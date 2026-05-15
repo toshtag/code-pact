@@ -1,0 +1,23 @@
+export const messages = {
+  usage: [
+    "code-pact - Design Control Plane for AI Coding Agents",
+    "",
+    "Usage:",
+    "  code-pact <command> [options]",
+    "  code-pact --version",
+    "",
+    "Commands (MVP, coming in later PRs):",
+    "  init       initialize a project control structure",
+    "  phase      manage phase contracts (add | ls | show)",
+    "  progress   show weighted progress against baseline",
+    "  pack       generate context pack for an agent",
+    "  verify     verify deterministic completion criteria",
+    "",
+    "Global options:",
+    "  -v, --version    print version",
+    "  -h, --help       print this help",
+    "      --json       emit machine-readable JSON to stdout",
+    "      --locale     ja-JP | en-US (defaults to LANG)",
+  ].join("\n"),
+  unknownCommand: (cmd: string): string => `Unknown command: ${cmd}`,
+} as const;
