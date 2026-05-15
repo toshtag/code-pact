@@ -8,6 +8,8 @@ export const PhaseVerification = z.object({
   commands: z.array(z.string().min(1)).min(1),
 });
 
+export type PhaseStatus = z.infer<typeof PhaseStatus>;
+
 export const Phase = z.object({
   id: z.string().min(1),
   name: z.string().min(1),

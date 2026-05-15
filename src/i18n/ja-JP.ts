@@ -26,4 +26,11 @@ export const messages = {
     created: (n: number): string => `${n} 件のファイルを作成しました。`,
     done: "プロジェクトを初期化しました。",
   },
+  phase: {
+    added: (id: string, path: string): string => `フェーズ "${id}" を ${path} に追加しました`,
+    duplicateId: (id: string): string =>
+      `フェーズ "${id}" は既に存在します。別の ID を指定してください。`,
+    notFound: (id: string): string => `フェーズ "${id}" が roadmap.yaml に見つかりません。`,
+    noPhases: "フェーズがありません。",
+  },
 } as const;
