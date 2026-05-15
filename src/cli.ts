@@ -15,6 +15,7 @@ import {
 import { runProgress, formatProgress } from "./commands/progress.ts";
 import { runPack } from "./commands/pack.ts";
 import { runVerify, formatVerify } from "./commands/verify.ts";
+import { runGenerateAdapter } from "./commands/adapter.ts";
 import type { LocaleCode } from "./core/schemas/locale.ts";
 import type { PhaseStatus } from "./core/schemas/phase.ts";
 
@@ -144,6 +145,53 @@ async function cmdInit(
       if (json) {
         process.stdout.write(
           `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
+        );
+      } else {
+        process.stderr.write(`${msg}\n`);
+      }
+      return 2;
+    }
+    throw err;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Command: adapter
+// ---------------------------------------------------------------------------
+
+async function cmdAdapter(argv: string[], locale: Locale, json: boolean): Promise<number> {
+  const m = messages[locale];
+  const { values } = parseArgs({
+    args: argv,
+    options: {
+      agent: { type: "string" },
+      force: { type: "boolean" },
+      json: { type: "boolean" },
+    },
+    strict: false,
+    allowPositionals: false,
+  });
+
+  const agentName = (values.agent as string | undefined) ?? "claude-code";
+  const force = values.force === true;
+  const cwd = process.cwd();
+
+  try {
+    const result = await runGenerateAdapter({ cwd, agentName, force });
+    if (json) {
+      process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
+    } else {
+      for (const f of result.created) process.stderr.write(`  created  ${f}\n`);
+      for (const f of result.skipped) process.stderr.write(`  skipped  ${f} (already exists)\n`);
+      process.stderr.write(`${m.adapter.done(agentName)}\n`);
+    }
+    return 0;
+  } catch (err: unknown) {
+    if (err instanceof Error && (err as NodeJS.ErrnoException).code === "AGENT_NOT_FOUND") {
+      const msg = m.adapter.agentNotFound(agentName);
+      if (json) {
+        process.stdout.write(
+          `${JSON.stringify({ ok: false, error: { code: "AGENT_NOT_FOUND", message: msg } })}\n`,
         );
       } else {
         process.stderr.write(`${msg}\n`);
@@ -590,6 +638,9 @@ async function main(): Promise<number> {
 
     case "verify":
       return cmdVerify(rest, locale, json);
+
+    case "adapter":
+      return cmdAdapter(rest, locale, json);
 
     default: {
       if (json) {
