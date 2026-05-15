@@ -6,7 +6,7 @@ export const messages = {
     "  code-pact <command> [options]",
     "  code-pact --version",
     "",
-    "コマンド (MVP、以降の PR で追加予定):",
+    "コマンド:",
     "  init       プロジェクトの制御構造を初期化",
     "  phase      フェーズ契約を管理 (add | ls | show)",
     "  progress   baseline に対する重み付き進捗を表示",
@@ -20,4 +20,10 @@ export const messages = {
     "      --locale     ja-JP | en-US (既定は LANG)",
   ].join("\n"),
   unknownCommand: (cmd: string): string => `未知のコマンド: ${cmd}`,
+  init: {
+    alreadyInitialized: (dir: string): string =>
+      `"${dir}" に ".code-pact/" が既に存在します。上書きするには --force を使ってください。`,
+    created: (n: number): string => `${n} 件のファイルを作成しました。`,
+    done: "プロジェクトを初期化しました。",
+  },
 } as const;
