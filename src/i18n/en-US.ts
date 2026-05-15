@@ -54,4 +54,11 @@ export const messages = {
       `Agent "${name}" not found. Run "code-pact init --agent ${name}" first.`,
     done: (name: string): string => `Agent adapter for "${name}" generated successfully.`,
   },
+  recommend: {
+    phaseNotFound: (id: string): string => `Phase "${id}" not found in roadmap.yaml.`,
+    taskNotFound: (taskId: string, phaseId: string): string =>
+      `Task "${taskId}" not found in phase "${phaseId}".`,
+    agentNotFound: (name: string): string =>
+      `Agent "${name}" not found. Run "code-pact init --agent ${name}" first.`,
+  },
 } as const;
