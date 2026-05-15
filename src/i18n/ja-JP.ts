@@ -54,6 +54,11 @@ export const messages = {
       `エージェント "${name}" が見つかりません。先に "code-pact init --agent ${name}" を実行してください。`,
     done: (name: string): string => `エージェント "${name}" のアダプターを生成しました。`,
   },
+  doctor: {
+    healthy: "問題は見つかりませんでした。プロジェクトは健全です。",
+    issues: (errors: number, warnings: number): string =>
+      `エラー ${errors} 件、警告 ${warnings} 件が見つかりました。`,
+  },
   recommend: {
     phaseNotFound: (id: string): string => `フェーズ "${id}" が roadmap.yaml に見つかりません。`,
     taskNotFound: (taskId: string, phaseId: string): string =>

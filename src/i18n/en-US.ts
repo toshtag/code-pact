@@ -54,6 +54,11 @@ export const messages = {
       `Agent "${name}" not found. Run "code-pact init --agent ${name}" first.`,
     done: (name: string): string => `Agent adapter for "${name}" generated successfully.`,
   },
+  doctor: {
+    healthy: "No issues found. Project is healthy.",
+    issues: (errors: number, warnings: number): string =>
+      `Found ${errors} error(s) and ${warnings} warning(s).`,
+  },
   recommend: {
     phaseNotFound: (id: string): string => `Phase "${id}" not found in roadmap.yaml.`,
     taskNotFound: (taskId: string, phaseId: string): string =>
