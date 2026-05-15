@@ -33,4 +33,8 @@ export const messages = {
     notFound: (id: string): string => `フェーズ "${id}" が roadmap.yaml に見つかりません。`,
     noPhases: "フェーズがありません。",
   },
+  progress: {
+    baselineNotFound: (name: string): string =>
+      `ベースライン "${name}" が .code-pact/state/baselines/ に見つかりません。`,
+  },
 } as const;
