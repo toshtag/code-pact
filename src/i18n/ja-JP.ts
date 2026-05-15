@@ -49,4 +49,9 @@ export const messages = {
     taskNotFound: (taskId: string, phaseId: string): string =>
       `タスク "${taskId}" がフェーズ "${phaseId}" に見つかりません。`,
   },
+  adapter: {
+    agentNotFound: (name: string): string =>
+      `エージェント "${name}" が見つかりません。先に "code-pact init --agent ${name}" を実行してください。`,
+    done: (name: string): string => `エージェント "${name}" のアダプターを生成しました。`,
+  },
 } as const;

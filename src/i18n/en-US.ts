@@ -49,4 +49,9 @@ export const messages = {
     taskNotFound: (taskId: string, phaseId: string): string =>
       `Task "${taskId}" not found in phase "${phaseId}".`,
   },
+  adapter: {
+    agentNotFound: (name: string): string =>
+      `Agent "${name}" not found. Run "code-pact init --agent ${name}" first.`,
+    done: (name: string): string => `Agent adapter for "${name}" generated successfully.`,
+  },
 } as const;
