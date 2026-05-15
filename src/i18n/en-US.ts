@@ -26,4 +26,11 @@ export const messages = {
     created: (n: number): string => `Created ${n} file(s).`,
     done: "Project initialized successfully.",
   },
+  phase: {
+    added: (id: string, path: string): string => `Phase "${id}" added at ${path}`,
+    duplicateId: (id: string): string =>
+      `Phase "${id}" already exists. Choose a different ID.`,
+    notFound: (id: string): string => `Phase "${id}" not found in roadmap.yaml.`,
+    noPhases: "No phases found.",
+  },
 } as const;
