@@ -37,4 +37,11 @@ export const messages = {
     baselineNotFound: (name: string): string =>
       `ベースライン "${name}" が .code-pact/state/baselines/ に見つかりません。`,
   },
+  pack: {
+    phaseNotFound: (id: string): string => `フェーズ "${id}" が roadmap.yaml に見つかりません。`,
+    taskNotFound: (taskId: string, phaseId: string): string =>
+      `タスク "${taskId}" がフェーズ "${phaseId}" に見つかりません。`,
+    written: (path: string, chars: number): string =>
+      `コンテキストパックを ${path} に書き込みました (${chars} 文字)`,
+  },
 } as const;
