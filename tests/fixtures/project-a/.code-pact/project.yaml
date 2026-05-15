@@ -1,0 +1,7 @@
+name: project-alpha
+version: 0.1.0
+locale: ja-JP
+default_agent: claude-code
+agents:
+  - name: claude-code
+    profile: agent-profiles/claude-code.yaml

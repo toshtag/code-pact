@@ -1,0 +1,9 @@
+tier: balanced_coding
+purpose:
+  - feature
+  - refactor
+effort_levels:
+  - low
+  - medium
+  - high
+supports_thinking: false

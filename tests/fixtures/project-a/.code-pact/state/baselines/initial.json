@@ -1,0 +1,9 @@
+{
+  "name": "initial",
+  "created_at": "2026-05-15T09:00:00+09:00",
+  "total_weight": 30,
+  "phases": [
+    { "id": "P1", "path": "design/phases/P1-foundation.yaml", "weight": 12 },
+    { "id": "P2", "path": "design/phases/P2-core.yaml", "weight": 18 }
+  ]
+}

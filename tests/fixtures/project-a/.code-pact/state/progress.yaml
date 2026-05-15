@@ -1,0 +1,12 @@
+events:
+  - task_id: P1-T1
+    status: done
+    at: "2026-05-15T10:00:00+09:00"
+    actor: human
+    evidence:
+      - pnpm test
+      - pnpm typecheck
+  - task_id: P1-T2
+    status: started
+    at: "2026-05-15T11:00:00+09:00"
+    actor: agent
