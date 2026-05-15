@@ -7,7 +7,7 @@ export const ProgressEvent = z.object({
   task_id: z.string().min(1),
   status: EventStatus,
   // ISO 8601 datetime string. Stored as string to avoid tz ambiguity in YAML.
-  at: z.string().datetime({ offset: true }),
+  at: z.iso.datetime({ offset: true }),
   actor: ActorType,
   evidence: z.array(z.string()).optional(),
   notes: z.string().optional(),

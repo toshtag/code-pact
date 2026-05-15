@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { parse as parseYaml } from "yaml";
-import type { ZodType, ZodTypeDef } from "zod";
+import type { ZodType } from "zod";
 
 export class ParseError extends Error {
   constructor(
@@ -12,9 +12,9 @@ export class ParseError extends Error {
   }
 }
 
-export async function loadYaml<Output, Def extends ZodTypeDef, Input>(
+export async function loadYaml<Output>(
   file: string,
-  schema: ZodType<Output, Def, Input>,
+  schema: ZodType<Output>,
 ): Promise<Output> {
   const raw = await readFile(file, "utf8");
   const data: unknown = parseYaml(raw);
@@ -25,9 +25,9 @@ export async function loadYaml<Output, Def extends ZodTypeDef, Input>(
   return result.data;
 }
 
-export function parseYamlString<Output, Def extends ZodTypeDef, Input>(
+export function parseYamlString<Output>(
   content: string,
-  schema: ZodType<Output, Def, Input>,
+  schema: ZodType<Output>,
   label = "<string>",
 ): Output {
   const data: unknown = parseYaml(content);
