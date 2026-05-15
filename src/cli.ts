@@ -13,6 +13,7 @@ import {
   formatPhaseShow,
 } from "./commands/phase.ts";
 import { runProgress, formatProgress } from "./commands/progress.ts";
+import { runPack } from "./commands/pack.ts";
 import type { LocaleCode } from "./core/schemas/locale.ts";
 import type { PhaseStatus } from "./core/schemas/phase.ts";
 
@@ -142,6 +143,78 @@ async function cmdInit(
       if (json) {
         process.stdout.write(
           `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
+        );
+      } else {
+        process.stderr.write(`${msg}\n`);
+      }
+      return 2;
+    }
+    throw err;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Command: pack
+// ---------------------------------------------------------------------------
+
+async function cmdPack(argv: string[], locale: Locale, json: boolean): Promise<number> {
+  const m = messages[locale];
+  const { values } = parseArgs({
+    args: argv,
+    options: {
+      phase: { type: "string" },
+      task: { type: "string" },
+      agent: { type: "string" },
+      json: { type: "boolean" },
+    },
+    strict: false,
+    allowPositionals: false,
+  });
+
+  const phaseId = values.phase as string | undefined;
+  const taskId = values.task as string | undefined;
+  const agentName = (values.agent as string | undefined) ?? "claude-code";
+
+  if (!phaseId || !taskId) {
+    const msg = "pack requires --phase and --task";
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
+      );
+    } else {
+      process.stderr.write(`${msg}\n`);
+    }
+    return 2;
+  }
+
+  const cwd = process.cwd();
+
+  try {
+    const result = await runPack({ cwd, phaseId, taskId, agentName });
+    if (json) {
+      process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
+    } else {
+      process.stderr.write(`${m.pack.written(result.outputPath, result.charCount)}\n`);
+    }
+    return 0;
+  } catch (err: unknown) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "PHASE_NOT_FOUND") {
+      const msg = m.pack.phaseNotFound(phaseId);
+      if (json) {
+        process.stdout.write(
+          `${JSON.stringify({ ok: false, error: { code: "PHASE_NOT_FOUND", message: msg } })}\n`,
+        );
+      } else {
+        process.stderr.write(`${msg}\n`);
+      }
+      return 2;
+    }
+    if (code === "TASK_NOT_FOUND") {
+      const msg = m.pack.taskNotFound(taskId, phaseId);
+      if (json) {
+        process.stdout.write(
+          `${JSON.stringify({ ok: false, error: { code: "TASK_NOT_FOUND", message: msg } })}\n`,
         );
       } else {
         process.stderr.write(`${msg}\n`);
@@ -428,6 +501,9 @@ async function main(): Promise<number> {
 
     case "progress":
       return cmdProgress(rest, locale, json);
+
+    case "pack":
+      return cmdPack(rest, locale, json);
 
     default: {
       if (json) {

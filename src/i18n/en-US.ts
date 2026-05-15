@@ -37,4 +37,11 @@ export const messages = {
     baselineNotFound: (name: string): string =>
       `Baseline "${name}" not found in .code-pact/state/baselines/.`,
   },
+  pack: {
+    phaseNotFound: (id: string): string => `Phase "${id}" not found in roadmap.yaml.`,
+    taskNotFound: (taskId: string, phaseId: string): string =>
+      `Task "${taskId}" not found in phase "${phaseId}".`,
+    written: (path: string, chars: number): string =>
+      `Context pack written to ${path} (${chars} chars)`,
+  },
 } as const;
