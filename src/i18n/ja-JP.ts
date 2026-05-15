@@ -54,4 +54,11 @@ export const messages = {
       `エージェント "${name}" が見つかりません。先に "code-pact init --agent ${name}" を実行してください。`,
     done: (name: string): string => `エージェント "${name}" のアダプターを生成しました。`,
   },
+  recommend: {
+    phaseNotFound: (id: string): string => `フェーズ "${id}" が roadmap.yaml に見つかりません。`,
+    taskNotFound: (taskId: string, phaseId: string): string =>
+      `タスク "${taskId}" がフェーズ "${phaseId}" に見つかりません。`,
+    agentNotFound: (name: string): string =>
+      `エージェント "${name}" が見つかりません。先に "code-pact init --agent ${name}" を実行してください。`,
+  },
 } as const;

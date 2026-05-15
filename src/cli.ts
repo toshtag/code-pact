@@ -16,6 +16,7 @@ import { runProgress, formatProgress } from "./commands/progress.ts";
 import { runPack } from "./commands/pack.ts";
 import { runVerify, formatVerify } from "./commands/verify.ts";
 import { runGenerateAdapter } from "./commands/adapter.ts";
+import { runRecommend, formatRecommend } from "./commands/recommend.ts";
 import type { LocaleCode } from "./core/schemas/locale.ts";
 import type { PhaseStatus } from "./core/schemas/phase.ts";
 
@@ -145,6 +146,89 @@ async function cmdInit(
       if (json) {
         process.stdout.write(
           `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
+        );
+      } else {
+        process.stderr.write(`${msg}\n`);
+      }
+      return 2;
+    }
+    throw err;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Command: recommend
+// ---------------------------------------------------------------------------
+
+async function cmdRecommend(argv: string[], locale: Locale, json: boolean): Promise<number> {
+  const m = messages[locale];
+  const { values } = parseArgs({
+    args: argv,
+    options: {
+      phase: { type: "string" },
+      task: { type: "string" },
+      agent: { type: "string" },
+      json: { type: "boolean" },
+    },
+    strict: false,
+    allowPositionals: false,
+  });
+
+  const phaseId = values.phase as string | undefined;
+  const taskId = values.task as string | undefined;
+  const agentName = (values.agent as string | undefined) ?? "claude-code";
+
+  if (!phaseId || !taskId) {
+    const msg = "recommend requires --phase and --task";
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
+      );
+    } else {
+      process.stderr.write(`${msg}\n`);
+    }
+    return 2;
+  }
+
+  const cwd = process.cwd();
+
+  try {
+    const result = await runRecommend({ cwd, phaseId, taskId, agentName });
+    if (json) {
+      process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
+    } else {
+      process.stdout.write(`${formatRecommend(result)}\n`);
+    }
+    return 0;
+  } catch (err: unknown) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "PHASE_NOT_FOUND") {
+      const msg = m.recommend.phaseNotFound(phaseId);
+      if (json) {
+        process.stdout.write(
+          `${JSON.stringify({ ok: false, error: { code: "PHASE_NOT_FOUND", message: msg } })}\n`,
+        );
+      } else {
+        process.stderr.write(`${msg}\n`);
+      }
+      return 2;
+    }
+    if (code === "TASK_NOT_FOUND") {
+      const msg = m.recommend.taskNotFound(taskId, phaseId);
+      if (json) {
+        process.stdout.write(
+          `${JSON.stringify({ ok: false, error: { code: "TASK_NOT_FOUND", message: msg } })}\n`,
+        );
+      } else {
+        process.stderr.write(`${msg}\n`);
+      }
+      return 2;
+    }
+    if (code === "AGENT_NOT_FOUND") {
+      const msg = m.recommend.agentNotFound(agentName);
+      if (json) {
+        process.stdout.write(
+          `${JSON.stringify({ ok: false, error: { code: "AGENT_NOT_FOUND", message: msg } })}\n`,
         );
       } else {
         process.stderr.write(`${msg}\n`);
@@ -641,6 +725,9 @@ async function main(): Promise<number> {
 
     case "adapter":
       return cmdAdapter(rest, locale, json);
+
+    case "recommend":
+      return cmdRecommend(rest, locale, json);
 
     default: {
       if (json) {
