@@ -12,5 +12,8 @@ build/
 # Root-level generated context output
 /.context/
 
+# Generated context inside test fixtures (written by pack tests)
+tests/fixtures/**/.context/
+
 # Root-level private design notes (planning, strategy, retro)
 /.local/

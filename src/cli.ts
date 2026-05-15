@@ -14,6 +14,7 @@ import {
 } from "./commands/phase.ts";
 import { runProgress, formatProgress } from "./commands/progress.ts";
 import { runPack } from "./commands/pack.ts";
+import { runVerify, formatVerify } from "./commands/verify.ts";
 import type { LocaleCode } from "./core/schemas/locale.ts";
 import type { PhaseStatus } from "./core/schemas/phase.ts";
 
@@ -143,6 +144,88 @@ async function cmdInit(
       if (json) {
         process.stdout.write(
           `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
+        );
+      } else {
+        process.stderr.write(`${msg}\n`);
+      }
+      return 2;
+    }
+    throw err;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Command: verify
+// ---------------------------------------------------------------------------
+
+async function cmdVerify(argv: string[], locale: Locale, json: boolean): Promise<number> {
+  const m = messages[locale];
+  const { values } = parseArgs({
+    args: argv,
+    options: {
+      phase: { type: "string" },
+      task: { type: "string" },
+      "dry-run": { type: "boolean" },
+      json: { type: "boolean" },
+    },
+    strict: false,
+    allowPositionals: false,
+  });
+
+  const phaseId = values.phase as string | undefined;
+  const taskId = values.task as string | undefined;
+  const dryRun = values["dry-run"] === true;
+
+  if (!phaseId || !taskId) {
+    const msg = "verify requires --phase and --task";
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
+      );
+    } else {
+      process.stderr.write(`${msg}\n`);
+    }
+    return 2;
+  }
+
+  const cwd = process.cwd();
+
+  try {
+    const result = await runVerify({ cwd, phaseId, taskId, dryRun });
+    if (json) {
+      if (result.ok) {
+        process.stdout.write(`${JSON.stringify({ ok: true, data: { checks: result.checks } })}\n`);
+      } else {
+        process.stdout.write(
+          `${JSON.stringify({
+            ok: false,
+            error: { code: "VERIFICATION_FAILED", message: "Verification failed" },
+            data: { checks: result.checks },
+          })}\n`,
+        );
+      }
+    } else {
+      process.stdout.write(`${formatVerify(result)}\n`);
+    }
+    return result.ok ? 0 : 1;
+  } catch (err: unknown) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "PHASE_NOT_FOUND") {
+      const msg = m.verify.phaseNotFound(phaseId);
+      if (json) {
+        process.stdout.write(
+          `${JSON.stringify({ ok: false, error: { code: "PHASE_NOT_FOUND", message: msg } })}\n`,
+        );
+      } else {
+        process.stderr.write(`${msg}\n`);
+      }
+      return 2;
+    }
+    if (code === "TASK_NOT_FOUND") {
+      const msg = m.verify.taskNotFound(taskId, phaseId);
+      if (json) {
+        process.stdout.write(
+          `${JSON.stringify({ ok: false, error: { code: "TASK_NOT_FOUND", message: msg } })}\n`,
         );
       } else {
         process.stderr.write(`${msg}\n`);
@@ -504,6 +587,9 @@ async function main(): Promise<number> {
 
     case "pack":
       return cmdPack(rest, locale, json);
+
+    case "verify":
+      return cmdVerify(rest, locale, json);
 
     default: {
       if (json) {
