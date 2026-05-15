@@ -44,4 +44,9 @@ export const messages = {
     written: (path: string, chars: number): string =>
       `コンテキストパックを ${path} に書き込みました (${chars} 文字)`,
   },
+  verify: {
+    phaseNotFound: (id: string): string => `フェーズ "${id}" が roadmap.yaml に見つかりません。`,
+    taskNotFound: (taskId: string, phaseId: string): string =>
+      `タスク "${taskId}" がフェーズ "${phaseId}" に見つかりません。`,
+  },
 } as const;
