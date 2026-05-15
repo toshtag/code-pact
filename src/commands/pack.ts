@@ -16,6 +16,8 @@ export type PackOptions = {
   phaseId: string;
   taskId: string;
   agentName: string;
+  /** Override output root; defaults to cwd/.context/<agentName> */
+  outputDir?: string;
 };
 
 export type PackResult = {
@@ -96,7 +98,7 @@ async function loadDecisions(cwd: string, taskId: string): Promise<DecisionDoc[]
 // ---------------------------------------------------------------------------
 
 export async function runPack(opts: PackOptions): Promise<PackResult> {
-  const { cwd, phaseId, taskId, agentName } = opts;
+  const { cwd, phaseId, taskId, agentName, outputDir } = opts;
 
   // Resolve phase
   const roadmap = await loadRoadmap(cwd);
@@ -125,7 +127,7 @@ export async function runPack(opts: PackOptions): Promise<PackResult> {
   const content = renderMarkdown({ phase, task, agentName, rules, decisions });
 
   // Write output
-  const outDir = join(cwd, ".context", agentName);
+  const outDir = outputDir ?? join(cwd, ".context", agentName);
   await mkdir(outDir, { recursive: true });
   const outputPath = join(outDir, `${taskId}.md`);
   await writeFile(outputPath, content, "utf8");

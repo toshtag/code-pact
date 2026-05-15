@@ -36,6 +36,7 @@ describe("parseFrontMatter", () => {
 
 // ---------------------------------------------------------------------------
 // runPack against project-a fixture
+// Output is always directed to a tmpdir so the fixture stays clean.
 // ---------------------------------------------------------------------------
 
 describe("runPack — project-a / P2-E1-T1", () => {
@@ -55,6 +56,7 @@ describe("runPack — project-a / P2-E1-T1", () => {
       phaseId: "P2",
       taskId: "P2-E1-T1",
       agentName: "claude-code",
+      outputDir: tmpOut,
     });
     expect(result.charCount).toBeGreaterThan(0);
     expect(result.outputPath).toContain("P2-E1-T1.md");
@@ -66,6 +68,7 @@ describe("runPack — project-a / P2-E1-T1", () => {
       phaseId: "P2",
       taskId: "P2-E1-T1",
       agentName: "claude-code",
+      outputDir: tmpOut,
     });
     const content = await readFile(result.outputPath, "utf8");
     expect(content).toContain("P2");
@@ -78,6 +81,7 @@ describe("runPack — project-a / P2-E1-T1", () => {
       phaseId: "P2",
       taskId: "P2-E1-T1",
       agentName: "claude-code",
+      outputDir: tmpOut,
     });
     expect(result.includedRules).toContain("coding-style.md");
     expect(result.includedRules).toContain("testing.md");
@@ -89,6 +93,7 @@ describe("runPack — project-a / P2-E1-T1", () => {
       phaseId: "P2",
       taskId: "P2-E1-T1",
       agentName: "claude-code",
+      outputDir: tmpOut,
     });
     expect(result.includedRules).not.toContain("docs-only.md");
   });
@@ -99,6 +104,7 @@ describe("runPack — project-a / P2-E1-T1", () => {
       phaseId: "P2",
       taskId: "P2-E1-T1",
       agentName: "claude-code",
+      outputDir: tmpOut,
     });
     expect(result.includedDecisions).toContain("P2-E1-T1-use-parseargs.md");
   });
@@ -109,6 +115,7 @@ describe("runPack — project-a / P2-E1-T1", () => {
       phaseId: "P2",
       taskId: "P2-E1-T1",
       agentName: "claude-code",
+      outputDir: tmpOut,
     });
     const content = await readFile(result.outputPath, "utf8");
     expect(content).toContain("progress.yaml");
@@ -143,7 +150,6 @@ describe("runPack — project with no rules dir", () => {
 
   beforeEach(async () => {
     dir = await mkdtemp(join(tmpdir(), "code-pact-pack-norules-"));
-    // Minimal project: .code-pact/, design/roadmap.yaml, design/phases/P1.yaml
     await mkdir(join(dir, ".code-pact", "state", "baselines"), { recursive: true });
     await mkdir(join(dir, "design", "phases"), { recursive: true });
     await writeFile(
@@ -186,7 +192,12 @@ describe("runPack — project with no rules dir", () => {
   });
 
   it("succeeds with empty rules and decisions when dirs are absent", async () => {
-    const result = await runPack({ cwd: dir, phaseId: "P1", taskId: "P1-T1", agentName: "claude-code" });
+    const result = await runPack({
+      cwd: dir,
+      phaseId: "P1",
+      taskId: "P1-T1",
+      agentName: "claude-code",
+    });
     expect(result.includedRules).toHaveLength(0);
     expect(result.includedDecisions).toHaveLength(0);
     expect(result.charCount).toBeGreaterThan(0);
