@@ -4,3 +4,13 @@ node_modules/
 dist/
 build/
 .DS_Store
+*.tsbuildinfo
+
+# Tool internal: not used yet, but reserved
+.code-pact/
+
+# Generated context output
+.context/
+
+# Private design notes (planning, strategy, retro)
+.local/
