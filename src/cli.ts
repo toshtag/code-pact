@@ -12,6 +12,7 @@ import {
   formatPhaseLsTable,
   formatPhaseShow,
 } from "./commands/phase.ts";
+import { runProgress, formatProgress } from "./commands/progress.ts";
 import type { LocaleCode } from "./core/schemas/locale.ts";
 import type { PhaseStatus } from "./core/schemas/phase.ts";
 
@@ -141,6 +142,49 @@ async function cmdInit(
       if (json) {
         process.stdout.write(
           `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
+        );
+      } else {
+        process.stderr.write(`${msg}\n`);
+      }
+      return 2;
+    }
+    throw err;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Command: progress
+// ---------------------------------------------------------------------------
+
+async function cmdProgress(argv: string[], locale: Locale, json: boolean): Promise<number> {
+  const m = messages[locale];
+  const { values } = parseArgs({
+    args: argv,
+    options: {
+      baseline: { type: "string" },
+      json: { type: "boolean" },
+    },
+    strict: false,
+    allowPositionals: false,
+  });
+
+  const baselineName = (values.baseline as string | undefined) ?? "initial";
+  const cwd = process.cwd();
+
+  try {
+    const result = await runProgress({ cwd, baseline: baselineName });
+    if (json) {
+      process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
+    } else {
+      process.stdout.write(`${formatProgress(result)}\n`);
+    }
+    return 0;
+  } catch (err: unknown) {
+    if (err instanceof Error && (err as NodeJS.ErrnoException).code === "BASELINE_NOT_FOUND") {
+      const msg = m.progress.baselineNotFound(baselineName);
+      if (json) {
+        process.stdout.write(
+          `${JSON.stringify({ ok: false, error: { code: "BASELINE_NOT_FOUND", message: msg } })}\n`,
         );
       } else {
         process.stderr.write(`${msg}\n`);
@@ -381,6 +425,9 @@ async function main(): Promise<number> {
 
     case "phase":
       return cmdPhase(rest, locale, json);
+
+    case "progress":
+      return cmdProgress(rest, locale, json);
 
     default: {
       if (json) {
