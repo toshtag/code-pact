@@ -1,0 +1,41 @@
+id: P1
+name: Foundation
+weight: 12
+confidence: high
+risk: low
+status: done
+objective: >
+  Establish project foundation, repository conventions, auth baseline,
+  and deployment skeleton.
+non_goals:
+  - Build full billing
+  - Build analytics
+definition_of_done:
+  - Local dev environment is reproducible
+  - Auth baseline works
+  - CI passes
+verification:
+  commands:
+    - pnpm test
+    - pnpm typecheck
+tasks:
+  - id: P1-T1
+    type: architecture
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: short
+    status: done
+    description: Bootstrap repository structure
+  - id: P1-T2
+    type: feature
+    ambiguity: medium
+    risk: low
+    context_size: small
+    write_surface: medium
+    verification_strength: medium
+    expected_duration: short
+    status: in_progress
+    description: Add CI workflow

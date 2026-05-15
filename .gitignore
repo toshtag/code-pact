@@ -6,11 +6,11 @@ build/
 .DS_Store
 *.tsbuildinfo
 
-# Tool internal: not used yet, but reserved
-.code-pact/
+# Root-level tool state (anchored with / so tests/fixtures/**/.code-pact/ is not affected)
+/.code-pact/
 
-# Generated context output
-.context/
+# Root-level generated context output
+/.context/
 
-# Private design notes (planning, strategy, retro)
-.local/
+# Root-level private design notes (planning, strategy, retro)
+/.local/

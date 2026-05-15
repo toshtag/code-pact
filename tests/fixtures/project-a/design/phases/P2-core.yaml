@@ -1,0 +1,32 @@
+id: P2
+name: Core CLI
+weight: 18
+confidence: medium
+risk: medium
+status: planned
+objective: >
+  Implement the five MVP CLI commands: init, phase, progress, pack, verify.
+non_goals:
+  - LLM API integration
+  - Web UI
+definition_of_done:
+  - All five commands are functional
+  - All commands support --json
+  - Snapshot tests pass for fixtures
+verification:
+  commands:
+    - pnpm test
+    - pnpm typecheck
+    - pnpm build
+requires_decision: true
+tasks:
+  - id: P2-E1-T1
+    type: feature
+    ambiguity: medium
+    risk: medium
+    context_size: medium
+    write_surface: high
+    verification_strength: strong
+    expected_duration: medium
+    status: planned
+    description: Implement code-pact init command

@@ -1,0 +1,7 @@
+phases:
+  - id: P1
+    path: design/phases/P1-foundation.yaml
+    weight: 12
+  - id: P2
+    path: design/phases/P2-core.yaml
+    weight: 18
