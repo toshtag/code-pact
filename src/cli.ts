@@ -17,6 +17,7 @@ import { runPack } from "./commands/pack.ts";
 import { runVerify, formatVerify } from "./commands/verify.ts";
 import { runGenerateAdapter } from "./commands/adapter.ts";
 import { runRecommend, formatRecommend } from "./commands/recommend.ts";
+import { runDoctor, formatDoctor } from "./commands/doctor.ts";
 import type { LocaleCode } from "./core/schemas/locale.ts";
 import type { PhaseStatus } from "./core/schemas/phase.ts";
 
@@ -154,6 +155,34 @@ async function cmdInit(
     }
     throw err;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Command: doctor
+// ---------------------------------------------------------------------------
+
+async function cmdDoctor(json: boolean): Promise<number> {
+  const cwd = process.cwd();
+  const result = await runDoctor(cwd);
+
+  if (json) {
+    if (result.ok) {
+      process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
+    } else {
+      process.stdout.write(
+        `${JSON.stringify({
+          ok: false,
+          error: { code: "DOCTOR_FAILED", message: "Project health check failed" },
+          data: result,
+        })}\n`,
+      );
+    }
+  } else {
+    process.stdout.write(`${formatDoctor(result)}\n`);
+  }
+
+  const hasErrors = result.issues.some((i) => i.severity === "error");
+  return hasErrors ? 1 : 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -728,6 +757,9 @@ async function main(): Promise<number> {
 
     case "recommend":
       return cmdRecommend(rest, locale, json);
+
+    case "doctor":
+      return cmdDoctor(json);
 
     default: {
       if (json) {

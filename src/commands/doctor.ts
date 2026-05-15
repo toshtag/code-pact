@@ -1,0 +1,401 @@
+import { readFile, readdir, access } from "node:fs/promises";
+import { join, basename, extname } from "node:path";
+import { parse as parseYaml } from "yaml";
+import { Roadmap } from "../core/schemas/roadmap.ts";
+import { Phase } from "../core/schemas/phase.ts";
+import { ProgressLog } from "../core/schemas/progress-event.ts";
+import { Project } from "../core/schemas/project.ts";
+import { AgentProfile } from "../core/schemas/agent-profile.ts";
+import { ModelProfile, ModelTier } from "../core/schemas/model-profile.ts";
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+export type DoctorIssue = {
+  code: string;
+  severity: "error" | "warning";
+  message: string;
+};
+
+export type DoctorResult = {
+  ok: boolean;
+  issues: DoctorIssue[];
+};
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+async function fileExists(p: string): Promise<boolean> {
+  try {
+    await access(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function safeReadYaml(p: string): Promise<{ ok: true; data: unknown } | { ok: false }> {
+  try {
+    const raw = await readFile(p, "utf8");
+    return { ok: true, data: parseYaml(raw) };
+  } catch {
+    return { ok: false };
+  }
+}
+
+async function safeReadJson(p: string): Promise<{ ok: true; data: unknown } | { ok: false }> {
+  try {
+    const raw = await readFile(p, "utf8");
+    return { ok: true, data: JSON.parse(raw) };
+  } catch {
+    return { ok: false };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Individual check groups
+// ---------------------------------------------------------------------------
+
+async function checkProjectYaml(cwd: string, issues: DoctorIssue[]): Promise<Project | null> {
+  const path = join(cwd, ".code-pact", "project.yaml");
+  const result = await safeReadYaml(path);
+  if (!result.ok) {
+    issues.push({ code: "INVALID_YAML", severity: "error", message: `Cannot read ${path}` });
+    return null;
+  }
+  const parsed = Project.safeParse(result.data);
+  if (!parsed.success) {
+    issues.push({
+      code: "SCHEMA_ERROR",
+      severity: "error",
+      message: `project.yaml failed schema validation: ${parsed.error.issues[0]?.message ?? "unknown"}`,
+    });
+    return null;
+  }
+  return parsed.data;
+}
+
+async function checkRoadmap(cwd: string, issues: DoctorIssue[]): Promise<Roadmap | null> {
+  const path = join(cwd, "design", "roadmap.yaml");
+  const result = await safeReadYaml(path);
+  if (!result.ok) {
+    issues.push({ code: "INVALID_YAML", severity: "error", message: `Cannot read ${path}` });
+    return null;
+  }
+  const parsed = Roadmap.safeParse(result.data);
+  if (!parsed.success) {
+    issues.push({
+      code: "SCHEMA_ERROR",
+      severity: "error",
+      message: `roadmap.yaml failed schema validation: ${parsed.error.issues[0]?.message ?? "unknown"}`,
+    });
+    return null;
+  }
+  return parsed.data;
+}
+
+async function checkPhases(
+  cwd: string,
+  roadmap: Roadmap,
+  issues: DoctorIssue[],
+): Promise<Phase[]> {
+  const phases: Phase[] = [];
+
+  for (const ref of roadmap.phases) {
+    const absPath = join(cwd, ref.path);
+    if (!(await fileExists(absPath))) {
+      issues.push({
+        code: "ORPHAN_PHASE_FILE",
+        severity: "error",
+        message: `roadmap.yaml references "${ref.path}" but the file does not exist`,
+      });
+      continue;
+    }
+    const result = await safeReadYaml(absPath);
+    if (!result.ok) {
+      issues.push({
+        code: "INVALID_YAML",
+        severity: "error",
+        message: `Cannot parse phase file: ${ref.path}`,
+      });
+      continue;
+    }
+    const parsed = Phase.safeParse(result.data);
+    if (!parsed.success) {
+      issues.push({
+        code: "SCHEMA_ERROR",
+        severity: "error",
+        message: `${ref.path} failed schema validation: ${parsed.error.issues[0]?.message ?? "unknown"}`,
+      });
+      continue;
+    }
+    // Check that phase id in YAML matches roadmap ref id
+    if (parsed.data.id !== ref.id) {
+      issues.push({
+        code: "PHASE_ID_MISMATCH",
+        severity: "error",
+        message: `${ref.path} has id="${parsed.data.id}" but roadmap expects "${ref.id}"`,
+      });
+    }
+    phases.push(parsed.data);
+  }
+
+  // Check for phase YAML files in design/phases/ not referenced in roadmap
+  const phasesDir = join(cwd, "design", "phases");
+  let phaseFiles: string[] = [];
+  try {
+    phaseFiles = await readdir(phasesDir);
+  } catch {
+    // directory may not exist
+  }
+  const referencedPaths = new Set(roadmap.phases.map((r) => r.path));
+  for (const file of phaseFiles) {
+    if (!file.endsWith(".yaml")) continue;
+    const relPath = `design/phases/${file}`;
+    if (!referencedPaths.has(relPath)) {
+      issues.push({
+        code: "ORPHAN_PHASE_FILE",
+        severity: "warning",
+        message: `${relPath} exists but is not referenced in roadmap.yaml`,
+      });
+    }
+  }
+
+  return phases;
+}
+
+async function checkProgressLog(
+  cwd: string,
+  phases: Phase[],
+  issues: DoctorIssue[],
+): Promise<void> {
+  const path = join(cwd, ".code-pact", "state", "progress.yaml");
+  const result = await safeReadYaml(path);
+  if (!result.ok) {
+    issues.push({
+      code: "INVALID_YAML",
+      severity: "error",
+      message: `Cannot read ${path}`,
+    });
+    return;
+  }
+  const parsed = ProgressLog.safeParse(result.data);
+  if (!parsed.success) {
+    issues.push({
+      code: "SCHEMA_ERROR",
+      severity: "error",
+      message: `progress.yaml failed schema validation: ${parsed.error.issues[0]?.message ?? "unknown"}`,
+    });
+    return;
+  }
+
+  // Collect all known task IDs
+  const knownTaskIds = new Set(phases.flatMap((p) => (p.tasks ?? []).map((t) => t.id)));
+
+  for (const event of parsed.data.events) {
+    if (!knownTaskIds.has(event.task_id)) {
+      issues.push({
+        code: "ORPHAN_PROGRESS_EVENT",
+        severity: "warning",
+        message: `progress.yaml references task "${event.task_id}" which does not exist in any phase`,
+      });
+    }
+  }
+}
+
+async function checkAgentProfiles(
+  cwd: string,
+  project: Project,
+  issues: DoctorIssue[],
+): Promise<void> {
+  const knownTiers = new Set(ModelTier.options);
+
+  for (const agentRef of project.agents) {
+    const profilePath = join(cwd, ".code-pact", agentRef.profile);
+    const result = await safeReadYaml(profilePath);
+    if (!result.ok) {
+      issues.push({
+        code: "AGENT_NOT_FOUND",
+        severity: "error",
+        message: `Agent profile "${agentRef.profile}" cannot be read`,
+      });
+      continue;
+    }
+    const parsed = AgentProfile.safeParse(result.data);
+    if (!parsed.success) {
+      issues.push({
+        code: "SCHEMA_ERROR",
+        severity: "error",
+        message: `${agentRef.profile} failed schema validation: ${parsed.error.issues[0]?.message ?? "unknown"}`,
+      });
+      continue;
+    }
+    // Check all tiers are present in model_map
+    for (const tier of knownTiers) {
+      if (!parsed.data.model_map[tier]) {
+        issues.push({
+          code: "MISSING_MODEL_TIER",
+          severity: "warning",
+          message: `Agent "${parsed.data.name}" is missing model_map entry for tier "${tier}"`,
+        });
+      }
+    }
+  }
+}
+
+async function checkModelProfiles(cwd: string, issues: DoctorIssue[]): Promise<void> {
+  const dir = join(cwd, ".code-pact", "model-profiles");
+  let entries: string[] = [];
+  try {
+    entries = await readdir(dir);
+  } catch {
+    issues.push({
+      code: "MISSING_DIR",
+      severity: "warning",
+      message: `.code-pact/model-profiles/ directory is missing`,
+    });
+    return;
+  }
+
+  for (const entry of entries) {
+    if (!entry.endsWith(".yaml")) continue;
+    const result = await safeReadYaml(join(dir, entry));
+    if (!result.ok) {
+      issues.push({
+        code: "INVALID_YAML",
+        severity: "error",
+        message: `.code-pact/model-profiles/${entry} cannot be parsed`,
+      });
+      continue;
+    }
+    const parsed = ModelProfile.safeParse(result.data);
+    if (!parsed.success) {
+      issues.push({
+        code: "SCHEMA_ERROR",
+        severity: "error",
+        message: `.code-pact/model-profiles/${entry} failed schema validation`,
+      });
+    }
+  }
+}
+
+async function checkBakFiles(cwd: string, issues: DoctorIssue[]): Promise<void> {
+  // Check design/ tree for .bak files
+  const dirs = [
+    join(cwd, "design"),
+    join(cwd, ".code-pact"),
+  ];
+  for (const dir of dirs) {
+    let entries: string[] = [];
+    try {
+      entries = await readdir(dir);
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (entry.endsWith(".bak")) {
+        issues.push({
+          code: "BAK_FILE",
+          severity: "warning",
+          message: `Backup file found: ${dir.replace(cwd + "/", "")}/${entry} — safe to delete`,
+        });
+      }
+    }
+  }
+}
+
+async function checkStaleContext(
+  cwd: string,
+  phases: Phase[],
+  project: Project,
+  issues: DoctorIssue[],
+): Promise<void> {
+  const knownTaskIds = new Set(phases.flatMap((p) => (p.tasks ?? []).map((t) => t.id)));
+
+  for (const agentRef of project.agents) {
+    // Derive context dir from agent profile
+    const profilePath = join(cwd, ".code-pact", agentRef.profile);
+    const result = await safeReadYaml(profilePath);
+    if (!result.ok) continue;
+    const parsed = AgentProfile.safeParse(result.data);
+    if (!parsed.success) continue;
+
+    const contextDir = join(cwd, parsed.data.context_dir);
+    let entries: string[] = [];
+    try {
+      entries = await readdir(contextDir);
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (extname(entry) !== ".md") continue;
+      const taskId = basename(entry, ".md");
+      if (!knownTaskIds.has(taskId)) {
+        issues.push({
+          code: "STALE_CONTEXT",
+          severity: "warning",
+          message: `${parsed.data.context_dir}/${entry} exists but task "${taskId}" is not in any phase`,
+        });
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Main
+// ---------------------------------------------------------------------------
+
+export async function runDoctor(cwd: string): Promise<DoctorResult> {
+  const issues: DoctorIssue[] = [];
+
+  // 1. project.yaml
+  const project = await checkProjectYaml(cwd, issues);
+
+  // 2. roadmap.yaml
+  const roadmap = await checkRoadmap(cwd, issues);
+
+  // 3. phase files (requires roadmap)
+  const phases = roadmap ? await checkPhases(cwd, roadmap, issues) : [];
+
+  // 4. progress.yaml (requires phases for orphan check)
+  await checkProgressLog(cwd, phases, issues);
+
+  // 5. agent profiles + model_map completeness (requires project)
+  if (project) {
+    await checkAgentProfiles(cwd, project, issues);
+  }
+
+  // 6. model profiles
+  await checkModelProfiles(cwd, issues);
+
+  // 7. .bak files
+  await checkBakFiles(cwd, issues);
+
+  // 8. stale generated context (requires phases + project)
+  if (project) {
+    await checkStaleContext(cwd, phases, project, issues);
+  }
+
+  const ok = issues.every((i) => i.severity !== "error");
+  return { ok, issues };
+}
+
+// ---------------------------------------------------------------------------
+// Human-readable formatter
+// ---------------------------------------------------------------------------
+
+export function formatDoctor(result: DoctorResult): string {
+  if (result.issues.length === 0) {
+    return "No issues found. Project is healthy.";
+  }
+  const lines = result.issues.map((i) => {
+    const mark = i.severity === "error" ? "[error]" : "[warn] ";
+    return `  ${mark} ${i.code}: ${i.message}`;
+  });
+  const summary = result.ok
+    ? `${result.issues.length} warning(s) found.`
+    : `${result.issues.filter((i) => i.severity === "error").length} error(s), ${result.issues.filter((i) => i.severity === "warning").length} warning(s) found.`;
+  return [summary, ...lines].join("\n");
+}
