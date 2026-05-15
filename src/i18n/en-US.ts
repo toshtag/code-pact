@@ -6,7 +6,7 @@ export const messages = {
     "  code-pact <command> [options]",
     "  code-pact --version",
     "",
-    "Commands (MVP, coming in later PRs):",
+    "Commands:",
     "  init       initialize a project control structure",
     "  phase      manage phase contracts (add | ls | show)",
     "  progress   show weighted progress against baseline",
@@ -20,4 +20,10 @@ export const messages = {
     "      --locale     ja-JP | en-US (defaults to LANG)",
   ].join("\n"),
   unknownCommand: (cmd: string): string => `Unknown command: ${cmd}`,
+  init: {
+    alreadyInitialized: (dir: string): string =>
+      `".code-pact/" already exists in ${dir}. Use --force to overwrite.`,
+    created: (n: number): string => `Created ${n} file(s).`,
+    done: "Project initialized successfully.",
+  },
 } as const;
