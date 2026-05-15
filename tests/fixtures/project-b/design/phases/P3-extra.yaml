@@ -1,0 +1,12 @@
+id: P3
+name: Extra Features
+weight: 20
+confidence: low
+risk: high
+status: planned
+objective: Additional features added after baseline.
+definition_of_done:
+  - Feature complete
+verification:
+  commands:
+    - pnpm test

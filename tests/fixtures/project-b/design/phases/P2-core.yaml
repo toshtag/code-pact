@@ -1,0 +1,13 @@
+id: P2
+name: Core CLI
+weight: 18
+confidence: medium
+risk: high
+status: in_progress
+objective: Implement the five MVP CLI commands.
+definition_of_done:
+  - All five commands are functional
+verification:
+  commands:
+    - pnpm test
+    - pnpm build
