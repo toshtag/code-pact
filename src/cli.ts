@@ -5,7 +5,15 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { messages, type Locale } from "./i18n/index.ts";
 import { runInit, type SupportedAgent } from "./commands/init.ts";
+import {
+  runPhaseAdd,
+  runPhaseLs,
+  runPhaseShow,
+  formatPhaseLsTable,
+  formatPhaseShow,
+} from "./commands/phase.ts";
 import type { LocaleCode } from "./core/schemas/locale.ts";
+import type { PhaseStatus } from "./core/schemas/phase.ts";
 
 const KNOWN_LOCALES: ReadonlySet<Locale> = new Set(["en-US", "ja-JP"]);
 const KNOWN_AGENTS: ReadonlySet<SupportedAgent> = new Set(["claude-code", "codex"]);
@@ -144,6 +152,199 @@ async function cmdInit(
 }
 
 // ---------------------------------------------------------------------------
+// Command: phase
+// ---------------------------------------------------------------------------
+
+async function cmdPhase(argv: string[], locale: Locale, json: boolean): Promise<number> {
+  const m = messages[locale];
+  const subcommand = argv[0];
+  const rest = argv.slice(1);
+  const cwd = process.cwd();
+
+  // ---- phase add ----
+  if (subcommand === "add") {
+    const { values } = parseArgs({
+      args: rest,
+      options: {
+        id: { type: "string" },
+        name: { type: "string" },
+        weight: { type: "string" },
+        objective: { type: "string" },
+        confidence: { type: "string" },
+        risk: { type: "string" },
+        "verify-command": { type: "string", multiple: true },
+        "done-criterion": { type: "string", multiple: true },
+        json: { type: "boolean" },
+      },
+      strict: false,
+      allowPositionals: false,
+    });
+
+    const id = values.id as string | undefined;
+    const name = values.name as string | undefined;
+    const weightRaw = values.weight as string | undefined;
+    const objective = values.objective as string | undefined;
+
+    if (!id || !name || !weightRaw || !objective) {
+      const msg = "phase add requires --id, --name, --weight, --objective";
+      if (json) {
+        process.stdout.write(
+          `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
+        );
+      } else {
+        process.stderr.write(`${msg}\n`);
+      }
+      return 2;
+    }
+
+    const weight = Number(weightRaw);
+    if (!Number.isFinite(weight) || weight <= 0) {
+      const msg = "--weight must be a positive number";
+      if (json) {
+        process.stdout.write(
+          `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
+        );
+      } else {
+        process.stderr.write(`${msg}\n`);
+      }
+      return 2;
+    }
+
+    const confidence = (values.confidence as string | undefined) ?? "medium";
+    const risk = (values.risk as string | undefined) ?? "medium";
+    const verifyCommands = (values["verify-command"] as string[] | undefined) ?? ["pnpm test"];
+    const definitionOfDone = (values["done-criterion"] as string[] | undefined) ?? [
+      "All tasks are done",
+    ];
+
+    try {
+      const result = await runPhaseAdd({
+        cwd,
+        id,
+        name,
+        weight,
+        objective,
+        confidence: confidence as "low" | "medium" | "high",
+        risk: risk as "low" | "medium" | "high",
+        verifyCommands,
+        definitionOfDone,
+      });
+      if (json) {
+        process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
+      } else {
+        process.stderr.write(`${m.phase.added(id, result.path)}\n`);
+      }
+      return 0;
+    } catch (err: unknown) {
+      if (err instanceof Error && (err as NodeJS.ErrnoException).code === "DUPLICATE_PHASE_ID") {
+        const msg = m.phase.duplicateId(id);
+        if (json) {
+          process.stdout.write(
+            `${JSON.stringify({ ok: false, error: { code: "DUPLICATE_PHASE_ID", message: msg } })}\n`,
+          );
+        } else {
+          process.stderr.write(`${msg}\n`);
+        }
+        return 2;
+      }
+      throw err;
+    }
+  }
+
+  // ---- phase ls ----
+  if (subcommand === "ls") {
+    const { values } = parseArgs({
+      args: rest,
+      options: {
+        status: { type: "string" },
+        json: { type: "boolean" },
+      },
+      strict: false,
+      allowPositionals: false,
+    });
+
+    const statusFilter = values.status as PhaseStatus | undefined;
+
+    try {
+      const items = await runPhaseLs({ cwd, status: statusFilter });
+      if (json) {
+        process.stdout.write(`${JSON.stringify({ ok: true, data: items })}\n`);
+      } else {
+        process.stdout.write(`${formatPhaseLsTable(items)}\n`);
+      }
+      return 0;
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (json) {
+        process.stdout.write(
+          `${JSON.stringify({ ok: false, error: { code: "INTERNAL_ERROR", message: msg } })}\n`,
+        );
+      } else {
+        process.stderr.write(`${msg}\n`);
+      }
+      return 3;
+    }
+  }
+
+  // ---- phase show ----
+  if (subcommand === "show") {
+    const { positionals: pos } = parseArgs({
+      args: rest,
+      options: { json: { type: "boolean" } },
+      strict: false,
+      allowPositionals: true,
+    });
+
+    const id = pos[0];
+    if (!id) {
+      const msg = "phase show requires a phase ID";
+      if (json) {
+        process.stdout.write(
+          `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
+        );
+      } else {
+        process.stderr.write(`${msg}\n`);
+      }
+      return 2;
+    }
+
+    try {
+      const phase = await runPhaseShow({ cwd, id });
+      if (json) {
+        process.stdout.write(`${JSON.stringify({ ok: true, data: phase })}\n`);
+      } else {
+        process.stdout.write(`${formatPhaseShow(phase)}\n`);
+      }
+      return 0;
+    } catch (err: unknown) {
+      if (err instanceof Error && (err as NodeJS.ErrnoException).code === "PHASE_NOT_FOUND") {
+        const msg = m.phase.notFound(id);
+        if (json) {
+          process.stdout.write(
+            `${JSON.stringify({ ok: false, error: { code: "PHASE_NOT_FOUND", message: msg } })}\n`,
+          );
+        } else {
+          process.stderr.write(`${msg}\n`);
+        }
+        return 2;
+      }
+      throw err;
+    }
+  }
+
+  // Unknown subcommand
+  const msg = `phase: unknown subcommand "${subcommand ?? ""}". Use: add | ls | show`;
+  if (json) {
+    process.stdout.write(
+      `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
+    );
+  } else {
+    process.stderr.write(`${msg}\n`);
+  }
+  return 2;
+}
+
+// ---------------------------------------------------------------------------
 // Main dispatcher
 // ---------------------------------------------------------------------------
 
@@ -177,6 +378,9 @@ async function main(): Promise<number> {
   switch (command) {
     case "init":
       return cmdInit(rest, locale, json);
+
+    case "phase":
+      return cmdPhase(rest, locale, json);
 
     default: {
       if (json) {
