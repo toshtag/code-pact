@@ -1,0 +1,12 @@
+id: P1
+name: Foundation
+weight: 12
+confidence: high
+risk: low
+status: done
+objective: Establish project foundation.
+definition_of_done:
+  - CI passes
+verification:
+  commands:
+    - pnpm test
