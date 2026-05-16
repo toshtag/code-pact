@@ -6,14 +6,27 @@ The product idea: agents should not read sprawling `design/` trees themselves an
 
 ## Status
 
-Pre-alpha (`v0.1.x` work in progress). Not yet published to npm. Use `pnpm link --global` from a clone, or install from a local tarball, until alpha publish.
+Alpha. Published on npm as [`code-pact@alpha`](https://www.npmjs.com/package/code-pact). API and command surface may still shift before `v0.1.0`. Stable releases (`latest` tag) will follow once the `task complete` flow lands.
+
+## Install
+
+```sh
+# One-off invocation (no install)
+npx code-pact@alpha --version
+
+# Global install
+npm install -g code-pact@alpha
+code-pact --version
+```
+
+Contributors can also run from a clone with `pnpm link --global`, or install a local tarball produced by `npm pack` — see [Development](#development).
 
 ## Quickstart
 
 ```sh
 # 1. Initialize an existing project. Run with no flags in your terminal
 #    to launch the interactive wizard.
-code-pact init
+npx code-pact@alpha init
 
 # 2. Add a phase interactively (or use `phase add` with flags — see below).
 code-pact phase new
@@ -27,6 +40,8 @@ code-pact adapter --agent claude-code
 code-pact task context <task-id> --agent <agent>
 code-pact verify --phase <phase-id> --task <task-id>
 ```
+
+Subsequent commands assume `code-pact` is on `PATH` (`npm install -g code-pact@alpha`). If you prefer not to install globally, prefix each invocation with `npx code-pact@alpha`.
 
 The `init` wizard asks, in order: language (English / 日本語), which agents to support (multi-select from Claude Code / Codex / Generic), the default agent, whether to generate adapter files now, the default verification command, and whether to create a sample first phase.
 
@@ -112,8 +127,8 @@ code-pact phase add ... --verify-command node --version
 
 ## Requirements
 
-- Node.js >= 24 (LTS)
-- pnpm
+- Node.js >= 22 (LTS or current)
+- pnpm (for contributors building from source)
 
 ## Development
 
