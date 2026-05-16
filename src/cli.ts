@@ -46,7 +46,7 @@ async function readPackageVersion(): Promise<string> {
 async function cmdInit(
   argv: string[],
   locale: Locale,
-  json: boolean,
+  globalJson: boolean,
 ): Promise<number> {
   const m = messages[locale];
 
@@ -62,6 +62,7 @@ async function cmdInit(
     allowPositionals: false,
   });
 
+  const json = globalJson || values.json === true;
   const agentRaw = (values.agent as string | undefined) ?? "claude-code";
   const agents: SupportedAgent[] = agentRaw
     .split(",")
@@ -132,7 +133,17 @@ async function cmdInit(
 // Command: doctor
 // ---------------------------------------------------------------------------
 
-async function cmdDoctor(json: boolean): Promise<number> {
+async function cmdDoctor(argv: string[], globalJson: boolean): Promise<number> {
+  const { values } = parseArgs({
+    args: argv,
+    options: {
+      json: { type: "boolean" },
+    },
+    strict: false,
+    allowPositionals: false,
+  });
+
+  const json = globalJson || values.json === true;
   const cwd = process.cwd();
   const result = await runDoctor(cwd);
 
@@ -160,7 +171,7 @@ async function cmdDoctor(json: boolean): Promise<number> {
 // Command: recommend
 // ---------------------------------------------------------------------------
 
-async function cmdRecommend(argv: string[], locale: Locale, json: boolean): Promise<number> {
+async function cmdRecommend(argv: string[], locale: Locale, globalJson: boolean): Promise<number> {
   const m = messages[locale];
   const { values } = parseArgs({
     args: argv,
@@ -174,6 +185,7 @@ async function cmdRecommend(argv: string[], locale: Locale, json: boolean): Prom
     allowPositionals: false,
   });
 
+  const json = globalJson || values.json === true;
   const phaseId = values.phase as string | undefined;
   const taskId = values.task as string | undefined;
   const agentName = (values.agent as string | undefined) ?? "claude-code";
@@ -243,7 +255,7 @@ async function cmdRecommend(argv: string[], locale: Locale, json: boolean): Prom
 // Command: adapter
 // ---------------------------------------------------------------------------
 
-async function cmdAdapter(argv: string[], locale: Locale, json: boolean): Promise<number> {
+async function cmdAdapter(argv: string[], locale: Locale, globalJson: boolean): Promise<number> {
   const m = messages[locale];
   const { values } = parseArgs({
     args: argv,
@@ -256,6 +268,7 @@ async function cmdAdapter(argv: string[], locale: Locale, json: boolean): Promis
     allowPositionals: false,
   });
 
+  const json = globalJson || values.json === true;
   const agentName = (values.agent as string | undefined) ?? "claude-code";
   const force = values.force === true;
   const cwd = process.cwd();
@@ -290,7 +303,7 @@ async function cmdAdapter(argv: string[], locale: Locale, json: boolean): Promis
 // Command: verify
 // ---------------------------------------------------------------------------
 
-async function cmdVerify(argv: string[], locale: Locale, json: boolean): Promise<number> {
+async function cmdVerify(argv: string[], locale: Locale, globalJson: boolean): Promise<number> {
   const m = messages[locale];
   const { values } = parseArgs({
     args: argv,
@@ -304,6 +317,7 @@ async function cmdVerify(argv: string[], locale: Locale, json: boolean): Promise
     allowPositionals: false,
   });
 
+  const json = globalJson || values.json === true;
   const phaseId = values.phase as string | undefined;
   const taskId = values.task as string | undefined;
   const dryRun = values["dry-run"] === true;
@@ -376,7 +390,7 @@ async function cmdVerify(argv: string[], locale: Locale, json: boolean): Promise
 // Command: pack
 // ---------------------------------------------------------------------------
 
-async function cmdPack(argv: string[], locale: Locale, json: boolean): Promise<number> {
+async function cmdPack(argv: string[], locale: Locale, globalJson: boolean): Promise<number> {
   const m = messages[locale];
   const { values } = parseArgs({
     args: argv,
@@ -390,6 +404,7 @@ async function cmdPack(argv: string[], locale: Locale, json: boolean): Promise<n
     allowPositionals: false,
   });
 
+  const json = globalJson || values.json === true;
   const phaseId = values.phase as string | undefined;
   const taskId = values.task as string | undefined;
   const agentName = (values.agent as string | undefined) ?? "claude-code";
@@ -448,7 +463,7 @@ async function cmdPack(argv: string[], locale: Locale, json: boolean): Promise<n
 // Command: progress
 // ---------------------------------------------------------------------------
 
-async function cmdProgress(argv: string[], locale: Locale, json: boolean): Promise<number> {
+async function cmdProgress(argv: string[], locale: Locale, globalJson: boolean): Promise<number> {
   const m = messages[locale];
   const { values } = parseArgs({
     args: argv,
@@ -460,6 +475,7 @@ async function cmdProgress(argv: string[], locale: Locale, json: boolean): Promi
     allowPositionals: false,
   });
 
+  const json = globalJson || values.json === true;
   const baselineName = (values.baseline as string | undefined) ?? "initial";
   const cwd = process.cwd();
 
@@ -491,7 +507,7 @@ async function cmdProgress(argv: string[], locale: Locale, json: boolean): Promi
 // Command: phase
 // ---------------------------------------------------------------------------
 
-async function cmdPhase(argv: string[], locale: Locale, json: boolean): Promise<number> {
+async function cmdPhase(argv: string[], locale: Locale, globalJson: boolean): Promise<number> {
   const m = messages[locale];
   const subcommand = argv[0];
   const rest = argv.slice(1);
@@ -499,23 +515,41 @@ async function cmdPhase(argv: string[], locale: Locale, json: boolean): Promise<
 
   // ---- phase add ----
   if (subcommand === "add") {
-    const { values } = parseArgs({
-      args: rest,
-      options: {
-        id: { type: "string" },
-        name: { type: "string" },
-        weight: { type: "string" },
-        objective: { type: "string" },
-        confidence: { type: "string" },
-        risk: { type: "string" },
-        "verify-command": { type: "string", multiple: true },
-        "done-criterion": { type: "string", multiple: true },
-        json: { type: "boolean" },
-      },
-      strict: false,
-      allowPositionals: false,
-    });
+    let values: Record<string, unknown>;
+    try {
+      ({ values } = parseArgs({
+        args: rest,
+        options: {
+          id: { type: "string" },
+          name: { type: "string" },
+          weight: { type: "string" },
+          objective: { type: "string" },
+          confidence: { type: "string" },
+          risk: { type: "string" },
+          "verify-command": { type: "string", multiple: true },
+          "done-criterion": { type: "string", multiple: true },
+          json: { type: "boolean" },
+        },
+        strict: true,
+        allowPositionals: false,
+      }));
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      const msg = `phase add: ${detail}. Quote multi-word values, e.g. --verify-command "node --version".`;
+      // Best-effort detection of post-command --json even when strict parsing
+      // failed before consuming it.
+      const json = globalJson || rest.includes("--json");
+      if (json) {
+        process.stdout.write(
+          `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
+        );
+      } else {
+        process.stderr.write(`${msg}\n`);
+      }
+      return 2;
+    }
 
+    const json = globalJson || values.json === true;
     const id = values.id as string | undefined;
     const name = values.name as string | undefined;
     const weightRaw = values.weight as string | undefined;
@@ -599,6 +633,7 @@ async function cmdPhase(argv: string[], locale: Locale, json: boolean): Promise<
       allowPositionals: false,
     });
 
+    const json = globalJson || values.json === true;
     const statusFilter = values.status as PhaseStatus | undefined;
 
     try {
@@ -624,13 +659,14 @@ async function cmdPhase(argv: string[], locale: Locale, json: boolean): Promise<
 
   // ---- phase show ----
   if (subcommand === "show") {
-    const { positionals: pos } = parseArgs({
+    const { values, positionals: pos } = parseArgs({
       args: rest,
       options: { json: { type: "boolean" } },
       strict: false,
       allowPositionals: true,
     });
 
+    const json = globalJson || values.json === true;
     const id = pos[0];
     if (!id) {
       const msg = "phase show requires a phase ID";
@@ -670,7 +706,7 @@ async function cmdPhase(argv: string[], locale: Locale, json: boolean): Promise<
 
   // Unknown subcommand
   const msg = `phase: unknown subcommand "${subcommand ?? ""}". Use: add | ls | show`;
-  if (json) {
+  if (globalJson) {
     process.stdout.write(
       `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
     );
@@ -731,7 +767,7 @@ async function main(): Promise<number> {
       return cmdRecommend(rest, locale, json);
 
     case "doctor":
-      return cmdDoctor(json);
+      return cmdDoctor(rest, json);
 
     default: {
       if (json) {
