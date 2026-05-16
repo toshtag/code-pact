@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { splitArgv } from "./lib/argv.ts";
-import { isInteractive } from "./lib/tty.ts";
+import { isInteractive, isCIEnv } from "./lib/tty.ts";
 import { messages, type Locale } from "./i18n/index.ts";
 import { runInit, type SupportedAgent } from "./commands/init.ts";
 import { runInitWizard } from "./commands/init-wizard.ts";
@@ -104,6 +104,31 @@ async function cmdInit(
       }
       throw err;
     }
+  }
+
+  // Automation mode = explicit --non-interactive OR detected CI=true.
+  // Per docs/cli-contract.md, missing required flags must fail with
+  // CONFIG_ERROR (exit 2) instead of silently picking defaults.
+  const automation = nonInteractive || isCIEnv();
+  const localeProvided = typeof values.locale === "string";
+  const agentProvided = typeof values.agent === "string";
+
+  if (automation && (!localeProvided || !agentProvided)) {
+    const missing = [
+      !localeProvided ? "--locale" : null,
+      !agentProvided ? "--agent" : null,
+    ]
+      .filter((v): v is string => v !== null)
+      .join(", ");
+    const msg = `init in non-interactive/CI mode requires ${missing}. See docs/cli-contract.md.`;
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
+      );
+    } else {
+      process.stderr.write(`${msg}\n`);
+    }
+    return 2;
   }
 
   const agentRaw = (values.agent as string | undefined) ?? "claude-code";
@@ -506,15 +531,32 @@ async function cmdPack(argv: string[], locale: Locale, globalJson: boolean): Pro
 
 async function cmdProgress(argv: string[], locale: Locale, globalJson: boolean): Promise<number> {
   const m = messages[locale];
-  const { values } = parseArgs({
-    args: argv,
-    options: {
-      baseline: { type: "string" },
-      json: { type: "boolean" },
-    },
-    strict: false,
-    allowPositionals: false,
-  });
+  let values: Record<string, unknown>;
+  try {
+    ({ values } = parseArgs({
+      args: argv,
+      options: {
+        baseline: { type: "string" },
+        json: { type: "boolean" },
+      },
+      strict: true,
+      allowPositionals: false,
+    }));
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    const msg = `progress: ${detail}`;
+    // Strict parsing failed before --json could be read from values; fall back
+    // to argv inspection so post-command --json is still honored.
+    const json = globalJson || argv.includes("--json");
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
+      );
+    } else {
+      process.stderr.write(`${msg}\n`);
+    }
+    return 2;
+  }
 
   const json = globalJson || values.json === true;
   const baselineName = (values.baseline as string | undefined) ?? "initial";
@@ -705,15 +747,30 @@ async function cmdPhase(argv: string[], locale: Locale, globalJson: boolean): Pr
 
   // ---- phase ls ----
   if (subcommand === "ls") {
-    const { values } = parseArgs({
-      args: rest,
-      options: {
-        status: { type: "string" },
-        json: { type: "boolean" },
-      },
-      strict: false,
-      allowPositionals: false,
-    });
+    let values: Record<string, unknown>;
+    try {
+      ({ values } = parseArgs({
+        args: rest,
+        options: {
+          status: { type: "string" },
+          json: { type: "boolean" },
+        },
+        strict: true,
+        allowPositionals: false,
+      }));
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      const msg = `phase ls: ${detail}`;
+      const json = globalJson || rest.includes("--json");
+      if (json) {
+        process.stdout.write(
+          `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
+        );
+      } else {
+        process.stderr.write(`${msg}\n`);
+      }
+      return 2;
+    }
 
     const json = globalJson || values.json === true;
     const statusFilter = values.status as PhaseStatus | undefined;

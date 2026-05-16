@@ -1,6 +1,9 @@
+export function isCIEnv(): boolean {
+  const ci = process.env.CI;
+  return Boolean(ci) && ci !== "false" && ci !== "0";
+}
+
 export function isInteractive(): boolean {
-  if (process.env.CI && process.env.CI !== "false" && process.env.CI !== "0") {
-    return false;
-  }
+  if (isCIEnv()) return false;
   return Boolean(process.stdin.isTTY) && Boolean(process.stdout.isTTY);
 }
