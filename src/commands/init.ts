@@ -38,7 +38,7 @@ export type InitResult = {
 const CLAUDE_PROFILE: AgentProfile = {
   name: "claude-code",
   instruction_filename: "CLAUDE.md",
-  context_dir: ".context/claude",
+  context_dir: ".context/claude-code",
   skill_dir: ".claude/skills",
   hook_dir: ".claude/hooks",
   model_map: {
@@ -178,7 +178,6 @@ export async function runInit(opts: InitOptions): Promise<InitResult> {
   await mkdirp(join(cwd, ".code-pact", "agent-profiles"));
   await mkdirp(join(cwd, ".code-pact", "model-profiles"));
   await mkdirp(join(cwd, ".code-pact", "state", "baselines"));
-  await mkdirp(join(cwd, ".code-pact", "templates"));
 
   // project.yaml
   const projectYaml: Project = {
