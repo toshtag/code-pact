@@ -66,4 +66,49 @@ export const messages = {
     agentNotFound: (name: string): string =>
       `Agent "${name}" not found. Run "code-pact init --agent ${name}" first.`,
   },
+  wizard: {
+    init: {
+      localePrompt: "Select language / 言語を選択してください",
+      localeOptionEn: "English",
+      localeOptionJa: "日本語",
+      agentsPrompt: "Which agents do you want to support? (comma separated)",
+      defaultAgentPrompt: "Which agent should be the default?",
+      verifyCommandPrompt: "Default verification command",
+      verifyCommandHint: "Press Enter to keep the default",
+      createSamplePrompt: "Create a sample phase to get started?",
+      generateAdaptersPrompt: "Generate adapter files now?",
+      summary: (agents: string[], defaultAgent: string): string =>
+        `Will initialize with agents: ${agents.join(", ")} (default: ${defaultAgent}).`,
+      invalidChoice: "Invalid choice. Please try again.",
+      noSelection: "At least one selection is required.",
+    },
+    phase: {
+      idPrompt: "Phase ID (e.g. P1)",
+      namePrompt: "Phase name",
+      weightPrompt: "Weight (1-100)",
+      objectivePrompt: "Objective",
+      confidencePrompt: "Confidence (low | medium | high)",
+      riskPrompt: "Risk (low | medium | high)",
+      verifyCommandPrompt: "Verification commands (comma separated)",
+      doneCriterionPrompt: "Done criteria (comma separated)",
+    },
+  },
+  task: {
+    context: {
+      taskNotFound: (taskId: string): string =>
+        `Task "${taskId}" not found in any phase.`,
+      ambiguous: (taskId: string, phases: string[]): string =>
+        `Task "${taskId}" exists in multiple phases: ${phases.join(", ")}.`,
+      agentNotEnabled: (name: string): string =>
+        `Agent "${name}" is disabled in project.yaml (enabled: false).`,
+      agentNotFound: (name: string): string =>
+        `Agent "${name}" is not configured in project.yaml.`,
+    },
+  },
+  cliContract: {
+    nonInteractiveMissing: (flag: string): string =>
+      `${flag} is required in non-interactive mode.`,
+    ciDetected:
+      "CI environment detected; interactive prompts are disabled. Pass required flags explicitly or unset CI.",
+  },
 } as const;
