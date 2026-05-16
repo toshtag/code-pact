@@ -98,6 +98,55 @@ describe("runGenerateAdapter — codex", () => {
 });
 
 // ---------------------------------------------------------------------------
+// generic adapter
+// ---------------------------------------------------------------------------
+
+describe("runGenerateAdapter — generic", () => {
+  beforeEach(async () => {
+    await runInit({ cwd: dir, locale: "en-US", agents: ["generic"], force: false, json: false });
+  });
+
+  it("writes docs/code-pact/agent-instructions.md", async () => {
+    const result = await runGenerateAdapter({ cwd: dir, agentName: "generic", force: false });
+    expect(result.agentName).toBe("generic");
+    const names = result.created.map((p) => p.replace(dir, ""));
+    expect(names.some((n) => n.includes("docs/code-pact/agent-instructions.md"))).toBe(true);
+  });
+
+  it("agent-instructions.md instructs the agent to use task context + verify", async () => {
+    await runGenerateAdapter({ cwd: dir, agentName: "generic", force: false });
+    const content = await readFile(
+      join(dir, "docs", "code-pact", "agent-instructions.md"),
+      "utf8",
+    );
+    expect(content).toContain("code-pact task context");
+    expect(content).toContain("code-pact verify");
+  });
+
+  it("agent-instructions.md does NOT reference unimplemented commands or npx", async () => {
+    await runGenerateAdapter({ cwd: dir, agentName: "generic", force: false });
+    const content = await readFile(
+      join(dir, "docs", "code-pact", "agent-instructions.md"),
+      "utf8",
+    );
+    // progress --add-event does not exist in v0.1; never tell the agent to call it.
+    expect(content).not.toContain("--add-event");
+    // The package is not published yet; README and docs/dogfood.md will start
+    // mentioning npx only after publish. The generic adapter ships earlier and
+    // must not promise a command users cannot run.
+    expect(content).not.toContain("npx code-pact");
+  });
+
+  it("creates .context/generic/ directory for context packs", async () => {
+    await runGenerateAdapter({ cwd: dir, agentName: "generic", force: false });
+    // Directory existence is implied by mkdir recursive; verify by reading.
+    const { readdir } = await import("node:fs/promises");
+    const entries = await readdir(join(dir, ".context"));
+    expect(entries).toContain("generic");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Error: unknown agent
 // ---------------------------------------------------------------------------
 
