@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 import { parse as parseYaml } from "yaml";
 import { Roadmap } from "../core/schemas/roadmap.ts";
 import { Phase } from "../core/schemas/phase.ts";
+import { Task } from "../core/schemas/task.ts";
 import { ProgressLog } from "../core/schemas/progress-event.ts";
 
 // ---------------------------------------------------------------------------
@@ -115,9 +116,10 @@ async function checkProgressEvent(
 async function checkDecision(
   cwd: string,
   phase: Phase,
-  taskId: string,
+  task: Task,
 ): Promise<CheckResult> {
-  if (!phase.requires_decision) {
+  const taskId = task.id;
+  if (!phase.requires_decision && !task.requires_decision) {
     return { name: "decision", ok: true };
   }
 
@@ -192,11 +194,13 @@ export async function runVerify(opts: VerifyOptions): Promise<VerifyResult> {
     throw err;
   }
 
+  const task = phase.tasks!.find((t) => t.id === taskId)!;
+
   // Run all checks in order
   const checks: CheckResult[] = [
     await checkCommands(phase.verification.commands, cwd, dryRun),
     await checkProgressEvent(log, taskId),
-    await checkDecision(cwd, phase, taskId),
+    await checkDecision(cwd, phase, task),
     checkTaskStatus(phase, taskId),
   ];
 
