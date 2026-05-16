@@ -75,6 +75,8 @@ describe("AgentRef.enabled", () => {
 
   it("Project preserves agents[].enabled defaulting through nested parse", () => {
     const result = Project.parse(VALID);
-    expect(result.agents[0].enabled).toBe(true);
+    const first = result.agents[0];
+    expect(first).toBeDefined();
+    expect(first!.enabled).toBe(true);
   });
 });
