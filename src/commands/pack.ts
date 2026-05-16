@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { Roadmap } from "../core/schemas/roadmap.ts";
 import { Phase } from "../core/schemas/phase.ts";
+import { AgentProfile } from "../core/schemas/agent-profile.ts";
 import { parseFrontMatter } from "../core/pack/front-matter.ts";
 import { renderMarkdown, type RuleDoc, type DecisionDoc } from "../core/pack/formatters/markdown.ts";
 import type { Task } from "../core/schemas/task.ts";
@@ -39,6 +40,18 @@ async function loadRoadmap(cwd: string): Promise<Roadmap> {
 async function loadPhase(cwd: string, path: string): Promise<Phase> {
   const raw = await readFile(join(cwd, path), "utf8");
   return Phase.parse(parseYaml(raw) as unknown);
+}
+
+async function loadAgentProfile(cwd: string, agentName: string): Promise<AgentProfile | null> {
+  try {
+    const raw = await readFile(
+      join(cwd, ".code-pact", "agent-profiles", `${agentName}.yaml`),
+      "utf8",
+    );
+    return AgentProfile.parse(parseYaml(raw) as unknown);
+  } catch {
+    return null;
+  }
 }
 
 async function loadRules(cwd: string, taskType: string): Promise<RuleDoc[]> {
@@ -126,8 +139,8 @@ export async function runPack(opts: PackOptions): Promise<PackResult> {
   // Render
   const content = renderMarkdown({ phase, task, agentName, rules, decisions });
 
-  // Write output
-  const outDir = outputDir ?? join(cwd, ".context", agentName);
+  const profile = await loadAgentProfile(cwd, agentName);
+  const outDir = outputDir ?? join(cwd, profile?.context_dir ?? join(".context", agentName));
   await mkdir(outDir, { recursive: true });
   const outputPath = join(outDir, `${taskId}.md`);
   await writeFile(outputPath, content, "utf8");
