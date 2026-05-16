@@ -28,6 +28,26 @@ function claudeMd(profile: AgentProfile, modelProfiles: ModelProfile[]): string 
     `> This file is managed by [code-pact](https://github.com/toshtag/code-pact).`,
     `> Edit the sections marked "Project-specific" to reflect your project's conventions.`,
     ``,
+    `## How to work on a task`,
+    ``,
+    `1. Fetch the context pack:`,
+    `   \`\`\`sh`,
+    `   code-pact task context <task-id> --agent claude-code`,
+    `   \`\`\``,
+    ``,
+    `2. Implement the task.`,
+    ``,
+    `3. Verify completion:`,
+    `   \`\`\`sh`,
+    `   code-pact verify --phase <phase-id> --task <task-id>`,
+    `   \`\`\``,
+    ``,
+    `4. Report the result to the user.`,
+    ``,
+    `Task completion automation (combined verify + progress update) will be`,
+    `handled by \`code-pact task complete\` in a later version. Until then,`,
+    `step 3 is the deterministic completion signal.`,
+    ``,
     `## Model selection`,
     ``,
     tierSection,
@@ -47,9 +67,6 @@ function claudeMd(profile: AgentProfile, modelProfiles: ModelProfile[]): string 
     `> See \`design/constitution.md\` and \`design/rules/\` for the source of truth.`,
     ``,
     `- Follow \`design/rules/coding-style.md\` for code style.`,
-    `- Record completed tasks in \`.code-pact/state/progress.yaml\`.`,
-    `- Use \`code-pact pack\` to generate context before starting a task.`,
-    `- Use \`code-pact verify\` to check completion criteria.`,
   ].join("\n");
 }
 
@@ -57,11 +74,11 @@ function claudeMd(profile: AgentProfile, modelProfiles: ModelProfile[]): string 
 // Skill templates
 // ---------------------------------------------------------------------------
 
-const SKILL_PACK = `# /pack — Generate context pack for a task
+const SKILL_CONTEXT = `# /context — Fetch the context pack for a task
 
-Usage: /pack <phase-id> <task-id>
+Usage: /context <task-id>
 
-Runs: code-pact pack --phase $1 --task $2 --agent claude-code
+Runs: code-pact task context $1 --agent claude-code
 `;
 
 const SKILL_VERIFY = `# /verify — Verify task completion criteria
@@ -120,7 +137,7 @@ export async function generateClaudeAdapter(
   // .claude/skills/
   const skillDir = join(cwd, profile.skill_dir ?? ".claude/skills");
   await mkdir(skillDir, { recursive: true });
-  await writeIfAbsent(join(skillDir, "pack.md"), SKILL_PACK);
+  await writeIfAbsent(join(skillDir, "context.md"), SKILL_CONTEXT);
   await writeIfAbsent(join(skillDir, "verify.md"), SKILL_VERIFY);
   await writeIfAbsent(join(skillDir, "progress.md"), SKILL_PROGRESS);
 

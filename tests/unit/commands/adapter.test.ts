@@ -29,7 +29,7 @@ describe("runGenerateAdapter — claude-code", () => {
     expect(result.agentName).toBe("claude-code");
     const names = result.created.map((p) => p.replace(dir, ""));
     expect(names.some((n) => n.includes("CLAUDE.md"))).toBe(true);
-    expect(names.some((n) => n.includes("pack.md"))).toBe(true);
+    expect(names.some((n) => n.includes("context.md"))).toBe(true);
     expect(names.some((n) => n.includes("verify.md"))).toBe(true);
     expect(names.some((n) => n.includes("progress.md"))).toBe(true);
   });
@@ -43,12 +43,18 @@ describe("runGenerateAdapter — claude-code", () => {
     expect(content).toContain("cheap_mechanical");
   });
 
-  it("CLAUDE.md contains code-pact workflow hints", async () => {
+  it("CLAUDE.md instructs the agent to use task context + verify", async () => {
     await runGenerateAdapter({ cwd: dir, agentName: "claude-code", force: false });
     const content = await readFile(join(dir, "CLAUDE.md"), "utf8");
-    expect(content).toContain("code-pact pack");
+    expect(content).toContain("code-pact task context");
     expect(content).toContain("code-pact verify");
-    expect(content).toContain("progress.yaml");
+  });
+
+  it("CLAUDE.md does NOT reference unimplemented progress --add-event", async () => {
+    await runGenerateAdapter({ cwd: dir, agentName: "claude-code", force: false });
+    const content = await readFile(join(dir, "CLAUDE.md"), "utf8");
+    expect(content).not.toContain("--add-event");
+    expect(content).not.toContain("progress.yaml");
   });
 
   it("skips existing files when force is false", async () => {
