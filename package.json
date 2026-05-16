@@ -4,16 +4,38 @@
   "description": "Design Control Plane for AI Coding Agents",
   "type": "module",
   "license": "MIT",
+  "author": "Pocket (@toshtag)",
+  "homepage": "https://github.com/toshtag/code-pact#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/toshtag/code-pact.git"
+  },
+  "bugs": {
+    "url": "https://github.com/toshtag/code-pact/issues"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "cli",
+    "claude",
+    "codex",
+    "design",
+    "spec-driven"
+  ],
   "engines": {
-    "node": ">=24"
+    "node": ">=22"
   },
   "packageManager": "pnpm@10.33.2",
   "bin": {
     "code-pact": "dist/cli.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "LICENSE"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsup",
     "test": "vitest run",
