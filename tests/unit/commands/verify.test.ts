@@ -10,7 +10,11 @@ const fixtureDir = new URL("../../../tests/fixtures/project-a", import.meta.url)
 // Helpers — build a minimal tmpdir project for mutation tests
 // ---------------------------------------------------------------------------
 
-const PHASE_YAML = (taskStatus: string, requiresDecision = false) =>
+const PHASE_YAML = (
+  taskStatus: string,
+  requiresDecision = false,
+  taskRequiresDecision = false,
+) =>
   [
     "id: P1",
     "name: Foundation",
@@ -35,6 +39,7 @@ const PHASE_YAML = (taskStatus: string, requiresDecision = false) =>
     "    verification_strength: weak",
     "    expected_duration: short",
     `    status: ${taskStatus}`,
+    taskRequiresDecision ? "    requires_decision: true" : "",
   ]
     .filter(Boolean)
     .join("\n");
@@ -48,6 +53,7 @@ async function setupProject(
     hasDoneEvent?: boolean;
     hasAdr?: boolean;
     requiresDecision?: boolean;
+    taskRequiresDecision?: boolean;
   } = {},
 ): Promise<void> {
   const {
@@ -55,6 +61,7 @@ async function setupProject(
     hasDoneEvent = true,
     hasAdr = false,
     requiresDecision = false,
+    taskRequiresDecision = false,
   } = opts;
 
   await mkdir(join(dir, ".code-pact", "state", "baselines"), { recursive: true });
@@ -64,7 +71,7 @@ async function setupProject(
   await writeFile(join(dir, "design", "roadmap.yaml"), ROADMAP_YAML, "utf8");
   await writeFile(
     join(dir, "design", "phases", "P1-foundation.yaml"),
-    PHASE_YAML(taskStatus, requiresDecision),
+    PHASE_YAML(taskStatus, requiresDecision, taskRequiresDecision),
     "utf8",
   );
 
@@ -202,5 +209,81 @@ describe("runVerify — error cases", () => {
     await expect(
       runVerify({ cwd: dir, phaseId: "P1", taskId: "NOPE", dryRun: true }),
     ).rejects.toMatchObject({ code: "TASK_NOT_FOUND" });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// BUG-003 regression — task-level requires_decision must be enforced
+// ---------------------------------------------------------------------------
+
+describe("runVerify — BUG-003: task-level requires_decision without ADR fails", () => {
+  let dir: string;
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "code-pact-verify-bug003-"));
+    await setupProject(dir, { taskRequiresDecision: true, hasAdr: false });
+  });
+  afterEach(() => rm(dir, { recursive: true, force: true }));
+
+  it("fails decision check when only task has requires_decision and no ADR exists", async () => {
+    const result = await runVerify({ cwd: dir, phaseId: "P1", taskId: "P1-T1", dryRun: true });
+    expect(result.ok).toBe(false);
+    const check = result.checks.find((c) => c.name === "decision");
+    expect(check?.ok).toBe(false);
+  });
+});
+
+describe("runVerify — BUG-003: task-level requires_decision with ADR passes", () => {
+  let dir: string;
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "code-pact-verify-bug003-"));
+    await setupProject(dir, { taskRequiresDecision: true, hasAdr: true });
+  });
+  afterEach(() => rm(dir, { recursive: true, force: true }));
+
+  it("passes decision check when task requires_decision and matching ADR exists", async () => {
+    const result = await runVerify({ cwd: dir, phaseId: "P1", taskId: "P1-T1", dryRun: true });
+    const check = result.checks.find((c) => c.name === "decision");
+    expect(check?.ok).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// BUG-001 regression — verification command stdout must not reach process.stdout
+// ---------------------------------------------------------------------------
+
+describe("runVerify — BUG-001: command stdout is captured, not inherited", () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "code-pact-verify-bug001-"));
+    // Write a script that emits stdout and exits non-zero; avoids whitespace-in-args split issues.
+    await writeFile(
+      join(dir, "fail.mjs"),
+      'process.stdout.write("boom"); process.exit(1);\n',
+      "utf8",
+    );
+    await mkdir(join(dir, ".code-pact", "state", "baselines"), { recursive: true });
+    await mkdir(join(dir, "design", "phases"), { recursive: true });
+    await mkdir(join(dir, "design", "decisions"), { recursive: true });
+    await writeFile(join(dir, "design", "roadmap.yaml"), ROADMAP_YAML, "utf8");
+    await writeFile(
+      join(dir, "design", "phases", "P1-foundation.yaml"),
+      PHASE_YAML("done", false).replace("echo ok", `node ${join(dir, "fail.mjs")}`),
+      "utf8",
+    );
+    await writeFile(
+      join(dir, ".code-pact", "state", "progress.yaml"),
+      `events:\n  - task_id: P1-T1\n    status: done\n    at: "2026-05-15T10:00:00+09:00"\n    actor: human\n`,
+      "utf8",
+    );
+  });
+
+  afterEach(() => rm(dir, { recursive: true, force: true }));
+
+  it("failing command stdout is captured into CheckResult.stdout", async () => {
+    const result = await runVerify({ cwd: dir, phaseId: "P1", taskId: "P1-T1", dryRun: false });
+    const check = result.checks.find((c) => c.name === "commands");
+    expect(check?.ok).toBe(false);
+    expect(check?.stdout).toBe("boom");
   });
 });

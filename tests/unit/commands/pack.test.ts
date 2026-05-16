@@ -203,3 +203,57 @@ describe("runPack — project with no rules dir", () => {
     expect(result.charCount).toBeGreaterThan(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// BUG-004 regression — pack must write to agent profile context_dir
+// ---------------------------------------------------------------------------
+
+describe("runPack — BUG-004: output follows agent profile context_dir", () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "code-pact-pack-bug004-"));
+    await mkdir(join(dir, ".code-pact", "state", "baselines"), { recursive: true });
+    await mkdir(join(dir, ".code-pact", "agent-profiles"), { recursive: true });
+    await mkdir(join(dir, "design", "phases"), { recursive: true });
+    await writeFile(
+      join(dir, "design", "roadmap.yaml"),
+      "phases:\n  - id: P1\n    path: design/phases/P1-minimal.yaml\n    weight: 5\n",
+      "utf8",
+    );
+    await writeFile(
+      join(dir, "design", "phases", "P1-minimal.yaml"),
+      [
+        "id: P1", "name: Minimal", "weight: 5", "confidence: high", "risk: low",
+        "status: planned", "objective: Minimal.", "definition_of_done:", "  - Done",
+        "verification:", "  commands:", "    - echo ok",
+        "tasks:",
+        "  - id: P1-T1", "    type: feature", "    ambiguity: low", "    risk: low",
+        "    context_size: small", "    write_surface: low",
+        "    verification_strength: weak", "    expected_duration: short", "    status: planned",
+      ].join("\n"),
+      "utf8",
+    );
+    await writeFile(
+      join(dir, ".code-pact", "agent-profiles", "test-agent.yaml"),
+      "name: test-agent\ninstruction_filename: AGENT.md\ncontext_dir: .context/custom\nmodel_map: {}\n",
+      "utf8",
+    );
+  });
+
+  afterEach(() => rm(dir, { recursive: true, force: true }));
+
+  it("writes to context_dir from agent profile when outputDir is not specified", async () => {
+    const result = await runPack({ cwd: dir, phaseId: "P1", taskId: "P1-T1", agentName: "test-agent" });
+    expect(result.outputPath).toContain(join(".context", "custom"));
+  });
+
+  it("outputDir still overrides agent profile context_dir", async () => {
+    const override = join(dir, "override");
+    const result = await runPack({
+      cwd: dir, phaseId: "P1", taskId: "P1-T1", agentName: "test-agent", outputDir: override,
+    });
+    expect(result.outputPath).toContain("override");
+    expect(result.outputPath).not.toContain("custom");
+  });
+});

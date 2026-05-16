@@ -3,6 +3,7 @@ import { parseArgs } from "node:util";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
+import { splitArgv } from "./lib/argv.ts";
 import { messages, type Locale } from "./i18n/index.ts";
 import { runInit, type SupportedAgent } from "./commands/init.ts";
 import {
@@ -36,36 +37,6 @@ async function readPackageVersion(): Promise<string> {
   const raw = await readFile(pkgPath, "utf8");
   const pkg = JSON.parse(raw) as { version?: string };
   return pkg.version ?? "0.0.0";
-}
-
-type GlobalValues = {
-  version?: boolean;
-  help?: boolean;
-  json?: boolean;
-  locale?: string;
-};
-
-type ParsedCli = {
-  values: GlobalValues;
-  positionals: string[];
-};
-
-function parse(argv: string[]): ParsedCli {
-  const { values, positionals } = parseArgs({
-    args: argv,
-    options: {
-      version: { type: "boolean", short: "v" },
-      help: { type: "boolean", short: "h" },
-      json: { type: "boolean" },
-      locale: { type: "string" },
-      // init flags
-      agent: { type: "string" },
-      force: { type: "boolean" },
-    },
-    strict: false,
-    allowPositionals: true,
-  });
-  return { values: values as GlobalValues, positionals };
 }
 
 // ---------------------------------------------------------------------------
@@ -366,6 +337,10 @@ async function cmdVerify(argv: string[], locale: Locale, json: boolean): Promise
         );
       }
     } else {
+      for (const c of result.checks) {
+        if (c.stdout) process.stderr.write(c.stdout);
+        if (c.stderr) process.stderr.write(c.stderr);
+      }
       process.stdout.write(`${formatVerify(result)}\n`);
     }
     return result.ok ? 0 : 1;
@@ -710,15 +685,15 @@ async function cmdPhase(argv: string[], locale: Locale, json: boolean): Promise<
 // ---------------------------------------------------------------------------
 
 async function main(): Promise<number> {
-  const { values, positionals } = parse(process.argv.slice(2));
+  const { globalValues, command, rest } = splitArgv(process.argv.slice(2));
   const locale: Locale =
-    values.locale && KNOWN_LOCALES.has(values.locale as Locale)
-      ? (values.locale as Locale)
+    globalValues.locale && KNOWN_LOCALES.has(globalValues.locale as Locale)
+      ? (globalValues.locale as Locale)
       : detectLocale();
   const m = messages[locale];
-  const json = values.json === true;
+  const json = globalValues.json === true;
 
-  if (values.version) {
+  if (globalValues.version) {
     const version = await readPackageVersion();
     if (json) {
       process.stdout.write(`${JSON.stringify({ ok: true, data: { version } })}\n`);
@@ -728,13 +703,10 @@ async function main(): Promise<number> {
     return 0;
   }
 
-  if (values.help || positionals.length === 0) {
+  if (globalValues.help || !command) {
     process.stdout.write(`${m.usage}\n`);
     return 0;
   }
-
-  const command = positionals[0];
-  const rest = process.argv.slice(3); // args after the command name
 
   switch (command) {
     case "init":

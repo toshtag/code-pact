@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 import { parse as parseYaml } from "yaml";
 import { Roadmap } from "../core/schemas/roadmap.ts";
 import { Phase } from "../core/schemas/phase.ts";
+import { Task } from "../core/schemas/task.ts";
 import { ProgressLog } from "../core/schemas/progress-event.ts";
 
 // ---------------------------------------------------------------------------
@@ -21,6 +22,8 @@ export type CheckResult = {
   name: string;
   ok: boolean;
   reason?: string;
+  stdout?: string;
+  stderr?: string;
 };
 
 export type VerifyResult = {
@@ -51,6 +54,21 @@ async function loadProgressLog(cwd: string): Promise<ProgressLog> {
 // Individual checks
 // ---------------------------------------------------------------------------
 
+type CommandRun = { exitCode: number; stdout: string; stderr: string };
+
+function runCommand(cmd: string, cwd: string): Promise<CommandRun> {
+  return new Promise((resolve) => {
+    const [bin, ...args] = cmd.split(/\s+/);
+    const proc = spawn(bin ?? cmd, args, { cwd, stdio: ["ignore", "pipe", "pipe"], shell: false });
+    let stdout = "";
+    let stderr = "";
+    proc.stdout?.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
+    proc.stderr?.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+    proc.on("close", (code) => resolve({ exitCode: code ?? 1, stdout, stderr }));
+    proc.on("error", () => resolve({ exitCode: 1, stdout, stderr }));
+  });
+}
+
 async function checkCommands(
   commands: string[],
   cwd: string,
@@ -65,25 +83,18 @@ async function checkCommands(
   }
 
   for (const cmd of commands) {
-    const exitCode = await runCommand(cmd, cwd);
+    const { exitCode, stdout, stderr } = await runCommand(cmd, cwd);
     if (exitCode !== 0) {
       return {
         name: "commands",
         ok: false,
         reason: `"${cmd}" exited with code ${exitCode}`,
+        ...(stdout && { stdout }),
+        ...(stderr && { stderr }),
       };
     }
   }
   return { name: "commands", ok: true };
-}
-
-function runCommand(cmd: string, cwd: string): Promise<number> {
-  return new Promise((resolve) => {
-    const [bin, ...args] = cmd.split(/\s+/);
-    const proc = spawn(bin ?? cmd, args, { cwd, stdio: "inherit", shell: false });
-    proc.on("close", (code) => resolve(code ?? 1));
-    proc.on("error", () => resolve(1));
-  });
 }
 
 async function checkProgressEvent(
@@ -105,9 +116,10 @@ async function checkProgressEvent(
 async function checkDecision(
   cwd: string,
   phase: Phase,
-  taskId: string,
+  task: Task,
 ): Promise<CheckResult> {
-  if (!phase.requires_decision) {
+  const taskId = task.id;
+  if (!phase.requires_decision && !task.requires_decision) {
     return { name: "decision", ok: true };
   }
 
@@ -182,11 +194,13 @@ export async function runVerify(opts: VerifyOptions): Promise<VerifyResult> {
     throw err;
   }
 
+  const task = phase.tasks!.find((t) => t.id === taskId)!;
+
   // Run all checks in order
   const checks: CheckResult[] = [
     await checkCommands(phase.verification.commands, cwd, dryRun),
     await checkProgressEvent(log, taskId),
-    await checkDecision(cwd, phase, taskId),
+    await checkDecision(cwd, phase, task),
     checkTaskStatus(phase, taskId),
   ];
 
