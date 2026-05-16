@@ -3,8 +3,8 @@ import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { AgentProfile } from "../core/schemas/agent-profile.ts";
 import { ModelProfile } from "../core/schemas/model-profile.ts";
-import { generateClaudeAdapter } from "../core/adapters/claude.ts";
-import { generateCodexAdapter } from "../core/adapters/codex.ts";
+import { adapterRegistry } from "../core/adapters/index.ts";
+import { isSupportedAgent } from "../core/agents.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -72,21 +72,14 @@ export async function runGenerateAdapter(opts: AdapterOptions): Promise<AdapterR
     loadModelProfiles(cwd),
   ]);
 
-  let result: { created: string[]; skipped: string[] };
-
-  switch (agentName) {
-    case "claude-code":
-      result = await generateClaudeAdapter(cwd, profile, modelProfiles, force);
-      break;
-    case "codex":
-      result = await generateCodexAdapter(cwd, profile, modelProfiles, force);
-      break;
-    default: {
-      const err = new Error(`No adapter implementation for agent "${agentName}".`);
-      (err as NodeJS.ErrnoException).code = "AGENT_NOT_FOUND";
-      throw err;
-    }
+  if (!isSupportedAgent(agentName)) {
+    const err = new Error(`No adapter implementation for agent "${agentName}".`);
+    (err as NodeJS.ErrnoException).code = "AGENT_NOT_FOUND";
+    throw err;
   }
+
+  const generator = adapterRegistry[agentName];
+  const result = await generator(cwd, profile, modelProfiles, force);
 
   return { agentName, ...result };
 }

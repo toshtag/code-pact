@@ -1,36 +1,31 @@
 import { mkdir, writeFile, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { AgentProfile } from "../schemas/agent-profile.ts";
 import type { ModelProfile } from "../schemas/model-profile.ts";
-import { ModelTier } from "../schemas/model-profile.ts";
 
-// ---------------------------------------------------------------------------
-// AGENTS.md template
-// ---------------------------------------------------------------------------
+// The generic adapter targets any agent that does not have a dedicated
+// instruction file convention (CLAUDE.md, AGENTS.md, etc). It writes one
+// human-readable document under docs/code-pact/ so it does not collide
+// with arbitrary project docs.
 
-function agentsMd(profile: AgentProfile, modelProfiles: ModelProfile[]): string {
-  const tier = (t: string) => profile.model_map[t as ModelTier] ?? t;
-
-  const tierSection = modelProfiles
-    .map((mp) => {
-      const modelId = tier(mp.tier);
-      const purposes = mp.purpose.join(", ");
-      const efforts = mp.effort_levels.join(" | ");
-      return `- **${mp.tier}** → \`${modelId}\`\n  - Use for: ${purposes}\n  - Effort: ${efforts}`;
-    })
-    .join("\n");
-
+function agentInstructionsMd(profile: AgentProfile): string {
   return [
-    `# Codex — Project Instructions`,
+    `# Agent Instructions — Generic`,
     ``,
     `> This file is managed by [code-pact](https://github.com/toshtag/code-pact).`,
-    `> Edit the sections marked "Project-specific" to reflect your project's conventions.`,
+    `> Copy or symlink it into your agent's instruction location (e.g. .cursorrules,`,
+    `> GEMINI.md, or any other tool-specific path).`,
+    ``,
+    `## Prerequisites`,
+    ``,
+    `Ensure \`code-pact\` is available in your PATH. During local development,`,
+    `\`pnpm link --global\` or a local tarball install both work.`,
     ``,
     `## How to work on a task`,
     ``,
     `1. Fetch the context pack:`,
     `   \`\`\`sh`,
-    `   code-pact task context <task-id> --agent codex`,
+    `   code-pact task context <task-id> --agent generic`,
     `   \`\`\``,
     ``,
     `2. Implement the task.`,
@@ -46,9 +41,9 @@ function agentsMd(profile: AgentProfile, modelProfiles: ModelProfile[]): string 
     `handled by \`code-pact task complete\` in a later version. Until then,`,
     `step 3 is the deterministic completion signal.`,
     ``,
-    `## Model selection`,
+    `## Context directory`,
     ``,
-    tierSection,
+    `Context packs for this agent live under \`${profile.context_dir}/\`.`,
     ``,
     `## Project-specific conventions`,
     ``,
@@ -59,23 +54,17 @@ function agentsMd(profile: AgentProfile, modelProfiles: ModelProfile[]): string 
   ].join("\n");
 }
 
-// ---------------------------------------------------------------------------
-// Result
-// ---------------------------------------------------------------------------
-
 export type AdapterGenerateResult = {
   created: string[];
   skipped: string[];
 };
 
-// ---------------------------------------------------------------------------
-// Main
-// ---------------------------------------------------------------------------
-
-export async function generateCodexAdapter(
+export async function generateGenericAdapter(
   cwd: string,
   profile: AgentProfile,
-  modelProfiles: ModelProfile[],
+  // model profiles are accepted for interface parity but the generic
+  // instruction file does not currently surface model tier mapping.
+  _modelProfiles: ModelProfile[],
   force: boolean,
 ): Promise<AdapterGenerateResult> {
   const created: string[] = [];
@@ -91,14 +80,15 @@ export async function generateCodexAdapter(
         // file doesn't exist — proceed
       }
     }
+    await mkdir(dirname(absPath), { recursive: true });
     await writeFile(absPath, content, "utf8");
     created.push(absPath);
   }
 
-  // AGENTS.md at project root
-  await writeIfAbsent(join(cwd, profile.instruction_filename), agentsMd(profile, modelProfiles));
+  // docs/code-pact/agent-instructions.md
+  await writeIfAbsent(join(cwd, profile.instruction_filename), agentInstructionsMd(profile));
 
-  // .context/codex/ (context pack output dir)
+  // .context/generic/
   const contextDir = join(cwd, profile.context_dir);
   await mkdir(contextDir, { recursive: true });
 

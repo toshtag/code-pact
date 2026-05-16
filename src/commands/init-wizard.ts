@@ -3,6 +3,7 @@ import { messages as messageCatalog, type Locale } from "../i18n/index.ts";
 import { SUPPORTED_AGENTS, type SupportedAgent } from "../core/agents.ts";
 import type { LocaleCode } from "../core/schemas/locale.ts";
 import { runInitCore, type InitCoreOptions, type InitResult } from "./init.ts";
+import { runGenerateAdapter } from "./adapter.ts";
 
 export type InitWizardOptions = {
   cwd: string;
@@ -48,19 +49,18 @@ export async function runInitWizard(opts: InitWizardOptions): Promise<InitResult
       defaultAgent = agents[idx]!;
     }
 
-    // 4. Verification command — Enter accepts the default.
+    // 4. Adapter generation — yes/no. Connected in Phase 4 once the
+    //    adapter registry covers every supported agent.
+    const generateAdapters = await prompter.askYesNo(m.generateAdaptersPrompt, true);
+
+    // 5. Verification command — Enter accepts the default.
     const defaultVerify = "pnpm test";
     const verifyPrompt = `${m.verifyCommandPrompt} [${defaultVerify}] (${m.verifyCommandHint})`;
     const verifyRaw = await prompter.ask(verifyPrompt);
     const verifyCommand = verifyRaw.length > 0 ? verifyRaw : defaultVerify;
 
-    // 5. Sample phase — yes/no.
+    // 6. Sample phase — yes/no.
     const createSamplePhase = await prompter.askYesNo(m.createSamplePrompt, true);
-
-    // NOTE: adapter generation is intentionally NOT asked here. The adapter
-    // registry lands in Phase 4; once it exists, the wizard will append a
-    // generateAdaptersPrompt step. Until then, users run `code-pact adapter`
-    // manually if they want adapters before any are auto-generated.
 
     const coreOpts: InitCoreOptions = {
       cwd: opts.cwd,
@@ -73,7 +73,21 @@ export async function runInitWizard(opts: InitWizardOptions): Promise<InitResult
       json: opts.json,
     };
 
-    return await runInitCore(coreOpts);
+    const result = await runInitCore(coreOpts);
+
+    if (generateAdapters) {
+      for (const agent of agents) {
+        const adapterResult = await runGenerateAdapter({
+          cwd: opts.cwd,
+          agentName: agent,
+          force: opts.force,
+        });
+        result.created.push(...adapterResult.created);
+        result.skipped.push(...adapterResult.skipped);
+      }
+    }
+
+    return result;
   } finally {
     if (ownsPrompter) prompter.close();
   }
