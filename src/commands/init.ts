@@ -26,6 +26,20 @@ export type InitOptions = {
   json: boolean;
 };
 
+/**
+ * Core init options. Extends InitOptions with the fields the interactive
+ * wizard collects. CLI flag callers go through runInit() which forwards
+ * these as undefined; the wizard goes through runInitCore() directly.
+ */
+export type InitCoreOptions = InitOptions & {
+  /** Default agent. Omitted -> agents[0]. */
+  defaultAgent?: SupportedAgent;
+  /** Verification command stored in the sample phase. Default "pnpm test". */
+  verifyCommand?: string;
+  /** When true, runInitCore also writes a minimal sample phase (P1). */
+  createSamplePhase?: boolean;
+};
+
 export type InitResult = {
   created: string[];
   skipped: string[];
@@ -130,8 +144,9 @@ async function mkdirp(p: string): Promise<void> {
 // Main
 // ---------------------------------------------------------------------------
 
-export async function runInit(opts: InitOptions): Promise<InitResult> {
+export async function runInitCore(opts: InitCoreOptions): Promise<InitResult> {
   const { cwd, locale, agents, force } = opts;
+  const defaultAgent = opts.defaultAgent ?? agents[0] ?? "claude-code";
   const created: string[] = [];
   const skipped: string[] = [];
 
@@ -160,7 +175,7 @@ export async function runInit(opts: InitOptions): Promise<InitResult> {
     name: projectName,
     version: "0.1.0",
     locale,
-    default_agent: agents[0] ?? "claude-code",
+    default_agent: defaultAgent,
     agents: agents.map((a) => ({
       name: a,
       profile: `agent-profiles/${a}.yaml`,
@@ -248,7 +263,7 @@ export async function runInit(opts: InitOptions): Promise<InitResult> {
     skipped,
   );
 
-  // roadmap.yaml (empty phases)
+  // roadmap.yaml (empty phases — the sample phase below appends to it)
   const roadmap: Roadmap = { phases: [] };
   await writeIfAbsent(
     join(cwd, "design", "roadmap.yaml"),
@@ -258,5 +273,46 @@ export async function runInit(opts: InitOptions): Promise<InitResult> {
     skipped,
   );
 
+  // Optional sample phase. Goes through runPhaseAdd so the wizard output
+  // matches what a real `phase add` would produce.
+  if (opts.createSamplePhase) {
+    const verifyCommand = opts.verifyCommand ?? "pnpm test";
+    const samplePath = await writeSamplePhase(cwd, verifyCommand);
+    if (samplePath) created.push(samplePath);
+  }
+
   return { created, skipped };
+}
+
+/**
+ * Backwards-compatible wrapper. Existing CLI callers (--agent flag, CI,
+ * tests) keep their original options shape. The wizard goes through
+ * runInitCore() directly to set defaultAgent, verifyCommand, and the
+ * sample-phase flag.
+ */
+export async function runInit(opts: InitOptions): Promise<InitResult> {
+  return runInitCore(opts);
+}
+
+async function writeSamplePhase(cwd: string, verifyCommand: string): Promise<string | undefined> {
+  const { runPhaseAdd } = await import("./phase.ts");
+  try {
+    const result = await runPhaseAdd({
+      cwd,
+      id: "P1",
+      name: "Welcome",
+      weight: 1,
+      objective: "Confirm the project structure and verification pipeline.",
+      confidence: "high",
+      risk: "low",
+      verifyCommands: [verifyCommand],
+      definitionOfDone: ["The verification command exits with status 0."],
+    });
+    return result.path;
+  } catch (err) {
+    if (err instanceof Error && (err as NodeJS.ErrnoException).code === "DUPLICATE_PHASE_ID") {
+      return undefined;
+    }
+    throw err;
+  }
 }
