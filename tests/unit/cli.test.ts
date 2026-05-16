@@ -1,20 +1,29 @@
+// This test suite spawns the built CLI (`dist/cli.js`) via `spawnSync`.
+// It is effectively a CLI integration test, not a pure unit test. We
+// rebuild dist on every run so a stale build cannot mask real failures
+// (this was the root cause of the BUG-001 RC dogfood failure).
+// TODO: move to tests/integration/cli.test.ts in a follow-up PR.
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
 import { spawnSync } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
 const repoRoot = resolve(fileURLToPath(import.meta.url), "../../..");
 const cliPath = join(repoRoot, "dist", "cli.js");
 
 let tmpDir: string;
 
-function run(args: string[]): { code: number; stdout: string; stderr: string } {
+type RunResult = { code: number; stdout: string; stderr: string };
+
+function run(args: string[], env?: NodeJS.ProcessEnv): RunResult {
   const res = spawnSync(process.execPath, [cliPath, ...args], {
     cwd: tmpDir,
     encoding: "utf8",
+    env: env ? { ...process.env, ...env } : process.env,
   });
   return {
     code: res.status ?? -1,
@@ -24,9 +33,7 @@ function run(args: string[]): { code: number; stdout: string; stderr: string } {
 }
 
 beforeAll(() => {
-  if (existsSync(cliPath)) return;
-  // CI runs tests before build, and locally the dist may be stale. Build on
-  // demand so this suite is self-contained.
+  // Always rebuild — stale dist would mask real CLI regressions.
   const res = spawnSync("pnpm", ["build"], {
     cwd: repoRoot,
     encoding: "utf8",
@@ -285,5 +292,220 @@ describe("CLI: phase add --verify-command parsing (BUG-002)", () => {
     // BUG-002 fix makes this exit 2 with a CONFIG_ERROR instead.
     expect(res.code).toBe(2);
     expect(res.stdout).not.toMatch(/^\d+\.\d+\.\d+/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// RC dogfood regressions: init --non-interactive contract (BUG-003)
+// ---------------------------------------------------------------------------
+
+describe("CLI: init non-interactive contract (RC BUG-003)", () => {
+  function expectJsonConfigError(res: RunResult) {
+    expect(res.code).toBe(2);
+    const parsed = JSON.parse(res.stdout) as {
+      ok: boolean;
+      error: { code: string };
+    };
+    expect(parsed.ok).toBe(false);
+    expect(parsed.error.code).toBe("CONFIG_ERROR");
+  }
+
+  it("init --non-interactive without flags fails with exit 2", () => {
+    const res = run(["init", "--non-interactive"]);
+    expect(res.code).toBe(2);
+    expect(res.stderr).toMatch(/non-interactive\/CI mode requires/);
+  });
+
+  it("init --non-interactive --json without flags emits CONFIG_ERROR JSON", () => {
+    const res = run(["init", "--non-interactive", "--json"]);
+    expectJsonConfigError(res);
+  });
+
+  it("--json init --non-interactive (pre-command --json) also emits CONFIG_ERROR JSON", () => {
+    const res = run(["--json", "init", "--non-interactive"]);
+    expectJsonConfigError(res);
+  });
+
+  it("CI=true init without flags fails with exit 2", () => {
+    const res = run(["init", "--json"], { CI: "true" });
+    expectJsonConfigError(res);
+  });
+
+  it("init --non-interactive --locale en-US --agent claude-code succeeds", () => {
+    const res = run([
+      "init",
+      "--non-interactive",
+      "--locale",
+      "en-US",
+      "--agent",
+      "claude-code",
+      "--json",
+    ]);
+    expect(res.code).toBe(0);
+    const parsed = JSON.parse(res.stdout) as { ok: boolean };
+    expect(parsed.ok).toBe(true);
+  });
+
+  it("init --non-interactive with multi-agent stores first agent as default_agent", async () => {
+    const res = run([
+      "init",
+      "--non-interactive",
+      "--locale",
+      "en-US",
+      "--agent",
+      "claude-code,generic",
+      "--json",
+    ]);
+    expect(res.code).toBe(0);
+    const projectYaml = await readFile(
+      join(tmpDir, ".code-pact", "project.yaml"),
+      "utf8",
+    );
+    const project = parseYaml(projectYaml) as {
+      default_agent: string;
+      agents: { name: string }[];
+    };
+    expect(project.default_agent).toBe("claude-code");
+    expect(project.agents.map((a) => a.name)).toEqual(["claude-code", "generic"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// RC dogfood regressions: AMBIGUOUS_TASK_ID via CLI (RC BUG-002)
+// ---------------------------------------------------------------------------
+
+describe("CLI: AMBIGUOUS_TASK_ID across phases (RC BUG-002)", () => {
+  it("task context returns AMBIGUOUS_TASK_ID when duplicate task ids exist", async () => {
+    // Use --locale/--agent so non-interactive contract is satisfied.
+    const initRes = run([
+      "init",
+      "--non-interactive",
+      "--locale",
+      "en-US",
+      "--agent",
+      "claude-code",
+      "--json",
+    ]);
+    expect(initRes.code).toBe(0);
+
+    const phasePaths: string[] = [];
+    for (const id of ["P1", "P2"]) {
+      const addRes = run([
+        "phase",
+        "add",
+        "--id",
+        id,
+        "--name",
+        `Phase ${id}`,
+        "--objective",
+        `Phase ${id}`,
+        "--weight",
+        "10",
+        "--json",
+      ]);
+      expect(addRes.code).toBe(0);
+      const parsed = JSON.parse(addRes.stdout) as {
+        data: { path: string };
+      };
+      phasePaths.push(parsed.data.path);
+    }
+
+    // Inject a duplicate task id into both phase YAMLs via parse/stringify
+    // (NOT appendFile — that can produce invalid YAML).
+    const dupTask = {
+      id: "DUP-T1",
+      type: "feature",
+      ambiguity: "low",
+      risk: "low",
+      context_size: "small",
+      write_surface: "medium",
+      verification_strength: "strong",
+      expected_duration: "short",
+      status: "planned",
+      description: "duplicate task fixture",
+    };
+    for (const rel of phasePaths) {
+      const p = join(tmpDir, rel);
+      const doc = parseYaml(await readFile(p, "utf8")) as {
+        tasks?: unknown[];
+      };
+      doc.tasks = [...(doc.tasks ?? []), dupTask];
+      await writeFile(p, stringifyYaml(doc), "utf8");
+    }
+
+    const res = run([
+      "task",
+      "context",
+      "DUP-T1",
+      "--agent",
+      "claude-code",
+      "--json",
+    ]);
+    expect(res.code).toBe(2);
+    const parsed = JSON.parse(res.stdout) as {
+      ok: boolean;
+      error: { code: string };
+    };
+    expect(parsed.ok).toBe(false);
+    expect(parsed.error.code).toBe("AMBIGUOUS_TASK_ID");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// RC dogfood regressions: strict reject of unknown options (RC BUG-004)
+// ---------------------------------------------------------------------------
+
+describe("CLI: unknown options on phase ls / progress (RC BUG-004)", () => {
+  function expectConfigJson(res: RunResult) {
+    expect(res.code).toBe(2);
+    const parsed = JSON.parse(res.stdout) as {
+      ok: boolean;
+      error: { code: string };
+    };
+    expect(parsed.ok).toBe(false);
+    expect(parsed.error.code).toBe("CONFIG_ERROR");
+  }
+
+  beforeEach(() => {
+    const initRes = run([
+      "init",
+      "--non-interactive",
+      "--locale",
+      "en-US",
+      "--agent",
+      "claude-code",
+      "--json",
+    ]);
+    expect(initRes.code).toBe(0);
+  });
+
+  it("phase ls --bogus --json fails with CONFIG_ERROR", () => {
+    expectConfigJson(run(["phase", "ls", "--bogus", "--json"]));
+  });
+
+  it("--json phase ls --bogus also fails with CONFIG_ERROR", () => {
+    expectConfigJson(run(["--json", "phase", "ls", "--bogus"]));
+  });
+
+  it("progress --bogus --json fails with CONFIG_ERROR", () => {
+    expectConfigJson(run(["progress", "--bogus", "--json"]));
+  });
+
+  it("--json progress --bogus also fails with CONFIG_ERROR", () => {
+    expectConfigJson(run(["--json", "progress", "--bogus"]));
+  });
+
+  it("phase ls --json (no unknown option) still succeeds", () => {
+    const res = run(["phase", "ls", "--json"]);
+    expect(res.code).toBe(0);
+    const parsed = JSON.parse(res.stdout) as { ok: boolean };
+    expect(parsed.ok).toBe(true);
+  });
+
+  it("progress --json (no unknown option) still succeeds", () => {
+    const res = run(["progress", "--json"]);
+    expect(res.code).toBe(0);
+    const parsed = JSON.parse(res.stdout) as { ok: boolean };
+    expect(parsed.ok).toBe(true);
   });
 });

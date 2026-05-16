@@ -103,6 +103,15 @@ invocation:
 This flag is for automation that runs from an interactive shell but
 must not depend on user input (scripts, agent calls, scheduled jobs).
 
+`init` in non-interactive or CI mode (`--non-interactive` or `CI=true`)
+specifically requires `--locale` and `--agent`. Running `init` without
+these flags in automation mode raises `CONFIG_ERROR` (exit 2) instead
+of silently picking defaults.
+
+When `--agent` lists multiple agents (e.g. `--agent claude-code,generic`)
+and no dedicated default-agent option is provided, the first agent in
+the list becomes `default_agent` in the generated `project.yaml`.
+
 ## Stability
 
 The shapes documented here — JSON envelope, exit codes, error codes,
