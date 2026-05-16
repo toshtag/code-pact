@@ -32,3 +32,15 @@ jobs:
       - run: pnpm build
 
       - run: node dist/cli.js --version
+
+  ci-status:
+    name: CI status
+    runs-on: ubuntu-latest
+    needs: build
+    if: ${{ always() }}
+    steps:
+      - name: Verify all matrix builds succeeded
+        if: ${{ needs.build.result != 'success' }}
+        run: |
+          echo "build matrix did not succeed: ${{ needs.build.result }}"
+          exit 1
