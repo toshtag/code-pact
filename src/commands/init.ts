@@ -2,18 +2,18 @@ import { mkdir, writeFile, access } from "node:fs/promises";
 import { join } from "node:path";
 import { stringify as toYaml } from "yaml";
 import type { LocaleCode } from "../core/schemas/locale.ts";
-import type { AgentProfile } from "../core/schemas/agent-profile.ts";
 import type { ModelProfile } from "../core/schemas/model-profile.ts";
 import type { Project } from "../core/schemas/project.ts";
 import type { Roadmap } from "../core/schemas/roadmap.ts";
 import type { ProgressLog } from "../core/schemas/progress-event.ts";
 import type { BaselineSnapshot } from "../core/schemas/baseline-snapshot.ts";
+import { DEFAULT_AGENT_PROFILES, type SupportedAgent } from "../core/agents.ts";
+
+export type { SupportedAgent } from "../core/agents.ts";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-export type SupportedAgent = "claude-code" | "codex";
 
 export type InitOptions = {
   /** Target directory (defaults to cwd) */
@@ -34,30 +34,6 @@ export type InitResult = {
 // ---------------------------------------------------------------------------
 // Default profile fixtures
 // ---------------------------------------------------------------------------
-
-const CLAUDE_PROFILE: AgentProfile = {
-  name: "claude-code",
-  instruction_filename: "CLAUDE.md",
-  context_dir: ".context/claude-code",
-  skill_dir: ".claude/skills",
-  hook_dir: ".claude/hooks",
-  model_map: {
-    highest_reasoning: "claude-opus-4-7",
-    balanced_coding: "claude-sonnet-4-6",
-    cheap_mechanical: "claude-haiku-4-5",
-  },
-};
-
-const CODEX_PROFILE: AgentProfile = {
-  name: "codex",
-  instruction_filename: "AGENTS.md",
-  context_dir: ".context/codex",
-  model_map: {
-    highest_reasoning: "o3",
-    balanced_coding: "o4-mini",
-    cheap_mechanical: "gpt-4.1-mini",
-  },
-};
 
 const MODEL_PROFILES: ModelProfile[] = [
   {
@@ -188,6 +164,7 @@ export async function runInit(opts: InitOptions): Promise<InitResult> {
     agents: agents.map((a) => ({
       name: a,
       profile: `agent-profiles/${a}.yaml`,
+      enabled: true,
     })),
   };
   await writeIfAbsent(
@@ -199,12 +176,8 @@ export async function runInit(opts: InitOptions): Promise<InitResult> {
   );
 
   // agent profiles
-  const profileMap: Record<SupportedAgent, AgentProfile> = {
-    "claude-code": CLAUDE_PROFILE,
-    codex: CODEX_PROFILE,
-  };
   for (const agent of agents) {
-    const profile = profileMap[agent];
+    const profile = DEFAULT_AGENT_PROFILES[agent];
     await writeIfAbsent(
       join(cwd, ".code-pact", "agent-profiles", `${agent}.yaml`),
       toYaml(profile),

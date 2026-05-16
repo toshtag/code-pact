@@ -66,4 +66,49 @@ export const messages = {
     agentNotFound: (name: string): string =>
       `エージェント "${name}" が見つかりません。先に "code-pact init --agent ${name}" を実行してください。`,
   },
+  wizard: {
+    init: {
+      localePrompt: "Select language / 言語を選択してください",
+      localeOptionEn: "English",
+      localeOptionJa: "日本語",
+      agentsPrompt: "サポートするエージェントを選択してください (カンマ区切り)",
+      defaultAgentPrompt: "デフォルトのエージェントを選択してください",
+      verifyCommandPrompt: "デフォルトの検証コマンド",
+      verifyCommandHint: "そのままで良ければ Enter",
+      createSamplePrompt: "サンプルフェーズを作成しますか?",
+      generateAdaptersPrompt: "アダプターファイルをいま生成しますか?",
+      summary: (agents: string[], defaultAgent: string): string =>
+        `次の構成で初期化します: ${agents.join(", ")} (既定: ${defaultAgent})`,
+      invalidChoice: "選択が不正です。もう一度入力してください。",
+      noSelection: "1 つ以上選択してください。",
+    },
+    phase: {
+      idPrompt: "フェーズ ID (例: P1)",
+      namePrompt: "フェーズ名",
+      weightPrompt: "重み (1-100)",
+      objectivePrompt: "目的",
+      confidencePrompt: "信頼度 (low | medium | high)",
+      riskPrompt: "リスク (low | medium | high)",
+      verifyCommandPrompt: "検証コマンド (カンマ区切り)",
+      doneCriterionPrompt: "完了条件 (カンマ区切り)",
+    },
+  },
+  task: {
+    context: {
+      taskNotFound: (taskId: string): string =>
+        `タスク "${taskId}" がどのフェーズにも見つかりません。`,
+      ambiguous: (taskId: string, phases: string[]): string =>
+        `タスク "${taskId}" は複数のフェーズに存在します: ${phases.join(", ")}`,
+      agentNotEnabled: (name: string): string =>
+        `エージェント "${name}" は project.yaml で無効化されています (enabled: false)。`,
+      agentNotFound: (name: string): string =>
+        `エージェント "${name}" は project.yaml に設定されていません。`,
+    },
+  },
+  cliContract: {
+    nonInteractiveMissing: (flag: string): string =>
+      `${flag} は非対話モードでは必須です。`,
+    ciDetected:
+      "CI 環境が検出されたため対話プロンプトは無効化されました。必要なフラグを明示するか、CI を解除してください。",
+  },
 } as const;

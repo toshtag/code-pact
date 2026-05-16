@@ -4,6 +4,7 @@ import { LocaleConfig } from "./locale.ts";
 export const AgentRef = z.object({
   name: z.string().min(1),
   profile: z.string().min(1),
+  enabled: z.boolean().optional().default(true),
 });
 export type AgentRef = z.infer<typeof AgentRef>;
 

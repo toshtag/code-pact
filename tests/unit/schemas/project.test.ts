@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { Project } from "../../../src/core/schemas/project.ts";
+import { AgentRef, Project } from "../../../src/core/schemas/project.ts";
 
 const VALID = {
   name: "my-project",
@@ -33,5 +33,50 @@ describe("Project", () => {
   it("rejects missing default_agent", () => {
     const { default_agent: _, ...rest } = VALID as Record<string, unknown>;
     expect(() => Project.parse(rest)).toThrow();
+  });
+});
+
+describe("AgentRef.enabled", () => {
+  it("defaults enabled to true when omitted", () => {
+    const result = AgentRef.parse({
+      name: "claude-code",
+      profile: "agent-profiles/claude-code.yaml",
+    });
+    expect(result.enabled).toBe(true);
+  });
+
+  it("accepts explicit enabled: true", () => {
+    const result = AgentRef.parse({
+      name: "claude-code",
+      profile: "agent-profiles/claude-code.yaml",
+      enabled: true,
+    });
+    expect(result.enabled).toBe(true);
+  });
+
+  it("accepts explicit enabled: false", () => {
+    const result = AgentRef.parse({
+      name: "claude-code",
+      profile: "agent-profiles/claude-code.yaml",
+      enabled: false,
+    });
+    expect(result.enabled).toBe(false);
+  });
+
+  it("rejects non-boolean enabled", () => {
+    expect(() =>
+      AgentRef.parse({
+        name: "claude-code",
+        profile: "agent-profiles/claude-code.yaml",
+        enabled: "yes",
+      }),
+    ).toThrow();
+  });
+
+  it("Project preserves agents[].enabled defaulting through nested parse", () => {
+    const result = Project.parse(VALID);
+    const first = result.agents[0];
+    expect(first).toBeDefined();
+    expect(first!.enabled).toBe(true);
   });
 });
