@@ -22,6 +22,7 @@ import { runVerify, formatVerify } from "./commands/verify.ts";
 import { runGenerateAdapter } from "./commands/adapter.ts";
 import { runRecommend, formatRecommend } from "./commands/recommend.ts";
 import { runDoctor, formatDoctor } from "./commands/doctor.ts";
+import { runTaskContext } from "./commands/task-context.ts";
 import type { LocaleCode } from "./core/schemas/locale.ts";
 import type { PhaseStatus } from "./core/schemas/phase.ts";
 
@@ -756,6 +757,137 @@ async function cmdPhase(argv: string[], locale: Locale, globalJson: boolean): Pr
 }
 
 // ---------------------------------------------------------------------------
+// Command: task
+// ---------------------------------------------------------------------------
+
+async function cmdTask(argv: string[], locale: Locale, globalJson: boolean): Promise<number> {
+  const subcommand = argv[0];
+  const rest = argv.slice(1);
+
+  if (subcommand === "context") {
+    return cmdTaskContext(rest, locale, globalJson);
+  }
+
+  const msg = `task: unknown subcommand "${subcommand ?? ""}". Use: context`;
+  if (globalJson) {
+    process.stdout.write(
+      `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
+    );
+  } else {
+    process.stderr.write(`${msg}\n`);
+  }
+  return 2;
+}
+
+async function cmdTaskContext(
+  argv: string[],
+  locale: Locale,
+  globalJson: boolean,
+): Promise<number> {
+  const m = messages[locale];
+
+  let values: Record<string, unknown>;
+  let positionals: string[];
+  try {
+    ({ values, positionals } = parseArgs({
+      args: argv,
+      options: {
+        agent: { type: "string" },
+        json: { type: "boolean" },
+      },
+      strict: true,
+      allowPositionals: true,
+    }));
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    const msg = `task context: ${detail}`;
+    const json = globalJson || argv.includes("--json");
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
+      );
+    } else {
+      process.stderr.write(`${msg}\n`);
+    }
+    return 2;
+  }
+
+  const json = globalJson || values.json === true;
+  const taskId = positionals[0];
+  if (!taskId) {
+    const msg = "task context requires a task id (e.g. `task context P1-T1`).";
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
+      );
+    } else {
+      process.stderr.write(`${msg}\n`);
+    }
+    return 2;
+  }
+  const agent = values.agent as string | undefined;
+  const cwd = process.cwd();
+
+  try {
+    const pack = await runTaskContext({ cwd, taskId, agent });
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({
+          ok: true,
+          data: {
+            task_id: pack.taskId,
+            phase_id: pack.phaseId,
+            agent: pack.agent,
+            char_count: pack.charCount,
+            content: pack.content,
+          },
+        })}\n`,
+      );
+    } else {
+      process.stdout.write(pack.content);
+      if (!pack.content.endsWith("\n")) process.stdout.write("\n");
+    }
+    return 0;
+  } catch (err: unknown) {
+    if (!(err instanceof Error)) throw err;
+    const code = (err as NodeJS.ErrnoException).code;
+    let msg: string;
+    let outCode: string;
+    switch (code) {
+      case "TASK_NOT_FOUND":
+        msg = m.task.context.taskNotFound(taskId);
+        outCode = "TASK_NOT_FOUND";
+        break;
+      case "AMBIGUOUS_TASK_ID": {
+        const phases =
+          (err as NodeJS.ErrnoException & { phases?: string[] }).phases ?? [];
+        msg = m.task.context.ambiguous(taskId, phases);
+        outCode = "AMBIGUOUS_TASK_ID";
+        break;
+      }
+      case "AGENT_NOT_ENABLED":
+        msg = m.task.context.agentNotEnabled(agent ?? "");
+        outCode = "AGENT_NOT_ENABLED";
+        break;
+      case "AGENT_NOT_FOUND":
+        msg = m.task.context.agentNotFound(agent ?? "");
+        outCode = "AGENT_NOT_FOUND";
+        break;
+      default:
+        throw err;
+    }
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({ ok: false, error: { code: outCode, message: msg } })}\n`,
+      );
+    } else {
+      process.stderr.write(`${msg}\n`);
+    }
+    return 2;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Main dispatcher
 // ---------------------------------------------------------------------------
 
@@ -789,6 +921,9 @@ async function main(): Promise<number> {
 
     case "phase":
       return cmdPhase(rest, locale, json);
+
+    case "task":
+      return cmdTask(rest, locale, json);
 
     case "progress":
       return cmdProgress(rest, locale, json);
