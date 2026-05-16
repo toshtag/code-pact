@@ -21,6 +21,8 @@ export type CheckResult = {
   name: string;
   ok: boolean;
   reason?: string;
+  stdout?: string;
+  stderr?: string;
 };
 
 export type VerifyResult = {
@@ -51,6 +53,21 @@ async function loadProgressLog(cwd: string): Promise<ProgressLog> {
 // Individual checks
 // ---------------------------------------------------------------------------
 
+type CommandRun = { exitCode: number; stdout: string; stderr: string };
+
+function runCommand(cmd: string, cwd: string): Promise<CommandRun> {
+  return new Promise((resolve) => {
+    const [bin, ...args] = cmd.split(/\s+/);
+    const proc = spawn(bin ?? cmd, args, { cwd, stdio: ["ignore", "pipe", "pipe"], shell: false });
+    let stdout = "";
+    let stderr = "";
+    proc.stdout?.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
+    proc.stderr?.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+    proc.on("close", (code) => resolve({ exitCode: code ?? 1, stdout, stderr }));
+    proc.on("error", () => resolve({ exitCode: 1, stdout, stderr }));
+  });
+}
+
 async function checkCommands(
   commands: string[],
   cwd: string,
@@ -65,25 +82,18 @@ async function checkCommands(
   }
 
   for (const cmd of commands) {
-    const exitCode = await runCommand(cmd, cwd);
+    const { exitCode, stdout, stderr } = await runCommand(cmd, cwd);
     if (exitCode !== 0) {
       return {
         name: "commands",
         ok: false,
         reason: `"${cmd}" exited with code ${exitCode}`,
+        ...(stdout && { stdout }),
+        ...(stderr && { stderr }),
       };
     }
   }
   return { name: "commands", ok: true };
-}
-
-function runCommand(cmd: string, cwd: string): Promise<number> {
-  return new Promise((resolve) => {
-    const [bin, ...args] = cmd.split(/\s+/);
-    const proc = spawn(bin ?? cmd, args, { cwd, stdio: "inherit", shell: false });
-    proc.on("close", (code) => resolve(code ?? 1));
-    proc.on("error", () => resolve(1));
-  });
 }
 
 async function checkProgressEvent(

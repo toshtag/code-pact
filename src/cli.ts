@@ -366,6 +366,10 @@ async function cmdVerify(argv: string[], locale: Locale, json: boolean): Promise
         );
       }
     } else {
+      for (const c of result.checks) {
+        if (c.stdout) process.stderr.write(c.stdout);
+        if (c.stderr) process.stderr.write(c.stderr);
+      }
       process.stdout.write(`${formatVerify(result)}\n`);
     }
     return result.ok ? 0 : 1;
