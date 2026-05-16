@@ -54,6 +54,7 @@ describe("runInitWizard — locale", () => {
     const { prompter } = makePrompter([
       "2", // locale: 日本語
       "1", // agents: Claude Code
+      "n", // generate adapters: no
       "", // verify command: default
       "n", // create sample phase: no
     ]);
@@ -66,6 +67,7 @@ describe("runInitWizard — locale", () => {
     const { prompter } = makePrompter([
       "1", // locale: English
       "1", // agents: Claude Code
+      "n", // adapters
       "", // verify
       "n", // sample
     ]);
@@ -80,6 +82,7 @@ describe("runInitWizard — default_agent", () => {
     const { prompter, reader } = makePrompter([
       "1", // locale
       "1", // agents: just Claude Code
+      "n", // adapters
       "", // verify
       "n", // sample
     ]);
@@ -87,8 +90,8 @@ describe("runInitWizard — default_agent", () => {
     const project = await readProjectYaml();
     expect(project.default_agent).toBe("claude-code");
     expect(project.agents).toHaveLength(1);
-    // 4 prompts total: locale, agents, verify, sample. No default_agent question.
-    expect(reader.prompts).toHaveLength(4);
+    // 5 prompts total: locale, agents, adapters, verify, sample.
+    expect(reader.prompts).toHaveLength(5);
   });
 
   it("asks default_agent when multiple agents are selected", async () => {
@@ -96,6 +99,7 @@ describe("runInitWizard — default_agent", () => {
       "1", // locale: en-US
       "1,2", // agents: Claude Code + Codex
       "2", // default_agent: Codex (second in selection)
+      "n", // adapters
       "", // verify
       "n", // sample
     ]);
@@ -103,7 +107,7 @@ describe("runInitWizard — default_agent", () => {
     const project = await readProjectYaml();
     expect(project.default_agent).toBe("codex");
     expect(project.agents.map((a) => a.name)).toEqual(["claude-code", "codex"]);
-    expect(reader.prompts).toHaveLength(5);
+    expect(reader.prompts).toHaveLength(6);
   });
 });
 
@@ -112,6 +116,7 @@ describe("runInitWizard — verify command", () => {
     const { prompter } = makePrompter([
       "1", // locale
       "1", // agents
+      "n", // adapters
       "", // verify: blank
       "y", // sample yes
     ]);
@@ -127,6 +132,7 @@ describe("runInitWizard — verify command", () => {
     const { prompter } = makePrompter([
       "1", // locale
       "1", // agents
+      "n", // adapters
       "vitest run", // verify
       "y", // sample yes
     ]);
@@ -144,6 +150,7 @@ describe("runInitWizard — sample phase", () => {
     const { prompter } = makePrompter([
       "1", // locale
       "1", // agents
+      "n", // adapters
       "", // verify
       "y", // sample yes
     ]);
@@ -156,6 +163,7 @@ describe("runInitWizard — sample phase", () => {
     const { prompter } = makePrompter([
       "1", // locale
       "1", // agents
+      "n", // adapters
       "", // verify
       "n", // sample no
     ]);
@@ -165,22 +173,46 @@ describe("runInitWizard — sample phase", () => {
   });
 });
 
-describe("runInitWizard — adapter generation (Phase 4 scope)", () => {
-  it("does NOT ask about adapter generation in Phase 2", async () => {
-    const { prompter, reader } = makePrompter([
+describe("runInitWizard — adapter generation", () => {
+  it("generates adapter files when answered yes", async () => {
+    const { prompter } = makePrompter([
       "1", // locale
-      "1,2,3", // agents: all three
-      "1", // default_agent
+      "1", // agents: claude-code
+      "y", // adapters: yes
       "", // verify
       "n", // sample
     ]);
-    await runInitWizard({ cwd: tmpDir, force: false, json: false, prompter });
-    // 5 prompts: locale, agents, default_agent, verify, sample.
-    // No 6th prompt for adapter generation.
-    expect(reader.prompts).toHaveLength(5);
-    const adapterMentions = reader.prompts.filter((p) =>
-      /adapter/i.test(p),
-    );
-    expect(adapterMentions).toEqual([]);
+    const result = await runInitWizard({ cwd: tmpDir, force: false, json: false, prompter });
+    const claudeMdCreated = result.created.some((p) => p.endsWith("CLAUDE.md"));
+    expect(claudeMdCreated).toBe(true);
+  });
+
+  it("does NOT generate adapter files when answered no", async () => {
+    const { prompter } = makePrompter([
+      "1", // locale
+      "1", // agents
+      "n", // adapters: no
+      "", // verify
+      "n", // sample
+    ]);
+    const result = await runInitWizard({ cwd: tmpDir, force: false, json: false, prompter });
+    const claudeMdCreated = result.created.some((p) => p.endsWith("CLAUDE.md"));
+    expect(claudeMdCreated).toBe(false);
+  });
+
+  it("generates one adapter per enabled agent when answered yes for multi-select", async () => {
+    const { prompter } = makePrompter([
+      "1", // locale
+      "1,3", // agents: claude-code + generic
+      "1", // default_agent: claude-code
+      "y", // adapters: yes
+      "", // verify
+      "n", // sample
+    ]);
+    const result = await runInitWizard({ cwd: tmpDir, force: false, json: false, prompter });
+    const hasClaude = result.created.some((p) => p.endsWith("CLAUDE.md"));
+    const hasGeneric = result.created.some((p) => p.endsWith("agent-instructions.md"));
+    expect(hasClaude).toBe(true);
+    expect(hasGeneric).toBe(true);
   });
 });
