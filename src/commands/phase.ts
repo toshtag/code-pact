@@ -1,8 +1,9 @@
-import { mkdir, writeFile, readFile, readdir } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { join, basename } from "node:path";
-import { parse as parseYaml, stringify as toYaml } from "yaml";
+import { parse as parseYaml } from "yaml";
 import { Phase, type PhaseStatus } from "../core/schemas/phase.ts";
 import { Roadmap, PhaseRef } from "../core/schemas/roadmap.ts";
+import { createPhase } from "../core/services/createPhase.ts";
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -14,21 +15,10 @@ async function loadRoadmap(cwd: string): Promise<Roadmap> {
   return Roadmap.parse(data);
 }
 
-async function saveRoadmap(cwd: string, roadmap: Roadmap): Promise<void> {
-  await writeFile(join(cwd, "design", "roadmap.yaml"), toYaml(roadmap), "utf8");
-}
-
 async function loadPhase(cwd: string, ref: PhaseRef): Promise<Phase> {
   const raw = await readFile(join(cwd, ref.path), "utf8");
   const data: unknown = parseYaml(raw);
   return Phase.parse(data);
-}
-
-function slugify(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/\s+/g, "-")
-    .replace(/[^a-z0-9-]/g, "");
 }
 
 // ---------------------------------------------------------------------------
@@ -52,47 +42,21 @@ export type PhaseAddResult = {
   ref: PhaseRef;
 };
 
+// Flag-based handler. Delegates to the createPhase domain service so the
+// interactive `phase new` wizard and any future automation share the same
+// rules around id collisions, slug derivation, and roadmap appends.
 export async function runPhaseAdd(opts: PhaseAddOptions): Promise<PhaseAddResult> {
-  const { cwd, id, name, weight, objective, confidence, risk, verifyCommands, definitionOfDone } =
-    opts;
-
-  const roadmap = await loadRoadmap(cwd);
-
-  // Guard duplicate ID
-  if (roadmap.phases.some((p) => p.id === id)) {
-    const err = new Error(`Phase "${id}" already exists in roadmap.yaml.`);
-    (err as NodeJS.ErrnoException).code = "DUPLICATE_PHASE_ID";
-    throw err;
-  }
-
-  // Determine file path
-  const slug = slugify(name);
-  const filename = `${id}-${slug}.yaml`;
-  const relPath = `design/phases/${filename}`;
-  const absPath = join(cwd, relPath);
-
-  // Build Phase object
-  const phase: Phase = {
-    id,
-    name,
-    weight,
-    confidence,
-    risk,
-    status: "planned",
-    objective,
-    definition_of_done: definitionOfDone,
-    verification: { commands: verifyCommands },
-  };
-
-  await mkdir(join(cwd, "design", "phases"), { recursive: true });
-  await writeFile(absPath, toYaml(phase), "utf8");
-
-  // Append to roadmap
-  const ref: PhaseRef = { id, path: relPath, weight };
-  roadmap.phases.push(ref);
-  await saveRoadmap(cwd, roadmap);
-
-  return { path: relPath, ref };
+  return createPhase({
+    cwd: opts.cwd,
+    id: opts.id,
+    name: opts.name,
+    weight: opts.weight,
+    objective: opts.objective,
+    confidence: opts.confidence,
+    risk: opts.risk,
+    verifyCommands: opts.verifyCommands,
+    doneCriteria: opts.definitionOfDone,
+  });
 }
 
 // ---------------------------------------------------------------------------
