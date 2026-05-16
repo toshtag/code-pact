@@ -23,6 +23,7 @@ import { runGenerateAdapter } from "./commands/adapter.ts";
 import { runRecommend, formatRecommend } from "./commands/recommend.ts";
 import { runDoctor, formatDoctor } from "./commands/doctor.ts";
 import { runTaskContext } from "./commands/task-context.ts";
+import { runPhaseNew } from "./commands/phase-new.ts";
 import type { LocaleCode } from "./core/schemas/locale.ts";
 import type { PhaseStatus } from "./core/schemas/phase.ts";
 
@@ -661,6 +662,47 @@ async function cmdPhase(argv: string[], locale: Locale, globalJson: boolean): Pr
     }
   }
 
+  // ---- phase new ----
+  if (subcommand === "new") {
+    if (!isInteractive()) {
+      const msg =
+        "phase new is interactive and cannot run in a non-TTY context. Use \`phase add\` with flags instead.";
+      if (globalJson) {
+        process.stdout.write(
+          `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
+        );
+      } else {
+        process.stderr.write(`${msg}\n`);
+      }
+      return 2;
+    }
+    const initialName = rest[0]?.startsWith("-") ? undefined : rest[0];
+    try {
+      const result = await runPhaseNew({ cwd, locale, initialName });
+      if (globalJson) {
+        process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
+      } else {
+        process.stderr.write(`${m.phase.added(result.ref.id, result.path)}\n`);
+      }
+      return 0;
+    } catch (err: unknown) {
+      if (err instanceof Error && (err as NodeJS.ErrnoException).code === "DUPLICATE_PHASE_ID") {
+        const id =
+          err.message.match(/"([^"]+)"/)?.[1] ?? "";
+        const msg = m.phase.duplicateId(id);
+        if (globalJson) {
+          process.stdout.write(
+            `${JSON.stringify({ ok: false, error: { code: "DUPLICATE_PHASE_ID", message: msg } })}\n`,
+          );
+        } else {
+          process.stderr.write(`${msg}\n`);
+        }
+        return 2;
+      }
+      throw err;
+    }
+  }
+
   // ---- phase ls ----
   if (subcommand === "ls") {
     const { values } = parseArgs({
@@ -745,7 +787,7 @@ async function cmdPhase(argv: string[], locale: Locale, globalJson: boolean): Pr
   }
 
   // Unknown subcommand
-  const msg = `phase: unknown subcommand "${subcommand ?? ""}". Use: add | ls | show`;
+  const msg = `phase: unknown subcommand "${subcommand ?? ""}". Use: add | new | ls | show`;
   if (globalJson) {
     process.stdout.write(
       `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
