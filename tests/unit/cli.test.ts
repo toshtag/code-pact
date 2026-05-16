@@ -24,10 +24,20 @@ function run(args: string[]): { code: number; stdout: string; stderr: string } {
 }
 
 beforeAll(() => {
-  if (!existsSync(cliPath)) {
-    throw new Error(`CLI not built. Expected: ${cliPath}. Run \`pnpm build\` first.`);
+  if (existsSync(cliPath)) return;
+  // CI runs tests before build, and locally the dist may be stale. Build on
+  // demand so this suite is self-contained.
+  const res = spawnSync("pnpm", ["build"], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    stdio: "pipe",
+  });
+  if (res.status !== 0 || !existsSync(cliPath)) {
+    throw new Error(
+      `Failed to build CLI for tests. exit=${res.status}\nstdout:\n${res.stdout}\nstderr:\n${res.stderr}`,
+    );
   }
-});
+}, 60_000);
 
 beforeEach(async () => {
   tmpDir = await mkdtemp(join(tmpdir(), "code-pact-cli-test-"));
