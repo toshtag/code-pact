@@ -4,8 +4,11 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { splitArgv } from "./lib/argv.ts";
+import { isInteractive } from "./lib/tty.ts";
 import { messages, type Locale } from "./i18n/index.ts";
 import { runInit, type SupportedAgent } from "./commands/init.ts";
+import { runInitWizard } from "./commands/init-wizard.ts";
+import { SUPPORTED_AGENTS } from "./core/agents.ts";
 import {
   runPhaseAdd,
   runPhaseLs,
@@ -23,7 +26,7 @@ import type { LocaleCode } from "./core/schemas/locale.ts";
 import type { PhaseStatus } from "./core/schemas/phase.ts";
 
 const KNOWN_LOCALES: ReadonlySet<Locale> = new Set(["en-US", "ja-JP"]);
-const KNOWN_AGENTS: ReadonlySet<SupportedAgent> = new Set(["claude-code", "codex"]);
+const KNOWN_AGENTS: ReadonlySet<SupportedAgent> = new Set(SUPPORTED_AGENTS);
 
 function detectLocale(): Locale {
   const env = process.env.CODE_PACT_LOCALE ?? process.env.LANG ?? "";
@@ -57,12 +60,50 @@ async function cmdInit(
       locale: { type: "string" },
       force: { type: "boolean" },
       json: { type: "boolean" },
+      "non-interactive": { type: "boolean" },
     },
     strict: false,
     allowPositionals: false,
   });
 
   const json = globalJson || values.json === true;
+  const nonInteractive = values["non-interactive"] === true;
+  const cwd = process.cwd();
+  const force = values.force === true;
+
+  // Wizard branch — TTY, no input flags supplied, no JSON contract requested,
+  // and the user did not opt out via --non-interactive. Any of these signals
+  // routes through the flag-based path below to keep CI and automation
+  // safe (matching docs/cli-contract.md).
+  const hasInitFlag =
+    typeof values.agent === "string" ||
+    typeof values.locale === "string" ||
+    values.force === true;
+  const useWizard = isInteractive() && !hasInitFlag && !json && !nonInteractive;
+
+  if (useWizard) {
+    try {
+      const result = await runInitWizard({ cwd, force, json: false });
+      for (const f of result.created) {
+        process.stderr.write(`  created  ${f}\n`);
+      }
+      for (const f of result.skipped) {
+        process.stderr.write(`  skipped  ${f} (already exists)\n`);
+      }
+      process.stderr.write(`\n${m.init.done}\n`);
+      return 0;
+    } catch (err: unknown) {
+      if (
+        err instanceof Error &&
+        (err as NodeJS.ErrnoException).code === "ALREADY_INITIALIZED"
+      ) {
+        process.stderr.write(`${m.init.alreadyInitialized(cwd)}\n`);
+        return 2;
+      }
+      throw err;
+    }
+  }
+
   const agentRaw = (values.agent as string | undefined) ?? "claude-code";
   const agents: SupportedAgent[] = agentRaw
     .split(",")
@@ -86,14 +127,12 @@ async function cmdInit(
       ? (values.locale as LocaleCode)
       : locale;
 
-  const cwd = process.cwd();
-
   try {
     const result = await runInit({
       cwd,
       locale: initLocale,
       agents,
-      force: values.force === true,
+      force,
       json,
     });
 
