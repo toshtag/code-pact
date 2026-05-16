@@ -160,3 +160,120 @@ describe("CLI: post-command --json (BUG-001)", () => {
     expectJsonOk(res);
   });
 });
+
+// ---------------------------------------------------------------------------
+// BUG-002: phase add --verify-command must not silently truncate
+// ---------------------------------------------------------------------------
+
+describe("CLI: phase add --verify-command parsing (BUG-002)", () => {
+  it("quoted multi-token --verify-command is preserved", () => {
+    run(["init", "--locale", "en-US", "--agent", "claude-code", "--json"]);
+    const res = run([
+      "phase",
+      "add",
+      "--id",
+      "P1",
+      "--name",
+      "Foundation",
+      "--objective",
+      "Foundation",
+      "--weight",
+      "12",
+      "--verify-command",
+      "node --version",
+      "--json",
+    ]);
+    expect(res.code).toBe(0);
+    const parsed = JSON.parse(res.stdout) as { ok: boolean };
+    expect(parsed.ok).toBe(true);
+
+    const show = run(["phase", "show", "P1", "--json"]);
+    const showParsed = JSON.parse(show.stdout) as {
+      ok: boolean;
+      data: { verification: { commands: string[] } };
+    };
+    expect(showParsed.data.verification.commands).toContain("node --version");
+  });
+
+  it("unquoted --verify-command node --version fails loudly (--json before)", () => {
+    run(["init", "--locale", "en-US", "--agent", "claude-code", "--json"]);
+    const res = run([
+      "--json",
+      "phase",
+      "add",
+      "--id",
+      "P1",
+      "--name",
+      "Foundation",
+      "--objective",
+      "Foundation",
+      "--weight",
+      "12",
+      "--verify-command",
+      "node",
+      "--version",
+    ]);
+    expect(res.code).toBe(2);
+    const parsed = JSON.parse(res.stdout) as {
+      ok: boolean;
+      error: { code: string };
+    };
+    expect(parsed.ok).toBe(false);
+    expect(parsed.error.code).toBe("CONFIG_ERROR");
+
+    // No phase file written.
+    const ls = run(["--json", "phase", "ls"]);
+    const lsParsed = JSON.parse(ls.stdout) as { ok: boolean; data: unknown[] };
+    expect(lsParsed.data).toEqual([]);
+  });
+
+  it("unquoted --verify-command node --version fails loudly (--json after)", () => {
+    run(["init", "--locale", "en-US", "--agent", "claude-code", "--json"]);
+    const res = run([
+      "phase",
+      "add",
+      "--id",
+      "P1",
+      "--name",
+      "Foundation",
+      "--objective",
+      "Foundation",
+      "--weight",
+      "12",
+      "--verify-command",
+      "node",
+      "--version",
+      "--json",
+    ]);
+    expect(res.code).toBe(2);
+    const parsed = JSON.parse(res.stdout) as {
+      ok: boolean;
+      error: { code: string };
+    };
+    expect(parsed.ok).toBe(false);
+    expect(parsed.error.code).toBe("CONFIG_ERROR");
+  });
+
+  it("subcommand --version inside phase add does not trigger top-level version", () => {
+    run(["init", "--locale", "en-US", "--agent", "claude-code", "--json"]);
+    const res = run([
+      "phase",
+      "add",
+      "--id",
+      "P1",
+      "--name",
+      "Foundation",
+      "--objective",
+      "Foundation",
+      "--weight",
+      "12",
+      "--verify-command",
+      "node",
+      "--version",
+    ]);
+    // Top-level version would exit 0 with just the version string.
+    // BUG-002 fix makes this exit 2 with a CONFIG_ERROR instead.
+    expect(res.code).toBe(2);
+    expect(res.stdout).not.toMatch(/^\d+\.\d+\.\d+/);
+  });
+});

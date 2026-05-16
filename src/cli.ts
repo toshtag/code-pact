@@ -515,22 +515,39 @@ async function cmdPhase(argv: string[], locale: Locale, globalJson: boolean): Pr
 
   // ---- phase add ----
   if (subcommand === "add") {
-    const { values } = parseArgs({
-      args: rest,
-      options: {
-        id: { type: "string" },
-        name: { type: "string" },
-        weight: { type: "string" },
-        objective: { type: "string" },
-        confidence: { type: "string" },
-        risk: { type: "string" },
-        "verify-command": { type: "string", multiple: true },
-        "done-criterion": { type: "string", multiple: true },
-        json: { type: "boolean" },
-      },
-      strict: false,
-      allowPositionals: false,
-    });
+    let values: Record<string, unknown>;
+    try {
+      ({ values } = parseArgs({
+        args: rest,
+        options: {
+          id: { type: "string" },
+          name: { type: "string" },
+          weight: { type: "string" },
+          objective: { type: "string" },
+          confidence: { type: "string" },
+          risk: { type: "string" },
+          "verify-command": { type: "string", multiple: true },
+          "done-criterion": { type: "string", multiple: true },
+          json: { type: "boolean" },
+        },
+        strict: true,
+        allowPositionals: false,
+      }));
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      const msg = `phase add: ${detail}. Quote multi-word values, e.g. --verify-command "node --version".`;
+      // Best-effort detection of post-command --json even when strict parsing
+      // failed before consuming it.
+      const json = globalJson || rest.includes("--json");
+      if (json) {
+        process.stdout.write(
+          `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
+        );
+      } else {
+        process.stderr.write(`${msg}\n`);
+      }
+      return 2;
+    }
 
     const json = globalJson || values.json === true;
     const id = values.id as string | undefined;
