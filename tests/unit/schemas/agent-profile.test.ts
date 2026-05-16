@@ -4,7 +4,7 @@ import { AgentProfile } from "../../../src/core/schemas/agent-profile.ts";
 const VALID = {
   name: "claude-code",
   instruction_filename: "CLAUDE.md",
-  context_dir: ".context/claude",
+  context_dir: ".context/claude-code",
   model_map: {
     highest_reasoning: "claude-opus-4-7",
     balanced_coding: "claude-sonnet-4-6",
