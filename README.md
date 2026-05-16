@@ -1,34 +1,70 @@
 # code-pact
 
-Design control plane for AI coding agents. Keep design as a structured source of truth, pack only the right context to agents, and verify completion criteria deterministically.
+A control plane for AI coding agents. `code-pact` keeps `design/` as the structured source of truth, gives agents a stable command surface for fetching task-specific context, and verifies completion criteria deterministically.
 
-`code-pact` is not a competitor of Spec Kit. It is meant to sit alongside spec-driven workflows as an agent execution control layer.
+The product idea: agents should not read sprawling `design/` trees themselves and edit progress files by hand. They should call a small set of deterministic CLI commands. `code-pact` provides those commands and the per-agent adapter files that wire them up.
 
 ## Status
 
-Pre-alpha. All MVP commands below are wired; the CLI contract is stabilizing.
-
-## MVP scope (v0.1)
-
-- `code-pact init` — scaffold project control structure
-- `code-pact phase add | ls | show` — manage phase contracts
-- `code-pact progress` — weighted progress against an explicit baseline snapshot
-- `code-pact pack` — emit a context pack (Markdown) for a specific agent + task
-- `code-pact verify` — deterministic completion check (event-based, no mtime)
-
-Supplementary commands: `adapter`, `recommend`, `doctor`.
-
-Supported agents: `claude-code`, `codex`.
-
-All commands support `--json`. The flag is accepted both before and after the command name. JSON responses follow `{ ok, data, error? }`. Exit codes: `0` success, `1` verification failed, `2` usage/config error, `3` internal error.
+Pre-alpha (`v0.1.x` work in progress). Not yet published to npm. Use `pnpm link --global` from a clone, or install from a local tarball, until alpha publish.
 
 ## Quickstart
 
 ```sh
-# 1. Scaffold a project.
-code-pact init --locale en-US --agent claude-code
+# 1. Initialize an existing project. Run with no flags in your terminal
+#    to launch the interactive wizard.
+code-pact init
 
-# 2. Declare a phase. --objective is required.
+# 2. Add a phase interactively (or use `phase add` with flags — see below).
+code-pact phase new
+
+# 3. Generate per-agent instruction files (CLAUDE.md / AGENTS.md /
+#    docs/code-pact/agent-instructions.md). The wizard can do this for
+#    you; the standalone command is here when you change agents later:
+code-pact adapter --agent claude-code
+
+# 4. From the agent: fetch the context pack for a task, then verify.
+code-pact task context <task-id> --agent <agent>
+code-pact verify --phase <phase-id> --task <task-id>
+```
+
+The `init` wizard asks, in order: language (English / 日本語), which agents to support (multi-select from Claude Code / Codex / Generic), the default agent, whether to generate adapter files now, the default verification command, and whether to create a sample first phase.
+
+## Agent-facing usage
+
+Agent adapters (CLAUDE.md, AGENTS.md, docs/code-pact/agent-instructions.md) instruct the agent to do exactly two things per task:
+
+```sh
+# Fetch the markdown context pack (writes to stdout, no side effects).
+code-pact task context <task-id> --agent <agent>
+
+# After implementation, confirm the deterministic completion signal.
+code-pact verify --phase <phase-id> --task <task-id>
+```
+
+`task context` resolves the task id across every phase, so the agent only needs the task id. Combined verify + progress reporting via `code-pact task complete` is planned for `v0.2`; until then `verify` is the authoritative completion check.
+
+## Supported agents
+
+| Agent | Status | Adapter output |
+|---|---|---|
+| `claude-code` | stable | `CLAUDE.md`, `.claude/skills/`, `.claude/hooks/`, `.context/claude-code/` |
+| `codex` | stable | `AGENTS.md`, `.context/codex/` |
+| `generic` | stable | `docs/code-pact/agent-instructions.md`, `.context/generic/` |
+| `cursor`, `gemini-cli` | planned (v0.2 experimental) | — |
+
+The `generic` adapter writes one human-readable instructions file that you can copy or symlink into any other agent's expected location (`.cursorrules`, `GEMINI.md`, …) while the dedicated adapters land.
+
+## Low-level mode (automation, CI, agents)
+
+Every interactive flow has a flag-based equivalent. CI and agent contexts use these directly. They are the primitives the wizards are built on.
+
+```sh
+# Init without prompts (any --agent / --locale / --force flag, or CI=true,
+# or --non-interactive, opts out of the wizard).
+code-pact init --non-interactive --agent claude-code,generic --locale en-US
+
+# Add a phase by flags.
 code-pact phase add \
   --id P1 \
   --name Foundation \
@@ -36,26 +72,35 @@ code-pact phase add \
   --objective "Establish project foundation" \
   --verify-command "pnpm test"
 
-# 3. Inspect phases.
+# Inspect phases.
 code-pact phase ls
 code-pact phase show P1 --json
 
-# 4. Pack context for an agent + task (writes to .context/<agent>/<task>.md).
+# Pack context to a file under .context/<agent>/<task>.md.
 code-pact pack --phase P1 --task P1-T1 --agent claude-code
 
-# 5. After completing the task, run verification.
+# Verify.
 code-pact verify --phase P1 --task P1-T1
 ```
 
-Multi-word verification commands must be quoted:
+Multi-word verification commands must be quoted, otherwise the trailing tokens raise `CONFIG_ERROR`:
 
 ```sh
 # Correct
 code-pact phase add ... --verify-command "node --version"
 
-# Rejected with CONFIG_ERROR — the trailing token would be silently lost.
+# Rejected — the trailing token would be silently lost.
 code-pact phase add ... --verify-command node --version
 ```
+
+## CLI contract
+
+`docs/cli-contract.md` is the canonical reference. Highlights:
+
+- `--json` is accepted before or after the command name and produces JSON-only stdout (`{ ok, data, error? }`). Human-readable logs go to stderr.
+- Exit codes: `0` success, `1` verification failed, `2` usage / config error, `3` internal error.
+- `isInteractive()` (`process.stdin.isTTY && process.stdout.isTTY && !CI`) is the single source of truth for whether a wizard launches.
+- `--non-interactive` is an explicit opt-out for users invoking the CLI from a TTY but wanting flag-only semantics.
 
 ## Non-goals (MVP)
 
@@ -63,7 +108,7 @@ code-pact phase add ... --verify-command node --version
 - No web UI, daemon, or vector database
 - No GitHub / Linear / Jira integrations
 - No multi-agent orchestration
-- No HTML reports (planned later via a separate `report` command)
+- No RAG / semantic search
 
 ## Requirements
 
@@ -79,3 +124,9 @@ pnpm test
 pnpm build
 node dist/cli.js --version
 ```
+
+For dogfooding `code-pact` against `code-pact` itself, see [`docs/dogfood.md`](docs/dogfood.md).
+
+## Relationship to spec-driven workflows
+
+`code-pact` is complementary to spec-style tools that produce structured spec / plan / task documents for agents to read. The difference in emphasis: spec tools optimize the *documents* an agent reads; `code-pact` optimizes the *command path* an agent uses to retrieve context and confirm completion. Use both if it fits your workflow.
