@@ -23,6 +23,7 @@ import { runPack } from "./commands/pack.ts";
 import { runVerify, formatVerify } from "./commands/verify.ts";
 import { runGenerateAdapter } from "./commands/adapter.ts";
 import { runPlanBrief } from "./commands/plan-brief.ts";
+import { runPlanPrompt } from "./commands/plan-prompt.ts";
 import { runRecommend, formatRecommend } from "./commands/recommend.ts";
 import { runDoctor, formatDoctor } from "./commands/doctor.ts";
 import { runValidate } from "./commands/validate.ts";
@@ -413,7 +414,11 @@ async function cmdPlan(argv: string[], locale: Locale, globalJson: boolean): Pro
     return cmdPlanBrief(rest, locale, globalJson);
   }
 
-  const msg = `plan: unknown subcommand "${subcommand ?? ""}". Use: brief`;
+  if (subcommand === "prompt") {
+    return cmdPlanPrompt(rest, locale, globalJson);
+  }
+
+  const msg = `plan: unknown subcommand "${subcommand ?? ""}". Use: brief | prompt`;
   if (globalJson) {
     process.stdout.write(
       `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
@@ -473,6 +478,61 @@ async function cmdPlanBrief(
   } else {
     process.stderr.write(`${m.plan.briefDone(result.path)}\n`);
   }
+  return 0;
+}
+
+async function cmdPlanPrompt(
+  argv: string[],
+  locale: Locale,
+  globalJson: boolean,
+): Promise<number> {
+  const m = messages[locale];
+  const { values } = parseArgs({
+    args: argv,
+    options: {
+      clipboard: { type: "boolean" },
+      json: { type: "boolean" },
+    },
+    strict: false,
+    allowPositionals: false,
+  });
+
+  const json = globalJson || values.json === true;
+  const clipboard = values.clipboard === true;
+  const cwd = process.cwd();
+
+  const result = await runPlanPrompt({ cwd, locale, clipboard });
+
+  if (json) {
+    process.stdout.write(
+      `${JSON.stringify({
+        ok: true,
+        data: {
+          prompt: result.prompt,
+          has_brief: result.hasBrief,
+          has_constitution: result.hasConstitution,
+          clipboard_copied: result.clipboardCopied,
+        },
+      })}\n`,
+    );
+    return 0;
+  }
+
+  // Human mode: write prompt to stdout, status info to stderr.
+  process.stdout.write(result.prompt);
+  if (!result.prompt.endsWith("\n")) process.stdout.write("\n");
+
+  if (!result.hasBrief) {
+    process.stderr.write(`${m.plan.promptNoBrief}\n`);
+  }
+  if (clipboard) {
+    if (result.clipboardCopied) {
+      process.stderr.write(`${m.plan.promptClipboardCopied}\n`);
+    } else {
+      process.stderr.write(`${m.plan.promptClipboardFailed}\n`);
+    }
+  }
+
   return 0;
 }
 
