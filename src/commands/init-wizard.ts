@@ -20,6 +20,7 @@ const AGENT_LABELS: Record<SupportedAgent, string> = {
   codex: "Codex",
   generic: "Generic",
   cursor: "Cursor (experimental, v0.2)",
+  "gemini-cli": "Gemini CLI (experimental, v0.2)",
 };
 
 export async function runInitWizard(opts: InitWizardOptions): Promise<InitResult> {
