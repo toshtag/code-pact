@@ -23,6 +23,7 @@ import { runGenerateAdapter } from "./commands/adapter.ts";
 import { runRecommend, formatRecommend } from "./commands/recommend.ts";
 import { runDoctor, formatDoctor } from "./commands/doctor.ts";
 import { runTaskContext } from "./commands/task-context.ts";
+import { runTaskComplete } from "./commands/task-complete.ts";
 import { runPhaseNew } from "./commands/phase-new.ts";
 import type { LocaleCode } from "./core/schemas/locale.ts";
 import type { PhaseStatus } from "./core/schemas/phase.ts";
@@ -847,8 +848,11 @@ async function cmdTask(argv: string[], locale: Locale, globalJson: boolean): Pro
   if (subcommand === "context") {
     return cmdTaskContext(rest, locale, globalJson);
   }
+  if (subcommand === "complete") {
+    return cmdTaskComplete(rest, locale, globalJson);
+  }
 
-  const msg = `task: unknown subcommand "${subcommand ?? ""}". Use: context`;
+  const msg = `task: unknown subcommand "${subcommand ?? ""}". Use: context | complete`;
   if (globalJson) {
     process.stdout.write(
       `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
@@ -950,6 +954,174 @@ async function cmdTaskContext(
         break;
       case "AGENT_NOT_FOUND":
         msg = m.task.context.agentNotFound(agent ?? "");
+        outCode = "AGENT_NOT_FOUND";
+        break;
+      default:
+        throw err;
+    }
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({ ok: false, error: { code: outCode, message: msg } })}\n`,
+      );
+    } else {
+      process.stderr.write(`${msg}\n`);
+    }
+    return 2;
+  }
+}
+
+async function cmdTaskComplete(
+  argv: string[],
+  locale: Locale,
+  globalJson: boolean,
+): Promise<number> {
+  const m = messages[locale];
+
+  let values: Record<string, unknown>;
+  let positionals: string[];
+  try {
+    ({ values, positionals } = strictParse(
+      "task complete",
+      argv,
+      {
+        agent: { type: "string" },
+        json: { type: "boolean" },
+        "dry-run": { type: "boolean" },
+      },
+      { allowPositionals: true },
+    ));
+  } catch (err) {
+    if (!(err instanceof ConfigError)) throw err;
+    const json = globalJson || argv.includes("--json");
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: err.message } })}\n`,
+      );
+    } else {
+      process.stderr.write(`${err.message}\n`);
+    }
+    return 2;
+  }
+
+  const json = globalJson || values.json === true;
+  const dryRun = values["dry-run"] === true;
+  const taskId = positionals[0];
+  if (!taskId) {
+    const msg = "task complete requires a task id (e.g. `task complete P1-T1`).";
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
+      );
+    } else {
+      process.stderr.write(`${msg}\n`);
+    }
+    return 2;
+  }
+  const agent = values.agent as string | undefined;
+  const cwd = process.cwd();
+
+  try {
+    const result = await runTaskComplete({ cwd, taskId, agent, dryRun });
+
+    if (result.kind === "already_done") {
+      if (json) {
+        process.stdout.write(
+          `${JSON.stringify({
+            ok: true,
+            data: {
+              already_done: true,
+              task_id: result.task_id,
+              phase_id: result.phase_id,
+              agent: result.agent,
+            },
+          })}\n`,
+        );
+      } else {
+        process.stdout.write(`${m.task.complete.alreadyDone(taskId)}\n`);
+      }
+      return 0;
+    }
+
+    if (result.kind === "dry_run") {
+      if (json) {
+        process.stdout.write(
+          `${JSON.stringify({
+            ok: true,
+            data: {
+              dry_run: true,
+              task_id: result.task_id,
+              phase_id: result.phase_id,
+              agent: result.agent,
+              would_append: result.would_append,
+            },
+          })}\n`,
+        );
+      } else {
+        process.stdout.write(`${m.task.complete.dryRun(taskId)}\n`);
+      }
+      return 0;
+    }
+
+    // result.kind === "done"
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({
+          ok: true,
+          data: {
+            task_id: result.task_id,
+            phase_id: result.phase_id,
+            agent: result.agent,
+            event: result.event,
+            verify: { ok: true, checks: result.verify.checks },
+          },
+        })}\n`,
+      );
+    } else {
+      process.stdout.write(`${m.task.complete.success(taskId, result.agent)}\n`);
+    }
+    return 0;
+  } catch (err: unknown) {
+    if (!(err instanceof Error)) throw err;
+    const code = (err as NodeJS.ErrnoException).code;
+
+    if (code === "VERIFICATION_FAILED") {
+      const checks =
+        (err as NodeJS.ErrnoException & { checks?: unknown[] }).checks ?? [];
+      const msg = m.task.complete.verificationFailed(taskId);
+      if (json) {
+        process.stdout.write(
+          `${JSON.stringify({
+            ok: false,
+            error: { code: "VERIFICATION_FAILED", message: msg },
+            data: { task_id: taskId, verify: { ok: false, checks } },
+          })}\n`,
+        );
+      } else {
+        process.stderr.write(`${msg}\n`);
+      }
+      return 1;
+    }
+
+    let msg: string;
+    let outCode: string;
+    switch (code) {
+      case "TASK_NOT_FOUND":
+        msg = m.task.complete.taskNotFound(taskId);
+        outCode = "TASK_NOT_FOUND";
+        break;
+      case "AMBIGUOUS_TASK_ID": {
+        const phases =
+          (err as NodeJS.ErrnoException & { phases?: string[] }).phases ?? [];
+        msg = m.task.complete.ambiguous(taskId, phases);
+        outCode = "AMBIGUOUS_TASK_ID";
+        break;
+      }
+      case "AGENT_NOT_ENABLED":
+        msg = m.task.complete.agentNotEnabled(agent ?? "");
+        outCode = "AGENT_NOT_ENABLED";
+        break;
+      case "AGENT_NOT_FOUND":
+        msg = m.task.complete.agentNotFound(agent ?? "");
         outCode = "AGENT_NOT_FOUND";
         break;
       default:
