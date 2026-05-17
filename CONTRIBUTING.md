@@ -25,7 +25,7 @@ test(progress): cover expanded_work for project-b fixture
 ## Branch / PR workflow
 
 - One CLI command (or one cohesive concern) per branch: `feat/<command>` or `chore/<scope>`.
-- Open a PR even for solo work; do not push directly to `master`.
+- Open a PR even for solo work; do not push directly to `main`.
 - Inside a PR, prefer many small commits. Squash-merge at PR merge time is acceptable.
 - CI must be green before merge: `pnpm typecheck && pnpm test && pnpm build`.
 
