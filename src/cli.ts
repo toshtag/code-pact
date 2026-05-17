@@ -3,7 +3,7 @@ import { parseArgs } from "node:util";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
-import { splitArgv } from "./lib/argv.ts";
+import { splitArgv, strictParse, ConfigError } from "./lib/argv.ts";
 import { isInteractive, isCIEnv } from "./lib/tty.ts";
 import { messages, type Locale } from "./i18n/index.ts";
 import { runInit, type SupportedAgent } from "./commands/init.ts";
@@ -533,27 +533,21 @@ async function cmdProgress(argv: string[], locale: Locale, globalJson: boolean):
   const m = messages[locale];
   let values: Record<string, unknown>;
   try {
-    ({ values } = parseArgs({
-      args: argv,
-      options: {
-        baseline: { type: "string" },
-        json: { type: "boolean" },
-      },
-      strict: true,
-      allowPositionals: false,
+    ({ values } = strictParse("progress", argv, {
+      baseline: { type: "string" },
+      json: { type: "boolean" },
     }));
   } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
-    const msg = `progress: ${detail}`;
+    if (!(err instanceof ConfigError)) throw err;
     // Strict parsing failed before --json could be read from values; fall back
     // to argv inspection so post-command --json is still honored.
     const json = globalJson || argv.includes("--json");
     if (json) {
       process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
+        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: err.message } })}\n`,
       );
     } else {
-      process.stderr.write(`${msg}\n`);
+      process.stderr.write(`${err.message}\n`);
     }
     return 2;
   }
@@ -600,27 +594,20 @@ async function cmdPhase(argv: string[], locale: Locale, globalJson: boolean): Pr
   if (subcommand === "add") {
     let values: Record<string, unknown>;
     try {
-      ({ values } = parseArgs({
-        args: rest,
-        options: {
-          id: { type: "string" },
-          name: { type: "string" },
-          weight: { type: "string" },
-          objective: { type: "string" },
-          confidence: { type: "string" },
-          risk: { type: "string" },
-          "verify-command": { type: "string", multiple: true },
-          "done-criterion": { type: "string", multiple: true },
-          json: { type: "boolean" },
-        },
-        strict: true,
-        allowPositionals: false,
+      ({ values } = strictParse("phase add", rest, {
+        id: { type: "string" },
+        name: { type: "string" },
+        weight: { type: "string" },
+        objective: { type: "string" },
+        confidence: { type: "string" },
+        risk: { type: "string" },
+        "verify-command": { type: "string", multiple: true },
+        "done-criterion": { type: "string", multiple: true },
+        json: { type: "boolean" },
       }));
     } catch (err) {
-      const detail = err instanceof Error ? err.message : String(err);
-      const msg = `phase add: ${detail}. Quote multi-word values, e.g. --verify-command "node --version".`;
-      // Best-effort detection of post-command --json even when strict parsing
-      // failed before consuming it.
+      if (!(err instanceof ConfigError)) throw err;
+      const msg = `${err.message}. Quote multi-word values, e.g. --verify-command "node --version".`;
       const json = globalJson || rest.includes("--json");
       if (json) {
         process.stdout.write(
@@ -749,25 +736,19 @@ async function cmdPhase(argv: string[], locale: Locale, globalJson: boolean): Pr
   if (subcommand === "ls") {
     let values: Record<string, unknown>;
     try {
-      ({ values } = parseArgs({
-        args: rest,
-        options: {
-          status: { type: "string" },
-          json: { type: "boolean" },
-        },
-        strict: true,
-        allowPositionals: false,
+      ({ values } = strictParse("phase ls", rest, {
+        status: { type: "string" },
+        json: { type: "boolean" },
       }));
     } catch (err) {
-      const detail = err instanceof Error ? err.message : String(err);
-      const msg = `phase ls: ${detail}`;
+      if (!(err instanceof ConfigError)) throw err;
       const json = globalJson || rest.includes("--json");
       if (json) {
         process.stdout.write(
-          `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
+          `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: err.message } })}\n`,
         );
       } else {
-        process.stderr.write(`${msg}\n`);
+        process.stderr.write(`${err.message}\n`);
       }
       return 2;
     }
@@ -888,25 +869,24 @@ async function cmdTaskContext(
   let values: Record<string, unknown>;
   let positionals: string[];
   try {
-    ({ values, positionals } = parseArgs({
-      args: argv,
-      options: {
+    ({ values, positionals } = strictParse(
+      "task context",
+      argv,
+      {
         agent: { type: "string" },
         json: { type: "boolean" },
       },
-      strict: true,
-      allowPositionals: true,
-    }));
+      { allowPositionals: true },
+    ));
   } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err);
-    const msg = `task context: ${detail}`;
+    if (!(err instanceof ConfigError)) throw err;
     const json = globalJson || argv.includes("--json");
     if (json) {
       process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
+        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: err.message } })}\n`,
       );
     } else {
-      process.stderr.write(`${msg}\n`);
+      process.stderr.write(`${err.message}\n`);
     }
     return 2;
   }
