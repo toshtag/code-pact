@@ -18,3 +18,7 @@ tests/fixtures/**/.context/
 # Root-level private design notes (planning, strategy, retro)
 /.local/
 *.tgz
+
+# Per-maintainer SSH allowedSigners for `git verify-tag`. Intentionally
+# not committed in v0.2 (single-maintainer); see CONTRIBUTING.md.
+.git_allowed_signers
