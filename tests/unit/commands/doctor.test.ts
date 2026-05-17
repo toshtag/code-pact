@@ -28,10 +28,18 @@ afterEach(async () => {
 // ---------------------------------------------------------------------------
 
 describe("runDoctor — healthy project (fresh init)", () => {
-  it("returns ok=true with no issues for a freshly initialised project", async () => {
+  it("returns ok=true with no errors for a freshly initialised project", async () => {
     const result = await runDoctor(dir);
     expect(result.ok).toBe(true);
-    expect(result.issues).toHaveLength(0);
+    // ADAPTER_MISSING is a warning (adapter not yet generated) — errors must be 0
+    const errors = result.issues.filter((i) => i.severity === "error");
+    expect(errors).toHaveLength(0);
+  });
+
+  it("does not report LOCAL_NOT_GITIGNORED because init creates .gitignore", async () => {
+    const result = await runDoctor(dir);
+    const issue = result.issues.find((i) => i.code === "LOCAL_NOT_GITIGNORED");
+    expect(issue).toBeUndefined();
   });
 });
 
@@ -183,5 +191,91 @@ describe("runDoctor — invalid YAML in project.yaml", () => {
     const result = await runDoctor(dir);
     // YAML parser may succeed on some malformed inputs; at minimum no crash
     expect(Array.isArray(result.issues)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// New checks: DUPLICATE_TASK_ID, LOCAL_NOT_GITIGNORED, ADAPTER_MISSING
+// ---------------------------------------------------------------------------
+
+describe("runDoctor — duplicate task ids", () => {
+  it("reports DUPLICATE_TASK_ID error when same id appears in two phases", async () => {
+    // Phase 1 with task P1-T1
+    await runPhaseAdd({
+      cwd: dir, id: "P1", name: "Alpha", weight: 10, objective: "Alpha.",
+      confidence: "medium", risk: "medium", verifyCommands: ["echo ok"],
+      definitionOfDone: ["Done"],
+    });
+    await writeFile(
+      join(dir, "design", "phases", "P1-alpha.yaml"),
+      [
+        "id: P1", "name: Alpha", "weight: 10", "confidence: medium", "risk: medium",
+        "status: planned", "objective: Alpha.", "definition_of_done:", "  - Done",
+        "verification:", "  commands:", "    - echo ok",
+        "tasks:", "  - id: SHARED-T1", "    type: feature", "    ambiguity: medium",
+        "    risk: medium", "    context_size: medium", "    write_surface: medium",
+        "    verification_strength: medium", "    expected_duration: medium",
+        "    status: planned",
+      ].join("\n"),
+      "utf8",
+    );
+    // Phase 2 with the same task id
+    await runPhaseAdd({
+      cwd: dir, id: "P2", name: "Beta", weight: 10, objective: "Beta.",
+      confidence: "medium", risk: "medium", verifyCommands: ["echo ok"],
+      definitionOfDone: ["Done"],
+    });
+    await writeFile(
+      join(dir, "design", "phases", "P2-beta.yaml"),
+      [
+        "id: P2", "name: Beta", "weight: 10", "confidence: medium", "risk: medium",
+        "status: planned", "objective: Beta.", "definition_of_done:", "  - Done",
+        "verification:", "  commands:", "    - echo ok",
+        "tasks:", "  - id: SHARED-T1", "    type: feature", "    ambiguity: medium",
+        "    risk: medium", "    context_size: medium", "    write_surface: medium",
+        "    verification_strength: medium", "    expected_duration: medium",
+        "    status: planned",
+      ].join("\n"),
+      "utf8",
+    );
+    const result = await runDoctor(dir);
+    const issue = result.issues.find((i) => i.code === "DUPLICATE_TASK_ID");
+    expect(issue).toBeDefined();
+    expect(issue?.severity).toBe("error");
+    expect(issue?.message).toContain("SHARED-T1");
+  });
+});
+
+describe("runDoctor — LOCAL_NOT_GITIGNORED", () => {
+  it("reports LOCAL_NOT_GITIGNORED warning when .local/ is absent from .gitignore", async () => {
+    await writeFile(join(dir, ".gitignore"), "node_modules/\ndist/\n", "utf8");
+    const result = await runDoctor(dir);
+    const issue = result.issues.find((i) => i.code === "LOCAL_NOT_GITIGNORED");
+    expect(issue).toBeDefined();
+    expect(issue?.severity).toBe("warning");
+  });
+
+  it("does not report LOCAL_NOT_GITIGNORED when .local/ is in .gitignore", async () => {
+    await writeFile(join(dir, ".gitignore"), "node_modules/\n.local/\n", "utf8");
+    const result = await runDoctor(dir);
+    const issue = result.issues.find((i) => i.code === "LOCAL_NOT_GITIGNORED");
+    expect(issue).toBeUndefined();
+  });
+});
+
+describe("runDoctor — ADAPTER_MISSING", () => {
+  it("reports ADAPTER_MISSING warning when enabled agent has no instruction file", async () => {
+    const result = await runDoctor(dir);
+    const issue = result.issues.find((i) => i.code === "ADAPTER_MISSING");
+    expect(issue).toBeDefined();
+    expect(issue?.severity).toBe("warning");
+    expect(issue?.message).toContain("claude-code");
+  });
+
+  it("does not report ADAPTER_MISSING when CLAUDE.md exists", async () => {
+    await writeFile(join(dir, "CLAUDE.md"), "# Claude Code adapter\n", "utf8");
+    const result = await runDoctor(dir);
+    const issue = result.issues.find((i) => i.code === "ADAPTER_MISSING");
+    expect(issue).toBeUndefined();
   });
 });
