@@ -8,7 +8,7 @@ export const messages = {
     "",
     "コマンド:",
     "  init       プロジェクトを初期化 (TTY なら対話、それ以外はフラグ)",
-    "  plan       プロジェクト計画ツール (brief | prompt)",
+    "  plan       プロジェクト計画ツール (brief | prompt | constitution)",
     "  phase      フェーズ契約を管理 (add | new | ls | show | import)",
     "  task       タスクの管理 (add) と Agent 向けコマンド (context | complete)",
     "  progress   baseline に対する重み付き進捗を表示",
@@ -126,10 +126,19 @@ export const messages = {
       whoPrompt: "誰のためですか？ (主なユーザーや関係者)",
       differentiatorPrompt: "特徴的なところは何ですか？ (任意 — スキップするなら Enter)",
     },
+    constitution: {
+      descriptionPrompt:
+        "このプロジェクトの判断を導く原則を一言で教えてください (1〜2 文 — デフォルトを使う場合は Enter)",
+      principlesPrompt:
+        "基本原則をカンマ区切りで入力してください (デフォルトを使う場合は Enter)",
+    },
   },
   plan: {
     briefDone: (path: string): string => `プロジェクト概要を ${path} に書き出しました`,
     briefSkipped: (path: string): string =>
+      `${path} は既に存在します。上書きするには --force を使ってください。`,
+    constitutionDone: (path: string): string => `プロジェクト方針を ${path} に書き出しました`,
+    constitutionSkipped: (path: string): string =>
       `${path} は既に存在します。上書きするには --force を使ってください。`,
     promptClipboardCopied: "プロンプトをクリップボードにコピーしました。",
     promptClipboardFailed: "クリップボードへのコピーに失敗しました (pbcopy/xclip コマンドが使えません)。",
