@@ -1,6 +1,8 @@
 # Dogfood guide
 
-How to run `code-pact` against the `code-pact` repository itself. The repo is already initialized (`.code-pact/` and `design/` are committed), so you mostly skip `init` and verify the existing structure.
+How to run `code-pact` against the `code-pact` repository itself.
+
+The repo is already initialized (`.code-pact/` is committed), so `init` is not needed. The `design/` directory containing phases and tasks is the source of truth for work in progress.
 
 ## One-time setup
 
@@ -19,64 +21,70 @@ which code-pact
 code-pact --version
 ```
 
-When the binary is in place, `doctor` should report a clean project (the repo carries the necessary state — if you removed `.code-pact/` mid-experiment, expect `CONFIG_ERROR` and re-run from a fresh checkout):
+Run a health check to confirm the project structure is clean:
 
 ```sh
 code-pact doctor
+code-pact validate       # exits 1 if any errors exist
 ```
 
-## Per-task flow (matches the agent adapter instructions)
+## Per-task flow
 
 ```sh
-# 1. Fetch the context pack. Output goes to stdout, no files written.
-code-pact task context P5-T1 --agent claude-code
+# 1. Pick a task from the current phase and fetch its context pack.
+#    Output goes to stdout — no files written.
+code-pact task context <task-id> --agent claude-code
 
 # 2. Implement the task.
 
-# 3. Verify the deterministic completion criteria.
-code-pact verify --phase P5 --task P5-T1
+# 3. Mark the task complete. This runs verify and, on pass,
+#    records a done event in .code-pact/state/progress.yaml.
+code-pact task complete <task-id> --agent claude-code
 ```
 
-`task context` resolves the task id across every phase in `design/roadmap.yaml` so you do not need to pass a phase id.
+`task context` resolves the task id across every phase in `design/roadmap.yaml`,
+so you do not need to pass a phase id.
 
-## Inspecting state without changing it
+## Inspecting state
 
 ```sh
 code-pact phase ls
-code-pact phase show P5 --json
+code-pact phase show <phase-id> --json
 code-pact progress --baseline initial
-code-pact pack --phase P5 --task P5-T1 --agent claude-code   # writes to .context/
 ```
 
-`pack` is the low-level primitive — it writes a Markdown file under `.context/<agent>/`. `task context` is the read-only equivalent agents call from their adapter instructions.
-
-## Adding work via the wizards
+## Adding work
 
 ```sh
-code-pact phase new "Implement billing"
+# Add a phase interactively (wizard):
+code-pact phase add
+
+# Add a phase by flags (CI/scripted):
+code-pact phase add --id P2 --name "..." --weight 10 --objective "..."
+
+# Add a task interactively:
+code-pact task add <phase-id>
 ```
 
-The wizard prompts for ID, weight, objective, confidence, risk, verify commands, and done criteria. The flag-based `phase add` is still available for scripted bulk work.
+## Resetting to a clean state in a temp dir
 
-## Resetting to a clean state
-
-If you want to throw away local state and re-init from scratch in a temp dir:
+Do **not** run `code-pact init` inside this repository — `.code-pact/` already exists
+and the command will refuse without `--force`. To experiment with a fresh project:
 
 ```sh
 mkdir /tmp/cp-fresh && cd /tmp/cp-fresh
-code-pact init                    # interactive wizard
+code-pact init
 ```
 
-Do **not** run `code-pact init` inside the `code-pact` repository — `.code-pact/` already exists and the command refuses without `--force`, but `--force` would clobber the committed fixtures.
-
-## When to use which command
+## Quick reference
 
 | Goal | Command |
 |---|---|
-| Start a new task as an agent | `code-pact task context <task-id> --agent <agent>` |
-| Confirm a task is done | `code-pact verify --phase <p> --task <t>` |
-| Add a phase by hand (CI / scripts) | `code-pact phase add --id ... --name ... --weight ... --objective ...` |
-| Add a phase interactively | `code-pact phase new [<name>]` |
-| Generate/refresh adapter files | `code-pact adapter --agent <agent> --force` |
+| Fetch context for a task (as agent) | `code-pact task context <task-id> --agent <agent>` |
+| Mark a task done (as agent) | `code-pact task complete <task-id> --agent <agent>` |
+| Add a phase interactively | `code-pact phase add` |
+| Add a task interactively | `code-pact task add <phase-id>` |
+| Generate / refresh adapter files | `code-pact adapter --agent <agent> --force` |
 | Show weighted progress | `code-pact progress` |
-| Health-check the project layout | `code-pact doctor` |
+| Health-check the project | `code-pact doctor` |
+| CI validation | `code-pact validate` |
