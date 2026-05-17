@@ -113,6 +113,59 @@ When `--agent` lists multiple agents (e.g. `--agent claude-code,generic`)
 and no dedicated default-agent option is provided, the first agent in
 the list becomes `default_agent` in the generated `project.yaml`.
 
+## `phase import`
+
+`code-pact phase import <path> [--force] [--json]` bulk-imports a draft roadmap. Input shape:
+
+```yaml
+phases:
+  - id: P1
+    name: Foundation
+    weight: 12
+    objective: "..."
+    # optional:
+    confidence: medium
+    risk: low
+    verify_commands: ["pnpm test"]
+    definition_of_done: ["..."]
+    non_goals: ["..."]
+    requires_decision: false
+    tasks:                # optional, accepted in v0.2 so imported tasks
+      - id: P1-T1         # are immediately visible to `task context`
+        type: feature
+        ambiguity: low
+        risk: low
+        context_size: small
+        write_surface: medium
+        verification_strength: strong
+        expected_duration: short
+        status: planned
+        description: "..."
+```
+
+Validation runs in a single pre-write pass:
+
+1. Malformed YAML or schema violation → `CONFIG_ERROR` (exit 2). No files are written.
+2. The same phase id appearing twice **within the input** → `DUPLICATE_PHASE_ID` (exit 2). No files are written.
+3. An input phase id colliding with an existing `roadmap.yaml` entry, **without `--force`** → `DUPLICATE_PHASE_ID` (exit 2). No files are written.
+4. With `--force`, colliding phases are **skipped**; tasks declared inside those skipped phases are not imported either.
+5. Across all *kept* import targets, plus the existing kept roadmap phases, every task id must be unique. Any collision → `AMBIGUOUS_TASK_ID` (exit 2). `--force` does **not** bypass this: task-level integrity wins over throughput. No files are written.
+
+On success the JSON envelope returns
+
+```json
+{
+  "ok": true,
+  "data": {
+    "imported_phases": [{ "id": "P1", "path": "design/phases/P1-foundation.yaml", "weight": 12 }],
+    "imported_tasks": ["P1-T1"],
+    "skipped_phases": []
+  }
+}
+```
+
+The validation pass detects logic errors before any write; ordinary disk failures during the per-phase write loop (disk full, permission denied) are out of scope for v0.2 and may leave a partial result.
+
 ## `task complete`
 
 `code-pact task complete <task-id> [--agent <name>] [--json] [--dry-run]` is the deterministic completion entry point for agents.

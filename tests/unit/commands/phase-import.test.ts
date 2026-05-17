@@ -1,0 +1,407 @@
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import {
+  mkdtemp,
+  rm,
+  mkdir,
+  writeFile,
+  readFile,
+} from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { parse as parseYaml } from "yaml";
+import { runPhaseImport } from "../../../src/commands/phase-import.ts";
+import { Phase } from "../../../src/core/schemas/phase.ts";
+
+const EMPTY_ROADMAP = `phases: []\n`;
+
+async function setupEmptyProject(dir: string): Promise<void> {
+  await mkdir(join(dir, "design", "phases"), { recursive: true });
+  await writeFile(join(dir, "design", "roadmap.yaml"), EMPTY_ROADMAP, "utf8");
+}
+
+async function readRoadmap(dir: string): Promise<{
+  raw: string;
+  doc: { phases: { id: string; path: string; weight: number }[] };
+}> {
+  const raw = await readFile(join(dir, "design", "roadmap.yaml"), "utf8");
+  const doc = parseYaml(raw) as {
+    phases: { id: string; path: string; weight: number }[];
+  };
+  return { raw, doc };
+}
+
+async function listPhaseFiles(dir: string): Promise<string[]> {
+  const { doc } = await readRoadmap(dir);
+  return doc.phases.map((p) => p.path).sort();
+}
+
+async function writeInput(
+  dir: string,
+  contents: string,
+  filename = "draft.yaml",
+): Promise<string> {
+  const p = join(dir, filename);
+  await writeFile(p, contents, "utf8");
+  return p;
+}
+
+let dir: string;
+
+beforeEach(async () => {
+  dir = await mkdtemp(join(tmpdir(), "code-pact-phase-import-"));
+});
+
+afterEach(async () => {
+  if (dir) await rm(dir, { recursive: true, force: true });
+});
+
+// ---------------------------------------------------------------------------
+// Happy path
+// ---------------------------------------------------------------------------
+
+describe("runPhaseImport — happy path", () => {
+  it("imports phases without tasks", async () => {
+    await setupEmptyProject(dir);
+    const inputPath = await writeInput(
+      dir,
+      `phases:
+  - id: P1
+    name: Foundation
+    weight: 12
+    objective: Establish project foundation
+  - id: P2
+    name: Core
+    weight: 18
+    objective: Implement CLI
+`,
+    );
+
+    const result = await runPhaseImport({ cwd: dir, inputPath });
+
+    expect(result.imported_phases).toHaveLength(2);
+    expect(result.imported_phases.map((p) => p.id)).toEqual(["P1", "P2"]);
+    expect(result.imported_tasks).toEqual([]);
+    expect(result.skipped_phases).toEqual([]);
+
+    const { doc } = await readRoadmap(dir);
+    expect(doc.phases.map((p) => p.id)).toEqual(["P1", "P2"]);
+  });
+
+  it("imports phases AND tasks; tasks are visible after parse", async () => {
+    await setupEmptyProject(dir);
+    const inputPath = await writeInput(
+      dir,
+      `phases:
+  - id: P1
+    name: Foundation
+    weight: 12
+    objective: Establish foundation
+    tasks:
+      - id: P1-T1
+        type: feature
+        ambiguity: low
+        risk: low
+        context_size: small
+        write_surface: medium
+        verification_strength: strong
+        expected_duration: short
+        status: planned
+        description: First task
+      - id: P1-T2
+        type: feature
+        ambiguity: low
+        risk: low
+        context_size: small
+        write_surface: medium
+        verification_strength: strong
+        expected_duration: short
+        status: planned
+`,
+    );
+
+    const result = await runPhaseImport({ cwd: dir, inputPath });
+    expect(result.imported_tasks).toEqual(["P1-T1", "P1-T2"]);
+
+    // Confirm the written phase YAML round-trips through the Phase schema
+    // and actually carries the tasks (the assertion that protects
+    // task-context visibility post-import).
+    const phaseRaw = await readFile(
+      join(dir, "design", "phases", "P1-foundation.yaml"),
+      "utf8",
+    );
+    const phase = Phase.parse(parseYaml(phaseRaw) as unknown);
+    expect(phase.tasks?.map((t) => t.id)).toEqual(["P1-T1", "P1-T2"]);
+  });
+
+  it("honors optional fields (confidence/risk/non_goals/requires_decision)", async () => {
+    await setupEmptyProject(dir);
+    const inputPath = await writeInput(
+      dir,
+      `phases:
+  - id: P1
+    name: Foundation
+    weight: 12
+    objective: Establish foundation
+    confidence: high
+    risk: low
+    non_goals:
+      - Build full billing
+    requires_decision: true
+    verify_commands:
+      - "echo ok"
+    definition_of_done:
+      - All tests pass
+`,
+    );
+
+    await runPhaseImport({ cwd: dir, inputPath });
+
+    const phaseRaw = await readFile(
+      join(dir, "design", "phases", "P1-foundation.yaml"),
+      "utf8",
+    );
+    const phase = Phase.parse(parseYaml(phaseRaw) as unknown);
+    expect(phase.confidence).toBe("high");
+    expect(phase.risk).toBe("low");
+    expect(phase.non_goals).toEqual(["Build full billing"]);
+    expect(phase.requires_decision).toBe(true);
+    expect(phase.verification.commands).toEqual(["echo ok"]);
+    expect(phase.definition_of_done).toEqual(["All tests pass"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Validation failures (no writes)
+// ---------------------------------------------------------------------------
+
+describe("runPhaseImport — validation failures leave files byte-identical", () => {
+  it("malformed YAML → CONFIG_ERROR, no writes", async () => {
+    await setupEmptyProject(dir);
+    const before = await readRoadmap(dir);
+    const inputPath = await writeInput(
+      dir,
+      `phases:
+  - id: P1
+    name: Foundation
+    weight: not a number
+`,
+    );
+
+    await expect(
+      runPhaseImport({ cwd: dir, inputPath }),
+    ).rejects.toMatchObject({ code: "CONFIG_ERROR" });
+
+    const after = await readRoadmap(dir);
+    expect(after.raw).toBe(before.raw);
+    expect(await listPhaseFiles(dir)).toEqual([]);
+  });
+
+  it("duplicate phase id within input → DUPLICATE_PHASE_ID, no writes", async () => {
+    await setupEmptyProject(dir);
+    const before = await readRoadmap(dir);
+    const inputPath = await writeInput(
+      dir,
+      `phases:
+  - id: P1
+    name: A
+    weight: 1
+    objective: a
+  - id: P1
+    name: B
+    weight: 1
+    objective: b
+`,
+    );
+
+    await expect(
+      runPhaseImport({ cwd: dir, inputPath }),
+    ).rejects.toMatchObject({ code: "DUPLICATE_PHASE_ID" });
+
+    const after = await readRoadmap(dir);
+    expect(after.raw).toBe(before.raw);
+  });
+
+  it("duplicate task id within input → AMBIGUOUS_TASK_ID, no writes", async () => {
+    await setupEmptyProject(dir);
+    const before = await readRoadmap(dir);
+    const inputPath = await writeInput(
+      dir,
+      `phases:
+  - id: P1
+    name: A
+    weight: 1
+    objective: a
+    tasks:
+      - id: DUP-T1
+        type: feature
+        ambiguity: low
+        risk: low
+        context_size: small
+        write_surface: low
+        verification_strength: weak
+        expected_duration: short
+        status: planned
+  - id: P2
+    name: B
+    weight: 1
+    objective: b
+    tasks:
+      - id: DUP-T1
+        type: feature
+        ambiguity: low
+        risk: low
+        context_size: small
+        write_surface: low
+        verification_strength: weak
+        expected_duration: short
+        status: planned
+`,
+    );
+
+    await expect(
+      runPhaseImport({ cwd: dir, inputPath }),
+    ).rejects.toMatchObject({ code: "AMBIGUOUS_TASK_ID" });
+
+    const after = await readRoadmap(dir);
+    expect(after.raw).toBe(before.raw);
+  });
+
+  it("missing input file → CONFIG_ERROR", async () => {
+    await setupEmptyProject(dir);
+    await expect(
+      runPhaseImport({ cwd: dir, inputPath: "nope.yaml" }),
+    ).rejects.toMatchObject({ code: "CONFIG_ERROR" });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Existing phase collisions
+// ---------------------------------------------------------------------------
+
+describe("runPhaseImport — collisions with existing roadmap", () => {
+  async function seedWithExistingP1(): Promise<string> {
+    await setupEmptyProject(dir);
+    const firstInput = await writeInput(
+      dir,
+      `phases:
+  - id: P1
+    name: Existing
+    weight: 5
+    objective: Existing P1
+    tasks:
+      - id: EXIST-T1
+        type: feature
+        ambiguity: low
+        risk: low
+        context_size: small
+        write_surface: low
+        verification_strength: weak
+        expected_duration: short
+        status: planned
+`,
+      "seed.yaml",
+    );
+    await runPhaseImport({ cwd: dir, inputPath: firstInput });
+    return firstInput;
+  }
+
+  it("colliding phase id without --force → DUPLICATE_PHASE_ID, no writes", async () => {
+    await seedWithExistingP1();
+    const before = await readRoadmap(dir);
+    const inputPath = await writeInput(
+      dir,
+      `phases:
+  - id: P1
+    name: New attempt
+    weight: 10
+    objective: Try to overwrite P1
+  - id: P2
+    name: Should not land either
+    weight: 5
+    objective: pre-write check blocks the whole input
+`,
+      "second.yaml",
+    );
+
+    await expect(
+      runPhaseImport({ cwd: dir, inputPath }),
+    ).rejects.toMatchObject({ code: "DUPLICATE_PHASE_ID" });
+
+    const after = await readRoadmap(dir);
+    expect(after.raw).toBe(before.raw);
+  });
+
+  it("--force skips colliding phases AND their tasks; imports the rest", async () => {
+    await seedWithExistingP1();
+    const inputPath = await writeInput(
+      dir,
+      `phases:
+  - id: P1
+    name: New attempt
+    weight: 10
+    objective: Try to overwrite P1
+    tasks:
+      - id: SHOULD-NOT-LAND
+        type: feature
+        ambiguity: low
+        risk: low
+        context_size: small
+        write_surface: low
+        verification_strength: weak
+        expected_duration: short
+        status: planned
+  - id: P2
+    name: Brand new
+    weight: 5
+    objective: gets imported
+`,
+      "force.yaml",
+    );
+
+    const result = await runPhaseImport({ cwd: dir, inputPath, force: true });
+    expect(result.imported_phases.map((p) => p.id)).toEqual(["P2"]);
+    expect(result.imported_tasks).toEqual([]);
+    expect(result.skipped_phases).toEqual(["P1"]);
+
+    // Confirm SHOULD-NOT-LAND did NOT make it onto disk: scan every phase
+    // file we actually wrote and assert the task id is absent.
+    const { doc } = await readRoadmap(dir);
+    for (const ref of doc.phases) {
+      const raw = await readFile(join(dir, ref.path), "utf8");
+      const phase = Phase.parse(parseYaml(raw) as unknown);
+      expect(phase.tasks?.some((t) => t.id === "SHOULD-NOT-LAND")).not.toBe(true);
+    }
+  });
+
+  it("--force does NOT bypass task collisions with existing kept phases", async () => {
+    await seedWithExistingP1();
+    const before = await readRoadmap(dir);
+    const inputPath = await writeInput(
+      dir,
+      `phases:
+  - id: P2
+    name: New
+    weight: 5
+    objective: brand new phase, but reuses an existing task id
+    tasks:
+      - id: EXIST-T1
+        type: feature
+        ambiguity: low
+        risk: low
+        context_size: small
+        write_surface: low
+        verification_strength: weak
+        expected_duration: short
+        status: planned
+`,
+      "task-collision.yaml",
+    );
+
+    await expect(
+      runPhaseImport({ cwd: dir, inputPath, force: true }),
+    ).rejects.toMatchObject({ code: "AMBIGUOUS_TASK_ID" });
+
+    const after = await readRoadmap(dir);
+    expect(after.raw).toBe(before.raw);
+  });
+});
