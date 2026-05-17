@@ -4,6 +4,7 @@ import type { SupportedAgent } from "../agents.ts";
 import { generateClaudeAdapter } from "./claude.ts";
 import { generateCodexAdapter } from "./codex.ts";
 import { generateGenericAdapter } from "./generic.ts";
+import { generateCursorAdapter } from "./cursor.ts";
 
 export type AdapterGenerateResult = {
   created: string[];
@@ -21,4 +22,5 @@ export const adapterRegistry: Record<SupportedAgent, AdapterGenerator> = {
   "claude-code": generateClaudeAdapter,
   codex: generateCodexAdapter,
   generic: generateGenericAdapter,
+  cursor: generateCursorAdapter,
 };
