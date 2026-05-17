@@ -8,7 +8,7 @@ export const messages = {
     "",
     "Commands:",
     "  init       initialize a project (interactive in a TTY, flag-based otherwise)",
-    "  plan       project planning tools (brief | prompt)",
+    "  plan       project planning tools (brief | prompt | constitution)",
     "  phase      manage phase contracts (add | new | ls | show | import)",
     "  task       manage tasks (add) and agent-facing commands (context | complete)",
     "  progress   show weighted progress against a baseline snapshot",
@@ -128,10 +128,19 @@ export const messages = {
       whoPrompt: "Who is it for? (primary users or stakeholders)",
       differentiatorPrompt: "What makes it different? (optional — press Enter to skip)",
     },
+    constitution: {
+      descriptionPrompt:
+        "What principles guide decisions in this project? (1-2 sentences — press Enter to use default)",
+      principlesPrompt:
+        "Core principles, comma separated (press Enter to use defaults)",
+    },
   },
   plan: {
     briefDone: (path: string): string => `Project brief written to ${path}`,
     briefSkipped: (path: string): string =>
+      `${path} already exists. Use --force to overwrite.`,
+    constitutionDone: (path: string): string => `Project constitution written to ${path}`,
+    constitutionSkipped: (path: string): string =>
       `${path} already exists. Use --force to overwrite.`,
     promptClipboardCopied: "Prompt copied to clipboard.",
     promptClipboardFailed: "Could not copy to clipboard — piped pbcopy/xclip command failed.",

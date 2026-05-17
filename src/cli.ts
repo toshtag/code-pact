@@ -24,6 +24,7 @@ import { runVerify, formatVerify } from "./commands/verify.ts";
 import { runGenerateAdapter } from "./commands/adapter.ts";
 import { runPlanBrief } from "./commands/plan-brief.ts";
 import { runPlanPrompt } from "./commands/plan-prompt.ts";
+import { runPlanConstitution } from "./commands/plan-constitution.ts";
 import { runRecommend, formatRecommend } from "./commands/recommend.ts";
 import { runDoctor, formatDoctor } from "./commands/doctor.ts";
 import { runValidate } from "./commands/validate.ts";
@@ -418,7 +419,11 @@ async function cmdPlan(argv: string[], locale: Locale, globalJson: boolean): Pro
     return cmdPlanPrompt(rest, locale, globalJson);
   }
 
-  const msg = `plan: unknown subcommand "${subcommand ?? ""}". Use: brief | prompt`;
+  if (subcommand === "constitution") {
+    return cmdPlanConstitution(rest, locale, globalJson);
+  }
+
+  const msg = `plan: unknown subcommand "${subcommand ?? ""}". Use: brief | prompt | constitution`;
   if (globalJson) {
     process.stdout.write(
       `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
@@ -533,6 +538,58 @@ async function cmdPlanPrompt(
     }
   }
 
+  return 0;
+}
+
+async function cmdPlanConstitution(
+  argv: string[],
+  locale: Locale,
+  globalJson: boolean,
+): Promise<number> {
+  const m = messages[locale];
+  const { values } = parseArgs({
+    args: argv,
+    options: {
+      force: { type: "boolean" },
+      json: { type: "boolean" },
+    },
+    strict: false,
+    allowPositionals: false,
+  });
+
+  const json = globalJson || values.json === true;
+  const force = values.force === true;
+  const cwd = process.cwd();
+
+  if (!isInteractive()) {
+    const msg = "plan constitution is interactive and requires a TTY.";
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
+      );
+    } else {
+      process.stderr.write(`${msg}\n`);
+    }
+    return 2;
+  }
+
+  const result = await runPlanConstitution({ cwd, locale, force });
+  if (result.skipped) {
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({ ok: false, error: { code: "ALREADY_EXISTS", message: m.plan.constitutionSkipped(result.path) } })}\n`,
+      );
+    } else {
+      process.stderr.write(`${m.plan.constitutionSkipped(result.path)}\n`);
+    }
+    return 2;
+  }
+
+  if (json) {
+    process.stdout.write(`${JSON.stringify({ ok: true, data: { path: result.path } })}\n`);
+  } else {
+    process.stderr.write(`${m.plan.constitutionDone(result.path)}\n`);
+  }
   return 0;
 }
 
