@@ -16,6 +16,7 @@ import {
   formatPhaseLsTable,
   formatPhaseShow,
 } from "./commands/phase.ts";
+import { runPhaseImport } from "./commands/phase-import.ts";
 import { runProgress, formatProgress } from "./commands/progress.ts";
 import { runPack } from "./commands/pack.ts";
 import { runVerify, formatVerify } from "./commands/verify.ts";
@@ -825,8 +826,79 @@ async function cmdPhase(argv: string[], locale: Locale, globalJson: boolean): Pr
     }
   }
 
+  // ---- phase import ----
+  if (subcommand === "import") {
+    let values: Record<string, unknown>;
+    let positionals: string[];
+    try {
+      ({ values, positionals } = strictParse(
+        "phase import",
+        rest,
+        {
+          force: { type: "boolean" },
+          json: { type: "boolean" },
+        },
+        { allowPositionals: true },
+      ));
+    } catch (err) {
+      if (!(err instanceof ConfigError)) throw err;
+      const json = globalJson || rest.includes("--json");
+      if (json) {
+        process.stdout.write(
+          `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: err.message } })}\n`,
+        );
+      } else {
+        process.stderr.write(`${err.message}\n`);
+      }
+      return 2;
+    }
+
+    const json = globalJson || values.json === true;
+    const force = values.force === true;
+    const inputPath = positionals[0];
+    if (!inputPath) {
+      const msg = "phase import requires an input YAML path, e.g. `phase import design/roadmap-draft.yaml`";
+      if (json) {
+        process.stdout.write(
+          `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
+        );
+      } else {
+        process.stderr.write(`${msg}\n`);
+      }
+      return 2;
+    }
+
+    try {
+      const result = await runPhaseImport({ cwd, inputPath, force });
+      if (json) {
+        process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
+      } else {
+        process.stderr.write(`${m.phase.importDone(result.imported_phases.length, result.imported_tasks.length, result.skipped_phases.length)}\n`);
+      }
+      return 0;
+    } catch (err: unknown) {
+      const code = (err as NodeJS.ErrnoException).code;
+      const message = err instanceof Error ? err.message : String(err);
+      if (
+        code === "CONFIG_ERROR" ||
+        code === "DUPLICATE_PHASE_ID" ||
+        code === "AMBIGUOUS_TASK_ID"
+      ) {
+        if (json) {
+          process.stdout.write(
+            `${JSON.stringify({ ok: false, error: { code, message } })}\n`,
+          );
+        } else {
+          process.stderr.write(`${message}\n`);
+        }
+        return 2;
+      }
+      throw err;
+    }
+  }
+
   // Unknown subcommand
-  const msg = `phase: unknown subcommand "${subcommand ?? ""}". Use: add | new | ls | show`;
+  const msg = `phase: unknown subcommand "${subcommand ?? ""}". Use: add | new | ls | show | import`;
   if (globalJson) {
     process.stdout.write(
       `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,

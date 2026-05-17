@@ -8,7 +8,7 @@ export const messages = {
     "",
     "コマンド:",
     "  init       プロジェクトを初期化 (TTY なら対話、それ以外はフラグ)",
-    "  phase      フェーズ契約を管理 (add | new | ls | show)",
+    "  phase      フェーズ契約を管理 (add | new | ls | show | import)",
     "  task       Agent 向けコマンド (context | complete)",
     "  progress   baseline に対する重み付き進捗を表示",
     "  pack       .context/<agent>/ に context pack ファイルを書き出し",
@@ -36,6 +36,16 @@ export const messages = {
       `フェーズ "${id}" は既に存在します。別の ID を指定してください。`,
     notFound: (id: string): string => `フェーズ "${id}" が roadmap.yaml に見つかりません。`,
     noPhases: "フェーズがありません。",
+    importDone: (
+      phaseCount: number,
+      taskCount: number,
+      skippedCount: number,
+    ): string => {
+      const parts = [`${phaseCount} 件のフェーズを取り込みました`];
+      if (taskCount > 0) parts.push(`(タスク ${taskCount} 件)`);
+      if (skippedCount > 0) parts.push(`(既存 ${skippedCount} 件はスキップ)`);
+      return `${parts.join(" ")}。`;
+    },
   },
   progress: {
     baselineNotFound: (name: string): string =>

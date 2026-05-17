@@ -8,7 +8,7 @@ export const messages = {
     "",
     "Commands:",
     "  init       initialize a project (interactive in a TTY, flag-based otherwise)",
-    "  phase      manage phase contracts (add | new | ls | show)",
+    "  phase      manage phase contracts (add | new | ls | show | import)",
     "  task       agent-facing commands (context | complete)",
     "  progress   show weighted progress against a baseline snapshot",
     "  pack       write a context pack file under .context/<agent>/",
@@ -36,6 +36,18 @@ export const messages = {
       `Phase "${id}" already exists. Choose a different ID.`,
     notFound: (id: string): string => `Phase "${id}" not found in roadmap.yaml.`,
     noPhases: "No phases found.",
+    importDone: (
+      phaseCount: number,
+      taskCount: number,
+      skippedCount: number,
+    ): string => {
+      const parts = [
+        `Imported ${phaseCount} phase${phaseCount === 1 ? "" : "s"}`,
+      ];
+      if (taskCount > 0) parts.push(`and ${taskCount} task${taskCount === 1 ? "" : "s"}`);
+      if (skippedCount > 0) parts.push(`(skipped ${skippedCount} existing)`);
+      return `${parts.join(" ")}.`;
+    },
   },
   progress: {
     baselineNotFound: (name: string): string =>
