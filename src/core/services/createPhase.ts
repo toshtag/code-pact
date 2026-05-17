@@ -2,6 +2,7 @@ import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parse as parseYaml, stringify as toYaml } from "yaml";
 import { Phase } from "../schemas/phase.ts";
+import type { Task } from "../schemas/task.ts";
 import { Roadmap, type PhaseRef } from "../schemas/roadmap.ts";
 
 export type Confidence = "low" | "medium" | "high";
@@ -17,6 +18,14 @@ export type CreatePhaseInput = {
   risk?: Risk;
   verifyCommands?: string[];
   doneCriteria?: string[];
+  /**
+   * Optional initial tasks to embed in the generated phase YAML.
+   * Used by `phase import`; the flag-based `phase add` and the
+   * interactive wizard omit this and grow tasks separately later.
+   */
+  tasks?: Task[];
+  nonGoals?: string[];
+  requiresDecision?: boolean;
 };
 
 export type CreatePhaseResult = {
@@ -85,6 +94,9 @@ export async function createPhase(opts: CreatePhaseInput): Promise<CreatePhaseRe
     objective,
     definition_of_done: doneCriteria,
     verification: { commands: verifyCommands },
+    ...(opts.nonGoals && opts.nonGoals.length > 0 ? { non_goals: opts.nonGoals } : {}),
+    ...(opts.requiresDecision === true ? { requires_decision: true } : {}),
+    ...(opts.tasks && opts.tasks.length > 0 ? { tasks: opts.tasks } : {}),
   };
 
   await mkdir(join(cwd, "design", "phases"), { recursive: true });
