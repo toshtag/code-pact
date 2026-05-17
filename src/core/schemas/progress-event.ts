@@ -9,6 +9,9 @@ export const ProgressEvent = z.object({
   // ISO 8601 datetime string. Stored as string to avoid tz ambiguity in YAML.
   at: z.iso.datetime({ offset: true }),
   actor: ActorType,
+  // Agent name that produced the event. Optional for backward compatibility
+  // with v0.1 logs written before `task complete` existed.
+  agent: z.string().min(1).optional(),
   evidence: z.array(z.string()).optional(),
   notes: z.string().optional(),
 });
