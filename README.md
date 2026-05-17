@@ -29,6 +29,8 @@ Contributors can also run from a clone with `pnpm link --global`, or install a l
 npx code-pact@alpha init
 
 # 2. Add a phase interactively (or use `phase add` with flags — see below).
+# Tip: if you already have a draft roadmap YAML, `phase import <path>`
+# bulk-imports phases (including their tasks) in one step.
 code-pact phase new
 
 # 3. Generate per-agent instruction files (CLAUDE.md / AGENTS.md /

@@ -776,3 +776,187 @@ describe("CLI: task complete (v0.2)", () => {
     expect(parsed.error.code).toBe("CONFIG_ERROR");
   });
 });
+
+// ---------------------------------------------------------------------------
+// v0.2: phase import
+// ---------------------------------------------------------------------------
+
+describe("CLI: phase import (v0.2)", () => {
+  async function setupEmpty(): Promise<void> {
+    const res = run([
+      "init",
+      "--non-interactive",
+      "--locale",
+      "en-US",
+      "--agent",
+      "claude-code",
+      "--json",
+    ]);
+    expect(res.code).toBe(0);
+  }
+
+  async function writeDraft(name: string, contents: string): Promise<string> {
+    const p = join(tmpDir, name);
+    await writeFile(p, contents, "utf8");
+    return name;
+  }
+
+  it("imports phases with tasks; task context resolves them immediately", async () => {
+    await setupEmpty();
+    const draftPath = await writeDraft(
+      "draft.yaml",
+      `phases:
+  - id: P1
+    name: Foundation
+    weight: 12
+    objective: Establish foundation
+    tasks:
+      - id: P1-T1
+        type: feature
+        ambiguity: low
+        risk: low
+        context_size: small
+        write_surface: medium
+        verification_strength: strong
+        expected_duration: short
+        status: planned
+        description: smoke import
+  - id: P2
+    name: Core
+    weight: 18
+    objective: Implement CLI commands
+`,
+    );
+
+    const importRes = run(["phase", "import", draftPath, "--json"]);
+    expect(importRes.code).toBe(0);
+    const importParsed = JSON.parse(importRes.stdout) as {
+      ok: boolean;
+      data: {
+        imported_phases: { id: string }[];
+        imported_tasks: string[];
+        skipped_phases: string[];
+      };
+    };
+    expect(importParsed.ok).toBe(true);
+    expect(importParsed.data.imported_phases.map((p) => p.id)).toEqual([
+      "P1",
+      "P2",
+    ]);
+    expect(importParsed.data.imported_tasks).toEqual(["P1-T1"]);
+    expect(importParsed.data.skipped_phases).toEqual([]);
+
+    // task context must succeed for the just-imported task — this is the
+    // core "phase import closes the dogfood loop" guarantee.
+    const ctxRes = run(["task", "context", "P1-T1", "--agent", "claude-code", "--json"]);
+    expect(ctxRes.code).toBe(0);
+    const ctxParsed = JSON.parse(ctxRes.stdout) as {
+      ok: boolean;
+      data: { task_id: string; phase_id: string };
+    };
+    expect(ctxParsed.ok).toBe(true);
+    expect(ctxParsed.data.task_id).toBe("P1-T1");
+    expect(ctxParsed.data.phase_id).toBe("P1");
+  });
+
+  it("duplicate phase id without --force fails with DUPLICATE_PHASE_ID, no writes", async () => {
+    await setupEmpty();
+    // Seed one phase via `phase add`, then try to import a draft that
+    // collides on phase id.
+    expect(
+      run([
+        "phase",
+        "add",
+        "--id",
+        "P1",
+        "--name",
+        "Existing",
+        "--objective",
+        "existing",
+        "--weight",
+        "5",
+        "--json",
+      ]).code,
+    ).toBe(0);
+
+    const beforeRoadmap = await readFile(
+      join(tmpDir, "design", "roadmap.yaml"),
+      "utf8",
+    );
+
+    const draftPath = await writeDraft(
+      "draft.yaml",
+      `phases:
+  - id: P1
+    name: New
+    weight: 10
+    objective: collide
+  - id: P2
+    name: Brand new
+    weight: 5
+    objective: should not land either
+`,
+    );
+
+    const res = run(["phase", "import", draftPath, "--json"]);
+    expect(res.code).toBe(2);
+    const parsed = JSON.parse(res.stdout) as {
+      ok: boolean;
+      error: { code: string };
+    };
+    expect(parsed.ok).toBe(false);
+    expect(parsed.error.code).toBe("DUPLICATE_PHASE_ID");
+
+    const after = await readFile(
+      join(tmpDir, "design", "roadmap.yaml"),
+      "utf8",
+    );
+    expect(after).toBe(beforeRoadmap);
+  });
+
+  it("malformed YAML fails with CONFIG_ERROR and JSON-only stdout", async () => {
+    await setupEmpty();
+    const draftPath = await writeDraft(
+      "broken.yaml",
+      `phases:
+  - id: P1
+    name: Foundation
+    weight: not-a-number
+    objective: malformed
+`,
+    );
+
+    const res = run(["phase", "import", draftPath, "--json"]);
+    expect(res.code).toBe(2);
+    const parsed = JSON.parse(res.stdout) as {
+      ok: boolean;
+      error: { code: string };
+    };
+    expect(parsed.ok).toBe(false);
+    expect(parsed.error.code).toBe("CONFIG_ERROR");
+  });
+
+  it("missing positional input path is a CONFIG_ERROR", async () => {
+    await setupEmpty();
+    const res = run(["phase", "import", "--json"]);
+    expect(res.code).toBe(2);
+    const parsed = JSON.parse(res.stdout) as {
+      ok: boolean;
+      error: { code: string };
+    };
+    expect(parsed.ok).toBe(false);
+    expect(parsed.error.code).toBe("CONFIG_ERROR");
+  });
+
+  it("--bogus is strictly rejected via strictParse", async () => {
+    await setupEmpty();
+    const res = run(["phase", "import", "draft.yaml", "--bogus", "--json"]);
+    expect(res.code).toBe(2);
+    const parsed = JSON.parse(res.stdout) as {
+      ok: boolean;
+      error: { code: string };
+    };
+    expect(parsed.ok).toBe(false);
+    expect(parsed.error.code).toBe("CONFIG_ERROR");
+  });
+});
