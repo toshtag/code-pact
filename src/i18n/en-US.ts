@@ -9,7 +9,7 @@ export const messages = {
     "Commands:",
     "  init       initialize a project (interactive in a TTY, flag-based otherwise)",
     "  phase      manage phase contracts (add | new | ls | show)",
-    "  task       agent-facing commands (context)",
+    "  task       agent-facing commands (context | complete)",
     "  progress   show weighted progress against a baseline snapshot",
     "  pack       write a context pack file under .context/<agent>/",
     "  verify     run deterministic completion criteria",
@@ -107,6 +107,24 @@ export const messages = {
         `Agent "${name}" is disabled in project.yaml (enabled: false).`,
       agentNotFound: (name: string): string =>
         `Agent "${name}" is not configured in project.yaml.`,
+    },
+    complete: {
+      taskNotFound: (taskId: string): string =>
+        `Task "${taskId}" not found in any phase.`,
+      ambiguous: (taskId: string, phases: string[]): string =>
+        `Task "${taskId}" exists in multiple phases: ${phases.join(", ")}.`,
+      agentNotEnabled: (name: string): string =>
+        `Agent "${name}" is disabled in project.yaml (enabled: false).`,
+      agentNotFound: (name: string): string =>
+        `Agent "${name}" is not configured in project.yaml.`,
+      verificationFailed: (taskId: string): string =>
+        `Verification failed for "${taskId}". progress.yaml was not modified.`,
+      alreadyDone: (taskId: string): string =>
+        `Task "${taskId}" already has a done event. Skipped re-verification (idempotent).`,
+      success: (taskId: string, agent: string): string =>
+        `Recorded done event for "${taskId}" (agent: ${agent}).`,
+      dryRun: (taskId: string): string =>
+        `Dry run: would append done event for "${taskId}". progress.yaml was not modified.`,
     },
   },
   cliContract: {

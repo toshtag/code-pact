@@ -9,7 +9,7 @@ export const messages = {
     "コマンド:",
     "  init       プロジェクトを初期化 (TTY なら対話、それ以外はフラグ)",
     "  phase      フェーズ契約を管理 (add | new | ls | show)",
-    "  task       Agent 向けコマンド (context)",
+    "  task       Agent 向けコマンド (context | complete)",
     "  progress   baseline に対する重み付き進捗を表示",
     "  pack       .context/<agent>/ に context pack ファイルを書き出し",
     "  verify     決定論的な完了条件を検証",
@@ -107,6 +107,24 @@ export const messages = {
         `エージェント "${name}" は project.yaml で無効化されています (enabled: false)。`,
       agentNotFound: (name: string): string =>
         `エージェント "${name}" は project.yaml に設定されていません。`,
+    },
+    complete: {
+      taskNotFound: (taskId: string): string =>
+        `タスク "${taskId}" がどのフェーズにも見つかりません。`,
+      ambiguous: (taskId: string, phases: string[]): string =>
+        `タスク "${taskId}" は複数のフェーズに存在します: ${phases.join(", ")}`,
+      agentNotEnabled: (name: string): string =>
+        `エージェント "${name}" は project.yaml で無効化されています (enabled: false)。`,
+      agentNotFound: (name: string): string =>
+        `エージェント "${name}" は project.yaml に設定されていません。`,
+      verificationFailed: (taskId: string): string =>
+        `タスク "${taskId}" の verify が失敗しました。progress.yaml は変更されていません。`,
+      alreadyDone: (taskId: string): string =>
+        `タスク "${taskId}" には既に done イベントが存在します。再 verify をスキップしました (idempotent)。`,
+      success: (taskId: string, agent: string): string =>
+        `タスク "${taskId}" の done イベントを記録しました (agent: ${agent})。`,
+      dryRun: (taskId: string): string =>
+        `Dry run: タスク "${taskId}" の done イベントを追記する想定です。progress.yaml は変更されていません。`,
     },
   },
   cliContract: {

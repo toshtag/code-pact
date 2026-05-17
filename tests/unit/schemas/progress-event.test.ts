@@ -34,6 +34,20 @@ describe("ProgressEvent", () => {
     const { task_id: _, ...rest } = VALID_EVENT as Record<string, unknown>;
     expect(() => ProgressEvent.parse(rest)).toThrow();
   });
+
+  it("accepts an event with agent (v0.2+)", () => {
+    const e = ProgressEvent.parse({ ...VALID_EVENT, agent: "claude-code" });
+    expect(e.agent).toBe("claude-code");
+  });
+
+  it("accepts an event without agent (v0.1 backward compatibility)", () => {
+    const e = ProgressEvent.parse(VALID_EVENT);
+    expect(e.agent).toBeUndefined();
+  });
+
+  it("rejects empty agent string", () => {
+    expect(() => ProgressEvent.parse({ ...VALID_EVENT, agent: "" })).toThrow();
+  });
 });
 
 describe("ProgressLog", () => {
