@@ -40,7 +40,8 @@
     "build": "tsup",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "node scripts/assert-package-metadata.mjs"
   },
   "dependencies": {
     "yaml": "^2.9.0",

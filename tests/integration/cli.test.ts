@@ -1,8 +1,7 @@
-// This test suite spawns the built CLI (`dist/cli.js`) via `spawnSync`.
-// It is effectively a CLI integration test, not a pure unit test. We
-// rebuild dist on every run so a stale build cannot mask real failures
-// (this was the root cause of the BUG-001 RC dogfood failure).
-// TODO: move to tests/integration/cli.test.ts in a follow-up PR.
+// CLI integration suite — spawns the built CLI (`dist/cli.js`) via
+// `spawnSync`. dist is rebuilt on every run so a stale build cannot mask
+// real failures (this was the root cause of the BUG-001 RC dogfood
+// failure on v0.1).
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
 import { spawnSync } from "node:child_process";
 import { mkdtemp, rm, readFile, writeFile } from "node:fs/promises";
