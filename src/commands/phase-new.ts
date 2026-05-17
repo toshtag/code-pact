@@ -39,7 +39,7 @@ export async function runPhaseNew(opts: PhaseNewOptions): Promise<CreatePhaseRes
 
     let weight = NaN;
     while (!Number.isFinite(weight) || weight <= 0 || weight > 100) {
-      const raw = await prompter.ask(`${m.weightPrompt} [10]`);
+      const raw = await prompter.ask(`${m.weightPrompt} [10]${m.weightHint}`);
       if (raw.length === 0) {
         weight = 10;
       } else {
@@ -49,9 +49,11 @@ export async function runPhaseNew(opts: PhaseNewOptions): Promise<CreatePhaseRes
 
     const objective = await askRequired(prompter, m.objectivePrompt);
 
+    prompter.write(`${m.confidenceHint}\n`);
     const confidenceIdx = await prompter.askChoice(m.confidencePrompt, CONFIDENCE_CHOICES);
     const confidence = CONFIDENCE_CHOICES[confidenceIdx]!;
 
+    prompter.write(`${m.riskHint}\n`);
     const riskIdx = await prompter.askChoice(m.riskPrompt, RISK_CHOICES);
     const risk = RISK_CHOICES[riskIdx]!;
 
