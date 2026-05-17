@@ -8,7 +8,7 @@ export const messages = {
     "",
     "Commands:",
     "  init       initialize a project (interactive in a TTY, flag-based otherwise)",
-    "  plan       project planning tools (brief)",
+    "  plan       project planning tools (brief | prompt)",
     "  phase      manage phase contracts (add | new | ls | show | import)",
     "  task       manage tasks (add) and agent-facing commands (context | complete)",
     "  progress   show weighted progress against a baseline snapshot",
@@ -133,6 +133,9 @@ export const messages = {
     briefDone: (path: string): string => `Project brief written to ${path}`,
     briefSkipped: (path: string): string =>
       `${path} already exists. Use --force to overwrite.`,
+    promptClipboardCopied: "Prompt copied to clipboard.",
+    promptClipboardFailed: "Could not copy to clipboard — piped pbcopy/xclip command failed.",
+    promptNoBrief: "Tip: run `code-pact plan brief` first to add a project description.",
   },
   task: {
     added: (taskId: string, phaseId: string, path: string): string =>
@@ -201,6 +204,24 @@ export const messages = {
       differentiatorPlaceholder: "(not specified)",
       footer:
         "Regenerate this file with `code-pact plan brief`.\nTo create a planning prompt for AI, run `code-pact plan prompt`.",
+    },
+    planPrompt: {
+      intro:
+        "Please read the following project information and create a code-pact roadmap YAML.",
+      briefHeader: "Project Brief",
+      noBriefNotice:
+        "No design/brief.md found. Add a project description above this section manually.",
+      constitutionHeader: "Project Constitution",
+      formatHeader: "Output Format (YAML)",
+      guidelinesHeader: "Guidelines",
+      guidelines: [
+        "Create 3–7 phases that cover the full scope of the project.",
+        "Assign 3–8 tasks per phase.",
+        "Total weight across all phases should be approximately 100.",
+        "confidence reflects design certainty; risk reflects implementation difficulty.",
+        "verification.commands must be real, runnable shell commands (e.g. pnpm test).",
+        "Output ONLY the YAML — no explanation text before or after.",
+      ],
     },
     adapterCommon: {
       managedNotice:

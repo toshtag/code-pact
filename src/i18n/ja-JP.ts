@@ -8,7 +8,7 @@ export const messages = {
     "",
     "コマンド:",
     "  init       プロジェクトを初期化 (TTY なら対話、それ以外はフラグ)",
-    "  plan       プロジェクト計画ツール (brief)",
+    "  plan       プロジェクト計画ツール (brief | prompt)",
     "  phase      フェーズ契約を管理 (add | new | ls | show | import)",
     "  task       タスクの管理 (add) と Agent 向けコマンド (context | complete)",
     "  progress   baseline に対する重み付き進捗を表示",
@@ -131,6 +131,9 @@ export const messages = {
     briefDone: (path: string): string => `プロジェクト概要を ${path} に書き出しました`,
     briefSkipped: (path: string): string =>
       `${path} は既に存在します。上書きするには --force を使ってください。`,
+    promptClipboardCopied: "プロンプトをクリップボードにコピーしました。",
+    promptClipboardFailed: "クリップボードへのコピーに失敗しました (pbcopy/xclip コマンドが使えません)。",
+    promptNoBrief: "ヒント: 先に `code-pact plan brief` を実行してプロジェクト説明を追加してください。",
   },
   task: {
     added: (taskId: string, phaseId: string, path: string): string =>
@@ -199,6 +202,24 @@ export const messages = {
       differentiatorPlaceholder: "(未記入)",
       footer:
         "このファイルは `code-pact plan brief` で再生成できます。\nAI 向けの計画プロンプトを生成するには `code-pact plan prompt` を実行してください。",
+    },
+    planPrompt: {
+      intro:
+        "以下のプロジェクト情報を読んで、code-pact 形式のロードマップ YAML を作成してください。",
+      briefHeader: "プロジェクト概要",
+      noBriefNotice:
+        "design/brief.md が見つかりません。このセクションの上にプロジェクト説明を手動で追加してください。",
+      constitutionHeader: "プロジェクト方針",
+      formatHeader: "出力形式（YAML）",
+      guidelinesHeader: "出力の指針",
+      guidelines: [
+        "プロジェクト全体をカバーする 3〜7 個のフェーズを作成する。",
+        "各フェーズに 3〜8 個のタスクを割り当てる。",
+        "全フェーズの weight 合計は目安として 100 前後にする。",
+        "confidence は設計の確度、risk は実装難易度を反映する。",
+        "verification.commands は実際に実行できるシェルコマンドにする（例: pnpm test）。",
+        "出力は YAML のみとし、前後に説明文を含めない。",
+      ],
     },
     adapterCommon: {
       managedNotice:
