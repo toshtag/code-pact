@@ -181,6 +181,18 @@ Order of operations:
 
 The `agent` field on `ProgressEvent` is optional for backward compatibility with v0.1 logs that predate `task complete`.
 
+## Locale resolution
+
+The active locale is resolved in this priority order:
+
+1. `--locale <code>` flag on the command line
+2. `CODE_PACT_LOCALE` environment variable
+3. `locale` field in `.code-pact/project.yaml` (read when the project has already been initialized; errors are silently ignored)
+4. `LANG` environment variable (checked for a `ja` prefix → `ja-JP`)
+5. Default: `en-US`
+
+This means that once a project is initialized with `ja-JP`, all subsequent commands automatically use Japanese without requiring `--locale` or environment variables.
+
 ## Stability
 
 The shapes documented here — JSON envelope, exit codes, error codes,

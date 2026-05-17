@@ -2,7 +2,8 @@
 import { parseArgs } from "node:util";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
+import { dirname, resolve, join } from "node:path";
+import { parse as parseYaml } from "yaml";
 import { splitArgv, strictParse, ConfigError } from "./lib/argv.ts";
 import { isInteractive, isCIEnv } from "./lib/tty.ts";
 import { messages, type Locale } from "./i18n/index.ts";
@@ -27,14 +28,41 @@ import { runTaskContext } from "./commands/task-context.ts";
 import { runTaskComplete } from "./commands/task-complete.ts";
 import { runPhaseNew } from "./commands/phase-new.ts";
 import type { LocaleCode } from "./core/schemas/locale.ts";
+import { LocaleConfig } from "./core/schemas/locale.ts";
 import type { PhaseStatus } from "./core/schemas/phase.ts";
 
 const KNOWN_LOCALES: ReadonlySet<Locale> = new Set(["en-US", "ja-JP"]);
 const KNOWN_AGENTS: ReadonlySet<SupportedAgent> = new Set(SUPPORTED_AGENTS);
 
-function detectLocale(): Locale {
-  const env = process.env.CODE_PACT_LOCALE ?? process.env.LANG ?? "";
-  if (env.startsWith("ja")) return "ja-JP";
+// Locale resolution priority:
+// 1. --locale flag (handled in main before this is called)
+// 2. CODE_PACT_LOCALE env var
+// 3. .code-pact/project.yaml locale field
+// 4. LANG env var
+// 5. default en-US
+async function detectLocale(cwd: string): Promise<Locale> {
+  const codePactLocale = process.env.CODE_PACT_LOCALE;
+  if (codePactLocale && KNOWN_LOCALES.has(codePactLocale as Locale)) {
+    return codePactLocale as Locale;
+  }
+
+  try {
+    const raw = await readFile(join(cwd, ".code-pact", "project.yaml"), "utf8");
+    const data = parseYaml(raw) as { locale?: unknown };
+    if (data && typeof data === "object" && data.locale != null) {
+      const result = LocaleConfig.safeParse(data.locale);
+      if (result.success) {
+        const cfg = result.data;
+        const code = typeof cfg === "string" ? cfg : (cfg.cli ?? cfg.default);
+        if (KNOWN_LOCALES.has(code as Locale)) return code as Locale;
+      }
+    }
+  } catch {
+    // project.yaml absent or unparseable — continue
+  }
+
+  const lang = process.env.LANG ?? "";
+  if (lang.startsWith("ja")) return "ja-JP";
   return "en-US";
 }
 
@@ -1216,10 +1244,11 @@ async function cmdTaskComplete(
 
 async function main(): Promise<number> {
   const { globalValues, command, rest } = splitArgv(process.argv.slice(2));
+  const cwd = process.cwd();
   const locale: Locale =
     globalValues.locale && KNOWN_LOCALES.has(globalValues.locale as Locale)
       ? (globalValues.locale as Locale)
-      : detectLocale();
+      : await detectLocale(cwd);
   const m = messages[locale];
   const json = globalValues.json === true;
 
