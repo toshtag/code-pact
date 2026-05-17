@@ -306,6 +306,73 @@ async function checkBakFiles(cwd: string, issues: DoctorIssue[]): Promise<void> 
   }
 }
 
+// Check 9: duplicate task ids across phases
+function checkDuplicateTaskIds(phases: Phase[], issues: DoctorIssue[]): void {
+  const seen = new Map<string, string>(); // taskId → first phaseId
+  for (const phase of phases) {
+    for (const task of phase.tasks ?? []) {
+      const first = seen.get(task.id);
+      if (first !== undefined) {
+        issues.push({
+          code: "DUPLICATE_TASK_ID",
+          severity: "error",
+          message: `Task "${task.id}" appears in both phase "${first}" and "${phase.id}"`,
+        });
+      } else {
+        seen.set(task.id, phase.id);
+      }
+    }
+  }
+}
+
+// Check 10: .local/ is gitignored
+async function checkLocalGitignored(cwd: string, issues: DoctorIssue[]): Promise<void> {
+  let content: string;
+  try {
+    content = await readFile(join(cwd, ".gitignore"), "utf8");
+  } catch {
+    issues.push({
+      code: "LOCAL_NOT_GITIGNORED",
+      severity: "warning",
+      message: ".gitignore not found — add \".local/\" to avoid committing sensitive planning notes",
+    });
+    return;
+  }
+  const lines = content.split("\n").map((l) => l.trim());
+  const isIgnored = lines.some((l) => l === ".local" || l === ".local/" || l.startsWith(".local/"));
+  if (!isIgnored) {
+    issues.push({
+      code: "LOCAL_NOT_GITIGNORED",
+      severity: "warning",
+      message: ".local/ is not in .gitignore — add \".local/\" to avoid committing sensitive planning notes",
+    });
+  }
+}
+
+// Check 11: enabled agents have their adapter instruction file on disk
+async function checkAdapterMissing(
+  cwd: string,
+  project: Project,
+  issues: DoctorIssue[],
+): Promise<void> {
+  for (const agentRef of project.agents) {
+    if (agentRef.enabled === false) continue;
+    const profilePath = join(cwd, ".code-pact", agentRef.profile);
+    const result = await safeReadYaml(profilePath);
+    if (!result.ok) continue; // already reported by checkAgentProfiles
+    const parsed = AgentProfile.safeParse(result.data);
+    if (!parsed.success) continue;
+    const instructionFile = join(cwd, parsed.data.instruction_filename);
+    if (!(await fileExists(instructionFile))) {
+      issues.push({
+        code: "ADAPTER_MISSING",
+        severity: "warning",
+        message: `Agent "${parsed.data.name}" is enabled but "${parsed.data.instruction_filename}" does not exist — run "code-pact adapter --agent ${agentRef.name}"`,
+      });
+    }
+  }
+}
+
 async function checkStaleContext(
   cwd: string,
   phases: Phase[],
@@ -376,6 +443,17 @@ export async function runDoctor(cwd: string): Promise<DoctorResult> {
   // 8. stale generated context (requires phases + project)
   if (project) {
     await checkStaleContext(cwd, phases, project, issues);
+  }
+
+  // 9. duplicate task ids across phases
+  checkDuplicateTaskIds(phases, issues);
+
+  // 10. .local/ gitignored
+  await checkLocalGitignored(cwd, issues);
+
+  // 11. enabled agents have adapter instruction files
+  if (project) {
+    await checkAdapterMissing(cwd, project, issues);
   }
 
   const ok = issues.every((i) => i.severity !== "error");
