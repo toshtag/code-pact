@@ -1,12 +1,22 @@
 import type { AgentProfile } from "./schemas/agent-profile.ts";
 
-export type SupportedAgent = "claude-code" | "codex" | "generic";
+export type SupportedAgent = "claude-code" | "codex" | "generic" | "cursor";
 
 export const SUPPORTED_AGENTS: readonly SupportedAgent[] = [
   "claude-code",
   "codex",
   "generic",
+  "cursor",
 ] as const;
+
+/**
+ * Adapters whose generated instructions or rule format may shift across
+ * v0.2.x. We surface this both in README and in a comment at the top of
+ * the generated file so contributors know to expect churn.
+ */
+export const EXPERIMENTAL_AGENTS: ReadonlySet<SupportedAgent> = new Set([
+  "cursor",
+]);
 
 export function isSupportedAgent(value: string): value is SupportedAgent {
   return (SUPPORTED_AGENTS as readonly string[]).includes(value);
@@ -46,8 +56,25 @@ const GENERIC_PROFILE: AgentProfile = {
   model_map: {},
 };
 
+// Cursor adapter (experimental, v0.2).
+// Source: https://cursor.com/docs/context/rules — `.cursor/rules/*.mdc`
+// is the canonical placement (`.cursorrules` was deprecated in 0.43).
+// Each rule is markdown with frontmatter (description / globs /
+// alwaysApply). code-pact's instructions are project-wide and must be
+// in the agent's context at all times, so we write a single file with
+// `alwaysApply: true`.
+const CURSOR_PROFILE: AgentProfile = {
+  name: "cursor",
+  instruction_filename: ".cursor/rules/code-pact.mdc",
+  context_dir: ".context/cursor",
+  // Cursor publishes its own model selection UI; we leave the model map
+  // empty so users are not surprised by stale vendor ids in the profile.
+  model_map: {},
+};
+
 export const DEFAULT_AGENT_PROFILES: Record<SupportedAgent, AgentProfile> = {
   "claude-code": CLAUDE_PROFILE,
   codex: CODEX_PROFILE,
   generic: GENERIC_PROFILE,
+  cursor: CURSOR_PROFILE,
 };
