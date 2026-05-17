@@ -42,7 +42,9 @@ Out of scope:
 
 ## Supply chain notes
 
-- Releases use annotated git tags and are built locally from a clean checkout before publish.
+- Releases from `v0.2.0-alpha.0` onward use **SSH-signed annotated git tags**. The signing key is registered on GitHub as the maintainer's signing key, so the tag page displays a "Verified" badge. The maintainer setup is documented in [CONTRIBUTING.md](CONTRIBUTING.md#tag-signing-maintainer-only).
+- The tag `v0.1.0-alpha.0` is unsigned (it predates this policy) and is left untouched; moving it would invalidate the corresponding npm publish.
+- Releases are built locally from a clean checkout before publish.
 - The published tarball shasum is recorded in the corresponding GitHub Release notes.
 - 2FA (`auth-and-writes`) is enabled on the publisher's npm account.
 
