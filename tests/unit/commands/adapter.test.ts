@@ -147,6 +147,73 @@ describe("runGenerateAdapter — generic", () => {
 });
 
 // ---------------------------------------------------------------------------
+// cursor adapter (experimental, v0.2)
+// ---------------------------------------------------------------------------
+
+describe("runGenerateAdapter — cursor", () => {
+  beforeEach(async () => {
+    await runInit({ cwd: dir, locale: "en-US", agents: ["cursor"], force: false, json: false });
+  });
+
+  it("writes .cursor/rules/code-pact.mdc", async () => {
+    const result = await runGenerateAdapter({ cwd: dir, agentName: "cursor", force: false });
+    expect(result.agentName).toBe("cursor");
+    const names = result.created.map((p) => p.replace(dir, ""));
+    expect(names.some((n) => n.includes(".cursor/rules/code-pact.mdc"))).toBe(
+      true,
+    );
+  });
+
+  it("emits a Cursor-format mdc with frontmatter and alwaysApply: true", async () => {
+    await runGenerateAdapter({ cwd: dir, agentName: "cursor", force: false });
+    const content = await readFile(
+      join(dir, ".cursor", "rules", "code-pact.mdc"),
+      "utf8",
+    );
+    // Frontmatter must be the very first thing in the file so Cursor
+    // recognises it as a rule. The .mdc format is documented at
+    // https://cursor.com/docs/context/rules.
+    expect(content.startsWith("---\n")).toBe(true);
+    expect(content).toContain("alwaysApply: true");
+    // Empty globs is intentional: the rule applies project-wide.
+    expect(content).toContain("globs: []");
+    expect(content).toMatch(/description:\s/);
+  });
+
+  it("instructs the agent to use task context + task complete", async () => {
+    await runGenerateAdapter({ cwd: dir, agentName: "cursor", force: false });
+    const content = await readFile(
+      join(dir, ".cursor", "rules", "code-pact.mdc"),
+      "utf8",
+    );
+    expect(content).toContain("code-pact task context");
+    expect(content).toContain("code-pact task complete");
+  });
+
+  it("flags itself as experimental in the file body", async () => {
+    await runGenerateAdapter({ cwd: dir, agentName: "cursor", force: false });
+    const content = await readFile(
+      join(dir, ".cursor", "rules", "code-pact.mdc"),
+      "utf8",
+    );
+    expect(content).toMatch(/experimental/i);
+  });
+
+  it("does NOT write the deprecated `.cursorrules` legacy file", async () => {
+    await runGenerateAdapter({ cwd: dir, agentName: "cursor", force: false });
+    const { existsSync } = await import("node:fs");
+    expect(existsSync(join(dir, ".cursorrules"))).toBe(false);
+  });
+
+  it("creates .context/cursor/ directory for context packs", async () => {
+    await runGenerateAdapter({ cwd: dir, agentName: "cursor", force: false });
+    const { readdir } = await import("node:fs/promises");
+    const entries = await readdir(join(dir, ".context"));
+    expect(entries).toContain("cursor");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Error: unknown agent
 // ---------------------------------------------------------------------------
 
