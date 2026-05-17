@@ -448,9 +448,11 @@ describe("runPhaseImport — lenient import (AI-generated YAML)", () => {
     const phase = Phase.parse(parseYaml(phaseRaw) as unknown);
     expect(phase.tasks?.map((t) => t.id)).toEqual(["P1-T1", "P1-T2"]);
     // Defaults should have been applied
-    expect(phase.tasks?.[0].type).toBe("feature");
-    expect(phase.tasks?.[0].status).toBe("planned");
-    expect(phase.tasks?.[0].ambiguity).toBe("medium");
+    const firstTask = phase.tasks?.[0];
+    expect(firstTask).toBeDefined();
+    expect(firstTask!.type).toBe("feature");
+    expect(firstTask!.status).toBe("planned");
+    expect(firstTask!.ambiguity).toBe("medium");
   });
 
   it("imports tasks with all fields present; completed_fields is empty", async () => {
