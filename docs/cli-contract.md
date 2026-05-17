@@ -115,7 +115,7 @@ the list becomes `default_agent` in the generated `project.yaml`.
 
 ## `phase import`
 
-`code-pact phase import <path> [--force] [--json]` bulk-imports a draft roadmap. Input shape:
+`code-pact phase import <path> [--force] [--strict] [--json]` bulk-imports a draft roadmap. Input shape:
 
 ```yaml
 phases:
@@ -123,25 +123,29 @@ phases:
     name: Foundation
     weight: 12
     objective: "..."
-    # optional:
+    # optional phase fields:
     confidence: medium
     risk: low
     verify_commands: ["pnpm test"]
     definition_of_done: ["..."]
     non_goals: ["..."]
     requires_decision: false
-    tasks:                # optional, accepted in v0.2 so imported tasks
-      - id: P1-T1         # are immediately visible to `task context`
-        type: feature
-        ambiguity: low
-        risk: low
-        context_size: small
+    tasks:                # optional; only `id` is required per task (v0.4+)
+      - id: P1-T1
+        description: "..."   # all other task fields are optional
+        type: feature        # defaults to "feature" when omitted
+        ambiguity: low       # defaults to "medium" when omitted
+        risk: low            # defaults to "medium" when omitted
+        context_size: small  # defaults to "medium" when omitted
         write_surface: medium
         verification_strength: strong
         expected_duration: short
-        status: planned
-        description: "..."
+        status: planned      # defaults to "planned" when omitted
 ```
+
+**Lenient task schema (v0.4+):** Only `id` is required on each task entry. Missing detail fields are filled with sensible defaults at import time. This allows AI-generated roadmap YAML (which often omits `ambiguity`, `context_size`, etc.) to be imported directly without manual field-filling.
+
+Add `--strict` to require every task field to be present explicitly; missing fields raise `CONFIG_ERROR` (exit 2) before any writes.
 
 Validation runs in a single pre-write pass:
 
@@ -150,6 +154,7 @@ Validation runs in a single pre-write pass:
 3. An input phase id colliding with an existing `roadmap.yaml` entry, **without `--force`** → `DUPLICATE_PHASE_ID` (exit 2). No files are written.
 4. With `--force`, colliding phases are **skipped**; tasks declared inside those skipped phases are not imported either.
 5. Across all *kept* import targets, plus the existing kept roadmap phases, every task id must be unique. Any collision → `AMBIGUOUS_TASK_ID` (exit 2). `--force` does **not** bypass this: task-level integrity wins over throughput. No files are written.
+6. With `--strict`, any task that is missing one or more required Task fields → `CONFIG_ERROR` (exit 2). No files are written.
 
 On success the JSON envelope returns
 
@@ -159,12 +164,35 @@ On success the JSON envelope returns
   "data": {
     "imported_phases": [{ "id": "P1", "path": "design/phases/P1-foundation.yaml", "weight": 12 }],
     "imported_tasks": ["P1-T1"],
-    "skipped_phases": []
+    "skipped_phases": [],
+    "completed_fields": [
+      { "taskId": "P1-T1", "fields": ["type", "ambiguity", "risk"] }
+    ]
   }
 }
 ```
 
+`completed_fields` is non-empty only when defaults were applied. In strict mode it is always `[]`.
+
 The validation pass detects logic errors before any write; ordinary disk failures during the per-phase write loop (disk full, permission denied) are out of scope for v0.2 and may leave a partial result.
+
+## `plan`
+
+`code-pact plan <subcommand>` provides AI-assisted project planning tools that feed into the design directory.
+
+### `plan brief [--force]`
+
+Interactive wizard that collects project description, target users, and differentiator, then writes `design/brief.md`. Requires a TTY; exits 2 in non-interactive mode. `--force` overwrites an existing file.
+
+### `plan prompt [--clipboard]`
+
+Reads `design/brief.md` and `design/constitution.md` (both optional), assembles a structured AI planning prompt, and writes it to stdout. Add `--clipboard` to also copy to the clipboard (via `pbcopy` on macOS or `xclip` on Linux). Does not require a TTY.
+
+JSON output includes `has_brief`, `has_constitution`, and `clipboard_copied` flags alongside the prompt string.
+
+### `plan constitution [--force]`
+
+Interactive wizard that collects a project description and comma-separated core principles, then writes `design/constitution.md`. Requires a TTY; exits 2 in non-interactive mode. `--force` overwrites an existing file. Empty input falls back to i18n defaults so the file is always a valid starting point.
 
 ## `task complete`
 
