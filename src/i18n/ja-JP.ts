@@ -8,6 +8,7 @@ export const messages = {
     "",
     "コマンド:",
     "  init       プロジェクトを初期化 (TTY なら対話、それ以外はフラグ)",
+    "  plan       プロジェクト計画ツール (brief)",
     "  phase      フェーズ契約を管理 (add | new | ls | show | import)",
     "  task       タスクの管理 (add) と Agent 向けコマンド (context | complete)",
     "  progress   baseline に対する重み付き進捗を表示",
@@ -16,7 +17,7 @@ export const messages = {
     "  adapter    Agent 別の instruction ファイルを生成/更新",
     "  recommend  タスクに適したモデル tier を提案",
     "  doctor     プロジェクト構造の問題を報告 (人間向け)",
-  "  validate   CI 向けプロジェクト検証 (エラー時 exit 1、--strict で警告も対象)",
+    "  validate   CI 向けプロジェクト検証 (エラー時 exit 1、--strict で警告も対象)",
     "",
     "グローバルオプション:",
     "  -v, --version    バージョンを表示",
@@ -119,6 +120,17 @@ export const messages = {
       descriptionPrompt: "タスクの説明",
       typePrompt: "タスクの種類",
     },
+    brief: {
+      collectBriefPrompt: "プロジェクト概要を収集しますか？ (design/brief.md を作成)",
+      whatPrompt: "何を作りますか？ (1〜3 文で)",
+      whoPrompt: "誰のためですか？ (主なユーザーや関係者)",
+      differentiatorPrompt: "特徴的なところは何ですか？ (任意 — スキップするなら Enter)",
+    },
+  },
+  plan: {
+    briefDone: (path: string): string => `プロジェクト概要を ${path} に書き出しました`,
+    briefSkipped: (path: string): string =>
+      `${path} は既に存在します。上書きするには --force を使ってください。`,
   },
   task: {
     added: (taskId: string, phaseId: string, path: string): string =>
@@ -178,6 +190,15 @@ export const messages = {
         "ファイルレベルのエクスポートのみ使用し、内部ヘルパーのバレル再エクスポートは避ける。",
       ],
       editHint: "このファイルを編集または削除して、プロジェクトの規約に合わせてください。",
+    },
+    brief: {
+      header: "プロジェクト概要",
+      whatHeader: "何を作るか",
+      whoHeader: "誰のためか",
+      differentiatorHeader: "特徴的なところ",
+      differentiatorPlaceholder: "(未記入)",
+      footer:
+        "このファイルは `code-pact plan brief` で再生成できます。\nAI 向けの計画プロンプトを生成するには `code-pact plan prompt` を実行してください。",
     },
     adapterCommon: {
       managedNotice:
