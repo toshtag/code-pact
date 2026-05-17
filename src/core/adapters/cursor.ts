@@ -2,6 +2,8 @@ import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { AgentProfile } from "../schemas/agent-profile.ts";
 import type { ModelProfile } from "../schemas/model-profile.ts";
+import type { Locale } from "../../i18n/index.ts";
+import { messages as messageCatalog } from "../../i18n/index.ts";
 
 // Cursor adapter (experimental, v0.2).
 //
@@ -19,7 +21,7 @@ import type { ModelProfile } from "../schemas/model-profile.ts";
 //   and placement may shift across Cursor releases. The generated
 //   file carries a warning comment so the project owner sees it.
 
-function cursorMdc(profile: AgentProfile): string {
+function cursorMdc(profile: AgentProfile, locale: Locale): string {
   // Frontmatter is YAML; we hand-write it to keep the structure tight
   // and to match the exact form documented at the URL above.
   const frontmatter = [
@@ -30,51 +32,48 @@ function cursorMdc(profile: AgentProfile): string {
     "---",
   ].join("\n");
 
+  const t = messageCatalog[locale].templates.adapterCommon;
+
   const body = [
     `# Cursor — Project Instructions (code-pact)`,
     ``,
-    `> This file is managed by [code-pact](https://github.com/toshtag/code-pact).`,
+    `> ${t.managedNotice}`,
     `> The \`cursor\` adapter is **experimental** in v0.2; the .mdc format`,
     `> and \`.cursor/rules/\` placement may shift across Cursor releases.`,
     `> Source: https://cursor.com/docs/context/rules`,
     ``,
-    `## How to work on a task`,
+    `## ${t.workflowHeader}`,
     ``,
-    `1. Fetch the context pack:`,
+    `1. ${t.step1}`,
     `   \`\`\`sh`,
     `   code-pact task context <task-id> --agent cursor`,
     `   \`\`\``,
     ``,
-    `2. Implement the task.`,
+    `2. ${t.step2}`,
     ``,
-    `3. Mark the task complete. This runs verify and, on pass, appends a`,
-    `   \`done\` event to \`.code-pact/state/progress.yaml\`:`,
+    `3. ${t.step3}`,
     `   \`\`\`sh`,
     `   code-pact task complete <task-id> --agent cursor`,
     `   \`\`\``,
-    `   If verify fails, this command exits 1 and progress.yaml is left`,
-    `   unchanged. If a \`done\` event already exists, it is a no-op`,
-    `   (\`already_done: true\`).`,
+    `   ${t.step3FailDetail}`,
+    `   ${t.step3IdempotentDetail}`,
     ``,
-    `4. Report the result to the user.`,
+    `4. ${t.step4}`,
     ``,
-    `> The low-level \`code-pact verify --phase <p> --task <t>\` is still`,
-    `> available if you need to inspect verify output without recording`,
-    `> a progress event.`,
+    `> ${t.verifyNote}`,
     `>`,
-    `> **Internal command:** \`code-pact pack\` is used internally by \`task context\`.`,
-    `> Do not call \`pack\` directly — use \`code-pact task context <task-id>\` instead.`,
+    `> ${t.packNote}`,
     ``,
     `## Context directory`,
     ``,
     `Context packs for this agent live under \`${profile.context_dir}/\`.`,
     ``,
-    `## Project-specific conventions`,
+    `## ${t.projectConventionsHeader}`,
     ``,
-    `> Replace this section with your project's actual conventions.`,
-    `> See \`design/constitution.md\` and \`design/rules/\` for the source of truth.`,
+    `> ${t.projectConventionsHint}`,
+    `> ${t.projectConventionsSource}`,
     ``,
-    `- Follow \`design/rules/coding-style.md\` for code style.`,
+    `- ${t.projectConventionsDefault}`,
   ].join("\n");
 
   return `${frontmatter}\n\n${body}\n`;
@@ -92,6 +91,7 @@ export async function generateCursorAdapter(
   // its own model in the editor, so we do not surface tier mapping.
   _modelProfiles: ModelProfile[],
   force: boolean,
+  locale: Locale,
 ): Promise<AdapterGenerateResult> {
   const created: string[] = [];
   const skipped: string[] = [];
@@ -112,7 +112,7 @@ export async function generateCursorAdapter(
   }
 
   // .cursor/rules/code-pact.mdc
-  await writeIfAbsent(join(cwd, profile.instruction_filename), cursorMdc(profile));
+  await writeIfAbsent(join(cwd, profile.instruction_filename), cursorMdc(profile, locale));
 
   // .context/cursor/
   await mkdir(join(cwd, profile.context_dir), { recursive: true });
