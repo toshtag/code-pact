@@ -17,3 +17,4 @@ tests/fixtures/**/.context/
 
 # Root-level private design notes (planning, strategy, retro)
 /.local/
+*.tgz
