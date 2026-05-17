@@ -6,7 +6,7 @@ The product idea: agents should not read sprawling `design/` trees themselves an
 
 ## Status
 
-Alpha. Published on npm as [`code-pact@alpha`](https://www.npmjs.com/package/code-pact) (current: `0.2.0-alpha.0`). API and command surface may still shift while the Cursor and Gemini CLI adapters are experimental. Stable releases (`latest` tag) will follow once those adapters graduate and `task start` / `npm create code-pact` land.
+Alpha. Published on npm as [`code-pact@alpha`](https://www.npmjs.com/package/code-pact) (current: `0.3.0-alpha.0`). API and command surface may still shift while the Cursor and Gemini CLI adapters are experimental. Stable releases (`latest` tag) will follow once those adapters graduate and `task start` / `npm create code-pact` land.
 
 ## Install
 
@@ -28,27 +28,32 @@ Contributors can also run from a clone with `pnpm link --global`, or install a l
 #    to launch the interactive wizard.
 npx code-pact@alpha init
 
-# 2. Add a phase interactively (or use `phase add` with flags — see below).
+# 2. Add a phase interactively (or pass flags to skip the prompts).
 # Tip: if you already have a draft roadmap YAML, `phase import <path>`
 # bulk-imports phases (including their tasks) in one step.
-code-pact phase new
+code-pact phase add
 
-# 3. Generate per-agent instruction files (CLAUDE.md / AGENTS.md /
+# 3. Add tasks to the phase interactively.
+code-pact task add <phase-id>
+
+# 4. Generate per-agent instruction files (CLAUDE.md / AGENTS.md /
 #    docs/code-pact/agent-instructions.md). The wizard can do this for
 #    you; the standalone command is here when you change agents later:
 code-pact adapter --agent claude-code
 
-# 4. From the agent: fetch the context pack for a task.
+# 5. From the agent: fetch the context pack for a task.
 code-pact task context <task-id> --agent <agent>
 
-# 5. After implementation, mark the task complete. This runs verify
+# 6. After implementation, mark the task complete. This runs verify
 #    and, on pass, appends a `done` event to progress.yaml.
 code-pact task complete <task-id> --agent <agent>
 ```
 
 Subsequent commands assume `code-pact` is on `PATH` (`npm install -g code-pact@alpha`). If you prefer not to install globally, prefix each invocation with `npx code-pact@alpha`.
 
-The `init` wizard asks, in order: language (English / 日本語), which agents to support (multi-select from Claude Code / Codex / Generic), the default agent, whether to generate adapter files now, the default verification command, and whether to create a sample first phase.
+The `init` wizard asks, in order: language (English / 日本語), which agents to support (multi-select from Claude Code / Codex / Generic), the default agent, whether to generate adapter files now, the default verification command, and whether to create a sample first phase. After completing, it prints **Next Steps** reminders to stderr.
+
+Use `code-pact doctor` to check project health at any time (invalid YAML, orphan phase files, duplicate task ids, missing adapter files, …). The CI-friendly `code-pact validate` variant exits 1 on errors; add `--strict` to promote warnings to errors as well.
 
 ## Agent-facing usage
 
@@ -103,6 +108,8 @@ code-pact phase ls
 code-pact phase show P1 --json
 
 # Pack context to a file under .context/<agent>/<task>.md.
+# NOTE: pack is an internal command used by `task context` — prefer
+# `code-pact task context <task-id>` in agent and CI workflows.
 code-pact pack --phase P1 --task P1-T1 --agent claude-code
 
 # Verify.
