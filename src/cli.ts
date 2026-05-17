@@ -24,6 +24,7 @@ import { runVerify, formatVerify } from "./commands/verify.ts";
 import { runGenerateAdapter } from "./commands/adapter.ts";
 import { runRecommend, formatRecommend } from "./commands/recommend.ts";
 import { runDoctor, formatDoctor } from "./commands/doctor.ts";
+import { runValidate } from "./commands/validate.ts";
 import { runTaskContext } from "./commands/task-context.ts";
 import { runTaskComplete } from "./commands/task-complete.ts";
 import { runPhaseNew } from "./commands/phase-new.ts";
@@ -263,6 +264,56 @@ async function cmdDoctor(argv: string[], globalJson: boolean): Promise<number> {
 
   const hasErrors = result.issues.some((i) => i.severity === "error");
   return hasErrors ? 1 : 0;
+}
+
+// ---------------------------------------------------------------------------
+// Command: validate
+// ---------------------------------------------------------------------------
+
+async function cmdValidate(argv: string[], globalJson: boolean): Promise<number> {
+  const { values } = parseArgs({
+    args: argv,
+    options: {
+      json: { type: "boolean" },
+      strict: { type: "boolean" },
+    },
+    strict: false,
+    allowPositionals: false,
+  });
+
+  const json = globalJson || values.json === true;
+  const strict = values.strict === true;
+  const cwd = process.cwd();
+  const result = await runValidate({ cwd, strict });
+
+  if (json) {
+    if (result.ok) {
+      process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
+    } else {
+      process.stdout.write(
+        `${JSON.stringify({
+          ok: false,
+          error: {
+            code: "VALIDATE_FAILED",
+            message: strict ? "Project has issues (strict mode)" : "Project has errors",
+          },
+          data: result,
+        })}\n`,
+      );
+    }
+  } else {
+    if (result.ok) {
+      process.stdout.write("Project validation passed.\n");
+    } else {
+      for (const issue of result.issues) {
+        const mark = issue.severity === "error" ? "[error]" : "[warn] ";
+        process.stderr.write(`  ${mark} ${issue.code}: ${issue.message}\n`);
+      }
+      process.stderr.write("Validation failed.\n");
+    }
+  }
+
+  return result.ok ? 0 : 1;
 }
 
 // ---------------------------------------------------------------------------
@@ -1399,6 +1450,9 @@ async function main(): Promise<number> {
 
     case "doctor":
       return cmdDoctor(rest, json);
+
+    case "validate":
+      return cmdValidate(rest, json);
 
     default: {
       if (json) {
