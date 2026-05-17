@@ -214,6 +214,50 @@ describe("runGenerateAdapter — cursor", () => {
 });
 
 // ---------------------------------------------------------------------------
+// gemini-cli adapter (experimental, v0.2)
+// ---------------------------------------------------------------------------
+
+describe("runGenerateAdapter — gemini-cli", () => {
+  beforeEach(async () => {
+    await runInit({ cwd: dir, locale: "en-US", agents: ["gemini-cli"], force: false, json: false });
+  });
+
+  it("writes GEMINI.md at project root", async () => {
+    const result = await runGenerateAdapter({ cwd: dir, agentName: "gemini-cli", force: false });
+    expect(result.agentName).toBe("gemini-cli");
+    const names = result.created.map((p) => p.replace(dir, ""));
+    expect(names.some((n) => n.endsWith("/GEMINI.md"))).toBe(true);
+  });
+
+  it("GEMINI.md instructs the agent to use task context + task complete", async () => {
+    await runGenerateAdapter({ cwd: dir, agentName: "gemini-cli", force: false });
+    const content = await readFile(join(dir, "GEMINI.md"), "utf8");
+    expect(content).toContain("code-pact task context");
+    expect(content).toContain("code-pact task complete");
+  });
+
+  it("flags itself as experimental and links the official source", async () => {
+    await runGenerateAdapter({ cwd: dir, agentName: "gemini-cli", force: false });
+    const content = await readFile(join(dir, "GEMINI.md"), "utf8");
+    expect(content).toMatch(/experimental/i);
+    expect(content).toContain("github.com/google-gemini/gemini-cli");
+  });
+
+  it("does NOT emit YAML frontmatter (Gemini CLI expects plain markdown)", async () => {
+    await runGenerateAdapter({ cwd: dir, agentName: "gemini-cli", force: false });
+    const content = await readFile(join(dir, "GEMINI.md"), "utf8");
+    expect(content.startsWith("---\n")).toBe(false);
+  });
+
+  it("creates .context/gemini-cli/ directory for context packs", async () => {
+    await runGenerateAdapter({ cwd: dir, agentName: "gemini-cli", force: false });
+    const { readdir } = await import("node:fs/promises");
+    const entries = await readdir(join(dir, ".context"));
+    expect(entries).toContain("gemini-cli");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Error: unknown agent
 // ---------------------------------------------------------------------------
 

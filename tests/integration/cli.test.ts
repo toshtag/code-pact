@@ -1021,3 +1021,61 @@ describe("CLI: adapter --agent cursor (v0.2 experimental)", () => {
     ]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// v0.2: gemini-cli adapter (experimental)
+// ---------------------------------------------------------------------------
+
+describe("CLI: adapter --agent gemini-cli (v0.2 experimental)", () => {
+  it("init --agent gemini-cli + adapter --agent gemini-cli writes GEMINI.md at project root", async () => {
+    const initRes = run([
+      "init",
+      "--non-interactive",
+      "--locale",
+      "en-US",
+      "--agent",
+      "gemini-cli",
+      "--json",
+    ]);
+    expect(initRes.code).toBe(0);
+
+    const adapterRes = run(["adapter", "--agent", "gemini-cli", "--json"]);
+    expect(adapterRes.code).toBe(0);
+    const parsed = JSON.parse(adapterRes.stdout) as { ok: boolean };
+    expect(parsed.ok).toBe(true);
+
+    const md = await readFile(join(tmpDir, "GEMINI.md"), "utf8");
+    // Plain markdown; no YAML frontmatter for Gemini CLI.
+    expect(md.startsWith("---\n")).toBe(false);
+    expect(md).toContain("code-pact task complete");
+    expect(md).toMatch(/experimental/i);
+    expect(md).toContain("github.com/google-gemini/gemini-cli");
+  });
+
+  it("init --agent claude-code,gemini-cli — gemini-cli is selectable in a multi-agent setup", async () => {
+    const initRes = run([
+      "init",
+      "--non-interactive",
+      "--locale",
+      "en-US",
+      "--agent",
+      "claude-code,gemini-cli",
+      "--json",
+    ]);
+    expect(initRes.code).toBe(0);
+
+    const projectYaml = await readFile(
+      join(tmpDir, ".code-pact", "project.yaml"),
+      "utf8",
+    );
+    const project = parseYaml(projectYaml) as {
+      default_agent: string;
+      agents: { name: string }[];
+    };
+    expect(project.default_agent).toBe("claude-code");
+    expect(project.agents.map((a) => a.name).sort()).toEqual([
+      "claude-code",
+      "gemini-cli",
+    ]);
+  });
+});

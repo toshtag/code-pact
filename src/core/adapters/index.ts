@@ -5,6 +5,7 @@ import { generateClaudeAdapter } from "./claude.ts";
 import { generateCodexAdapter } from "./codex.ts";
 import { generateGenericAdapter } from "./generic.ts";
 import { generateCursorAdapter } from "./cursor.ts";
+import { generateGeminiCliAdapter } from "./gemini-cli.ts";
 
 export type AdapterGenerateResult = {
   created: string[];
@@ -23,4 +24,5 @@ export const adapterRegistry: Record<SupportedAgent, AdapterGenerator> = {
   codex: generateCodexAdapter,
   generic: generateGenericAdapter,
   cursor: generateCursorAdapter,
+  "gemini-cli": generateGeminiCliAdapter,
 };

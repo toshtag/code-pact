@@ -1,12 +1,18 @@
 import type { AgentProfile } from "./schemas/agent-profile.ts";
 
-export type SupportedAgent = "claude-code" | "codex" | "generic" | "cursor";
+export type SupportedAgent =
+  | "claude-code"
+  | "codex"
+  | "generic"
+  | "cursor"
+  | "gemini-cli";
 
 export const SUPPORTED_AGENTS: readonly SupportedAgent[] = [
   "claude-code",
   "codex",
   "generic",
   "cursor",
+  "gemini-cli",
 ] as const;
 
 /**
@@ -16,6 +22,7 @@ export const SUPPORTED_AGENTS: readonly SupportedAgent[] = [
  */
 export const EXPERIMENTAL_AGENTS: ReadonlySet<SupportedAgent> = new Set([
   "cursor",
+  "gemini-cli",
 ]);
 
 export function isSupportedAgent(value: string): value is SupportedAgent {
@@ -72,9 +79,27 @@ const CURSOR_PROFILE: AgentProfile = {
   model_map: {},
 };
 
+// Gemini CLI adapter (experimental, v0.2).
+// Source: https://github.com/google-gemini/gemini-cli (Google's
+// official org). The CLI discovers `GEMINI.md` hierarchically starting
+// from the current working directory and walking up to the project
+// root (.git). Writing a single GEMINI.md at the project root is the
+// idiomatic placement and mirrors how CLAUDE.md / AGENTS.md work.
+//
+// Note: the `gemini-cli` name on npm has typosquat history. Users must
+// install from the google-gemini org, not from look-alike packages. The
+// generated file body carries an "experimental" notice for that reason.
+const GEMINI_CLI_PROFILE: AgentProfile = {
+  name: "gemini-cli",
+  instruction_filename: "GEMINI.md",
+  context_dir: ".context/gemini-cli",
+  model_map: {},
+};
+
 export const DEFAULT_AGENT_PROFILES: Record<SupportedAgent, AgentProfile> = {
   "claude-code": CLAUDE_PROFILE,
   codex: CODEX_PROFILE,
   generic: GENERIC_PROFILE,
   cursor: CURSOR_PROFILE,
+  "gemini-cli": GEMINI_CLI_PROFILE,
 };

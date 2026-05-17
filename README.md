@@ -73,9 +73,11 @@ code-pact task complete <task-id> --agent <agent>
 | `codex` | stable | `AGENTS.md`, `.context/codex/` |
 | `generic` | stable | `docs/code-pact/agent-instructions.md`, `.context/generic/` |
 | `cursor` | **experimental (v0.2)** | `.cursor/rules/code-pact.mdc` (`alwaysApply: true`), `.context/cursor/` |
-| `gemini-cli` | planned (v0.2 experimental) | — |
+| `gemini-cli` | **experimental (v0.2)** | `GEMINI.md`, `.context/gemini-cli/` |
 
 The `cursor` adapter writes a [Cursor Project Rule](https://cursor.com/docs/context/rules) — `.cursor/rules/code-pact.mdc` with `alwaysApply: true` so the agent always sees code-pact's workflow. `.cursorrules` (the legacy single-file format, deprecated in Cursor 0.43) is **not** written. The adapter is marked experimental because the .mdc format and placement may shift across Cursor releases.
+
+The `gemini-cli` adapter writes [`GEMINI.md`](https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/gemini-md.md) at the project root. Gemini CLI auto-discovers `GEMINI.md` files hierarchically (CWD → parent dirs up to `.git`, plus `~/.gemini/GEMINI.md`). Install Gemini CLI only from the official `google-gemini` org — typosquat packages have been reported on npm.
 
 The `generic` adapter writes one human-readable instructions file that you can copy or symlink into any other agent's expected location (`GEMINI.md`, …) while the dedicated adapters land.
 
