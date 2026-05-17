@@ -8,6 +8,7 @@ export const messages = {
     "",
     "Commands:",
     "  init       initialize a project (interactive in a TTY, flag-based otherwise)",
+    "  plan       project planning tools (brief)",
     "  phase      manage phase contracts (add | new | ls | show | import)",
     "  task       manage tasks (add) and agent-facing commands (context | complete)",
     "  progress   show weighted progress against a baseline snapshot",
@@ -16,7 +17,7 @@ export const messages = {
     "  adapter    generate or refresh per-agent instruction files",
     "  recommend  suggest a model tier for a task",
     "  doctor     report project structure issues (human-friendly)",
-  "  validate   check project validity for CI (exit 1 on errors, --strict for warnings)",
+    "  validate   check project validity for CI (exit 1 on errors, --strict for warnings)",
     "",
     "Global options:",
     "  -v, --version    print version",
@@ -121,6 +122,17 @@ export const messages = {
       descriptionPrompt: "Task description",
       typePrompt: "Task type",
     },
+    brief: {
+      collectBriefPrompt: "Collect a project brief? (creates design/brief.md)",
+      whatPrompt: "What are you building? (1–3 sentences)",
+      whoPrompt: "Who is it for? (primary users or stakeholders)",
+      differentiatorPrompt: "What makes it different? (optional — press Enter to skip)",
+    },
+  },
+  plan: {
+    briefDone: (path: string): string => `Project brief written to ${path}`,
+    briefSkipped: (path: string): string =>
+      `${path} already exists. Use --force to overwrite.`,
   },
   task: {
     added: (taskId: string, phaseId: string, path: string): string =>
@@ -180,6 +192,15 @@ export const messages = {
         "File-level exports only; avoid barrel re-exports of internal helpers.",
       ],
       editHint: "Edit or delete this file to match your project conventions.",
+    },
+    brief: {
+      header: "Project Brief",
+      whatHeader: "What we're building",
+      whoHeader: "Who it's for",
+      differentiatorHeader: "What makes it different",
+      differentiatorPlaceholder: "(not specified)",
+      footer:
+        "Regenerate this file with `code-pact plan brief`.\nTo create a planning prompt for AI, run `code-pact plan prompt`.",
     },
     adapterCommon: {
       managedNotice:
