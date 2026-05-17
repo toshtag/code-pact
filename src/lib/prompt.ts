@@ -97,6 +97,10 @@ export class Prompter {
     }
   }
 
+  write(msg: string): void {
+    this.output.write(msg);
+  }
+
   async askYesNo(question: string, defaultYes: boolean): Promise<boolean> {
     const suffix = defaultYes ? "[Y/n]" : "[y/N]";
     for (;;) {
