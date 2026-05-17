@@ -43,18 +43,20 @@ describe("runGenerateAdapter — claude-code", () => {
     expect(content).toContain("cheap_mechanical");
   });
 
-  it("CLAUDE.md instructs the agent to use task context + verify", async () => {
+  it("CLAUDE.md instructs the agent to use task context + task complete", async () => {
     await runGenerateAdapter({ cwd: dir, agentName: "claude-code", force: false });
     const content = await readFile(join(dir, "CLAUDE.md"), "utf8");
     expect(content).toContain("code-pact task context");
-    expect(content).toContain("code-pact verify");
+    expect(content).toContain("code-pact task complete");
   });
 
-  it("CLAUDE.md does NOT reference unimplemented progress --add-event", async () => {
+  it("CLAUDE.md does NOT reference unimplemented `progress --add-event`", async () => {
+    // task complete (v0.2) writes progress.yaml on the agent's behalf,
+    // so the file is now mentioned descriptively, but the unsupported
+    // `progress --add-event` form must still never appear.
     await runGenerateAdapter({ cwd: dir, agentName: "claude-code", force: false });
     const content = await readFile(join(dir, "CLAUDE.md"), "utf8");
     expect(content).not.toContain("--add-event");
-    expect(content).not.toContain("progress.yaml");
   });
 
   it("skips existing files when force is false", async () => {
@@ -120,7 +122,7 @@ describe("runGenerateAdapter — generic", () => {
       "utf8",
     );
     expect(content).toContain("code-pact task context");
-    expect(content).toContain("code-pact verify");
+    expect(content).toContain("code-pact task complete");
   });
 
   it("agent-instructions.md does NOT reference unimplemented commands or npx", async () => {
@@ -129,11 +131,9 @@ describe("runGenerateAdapter — generic", () => {
       join(dir, "docs", "code-pact", "agent-instructions.md"),
       "utf8",
     );
-    // progress --add-event does not exist in v0.1; never tell the agent to call it.
+    // `progress --add-event` never existed and must never be advertised.
     expect(content).not.toContain("--add-event");
-    // The package is not published yet; README and docs/dogfood.md will start
-    // mentioning npx only after publish. The generic adapter ships earlier and
-    // must not promise a command users cannot run.
+    // Generic adapter is for the contributor-distributed binary, not npx.
     expect(content).not.toContain("npx code-pact");
   });
 
