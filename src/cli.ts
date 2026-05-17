@@ -1090,6 +1090,7 @@ async function cmdPhase(argv: string[], locale: Locale, globalJson: boolean): Pr
         rest,
         {
           force: { type: "boolean" },
+          strict: { type: "boolean" },
           json: { type: "boolean" },
         },
         { allowPositionals: true },
@@ -1109,6 +1110,7 @@ async function cmdPhase(argv: string[], locale: Locale, globalJson: boolean): Pr
 
     const json = globalJson || values.json === true;
     const force = values.force === true;
+    const strict = values.strict === true;
     const inputPath = positionals[0];
     if (!inputPath) {
       const msg = "phase import requires an input YAML path, e.g. `phase import design/roadmap-draft.yaml`";
@@ -1123,11 +1125,14 @@ async function cmdPhase(argv: string[], locale: Locale, globalJson: boolean): Pr
     }
 
     try {
-      const result = await runPhaseImport({ cwd, inputPath, force });
+      const result = await runPhaseImport({ cwd, inputPath, force, strict });
       if (json) {
         process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
       } else {
         process.stderr.write(`${m.phase.importDone(result.imported_phases.length, result.imported_tasks.length, result.skipped_phases.length)}\n`);
+        for (const cf of result.completed_fields) {
+          process.stderr.write(`  completed defaults for ${cf.taskId}: ${cf.fields.join(", ")}\n`);
+        }
       }
       return 0;
     } catch (err: unknown) {

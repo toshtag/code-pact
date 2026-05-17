@@ -405,3 +405,193 @@ describe("runPhaseImport — collisions with existing roadmap", () => {
     expect(after.raw).toBe(before.raw);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Lenient import (TaskImport defaults)
+// ---------------------------------------------------------------------------
+
+describe("runPhaseImport — lenient import (AI-generated YAML)", () => {
+  it("imports tasks with only id+description; fills defaults and reports completed_fields", async () => {
+    await setupEmptyProject(dir);
+    const inputPath = await writeInput(
+      dir,
+      `phases:
+  - id: P1
+    name: Foundation
+    weight: 10
+    objective: Establish foundation
+    tasks:
+      - id: P1-T1
+        description: Implement auth module
+      - id: P1-T2
+        description: Write tests
+`,
+    );
+
+    const result = await runPhaseImport({ cwd: dir, inputPath });
+
+    expect(result.imported_tasks).toEqual(["P1-T1", "P1-T2"]);
+    // Both tasks had all detail fields missing → completed_fields has entries for both
+    expect(result.completed_fields).toHaveLength(2);
+    const t1Entry = result.completed_fields.find((cf) => cf.taskId === "P1-T1");
+    expect(t1Entry).toBeDefined();
+    expect(t1Entry!.fields).toContain("type");
+    expect(t1Entry!.fields).toContain("ambiguity");
+    expect(t1Entry!.fields).toContain("risk");
+    expect(t1Entry!.fields).toContain("status");
+
+    // Confirm the written phase passes Phase schema validation and has the tasks
+    const phaseRaw = await readFile(
+      join(dir, "design", "phases", "P1-foundation.yaml"),
+      "utf8",
+    );
+    const phase = Phase.parse(parseYaml(phaseRaw) as unknown);
+    expect(phase.tasks?.map((t) => t.id)).toEqual(["P1-T1", "P1-T2"]);
+    // Defaults should have been applied
+    expect(phase.tasks?.[0].type).toBe("feature");
+    expect(phase.tasks?.[0].status).toBe("planned");
+    expect(phase.tasks?.[0].ambiguity).toBe("medium");
+  });
+
+  it("imports tasks with all fields present; completed_fields is empty", async () => {
+    await setupEmptyProject(dir);
+    const inputPath = await writeInput(
+      dir,
+      `phases:
+  - id: P1
+    name: Foundation
+    weight: 10
+    objective: Establish foundation
+    tasks:
+      - id: P1-T1
+        type: feature
+        ambiguity: low
+        risk: low
+        context_size: small
+        write_surface: low
+        verification_strength: weak
+        expected_duration: short
+        status: planned
+`,
+    );
+
+    const result = await runPhaseImport({ cwd: dir, inputPath });
+
+    expect(result.imported_tasks).toEqual(["P1-T1"]);
+    expect(result.completed_fields).toEqual([]);
+  });
+
+  it("partial fields: only some fields present; completed_fields tracks missing ones", async () => {
+    await setupEmptyProject(dir);
+    const inputPath = await writeInput(
+      dir,
+      `phases:
+  - id: P1
+    name: Foundation
+    weight: 10
+    objective: Establish foundation
+    tasks:
+      - id: P1-T1
+        type: bugfix
+        status: in_progress
+`,
+    );
+
+    const result = await runPhaseImport({ cwd: dir, inputPath });
+
+    expect(result.imported_tasks).toEqual(["P1-T1"]);
+    const t1Entry = result.completed_fields.find((cf) => cf.taskId === "P1-T1");
+    expect(t1Entry).toBeDefined();
+    // type and status were present, so they should NOT be in completed_fields
+    expect(t1Entry!.fields).not.toContain("type");
+    expect(t1Entry!.fields).not.toContain("status");
+    // Missing detail fields should appear
+    expect(t1Entry!.fields).toContain("ambiguity");
+    expect(t1Entry!.fields).toContain("risk");
+    expect(t1Entry!.fields).toContain("context_size");
+  });
+
+  it("--strict rejects tasks with missing fields", async () => {
+    await setupEmptyProject(dir);
+    const before = await readRoadmap(dir);
+    const inputPath = await writeInput(
+      dir,
+      `phases:
+  - id: P1
+    name: Foundation
+    weight: 10
+    objective: Establish foundation
+    tasks:
+      - id: P1-T1
+        description: Only id provided
+`,
+    );
+
+    await expect(
+      runPhaseImport({ cwd: dir, inputPath, strict: true }),
+    ).rejects.toMatchObject({ code: "CONFIG_ERROR" });
+
+    // No writes
+    const after = await readRoadmap(dir);
+    expect(after.raw).toBe(before.raw);
+  });
+
+  it("--strict accepts tasks with all required fields present", async () => {
+    await setupEmptyProject(dir);
+    const inputPath = await writeInput(
+      dir,
+      `phases:
+  - id: P1
+    name: Foundation
+    weight: 10
+    objective: Establish foundation
+    tasks:
+      - id: P1-T1
+        type: feature
+        ambiguity: low
+        risk: low
+        context_size: small
+        write_surface: low
+        verification_strength: weak
+        expected_duration: short
+        status: planned
+`,
+    );
+
+    const result = await runPhaseImport({ cwd: dir, inputPath, strict: true });
+
+    expect(result.imported_tasks).toEqual(["P1-T1"]);
+    expect(result.completed_fields).toEqual([]);
+  });
+
+  it("duplicate task ids in lenient import → AMBIGUOUS_TASK_ID, no writes", async () => {
+    await setupEmptyProject(dir);
+    const before = await readRoadmap(dir);
+    const inputPath = await writeInput(
+      dir,
+      `phases:
+  - id: P1
+    name: A
+    weight: 5
+    objective: first
+    tasks:
+      - id: SHARED-T1
+        description: Task in P1
+  - id: P2
+    name: B
+    weight: 5
+    objective: second
+    tasks:
+      - id: SHARED-T1
+        description: Same id in P2
+`,
+    );
+
+    await expect(
+      runPhaseImport({ cwd: dir, inputPath }),
+    ).rejects.toMatchObject({ code: "AMBIGUOUS_TASK_ID" });
+
+    const after = await readRoadmap(dir);
+    expect(after.raw).toBe(before.raw);
+  });
+});

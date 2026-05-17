@@ -1,7 +1,8 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { PhaseImportInput, type PhaseImportEntry } from "../core/schemas/phase-import.ts";
+import { PhaseImportInput, type PhaseImportEntry, type TaskImport } from "../core/schemas/phase-import.ts";
+import { Task } from "../core/schemas/task.ts";
 import { Roadmap, type PhaseRef } from "../core/schemas/roadmap.ts";
 import { Phase } from "../core/schemas/phase.ts";
 import { createPhase } from "../core/services/createPhase.ts";
@@ -12,12 +13,25 @@ export type PhaseImportOptions = {
   inputPath: string;
   /** Skip duplicate phase ids instead of failing. */
   force?: boolean;
+  /**
+   * When true, all Task fields must be present in the input. When false
+   * (default), missing optional task fields are filled with sensible defaults
+   * and reported in `result.completed_fields`.
+   */
+  strict?: boolean;
+};
+
+export type CompletedField = {
+  taskId: string;
+  fields: string[];
 };
 
 export type PhaseImportResult = {
   imported_phases: PhaseRef[];
   imported_tasks: string[];
   skipped_phases: string[];
+  /** Task fields that were filled with defaults (empty when --strict or no gaps). */
+  completed_fields: CompletedField[];
 };
 
 async function loadRoadmap(cwd: string): Promise<Roadmap> {
@@ -71,9 +85,32 @@ function parseInput(raw: string): PhaseImportInput {
   return result.data;
 }
 
+function applyTaskDefaults(raw: TaskImport): { task: Task; completedFields: string[] } {
+  const completedFields: string[] = [];
+  function d<T>(val: T | undefined, def: T, field: string): T {
+    if (val === undefined) { completedFields.push(field); return def; }
+    return val;
+  }
+  const task: Task = {
+    id: raw.id,
+    type: d(raw.type, "feature", "type"),
+    ambiguity: d(raw.ambiguity, "medium", "ambiguity"),
+    risk: d(raw.risk, "medium", "risk"),
+    context_size: d(raw.context_size, "medium", "context_size"),
+    write_surface: d(raw.write_surface, "medium", "write_surface"),
+    verification_strength: d(raw.verification_strength, "medium", "verification_strength"),
+    expected_duration: d(raw.expected_duration, "medium", "expected_duration"),
+    status: d(raw.status, "planned", "status"),
+    ...(raw.description !== undefined ? { description: raw.description } : {}),
+    ...(raw.requires_decision === true ? { requires_decision: true } : {}),
+  };
+  return { task, completedFields };
+}
+
 function entryToCreatePhaseInput(
   cwd: string,
   entry: PhaseImportEntry,
+  resolvedTasks: Task[],
 ): Parameters<typeof createPhase>[0] {
   return {
     cwd,
@@ -87,7 +124,7 @@ function entryToCreatePhaseInput(
     doneCriteria: entry.definition_of_done,
     nonGoals: entry.non_goals,
     requiresDecision: entry.requires_decision,
-    tasks: entry.tasks,
+    tasks: resolvedTasks.length > 0 ? resolvedTasks : undefined,
   };
 }
 
@@ -96,6 +133,7 @@ export async function runPhaseImport(
 ): Promise<PhaseImportResult> {
   const { cwd, inputPath } = opts;
   const force = opts.force === true;
+  const strict = opts.strict === true;
 
   // ---- Read + schema-validate ------------------------------------------
   let raw: string;
@@ -182,18 +220,55 @@ export async function runPhaseImport(
     throw e;
   }
 
+  // ---- Strict mode: validate that all Task required fields are present ---
+  if (strict) {
+    const errors: string[] = [];
+    for (const entry of importTargets) {
+      for (const rawTask of entry.tasks ?? []) {
+        const result = Task.safeParse(rawTask);
+        if (!result.success) {
+          const missing = Object.keys(result.error.flatten().fieldErrors).join(", ");
+          errors.push(`  ${rawTask.id}: missing ${missing}`);
+        }
+      }
+    }
+    if (errors.length > 0) {
+      const e = new Error(
+        `Strict mode: task fields missing — re-run without --strict to apply defaults.\n${errors.join("\n")}`,
+      );
+      (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+      throw e;
+    }
+  }
+
+  // ---- Resolve tasks (apply defaults unless strict) --------------------
+  const completedFieldsAll: CompletedField[] = [];
+  type ResolvedEntry = { entry: PhaseImportEntry; tasks: Task[] };
+  const resolved: ResolvedEntry[] = importTargets.map((entry) => {
+    const tasks: Task[] = [];
+    for (const rawTask of entry.tasks ?? []) {
+      const { task, completedFields } = applyTaskDefaults(rawTask);
+      tasks.push(task);
+      if (completedFields.length > 0) {
+        completedFieldsAll.push({ taskId: rawTask.id, fields: completedFields });
+      }
+    }
+    return { entry, tasks };
+  });
+
   // ---- Write pass (one createPhase call per target) -------------------
   const importedRefs: PhaseRef[] = [];
   const importedTaskIds: string[] = [];
-  for (const entry of importTargets) {
-    const created = await createPhase(entryToCreatePhaseInput(cwd, entry));
+  for (const { entry, tasks } of resolved) {
+    const created = await createPhase(entryToCreatePhaseInput(cwd, entry, tasks));
     importedRefs.push(created.ref);
-    for (const t of entry.tasks ?? []) importedTaskIds.push(t.id);
+    for (const t of tasks) importedTaskIds.push(t.id);
   }
 
   return {
     imported_phases: importedRefs,
     imported_tasks: importedTaskIds,
     skipped_phases: skippedPhaseIds,
+    completed_fields: completedFieldsAll,
   };
 }
