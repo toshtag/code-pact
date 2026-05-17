@@ -70,7 +70,8 @@ against.
 | `TASK_NOT_FOUND` | `pack`, `verify`, `task context` | Task id not present anywhere |
 | `AMBIGUOUS_TASK_ID` | `task context` | Same task id exists in multiple phases |
 | `AGENT_NOT_FOUND` | `pack`, `adapter`, `task context` | Agent name not in `project.yaml` |
-| `AGENT_NOT_ENABLED` | `task context` | Agent is configured but has `enabled: false` |
+| `AGENT_NOT_ENABLED` | `task context`, `task complete` | Agent is configured but has `enabled: false` |
+| `VERIFICATION_FAILED` | `verify`, `task complete` | Deterministic completion check did not pass |
 | `INTERNAL_ERROR` | any command | Catch-all for unhandled exceptions |
 
 New error codes may be added without a major version bump. Removing or
@@ -111,6 +112,21 @@ of silently picking defaults.
 When `--agent` lists multiple agents (e.g. `--agent claude-code,generic`)
 and no dedicated default-agent option is provided, the first agent in
 the list becomes `default_agent` in the generated `project.yaml`.
+
+## `task complete`
+
+`code-pact task complete <task-id> [--agent <name>] [--json] [--dry-run]` is the deterministic completion entry point for agents.
+
+Order of operations:
+
+1. **Agent validation**. The same checks as `task context`: unknown agent → `AGENT_NOT_FOUND`, disabled agent → `AGENT_NOT_ENABLED`. When `--agent` is omitted, `project.yaml.default_agent` is used.
+2. **Task resolution**. The same logic as `task context`: scans every phase referenced by `design/roadmap.yaml`. `TASK_NOT_FOUND` / `AMBIGUOUS_TASK_ID` are raised for missing / duplicate task ids.
+3. **Idempotency check**. If a `done` event already exists for `task_id` in `.code-pact/state/progress.yaml`, `task complete` returns `{ ok: true, data: { already_done: true } }` with exit 0 and **does not re-run verification**. To force re-verification, use `task complete --rerun` (planned for a later release).
+4. **Verification (preflight mode)**. Runs the deterministic checks from `code-pact verify` — `commands` and `decision` — but skips the state-consistency checks (`progress_event`, `task_status`) because `task complete` is the action that produces that state. On failure, exits 1 with `VERIFICATION_FAILED`; `progress.yaml` is left byte-identical. Standalone `code-pact verify` still runs all four checks for after-the-fact consistency auditing.
+5. **Progress append**. On verify pass, appends a `done` event with shape `{ task_id, status: "done", at, actor: "agent", agent, evidence }` to `progress.yaml`. The write uses best-effort atomic replacement (`writeFile` to a temp file + `rename`) to prevent partial-write corruption. Concurrent `task complete` calls are out of scope for v0.2.
+6. **`--dry-run`**. Skips the progress append. Returns `{ ok: true, data: { dry_run: true, would_append: <event> } }`. `progress.yaml` is byte-identical.
+
+The `agent` field on `ProgressEvent` is optional for backward compatibility with v0.1 logs that predate `task complete`.
 
 ## Stability
 

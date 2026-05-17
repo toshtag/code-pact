@@ -6,7 +6,7 @@ The product idea: agents should not read sprawling `design/` trees themselves an
 
 ## Status
 
-Alpha. Published on npm as [`code-pact@alpha`](https://www.npmjs.com/package/code-pact). API and command surface may still shift before `v0.1.0`. Stable releases (`latest` tag) will follow once the `task complete` flow lands.
+Alpha. Published on npm as [`code-pact@alpha`](https://www.npmjs.com/package/code-pact). API and command surface may still shift before `v0.1.0`. Stable releases (`latest` tag) will follow after the experimental Cursor / Gemini CLI adapters graduate.
 
 ## Install
 
@@ -36,9 +36,12 @@ code-pact phase new
 #    you; the standalone command is here when you change agents later:
 code-pact adapter --agent claude-code
 
-# 4. From the agent: fetch the context pack for a task, then verify.
+# 4. From the agent: fetch the context pack for a task.
 code-pact task context <task-id> --agent <agent>
-code-pact verify --phase <phase-id> --task <task-id>
+
+# 5. After implementation, mark the task complete. This runs verify
+#    and, on pass, appends a `done` event to progress.yaml.
+code-pact task complete <task-id> --agent <agent>
 ```
 
 Subsequent commands assume `code-pact` is on `PATH` (`npm install -g code-pact@alpha`). If you prefer not to install globally, prefix each invocation with `npx code-pact@alpha`.
@@ -53,11 +56,12 @@ Agent adapters (CLAUDE.md, AGENTS.md, docs/code-pact/agent-instructions.md) inst
 # Fetch the markdown context pack (writes to stdout, no side effects).
 code-pact task context <task-id> --agent <agent>
 
-# After implementation, confirm the deterministic completion signal.
-code-pact verify --phase <phase-id> --task <task-id>
+# After implementation, mark the task complete. This runs verify and,
+# on pass, appends a `done` event to progress.yaml.
+code-pact task complete <task-id> --agent <agent>
 ```
 
-`task context` resolves the task id across every phase, so the agent only needs the task id. Combined verify + progress reporting via `code-pact task complete` is planned for `v0.2`; until then `verify` is the authoritative completion check.
+`task context` resolves the task id across every phase, so the agent only needs the task id. `task complete` is idempotent — calling it again on an already-done task is a no-op (`already_done: true`). The low-level `code-pact verify --phase <p> --task <t>` is still available if you want to inspect verify output without recording a progress event.
 
 ## Supported agents
 

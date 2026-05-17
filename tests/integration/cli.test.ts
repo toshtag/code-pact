@@ -508,3 +508,271 @@ describe("CLI: unknown options on phase ls / progress (RC BUG-004)", () => {
     expect(parsed.ok).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// v0.2: task complete
+// ---------------------------------------------------------------------------
+
+describe("CLI: task complete (v0.2)", () => {
+  // Replace P1's verification commands with `echo ok` (or `false` for the
+  // failing variant) so the spawned CLI does not need pnpm in tmpDir.
+  async function rewritePhaseCommands(failing: boolean): Promise<string> {
+    const phasePath = join(tmpDir, "design", "phases", "P1-foundation.yaml");
+    const doc = parseYaml(await readFile(phasePath, "utf8")) as Record<
+      string,
+      unknown
+    >;
+    doc.verification = {
+      commands: failing ? ["false"] : ["echo ok"],
+    };
+    await writeFile(phasePath, stringifyYaml(doc), "utf8");
+    return phasePath;
+  }
+
+  async function setupWithTask(): Promise<void> {
+    const initRes = run([
+      "init",
+      "--non-interactive",
+      "--locale",
+      "en-US",
+      "--agent",
+      "claude-code",
+      "--json",
+    ]);
+    expect(initRes.code).toBe(0);
+    const addRes = run([
+      "phase",
+      "add",
+      "--id",
+      "P1",
+      "--name",
+      "Foundation",
+      "--objective",
+      "Foundation",
+      "--weight",
+      "10",
+      "--json",
+    ]);
+    expect(addRes.code).toBe(0);
+
+    // Append a single task to P1 via YAML parse/stringify (safe, not appendFile).
+    const phasePath = join(tmpDir, "design", "phases", "P1-foundation.yaml");
+    const doc = parseYaml(await readFile(phasePath, "utf8")) as Record<
+      string,
+      unknown
+    >;
+    doc.tasks = [
+      {
+        id: "P1-T1",
+        type: "feature",
+        ambiguity: "low",
+        risk: "low",
+        context_size: "small",
+        write_surface: "low",
+        verification_strength: "weak",
+        expected_duration: "short",
+        status: "planned",
+        description: "integration test task",
+      },
+    ];
+    await writeFile(phasePath, stringifyYaml(doc), "utf8");
+  }
+
+  it("happy path: appends done event, idempotent on re-run", async () => {
+    await setupWithTask();
+    await rewritePhaseCommands(false);
+
+    const first = run([
+      "task",
+      "complete",
+      "P1-T1",
+      "--agent",
+      "claude-code",
+      "--json",
+    ]);
+    expect(first.code).toBe(0);
+    const firstParsed = JSON.parse(first.stdout) as {
+      ok: boolean;
+      data: { task_id: string; phase_id: string; agent: string; event: { agent: string } };
+    };
+    expect(firstParsed.ok).toBe(true);
+    expect(firstParsed.data.task_id).toBe("P1-T1");
+    expect(firstParsed.data.phase_id).toBe("P1");
+    expect(firstParsed.data.agent).toBe("claude-code");
+    expect(firstParsed.data.event.agent).toBe("claude-code");
+
+    const progressYaml = await readFile(
+      join(tmpDir, ".code-pact", "state", "progress.yaml"),
+      "utf8",
+    );
+    const log = parseYaml(progressYaml) as { events: unknown[] };
+    expect(log.events).toHaveLength(1);
+
+    // Second run: already_done, byte-identical progress.yaml
+    const before = progressYaml;
+    const second = run([
+      "task",
+      "complete",
+      "P1-T1",
+      "--agent",
+      "claude-code",
+      "--json",
+    ]);
+    expect(second.code).toBe(0);
+    const secondParsed = JSON.parse(second.stdout) as {
+      ok: boolean;
+      data: { already_done: boolean };
+    };
+    expect(secondParsed.ok).toBe(true);
+    expect(secondParsed.data.already_done).toBe(true);
+
+    const after = await readFile(
+      join(tmpDir, ".code-pact", "state", "progress.yaml"),
+      "utf8",
+    );
+    expect(after).toBe(before);
+  });
+
+  it("verify failure: exit 1, VERIFICATION_FAILED, progress.yaml unchanged", async () => {
+    await setupWithTask();
+    await rewritePhaseCommands(true);
+
+    const before = await readFile(
+      join(tmpDir, ".code-pact", "state", "progress.yaml"),
+      "utf8",
+    );
+
+    const res = run([
+      "task",
+      "complete",
+      "P1-T1",
+      "--agent",
+      "claude-code",
+      "--json",
+    ]);
+    expect(res.code).toBe(1);
+    const parsed = JSON.parse(res.stdout) as {
+      ok: boolean;
+      error: { code: string };
+    };
+    expect(parsed.ok).toBe(false);
+    expect(parsed.error.code).toBe("VERIFICATION_FAILED");
+
+    const after = await readFile(
+      join(tmpDir, ".code-pact", "state", "progress.yaml"),
+      "utf8",
+    );
+    expect(after).toBe(before);
+  });
+
+  it("dry-run leaves progress.yaml byte-identical and returns would_append", async () => {
+    await setupWithTask();
+    await rewritePhaseCommands(false);
+
+    const before = await readFile(
+      join(tmpDir, ".code-pact", "state", "progress.yaml"),
+      "utf8",
+    );
+
+    const res = run([
+      "task",
+      "complete",
+      "P1-T1",
+      "--agent",
+      "claude-code",
+      "--dry-run",
+      "--json",
+    ]);
+    expect(res.code).toBe(0);
+    const parsed = JSON.parse(res.stdout) as {
+      ok: boolean;
+      data: {
+        dry_run: boolean;
+        would_append: { task_id: string; agent: string };
+      };
+    };
+    expect(parsed.ok).toBe(true);
+    expect(parsed.data.dry_run).toBe(true);
+    expect(parsed.data.would_append.task_id).toBe("P1-T1");
+    expect(parsed.data.would_append.agent).toBe("claude-code");
+
+    const after = await readFile(
+      join(tmpDir, ".code-pact", "state", "progress.yaml"),
+      "utf8",
+    );
+    expect(after).toBe(before);
+  });
+
+  it("unknown agent: AGENT_NOT_FOUND, progress.yaml unchanged", async () => {
+    await setupWithTask();
+    await rewritePhaseCommands(false);
+    const before = await readFile(
+      join(tmpDir, ".code-pact", "state", "progress.yaml"),
+      "utf8",
+    );
+
+    const res = run([
+      "task",
+      "complete",
+      "P1-T1",
+      "--agent",
+      "nonexistent",
+      "--json",
+    ]);
+    expect(res.code).toBe(2);
+    const parsed = JSON.parse(res.stdout) as {
+      ok: boolean;
+      error: { code: string };
+    };
+    expect(parsed.ok).toBe(false);
+    expect(parsed.error.code).toBe("AGENT_NOT_FOUND");
+
+    const after = await readFile(
+      join(tmpDir, ".code-pact", "state", "progress.yaml"),
+      "utf8",
+    );
+    expect(after).toBe(before);
+  });
+
+  it("missing task id positional fails with CONFIG_ERROR", () => {
+    const initRes = run([
+      "init",
+      "--non-interactive",
+      "--locale",
+      "en-US",
+      "--agent",
+      "claude-code",
+      "--json",
+    ]);
+    expect(initRes.code).toBe(0);
+    const res = run(["task", "complete", "--json"]);
+    expect(res.code).toBe(2);
+    const parsed = JSON.parse(res.stdout) as {
+      ok: boolean;
+      error: { code: string };
+    };
+    expect(parsed.ok).toBe(false);
+    expect(parsed.error.code).toBe("CONFIG_ERROR");
+  });
+
+  it("unknown option strictly rejected via shared strictParse helper", () => {
+    const initRes = run([
+      "init",
+      "--non-interactive",
+      "--locale",
+      "en-US",
+      "--agent",
+      "claude-code",
+      "--json",
+    ]);
+    expect(initRes.code).toBe(0);
+    const res = run(["task", "complete", "P1-T1", "--bogus", "--json"]);
+    expect(res.code).toBe(2);
+    const parsed = JSON.parse(res.stdout) as {
+      ok: boolean;
+      error: { code: string };
+    };
+    expect(parsed.ok).toBe(false);
+    expect(parsed.error.code).toBe("CONFIG_ERROR");
+  });
+});
