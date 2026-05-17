@@ -1,5 +1,33 @@
 import { z } from "zod";
-import { Task } from "./task.ts";
+import {
+  TaskType,
+  AmbiguityLevel,
+  RiskLevel,
+  ContextSize,
+  WriteSurface,
+  VerificationStrength,
+  ExpectedDuration,
+  TaskStatus,
+} from "./task.ts";
+
+// Lenient task schema for imports. Only `id` is required; all detail
+// fields have defaults applied by runPhaseImport() unless --strict is set.
+// This lets AI-generated YAML (which often omits ambiguity/context_size
+// etc.) be imported without manual field-filling.
+export const TaskImport = z.object({
+  id: z.string().min(1),
+  description: z.string().optional(),
+  type: TaskType.optional(),
+  ambiguity: AmbiguityLevel.optional(),
+  risk: RiskLevel.optional(),
+  context_size: ContextSize.optional(),
+  write_surface: WriteSurface.optional(),
+  verification_strength: VerificationStrength.optional(),
+  expected_duration: ExpectedDuration.optional(),
+  status: TaskStatus.optional(),
+  requires_decision: z.boolean().optional(),
+});
+export type TaskImport = z.infer<typeof TaskImport>;
 
 // Input schema for `code-pact phase import <yaml>`.
 //
@@ -9,8 +37,8 @@ import { Task } from "./task.ts";
 // roadmap YAML) and with `tasks[]` accepted directly so a roadmap +
 // tasks can be bulk-imported in one call.
 //
-// All ConfidenceLevel / RiskLevel optionals default to "medium" inside
-// runPhaseImport (not via zod default, so the raw shape stays honest).
+// Tasks use TaskImport (lenient). runPhaseImport() applies defaults for
+// any omitted fields unless --strict prevents it.
 export const PhaseImportEntry = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
@@ -22,7 +50,7 @@ export const PhaseImportEntry = z.object({
   definition_of_done: z.array(z.string().min(1)).min(1).optional(),
   non_goals: z.array(z.string().min(1)).optional(),
   requires_decision: z.boolean().optional(),
-  tasks: z.array(Task).optional(),
+  tasks: z.array(TaskImport).optional(),
 });
 export type PhaseImportEntry = z.infer<typeof PhaseImportEntry>;
 
