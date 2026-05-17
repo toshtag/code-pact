@@ -6,7 +6,7 @@ The product idea: agents should not read sprawling `design/` trees themselves an
 
 ## Status
 
-Alpha. Published on npm as [`code-pact@alpha`](https://www.npmjs.com/package/code-pact) (current: `0.3.0-alpha.0`). API and command surface may still shift while the Cursor and Gemini CLI adapters are experimental. Stable releases (`latest` tag) will follow once those adapters graduate and `task start` / `npm create code-pact` land.
+Alpha. Published on npm as [`code-pact@alpha`](https://www.npmjs.com/package/code-pact) (current: `0.4.0-alpha.0`). API and command surface may still shift while the Cursor and Gemini CLI adapters are experimental. Stable releases (`latest` tag) will follow once those adapters graduate and `task start` / `npm create code-pact` land.
 
 ## Install
 
@@ -28,30 +28,37 @@ Contributors can also run from a clone with `pnpm link --global`, or install a l
 #    to launch the interactive wizard.
 npx code-pact@alpha init
 
-# 2. Add a phase interactively (or pass flags to skip the prompts).
-# Tip: if you already have a draft roadmap YAML, `phase import <path>`
-# bulk-imports phases (including their tasks) in one step.
-code-pact phase add
+# 2. (Optional) Build the planning artifacts that feed AI-assisted roadmapping.
+#    Run these once at the start of the project:
+code-pact plan brief        # collect what/who/why → design/brief.md
+code-pact plan constitution  # collect principles   → design/constitution.md
+code-pact plan prompt        # generate a planning prompt for an AI agent
 
-# 3. Add tasks to the phase interactively.
+# 3. Add a phase interactively (or pass flags to skip the prompts).
+#    Tip: if an AI agent answered `plan prompt`, pipe its YAML to
+#    `phase import <path>` to bulk-import all phases and tasks at once.
+code-pact phase add
+code-pact phase import draft-roadmap.yaml   # bulk import from AI-generated YAML
+
+# 4. Add tasks to the phase interactively.
 code-pact task add <phase-id>
 
-# 4. Generate per-agent instruction files (CLAUDE.md / AGENTS.md /
+# 5. Generate per-agent instruction files (CLAUDE.md / AGENTS.md /
 #    docs/code-pact/agent-instructions.md). The wizard can do this for
 #    you; the standalone command is here when you change agents later:
 code-pact adapter --agent claude-code
 
-# 5. From the agent: fetch the context pack for a task.
+# 6. From the agent: fetch the context pack for a task.
 code-pact task context <task-id> --agent <agent>
 
-# 6. After implementation, mark the task complete. This runs verify
+# 7. After implementation, mark the task complete. This runs verify
 #    and, on pass, appends a `done` event to progress.yaml.
 code-pact task complete <task-id> --agent <agent>
 ```
 
 Subsequent commands assume `code-pact` is on `PATH` (`npm install -g code-pact@alpha`). If you prefer not to install globally, prefix each invocation with `npx code-pact@alpha`.
 
-The `init` wizard asks, in order: language (English / 日本語), which agents to support (multi-select from Claude Code / Codex / Generic), the default agent, whether to generate adapter files now, the default verification command, and whether to create a sample first phase. After completing, it prints **Next Steps** reminders to stderr.
+The `init` wizard asks, in order: language (English / 日本語), which agents to support (multi-select from Claude Code / Codex / Generic), the default agent, whether to generate adapter files now, the default verification command, whether to create a sample first phase, and whether to collect a project brief (writes `design/brief.md`). After completing, it prints **Next Steps** reminders to stderr. Once initialized, the selected locale is saved in `.code-pact/project.yaml` so subsequent commands automatically use that language without `--locale`.
 
 Use `code-pact doctor` to check project health at any time (invalid YAML, orphan phase files, duplicate task ids, missing adapter files, …). The CI-friendly `code-pact validate` variant exits 1 on errors; add `--strict` to promote warnings to errors as well.
 
@@ -72,13 +79,13 @@ code-pact task complete <task-id> --agent <agent>
 
 ## Supported agents
 
-| Agent | Status | Adapter output |
-|---|---|---|
-| `claude-code` | stable | `CLAUDE.md`, `.claude/skills/`, `.claude/hooks/`, `.context/claude-code/` |
-| `codex` | stable | `AGENTS.md`, `.context/codex/` |
-| `generic` | stable | `docs/code-pact/agent-instructions.md`, `.context/generic/` |
-| `cursor` | **experimental (v0.2)** | `.cursor/rules/code-pact.mdc` (`alwaysApply: true`), `.context/cursor/` |
-| `gemini-cli` | **experimental (v0.2)** | `GEMINI.md`, `.context/gemini-cli/` |
+| Agent         | Status           | Adapter output                                                            |
+| ------------- | ---------------- | ------------------------------------------------------------------------- |
+| `claude-code` | stable           | `CLAUDE.md`, `.claude/skills/`, `.claude/hooks/`, `.context/claude-code/` |
+| `codex`       | stable           | `AGENTS.md`, `.context/codex/`                                            |
+| `generic`     | stable           | `docs/code-pact/agent-instructions.md`, `.context/generic/`               |
+| `cursor`      | **experimental** | `.cursor/rules/code-pact.mdc` (`alwaysApply: true`), `.context/cursor/`   |
+| `gemini-cli`  | **experimental** | `GEMINI.md`, `.context/gemini-cli/`                                       |
 
 The `cursor` adapter writes a [Cursor Project Rule](https://cursor.com/docs/context/rules) — `.cursor/rules/code-pact.mdc` with `alwaysApply: true` so the agent always sees code-pact's workflow. `.cursorrules` (the legacy single-file format, deprecated in Cursor 0.43) is **not** written. The adapter is marked experimental because the .mdc format and placement may shift across Cursor releases.
 
@@ -102,6 +109,12 @@ code-pact phase add \
   --weight 12 \
   --objective "Establish project foundation" \
   --verify-command "pnpm test"
+
+# Bulk-import phases from AI-generated YAML (lenient: only task `id` is required;
+# missing fields are filled with defaults and reported in the result).
+# Add --strict to require all task fields explicitly.
+code-pact phase import draft-roadmap.yaml
+code-pact phase import draft-roadmap.yaml --strict
 
 # Inspect phases.
 code-pact phase ls
@@ -162,4 +175,4 @@ For dogfooding `code-pact` against `code-pact` itself, see [`docs/dogfood.md`](d
 
 ## Relationship to spec-driven workflows
 
-`code-pact` is complementary to spec-style tools that produce structured spec / plan / task documents for agents to read. The difference in emphasis: spec tools optimize the *documents* an agent reads; `code-pact` optimizes the *command path* an agent uses to retrieve context and confirm completion. Use both if it fits your workflow.
+`code-pact` is complementary to spec-style tools that produce structured spec / plan / task documents for agents to read. The difference in emphasis: spec tools optimize the _documents_ an agent reads; `code-pact` optimizes the _command path_ an agent uses to retrieve context and confirm completion. Use both if it fits your workflow.
