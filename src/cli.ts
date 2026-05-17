@@ -22,6 +22,7 @@ import { runProgress, formatProgress } from "./commands/progress.ts";
 import { runPack } from "./commands/pack.ts";
 import { runVerify, formatVerify } from "./commands/verify.ts";
 import { runGenerateAdapter } from "./commands/adapter.ts";
+import { runPlanBrief } from "./commands/plan-brief.ts";
 import { runRecommend, formatRecommend } from "./commands/recommend.ts";
 import { runDoctor, formatDoctor } from "./commands/doctor.ts";
 import { runValidate } from "./commands/validate.ts";
@@ -398,6 +399,81 @@ async function cmdRecommend(argv: string[], locale: Locale, globalJson: boolean)
     }
     throw err;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Command: plan
+// ---------------------------------------------------------------------------
+
+async function cmdPlan(argv: string[], locale: Locale, globalJson: boolean): Promise<number> {
+  const subcommand = argv[0];
+  const rest = argv.slice(1);
+
+  if (subcommand === "brief") {
+    return cmdPlanBrief(rest, locale, globalJson);
+  }
+
+  const msg = `plan: unknown subcommand "${subcommand ?? ""}". Use: brief`;
+  if (globalJson) {
+    process.stdout.write(
+      `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
+    );
+  } else {
+    process.stderr.write(`${msg}\n`);
+  }
+  return 2;
+}
+
+async function cmdPlanBrief(
+  argv: string[],
+  locale: Locale,
+  globalJson: boolean,
+): Promise<number> {
+  const m = messages[locale];
+  const { values } = parseArgs({
+    args: argv,
+    options: {
+      force: { type: "boolean" },
+      json: { type: "boolean" },
+    },
+    strict: false,
+    allowPositionals: false,
+  });
+
+  const json = globalJson || values.json === true;
+  const force = values.force === true;
+  const cwd = process.cwd();
+
+  if (!isInteractive()) {
+    const msg = "plan brief is interactive and requires a TTY.";
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
+      );
+    } else {
+      process.stderr.write(`${msg}\n`);
+    }
+    return 2;
+  }
+
+  const result = await runPlanBrief({ cwd, locale, force });
+  if (result.skipped) {
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({ ok: false, error: { code: "ALREADY_EXISTS", message: m.plan.briefSkipped(result.path) } })}\n`,
+      );
+    } else {
+      process.stderr.write(`${m.plan.briefSkipped(result.path)}\n`);
+    }
+    return 2;
+  }
+
+  if (json) {
+    process.stdout.write(`${JSON.stringify({ ok: true, data: { path: result.path } })}\n`);
+  } else {
+    process.stderr.write(`${m.plan.briefDone(result.path)}\n`);
+  }
+  return 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -1426,6 +1502,9 @@ async function main(): Promise<number> {
   switch (command) {
     case "init":
       return cmdInit(rest, locale, json);
+
+    case "plan":
+      return cmdPlan(rest, locale, json);
 
     case "phase":
       return cmdPhase(rest, locale, json);

@@ -1,9 +1,12 @@
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { Prompter } from "../lib/prompt.ts";
 import { messages as messageCatalog, type Locale } from "../i18n/index.ts";
 import { SUPPORTED_AGENTS, type SupportedAgent } from "../core/agents.ts";
 import type { LocaleCode } from "../core/schemas/locale.ts";
 import { runInitCore, type InitCoreOptions, type InitResult } from "./init.ts";
 import { runGenerateAdapter } from "./adapter.ts";
+import { runBriefWizard, generateBriefMd } from "./plan-brief.ts";
 
 export type InitWizardOptions = {
   cwd: string;
@@ -64,6 +67,15 @@ export async function runInitWizard(opts: InitWizardOptions): Promise<InitResult
     // 6. Sample phase — yes/no.
     const createSamplePhase = await prompter.askYesNo(m.createSamplePrompt, true);
 
+    // 7. Project brief — optional, yes by default. Questions are collected
+    //    upfront (before any file operations) so the wizard feels linear.
+    const mb = messageCatalog[locale].wizard.brief;
+    const collectBrief = await prompter.askYesNo(mb.collectBriefPrompt, true);
+    let briefAnswers: Awaited<ReturnType<typeof runBriefWizard>> | null = null;
+    if (collectBrief) {
+      briefAnswers = await runBriefWizard(prompter, mb);
+    }
+
     const coreOpts: InitCoreOptions = {
       cwd: opts.cwd,
       locale: locale as LocaleCode,
@@ -88,6 +100,13 @@ export async function runInitWizard(opts: InitWizardOptions): Promise<InitResult
         result.created.push(...adapterResult.created);
         result.skipped.push(...adapterResult.skipped);
       }
+    }
+
+    // Write brief if answers were collected.
+    if (briefAnswers) {
+      const briefPath = join(opts.cwd, "design", "brief.md");
+      await writeFile(briefPath, generateBriefMd(briefAnswers, locale), "utf8");
+      result.created.push(briefPath);
     }
 
     const ns = messageCatalog[locale].wizard.init;
