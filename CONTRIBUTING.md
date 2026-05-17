@@ -58,3 +58,54 @@ When `--json` is set, **stdout must be JSON only**. All human-readable logs, war
 ```
 
 Stable error code strings are the public contract; do not rename them lightly.
+
+## Tag signing (maintainer only)
+
+From `v0.2.0-alpha.0` onward, release tags are signed with SSH so the GitHub tag page shows a "Verified" badge and downstream consumers can audit the chain locally. This section is for the maintainer cutting a release; it is not required for ordinary contributors who only open PRs.
+
+### One-time local setup
+
+```sh
+# 1. Tell git to sign tags with SSH (not GPG/OpenPGP).
+git config --local gpg.format ssh
+
+# 2. Point at the SSH key you want to use as your signing key.
+#    The key must be an existing public key file; ~/.ssh/id_ed25519.pub
+#    is the common choice. Do NOT use a separate, unlisted key.
+git config --local user.signingkey ~/.ssh/id_ed25519.pub
+
+# 3. Sign every annotated tag created in this repo by default.
+git config --local tag.gpgSign true
+```
+
+### One-time GitHub setup
+
+In https://github.com/settings/keys, **add the same SSH public key as a Signing Key** (it is fine to also have it registered as an Authentication Key — they are separate registrations even for the same key). Only keys registered as Signing Keys produce the "Verified" badge on tag and commit pages.
+
+### Local verification with `allowedSignersFile`
+
+`git verify-tag` requires an `allowedSignersFile` that maps SSH public keys to identities. Without it, the command returns `signature trust unknown` even for a tag your key actually signed.
+
+Per-repo setup:
+
+```sh
+git config --local gpg.ssh.allowedSignersFile .git_allowed_signers
+# .git_allowed_signers contents (one line, your email + your public key):
+# you@example.com ssh-ed25519 AAAA...your-public-key... comment
+```
+
+The `.git_allowed_signers` file is intentionally **not committed** in v0.2 because there is only one maintainer; if more maintainers are added, we will commit a curated file and pin the path globally. For now, each maintainer keeps their own local copy.
+
+### Verifying a freshly created tag
+
+```sh
+git tag -s vX.Y.Z-alpha.N -m "vX.Y.Z-alpha.N"
+git verify-tag vX.Y.Z-alpha.N
+# Expected: "Good \"git\" signature for <your-email>"
+```
+
+After `git push origin vX.Y.Z-alpha.N`, the tag page on GitHub should show a green "Verified" badge. If it does not, double-check that the SSH public key is registered as a **Signing Key** (not just an Authentication Key) on your GitHub profile.
+
+### Existing unsigned tags
+
+`v0.1.0-alpha.0` is unsigned (predates this policy). It is intentionally **not** re-tagged; moving it would invalidate the npm publish that points at the original commit. The signed-release policy applies from `v0.2.0-alpha.0` forward.
