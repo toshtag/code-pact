@@ -9,7 +9,7 @@ export const messages = {
     "Commands:",
     "  init       initialize a project (interactive in a TTY, flag-based otherwise)",
     "  phase      manage phase contracts (add | new | ls | show | import)",
-    "  task       agent-facing commands (context | complete)",
+    "  task       manage tasks (add) and agent-facing commands (context | complete)",
     "  progress   show weighted progress against a baseline snapshot",
     "  pack       write a context pack file under .context/<agent>/",
     "  verify     run deterministic completion criteria",
@@ -116,8 +116,14 @@ export const messages = {
       verifyCommandPrompt: "Verification commands (comma separated)",
       doneCriterionPrompt: "Done criteria (comma separated)",
     },
+    task: {
+      descriptionPrompt: "Task description",
+      typePrompt: "Task type",
+    },
   },
   task: {
+    added: (taskId: string, phaseId: string, path: string): string =>
+      `Task "${taskId}" added to phase "${phaseId}" at ${path}`,
     context: {
       taskNotFound: (taskId: string): string =>
         `Task "${taskId}" not found in any phase.`,
