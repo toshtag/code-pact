@@ -238,6 +238,15 @@ export async function runInitCore(opts: InitCoreOptions): Promise<InitResult> {
     skipped,
   );
 
+  // .gitignore — ensure .local/ is excluded from version control
+  await writeIfAbsent(
+    join(cwd, ".gitignore"),
+    ".local/\n",
+    force,
+    created,
+    skipped,
+  );
+
   // -------------------------------------------------------------------------
   // design/
   // -------------------------------------------------------------------------
