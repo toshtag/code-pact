@@ -160,4 +160,51 @@ export const messages = {
     ciDetected:
       "CI environment detected; interactive prompts are disabled. Pass required flags explicitly or unset CI.",
   },
+  templates: {
+    constitution: {
+      description:
+        "This file captures the principles that guide every planning and implementation decision in this project.",
+      corePrinciplesHeader: "Core principles",
+      principles: [
+        "Write for the next reader, not just the next test.",
+        "Planning decisions must be captured in `design/decisions/`.",
+        "Completion criteria must be deterministically verifiable.",
+      ],
+      editHint: "Edit this file to reflect the actual principles of your project.",
+    },
+    codingStyle: {
+      header: "Coding style rules",
+      rules: [
+        "Prefer explicit over implicit.",
+        "No commented-out code in commits.",
+        "File-level exports only; avoid barrel re-exports of internal helpers.",
+      ],
+      editHint: "Edit or delete this file to match your project conventions.",
+    },
+    adapterCommon: {
+      managedNotice:
+        "This file is managed by [code-pact](https://github.com/toshtag/code-pact).",
+      editNotice:
+        'Edit the sections marked "Project-specific" to reflect your project\'s conventions.',
+      workflowHeader: "How to work on a task",
+      step1: "Fetch the context pack:",
+      step2: "Implement the task.",
+      step3: "Mark the task complete. This runs verify and, on pass, appends a `done` event to `.code-pact/state/progress.yaml`:",
+      step3FailDetail:
+        "If verify fails, this command exits 1 and progress.yaml is left unchanged.",
+      step3IdempotentDetail:
+        "If a `done` event already exists, it is a no-op (`already_done: true`).",
+      step4: "Report the result to the user.",
+      verifyNote:
+        "The low-level `code-pact verify --phase <p> --task <t>` is still available if you need to inspect verify output without recording a progress event.",
+      packNote:
+        "**Internal command:** `code-pact pack` is used internally by `task context`. Do not call `pack` directly — use `code-pact task context <task-id>` instead.",
+      projectConventionsHeader: "Project-specific conventions",
+      projectConventionsHint:
+        "Replace this section with your project's actual conventions.",
+      projectConventionsSource:
+        "See `design/constitution.md` and `design/rules/` for the source of truth.",
+      projectConventionsDefault: "Follow `design/rules/coding-style.md` for code style.",
+    },
+  },
 } as const;
