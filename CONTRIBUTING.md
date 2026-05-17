@@ -109,3 +109,13 @@ After `git push origin vX.Y.Z-alpha.N`, the tag page on GitHub should show a gre
 ### Existing unsigned tags
 
 `v0.1.0-alpha.0` is unsigned (predates this policy). It is intentionally **not** re-tagged; moving it would invalidate the npm publish that points at the original commit. The signed-release policy applies from `v0.2.0-alpha.0` forward.
+
+## npm `dist-tags` policy
+
+npm publishes the first version of a package with both the chosen tag (e.g. `--tag alpha`) and the implicit `latest` tag set. **`npm dist-tag rm code-pact latest` is rejected with HTTP 400 by the registry** — the `latest` tag is reserved and can only be moved, not deleted.
+
+While code-pact is in alpha:
+
+- Every release is published with `--tag alpha` so `npm install code-pact@alpha` always resolves to the current release.
+- After each `npm publish`, also run `npm dist-tag add code-pact@<version> latest` so `latest` tracks the newest alpha rather than the oldest. Otherwise `npm install code-pact` (no tag) keeps returning the original v0.1.0-alpha.0.
+- Both tags pointing to the same version is intentional during the alpha period. When a stable release eventually ships (`v0.3` or later), `latest` moves to that stable version while `alpha` continues to advance independently.
