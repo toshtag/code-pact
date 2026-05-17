@@ -1,0 +1,212 @@
+import { readFile, writeFile, rename, mkdir } from "node:fs/promises";
+import { join, dirname } from "node:path";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { Project } from "../core/schemas/project.ts";
+import { Roadmap } from "../core/schemas/roadmap.ts";
+import { Phase } from "../core/schemas/phase.ts";
+import {
+  ProgressLog,
+  type ProgressEvent,
+} from "../core/schemas/progress-event.ts";
+import { runVerify, type CheckResult } from "./verify.ts";
+
+export type TaskCompleteOptions = {
+  cwd: string;
+  taskId: string;
+  /** Optional. When omitted, project.yaml's default_agent is used. */
+  agent?: string;
+  /** When true, do not modify progress.yaml. */
+  dryRun?: boolean;
+  /** Date injection for tests. Defaults to new Date(). */
+  now?: () => Date;
+};
+
+export type TaskCompleteResult =
+  | {
+      kind: "done";
+      task_id: string;
+      phase_id: string;
+      agent: string;
+      event: ProgressEvent;
+      verify: { ok: true; checks: CheckResult[] };
+    }
+  | {
+      kind: "already_done";
+      task_id: string;
+      phase_id: string;
+      agent: string;
+    }
+  | {
+      kind: "dry_run";
+      task_id: string;
+      phase_id: string;
+      agent: string;
+      would_append: ProgressEvent;
+      verify: { ok: true; checks: CheckResult[] };
+    };
+
+/**
+ * Mirrors `task-context.ts:resolveTaskPhase`. Collects every phase that
+ * contains the task id and raises AMBIGUOUS_TASK_ID when more than one
+ * matches. Kept here (not extracted) to keep this PR contained.
+ */
+async function resolveTaskPhase(cwd: string, taskId: string): Promise<string> {
+  const roadmapRaw = await readFile(join(cwd, "design", "roadmap.yaml"), "utf8");
+  const roadmap = Roadmap.parse(parseYaml(roadmapRaw) as unknown);
+
+  const hits: string[] = [];
+  for (const ref of roadmap.phases) {
+    const phaseRaw = await readFile(join(cwd, ref.path), "utf8");
+    const phase = Phase.parse(parseYaml(phaseRaw) as unknown);
+    if (phase.tasks?.some((t) => t.id === taskId)) {
+      hits.push(phase.id);
+    }
+  }
+
+  if (hits.length === 0) {
+    const err = new Error(`Task "${taskId}" not found in any phase.`);
+    (err as NodeJS.ErrnoException).code = "TASK_NOT_FOUND";
+    throw err;
+  }
+  if (hits.length > 1) {
+    const err = new Error(
+      `Task "${taskId}" exists in multiple phases: ${hits.join(", ")}`,
+    );
+    (err as NodeJS.ErrnoException).code = "AMBIGUOUS_TASK_ID";
+    (err as NodeJS.ErrnoException & { phases?: string[] }).phases = hits;
+    throw err;
+  }
+  return hits[0]!;
+}
+
+async function loadProject(cwd: string): Promise<Project> {
+  const raw = await readFile(join(cwd, ".code-pact", "project.yaml"), "utf8");
+  return Project.parse(parseYaml(raw) as unknown);
+}
+
+async function loadProgressLog(cwd: string): Promise<{
+  raw: string;
+  log: ProgressLog;
+  path: string;
+}> {
+  const path = join(cwd, ".code-pact", "state", "progress.yaml");
+  const raw = await readFile(path, "utf8");
+  const log = ProgressLog.parse(parseYaml(raw) as unknown);
+  return { raw, log, path };
+}
+
+/**
+ * Best-effort atomic replacement: write a temp file in the same directory,
+ * then rename to the destination. Prevents partial-write corruption of
+ * progress.yaml. Does NOT protect against concurrent task-complete calls;
+ * that is out of scope for v0.2 (see docs/cli-contract.md).
+ */
+async function atomicWriteYaml(path: string, value: unknown): Promise<void> {
+  const tmp = `${path}.tmp-${process.pid}-${Date.now()}`;
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(tmp, stringifyYaml(value), "utf8");
+  await rename(tmp, path);
+}
+
+export async function runTaskComplete(
+  opts: TaskCompleteOptions,
+): Promise<TaskCompleteResult> {
+  const { cwd, taskId } = opts;
+  const dryRun = opts.dryRun === true;
+  const now = opts.now ?? (() => new Date());
+
+  // ---- Step 0: agent validation (same order as task context) ----
+  const project = await loadProject(cwd);
+  const agentName = opts.agent ?? project.default_agent;
+  const ref = project.agents.find((a) => a.name === agentName);
+  if (!ref) {
+    const err = new Error(`Agent "${agentName}" is not configured in project.yaml.`);
+    (err as NodeJS.ErrnoException).code = "AGENT_NOT_FOUND";
+    throw err;
+  }
+  if (ref.enabled === false) {
+    const err = new Error(
+      `Agent "${agentName}" is disabled in project.yaml (enabled: false).`,
+    );
+    (err as NodeJS.ErrnoException).code = "AGENT_NOT_ENABLED";
+    throw err;
+  }
+
+  // ---- Step 1: resolve phase from task id ----
+  const phaseId = await resolveTaskPhase(cwd, taskId);
+
+  // ---- Step 2: idempotency check ----
+  const { log } = await loadProgressLog(cwd);
+  const existingDone = log.events.find(
+    (e) => e.task_id === taskId && e.status === "done",
+  );
+  if (existingDone) {
+    return {
+      kind: "already_done",
+      task_id: taskId,
+      phase_id: phaseId,
+      agent: agentName,
+    };
+  }
+
+  // ---- Step 3: run verify in preflight mode ----
+  // skipConsistencyChecks: true skips the progress_event + task_status
+  // checks that task complete is itself about to produce. The remaining
+  // checks (commands, decision) are the deterministic preconditions.
+  const verifyResult = await runVerify({
+    cwd,
+    phaseId,
+    taskId,
+    dryRun: false,
+    skipConsistencyChecks: true,
+  });
+
+  if (!verifyResult.ok) {
+    // Surface verify result without touching progress.yaml.
+    const err = new Error(
+      `Verification failed for "${taskId}". progress.yaml was not modified.`,
+    );
+    (err as NodeJS.ErrnoException).code = "VERIFICATION_FAILED";
+    (err as NodeJS.ErrnoException & { checks?: CheckResult[] }).checks =
+      verifyResult.checks;
+    throw err;
+  }
+
+  // ---- Step 4: build the done event ----
+  const event: ProgressEvent = {
+    task_id: taskId,
+    status: "done",
+    at: now().toISOString(),
+    actor: "agent",
+    agent: agentName,
+    evidence: verifyResult.checks.filter((c) => c.ok).map((c) => c.name),
+  };
+
+  // ---- Step 5: dry-run short circuit ----
+  if (dryRun) {
+    return {
+      kind: "dry_run",
+      task_id: taskId,
+      phase_id: phaseId,
+      agent: agentName,
+      would_append: event,
+      verify: { ok: true, checks: verifyResult.checks },
+    };
+  }
+
+  // ---- Step 6: append + atomic write ----
+  const { path } = await loadProgressLog(cwd);
+  const nextLog: ProgressLog = {
+    events: [...log.events, event],
+  };
+  await atomicWriteYaml(path, nextLog);
+
+  return {
+    kind: "done",
+    task_id: taskId,
+    phase_id: phaseId,
+    agent: agentName,
+    event,
+    verify: { ok: true, checks: verifyResult.checks },
+  };
+}
