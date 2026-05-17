@@ -3,13 +3,16 @@ import { join } from "node:path";
 import type { AgentProfile } from "../schemas/agent-profile.ts";
 import type { ModelProfile } from "../schemas/model-profile.ts";
 import { ModelTier } from "../schemas/model-profile.ts";
+import type { Locale } from "../../i18n/index.ts";
+import { messages as messageCatalog } from "../../i18n/index.ts";
 
 // ---------------------------------------------------------------------------
 // AGENTS.md template
 // ---------------------------------------------------------------------------
 
-function agentsMd(profile: AgentProfile, modelProfiles: ModelProfile[]): string {
+function agentsMd(profile: AgentProfile, modelProfiles: ModelProfile[], locale: Locale): string {
   const tier = (t: string) => profile.model_map[t as ModelTier] ?? t;
+  const t = messageCatalog[locale].templates.adapterCommon;
 
   const tierSection = modelProfiles
     .map((mp) => {
@@ -23,46 +26,41 @@ function agentsMd(profile: AgentProfile, modelProfiles: ModelProfile[]): string 
   return [
     `# Codex — Project Instructions`,
     ``,
-    `> This file is managed by [code-pact](https://github.com/toshtag/code-pact).`,
-    `> Edit the sections marked "Project-specific" to reflect your project's conventions.`,
+    `> ${t.managedNotice}`,
+    `> ${t.editNotice}`,
     ``,
-    `## How to work on a task`,
+    `## ${t.workflowHeader}`,
     ``,
-    `1. Fetch the context pack:`,
+    `1. ${t.step1}`,
     `   \`\`\`sh`,
     `   code-pact task context <task-id> --agent codex`,
     `   \`\`\``,
     ``,
-    `2. Implement the task.`,
+    `2. ${t.step2}`,
     ``,
-    `3. Mark the task complete. This runs verify and, on pass, appends a`,
-    `   \`done\` event to \`.code-pact/state/progress.yaml\`:`,
+    `3. ${t.step3}`,
     `   \`\`\`sh`,
     `   code-pact task complete <task-id> --agent codex`,
     `   \`\`\``,
-    `   If verify fails, this command exits 1 and progress.yaml is left`,
-    `   unchanged. If a \`done\` event already exists, it is a no-op`,
-    `   (\`already_done: true\`).`,
+    `   ${t.step3FailDetail}`,
+    `   ${t.step3IdempotentDetail}`,
     ``,
-    `4. Report the result to the user.`,
+    `4. ${t.step4}`,
     ``,
-    `> The low-level \`code-pact verify --phase <p> --task <t>\` is still`,
-    `> available if you need to inspect verify output without recording`,
-    `> a progress event.`,
+    `> ${t.verifyNote}`,
     `>`,
-    `> **Internal command:** \`code-pact pack\` is used internally by \`task context\`.`,
-    `> Do not call \`pack\` directly — use \`code-pact task context <task-id>\` instead.`,
+    `> ${t.packNote}`,
     ``,
     `## Model selection`,
     ``,
     tierSection,
     ``,
-    `## Project-specific conventions`,
+    `## ${t.projectConventionsHeader}`,
     ``,
-    `> Replace this section with your project's actual conventions.`,
-    `> See \`design/constitution.md\` and \`design/rules/\` for the source of truth.`,
+    `> ${t.projectConventionsHint}`,
+    `> ${t.projectConventionsSource}`,
     ``,
-    `- Follow \`design/rules/coding-style.md\` for code style.`,
+    `- ${t.projectConventionsDefault}`,
   ].join("\n");
 }
 
@@ -84,6 +82,7 @@ export async function generateCodexAdapter(
   profile: AgentProfile,
   modelProfiles: ModelProfile[],
   force: boolean,
+  locale: Locale,
 ): Promise<AdapterGenerateResult> {
   const created: string[] = [];
   const skipped: string[] = [];
@@ -103,7 +102,10 @@ export async function generateCodexAdapter(
   }
 
   // AGENTS.md at project root
-  await writeIfAbsent(join(cwd, profile.instruction_filename), agentsMd(profile, modelProfiles));
+  await writeIfAbsent(
+    join(cwd, profile.instruction_filename),
+    agentsMd(profile, modelProfiles, locale),
+  );
 
   // .context/codex/ (context pack output dir)
   const contextDir = join(cwd, profile.context_dir);

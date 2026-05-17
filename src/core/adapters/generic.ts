@@ -2,17 +2,21 @@ import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { AgentProfile } from "../schemas/agent-profile.ts";
 import type { ModelProfile } from "../schemas/model-profile.ts";
+import type { Locale } from "../../i18n/index.ts";
+import { messages as messageCatalog } from "../../i18n/index.ts";
 
 // The generic adapter targets any agent that does not have a dedicated
 // instruction file convention (CLAUDE.md, AGENTS.md, etc). It writes one
 // human-readable document under docs/code-pact/ so it does not collide
 // with arbitrary project docs.
 
-function agentInstructionsMd(profile: AgentProfile): string {
+function agentInstructionsMd(profile: AgentProfile, locale: Locale): string {
+  const t = messageCatalog[locale].templates.adapterCommon;
+
   return [
     `# Agent Instructions — Generic`,
     ``,
-    `> This file is managed by [code-pact](https://github.com/toshtag/code-pact).`,
+    `> ${t.managedNotice}`,
     `> Copy or symlink it into your agent's instruction location (e.g. .cursorrules,`,
     `> GEMINI.md, or any other tool-specific path).`,
     ``,
@@ -21,43 +25,38 @@ function agentInstructionsMd(profile: AgentProfile): string {
     `Ensure \`code-pact\` is available in your PATH. During local development,`,
     `\`pnpm link --global\` or a local tarball install both work.`,
     ``,
-    `## How to work on a task`,
+    `## ${t.workflowHeader}`,
     ``,
-    `1. Fetch the context pack:`,
+    `1. ${t.step1}`,
     `   \`\`\`sh`,
     `   code-pact task context <task-id> --agent generic`,
     `   \`\`\``,
     ``,
-    `2. Implement the task.`,
+    `2. ${t.step2}`,
     ``,
-    `3. Mark the task complete. This runs verify and, on pass, appends a`,
-    `   \`done\` event to \`.code-pact/state/progress.yaml\`:`,
+    `3. ${t.step3}`,
     `   \`\`\`sh`,
     `   code-pact task complete <task-id> --agent generic`,
     `   \`\`\``,
-    `   If verify fails, this command exits 1 and progress.yaml is left`,
-    `   unchanged. If a \`done\` event already exists, it is a no-op`,
-    `   (\`already_done: true\`).`,
+    `   ${t.step3FailDetail}`,
+    `   ${t.step3IdempotentDetail}`,
     ``,
-    `4. Report the result to the user.`,
+    `4. ${t.step4}`,
     ``,
-    `> The low-level \`code-pact verify --phase <p> --task <t>\` is still`,
-    `> available if you need to inspect verify output without recording`,
-    `> a progress event.`,
+    `> ${t.verifyNote}`,
     `>`,
-    `> **Internal command:** \`code-pact pack\` is used internally by \`task context\`.`,
-    `> Do not call \`pack\` directly — use \`code-pact task context <task-id>\` instead.`,
+    `> ${t.packNote}`,
     ``,
     `## Context directory`,
     ``,
     `Context packs for this agent live under \`${profile.context_dir}/\`.`,
     ``,
-    `## Project-specific conventions`,
+    `## ${t.projectConventionsHeader}`,
     ``,
-    `> Replace this section with your project's actual conventions.`,
-    `> See \`design/constitution.md\` and \`design/rules/\` for the source of truth.`,
+    `> ${t.projectConventionsHint}`,
+    `> ${t.projectConventionsSource}`,
     ``,
-    `- Follow \`design/rules/coding-style.md\` for code style.`,
+    `- ${t.projectConventionsDefault}`,
   ].join("\n");
 }
 
@@ -73,6 +72,7 @@ export async function generateGenericAdapter(
   // instruction file does not currently surface model tier mapping.
   _modelProfiles: ModelProfile[],
   force: boolean,
+  locale: Locale,
 ): Promise<AdapterGenerateResult> {
   const created: string[] = [];
   const skipped: string[] = [];
@@ -93,7 +93,7 @@ export async function generateGenericAdapter(
   }
 
   // docs/code-pact/agent-instructions.md
-  await writeIfAbsent(join(cwd, profile.instruction_filename), agentInstructionsMd(profile));
+  await writeIfAbsent(join(cwd, profile.instruction_filename), agentInstructionsMd(profile, locale));
 
   // .context/generic/
   const contextDir = join(cwd, profile.context_dir);

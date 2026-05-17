@@ -25,7 +25,7 @@ describe("runGenerateAdapter — claude-code", () => {
   });
 
   it("returns created list with CLAUDE.md and skill files", async () => {
-    const result = await runGenerateAdapter({ cwd: dir, agentName: "claude-code", force: false });
+    const result = await runGenerateAdapter({ cwd: dir, agentName: "claude-code", force: false, locale: "en-US" });
     expect(result.agentName).toBe("claude-code");
     const names = result.created.map((p) => p.replace(dir, ""));
     expect(names.some((n) => n.includes("CLAUDE.md"))).toBe(true);
@@ -35,7 +35,7 @@ describe("runGenerateAdapter — claude-code", () => {
   });
 
   it("CLAUDE.md contains model tier entries", async () => {
-    await runGenerateAdapter({ cwd: dir, agentName: "claude-code", force: false });
+    await runGenerateAdapter({ cwd: dir, agentName: "claude-code", force: false, locale: "en-US" });
     const content = await readFile(join(dir, "CLAUDE.md"), "utf8");
     expect(content).toContain("highest_reasoning");
     expect(content).toContain("claude-opus-4-7");
@@ -44,7 +44,7 @@ describe("runGenerateAdapter — claude-code", () => {
   });
 
   it("CLAUDE.md instructs the agent to use task context + task complete", async () => {
-    await runGenerateAdapter({ cwd: dir, agentName: "claude-code", force: false });
+    await runGenerateAdapter({ cwd: dir, agentName: "claude-code", force: false, locale: "en-US" });
     const content = await readFile(join(dir, "CLAUDE.md"), "utf8");
     expect(content).toContain("code-pact task context");
     expect(content).toContain("code-pact task complete");
@@ -54,21 +54,21 @@ describe("runGenerateAdapter — claude-code", () => {
     // task complete (v0.2) writes progress.yaml on the agent's behalf,
     // so the file is now mentioned descriptively, but the unsupported
     // `progress --add-event` form must still never appear.
-    await runGenerateAdapter({ cwd: dir, agentName: "claude-code", force: false });
+    await runGenerateAdapter({ cwd: dir, agentName: "claude-code", force: false, locale: "en-US" });
     const content = await readFile(join(dir, "CLAUDE.md"), "utf8");
     expect(content).not.toContain("--add-event");
   });
 
   it("skips existing files when force is false", async () => {
-    await runGenerateAdapter({ cwd: dir, agentName: "claude-code", force: false });
-    const second = await runGenerateAdapter({ cwd: dir, agentName: "claude-code", force: false });
+    await runGenerateAdapter({ cwd: dir, agentName: "claude-code", force: false, locale: "en-US" });
+    const second = await runGenerateAdapter({ cwd: dir, agentName: "claude-code", force: false, locale: "en-US" });
     expect(second.created).toHaveLength(0);
     expect(second.skipped.length).toBeGreaterThan(0);
   });
 
   it("overwrites when force is true", async () => {
-    await runGenerateAdapter({ cwd: dir, agentName: "claude-code", force: false });
-    const second = await runGenerateAdapter({ cwd: dir, agentName: "claude-code", force: true });
+    await runGenerateAdapter({ cwd: dir, agentName: "claude-code", force: false, locale: "en-US" });
+    const second = await runGenerateAdapter({ cwd: dir, agentName: "claude-code", force: true, locale: "en-US" });
     expect(second.created.length).toBeGreaterThan(0);
     expect(second.skipped).toHaveLength(0);
   });
@@ -84,13 +84,13 @@ describe("runGenerateAdapter — codex", () => {
   });
 
   it("creates AGENTS.md", async () => {
-    const result = await runGenerateAdapter({ cwd: dir, agentName: "codex", force: false });
+    const result = await runGenerateAdapter({ cwd: dir, agentName: "codex", force: false, locale: "en-US" });
     const names = result.created.map((p) => p.replace(dir, ""));
     expect(names.some((n) => n.includes("AGENTS.md"))).toBe(true);
   });
 
   it("AGENTS.md contains model tier entries", async () => {
-    await runGenerateAdapter({ cwd: dir, agentName: "codex", force: false });
+    await runGenerateAdapter({ cwd: dir, agentName: "codex", force: false, locale: "en-US" });
     const content = await readFile(join(dir, "AGENTS.md"), "utf8");
     expect(content).toContain("highest_reasoning");
     expect(content).toContain("o3");
@@ -109,14 +109,14 @@ describe("runGenerateAdapter — generic", () => {
   });
 
   it("writes docs/code-pact/agent-instructions.md", async () => {
-    const result = await runGenerateAdapter({ cwd: dir, agentName: "generic", force: false });
+    const result = await runGenerateAdapter({ cwd: dir, agentName: "generic", force: false, locale: "en-US" });
     expect(result.agentName).toBe("generic");
     const names = result.created.map((p) => p.replace(dir, ""));
     expect(names.some((n) => n.includes("docs/code-pact/agent-instructions.md"))).toBe(true);
   });
 
   it("agent-instructions.md instructs the agent to use task context + verify", async () => {
-    await runGenerateAdapter({ cwd: dir, agentName: "generic", force: false });
+    await runGenerateAdapter({ cwd: dir, agentName: "generic", force: false, locale: "en-US" });
     const content = await readFile(
       join(dir, "docs", "code-pact", "agent-instructions.md"),
       "utf8",
@@ -126,7 +126,7 @@ describe("runGenerateAdapter — generic", () => {
   });
 
   it("agent-instructions.md does NOT reference unimplemented commands or npx", async () => {
-    await runGenerateAdapter({ cwd: dir, agentName: "generic", force: false });
+    await runGenerateAdapter({ cwd: dir, agentName: "generic", force: false, locale: "en-US" });
     const content = await readFile(
       join(dir, "docs", "code-pact", "agent-instructions.md"),
       "utf8",
@@ -138,7 +138,7 @@ describe("runGenerateAdapter — generic", () => {
   });
 
   it("creates .context/generic/ directory for context packs", async () => {
-    await runGenerateAdapter({ cwd: dir, agentName: "generic", force: false });
+    await runGenerateAdapter({ cwd: dir, agentName: "generic", force: false, locale: "en-US" });
     // Directory existence is implied by mkdir recursive; verify by reading.
     const { readdir } = await import("node:fs/promises");
     const entries = await readdir(join(dir, ".context"));
@@ -156,7 +156,7 @@ describe("runGenerateAdapter — cursor", () => {
   });
 
   it("writes .cursor/rules/code-pact.mdc", async () => {
-    const result = await runGenerateAdapter({ cwd: dir, agentName: "cursor", force: false });
+    const result = await runGenerateAdapter({ cwd: dir, agentName: "cursor", force: false, locale: "en-US" });
     expect(result.agentName).toBe("cursor");
     const names = result.created.map((p) => p.replace(dir, ""));
     expect(names.some((n) => n.includes(".cursor/rules/code-pact.mdc"))).toBe(
@@ -165,7 +165,7 @@ describe("runGenerateAdapter — cursor", () => {
   });
 
   it("emits a Cursor-format mdc with frontmatter and alwaysApply: true", async () => {
-    await runGenerateAdapter({ cwd: dir, agentName: "cursor", force: false });
+    await runGenerateAdapter({ cwd: dir, agentName: "cursor", force: false, locale: "en-US" });
     const content = await readFile(
       join(dir, ".cursor", "rules", "code-pact.mdc"),
       "utf8",
@@ -181,7 +181,7 @@ describe("runGenerateAdapter — cursor", () => {
   });
 
   it("instructs the agent to use task context + task complete", async () => {
-    await runGenerateAdapter({ cwd: dir, agentName: "cursor", force: false });
+    await runGenerateAdapter({ cwd: dir, agentName: "cursor", force: false, locale: "en-US" });
     const content = await readFile(
       join(dir, ".cursor", "rules", "code-pact.mdc"),
       "utf8",
@@ -191,7 +191,7 @@ describe("runGenerateAdapter — cursor", () => {
   });
 
   it("flags itself as experimental in the file body", async () => {
-    await runGenerateAdapter({ cwd: dir, agentName: "cursor", force: false });
+    await runGenerateAdapter({ cwd: dir, agentName: "cursor", force: false, locale: "en-US" });
     const content = await readFile(
       join(dir, ".cursor", "rules", "code-pact.mdc"),
       "utf8",
@@ -200,13 +200,13 @@ describe("runGenerateAdapter — cursor", () => {
   });
 
   it("does NOT write the deprecated `.cursorrules` legacy file", async () => {
-    await runGenerateAdapter({ cwd: dir, agentName: "cursor", force: false });
+    await runGenerateAdapter({ cwd: dir, agentName: "cursor", force: false, locale: "en-US" });
     const { existsSync } = await import("node:fs");
     expect(existsSync(join(dir, ".cursorrules"))).toBe(false);
   });
 
   it("creates .context/cursor/ directory for context packs", async () => {
-    await runGenerateAdapter({ cwd: dir, agentName: "cursor", force: false });
+    await runGenerateAdapter({ cwd: dir, agentName: "cursor", force: false, locale: "en-US" });
     const { readdir } = await import("node:fs/promises");
     const entries = await readdir(join(dir, ".context"));
     expect(entries).toContain("cursor");
@@ -223,34 +223,34 @@ describe("runGenerateAdapter — gemini-cli", () => {
   });
 
   it("writes GEMINI.md at project root", async () => {
-    const result = await runGenerateAdapter({ cwd: dir, agentName: "gemini-cli", force: false });
+    const result = await runGenerateAdapter({ cwd: dir, agentName: "gemini-cli", force: false, locale: "en-US" });
     expect(result.agentName).toBe("gemini-cli");
     const names = result.created.map((p) => p.replace(dir, ""));
     expect(names.some((n) => n.endsWith("/GEMINI.md"))).toBe(true);
   });
 
   it("GEMINI.md instructs the agent to use task context + task complete", async () => {
-    await runGenerateAdapter({ cwd: dir, agentName: "gemini-cli", force: false });
+    await runGenerateAdapter({ cwd: dir, agentName: "gemini-cli", force: false, locale: "en-US" });
     const content = await readFile(join(dir, "GEMINI.md"), "utf8");
     expect(content).toContain("code-pact task context");
     expect(content).toContain("code-pact task complete");
   });
 
   it("flags itself as experimental and links the official source", async () => {
-    await runGenerateAdapter({ cwd: dir, agentName: "gemini-cli", force: false });
+    await runGenerateAdapter({ cwd: dir, agentName: "gemini-cli", force: false, locale: "en-US" });
     const content = await readFile(join(dir, "GEMINI.md"), "utf8");
     expect(content).toMatch(/experimental/i);
     expect(content).toContain("github.com/google-gemini/gemini-cli");
   });
 
   it("does NOT emit YAML frontmatter (Gemini CLI expects plain markdown)", async () => {
-    await runGenerateAdapter({ cwd: dir, agentName: "gemini-cli", force: false });
+    await runGenerateAdapter({ cwd: dir, agentName: "gemini-cli", force: false, locale: "en-US" });
     const content = await readFile(join(dir, "GEMINI.md"), "utf8");
     expect(content.startsWith("---\n")).toBe(false);
   });
 
   it("creates .context/gemini-cli/ directory for context packs", async () => {
-    await runGenerateAdapter({ cwd: dir, agentName: "gemini-cli", force: false });
+    await runGenerateAdapter({ cwd: dir, agentName: "gemini-cli", force: false, locale: "en-US" });
     const { readdir } = await import("node:fs/promises");
     const entries = await readdir(join(dir, ".context"));
     expect(entries).toContain("gemini-cli");
@@ -268,7 +268,7 @@ describe("runGenerateAdapter — unknown agent", () => {
 
   it("throws AGENT_NOT_FOUND for unrecognised agent name", async () => {
     await expect(
-      runGenerateAdapter({ cwd: dir, agentName: "gemini", force: false }),
+      runGenerateAdapter({ cwd: dir, agentName: "gemini", force: false, locale: "en-US" }),
     ).rejects.toMatchObject({ code: "AGENT_NOT_FOUND" });
   });
 });

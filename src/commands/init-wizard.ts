@@ -83,6 +83,7 @@ export async function runInitWizard(opts: InitWizardOptions): Promise<InitResult
           cwd: opts.cwd,
           agentName: agent,
           force: opts.force,
+          locale,
         });
         result.created.push(...adapterResult.created);
         result.skipped.push(...adapterResult.skipped);

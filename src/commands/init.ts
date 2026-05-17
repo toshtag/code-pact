@@ -8,6 +8,7 @@ import type { Roadmap } from "../core/schemas/roadmap.ts";
 import type { ProgressLog } from "../core/schemas/progress-event.ts";
 import type { BaselineSnapshot } from "../core/schemas/baseline-snapshot.ts";
 import { DEFAULT_AGENT_PROFILES, type SupportedAgent } from "../core/agents.ts";
+import { messages as messageCatalog } from "../i18n/index.ts";
 
 export type { SupportedAgent } from "../core/agents.ts";
 
@@ -74,37 +75,34 @@ const MODEL_PROFILES: ModelProfile[] = [
 // Template strings
 // ---------------------------------------------------------------------------
 
-function constitutionMd(projectName: string): string {
+function constitutionMd(projectName: string, locale: LocaleCode): string {
+  const t = messageCatalog[locale].templates.constitution;
   return [
     `# ${projectName} — Constitution`,
     "",
-    "This file captures the high-level principles that guide every design",
-    "and implementation decision in this project.",
+    t.description,
     "",
-    "## Core principles",
+    `## ${t.corePrinciplesHeader}`,
     "",
-    "- Write for the next reader, not just the next test.",
-    "- Design decisions must be captured in `design/decisions/`.",
-    "- Completion criteria must be deterministically verifiable.",
+    ...t.principles.map((p) => `- ${p}`),
     "",
-    "> Edit this file to reflect the actual principles of your project.",
+    `> ${t.editHint}`,
   ].join("\n");
 }
 
-function codingStyleMd(): string {
+function codingStyleMd(locale: LocaleCode): string {
+  const t = messageCatalog[locale].templates.codingStyle;
   return [
     "---",
     "tags: [coding, style]",
     "applies_to: [feature, refactor, bugfix]",
     "---",
     "",
-    "# Coding style rules",
+    `# ${t.header}`,
     "",
-    "- Prefer explicit over implicit.",
-    "- No commented-out code in commits.",
-    "- File-level exports only; avoid barrel re-exports of internal helpers.",
+    ...t.rules.map((r) => `- ${r}`),
     "",
-    "> Edit or delete this file to match your project conventions.",
+    `> ${t.editHint}`,
   ].join("\n");
 }
 
@@ -257,7 +255,7 @@ export async function runInitCore(opts: InitCoreOptions): Promise<InitResult> {
   // constitution.md
   await writeIfAbsent(
     join(cwd, "design", "constitution.md"),
-    constitutionMd(projectName),
+    constitutionMd(projectName, locale),
     force,
     created,
     skipped,
@@ -266,7 +264,7 @@ export async function runInitCore(opts: InitCoreOptions): Promise<InitResult> {
   // rules/coding-style.md
   await writeIfAbsent(
     join(cwd, "design", "rules", "coding-style.md"),
-    codingStyleMd(),
+    codingStyleMd(locale),
     force,
     created,
     skipped,

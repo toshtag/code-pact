@@ -158,4 +158,51 @@ export const messages = {
     ciDetected:
       "CI 環境が検出されたため対話プロンプトは無効化されました。必要なフラグを明示するか、CI を解除してください。",
   },
+  templates: {
+    constitution: {
+      description:
+        "このファイルは、プロジェクトのすべての計画・実装上の判断を導く原則を記述します。",
+      corePrinciplesHeader: "基本原則",
+      principles: [
+        "次のテストのためではなく、次に読む人のために書く。",
+        "計画上の判断は `design/decisions/` に記録する。",
+        "完了条件は決定論的に検証できるものにする。",
+      ],
+      editHint: "このファイルを編集して、プロジェクト固有の原則を反映させてください。",
+    },
+    codingStyle: {
+      header: "コーディングスタイルルール",
+      rules: [
+        "暗黙より明示を優先する。",
+        "コミットにコメントアウトしたコードを含めない。",
+        "ファイルレベルのエクスポートのみ使用し、内部ヘルパーのバレル再エクスポートは避ける。",
+      ],
+      editHint: "このファイルを編集または削除して、プロジェクトの規約に合わせてください。",
+    },
+    adapterCommon: {
+      managedNotice:
+        "このファイルは [code-pact](https://github.com/toshtag/code-pact) によって管理されています。",
+      editNotice:
+        "「プロジェクト固有」とマークされたセクションを編集して、プロジェクトの規約を反映させてください。",
+      workflowHeader: "タスクの進め方",
+      step1: "コンテキストパックを取得する:",
+      step2: "タスクを実装する。",
+      step3: "タスクを完了としてマークする。verify を実行し、成功すれば `done` イベントを `.code-pact/state/progress.yaml` に追記する:",
+      step3FailDetail:
+        "verify が失敗した場合、このコマンドは exit 1 を返し progress.yaml は変更されません。",
+      step3IdempotentDetail:
+        "`done` イベントが既に存在する場合は no-op (`already_done: true`) となります。",
+      step4: "結果をユーザーに報告する。",
+      verifyNote:
+        "低レベルコマンド `code-pact verify --phase <p> --task <t>` は、進捗イベントを記録せずに verify 出力を確認したい場合に利用できます。",
+      packNote:
+        "**内部コマンド:** `code-pact pack` は `task context` が内部的に呼び出すコマンドです。`pack` を直接呼び出さず、`code-pact task context <task-id>` を使用してください。",
+      projectConventionsHeader: "プロジェクト固有の規約",
+      projectConventionsHint:
+        "このセクションを編集して、実際のプロジェクト規約を記述してください。",
+      projectConventionsSource:
+        "`design/constitution.md` と `design/rules/` が規約の source of truth です。",
+      projectConventionsDefault: "`design/rules/coding-style.md` のコーディングスタイルに従う。",
+    },
+  },
 } as const;

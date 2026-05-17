@@ -5,6 +5,7 @@ import { AgentProfile } from "../core/schemas/agent-profile.ts";
 import { ModelProfile } from "../core/schemas/model-profile.ts";
 import { adapterRegistry } from "../core/adapters/index.ts";
 import { isSupportedAgent } from "../core/agents.ts";
+import type { Locale } from "../i18n/index.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -14,6 +15,7 @@ export type AdapterOptions = {
   cwd: string;
   agentName: string;
   force: boolean;
+  locale: Locale;
 };
 
 export type AdapterResult = {
@@ -65,7 +67,7 @@ async function loadModelProfiles(cwd: string): Promise<ModelProfile[]> {
 // ---------------------------------------------------------------------------
 
 export async function runGenerateAdapter(opts: AdapterOptions): Promise<AdapterResult> {
-  const { cwd, agentName, force } = opts;
+  const { cwd, agentName, force, locale } = opts;
 
   const [profile, modelProfiles] = await Promise.all([
     loadAgentProfile(cwd, agentName),
@@ -79,7 +81,7 @@ export async function runGenerateAdapter(opts: AdapterOptions): Promise<AdapterR
   }
 
   const generator = adapterRegistry[agentName];
-  const result = await generator(cwd, profile, modelProfiles, force);
+  const result = await generator(cwd, profile, modelProfiles, force, locale);
 
   return { agentName, ...result };
 }

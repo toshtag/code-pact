@@ -423,7 +423,7 @@ async function cmdAdapter(argv: string[], locale: Locale, globalJson: boolean): 
   const cwd = process.cwd();
 
   try {
-    const result = await runGenerateAdapter({ cwd, agentName, force });
+    const result = await runGenerateAdapter({ cwd, agentName, force, locale });
     if (json) {
       process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
     } else {
