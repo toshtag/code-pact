@@ -16,6 +16,13 @@ export type VerifyOptions = {
   phaseId: string;
   taskId: string;
   dryRun: boolean;
+  /**
+   * When true, skip the `progress_event` and `task_status` checks.
+   * Used by `task complete` to evaluate the deterministic preconditions
+   * (commands, decision) without requiring the state that task complete
+   * is itself about to produce.
+   */
+  skipConsistencyChecks?: boolean;
 };
 
 export type CheckResult = {
@@ -171,6 +178,7 @@ function checkTaskStatus(phase: Phase, taskId: string): CheckResult {
 
 export async function runVerify(opts: VerifyOptions): Promise<VerifyResult> {
   const { cwd, phaseId, taskId, dryRun } = opts;
+  const skipConsistency = opts.skipConsistencyChecks === true;
 
   // Resolve phase
   const roadmap = await loadRoadmap(cwd);
@@ -181,10 +189,8 @@ export async function runVerify(opts: VerifyOptions): Promise<VerifyResult> {
     throw err;
   }
 
-  const [phase, log] = await Promise.all([
-    loadPhase(cwd, ref.path),
-    loadProgressLog(cwd),
-  ]);
+  // progress.yaml is only loaded when the consistency checks need it.
+  const phase = await loadPhase(cwd, ref.path);
 
   // Verify task exists in phase before running checks
   const taskExists = phase.tasks?.some((t) => t.id === taskId) ?? false;
@@ -196,13 +202,22 @@ export async function runVerify(opts: VerifyOptions): Promise<VerifyResult> {
 
   const task = phase.tasks!.find((t) => t.id === taskId)!;
 
-  // Run all checks in order
+  // Deterministic preflight checks: would always be runnable on a fresh
+  // task before any state mutation. `task complete` calls runVerify with
+  // skipConsistencyChecks: true so these are the only checks evaluated.
   const checks: CheckResult[] = [
     await checkCommands(phase.verification.commands, cwd, dryRun),
-    await checkProgressEvent(log, taskId),
     await checkDecision(cwd, phase, task),
-    checkTaskStatus(phase, taskId),
   ];
+
+  // State-consistency checks: only meaningful AFTER the task has been
+  // recorded as done. `verify` (standalone) runs them; `task complete`
+  // skips them because it is the action that produces that state.
+  if (!skipConsistency) {
+    const log = await loadProgressLog(cwd);
+    checks.splice(1, 0, await checkProgressEvent(log, taskId));
+    checks.push(checkTaskStatus(phase, taskId));
+  }
 
   const ok = checks.every((c) => c.ok);
   return { ok, checks };
