@@ -53,6 +53,31 @@ code-pact phase show <phase-id> --json
 code-pact progress --baseline initial
 ```
 
+## Planning (v0.4+)
+
+```sh
+# Write a project brief (what/who/why → design/brief.md):
+code-pact plan brief
+
+# Write project principles (→ design/constitution.md):
+code-pact plan constitution
+
+# Generate a planning prompt for an AI agent and print to stdout:
+code-pact plan prompt
+
+# Copy the prompt directly to clipboard:
+code-pact plan prompt --clipboard
+```
+
+Feed the AI agent's YAML response to `phase import` to bulk-import all phases and tasks:
+
+```sh
+code-pact phase import draft-roadmap.yaml
+# AI-generated YAML only needs task `id`; missing fields get sensible defaults.
+# Add --strict to require every task field explicitly.
+code-pact phase import draft-roadmap.yaml --strict
+```
+
 ## Adding work
 
 ```sh
@@ -80,6 +105,10 @@ code-pact init
 
 | Goal | Command |
 |---|---|
+| Write project brief | `code-pact plan brief` |
+| Write project constitution | `code-pact plan constitution` |
+| Generate AI planning prompt | `code-pact plan prompt [--clipboard]` |
+| Bulk-import AI-generated roadmap | `code-pact phase import <yaml> [--strict]` |
 | Fetch context for a task (as agent) | `code-pact task context <task-id> --agent <agent>` |
 | Mark a task done (as agent) | `code-pact task complete <task-id> --agent <agent>` |
 | Add a phase interactively | `code-pact phase add` |
