@@ -960,3 +960,64 @@ describe("CLI: phase import (v0.2)", () => {
     expect(parsed.error.code).toBe("CONFIG_ERROR");
   });
 });
+
+// ---------------------------------------------------------------------------
+// v0.2: cursor adapter (experimental)
+// ---------------------------------------------------------------------------
+
+describe("CLI: adapter --agent cursor (v0.2 experimental)", () => {
+  it("init --agent cursor + adapter --agent cursor writes .cursor/rules/code-pact.mdc", async () => {
+    const initRes = run([
+      "init",
+      "--non-interactive",
+      "--locale",
+      "en-US",
+      "--agent",
+      "cursor",
+      "--json",
+    ]);
+    expect(initRes.code).toBe(0);
+
+    const adapterRes = run(["adapter", "--agent", "cursor", "--json"]);
+    expect(adapterRes.code).toBe(0);
+    const parsed = JSON.parse(adapterRes.stdout) as { ok: boolean };
+    expect(parsed.ok).toBe(true);
+
+    const mdc = await readFile(
+      join(tmpDir, ".cursor", "rules", "code-pact.mdc"),
+      "utf8",
+    );
+    // Frontmatter must lead so Cursor recognises it as a rule.
+    expect(mdc.startsWith("---\n")).toBe(true);
+    expect(mdc).toContain("alwaysApply: true");
+    expect(mdc).toContain("code-pact task complete");
+    expect(mdc).toMatch(/experimental/i);
+  });
+
+  it("init --agent claude-code,cursor — cursor is selectable in a multi-agent setup", async () => {
+    const initRes = run([
+      "init",
+      "--non-interactive",
+      "--locale",
+      "en-US",
+      "--agent",
+      "claude-code,cursor",
+      "--json",
+    ]);
+    expect(initRes.code).toBe(0);
+
+    const projectYaml = await readFile(
+      join(tmpDir, ".code-pact", "project.yaml"),
+      "utf8",
+    );
+    const project = parseYaml(projectYaml) as {
+      default_agent: string;
+      agents: { name: string }[];
+    };
+    expect(project.default_agent).toBe("claude-code");
+    expect(project.agents.map((a) => a.name).sort()).toEqual([
+      "claude-code",
+      "cursor",
+    ]);
+  });
+});
