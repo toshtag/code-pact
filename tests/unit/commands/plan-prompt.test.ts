@@ -1,0 +1,122 @@
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { generatePlanningPrompt, runPlanPrompt } from "../../../src/commands/plan-prompt.ts";
+
+let tmpDir: string;
+
+beforeEach(async () => {
+  tmpDir = await mkdtemp(join(tmpdir(), "code-pact-prompt-test-"));
+  await mkdir(join(tmpDir, "design"), { recursive: true });
+});
+
+afterEach(async () => {
+  await rm(tmpDir, { recursive: true, force: true });
+});
+
+// ---------------------------------------------------------------------------
+// generatePlanningPrompt — unit
+// ---------------------------------------------------------------------------
+
+describe("generatePlanningPrompt — en-US", () => {
+  it("includes the brief content when provided", () => {
+    const prompt = generatePlanningPrompt("A CLI tool for developers", null, "en-US");
+    expect(prompt).toContain("A CLI tool for developers");
+    expect(prompt).toContain("Project Brief");
+  });
+
+  it("shows noBriefNotice when brief is null", () => {
+    const prompt = generatePlanningPrompt(null, null, "en-US");
+    expect(prompt).toContain("design/brief.md");
+    expect(prompt).not.toContain("Project Brief\n\nA ");
+  });
+
+  it("includes constitution content when provided", () => {
+    const prompt = generatePlanningPrompt(null, "Write for the reader.", "en-US");
+    expect(prompt).toContain("Project Constitution");
+    expect(prompt).toContain("Write for the reader.");
+  });
+
+  it("omits constitution section when not provided", () => {
+    const prompt = generatePlanningPrompt("brief text", null, "en-US");
+    expect(prompt).not.toContain("Project Constitution");
+  });
+
+  it("includes YAML format example", () => {
+    const prompt = generatePlanningPrompt(null, null, "en-US");
+    expect(prompt).toContain("phases:");
+    expect(prompt).toContain("definition_of_done:");
+    expect(prompt).toContain("verification:");
+    expect(prompt).toContain("tasks:");
+  });
+
+  it("includes guidelines section", () => {
+    const prompt = generatePlanningPrompt(null, null, "en-US");
+    expect(prompt).toContain("Guidelines");
+    expect(prompt).toContain("3–7 phases");
+  });
+
+  it("ends with a newline", () => {
+    const prompt = generatePlanningPrompt(null, null, "en-US");
+    expect(prompt.endsWith("\n")).toBe(true);
+  });
+});
+
+describe("generatePlanningPrompt — ja-JP", () => {
+  it("uses Japanese section headers", () => {
+    const prompt = generatePlanningPrompt("CLI ツール", null, "ja-JP");
+    expect(prompt).toContain("以下のプロジェクト情報を読んで");
+    expect(prompt).toContain("プロジェクト概要");
+    expect(prompt).toContain("出力形式");
+    expect(prompt).toContain("出力の指針");
+  });
+
+  it("shows Japanese noBriefNotice when brief is null", () => {
+    const prompt = generatePlanningPrompt(null, null, "ja-JP");
+    expect(prompt).toContain("design/brief.md が見つかりません");
+  });
+
+  it("includes constitution under Japanese header", () => {
+    const prompt = generatePlanningPrompt(null, "原則: 明示より暗示", "ja-JP");
+    expect(prompt).toContain("プロジェクト方針");
+    expect(prompt).toContain("原則: 明示より暗示");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// runPlanPrompt — integration (reads files from tmpDir)
+// ---------------------------------------------------------------------------
+
+describe("runPlanPrompt", () => {
+  it("returns hasBrief:false and hasConstitution:false when files absent", async () => {
+    const result = await runPlanPrompt({ cwd: tmpDir, locale: "en-US", clipboard: false });
+    expect(result.hasBrief).toBe(false);
+    expect(result.hasConstitution).toBe(false);
+    expect(result.clipboardCopied).toBe(false);
+    expect(result.prompt).toContain("design/brief.md");
+  });
+
+  it("includes brief content when design/brief.md exists", async () => {
+    await writeFile(join(tmpDir, "design", "brief.md"), "# Project Brief\n\nA great tool.", "utf8");
+    const result = await runPlanPrompt({ cwd: tmpDir, locale: "en-US", clipboard: false });
+    expect(result.hasBrief).toBe(true);
+    expect(result.prompt).toContain("A great tool.");
+  });
+
+  it("includes constitution content when design/constitution.md exists", async () => {
+    await writeFile(
+      join(tmpDir, "design", "constitution.md"),
+      "# Constitution\n\nWrite for the reader.",
+      "utf8",
+    );
+    const result = await runPlanPrompt({ cwd: tmpDir, locale: "en-US", clipboard: false });
+    expect(result.hasConstitution).toBe(true);
+    expect(result.prompt).toContain("Write for the reader.");
+  });
+
+  it("produces ja-JP prompt when locale is ja-JP", async () => {
+    const result = await runPlanPrompt({ cwd: tmpDir, locale: "ja-JP", clipboard: false });
+    expect(result.prompt).toContain("以下のプロジェクト情報を読んで");
+  });
+});
