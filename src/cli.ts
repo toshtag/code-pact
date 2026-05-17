@@ -27,6 +27,8 @@ import { runDoctor, formatDoctor } from "./commands/doctor.ts";
 import { runTaskContext } from "./commands/task-context.ts";
 import { runTaskComplete } from "./commands/task-complete.ts";
 import { runPhaseNew } from "./commands/phase-new.ts";
+import { runTaskAdd } from "./commands/task-add.ts";
+import { runPhaseWizard } from "./lib/phase-wizard.ts";
 import type { LocaleCode } from "./core/schemas/locale.ts";
 import { LocaleConfig } from "./core/schemas/locale.ts";
 import type { PhaseStatus } from "./core/schemas/phase.ts";
@@ -634,6 +636,7 @@ async function cmdPhase(argv: string[], locale: Locale, globalJson: boolean): Pr
         "verify-command": { type: "string", multiple: true },
         "done-criterion": { type: "string", multiple: true },
         json: { type: "boolean" },
+        "non-interactive": { type: "boolean" },
       }));
     } catch (err) {
       if (!(err instanceof ConfigError)) throw err;
@@ -650,13 +653,49 @@ async function cmdPhase(argv: string[], locale: Locale, globalJson: boolean): Pr
     }
 
     const json = globalJson || values.json === true;
+    const nonInteractive = values["non-interactive"] === true;
     const id = values.id as string | undefined;
     const name = values.name as string | undefined;
     const weightRaw = values.weight as string | undefined;
     const objective = values.objective as string | undefined;
 
-    if (!id || !name || !weightRaw || !objective) {
-      const msg = "phase add requires --id, --name, --weight, --objective";
+    const missingRequiredFlags = !id || !name || !weightRaw || !objective;
+
+    // Wizard branch: TTY, flags missing, not non-interactive, not JSON
+    if (missingRequiredFlags && isInteractive() && !nonInteractive && !json) {
+      const { Prompter } = await import("./lib/prompt.ts");
+      const prompter = Prompter.fromIO();
+      try {
+        const input = await runPhaseWizard(prompter, messages[locale].wizard.phase);
+        const result = await runPhaseAdd({
+          cwd,
+          id: input.id,
+          name: input.name,
+          weight: input.weight,
+          objective: input.objective,
+          confidence: input.confidence,
+          risk: input.risk,
+          verifyCommands: input.verifyCommands,
+          definitionOfDone: input.doneCriteria,
+        });
+        process.stderr.write(`${m.phase.added(input.id, result.path)}\n`);
+        return 0;
+      } catch (err: unknown) {
+        if (err instanceof Error && (err as NodeJS.ErrnoException).code === "DUPLICATE_PHASE_ID") {
+          const phaseId = err.message.match(/"([^"]+)"/)?.[1] ?? "";
+          process.stderr.write(`${m.phase.duplicateId(phaseId)}\n`);
+          return 1;
+        }
+        throw err;
+      } finally {
+        prompter.close();
+      }
+    }
+
+    if (missingRequiredFlags) {
+      const msg = nonInteractive
+        ? m.cliContract.nonInteractiveMissing("--id, --name, --weight, --objective")
+        : "phase add requires --id, --name, --weight, --objective";
       if (json) {
         process.stdout.write(
           `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
@@ -951,8 +990,11 @@ async function cmdTask(argv: string[], locale: Locale, globalJson: boolean): Pro
   if (subcommand === "complete") {
     return cmdTaskComplete(rest, locale, globalJson);
   }
+  if (subcommand === "add") {
+    return cmdTaskAdd(rest, locale, globalJson);
+  }
 
-  const msg = `task: unknown subcommand "${subcommand ?? ""}". Use: context | complete`;
+  const msg = `task: unknown subcommand "${subcommand ?? ""}". Use: add | context | complete`;
   if (globalJson) {
     process.stdout.write(
       `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
@@ -961,6 +1003,69 @@ async function cmdTask(argv: string[], locale: Locale, globalJson: boolean): Pro
     process.stderr.write(`${msg}\n`);
   }
   return 2;
+}
+
+async function cmdTaskAdd(
+  argv: string[],
+  locale: Locale,
+  globalJson: boolean,
+): Promise<number> {
+  const m = messages[locale];
+  const cwd = process.cwd();
+
+  // Positional: phase-id
+  const phaseId = argv.find((a) => !a.startsWith("-"));
+  if (!phaseId) {
+    const msg = "task add requires a phase id: code-pact task add <phase-id>";
+    if (globalJson) {
+      process.stdout.write(
+        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
+      );
+    } else {
+      process.stderr.write(`${msg}\n`);
+    }
+    return 2;
+  }
+
+  // Optional --id flag
+  const idFlagIdx = argv.indexOf("--id");
+  const explicitId = idFlagIdx !== -1 ? argv[idFlagIdx + 1] : undefined;
+
+  if (!isInteractive()) {
+    const msg = "task add is interactive and requires a TTY. Use --non-interactive phase add with tasks in a phase import file instead.";
+    if (globalJson) {
+      process.stdout.write(
+        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
+      );
+    } else {
+      process.stderr.write(`${msg}\n`);
+    }
+    return 2;
+  }
+
+  try {
+    const result = await runTaskAdd({ cwd, phaseId, locale, id: explicitId });
+    if (globalJson) {
+      process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
+    } else {
+      process.stderr.write(`${m.task.added(result.taskId, result.phaseId, result.phasePath)}\n`);
+    }
+    return 0;
+  } catch (err: unknown) {
+    const code = (err as NodeJS.ErrnoException).code;
+    const message = err instanceof Error ? err.message : String(err);
+    if (code === "PHASE_NOT_FOUND" || code === "DUPLICATE_TASK_ID") {
+      if (globalJson) {
+        process.stdout.write(
+          `${JSON.stringify({ ok: false, error: { code, message } })}\n`,
+        );
+      } else {
+        process.stderr.write(`${message}\n`);
+      }
+      return code === "PHASE_NOT_FOUND" ? 2 : 1;
+    }
+    throw err;
+  }
 }
 
 async function cmdTaskContext(

@@ -9,7 +9,7 @@ export const messages = {
     "コマンド:",
     "  init       プロジェクトを初期化 (TTY なら対話、それ以外はフラグ)",
     "  phase      フェーズ契約を管理 (add | new | ls | show | import)",
-    "  task       Agent 向けコマンド (context | complete)",
+    "  task       タスクの管理 (add) と Agent 向けコマンド (context | complete)",
     "  progress   baseline に対する重み付き進捗を表示",
     "  pack       .context/<agent>/ に context pack ファイルを書き出し",
     "  verify     決定論的な完了条件を検証",
@@ -114,8 +114,14 @@ export const messages = {
       verifyCommandPrompt: "検証コマンド (カンマ区切り)",
       doneCriterionPrompt: "完了条件 (カンマ区切り)",
     },
+    task: {
+      descriptionPrompt: "タスクの説明",
+      typePrompt: "タスクの種類",
+    },
   },
   task: {
+    added: (taskId: string, phaseId: string, path: string): string =>
+      `タスク "${taskId}" をフェーズ "${phaseId}" に追加しました (${path})`,
     context: {
       taskNotFound: (taskId: string): string =>
         `タスク "${taskId}" がどのフェーズにも見つかりません。`,
