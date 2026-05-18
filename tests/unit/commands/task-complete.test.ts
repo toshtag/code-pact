@@ -330,3 +330,84 @@ describe("runTaskComplete — error codes", () => {
     expect(after).toBe(before);
   });
 });
+
+describe("runTaskComplete — state transitions (v0.6)", () => {
+  it("started → done succeeds and appends a done event", async () => {
+    const started = `events:
+  - task_id: P1-T1
+    status: started
+    at: "2026-05-18T09:00:00+00:00"
+    actor: agent
+    agent: claude-code
+`;
+    await setupProject(dir, { progressYaml: started });
+    const result = await runTaskComplete({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+    });
+    expect(result.kind).toBe("done");
+    const { log } = await readProgress(dir);
+    expect(log.events.map((e) => e.status)).toEqual(["started", "done"]);
+  });
+
+  it("resumed → done succeeds and appends a done event", async () => {
+    const resumed = `events:
+  - task_id: P1-T1
+    status: started
+    at: "2026-05-18T09:00:00+00:00"
+    actor: agent
+    agent: claude-code
+  - task_id: P1-T1
+    status: blocked
+    at: "2026-05-18T10:00:00+00:00"
+    actor: agent
+    agent: claude-code
+    reason: waiting on review
+  - task_id: P1-T1
+    status: resumed
+    at: "2026-05-18T11:00:00+00:00"
+    actor: agent
+    agent: claude-code
+`;
+    await setupProject(dir, { progressYaml: resumed });
+    const result = await runTaskComplete({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+    });
+    expect(result.kind).toBe("done");
+    const { log } = await readProgress(dir);
+    expect(log.events).toHaveLength(4);
+    expect(log.events[3]!.status).toBe("done");
+  });
+
+  it("blocked → done is rejected with INVALID_TASK_TRANSITION and progress.yaml stays byte-identical", async () => {
+    const blocked = `events:
+  - task_id: P1-T1
+    status: started
+    at: "2026-05-18T09:00:00+00:00"
+    actor: agent
+    agent: claude-code
+  - task_id: P1-T1
+    status: blocked
+    at: "2026-05-18T10:00:00+00:00"
+    actor: agent
+    agent: claude-code
+    reason: waiting on review
+`;
+    await setupProject(dir, { progressYaml: blocked });
+    const before = await readFile(
+      join(dir, ".code-pact", "state", "progress.yaml"),
+      "utf8",
+    );
+    await expect(
+      runTaskComplete({ cwd: dir, taskId: "P1-T1", agent: "claude-code" }),
+    ).rejects.toMatchObject({ code: "INVALID_TASK_TRANSITION" });
+    const after = await readFile(
+      join(dir, ".code-pact", "state", "progress.yaml"),
+      "utf8",
+    );
+    expect(after).toBe(before);
+  });
+});
