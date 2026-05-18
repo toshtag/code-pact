@@ -30,6 +30,11 @@ import {
   runPlanLint,
   serializePlanLintData,
 } from "./commands/plan-lint.ts";
+import {
+  formatPlanNormalizeHuman,
+  runPlanNormalize,
+  serializePlanNormalizeData,
+} from "./commands/plan-normalize.ts";
 import { runRecommend, formatRecommend } from "./commands/recommend.ts";
 import { runDoctor, formatDoctor } from "./commands/doctor.ts";
 import { runValidate } from "./commands/validate.ts";
@@ -436,7 +441,11 @@ async function cmdPlan(argv: string[], locale: Locale, globalJson: boolean): Pro
     return cmdPlanLint(rest, locale, globalJson);
   }
 
-  const msg = `plan: unknown subcommand "${subcommand ?? ""}". Use: brief | prompt | constitution | lint`;
+  if (subcommand === "normalize") {
+    return cmdPlanNormalize(rest, locale, globalJson);
+  }
+
+  const msg = `plan: unknown subcommand "${subcommand ?? ""}". Use: brief | prompt | constitution | lint | normalize`;
   if (globalJson) {
     process.stdout.write(
       `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
@@ -930,6 +939,98 @@ async function cmdPlanLint(
       process.stderr.write(`${message}\n`);
     }
     return 2;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Command: plan normalize (v0.7)
+// ---------------------------------------------------------------------------
+
+async function cmdPlanNormalize(
+  argv: string[],
+  locale: Locale,
+  globalJson: boolean,
+): Promise<number> {
+  void locale;
+  const { values } = parseArgs({
+    args: argv,
+    options: {
+      json: { type: "boolean" },
+      check: { type: "boolean" },
+      write: { type: "boolean" },
+    },
+    strict: false,
+  });
+  const json = globalJson || values.json === true;
+  const checkFlag = values.check === true;
+  const writeFlag = values.write === true;
+  const cwd = process.cwd();
+
+  // Reject typos and unknown flags so --wite cannot silently degrade to
+  // a no-op check. parseArgs strict: false otherwise lets unknown
+  // options through.
+  const allowedKeys = new Set(["json", "check", "write"]);
+  const unknown = Object.keys(values).filter((k) => !allowedKeys.has(k));
+  if (unknown.length > 0) {
+    const message = `plan normalize: unknown option(s): ${unknown.map((k) => `--${k}`).join(", ")}`;
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message } })}\n`,
+      );
+    } else {
+      process.stderr.write(`${message}\n`);
+    }
+    return 2;
+  }
+
+  if (checkFlag && writeFlag) {
+    const message =
+      "plan normalize: --check and --write are mutually exclusive.";
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({ ok: false, error: { code: "PLAN_NORMALIZE_CONFLICT", message } })}\n`,
+      );
+    } else {
+      process.stderr.write(`${message}\n`);
+    }
+    return 2;
+  }
+
+  const mode = writeFlag ? "write" : "check";
+
+  try {
+    const result = await runPlanNormalize({ cwd, mode });
+    const data = serializePlanNormalizeData(result);
+
+    if (json) {
+      const payload = result.ok
+        ? { ok: true, data }
+        : {
+            ok: false,
+            error: {
+              code: "PLAN_NORMALIZE_REQUIRED",
+              message: `plan normalize: ${result.changedCount} file(s) need normalization`,
+            },
+            data,
+          };
+      process.stdout.write(`${JSON.stringify(payload)}\n`);
+    } else {
+      process.stderr.write(`${formatPlanNormalizeHuman(result)}\n`);
+    }
+
+    return result.ok ? 0 : 1;
+  } catch (err: unknown) {
+    const code =
+      (err as NodeJS.ErrnoException).code ?? "PLAN_NORMALIZE_FAILED";
+    const message = err instanceof Error ? err.message : String(err);
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({ ok: false, error: { code, message } })}\n`,
+      );
+    } else {
+      process.stderr.write(`${message}\n`);
+    }
+    return 3;
   }
 }
 

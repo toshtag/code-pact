@@ -262,6 +262,81 @@ Quality heuristics are intentionally off by default so `--strict` does not fail 
 
 **Lenient loader behavior:** when `roadmap.yaml` itself is unparseable, plan lint still scans `design/phases/` directly so duplicate-id and naming checks can run on parseable phase files. Roadmap-dependent checks (`MISSING_PHASE_FILE`, `ORPHAN_PHASE_FILE`) are listed in `data.skipped_checks` so the agent can see exactly which checks were short-circuited.
 
+### `plan normalize [--check | --write] [--json]` (v0.7)
+
+Conservative, line-based normalization for files under `design/` and the progress log. No YAML parse/re-stringify; the command operates on raw bytes per line so comments, key ordering, and document structure survive untouched.
+
+**Targets:**
+- Every `*.yaml` and `*.md` file reachable from `design/` (recursive).
+- `.code-pact/state/progress.yaml` (located via the shared progress IO helper, not hard-coded).
+
+**Normalization by file kind:**
+
+| Kind | CRLF → LF | Trailing whitespace stripped | Final newline = 1 |
+|---|---|---|---|
+| `*.yaml`, `*.yml` | ✓ | ✓ | ✓ |
+| `*.md` | ✓ | **preserved** | ✓ |
+
+Markdown trailing whitespace is preserved because two trailing spaces are a meaningful hard line break. Stripping them would silently change rendered output.
+
+**Modes:**
+- No flag → `--check` (safe default; never writes).
+- `--check` → dry-run. Lists files that would change and exits 1 when any are found.
+- `--write` → applies normalization via the atomic-text helper. Exits 0 even when files were rewritten because writing is the command's purpose.
+- `--check` and `--write` together → `PLAN_NORMALIZE_CONFLICT` exit 2.
+- Unknown flag (e.g. typo `--wite`) → `CONFIG_ERROR` exit 2 (does NOT silently degrade to `--check`).
+
+**Idempotency:** running `--write` twice in a row is a true no-op — the second invocation skips every file because the content already matches the normalized form. Running `--check` immediately after `--write` reports zero changes.
+
+**Exit code:**
+- `0` — `--check` found nothing to do, or `--write` succeeded.
+- `1` — `--check` found at least one file that would change.
+- `2` — argument conflict or unknown option.
+- `3` — unexpected runtime error during a write.
+
+**JSON shape (clean tree):**
+```json
+{
+  "ok": true,
+  "data": {
+    "mode": "check",
+    "changed_count": 0,
+    "changes": [],
+    "written": []
+  }
+}
+```
+
+**JSON shape (dirty tree under `--check`):**
+```json
+{
+  "ok": false,
+  "error": {
+    "code": "PLAN_NORMALIZE_REQUIRED",
+    "message": "plan normalize: 2 file(s) need normalization"
+  },
+  "data": {
+    "mode": "check",
+    "changed_count": 2,
+    "changes": [
+      {
+        "path": "design/phases/P1.yaml",
+        "kind": "yaml",
+        "reasons": ["trailing whitespace", "final newline"]
+      },
+      {
+        "path": "design/notes.md",
+        "kind": "markdown",
+        "reasons": ["crlf"]
+      }
+    ],
+    "written": []
+  }
+}
+```
+
+**JSON shape (under `--write`):** identical to the dirty `--check` payload but with `mode: "write"`, `ok: true`, no `error` field, and `written` listing every file that was rewritten.
+
 ## `adapter` (v0.5)
 
 `code-pact adapter [--agent <name>] [--force] [--model <version>] [--regen-skills] [--json]`
