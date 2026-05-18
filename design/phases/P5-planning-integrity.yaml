@@ -92,7 +92,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: in_progress
     description: |
       plan analyze. Cross-artifact drift detection between design status and
       progress-derived state. Historical done (no progress events) is hidden
