@@ -7,6 +7,35 @@ Versions follow `MAJOR.MINOR.PATCH-alpha.N` while the project is in alpha.
 
 ---
 
+## [0.6.0-alpha.0] — 2026-05-18
+
+### Added
+
+- **`task start <task-id> [--agent <name>] [--json]`** — records a `started` event in `progress.yaml`. Idempotent: starting an already-started task exits 0 with `{ already_started: true }` and leaves `progress.yaml` byte-identical. ([#51])
+- **`task status <task-id> [--json]`** — pure-read inspection of a task's derived current state and full event history. **Agent-neutral**: takes no `--agent` flag and does not validate agent configuration, so CI / monitoring / human reviewers can use it without project agent setup. ([#51])
+- **`task block <task-id> --reason "<text>" [--agent <name>] [--json]`** — records a `blocked` event with a required reason. The reason is enforced at both the CLI (`CONFIG_ERROR` for missing / empty) and the Zod schema (`superRefine` rejects `blocked` events without `reason`), so hand-edited progress logs cannot accumulate empty blocks. Allowed only from `started` or `resumed`. ([#51])
+- **`task resume <task-id> [--agent <name>] [--json]`** — records a `resumed` event. Allowed only from `blocked`; any other current state returns `INVALID_TASK_TRANSITION`. ([#51])
+- **`INVALID_TASK_TRANSITION` error code (exit 2)** — raised by `task start/block/resume/complete` when a requested state transition is not allowed from the current derived state. ([#51])
+- **`ProgressEvent.reason?: string` field** — semantically distinct from the existing `notes` field. `reason` records the justification for a state transition (currently used for `blocked` events). ([#51])
+
+### Changed
+
+- **`task complete` rejects `blocked → done`** with `INVALID_TASK_TRANSITION` (exit 2) and leaves `progress.yaml` byte-identical. The task must be `resume`d first so the `resumed` event records the unblock decision. `planned → done` remains permitted at the command layer for v0.5 backwards compatibility. ([#51])
+- **`task complete` idempotency** check now routes through the shared `deriveTaskState` helper instead of an inline `events.find` scan. The `kind: "already_done"` and exit-0 semantics are preserved; existing v0.5 integration tests pass unchanged. ([#51])
+- **`EventStatus` enum extended** with `blocked` and `resumed` (in-place; `started`, `done`, and `failed` are preserved). Existing `progress.yaml` files remain forward-compatible — no schema migration is performed. ([#51])
+- **`recommend` promoted into the agent-facing loop narrative** in README, `docs/dogfood.md`, and `docs/cli-contract.md`. Source code for `recommend` is unchanged; only documentation was updated. The new agent-facing flow is `recommend → task context → task start → implement → task block / resume → task complete`. ([#51])
+
+### Internal
+
+- New module `src/core/progress/`:
+  - `io.ts` — `atomicWriteYaml` / `loadProgressLog` / `appendEvent` consolidated from `task-complete.ts`'s inline helpers; shared with all four new task-state commands.
+  - `task-state.ts` — `deriveTaskState` (last-event-wins reduction over the append-only log) and `assertTransition` (deterministic state-machine enforcement).
+- 35 new unit tests + 5 new integration tests covering the state machine end-to-end.
+
+[#51]: https://github.com/toshtag/code-pact/pull/51
+
+---
+
 ## [0.5.0-alpha.0] — 2026-05-18
 
 ### Added
