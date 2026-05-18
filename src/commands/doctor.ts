@@ -358,7 +358,9 @@ async function checkLocalGitignored(cwd: string, issues: DoctorIssue[]): Promise
     return;
   }
   const lines = content.split("\n").map((l) => l.trim());
-  const isIgnored = lines.some((l) => l === ".local" || l === ".local/" || l.startsWith(".local/"));
+  const isIgnored = lines.some(
+    (l) => l === ".local" || l === ".local/" || l === "/.local" || l === "/.local/" || l.startsWith(".local/"),
+  );
   if (!isIgnored) {
     issues.push({
       code: "LOCAL_NOT_GITIGNORED",

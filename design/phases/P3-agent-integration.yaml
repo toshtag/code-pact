@@ -1,0 +1,61 @@
+id: P3
+name: Agent Integration
+weight: 30
+confidence: high
+risk: low
+status: done
+objective: >
+  Close the plan-to-execution loop: model-aware CLAUDE.md generation, context quality
+  gates (constitution / decisions / done events based on task attributes), automatic
+  skill generation from verification commands, and plan quality doctor checks.
+definition_of_done:
+  - adapter --model flag generates effort/thinking guidance per Claude model version
+  - task context includes constitution for large/high-ambiguity tasks
+  - adapter --agent claude-code generates skills from verification.commands
+  - doctor reports BRIEF_MISSING, CONSTITUTION_PLACEHOLDER, EMPTY_OBJECTIVE, ADAPTER_STALE
+  - disabled_checks in .code-pact/doctor.yaml suppresses individual checks
+verification:
+  commands:
+    - pnpm test
+    - pnpm typecheck
+tasks:
+  - id: P3-T1
+    type: feature
+    ambiguity: medium
+    risk: low
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: done
+    description: Model-aware CLAUDE.md — effort/thinking guidance per claude model version (--model flag)
+  - id: P3-T2
+    type: feature
+    ambiguity: medium
+    risk: low
+    context_size: large
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: done
+    description: Context quality gates — constitution, decisions, done events based on task attributes
+  - id: P3-T3
+    type: feature
+    ambiguity: low
+    risk: low
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: short
+    status: done
+    description: Skill generation from verification.commands + --regen-skills flag
+  - id: P3-T4
+    type: feature
+    ambiguity: low
+    risk: low
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: done
+    description: Plan quality doctor checks (BRIEF_MISSING, CONSTITUTION_PLACEHOLDER, EMPTY_OBJECTIVE, ADAPTER_STALE) + disabled_checks config

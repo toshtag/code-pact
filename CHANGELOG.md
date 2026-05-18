@@ -7,6 +7,29 @@ Versions follow `MAJOR.MINOR.PATCH-alpha.N` while the project is in alpha.
 
 ---
 
+## [0.5.0-alpha.0] — 2026-05-18
+
+### Added
+
+- **Model-aware adapter generation (`--model`)** — `adapter --agent claude-code --model <version>` generates a `CLAUDE.md` with a "Model guidance" section containing effort-level and extended-thinking guidance tailored to the specific Claude version. Supported: `opus-4.7`, `opus-4.6`, `sonnet-4.6`. The `model_version` field in the agent profile YAML is used as the default when the flag is omitted. ([#46])
+- **`--regen-skills` flag** — forces skill file regeneration without overwriting `CLAUDE.md`. Useful after adding new phases with new `verification.commands`. ([#48])
+- **Skill generation from `verification.commands`** — `adapter --agent claude-code` now reads every phase in `design/roadmap.yaml` and auto-generates a `.claude/skills/<name>.md` file for each unique verification command (e.g. `pnpm test` → `/test`). Duplicate commands across phases produce a single skill. ([#48])
+- **Context quality gates in `task context`** — the context pack now adapts its content to task attributes: `context_size: large` includes `constitution.md` + all decisions; `context_size: small` is minimal (no rules/decisions/constitution); `ambiguity: high` includes `constitution.md` + recent done events in the phase; `write_surface: high` bypasses the `applies_to` filter and includes all rule files. `PackResult` exposes `includedConstitution`. ([#47])
+- **Plan quality `doctor` checks** — four new checks: `BRIEF_MISSING` (warning, `design/brief.md` absent), `CONSTITUTION_PLACEHOLDER` (warning, constitution not yet edited), `EMPTY_OBJECTIVE` (error, phase objective < 10 chars), `ADAPTER_STALE` (warning, no `model_version` in agent profile). ([#49])
+- **`disabled_checks` config** — `.code-pact/doctor.yaml` with a `disabled_checks` array suppresses individual doctor checks per project. ([#49])
+- **`design/` structure** — `design/brief.md`, `design/constitution.md`, and `design/roadmap.yaml` now ship with real content so the repo can dogfood itself.
+
+### Changed
+
+- `adapter --agent claude-code` always generates dynamic skills in addition to the three fixed skills (`/context`, `/verify`, `/progress`).
+
+[#46]: https://github.com/toshtag/code-pact/pull/46
+[#47]: https://github.com/toshtag/code-pact/pull/47
+[#48]: https://github.com/toshtag/code-pact/pull/48
+[#49]: https://github.com/toshtag/code-pact/pull/49
+
+---
+
 ## [0.4.0-alpha.0] — 2026-05-18
 
 ### Added

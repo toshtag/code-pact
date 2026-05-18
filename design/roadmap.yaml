@@ -1,0 +1,13 @@
+phases:
+  - id: P1
+    path: design/phases/P1-foundations.yaml
+    weight: 20
+  - id: P2
+    path: design/phases/P2-planning-ux.yaml
+    weight: 25
+  - id: P3
+    path: design/phases/P3-agent-integration.yaml
+    weight: 30
+  - id: P4
+    path: design/phases/P4-stabilize.yaml
+    weight: 25

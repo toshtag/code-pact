@@ -1,0 +1,44 @@
+id: P4
+name: Stabilize & Dogfood
+weight: 25
+confidence: medium
+risk: low
+status: planned
+objective: >
+  Make code-pact stable enough to dogfood its own development. Update all documentation
+  to reflect the v0.5 command surface, create the project's own design/ structure, and
+  validate the full plan → import → context → complete loop against real tasks.
+definition_of_done:
+  - design/brief.md and design/constitution.md reflect real project intent
+  - design/roadmap.yaml references actual phase files
+  - docs/dogfood.md covers v0.5 adapter, context quality, and doctor features
+  - docs/cli-contract.md documents all v0.5 additions
+  - doctor reports no errors on the repo itself
+  - v0.5.0 released
+verification:
+  commands:
+    - pnpm test
+    - pnpm typecheck
+    - pnpm build
+    - code-pact doctor
+tasks:
+  - id: P4-T1
+    type: docs
+    ambiguity: low
+    risk: low
+    context_size: medium
+    write_surface: medium
+    verification_strength: weak
+    expected_duration: medium
+    status: planned
+    description: Dogfood prep — design/brief.md, design/constitution.md, design/roadmap.yaml, docs/dogfood.md, docs/cli-contract.md v0.5 additions
+  - id: P4-T2
+    type: docs
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: weak
+    expected_duration: short
+    status: planned
+    description: v0.5.0 release prep — version bump, CHANGELOG, README update, GitHub Release

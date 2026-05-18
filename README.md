@@ -6,7 +6,7 @@ The product idea: agents should not read sprawling `design/` trees themselves an
 
 ## Status
 
-Alpha. Published on npm as [`code-pact@alpha`](https://www.npmjs.com/package/code-pact) (current: `0.4.0-alpha.0`). API and command surface may still shift while the Cursor and Gemini CLI adapters are experimental. Stable releases (`latest` tag) will follow once those adapters graduate and `task start` / `npm create code-pact` land.
+Alpha. Published on npm as [`code-pact@alpha`](https://www.npmjs.com/package/code-pact) (current: `0.5.0-alpha.0`). API and command surface may still shift while the Cursor and Gemini CLI adapters are experimental. Stable releases (`latest` tag) will follow once those adapters graduate and `task start` / `npm create code-pact` land.
 
 ## Install
 
@@ -48,10 +48,14 @@ code-pact task add <phase-id>
 #    you; the standalone command is here when you change agents later:
 code-pact adapter --agent claude-code
 
-# 6. From the agent: fetch the context pack for a task.
+# 6. (Optional) Pin a Claude model version for effort/thinking guidance in CLAUDE.md:
+code-pact adapter --agent claude-code --model opus-4.7
+
+# 7. From the agent: fetch the context pack for a task.
+#    Content adapts automatically to task attributes (context_size, ambiguity, write_surface).
 code-pact task context <task-id> --agent <agent>
 
-# 7. After implementation, mark the task complete. This runs verify
+# 8. After implementation, mark the task complete. This runs verify
 #    and, on pass, appends a `done` event to progress.yaml.
 code-pact task complete <task-id> --agent <agent>
 ```
