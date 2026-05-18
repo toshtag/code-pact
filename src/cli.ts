@@ -35,6 +35,11 @@ import {
   runPlanNormalize,
   serializePlanNormalizeData,
 } from "./commands/plan-normalize.ts";
+import {
+  formatPlanAnalyzeHuman,
+  runPlanAnalyze,
+  serializePlanAnalyzeData,
+} from "./commands/plan-analyze.ts";
 import { runRecommend, formatRecommend } from "./commands/recommend.ts";
 import { runDoctor, formatDoctor } from "./commands/doctor.ts";
 import { runValidate } from "./commands/validate.ts";
@@ -445,7 +450,11 @@ async function cmdPlan(argv: string[], locale: Locale, globalJson: boolean): Pro
     return cmdPlanNormalize(rest, locale, globalJson);
   }
 
-  const msg = `plan: unknown subcommand "${subcommand ?? ""}". Use: brief | prompt | constitution | lint | normalize`;
+  if (subcommand === "analyze") {
+    return cmdPlanAnalyze(rest, locale, globalJson);
+  }
+
+  const msg = `plan: unknown subcommand "${subcommand ?? ""}". Use: brief | prompt | constitution | lint | normalize | analyze`;
   if (globalJson) {
     process.stdout.write(
       `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
@@ -1031,6 +1040,66 @@ async function cmdPlanNormalize(
       process.stderr.write(`${message}\n`);
     }
     return 3;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Command: plan analyze (v0.7)
+// ---------------------------------------------------------------------------
+
+async function cmdPlanAnalyze(
+  argv: string[],
+  locale: Locale,
+  globalJson: boolean,
+): Promise<number> {
+  void locale;
+  const { values } = parseArgs({
+    args: argv,
+    options: {
+      json: { type: "boolean" },
+      strict: { type: "boolean" },
+      "include-historical": { type: "boolean" },
+    },
+    strict: false,
+  });
+  const json = globalJson || values.json === true;
+  const strict = values.strict === true;
+  const includeHistorical = values["include-historical"] === true;
+  const cwd = process.cwd();
+
+  try {
+    const result = await runPlanAnalyze({ cwd, strict, includeHistorical });
+    const data = serializePlanAnalyzeData(result);
+
+    if (json) {
+      const payload = result.ok
+        ? { ok: true, data }
+        : {
+            ok: false,
+            error: {
+              code: "PLAN_ANALYZE_FAILED",
+              message: `plan analyze failed: ${result.errors} error(s), ${result.warnings} warning(s)`,
+            },
+            data,
+          };
+      process.stdout.write(`${JSON.stringify(payload)}\n`);
+    } else {
+      process.stderr.write(`${formatPlanAnalyzeHuman(result)}\n`);
+    }
+
+    return result.ok ? 0 : 1;
+  } catch (err: unknown) {
+    const code =
+      (err as NodeJS.ErrnoException).code ?? "PLAN_ANALYZE_FAILED";
+    const message = err instanceof Error ? err.message : String(err);
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({ ok: false, error: { code, message } })}\n`,
+      );
+    } else {
+      process.stderr.write(`${message}\n`);
+    }
+    return 1;
   }
 }
 

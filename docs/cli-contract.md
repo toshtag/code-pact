@@ -337,6 +337,86 @@ Markdown trailing whitespace is preserved because two trailing spaces are a mean
 
 **JSON shape (under `--write`):** identical to the dirty `--check` payload but with `mode: "write"`, `ok: true`, no `error` field, and `written` listing every file that was rewritten.
 
+### `plan analyze [--strict] [--include-historical] [--json]` (v0.7)
+
+Cross-artifact integrity check. Compares design intent (task and phase `status`) against derived progress state (`deriveTaskState` over `.code-pact/state/progress.yaml`). Read-only.
+
+**Issue families:**
+
+- `STATUS_DRIFT` (one code, five mutually exclusive kinds in `details.kind`; top-down evaluation guarantees a single task never produces two issues):
+
+  | kind | severity | hidden_by_default | affects_exit | trigger |
+  |---|---|---|---|---|
+  | `done-blocked-conflict` | error | — | true | `design.status == done` && derived state is `blocked` |
+  | `done-with-incomplete-events` | error | — | true | `design.status == done` && events exist && derived ∈ {started, resumed, failed} |
+  | `done-historical` | warning | **true** | **false** | `design.status == done` && no progress events for this task |
+  | `done-but-design-not-done` | warning | — | true | derived `done` but `design.status` is `planned` or `in_progress` |
+  | `in-progress-no-events` | warning | — | true | `design.status == in_progress` && no events (likely missing `task start`) |
+
+- `PHASE_DONE_WITH_OPEN_TASKS` (error) — a phase with `status: done` that still has tasks not in `status: done`.
+- `ORPHAN_PROGRESS_EVENT` (warning) — progress event references a `task_id` that does not exist in any phase. Detector is shared with `doctor`; `plan lint` does NOT call it.
+
+**Severity model (no `info` tier):** `done-historical` carries `hidden_by_default: true` and `affects_exit: false` directly on the issue. This keeps the existing `error | warning` severity contract intact while letting analyze hide pre-v0.6 history from default output and from `--strict` exit codes.
+
+**Flags:**
+- `--strict` — promote `affects_exit: true` warnings to exit 1. Mirrors `validate --strict` and `plan lint --strict`. Does NOT flip `hidden_by_default`; historical issues stay hidden.
+- `--include-historical` — render issues marked `hidden_by_default: true`. JSON consumers see them in `data.issues`. Exit code is unchanged because `affects_exit: false` is independent of visibility.
+
+**Exit code:**
+- `0` — no `affects_exit: true` errors; under `--strict`, no `affects_exit: true` warnings either.
+- `1` — at least one exit-relevant issue, or a schema/parse failure during the strict load.
+- `2` — argument / configuration error.
+
+**JSON shape (clean tree):**
+```json
+{
+  "ok": true,
+  "data": {
+    "summary": {
+      "phases": 5,
+      "tasks": 20,
+      "errors": 0,
+      "warnings": 0,
+      "hidden": 16
+    },
+    "strict": false,
+    "include_historical": false,
+    "issues": []
+  }
+}
+```
+
+**JSON shape (failing tree):**
+```json
+{
+  "ok": false,
+  "error": {
+    "code": "PLAN_ANALYZE_FAILED",
+    "message": "plan analyze failed: 1 error(s), 0 warning(s)"
+  },
+  "data": {
+    "summary": { "phases": 1, "tasks": 1, "errors": 1, "warnings": 0, "hidden": 0 },
+    "strict": false,
+    "include_historical": false,
+    "issues": [
+      {
+        "code": "STATUS_DRIFT",
+        "severity": "error",
+        "message": "Task \"P1-T1\" is marked done in design but the progress log derives state \"blocked\".",
+        "phase_id": "P1",
+        "task_id": "P1-T1",
+        "file": "design/phases/P1.yaml",
+        "details": {
+          "kind": "done-blocked-conflict",
+          "design_status": "done",
+          "derived_state": "blocked"
+        }
+      }
+    ]
+  }
+}
+```
+
 ## `adapter` (v0.5)
 
 `code-pact adapter [--agent <name>] [--force] [--model <version>] [--regen-skills] [--json]`
