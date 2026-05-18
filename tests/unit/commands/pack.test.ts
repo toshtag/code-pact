@@ -205,6 +205,158 @@ describe("runPack — project with no rules dir", () => {
 });
 
 // ---------------------------------------------------------------------------
+// v0.5.1 context quality — write_surface, context_size, ambiguity
+// ---------------------------------------------------------------------------
+
+describe("runPack — v0.5.1 context quality", () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "code-pact-pack-quality-"));
+    await mkdir(join(dir, ".code-pact", "state"), { recursive: true });
+    await mkdir(join(dir, "design", "rules"), { recursive: true });
+    await mkdir(join(dir, "design", "decisions"), { recursive: true });
+    await mkdir(join(dir, "design", "phases"), { recursive: true });
+
+    await writeFile(
+      join(dir, "design", "roadmap.yaml"),
+      "phases:\n  - id: PQ\n    path: design/phases/PQ-quality.yaml\n    weight: 5\n",
+      "utf8",
+    );
+    await writeFile(
+      join(dir, "design", "rules", "generic.md"),
+      "---\ntags: [general]\napplies_to: []\n---\n\n# Generic rule\n",
+      "utf8",
+    );
+    await writeFile(
+      join(dir, "design", "rules", "docs-only.md"),
+      "---\ntags: [docs]\napplies_to: [docs]\n---\n\n# Docs rule\n",
+      "utf8",
+    );
+    await writeFile(
+      join(dir, "design", "decisions", "PQ-T1-decision.md"),
+      "# Decision\n\nUse X over Y.\n",
+      "utf8",
+    );
+    await writeFile(
+      join(dir, "design", "decisions", "PQ-other-decision.md"),
+      "# Other Decision\n\nAnother decision unrelated to PQ-T1.\n",
+      "utf8",
+    );
+    await writeFile(
+      join(dir, "design", "constitution.md"),
+      "# Project Constitution\n\nAlways write tests.\n",
+      "utf8",
+    );
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  async function writePhaseYaml(tasks: Array<Record<string, string>>) {
+    const taskLines = tasks.flatMap((t) => [
+      `  - id: ${t.id}`,
+      `    type: ${t.type ?? "feature"}`,
+      `    ambiguity: ${t.ambiguity ?? "low"}`,
+      `    risk: ${t.risk ?? "low"}`,
+      `    context_size: ${t.context_size ?? "medium"}`,
+      `    write_surface: ${t.write_surface ?? "medium"}`,
+      `    verification_strength: ${t.verification_strength ?? "weak"}`,
+      `    expected_duration: ${t.expected_duration ?? "short"}`,
+      `    status: ${t.status ?? "planned"}`,
+    ]);
+    const lines = [
+      "id: PQ",
+      "name: Quality",
+      "weight: 5",
+      "confidence: high",
+      "risk: low",
+      "status: planned",
+      "objective: Quality phase.",
+      "definition_of_done:",
+      "  - Done",
+      "verification:",
+      "  commands:",
+      "    - echo ok",
+      "tasks:",
+      ...taskLines,
+    ];
+    await writeFile(join(dir, "design", "phases", "PQ-quality.yaml"), lines.join("\n"), "utf8");
+  }
+
+  it("write_surface: high includes all rules (bypasses applies_to filter)", async () => {
+    await writePhaseYaml([{ id: "PQ-T1", write_surface: "high" }]);
+    const result = await runPack({ cwd: dir, phaseId: "PQ", taskId: "PQ-T1", agentName: "claude-code", outputDir: dir });
+    expect(result.includedRules).toContain("docs-only.md");
+    expect(result.includedRules).toContain("generic.md");
+  });
+
+  it("write_surface: medium excludes docs-only rule for feature task", async () => {
+    await writePhaseYaml([{ id: "PQ-T1", write_surface: "medium" }]);
+    const result = await runPack({ cwd: dir, phaseId: "PQ", taskId: "PQ-T1", agentName: "claude-code", outputDir: dir });
+    expect(result.includedRules).not.toContain("docs-only.md");
+    expect(result.includedRules).toContain("generic.md");
+  });
+
+  it("context_size: large sets includedConstitution and includes constitution in output", async () => {
+    await writePhaseYaml([{ id: "PQ-T1", context_size: "large" }]);
+    const result = await runPack({ cwd: dir, phaseId: "PQ", taskId: "PQ-T1", agentName: "claude-code", outputDir: dir });
+    expect(result.includedConstitution).toBe(true);
+    const content = await readFile(join(dir, "PQ-T1.md"), "utf8");
+    expect(content).toContain("Project Constitution");
+  });
+
+  it("context_size: large includes all decisions (not just task-id-matched)", async () => {
+    await writePhaseYaml([{ id: "PQ-T1", context_size: "large" }]);
+    const result = await runPack({ cwd: dir, phaseId: "PQ", taskId: "PQ-T1", agentName: "claude-code", outputDir: dir });
+    expect(result.includedDecisions).toContain("PQ-T1-decision.md");
+    expect(result.includedDecisions).toContain("PQ-other-decision.md");
+  });
+
+  it("context_size: small yields no rules, decisions, or constitution", async () => {
+    await writePhaseYaml([{ id: "PQ-T1", context_size: "small" }]);
+    const result = await runPack({ cwd: dir, phaseId: "PQ", taskId: "PQ-T1", agentName: "claude-code", outputDir: dir });
+    expect(result.includedRules).toHaveLength(0);
+    expect(result.includedDecisions).toHaveLength(0);
+    expect(result.includedConstitution).toBe(false);
+  });
+
+  it("ambiguity: high includes constitution", async () => {
+    await writePhaseYaml([{ id: "PQ-T1", ambiguity: "high" }]);
+    const result = await runPack({ cwd: dir, phaseId: "PQ", taskId: "PQ-T1", agentName: "claude-code", outputDir: dir });
+    expect(result.includedConstitution).toBe(true);
+  });
+
+  it("ambiguity: high with done events in phase shows completed tasks section in output", async () => {
+    await writePhaseYaml([
+      { id: "PQ-T0", status: "done" },
+      { id: "PQ-T1", ambiguity: "high" },
+    ]);
+    await writeFile(
+      join(dir, ".code-pact", "state", "progress.yaml"),
+      [
+        "events:",
+        "  - task_id: PQ-T0",
+        "    status: done",
+        '    at: "2026-05-15T10:00:00+09:00"',
+        "    actor: agent",
+        "    agent: claude-code",
+        "    evidence:",
+        "      - pnpm test",
+      ].join("\n"),
+      "utf8",
+    );
+    const result = await runPack({ cwd: dir, phaseId: "PQ", taskId: "PQ-T1", agentName: "claude-code", outputDir: dir });
+    const content = await readFile(join(dir, "PQ-T1.md"), "utf8");
+    expect(content).toContain("Completed Tasks in This Phase");
+    expect(content).toContain("PQ-T0");
+    // suppress unused result warning
+    expect(result.charCount).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // BUG-004 regression — pack must write to agent profile context_dir
 // ---------------------------------------------------------------------------
 
