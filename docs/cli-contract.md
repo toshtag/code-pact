@@ -195,6 +195,73 @@ JSON output includes `has_brief`, `has_constitution`, and `clipboard_copied` fla
 
 Interactive wizard that collects a project description and comma-separated core principles, then writes `design/constitution.md`. Requires a TTY; exits 2 in non-interactive mode. `--force` overwrites an existing file. Empty input falls back to i18n defaults so the file is always a valid starting point.
 
+### `plan lint [--strict] [--include-quality] [--json]` (v0.7)
+
+Read-only static integrity check over `design/roadmap.yaml` and every referenced phase file. Intended as a checkpoint command at phase or PR boundaries, not as a per-task gate.
+
+**Checks (default):**
+- `INVALID_YAML` (error) — a file failed to parse
+- `SCHEMA_ERROR` (error) — a file failed Zod validation
+- `MISSING_PHASE_FILE` (error) — roadmap references a phase file that does not exist on disk
+- `DUPLICATE_TASK_ID` (error) — the same task id appears in more than one phase
+- `DUPLICATE_PHASE_ID` (error) — the same phase id appears twice
+- `PHASE_ID_MISMATCH` (error) — `phase.id` inside the YAML does not match the id the roadmap uses to reference it
+- `ORPHAN_PHASE_FILE` (warning) — a `.yaml` under `design/phases/` is not referenced by the roadmap
+- `PHASE_ID_NAMING` (warning) — phase id does not match `P<N>`
+- `TASK_ID_PHASE_PREFIX` (warning) — task id does not match `<phase>-T<N>`
+
+**`--include-quality` (opt-in heuristics):**
+- `WEAK_DOD` (warning) — DoD bullets shorter than 10 chars or matching `/TODO|FIXME|tbd/i`
+- `PLACEHOLDER_VERIFICATION` (warning) — verification commands starting with `echo`, `true`, or `noop`
+
+Quality heuristics are intentionally off by default so `--strict` does not fail CI on subjective judgments.
+
+**Exit code:**
+- `0` — no errors. Without `--strict`, warnings are also exit 0.
+- `1` — errors present, or warnings present with `--strict`.
+- `2` — argument / configuration error.
+
+**JSON shape (success):**
+```json
+{
+  "ok": true,
+  "data": {
+    "errors": 0,
+    "warnings": 0,
+    "include_quality": false,
+    "strict": false,
+    "skipped_checks": [],
+    "issues": []
+  }
+}
+```
+
+**JSON shape (failure):**
+```json
+{
+  "ok": false,
+  "error": { "code": "PLAN_LINT_FAILED", "message": "..." },
+  "data": {
+    "errors": 1,
+    "warnings": 0,
+    "include_quality": false,
+    "strict": false,
+    "skipped_checks": [],
+    "issues": [
+      {
+        "code": "DUPLICATE_TASK_ID",
+        "severity": "error",
+        "message": "Task \"SHARED-T1\" appears in both phase \"P1\" and \"P2\"",
+        "phase_id": "P2",
+        "task_id": "SHARED-T1"
+      }
+    ]
+  }
+}
+```
+
+**Lenient loader behavior:** when `roadmap.yaml` itself is unparseable, plan lint still scans `design/phases/` directly so duplicate-id and naming checks can run on parseable phase files. Roadmap-dependent checks (`MISSING_PHASE_FILE`, `ORPHAN_PHASE_FILE`) are listed in `data.skipped_checks` so the agent can see exactly which checks were short-circuited.
+
 ## `adapter` (v0.5)
 
 `code-pact adapter [--agent <name>] [--force] [--model <version>] [--regen-skills] [--json]`
