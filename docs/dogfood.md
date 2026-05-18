@@ -177,6 +177,53 @@ disabled_checks:
   - ADAPTER_STALE
 ```
 
+## Planning integrity (v0.7) — checkpoint commands
+
+`plan lint`, `plan normalize`, and `plan analyze` are **checkpoint commands**, not per-task gates. Run them at phase boundaries, PR boundaries, or before handoff — not before every `task complete`.
+
+```sh
+# Static integrity: schemas, naming, duplicate / missing / orphan refs.
+# Default ignores subjective heuristics so CI does not fail on style.
+code-pact plan lint --json
+
+# Stricter: warnings also fail.
+code-pact plan lint --strict --json
+
+# Opt in to subjective heuristics (WEAK_DOD, PLACEHOLDER_VERIFICATION):
+code-pact plan lint --include-quality --json
+
+# Formatting normalization — safe dry-run by default. Reports files
+# that would change but writes nothing.
+code-pact plan normalize --json          # equivalent to --check
+code-pact plan normalize --check --json
+
+# Apply (atomic per-file write; YAML comments and Markdown hard line
+# breaks are preserved):
+code-pact plan normalize --write --json
+
+# Cross-artifact drift: compares design status against derived
+# progress state. Pre-v0.6 done tasks (no progress events) are
+# hidden from default output so historical phases do not break
+# self-dogfooding.
+code-pact plan analyze --json
+
+# Show every drift, including historical:
+code-pact plan analyze --include-historical --json
+
+# Promote warnings to exit 1 in CI:
+code-pact plan analyze --strict --json
+```
+
+A typical phase-boundary checkpoint:
+
+```sh
+code-pact plan lint --json && \
+code-pact plan normalize --check --json && \
+code-pact plan analyze --json
+```
+
+If any of the three fails, fix the underlying issue (or run `plan normalize --write`) before declaring a phase done.
+
 ## Quick reference
 
 | Goal | Command |
@@ -199,3 +246,7 @@ disabled_checks:
 | Show weighted progress | `code-pact progress` |
 | Health-check the project | `code-pact doctor` |
 | CI validation | `code-pact validate` |
+| Static integrity of plan files | `code-pact plan lint [--strict] [--include-quality]` |
+| Whitespace / newline normalization (dry-run) | `code-pact plan normalize --check` |
+| Whitespace / newline normalization (apply) | `code-pact plan normalize --write` |
+| Cross-artifact drift (design vs progress) | `code-pact plan analyze [--strict] [--include-historical]` |
