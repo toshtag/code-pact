@@ -7,6 +7,40 @@ Versions follow `MAJOR.MINOR.PATCH-alpha.N` while the project is in alpha.
 
 ---
 
+## [0.7.0-alpha.0] — 2026-05-18
+
+### Added
+
+- **`plan lint [--strict] [--include-quality] [--json]`** — read-only static integrity check over `design/roadmap.yaml` and every referenced phase file. Default checks: `INVALID_YAML`, `SCHEMA_ERROR`, `MISSING_PHASE_FILE`, `DUPLICATE_TASK_ID`, `DUPLICATE_PHASE_ID`, `PHASE_ID_MISMATCH`, `ORPHAN_PHASE_FILE` (warning), `PHASE_ID_NAMING` (warning), `TASK_ID_PHASE_PREFIX` (warning). `--include-quality` opt-in adds `WEAK_DOD` and `PLACEHOLDER_VERIFICATION` so subjective heuristics never fail CI by default. `--strict` promotes warnings to exit 1. Lenient loader: a broken `roadmap.yaml` does not stop the run — it falls back to scanning `design/phases/` directly and lists the roadmap-dependent checks it skipped under `data.skipped_checks`. ([#54])
+- **`plan normalize [--check | --write] [--json]`** — conservative line-based normalization for files under `design/` plus the progress log. YAML files: CRLF → LF, strip trailing whitespace, single trailing newline. Markdown files: CRLF → LF and final newline only — trailing whitespace is preserved because two trailing spaces are a meaningful hard line break. No YAML parse/re-stringify, so comments survive byte-for-byte. `--check` (default) never writes; `--write` uses an atomic temp-file + rename per file. `--check` + `--write` → `PLAN_NORMALIZE_CONFLICT` exit 2. Typo flags (e.g. `--wite`) are rejected explicitly so they cannot silently degrade to a no-op. ([#55])
+- **`plan analyze [--strict] [--include-historical] [--json]`** — cross-artifact drift detection comparing design `status` against derived progress state. One `STATUS_DRIFT` code with five mutually exclusive kinds in `details.kind` (top-down evaluation guarantees a single task never produces two issues): `done-blocked-conflict` (error), `done-with-incomplete-events` (error), `done-historical` (warning, hidden by default, never affects exit), `done-but-design-not-done` (warning), `in-progress-no-events` (warning). Also reports `PHASE_DONE_WITH_OPEN_TASKS` (error) and reuses the shared `ORPHAN_PROGRESS_EVENT` detector (warning). ([#56])
+- **`hidden_by_default` and `affects_exit` issue metadata** — analyze issues can now hide themselves from default output and from `--strict` exit codes without inventing a third severity tier. This is the safety property that keeps `plan analyze` from blowing up on pre-v0.7 done tasks that have no progress events. `--include-historical` exposes hidden issues in JSON; the exit code is independent of visibility. ([#56])
+
+### Changed
+
+- **`doctor` and `plan lint` share their duplicate / orphan / missing-reference detectors** through `src/core/plan/checks.ts`, so the two commands cannot drift apart. doctor's `DoctorIssue` shape, codes, and human messages are preserved; only the detector source moved. ([#53])
+- **`src/io/atomic-text.ts`** — raw-text atomic writer extracted from `atomicWriteYaml`. `plan normalize --write` uses it directly (no YAML stringify). `atomicWriteYaml` is now a one-line wrapper over the same primitive. ([#53])
+
+### Internal
+
+- New `src/core/plan/` module:
+  - `state.ts` — strict (`loadPlanState`) and lenient (`collectPlanArtifacts`) loaders. The lenient loader collects parse / schema / reference issues per file and, when the roadmap is unparseable, falls back to scanning `design/phases/` while reporting the skipped roadmap-dependent checks.
+  - `shared.ts` — `PlanIssue` type with optional `hidden_by_default` / `affects_exit` / `details` metadata.
+  - `checks.ts` — pure detectors shared with doctor (duplicate task / phase id, phase id mismatch, missing / orphan phase file, orphan progress event) plus naming heuristics used only by lint.
+  - `lint.ts` — `plan lint` orchestration (structural checks + opt-in quality heuristics).
+  - `normalize.ts` — file walker + pure YAML/Markdown line normalizers.
+  - `analyze.ts` — cross-artifact drift detection.
+- `design/phases/P5-planning-integrity.yaml` — new phase covering the v0.7 work end-to-end, dogfooded through `task start` / `task complete` for each task (T1-T5). Phase verification chains `pnpm typecheck / test / build + plan lint + plan normalize --check + plan analyze` so subsequent phases inherit the integrity gate.
+- `vitest.config.ts` — `fileParallelism: false`. The integration suites all rebuild `dist/cli.js` in `beforeAll`, and concurrent workers raced against tsup's output-dir cleanup. Sequencing test files removes the race; in-file concurrency is unaffected. ([#54])
+- ~60 new tests across `src/core/plan/` (state, checks, lint, normalize, analyze) and the three new `tests/integration/plan-*.test.ts` suites, including a dedicated **historical fixture** regression test that asserts `plan analyze` exits 0 on a project mirroring pre-v0.7 history (done tasks with no progress events).
+
+[#53]: https://github.com/toshtag/code-pact/pull/53
+[#54]: https://github.com/toshtag/code-pact/pull/54
+[#55]: https://github.com/toshtag/code-pact/pull/55
+[#56]: https://github.com/toshtag/code-pact/pull/56
+
+---
+
 ## [0.6.0-alpha.0] — 2026-05-18
 
 ### Added

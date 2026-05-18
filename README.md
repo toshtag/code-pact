@@ -6,7 +6,7 @@ The product idea: agents should not read sprawling `design/` trees themselves an
 
 ## Status
 
-Alpha. Published on npm as [`code-pact@alpha`](https://www.npmjs.com/package/code-pact) (current: `0.5.0-alpha.0`). API and command surface may still shift while the Cursor and Gemini CLI adapters are experimental. Stable releases (`latest` tag) will follow once those adapters graduate and `task start` / `npm create code-pact` land.
+Alpha. Published on npm as [`code-pact@alpha`](https://www.npmjs.com/package/code-pact) (current: `0.7.0-alpha.0`). API and command surface may still shift while the Cursor and Gemini CLI adapters are experimental. Stable releases (`latest` tag) will follow once those adapters graduate.
 
 ## Install
 
@@ -65,6 +65,16 @@ Subsequent commands assume `code-pact` is on `PATH` (`npm install -g code-pact@a
 The `init` wizard asks, in order: language (English / 日本語), which agents to support (multi-select from Claude Code / Codex / Generic), the default agent, whether to generate adapter files now, the default verification command, whether to create a sample first phase, and whether to collect a project brief (writes `design/brief.md`). After completing, it prints **Next Steps** reminders to stderr. Once initialized, the selected locale is saved in `.code-pact/project.yaml` so subsequent commands automatically use that language without `--locale`.
 
 Use `code-pact doctor` to check project health at any time (invalid YAML, orphan phase files, duplicate task ids, missing adapter files, …). The CI-friendly `code-pact validate` variant exits 1 on errors; add `--strict` to promote warnings to errors as well.
+
+At phase or PR boundaries, run the v0.7 **planning integrity** checkpoints:
+
+```sh
+code-pact plan lint --json          # schema + naming + missing/orphan references
+code-pact plan normalize --check    # whitespace/newline drift (--write to apply)
+code-pact plan analyze --json       # design status vs progress-log drift
+```
+
+`plan lint` and `plan analyze` accept `--strict` to fail on warnings. `plan normalize --write` preserves YAML comments and Markdown hard line breaks. Pre-v0.7 done tasks (no progress events) are hidden from `plan analyze` by default; pass `--include-historical` to surface them without affecting the exit code.
 
 ## Agent-facing usage
 
