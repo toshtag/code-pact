@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
+import { mkdtemp, rm, readFile, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runInit } from "../../../src/commands/init.ts";
@@ -277,5 +277,131 @@ describe("runDoctor — ADAPTER_MISSING", () => {
     const result = await runDoctor(dir);
     const issue = result.issues.find((i) => i.code === "ADAPTER_MISSING");
     expect(issue).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v0.5.3 plan quality checks
+// ---------------------------------------------------------------------------
+
+describe("runDoctor — BRIEF_MISSING (v0.5.3)", () => {
+  it("reports BRIEF_MISSING warning when design/brief.md does not exist", async () => {
+    const result = await runDoctor(dir);
+    const issue = result.issues.find((i) => i.code === "BRIEF_MISSING");
+    expect(issue).toBeDefined();
+    expect(issue?.severity).toBe("warning");
+  });
+
+  it("does not report BRIEF_MISSING when design/brief.md exists", async () => {
+    await writeFile(join(dir, "design", "brief.md"), "# Brief\n\nWe are building something.\n", "utf8");
+    const result = await runDoctor(dir);
+    const issue = result.issues.find((i) => i.code === "BRIEF_MISSING");
+    expect(issue).toBeUndefined();
+  });
+});
+
+describe("runDoctor — CONSTITUTION_PLACEHOLDER (v0.5.3)", () => {
+  it("reports CONSTITUTION_PLACEHOLDER when constitution.md contains the initial edit hint", async () => {
+    // Fresh init creates constitution.md with the placeholder text
+    const result = await runDoctor(dir);
+    const issue = result.issues.find((i) => i.code === "CONSTITUTION_PLACEHOLDER");
+    expect(issue).toBeDefined();
+    expect(issue?.severity).toBe("warning");
+  });
+
+  it("does not report CONSTITUTION_PLACEHOLDER when the hint text is removed", async () => {
+    await writeFile(
+      join(dir, "design", "constitution.md"),
+      "# My Project Constitution\n\n- Keep it simple.\n",
+      "utf8",
+    );
+    const result = await runDoctor(dir);
+    const issue = result.issues.find((i) => i.code === "CONSTITUTION_PLACEHOLDER");
+    expect(issue).toBeUndefined();
+  });
+});
+
+describe("runDoctor — EMPTY_OBJECTIVE (v0.5.3)", () => {
+  it("reports EMPTY_OBJECTIVE error when a phase objective is shorter than 10 chars", async () => {
+    await runPhaseAdd({
+      cwd: dir,
+      id: "PX",
+      name: "Tiny",
+      weight: 5,
+      objective: "Short",
+      confidence: "medium",
+      risk: "medium",
+      verifyCommands: ["pnpm test"],
+      definitionOfDone: ["Done"],
+    });
+    const result = await runDoctor(dir);
+    const issue = result.issues.find((i) => i.code === "EMPTY_OBJECTIVE");
+    expect(issue).toBeDefined();
+    expect(issue?.severity).toBe("error");
+    expect(issue?.message).toContain("PX");
+  });
+
+  it("does not report EMPTY_OBJECTIVE for adequate objectives", async () => {
+    await runPhaseAdd({
+      cwd: dir,
+      id: "PY",
+      name: "Adequate",
+      weight: 5,
+      objective: "This is a well-written phase objective that is long enough.",
+      confidence: "medium",
+      risk: "medium",
+      verifyCommands: ["pnpm test"],
+      definitionOfDone: ["Done"],
+    });
+    const result = await runDoctor(dir);
+    const issue = result.issues.find((i) => i.code === "EMPTY_OBJECTIVE" && i.message.includes("PY"));
+    expect(issue).toBeUndefined();
+  });
+});
+
+
+describe("runDoctor — ADAPTER_STALE (v0.5.3)", () => {
+  it("reports ADAPTER_STALE warning when an enabled agent profile has no model_version", async () => {
+    // Fresh init creates claude-code.yaml without model_version — should trigger warning
+    const result = await runDoctor(dir);
+    const issue = result.issues.find((i) => i.code === "ADAPTER_STALE");
+    expect(issue).toBeDefined();
+    expect(issue?.severity).toBe("warning");
+    expect(issue?.message).toContain("claude-code");
+  });
+
+  it("does not report ADAPTER_STALE when model_version is set in the agent profile", async () => {
+    const profilePath = join(dir, ".code-pact", "agent-profiles", "claude-code.yaml");
+    const original = await readFile(profilePath, "utf8");
+    await writeFile(profilePath, original + "model_version: opus-4.7\n", "utf8");
+    const result = await runDoctor(dir);
+    const issue = result.issues.find((i) => i.code === "ADAPTER_STALE");
+    expect(issue).toBeUndefined();
+  });
+});
+
+describe("runDoctor — disabled_checks via .code-pact/doctor.yaml (v0.5.3)", () => {
+  it("suppresses checks listed in disabled_checks", async () => {
+    await writeFile(
+      join(dir, ".code-pact", "doctor.yaml"),
+      "disabled_checks:\n  - BRIEF_MISSING\n  - CONSTITUTION_PLACEHOLDER\n  - ADAPTER_STALE\n",
+      "utf8",
+    );
+    const result = await runDoctor(dir);
+    expect(result.issues.find((i) => i.code === "BRIEF_MISSING")).toBeUndefined();
+    expect(result.issues.find((i) => i.code === "CONSTITUTION_PLACEHOLDER")).toBeUndefined();
+    expect(result.issues.find((i) => i.code === "ADAPTER_STALE")).toBeUndefined();
+  });
+
+  it("other checks still fire when only some are disabled", async () => {
+    await writeFile(
+      join(dir, ".code-pact", "doctor.yaml"),
+      "disabled_checks:\n  - BRIEF_MISSING\n",
+      "utf8",
+    );
+    // CONSTITUTION_PLACEHOLDER should still fire (fresh init = unedited template)
+    const result = await runDoctor(dir);
+    expect(result.issues.find((i) => i.code === "BRIEF_MISSING")).toBeUndefined();
+    expect(result.issues.find((i) => i.code === "CONSTITUTION_PLACEHOLDER")).toBeDefined();
   });
 });

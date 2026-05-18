@@ -1,12 +1,31 @@
 import { readFile, readdir, access } from "node:fs/promises";
 import { join, basename, extname } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { z } from "zod";
 import { Roadmap } from "../core/schemas/roadmap.ts";
 import { Phase } from "../core/schemas/phase.ts";
 import { ProgressLog } from "../core/schemas/progress-event.ts";
 import { Project } from "../core/schemas/project.ts";
 import { AgentProfile } from "../core/schemas/agent-profile.ts";
 import { ModelProfile, ModelTier } from "../core/schemas/model-profile.ts";
+
+// Optional per-project doctor configuration (.code-pact/doctor.yaml)
+const DoctorConfig = z.object({
+  disabled_checks: z.array(z.string()).optional().default([]),
+});
+type DoctorConfig = z.infer<typeof DoctorConfig>;
+
+async function loadDoctorConfig(cwd: string): Promise<DoctorConfig> {
+  const path = join(cwd, ".code-pact", "doctor.yaml");
+  try {
+    const raw = await readFile(path, "utf8");
+    const parsed = DoctorConfig.safeParse(parseYaml(raw));
+    if (parsed.success) return parsed.data;
+  } catch {
+    // file absent or unreadable — use defaults
+  }
+  return { disabled_checks: [] };
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -373,6 +392,78 @@ async function checkAdapterMissing(
   }
 }
 
+// Check 12: design/brief.md exists
+async function checkBriefMissing(cwd: string, issues: DoctorIssue[]): Promise<void> {
+  if (!(await fileExists(join(cwd, "design", "brief.md")))) {
+    issues.push({
+      code: "BRIEF_MISSING",
+      severity: "warning",
+      message: "design/brief.md does not exist — run \"code-pact plan brief\" to create a project overview",
+    });
+  }
+}
+
+// Sentinel strings that indicate constitution.md hasn't been edited from its initial template.
+const CONSTITUTION_PLACEHOLDER_MARKERS = [
+  "Edit this file to reflect the actual principles of your project",
+  "このファイルを編集して、プロジェクト固有の原則を反映させてください",
+];
+
+// Check 13: constitution.md is not the unedited initial template
+async function checkConstitutionPlaceholder(cwd: string, issues: DoctorIssue[]): Promise<void> {
+  const path = join(cwd, "design", "constitution.md");
+  let content: string;
+  try {
+    content = await readFile(path, "utf8");
+  } catch {
+    return; // file absent — BRIEF_MISSING or similar handles the design dir; skip here
+  }
+  const isPlaceholder = CONSTITUTION_PLACEHOLDER_MARKERS.some((m) => content.includes(m));
+  if (isPlaceholder) {
+    issues.push({
+      code: "CONSTITUTION_PLACEHOLDER",
+      severity: "warning",
+      message: "design/constitution.md still contains the initial template text — edit it or run \"code-pact plan constitution\"",
+    });
+  }
+}
+
+// Check 14: all phase objectives are non-trivial (>= 10 chars)
+function checkEmptyObjectives(phases: Phase[], issues: DoctorIssue[]): void {
+  for (const phase of phases) {
+    if (!phase.objective || phase.objective.trim().length < 10) {
+      issues.push({
+        code: "EMPTY_OBJECTIVE",
+        severity: "error",
+        message: `Phase "${phase.id}" has an empty or too-short objective (must be at least 10 characters)`,
+      });
+    }
+  }
+}
+
+// Check 15: enabled agent profiles have model_version set
+async function checkAdapterStale(
+  cwd: string,
+  project: Project,
+  issues: DoctorIssue[],
+): Promise<void> {
+  for (const agentRef of project.agents) {
+    if (agentRef.enabled === false) continue;
+    const profilePath = join(cwd, ".code-pact", agentRef.profile);
+    const result = await safeReadYaml(profilePath);
+    if (!result.ok) continue; // already reported elsewhere
+    const parsed = AgentProfile.safeParse(result.data);
+    if (!parsed.success) continue;
+    if (!parsed.data.model_version) {
+      issues.push({
+        code: "ADAPTER_STALE",
+        severity: "warning",
+        message: `Agent "${parsed.data.name}" has no model_version set — run "code-pact adapter --agent ${agentRef.name} --model <version>" to pin a model`,
+      });
+    }
+  }
+}
+
 async function checkStaleContext(
   cwd: string,
   phases: Phase[],
@@ -415,46 +506,67 @@ async function checkStaleContext(
 // ---------------------------------------------------------------------------
 
 export async function runDoctor(cwd: string): Promise<DoctorResult> {
-  const issues: DoctorIssue[] = [];
+  const allIssues: DoctorIssue[] = [];
+  const config = await loadDoctorConfig(cwd);
+  const disabled = new Set(config.disabled_checks);
 
   // 1. project.yaml
-  const project = await checkProjectYaml(cwd, issues);
+  const project = await checkProjectYaml(cwd, allIssues);
 
   // 2. roadmap.yaml
-  const roadmap = await checkRoadmap(cwd, issues);
+  const roadmap = await checkRoadmap(cwd, allIssues);
 
   // 3. phase files (requires roadmap)
-  const phases = roadmap ? await checkPhases(cwd, roadmap, issues) : [];
+  const phases = roadmap ? await checkPhases(cwd, roadmap, allIssues) : [];
 
   // 4. progress.yaml (requires phases for orphan check)
-  await checkProgressLog(cwd, phases, issues);
+  await checkProgressLog(cwd, phases, allIssues);
 
   // 5. agent profiles + model_map completeness (requires project)
   if (project) {
-    await checkAgentProfiles(cwd, project, issues);
+    await checkAgentProfiles(cwd, project, allIssues);
   }
 
   // 6. model profiles
-  await checkModelProfiles(cwd, issues);
+  await checkModelProfiles(cwd, allIssues);
 
   // 7. .bak files
-  await checkBakFiles(cwd, issues);
+  await checkBakFiles(cwd, allIssues);
 
   // 8. stale generated context (requires phases + project)
   if (project) {
-    await checkStaleContext(cwd, phases, project, issues);
+    await checkStaleContext(cwd, phases, project, allIssues);
   }
 
   // 9. duplicate task ids across phases
-  checkDuplicateTaskIds(phases, issues);
+  checkDuplicateTaskIds(phases, allIssues);
 
   // 10. .local/ gitignored
-  await checkLocalGitignored(cwd, issues);
+  await checkLocalGitignored(cwd, allIssues);
 
   // 11. enabled agents have adapter instruction files
   if (project) {
-    await checkAdapterMissing(cwd, project, issues);
+    await checkAdapterMissing(cwd, project, allIssues);
   }
+
+  // 12. design/brief.md present
+  await checkBriefMissing(cwd, allIssues);
+
+  // 13. constitution.md is not the unedited template
+  await checkConstitutionPlaceholder(cwd, allIssues);
+
+  // 14. phase objectives are non-trivial
+  checkEmptyObjectives(phases, allIssues);
+
+  // 15. enabled agents have model_version set
+  if (project) {
+    await checkAdapterStale(cwd, project, allIssues);
+  }
+
+  // Apply disabled_checks filter
+  const issues = disabled.size > 0
+    ? allIssues.filter((i) => !disabled.has(i.code))
+    : allIssues;
 
   const ok = issues.every((i) => i.severity !== "error");
   return { ok, issues };
