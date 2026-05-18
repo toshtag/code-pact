@@ -68,18 +68,33 @@ Use `code-pact doctor` to check project health at any time (invalid YAML, orphan
 
 ## Agent-facing usage
 
-Agent adapters (CLAUDE.md, AGENTS.md, docs/code-pact/agent-instructions.md) instruct the agent to do exactly two things per task:
+Agent adapters (CLAUDE.md, AGENTS.md, docs/code-pact/agent-instructions.md) drive a small, deterministic per-task loop:
 
 ```sh
+# (Optional) Ask code-pact which Claude model tier and effort suit the task.
+code-pact recommend --phase <phase-id> --task <task-id>
+
 # Fetch the markdown context pack (writes to stdout, no side effects).
 code-pact task context <task-id> --agent <agent>
+
+# Mark the task started so handoff and status views know who's on it.
+code-pact task start <task-id> --agent <agent>
+
+# If the task gets blocked, record why explicitly. The CLI requires a reason.
+code-pact task block <task-id> --reason "Waiting for review on PR #42"
+
+# When the blocker clears:
+code-pact task resume <task-id> --agent <agent>
+
+# Inspect the derived state and full event history at any time (pure read).
+code-pact task status <task-id> --json
 
 # After implementation, mark the task complete. This runs verify and,
 # on pass, appends a `done` event to progress.yaml.
 code-pact task complete <task-id> --agent <agent>
 ```
 
-`task context` resolves the task id across every phase, so the agent only needs the task id. `task complete` is idempotent — calling it again on an already-done task is a no-op (`already_done: true`). The low-level `code-pact verify --phase <p> --task <t>` is still available if you want to inspect verify output without recording a progress event.
+`task context` resolves the task id across every phase, so the agent only needs the task id. `task complete` and `task start` are idempotent — calling them again on a task already in that state is a no-op (`already_done: true` / `already_started: true`). A `blocked` task cannot complete directly: `task complete` returns `INVALID_TASK_TRANSITION` until the task is `resume`d, so the resume event records the unblock decision. The low-level `code-pact verify --phase <p> --task <t>` is still available if you want to inspect verify output without recording a progress event.
 
 ## Supported agents
 

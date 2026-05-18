@@ -69,8 +69,9 @@ against.
 | `PHASE_NOT_FOUND` | `phase show`, `pack`, `verify`, `recommend` | Phase id not in `roadmap.yaml` |
 | `TASK_NOT_FOUND` | `pack`, `verify`, `task context` | Task id not present anywhere |
 | `AMBIGUOUS_TASK_ID` | `task context` | Same task id exists in multiple phases |
-| `AGENT_NOT_FOUND` | `pack`, `adapter`, `task context` | Agent name not in `project.yaml` |
-| `AGENT_NOT_ENABLED` | `task context`, `task complete` | Agent is configured but has `enabled: false` |
+| `AGENT_NOT_FOUND` | `pack`, `adapter`, `task context`, `task start/block/resume/complete` | Agent name not in `project.yaml` |
+| `AGENT_NOT_ENABLED` | `task context`, `task start/block/resume/complete` | Agent is configured but has `enabled: false` |
+| `INVALID_TASK_TRANSITION` | `task start/block/resume/complete` | Requested state transition is not allowed from the current state |
 | `VERIFICATION_FAILED` | `verify`, `task complete` | Deterministic completion check did not pass |
 | `INTERNAL_ERROR` | any command | Catch-all for unhandled exceptions |
 
@@ -277,12 +278,91 @@ Order of operations:
 
 1. **Agent validation**. The same checks as `task context`: unknown agent → `AGENT_NOT_FOUND`, disabled agent → `AGENT_NOT_ENABLED`. When `--agent` is omitted, `project.yaml.default_agent` is used.
 2. **Task resolution**. The same logic as `task context`: scans every phase referenced by `design/roadmap.yaml`. `TASK_NOT_FOUND` / `AMBIGUOUS_TASK_ID` are raised for missing / duplicate task ids.
-3. **Idempotency check**. If a `done` event already exists for `task_id` in `.code-pact/state/progress.yaml`, `task complete` returns `{ ok: true, data: { already_done: true } }` with exit 0 and **does not re-run verification**. To force re-verification, use `task complete --rerun` (planned for a later release).
+3. **State check**. Derived from the append-only progress log via `deriveTaskState`. If the current state is `done`, returns `{ ok: true, data: { already_done: true } }` with exit 0 and **does not re-run verification** (to force re-verification, use `task complete --rerun` — planned for a later release). If the current state is `blocked`, exits 2 with `INVALID_TASK_TRANSITION`: the task must be resumed via `task resume <id>` before it can complete, so the resume event records the unblock decision. Other current states (`planned`, `started`, `resumed`, `failed`) proceed to verification. `planned → done` is permitted at the command layer for v0.5 backwards compatibility, even though the state machine itself does not list that transition.
 4. **Verification (preflight mode)**. Runs the deterministic checks from `code-pact verify` — `commands` and `decision` — but skips the state-consistency checks (`progress_event`, `task_status`) because `task complete` is the action that produces that state. On failure, exits 1 with `VERIFICATION_FAILED`; `progress.yaml` is left byte-identical. Standalone `code-pact verify` still runs all four checks for after-the-fact consistency auditing.
 5. **Progress append**. On verify pass, appends a `done` event with shape `{ task_id, status: "done", at, actor: "agent", agent, evidence }` to `progress.yaml`. The write uses best-effort atomic replacement (`writeFile` to a temp file + `rename`) to prevent partial-write corruption. Concurrent `task complete` calls are out of scope for v0.2.
 6. **`--dry-run`**. Skips the progress append. Returns `{ ok: true, data: { dry_run: true, would_append: <event> } }`. `progress.yaml` is byte-identical.
 
 The `agent` field on `ProgressEvent` is optional for backward compatibility with v0.1 logs that predate `task complete`.
+
+## `task start` / `task status` / `task block` / `task resume` (v0.6)
+
+These four commands fill the execution-state gap between `task context` and `task complete`. They all read and append to the same `.code-pact/state/progress.yaml` log used by `task complete`, and they share the same state-machine rules enforced via `deriveTaskState` and `assertTransition`.
+
+**Allowed transitions:**
+
+```
+planned   → started
+started   → blocked | done | failed
+blocked   → resumed | failed
+resumed   → blocked | done | failed
+done      → terminal
+failed    → started   (internal retry path, not user-facing in v0.6)
+```
+
+Any disallowed transition exits 2 with `INVALID_TASK_TRANSITION` and leaves `progress.yaml` byte-identical.
+
+### `task start <task-id> [--agent <name>] [--json]`
+
+Appends a `started` event. Validates `--agent` against `project.yaml` (defaults to `default_agent` when omitted) and emits the standard `AGENT_NOT_FOUND` / `AGENT_NOT_ENABLED` errors.
+
+Idempotency: if the current state is already `started`, the command exits 0 with `{ ok: true, data: { already_started: true, ... } }` and `progress.yaml` is byte-identical.
+
+### `task status <task-id> [--json]`
+
+**Pure read.** Does not accept `--agent` and does not validate agent configuration, so it can be invoked from CI, monitoring, or by a human reviewer without project agent setup. Resolves the task to its phase and returns the derived current state plus the full event history for the task.
+
+JSON envelope:
+
+```json
+{
+  "ok": true,
+  "data": {
+    "task_id": "P1-T1",
+    "phase_id": "P1",
+    "current": "blocked",
+    "last_event": { "task_id": "P1-T1", "status": "blocked", "at": "...", "actor": "agent", "agent": "claude-code", "reason": "..." },
+    "history": [ /* full chronological history for this task */ ]
+  }
+}
+```
+
+`current` is one of `planned | started | blocked | resumed | done | failed`. `last_event` and `history` reflect only events whose `task_id` matches.
+
+### `task block <task-id> --reason "<text>" [--agent <name>] [--json]`
+
+Appends a `blocked` event. `--reason` is **required** at the CLI layer and stored in the new `ProgressEvent.reason` field (distinct from `notes`, which remains a free-form memo). An empty or whitespace-only reason raises `CONFIG_ERROR` (exit 2). The schema also enforces non-empty `reason` for blocked events via `superRefine`, so progress.yaml stays honest even under hand-editing.
+
+Allowed only from `started` or `resumed`. Block from `planned`, `blocked`, or `done` returns `INVALID_TASK_TRANSITION` (exit 2).
+
+### `task resume <task-id> [--agent <name>] [--json]`
+
+Appends a `resumed` event. Allowed only from `blocked` — any other current state returns `INVALID_TASK_TRANSITION` (exit 2).
+
+## `recommend`
+
+`code-pact recommend [--phase <id>] [--task <id>] [--agent <name>] [--json]` suggests a Claude model tier and effort level for a given task based on its attributes (`type`, `ambiguity`, `risk`, `context_size`, `write_surface`, `verification_strength`, `expected_duration`).
+
+This is the entry point of the agent-facing loop: agents should call `recommend` first to choose model/effort before fetching the context pack.
+
+JSON envelope:
+
+```json
+{
+  "ok": true,
+  "data": {
+    "task_id": "P1-T1",
+    "phase_id": "P1",
+    "agent": "claude-code",
+    "tier": "balanced_coding",
+    "model_id": "claude-sonnet-4-6",
+    "effort": "medium",
+    "reasons": ["feature task with medium write surface"]
+  }
+}
+```
+
+Error codes follow the standard set: `PHASE_NOT_FOUND`, `TASK_NOT_FOUND`, `AGENT_NOT_FOUND`. The command does not mutate any state.
 
 ## Locale resolution
 
