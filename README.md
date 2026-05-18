@@ -66,6 +66,16 @@ The `init` wizard asks, in order: language (English / 日本語), which agents t
 
 Use `code-pact doctor` to check project health at any time (invalid YAML, orphan phase files, duplicate task ids, missing adapter files, …). The CI-friendly `code-pact validate` variant exits 1 on errors; add `--strict` to promote warnings to errors as well.
 
+At phase or PR boundaries, run the v0.7 **planning integrity** checkpoints:
+
+```sh
+code-pact plan lint --json          # schema + naming + missing/orphan references
+code-pact plan normalize --check    # whitespace/newline drift (--write to apply)
+code-pact plan analyze --json       # design status vs progress-log drift
+```
+
+`plan lint` and `plan analyze` accept `--strict` to fail on warnings. `plan normalize --write` preserves YAML comments and Markdown hard line breaks. Pre-v0.7 done tasks (no progress events) are hidden from `plan analyze` by default; pass `--include-historical` to surface them without affecting the exit code.
+
 ## Agent-facing usage
 
 Agent adapters (CLAUDE.md, AGENTS.md, docs/code-pact/agent-instructions.md) drive a small, deterministic per-task loop:

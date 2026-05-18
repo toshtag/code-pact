@@ -114,10 +114,15 @@ tasks:
     write_surface: low
     verification_strength: medium
     expected_duration: short
-    status: planned
+    status: in_progress
     description: |
-      Release prep only. README polish, CHANGELOG v0.7.0-alpha.0 entry,
-      package.json version bump from 0.6.0-alpha.0 to 0.7.0-alpha.0, design
-      self-checks pass. cli-contract.md and dogfood.md are already updated
-      in T2-T4. Separate commit/PR from T1-T4 implementation per release
-      prep convention.
+      Release prep. package.json bumped from 0.6.0-alpha.0 to
+      0.7.0-alpha.0 (prepublishOnly metadata check passes), CHANGELOG
+      v0.7.0-alpha.0 entry covering the three new plan commands and the
+      hidden_by_default / affects_exit issue metadata, README updated
+      with a planning integrity checkpoint snippet. cli-contract.md and
+      dogfood.md were already updated in T2-T4. P5 phase status will
+      flip to done after task complete records the done event for this
+      task — running the phase verification chain in between would
+      otherwise see PHASE_DONE_WITH_OPEN_TASKS while T5 is still in
+      progress.
