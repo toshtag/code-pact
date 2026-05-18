@@ -11,3 +11,6 @@ phases:
   - id: P4
     path: design/phases/P4-stabilize.yaml
     weight: 25
+  - id: P5
+    path: design/phases/P5-planning-integrity.yaml
+    weight: 20
