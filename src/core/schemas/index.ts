@@ -27,3 +27,17 @@ export { AgentProfile } from "./agent-profile.ts";
 export { EventStatus, ActorType, ProgressEvent, ProgressLog } from "./progress-event.ts";
 
 export { BaselineSnapshot } from "./baseline-snapshot.ts";
+
+export {
+  ContextProfile,
+  VerificationProfile,
+  AmbiguityAction,
+  EscalationStep,
+  PreflightEntry,
+  BudgetToolCalls,
+  BudgetContextFiles,
+  BudgetVerificationCommands,
+  BudgetProfile,
+  StructuredReason,
+  RecommendResultV2,
+} from "./recommend-result.ts";
