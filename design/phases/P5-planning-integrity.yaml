@@ -33,6 +33,7 @@ verification:
     - pnpm test
     - pnpm build
     - node dist/cli.js plan lint --json
+    - node dist/cli.js plan normalize --check --json
 tasks:
   - id: P5-T1
     type: architecture
@@ -72,14 +73,17 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: in_progress
+    status: done
     description: |
       plan normalize. Conservative line-based normalization. YAML: trailing
       whitespace + CRLF->LF + final newline. Markdown: CRLF->LF + final
-      newline only (preserve hard line break trailing spaces). --check is the
-      safe default, --write performs atomic writes. Idempotency and comment
-      preservation tests required. Update docs/cli-contract.md plan normalize
-      section.
+      newline only (preserve hard line break trailing spaces). --check is
+      safe default, --write performs atomic writes, --check+--write
+      conflict guard, typo-flag guard, idempotency and YAML comment /
+      Markdown hard-line-break preservation tests landed. plan normalize
+      --check appended to phase verification. docs/cli-contract.md plan
+      normalize section added. Verified via task complete with full
+      verification.
   - id: P5-T4
     type: feature
     ambiguity: low
