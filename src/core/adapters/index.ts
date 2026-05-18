@@ -19,6 +19,7 @@ export type AdapterGenerator = (
   modelProfiles: ModelProfile[],
   force: boolean,
   locale: Locale,
+  modelVersion?: string,
 ) => Promise<AdapterGenerateResult>;
 
 export const adapterRegistry: Record<SupportedAgent, AdapterGenerator> = {
