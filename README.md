@@ -6,7 +6,7 @@ The product idea: agents should not read sprawling `design/` trees themselves an
 
 ## Status
 
-Alpha. Published on npm as [`code-pact@alpha`](https://www.npmjs.com/package/code-pact) (current: `0.7.0-alpha.0`). API and command surface may still shift while the Cursor and Gemini CLI adapters are experimental. Stable releases (`latest` tag) will follow once those adapters graduate.
+Alpha. Published on npm under the `alpha` dist-tag — install with `npm install code-pact@alpha` or check the current version with `npm view code-pact@alpha version`. The `latest` dist-tag is held back until the Cursor / Gemini CLI adapters graduate; the API and command surface may still shift in the meantime. Release notes and the running version history live in [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Install
 
