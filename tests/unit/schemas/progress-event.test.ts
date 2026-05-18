@@ -48,6 +48,54 @@ describe("ProgressEvent", () => {
   it("rejects empty agent string", () => {
     expect(() => ProgressEvent.parse({ ...VALID_EVENT, agent: "" })).toThrow();
   });
+
+  describe("v0.6 status extension", () => {
+    it("accepts a started event", () => {
+      const e = ProgressEvent.parse({ ...VALID_EVENT, status: "started" });
+      expect(e.status).toBe("started");
+    });
+
+    it("accepts a resumed event", () => {
+      const e = ProgressEvent.parse({ ...VALID_EVENT, status: "resumed" });
+      expect(e.status).toBe("resumed");
+    });
+
+    it("accepts a blocked event with reason", () => {
+      const e = ProgressEvent.parse({
+        ...VALID_EVENT,
+        status: "blocked",
+        reason: "Waiting for schema decision",
+      });
+      expect(e.status).toBe("blocked");
+      expect(e.reason).toBe("Waiting for schema decision");
+    });
+
+    it("rejects a blocked event without reason", () => {
+      expect(() =>
+        ProgressEvent.parse({ ...VALID_EVENT, status: "blocked" }),
+      ).toThrow();
+    });
+
+    it("rejects a blocked event with empty reason", () => {
+      expect(() =>
+        ProgressEvent.parse({
+          ...VALID_EVENT,
+          status: "blocked",
+          reason: "",
+        }),
+      ).toThrow();
+    });
+
+    it("accepts done event without reason (reason is optional for non-blocked)", () => {
+      const e = ProgressEvent.parse(VALID_EVENT);
+      expect(e.reason).toBeUndefined();
+    });
+
+    it("accepts a failed event (existing status preserved)", () => {
+      const e = ProgressEvent.parse({ ...VALID_EVENT, status: "failed" });
+      expect(e.status).toBe("failed");
+    });
+  });
 });
 
 describe("ProgressLog", () => {
@@ -64,5 +112,23 @@ describe("ProgressLog", () => {
       ],
     });
     expect(log.events).toHaveLength(2);
+  });
+
+  it("accepts a full started→blocked→resumed→done sequence", () => {
+    const log = ProgressLog.parse({
+      events: [
+        { ...VALID_EVENT, status: "started" },
+        { ...VALID_EVENT, status: "blocked", reason: "review" },
+        { ...VALID_EVENT, status: "resumed" },
+        VALID_EVENT,
+      ],
+    });
+    expect(log.events).toHaveLength(4);
+    expect(log.events.map((e) => e.status)).toEqual([
+      "started",
+      "blocked",
+      "resumed",
+      "done",
+    ]);
   });
 });
