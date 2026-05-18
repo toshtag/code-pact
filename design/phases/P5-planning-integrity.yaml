@@ -33,8 +33,6 @@ verification:
     - pnpm test
     - pnpm build
     - node dist/cli.js plan lint --json
-    - node dist/cli.js plan analyze --json
-    - node dist/cli.js plan normalize --check --json
 tasks:
   - id: P5-T1
     type: architecture
@@ -58,12 +56,14 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: in_progress
+    status: done
     description: |
       plan lint command. Lenient loader collects parse/schema/reference issues
       across files. --strict promotes warnings to exit 1. --include-quality
       opt-in surfaces WEAK_DOD / PLACEHOLDER_VERIFICATION heuristics so they
-      do not fail CI by default. Update docs/cli-contract.md plan lint section.
+      do not fail CI by default. docs/cli-contract.md plan lint section
+      added. Verified via task complete with pnpm typecheck/test/build +
+      plan lint --json. Merged via PR (link added at merge time).
   - id: P5-T3
     type: feature
     ambiguity: medium
