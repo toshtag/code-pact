@@ -1,9 +1,12 @@
 import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { parse as parseYaml } from "yaml";
 import type { AgentProfile } from "../schemas/agent-profile.ts";
 import { CLAUDE_MODEL_VERSIONS, type ClaudeModelVersion } from "../schemas/agent-profile.ts";
 import type { ModelProfile } from "../schemas/model-profile.ts";
 import { ModelTier } from "../schemas/model-profile.ts";
+import { Roadmap } from "../schemas/roadmap.ts";
+import { Phase } from "../schemas/phase.ts";
 import type { Locale } from "../../i18n/index.ts";
 import { messages as messageCatalog } from "../../i18n/index.ts";
 
@@ -172,6 +175,60 @@ Runs: code-pact progress --json
 `;
 
 // ---------------------------------------------------------------------------
+// Verification command → skill helpers
+// ---------------------------------------------------------------------------
+
+const PACKAGE_MANAGERS = ["pnpm", "npm", "yarn", "bun"] as const;
+
+export function deriveSkillName(command: string): string {
+  const tokens = command.trim().split(/\s+/);
+  const first = tokens[0] ?? "";
+  if (tokens.length >= 2 && (PACKAGE_MANAGERS as readonly string[]).includes(first)) {
+    const rest = tokens[1] === "run" ? tokens.slice(2) : tokens.slice(1);
+    const task = rest.find((t) => !t.startsWith("-"));
+    if (task) return sanitizeSkillName(task);
+  }
+  const nonFlags = tokens.filter((t) => !t.startsWith("-"));
+  const last = nonFlags[nonFlags.length - 1] ?? first;
+  return sanitizeSkillName(last);
+}
+
+function sanitizeSkillName(s: string): string {
+  const cleaned = s.toLowerCase().replace(/[^a-z0-9]/g, "-").replace(/-+/g, "-").replace(/^-|-$/, "");
+  return cleaned || "cmd";
+}
+
+function buildCommandSkill(skillName: string, command: string): string {
+  return [`# /${skillName} — ${command}`, ``, `Usage: /${skillName}`, ``, `Runs: ${command}`, ``].join("\n");
+}
+
+async function readVerificationCommands(cwd: string): Promise<string[]> {
+  let roadmapRaw: string;
+  try {
+    roadmapRaw = await readFile(join(cwd, "design", "roadmap.yaml"), "utf8");
+  } catch {
+    return [];
+  }
+  let roadmap: Roadmap;
+  try {
+    roadmap = Roadmap.parse(parseYaml(roadmapRaw) as unknown);
+  } catch {
+    return [];
+  }
+  const seen = new Set<string>();
+  for (const ref of roadmap.phases) {
+    try {
+      const phaseRaw = await readFile(join(cwd, ref.path), "utf8");
+      const phase = Phase.parse(parseYaml(phaseRaw) as unknown);
+      for (const cmd of phase.verification.commands) seen.add(cmd);
+    } catch {
+      // skip unreadable phases
+    }
+  }
+  return Array.from(seen);
+}
+
+// ---------------------------------------------------------------------------
 // Result
 // ---------------------------------------------------------------------------
 
@@ -191,15 +248,17 @@ export async function generateClaudeAdapter(
   force: boolean,
   locale: Locale,
   modelVersion?: string,
+  regenSkills = false,
 ): Promise<AdapterGenerateResult> {
   const created: string[] = [];
   const skipped: string[] = [];
 
   // Resolve model version: CLI override takes precedence over profile field.
   const resolvedModelVersion = modelVersion ?? profile.model_version;
+  const forceSkills = force || regenSkills;
 
-  async function writeIfAbsent(absPath: string, content: string): Promise<void> {
-    if (!force) {
+  async function writeIfAbsent(absPath: string, content: string, forceWrite: boolean): Promise<void> {
+    if (!forceWrite) {
       try {
         await readFile(absPath);
         skipped.push(absPath);
@@ -212,18 +271,29 @@ export async function generateClaudeAdapter(
     created.push(absPath);
   }
 
-  // CLAUDE.md at project root
+  // CLAUDE.md at project root (respects force only, not regenSkills)
   await writeIfAbsent(
     join(cwd, profile.instruction_filename),
     claudeMd(profile, modelProfiles, locale, resolvedModelVersion),
+    force,
   );
 
-  // .claude/skills/
+  // .claude/skills/ — fixed skills
   const skillDir = join(cwd, profile.skill_dir ?? ".claude/skills");
   await mkdir(skillDir, { recursive: true });
-  await writeIfAbsent(join(skillDir, "context.md"), SKILL_CONTEXT);
-  await writeIfAbsent(join(skillDir, "verify.md"), SKILL_VERIFY);
-  await writeIfAbsent(join(skillDir, "progress.md"), SKILL_PROGRESS);
+  await writeIfAbsent(join(skillDir, "context.md"), SKILL_CONTEXT, forceSkills);
+  await writeIfAbsent(join(skillDir, "verify.md"), SKILL_VERIFY, forceSkills);
+  await writeIfAbsent(join(skillDir, "progress.md"), SKILL_PROGRESS, forceSkills);
+
+  // Dynamic skills from verification.commands in roadmap phases
+  const verificationCommands = await readVerificationCommands(cwd);
+  const seenSkillNames = new Set<string>();
+  for (const cmd of verificationCommands) {
+    const skillName = deriveSkillName(cmd);
+    if (seenSkillNames.has(skillName)) continue;
+    seenSkillNames.add(skillName);
+    await writeIfAbsent(join(skillDir, `${skillName}.md`), buildCommandSkill(skillName, cmd), forceSkills);
+  }
 
   // .claude/hooks/ (empty placeholder — user fills in)
   const hookDir = join(cwd, profile.hook_dir ?? ".claude/hooks");

@@ -606,6 +606,7 @@ async function cmdAdapter(argv: string[], locale: Locale, globalJson: boolean): 
       force: { type: "boolean" },
       json: { type: "boolean" },
       model: { type: "string" },
+      "regen-skills": { type: "boolean" },
     },
     strict: false,
     allowPositionals: false,
@@ -615,10 +616,11 @@ async function cmdAdapter(argv: string[], locale: Locale, globalJson: boolean): 
   const agentName = (values.agent as string | undefined) ?? "claude-code";
   const force = values.force === true;
   const modelVersion = values.model as string | undefined;
+  const regenSkills = values["regen-skills"] === true;
   const cwd = process.cwd();
 
   try {
-    const result = await runGenerateAdapter({ cwd, agentName, force, locale, modelVersion });
+    const result = await runGenerateAdapter({ cwd, agentName, force, locale, modelVersion, regenSkills });
     if (json) {
       process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
     } else {
