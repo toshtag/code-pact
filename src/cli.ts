@@ -25,6 +25,11 @@ import { runGenerateAdapter } from "./commands/adapter.ts";
 import { runPlanBrief } from "./commands/plan-brief.ts";
 import { runPlanPrompt } from "./commands/plan-prompt.ts";
 import { runPlanConstitution } from "./commands/plan-constitution.ts";
+import {
+  formatPlanLintHuman,
+  runPlanLint,
+  serializePlanLintData,
+} from "./commands/plan-lint.ts";
 import { runRecommend, formatRecommend } from "./commands/recommend.ts";
 import { runDoctor, formatDoctor } from "./commands/doctor.ts";
 import { runValidate } from "./commands/validate.ts";
@@ -427,7 +432,11 @@ async function cmdPlan(argv: string[], locale: Locale, globalJson: boolean): Pro
     return cmdPlanConstitution(rest, locale, globalJson);
   }
 
-  const msg = `plan: unknown subcommand "${subcommand ?? ""}". Use: brief | prompt | constitution`;
+  if (subcommand === "lint") {
+    return cmdPlanLint(rest, locale, globalJson);
+  }
+
+  const msg = `plan: unknown subcommand "${subcommand ?? ""}". Use: brief | prompt | constitution | lint`;
   if (globalJson) {
     process.stdout.write(
       `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
@@ -861,6 +870,66 @@ async function cmdProgress(argv: string[], locale: Locale, globalJson: boolean):
       return 2;
     }
     throw err;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Command: plan lint (v0.7)
+// ---------------------------------------------------------------------------
+
+async function cmdPlanLint(
+  argv: string[],
+  locale: Locale,
+  globalJson: boolean,
+): Promise<number> {
+  void locale;
+  const { values } = parseArgs({
+    args: argv,
+    options: {
+      json: { type: "boolean" },
+      strict: { type: "boolean" },
+      "include-quality": { type: "boolean" },
+    },
+    strict: false,
+  });
+  const json = globalJson || values.json === true;
+  const strict = values.strict === true;
+  const includeQuality = values["include-quality"] === true;
+  const cwd = process.cwd();
+
+  try {
+    const result = await runPlanLint({ cwd, strict, includeQuality });
+    const data = serializePlanLintData(result);
+
+    if (json) {
+      const payload = result.ok
+        ? { ok: true, data }
+        : {
+            ok: false,
+            error: {
+              code: "PLAN_LINT_FAILED",
+              message: `plan lint failed: ${result.errors} error(s), ${result.warnings} warning(s)`,
+            },
+            data,
+          };
+      process.stdout.write(`${JSON.stringify(payload)}\n`);
+    } else {
+      process.stderr.write(`${formatPlanLintHuman(result)}\n`);
+    }
+
+    return result.ok ? 0 : 1;
+  } catch (err: unknown) {
+    const code =
+      (err as NodeJS.ErrnoException).code ?? "PLAN_LINT_FAILED";
+    const message = err instanceof Error ? err.message : String(err);
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({ ok: false, error: { code, message } })}\n`,
+      );
+    } else {
+      process.stderr.write(`${message}\n`);
+    }
+    return 2;
   }
 }
 
