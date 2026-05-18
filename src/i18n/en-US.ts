@@ -176,6 +176,36 @@ export const messages = {
         `Recorded done event for "${taskId}" (agent: ${agent}).`,
       dryRun: (taskId: string): string =>
         `Dry run: would append done event for "${taskId}". progress.yaml was not modified.`,
+      invalidTransition: (taskId: string, current: string): string =>
+        `Task "${taskId}" is ${current}. Run \`code-pact task resume ${taskId}\` before completing.`,
+    },
+    start: {
+      success: (taskId: string, agent: string): string =>
+        `Recorded started event for "${taskId}" (agent: ${agent}).`,
+      alreadyStarted: (taskId: string): string =>
+        `Task "${taskId}" is already started. progress.yaml was not modified.`,
+      invalidTransition: (taskId: string, current: string): string =>
+        `Cannot start task "${taskId}" from state "${current}".`,
+    },
+    block: {
+      success: (taskId: string, reason: string): string =>
+        `Recorded blocked event for "${taskId}" (reason: ${reason}).`,
+      reasonRequired:
+        "task block requires --reason \"<text>\" describing why the task is blocked.",
+      invalidTransition: (taskId: string, current: string): string =>
+        `Cannot block task "${taskId}" from state "${current}". Block is allowed from started or resumed.`,
+    },
+    resume: {
+      success: (taskId: string): string =>
+        `Recorded resumed event for "${taskId}".`,
+      invalidTransition: (taskId: string, current: string): string =>
+        `Cannot resume task "${taskId}" from state "${current}". Resume is only valid from blocked.`,
+    },
+    status: {
+      headline: (taskId: string, current: string): string =>
+        `Task "${taskId}" — current: ${current}`,
+      noEvents: (taskId: string): string =>
+        `Task "${taskId}" has no progress events yet.`,
     },
   },
   cliContract: {

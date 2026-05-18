@@ -30,6 +30,10 @@ import { runDoctor, formatDoctor } from "./commands/doctor.ts";
 import { runValidate } from "./commands/validate.ts";
 import { runTaskContext } from "./commands/task-context.ts";
 import { runTaskComplete } from "./commands/task-complete.ts";
+import { runTaskStart } from "./commands/task-start.ts";
+import { runTaskBlock } from "./commands/task-block.ts";
+import { runTaskResume } from "./commands/task-resume.ts";
+import { runTaskStatus } from "./commands/task-status.ts";
 import { runPhaseNew } from "./commands/phase-new.ts";
 import { runTaskAdd } from "./commands/task-add.ts";
 import { runPhaseWizard } from "./lib/phase-wizard.ts";
@@ -1246,8 +1250,20 @@ async function cmdTask(argv: string[], locale: Locale, globalJson: boolean): Pro
   if (subcommand === "add") {
     return cmdTaskAdd(rest, locale, globalJson);
   }
+  if (subcommand === "start") {
+    return cmdTaskStart(rest, locale, globalJson);
+  }
+  if (subcommand === "status") {
+    return cmdTaskStatus(rest, locale, globalJson);
+  }
+  if (subcommand === "block") {
+    return cmdTaskBlock(rest, locale, globalJson);
+  }
+  if (subcommand === "resume") {
+    return cmdTaskResume(rest, locale, globalJson);
+  }
 
-  const msg = `task: unknown subcommand "${subcommand ?? ""}". Use: add | context | complete`;
+  const msg = `task: unknown subcommand "${subcommand ?? ""}". Use: add | context | start | status | block | resume | complete`;
   if (globalJson) {
     process.stdout.write(
       `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
@@ -1582,6 +1598,453 @@ async function cmdTaskComplete(
         msg = m.task.complete.agentNotFound(agent ?? "");
         outCode = "AGENT_NOT_FOUND";
         break;
+      case "INVALID_TASK_TRANSITION": {
+        const current =
+          (err as NodeJS.ErrnoException & { current?: string }).current ?? "";
+        msg = m.task.complete.invalidTransition(taskId, current);
+        outCode = "INVALID_TASK_TRANSITION";
+        break;
+      }
+      default:
+        throw err;
+    }
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({ ok: false, error: { code: outCode, message: msg } })}\n`,
+      );
+    } else {
+      process.stderr.write(`${msg}\n`);
+    }
+    return 2;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Command: task start / block / resume / status (v0.6)
+// ---------------------------------------------------------------------------
+
+type TaskStateErrorKey = "start" | "block" | "resume";
+type LocaleMessages = (typeof messages)[Locale];
+
+function emitTaskCommonError(
+  err: NodeJS.ErrnoException,
+  key: TaskStateErrorKey,
+  m: LocaleMessages,
+  taskId: string,
+  agent: string | undefined,
+  json: boolean,
+): number | null {
+  const code = err.code;
+  let msg: string;
+  let outCode: string;
+  switch (code) {
+    case "TASK_NOT_FOUND":
+      msg = m.task.complete.taskNotFound(taskId);
+      outCode = "TASK_NOT_FOUND";
+      break;
+    case "AMBIGUOUS_TASK_ID": {
+      const phases =
+        (err as NodeJS.ErrnoException & { phases?: string[] }).phases ?? [];
+      msg = m.task.complete.ambiguous(taskId, phases);
+      outCode = "AMBIGUOUS_TASK_ID";
+      break;
+    }
+    case "AGENT_NOT_FOUND":
+      msg = m.task.complete.agentNotFound(agent ?? "");
+      outCode = "AGENT_NOT_FOUND";
+      break;
+    case "AGENT_NOT_ENABLED":
+      msg = m.task.complete.agentNotEnabled(agent ?? "");
+      outCode = "AGENT_NOT_ENABLED";
+      break;
+    case "INVALID_TASK_TRANSITION": {
+      const current =
+        (err as NodeJS.ErrnoException & { current?: string }).current ?? "";
+      msg = m.task[key].invalidTransition(taskId, current);
+      outCode = "INVALID_TASK_TRANSITION";
+      break;
+    }
+    default:
+      return null;
+  }
+  if (json) {
+    process.stdout.write(
+      `${JSON.stringify({ ok: false, error: { code: outCode, message: msg } })}\n`,
+    );
+  } else {
+    process.stderr.write(`${msg}\n`);
+  }
+  return 2;
+}
+
+async function cmdTaskStart(
+  argv: string[],
+  locale: Locale,
+  globalJson: boolean,
+): Promise<number> {
+  const m = messages[locale];
+
+  let values: Record<string, unknown>;
+  let positionals: string[];
+  try {
+    ({ values, positionals } = strictParse(
+      "task start",
+      argv,
+      {
+        agent: { type: "string" },
+        json: { type: "boolean" },
+      },
+      { allowPositionals: true },
+    ));
+  } catch (err) {
+    if (!(err instanceof ConfigError)) throw err;
+    const json = globalJson || argv.includes("--json");
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: err.message } })}\n`,
+      );
+    } else {
+      process.stderr.write(`${err.message}\n`);
+    }
+    return 2;
+  }
+
+  const json = globalJson || values.json === true;
+  const taskId = positionals[0];
+  if (!taskId) {
+    const msg = "task start requires a task id (e.g. `task start P1-T1`).";
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
+      );
+    } else {
+      process.stderr.write(`${msg}\n`);
+    }
+    return 2;
+  }
+  const agent = values.agent as string | undefined;
+  const cwd = process.cwd();
+
+  try {
+    const result = await runTaskStart({ cwd, taskId, agent });
+    if (result.kind === "already_started") {
+      if (json) {
+        process.stdout.write(
+          `${JSON.stringify({
+            ok: true,
+            data: {
+              already_started: true,
+              task_id: result.task_id,
+              phase_id: result.phase_id,
+              agent: result.agent,
+            },
+          })}\n`,
+        );
+      } else {
+        process.stdout.write(`${m.task.start.alreadyStarted(taskId)}\n`);
+      }
+      return 0;
+    }
+
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({
+          ok: true,
+          data: {
+            task_id: result.task_id,
+            phase_id: result.phase_id,
+            agent: result.agent,
+            event: result.event,
+          },
+        })}\n`,
+      );
+    } else {
+      process.stdout.write(`${m.task.start.success(taskId, result.agent)}\n`);
+    }
+    return 0;
+  } catch (err: unknown) {
+    if (!(err instanceof Error)) throw err;
+    const handled = emitTaskCommonError(
+      err as NodeJS.ErrnoException,
+      "start",
+      m,
+      taskId,
+      agent,
+      json,
+    );
+    if (handled !== null) return handled;
+    throw err;
+  }
+}
+
+async function cmdTaskBlock(
+  argv: string[],
+  locale: Locale,
+  globalJson: boolean,
+): Promise<number> {
+  const m = messages[locale];
+
+  let values: Record<string, unknown>;
+  let positionals: string[];
+  try {
+    ({ values, positionals } = strictParse(
+      "task block",
+      argv,
+      {
+        agent: { type: "string" },
+        reason: { type: "string" },
+        json: { type: "boolean" },
+      },
+      { allowPositionals: true },
+    ));
+  } catch (err) {
+    if (!(err instanceof ConfigError)) throw err;
+    const json = globalJson || argv.includes("--json");
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: err.message } })}\n`,
+      );
+    } else {
+      process.stderr.write(`${err.message}\n`);
+    }
+    return 2;
+  }
+
+  const json = globalJson || values.json === true;
+  const taskId = positionals[0];
+  if (!taskId) {
+    const msg = "task block requires a task id (e.g. `task block P1-T1 --reason ...`).";
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
+      );
+    } else {
+      process.stderr.write(`${msg}\n`);
+    }
+    return 2;
+  }
+  const reason = (values.reason as string | undefined) ?? "";
+  if (!reason || reason.trim().length === 0) {
+    const msg = m.task.block.reasonRequired;
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
+      );
+    } else {
+      process.stderr.write(`${msg}\n`);
+    }
+    return 2;
+  }
+  const agent = values.agent as string | undefined;
+  const cwd = process.cwd();
+
+  try {
+    const result = await runTaskBlock({ cwd, taskId, reason, agent });
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({
+          ok: true,
+          data: {
+            task_id: result.task_id,
+            phase_id: result.phase_id,
+            agent: result.agent,
+            event: result.event,
+          },
+        })}\n`,
+      );
+    } else {
+      process.stdout.write(`${m.task.block.success(taskId, reason)}\n`);
+    }
+    return 0;
+  } catch (err: unknown) {
+    if (!(err instanceof Error)) throw err;
+    const handled = emitTaskCommonError(
+      err as NodeJS.ErrnoException,
+      "block",
+      m,
+      taskId,
+      agent,
+      json,
+    );
+    if (handled !== null) return handled;
+    throw err;
+  }
+}
+
+async function cmdTaskResume(
+  argv: string[],
+  locale: Locale,
+  globalJson: boolean,
+): Promise<number> {
+  const m = messages[locale];
+
+  let values: Record<string, unknown>;
+  let positionals: string[];
+  try {
+    ({ values, positionals } = strictParse(
+      "task resume",
+      argv,
+      {
+        agent: { type: "string" },
+        json: { type: "boolean" },
+      },
+      { allowPositionals: true },
+    ));
+  } catch (err) {
+    if (!(err instanceof ConfigError)) throw err;
+    const json = globalJson || argv.includes("--json");
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: err.message } })}\n`,
+      );
+    } else {
+      process.stderr.write(`${err.message}\n`);
+    }
+    return 2;
+  }
+
+  const json = globalJson || values.json === true;
+  const taskId = positionals[0];
+  if (!taskId) {
+    const msg = "task resume requires a task id (e.g. `task resume P1-T1`).";
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
+      );
+    } else {
+      process.stderr.write(`${msg}\n`);
+    }
+    return 2;
+  }
+  const agent = values.agent as string | undefined;
+  const cwd = process.cwd();
+
+  try {
+    const result = await runTaskResume({ cwd, taskId, agent });
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({
+          ok: true,
+          data: {
+            task_id: result.task_id,
+            phase_id: result.phase_id,
+            agent: result.agent,
+            event: result.event,
+          },
+        })}\n`,
+      );
+    } else {
+      process.stdout.write(`${m.task.resume.success(taskId)}\n`);
+    }
+    return 0;
+  } catch (err: unknown) {
+    if (!(err instanceof Error)) throw err;
+    const handled = emitTaskCommonError(
+      err as NodeJS.ErrnoException,
+      "resume",
+      m,
+      taskId,
+      agent,
+      json,
+    );
+    if (handled !== null) return handled;
+    throw err;
+  }
+}
+
+async function cmdTaskStatus(
+  argv: string[],
+  locale: Locale,
+  globalJson: boolean,
+): Promise<number> {
+  const m = messages[locale];
+
+  let values: Record<string, unknown>;
+  let positionals: string[];
+  try {
+    ({ values, positionals } = strictParse(
+      "task status",
+      argv,
+      {
+        json: { type: "boolean" },
+      },
+      { allowPositionals: true },
+    ));
+  } catch (err) {
+    if (!(err instanceof ConfigError)) throw err;
+    const json = globalJson || argv.includes("--json");
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: err.message } })}\n`,
+      );
+    } else {
+      process.stderr.write(`${err.message}\n`);
+    }
+    return 2;
+  }
+
+  const json = globalJson || values.json === true;
+  const taskId = positionals[0];
+  if (!taskId) {
+    const msg = "task status requires a task id (e.g. `task status P1-T1`).";
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
+      );
+    } else {
+      process.stderr.write(`${msg}\n`);
+    }
+    return 2;
+  }
+  const cwd = process.cwd();
+
+  try {
+    const result = await runTaskStatus({ cwd, taskId });
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({
+          ok: true,
+          data: {
+            task_id: result.task_id,
+            phase_id: result.phase_id,
+            current: result.current,
+            last_event: result.last_event,
+            history: result.history,
+          },
+        })}\n`,
+      );
+    } else {
+      process.stdout.write(`${m.task.status.headline(taskId, result.current)}\n`);
+      if (result.history.length === 0) {
+        process.stdout.write(`${m.task.status.noEvents(taskId)}\n`);
+      } else {
+        for (const ev of result.history) {
+          const extras: string[] = [];
+          if (ev.agent) extras.push(`agent=${ev.agent}`);
+          if (ev.reason) extras.push(`reason=${ev.reason}`);
+          const suffix = extras.length > 0 ? `  (${extras.join(", ")})` : "";
+          process.stdout.write(`  ${ev.at}  ${ev.status}${suffix}\n`);
+        }
+      }
+    }
+    return 0;
+  } catch (err: unknown) {
+    if (!(err instanceof Error)) throw err;
+    const code = (err as NodeJS.ErrnoException).code;
+    let msg: string;
+    let outCode: string;
+    switch (code) {
+      case "TASK_NOT_FOUND":
+        msg = m.task.complete.taskNotFound(taskId);
+        outCode = "TASK_NOT_FOUND";
+        break;
+      case "AMBIGUOUS_TASK_ID": {
+        const phases =
+          (err as NodeJS.ErrnoException & { phases?: string[] }).phases ?? [];
+        msg = m.task.complete.ambiguous(taskId, phases);
+        outCode = "AMBIGUOUS_TASK_ID";
+        break;
+      }
       default:
         throw err;
     }
