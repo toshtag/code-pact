@@ -258,6 +258,97 @@ describe("runGenerateAdapter — gemini-cli", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Model-aware adapter (v0.5)
+// ---------------------------------------------------------------------------
+
+describe("runGenerateAdapter — claude-code model-aware (v0.5)", () => {
+  beforeEach(async () => {
+    await runInit({ cwd: dir, locale: "en-US", agents: ["claude-code"], force: false, json: false });
+  });
+
+  it("--model opus-4.7: CLAUDE.md includes effort guidance with high/medium/low", async () => {
+    await runGenerateAdapter({
+      cwd: dir, agentName: "claude-code", force: true, locale: "en-US",
+      modelVersion: "opus-4.7",
+    });
+    const content = await readFile(join(dir, "CLAUDE.md"), "utf8");
+    expect(content).toContain("Model guidance (opus-4.7)");
+    expect(content).toContain("`high`");
+    expect(content).toContain("`medium`");
+    expect(content).toContain("`low`");
+    expect(content).toContain("Extended thinking");
+  });
+
+  it("--model opus-4.6: includes effort guidance with high/medium/low", async () => {
+    await runGenerateAdapter({
+      cwd: dir, agentName: "claude-code", force: true, locale: "en-US",
+      modelVersion: "opus-4.6",
+    });
+    const content = await readFile(join(dir, "CLAUDE.md"), "utf8");
+    expect(content).toContain("Model guidance (opus-4.6)");
+    expect(content).toContain("`high`");
+  });
+
+  it("--model sonnet-4.6: notes that effort:high is NOT supported", async () => {
+    await runGenerateAdapter({
+      cwd: dir, agentName: "claude-code", force: true, locale: "en-US",
+      modelVersion: "sonnet-4.6",
+    });
+    const content = await readFile(join(dir, "CLAUDE.md"), "utf8");
+    expect(content).toContain("Model guidance (sonnet-4.6)");
+    expect(content).toContain("not supported");
+    expect(content).toContain("highest_reasoning");
+  });
+
+  it("no --model: CLAUDE.md does not include Model guidance section", async () => {
+    await runGenerateAdapter({
+      cwd: dir, agentName: "claude-code", force: true, locale: "en-US",
+    });
+    const content = await readFile(join(dir, "CLAUDE.md"), "utf8");
+    expect(content).not.toContain("Model guidance");
+  });
+
+  it("unknown model string: includes fallback note instead of crashing", async () => {
+    await runGenerateAdapter({
+      cwd: dir, agentName: "claude-code", force: true, locale: "en-US",
+      modelVersion: "future-model-99",
+    });
+    const content = await readFile(join(dir, "CLAUDE.md"), "utf8");
+    expect(content).toContain("Model guidance (future-model-99)");
+    expect(content).toContain("No model-specific guidance available");
+  });
+
+  it("model_version from profile.yaml is used when no CLI override", async () => {
+    // Write model_version into the agent profile yaml
+    const { writeFile: wf } = await import("node:fs/promises");
+    const profilePath = join(dir, ".code-pact", "agent-profiles", "claude-code.yaml");
+    const original = await readFile(profilePath, "utf8");
+    await wf(profilePath, original + "model_version: opus-4.7\n", "utf8");
+
+    await runGenerateAdapter({
+      cwd: dir, agentName: "claude-code", force: true, locale: "en-US",
+    });
+    const content = await readFile(join(dir, "CLAUDE.md"), "utf8");
+    expect(content).toContain("Model guidance (opus-4.7)");
+  });
+
+  it("CLI modelVersion overrides model_version from profile.yaml", async () => {
+    const { writeFile: wf } = await import("node:fs/promises");
+    const profilePath = join(dir, ".code-pact", "agent-profiles", "claude-code.yaml");
+    const original = await readFile(profilePath, "utf8");
+    await wf(profilePath, original + "model_version: opus-4.7\n", "utf8");
+
+    await runGenerateAdapter({
+      cwd: dir, agentName: "claude-code", force: true, locale: "en-US",
+      modelVersion: "sonnet-4.6",  // CLI override wins
+    });
+    const content = await readFile(join(dir, "CLAUDE.md"), "utf8");
+    expect(content).toContain("Model guidance (sonnet-4.6)");
+    expect(content).not.toContain("Model guidance (opus-4.7)");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Error: unknown agent
 // ---------------------------------------------------------------------------
 

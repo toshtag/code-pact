@@ -16,6 +16,8 @@ export type AdapterOptions = {
   agentName: string;
   force: boolean;
   locale: Locale;
+  /** Override or set the Claude model version for model-aware CLAUDE.md generation. */
+  modelVersion?: string;
 };
 
 export type AdapterResult = {
@@ -67,7 +69,7 @@ async function loadModelProfiles(cwd: string): Promise<ModelProfile[]> {
 // ---------------------------------------------------------------------------
 
 export async function runGenerateAdapter(opts: AdapterOptions): Promise<AdapterResult> {
-  const { cwd, agentName, force, locale } = opts;
+  const { cwd, agentName, force, locale, modelVersion } = opts;
 
   const [profile, modelProfiles] = await Promise.all([
     loadAgentProfile(cwd, agentName),
@@ -81,7 +83,7 @@ export async function runGenerateAdapter(opts: AdapterOptions): Promise<AdapterR
   }
 
   const generator = adapterRegistry[agentName];
-  const result = await generator(cwd, profile, modelProfiles, force, locale);
+  const result = await generator(cwd, profile, modelProfiles, force, locale, modelVersion);
 
   return { agentName, ...result };
 }

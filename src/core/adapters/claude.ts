@@ -1,16 +1,85 @@
 import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { AgentProfile } from "../schemas/agent-profile.ts";
+import { CLAUDE_MODEL_VERSIONS, type ClaudeModelVersion } from "../schemas/agent-profile.ts";
 import type { ModelProfile } from "../schemas/model-profile.ts";
 import { ModelTier } from "../schemas/model-profile.ts";
 import type { Locale } from "../../i18n/index.ts";
 import { messages as messageCatalog } from "../../i18n/index.ts";
 
 // ---------------------------------------------------------------------------
+// Model-specific guidance blocks
+// ---------------------------------------------------------------------------
+
+type ModelGuidance = {
+  supportsHighEffort: boolean;
+  effortGuidance: string;
+  thinkingNote: string;
+};
+
+const MODEL_GUIDANCE: Record<ClaudeModelVersion, ModelGuidance> = {
+  "opus-4.7": {
+    supportsHighEffort: true,
+    effortGuidance: [
+      "- `high` — large context, complex architecture decisions, or tasks with `ambiguity: high`",
+      "- `medium` — standard feature work (default)",
+      "- `low` — small mechanical tasks (`type: refactor`, `expected_duration: short`)",
+    ].join("\n"),
+    thinkingNote:
+      "Extended thinking is supported. Enable it for tasks flagged `ambiguity: high` or `context_size: large`.",
+  },
+  "opus-4.6": {
+    supportsHighEffort: true,
+    effortGuidance: [
+      "- `high` — large context, complex architecture decisions, or tasks with `ambiguity: high`",
+      "- `medium` — standard feature work (default)",
+      "- `low` — small mechanical tasks (`type: refactor`, `expected_duration: short`)",
+    ].join("\n"),
+    thinkingNote:
+      "Extended thinking is supported. Enable it for tasks flagged `ambiguity: high` or `context_size: large`.",
+  },
+  "sonnet-4.6": {
+    supportsHighEffort: false,
+    effortGuidance: [
+      "- `medium` — standard feature work (default)",
+      "- `low` — small mechanical tasks (`type: refactor`, `expected_duration: short`)",
+      "- `high` is **not supported** on this model — switch to the `highest_reasoning` tier for complex tasks.",
+    ].join("\n"),
+    thinkingNote:
+      "Extended thinking is supported. For tasks requiring deep reasoning (`ambiguity: high`), consider switching to the `highest_reasoning` tier model.",
+  },
+};
+
+function modelGuidanceSection(modelVersion: string): string {
+  const isKnown = (CLAUDE_MODEL_VERSIONS as readonly string[]).includes(modelVersion);
+  if (!isKnown) {
+    return [
+      `## Model guidance (${modelVersion})`,
+      ``,
+      `No model-specific guidance available for \`${modelVersion}\`. Refer to the Anthropic documentation.`,
+    ].join("\n");
+  }
+  const g = MODEL_GUIDANCE[modelVersion as ClaudeModelVersion];
+  return [
+    `## Model guidance (${modelVersion})`,
+    ``,
+    `**Effort levels:**`,
+    g.effortGuidance,
+    ``,
+    `**Extended thinking:** ${g.thinkingNote}`,
+  ].join("\n");
+}
+
+// ---------------------------------------------------------------------------
 // CLAUDE.md template
 // ---------------------------------------------------------------------------
 
-function claudeMd(profile: AgentProfile, modelProfiles: ModelProfile[], locale: Locale): string {
+function claudeMd(
+  profile: AgentProfile,
+  modelProfiles: ModelProfile[],
+  locale: Locale,
+  modelVersion?: string,
+): string {
   const tier = (t: string) => profile.model_map[t as ModelTier] ?? t;
   const t = messageCatalog[locale].templates.adapterCommon;
 
@@ -23,6 +92,8 @@ function claudeMd(profile: AgentProfile, modelProfiles: ModelProfile[], locale: 
       return `- **${mp.tier}** → \`${modelId}\`${thinking}\n  - Use for: ${purposes}\n  - Effort: ${efforts}`;
     })
     .join("\n");
+
+  const modelSection = modelVersion ? `\n\n${modelGuidanceSection(modelVersion)}` : "";
 
   return [
     `# Claude Code — Project Instructions`,
@@ -55,6 +126,7 @@ function claudeMd(profile: AgentProfile, modelProfiles: ModelProfile[], locale: 
     `## Model selection`,
     ``,
     tierSection,
+    modelSection,
     ``,
     `## Skills`,
     ``,
@@ -118,9 +190,13 @@ export async function generateClaudeAdapter(
   modelProfiles: ModelProfile[],
   force: boolean,
   locale: Locale,
+  modelVersion?: string,
 ): Promise<AdapterGenerateResult> {
   const created: string[] = [];
   const skipped: string[] = [];
+
+  // Resolve model version: CLI override takes precedence over profile field.
+  const resolvedModelVersion = modelVersion ?? profile.model_version;
 
   async function writeIfAbsent(absPath: string, content: string): Promise<void> {
     if (!force) {
@@ -139,7 +215,7 @@ export async function generateClaudeAdapter(
   // CLAUDE.md at project root
   await writeIfAbsent(
     join(cwd, profile.instruction_filename),
-    claudeMd(profile, modelProfiles, locale),
+    claudeMd(profile, modelProfiles, locale, resolvedModelVersion),
   );
 
   // .claude/skills/
