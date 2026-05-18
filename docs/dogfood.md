@@ -101,6 +101,61 @@ mkdir /tmp/cp-fresh && cd /tmp/cp-fresh
 code-pact init
 ```
 
+## Model-aware adapter (v0.5.0)
+
+Pin a Claude model version so the adapter generates effort and extended-thinking guidance
+tailored to that model:
+
+```sh
+# Generate CLAUDE.md with Opus 4.7–specific guidance:
+code-pact adapter --agent claude-code --model opus-4.7
+
+# Re-run skills only (skill files regenerated, CLAUDE.md left untouched):
+code-pact adapter --agent claude-code --regen-skills
+```
+
+Supported values: `opus-4.7`, `opus-4.6`, `sonnet-4.6`. The `model_version` field in
+`.code-pact/agent-profiles/claude-code.yaml` is used as the default when `--model` is
+not passed on the CLI.
+
+After adapter generation, `.claude/skills/` is populated with:
+- Fixed skills: `/context`, `/verify`, `/progress`
+- Dynamic skills derived from `verification.commands` in all roadmap phases
+  (e.g. `pnpm test` → `/test`, `pnpm typecheck` → `/typecheck`)
+
+## Context quality (v0.5.1)
+
+`task context` automatically adjusts what it includes based on task attributes.
+No flags are needed — the task YAML drives the behavior:
+
+| Task attribute | Effect |
+|---|---|
+| `context_size: large` | Includes `design/constitution.md` + all decision files |
+| `context_size: small` | Minimal output (no rules, decisions, or constitution) |
+| `ambiguity: high` | Includes `design/constitution.md` + recent done events in phase |
+| `write_surface: high` | All rule files included, bypassing `applies_to` filter |
+
+## Plan quality (v0.5.3)
+
+`doctor` now reports plan quality issues alongside structural checks:
+
+```sh
+code-pact doctor
+```
+
+New warning/error codes:
+- `BRIEF_MISSING` — `design/brief.md` not created yet
+- `CONSTITUTION_PLACEHOLDER` — constitution.md still contains the template edit hint
+- `EMPTY_OBJECTIVE` — a phase objective is blank or very short
+- `ADAPTER_STALE` — an agent profile has no `model_version` pinned
+
+To suppress specific checks, create `.code-pact/doctor.yaml`:
+
+```yaml
+disabled_checks:
+  - ADAPTER_STALE
+```
+
 ## Quick reference
 
 | Goal | Command |
@@ -113,7 +168,8 @@ code-pact init
 | Mark a task done (as agent) | `code-pact task complete <task-id> --agent <agent>` |
 | Add a phase interactively | `code-pact phase add` |
 | Add a task interactively | `code-pact task add <phase-id>` |
-| Generate / refresh adapter files | `code-pact adapter --agent <agent> --force` |
+| Generate / refresh adapter files | `code-pact adapter --agent <agent> [--model <ver>] [--force]` |
+| Regenerate skills only | `code-pact adapter --agent <agent> --regen-skills` |
 | Show weighted progress | `code-pact progress` |
 | Health-check the project | `code-pact doctor` |
 | CI validation | `code-pact validate` |

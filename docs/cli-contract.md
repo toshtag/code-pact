@@ -194,6 +194,81 @@ JSON output includes `has_brief`, `has_constitution`, and `clipboard_copied` fla
 
 Interactive wizard that collects a project description and comma-separated core principles, then writes `design/constitution.md`. Requires a TTY; exits 2 in non-interactive mode. `--force` overwrites an existing file. Empty input falls back to i18n defaults so the file is always a valid starting point.
 
+## `adapter` (v0.5)
+
+`code-pact adapter [--agent <name>] [--force] [--model <version>] [--regen-skills] [--json]`
+
+### `--model <version>`
+
+Generates a **model-aware** instruction file for the claude-code adapter. The file includes a
+"Model guidance" section with effort-level and extended-thinking guidance tailored to the
+specific Claude model version.
+
+Supported values: `opus-4.7`, `opus-4.6`, `sonnet-4.6`. Unknown values produce a fallback
+note instead of an error, so future model names do not break existing pipelines.
+
+The `--model` flag takes precedence over the `model_version` field in the agent profile YAML.
+If neither is set, the generic template (no model-specific section) is used.
+
+### `--regen-skills`
+
+Forces all skill files in `.claude/skills/` to be regenerated without overwriting the main
+`CLAUDE.md` instruction file. Use after adding new phases with new `verification.commands`.
+
+### Automatic skill generation (v0.5.2)
+
+When `adapter --agent claude-code` runs, it reads `verification.commands` from every phase
+in `design/roadmap.yaml` and auto-generates a skill file for each unique command:
+
+| Command | Skill file | Slash command |
+|---|---|---|
+| `pnpm test` | `.claude/skills/test.md` | `/test` |
+| `pnpm typecheck` | `.claude/skills/typecheck.md` | `/typecheck` |
+| `npm run lint` | `.claude/skills/lint.md` | `/lint` |
+
+Skill names are derived by stripping the package-manager prefix (`pnpm`, `npm run`, `yarn`,
+`bun run`) and sanitizing to kebab-case. If `design/roadmap.yaml` does not exist, no dynamic
+skills are generated (the three fixed skills — `/context`, `/verify`, `/progress` — are always
+written). Duplicate commands across phases produce a single skill file.
+
+## `task context` — context quality gates (v0.5.1)
+
+`code-pact task context <task-id> [--agent <name>] [--json]` generates a context pack whose
+content is determined by the task's attributes:
+
+| Attribute | Value | Effect on context pack |
+|---|---|---|
+| `context_size` | `large` | Includes `design/constitution.md` + **all** decision files |
+| `context_size` | `small` | Minimal: phase contract + task definition only (no rules, decisions, or constitution) |
+| `ambiguity` | `high` | Includes `design/constitution.md` + up to 5 recent `done` events from the same phase |
+| `write_surface` | `high` | Includes **all** rule files in `design/rules/`, bypassing `applies_to` filters |
+
+The `char_count` (total characters in the rendered pack) and `included_constitution` flag
+are included in the `--json` result. Missing design files are silently skipped.
+
+## `doctor` — plan quality checks (v0.5.3)
+
+In addition to structural checks (orphan files, schema errors, duplicate IDs), `doctor` now
+reports plan quality issues:
+
+| Code | Severity | Condition |
+|---|---|---|
+| `BRIEF_MISSING` | warning | `design/brief.md` does not exist |
+| `CONSTITUTION_PLACEHOLDER` | warning | `design/constitution.md` still contains the initial template edit hint |
+| `EMPTY_OBJECTIVE` | error | A phase `objective` is blank or fewer than 10 characters |
+| `ADAPTER_STALE` | warning | An enabled agent profile has no `model_version` set |
+
+Individual checks can be suppressed per project without touching source code by creating
+`.code-pact/doctor.yaml`:
+
+```yaml
+disabled_checks:
+  - BRIEF_MISSING
+  - ADAPTER_STALE
+```
+
+This file is optional. When absent, all checks are active.
+
 ## `task complete`
 
 `code-pact task complete <task-id> [--agent <name>] [--json] [--dry-run]` is the deterministic completion entry point for agents.
