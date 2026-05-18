@@ -20,6 +20,7 @@ export type AdapterGenerator = (
   force: boolean,
   locale: Locale,
   modelVersion?: string,
+  regenSkills?: boolean,
 ) => Promise<AdapterGenerateResult>;
 
 export const adapterRegistry: Record<SupportedAgent, AdapterGenerator> = {

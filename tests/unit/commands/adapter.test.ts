@@ -1,9 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtemp, rm, readFile } from "node:fs/promises";
+import { mkdtemp, rm, readFile, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runInit } from "../../../src/commands/init.ts";
+import { runInitCore } from "../../../src/commands/init.ts";
 import { runGenerateAdapter } from "../../../src/commands/adapter.ts";
+import { deriveSkillName } from "../../../src/core/adapters/claude.ts";
 
 let dir: string;
 
@@ -361,5 +363,116 @@ describe("runGenerateAdapter — unknown agent", () => {
     await expect(
       runGenerateAdapter({ cwd: dir, agentName: "gemini", force: false, locale: "en-US" }),
     ).rejects.toMatchObject({ code: "AGENT_NOT_FOUND" });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// deriveSkillName unit tests (v0.5.2)
+// ---------------------------------------------------------------------------
+
+describe("deriveSkillName", () => {
+  it("pnpm test → test", () => expect(deriveSkillName("pnpm test")).toBe("test"));
+  it("pnpm typecheck → typecheck", () => expect(deriveSkillName("pnpm typecheck")).toBe("typecheck"));
+  it("pnpm build → build", () => expect(deriveSkillName("pnpm build")).toBe("build"));
+  it("npm run lint → lint", () => expect(deriveSkillName("npm run lint")).toBe("lint"));
+  it("yarn dev → dev", () => expect(deriveSkillName("yarn dev")).toBe("dev"));
+  it("bun run test:unit → test-unit", () => expect(deriveSkillName("bun run test:unit")).toBe("test-unit"));
+  it("make build → build", () => expect(deriveSkillName("make build")).toBe("build"));
+});
+
+// ---------------------------------------------------------------------------
+// Skill generation from verification commands (v0.5.2)
+// ---------------------------------------------------------------------------
+
+describe("runGenerateAdapter — v0.5.2 skill generation", () => {
+  beforeEach(async () => {
+    await runInitCore({
+      cwd: dir,
+      locale: "en-US",
+      agents: ["claude-code"],
+      force: false,
+      json: false,
+      createSamplePhase: true,
+      verifyCommand: "pnpm test",
+    });
+  });
+
+  it("generates test.md skill from verification command pnpm test", async () => {
+    await runGenerateAdapter({ cwd: dir, agentName: "claude-code", force: false, locale: "en-US" });
+    const skillContent = await readFile(join(dir, ".claude", "skills", "test.md"), "utf8");
+    expect(skillContent).toContain("/test");
+    expect(skillContent).toContain("pnpm test");
+  });
+
+  it("generated skill is listed in created result", async () => {
+    const result = await runGenerateAdapter({ cwd: dir, agentName: "claude-code", force: false, locale: "en-US" });
+    const names = result.created.map((p) => p.replace(dir, ""));
+    expect(names.some((n) => n.includes("test.md"))).toBe(true);
+  });
+
+  it("re-run without force skips existing skill files", async () => {
+    await runGenerateAdapter({ cwd: dir, agentName: "claude-code", force: false, locale: "en-US" });
+    const second = await runGenerateAdapter({ cwd: dir, agentName: "claude-code", force: false, locale: "en-US" });
+    expect(second.skipped.some((p) => p.includes("test.md"))).toBe(true);
+  });
+
+  it("--regen-skills regenerates skill files without overwriting CLAUDE.md", async () => {
+    // First run — create all files
+    await runGenerateAdapter({ cwd: dir, agentName: "claude-code", force: false, locale: "en-US" });
+    // Overwrite CLAUDE.md with sentinel content
+    await writeFile(join(dir, "CLAUDE.md"), "SENTINEL", "utf8");
+    // Overwrite test.md with old content
+    await writeFile(join(dir, ".claude", "skills", "test.md"), "OLD", "utf8");
+
+    await runGenerateAdapter({ cwd: dir, agentName: "claude-code", force: false, locale: "en-US", regenSkills: true });
+
+    // CLAUDE.md must NOT have been overwritten
+    const claudeMd = await readFile(join(dir, "CLAUDE.md"), "utf8");
+    expect(claudeMd).toBe("SENTINEL");
+
+    // test.md must have been regenerated
+    const skillContent = await readFile(join(dir, ".claude", "skills", "test.md"), "utf8");
+    expect(skillContent).not.toBe("OLD");
+    expect(skillContent).toContain("pnpm test");
+  });
+
+  it("no roadmap → no crash, only fixed skills are created", async () => {
+    // Remove roadmap to simulate project without phases
+    const { rm: fsRm } = await import("node:fs/promises");
+    await fsRm(join(dir, "design", "roadmap.yaml"));
+
+    const result = await runGenerateAdapter({ cwd: dir, agentName: "claude-code", force: true, locale: "en-US" });
+    const names = result.created.map((p) => p.replace(dir, ""));
+    // Fixed skills must exist
+    expect(names.some((n) => n.includes("context.md"))).toBe(true);
+    expect(names.some((n) => n.includes("verify.md"))).toBe(true);
+    expect(names.some((n) => n.includes("progress.md"))).toBe(true);
+    // No dynamic skill from roadmap
+    expect(names.some((n) => n.includes("test.md"))).toBe(false);
+  });
+
+  it("multiple phases with the same command produce one skill file", async () => {
+    // Add a second phase with the same verification command
+    const roadmapContent = await readFile(join(dir, "design", "roadmap.yaml"), "utf8");
+    await mkdir(join(dir, "design", "phases"), { recursive: true });
+    await writeFile(
+      join(dir, "design", "phases", "P2-extra.yaml"),
+      [
+        "id: P2", "name: Extra", "weight: 5", "confidence: high", "risk: low",
+        "status: planned", "objective: Extra phase.", "definition_of_done:", "  - Done",
+        "verification:", "  commands:", "    - pnpm test",
+        "tasks: []",
+      ].join("\n"),
+      "utf8",
+    );
+    await writeFile(
+      join(dir, "design", "roadmap.yaml"),
+      roadmapContent + "  - id: P2\n    path: design/phases/P2-extra.yaml\n    weight: 5\n",
+      "utf8",
+    );
+
+    const result = await runGenerateAdapter({ cwd: dir, agentName: "claude-code", force: true, locale: "en-US" });
+    const skillFiles = result.created.filter((p) => p.includes("test.md"));
+    expect(skillFiles).toHaveLength(1);
   });
 });

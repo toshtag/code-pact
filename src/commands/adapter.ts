@@ -18,6 +18,8 @@ export type AdapterOptions = {
   locale: Locale;
   /** Override or set the Claude model version for model-aware CLAUDE.md generation. */
   modelVersion?: string;
+  /** Regenerate skill files only (does not overwrite the main instruction file). */
+  regenSkills?: boolean;
 };
 
 export type AdapterResult = {
@@ -69,7 +71,7 @@ async function loadModelProfiles(cwd: string): Promise<ModelProfile[]> {
 // ---------------------------------------------------------------------------
 
 export async function runGenerateAdapter(opts: AdapterOptions): Promise<AdapterResult> {
-  const { cwd, agentName, force, locale, modelVersion } = opts;
+  const { cwd, agentName, force, locale, modelVersion, regenSkills } = opts;
 
   const [profile, modelProfiles] = await Promise.all([
     loadAgentProfile(cwd, agentName),
@@ -83,7 +85,7 @@ export async function runGenerateAdapter(opts: AdapterOptions): Promise<AdapterR
   }
 
   const generator = adapterRegistry[agentName];
-  const result = await generator(cwd, profile, modelProfiles, force, locale, modelVersion);
+  const result = await generator(cwd, profile, modelProfiles, force, locale, modelVersion, regenSkills);
 
   return { agentName, ...result };
 }
