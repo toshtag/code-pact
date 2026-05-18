@@ -332,6 +332,7 @@ describe("runDoctor — EMPTY_OBJECTIVE (v0.5.3)", () => {
       confidence: "medium",
       risk: "medium",
       verifyCommands: ["pnpm test"],
+      definitionOfDone: ["Done"],
     });
     const result = await runDoctor(dir);
     const issue = result.issues.find((i) => i.code === "EMPTY_OBJECTIVE");
@@ -350,6 +351,7 @@ describe("runDoctor — EMPTY_OBJECTIVE (v0.5.3)", () => {
       confidence: "medium",
       risk: "medium",
       verifyCommands: ["pnpm test"],
+      definitionOfDone: ["Done"],
     });
     const result = await runDoctor(dir);
     const issue = result.issues.find((i) => i.code === "EMPTY_OBJECTIVE" && i.message.includes("PY"));
