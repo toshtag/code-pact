@@ -34,7 +34,7 @@ tasks:
     write_surface: medium
     verification_strength: weak
     expected_duration: medium
-    status: planned
+    status: done
     description: Dogfood prep — design/brief.md, design/constitution.md, design/roadmap.yaml, docs/dogfood.md, docs/cli-contract.md v0.5 additions
   - id: P4-T2
     type: docs
@@ -44,7 +44,7 @@ tasks:
     write_surface: low
     verification_strength: weak
     expected_duration: short
-    status: planned
+    status: done
     description: v0.5.0 release prep — version bump, CHANGELOG, README update, GitHub Release
   - id: P4-T3
     type: feature
@@ -66,3 +66,13 @@ tasks:
     expected_duration: short
     status: done
     description: v0.6 recommend promotion in README + dogfood.md + cli-contract.md agent-facing-loop narrative
+  - id: P4-T5
+    type: docs
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: weak
+    expected_duration: short
+    status: done
+    description: v0.6.0 release prep — version bump to 0.6.0-alpha.0, CHANGELOG entry, GitHub Release
