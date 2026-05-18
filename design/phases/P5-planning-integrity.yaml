@@ -1,0 +1,115 @@
+id: P5
+name: Planning Integrity
+weight: 20
+confidence: medium
+risk: low
+status: in_progress
+objective: |
+  Add deterministic CLI-side validation, normalization, and cross-artifact
+  analysis for design/ and progress state so AI agents can rely on machine
+  verification instead of manual reconciliation. v0.7 is an existing-schema
+  Planning Integrity layer, not a full execution-readiness gate; schema
+  expansion (non_goals/dependencies/touched_paths/decision_refs) is deferred
+  to a separate Plan Readiness Schema RFC.
+non_goals:
+  - structural YAML reordering (key/phase/task reorder)
+  - task dependencies field or dependency cycle detection
+  - new schema fields beyond the existing v0.6 model
+  - time-based checks such as BLOCKED_TASK_STALE
+  - auto-fix in plan lint (only normalize writes)
+  - Markdown trailing whitespace stripping (preserve hard line break semantics)
+definition_of_done:
+  - plan lint detects schema and convention violations with stable error codes
+  - plan normalize is conservative (whitespace/newline only) and idempotent
+  - plan analyze surfaces design vs progress drift without breaking historical tasks
+  - shared detectors live in src/core/plan/checks.ts and are imported by doctor
+  - docs/cli-contract.md covers the three commands by T4
+  - docs/dogfood.md describes checkpoint usage by T4
+  - all new commands ship with unit + integration tests
+  - README polish / CHANGELOG / package version bump handled in T5 release prep
+verification:
+  commands:
+    - pnpm typecheck
+    - pnpm test
+    - pnpm build
+    - node dist/cli.js plan lint --json
+    - node dist/cli.js plan analyze --json
+    - node dist/cli.js plan normalize --check --json
+tasks:
+  - id: P5-T1
+    type: architecture
+    ambiguity: low
+    risk: low
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: short
+    status: in_progress
+    description: |
+      Shared scaffolding for v0.7: src/core/plan/{state,checks,shared}.ts +
+      i18n keys + src/io/atomic-text.ts extraction. Move shared duplicate/
+      orphan detectors out of doctor.ts into checks.ts. Doctor imports from
+      checks.ts. No new lint/normalize/analyze commands yet — those land in
+      T2-T4 on top of this foundation.
+  - id: P5-T2
+    type: feature
+    ambiguity: low
+    risk: low
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: planned
+    description: |
+      plan lint command. Lenient loader collects parse/schema/reference issues
+      across files. --strict promotes warnings to exit 1. --include-quality
+      opt-in surfaces WEAK_DOD / PLACEHOLDER_VERIFICATION heuristics so they
+      do not fail CI by default. Update docs/cli-contract.md plan lint section.
+  - id: P5-T3
+    type: feature
+    ambiguity: medium
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: planned
+    description: |
+      plan normalize. Conservative line-based normalization. YAML: trailing
+      whitespace + CRLF->LF + final newline. Markdown: CRLF->LF + final
+      newline only (preserve hard line break trailing spaces). --check is the
+      safe default, --write performs atomic writes. Idempotency and comment
+      preservation tests required. Update docs/cli-contract.md plan normalize
+      section.
+  - id: P5-T4
+    type: feature
+    ambiguity: low
+    risk: low
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: planned
+    description: |
+      plan analyze. Cross-artifact drift detection between design status and
+      progress-derived state. Historical done (no progress events) is hidden
+      by default and does not affect exit code, preventing self-dogfood
+      breakage on pre-v0.6 phases. STATUS_DRIFT kinds evaluated top-down so no
+      task generates duplicate issues. PHASE_DONE_WITH_OPEN_TASKS and
+      ORPHAN_PROGRESS_EVENT also covered. Update docs/cli-contract.md plan
+      analyze section and docs/dogfood.md checkpoint flow.
+  - id: P5-T5
+    type: docs
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: planned
+    description: |
+      Release prep only. README polish, CHANGELOG v0.7.0-alpha.0 entry,
+      package.json version bump from 0.6.0-alpha.0 to 0.7.0-alpha.0, design
+      self-checks pass. cli-contract.md and dogfood.md are already updated
+      in T2-T4. Separate commit/PR from T1-T4 implementation per release
+      prep convention.

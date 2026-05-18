@@ -8,6 +8,12 @@ import { ProgressLog } from "../core/schemas/progress-event.ts";
 import { Project } from "../core/schemas/project.ts";
 import { AgentProfile } from "../core/schemas/agent-profile.ts";
 import { ModelProfile, ModelTier } from "../core/schemas/model-profile.ts";
+import {
+  detectDuplicateTaskIds,
+  detectOrphanProgressEvents,
+} from "../core/plan/checks.ts";
+import type { PhaseEntry } from "../core/plan/state.ts";
+import type { PlanIssue } from "../core/plan/shared.ts";
 
 // Optional per-project doctor configuration (.code-pact/doctor.yaml)
 const DoctorConfig = z.object({
@@ -210,18 +216,26 @@ async function checkProgressLog(
     return;
   }
 
-  // Collect all known task IDs
-  const knownTaskIds = new Set(phases.flatMap((p) => (p.tasks ?? []).map((t) => t.id)));
-
-  for (const event of parsed.data.events) {
-    if (!knownTaskIds.has(event.task_id)) {
-      issues.push({
-        code: "ORPHAN_PROGRESS_EVENT",
-        severity: "warning",
-        message: `progress.yaml references task "${event.task_id}" which does not exist in any phase`,
-      });
-    }
+  // Build a task index for the shared orphan-event detector.
+  const taskIndex = new Map<string, true>();
+  for (const phase of phases) {
+    for (const task of phase.tasks ?? []) taskIndex.set(task.id, true);
   }
+  for (const planIssue of detectOrphanProgressEvents(parsed.data.events, taskIndex)) {
+    issues.push(planIssueToDoctor(planIssue));
+  }
+}
+
+function planIssueToDoctor(issue: PlanIssue): DoctorIssue {
+  return { code: issue.code, severity: issue.severity, message: issue.message };
+}
+
+function phasesToEntries(phases: Phase[]): PhaseEntry[] {
+  return phases.map((phase) => ({
+    ref: { id: phase.id, path: "", weight: phase.weight },
+    absPath: "",
+    phase,
+  }));
 }
 
 async function checkAgentProfiles(
@@ -325,22 +339,12 @@ async function checkBakFiles(cwd: string, issues: DoctorIssue[]): Promise<void> 
   }
 }
 
-// Check 9: duplicate task ids across phases
+// Check 9: duplicate task ids across phases — delegates to the shared
+// detector in src/core/plan/checks.ts so plan lint (T2) and doctor stay
+// in sync.
 function checkDuplicateTaskIds(phases: Phase[], issues: DoctorIssue[]): void {
-  const seen = new Map<string, string>(); // taskId → first phaseId
-  for (const phase of phases) {
-    for (const task of phase.tasks ?? []) {
-      const first = seen.get(task.id);
-      if (first !== undefined) {
-        issues.push({
-          code: "DUPLICATE_TASK_ID",
-          severity: "error",
-          message: `Task "${task.id}" appears in both phase "${first}" and "${phase.id}"`,
-        });
-      } else {
-        seen.set(task.id, phase.id);
-      }
-    }
+  for (const planIssue of detectDuplicateTaskIds(phasesToEntries(phases))) {
+    issues.push(planIssueToDoctor(planIssue));
   }
 }
 
