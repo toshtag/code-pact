@@ -1,5 +1,6 @@
 import type { Phase } from "../../schemas/phase.ts";
 import type { Task } from "../../schemas/task.ts";
+import type { ProgressEvent } from "../../schemas/progress-event.ts";
 
 export type PackContext = {
   phase: Phase;
@@ -7,6 +8,10 @@ export type PackContext = {
   agentName: string;
   rules: RuleDoc[];
   decisions: DecisionDoc[];
+  /** design/constitution.md content — included when context_size:large or ambiguity:high */
+  constitution?: string | null;
+  /** Recent done events in this phase — included when ambiguity:high */
+  doneEvents?: ProgressEvent[];
 };
 
 export type RuleDoc = {
@@ -34,7 +39,12 @@ export function renderMarkdown(ctx: PackContext): string {
     ``,
   );
 
-  // 2. Applicable rules
+  // 2. Constitution (context_size: large | ambiguity: high)
+  if (ctx.constitution) {
+    sections.push(`## Project Constitution`, ``, ctx.constitution.trim(), ``);
+  }
+
+  // 3. Applicable rules
   if (ctx.rules.length > 0) {
     sections.push(`## Rules`);
     for (const rule of ctx.rules) {
@@ -43,7 +53,7 @@ export function renderMarkdown(ctx: PackContext): string {
     sections.push(``);
   }
 
-  // 3. Phase contract
+  // 4. Phase contract
   sections.push(
     `## Phase Contract`,
     ``,
@@ -62,7 +72,7 @@ export function renderMarkdown(ctx: PackContext): string {
     );
   }
 
-  // 4. Task definition
+  // 5. Task definition
   sections.push(
     `## Task Definition`,
     ``,
@@ -84,7 +94,7 @@ export function renderMarkdown(ctx: PackContext): string {
     sections.push(`**Description:** ${ctx.task.description}`, ``);
   }
 
-  // 5. Related decisions
+  // 6. Related decisions
   if (ctx.decisions.length > 0) {
     sections.push(`## Related Decisions`);
     for (const dec of ctx.decisions) {
@@ -93,7 +103,20 @@ export function renderMarkdown(ctx: PackContext): string {
     sections.push(``);
   }
 
-  // 6. Verification commands
+  // 7. Completed tasks in this phase (ambiguity: high)
+  if (ctx.doneEvents && ctx.doneEvents.length > 0) {
+    sections.push(`## Completed Tasks in This Phase`, ``);
+    for (const ev of ctx.doneEvents) {
+      const agent = ev.agent ? ` by ${ev.agent}` : "";
+      const evidence = ev.evidence && ev.evidence.length > 0
+        ? `\n  Evidence: ${ev.evidence.join(", ")}`
+        : "";
+      sections.push(`- **${ev.task_id}** — done at ${ev.at}${agent}${evidence}`);
+    }
+    sections.push(``);
+  }
+
+  // 8. Verification commands
   sections.push(
     `## Verification Commands`,
     ``,
@@ -101,7 +124,7 @@ export function renderMarkdown(ctx: PackContext): string {
     ``,
   );
 
-  // 7. Progress event schema hint
+  // 9. Progress event schema hint
   sections.push(
     `## Progress Event`,
     ``,

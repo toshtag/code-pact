@@ -14,6 +14,7 @@ export type PackResult = {
   charCount: number;
   includedRules: string[];
   includedDecisions: string[];
+  includedConstitution: boolean;
 };
 
 export async function runPack(opts: PackOptions): Promise<PackResult> {
@@ -33,5 +34,6 @@ export async function runPack(opts: PackOptions): Promise<PackResult> {
     charCount: pack.charCount,
     includedRules: pack.includedRules,
     includedDecisions: pack.includedDecisions,
+    includedConstitution: pack.includedConstitution,
   };
 }

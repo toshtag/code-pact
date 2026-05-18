@@ -25,7 +25,7 @@ tasks:
     ambiguity: medium
     risk: medium
     context_size: medium
-    write_surface: high
+    write_surface: medium
     verification_strength: strong
     expected_duration: medium
     status: planned

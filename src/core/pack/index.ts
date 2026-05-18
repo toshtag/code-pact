@@ -4,6 +4,7 @@ import { parse as parseYaml } from "yaml";
 import { Roadmap } from "../schemas/roadmap.ts";
 import { Phase } from "../schemas/phase.ts";
 import { AgentProfile } from "../schemas/agent-profile.ts";
+import { ProgressLog, type ProgressEvent } from "../schemas/progress-event.ts";
 import { parseFrontMatter } from "./front-matter.ts";
 import { renderMarkdown, type RuleDoc, type DecisionDoc } from "./formatters/markdown.ts";
 
@@ -22,6 +23,7 @@ export type ContextPackResult = {
   charCount: number;
   includedRules: string[];
   includedDecisions: string[];
+  includedConstitution: boolean;
 };
 
 export type WriteContextPackOptions = {
@@ -56,7 +58,20 @@ async function loadAgentProfile(cwd: string, agentName: string): Promise<AgentPr
   }
 }
 
-async function loadRules(cwd: string, taskType: string): Promise<RuleDoc[]> {
+async function loadConstitution(cwd: string): Promise<string | null> {
+  try {
+    return await readFile(join(cwd, "design", "constitution.md"), "utf8");
+  } catch {
+    return null;
+  }
+}
+
+// includeAll=true bypasses the applies_to filter (used for write_surface: large)
+async function loadRules(
+  cwd: string,
+  taskType: string,
+  includeAll = false,
+): Promise<RuleDoc[]> {
   const rulesDir = join(cwd, "design", "rules");
   let entries: string[];
   try {
@@ -68,7 +83,7 @@ async function loadRules(cwd: string, taskType: string): Promise<RuleDoc[]> {
   const docs: RuleDoc[] = [];
   for (const entry of entries.sort()) {
     if (!entry.endsWith(".md")) continue;
-    // constitution.md is human-facing only — never packed
+    // constitution.md is included via the dedicated constitution slot, not rules
     if (entry === "constitution.md") continue;
 
     const raw = await readFile(join(rulesDir, entry), "utf8");
@@ -78,14 +93,19 @@ async function loadRules(cwd: string, taskType: string): Promise<RuleDoc[]> {
       ? (frontMatter.applies_to as string[])
       : [];
 
-    if (appliesTo.length === 0 || appliesTo.includes(taskType)) {
+    if (includeAll || appliesTo.length === 0 || appliesTo.includes(taskType)) {
       docs.push({ filename: entry, tags, applies_to: appliesTo, body });
     }
   }
   return docs;
 }
 
-async function loadDecisions(cwd: string, taskId: string): Promise<DecisionDoc[]> {
+// allDecisions=true returns every decision file (used for context_size: large)
+async function loadDecisions(
+  cwd: string,
+  taskId: string,
+  allDecisions = false,
+): Promise<DecisionDoc[]> {
   const decisionsDir = join(cwd, "design", "decisions");
   let entries: string[];
   try {
@@ -97,7 +117,7 @@ async function loadDecisions(cwd: string, taskId: string): Promise<DecisionDoc[]
   const docs: DecisionDoc[] = [];
   for (const entry of entries.sort()) {
     if (!entry.endsWith(".md")) continue;
-    if (!entry.includes(taskId)) continue;
+    if (!allDecisions && !entry.includes(taskId)) continue;
 
     const raw = await readFile(join(decisionsDir, entry), "utf8");
     const { body } = parseFrontMatter(raw);
@@ -106,9 +126,34 @@ async function loadDecisions(cwd: string, taskId: string): Promise<DecisionDoc[]
   return docs;
 }
 
+// Returns the most recent done events for tasks in the given phase (up to 5).
+// Used when ambiguity: high to give the agent context on completed similar work.
+async function loadDoneEventsInPhase(
+  cwd: string,
+  phase: Phase,
+): Promise<ProgressEvent[]> {
+  const taskIds = new Set((phase.tasks ?? []).map((t) => t.id));
+  if (taskIds.size === 0) return [];
+  try {
+    const raw = await readFile(join(cwd, ".code-pact", "state", "progress.yaml"), "utf8");
+    const log = ProgressLog.parse(parseYaml(raw) as unknown);
+    return log.events
+      .filter((e) => e.status === "done" && taskIds.has(e.task_id))
+      .slice(-5);
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Pure-ish context pack builder. Reads design files and renders the
  * Markdown content along with metadata. Does NOT write to disk.
+ *
+ * Content selection is driven by task attributes:
+ * - context_size: large  → includes design/constitution.md + all decisions
+ * - context_size: small  → minimal (no rules, decisions, or constitution)
+ * - ambiguity: high      → includes constitution.md + recent done events in phase
+ * - write_surface: large → includes all rule files (bypasses applies_to filter)
  *
  * Throws an error with code "PHASE_NOT_FOUND" or "TASK_NOT_FOUND" when
  * the requested ids do not exist.
@@ -135,10 +180,31 @@ export async function buildContextPack(
     throw err;
   }
 
-  const rules = await loadRules(cwd, task.type);
-  const decisions = await loadDecisions(cwd, taskId);
+  const isSmall = task.context_size === "small";
+  const isLarge = task.context_size === "large";
+  const isHighAmbiguity = task.ambiguity === "high";
+  const isLargeWriteSurface = task.write_surface === "high";
 
-  const content = renderMarkdown({ phase, task, agentName, rules, decisions });
+  const includeConstitution = isLarge || isHighAmbiguity;
+  const allDecisions = isLarge;
+  const allRules = isLargeWriteSurface;
+
+  const [rules, decisions, constitution, doneEvents] = await Promise.all([
+    isSmall ? Promise.resolve([]) : loadRules(cwd, task.type, allRules),
+    isSmall ? Promise.resolve([]) : loadDecisions(cwd, taskId, allDecisions),
+    includeConstitution ? loadConstitution(cwd) : Promise.resolve(null),
+    isHighAmbiguity ? loadDoneEventsInPhase(cwd, phase) : Promise.resolve([]),
+  ]);
+
+  const content = renderMarkdown({
+    phase,
+    task,
+    agentName,
+    rules,
+    decisions,
+    constitution,
+    doneEvents,
+  });
 
   return {
     content,
@@ -148,6 +214,7 @@ export async function buildContextPack(
     charCount: content.length,
     includedRules: rules.map((r) => r.filename),
     includedDecisions: decisions.map((d) => d.filename),
+    includedConstitution: constitution !== null,
   };
 }
 
