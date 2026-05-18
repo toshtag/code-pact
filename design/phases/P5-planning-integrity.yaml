@@ -34,6 +34,7 @@ verification:
     - pnpm build
     - node dist/cli.js plan lint --json
     - node dist/cli.js plan normalize --check --json
+    - node dist/cli.js plan analyze --json
 tasks:
   - id: P5-T1
     type: architecture
@@ -92,15 +93,19 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: in_progress
+    status: done
     description: |
       plan analyze. Cross-artifact drift detection between design status and
-      progress-derived state. Historical done (no progress events) is hidden
-      by default and does not affect exit code, preventing self-dogfood
-      breakage on pre-v0.6 phases. STATUS_DRIFT kinds evaluated top-down so no
-      task generates duplicate issues. PHASE_DONE_WITH_OPEN_TASKS and
-      ORPHAN_PROGRESS_EVENT also covered. Update docs/cli-contract.md plan
-      analyze section and docs/dogfood.md checkpoint flow.
+      progress-derived state. Five STATUS_DRIFT kinds (done-blocked-conflict,
+      done-with-incomplete-events, done-historical, done-but-design-not-done,
+      in-progress-no-events) evaluated top-down so no task produces duplicate
+      issues. done-historical uses hidden_by_default + affects_exit=false so
+      pre-v0.6 done tasks never break self-dogfood, even under --strict.
+      PHASE_DONE_WITH_OPEN_TASKS and ORPHAN_PROGRESS_EVENT also covered.
+      docs/cli-contract.md plan analyze section and docs/dogfood.md
+      checkpoint flow added. plan analyze --json appended to phase
+      verification; full verification (typecheck + test + build + lint +
+      normalize --check + analyze) passes on code-pact's own design/.
   - id: P5-T5
     type: docs
     ambiguity: low
