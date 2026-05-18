@@ -72,7 +72,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: in_progress
     description: |
       plan normalize. Conservative line-based normalization. YAML: trailing
       whitespace + CRLF->LF + final newline. Markdown: CRLF->LF + final
