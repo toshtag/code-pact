@@ -174,6 +174,36 @@ export const messages = {
         `タスク "${taskId}" の done イベントを記録しました (agent: ${agent})。`,
       dryRun: (taskId: string): string =>
         `Dry run: タスク "${taskId}" の done イベントを追記する想定です。progress.yaml は変更されていません。`,
+      invalidTransition: (taskId: string, current: string): string =>
+        `タスク "${taskId}" は ${current} 状態です。先に \`code-pact task resume ${taskId}\` を実行してください。`,
+    },
+    start: {
+      success: (taskId: string, agent: string): string =>
+        `タスク "${taskId}" の started イベントを記録しました (agent: ${agent})。`,
+      alreadyStarted: (taskId: string): string =>
+        `タスク "${taskId}" は既に started 状態です。progress.yaml は変更されていません。`,
+      invalidTransition: (taskId: string, current: string): string =>
+        `状態 "${current}" からタスク "${taskId}" を start できません。`,
+    },
+    block: {
+      success: (taskId: string, reason: string): string =>
+        `タスク "${taskId}" の blocked イベントを記録しました (reason: ${reason})。`,
+      reasonRequired:
+        "task block には --reason \"<text>\" でブロック理由を指定する必要があります。",
+      invalidTransition: (taskId: string, current: string): string =>
+        `状態 "${current}" からタスク "${taskId}" を block できません。block は started / resumed からのみ可能です。`,
+    },
+    resume: {
+      success: (taskId: string): string =>
+        `タスク "${taskId}" の resumed イベントを記録しました。`,
+      invalidTransition: (taskId: string, current: string): string =>
+        `状態 "${current}" からタスク "${taskId}" を resume できません。resume は blocked からのみ可能です。`,
+    },
+    status: {
+      headline: (taskId: string, current: string): string =>
+        `タスク "${taskId}" — 現在の状態: ${current}`,
+      noEvents: (taskId: string): string =>
+        `タスク "${taskId}" の進捗イベントはまだ記録されていません。`,
     },
   },
   cliContract: {

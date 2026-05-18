@@ -1,13 +1,15 @@
-import { readFile, writeFile, rename, mkdir } from "node:fs/promises";
-import { join, dirname } from "node:path";
-import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { parse as parseYaml } from "yaml";
 import { Project } from "../core/schemas/project.ts";
 import { Roadmap } from "../core/schemas/roadmap.ts";
 import { Phase } from "../core/schemas/phase.ts";
+import type { ProgressEvent } from "../core/schemas/progress-event.ts";
 import {
-  ProgressLog,
-  type ProgressEvent,
-} from "../core/schemas/progress-event.ts";
+  appendEvent,
+  loadProgressLog,
+} from "../core/progress/io.ts";
+import { deriveTaskState } from "../core/progress/task-state.ts";
 import { runVerify, type CheckResult } from "./verify.ts";
 
 export type TaskCompleteOptions = {
@@ -84,30 +86,6 @@ async function loadProject(cwd: string): Promise<Project> {
   return Project.parse(parseYaml(raw) as unknown);
 }
 
-async function loadProgressLog(cwd: string): Promise<{
-  raw: string;
-  log: ProgressLog;
-  path: string;
-}> {
-  const path = join(cwd, ".code-pact", "state", "progress.yaml");
-  const raw = await readFile(path, "utf8");
-  const log = ProgressLog.parse(parseYaml(raw) as unknown);
-  return { raw, log, path };
-}
-
-/**
- * Best-effort atomic replacement: write a temp file in the same directory,
- * then rename to the destination. Prevents partial-write corruption of
- * progress.yaml. Does NOT protect against concurrent task-complete calls;
- * that is out of scope for v0.2 (see docs/cli-contract.md).
- */
-async function atomicWriteYaml(path: string, value: unknown): Promise<void> {
-  const tmp = `${path}.tmp-${process.pid}-${Date.now()}`;
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(tmp, stringifyYaml(value), "utf8");
-  await rename(tmp, path);
-}
-
 export async function runTaskComplete(
   opts: TaskCompleteOptions,
 ): Promise<TaskCompleteResult> {
@@ -135,12 +113,11 @@ export async function runTaskComplete(
   // ---- Step 1: resolve phase from task id ----
   const phaseId = await resolveTaskPhase(cwd, taskId);
 
-  // ---- Step 2: idempotency check ----
+  // ---- Step 2: derive current state ----
   const { log } = await loadProgressLog(cwd);
-  const existingDone = log.events.find(
-    (e) => e.task_id === taskId && e.status === "done",
-  );
-  if (existingDone) {
+  const state = deriveTaskState(log.events, taskId);
+
+  if (state.current === "done") {
     return {
       kind: "already_done",
       task_id: taskId,
@@ -148,6 +125,27 @@ export async function runTaskComplete(
       agent: agentName,
     };
   }
+
+  // Reject completion from blocked. Task must be explicitly resumed first
+  // so the resume event records the unblock decision in the log.
+  if (state.current === "blocked") {
+    const err = new Error(
+      `Task "${taskId}" is blocked. Run \`task resume ${taskId}\` before completing.`,
+    );
+    (err as NodeJS.ErrnoException).code = "INVALID_TASK_TRANSITION";
+    (err as NodeJS.ErrnoException & {
+      current?: string;
+      next?: string;
+    }).current = state.current;
+    (err as NodeJS.ErrnoException & {
+      current?: string;
+      next?: string;
+    }).next = "done";
+    throw err;
+  }
+  // planned / started / resumed / failed: proceed to verify.
+  // planned→done is permitted at the command layer for v0.5 compatibility;
+  // assertTransition rejects it, so we intentionally do not call that here.
 
   // ---- Step 3: run verify in preflight mode ----
   // skipConsistencyChecks: true skips the progress_event + task_status
@@ -194,12 +192,8 @@ export async function runTaskComplete(
     };
   }
 
-  // ---- Step 6: append + atomic write ----
-  const { path } = await loadProgressLog(cwd);
-  const nextLog: ProgressLog = {
-    events: [...log.events, event],
-  };
-  await atomicWriteYaml(path, nextLog);
+  // ---- Step 6: append + atomic write (shared helper) ----
+  await appendEvent(cwd, event);
 
   return {
     kind: "done",

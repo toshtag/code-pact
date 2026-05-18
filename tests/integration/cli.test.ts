@@ -778,6 +778,234 @@ describe("CLI: task complete (v0.2)", () => {
 });
 
 // ---------------------------------------------------------------------------
+// v0.6: task state machine (start / status / block / resume + complete)
+// ---------------------------------------------------------------------------
+
+describe("CLI: task state machine (v0.6)", () => {
+  async function setupWithTask(): Promise<void> {
+    const initRes = run([
+      "init",
+      "--non-interactive",
+      "--locale",
+      "en-US",
+      "--agent",
+      "claude-code",
+      "--json",
+    ]);
+    expect(initRes.code).toBe(0);
+    const addRes = run([
+      "phase",
+      "add",
+      "--id",
+      "P1",
+      "--name",
+      "Foundation",
+      "--objective",
+      "Foundation",
+      "--weight",
+      "10",
+      "--json",
+    ]);
+    expect(addRes.code).toBe(0);
+
+    const phasePath = join(tmpDir, "design", "phases", "P1-foundation.yaml");
+    const doc = parseYaml(await readFile(phasePath, "utf8")) as Record<
+      string,
+      unknown
+    >;
+    doc.tasks = [
+      {
+        id: "P1-T1",
+        type: "feature",
+        ambiguity: "low",
+        risk: "low",
+        context_size: "small",
+        write_surface: "low",
+        verification_strength: "weak",
+        expected_duration: "short",
+        status: "planned",
+        description: "integration test task",
+      },
+    ];
+    doc.verification = { commands: ["echo ok"] };
+    await writeFile(phasePath, stringifyYaml(doc), "utf8");
+  }
+
+  async function readProgress(): Promise<{ raw: string; events: unknown[] }> {
+    const raw = await readFile(
+      join(tmpDir, ".code-pact", "state", "progress.yaml"),
+      "utf8",
+    );
+    const log = parseYaml(raw) as { events: unknown[] };
+    return { raw, events: log.events };
+  }
+
+  it("full sequence: start → status → block → resume → complete", async () => {
+    await setupWithTask();
+
+    const startRes = run(["task", "start", "P1-T1", "--json"]);
+    expect(startRes.code).toBe(0);
+    const startParsed = JSON.parse(startRes.stdout) as {
+      ok: boolean;
+      data: { event: { status: string } };
+    };
+    expect(startParsed.ok).toBe(true);
+    expect(startParsed.data.event.status).toBe("started");
+
+    const statusRes = run(["task", "status", "P1-T1", "--json"]);
+    expect(statusRes.code).toBe(0);
+    const statusParsed = JSON.parse(statusRes.stdout) as {
+      ok: boolean;
+      data: { current: string };
+    };
+    expect(statusParsed.data.current).toBe("started");
+
+    const blockRes = run([
+      "task",
+      "block",
+      "P1-T1",
+      "--reason",
+      "waiting on review",
+      "--json",
+    ]);
+    expect(blockRes.code).toBe(0);
+    const blockParsed = JSON.parse(blockRes.stdout) as {
+      ok: boolean;
+      data: { event: { status: string; reason: string } };
+    };
+    expect(blockParsed.data.event.status).toBe("blocked");
+    expect(blockParsed.data.event.reason).toBe("waiting on review");
+
+    const resumeRes = run(["task", "resume", "P1-T1", "--json"]);
+    expect(resumeRes.code).toBe(0);
+    const resumeParsed = JSON.parse(resumeRes.stdout) as {
+      ok: boolean;
+      data: { event: { status: string } };
+    };
+    expect(resumeParsed.data.event.status).toBe("resumed");
+
+    const completeRes = run([
+      "task",
+      "complete",
+      "P1-T1",
+      "--agent",
+      "claude-code",
+      "--json",
+    ]);
+    expect(completeRes.code).toBe(0);
+
+    const { events } = await readProgress();
+    expect(events).toHaveLength(4);
+    expect((events as { status: string }[]).map((e) => e.status)).toEqual([
+      "started",
+      "blocked",
+      "resumed",
+      "done",
+    ]);
+    // Final state check via task status (pure read, no extra event)
+    const finalStatus = run(["task", "status", "P1-T1", "--json"]);
+    const finalParsed = JSON.parse(finalStatus.stdout) as {
+      data: { current: string };
+    };
+    expect(finalParsed.data.current).toBe("done");
+  });
+
+  it("task block without --reason: exit 2 / CONFIG_ERROR", async () => {
+    await setupWithTask();
+    const res = run(["task", "block", "P1-T1", "--json"]);
+    expect(res.code).toBe(2);
+    const parsed = JSON.parse(res.stdout) as {
+      ok: boolean;
+      error: { code: string };
+    };
+    expect(parsed.ok).toBe(false);
+    expect(parsed.error.code).toBe("CONFIG_ERROR");
+  });
+
+  it("task start twice: returns already_started with byte-identical progress.yaml", async () => {
+    await setupWithTask();
+
+    const first = run(["task", "start", "P1-T1", "--json"]);
+    expect(first.code).toBe(0);
+    const before = await readFile(
+      join(tmpDir, ".code-pact", "state", "progress.yaml"),
+      "utf8",
+    );
+
+    const second = run(["task", "start", "P1-T1", "--json"]);
+    expect(second.code).toBe(0);
+    const secondParsed = JSON.parse(second.stdout) as {
+      ok: boolean;
+      data: { already_started: boolean };
+    };
+    expect(secondParsed.data.already_started).toBe(true);
+
+    const after = await readFile(
+      join(tmpDir, ".code-pact", "state", "progress.yaml"),
+      "utf8",
+    );
+    expect(after).toBe(before);
+  });
+
+  it("blocked → complete: INVALID_TASK_TRANSITION with byte-identical progress.yaml", async () => {
+    await setupWithTask();
+    run(["task", "start", "P1-T1", "--json"]);
+    run([
+      "task",
+      "block",
+      "P1-T1",
+      "--reason",
+      "still blocked",
+      "--json",
+    ]);
+    const before = await readFile(
+      join(tmpDir, ".code-pact", "state", "progress.yaml"),
+      "utf8",
+    );
+
+    const res = run([
+      "task",
+      "complete",
+      "P1-T1",
+      "--agent",
+      "claude-code",
+      "--json",
+    ]);
+    expect(res.code).toBe(2);
+    const parsed = JSON.parse(res.stdout) as {
+      ok: boolean;
+      error: { code: string };
+    };
+    expect(parsed.error.code).toBe("INVALID_TASK_TRANSITION");
+
+    const after = await readFile(
+      join(tmpDir, ".code-pact", "state", "progress.yaml"),
+      "utf8",
+    );
+    expect(after).toBe(before);
+  });
+
+  it("task status is agent-neutral (rejects --agent as unknown option)", async () => {
+    await setupWithTask();
+    const res = run([
+      "task",
+      "status",
+      "P1-T1",
+      "--agent",
+      "claude-code",
+      "--json",
+    ]);
+    // strictParse rejects unknown options with CONFIG_ERROR exit 2.
+    expect(res.code).toBe(2);
+    const parsed = JSON.parse(res.stdout) as {
+      ok: boolean;
+      error: { code: string };
+    };
+    expect(parsed.error.code).toBe("CONFIG_ERROR");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // v0.2: phase import
 // ---------------------------------------------------------------------------
 

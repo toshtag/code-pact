@@ -31,19 +31,40 @@ code-pact validate       # exits 1 if any errors exist
 ## Per-task flow
 
 ```sh
+# 0. (Optional) Ask code-pact which model tier and effort fit the task,
+#    based on the task's attributes (type / ambiguity / risk / etc.).
+code-pact recommend --phase <phase-id> --task <task-id>
+
 # 1. Pick a task from the current phase and fetch its context pack.
 #    Output goes to stdout — no files written.
 code-pact task context <task-id> --agent claude-code
 
-# 2. Implement the task.
+# 2. Mark the task started so handoff and downstream tools can see who's on it.
+code-pact task start <task-id> --agent claude-code
 
-# 3. Mark the task complete. This runs verify and, on pass,
+# 3. Implement the task. If you have to wait on a decision or review,
+#    capture the reason explicitly so the log records why you stopped:
+code-pact task block <task-id> --reason "Waiting for schema decision"
+
+# When the blocker clears:
+code-pact task resume <task-id> --agent claude-code
+
+# 4. Inspect state any time — task status is a pure read and does not
+#    require an --agent flag, so CI and monitoring can use it freely.
+code-pact task status <task-id> --json
+
+# 5. Mark the task complete. This runs verify and, on pass,
 #    records a done event in .code-pact/state/progress.yaml.
 code-pact task complete <task-id> --agent claude-code
 ```
 
-`task context` resolves the task id across every phase in `design/roadmap.yaml`,
-so you do not need to pass a phase id.
+`task context` / `task complete` / `task start` / `task block` / `task resume`
+all resolve the task id across every phase in `design/roadmap.yaml`, so you
+do not need to pass a phase id.
+
+A task that is currently `blocked` cannot be completed directly — `task complete`
+returns `INVALID_TASK_TRANSITION`. Resume it first so the `resumed` event
+records the decision that unblocked the task.
 
 ## Inspecting state
 
@@ -164,7 +185,12 @@ disabled_checks:
 | Write project constitution | `code-pact plan constitution` |
 | Generate AI planning prompt | `code-pact plan prompt [--clipboard]` |
 | Bulk-import AI-generated roadmap | `code-pact phase import <yaml> [--strict]` |
+| Recommend model tier / effort for a task | `code-pact recommend --phase <phase-id> --task <task-id>` |
 | Fetch context for a task (as agent) | `code-pact task context <task-id> --agent <agent>` |
+| Mark a task started (as agent) | `code-pact task start <task-id> --agent <agent>` |
+| Block a task with a recorded reason | `code-pact task block <task-id> --reason "<text>"` |
+| Resume a blocked task | `code-pact task resume <task-id> --agent <agent>` |
+| Inspect a task's current state + history | `code-pact task status <task-id> --json` |
 | Mark a task done (as agent) | `code-pact task complete <task-id> --agent <agent>` |
 | Add a phase interactively | `code-pact phase add` |
 | Add a task interactively | `code-pact task add <phase-id>` |
