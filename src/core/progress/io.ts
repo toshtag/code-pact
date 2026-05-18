@@ -1,6 +1,7 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { atomicWriteText } from "../../io/atomic-text.ts";
 import {
   ProgressLog,
   type ProgressEvent,
@@ -31,19 +32,15 @@ export async function loadProgressLog(cwd: string): Promise<LoadedProgress> {
 }
 
 /**
- * Best-effort atomic replacement: write a temp file in the same directory,
- * then rename to the destination. Prevents partial-write corruption of
- * progress.yaml. Does NOT protect against concurrent writers — that is a
- * known v0.2 limitation noted in docs/cli-contract.md.
+ * Atomic YAML write — serializes `value` then delegates to `atomicWriteText`.
+ * Kept as a thin wrapper so progress-log writers do not need to know about
+ * the serialization step separately.
  */
 export async function atomicWriteYaml(
   path: string,
   value: unknown,
 ): Promise<void> {
-  const tmp = `${path}.tmp-${process.pid}-${Date.now()}`;
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(tmp, stringifyYaml(value), "utf8");
-  await rename(tmp, path);
+  await atomicWriteText(path, stringifyYaml(value));
 }
 
 /**
