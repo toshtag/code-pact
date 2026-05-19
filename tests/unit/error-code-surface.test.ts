@@ -149,7 +149,7 @@ async function collectCodes(): Promise<Set<string>> {
       // when consumed via matchAll, so no need to reset lastIndex.
       for (const m of text.matchAll(re)) {
         const code = m[1];
-        if (NON_ERROR_CODES.has(code)) continue;
+        if (!code || NON_ERROR_CODES.has(code)) continue;
         codes.add(code);
       }
     }
