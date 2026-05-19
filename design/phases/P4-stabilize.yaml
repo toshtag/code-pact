@@ -3,7 +3,7 @@ name: Stabilize & Dogfood
 weight: 25
 confidence: medium
 risk: low
-status: in_progress
+status: done
 objective: >
   Make code-pact stable enough to dogfood its own development. Update all documentation
   to reflect the v0.5/v0.6 command surface, ship the v0.6 task execution-state commands
