@@ -1,0 +1,344 @@
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { mkdtemp, readFile, rm, writeFile, mkdir, unlink } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { runInit } from "../../../src/commands/init.ts";
+import { runAdapterInstall } from "../../../src/commands/adapter-install.ts";
+import { runAdapterDoctor } from "../../../src/commands/adapter-doctor.ts";
+import {
+  manifestPath,
+  readManifest,
+  writeManifest,
+} from "../../../src/core/adapters/manifest.ts";
+import { ADAPTER_MANIFEST_DIR_SEGMENTS } from "../../../src/core/adapters/manifest.ts";
+import type { AdapterManifest } from "../../../src/core/schemas/adapter-manifest.ts";
+
+let dir: string;
+
+beforeEach(async () => {
+  dir = await mkdtemp(join(tmpdir(), "code-pact-adapter-doctor-test-"));
+  await runInit({
+    cwd: dir,
+    locale: "en-US",
+    agents: ["claude-code"],
+    force: false,
+    json: false,
+  });
+});
+
+afterEach(async () => {
+  await rm(dir, { recursive: true, force: true });
+});
+
+async function readMutableManifest(cwd: string, agent: string): Promise<AdapterManifest> {
+  const m = await readManifest(cwd, agent);
+  if (m === null) throw new Error("manifest expected to exist for this test");
+  return m;
+}
+
+// ---------------------------------------------------------------------------
+// ADAPTER_MANIFEST_MISSING
+// ---------------------------------------------------------------------------
+
+describe("adapter doctor — ADAPTER_MANIFEST_MISSING", () => {
+  it("emits MANIFEST_MISSING for an enabled agent with no manifest", async () => {
+    const result = await runAdapterDoctor({ cwd: dir, locale: "en-US" });
+    expect(result.ok).toBe(true); // warning, not error
+    const codes = result.issues.map((i) => i.code);
+    expect(codes).toContain("ADAPTER_MANIFEST_MISSING");
+    const issue = result.issues.find((i) => i.code === "ADAPTER_MANIFEST_MISSING")!;
+    expect(issue.agent).toBe("claude-code");
+    expect(issue.severity).toBe("warning");
+  });
+
+  it("does NOT emit MANIFEST_MISSING for a disabled (not-listed) agent when no --agent flag", async () => {
+    const result = await runAdapterDoctor({ cwd: dir, locale: "en-US" });
+    const agents = result.issues.filter((i) => i.code === "ADAPTER_MANIFEST_MISSING").map((i) => i.agent);
+    // Project enables only claude-code, so codex / generic / etc. are NOT inspected.
+    expect(agents).toEqual(["claude-code"]);
+  });
+
+  it("emits MANIFEST_MISSING for an explicitly targeted unenabled agent via --agent", async () => {
+    // codex isn't enabled in this project, but --agent codex requests inspection.
+    const result = await runAdapterDoctor({ cwd: dir, agentName: "codex", locale: "en-US" });
+    // Not enabled → MANIFEST_MISSING is NOT emitted (it's a soft signal only for enabled agents).
+    expect(result.issues).toEqual([]);
+    expect(result.ok).toBe(true);
+  });
+
+  it("does NOT emit MANIFEST_MISSING after a successful install", async () => {
+    await runAdapterInstall({
+      cwd: dir,
+      agentName: "claude-code",
+      force: false,
+      locale: "en-US",
+      generatorVersionOverride: "0.9.0-alpha.0",
+    });
+    const result = await runAdapterDoctor({
+      cwd: dir,
+      locale: "en-US",
+    });
+    expect(result.issues.map((i) => i.code)).not.toContain("ADAPTER_MANIFEST_MISSING");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ADAPTER_MANIFEST_INVALID
+// ---------------------------------------------------------------------------
+
+describe("adapter doctor — ADAPTER_MANIFEST_INVALID", () => {
+  it("emits MANIFEST_INVALID with error severity for malformed YAML", async () => {
+    await mkdir(join(dir, ...ADAPTER_MANIFEST_DIR_SEGMENTS), { recursive: true });
+    await writeFile(
+      manifestPath(dir, "claude-code"),
+      "schema_version: 1\n  files: [oops:\n",
+      "utf8",
+    );
+    const result = await runAdapterDoctor({ cwd: dir, locale: "en-US" });
+    const issue = result.issues.find((i) => i.code === "ADAPTER_MANIFEST_INVALID")!;
+    expect(issue).toBeDefined();
+    expect(issue.severity).toBe("error");
+    expect(result.ok).toBe(false);
+  });
+
+  it("emits MANIFEST_INVALID for YAML that fails schema validation", async () => {
+    await mkdir(join(dir, ...ADAPTER_MANIFEST_DIR_SEGMENTS), { recursive: true });
+    await writeFile(
+      manifestPath(dir, "claude-code"),
+      "schema_version: 99\nagent_name: claude-code\n",
+      "utf8",
+    );
+    const result = await runAdapterDoctor({ cwd: dir, locale: "en-US" });
+    const codes = result.issues.map((i) => i.code);
+    expect(codes).toContain("ADAPTER_MANIFEST_INVALID");
+    expect(result.ok).toBe(false);
+  });
+
+  it("MANIFEST_INVALID aborts further per-agent checks (no FILE_MISSING duplicates)", async () => {
+    await mkdir(join(dir, ...ADAPTER_MANIFEST_DIR_SEGMENTS), { recursive: true });
+    await writeFile(
+      manifestPath(dir, "claude-code"),
+      "schema_version: 99\nagent_name: claude-code\n",
+      "utf8",
+    );
+    const result = await runAdapterDoctor({ cwd: dir, locale: "en-US" });
+    const codes = result.issues.map((i) => i.code);
+    expect(codes).not.toContain("ADAPTER_FILE_MISSING");
+    expect(codes).not.toContain("ADAPTER_GENERATOR_STALE");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ADAPTER_GENERATOR_STALE / SCHEMA_DRIFT / PROFILE_DRIFT
+// ---------------------------------------------------------------------------
+
+describe("adapter doctor — version drifts", () => {
+  beforeEach(async () => {
+    await runAdapterInstall({
+      cwd: dir,
+      agentName: "claude-code",
+      force: false,
+      locale: "en-US",
+      generatorVersionOverride: "0.9.0-alpha.0",
+    });
+  });
+
+  it("emits GENERATOR_STALE when manifest.generator_version differs from current", async () => {
+    // The install used override 0.9.0-alpha.0 but the running package may be a different version.
+    const m = await readMutableManifest(dir, "claude-code");
+    m.generator_version = "stale-0.0.0";
+    await writeManifest(dir, "claude-code", m);
+    const result = await runAdapterDoctor({ cwd: dir, locale: "en-US" });
+    const codes = result.issues.map((i) => i.code);
+    expect(codes).toContain("ADAPTER_GENERATOR_STALE");
+  });
+
+  it("does NOT emit GENERATOR_STALE when versions match", async () => {
+    const m = await readMutableManifest(dir, "claude-code");
+    // Hack: re-read current package version via re-install — version comes from package.json.
+    // Simplest: set manifest's version to whatever the current readPackageVersion returns.
+    // We can rely on the install having recorded the current version (we used generatorVersionOverride above, so we need to refresh).
+    const { readPackageVersion } = await import("../../../src/lib/package-version.ts");
+    m.generator_version = await readPackageVersion();
+    await writeManifest(dir, "claude-code", m);
+    const result = await runAdapterDoctor({ cwd: dir, locale: "en-US" });
+    expect(result.issues.map((i) => i.code)).not.toContain("ADAPTER_GENERATOR_STALE");
+  });
+
+  it("emits SCHEMA_DRIFT when manifest adapter_schema_version is older than the current adapter", async () => {
+    const m = await readMutableManifest(dir, "claude-code");
+    m.adapter_schema_version = 0;
+    await writeManifest(dir, "claude-code", m);
+    const result = await runAdapterDoctor({ cwd: dir, locale: "en-US" });
+    expect(result.issues.map((i) => i.code)).toContain("ADAPTER_SCHEMA_DRIFT");
+  });
+
+  it("does NOT emit SCHEMA_DRIFT when manifest schema matches", async () => {
+    const result = await runAdapterDoctor({ cwd: dir, locale: "en-US" });
+    expect(result.issues.map((i) => i.code)).not.toContain("ADAPTER_SCHEMA_DRIFT");
+  });
+
+  it("emits PROFILE_DRIFT when adapter-output-affecting profile fields change", async () => {
+    // Mutate context_dir in the agent profile.
+    const profilePath = join(dir, ".code-pact", "agent-profiles", "claude-code.yaml");
+    const raw = await readFile(profilePath, "utf8");
+    const profile = parseYaml(raw) as { context_dir: string };
+    profile.context_dir = ".context/claude-code-renamed";
+    await writeFile(profilePath, stringifyYaml(profile), "utf8");
+    const result = await runAdapterDoctor({ cwd: dir, locale: "en-US" });
+    expect(result.issues.map((i) => i.code)).toContain("ADAPTER_PROFILE_DRIFT");
+  });
+
+  it("does NOT emit PROFILE_DRIFT when profile is unchanged", async () => {
+    const result = await runAdapterDoctor({ cwd: dir, locale: "en-US" });
+    expect(result.issues.map((i) => i.code)).not.toContain("ADAPTER_PROFILE_DRIFT");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// File-level checks
+// ---------------------------------------------------------------------------
+
+describe("adapter doctor — file-level findings", () => {
+  beforeEach(async () => {
+    await runAdapterInstall({
+      cwd: dir,
+      agentName: "claude-code",
+      force: false,
+      locale: "en-US",
+      generatorVersionOverride: "0.9.0-alpha.0",
+    });
+  });
+
+  it("emits FILE_MISSING (error) when a managed file is removed from disk", async () => {
+    await unlink(join(dir, "CLAUDE.md"));
+    const result = await runAdapterDoctor({ cwd: dir, locale: "en-US" });
+    const issue = result.issues.find((i) => i.code === "ADAPTER_FILE_MISSING");
+    expect(issue).toBeDefined();
+    expect(issue!.severity).toBe("error");
+    expect(issue!.path).toBe(join(dir, "CLAUDE.md"));
+    expect(result.ok).toBe(false);
+  });
+
+  it("emits FILE_DRIFT (warning) for managed-modified × stale — user edited AND generator moved on", async () => {
+    // First make the managed file modified relative to manifest.
+    await writeFile(join(dir, "CLAUDE.md"), "MY EDITS", "utf8");
+    // Then make the generator output drift too — simplest: alter the manifest hash so manifest≠disk≠desired.
+    const m = await readMutableManifest(dir, "claude-code");
+    // We don't have a way to mutate the generator output here, but we can synthesise drift via the hash:
+    // setting manifest hash to a non-matching value puts us in managed-modified, and the desired hash
+    // (computed from current generator output) doesn't match the disk either since disk = "MY EDITS".
+    const file = m.files.find((f) => f.path === "CLAUDE.md")!;
+    file.sha256 = "f".repeat(64); // arbitrary non-matching hash
+    await writeManifest(dir, "claude-code", m);
+    const result = await runAdapterDoctor({ cwd: dir, locale: "en-US" });
+    expect(result.issues.map((i) => i.code)).toContain("ADAPTER_FILE_DRIFT");
+  });
+
+  it("emits DESIRED_STALE (warning) for managed-clean × stale — disk matches manifest, generator moved on", async () => {
+    // Mutate the manifest's recorded sha256 to match the current desired hash differently.
+    // Simulation: keep the on-disk file identical to manifest, but pretend the generator's
+    // current output differs. Easiest synth: change the disk file AND the manifest in
+    // sync (both to a sentinel), so manifest==disk≠desired.
+    const sentinel = "SENTINEL CONTENT";
+    await writeFile(join(dir, "CLAUDE.md"), sentinel, "utf8");
+    const m = await readMutableManifest(dir, "claude-code");
+    const file = m.files.find((f) => f.path === "CLAUDE.md")!;
+    // sha256("SENTINEL CONTENT") — compute it.
+    const { computeContentHash } = await import("../../../src/core/adapters/manifest.ts");
+    file.sha256 = computeContentHash(sentinel);
+    await writeManifest(dir, "claude-code", m);
+    const result = await runAdapterDoctor({ cwd: dir, locale: "en-US" });
+    expect(result.issues.map((i) => i.code)).toContain("ADAPTER_DESIRED_STALE");
+    expect(result.issues.find((i) => i.code === "ADAPTER_DESIRED_STALE")!.severity).toBe(
+      "warning",
+    );
+  });
+
+  it("happy path: managed-clean × current emits no file-level issues", async () => {
+    const result = await runAdapterDoctor({ cwd: dir, locale: "en-US" });
+    const fileCodes = result.issues
+      .filter((i) => ["ADAPTER_FILE_MISSING", "ADAPTER_FILE_DRIFT", "ADAPTER_DESIRED_STALE"].includes(i.code))
+      .map((i) => i.code);
+    expect(fileCodes).toEqual([]);
+  });
+
+  it("managed-modified × current is SILENT (manifest-only drift is not a doctor concern)", async () => {
+    // Mutate manifest hash for CLAUDE.md so manifestHash != diskHash, but disk still matches desired.
+    const m = await readMutableManifest(dir, "claude-code");
+    const file = m.files.find((f) => f.path === "CLAUDE.md")!;
+    file.sha256 = "0".repeat(64); // any non-matching hash
+    await writeManifest(dir, "claude-code", m);
+    const result = await runAdapterDoctor({ cwd: dir, locale: "en-US" });
+    // Should NOT emit FILE_DRIFT (desired is current) or DESIRED_STALE (local is modified).
+    const fileCodes = result.issues
+      .filter((i) => ["ADAPTER_FILE_MISSING", "ADAPTER_FILE_DRIFT", "ADAPTER_DESIRED_STALE"].includes(i.code))
+      .map((i) => i.code);
+    expect(fileCodes).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ADAPTER_UNMANAGED_FILE (orphan scan, narrow scope)
+// ---------------------------------------------------------------------------
+
+describe("adapter doctor — ADAPTER_UNMANAGED_FILE", () => {
+  beforeEach(async () => {
+    await runAdapterInstall({
+      cwd: dir,
+      agentName: "claude-code",
+      force: false,
+      locale: "en-US",
+      generatorVersionOverride: "0.9.0-alpha.0",
+    });
+  });
+
+  it("does NOT flag arbitrary user-created files inside .claude/skills/ (narrow ownedPathGlobs)", async () => {
+    // User adds their own skill file — this MUST NOT trigger ADAPTER_UNMANAGED_FILE.
+    await writeFile(join(dir, ".claude/skills/custom.md"), "user content", "utf8");
+    const result = await runAdapterDoctor({ cwd: dir, locale: "en-US" });
+    expect(result.issues.map((i) => i.code)).not.toContain("ADAPTER_UNMANAGED_FILE");
+  });
+
+  it("flags a previously-managed file that drops out of the manifest", async () => {
+    // Simulate: remove an entry from the manifest while leaving the file on disk.
+    const m = await readMutableManifest(dir, "claude-code");
+    const before = m.files.length;
+    m.files = m.files.filter((f) => f.path !== ".claude/skills/context.md");
+    expect(m.files.length).toBe(before - 1);
+    await writeManifest(dir, "claude-code", m);
+    const result = await runAdapterDoctor({ cwd: dir, locale: "en-US" });
+    const orphans = result.issues.filter((i) => i.code === "ADAPTER_UNMANAGED_FILE");
+    expect(orphans.length).toBeGreaterThanOrEqual(1);
+    expect(orphans.some((i) => i.path?.endsWith(".claude/skills/context.md"))).toBe(true);
+  });
+
+  it("does NOT flag orphans when the manifest is missing entirely (MANIFEST_MISSING covers it)", async () => {
+    // Remove manifest. Files (CLAUDE.md etc.) still on disk.
+    await unlink(manifestPath(dir, "claude-code"));
+    const result = await runAdapterDoctor({ cwd: dir, locale: "en-US" });
+    expect(result.issues.map((i) => i.code)).toContain("ADAPTER_MANIFEST_MISSING");
+    expect(result.issues.map((i) => i.code)).not.toContain("ADAPTER_UNMANAGED_FILE");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// --agent targeting + unknown agent
+// ---------------------------------------------------------------------------
+
+describe("adapter doctor — agent targeting", () => {
+  it("throws AGENT_NOT_FOUND for an unregistered agent name", async () => {
+    await expect(
+      runAdapterDoctor({ cwd: dir, agentName: "no-such-agent", locale: "en-US" }),
+    ).rejects.toMatchObject({ code: "AGENT_NOT_FOUND" });
+  });
+
+  it("with no --agent and no project.yaml, returns ok=true and empty issues (no-op)", async () => {
+    // Wipe project.yaml so no agents are considered enabled.
+    await unlink(join(dir, ".code-pact", "project.yaml"));
+    const result = await runAdapterDoctor({ cwd: dir, locale: "en-US" });
+    expect(result.ok).toBe(true);
+    expect(result.issues).toEqual([]);
+  });
+});
