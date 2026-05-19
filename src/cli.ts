@@ -21,7 +21,12 @@ import { runPhaseImport } from "./commands/phase-import.ts";
 import { runProgress, formatProgress } from "./commands/progress.ts";
 import { runPack } from "./commands/pack.ts";
 import { runVerify, formatVerify } from "./commands/verify.ts";
-import { runAdapterInstall, runAdapterList, runAdapterDoctor } from "./commands/adapter.ts";
+import {
+  runAdapterInstall,
+  runAdapterList,
+  runAdapterDoctor,
+  runAdapterUpgrade,
+} from "./commands/adapter.ts";
 import { runPlanBrief } from "./commands/plan-brief.ts";
 import { runPlanPrompt } from "./commands/plan-prompt.ts";
 import { runPlanConstitution } from "./commands/plan-constitution.ts";
@@ -626,22 +631,11 @@ async function cmdAdapter(argv: string[], locale: Locale, globalJson: boolean): 
   if (sub === "list") return cmdAdapterList(argv.slice(1), globalJson);
   if (sub === "install") return cmdAdapterInstall(argv.slice(1), locale, globalJson);
   if (sub === "doctor") return cmdAdapterDoctor(argv.slice(1), locale, globalJson);
+  if (sub === "upgrade") return cmdAdapterUpgrade(argv.slice(1), locale, globalJson);
 
   // Effective --json honors both the global flag (before the command) and
   // a --json embedded in the subcommand args (after the command).
   const effectiveJson = globalJson || argv.includes("--json");
-
-  if (sub === "upgrade") {
-    const msg = `adapter upgrade is not yet implemented; arriving in v0.9 P7-T5.`;
-    if (effectiveJson) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: "NOT_IMPLEMENTED", message: msg } })}\n`,
-      );
-    } else {
-      process.stderr.write(`${msg}\n`);
-    }
-    return 2;
-  }
 
   // Reject other unknown sub-words (anything that doesn't start with `-`).
   if (sub !== undefined && !sub.startsWith("-")) {
@@ -789,6 +783,141 @@ async function cmdAdapterDoctor(
         process.stderr.write(`${msg}\n`);
       }
       return 2;
+    }
+    throw err;
+  }
+}
+
+async function cmdAdapterUpgrade(
+  argv: string[],
+  locale: Locale,
+  globalJson: boolean,
+): Promise<number> {
+  const m = messages[locale];
+  const { values, positionals } = parseArgs({
+    args: argv,
+    options: {
+      check: { type: "boolean" },
+      write: { type: "boolean" },
+      force: { type: "boolean" },
+      "accept-modified": { type: "boolean" },
+      "regen-skills": { type: "boolean" },
+      model: { type: "string" },
+      json: { type: "boolean" },
+    },
+    strict: false,
+    allowPositionals: true,
+  });
+
+  const json = globalJson || values.json === true;
+  const agentName = positionals[0];
+  const check = values.check === true;
+  const write = values.write === true;
+  const force = values.force === true;
+  const acceptModified = values["accept-modified"] === true;
+  const regenSkills = values["regen-skills"] === true;
+  const modelVersion = values.model as string | undefined;
+
+  if (!agentName) {
+    const msg = "adapter upgrade requires an <agent> argument (e.g. claude-code).";
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
+      );
+    } else {
+      process.stderr.write(`${msg}\n`);
+    }
+    return 2;
+  }
+
+  if (check === write) {
+    // Both true or both false → require explicit choice.
+    const msg = check
+      ? "adapter upgrade: --check and --write are mutually exclusive."
+      : "adapter upgrade requires either --check or --write.";
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
+      );
+    } else {
+      process.stderr.write(`${msg}\n`);
+    }
+    return 2;
+  }
+
+  const mode = check ? "check" : "write";
+
+  try {
+    const result = await runAdapterUpgrade({
+      cwd: process.cwd(),
+      agentName,
+      mode,
+      force,
+      acceptModified,
+      locale,
+      modelVersion,
+      regenSkills,
+    });
+
+    if (json) {
+      process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
+    } else {
+      for (const entry of result.plan) {
+        if (entry.action === "skip") continue;
+        process.stderr.write(
+          `  ${entry.action.padEnd(18)} ${entry.relPath} [${entry.local} × ${entry.desired}]\n`,
+        );
+      }
+      if (mode === "check") {
+        if (result.clean) {
+          process.stderr.write("Clean — no upgrade actions needed.\n");
+        } else {
+          process.stderr.write(`Drift detected — run "code-pact adapter upgrade ${agentName} --write" to apply.\n`);
+        }
+      } else {
+        const refused = result.plan.filter((p) => p.action === "refuse").length;
+        if (refused > 0) {
+          process.stderr.write(
+            `${refused} file(s) refused — re-run with --accept-modified to overwrite local changes.\n`,
+          );
+        } else {
+          process.stderr.write(`${m.adapter.done(agentName)} Manifest: ${result.manifestPath}\n`);
+        }
+      }
+    }
+
+    // Exit codes:
+    //   --check: 0 clean / 1 drift
+    //   --write: 0 ok / 1 if anything was refused
+    if (mode === "check") {
+      return result.clean ? 0 : 1;
+    }
+    const hasRefused = result.plan.some((p) => p.action === "refuse");
+    return hasRefused ? 1 : 0;
+  } catch (err: unknown) {
+    if (err instanceof Error) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === "AGENT_NOT_FOUND") {
+        const msg = m.adapter.agentNotFound(agentName);
+        if (json) {
+          process.stdout.write(
+            `${JSON.stringify({ ok: false, error: { code: "AGENT_NOT_FOUND", message: msg } })}\n`,
+          );
+        } else {
+          process.stderr.write(`${msg}\n`);
+        }
+        return 2;
+      }
+      if (code === "MANIFEST_NOT_FOUND") {
+        if (json) {
+          process.stdout.write(
+            `${JSON.stringify({ ok: false, error: { code: "MANIFEST_NOT_FOUND", message: err.message } })}\n`,
+          );
+        } else {
+          process.stderr.write(`${err.message}\n`);
+        }
+        return 2;
+      }
     }
     throw err;
   }

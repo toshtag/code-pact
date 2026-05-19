@@ -427,8 +427,8 @@ it will be removed in v0.10.
 
 - `adapter list [--json]` — enumerate registered adapters with manifest state
 - `adapter install <agent> [--force] [--model <v>] [--regen-skills] [--json]` — first-time install + writes manifest
-- `adapter upgrade <agent> --check [--json]` — read-only drift report **(P7-T5, not yet implemented in v0.9 P7-T4)**
-- `adapter upgrade <agent> --write [--force] [--accept-modified] [--json]` — apply changes **(P7-T5, not yet implemented in v0.9 P7-T4)**
+- `adapter upgrade <agent> --check [--json]` — read-only drift report
+- `adapter upgrade <agent> --write [--force] [--accept-modified] [--model <v>] [--regen-skills] [--json]` — apply changes
 - `adapter doctor [--agent <name>] [--json]` — adapter-scoped diagnostics
 
 ### Per-agent manifest
@@ -436,7 +436,7 @@ it will be removed in v0.10.
 `adapter install` writes `.code-pact/adapters/<agent>.manifest.yaml` recording every file
 code-pact generated, its sha256 hash (computed from LF-normalized UTF-8 bytes), and a
 fingerprint of the adapter-output-affecting profile fields. The manifest is the source of
-truth for `adapter upgrade` / `adapter doctor` (P7-T4/T5). Schema is documented in
+truth for `adapter upgrade` / `adapter doctor`. Schema is documented in
 `src/core/schemas/adapter-manifest.ts`; see `RelativePosixPath` for the path-safety rules
 (no `..`, no leading `/` or `~`, no `\`, no Windows drive letters, no `.` segments).
 
@@ -453,7 +453,7 @@ manifest, but it NEVER overwrites a file already recorded in the manifest (`mana
 | `unmanaged × stale` (disk differs from desired, no manifest entry) | with `--force`: **replace_unmanaged** (overwrite + manifest) |
 | `managed-*` (already in the manifest) | `--force` is ignored — install is hands-off |
 
-Destructive overwrite of a managed-modified file requires `adapter upgrade --write --accept-modified` (P7-T5).
+Destructive overwrite of a managed-modified file requires `adapter upgrade --write --accept-modified`.
 The `--regen-skills` flag is a role-scoped force: it makes `--force` apply only to files with
 `role: skill`. It still cannot override `managed-modified`.
 
@@ -545,6 +545,106 @@ Skill names are derived by stripping the package-manager prefix (`pnpm`, `npm ru
 `bun run`) and sanitizing to kebab-case. If `design/roadmap.yaml` does not exist, no dynamic
 skills are generated (the three fixed skills — `/context`, `/verify`, `/progress` — are always
 written). Duplicate commands across phases produce a single skill file.
+
+### `adapter upgrade <agent> --check | --write [flags] [--json]`
+
+Inspects or applies adapter drift against the installed manifest. Requires an
+existing manifest at `.code-pact/adapters/<agent>.manifest.yaml`; run
+`adapter install <agent>` first on fresh projects. `--check` and `--write` are
+**mutually exclusive and required** — passing neither (or both) is a
+`CONFIG_ERROR` exit 2 so the intent is unambiguous in CI logs.
+
+Common flags:
+
+- `--force` — adopt unmanaged files only. **Never** overrides `managed-modified`.
+- `--accept-modified` — required to overwrite `managed-modified × stale` files. Available only on `--write`.
+- `--regen-skills` — role-scoped force: applies `--force`-equivalent to `role: skill` files only. Still cannot override `managed-modified`.
+- `--model <version>` — same semantics as `adapter install --model`; affects Claude `CLAUDE.md` generation.
+
+#### Action enum (8 values)
+
+Each plan entry carries a `local`, `desired`, and `action` field. `action` is one of:
+
+| Value | Meaning |
+|---|---|
+| `write` | Create or recreate the file from desired content (managed-missing, new). |
+| `skip` | Idempotent no-op (managed-clean × current). |
+| `adopt` | Record an existing on-disk file in the manifest; no content write (unmanaged × current with `--force`). |
+| `replace_unmanaged` | Overwrite an unmanaged-but-stale file (unmanaged × stale with `--force`). |
+| `update` | Overwrite a managed file. Used for `managed-clean × stale` (safe) and `managed-modified × stale` with `--accept-modified`. |
+| `update_manifest` | Refresh the manifest hash only; disk content already matches desired (managed-modified × current). |
+| `refuse` | Would destroy local modifications without `--accept-modified` (managed-modified × stale). |
+| `warn` | Surfaceable in `--check` for unmanaged rows regardless of `--force`. `--write` never produces this. |
+
+#### `adapter upgrade <agent> --check`
+
+Fully read-only. Returns the action `--write` WOULD take for each desired file
+with two intentional differences:
+
+- **Unmanaged rows always return `warn`** regardless of `--force`, so callers can
+  see which files are adoptable before opting in.
+- **`managed-modified × stale` always returns `refuse`** regardless of
+  `--accept-modified`, so callers see the pending destructive action before
+  re-running with `--write --accept-modified`.
+
+```json
+{
+  "ok": true,
+  "data": {
+    "agentName": "claude-code",
+    "mode": "check",
+    "manifestPath": "/abs/.code-pact/adapters/claude-code.manifest.yaml",
+    "generatorVersion": "0.9.0-alpha.0",
+    "clean": false,
+    "plan": [
+      {
+        "path": "/abs/CLAUDE.md",
+        "relPath": "CLAUDE.md",
+        "role": "instruction",
+        "local": "managed-clean",
+        "desired": "stale",
+        "action": "update"
+      }
+    ]
+  }
+}
+```
+
+Exit codes: `0` clean (every entry is `action: skip`), `1` drift detected (any
+non-skip action), `2` on `CONFIG_ERROR` (missing positional, mutex flags) /
+`AGENT_NOT_FOUND` / `MANIFEST_NOT_FOUND`.
+
+#### `adapter upgrade <agent> --write`
+
+Executes the action matrix. The new manifest reflects the post-write state:
+files written / adopted have their hash refreshed, skipped managed files
+preserve their existing hash, refused entries are preserved unchanged, and
+orphans (manifest entries no longer emitted by the generator) drop out. Files
+on disk that are no longer in the new manifest remain where they are; the next
+`adapter doctor` run surfaces them as `ADAPTER_UNMANAGED_FILE` if they fall
+under the adapter's `ownedPathGlobs`.
+
+```json
+{
+  "ok": true,
+  "data": {
+    "agentName": "claude-code",
+    "mode": "write",
+    "manifestPath": "/abs/.code-pact/adapters/claude-code.manifest.yaml",
+    "generatorVersion": "0.9.0-alpha.0",
+    "clean": false,
+    "plan": [
+      { "path": "/abs/CLAUDE.md", "relPath": "CLAUDE.md", "role": "instruction",
+        "local": "managed-clean", "desired": "stale", "action": "update" }
+    ]
+  }
+}
+```
+
+Exit codes: `0` ok (all changes applied or all-skip), `1` when any file was
+`refused` (managed-modified × stale without `--accept-modified`), `2` on the
+same `CONFIG_ERROR` / `AGENT_NOT_FOUND` / `MANIFEST_NOT_FOUND` conditions as
+`--check`.
 
 ### `adapter doctor [--agent <name>] [--json]`
 
