@@ -58,25 +58,104 @@ invalid project structure exit 2. Unhandled exceptions exit 3.
 ## Error codes
 
 Error codes appear in the `error.code` field of the JSON envelope and
-in stderr messages. They are stable identifiers that callers can match
-against.
+in stderr messages, or as `code` on individual diagnostic issues from
+`doctor` / `validate` / `plan lint` / `plan analyze` / `adapter doctor`.
+They are stable identifiers that callers can match against.
+
+The full v1.0 surface is anchored by `tests/unit/error-code-surface.test.ts`,
+which fails if src/ emits a code that isn't listed below or if a code
+listed below is no longer emitted. Codes are partitioned into four
+categories — adding a new code in `src/` requires updating both the test
+and the appropriate table below.
+
+### Public codes (top-level error envelopes)
+
+These appear in `error.code` of `{ok:false, error}` envelopes returned by
+the listed commands. They are the primary failure signal for agents and
+CI.
 
 | Code | Raised by | Meaning |
 |------|-----------|---------|
 | `CONFIG_ERROR` | most commands | Bad flags, missing required input, malformed YAML |
+| `UNKNOWN_COMMAND` | top-level dispatch | Unrecognized command name |
 | `ALREADY_INITIALIZED` | `init` | `.code-pact/` already exists without `--force` |
+| `ALREADY_EXISTS` | `plan brief`, `plan constitution` | Target design file already exists without `--force` |
 | `BASELINE_NOT_FOUND` | `progress` | Named baseline snapshot missing |
 | `PHASE_NOT_FOUND` | `phase show`, `pack`, `verify`, `recommend` | Phase id not in `roadmap.yaml` |
-| `TASK_NOT_FOUND` | `pack`, `verify`, `task context` | Task id not present anywhere |
-| `AMBIGUOUS_TASK_ID` | `task context` | Same task id exists in multiple phases |
-| `AGENT_NOT_FOUND` | `pack`, `adapter`, `task context`, `task start/block/resume/complete` | Agent name not in `project.yaml` |
+| `TASK_NOT_FOUND` | `pack`, `verify`, `task context`, `task start/block/resume/complete/status` | Task id not present anywhere |
+| `AMBIGUOUS_TASK_ID` | `task context`, `task start/block/resume/complete/status` | Same task id exists in multiple phases |
+| `AGENT_NOT_FOUND` | `pack`, `adapter *`, `task context`, `task start/block/resume/complete` | Agent name not in `project.yaml` |
 | `AGENT_NOT_ENABLED` | `task context`, `task start/block/resume/complete` | Agent is configured but has `enabled: false` |
 | `INVALID_TASK_TRANSITION` | `task start/block/resume/complete` | Requested state transition is not allowed from the current state |
+| `DUPLICATE_PHASE_ID` | `phase add`, `phase import` | Phase id collides with an existing or imported phase |
+| `MANIFEST_NOT_FOUND` | `adapter upgrade` | `.code-pact/adapters/<agent>.manifest.yaml` does not exist (run `adapter install` first) |
 | `VERIFICATION_FAILED` | `verify`, `task complete` | Deterministic completion check did not pass |
-| `INTERNAL_ERROR` | any command | Catch-all for unhandled exceptions |
+| `VALIDATE_FAILED` | `validate` | One or more errors (or, under `--strict`, any issue) detected by the underlying doctor checks |
+| `DOCTOR_FAILED` | `doctor` | One or more error-severity doctor issues found |
+| `PLAN_LINT_FAILED` | `plan lint` | One or more lint issues found (under `--strict`, includes warnings) |
+| `PLAN_NORMALIZE_REQUIRED` | `plan normalize --check` | At least one file needs normalization |
+| `PLAN_NORMALIZE_CONFLICT` | `plan normalize` | `--check` and `--write` both passed |
+| `PLAN_ANALYZE_FAILED` | `plan analyze` | One or more exit-relevant drift issues found |
+| `INTERNAL_ERROR` | any command | Reserved for unhandled exceptions |
 
-New error codes may be added without a major version bump. Removing or
-renaming an existing code is a breaking change.
+### Plan diagnostic codes
+
+Issue-level codes emitted by `plan lint` and `plan analyze` inside `data.issues[]`. Carry severity `error` or `warning`.
+
+| Code | Severity | Emitter | Meaning |
+|------|----------|---------|---------|
+| `INVALID_YAML` | error | `plan lint` | A roadmap or phase YAML file failed to parse |
+| `SCHEMA_ERROR` | error | `plan lint` | A YAML file parsed but failed Zod schema validation |
+| `MISSING_PHASE_FILE` | error | `plan lint` | `roadmap.yaml` references a phase file that does not exist |
+| `DUPLICATE_TASK_ID` | error | `plan lint` | The same task id appears in more than one phase |
+| `PHASE_ID_MISMATCH` | error | `plan lint` | `phase.id` inside the YAML does not match the roadmap reference |
+| `ORPHAN_PHASE_FILE` | warning | `plan lint` | A phase file exists on disk but is not in `roadmap.yaml` |
+| `PHASE_ID_NAMING` | warning | `plan lint` | Phase id does not match `P<N>` |
+| `TASK_ID_PHASE_PREFIX` | warning | `plan lint` | Task id does not match `<phase>-T<N>` |
+| `WEAK_DOD` | warning | `plan lint --include-quality` | DoD entry is suspiciously short or contains `TODO`/`FIXME`/`tbd` |
+| `PLACEHOLDER_VERIFICATION` | warning | `plan lint --include-quality` | Verification command starts with `echo`/`true`/`noop` |
+| `STATUS_DRIFT` | error/warning | `plan analyze` | Design status disagrees with derived progress state (see `details.kind`) |
+| `PHASE_DONE_WITH_OPEN_TASKS` | error | `plan analyze` | Phase marked done but at least one task is still open |
+| `ORPHAN_PROGRESS_EVENT` | warning | `plan analyze`, `doctor` | Progress event references a `task_id` that does not exist in any phase |
+
+### Doctor diagnostic codes
+
+Issue-level codes emitted by `doctor` / `validate` for general project health.
+
+| Code | Severity | Meaning |
+|------|----------|---------|
+| `MISSING_DIR` | error | A required directory under `.code-pact/` or `design/` is absent |
+| `MISSING_MODEL_TIER` | error | An agent profile is missing a required `model_map` tier |
+| `EMPTY_OBJECTIVE` | error | A phase `objective` is blank or fewer than 10 characters |
+| `BAK_FILE` | warning | A `.bak` file is present alongside a tracked file |
+| `LOCAL_NOT_GITIGNORED` | warning | `.code-pact/` is not listed in `.gitignore` |
+| `BRIEF_MISSING` | warning | `design/brief.md` does not exist |
+| `CONSTITUTION_PLACEHOLDER` | warning | `design/constitution.md` still contains the template edit hint |
+| `ADAPTER_STALE` | warning | An enabled agent profile has no `model_version` set |
+| `STALE_CONTEXT` | warning | A cached context file is older than its source design files |
+
+### Adapter diagnostic codes
+
+Emitted by `adapter doctor` and (manifest-aware) global `doctor`. See the `adapter doctor` section above for severity rules and the rationale for each code.
+
+| Code | Severity | Meaning |
+|------|----------|---------|
+| `ADAPTER_MISSING` | warning | (legacy v0.8) Enabled agent has no instruction file AND no manifest. Replaced by manifest-aware codes once a manifest exists. |
+| `ADAPTER_MANIFEST_MISSING` | warning | `adapter doctor` only — no manifest for an enabled agent. Never emitted by global `doctor`. |
+| `ADAPTER_MANIFEST_INVALID` | error | Manifest YAML failed parse or schema validation |
+| `ADAPTER_GENERATOR_STALE` | warning | Manifest's `generator_version` differs from the current package version |
+| `ADAPTER_SCHEMA_DRIFT` | warning | Manifest's `adapter_schema_version` is older than the module's declared version |
+| `ADAPTER_PROFILE_DRIFT` | warning | Profile fields recorded in `profile_fingerprint` have changed since install |
+| `ADAPTER_FILE_MISSING` | error | A file listed in the manifest is missing from disk |
+| `ADAPTER_FILE_DRIFT` | warning | A managed file was locally modified AND the generator output also moved on |
+| `ADAPTER_DESIRED_STALE` | warning | A managed file is unchanged locally but the generator now produces different content |
+| `ADAPTER_UNMANAGED_FILE` | warning | A file under `ownedPathGlobs` exists on disk but is not in the manifest |
+
+### Stability rules for codes (v1.0)
+
+- **Additive changes** (new codes, new severities, new diagnostic categories) may land in minor releases without a major bump.
+- **Renaming or removing** a code listed in any of the four tables above is a breaking change.
+- **Re-categorizing** a code between Public / Plan / Doctor / Adapter is documentation only — agents that match on `error.code` are unaffected.
 
 ## TTY and CI detection
 
@@ -966,9 +1045,89 @@ The active locale is resolved in this priority order:
 
 This means that once a project is initialized with `ja-JP`, all subsequent commands automatically use Japanese without requiring `--locale` or environment variables.
 
+## Stability taxonomy (v1.0)
+
+As of v1.0.0, every public command in `code-pact` falls into one of four
+stability bands. Future minor releases are allowed to grow the surface
+(new commands, new JSON fields, new error codes) without changing band,
+but no command may move to a more-restrictive band or change its public
+shape without a major version bump.
+
+### Stable (v1.0)
+
+Commands that take `--json`, emit a documented `{ok, data}` envelope on
+stdout, have documented exit codes, and have subprocess integration
+coverage. Agents and CI may rely on these.
+
+| Command | Notes |
+|---------|-------|
+| `--version` | Both human and `--json` modes |
+| `init` | TTY wizard, but `--non-interactive --agent X --locale Y --json` is supported and tested |
+| `doctor` | |
+| `validate` | |
+| `recommend` | |
+| `plan lint` / `plan normalize` / `plan analyze` / `plan prompt` | |
+| `phase add` | Flag-only path (`--id`/`--name`/`--objective`/`--weight`/`--verify-command`) is the Stable surface |
+| `phase ls` / `phase show` / `phase import` | |
+| `task context` / `task status` / `task start` / `task block` / `task resume` / `task complete` | |
+| `pack` | Internal but stable — `task context` is the preferred agent-facing entry |
+| `verify` | |
+| `progress` | |
+| `adapter list` / `adapter install` / `adapter doctor` / `adapter upgrade --check` / `adapter upgrade --write` | |
+
+### Stable (human-output)
+
+Commands that are TTY-required wizards by design. They DO accept
+`--json` for the failure path (e.g. emitting `CONFIG_ERROR` in
+`--non-interactive` mode), but their success path is not driven by a
+machine-readable contract.
+
+| Command | Notes |
+|---------|-------|
+| `plan brief` | Interactive prompt → `design/brief.md` |
+| `plan constitution` | Interactive prompt → `design/constitution.md` |
+| `task add` | Interactive task wizard |
+
+`code-pact` will not add JSON-mode success contracts to these commands
+solely for v1.0. If a future minor release adds one, it is purely
+additive and the human-output path remains supported.
+
+### Experimental
+
+The adapter modules below ship and are usable, but their generated
+output formats may shift in minor releases to track upstream tooling
+changes. They are intentionally excluded from
+`tests/integration/adapter-conformance.test.ts`.
+
+| Adapter | Notes |
+|---------|-------|
+| `cursor` | Writes `.cursor/rules/code-pact.mdc`. Cursor's `.mdc` format and placement may change. |
+| `gemini-cli` | Writes `GEMINI.md`. Gemini CLI's discovery rules may change. |
+
+### Deprecated
+
+Surfaces that still work in v1.x but are scheduled for removal.
+
+| Surface | Replacement | Removal target |
+|---------|-------------|----------------|
+| Bare-form `code-pact adapter [--agent X] [--force] [--regen-skills]` | `code-pact adapter install <agent>` | v1.1 (originally v0.10) |
+
+The bare form currently prints a one-line deprecation notice on stderr
+(suppressed under `--json`) and routes internally to `adapter install`.
+
+### What is NOT a stability claim
+
+The following shapes are documented but **not** locked by v1.0:
+
+- Human-readable stdout / stderr text content (translation, phrasing, log line ordering)
+- The presence of optional / advisory JSON fields beyond the documented contract — fields can be added; existing fields cannot be removed or change type
+- Internal module names, file layouts under `src/`, and TypeScript exported types
+- The format of files under `.code-pact/state/` beyond the documented `progress.yaml` schema
+- The exact filename pattern of `.code-pact/adapters/<agent>.manifest.yaml` (the directory and schema are stable; the per-agent filename mapping follows `<agent>.manifest.yaml`)
+
 ## Stability
 
-The shapes documented here — JSON envelope, exit codes, error codes,
-`--json` position equivalence, TTY rules — are the public contract.
-Pre-1.0, the surface of individual commands may change between minor
-versions, but the rules in this file should not.
+The rules documented in this file — JSON envelope shape, exit-code
+families, error-code surface, `--json` position equivalence, TTY rules,
+and the taxonomy above — are the v1.0 public contract. Changes that
+break these rules require a major version bump.

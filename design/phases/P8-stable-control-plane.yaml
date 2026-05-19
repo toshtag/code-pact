@@ -86,7 +86,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
     description: |
       End-to-end workflow smoke + shared test helpers. Extract a
       tests/helpers/cli.ts module exposing createTempProject / run /
