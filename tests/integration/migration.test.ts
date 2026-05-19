@@ -21,9 +21,22 @@
 // 3. Dynamic construction makes the test read top-to-bottom as a story:
 //    "given a project that has Y but not Z, when we run W, then ...".
 //
-// The shape definitions below are pinned descriptions of each historical
-// era so a regression in init's output won't accidentally drift the
-// fixture out from under us.
+// Known limit (intentional): the v1.0 `init` is used as the base layer
+// for every fixture below. That gives us the project skeleton
+// (.code-pact/, agent profiles, model profiles, .gitignore) without
+// having to mirror it by hand in this test, and the historical state
+// being exercised — empty progress.yaml, hand-edited phase YAML, stale
+// adapter manifest — is layered on top. A consequence is that if init's
+// own output drifts across a future release, this test exercises the
+// new init output's compatibility, not the literal historical bytes.
+// We accept that trade because:
+//   - The historical behaviour we care about (no progress events / no
+//     manifest / stale generator_version) is encoded explicitly in
+//     the helpers below — those mutations are the contract.
+//   - Re-grounding init across releases is desirable: it ensures the
+//     test moves with the project rather than fossilizing.
+//   - A fully literal historical fixture (hand-written project.yaml,
+//     model-profiles, etc.) is a future refinement, not a v1.0 gate.
 
 import { describe, it, expect, beforeAll, afterEach } from "vitest";
 import { readFile, writeFile, rm } from "node:fs/promises";

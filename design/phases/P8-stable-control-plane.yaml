@@ -133,7 +133,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
     description: |
       Migration safety + state file documentation. Add fixtures under
       tests/fixtures/migration/ for v0.6-style (no progress events,
