@@ -20,6 +20,13 @@ export type {
   AdapterListResult,
 } from "./adapter-list.ts";
 
+export { runAdapterDoctor } from "./adapter-doctor.ts";
+export type {
+  AdapterDoctorIssue,
+  AdapterDoctorOptions,
+  AdapterDoctorResult,
+} from "./adapter-doctor.ts";
+
 // ---------------------------------------------------------------------------
 // Back-compat aliases — the v0.8 surface used `runGenerateAdapter` and
 // `AdapterOptions` / `AdapterResult`. v0.9 keeps these names working so

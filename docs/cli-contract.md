@@ -427,9 +427,9 @@ it will be removed in v0.10.
 
 - `adapter list [--json]` — enumerate registered adapters with manifest state
 - `adapter install <agent> [--force] [--model <v>] [--regen-skills] [--json]` — first-time install + writes manifest
-- `adapter upgrade <agent> --check [--json]` — read-only drift report **(P7-T5, not yet implemented in v0.9 P7-T3)**
-- `adapter upgrade <agent> --write [--force] [--accept-modified] [--json]` — apply changes **(P7-T5, not yet implemented in v0.9 P7-T3)**
-- `adapter doctor [--agent <name>] [--json]` — adapter-scoped diagnostics **(P7-T4, not yet implemented in v0.9 P7-T3)**
+- `adapter upgrade <agent> --check [--json]` — read-only drift report **(P7-T5, not yet implemented in v0.9 P7-T4)**
+- `adapter upgrade <agent> --write [--force] [--accept-modified] [--json]` — apply changes **(P7-T5, not yet implemented in v0.9 P7-T4)**
+- `adapter doctor [--agent <name>] [--json]` — adapter-scoped diagnostics
 
 ### Per-agent manifest
 
@@ -487,8 +487,8 @@ Returns one entry per registered adapter:
 under `project.yaml`'s `agents:` list with `enabled != false`. `manifestPresent: false` when
 no manifest exists yet; `fileCount` / `lastGeneratedAt` / `generatorVersion` are omitted
 in that case. When the manifest YAML exists but fails parse or schema validation, the entry
-sets `manifestInvalid: true` and omits the detail fields — use `adapter doctor` (P7-T4) for
-the parse error.
+sets `manifestInvalid: true` and omits the detail fields — use `adapter doctor`
+for the parse error.
 
 ### `adapter install <agent> [--force] [--model <v>] [--regen-skills] [--json]`
 
@@ -545,6 +545,76 @@ Skill names are derived by stripping the package-manager prefix (`pnpm`, `npm ru
 `bun run`) and sanitizing to kebab-case. If `design/roadmap.yaml` does not exist, no dynamic
 skills are generated (the three fixed skills — `/context`, `/verify`, `/progress` — are always
 written). Duplicate commands across phases produce a single skill file.
+
+### `adapter doctor [--agent <name>] [--json]`
+
+Read-only manifest-aware health check. Reports issues per agent without
+modifying the manifest or any generated files. With `--agent`, inspects
+exactly that adapter regardless of `project.yaml` enabled-state; without
+`--agent`, inspects every enabled agent listed under `project.yaml`'s
+`agents:` (with `enabled != false`).
+
+```json
+{
+  "ok": true,
+  "data": {
+    "ok": false,
+    "issues": [
+      {
+        "code": "ADAPTER_FILE_MISSING",
+        "severity": "error",
+        "message": "Managed file \"CLAUDE.md\" is missing from disk",
+        "agent": "claude-code",
+        "path": "/abs/CLAUDE.md"
+      }
+    ]
+  }
+}
+```
+
+`data.ok` is `false` when any issue has `severity: "error"`; warnings alone
+don't fail. Exit code mirrors that: `0` clean or warnings-only, `1` when
+any error is present, `2` for `AGENT_NOT_FOUND` (only on explicit
+`--agent`). Each issue carries the agent name in `agent`; file-level
+issues additionally carry `path` (absolute).
+
+#### Error codes
+
+| Code | Severity | Trigger |
+|---|---|---|
+| `ADAPTER_MANIFEST_MISSING` | warning | Agent is enabled but `.code-pact/adapters/<agent>.manifest.yaml` does not exist. **`adapter doctor` only — never emitted by global `doctor`.** |
+| `ADAPTER_MANIFEST_INVALID` | error | Manifest YAML failed to parse or failed schema validation. Aborts further per-agent checks. |
+| `ADAPTER_GENERATOR_STALE` | warning | Manifest's `generator_version` differs from the current code-pact package version (simple equality, no semver ordering). |
+| `ADAPTER_SCHEMA_DRIFT` | warning | Manifest's `adapter_schema_version` is older than the adapter module's declared value. |
+| `ADAPTER_PROFILE_DRIFT` | warning | Agent profile fields recorded in `profile_fingerprint` (instruction_filename, context_dir, optional skill_dir / hook_dir / resolved_model) have changed since install. |
+| `ADAPTER_FILE_MISSING` | error | A file listed in the manifest is missing from disk (`managed-missing` × `absent`). |
+| `ADAPTER_FILE_DRIFT` | warning | A managed file was locally modified AND the generator output also moved on (`managed-modified` × `stale`). Requires `--accept-modified` on `upgrade --write`. |
+| `ADAPTER_DESIRED_STALE` | warning | A managed file is unchanged locally but the generator now produces different content (`managed-clean` × `stale`). Safe to apply with `upgrade --write` (no `--accept-modified` required). |
+| `ADAPTER_UNMANAGED_FILE` | warning | A file under one of the adapter's `ownedPathGlobs` exists on disk but is not in the manifest. Narrow scope — does NOT fire for arbitrary user-created files such as `.claude/skills/custom.md`. |
+
+`managed-modified × current` (hash drift only) and `managed-clean × current`
+(happy path) are intentionally silent.
+
+#### Interaction with global `doctor`
+
+The global `code-pact doctor` is **manifest-aware when a manifest exists**
+and **byte-identical to v0.8 when no manifest exists**. Specifically:
+
+- No manifest → the legacy `ADAPTER_MISSING` warning fires for each enabled
+  agent whose instruction file is missing. The v0.8 contract is preserved
+  for projects that have not yet run `adapter install`.
+- Manifest present → `ADAPTER_MISSING` is skipped and the more precise
+  manifest-aware codes (`ADAPTER_FILE_MISSING`, `ADAPTER_FILE_DRIFT`,
+  `ADAPTER_DESIRED_STALE`, `ADAPTER_GENERATOR_STALE`, `ADAPTER_SCHEMA_DRIFT`,
+  `ADAPTER_PROFILE_DRIFT`, `ADAPTER_UNMANAGED_FILE`) appear instead.
+- `ADAPTER_MANIFEST_MISSING` is **never** emitted by global `doctor`. It is
+  an `adapter doctor`-only signal so existing projects don't suddenly
+  become noisy on upgrade. Use `adapter doctor` to learn that the
+  manifest hasn't been created yet.
+
+Findings from manifest-aware checks appear in global `doctor` output with
+a `[agent-name]` prefix on the message so consumers can attribute issues
+without changing the global `DoctorIssue` shape.
 
 ### Bare-form back-compat (deprecated)
 

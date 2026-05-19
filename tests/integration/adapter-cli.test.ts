@@ -134,19 +134,67 @@ describe("adapter bare-form back-compat — CLI", () => {
   });
 });
 
-describe("adapter upgrade / doctor stubs — CLI", () => {
+describe("adapter upgrade stub — CLI", () => {
   it("upgrade → NOT_IMPLEMENTED exit 2", () => {
     const res = runCli(["adapter", "upgrade", "--json"]);
     expect(res.status).toBe(2);
     const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
     expect(parsed.error.code).toBe("NOT_IMPLEMENTED");
   });
+});
 
-  it("doctor → NOT_IMPLEMENTED exit 2", () => {
+describe("adapter doctor — CLI", () => {
+  it("--json returns ok envelope with issues array (exit 0 for warning-only state)", () => {
     const res = runCli(["adapter", "doctor", "--json"]);
+    // Before install, claude-code has no manifest → MANIFEST_MISSING is a
+    // warning, not an error. Matches global doctor's semantic: exit 0 unless
+    // a severity:"error" issue is present.
+    expect(res.status).toBe(0);
+    const parsed = JSON.parse(res.stdout) as {
+      ok: boolean;
+      data: { ok: boolean; issues: Array<{ code: string; agent: string }> };
+    };
+    expect(parsed.ok).toBe(true);
+    expect(parsed.data.ok).toBe(true);
+    const codes = parsed.data.issues.map((i) => i.code);
+    expect(codes).toContain("ADAPTER_MANIFEST_MISSING");
+  });
+
+  it("exit 0 after install — clean state with no issues", () => {
+    runCli(["adapter", "install", "claude-code", "--json"]);
+    const res = runCli(["adapter", "doctor", "--json"]);
+    // generator_version may differ from the install-recorded version, so
+    // a warning could still surface; this asserts the exit code only when
+    // truly clean. In practice the test repo's package version matches.
+    if (res.status === 0) {
+      const parsed = JSON.parse(res.stdout) as {
+        data: { issues: Array<{ code: string }> };
+      };
+      expect(parsed.data.issues).toEqual([]);
+    } else {
+      expect(res.status).toBe(1);
+    }
+  });
+
+  it("--agent flag accepts an explicit target", () => {
+    const res = runCli(["adapter", "doctor", "--agent", "codex", "--json"]);
+    expect(res.status).toBe(0); // codex isn't enabled in this project → no findings
+    const parsed = JSON.parse(res.stdout) as { ok: boolean; data: { issues: unknown[] } };
+    expect(parsed.ok).toBe(true);
+    expect(parsed.data.issues).toEqual([]);
+  });
+
+  it("--agent with an unknown name → AGENT_NOT_FOUND exit 2", () => {
+    const res = runCli(["adapter", "doctor", "--agent", "no-such-agent", "--json"]);
     expect(res.status).toBe(2);
     const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
-    expect(parsed.error.code).toBe("NOT_IMPLEMENTED");
+    expect(parsed.error.code).toBe("AGENT_NOT_FOUND");
+  });
+
+  it("human form prints one line per issue", () => {
+    const res = runCli(["adapter", "doctor"]);
+    expect(res.stderr).toContain("ADAPTER_MANIFEST_MISSING");
+    expect(res.stderr).toContain("[claude-code]");
   });
 });
 

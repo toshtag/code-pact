@@ -21,7 +21,7 @@ import { runPhaseImport } from "./commands/phase-import.ts";
 import { runProgress, formatProgress } from "./commands/progress.ts";
 import { runPack } from "./commands/pack.ts";
 import { runVerify, formatVerify } from "./commands/verify.ts";
-import { runAdapterInstall, runAdapterList } from "./commands/adapter.ts";
+import { runAdapterInstall, runAdapterList, runAdapterDoctor } from "./commands/adapter.ts";
 import { runPlanBrief } from "./commands/plan-brief.ts";
 import { runPlanPrompt } from "./commands/plan-prompt.ts";
 import { runPlanConstitution } from "./commands/plan-constitution.ts";
@@ -625,14 +625,14 @@ async function cmdAdapter(argv: string[], locale: Locale, globalJson: boolean): 
 
   if (sub === "list") return cmdAdapterList(argv.slice(1), globalJson);
   if (sub === "install") return cmdAdapterInstall(argv.slice(1), locale, globalJson);
+  if (sub === "doctor") return cmdAdapterDoctor(argv.slice(1), locale, globalJson);
 
   // Effective --json honors both the global flag (before the command) and
   // a --json embedded in the subcommand args (after the command).
   const effectiveJson = globalJson || argv.includes("--json");
 
-  if (sub === "upgrade" || sub === "doctor") {
-    const stage = sub === "upgrade" ? "P7-T5" : "P7-T4";
-    const msg = `adapter ${sub} is not yet implemented; arriving in v0.9 ${stage}.`;
+  if (sub === "upgrade") {
+    const msg = `adapter upgrade is not yet implemented; arriving in v0.9 P7-T5.`;
     if (effectiveJson) {
       process.stdout.write(
         `${JSON.stringify({ ok: false, error: { code: "NOT_IMPLEMENTED", message: msg } })}\n`,
@@ -738,6 +738,60 @@ async function cmdAdapterInstall(
     m,
     deprecated: false,
   });
+}
+
+async function cmdAdapterDoctor(
+  argv: string[],
+  locale: Locale,
+  globalJson: boolean,
+): Promise<number> {
+  const { values } = parseArgs({
+    args: argv,
+    options: {
+      agent: { type: "string" },
+      json: { type: "boolean" },
+    },
+    strict: false,
+    allowPositionals: false,
+  });
+
+  const json = globalJson || values.json === true;
+  const agentName = values.agent as string | undefined;
+  const cwd = process.cwd();
+
+  try {
+    const result = await runAdapterDoctor({ cwd, agentName, locale });
+
+    if (json) {
+      process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
+    } else {
+      if (result.issues.length === 0) {
+        process.stderr.write("No adapter issues found.\n");
+      } else {
+        for (const issue of result.issues) {
+          const sev = issue.severity === "error" ? "ERROR " : "WARN  ";
+          const where = issue.path ? ` (${issue.path})` : "";
+          process.stderr.write(
+            `  ${sev} ${issue.code.padEnd(28)} [${issue.agent}] ${issue.message}${where}\n`,
+          );
+        }
+      }
+    }
+    return result.ok ? 0 : 1;
+  } catch (err: unknown) {
+    if (err instanceof Error && (err as NodeJS.ErrnoException).code === "AGENT_NOT_FOUND") {
+      const msg = messages[locale].adapter.agentNotFound(agentName ?? "");
+      if (json) {
+        process.stdout.write(
+          `${JSON.stringify({ ok: false, error: { code: "AGENT_NOT_FOUND", message: msg } })}\n`,
+        );
+      } else {
+        process.stderr.write(`${msg}\n`);
+      }
+      return 2;
+    }
+    throw err;
+  }
 }
 
 async function cmdAdapterBareForm(
