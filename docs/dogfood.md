@@ -297,6 +297,90 @@ code-pact plan analyze --json
 
 If any of the three fails, fix the underlying issue (or run `plan normalize --write`) before declaring a phase done.
 
+## `task complete` vs `design/` (v1.0 contract)
+
+`task complete` records an operational fact: this task's verify command passed at this point in time. It writes a `done` event to `.code-pact/state/progress.yaml`. It **does not** modify the task's `status` field in `design/phases/<phase>.yaml`.
+
+This separation is intentional:
+
+- `design/` is the source of truth for **intent** — what the human/agent decided this task should be.
+- `.code-pact/state/progress.yaml` is the operational log of **what actually happened** — when it started, blocked, resumed, completed.
+
+When the two diverge, `plan analyze` surfaces a `STATUS_DRIFT` warning so it's visible:
+
+- `done-but-design-not-done` — `task complete` ran, but `design.status` is still `planned` or `in_progress`. Agents and humans should update the design YAML when they truly mean the task is done.
+- `done-historical` — `design.status: done` but no progress events exist. Hidden by default (`affects_exit: false`) so legacy projects don't fail CI. Surface them with `plan analyze --include-historical`.
+
+In practice: the existing v0.6–v0.9 release-prep PRs flip the phase YAML `status` fields manually as part of the release prep commit (see `chore(design): mark P8-T1 as done` and similar). v1.0 retains this pattern.
+
+## Troubleshooting (v1.0)
+
+When a command surfaces one of the diagnostic codes below, this section maps it to the typical recovery action. The full per-code reference is in [`docs/cli-contract.md` § Error codes](cli-contract.md#error-codes).
+
+### `MANIFEST_NOT_FOUND` from `adapter upgrade --check` / `--write`
+
+You haven't run `adapter install <agent>` yet, or the per-agent manifest at `.code-pact/adapters/<agent>.manifest.yaml` was deleted.
+
+```sh
+code-pact adapter install <agent>
+# then re-run the upgrade.
+```
+
+Distinct from the `ADAPTER_MANIFEST_MISSING` *warning* surfaced by `adapter doctor` for the same root cause — `adapter doctor` is read-only and never fails on a missing manifest; the upgrade commands need a manifest to do their job.
+
+### `INVALID_TASK_TRANSITION` from `task start` / `block` / `resume` / `complete`
+
+The current state derived from `progress.yaml` doesn't allow the requested transition. The most common case is `task complete` against a `blocked` task — the task must be `resume`d first so the `resumed` event records the unblock decision.
+
+```sh
+code-pact task status <task-id> --json
+# Read data.current; see docs/cli-contract.md § task * for the
+# allowed-transitions table.
+
+code-pact task resume <task-id>   # if currently blocked
+code-pact task complete <task-id>
+```
+
+### `PLAN_NORMALIZE_REQUIRED` from `plan normalize --check`
+
+A file under `design/` or `.code-pact/state/progress.yaml` has trailing whitespace, CRLF line endings, or a missing/extra final newline.
+
+```sh
+code-pact plan normalize --write
+# Idempotent. Comments and Markdown hard line breaks are preserved.
+```
+
+`plan normalize --write` is the apply-mode counterpart to `--check`. Passing both at once is a `PLAN_NORMALIZE_CONFLICT` (exit 2) so the intent is unambiguous in CI scripts.
+
+### `VERIFICATION_FAILED` from `task complete` (or standalone `verify`)
+
+The phase's `verify.commands` did not pass.
+
+```sh
+code-pact verify --phase <phase-id> --task <task-id>
+# Runs the same commands stand-alone so you can read the failure
+# output directly. progress.yaml is NOT mutated when verify fails;
+# you can re-run task complete after fixing the underlying issue.
+```
+
+If the verify command itself is wrong (typo, dependency missing) rather than the task's implementation, edit `design/phases/<phase>.yaml` `verification.commands` and re-run.
+
+### `ADAPTER_GENERATOR_STALE` from `adapter doctor` / global `doctor`
+
+Your adapter manifest's `generator_version` field doesn't match the installed code-pact version. This is the expected state after upgrading the CLI (`0.9.0-alpha.0` → `1.0.0` is the v1.0 case).
+
+```sh
+code-pact adapter upgrade <agent> --check --json
+# Read plan[] — managed-clean files appear as action:update,
+# managed-modified files as action:refuse.
+
+code-pact adapter upgrade <agent> --write
+# Safe for managed-clean. Refuses managed-modified unless you also
+# pass --accept-modified (the only flag that overwrites local edits).
+```
+
+See [`docs/migration.md`](migration.md) for the full upgrade path between alpha releases.
+
 ## Quick reference
 
 | Goal | Command |

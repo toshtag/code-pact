@@ -1081,12 +1081,14 @@ Every write listed above goes through `atomicWriteText` (`src/io/atomic-text.ts`
 
 ### Path safety
 
-Adapter-generated files go through stricter path validation than the other state writes:
+The v1.0 path-traversal hardening is intentionally scoped to **adapter-managed generated file writes**, because adapters are the surface that writes user-visible paths derived from generator output (where the manifest, the generator, and the on-disk file all need to agree on a path that a user can reasonably modify).
 
 - `assertSafeRelativePath` (`src/core/adapters/file-state.ts`) rejects absolute paths, leading `~`, backslashes, Windows drive letters, `..`, `.`, and empty path segments at the zod-schema layer.
 - `resolveWithinProject` walks ancestor directory realpaths and rejects symlink escape (a directory symlink under `cwd` resolving to a location outside the project root).
 
-These helpers are intentionally scoped to the adapter layer. Progress logs, phase YAML files, and the design tree are written to paths derived from project config, not user input, so the broader path-safety machinery is not currently applied to them. v1.0 does not expand this surface — the existing helpers remain adapter-only.
+Other project state files — `progress.yaml`, phase YAMLs, the design tree, agent profiles — remain protected by their existing schema validation and atomic-write behaviour. They are written to paths derived from project config or constants, not from user-supplied generator output, so the adapter-style traversal helpers do not currently apply.
+
+Extending the adapter-style helpers to other state-file writes is **deferred unless a concrete risk appears**. It is not a "we don't need validation there" claim — it's a scope statement about what kind of write surface the helpers are designed for.
 
 ### Concurrent writers
 
