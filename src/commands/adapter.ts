@@ -1,10 +1,11 @@
-import { readFile, readdir } from "node:fs/promises";
-import { join } from "node:path";
+import { readFile, readdir, mkdir, writeFile } from "node:fs/promises";
+import { join, dirname } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { AgentProfile } from "../core/schemas/agent-profile.ts";
 import { ModelProfile } from "../core/schemas/model-profile.ts";
 import { adapterRegistry } from "../core/adapters/index.ts";
 import { isSupportedAgent } from "../core/agents.ts";
+import type { DesiredAdapterFileRole } from "../core/adapters/types.ts";
 import type { Locale } from "../i18n/index.ts";
 
 // ---------------------------------------------------------------------------
@@ -67,16 +68,24 @@ async function loadModelProfiles(cwd: string): Promise<ModelProfile[]> {
 }
 
 // ---------------------------------------------------------------------------
+// Write policy
+// ---------------------------------------------------------------------------
+
+function shouldOverwrite(
+  role: DesiredAdapterFileRole,
+  force: boolean,
+  regenSkills: boolean,
+): boolean {
+  if (role === "skill") return force || regenSkills;
+  return force;
+}
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
 export async function runGenerateAdapter(opts: AdapterOptions): Promise<AdapterResult> {
-  const { cwd, agentName, force, locale, modelVersion, regenSkills } = opts;
-
-  const [profile, modelProfiles] = await Promise.all([
-    loadAgentProfile(cwd, agentName),
-    loadModelProfiles(cwd),
-  ]);
+  const { cwd, agentName, force, locale, modelVersion, regenSkills = false } = opts;
 
   if (!isSupportedAgent(agentName)) {
     const err = new Error(`No adapter implementation for agent "${agentName}".`);
@@ -84,8 +93,48 @@ export async function runGenerateAdapter(opts: AdapterOptions): Promise<AdapterR
     throw err;
   }
 
-  const generator = adapterRegistry[agentName];
-  const result = await generator(cwd, profile, modelProfiles, force, locale, modelVersion, regenSkills);
+  const [profile, modelProfiles] = await Promise.all([
+    loadAgentProfile(cwd, agentName),
+    loadModelProfiles(cwd),
+  ]);
 
-  return { agentName, ...result };
+  const descriptor = adapterRegistry[agentName];
+  const desiredFiles = await descriptor.generateDesiredFiles({
+    cwd,
+    profile,
+    modelProfiles,
+    locale,
+    modelVersion,
+  });
+
+  // Directory placeholders. context_dir is required for every adapter so
+  // context-pack output has a stable home. hook_dir is claude-only — we
+  // ensure it whenever the profile sets it.
+  await mkdir(join(cwd, profile.context_dir), { recursive: true });
+  if (profile.hook_dir) {
+    await mkdir(join(cwd, profile.hook_dir), { recursive: true });
+  }
+
+  const created: string[] = [];
+  const skipped: string[] = [];
+
+  for (const file of desiredFiles) {
+    const absPath = join(cwd, file.path);
+    const overwrite = shouldOverwrite(file.role, force, regenSkills);
+
+    if (!overwrite) {
+      try {
+        await readFile(absPath);
+        skipped.push(absPath);
+        continue;
+      } catch {
+        // not present — fall through to write
+      }
+    }
+    await mkdir(dirname(absPath), { recursive: true });
+    await writeFile(absPath, file.content, "utf8");
+    created.push(absPath);
+  }
+
+  return { agentName, created, skipped };
 }

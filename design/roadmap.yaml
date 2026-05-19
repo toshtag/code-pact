@@ -17,3 +17,6 @@ phases:
   - id: P6
     path: design/phases/P6-budgeted-execution.yaml
     weight: 20
+  - id: P7
+    path: design/phases/P7-adapter-platform.yaml
+    weight: 20

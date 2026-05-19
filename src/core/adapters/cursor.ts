@@ -1,9 +1,11 @@
-import { mkdir, writeFile, readFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
 import type { AgentProfile } from "../schemas/agent-profile.ts";
-import type { ModelProfile } from "../schemas/model-profile.ts";
 import type { Locale } from "../../i18n/index.ts";
 import { messages as messageCatalog } from "../../i18n/index.ts";
+import type {
+  AdapterDescriptor,
+  AdapterGenerateInput,
+  DesiredAdapterFile,
+} from "./types.ts";
 
 // Cursor adapter (experimental, v0.2).
 //
@@ -79,43 +81,25 @@ function cursorMdc(profile: AgentProfile, locale: Locale): string {
   return `${frontmatter}\n\n${body}\n`;
 }
 
-export type AdapterGenerateResult = {
-  created: string[];
-  skipped: string[];
-};
+// ---------------------------------------------------------------------------
+// AdapterDescriptor
+// ---------------------------------------------------------------------------
 
-export async function generateCursorAdapter(
-  cwd: string,
-  profile: AgentProfile,
-  // model profiles are accepted for interface parity. Cursor chooses
-  // its own model in the editor, so we do not surface tier mapping.
-  _modelProfiles: ModelProfile[],
-  force: boolean,
-  locale: Locale,
-): Promise<AdapterGenerateResult> {
-  const created: string[] = [];
-  const skipped: string[] = [];
-
-  async function writeIfAbsent(absPath: string, content: string): Promise<void> {
-    if (!force) {
-      try {
-        await readFile(absPath);
-        skipped.push(absPath);
-        return;
-      } catch {
-        // file doesn't exist — proceed
-      }
-    }
-    await mkdir(dirname(absPath), { recursive: true });
-    await writeFile(absPath, content, "utf8");
-    created.push(absPath);
-  }
-
-  // .cursor/rules/code-pact.mdc
-  await writeIfAbsent(join(cwd, profile.instruction_filename), cursorMdc(profile, locale));
-
-  // .context/cursor/
-  await mkdir(join(cwd, profile.context_dir), { recursive: true });
-
-  return { created, skipped };
+export async function generateCursorDesiredFiles(
+  input: AdapterGenerateInput,
+): Promise<DesiredAdapterFile[]> {
+  return [
+    {
+      path: input.profile.instruction_filename,
+      role: "rule",
+      content: cursorMdc(input.profile, input.locale),
+    },
+  ];
 }
+
+export const cursorAdapterDescriptor: AdapterDescriptor = {
+  generateDesiredFiles: generateCursorDesiredFiles,
+  capabilities: ["rules_file", "context_dir"] as const,
+  ownedPathGlobs: [".cursor/rules/code-pact.mdc"] as const,
+  adapterSchemaVersion: 1,
+};
