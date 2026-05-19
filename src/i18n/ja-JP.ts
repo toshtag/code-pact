@@ -266,6 +266,9 @@ export const messages = {
       editNotice:
         "「プロジェクト固有」とマークされたセクションを編集して、プロジェクトの規約を反映させてください。",
       workflowHeader: "タスクの進め方",
+      step0: "実行推奨を取得する (モデル階層、エフォート、計画姿勢、バジェット):",
+      step0Detail:
+        "JSON 出力からモデル選択、コンテキストバジェット、計画 vs 即着手の判断を行う。",
       step1: "コンテキストパックを取得する:",
       step2: "タスクを実装する。",
       step3: "タスクを完了としてマークする。verify を実行し、成功すれば `done` イベントを `.code-pact/state/progress.yaml` に追記する:",
@@ -276,6 +279,8 @@ export const messages = {
       step4: "結果をユーザーに報告する。",
       verifyNote:
         "低レベルコマンド `code-pact verify --phase <p> --task <t>` は、進捗イベントを記録せずに verify 出力を確認したい場合に利用できます。",
+      validateNote:
+        "非自明なタスク開始前に `code-pact validate --json` でプロジェクト全体の整合性 (schema / manifest / plan) を確認する。",
       packNote:
         "**内部コマンド:** `code-pact pack` は `task context` が内部的に呼び出すコマンドです。`pack` を直接呼び出さず、`code-pact task context <task-id>` を使用してください。",
       projectConventionsHeader: "プロジェクト固有の規約",

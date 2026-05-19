@@ -144,10 +144,10 @@ tailored to that model:
 
 ```sh
 # Generate CLAUDE.md with Opus 4.7–specific guidance:
-code-pact adapter --agent claude-code --model opus-4.7
+code-pact adapter install claude-code --model opus-4.7
 
 # Re-run skills only (skill files regenerated, CLAUDE.md left untouched):
-code-pact adapter --agent claude-code --regen-skills
+code-pact adapter install claude-code --regen-skills
 ```
 
 Supported values: `opus-4.7`, `opus-4.6`, `sonnet-4.6`. The `model_version` field in
@@ -158,6 +158,64 @@ After adapter generation, `.claude/skills/` is populated with:
 - Fixed skills: `/context`, `/verify`, `/progress`
 - Dynamic skills derived from `verification.commands` in all roadmap phases
   (e.g. `pnpm test` → `/test`, `pnpm typecheck` → `/typecheck`)
+
+## Upgrading an adapter safely (v0.9)
+
+When you bump code-pact, edit the roadmap, or change the agent profile, the adapter
+files on disk may drift from what the generator now produces. v0.9's `adapter upgrade`
+subcommand has a check/apply split so you never apply destructive changes without
+seeing them first.
+
+```sh
+# 1. Inspect drift without touching anything.
+code-pact adapter upgrade claude-code --check --json
+# exit 0: clean. exit 1: drift detected (read the plan[] to see each action).
+
+# 2. Apply non-destructive updates.
+code-pact adapter upgrade claude-code --write
+# Safe to run anytime — managed files you HAVEN'T edited get refreshed,
+# locally-edited managed files are refused and reported in plan[].
+
+# 3. If --write reported `refuse` actions you've decided to overwrite anyway:
+code-pact adapter upgrade claude-code --write --accept-modified
+# Only this flag overwrites locally-modified managed files.
+```
+
+`--force` in v0.9 is **unmanaged-adoption only**. It will NOT override
+`managed-modified` files. Destructive overwrite is gated behind `--accept-modified`
+specifically so a stray `--force` in a CI script can't blow away local edits.
+
+### Action enum
+
+`adapter upgrade --check` and `--write` return a `plan[]` array where each entry
+carries an `action` field. The eight values map to (`local × desired` state):
+
+| Action | Meaning |
+|---|---|
+| `write` | New file or recreated managed-missing file |
+| `skip` | Idempotent no-op (managed-clean × current) |
+| `adopt` | Existing on-disk file matches desired — recorded in manifest, no write |
+| `replace_unmanaged` | Overwrites an unmanaged stale file with `--force` |
+| `update` | Overwrites a managed file. Safe for managed-clean × stale (no `--accept-modified` needed) |
+| `update_manifest` | Manifest hash refresh only — disk content already matches desired |
+| `refuse` | Would destroy local modifications without `--accept-modified` |
+| `warn` | `--check`-only: unmanaged file flagged for adoption review |
+
+### Detect issues with `adapter doctor`
+
+`adapter doctor` is the read-only manifest-aware health check. Run it any time you
+suspect drift you can't quite see:
+
+```sh
+code-pact adapter doctor --json
+# Reports ADAPTER_FILE_MISSING / FILE_DRIFT / DESIRED_STALE / UNMANAGED_FILE /
+# GENERATOR_STALE / SCHEMA_DRIFT / PROFILE_DRIFT / MANIFEST_INVALID / MANIFEST_MISSING.
+```
+
+Global `code-pact doctor` becomes manifest-aware when a manifest exists: it picks up
+the same findings with an `[agent-name]` prefix on the message. With no manifest yet,
+it falls back to the legacy `ADAPTER_MISSING` warning — byte-identical to v0.8 so
+existing CI doesn't start flagging surprise errors after the v0.9 upgrade.
 
 ## Context quality (v0.5.1)
 
@@ -256,8 +314,13 @@ If any of the three fails, fix the underlying issue (or run `plan normalize --wr
 | Mark a task done (as agent) | `code-pact task complete <task-id> --agent <agent>` |
 | Add a phase interactively | `code-pact phase add` |
 | Add a task interactively | `code-pact task add <phase-id>` |
-| Generate / refresh adapter files | `code-pact adapter --agent <agent> [--model <ver>] [--force]` |
-| Regenerate skills only | `code-pact adapter --agent <agent> --regen-skills` |
+| List registered adapters + manifest state | `code-pact adapter list [--json]` |
+| Install adapter (first-time) | `code-pact adapter install <agent> [--model <ver>] [--force]` |
+| Check adapter drift (read-only) | `code-pact adapter upgrade <agent> --check [--json]` |
+| Apply adapter updates (safe, non-destructive) | `code-pact adapter upgrade <agent> --write` |
+| Apply adapter updates, overwriting local edits | `code-pact adapter upgrade <agent> --write --accept-modified` |
+| Adapter-scoped health check | `code-pact adapter doctor [--agent <name>] [--json]` |
+| Regenerate skills only | `code-pact adapter install <agent> --regen-skills` |
 | Show weighted progress | `code-pact progress` |
 | Health-check the project | `code-pact doctor` |
 | CI validation | `code-pact validate` |

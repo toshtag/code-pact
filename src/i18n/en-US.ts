@@ -268,6 +268,9 @@ export const messages = {
       editNotice:
         'Edit the sections marked "Project-specific" to reflect your project\'s conventions.',
       workflowHeader: "How to work on a task",
+      step0: "Get an execution recommendation (model tier, effort, planning posture, budget):",
+      step0Detail:
+        "The JSON drives model selection, context budget, and whether to plan or proceed directly.",
       step1: "Fetch the context pack:",
       step2: "Implement the task.",
       step3: "Mark the task complete. This runs verify and, on pass, appends a `done` event to `.code-pact/state/progress.yaml`:",
@@ -278,6 +281,8 @@ export const messages = {
       step4: "Report the result to the user.",
       verifyNote:
         "The low-level `code-pact verify --phase <p> --task <t>` is still available if you need to inspect verify output without recording a progress event.",
+      validateNote:
+        "Run `code-pact validate --json` to check overall project state (schema, manifest, plan integrity) before starting a non-trivial task.",
       packNote:
         "**Internal command:** `code-pact pack` is used internally by `task context`. Do not call `pack` directly — use `code-pact task context <task-id>` instead.",
       projectConventionsHeader: "Project-specific conventions",
