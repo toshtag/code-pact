@@ -65,7 +65,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
     description: |
       Coverage backfill plus P8 design registration. Create
       design/phases/P8-stable-control-plane.yaml and append P8 to
