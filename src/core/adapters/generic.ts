@@ -4,6 +4,11 @@ import type { AgentProfile } from "../schemas/agent-profile.ts";
 import type { ModelProfile } from "../schemas/model-profile.ts";
 import type { Locale } from "../../i18n/index.ts";
 import { messages as messageCatalog } from "../../i18n/index.ts";
+import type {
+  AdapterDescriptor,
+  AdapterGenerateInput,
+  DesiredAdapterFile,
+} from "./types.ts";
 
 // The generic adapter targets any agent that does not have a dedicated
 // instruction file convention (CLAUDE.md, AGENTS.md, etc). It writes one
@@ -101,3 +106,26 @@ export async function generateGenericAdapter(
 
   return { created, skipped };
 }
+
+// ---------------------------------------------------------------------------
+// AdapterDescriptor (P7 — pure desired-file generation)
+// ---------------------------------------------------------------------------
+
+export async function generateGenericDesiredFiles(
+  input: AdapterGenerateInput,
+): Promise<DesiredAdapterFile[]> {
+  return [
+    {
+      path: input.profile.instruction_filename,
+      role: "instruction",
+      content: agentInstructionsMd(input.profile, input.locale),
+    },
+  ];
+}
+
+export const genericAdapterDescriptor: AdapterDescriptor = {
+  generateDesiredFiles: generateGenericDesiredFiles,
+  capabilities: ["instructions_file", "context_dir"] as const,
+  ownedPathGlobs: ["docs/code-pact/agent-instructions.md"] as const,
+  adapterSchemaVersion: 1,
+};

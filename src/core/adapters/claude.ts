@@ -9,6 +9,11 @@ import { Roadmap } from "../schemas/roadmap.ts";
 import { Phase } from "../schemas/phase.ts";
 import type { Locale } from "../../i18n/index.ts";
 import { messages as messageCatalog } from "../../i18n/index.ts";
+import type {
+  AdapterDescriptor,
+  AdapterGenerateInput,
+  DesiredAdapterFile,
+} from "./types.ts";
 
 // ---------------------------------------------------------------------------
 // Model-specific guidance blocks
@@ -301,3 +306,58 @@ export async function generateClaudeAdapter(
 
   return { created, skipped };
 }
+
+// ---------------------------------------------------------------------------
+// AdapterDescriptor (P7 — pure desired-file generation)
+// ---------------------------------------------------------------------------
+
+export async function generateClaudeDesiredFiles(
+  input: AdapterGenerateInput,
+): Promise<DesiredAdapterFile[]> {
+  const { cwd, profile, modelProfiles, locale, modelVersion } = input;
+  const resolvedModelVersion = modelVersion ?? profile.model_version;
+  const skillDir = profile.skill_dir ?? ".claude/skills";
+
+  const files: DesiredAdapterFile[] = [
+    {
+      path: profile.instruction_filename,
+      role: "instruction",
+      content: claudeMd(profile, modelProfiles, locale, resolvedModelVersion),
+    },
+    { path: `${skillDir}/context.md`, role: "skill", content: SKILL_CONTEXT },
+    { path: `${skillDir}/verify.md`, role: "skill", content: SKILL_VERIFY },
+    { path: `${skillDir}/progress.md`, role: "skill", content: SKILL_PROGRESS },
+  ];
+
+  const verificationCommands = await readVerificationCommands(cwd);
+  const seenSkillNames = new Set<string>();
+  for (const cmd of verificationCommands) {
+    const skillName = deriveSkillName(cmd);
+    if (seenSkillNames.has(skillName)) continue;
+    seenSkillNames.add(skillName);
+    files.push({
+      path: `${skillDir}/${skillName}.md`,
+      role: "skill",
+      content: buildCommandSkill(skillName, cmd),
+    });
+  }
+
+  return files;
+}
+
+export const claudeAdapterDescriptor: AdapterDescriptor = {
+  generateDesiredFiles: generateClaudeDesiredFiles,
+  capabilities: [
+    "instructions_file",
+    "skills_dir",
+    "hooks_dir",
+    "context_dir",
+  ] as const,
+  ownedPathGlobs: [
+    "CLAUDE.md",
+    ".claude/skills/context.md",
+    ".claude/skills/verify.md",
+    ".claude/skills/progress.md",
+  ] as const,
+  adapterSchemaVersion: 1,
+};

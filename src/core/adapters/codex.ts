@@ -5,6 +5,11 @@ import type { ModelProfile } from "../schemas/model-profile.ts";
 import { ModelTier } from "../schemas/model-profile.ts";
 import type { Locale } from "../../i18n/index.ts";
 import { messages as messageCatalog } from "../../i18n/index.ts";
+import type {
+  AdapterDescriptor,
+  AdapterGenerateInput,
+  DesiredAdapterFile,
+} from "./types.ts";
 
 // ---------------------------------------------------------------------------
 // AGENTS.md template
@@ -113,3 +118,26 @@ export async function generateCodexAdapter(
 
   return { created, skipped };
 }
+
+// ---------------------------------------------------------------------------
+// AdapterDescriptor (P7 — pure desired-file generation)
+// ---------------------------------------------------------------------------
+
+export async function generateCodexDesiredFiles(
+  input: AdapterGenerateInput,
+): Promise<DesiredAdapterFile[]> {
+  return [
+    {
+      path: input.profile.instruction_filename,
+      role: "instruction",
+      content: agentsMd(input.profile, input.modelProfiles, input.locale),
+    },
+  ];
+}
+
+export const codexAdapterDescriptor: AdapterDescriptor = {
+  generateDesiredFiles: generateCodexDesiredFiles,
+  capabilities: ["instructions_file", "context_dir"] as const,
+  ownedPathGlobs: ["AGENTS.md"] as const,
+  adapterSchemaVersion: 1,
+};

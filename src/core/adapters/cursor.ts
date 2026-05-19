@@ -4,6 +4,11 @@ import type { AgentProfile } from "../schemas/agent-profile.ts";
 import type { ModelProfile } from "../schemas/model-profile.ts";
 import type { Locale } from "../../i18n/index.ts";
 import { messages as messageCatalog } from "../../i18n/index.ts";
+import type {
+  AdapterDescriptor,
+  AdapterGenerateInput,
+  DesiredAdapterFile,
+} from "./types.ts";
 
 // Cursor adapter (experimental, v0.2).
 //
@@ -119,3 +124,26 @@ export async function generateCursorAdapter(
 
   return { created, skipped };
 }
+
+// ---------------------------------------------------------------------------
+// AdapterDescriptor (P7 — pure desired-file generation)
+// ---------------------------------------------------------------------------
+
+export async function generateCursorDesiredFiles(
+  input: AdapterGenerateInput,
+): Promise<DesiredAdapterFile[]> {
+  return [
+    {
+      path: input.profile.instruction_filename,
+      role: "rule",
+      content: cursorMdc(input.profile, input.locale),
+    },
+  ];
+}
+
+export const cursorAdapterDescriptor: AdapterDescriptor = {
+  generateDesiredFiles: generateCursorDesiredFiles,
+  capabilities: ["rules_file", "context_dir"] as const,
+  ownedPathGlobs: [".cursor/rules/code-pact.mdc"] as const,
+  adapterSchemaVersion: 1,
+};
