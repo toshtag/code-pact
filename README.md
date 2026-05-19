@@ -6,18 +6,24 @@ The product idea: agents should not read sprawling `design/` trees themselves an
 
 ## Status
 
-Alpha. Published on npm under the `alpha` dist-tag — install with `npm install code-pact@alpha` or check the current version with `npm view code-pact@alpha version`. The `latest` dist-tag is held back until the Cursor / Gemini CLI adapters graduate; the API and command surface may still shift in the meantime. Release notes and the running version history live in [`CHANGELOG.md`](CHANGELOG.md).
+v1.0 freezes the public CLI surface. Every command classified `Stable (v1.0)` in [`docs/cli-contract.md`](docs/cli-contract.md) — `doctor`, `validate`, `recommend`, `plan lint/normalize/analyze/prompt`, `task context/start/status/block/resume/complete`, `adapter list/install/doctor/upgrade`, `init`, `phase add/import/ls/show`, `pack`, `verify`, `progress` — keeps its flags, exit codes, and JSON envelope shape across the v1.x line. Wizard-only commands (`plan brief`, `plan constitution`, `task add`) are `Stable (human-output)`.
+
+The Cursor and Gemini CLI adapters remain **Experimental** — their generated file formats may shift in minor releases to track upstream tooling changes. They are intentionally excluded from the adapter-conformance suite.
+
+Release notes and the running version history live in [`CHANGELOG.md`](CHANGELOG.md). Migration guidance for projects upgrading from v0.6 / v0.7 / v0.8 / v0.9 lives in [`docs/migration.md`](docs/migration.md).
 
 ## Install
 
 ```sh
 # One-off invocation (no install)
-npx code-pact@alpha --version
+npx code-pact --version
 
 # Global install
-npm install -g code-pact@alpha
+npm install -g code-pact
 code-pact --version
 ```
+
+Past alpha releases remain available under the `alpha` dist-tag (`npm install code-pact@alpha`) for users who pinned to pre-v1.0 behaviour. New projects should use the default (`latest`) tag.
 
 Contributors can also run from a clone with `pnpm link --global`, or install a local tarball produced by `npm pack` — see [Development](#development).
 
@@ -26,7 +32,7 @@ Contributors can also run from a clone with `pnpm link --global`, or install a l
 ```sh
 # 1. Initialize an existing project. Run with no flags in your terminal
 #    to launch the interactive wizard.
-npx code-pact@alpha init
+npx code-pact init
 
 # 2. (Optional) Build the planning artifacts that feed AI-assisted roadmapping.
 #    Run these once at the start of the project:
@@ -62,13 +68,13 @@ code-pact task context <task-id> --agent <agent>
 code-pact task complete <task-id> --agent <agent>
 ```
 
-Subsequent commands assume `code-pact` is on `PATH` (`npm install -g code-pact@alpha`). If you prefer not to install globally, prefix each invocation with `npx code-pact@alpha`.
+Subsequent commands assume `code-pact` is on `PATH` (`npm install -g code-pact`). If you prefer not to install globally, prefix each invocation with `npx code-pact`.
 
 The `init` wizard asks, in order: language (English / 日本語), which agents to support (multi-select from Claude Code / Codex / Generic), the default agent, whether to generate adapter files now, the default verification command, whether to create a sample first phase, and whether to collect a project brief (writes `design/brief.md`). After completing, it prints **Next Steps** reminders to stderr. Once initialized, the selected locale is saved in `.code-pact/project.yaml` so subsequent commands automatically use that language without `--locale`.
 
 Use `code-pact doctor` to check project health at any time (invalid YAML, orphan phase files, duplicate task ids, missing adapter files, …). The CI-friendly `code-pact validate` variant exits 1 on errors; add `--strict` to promote warnings to errors as well.
 
-At phase or PR boundaries, run the v0.7 **planning integrity** checkpoints:
+At phase or PR boundaries, run the **planning integrity** checkpoints:
 
 ```sh
 code-pact plan lint --json          # schema + naming + missing/orphan references
@@ -76,7 +82,7 @@ code-pact plan normalize --check    # whitespace/newline drift (--write to apply
 code-pact plan analyze --json       # design status vs progress-log drift
 ```
 
-`plan lint` and `plan analyze` accept `--strict` to fail on warnings. `plan normalize --write` preserves YAML comments and Markdown hard line breaks. Pre-v0.7 done tasks (no progress events) are hidden from `plan analyze` by default; pass `--include-historical` to surface them without affecting the exit code.
+`plan lint` and `plan analyze` accept `--strict` to fail on warnings. `plan normalize --write` preserves YAML comments and Markdown hard line breaks. Historical done tasks (design `status: done` with no progress events — typically from before the v0.6 task state machine) are hidden from `plan analyze` by default; pass `--include-historical` to surface them without affecting the exit code.
 
 ## Agent-facing usage
 
