@@ -14,6 +14,12 @@ export type {
   AdapterInstallFile,
 } from "./adapter-install.ts";
 
+export { runAdapterList } from "./adapter-list.ts";
+export type {
+  AdapterListEntry,
+  AdapterListResult,
+} from "./adapter-list.ts";
+
 // ---------------------------------------------------------------------------
 // Back-compat aliases — the v0.8 surface used `runGenerateAdapter` and
 // `AdapterOptions` / `AdapterResult`. v0.9 keeps these names working so
