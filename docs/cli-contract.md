@@ -417,31 +417,123 @@ Cross-artifact integrity check. Compares design intent (task and phase `status`)
 }
 ```
 
-## `adapter` (v0.5)
+## `adapter` (v0.9)
 
-`code-pact adapter [--agent <name>] [--force] [--model <version>] [--regen-skills] [--json]`
+In v0.9 `adapter` becomes a subcommand group. Each subcommand produces a stable
+`{ok, data} | {ok:false, error:{code, message}}` JSON envelope under `--json`. The bare-form
+`code-pact adapter [--agent <name>] ...` (v0.5–v0.8) continues to work and routes internally
+to `adapter install` with a one-line stderr deprecation notice (suppressed under `--json`);
+it will be removed in v0.10.
 
-### `--model <version>`
+- `adapter list [--json]` — enumerate registered adapters with manifest state
+- `adapter install <agent> [--force] [--model <v>] [--regen-skills] [--json]` — first-time install + writes manifest
+- `adapter upgrade <agent> --check [--json]` — read-only drift report **(P7-T5, not yet implemented in v0.9 P7-T3)**
+- `adapter upgrade <agent> --write [--force] [--accept-modified] [--json]` — apply changes **(P7-T5, not yet implemented in v0.9 P7-T3)**
+- `adapter doctor [--agent <name>] [--json]` — adapter-scoped diagnostics **(P7-T4, not yet implemented in v0.9 P7-T3)**
 
-Generates a **model-aware** instruction file for the claude-code adapter. The file includes a
-"Model guidance" section with effort-level and extended-thinking guidance tailored to the
-specific Claude model version.
+### Per-agent manifest
 
-Supported values: `opus-4.7`, `opus-4.6`, `sonnet-4.6`. Unknown values produce a fallback
-note instead of an error, so future model names do not break existing pipelines.
+`adapter install` writes `.code-pact/adapters/<agent>.manifest.yaml` recording every file
+code-pact generated, its sha256 hash (computed from LF-normalized UTF-8 bytes), and a
+fingerprint of the adapter-output-affecting profile fields. The manifest is the source of
+truth for `adapter upgrade` / `adapter doctor` (P7-T4/T5). Schema is documented in
+`src/core/schemas/adapter-manifest.ts`; see `RelativePosixPath` for the path-safety rules
+(no `..`, no leading `/` or `~`, no `\`, no Windows drive letters, no `.` segments).
 
-The `--model` flag takes precedence over the `model_version` field in the agent profile YAML.
-If neither is set, the generic template (no model-specific section) is used.
+### `--force` semantics — narrowed in v0.9
 
-### `--regen-skills`
+**Behavior change vs v0.8.** In v0.8, `adapter --force` overwrote every file unconditionally.
+In v0.9, `--force` is **unmanaged-adoption only**: it adopts pre-existing files into the
+manifest, but it NEVER overwrites a file already recorded in the manifest (`managed-modified`).
 
-Forces all skill files in `.claude/skills/` to be regenerated without overwriting the main
-`CLAUDE.md` instruction file. Use after adding new phases with new `verification.commands`.
+| Disk state | `--force` action |
+|---|---|
+| `new` (manifest no, disk no) | always write (`--force` not needed) |
+| `unmanaged × current` (disk matches desired, no manifest entry) | with `--force`: **adopt** (manifest only, no write) |
+| `unmanaged × stale` (disk differs from desired, no manifest entry) | with `--force`: **replace_unmanaged** (overwrite + manifest) |
+| `managed-*` (already in the manifest) | `--force` is ignored — install is hands-off |
 
-### Automatic skill generation (v0.5.2)
+Destructive overwrite of a managed-modified file requires `adapter upgrade --write --accept-modified` (P7-T5).
+The `--regen-skills` flag is a role-scoped force: it makes `--force` apply only to files with
+`role: skill`. It still cannot override `managed-modified`.
 
-When `adapter --agent claude-code` runs, it reads `verification.commands` from every phase
-in `design/roadmap.yaml` and auto-generates a skill file for each unique command:
+### `adapter list [--json]`
+
+Returns one entry per registered adapter:
+
+```json
+{
+  "ok": true,
+  "data": {
+    "agents": [
+      {
+        "name": "claude-code",
+        "supported": true,
+        "experimental": false,
+        "enabled": true,
+        "manifestPath": "/abs/path/.code-pact/adapters/claude-code.manifest.yaml",
+        "profilePath": "/abs/path/.code-pact/agent-profiles/claude-code.yaml",
+        "manifestPresent": true,
+        "fileCount": 14,
+        "lastGeneratedAt": "2026-05-19T12:00:00.000Z",
+        "generatorVersion": "0.9.0-alpha.0"
+      }
+    ]
+  }
+}
+```
+
+`experimental: true` for `cursor` and `gemini-cli`. `enabled: true` when the agent appears
+under `project.yaml`'s `agents:` list with `enabled != false`. `manifestPresent: false` when
+no manifest exists yet; `fileCount` / `lastGeneratedAt` / `generatorVersion` are omitted
+in that case. When the manifest YAML exists but fails parse or schema validation, the entry
+sets `manifestInvalid: true` and omits the detail fields — use `adapter doctor` (P7-T4) for
+the parse error.
+
+### `adapter install <agent> [--force] [--model <v>] [--regen-skills] [--json]`
+
+Generates the adapter for `<agent>` (positional, required) and writes the manifest.
+
+`--model <version>` produces a **model-aware** instruction file for the claude-code adapter
+with effort-level and extended-thinking guidance tailored to a specific Claude version
+(`opus-4.7`, `opus-4.6`, `sonnet-4.6`). Unknown values produce a fallback note rather than
+an error. Takes precedence over `model_version` in the agent profile YAML; if neither is
+set, the version-agnostic template is used.
+
+`--regen-skills` is the role-scoped `--force` described above; documented separately because
+it's the common way users handle stale dynamic skill files after the roadmap's
+`verification.commands` changes.
+
+Result envelope:
+
+```json
+{
+  "ok": true,
+  "data": {
+    "agentName": "claude-code",
+    "manifestPath": "/abs/.code-pact/adapters/claude-code.manifest.yaml",
+    "generatorVersion": "0.9.0-alpha.0",
+    "created": ["/abs/CLAUDE.md", "/abs/.claude/skills/context.md"],
+    "skipped": [],
+    "adopted": [],
+    "files": [
+      { "path": "/abs/CLAUDE.md", "relPath": "CLAUDE.md", "role": "instruction", "action": "write" }
+    ]
+  }
+}
+```
+
+`created` lists files written (action `write` or `replace_unmanaged`). `adopted` lists files
+recorded in the manifest without write (action `adopt`). `skipped` lists files we deliberately
+did not touch (action `skip`, e.g. `managed-clean × current` is idempotent). `files[].action`
+follows the eight-value enum from `src/core/adapters/file-state.ts`.
+
+Exit codes: `0` ok, `2` config (missing positional / `AGENT_NOT_FOUND`), `3` internal.
+
+### Automatic skill generation
+
+When the claude-code adapter generates files, it reads `verification.commands` from every
+phase in `design/roadmap.yaml` and emits a slash-command skill file for each unique command:
 
 | Command | Skill file | Slash command |
 |---|---|---|
@@ -453,6 +545,14 @@ Skill names are derived by stripping the package-manager prefix (`pnpm`, `npm ru
 `bun run`) and sanitizing to kebab-case. If `design/roadmap.yaml` does not exist, no dynamic
 skills are generated (the three fixed skills — `/context`, `/verify`, `/progress` — are always
 written). Duplicate commands across phases produce a single skill file.
+
+### Bare-form back-compat (deprecated)
+
+`code-pact adapter [--agent <name>] [--force] [--model <v>] [--regen-skills] [--json]`
+continues to work in v0.9 and is internally routed to `adapter install`. When `--agent` is
+omitted, it defaults to `claude-code`. A one-line deprecation notice is printed to stderr;
+the notice is suppressed under `--json` so agents reading the JSON envelope are not
+surprised by an extra stderr line. The bare form will be removed in v0.10.
 
 ## `task context` — context quality gates (v0.5.1)
 
