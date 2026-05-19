@@ -20,3 +20,6 @@ phases:
   - id: P7
     path: design/phases/P7-adapter-platform.yaml
     weight: 20
+  - id: P8
+    path: design/phases/P8-stable-control-plane.yaml
+    weight: 15
