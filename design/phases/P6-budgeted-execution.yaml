@@ -3,7 +3,7 @@ name: Budgeted Execution
 weight: 20
 confidence: medium
 risk: low
-status: planned
+status: done
 objective: |
   Extend `recommend` from a 4-line tier hint into a deterministic execution-
   planning contract that returns model tier, effort, context profile, planning
