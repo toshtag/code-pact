@@ -561,30 +561,128 @@ Allowed only from `started` or `resumed`. Block from `planned`, `blocked`, or `d
 
 Appends a `resumed` event. Allowed only from `blocked` — any other current state returns `INVALID_TASK_TRANSITION` (exit 2).
 
-## `recommend`
+## `recommend` (v0.8)
 
-`code-pact recommend [--phase <id>] [--task <id>] [--agent <name>] [--json]` suggests a Claude model tier and effort level for a given task based on its attributes (`type`, `ambiguity`, `risk`, `context_size`, `write_surface`, `verification_strength`, `expected_duration`).
+`code-pact recommend --phase <id> --task <id> [--agent <name>] [--json]` returns a deterministic execution plan for a given task — model tier, effort, context profile, planning posture, escalation order, preflight commands, and a categorical budget profile — based on Task metadata (`type`, `ambiguity`, `risk`, `context_size`, `write_surface`, `verification_strength`, `expected_duration`, `requires_decision`).
 
-This is the entry point of the agent-facing loop: agents should call `recommend` first to choose model/effort before fetching the context pack.
+This is the entry point of the agent-facing loop: agents should call `recommend` first, **before** fetching the context pack or marking the task started, then use its output to decide what to load, how hard to think, and what to verify before implementation.
 
-JSON envelope:
+Read-only. The command does not mutate any state.
+
+**JSON shape:**
+
+All field names are camelCase. Enum / identifier values are snake_case where applicable (matches existing `model_map` keys like `highest_reasoning`).
 
 ```json
 {
   "ok": true,
   "data": {
-    "task_id": "P1-T1",
-    "phase_id": "P1",
-    "agent": "claude-code",
-    "tier": "balanced_coding",
-    "model_id": "claude-sonnet-4-6",
-    "effort": "medium",
-    "reasons": ["feature task with medium write surface"]
+    "phaseId": "P6",
+    "taskId": "P6-T1",
+    "agentName": "claude-code",
+    "tier": "highest_reasoning",
+    "effort": "high",
+    "modelId": "claude-opus-4-7",
+    "reasons": ["task type is architecture"],
+
+    "contextProfile": "large",
+    "verificationProfile": "strong",
+    "planningRequired": true,
+    "ambiguityAction": "clarify_before_implementation",
+    "allowedEscalation": ["increase_context", "ask_human"],
+    "preflight": [
+      {
+        "id": "plan_lint",
+        "command": "plan lint",
+        "argv": ["plan", "lint", "--json"],
+        "displayCommand": "code-pact plan lint --json",
+        "reason": "planning_required",
+        "required": false
+      },
+      {
+        "id": "plan_analyze",
+        "command": "plan analyze",
+        "argv": ["plan", "analyze", "--json"],
+        "displayCommand": "code-pact plan analyze --json",
+        "reason": "planning_required",
+        "required": false
+      }
+    ],
+    "budgetProfile": {
+      "toolCalls": "medium",
+      "contextFiles": "many",
+      "verificationCommands": "full"
+    },
+    "structuredReasons": [
+      { "factor": "type", "value": "architecture", "effect": "tier=highest_reasoning" }
+    ]
   }
 }
 ```
 
-Error codes follow the standard set: `PHASE_NOT_FOUND`, `TASK_NOT_FOUND`, `AGENT_NOT_FOUND`. The command does not mutate any state.
+The output is zod-validated before return. The contract uses strict mode at every level, so accidental snake_case drift (e.g. `planning_required` next to `planningRequired`) fails loudly instead of producing a silent split contract.
+
+### Field reference
+
+**Existing fields (preserved from earlier versions):**
+
+| Field | Type | Notes |
+|---|---|---|
+| `phaseId` | string | Phase ID as passed in `--phase`. |
+| `taskId` | string | Task ID as passed in `--task`. |
+| `agentName` | string | Agent name as passed in `--agent` (defaults to `claude-code`). |
+| `tier` | enum | `highest_reasoning` \| `balanced_coding` \| `cheap_mechanical`. From `recommendTier(task)`. |
+| `effort` | enum | `low` \| `medium` \| `high`. Tier-dependent. |
+| `modelId` | string | Concrete vendor model ID resolved via `AgentProfile.model_map[tier]`. |
+| `reasons` | string[] | Human-readable rationale strings for the tier choice. Always at least one entry. |
+
+**v0.8 additive fields:**
+
+| Field | Type | Trigger |
+|---|---|---|
+| `contextProfile` | `small` \| `medium` \| `large` | Pass-through of `context_size`, bumped up one notch when `ambiguity == high`. |
+| `verificationProfile` | `weak` \| `medium` \| `strong` | Pass-through of `verification_strength`. |
+| `planningRequired` | boolean | True for `type == architecture`, `ambiguity in {medium, high}`, `risk == high`, or `requires_decision == true`. |
+| `ambiguityAction` | `proceed` \| `clarify_before_implementation` \| `split_recommended` | Top-down: `requires_decision == true` → clarify; `ambiguity == high` → clarify; `ambiguity == medium && risk == high` → clarify; `expected_duration == long && write_surface == high && ambiguity == medium && risk != high` → split; else proceed. |
+| `allowedEscalation` | EscalationStep[] | Tier-driven ordered list of escalation hints. `cheap_mechanical` → `[increase_effort, increase_context, escalate_tier]`; `balanced_coding` → `[increase_context, increase_effort, escalate_tier, ask_human]`; `highest_reasoning` → `[increase_context, ask_human]` (no tier above). |
+| `preflight` | PreflightEntry[] | Suggested commands to run **before** implementation. Capped at 3 entries. v0.8 emits, in order: `plan lint` and `plan analyze` when `planningRequired == true`; `task status <id>` when `task.status == "in_progress"`. Agent decides whether to run them. |
+| `budgetProfile` | BudgetProfile | Three categorical magnitudes — **not** token / cost / time estimates. See below. |
+| `structuredReasons` | StructuredReason[] | Machine-readable mirror of `reasons[]`. Each entry pairs one Task factor with one effect on the output. Always at least one entry. |
+
+**PreflightEntry shape:**
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | string | Stable identifier (`plan_lint`, `plan_analyze`, `task_status` in v0.8). |
+| `command` | string | Human-readable command name. |
+| `argv` | string[] | argv tail to pass to `code-pact`. |
+| `displayCommand` | string | Full command string for human display. |
+| `reason` | string | Why this entry was emitted (e.g. `planning_required`, `task_in_progress`). |
+| `required` | boolean | Always `false` in v0.8 — preflight is advisory, never mandatory. |
+
+**BudgetProfile shape:**
+
+| Field | Type | Decision rule |
+|---|---|---|
+| `toolCalls` | `low` \| `medium` \| `high` | `high` if `write_surface == high` OR `expected_duration == long`; `low` if `write_surface == low` (and not the high case above); else `medium`. |
+| `contextFiles` | `few` \| `several` \| `many` | `small` → `few`; `medium` → `several`; `large` → `many` (mapped from `context_size`). |
+| `verificationCommands` | `minimal` \| `standard` \| `full` | Pass-through of `verification_strength` (`weak` → `minimal`; `medium` → `standard`; `strong` → `full`). |
+
+`budgetProfile` is intentionally **categorical**, not numeric. It is a relative-magnitude hint, not an estimate of actual tokens, cost, or time. Provider-side token estimation is out of scope for v0.8.
+
+**StructuredReason shape:**
+
+| Field | Type | Notes |
+|---|---|---|
+| `factor` | string | Task factor that influenced the output (e.g. `type`, `ambiguity`, `requires_decision`). |
+| `value` | string | Observed value of that factor (e.g. `architecture`, `high`, `true`). |
+| `effect` | string | The output property it drove (e.g. `tier=highest_reasoning`, `planning_required`, `ambiguity_action=clarify_before_implementation`). |
+
+**Exit codes:**
+- `0` — success
+- `2` — missing `--phase` / `--task`, or unknown phase / task / agent
+
+**Error codes:** `PHASE_NOT_FOUND`, `TASK_NOT_FOUND`, `AGENT_NOT_FOUND`, `CONFIG_ERROR`.
 
 ## Locale resolution
 

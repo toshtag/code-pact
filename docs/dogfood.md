@@ -31,9 +31,11 @@ code-pact validate       # exits 1 if any errors exist
 ## Per-task flow
 
 ```sh
-# 0. (Optional) Ask code-pact which model tier and effort fit the task,
-#    based on the task's attributes (type / ambiguity / risk / etc.).
-code-pact recommend --phase <phase-id> --task <task-id>
+# 0. Start every task here. recommend returns a deterministic execution
+#    plan for the task — model tier and effort to use, context profile,
+#    whether planning is required, escalation order, a preflight command
+#    list, and a categorical budget profile. v0.8+.
+code-pact recommend --phase <phase-id> --task <task-id> --json
 
 # 1. Pick a task from the current phase and fetch its context pack.
 #    Output goes to stdout — no files written.
@@ -65,6 +67,19 @@ do not need to pass a phase id.
 A task that is currently `blocked` cannot be completed directly — `task complete`
 returns `INVALID_TASK_TRANSITION`. Resume it first so the `resumed` event
 records the decision that unblocked the task.
+
+### Reading `recommend --json` (v0.8)
+
+The fields most worth wiring into agent behavior:
+
+- `tier` / `effort` / `modelId` — choose which model to invoke and how hard to think.
+- `contextProfile` (`small` / `medium` / `large`) — how much surrounding context to pull. `large` includes `design/constitution.md` and decision files.
+- `planningRequired` (boolean) — if `true`, plan the implementation before writing code. Combined with `ambiguityAction`, this tells you whether the next step is "go" or "go ask the human."
+- `ambiguityAction` (`proceed` / `clarify_before_implementation` / `split_recommended`) — `clarify_before_implementation` means stop and ask; `split_recommended` means the task is too wide for one shot, break it up first.
+- `preflight[]` — ordered list of `code-pact` commands to run before implementation. Each entry has `argv` ready to pass to the CLI and a `reason` explaining why it was emitted. `required: false` everywhere in v0.8 — advisory, not mandatory.
+- `budgetProfile` — categorical hints (not token counts) for how many tool calls, context files, and verification commands to expect.
+
+The contract is strictly additive — earlier consumers that only read `tier` / `effort` / `modelId` / `reasons` continue to work unchanged.
 
 ## Inspecting state
 
@@ -232,7 +247,7 @@ If any of the three fails, fix the underlying issue (or run `plan normalize --wr
 | Write project constitution | `code-pact plan constitution` |
 | Generate AI planning prompt | `code-pact plan prompt [--clipboard]` |
 | Bulk-import AI-generated roadmap | `code-pact phase import <yaml> [--strict]` |
-| Recommend model tier / effort for a task | `code-pact recommend --phase <phase-id> --task <task-id>` |
+| Get the execution plan for a task (tier / planning / preflight / budget) | `code-pact recommend --phase <phase-id> --task <task-id> [--json]` |
 | Fetch context for a task (as agent) | `code-pact task context <task-id> --agent <agent>` |
 | Mark a task started (as agent) | `code-pact task start <task-id> --agent <agent>` |
 | Block a task with a recorded reason | `code-pact task block <task-id> --reason "<text>"` |

@@ -1,0 +1,142 @@
+id: P6
+name: Budgeted Execution
+weight: 20
+confidence: medium
+risk: low
+status: planned
+objective: |
+  Extend `recommend` from a 4-line tier hint into a deterministic execution-
+  planning contract that returns model tier, effort, context profile, planning
+  posture, ambiguity action, escalation order, preflight commands, and a
+  categorical budget profile. Strictly additive over v0.7 — old consumers see
+  byte-identical v0.7 fields; new consumers get richer machine-readable
+  rationale. No new task schema fields, no provider integration, no telemetry,
+  no eval harness.
+non_goals:
+  - new task schema fields (requires_decision is already in the v0.6 schema)
+  - .code-pact/budget-policy.yaml repo-local override (deferred to v0.9)
+  - phase-level preflight triggers (sibling in-progress tasks, normalize drift)
+  - derived-state-aware preflight (blocked/resumed) — would need a derivedTaskState
+    field on RecommendContext and break the v0.8 pure / no-I/O boundary
+  - per-agent budget overrides in agent profile
+  - actual token estimation (would require provider integration)
+  - eval / measurement harness
+  - automatic execution of preflight commands (advisory only)
+  - exit code semantics change (recommend still exits 0 unless config error)
+  - new commands — extends recommend only
+definition_of_done:
+  - RecommendResultV2 zod schema with .strict() at every level locks the JSON contract
+  - five pure no-I/O decision modules under src/core/recommend/ map Task metadata to v0.8 fields
+  - runRecommend composes all modules and validates output through the zod schema
+  - formatRecommend renders Planning / Escalation / Preflight / Budget sections beneath the existing 5-line summary
+  - all v0.7 fields (phaseId / taskId / agentName / tier / effort / modelId / reasons) are byte-identical for pre-v0.8 fixtures
+  - docs/cli-contract.md covers every v0.8 field with type, allowed values, and trigger
+  - docs/dogfood.md promotes recommend to the recommended step 0 and shows how to read the JSON
+  - design/roadmap.yaml lists P6 and design/phases/P6-budgeted-execution.yaml exists
+  - package.json bump to 0.8.0-alpha.0 and CHANGELOG entry handled in release prep, not in P6-T1〜T5
+verification:
+  commands:
+    - pnpm typecheck
+    - pnpm test
+    - pnpm build
+    - node dist/cli.js plan lint --json
+    - node dist/cli.js plan normalize --check --json
+    - node dist/cli.js plan analyze --json
+    - node dist/cli.js recommend --phase P6 --task P6-T5 --json
+tasks:
+  - id: P6-T1
+    type: architecture
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: strong
+    expected_duration: short
+    status: done
+    description: |
+      RecommendResultV2 zod schema. Strictly additive over v0.7 — camelCase
+      field names matching existing phaseId/taskId/agentName/modelId, with
+      .strict() at every level so accidental snake_case drift (e.g.
+      planning_required next to planningRequired) fails loudly instead of
+      producing a silent split contract. 30 unit tests cover happy path,
+      required fields, enum guards, the drift guard, preflight 3-item cap,
+      and inner shapes for PreflightEntry / BudgetProfile / StructuredReason.
+      Merged via PR #59.
+  - id: P6-T2
+    type: feature
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: done
+    description: |
+      Four pure no-I/O decision modules under src/core/recommend/:
+      context-profile (context_size + ambiguity → contextProfile),
+      planning (isPlanningRequired + recommendAmbiguityAction),
+      escalation (tier → ordered EscalationStep[]), and budget
+      (categorical BudgetProfile — explicitly NOT a token/cost/time
+      estimate). 45 unit tests cover every decision-table row plus
+      composition / shared-mutable-state guards. Modules not yet wired
+      into runRecommend; CLI output unchanged in this slice.
+      Merged via PR #60.
+  - id: P6-T3
+    type: feature
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: strong
+    expected_duration: short
+    status: done
+    description: |
+      preflight decision module. Task-derivable triggers only, capped at 3
+      entries. v0.8 emits plan_lint + plan_analyze on planningRequired and
+      task_status with task.id interpolated when task.status == "in_progress".
+      Each emitted entry is parsed through the PreflightEntry zod schema in
+      a unit test to lock the producer/contract relationship. Blocked/
+      derived-state-aware preflight deferred to v0.9 (would need progress
+      log I/O). 16 unit tests. Merged via PR #61.
+  - id: P6-T4
+    type: feature
+    ambiguity: low
+    risk: low
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: done
+    description: |
+      Wire all decision modules into runRecommend; extend formatRecommend
+      with Planning / Escalation / Preflight / Budget sections beneath the
+      5-line v0.7 summary. Public RecommendResult type aliases
+      RecommendResultV2 so callers keep working with stricter inferred
+      field types. structuredReasons is a lightweight machine-readable
+      mirror — each entry pairs one Task factor with one effect. Output
+      zod-validated before return. 18 integration tests cover back-compat
+      regression (v0.7 fields byte-identical for the project-a fixture),
+      v0.8 field presence, tier variety, human formatter sections, and a
+      subprocess test confirming the {ok:true,data:{...}} envelope shape
+      is preserved. One follow-up fix (f812cd0) moved the empty-preflight
+      formatter test off the gitignored local agent profile so CI passes
+      on a clean checkout. Merged via PR #62.
+  - id: P6-T5
+    type: docs
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: done
+    description: |
+      Documentation and design state. docs/cli-contract.md recommend section
+      rewritten for v0.8 with per-field type / allowed values / trigger and
+      a corrected camelCase JSON example (fixes a pre-existing drift where
+      the doc showed snake_case keys but the implementation has always
+      emitted camelCase). docs/dogfood.md promotes recommend from "step 0
+      (optional)" to the recommended starting point and adds a "Reading
+      recommend --json" section. design/roadmap.yaml appends P6 and this
+      phase file is created. package.json bump and CHANGELOG entry are
+      deliberately NOT in this task — those belong to release prep.
