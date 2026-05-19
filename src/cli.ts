@@ -1861,11 +1861,24 @@ async function cmdTaskAdd(
   const m = messages[locale];
   const cwd = process.cwd();
 
-  // Positional: phase-id
-  const phaseId = argv.find((a) => !a.startsWith("-"));
+  // Honor post-command --json the same way every other `task` subcommand does
+  // (see cmdTaskStart / cmdTaskStatus / cmdTaskComplete). Pre-v1.0, `task add`
+  // only read globalJson, so `code-pact task add P1 --json` silently dropped
+  // to human stderr — a v0.6 regression relative to the BUG-001 contract.
+  const json = globalJson || argv.includes("--json");
+
+  // Positional: phase-id (the first non-flag token, and not the value following --id)
+  const idFlagIdx = argv.indexOf("--id");
+  const explicitId = idFlagIdx !== -1 ? argv[idFlagIdx + 1] : undefined;
+  const phaseId = argv.find((a, i) => {
+    if (a.startsWith("-")) return false;
+    if (idFlagIdx !== -1 && i === idFlagIdx + 1) return false;
+    return true;
+  });
+
   if (!phaseId) {
     const msg = "task add requires a phase id: code-pact task add <phase-id>";
-    if (globalJson) {
+    if (json) {
       process.stdout.write(
         `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
       );
@@ -1875,13 +1888,9 @@ async function cmdTaskAdd(
     return 2;
   }
 
-  // Optional --id flag
-  const idFlagIdx = argv.indexOf("--id");
-  const explicitId = idFlagIdx !== -1 ? argv[idFlagIdx + 1] : undefined;
-
   if (!isInteractive()) {
     const msg = "task add is interactive and requires a TTY. Use --non-interactive phase add with tasks in a phase import file instead.";
-    if (globalJson) {
+    if (json) {
       process.stdout.write(
         `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
       );
@@ -1893,7 +1902,7 @@ async function cmdTaskAdd(
 
   try {
     const result = await runTaskAdd({ cwd, phaseId, locale, id: explicitId });
-    if (globalJson) {
+    if (json) {
       process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
     } else {
       process.stderr.write(`${m.task.added(result.taskId, result.phaseId, result.phasePath)}\n`);
@@ -1903,7 +1912,7 @@ async function cmdTaskAdd(
     const code = (err as NodeJS.ErrnoException).code;
     const message = err instanceof Error ? err.message : String(err);
     if (code === "PHASE_NOT_FOUND" || code === "DUPLICATE_TASK_ID") {
-      if (globalJson) {
+      if (json) {
         process.stdout.write(
           `${JSON.stringify({ ok: false, error: { code, message } })}\n`,
         );

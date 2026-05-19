@@ -1307,3 +1307,107 @@ describe("CLI: adapter --agent gemini-cli (v0.2 experimental)", () => {
     ]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// v1.0 P8-T1: validate subprocess coverage
+// ---------------------------------------------------------------------------
+//
+// `validate` is the CI-friendly variant of `doctor` (exit 1 on errors, 0 on
+// warnings only; --strict promotes warnings to exit 1). It is part of the
+// Stable (v1.0) public contract surface, so it needs subprocess-level
+// coverage that asserts both the JSON envelope and the human-output paths.
+
+describe("CLI: validate", () => {
+  it("validate --json on a clean project returns {ok:true,data} and exit 0", () => {
+    run(["init", "--non-interactive", "--locale", "en-US", "--agent", "claude-code", "--json"]);
+    const res = run(["validate", "--json"]);
+    expect(res.code).toBe(0);
+    const parsed = JSON.parse(res.stdout) as { ok: boolean; data: { ok: boolean; issues: unknown[] } };
+    expect(parsed.ok).toBe(true);
+    expect(parsed.data.ok).toBe(true);
+    expect(Array.isArray(parsed.data.issues)).toBe(true);
+  });
+
+  it("validate (human output) on a clean project prints success and exits 0", () => {
+    run(["init", "--non-interactive", "--locale", "en-US", "--agent", "claude-code", "--json"]);
+    const res = run(["validate"]);
+    expect(res.code).toBe(0);
+    expect(res.stdout).toContain("Project validation passed.");
+  });
+
+  it("validate --strict --json on a project with warnings returns {ok:false,error:VALIDATE_FAILED} and exit 1", () => {
+    // A fresh init project has no design/brief.md → BRIEF_MISSING warning.
+    // Under --strict, that warning should trip exit 1.
+    run(["init", "--non-interactive", "--locale", "en-US", "--agent", "claude-code", "--json"]);
+    const res = run(["validate", "--strict", "--json"]);
+    expect(res.code).toBe(1);
+    const parsed = JSON.parse(res.stdout) as {
+      ok: boolean;
+      error: { code: string };
+      data: { ok: boolean; issues: { severity: string }[] };
+    };
+    expect(parsed.ok).toBe(false);
+    expect(parsed.error.code).toBe("VALIDATE_FAILED");
+    expect(parsed.data.issues.length).toBeGreaterThan(0);
+  });
+
+  it("validate (non-JSON) on an uninitialized project still emits a single stderr line and exits non-zero", () => {
+    // No `init` here — the project has no .code-pact/ at all.
+    const res = run(["validate"]);
+    expect([1, 2]).toContain(res.code);
+    // Should not print success to stdout.
+    expect(res.stdout).not.toContain("Project validation passed.");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v1.0 P8-T1: task add wizard-only (no-TTY) coverage
+// ---------------------------------------------------------------------------
+//
+// task add is interactive-only (no flag-only path). In a subprocess where
+// stdin/stdout are not TTYs, it must surface CONFIG_ERROR rather than
+// silently hang. This is the contract for Stable (human-output) wizard
+// commands documented in docs/cli-contract.md (v1.0).
+
+describe("CLI: task add (no-TTY)", () => {
+  it("task add <phase> --json in a non-TTY subprocess returns {ok:false,error:CONFIG_ERROR} exit 2", () => {
+    run(["init", "--non-interactive", "--locale", "en-US", "--agent", "claude-code", "--json"]);
+    run([
+      "phase",
+      "add",
+      "--id",
+      "P1",
+      "--name",
+      "Foundation",
+      "--objective",
+      "Foundation phase",
+      "--weight",
+      "10",
+      "--verify-command",
+      "node --version",
+      "--json",
+    ]);
+
+    const res = run(["task", "add", "P1", "--json"]);
+    expect(res.code).toBe(2);
+    const parsed = JSON.parse(res.stdout) as {
+      ok: boolean;
+      error: { code: string; message: string };
+    };
+    expect(parsed.ok).toBe(false);
+    expect(parsed.error.code).toBe("CONFIG_ERROR");
+    expect(parsed.error.message.toLowerCase()).toContain("tty");
+  });
+
+  it("task add without a phase id returns {ok:false,error:CONFIG_ERROR} exit 2", () => {
+    run(["init", "--non-interactive", "--locale", "en-US", "--agent", "claude-code", "--json"]);
+    const res = run(["task", "add", "--json"]);
+    expect(res.code).toBe(2);
+    const parsed = JSON.parse(res.stdout) as {
+      ok: boolean;
+      error: { code: string };
+    };
+    expect(parsed.ok).toBe(false);
+    expect(parsed.error.code).toBe("CONFIG_ERROR");
+  });
+});
