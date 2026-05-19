@@ -405,3 +405,85 @@ describe("runDoctor — disabled_checks via .code-pact/doctor.yaml (v0.5.3)", ()
     expect(result.issues.find((i) => i.code === "CONSTITUTION_PLACEHOLDER")).toBeDefined();
   });
 });
+
+// ---------------------------------------------------------------------------
+// v0.9 — manifest-aware adapter health
+// ---------------------------------------------------------------------------
+
+describe("runDoctor — v0.9 manifest-aware adapter health", () => {
+  it("no manifest → still emits legacy ADAPTER_MISSING (byte-identical with v0.8)", async () => {
+    // Fresh init, no adapter install → no manifest. CLAUDE.md is also absent.
+    const result = await runDoctor(dir);
+    expect(result.issues.map((i) => i.code)).toContain("ADAPTER_MISSING");
+    // No manifest-aware codes should appear when there's no manifest.
+    const adapterCodes = result.issues.map((i) => i.code).filter((c) => c.startsWith("ADAPTER_"));
+    expect(adapterCodes).not.toContain("ADAPTER_FILE_MISSING");
+    expect(adapterCodes).not.toContain("ADAPTER_MANIFEST_MISSING");
+    expect(adapterCodes).not.toContain("ADAPTER_MANIFEST_INVALID");
+  });
+
+  it("no manifest + present CLAUDE.md → no ADAPTER_MISSING (byte-identical with v0.8)", async () => {
+    await writeFile(join(dir, "CLAUDE.md"), "# Claude Code adapter\n", "utf8");
+    const result = await runDoctor(dir);
+    expect(result.issues.find((i) => i.code === "ADAPTER_MISSING")).toBeUndefined();
+  });
+
+  it("with manifest + clean state → no adapter findings", async () => {
+    const { runAdapterInstall } = await import("../../../src/commands/adapter-install.ts");
+    await runAdapterInstall({
+      cwd: dir,
+      agentName: "claude-code",
+      force: false,
+      locale: "en-US",
+    });
+    const result = await runDoctor(dir);
+    const adapterFindings = result.issues
+      .map((i) => i.code)
+      .filter((c) => c.startsWith("ADAPTER_") && c !== "ADAPTER_STALE");
+    expect(adapterFindings).toEqual([]);
+  });
+
+  it("with manifest + deleted CLAUDE.md → ADAPTER_FILE_MISSING (NOT ADAPTER_MISSING)", async () => {
+    const { runAdapterInstall } = await import("../../../src/commands/adapter-install.ts");
+    const { unlink } = await import("node:fs/promises");
+    await runAdapterInstall({
+      cwd: dir,
+      agentName: "claude-code",
+      force: false,
+      locale: "en-US",
+    });
+    await unlink(join(dir, "CLAUDE.md"));
+    const result = await runDoctor(dir);
+    const codes = result.issues.map((i) => i.code);
+    expect(codes).toContain("ADAPTER_FILE_MISSING");
+    expect(codes).not.toContain("ADAPTER_MISSING"); // legacy check skipped when manifest exists
+    const fileMissing = result.issues.find((i) => i.code === "ADAPTER_FILE_MISSING")!;
+    expect(fileMissing.severity).toBe("error");
+    expect(fileMissing.message).toMatch(/\[claude-code\]/);
+  });
+
+  it("global doctor NEVER emits ADAPTER_MANIFEST_MISSING (that signal is adapter-doctor only)", async () => {
+    // Fresh init, no manifest. adapter doctor would emit MANIFEST_MISSING.
+    // Global doctor must NOT — it uses the legacy ADAPTER_MISSING signal
+    // and stays quiet on manifest absence.
+    const result = await runDoctor(dir);
+    expect(result.issues.map((i) => i.code)).not.toContain("ADAPTER_MANIFEST_MISSING");
+  });
+
+  it("with malformed manifest → ADAPTER_MANIFEST_INVALID (error)", async () => {
+    const { manifestPath, ADAPTER_MANIFEST_DIR_SEGMENTS } = await import(
+      "../../../src/core/adapters/manifest.ts"
+    );
+    await mkdir(join(dir, ...ADAPTER_MANIFEST_DIR_SEGMENTS), { recursive: true });
+    await writeFile(
+      manifestPath(dir, "claude-code"),
+      "schema_version: 99\nagent_name: claude-code\n",
+      "utf8",
+    );
+    const result = await runDoctor(dir);
+    const issue = result.issues.find((i) => i.code === "ADAPTER_MANIFEST_INVALID");
+    expect(issue).toBeDefined();
+    expect(issue!.severity).toBe("error");
+    expect(result.ok).toBe(false);
+  });
+});

@@ -14,6 +14,11 @@ import {
 } from "../core/plan/checks.ts";
 import type { PhaseEntry } from "../core/plan/state.ts";
 import type { PlanIssue } from "../core/plan/shared.ts";
+import { isSupportedAgent, type SupportedAgent } from "../core/agents.ts";
+import { readManifest } from "../core/adapters/manifest.ts";
+import { inspectAgent, type AdapterDoctorIssue } from "./adapter-doctor.ts";
+import { readPackageVersion } from "../lib/package-version.ts";
+import type { Locale } from "../i18n/index.ts";
 
 // Optional per-project doctor configuration (.code-pact/doctor.yaml)
 const DoctorConfig = z.object({
@@ -374,7 +379,13 @@ async function checkLocalGitignored(cwd: string, issues: DoctorIssue[]): Promise
   }
 }
 
-// Check 11: enabled agents have their adapter instruction file on disk
+// Check 11: enabled agents have their adapter instruction file on disk.
+//
+// v0.9: legacy check ONLY fires when no manifest exists. With a manifest,
+// the manifest-aware checkAdapterManifestAware emits the more precise
+// ADAPTER_FILE_MISSING (error) per managed file. The byte-identical
+// commitment to v0.8 holds for any project that has not yet run
+// `adapter install`.
 async function checkAdapterMissing(
   cwd: string,
   project: Project,
@@ -382,6 +393,18 @@ async function checkAdapterMissing(
 ): Promise<void> {
   for (const agentRef of project.agents) {
     if (agentRef.enabled === false) continue;
+
+    if (isSupportedAgent(agentRef.name)) {
+      // Skip legacy check when a manifest exists OR is invalid — the
+      // manifest-aware path will surface the appropriate finding.
+      try {
+        const m = await readManifest(cwd, agentRef.name);
+        if (m !== null) continue;
+      } catch {
+        continue;
+      }
+    }
+
     const profilePath = join(cwd, ".code-pact", agentRef.profile);
     const result = await safeReadYaml(profilePath);
     if (!result.ok) continue; // already reported by checkAgentProfiles
@@ -396,6 +419,63 @@ async function checkAdapterMissing(
       });
     }
   }
+}
+
+// Check 11b (v0.9): manifest-aware adapter health.
+//
+// Runs only for enabled agents whose manifest file exists on disk. The
+// per-agent findings come from inspectAgent (the same code path
+// `adapter doctor` uses), so error codes and semantics stay aligned.
+// ADAPTER_MANIFEST_MISSING is intentionally dropped — it's an
+// `adapter doctor`-only signal so we don't make existing projects
+// suddenly noisy after upgrading to v0.9.
+async function checkAdapterManifestAware(
+  cwd: string,
+  project: Project,
+  issues: DoctorIssue[],
+): Promise<void> {
+  const locale = resolveDoctorLocale(project);
+  const packageVersion = await readPackageVersion();
+
+  for (const agentRef of project.agents) {
+    if (agentRef.enabled === false) continue;
+    if (!isSupportedAgent(agentRef.name)) continue;
+
+    let manifestPresent: boolean;
+    try {
+      const m = await readManifest(cwd, agentRef.name);
+      manifestPresent = m !== null;
+    } catch {
+      // Invalid manifest → let inspectAgent emit ADAPTER_MANIFEST_INVALID.
+      manifestPresent = true;
+    }
+    if (!manifestPresent) continue;
+
+    const findings = await inspectAgent({
+      cwd,
+      agentName: agentRef.name as SupportedAgent,
+      locale,
+      enabled: true,
+      packageVersion,
+    });
+    for (const f of findings) {
+      if (f.code === "ADAPTER_MANIFEST_MISSING") continue;
+      issues.push(adapterIssueToDoctor(f));
+    }
+  }
+}
+
+function resolveDoctorLocale(project: Project): Locale {
+  const lc = project.locale;
+  return typeof lc === "string" ? lc : lc.default;
+}
+
+function adapterIssueToDoctor(issue: AdapterDoctorIssue): DoctorIssue {
+  return {
+    code: issue.code,
+    severity: issue.severity,
+    message: `[${issue.agent}] ${issue.message}`,
+  };
 }
 
 // Check 12: design/brief.md exists
@@ -550,9 +630,14 @@ export async function runDoctor(cwd: string): Promise<DoctorResult> {
   // 10. .local/ gitignored
   await checkLocalGitignored(cwd, allIssues);
 
-  // 11. enabled agents have adapter instruction files
+  // 11. enabled agents have adapter instruction files (legacy, no-manifest only)
   if (project) {
     await checkAdapterMissing(cwd, project, allIssues);
+  }
+
+  // 11b. manifest-aware adapter health (v0.9, only when manifest exists)
+  if (project) {
+    await checkAdapterManifestAware(cwd, project, allIssues);
   }
 
   // 12. design/brief.md present
