@@ -5,7 +5,21 @@ import { Roadmap } from "../core/schemas/roadmap.ts";
 import { Phase } from "../core/schemas/phase.ts";
 import { AgentProfile } from "../core/schemas/agent-profile.ts";
 import { recommendTier, type TierRecommendation } from "../core/recommend/tier.ts";
+import { recommendContextProfile } from "../core/recommend/context-profile.ts";
+import {
+  isPlanningRequired,
+  recommendAmbiguityAction,
+} from "../core/recommend/planning.ts";
+import { recommendEscalation } from "../core/recommend/escalation.ts";
+import { recommendPreflight } from "../core/recommend/preflight.ts";
+import { recommendBudgetProfile } from "../core/recommend/budget.ts";
 import type { Task } from "../core/schemas/task.ts";
+import type { ModelTier } from "../core/schemas/model-profile.ts";
+import {
+  RecommendResultV2,
+  type RecommendResultV2 as RecommendResultV2Type,
+  type StructuredReason,
+} from "../core/schemas/recommend-result.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -18,15 +32,9 @@ export type RecommendOptions = {
   agentName: string;
 };
 
-export type RecommendResult = {
-  phaseId: string;
-  taskId: string;
-  agentName: string;
-  tier: string;
-  effort: string;
-  modelId: string;
-  reasons: string[];
-};
+// v0.8 enriched contract. Aliased to RecommendResultV2 so the public type
+// name stays stable across versions while the shape evolves.
+export type RecommendResult = RecommendResultV2Type;
 
 // ---------------------------------------------------------------------------
 // Loaders
@@ -53,6 +61,79 @@ async function loadAgentProfile(cwd: string, agentName: string): Promise<AgentPr
     throw err;
   }
   return AgentProfile.parse(parseYaml(raw) as unknown);
+}
+
+// ---------------------------------------------------------------------------
+// Structured reasons — machine-readable mirror of `reasons[]`
+//
+// Each entry pairs ONE notable Task factor with ONE effect on the output.
+// This is intentionally lighter than full re-derivation of every decision —
+// agents that want machine-readable rationale read this, agents that want
+// human strings read `reasons[]`.
+// ---------------------------------------------------------------------------
+
+function buildStructuredReasons(task: Task, tier: ModelTier): StructuredReason[] {
+  const out: StructuredReason[] = [];
+
+  if (task.type === "architecture") {
+    out.push({ factor: "type", value: "architecture", effect: "tier=highest_reasoning" });
+  }
+
+  if (task.ambiguity === "high") {
+    out.push({ factor: "ambiguity", value: "high", effect: "tier=highest_reasoning" });
+  } else if (task.ambiguity === "medium") {
+    out.push({ factor: "ambiguity", value: "medium", effect: "planning_required" });
+  }
+
+  if (task.risk === "high") {
+    out.push({ factor: "risk", value: "high", effect: "planning_required" });
+  }
+
+  if (task.verification_strength === "weak") {
+    out.push({
+      factor: "verification_strength",
+      value: "weak",
+      effect: "tier=highest_reasoning",
+    });
+  }
+
+  if (task.requires_decision === true) {
+    out.push({
+      factor: "requires_decision",
+      value: "true",
+      effect: "ambiguity_action=clarify_before_implementation",
+    });
+  }
+
+  // split_recommended condition: long+high_surface+medium_ambiguity+non-high_risk.
+  // (high ambiguity OR medium+high_risk would already have routed to clarify.)
+  if (
+    task.expected_duration === "long" &&
+    task.write_surface === "high" &&
+    task.ambiguity === "medium" &&
+    task.risk !== "high"
+  ) {
+    out.push({
+      factor: "duration+write_surface",
+      value: "long+high",
+      effect: "ambiguity_action=split_recommended",
+    });
+  }
+
+  if (tier === "cheap_mechanical" && out.length === 0) {
+    out.push({
+      factor: "type+ambiguity+risk",
+      value: `${task.type}+low+low`,
+      effect: "tier=cheap_mechanical",
+    });
+  }
+
+  // Schema requires at least one entry. Default reason mirrors the default tier.
+  if (out.length === 0) {
+    out.push({ factor: "defaults", value: "standard", effect: "tier=balanced_coding" });
+  }
+
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -84,13 +165,15 @@ export async function runRecommend(opts: RecommendOptions): Promise<RecommendRes
     throw err;
   }
 
-  // Recommend tier
+  // Existing v0.7 decisions
   const rec: TierRecommendation = recommendTier(task);
-
-  // Resolve concrete model ID from agent profile
   const modelId = profile.model_map[rec.tier] ?? rec.tier;
 
-  return {
+  // New v0.8 decisions
+  const planningRequired = isPlanningRequired(task);
+  const ambiguityAction = recommendAmbiguityAction(task);
+
+  const result: RecommendResult = {
     phaseId,
     taskId,
     agentName,
@@ -98,22 +181,76 @@ export async function runRecommend(opts: RecommendOptions): Promise<RecommendRes
     effort: rec.effort,
     modelId,
     reasons: rec.reasons,
+    contextProfile: recommendContextProfile(task),
+    verificationProfile: task.verification_strength,
+    planningRequired,
+    ambiguityAction,
+    allowedEscalation: recommendEscalation(rec.tier),
+    preflight: recommendPreflight(task),
+    budgetProfile: recommendBudgetProfile(task),
+    structuredReasons: buildStructuredReasons(task, rec.tier),
   };
+
+  // Enforce the contract before handing back to the CLI layer.
+  return RecommendResultV2.parse(result);
 }
 
 // ---------------------------------------------------------------------------
 // Human-readable formatter
 // ---------------------------------------------------------------------------
 
+function yesNo(b: boolean): string {
+  return b ? "yes" : "no";
+}
+
+function formatPreflight(entries: RecommendResult["preflight"]): string {
+  if (entries.length === 0) return "Preflight: (none)";
+  const lines = ["Preflight:"];
+  for (const e of entries) {
+    lines.push(`  - ${e.displayCommand}  (reason: ${e.reason})`);
+  }
+  return lines.join("\n");
+}
+
 export function formatRecommend(r: RecommendResult): string {
-  return [
-    `Task:    ${r.phaseId} / ${r.taskId}`,
-    `Agent:   ${r.agentName}`,
-    `Tier:    ${r.tier}`,
-    `Model:   ${r.modelId}`,
-    `Effort:  ${r.effort}`,
-    ``,
-    `Reasons:`,
-    ...r.reasons.map((reason) => `  - ${reason}`),
-  ].join("\n");
+  const sections: string[] = [];
+
+  sections.push(
+    [
+      `Task:    ${r.phaseId} / ${r.taskId}`,
+      `Agent:   ${r.agentName}`,
+      `Tier:    ${r.tier}`,
+      `Model:   ${r.modelId}`,
+      `Effort:  ${r.effort}`,
+    ].join("\n"),
+  );
+
+  sections.push(["Reasons:", ...r.reasons.map((reason) => `  - ${reason}`)].join("\n"));
+
+  sections.push(
+    [
+      `Planning:`,
+      `  Required:         ${yesNo(r.planningRequired)}`,
+      `  Ambiguity action: ${r.ambiguityAction}`,
+      `  Context profile:  ${r.contextProfile}`,
+      `  Verification:     ${r.verificationProfile}`,
+    ].join("\n"),
+  );
+
+  sections.push(
+    [`Escalation:`, ...r.allowedEscalation.map((step, i) => `  ${i + 1}. ${step}`)].join("\n"),
+  );
+
+  sections.push(formatPreflight(r.preflight));
+
+  sections.push(
+    [
+      `Budget:`,
+      `  Tool calls:            ${r.budgetProfile.toolCalls}`,
+      `  Context files:         ${r.budgetProfile.contextFiles}`,
+      `  Verification commands: ${r.budgetProfile.verificationCommands}`,
+    ].join("\n"),
+  );
+
+  return sections.join("\n\n");
 }
