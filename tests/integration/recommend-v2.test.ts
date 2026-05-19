@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { runRecommend, formatRecommend } from "../../src/commands/recommend.ts";
+import { runRecommend, formatRecommend, type RecommendResult } from "../../src/commands/recommend.ts";
 import { RecommendResultV2 } from "../../src/core/schemas/recommend-result.ts";
 
 const repoRoot = resolve(fileURLToPath(import.meta.url), "../../..");
@@ -222,17 +222,28 @@ describe("recommend v0.8 — human formatter", () => {
     expect(out).toContain("  2. increase_effort");
   });
 
-  it("renders Preflight: (none) when no triggers fire", async () => {
-    // Find a totally calm task — use a fixture where preflight is empty
-    // by using P5-T4 from the actual repo design (status: done, low ambiguity)
-    const result = await runRecommend({
-      cwd: repoRoot,
-      phaseId: "P5",
-      taskId: "P5-T4",
+  it("renders Preflight: (none) when preflight array is empty", () => {
+    // Pure formatter test — feed a stub result so we do not depend on any
+    // fixture having a totally calm task (and so we do not depend on the
+    // local repo's gitignored agent profile, which CI does not have).
+    const stub: RecommendResult = {
+      phaseId: "P1",
+      taskId: "P1-T1",
       agentName: "claude-code",
-    });
-    expect(result.preflight).toEqual([]);
-    const out = formatRecommend(result);
+      tier: "balanced_coding",
+      effort: "medium",
+      modelId: "claude-sonnet-4-6",
+      reasons: ["stub reason"],
+      contextProfile: "small",
+      verificationProfile: "strong",
+      planningRequired: false,
+      ambiguityAction: "proceed",
+      allowedEscalation: ["increase_context", "ask_human"],
+      preflight: [],
+      budgetProfile: { toolCalls: "low", contextFiles: "few", verificationCommands: "full" },
+      structuredReasons: [{ factor: "stub", value: "stub", effect: "stub" }],
+    };
+    const out = formatRecommend(stub);
     expect(out).toContain("Preflight: (none)");
   });
 
