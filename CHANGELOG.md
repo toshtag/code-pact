@@ -7,6 +7,51 @@ Versions follow `MAJOR.MINOR.PATCH-alpha.N` while the project is in alpha.
 
 ---
 
+## [0.8.0-alpha.0] — 2026-05-19
+
+### Added
+
+- **`recommend` extended into a deterministic execution-planning contract** — `code-pact recommend --phase <id> --task <id> [--agent <name>] [--json]` now returns a context profile, planning posture, ambiguity action, escalation order, structured preflight commands, categorical budget profile, and machine-readable structured reasons. Strictly additive over v0.7: existing fields (`phaseId / taskId / agentName / tier / effort / modelId / reasons`) are byte-identical for pre-v0.8 fixtures, asserted by an integration regression test.
+- **New `recommend` output fields:**
+  - `contextProfile` (`small | medium | large`) — derived from `context_size`, bumped up one notch when `ambiguity == high`. ([#62])
+  - `verificationProfile` — passthrough of `verification_strength`. ([#62])
+  - `planningRequired` (boolean) — true for `architecture` type, medium / high ambiguity, high risk, or `requires_decision == true`. ([#62])
+  - `ambiguityAction` (`proceed | clarify_before_implementation | split_recommended`) — top-down evaluation; clarify wins over split when both could fire. ([#62])
+  - `allowedEscalation` — tier-driven ordered escalation hints. Cheap tiers lead with `increase_effort`; larger tiers lead with `increase_context`. ([#62])
+  - `preflight` — structured array of suggested pre-implementation commands (`plan lint`, `plan analyze`, `task status <id>`), capped at 3 entries. Each entry has `argv` ready to spawn and a `reason` field. Advisory only (`required: false` in v0.8). ([#62])
+  - `budgetProfile` — three categorical magnitudes (`toolCalls`, `contextFiles`, `verificationCommands`). Explicitly **not** an estimate of tokens, cost, or time. ([#62])
+  - `structuredReasons` — machine-readable mirror of `reasons[]`. Each entry pairs one Task factor with one effect on the output. ([#62])
+- **`RecommendResultV2` zod schema** with `.strict()` at every level. Drift-guards the contract — accidental snake_case fields (e.g. `planning_required` next to `planningRequired`) fail loudly instead of producing a silent split contract. ([#59])
+- **`formatRecommend()` extended** with Planning / Escalation / Preflight / Budget sections beneath the existing 5-line Task / Agent / Tier / Model / Effort summary. Section/field structure, not a snapshot — tests assert labels and lines, not byte-exact output. ([#62])
+
+### Changed
+
+- **`docs/cli-contract.md` `recommend` section** rewritten with per-field tables (type, allowed values, trigger) plus inline tables for `PreflightEntry`, `BudgetProfile`, and `StructuredReason`. The JSON example now matches the real camelCase shape — the previous example used snake_case keys (`task_id`, `phase_id`, `agent`, `model_id`), but the implementation has always emitted camelCase. This fixes a pre-existing doc drift. ([#63])
+- **`docs/dogfood.md` per-task flow** promotes `recommend` from "step 0 (optional)" to the recommended starting point. New "Reading `recommend --json` (v0.8)" section explains which fields drive which agent decisions. ([#63])
+- **`README.md` agent-facing usage** updated to match the new dogfood flow. (this PR)
+
+### Internal
+
+- New `src/core/recommend/` modules — pure no-I/O decision functions, each paired with unit tests covering every decision-table row:
+  - `context-profile.ts` — `context_size + ambiguity → contextProfile`. ([#60])
+  - `planning.ts` — `isPlanningRequired` + `recommendAmbiguityAction`. ([#60])
+  - `escalation.ts` — `ModelTier → ordered EscalationStep[]`. ([#60])
+  - `budget.ts` — `Task → BudgetProfile`. ([#60])
+  - `preflight.ts` — `Task → PreflightEntry[]`, capped at 3, Task-derivable triggers only. ([#61])
+- `src/core/schemas/recommend-result.ts` — zod schema with strict mode and inner schemas for `PreflightEntry`, `BudgetProfile`, `StructuredReason`. ([#59])
+- `src/commands/recommend.ts` — `runRecommend` composes every decision module and zod-validates the result before return. The public `RecommendResult` type aliases `RecommendResultV2` so callers keep working with stricter inferred field types. ([#62])
+- `design/phases/P6-budgeted-execution.yaml` — new phase covering the v0.8 work end-to-end. Phase verification chains `pnpm typecheck / test / build + plan lint + plan normalize --check + plan analyze + recommend` so subsequent phases inherit the v0.8 execution-planning gate. ([#63])
+- ~110 new tests across the recommend modules, schemas, and integration suite (`tests/integration/recommend-v2.test.ts`). Includes a back-compat regression that asserts every v0.7 field is byte-identical for the project-a fixture, and a CLI subprocess test confirming the `{ok:true, data:{...}}` envelope shape is preserved.
+- Pre-existing local agent profile (`.code-pact/agent-profiles/claude-code.yaml`) is gitignored and absent in CI checkout. Where the v0.8 tests render formatter output, they feed stub `RecommendResult` values directly into `formatRecommend` rather than calling `runRecommend` against the repo's own profile, so CI never hits `AGENT_NOT_FOUND`.
+
+[#59]: https://github.com/toshtag/code-pact/pull/59
+[#60]: https://github.com/toshtag/code-pact/pull/60
+[#61]: https://github.com/toshtag/code-pact/pull/61
+[#62]: https://github.com/toshtag/code-pact/pull/62
+[#63]: https://github.com/toshtag/code-pact/pull/63
+
+---
+
 ## [0.7.0-alpha.0] — 2026-05-18
 
 ### Added
