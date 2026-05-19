@@ -68,11 +68,87 @@ describe("runGenerateAdapter — claude-code", () => {
     expect(second.skipped.length).toBeGreaterThan(0);
   });
 
-  it("overwrites when force is true", async () => {
+  it("second install with --force is idempotent for managed-clean files (v0.9 --force narrowing)", async () => {
+    // v0.9: --force is unmanaged-adoption only. After the first install
+    // every file is managed-clean × current, so --force has nothing to do.
+    // To destructively overwrite a managed-modified file, callers must use
+    // `adapter upgrade --write --accept-modified` (P7-T5).
     await runGenerateAdapter({ cwd: dir, agentName: "claude-code", force: false, locale: "en-US" });
     const second = await runGenerateAdapter({ cwd: dir, agentName: "claude-code", force: true, locale: "en-US" });
-    expect(second.created.length).toBeGreaterThan(0);
-    expect(second.skipped).toHaveLength(0);
+    expect(second.created).toHaveLength(0);
+    expect(second.skipped.length).toBeGreaterThan(0);
+  });
+
+  it("first install writes a manifest at .code-pact/adapters/<agent>.manifest.yaml", async () => {
+    const result = await runGenerateAdapter({ cwd: dir, agentName: "claude-code", force: false, locale: "en-US" });
+    expect(result.manifestPath).toBe(
+      join(dir, ".code-pact", "adapters", "claude-code.manifest.yaml"),
+    );
+    const raw = await readFile(result.manifestPath, "utf8");
+    expect(raw).toContain("agent_name: claude-code");
+    expect(raw).toContain("schema_version: 1");
+    expect(raw).toContain("files:");
+  });
+
+  it("manifest files[] entries record sha256, role, managed=true", async () => {
+    const result = await runGenerateAdapter({ cwd: dir, agentName: "claude-code", force: false, locale: "en-US" });
+    const raw = await readFile(result.manifestPath, "utf8");
+    // Every recorded file should be managed=true with a 64-hex sha256.
+    const sha256Matches = raw.match(/sha256: [0-9a-f]{64}/g) ?? [];
+    const roleMatches = raw.match(/role: (instruction|skill|hook|rule)/g) ?? [];
+    expect(sha256Matches.length).toBeGreaterThan(0);
+    expect(roleMatches.length).toBeGreaterThan(0);
+    expect(raw).toContain("managed: true");
+  });
+
+  it("install is fully idempotent — second run produces identical manifest hashes", async () => {
+    const first = await runGenerateAdapter({ cwd: dir, agentName: "claude-code", force: false, locale: "en-US" });
+    const firstYaml = await readFile(first.manifestPath, "utf8");
+    const firstHashes = firstYaml.match(/sha256: [0-9a-f]{64}/g) ?? [];
+
+    await runGenerateAdapter({ cwd: dir, agentName: "claude-code", force: false, locale: "en-US" });
+    const secondYaml = await readFile(first.manifestPath, "utf8");
+    const secondHashes = secondYaml.match(/sha256: [0-9a-f]{64}/g) ?? [];
+
+    expect(secondHashes).toEqual(firstHashes);
+  });
+
+  it("--force on first run adopts a pre-existing file matching desired content", async () => {
+    // Pre-create CLAUDE.md by running install once, capture content, then
+    // delete the manifest to simulate an unmanaged-but-matching disk state.
+    const first = await runGenerateAdapter({ cwd: dir, agentName: "claude-code", force: false, locale: "en-US" });
+    const desiredContent = await readFile(join(dir, "CLAUDE.md"), "utf8");
+    const { rm } = await import("node:fs/promises");
+    await rm(first.manifestPath);
+
+    // Now re-run with --force — CLAUDE.md is unmanaged × current → adopt.
+    const second = await runGenerateAdapter({ cwd: dir, agentName: "claude-code", force: true, locale: "en-US" });
+    const claude = second.files.find((f) => f.relPath === "CLAUDE.md");
+    expect(claude?.action).toBe("adopt");
+    expect(second.adopted.some((p) => p.endsWith("/CLAUDE.md"))).toBe(true);
+    // File content is unchanged after adopt.
+    const after = await readFile(join(dir, "CLAUDE.md"), "utf8");
+    expect(after).toBe(desiredContent);
+  });
+
+  it("--force on first run replaces an unmanaged file with differing content (replace_unmanaged)", async () => {
+    // Pre-create CLAUDE.md with stale content (no manifest).
+    await writeFile(join(dir, "CLAUDE.md"), "STALE", "utf8");
+    const result = await runGenerateAdapter({ cwd: dir, agentName: "claude-code", force: true, locale: "en-US" });
+    const claude = result.files.find((f) => f.relPath === "CLAUDE.md");
+    expect(claude?.action).toBe("replace_unmanaged");
+    const after = await readFile(join(dir, "CLAUDE.md"), "utf8");
+    expect(after).not.toBe("STALE");
+    expect(after).toContain("Claude Code");
+  });
+
+  it("install does NOT overwrite a user-modified managed file (managed-modified × stale → skip)", async () => {
+    await runGenerateAdapter({ cwd: dir, agentName: "claude-code", force: false, locale: "en-US" });
+    await writeFile(join(dir, "CLAUDE.md"), "USER MODS", "utf8");
+    // Even with --force, install is hands-off for managed-modified files.
+    await runGenerateAdapter({ cwd: dir, agentName: "claude-code", force: true, locale: "en-US" });
+    const after = await readFile(join(dir, "CLAUDE.md"), "utf8");
+    expect(after).toBe("USER MODS");
   });
 });
 
@@ -416,24 +492,46 @@ describe("runGenerateAdapter — v0.5.2 skill generation", () => {
     expect(second.skipped.some((p) => p.includes("test.md"))).toBe(true);
   });
 
-  it("--regen-skills regenerates skill files without overwriting CLAUDE.md", async () => {
-    // First run — create all files
+  it("--regen-skills does NOT overwrite a user-modified skill file (v0.9 safety invariant)", async () => {
+    // v0.9 narrowing: --regen-skills is a role-scoped force, but force is
+    // unmanaged-adoption only and cannot touch managed-modified files.
+    // Destructive overwrite requires `adapter upgrade --write --accept-modified`.
     await runGenerateAdapter({ cwd: dir, agentName: "claude-code", force: false, locale: "en-US" });
-    // Overwrite CLAUDE.md with sentinel content
     await writeFile(join(dir, "CLAUDE.md"), "SENTINEL", "utf8");
-    // Overwrite test.md with old content
     await writeFile(join(dir, ".claude", "skills", "test.md"), "OLD", "utf8");
 
     await runGenerateAdapter({ cwd: dir, agentName: "claude-code", force: false, locale: "en-US", regenSkills: true });
 
-    // CLAUDE.md must NOT have been overwritten
-    const claudeMd = await readFile(join(dir, "CLAUDE.md"), "utf8");
-    expect(claudeMd).toBe("SENTINEL");
+    // Both managed-modified files are preserved.
+    expect(await readFile(join(dir, "CLAUDE.md"), "utf8")).toBe("SENTINEL");
+    expect(await readFile(join(dir, ".claude", "skills", "test.md"), "utf8")).toBe("OLD");
+  });
 
-    // test.md must have been regenerated
-    const skillContent = await readFile(join(dir, ".claude", "skills", "test.md"), "utf8");
-    expect(skillContent).not.toBe("OLD");
-    expect(skillContent).toContain("pnpm test");
+  it("--regen-skills adopts a pre-existing unmanaged skill (role-scoped force)", async () => {
+    // Pre-create a stale test.md (unmanaged — no manifest yet).
+    await mkdir(join(dir, ".claude", "skills"), { recursive: true });
+    await writeFile(join(dir, ".claude", "skills", "test.md"), "STALE", "utf8");
+    // Pre-create an unmanaged CLAUDE.md too — it should be left alone since
+    // --regen-skills only scopes to skill role.
+    await writeFile(join(dir, "CLAUDE.md"), "USER CLAUDE", "utf8");
+
+    const result = await runGenerateAdapter({
+      cwd: dir,
+      agentName: "claude-code",
+      force: false,
+      locale: "en-US",
+      regenSkills: true,
+    });
+
+    // test.md was unmanaged × stale → replace_unmanaged (regenSkills scopes force to skills)
+    const testFile = result.files.find((f) => f.relPath.endsWith("test.md"));
+    expect(testFile?.action).toBe("replace_unmanaged");
+    expect(await readFile(join(dir, ".claude", "skills", "test.md"), "utf8")).toContain("pnpm test");
+
+    // CLAUDE.md (role=instruction) is NOT touched by --regen-skills.
+    const claude = result.files.find((f) => f.relPath === "CLAUDE.md");
+    expect(claude?.action).toBe("skip");
+    expect(await readFile(join(dir, "CLAUDE.md"), "utf8")).toBe("USER CLAUDE");
   });
 
   it("no roadmap → no crash, only fixed skills are created", async () => {

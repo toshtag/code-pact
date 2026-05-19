@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 import { parseArgs } from "node:util";
 import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
-import { dirname, resolve, join } from "node:path";
+import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { readPackageVersion } from "./lib/package-version.ts";
 import { splitArgv, strictParse, ConfigError } from "./lib/argv.ts";
 import { isInteractive, isCIEnv } from "./lib/tty.ts";
 import { messages, type Locale } from "./i18n/index.ts";
@@ -21,7 +21,7 @@ import { runPhaseImport } from "./commands/phase-import.ts";
 import { runProgress, formatProgress } from "./commands/progress.ts";
 import { runPack } from "./commands/pack.ts";
 import { runVerify, formatVerify } from "./commands/verify.ts";
-import { runGenerateAdapter } from "./commands/adapter.ts";
+import { runAdapterInstall, runAdapterList } from "./commands/adapter.ts";
 import { runPlanBrief } from "./commands/plan-brief.ts";
 import { runPlanPrompt } from "./commands/plan-prompt.ts";
 import { runPlanConstitution } from "./commands/plan-constitution.ts";
@@ -89,14 +89,6 @@ async function detectLocale(cwd: string): Promise<Locale> {
   const lang = process.env.LANG ?? "";
   if (lang.startsWith("ja")) return "ja-JP";
   return "en-US";
-}
-
-async function readPackageVersion(): Promise<string> {
-  const here = dirname(fileURLToPath(import.meta.url));
-  const pkgPath = resolve(here, "..", "package.json");
-  const raw = await readFile(pkgPath, "utf8");
-  const pkg = JSON.parse(raw) as { version?: string };
-  return pkg.version ?? "0.0.0";
 }
 
 // ---------------------------------------------------------------------------
@@ -629,6 +621,130 @@ async function cmdPlanConstitution(
 // ---------------------------------------------------------------------------
 
 async function cmdAdapter(argv: string[], locale: Locale, globalJson: boolean): Promise<number> {
+  const sub = argv[0];
+
+  if (sub === "list") return cmdAdapterList(argv.slice(1), globalJson);
+  if (sub === "install") return cmdAdapterInstall(argv.slice(1), locale, globalJson);
+
+  // Effective --json honors both the global flag (before the command) and
+  // a --json embedded in the subcommand args (after the command).
+  const effectiveJson = globalJson || argv.includes("--json");
+
+  if (sub === "upgrade" || sub === "doctor") {
+    const stage = sub === "upgrade" ? "P7-T5" : "P7-T4";
+    const msg = `adapter ${sub} is not yet implemented; arriving in v0.9 ${stage}.`;
+    if (effectiveJson) {
+      process.stdout.write(
+        `${JSON.stringify({ ok: false, error: { code: "NOT_IMPLEMENTED", message: msg } })}\n`,
+      );
+    } else {
+      process.stderr.write(`${msg}\n`);
+    }
+    return 2;
+  }
+
+  // Reject other unknown sub-words (anything that doesn't start with `-`).
+  if (sub !== undefined && !sub.startsWith("-")) {
+    const msg = `adapter: unknown subcommand "${sub}". Use: list | install | upgrade | doctor`;
+    if (effectiveJson) {
+      process.stdout.write(
+        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
+      );
+    } else {
+      process.stderr.write(`${msg}\n`);
+    }
+    return 2;
+  }
+
+  // Bare-form back-compat: `code-pact adapter [--agent X] ...` routes to
+  // install with a deprecation notice on stderr (suppressed under --json
+  // so agents consuming the JSON envelope are not surprised by an extra
+  // stderr line). Removal is scheduled for v0.10.
+  return cmdAdapterBareForm(argv, locale, globalJson);
+}
+
+async function cmdAdapterList(argv: string[], globalJson: boolean): Promise<number> {
+  const { values } = parseArgs({
+    args: argv,
+    options: { json: { type: "boolean" } },
+    strict: false,
+    allowPositionals: false,
+  });
+  const json = globalJson || values.json === true;
+  const result = await runAdapterList({ cwd: process.cwd() });
+
+  if (json) {
+    process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
+    return 0;
+  }
+
+  for (const a of result.agents) {
+    const flags = [
+      a.enabled ? "enabled" : "disabled",
+      a.experimental ? "experimental" : null,
+      a.manifestPresent ? `manifest (${a.fileCount ?? 0} files)` : "no manifest",
+      a.manifestInvalid ? "INVALID" : null,
+    ]
+      .filter((s): s is string => s !== null)
+      .join(", ");
+    process.stderr.write(`  ${a.name.padEnd(12)} ${flags}\n`);
+  }
+  return 0;
+}
+
+async function cmdAdapterInstall(
+  argv: string[],
+  locale: Locale,
+  globalJson: boolean,
+): Promise<number> {
+  const m = messages[locale];
+  const { values, positionals } = parseArgs({
+    args: argv,
+    options: {
+      force: { type: "boolean" },
+      json: { type: "boolean" },
+      model: { type: "string" },
+      "regen-skills": { type: "boolean" },
+    },
+    strict: false,
+    allowPositionals: true,
+  });
+
+  const json = globalJson || values.json === true;
+  const agentName = positionals[0];
+  const force = values.force === true;
+  const modelVersion = values.model as string | undefined;
+  const regenSkills = values["regen-skills"] === true;
+
+  if (!agentName) {
+    const msg = "adapter install requires an <agent> argument (e.g. claude-code).";
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
+      );
+    } else {
+      process.stderr.write(`${msg}\n`);
+    }
+    return 2;
+  }
+
+  return runAdapterInstallAndEmit({
+    agentName,
+    force,
+    locale,
+    modelVersion,
+    regenSkills,
+    json,
+    m,
+    deprecated: false,
+  });
+}
+
+async function cmdAdapterBareForm(
+  argv: string[],
+  locale: Locale,
+  globalJson: boolean,
+): Promise<number> {
   const m = messages[locale];
   const { values } = parseArgs({
     args: argv,
@@ -648,15 +764,56 @@ async function cmdAdapter(argv: string[], locale: Locale, globalJson: boolean): 
   const force = values.force === true;
   const modelVersion = values.model as string | undefined;
   const regenSkills = values["regen-skills"] === true;
+
+  if (!json) {
+    process.stderr.write(
+      `[deprecated] bare 'code-pact adapter' is deprecated; use 'code-pact adapter install ${agentName}'. The bare form will be removed in v0.10.\n`,
+    );
+  }
+
+  return runAdapterInstallAndEmit({
+    agentName,
+    force,
+    locale,
+    modelVersion,
+    regenSkills,
+    json,
+    m,
+    deprecated: true,
+  });
+}
+
+async function runAdapterInstallAndEmit(args: {
+  agentName: string;
+  force: boolean;
+  locale: Locale;
+  modelVersion: string | undefined;
+  regenSkills: boolean;
+  json: boolean;
+  m: (typeof messages)[Locale];
+  deprecated: boolean;
+}): Promise<number> {
+  const { agentName, force, locale, modelVersion, regenSkills, json, m } = args;
   const cwd = process.cwd();
 
   try {
-    const result = await runGenerateAdapter({ cwd, agentName, force, locale, modelVersion, regenSkills });
+    const result = await runAdapterInstall({
+      cwd,
+      agentName,
+      force,
+      locale,
+      modelVersion,
+      regenSkills,
+    });
+
     if (json) {
       process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
     } else {
-      for (const f of result.created) process.stderr.write(`  created  ${f}\n`);
-      for (const f of result.skipped) process.stderr.write(`  skipped  ${f} (already exists)\n`);
+      for (const f of result.created) process.stderr.write(`  created   ${f}\n`);
+      for (const f of result.adopted) process.stderr.write(`  adopted   ${f}\n`);
+      for (const f of result.skipped)
+        process.stderr.write(`  skipped   ${f} (already exists)\n`);
+      process.stderr.write(`  manifest  ${result.manifestPath}\n`);
       process.stderr.write(`${m.adapter.done(agentName)}\n`);
     }
     return 0;

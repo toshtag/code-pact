@@ -26,8 +26,11 @@ export function assertSafeRelativePath(relPath: string): void {
  * through existing parents until it finds one that exists on disk; that
  * ancestor's realpath must remain within the project root.
  *
- * Returns the non-realpath'd absolute path — callers that need the
- * canonical path should `realpath` it themselves after creating the file.
+ * Returns the path joined to the ORIGINAL `cwd` (not the realpath'd
+ * cwd). This matters on macOS where `/var/folders/...` is a symlink to
+ * `/private/var/folders/...`; users passing the former in expect the
+ * former back out. The realpath is computed internally only for the
+ * symlink-escape safety check.
  *
  * Throws on:
  *  - any structural path failure from `assertSafeRelativePath`
@@ -39,13 +42,15 @@ export async function resolveWithinProject(
 ): Promise<string> {
   assertSafeRelativePath(relPath);
   const cwdReal = await realpath(cwd);
-  const target = resolve(cwdReal, relPath);
+  const target = resolve(cwd, relPath);
+  const targetReal = resolve(cwdReal, relPath);
 
-  // Walk up `target` until we hit something that exists on disk, then
-  // verify its realpath is still under cwdReal. This catches symlink
-  // escape both for files that exist and for files we are about to
-  // create whose parent directory is a symlink to outside the project.
-  let ancestor = target;
+  // Walk up `targetReal` (the realpath-rooted candidate) until we hit
+  // something that exists on disk, then verify its realpath is still
+  // under cwdReal. This catches symlink escape both for files that
+  // exist and for files we are about to create whose parent directory
+  // is a symlink to outside the project.
+  let ancestor = targetReal;
   // eslint-disable-next-line no-constant-condition
   while (true) {
     try {
