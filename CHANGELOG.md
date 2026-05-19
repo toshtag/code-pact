@@ -11,6 +11,27 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ---
 
+## [1.0.1] — 2026-05-19
+
+**Atomic-write contract alignment.** Patch release closing a public-contract gap the v1.0 post-release audit caught: `docs/cli-contract.md` claims every listed state/design write goes through `atomicWriteText`, but six raw `fs.writeFile` call sites remained on listed paths. This release routes all of them through the shared atomic-text helper so the implementation matches the published contract.
+
+### CLI behavior changes
+
+None. JSON envelopes, exit codes, error codes, and human output are unchanged. Output bytes on disk are identical.
+
+### Fixed
+
+- **Atomic-write coverage for listed state/design writes.** Six remaining raw `fs.writeFile` call sites now route through `atomicWriteText` (`src/io/atomic-text.ts`), matching the v1.0 atomic-write guarantee in [`docs/cli-contract.md`](docs/cli-contract.md):
+  - `src/core/services/createPhase.ts` — `design/roadmap.yaml` and `design/phases/<phase>.yaml` (covers `phase add` and `phase import`)
+  - `src/commands/task-add.ts` — `design/phases/<phase>.yaml` rewrite
+  - `src/commands/plan-brief.ts` — `design/brief.md`
+  - `src/commands/plan-constitution.ts` — `design/constitution.md`
+  - `src/commands/init-wizard.ts` — `design/brief.md` from the interactive `code-pact init` wizard
+
+  An interrupted process can no longer leave any of these files half-written. The v1.0.0 internal note that claimed "every disk write in `src/` now goes through the temp-file + rename primitive" was accurate as a target but premature as a fact; this release makes it actually true for every path listed in the contract.
+
+---
+
 ## [1.0.0] — 2026-05-19
 
 **Stable Control Plane / GA Hardening.** Locks the public CLI surface and ships the regression nets that protect it. Every command classified `Stable (v1.0)` in [`docs/cli-contract.md`](docs/cli-contract.md) keeps its flags, exit codes, and JSON envelope shape across the v1.x line. No new commands. Migration guidance from any prior alpha lives in [`docs/migration.md`](docs/migration.md).
