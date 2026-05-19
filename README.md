@@ -1,16 +1,36 @@
 # code-pact
 
-A control plane for AI coding agents. `code-pact` keeps `design/` as the structured source of truth, gives agents a stable command surface for fetching task-specific context, and verifies completion criteria deterministically.
+[![npm version](https://img.shields.io/npm/v/code-pact)](https://www.npmjs.com/package/code-pact)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Node.js version](https://img.shields.io/node/v/code-pact)](package.json)
 
-The product idea: agents should not read sprawling `design/` trees themselves and edit progress files by hand. They should call a small set of deterministic CLI commands. `code-pact` provides those commands and the per-agent adapter files that wire them up.
+**A vendor-neutral control plane for AI coding agents.**
+
+Claude Code writes `CLAUDE.md`. Codex writes `AGENTS.md`. Cursor writes `.cursor/rules/`. Each AI coding agent has its own conventions for instruction files, skills, and progress tracking. Switching between them — or running more than one against the same project — means hand-editing parallel state.
+
+`code-pact` gives any supported agent the same deterministic CLI for fetching task context, recording progress, and verifying completion criteria. The agent calls a small set of commands; `code-pact` keeps `design/` as the structured source of truth and `.code-pact/state/progress.yaml` as the operational log. Adapters generate the per-agent instruction files so each agent sees its own world without the project state diverging.
+
+v1.0 ships **stable** adapters for `claude-code`, `codex`, and `generic`. The `cursor` and `gemini-cli` adapters are **experimental** — they ship, they work, but their generated file formats may shift in minor releases to track upstream tooling changes.
+
+```sh
+# 30-second tour
+npx code-pact init --non-interactive --agent claude-code --locale en-US
+code-pact adapter install claude-code --json
+code-pact recommend --phase P1 --task P1-T1 --json    # deterministic execution plan
+code-pact task context P1-T1 --agent claude-code      # markdown context pack for the agent
+code-pact task start P1-T1
+# ... agent implements ...
+code-pact task complete P1-T1                          # runs verify, appends a done event
+code-pact validate                                     # CI-friendly health check
+```
+
+The full CLI contract — flags, exit codes, JSON envelope shapes, error codes, stability bands — lives in [`docs/cli-contract.md`](docs/cli-contract.md). The dogfood-on-a-real-project walkthrough lives in [`docs/dogfood.md`](docs/dogfood.md).
 
 ## Status
 
-v1.0 freezes the public CLI surface. Every command classified `Stable (v1.0)` in [`docs/cli-contract.md`](docs/cli-contract.md) — `doctor`, `validate`, `recommend`, `plan lint/normalize/analyze/prompt`, `task context/start/status/block/resume/complete`, `adapter list/install/doctor/upgrade`, `init`, `phase add/import/ls/show`, `pack`, `verify`, `progress` — keeps its flags, exit codes, and JSON envelope shape across the v1.x line. Wizard-only commands (`plan brief`, `plan constitution`, `task add`) are `Stable (human-output)`.
+v1.0 freezes the public CLI surface — flags, exit codes, JSON envelope shapes, and error codes are stable across the v1.x line. The full stability taxonomy (`Stable (v1.0)` / `Stable (human-output)` / `Experimental` / `Deprecated`) lives in [`docs/cli-contract.md`](docs/cli-contract.md#stability-taxonomy-v10).
 
-The Cursor and Gemini CLI adapters remain **Experimental** — their generated file formats may shift in minor releases to track upstream tooling changes. They are intentionally excluded from the adapter-conformance suite.
-
-Release notes and the running version history live in [`CHANGELOG.md`](CHANGELOG.md). Migration guidance for projects upgrading from v0.6 / v0.7 / v0.8 / v0.9 lives in [`docs/migration.md`](docs/migration.md).
+Release notes live in [`CHANGELOG.md`](CHANGELOG.md). Migration guidance for projects upgrading from v0.6 / v0.7 / v0.8 / v0.9 lives in [`docs/migration.md`](docs/migration.md).
 
 ## Install
 
@@ -52,8 +72,9 @@ code-pact task add <phase-id>
 # 5. Generate per-agent instruction files (CLAUDE.md / AGENTS.md /
 #    docs/code-pact/agent-instructions.md). The wizard can do this for
 #    you; the standalone command is here when you change agents later.
-#    v0.9 also writes a manifest at .code-pact/adapters/<agent>.manifest.yaml
-#    so the next `adapter upgrade --check` knows what code-pact wrote.
+#    `adapter install` also writes a manifest at
+#    .code-pact/adapters/<agent>.manifest.yaml so the next
+#    `adapter upgrade --check` knows what code-pact wrote.
 code-pact adapter install claude-code
 
 # 6. (Optional) Pin a Claude model version for effort/thinking guidance in CLAUDE.md:
