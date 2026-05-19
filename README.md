@@ -81,8 +81,11 @@ code-pact plan analyze --json       # design status vs progress-log drift
 Agent adapters (CLAUDE.md, AGENTS.md, docs/code-pact/agent-instructions.md) drive a small, deterministic per-task loop:
 
 ```sh
-# (Optional) Ask code-pact which Claude model tier and effort suit the task.
-code-pact recommend --phase <phase-id> --task <task-id>
+# Start every task here. recommend returns a deterministic execution plan
+# for the task — model tier and effort, context profile, whether planning
+# is required, escalation order, a preflight command list, and a
+# categorical budget profile. v0.8+.
+code-pact recommend --phase <phase-id> --task <task-id> --json
 
 # Fetch the markdown context pack (writes to stdout, no side effects).
 code-pact task context <task-id> --agent <agent>
@@ -103,6 +106,8 @@ code-pact task status <task-id> --json
 # on pass, appends a `done` event to progress.yaml.
 code-pact task complete <task-id> --agent <agent>
 ```
+
+`recommend` is strictly additive — older consumers that only read `tier` / `effort` / `modelId` / `reasons` continue to work unchanged. New consumers can drive behavior off `planningRequired`, `ambiguityAction`, the `preflight` list, and `budgetProfile`. Full field-by-field reference in [`docs/cli-contract.md`](docs/cli-contract.md) and a how-to-read guide in [`docs/dogfood.md`](docs/dogfood.md).
 
 `task context` resolves the task id across every phase, so the agent only needs the task id. `task complete` and `task start` are idempotent — calling them again on a task already in that state is a no-op (`already_done: true` / `already_started: true`). A `blocked` task cannot complete directly: `task complete` returns `INVALID_TASK_TRANSITION` until the task is `resume`d, so the resume event records the unblock decision. The low-level `code-pact verify --phase <p> --task <t>` is still available if you want to inspect verify output without recording a progress event.
 
