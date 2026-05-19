@@ -45,11 +45,13 @@ code-pact task add <phase-id>
 
 # 5. Generate per-agent instruction files (CLAUDE.md / AGENTS.md /
 #    docs/code-pact/agent-instructions.md). The wizard can do this for
-#    you; the standalone command is here when you change agents later:
-code-pact adapter --agent claude-code
+#    you; the standalone command is here when you change agents later.
+#    v0.9 also writes a manifest at .code-pact/adapters/<agent>.manifest.yaml
+#    so the next `adapter upgrade --check` knows what code-pact wrote.
+code-pact adapter install claude-code
 
 # 6. (Optional) Pin a Claude model version for effort/thinking guidance in CLAUDE.md:
-code-pact adapter --agent claude-code --model opus-4.7
+code-pact adapter install claude-code --model opus-4.7
 
 # 7. From the agent: fetch the context pack for a task.
 #    Content adapts automatically to task attributes (context_size, ambiguity, write_surface).
@@ -110,6 +112,34 @@ code-pact task complete <task-id> --agent <agent>
 `recommend` is strictly additive — older consumers that only read `tier` / `effort` / `modelId` / `reasons` continue to work unchanged. New consumers can drive behavior off `planningRequired`, `ambiguityAction`, the `preflight` list, and `budgetProfile`. Full field-by-field reference in [`docs/cli-contract.md`](docs/cli-contract.md) and a how-to-read guide in [`docs/dogfood.md`](docs/dogfood.md).
 
 `task context` resolves the task id across every phase, so the agent only needs the task id. `task complete` and `task start` are idempotent — calling them again on a task already in that state is a no-op (`already_done: true` / `already_started: true`). A `blocked` task cannot complete directly: `task complete` returns `INVALID_TASK_TRANSITION` until the task is `resume`d, so the resume event records the unblock decision. The low-level `code-pact verify --phase <p> --task <t>` is still available if you want to inspect verify output without recording a progress event.
+
+## Managing adapters (v0.9)
+
+`adapter` is a subcommand group in v0.9. The bare-form `code-pact adapter [--agent X]` continues to work with a one-line deprecation notice and is internally routed to `adapter install`; it will be removed in v0.10.
+
+```sh
+# List registered adapters with manifest state.
+code-pact adapter list --json
+
+# First-time install — writes .code-pact/adapters/<agent>.manifest.yaml.
+code-pact adapter install claude-code [--model opus-4.7] [--regen-skills]
+
+# Inspect drift without touching anything.
+code-pact adapter upgrade claude-code --check --json
+
+# Apply safe non-destructive updates (managed-clean × stale, managed-missing).
+code-pact adapter upgrade claude-code --write
+
+# Overwrite locally-modified managed files (the only path that destroys local edits).
+code-pact adapter upgrade claude-code --write --accept-modified
+
+# Adapter-scoped health check (manifest validity, file drift, schema/profile drift, orphans).
+code-pact adapter doctor --json
+```
+
+`--force` in v0.9 is **unmanaged-adoption only** — it never overrides `managed-modified` files. Destructive overwrite is gated behind `--accept-modified` specifically so a stray `--force` in a CI script can't blow away local edits. The per-file decision matrix (`local × desired`) and the 8-value action enum are documented in [`docs/cli-contract.md`](docs/cli-contract.md) and [`docs/dogfood.md`](docs/dogfood.md).
+
+Global `code-pact doctor` becomes manifest-aware when a manifest exists (surfaces `ADAPTER_FILE_MISSING`, `ADAPTER_FILE_DRIFT`, `ADAPTER_DESIRED_STALE`, etc. with an `[agent-name]` prefix); on a fresh clone without a manifest it falls back to the legacy `ADAPTER_MISSING` warning byte-identical to v0.8.
 
 ## Supported agents
 

@@ -3,7 +3,7 @@ name: Adapter Platform
 weight: 20
 confidence: medium
 risk: low
-status: in_progress
+status: done
 objective: |
   Promote the adapter layer from "template generator" into a managed,
   inspectable, upgradeable subsystem. Add a per-agent manifest that tracks
@@ -66,7 +66,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: in_progress
+    status: done
     description: |
       Register P7 in design/ and refactor adapter generation to a
       descriptor model. Introduce AdapterDescriptor / DesiredAdapterFile /
@@ -91,7 +91,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
     description: |
       AdapterManifest zod .strict() schema in
       src/core/schemas/adapter-manifest.ts, atomic read/write in
@@ -114,7 +114,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
     description: |
       adapter list + adapter install subcommand wiring. cmdAdapter
       becomes a subcommand router following the cmdPlan / cmdPhase
@@ -137,7 +137,7 @@ tasks:
     write_surface: low
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
     description: |
       adapter doctor subcommand emitting 9 new ADAPTER_* error codes
       (ADAPTER_MANIFEST_MISSING / _INVALID, ADAPTER_FILE_MISSING /
@@ -158,7 +158,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
     description: |
       adapter upgrade --check / --write using the 2-axis file-state
       classifier. --check is read-only and exits 1 with action=update /
@@ -180,7 +180,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
     description: |
       tests/integration/adapter-conformance.test.ts covers claude-code /
       codex / generic. For each, snapshots the manifest file list
@@ -204,7 +204,7 @@ tasks:
     write_surface: medium
     verification_strength: medium
     expected_duration: short
-    status: planned
+    status: done
     description: |
       Release prep. Bump package.json to 0.9.0-alpha.0, rebuild, then
       run `node dist/cli.js adapter upgrade claude-code --write` so the
