@@ -950,7 +950,7 @@ async function cmdAdapterBareForm(
 
   if (!json) {
     process.stderr.write(
-      `[deprecated] bare 'code-pact adapter' is deprecated; use 'code-pact adapter install ${agentName}'. The bare form will be removed in v0.10.\n`,
+      `[deprecated] bare 'code-pact adapter' is deprecated; use 'code-pact adapter install ${agentName}'. The bare form will be removed in v1.1.\n`,
     );
   }
 

@@ -12,6 +12,14 @@ build/
 # Root-level generated context output
 /.context/
 
+# Root-level adapter-generated files (per-developer state, consistent with
+# /.code-pact/ being gitignored — see CHANGELOG v0.9.0 release-prep note).
+/CLAUDE.md
+/AGENTS.md
+/GEMINI.md
+/.claude/
+/.cursor/
+
 # Generated context inside test fixtures (written by pack tests)
 tests/fixtures/**/.context/
 

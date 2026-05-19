@@ -2,12 +2,13 @@
 
 ## Supported versions
 
-`code-pact` is in alpha (`0.x.x-alpha.*`). Only the latest version on the npm `alpha` tag receives security fixes. Once a stable `1.0.0` ships, this section will be updated.
+Starting with `v1.0.0`, `code-pact` ships under the npm `latest` tag. Only the most recent release on `latest` receives security fixes. Past pre-1.0 alpha releases remain on the `@alpha` tag for reference but are no longer maintained.
 
 | Version | Supported |
 |---|---|
-| latest on the `alpha` tag | yes |
-| older alphas | no |
+| latest release on the `latest` tag | yes |
+| older `v1.x` releases | no — upgrade to the current `v1.x` |
+| pre-1.0 alpha releases (`@alpha`) | no |
 
 ## Reporting a vulnerability
 
@@ -38,11 +39,11 @@ Out of scope:
 
 - Vulnerabilities in third-party dependencies — please report those upstream (`yaml`, `zod`, etc.).
 - Issues that require an attacker who already has write access to the user's `design/` directory or `.code-pact/` state.
-- Reports based on outdated alpha versions when the issue is already fixed on the current `alpha` tag.
+- Reports based on outdated releases when the issue is already fixed on the current `latest` tag.
 
 ## Supply chain notes
 
-- Releases from `v0.2.0-alpha.0` onward use **SSH-signed annotated git tags**. The signing key is registered on GitHub as the maintainer's signing key, so the tag page displays a "Verified" badge. The maintainer setup is documented in [CONTRIBUTING.md](CONTRIBUTING.md#tag-signing-maintainer-only).
+- Releases from `v0.2.0-alpha.0` onward (including all `v1.x` releases) use **SSH-signed annotated git tags**. The signing key is registered on GitHub as the maintainer's signing key, so the tag page displays a "Verified" badge. The maintainer setup is documented in [CONTRIBUTING.md](CONTRIBUTING.md#tag-signing-maintainer-only).
 - The tag `v0.1.0-alpha.0` is unsigned (it predates this policy) and is left untouched; moving it would invalidate the corresponding npm publish.
 - Releases are built locally from a clean checkout before publish.
 - The published tarball shasum is recorded in the corresponding GitHub Release notes.

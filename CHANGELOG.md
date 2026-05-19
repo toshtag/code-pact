@@ -11,6 +11,56 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ---
 
+## [1.0.0] — 2026-05-19
+
+**Stable Control Plane / GA Hardening.** Locks the public CLI surface and ships the regression nets that protect it. Every command classified `Stable (v1.0)` in [`docs/cli-contract.md`](docs/cli-contract.md) keeps its flags, exit codes, and JSON envelope shape across the v1.x line. No new commands. Migration guidance from any prior alpha lives in [`docs/migration.md`](docs/migration.md).
+
+### CLI behavior changes
+
+None. v0.6–v0.9 callers parse v1.0 output unchanged, and every previously stable error code retains its name and `error.code` value.
+
+### Release channel changes
+
+- **npm dist-tag moved from `alpha` to `latest`.** New projects can `npm install code-pact` (or `npx code-pact`) and get v1.0. Past alpha releases remain available at `npm install code-pact@alpha` for users who pinned to pre-v1.0 behaviour.
+
+### Added
+
+- **`docs/migration.md`** — v0.6 / v0.7 / v0.8 / v0.9 → v1.0 upgrade paths, plus a dedicated section on the `task complete` vs `design.status` contract (`task complete` records operational progress; it does NOT mutate design YAML). ([#76])
+- **`docs/dogfood.md` Troubleshooting section** — recovery actions keyed to the 5 most common diagnostic codes: `MANIFEST_NOT_FOUND`, `INVALID_TASK_TRANSITION`, `PLAN_NORMALIZE_REQUIRED`, `VERIFICATION_FAILED`, `ADAPTER_GENERATOR_STALE`. ([#76])
+- **Stability taxonomy in `docs/cli-contract.md`** — `Stable (v1.0)` / `Stable (human-output)` / `Experimental` / `Deprecated` bands. Every command is classified explicitly. The 4-category public error code tables (public 20 / plan 13 / doctor 9 / adapter 10 / internal 1 = 53 codes) replace the previous 11-code summary table. ([#74])
+- **State file write guarantees section in `docs/cli-contract.md`** — documents every file `code-pact` writes, the atomic-write strategy (temp file + rename, no fsync), the path-safety scope (adapter-managed file writes only for v1.0), and the single-process-owner assumption for `.code-pact/`. ([#75])
+- **`tests/integration/e2e-workflow.test.ts`** — end-to-end smoke for the full agent-facing loop (init → adapter install → recommend → task context → task start → task complete → plan lint → plan analyze → adapter upgrade --check → doctor → validate) plus a pre-v0.9 migration scenario. ([#73])
+- **`tests/integration/migration.test.ts`** — 12 scenarios covering v0.6-era (design done, no progress events), v0.8-era (mixed events + historical tasks), and v0.9-era (manifest with stale `generator_version`) project shapes. ([#75])
+- **`tests/integration/json-stdout.test.ts`** — 31 tests asserting every `Stable (v1.0)` command emits a single valid JSON document on stdout under `--json`. Catches the `console.log`-on-stdout regression class regardless of which command broke. ([#74])
+- **`tests/unit/error-code-surface.test.ts`** — walks `src/` for every `code: "..."` / `.code = "..."` / `outCode = "..."` literal and locks the de-facto error-code surface against a categorized table. Adding a new code in `src/` requires updating both this test and `docs/cli-contract.md`. ([#74])
+- **`tests/helpers/cli.ts`** — shared subprocess + JSON-envelope helpers (`createTempProject`, `run`, `expectJsonOk`, `expectJsonErr`, `ensureCliBuilt`). New tests use it; existing tests are intentionally not migrated. ([#73])
+- **Subprocess coverage for `validate`, `task add`, `plan brief`, `plan prompt`, `plan constitution`** — 14 new integration tests filling the v1.0 contract-freeze prerequisite of "every Stable command has subprocess coverage". ([#72])
+
+### Changed
+
+- **`README.md`** — Status section rewritten to list the v1.0 stable surface explicitly and call out cursor / gemini-cli as Experimental. Install snippets drop the `@alpha` dist-tag from primary examples (with a one-line note that `@alpha` still resolves to past prereleases). Quickstart aligned with the v0.9 adapter subcommand layout. ([#76])
+- **`docs/cli-contract.md`** — Path-safety scope wording reframed to make explicit that "v1.0 path-traversal hardening is scoped to adapter-managed generated file writes" — not "design/progress need no validation". Existing state files remain protected by their schema validation and atomic-write behaviour. ([#76])
+- **`CHANGELOG.md` preamble** — switches from "alpha-only" versioning to a SemVer statement covering both the v0.x-alpha history and the upcoming v1.x line. ([#76])
+- **`scripts/assert-package-metadata.mjs`** — version regex broadened to accept plain `X.Y.Z` in addition to the v0.x `X.Y.Z-(alpha|beta|rc).N` prerelease form. (this PR)
+- **`design/phases/P8-stable-control-plane.yaml`** — new phase covering the v1.0 work end-to-end across six tasks. Each task was a single PR, each green individually. (P8-T1 .. P8-T6)
+
+### Fixed
+
+- **`task add` honors post-command `--json`** like every other `task` subcommand. Pre-v1.0, `code-pact task add P1 --json` silently dropped to the human stderr path because `cmdTaskAdd` only consulted the global pre-form `--json` flag. The fix brings the JSON envelope contract in line across the whole `task` subcommand group ahead of contract freeze. ([#72])
+
+### Internal
+
+- **`src/commands/init.ts`** — last raw `fs.writeFile` call site converted to the shared `atomicWriteText` helper. Every disk write in `src/` now goes through the temp-file + rename primitive; an interrupted `init` cannot leave a half-written project file behind. Behaviour unchanged on the happy path. ([#75])
+- **Test suite**: 881 tests at v0.9.0-alpha.0 → 930 tests at v1.0.0 across 66 files. New tests are all subprocess-level integration except `error-code-surface` (unit).
+
+[#72]: https://github.com/toshtag/code-pact/pull/72
+[#73]: https://github.com/toshtag/code-pact/pull/73
+[#74]: https://github.com/toshtag/code-pact/pull/74
+[#75]: https://github.com/toshtag/code-pact/pull/75
+[#76]: https://github.com/toshtag/code-pact/pull/76
+
+---
+
 ## [0.9.0-alpha.0] — 2026-05-19
 
 ### Behavior changes

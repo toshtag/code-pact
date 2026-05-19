@@ -37,10 +37,12 @@ if (pkg.name !== "code-pact") {
   fail(`name must be "code-pact" (got: ${JSON.stringify(pkg.name)})`);
 }
 
-const prereleaseRegex = /^\d+\.\d+\.\d+-(alpha|beta|rc)\.\d+$/;
-if (typeof pkg.version !== "string" || !prereleaseRegex.test(pkg.version)) {
+// v0.x: X.Y.Z-(alpha|beta|rc).N
+// v1.0+: plain X.Y.Z for stable; prereleases retain the suffix form.
+const versionRegex = /^\d+\.\d+\.\d+(-(alpha|beta|rc)\.\d+)?$/;
+if (typeof pkg.version !== "string" || !versionRegex.test(pkg.version)) {
   fail(
-    `version must match X.Y.Z-(alpha|beta|rc).N while we ship under the alpha tag (got: ${JSON.stringify(pkg.version)})`,
+    `version must match X.Y.Z or X.Y.Z-(alpha|beta|rc).N (got: ${JSON.stringify(pkg.version)})`,
   );
 }
 
