@@ -27,6 +27,14 @@ export type {
   AdapterDoctorResult,
 } from "./adapter-doctor.ts";
 
+export { runAdapterUpgrade } from "./adapter-upgrade.ts";
+export type {
+  AdapterUpgradeMode,
+  AdapterUpgradeOptions,
+  AdapterUpgradePlanEntry,
+  AdapterUpgradeResult,
+} from "./adapter-upgrade.ts";
+
 // ---------------------------------------------------------------------------
 // Back-compat aliases — the v0.8 surface used `runGenerateAdapter` and
 // `AdapterOptions` / `AdapterResult`. v0.9 keeps these names working so

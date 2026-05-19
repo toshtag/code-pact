@@ -134,12 +134,66 @@ describe("adapter bare-form back-compat — CLI", () => {
   });
 });
 
-describe("adapter upgrade stub — CLI", () => {
-  it("upgrade → NOT_IMPLEMENTED exit 2", () => {
-    const res = runCli(["adapter", "upgrade", "--json"]);
+describe("adapter upgrade — CLI", () => {
+  it("missing <agent> → CONFIG_ERROR exit 2", () => {
+    const res = runCli(["adapter", "upgrade", "--check", "--json"]);
     expect(res.status).toBe(2);
     const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
-    expect(parsed.error.code).toBe("NOT_IMPLEMENTED");
+    expect(parsed.error.code).toBe("CONFIG_ERROR");
+  });
+
+  it("neither --check nor --write → CONFIG_ERROR exit 2", () => {
+    const res = runCli(["adapter", "upgrade", "claude-code", "--json"]);
+    expect(res.status).toBe(2);
+    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string; message: string } };
+    expect(parsed.error.code).toBe("CONFIG_ERROR");
+    expect(parsed.error.message).toMatch(/--check or --write/);
+  });
+
+  it("both --check and --write → CONFIG_ERROR exit 2 (mutually exclusive)", () => {
+    const res = runCli(["adapter", "upgrade", "claude-code", "--check", "--write", "--json"]);
+    expect(res.status).toBe(2);
+    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string; message: string } };
+    expect(parsed.error.code).toBe("CONFIG_ERROR");
+    expect(parsed.error.message).toMatch(/mutually exclusive/);
+  });
+
+  it("no manifest → MANIFEST_NOT_FOUND exit 2", () => {
+    const res = runCli(["adapter", "upgrade", "claude-code", "--check", "--json"]);
+    expect(res.status).toBe(2);
+    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+    expect(parsed.error.code).toBe("MANIFEST_NOT_FOUND");
+  });
+
+  it("unknown agent → AGENT_NOT_FOUND exit 2", () => {
+    const res = runCli(["adapter", "upgrade", "no-such-agent", "--check", "--json"]);
+    expect(res.status).toBe(2);
+    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+    expect(parsed.error.code).toBe("AGENT_NOT_FOUND");
+  });
+
+  it("--check after fresh install → clean true, exit 0", () => {
+    runCli(["adapter", "install", "claude-code", "--json"]);
+    const res = runCli(["adapter", "upgrade", "claude-code", "--check", "--json"]);
+    expect(res.status).toBe(0);
+    const parsed = JSON.parse(res.stdout) as { ok: boolean; data: { clean: boolean } };
+    expect(parsed.ok).toBe(true);
+    expect(parsed.data.clean).toBe(true);
+  });
+
+  it("--write after fresh install → idempotent (manifest hashes unchanged)", () => {
+    const install = runCli(["adapter", "install", "claude-code", "--json"]);
+    const installed = JSON.parse(install.stdout) as { data: { manifestPath: string } };
+    const manifestPath = installed.data.manifestPath;
+    const fs = require("node:fs") as typeof import("node:fs");
+    const before = fs.readFileSync(manifestPath, "utf8");
+    const hashesBefore = before.match(/sha256: [0-9a-f]{64}/g);
+
+    const res = runCli(["adapter", "upgrade", "claude-code", "--write", "--json"]);
+    expect(res.status).toBe(0);
+    const after = fs.readFileSync(manifestPath, "utf8");
+    const hashesAfter = after.match(/sha256: [0-9a-f]{64}/g);
+    expect(hashesAfter).toEqual(hashesBefore);
   });
 });
 
