@@ -1,4 +1,4 @@
-import { mkdir, writeFile, readFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import type { AgentProfile } from "../schemas/agent-profile.ts";
@@ -234,81 +234,7 @@ async function readVerificationCommands(cwd: string): Promise<string[]> {
 }
 
 // ---------------------------------------------------------------------------
-// Result
-// ---------------------------------------------------------------------------
-
-export type AdapterGenerateResult = {
-  created: string[];
-  skipped: string[];
-};
-
-// ---------------------------------------------------------------------------
-// Main
-// ---------------------------------------------------------------------------
-
-export async function generateClaudeAdapter(
-  cwd: string,
-  profile: AgentProfile,
-  modelProfiles: ModelProfile[],
-  force: boolean,
-  locale: Locale,
-  modelVersion?: string,
-  regenSkills = false,
-): Promise<AdapterGenerateResult> {
-  const created: string[] = [];
-  const skipped: string[] = [];
-
-  // Resolve model version: CLI override takes precedence over profile field.
-  const resolvedModelVersion = modelVersion ?? profile.model_version;
-  const forceSkills = force || regenSkills;
-
-  async function writeIfAbsent(absPath: string, content: string, forceWrite: boolean): Promise<void> {
-    if (!forceWrite) {
-      try {
-        await readFile(absPath);
-        skipped.push(absPath);
-        return;
-      } catch {
-        // file doesn't exist — proceed
-      }
-    }
-    await writeFile(absPath, content, "utf8");
-    created.push(absPath);
-  }
-
-  // CLAUDE.md at project root (respects force only, not regenSkills)
-  await writeIfAbsent(
-    join(cwd, profile.instruction_filename),
-    claudeMd(profile, modelProfiles, locale, resolvedModelVersion),
-    force,
-  );
-
-  // .claude/skills/ — fixed skills
-  const skillDir = join(cwd, profile.skill_dir ?? ".claude/skills");
-  await mkdir(skillDir, { recursive: true });
-  await writeIfAbsent(join(skillDir, "context.md"), SKILL_CONTEXT, forceSkills);
-  await writeIfAbsent(join(skillDir, "verify.md"), SKILL_VERIFY, forceSkills);
-  await writeIfAbsent(join(skillDir, "progress.md"), SKILL_PROGRESS, forceSkills);
-
-  // Dynamic skills from verification.commands in roadmap phases
-  const verificationCommands = await readVerificationCommands(cwd);
-  const seenSkillNames = new Set<string>();
-  for (const cmd of verificationCommands) {
-    const skillName = deriveSkillName(cmd);
-    if (seenSkillNames.has(skillName)) continue;
-    seenSkillNames.add(skillName);
-    await writeIfAbsent(join(skillDir, `${skillName}.md`), buildCommandSkill(skillName, cmd), forceSkills);
-  }
-
-  // .claude/hooks/ (empty placeholder — user fills in)
-  const hookDir = join(cwd, profile.hook_dir ?? ".claude/hooks");
-  await mkdir(hookDir, { recursive: true });
-
-  return { created, skipped };
-}
-
-// ---------------------------------------------------------------------------
-// AdapterDescriptor (P7 — pure desired-file generation)
+// AdapterDescriptor
 // ---------------------------------------------------------------------------
 
 export async function generateClaudeDesiredFiles(

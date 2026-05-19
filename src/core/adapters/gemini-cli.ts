@@ -1,7 +1,4 @@
-import { mkdir, writeFile, readFile } from "node:fs/promises";
-import { join } from "node:path";
 import type { AgentProfile } from "../schemas/agent-profile.ts";
-import type { ModelProfile } from "../schemas/model-profile.ts";
 import type { Locale } from "../../i18n/index.ts";
 import { messages as messageCatalog } from "../../i18n/index.ts";
 import type {
@@ -77,49 +74,8 @@ function geminiMd(profile: AgentProfile, locale: Locale): string {
   ].join("\n");
 }
 
-export type AdapterGenerateResult = {
-  created: string[];
-  skipped: string[];
-};
-
-export async function generateGeminiCliAdapter(
-  cwd: string,
-  profile: AgentProfile,
-  // model profiles are accepted for interface parity. Gemini CLI
-  // selects its own model in settings; surfacing tier mapping here
-  // would only confuse the user.
-  _modelProfiles: ModelProfile[],
-  force: boolean,
-  locale: Locale,
-): Promise<AdapterGenerateResult> {
-  const created: string[] = [];
-  const skipped: string[] = [];
-
-  async function writeIfAbsent(absPath: string, content: string): Promise<void> {
-    if (!force) {
-      try {
-        await readFile(absPath);
-        skipped.push(absPath);
-        return;
-      } catch {
-        // file doesn't exist — proceed
-      }
-    }
-    await writeFile(absPath, content, "utf8");
-    created.push(absPath);
-  }
-
-  // GEMINI.md at project root
-  await writeIfAbsent(join(cwd, profile.instruction_filename), geminiMd(profile, locale));
-
-  // .context/gemini-cli/
-  await mkdir(join(cwd, profile.context_dir), { recursive: true });
-
-  return { created, skipped };
-}
-
 // ---------------------------------------------------------------------------
-// AdapterDescriptor (P7 — pure desired-file generation)
+// AdapterDescriptor
 // ---------------------------------------------------------------------------
 
 export async function generateGeminiCliDesiredFiles(

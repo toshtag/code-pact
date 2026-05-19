@@ -1,5 +1,3 @@
-import { mkdir, writeFile, readFile } from "node:fs/promises";
-import { join } from "node:path";
 import type { AgentProfile } from "../schemas/agent-profile.ts";
 import type { ModelProfile } from "../schemas/model-profile.ts";
 import { ModelTier } from "../schemas/model-profile.ts";
@@ -70,57 +68,7 @@ function agentsMd(profile: AgentProfile, modelProfiles: ModelProfile[], locale: 
 }
 
 // ---------------------------------------------------------------------------
-// Result
-// ---------------------------------------------------------------------------
-
-export type AdapterGenerateResult = {
-  created: string[];
-  skipped: string[];
-};
-
-// ---------------------------------------------------------------------------
-// Main
-// ---------------------------------------------------------------------------
-
-export async function generateCodexAdapter(
-  cwd: string,
-  profile: AgentProfile,
-  modelProfiles: ModelProfile[],
-  force: boolean,
-  locale: Locale,
-): Promise<AdapterGenerateResult> {
-  const created: string[] = [];
-  const skipped: string[] = [];
-
-  async function writeIfAbsent(absPath: string, content: string): Promise<void> {
-    if (!force) {
-      try {
-        await readFile(absPath);
-        skipped.push(absPath);
-        return;
-      } catch {
-        // file doesn't exist — proceed
-      }
-    }
-    await writeFile(absPath, content, "utf8");
-    created.push(absPath);
-  }
-
-  // AGENTS.md at project root
-  await writeIfAbsent(
-    join(cwd, profile.instruction_filename),
-    agentsMd(profile, modelProfiles, locale),
-  );
-
-  // .context/codex/ (context pack output dir)
-  const contextDir = join(cwd, profile.context_dir);
-  await mkdir(contextDir, { recursive: true });
-
-  return { created, skipped };
-}
-
-// ---------------------------------------------------------------------------
-// AdapterDescriptor (P7 — pure desired-file generation)
+// AdapterDescriptor
 // ---------------------------------------------------------------------------
 
 export async function generateCodexDesiredFiles(

@@ -1,7 +1,4 @@
-import { mkdir, writeFile, readFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
 import type { AgentProfile } from "../schemas/agent-profile.ts";
-import type { ModelProfile } from "../schemas/model-profile.ts";
 import type { Locale } from "../../i18n/index.ts";
 import { messages as messageCatalog } from "../../i18n/index.ts";
 import type {
@@ -65,50 +62,8 @@ function agentInstructionsMd(profile: AgentProfile, locale: Locale): string {
   ].join("\n");
 }
 
-export type AdapterGenerateResult = {
-  created: string[];
-  skipped: string[];
-};
-
-export async function generateGenericAdapter(
-  cwd: string,
-  profile: AgentProfile,
-  // model profiles are accepted for interface parity but the generic
-  // instruction file does not currently surface model tier mapping.
-  _modelProfiles: ModelProfile[],
-  force: boolean,
-  locale: Locale,
-): Promise<AdapterGenerateResult> {
-  const created: string[] = [];
-  const skipped: string[] = [];
-
-  async function writeIfAbsent(absPath: string, content: string): Promise<void> {
-    if (!force) {
-      try {
-        await readFile(absPath);
-        skipped.push(absPath);
-        return;
-      } catch {
-        // file doesn't exist — proceed
-      }
-    }
-    await mkdir(dirname(absPath), { recursive: true });
-    await writeFile(absPath, content, "utf8");
-    created.push(absPath);
-  }
-
-  // docs/code-pact/agent-instructions.md
-  await writeIfAbsent(join(cwd, profile.instruction_filename), agentInstructionsMd(profile, locale));
-
-  // .context/generic/
-  const contextDir = join(cwd, profile.context_dir);
-  await mkdir(contextDir, { recursive: true });
-
-  return { created, skipped };
-}
-
 // ---------------------------------------------------------------------------
-// AdapterDescriptor (P7 — pure desired-file generation)
+// AdapterDescriptor
 // ---------------------------------------------------------------------------
 
 export async function generateGenericDesiredFiles(
