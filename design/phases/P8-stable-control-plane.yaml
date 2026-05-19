@@ -111,7 +111,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
     description: |
       Public contract freeze. Introduce a Stability taxonomy in
       docs/cli-contract.md (`Stable (v1.0)`, `Stable (human-output)`,
