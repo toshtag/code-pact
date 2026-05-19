@@ -1,6 +1,7 @@
-import { mkdir, writeFile, readFile } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parse as parseYaml, stringify as toYaml } from "yaml";
+import { atomicWriteText } from "../../io/atomic-text.ts";
 import { Phase } from "../schemas/phase.ts";
 import type { Task } from "../schemas/task.ts";
 import { Roadmap, type PhaseRef } from "../schemas/roadmap.ts";
@@ -39,7 +40,7 @@ async function loadRoadmap(cwd: string): Promise<Roadmap> {
 }
 
 async function saveRoadmap(cwd: string, roadmap: Roadmap): Promise<void> {
-  await writeFile(join(cwd, "design", "roadmap.yaml"), toYaml(roadmap), "utf8");
+  await atomicWriteText(join(cwd, "design", "roadmap.yaml"), toYaml(roadmap));
 }
 
 function slugify(name: string): string {
@@ -100,7 +101,7 @@ export async function createPhase(opts: CreatePhaseInput): Promise<CreatePhaseRe
   };
 
   await mkdir(join(cwd, "design", "phases"), { recursive: true });
-  await writeFile(absPath, toYaml(phase), "utf8");
+  await atomicWriteText(absPath, toYaml(phase));
 
   const ref: PhaseRef = { id, path: relPath, weight };
   roadmap.phases.push(ref);
