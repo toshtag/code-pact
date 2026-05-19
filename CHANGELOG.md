@@ -3,7 +3,11 @@
 All notable changes to this project will be documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
-Versions follow `MAJOR.MINOR.PATCH-alpha.N` while the project is in alpha.
+Versions follow [Semantic Versioning](https://semver.org/). The
+v0.1.0-alpha through v0.9.0-alpha line used `MAJOR.MINOR.PATCH-alpha.N`
+identifiers. Starting with v1.0.0, stable releases use plain
+`MAJOR.MINOR.PATCH` and prereleases (if any) use the standard
+`-rc.N` / `-beta.N` suffixes.
 
 ---
 
