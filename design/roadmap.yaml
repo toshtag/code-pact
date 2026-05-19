@@ -23,3 +23,6 @@ phases:
   - id: P8
     path: design/phases/P8-stable-control-plane.yaml
     weight: 15
+  - id: P9
+    path: design/phases/P9-post-v1-dogfood-onboarding.yaml
+    weight: 20
