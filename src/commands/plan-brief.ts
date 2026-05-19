@@ -1,5 +1,6 @@
-import { writeFile, readFile, mkdir } from "node:fs/promises";
+import { readFile, mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { atomicWriteText } from "../io/atomic-text.ts";
 import { Prompter } from "../lib/prompt.ts";
 import type { Locale } from "../i18n/index.ts";
 import { messages as messageCatalog } from "../i18n/index.ts";
@@ -104,7 +105,7 @@ export async function runPlanBrief(opts: PlanBriefOptions): Promise<PlanBriefRes
     );
     const content = generateBriefMd(answers, locale);
     await mkdir(dirname(briefPath), { recursive: true });
-    await writeFile(briefPath, content, "utf8");
+    await atomicWriteText(briefPath, content);
     return { path: briefPath, skipped: false };
   } finally {
     if (ownsPrompter) prompter.close();
