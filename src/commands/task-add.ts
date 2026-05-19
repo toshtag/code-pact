@@ -1,6 +1,7 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parse as parseYaml, stringify as toYaml } from "yaml";
+import { atomicWriteText } from "../io/atomic-text.ts";
 import { Roadmap } from "../core/schemas/roadmap.ts";
 import { Phase } from "../core/schemas/phase.ts";
 import { TaskType, type Task } from "../core/schemas/task.ts";
@@ -107,7 +108,7 @@ export async function runTaskAdd(opts: TaskAddOptions): Promise<TaskAddResult> {
     };
 
     const absPath = join(opts.cwd, ref.path);
-    await writeFile(absPath, toYaml(updatedPhase), "utf8");
+    await atomicWriteText(absPath, toYaml(updatedPhase));
 
     return { phaseId: opts.phaseId, taskId, phasePath: ref.path };
   } finally {

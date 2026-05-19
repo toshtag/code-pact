@@ -1,5 +1,6 @@
-import { writeFile, readFile, mkdir } from "node:fs/promises";
+import { readFile, mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { atomicWriteText } from "../io/atomic-text.ts";
 import { Prompter } from "../lib/prompt.ts";
 import type { Locale } from "../i18n/index.ts";
 import { messages as messageCatalog } from "../i18n/index.ts";
@@ -98,7 +99,7 @@ export async function runPlanConstitution(
     );
     const content = generateConstitutionMd(answers, locale);
     await mkdir(dirname(constitutionPath), { recursive: true });
-    await writeFile(constitutionPath, content, "utf8");
+    await atomicWriteText(constitutionPath, content);
     return { path: constitutionPath, skipped: false };
   } finally {
     if (ownsPrompter) prompter.close();

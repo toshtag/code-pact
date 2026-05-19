@@ -1,5 +1,5 @@
-import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { atomicWriteText } from "../io/atomic-text.ts";
 import { Prompter } from "../lib/prompt.ts";
 import { messages as messageCatalog, type Locale } from "../i18n/index.ts";
 import { SUPPORTED_AGENTS, type SupportedAgent } from "../core/agents.ts";
@@ -105,7 +105,7 @@ export async function runInitWizard(opts: InitWizardOptions): Promise<InitResult
     // Write brief if answers were collected.
     if (briefAnswers) {
       const briefPath = join(opts.cwd, "design", "brief.md");
-      await writeFile(briefPath, generateBriefMd(briefAnswers, locale), "utf8");
+      await atomicWriteText(briefPath, generateBriefMd(briefAnswers, locale));
       result.created.push(briefPath);
     }
 
