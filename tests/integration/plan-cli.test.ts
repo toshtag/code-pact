@@ -1,0 +1,189 @@
+// CLI integration suite for `plan brief` / `plan prompt` /
+// `plan constitution`. These three commands were previously only
+// unit-tested; v1.0 P8-T1 adds subprocess coverage so the public
+// surface (exit codes, --json envelope, non-TTY behaviour) is locked
+// in before P8-T3's contract freeze.
+//
+// `plan brief` and `plan constitution` are TTY-required wizards
+// (Stable (human-output) candidates) — in a subprocess they must
+// surface CONFIG_ERROR exit 2 rather than silently hanging.
+//
+// `plan prompt` is non-interactive and reads design/brief.md +
+// design/constitution.md from disk (Stable (v1.0) candidate). The
+// --clipboard path is intentionally not exercised here because it
+// shells out to pbcopy / xclip, which is brittle in CI; that branch
+// is covered by tests/unit/commands/plan-prompt.test.ts.
+
+import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
+import { spawnSync } from "node:child_process";
+import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
+import { join, resolve } from "node:path";
+import { tmpdir } from "node:os";
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+const repoRoot = resolve(fileURLToPath(import.meta.url), "../../..");
+const cliPath = join(repoRoot, "dist", "cli.js");
+
+let tmpDir: string;
+
+type RunResult = { code: number; stdout: string; stderr: string };
+
+function run(args: string[], env?: NodeJS.ProcessEnv): RunResult {
+  const res = spawnSync(process.execPath, [cliPath, ...args], {
+    cwd: tmpDir,
+    encoding: "utf8",
+    env: env ? { ...process.env, ...env } : process.env,
+  });
+  return {
+    code: res.status ?? -1,
+    stdout: res.stdout ?? "",
+    stderr: res.stderr ?? "",
+  };
+}
+
+beforeAll(() => {
+  // Reuse the same rebuild-before-tests posture as cli.test.ts.
+  const res = spawnSync("pnpm", ["build"], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    stdio: "pipe",
+  });
+  if (res.status !== 0 || !existsSync(cliPath)) {
+    throw new Error(
+      `Failed to build CLI for tests. exit=${res.status}\nstdout:\n${res.stdout}\nstderr:\n${res.stderr}`,
+    );
+  }
+}, 60_000);
+
+beforeEach(async () => {
+  tmpDir = await mkdtemp(join(tmpdir(), "code-pact-plan-cli-test-"));
+});
+
+afterAll(async () => {
+  if (tmpDir) await rm(tmpDir, { recursive: true, force: true });
+});
+
+// ---------------------------------------------------------------------------
+// plan brief (TTY-required wizard)
+// ---------------------------------------------------------------------------
+
+describe("CLI: plan brief (no-TTY)", () => {
+  it("plan brief --json in a non-TTY subprocess returns {ok:false,error:CONFIG_ERROR} exit 2", () => {
+    run(["init", "--non-interactive", "--locale", "en-US", "--agent", "claude-code", "--json"]);
+    const res = run(["plan", "brief", "--json"]);
+    expect(res.code).toBe(2);
+    const parsed = JSON.parse(res.stdout) as {
+      ok: boolean;
+      error: { code: string; message: string };
+    };
+    expect(parsed.ok).toBe(false);
+    expect(parsed.error.code).toBe("CONFIG_ERROR");
+    expect(parsed.error.message.toLowerCase()).toContain("tty");
+  });
+
+  it("plan brief (human output) in a non-TTY subprocess writes a single stderr line and exit 2", () => {
+    run(["init", "--non-interactive", "--locale", "en-US", "--agent", "claude-code", "--json"]);
+    const res = run(["plan", "brief"]);
+    expect(res.code).toBe(2);
+    expect(res.stdout).toBe("");
+    expect(res.stderr.toLowerCase()).toContain("tty");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// plan constitution (TTY-required wizard)
+// ---------------------------------------------------------------------------
+
+describe("CLI: plan constitution (no-TTY)", () => {
+  it("plan constitution --json in a non-TTY subprocess returns {ok:false,error:CONFIG_ERROR} exit 2", () => {
+    run(["init", "--non-interactive", "--locale", "en-US", "--agent", "claude-code", "--json"]);
+    const res = run(["plan", "constitution", "--json"]);
+    expect(res.code).toBe(2);
+    const parsed = JSON.parse(res.stdout) as {
+      ok: boolean;
+      error: { code: string; message: string };
+    };
+    expect(parsed.ok).toBe(false);
+    expect(parsed.error.code).toBe("CONFIG_ERROR");
+    expect(parsed.error.message.toLowerCase()).toContain("tty");
+  });
+
+  it("plan constitution (human output) in a non-TTY subprocess writes a single stderr line and exit 2", () => {
+    run(["init", "--non-interactive", "--locale", "en-US", "--agent", "claude-code", "--json"]);
+    const res = run(["plan", "constitution"]);
+    expect(res.code).toBe(2);
+    expect(res.stdout).toBe("");
+    expect(res.stderr.toLowerCase()).toContain("tty");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// plan prompt (non-interactive)
+// ---------------------------------------------------------------------------
+
+describe("CLI: plan prompt", () => {
+  it("plan prompt --json on an uninitialized project returns {ok:true,data:{has_brief:false,has_constitution:false}} exit 0", () => {
+    // plan prompt does not require an initialized project — it just
+    // reports has_brief / has_constitution = false when the files are
+    // missing.
+    const res = run(["plan", "prompt", "--json"]);
+    expect(res.code).toBe(0);
+    const parsed = JSON.parse(res.stdout) as {
+      ok: boolean;
+      data: {
+        prompt: string;
+        has_brief: boolean;
+        has_constitution: boolean;
+        clipboard_copied: boolean;
+      };
+    };
+    expect(parsed.ok).toBe(true);
+    expect(parsed.data.has_brief).toBe(false);
+    expect(parsed.data.has_constitution).toBe(false);
+    expect(parsed.data.clipboard_copied).toBe(false);
+    expect(parsed.data.prompt.length).toBeGreaterThan(0);
+  });
+
+  it("plan prompt --json picks up design/brief.md and design/constitution.md when present", async () => {
+    run(["init", "--non-interactive", "--locale", "en-US", "--agent", "claude-code", "--json"]);
+    await mkdir(join(tmpDir, "design"), { recursive: true });
+    await writeFile(join(tmpDir, "design", "brief.md"), "# Brief\n\nTest brief content.\n");
+    await writeFile(
+      join(tmpDir, "design", "constitution.md"),
+      "# Constitution\n\nTest constitution content.\n",
+    );
+
+    const res = run(["plan", "prompt", "--json"]);
+    expect(res.code).toBe(0);
+    const parsed = JSON.parse(res.stdout) as {
+      ok: boolean;
+      data: { has_brief: boolean; has_constitution: boolean; prompt: string };
+    };
+    expect(parsed.ok).toBe(true);
+    expect(parsed.data.has_brief).toBe(true);
+    expect(parsed.data.has_constitution).toBe(true);
+    expect(parsed.data.prompt).toContain("Test brief content.");
+    expect(parsed.data.prompt).toContain("Test constitution content.");
+  });
+
+  it("plan prompt (human output) writes the prompt to stdout and exits 0", () => {
+    const res = run(["plan", "prompt"]);
+    expect(res.code).toBe(0);
+    // The prompt is the entire stdout in human mode.
+    expect(res.stdout.length).toBeGreaterThan(0);
+    // It should NOT be a JSON envelope.
+    expect(res.stdout.trimStart().startsWith("{")).toBe(false);
+  });
+
+  it("plan prompt rejects unknown options with parseArgs strict:false behaviour (tolerant)", () => {
+    // plan prompt currently uses parseArgs strict:false, so unknown flags
+    // are quietly ignored. This test pins that behaviour so the v1.0
+    // contract freeze records it accurately — if we tighten this later
+    // it will be an intentional, documented change.
+    const res = run(["plan", "prompt", "--bogus", "--json"]);
+    expect(res.code).toBe(0);
+    const parsed = JSON.parse(res.stdout) as { ok: boolean };
+    expect(parsed.ok).toBe(true);
+  });
+});
