@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 import { parseArgs } from "node:util";
 import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
-import { dirname, resolve, join } from "node:path";
+import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { readPackageVersion } from "./lib/package-version.ts";
 import { splitArgv, strictParse, ConfigError } from "./lib/argv.ts";
 import { isInteractive, isCIEnv } from "./lib/tty.ts";
 import { messages, type Locale } from "./i18n/index.ts";
@@ -89,14 +89,6 @@ async function detectLocale(cwd: string): Promise<Locale> {
   const lang = process.env.LANG ?? "";
   if (lang.startsWith("ja")) return "ja-JP";
   return "en-US";
-}
-
-async function readPackageVersion(): Promise<string> {
-  const here = dirname(fileURLToPath(import.meta.url));
-  const pkgPath = resolve(here, "..", "package.json");
-  const raw = await readFile(pkgPath, "utf8");
-  const pkg = JSON.parse(raw) as { version?: string };
-  return pkg.version ?? "0.0.0";
 }
 
 // ---------------------------------------------------------------------------
