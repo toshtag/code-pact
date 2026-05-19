@@ -2,11 +2,11 @@
 
 ## Supported versions
 
-`code-pact` is in alpha (`0.1.x-alpha.*`). Only the latest alpha on the npm `alpha` tag receives security fixes. Once a stable `0.1.0` ships, this section will be updated.
+`code-pact` is in alpha (`0.x.x-alpha.*`). Only the latest version on the npm `alpha` tag receives security fixes. Once a stable `1.0.0` ships, this section will be updated.
 
 | Version | Supported |
 |---|---|
-| `0.1.x-alpha` (latest on `alpha` tag) | yes |
+| latest on the `alpha` tag | yes |
 | older alphas | no |
 
 ## Reporting a vulnerability
