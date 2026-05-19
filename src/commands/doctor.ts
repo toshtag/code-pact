@@ -415,7 +415,7 @@ async function checkAdapterMissing(
       issues.push({
         code: "ADAPTER_MISSING",
         severity: "warning",
-        message: `Agent "${parsed.data.name}" is enabled but "${parsed.data.instruction_filename}" does not exist — run "code-pact adapter --agent ${agentRef.name}"`,
+        message: `Agent "${parsed.data.name}" is enabled but "${parsed.data.instruction_filename}" does not exist — run "code-pact adapter install ${agentRef.name}"`,
       });
     }
   }
@@ -544,7 +544,7 @@ async function checkAdapterStale(
       issues.push({
         code: "ADAPTER_STALE",
         severity: "warning",
-        message: `Agent "${parsed.data.name}" has no model_version set — run "code-pact adapter --agent ${agentRef.name} --model <version>" to pin a model`,
+        message: `Agent "${parsed.data.name}" has no model_version set — run "code-pact adapter install ${agentRef.name} --model <version>" to pin a model`,
       });
     }
   }

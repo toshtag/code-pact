@@ -7,6 +7,74 @@ Versions follow `MAJOR.MINOR.PATCH-alpha.N` while the project is in alpha.
 
 ---
 
+## [0.9.0-alpha.0] — 2026-05-19
+
+### Behavior changes
+
+- **`adapter --force` is narrowed to unmanaged-adoption only.** In v0.8, `code-pact adapter --force` overwrote every file unconditionally. In v0.9, `--force` adopts pre-existing files into the manifest but **NEVER** overwrites a file already recorded in the manifest (`managed-modified`). Destructive overwrite of a locally-modified managed file now requires `code-pact adapter upgrade <agent> --write --accept-modified`. The bare-form `code-pact adapter --agent X [--force] [--regen-skills]` continues to work in v0.9.x with a one-line stderr deprecation notice (suppressed under `--json`) and is internally routed to `adapter install`; it will be removed in v0.10. `--regen-skills` is preserved as a role-scoped force that applies `--force`-equivalent to skill files only and **still** cannot override `managed-modified`. ([#67], [#69])
+
+### Added
+
+- **`adapter` subcommand group.** `code-pact adapter` is promoted from a flat command into a router following the `cmdPlan` / `cmdPhase` pattern. Six subcommands ship:
+  - `adapter list [--json]` — enumerate registered adapters with manifest state (enabled / experimental flags, fileCount, lastGeneratedAt, generatorVersion, manifestInvalid surfacing). ([#67])
+  - `adapter install <agent> [--force] [--model <v>] [--regen-skills] [--json]` — first-time install, writes the per-agent manifest. Idempotent across re-runs. ([#67])
+  - `adapter upgrade <agent> --check [--json]` — read-only drift report. Exit 0 clean / 1 drift detected / 2 config. Never touches disk or manifest. ([#69])
+  - `adapter upgrade <agent> --write [--force] [--accept-modified] [--model <v>] [--regen-skills] [--json]` — apply changes. Exit 0 ok / 1 if any file was refused / 2 config. `--check` and `--write` are mutually exclusive and required. ([#69])
+  - `adapter doctor [--agent <name>] [--json]` — manifest-aware adapter-scoped diagnostics. ([#68])
+  - Bare-form `adapter [--agent <name>] ...` — deprecated v0.5–v0.8 surface; routes to `install`. ([#67])
+- **Per-agent manifest at `.code-pact/adapters/<agent>.manifest.yaml`.** Records every file code-pact generated, its sha256 hash (computed from LF-normalized UTF-8 bytes), an `adapter_schema_version`, a `profile_fingerprint` (the adapter-output-affecting profile fields), the `generator_version` at install time, and an ISO-8601 `generated_at`. zod `.strict()` at every level so accidental field drift fails loudly. ([#66])
+- **2-axis file-state classifier (`local × desired`).** Local: `new | unmanaged | managed-clean | managed-modified | managed-missing`. Desired: `current | stale | absent`. The 8-value action enum `write | skip | adopt | replace_unmanaged | update | update_manifest | refuse | warn` is derived from `(local, desired, mode, force, acceptModified)` by a pure function. Catches the "manifest hash drifted but content is still current" case (`managed-modified × current`) so re-runs refresh the manifest without touching disk. ([#66])
+- **Nine new `ADAPTER_*` error codes** surfaced by `adapter doctor`:
+  - `ADAPTER_MANIFEST_MISSING` (warning, **`adapter doctor` only** — never emitted by global doctor)
+  - `ADAPTER_MANIFEST_INVALID` (error) — YAML parse or schema failure
+  - `ADAPTER_GENERATOR_STALE` (warning) — manifest's `generator_version` differs from current package version (simple equality, no semver ordering)
+  - `ADAPTER_SCHEMA_DRIFT` (warning) — manifest's `adapter_schema_version` older than the adapter module declares
+  - `ADAPTER_PROFILE_DRIFT` (warning) — `profile_fingerprint` deep-mismatch
+  - `ADAPTER_FILE_MISSING` (error) — managed-missing
+  - `ADAPTER_FILE_DRIFT` (warning) — `managed-modified × stale`
+  - `ADAPTER_DESIRED_STALE` (warning) — `managed-clean × stale`
+  - `ADAPTER_UNMANAGED_FILE` (warning) — file under `ownedPathGlobs` but not in manifest ([#68])
+- **Path-safety helpers** in `src/core/adapters/file-state.ts`. `assertSafeRelativePath` rejects absolute paths, leading `~`, `\`, Windows drive letters, `..`, `.`, and empty segments at the zod-schema level. `resolveWithinProject` additionally walks ancestors and rejects symlink-escape (a directory symlink under cwd resolving outside the project) before any write. ([#66])
+- **Stable-adapter conformance suite** (`tests/integration/adapter-conformance.test.ts`). Per-agent snapshots of the manifest file list at `tests/fixtures/adapters/<agent>/expected-files.txt`. Content invariants assert all four required CLI references (`code-pact recommend`, `code-pact task context`, `code-pact task complete`, `code-pact validate`), `--json` mention, install→install idempotency, zod round-trip, and `generateDesiredFiles` path safety. cursor and gemini-cli are intentionally excluded with an inline comment citing `EXPERIMENTAL_AGENTS`. ([#70])
+- **`recommend` and `validate` references in stable adapter instruction templates.** The generated `CLAUDE.md`, `AGENTS.md`, and `docs/code-pact/agent-instructions.md` now open with a step 0 telling the agent to call `code-pact recommend --phase <id> --task <id> --agent <name> --json` first; a `validateNote` below the verify note also points at `code-pact validate --json`. ([#70])
+
+### Changed
+
+- **Global `doctor` is manifest-aware when a manifest exists.** With a manifest, the legacy `ADAPTER_MISSING` warning is skipped in favor of the manifest-aware codes (`ADAPTER_FILE_MISSING`, `ADAPTER_FILE_DRIFT`, `ADAPTER_DESIRED_STALE`, `ADAPTER_GENERATOR_STALE`, `ADAPTER_SCHEMA_DRIFT`, `ADAPTER_PROFILE_DRIFT`, `ADAPTER_UNMANAGED_FILE`); findings carry an `[agent-name]` prefix on the message so consumers can attribute issues without changing the `DoctorIssue` shape. `ADAPTER_MANIFEST_MISSING` is **never** emitted by global `doctor` — it's an `adapter doctor`-only signal so existing projects don't suddenly become noisy after upgrading to v0.9. ([#68])
+- **Global `doctor` is byte-identical to v0.8 when no manifest exists.** Projects that have not yet run `adapter install` continue to see the legacy `ADAPTER_MISSING` warning exactly as in v0.8 — no new codes, no new lines, no surprise CI failures. ([#68])
+- **`docs/cli-contract.md`** rewrites the v0.5 `adapter` section as v0.9: subcommand list, JSON envelope shapes for every subcommand, the `--force` action table, manifest schema reference, `--regen-skills` role scoping, bare-form deprecation, full 8-row action enum table, full 9-row `ADAPTER_*` error code table, and "Interaction with global doctor" subsection. ([#67], [#68], [#69])
+- **`docs/dogfood.md`** adds an "Upgrading an adapter safely (v0.9)" section covering the check/apply split, the `--force` narrowing, the 8-row action enum, and the `adapter doctor` workflow. Quick-reference table updated with `adapter list / install / upgrade / doctor` rows. ([#70])
+- **`README.md` agent-facing usage** updated to match the v0.9 subcommand surface. (this PR)
+
+### Internal
+
+- **Pure `AdapterDescriptor` model.** Each of the five adapters now exposes `generateDesiredFiles(input): Promise<DesiredAdapterFile[]>` returning only the file list it would write (LF-normalized UTF-8 content, project-relative POSIX paths). All disk write I/O, force / skip / regenSkills logic, and directory placeholder creation moved into the command layer. Generators are byte-identical to v0.8 output for unchanged inputs. ([#65])
+- **Action matrix + classifier are pure functions.** `classifyFileState({manifestHash, diskHash, desiredHash})` and `decideAction({local, desired, mode, force, acceptModified})` live in `src/core/adapters/file-state.ts` and are exhaustively unit-tested across every cell of the 5×3 × 3 modes × flag combinations. ([#66])
+- **Atomic manifest I/O.** `writeManifest` validates the input through `AdapterManifest.parse` BEFORE any bytes hit disk, then delegates to the existing `atomicWriteText` helper. `readManifest` returns `null` on ENOENT (fresh project) and throws on parse failure so doctor can surface `ADAPTER_MANIFEST_INVALID`. ([#66])
+- **`readPackageVersion` extracted** to `src/lib/package-version.ts` so adapter modules can read the current code-pact version into `generator_version` without duplicating the cli.ts helper. Tries both `..` and `../..` from `import.meta.url` so it works from `dist/cli.js` AND from tsx-driven runs of source files. ([#67])
+- **220 new tests** across the v0.9 surface:
+  - 30 schema tests (`tests/unit/schemas/adapter-manifest.test.ts`)
+  - 22 manifest I/O tests (`tests/unit/core/adapter-manifest.test.ts`)
+  - 59 file-state classifier + action matrix tests (`tests/unit/core/adapter-file-state.test.ts`)
+  - 7 install unit tests added to `tests/unit/commands/adapter.test.ts`
+  - 9 list unit tests (`tests/unit/commands/adapter-list.test.ts`)
+  - 23 doctor unit tests (`tests/unit/commands/adapter-doctor.test.ts`)
+  - 24 upgrade unit tests (`tests/unit/commands/adapter-upgrade.test.ts`)
+  - 21 CLI integration tests (`tests/integration/adapter-cli.test.ts`)
+  - 19 conformance tests (`tests/integration/adapter-conformance.test.ts`)
+  - 6 global-doctor manifest-aware regression tests added to `tests/unit/commands/doctor.test.ts`
+- **`design/phases/P7-adapter-platform.yaml`** — new phase covering the v0.9 work end-to-end across seven tasks. Each task was a single PR, each green individually.
+- **Self-dogfood manifest not committed in v0.9.** `.code-pact/` remains gitignored as per-developer state, consistent with how v0.8 shipped. Users running v0.9 on a fresh clone see the legacy `ADAPTER_MISSING` warning from global `doctor` until they run `code-pact adapter install <agent>`. A future release may revisit the gitignore policy.
+
+[#65]: https://github.com/toshtag/code-pact/pull/65
+[#66]: https://github.com/toshtag/code-pact/pull/66
+[#67]: https://github.com/toshtag/code-pact/pull/67
+[#68]: https://github.com/toshtag/code-pact/pull/68
+[#69]: https://github.com/toshtag/code-pact/pull/69
+[#70]: https://github.com/toshtag/code-pact/pull/70
+
+---
+
 ## [0.8.0-alpha.0] — 2026-05-19
 
 ### Added
