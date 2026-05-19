@@ -1045,6 +1045,53 @@ The active locale is resolved in this priority order:
 
 This means that once a project is initialized with `ja-JP`, all subsequent commands automatically use Japanese without requiring `--locale` or environment variables.
 
+## State file write guarantees
+
+`code-pact` writes a small, well-defined set of files into the project tree. Every disk write goes through the same atomic primitive so an interrupted process cannot leave a half-written file behind.
+
+### Files written by `code-pact`
+
+| Path | Written by | Frequency |
+|------|------------|-----------|
+| `.code-pact/project.yaml` | `init` | Once at project bootstrap |
+| `.code-pact/agent-profiles/<agent>.yaml` | `init`, `adapter install`, `adapter upgrade --write` | Once at bootstrap; refreshed when adapter profile fields change |
+| `.code-pact/model-profiles/*.yaml` | `init` | Once at bootstrap (default tier templates) |
+| `.code-pact/state/progress.yaml` | `task start` / `task block` / `task resume` / `task complete` | One append per state transition |
+| `.code-pact/state/baselines/*.json` | `init`, future baseline commands | Once at bootstrap (`initial.json`) |
+| `.code-pact/adapters/<agent>.manifest.yaml` | `adapter install`, `adapter upgrade --write` | Each install or write-mode upgrade |
+| `design/brief.md`, `design/constitution.md` | `plan brief`, `plan constitution` | Once per wizard run |
+| `design/roadmap.yaml` | `phase add`, `phase import` | One write per phase added |
+| `design/phases/<phase>.yaml` | `phase add`, `phase import`, `task add` | One write per phase / task add |
+| `<adapter-owned files>` (e.g. `CLAUDE.md`, `.claude/skills/*.md`, `.context/<agent>/*`) | `adapter install`, `adapter upgrade --write` | Generated from the agent's `AdapterDescriptor`; manifest tracks every file |
+
+### Atomic write strategy
+
+Every write listed above goes through `atomicWriteText` (`src/io/atomic-text.ts`):
+
+1. Write content to `<path>.tmp-<pid>-<timestamp>` in the same directory.
+2. `fs.rename(tmp, path)` — on POSIX, this is a single inode swap.
+
+`fs.rename` within the same filesystem is atomic on POSIX (the destination either points at the old content or the new content, never a partial file). This is sufficient for code-pact's "interrupted-process safety" requirement and is verified end-to-end by the test suite.
+
+**What `code-pact` does NOT do** (intentional, documented limits):
+
+- **No `fsync`.** A power loss between the rename and the OS flushing the dirty buffers can lose the most recent write. This is acceptable for a local dev tool — the next run will recover from the prior state.
+- **No write locks.** Two concurrent `task complete` invocations against the same project may interleave appends. The progress log is append-only, so the worst case is event reordering, not corruption. Out of scope for v1.0; defer to v1.x if a real workflow needs it.
+- **No backup file** (`.bak`). The doctor `BAK_FILE` warning fires if a `.bak` file appears next to a tracked file — it's expected to be a leftover from manual edits, not code-pact output.
+
+### Path safety
+
+Adapter-generated files go through stricter path validation than the other state writes:
+
+- `assertSafeRelativePath` (`src/core/adapters/file-state.ts`) rejects absolute paths, leading `~`, backslashes, Windows drive letters, `..`, `.`, and empty path segments at the zod-schema layer.
+- `resolveWithinProject` walks ancestor directory realpaths and rejects symlink escape (a directory symlink under `cwd` resolving to a location outside the project root).
+
+These helpers are intentionally scoped to the adapter layer. Progress logs, phase YAML files, and the design tree are written to paths derived from project config, not user input, so the broader path-safety machinery is not currently applied to them. v1.0 does not expand this surface — the existing helpers remain adapter-only.
+
+### Concurrent writers
+
+Running two `code-pact` commands against the same project in parallel is not supported. The CLI assumes a single-process owner of `.code-pact/`. v1.x may add advisory locking; v1.0 does not.
+
 ## Stability taxonomy (v1.0)
 
 As of v1.0.0, every public command in `code-pact` falls into one of four

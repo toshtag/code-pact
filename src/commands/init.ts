@@ -1,4 +1,5 @@
-import { mkdir, writeFile, access } from "node:fs/promises";
+import { mkdir, access } from "node:fs/promises";
+import { atomicWriteText } from "../io/atomic-text.ts";
 import { join } from "node:path";
 import { stringify as toYaml } from "yaml";
 import type { LocaleCode } from "../core/schemas/locale.ts";
@@ -130,7 +131,10 @@ async function writeIfAbsent(
     skipped.push(p);
     return;
   }
-  await writeFile(p, content, "utf8");
+  // atomicWriteText: temp-file + rename. Prevents an interrupted `init`
+  // from leaving a half-written project file on disk. Behaviour is
+  // identical to the previous writeFile call for the happy path.
+  await atomicWriteText(p, content);
   created.push(p);
 }
 
