@@ -1,0 +1,4 @@
+.claude/skills/context.md
+.claude/skills/progress.md
+.claude/skills/verify.md
+CLAUDE.md
