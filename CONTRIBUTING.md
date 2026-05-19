@@ -99,12 +99,13 @@ The `.git_allowed_signers` file is intentionally **not committed** in v0.2 becau
 ### Verifying a freshly created tag
 
 ```sh
-git tag -s vX.Y.Z-alpha.N -m "vX.Y.Z-alpha.N"
-git verify-tag vX.Y.Z-alpha.N
+git tag -s vX.Y.Z -m "vX.Y.Z"           # stable cut (v1.0+)
+git tag -s vX.Y.Z-rc.N -m "vX.Y.Z-rc.N" # prerelease cut, if any
+git verify-tag vX.Y.Z
 # Expected: "Good \"git\" signature for <your-email>"
 ```
 
-After `git push origin vX.Y.Z-alpha.N`, the tag page on GitHub should show a green "Verified" badge. If it does not, double-check that the SSH public key is registered as a **Signing Key** (not just an Authentication Key) on your GitHub profile.
+After `git push origin vX.Y.Z`, the tag page on GitHub should show a green "Verified" badge. If it does not, double-check that the SSH public key is registered as a **Signing Key** (not just an Authentication Key) on your GitHub profile.
 
 ### Existing unsigned tags
 
@@ -114,8 +115,10 @@ After `git push origin vX.Y.Z-alpha.N`, the tag page on GitHub should show a gre
 
 npm publishes the first version of a package with both the chosen tag (e.g. `--tag alpha`) and the implicit `latest` tag set. **`npm dist-tag rm code-pact latest` is rejected with HTTP 400 by the registry** — the `latest` tag is reserved and can only be moved, not deleted.
 
-While code-pact is in alpha:
+Starting with v1.0.0:
 
-- Every release is published with `--tag alpha` so `npm install code-pact@alpha` always resolves to the current release.
-- After each `npm publish`, also run `npm dist-tag add code-pact@<version> latest` so `latest` tracks the newest alpha rather than the oldest. Otherwise `npm install code-pact` (no tag) keeps returning the original v0.1.0-alpha.0.
-- Both tags pointing to the same version is intentional during the alpha period. When a stable release eventually ships (`v0.3` or later), `latest` moves to that stable version while `alpha` continues to advance independently.
+- Stable releases (`v1.x.0`, `v1.x.y` patches) publish to `latest` by default. Plain `npm publish` is enough — `1.x.y` is not a prerelease string, so npm puts it on `latest` automatically.
+- The historical `alpha` tag continues to point at `v0.9.0-alpha.0` so `npm install code-pact@alpha` keeps working for users pinned to pre-v1.0 behaviour. Past alphas are not maintained but the tag is not deleted.
+- Future prerelease cuts (if any) should use `--tag rc` / `--tag beta` and **not** auto-promote to `latest` until the corresponding stable cut.
+
+Pre-v1.0 history (kept for reference): during the alpha period, every release was published with `--tag alpha` AND the `latest` tag was manually moved (`npm dist-tag add code-pact@<version> latest`) so plain `npm install code-pact` returned the newest alpha rather than the oldest `v0.1.0-alpha.0`. The v1.0.0 publish replaces that workaround.

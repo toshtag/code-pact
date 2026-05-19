@@ -502,7 +502,7 @@ In v0.9 `adapter` becomes a subcommand group. Each subcommand produces a stable
 `{ok, data} | {ok:false, error:{code, message}}` JSON envelope under `--json`. The bare-form
 `code-pact adapter [--agent <name>] ...` (v0.5–v0.8) continues to work and routes internally
 to `adapter install` with a one-line stderr deprecation notice (suppressed under `--json`);
-it will be removed in v0.10.
+it will be removed in v1.1.
 
 - `adapter list [--json]` — enumerate registered adapters with manifest state
 - `adapter install <agent> [--force] [--model <v>] [--regen-skills] [--json]` — first-time install + writes manifest
@@ -801,7 +801,7 @@ without changing the global `DoctorIssue` shape.
 continues to work in v0.9 and is internally routed to `adapter install`. When `--agent` is
 omitted, it defaults to `claude-code`. A one-line deprecation notice is printed to stderr;
 the notice is suppressed under `--json` so agents reading the JSON envelope are not
-surprised by an extra stderr line. The bare form will be removed in v0.10.
+surprised by an extra stderr line. The bare form will be removed in v1.1.
 
 ## `task context` — context quality gates (v0.5.1)
 
