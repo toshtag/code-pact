@@ -48,6 +48,24 @@ export const messages = {
       if (skippedCount > 0) parts.push(`(既存 ${skippedCount} 件はスキップ)`);
       return `${parts.join(" ")}。`;
     },
+    reconcile: {
+      phaseNotFound: (id: string): string =>
+        `フェーズ "${id}" が roadmap.yaml に見つかりません。`,
+      noEligible: (id: string): string =>
+        `フェーズ "${id}": finalize 対象の task はありません。`,
+      wouldReconcile: (id: string, count: number): string =>
+        `Dry run: フェーズ "${id}" の task ${count} 件を finalize する想定です。--write で適用してください。`,
+      reconciled: (id: string, applied: number, skipped: number): string => {
+        const parts = [
+          `フェーズ "${id}" を reconcile しました: ${applied} 件を flip`,
+        ];
+        if (skipped > 0) parts.push(`、${skipped} 件をスキップ`);
+        parts.push("。");
+        return parts.join("");
+      },
+      writeRefused: (id: string): string =>
+        `フェーズ "${id}" の reconcile を拒否しました: 適用候補すべてが安全上の理由で拒否されました。data.skipped_writes を確認してください。`,
+    },
   },
   progress: {
     baselineNotFound: (name: string): string =>

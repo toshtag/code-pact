@@ -1,0 +1,309 @@
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { parse as parseYaml } from "yaml";
+import { Roadmap } from "../core/schemas/roadmap.ts";
+import { Phase, type PhaseStatus } from "../core/schemas/phase.ts";
+import { loadProgressLog } from "../core/progress/io.ts";
+import {
+  deriveTaskState,
+  type TaskCurrentState,
+} from "../core/progress/task-state.ts";
+import {
+  applyPlannedWrite,
+  classifyWriteRequest,
+  type WriteRefusalReason,
+} from "../core/finalize/safe-write.ts";
+import type { TaskStatusDiff } from "../core/finalize/diff.ts";
+
+// ---------------------------------------------------------------------------
+// `phase reconcile <phase-id>` — v1.2 P11
+//
+// Bulk version of `task finalize`: walks `phase.tasks[]` once and flips
+// every task whose derived state is `done` but whose design status is
+// still `planned` / `in_progress`. Default is dry-run; `--write` is
+// the explicit opt-in.
+//
+// `phase reconcile` never auto-flips the phase's own `status` field in
+// v1.2 — it reports a `phase_status_candidate` as advisory only.
+// Per-task flip / skip / manual_review classification is exposed in
+// `data.tasks[]` so the user can audit the verdict before --write.
+//
+// Partial success: `--write` does NOT raise an error when some tasks
+// flip and others are refused. `applied_writes[]` and `skipped_writes[]`
+// are both populated and exit 0 is returned. Only when EVERY eligible
+// write is refused does `PHASE_RECONCILE_WRITE_REFUSED` (exit 2) fire.
+// ---------------------------------------------------------------------------
+
+export type PhaseReconcileOptions = {
+  cwd: string;
+  phaseId: string;
+  /** When true, apply the writes. Default (false) is dry-run. */
+  write?: boolean;
+};
+
+export type TaskReconcileVerdict = {
+  task_id: string;
+  current_design_status: PhaseStatus;
+  derived_state: TaskCurrentState;
+  target_status: "done";
+  action: "flip" | "skip" | "manual_review";
+  reason: string | null;
+};
+
+export type SkippedWrite = {
+  file: string;
+  task_id: string;
+  reason: WriteRefusalReason;
+  detail: string;
+};
+
+type ReconcileContext = {
+  phase_id: string;
+  file: string;
+  tasks: TaskReconcileVerdict[];
+  phase_status_candidate: PhaseStatus;
+  phase_status_note: string;
+};
+
+export type PhaseReconcileResult =
+  | (ReconcileContext & {
+      kind: "would_reconcile";
+      planned_writes: TaskStatusDiff[];
+    })
+  | (ReconcileContext & {
+      kind: "reconciled";
+      applied_writes: TaskStatusDiff[];
+      skipped_writes: SkippedWrite[];
+    })
+  | (ReconcileContext & {
+      kind: "no_eligible_tasks";
+    });
+
+const PHASE_STATUS_ADVISORY_NOTE =
+  "advisory — phase status is never written by phase reconcile in v1.2; flip by hand in release prep until P14";
+
+async function resolvePhase(
+  cwd: string,
+  phaseId: string,
+): Promise<{ phase: Phase; file: string }> {
+  const roadmapRaw = await readFile(join(cwd, "design", "roadmap.yaml"), "utf8");
+  const roadmap = Roadmap.parse(parseYaml(roadmapRaw) as unknown);
+  const ref = roadmap.phases.find((p) => p.id === phaseId);
+  if (!ref) {
+    const err = new Error(`Phase "${phaseId}" not found in roadmap.yaml.`);
+    (err as NodeJS.ErrnoException).code = "PHASE_NOT_FOUND";
+    throw err;
+  }
+  const phaseRaw = await readFile(join(cwd, ref.path), "utf8");
+  const phase = Phase.parse(parseYaml(phaseRaw) as unknown);
+  return { phase, file: ref.path };
+}
+
+/**
+ * Classifies a single task's reconciliation action. Per the RFC § Reconciliation model:
+ *
+ *   - flip:          derived === "done" AND design ≠ "done"
+ *   - skip:          design === "done" already, OR derived === "planned" (no events, no drift)
+ *   - manual_review: derived ∈ {blocked, failed} (states reconcile cannot resolve)
+ *
+ * `started` / `resumed` are treated as skip — work in progress, no drift to fix.
+ */
+function classifyTask(
+  designStatus: PhaseStatus,
+  derivedState: TaskCurrentState,
+): { action: TaskReconcileVerdict["action"]; reason: string | null } {
+  if (derivedState === "done" && designStatus !== "done") {
+    return { action: "flip", reason: null };
+  }
+  if (designStatus === "done") {
+    return { action: "skip", reason: "design status already done" };
+  }
+  if (derivedState === "planned") {
+    return { action: "skip", reason: "not yet done (no events recorded)" };
+  }
+  if (derivedState === "started" || derivedState === "resumed") {
+    return {
+      action: "skip",
+      reason: `work in progress (derived state: ${derivedState})`,
+    };
+  }
+  // blocked / failed: reconcile cannot resolve; surface for human attention.
+  return {
+    action: "manual_review",
+    reason: `derived state is ${derivedState}; reconcile cannot resolve this — run plan analyze for diagnosis`,
+  };
+}
+
+/**
+ * Computes the candidate phase status by simulating each task's
+ * post-reconcile effective status and aggregating. Never writes
+ * anything — this is advisory only per the v1.2 contract.
+ */
+function computePhaseStatusCandidate(
+  verdicts: TaskReconcileVerdict[],
+): PhaseStatus {
+  if (verdicts.length === 0) return "planned";
+
+  // For each task, compute the effective post-reconcile status.
+  const effective: PhaseStatus[] = verdicts.map((v) => {
+    if (v.action === "flip") return "done";
+    if (v.current_design_status === "done") return "done";
+    // For skip (not yet done) and manual_review, keep the current design status.
+    return v.current_design_status;
+  });
+
+  if (effective.every((s) => s === "done")) return "done";
+
+  // If any verdict indicates active or blocked work, surface in_progress.
+  const hasActiveWork = verdicts.some(
+    (v) =>
+      v.derived_state === "started" ||
+      v.derived_state === "blocked" ||
+      v.derived_state === "resumed" ||
+      v.derived_state === "failed",
+  );
+  if (hasActiveWork) return "in_progress";
+
+  // Otherwise everything is planned (or has been left in_progress in design).
+  if (effective.some((s) => s === "in_progress")) return "in_progress";
+  return "planned";
+}
+
+export async function runPhaseReconcile(
+  opts: PhaseReconcileOptions,
+): Promise<PhaseReconcileResult> {
+  const { cwd, phaseId } = opts;
+  const write = opts.write === true;
+
+  // 1. Resolve phase from roadmap.
+  const { phase, file } = await resolvePhase(cwd, phaseId);
+
+  // 2. Load progress events and derive per-task state.
+  const { log } = await loadProgressLog(cwd);
+
+  // 3. Classify each task.
+  const tasks = phase.tasks ?? [];
+  const verdicts: TaskReconcileVerdict[] = tasks.map((t) => {
+    const derived = deriveTaskState(log.events, t.id).current;
+    const { action, reason } = classifyTask(t.status, derived);
+    return {
+      task_id: t.id,
+      current_design_status: t.status,
+      derived_state: derived,
+      target_status: "done",
+      action,
+      reason,
+    };
+  });
+
+  // 4. Compute phase status candidate (advisory).
+  const phase_status_candidate = computePhaseStatusCandidate(verdicts);
+
+  const baseContext: ReconcileContext = {
+    phase_id: phase.id,
+    file,
+    tasks: verdicts,
+    phase_status_candidate,
+    phase_status_note: PHASE_STATUS_ADVISORY_NOTE,
+  };
+
+  // 5. Collect the flip candidates (the only eligible writes).
+  const flipCandidates = verdicts.filter((v) => v.action === "flip");
+
+  if (flipCandidates.length === 0) {
+    return { kind: "no_eligible_tasks", ...baseContext };
+  }
+
+  // 6. Dry-run: classify each candidate against safe-write rules and
+  //    collect the diffs. Refusals at classify time still go in
+  //    skipped_writes once we apply (or in the dry-run output too — we
+  //    represent them in planned_writes only for the writable subset).
+  const plannedDiffs: TaskStatusDiff[] = [];
+  const skippedAtClassify: SkippedWrite[] = [];
+  for (const v of flipCandidates) {
+    const classified = await classifyWriteRequest({
+      cwd,
+      file,
+      taskId: v.task_id,
+      targetStatus: "done",
+    });
+    if (classified.kind === "refused") {
+      skippedAtClassify.push({
+        file: classified.file,
+        task_id: v.task_id,
+        reason: classified.reason,
+        detail: classified.detail,
+      });
+      continue;
+    }
+    if (classified.kind === "no-op") {
+      // Defensive: should not happen because the verdict only marks
+      // `flip` when design status differs. Treat as skip silently.
+      continue;
+    }
+    plannedDiffs.push(classified.diff);
+  }
+
+  if (!write) {
+    // In dry-run we surface refusals only via skipped_writes if any
+    // were caught at classify-time. Mostly this stays empty.
+    return {
+      kind: "would_reconcile",
+      ...baseContext,
+      planned_writes: plannedDiffs,
+    };
+  }
+
+  // 7. --write: apply each planned diff. Apply-time refusals go to
+  //    skipped_writes too.
+  const appliedWrites: TaskStatusDiff[] = [];
+  const skippedWrites: SkippedWrite[] = [...skippedAtClassify];
+  for (const diff of plannedDiffs) {
+    try {
+      await applyPlannedWrite(cwd, diff);
+      appliedWrites.push(diff);
+    } catch (err) {
+      skippedWrites.push({
+        file: diff.file,
+        task_id: diff.task_id,
+        reason: "unreadable",
+        detail: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  // 8. If every eligible write was refused, raise the error code per RFC.
+  if (
+    appliedWrites.length === 0 &&
+    skippedWrites.length > 0 &&
+    skippedWrites.length === flipCandidates.length
+  ) {
+    const err = new Error(
+      `phase reconcile --write was unable to apply any of ${flipCandidates.length} eligible writes for phase "${phase.id}".`,
+    );
+    (err as NodeJS.ErrnoException).code = "PHASE_RECONCILE_WRITE_REFUSED";
+    (err as NodeJS.ErrnoException & {
+      phase_id?: string;
+      file?: string;
+      skipped_writes?: SkippedWrite[];
+    }).phase_id = phase.id;
+    (err as NodeJS.ErrnoException & {
+      phase_id?: string;
+      file?: string;
+      skipped_writes?: SkippedWrite[];
+    }).file = file;
+    (err as NodeJS.ErrnoException & {
+      phase_id?: string;
+      file?: string;
+      skipped_writes?: SkippedWrite[];
+    }).skipped_writes = skippedWrites;
+    throw err;
+  }
+
+  return {
+    kind: "reconciled",
+    ...baseContext,
+    applied_writes: appliedWrites,
+    skipped_writes: skippedWrites,
+  };
+}

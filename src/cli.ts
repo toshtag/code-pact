@@ -51,6 +51,7 @@ import { runValidate } from "./commands/validate.ts";
 import { runTaskContext } from "./commands/task-context.ts";
 import { runTaskComplete } from "./commands/task-complete.ts";
 import { runTaskFinalize } from "./commands/task-finalize.ts";
+import { runPhaseReconcile } from "./commands/phase-reconcile.ts";
 import { runTaskStart } from "./commands/task-start.ts";
 import { runTaskBlock } from "./commands/task-block.ts";
 import { runTaskResume } from "./commands/task-resume.ts";
@@ -1726,6 +1727,10 @@ async function cmdPhase(argv: string[], locale: Locale, globalJson: boolean): Pr
   }
 
   // ---- phase import ----
+  if (subcommand === "reconcile") {
+    return cmdPhaseReconcile(rest, locale, globalJson);
+  }
+
   if (subcommand === "import") {
     let values: Record<string, unknown>;
     let positionals: string[];
@@ -1802,7 +1807,7 @@ async function cmdPhase(argv: string[], locale: Locale, globalJson: boolean): Pr
   }
 
   // Unknown subcommand
-  const msg = `phase: unknown subcommand "${subcommand ?? ""}". Use: add | new | ls | show | import`;
+  const msg = `phase: unknown subcommand "${subcommand ?? ""}". Use: add | new | ls | show | import | reconcile`;
   if (globalJson) {
     process.stdout.write(
       `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
@@ -2379,6 +2384,174 @@ async function cmdTaskFinalize(
         msg = m.task.finalize.writeRefused(taskId, err.message);
         outCode = "TASK_FINALIZE_WRITE_REFUSED";
         extraData = { task_id: taskId, file, reason };
+        break;
+      }
+      default:
+        throw err;
+    }
+    if (json) {
+      const envelope: Record<string, unknown> = {
+        ok: false,
+        error: { code: outCode, message: msg },
+      };
+      if (extraData) envelope.data = extraData;
+      process.stdout.write(`${JSON.stringify(envelope)}\n`);
+    } else {
+      process.stderr.write(`${msg}\n`);
+    }
+    return 2;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Command: phase reconcile (v1.2 P11)
+// ---------------------------------------------------------------------------
+
+async function cmdPhaseReconcile(
+  argv: string[],
+  locale: Locale,
+  globalJson: boolean,
+): Promise<number> {
+  const m = messages[locale];
+
+  let values: Record<string, unknown>;
+  let positionals: string[];
+  try {
+    ({ values, positionals } = strictParse(
+      "phase reconcile",
+      argv,
+      {
+        json: { type: "boolean" },
+        write: { type: "boolean" },
+      },
+      { allowPositionals: true },
+    ));
+  } catch (err) {
+    if (!(err instanceof ConfigError)) throw err;
+    const json = globalJson || argv.includes("--json");
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: err.message } })}\n`,
+      );
+    } else {
+      process.stderr.write(`${err.message}\n`);
+    }
+    return 2;
+  }
+
+  const json = globalJson || values.json === true;
+  const write = values.write === true;
+  const phaseId = positionals[0];
+  if (!phaseId) {
+    const msg =
+      "phase reconcile requires a phase id (e.g. `phase reconcile P1`).";
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
+      );
+    } else {
+      process.stderr.write(`${msg}\n`);
+    }
+    return 2;
+  }
+  const cwd = process.cwd();
+
+  try {
+    const result = await runPhaseReconcile({ cwd, phaseId, write });
+
+    if (result.kind === "no_eligible_tasks") {
+      if (json) {
+        process.stdout.write(
+          `${JSON.stringify({
+            ok: true,
+            data: {
+              kind: "no_eligible_tasks",
+              phase_id: result.phase_id,
+              file: result.file,
+              tasks: result.tasks,
+              phase_status_candidate: result.phase_status_candidate,
+              phase_status_note: result.phase_status_note,
+            },
+          })}\n`,
+        );
+      } else {
+        process.stdout.write(
+          `${m.phase.reconcile.noEligible(phaseId)}\n`,
+        );
+      }
+      return 0;
+    }
+
+    if (result.kind === "would_reconcile") {
+      if (json) {
+        process.stdout.write(
+          `${JSON.stringify({
+            ok: true,
+            data: {
+              kind: "would_reconcile",
+              phase_id: result.phase_id,
+              file: result.file,
+              tasks: result.tasks,
+              planned_writes: result.planned_writes,
+              phase_status_candidate: result.phase_status_candidate,
+              phase_status_note: result.phase_status_note,
+            },
+          })}\n`,
+        );
+      } else {
+        process.stdout.write(
+          `${m.phase.reconcile.wouldReconcile(phaseId, result.planned_writes.length)}\n`,
+        );
+      }
+      return 0;
+    }
+
+    // result.kind === "reconciled"
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({
+          ok: true,
+          data: {
+            kind: "reconciled",
+            phase_id: result.phase_id,
+            file: result.file,
+            tasks: result.tasks,
+            applied_writes: result.applied_writes,
+            skipped_writes: result.skipped_writes,
+            phase_status_candidate: result.phase_status_candidate,
+            phase_status_note: result.phase_status_note,
+          },
+        })}\n`,
+      );
+    } else {
+      process.stdout.write(
+        `${m.phase.reconcile.reconciled(phaseId, result.applied_writes.length, result.skipped_writes.length)}\n`,
+      );
+    }
+    return 0;
+  } catch (err: unknown) {
+    if (!(err instanceof Error)) throw err;
+    const code = (err as NodeJS.ErrnoException).code;
+
+    let msg: string;
+    let outCode: string;
+    let extraData: Record<string, unknown> | undefined;
+
+    switch (code) {
+      case "PHASE_NOT_FOUND":
+        msg = m.phase.reconcile.phaseNotFound(phaseId);
+        outCode = "PHASE_NOT_FOUND";
+        break;
+      case "PHASE_RECONCILE_WRITE_REFUSED": {
+        const file =
+          (err as NodeJS.ErrnoException & { file?: string }).file ?? "";
+        const skipped =
+          (err as NodeJS.ErrnoException & {
+            skipped_writes?: unknown[];
+          }).skipped_writes ?? [];
+        msg = m.phase.reconcile.writeRefused(phaseId);
+        outCode = "PHASE_RECONCILE_WRITE_REFUSED";
+        extraData = { phase_id: phaseId, file, skipped_writes: skipped };
         break;
       }
       default:
