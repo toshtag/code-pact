@@ -11,6 +11,49 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ---
 
+## [1.1.0] — 2026-05-20
+
+**Task Readiness Schema.** Minor release that introduces five additive optional fields on the task type (`depends_on`, `decision_refs`, `reads`, `writes`, `acceptance_refs`) so a task can declare its own context-pack targets, read / write surface, dependencies, and acceptance references. The change is strictly additive — every v1.0.x phase YAML continues to parse and behave identically.
+
+### CLI behavior changes
+
+None for tasks that declare none of the new fields. Stable command flags, JSON envelope shape, exit-code semantics, and the existing error-code surface remain unchanged from v1.0.2. The `tests/integration/json-stdout.test.ts` and `tests/unit/error-code-surface.test.ts` regression nets are unchanged at the envelope / existing-code level.
+
+### Added
+
+- **Five optional task fields** (`src/core/schemas/task.ts`): `depends_on` (same-phase task ids), `decision_refs` (paths surfaced into the pack), `reads` / `writes` (declared globs in a documented subset), `acceptance_refs` (paths to acceptance criteria). All `.optional()`; pre-v1.1 phase YAML parses unchanged. `phase import` lenient mode forwards them verbatim with no synthetic default. ([#89])
+- **Twelve additive `plan` lint codes** validating the new fields when declared. All `TASK_*` prefixed: `TASK_DEPENDS_ON_UNRESOLVED`, `TASK_DEPENDS_ON_SELF_REFERENCE`, `TASK_DECISION_REF_NOT_FOUND`, `TASK_DECISION_REF_UNSAFE_PATH`, `TASK_READS_UNSAFE_PATH`, `TASK_READS_GLOB_INVALID`, `TASK_READS_NO_MATCH`, `TASK_WRITES_UNSAFE_PATH`, `TASK_WRITES_GLOB_INVALID`, `TASK_WRITES_PROTECTED_PATH`, `TASK_ACCEPTANCE_REF_NOT_FOUND`, `TASK_ACCEPTANCE_REF_UNSAFE_PATH`. Documented in `docs/cli-contract.md` § Plan diagnostic codes — Task Readiness Schema diagnostics; locked by `tests/unit/error-code-surface.test.ts`. ([#90])
+- **Five new pack sections in `task context`**, rendered in stable order (Depends on → Declared read surface → Declared write surface → Declared decisions → Acceptance references) when the corresponding fields are declared. `decision_refs` content is surfaced regardless of `context_size`. ([#91])
+- **`src/core/path-safety.ts`** — neutral module owning `assertSafeRelativePath` / `resolveWithinProject`, promoted from `src/core/adapters/file-state.ts`. The adapter file re-exports both symbols so existing call sites (`adapter-install`, `adapter-upgrade`, `adapter-file-state` tests) remain untouched. Plan lint, future P11 finalize, and future P14 governance import from the neutral module. ([#90])
+- **`src/core/glob.ts`** — minimal in-repo glob matcher for the supported subset (literal segments, single-segment `*`, full-segment `**`). No external glob dependency added per the runtime-dependency policy in `CONTRIBUTING.md`. Exports `validateGlobSyntax`, `globToRegex`, `walkAndMatch`, `findProtectedPathOverlaps`, and the `PROTECTED_PATHS` seed set. ([#90])
+- **Byte-identical pack regression test** (`tests/integration/pack-byte-identical.test.ts` + `tests/fixtures/golden/pack-v1.0.2-shaped.md`). Locks the contract that `task context` output is unchanged for v1.0.2-shaped tasks (those declaring none of the new fields). ([#91])
+- **`design/decisions/task-readiness-schema-rfc.md`** — the accepted RFC capturing field semantics, validation rules, backward-compat contract, alternatives considered, open questions, and the P10-T1..T6 implementation slicing. ([#88])
+- **`docs/concepts/task-readiness-fields.md`** — agent- and reviewer-facing walkthrough of the five fields with a full example phase YAML, per-field lint / pack / non-enforcement breakdown, recommended adoption pattern, and the explicit "intentionally not in this release" list. ([#92])
+- **`design/phases/P10-task-readiness-schema.yaml`** — phase contract registering the work. ([#88])
+
+### Changed
+
+- **`docs/migration.md`** gains a `v1.0.x → v1.1.0` section covering the additive contract, one-command upgrade (`npm install` + `adapter upgrade --write`), the recommended adoption pattern (declare on new tasks first; retroactive backfill is explicitly discouraged), the supported glob subset, and the protected-path seed set. The previous "Deferred to v1.1+" section is renamed to "Deferred beyond v1.1" and refined to reflect what landed and what is still deferred (cross-phase `depends_on`, file-content inclusion for `reads`, ID-based references, `task finalize` / `phase reconcile`, hard enforcement of `writes`). ([#92])
+- **`docs/cli-contract.md`** § `phase import` extends the task shape with the five new optional fields. The `task context` section gains a "P10 declared sections (v1.1+)" subsection documenting the five pack sections, stable order, decision_refs dedupe-with-Related-Decisions rule, and the byte-identical contract. ([#92])
+- **`docs/getting-started.md`** gains an "Optional task readiness fields (v1.1+)" subsection with a short example YAML and pointers to the concept doc and the migration story. ([#92])
+- **`design/phases/P10-task-readiness-schema.yaml`** — phase `status: planned` → `status: done`; every P10 task (T1–T6) `status: planned` → `status: done`. Also adopts the new fields itself per P10-T6 dogfood scope, which now produces three intentional `TASK_WRITES_PROTECTED_PATH` advisories (P10-T1 writes against `design/roadmap.yaml` + `design/phases/P10-task-readiness-schema.yaml`; P10-T6 writes against `design/phases/P10-task-readiness-schema.yaml`). These are proof the protected-path lint is working as designed; P14 governance will turn them into a configurable error. ([#93], this release prep)
+- **`package.json`** — version `1.0.2` → `1.1.0`. (this release prep)
+
+### Known residuals (not blockers)
+
+- **`TASK_WRITES_PROTECTED_PATH` is advisory only.** Three intentional warnings on the dogfood corpus (see above). P14 governance is the consumer that promotes to error severity with a configurable policy.
+- **Cross-phase `depends_on`, file-content inclusion for `reads`, ID-based references, `task finalize` / `phase reconcile`** all remain future work. See `docs/migration.md` § Deferred beyond v1.1 for the full list.
+- **`STATUS_DRIFT done-but-design-not-done` warnings** on the dogfood corpus continue to fire for any task whose progress.yaml has a `done` event but whose design status was not yet flipped. This release prep flips every P10 task to `done`, clearing the five warnings that had accumulated across the P10 task PRs into a single coherent flip.
+
+[#88]: https://github.com/toshtag/code-pact/pull/88
+[#89]: https://github.com/toshtag/code-pact/pull/89
+[#90]: https://github.com/toshtag/code-pact/pull/90
+[#91]: https://github.com/toshtag/code-pact/pull/91
+[#92]: https://github.com/toshtag/code-pact/pull/92
+[#93]: https://github.com/toshtag/code-pact/pull/93
+
+---
+
 ## [1.0.2] — 2026-05-20
 
 **Onboarding and dogfood documentation baseline.** Patch release that restructures the onboarding entry path and ships the dogfood / sample-phase / community materials that v1.0 left implicit.

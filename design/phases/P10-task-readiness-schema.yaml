@@ -3,7 +3,7 @@ name: Task Readiness Schema
 weight: 25
 confidence: medium
 risk: medium
-status: planned
+status: done
 objective: |
   Extend the task schema additively with optional references that let
   a task declare its own context-pack target set, read / write surface,
@@ -57,7 +57,7 @@ tasks:
     write_surface: low
     verification_strength: medium
     expected_duration: short
-    status: planned
+    status: done
     description: |
       RFC acceptance. Register P10 in design/roadmap.yaml. Land the
       design/decisions/task-readiness-schema-rfc.md document and mark
@@ -82,7 +82,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: short
-    status: planned
+    status: done
     description: |
       Schema compatibility design and implementation. Add five
       optional fields to src/core/schemas/task.ts (depends_on,
@@ -116,7 +116,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
     description: |
       Plan lint validation. Implement 12 new detectors in
       src/core/plan/checks.ts and register them in
@@ -162,7 +162,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
     description: |
       Task context pack behaviour. Extend src/core/pack/index.ts and
       src/core/pack/formatters/markdown.ts to surface the declared
@@ -203,7 +203,7 @@ tasks:
     write_surface: medium
     verification_strength: medium
     expected_duration: short
-    status: planned
+    status: done
     description: |
       Docs and migration story. Add a v1.0.x -> v1.1.0 section to
       docs/migration.md explaining the additive schema change, the
@@ -239,7 +239,7 @@ tasks:
     write_surface: medium
     verification_strength: medium
     expected_duration: short
-    status: planned
+    status: done
     description: |
       Dogfood adoption. Update a small set of existing tasks in this
       repo's design/phases/*.yaml to declare new fields where they
