@@ -63,11 +63,17 @@ code-pact task complete P1-T1 --agent claude-code
 #    pass --write to actually mutate design/phases/P1.yaml. The bulk
 #    counterpart is `code-pact phase reconcile P1 --write`.
 code-pact task finalize P1-T1 --write
+
+# (Optional, v1.3+) Anywhere in the loop, ask the CLI "what should I
+# do next?" instead of guessing. Read-only — runbook never executes
+# anything, it just returns the recommended sequence of commands.
+code-pact task runbook P1-T1 --json   # per-task next steps
+code-pact phase runbook P1 --json     # per-phase next steps (histograms + reconcile candidate)
 ```
 
 If `pnpm test` is not the right verification command for your repo, choose another one when the wizard prompts for it (step 1) — `node --version` is a safe choice for a smoke test.
 
-> Step 5 is opt-in. v1.0 / v1.1 projects can keep flipping `status` by hand if they prefer; `task finalize` and `phase reconcile` exist to mechanize the step in release-prep PRs. See [`docs/concepts/finalization-reconciliation.md`](concepts/finalization-reconciliation.md) for the full walkthrough.
+> Steps 5 and the runbook commands are opt-in. v1.0 / v1.1 projects can keep flipping `status` by hand if they prefer; `task finalize` and `phase reconcile` exist to mechanize the step in release-prep PRs. `task runbook` and `phase runbook` (v1.3+) return read-only sequencing guidance — they never execute anything. See [`docs/concepts/finalization-reconciliation.md`](concepts/finalization-reconciliation.md) and [`docs/concepts/runbook.md`](concepts/runbook.md) for the walkthroughs.
 
 > The sample phase is named `P1 — Welcome` and exists only to confirm the project structure and verification pipeline. Keep it, rename it, or delete it once you have real phases. See [`docs/concepts/sample-phase.md`](concepts/sample-phase.md) for the full keep / rename / delete decision.
 
