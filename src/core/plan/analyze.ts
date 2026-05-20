@@ -135,6 +135,13 @@ export async function runAnalyze(
           kind: cls.kind,
           design_status: task.status,
           derived_state: derived.current,
+          // v1.2 P11-T5: additive remediation hint pointing at `task finalize`.
+          // Only emitted for `done-but-design-not-done` — the drift kind that
+          // `task finalize` / `phase reconcile` can mechanically resolve. The
+          // other four kinds need human judgement and don't get a hint.
+          ...(cls.kind === "done-but-design-not-done"
+            ? { remediation: `code-pact task finalize ${task.id}` }
+            : {}),
         },
         ...(cls.hidden_by_default ? { hidden_by_default: true } : {}),
         ...(cls.affects_exit === false ? { affects_exit: false } : {}),
