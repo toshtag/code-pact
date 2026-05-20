@@ -4,6 +4,12 @@ import type { PhaseEntry } from "./state.ts";
 import type { PlanIssue } from "./shared.ts";
 import type { ProgressEvent } from "../schemas/progress-event.ts";
 import type { Roadmap } from "../schemas/roadmap.ts";
+import { assertSafeRelativePath } from "../path-safety.ts";
+import {
+  findProtectedPathOverlaps,
+  validateGlobSyntax,
+  walkAndMatch,
+} from "../glob.ts";
 
 const PHASE_ID_PATTERN = /^P\d+$/;
 const TASK_ID_PATTERN = (phaseId: string): RegExp =>
@@ -174,6 +180,369 @@ export function detectOrphanProgressEvents(
       message: `progress.yaml references task "${event.task_id}" which does not exist in any phase`,
       task_id: event.task_id,
     });
+  }
+  return issues;
+}
+
+// ---------------------------------------------------------------------------
+// P10 — Task Readiness Schema detectors
+//
+// Field-by-field validation for the optional fields declared in
+// design/decisions/task-readiness-schema-rfc.md. All detectors are
+// additive — existing v1.0.x tasks declare none of these fields and so
+// produce no new issues. See docs/cli-contract.md § Plan diagnostic codes
+// for the public surface. Path safety helpers live in
+// `src/core/path-safety.ts` (promoted from the adapter layer in P10-T3
+// so plan lint imports from a neutral module).
+// ---------------------------------------------------------------------------
+
+function safePathReason(path: string): string {
+  try {
+    assertSafeRelativePath(path);
+    return "";
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    return detail;
+  }
+}
+
+/** `depends_on` references a task id not present in the same phase. */
+export function detectTaskDependsOnUnresolved(phases: PhaseEntry[]): PlanIssue[] {
+  const issues: PlanIssue[] = [];
+  for (const { phase, ref } of phases) {
+    const taskIds = new Set((phase.tasks ?? []).map((t) => t.id));
+    for (const task of phase.tasks ?? []) {
+      const deps = task.depends_on ?? [];
+      deps.forEach((dep, index) => {
+        if (!taskIds.has(dep)) {
+          issues.push({
+            code: "TASK_DEPENDS_ON_UNRESOLVED",
+            severity: "error",
+            message: `Task "${task.id}" depends_on references unknown task id "${dep}" (not in phase "${phase.id}")`,
+            file: ref.path,
+            phase_id: phase.id,
+            task_id: task.id,
+            path: `depends_on[${index}]`,
+            details: { value: dep },
+          });
+        }
+      });
+    }
+  }
+  return issues;
+}
+
+/**
+ * `depends_on` includes the task's own id — a direct self-cycle. Multi-
+ * node cycle detection is intentionally future work (see RFC § Open
+ * questions).
+ */
+export function detectTaskDependsOnSelfReference(phases: PhaseEntry[]): PlanIssue[] {
+  const issues: PlanIssue[] = [];
+  for (const { phase, ref } of phases) {
+    for (const task of phase.tasks ?? []) {
+      const deps = task.depends_on ?? [];
+      deps.forEach((dep, index) => {
+        if (dep === task.id) {
+          issues.push({
+            code: "TASK_DEPENDS_ON_SELF_REFERENCE",
+            severity: "error",
+            message: `Task "${task.id}" depends_on lists itself (direct self-cycle)`,
+            file: ref.path,
+            phase_id: phase.id,
+            task_id: task.id,
+            path: `depends_on[${index}]`,
+          });
+        }
+      });
+    }
+  }
+  return issues;
+}
+
+/** `decision_refs` path is not a safe repo-root-relative POSIX path. */
+export function detectTaskDecisionRefUnsafePath(phases: PhaseEntry[]): PlanIssue[] {
+  const issues: PlanIssue[] = [];
+  for (const { phase, ref } of phases) {
+    for (const task of phase.tasks ?? []) {
+      const refs = task.decision_refs ?? [];
+      refs.forEach((p, index) => {
+        const reason = safePathReason(p);
+        if (reason !== "") {
+          issues.push({
+            code: "TASK_DECISION_REF_UNSAFE_PATH",
+            severity: "error",
+            message: `Task "${task.id}" decision_refs path "${p}" is not a safe repo-root-relative path: ${reason}`,
+            file: ref.path,
+            phase_id: phase.id,
+            task_id: task.id,
+            path: `decision_refs[${index}]`,
+            details: { value: p, reason },
+          });
+        }
+      });
+    }
+  }
+  return issues;
+}
+
+/** `decision_refs` path does not exist on disk. */
+export async function detectTaskDecisionRefNotFound(
+  cwd: string,
+  phases: PhaseEntry[],
+): Promise<PlanIssue[]> {
+  const issues: PlanIssue[] = [];
+  for (const { phase, ref } of phases) {
+    for (const task of phase.tasks ?? []) {
+      const refs = task.decision_refs ?? [];
+      for (let index = 0; index < refs.length; index++) {
+        const p = refs[index]!;
+        // Don't double-report — path safety failures are surfaced by the
+        // dedicated detector and would also fail this access check for
+        // the wrong reason.
+        if (safePathReason(p) !== "") continue;
+        if (!(await fileExists(join(cwd, p)))) {
+          issues.push({
+            code: "TASK_DECISION_REF_NOT_FOUND",
+            severity: "error",
+            message: `Task "${task.id}" decision_refs path "${p}" does not exist on disk`,
+            file: ref.path,
+            phase_id: phase.id,
+            task_id: task.id,
+            path: `decision_refs[${index}]`,
+            details: { value: p },
+          });
+        }
+      }
+    }
+  }
+  return issues;
+}
+
+/** `reads` glob is not a safe repo-root-relative POSIX path. */
+export function detectTaskReadsUnsafePath(phases: PhaseEntry[]): PlanIssue[] {
+  const issues: PlanIssue[] = [];
+  for (const { phase, ref } of phases) {
+    for (const task of phase.tasks ?? []) {
+      const globs = task.reads ?? [];
+      globs.forEach((g, index) => {
+        const reason = safePathReason(g);
+        if (reason !== "") {
+          issues.push({
+            code: "TASK_READS_UNSAFE_PATH",
+            severity: "error",
+            message: `Task "${task.id}" reads glob "${g}" is not a safe repo-root-relative path: ${reason}`,
+            file: ref.path,
+            phase_id: phase.id,
+            task_id: task.id,
+            path: `reads[${index}]`,
+            details: { value: g, reason },
+          });
+        }
+      });
+    }
+  }
+  return issues;
+}
+
+/** `reads` glob uses syntax outside the P10 supported subset. */
+export function detectTaskReadsGlobInvalid(phases: PhaseEntry[]): PlanIssue[] {
+  const issues: PlanIssue[] = [];
+  for (const { phase, ref } of phases) {
+    for (const task of phase.tasks ?? []) {
+      const globs = task.reads ?? [];
+      globs.forEach((g, index) => {
+        if (safePathReason(g) !== "") return;
+        const reason = validateGlobSyntax(g);
+        if (reason !== null) {
+          issues.push({
+            code: "TASK_READS_GLOB_INVALID",
+            severity: "error",
+            message: `Task "${task.id}" reads glob "${g}" uses unsupported syntax: ${reason}`,
+            file: ref.path,
+            phase_id: phase.id,
+            task_id: task.id,
+            path: `reads[${index}]`,
+            details: { value: g, reason },
+          });
+        }
+      });
+    }
+  }
+  return issues;
+}
+
+/** `reads` glob matches zero files on disk (warning — possibly a typo). */
+export async function detectTaskReadsNoMatch(
+  cwd: string,
+  phases: PhaseEntry[],
+): Promise<PlanIssue[]> {
+  const issues: PlanIssue[] = [];
+  for (const { phase, ref } of phases) {
+    for (const task of phase.tasks ?? []) {
+      const globs = task.reads ?? [];
+      for (let index = 0; index < globs.length; index++) {
+        const g = globs[index]!;
+        // Skip entries that another detector already flagged.
+        if (safePathReason(g) !== "") continue;
+        if (validateGlobSyntax(g) !== null) continue;
+        const matched = await walkAndMatch(cwd, g);
+        if (matched.length === 0) {
+          issues.push({
+            code: "TASK_READS_NO_MATCH",
+            severity: "warning",
+            message: `Task "${task.id}" reads glob "${g}" matches zero files on disk`,
+            file: ref.path,
+            phase_id: phase.id,
+            task_id: task.id,
+            path: `reads[${index}]`,
+            details: { value: g },
+          });
+        }
+      }
+    }
+  }
+  return issues;
+}
+
+/** `writes` glob is not a safe repo-root-relative POSIX path. */
+export function detectTaskWritesUnsafePath(phases: PhaseEntry[]): PlanIssue[] {
+  const issues: PlanIssue[] = [];
+  for (const { phase, ref } of phases) {
+    for (const task of phase.tasks ?? []) {
+      const globs = task.writes ?? [];
+      globs.forEach((g, index) => {
+        const reason = safePathReason(g);
+        if (reason !== "") {
+          issues.push({
+            code: "TASK_WRITES_UNSAFE_PATH",
+            severity: "error",
+            message: `Task "${task.id}" writes glob "${g}" is not a safe repo-root-relative path: ${reason}`,
+            file: ref.path,
+            phase_id: phase.id,
+            task_id: task.id,
+            path: `writes[${index}]`,
+            details: { value: g, reason },
+          });
+        }
+      });
+    }
+  }
+  return issues;
+}
+
+/** `writes` glob uses syntax outside the P10 supported subset. */
+export function detectTaskWritesGlobInvalid(phases: PhaseEntry[]): PlanIssue[] {
+  const issues: PlanIssue[] = [];
+  for (const { phase, ref } of phases) {
+    for (const task of phase.tasks ?? []) {
+      const globs = task.writes ?? [];
+      globs.forEach((g, index) => {
+        if (safePathReason(g) !== "") return;
+        const reason = validateGlobSyntax(g);
+        if (reason !== null) {
+          issues.push({
+            code: "TASK_WRITES_GLOB_INVALID",
+            severity: "error",
+            message: `Task "${task.id}" writes glob "${g}" uses unsupported syntax: ${reason}`,
+            file: ref.path,
+            phase_id: phase.id,
+            task_id: task.id,
+            path: `writes[${index}]`,
+            details: { value: g, reason },
+          });
+        }
+      });
+    }
+  }
+  return issues;
+}
+
+/**
+ * `writes` glob covers a protected path. P10 advisory warning; P14
+ * governance may promote this to error severity once the policy is
+ * configurable.
+ */
+export function detectTaskWritesProtectedPath(phases: PhaseEntry[]): PlanIssue[] {
+  const issues: PlanIssue[] = [];
+  for (const { phase, ref } of phases) {
+    for (const task of phase.tasks ?? []) {
+      const globs = task.writes ?? [];
+      globs.forEach((g, index) => {
+        // Don't double-report on already-broken patterns.
+        if (safePathReason(g) !== "") return;
+        if (validateGlobSyntax(g) !== null) return;
+        const overlaps = findProtectedPathOverlaps(g);
+        for (const entry of overlaps) {
+          issues.push({
+            code: "TASK_WRITES_PROTECTED_PATH",
+            severity: "warning",
+            message: `Task "${task.id}" writes glob "${g}" covers a protected path (matches "${entry.pattern}")`,
+            file: ref.path,
+            phase_id: phase.id,
+            task_id: task.id,
+            path: `writes[${index}]`,
+            details: { value: g, protected_pattern: entry.pattern },
+          });
+        }
+      });
+    }
+  }
+  return issues;
+}
+
+/** `acceptance_refs` path is not a safe repo-root-relative POSIX path. */
+export function detectTaskAcceptanceRefUnsafePath(phases: PhaseEntry[]): PlanIssue[] {
+  const issues: PlanIssue[] = [];
+  for (const { phase, ref } of phases) {
+    for (const task of phase.tasks ?? []) {
+      const refs = task.acceptance_refs ?? [];
+      refs.forEach((p, index) => {
+        const reason = safePathReason(p);
+        if (reason !== "") {
+          issues.push({
+            code: "TASK_ACCEPTANCE_REF_UNSAFE_PATH",
+            severity: "error",
+            message: `Task "${task.id}" acceptance_refs path "${p}" is not a safe repo-root-relative path: ${reason}`,
+            file: ref.path,
+            phase_id: phase.id,
+            task_id: task.id,
+            path: `acceptance_refs[${index}]`,
+            details: { value: p, reason },
+          });
+        }
+      });
+    }
+  }
+  return issues;
+}
+
+/** `acceptance_refs` path does not exist on disk. */
+export async function detectTaskAcceptanceRefNotFound(
+  cwd: string,
+  phases: PhaseEntry[],
+): Promise<PlanIssue[]> {
+  const issues: PlanIssue[] = [];
+  for (const { phase, ref } of phases) {
+    for (const task of phase.tasks ?? []) {
+      const refs = task.acceptance_refs ?? [];
+      for (let index = 0; index < refs.length; index++) {
+        const p = refs[index]!;
+        if (safePathReason(p) !== "") continue;
+        if (!(await fileExists(join(cwd, p)))) {
+          issues.push({
+            code: "TASK_ACCEPTANCE_REF_NOT_FOUND",
+            severity: "error",
+            message: `Task "${task.id}" acceptance_refs path "${p}" does not exist on disk`,
+            file: ref.path,
+            phase_id: phase.id,
+            task_id: task.id,
+            path: `acceptance_refs[${index}]`,
+            details: { value: p },
+          });
+        }
+      }
+    }
   }
   return issues;
 }

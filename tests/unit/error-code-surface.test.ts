@@ -81,6 +81,22 @@ const KNOWN_CODES: Record<string, "public" | "plan" | "doctor" | "adapter" | "in
   TASK_ID_PHASE_PREFIX: "plan",
   WEAK_DOD: "plan",
 
+  // Plan diagnostics added in P10 — Task Readiness Schema. All emitted
+  // by `plan lint` against the new optional task fields declared in
+  // design/decisions/task-readiness-schema-rfc.md.
+  TASK_ACCEPTANCE_REF_NOT_FOUND: "plan",
+  TASK_ACCEPTANCE_REF_UNSAFE_PATH: "plan",
+  TASK_DECISION_REF_NOT_FOUND: "plan",
+  TASK_DECISION_REF_UNSAFE_PATH: "plan",
+  TASK_DEPENDS_ON_SELF_REFERENCE: "plan",
+  TASK_DEPENDS_ON_UNRESOLVED: "plan",
+  TASK_READS_GLOB_INVALID: "plan",
+  TASK_READS_NO_MATCH: "plan",
+  TASK_READS_UNSAFE_PATH: "plan",
+  TASK_WRITES_GLOB_INVALID: "plan",
+  TASK_WRITES_PROTECTED_PATH: "plan",
+  TASK_WRITES_UNSAFE_PATH: "plan",
+
   // Doctor diagnostics (general project health)
   ADAPTER_STALE: "doctor",
   BAK_FILE: "doctor",
