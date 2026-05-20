@@ -11,6 +11,87 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ---
 
+## [1.4.0] — 2026-05-21
+
+**Planning UX and init hardening.** Minor release that closes four small frictions in the planning / init / task-creation surface that P9 and P12 explicitly deferred. Every change is additive on the CLI contract — no new commands, no new error codes, no new schema fields, no behavioural changes to `task complete` / `task finalize` / `phase reconcile` / `task runbook` / `phase runbook`.
+
+The sample-phase artifact `init` produces is renamed from `P1-welcome.yaml` (id `P1`, no tasks) to `TUTORIAL-walkthrough.yaml` (id `TUTORIAL`, two tutorial tasks with `TUTORIAL-T2 depends_on: [TUTORIAL-T1]`). A single bootstrap now demos P10 (`depends_on`) + P11 (`task finalize` / `phase reconcile`) + P12 (`task runbook` blocking step) end-to-end. Existing projects with a pre-v1.4 `P1-welcome.yaml` are untouched — the rename only affects NEW `init` runs.
+
+### CLI behavior changes
+
+None for the existing Stable surface. Stable command flags, JSON envelope shape, exit-code semantics, and the existing error-code surface remain unchanged from v1.3.0. The `tests/integration/json-stdout.test.ts` and `tests/unit/error-code-surface.test.ts` regression nets continue to pass; new test entries are additive.
+
+The wizard mode of `init` is unchanged — the default-yes prompt for sample-phase creation still fires for TTY users.
+
+### Added
+
+- **`init --sample-phase`** as Stable (v1.4+). Explicit opt-in flag. In non-interactive mode, enables sample-phase creation (previously wizard-only). In TTY wizard mode, skips the existing "create sample phase?" prompt and forces creation. Makes `init --non-interactive --locale <l> --agent <a> --sample-phase` a single-command scripted bootstrap that produces a complete tutorial artifact ready for the per-task loop. ([#112])
+- **`task add` non-interactive flag set** as Stable (v1.4+) (`src/commands/task-add.ts`). Presence of `--description` triggers the flag-driven path; `--type` is required in that mode. Six readiness fields (`--ambiguity` / `--risk` / `--context-size` / `--write-surface` / `--verification-strength` / `--expected-duration`) accept enum values; five P10 fields (`--depends-on` / `--decision-ref` / `--read` / `--write` / `--acceptance-ref`) are repeatable. `--status` is **intentionally not exposed** — newly added tasks are always `status: planned`; historical / migrated tasks use `phase import`, preserving the P11/P12 contract that design `done` is the result of `task finalize` / `phase reconcile`, not a starting point. Partial flags (non-interactive flag without `--description`) raise `CONFIG_ERROR` rather than silently entering the wizard or silently ignoring flags. The wizard path is unchanged. ([#113])
+- **`suggested_next_steps: string[]`** as an additive sibling field on `plan prompt --json` and as an additive top-level field on `phase import --json`. Always present (field-presence-fixed per the P12 RunbookStep convention). `plan prompt` emits the canonical 4-step AI-assisted planning flow (prompt → import → lint → phase runbook) with an optional leading brief/constitution-capture hint when either file is missing. `phase import` emits the post-import sequence (lint → phase runbook per imported phase → task runbook on first task) with an optional leading defaults-review hint when `completed_fields[]` is non-empty. The whole array is empty when nothing was imported. ([#114])
+- **Sample-phase artifact rewrite**. The `writeSamplePhase()` helper in `src/commands/init.ts` now produces `id: TUTORIAL`, `name: Walkthrough`, with two minimal tutorial tasks. `TUTORIAL-T1` is a feature with no dependencies; `TUTORIAL-T2` is a docs task with `depends_on: [TUTORIAL-T1]` so the tutorial demos `task runbook TUTORIAL-T2 --json` returning a blocking dependency step until `TUTORIAL-T1` is complete. The phase's `objective` text embeds the "Tutorial-only — delete before treating design/ as your source-of-truth" warning since YAML schema forbids comments inside zod-parsed values. The `runPhaseAdd` wrapper does not forward `tasks`, so `writeSamplePhase` was rewritten to call the `createPhase` core service directly. ([#112])
+- **`design/decisions/planning-ux-init-hardening-rfc.md`** — the accepted RFC capturing the four UX gaps, proposed changes (with generation-policy table for `init --sample-phase` mode × flag, `task add` flag table + 3-branch partial-flags resolution), the "P14 governance" deferral list, and the P13-T1..T6 implementation slicing. ([#110], [#111])
+- **`design/phases/P13-planning-ux-init-hardening.yaml`** — phase contract registering the work. ([#110])
+- **`docs/concepts/sample-phase.md`** — rewritten in TUTORIAL terms. Documents both creation paths (wizard yes / `init --sample-phase`), the artifact content with `TUTORIAL-T2 depends_on: [TUTORIAL-T1]`, the three-purpose rationale (smoke-test + working template + tutorial/source-of-truth boundary), the keep/rename/delete decision tree, and explicit upgrade guidance ("existing P1-welcome.yaml is untouched"). ([#115])
+
+### Changed
+
+- **`docs/migration.md`** gains a `v1.3.x → v1.4.0` section with the quick path, what's new (the four additive changes), recommended adoption pattern (replace scripted-bootstrap workarounds with `init --non-interactive --sample-phase`; replace single-task `phase import` deltas with `task add --description --type`), CI implications under `--strict` (no new errors / warnings / codes), and backward-compatibility notes. "Deferred beyond v1.3" → "Deferred beyond v1.4" with the now-shipped P13 items removed and explicit `task add --status` / `--dry-run` / reserved-id hard enforcement / `plan brief` non-TTY deferrals rolled forward. ([#115])
+- **`docs/cli-contract.md`** gains a `## task add` section annotated Stable (v0.6 wizard + v1.4+ non-interactive) with the mode-resolution table, full flag table, P10 validation responsibility note ("`task add` stores; `plan lint` validates"), JSON envelope shape, error codes, and four usage examples. The `plan prompt` and `phase import` sections gain a "v1.4+ additive field" subsection describing `suggested_next_steps`. ([#113], [#114])
+- **`docs/getting-started.md`** — Path 1 (Tutorial) rewritten in TUTORIAL terms with the full per-task loop on TUTORIAL-T1 + TUTORIAL-T2, the dependency-blocking demo callout, and a v1.4+ CI / non-TTY callout pointing at the single-command scripted bootstrap. Path 2 (Manual) step 4 shows both the interactive `task add` and the new non-interactive `task add --description --type ...` side-by-side. ([#115])
+- **`docs/dogfood.md`** — "Adding work" gains the non-interactive `task add` example and the `--status` policy note. New "Tutorial bootstrap (v1.4+)" subsection. ([#115])
+- **`design/phases/P13-planning-ux-init-hardening.yaml`** — phase `status: planned` → `status: done`; every P13 task (T1–T6) `status: planned` → `status: done`. **The T1–T5 task-level flips were performed by `code-pact phase reconcile P13 --write` itself** — the third consecutive release prep PR to dogfood the P11 mechanization. T6 (this release-prep task) was flipped via `task finalize P13-T6 --write` after `task complete P13-T6`, completing the per-task loop on the task that performed the release prep. The phase's own `status` field was flipped by hand per the v1.2 contract. ([#113], [#114], [#115], this release prep)
+- **`package.json`** — version `1.3.0` → `1.4.0`. (this release prep)
+
+### Dogfood log
+
+A complete end-to-end exercise of every new v1.4.0 flag was captured in a fresh tmp project before this release prep PR was committed. The full log is in the PR description; verbatim summary:
+
+```
+=== STEP 1: init --non-interactive --sample-phase ===
+created files: 12
+TUTORIAL files: ['design/phases/TUTORIAL-walkthrough.yaml']
+
+=== STEP 2: phase show TUTORIAL ===
+TUTORIAL-T1 (feature)
+TUTORIAL-T2 (docs) depends_on=['TUTORIAL-T1']
+
+=== STEP 3: task runbook TUTORIAL-T2 (P10 + P12 demo) ===
+blocking head step: True
+manual_action: Wait for TUTORIAL-T1 to reach derived state: done (currently: planned)
+
+=== STEP 4: task add TUTORIAL --description --type --depends-on --read --json ===
+ok: True | taskId: TUTORIAL-T3
+
+=== STEP 5: task add TUTORIAL --type docs (no --description) ===
+ok: False | code: CONFIG_ERROR
+
+=== STEP 6: plan prompt --json (5 suggested_next_steps) ===
+1. plan brief/constitution hint
+2-5. AI flow (prompt → phase import → plan lint → phase runbook)
+
+=== STEP 7: phase import --json (4 suggested_next_steps) ===
+1. completed_fields review hint
+2. plan lint
+3. phase runbook P1
+4. task runbook P1-T1
+completed_fields: 1
+```
+
+### Known residuals (not blockers)
+
+- **`TASK_WRITES_PROTECTED_PATH` advisories on the dogfood corpus.** Existing advisories remain (P10-T1, P10-T6, P11-T1 declaring writes against `design/roadmap.yaml` and `design/phases/*.yaml`). P14 governance is the consumer that promotes to error severity with a configurable policy.
+- **`task add --status`, `task add --dry-run`, reserved-id (`TUTORIAL`) hard enforcement, `plan brief` / `plan constitution` non-TTY alternatives, multi-phase reconcile / runbook (`--all`), runbook execution (`task runbook --execute`), schema-level `human_gate`, `task next` / `phase next` aliases, bundling `recommend` into `task runbook`, runbook orchestrator (`task run` / `phase close`)** — all remain future work. See `docs/migration.md` § Deferred beyond v1.4 for the full list.
+- **`STATUS_DRIFT done-but-design-not-done` warnings** on the dogfood corpus continue to fire for any task whose progress.yaml has a `done` event but whose design status was not yet flipped. This release prep clears every P13 warning that had accumulated across the P13 task PRs into a single coherent reconcile flip (for T1-T5) + a single finalize call (for T6, the release-prep task itself) — the third consecutive release prep where the post-reconcile drift count drops to zero via mechanization.
+
+[#110]: https://github.com/toshtag/code-pact/pull/110
+[#111]: https://github.com/toshtag/code-pact/pull/111
+[#112]: https://github.com/toshtag/code-pact/pull/112
+[#113]: https://github.com/toshtag/code-pact/pull/113
+[#114]: https://github.com/toshtag/code-pact/pull/114
+[#115]: https://github.com/toshtag/code-pact/pull/115
+
+---
+
 ## [1.3.0] — 2026-05-20
 
 **Lightweight Runbook.** Minor release that introduces two new read-only commands for answering the user-facing question "what should I run next?" deterministically. `task runbook <task-id>` returns the recommended sequence of next steps for a single task; `phase runbook <phase-id>` does the same for an entire phase with a 6-priority step list, task/drift histograms, and a phase status candidate. Neither command mutates anything; neither calls an adapter; neither takes a `--write` / `--execute` / `--agent` flag. Every recommended step is a CLI invocation the user runs separately, or a `manual_action` describing a human checkpoint.

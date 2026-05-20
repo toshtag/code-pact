@@ -3,7 +3,7 @@ name: Planning UX and init hardening
 weight: 15
 confidence: high
 risk: low
-status: planned
+status: done
 objective: |
   Close the planning-UX and init-bootstrap gaps that P9 and P12
   explicitly deferred. Add `init --sample-phase` as an explicit
@@ -25,35 +25,64 @@ non_goals:
   - any change to `task runbook` / `phase runbook` semantics
   - any change to `task complete` / `task finalize` / `phase reconcile` semantics
   - any change to `progress.yaml` append-only contract
-  - any new public error code (existing PHASE_NOT_FOUND / DUPLICATE_TASK_ID / CONFIG_ERROR / ALREADY_EXISTS / ALREADY_INITIALIZED are reused)
+  - any new public error code (existing PHASE_NOT_FOUND / DUPLICATE_TASK_ID /
+    CONFIG_ERROR / ALREADY_EXISTS / ALREADY_INITIALIZED are reused)
   - any new task or phase schema field
-  - any new command (only additive flags + additive output fields on existing commands)
-  - "`plan brief` / `plan constitution` non-TTY alternatives (docs-only mention; new code in P14 or later)"
+  - any new command (only additive flags + additive output fields on existing
+    commands)
+  - "`plan brief` / `plan constitution` non-TTY alternatives (docs-only mention;
+    new code in P14 or later)"
   - reserved-id (`TUTORIAL`) hard enforcement (P14 governance candidate)
   - protected-path hard enforcement (P14)
   - advisory locks / concurrent safety (P14)
-  - LLM / RAG / MCP / multi-agent orchestration / scheduler / issue-tracker integration (excluded from the v1.x window)
+  - LLM / RAG / MCP / multi-agent orchestration / scheduler / issue-tracker
+    integration (excluded from the v1.x window)
   - "`task next` / `phase next` sugar aliases (deferred per P12 RFC)"
-  - "bundling `recommend` into `task runbook` (deferred per P12 RFC)"
+  - bundling `recommend` into `task runbook` (deferred per P12 RFC)
   - "`task add` dry-run mode (deferred — scope creep)"
-  - "`task add --status` flag (not exposed in P13; newly added tasks always status: planned; historical / done state via `phase import`)"
-  - dropping P1 backward-compat from existing projects (only NEW init runs produce TUTORIAL; existing P1-welcome.yaml in old projects is untouched)
+  - "`task add --status` flag (not exposed in P13; newly added tasks always
+    status: planned; historical / done state via `phase import`)"
+  - dropping P1 backward-compat from existing projects (only NEW init runs
+    produce TUTORIAL; existing P1-welcome.yaml in old projects is untouched)
 definition_of_done:
-  - design/decisions/planning-ux-init-hardening-rfc.md exists and is marked accepted
+  - design/decisions/planning-ux-init-hardening-rfc.md exists and is marked
+    accepted
   - design/roadmap.yaml lists P13
-  - design/phases/P13-planning-ux-init-hardening.yaml exists with this objective and tasks list
-  - "`init --sample-phase` ships as Stable (v1.4+) and works with `init --non-interactive --sample-phase --locale <l> --agent <a>` to bootstrap a tutorial artifact"
-  - "`task add <phase-id> --description \"...\" --type <type> [optional flags]` works without a TTY and produces `{ ok: true, data: { phaseId, taskId, phasePath } }`, identical envelope shape to the wizard path; reuses existing PHASE_NOT_FOUND / DUPLICATE_TASK_ID / CONFIG_ERROR; ships as Stable (v1.4+); newly added tasks are always written with `status: planned` (no `--status` flag)"
-  - "`task add` non-interactive flags provided without `--description` raise CONFIG_ERROR rather than silently falling through to the wizard or silently ignoring the flags"
-  - "`plan prompt --json` gains an additive `data.suggested_next_steps: string[]` field"
-  - "`phase import --json` gains an additive `data.suggested_next_steps: string[]` field"
-  - "sample phase artifact uses `id: TUTORIAL` with 1–2 minimal tutorial tasks (`TUTORIAL-T1` always, `TUTORIAL-T2` with `depends_on: [TUTORIAL-T1]` to demo P10 / P12); both wizard mode and `--sample-phase` produce the same artifact"
-  - TTY wizard mode keeps its existing default-yes behaviour for the sample-phase prompt; explicit opt-in (`--sample-phase`) applies only to non-interactive mode (and acts as a prompt-skipping override in wizard mode)
+  - design/phases/P13-planning-ux-init-hardening.yaml exists with this objective
+    and tasks list
+  - "`init --sample-phase` ships as Stable (v1.4+) and works with `init
+    --non-interactive --sample-phase --locale <l> --agent <a>` to bootstrap a
+    tutorial artifact"
+  - '`task add <phase-id> --description "..." --type <type> [optional flags]`
+    works without a TTY and produces `{ ok: true, data: { phaseId, taskId,
+    phasePath } }`, identical envelope shape to the wizard path; reuses existing
+    PHASE_NOT_FOUND / DUPLICATE_TASK_ID / CONFIG_ERROR; ships as Stable (v1.4+);
+    newly added tasks are always written with `status: planned` (no `--status`
+    flag)'
+  - "`task add` non-interactive flags provided without `--description` raise
+    CONFIG_ERROR rather than silently falling through to the wizard or silently
+    ignoring the flags"
+  - "`plan prompt --json` gains an additive `data.suggested_next_steps:
+    string[]` field"
+  - "`phase import --json` gains an additive `data.suggested_next_steps:
+    string[]` field"
+  - "sample phase artifact uses `id: TUTORIAL` with 1–2 minimal tutorial tasks
+    (`TUTORIAL-T1` always, `TUTORIAL-T2` with `depends_on: [TUTORIAL-T1]` to
+    demo P10 / P12); both wizard mode and `--sample-phase` produce the same
+    artifact"
+  - TTY wizard mode keeps its existing default-yes behaviour for the
+    sample-phase prompt; explicit opt-in (`--sample-phase`) applies only to
+    non-interactive mode (and acts as a prompt-skipping override in wizard mode)
   - "`KNOWN_CODES.public` is unchanged (no new error codes)"
-  - "`tests/integration/pack-byte-identical.test.ts` continues to pass (no `task context` pack change in P13)"
-  - new flag invocations appear in `tests/integration/json-stdout.test.ts` so the Stable JSON-only stdout regression net covers them
-  - "`docs/migration.md` gains a v1.3.x → v1.4.0 section noting the TUTORIAL rename as the sole behaviour change to wizard-generated artifacts, plus the new flag surfaces"
-  - "`docs/concepts/sample-phase.md` is updated to TUTORIAL naming + tutorial-tasks shape"
+  - "`tests/integration/pack-byte-identical.test.ts` continues to pass (no `task
+    context` pack change in P13)"
+  - new flag invocations appear in `tests/integration/json-stdout.test.ts` so
+    the Stable JSON-only stdout regression net covers them
+  - "`docs/migration.md` gains a v1.3.x → v1.4.0 section noting the TUTORIAL
+    rename as the sole behaviour change to wizard-generated artifacts, plus the
+    new flag surfaces"
+  - "`docs/concepts/sample-phase.md` is updated to TUTORIAL naming +
+    tutorial-tasks shape"
 verification:
   commands:
     - pnpm typecheck
@@ -73,15 +102,7 @@ tasks:
     write_surface: low
     verification_strength: medium
     expected_duration: short
-    status: planned
-    decision_refs:
-      - design/decisions/planning-ux-init-hardening-rfc.md
-    writes:
-      - design/roadmap.yaml
-      - design/phases/P13-planning-ux-init-hardening.yaml
-      - design/decisions/planning-ux-init-hardening-rfc.md
-    acceptance_refs:
-      - design/decisions/planning-ux-init-hardening-rfc.md
+    status: done
     description: |
       RFC acceptance. Register P13 in design/roadmap.yaml. Land the
       design/decisions/planning-ux-init-hardening-rfc.md document
@@ -94,6 +115,14 @@ tasks:
       CONFIG_ERROR semantics, suggested_next_steps additive
       fields, error-code reuse policy, P10 field validation
       responsibility, P14 deferrals) before any src/ touches.
+    decision_refs:
+      - design/decisions/planning-ux-init-hardening-rfc.md
+    writes:
+      - design/roadmap.yaml
+      - design/phases/P13-planning-ux-init-hardening.yaml
+      - design/decisions/planning-ux-init-hardening-rfc.md
+    acceptance_refs:
+      - design/decisions/planning-ux-init-hardening-rfc.md
   - id: P13-T2
     type: feature
     ambiguity: low
@@ -102,26 +131,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: planned
-    depends_on:
-      - P13-T1
-    decision_refs:
-      - design/decisions/planning-ux-init-hardening-rfc.md
-    reads:
-      - src/commands/init.ts
-      - src/commands/init-wizard.ts
-      - src/cli.ts
-      - src/core/schemas/phase.ts
-      - src/core/schemas/task.ts
-    writes:
-      - src/cli.ts
-      - src/commands/init.ts
-      - src/i18n/en-US.ts
-      - src/i18n/ja-JP.ts
-      - tests/unit/commands/init.test.ts
-      - tests/integration/json-stdout.test.ts
-    acceptance_refs:
-      - design/decisions/planning-ux-init-hardening-rfc.md
+    status: done
     description: |
       `init --sample-phase` flag + TUTORIAL rename. Adds the
       `--sample-phase` boolean to cli.ts parseArgs and threads it
@@ -141,6 +151,25 @@ tasks:
       DUPLICATE_PHASE_ID; same here). Existing test fixtures
       referencing P1-T1 in unrelated tests are not touched —
       only init/wizard-specific tests are updated.
+    depends_on:
+      - P13-T1
+    decision_refs:
+      - design/decisions/planning-ux-init-hardening-rfc.md
+    reads:
+      - src/commands/init.ts
+      - src/commands/init-wizard.ts
+      - src/cli.ts
+      - src/core/schemas/phase.ts
+      - src/core/schemas/task.ts
+    writes:
+      - src/cli.ts
+      - src/commands/init.ts
+      - src/i18n/en-US.ts
+      - src/i18n/ja-JP.ts
+      - tests/unit/commands/init.test.ts
+      - tests/integration/json-stdout.test.ts
+    acceptance_refs:
+      - design/decisions/planning-ux-init-hardening-rfc.md
   - id: P13-T3
     type: feature
     ambiguity: low
@@ -149,25 +178,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: planned
-    depends_on:
-      - P13-T1
-    decision_refs:
-      - design/decisions/planning-ux-init-hardening-rfc.md
-    reads:
-      - src/commands/task-add.ts
-      - src/cli.ts
-      - src/core/schemas/task.ts
-    writes:
-      - src/commands/task-add.ts
-      - src/cli.ts
-      - src/i18n/en-US.ts
-      - src/i18n/ja-JP.ts
-      - tests/unit/commands/task-add.test.ts
-      - tests/integration/json-stdout.test.ts
-      - docs/cli-contract.md
-    acceptance_refs:
-      - design/decisions/planning-ux-init-hardening-rfc.md
+    status: done
     description: |
       `task add` non-interactive flags. Adds strictParse with
       `--description`, `--type`, `--id`, plus the six readiness
@@ -197,6 +208,24 @@ tasks:
       to tests/integration/json-stdout.test.ts with happy-path
       and CONFIG_ERROR cases (including the partial-flags
       branch). Updates docs/cli-contract.md `task add` section.
+    depends_on:
+      - P13-T1
+    decision_refs:
+      - design/decisions/planning-ux-init-hardening-rfc.md
+    reads:
+      - src/commands/task-add.ts
+      - src/cli.ts
+      - src/core/schemas/task.ts
+    writes:
+      - src/commands/task-add.ts
+      - src/cli.ts
+      - src/i18n/en-US.ts
+      - src/i18n/ja-JP.ts
+      - tests/unit/commands/task-add.test.ts
+      - tests/integration/json-stdout.test.ts
+      - docs/cli-contract.md
+    acceptance_refs:
+      - design/decisions/planning-ux-init-hardening-rfc.md
   - id: P13-T4
     type: feature
     ambiguity: low
@@ -205,7 +234,21 @@ tasks:
     write_surface: low
     verification_strength: strong
     expected_duration: short
-    status: planned
+    status: done
+    description: |
+      Planning command UX guidance. Adds `suggested_next_steps:
+      string[]` as a sibling field in `plan prompt`'s
+      PlanPromptResult and as a top-level field in `phase
+      import`'s PhaseImportResult. For `plan prompt`: emit the
+      AI-assisted planning sequence (run prompt → phase import →
+      plan lint → phase runbook). For `phase import`: emit the
+      post-import validation sequence (plan lint → phase runbook
+      <imported-phase-id> → task runbook <first-task>). Unit
+      tests assert the new field's contents are stable across
+      brief/constitution-present/absent matrix. Integration
+      tests assert the JSON envelope still parses and the new
+      field is always present (even as []). docs/cli-contract.md
+      gains the additive-field notice on both command sections.
     depends_on:
       - P13-T1
     decision_refs:
@@ -222,20 +265,6 @@ tasks:
       - docs/cli-contract.md
     acceptance_refs:
       - design/decisions/planning-ux-init-hardening-rfc.md
-    description: |
-      Planning command UX guidance. Adds `suggested_next_steps:
-      string[]` as a sibling field in `plan prompt`'s
-      PlanPromptResult and as a top-level field in `phase
-      import`'s PhaseImportResult. For `plan prompt`: emit the
-      AI-assisted planning sequence (run prompt → phase import →
-      plan lint → phase runbook). For `phase import`: emit the
-      post-import validation sequence (plan lint → phase runbook
-      <imported-phase-id> → task runbook <first-task>). Unit
-      tests assert the new field's contents are stable across
-      brief/constitution-present/absent matrix. Integration
-      tests assert the JSON envelope still parses and the new
-      field is always present (even as []). docs/cli-contract.md
-      gains the additive-field notice on both command sections.
   - id: P13-T5
     type: docs
     ambiguity: low
@@ -244,7 +273,22 @@ tasks:
     write_surface: medium
     verification_strength: medium
     expected_duration: short
-    status: planned
+    status: done
+    description: |
+      Docs and migration. Adds the v1.3.x → v1.4.0 section to
+      docs/migration.md covering (a) the new `init --sample-phase`
+      flag, (b) the TUTORIAL rename as the only behavioural change
+      for new init runs (existing P1-welcome.yaml projects are
+      untouched), (c) the new `task add` non-interactive flag set
+      (no `--status`; CONFIG_ERROR on partial-flags), (d) the
+      additive suggested_next_steps fields. Updates
+      docs/getting-started.md non-interactive walkthrough to use
+      `init --non-interactive --sample-phase` and `task add
+      --description --type`. Updates docs/dogfood.md Per-task
+      flow to show the new scripted path alongside the wizard
+      path. Rewrites docs/concepts/sample-phase.md to reflect
+      TUTORIAL naming + 1–2 tutorial tasks; preserves the keep /
+      rename / delete decision tree but in TUTORIAL terms.
     depends_on:
       - P13-T2
       - P13-T3
@@ -264,21 +308,6 @@ tasks:
       - docs/concepts/sample-phase.md
     acceptance_refs:
       - docs/migration.md
-    description: |
-      Docs and migration. Adds the v1.3.x → v1.4.0 section to
-      docs/migration.md covering (a) the new `init --sample-phase`
-      flag, (b) the TUTORIAL rename as the only behavioural change
-      for new init runs (existing P1-welcome.yaml projects are
-      untouched), (c) the new `task add` non-interactive flag set
-      (no `--status`; CONFIG_ERROR on partial-flags), (d) the
-      additive suggested_next_steps fields. Updates
-      docs/getting-started.md non-interactive walkthrough to use
-      `init --non-interactive --sample-phase` and `task add
-      --description --type`. Updates docs/dogfood.md Per-task
-      flow to show the new scripted path alongside the wizard
-      path. Rewrites docs/concepts/sample-phase.md to reflect
-      TUTORIAL naming + 1–2 tutorial tasks; preserves the keep /
-      rename / delete decision tree but in TUTORIAL terms.
   - id: P13-T6
     type: docs
     ambiguity: low
@@ -287,7 +316,21 @@ tasks:
     write_surface: medium
     verification_strength: medium
     expected_duration: short
-    status: planned
+    status: done
+    description: |
+      v1.4.0 release prep + end-to-end dogfood validation. Bumps
+      package.json 1.3.0 → 1.4.0. Prepends CHANGELOG.md [1.4.0]
+      entry. Runs `phase reconcile P13 --write` to mechanize the
+      task-status flip (continuing the P11 release-prep
+      mechanization pattern). Hand-edits the P13 phase status to
+      `done` (advisory only per v1.2 / v1.3 contract). Records a
+      dogfood log in the PR description that exercises every new
+      flag in a tmp project: `init --non-interactive --sample-phase
+      --locale en-US --agent claude-code`, `task add TUTORIAL
+      --description "demo" --type docs`, `plan prompt --json`
+      (with new suggested_next_steps), `phase import` (with new
+      suggested_next_steps). No src/ change in this task itself —
+      it is a chore commit that validates the v1.4.0 UX gains.
     depends_on:
       - P13-T2
       - P13-T3
@@ -305,17 +348,3 @@ tasks:
       - design/phases/P13-planning-ux-init-hardening.yaml
     acceptance_refs:
       - CHANGELOG.md
-    description: |
-      v1.4.0 release prep + end-to-end dogfood validation. Bumps
-      package.json 1.3.0 → 1.4.0. Prepends CHANGELOG.md [1.4.0]
-      entry. Runs `phase reconcile P13 --write` to mechanize the
-      task-status flip (continuing the P11 release-prep
-      mechanization pattern). Hand-edits the P13 phase status to
-      `done` (advisory only per v1.2 / v1.3 contract). Records a
-      dogfood log in the PR description that exercises every new
-      flag in a tmp project: `init --non-interactive --sample-phase
-      --locale en-US --agent claude-code`, `task add TUTORIAL
-      --description "demo" --type docs`, `plan prompt --json`
-      (with new suggested_next_steps), `phase import` (with new
-      suggested_next_steps). No src/ change in this task itself —
-      it is a chore commit that validates the v1.4.0 UX gains.
