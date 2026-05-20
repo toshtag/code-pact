@@ -3,7 +3,7 @@ name: Post-v1.0 Dogfood Close & Onboarding Baseline
 weight: 20
 confidence: high
 risk: low
-status: planned
+status: done
 objective: |
   Close the post-v1.0 dogfood thread carried by P4 and establish an
   onboarding baseline so a first-time user can reach a working install
@@ -72,7 +72,7 @@ tasks:
     write_surface: medium
     verification_strength: medium
     expected_duration: short
-    status: planned
+    status: done
     description: |
       P9 baseline + P4 dogfood close. Flip design/phases/P4-stabilize.yaml
       status to `done` so the dogfood phase is formally closed in the
@@ -90,7 +90,7 @@ tasks:
     write_surface: medium
     verification_strength: medium
     expected_duration: medium
-    status: planned
+    status: done
     description: |
       README slim + docs/getting-started.md. Reduce README.md to a
       30-second tour plus a link hub (Status, Install, pointers to
@@ -114,7 +114,7 @@ tasks:
     write_surface: medium
     verification_strength: medium
     expected_duration: medium
-    status: planned
+    status: done
     description: |
       Workflow and concept docs. Add docs/workflows/greenfield.md
       (new project, no existing code) and
@@ -133,7 +133,7 @@ tasks:
     write_surface: medium
     verification_strength: weak
     expected_duration: short
-    status: planned
+    status: done
     description: |
       Japanese getting-started. Add docs/ja/getting-started.md as a
       Japanese counterpart to docs/getting-started.md. Translate the
@@ -151,7 +151,7 @@ tasks:
     write_surface: medium
     verification_strength: weak
     expected_duration: short
-    status: planned
+    status: done
     description: |
       Community entry. Add .github/ISSUE_TEMPLATE/ with at least one
       bug-report template and one feature-request template. Add
@@ -170,7 +170,7 @@ tasks:
     write_surface: medium
     verification_strength: weak
     expected_duration: short
-    status: planned
+    status: done
     description: |
       Seed corpus for design/decisions/ and design/rules/. The
       directories are currently empty in this repo, which means the
@@ -191,7 +191,7 @@ tasks:
     write_surface: low
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
     description: |
       End-to-end onboarding verification. From a fresh checkout
       (clean working tree, no `.code-pact/` state), walk
