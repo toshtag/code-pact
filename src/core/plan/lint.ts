@@ -6,6 +6,18 @@ import {
   detectPhaseIdMismatches,
   detectPhaseIdNaming,
   detectTaskIdPhasePrefix,
+  detectTaskDependsOnUnresolved,
+  detectTaskDependsOnSelfReference,
+  detectTaskDecisionRefUnsafePath,
+  detectTaskDecisionRefNotFound,
+  detectTaskReadsUnsafePath,
+  detectTaskReadsGlobInvalid,
+  detectTaskReadsNoMatch,
+  detectTaskWritesUnsafePath,
+  detectTaskWritesGlobInvalid,
+  detectTaskWritesProtectedPath,
+  detectTaskAcceptanceRefUnsafePath,
+  detectTaskAcceptanceRefNotFound,
 } from "./checks.ts";
 import type { PhaseEntry, PlanState } from "./state.ts";
 import { collectPlanArtifacts } from "./state.ts";
@@ -57,6 +69,23 @@ export async function runLint(opts: LintOptions): Promise<LintResult> {
   issues.push(...detectDuplicatePhaseIds(phases));
   issues.push(...detectPhaseIdNaming(phases));
   issues.push(...detectTaskIdPhasePrefix(phases));
+
+  // P10 — Task Readiness Schema. All twelve detectors are no-ops for
+  // tasks that declare none of the optional fields. Sync detectors run
+  // first; async detectors that touch the filesystem run after so a
+  // configuration error in the sync set is visible quickly.
+  issues.push(...detectTaskDependsOnUnresolved(phases));
+  issues.push(...detectTaskDependsOnSelfReference(phases));
+  issues.push(...detectTaskDecisionRefUnsafePath(phases));
+  issues.push(...detectTaskReadsUnsafePath(phases));
+  issues.push(...detectTaskReadsGlobInvalid(phases));
+  issues.push(...detectTaskWritesUnsafePath(phases));
+  issues.push(...detectTaskWritesGlobInvalid(phases));
+  issues.push(...detectTaskWritesProtectedPath(phases));
+  issues.push(...detectTaskAcceptanceRefUnsafePath(phases));
+  issues.push(...(await detectTaskDecisionRefNotFound(opts.cwd, phases)));
+  issues.push(...(await detectTaskReadsNoMatch(opts.cwd, phases)));
+  issues.push(...(await detectTaskAcceptanceRefNotFound(opts.cwd, phases)));
 
   // Roadmap-dependent checks. Only run when we have a roadmap; the
   // lenient loader has already recorded the skipped check names when

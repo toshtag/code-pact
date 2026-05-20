@@ -118,6 +118,25 @@ Issue-level codes emitted by `plan lint` and `plan analyze` inside `data.issues[
 | `PHASE_DONE_WITH_OPEN_TASKS` | error | `plan analyze` | Phase marked done but at least one task is still open |
 | `ORPHAN_PROGRESS_EVENT` | warning | `plan analyze`, `doctor` | Progress event references a `task_id` that does not exist in any phase |
 
+#### Task Readiness Schema diagnostics (P10, v1.1+)
+
+Issue-level codes emitted by `plan lint` against the optional task fields introduced in v1.1 (`depends_on`, `decision_refs`, `reads`, `writes`, `acceptance_refs`). All twelve are additive — a v1.0.x task that declares none of these fields produces none of these codes. See `design/decisions/task-readiness-schema-rfc.md` for field semantics.
+
+| Code | Severity | Trigger |
+|------|----------|---------|
+| `TASK_DEPENDS_ON_UNRESOLVED` | error | `depends_on` references a task id not present in the same phase |
+| `TASK_DEPENDS_ON_SELF_REFERENCE` | error | A task lists itself in `depends_on` (direct self-cycle; multi-node cycle detection is future work) |
+| `TASK_DECISION_REF_NOT_FOUND` | error | `decision_refs` path does not exist on disk |
+| `TASK_DECISION_REF_UNSAFE_PATH` | error | `decision_refs` path fails `assertSafeRelativePath` (traversal / absolute / etc.) |
+| `TASK_READS_UNSAFE_PATH` | error | `reads` glob fails `assertSafeRelativePath` |
+| `TASK_READS_GLOB_INVALID` | error | `reads` glob uses syntax outside the P10 supported subset (see RFC § Supported glob subset) |
+| `TASK_READS_NO_MATCH` | warning | `reads` glob matches zero files on disk (likely a typo or a file not yet created) |
+| `TASK_WRITES_UNSAFE_PATH` | error | `writes` glob fails `assertSafeRelativePath` |
+| `TASK_WRITES_GLOB_INVALID` | error | `writes` glob uses syntax outside the P10 supported subset |
+| `TASK_WRITES_PROTECTED_PATH` | warning | `writes` glob covers a protected path (`.git/**`, `node_modules/**`, `.code-pact/**`, `design/roadmap.yaml`, `design/phases/*.yaml`). Advisory in P10; P14 governance may promote to error severity once the policy is configurable |
+| `TASK_ACCEPTANCE_REF_NOT_FOUND` | error | `acceptance_refs` path does not exist on disk |
+| `TASK_ACCEPTANCE_REF_UNSAFE_PATH` | error | `acceptance_refs` path fails `assertSafeRelativePath` |
+
 ### Doctor diagnostic codes
 
 Issue-level codes emitted by `doctor` / `validate` for general project health.

@@ -1,4 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   detectDuplicatePhaseIds,
   detectDuplicateTaskIds,
@@ -6,6 +9,18 @@ import {
   detectPhaseIdMismatches,
   detectPhaseIdNaming,
   detectTaskIdPhasePrefix,
+  detectTaskAcceptanceRefNotFound,
+  detectTaskAcceptanceRefUnsafePath,
+  detectTaskDecisionRefNotFound,
+  detectTaskDecisionRefUnsafePath,
+  detectTaskDependsOnSelfReference,
+  detectTaskDependsOnUnresolved,
+  detectTaskReadsGlobInvalid,
+  detectTaskReadsNoMatch,
+  detectTaskReadsUnsafePath,
+  detectTaskWritesGlobInvalid,
+  detectTaskWritesProtectedPath,
+  detectTaskWritesUnsafePath,
 } from "../../../../src/core/plan/checks.ts";
 import type { PhaseEntry } from "../../../../src/core/plan/state.ts";
 import type { ProgressEvent } from "../../../../src/core/schemas/progress-event.ts";
@@ -169,5 +184,321 @@ describe("detectTaskIdPhasePrefix", () => {
     expect(issues).toHaveLength(1);
     expect(issues[0]?.code).toBe("TASK_ID_PHASE_PREFIX");
     expect(issues[0]?.severity).toBe("warning");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P10 — Task Readiness Schema detectors
+// ---------------------------------------------------------------------------
+
+describe("detectTaskDependsOnUnresolved", () => {
+  it("no issue when depends_on references existing tasks in the same phase", () => {
+    const entries = [
+      entry(
+        phase("P1", [
+          task("P1-T1", { depends_on: ["P1-T2"] }),
+          task("P1-T2"),
+        ]),
+      ),
+    ];
+    expect(detectTaskDependsOnUnresolved(entries)).toEqual([]);
+  });
+
+  it("error when depends_on references a task not in the same phase", () => {
+    const entries = [
+      entry(
+        phase("P1", [task("P1-T1", { depends_on: ["P1-T9"] }), task("P1-T2")]),
+      ),
+    ];
+    const issues = detectTaskDependsOnUnresolved(entries);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.code).toBe("TASK_DEPENDS_ON_UNRESOLVED");
+    expect(issues[0]?.severity).toBe("error");
+    expect(issues[0]?.task_id).toBe("P1-T1");
+    expect(issues[0]?.details?.value).toBe("P1-T9");
+  });
+});
+
+describe("detectTaskDependsOnSelfReference", () => {
+  it("no issue when depends_on contains only other task ids", () => {
+    const entries = [
+      entry(phase("P1", [task("P1-T1", { depends_on: ["P1-T2"] }), task("P1-T2")])),
+    ];
+    expect(detectTaskDependsOnSelfReference(entries)).toEqual([]);
+  });
+
+  it("error when a task depends on itself", () => {
+    const entries = [
+      entry(phase("P1", [task("P1-T1", { depends_on: ["P1-T1"] })])),
+    ];
+    const issues = detectTaskDependsOnSelfReference(entries);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.code).toBe("TASK_DEPENDS_ON_SELF_REFERENCE");
+    expect(issues[0]?.severity).toBe("error");
+    expect(issues[0]?.task_id).toBe("P1-T1");
+  });
+});
+
+describe("detectTaskDecisionRefUnsafePath", () => {
+  it("no issue for safe repo-root-relative paths", () => {
+    const entries = [
+      entry(
+        phase("P1", [
+          task("P1-T1", { decision_refs: ["design/decisions/foo.md"] }),
+        ]),
+      ),
+    ];
+    expect(detectTaskDecisionRefUnsafePath(entries)).toEqual([]);
+  });
+
+  it("error for traversal attempts", () => {
+    const entries = [
+      entry(phase("P1", [task("P1-T1", { decision_refs: ["../etc/passwd"] })])),
+    ];
+    const issues = detectTaskDecisionRefUnsafePath(entries);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.code).toBe("TASK_DECISION_REF_UNSAFE_PATH");
+    expect(issues[0]?.severity).toBe("error");
+  });
+});
+
+describe("detectTaskReadsUnsafePath", () => {
+  it("no issue for safe repo-root-relative globs", () => {
+    const entries = [
+      entry(phase("P1", [task("P1-T1", { reads: ["src/commands/*.ts"] })])),
+    ];
+    expect(detectTaskReadsUnsafePath(entries)).toEqual([]);
+  });
+
+  it("error for absolute path in reads", () => {
+    const entries = [
+      entry(phase("P1", [task("P1-T1", { reads: ["/etc/passwd"] })])),
+    ];
+    const issues = detectTaskReadsUnsafePath(entries);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.code).toBe("TASK_READS_UNSAFE_PATH");
+    expect(issues[0]?.severity).toBe("error");
+  });
+});
+
+describe("detectTaskReadsGlobInvalid", () => {
+  it("no issue for in-subset globs", () => {
+    const entries = [
+      entry(
+        phase("P1", [
+          task("P1-T1", {
+            reads: ["src/commands/*.ts", "tests/**/integration/*.test.ts"],
+          }),
+        ]),
+      ),
+    ];
+    expect(detectTaskReadsGlobInvalid(entries)).toEqual([]);
+  });
+
+  it("error for brace expansion (out of subset)", () => {
+    const entries = [
+      entry(phase("P1", [task("P1-T1", { reads: ["src/{a,b}/*.ts"] })])),
+    ];
+    const issues = detectTaskReadsGlobInvalid(entries);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.code).toBe("TASK_READS_GLOB_INVALID");
+    expect(issues[0]?.severity).toBe("error");
+  });
+});
+
+describe("detectTaskWritesUnsafePath", () => {
+  it("no issue for safe write globs", () => {
+    const entries = [
+      entry(phase("P1", [task("P1-T1", { writes: ["src/core/path-safety.ts"] })])),
+    ];
+    expect(detectTaskWritesUnsafePath(entries)).toEqual([]);
+  });
+
+  it("error for parent traversal in writes", () => {
+    const entries = [
+      entry(phase("P1", [task("P1-T1", { writes: ["../outside.txt"] })])),
+    ];
+    const issues = detectTaskWritesUnsafePath(entries);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.code).toBe("TASK_WRITES_UNSAFE_PATH");
+    expect(issues[0]?.severity).toBe("error");
+  });
+});
+
+describe("detectTaskWritesGlobInvalid", () => {
+  it("no issue for in-subset write globs", () => {
+    const entries = [
+      entry(phase("P1", [task("P1-T1", { writes: ["src/**/*.ts"] })])),
+    ];
+    expect(detectTaskWritesGlobInvalid(entries)).toEqual([]);
+  });
+
+  it("error for character class (out of subset)", () => {
+    const entries = [
+      entry(phase("P1", [task("P1-T1", { writes: ["src/[abc].ts"] })])),
+    ];
+    const issues = detectTaskWritesGlobInvalid(entries);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.code).toBe("TASK_WRITES_GLOB_INVALID");
+    expect(issues[0]?.severity).toBe("error");
+  });
+});
+
+describe("detectTaskWritesProtectedPath", () => {
+  it("no issue when writes do not touch protected paths", () => {
+    const entries = [
+      entry(phase("P1", [task("P1-T1", { writes: ["src/commands/foo.ts"] })])),
+    ];
+    expect(detectTaskWritesProtectedPath(entries)).toEqual([]);
+  });
+
+  it("warning when writes target the design/phases protected pattern", () => {
+    const entries = [
+      entry(
+        phase("P1", [
+          task("P1-T1", { writes: ["design/phases/P1-foundation.yaml"] }),
+        ]),
+      ),
+    ];
+    const issues = detectTaskWritesProtectedPath(entries);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.code).toBe("TASK_WRITES_PROTECTED_PATH");
+    expect(issues[0]?.severity).toBe("warning");
+    expect(issues[0]?.details?.protected_pattern).toBe("design/phases/*.yaml");
+  });
+
+  it("warning when writes target the .code-pact protected tree", () => {
+    const entries = [
+      entry(
+        phase("P1", [task("P1-T1", { writes: [".code-pact/state/progress.yaml"] })]),
+      ),
+    ];
+    const issues = detectTaskWritesProtectedPath(entries);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.code).toBe("TASK_WRITES_PROTECTED_PATH");
+  });
+});
+
+describe("detectTaskAcceptanceRefUnsafePath", () => {
+  it("no issue for safe acceptance_refs paths", () => {
+    const entries = [
+      entry(
+        phase("P1", [task("P1-T1", { acceptance_refs: ["docs/cli-contract.md"] })]),
+      ),
+    ];
+    expect(detectTaskAcceptanceRefUnsafePath(entries)).toEqual([]);
+  });
+
+  it("error for absolute acceptance_refs path", () => {
+    const entries = [
+      entry(phase("P1", [task("P1-T1", { acceptance_refs: ["/abs/path.md"] })])),
+    ];
+    const issues = detectTaskAcceptanceRefUnsafePath(entries);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.code).toBe("TASK_ACCEPTANCE_REF_UNSAFE_PATH");
+    expect(issues[0]?.severity).toBe("error");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Filesystem-backed detectors (decision_refs / acceptance_refs not-found,
+// reads no-match). Use a temp project tree so we can control which paths
+// exist on disk.
+// ---------------------------------------------------------------------------
+
+let cwd: string;
+
+async function makeFile(p: string, content = ""): Promise<void> {
+  const abs = join(cwd, p);
+  await mkdir(join(abs, ".."), { recursive: true });
+  await writeFile(abs, content, "utf8");
+}
+
+beforeEach(async () => {
+  cwd = await mkdtemp(join(tmpdir(), "code-pact-checks-p10-"));
+});
+
+afterEach(async () => {
+  if (cwd) await rm(cwd, { recursive: true, force: true });
+});
+
+describe("detectTaskDecisionRefNotFound (fs-backed)", () => {
+  it("no issue when every decision_refs path exists on disk", async () => {
+    await makeFile("design/decisions/stability-taxonomy.md", "stub");
+    const entries = [
+      entry(
+        phase("P1", [
+          task("P1-T1", {
+            decision_refs: ["design/decisions/stability-taxonomy.md"],
+          }),
+        ]),
+      ),
+    ];
+    const issues = await detectTaskDecisionRefNotFound(cwd, entries);
+    expect(issues).toEqual([]);
+  });
+
+  it("error when decision_refs path does not exist", async () => {
+    const entries = [
+      entry(
+        phase("P1", [task("P1-T1", { decision_refs: ["design/decisions/missing.md"] })]),
+      ),
+    ];
+    const issues = await detectTaskDecisionRefNotFound(cwd, entries);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.code).toBe("TASK_DECISION_REF_NOT_FOUND");
+    expect(issues[0]?.severity).toBe("error");
+  });
+
+  it("skips entries already flagged as unsafe (no double-reporting)", async () => {
+    const entries = [
+      entry(phase("P1", [task("P1-T1", { decision_refs: ["../escape.md"] })])),
+    ];
+    const issues = await detectTaskDecisionRefNotFound(cwd, entries);
+    expect(issues).toEqual([]);
+  });
+});
+
+describe("detectTaskReadsNoMatch (fs-backed)", () => {
+  it("no issue when the glob matches at least one file", async () => {
+    await makeFile("src/commands/foo.ts", "stub");
+    const entries = [
+      entry(phase("P1", [task("P1-T1", { reads: ["src/commands/*.ts"] })])),
+    ];
+    const issues = await detectTaskReadsNoMatch(cwd, entries);
+    expect(issues).toEqual([]);
+  });
+
+  it("warning when the glob matches nothing", async () => {
+    const entries = [
+      entry(phase("P1", [task("P1-T1", { reads: ["src/commands/*.ts"] })])),
+    ];
+    const issues = await detectTaskReadsNoMatch(cwd, entries);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.code).toBe("TASK_READS_NO_MATCH");
+    expect(issues[0]?.severity).toBe("warning");
+  });
+});
+
+describe("detectTaskAcceptanceRefNotFound (fs-backed)", () => {
+  it("no issue when every acceptance_refs path exists", async () => {
+    await makeFile("docs/cli-contract.md", "stub");
+    const entries = [
+      entry(
+        phase("P1", [task("P1-T1", { acceptance_refs: ["docs/cli-contract.md"] })]),
+      ),
+    ];
+    const issues = await detectTaskAcceptanceRefNotFound(cwd, entries);
+    expect(issues).toEqual([]);
+  });
+
+  it("error when acceptance_refs path does not exist", async () => {
+    const entries = [
+      entry(phase("P1", [task("P1-T1", { acceptance_refs: ["docs/missing.md"] })])),
+    ];
+    const issues = await detectTaskAcceptanceRefNotFound(cwd, entries);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.code).toBe("TASK_ACCEPTANCE_REF_NOT_FOUND");
+    expect(issues[0]?.severity).toBe("error");
   });
 });
