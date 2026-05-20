@@ -465,6 +465,8 @@ Cross-artifact integrity check. Compares design intent (task and phase `status`)
   | `done-but-design-not-done` | warning | — | true | derived `done` but `design.status` is `planned` or `in_progress` |
   | `in-progress-no-events` | warning | — | true | `design.status == in_progress` && no events (likely missing `task start`) |
 
+  **`details.remediation` (v1.2+, additive).** When `details.kind == "done-but-design-not-done"`, the issue's `details` payload also carries a `remediation` string of the form `"code-pact task finalize <task-id>"`. This is the mechanizable drift kind — `task finalize` / `phase reconcile` resolve it deterministically. The other four kinds need human judgement and do not carry a `remediation` field. The addition is additive on a `Record<string, unknown>` payload; existing JSON envelope consumers see no shape change.
+
 - `PHASE_DONE_WITH_OPEN_TASKS` (error) — a phase with `status: done` that still has tasks not in `status: done`.
 - `ORPHAN_PROGRESS_EVENT` (warning) — progress event references a `task_id` that does not exist in any phase. Detector is shared with `doctor`; `plan lint` does NOT call it.
 

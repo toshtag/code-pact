@@ -158,6 +158,20 @@ describe("runAnalyze — STATUS_DRIFT kinds", () => {
     const drift = result.issues.find((i) => i.code === "STATUS_DRIFT");
     expect(drift?.severity).toBe("warning");
     expect(drift?.details?.["kind"]).toBe("done-but-design-not-done");
+    // v1.2 P11-T5: additive remediation hint for the only mechanizable kind.
+    expect(drift?.details?.["remediation"]).toBe("code-pact task finalize P1-T1");
+  });
+
+  it("remediation hint is not emitted for other STATUS_DRIFT kinds", async () => {
+    // in-progress-no-events is human-judgement territory — no hint.
+    await setupProject(
+      [{ id: "P1", tasks: [{ id: "P1-T1", status: "in_progress" }] }],
+      [],
+    );
+    const result = await runAnalyze({ cwd });
+    const drift = result.issues.find((i) => i.code === "STATUS_DRIFT");
+    expect(drift?.details?.["kind"]).toBe("in-progress-no-events");
+    expect(drift?.details?.["remediation"]).toBeUndefined();
   });
 
   it("in-progress-no-events: design in_progress + no events", async () => {
