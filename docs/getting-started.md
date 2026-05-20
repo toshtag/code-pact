@@ -42,42 +42,51 @@ Use the `init` wizard's built-in sample phase to confirm the full loop works end
 ```sh
 # 1. Initialize. The wizard asks: language → agents → default agent →
 #    generate adapter files now (yes) → verification command (pnpm test) →
-#    create a sample phase (yes) → collect a project brief (skip for now).
+#    create a tutorial sample phase (yes) → collect a project brief (skip).
 code-pact init
 
-# 2. Sample phase P1 ("Welcome") was created with no tasks yet.
-#    Add one interactively.
-code-pact task add P1
+# 2. The tutorial sample phase TUTORIAL (with TUTORIAL-T1 and TUTORIAL-T2)
+#    was created. v1.4+ ships two minimal tutorial tasks; TUTORIAL-T2
+#    declares `depends_on: [TUTORIAL-T1]` so you can demo the P10
+#    dependency field + the P12 task runbook blocking-step output
+#    in one bootstrap.
 
-# 3. Fetch the markdown context pack and implement the task.
-code-pact task context P1-T1 --agent claude-code
+# 3. Fetch the markdown context pack and implement the first task.
+code-pact task context TUTORIAL-T1 --agent claude-code
 
 # 4. After implementation, mark complete. This runs the phase's
 #    verify command and, on pass, appends a `done` event to
 #    .code-pact/state/progress.yaml. The design YAML's `status` field
 #    is NOT mutated by this command — that is the v1.0 contract.
-code-pact task complete P1-T1 --agent claude-code
+code-pact task complete TUTORIAL-T1 --agent claude-code
 
 # 5. (Optional, v1.2+) Flip the design YAML's `status` field to `done`
 #    so design intent matches the operational fact. Defaults to dry-run;
-#    pass --write to actually mutate design/phases/P1.yaml. The bulk
-#    counterpart is `code-pact phase reconcile P1 --write`.
-code-pact task finalize P1-T1 --write
+#    pass --write to actually mutate the phase YAML. The bulk
+#    counterpart is `code-pact phase reconcile TUTORIAL --write`.
+code-pact task finalize TUTORIAL-T1 --write
+
+# 6. Repeat steps 3–5 for TUTORIAL-T2 (depends on TUTORIAL-T1 being done).
+code-pact task context TUTORIAL-T2 --agent claude-code
+code-pact task complete TUTORIAL-T2 --agent claude-code
+code-pact task finalize TUTORIAL-T2 --write
 
 # (Optional, v1.3+) Anywhere in the loop, ask the CLI "what should I
 # do next?" instead of guessing. Read-only — runbook never executes
 # anything, it just returns the recommended sequence of commands.
-code-pact task runbook P1-T1 --json   # per-task next steps
-code-pact phase runbook P1 --json     # per-phase next steps (histograms + reconcile candidate)
+code-pact task runbook TUTORIAL-T2 --json   # per-task next steps
+code-pact phase runbook TUTORIAL --json     # per-phase next steps (histograms + reconcile candidate)
 ```
 
 If `pnpm test` is not the right verification command for your repo, choose another one when the wizard prompts for it (step 1) — `node --version` is a safe choice for a smoke test.
 
-> Steps 5 and the runbook commands are opt-in. v1.0 / v1.1 projects can keep flipping `status` by hand if they prefer; `task finalize` and `phase reconcile` exist to mechanize the step in release-prep PRs. `task runbook` and `phase runbook` (v1.3+) return read-only sequencing guidance — they never execute anything. See [`docs/concepts/finalization-reconciliation.md`](concepts/finalization-reconciliation.md) and [`docs/concepts/runbook.md`](concepts/runbook.md) for the walkthroughs.
+> **Try the dependency demo.** After `init`, before completing TUTORIAL-T1, run `code-pact task runbook TUTORIAL-T2 --json`. The first step in `data.next_steps[]` will be a blocking `manual_action` step ("Wait for TUTORIAL-T1 to reach derived state: done"). This is the P10 + P12 integration the tutorial artifact exists to demo.
 
-> The sample phase is named `P1 — Welcome` and exists only to confirm the project structure and verification pipeline. Keep it, rename it, or delete it once you have real phases. See [`docs/concepts/sample-phase.md`](concepts/sample-phase.md) for the full keep / rename / delete decision.
+> Steps 5/6 and the runbook commands are opt-in. v1.0 / v1.1 projects can keep flipping `status` by hand if they prefer; `task finalize` and `phase reconcile` exist to mechanize the step in release-prep PRs. `task runbook` and `phase runbook` (v1.3+) return read-only sequencing guidance — they never execute anything. See [`docs/concepts/finalization-reconciliation.md`](concepts/finalization-reconciliation.md) and [`docs/concepts/runbook.md`](concepts/runbook.md) for the walkthroughs.
 
-> **TTY required.** The tutorial path uses the `init` wizard and `task add`, both of which require a TTY. In CI or other non-TTY environments, use the manual or AI-assisted path below — `init --non-interactive` does **not** create the sample phase (the `createSamplePhase` choice is wizard-only).
+> The tutorial artifact is named `TUTORIAL — Walkthrough` (v1.4+) and exists only to confirm the project structure and verification pipeline. Delete it (or its filename `design/phases/TUTORIAL-walkthrough.yaml` plus the roadmap entry) once you have real phases. See [`docs/concepts/sample-phase.md`](concepts/sample-phase.md) for the full keep / rename / delete decision. Pre-v1.4 projects that still have a `P1-welcome.yaml` are untouched by upgrades.
+
+> **CI / non-TTY users (v1.4+).** The tutorial path is also scriptable as a single command: `code-pact init --non-interactive --agent claude-code --locale en-US --sample-phase` produces the same TUTORIAL artifact without a TTY. Before v1.4 the wizard was the only path; pre-v1.4 `init --non-interactive` produces an empty roadmap with no sample phase.
 
 ---
 
@@ -104,8 +113,21 @@ code-pact phase add \
   --objective "Establish the project foundation" \
   --verify-command "pnpm test"
 
-# 4. Add a task to the phase (interactive).
+# 4. Add a task to the phase. TWO paths:
+#
+#    (a) Interactive (existing v0.6 path):
 code-pact task add P1
+#
+#    (b) Non-interactive (v1.4+; `--description` triggers flag-driven mode):
+code-pact task add P1 \
+  --description "Login form" \
+  --type feature \
+  --ambiguity medium \
+  --risk low \
+  --depends-on P1-T0 \
+  --read "src/auth/**" \
+  --write "src/handlers/login.ts" \
+  --json
 
 # 5. Generate the per-agent instruction files. The wizard in step 1 can
 #    do this for you; this is the standalone command for later use.
@@ -126,7 +148,7 @@ code-pact phase add ... --verify-command "node --version"
 code-pact phase add ... --verify-command node --version
 ```
 
-> **TTY-only steps in this path:** `plan brief`, `plan constitution`, and `task add` all require a TTY. In CI or non-TTY environments, skip steps 2 and 4 and bulk-import the phase plus its tasks from a YAML file with `code-pact phase import draft-roadmap.yaml` instead (this is the AI-assisted path below; it is also the right shape for any non-interactive automation). After a non-interactive init, `code-pact validate` reports `BRIEF_MISSING` / `CONSTITUTION_PLACEHOLDER` warnings — these are expected and clear up once you run the wizards on a real machine, edit the files directly, or accept them as warnings the project is intentionally living with.
+> **TTY-only steps in this path:** `plan brief` and `plan constitution` require a TTY (they're interactive by intent — see [the deferred list](migration.md#deferred-beyond-v14) for non-TTY plans). `task add` in v0.6's wizard mode also requires a TTY, but v1.4+ adds a non-interactive flag set (`--description` + `--type` + optional readiness/P10 flags) for CI use. In purely non-TTY environments, skip steps 2 and 4(a) and either: (1) use `task add P1 --description "..." --type ...` flag-driven, **or** (2) bulk-import the phase plus its tasks from a YAML file with `code-pact phase import draft-roadmap.yaml` (this is the AI-assisted path below; it is also the right shape for any non-interactive automation). After a non-interactive init, `code-pact validate` reports `BRIEF_MISSING` / `CONSTITUTION_PLACEHOLDER` warnings — these are expected and clear up once you run the wizards on a real machine, edit the files directly, or accept them as warnings the project is intentionally living with.
 
 ---
 

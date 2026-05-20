@@ -144,9 +144,42 @@ code-pact phase add
 # Add a phase by flags (CI/scripted):
 code-pact phase add --id P2 --name "..." --weight 10 --objective "..."
 
-# Add a task interactively:
+# Add a task interactively (wizard):
 code-pact task add <phase-id>
+
+# Add a task non-interactively (v1.4+; flag-driven path).
+# Presence of `--description` triggers the non-interactive mode;
+# `--type` is required. Wizard is bypassed entirely (no TTY needed).
+code-pact task add <phase-id> \
+  --description "..." \
+  --type feature \
+  --ambiguity medium \
+  --risk low \
+  --depends-on <upstream-task-id> \
+  --read "src/foo/**" \
+  --write "src/foo/bar.ts" \
+  --json
+
+# Newly added tasks always start as `status: planned`. Historical or
+# already-done tasks must use `phase import` — `--status` is
+# intentionally NOT exposed in `task add`. Passing a non-interactive
+# flag (e.g. `--type`) without `--description` raises CONFIG_ERROR
+# rather than silently entering the wizard or silently ignoring the
+# flag.
 ```
+
+### Tutorial bootstrap (v1.4+)
+
+If you want a single-command end-to-end scripted bootstrap, the `--sample-phase` flag on `init` creates the TUTORIAL phase + tutorial tasks in one shot:
+
+```sh
+code-pact init --non-interactive --agent claude-code --locale en-US --sample-phase
+# → design/roadmap.yaml + design/phases/TUTORIAL-walkthrough.yaml
+# → TUTORIAL-T1 (no deps) and TUTORIAL-T2 (depends_on: [TUTORIAL-T1])
+# → ready for the per-task loop above
+```
+
+See [`docs/concepts/sample-phase.md`](concepts/sample-phase.md) for the keep / rename / delete decision.
 
 ## Resetting to a clean state in a temp dir
 

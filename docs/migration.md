@@ -343,26 +343,134 @@ Projects running `plan lint --strict` / `plan analyze --strict` / `validate --st
 
 In semver terms, v1.3.0 is a minor release.
 
-## Deferred beyond v1.3
+## v1.3.x → v1.4.0
 
-The following remain on the backlog after v1.3.0:
+### Quick path
+
+```sh
+# 1. Upgrade the CLI.
+npm install -g code-pact@1.4.0
+
+# 2. No mandatory action. All existing flag invocations, JSON envelopes,
+#    and error codes are preserved. The new flags are opt-in.
+code-pact validate --json   # expect: ok
+code-pact plan analyze --json
+# Existing P1-welcome.yaml artifacts in projects that initialised with
+# v1.3.x or earlier are NOT touched by the upgrade. Only NEW `init` runs
+# produce the renamed TUTORIAL artifact.
+```
+
+### What's new in v1.4.0
+
+P13 (Planning UX & init hardening) closes four small frictions in the planning / init / task-creation surface that P9 and P12 explicitly deferred. Every change is additive on the CLI contract — no new commands, no new error codes, no new schema fields, no behavioural changes to `task complete` / `task finalize` / `phase reconcile` / `task runbook` / `phase runbook`.
+
+- **`init --sample-phase`** (Stable v1.4+) — explicit opt-in flag. In non-interactive mode, enables sample-phase creation (which was previously wizard-only). In TTY wizard mode, skips the "create sample phase?" prompt and forces creation. The existing TTY-wizard default-yes behaviour is preserved unchanged.
+- **`task add` non-interactive flags** (Stable v1.4+) — `--description` triggers a flag-driven path that bypasses the wizard entirely (no TTY required). `--type` is required in that mode. Six readiness fields (`--ambiguity` / `--risk` / `--context-size` / `--write-surface` / `--verification-strength` / `--expected-duration`) accept enum values; five P10 fields (`--depends-on` / `--decision-ref` / `--read` / `--write` / `--acceptance-ref`) are repeatable. `--status` is **intentionally not exposed** — newly added tasks are always `status: planned`; historical / migrated tasks use `phase import`. Partial flags (non-interactive flag without `--description`) raise `CONFIG_ERROR`. Wizard path is unchanged.
+- **`suggested_next_steps: string[]`** on `plan prompt --json` and `phase import --json` (Stable v1.4+) — additive field naming the canonical post-command sequence. `plan prompt` emits the 4-step AI-assisted planning flow (prompt → import → lint → phase runbook). `phase import` emits the post-import validation flow (lint → phase runbook per imported phase → task runbook on the first task) plus a defaults-review hint when `completed_fields[]` is non-empty.
+- **Sample-phase artifact renamed `P1-welcome.yaml` → `TUTORIAL-walkthrough.yaml`** with two minimal tutorial tasks added (`TUTORIAL-T1`, `TUTORIAL-T2`; the latter `depends_on: [TUTORIAL-T1]`). One bootstrap artifact now demos P10 (`depends_on`) + P11 (`task finalize` / `phase reconcile`) + P12 (`task runbook` blocking step) end-to-end. **This is the only behavioural change for new init runs.** Existing v1.3.x projects with a `P1-welcome.yaml` are untouched.
+
+For the full design rationale, read [`design/decisions/planning-ux-init-hardening-rfc.md`](../design/decisions/planning-ux-init-hardening-rfc.md). For the agent- and reviewer-facing walkthrough of the sample phase, read [`docs/concepts/sample-phase.md`](concepts/sample-phase.md).
+
+### Recommended adoption pattern
+
+**Replace scripted-bootstrap workarounds with `init --non-interactive --sample-phase`.**
+
+Pre-v1.4 scripted bootstrap required either dropping into a TTY for `init` (impossible in CI) or running `init --non-interactive` followed by a hand-built `phase import` to seed a smoke-test artifact. v1.4 replaces both:
+
+```sh
+# v1.3.x and earlier (CI without sample phase):
+code-pact init --non-interactive --locale en-US --agent claude-code
+# → empty roadmap, no smoke-test artifact
+
+# v1.3.x + hand-built phase import (heavyweight scripted bootstrap):
+code-pact init --non-interactive --locale en-US --agent claude-code
+cat > /tmp/seed.yaml <<EOF
+phases:
+  - id: P1
+    name: Smoke
+    weight: 1
+    objective: ...
+    tasks:
+      - id: P1-T1
+        description: ...
+EOF
+code-pact phase import /tmp/seed.yaml
+
+# v1.4.0+ (single command):
+code-pact init --non-interactive --locale en-US --agent claude-code --sample-phase
+# → roadmap with TUTORIAL phase + TUTORIAL-T1 / TUTORIAL-T2 ready for the per-task loop
+```
+
+**Replace `phase import` of single-task deltas with `task add` non-interactive flags.** When you only need to add one task in CI:
+
+```sh
+# v1.3.x and earlier (heavyweight):
+cat > /tmp/delta.yaml <<EOF
+phases:
+  - id: P1
+    name: ...
+    weight: ...
+    objective: ...
+    tasks:
+      - id: P1-T5
+        type: feature
+        description: ...
+EOF
+code-pact phase import /tmp/delta.yaml --force
+
+# v1.4.0+ (single command):
+code-pact task add P1 --description "..." --type feature
+```
+
+Both produce byte-identical phase YAML output.
+
+### CI implications under `--strict`
+
+Projects running `plan lint --strict` / `plan analyze --strict` / `validate --strict` see **no new errors and no new warnings**. v1.4.0 introduces zero new lint codes, zero new analyze codes, zero new error codes. `KNOWN_CODES.public` in `tests/unit/error-code-surface.test.ts` is unchanged from v1.3.0.
+
+### Backward compatibility
+
+- `init` flag surface gains `--sample-phase` (additive); all existing flags unchanged.
+- `init` JSON envelope unchanged.
+- `init` TTY wizard prompts and default-yes behaviour are unchanged. The `--sample-phase` flag, when passed to a TTY-wizard invocation, only skips the existing prompt (the wizard's default behaviour without the flag is identical to v1.3.x).
+- **`init` generated artifact is renamed** (`P1-welcome.yaml` → `TUTORIAL-walkthrough.yaml`; phase id `P1` → `TUTORIAL`; two tutorial tasks added). This affects only NEW init runs. Existing projects with a v1.3.x-or-earlier `P1-welcome.yaml` are untouched.
+- `task add` flag surface gains the non-interactive flag set (additive); existing positional + `--id` behaviour unchanged.
+- `task add` JSON envelope unchanged (`{ phaseId, taskId, phasePath }`).
+- `plan prompt` output gains `data.suggested_next_steps` (additive); existing fields (`prompt`, `has_brief`, `has_constitution`, `clipboard_copied`) unchanged.
+- `phase import` output gains `data.suggested_next_steps` (additive); existing fields (`imported_phases`, `imported_tasks`, `skipped_phases`, `completed_fields`) unchanged.
+- `task complete` / `task finalize` / `phase reconcile` / `task runbook` / `phase runbook` / `task context` / `task start` / `task block` / `task resume` / `task status` / `plan analyze` / `plan lint` / `validate` / `doctor` / `recommend` — **unchanged**. Same flags, JSON envelope, exit codes, error codes.
+- `progress.yaml` remains read-only for the new commands. The append-only operational-log contract is preserved.
+- `task context` pack output is unchanged. The byte-identical pack regression test against the golden fixture passes without modification.
+- `tests/integration/json-stdout.test.ts` continues to pass for every Stable command. Three new entries added for `init --sample-phase`, `task add --description`, and `task add` partial-flags CONFIG_ERROR.
+- `KNOWN_CODES.public` unchanged.
+- No new task or phase schema field. v1.3.x phase YAMLs parse and behave identically.
+
+In semver terms, v1.4.0 is a minor release.
+
+## Deferred beyond v1.4
+
+The following remain on the backlog after v1.4.0:
 
 - Removal of bare-form `code-pact adapter`.
 - Multi-agent orchestration / MCP / GitHub-Linear-Jira sync.
 - Advisory write locks for concurrent process safety.
 - **Enforcement of declared `writes` against actual file-system writes.** v1.1+ surfaces `TASK_WRITES_PROTECTED_PATH` as a warning against a narrow built-in seed set (`.git/**`, `node_modules/**`, `.code-pact/**`, `design/roadmap.yaml`, `design/phases/*.yaml`). Configurable governance and warning → error promotion are P14 work. v1.2+ displays declared `writes` in the `task finalize` / `phase reconcile` / `task runbook` JSON payload but does **not** verify them against actual file-system writes.
 - **Cross-phase `depends_on`.** v1.1+ ships same-phase only; cross-phase task ordering is a future extension. v1.3.0 surfaces `depends_on` in `task runbook` blocking steps but does not extend the same-phase restriction.
-- **File-content inclusion for `reads` and `acceptance_refs`.** v1.1+ renders both as path lists only; v1.3.0 keeps that surface unchanged.
+- **File-content inclusion for `reads` and `acceptance_refs`.** v1.1+ renders both as path lists only; v1.4.0 keeps that surface unchanged.
 - **Phase status auto-flip.** v1.2+ reports `phase_status_candidate` as advisory but never writes the phase's own `status` field. v1.3.0 `phase runbook` surfaces the same candidate plus a `manual_action` recommending the flip; it does not write either. An `--include-phase-status` opt-in is a candidate once the per-task flip path has been used through one release cycle.
-- **Multi-phase reconcile / runbook (`--all`).** v1.2 / v1.3 ship per-phase only.
+- **Multi-phase reconcile / runbook (`--all`).** v1.2 / v1.3 / v1.4 ship per-phase only.
 - **`design/roadmap.yaml` mutation.** Whether release prep should be able to delegate the per-phase weight / status flip to a `roadmap reconcile` command is P14 governance scope.
 - **Semantic validation of `acceptance_refs` content.** v1.2+ only checks the path exists; richer validation would couple finalize to acceptance-criteria format choices the project has not yet made.
 - **Runbook execution (`task runbook --execute`).** v1.3.0 is proposal-only by design. A future RFC may revisit a flag that runs each recommended step automatically, but only after the proposal-only contract has been used through one release cycle.
-- **Schema-level `human_gate` field.** v1.3.0 expresses manual checkpoints as `RunbookStep` content (`command: null` + `manual_action: "..."`). Promotion to a task-schema field requires more usage signal; P13 / P14 candidate.
-- **`task next` / `phase next` sugar aliases.** v1.3.0 ships `runbook` as the explicit primary name. Short-form aliases are a P13 candidate.
-- **Bundling `recommend` into `task runbook`.** v1.3.0 keeps them as separate commands answering different questions. Bundling is a P13 candidate once usage signal emerges.
-- **Init / wizard / task-add UX polish, sample-phase non-interactive mode, plan-brief / plan-constitution non-TTY paths.** Explicitly deferred from P12 to **P13**. P13 RFC should pick up the gap inventory from this RFC's Phase 1 exploration.
-- **Runbook integration with a runbook orchestrator (`task run` / `phase close`).** v1.3.0 keeps `task runbook` / `phase runbook` as user-callable read-only commands. A future runbook orchestrator that consumes them is out of scope.
+- **Schema-level `human_gate` field.** v1.3.0 expresses manual checkpoints as `RunbookStep` content (`command: null` + `manual_action: "..."`). Promotion to a task-schema field requires more usage signal; P14 candidate.
+- **`task next` / `phase next` sugar aliases.** v1.3.0 ships `runbook` as the explicit primary name. Short-form aliases remain a future candidate.
+- **Bundling `recommend` into `task runbook`.** v1.3.0 keeps them as separate commands answering different questions. Bundling remains a future candidate once usage signal emerges.
+- **`task add --status` flag.** P13 explicitly does not expose `--status`. Newly added tasks are always `status: planned`. Historical / migrated tasks must use `phase import`. Preserves the P11/P12 contract that design `done` is the result of `task finalize` / `phase reconcile`, not a starting point.
+- **`task add --dry-run`.** Not enough signal yet; revisit if needed.
+- **Reserved-id (`TUTORIAL`) hard enforcement.** P13 only changes the sample-phase default; users can still hand-edit roadmap.yaml to add their own `TUTORIAL`-named phase. Existing `DUPLICATE_PHASE_ID` catches the practical case. Hard reservation is P14 governance.
+- **`plan brief` / `plan constitution` non-TTY alternatives.** Designed as interactive by intent; non-TTY users can hand-edit `design/brief.md` / `design/constitution.md`. Code-level alternatives are P14 or later.
+- **Init / wizard / task-add UX polish beyond P13.** P13 closed the scripted-bootstrap gap and the partial-flags / silent-fallthrough footgun; further polish (e.g. `init --mode tutorial` sugar alias, `task add --dry-run`) remains future scope.
+- **Runbook integration with a runbook orchestrator (`task run` / `phase close`).** v1.4.0 keeps `task runbook` / `phase runbook` as user-callable read-only commands. A future runbook orchestrator that consumes them is out of scope.
 - Semver-aware `ADAPTER_GENERATOR_STALE` (current implementation is simple equality).
 - Conformance test inclusion for `cursor` / `gemini-cli` adapters — they remain Experimental.
 
