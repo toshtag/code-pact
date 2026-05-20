@@ -1,6 +1,6 @@
 # RFC: Lightweight Runbook
 
-**Status:** proposed (P12, 2026-05)
+**Status:** accepted (P12, 2026-05)
 **Scope:** new commands `task runbook` and `phase runbook`; shared runbook helpers under `src/core/runbook/`; extraction of the reconcile classifier to `src/core/finalize/reconcile-classifier.ts` and export of `classifyTaskDrift` from `src/core/plan/analyze.ts`.
 **Owners:** maintainer
 **Related:** [design/decisions/task-readiness-schema-rfc.md](task-readiness-schema-rfc.md) (P10 — provides `depends_on`, `decision_refs`, `acceptance_refs`, `writes` that the runbook reads). [design/decisions/finalization-reconciliation-rfc.md](finalization-reconciliation-rfc.md) (P11 — provides `task finalize` / `phase reconcile` that the runbook proposes as steps).
