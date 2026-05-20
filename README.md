@@ -63,6 +63,7 @@ All three converge on the same per-task agent loop (`recommend` → `task contex
 | [`docs/cli-contract.md`](docs/cli-contract.md) | Full flag / exit code / JSON envelope / error code reference and the Stability taxonomy. |
 | [`docs/migration.md`](docs/migration.md) | Upgrade guidance from any prior alpha (v0.6 – v0.9) to v1.0. |
 | [`docs/dogfood.md`](docs/dogfood.md) | Real-project walkthrough and troubleshooting for the most common error codes. |
+| [`docs/community.md`](docs/community.md) | Where to file issues / discussions / PRs, the GitHub Discussions intent, and the scope-discipline rule for the Non-goals list. |
 
 ## Supported agents
 
