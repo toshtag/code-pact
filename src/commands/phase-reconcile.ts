@@ -14,6 +14,7 @@ import {
   type WriteRefusalReason,
 } from "../core/finalize/safe-write.ts";
 import type { TaskStatusDiff } from "../core/finalize/diff.ts";
+import { classifyReconcile } from "../core/finalize/reconcile-classifier.ts";
 
 // ---------------------------------------------------------------------------
 // `phase reconcile <phase-id>` — v1.2 P11
@@ -100,41 +101,6 @@ async function resolvePhase(
 }
 
 /**
- * Classifies a single task's reconciliation action. Per the RFC § Reconciliation model:
- *
- *   - flip:          derived === "done" AND design ≠ "done"
- *   - skip:          design === "done" already, OR derived === "planned" (no events, no drift)
- *   - manual_review: derived ∈ {blocked, failed} (states reconcile cannot resolve)
- *
- * `started` / `resumed` are treated as skip — work in progress, no drift to fix.
- */
-function classifyTask(
-  designStatus: PhaseStatus,
-  derivedState: TaskCurrentState,
-): { action: TaskReconcileVerdict["action"]; reason: string | null } {
-  if (derivedState === "done" && designStatus !== "done") {
-    return { action: "flip", reason: null };
-  }
-  if (designStatus === "done") {
-    return { action: "skip", reason: "design status already done" };
-  }
-  if (derivedState === "planned") {
-    return { action: "skip", reason: "not yet done (no events recorded)" };
-  }
-  if (derivedState === "started" || derivedState === "resumed") {
-    return {
-      action: "skip",
-      reason: `work in progress (derived state: ${derivedState})`,
-    };
-  }
-  // blocked / failed: reconcile cannot resolve; surface for human attention.
-  return {
-    action: "manual_review",
-    reason: `derived state is ${derivedState}; reconcile cannot resolve this — run plan analyze for diagnosis`,
-  };
-}
-
-/**
  * Computes the candidate phase status by simulating each task's
  * post-reconcile effective status and aggregating. Never writes
  * anything — this is advisory only per the v1.2 contract.
@@ -185,7 +151,7 @@ export async function runPhaseReconcile(
   const tasks = phase.tasks ?? [];
   const verdicts: TaskReconcileVerdict[] = tasks.map((t) => {
     const derived = deriveTaskState(log.events, t.id).current;
-    const { action, reason } = classifyTask(t.status, derived);
+    const { action, reason } = classifyReconcile(t.status, derived);
     return {
       task_id: t.id,
       current_design_status: t.status,
