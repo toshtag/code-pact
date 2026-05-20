@@ -890,6 +890,106 @@ disabled_checks:
 
 This file is optional. When absent, all checks are active.
 
+## `task add` — append a task to a phase (v0.6, non-interactive in v1.4+)
+
+`code-pact task add <phase-id> [flags]` appends a task to the named phase's `tasks[]` array. Two paths share the same write contract:
+
+- **Wizard path (v0.6+, unchanged)** — TTY-only. The wizard prompts for `description` and `type`; all readiness fields default to `"medium"` and `status` defaults to `"planned"`. Output goes to stderr (or stdout JSON when `--json` is passed).
+- **Non-interactive path (v1.4+, Stable)** — flag-driven. Triggered by the presence of `--description`. Bypasses the wizard prompter entirely (no stdin handle is opened), making it safe for CI / scripted bootstrap. JSON envelope is **byte-identical** to the wizard path.
+
+### Mode resolution
+
+The presence of `--description` is the mode switch. Three branches:
+
+| Input | Behaviour |
+| --- | --- |
+| `--description` provided | Non-interactive path. `--type` is required (else CONFIG_ERROR). |
+| `--description` absent, no other non-interactive flags, TTY available | Wizard path (unchanged from v0.6). |
+| `--description` absent, no other non-interactive flags, no TTY | CONFIG_ERROR with non-interactive guidance. |
+| `--description` absent, one or more non-interactive-only flags present (e.g. `--type`, `--depends-on`) | **CONFIG_ERROR**. The CLI never silently enters the wizard or silently ignores the flags — predictable for scripts that lose TTY capability mid-pipeline. |
+
+### Non-interactive flag table (v1.4+)
+
+| Flag | Type | Required? | Default | Notes |
+| --- | --- | --- | --- | --- |
+| `--description` | string | yes (mode trigger) | — | Required in non-interactive mode |
+| `--type` | enum (`architecture` / `feature` / `bugfix` / `refactor` / `docs` / `test` / `mechanical_refactor` / `other`) | yes | — | Wizard prompts; non-interactive requires it |
+| `--id` | string | no | auto-generated as `<phaseId>-T<n>` | Valid in both wizard and non-interactive paths |
+| `--ambiguity` | enum (`low` / `medium` / `high`) | no | `medium` | Wizard default |
+| `--risk` | enum (`low` / `medium` / `high`) | no | `medium` | Wizard default |
+| `--context-size` | enum (`small` / `medium` / `large`) | no | `medium` | Wizard default |
+| `--write-surface` | enum (`low` / `medium` / `high`) | no | `medium` | Wizard default |
+| `--verification-strength` | enum (`weak` / `medium` / `strong`) | no | `medium` | Wizard default |
+| `--expected-duration` | enum (`short` / `medium` / `long`) | no | `medium` | Wizard default |
+| `--depends-on <id>` | string, **repeatable** | no | (none) | P10 field; pass multiple flags, not a comma-separated list |
+| `--decision-ref <path>` | string, **repeatable** | no | (none) | P10 field |
+| `--read <glob>` | string, **repeatable** | no | (none) | P10 field |
+| `--write <glob>` | string, **repeatable** | no | (none) | P10 field |
+| `--acceptance-ref <path>` | string, **repeatable** | no | (none) | P10 field |
+| `--json` | boolean | no | false | Valid in both paths |
+
+**`--status` is intentionally not exposed.** Newly added tasks are always written with `status: planned`. Historical or already-done tasks must use `phase import` — this preserves the P11/P12 contract that design `done` is the result of `task finalize` / `phase reconcile` after `task complete`, never a starting point declared at creation time.
+
+### P10 field validation responsibility
+
+`task add` stores P10 field flags after **basic string validation only**. Existence checks (file presence on disk), glob validity (P10 supported subset), unsafe-path detection (`assertSafeRelativePath`), and protected-path advisories remain `plan lint`'s responsibility. The dogfood loop (`task add` → `plan lint --json`) provides immediate feedback when a declared field is invalid.
+
+### JSON envelope
+
+Same shape in both modes:
+
+```json
+{
+  "ok": true,
+  "data": {
+    "phaseId": "P1",
+    "taskId": "P1-T5",
+    "phasePath": "design/phases/P1-foundation.yaml"
+  }
+}
+```
+
+### Errors
+
+No new error codes in v1.4. All paths reuse existing public codes:
+
+| Code | Exit | When |
+| --- | --- | --- |
+| `PHASE_NOT_FOUND` | 2 | Phase id is not in `design/roadmap.yaml` |
+| `DUPLICATE_TASK_ID` | 1 | Task id already exists in the phase (pre-v1.4 exit code preserved) |
+| `CONFIG_ERROR` | 2 | Missing positional `<phase-id>`; `--description` absent with no TTY; `--description` provided without `--type`; non-interactive flag without `--description`; invalid enum value; unknown flag |
+
+### Usage examples
+
+```sh
+# Wizard path (unchanged from v0.6) — TTY required.
+code-pact task add P1
+
+# Non-interactive (v1.4+) — minimal required flags.
+code-pact task add P1 --description "Add login form" --type feature
+
+# Non-interactive with explicit id + readiness overrides.
+code-pact task add P1 \
+  --id P1-AUTH \
+  --description "OAuth migration spike" \
+  --type architecture \
+  --ambiguity high \
+  --risk high \
+  --verification-strength strong
+
+# Non-interactive with P10 declarations (repeatable flags).
+code-pact task add P1 \
+  --description "Wire the new flow" \
+  --type feature \
+  --depends-on P1-AUTH \
+  --read "src/auth/**" \
+  --read "src/middleware/**" \
+  --write "src/handlers/login.ts" \
+  --decision-ref design/decisions/auth-oauth-rfc.md \
+  --acceptance-ref docs/acceptance/login-flow.md \
+  --json
+```
+
 ## `task complete`
 
 `code-pact task complete <task-id> [--agent <name>] [--json] [--dry-run]` is the deterministic completion entry point for agents.

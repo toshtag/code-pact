@@ -59,7 +59,16 @@ import { runTaskBlock } from "./commands/task-block.ts";
 import { runTaskResume } from "./commands/task-resume.ts";
 import { runTaskStatus } from "./commands/task-status.ts";
 import { runPhaseNew } from "./commands/phase-new.ts";
-import { runTaskAdd } from "./commands/task-add.ts";
+import { runTaskAdd, type TaskAddNonInteractiveSpec } from "./commands/task-add.ts";
+import {
+  TaskType,
+  AmbiguityLevel,
+  RiskLevel,
+  ContextSize,
+  WriteSurface,
+  VerificationStrength,
+  ExpectedDuration,
+} from "./core/schemas/task.ts";
 import { runPhaseWizard } from "./lib/phase-wizard.ts";
 import type { LocaleCode } from "./core/schemas/locale.ts";
 import { LocaleConfig } from "./core/schemas/locale.ts";
@@ -1880,6 +1889,42 @@ async function cmdTask(argv: string[], locale: Locale, globalJson: boolean): Pro
   return 2;
 }
 
+// Non-interactive-only flags for `task add` (v1.4 P13-T3). Presence of
+// any of these flags without `--description` triggers CONFIG_ERROR — the
+// runbook never silently falls through to the wizard or silently ignores
+// flags, per the P13 RFC § Task creation non-TTY model.
+//
+// `--id` and `--json` are NOT in this set — they are valid in both wizard
+// and non-interactive paths.
+const TASK_ADD_NON_INTERACTIVE_ONLY_FLAGS = [
+  "description",
+  "type",
+  "ambiguity",
+  "risk",
+  "context-size",
+  "write-surface",
+  "verification-strength",
+  "expected-duration",
+  "depends-on",
+  "decision-ref",
+  "read",
+  "write",
+  "acceptance-ref",
+] as const;
+
+function emitConfigError(
+  message: string,
+  json: boolean,
+): void {
+  if (json) {
+    process.stdout.write(
+      `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message } })}\n`,
+    );
+  } else {
+    process.stderr.write(`${message}\n`);
+  }
+}
+
 async function cmdTaskAdd(
   argv: string[],
   locale: Locale,
@@ -1888,47 +1933,190 @@ async function cmdTaskAdd(
   const m = messages[locale];
   const cwd = process.cwd();
 
-  // Honor post-command --json the same way every other `task` subcommand does
-  // (see cmdTaskStart / cmdTaskStatus / cmdTaskComplete). Pre-v1.0, `task add`
-  // only read globalJson, so `code-pact task add P1 --json` silently dropped
-  // to human stderr — a v0.6 regression relative to the BUG-001 contract.
-  const json = globalJson || argv.includes("--json");
-
-  // Positional: phase-id (the first non-flag token, and not the value following --id)
-  const idFlagIdx = argv.indexOf("--id");
-  const explicitId = idFlagIdx !== -1 ? argv[idFlagIdx + 1] : undefined;
-  const phaseId = argv.find((a, i) => {
-    if (a.startsWith("-")) return false;
-    if (idFlagIdx !== -1 && i === idFlagIdx + 1) return false;
-    return true;
-  });
-
-  if (!phaseId) {
-    const msg = "task add requires a phase id: code-pact task add <phase-id>";
-    if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
-      );
-    } else {
-      process.stderr.write(`${msg}\n`);
-    }
+  // Parse all flags via the stdlib parser. P10 fields accept multiple
+  // occurrences (e.g. `--depends-on a --depends-on b`); comma-separated
+  // values are intentionally not parsed (path-with-comma ambiguity).
+  let values: Record<string, unknown>;
+  let positionals: string[];
+  try {
+    const parsed = parseArgs({
+      args: argv,
+      options: {
+        json: { type: "boolean" },
+        id: { type: "string" },
+        description: { type: "string" },
+        type: { type: "string" },
+        ambiguity: { type: "string" },
+        risk: { type: "string" },
+        "context-size": { type: "string" },
+        "write-surface": { type: "string" },
+        "verification-strength": { type: "string" },
+        "expected-duration": { type: "string" },
+        "depends-on": { type: "string", multiple: true },
+        "decision-ref": { type: "string", multiple: true },
+        read: { type: "string", multiple: true },
+        write: { type: "string", multiple: true },
+        "acceptance-ref": { type: "string", multiple: true },
+      },
+      strict: true,
+      allowPositionals: true,
+    });
+    values = parsed.values as Record<string, unknown>;
+    positionals = parsed.positionals;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    emitConfigError(message, globalJson || argv.includes("--json"));
     return 2;
   }
 
-  if (!isInteractive()) {
-    const msg = "task add is interactive and requires a TTY. Use --non-interactive phase add with tasks in a phase import file instead.";
-    if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
-      );
-    } else {
-      process.stderr.write(`${msg}\n`);
-    }
+  const json = globalJson || values.json === true;
+  const phaseId = positionals[0];
+  const explicitId =
+    typeof values.id === "string" ? (values.id as string) : undefined;
+
+  if (!phaseId) {
+    emitConfigError(
+      "task add requires a phase id: code-pact task add <phase-id>",
+      json,
+    );
     return 2;
+  }
+
+  const description =
+    typeof values.description === "string"
+      ? (values.description as string)
+      : undefined;
+
+  // Detect any non-interactive-only flag that was passed.
+  const nonInteractiveFlagsSeen = TASK_ADD_NON_INTERACTIVE_ONLY_FLAGS.filter(
+    (flag) => {
+      if (flag === "description") return false; // handled separately
+      const v = values[flag];
+      if (Array.isArray(v)) return v.length > 0;
+      return typeof v === "string";
+    },
+  );
+
+  // 3-branch resolution per RFC § Task creation non-TTY model:
+  //   (a) --description present → non-interactive
+  //   (b) --description absent, no other non-interactive flags, TTY → wizard
+  //   (c) --description absent, no other non-interactive flags, no TTY →
+  //       CONFIG_ERROR (TTY-required message, updated to mention alternative)
+  //   (d) --description absent, non-interactive flag(s) present →
+  //       CONFIG_ERROR (never silently enter the wizard, never silently ignore)
+  if (description === undefined && nonInteractiveFlagsSeen.length > 0) {
+    emitConfigError(
+      `task add: non-interactive flag(s) provided without --description: ${nonInteractiveFlagsSeen
+        .map((f) => `--${f}`)
+        .join(", ")}. Pass --description "<text>" to use the non-interactive path, or omit the flags to use the wizard.`,
+      json,
+    );
+    return 2;
+  }
+
+  if (description === undefined && !isInteractive()) {
+    emitConfigError(
+      `task add is interactive and requires a TTY. Use \`task add ${phaseId} --description "<text>" --type <type>\` for the non-interactive path (v1.4+), or \`phase import\` for bulk task creation.`,
+      json,
+    );
+    return 2;
+  }
+
+  // Build non-interactive spec when --description is present. --type is
+  // required in this mode; other readiness/P10 flags are optional.
+  let nonInteractiveSpec: TaskAddNonInteractiveSpec | undefined;
+  if (description !== undefined) {
+    const typeRaw =
+      typeof values.type === "string" ? (values.type as string) : undefined;
+    if (typeRaw === undefined) {
+      emitConfigError(
+        "task add: --type is required when --description is provided. Valid values: " +
+          TaskType.options.join(", "),
+        json,
+      );
+      return 2;
+    }
+    const typeParsed = TaskType.safeParse(typeRaw);
+    if (!typeParsed.success) {
+      emitConfigError(
+        `task add: invalid --type "${typeRaw}". Valid values: ${TaskType.options.join(", ")}`,
+        json,
+      );
+      return 2;
+    }
+
+    const parseEnum = <T extends { safeParse: (v: unknown) => { success: boolean; data?: unknown } }>(
+      schema: T,
+      raw: unknown,
+      flagName: string,
+      validValues: readonly string[],
+    ): { ok: true; value: unknown | undefined } | { ok: false } => {
+      if (raw === undefined) return { ok: true, value: undefined };
+      const parsed = schema.safeParse(raw);
+      if (!parsed.success) {
+        emitConfigError(
+          `task add: invalid --${flagName} "${String(raw)}". Valid values: ${validValues.join(", ")}`,
+          json,
+        );
+        return { ok: false };
+      }
+      return { ok: true, value: parsed.data };
+    };
+
+    const ambiguity = parseEnum(AmbiguityLevel, values.ambiguity, "ambiguity", AmbiguityLevel.options);
+    if (!ambiguity.ok) return 2;
+    const risk = parseEnum(RiskLevel, values.risk, "risk", RiskLevel.options);
+    if (!risk.ok) return 2;
+    const contextSize = parseEnum(ContextSize, values["context-size"], "context-size", ContextSize.options);
+    if (!contextSize.ok) return 2;
+    const writeSurface = parseEnum(WriteSurface, values["write-surface"], "write-surface", WriteSurface.options);
+    if (!writeSurface.ok) return 2;
+    const verificationStrength = parseEnum(
+      VerificationStrength,
+      values["verification-strength"],
+      "verification-strength",
+      VerificationStrength.options,
+    );
+    if (!verificationStrength.ok) return 2;
+    const expectedDuration = parseEnum(
+      ExpectedDuration,
+      values["expected-duration"],
+      "expected-duration",
+      ExpectedDuration.options,
+    );
+    if (!expectedDuration.ok) return 2;
+
+    const asStringArray = (raw: unknown): string[] | undefined => {
+      if (raw === undefined) return undefined;
+      if (Array.isArray(raw)) return raw.filter((v): v is string => typeof v === "string");
+      return undefined;
+    };
+
+    nonInteractiveSpec = {
+      description,
+      type: typeParsed.data,
+      ...(ambiguity.value !== undefined ? { ambiguity: ambiguity.value as TaskAddNonInteractiveSpec["ambiguity"] } : {}),
+      ...(risk.value !== undefined ? { risk: risk.value as TaskAddNonInteractiveSpec["risk"] } : {}),
+      ...(contextSize.value !== undefined ? { context_size: contextSize.value as TaskAddNonInteractiveSpec["context_size"] } : {}),
+      ...(writeSurface.value !== undefined ? { write_surface: writeSurface.value as TaskAddNonInteractiveSpec["write_surface"] } : {}),
+      ...(verificationStrength.value !== undefined ? { verification_strength: verificationStrength.value as TaskAddNonInteractiveSpec["verification_strength"] } : {}),
+      ...(expectedDuration.value !== undefined ? { expected_duration: expectedDuration.value as TaskAddNonInteractiveSpec["expected_duration"] } : {}),
+      ...(asStringArray(values["depends-on"]) ? { depends_on: asStringArray(values["depends-on"])! } : {}),
+      ...(asStringArray(values["decision-ref"]) ? { decision_refs: asStringArray(values["decision-ref"])! } : {}),
+      ...(asStringArray(values.read) ? { reads: asStringArray(values.read)! } : {}),
+      ...(asStringArray(values.write) ? { writes: asStringArray(values.write)! } : {}),
+      ...(asStringArray(values["acceptance-ref"]) ? { acceptance_refs: asStringArray(values["acceptance-ref"])! } : {}),
+    };
   }
 
   try {
-    const result = await runTaskAdd({ cwd, phaseId, locale, id: explicitId });
+    const result = await runTaskAdd({
+      cwd,
+      phaseId,
+      locale,
+      id: explicitId,
+      ...(nonInteractiveSpec ? { nonInteractive: nonInteractiveSpec } : {}),
+    });
     if (json) {
       process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
     } else {
