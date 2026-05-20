@@ -381,6 +381,20 @@ code-pact adapter upgrade <agent> --write
 
 See [`docs/migration.md`](migration.md) for the full upgrade path between alpha releases.
 
+### Expected warnings after a non-interactive bootstrap
+
+If you ran `code-pact init --non-interactive --agent <agent> --locale <locale>` from CI or a script, the project skips the brief / constitution wizards and does not pin a model version. `code-pact validate --json` then reports three warnings as expected state:
+
+| Code | Severity | Why it fires |
+|---|---|---|
+| `BRIEF_MISSING` | warning | `design/brief.md` does not exist — the non-interactive init does not run `plan brief`. |
+| `CONSTITUTION_PLACEHOLDER` | warning | `design/constitution.md` still contains the template text from `init`. Edit it manually, or run `code-pact plan constitution` in a TTY. |
+| `ADAPTER_STALE` | warning | `adapter install <agent>` was called without `--model <version>`, so the model profile is not pinned. Re-run `adapter install <agent> --model <version>` (e.g. `--model opus-4.7`) to silence. |
+
+These are intentionally warnings, not errors — `validate` still exits 0. CI scripts that require a clean run can either fix the underlying state (recommended for `BRIEF_MISSING` / `CONSTITUTION_PLACEHOLDER`) or pass `--strict` only after deciding to treat them as failures.
+
+A separate `STATUS_DRIFT done-but-design-not-done` warning from `plan analyze --json` is also expected after any `task complete` until the design YAML's `status` field is flipped to `done` by hand — `task complete` records progress, but does not mutate design intent. See [`task complete` vs `design/` (v1.0 contract)](#task-complete-vs-design-v10-contract) above.
+
 ## Quick reference
 
 | Goal | Command |
