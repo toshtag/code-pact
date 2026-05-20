@@ -240,9 +240,20 @@ phases:
         verification_strength: strong
         expected_duration: short
         status: planned      # defaults to "planned" when omitted
+
+        # P10 (v1.1+) — Task Readiness Schema. All five fields are
+        # optional and have NO synthetic default — absent stays
+        # undefined, which means v1.0.x YAML behaviour is unchanged.
+        depends_on: [P1-T2]                       # same-phase task ids
+        decision_refs: [design/decisions/x.md]    # paths surfaced into the pack
+        reads: [src/core/**/*.ts]                 # declared read surface (globs)
+        writes: [src/core/foo.ts]                 # declared write surface (globs)
+        acceptance_refs: [docs/cli-contract.md]   # acceptance criteria paths
 ```
 
 **Lenient task schema (v0.4+):** Only `id` is required on each task entry. Missing detail fields are filled with sensible defaults at import time. This allows AI-generated roadmap YAML (which often omits `ambiguity`, `context_size`, etc.) to be imported directly without manual field-filling.
+
+**P10 Task Readiness Schema fields (v1.1+):** `depends_on` / `decision_refs` / `reads` / `writes` / `acceptance_refs` are additive optional fields. They have **no synthetic default** — when omitted from the input they stay `undefined` on the parsed task and the corresponding pack section is omitted. Field semantics, validation rules, the supported glob subset (literal segments, single-segment `*`, full-segment `**` only), and the protected-path seed set live in [`design/decisions/task-readiness-schema-rfc.md`](../design/decisions/task-readiness-schema-rfc.md). The twelve additive lint codes that validate them are listed below under [§ Plan diagnostic codes](#plan-diagnostic-codes) → Task Readiness Schema diagnostics.
 
 Add `--strict` to require every task field to be present explicitly; missing fields raise `CONFIG_ERROR` (exit 2) before any writes.
 
@@ -822,7 +833,7 @@ omitted, it defaults to `claude-code`. A one-line deprecation notice is printed 
 the notice is suppressed under `--json` so agents reading the JSON envelope are not
 surprised by an extra stderr line. The bare form will be removed in v1.1.
 
-## `task context` — context quality gates (v0.5.1)
+## `task context` — context quality gates (v0.5.1, v1.1 additions)
 
 `code-pact task context <task-id> [--agent <name>] [--json]` generates a context pack whose
 content is determined by the task's attributes:
@@ -836,6 +847,20 @@ content is determined by the task's attributes:
 
 The `char_count` (total characters in the rendered pack) and `included_constitution` flag
 are included in the `--json` result. Missing design files are silently skipped.
+
+### P10 declared sections (v1.1+)
+
+When a task declares any of the [P10 Task Readiness Schema fields](#phase-import) (`depends_on`, `decision_refs`, `reads`, `writes`, `acceptance_refs`), the pack body gains the corresponding sections in this fixed order, inserted after the Task Definition block and before the existing "Related Decisions" section:
+
+| Order | Section | Contents when declared |
+|---|---|---|
+| 1 | `## Depends on` | List of declared task ids with derived current state from `.code-pact/state/progress.yaml` (`planned` / `started` / `blocked` / `resumed` / `done` / `failed`). |
+| 2 | `## Declared read surface` | Each `reads` glob with currently-matched repo-relative file paths. `_(no current matches on disk)_` line when the glob matches nothing (mirrors the `TASK_READS_NO_MATCH` lint warning). |
+| 3 | `## Declared write surface` | Each `writes` glob, declaration-only — no fs lookup because writes are future-tense. |
+| 4 | `## Declared decisions` | Full body of every file referenced by `decision_refs`. Surfaced **regardless** of `context_size` (in addition to, not replacing, the existing `context_size: large` allDecisions path). Files referenced via `decision_refs` are removed from the existing "Related Decisions" section to avoid printing the same content twice. |
+| 5 | `## Acceptance references` | Path list only in P10. No content excerpt; richer rendering is deferred to P11 reconcile. |
+
+When a task declares **none** of the P10 fields, the pack body is byte-identical to v1.0.2. The byte-identical contract is locked by `tests/integration/pack-byte-identical.test.ts` against a checked-in golden fixture (`tests/fixtures/golden/pack-v1.0.2-shaped.md`).
 
 ## `doctor` — plan quality checks (v0.5.3)
 
