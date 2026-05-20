@@ -26,6 +26,12 @@ export type InitOptions = {
   force: boolean;
   /** Emit JSON result to stdout instead of human messages */
   json: boolean;
+  /**
+   * When true, write the tutorial sample phase artifact (P13+).
+   * Honoured by both the flag-based `init` path (via CLI `--sample-phase`)
+   * and the wizard path (forces creation, skipping the wizard's prompt).
+   */
+  createSamplePhase?: boolean;
 };
 
 /**
@@ -305,19 +311,76 @@ export async function runInit(opts: InitOptions): Promise<InitResult> {
   return runInitCore(opts);
 }
 
-async function writeSamplePhase(cwd: string, verifyCommand: string): Promise<string | undefined> {
-  const { runPhaseAdd } = await import("./phase.ts");
+/**
+ * Writes the tutorial sample phase artifact introduced in P13 (v1.4+).
+ *
+ * Phase id is `TUTORIAL` (was `P1` pre-v1.4) so it does not collide with
+ * the natural first user phase. Includes two tutorial tasks — TUTORIAL-T1
+ * and TUTORIAL-T2 with `depends_on: [TUTORIAL-T1]` — so the per-task loop
+ * + P10 depends_on + P12 task runbook blocking-step output can be demoed
+ * end-to-end from a single bootstrap artifact.
+ *
+ * Calls the `createPhase` domain service directly because `runPhaseAdd`
+ * does not forward the `tasks` field.
+ *
+ * Returns the relative path of the created phase, or `undefined` when
+ * the phase already exists (DUPLICATE_PHASE_ID is swallowed silently,
+ * matching the pre-P13 behaviour).
+ */
+async function writeSamplePhase(
+  cwd: string,
+  verifyCommand: string,
+): Promise<string | undefined> {
+  const { createPhase } = await import("../core/services/createPhase.ts");
   try {
-    const result = await runPhaseAdd({
+    // The phase `name` becomes the file slug via createPhase's
+    // slugify(). Using just "Walkthrough" yields the file path
+    // `design/phases/TUTORIAL-walkthrough.yaml` promised by the
+    // P13 RFC. The `id: "TUTORIAL"` plus the explicit objective
+    // text below carries the tutorial-only framing.
+    const result = await createPhase({
       cwd,
-      id: "P1",
-      name: "Welcome",
+      id: "TUTORIAL",
+      name: "Walkthrough",
       weight: 1,
-      objective: "Confirm the project structure and verification pipeline.",
+      objective:
+        "Confirm the project structure and verification pipeline by walking through the per-task loop end-to-end. Tutorial-only — delete this phase (and its roadmap entry) before treating design/ as your project's source-of-truth.",
       confidence: "high",
       risk: "low",
       verifyCommands: [verifyCommand],
-      definitionOfDone: ["The verification command exits with status 0."],
+      doneCriteria: [
+        "The verification command exits with status 0.",
+        "Every TUTORIAL-T* task has been completed and finalized.",
+      ],
+      tasks: [
+        {
+          id: "TUTORIAL-T1",
+          type: "feature",
+          ambiguity: "low",
+          risk: "low",
+          context_size: "small",
+          write_surface: "low",
+          verification_strength: "medium",
+          expected_duration: "short",
+          status: "planned",
+          description:
+            "Tutorial-only task. Run `code-pact task context TUTORIAL-T1` to see the context pack, then `code-pact task complete TUTORIAL-T1` to mark it done. Delete this entire TUTORIAL phase (and its roadmap entry) before treating design/ as your project's source-of-truth.",
+        },
+        {
+          id: "TUTORIAL-T2",
+          type: "docs",
+          ambiguity: "low",
+          risk: "low",
+          context_size: "small",
+          write_surface: "low",
+          verification_strength: "medium",
+          expected_duration: "short",
+          status: "planned",
+          depends_on: ["TUTORIAL-T1"],
+          description:
+            "Tutorial-only task. Demonstrates `code-pact task finalize TUTORIAL-T2 --write` after `task complete`. The `depends_on: [TUTORIAL-T1]` lets the tutorial demo the P10 dependency field + the P12 `task runbook` blocking-step output: `task runbook TUTORIAL-T2 --json` returns a blocking `manual_action` step at the head of `next_steps[]` until `task complete TUTORIAL-T1` runs. Safe to delete with the rest of TUTORIAL.",
+        },
+      ],
     });
     return result.path;
   } catch (err) {
