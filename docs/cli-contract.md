@@ -96,6 +96,9 @@ CI.
 | `PLAN_NORMALIZE_REQUIRED` | `plan normalize --check` | At least one file needs normalization |
 | `PLAN_NORMALIZE_CONFLICT` | `plan normalize` | `--check` and `--write` both passed |
 | `PLAN_ANALYZE_FAILED` | `plan analyze` | One or more exit-relevant drift issues found |
+| `TASK_FINALIZE_NOT_ELIGIBLE` | `task finalize` | Task's derived state from `progress.yaml` is not `done` (raised in **both** dry-run and `--write`) |
+| `TASK_FINALIZE_WRITE_REFUSED` | `task finalize --write` | Safety check refused the phase YAML write (unsafe path, outside `design/phases/`, symlink escape, unparseable, etc.) |
+| `PHASE_RECONCILE_WRITE_REFUSED` | `phase reconcile --write` | Every eligible task write in the phase was refused for safety reasons. Partial successes return exit 0; this fires only when **all** writes refused |
 | `INTERNAL_ERROR` | any command | Reserved for unhandled exceptions |
 
 ### Plan diagnostic codes
@@ -973,6 +976,98 @@ code-pact task finalize P9-T5 --write --json
 
 # Recommended adoption: stop hand-editing design status in release prep.
 # Use this command (or `phase reconcile`, P11-T4) instead.
+```
+
+## `phase reconcile` — bulk-flip task design statuses for a phase (v1.2+, P11)
+
+`code-pact phase reconcile <phase-id> [--write] [--json]` walks every task inside `design/phases/<phase>.yaml`, classifies each one against its derived state from `.code-pact/state/progress.yaml`, and (with `--write`) flips the `status` field for every task whose derived state is `done` while its design status is still `planned` / `in_progress`. Stability: **Stable (v1.2+)**.
+
+Default mode is dry-run. Pass `--write` to apply the mutations. No `--agent` flag — like `task finalize`, this is a design/progress reconciliation command that never calls an adapter.
+
+`phase reconcile` **never** auto-flips the phase's own `status` field in v1.2. It computes a `phase_status_candidate` and surfaces it as advisory only. The phase status itself continues to be flipped by hand in release prep until P14 governance owns the policy. `phase reconcile` also **never** mutates `progress.yaml` and **never** writes to `design/roadmap.yaml`.
+
+### Per-task classification
+
+Each task in the phase is classified into one of three actions:
+
+| Action | When | Effect of `--write` |
+| --- | --- | --- |
+| `flip` | Derived state is `done` AND design status is `planned` / `in_progress` | Status is rewritten to `done` (atomic write) |
+| `skip` | Design status is already `done`, OR derived state is `planned` (no events recorded), OR derived state is `started` / `resumed` (work in progress) | No change |
+| `manual_review` | Derived state is `blocked` or `failed` | No change. The user is directed to `plan analyze` for diagnosis |
+
+`phase reconcile` never touches `manual_review` tasks even with `--write`. The classifier intentionally narrows the writable set to the unambiguous `done-but-design-not-done` case.
+
+### Order of operations
+
+1. **Phase resolution.** Reads `design/roadmap.yaml`, finds the phase, loads its YAML. `PHASE_NOT_FOUND` is raised if the phase id is unknown.
+2. **Classification.** For each task, derives state via `deriveTaskState` and applies the table above.
+3. **Phase status candidate.** Computes a suggested phase status by simulating the post-flip state. Surfaced as `phase_status_candidate` (advisory). Never written.
+4. **No eligible writes.** If no task is classified as `flip`, returns `kind: "no_eligible_tasks"` with exit 0 in both dry-run and `--write`. This is **not** an error — it just means there is nothing to reconcile.
+5. **Safe-write classification.** Each flip candidate is validated via `src/core/path-safety.ts` and parsed as a Phase. Failures land in `skipped_writes[]` with a structured `reason` (`unsafe_path` / `outside_design_phases` / `not_yaml` / `symlink_escape` / `unreadable` / `unparseable_phase` / `task_not_found`).
+6. **Dry-run or `--write`.** In dry-run, returns `kind: "would_reconcile"` with `planned_writes[]`. In `--write`, applies each diff via `atomicWriteText` and returns `kind: "reconciled"` with `applied_writes[]` and any apply-time failures in `skipped_writes[]`.
+7. **All-refused error.** When `--write` is requested and **every** eligible write was refused, `PHASE_RECONCILE_WRITE_REFUSED` (exit 2) is raised with `data.skipped_writes[]` carrying the refusal details. Partial successes (one or more applied, one or more refused) return exit 0.
+
+### JSON envelope (success)
+
+```json
+{
+  "ok": true,
+  "data": {
+    "kind": "would_reconcile" | "reconciled" | "no_eligible_tasks",
+    "phase_id": "P11",
+    "file": "design/phases/P11-finalization-reconciliation.yaml",
+    "tasks": [
+      {
+        "task_id": "P11-T1",
+        "current_design_status": "planned",
+        "derived_state": "done",
+        "target_status": "done",
+        "action": "flip",
+        "reason": null
+      }
+    ],
+    "planned_writes": [{ "file": "...", "task_id": "...", "before": "planned", "after": "done" }],
+    "applied_writes": [],
+    "skipped_writes": [{ "file": "...", "task_id": "...", "reason": "outside_design_phases", "detail": "..." }],
+    "phase_status_candidate": "done",
+    "phase_status_note": "advisory — phase status is never written by phase reconcile in v1.2; flip by hand in release prep until P14"
+  }
+}
+```
+
+Field presence by kind:
+
+| Field | `would_reconcile` | `reconciled` | `no_eligible_tasks` |
+| --- | --- | --- | --- |
+| `phase_id`, `file` | ✓ | ✓ | ✓ |
+| `tasks[]` (per-task verdicts) | ✓ | ✓ | ✓ |
+| `phase_status_candidate`, `phase_status_note` | ✓ | ✓ | ✓ |
+| `planned_writes[]` | ✓ | absent | absent |
+| `applied_writes[]`, `skipped_writes[]` | absent | ✓ | absent |
+
+`phase_status_candidate` reflects the post-flip simulation. It is `done` only if every task would end up `done`; `in_progress` if any task is `started` / `blocked` / `resumed` / `failed`; otherwise `planned`. Writing the actual phase status remains a manual release-prep step.
+
+### Errors
+
+| Code | Exit | When |
+| --- | --- | --- |
+| `PHASE_NOT_FOUND` | 2 | Phase id is not present in `design/roadmap.yaml` |
+| `PHASE_RECONCILE_WRITE_REFUSED` | 2 | `--write` was requested AND every eligible task write was refused for safety reasons. `data.skipped_writes[]` carries the per-task refusal detail. Not raised when at least one write applied successfully |
+| `CONFIG_ERROR` | 2 | Missing positional phase id, or unknown flag |
+
+### Usage example
+
+```sh
+# Preview — what would reconcile do across the whole phase?
+code-pact phase reconcile P11 --json
+
+# Apply — flip every eligible task at once.
+code-pact phase reconcile P11 --write --json
+
+# Recommended adoption pattern (v1.2.0+):
+# Replace hand-edits of design/phases/*.yaml in release prep
+# with a single `phase reconcile <phase-id> --write` invocation.
 ```
 
 ## `task start` / `task status` / `task block` / `task resume` (v0.6)

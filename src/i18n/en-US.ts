@@ -50,6 +50,22 @@ export const messages = {
       if (skippedCount > 0) parts.push(`(skipped ${skippedCount} existing)`);
       return `${parts.join(" ")}.`;
     },
+    reconcile: {
+      phaseNotFound: (id: string): string =>
+        `Phase "${id}" not found in roadmap.yaml.`,
+      noEligible: (id: string): string =>
+        `Phase "${id}": no tasks are eligible for finalize (nothing to do).`,
+      wouldReconcile: (id: string, count: number): string =>
+        `Dry run: would finalize ${count} task${count === 1 ? "" : "s"} in phase "${id}". Run with --write to apply.`,
+      reconciled: (id: string, applied: number, skipped: number): string => {
+        const parts = [`Reconciled phase "${id}": ${applied} flipped`];
+        if (skipped > 0) parts.push(`, ${skipped} skipped`);
+        parts.push(".");
+        return parts.join("");
+      },
+      writeRefused: (id: string): string =>
+        `Refused to reconcile phase "${id}": every eligible write was refused for safety reasons. Inspect data.skipped_writes for the per-task reason.`,
+    },
   },
   progress: {
     baselineNotFound: (name: string): string =>

@@ -392,6 +392,34 @@ describe("json-stdout contract: state-mutating Stable (v1.0) commands", () => {
       "task finalize --write",
     );
   });
+
+  it("phase reconcile P1 --json (no_eligible_tasks before any task complete)", async () => {
+    const p = await projectWithTask("phase-reconcile-noop");
+    expectStdoutIsJson(
+      p.run(["phase", "reconcile", "P1", "--json"]),
+      "phase reconcile dry-run noop",
+    );
+  });
+
+  it("phase reconcile P1 --json (would_reconcile after task complete)", async () => {
+    const p = await projectWithTask("phase-reconcile-dryrun");
+    p.run(["task", "start", "P1-T1", "--agent", "claude-code", "--json"]);
+    p.run(["task", "complete", "P1-T1", "--agent", "claude-code", "--json"]);
+    expectStdoutIsJson(
+      p.run(["phase", "reconcile", "P1", "--json"]),
+      "phase reconcile dry-run",
+    );
+  });
+
+  it("phase reconcile P1 --write --json (reconciled after task complete)", async () => {
+    const p = await projectWithTask("phase-reconcile-write");
+    p.run(["task", "start", "P1-T1", "--agent", "claude-code", "--json"]);
+    p.run(["task", "complete", "P1-T1", "--agent", "claude-code", "--json"]);
+    expectStdoutIsJson(
+      p.run(["phase", "reconcile", "P1", "--write", "--json"]),
+      "phase reconcile --write",
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------
