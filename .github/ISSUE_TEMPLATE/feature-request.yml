@@ -1,0 +1,52 @@
+name: Feature request
+description: Propose a change to the `code-pact` CLI surface or behaviour.
+title: "feat: "
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing, please check that the change you want is not already on the explicit non-goals list:
+
+        - No LLM API calls
+        - No web UI / daemon / vector database
+        - No GitHub / Linear / Jira integrations
+        - No multi-agent orchestration
+        - No RAG / semantic search
+
+        See the [Non-goals (MVP) section in the README](../../README.md#non-goals-mvp). Re-introducing an item from that list is not impossible, but it requires an explicit scope tradeoff in the issue body — see [`docs/community.md`](../../docs/community.md#scope-discipline).
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: |
+        Describe the user-facing pain that motivates this request. Concrete is better than abstract. "I cannot do X without doing Y manually" beats "code-pact should be more flexible."
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: |
+        Sketch the change. CLI flag / new subcommand / new doc / new error code — whatever you have in mind. Rough is fine; the goal is to make the conversation concrete enough that scope can be evaluated.
+    validations:
+      required: true
+
+  - type: textarea
+    id: existing-workaround
+    attributes:
+      label: Existing workaround (if any)
+      description: |
+        How are you solving this today? If `code-pact` can already do this and you just could not find the surface, that is itself useful information — it usually means a docs gap rather than a missing feature.
+
+  - type: textarea
+    id: scope-check
+    attributes:
+      label: Scope check
+      description: |
+        - Does this change require LLM API calls, a web UI, an issue-tracker integration, multi-agent orchestration, or RAG / semantic search? If yes, please explain why this is the right tradeoff rather than keeping `code-pact` narrow.
+        - Does this change affect a `Stable (v1.0)` flag, exit code, JSON envelope shape, or error code? If yes, please explain whether it can land as an additive change or whether a v2 cut would be needed.
+    validations:
+      required: true
