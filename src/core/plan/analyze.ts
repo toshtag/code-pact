@@ -16,8 +16,15 @@ export type AnalyzeResult = {
   issues: PlanIssue[];
 };
 
-type DriftClassification = {
-  kind: string;
+export type DriftKind =
+  | "done-blocked-conflict"
+  | "done-with-incomplete-events"
+  | "done-historical"
+  | "done-but-design-not-done"
+  | "in-progress-no-events";
+
+export type DriftClassification = {
+  kind: DriftKind;
   severity: "error" | "warning";
   hidden_by_default?: boolean;
   affects_exit?: boolean;
@@ -30,7 +37,7 @@ type DriftClassification = {
  * the `done-with-incomplete-events` rule below must not fire for the
  * same task. Returns null when design and progress agree.
  */
-function classifyTaskDrift(
+export function classifyTaskDrift(
   designStatus: Task["status"],
   derivedCurrent: TaskCurrentState,
   hasEvents: boolean,
