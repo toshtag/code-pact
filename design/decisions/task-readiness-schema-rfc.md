@@ -200,7 +200,8 @@ Target: existing projects upgrading from v1.0.x to v1.1.0.
 3. **`phase reconcile` integration.** P11 will read `acceptance_refs` to validate that the documented acceptance points are present in the proposed `done` state. The exact semantic of "present" (file exists vs file modified vs file references a specific id) is deferred to P11 RFC.
 4. **Cross-phase dependency UX.** Deferred. If projects start informally encoding cross-phase deps in `description`, that is the signal that a future RFC needs to upgrade the field.
 5. **`roadmap.yaml` phase-level `depends_on`.** Out of scope for P10. This RFC concerns task-level only. Phase-level ordering is already expressed by the linear roadmap entries; if a real need for explicit phase dependencies emerges, it is a separate RFC.
-6. **v1.1.0 dist-tag.** Proposed: plain `latest`, same as v1.0.x. Confirmed at release time of P10 implementation, not in this RFC.
+
+(The v1.1.0 dist-tag decision is intentionally not listed here. It is a release-policy question for the P10 release prep PR, not a Task Readiness Schema design question.)
 
 ## Implementation slicing
 
