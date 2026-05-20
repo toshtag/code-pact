@@ -11,6 +11,52 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ---
 
+## [1.0.2] — 2026-05-20
+
+**Onboarding and dogfood documentation baseline.** Patch release that restructures the onboarding entry path and ships the dogfood / sample-phase / community materials that v1.0 left implicit.
+
+### CLI behavior changes
+
+None. Stable command flags, JSON envelope shape, exit-code semantics, and error-code surface remain unchanged from v1.0.1. The `tests/integration/json-stdout.test.ts` and `tests/unit/error-code-surface.test.ts` regression nets are unchanged.
+
+### Added
+
+- **`docs/getting-started.md`** — canonical first-thirty-minutes guide documenting three onboarding paths side by side (tutorial / manual / AI-assisted) plus the per-task agent loop, phase-boundary checkpoints, and adapter management. Replaces the in-README Quickstart. ([#81])
+- **`docs/workflows/greenfield.md`** — guidance for projects starting from an empty repo: which onboarding path matches a greenfield project, how to fill `plan brief` / `plan constitution`, the Foundations → Capability → Stabilization phase pattern. ([#82])
+- **`docs/workflows/brownfield-feature.md`** — guidance for adopting `code-pact` on an existing project: scope discipline (one feature, not retroactive backfill), three coexistence options for a pre-existing `CLAUDE.md` / `AGENTS.md`, verify-command sizing. ([#82])
+- **`docs/concepts/sample-phase.md`** — what the `init` wizard's optional sample phase actually contains (P1 Welcome, no tasks, one verify command), why the default is yes, keep / rename / delete decision matrix. ([#82])
+- **`docs/ja/getting-started.md`** — Japanese counterpart to `docs/getting-started.md`. README / migration translations remain English-primary and out of scope for this release. ([#83])
+- **`.github/ISSUE_TEMPLATE/bug-report.yml`** and **`.github/ISSUE_TEMPLATE/feature-request.yml`** — structured intake forms that ask for `--json` reproduction, the relevant exit code, and an explicit scope check against the MVP non-goals. ([#84])
+- **`.github/pull_request_template.md`** — contract checklist covering Stable (v1.0) surface preservation, atomic-write contract, and the no-new-runtime-dependency policy from `CONTRIBUTING.md`. ([#84])
+- **`docs/community.md`** — where to file issues / discussions / PRs, GitHub Discussions intent (with a status note that the tab may not be enabled yet), and the scope-discipline rule that re-introducing items from the MVP non-goals list requires an `rfc`-labelled issue with an explicit scope tradeoff. ([#84])
+- **`design/decisions/stability-taxonomy.md`** and **`design/rules/json-output.md`** — seed corpus so the context-quality gate in `src/core/pack/index.ts` has content to surface when a task declares `context_size: large` or `write_surface: high`. Exhaustive backfill remains out of scope. ([#85])
+- **`design/phases/P9-post-v1-dogfood-onboarding.yaml`** — phase contract registering the onboarding baseline work. ([#79])
+
+### Changed
+
+- **`README.md`** — reduced from a 269-line monolith to a ~110-line 30-second tour plus a Reference docs link hub. Quickstart, Agent-facing usage, Managing adapters, and Low-level mode all move into `docs/getting-started.md`. ([#81], [#84])
+- **`docs/dogfood.md`** — Troubleshooting section gains an "Expected warnings after a non-interactive bootstrap" entry covering `BRIEF_MISSING` / `CONSTITUTION_PLACEHOLDER` / `ADAPTER_STALE`, plus a `STATUS_DRIFT done-but-design-not-done` reminder cross-linked to the v1.0 contract section. ([#86])
+- **`design/phases/P4-stabilize.yaml`** — `status: in_progress` → `status: done`. P4 had been the open phase continuously since v0.5; closing it formally now that P9 is the new chapter. ([#80])
+- **`design/roadmap.yaml`** — appends P9 entry. ([#79])
+- **`design/phases/P9-post-v1-dogfood-onboarding.yaml`** — phase `status: planned` → `status: done`, and every P9 task (`P9-T1` through `P9-T7`) `status: planned` → `status: done`. Clears the seven `STATUS_DRIFT done-but-design-not-done` warnings that accumulated across P9 task PRs into a single coherent release-prep flip, following the v1.0.0 / v1.0.1 release-prep pattern. (this release prep)
+- **`package.json`** — version `1.0.1` → `1.0.2`. (this release prep)
+
+### Known residuals (not blockers)
+
+- **Tutorial path requires TTY.** `code-pact init --non-interactive` does not create the sample phase (`createSamplePhase` is wizard-only). Documented in `docs/getting-started.md` Path 1 as expected behaviour. Candidate for a future `init` UX hardening phase.
+- **No `task add --non-interactive`.** CI / automation workflows use `code-pact phase import` with tasks declared in the imported YAML. Documented in `docs/getting-started.md` and `docs/dogfood.md`.
+
+[#79]: https://github.com/toshtag/code-pact/pull/79
+[#80]: https://github.com/toshtag/code-pact/pull/80
+[#81]: https://github.com/toshtag/code-pact/pull/81
+[#82]: https://github.com/toshtag/code-pact/pull/82
+[#83]: https://github.com/toshtag/code-pact/pull/83
+[#84]: https://github.com/toshtag/code-pact/pull/84
+[#85]: https://github.com/toshtag/code-pact/pull/85
+[#86]: https://github.com/toshtag/code-pact/pull/86
+
+---
+
 ## [1.0.1] — 2026-05-19
 
 **Atomic-write contract alignment.** Patch release closing a public-contract gap the v1.0 post-release audit caught: `docs/cli-contract.md` claims every listed state/design write goes through `atomicWriteText`, but six raw `fs.writeFile` call sites remained on listed paths. This release routes all of them through the shared atomic-text helper so the implementation matches the published contract.
