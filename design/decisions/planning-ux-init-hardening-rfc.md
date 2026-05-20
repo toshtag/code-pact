@@ -1,6 +1,6 @@
 # RFC: Planning UX and init hardening
 
-**Status:** proposed (P13, 2026-05)
+**Status:** accepted (P13, 2026-05)
 **Scope:** new flag `init --sample-phase`; new non-interactive flag set for `task add`; additive `data.suggested_next_steps: string[]` field on `plan prompt` and `phase import`; sample-phase artifact rename from `P1` to `TUTORIAL` with 1–2 tutorial tasks added.
 **Owners:** maintainer
 **Related:** [design/decisions/lightweight-runbook-rfc.md](lightweight-runbook-rfc.md) (P12 — explicitly deferred init/UX polish to P13). [design/decisions/task-readiness-schema-rfc.md](task-readiness-schema-rfc.md) (P10 — provides the optional task fields P13's new `task add` flags can declare).
