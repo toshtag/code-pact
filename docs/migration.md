@@ -282,21 +282,87 @@ Three new public error codes ship in v1.2.0. The error-code surface lock at `tes
 
 In semver terms, v1.2.0 is a minor release.
 
-## Deferred beyond v1.2
+## v1.2.x → v1.3.0
 
-The following remain on the backlog after v1.2.0:
+### Quick path
+
+```sh
+# 1. Upgrade the CLI.
+npm install -g code-pact@1.3.0
+
+# 2. No mandatory action. Existing v1.2.x projects continue to work
+#    unchanged — `task runbook` and `phase runbook` are opt-in.
+code-pact validate --json   # expect: ok
+code-pact plan analyze --json
+# Every Stable contract from v1.0 / v1.1 / v1.2 is preserved. No
+# new error codes, no new schema fields, no new mutation surface.
+```
+
+### What's new in v1.3.0
+
+Two new **read-only guidance commands** ship as **Stable (v1.3+)**. Neither command mutates anything; neither calls an adapter; neither takes an `--agent` / `--write` / `--execute` flag. Both return a deterministic list of next recommended steps as command strings the user (or an agent) runs separately.
+
+- **`task runbook <task-id>`** — answers "what should happen next in this task's lifecycle?". Returns the sequence of `task start` / `task context` / implementation / `task complete` / `task finalize` etc., gated by `depends_on` and drift state. JSON envelope is `{ ok: true, data: { kind: "runbook", task_id, phase_id, state_summary, next_steps: RunbookStep[] } }`. Reuses existing error codes (`TASK_NOT_FOUND` / `AMBIGUOUS_TASK_ID` / `CONFIG_ERROR`).
+- **`phase runbook <phase-id>`** — answers "what should happen next across the whole phase?". Returns a 6-priority step list (blocked → manual_review → reconcile batch → in-progress hints → primary loop → phase-status advisory) plus task/drift histograms and a `phase_status_candidate` (advisory only — `phase runbook` continues the v1.2 contract that phase status is never written automatically). Reuses `PHASE_NOT_FOUND` / `CONFIG_ERROR`.
+
+The `RunbookStep` shape is **field-presence-fixed**: every field (`command`, `manual_action`, `reason`, `blocking`, `safety_note`, `expected_result`) is always present in JSON output, with `null` where not applicable. Exactly one of `command` / `manual_action` is non-null. JSON consumers can assume the schema is constant across step kinds.
+
+Internally, v1.3.0 also extracts the reconcile classifier from `src/commands/phase-reconcile.ts` into `src/core/finalize/reconcile-classifier.ts` so both `phase reconcile` and the new runbook builders can import from the same core helper. This is a pure refactor — `tests/unit/commands/phase-reconcile.test.ts` passes unchanged.
+
+For the full design rationale, read [`design/decisions/lightweight-runbook-rfc.md`](../design/decisions/lightweight-runbook-rfc.md). For the agent- and reviewer-facing walkthrough, read [`docs/concepts/runbook.md`](concepts/runbook.md).
+
+### Recommended adoption pattern
+
+**Use `task runbook` after `plan analyze` flags drift.** When `plan analyze` reports a `STATUS_DRIFT done-but-design-not-done` warning, the additive `details.remediation` field (added in v1.2.0 P11-T5) points at the exact `task finalize <id>` command. `task runbook <id>` is the broader counterpart: it surfaces the same recommendation in context, alongside the rest of the task's lifecycle state.
+
+**Use `phase runbook` as a sanity check before release-prep `phase reconcile --write`.** v1.2.0's release-prep dogfood used `phase reconcile P11 --write` directly; v1.3.0 release prep should run `phase runbook P12 --json` first to inspect the histogram and verify the recommended reconcile batch matches expectations.
+
+```sh
+# Single-task drift recovery:
+code-pact plan analyze --json   # → STATUS_DRIFT remediation hint points at task finalize
+code-pact task runbook P9-T5 --json   # → same finalize step + full lifecycle context
+
+# Release-prep adoption (v1.3.0+):
+code-pact phase runbook <phase-id> --json   # sanity check; inspect histogram + candidate
+code-pact phase reconcile <phase-id> --write   # apply the batch flip
+```
+
+### CI implications under `--strict`
+
+Projects running `plan lint --strict` / `plan analyze --strict` / `validate --strict` see **no new errors and no new warnings**. v1.3.0 introduces zero new lint codes, zero new analyze codes, zero new error codes. The `KNOWN_CODES.public` surface lock at `tests/unit/error-code-surface.test.ts` is unchanged from v1.2.0.
+
+### Backward compatibility
+
+- `task complete` / `task finalize` / `phase reconcile` / `task context` / `task start` / `task block` / `task resume` / `task status` / `plan analyze` / `plan lint` / `validate` / `doctor` / `recommend` — **unchanged**. Same flags, same JSON envelope, same exit codes, same error codes.
+- `progress.yaml` remains read-only for the new commands. The append-only operational-log contract is preserved.
+- `task context` pack output is unchanged. The byte-identical pack regression test against the golden fixture passes without modification.
+- `tests/integration/json-stdout.test.ts` continues to pass for every Stable (v1.0 / v1.1 / v1.2) command; the two new runbook commands are added to the test list and pass from day one.
+- `KNOWN_CODES.public` is unchanged.
+- No new task or phase schema field. v1.2.x phase YAMLs parse and behave identically.
+- The reconcile classifier extraction (P12-T2) is a pure refactor of code that has always been an implementation detail of `phase reconcile`; no external consumer was depending on its location. The existing `tests/unit/commands/phase-reconcile.test.ts` regression net continues to pass without modification.
+
+In semver terms, v1.3.0 is a minor release.
+
+## Deferred beyond v1.3
+
+The following remain on the backlog after v1.3.0:
 
 - Removal of bare-form `code-pact adapter`.
 - Multi-agent orchestration / MCP / GitHub-Linear-Jira sync.
 - Advisory write locks for concurrent process safety.
-- **Enforcement of declared `writes` against actual file-system writes.** v1.1+ surfaces `TASK_WRITES_PROTECTED_PATH` as a warning against a narrow built-in seed set (`.git/**`, `node_modules/**`, `.code-pact/**`, `design/roadmap.yaml`, `design/phases/*.yaml`). Configurable governance and warning → error promotion are P14 work. v1.2.0 displays declared `writes` in the `task finalize` / `phase reconcile` JSON payload but does **not** verify them against actual file-system writes.
-- **Cross-phase `depends_on`.** v1.1+ ships same-phase only; cross-phase task ordering is a future extension. v1.2.0 surfaces `depends_on_check[]` in `task finalize` output as warning advisory only — it does not block on unsatisfied dependencies.
-- **File-content inclusion for `reads` and `acceptance_refs`.** v1.1+ renders both as path lists only; v1.2.0 keeps that surface unchanged.
-- **Phase status auto-flip.** v1.2.0 `phase reconcile` reports `phase_status_candidate` as advisory but never writes the phase's own `status` field. An `--include-phase-status` opt-in is a candidate once the per-task flip path has been used through one release cycle.
-- **Multi-phase reconcile (`--all`).** v1.2.0 ships per-phase only.
+- **Enforcement of declared `writes` against actual file-system writes.** v1.1+ surfaces `TASK_WRITES_PROTECTED_PATH` as a warning against a narrow built-in seed set (`.git/**`, `node_modules/**`, `.code-pact/**`, `design/roadmap.yaml`, `design/phases/*.yaml`). Configurable governance and warning → error promotion are P14 work. v1.2+ displays declared `writes` in the `task finalize` / `phase reconcile` / `task runbook` JSON payload but does **not** verify them against actual file-system writes.
+- **Cross-phase `depends_on`.** v1.1+ ships same-phase only; cross-phase task ordering is a future extension. v1.3.0 surfaces `depends_on` in `task runbook` blocking steps but does not extend the same-phase restriction.
+- **File-content inclusion for `reads` and `acceptance_refs`.** v1.1+ renders both as path lists only; v1.3.0 keeps that surface unchanged.
+- **Phase status auto-flip.** v1.2+ reports `phase_status_candidate` as advisory but never writes the phase's own `status` field. v1.3.0 `phase runbook` surfaces the same candidate plus a `manual_action` recommending the flip; it does not write either. An `--include-phase-status` opt-in is a candidate once the per-task flip path has been used through one release cycle.
+- **Multi-phase reconcile / runbook (`--all`).** v1.2 / v1.3 ship per-phase only.
 - **`design/roadmap.yaml` mutation.** Whether release prep should be able to delegate the per-phase weight / status flip to a `roadmap reconcile` command is P14 governance scope.
-- **Semantic validation of `acceptance_refs` content.** v1.2.0 only checks the path exists; richer validation would couple finalize to acceptance-criteria format choices the project has not yet made.
-- **Runbook integration (`task run` / `phase close`).** P12 will consume `task finalize` / `phase reconcile` from the runbook layer; v1.2.0 keeps the commands user-callable only.
+- **Semantic validation of `acceptance_refs` content.** v1.2+ only checks the path exists; richer validation would couple finalize to acceptance-criteria format choices the project has not yet made.
+- **Runbook execution (`task runbook --execute`).** v1.3.0 is proposal-only by design. A future RFC may revisit a flag that runs each recommended step automatically, but only after the proposal-only contract has been used through one release cycle.
+- **Schema-level `human_gate` field.** v1.3.0 expresses manual checkpoints as `RunbookStep` content (`command: null` + `manual_action: "..."`). Promotion to a task-schema field requires more usage signal; P13 / P14 candidate.
+- **`task next` / `phase next` sugar aliases.** v1.3.0 ships `runbook` as the explicit primary name. Short-form aliases are a P13 candidate.
+- **Bundling `recommend` into `task runbook`.** v1.3.0 keeps them as separate commands answering different questions. Bundling is a P13 candidate once usage signal emerges.
+- **Init / wizard / task-add UX polish, sample-phase non-interactive mode, plan-brief / plan-constitution non-TTY paths.** Explicitly deferred from P12 to **P13**. P13 RFC should pick up the gap inventory from this RFC's Phase 1 exploration.
+- **Runbook integration with a runbook orchestrator (`task run` / `phase close`).** v1.3.0 keeps `task runbook` / `phase runbook` as user-callable read-only commands. A future runbook orchestrator that consumes them is out of scope.
 - Semver-aware `ADAPTER_GENERATOR_STALE` (current implementation is simple equality).
 - Conformance test inclusion for `cursor` / `gemini-cli` adapters — they remain Experimental.
 

@@ -70,12 +70,20 @@ code-pact task finalize <task-id> --write
 # Or, when reconciling many completed tasks at once (e.g. during
 # release prep), use the bulk version:
 code-pact phase reconcile <phase-id> --write
+
+# 7. (v1.3+) At any point in the loop, ask the CLI for read-only
+#    sequencing guidance. Runbook never executes anything — it just
+#    returns the recommended next steps as command strings.
+code-pact task runbook <task-id> --json     # per-task next steps
+code-pact phase runbook <phase-id> --json   # per-phase priority list + histograms
 ```
 
 `task context` / `task complete` / `task start` / `task block` / `task resume`
 all resolve the task id across every phase in `design/roadmap.yaml`, so you
 do not need to pass a phase id. `task finalize` and `phase reconcile` (v1.2+)
-also resolve task / phase ids from the roadmap.
+also resolve task / phase ids from the roadmap. `task runbook` and
+`phase runbook` (v1.3+) likewise resolve from the roadmap and take no
+`--agent` flag — runbook is agent-independent sequencing guidance.
 
 A task that is currently `blocked` cannot be completed directly — `task complete`
 returns `INVALID_TASK_TRANSITION`. Resume it first so the `resumed` event
@@ -324,9 +332,9 @@ When the two diverge, `plan analyze` surfaces a `STATUS_DRIFT` warning so it's v
 - `done-but-design-not-done` — `task complete` ran, but `design.status` is still `planned` or `in_progress`. Agents and humans should update the design YAML when they truly mean the task is done.
 - `done-historical` — `design.status: done` but no progress events exist. Hidden by default (`affects_exit: false`) so legacy projects don't fail CI. Surface them with `plan analyze --include-historical`.
 
-In practice: the v0.6–v1.1 release-prep PRs flipped the phase YAML `status` fields manually as part of the release-prep commit (see `chore(design): mark P8-T1 as done` and similar). v1.2 keeps the v1.0 contract — `task complete` still records progress only and never mutates design YAML — but adds `task finalize <task-id>` and `phase reconcile <phase-id>` as Stable (v1.2+) commands that flip the design YAML's `status` field explicitly, with default dry-run and `--write` opt-in. See [`docs/concepts/finalization-reconciliation.md`](concepts/finalization-reconciliation.md) for the walkthrough.
+In practice: the v0.6–v1.1 release-prep PRs flipped the phase YAML `status` fields manually as part of the release-prep commit (see `chore(design): mark P8-T1 as done` and similar). v1.2 keeps the v1.0 contract — `task complete` still records progress only and never mutates design YAML — but adds `task finalize <task-id>` and `phase reconcile <phase-id>` as Stable (v1.2+) commands that flip the design YAML's `status` field explicitly, with default dry-run and `--write` opt-in. v1.3 adds `task runbook <task-id>` and `phase runbook <phase-id>` as Stable (v1.3+) read-only guidance commands that return the recommended next steps (including `task finalize` / `phase reconcile` invocations when drift is present) without executing anything. See [`docs/concepts/finalization-reconciliation.md`](concepts/finalization-reconciliation.md) and [`docs/concepts/runbook.md`](concepts/runbook.md) for the walkthroughs.
 
-## Troubleshooting (v1.0 / v1.2+)
+## Troubleshooting (v1.0 / v1.2+ / v1.3+)
 
 When a command surfaces one of the diagnostic codes below, this section maps it to the typical recovery action. The full per-code reference is in [`docs/cli-contract.md` § Error codes](cli-contract.md#error-codes).
 
@@ -392,6 +400,11 @@ code-pact task status <task-id> --json
 #     the task first.
 #   - current: "failed" → the verify failed at task complete; fix
 #     the underlying issue, complete again, then finalize.
+
+# v1.3+ alternative: `task runbook` returns the same diagnosis plus
+# the recommended next step inline (no manual state interpretation).
+code-pact task runbook <task-id> --json
+# Read data.state_summary + data.next_steps[0].command.
 ```
 
 `task finalize` deliberately refuses ineligible cases instead of guessing. Every legitimate path through the state machine ends in a `done` event, which is the precondition for finalization.
@@ -421,6 +434,11 @@ code-pact phase reconcile <phase-id> --json
 # Re-run in dry-run mode to inspect the per-task verdicts. Fix the
 # underlying cause (unparseable phase file is the most common) and
 # re-run with --write.
+
+# v1.3+ alternative: `phase runbook` returns the same per-task verdicts
+# plus the recommended next steps (blocked / manual_review / reconcile
+# batch / primary loop / phase-status advisory).
+code-pact phase runbook <phase-id> --json
 ```
 
 If `data.tasks[]` shows every flip candidate has the same refusal reason, the issue is the phase file itself, not individual tasks — fix it once and reconcile will proceed for all of them.
@@ -453,7 +471,7 @@ If you ran `code-pact init --non-interactive --agent <agent> --locale <locale>` 
 
 These are intentionally warnings, not errors — `validate` still exits 0. CI scripts that require a clean run can either fix the underlying state (recommended for `BRIEF_MISSING` / `CONSTITUTION_PLACEHOLDER`) or pass `--strict` only after deciding to treat them as failures.
 
-A separate `STATUS_DRIFT done-but-design-not-done` warning from `plan analyze --json` is also expected after any `task complete` until the design YAML's `status` field is flipped to `done`. `task complete` records progress, but does not mutate design intent. v1.2+ mechanizes the flip via `code-pact task finalize <task-id> --write` (single task) or `code-pact phase reconcile <phase-id> --write` (whole phase); the warning's `details.remediation` field carries the exact command. See [`task complete` vs `design/` (v1.0 contract)](#task-complete-vs-design-v10-contract) above and [`docs/concepts/finalization-reconciliation.md`](concepts/finalization-reconciliation.md) for the v1.2+ walkthrough.
+A separate `STATUS_DRIFT done-but-design-not-done` warning from `plan analyze --json` is also expected after any `task complete` until the design YAML's `status` field is flipped to `done`. `task complete` records progress, but does not mutate design intent. v1.2+ mechanizes the flip via `code-pact task finalize <task-id> --write` (single task) or `code-pact phase reconcile <phase-id> --write` (whole phase); the warning's `details.remediation` field carries the exact command. v1.3+ also exposes the same recommendation via `code-pact task runbook <task-id> --json` (single task) or `code-pact phase runbook <phase-id> --json` (whole phase) — runbook is read-only and never executes anything. See [`task complete` vs `design/` (v1.0 contract)](#task-complete-vs-design-v10-contract) above, [`docs/concepts/finalization-reconciliation.md`](concepts/finalization-reconciliation.md) for the v1.2+ walkthrough, and [`docs/concepts/runbook.md`](concepts/runbook.md) for the v1.3+ walkthrough.
 
 ## Quick reference
 
