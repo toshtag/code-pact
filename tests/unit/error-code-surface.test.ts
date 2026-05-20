@@ -56,6 +56,8 @@ const KNOWN_CODES: Record<string, "public" | "plan" | "doctor" | "adapter" | "in
   INVALID_TASK_TRANSITION: "public",
   MANIFEST_NOT_FOUND: "public",
   PHASE_NOT_FOUND: "public",
+  TASK_FINALIZE_NOT_ELIGIBLE: "public",
+  TASK_FINALIZE_WRITE_REFUSED: "public",
   TASK_NOT_FOUND: "public",
   UNKNOWN_COMMAND: "public",
   VALIDATE_FAILED: "public",

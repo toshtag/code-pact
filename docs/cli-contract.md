@@ -900,6 +900,81 @@ Order of operations:
 
 The `agent` field on `ProgressEvent` is optional for backward compatibility with v0.1 logs that predate `task complete`.
 
+## `task finalize` — flip task design status to done (v1.2+, P11)
+
+`code-pact task finalize <task-id> [--write] [--json]` flips the `status` field of a single task inside `design/phases/<phase>.yaml` from `planned` / `in_progress` to `done`. Stability: **Stable (v1.2+)**.
+
+Eligibility: the task's derived state from `.code-pact/state/progress.yaml` (via `deriveTaskState`) **must equal `done`**. Any other current state (no events, `started`, `blocked`, `resumed`, `failed`) raises `TASK_FINALIZE_NOT_ELIGIBLE` (`ok: false`, exit 2) in **both** dry-run and `--write` modes. Dry-run means "won't write", not "won't validate" — the dry-run output of a finalize-able task is a faithful preview of what `--write` would do.
+
+Default mode is dry-run. Pass `--write` to apply the mutation. No `--agent` flag — this is a design/progress reconciliation command that never calls an adapter.
+
+Order of operations:
+
+1. **Task resolution.** Scans every phase referenced by `design/roadmap.yaml`. `TASK_NOT_FOUND` / `AMBIGUOUS_TASK_ID` are raised for missing / duplicate task ids (same logic as `task complete`).
+2. **Eligibility check.** Reads `progress.yaml`, derives the task state, raises `TASK_FINALIZE_NOT_ELIGIBLE` if not `done`.
+3. **Safe-write classification.** Validates the resolved phase file via `src/core/path-safety.ts` (`assertSafeRelativePath` + `resolveWithinProject`), reads it, parses it as Phase, confirms the task is present. Any failure raises `TASK_FINALIZE_WRITE_REFUSED` (exit 2) with a structured reason in `data.reason` (`unsafe_path` / `outside_design_phases` / `not_yaml` / `symlink_escape` / `unreadable` / `unparseable_phase` / `task_not_found`).
+4. **Idempotency check.** If the phase YAML already has `status: done` for this task, returns `kind: "already_finalized"` (exit 0) with no write attempt.
+5. **Dry-run or `--write`.** In dry-run, returns `kind: "would_finalize"` with `planned_writes[]`. In `--write`, calls `atomicWriteText` to apply the change and returns `kind: "finalized"` with `applied_writes[]`.
+
+`task finalize` **never** mutates `progress.yaml`, **never** writes to `design/roadmap.yaml`, and **never** flips the phase's own `status` field. The v1.0 append-only progress contract and the v1.2 narrow-write-target contract are both preserved.
+
+### JSON envelope (success)
+
+```json
+{
+  "ok": true,
+  "data": {
+    "kind": "would_finalize" | "finalized" | "already_finalized",
+    "task_id": "P1-T1",
+    "phase_id": "P1",
+    "file": "design/phases/P1-foundation.yaml",
+    "current_status": "planned",
+    "target_status": "done",
+    "planned_writes": [{ "file": "...", "task_id": "...", "before": "planned", "after": "done" }],
+    "applied_writes": [],
+    "skipped_writes": [],
+    "acceptance_refs_check": [{ "path": "docs/cli-contract.md", "exists": true }],
+    "declared_writes": ["src/commands/task-finalize.ts"],
+    "depends_on_check": [{ "task_id": "P1-T0", "current": "done", "satisfied": true }]
+  }
+}
+```
+
+Field presence by kind:
+
+| Field | `would_finalize` | `finalized` | `already_finalized` |
+| --- | --- | --- | --- |
+| `task_id`, `phase_id`, `file` | ✓ | ✓ | ✓ |
+| `current_status` (pre-write), `target_status` | ✓ | ✓ | ✓ |
+| `planned_writes[]` | ✓ | absent | absent |
+| `applied_writes[]`, `skipped_writes[]` | absent | ✓ | absent |
+| `acceptance_refs_check[]`, `declared_writes[]`, `depends_on_check[]` | ✓ | ✓ | ✓ |
+
+`skipped_writes[]` is always empty for `task finalize` (it operates on a single task). The field exists for shape parity with `phase reconcile` (P11-T4).
+
+### Errors
+
+| Code | Exit | When |
+| --- | --- | --- |
+| `TASK_NOT_FOUND` | 2 | Task id is not present in any phase |
+| `AMBIGUOUS_TASK_ID` | 2 | Task id appears in more than one phase |
+| `TASK_FINALIZE_NOT_ELIGIBLE` | 2 | Derived state from `progress.yaml` is not `done`. Raised in **both** dry-run and `--write`. `data.current` carries the actual derived state |
+| `TASK_FINALIZE_WRITE_REFUSED` | 2 | Safety check failed. `data.reason` carries one of `unsafe_path` / `outside_design_phases` / `not_yaml` / `symlink_escape` / `unreadable` / `unparseable_phase` / `task_not_found`. `data.file` carries the offending path |
+| `CONFIG_ERROR` | 2 | Missing positional task id, or unknown flag |
+
+### Usage example
+
+```sh
+# Preview — what would finalize do?
+code-pact task finalize P9-T5 --json
+
+# Apply — flip the status in the phase YAML.
+code-pact task finalize P9-T5 --write --json
+
+# Recommended adoption: stop hand-editing design status in release prep.
+# Use this command (or `phase reconcile`, P11-T4) instead.
+```
+
 ## `task start` / `task status` / `task block` / `task resume` (v0.6)
 
 These four commands fill the execution-state gap between `task context` and `task complete`. They all read and append to the same `.code-pact/state/progress.yaml` log used by `task complete`, and they share the same state-machine rules enforced via `deriveTaskState` and `assertTransition`.

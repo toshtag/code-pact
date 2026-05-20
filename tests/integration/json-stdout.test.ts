@@ -369,6 +369,29 @@ describe("json-stdout contract: state-mutating Stable (v1.0) commands", () => {
       "task complete",
     );
   });
+
+  it("task finalize P1-T1 --json (would_finalize after task complete)", async () => {
+    // After task complete, the derived state is done but design YAML
+    // still says planned — task finalize default-mode (dry-run) emits
+    // `kind: "would_finalize"` and exits 0.
+    const p = await projectWithTask("task-finalize-dryrun");
+    p.run(["task", "start", "P1-T1", "--agent", "claude-code", "--json"]);
+    p.run(["task", "complete", "P1-T1", "--agent", "claude-code", "--json"]);
+    expectStdoutIsJson(
+      p.run(["task", "finalize", "P1-T1", "--json"]),
+      "task finalize dry-run",
+    );
+  });
+
+  it("task finalize P1-T1 --write --json (finalized after task complete)", async () => {
+    const p = await projectWithTask("task-finalize-write");
+    p.run(["task", "start", "P1-T1", "--agent", "claude-code", "--json"]);
+    p.run(["task", "complete", "P1-T1", "--agent", "claude-code", "--json"]);
+    expectStdoutIsJson(
+      p.run(["task", "finalize", "P1-T1", "--write", "--json"]),
+      "task finalize --write",
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------
