@@ -32,3 +32,6 @@ phases:
   - id: P11
     path: design/phases/P11-finalization-reconciliation.yaml
     weight: 20
+  - id: P12
+    path: design/phases/P12-lightweight-runbook.yaml
+    weight: 20
