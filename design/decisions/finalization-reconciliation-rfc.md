@@ -1,6 +1,6 @@
 # RFC: Finalization & Reconciliation
 
-**Status:** proposed (P11, 2026-05)
+**Status:** accepted (P11, 2026-05)
 **Scope:** new commands `task finalize` and `phase reconcile`; additive `details.remediation` hint on the existing `STATUS_DRIFT done-but-design-not-done` issue; shared write-safety helpers under `src/core/finalize/`.
 **Owners:** maintainer
 **Related:** [design/decisions/task-readiness-schema-rfc.md](task-readiness-schema-rfc.md) (P10 — provides the `writes` and `acceptance_refs` fields P11 reads). [docs/migration.md § task complete records progress, but does NOT mutate design YAML](../../docs/migration.md) (the v1.0 contract P11 explicitly preserves).
