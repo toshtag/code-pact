@@ -1,6 +1,6 @@
 # RFC: Task Readiness Schema
 
-**Status:** proposed (P10, 2026-05)
+**Status:** accepted (P10, 2026-05)
 **Scope:** task schema in src/core/schemas/task.ts and dependent surfaces (plan lint, task context pack, docs/cli-contract.md)
 **Owners:** maintainer
 **Related:** [design/phases/P5-planning-integrity.yaml § non_goals](../phases/P5-planning-integrity.yaml) (deferred "Plan Readiness Schema RFC" — superseded by this document)
