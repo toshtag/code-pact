@@ -3,7 +3,7 @@ name: Finalization & Reconciliation
 weight: 20
 confidence: medium
 risk: medium
-status: planned
+status: done
 objective: |
   Add explicit, safe, deterministic commands that flip task design
   YAML statuses to match the append-only progress log, and report
@@ -20,28 +20,49 @@ objective: |
   governance candidate.
 non_goals:
   - any change to `task complete` or the progress.yaml append-only contract
-  - any change to existing STATUS_DRIFT kinds, severity, or hidden_by_default values
-  - automatic phase status flip (P11 reports a candidate; explicit phase-level write requires future work)
+  - any change to existing STATUS_DRIFT kinds, severity, or hidden_by_default
+    values
+  - automatic phase status flip (P11 reports a candidate; explicit phase-level
+    write requires future work)
   - multi-phase reconcile (`--all` / `--every`) (future extension)
-  - design/roadmap.yaml mutation (release prep continues to handle that manually until P14)
-  - semantic validation of acceptance_refs contents (path existence + display only)
-  - actual write detection against declared writes (no git diff; declared surface display only)
+  - design/roadmap.yaml mutation (release prep continues to handle that manually
+    until P14)
+  - semantic validation of acceptance_refs contents (path existence + display
+    only)
+  - actual write detection against declared writes (no git diff; declared
+    surface display only)
   - protected-section enforcement / configurable governance policy (P14)
   - advisory locks / concurrent reconcile (P14)
   - runbook integration (task run / phase close) (P12)
   - introducing `human_gate` (P12 RFC owns it)
   - LLM / RAG / MCP / issue-tracker integration (excluded from the v1.x window)
 definition_of_done:
-  - design/decisions/finalization-reconciliation-rfc.md exists and is marked accepted
+  - design/decisions/finalization-reconciliation-rfc.md exists and is marked
+    accepted
   - design/roadmap.yaml lists P11
-  - design/phases/P11-finalization-reconciliation.yaml exists with this objective and tasks list
-  - "`task finalize <task-id>` ships as Stable (v1.2+) with default dry-run, explicit `--write` opt-in, and JSON envelope kinds `would_finalize` / `finalized` / `already_finalized`"
-  - "`phase reconcile <phase-id>` ships as Stable (v1.2+) with default dry-run, explicit `--write` opt-in, JSON envelope kinds `would_reconcile` / `reconciled` / `no_eligible_tasks`, and per-task `applied_writes` / `skipped_writes`"
-  - "new public error codes (`TASK_FINALIZE_NOT_ELIGIBLE`, `TASK_FINALIZE_WRITE_REFUSED`, `PHASE_RECONCILE_WRITE_REFUSED`) ship in `KNOWN_CODES.public` and `docs/cli-contract.md`; `no_eligible_tasks` is intentionally NOT an error code — it is represented as `data.kind: \"no_eligible_tasks\"` with exit 0"
-  - "`plan analyze` `done-but-design-not-done` STATUS_DRIFT issues gain an additive `details.remediation` hint pointing at `task finalize <task-id>`; no kind, severity, or hidden_by_default value changes"
-  - new commands are added to `tests/integration/json-stdout.test.ts` so the Stable (v1.2+) JSON-only stdout regression net covers them
-  - "`docs/migration.md` gains a v1.1.x → v1.2.0 section explaining when to reach for finalize vs reconcile and the recommended adoption pattern"
-  - "`task context` pack output for v1.1 tasks remains byte-identical against the existing golden fixture (no pack change in P11)"
+  - design/phases/P11-finalization-reconciliation.yaml exists with this
+    objective and tasks list
+  - "`task finalize <task-id>` ships as Stable (v1.2+) with default dry-run,
+    explicit `--write` opt-in, and JSON envelope kinds `would_finalize` /
+    `finalized` / `already_finalized`"
+  - "`phase reconcile <phase-id>` ships as Stable (v1.2+) with default dry-run,
+    explicit `--write` opt-in, JSON envelope kinds `would_reconcile` /
+    `reconciled` / `no_eligible_tasks`, and per-task `applied_writes` /
+    `skipped_writes`"
+  - 'new public error codes (`TASK_FINALIZE_NOT_ELIGIBLE`,
+    `TASK_FINALIZE_WRITE_REFUSED`, `PHASE_RECONCILE_WRITE_REFUSED`) ship in
+    `KNOWN_CODES.public` and `docs/cli-contract.md`; `no_eligible_tasks` is
+    intentionally NOT an error code — it is represented as `data.kind:
+    "no_eligible_tasks"` with exit 0'
+  - "`plan analyze` `done-but-design-not-done` STATUS_DRIFT issues gain an
+    additive `details.remediation` hint pointing at `task finalize <task-id>`;
+    no kind, severity, or hidden_by_default value changes"
+  - new commands are added to `tests/integration/json-stdout.test.ts` so the
+    Stable (v1.2+) JSON-only stdout regression net covers them
+  - "`docs/migration.md` gains a v1.1.x → v1.2.0 section explaining when to
+    reach for finalize vs reconcile and the recommended adoption pattern"
+  - "`task context` pack output for v1.1 tasks remains byte-identical against
+    the existing golden fixture (no pack change in P11)"
 verification:
   commands:
     - pnpm typecheck
@@ -61,15 +82,7 @@ tasks:
     write_surface: low
     verification_strength: medium
     expected_duration: short
-    status: planned
-    decision_refs:
-      - design/decisions/finalization-reconciliation-rfc.md
-    writes:
-      - design/roadmap.yaml
-      - design/phases/P11-finalization-reconciliation.yaml
-      - design/decisions/finalization-reconciliation-rfc.md
-    acceptance_refs:
-      - design/decisions/finalization-reconciliation-rfc.md
+    status: done
     description: |
       RFC acceptance. Register P11 in design/roadmap.yaml. Land the
       design/decisions/finalization-reconciliation-rfc.md document
@@ -79,6 +92,14 @@ tasks:
       lock the design decisions (command semantics, dry-run/write
       model, drift taxonomy strategy, safety model, error codes,
       P10 field integration scope) before any src/ touches.
+    decision_refs:
+      - design/decisions/finalization-reconciliation-rfc.md
+    writes:
+      - design/roadmap.yaml
+      - design/phases/P11-finalization-reconciliation.yaml
+      - design/decisions/finalization-reconciliation-rfc.md
+    acceptance_refs:
+      - design/decisions/finalization-reconciliation-rfc.md
   - id: P11-T2
     type: architecture
     ambiguity: medium
@@ -87,7 +108,19 @@ tasks:
     write_surface: medium
     verification_strength: medium
     expected_duration: medium
-    status: planned
+    status: done
+    description: |
+      Shared write-safety / dry-run helpers. Lands BEFORE the
+      task finalize / phase reconcile command surfaces (T3 and T4
+      depend on it). Owns: (a) the "load phase YAML -> mutate
+      tasks[].status in memory -> atomicWriteText" pattern in one
+      reviewable helper, (b) the dry-run diff shape (`{file,
+      task_id, before, after}`), (c) the write-refusal classifier
+      (`TASK_FINALIZE_WRITE_REFUSED` / `PHASE_RECONCILE_WRITE_REFUSED`
+      triggers: unsafe path, symlink escape, target file outside
+      design/phases/, target file not parseable as Phase). Helpers
+      live under src/core/finalize/ so the namespace stays separate
+      from adapter-owned writes.
     depends_on:
       - P11-T1
     decision_refs:
@@ -104,18 +137,6 @@ tasks:
       - tests/unit/core/finalize/diff.test.ts
     acceptance_refs:
       - design/decisions/finalization-reconciliation-rfc.md
-    description: |
-      Shared write-safety / dry-run helpers. Lands BEFORE the
-      task finalize / phase reconcile command surfaces (T3 and T4
-      depend on it). Owns: (a) the "load phase YAML -> mutate
-      tasks[].status in memory -> atomicWriteText" pattern in one
-      reviewable helper, (b) the dry-run diff shape (`{file,
-      task_id, before, after}`), (c) the write-refusal classifier
-      (`TASK_FINALIZE_WRITE_REFUSED` / `PHASE_RECONCILE_WRITE_REFUSED`
-      triggers: unsafe path, symlink escape, target file outside
-      design/phases/, target file not parseable as Phase). Helpers
-      live under src/core/finalize/ so the namespace stays separate
-      from adapter-owned writes.
   - id: P11-T3
     type: architecture
     ambiguity: low
@@ -124,7 +145,20 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
+    description: |
+      `task finalize` design and implementation. Single PR landing
+      dry-run + `--write` together (the structural identity is too
+      close to justify a half-command on main). JSON envelope kinds:
+      `would_finalize`, `finalized`, `already_finalized`. Ineligibility
+      raises `TASK_FINALIZE_NOT_ELIGIBLE` (`ok: false`, exit 2) in
+      both dry-run and `--write` modes. Reuses the helpers from T2
+      so the safe-write contract is implemented once. Extends
+      `KNOWN_CODES.public` with `TASK_FINALIZE_NOT_ELIGIBLE` and
+      `TASK_FINALIZE_WRITE_REFUSED`. Adds the command to
+      `tests/integration/json-stdout.test.ts`. Updates
+      `docs/cli-contract.md` § `task` with the new command section
+      annotated `Stable (v1.2+)`.
     depends_on:
       - P11-T1
       - P11-T2
@@ -145,19 +179,6 @@ tasks:
       - tests/unit/error-code-surface.test.ts
     acceptance_refs:
       - design/decisions/finalization-reconciliation-rfc.md
-    description: |
-      `task finalize` design and implementation. Single PR landing
-      dry-run + `--write` together (the structural identity is too
-      close to justify a half-command on main). JSON envelope kinds:
-      `would_finalize`, `finalized`, `already_finalized`. Ineligibility
-      raises `TASK_FINALIZE_NOT_ELIGIBLE` (`ok: false`, exit 2) in
-      both dry-run and `--write` modes. Reuses the helpers from T2
-      so the safe-write contract is implemented once. Extends
-      `KNOWN_CODES.public` with `TASK_FINALIZE_NOT_ELIGIBLE` and
-      `TASK_FINALIZE_WRITE_REFUSED`. Adds the command to
-      `tests/integration/json-stdout.test.ts`. Updates
-      `docs/cli-contract.md` § `task` with the new command section
-      annotated `Stable (v1.2+)`.
   - id: P11-T4
     type: architecture
     ambiguity: low
@@ -166,7 +187,19 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
+    description: |
+      `phase reconcile` design and implementation. Single PR landing
+      dry-run + `--write`. JSON envelope kinds: `would_reconcile`,
+      `reconciled`, `no_eligible_tasks` (exit 0 — NOT an error;
+      simply nothing to flip). Reports `phase_status_candidate` as
+      advisory but never writes phase status. Partial-success
+      semantics: unsafe writes appear in `skipped_writes[]` with a
+      reason string and never trigger a non-zero exit unless every
+      requested write is refused, in which case
+      `PHASE_RECONCILE_WRITE_REFUSED` (exit 2) is raised. Extends
+      `KNOWN_CODES.public` with `PHASE_RECONCILE_WRITE_REFUSED`.
+      Adds the command to `tests/integration/json-stdout.test.ts`.
     depends_on:
       - P11-T1
       - P11-T2
@@ -187,18 +220,6 @@ tasks:
       - tests/unit/error-code-surface.test.ts
     acceptance_refs:
       - design/decisions/finalization-reconciliation-rfc.md
-    description: |
-      `phase reconcile` design and implementation. Single PR landing
-      dry-run + `--write`. JSON envelope kinds: `would_reconcile`,
-      `reconciled`, `no_eligible_tasks` (exit 0 — NOT an error;
-      simply nothing to flip). Reports `phase_status_candidate` as
-      advisory but never writes phase status. Partial-success
-      semantics: unsafe writes appear in `skipped_writes[]` with a
-      reason string and never trigger a non-zero exit unless every
-      requested write is refused, in which case
-      `PHASE_RECONCILE_WRITE_REFUSED` (exit 2) is raised. Extends
-      `KNOWN_CODES.public` with `PHASE_RECONCILE_WRITE_REFUSED`.
-      Adds the command to `tests/integration/json-stdout.test.ts`.
   - id: P11-T5
     type: feature
     ambiguity: low
@@ -207,7 +228,16 @@ tasks:
     write_surface: low
     verification_strength: strong
     expected_duration: short
-    status: planned
+    status: done
+    description: |
+      Drift taxonomy / plan analyze integration. Extend the
+      `done-but-design-not-done` STATUS_DRIFT issue's `details`
+      payload with an additive `remediation` field whose value is
+      `"code-pact task finalize <task-id>"`. No new STATUS_DRIFT
+      kind, no change to existing kind / severity / hidden_by_default.
+      Update docs/cli-contract.md § Plan diagnostic codes to mention
+      the additive field. Update the analyze unit test to assert
+      the new details key.
     depends_on:
       - P11-T3
     decision_refs:
@@ -221,15 +251,6 @@ tasks:
       - docs/cli-contract.md
     acceptance_refs:
       - docs/cli-contract.md
-    description: |
-      Drift taxonomy / plan analyze integration. Extend the
-      `done-but-design-not-done` STATUS_DRIFT issue's `details`
-      payload with an additive `remediation` field whose value is
-      `"code-pact task finalize <task-id>"`. No new STATUS_DRIFT
-      kind, no change to existing kind / severity / hidden_by_default.
-      Update docs/cli-contract.md § Plan diagnostic codes to mention
-      the additive field. Update the analyze unit test to assert
-      the new details key.
   - id: P11-T6
     type: docs
     ambiguity: low
@@ -238,7 +259,19 @@ tasks:
     write_surface: medium
     verification_strength: medium
     expected_duration: short
-    status: planned
+    status: done
+    description: |
+      Docs and migration. Adds the v1.1.x -> v1.2.0 section to
+      docs/migration.md (one-command upgrade, when to reach for
+      finalize vs reconcile, recommended adoption: stop hand-editing
+      design status in release prep, use finalize / reconcile
+      instead). Mentions `task finalize` in the per-task loop in
+      getting-started.md. Adds a Troubleshooting entry for the
+      new `TASK_FINALIZE_NOT_ELIGIBLE` / `TASK_FINALIZE_WRITE_REFUSED`
+      / `PHASE_RECONCILE_WRITE_REFUSED` codes to docs/dogfood.md.
+      Adds docs/concepts/finalization-reconciliation.md as the
+      conceptual walkthrough (mirrors docs/concepts/task-readiness-
+      fields.md).
     depends_on:
       - P11-T3
       - P11-T4
@@ -257,15 +290,3 @@ tasks:
       - docs/concepts/finalization-reconciliation.md
     acceptance_refs:
       - docs/migration.md
-    description: |
-      Docs and migration. Adds the v1.1.x -> v1.2.0 section to
-      docs/migration.md (one-command upgrade, when to reach for
-      finalize vs reconcile, recommended adoption: stop hand-editing
-      design status in release prep, use finalize / reconcile
-      instead). Mentions `task finalize` in the per-task loop in
-      getting-started.md. Adds a Troubleshooting entry for the
-      new `TASK_FINALIZE_NOT_ELIGIBLE` / `TASK_FINALIZE_WRITE_REFUSED`
-      / `PHASE_RECONCILE_WRITE_REFUSED` codes to docs/dogfood.md.
-      Adds docs/concepts/finalization-reconciliation.md as the
-      conceptual walkthrough (mirrors docs/concepts/task-readiness-
-      fields.md).

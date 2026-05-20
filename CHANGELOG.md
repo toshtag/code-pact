@@ -11,6 +11,51 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ---
 
+## [1.2.0] — 2026-05-20
+
+**Finalization & Reconciliation.** Minor release that introduces two new commands for closing the long-standing drift between `progress.yaml` (operational fact) and `design/phases/*.yaml` (design intent). `task finalize <task-id>` flips one task's design status to `done` when its derived state from progress is already `done`; `phase reconcile <phase-id>` is the bulk counterpart. Both default to dry-run; `--write` is the explicit opt-in. Neither command mutates `progress.yaml`, neither writes to `design/roadmap.yaml`, and neither auto-flips the phase's own `status` field — phase status remains a manual release-prep step until P14 governance. The v1.0 contract that `task complete` records progress only and never mutates design YAML is preserved unchanged.
+
+### CLI behavior changes
+
+None for the existing Stable surface. Stable command flags, JSON envelope shape, exit-code semantics, and the existing error-code surface remain unchanged from v1.1.0. The `tests/integration/json-stdout.test.ts` and `tests/unit/error-code-surface.test.ts` regression nets continue to pass; the two new commands are additive entries.
+
+### Added
+
+- **`task finalize <task-id> [--write] [--json]`** as Stable (v1.2+) (`src/commands/task-finalize.ts`). Flips one task's design status to `done` only when `progress.yaml` already shows a `done` event for it. Defaults to dry-run; `--write` is the explicit opt-in. JSON envelope kinds: `would_finalize` / `finalized` / `already_finalized`. Ineligibility raises `TASK_FINALIZE_NOT_ELIGIBLE` (exit 2) in **both** dry-run and `--write` — dry-run means "won't write", not "won't validate". No `--agent` flag: finalize is a design/progress reconciliation command and never calls an adapter. ([#98])
+- **`phase reconcile <phase-id> [--write] [--json]`** as Stable (v1.2+) (`src/commands/phase-reconcile.ts`). Bulk counterpart that walks every task in the phase, classifies each as `flip` / `skip` / `manual_review`, and (with `--write`) applies the flips in one shot. JSON envelope kinds: `would_reconcile` / `reconciled` / `no_eligible_tasks`. The `no_eligible_tasks` case is intentionally not an error code — nothing to flip is a normal outcome (exit 0). Partial successes return exit 0 with both `applied_writes[]` and `skipped_writes[]` populated; `PHASE_RECONCILE_WRITE_REFUSED` (exit 2) fires only when every eligible write was refused. Reports `phase_status_candidate` as advisory but never writes the phase's own `status` field. ([#99])
+- **`src/core/finalize/`** — shared write-safety + dry-run diff helpers (`safe-write.ts`, `diff.ts`). Owns the load → mutate → atomic-write pattern, the dry-run diff shape (`{file, task_id, before, after}`), and the write-refusal classifier (`unsafe_path` / `outside_design_phases` / `not_yaml` / `symlink_escape` / `unreadable` / `unparseable_phase` / `task_not_found`). Imported by both new commands; namespace deliberately separate from `src/core/adapters/` (adapter-owned writes) and `src/io/` (raw write primitives). ([#97])
+- **Three new public error codes** (additive in `KNOWN_CODES.public`): `TASK_FINALIZE_NOT_ELIGIBLE`, `TASK_FINALIZE_WRITE_REFUSED`, `PHASE_RECONCILE_WRITE_REFUSED`. Documented in `docs/cli-contract.md` § Public codes and locked by `tests/unit/error-code-surface.test.ts`. ([#98], [#99])
+- **Additive `details.remediation` on `STATUS_DRIFT done-but-design-not-done`** issues emitted by `plan analyze`. Value is the literal string `"code-pact task finalize <task-id>"`. Only this drift kind carries the hint — the other four kinds (`done-blocked-conflict`, `done-with-incomplete-events`, `done-historical`, `in-progress-no-events`) need human judgement and stay unannotated. Additive on the `Record<string, unknown>` `details` payload; existing JSON consumers see no shape change. ([#100])
+- **`design/decisions/finalization-reconciliation-rfc.md`** — the accepted RFC capturing command semantics, dry-run / write model, drift taxonomy strategy, safety model, P10 field integration scope, alternatives considered, and the P11-T1..T6 implementation slicing. ([#95], [#96])
+- **`design/phases/P11-finalization-reconciliation.yaml`** — phase contract registering the work. ([#95])
+- **`docs/concepts/finalization-reconciliation.md`** — agent- and reviewer-facing walkthrough mirroring `docs/concepts/task-readiness-fields.md`. Covers the drift these commands close, command surfaces with JSON envelope kinds, classification table, partial-success semantics, why phase status stays manual in v1.2, before/after release-prep loop, field reference, error code reference, what stays the same. ([#101])
+
+### Changed
+
+- **`docs/migration.md`** gains a `v1.1.x → v1.2.0` section covering the quick path, what's new, recommended adoption pattern (replace hand-edits in release prep with `phase reconcile --write`), CI implications under `--strict` (no new errors), the three new `KNOWN_CODES.public` entries, and backward-compatibility notes. "Deferred beyond v1.1" → "Deferred beyond v1.2" with the now-shipped `task finalize` / `phase reconcile` bullet removed. ([#101])
+- **`docs/cli-contract.md`** gains a `task finalize` section + a `phase reconcile` section (both annotated Stable (v1.2+)) with full JSON envelope shape, field-presence-by-kind tables, error tables, and usage examples. The public-codes table is extended with the three new entries. The STATUS_DRIFT kinds table notes the additive `details.remediation` field for `done-but-design-not-done`. ([#98], [#99], [#100])
+- **`docs/getting-started.md`** gains an optional Step 5 in the tutorial mentioning `task finalize <task-id> --write`, explicitly labelled as v1.2+ and opt-in, with a pointer to the concept walkthrough. ([#101])
+- **`docs/dogfood.md`** gains a Step 6 in the per-task flow for `task finalize` / `phase reconcile`; updates the v1.0 contract section to mention v1.2 mechanization; updates the STATUS_DRIFT expected-warnings note to surface the new `details.remediation` field; adds three new Troubleshooting entries (`TASK_FINALIZE_NOT_ELIGIBLE`, `TASK_FINALIZE_WRITE_REFUSED`, `PHASE_RECONCILE_WRITE_REFUSED`) with per-reason recovery tables; section header renamed `(v1.0)` → `(v1.0 / v1.2+)`. ([#101])
+- **`design/phases/P11-finalization-reconciliation.yaml`** — phase `status: planned` → `status: done`; every P11 task (T1–T6) `status: planned` → `status: done`. **The task-level flip was performed by `code-pact phase reconcile P11 --write` itself** — the first release-prep PR in the project's history to mechanize what was previously a hand-edit step in every release prep going back to v1.0.0. The phase's own `status` field was flipped by hand per the v1.2 contract (reconcile's `phase_status_candidate` reported `done`, the advisory was followed). ([#97], [#98], [#99], [#100], [#101], this release prep)
+- **`package.json`** — version `1.1.0` → `1.2.0`. (this release prep)
+
+### Known residuals (not blockers)
+
+- **`phase reconcile --write` reflows long YAML lines.** The first `--write` against a phase file goes through `yaml.stringify()` and snaps the file to canonical line-wrap form. P11's RFC PR landed the phase YAML with hand-authored long lines; the reconcile write in this release prep normalizes them. The resulting file is what `plan normalize` considers canonical (`plan normalize --check` reports no further changes), so this is a one-time snap, not a recurring drift. Phase YAMLs written via `phase add` / `phase import` have always been canonical; future P-tasks won't see this reflow.
+- **`TASK_WRITES_PROTECTED_PATH` advisories on the dogfood corpus.** Five intentional warnings remain (P10-T1, P10-T6, P11-T1 declaring writes against `design/roadmap.yaml` and `design/phases/*.yaml`). These are proof the protected-path lint is working as designed; P14 governance is the consumer that promotes to error severity with a configurable policy.
+- **Phase status auto-flip, multi-phase reconcile, `design/roadmap.yaml` mutation, file-content validation of `acceptance_refs`, actual-write enforcement of declared `writes`, runbook integration (P12), cross-phase `depends_on`** all remain future work. See `docs/migration.md` § Deferred beyond v1.2 for the full list.
+- **`STATUS_DRIFT done-but-design-not-done` warnings** on the dogfood corpus continue to fire for any task whose progress.yaml has a `done` event but whose design status was not yet flipped. This release prep clears every P11 warning that had accumulated across the P11 task PRs into a single coherent reconcile flip — the first time a release prep has cleared the drift without hand-editing.
+
+[#95]: https://github.com/toshtag/code-pact/pull/95
+[#96]: https://github.com/toshtag/code-pact/pull/96
+[#97]: https://github.com/toshtag/code-pact/pull/97
+[#98]: https://github.com/toshtag/code-pact/pull/98
+[#99]: https://github.com/toshtag/code-pact/pull/99
+[#100]: https://github.com/toshtag/code-pact/pull/100
+[#101]: https://github.com/toshtag/code-pact/pull/101
+
+---
+
 ## [1.1.0] — 2026-05-20
 
 **Task Readiness Schema.** Minor release that introduces five additive optional fields on the task type (`depends_on`, `decision_refs`, `reads`, `writes`, `acceptance_refs`) so a task can declare its own context-pack targets, read / write surface, dependencies, and acceptance references. The change is strictly additive — every v1.0.x phase YAML continues to parse and behave identically.
