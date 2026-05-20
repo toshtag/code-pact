@@ -280,12 +280,27 @@ On success the JSON envelope returns
     "skipped_phases": [],
     "completed_fields": [
       { "taskId": "P1-T1", "fields": ["type", "ambiguity", "risk"] }
+    ],
+    "suggested_next_steps": [
+      "Review the `completed_fields` array — every entry is a task field code-pact filled with a default. Confirm each is appropriate before treating the imported tasks as source-of-truth.",
+      "Run `code-pact plan lint --json` to validate the imported phase(s).",
+      "Run `code-pact phase runbook P1 --json` to see the recommended per-phase next steps (reconcile-batch step is the natural follow-up after the per-task loop starts).",
+      "Run `code-pact task runbook P1-T1 --json` to see the per-task lifecycle starting from a fresh task."
     ]
   }
 }
 ```
 
 `completed_fields` is non-empty only when defaults were applied. In strict mode it is always `[]`.
+
+**`suggested_next_steps` (v1.4+ additive field).** Always present, even as `[]`. Names the canonical post-import sequence:
+
+- A leading defaults-review hint is prepended when `completed_fields` is non-empty (lenient mode filled defaults).
+- One `phase runbook <id>` step per imported phase.
+- One `task runbook <id>` step pointing at the first imported task.
+- The whole array is empty when every input phase was skipped (`imported_phases.length === 0`).
+
+The field is additive: existing JSON consumers see no shape change.
 
 The validation pass detects logic errors before any write; ordinary disk failures during the per-phase write loop (disk full, permission denied) are out of scope for v0.2 and may leave a partial result.
 
@@ -302,6 +317,15 @@ Interactive wizard that collects project description, target users, and differen
 Reads `design/brief.md` and `design/constitution.md` (both optional), assembles a structured AI planning prompt, and writes it to stdout. Add `--clipboard` to also copy to the clipboard (via `pbcopy` on macOS or `xclip` on Linux). Does not require a TTY.
 
 JSON output includes `has_brief`, `has_constitution`, and `clipboard_copied` flags alongside the prompt string.
+
+**v1.4+ additive field** — `data.suggested_next_steps: string[]` is always present (field-presence-fixed). Names the canonical AI-assisted planning sequence:
+
+1. Run the planning prompt through your AI agent of choice and capture its YAML response into a file (e.g. `design/imports/p1.yaml`).
+2. Run `code-pact phase import design/imports/p1.yaml --json` to ingest the YAML.
+3. Run `code-pact plan lint --json` to validate the imported phase.
+4. Run `code-pact phase runbook <imported-phase-id> --json` to see the per-phase next steps.
+
+When `has_brief` or `has_constitution` is false, a leading step recommends `plan brief` / `plan constitution` first. The field is additive: existing JSON consumers (which read only `prompt` / `has_brief` / `has_constitution` / `clipboard_copied`) see no shape change.
 
 ### `plan constitution [--force]`
 

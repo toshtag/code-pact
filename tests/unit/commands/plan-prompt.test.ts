@@ -120,3 +120,44 @@ describe("runPlanPrompt", () => {
     expect(result.prompt).toContain("以下のプロジェクト情報を読んで");
   });
 });
+
+// ---------------------------------------------------------------------------
+// v1.4 P13-T4: suggested_next_steps additive field
+// ---------------------------------------------------------------------------
+
+describe("runPlanPrompt — suggested_next_steps (P13-T4)", () => {
+  it("is always present (field-presence-fixed) even when no brief/constitution", async () => {
+    const result = await runPlanPrompt({ cwd: tmpDir, locale: "en-US", clipboard: false });
+    expect(Array.isArray(result.suggested_next_steps)).toBe(true);
+    expect(result.suggested_next_steps.length).toBeGreaterThan(0);
+  });
+
+  it("prepends a brief/constitution hint when both are absent", async () => {
+    const result = await runPlanPrompt({ cwd: tmpDir, locale: "en-US", clipboard: false });
+    expect(result.suggested_next_steps[0]).toMatch(/plan brief/);
+    expect(result.suggested_next_steps[0]).toMatch(/plan constitution/);
+  });
+
+  it("prepends the brief/constitution hint when only one is absent", async () => {
+    await writeFile(join(tmpDir, "design", "brief.md"), "# Brief\n", "utf8");
+    const result = await runPlanPrompt({ cwd: tmpDir, locale: "en-US", clipboard: false });
+    expect(result.suggested_next_steps[0]).toMatch(/plan brief|plan constitution/);
+  });
+
+  it("omits the brief/constitution hint when both are present", async () => {
+    await writeFile(join(tmpDir, "design", "brief.md"), "# Brief\n", "utf8");
+    await writeFile(join(tmpDir, "design", "constitution.md"), "# Constitution\n", "utf8");
+    const result = await runPlanPrompt({ cwd: tmpDir, locale: "en-US", clipboard: false });
+    // First step is the AI-prompt step, not the brief/constitution hint.
+    expect(result.suggested_next_steps[0]).toMatch(/AI agent/);
+  });
+
+  it("always includes the canonical 4-step AI-assisted planning sequence", async () => {
+    const result = await runPlanPrompt({ cwd: tmpDir, locale: "en-US", clipboard: false });
+    const joined = result.suggested_next_steps.join("\n");
+    expect(joined).toMatch(/AI agent/);
+    expect(joined).toMatch(/phase import/);
+    expect(joined).toMatch(/plan lint/);
+    expect(joined).toMatch(/phase runbook/);
+  });
+});
