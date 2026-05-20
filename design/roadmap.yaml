@@ -29,3 +29,6 @@ phases:
   - id: P10
     path: design/phases/P10-task-readiness-schema.yaml
     weight: 25
+  - id: P11
+    path: design/phases/P11-finalization-reconciliation.yaml
+    weight: 20
