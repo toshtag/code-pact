@@ -6,7 +6,15 @@ import { Phase } from "../schemas/phase.ts";
 import { AgentProfile } from "../schemas/agent-profile.ts";
 import { ProgressLog, type ProgressEvent } from "../schemas/progress-event.ts";
 import { parseFrontMatter } from "./front-matter.ts";
-import { renderMarkdown, type RuleDoc, type DecisionDoc } from "./formatters/markdown.ts";
+import {
+  renderMarkdown,
+  type DependsOnEntry,
+  type DecisionDoc,
+  type ReadGlobMatches,
+  type RuleDoc,
+} from "./formatters/markdown.ts";
+import { deriveTaskState } from "../progress/task-state.ts";
+import { validateGlobSyntax, walkAndMatch } from "../glob.ts";
 
 export type BuildContextPackOptions = {
   cwd: string;
@@ -145,6 +153,72 @@ async function loadDoneEventsInPhase(
   }
 }
 
+// Loads every event from .code-pact/state/progress.yaml or returns []
+// when the log is missing / unparseable. The pack uses this to derive
+// the current state of each id listed in task.depends_on (P10).
+async function loadAllProgressEvents(cwd: string): Promise<ProgressEvent[]> {
+  try {
+    const raw = await readFile(join(cwd, ".code-pact", "state", "progress.yaml"), "utf8");
+    const log = ProgressLog.parse(parseYaml(raw) as unknown);
+    return log.events;
+  } catch {
+    return [];
+  }
+}
+
+// Loads the decision files referenced by task.decision_refs (P10),
+// regardless of context_size. Skips entries that do not exist on disk
+// — the plan-lint surface (TASK_DECISION_REF_NOT_FOUND) is responsible
+// for warning the user about misconfigured refs at lint time; the pack
+// renderer just shows what is actually loadable.
+async function loadDeclaredDecisions(
+  cwd: string,
+  refs: readonly string[],
+): Promise<DecisionDoc[]> {
+  const docs: DecisionDoc[] = [];
+  for (const ref of refs) {
+    try {
+      const raw = await readFile(join(cwd, ref), "utf8");
+      const { body } = parseFrontMatter(raw);
+      // Use just the basename for the section header so the rendered
+      // pack matches the existing "Related Decisions" presentation
+      // (which keys by filename, not full path).
+      const filename = ref.split("/").pop() ?? ref;
+      docs.push({ filename, body });
+    } catch {
+      // Skipped silently here — see comment above.
+    }
+  }
+  return docs;
+}
+
+// Walks the project for each declared `reads` glob and returns the
+// matched paths per glob. Skips any glob that the lint surface would
+// reject (path safety / syntax) so the pack renderer never sees a
+// half-parsed pattern. Returns [] when task.reads is absent or empty.
+async function loadReadMatches(
+  cwd: string,
+  reads: readonly string[],
+): Promise<ReadGlobMatches[]> {
+  const result: ReadGlobMatches[] = [];
+  for (const glob of reads) {
+    if (validateGlobSyntax(glob) !== null) {
+      // Pattern lint failed — still surface it in the pack with no
+      // matches so the agent sees that this glob was declared.
+      result.push({ glob, matches: [] });
+      continue;
+    }
+    let matches: string[];
+    try {
+      matches = await walkAndMatch(cwd, glob);
+    } catch {
+      matches = [];
+    }
+    result.push({ glob, matches });
+  }
+  return result;
+}
+
 /**
  * Pure-ish context pack builder. Reads design files and renders the
  * Markdown content along with metadata. Does NOT write to disk.
@@ -189,12 +263,31 @@ export async function buildContextPack(
   const allDecisions = isLarge;
   const allRules = isLargeWriteSurface;
 
-  const [rules, decisions, constitution, doneEvents] = await Promise.all([
-    isSmall ? Promise.resolve([]) : loadRules(cwd, task.type, allRules),
-    isSmall ? Promise.resolve([]) : loadDecisions(cwd, taskId, allDecisions),
-    includeConstitution ? loadConstitution(cwd) : Promise.resolve(null),
-    isHighAmbiguity ? loadDoneEventsInPhase(cwd, phase) : Promise.resolve([]),
-  ]);
+  // P10 — Task Readiness Schema declared sections. Each branch is a
+  // no-op when the corresponding field is absent or empty, so the pack
+  // output for a v1.0.2-shaped task (no new fields declared) is
+  // byte-identical to v1.0.2 (locked by tests/integration/pack-byte-identical.test.ts).
+  const dependsOnIds = task.depends_on ?? [];
+  const readGlobs = task.reads ?? [];
+  const writeGlobsList = task.writes ?? [];
+  const decisionRefs = task.decision_refs ?? [];
+  const acceptanceRefsList = task.acceptance_refs ?? [];
+
+  const [rules, decisions, constitution, doneEvents, allEvents, declaredDecisions, readMatches] =
+    await Promise.all([
+      isSmall ? Promise.resolve([]) : loadRules(cwd, task.type, allRules),
+      isSmall ? Promise.resolve([]) : loadDecisions(cwd, taskId, allDecisions),
+      includeConstitution ? loadConstitution(cwd) : Promise.resolve(null),
+      isHighAmbiguity ? loadDoneEventsInPhase(cwd, phase) : Promise.resolve([]),
+      dependsOnIds.length > 0 ? loadAllProgressEvents(cwd) : Promise.resolve([]),
+      decisionRefs.length > 0 ? loadDeclaredDecisions(cwd, decisionRefs) : Promise.resolve([]),
+      readGlobs.length > 0 ? loadReadMatches(cwd, readGlobs) : Promise.resolve([]),
+    ]);
+
+  const dependsOn: DependsOnEntry[] | undefined =
+    dependsOnIds.length > 0
+      ? dependsOnIds.map((id) => ({ id, current: deriveTaskState(allEvents, id).current }))
+      : undefined;
 
   const content = renderMarkdown({
     phase,
@@ -204,6 +297,15 @@ export async function buildContextPack(
     decisions,
     constitution,
     doneEvents,
+    // P10 — only attach the field on the render context when the task
+    // actually declared the corresponding optional. Passing undefined
+    // (vs an empty array) preserves byte-identical output for v1.0.2-
+    // shaped tasks.
+    ...(dependsOn !== undefined ? { dependsOn } : {}),
+    ...(readMatches.length > 0 ? { readMatches } : {}),
+    ...(writeGlobsList.length > 0 ? { writeGlobs: writeGlobsList } : {}),
+    ...(declaredDecisions.length > 0 ? { declaredDecisions } : {}),
+    ...(acceptanceRefsList.length > 0 ? { acceptanceRefs: acceptanceRefsList } : {}),
   });
 
   return {

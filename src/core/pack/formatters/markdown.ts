@@ -1,6 +1,7 @@
 import type { Phase } from "../../schemas/phase.ts";
 import type { Task } from "../../schemas/task.ts";
 import type { ProgressEvent } from "../../schemas/progress-event.ts";
+import type { TaskCurrentState } from "../../progress/task-state.ts";
 
 export type PackContext = {
   phase: Phase;
@@ -12,6 +13,15 @@ export type PackContext = {
   constitution?: string | null;
   /** Recent done events in this phase — included when ambiguity:high */
   doneEvents?: ProgressEvent[];
+  // P10 — Task Readiness Schema declared-section data. Each field is
+  // optional; when absent the corresponding pack section is omitted
+  // entirely so output stays byte-identical to v1.0.2 for tasks that
+  // declare none of the new fields.
+  dependsOn?: DependsOnEntry[];
+  readMatches?: ReadGlobMatches[];
+  writeGlobs?: string[];
+  declaredDecisions?: DecisionDoc[];
+  acceptanceRefs?: string[];
 };
 
 export type RuleDoc = {
@@ -24,6 +34,23 @@ export type RuleDoc = {
 export type DecisionDoc = {
   filename: string;
   body: string;
+};
+
+export type DependsOnEntry = {
+  id: string;
+  /**
+   * Derived state from progress.yaml. `"unknown"` is reserved for ids
+   * that fail to resolve at all — this should not occur because the
+   * lint surface (`TASK_DEPENDS_ON_UNRESOLVED`) catches missing ids
+   * before pack time, but the type tolerates the case so the renderer
+   * never throws.
+   */
+  current: TaskCurrentState | "unknown";
+};
+
+export type ReadGlobMatches = {
+  glob: string;
+  matches: string[];
 };
 
 export function renderMarkdown(ctx: PackContext): string {
@@ -94,10 +121,82 @@ export function renderMarkdown(ctx: PackContext): string {
     sections.push(`**Description:** ${ctx.task.description}`, ``);
   }
 
-  // 6. Related decisions
-  if (ctx.decisions.length > 0) {
+  // 6a. Depends on — task-declared dependencies, P10. Each id is shown
+  // with its current derived state from progress.yaml.
+  if (ctx.dependsOn && ctx.dependsOn.length > 0) {
+    sections.push(`## Depends on`, ``);
+    for (const dep of ctx.dependsOn) {
+      sections.push(`- **${dep.id}** — ${dep.current}`);
+    }
+    sections.push(``);
+  }
+
+  // 6b. Declared read surface — P10. Each glob is shown with the set of
+  // currently-matched files under it; file contents are not inlined in
+  // P10 (declaration-only). An empty matches list is rendered as a
+  // visible "no matches" line so the agent sees the lint warning's
+  // counterpart in pack form.
+  if (ctx.readMatches && ctx.readMatches.length > 0) {
+    sections.push(`## Declared read surface`, ``);
+    for (const entry of ctx.readMatches) {
+      sections.push(`- \`${entry.glob}\``);
+      if (entry.matches.length === 0) {
+        sections.push(`  - _(no current matches on disk)_`);
+      } else {
+        for (const m of entry.matches) {
+          sections.push(`  - \`${m}\``);
+        }
+      }
+    }
+    sections.push(``);
+  }
+
+  // 6c. Declared write surface — P10. Globs only; existence is by
+  // definition future-tense for writes, so no fs lookup is done.
+  if (ctx.writeGlobs && ctx.writeGlobs.length > 0) {
+    sections.push(`## Declared write surface`, ``);
+    for (const g of ctx.writeGlobs) {
+      sections.push(`- \`${g}\``);
+    }
+    sections.push(``);
+  }
+
+  // 6d. Declared decisions — P10. Full content of files referenced by
+  // task.decision_refs, inserted under each filename. Surfaced
+  // regardless of context_size. The existing context_size:large
+  // allDecisions path (rendered in section 6e) is filtered to avoid
+  // re-printing files already shown here.
+  if (ctx.declaredDecisions && ctx.declaredDecisions.length > 0) {
+    sections.push(`## Declared decisions`);
+    for (const dec of ctx.declaredDecisions) {
+      sections.push(``, `### ${dec.filename}`, ``, dec.body.trim());
+    }
+    sections.push(``);
+  }
+
+  // 6e. Acceptance references — P10. Path list only in P10; no content
+  // excerpt and no semantic validation (deferred to P11 reconcile).
+  if (ctx.acceptanceRefs && ctx.acceptanceRefs.length > 0) {
+    sections.push(`## Acceptance references`, ``);
+    for (const p of ctx.acceptanceRefs) {
+      sections.push(`- \`${p}\``);
+    }
+    sections.push(``);
+  }
+
+  // 6. Related decisions — existing v1.0 path (task-id filename match
+  // and the context_size:large allDecisions case). Deduped against
+  // declared decisions so content is not printed twice when a file is
+  // both referenced and matched.
+  const declaredNames = new Set(
+    (ctx.declaredDecisions ?? []).map((d) => d.filename),
+  );
+  const relatedDecisions = ctx.decisions.filter(
+    (d) => !declaredNames.has(d.filename),
+  );
+  if (relatedDecisions.length > 0) {
     sections.push(`## Related Decisions`);
-    for (const dec of ctx.decisions) {
+    for (const dec of relatedDecisions) {
       sections.push(``, `### ${dec.filename}`, ``, dec.body.trim());
     }
     sections.push(``);
