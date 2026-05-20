@@ -189,6 +189,27 @@ A few invariants worth knowing:
 - A `blocked` task cannot complete directly. `task complete` returns `INVALID_TASK_TRANSITION` until the task is resumed, so the `resume` event captures the unblock decision.
 - `task complete` records progress, but **does not mutate `design/`**. The design YAML is intent; `progress.yaml` is what actually happened. If they diverge, `code-pact plan analyze` reports a `STATUS_DRIFT` warning.
 
+## Optional task readiness fields (v1.1+)
+
+v1.1.0 adds five optional fields to the task schema that let a task declare its own context-pack targets, dependencies, read / write surface, and acceptance references. They are **fully optional** — pre-v1.1 phase YAML continues to work unchanged, and a task that declares none of these fields produces the same `task context` output it did under v1.0.2.
+
+```yaml
+# Excerpt from design/phases/<phase>.yaml
+tasks:
+  - id: P1-T1
+    type: feature
+    # ... existing required fields ...
+    depends_on: [P1-T0]                       # same-phase task ids
+    decision_refs: [design/decisions/x.md]    # files surfaced into the pack
+    reads: [src/core/**/*.ts]                 # declared read surface (globs)
+    writes: [src/core/foo.ts]                 # declared write surface (globs)
+    acceptance_refs: [docs/cli-contract.md]   # acceptance criteria paths
+```
+
+When declared, each field adds a corresponding section to the `task context` output: **Depends on** (with derived state from `progress.yaml`), **Declared read surface** (each glob plus matched files), **Declared write surface** (globs only), **Declared decisions** (full body of referenced files), and **Acceptance references** (path list).
+
+`plan lint` validates the new fields automatically when present (twelve additive `TASK_*` codes — see [`docs/cli-contract.md` § Plan diagnostic codes — Task Readiness Schema diagnostics](cli-contract.md#plan-diagnostic-codes)). The recommended adoption pattern is to declare new fields on **new** tasks first; retroactive backfill on existing tasks is unnecessary. For a walkthrough of a phase YAML that uses every field, see [`docs/concepts/task-readiness-fields.md`](concepts/task-readiness-fields.md). For the migration story from v1.0.x, see [`docs/migration.md` § v1.0.x → v1.1.0](migration.md#v10x--v110).
+
 ## Checkpoints at phase / PR boundaries
 
 ```sh
