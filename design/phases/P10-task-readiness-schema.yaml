@@ -1,0 +1,170 @@
+id: P10
+name: Task Readiness Schema
+weight: 25
+confidence: medium
+risk: medium
+status: planned
+objective: |
+  Extend the task schema additively with optional references that let
+  a task declare its own context-pack target set, read / write surface,
+  acceptance criteria, and dependencies. The goal is to move
+  `task context` from attribute-based heuristics (context_size /
+  ambiguity / write_surface) toward task-declared minimal sets, with
+  the v1.0 heuristics remaining as the fallback when nothing is
+  declared. P10 introduces the schema, the lint surface around it,
+  and the context-pack behaviour; downstream phases (P11 finalize /
+  reconcile, P12 runbook, P14 governance) reuse the declarations.
+non_goals:
+  - any change to Stable (v1.0) CLI flags, exit codes, JSON envelope shape, or existing error codes
+  - making any new field required (every P10 field is optional)
+  - cross-phase `depends_on` (same-phase only in P10; future extension)
+  - decision_ref / acceptance_ref ID resolution (path-only in P10)
+  - file content inclusion for `reads` (declaration-only in P10)
+  - introducing `human_gate` (P12 RFC owns it)
+  - protected-path enforcement beyond a warning (P14 owns it)
+  - exhaustive backfill of decision_refs / reads / writes on existing phase YAMLs (PR6 demonstrates the pattern on a small set; full adoption is incremental)
+  - adapter contract depth (P13)
+  - any LLM / RAG / MCP / issue-tracker integration (excluded from the v1.x window)
+definition_of_done:
+  - design/decisions/task-readiness-schema-rfc.md exists and is marked accepted
+  - design/roadmap.yaml lists P10
+  - design/phases/P10-task-readiness-schema.yaml exists with this objective and tasks list
+  - src/core/schemas/task.ts gains 5 optional fields (`depends_on`, `decision_refs`, `reads`, `writes`, `acceptance_refs`) — additive only
+  - 12 new plan diagnostic codes ship, each covered by a unit test in tests/unit/core/plan/checks.test.ts
+  - tests/unit/error-code-surface.test.ts KNOWN_CODES.plan is extended with the 12 new codes
+  - docs/cli-contract.md Plan diagnostic codes table is updated
+  - tests/integration/json-stdout.test.ts continues to pass for every Stable (v1.0) command (no new --json command introduced)
+  - "`task context` pack output is byte-identical when none of the new fields are declared, judged against a checked-in golden file for the markdown pack body (env-dependent metadata such as absolute paths and timestamps excluded from the comparison)"
+  - "`task context` pack output for a task with declared fields surfaces \"Depends on\", \"Declared read surface\", \"Declared write surface\", \"Declared decisions\", \"Acceptance references\" sections in a stable order"
+  - "`phase import` lenient mode accepts both old YAML (no new fields) and new YAML (some or all new fields declared)"
+  - docs/migration.md gains a v1.0.x → v1.1.0 section
+verification:
+  commands:
+    - pnpm typecheck
+    - pnpm test
+    - pnpm build
+    - node dist/cli.js plan lint --json
+    - node dist/cli.js plan normalize --check --json
+    - node dist/cli.js plan analyze --json
+    - node dist/cli.js validate --json
+    - node dist/cli.js doctor --json
+tasks:
+  - id: P10-T1
+    type: architecture
+    ambiguity: medium
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: planned
+    description: |
+      RFC acceptance. Register P10 in design/roadmap.yaml. Land the
+      design/decisions/task-readiness-schema-rfc.md document and mark
+      its status as accepted. No code change in this task — its purpose
+      is to lock the design decisions (depends_on scope, decision_refs
+      / reads / writes / acceptance_refs semantics, lint code
+      taxonomy, backward-compatibility contract) before any
+      src/ touches.
+  - id: P10-T2
+    type: architecture
+    ambiguity: low
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: short
+    status: planned
+    description: |
+      Schema compatibility design and implementation. Add five
+      optional fields to src/core/schemas/task.ts (depends_on,
+      decision_refs, reads, writes, acceptance_refs). Update
+      phase-import.ts applyTaskDefaults so the new fields are
+      forwarded without being filled with synthetic defaults
+      (optional = undefined = absent = old behaviour). Add unit
+      tests under tests/unit/schemas/ that prove every existing
+      v1.0.x phase fixture still parses unchanged.
+  - id: P10-T3
+    type: feature
+    ambiguity: low
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: planned
+    description: |
+      Plan lint validation. Implement 12 new detectors in
+      src/core/plan/checks.ts and register them in
+      src/core/plan/lint.ts. Add KNOWN_CODES.plan entries for the 12
+      codes in tests/unit/error-code-surface.test.ts. Add 12 unit
+      tests under tests/unit/core/plan/checks.test.ts. Update
+      docs/cli-contract.md Plan diagnostic codes table. Promote
+      assertSafeRelativePath and resolveWithinProject from
+      src/core/adapters/file-state.ts to a neutral module
+      src/core/path-safety.ts, then re-export them from the adapter
+      file so existing call sites remain untouched. Plan lint must
+      import from the neutral module. Do not introduce a glob
+      library — implement the minimal glob matching needed for
+      reads / writes inline using node:fs/promises and existing
+      helpers (supported subset: literal segments, `*` within a
+      segment, `**` as a full segment only).
+  - id: P10-T4
+    type: feature
+    ambiguity: low
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: planned
+    description: |
+      Task context pack behaviour. Extend src/core/pack/index.ts and
+      src/core/pack/formatters/markdown.ts to surface the declared
+      sections (Depends on / Declared read surface / Declared write
+      surface / Declared decisions / Acceptance references) when the
+      corresponding fields are present. Pack output must be
+      byte-identical to v1.0.2 when no new fields are declared (add
+      a regression test under tests/integration/ that builds a pack
+      for an old-style task and compares the output to a frozen
+      fixture). When decision_refs is declared, the referenced
+      decision files are surfaced into the pack regardless of
+      context_size (in addition to, not replacing, the existing
+      context_size:large allDecisions path).
+  - id: P10-T5
+    type: docs
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: medium
+    verification_strength: medium
+    expected_duration: short
+    status: planned
+    description: |
+      Docs and migration story. Add a v1.0.x -> v1.1.0 section to
+      docs/migration.md explaining the additive schema change, the
+      new lint codes, and the recommended adoption pattern
+      (declare new fields on new tasks first, leave existing tasks
+      alone). Update docs/getting-started.md and docs/cli-contract.md
+      Task schema reference with the new optional fields. Add a
+      short example to docs/concepts/ or docs/workflows/ showing
+      a phase YAML that exercises the new fields end-to-end.
+  - id: P10-T6
+    type: refactor
+    ambiguity: medium
+    risk: low
+    context_size: medium
+    write_surface: medium
+    verification_strength: medium
+    expected_duration: short
+    status: planned
+    description: |
+      Dogfood adoption. Update a small set of existing tasks in this
+      repo's design/phases/*.yaml to declare new fields where they
+      meaningfully apply (depends_on within a phase, decision_refs
+      pointing at design/decisions/stability-taxonomy.md when
+      relevant, reads/writes for tasks that touch known surfaces,
+      acceptance_refs pointing at docs/cli-contract.md sections).
+      Goal: prove the gate is observable on the dogfood corpus,
+      and surface any RFC gap that only becomes visible in real
+      usage. Full retroactive backfill is NOT in scope.
