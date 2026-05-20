@@ -26,3 +26,6 @@ phases:
   - id: P9
     path: design/phases/P9-post-v1-dogfood-onboarding.yaml
     weight: 20
+  - id: P10
+    path: design/phases/P10-task-readiness-schema.yaml
+    weight: 25
