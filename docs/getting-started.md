@@ -53,11 +53,21 @@ code-pact task add P1
 code-pact task context P1-T1 --agent claude-code
 
 # 4. After implementation, mark complete. This runs the phase's
-#    verify command and, on pass, appends a `done` event.
+#    verify command and, on pass, appends a `done` event to
+#    .code-pact/state/progress.yaml. The design YAML's `status` field
+#    is NOT mutated by this command — that is the v1.0 contract.
 code-pact task complete P1-T1 --agent claude-code
+
+# 5. (Optional, v1.2+) Flip the design YAML's `status` field to `done`
+#    so design intent matches the operational fact. Defaults to dry-run;
+#    pass --write to actually mutate design/phases/P1.yaml. The bulk
+#    counterpart is `code-pact phase reconcile P1 --write`.
+code-pact task finalize P1-T1 --write
 ```
 
 If `pnpm test` is not the right verification command for your repo, choose another one when the wizard prompts for it (step 1) — `node --version` is a safe choice for a smoke test.
+
+> Step 5 is opt-in. v1.0 / v1.1 projects can keep flipping `status` by hand if they prefer; `task finalize` and `phase reconcile` exist to mechanize the step in release-prep PRs. See [`docs/concepts/finalization-reconciliation.md`](concepts/finalization-reconciliation.md) for the full walkthrough.
 
 > The sample phase is named `P1 — Welcome` and exists only to confirm the project structure and verification pipeline. Keep it, rename it, or delete it once you have real phases. See [`docs/concepts/sample-phase.md`](concepts/sample-phase.md) for the full keep / rename / delete decision.
 

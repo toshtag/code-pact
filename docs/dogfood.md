@@ -57,12 +57,25 @@ code-pact task status <task-id> --json
 
 # 5. Mark the task complete. This runs verify and, on pass,
 #    records a done event in .code-pact/state/progress.yaml.
+#    Does NOT mutate the task's `status` field in the phase YAML —
+#    that is the v1.0 contract (design intent vs operational fact).
 code-pact task complete <task-id> --agent claude-code
+
+# 6. (v1.2+) Flip the phase YAML's `status` field for the completed task.
+#    Defaults to dry-run; pass --write to apply. Eligibility requires
+#    a `done` event in progress.yaml — `task finalize` is the design-
+#    layer counterpart to `task complete`.
+code-pact task finalize <task-id> --write
+
+# Or, when reconciling many completed tasks at once (e.g. during
+# release prep), use the bulk version:
+code-pact phase reconcile <phase-id> --write
 ```
 
 `task context` / `task complete` / `task start` / `task block` / `task resume`
 all resolve the task id across every phase in `design/roadmap.yaml`, so you
-do not need to pass a phase id.
+do not need to pass a phase id. `task finalize` and `phase reconcile` (v1.2+)
+also resolve task / phase ids from the roadmap.
 
 A task that is currently `blocked` cannot be completed directly — `task complete`
 returns `INVALID_TASK_TRANSITION`. Resume it first so the `resumed` event
@@ -311,9 +324,9 @@ When the two diverge, `plan analyze` surfaces a `STATUS_DRIFT` warning so it's v
 - `done-but-design-not-done` — `task complete` ran, but `design.status` is still `planned` or `in_progress`. Agents and humans should update the design YAML when they truly mean the task is done.
 - `done-historical` — `design.status: done` but no progress events exist. Hidden by default (`affects_exit: false`) so legacy projects don't fail CI. Surface them with `plan analyze --include-historical`.
 
-In practice: the existing v0.6–v0.9 release-prep PRs flip the phase YAML `status` fields manually as part of the release prep commit (see `chore(design): mark P8-T1 as done` and similar). v1.0 retains this pattern.
+In practice: the v0.6–v1.1 release-prep PRs flipped the phase YAML `status` fields manually as part of the release-prep commit (see `chore(design): mark P8-T1 as done` and similar). v1.2 keeps the v1.0 contract — `task complete` still records progress only and never mutates design YAML — but adds `task finalize <task-id>` and `phase reconcile <phase-id>` as Stable (v1.2+) commands that flip the design YAML's `status` field explicitly, with default dry-run and `--write` opt-in. See [`docs/concepts/finalization-reconciliation.md`](concepts/finalization-reconciliation.md) for the walkthrough.
 
-## Troubleshooting (v1.0)
+## Troubleshooting (v1.0 / v1.2+)
 
 When a command surfaces one of the diagnostic codes below, this section maps it to the typical recovery action. The full per-code reference is in [`docs/cli-contract.md` § Error codes](cli-contract.md#error-codes).
 
@@ -365,6 +378,53 @@ code-pact verify --phase <phase-id> --task <task-id>
 
 If the verify command itself is wrong (typo, dependency missing) rather than the task's implementation, edit `design/phases/<phase>.yaml` `verification.commands` and re-run.
 
+### `TASK_FINALIZE_NOT_ELIGIBLE` from `task finalize` (v1.2+)
+
+The task's derived state from `progress.yaml` is not `done`, so flipping its design YAML status would create a worse drift (design says done, progress says otherwise). The check fires in **both** dry-run and `--write` — dry-run means "won't write", not "won't validate".
+
+```sh
+code-pact task status <task-id> --json
+# Read data.current. Common cases:
+#   - current: "planned" → you forgot to run `task complete` (or
+#     `task start` + implementation + `task complete`).
+#   - current: "blocked" → resume first, then complete, then finalize.
+#   - current: "started" / "resumed" → still in progress; complete
+#     the task first.
+#   - current: "failed" → the verify failed at task complete; fix
+#     the underlying issue, complete again, then finalize.
+```
+
+`task finalize` deliberately refuses ineligible cases instead of guessing. Every legitimate path through the state machine ends in a `done` event, which is the precondition for finalization.
+
+### `TASK_FINALIZE_WRITE_REFUSED` from `task finalize --write` (v1.2+)
+
+The phase YAML write was refused by the safety classifier. `data.reason` is one of:
+
+| Reason | Cause | Recovery |
+|---|---|---|
+| `unsafe_path` | The resolved path failed `assertSafeRelativePath` (traversal, absolute) | Should not happen from normal CLI use; report a bug |
+| `outside_design_phases` | The phase file resolves outside `design/phases/` | Same — should not happen via the roadmap-driven resolver |
+| `not_yaml` | The phase file does not end in `.yaml` | Rename the phase file to `.yaml` |
+| `symlink_escape` | `resolveWithinProject` detected a symlink leaving the project root | Replace the symlink with the actual file inside the project |
+| `unreadable` | The phase file could not be read (permissions, missing) | `ls -l design/phases/` and fix file permissions or restore the file |
+| `unparseable_phase` | The phase file's YAML failed schema parse | Run `code-pact plan lint --json` — the underlying parse error is reported there |
+| `task_not_found` | The task id is not in the phase's `tasks[]` array | The task id and phase do not match; verify the task id against `code-pact phase show <phase-id> --json` |
+
+`task finalize --write` will not partially-modify a phase file. If the safety check fails, no write occurs.
+
+### `PHASE_RECONCILE_WRITE_REFUSED` from `phase reconcile --write` (v1.2+)
+
+Every eligible task write was refused for safety reasons. Partial successes (one or more applied + one or more refused) return exit 0 — this code only fires when the whole batch failed. `data.skipped_writes[]` carries per-task refusal detail in the same `reason` enum as `TASK_FINALIZE_WRITE_REFUSED` above.
+
+```sh
+code-pact phase reconcile <phase-id> --json
+# Re-run in dry-run mode to inspect the per-task verdicts. Fix the
+# underlying cause (unparseable phase file is the most common) and
+# re-run with --write.
+```
+
+If `data.tasks[]` shows every flip candidate has the same refusal reason, the issue is the phase file itself, not individual tasks — fix it once and reconcile will proceed for all of them.
+
 ### `ADAPTER_GENERATOR_STALE` from `adapter doctor` / global `doctor`
 
 Your adapter manifest's `generator_version` field doesn't match the installed code-pact version. This is the expected state after upgrading the CLI (`0.9.0-alpha.0` → `1.0.0` is the v1.0 case).
@@ -393,7 +453,7 @@ If you ran `code-pact init --non-interactive --agent <agent> --locale <locale>` 
 
 These are intentionally warnings, not errors — `validate` still exits 0. CI scripts that require a clean run can either fix the underlying state (recommended for `BRIEF_MISSING` / `CONSTITUTION_PLACEHOLDER`) or pass `--strict` only after deciding to treat them as failures.
 
-A separate `STATUS_DRIFT done-but-design-not-done` warning from `plan analyze --json` is also expected after any `task complete` until the design YAML's `status` field is flipped to `done` by hand — `task complete` records progress, but does not mutate design intent. See [`task complete` vs `design/` (v1.0 contract)](#task-complete-vs-design-v10-contract) above.
+A separate `STATUS_DRIFT done-but-design-not-done` warning from `plan analyze --json` is also expected after any `task complete` until the design YAML's `status` field is flipped to `done`. `task complete` records progress, but does not mutate design intent. v1.2+ mechanizes the flip via `code-pact task finalize <task-id> --write` (single task) or `code-pact phase reconcile <phase-id> --write` (whole phase); the warning's `details.remediation` field carries the exact command. See [`task complete` vs `design/` (v1.0 contract)](#task-complete-vs-design-v10-contract) above and [`docs/concepts/finalization-reconciliation.md`](concepts/finalization-reconciliation.md) for the v1.2+ walkthrough.
 
 ## Quick reference
 

@@ -210,17 +210,93 @@ The pack rendered by `task context` gains five new sections when the correspondi
 
 When a task declares none of the new fields, the pack body is byte-identical to v1.0.2 (locked by `tests/integration/pack-byte-identical.test.ts` against a checked-in golden fixture).
 
-## Deferred beyond v1.1
+## v1.1.x → v1.2.0
 
-The following remain on the backlog after v1.1.0:
+### Quick path
+
+```sh
+# 1. Upgrade the CLI.
+npm install -g code-pact@1.2.0
+
+# 2. No mandatory action. Existing v1.1.x projects continue to work
+#    unchanged — `task finalize` and `phase reconcile` are opt-in.
+code-pact validate --json   # expect: ok
+code-pact plan analyze --json
+# Existing STATUS_DRIFT done-but-design-not-done warnings now carry an
+# additive `details.remediation` hint. Existing JSON consumers see no
+# shape change (details is a Record<string, unknown> payload).
+```
+
+### What's new in v1.2.0
+
+Two new commands ship as **Stable (v1.2+)**. Both default to dry-run; `--write` is the explicit opt-in to mutate `design/phases/*.yaml`. Neither command mutates `progress.yaml` (append-only contract preserved), `design/roadmap.yaml` (still manual until P14), or the phase's own `status` field (advisory only via `phase_status_candidate`). Neither command takes `--agent` — they never call an adapter.
+
+- **`task finalize <task-id>`** — flips one task's `status: planned` / `in_progress` → `done` in its phase YAML, but only when `progress.yaml` already shows a `done` event for that task. Ineligible tasks raise `TASK_FINALIZE_NOT_ELIGIBLE` (exit 2) in both dry-run and `--write` — dry-run means "won't write", not "won't validate". JSON envelope kinds: `would_finalize` / `finalized` / `already_finalized`.
+- **`phase reconcile <phase-id>`** — bulk version. Walks every task in the phase, classifies each as `flip` / `skip` / `manual_review`, and (with `--write`) applies the flips in one shot. Partial successes (some flips applied, some refused for safety reasons) return exit 0 with `applied_writes[]` + `skipped_writes[]` both populated. `PHASE_RECONCILE_WRITE_REFUSED` (exit 2) fires only when **every** eligible write was refused. JSON envelope kinds: `would_reconcile` / `reconciled` / `no_eligible_tasks`. The `no_eligible_tasks` case is intentionally not an error — nothing to flip is a normal outcome.
+
+The `plan analyze` `STATUS_DRIFT done-but-design-not-done` warning now also carries an additive `details.remediation` field of the form `"code-pact task finalize <task-id>"`. Only this kind carries the hint — the other four kinds need human judgement, not a mechanizable fix.
+
+For the full design rationale, read [`design/decisions/finalization-reconciliation-rfc.md`](../design/decisions/finalization-reconciliation-rfc.md). For the agent- and reviewer-facing walkthrough, read [`docs/concepts/finalization-reconciliation.md`](concepts/finalization-reconciliation.md).
+
+### Recommended adoption pattern
+
+**Stop hand-editing design status in release-prep PRs.** Through v1.1.x, every release-prep PR included a step that hand-edited `design/phases/*.yaml` to flip completed tasks from `status: planned` to `status: done`. v1.2.0 replaces that step with a single command:
+
+```sh
+# 1. Bump version + write CHANGELOG.
+# 2. Flip completed tasks for the phase being released.
+code-pact phase reconcile <phase-id> --write --json
+# 3. Hand-edit the phase's own status field if every task is now done
+#    (advisory only via `phase_status_candidate`; phase status auto-flip
+#    is P14 work).
+# 4. Hand-edit design/roadmap.yaml if a phase weight or status moved
+#    (still manual until P14).
+# 5. Commit + PR.
+```
+
+Step 2 is the high-leverage change. The other steps remain manual on purpose: phase status and roadmap entries often depend on non-task work (release prep, docs, manual cleanup) that no deterministic command can verify, and P14 governance is the right home for opt-in policies that would let them be auto-managed.
+
+For single-task finalization (e.g. closing one task mid-phase without affecting siblings), `task finalize <task-id> --write` is the per-task counterpart.
+
+### CI implications under `--strict`
+
+Projects running `plan lint --strict` or `plan analyze --strict` see **no new errors** in v1.2.0. The new fields are additive on existing diagnostic payloads, not new kinds. The `STATUS_DRIFT done-but-design-not-done` warning continues to fire pre-reconcile; once `phase reconcile --write` (or `task finalize --write`) has flipped a task, the warning clears on the next `plan analyze` run.
+
+### New `KNOWN_CODES.public` entries (additive)
+
+Three new public error codes ship in v1.2.0. The error-code surface lock at `tests/unit/error-code-surface.test.ts` is updated accordingly. Existing codes are unchanged.
+
+| Code | Severity | Trigger |
+| --- | --- | --- |
+| `TASK_FINALIZE_NOT_ELIGIBLE` | error | `task finalize` against a task whose derived state is not `done` (raised in both dry-run and `--write`) |
+| `TASK_FINALIZE_WRITE_REFUSED` | error | `task finalize --write` failed the path-safety / phase-parse classification |
+| `PHASE_RECONCILE_WRITE_REFUSED` | error | `phase reconcile --write` was unable to apply any of the eligible writes |
+
+### Backward compatibility
+
+- `task complete` is unchanged. Same flags, same JSON envelope, same exit codes, same error codes. The v1.0 contract — `task complete` records progress only and never mutates design YAML — is preserved unchanged.
+- `progress.yaml` remains append-only and is read-only for the new commands.
+- `task context` pack output is unchanged. The byte-identical pack regression test against the golden fixture passes without modification.
+- `tests/integration/json-stdout.test.ts` continues to pass for every Stable (v1.0) and Stable (v1.1) command; the two new commands are added to the test list and pass from day one.
+- No existing error code is removed, renamed, or recategorized.
+
+In semver terms, v1.2.0 is a minor release.
+
+## Deferred beyond v1.2
+
+The following remain on the backlog after v1.2.0:
 
 - Removal of bare-form `code-pact adapter`.
 - Multi-agent orchestration / MCP / GitHub-Linear-Jira sync.
 - Advisory write locks for concurrent process safety.
-- **Enforcement of declared `writes` against actual file-system writes.** v1.1.0 surfaces `TASK_WRITES_PROTECTED_PATH` as a warning against a narrow built-in seed set (`.git/**`, `node_modules/**`, `.code-pact/**`, `design/roadmap.yaml`, `design/phases/*.yaml`). Configurable governance and warning → error promotion are P14 work.
-- **Cross-phase `depends_on`.** v1.1.0 ships same-phase only; cross-phase task ordering is a future extension.
-- **File-content inclusion for `reads` and `acceptance_refs`.** v1.1.0 renders both as path lists only; the content-inclusion path is a future RFC.
-- **`task finalize` / `phase reconcile`.** The "design YAML is intent; progress.yaml is fact" split documented in [§ `task complete` records progress, but does NOT mutate design YAML](#task-complete-records-progress-but-does-not-mutate-design-yaml) is preserved. v1.1.0 does not yet ship a command that mutates design status from progress evidence. P11 owns that work.
+- **Enforcement of declared `writes` against actual file-system writes.** v1.1+ surfaces `TASK_WRITES_PROTECTED_PATH` as a warning against a narrow built-in seed set (`.git/**`, `node_modules/**`, `.code-pact/**`, `design/roadmap.yaml`, `design/phases/*.yaml`). Configurable governance and warning → error promotion are P14 work. v1.2.0 displays declared `writes` in the `task finalize` / `phase reconcile` JSON payload but does **not** verify them against actual file-system writes.
+- **Cross-phase `depends_on`.** v1.1+ ships same-phase only; cross-phase task ordering is a future extension. v1.2.0 surfaces `depends_on_check[]` in `task finalize` output as warning advisory only — it does not block on unsatisfied dependencies.
+- **File-content inclusion for `reads` and `acceptance_refs`.** v1.1+ renders both as path lists only; v1.2.0 keeps that surface unchanged.
+- **Phase status auto-flip.** v1.2.0 `phase reconcile` reports `phase_status_candidate` as advisory but never writes the phase's own `status` field. An `--include-phase-status` opt-in is a candidate once the per-task flip path has been used through one release cycle.
+- **Multi-phase reconcile (`--all`).** v1.2.0 ships per-phase only.
+- **`design/roadmap.yaml` mutation.** Whether release prep should be able to delegate the per-phase weight / status flip to a `roadmap reconcile` command is P14 governance scope.
+- **Semantic validation of `acceptance_refs` content.** v1.2.0 only checks the path exists; richer validation would couple finalize to acceptance-criteria format choices the project has not yet made.
+- **Runbook integration (`task run` / `phase close`).** P12 will consume `task finalize` / `phase reconcile` from the runbook layer; v1.2.0 keeps the commands user-callable only.
 - Semver-aware `ADAPTER_GENERATOR_STALE` (current implementation is simple equality).
 - Conformance test inclusion for `cursor` / `gemini-cli` adapters — they remain Experimental.
 
