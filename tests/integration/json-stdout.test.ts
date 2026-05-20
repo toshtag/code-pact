@@ -420,6 +420,24 @@ describe("json-stdout contract: state-mutating Stable (v1.0) commands", () => {
       "phase reconcile --write",
     );
   });
+
+  it("task runbook P1-T1 --json (planned + no events → primary loop)", async () => {
+    const p = await projectWithTask("task-runbook-planned");
+    expectStdoutIsJson(
+      p.run(["task", "runbook", "P1-T1", "--json"]),
+      "task runbook planned",
+    );
+  });
+
+  it("task runbook P1-T1 --json (after task complete → finalize step)", async () => {
+    const p = await projectWithTask("task-runbook-done");
+    p.run(["task", "start", "P1-T1", "--agent", "claude-code", "--json"]);
+    p.run(["task", "complete", "P1-T1", "--agent", "claude-code", "--json"]);
+    expectStdoutIsJson(
+      p.run(["task", "runbook", "P1-T1", "--json"]),
+      "task runbook done-but-design-not-done",
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------

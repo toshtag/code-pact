@@ -1072,6 +1072,116 @@ code-pact phase reconcile P11 --write --json
 # with a single `phase reconcile <phase-id> --write` invocation.
 ```
 
+## `task runbook` — read-only guidance for a single task (v1.3+, P12)
+
+`code-pact task runbook <task-id> [--json]` returns a deterministic list of next recommended steps for one task. Stability: **Stable (v1.3+)**.
+
+The command is **read-only**. It emits command strings the user (or an agent) runs separately, or a `manual_action` describing a human checkpoint. There is no `--write` flag, no `--execute` flag, no `--agent` flag — runbook is sequencing guidance, not orchestration. Agent choice belongs to whichever command in the recommended sequence needs an adapter (e.g. `code-pact task context <id> --agent claude-code`).
+
+The command **never** mutates `progress.yaml`, **never** writes to `design/`, and **never** calls an adapter. It only reads the roadmap, phase YAMLs, and the progress log.
+
+### Step generation
+
+Runbook maps `(derived state, design status, drift kind)` → recommended steps using these classifiers:
+
+- `deriveTaskState` from `src/core/progress/task-state.ts` — current state in {planned, started, blocked, resumed, done, failed}
+- `classifyTaskDrift` from `src/core/plan/analyze.ts` — drift kind when design and progress disagree
+- `resolveDependsOnStates` from `src/core/runbook/depends-on.ts` — per-dependency current state
+
+Mapping table:
+
+| Derived | Design | Drift kind | Steps |
+| --- | --- | --- | --- |
+| planned (no events) | planned / in_progress | (none) | `task start` → `task context` → manual implement → `task complete` |
+| started / resumed | planned / in_progress | (none) | continue implementation → `task complete` |
+| blocked | planned / in_progress | (none) | manual_action (resolve blocker) → `task resume --reason "..."` — both `blocking: true` |
+| failed | planned / in_progress | (none) | manual_review (diagnose + fix) → `task complete` (re-run) |
+| done | planned / in_progress | done-but-design-not-done | `task finalize --write` with dry-run safety note |
+| done | done | (none) | empty `next_steps` (consistent) |
+| done | done | done-blocked-conflict / done-with-incomplete-events | manual_review pointing at `plan analyze` (blocking) |
+| done | done | done-historical | empty `next_steps` (hidden by default) |
+
+`depends_on` adds a blocking `manual_action` step at the head whenever any dependency's derived state is not `done`.
+
+### JSON envelope (success)
+
+```json
+{
+  "ok": true,
+  "data": {
+    "kind": "runbook",
+    "task_id": "P9-T5",
+    "phase_id": "P9",
+    "state_summary": {
+      "design_status": "planned",
+      "derived_state": "done",
+      "drift_kind": "done-but-design-not-done",
+      "depends_on": [
+        { "task_id": "P9-T4", "current": "done", "satisfied": true }
+      ],
+      "acceptance_refs_check": [
+        { "path": "docs/cli-contract.md", "exists": true }
+      ],
+      "declared_writes": ["src/commands/task-runbook.ts"],
+      "decision_refs": ["design/decisions/lightweight-runbook-rfc.md"]
+    },
+    "next_steps": [
+      {
+        "command": "code-pact task finalize P9-T5 --write",
+        "manual_action": null,
+        "reason": "Task is done in progress.yaml but design status is still planned/in_progress. `task finalize` is the deterministic resolver.",
+        "blocking": false,
+        "safety_note": "This is a --write operation. Preview first with `code-pact task finalize P9-T5 --json` (dry-run).",
+        "expected_result": "design/phases/<phase>.yaml task status flips to done; STATUS_DRIFT done-but-design-not-done clears on next plan analyze."
+      }
+    ]
+  }
+}
+```
+
+### `RunbookStep` field invariants
+
+Every step in `next_steps[]` has all six fields present in JSON output, with `null` where not applicable. **Exactly one of `command` / `manual_action` is non-null** — never both, never neither. JSON consumers can assume the schema is constant across step kinds and need no field-absence branching.
+
+| Field | Type | When non-null |
+| --- | --- | --- |
+| `command` | `string \| null` | Step is a CLI invocation the user runs verbatim |
+| `manual_action` | `string \| null` | Step is a human checkpoint with no command |
+| `reason` | `string` | Always required |
+| `blocking` | `boolean` | Always present; `true` means downstream steps assume this is resolved first |
+| `safety_note` | `string \| null` | Non-null for `--write` steps and similar safety concerns |
+| `expected_result` | `string \| null` | Non-null when a deterministic post-step state is known |
+
+### Errors
+
+No new error codes. Reused:
+
+| Code | Exit | When |
+| --- | --- | --- |
+| `TASK_NOT_FOUND` | 2 | Task id is not present in any phase |
+| `AMBIGUOUS_TASK_ID` | 2 | Task id appears in more than one phase; `data.phases[]` lists the offenders |
+| `CONFIG_ERROR` | 2 | Missing positional task id, or unknown flag |
+
+### Relationship to `recommend`
+
+`recommend` and `task runbook` are intended to coexist:
+
+- **`recommend`** answers: **"How should this task be executed?"** — model tier, effort, context profile, preflight commands, ambiguity action, budget profile.
+- **`task runbook`** answers: **"What should happen next in the task lifecycle?"** — the sequence of `task start` / `task context` / implementation / `task complete` / `task finalize` etc., gated by `depends_on` and drift state.
+
+Both take a task id; neither calls the other. Bundling them is an open question deferred to P13.
+
+### Usage example
+
+```sh
+# Single task — see what to do next.
+code-pact task runbook P9-T5 --json
+
+# After implementation + task complete, runbook recommends finalize.
+code-pact task complete P9-T5
+code-pact task runbook P9-T5 --json   # → step: task finalize P9-T5 --write
+```
+
 ## `task start` / `task status` / `task block` / `task resume` (v0.6)
 
 These four commands fill the execution-state gap between `task context` and `task complete`. They all read and append to the same `.code-pact/state/progress.yaml` log used by `task complete`, and they share the same state-machine rules enforced via `deriveTaskState` and `assertTransition`.

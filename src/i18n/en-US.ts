@@ -211,6 +211,37 @@ export const messages = {
       wouldFinalize: (taskId: string, file: string): string =>
         `Dry run: would flip "${taskId}" status to "done" in ${file}. Run with --write to apply.`,
     },
+    runbook: {
+      header: (taskId: string, phaseId: string): string =>
+        `Runbook for ${taskId} (phase ${phaseId}):`,
+      stateSummary: (summary: {
+        design_status: string;
+        derived_state: string;
+        drift_kind: string | null;
+      }): string =>
+        `  state: design=${summary.design_status}, derived=${summary.derived_state}${summary.drift_kind ? `, drift=${summary.drift_kind}` : ""}`,
+      noSteps:
+        "  (no next steps — task is consistent)",
+      step: (
+        index: number,
+        step: {
+          command: string | null;
+          manual_action: string | null;
+          reason: string;
+          blocking: boolean;
+          safety_note: string | null;
+          expected_result: string | null;
+        },
+      ): string => {
+        const action = step.command ?? `MANUAL: ${step.manual_action}`;
+        const prefix = step.blocking ? "[blocking] " : "";
+        const safety = step.safety_note ? `\n      safety: ${step.safety_note}` : "";
+        const expected = step.expected_result
+          ? `\n      expected: ${step.expected_result}`
+          : "";
+        return `  ${index}. ${prefix}${action}\n      reason: ${step.reason}${safety}${expected}`;
+      },
+    },
     start: {
       success: (taskId: string, agent: string): string =>
         `Recorded started event for "${taskId}" (agent: ${agent}).`,

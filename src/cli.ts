@@ -51,6 +51,7 @@ import { runValidate } from "./commands/validate.ts";
 import { runTaskContext } from "./commands/task-context.ts";
 import { runTaskComplete } from "./commands/task-complete.ts";
 import { runTaskFinalize } from "./commands/task-finalize.ts";
+import { runTaskRunbook } from "./commands/task-runbook.ts";
 import { runPhaseReconcile } from "./commands/phase-reconcile.ts";
 import { runTaskStart } from "./commands/task-start.ts";
 import { runTaskBlock } from "./commands/task-block.ts";
@@ -1850,8 +1851,11 @@ async function cmdTask(argv: string[], locale: Locale, globalJson: boolean): Pro
   if (subcommand === "finalize") {
     return cmdTaskFinalize(rest, locale, globalJson);
   }
+  if (subcommand === "runbook") {
+    return cmdTaskRunbook(rest, locale, globalJson);
+  }
 
-  const msg = `task: unknown subcommand "${subcommand ?? ""}". Use: add | context | start | status | block | resume | complete | finalize`;
+  const msg = `task: unknown subcommand "${subcommand ?? ""}". Use: add | context | start | status | block | resume | complete | finalize | runbook`;
   if (globalJson) {
     process.stdout.write(
       `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
@@ -2388,6 +2392,102 @@ async function cmdTaskFinalize(
       }
       default:
         throw err;
+    }
+    if (json) {
+      const envelope: Record<string, unknown> = {
+        ok: false,
+        error: { code: outCode, message: msg },
+      };
+      if (extraData) envelope.data = extraData;
+      process.stdout.write(`${JSON.stringify(envelope)}\n`);
+    } else {
+      process.stderr.write(`${msg}\n`);
+    }
+    return 2;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Command: task runbook (v1.3 P12)
+// ---------------------------------------------------------------------------
+
+async function cmdTaskRunbook(
+  argv: string[],
+  locale: Locale,
+  globalJson: boolean,
+): Promise<number> {
+  const m = messages[locale];
+
+  let values: Record<string, unknown>;
+  let positionals: string[];
+  try {
+    ({ values, positionals } = strictParse(
+      "task runbook",
+      argv,
+      {
+        json: { type: "boolean" },
+      },
+      { allowPositionals: true },
+    ));
+  } catch (err) {
+    if (!(err instanceof ConfigError)) throw err;
+    const json = globalJson || argv.includes("--json");
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: err.message } })}\n`,
+      );
+    } else {
+      process.stderr.write(`${err.message}\n`);
+    }
+    return 2;
+  }
+
+  const json = globalJson || values.json === true;
+  const taskId = positionals[0];
+  if (!taskId) {
+    const msg = "task runbook requires a task id (e.g. `task runbook P1-T1`).";
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
+      );
+    } else {
+      process.stderr.write(`${msg}\n`);
+    }
+    return 2;
+  }
+  const cwd = process.cwd();
+
+  try {
+    const result = await runTaskRunbook({ cwd, taskId });
+
+    if (json) {
+      process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
+    } else {
+      process.stdout.write(`${m.task.runbook.header(taskId, result.phase_id)}\n`);
+      process.stdout.write(`${m.task.runbook.stateSummary(result.state_summary)}\n`);
+      if (result.next_steps.length === 0) {
+        process.stdout.write(`${m.task.runbook.noSteps}\n`);
+      } else {
+        for (let i = 0; i < result.next_steps.length; i++) {
+          const step = result.next_steps[i]!;
+          process.stdout.write(`${m.task.runbook.step(i + 1, step)}\n`);
+        }
+      }
+    }
+    return 0;
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    const msg = (err as Error).message;
+    let outCode = "INTERNAL_ERROR";
+    let extraData: Record<string, unknown> | null = null;
+    if (code === "TASK_NOT_FOUND") {
+      outCode = "TASK_NOT_FOUND";
+    } else if (code === "AMBIGUOUS_TASK_ID") {
+      outCode = "AMBIGUOUS_TASK_ID";
+      const phases = (err as NodeJS.ErrnoException & { phases?: string[] }).phases;
+      if (phases) extraData = { phases };
+    } else if (code === "CONFIG_ERROR") {
+      outCode = "CONFIG_ERROR";
     }
     if (json) {
       const envelope: Record<string, unknown> = {
