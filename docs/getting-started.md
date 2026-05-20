@@ -59,7 +59,9 @@ code-pact task complete P1-T1 --agent claude-code
 
 If `pnpm test` is not the right verification command for your repo, choose another one when the wizard prompts for it (step 1) — `node --version` is a safe choice for a smoke test.
 
-> The sample phase is named `P1 — Welcome` and exists only to confirm the project structure and verification pipeline. Keep it, rename it, or delete it once you have real phases. A dedicated doc on the sample-phase concept will land in a follow-up task; for now the wizard's prompt copy is canonical.
+> The sample phase is named `P1 — Welcome` and exists only to confirm the project structure and verification pipeline. Keep it, rename it, or delete it once you have real phases. See [`docs/concepts/sample-phase.md`](concepts/sample-phase.md) for the full keep / rename / delete decision.
+
+> **TTY required.** The tutorial path uses the `init` wizard and `task add`, both of which require a TTY. In CI or other non-TTY environments, use the manual or AI-assisted path below — `init --non-interactive` does **not** create the sample phase (the `createSamplePhase` choice is wizard-only).
 
 ---
 
@@ -108,6 +110,8 @@ code-pact phase add ... --verify-command "node --version"
 code-pact phase add ... --verify-command node --version
 ```
 
+> **TTY-only steps in this path:** `plan brief`, `plan constitution`, and `task add` all require a TTY. In CI or non-TTY environments, skip steps 2 and 4 and bulk-import the phase plus its tasks from a YAML file with `code-pact phase import draft-roadmap.yaml` instead (this is the AI-assisted path below; it is also the right shape for any non-interactive automation). After a non-interactive init, `code-pact validate` reports `BRIEF_MISSING` / `CONSTITUTION_PLACEHOLDER` warnings — these are expected and clear up once you run the wizards on a real machine, edit the files directly, or accept them as warnings the project is intentionally living with.
+
 ---
 
 ## Path 3 — AI-assisted
@@ -143,6 +147,8 @@ code-pact task complete P1-T1 --agent claude-code
 ```
 
 The lenient `phase import` mode is intentional. It lets the AI focus on getting `id`s right and trust `code-pact` to fill in the rest; you can audit the filled-in defaults in the JSON response or by running `code-pact plan lint --json`.
+
+> **TTY required for steps 2 and 3.** `plan brief` and `plan constitution` are interactive and need a TTY. `plan prompt` itself runs fine without them — if `design/brief.md` is missing, the generated prompt includes a line *"No design/brief.md found. Add a project description above this section manually."* so the AI agent knows to ask for it. The full AI-assisted path is therefore feasible without ever running the brief / constitution wizards, but you give the AI less to ground on.
 
 ---
 
