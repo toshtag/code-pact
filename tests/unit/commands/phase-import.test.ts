@@ -597,3 +597,127 @@ describe("runPhaseImport — lenient import (AI-generated YAML)", () => {
     expect(after.raw).toBe(before.raw);
   });
 });
+
+// ---------------------------------------------------------------------------
+// P10 — Task Readiness Schema additions
+// ---------------------------------------------------------------------------
+
+describe("runPhaseImport — P10 Task Readiness Schema fields", () => {
+  it("forwards declared depends_on / decision_refs / reads / writes / acceptance_refs to the written phase", async () => {
+    await setupEmptyProject(dir);
+    const inputPath = await writeInput(
+      dir,
+      `phases:
+  - id: P1
+    name: Foundation
+    weight: 10
+    objective: Establish foundation
+    tasks:
+      - id: P1-T1
+        type: feature
+        ambiguity: low
+        risk: low
+        context_size: small
+        write_surface: low
+        verification_strength: weak
+        expected_duration: short
+        status: planned
+        depends_on:
+          - P1-T2
+        decision_refs:
+          - design/decisions/stability-taxonomy.md
+        reads:
+          - src/core/schemas/task.ts
+          - tests/**/*.test.ts
+        writes:
+          - src/core/schemas/task.ts
+        acceptance_refs:
+          - docs/cli-contract.md
+      - id: P1-T2
+        type: docs
+        ambiguity: low
+        risk: low
+        context_size: small
+        write_surface: low
+        verification_strength: weak
+        expected_duration: short
+        status: planned
+`,
+    );
+
+    const result = await runPhaseImport({ cwd: dir, inputPath });
+    expect(result.imported_tasks).toEqual(["P1-T1", "P1-T2"]);
+    // P10 fields are optional in TaskImport, so absent fields must
+    // never appear in completed_fields (no synthetic default).
+    const t1Entry = result.completed_fields.find((cf) => cf.taskId === "P1-T1");
+    expect(t1Entry?.fields ?? []).not.toContain("depends_on");
+    expect(t1Entry?.fields ?? []).not.toContain("reads");
+
+    const phaseRaw = await readFile(
+      join(dir, "design", "phases", "P1-foundation.yaml"),
+      "utf8",
+    );
+    const phase = Phase.parse(parseYaml(phaseRaw) as unknown);
+    const t1 = phase.tasks?.find((t) => t.id === "P1-T1");
+    expect(t1).toBeDefined();
+    expect(t1!.depends_on).toEqual(["P1-T2"]);
+    expect(t1!.decision_refs).toEqual([
+      "design/decisions/stability-taxonomy.md",
+    ]);
+    expect(t1!.reads).toEqual([
+      "src/core/schemas/task.ts",
+      "tests/**/*.test.ts",
+    ]);
+    expect(t1!.writes).toEqual(["src/core/schemas/task.ts"]);
+    expect(t1!.acceptance_refs).toEqual(["docs/cli-contract.md"]);
+
+    // The task without P10 fields must not gain any.
+    const t2 = phase.tasks?.find((t) => t.id === "P1-T2");
+    expect(t2).toBeDefined();
+    expect(t2!.depends_on).toBeUndefined();
+    expect(t2!.decision_refs).toBeUndefined();
+    expect(t2!.reads).toBeUndefined();
+    expect(t2!.writes).toBeUndefined();
+    expect(t2!.acceptance_refs).toBeUndefined();
+  });
+
+  it("legacy v1.0.x-shaped task (no P10 fields) imports unchanged", async () => {
+    await setupEmptyProject(dir);
+    const inputPath = await writeInput(
+      dir,
+      `phases:
+  - id: P1
+    name: Foundation
+    weight: 10
+    objective: Establish foundation
+    tasks:
+      - id: P1-T1
+        type: feature
+        ambiguity: low
+        risk: low
+        context_size: small
+        write_surface: low
+        verification_strength: weak
+        expected_duration: short
+        status: planned
+`,
+    );
+
+    const result = await runPhaseImport({ cwd: dir, inputPath });
+    expect(result.imported_tasks).toEqual(["P1-T1"]);
+    // No P10 field in input → no P10 field in completed_fields.
+    expect(result.completed_fields).toEqual([]);
+
+    const phaseRaw = await readFile(
+      join(dir, "design", "phases", "P1-foundation.yaml"),
+      "utf8",
+    );
+    const phase = Phase.parse(parseYaml(phaseRaw) as unknown);
+    const t1 = phase.tasks?.[0];
+    expect(t1?.depends_on).toBeUndefined();
+    expect(t1?.decision_refs).toBeUndefined();
+    expect(t1?.reads).toBeUndefined();
+    expect(t1?.writes).toBeUndefined();
+    expect(t1?.acceptance_refs).toBeUndefined();
+  });
+});

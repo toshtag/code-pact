@@ -103,6 +103,14 @@ function applyTaskDefaults(raw: TaskImport): { task: Task; completedFields: stri
     status: d(raw.status, "planned", "status"),
     ...(raw.description !== undefined ? { description: raw.description } : {}),
     ...(raw.requires_decision === true ? { requires_decision: true } : {}),
+    // P10 — Task Readiness Schema. Forward verbatim when present; do
+    // not invent synthetic defaults. Absent stays undefined so old
+    // YAML behaves exactly as in v1.0.2.
+    ...(raw.depends_on !== undefined ? { depends_on: raw.depends_on } : {}),
+    ...(raw.decision_refs !== undefined ? { decision_refs: raw.decision_refs } : {}),
+    ...(raw.reads !== undefined ? { reads: raw.reads } : {}),
+    ...(raw.writes !== undefined ? { writes: raw.writes } : {}),
+    ...(raw.acceptance_refs !== undefined ? { acceptance_refs: raw.acceptance_refs } : {}),
   };
   return { task, completedFields };
 }
