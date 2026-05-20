@@ -11,6 +11,49 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ---
 
+## [1.3.0] — 2026-05-20
+
+**Lightweight Runbook.** Minor release that introduces two new read-only commands for answering the user-facing question "what should I run next?" deterministically. `task runbook <task-id>` returns the recommended sequence of next steps for a single task; `phase runbook <phase-id>` does the same for an entire phase with a 6-priority step list, task/drift histograms, and a phase status candidate. Neither command mutates anything; neither calls an adapter; neither takes a `--write` / `--execute` / `--agent` flag. Every recommended step is a CLI invocation the user runs separately, or a `manual_action` describing a human checkpoint.
+
+### CLI behavior changes
+
+None for the existing Stable surface. Stable command flags, JSON envelope shape, exit-code semantics, and the existing error-code surface remain unchanged from v1.2.0. The `tests/integration/json-stdout.test.ts` and `tests/unit/error-code-surface.test.ts` regression nets continue to pass; the two new commands are additive entries with no new error codes.
+
+### Added
+
+- **`task runbook <task-id> [--json]`** as Stable (v1.3+) (`src/commands/task-runbook.ts`). Returns `{ ok: true, data: { kind: "runbook", task_id, phase_id, state_summary, next_steps: RunbookStep[] } }`. Maps `(derived state, design status, drift kind)` → recommended steps using the lifecycle table from the RFC. `task start` is part of the primary loop for `planned + no events` tasks. `depends_on` emits a blocking dependency-check step at the head when any dep is unsatisfied. No new error codes — reuses `TASK_NOT_FOUND` / `AMBIGUOUS_TASK_ID` / `CONFIG_ERROR`. ([#106])
+- **`phase runbook <phase-id> [--json]`** as Stable (v1.3+) (`src/commands/phase-runbook.ts`). Bulk counterpart. Returns the same envelope kind with `phase_summary` (task histogram + drift histogram + `phase_status_candidate` + advisory note) and a 6-priority step list (blocked → manual_review → reconcile batch → in-progress hints → primary loop → phase-status advisory). Reuses `PHASE_NOT_FOUND` / `CONFIG_ERROR`. ([#107])
+- **`src/core/runbook/`** — new neutral module owning the pure-function runbook builders. `types.ts` defines the field-presence-fixed `RunbookStep` shape with `assertStepInvariant` (exactly-one-of command/manual_action enforced at construction time). `depends-on.ts` extracts the inline `depends_on` resolution pattern from `task-finalize.ts` into a shared helper. `build-task-runbook.ts` and `build-phase-runbook.ts` are pure functions — commands pass already-loaded `PlanState` / progress events. No I/O in the core helpers. ([#105])
+- **`src/core/finalize/reconcile-classifier.ts`** — the reconcile classifier previously private inside `src/commands/phase-reconcile.ts` is extracted into a core module in P11's `src/core/finalize/` namespace. Both `phase-reconcile.ts` and the new `src/core/runbook/build-phase-runbook.ts` import from the core helper. Preserves the `command → core` dependency direction. Pure refactor — existing `tests/unit/commands/phase-reconcile.test.ts` passes unchanged. ([#105])
+- **`classifyTaskDrift` export** from `src/core/plan/analyze.ts`. The function was private; runbook needs it to label tasks with their drift kind. Same-module export — analyze.ts is already core layer, so no layering inversion. ([#105])
+- **`design/decisions/lightweight-runbook-rfc.md`** — the accepted RFC capturing command semantics, runbook step shape, state-based recommendation rules, the explicit `recommend` vs `task runbook` boundary, layering decisions (classifier extraction, no `--agent` flag on runbook), the `human_gate` deferral to P13/P14, the init/UX polish deferral to P13, alternatives considered (executable runbook, `task next` alias, classifier export from command file, etc.), open questions, and the P12-T1..T5 implementation slicing. ([#103], [#104])
+- **`design/phases/P12-lightweight-runbook.yaml`** — phase contract registering the work. ([#103])
+- **`docs/concepts/runbook.md`** — agent- and reviewer-facing walkthrough mirroring `docs/concepts/finalization-reconciliation.md`. Covers why runbook exists, the explicit boundary against `recommend` / `task context` / `phase reconcile`, full state → steps mapping table, 6-priority order for phase runbook, RunbookStep field invariants, P10/P11 integration, error codes (none new), what's intentionally NOT in v1.3 (`--execute`, `task next` alias, `human_gate` schema field, `--all`, init UX polish). ([#108])
+
+### Changed
+
+- **`docs/migration.md`** gains a `v1.2.x → v1.3.0` section covering the quick path, what's new (both runbook commands, field-presence-fixed shape, the internal classifier extraction), recommended adoption pattern (use `task runbook` after `plan analyze` flags drift; use `phase runbook` as a sanity check before release-prep `phase reconcile --write`), CI implications under `--strict` (no new errors, no new warnings, KNOWN_CODES.public unchanged), and backward-compatibility notes. "Deferred beyond v1.2" → "Deferred beyond v1.3" with the now-shipped runbook commands removed and the previously-deferred init/UX polish item rolled forward to P13. ([#108])
+- **`docs/cli-contract.md`** gains a `task runbook` section + a `phase runbook` section (both annotated Stable (v1.3+)) with full JSON envelope shape, RunbookStep field invariants table, state → steps mapping table, 6-priority order for phase runbook, error codes, usage examples, and the explicit `recommend` vs `task runbook` boundary statement. ([#106], [#107])
+- **`docs/getting-started.md`** gains an optional step in the tutorial mentioning `task runbook` and `phase runbook` as read-only sequencing guidance, with a pointer to the concept walkthrough. ([#108])
+- **`docs/dogfood.md`** gains a Step 7 in the per-task flow for `task runbook` / `phase runbook`; updates the v1.0 contract section to mention v1.3 read-only counterparts; updates the STATUS_DRIFT expected-warnings note to surface that runbook carries the same recommendation in lifecycle context; adds runbook as a v1.3+ alternative diagnostic step inside the existing `TASK_FINALIZE_NOT_ELIGIBLE` and `PHASE_RECONCILE_WRITE_REFUSED` Troubleshooting entries; section header renamed `(v1.0 / v1.2+)` → `(v1.0 / v1.2+ / v1.3+)`. ([#108])
+- **`design/phases/P12-lightweight-runbook.yaml`** — phase `status: planned` → `status: done`; every P12 task (T1–T5) `status: planned` → `status: done`. **The task-level flip was performed by `code-pact phase reconcile P12 --write` itself**, after a sanity-check run of **`code-pact phase runbook P12 --json`** which returned exactly the two-step recommendation the release prep then followed (the reconcile batch + the manual phase-status flip). This is the second release-prep PR to dogfood the P11 mechanization, and the first one to dogfood the P12 read-only sanity-check layer alongside it. ([#105], [#106], [#107], [#108], this release prep)
+- **`package.json`** — version `1.2.0` → `1.3.0`. (this release prep)
+
+### Known residuals (not blockers)
+
+- **`TASK_WRITES_PROTECTED_PATH` advisories on the dogfood corpus.** Existing advisories remain (P10-T1, P10-T6, P11-T1 declaring writes against `design/roadmap.yaml` and `design/phases/*.yaml`). These are proof the protected-path lint is working as designed; P14 governance is the consumer that promotes to error severity with a configurable policy.
+- **Phase status auto-flip, multi-phase runbook (`--all`), `design/roadmap.yaml` mutation, file-content validation of `acceptance_refs`, actual-write enforcement of declared `writes`, runbook execution (`task runbook --execute`), schema-level `human_gate`, `task next` / `phase next` sugar aliases, bundling `recommend` into `task runbook`, init/wizard/task-add UX polish (P13 scope), runbook orchestrator integration** all remain future work. See `docs/migration.md` § Deferred beyond v1.3 for the full list.
+- **`STATUS_DRIFT done-but-design-not-done` warnings** on the dogfood corpus continue to fire for any task whose progress.yaml has a `done` event but whose design status was not yet flipped. This release prep clears every P12 warning that had accumulated across the P12 task PRs into a single coherent reconcile flip — the second time a release prep has used `phase reconcile --write` to mechanize the step, and the first time `phase runbook` was used as the sanity check before it.
+
+[#103]: https://github.com/toshtag/code-pact/pull/103
+[#104]: https://github.com/toshtag/code-pact/pull/104
+[#105]: https://github.com/toshtag/code-pact/pull/105
+[#106]: https://github.com/toshtag/code-pact/pull/106
+[#107]: https://github.com/toshtag/code-pact/pull/107
+[#108]: https://github.com/toshtag/code-pact/pull/108
+
+---
+
 ## [1.2.0] — 2026-05-20
 
 **Finalization & Reconciliation.** Minor release that introduces two new commands for closing the long-standing drift between `progress.yaml` (operational fact) and `design/phases/*.yaml` (design intent). `task finalize <task-id>` flips one task's design status to `done` when its derived state from progress is already `done`; `phase reconcile <phase-id>` is the bulk counterpart. Both default to dry-run; `--write` is the explicit opt-in. Neither command mutates `progress.yaml`, neither writes to `design/roadmap.yaml`, and neither auto-flips the phase's own `status` field — phase status remains a manual release-prep step until P14 governance. The v1.0 contract that `task complete` records progress only and never mutates design YAML is preserved unchanged.
