@@ -1182,6 +1182,86 @@ code-pact task complete P9-T5
 code-pact task runbook P9-T5 --json   # → step: task finalize P9-T5 --write
 ```
 
+## `phase runbook` — read-only guidance for an entire phase (v1.3+, P12)
+
+`code-pact phase runbook <phase-id> [--json]` returns a deterministic list of next recommended steps for an entire phase. Stability: **Stable (v1.3+)**.
+
+Mirrors `task runbook` at phase level. The command is **read-only**: every recommended step is a CLI invocation the user runs separately, or a `manual_action` describing a human checkpoint. There is no `--write`, no `--execute`, no `--agent` flag, and no multi-phase `--all`.
+
+The command **never** mutates `progress.yaml`, **never** writes to `design/` (including `design/roadmap.yaml`), and **never** flips the phase's own `status` field. The `phase_status_candidate` reported in `phase_summary` is advisory only — consistent with the v1.2 `phase reconcile` contract.
+
+### Step priority order
+
+For each phase, runbook iterates `phase.tasks[]` and emits steps in this priority order:
+
+1. **Blocked tasks — resume guidance** (`blocking: true`). For each `blocked` task, emit one `manual_action` step describing blocker resolution + a `task resume <id> --reason "..."` command step.
+2. **Failed / complex-drift tasks — manual_review** (`blocking: true`). For `failed` state or `done-blocked-conflict` / `done-with-incomplete-events` drift, emit a `manual_action` step pointing at `plan analyze`. These drifts need human judgement; `phase reconcile` intentionally refuses them.
+3. **Eligible reconcile batch** (non-blocking). If at least one task is a `flip` candidate, emit exactly one `phase reconcile <id> --write` step. Per-task `task finalize` enumeration is intentionally avoided — reconcile's atomic batch is the whole point.
+4. **In-progress task hints** (non-blocking). For each `started` / `resumed` task, emit one `task runbook <task-id>` step. Per-task judgement is delegated to `task runbook`.
+5. **Untouched ready tasks** (non-blocking). For each `planned` task with no events AND all `depends_on` satisfied, emit the four-step primary loop: `task start <id>` → `task context <id>` → manual implement → `task complete <id>`.
+6. **Phase-status advisory** (non-blocking, `manual_action`). If every task would be `done` post-reconcile and the phase itself isn't already `done`, surface the manual phase-status flip as the final step.
+
+### JSON envelope (success)
+
+```json
+{
+  "ok": true,
+  "data": {
+    "kind": "runbook",
+    "phase_id": "P12",
+    "phase_summary": {
+      "task_histogram": {
+        "planned": 1,
+        "started": 1,
+        "blocked": 0,
+        "resumed": 0,
+        "done": 3,
+        "failed": 0
+      },
+      "drift_histogram": {
+        "done-but-design-not-done": 2,
+        "manual_review": 0,
+        "consistent": 4
+      },
+      "phase_status_candidate": "in_progress",
+      "phase_status_note": "advisory — phase status is never written by phase runbook (or by phase reconcile in v1.2)"
+    },
+    "next_steps": [
+      {
+        "command": "code-pact phase reconcile P12 --write",
+        "manual_action": null,
+        "reason": "2 task(s) (P12-T1, P12-T2) are done in progress.yaml but design status is still planned/in_progress. `phase reconcile --write` flips them in one atomic batch.",
+        "blocking": false,
+        "safety_note": "This is a --write operation. Preview first with `code-pact phase reconcile P12 --json` (dry-run).",
+        "expected_result": "design/phases/<phase>.yaml task statuses flip planned → done; STATUS_DRIFT done-but-design-not-done clears for each task."
+      }
+    ]
+  }
+}
+```
+
+`RunbookStep` field invariants are identical to `task runbook` — every field present, exactly one of `command` / `manual_action` non-null. See the `task runbook` section for the field-presence table.
+
+### Errors
+
+No new error codes. Reused:
+
+| Code | Exit | When |
+| --- | --- | --- |
+| `PHASE_NOT_FOUND` | 2 | Phase id is not present in `design/roadmap.yaml` |
+| `CONFIG_ERROR` | 2 | Missing positional phase id, or unknown flag |
+
+### Usage example
+
+```sh
+# Inspect phase state at a glance.
+code-pact phase runbook P9 --json
+
+# Recommended sanity check before release-prep `phase reconcile --write`.
+code-pact phase runbook P9 --json
+code-pact phase reconcile P9 --write
+```
+
 ## `task start` / `task status` / `task block` / `task resume` (v0.6)
 
 These four commands fill the execution-state gap between `task context` and `task complete`. They all read and append to the same `.code-pact/state/progress.yaml` log used by `task complete`, and they share the same state-machine rules enforced via `deriveTaskState` and `assertTransition`.

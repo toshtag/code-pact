@@ -66,6 +66,43 @@ export const messages = {
       writeRefused: (id: string): string =>
         `フェーズ "${id}" の reconcile を拒否しました: 適用候補すべてが安全上の理由で拒否されました。data.skipped_writes を確認してください。`,
     },
+    runbook: {
+      header: (phaseId: string): string => `フェーズ ${phaseId} の runbook:`,
+      phaseSummary: (summary: {
+        task_histogram: {
+          planned: number;
+          started: number;
+          blocked: number;
+          resumed: number;
+          done: number;
+          failed: number;
+        };
+        phase_status_candidate: string;
+      }): string => {
+        const h = summary.task_histogram;
+        return `  tasks: planned=${h.planned}, started=${h.started}, blocked=${h.blocked}, resumed=${h.resumed}, done=${h.done}, failed=${h.failed} | phase_status_candidate=${summary.phase_status_candidate}`;
+      },
+      noSteps: "  (次の step はありません — フェーズは安定状態です)",
+      step: (
+        index: number,
+        step: {
+          command: string | null;
+          manual_action: string | null;
+          reason: string;
+          blocking: boolean;
+          safety_note: string | null;
+          expected_result: string | null;
+        },
+      ): string => {
+        const action = step.command ?? `手動: ${step.manual_action}`;
+        const prefix = step.blocking ? "[blocking] " : "";
+        const safety = step.safety_note ? `\n      安全注意: ${step.safety_note}` : "";
+        const expected = step.expected_result
+          ? `\n      期待結果: ${step.expected_result}`
+          : "";
+        return `  ${index}. ${prefix}${action}\n      理由: ${step.reason}${safety}${expected}`;
+      },
+    },
   },
   progress: {
     baselineNotFound: (name: string): string =>
