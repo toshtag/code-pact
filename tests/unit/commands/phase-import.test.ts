@@ -721,3 +721,159 @@ describe("runPhaseImport — P10 Task Readiness Schema fields", () => {
     expect(t1?.acceptance_refs).toBeUndefined();
   });
 });
+
+// ---------------------------------------------------------------------------
+// v1.4 P13-T4: suggested_next_steps additive field
+// ---------------------------------------------------------------------------
+
+describe("runPhaseImport — suggested_next_steps (P13-T4)", () => {
+  it("is always present (field-presence-fixed)", async () => {
+    await setupEmptyProject(dir);
+    const inputPath = await writeInput(
+      dir,
+      `phases:
+  - id: P1
+    name: Foundation
+    weight: 10
+    objective: Phase A
+`,
+    );
+    const result = await runPhaseImport({ cwd: dir, inputPath });
+    expect(Array.isArray(result.suggested_next_steps)).toBe(true);
+  });
+
+  it("emits canonical post-import sequence (plan lint → phase runbook → task runbook)", async () => {
+    await setupEmptyProject(dir);
+    const inputPath = await writeInput(
+      dir,
+      `phases:
+  - id: P1
+    name: Foundation
+    weight: 12
+    objective: Establish foundation
+    tasks:
+      - id: P1-T1
+        type: feature
+        ambiguity: low
+        risk: low
+        context_size: small
+        write_surface: medium
+        verification_strength: strong
+        expected_duration: short
+        status: planned
+        description: First task
+`,
+    );
+    const result = await runPhaseImport({ cwd: dir, inputPath });
+    const joined = result.suggested_next_steps.join("\n");
+    expect(joined).toMatch(/plan lint/);
+    expect(joined).toMatch(/phase runbook P1/);
+    expect(joined).toMatch(/task runbook P1-T1/);
+  });
+
+  it("emits one phase-runbook step per imported phase", async () => {
+    await setupEmptyProject(dir);
+    const inputPath = await writeInput(
+      dir,
+      `phases:
+  - id: P1
+    name: Foundation
+    weight: 10
+    objective: First
+  - id: P2
+    name: Core
+    weight: 10
+    objective: Second
+`,
+    );
+    const result = await runPhaseImport({ cwd: dir, inputPath });
+    const phaseRunbookSteps = result.suggested_next_steps.filter((s) =>
+      s.includes("phase runbook"),
+    );
+    expect(phaseRunbookSteps.length).toBe(2);
+    expect(phaseRunbookSteps[0]).toMatch(/phase runbook P1/);
+    expect(phaseRunbookSteps[1]).toMatch(/phase runbook P2/);
+  });
+
+  it("prepends a defaults-review hint when completed_fields is non-empty (lenient mode)", async () => {
+    await setupEmptyProject(dir);
+    const inputPath = await writeInput(
+      dir,
+      `phases:
+  - id: P1
+    name: Foundation
+    weight: 10
+    objective: Lenient-mode test
+    tasks:
+      - id: P1-T1
+        description: only id + description provided
+`,
+    );
+    const result = await runPhaseImport({ cwd: dir, inputPath });
+    expect(result.completed_fields.length).toBeGreaterThan(0);
+    expect(result.suggested_next_steps[0]).toMatch(/completed_fields/);
+    expect(result.suggested_next_steps[0]).toMatch(/source-of-truth/);
+  });
+
+  it("omits the defaults-review hint when completed_fields is empty", async () => {
+    await setupEmptyProject(dir);
+    const inputPath = await writeInput(
+      dir,
+      `phases:
+  - id: P1
+    name: Foundation
+    weight: 10
+    objective: All fields explicit
+    tasks:
+      - id: P1-T1
+        type: feature
+        ambiguity: low
+        risk: low
+        context_size: small
+        write_surface: medium
+        verification_strength: strong
+        expected_duration: short
+        status: planned
+        description: Fully specified
+`,
+    );
+    const result = await runPhaseImport({ cwd: dir, inputPath });
+    expect(result.completed_fields).toEqual([]);
+    // First step should be `plan lint`, not the defaults-review hint.
+    expect(result.suggested_next_steps[0]).toMatch(/plan lint/);
+  });
+
+  it("returns empty suggested_next_steps when nothing was imported (every phase skipped)", async () => {
+    await setupEmptyProject(dir);
+    // First import lands P1.
+    const first = await writeInput(
+      dir,
+      `phases:
+  - id: P1
+    name: First
+    weight: 10
+    objective: Already imported
+`,
+    );
+    await runPhaseImport({ cwd: dir, inputPath: first });
+
+    // Second import re-attempts P1 with --force → skipped, no imports.
+    const second = await writeInput(
+      dir,
+      `phases:
+  - id: P1
+    name: First again
+    weight: 10
+    objective: Collides
+`,
+    );
+    const result = await runPhaseImport({
+      cwd: dir,
+      inputPath: second,
+      force: true,
+    });
+    expect(result.imported_phases).toEqual([]);
+    expect(result.skipped_phases).toEqual(["P1"]);
+    expect(result.suggested_next_steps).toEqual([]);
+  });
+});

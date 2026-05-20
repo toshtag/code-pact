@@ -19,6 +19,15 @@ export type PlanPromptResult = {
   hasBrief: boolean;
   hasConstitution: boolean;
   clipboardCopied: boolean;
+  /**
+   * Additive guidance (v1.4 P13-T4). Always present, even as []. Names
+   * the canonical "prompt → import → lint → runbook" sequence so the
+   * AI-assisted planning loop is CLI-emitted, not docs-only.
+   *
+   * Field-presence-fixed per the P12 RunbookStep convention extended in
+   * P13: JSON consumers can assume the schema is constant.
+   */
+  suggested_next_steps: string[];
 };
 
 // ---------------------------------------------------------------------------
@@ -111,6 +120,30 @@ async function readFileOrNull(path: string): Promise<string | null> {
   }
 }
 
+/**
+ * Builds the additive `suggested_next_steps` array. Always returns the
+ * canonical four-step AI-assisted planning sequence; appends a
+ * brief/constitution capture hint when either is missing.
+ */
+function buildSuggestedNextSteps(
+  hasBrief: boolean,
+  hasConstitution: boolean,
+): string[] {
+  const steps: string[] = [];
+  if (!hasBrief || !hasConstitution) {
+    steps.push(
+      "Consider running `code-pact plan brief` and `code-pact plan constitution` first to capture intent and principles before invoking your AI agent.",
+    );
+  }
+  steps.push(
+    "Run the planning prompt above through your AI agent of choice (Claude, ChatGPT, etc.) and capture its YAML response into a file (e.g. `design/imports/p1.yaml`).",
+    "Run `code-pact phase import design/imports/p1.yaml --json` to ingest the AI-generated YAML.",
+    "Run `code-pact plan lint --json` to validate the imported phase.",
+    "Run `code-pact phase runbook <imported-phase-id> --json` to see the recommended per-phase next steps.",
+  );
+  return steps;
+}
+
 export async function runPlanPrompt(opts: PlanPromptOptions): Promise<PlanPromptResult> {
   const { cwd, locale, clipboard } = opts;
 
@@ -126,10 +159,14 @@ export async function runPlanPrompt(opts: PlanPromptOptions): Promise<PlanPrompt
     clipboardCopied = await copyToClipboard(prompt);
   }
 
+  const hasBrief = brief !== null;
+  const hasConstitution = constitution !== null;
+
   return {
     prompt,
-    hasBrief: brief !== null,
-    hasConstitution: constitution !== null,
+    hasBrief,
+    hasConstitution,
     clipboardCopied,
+    suggested_next_steps: buildSuggestedNextSteps(hasBrief, hasConstitution),
   };
 }

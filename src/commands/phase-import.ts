@@ -32,6 +32,15 @@ export type PhaseImportResult = {
   skipped_phases: string[];
   /** Task fields that were filled with defaults (empty when --strict or no gaps). */
   completed_fields: CompletedField[];
+  /**
+   * Additive guidance (v1.4 P13-T4). Always present, even as []. Names
+   * the canonical post-import sequence (plan lint → phase runbook → task
+   * runbook) so the dogfood loop is CLI-emitted, not docs-only.
+   *
+   * Field-presence-fixed per the P12 RunbookStep convention extended in
+   * P13: JSON consumers can assume the schema is constant.
+   */
+  suggested_next_steps: string[];
 };
 
 async function loadRoadmap(cwd: string): Promise<Roadmap> {
@@ -278,5 +287,51 @@ export async function runPhaseImport(
     imported_tasks: importedTaskIds,
     skipped_phases: skippedPhaseIds,
     completed_fields: completedFieldsAll,
+    suggested_next_steps: buildSuggestedNextSteps(
+      importedRefs,
+      importedTaskIds,
+      completedFieldsAll,
+    ),
   };
+}
+
+/**
+ * Builds the additive `suggested_next_steps` array (v1.4 P13-T4). Returns
+ * an empty array when nothing was imported. Otherwise emits the canonical
+ * post-import sequence and prepends a defaults-review hint when lenient
+ * mode filled fields.
+ */
+function buildSuggestedNextSteps(
+  importedRefs: PhaseRef[],
+  importedTaskIds: string[],
+  completedFieldsAll: CompletedField[],
+): string[] {
+  if (importedRefs.length === 0) return [];
+
+  const steps: string[] = [];
+
+  if (completedFieldsAll.length > 0) {
+    steps.push(
+      "Review the `completed_fields` array — every entry is a task field code-pact filled with a default. Confirm each is appropriate before treating the imported tasks as source-of-truth.",
+    );
+  }
+
+  steps.push("Run `code-pact plan lint --json` to validate the imported phase(s).");
+
+  // One runbook step per imported phase. Keep the suggestions tight when
+  // many phases are imported by listing the id explicitly so the user can
+  // pipe them straight into a runner.
+  for (const ref of importedRefs) {
+    steps.push(
+      `Run \`code-pact phase runbook ${ref.id} --json\` to see the recommended per-phase next steps (reconcile-batch step is the natural follow-up after the per-task loop starts).`,
+    );
+  }
+
+  if (importedTaskIds.length > 0) {
+    steps.push(
+      `Run \`code-pact task runbook ${importedTaskIds[0]} --json\` to see the per-task lifecycle starting from a fresh task.`,
+    );
+  }
+
+  return steps;
 }

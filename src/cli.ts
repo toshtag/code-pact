@@ -567,6 +567,7 @@ async function cmdPlanPrompt(
           has_brief: result.hasBrief,
           has_constitution: result.hasConstitution,
           clipboard_copied: result.clipboardCopied,
+          suggested_next_steps: result.suggested_next_steps,
         },
       })}\n`,
     );
