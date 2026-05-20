@@ -66,6 +66,14 @@ tasks:
       / reads / writes / acceptance_refs semantics, lint code
       taxonomy, backward-compatibility contract) before any
       src/ touches.
+    decision_refs:
+      - design/decisions/task-readiness-schema-rfc.md
+    writes:
+      - design/roadmap.yaml
+      - design/phases/P10-task-readiness-schema.yaml
+      - design/decisions/task-readiness-schema-rfc.md
+    acceptance_refs:
+      - design/decisions/task-readiness-schema-rfc.md
   - id: P10-T2
     type: architecture
     ambiguity: low
@@ -84,6 +92,22 @@ tasks:
       (optional = undefined = absent = old behaviour). Add unit
       tests under tests/unit/schemas/ that prove every existing
       v1.0.x phase fixture still parses unchanged.
+    depends_on:
+      - P10-T1
+    decision_refs:
+      - design/decisions/task-readiness-schema-rfc.md
+    reads:
+      - src/core/schemas/task.ts
+      - src/core/schemas/phase-import.ts
+      - src/commands/phase-import.ts
+    writes:
+      - src/core/schemas/task.ts
+      - src/core/schemas/phase-import.ts
+      - src/commands/phase-import.ts
+      - tests/unit/schemas/task.test.ts
+      - tests/unit/commands/phase-import.test.ts
+    acceptance_refs:
+      - design/decisions/task-readiness-schema-rfc.md
   - id: P10-T3
     type: feature
     ambiguity: low
@@ -109,6 +133,27 @@ tasks:
       reads / writes inline using node:fs/promises and existing
       helpers (supported subset: literal segments, `*` within a
       segment, `**` as a full segment only).
+    depends_on:
+      - P10-T2
+    decision_refs:
+      - design/decisions/task-readiness-schema-rfc.md
+    reads:
+      - src/core/plan/checks.ts
+      - src/core/plan/lint.ts
+      - src/core/adapters/file-state.ts
+      - src/core/schemas/task.ts
+    writes:
+      - src/core/path-safety.ts
+      - src/core/glob.ts
+      - src/core/plan/checks.ts
+      - src/core/plan/lint.ts
+      - src/core/adapters/file-state.ts
+      - docs/cli-contract.md
+      - tests/unit/error-code-surface.test.ts
+      - tests/unit/core/plan/checks.test.ts
+      - tests/unit/core/glob.test.ts
+    acceptance_refs:
+      - docs/cli-contract.md
   - id: P10-T4
     type: feature
     ambiguity: low
@@ -131,6 +176,25 @@ tasks:
       decision files are surfaced into the pack regardless of
       context_size (in addition to, not replacing, the existing
       context_size:large allDecisions path).
+    depends_on:
+      - P10-T2
+      - P10-T3
+    decision_refs:
+      - design/decisions/task-readiness-schema-rfc.md
+    reads:
+      - src/core/pack/index.ts
+      - src/core/pack/formatters/markdown.ts
+      - src/core/progress/task-state.ts
+      - src/core/glob.ts
+      - src/core/schemas/task.ts
+    writes:
+      - src/core/pack/index.ts
+      - src/core/pack/formatters/markdown.ts
+      - tests/integration/pack-byte-identical.test.ts
+      - tests/unit/core/pack-declared-sections.test.ts
+      - tests/fixtures/golden/pack-v1.0.2-shaped.md
+    acceptance_refs:
+      - design/decisions/task-readiness-schema-rfc.md
   - id: P10-T5
     type: docs
     ambiguity: low
@@ -149,6 +213,24 @@ tasks:
       Task schema reference with the new optional fields. Add a
       short example to docs/concepts/ or docs/workflows/ showing
       a phase YAML that exercises the new fields end-to-end.
+    depends_on:
+      - P10-T2
+      - P10-T3
+      - P10-T4
+    decision_refs:
+      - design/decisions/task-readiness-schema-rfc.md
+    reads:
+      - docs/cli-contract.md
+      - docs/migration.md
+      - docs/getting-started.md
+      - src/core/schemas/task.ts
+    writes:
+      - docs/migration.md
+      - docs/cli-contract.md
+      - docs/getting-started.md
+      - docs/concepts/task-readiness-fields.md
+    acceptance_refs:
+      - docs/migration.md
   - id: P10-T6
     type: refactor
     ambiguity: medium
@@ -168,3 +250,25 @@ tasks:
       Goal: prove the gate is observable on the dogfood corpus,
       and surface any RFC gap that only becomes visible in real
       usage. Full retroactive backfill is NOT in scope.
+
+      Concrete scope: declare the five P10 fields on each P10 task
+      (T1-T6, including this one). P9 and earlier phases are left
+      untouched. Two TASK_WRITES_PROTECTED_PATH warnings are
+      expected after merge — they're proof the gate works, not a
+      regression: P10-T1 declares writes against design/roadmap.yaml
+      and design/phases/P10-task-readiness-schema.yaml, and this
+      task (P10-T6) declares writes against the same phase YAML.
+      P14 governance is the consumer that promotes these to errors.
+    depends_on:
+      - P10-T2
+      - P10-T3
+      - P10-T4
+      - P10-T5
+    decision_refs:
+      - design/decisions/task-readiness-schema-rfc.md
+    reads:
+      - design/phases/P10-task-readiness-schema.yaml
+    writes:
+      - design/phases/P10-task-readiness-schema.yaml
+    acceptance_refs:
+      - design/phases/P10-task-readiness-schema.yaml
