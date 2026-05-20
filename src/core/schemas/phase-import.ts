@@ -26,6 +26,14 @@ export const TaskImport = z.object({
   expected_duration: ExpectedDuration.optional(),
   status: TaskStatus.optional(),
   requires_decision: z.boolean().optional(),
+  // P10 — Task Readiness Schema additions. All optional; forwarded
+  // verbatim by applyTaskDefaults() without synthetic defaults so
+  // absent == undefined == old behaviour.
+  depends_on: z.array(z.string().min(1)).optional(),
+  decision_refs: z.array(z.string().min(1)).optional(),
+  reads: z.array(z.string().min(1)).optional(),
+  writes: z.array(z.string().min(1)).optional(),
+  acceptance_refs: z.array(z.string().min(1)).optional(),
 });
 export type TaskImport = z.infer<typeof TaskImport>;
 
