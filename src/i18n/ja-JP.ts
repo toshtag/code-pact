@@ -146,7 +146,8 @@ export const messages = {
       defaultAgentPrompt: "デフォルトのエージェントを選択してください",
       verifyCommandPrompt: "デフォルトの検証コマンド",
       verifyCommandHint: "そのままで良ければ Enter",
-      createSamplePrompt: "プロジェクト構造を理解するためのサンプルフェーズファイルを作成しますか?",
+      createSamplePrompt:
+        "per-task ループの確認用にチュートリアルフェーズ (TUTORIAL) を作成しますか？スモークテスト後に削除して構いません。",
       generateAdaptersPrompt:
         "AI エージェント用の instruction ファイルをいま生成しますか? (CLAUDE.md / AGENTS.md など)",
       summary: (agents: string[], defaultAgent: string): string =>

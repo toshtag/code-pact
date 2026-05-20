@@ -127,7 +127,7 @@ describe("runInitWizard — verify command", () => {
     ]);
     await runInitWizard({ cwd: tmpDir, force: false, json: false, prompter });
     const phase = await readFile(
-      join(tmpDir, "design", "phases", "P1-welcome.yaml"),
+      join(tmpDir, "design", "phases", "TUTORIAL-walkthrough.yaml"),
       "utf8",
     );
     expect(phase).toContain("pnpm test");
@@ -144,7 +144,7 @@ describe("runInitWizard — verify command", () => {
     ]);
     await runInitWizard({ cwd: tmpDir, force: false, json: false, prompter });
     const phase = await readFile(
-      join(tmpDir, "design", "phases", "P1-welcome.yaml"),
+      join(tmpDir, "design", "phases", "TUTORIAL-walkthrough.yaml"),
       "utf8",
     );
     expect(phase).toContain("vitest run");
@@ -162,7 +162,7 @@ describe("runInitWizard — sample phase", () => {
       "n", // brief
     ]);
     const result = await runInitWizard({ cwd: tmpDir, force: false, json: false, prompter });
-    const phaseCreated = result.created.some((p) => p.includes("P1-welcome.yaml"));
+    const phaseCreated = result.created.some((p) => p.includes("TUTORIAL-walkthrough.yaml"));
     expect(phaseCreated).toBe(true);
   });
 
@@ -176,7 +176,7 @@ describe("runInitWizard — sample phase", () => {
       "n", // brief
     ]);
     const result = await runInitWizard({ cwd: tmpDir, force: false, json: false, prompter });
-    const phaseCreated = result.created.some((p) => p.includes("P1-welcome.yaml"));
+    const phaseCreated = result.created.some((p) => p.includes("TUTORIAL-walkthrough.yaml"));
     expect(phaseCreated).toBe(false);
   });
 });

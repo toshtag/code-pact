@@ -146,7 +146,8 @@ export const messages = {
       defaultAgentPrompt: "Which agent should be the default?",
       verifyCommandPrompt: "Default verification command",
       verifyCommandHint: "Press Enter to keep the default",
-      createSamplePrompt: "Create an example phase file to understand the project structure?",
+      createSamplePrompt:
+        "Create a tutorial sample phase (TUTORIAL) to walk through the per-task loop? It is safe to delete after the smoke test.",
       generateAdaptersPrompt:
         "Generate AI agent instruction files now? (CLAUDE.md / AGENTS.md etc.)",
       summary: (agents: string[], defaultAgent: string): string =>

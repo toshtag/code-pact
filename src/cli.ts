@@ -119,6 +119,7 @@ async function cmdInit(
       force: { type: "boolean" },
       json: { type: "boolean" },
       "non-interactive": { type: "boolean" },
+      "sample-phase": { type: "boolean" },
     },
     strict: false,
     allowPositionals: false,
@@ -126,13 +127,15 @@ async function cmdInit(
 
   const json = globalJson || values.json === true;
   const nonInteractive = values["non-interactive"] === true;
+  const samplePhase = values["sample-phase"] === true;
   const cwd = process.cwd();
   const force = values.force === true;
 
   // Wizard branch — TTY, no input flags supplied, no JSON contract requested,
   // and the user did not opt out via --non-interactive. Any of these signals
   // routes through the flag-based path below to keep CI and automation
-  // safe (matching docs/cli-contract.md).
+  // safe (matching docs/cli-contract.md). `--sample-phase` does not switch
+  // modes — it only controls whether the sample phase is created.
   const hasInitFlag =
     typeof values.agent === "string" ||
     typeof values.locale === "string" ||
@@ -141,7 +144,12 @@ async function cmdInit(
 
   if (useWizard) {
     try {
-      const result = await runInitWizard({ cwd, force, json: false });
+      const result = await runInitWizard({
+        cwd,
+        force,
+        json: false,
+        samplePhaseOverride: samplePhase ? true : undefined,
+      });
       for (const f of result.created) {
         process.stderr.write(`  created  ${f}\n`);
       }
@@ -217,6 +225,7 @@ async function cmdInit(
       agents,
       force,
       json,
+      ...(samplePhase ? { createSamplePhase: true } : {}),
     });
 
     if (json) {

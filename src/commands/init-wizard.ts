@@ -12,6 +12,12 @@ export type InitWizardOptions = {
   cwd: string;
   force: boolean;
   json: boolean;
+  /**
+   * When true, the wizard skips the "create sample phase?" prompt and
+   * forces creation. Passed from the CLI when `--sample-phase` was set.
+   * P13+.
+   */
+  samplePhaseOverride?: boolean;
   /** Optional pre-built prompter (for tests). Defaults to stdin/stderr. */
   prompter?: Prompter;
 };
@@ -64,8 +70,13 @@ export async function runInitWizard(opts: InitWizardOptions): Promise<InitResult
     const verifyRaw = await prompter.ask(verifyPrompt);
     const verifyCommand = verifyRaw.length > 0 ? verifyRaw : defaultVerify;
 
-    // 6. Sample phase — yes/no.
-    const createSamplePhase = await prompter.askYesNo(m.createSamplePrompt, true);
+    // 6. Sample phase — yes/no. When the CLI passed `--sample-phase`,
+    //    the wizard skips this prompt and forces creation (per the
+    //    P13 RFC's generation-policy table).
+    const createSamplePhase =
+      opts.samplePhaseOverride === true
+        ? true
+        : await prompter.askYesNo(m.createSamplePrompt, true);
 
     // 7. Project brief — optional, yes by default. Questions are collected
     //    upfront (before any file operations) so the wizard feels linear.

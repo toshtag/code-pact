@@ -265,6 +265,27 @@ describe("json-stdout contract: state-mutating Stable (v1.0) commands", () => {
     );
   });
 
+  it("init --non-interactive --sample-phase --json (P13 tutorial bootstrap)", async () => {
+    const p = await createTempProject({
+      init: false,
+      prefix: "code-pact-json-stdout-init-sample-",
+    });
+    cleanups.push(p.cleanup);
+    expectStdoutIsJson(
+      p.run([
+        "init",
+        "--non-interactive",
+        "--agent",
+        "claude-code",
+        "--locale",
+        "en-US",
+        "--sample-phase",
+        "--json",
+      ]),
+      "init --sample-phase",
+    );
+  });
+
   it("phase add --json", async () => {
     const p = await freshProject("phase-add");
     expectStdoutIsJson(
