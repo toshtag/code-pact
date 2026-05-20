@@ -120,3 +120,195 @@ describe("runTaskAdd — error cases", () => {
     ).rejects.toMatchObject({ code: "DUPLICATE_TASK_ID" });
   });
 });
+
+// ---------------------------------------------------------------------------
+// v1.4 P13-T3: non-interactive path (no prompter required)
+// ---------------------------------------------------------------------------
+
+describe("runTaskAdd — non-interactive path (P13-T3)", () => {
+  it("appends a task with required-only spec; defaults all readiness fields to medium", async () => {
+    const result = await runTaskAdd({
+      cwd,
+      phaseId: "P1",
+      locale: "en-US",
+      nonInteractive: {
+        description: "Non-interactive add",
+        type: "feature",
+      },
+    });
+    expect(result.taskId).toBe("P1-T1");
+
+    const phase = parseYaml(await readFile(join(cwd, result.phasePath), "utf8")) as {
+      tasks: Array<{
+        id: string;
+        type: string;
+        description: string;
+        ambiguity: string;
+        risk: string;
+        context_size: string;
+        write_surface: string;
+        verification_strength: string;
+        expected_duration: string;
+        status: string;
+      }>;
+    };
+    const t = phase.tasks[0]!;
+    expect(t.id).toBe("P1-T1");
+    expect(t.type).toBe("feature");
+    expect(t.description).toBe("Non-interactive add");
+    expect(t.status).toBe("planned");
+    expect(t.ambiguity).toBe("medium");
+    expect(t.risk).toBe("medium");
+    expect(t.context_size).toBe("medium");
+    expect(t.write_surface).toBe("medium");
+    expect(t.verification_strength).toBe("medium");
+    expect(t.expected_duration).toBe("medium");
+  });
+
+  it("respects explicit readiness overrides", async () => {
+    const result = await runTaskAdd({
+      cwd,
+      phaseId: "P1",
+      locale: "en-US",
+      nonInteractive: {
+        description: "High-risk refactor",
+        type: "refactor",
+        ambiguity: "high",
+        risk: "high",
+        context_size: "large",
+        write_surface: "high",
+        verification_strength: "strong",
+        expected_duration: "long",
+      },
+    });
+    const phase = parseYaml(await readFile(join(cwd, result.phasePath), "utf8")) as {
+      tasks: Array<{
+        ambiguity: string;
+        risk: string;
+        context_size: string;
+        write_surface: string;
+        verification_strength: string;
+        expected_duration: string;
+      }>;
+    };
+    const t = phase.tasks[0]!;
+    expect(t.ambiguity).toBe("high");
+    expect(t.risk).toBe("high");
+    expect(t.context_size).toBe("large");
+    expect(t.write_surface).toBe("high");
+    expect(t.verification_strength).toBe("strong");
+    expect(t.expected_duration).toBe("long");
+  });
+
+  it("stores P10 optional fields verbatim (no lint here; lint is plan lint's responsibility)", async () => {
+    const result = await runTaskAdd({
+      cwd,
+      phaseId: "P1",
+      locale: "en-US",
+      nonInteractive: {
+        description: "Task with P10 declarations",
+        type: "feature",
+        depends_on: ["P1-T0"],
+        decision_refs: ["design/decisions/foo.md"],
+        reads: ["src/foo.ts", "src/bar.ts"],
+        writes: ["src/baz.ts"],
+        acceptance_refs: ["docs/acceptance/foo.md"],
+      },
+    });
+    const phase = parseYaml(await readFile(join(cwd, result.phasePath), "utf8")) as {
+      tasks: Array<{
+        depends_on?: string[];
+        decision_refs?: string[];
+        reads?: string[];
+        writes?: string[];
+        acceptance_refs?: string[];
+      }>;
+    };
+    const t = phase.tasks[0]!;
+    expect(t.depends_on).toEqual(["P1-T0"]);
+    expect(t.decision_refs).toEqual(["design/decisions/foo.md"]);
+    expect(t.reads).toEqual(["src/foo.ts", "src/bar.ts"]);
+    expect(t.writes).toEqual(["src/baz.ts"]);
+    expect(t.acceptance_refs).toEqual(["docs/acceptance/foo.md"]);
+  });
+
+  it("omits P10 fields when arrays are empty (no schema-noise from blank arrays)", async () => {
+    const result = await runTaskAdd({
+      cwd,
+      phaseId: "P1",
+      locale: "en-US",
+      nonInteractive: {
+        description: "Task without P10 fields",
+        type: "docs",
+        depends_on: [],
+        reads: [],
+      },
+    });
+    const phase = parseYaml(await readFile(join(cwd, result.phasePath), "utf8")) as {
+      tasks: Array<Record<string, unknown>>;
+    };
+    const t = phase.tasks[0]!;
+    expect(t).not.toHaveProperty("depends_on");
+    expect(t).not.toHaveProperty("reads");
+  });
+
+  it("always writes status: planned regardless of input (--status is intentionally not part of the spec)", async () => {
+    const result = await runTaskAdd({
+      cwd,
+      phaseId: "P1",
+      locale: "en-US",
+      nonInteractive: {
+        description: "Sanity check",
+        type: "feature",
+      },
+    });
+    const phase = parseYaml(await readFile(join(cwd, result.phasePath), "utf8")) as {
+      tasks: Array<{ status: string }>;
+    };
+    expect(phase.tasks[0]!.status).toBe("planned");
+  });
+
+  it("non-interactive path does not open a prompter (no TTY required)", async () => {
+    // No prompter, no scripted reader — if the implementation tries to
+    // open one, Prompter.fromIO() will be called and the test will hang
+    // waiting for stdin in non-TTY test environment. Reaching the assertion
+    // proves the prompter was not opened.
+    const result = await runTaskAdd({
+      cwd,
+      phaseId: "P1",
+      locale: "en-US",
+      nonInteractive: { description: "No prompter", type: "test" },
+    });
+    expect(result.taskId).toBe("P1-T1");
+  });
+
+  it("throws DUPLICATE_TASK_ID on explicit id collision in non-interactive mode", async () => {
+    await runTaskAdd({
+      cwd,
+      phaseId: "P1",
+      locale: "en-US",
+      id: "P1-T1",
+      nonInteractive: { description: "First", type: "feature" },
+    });
+    await expect(
+      runTaskAdd({
+        cwd,
+        phaseId: "P1",
+        locale: "en-US",
+        id: "P1-T1",
+        nonInteractive: { description: "Second", type: "feature" },
+      }),
+    ).rejects.toMatchObject({ code: "DUPLICATE_TASK_ID" });
+  });
+
+  it("throws PHASE_NOT_FOUND in non-interactive mode for unknown phase", async () => {
+    await expect(
+      runTaskAdd({
+        cwd,
+        phaseId: "P999",
+        locale: "en-US",
+        nonInteractive: { description: "irrelevant", type: "feature" },
+      }),
+    ).rejects.toMatchObject({ code: "PHASE_NOT_FOUND" });
+  });
+});

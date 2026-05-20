@@ -286,6 +286,66 @@ describe("json-stdout contract: state-mutating Stable (v1.0) commands", () => {
     );
   });
 
+  it("task add <phase> --description --type --json (P13 non-interactive)", async () => {
+    const p = await createTempProject({
+      init: false,
+      prefix: "code-pact-json-stdout-task-add-noni-",
+    });
+    cleanups.push(p.cleanup);
+    p.run([
+      "init",
+      "--non-interactive",
+      "--agent",
+      "claude-code",
+      "--locale",
+      "en-US",
+      "--sample-phase",
+      "--json",
+    ]);
+    expectStdoutIsJson(
+      p.run([
+        "task",
+        "add",
+        "TUTORIAL",
+        "--description",
+        "json-stdout regression",
+        "--type",
+        "docs",
+        "--json",
+      ]),
+      "task add non-interactive",
+    );
+  });
+
+  it("task add <phase> --type without --description --json (P13 partial-flags CONFIG_ERROR)", async () => {
+    const p = await createTempProject({
+      init: false,
+      prefix: "code-pact-json-stdout-task-add-partial-",
+    });
+    cleanups.push(p.cleanup);
+    p.run([
+      "init",
+      "--non-interactive",
+      "--agent",
+      "claude-code",
+      "--locale",
+      "en-US",
+      "--sample-phase",
+      "--json",
+    ]);
+    expectStdoutIsJson(
+      p.run([
+        "task",
+        "add",
+        "TUTORIAL",
+        "--type",
+        "docs",
+        "--json",
+      ]),
+      "task add partial-flags CONFIG_ERROR",
+    );
+  });
+
   it("phase add --json", async () => {
     const p = await freshProject("phase-add");
     expectStdoutIsJson(

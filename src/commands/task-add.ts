@@ -8,12 +8,40 @@ import { TaskType, type Task } from "../core/schemas/task.ts";
 import { Prompter } from "../lib/prompt.ts";
 import { messages as messageCatalog, type Locale, type Messages } from "../i18n/index.ts";
 
+/**
+ * Non-interactive task spec (v1.4 P13-T3). When `TaskAddOptions.nonInteractive`
+ * is provided, `runTaskAdd` bypasses the prompter entirely and uses the
+ * supplied values. `--status` is intentionally NOT part of this spec —
+ * newly added tasks are always `status: planned`; historical state must
+ * use `phase import`.
+ */
+export type TaskAddNonInteractiveSpec = {
+  description: string;
+  type: Task["type"];
+  ambiguity?: Task["ambiguity"];
+  risk?: Task["risk"];
+  context_size?: Task["context_size"];
+  write_surface?: Task["write_surface"];
+  verification_strength?: Task["verification_strength"];
+  expected_duration?: Task["expected_duration"];
+  depends_on?: string[];
+  decision_refs?: string[];
+  reads?: string[];
+  writes?: string[];
+  acceptance_refs?: string[];
+};
+
 export type TaskAddOptions = {
   cwd: string;
   phaseId: string;
   locale: Locale;
   /** Explicit task id. Auto-generated as <phaseId>-T<n> when omitted. */
   id?: string;
+  /**
+   * Non-interactive flag-driven path (v1.4 P13-T3). When set, the
+   * wizard prompter is bypassed and the spec is applied directly.
+   */
+  nonInteractive?: TaskAddNonInteractiveSpec;
   prompter?: Prompter;
 };
 
@@ -58,9 +86,48 @@ async function askRequired(prompter: Prompter, question: string): Promise<string
   }
 }
 
+function buildNonInteractiveTask(
+  taskId: string,
+  spec: TaskAddNonInteractiveSpec,
+): Task {
+  return {
+    id: taskId,
+    type: spec.type,
+    ambiguity: spec.ambiguity ?? "medium",
+    risk: spec.risk ?? "medium",
+    context_size: spec.context_size ?? "medium",
+    write_surface: spec.write_surface ?? "medium",
+    verification_strength: spec.verification_strength ?? "medium",
+    expected_duration: spec.expected_duration ?? "medium",
+    status: "planned",
+    description: spec.description,
+    // P10 optional fields. Stored as provided (basic string validation
+    // happened at the CLI boundary); existence checks / glob validity /
+    // unsafe-path detection / protected-path advisories remain the
+    // responsibility of `plan lint` per the P13 RFC.
+    ...(spec.depends_on && spec.depends_on.length > 0
+      ? { depends_on: spec.depends_on }
+      : {}),
+    ...(spec.decision_refs && spec.decision_refs.length > 0
+      ? { decision_refs: spec.decision_refs }
+      : {}),
+    ...(spec.reads && spec.reads.length > 0 ? { reads: spec.reads } : {}),
+    ...(spec.writes && spec.writes.length > 0 ? { writes: spec.writes } : {}),
+    ...(spec.acceptance_refs && spec.acceptance_refs.length > 0
+      ? { acceptance_refs: spec.acceptance_refs }
+      : {}),
+  };
+}
+
 export async function runTaskAdd(opts: TaskAddOptions): Promise<TaskAddResult> {
-  const prompter = opts.prompter ?? Prompter.fromIO();
-  const ownsPrompter = opts.prompter === undefined;
+  // When `nonInteractive` is set we bypass the prompter entirely — no
+  // stdin/stderr handle is opened, which is essential for CI / scripted
+  // bootstrap paths.
+  const useNonInteractive = opts.nonInteractive !== undefined;
+  const prompter = useNonInteractive
+    ? undefined
+    : (opts.prompter ?? Prompter.fromIO());
+  const ownsPrompter = !useNonInteractive && opts.prompter === undefined;
   const m = messageCatalog[opts.locale].wizard.task;
 
   try {
@@ -83,24 +150,29 @@ export async function runTaskAdd(opts: TaskAddOptions): Promise<TaskAddResult> {
       throw err;
     }
 
-    const description = await askRequired(prompter, m.descriptionPrompt);
+    let newTask: Task;
+    if (opts.nonInteractive) {
+      newTask = buildNonInteractiveTask(taskId, opts.nonInteractive);
+    } else {
+      const description = await askRequired(prompter!, m.descriptionPrompt);
 
-    const typeLabels = TASK_TYPE_VALUES.map((v) => TASK_TYPE_LABELS[v] ?? v);
-    const typeIdx = await prompter.askChoice(m.typePrompt, typeLabels);
-    const type = TASK_TYPE_VALUES[typeIdx]!;
+      const typeLabels = TASK_TYPE_VALUES.map((v) => TASK_TYPE_LABELS[v] ?? v);
+      const typeIdx = await prompter!.askChoice(m.typePrompt, typeLabels);
+      const type = TASK_TYPE_VALUES[typeIdx]!;
 
-    const newTask: Task = {
-      id: taskId,
-      type,
-      ambiguity: "medium",
-      risk: "medium",
-      context_size: "medium",
-      write_surface: "medium",
-      verification_strength: "medium",
-      expected_duration: "medium",
-      status: "planned",
-      description,
-    };
+      newTask = {
+        id: taskId,
+        type,
+        ambiguity: "medium",
+        risk: "medium",
+        context_size: "medium",
+        write_surface: "medium",
+        verification_strength: "medium",
+        expected_duration: "medium",
+        status: "planned",
+        description,
+      };
+    }
 
     const updatedPhase: Phase = {
       ...phase,
@@ -112,6 +184,6 @@ export async function runTaskAdd(opts: TaskAddOptions): Promise<TaskAddResult> {
 
     return { phaseId: opts.phaseId, taskId, phasePath: ref.path };
   } finally {
-    if (ownsPrompter) prompter.close();
+    if (ownsPrompter && prompter) prompter.close();
   }
 }
