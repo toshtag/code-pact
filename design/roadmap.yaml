@@ -35,3 +35,6 @@ phases:
   - id: P12
     path: design/phases/P12-lightweight-runbook.yaml
     weight: 20
+  - id: P13
+    path: design/phases/P13-planning-ux-init-hardening.yaml
+    weight: 15
