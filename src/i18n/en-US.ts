@@ -179,6 +179,22 @@ export const messages = {
       invalidTransition: (taskId: string, current: string): string =>
         `Task "${taskId}" is ${current}. Run \`code-pact task resume ${taskId}\` before completing.`,
     },
+    finalize: {
+      taskNotFound: (taskId: string): string =>
+        `Task "${taskId}" not found in any phase.`,
+      ambiguous: (taskId: string, phases: string[]): string =>
+        `Task "${taskId}" exists in multiple phases: ${phases.join(", ")}.`,
+      notEligible: (taskId: string, current: string): string =>
+        `Task "${taskId}" is not finalize-eligible: derived state is "${current}", expected "done". Run \`code-pact task complete ${taskId}\` first.`,
+      writeRefused: (taskId: string, reason: string): string =>
+        `Refused to finalize "${taskId}": ${reason}.`,
+      alreadyFinalized: (taskId: string): string =>
+        `Task "${taskId}" design status is already "done". No change written.`,
+      success: (taskId: string, file: string): string =>
+        `Finalized "${taskId}" in ${file}.`,
+      wouldFinalize: (taskId: string, file: string): string =>
+        `Dry run: would flip "${taskId}" status to "done" in ${file}. Run with --write to apply.`,
+    },
     start: {
       success: (taskId: string, agent: string): string =>
         `Recorded started event for "${taskId}" (agent: ${agent}).`,

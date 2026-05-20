@@ -50,6 +50,7 @@ import { runDoctor, formatDoctor } from "./commands/doctor.ts";
 import { runValidate } from "./commands/validate.ts";
 import { runTaskContext } from "./commands/task-context.ts";
 import { runTaskComplete } from "./commands/task-complete.ts";
+import { runTaskFinalize } from "./commands/task-finalize.ts";
 import { runTaskStart } from "./commands/task-start.ts";
 import { runTaskBlock } from "./commands/task-block.ts";
 import { runTaskResume } from "./commands/task-resume.ts";
@@ -1841,8 +1842,11 @@ async function cmdTask(argv: string[], locale: Locale, globalJson: boolean): Pro
   if (subcommand === "resume") {
     return cmdTaskResume(rest, locale, globalJson);
   }
+  if (subcommand === "finalize") {
+    return cmdTaskFinalize(rest, locale, globalJson);
+  }
 
-  const msg = `task: unknown subcommand "${subcommand ?? ""}". Use: add | context | start | status | block | resume | complete`;
+  const msg = `task: unknown subcommand "${subcommand ?? ""}". Use: add | context | start | status | block | resume | complete | finalize`;
   if (globalJson) {
     process.stdout.write(
       `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
@@ -2200,6 +2204,193 @@ async function cmdTaskComplete(
       process.stdout.write(
         `${JSON.stringify({ ok: false, error: { code: outCode, message: msg } })}\n`,
       );
+    } else {
+      process.stderr.write(`${msg}\n`);
+    }
+    return 2;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Command: task finalize (v1.2 P11)
+// ---------------------------------------------------------------------------
+
+async function cmdTaskFinalize(
+  argv: string[],
+  locale: Locale,
+  globalJson: boolean,
+): Promise<number> {
+  const m = messages[locale];
+
+  let values: Record<string, unknown>;
+  let positionals: string[];
+  try {
+    ({ values, positionals } = strictParse(
+      "task finalize",
+      argv,
+      {
+        json: { type: "boolean" },
+        write: { type: "boolean" },
+      },
+      { allowPositionals: true },
+    ));
+  } catch (err) {
+    if (!(err instanceof ConfigError)) throw err;
+    const json = globalJson || argv.includes("--json");
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: err.message } })}\n`,
+      );
+    } else {
+      process.stderr.write(`${err.message}\n`);
+    }
+    return 2;
+  }
+
+  const json = globalJson || values.json === true;
+  const write = values.write === true;
+  const taskId = positionals[0];
+  if (!taskId) {
+    const msg = "task finalize requires a task id (e.g. `task finalize P1-T1`).";
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
+      );
+    } else {
+      process.stderr.write(`${msg}\n`);
+    }
+    return 2;
+  }
+  const cwd = process.cwd();
+
+  try {
+    const result = await runTaskFinalize({ cwd, taskId, write });
+
+    if (result.kind === "already_finalized") {
+      if (json) {
+        process.stdout.write(
+          `${JSON.stringify({
+            ok: true,
+            data: {
+              kind: "already_finalized",
+              task_id: result.task_id,
+              phase_id: result.phase_id,
+              file: result.file,
+              current_status: result.current_status,
+              target_status: result.target_status,
+              acceptance_refs_check: result.acceptance_refs_check,
+              declared_writes: result.declared_writes,
+              depends_on_check: result.depends_on_check,
+            },
+          })}\n`,
+        );
+      } else {
+        process.stdout.write(`${m.task.finalize.alreadyFinalized(taskId)}\n`);
+      }
+      return 0;
+    }
+
+    if (result.kind === "would_finalize") {
+      if (json) {
+        process.stdout.write(
+          `${JSON.stringify({
+            ok: true,
+            data: {
+              kind: "would_finalize",
+              task_id: result.task_id,
+              phase_id: result.phase_id,
+              file: result.file,
+              current_status: result.current_status,
+              target_status: result.target_status,
+              planned_writes: result.planned_writes,
+              acceptance_refs_check: result.acceptance_refs_check,
+              declared_writes: result.declared_writes,
+              depends_on_check: result.depends_on_check,
+            },
+          })}\n`,
+        );
+      } else {
+        process.stdout.write(
+          `${m.task.finalize.wouldFinalize(taskId, result.file)}\n`,
+        );
+      }
+      return 0;
+    }
+
+    // result.kind === "finalized"
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({
+          ok: true,
+          data: {
+            kind: "finalized",
+            task_id: result.task_id,
+            phase_id: result.phase_id,
+            file: result.file,
+            current_status: result.current_status,
+            target_status: result.target_status,
+            applied_writes: result.applied_writes,
+            skipped_writes: result.skipped_writes,
+            acceptance_refs_check: result.acceptance_refs_check,
+            declared_writes: result.declared_writes,
+            depends_on_check: result.depends_on_check,
+          },
+        })}\n`,
+      );
+    } else {
+      process.stdout.write(`${m.task.finalize.success(taskId, result.file)}\n`);
+    }
+    return 0;
+  } catch (err: unknown) {
+    if (!(err instanceof Error)) throw err;
+    const code = (err as NodeJS.ErrnoException).code;
+
+    let msg: string;
+    let outCode: string;
+    let extraData: Record<string, unknown> | undefined;
+
+    switch (code) {
+      case "TASK_NOT_FOUND":
+        msg = m.task.finalize.taskNotFound(taskId);
+        outCode = "TASK_NOT_FOUND";
+        break;
+      case "AMBIGUOUS_TASK_ID": {
+        const phases =
+          (err as NodeJS.ErrnoException & { phases?: string[] }).phases ?? [];
+        msg = m.task.finalize.ambiguous(taskId, phases);
+        outCode = "AMBIGUOUS_TASK_ID";
+        break;
+      }
+      case "TASK_FINALIZE_NOT_ELIGIBLE": {
+        const current =
+          (err as NodeJS.ErrnoException & { current?: string }).current ?? "";
+        const phase_id =
+          (err as NodeJS.ErrnoException & { phase_id?: string }).phase_id ?? "";
+        msg = m.task.finalize.notEligible(taskId, current);
+        outCode = "TASK_FINALIZE_NOT_ELIGIBLE";
+        extraData = { task_id: taskId, phase_id, current };
+        break;
+      }
+      case "TASK_FINALIZE_WRITE_REFUSED": {
+        const reason =
+          (err as NodeJS.ErrnoException & { reason?: string }).reason ?? "";
+        const file =
+          (err as NodeJS.ErrnoException & { file?: string }).file ?? "";
+        msg = m.task.finalize.writeRefused(taskId, err.message);
+        outCode = "TASK_FINALIZE_WRITE_REFUSED";
+        extraData = { task_id: taskId, file, reason };
+        break;
+      }
+      default:
+        throw err;
+    }
+    if (json) {
+      const envelope: Record<string, unknown> = {
+        ok: false,
+        error: { code: outCode, message: msg },
+      };
+      if (extraData) envelope.data = extraData;
+      process.stdout.write(`${JSON.stringify(envelope)}\n`);
     } else {
       process.stderr.write(`${msg}\n`);
     }

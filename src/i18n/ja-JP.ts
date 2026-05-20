@@ -177,6 +177,22 @@ export const messages = {
       invalidTransition: (taskId: string, current: string): string =>
         `タスク "${taskId}" は ${current} 状態です。先に \`code-pact task resume ${taskId}\` を実行してください。`,
     },
+    finalize: {
+      taskNotFound: (taskId: string): string =>
+        `タスク "${taskId}" がどのフェーズにも見つかりません。`,
+      ambiguous: (taskId: string, phases: string[]): string =>
+        `タスク "${taskId}" は複数のフェーズに存在します: ${phases.join(", ")}`,
+      notEligible: (taskId: string, current: string): string =>
+        `タスク "${taskId}" は finalize できません: derived 状態が "${current}" で、"done" が必要です。先に \`code-pact task complete ${taskId}\` を実行してください。`,
+      writeRefused: (taskId: string, reason: string): string =>
+        `タスク "${taskId}" の finalize は拒否されました: ${reason}`,
+      alreadyFinalized: (taskId: string): string =>
+        `タスク "${taskId}" の design status は既に "done" です。書き込みは行いませんでした。`,
+      success: (taskId: string, file: string): string =>
+        `タスク "${taskId}" を ${file} 上で finalize しました。`,
+      wouldFinalize: (taskId: string, file: string): string =>
+        `Dry run: ${file} 上でタスク "${taskId}" の status を "done" に書き換える想定です。--write で適用してください。`,
+    },
     start: {
       success: (taskId: string, agent: string): string =>
         `タスク "${taskId}" の started イベントを記録しました (agent: ${agent})。`,
