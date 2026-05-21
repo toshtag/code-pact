@@ -7,6 +7,7 @@ import type { Roadmap } from "../schemas/roadmap.ts";
 import { assertSafeRelativePath } from "../path-safety.ts";
 import {
   findProtectedPathOverlaps,
+  type ProtectedPathEntry,
   validateGlobSyntax,
   walkAndMatch,
 } from "../glob.ts";
@@ -459,11 +460,21 @@ export function detectTaskWritesGlobInvalid(phases: PhaseEntry[]): PlanIssue[] {
 }
 
 /**
- * `writes` glob covers a protected path. P10 advisory warning; P14
- * governance may promote this to error severity once the policy is
- * configurable.
+ * `writes` glob covers a protected path. P10 advisory warning. The
+ * protected-paths list is loaded from `design/rules/protected-paths.md`
+ * via `loadProtectedPaths` (v1.6 P15-T3); when the rule file is absent
+ * the hardcoded `PROTECTED_PATHS` constant in `src/core/glob.ts` is
+ * the fallback.
+ *
+ * Accepts an optional `protectedPaths` parameter for callers that have
+ * already loaded the list (lint orchestrator does this once per run);
+ * omitting it falls back to the hardcoded defaults so this function
+ * remains usable in isolation (tests, ad-hoc scripts, future REPL).
  */
-export function detectTaskWritesProtectedPath(phases: PhaseEntry[]): PlanIssue[] {
+export function detectTaskWritesProtectedPath(
+  phases: PhaseEntry[],
+  protectedPaths?: readonly ProtectedPathEntry[],
+): PlanIssue[] {
   const issues: PlanIssue[] = [];
   for (const { phase, ref } of phases) {
     for (const task of phase.tasks ?? []) {
@@ -472,7 +483,7 @@ export function detectTaskWritesProtectedPath(phases: PhaseEntry[]): PlanIssue[]
         // Don't double-report on already-broken patterns.
         if (safePathReason(g) !== "") return;
         if (validateGlobSyntax(g) !== null) return;
-        const overlaps = findProtectedPathOverlaps(g);
+        const overlaps = findProtectedPathOverlaps(g, protectedPaths);
         for (const entry of overlaps) {
           issues.push({
             code: "TASK_WRITES_PROTECTED_PATH",

@@ -20,6 +20,7 @@ import {
   detectTaskAcceptanceRefUnsafePath,
   detectTaskAcceptanceRefNotFound,
 } from "./checks.ts";
+import { loadProtectedPaths } from "../rules/protected-paths.ts";
 import type { PhaseEntry, PlanState } from "./state.ts";
 import { collectPlanArtifacts } from "./state.ts";
 import type { PlanIssue } from "./shared.ts";
@@ -83,7 +84,12 @@ export async function runLint(opts: LintOptions): Promise<LintResult> {
   issues.push(...detectTaskWritesUnsafePath(phases));
   issues.push(...detectTaskWritesGlobInvalid(phases));
   issues.push(...detectTaskWritesOverBroad(phases));
-  issues.push(...detectTaskWritesProtectedPath(phases));
+  // v1.6 P15-T3: protected-paths list is configurable. Load once per
+  // lint run, then inject into the detector. Falls back to the
+  // hardcoded constant when `design/rules/protected-paths.md` is
+  // absent — v1.5 behaviour is preserved by default.
+  const { paths: protectedPaths } = await loadProtectedPaths(opts.cwd);
+  issues.push(...detectTaskWritesProtectedPath(phases, protectedPaths));
   issues.push(...detectTaskAcceptanceRefUnsafePath(phases));
   issues.push(...(await detectTaskDecisionRefNotFound(opts.cwd, phases)));
   issues.push(...(await detectTaskReadsNoMatch(opts.cwd, phases)));

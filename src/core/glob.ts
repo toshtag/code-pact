@@ -210,23 +210,28 @@ export const PROTECTED_PATHS: readonly ProtectedPathEntry[] = [
  */
 export function findProtectedPathOverlaps(
   declaredGlob: string,
+  protectedPaths: readonly ProtectedPathEntry[] = PROTECTED_PATHS,
 ): ProtectedPathEntry[] {
   if (validateGlobSyntax(declaredGlob) !== null) return [];
   const declaredRe = globToRegex(declaredGlob);
   const declaredSample = synthesizeSample(declaredGlob);
-  return PROTECTED_PATHS.filter((entry) => {
+  return protectedPaths.filter((entry) => {
     if (declaredRe.test(entry.sample)) return true;
     const protectedRe = globToRegex(entry.pattern);
     return protectedRe.test(declaredSample);
   });
 }
 
-// Replaces wildcards in a glob with non-empty placeholder tokens to
-// produce one concrete representative path. `*` becomes a single-segment
-// filler, `**` becomes a multi-segment filler. Used only for the
-// protected-path overlap heuristic; the placeholders are deliberately
-// recognizable so test failures point back at this synthesis routine.
-function synthesizeSample(glob: string): string {
+/**
+ * Replaces wildcards in a glob with non-empty placeholder tokens to
+ * produce one concrete representative path. `*` becomes a single-segment
+ * filler, `**` becomes a multi-segment filler. Used by the
+ * protected-path overlap heuristic (here and in the v1.6 P15-T3 loader
+ * for `design/rules/protected-paths.md`); the placeholders are
+ * deliberately recognizable so test failures point back at this
+ * synthesis routine.
+ */
+export function synthesizeSample(glob: string): string {
   const segments = glob.split("/").map((seg) => {
     if (seg === "**") return "p10sampledir";
     return seg.replace(/\*/g, "p10sample");

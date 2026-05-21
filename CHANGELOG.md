@@ -44,6 +44,24 @@ identifiers. Starting with v1.0.0, stable releases use plain
   `plan lint --strict` per the existing binary promotion. Heuristic-only:
   the goal is to catch obvious "writes everywhere" declarations, not to
   encode a precise breadth metric.
+- **Configurable protected paths via `design/rules/protected-paths.md`**
+  (v1.6+, P15-T3). New `src/core/rules/protected-paths.ts` loader reads
+  the optional rule file (one glob per line, `#` comments, P10 supported
+  subset) and feeds it into `TASK_WRITES_PROTECTED_PATH` lint emission.
+  When the file is **absent**, the hardcoded `PROTECTED_PATHS` constant
+  in `src/core/glob.ts` remains the fallback — v1.5 behaviour is
+  preserved. When the file is **present but contains zero valid
+  entries**, the list is treated as explicit "no protected paths" (the
+  loader does NOT silently revert to defaults; delete the file instead).
+  Malformed entries (unsafe paths, glob syntax outside the P10 subset)
+  are silently skipped. `synthesizeSample` is promoted from a private
+  helper in `glob.ts` to a named export so the loader can attach
+  concrete samples to its entries (consumed by the overlap heuristic).
+  Both `findProtectedPathOverlaps` and `detectTaskWritesProtectedPath`
+  accept an optional `protectedPaths` parameter; omitting it preserves
+  the v1.5 behaviour. The code-pact dogfood corpus now ships
+  `design/rules/protected-paths.md` mirroring the defaults — the
+  effective lint behaviour is unchanged.
 
 ### Changed
 
