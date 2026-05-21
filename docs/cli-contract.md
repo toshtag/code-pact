@@ -136,7 +136,7 @@ Issue-level codes emitted by `plan lint` against the optional task fields introd
 | `TASK_READS_NO_MATCH` | warning | `reads` glob matches zero files on disk (likely a typo or a file not yet created) |
 | `TASK_WRITES_UNSAFE_PATH` | error | `writes` glob fails `assertSafeRelativePath` |
 | `TASK_WRITES_GLOB_INVALID` | error | `writes` glob uses syntax outside the P10 supported subset |
-| `TASK_WRITES_PROTECTED_PATH` | warning | `writes` glob covers a protected path (`.git/**`, `node_modules/**`, `.code-pact/**`, `design/roadmap.yaml`, `design/phases/*.yaml`). Advisory in P10; P14 governance may promote to error severity once the policy is configurable |
+| `TASK_WRITES_PROTECTED_PATH` | warning | `writes` glob covers a protected path (`.git/**`, `node_modules/**`, `.code-pact/**`, `design/roadmap.yaml`, `design/phases/*.yaml`). Stays `warning` severity in v1.5+. Under `plan lint --strict`, the warning becomes exit-relevant per the existing binary `--strict` promotion (see § `plan lint` below). Selective per-code promotion and configurable protected-path policy are P15+ scope |
 | `TASK_ACCEPTANCE_REF_NOT_FOUND` | error | `acceptance_refs` path does not exist on disk |
 | `TASK_ACCEPTANCE_REF_UNSAFE_PATH` | error | `acceptance_refs` path fails `assertSafeRelativePath` |
 
@@ -351,6 +351,8 @@ Read-only static integrity check over `design/roadmap.yaml` and every referenced
 - `PLACEHOLDER_VERIFICATION` (warning) — verification commands starting with `echo`, `true`, or `noop`
 
 Quality heuristics are intentionally off by default so `--strict` does not fail CI on subjective judgments.
+
+**`--strict` semantics (binary promotion).** When `--strict` is passed, **all** warnings — regardless of code — become exit-relevant. This includes P10's `TASK_WRITES_PROTECTED_PATH` advisory: a task that declares `writes: design/roadmap.yaml` is informational under default lint and exit-relevant under `--strict`. Selective per-code promotion ("promote only `TASK_WRITES_PROTECTED_PATH`, leave other warnings advisory") is **not** supported in v1.5+; it remains a P15+ candidate. Choose `--strict` when you want a fail-fast posture on any advisory; omit it when the project legitimately declares advisories you want to keep as warnings (e.g. governance tasks writing to design YAML files — see [`docs/dogfood.md` § Release prep](dogfood.md) for the dogfood corpus's posture).
 
 **Exit code:**
 - `0` — no errors. Without `--strict`, warnings are also exit 0.

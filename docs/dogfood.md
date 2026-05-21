@@ -351,6 +351,24 @@ code-pact plan analyze --json
 
 If any of the three fails, fix the underlying issue (or run `plan normalize --write`) before declaring a phase done.
 
+### Release prep does NOT use `plan lint --strict` (v1.5+ guidance)
+
+`plan lint --strict` promotes every warning to exit-relevant — including `TASK_WRITES_PROTECTED_PATH` advisories. The dogfood corpus in this repo contains **legitimate** `TASK_WRITES_PROTECTED_PATH` warnings on governance / release-prep tasks that declare writes against `design/roadmap.yaml` and `design/phases/*.yaml` (P10-T1, P10-T6, P11-T1, and equivalent meta-design tasks across later phases). These tasks ARE the writers of those files — flagging them as failures would defeat the lint's purpose.
+
+The recommended release-prep posture:
+
+```sh
+# Use default lint (warnings stay as warnings). This is what
+# the four consecutive drift-zero release preps (v1.2.0 / v1.3.0 /
+# v1.4.0 / v1.5.0) actually run.
+code-pact plan lint --json
+code-pact plan analyze --json
+```
+
+`plan lint --strict` is appropriate when your project has **no** governance tasks declaring writes against design YAML files — typical for user projects that don't do meta-design work. For projects that DO (like this repo), the strict-mode discipline lives in `plan analyze --strict` instead (which surfaces drift but not declared-writes advisories).
+
+Selective per-code promotion ("strict on everything EXCEPT `TASK_WRITES_PROTECTED_PATH`") is **not** supported in v1.5+; it remains a P15+ candidate. Until then, the binary `--strict` flag is your only lever.
+
 ## `task complete` vs `design/` (v1.0 contract)
 
 `task complete` records an operational fact: this task's verify command passed at this point in time. It writes a `done` event to `.code-pact/state/progress.yaml`. It **does not** modify the task's `status` field in `design/phases/<phase>.yaml`.
