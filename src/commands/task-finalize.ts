@@ -13,6 +13,7 @@ import {
 } from "../core/finalize/safe-write.ts";
 import type { TaskStatusDiff } from "../core/finalize/diff.ts";
 import { resolveTaskInRoadmap } from "../core/plan/resolve-task.ts";
+import { auditWrites, type WriteAuditResult } from "../core/audit/index.ts";
 
 // ---------------------------------------------------------------------------
 // `task finalize <task-id>` — v1.2 P11
@@ -36,6 +37,19 @@ export type TaskFinalizeOptions = {
   taskId: string;
   /** When true, apply the write. Default (false) is dry-run. */
   write?: boolean;
+  /**
+   * Optional base ref for branch-level declared-writes audit. When
+   * undefined, the audit (if requested) operates in working-tree mode.
+   * v1.6 P15-T1.
+   */
+  baseRef?: string;
+  /**
+   * When true, populate `write_audit` on the result. Default (false)
+   * skips the audit entirely — no git spawn, no envelope field. The CLI
+   * sets this to `true` only when `--json` is in effect, so human mode
+   * `task finalize` remains identical to v1.5.1. v1.6 P15-T1.
+   */
+  includeWriteAudit?: boolean;
 };
 
 export type AcceptanceRefCheck = {
@@ -58,6 +72,12 @@ type FinalizeContext = {
   acceptance_refs_check: AcceptanceRefCheck[];
   declared_writes: string[];
   depends_on_check: DependsOnCheck[];
+  /**
+   * Populated only when `TaskFinalizeOptions.includeWriteAudit === true`.
+   * The CLI sets this whenever `--json` is in effect, so all three
+   * success kinds carry the audit in the JSON envelope. v1.6 P15-T1.
+   */
+  write_audit?: WriteAuditResult;
 };
 
 export type TaskFinalizeResult =
@@ -193,6 +213,14 @@ export async function runTaskFinalize(
     declared_writes: task.writes ? [...task.writes] : [],
     depends_on_check: dependsOnCheck,
   };
+
+  if (opts.includeWriteAudit === true) {
+    baseContext.write_audit = await auditWrites({
+      cwd,
+      declaredWrites: baseContext.declared_writes,
+      baseRef: opts.baseRef,
+    });
+  }
 
   // 6. Idempotent no-op: already at target.
   if (classified.kind === "no-op") {

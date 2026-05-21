@@ -41,3 +41,6 @@ phases:
   - id: P14
     path: design/phases/P14-governance.yaml
     weight: 25
+  - id: P15
+    path: design/phases/P15-declared-writes-audit.yaml
+    weight: 25

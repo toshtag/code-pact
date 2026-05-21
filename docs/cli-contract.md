@@ -138,6 +138,7 @@ Issue-level codes emitted by `plan lint` against the optional task fields introd
 | `TASK_WRITES_UNSAFE_PATH` | error | `writes` glob fails `assertSafeRelativePath` |
 | `TASK_WRITES_GLOB_INVALID` | error | `writes` glob uses syntax outside the P10 supported subset |
 | `TASK_WRITES_PROTECTED_PATH` | warning | `writes` glob covers a protected path (`.git/**`, `node_modules/**`, `.code-pact/**`, `design/roadmap.yaml`, `design/phases/*.yaml`). Stays `warning` severity in v1.5+. Under `plan lint --strict`, the warning becomes exit-relevant per the existing binary `--strict` promotion (see § `plan lint` below). The code-pact dogfood corpus is strict-clean as of v1.5.1. Selective per-code promotion and configurable protected-path policy are P15+ scope |
+| `TASK_WRITES_AUDIT_OUTSIDE_DECLARED` (v1.6+, P15-T1) | warning | Real filesystem changes touched a file matched by no declared `writes` glob. Emitted in `data.write_audit.warnings[]` on `task finalize --json` only. Advisory: never changes the exit code in v1.6 (the `--audit-strict` flag in P15-T6 opts into exit-relevant enforcement) |
 | `TASK_ACCEPTANCE_REF_NOT_FOUND` | error | `acceptance_refs` path does not exist on disk |
 | `TASK_ACCEPTANCE_REF_UNSAFE_PATH` | error | `acceptance_refs` path fails `assertSafeRelativePath` |
 
@@ -1035,7 +1036,7 @@ The `agent` field on `ProgressEvent` is optional for backward compatibility with
 
 ## `task finalize` — flip task design status to done (v1.2+, P11)
 
-`code-pact task finalize <task-id> [--write] [--json]` flips the `status` field of a single task inside `design/phases/<phase>.yaml` from `planned` / `in_progress` to `done`. Stability: **Stable (v1.2+)**.
+`code-pact task finalize <task-id> [--write] [--base-ref <ref>] [--json]` flips the `status` field of a single task inside `design/phases/<phase>.yaml` from `planned` / `in_progress` to `done`. Stability: **Stable (v1.2+)**. `--base-ref` is **Stable (v1.6+)** under P15-T1.
 
 Eligibility: the task's derived state from `.code-pact/state/progress.yaml` (via `deriveTaskState`) **must equal `done`**. Any other current state (no events, `started`, `blocked`, `resumed`, `failed`) raises `TASK_FINALIZE_NOT_ELIGIBLE` (`ok: false`, exit 2) in **both** dry-run and `--write` modes. Dry-run means "won't write", not "won't validate" — the dry-run output of a finalize-able task is a faithful preview of what `--write` would do.
 
@@ -1068,7 +1069,16 @@ Order of operations:
     "skipped_writes": [],
     "acceptance_refs_check": [{ "path": "docs/cli-contract.md", "exists": true }],
     "declared_writes": ["src/commands/task-finalize.ts"],
-    "depends_on_check": [{ "task_id": "P1-T0", "current": "done", "satisfied": true }]
+    "depends_on_check": [{ "task_id": "P1-T0", "current": "done", "satisfied": true }],
+    "write_audit": {
+      "git_available": true,
+      "base_kind": "working-tree",
+      "base_ref": null,
+      "files_touched": ["src/commands/task-finalize.ts"],
+      "outside_declared": [],
+      "declared_unused": [],
+      "warnings": []
+    }
   }
 }
 ```
@@ -1082,8 +1092,31 @@ Field presence by kind:
 | `planned_writes[]` | ✓ | absent | absent |
 | `applied_writes[]`, `skipped_writes[]` | absent | ✓ | absent |
 | `acceptance_refs_check[]`, `declared_writes[]`, `depends_on_check[]` | ✓ | ✓ | ✓ |
+| `write_audit` (v1.6+, P15-T1) | ✓ (when `--json`) | ✓ (when `--json`) | ✓ (when `--json`) |
 
 `skipped_writes[]` is always empty for `task finalize` (it operates on a single task). The field exists for shape parity with `phase reconcile` (P11-T4).
+
+### `write_audit` field (v1.6+, P15-T1)
+
+Read-only advisory comparing the task's declared `writes` globs against the actual filesystem changes reported by git. Present on **all three success kinds** when `--json` is in effect. Human-mode `task finalize` (no `--json`) does **not** compute the audit and does **not** spawn git — the field is JSON-only.
+
+Default range is the **working tree** only: staged (`git diff --cached --name-only`) + unstaged (`git diff --name-only`) + untracked (`git ls-files --others --exclude-standard`), all merged, POSIX-normalized, and sorted. Pass `--base-ref <ref>` to additionally include the branch-level diff (`git diff --name-only $(git merge-base HEAD <ref>) HEAD`). `--base-ref` **requires** `--json`; passing it without `--json` returns `CONFIG_ERROR` (exit 2).
+
+Shape (field-presence-fixed — every key is always present):
+
+| Key | Type | Notes |
+| --- | --- | --- |
+| `git_available` | boolean | `false` when git is not on `PATH` or `cwd` is not a git repo |
+| `reason` | `"not_a_git_repo"` \| `"git_not_on_path"` | Present only when `git_available === false` |
+| `base_kind` | `"working-tree"` \| `"merge-base"` \| `"unavailable"` | `"merge-base"` only when `--base-ref` was supplied and resolved |
+| `base_ref` | string \| null | The ref echoed back when `base_kind === "merge-base"`; otherwise `null` |
+| `base_error` | object | Present **only** when `--base-ref` was supplied but `merge-base` / `rev-parse` failed (graceful fallback to working-tree mode). Shape: `{ code: "MERGE_BASE_NOT_FOUND" \| "REF_NOT_FOUND", message, requested_ref }`. Exit code is **unchanged** (advisory). |
+| `files_touched` | string[] | Sorted, deduplicated POSIX-relative paths |
+| `outside_declared` | string[] | Files that match no declared glob in the task's `writes` |
+| `declared_unused` | string[] | Declared globs that matched no file in `files_touched`. **Data only in v1.6 P15-T1** — promoted to `TASK_WRITES_AUDIT_DECLARED_UNUSED` in P15-T4 |
+| `warnings` | string[] | Advisory warning codes (see Plan diagnostics table) |
+
+The audit **never** changes the exit code in P15-T1. The `--audit-strict` flag (P15-T6) opts into exit-relevant enforcement.
 
 ### Errors
 
@@ -1093,7 +1126,7 @@ Field presence by kind:
 | `AMBIGUOUS_TASK_ID` | 2 | Task id appears in more than one phase |
 | `TASK_FINALIZE_NOT_ELIGIBLE` | 2 | Derived state from `progress.yaml` is not `done`. Raised in **both** dry-run and `--write`. `data.current` carries the actual derived state |
 | `TASK_FINALIZE_WRITE_REFUSED` | 2 | Safety check failed. `data.reason` carries one of `unsafe_path` / `outside_design_phases` / `not_yaml` / `symlink_escape` / `unreadable` / `unparseable_phase` / `task_not_found`. `data.file` carries the offending path |
-| `CONFIG_ERROR` | 2 | Missing positional task id, or unknown flag |
+| `CONFIG_ERROR` | 2 | Missing positional task id, unknown flag, or `--base-ref` supplied without `--json` (v1.6+, P15-T1) |
 
 ### Usage example
 

@@ -1,0 +1,364 @@
+id: P15
+name: Declared Writes Audit
+weight: 25
+confidence: medium
+risk: medium
+status: in_progress
+objective: |
+  Promote declared `writes` from a passive review surface into a
+  deterministic, machine-checkable advisory layer. P14 governance
+  established `declared_writes` as a JSON envelope field on
+  `task finalize` and `task runbook`, but left the comparison
+  against real-world filesystem changes to human reviewers. P15
+  introduces the missing oracle: a read-only `auditWrites()`
+  utility that compares declared globs against the working tree
+  (and optionally a branch-level merge-base), surfaced through
+  `task finalize --json` as the additive `write_audit` field.
+  The first task (P15-T1) ships the core utility + the
+  `task finalize` integration + a single advisory warning code
+  (`TASK_WRITES_AUDIT_OUTSIDE_DECLARED`). Every change is additive
+  on the v1.0 stable CLI contract: no exit-code changes, no human
+  stdout changes, no breakage of existing JSON envelopes. Default
+  audit range is the working tree only (HEAD vs staged / unstaged
+  / untracked); branch-level diff via `--base-ref <ref>` is
+  opt-in. Subsequent tasks (T2–T6) layer additional advisories
+  (over-broad writes lint, configurable protected paths, the
+  `DECLARED_UNUSED` warning, phase-level audit, selective
+  strictness) on top of the T1 foundation, each with its own
+  contract impact analysis.
+non_goals:
+  - hard-error promotion of audit drift (no exit-code change in P15-T1;
+    `--audit-strict` is P15-T6)
+  - any change to existing Stable command behaviour on the success path (task
+    complete / phase reconcile / task runbook / task add / init are unchanged in
+    P15-T1)
+  - reads-side audit (process-level tracing is asymmetric in cost and detection
+    fidelity; deferred indefinitely)
+  - SHA recording at task start in progress.yaml (append-only contract vs rebase
+    invariance trade-off unresolved)
+  - human stdout changes on `task finalize` (JSON-only additive surface in
+    P15-T1)
+  - "`task complete` envelope changes (hot path protection — keeps verify as the
+    single failure signal)"
+  - LLM / RAG / MCP / web UI / issue tracker sync / multi-agent orchestration /
+    Spec Kit re-implementation
+  - new task or phase schema field (audit reads existing `writes`)
+definition_of_done:
+  - design/phases/P15-declared-writes-audit.yaml exists with this objective and
+    tasks list
+  - design/roadmap.yaml lists P15
+  - "`src/core/audit/write-audit.ts` exists exposing `auditWrites({ cwd,
+    declaredWrites, baseRef? }): Promise<WriteAuditResult>` with a
+    field-presence-fixed shape (`git_available`, `reason?`, `base_kind`,
+    `base_ref`, `base_error?`, `files_touched`, `outside_declared`,
+    `declared_unused`, `warnings`)"
+  - "`task finalize --json` emits `data.write_audit` on all three success kinds
+    (`would_finalize` / `finalized` / `already_finalized`) whenever `--json` is
+    passed"
+  - "`task finalize` (human mode, no `--json`) does NOT invoke `auditWrites()`
+    and does NOT spawn git"
+  - "`task finalize --base-ref <ref>` without `--json` fails with `CONFIG_ERROR`
+    (exit 2)"
+  - "`task finalize --base-ref <ref> --json` runs branch-level audit against
+    `git merge-base HEAD <ref>`; on merge-base failure, graceful fallback to
+    working-tree mode with `base_error: { code, message, requested_ref }`. Exit
+    code 0 in all such fallbacks."
+  - "`TASK_WRITES_AUDIT_OUTSIDE_DECLARED` ships in `KNOWN_CODES.plan` and
+    `docs/cli-contract.md` Task Readiness Schema diagnostics section (severity:
+    warning, affects_exit: false)"
+  - "non-git project surface returns `{ git_available: false, reason:
+    'not_a_git_repo' | 'git_not_on_path', base_kind: 'unavailable', base_ref:
+    null, files_touched: [], outside_declared: [], declared_unused: [],
+    warnings: [] }` (all keys present)"
+  - untracked files are included in `files_touched` via `git ls-files --others
+    --exclude-standard`
+  - "`tests/integration/json-stdout.test.ts` continues to pass"
+  - human stdout of `task finalize` is byte-identical to v1.5.1
+  - docs/cli-contract.md gains (a) `task finalize` `--base-ref` flag
+    documentation, (b) `data.write_audit` shape documentation including
+    field-presence-by-kind, (c) `TASK_WRITES_AUDIT_OUTSIDE_DECLARED` entry in
+    the Plan diagnostic codes table
+  - docs/migration.md gains a v1.5.x → v1.6.0 section noting that the audit is
+    additive and advisory; the dogfood corpus may surface
+    `TASK_WRITES_AUDIT_OUTSIDE_DECLARED` warnings (expected, not a breakage)
+  - docs/dogfood.md gains a `write_audit` walkthrough step in the finalize
+    portion of the per-task loop
+  - CHANGELOG.md gains a `[Unreleased]` (or v1.6.0) entry covering P15-T1
+verification:
+  commands:
+    - pnpm typecheck
+    - pnpm test
+    - pnpm build
+    - node dist/cli.js plan lint --json
+    - node dist/cli.js plan normalize --check --json
+    - node dist/cli.js plan analyze --json
+    - node dist/cli.js validate --json
+    - node dist/cli.js doctor --json
+tasks:
+  - id: P15-T1
+    type: feature
+    ambiguity: medium
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: done
+    description: |
+      Read-only declared-writes audit advisory, exposed via
+      `task finalize --json`. New module `src/core/audit/
+      write-audit.ts` exports `auditWrites({ cwd, declaredWrites,
+      baseRef? }): Promise<WriteAuditResult>`. Default range is
+      working tree only: staged (`git diff --cached --name-only`)
+      + unstaged (`git diff --name-only`) + untracked (`git ls-
+      files --others --exclude-standard`), all merged and POSIX-
+      normalized. `--base-ref <ref>` (passed through from
+      `task finalize`) opts into branch-level audit via `git
+      merge-base HEAD <ref>` plus the working-tree set; on
+      merge-base failure the function falls back to working-tree
+      mode and populates `base_error: { code, message,
+      requested_ref }` (exit code unchanged).
+
+      Each `files_touched` entry is tested against each declared
+      glob via the existing `globToRegex` from `src/core/glob.ts`
+      (reusing the P10 supported subset — literal segments, `*`,
+      `**`). Files matching no declared glob populate
+      `outside_declared`; declared globs matching no file
+      populate `declared_unused`. The initial PR raises **one**
+      warning code:
+      `TASK_WRITES_AUDIT_OUTSIDE_DECLARED` (severity: warning,
+      affects_exit: false). `TASK_WRITES_AUDIT_DECLARED_UNUSED`
+      is deliberately deferred to P15-T4 — `declared_unused` is
+      data only in T1.
+
+      Integration: `src/commands/task-finalize.ts` gains
+      `TaskFinalizeOptions.baseRef?` and `includeWriteAudit?:
+      boolean`, plus an optional `write_audit?: WriteAuditResult`
+      on the result. `runTaskFinalize` invokes `auditWrites`
+      only when `includeWriteAudit === true`. The three success
+      kinds (`would_finalize` / `finalized` / `already_finalized`)
+      all surface `write_audit` when present.
+
+      `src/cli.ts` `cmdTaskFinalize` parses `--base-ref <ref>`,
+      enforces the `--json` co-requirement (returns `CONFIG_ERROR`
+      / exit 2 when `--base-ref` is supplied without `--json`),
+      and decides `includeWriteAudit = json` so human mode never
+      spawns git. The envelope serialization is updated to
+      include `data.write_audit` on all three kinds. Human
+      stdout is unchanged.
+
+      Tests:
+      - `tests/unit/core/audit/write-audit.test.ts` —
+        unit matrix across the glob × diff combinations,
+        non-git fallback (both `not_a_git_repo` and
+        `git_not_on_path`), `--base-ref` merge-base success /
+        failure, untracked-file inclusion, Windows-style
+        backslash normalization.
+      - `tests/integration/task-finalize-write-audit.test.ts` —
+        envelope presence across the three success kinds, human
+        stdout regression, the `--base-ref` without `--json`
+        CONFIG_ERROR contract, and (importantly) a regression
+        guard that human-mode `task finalize` does not spawn
+        git (via spawn mock or the existing
+        `CODE_PACT_DISABLE_LOCKS`-style env hook).
+      - `tests/unit/error-code-surface.test.ts` — add
+        `TASK_WRITES_AUDIT_OUTSIDE_DECLARED` to `KNOWN_CODES.plan`.
+
+      Docs: docs/cli-contract.md gains a `task finalize` envelope
+      section update (write_audit shape, --base-ref flag),
+      a Plan diagnostic codes table row for the new warning,
+      and a v1.6.0 stability-band note. docs/migration.md gets a
+      v1.5.x → v1.6.0 section. CHANGELOG.md gets a [Unreleased]
+      entry. docs/dogfood.md gets a write_audit walkthrough.
+    decision_refs:
+      - design/phases/P15-declared-writes-audit.yaml
+    reads:
+      - src/core/glob.ts
+      - src/commands/task-finalize.ts
+      - src/commands/verify.ts
+      - src/cli.ts
+      - tests/unit/error-code-surface.test.ts
+      - tests/integration/json-stdout.test.ts
+      - docs/cli-contract.md
+      - docs/migration.md
+      - docs/dogfood.md
+    writes:
+      - src/core/audit/write-audit.ts
+      - src/core/audit/index.ts
+      - src/commands/task-finalize.ts
+      - src/cli.ts
+      - tests/unit/core/audit/write-audit.test.ts
+      - tests/integration/task-finalize-write-audit.test.ts
+      - tests/unit/error-code-surface.test.ts
+      - docs/cli-contract.md
+      - docs/migration.md
+      - docs/dogfood.md
+      - CHANGELOG.md
+    acceptance_refs:
+      - design/phases/P15-declared-writes-audit.yaml
+  - id: P15-T2
+    type: feature
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: planned
+    description: |
+      Add `TASK_WRITES_OVER_BROAD` plan-lint warning detecting
+      declared writes that are too coarse (`**`, `**/*`,
+      `**/*.ts`, etc. — patterns that match the entire repository
+      or large swaths of it). Severity: warning, affects_exit:
+      false. Heuristic: any glob whose root segment is `**` or
+      `**/*<extension>` flags. Tests: glob × granularity matrix,
+      no false positives on legitimate task-scoped globs like
+      `src/core/audit/**`.
+    depends_on:
+      - P15-T1
+    decision_refs:
+      - design/phases/P15-declared-writes-audit.yaml
+    reads:
+      - src/core/plan/checks.ts
+      - src/core/glob.ts
+      - tests/unit/error-code-surface.test.ts
+    writes:
+      - src/core/plan/checks.ts
+      - tests/unit/core/plan/checks.test.ts
+      - tests/unit/error-code-surface.test.ts
+      - docs/cli-contract.md
+    acceptance_refs:
+      - design/phases/P15-declared-writes-audit.yaml
+  - id: P15-T3
+    type: feature
+    ambiguity: medium
+    risk: low
+    context_size: medium
+    write_surface: medium
+    verification_strength: medium
+    expected_duration: medium
+    status: planned
+    description: |
+      Make protected paths configurable via `design/rules/
+      protected-paths.md`. The hardcoded P10 list in
+      `src/core/glob.ts` (`PROTECTED_PATHS`) becomes the fallback
+      when the rule file is absent. Loader parses the rule file
+      (one glob per line, `#` comments). Affects
+      `TASK_WRITES_PROTECTED_PATH` lint emission. Tests:
+      fallback parity, override behaviour, malformed input
+      handling.
+    depends_on:
+      - P15-T1
+    decision_refs:
+      - design/phases/P15-declared-writes-audit.yaml
+    reads:
+      - src/core/glob.ts
+      - src/core/plan/checks.ts
+    writes:
+      - src/core/glob.ts
+      - src/core/rules/protected-paths.ts
+      - design/rules/protected-paths.md
+      - tests/unit/core/rules/protected-paths.test.ts
+      - docs/cli-contract.md
+    acceptance_refs:
+      - design/phases/P15-declared-writes-audit.yaml
+  - id: P15-T4
+    type: feature
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: planned
+    description: |
+      Promote `declared_unused` from data-only to a warning
+      code. New `TASK_WRITES_AUDIT_DECLARED_UNUSED` (severity:
+      warning, affects_exit: false). Emitted by `auditWrites`
+      into the `write_audit.warnings` array when any declared
+      glob has zero matches in `files_touched`. Tests: glob ×
+      empty-match matrix; ensures pre-T4 `declared_unused`
+      data-only behaviour is preserved when audit is suppressed
+      (`includeWriteAudit: false`).
+    depends_on:
+      - P15-T1
+    decision_refs:
+      - design/phases/P15-declared-writes-audit.yaml
+    reads:
+      - src/core/audit/write-audit.ts
+      - tests/unit/core/audit/write-audit.test.ts
+      - tests/unit/error-code-surface.test.ts
+    writes:
+      - src/core/audit/write-audit.ts
+      - tests/unit/core/audit/write-audit.test.ts
+      - tests/unit/error-code-surface.test.ts
+      - docs/cli-contract.md
+    acceptance_refs:
+      - design/phases/P15-declared-writes-audit.yaml
+  - id: P15-T5
+    type: feature
+    ambiguity: high
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: medium
+    expected_duration: medium
+    status: planned
+    description: |
+      Expose `write_audit` via `phase reconcile --json` for
+      multi-task batch review. Requires solving the "diff
+      attribution" problem (a single working-tree diff cannot
+      be sharded across tasks deterministically). Initial
+      semantics likely: per-task audit using each task's
+      declared writes, plus an aggregate `outside_any_declared`
+      array highlighting files not covered by any task in the
+      phase. Schema and exact field shape to be finalized when
+      P15-T1–T4 results are in hand.
+    depends_on:
+      - P15-T1
+    decision_refs:
+      - design/phases/P15-declared-writes-audit.yaml
+    reads:
+      - src/commands/phase-reconcile.ts
+      - src/core/audit/write-audit.ts
+    writes:
+      - src/commands/phase-reconcile.ts
+      - tests/integration/phase-reconcile-write-audit.test.ts
+      - docs/cli-contract.md
+    acceptance_refs:
+      - design/phases/P15-declared-writes-audit.yaml
+  - id: P15-T6
+    type: feature
+    ambiguity: medium
+    risk: medium
+    context_size: small
+    write_surface: low
+    verification_strength: strong
+    expected_duration: short
+    status: planned
+    description: |
+      Introduce `--audit-strict` flag on `task finalize` and
+      `phase reconcile`. When set, presence of any
+      `TASK_WRITES_AUDIT_*` warning in the envelope causes
+      exit 1 (advisory becomes enforcing). Kept distinct from
+      `--strict` (which is plan-lint-scoped) so existing CI
+      consumers are not affected. Tests: opt-in semantics,
+      exit-code matrix, JSON envelope still includes
+      `write_audit` on the failure path.
+    depends_on:
+      - P15-T1
+      - P15-T4
+    decision_refs:
+      - design/phases/P15-declared-writes-audit.yaml
+    reads:
+      - src/commands/task-finalize.ts
+      - src/commands/phase-reconcile.ts
+      - src/cli.ts
+    writes:
+      - src/commands/task-finalize.ts
+      - src/commands/phase-reconcile.ts
+      - src/cli.ts
+      - tests/integration/task-finalize-audit-strict.test.ts
+      - docs/cli-contract.md
+    acceptance_refs:
+      - design/phases/P15-declared-writes-audit.yaml

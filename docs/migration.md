@@ -447,6 +447,88 @@ Projects running `plan lint --strict` / `plan analyze --strict` / `validate --st
 
 In semver terms, v1.4.0 is a minor release.
 
+## v1.5.x → v1.6.0
+
+### Quick path
+
+```sh
+# 1. Upgrade the CLI.
+npm install -g code-pact@1.6.0
+
+# 2. No mandatory action. The new behaviour is JSON-only and advisory.
+code-pact validate --json   # expect: ok
+code-pact plan analyze --json
+```
+
+### What's new (additive only)
+
+- **`task finalize --json` envelope gains `data.write_audit`.** Read-only
+  advisory comparing declared `writes` globs against actual filesystem
+  changes via git. Present on all three success kinds (`would_finalize` /
+  `finalized` / `already_finalized`) when `--json` is in effect. Default
+  range is the working tree (staged + unstaged + untracked); pass
+  `--base-ref <ref>` to opt into branch-level audit via `git merge-base`.
+  See [`docs/cli-contract.md` § `task finalize`](cli-contract.md) for the
+  full field-by-field contract.
+- **`task finalize --base-ref <ref>` flag** added. Requires `--json`;
+  passing it without `--json` returns `CONFIG_ERROR` (exit 2). The
+  combination of `--base-ref` + `--json` returns `base_kind: "merge-base"`
+  in the envelope; merge-base failures gracefully fall back to working-tree
+  mode with a `base_error` field. Exit code is unchanged in either path.
+- **New warning code `TASK_WRITES_AUDIT_OUTSIDE_DECLARED`** added to
+  `KNOWN_CODES.plan`. Emitted in `data.write_audit.warnings[]` when the
+  audit detects a file change outside any declared `writes` glob.
+  Advisory only — never alters the exit code in v1.6 P15-T1. The
+  `--audit-strict` flag (P15-T6) is the opt-in for exit-relevant
+  enforcement; not in this release.
+- **`design/roadmap.yaml` lists P15.** Existing v1.5.x projects do not
+  need to mirror this in their own roadmaps — the change is internal to
+  code-pact's own dogfood corpus.
+
+### Adoption pattern
+
+The minimum action is **none**. Existing CI pipelines, agents, and human
+workflows that run `task finalize` continue to behave byte-identically.
+
+If you want to take advantage of the audit:
+
+```sh
+# Single-task review at finalize time.
+code-pact task finalize <task-id> --json | jq .data.write_audit
+
+# Branch-level audit (compares against main's merge-base).
+code-pact task finalize <task-id> --json --base-ref main \
+  | jq .data.write_audit.outside_declared
+```
+
+The audit operates **read-only** — paths only, never file contents — and
+never changes the exit code in v1.6.
+
+### Backward-compatibility notes
+
+- **Human-mode `task finalize` is byte-identical to v1.5.1.** No new
+  stdout lines, no git spawn, no behavioural difference. The audit is
+  JSON-only.
+- **`task complete` is unchanged.** The hot path is deliberately not
+  augmented — verify remains the single signal there.
+- **`phase reconcile --json` is unchanged in P15-T1.** Phase-level audit
+  (P15-T5) is deferred until the "diff attribution across multiple
+  tasks" semantics are designed.
+- **The dogfood corpus may surface `TASK_WRITES_AUDIT_OUTSIDE_DECLARED`
+  advisories.** This is the expected behaviour, not a breakage —
+  releases that touch files outside the active task's declared writes
+  will see them flagged. The exit code stays 0.
+- **`progress.yaml` schema is unchanged.** No new event types, no SHA
+  recording at task start. That schema change is intentionally deferred
+  (the append-only contract vs rebase invariance trade-off needs its
+  own RFC).
+- **`KNOWN_CODES.public` is unchanged.** The new code lives in the
+  `plan` category.
+- **`tests/integration/json-stdout.test.ts` continues to pass.** The new
+  `data.write_audit` field is additive on the v1.0 envelope shape.
+
+In semver terms, v1.6.0 is a minor release.
+
 ## v1.4.x → v1.5.0
 
 ### Quick path

@@ -97,6 +97,7 @@ const KNOWN_CODES: Record<string, "public" | "plan" | "doctor" | "adapter" | "in
   TASK_READS_GLOB_INVALID: "plan",
   TASK_READS_NO_MATCH: "plan",
   TASK_READS_UNSAFE_PATH: "plan",
+  TASK_WRITES_AUDIT_OUTSIDE_DECLARED: "plan",
   TASK_WRITES_GLOB_INVALID: "plan",
   TASK_WRITES_PROTECTED_PATH: "plan",
   TASK_WRITES_UNSAFE_PATH: "plan",
@@ -134,16 +135,27 @@ const KNOWN_CODES: Record<string, "public" | "plan" | "doctor" | "adapter" | "in
 // 3. Router/normalization assignment:        outCode = "AGENT_NOT_ENABLED"
 //    (these are codes the CLI passes through — they originate as #2 elsewhere
 //     but the surface presented to agents is still UPPER_SNAKE_CASE)
+// 4. Advisory warnings pushed into an envelope array (v1.6 P15-T1):
+//    warnings.push("TASK_WRITES_AUDIT_OUTSIDE_DECLARED")
 const EMISSION_PATTERNS: RegExp[] = [
   /\bcode:\s*"([A-Z][A-Z0-9_]+)"/g,
   /\.code\s*=\s*"([A-Z][A-Z0-9_]+)"/g,
   /\boutCode\s*=\s*"([A-Z][A-Z0-9_]+)"/g,
+  /\bwarnings\.push\(\s*"([A-Z][A-Z0-9_]+)"\s*\)/g,
 ];
 
 // Strings that look like UPPER_SNAKE_CASE error codes but aren't part of the
 // v1.0 error-code surface (e.g. case labels for routing, internal enum
 // values). Filter them out explicitly so the test diagnostics stay accurate.
-const NON_ERROR_CODES = new Set<string>([]);
+//
+// `MERGE_BASE_NOT_FOUND` / `REF_NOT_FOUND` are the diagnostic sub-codes
+// emitted on `write_audit.base_error.code` — they live inside the
+// advisory `write_audit` envelope and never propagate to top-level
+// `error.code`, so they are deliberately out of the v1.0 public surface.
+const NON_ERROR_CODES = new Set<string>([
+  "MERGE_BASE_NOT_FOUND",
+  "REF_NOT_FOUND",
+]);
 
 async function walkSrc(dir: string): Promise<string[]> {
   const files: string[] = [];
