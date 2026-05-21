@@ -124,10 +124,51 @@ Only the `done-but-design-not-done` kind carries this hint — the other four ST
 The `data` payload for both commands lists declarative context to help reviewers audit the proposed mutation:
 
 - `acceptance_refs_check[]` (task finalize only) — each declared `acceptance_refs` path plus whether it exists on disk. **Existence check only**; semantic validation of the file content is intentionally out of scope.
-- `declared_writes[]` (task finalize only) — the task's declared `writes` globs, surfaced as-is. Actual write detection (against git diff or a snapshot) is **not** part of v1.2 and is P14 governance scope.
+- `declared_writes[]` (task finalize only) — the task's declared `writes` globs, surfaced as-is. See § Declared writes as a governance review surface below for the v1.5+ contract.
 - `depends_on_check[]` (task finalize only) — for each `depends_on` entry, the current derived state and whether it is `done`. Used as a warning surface; finalize does not block on unsatisfied dependencies.
 
 `phase reconcile` does not emit these per-task fields in the top-level payload — they are present in `data.tasks[]` only when a per-task verdict needs them.
+
+## Declared writes as a governance review surface (v1.4+ / P14)
+
+The `writes` field on a task (P10, v1.1+) and the `declared_writes[]` field on `task finalize` JSON output (P11, v1.2+) together form a **review surface**, not enforcement.
+
+**What the surface IS in v1.5:**
+
+- A declaration of intent: the task author says "this task is expected to write these globs."
+- A reviewable signal in `task finalize --json` / `task runbook --json` output: a human (or agent) can compare declared intent against actual file-system changes (typically via `git diff`) when reviewing a PR or commit.
+- A lint surface via `TASK_WRITES_PROTECTED_PATH` (P10, warning severity in v1.5): the lint flags when declared `writes` cover paths in the protected seed set (`.git/**`, `node_modules/**`, `.code-pact/**`, `design/roadmap.yaml`, `design/phases/*.yaml`). Under `plan lint --strict` the advisory becomes exit-relevant; in release prep, the dogfood corpus deliberately runs default lint to keep governance tasks (which legitimately write design YAML) passing.
+
+**What the surface is NOT in v1.5:**
+
+- **Not enforced at runtime.** `task complete` / `task finalize` / `phase reconcile` / any other command does NOT verify that actual file-system writes match declared `writes`. A task can declare `writes: src/foo.ts` and modify `src/bar.ts` without code-pact noticing.
+- **Not tracked across the per-task loop.** code-pact does not run the agent's implementation, so there's no opportunity to observe writes as they happen.
+- **Not git-aware.** No `git diff` comparison between declared and actual change sets.
+
+**Why "review surface" is the right v1.5 posture.**
+
+Actual write enforcement requires either:
+
+- A runner that observes file-system writes during command execution, or
+- VCS integration (e.g. `git diff` between two commits or against a base ref) to verify declared `writes` covered the actual changes.
+
+Both options are significant scope expansions. The P14 RFC explicitly defers them to P15+. Meanwhile, the v1.2 + v1.3 surfaces (declared_writes in `task finalize` output, state_summary.declared_writes in `task runbook` output) give a reviewer everything they need to spot a declared/actual mismatch in PR review — without committing to a specific enforcement mechanism that might constrain future design.
+
+**How to use the surface today.**
+
+In a PR review (human or agent-assisted):
+
+1. Run `code-pact task finalize <task-id> --json` (dry-run) to read the `declared_writes` array for the task.
+2. Compare against `git diff --name-only main...HEAD` (or equivalent) for the actual changes.
+3. Flag any mismatch — declared paths not touched, or untouched paths beyond the declaration — as a review concern.
+
+Or via the runbook:
+
+1. Run `code-pact task runbook <task-id> --json`.
+2. Read `data.state_summary.declared_writes` for the same declaration.
+3. Apply the same comparison.
+
+Both surfaces emit the same data; pick whichever fits the reviewer's workflow.
 
 ## Error code reference
 
