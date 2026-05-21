@@ -2616,6 +2616,7 @@ async function cmdTaskFinalize(
       {
         json: { type: "boolean" },
         write: { type: "boolean" },
+        "base-ref": { type: "string" },
       },
       { allowPositionals: true },
     ));
@@ -2634,6 +2635,7 @@ async function cmdTaskFinalize(
 
   const json = globalJson || values.json === true;
   const write = values.write === true;
+  const baseRef = typeof values["base-ref"] === "string" ? values["base-ref"] : undefined;
   const taskId = positionals[0];
   if (!taskId) {
     const msg = "task finalize requires a task id (e.g. `task finalize P1-T1`).";
@@ -2646,11 +2648,29 @@ async function cmdTaskFinalize(
     }
     return 2;
   }
+
+  // v1.6 P15-T1: `--base-ref` requires `--json` so human mode never
+  // spawns git and the audit field always lands in a machine-readable
+  // envelope. Silent ignore would mislead users into thinking the
+  // branch-level audit ran when it did not.
+  if (baseRef !== undefined && !json) {
+    const msg = "task finalize --base-ref requires --json (write_audit is JSON-only in v1.6).";
+    process.stderr.write(`CONFIG_ERROR: ${msg}\n`);
+    return 2;
+  }
+
   const cwd = process.cwd();
+  const includeWriteAudit = json;
 
   const runImpl = async (): Promise<number> => {
   try {
-    const result = await runTaskFinalize({ cwd, taskId, write });
+    const result = await runTaskFinalize({
+      cwd,
+      taskId,
+      write,
+      baseRef,
+      includeWriteAudit,
+    });
 
     if (result.kind === "already_finalized") {
       if (json) {
@@ -2667,6 +2687,7 @@ async function cmdTaskFinalize(
               acceptance_refs_check: result.acceptance_refs_check,
               declared_writes: result.declared_writes,
               depends_on_check: result.depends_on_check,
+              write_audit: result.write_audit,
             },
           })}\n`,
         );
@@ -2692,6 +2713,7 @@ async function cmdTaskFinalize(
               acceptance_refs_check: result.acceptance_refs_check,
               declared_writes: result.declared_writes,
               depends_on_check: result.depends_on_check,
+              write_audit: result.write_audit,
             },
           })}\n`,
         );
@@ -2720,6 +2742,7 @@ async function cmdTaskFinalize(
             acceptance_refs_check: result.acceptance_refs_check,
             declared_writes: result.declared_writes,
             depends_on_check: result.depends_on_check,
+            write_audit: result.write_audit,
           },
         })}\n`,
       );
