@@ -99,6 +99,7 @@ const KNOWN_CODES: Record<string, "public" | "plan" | "doctor" | "adapter" | "in
   TASK_READS_UNSAFE_PATH: "plan",
   TASK_WRITES_AUDIT_OUTSIDE_DECLARED: "plan",
   TASK_WRITES_GLOB_INVALID: "plan",
+  TASK_WRITES_OVER_BROAD: "plan",
   TASK_WRITES_PROTECTED_PATH: "plan",
   TASK_WRITES_UNSAFE_PATH: "plan",
 

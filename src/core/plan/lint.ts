@@ -15,6 +15,7 @@ import {
   detectTaskReadsNoMatch,
   detectTaskWritesUnsafePath,
   detectTaskWritesGlobInvalid,
+  detectTaskWritesOverBroad,
   detectTaskWritesProtectedPath,
   detectTaskAcceptanceRefUnsafePath,
   detectTaskAcceptanceRefNotFound,
@@ -81,6 +82,7 @@ export async function runLint(opts: LintOptions): Promise<LintResult> {
   issues.push(...detectTaskReadsGlobInvalid(phases));
   issues.push(...detectTaskWritesUnsafePath(phases));
   issues.push(...detectTaskWritesGlobInvalid(phases));
+  issues.push(...detectTaskWritesOverBroad(phases));
   issues.push(...detectTaskWritesProtectedPath(phases));
   issues.push(...detectTaskAcceptanceRefUnsafePath(phases));
   issues.push(...(await detectTaskDecisionRefNotFound(opts.cwd, phases)));
