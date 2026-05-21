@@ -41,7 +41,14 @@ import {
   runPlanBrief,
 } from "./commands/plan-brief.ts";
 import { runPlanPrompt } from "./commands/plan-prompt.ts";
-import { runPlanConstitution } from "./commands/plan-constitution.ts";
+import {
+  type ConstitutionAnswers,
+  loadConstitutionFromFile,
+  loadConstitutionFromStdin,
+  PlanConstitutionFromFileError,
+  PlanConstitutionFromStdinError,
+  runPlanConstitution,
+} from "./commands/plan-constitution.ts";
 import {
   formatPlanLintHuman,
   runPlanLint,
@@ -824,6 +831,10 @@ async function cmdPlanConstitution(
     options: {
       force: { type: "boolean" },
       json: { type: "boolean" },
+      "from-file": { type: "string" },
+      stdin: { type: "boolean" },
+      description: { type: "string" },
+      principle: { type: "string", multiple: true },
     },
     strict: false,
     allowPositionals: false,
@@ -831,10 +842,31 @@ async function cmdPlanConstitution(
 
   const json = globalJson || values.json === true;
   const force = values.force === true;
+  const fromFile =
+    typeof values["from-file"] === "string" ? values["from-file"] : undefined;
+  const fromStdin = values.stdin === true;
+  const description =
+    typeof values.description === "string" ? values.description : undefined;
+  const principleRaw = Array.isArray(values.principle)
+    ? (values.principle as unknown[]).filter(
+        (v): v is string => typeof v === "string",
+      )
+    : undefined;
+  const principles =
+    principleRaw !== undefined && principleRaw.length > 0
+      ? principleRaw
+      : undefined;
+  const flagDriven = description !== undefined || principles !== undefined;
   const cwd = process.cwd();
 
-  if (!isInteractive()) {
-    const msg = "plan constitution is interactive and requires a TTY.";
+  // v1.6 P17-T4: three pairwise-mutually-exclusive non-interactive
+  // input modes, mirroring `plan brief` (P17-T1 / T2 / T3).
+  const inputModes: string[] = [];
+  if (fromFile !== undefined) inputModes.push("--from-file");
+  if (fromStdin) inputModes.push("--stdin");
+  if (flagDriven) inputModes.push("--description/--principle");
+  if (inputModes.length > 1) {
+    const msg = `plan constitution: ${inputModes.join(", ")} are mutually exclusive. Pick one input source.`;
     if (json) {
       process.stdout.write(
         `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
@@ -845,7 +877,81 @@ async function cmdPlanConstitution(
     return 2;
   }
 
-  const result = await runPlanConstitution({ cwd, locale, force });
+  // v1.6 P17-T4: load pre-collected answers from whichever
+  // non-interactive mode was selected. `ConstitutionFileSchema`
+  // defaults both fields to empty, so an empty-but-present input
+  // (e.g. `plan constitution --stdin` with `{}` on stdin) is
+  // accepted and falls back to the locale defaults via
+  // `generateConstitutionMd` — same as the wizard with empty
+  // input.
+  let preCollectedAnswers: ConstitutionAnswers | undefined;
+  if (fromFile !== undefined) {
+    try {
+      preCollectedAnswers = await loadConstitutionFromFile(cwd, fromFile);
+    } catch (err) {
+      if (err instanceof PlanConstitutionFromFileError) {
+        if (json) {
+          process.stdout.write(
+            `${JSON.stringify({
+              ok: false,
+              error: { code: "CONFIG_ERROR", message: err.message },
+              data: { detail: err.detail, path: err.path },
+            })}\n`,
+          );
+        } else {
+          process.stderr.write(`${err.message}\n`);
+        }
+        return 2;
+      }
+      throw err;
+    }
+  } else if (fromStdin) {
+    try {
+      preCollectedAnswers = await loadConstitutionFromStdin(process.stdin);
+    } catch (err) {
+      if (err instanceof PlanConstitutionFromStdinError) {
+        if (json) {
+          process.stdout.write(
+            `${JSON.stringify({
+              ok: false,
+              error: { code: "CONFIG_ERROR", message: err.message },
+              data: { detail: err.detail, source: "stdin" },
+            })}\n`,
+          );
+        } else {
+          process.stderr.write(`${err.message}\n`);
+        }
+        return 2;
+      }
+      throw err;
+    }
+  } else if (flagDriven) {
+    // v1.6 P17-T4: flag-driven mode. Both fields are optional in the
+    // schema; we pass through whatever was supplied and let
+    // generateConstitutionMd fall back to locale defaults for empty
+    // values — same behaviour as the wizard's empty-input path.
+    preCollectedAnswers = {
+      description: description ?? "",
+      principles: principles ?? [],
+    };
+  } else if (!isInteractive()) {
+    const msg = "plan constitution is interactive and requires a TTY (use --from-file <yaml>, --stdin, or --description/--principle for non-interactive input).";
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
+      );
+    } else {
+      process.stderr.write(`${msg}\n`);
+    }
+    return 2;
+  }
+
+  const result = await runPlanConstitution({
+    cwd,
+    locale,
+    force,
+    answers: preCollectedAnswers,
+  });
   if (result.skipped) {
     if (json) {
       process.stdout.write(
