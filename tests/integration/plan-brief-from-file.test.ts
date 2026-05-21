@@ -142,15 +142,13 @@ describe("plan brief --from-file (error matrix)", () => {
       "--json",
     ]);
     expect(res.code).toBe(2);
-    const env = JSON.parse(res.stdout) as JsonEnvelope<{
-      detail: string;
-      path: string;
-    }>;
+    const env = JSON.parse(res.stdout) as JsonEnvelope<unknown>;
     expect(env.ok).toBe(false);
     if (!env.ok) {
       expect(env.error.code).toBe("CONFIG_ERROR");
-      expect(env.data?.detail).toBe("unreadable");
-      expect(env.data?.path).toBe("does-not-exist.yaml");
+      const data = env.data as { detail?: string; path?: string } | undefined;
+      expect(data?.detail).toBe("unreadable");
+      expect(data?.path).toBe("does-not-exist.yaml");
     }
   });
 
@@ -165,13 +163,11 @@ describe("plan brief --from-file (error matrix)", () => {
       "--json",
     ]);
     expect(res.code).toBe(2);
-    const env = JSON.parse(res.stdout) as JsonEnvelope<{
-      detail: string;
-      path: string;
-    }>;
+    const env = JSON.parse(res.stdout) as JsonEnvelope<unknown>;
     expect(env.ok).toBe(false);
     if (!env.ok) {
-      expect(env.data?.detail).toBe("invalid_yaml");
+      const data = env.data as { detail?: string } | undefined;
+      expect(data?.detail).toBe("invalid_yaml");
     }
   });
 
@@ -186,10 +182,11 @@ describe("plan brief --from-file (error matrix)", () => {
       "--json",
     ]);
     expect(res.code).toBe(2);
-    const env = JSON.parse(res.stdout) as JsonEnvelope<{ detail: string }>;
+    const env = JSON.parse(res.stdout) as JsonEnvelope<unknown>;
     expect(env.ok).toBe(false);
     if (!env.ok) {
-      expect(env.data?.detail).toBe("schema_invalid");
+      const data = env.data as { detail?: string } | undefined;
+      expect(data?.detail).toBe("schema_invalid");
     }
   });
 
@@ -208,10 +205,11 @@ describe("plan brief --from-file (error matrix)", () => {
       "--json",
     ]);
     expect(res.code).toBe(2);
-    const env = JSON.parse(res.stdout) as JsonEnvelope<{ detail: string }>;
+    const env = JSON.parse(res.stdout) as JsonEnvelope<unknown>;
     expect(env.ok).toBe(false);
     if (!env.ok) {
-      expect(env.data?.detail).toBe("schema_invalid");
+      const data = env.data as { detail?: string } | undefined;
+      expect(data?.detail).toBe("schema_invalid");
     }
   });
 
@@ -225,10 +223,11 @@ describe("plan brief --from-file (error matrix)", () => {
       "--json",
     ]);
     expect(res.code).toBe(2);
-    const env = JSON.parse(res.stdout) as JsonEnvelope<{ detail: string }>;
+    const env = JSON.parse(res.stdout) as JsonEnvelope<unknown>;
     expect(env.ok).toBe(false);
     if (!env.ok) {
-      expect(env.data?.detail).toBe("unsafe_path");
+      const data = env.data as { detail?: string } | undefined;
+      expect(data?.detail).toBe("unsafe_path");
     }
   });
 
