@@ -132,7 +132,7 @@ Runbook proposes — but never executes — the v1.2 commands from P11:
 - **The field IS a reviewable declaration of intent.** A human or agent reviewing a PR can compare `declared_writes` against actual `git diff` changes to spot mismatches.
 - **The field is NOT runtime-enforced.** `task complete` / `task finalize` / `phase reconcile` do not verify the agent's actual writes match the declaration.
 - **Actual write enforcement is P15+ scope.** Implementation requires either a command runner or VCS (`git diff`) integration; the P14 RFC explicitly defers both.
-- **`plan lint --strict` does promote `TASK_WRITES_PROTECTED_PATH` to exit-relevant** (existing binary `--strict` behaviour). See [`docs/cli-contract.md` § `plan lint`](../cli-contract.md#plan-lint---strict---include-quality---json-v07) for the dogfood-corpus posture (release prep does not use `--strict`).
+- **`plan lint --strict` does promote `TASK_WRITES_PROTECTED_PATH` to exit-relevant** (existing binary `--strict` behaviour). See [`docs/cli-contract.md` § `plan lint`](../cli-contract.md#plan-lint---strict---include-quality---json-v07) for the strict-clean dogfood posture.
 
 Read the finalization-reconciliation walkthrough's review-surface section for the canonical `git diff` comparison workflow — both surfaces (`task finalize` and `task runbook`) emit the same `declared_writes` data, so either fits a reviewer's workflow.
 

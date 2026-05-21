@@ -107,7 +107,7 @@ See [`docs/concepts/finalization-reconciliation.md` § Phase status remains manu
 
 P14-T2 documented the existing `plan lint --strict` semantics for `TASK_WRITES_PROTECTED_PATH` without changing any code. The advisory has been a warning since P10 (v1.1+); `--strict`'s pre-existing binary promotion (`errors + warnings === 0`) makes it exit-relevant in CI use.
 
-**Release-prep posture.** Release prep does NOT use `plan lint --strict` against the dogfood corpus because P10-T1, P10-T6, P11-T1, and the P14-T* tasks themselves legitimately declare `writes` against `design/roadmap.yaml` and `design/phases/*.yaml` (these tasks are themselves the writers). Default `plan lint --json` (no `--strict`) treats them as advisories.
+**Release-prep posture.** As of v1.5.1, the code-pact dogfood corpus is strict-clean: `plan lint --include-quality --strict --json` is expected to pass with zero warnings. Completed historical meta-design tasks do not keep protected design YAML writes declared solely to prove the advisory exists.
 
 See [`docs/cli-contract.md` § Plan diagnostic codes → Task Readiness Schema diagnostics → `--strict`](../cli-contract.md#plan-diagnostic-codes) and [`docs/dogfood.md`](../dogfood.md) (Release prep section) for the canonical guidance.
 

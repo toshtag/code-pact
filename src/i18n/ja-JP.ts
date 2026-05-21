@@ -385,7 +385,7 @@ export const messages = {
       validateNote:
         "非自明なタスク開始前に `code-pact validate --json` でプロジェクト全体の整合性 (schema / manifest / plan) を確認する。",
       packNote:
-        "**内部コマンド:** `code-pact pack` は `task context` が内部的に呼び出すコマンドです。`pack` を直接呼び出さず、`code-pact task context <task-id>` を使用してください。",
+        "**低レベルコマンド:** `code-pact pack` は安定していますが、エージェント向けの入口としては `code-pact task context <task-id>` を推奨します。",
       projectConventionsHeader: "プロジェクト固有の規約",
       projectConventionsHint:
         "このセクションを編集して、実際のプロジェクト規約を記述してください。",

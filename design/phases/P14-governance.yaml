@@ -124,8 +124,6 @@ tasks:
     decision_refs:
       - design/decisions/governance-rfc.md
     writes:
-      - design/roadmap.yaml
-      - design/phases/P14-governance.yaml
       - design/decisions/governance-rfc.md
     acceptance_refs:
       - design/decisions/governance-rfc.md
@@ -482,6 +480,5 @@ tasks:
     writes:
       - CHANGELOG.md
       - package.json
-      - design/phases/P14-governance.yaml
     acceptance_refs:
       - CHANGELOG.md

@@ -472,7 +472,7 @@ P14 (Governance) closes the "who can write what, and when" question that v1.4 le
 - **Reserved phase id `TUTORIAL`** at the governance layer. `init --sample-phase` is the only sanctioned creation path; `phase add --id TUTORIAL`, `phase new` typing `TUTORIAL`, and `phase import` containing a `TUTORIAL` entry all raise `CONFIG_ERROR` (exit 2) at creation time. Existing TUTORIAL phases in v1.4.x projects are untouched.
 - **Roadmap mutation policy** documented. The four `createPhase` callers (`init` sample-phase path, `phase add`, `phase new`, `phase import`) are the only code paths that mutate `design/roadmap.yaml`. This was structurally true in v1.4 too; v1.5 documents it.
 - **Phase status manual-flip convention** formalized. `phase reconcile --write` flips task statuses; the phase's own `status` field is hand-edited in the release-prep PR. Auto-flip is deferred to a future RFC.
-- **Protected-path strict-mode posture** documented (no code change). `plan lint --strict` already promotes `TASK_WRITES_PROTECTED_PATH` to exit-relevant via the existing binary promotion. Release prep deliberately does NOT use `--strict` because the dogfood corpus declares legitimate writes against `design/roadmap.yaml` / `design/phases/*.yaml`.
+- **Protected-path strict-mode posture** documented (no code change). `plan lint --strict` already promotes `TASK_WRITES_PROTECTED_PATH` to exit-relevant via the existing binary promotion. v1.5.1 later tightens this repo's own dogfood posture to strict-clean by removing stale historical protected-path declarations.
 - **Declared writes as a governance review surface** documented (no code change). `declared_writes[]` in `task finalize --json` / `task runbook --json` envelopes is a review signal for `git diff`-style PR comparison, not runtime enforcement. Actual write enforcement requires a runner or VCS integration; P15+ scope.
 - **Internal refactor:** the task→phase resolver (TASK_NOT_FOUND / AMBIGUOUS_TASK_ID) is extracted to `src/core/plan/resolve-task.ts` and shared across all eight `task-*` commands. Same error codes, same message shape, same `.phases` array on ambiguity — pure refactor, invisible to consumers.
 
@@ -502,7 +502,7 @@ code-pact phase reconcile P14 --write --json
 3. Hand-edit the phase's own `status` field — formalized as the convention in v1.5 (auto-flip deferred to future RFC).
 4. Hand-edit `design/roadmap.yaml` if a phase weight or status moved.
 5. Commit + PR.
-6. **Do NOT use `plan lint --strict` in release-prep verification** — the dogfood corpus has legitimate `TASK_WRITES_PROTECTED_PATH` advisories on governance tasks. Default `plan lint --json` (no `--strict`) treats them as warnings, which is the right posture.
+6. Run strict self-checks in v1.5.1+ release prep: `plan lint --include-quality --strict --json`, `plan analyze --strict --json`, `validate --json`, and `doctor --json`.
 
 ### Stale lock recovery (manual in v1.5)
 

@@ -1,6 +1,6 @@
 {
   "name": "code-pact",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "description": "Design Control Plane for AI Coding Agents",
   "type": "module",
   "license": "MIT",
