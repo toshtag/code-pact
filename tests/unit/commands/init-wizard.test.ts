@@ -23,11 +23,20 @@ class ScriptedReader implements LineReader {
   close(): void {}
 }
 
-function makePrompter(lines: readonly string[]): { prompter: Prompter; reader: ScriptedReader; output: PassThrough } {
+function makePrompter(lines: readonly string[]): {
+  prompter: Prompter;
+  reader: ScriptedReader;
+  output: PassThrough;
+  getOutput: () => string;
+} {
   const reader = new ScriptedReader(lines);
   const output = new PassThrough();
+  let written = "";
+  output.on("data", (chunk: Buffer) => {
+    written += chunk.toString();
+  });
   output.resume(); // drop writes silently
-  return { prompter: new Prompter(reader, output), reader, output };
+  return { prompter: new Prompter(reader, output), reader, output, getOutput: () => written };
 }
 
 let tmpDir: string;
@@ -148,6 +157,21 @@ describe("runInitWizard — verify command", () => {
       "utf8",
     );
     expect(phase).toContain("vitest run");
+  });
+});
+
+describe("runInitWizard — output routing", () => {
+  it("writes next steps to the injected prompter output", async () => {
+    const { prompter, getOutput } = makePrompter([
+      "1", // locale
+      "1", // agents
+      "n", // adapters
+      "", // verify
+      "n", // sample
+      "n", // brief
+    ]);
+    await runInitWizard({ cwd: tmpDir, force: false, json: false, prompter });
+    expect(getOutput()).toContain("Next steps");
   });
 });
 

@@ -121,7 +121,7 @@ export async function runInitWizard(opts: InitWizardOptions): Promise<InitResult
     }
 
     const ns = messageCatalog[locale].wizard.init;
-    process.stderr.write(
+    prompter.write(
       `\n${ns.nextStepsHeader}\n  ${ns.nextStep1}\n  ${ns.nextStep2}\n  ${ns.nextStep3}\n`,
     );
 
