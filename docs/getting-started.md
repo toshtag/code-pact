@@ -260,6 +260,21 @@ code-pact validate                  # CI-friendly, exit 1 on errors
 
 Both `plan lint` and `plan analyze` accept `--strict` to fail on warnings. `plan normalize --write` preserves YAML comments and Markdown hard line breaks.
 
+## Concurrent processes (v1.5+)
+
+`code-pact` is designed to be run by a single user (or a single agent) at a time per project. If a workflow ends up running two design-mutating commands in parallel against the same project — for example, an agent calling `task finalize` while a human runs `phase reconcile --write` — the second invocation fails fast with `LOCK_HELD` (exit 2):
+
+```sh
+code-pact phase reconcile P1 --write --json
+# {"ok":false,"error":{"code":"LOCK_HELD",
+#   "message":"Another code-pact mutation is in progress: task finalize P1-T1 --write (pid: 12345, ...). If you are certain no command is running, remove .code-pact/locks/write.lock and retry."},
+#  "data":{"lock_holder":{"pid":12345,"hostname":"laptop.local","cmd":"task finalize P1-T1 --write","created_at":"..."},"lock_path":"..."}}
+```
+
+This is a **transient** failure: wait for the holding process to finish and re-run. Read-only commands (`plan lint`, `plan analyze`, `task runbook`, `phase runbook`, `validate`, `doctor`, `recommend`, `task context`, `task status`) do NOT acquire the lock and can be used to observe state while a mutation is pending. If a process crashed and left the lock file behind, you can delete `.code-pact/locks/write.lock` manually — but only after confirming no `code-pact` process is actually running.
+
+See [`docs/concepts/governance.md`](concepts/governance.md) for the v1.5 governance walkthrough and [`docs/dogfood.md` § Troubleshooting → `LOCK_HELD`](dogfood.md#lock_held-from-a-design-mutating-command-v15) for the recovery playbook.
+
 ## Adapter management later
 
 The `init` wizard (or step 5 in the manual / AI-assisted paths) is the only time most projects need to think about adapters. After that, the upgrade path looks like this:
@@ -276,5 +291,6 @@ code-pact adapter doctor --json                        # adapter-scoped health c
 ## Next reading
 
 - [`docs/cli-contract.md`](cli-contract.md) — full flag / exit code / JSON envelope / error code reference and the Stability taxonomy.
-- [`docs/migration.md`](migration.md) — upgrade guidance from any prior alpha (v0.6 – v0.9) to v1.0.
+- [`docs/migration.md`](migration.md) — upgrade guidance from any prior alpha (v0.6 – v0.9) up through v1.5.0.
 - [`docs/dogfood.md`](dogfood.md) — the real-project walkthrough, including troubleshooting for the most common error codes.
+- [`docs/concepts/governance.md`](concepts/governance.md) — the v1.5 governance layer (advisory write lock, reserved-id block, roadmap mutation policy, phase status manual-flip convention).

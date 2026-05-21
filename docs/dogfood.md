@@ -385,7 +385,7 @@ When the two diverge, `plan analyze` surfaces a `STATUS_DRIFT` warning so it's v
 
 In practice: the v0.6–v1.1 release-prep PRs flipped the phase YAML `status` fields manually as part of the release-prep commit (see `chore(design): mark P8-T1 as done` and similar). v1.2 keeps the v1.0 contract — `task complete` still records progress only and never mutates design YAML — but adds `task finalize <task-id>` and `phase reconcile <phase-id>` as Stable (v1.2+) commands that flip the design YAML's `status` field explicitly, with default dry-run and `--write` opt-in. v1.3 adds `task runbook <task-id>` and `phase runbook <phase-id>` as Stable (v1.3+) read-only guidance commands that return the recommended next steps (including `task finalize` / `phase reconcile` invocations when drift is present) without executing anything. See [`docs/concepts/finalization-reconciliation.md`](concepts/finalization-reconciliation.md) and [`docs/concepts/runbook.md`](concepts/runbook.md) for the walkthroughs.
 
-## Troubleshooting (v1.0 / v1.2+ / v1.3+)
+## Troubleshooting (v1.0 / v1.2+ / v1.3+ / v1.5+)
 
 When a command surfaces one of the diagnostic codes below, this section maps it to the typical recovery action. The full per-code reference is in [`docs/cli-contract.md` § Error codes](cli-contract.md#error-codes).
 
@@ -493,6 +493,57 @@ code-pact phase runbook <phase-id> --json
 ```
 
 If `data.tasks[]` shows every flip candidate has the same refusal reason, the issue is the phase file itself, not individual tasks — fix it once and reconcile will proceed for all of them.
+
+### `LOCK_HELD` from a design-mutating command (v1.5+)
+
+Another `code-pact` mutation is in progress on the same project. The advisory write lock (`.code-pact/locks/write.lock`) is held by the process whose details appear in the envelope:
+
+```json
+{
+  "ok": false,
+  "error": { "code": "LOCK_HELD", "message": "Another code-pact mutation is in progress: phase reconcile P14 --write (pid: 12345, host: laptop.local, started: 2026-05-21T10:15:00.000Z). ..." },
+  "data": {
+    "lock_holder": { "pid": 12345, "hostname": "laptop.local", "cmd": "phase reconcile P14 --write", "created_at": "2026-05-21T10:15:00.000Z" },
+    "lock_path": "/path/to/.code-pact/locks/write.lock"
+  }
+}
+```
+
+**Normal case — another command is running.** Wait for the holder to release (the lock is created/released within a single CLI invocation) and re-run. The lock is transient by design; LOCK_HELD belongs in the retry-on-transient list for any orchestration that runs multiple `code-pact` commands in parallel.
+
+**Stale-lock case — the holder is gone.** A prior `code-pact` process crashed (SIGKILL, OOM, OS reboot) without releasing the lock. v1.5 does NOT auto-detect this; recovery is manual and intentionally conservative:
+
+1. Verify no `code-pact` process is running (check `ps` / `pgrep` for the `pid` in `data.lock_holder.pid`; on a different host, check `data.lock_holder.hostname` matches yours).
+2. **Only when certain no process holds it**, delete the lock file: `rm .code-pact/locks/write.lock`.
+3. Re-run the command.
+
+Do not blindly delete the lock file just because LOCK_HELD fired — if a concurrent mutation IS in progress, deleting the lock undermines the guarantee. The conservative manual-recovery default in v1.5 deliberately favours wait-and-retry over automation, because automated stale detection is subtle (two processes can both decide the other is stale and clobber a real lock).
+
+Read-only commands (`plan lint`, `plan analyze`, `task runbook`, `phase runbook`, `validate`, `doctor`, `recommend`, `task context`, `task status`) do NOT acquire the lock and can be used to observe project state while a mutation is pending.
+
+See [`docs/concepts/governance.md`](concepts/governance.md) for the v1.5 governance walkthrough and [`docs/cli-contract.md` § Advisory write lock](cli-contract.md#advisory-write-lock-v15--p14) for the full acquisition-point matrix.
+
+### `CONFIG_ERROR` from `phase add --id TUTORIAL` / `phase import` containing `TUTORIAL` (v1.5+)
+
+The id `TUTORIAL` is reserved at the governance layer for the sample-phase artifact created by `code-pact init --sample-phase`. The block fires at creation time on every path except the sanctioned bootstrap.
+
+```sh
+# Rejected: phase add cannot create a TUTORIAL phase.
+code-pact phase add --id TUTORIAL --name ... --weight 1 --objective ...
+# → CONFIG_ERROR (exit 2). Roadmap is byte-identical (no write).
+
+# Rejected: phase import containing a TUTORIAL entry (anywhere in the
+# file) is preflighted before any createPhase call, so the whole
+# import is rejected with the roadmap untouched.
+code-pact phase import path/to/import.yaml
+# → CONFIG_ERROR (exit 2) if any phase entry has id: TUTORIAL.
+
+# Sanctioned: init --sample-phase is the only allowed creation path.
+code-pact init --sample-phase
+# → creates design/phases/TUTORIAL-walkthrough.yaml + the roadmap entry.
+```
+
+If you genuinely want a phase named `TUTORIAL` for a non-tutorial purpose, **pick a different id**. The block uses the existing `CONFIG_ERROR` envelope — no new error code ships for this. The error message names the reserved id and points back at `init --sample-phase` as the sanctioned path. Existing v1.4.x projects with a TUTORIAL phase are untouched; the block only fires on new creation. See [`docs/concepts/sample-phase.md`](concepts/sample-phase.md#tutorial-is-a-reserved-phase-id-v15--p14) for the user-facing rules.
 
 ### `ADAPTER_GENERATOR_STALE` from `adapter doctor` / global `doctor`
 

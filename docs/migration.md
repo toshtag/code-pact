@@ -447,73 +447,138 @@ Projects running `plan lint --strict` / `plan analyze --strict` / `validate --st
 
 In semver terms, v1.4.0 is a minor release.
 
-## v1.4.x → v1.5.0 (in development)
+## v1.4.x → v1.5.0
 
-> Authoritative migration entries land with v1.5.0 release prep (P14-T7 / T8). This subsection is a forward-looking snapshot from P14-T4, covering the two governance decisions that ship as part of this PR.
+### Quick path
 
-### Reserved phase id (TUTORIAL) creation-time block
+```sh
+# 1. Upgrade the CLI.
+npm install -g code-pact@1.5.0
 
-`code-pact init --sample-phase` is now the **only** sanctioned path that creates a phase with `id: TUTORIAL`. As of v1.5.0:
+# 2. No mandatory action for single-process users. All existing flag
+#    invocations, JSON envelopes, and error codes are preserved on
+#    the success path. The new failure modes (LOCK_HELD on concurrent
+#    invocations; CONFIG_ERROR on `phase add --id TUTORIAL`) only fire
+#    in genuinely new conditions.
+code-pact validate --json   # expect: ok
+code-pact plan analyze --json
+```
 
-| Path | Outcome |
-|------|---------|
-| `init --sample-phase` (or `init` wizard → yes) | **Allowed** — internal bypass on `createPhase` |
-| `phase add --id TUTORIAL ...` | `CONFIG_ERROR` (exit 2). Roadmap is byte-identical (no write) |
-| `phase new` wizard → typing `TUTORIAL` as the id | `CONFIG_ERROR` (exit 2) |
-| `phase import` containing `id: TUTORIAL` (in any position) | `CONFIG_ERROR` (exit 2) from a **preflight scan**. The entire import is rejected — earlier phases in the input are NOT partially written |
-| `validate` / `plan lint` / `plan analyze` against an existing TUTORIAL phase | No warning. Block is creation-time only; existing data is untouched |
+### What's new in v1.5.0
 
-**Migration impact.** Existing v1.4.x projects with a TUTORIAL phase (whether sample-phase artifact or otherwise) are NOT touched. The block only fires on new creation. Users who genuinely want a phase named `TUTORIAL` need to pick a different id — the recommended sanctioned path is `init --sample-phase`.
+P14 (Governance) closes the "who can write what, and when" question that v1.4 left implicit. The full design rationale lives in [`design/decisions/governance-rfc.md`](../design/decisions/governance-rfc.md); the agent- and reviewer-facing walkthrough is [`docs/concepts/governance.md`](concepts/governance.md). The headline shipped surface:
 
-No new error code: the block reuses `CONFIG_ERROR`. Full details and the future-deferred work (configurable reserved-id lists, advisory `RESERVED_ID_USAGE` lint on existing data) live in [design/decisions/governance-rfc.md](../design/decisions/governance-rfc.md) § Reserved id policy.
+- **Advisory write lock** at `.code-pact/locks/write.lock`, acquired by every design-mutating command (`init --sample-phase`, `init` wizard, `phase add`, `phase new`, `phase import`, `task add`, `task finalize --write`, `phase reconcile --write`). Concurrent invocations against the same project fail fast with the **new public error code `LOCK_HELD`** (exit 2) and a diagnostic envelope carrying `data.lock_holder` (`{pid, hostname, cmd, created_at}`) + `data.lock_path`. Read-only commands (`plan lint`, `plan analyze`, `task runbook`, `phase runbook`, `validate`, `doctor`, `recommend`, `task context`, `task status`) do NOT acquire the lock. `phase import` holds a single outer lock around its multi-phase apply loop (batch transactionality).
+- **Reserved phase id `TUTORIAL`** at the governance layer. `init --sample-phase` is the only sanctioned creation path; `phase add --id TUTORIAL`, `phase new` typing `TUTORIAL`, and `phase import` containing a `TUTORIAL` entry all raise `CONFIG_ERROR` (exit 2) at creation time. Existing TUTORIAL phases in v1.4.x projects are untouched.
+- **Roadmap mutation policy** documented. The four `createPhase` callers (`init` sample-phase path, `phase add`, `phase new`, `phase import`) are the only code paths that mutate `design/roadmap.yaml`. This was structurally true in v1.4 too; v1.5 documents it.
+- **Phase status manual-flip convention** formalized. `phase reconcile --write` flips task statuses; the phase's own `status` field is hand-edited in the release-prep PR. Auto-flip is deferred to a future RFC.
+- **Protected-path strict-mode posture** documented (no code change). `plan lint --strict` already promotes `TASK_WRITES_PROTECTED_PATH` to exit-relevant via the existing binary promotion. Release prep deliberately does NOT use `--strict` because the dogfood corpus declares legitimate writes against `design/roadmap.yaml` / `design/phases/*.yaml`.
+- **Declared writes as a governance review surface** documented (no code change). `declared_writes[]` in `task finalize --json` / `task runbook --json` envelopes is a review signal for `git diff`-style PR comparison, not runtime enforcement. Actual write enforcement requires a runner or VCS integration; P15+ scope.
+- **Internal refactor:** the task→phase resolver (TASK_NOT_FOUND / AMBIGUOUS_TASK_ID) is extracted to `src/core/plan/resolve-task.ts` and shared across all eight `task-*` commands. Same error codes, same message shape, same `.phases` array on ambiguity — pure refactor, invisible to consumers.
 
-### Phase status manual-flip convention (formalized)
+### Recommended adoption pattern
 
-`phase reconcile --write` flips **task** statuses in batch but never writes the phase's own `status` field. The `phase_status_candidate` returned in the JSON envelope is advisory only — this contract has held since v1.2.0 and v1.5.0 formalizes it.
+**Single-process users:** no action. Continue using `code-pact` exactly as in v1.4.x. The lock is created and released within a single command invocation and is invisible from the outside.
 
-Release-prep convention:
+**Multi-process / agent-orchestration automation:** add `LOCK_HELD` to the transient-retry list. The envelope's `data.lock_holder` is the right signal for backoff (the human-readable cmd field can be logged for debugging; the `pid` + `created_at` pair lets a sufficiently old lock be flagged for manual recovery, though P14 itself does NOT auto-detect stale locks). Example handling:
 
-1. `code-pact phase reconcile <phase-id> --write` — flips every eligible task in one shot.
-2. **Hand-edit** the phase's own `status` field in `design/phases/<phase>.yaml` (typically inside the release-prep PR).
+```sh
+code-pact phase reconcile P14 --write --json
+# If exit 2 + envelope.error.code === "LOCK_HELD":
+#   - Inspect envelope.data.lock_holder.cmd to decide whether to wait or
+#     report a stuck process.
+#   - On wait + retry, the second invocation succeeds once the holder
+#     releases.
+```
 
-Auto-flip implementation (e.g. a `--phase-status` flag on `phase reconcile`, or a separate `phase finalize` command) is **not part of v1.5** and is deferred to a future RFC. See [design/decisions/governance-rfc.md](../design/decisions/governance-rfc.md) § Phase status policy for the rationale.
+**CI under `plan lint --strict`:** no new errors and no new warnings. v1.5.0 introduces **zero new plan diagnostic codes** and **zero new severity changes**. The single new public error code (`LOCK_HELD`) only fires on concurrent invocations, which CI typically does not run.
 
-### Coming in subsequent P14 PRs (v1.5.0 final)
+**`phase add --id TUTORIAL` / `phase import` containing `TUTORIAL`:** now returns `CONFIG_ERROR` exit 2. If you genuinely want a phase named `TUTORIAL`, pick a different id — the recommended sanctioned path is `init --sample-phase`. Existing v1.4.x projects with a TUTORIAL phase (whether sample-phase artifact or otherwise) are untouched; the block only fires on new creation.
 
-The following changes ship later in the v1.5.0 cycle and will get their own migration notes in the final v1.5.0 release-prep update:
+**Release prep:** continue using the v1.4 release-prep mechanization. The v1.5 governance additions do NOT change the release-prep loop:
 
-- **Advisory write lock** at `.code-pact/locks/write.lock` acquired by design-mutating commands (`init` sample-phase path, `phase add`, `phase new`, `phase import`, `task add`, `task finalize --write`, `phase reconcile --write`). Concurrent invocations return a new public error code `LOCK_HELD` (exit 2). Read-only commands are unaffected. Single-process users see no change.
-- **Task→phase resolver core extraction** — pure internal refactor; all existing per-command behaviour and error codes (`TASK_NOT_FOUND` / `AMBIGUOUS_TASK_ID`) preserved unchanged.
-- **Declared writes as a governance review surface** — already shipped in [`docs/concepts/finalization-reconciliation.md`](concepts/finalization-reconciliation.md#declared-writes-as-a-governance-review-surface-v14--p14) and [`docs/concepts/runbook.md`](concepts/runbook.md#declared-writes-as-a-governance-review-surface-v14--p14) (P14-T3).
-- **`plan lint --strict` semantics for `TASK_WRITES_PROTECTED_PATH`** — already documented in [`docs/cli-contract.md` § Plan diagnostic codes](cli-contract.md#plan-diagnostic-codes) (P14-T2). Release prep does NOT pass `--strict` because the dogfood corpus contains legitimate `TASK_WRITES_PROTECTED_PATH` advisories on governance tasks.
+1. Bump version + write CHANGELOG.
+2. `code-pact phase reconcile <phase-id> --write --json` — flips every eligible task in one shot. Now serialized by the lock against any concurrent mutations.
+3. Hand-edit the phase's own `status` field — formalized as the convention in v1.5 (auto-flip deferred to future RFC).
+4. Hand-edit `design/roadmap.yaml` if a phase weight or status moved.
+5. Commit + PR.
+6. **Do NOT use `plan lint --strict` in release-prep verification** — the dogfood corpus has legitimate `TASK_WRITES_PROTECTED_PATH` advisories on governance tasks. Default `plan lint --json` (no `--strict`) treats them as warnings, which is the right posture.
 
-## Deferred beyond v1.4
+### Stale lock recovery (manual in v1.5)
 
-The following remain on the backlog after v1.4.0:
+If a `code-pact` command crashes without releasing the lock (e.g. SIGKILL, OS-level crash), the lock file persists. v1.5 does NOT auto-detect this. Manual recovery:
+
+1. Verify no `code-pact` command is running (check process list).
+2. Delete `.code-pact/locks/write.lock`.
+3. Re-run the command.
+
+Automation (PID liveness check, age-based stale detection, a `--force-lock` flag) is deferred to a future RFC. The conservative manual-recovery default in v1.5 avoids races where two processes both decide the other is stale.
+
+### New `KNOWN_CODES.public` entries (additive)
+
+v1.5.0 grows the public error-code surface by exactly **one** entry:
+
+| Code | Exit | Description |
+| --- | --- | --- |
+| `LOCK_HELD` | 2 | Another `code-pact` mutation is in progress on the same project. Diagnostic data in `data.lock_holder` + `data.lock_path`. Transient + retryable |
+
+No existing code is renamed, recategorized, or has its severity changed. The full public surface remains additive.
+
+### Backward compatibility
+
+- `init` / `phase add` / `phase new` / `phase import` / `task add` / `task complete` / `task finalize` / `phase reconcile` / `task context` / `task start` / `task block` / `task resume` / `task status` / `task runbook` / `phase runbook` / `plan lint` / `plan analyze` / `plan normalize` / `plan prompt` / `validate` / `doctor` / `recommend` — **success-path behaviour unchanged**. Same flags, JSON envelope, exit codes.
+- **New failure modes (transient + targeted):**
+  - Design-mutating commands may now return `LOCK_HELD` (exit 2) under concurrent invocation. Single-process users see no change.
+  - `phase add --id TUTORIAL` / `phase new` typing `TUTORIAL` / `phase import` containing `TUTORIAL` → `CONFIG_ERROR` (exit 2). Existing projects with TUTORIAL phases are untouched.
+- **`progress.yaml`** remains read-only for the new lock. The append-only operational-log contract is preserved unchanged; `task complete` / `task start` / `task block` / `task resume` do NOT acquire the lock.
+- **`task context` pack output** is unchanged. The byte-identical pack regression test passes without modification.
+- **`tests/integration/json-stdout.test.ts`** continues to pass for every Stable command. New entries added for the LOCK_HELD envelope and TUTORIAL reserved-id `CONFIG_ERROR` paths.
+- **`KNOWN_CODES.public`** gains exactly one new entry (`LOCK_HELD`). No existing code is renamed or recategorized.
+- **No new task or phase schema field.** v1.4.x phase YAMLs parse and behave identically.
+- **The task→phase resolver refactor is invisible.** Existing per-command unit tests pass unchanged — that's the load-bearing safety check.
+
+In semver terms, v1.5.0 is a **minor** release.
+
+## Deferred beyond v1.5
+
+The following remain on the backlog after v1.5.0:
 
 - Removal of bare-form `code-pact adapter`.
 - Multi-agent orchestration / MCP / GitHub-Linear-Jira sync.
-- Advisory write locks for concurrent process safety.
-- **Enforcement of declared `writes` against actual file-system writes.** v1.1+ surfaces `TASK_WRITES_PROTECTED_PATH` as a warning against a narrow built-in seed set (`.git/**`, `node_modules/**`, `.code-pact/**`, `design/roadmap.yaml`, `design/phases/*.yaml`). Configurable governance and warning → error promotion are P14 work. v1.2+ displays declared `writes` in the `task finalize` / `phase reconcile` / `task runbook` JSON payload but does **not** verify them against actual file-system writes.
+- **Auto-detection of stale advisory write locks** (PID liveness check, age-based stale detection, a `--force-lock` flag). v1.5.0 ships the lock with manual-recovery only — if a process crashes mid-lock, the user manually deletes `.code-pact/locks/write.lock`. Auto-detection is subtle (two processes can both decide the other is stale) and was deferred to a future RFC.
+- **Enforcement of declared `writes` against actual file-system writes.** v1.1+ surfaces `TASK_WRITES_PROTECTED_PATH` as a warning against a hardcoded seed set. v1.2+/v1.3+ display declared `writes` in `task finalize` / `task runbook` JSON envelopes; v1.5 (P14-T3) explicitly framed this as a review surface, not enforcement. Actual enforcement requires either a runner that observes file-system writes during command execution or a VCS-diff integration; both are significant scope expansions and remain P15+.
+- **Configurable protected paths.** `PROTECTED_PATHS` (`.git/**`, `node_modules/**`, `.code-pact/**`, `design/roadmap.yaml`, `design/phases/*.yaml`) stays hardcoded in v1.5. A `project.yaml`-driven override is a P15+ candidate.
+- **Configurable reserved-id list.** v1.5 reserves `TUTORIAL` and only `TUTORIAL`. Configurable lists require schema design and are deferred.
+- **`RESERVED_ID_USAGE` advisory plan-lint diagnostic on existing TUTORIAL phases.** v1.5 only blocks creation time; existing TUTORIAL phases in user projects are not flagged. An advisory warning for existing data is a future-RFC candidate.
+- **Selective per-code `--strict` promotion.** v1.5 uses the existing binary promotion (`errors + warnings === 0`). A future flag like `--strict-code TASK_WRITES_PROTECTED_PATH` (promote one specific code without promoting all warnings) is P15+ if signal emerges.
 - **Cross-phase `depends_on`.** v1.1+ ships same-phase only; cross-phase task ordering is a future extension. v1.3.0 surfaces `depends_on` in `task runbook` blocking steps but does not extend the same-phase restriction.
-- **File-content inclusion for `reads` and `acceptance_refs`.** v1.1+ renders both as path lists only; v1.4.0 keeps that surface unchanged.
-- **Phase status auto-flip.** v1.2+ reports `phase_status_candidate` as advisory but never writes the phase's own `status` field. v1.3.0 `phase runbook` surfaces the same candidate plus a `manual_action` recommending the flip; it does not write either. v1.5 formalizes manual-flip as the convention (see [`docs/concepts/finalization-reconciliation.md`](concepts/finalization-reconciliation.md#phase-status-remains-manual-in-v12-formalized-as-the-convention-in-v15--p14) and [design/decisions/governance-rfc.md](../design/decisions/governance-rfc.md) § Phase status policy). An `--include-phase-status` opt-in (or a separate `phase finalize` command) is a future RFC candidate once the per-task flip path has been used through more release cycles.
-- **Multi-phase reconcile / runbook (`--all`).** v1.2 / v1.3 / v1.4 ship per-phase only.
-- **`design/roadmap.yaml` mutation.** Whether release prep should be able to delegate the per-phase weight / status flip to a `roadmap reconcile` command is P14 governance scope.
+- **File-content inclusion for `reads` and `acceptance_refs`.** v1.1+ renders both as path lists only; v1.5 keeps that surface unchanged.
+- **Phase status auto-flip.** v1.2+ reports `phase_status_candidate` as advisory but never writes the phase's own `status` field. v1.3.0 `phase runbook` surfaces the same candidate plus a `manual_action` recommending the flip; it does not write either. v1.5 formalized manual-flip as the convention (see [`docs/concepts/finalization-reconciliation.md`](concepts/finalization-reconciliation.md#phase-status-remains-manual-in-v12--formalized-as-the-convention-in-v15--p14) and [design/decisions/governance-rfc.md](../design/decisions/governance-rfc.md) § Phase status policy). An `--include-phase-status` opt-in (or a separate `phase finalize` command) is a future RFC candidate.
+- **Multi-phase reconcile / runbook (`--all`).** v1.2 / v1.3 / v1.4 / v1.5 ship per-phase only.
+- **`design/roadmap.yaml` mutation beyond `createPhase`.** v1.5 documents the four `createPhase` callers as the only roadmap writers (P14 § Roadmap mutation policy). Whether release prep should be able to delegate per-phase weight / status flips to a `roadmap reconcile` command remains a future RFC.
+- **Cross-phase / multi-project locking.** v1.5 ships single project, single lock file. Coordinating mutations across multiple `code-pact` projects on the same machine is not addressed.
+- **Progress.yaml write locks.** v1.5 leaves `task complete` / `task start` / `task block` / `task resume` lock-free because the append-only contract makes them safe under interleaving (worst case = event reordering, not corruption). Adding a lock to those high-frequency paths would have overhead without integrity benefit; future work would need a different motivation.
 - **Semantic validation of `acceptance_refs` content.** v1.2+ only checks the path exists; richer validation would couple finalize to acceptance-criteria format choices the project has not yet made.
-- **Runbook execution (`task runbook --execute`).** v1.3.0 is proposal-only by design. A future RFC may revisit a flag that runs each recommended step automatically, but only after the proposal-only contract has been used through one release cycle.
-- **Schema-level `human_gate` field.** v1.3.0 expresses manual checkpoints as `RunbookStep` content (`command: null` + `manual_action: "..."`). Promotion to a task-schema field requires more usage signal; P14 candidate.
-- **`task next` / `phase next` sugar aliases.** v1.3.0 ships `runbook` as the explicit primary name. Short-form aliases remain a future candidate.
-- **Bundling `recommend` into `task runbook`.** v1.3.0 keeps them as separate commands answering different questions. Bundling remains a future candidate once usage signal emerges.
+- **Runbook execution (`task runbook --execute`).** v1.3.0 is proposal-only by design. A future RFC may revisit a flag that runs each recommended step automatically, but only after the proposal-only contract has been used through more release cycles.
+- **Schema-level `human_gate` field.** v1.3.0 expresses manual checkpoints as `RunbookStep` content (`command: null` + `manual_action: "..."`). Promotion to a task-schema field requires more usage signal.
+- **`task next` / `phase next` sugar aliases.** v1.3.0+ ships `runbook` as the explicit primary name. Short-form aliases remain a future candidate.
+- **Bundling `recommend` into `task runbook`.** v1.3.0+ keeps them as separate commands answering different questions. Bundling remains a future candidate once usage signal emerges.
 - **`task add --status` flag.** P13 explicitly does not expose `--status`. Newly added tasks are always `status: planned`. Historical / migrated tasks must use `phase import`. Preserves the P11/P12 contract that design `done` is the result of `task finalize` / `phase reconcile`, not a starting point.
 - **`task add --dry-run`.** Not enough signal yet; revisit if needed.
-- **Reserved-id (`TUTORIAL`) hard enforcement.** P13 only changes the sample-phase default; users can still hand-edit roadmap.yaml to add their own `TUTORIAL`-named phase. Existing `DUPLICATE_PHASE_ID` catches the practical case. Hard reservation is P14 governance.
-- **`plan brief` / `plan constitution` non-TTY alternatives.** Designed as interactive by intent; non-TTY users can hand-edit `design/brief.md` / `design/constitution.md`. Code-level alternatives are P14 or later.
+- **`plan brief` / `plan constitution` non-TTY alternatives.** Designed as interactive by intent; non-TTY users can hand-edit `design/brief.md` / `design/constitution.md`. Code-level alternatives remain future scope.
 - **Init / wizard / task-add UX polish beyond P13.** P13 closed the scripted-bootstrap gap and the partial-flags / silent-fallthrough footgun; further polish (e.g. `init --mode tutorial` sugar alias, `task add --dry-run`) remains future scope.
-- **Runbook integration with a runbook orchestrator (`task run` / `phase close`).** v1.4.0 keeps `task runbook` / `phase runbook` as user-callable read-only commands. A future runbook orchestrator that consumes them is out of scope.
+- **Runbook integration with a runbook orchestrator (`task run` / `phase close`).** v1.5 keeps `task runbook` / `phase runbook` as user-callable read-only commands. A future runbook orchestrator that consumes them is out of scope.
 - Semver-aware `ADAPTER_GENERATOR_STALE` (current implementation is simple equality).
 - Conformance test inclusion for `cursor` / `gemini-cli` adapters — they remain Experimental.
 
-A previously deferred item, **promoting `assertSafeRelativePath` / `resolveWithinProject` to a neutral module**, was partially closed in v1.1.0 (P10-T3): the helpers now live at `src/core/path-safety.ts` and are imported by plan lint for the new `decision_refs` / `reads` / `writes` / `acceptance_refs` validation. The adapter file re-exports them so existing call sites are unchanged. Extension of these helpers to the broader project state tree (design / progress file writes) remains P14 governance scope.
+**Closed in v1.5 (P14):**
+
+- ~~Advisory write locks for concurrent process safety~~ — shipped as `LOCK_HELD` (see § v1.4.x → v1.5.0).
+- ~~Hard reservation of `TUTORIAL` id~~ — shipped as creation-time `CONFIG_ERROR` block.
+- ~~Roadmap mutation policy documentation~~ — shipped in [`docs/cli-contract.md` § Roadmap mutation policy](cli-contract.md#roadmap-mutation-policy-v15--p14) + [`docs/concepts/governance.md`](concepts/governance.md).
+- ~~Phase status manual-flip formalization~~ — shipped in [`docs/concepts/finalization-reconciliation.md` § Phase status remains manual…](concepts/finalization-reconciliation.md#phase-status-remains-manual-in-v12--formalized-as-the-convention-in-v15--p14).
+- ~~Task→phase resolver core extraction~~ — shipped as internal-only refactor (`src/core/plan/resolve-task.ts`); pure refactor with no observable behaviour change.
+
+A previously deferred item, **promoting `assertSafeRelativePath` / `resolveWithinProject` to a neutral module**, was partially closed in v1.1.0 (P10-T3): the helpers now live at `src/core/path-safety.ts` and are imported by plan lint for the new `decision_refs` / `reads` / `writes` / `acceptance_refs` validation. The adapter file re-exports them so existing call sites are unchanged. Extension of these helpers to the broader project state tree (design / progress file writes) remains future scope.
 
 See [`docs/cli-contract.md` § Stability taxonomy](cli-contract.md#stability-taxonomy-v10) for the full list of stability bands per command and the criteria a v1.x command must meet to move between them.
