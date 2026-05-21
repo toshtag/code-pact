@@ -44,11 +44,14 @@ jobs:
       - run: node dist/cli.js plan analyze --strict --json
         if: matrix.profile == 'full'
 
-      - run: node dist/cli.js validate --json
+      - name: Smoke validate and doctor on an initialized project
         if: matrix.profile == 'full'
-
-      - run: node dist/cli.js doctor --json
-        if: matrix.profile == 'full'
+        run: |
+          tmp="$(mktemp -d)"
+          cd "$tmp"
+          node "$GITHUB_WORKSPACE/dist/cli.js" init --non-interactive --locale en-US --agent claude-code --json
+          node "$GITHUB_WORKSPACE/dist/cli.js" validate --json
+          node "$GITHUB_WORKSPACE/dist/cli.js" doctor --json
 
       - run: node dist/cli.js --version
 
