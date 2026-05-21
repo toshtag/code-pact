@@ -312,9 +312,38 @@ The validation pass detects logic errors before any write; ordinary disk failure
 
 `code-pact plan <subcommand>` provides AI-assisted project planning tools that feed into the design directory.
 
-### `plan brief [--force]`
+### `plan brief [--force] [--from-file <yaml>] [--json]`
 
-Interactive wizard that collects project description, target users, and differentiator, then writes `design/brief.md`. Requires a TTY; exits 2 in non-interactive mode. `--force` overwrites an existing file.
+Interactive wizard that collects project description, target users, and differentiator, then writes `design/brief.md`. Stability: **Stable (v0.2+)**. `--from-file` is **Stable (v1.6+)** under P17-T1.
+
+Default behaviour requires a TTY; exits 2 with `CONFIG_ERROR` in non-interactive mode. `--force` overwrites an existing file.
+
+**`--from-file <yaml>` (v1.6+, P17-T1).** Reads the file at `<yaml>` (repo-root-relative; `assertSafeRelativePath` enforced), validates it against the schema below, and writes `design/brief.md` from the supplied values. Bypasses the TTY check, so non-TTY environments (CI, agent sessions) can author a brief end-to-end. The TTY wizard remains the default when `--from-file` is omitted.
+
+YAML schema:
+
+```yaml
+what: <non-empty string, required>          # "what we're building"
+who: <non-empty string, required>           # "who it's for"
+differentiator: <string, optional>          # defaults to "" (matches wizard empty-input behaviour)
+```
+
+Unknown keys are rejected (strict schema). All four failure modes return `CONFIG_ERROR` (exit 2) with the structured envelope:
+
+```json
+{
+  "ok": false,
+  "error": { "code": "CONFIG_ERROR", "message": "..." },
+  "data": {
+    "detail": "unsafe_path" | "unreadable" | "invalid_yaml" | "schema_invalid",
+    "path": "<the --from-file value, verbatim>"
+  }
+}
+```
+
+On success, `--json` emits `{ ok: true, data: { path: "..." } }` (same envelope as the wizard path). `design/brief.md` produced via `--from-file` is byte-identical to one produced by the wizard for equivalent input.
+
+`--from-file` is partial-write-safe: any failure (path / read / parse / schema) yields no write to `design/brief.md`.
 
 ### `plan prompt [--clipboard]`
 
