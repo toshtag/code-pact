@@ -32,7 +32,12 @@ import {
   runAdapterDoctor,
   runAdapterUpgrade,
 } from "./commands/adapter.ts";
-import { runPlanBrief } from "./commands/plan-brief.ts";
+import {
+  type BriefAnswers,
+  loadBriefFromFile,
+  PlanBriefFromFileError,
+  runPlanBrief,
+} from "./commands/plan-brief.ts";
 import { runPlanPrompt } from "./commands/plan-prompt.ts";
 import { runPlanConstitution } from "./commands/plan-constitution.ts";
 import {
@@ -589,6 +594,7 @@ async function cmdPlanBrief(
     options: {
       force: { type: "boolean" },
       json: { type: "boolean" },
+      "from-file": { type: "string" },
     },
     strict: false,
     allowPositionals: false,
@@ -596,10 +602,37 @@ async function cmdPlanBrief(
 
   const json = globalJson || values.json === true;
   const force = values.force === true;
+  const fromFile =
+    typeof values["from-file"] === "string" ? values["from-file"] : undefined;
   const cwd = process.cwd();
 
-  if (!isInteractive()) {
-    const msg = "plan brief is interactive and requires a TTY.";
+  // v1.6 P17-T1: `--from-file` bypasses the TTY requirement. Without
+  // it, the wizard path still requires a TTY (v1.5.1 behaviour
+  // preserved). With it, non-TTY environments (CI, agent sessions)
+  // can author the brief end-to-end.
+  let preCollectedAnswers: BriefAnswers | undefined;
+  if (fromFile !== undefined) {
+    try {
+      preCollectedAnswers = await loadBriefFromFile(cwd, fromFile);
+    } catch (err) {
+      if (err instanceof PlanBriefFromFileError) {
+        if (json) {
+          process.stdout.write(
+            `${JSON.stringify({
+              ok: false,
+              error: { code: "CONFIG_ERROR", message: err.message },
+              data: { detail: err.detail, path: err.path },
+            })}\n`,
+          );
+        } else {
+          process.stderr.write(`${err.message}\n`);
+        }
+        return 2;
+      }
+      throw err;
+    }
+  } else if (!isInteractive()) {
+    const msg = "plan brief is interactive and requires a TTY (use --from-file <yaml> for non-interactive input).";
     if (json) {
       process.stdout.write(
         `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
@@ -610,7 +643,12 @@ async function cmdPlanBrief(
     return 2;
   }
 
-  const result = await runPlanBrief({ cwd, locale, force });
+  const result = await runPlanBrief({
+    cwd,
+    locale,
+    force,
+    answers: preCollectedAnswers,
+  });
   if (result.skipped) {
     if (json) {
       process.stdout.write(

@@ -1,0 +1,254 @@
+id: P17
+name: Non-interactive Authoring
+weight: 20
+confidence: high
+risk: low
+status: in_progress
+objective: |
+  Unblock CI / agent-session bootstrap by giving the two TTY-only
+  plan authoring commands (`plan brief` and `plan constitution`)
+  non-interactive input paths. Today both commands exit
+  `CONFIG_ERROR` on non-TTY environments — there is no
+  `--from-file`, no `--stdin`, no flag-driven input. By contrast
+  `task add` (v1.4 P13-T3) and `phase import` (v0.4+) already
+  support flag- and file-driven input. P17 closes the asymmetry
+  so a fresh project can be bootstrapped end-to-end without a
+  human at the terminal. The existing TTY wizard remains
+  default behaviour for human users — every change is additive
+  on the v1.0 stable CLI contract. P17-T1 ships the first input
+  path (`plan brief --from-file <yaml>`) plus the typed YAML
+  schema both commands will eventually share. T2 through T5
+  layer additional input modes and extend the contract to
+  `plan constitution`.
+non_goals:
+  - LLM API integration (no Anthropic / OpenAI SDK calls — the
+    user supplies brief / constitution content via their own
+    tooling)
+  - changes to the wizard UX itself (the wizard remains the
+    default TTY path, unchanged)
+  - changes to `design/brief.md` / `design/constitution.md`
+    file formats (atomic-write of the same template via
+    `generateBriefMd` / `generateConstitutionMd`)
+  - per-agent customization of brief / constitution authoring
+    paths (the input shape is agent-agnostic, same as the
+    wizard)
+  - retroactive non-interactive paths for already-implemented
+    wizards (`init`, `phase new`) — those already have
+    flag-driven equivalents via `init --non-interactive` and
+    `phase add`
+definition_of_done:
+  - design/phases/P17-non-interactive-authoring.yaml exists
+    with this objective and tasks list
+  - design/roadmap.yaml lists P17
+  - "`plan brief --from-file <yaml>` reads, validates, and applies
+    the supplied YAML, writing `design/brief.md` without
+    requiring a TTY"
+  - non-TTY environments with `--from-file` succeed (no
+    `CONFIG_ERROR`); non-TTY environments without `--from-file`
+    continue to return `CONFIG_ERROR` (v1.5.1 behaviour
+    preserved)
+  - "`--from-file` + `--json` emits `{ok: true, data: {path}}` on
+    success (consistent with the existing TTY-mode JSON envelope)"
+  - file-read / YAML-parse / schema-validation failures all
+    return `CONFIG_ERROR` (exit 2) with a structured message;
+    no partial writes
+  - "`design/brief.md` produced via `--from-file` is byte-
+    identical to one produced via the wizard for the same input"
+  - "`tests/integration/json-stdout.test.ts` continues to pass"
+  - human-mode `plan brief` (TTY wizard) is byte-identical to
+    v1.5.1
+  - docs/cli-contract.md documents the `--from-file` flag and
+    the YAML schema (P17-T1 scope only — T2/T3/T4/T5 add their
+    own sections incrementally)
+  - CHANGELOG.md gains a `[Unreleased]` entry covering P17-T1
+verification:
+  commands:
+    - pnpm typecheck
+    - pnpm test
+    - pnpm build
+    - node dist/cli.js plan lint --json
+    - node dist/cli.js validate --json
+    - node dist/cli.js doctor --json
+tasks:
+  - id: P17-T1
+    type: feature
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: short
+    status: in_progress
+    description: |
+      `plan brief --from-file <yaml>`. Adds a typed YAML schema
+      for the three fields the existing wizard collects (`what`,
+      `who`, `differentiator`) and wires the flag through
+      `cmdPlanBrief` so the TTY check is bypassed when
+      `--from-file` is supplied. The actual brief.md generation
+      reuses `generateBriefMd` unchanged — the only new code is
+      the file loader, the zod schema, and the cli flag plumbing.
+
+      Schema (zod):
+        what: required string, min length 1
+        who: required string, min length 1
+        differentiator: optional string (when omitted, the
+          existing `differentiatorPlaceholder` template fills in,
+          matching the wizard's empty-input behaviour)
+
+      Error cases (all return CONFIG_ERROR / exit 2):
+        - file does not exist
+        - file is unreadable (e.g. permission denied)
+        - file is not valid YAML
+        - YAML does not match the schema (missing required field,
+          wrong type, extra unknown field)
+
+      All four cases yield no write to `design/brief.md`.
+
+      Tests:
+        - unit: schema validation matrix (valid / missing field /
+          wrong type / extra field), file loader (missing file /
+          empty / malformed YAML / valid)
+        - integration: non-TTY + `--from-file <valid.yaml>`
+          succeeds and produces a byte-identical brief.md to the
+          wizard path; non-TTY + `--from-file` of a missing /
+          malformed file returns CONFIG_ERROR; TTY + `--from-file`
+          still uses the file (does NOT fall back to the wizard);
+          `--from-file` + `--json` emits the existing success
+          envelope
+        - regression: `plan brief` without `--from-file` in
+          non-TTY still returns CONFIG_ERROR (v1.5.1 contract
+          preserved)
+    decision_refs:
+      - design/phases/P17-non-interactive-authoring.yaml
+    reads:
+      - src/commands/plan-brief.ts
+      - src/cli.ts
+      - src/lib/tty.ts
+    writes:
+      - src/commands/plan-brief.ts
+      - src/cli.ts
+      - tests/unit/commands/plan-brief.test.ts
+      - tests/integration/plan-brief-from-file.test.ts
+      - docs/cli-contract.md
+      - CHANGELOG.md
+    acceptance_refs:
+      - design/phases/P17-non-interactive-authoring.yaml
+  - id: P17-T2
+    type: feature
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: planned
+    description: |
+      `plan brief --stdin`. Same schema as T1, but the YAML is
+      read from `process.stdin` instead of a file. Mutually
+      exclusive with `--from-file` (passing both returns
+      CONFIG_ERROR). Test surface mirrors T1 with the stdin path
+      substituted.
+    depends_on:
+      - P17-T1
+    decision_refs:
+      - design/phases/P17-non-interactive-authoring.yaml
+    reads:
+      - src/commands/plan-brief.ts
+      - src/cli.ts
+    writes:
+      - src/commands/plan-brief.ts
+      - src/cli.ts
+      - tests/integration/plan-brief-stdin.test.ts
+      - docs/cli-contract.md
+    acceptance_refs:
+      - design/phases/P17-non-interactive-authoring.yaml
+  - id: P17-T3
+    type: feature
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: planned
+    description: |
+      `plan brief` flag-driven mode (`--what` / `--who` /
+      `--differentiator`). Same shape as the `task add` v1.4
+      non-interactive flags. Mutually exclusive with `--from-file`
+      and `--stdin`; missing required flags in non-TTY without
+      `--from-file` / `--stdin` returns CONFIG_ERROR.
+    depends_on:
+      - P17-T1
+    decision_refs:
+      - design/phases/P17-non-interactive-authoring.yaml
+    reads:
+      - src/commands/plan-brief.ts
+      - src/cli.ts
+      - src/commands/task-add.ts
+    writes:
+      - src/commands/plan-brief.ts
+      - src/cli.ts
+      - tests/integration/plan-brief-flags.test.ts
+      - docs/cli-contract.md
+    acceptance_refs:
+      - design/phases/P17-non-interactive-authoring.yaml
+  - id: P17-T4
+    type: feature
+    ambiguity: low
+    risk: low
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: planned
+    description: |
+      Apply T1–T3 patterns to `plan constitution`. Same three
+      input modes (`--from-file`, `--stdin`, flag-driven), same
+      YAML schema (constitution-specific fields), same CONFIG_ERROR
+      contract on bad input.
+    depends_on:
+      - P17-T1
+      - P17-T2
+      - P17-T3
+    decision_refs:
+      - design/phases/P17-non-interactive-authoring.yaml
+    reads:
+      - src/commands/plan-constitution.ts
+      - src/cli.ts
+    writes:
+      - src/commands/plan-constitution.ts
+      - src/cli.ts
+      - tests/integration/plan-constitution-non-interactive.test.ts
+      - docs/cli-contract.md
+    acceptance_refs:
+      - design/phases/P17-non-interactive-authoring.yaml
+  - id: P17-T5
+    type: docs
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: planned
+    description: |
+      Document the full non-interactive authoring contract once
+      T1–T4 are in. Adds a `plan brief` / `plan constitution`
+      non-interactive walkthrough to docs/dogfood.md and a CI-
+      bootstrap example to docs/getting-started.md.
+    depends_on:
+      - P17-T1
+      - P17-T2
+      - P17-T3
+      - P17-T4
+    decision_refs:
+      - design/phases/P17-non-interactive-authoring.yaml
+    reads:
+      - docs/cli-contract.md
+      - docs/dogfood.md
+      - docs/getting-started.md
+    writes:
+      - docs/dogfood.md
+      - docs/getting-started.md
+    acceptance_refs:
+      - docs/dogfood.md
