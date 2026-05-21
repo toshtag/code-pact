@@ -18,6 +18,11 @@ import {
   formatPhaseShow,
 } from "./commands/phase.ts";
 import { runPhaseImport } from "./commands/phase-import.ts";
+import {
+  acquireWriteLock,
+  isLockHeldError,
+  type LockHandle,
+} from "./core/locks/write-lock.ts";
 import { runProgress, formatProgress } from "./commands/progress.ts";
 import { runPack } from "./commands/pack.ts";
 import { runVerify, formatVerify } from "./commands/verify.ts";
@@ -76,6 +81,49 @@ import type { PhaseStatus } from "./core/schemas/phase.ts";
 
 const KNOWN_LOCALES: ReadonlySet<Locale> = new Set(["en-US", "ja-JP"]);
 const KNOWN_AGENTS: ReadonlySet<SupportedAgent> = new Set(SUPPORTED_AGENTS);
+
+/**
+ * Wrap a design-mutating CLI handler in the advisory write lock
+ * (P14 governance). Acquires the lock at command-handler entry,
+ * runs the handler, and releases on every exit path. On contention,
+ * emits the `LOCK_HELD` JSON envelope (or stderr message) and
+ * returns exit 2 without invoking `run`.
+ *
+ * `cmdLabel` is the user-facing command string ("task finalize P14-T5
+ * --write" etc.) recorded in the lock file for diagnostic display.
+ */
+async function withWriteLock(
+  cwd: string,
+  cmdLabel: string,
+  json: boolean,
+  run: () => Promise<number>,
+): Promise<number> {
+  let lock: LockHandle;
+  try {
+    lock = await acquireWriteLock(cwd, cmdLabel);
+  } catch (err) {
+    if (isLockHeldError(err)) {
+      if (json) {
+        process.stdout.write(
+          `${JSON.stringify({
+            ok: false,
+            error: { code: "LOCK_HELD", message: err.message },
+            data: { lock_holder: err.lock_holder, lock_path: err.lock_path },
+          })}\n`,
+        );
+      } else {
+        process.stderr.write(`${err.message}\n`);
+      }
+      return 2;
+    }
+    throw err;
+  }
+  try {
+    return await run();
+  } finally {
+    await lock.release();
+  }
+}
 
 // Locale resolution priority:
 // 1. --locale flag (handled in main before this is called)
@@ -152,31 +200,37 @@ async function cmdInit(
   const useWizard = isInteractive() && !hasInitFlag && !json && !nonInteractive;
 
   if (useWizard) {
-    try {
-      const result = await runInitWizard({
-        cwd,
-        force,
-        json: false,
-        samplePhaseOverride: samplePhase ? true : undefined,
-      });
-      for (const f of result.created) {
-        process.stderr.write(`  created  ${f}\n`);
+    // P14 advisory write lock: the wizard may run `writeSamplePhase`
+    // (default-yes prompt). Acquire around the whole wizard so the
+    // sample-phase createPhase write is serialized; if the user
+    // answers no, the lock is briefly held with no side effect.
+    return withWriteLock(cwd, "init (wizard)", false, async (): Promise<number> => {
+      try {
+        const result = await runInitWizard({
+          cwd,
+          force,
+          json: false,
+          samplePhaseOverride: samplePhase ? true : undefined,
+        });
+        for (const f of result.created) {
+          process.stderr.write(`  created  ${f}\n`);
+        }
+        for (const f of result.skipped) {
+          process.stderr.write(`  skipped  ${f} (already exists)\n`);
+        }
+        process.stderr.write(`\n${m.init.done}\n`);
+        return 0;
+      } catch (err: unknown) {
+        if (
+          err instanceof Error &&
+          (err as NodeJS.ErrnoException).code === "ALREADY_INITIALIZED"
+        ) {
+          process.stderr.write(`${m.init.alreadyInitialized(cwd)}\n`);
+          return 2;
+        }
+        throw err;
       }
-      for (const f of result.skipped) {
-        process.stderr.write(`  skipped  ${f} (already exists)\n`);
-      }
-      process.stderr.write(`\n${m.init.done}\n`);
-      return 0;
-    } catch (err: unknown) {
-      if (
-        err instanceof Error &&
-        (err as NodeJS.ErrnoException).code === "ALREADY_INITIALIZED"
-      ) {
-        process.stderr.write(`${m.init.alreadyInitialized(cwd)}\n`);
-        return 2;
-      }
-      throw err;
-    }
+    });
   }
 
   // Automation mode = explicit --non-interactive OR detected CI=true.
@@ -227,46 +281,57 @@ async function cmdInit(
       ? (values.locale as LocaleCode)
       : locale;
 
-  try {
-    const result = await runInit({
-      cwd,
-      locale: initLocale,
-      agents,
-      force,
-      json,
-      ...(samplePhase ? { createSamplePhase: true } : {}),
-    });
+  const runImpl = async (): Promise<number> => {
+    try {
+      const result = await runInit({
+        cwd,
+        locale: initLocale,
+        agents,
+        force,
+        json,
+        ...(samplePhase ? { createSamplePhase: true } : {}),
+      });
 
-    if (json) {
-      process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
-    } else {
-      for (const f of result.created) {
-        process.stderr.write(`  created  ${f}\n`);
-      }
-      for (const f of result.skipped) {
-        process.stderr.write(`  skipped  ${f} (already exists)\n`);
-      }
-      process.stderr.write(`\n${m.init.done}\n`);
-    }
-    return 0;
-  } catch (err: unknown) {
-    const isAlreadyInit =
-      err instanceof Error &&
-      (err as NodeJS.ErrnoException).code === "ALREADY_INITIALIZED";
-
-    if (isAlreadyInit) {
-      const msg = m.init.alreadyInitialized(cwd);
       if (json) {
-        process.stdout.write(
-          `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
-        );
+        process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
       } else {
-        process.stderr.write(`${msg}\n`);
+        for (const f of result.created) {
+          process.stderr.write(`  created  ${f}\n`);
+        }
+        for (const f of result.skipped) {
+          process.stderr.write(`  skipped  ${f} (already exists)\n`);
+        }
+        process.stderr.write(`\n${m.init.done}\n`);
       }
-      return 2;
+      return 0;
+    } catch (err: unknown) {
+      const isAlreadyInit =
+        err instanceof Error &&
+        (err as NodeJS.ErrnoException).code === "ALREADY_INITIALIZED";
+
+      if (isAlreadyInit) {
+        const msg = m.init.alreadyInitialized(cwd);
+        if (json) {
+          process.stdout.write(
+            `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
+          );
+        } else {
+          process.stderr.write(`${msg}\n`);
+        }
+        return 2;
+      }
+      throw err;
     }
-    throw err;
+  };
+
+  // P14 advisory write lock: only when sample-phase will be created
+  // (the only path that mutates roadmap.yaml / design/phases). Plain
+  // init without --sample-phase writes only `.code-pact/` bootstrap
+  // artifacts, which fall outside the design-mutation lock contract.
+  if (samplePhase) {
+    return withWriteLock(cwd, "init --sample-phase", json, runImpl);
   }
+  return runImpl();
 }
 
 // ---------------------------------------------------------------------------
@@ -1519,36 +1584,51 @@ async function cmdPhase(argv: string[], locale: Locale, globalJson: boolean): Pr
     if (missingRequiredFlags && isInteractive() && !nonInteractive && !json) {
       const { Prompter } = await import("./lib/prompt.ts");
       const prompter = Prompter.fromIO();
+      let input: Awaited<ReturnType<typeof runPhaseWizard>>;
       try {
-        const input = await runPhaseWizard(prompter, messages[locale].wizard.phase);
-        const result = await runPhaseAdd({
-          cwd,
-          id: input.id,
-          name: input.name,
-          weight: input.weight,
-          objective: input.objective,
-          confidence: input.confidence,
-          risk: input.risk,
-          verifyCommands: input.verifyCommands,
-          definitionOfDone: input.doneCriteria,
-        });
-        process.stderr.write(`${m.phase.added(input.id, result.path)}\n`);
-        return 0;
-      } catch (err: unknown) {
-        if (err instanceof Error && (err as NodeJS.ErrnoException).code === "DUPLICATE_PHASE_ID") {
-          const phaseId = err.message.match(/"([^"]+)"/)?.[1] ?? "";
-          process.stderr.write(`${m.phase.duplicateId(phaseId)}\n`);
-          return 1;
-        }
-        // P14 reserved-id (TUTORIAL) block surfaces as CONFIG_ERROR.
-        if (err instanceof Error && (err as NodeJS.ErrnoException).code === "CONFIG_ERROR") {
-          process.stderr.write(`${err.message}\n`);
-          return 2;
-        }
-        throw err;
-      } finally {
+        input = await runPhaseWizard(prompter, messages[locale].wizard.phase);
+      } catch (err) {
         prompter.close();
+        throw err;
       }
+      // Wizard prompts complete — acquire the P14 write lock before
+      // the phase YAML / roadmap.yaml mutation. Release in finally.
+      return withWriteLock(
+        cwd,
+        `phase add ${input.id}`,
+        false /* wizard branch never uses --json */,
+        async (): Promise<number> => {
+          try {
+            const result = await runPhaseAdd({
+              cwd,
+              id: input.id,
+              name: input.name,
+              weight: input.weight,
+              objective: input.objective,
+              confidence: input.confidence,
+              risk: input.risk,
+              verifyCommands: input.verifyCommands,
+              definitionOfDone: input.doneCriteria,
+            });
+            process.stderr.write(`${m.phase.added(input.id, result.path)}\n`);
+            return 0;
+          } catch (err: unknown) {
+            if (err instanceof Error && (err as NodeJS.ErrnoException).code === "DUPLICATE_PHASE_ID") {
+              const phaseId = err.message.match(/"([^"]+)"/)?.[1] ?? "";
+              process.stderr.write(`${m.phase.duplicateId(phaseId)}\n`);
+              return 1;
+            }
+            // P14 reserved-id (TUTORIAL) block surfaces as CONFIG_ERROR.
+            if (err instanceof Error && (err as NodeJS.ErrnoException).code === "CONFIG_ERROR") {
+              process.stderr.write(`${err.message}\n`);
+              return 2;
+            }
+            throw err;
+          } finally {
+            prompter.close();
+          }
+        },
+      );
     }
 
     if (missingRequiredFlags) {
@@ -1585,51 +1665,55 @@ async function cmdPhase(argv: string[], locale: Locale, globalJson: boolean): Pr
       "All tasks are done",
     ];
 
-    try {
-      const result = await runPhaseAdd({
-        cwd,
-        id,
-        name,
-        weight,
-        objective,
-        confidence: confidence as "low" | "medium" | "high",
-        risk: risk as "low" | "medium" | "high",
-        verifyCommands,
-        definitionOfDone,
-      });
-      if (json) {
-        process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
-      } else {
-        process.stderr.write(`${m.phase.added(id, result.path)}\n`);
-      }
-      return 0;
-    } catch (err: unknown) {
-      if (err instanceof Error && (err as NodeJS.ErrnoException).code === "DUPLICATE_PHASE_ID") {
-        const msg = m.phase.duplicateId(id);
+    // P14 advisory write lock: serializes the phase YAML + roadmap
+    // mutation against concurrent design mutations.
+    return withWriteLock(cwd, `phase add ${id}`, json, async (): Promise<number> => {
+      try {
+        const result = await runPhaseAdd({
+          cwd,
+          id,
+          name,
+          weight,
+          objective,
+          confidence: confidence as "low" | "medium" | "high",
+          risk: risk as "low" | "medium" | "high",
+          verifyCommands,
+          definitionOfDone,
+        });
         if (json) {
-          process.stdout.write(
-            `${JSON.stringify({ ok: false, error: { code: "DUPLICATE_PHASE_ID", message: msg } })}\n`,
-          );
+          process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
         } else {
-          process.stderr.write(`${msg}\n`);
+          process.stderr.write(`${m.phase.added(id, result.path)}\n`);
         }
-        return 2;
-      }
-      // P14 reserved-id (TUTORIAL) block surfaces as CONFIG_ERROR from
-      // createPhase. Propagate the message verbatim — it already names
-      // the reserved id and points at `init --sample-phase`.
-      if (err instanceof Error && (err as NodeJS.ErrnoException).code === "CONFIG_ERROR") {
-        if (json) {
-          process.stdout.write(
-            `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: err.message } })}\n`,
-          );
-        } else {
-          process.stderr.write(`${err.message}\n`);
+        return 0;
+      } catch (err: unknown) {
+        if (err instanceof Error && (err as NodeJS.ErrnoException).code === "DUPLICATE_PHASE_ID") {
+          const msg = m.phase.duplicateId(id);
+          if (json) {
+            process.stdout.write(
+              `${JSON.stringify({ ok: false, error: { code: "DUPLICATE_PHASE_ID", message: msg } })}\n`,
+            );
+          } else {
+            process.stderr.write(`${msg}\n`);
+          }
+          return 2;
         }
-        return 2;
+        // P14 reserved-id (TUTORIAL) block surfaces as CONFIG_ERROR from
+        // createPhase. Propagate the message verbatim — it already names
+        // the reserved id and points at `init --sample-phase`.
+        if (err instanceof Error && (err as NodeJS.ErrnoException).code === "CONFIG_ERROR") {
+          if (json) {
+            process.stdout.write(
+              `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: err.message } })}\n`,
+            );
+          } else {
+            process.stderr.write(`${err.message}\n`);
+          }
+          return 2;
+        }
+        throw err;
       }
-      throw err;
-    }
+    });
   }
 
   // ---- phase new ----
@@ -1647,42 +1731,52 @@ async function cmdPhase(argv: string[], locale: Locale, globalJson: boolean): Pr
       return 2;
     }
     const initialName = rest[0]?.startsWith("-") ? undefined : rest[0];
-    try {
-      const result = await runPhaseNew({ cwd, locale, initialName });
-      if (globalJson) {
-        process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
-      } else {
-        process.stderr.write(`${m.phase.added(result.ref.id, result.path)}\n`);
-      }
-      return 0;
-    } catch (err: unknown) {
-      if (err instanceof Error && (err as NodeJS.ErrnoException).code === "DUPLICATE_PHASE_ID") {
-        const id =
-          err.message.match(/"([^"]+)"/)?.[1] ?? "";
-        const msg = m.phase.duplicateId(id);
-        if (globalJson) {
-          process.stdout.write(
-            `${JSON.stringify({ ok: false, error: { code: "DUPLICATE_PHASE_ID", message: msg } })}\n`,
-          );
-        } else {
-          process.stderr.write(`${msg}\n`);
+    // P14 advisory write lock: serialize the wizard's createPhase
+    // write. The lock IS held through the wizard prompts — see
+    // RFC § Open question 1 for the prompt-hold trade-off.
+    return withWriteLock(
+      cwd,
+      `phase new${initialName ? ` ${initialName}` : ""}`,
+      globalJson,
+      async (): Promise<number> => {
+        try {
+          const result = await runPhaseNew({ cwd, locale, initialName });
+          if (globalJson) {
+            process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
+          } else {
+            process.stderr.write(`${m.phase.added(result.ref.id, result.path)}\n`);
+          }
+          return 0;
+        } catch (err: unknown) {
+          if (err instanceof Error && (err as NodeJS.ErrnoException).code === "DUPLICATE_PHASE_ID") {
+            const id =
+              err.message.match(/"([^"]+)"/)?.[1] ?? "";
+            const msg = m.phase.duplicateId(id);
+            if (globalJson) {
+              process.stdout.write(
+                `${JSON.stringify({ ok: false, error: { code: "DUPLICATE_PHASE_ID", message: msg } })}\n`,
+              );
+            } else {
+              process.stderr.write(`${msg}\n`);
+            }
+            return 2;
+          }
+          // P14 reserved-id (TUTORIAL) block surfaces as CONFIG_ERROR from
+          // createPhase (the wizard never asks for the bypass flag).
+          if (err instanceof Error && (err as NodeJS.ErrnoException).code === "CONFIG_ERROR") {
+            if (globalJson) {
+              process.stdout.write(
+                `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: err.message } })}\n`,
+              );
+            } else {
+              process.stderr.write(`${err.message}\n`);
+            }
+            return 2;
+          }
+          throw err;
         }
-        return 2;
-      }
-      // P14 reserved-id (TUTORIAL) block surfaces as CONFIG_ERROR from
-      // createPhase (the wizard never asks for the bypass flag).
-      if (err instanceof Error && (err as NodeJS.ErrnoException).code === "CONFIG_ERROR") {
-        if (globalJson) {
-          process.stdout.write(
-            `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: err.message } })}\n`,
-          );
-        } else {
-          process.stderr.write(`${err.message}\n`);
-        }
-        return 2;
-      }
-      throw err;
-    }
+      },
+    );
   }
 
   // ---- phase ls ----
@@ -1829,36 +1923,43 @@ async function cmdPhase(argv: string[], locale: Locale, globalJson: boolean): Pr
       return 2;
     }
 
-    try {
-      const result = await runPhaseImport({ cwd, inputPath, force, strict });
-      if (json) {
-        process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
-      } else {
-        process.stderr.write(`${m.phase.importDone(result.imported_phases.length, result.imported_tasks.length, result.skipped_phases.length)}\n`);
-        for (const cf of result.completed_fields) {
-          process.stderr.write(`  completed defaults for ${cf.taskId}: ${cf.fields.join(", ")}\n`);
-        }
-      }
-      return 0;
-    } catch (err: unknown) {
-      const code = (err as NodeJS.ErrnoException).code;
-      const message = err instanceof Error ? err.message : String(err);
-      if (
-        code === "CONFIG_ERROR" ||
-        code === "DUPLICATE_PHASE_ID" ||
-        code === "AMBIGUOUS_TASK_ID"
-      ) {
+    // P14 advisory write lock: a single acquisition covers
+    // `runPhaseImport`'s multi-phase apply loop (every `createPhase`
+    // call inside runs under the same lock — batch transactionality).
+    // `createPhase` itself stays lock-agnostic so the inner calls
+    // don't try to re-acquire.
+    return withWriteLock(cwd, "phase import", json, async (): Promise<number> => {
+      try {
+        const result = await runPhaseImport({ cwd, inputPath, force, strict });
         if (json) {
-          process.stdout.write(
-            `${JSON.stringify({ ok: false, error: { code, message } })}\n`,
-          );
+          process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
         } else {
-          process.stderr.write(`${message}\n`);
+          process.stderr.write(`${m.phase.importDone(result.imported_phases.length, result.imported_tasks.length, result.skipped_phases.length)}\n`);
+          for (const cf of result.completed_fields) {
+            process.stderr.write(`  completed defaults for ${cf.taskId}: ${cf.fields.join(", ")}\n`);
+          }
         }
-        return 2;
+        return 0;
+      } catch (err: unknown) {
+        const code = (err as NodeJS.ErrnoException).code;
+        const message = err instanceof Error ? err.message : String(err);
+        if (
+          code === "CONFIG_ERROR" ||
+          code === "DUPLICATE_PHASE_ID" ||
+          code === "AMBIGUOUS_TASK_ID"
+        ) {
+          if (json) {
+            process.stdout.write(
+              `${JSON.stringify({ ok: false, error: { code, message } })}\n`,
+            );
+          } else {
+            process.stderr.write(`${message}\n`);
+          }
+          return 2;
+        }
+        throw err;
       }
-      throw err;
-    }
+    });
   }
 
   // Unknown subcommand
@@ -2140,35 +2241,48 @@ async function cmdTaskAdd(
     };
   }
 
-  try {
-    const result = await runTaskAdd({
-      cwd,
-      phaseId,
-      locale,
-      id: explicitId,
-      ...(nonInteractiveSpec ? { nonInteractive: nonInteractiveSpec } : {}),
-    });
-    if (json) {
-      process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
-    } else {
-      process.stderr.write(`${m.task.added(result.taskId, result.phaseId, result.phasePath)}\n`);
-    }
-    return 0;
-  } catch (err: unknown) {
-    const code = (err as NodeJS.ErrnoException).code;
-    const message = err instanceof Error ? err.message : String(err);
-    if (code === "PHASE_NOT_FOUND" || code === "DUPLICATE_TASK_ID") {
-      if (json) {
-        process.stdout.write(
-          `${JSON.stringify({ ok: false, error: { code, message } })}\n`,
-        );
-      } else {
-        process.stderr.write(`${message}\n`);
+  // P14 advisory write lock: serialize task-add (phase YAML write)
+  // against concurrent design mutations. Wizard prompts (when no
+  // --description is supplied) ALSO run under the lock — see RFC
+  // § Open question 1 for the prompt-hold trade-off.
+  return withWriteLock(
+    cwd,
+    nonInteractiveSpec !== undefined
+      ? `task add ${phaseId} --description "..."`
+      : `task add ${phaseId}`,
+    json,
+    async (): Promise<number> => {
+      try {
+        const result = await runTaskAdd({
+          cwd,
+          phaseId,
+          locale,
+          id: explicitId,
+          ...(nonInteractiveSpec ? { nonInteractive: nonInteractiveSpec } : {}),
+        });
+        if (json) {
+          process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
+        } else {
+          process.stderr.write(`${m.task.added(result.taskId, result.phaseId, result.phasePath)}\n`);
+        }
+        return 0;
+      } catch (err: unknown) {
+        const code = (err as NodeJS.ErrnoException).code;
+        const message = err instanceof Error ? err.message : String(err);
+        if (code === "PHASE_NOT_FOUND" || code === "DUPLICATE_TASK_ID") {
+          if (json) {
+            process.stdout.write(
+              `${JSON.stringify({ ok: false, error: { code, message } })}\n`,
+            );
+          } else {
+            process.stderr.write(`${message}\n`);
+          }
+          return code === "PHASE_NOT_FOUND" ? 2 : 1;
+        }
+        throw err;
       }
-      return code === "PHASE_NOT_FOUND" ? 2 : 1;
-    }
-    throw err;
-  }
+    },
+  );
 }
 
 async function cmdTaskContext(
@@ -2505,6 +2619,7 @@ async function cmdTaskFinalize(
   }
   const cwd = process.cwd();
 
+  const runImpl = async (): Promise<number> => {
   try {
     const result = await runTaskFinalize({ cwd, taskId, write });
 
@@ -2638,6 +2753,18 @@ async function cmdTaskFinalize(
     }
     return 2;
   }
+  };
+
+  // P14: only --write mutates phase YAML; dry-run is lock-free.
+  if (write) {
+    return withWriteLock(
+      cwd,
+      `task finalize ${taskId} --write`,
+      json,
+      runImpl,
+    );
+  }
+  return runImpl();
 }
 
 // ---------------------------------------------------------------------------
@@ -2789,6 +2916,7 @@ async function cmdPhaseReconcile(
   }
   const cwd = process.cwd();
 
+  const runImpl = async (): Promise<number> => {
   try {
     const result = await runPhaseReconcile({ cwd, phaseId, write });
 
@@ -2902,6 +3030,18 @@ async function cmdPhaseReconcile(
     }
     return 2;
   }
+  };
+
+  // P14: only --write mutates phase YAML; dry-run is lock-free.
+  if (write) {
+    return withWriteLock(
+      cwd,
+      `phase reconcile ${phaseId} --write`,
+      json,
+      runImpl,
+    );
+  }
+  return runImpl();
 }
 
 // ---------------------------------------------------------------------------
