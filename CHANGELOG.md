@@ -11,6 +11,46 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **`task finalize --json` emits `data.write_audit`** (v1.6+, P15-T1). Read-only
+  advisory comparing the task's declared `writes` globs against the actual
+  filesystem changes reported by git. Present on all three success kinds
+  (`would_finalize` / `finalized` / `already_finalized`) when `--json` is in
+  effect. Default range is the working tree (HEAD vs staged / unstaged /
+  untracked); pass `--base-ref <ref>` to opt into branch-level audit via
+  `git merge-base HEAD <ref>`. Non-git projects return the canonical
+  unavailable shape (`git_available: false`); merge-base failures gracefully
+  fall back to working-tree mode with a `base_error` field. Exit code is
+  **unchanged** in P15-T1 — the audit is advisory only.
+- **`task finalize --base-ref <ref>` flag** (v1.6+, P15-T1). Requires `--json`;
+  passing it without `--json` returns `CONFIG_ERROR` (exit 2). The flag is
+  additive; existing `task finalize` invocations are byte-identical.
+- **`TASK_WRITES_AUDIT_OUTSIDE_DECLARED` warning code** (v1.6+, P15-T1) added
+  to `KNOWN_CODES.plan`. Emitted in `data.write_audit.warnings[]` when the
+  audit detects a file change outside any declared `writes` glob. Severity:
+  warning, never exit-relevant in P15-T1.
+- **`src/core/audit/write-audit.ts`** new internal module exposing
+  `auditWrites({ cwd, declaredWrites, baseRef? })`. Reused by future P15
+  tasks for `phase reconcile --json` (P15-T5) and `--audit-strict` (P15-T6).
+
+### Changed
+
+- **`docs/cli-contract.md`** documents the new `write_audit` field, the
+  `--base-ref` flag, and the new warning code. The field-presence-by-kind
+  table for `task finalize` now lists `write_audit` as additive optional.
+- **`design/roadmap.yaml`** registers P15 (Declared Writes Audit, weight 25).
+- **`design/phases/P15-declared-writes-audit.yaml`** new phase YAML covering
+  T1 through T6 (T1 in_progress, T2–T6 planned).
+
+Human-mode `task finalize` (without `--json`) is byte-identical to v1.5.1:
+the audit is JSON-only, never spawns git in human mode, and never alters
+exit codes or stdout content.
+
+---
+
 ## [1.5.1] — 2026-05-21
 
 **Cleanup patch.** Conservative maintenance release: no new public commands,

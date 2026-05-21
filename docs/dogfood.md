@@ -67,6 +67,13 @@ code-pact task complete <task-id> --agent claude-code
 #    layer counterpart to `task complete`.
 code-pact task finalize <task-id> --write
 
+# (v1.6+) Optional: read-only audit of declared `writes` vs the actual
+# working tree. JSON-only; advisory; never changes the exit code.
+# Pass --base-ref <ref> to widen the audit to a branch-level diff.
+code-pact task finalize <task-id> --json | jq .data.write_audit
+code-pact task finalize <task-id> --json --base-ref main \
+  | jq '.data.write_audit | {outside_declared, declared_unused, warnings}'
+
 # Or, when reconciling many completed tasks at once (e.g. during
 # release prep), use the bulk version:
 code-pact phase reconcile <phase-id> --write
