@@ -13,9 +13,10 @@
 ## Test plan
 
 - [ ] `pnpm typecheck`
-- [ ] `pnpm test`
+- [ ] `pnpm test:unit`
+- [ ] `pnpm test:integration`
 - [ ] `pnpm build`
-- [ ] Relevant `code-pact` self-checks (typically `plan lint --json`, `plan analyze --json`, `validate --json`, `doctor --json` — pick the subset that applies)
+- [ ] Relevant `code-pact` self-checks (typically `plan lint --include-quality --strict --json`, `plan analyze --strict --json`, `validate --json`, `doctor --json` — pick the subset that applies)
 
 ## Contract checklist
 

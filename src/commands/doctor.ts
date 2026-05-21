@@ -75,15 +75,6 @@ async function safeReadYaml(p: string): Promise<{ ok: true; data: unknown } | { 
   }
 }
 
-async function safeReadJson(p: string): Promise<{ ok: true; data: unknown } | { ok: false }> {
-  try {
-    const raw = await readFile(p, "utf8");
-    return { ok: true, data: JSON.parse(raw) };
-  } catch {
-    return { ok: false };
-  }
-}
-
 // ---------------------------------------------------------------------------
 // Individual check groups
 // ---------------------------------------------------------------------------

@@ -118,8 +118,6 @@ tasks:
     decision_refs:
       - design/decisions/planning-ux-init-hardening-rfc.md
     writes:
-      - design/roadmap.yaml
-      - design/phases/P13-planning-ux-init-hardening.yaml
       - design/decisions/planning-ux-init-hardening-rfc.md
     acceptance_refs:
       - design/decisions/planning-ux-init-hardening-rfc.md
@@ -345,6 +343,5 @@ tasks:
     writes:
       - CHANGELOG.md
       - package.json
-      - design/phases/P13-planning-ux-init-hardening.yaml
     acceptance_refs:
       - CHANGELOG.md

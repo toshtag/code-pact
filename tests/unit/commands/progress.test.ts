@@ -3,7 +3,6 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runInit } from "../../../src/commands/init.ts";
-import { runPhaseAdd } from "../../../src/commands/phase.ts";
 import { runProgress } from "../../../src/commands/progress.ts";
 
 // ---------------------------------------------------------------------------

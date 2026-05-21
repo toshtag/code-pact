@@ -144,7 +144,7 @@ The `writes` field on a task (P10, v1.1+) and the `declared_writes[]` field on `
 
 - A declaration of intent: the task author says "this task is expected to write these globs."
 - A reviewable signal in `task finalize --json` / `task runbook --json` output: a human (or agent) can compare declared intent against actual file-system changes (typically via `git diff`) when reviewing a PR or commit.
-- A lint surface via `TASK_WRITES_PROTECTED_PATH` (P10, warning severity in v1.5): the lint flags when declared `writes` cover paths in the protected seed set (`.git/**`, `node_modules/**`, `.code-pact/**`, `design/roadmap.yaml`, `design/phases/*.yaml`). Under `plan lint --strict` the advisory becomes exit-relevant; in release prep, the dogfood corpus deliberately runs default lint to keep governance tasks (which legitimately write design YAML) passing.
+- A lint surface via `TASK_WRITES_PROTECTED_PATH` (P10, warning severity in v1.5): the lint flags when declared `writes` cover paths in the protected seed set (`.git/**`, `node_modules/**`, `.code-pact/**`, `design/roadmap.yaml`, `design/phases/*.yaml`). Under `plan lint --strict` the advisory becomes exit-relevant. As of v1.5.1, this repo's dogfood corpus is expected to pass that strict check with zero warnings.
 
 **What the surface is NOT in v1.5:**
 

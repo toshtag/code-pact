@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { join, basename } from "node:path";
+import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { Phase, type PhaseStatus } from "../core/schemas/phase.ts";
 import { Roadmap, PhaseRef } from "../core/schemas/roadmap.ts";

@@ -137,7 +137,7 @@ Issue-level codes emitted by `plan lint` against the optional task fields introd
 | `TASK_READS_NO_MATCH` | warning | `reads` glob matches zero files on disk (likely a typo or a file not yet created) |
 | `TASK_WRITES_UNSAFE_PATH` | error | `writes` glob fails `assertSafeRelativePath` |
 | `TASK_WRITES_GLOB_INVALID` | error | `writes` glob uses syntax outside the P10 supported subset |
-| `TASK_WRITES_PROTECTED_PATH` | warning | `writes` glob covers a protected path (`.git/**`, `node_modules/**`, `.code-pact/**`, `design/roadmap.yaml`, `design/phases/*.yaml`). Stays `warning` severity in v1.5+. Under `plan lint --strict`, the warning becomes exit-relevant per the existing binary `--strict` promotion (see § `plan lint` below). Selective per-code promotion and configurable protected-path policy are P15+ scope |
+| `TASK_WRITES_PROTECTED_PATH` | warning | `writes` glob covers a protected path (`.git/**`, `node_modules/**`, `.code-pact/**`, `design/roadmap.yaml`, `design/phases/*.yaml`). Stays `warning` severity in v1.5+. Under `plan lint --strict`, the warning becomes exit-relevant per the existing binary `--strict` promotion (see § `plan lint` below). The code-pact dogfood corpus is strict-clean as of v1.5.1. Selective per-code promotion and configurable protected-path policy are P15+ scope |
 | `TASK_ACCEPTANCE_REF_NOT_FOUND` | error | `acceptance_refs` path does not exist on disk |
 | `TASK_ACCEPTANCE_REF_UNSAFE_PATH` | error | `acceptance_refs` path fails `assertSafeRelativePath` |
 
@@ -1610,7 +1610,7 @@ Every write listed above goes through `atomicWriteText` (`src/io/atomic-text.ts`
 **What `code-pact` does NOT do** (intentional, documented limits):
 
 - **No `fsync`.** A power loss between the rename and the OS flushing the dirty buffers can lose the most recent write. This is acceptable for a local dev tool — the next run will recover from the prior state.
-- **No write locks.** Two concurrent `task complete` invocations against the same project may interleave appends. The progress log is append-only, so the worst case is event reordering, not corruption. Out of scope for v1.0; defer to v1.x if a real workflow needs it.
+- **No progress-log write lock.** Two concurrent `task complete` invocations against the same project may interleave appends. The progress log is append-only, so the worst case is event reordering, not corruption. Design mutations are different: v1.5+ serializes roadmap and phase YAML writes with the advisory lock documented below.
 - **No backup file** (`.bak`). The doctor `BAK_FILE` warning fires if a `.bak` file appears next to a tracked file — it's expected to be a leftover from manual edits, not code-pact output.
 
 ### Path safety
@@ -1751,7 +1751,7 @@ coverage. Agents and CI may rely on these.
 | `phase add` | Flag-only path (`--id`/`--name`/`--objective`/`--weight`/`--verify-command`) is the Stable surface |
 | `phase ls` / `phase show` / `phase import` | |
 | `task context` / `task status` / `task start` / `task block` / `task resume` / `task complete` | |
-| `pack` | Internal but stable — `task context` is the preferred agent-facing entry |
+| `pack` | Low-level stable command — `task context` is the preferred agent-facing entry |
 | `verify` | |
 | `progress` | |
 | `adapter list` / `adapter install` / `adapter doctor` / `adapter upgrade --check` / `adapter upgrade --write` | |

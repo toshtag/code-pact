@@ -1,13 +1,9 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-
-const repoRoot = resolve(fileURLToPath(import.meta.url), "../../..");
-const cliPath = join(repoRoot, "dist", "cli.js");
+import { join } from "node:path";
+import { cliPath, ensureCliBuilt } from "../helpers/cli.ts";
 
 let tmpDir: string;
 
@@ -27,16 +23,7 @@ function run(args: string[]): RunResult {
 }
 
 beforeAll(() => {
-  const res = spawnSync("pnpm", ["build"], {
-    cwd: repoRoot,
-    encoding: "utf8",
-    stdio: "pipe",
-  });
-  if (res.status !== 0 || !existsSync(cliPath)) {
-    throw new Error(
-      `Failed to build CLI for tests. exit=${res.status}\nstderr:\n${res.stderr}`,
-    );
-  }
+  ensureCliBuilt();
 }, 60_000);
 
 beforeEach(async () => {

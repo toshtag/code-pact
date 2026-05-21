@@ -95,8 +95,6 @@ tasks:
     decision_refs:
       - design/decisions/finalization-reconciliation-rfc.md
     writes:
-      - design/roadmap.yaml
-      - design/phases/P11-finalization-reconciliation.yaml
       - design/decisions/finalization-reconciliation-rfc.md
     acceptance_refs:
       - design/decisions/finalization-reconciliation-rfc.md

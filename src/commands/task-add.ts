@@ -6,7 +6,7 @@ import { Roadmap } from "../core/schemas/roadmap.ts";
 import { Phase } from "../core/schemas/phase.ts";
 import { TaskType, type Task } from "../core/schemas/task.ts";
 import { Prompter } from "../lib/prompt.ts";
-import { messages as messageCatalog, type Locale, type Messages } from "../i18n/index.ts";
+import { messages as messageCatalog, type Locale } from "../i18n/index.ts";
 
 /**
  * Non-interactive task spec (v1.4 P13-T3). When `TaskAddOptions.nonInteractive`

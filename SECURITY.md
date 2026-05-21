@@ -39,6 +39,7 @@ Out of scope:
 
 - Vulnerabilities in third-party dependencies — please report those upstream (`yaml`, `zod`, etc.).
 - Issues that require an attacker who already has write access to the user's `design/` directory or `.code-pact/` state.
+- `verify.commands` executing malicious commands from an untrusted project checkout. Verification commands are trusted local project configuration; do not run `code-pact verify` or `code-pact task complete` on a repository whose `design/` files you would not run as shell commands.
 - Reports based on outdated releases when the issue is already fixed on the current `latest` tag.
 
 ## Supply chain notes

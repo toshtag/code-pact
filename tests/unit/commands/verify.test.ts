@@ -287,3 +287,56 @@ describe("runVerify — BUG-001: command stdout is captured, not inherited", () 
     expect(check?.stdout).toBe("boom");
   });
 });
+
+describe("runVerify — shell verification commands", () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "code-pact-verify-shell-"));
+    await setupProject(dir);
+  });
+
+  afterEach(() => rm(dir, { recursive: true, force: true }));
+
+  it("preserves quoted arguments in configured shell commands", async () => {
+    await writeFile(
+      join(dir, "design", "phases", "P1-foundation.yaml"),
+      PHASE_YAML("done", false).replace(
+        "echo ok",
+        `node -e "if (process.argv[1] !== 'hello world') process.exit(2)" "hello world"`,
+      ),
+      "utf8",
+    );
+
+    const result = await runVerify({
+      cwd: dir,
+      phaseId: "P1",
+      taskId: "P1-T1",
+      dryRun: false,
+    });
+    const check = result.checks.find((c) => c.name === "commands");
+    expect(check?.ok).toBe(true);
+  });
+
+  it("bounds captured stdout from failing commands", async () => {
+    await writeFile(
+      join(dir, "design", "phases", "P1-foundation.yaml"),
+      PHASE_YAML("done", false).replace(
+        "echo ok",
+        `node -e "process.stdout.write('x'.repeat(1100000), () => process.exit(1))"`,
+      ),
+      "utf8",
+    );
+
+    const result = await runVerify({
+      cwd: dir,
+      phaseId: "P1",
+      taskId: "P1-T1",
+      dryRun: false,
+    });
+    const check = result.checks.find((c) => c.name === "commands");
+    expect(check?.ok).toBe(false);
+    expect(check?.stdout).toContain("output truncated after 1048576 bytes");
+    expect(Buffer.byteLength(check?.stdout ?? "")).toBeLessThan(1_050_000);
+  });
+});

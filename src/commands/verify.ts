@@ -1,4 +1,4 @@
-import { readFile, readdir, access } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { parse as parseYaml } from "yaml";
@@ -63,16 +63,65 @@ async function loadProgressLog(cwd: string): Promise<ProgressLog> {
 
 type CommandRun = { exitCode: number; stdout: string; stderr: string };
 
+const MAX_COMMAND_OUTPUT_BYTES = 1_048_576;
+const TRUNCATED_OUTPUT_MESSAGE = `\n[code-pact: output truncated after ${MAX_COMMAND_OUTPUT_BYTES} bytes]\n`;
+
+function createOutputCapture(): { append: (chunk: Buffer) => void; value: () => string } {
+  let text = "";
+  let bytes = 0;
+  let truncated = false;
+
+  return {
+    append(chunk: Buffer): void {
+      if (truncated) return;
+
+      const remaining = MAX_COMMAND_OUTPUT_BYTES - bytes;
+      if (chunk.byteLength <= remaining) {
+        text += chunk.toString();
+        bytes += chunk.byteLength;
+        return;
+      }
+
+      if (remaining > 0) {
+        text += chunk.subarray(0, remaining).toString();
+      }
+      text += TRUNCATED_OUTPUT_MESSAGE;
+      bytes = MAX_COMMAND_OUTPUT_BYTES;
+      truncated = true;
+    },
+    value(): string {
+      return text;
+    },
+  };
+}
+
 function runCommand(cmd: string, cwd: string): Promise<CommandRun> {
   return new Promise((resolve) => {
-    const [bin, ...args] = cmd.split(/\s+/);
-    const proc = spawn(bin ?? cmd, args, { cwd, stdio: ["ignore", "pipe", "pipe"], shell: false });
-    let stdout = "";
-    let stderr = "";
-    proc.stdout?.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
-    proc.stderr?.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
-    proc.on("close", (code) => resolve({ exitCode: code ?? 1, stdout, stderr }));
-    proc.on("error", () => resolve({ exitCode: 1, stdout, stderr }));
+    const shellCommand = cmd.trim();
+    if (!shellCommand) {
+      resolve({ exitCode: 1, stdout: "", stderr: "empty verification command" });
+      return;
+    }
+
+    const proc = spawn(shellCommand, {
+      cwd,
+      stdio: ["ignore", "pipe", "pipe"],
+      shell: true,
+    });
+    const stdout = createOutputCapture();
+    const stderr = createOutputCapture();
+    proc.stdout?.on("data", (chunk: Buffer) => {
+      stdout.append(chunk);
+    });
+    proc.stderr?.on("data", (chunk: Buffer) => {
+      stderr.append(chunk);
+    });
+    proc.on("close", (code) =>
+      resolve({ exitCode: code ?? 1, stdout: stdout.value(), stderr: stderr.value() }),
+    );
+    proc.on("error", () =>
+      resolve({ exitCode: 1, stdout: stdout.value(), stderr: stderr.value() }),
+    );
   });
 }
 

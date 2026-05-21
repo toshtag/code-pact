@@ -39,7 +39,7 @@
 //     model-profiles, etc.) is a future refinement, not a v1.0 gate.
 
 import { describe, it, expect, beforeAll, afterEach } from "vitest";
-import { readFile, writeFile, rm } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 

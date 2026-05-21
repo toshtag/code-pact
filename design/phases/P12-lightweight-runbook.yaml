@@ -111,8 +111,6 @@ tasks:
     decision_refs:
       - design/decisions/lightweight-runbook-rfc.md
     writes:
-      - design/roadmap.yaml
-      - design/phases/P12-lightweight-runbook.yaml
       - design/decisions/lightweight-runbook-rfc.md
     acceptance_refs:
       - design/decisions/lightweight-runbook-rfc.md

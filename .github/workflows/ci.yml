@@ -11,8 +11,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node-version: [22, 24]
-    name: build (Node ${{ matrix.node-version }})
+        include:
+          - node-version: 22
+            profile: full
+          - node-version: 24
+            profile: smoke
+    name: ${{ matrix.profile }} (Node ${{ matrix.node-version }})
     steps:
       - uses: actions/checkout@v6.0.2
 
@@ -27,11 +31,31 @@ jobs:
 
       - run: pnpm typecheck
 
-      - run: pnpm test
+      - run: pnpm test:unit
 
       - run: pnpm build
 
+      - run: pnpm exec vitest run --config vitest.integration.config.ts
+        if: matrix.profile == 'full'
+
+      - run: node dist/cli.js plan lint --include-quality --strict --json
+        if: matrix.profile == 'full'
+
+      - run: node dist/cli.js plan analyze --strict --json
+        if: matrix.profile == 'full'
+
+      - name: Smoke validate and doctor on an initialized project
+        if: matrix.profile == 'full'
+        run: |
+          tmp="$(mktemp -d)"
+          cd "$tmp"
+          node "$GITHUB_WORKSPACE/dist/cli.js" init --non-interactive --locale en-US --agent claude-code --json
+          node "$GITHUB_WORKSPACE/dist/cli.js" validate --json
+          node "$GITHUB_WORKSPACE/dist/cli.js" doctor --json
+
       - run: node dist/cli.js --version
+
+      - run: node dist/cli.js --json --version
 
   ci-status:
     name: CI status

@@ -11,6 +11,33 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ---
 
+## [1.5.1] — 2026-05-21
+
+**Cleanup patch.** Conservative maintenance release: no new public commands,
+flags, error codes, or JSON envelope fields.
+
+### Changed
+
+- Enabled unused TypeScript symbol checks in `tsconfig.json` and removed the
+  current unused import/helper noise.
+- `Roadmap.PhaseRef.path` now accepts only safe project-relative
+  `design/phases/*.yaml` paths.
+- `verify.commands` now executes documented shell command strings, preserving
+  quoted arguments while keeping stdout/stderr captured and bounded.
+- CI now runs the full gate on Node 22 and a compatibility smoke path on Node
+  24. Unit and integration tests are split, and integration tests consume one
+  prebuilt `dist/cli.js` instead of rebuilding inside multiple suites.
+- The dogfood corpus is strict-clean for
+  `plan lint --include-quality --strict`; stale historical protected-path
+  declarations were removed from completed meta-design tasks.
+- Docs now distinguish unlocked `progress.yaml` appends from locked design
+  mutations, describe `pack` as a low-level stable command with `task context`
+  preferred, and clarify that `verify.commands` is trusted local project
+  configuration.
+- **`package.json`** — version `1.5.0` → `1.5.1`. (this release prep)
+
+---
+
 ## [1.5.0] — 2026-05-21
 
 **Governance.** Minor release that closes the "who can write what, and when" question that v1.4 left implicit. Single deliberately small surface: one new public error code (`LOCK_HELD`), one creation-time reservation (`TUTORIAL`), one pure refactor (resolver core), and three docs-only governance decisions (protected-path strict-mode posture, declared writes as a review surface, phase status manual-flip convention). No new commands. No new schema fields. No behavioural changes to existing Stable commands on the success path.
@@ -54,7 +81,7 @@ The existing Stable surface is unchanged on the success path. The new failure mo
 - **`src/commands/phase-import.ts`** — adds the reserved-id preflight scan documented above. ([#121])
 - **`docs/cli-contract.md`** — Public codes table gains the `LOCK_HELD` row. § State file write guarantees → Files written by code-pact: writer columns on `design/roadmap.yaml` and `design/phases/*.yaml` rows now name every writer. § Concurrent writers rewritten — was "not supported" in v1.0; now describes detection via `LOCK_HELD` + lists read-only commands that DON'T acquire the lock. New § Advisory write lock (v1.5+ / P14), § Roadmap mutation policy (v1.5+ / P14), § Reserved phase ids (v1.5+ / P14), § Phase status manual-flip convention. § `phase import` validation pass: reserved-id preflight is step 2 (between schema validation and duplicate-id check). § Plan diagnostic codes documents `--strict` semantics for `TASK_WRITES_PROTECTED_PATH`. ([#119], [#121], [#122])
 - **`docs/migration.md`** — new § v1.4.x → v1.5.0 covering shipped surface, recommended adoption per context (single-process / multi-process / CI-strict / TUTORIAL-add / release-prep), stale lock manual recovery, KNOWN_CODES.public growth, and the full backward-compatibility list. § "Deferred beyond v1.4" renamed to § "Deferred beyond v1.5" with closed-in-v1.5 items struck through (advisory locks / TUTORIAL hard reservation / roadmap mutation policy docs / phase status formalization / resolver core extraction). Remaining deferrals reorganized around v1.5's framing. ([#124])
-- **`docs/dogfood.md`** — § Troubleshooting gains `LOCK_HELD` and `CONFIG_ERROR from phase add --id TUTORIAL / phase import containing TUTORIAL` entries. Release prep does NOT use `plan lint --strict` documented in P14-T2 (docs/dogfood.md § Release prep). ([#119], [#124])
+- **`docs/dogfood.md`** — § Troubleshooting gains `LOCK_HELD` and `CONFIG_ERROR from phase add --id TUTORIAL / phase import containing TUTORIAL` entries. v1.5.0 documented non-strict release-prep lint for the then-current dogfood corpus; v1.5.1 supersedes that with strict-clean dogfood guidance. ([#119], [#124])
 - **`docs/getting-started.md`** — new § Concurrent processes (v1.5+) introduces LOCK_HELD as a transient failure with the envelope shape and pointer to the dogfood troubleshooting entry + governance concept doc. Next-reading list gains the governance concept doc. Migration link description updated to "v0.6 – v0.9 up through v1.5.0". ([#124])
 - **`docs/concepts/sample-phase.md`** — new § "TUTORIAL is a reserved phase id (v1.5+ / P14)" replaces the previous "(Hard reservation of the `TUTORIAL` id is P14 governance scope)" forward-looking note. § "What the sample phase is not" updated: the v1.5 block protects the **id**, not the phase data. Next-reading list gains the governance concept doc. ([#124])
 - **`docs/concepts/finalization-reconciliation.md`** — § Phase status remains manual in v1.2 renamed to "formalized as the convention in v1.5+ / P14" and cites the governance RFC. Release-prep loop step 3 marks the manual flip as "manual by convention" with RFC link; step 4 links to the new roadmap mutation policy section. § Declared writes as a governance review surface (v1.4+ / P14) added in P14-T3. ([#120], [#121])
@@ -100,7 +127,7 @@ task complete BOGUS-ID: exit 2 | TASK_NOT_FOUND  (envelope unchanged)
 
 ### Known residuals (not blockers)
 
-- **`TASK_WRITES_PROTECTED_PATH` advisories on the dogfood corpus.** Existing advisories remain (P10-T1, P10-T6, P11-T1, P14-T1 declaring writes against `design/roadmap.yaml` and `design/phases/*.yaml`). Documented in docs/dogfood.md § "Release prep does NOT use `plan lint --strict`" — actual write enforcement against declared `writes` is P15+ candidate (requires runner or VCS integration).
+- **`TASK_WRITES_PROTECTED_PATH` advisories on the dogfood corpus.** Existing advisories remained in v1.5.0 (P10-T1, P10-T6, P11-T1, P14-T1 declaring writes against `design/roadmap.yaml` and `design/phases/*.yaml`). v1.5.1 removes those stale historical declarations so the dogfood corpus is strict-clean. Actual write enforcement against declared `writes` remains a P15+ candidate (requires runner or VCS integration).
 - **Stale lock recovery is manual.** v1.5 ships the advisory lock without automatic stale-lock detection. If a `code-pact` process crashes mid-lock (SIGKILL, OS reboot), the user manually deletes `.code-pact/locks/write.lock` after verifying no process holds it. PID liveness checks + `--force-lock` are P15+ candidates.
 - **Configurable protected paths / configurable reserved-id list / RESERVED_ID_USAGE lint on existing TUTORIAL phases / selective per-code `--strict` promotion / progress.yaml write locks** — all remain future work. See `docs/migration.md` § Deferred beyond v1.5 for the full list.
 - **`STATUS_DRIFT done-but-design-not-done` warnings** on the dogfood corpus continue to fire for any task whose progress.yaml has a `done` event but whose design status was not yet flipped. This release prep clears every P14 warning that had accumulated across the P14 task PRs into a single coherent reconcile flip (for T1–T7) + a single finalize call (for T8, the release-prep task itself) — **the fourth consecutive release prep where the post-reconcile drift count drops to zero via mechanization**.

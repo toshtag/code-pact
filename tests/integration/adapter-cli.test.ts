@@ -1,29 +1,15 @@
-import { afterAll, beforeAll, afterEach, beforeEach, describe, expect, it } from "vitest";
+import { beforeAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { spawnSync } from "node:child_process";
-import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
+import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { runInit } from "../../src/commands/init.ts";
-
-const repoRoot = resolve(fileURLToPath(import.meta.url), "../../..");
-const cliPath = join(repoRoot, "dist", "cli.js");
+import { cliPath, ensureCliBuilt } from "../helpers/cli.ts";
 
 beforeAll(() => {
-  const res = spawnSync("pnpm", ["build"], {
-    cwd: repoRoot,
-    encoding: "utf8",
-    stdio: "pipe",
-  });
-  if (res.status !== 0 || !existsSync(cliPath)) {
-    throw new Error(
-      `Failed to build CLI for tests. exit=${res.status}\nstdout:\n${res.stdout}\nstderr:\n${res.stderr}`,
-    );
-  }
+  ensureCliBuilt();
 }, 60_000);
-
-afterAll(() => {});
 
 let dir: string;
 

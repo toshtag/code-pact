@@ -69,8 +69,6 @@ tasks:
     decision_refs:
       - design/decisions/task-readiness-schema-rfc.md
     writes:
-      - design/roadmap.yaml
-      - design/phases/P10-task-readiness-schema.yaml
       - design/decisions/task-readiness-schema-rfc.md
     acceptance_refs:
       - design/decisions/task-readiness-schema-rfc.md
@@ -253,12 +251,9 @@ tasks:
 
       Concrete scope: declare the five P10 fields on each P10 task
       (T1-T6, including this one). P9 and earlier phases are left
-      untouched. Two TASK_WRITES_PROTECTED_PATH warnings are
-      expected after merge — they're proof the gate works, not a
-      regression: P10-T1 declares writes against design/roadmap.yaml
-      and design/phases/P10-task-readiness-schema.yaml, and this
-      task (P10-T6) declares writes against the same phase YAML.
-      P14 governance is the consumer that promotes these to errors.
+      untouched. As of v1.5.1 the dogfood corpus is strict-clean, so
+      completed historical tasks do not keep protected design YAML
+      writes declared solely to prove the advisory exists.
     depends_on:
       - P10-T2
       - P10-T3
@@ -267,8 +262,6 @@ tasks:
     decision_refs:
       - design/decisions/task-readiness-schema-rfc.md
     reads:
-      - design/phases/P10-task-readiness-schema.yaml
-    writes:
       - design/phases/P10-task-readiness-schema.yaml
     acceptance_refs:
       - design/phases/P10-task-readiness-schema.yaml

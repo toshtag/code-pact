@@ -1,32 +1,15 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
-import { resolve, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { runRecommend, formatRecommend, type RecommendResult } from "../../src/commands/recommend.ts";
 import { RecommendResultV2 } from "../../src/core/schemas/recommend-result.ts";
+import { cliPath, ensureCliBuilt, repoRoot } from "../helpers/cli.ts";
 
-const repoRoot = resolve(fileURLToPath(import.meta.url), "../../..");
-const cliPath = join(repoRoot, "dist", "cli.js");
 const fixtureDir = join(repoRoot, "tests", "fixtures", "project-a");
 
 beforeAll(() => {
-  // Build once so the CLI-envelope test below sees the wired-up runRecommend.
-  const res = spawnSync("pnpm", ["build"], {
-    cwd: repoRoot,
-    encoding: "utf8",
-    stdio: "pipe",
-  });
-  if (res.status !== 0 || !existsSync(cliPath)) {
-    throw new Error(
-      `Failed to build CLI for tests. exit=${res.status}\nstdout:\n${res.stdout}\nstderr:\n${res.stderr}`,
-    );
-  }
+  ensureCliBuilt();
 }, 60_000);
-
-afterAll(() => {
-  // Nothing to clean — we use the committed fixture in read-only mode.
-});
 
 describe("recommend v0.8 — back-compat regression guard", () => {
   it("v0.7 fields are byte-identical for P2-E1-T1 fixture", async () => {

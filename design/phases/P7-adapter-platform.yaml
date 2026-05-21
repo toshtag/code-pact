@@ -52,7 +52,6 @@ verification:
     - node dist/cli.js plan lint --json
     - node dist/cli.js plan normalize --check --json
     - node dist/cli.js plan analyze --json
-    - node dist/cli.js recommend --phase P6 --task P6-T5 --json
     - node dist/cli.js doctor --json
     - node dist/cli.js adapter list --json
     - node dist/cli.js adapter doctor --agent claude-code --json

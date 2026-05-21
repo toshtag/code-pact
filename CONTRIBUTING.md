@@ -27,7 +27,9 @@ test(progress): cover expanded_work for project-b fixture
 - One CLI command (or one cohesive concern) per branch: `feat/<command>` or `chore/<scope>`.
 - Open a PR even for solo work; do not push directly to `main`.
 - Inside a PR, prefer many small commits. Squash-merge at PR merge time is acceptable.
-- CI must be green before merge: `pnpm typecheck && pnpm test && pnpm build`.
+- Fast local loop: `pnpm test:unit`.
+- Full local gate before merge: `pnpm test:ci`.
+- CI must be green before merge. Node 22 runs the full gate; Node 24 runs typecheck, unit tests, build, and CLI smoke checks.
 
 ## Runtime dependency policy
 

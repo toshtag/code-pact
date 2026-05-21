@@ -385,7 +385,7 @@ export const messages = {
       validateNote:
         "Run `code-pact validate --json` to check overall project state (schema, manifest, plan integrity) before starting a non-trivial task.",
       packNote:
-        "**Internal command:** `code-pact pack` is used internally by `task context`. Do not call `pack` directly — use `code-pact task context <task-id>` instead.",
+        "**Low-level command:** `code-pact pack` is stable, but `code-pact task context <task-id>` is the preferred agent-facing entry.",
       projectConventionsHeader: "Project-specific conventions",
       projectConventionsHint:
         "Replace this section with your project's actual conventions.",
