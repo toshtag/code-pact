@@ -125,6 +125,17 @@ Runbook proposes — but never executes — the v1.2 commands from P11:
 - **`task finalize <id> --write`** is the single step recommended when derived state is `done` and design status disagrees (`done-but-design-not-done` drift).
 - **`phase reconcile <id> --write`** is the single batch step recommended when at least one task in the phase is a `flip` candidate. Per-task finalize enumeration is intentionally avoided.
 
+## Declared writes as a governance review surface (v1.4+ / P14)
+
+`state_summary.declared_writes[]` in `task runbook --json` output is the per-task view of the same review-surface contract documented in [`docs/concepts/finalization-reconciliation.md`](finalization-reconciliation.md#declared-writes-as-a-governance-review-surface-v14--p14). In summary:
+
+- **The field IS a reviewable declaration of intent.** A human or agent reviewing a PR can compare `declared_writes` against actual `git diff` changes to spot mismatches.
+- **The field is NOT runtime-enforced.** `task complete` / `task finalize` / `phase reconcile` do not verify the agent's actual writes match the declaration.
+- **Actual write enforcement is P15+ scope.** Implementation requires either a command runner or VCS (`git diff`) integration; the P14 RFC explicitly defers both.
+- **`plan lint --strict` does promote `TASK_WRITES_PROTECTED_PATH` to exit-relevant** (existing binary `--strict` behaviour). See [`docs/cli-contract.md` § `plan lint`](../cli-contract.md#plan-lint---strict---include-quality---json-v07) for the dogfood-corpus posture (release prep does not use `--strict`).
+
+Read the finalization-reconciliation walkthrough's review-surface section for the canonical `git diff` comparison workflow — both surfaces (`task finalize` and `task runbook`) emit the same `declared_writes` data, so either fits a reviewer's workflow.
+
 ## Error codes
 
 Both commands introduce **zero new error codes**. They reuse:
