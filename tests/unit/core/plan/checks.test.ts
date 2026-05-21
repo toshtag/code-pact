@@ -19,6 +19,7 @@ import {
   detectTaskReadsNoMatch,
   detectTaskReadsUnsafePath,
   detectTaskWritesGlobInvalid,
+  detectTaskWritesOverBroad,
   detectTaskWritesProtectedPath,
   detectTaskWritesUnsafePath,
 } from "../../../../src/core/plan/checks.ts";
@@ -376,6 +377,114 @@ describe("detectTaskWritesProtectedPath", () => {
     const issues = detectTaskWritesProtectedPath(entries);
     expect(issues).toHaveLength(1);
     expect(issues[0]?.code).toBe("TASK_WRITES_PROTECTED_PATH");
+  });
+});
+
+describe("detectTaskWritesOverBroad", () => {
+  it("no issue for a task-scoped writes glob with a concrete root", () => {
+    const entries = [
+      entry(phase("P1", [task("P1-T1", { writes: ["src/core/audit/**"] })])),
+    ];
+    expect(detectTaskWritesOverBroad(entries)).toEqual([]);
+  });
+
+  it("no issue for a src-scoped deep glob (src/**/*.ts)", () => {
+    const entries = [
+      entry(phase("P1", [task("P1-T1", { writes: ["src/**/*.ts"] })])),
+    ];
+    expect(detectTaskWritesOverBroad(entries)).toEqual([]);
+  });
+
+  it("no issue for a single-file declared write", () => {
+    const entries = [
+      entry(phase("P1", [task("P1-T1", { writes: ["docs/cli-contract.md"] })])),
+    ];
+    expect(detectTaskWritesOverBroad(entries)).toEqual([]);
+  });
+
+  it("no issue for a root-level glob without ** (e.g. *.md)", () => {
+    // `*.md` is narrow — it only matches root-level files. Not flagged.
+    const entries = [
+      entry(phase("P1", [task("P1-T1", { writes: ["*.md"] })])),
+    ];
+    expect(detectTaskWritesOverBroad(entries)).toEqual([]);
+  });
+
+  it("warning when writes is just **", () => {
+    const entries = [
+      entry(phase("P1", [task("P1-T1", { writes: ["**"] })])),
+    ];
+    const issues = detectTaskWritesOverBroad(entries);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.code).toBe("TASK_WRITES_OVER_BROAD");
+    expect(issues[0]?.severity).toBe("warning");
+    expect(issues[0]?.details?.value).toBe("**");
+  });
+
+  it("warning when writes is **/*", () => {
+    const entries = [
+      entry(phase("P1", [task("P1-T1", { writes: ["**/*"] })])),
+    ];
+    const issues = detectTaskWritesOverBroad(entries);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.code).toBe("TASK_WRITES_OVER_BROAD");
+  });
+
+  it("warning when writes is **/*.ts (matches every .ts in the repo)", () => {
+    const entries = [
+      entry(phase("P1", [task("P1-T1", { writes: ["**/*.ts"] })])),
+    ];
+    const issues = detectTaskWritesOverBroad(entries);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.code).toBe("TASK_WRITES_OVER_BROAD");
+  });
+
+  it("warning when writes is **/foo.ts (matches foo.ts anywhere)", () => {
+    const entries = [
+      entry(phase("P1", [task("P1-T1", { writes: ["**/foo.ts"] })])),
+    ];
+    const issues = detectTaskWritesOverBroad(entries);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.code).toBe("TASK_WRITES_OVER_BROAD");
+  });
+
+  it("flags each over-broad glob independently when several are declared", () => {
+    const entries = [
+      entry(
+        phase("P1", [
+          task("P1-T1", {
+            writes: ["src/core/audit/**", "**", "**/*.json"],
+          }),
+        ]),
+      ),
+    ];
+    const issues = detectTaskWritesOverBroad(entries);
+    expect(issues).toHaveLength(2);
+    expect(issues.map((i) => i.details?.value)).toEqual(["**", "**/*.json"]);
+  });
+
+  it("does not double-report on already-broken patterns (unsafe path)", () => {
+    // `/abs/**` is unsafe (absolute path); the unsafe-path detector
+    // will fire. The over-broad detector must stay silent here so
+    // a single broken pattern produces a single, actionable diagnostic.
+    const entries = [
+      entry(phase("P1", [task("P1-T1", { writes: ["/abs/**"] })])),
+    ];
+    expect(detectTaskWritesOverBroad(entries)).toEqual([]);
+  });
+
+  it("does not double-report on already-broken patterns (invalid glob syntax)", () => {
+    // Brace expansion is out of the P10 supported subset; the
+    // glob-invalid detector owns this one.
+    const entries = [
+      entry(phase("P1", [task("P1-T1", { writes: ["**/{a,b}/*.ts"] })])),
+    ];
+    expect(detectTaskWritesOverBroad(entries)).toEqual([]);
+  });
+
+  it("no issue when task has no writes at all", () => {
+    const entries = [entry(phase("P1", [task("P1-T1")]))];
+    expect(detectTaskWritesOverBroad(entries)).toEqual([]);
   });
 });
 

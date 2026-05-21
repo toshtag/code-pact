@@ -204,7 +204,7 @@ tasks:
     write_surface: low
     verification_strength: medium
     expected_duration: short
-    status: planned
+    status: done
     description: |
       Add `TASK_WRITES_OVER_BROAD` plan-lint warning detecting
       declared writes that are too coarse (`**`, `**/*`,
@@ -220,13 +220,16 @@ tasks:
       - design/phases/P15-declared-writes-audit.yaml
     reads:
       - src/core/plan/checks.ts
+      - src/core/plan/lint.ts
       - src/core/glob.ts
       - tests/unit/error-code-surface.test.ts
     writes:
       - src/core/plan/checks.ts
+      - src/core/plan/lint.ts
       - tests/unit/core/plan/checks.test.ts
       - tests/unit/error-code-surface.test.ts
       - docs/cli-contract.md
+      - CHANGELOG.md
     acceptance_refs:
       - design/phases/P15-declared-writes-audit.yaml
   - id: P15-T3

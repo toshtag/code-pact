@@ -491,6 +491,56 @@ export function detectTaskWritesProtectedPath(phases: PhaseEntry[]): PlanIssue[]
   return issues;
 }
 
+// `writes` glob is too coarse — its root path segment is the doublestar
+// (`**`), meaning the glob matches the entire repository (or huge
+// swaths of it). v1.6 P15-T2.
+//
+// Examples that trip this check (root segment is doublestar):
+//   - just `**`
+//   - `**` then `/` then `*`
+//   - `**` then `/` then `*.ts`
+//   - `**` then `/` then a literal filename
+//
+// Legitimate task-scoped globs have a concrete root segment and pass
+// unchanged: `src/core/audit/**`, `src/**/*.ts`, `tests/unit/**`,
+// `docs/cli-contract.md`, etc.
+//
+// Heuristic-only — the goal is to catch obvious "writes everywhere"
+// declarations during plan lint, not to encode a precise breadth
+// metric. Severity: warning, advisory. Under `plan lint --strict` the
+// existing binary promotion makes it exit-relevant (same posture as
+// `TASK_WRITES_PROTECTED_PATH`).
+export function detectTaskWritesOverBroad(phases: PhaseEntry[]): PlanIssue[] {
+  const issues: PlanIssue[] = [];
+  for (const { phase, ref } of phases) {
+    for (const task of phase.tasks ?? []) {
+      const globs = task.writes ?? [];
+      globs.forEach((g, index) => {
+        // Don't double-report on already-broken patterns.
+        if (safePathReason(g) !== "") return;
+        if (validateGlobSyntax(g) !== null) return;
+        if (!isOverBroadGlob(g)) return;
+        issues.push({
+          code: "TASK_WRITES_OVER_BROAD",
+          severity: "warning",
+          message: `Task "${task.id}" writes glob "${g}" is too broad — its root segment is "**", which matches the entire repository. Narrow it to a concrete root (e.g. "src/...", "tests/...", "docs/...") that reflects the task's actual write surface.`,
+          file: ref.path,
+          phase_id: phase.id,
+          task_id: task.id,
+          path: `writes[${index}]`,
+          details: { value: g },
+        });
+      });
+    }
+  }
+  return issues;
+}
+
+function isOverBroadGlob(g: string): boolean {
+  const segments = g.split("/");
+  return segments[0] === "**";
+}
+
 /** `acceptance_refs` path is not a safe repo-root-relative POSIX path. */
 export function detectTaskAcceptanceRefUnsafePath(phases: PhaseEntry[]): PlanIssue[] {
   const issues: PlanIssue[] = [];
