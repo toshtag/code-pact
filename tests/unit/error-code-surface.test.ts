@@ -54,6 +54,7 @@ const KNOWN_CODES: Record<string, "public" | "plan" | "doctor" | "adapter" | "in
   CONFIG_ERROR: "public",
   DUPLICATE_PHASE_ID: "public",
   INVALID_TASK_TRANSITION: "public",
+  LOCK_HELD: "public",
   MANIFEST_NOT_FOUND: "public",
   PHASE_NOT_FOUND: "public",
   PHASE_RECONCILE_WRITE_REFUSED: "public",

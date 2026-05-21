@@ -99,6 +99,7 @@ CI.
 | `TASK_FINALIZE_NOT_ELIGIBLE` | `task finalize` | Task's derived state from `progress.yaml` is not `done` (raised in **both** dry-run and `--write`) |
 | `TASK_FINALIZE_WRITE_REFUSED` | `task finalize --write` | Safety check refused the phase YAML write (unsafe path, outside `design/phases/`, symlink escape, unparseable, etc.) |
 | `PHASE_RECONCILE_WRITE_REFUSED` | `phase reconcile --write` | Every eligible task write in the phase was refused for safety reasons. Partial successes return exit 0; this fires only when **all** writes refused |
+| `LOCK_HELD` (v1.5+ / P14) | `init --sample-phase`, `init` wizard, `phase add`, `phase new`, `phase import`, `task add`, `task finalize --write`, `phase reconcile --write` | Another code-pact mutation is in progress on the same project. The envelope's `data.lock_holder` carries `{pid, hostname, cmd, created_at}` for diagnostic display; `data.lock_path` is the lock file path. Transient + retryable — wait for the holder to release, or manually delete the lock file if you are certain no process holds it |
 | `INTERNAL_ERROR` | any command | Reserved for unhandled exceptions |
 
 ### Plan diagnostic codes
@@ -1625,7 +1626,61 @@ Extending the adapter-style helpers to other state-file writes is **deferred unl
 
 ### Concurrent writers
 
-Running two `code-pact` commands against the same project in parallel is not supported. The CLI assumes a single-process owner of `.code-pact/`. v1.x may add advisory locking; v1.0 does not.
+Running two design-mutating `code-pact` commands against the same project in parallel is **detected** in v1.5+ via the advisory write lock (P14 governance — see § Advisory write lock below). The second invocation fails fast with `LOCK_HELD` (exit 2) and a diagnostic envelope. Read-only commands (`plan lint`, `plan analyze`, `task runbook`, `phase runbook`, `validate`, `doctor`, `recommend`, `task context`, `task status`) do not acquire the lock and can run concurrently with mutations (observing the project at whatever transitional state is on disk when they read).
+
+### Advisory write lock (v1.5+ / P14)
+
+`.code-pact/locks/write.lock` is created by the design-mutating commands listed in the `LOCK_HELD` row of [§ Public codes](#public-codes-top-level-error-envelopes) above. Acquisition is atomic via `fs.writeFile(..., { flag: "wx" })` (cross-platform exclusive create); release is `unlink`. The lock file content is JSON `{pid, hostname, cmd, created_at}` for diagnostic display.
+
+**Lock acquisition points.** The lock is acquired at the **CLI command-handler level**, not inside `createPhase` or other core services. This lets `phase import` hold a single outer acquisition across its multi-phase apply loop (batch transactionality — every `createPhase` call inside runs under the same lock without re-acquiring). The acquisition points are:
+
+| Command | Acquired when | Coverage |
+|---------|---------------|----------|
+| `init --sample-phase` | The `--sample-phase` flag is set in non-interactive mode | The whole `runInit` (which calls `writeSamplePhase` → `createPhase`) |
+| `init` (wizard) | Always (wizard may answer yes to the sample-phase prompt) | The whole wizard + any `writeSamplePhase` call |
+| `phase add` (flag-based or wizard) | After parsing / wizard prompts finish, before `runPhaseAdd` | The single `createPhase` call |
+| `phase new` (wizard) | At command entry — held through wizard prompts and write | The single `createPhase` call |
+| `phase import` | At command entry, before `runPhaseImport` is called | The entire multi-phase apply loop (every `createPhase` inside) |
+| `task add` (wizard or non-interactive) | At command entry | Wizard prompts (if any) + phase YAML write |
+| `task finalize` | Only when `--write` | The single phase YAML status flip |
+| `phase reconcile` | Only when `--write` | The entire reconcile batch (all flips under one acquisition) |
+
+`task finalize` and `phase reconcile` **dry-runs do NOT acquire the lock** (they don't write).
+
+**`LOCK_HELD` envelope shape.**
+
+```json
+{
+  "ok": false,
+  "error": {
+    "code": "LOCK_HELD",
+    "message": "Another code-pact mutation is in progress: phase reconcile P14 --write (pid: 12345, host: laptop.local, started: 2026-05-21T10:15:00.000Z). If you are certain no command is running, remove /path/to/.code-pact/locks/write.lock and retry."
+  },
+  "data": {
+    "lock_holder": {
+      "pid": 12345,
+      "hostname": "laptop.local",
+      "cmd": "phase reconcile P14 --write",
+      "created_at": "2026-05-21T10:15:00.000Z"
+    },
+    "lock_path": "/path/to/.code-pact/locks/write.lock"
+  }
+}
+```
+
+When the lock file exists but is unreadable or unparseable (e.g. a partial write from a crashed process, or a hand-edit gone wrong), `data.lock_holder` is `null` and the message text adjusts accordingly. The contender always fails fast; corrupt lock files do NOT auto-clean themselves.
+
+**Stale lock recovery.** v1.5 does NOT auto-detect stale locks (e.g. a crashed process leaving the file behind). The user must:
+
+1. Verify no `code-pact` command is running.
+2. Manually delete `.code-pact/locks/write.lock`.
+3. Re-run the command.
+
+Automation (PID liveness check, age-based stale detection, a `--force-lock` flag) is deferred to a future RFC. Conservative manual-recovery avoids races where two processes both decide the other is stale.
+
+**Relationship to atomic-text.** The lock is layered ON TOP of the existing atomic-write contract — it does not replace it. Atomic-text gives file-level durability (interrupted writes never leave a half-written file); the lock gives semantic guard against concurrent semantic mutations of the same project. Both are needed.
+
+**`progress.yaml` is intentionally NOT locked.** The append-only operational-log contract documented above (worst case is event reordering, not corruption) makes lock-free safe for `task complete` / `task start` / `task block` / `task resume`. Adding a lock to those high-frequency commands would have no integrity benefit and would add per-invocation acquisition overhead.
 
 ### Roadmap mutation policy (v1.5+ / P14)
 

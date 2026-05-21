@@ -20,8 +20,8 @@
 // fan-out so individual tests stay readable.
 
 import { describe, it, expect, beforeAll, afterEach } from "vitest";
-import { readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
 import {
@@ -423,6 +423,90 @@ describe("json-stdout contract: state-mutating Stable (v1.0) commands", () => {
     expect(envelope.error?.message).toContain("init --sample-phase");
     const after = await readFile(roadmapPath, "utf8");
     expect(after).toBe(before);
+  });
+
+  // P14 advisory write lock: LOCK_HELD JSON envelope. Pre-populates
+  // the lock file to simulate another process holding the lock, then
+  // runs a design-mutating command with the test-escape env var
+  // cleared (empty string, not "1") so the real acquisition path
+  // fires and returns LOCK_HELD instead of short-circuiting.
+  it("phase reconcile --write --json with existing lock (P14 LOCK_HELD envelope)", async () => {
+    const p = await freshProject("phase-reconcile-lock-held");
+    // Seed a fake lock holder. The CLI will fail to acquire and
+    // return the diagnostic envelope.
+    const lockPath = join(p.dir, ".code-pact", "locks", "write.lock");
+    await mkdir(dirname(lockPath), { recursive: true });
+    const fakeHolder = {
+      pid: 99999,
+      hostname: "phantom.local",
+      cmd: "task finalize P1-T1 --write",
+      created_at: "2026-05-21T03:00:00.000Z",
+    };
+    await writeFile(lockPath, JSON.stringify(fakeHolder), "utf8");
+
+    // Need a phase to target. Seed via direct file writes (a `phase
+    // add` CLI invocation would also fail with LOCK_HELD).
+    const phasePath = join(p.dir, "design", "phases", "P1-foundation.yaml");
+    await writeFile(
+      phasePath,
+      stringifyYaml({
+        id: "P1",
+        name: "Foundation",
+        weight: 10,
+        confidence: "medium",
+        risk: "low",
+        status: "planned",
+        // ≥10 chars to satisfy the EMPTY_OBJECTIVE doctor check
+        // (so the read-only `validate` assertion below isn't
+        // confounded by an unrelated schema warning).
+        objective: "lock-held envelope test phase",
+        definition_of_done: ["pass"],
+        verification: { commands: ["node --version"] },
+      }),
+      "utf8",
+    );
+    const roadmapPath = join(p.dir, "design", "roadmap.yaml");
+    const roadmap = parseYaml(await readFile(roadmapPath, "utf8")) as {
+      phases: { id: string; path: string; weight: number }[];
+    };
+    roadmap.phases.push({
+      id: "P1",
+      path: "design/phases/P1-foundation.yaml",
+      weight: 10,
+    });
+    await writeFile(roadmapPath, stringifyYaml(roadmap), "utf8");
+
+    // Empty string (not "1") = locks active even with the
+    // setup-file escape inherited from the vitest parent env.
+    const res = p.run(["phase", "reconcile", "P1", "--write", "--json"], {
+      CODE_PACT_DISABLE_LOCKS: "",
+    });
+    expectStdoutIsJson(res, "phase reconcile --write LOCK_HELD");
+    expect(res.code).toBe(2);
+    const envelope = JSON.parse(res.stdout) as {
+      ok: boolean;
+      error?: { code: string; message: string };
+      data?: { lock_holder?: typeof fakeHolder; lock_path?: string };
+    };
+    expect(envelope.ok).toBe(false);
+    expect(envelope.error?.code).toBe("LOCK_HELD");
+    expect(envelope.data?.lock_holder).toEqual(fakeHolder);
+    // macOS `mkdtemp` returns `/var/folders/...` but the spawned
+    // CLI resolves cwd via realpath to `/private/var/folders/...`,
+    // so compare by suffix rather than the raw path.
+    expect(envelope.data?.lock_path).toMatch(
+      /\.code-pact\/locks\/write\.lock$/,
+    );
+    expect(envelope.error?.message).toContain(fakeHolder.cmd);
+    expect(envelope.error?.message).toContain(String(fakeHolder.pid));
+
+    // Read-only command must NOT acquire the lock — the same project
+    // can still be observed while a mutation is pending.
+    const observe = p.run(["validate", "--json"], {
+      CODE_PACT_DISABLE_LOCKS: "",
+    });
+    expectStdoutIsJson(observe, "validate --json (read-only, no lock)");
+    expect(observe.code).toBe(0);
   });
 
   it("phase import containing TUTORIAL --json (P14 preflight CONFIG_ERROR)", async () => {
