@@ -99,4 +99,75 @@ describe("createPhase", () => {
     // commas, exclamations, ampersands. The leftover `-&-` ends up as `--`.
     expect(result.path).toBe("design/phases/P14-hello-world-spaces--symbols.yaml");
   });
+
+  // P14 governance: reserved-id (TUTORIAL) creation-time block.
+  describe("reserved-id block (P14)", () => {
+    it("rejects id \"TUTORIAL\" with CONFIG_ERROR when _isSampleCreation is omitted", async () => {
+      // Sanity: roadmap.yaml unchanged on rejection — preflight-style.
+      const roadmapBefore = await readFile(
+        join(cwd, "design", "roadmap.yaml"),
+        "utf8",
+      );
+      await expect(
+        createPhase({
+          cwd,
+          id: "TUTORIAL",
+          name: "tutorial impostor",
+          weight: 1,
+          objective: "should be rejected",
+        }),
+      ).rejects.toMatchObject({ code: "CONFIG_ERROR" });
+      const roadmapAfter = await readFile(
+        join(cwd, "design", "roadmap.yaml"),
+        "utf8",
+      );
+      expect(roadmapAfter).toBe(roadmapBefore);
+    });
+
+    it("rejects id \"TUTORIAL\" with CONFIG_ERROR when _isSampleCreation is explicitly false", async () => {
+      await expect(
+        createPhase({
+          cwd,
+          _isSampleCreation: false,
+          id: "TUTORIAL",
+          name: "still impostor",
+          weight: 1,
+          objective: "explicit false should still reject",
+        }),
+      ).rejects.toMatchObject({ code: "CONFIG_ERROR" });
+    });
+
+    it("allows id \"TUTORIAL\" through when _isSampleCreation: true is passed", async () => {
+      const result = await createPhase({
+        cwd,
+        _isSampleCreation: true,
+        id: "TUTORIAL",
+        name: "Walkthrough",
+        weight: 1,
+        objective: "sample phase bypass",
+      });
+      expect(result.path).toBe("design/phases/TUTORIAL-walkthrough.yaml");
+      const raw = await readFile(join(cwd, result.path), "utf8");
+      const phase = parseYaml(raw) as Record<string, unknown>;
+      expect(phase.id).toBe("TUTORIAL");
+    });
+
+    it("CONFIG_ERROR message names the reserved id and points at init --sample-phase", async () => {
+      let captured: Error | undefined;
+      try {
+        await createPhase({
+          cwd,
+          id: "TUTORIAL",
+          name: "msg test",
+          weight: 1,
+          objective: "msg test",
+        });
+      } catch (err) {
+        captured = err as Error;
+      }
+      expect(captured).toBeDefined();
+      expect(captured!.message).toContain("\"TUTORIAL\"");
+      expect(captured!.message).toContain("init --sample-phase");
+    });
+  });
 });

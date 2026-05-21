@@ -1540,6 +1540,11 @@ async function cmdPhase(argv: string[], locale: Locale, globalJson: boolean): Pr
           process.stderr.write(`${m.phase.duplicateId(phaseId)}\n`);
           return 1;
         }
+        // P14 reserved-id (TUTORIAL) block surfaces as CONFIG_ERROR.
+        if (err instanceof Error && (err as NodeJS.ErrnoException).code === "CONFIG_ERROR") {
+          process.stderr.write(`${err.message}\n`);
+          return 2;
+        }
         throw err;
       } finally {
         prompter.close();
@@ -1610,6 +1615,19 @@ async function cmdPhase(argv: string[], locale: Locale, globalJson: boolean): Pr
         }
         return 2;
       }
+      // P14 reserved-id (TUTORIAL) block surfaces as CONFIG_ERROR from
+      // createPhase. Propagate the message verbatim — it already names
+      // the reserved id and points at `init --sample-phase`.
+      if (err instanceof Error && (err as NodeJS.ErrnoException).code === "CONFIG_ERROR") {
+        if (json) {
+          process.stdout.write(
+            `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: err.message } })}\n`,
+          );
+        } else {
+          process.stderr.write(`${err.message}\n`);
+        }
+        return 2;
+      }
       throw err;
     }
   }
@@ -1648,6 +1666,18 @@ async function cmdPhase(argv: string[], locale: Locale, globalJson: boolean): Pr
           );
         } else {
           process.stderr.write(`${msg}\n`);
+        }
+        return 2;
+      }
+      // P14 reserved-id (TUTORIAL) block surfaces as CONFIG_ERROR from
+      // createPhase (the wizard never asks for the bypass flag).
+      if (err instanceof Error && (err as NodeJS.ErrnoException).code === "CONFIG_ERROR") {
+        if (globalJson) {
+          process.stdout.write(
+            `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: err.message } })}\n`,
+          );
+        } else {
+          process.stderr.write(`${err.message}\n`);
         }
         return 2;
       }

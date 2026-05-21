@@ -447,6 +447,46 @@ Projects running `plan lint --strict` / `plan analyze --strict` / `validate --st
 
 In semver terms, v1.4.0 is a minor release.
 
+## v1.4.x → v1.5.0 (in development)
+
+> Authoritative migration entries land with v1.5.0 release prep (P14-T7 / T8). This subsection is a forward-looking snapshot from P14-T4, covering the two governance decisions that ship as part of this PR.
+
+### Reserved phase id (TUTORIAL) creation-time block
+
+`code-pact init --sample-phase` is now the **only** sanctioned path that creates a phase with `id: TUTORIAL`. As of v1.5.0:
+
+| Path | Outcome |
+|------|---------|
+| `init --sample-phase` (or `init` wizard → yes) | **Allowed** — internal bypass on `createPhase` |
+| `phase add --id TUTORIAL ...` | `CONFIG_ERROR` (exit 2). Roadmap is byte-identical (no write) |
+| `phase new` wizard → typing `TUTORIAL` as the id | `CONFIG_ERROR` (exit 2) |
+| `phase import` containing `id: TUTORIAL` (in any position) | `CONFIG_ERROR` (exit 2) from a **preflight scan**. The entire import is rejected — earlier phases in the input are NOT partially written |
+| `validate` / `plan lint` / `plan analyze` against an existing TUTORIAL phase | No warning. Block is creation-time only; existing data is untouched |
+
+**Migration impact.** Existing v1.4.x projects with a TUTORIAL phase (whether sample-phase artifact or otherwise) are NOT touched. The block only fires on new creation. Users who genuinely want a phase named `TUTORIAL` need to pick a different id — the recommended sanctioned path is `init --sample-phase`.
+
+No new error code: the block reuses `CONFIG_ERROR`. Full details and the future-deferred work (configurable reserved-id lists, advisory `RESERVED_ID_USAGE` lint on existing data) live in [design/decisions/governance-rfc.md](../design/decisions/governance-rfc.md) § Reserved id policy.
+
+### Phase status manual-flip convention (formalized)
+
+`phase reconcile --write` flips **task** statuses in batch but never writes the phase's own `status` field. The `phase_status_candidate` returned in the JSON envelope is advisory only — this contract has held since v1.2.0 and v1.5.0 formalizes it.
+
+Release-prep convention:
+
+1. `code-pact phase reconcile <phase-id> --write` — flips every eligible task in one shot.
+2. **Hand-edit** the phase's own `status` field in `design/phases/<phase>.yaml` (typically inside the release-prep PR).
+
+Auto-flip implementation (e.g. a `--phase-status` flag on `phase reconcile`, or a separate `phase finalize` command) is **not part of v1.5** and is deferred to a future RFC. See [design/decisions/governance-rfc.md](../design/decisions/governance-rfc.md) § Phase status policy for the rationale.
+
+### Coming in subsequent P14 PRs (v1.5.0 final)
+
+The following changes ship later in the v1.5.0 cycle and will get their own migration notes in the final v1.5.0 release-prep update:
+
+- **Advisory write lock** at `.code-pact/locks/write.lock` acquired by design-mutating commands (`init` sample-phase path, `phase add`, `phase new`, `phase import`, `task add`, `task finalize --write`, `phase reconcile --write`). Concurrent invocations return a new public error code `LOCK_HELD` (exit 2). Read-only commands are unaffected. Single-process users see no change.
+- **Task→phase resolver core extraction** — pure internal refactor; all existing per-command behaviour and error codes (`TASK_NOT_FOUND` / `AMBIGUOUS_TASK_ID`) preserved unchanged.
+- **Declared writes as a governance review surface** — already shipped in [`docs/concepts/finalization-reconciliation.md`](concepts/finalization-reconciliation.md#declared-writes-as-a-governance-review-surface-v14--p14) and [`docs/concepts/runbook.md`](concepts/runbook.md#declared-writes-as-a-governance-review-surface-v14--p14) (P14-T3).
+- **`plan lint --strict` semantics for `TASK_WRITES_PROTECTED_PATH`** — already documented in [`docs/cli-contract.md` § Plan diagnostic codes](cli-contract.md#plan-diagnostic-codes) (P14-T2). Release prep does NOT pass `--strict` because the dogfood corpus contains legitimate `TASK_WRITES_PROTECTED_PATH` advisories on governance tasks.
+
 ## Deferred beyond v1.4
 
 The following remain on the backlog after v1.4.0:
@@ -457,7 +497,7 @@ The following remain on the backlog after v1.4.0:
 - **Enforcement of declared `writes` against actual file-system writes.** v1.1+ surfaces `TASK_WRITES_PROTECTED_PATH` as a warning against a narrow built-in seed set (`.git/**`, `node_modules/**`, `.code-pact/**`, `design/roadmap.yaml`, `design/phases/*.yaml`). Configurable governance and warning → error promotion are P14 work. v1.2+ displays declared `writes` in the `task finalize` / `phase reconcile` / `task runbook` JSON payload but does **not** verify them against actual file-system writes.
 - **Cross-phase `depends_on`.** v1.1+ ships same-phase only; cross-phase task ordering is a future extension. v1.3.0 surfaces `depends_on` in `task runbook` blocking steps but does not extend the same-phase restriction.
 - **File-content inclusion for `reads` and `acceptance_refs`.** v1.1+ renders both as path lists only; v1.4.0 keeps that surface unchanged.
-- **Phase status auto-flip.** v1.2+ reports `phase_status_candidate` as advisory but never writes the phase's own `status` field. v1.3.0 `phase runbook` surfaces the same candidate plus a `manual_action` recommending the flip; it does not write either. An `--include-phase-status` opt-in is a candidate once the per-task flip path has been used through one release cycle.
+- **Phase status auto-flip.** v1.2+ reports `phase_status_candidate` as advisory but never writes the phase's own `status` field. v1.3.0 `phase runbook` surfaces the same candidate plus a `manual_action` recommending the flip; it does not write either. v1.5 formalizes manual-flip as the convention (see [`docs/concepts/finalization-reconciliation.md`](concepts/finalization-reconciliation.md#phase-status-remains-manual-in-v12-formalized-as-the-convention-in-v15--p14) and [design/decisions/governance-rfc.md](../design/decisions/governance-rfc.md) § Phase status policy). An `--include-phase-status` opt-in (or a separate `phase finalize` command) is a future RFC candidate once the per-task flip path has been used through more release cycles.
 - **Multi-phase reconcile / runbook (`--all`).** v1.2 / v1.3 / v1.4 ship per-phase only.
 - **`design/roadmap.yaml` mutation.** Whether release prep should be able to delegate the per-phase weight / status flip to a `roadmap reconcile` command is P14 governance scope.
 - **Semantic validation of `acceptance_refs` content.** v1.2+ only checks the path exists; richer validation would couple finalize to acceptance-criteria format choices the project has not yet made.

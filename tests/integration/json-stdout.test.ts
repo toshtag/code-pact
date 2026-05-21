@@ -389,6 +389,86 @@ describe("json-stdout contract: state-mutating Stable (v1.0) commands", () => {
     expectStdoutIsJson(p.run(["phase", "import", importPath, "--json"]), "phase import");
   });
 
+  // P14 governance: reserved-id (TUTORIAL) creation-time block — both
+  // `phase add` and `phase import` reject the entire operation with
+  // CONFIG_ERROR (exit 2). Roadmap stays byte-identical on failure.
+  it("phase add --id TUTORIAL --json (P14 reserved-id CONFIG_ERROR)", async () => {
+    const p = await freshProject("phase-add-tutorial-reserved");
+    const roadmapPath = join(p.dir, "design", "roadmap.yaml");
+    const before = await readFile(roadmapPath, "utf8");
+    const res = p.run([
+      "phase",
+      "add",
+      "--id",
+      "TUTORIAL",
+      "--name",
+      "Impostor",
+      "--objective",
+      "Should be rejected by P14 reserved-id block",
+      "--weight",
+      "1",
+      "--verify-command",
+      "node --version",
+      "--json",
+    ]);
+    expectStdoutIsJson(res, "phase add TUTORIAL reserved-id CONFIG_ERROR");
+    expect(res.code).toBe(2);
+    const envelope = JSON.parse(res.stdout) as {
+      ok: boolean;
+      error?: { code: string; message: string };
+    };
+    expect(envelope.ok).toBe(false);
+    expect(envelope.error?.code).toBe("CONFIG_ERROR");
+    expect(envelope.error?.message).toContain("TUTORIAL");
+    expect(envelope.error?.message).toContain("init --sample-phase");
+    const after = await readFile(roadmapPath, "utf8");
+    expect(after).toBe(before);
+  });
+
+  it("phase import containing TUTORIAL --json (P14 preflight CONFIG_ERROR)", async () => {
+    const p = await freshProject("phase-import-tutorial-reserved");
+    const roadmapPath = join(p.dir, "design", "roadmap.yaml");
+    const before = await readFile(roadmapPath, "utf8");
+    const importPath = join(p.dir, "draft.yaml");
+    await writeFile(
+      importPath,
+      stringifyYaml({
+        // Mix of safe + reserved-id phases: preflight must reject the
+        // whole input, leaving roadmap byte-identical (no partial write).
+        phases: [
+          {
+            id: "P1",
+            name: "Foundation",
+            weight: 10,
+            objective: "Would be safe in isolation",
+            tasks: [{ id: "P1-T1" }],
+          },
+          {
+            id: "TUTORIAL",
+            name: "Impostor",
+            weight: 1,
+            objective: "Triggers preflight CONFIG_ERROR",
+            tasks: [{ id: "TUTORIAL-T1" }],
+          },
+        ],
+      }),
+      "utf8",
+    );
+    const res = p.run(["phase", "import", importPath, "--json"]);
+    expectStdoutIsJson(res, "phase import TUTORIAL preflight CONFIG_ERROR");
+    expect(res.code).toBe(2);
+    const envelope = JSON.parse(res.stdout) as {
+      ok: boolean;
+      error?: { code: string; message: string };
+    };
+    expect(envelope.ok).toBe(false);
+    expect(envelope.error?.code).toBe("CONFIG_ERROR");
+    expect(envelope.error?.message).toContain("TUTORIAL");
+    expect(envelope.error?.message).toContain("init --sample-phase");
+    const after = await readFile(roadmapPath, "utf8");
+    expect(after).toBe(before);
+  });
+
   it("adapter install --json", async () => {
     const p = await projectWithTask("adapter-install");
     expectStdoutIsJson(

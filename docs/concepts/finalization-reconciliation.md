@@ -67,7 +67,7 @@ JSON envelope kinds: `would_reconcile` (dry-run), `reconciled` (`--write`), `no_
 
 This matches the spirit of `adapter upgrade`: the contract is "do as much as is safe, surface exactly what was skipped and why."
 
-## Phase status remains manual in v1.2
+## Phase status remains manual in v1.2 — formalized as the convention in v1.5+ / P14
 
 `phase reconcile` reports a `phase_status_candidate` (`done` / `in_progress` / `planned`) by simulating the post-flip state, but never writes the phase's own `status` field:
 
@@ -78,7 +78,14 @@ This matches the spirit of `adapter upgrade`: the contract is "do as much as is 
 }
 ```
 
-The candidate exists so release-prep PRs have a deterministic check ("if reconcile suggests `done`, flip the phase status by hand"). Auto-flipping the phase is the kind of judgement call that P14 governance is the right home for — it often depends on non-task work (release prep, docs, manual cleanup) that no command can verify.
+The candidate exists so release-prep PRs have a deterministic check ("if reconcile suggests `done`, flip the phase status by hand"). Auto-flipping the phase is the kind of judgement call that P14 governance was expected to address — it often depends on non-task work (release prep, docs, manual cleanup) that no command can verify.
+
+**v1.5+ / P14 decision: manual-flip is the convention, auto-flip stays out of scope.** The P14 governance RFC ([design/decisions/governance-rfc.md](../../design/decisions/governance-rfc.md) § Phase status policy) explicitly defers auto-flip implementation to a future RFC. The release-prep convention is:
+
+1. Run `code-pact phase reconcile <phase-id> --write` to flip task statuses.
+2. Hand-edit the phase's own `status` field in `design/phases/<phase>.yaml` (typically in the release-prep PR).
+
+A future RFC may design either a `phase reconcile --write --phase-status` flag, a separate `phase finalize <phase-id> --write` command, or some other mechanism — but v1.5 does NOT design or implement any of them. The `phase_status_note` JSON-envelope text remains accurate: phase status is never written by `phase reconcile`, and that contract is now load-bearing rather than transitional.
 
 ## The full release-prep loop, before and after
 
@@ -94,8 +101,8 @@ The candidate exists so release-prep PRs have a deterministic check ("if reconci
 
 1. Bump version + write CHANGELOG.
 2. `code-pact phase reconcile <phase-id> --write --json` — flips every eligible task in one shot.
-3. Hand-edit the phase status when every task is done (still manual; `phase_status_candidate` tells you what it should be).
-4. Hand-edit `design/roadmap.yaml` if a phase weight or status moved (still manual until P14).
+3. Hand-edit the phase status when every task is done — **manual by convention** in v1.5+ (P14 governance RFC § Phase status policy); `phase_status_candidate` tells you what it should be.
+4. Hand-edit `design/roadmap.yaml` if a phase weight or status moved (still manual — the writer chokepoint is `createPhase` (see [docs/cli-contract.md § Roadmap mutation policy](../cli-contract.md#roadmap-mutation-policy-v15--p14)), and a `roadmap reconcile`-style command is deferred to a future RFC).
 5. Commit + PR.
 
 Step 2 replaces what was previously the most repetitive and error-prone part of release prep.
