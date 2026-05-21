@@ -240,7 +240,7 @@ tasks:
     write_surface: medium
     verification_strength: medium
     expected_duration: medium
-    status: planned
+    status: done
     description: |
       Make protected paths configurable via `design/rules/
       protected-paths.md`. The hardcoded P10 list in
@@ -257,12 +257,18 @@ tasks:
     reads:
       - src/core/glob.ts
       - src/core/plan/checks.ts
+      - src/core/plan/lint.ts
+      - src/core/path-safety.ts
     writes:
       - src/core/glob.ts
+      - src/core/plan/checks.ts
+      - src/core/plan/lint.ts
       - src/core/rules/protected-paths.ts
       - design/rules/protected-paths.md
       - tests/unit/core/rules/protected-paths.test.ts
+      - tests/unit/core/plan/checks.test.ts
       - docs/cli-contract.md
+      - CHANGELOG.md
     acceptance_refs:
       - design/phases/P15-declared-writes-audit.yaml
   - id: P15-T4
