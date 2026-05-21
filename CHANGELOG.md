@@ -44,6 +44,26 @@ identifiers. Starting with v1.0.0, stable releases use plain
   `plan lint --strict` per the existing binary promotion. Heuristic-only:
   the goal is to catch obvious "writes everywhere" declarations, not to
   encode a precise breadth metric.
+- **`task finalize --audit-strict` opt-in gate** (v1.6+, P15-T6).
+  New flag promotes `TASK_WRITES_AUDIT_*` warnings from advisory to
+  exit-relevant for `task finalize`. With the flag, any warning in
+  the audit envelope returns `WRITES_AUDIT_STRICT_FAILED` (exit
+  **1** — not 2; the invocation was well-formed, only the strict
+  gate refused) and the design YAML is NOT mutated even when
+  `--write` is set. Without the flag, default behaviour is
+  unchanged — warnings stay advisory, exit code stays 0. Requires
+  `--json` (same constraint as `--base-ref`); passing it without
+  `--json` returns `CONFIG_ERROR` (exit 2). The strict-failure
+  envelope carries the full `write_audit` plus a fixed
+  `applied: false` invariant — the gate fires before
+  `applyPlannedWrite`, so the no-mutation guarantee is
+  machine-readable. New public error code
+  `WRITES_AUDIT_STRICT_FAILED` added to `KNOWN_CODES.public`. Kept
+  distinct from `plan lint --strict` (plan-lint-scoped) so existing
+  CI consumers of either flag are unaffected.
+  `phase reconcile --audit-strict` is deferred to a follow-up
+  after P15-T5 (phase reconcile audit) ships — the gate would be
+  a no-op there today.
 - **Non-interactive authoring walkthrough docs** (v1.6+, P17-T5). New
   `docs/dogfood.md § Non-interactive plan brief / plan constitution`
   section walks through all six non-interactive modes (--from-file,
