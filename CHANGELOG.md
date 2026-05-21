@@ -35,6 +35,15 @@ identifiers. Starting with v1.0.0, stable releases use plain
 - **`src/core/audit/write-audit.ts`** new internal module exposing
   `auditWrites({ cwd, declaredWrites, baseRef? })`. Reused by future P15
   tasks for `phase reconcile --json` (P15-T5) and `--audit-strict` (P15-T6).
+- **`TASK_WRITES_OVER_BROAD` plan-lint warning** (v1.6+, P15-T2). Flags
+  declared `writes` globs whose root path segment is `**` — patterns that
+  match the entire repository (e.g. `**`, `**/*`, `**/*.ts`, `**/foo.ts`).
+  Legitimate task-scoped globs (`src/core/audit/**`, `src/**/*.ts`,
+  `tests/unit/**`) have a concrete root segment and pass unchanged.
+  Severity: warning, advisory in default `plan lint`; exit-relevant under
+  `plan lint --strict` per the existing binary promotion. Heuristic-only:
+  the goal is to catch obvious "writes everywhere" declarations, not to
+  encode a precise breadth metric.
 
 ### Changed
 
