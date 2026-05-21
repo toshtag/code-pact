@@ -343,7 +343,7 @@ describe("task finalize --json write_audit boundary semantics", () => {
     );
   });
 
-  it("computes declared_unused as data without raising a warning (v1.6 P15-T1 scope)", async () => {
+  it("v1.6 P15-T4: declared_unused promotes to TASK_WRITES_AUDIT_DECLARED_UNUSED warning", async () => {
     const p = await projectWithFinalizableTask("unused", {
       initGit: true,
       declaredWrites: ["src/core/audit/**", "docs/cli-contract.md"],
@@ -355,14 +355,13 @@ describe("task finalize --json write_audit boundary semantics", () => {
     );
 
     const res = p.run(["task", "finalize", "P1-T1", "--json"]);
+    // Advisory only — exit code is still 0 even with the warning.
     expect(res.code).toBe(0);
     const data = parseFinalize(res);
     expect(data.write_audit?.declared_unused).toEqual([
       "docs/cli-contract.md",
     ]);
-    // P15-T1 does NOT promote declared_unused to a warning code; that
-    // arrives in P15-T4.
-    expect(data.write_audit?.warnings).not.toContain(
+    expect(data.write_audit?.warnings).toContain(
       "TASK_WRITES_AUDIT_DECLARED_UNUSED",
     );
   });
