@@ -44,6 +44,21 @@ identifiers. Starting with v1.0.0, stable releases use plain
   `plan lint --strict` per the existing binary promotion. Heuristic-only:
   the goal is to catch obvious "writes everywhere" declarations, not to
   encode a precise breadth metric.
+- **`plan brief --from-file <yaml>`** (v1.6+, P17-T1). Non-interactive
+  input path for `plan brief`. Reads a typed YAML file (`what` / `who` /
+  `differentiator`), bypasses the TTY check, and writes `design/brief.md`
+  via the existing `generateBriefMd` template — byte-identical to the
+  wizard's output for equivalent input. Schema is strict: unknown keys
+  rejected; `what` and `who` required non-empty; `differentiator`
+  optional (defaults to the wizard's empty-input placeholder). All four
+  failure modes (`unsafe_path` / `unreadable` / `invalid_yaml` /
+  `schema_invalid`) return `CONFIG_ERROR` (exit 2) with the structured
+  envelope `{ ok: false, error: { code: "CONFIG_ERROR", message },
+  data: { detail, path } }`. Partial-write-safe: any failure yields
+  no write to `design/brief.md`. Wizard path unchanged; the v1.5.1
+  contract that non-TTY without `--from-file` returns CONFIG_ERROR is
+  preserved. Foundation for P17-T2 (`--stdin`), P17-T3 (flag-driven),
+  and P17-T4 (apply the same three paths to `plan constitution`).
 - **Configurable protected paths via `design/rules/protected-paths.md`**
   (v1.6+, P15-T3). New `src/core/rules/protected-paths.ts` loader reads
   the optional rule file (one glob per line, `#` comments, P10 supported
