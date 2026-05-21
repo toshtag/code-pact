@@ -142,10 +142,26 @@ code-pact validate --json
 
 For most cases, deleting the TUTORIAL artifact + running `phase add` (or `phase import`) with your real intent is cleaner than renaming. The TUTORIAL tasks' descriptions explicitly mark them as tutorial-only and won't survive review.
 
+## `TUTORIAL` is a reserved phase id (v1.5+ / P14)
+
+As of v1.5.0 the id `TUTORIAL` is **reserved at the governance layer** for the sample-phase artifact. `init --sample-phase` is the only sanctioned creation path; every other creation route is rejected:
+
+| Path | v1.5 outcome |
+| --- | --- |
+| `init --sample-phase` (or `init` wizard → yes) | **Allowed.** The bootstrap path passes an internal `_isSampleCreation: true` bypass to `createPhase` |
+| `phase add --id TUTORIAL ...` | `CONFIG_ERROR` (exit 2). Roadmap byte-identical (no write) |
+| `phase new` wizard → typing `TUTORIAL` as the id | `CONFIG_ERROR` (exit 2) |
+| `phase import` containing any entry with `id: TUTORIAL` | `CONFIG_ERROR` (exit 2) from a preflight scan — the entire import is rejected before any phase YAML is written |
+| `validate` / `plan lint` / `plan analyze` against an existing TUTORIAL phase | No warning. The block is creation-time only; existing data is untouched |
+
+**Practical implication.** If you want to recreate the sample phase after deleting it, run `code-pact init --sample-phase` again (in a project that already has `.code-pact/`, the bootstrap is idempotent for the sample phase — it will be re-added). Don't try to recreate it via `phase add --id TUTORIAL ...`; the block fires unconditionally outside the sanctioned bootstrap path.
+
+The block uses the existing `CONFIG_ERROR` envelope. No new error code ships in v1.5 for this; the error message names the reserved id and points back at `init --sample-phase`. The configurable-reserved-id-list and advisory plan-lint warning for existing TUTORIAL phases are explicitly deferred to a future RFC. See [docs/concepts/governance.md](governance.md) for the broader v1.5 governance surface.
+
 ## What the sample phase is not
 
 - It is **not a tutorial in the educational sense.** It does not walk you through `code-pact`'s concepts. [`docs/getting-started.md`](../getting-started.md) is the tutorial; the TUTORIAL artifact is the *fixture* the tutorial uses.
-- It is **not protected.** The wizard / flag offers it, the rest of `code-pact` treats it like any other phase. There is no special handling, no warning if you modify it, and no migration path for it. (Hard reservation of the `TUTORIAL` id is P14 governance scope.)
+- It is **not protected from your edits.** The wizard / flag offers it, the rest of `code-pact` treats it like any other phase. There is no special handling, no warning if you modify the phase contents, and no migration path for it. The v1.5 reserved-id block protects only the **id**; the phase data itself is yours to edit, delete, or rename.
 - It is **not required.** You can answer **no** to the wizard prompt (or omit `--sample-phase` in non-interactive mode) and `init` succeeds; the resulting project simply has zero phases until you add one.
 - It is **not source-of-truth.** The tutorial-only framing is embedded in the phase's `objective` text, the task descriptions, and the console output after creation. Delete it before you treat `design/` as your project's design source-of-truth.
 
@@ -155,3 +171,4 @@ For most cases, deleting the TUTORIAL artifact + running `phase add` (or `phase 
 - [`docs/concepts/runbook.md`](runbook.md) — the per-task / per-phase guidance the TUTORIAL artifact lets you demo end-to-end.
 - [`docs/concepts/task-readiness-fields.md`](task-readiness-fields.md) — the P10 fields TUTORIAL-T2 declares (`depends_on`).
 - [`docs/concepts/finalization-reconciliation.md`](finalization-reconciliation.md) — the P11 commands the tutorial walks through (`task finalize` / `phase reconcile`).
+- [`docs/concepts/governance.md`](governance.md) — the v1.5 governance layer that hardens the TUTORIAL reservation and serializes design-mutating commands behind the advisory write lock.
