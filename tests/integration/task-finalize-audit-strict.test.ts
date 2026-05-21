@@ -218,17 +218,18 @@ describe("task finalize --audit-strict warning path", () => {
       "--json",
     ]);
     expect(res.code).toBe(1);
-    const env = JSON.parse(res.stdout) as JsonEnvelope<StrictData>;
+    const env = JSON.parse(res.stdout) as JsonEnvelope<unknown>;
     expect(env.ok).toBe(false);
     if (!env.ok) {
       expect(env.error.code).toBe("WRITES_AUDIT_STRICT_FAILED");
-      expect(env.data?.task_id).toBe("P1-T1");
-      expect(env.data?.phase_id).toBe("P1");
-      expect(env.data?.applied).toBe(false);
-      expect(env.data?.write_audit?.warnings).toContain(
+      const data = env.data as StrictData | undefined;
+      expect(data?.task_id).toBe("P1-T1");
+      expect(data?.phase_id).toBe("P1");
+      expect(data?.applied).toBe(false);
+      expect(data?.write_audit?.warnings).toContain(
         "TASK_WRITES_AUDIT_OUTSIDE_DECLARED",
       );
-      expect(env.data?.write_audit?.outside_declared).toContain(
+      expect(data?.write_audit?.outside_declared).toContain(
         "src/stray/outside.ts",
       );
     }
@@ -258,11 +259,12 @@ describe("task finalize --audit-strict warning path", () => {
       "--json",
     ]);
     expect(res.code).toBe(1);
-    const env = JSON.parse(res.stdout) as JsonEnvelope<StrictData>;
+    const env = JSON.parse(res.stdout) as JsonEnvelope<unknown>;
     expect(env.ok).toBe(false);
     if (!env.ok) {
       expect(env.error.code).toBe("WRITES_AUDIT_STRICT_FAILED");
-      expect(env.data?.applied).toBe(false);
+      const data = env.data as StrictData | undefined;
+      expect(data?.applied).toBe(false);
     }
 
     // The critical contract: --write was set but the gate fired
@@ -287,11 +289,12 @@ describe("task finalize --audit-strict warning path", () => {
       "--json",
     ]);
     expect(res.code).toBe(1);
-    const env = JSON.parse(res.stdout) as JsonEnvelope<StrictData>;
+    const env = JSON.parse(res.stdout) as JsonEnvelope<unknown>;
     expect(env.ok).toBe(false);
     if (!env.ok) {
       expect(env.error.code).toBe("WRITES_AUDIT_STRICT_FAILED");
-      expect(env.data?.write_audit?.warnings).toContain(
+      const data = env.data as StrictData | undefined;
+      expect(data?.write_audit?.warnings).toContain(
         "TASK_WRITES_AUDIT_DECLARED_UNUSED",
       );
     }
