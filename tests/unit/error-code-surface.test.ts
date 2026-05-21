@@ -69,6 +69,7 @@ const KNOWN_CODES: Record<string, "public" | "plan" | "doctor" | "adapter" | "in
   PLAN_LINT_FAILED: "public",
   PLAN_NORMALIZE_CONFLICT: "public",
   PLAN_NORMALIZE_REQUIRED: "public",
+  WRITES_AUDIT_STRICT_FAILED: "public",
 
   // Plan diagnostics (issue codes inside plan lint / plan analyze)
   DUPLICATE_TASK_ID: "plan",

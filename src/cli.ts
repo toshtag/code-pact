@@ -69,7 +69,10 @@ import { runDoctor, formatDoctor } from "./commands/doctor.ts";
 import { runValidate } from "./commands/validate.ts";
 import { runTaskContext } from "./commands/task-context.ts";
 import { runTaskComplete } from "./commands/task-complete.ts";
-import { runTaskFinalize } from "./commands/task-finalize.ts";
+import {
+  runTaskFinalize,
+  TaskFinalizeAuditStrictError,
+} from "./commands/task-finalize.ts";
 import { runTaskRunbook } from "./commands/task-runbook.ts";
 import { runPhaseReconcile } from "./commands/phase-reconcile.ts";
 import { runPhaseRunbook } from "./commands/phase-runbook.ts";
@@ -2850,6 +2853,7 @@ async function cmdTaskFinalize(
         json: { type: "boolean" },
         write: { type: "boolean" },
         "base-ref": { type: "string" },
+        "audit-strict": { type: "boolean" },
       },
       { allowPositionals: true },
     ));
@@ -2869,6 +2873,7 @@ async function cmdTaskFinalize(
   const json = globalJson || values.json === true;
   const write = values.write === true;
   const baseRef = typeof values["base-ref"] === "string" ? values["base-ref"] : undefined;
+  const auditStrict = values["audit-strict"] === true;
   const taskId = positionals[0];
   if (!taskId) {
     const msg = "task finalize requires a task id (e.g. `task finalize P1-T1`).";
@@ -2892,6 +2897,15 @@ async function cmdTaskFinalize(
     return 2;
   }
 
+  // v1.6 P15-T6: `--audit-strict` requires `--json` for the same
+  // reason — the audit only runs in JSON mode, so a strict gate
+  // without --json would silently degrade to a no-op.
+  if (auditStrict && !json) {
+    const msg = "task finalize --audit-strict requires --json (the audit it gates is JSON-only in v1.6).";
+    process.stderr.write(`CONFIG_ERROR: ${msg}\n`);
+    return 2;
+  }
+
   const cwd = process.cwd();
   const includeWriteAudit = json;
 
@@ -2903,6 +2917,7 @@ async function cmdTaskFinalize(
       write,
       baseRef,
       includeWriteAudit,
+      auditStrict,
     });
 
     if (result.kind === "already_finalized") {
@@ -2985,6 +3000,37 @@ async function cmdTaskFinalize(
     return 0;
   } catch (err: unknown) {
     if (!(err instanceof Error)) throw err;
+
+    // v1.6 P15-T6: strict-audit failure surfaces as
+    // WRITES_AUDIT_STRICT_FAILED with exit 1 (NOT 2 — this is not
+    // a CONFIG_ERROR; the invocation was well-formed but the audit
+    // gate refused to proceed). The envelope carries the full audit
+    // result so consumers see the same `write_audit` shape they
+    // would on the success path, plus `applied: false` to make the
+    // no-mutation guarantee machine-readable.
+    if (err instanceof TaskFinalizeAuditStrictError) {
+      if (json) {
+        process.stdout.write(
+          `${JSON.stringify({
+            ok: false,
+            error: {
+              code: "WRITES_AUDIT_STRICT_FAILED",
+              message: err.message,
+            },
+            data: {
+              task_id: err.task_id,
+              phase_id: err.phase_id,
+              applied: err.applied,
+              write_audit: err.write_audit,
+            },
+          })}\n`,
+        );
+      } else {
+        process.stderr.write(`${err.message}\n`);
+      }
+      return 1;
+    }
+
     const code = (err as NodeJS.ErrnoException).code;
 
     let msg: string;
