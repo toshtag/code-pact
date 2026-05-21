@@ -59,6 +59,21 @@ identifiers. Starting with v1.0.0, stable releases use plain
   contract that non-TTY without `--from-file` returns CONFIG_ERROR is
   preserved. Foundation for P17-T2 (`--stdin`), P17-T3 (flag-driven),
   and P17-T4 (apply the same three paths to `plan constitution`).
+- **`TASK_WRITES_AUDIT_DECLARED_UNUSED` warning code** (v1.6+, P15-T4)
+  added to `KNOWN_CODES.plan`. Promotes the `declared_unused` data
+  field on `task finalize --json`'s `write_audit` envelope from
+  data-only to an advisory warning, emitted whenever a declared
+  `writes` glob has zero matches in `files_touched`. Fires
+  independently of `TASK_WRITES_AUDIT_OUTSIDE_DECLARED` — a single
+  audit can emit both. Advisory only: never alters the exit code in
+  v1.6 (the `--audit-strict` flag in P15-T6 opts into exit-relevant
+  enforcement). Underlying `write_audit` shape is unchanged;
+  consumers that only inspect `declared_unused` / `outside_declared`
+  / `files_touched` / `base_kind` / `base_ref` see no contract
+  change. Signal interpretation: `declared_unused` usually means the
+  declaration is stale, the task was partially split across PRs, or
+  the planning artifact drifted from reality — exactly the pattern
+  P15-T1's audit caught on P15-T2 / P15-T3 in their own PRs.
 - **Configurable protected paths via `design/rules/protected-paths.md`**
   (v1.6+, P15-T3). New `src/core/rules/protected-paths.ts` loader reads
   the optional rule file (one glob per line, `#` comments, P10 supported
