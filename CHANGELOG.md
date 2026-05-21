@@ -11,6 +11,111 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ---
 
+## [1.5.0] — 2026-05-21
+
+**Governance.** Minor release that closes the "who can write what, and when" question that v1.4 left implicit. Single deliberately small surface: one new public error code (`LOCK_HELD`), one creation-time reservation (`TUTORIAL`), one pure refactor (resolver core), and three docs-only governance decisions (protected-path strict-mode posture, declared writes as a review surface, phase status manual-flip convention). No new commands. No new schema fields. No behavioural changes to existing Stable commands on the success path.
+
+Concurrent design-mutating invocations against the same project now fail fast with `LOCK_HELD` (exit 2) carrying a diagnostic struct (`pid`, `hostname`, `cmd`, `created_at`, lock file path). `phase add --id TUTORIAL` / `phase new` typing `TUTORIAL` / `phase import` containing a TUTORIAL entry now raise `CONFIG_ERROR` (exit 2) at creation time — `init --sample-phase` is the only sanctioned path for the reserved id. Existing v1.4.x projects with a TUTORIAL phase are untouched; the block only fires on new creation.
+
+### CLI behavior changes
+
+The existing Stable surface is unchanged on the success path. The new failure modes are transient + targeted:
+
+- Design-mutating commands (`init --sample-phase`, `init` wizard, `phase add`, `phase new`, `phase import`, `task add`, `task finalize --write`, `phase reconcile --write`) may now return `LOCK_HELD` (exit 2) under concurrent invocation. Single-process users see no change.
+- `phase add --id TUTORIAL` / `phase new` wizard typing `TUTORIAL` / `phase import` containing a `TUTORIAL` entry → `CONFIG_ERROR` (exit 2). Reuses the existing error code; no new code for this path.
+
+`tests/integration/json-stdout.test.ts` continues to pass for every Stable command; new entries added for the LOCK_HELD envelope and TUTORIAL reserved-id CONFIG_ERROR paths. `tests/unit/error-code-surface.test.ts` grows by exactly **one** entry (`LOCK_HELD`).
+
+### Added
+
+- **`LOCK_HELD`** as a new public error code (`tests/unit/error-code-surface.test.ts` KNOWN_CODES.public). The envelope is `{ ok: false, error: { code: "LOCK_HELD", message }, data: { lock_holder: { pid, hostname, cmd, created_at } | null, lock_path: string } }`. The single addition to the v1.5 public surface lock. ([#122])
+- **`src/core/locks/write-lock.ts`** — new module exposing `acquireWriteLock(cwd, cmd): Promise<LockHandle>` and `isLockHeldError` type guard. Atomic exclusive create via `fs.writeFile(..., { flag: "wx" })` (cross-platform safe; no POSIX flock dependency, no new runtime package). Lock content is JSON `{pid, hostname, cmd, created_at}`. On EEXIST throws `LockHeldError` with `.code === "LOCK_HELD"`, `.lock_holder` (or `null` for corrupt lock files), and `.lock_path`. Test escape: `CODE_PACT_DISABLE_LOCKS=1` short-circuits to a no-op handle — undocumented in public surfaces (test-only). ([#122])
+- **`withWriteLock` helper in `src/cli.ts`** — wraps the seven design-mutating CLI handlers. Acquires the lock at the CLI command-handler level (not inside `createPhase` or other core services). `phase import` holds a single outer lock around its multi-phase apply loop (batch transactionality — every `createPhase` call inside runs under the same acquisition). `task finalize` and `phase reconcile` dry-runs do NOT acquire the lock; only `--write` invocations do. Read-only commands (`plan lint`, `plan analyze`, `task runbook`, `phase runbook`, `validate`, `doctor`, `recommend`, `task context`, `task status`) never acquire the lock and can be used to observe state while a mutation is pending. ([#122])
+- **`tests/setup.ts` + `vitest.config.ts setupFiles`** — sets `process.env.CODE_PACT_DISABLE_LOCKS = "1"` for the bulk of the suite so unrelated tests don't accidentally acquire real locks. Lock-specific tests (`tests/unit/core/locks/write-lock.test.ts`, the LOCK_HELD integration entry in `tests/integration/json-stdout.test.ts`) delete the env var in `beforeEach` to exercise the real acquisition path. ([#122])
+- **`RESERVED_PHASE_IDS = ["TUTORIAL"]` in `src/core/services/createPhase.ts`** + internal-only `_isSampleCreation?: boolean` bypass flag. `writeSamplePhase()` in `src/commands/init.ts` is the single sanctioned call site that may pass the flag. Every other caller (`phase add` flag-based / wizard, `phase new` wizard, `phase import`) is rejected with `CONFIG_ERROR` (exit 2) before any file write. ([#121])
+- **`phase import` reserved-id preflight scan** in `src/commands/phase-import.ts` — runs BEFORE any `createPhase` call. If any input phase entry has `id: TUTORIAL` (in any position of the input file), the entire import is rejected with `CONFIG_ERROR` and the roadmap stays byte-identical. `--force` does NOT bypass this; reserved ids are reserved at the governance layer, not the collision-handling layer. ([#121])
+- **`src/core/plan/resolve-task.ts`** — new module exposing `resolveTaskInRoadmap(cwd, taskId)` (I/O variant) and `resolveTaskInPlanState(state, taskId)` (pure variant for callers with PlanState already loaded). Consolidates the eight duplicated `resolveTaskPhase` implementations across the task-* commands (P12 RFC § Non-goals explicitly deferred this to P14). Pure refactor — every per-command unit test passes unchanged. ([#123])
+- **`design/decisions/governance-rfc.md`** — the accepted RFC capturing the four governance decisions, the LOCK_HELD lock model, the reserved-id policy with the `_isSampleCreation` bypass + `phase import` preflight design, the resolver-extraction shape, the protected-path strict-mode posture, the declared-writes review-surface contract, the roadmap mutation policy matrix, the phase-status manual-flip convention, the alternatives considered, and the eight P15+ deferral items. ([#117], [#118])
+- **`design/phases/P14-governance.yaml`** — phase contract registering the work. ([#117])
+- **`docs/concepts/governance.md`** — new concept doc mirroring the shape of the runbook / finalization-reconciliation / task-readiness-fields / sample-phase docs. Walks through the four shipped pillars + two docs-only pillars, includes the full LOCK_HELD envelope shape, the lock acquisition matrix, the reserved-id block matrix, the error/diagnostic taxonomy, and an explicit "what's intentionally NOT in v1.5" boundary list. ([#124])
+- **§ Roadmap mutation policy (v1.5+ / P14) in `docs/cli-contract.md`** — names the four `createPhase` callers as the only roadmap writers, the non-writers (task lifecycle commands), and the structural-chokepoint statement. § Reserved phase ids (v1.5+ / P14) adds the block matrix. § Advisory write lock (v1.5+ / P14) carries the full LOCK_HELD envelope, the acquisition-point matrix, the stale-lock recovery playbook, and the relationship to atomic-text. ([#121], [#122])
+- **`tests/unit/core/locks/write-lock.test.ts`** (9 unit tests) — lock file JSON shape, release, idempotent acquire/release/acquire, EEXIST → LOCK_HELD with full holder, corrupt lock file → `lock_holder: null` + adjusted message, `.code-pact/locks/` created on demand, `CODE_PACT_DISABLE_LOCKS=1` short-circuit, defensive env-value checks, `isLockHeldError` correctness. ([#122])
+- **`tests/unit/core/services/createPhase.test.ts` reserved-id block tests** (4 new) — reject when `_isSampleCreation` is omitted (roadmap byte-identical), reject when explicitly `false`, allow when `true`, error message contract (names id + points at `init --sample-phase`). ([#121])
+- **`tests/unit/core/plan/resolve-task.test.ts`** (8 new tests) — I/O variant single match / not-found / ambiguous with full `.phases` array / correct phase among many / ENOENT on missing roadmap; PlanState variant single match / not-found / **ambiguity detection where `state.taskIndex` silently returns the first match** (the load-bearing reason the pure variant exists). ([#123])
+- **`tests/integration/json-stdout.test.ts` LOCK_HELD + TUTORIAL CONFIG_ERROR entries** (3 new) — `phase add --id TUTORIAL --json` returns CONFIG_ERROR envelope with roadmap byte-identical; `phase import` containing a TUTORIAL entry returns CONFIG_ERROR via preflight with roadmap byte-identical and zero phase YAML files written; `phase reconcile --write --json` against a pre-seeded stale lock returns the LOCK_HELD envelope with data.lock_holder + data.lock_path, AND read-only `validate --json` on the same project succeeds (locks do not block reads). ([#121], [#122])
+
+### Changed
+
+- **`tests/unit/error-code-surface.test.ts` KNOWN_CODES.public** — added `LOCK_HELD: "public"`. The public surface lock contract grows by exactly **one** entry in v1.5. ([#122])
+- **`src/commands/task-context.ts`, `task-start.ts`, `task-block.ts`, `task-resume.ts`, `task-complete.ts`, `task-status.ts`, `task-finalize.ts`, `task-runbook.ts`** — all eight private `resolveTaskPhase` implementations removed and replaced with calls to the new `src/core/plan/resolve-task.ts` helpers. `task-finalize.ts` aliases `phasePath` → `file` at the destructuring site to preserve the public `data.file` field. `task-runbook.ts`'s manual ambiguity rescan + `state.taskIndex.get(...)` + internal-invariant guard collapse into a single `resolveTaskInPlanState` call. Pure refactor — `TASK_NOT_FOUND` / `AMBIGUOUS_TASK_ID` emitted identically (same message text, same `.phases` array shape). ([#123])
+- **`src/cli.ts`** — adds `withWriteLock` helper and wires it into seven design-mutating handlers. `cmdInit` acquires the lock when `--sample-phase` is set (non-wizard) OR in wizard mode, **but only when `.code-pact/` already exists**. Fresh init bootstraps the directory tree, and acquiring the lock helper's `mkdir -p .code-pact/locks/` would create `.code-pact/` as a side effect and trip the `ALREADY_INITIALIZED` guard. The `codePactDirExists()` gate (added during P14-T8 release-prep validation when the issue surfaced) is the correct fix: fresh init has no possible concurrent code-pact mutation to defend against (no project exists yet), so skipping the lock is semantically correct. Re-init (with `--force` on an existing project) still acquires the lock. `cmdPhase` "add" / "new" / "import" each acquire around their respective `runX` call; "import" holds a single outer lock around the multi-phase apply loop. `cmdTaskAdd` acquires around `runTaskAdd` (covers both wizard and non-interactive). `cmdTaskFinalize` / `cmdPhaseReconcile` acquire only when `--write`. `cmdPhase` "add" + "new" branches also gain `CONFIG_ERROR` catches so the P14-T4 reserved-id block surfaces correctly through the JSON envelope. (this release prep, [#121], [#122])
+- **`src/core/services/createPhase.ts`** — exports `RESERVED_PHASE_IDS` and adds the internal-only `_isSampleCreation?: boolean` field on `CreatePhaseInput`. Validation against the reserved list runs before any disk read, so the roadmap stays byte-identical on rejection. ([#121])
+- **`src/commands/init.ts`** — `writeSamplePhase()` passes `_isSampleCreation: true` to `createPhase`. The single sanctioned bypass for the reserved `TUTORIAL` id. ([#121])
+- **`src/commands/phase-import.ts`** — adds the reserved-id preflight scan documented above. ([#121])
+- **`docs/cli-contract.md`** — Public codes table gains the `LOCK_HELD` row. § State file write guarantees → Files written by code-pact: writer columns on `design/roadmap.yaml` and `design/phases/*.yaml` rows now name every writer. § Concurrent writers rewritten — was "not supported" in v1.0; now describes detection via `LOCK_HELD` + lists read-only commands that DON'T acquire the lock. New § Advisory write lock (v1.5+ / P14), § Roadmap mutation policy (v1.5+ / P14), § Reserved phase ids (v1.5+ / P14), § Phase status manual-flip convention. § `phase import` validation pass: reserved-id preflight is step 2 (between schema validation and duplicate-id check). § Plan diagnostic codes documents `--strict` semantics for `TASK_WRITES_PROTECTED_PATH`. ([#119], [#121], [#122])
+- **`docs/migration.md`** — new § v1.4.x → v1.5.0 covering shipped surface, recommended adoption per context (single-process / multi-process / CI-strict / TUTORIAL-add / release-prep), stale lock manual recovery, KNOWN_CODES.public growth, and the full backward-compatibility list. § "Deferred beyond v1.4" renamed to § "Deferred beyond v1.5" with closed-in-v1.5 items struck through (advisory locks / TUTORIAL hard reservation / roadmap mutation policy docs / phase status formalization / resolver core extraction). Remaining deferrals reorganized around v1.5's framing. ([#124])
+- **`docs/dogfood.md`** — § Troubleshooting gains `LOCK_HELD` and `CONFIG_ERROR from phase add --id TUTORIAL / phase import containing TUTORIAL` entries. Release prep does NOT use `plan lint --strict` documented in P14-T2 (docs/dogfood.md § Release prep). ([#119], [#124])
+- **`docs/getting-started.md`** — new § Concurrent processes (v1.5+) introduces LOCK_HELD as a transient failure with the envelope shape and pointer to the dogfood troubleshooting entry + governance concept doc. Next-reading list gains the governance concept doc. Migration link description updated to "v0.6 – v0.9 up through v1.5.0". ([#124])
+- **`docs/concepts/sample-phase.md`** — new § "TUTORIAL is a reserved phase id (v1.5+ / P14)" replaces the previous "(Hard reservation of the `TUTORIAL` id is P14 governance scope)" forward-looking note. § "What the sample phase is not" updated: the v1.5 block protects the **id**, not the phase data. Next-reading list gains the governance concept doc. ([#124])
+- **`docs/concepts/finalization-reconciliation.md`** — § Phase status remains manual in v1.2 renamed to "formalized as the convention in v1.5+ / P14" and cites the governance RFC. Release-prep loop step 3 marks the manual flip as "manual by convention" with RFC link; step 4 links to the new roadmap mutation policy section. § Declared writes as a governance review surface (v1.4+ / P14) added in P14-T3. ([#120], [#121])
+- **`docs/concepts/runbook.md`** — § Declared writes as a governance review surface (v1.4+ / P14) added in P14-T3. ([#120])
+- **`design/phases/P14-governance.yaml`** — phase `status: planned` → `status: done`; every P14 task (T1–T8) `status: planned` → `status: done`. **The T1–T7 task-level flips were performed by `code-pact phase reconcile P14 --write` itself** — the **fourth consecutive** release prep PR to dogfood the P11 mechanization. T8 (this release-prep task) was flipped via `task finalize P14-T8 --write` after `task complete P14-T8`, completing the per-task loop on the task that performed the release prep (per the P13-T6 pattern). The phase's own `status` field was flipped by hand per the v1.2 contract — now formalized in v1.5 as the release-prep convention. ([#121], [#122], [#123], [#124], this release prep)
+- **`package.json`** — version `1.4.0` → `1.5.0`. (this release prep)
+
+### Dogfood log
+
+A complete end-to-end exercise of every new v1.5.0 governance flag / failure mode was captured in a fresh tmp project before this release prep PR was committed. The full log is in the PR description; verbatim summary:
+
+```
+=== STEP 1: init --non-interactive --sample-phase ===
+created files: 12 incl. design/phases/TUTORIAL-walkthrough.yaml
+
+=== STEP 2: phase add --id TUTORIAL (P14-T4 reserved-id block) ===
+ok: False | code: CONFIG_ERROR | exit: 2
+message contains "TUTORIAL" and "init --sample-phase": True
+roadmap byte-identical before/after: True
+
+=== STEP 3: phase import containing TUTORIAL (P14-T4 preflight) ===
+ok: False | code: CONFIG_ERROR | exit: 2
+roadmap byte-identical: True
+phase YAML files written: 0  (preflight rejects entire input)
+
+=== STEP 4: concurrent task finalize --write (P14-T5 LOCK_HELD) ===
+process A: ok: True | task finalize succeeded
+process B (with seeded stale lock): ok: False | code: LOCK_HELD | exit: 2
+data.lock_holder.cmd matches A's command: True
+data.lock_holder.pid is numeric: True
+data.lock_path ends with .code-pact/locks/write.lock: True
+
+=== STEP 5: read-only commands during held lock ===
+validate --json:    ok: True (no lock acquired)
+task status --json: ok: True (no lock acquired)
+plan lint --json:   ok: True (no lock acquired)
+
+=== STEP 6: resolver refactor invisible (P14-T6) ===
+task context BOGUS-ID:  exit 2 | TASK_NOT_FOUND  (envelope unchanged)
+task start BOGUS-ID:    exit 2 | TASK_NOT_FOUND  (envelope unchanged)
+task complete BOGUS-ID: exit 2 | TASK_NOT_FOUND  (envelope unchanged)
+```
+
+### Known residuals (not blockers)
+
+- **`TASK_WRITES_PROTECTED_PATH` advisories on the dogfood corpus.** Existing advisories remain (P10-T1, P10-T6, P11-T1, P14-T1 declaring writes against `design/roadmap.yaml` and `design/phases/*.yaml`). Documented in docs/dogfood.md § "Release prep does NOT use `plan lint --strict`" — actual write enforcement against declared `writes` is P15+ candidate (requires runner or VCS integration).
+- **Stale lock recovery is manual.** v1.5 ships the advisory lock without automatic stale-lock detection. If a `code-pact` process crashes mid-lock (SIGKILL, OS reboot), the user manually deletes `.code-pact/locks/write.lock` after verifying no process holds it. PID liveness checks + `--force-lock` are P15+ candidates.
+- **Configurable protected paths / configurable reserved-id list / RESERVED_ID_USAGE lint on existing TUTORIAL phases / selective per-code `--strict` promotion / progress.yaml write locks** — all remain future work. See `docs/migration.md` § Deferred beyond v1.5 for the full list.
+- **`STATUS_DRIFT done-but-design-not-done` warnings** on the dogfood corpus continue to fire for any task whose progress.yaml has a `done` event but whose design status was not yet flipped. This release prep clears every P14 warning that had accumulated across the P14 task PRs into a single coherent reconcile flip (for T1–T7) + a single finalize call (for T8, the release-prep task itself) — **the fourth consecutive release prep where the post-reconcile drift count drops to zero via mechanization**.
+
+[#117]: https://github.com/toshtag/code-pact/pull/117
+[#118]: https://github.com/toshtag/code-pact/pull/118
+[#119]: https://github.com/toshtag/code-pact/pull/119
+[#120]: https://github.com/toshtag/code-pact/pull/120
+[#121]: https://github.com/toshtag/code-pact/pull/121
+[#122]: https://github.com/toshtag/code-pact/pull/122
+[#123]: https://github.com/toshtag/code-pact/pull/123
+[#124]: https://github.com/toshtag/code-pact/pull/124
+
+---
+
 ## [1.4.0] — 2026-05-21
 
 **Planning UX and init hardening.** Minor release that closes four small frictions in the planning / init / task-creation surface that P9 and P12 explicitly deferred. Every change is additive on the CLI contract — no new commands, no new error codes, no new schema fields, no behavioural changes to `task complete` / `task finalize` / `phase reconcile` / `task runbook` / `phase runbook`.
