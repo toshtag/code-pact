@@ -203,9 +203,11 @@ describe("plan brief (regression — TTY contract preserved with new --stdin)", 
     expect(env.ok).toBe(false);
     if (!env.ok) {
       expect(env.error.code).toBe("CONFIG_ERROR");
-      // v1.6 P17-T2: the message now mentions both --from-file and --stdin.
+      // v1.6 P17-T2/T3: the message lists all three non-interactive
+      // input modes (--from-file, --stdin, --what/--who).
       expect(env.error.message).toContain("--from-file");
       expect(env.error.message).toContain("--stdin");
+      expect(env.error.message).toContain("--what/--who");
     }
   });
 });

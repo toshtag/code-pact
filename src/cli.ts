@@ -598,6 +598,9 @@ async function cmdPlanBrief(
       json: { type: "boolean" },
       "from-file": { type: "string" },
       stdin: { type: "boolean" },
+      what: { type: "string" },
+      who: { type: "string" },
+      differentiator: { type: "string" },
     },
     strict: false,
     allowPositionals: false,
@@ -608,13 +611,25 @@ async function cmdPlanBrief(
   const fromFile =
     typeof values["from-file"] === "string" ? values["from-file"] : undefined;
   const fromStdin = values.stdin === true;
+  const what = typeof values.what === "string" ? values.what : undefined;
+  const who = typeof values.who === "string" ? values.who : undefined;
+  const differentiator =
+    typeof values.differentiator === "string" ? values.differentiator : undefined;
+  const flagDriven =
+    what !== undefined || who !== undefined || differentiator !== undefined;
   const cwd = process.cwd();
 
-  // v1.6 P17-T2: `--from-file` and `--stdin` are mutually exclusive.
-  // Allowing both would create ambiguous precedence; reject early so
-  // the user is forced to pick one source of truth.
-  if (fromFile !== undefined && fromStdin) {
-    const msg = "plan brief: --from-file and --stdin are mutually exclusive. Pick one input source.";
+  // v1.6 P17-T2/T3: the three non-interactive input modes (`--from-file`,
+  // `--stdin`, flag-driven `--what`/`--who`/`--differentiator`) are
+  // pairwise mutually exclusive. Allowing combinations would create
+  // ambiguous precedence; reject early so the user is forced to pick
+  // a single source of truth.
+  const inputModes: string[] = [];
+  if (fromFile !== undefined) inputModes.push("--from-file");
+  if (fromStdin) inputModes.push("--stdin");
+  if (flagDriven) inputModes.push("--what/--who/--differentiator");
+  if (inputModes.length > 1) {
+    const msg = `plan brief: ${inputModes.join(", ")} are mutually exclusive. Pick one input source.`;
     if (json) {
       process.stdout.write(
         `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
@@ -623,6 +638,32 @@ async function cmdPlanBrief(
       process.stderr.write(`${msg}\n`);
     }
     return 2;
+  }
+
+  // v1.6 P17-T3: if any flag-driven option was supplied, both `--what`
+  // and `--who` are required (matches `BriefFileSchema`). Missing them
+  // is CONFIG_ERROR — we deliberately do NOT fall back to the wizard
+  // (would silently lose user intent) or to defaults (would write a
+  // misleading brief.md).
+  if (flagDriven) {
+    const missing: string[] = [];
+    if (what === undefined || what.length === 0) missing.push("--what");
+    if (who === undefined || who.length === 0) missing.push("--who");
+    if (missing.length > 0) {
+      const msg = `plan brief: flag-driven mode requires non-empty ${missing.join(" and ")}. Pass the missing flag(s) or use --from-file / --stdin / the TTY wizard instead.`;
+      if (json) {
+        process.stdout.write(
+          `${JSON.stringify({
+            ok: false,
+            error: { code: "CONFIG_ERROR", message: msg },
+            data: { missing },
+          })}\n`,
+        );
+      } else {
+        process.stderr.write(`${msg}\n`);
+      }
+      return 2;
+    }
   }
 
   // v1.6 P17-T1: `--from-file` bypasses the TTY requirement. Without
@@ -669,8 +710,18 @@ async function cmdPlanBrief(
       }
       throw err;
     }
+  } else if (flagDriven) {
+    // v1.6 P17-T3: flag-driven mode. We've already validated that
+    // `--what` and `--who` are present and non-empty above. The
+    // schema's empty-input behaviour for `differentiator` (defaults
+    // to "" → locale placeholder fills in) is preserved.
+    preCollectedAnswers = {
+      what: what!,
+      who: who!,
+      differentiator: differentiator ?? "",
+    };
   } else if (!isInteractive()) {
-    const msg = "plan brief is interactive and requires a TTY (use --from-file <yaml> or --stdin for non-interactive input).";
+    const msg = "plan brief is interactive and requires a TTY (use --from-file <yaml>, --stdin, or --what/--who[/--differentiator] for non-interactive input).";
     if (json) {
       process.stdout.write(
         `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
