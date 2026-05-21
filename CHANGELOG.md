@@ -44,6 +44,20 @@ identifiers. Starting with v1.0.0, stable releases use plain
   `plan lint --strict` per the existing binary promotion. Heuristic-only:
   the goal is to catch obvious "writes everywhere" declarations, not to
   encode a precise breadth metric.
+- **`plan brief --stdin`** (v1.6+, P17-T2). Reads the same YAML schema as
+  `--from-file` from `process.stdin` instead of a file. Useful for piping
+  brief content from another process (`some-tool | code-pact plan brief
+  --stdin --json`). Mutually exclusive with `--from-file` — passing both
+  returns `CONFIG_ERROR` (exit 2). Failure envelope mirrors `--from-file`
+  with `source: "stdin"` replacing the `path` field; detail enum is
+  `stdin_read_failed | invalid_yaml | schema_invalid` (the `unsafe_path`
+  / `unreadable` details do not apply to stdin). The internal
+  YAML-parse / schema-validate pipeline is factored out as
+  `parseBriefSource` and shared by both the file and stdin paths;
+  loaders supply their own error constructor as a callback. Brief.md
+  produced via `--stdin` is byte-identical to one produced by the
+  wizard or `--from-file` for equivalent input. The non-TTY guard
+  message now mentions both flags. Wizard path unchanged.
 - **`plan brief --from-file <yaml>`** (v1.6+, P17-T1). Non-interactive
   input path for `plan brief`. Reads a typed YAML file (`what` / `who` /
   `differentiator`), bypasses the TTY check, and writes `design/brief.md`

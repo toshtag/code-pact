@@ -313,13 +313,15 @@ The validation pass detects logic errors before any write; ordinary disk failure
 
 `code-pact plan <subcommand>` provides AI-assisted project planning tools that feed into the design directory.
 
-### `plan brief [--force] [--from-file <yaml>] [--json]`
+### `plan brief [--force] [--from-file <yaml> | --stdin] [--json]`
 
-Interactive wizard that collects project description, target users, and differentiator, then writes `design/brief.md`. Stability: **Stable (v0.2+)**. `--from-file` is **Stable (v1.6+)** under P17-T1.
+Interactive wizard that collects project description, target users, and differentiator, then writes `design/brief.md`. Stability: **Stable (v0.2+)**. `--from-file` and `--stdin` are **Stable (v1.6+)** under P17-T1 / P17-T2.
 
 Default behaviour requires a TTY; exits 2 with `CONFIG_ERROR` in non-interactive mode. `--force` overwrites an existing file.
 
 **`--from-file <yaml>` (v1.6+, P17-T1).** Reads the file at `<yaml>` (repo-root-relative; `assertSafeRelativePath` enforced), validates it against the schema below, and writes `design/brief.md` from the supplied values. Bypasses the TTY check, so non-TTY environments (CI, agent sessions) can author a brief end-to-end. The TTY wizard remains the default when `--from-file` is omitted.
+
+**`--stdin` (v1.6+, P17-T2).** Reads the same YAML schema from `process.stdin` instead of a file. Useful when the brief content is produced by another process and piped in (`some-tool | code-pact plan brief --stdin --json`). Mutually exclusive with `--from-file` — passing both returns `CONFIG_ERROR` (exit 2) with the message `"--from-file and --stdin are mutually exclusive. Pick one input source."`. Like `--from-file`, this flag bypasses the TTY check.
 
 YAML schema:
 
@@ -345,6 +347,21 @@ Unknown keys are rejected (strict schema). All four failure modes return `CONFIG
 On success, `--json` emits `{ ok: true, data: { path: "..." } }` (same envelope as the wizard path). `design/brief.md` produced via `--from-file` is byte-identical to one produced by the wizard for equivalent input.
 
 `--from-file` is partial-write-safe: any failure (path / read / parse / schema) yields no write to `design/brief.md`.
+
+**`--stdin` envelope (v1.6+, P17-T2).** Failures return the same `CONFIG_ERROR` exit 2, with a parallel envelope shape:
+
+```json
+{
+  "ok": false,
+  "error": { "code": "CONFIG_ERROR", "message": "..." },
+  "data": {
+    "detail": "stdin_read_failed" | "invalid_yaml" | "schema_invalid",
+    "source": "stdin"
+  }
+}
+```
+
+`source: "stdin"` replaces `--from-file`'s `path` field, so consumers can disambiguate the two input modes from the envelope alone. The `unsafe_path` and `unreadable` details do not apply (stdin has no path). `--stdin` is partial-write-safe: any failure yields no write to `design/brief.md`.
 
 ### `plan prompt [--clipboard]`
 

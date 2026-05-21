@@ -118,14 +118,101 @@ export async function loadBriefFromFile(
     );
   }
 
+  return parseBriefSource(raw, "--from-file", relPath, (detail, message) => {
+    throw new PlanBriefFromFileError(detail, relPath, message);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Stdin-driven input — v1.6 P17-T2
+// ---------------------------------------------------------------------------
+
+export class PlanBriefFromStdinError extends Error {
+  readonly code = "CONFIG_ERROR";
+  readonly detail:
+    | "stdin_read_failed"
+    | "invalid_yaml"
+    | "schema_invalid";
+
+  constructor(
+    detail: PlanBriefFromStdinError["detail"],
+    message: string,
+  ) {
+    super(message);
+    this.name = "PlanBriefFromStdinError";
+    this.detail = detail;
+  }
+}
+
+/**
+ * Reads YAML from a Node.js readable stream (typically
+ * `process.stdin`) and validates it against `BriefFileSchema`.
+ * Returns a `BriefAnswers` record ready to feed into
+ * `runPlanBrief({ answers })`.
+ *
+ * Throws `PlanBriefFromStdinError` on read / parse / schema
+ * failures. Never logs, never writes.
+ *
+ * The stream is consumed via async iteration so back-pressure
+ * works correctly on large pipes. Reading is uncapped — the
+ * caller is expected to provide a reasonably sized input
+ * (briefs are O(KB), not O(MB)).
+ */
+export async function loadBriefFromStdin(
+  stdin: NodeJS.ReadableStream,
+): Promise<BriefAnswers> {
+  let raw: string;
+  try {
+    const chunks: string[] = [];
+    for await (const chunk of stdin) {
+      chunks.push(
+        typeof chunk === "string" ? chunk : chunk.toString("utf8"),
+      );
+    }
+    raw = chunks.join("");
+  } catch (err) {
+    throw new PlanBriefFromStdinError(
+      "stdin_read_failed",
+      `plan brief --stdin: failed to read from stdin: ${(err as Error).message}`,
+    );
+  }
+
+  return parseBriefSource(raw, "--stdin", "<stdin>", (detail, message) => {
+    // PlanBriefFromFileError carries an `unsafe_path` / `unreadable`
+    // detail that doesn't apply here, so map only the YAML / schema
+    // failures onto the stdin error class.
+    if (detail === "invalid_yaml" || detail === "schema_invalid") {
+      throw new PlanBriefFromStdinError(detail, message);
+    }
+    // Defensive: `parseBriefSource` only ever returns these two
+    // detail kinds, but keep an explicit fallback so future
+    // additions to the parser fail loudly here instead of silently.
+    throw new PlanBriefFromStdinError(
+      "stdin_read_failed",
+      `plan brief --stdin: unexpected parser detail "${detail}": ${message}`,
+    );
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Shared YAML + schema parser used by file and stdin paths
+// ---------------------------------------------------------------------------
+
+type ParserDetail = "invalid_yaml" | "schema_invalid";
+
+function parseBriefSource(
+  raw: string,
+  flagLabel: string,
+  sourceLabel: string,
+  throwError: (detail: ParserDetail, message: string) => never,
+): BriefAnswers {
   let parsed: unknown;
   try {
     parsed = parseYaml(raw);
   } catch (err) {
-    throw new PlanBriefFromFileError(
+    throwError(
       "invalid_yaml",
-      relPath,
-      `plan brief --from-file: "${relPath}" is not valid YAML: ${(err as Error).message}`,
+      `plan brief ${flagLabel}: "${sourceLabel}" is not valid YAML: ${(err as Error).message}`,
     );
   }
 
@@ -134,10 +221,9 @@ export async function loadBriefFromFile(
     const summary = result.error.issues
       .map((i) => `${i.path.join(".") || "<root>"}: ${i.message}`)
       .join("; ");
-    throw new PlanBriefFromFileError(
+    throwError(
       "schema_invalid",
-      relPath,
-      `plan brief --from-file: "${relPath}" does not match the brief schema: ${summary}`,
+      `plan brief ${flagLabel}: "${sourceLabel}" does not match the brief schema: ${summary}`,
     );
   }
 

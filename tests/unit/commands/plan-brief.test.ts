@@ -4,11 +4,14 @@ import { mkdtemp, rm, readFile, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { Prompter, type LineReader } from "../../../src/lib/prompt.ts";
+import { Readable } from "node:stream";
 import {
   BriefFileSchema,
   PlanBriefFromFileError,
+  PlanBriefFromStdinError,
   generateBriefMd,
   loadBriefFromFile,
+  loadBriefFromStdin,
   runPlanBrief,
 } from "../../../src/commands/plan-brief.ts";
 
@@ -401,6 +404,110 @@ describe("runPlanBrief({ answers }) — wizard bypass (v1.6 P17-T1)", () => {
       expect(ansContent).toBe(wizContent);
     } finally {
       await rm(wizardDir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v1.6 P17-T2: --stdin path
+// ---------------------------------------------------------------------------
+
+function streamOf(text: string): NodeJS.ReadableStream {
+  return Readable.from([text]);
+}
+
+describe("loadBriefFromStdin (v1.6 P17-T2)", () => {
+  it("returns BriefAnswers when stdin is valid YAML matching the schema", async () => {
+    const stream = streamOf(
+      [
+        "what: A control plane for AI coding agents.",
+        "who: Software teams using AI coding agents.",
+        "differentiator: Vendor-neutral, deterministic CLI.",
+        "",
+      ].join("\n"),
+    );
+    const answers = await loadBriefFromStdin(stream);
+    expect(answers).toEqual({
+      what: "A control plane for AI coding agents.",
+      who: "Software teams using AI coding agents.",
+      differentiator: "Vendor-neutral, deterministic CLI.",
+    });
+  });
+
+  it("defaults differentiator to empty string when omitted", async () => {
+    const stream = streamOf("what: x\nwho: y\n");
+    const answers = await loadBriefFromStdin(stream);
+    expect(answers).toEqual({ what: "x", who: "y", differentiator: "" });
+  });
+
+  it("concatenates multiple chunks before parsing (large-pipe safety)", async () => {
+    // Simulate a real pipe that delivers the YAML in pieces.
+    const stream = Readable.from([
+      "what: piece-one\n",
+      "who: piece-two\n",
+      "differentiator: piece-three\n",
+    ]);
+    const answers = await loadBriefFromStdin(stream);
+    expect(answers).toEqual({
+      what: "piece-one",
+      who: "piece-two",
+      differentiator: "piece-three",
+    });
+  });
+
+  it("throws PlanBriefFromStdinError on malformed YAML", async () => {
+    const stream = streamOf("what: [unclosed\n");
+    await expect(loadBriefFromStdin(stream)).rejects.toMatchObject({
+      name: "PlanBriefFromStdinError",
+      code: "CONFIG_ERROR",
+      detail: "invalid_yaml",
+    });
+  });
+
+  it("throws PlanBriefFromStdinError on schema mismatch (missing required field)", async () => {
+    const stream = streamOf("what: only-what\n");
+    await expect(loadBriefFromStdin(stream)).rejects.toMatchObject({
+      name: "PlanBriefFromStdinError",
+      detail: "schema_invalid",
+    });
+  });
+
+  it("throws PlanBriefFromStdinError on schema mismatch (unknown key)", async () => {
+    const stream = streamOf("what: x\nwho: y\nbogus: 1\n");
+    await expect(loadBriefFromStdin(stream)).rejects.toMatchObject({
+      name: "PlanBriefFromStdinError",
+      detail: "schema_invalid",
+    });
+  });
+
+  it("error messages mention `--stdin` and `<stdin>` so users can disambiguate", async () => {
+    const stream = streamOf("what: [unclosed\n");
+    try {
+      await loadBriefFromStdin(stream);
+      expect.fail("expected throw");
+    } catch (err) {
+      expect(err).toBeInstanceOf(PlanBriefFromStdinError);
+      if (err instanceof PlanBriefFromStdinError) {
+        expect(err.message).toContain("--stdin");
+        expect(err.message).toContain("<stdin>");
+      }
+    }
+  });
+
+  it("loadBriefFromStdin and loadBriefFromFile produce identical answers for identical content", async () => {
+    const yaml = "what: A\nwho: B\ndifferentiator: C\n";
+
+    // Stdin path
+    const fromStdin = await loadBriefFromStdin(streamOf(yaml));
+
+    // File path
+    const dir = await mkdtemp(join(tmpdir(), "code-pact-brief-parity-"));
+    try {
+      await writeFile(join(dir, "brief.yaml"), yaml, "utf8");
+      const fromFile = await loadBriefFromFile(dir, "brief.yaml");
+      expect(fromStdin).toEqual(fromFile);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
     }
   });
 });

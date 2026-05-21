@@ -133,7 +133,7 @@ tasks:
     write_surface: low
     verification_strength: medium
     expected_duration: short
-    status: planned
+    status: done
     description: |
       `plan brief --stdin`. Same schema as T1, but the YAML is
       read from `process.stdin` instead of a file. Mutually
@@ -147,11 +147,18 @@ tasks:
     reads:
       - src/commands/plan-brief.ts
       - src/cli.ts
+      - tests/helpers/cli.ts
+      - tests/unit/commands/plan-brief.test.ts
+      - tests/integration/plan-brief-from-file.test.ts
     writes:
       - src/commands/plan-brief.ts
       - src/cli.ts
+      - tests/helpers/cli.ts
+      - tests/unit/commands/plan-brief.test.ts
       - tests/integration/plan-brief-stdin.test.ts
+      - tests/integration/plan-brief-from-file.test.ts
       - docs/cli-contract.md
+      - CHANGELOG.md
     acceptance_refs:
       - design/phases/P17-non-interactive-authoring.yaml
   - id: P17-T3
