@@ -378,6 +378,41 @@ describe("detectTaskWritesProtectedPath", () => {
     expect(issues).toHaveLength(1);
     expect(issues[0]?.code).toBe("TASK_WRITES_PROTECTED_PATH");
   });
+
+  it("v1.6 P15-T3: respects an injected protected-paths list (override mode)", () => {
+    // Caller (lint orchestrator) supplies a custom list. The defaults
+    // are NOT consulted — the user overrode them.
+    const customList = [
+      { pattern: "secrets/**", sample: "secrets/x.env" },
+    ] as const;
+
+    // `design/roadmap.yaml` is in the hardcoded defaults but NOT in
+    // the custom list — so no warning should fire here.
+    const noiseEntries = [
+      entry(phase("P1", [task("P1-T1", { writes: ["design/roadmap.yaml"] })])),
+    ];
+    expect(
+      detectTaskWritesProtectedPath(noiseEntries, customList),
+    ).toEqual([]);
+
+    // `secrets/**` is in the custom list — should fire.
+    const hitEntries = [
+      entry(phase("P1", [task("P1-T1", { writes: ["secrets/api-keys.env"] })])),
+    ];
+    const issues = detectTaskWritesProtectedPath(hitEntries, customList);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.details?.protected_pattern).toBe("secrets/**");
+  });
+
+  it("v1.6 P15-T3: an empty injected list = explicit no-protection (no warnings)", () => {
+    // The loader returns `paths: []` when the rule file is present but
+    // contains no valid entries. The detector must treat that as
+    // "user opted out", NOT "fall back to defaults".
+    const entries = [
+      entry(phase("P1", [task("P1-T1", { writes: ["design/roadmap.yaml"] })])),
+    ];
+    expect(detectTaskWritesProtectedPath(entries, [])).toEqual([]);
+  });
 });
 
 describe("detectTaskWritesOverBroad", () => {
