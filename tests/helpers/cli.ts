@@ -46,16 +46,29 @@ export function ensureCliBuilt(): void {
  * Spawn `node dist/cli.js <args>` in `cwd` and capture stdout / stderr.
  * The CLI is invoked through the same Node binary that's running vitest
  * so version skew can't cause test flake.
+ *
+ * Pass `opts.input` (or env as the third positional shorthand) to feed
+ * stdin to the subprocess — used by v1.6 P17-T2 `plan brief --stdin`
+ * integration tests.
  */
 export function run(
   cwd: string,
   args: string[],
-  env?: NodeJS.ProcessEnv,
+  envOrOpts?: NodeJS.ProcessEnv | { env?: NodeJS.ProcessEnv; input?: string },
 ): RunResult {
+  // Back-compat: the original signature took `env` as the third arg.
+  // The new options-object form lets callers pass `input` for stdin
+  // without breaking any existing call site.
+  const opts: { env?: NodeJS.ProcessEnv; input?: string } =
+    envOrOpts && "env" in envOrOpts || envOrOpts && "input" in envOrOpts
+      ? (envOrOpts as { env?: NodeJS.ProcessEnv; input?: string })
+      : { env: envOrOpts as NodeJS.ProcessEnv | undefined };
+
   const res = spawnSync(process.execPath, [cliPath, ...args], {
     cwd,
     encoding: "utf8",
-    env: env ? { ...process.env, ...env } : process.env,
+    env: opts.env ? { ...process.env, ...opts.env } : process.env,
+    input: opts.input,
   });
   return {
     code: res.status ?? -1,
@@ -83,8 +96,14 @@ export async function createTempProject(opts?: {
 }): Promise<{
   dir: string;
   cleanup: () => Promise<void>;
-  run: (args: string[], env?: NodeJS.ProcessEnv) => RunResult;
-  runJson: <T = unknown>(args: string[], env?: NodeJS.ProcessEnv) => JsonEnvelope<T>;
+  run: (
+    args: string[],
+    envOrOpts?: NodeJS.ProcessEnv | { env?: NodeJS.ProcessEnv; input?: string },
+  ) => RunResult;
+  runJson: <T = unknown>(
+    args: string[],
+    envOrOpts?: NodeJS.ProcessEnv | { env?: NodeJS.ProcessEnv; input?: string },
+  ) => JsonEnvelope<T>;
 }> {
   ensureCliBuilt();
   const prefix = opts?.prefix ?? "code-pact-test-";
@@ -103,12 +122,15 @@ export async function createTempProject(opts?: {
     }
   }
 
-  const projectRun = (args: string[], env?: NodeJS.ProcessEnv) => run(dir, args, env);
+  const projectRun = (
+    args: string[],
+    envOrOpts?: NodeJS.ProcessEnv | { env?: NodeJS.ProcessEnv; input?: string },
+  ) => run(dir, args, envOrOpts);
   const projectRunJson = <T = unknown>(
     args: string[],
-    env?: NodeJS.ProcessEnv,
+    envOrOpts?: NodeJS.ProcessEnv | { env?: NodeJS.ProcessEnv; input?: string },
   ): JsonEnvelope<T> => {
-    const r = projectRun(args, env);
+    const r = projectRun(args, envOrOpts);
     if (r.stdout.trim().length === 0) {
       throw new Error(
         `runJson: empty stdout (exit ${r.code})\nargs: ${JSON.stringify(args)}\nstderr:\n${r.stderr}`,

@@ -124,9 +124,11 @@ describe("plan brief --from-file (regression — TTY contract preserved)", () =>
     expect(env.ok).toBe(false);
     if (!env.ok) {
       expect(env.error.code).toBe("CONFIG_ERROR");
-      // The v1.6 message now also points users at --from-file.
+      // The v1.6 message now also points users at --from-file
+      // (P17-T1) and --stdin (P17-T2).
       expect(env.error.message).toContain("TTY");
       expect(env.error.message).toContain("--from-file");
+      expect(env.error.message).toContain("--stdin");
     }
   });
 });

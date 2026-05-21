@@ -35,7 +35,9 @@ import {
 import {
   type BriefAnswers,
   loadBriefFromFile,
+  loadBriefFromStdin,
   PlanBriefFromFileError,
+  PlanBriefFromStdinError,
   runPlanBrief,
 } from "./commands/plan-brief.ts";
 import { runPlanPrompt } from "./commands/plan-prompt.ts";
@@ -595,6 +597,7 @@ async function cmdPlanBrief(
       force: { type: "boolean" },
       json: { type: "boolean" },
       "from-file": { type: "string" },
+      stdin: { type: "boolean" },
     },
     strict: false,
     allowPositionals: false,
@@ -604,12 +607,27 @@ async function cmdPlanBrief(
   const force = values.force === true;
   const fromFile =
     typeof values["from-file"] === "string" ? values["from-file"] : undefined;
+  const fromStdin = values.stdin === true;
   const cwd = process.cwd();
+
+  // v1.6 P17-T2: `--from-file` and `--stdin` are mutually exclusive.
+  // Allowing both would create ambiguous precedence; reject early so
+  // the user is forced to pick one source of truth.
+  if (fromFile !== undefined && fromStdin) {
+    const msg = "plan brief: --from-file and --stdin are mutually exclusive. Pick one input source.";
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
+      );
+    } else {
+      process.stderr.write(`${msg}\n`);
+    }
+    return 2;
+  }
 
   // v1.6 P17-T1: `--from-file` bypasses the TTY requirement. Without
   // it, the wizard path still requires a TTY (v1.5.1 behaviour
-  // preserved). With it, non-TTY environments (CI, agent sessions)
-  // can author the brief end-to-end.
+  // preserved). v1.6 P17-T2 extends the bypass to `--stdin`.
   let preCollectedAnswers: BriefAnswers | undefined;
   if (fromFile !== undefined) {
     try {
@@ -631,8 +649,28 @@ async function cmdPlanBrief(
       }
       throw err;
     }
+  } else if (fromStdin) {
+    try {
+      preCollectedAnswers = await loadBriefFromStdin(process.stdin);
+    } catch (err) {
+      if (err instanceof PlanBriefFromStdinError) {
+        if (json) {
+          process.stdout.write(
+            `${JSON.stringify({
+              ok: false,
+              error: { code: "CONFIG_ERROR", message: err.message },
+              data: { detail: err.detail, source: "stdin" },
+            })}\n`,
+          );
+        } else {
+          process.stderr.write(`${err.message}\n`);
+        }
+        return 2;
+      }
+      throw err;
+    }
   } else if (!isInteractive()) {
-    const msg = "plan brief is interactive and requires a TTY (use --from-file <yaml> for non-interactive input).";
+    const msg = "plan brief is interactive and requires a TTY (use --from-file <yaml> or --stdin for non-interactive input).";
     if (json) {
       process.stdout.write(
         `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
