@@ -340,6 +340,10 @@ async function writeSamplePhase(
     // text below carries the tutorial-only framing.
     const result = await createPhase({
       cwd,
+      // Internal-only bypass for the P14 reserved-id (TUTORIAL) block. This
+      // is the single sanctioned call site that may set this flag — no other
+      // caller (`phase add`, `phase new`, `phase import`) is allowed to.
+      _isSampleCreation: true,
       id: "TUTORIAL",
       name: "Walkthrough",
       weight: 1,

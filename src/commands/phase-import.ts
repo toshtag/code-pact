@@ -5,7 +5,7 @@ import { PhaseImportInput, type PhaseImportEntry, type TaskImport } from "../cor
 import { Task } from "../core/schemas/task.ts";
 import { Roadmap, type PhaseRef } from "../core/schemas/roadmap.ts";
 import { Phase } from "../core/schemas/phase.ts";
-import { createPhase } from "../core/services/createPhase.ts";
+import { createPhase, RESERVED_PHASE_IDS } from "../core/services/createPhase.ts";
 
 export type PhaseImportOptions = {
   cwd: string;
@@ -166,6 +166,25 @@ export async function runPhaseImport(
     throw e;
   }
   const input = parseInput(raw);
+
+  // ---- Reserved-id preflight (P14 governance) -------------------------
+  // Reject the entire import if ANY phase entry uses a reserved id (e.g.
+  // TUTORIAL). Runs BEFORE any createPhase call, so the roadmap stays
+  // byte-identical on failure — no partial-import state where earlier
+  // phases are written and a later reserved-id entry is rejected.
+  // `--force` does NOT bypass this; reserved ids are reserved at the
+  // governance layer, not the collision-handling layer.
+  const reservedHits = input.phases.filter((e) =>
+    RESERVED_PHASE_IDS.includes(e.id),
+  );
+  if (reservedHits.length > 0) {
+    const ids = reservedHits.map((p) => `"${p.id}"`).join(", ");
+    const e = new Error(
+      `Phase id ${ids} is reserved for the sample-phase artifact created by \`init --sample-phase\`. Pick a different id in the import file.`,
+    );
+    (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+    throw e;
+  }
 
   // ---- Pre-write validation pass --------------------------------------
   // Detect duplicate phase ids within the input itself first.

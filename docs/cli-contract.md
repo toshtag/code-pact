@@ -263,11 +263,12 @@ Add `--strict` to require every task field to be present explicitly; missing fie
 Validation runs in a single pre-write pass:
 
 1. Malformed YAML or schema violation → `CONFIG_ERROR` (exit 2). No files are written.
-2. The same phase id appearing twice **within the input** → `DUPLICATE_PHASE_ID` (exit 2). No files are written.
-3. An input phase id colliding with an existing `roadmap.yaml` entry, **without `--force`** → `DUPLICATE_PHASE_ID` (exit 2). No files are written.
-4. With `--force`, colliding phases are **skipped**; tasks declared inside those skipped phases are not imported either.
-5. Across all *kept* import targets, plus the existing kept roadmap phases, every task id must be unique. Any collision → `AMBIGUOUS_TASK_ID` (exit 2). `--force` does **not** bypass this: task-level integrity wins over throughput. No files are written.
-6. With `--strict`, any task that is missing one or more required Task fields → `CONFIG_ERROR` (exit 2). No files are written.
+2. **Reserved-id preflight (v1.5+ / P14).** Any input phase entry whose `id` is a reserved id (currently `TUTORIAL`) → `CONFIG_ERROR` (exit 2). The check runs **before any `createPhase` call**, so the roadmap stays byte-identical on failure — partial imports with TUTORIAL rejected mid-loop are not possible. `--force` does NOT bypass this; reserved ids are reserved at the governance layer, not the collision-handling layer. The sanctioned path for creating a `TUTORIAL` phase is `code-pact init --sample-phase`.
+3. The same phase id appearing twice **within the input** → `DUPLICATE_PHASE_ID` (exit 2). No files are written.
+4. An input phase id colliding with an existing `roadmap.yaml` entry, **without `--force`** → `DUPLICATE_PHASE_ID` (exit 2). No files are written.
+5. With `--force`, colliding phases are **skipped**; tasks declared inside those skipped phases are not imported either.
+6. Across all *kept* import targets, plus the existing kept roadmap phases, every task id must be unique. Any collision → `AMBIGUOUS_TASK_ID` (exit 2). `--force` does **not** bypass this: task-level integrity wins over throughput. No files are written.
+7. With `--strict`, any task that is missing one or more required Task fields → `CONFIG_ERROR` (exit 2). No files are written.
 
 On success the JSON envelope returns
 
@@ -1592,8 +1593,8 @@ This means that once a project is initialized with `ja-JP`, all subsequent comma
 | `.code-pact/state/baselines/*.json` | `init`, future baseline commands | Once at bootstrap (`initial.json`) |
 | `.code-pact/adapters/<agent>.manifest.yaml` | `adapter install`, `adapter upgrade --write` | Each install or write-mode upgrade |
 | `design/brief.md`, `design/constitution.md` | `plan brief`, `plan constitution` | Once per wizard run |
-| `design/roadmap.yaml` | `phase add`, `phase import` | One write per phase added |
-| `design/phases/<phase>.yaml` | `phase add`, `phase import`, `task add` | One write per phase / task add |
+| `design/roadmap.yaml` | `init --sample-phase`, `phase add`, `phase new`, `phase import` (all via `createPhase`) | One append per phase added |
+| `design/phases/<phase>.yaml` | `init --sample-phase`, `phase add`, `phase new`, `phase import`, `task add`, `task finalize --write`, `phase reconcile --write` | Phase creation: one write per phase. Task lifecycle: one write per `task add` / status flip |
 | `<adapter-owned files>` (e.g. `CLAUDE.md`, `.claude/skills/*.md`, `.context/<agent>/*`) | `adapter install`, `adapter upgrade --write` | Generated from the agent's `AdapterDescriptor`; manifest tracks every file |
 
 ### Atomic write strategy
@@ -1625,6 +1626,50 @@ Extending the adapter-style helpers to other state-file writes is **deferred unl
 ### Concurrent writers
 
 Running two `code-pact` commands against the same project in parallel is not supported. The CLI assumes a single-process owner of `.code-pact/`. v1.x may add advisory locking; v1.0 does not.
+
+### Roadmap mutation policy (v1.5+ / P14)
+
+`design/roadmap.yaml` is the project's phase index. Every code path that mutates it routes through the `createPhase` domain service (`src/core/services/createPhase.ts`), so the id-collision check, slug derivation, file layout, reserved-id block, and roadmap append all live in one place.
+
+| Command | Writes `design/roadmap.yaml`? | Mechanism |
+|---------|-------------------------------|-----------|
+| `init` (sample-phase path: `--sample-phase`, or wizard-yes) | yes | `writeSamplePhase()` → `createPhase` (with internal `_isSampleCreation: true` bypass for the reserved `TUTORIAL` id) |
+| `phase add` (flag-based) | yes | `runPhaseAdd` → `createPhase` |
+| `phase new` (TTY wizard) | yes | `runPhaseNew` → `createPhase` |
+| `phase import` | yes (per imported phase, after reserved-id preflight) | `runPhaseImport` → `createPhase` |
+| `task add` | no | Writes phase YAML only (`design/phases/<phase>.yaml`) |
+| `task complete` | no | Writes `progress.yaml` (append-only) |
+| `task finalize --write` | no | Writes phase YAML only (flips `tasks[].status`) |
+| `phase reconcile --write` | no | Writes phase YAML only (batch flip of `tasks[].status`) |
+| `task start` / `task block` / `task resume` / `task status` | no | Writes `progress.yaml` only, or read-only |
+| `plan lint` / `plan normalize` / `plan analyze` / `validate` / `doctor` / `recommend` / `task runbook` / `phase runbook` / `task context` | no | Read-only |
+
+The four `createPhase` callers are the **only** code paths that mutate `roadmap.yaml`. This is enforced structurally — no other module calls into the roadmap saver. Future commands that need to mutate the roadmap MUST go through `createPhase` (or land an RFC-update that extends this writer list).
+
+### Reserved phase ids (v1.5+ / P14)
+
+The id `TUTORIAL` is **reserved** for the sample-phase artifact created by `code-pact init --sample-phase`. The block fires at creation time:
+
+| Path | Outcome |
+|------|---------|
+| `init --sample-phase` (or `init` wizard answering yes to the sample-phase prompt) | **Allowed.** `writeSamplePhase()` passes the internal `_isSampleCreation: true` flag to `createPhase` |
+| `phase add --id TUTORIAL ...` | `CONFIG_ERROR` (exit 2). Roadmap is byte-identical (no write) |
+| `phase new` (TTY wizard) → typing `TUTORIAL` as the id | `CONFIG_ERROR` (exit 2). Roadmap is byte-identical |
+| `phase import` containing any entry with `id: TUTORIAL` | `CONFIG_ERROR` (exit 2) from a **preflight scan** that runs before the first `createPhase` call. The entire import is rejected — no partial-import state where earlier phases are written and the TUTORIAL entry is rejected mid-loop |
+| `validate` / `plan lint` / `plan analyze` against an existing TUTORIAL phase | No warning. The block is creation-time only; existing projects with a TUTORIAL phase (whether sample-phase artifact or legacy) are untouched |
+
+The block uses **existing `CONFIG_ERROR`** — no new error code. The error message names the reserved id and points at `init --sample-phase` as the sanctioned path. Configurable reserved-id lists are deferred to a future RFC; in v1.5, `TUTORIAL` is the only reserved id.
+
+### Phase status manual-flip convention (v1.2+, documented in v1.5 / P14)
+
+`phase reconcile <id> --write` flips **task** statuses in batch (`planned`/`in_progress` → `done` for every `flip` candidate) but never writes the phase's own `status` field — `phase_status_candidate` in the JSON envelope is advisory only.
+
+The release-prep convention since v1.2.0 is:
+
+1. Run `code-pact phase reconcile <phase-id> --write` to flip task statuses.
+2. Hand-edit the phase's own `status` field in `design/phases/<phase>.yaml` (typically as part of the release-prep PR).
+
+Auto-flip implementation (e.g. a `--phase-status` flag on `phase reconcile`, or a separate `phase finalize` command) is **not part of v1.5** and is deferred to a future RFC. The decision and its rationale are documented in [design/decisions/governance-rfc.md](../design/decisions/governance-rfc.md) § Phase status policy.
 
 ## Stability taxonomy (v1.0)
 

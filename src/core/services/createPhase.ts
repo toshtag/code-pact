@@ -9,6 +9,19 @@ import { Roadmap, type PhaseRef } from "../schemas/roadmap.ts";
 export type Confidence = "low" | "medium" | "high";
 export type Risk = "low" | "medium" | "high";
 
+/**
+ * Reserved phase ids (P14 governance). Only the sample-phase generator
+ * (`writeSamplePhase` in `src/commands/init.ts`) may create a phase with
+ * one of these ids, via the internal `_isSampleCreation: true` bypass.
+ * Every other call site (flag-based `phase add`, interactive `phase new`
+ * wizard, `phase import`) is rejected with CONFIG_ERROR (exit 2).
+ *
+ * Kept as a small constant array rather than a config field so adding to
+ * the list requires an RFC update — that intentional friction matches the
+ * P14 "scope discipline" decision.
+ */
+export const RESERVED_PHASE_IDS: readonly string[] = ["TUTORIAL"];
+
 export type CreatePhaseInput = {
   cwd: string;
   id: string;
@@ -27,6 +40,14 @@ export type CreatePhaseInput = {
   tasks?: Task[];
   nonGoals?: string[];
   requiresDecision?: boolean;
+  /**
+   * Internal-only escape hatch (P14 governance). The sample-phase
+   * generator in `src/commands/init.ts` sets this to `true` so it can
+   * create the reserved-id `TUTORIAL` phase. Public callers MUST omit
+   * the field — passing it from a non-bootstrap path is a contract
+   * violation. Not exposed through any CLI flag.
+   */
+  _isSampleCreation?: boolean;
 };
 
 export type CreatePhaseResult = {
@@ -71,6 +92,17 @@ export async function createPhase(opts: CreatePhaseInput): Promise<CreatePhaseRe
     verifyCommands = ["pnpm test"],
     doneCriteria = ["All tasks are done"],
   } = opts;
+
+  // Reserved-id check (P14 governance). Block creation of phases with a
+  // reserved id unless the internal `_isSampleCreation: true` bypass is
+  // set — only `writeSamplePhase` (init's sample-phase generator) does so.
+  if (RESERVED_PHASE_IDS.includes(id) && opts._isSampleCreation !== true) {
+    const err = new Error(
+      `Phase id "${id}" is reserved for the sample-phase artifact created by \`init --sample-phase\`. Pick a different id.`,
+    );
+    (err as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+    throw err;
+  }
 
   const roadmap = await loadRoadmap(cwd);
 
