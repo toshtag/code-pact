@@ -124,11 +124,13 @@ describe("plan brief --from-file (regression — TTY contract preserved)", () =>
     expect(env.ok).toBe(false);
     if (!env.ok) {
       expect(env.error.code).toBe("CONFIG_ERROR");
-      // The v1.6 message now also points users at --from-file
-      // (P17-T1) and --stdin (P17-T2).
+      // v1.6 messages mention all three non-interactive modes:
+      // --from-file (P17-T1), --stdin (P17-T2),
+      // --what/--who[/--differentiator] (P17-T3).
       expect(env.error.message).toContain("TTY");
       expect(env.error.message).toContain("--from-file");
       expect(env.error.message).toContain("--stdin");
+      expect(env.error.message).toContain("--what/--who");
     }
   });
 });

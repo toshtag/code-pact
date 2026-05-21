@@ -169,7 +169,7 @@ tasks:
     write_surface: low
     verification_strength: medium
     expected_duration: short
-    status: planned
+    status: done
     description: |
       `plan brief` flag-driven mode (`--what` / `--who` /
       `--differentiator`). Same shape as the `task add` v1.4
@@ -184,11 +184,15 @@ tasks:
       - src/commands/plan-brief.ts
       - src/cli.ts
       - src/commands/task-add.ts
+      - tests/integration/plan-brief-from-file.test.ts
+      - tests/integration/plan-brief-stdin.test.ts
     writes:
-      - src/commands/plan-brief.ts
       - src/cli.ts
       - tests/integration/plan-brief-flags.test.ts
+      - tests/integration/plan-brief-from-file.test.ts
+      - tests/integration/plan-brief-stdin.test.ts
       - docs/cli-contract.md
+      - CHANGELOG.md
     acceptance_refs:
       - design/phases/P17-non-interactive-authoring.yaml
   - id: P17-T4

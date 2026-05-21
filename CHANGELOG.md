@@ -44,6 +44,21 @@ identifiers. Starting with v1.0.0, stable releases use plain
   `plan lint --strict` per the existing binary promotion. Heuristic-only:
   the goal is to catch obvious "writes everywhere" declarations, not to
   encode a precise breadth metric.
+- **`plan brief` flag-driven mode** (v1.6+, P17-T3). New
+  `--what <text>` / `--who <text>` / `--differentiator <text>` flags
+  supply the brief fields directly as command-line strings. Mirrors
+  the v1.4 `task add` non-interactive flag pattern so projects with
+  flag-driven `task add` workflows get a consistent surface. Presence
+  of ANY of the three flags triggers flag-driven mode; `--what` and
+  `--who` are required (non-empty); `--differentiator` is optional
+  (defaults to the locale placeholder). Missing required flags return
+  `CONFIG_ERROR` (exit 2) with `data.missing: string[]` naming the
+  missing flags. Empty-string values for required flags are rejected
+  the same as missing flags. Bypasses the TTY check. Pairwise mutex
+  with `--from-file` and `--stdin` — passing any combination returns
+  `CONFIG_ERROR` (exit 2). Non-TTY guard message updated to list all
+  three non-interactive modes so users see every escape hatch. The
+  wizard, `--from-file`, and `--stdin` paths are unchanged.
 - **`plan brief --stdin`** (v1.6+, P17-T2). Reads the same YAML schema as
   `--from-file` from `process.stdin` instead of a file. Useful for piping
   brief content from another process (`some-tool | code-pact plan brief
