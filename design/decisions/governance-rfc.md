@@ -1,6 +1,6 @@
 # RFC: Governance
 
-**Status:** proposed (P14, 2026-05)
+**Status:** accepted (P14, 2026-05)
 **Scope:** new advisory write lock (`.code-pact/locks/write.lock`) acquired by design-mutating CLI command handlers; new public error code `LOCK_HELD`; reserved-id creation-time block on `phase add` / `phase import` for `TUTORIAL`; task→phase resolver core extraction to `src/core/plan/resolve-task.ts`; docs-only governance for protected-path strict-mode, declared-writes review surface, roadmap mutation policy, and phase status manual-flip convention.
 **Owners:** maintainer
 **Related:** [design/decisions/task-readiness-schema-rfc.md](task-readiness-schema-rfc.md) (P10 — provides `writes` + `TASK_WRITES_PROTECTED_PATH`). [design/decisions/finalization-reconciliation-rfc.md](finalization-reconciliation-rfc.md) (P11 — provides `task finalize` / `phase reconcile` — the two commands that gain lock acquisition). [design/decisions/lightweight-runbook-rfc.md](lightweight-runbook-rfc.md) (P12 — defers task→phase resolver extraction to P14). [design/decisions/planning-ux-init-hardening-rfc.md](planning-ux-init-hardening-rfc.md) (P13 — introduces TUTORIAL sample-phase artifact; P14 hardens it via creation-time block).
