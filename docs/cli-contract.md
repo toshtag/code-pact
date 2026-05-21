@@ -313,15 +313,28 @@ The validation pass detects logic errors before any write; ordinary disk failure
 
 `code-pact plan <subcommand>` provides AI-assisted project planning tools that feed into the design directory.
 
-### `plan brief [--force] [--from-file <yaml> | --stdin] [--json]`
+### `plan brief [--force] [--from-file <yaml> | --stdin | --what <s> --who <s> [--differentiator <s>]] [--json]`
 
-Interactive wizard that collects project description, target users, and differentiator, then writes `design/brief.md`. Stability: **Stable (v0.2+)**. `--from-file` and `--stdin` are **Stable (v1.6+)** under P17-T1 / P17-T2.
+Interactive wizard that collects project description, target users, and differentiator, then writes `design/brief.md`. Stability: **Stable (v0.2+)**. `--from-file`, `--stdin`, and `--what` / `--who` / `--differentiator` are **Stable (v1.6+)** under P17-T1 / T2 / T3.
 
 Default behaviour requires a TTY; exits 2 with `CONFIG_ERROR` in non-interactive mode. `--force` overwrites an existing file.
 
-**`--from-file <yaml>` (v1.6+, P17-T1).** Reads the file at `<yaml>` (repo-root-relative; `assertSafeRelativePath` enforced), validates it against the schema below, and writes `design/brief.md` from the supplied values. Bypasses the TTY check, so non-TTY environments (CI, agent sessions) can author a brief end-to-end. The TTY wizard remains the default when `--from-file` is omitted.
+`plan brief` supports three pairwise-mutually-exclusive non-interactive input modes plus the default TTY wizard:
 
-**`--stdin` (v1.6+, P17-T2).** Reads the same YAML schema from `process.stdin` instead of a file. Useful when the brief content is produced by another process and piped in (`some-tool | code-pact plan brief --stdin --json`). Mutually exclusive with `--from-file` — passing both returns `CONFIG_ERROR` (exit 2) with the message `"--from-file and --stdin are mutually exclusive. Pick one input source."`. Like `--from-file`, this flag bypasses the TTY check.
+| Mode | Trigger | Source of content |
+| --- | --- | --- |
+| TTY wizard | no input flags + stdin is a TTY | interactive prompts |
+| `--from-file` | `--from-file <yaml>` (v1.6+, P17-T1) | YAML file on disk |
+| `--stdin` | `--stdin` (v1.6+, P17-T2) | YAML on `process.stdin` |
+| flag-driven | any of `--what`, `--who`, `--differentiator` (v1.6+, P17-T3) | command-line flags |
+
+Passing any combination of the three non-interactive modes returns `CONFIG_ERROR` (exit 2) with a message listing the modes that were detected.
+
+**`--from-file <yaml>` (v1.6+, P17-T1).** Reads the file at `<yaml>` (repo-root-relative; `assertSafeRelativePath` enforced), validates it against the schema below, and writes `design/brief.md` from the supplied values. Bypasses the TTY check, so non-TTY environments (CI, agent sessions) can author a brief end-to-end.
+
+**`--stdin` (v1.6+, P17-T2).** Reads the same YAML schema from `process.stdin` instead of a file. Useful when the brief content is produced by another process and piped in (`some-tool | code-pact plan brief --stdin --json`). Bypasses the TTY check.
+
+**`--what <text>` / `--who <text>` / `--differentiator <text>` (v1.6+, P17-T3).** Supplies the brief fields directly as command-line strings. Presence of ANY of the three flags triggers flag-driven mode. `--what` and `--who` are required (non-empty strings); `--differentiator` is optional and defaults to the locale placeholder when omitted. Missing or empty-string `--what` / `--who` returns `CONFIG_ERROR` (exit 2) with `data.missing: string[]` naming the missing flags. Bypasses the TTY check. Mirrors the v1.4 `task add` non-interactive flag pattern.
 
 YAML schema:
 
