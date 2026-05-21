@@ -44,6 +44,20 @@ identifiers. Starting with v1.0.0, stable releases use plain
   `plan lint --strict` per the existing binary promotion. Heuristic-only:
   the goal is to catch obvious "writes everywhere" declarations, not to
   encode a precise breadth metric.
+- **Non-interactive authoring walkthrough docs** (v1.6+, P17-T5). New
+  `docs/dogfood.md § Non-interactive plan brief / plan constitution`
+  section walks through all six non-interactive modes (--from-file,
+  --stdin, flag-driven on each of the two commands) with copy-paste
+  examples. The `BRIEF_MISSING` and `CONSTITUTION_PLACEHOLDER`
+  expected-warning rows in dogfood.md now point at the v1.6+
+  resolution paths instead of "edit manually or use a TTY". The
+  Quick reference table gains CI / non-TTY rows for both commands.
+  `docs/getting-started.md` Path 2 (Manual) TTY-only callout is
+  rewritten as a CI / non-TTY (v1.6+) callout with a fully-scripted
+  bootstrap example (init → plan brief → plan constitution → phase
+  add / task add / adapter install) — pre-v1.6 history is preserved
+  inline so upgraders see what changed. P17 (Non-interactive
+  Authoring) is fully feature-complete with this docs roll-up.
 - **`plan constitution` non-interactive trifecta** (v1.6+, P17-T4).
   Applies the P17-T1/T2/T3 plan-brief patterns to `plan constitution`:
   `--from-file <yaml>` reads a YAML file, `--stdin` reads YAML from

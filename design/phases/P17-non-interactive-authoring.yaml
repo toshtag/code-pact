@@ -237,7 +237,7 @@ tasks:
     write_surface: low
     verification_strength: medium
     expected_duration: short
-    status: planned
+    status: done
     description: |
       Document the full non-interactive authoring contract once
       T1–T4 are in. Adds a `plan brief` / `plan constitution`
@@ -257,5 +257,6 @@ tasks:
     writes:
       - docs/dogfood.md
       - docs/getting-started.md
+      - CHANGELOG.md
     acceptance_refs:
       - docs/dogfood.md
