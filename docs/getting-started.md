@@ -148,7 +148,24 @@ code-pact phase add ... --verify-command "node --version"
 code-pact phase add ... --verify-command node --version
 ```
 
-> **TTY-only steps in this path:** `plan brief` and `plan constitution` require a TTY (they're interactive by intent — see [the deferred list](migration.md#deferred-beyond-v14) for non-TTY plans). `task add` in v0.6's wizard mode also requires a TTY, but v1.4+ adds a non-interactive flag set (`--description` + `--type` + optional readiness/P10 flags) for CI use. In purely non-TTY environments, skip steps 2 and 4(a) and either: (1) use `task add P1 --description "..." --type ...` flag-driven, **or** (2) bulk-import the phase plus its tasks from a YAML file with `code-pact phase import draft-roadmap.yaml` (this is the AI-assisted path below; it is also the right shape for any non-interactive automation). After a non-interactive init, `code-pact validate` reports `BRIEF_MISSING` / `CONSTITUTION_PLACEHOLDER` warnings — these are expected and clear up once you run the wizards on a real machine, edit the files directly, or accept them as warnings the project is intentionally living with.
+> **CI / non-TTY users (v1.6+).** Steps 2, 4(a), and the wizards in general all have non-interactive equivalents now. `plan brief` and `plan constitution` (P17) each accept three modes — `--from-file <yaml>`, `--stdin`, or a flag-driven form (`--what` / `--who` / `--differentiator` for brief; `--description` / `--principle` for constitution). `task add` (v1.4 P13-T3) has had `--description` + readiness flags since v1.4. `phase import` (v0.4+) bulk-loads a YAML roadmap. A fully scripted CI bootstrap looks like:
+>
+> ```sh
+> code-pact init --non-interactive --agent claude-code --locale en-US --json
+> code-pact plan brief \
+>   --what "What we're building" \
+>   --who  "Who it's for" \
+>   --differentiator "What makes it different" \
+>   --json
+> code-pact plan constitution \
+>   --description "Project description" \
+>   --principle "First principle" \
+>   --principle "Second principle" \
+>   --json
+> # ... then phase add / task add / adapter install as in step 3+.
+> ```
+>
+> Pre-v1.6, `plan brief` and `plan constitution` were TTY-only — after a non-interactive `init`, `code-pact validate` reported `BRIEF_MISSING` / `CONSTITUTION_PLACEHOLDER` warnings that required either a TTY visit or hand-editing the files. v1.6+ resolves both from CI with the modes above. See [`docs/dogfood.md` § Non-interactive `plan brief` / `plan constitution`](dogfood.md) for the full walkthrough and `docs/cli-contract.md` for the envelope shapes.
 
 ---
 

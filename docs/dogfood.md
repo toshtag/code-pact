@@ -133,6 +133,56 @@ code-pact plan prompt
 code-pact plan prompt --clipboard
 ```
 
+### Non-interactive `plan brief` / `plan constitution` (v1.6+, P17)
+
+Both wizard commands now accept three pairwise-mutually-exclusive non-interactive input modes — useful in CI, agent sessions, or any context without a TTY. Without one of these modes, non-TTY invocations still return `CONFIG_ERROR` (v1.5.1 contract preserved).
+
+```sh
+# --- plan brief ---
+
+# (1) Read a YAML file (must contain non-empty `what` and `who`).
+cat > brief.yaml <<EOF
+what: A control plane for AI coding agents.
+who: Software teams adopting agentic workflows.
+differentiator: Vendor-neutral, deterministic CLI.
+EOF
+code-pact plan brief --from-file brief.yaml --json
+
+# (2) Read YAML from stdin (e.g. piped from another tool).
+echo "what: ...
+who: ...
+differentiator: ..." | code-pact plan brief --stdin --json
+
+# (3) Pass the three fields as flags.
+code-pact plan brief \
+  --what "A control plane for AI coding agents." \
+  --who  "Software teams adopting agentic workflows." \
+  --differentiator "Vendor-neutral, deterministic CLI." \
+  --json
+
+# --- plan constitution ---
+# Mirror shape, but both schema fields are optional (empty falls back
+# to locale defaults via generateConstitutionMd — same as the wizard).
+
+cat > constitution.yaml <<EOF
+description: A control plane for AI coding agents.
+principles:
+  - Vendor neutrality
+  - Determinism over plausibility
+  - Boundaries over conventions
+EOF
+code-pact plan constitution --from-file constitution.yaml --json
+
+# Or via stdin, or via flags:
+code-pact plan constitution \
+  --description "..." \
+  --principle "First principle" \
+  --principle "Second principle" \
+  --json
+```
+
+Passing any combination of the three modes returns `CONFIG_ERROR` (exit 2). `--from-file` failures emit `data: { detail, path }`; `--stdin` failures emit `data: { detail, source: "stdin" }`. See [`docs/cli-contract.md` § `plan brief`](cli-contract.md) and `§ plan constitution` for the full envelope shapes.
+
 Feed the AI agent's YAML response to `phase import` to bulk-import all phases and tasks:
 
 ```sh
@@ -571,8 +621,8 @@ If you ran `code-pact init --non-interactive --agent <agent> --locale <locale>` 
 
 | Code | Severity | Why it fires |
 |---|---|---|
-| `BRIEF_MISSING` | warning | `design/brief.md` does not exist — the non-interactive init does not run `plan brief`. |
-| `CONSTITUTION_PLACEHOLDER` | warning | `design/constitution.md` still contains the template text from `init`. Edit it manually, or run `code-pact plan constitution` in a TTY. |
+| `BRIEF_MISSING` | warning | `design/brief.md` does not exist — the non-interactive init does not run `plan brief`. **v1.6+**: resolve from CI with `code-pact plan brief --from-file <yaml>`, `--stdin`, or `--what "..." --who "..." [--differentiator "..."]` (see § [Non-interactive `plan brief` / `plan constitution`](#non-interactive-plan-brief--plan-constitution-v16-p17)). Pre-v1.6: edit it manually, or run `code-pact plan brief` in a TTY. |
+| `CONSTITUTION_PLACEHOLDER` | warning | `design/constitution.md` still contains the template text from `init`. **v1.6+**: resolve from CI with `code-pact plan constitution --from-file <yaml>`, `--stdin`, or `--description "..." --principle "..."` (repeatable). Pre-v1.6: edit it manually, or run `code-pact plan constitution` in a TTY. |
 | `ADAPTER_STALE` | warning | `adapter install <agent>` was called without `--model <version>`, so the model profile is not pinned. Re-run `adapter install <agent> --model <version>` (e.g. `--model opus-4.7`) to silence. |
 
 These are intentionally warnings, not errors — `validate` still exits 0. CI scripts that require a clean run can either fix the underlying state (recommended for `BRIEF_MISSING` / `CONSTITUTION_PLACEHOLDER`) or pass `--strict` only after deciding to treat them as failures.
@@ -583,8 +633,10 @@ A separate `STATUS_DRIFT done-but-design-not-done` warning from `plan analyze --
 
 | Goal | Command |
 |---|---|
-| Write project brief | `code-pact plan brief` |
-| Write project constitution | `code-pact plan constitution` |
+| Write project brief (TTY wizard) | `code-pact plan brief` |
+| Write project brief (CI / non-TTY, v1.6+) | `code-pact plan brief --from-file <yaml>` \| `--stdin` \| `--what "..." --who "..." [--differentiator "..."]` |
+| Write project constitution (TTY wizard) | `code-pact plan constitution` |
+| Write project constitution (CI / non-TTY, v1.6+) | `code-pact plan constitution --from-file <yaml>` \| `--stdin` \| `--description "..." --principle "..."` (repeatable) |
 | Generate AI planning prompt | `code-pact plan prompt [--clipboard]` |
 | Bulk-import AI-generated roadmap | `code-pact phase import <yaml> [--strict]` |
 | Get the execution plan for a task (tier / planning / preflight / budget) | `code-pact recommend --phase <phase-id> --task <task-id> [--json]` |
