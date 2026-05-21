@@ -1,18 +1,13 @@
 // CLI integration suite — spawns the built CLI (`dist/cli.js`) via
-// `spawnSync`. dist is rebuilt on every run so a stale build cannot mask
-// real failures (this was the root cause of the BUG-001 RC dogfood
-// failure on v0.1).
+// `spawnSync`. The integration test script builds dist once before Vitest
+// starts so files can run in parallel without racing tsup cleanup.
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
 import { spawnSync } from "node:child_process";
 import { mkdtemp, rm, readFile, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { existsSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-
-const repoRoot = resolve(fileURLToPath(import.meta.url), "../../..");
-const cliPath = join(repoRoot, "dist", "cli.js");
+import { cliPath, ensureCliBuilt } from "../helpers/cli.ts";
 
 let tmpDir: string;
 
@@ -32,17 +27,7 @@ function run(args: string[], env?: NodeJS.ProcessEnv): RunResult {
 }
 
 beforeAll(() => {
-  // Always rebuild — stale dist would mask real CLI regressions.
-  const res = spawnSync("pnpm", ["build"], {
-    cwd: repoRoot,
-    encoding: "utf8",
-    stdio: "pipe",
-  });
-  if (res.status !== 0 || !existsSync(cliPath)) {
-    throw new Error(
-      `Failed to build CLI for tests. exit=${res.status}\nstdout:\n${res.stdout}\nstderr:\n${res.stderr}`,
-    );
-  }
+  ensureCliBuilt();
 }, 60_000);
 
 beforeEach(async () => {

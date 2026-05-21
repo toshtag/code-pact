@@ -6,12 +6,9 @@
 // import this module instead. Existing tests are left untouched per the
 // v1.0 P8-T2 scope (no forced migration).
 //
-// Build posture: the first import (in the first test file to run, given
-// vitest's fileParallelism: false) rebuilds dist/cli.js once and caches
-// the success. Subsequent imports skip the build. This preserves the
-// "stale dist can't mask failures" invariant documented at the top of
-// cli.test.ts while avoiding redundant builds when multiple files use
-// the helper.
+// Build posture: integration tests expect dist/cli.js to have been built
+// before Vitest starts. `pnpm test:integration` and CI both run `pnpm build`
+// once up front, avoiding per-file tsup races and repeated rebuilds.
 
 import { spawnSync } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -33,27 +30,16 @@ export type JsonErr = {
 };
 export type JsonEnvelope<T> = JsonOk<T> | JsonErr;
 
-let built = false;
-
 /**
- * Rebuild dist/cli.js exactly once per vitest process. Idempotent across
- * test files. Call this from beforeAll() in the importing test file so
- * the build cost is paid up front and surfaces as a build failure rather
- * than the first test's "Unexpected end of JSON input".
+ * Assert dist/cli.js exists. Call this from beforeAll() in subprocess
+ * integration tests so a missing prebuild fails with a direct diagnostic.
  */
 export function ensureCliBuilt(): void {
-  if (built && existsSync(cliPath)) return;
-  const res = spawnSync("pnpm", ["build"], {
-    cwd: repoRoot,
-    encoding: "utf8",
-    stdio: "pipe",
-  });
-  if (res.status !== 0 || !existsSync(cliPath)) {
+  if (!existsSync(cliPath)) {
     throw new Error(
-      `Failed to build CLI for tests. exit=${res.status}\nstdout:\n${res.stdout}\nstderr:\n${res.stderr}`,
+      `Missing ${cliPath}. Run "pnpm build" first, or use "pnpm test:integration".`,
     );
   }
-  built = true;
 }
 
 /**

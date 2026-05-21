@@ -38,7 +38,10 @@
   },
   "scripts": {
     "build": "tsup",
-    "test": "vitest run",
+    "test": "pnpm test:unit && pnpm test:integration",
+    "test:unit": "vitest run --config vitest.unit.config.ts",
+    "test:integration": "pnpm build && vitest run --config vitest.integration.config.ts",
+    "test:ci": "pnpm typecheck && pnpm test:unit && pnpm build && vitest run --config vitest.integration.config.ts",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "node scripts/assert-package-metadata.mjs"
