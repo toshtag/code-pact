@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { parseArgs } from "node:util";
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { readPackageVersion } from "./lib/package-version.ts";
@@ -81,6 +81,27 @@ import type { PhaseStatus } from "./core/schemas/phase.ts";
 
 const KNOWN_LOCALES: ReadonlySet<Locale> = new Set(["en-US", "ja-JP"]);
 const KNOWN_AGENTS: ReadonlySet<SupportedAgent> = new Set(SUPPORTED_AGENTS);
+
+/**
+ * `true` when `<cwd>/.code-pact/` exists on disk. Used by `cmdInit` to
+ * decide whether to wrap with the advisory write lock: fresh init (no
+ * `.code-pact/` yet) bootstraps the project tree, and the lock helper's
+ * `mkdir -p` of `.code-pact/locks/` would itself create `.code-pact/`
+ * as a side effect — which then trips the ALREADY_INITIALIZED guard in
+ * `runInit`. Fresh init also has no possible concurrent code-pact
+ * mutation to defend against (no project exists yet), so skipping the
+ * lock is semantically correct. Re-init (with `--force` on an existing
+ * project) still acquires the lock — concurrent mutations are possible
+ * there and need the same serialization guarantee.
+ */
+async function codePactDirExists(cwd: string): Promise<boolean> {
+  try {
+    const s = await stat(join(cwd, ".code-pact"));
+    return s.isDirectory();
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Wrap a design-mutating CLI handler in the advisory write lock
@@ -200,11 +221,7 @@ async function cmdInit(
   const useWizard = isInteractive() && !hasInitFlag && !json && !nonInteractive;
 
   if (useWizard) {
-    // P14 advisory write lock: the wizard may run `writeSamplePhase`
-    // (default-yes prompt). Acquire around the whole wizard so the
-    // sample-phase createPhase write is serialized; if the user
-    // answers no, the lock is briefly held with no side effect.
-    return withWriteLock(cwd, "init (wizard)", false, async (): Promise<number> => {
+    const wizardImpl = async (): Promise<number> => {
       try {
         const result = await runInitWizard({
           cwd,
@@ -230,7 +247,15 @@ async function cmdInit(
         }
         throw err;
       }
-    });
+    };
+    // P14 advisory write lock: only when `.code-pact/` already exists.
+    // Fresh init bootstraps the project; acquiring the lock would
+    // create `.code-pact/` as a side effect and trip `ALREADY_INITIALIZED`.
+    // See codePactDirExists() doc-comment.
+    if (await codePactDirExists(cwd)) {
+      return withWriteLock(cwd, "init (wizard)", false, wizardImpl);
+    }
+    return wizardImpl();
   }
 
   // Automation mode = explicit --non-interactive OR detected CI=true.
@@ -328,7 +353,11 @@ async function cmdInit(
   // (the only path that mutates roadmap.yaml / design/phases). Plain
   // init without --sample-phase writes only `.code-pact/` bootstrap
   // artifacts, which fall outside the design-mutation lock contract.
-  if (samplePhase) {
+  // Additional gate: only acquire when `.code-pact/` already exists.
+  // Fresh init bootstraps the directory; the lock helper would create
+  // `.code-pact/` as a side effect and trip `ALREADY_INITIALIZED`.
+  // See codePactDirExists() doc-comment.
+  if (samplePhase && (await codePactDirExists(cwd))) {
     return withWriteLock(cwd, "init --sample-phase", json, runImpl);
   }
   return runImpl();

@@ -425,6 +425,37 @@ describe("json-stdout contract: state-mutating Stable (v1.0) commands", () => {
     expect(after).toBe(before);
   });
 
+  // P14 governance: fresh `init --sample-phase` MUST NOT acquire the
+  // advisory write lock (the helper's `mkdir -p .code-pact/locks/`
+  // would create `.code-pact/` and trip the ALREADY_INITIALIZED guard).
+  // Regression net for the P14-T8 release-prep fix in src/cli.ts'
+  // codePactDirExists() gate.
+  it("fresh init --sample-phase with locks enabled (P14-T5 fresh-init gate)", async () => {
+    const p = await createTempProject({
+      init: false,
+      prefix: "code-pact-json-stdout-init-fresh-locks-",
+    });
+    cleanups.push(p.cleanup);
+    // Empty string ≠ "1" → locks are ACTIVE for this subprocess.
+    // The fresh-init gate must skip lock acquisition; otherwise the
+    // mkdir of `.code-pact/locks/` would itself trip ALREADY_INITIALIZED.
+    const res = p.run(
+      ["init", "--non-interactive", "--locale", "en-US", "--agent", "claude-code", "--sample-phase", "--json"],
+      { CODE_PACT_DISABLE_LOCKS: "" },
+    );
+    expectStdoutIsJson(res, "fresh init --sample-phase with locks active");
+    expect(res.code).toBe(0);
+    const envelope = JSON.parse(res.stdout) as { ok: boolean };
+    expect(envelope.ok).toBe(true);
+    // Sanity: the project tree actually got bootstrapped (no silent
+    // short-circuit), and the TUTORIAL artifact is present.
+    const phaseExists = await readFile(
+      join(p.dir, "design", "phases", "TUTORIAL-walkthrough.yaml"),
+      "utf8",
+    ).then(() => true, () => false);
+    expect(phaseExists).toBe(true);
+  });
+
   // P14 advisory write lock: LOCK_HELD JSON envelope. Pre-populates
   // the lock file to simulate another process holding the lock, then
   // runs a design-mutating command with the test-escape env var
