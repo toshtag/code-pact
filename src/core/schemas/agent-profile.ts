@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { ModelTier } from "./model-profile.ts";
 
 // Supported Claude model versions for model-aware adapter generation.
 // "generic" (or undefined) produces the baseline template.

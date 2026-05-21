@@ -1,4 +1,4 @@
-import { readFile, readdir, access } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { parse as parseYaml } from "yaml";

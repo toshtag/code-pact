@@ -1,9 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtemp, readFile, rm, writeFile, mkdir, unlink } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile, unlink } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { runInit } from "../../../src/commands/init.ts";
 import { runAdapterInstall } from "../../../src/commands/adapter-install.ts";
 import { runAdapterUpgrade } from "../../../src/commands/adapter-upgrade.ts";
