@@ -122,14 +122,32 @@ describe("auditWrites — working-tree mode", () => {
     expect(result.warnings).toEqual(["TASK_WRITES_AUDIT_OUTSIDE_DECLARED"]);
   });
 
-  it("populates declared_unused without raising a warning when a declared glob matches no files", async () => {
+  it("v1.6 P15-T4: populates declared_unused AND raises TASK_WRITES_AUDIT_DECLARED_UNUSED warning when a declared glob matches no files", async () => {
     await touch(cwd, "src/core/audit/write-audit.ts", "// new\n");
     const result = await auditWrites({
       cwd,
       declaredWrites: ["src/core/audit/**", "docs/cli-contract.md"],
     });
     expect(result.declared_unused).toEqual(["docs/cli-contract.md"]);
-    expect(result.warnings).toEqual([]);
+    expect(result.warnings).toEqual(["TASK_WRITES_AUDIT_DECLARED_UNUSED"]);
+  });
+
+  it("v1.6 P15-T4: both OUTSIDE_DECLARED and DECLARED_UNUSED warnings fire independently when both conditions hit", async () => {
+    // declared_writes covers `src/core/audit/**` (no files touched there)
+    // AND the diff touches `src/commands/...` (outside the declared list)
+    await touch(cwd, "src/commands/task-finalize.ts", "// new\n");
+    const result = await auditWrites({
+      cwd,
+      declaredWrites: ["src/core/audit/**"],
+    });
+    expect(result.outside_declared).toEqual([
+      "src/commands/task-finalize.ts",
+    ]);
+    expect(result.declared_unused).toEqual(["src/core/audit/**"]);
+    expect(result.warnings).toEqual([
+      "TASK_WRITES_AUDIT_OUTSIDE_DECLARED",
+      "TASK_WRITES_AUDIT_DECLARED_UNUSED",
+    ]);
   });
 
   it("treats empty declared_writes as 'everything is outside'", async () => {

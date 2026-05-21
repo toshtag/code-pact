@@ -279,7 +279,7 @@ tasks:
     write_surface: low
     verification_strength: medium
     expected_duration: short
-    status: planned
+    status: done
     description: |
       Promote `declared_unused` from data-only to a warning
       code. New `TASK_WRITES_AUDIT_DECLARED_UNUSED` (severity:
@@ -296,12 +296,15 @@ tasks:
     reads:
       - src/core/audit/write-audit.ts
       - tests/unit/core/audit/write-audit.test.ts
+      - tests/integration/task-finalize-write-audit.test.ts
       - tests/unit/error-code-surface.test.ts
     writes:
       - src/core/audit/write-audit.ts
       - tests/unit/core/audit/write-audit.test.ts
+      - tests/integration/task-finalize-write-audit.test.ts
       - tests/unit/error-code-surface.test.ts
       - docs/cli-contract.md
+      - CHANGELOG.md
     acceptance_refs:
       - design/phases/P15-declared-writes-audit.yaml
   - id: P15-T5

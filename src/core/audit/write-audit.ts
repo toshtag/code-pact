@@ -30,7 +30,9 @@ export type GitUnavailableReason = "not_a_git_repo" | "git_not_on_path";
 export type BaseKind = "working-tree" | "merge-base" | "unavailable";
 export type BaseErrorCode = "MERGE_BASE_NOT_FOUND" | "REF_NOT_FOUND";
 
-export type WriteAuditWarning = "TASK_WRITES_AUDIT_OUTSIDE_DECLARED";
+export type WriteAuditWarning =
+  | "TASK_WRITES_AUDIT_OUTSIDE_DECLARED"
+  | "TASK_WRITES_AUDIT_DECLARED_UNUSED";
 
 export type WriteAuditBaseError = {
   code: BaseErrorCode;
@@ -202,6 +204,15 @@ export async function auditWrites(
   const warnings: WriteAuditWarning[] = [];
   if (outsideDeclared.length > 0) {
     warnings.push("TASK_WRITES_AUDIT_OUTSIDE_DECLARED");
+  }
+  // v1.6 P15-T4: declared_unused gets promoted from data-only to a
+  // warning. The signal is: "you said you'd write this glob and the
+  // current diff doesn't touch it" — usually means the declaration is
+  // stale, the task was partially split, or the planning artifact
+  // drifted from reality. Stays advisory (warning, never exit-relevant
+  // in P15 — `--audit-strict` in P15-T6 opts into enforcement).
+  if (declaredUnused.length > 0) {
+    warnings.push("TASK_WRITES_AUDIT_DECLARED_UNUSED");
   }
 
   const baseKind: BaseKind = useBaseRef ? "merge-base" : "working-tree";
