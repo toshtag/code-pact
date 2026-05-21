@@ -1,6 +1,6 @@
 import { realpath } from "node:fs/promises";
 import { dirname, resolve, sep } from "node:path";
-import { RelativePosixPath } from "./schemas/adapter-manifest.ts";
+import { RelativePosixPath } from "./schemas/relative-path.ts";
 
 // ---------------------------------------------------------------------------
 // Neutral path-safety module

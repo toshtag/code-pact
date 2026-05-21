@@ -17,6 +17,19 @@ describe("PhaseRef", () => {
       PhaseRef.parse({ id: "P1", path: "design/phases/P1.yaml", weight: -5 }),
     ).toThrow();
   });
+
+  it.each([
+    "../P1.yaml",
+    "/tmp/P1.yaml",
+    "design/roadmap.yaml",
+    "design/phases/P1.md",
+    "./design/phases/P1.yaml",
+    "design/phases/../P1.yaml",
+    "design/phases/.yaml",
+    "design\\phases\\P1.yaml",
+  ])("rejects unsafe or non-phase path %s", (path) => {
+    expect(() => PhaseRef.parse({ id: "P1", path, weight: 10 })).toThrow();
+  });
 });
 
 describe("Roadmap", () => {

@@ -86,6 +86,14 @@ describe("loadPlanState (strict)", () => {
     await expect(loadPlanState(cwd)).rejects.toThrow();
   });
 
+  it("throws ParseError when the roadmap references an unsafe phase path", async () => {
+    await writeRoadmap(
+      `phases:\n  - id: P1\n    path: ../outside.yaml\n    weight: 10\n`,
+    );
+
+    await expect(loadPlanState(cwd)).rejects.toThrow();
+  });
+
   it("loads progress events when progress.yaml exists", async () => {
     await writeRoadmap(
       `phases:\n  - id: P1\n    path: design/phases/P1.yaml\n    weight: 10\n`,
@@ -144,5 +152,17 @@ describe("collectPlanArtifacts (lenient)", () => {
         (i) => i.code === "SCHEMA_ERROR" && i.file === "design/phases/P1.yaml",
       ),
     ).toBe(true);
+  });
+
+  it("reports unsafe roadmap phase paths as roadmap schema errors", async () => {
+    await writeRoadmap(
+      `phases:\n  - id: P1\n    path: /tmp/outside.yaml\n    weight: 10\n`,
+    );
+    await writePhase("P1.yaml", PHASE_YAML("P1", ["P1-T1"]));
+
+    const result = await collectPlanArtifacts(cwd);
+    expect(result.state).toBeNull();
+    expect(result.fileIssues.some((i) => i.code === "SCHEMA_ERROR")).toBe(true);
+    expect(result.skippedChecks).toContain("MISSING_PHASE_FILE");
   });
 });

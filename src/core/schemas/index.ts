@@ -5,6 +5,7 @@ export { LocaleCode, LocaleConfig } from "./locale.ts";
 export { AgentRef, Project } from "./project.ts";
 
 export { PhaseRef, Roadmap } from "./roadmap.ts";
+export { RelativePosixPath } from "./relative-path.ts";
 
 export {
   TaskType,
