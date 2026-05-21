@@ -1,8 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { parse as parseYaml } from "yaml";
-import { Roadmap } from "../core/schemas/roadmap.ts";
-import { Phase, type PhaseStatus } from "../core/schemas/phase.ts";
+import { type PhaseStatus } from "../core/schemas/phase.ts";
 import { loadProgressLog } from "../core/progress/io.ts";
 import {
   deriveTaskState,
@@ -14,6 +12,7 @@ import {
   type WriteRefusalReason,
 } from "../core/finalize/safe-write.ts";
 import type { TaskStatusDiff } from "../core/finalize/diff.ts";
+import { resolveTaskInRoadmap } from "../core/plan/resolve-task.ts";
 
 // ---------------------------------------------------------------------------
 // `task finalize <task-id>` — v1.2 P11
@@ -75,42 +74,6 @@ export type TaskFinalizeResult =
       kind: "already_finalized";
     });
 
-type RoadmapHit = { phaseId: string; file: string };
-
-async function resolveTaskPhase(
-  cwd: string,
-  taskId: string,
-): Promise<RoadmapHit> {
-  const roadmapRaw = await readFile(join(cwd, "design", "roadmap.yaml"), "utf8");
-  const roadmap = Roadmap.parse(parseYaml(roadmapRaw) as unknown);
-
-  const hits: RoadmapHit[] = [];
-  for (const ref of roadmap.phases) {
-    const phaseRaw = await readFile(join(cwd, ref.path), "utf8");
-    const phase = Phase.parse(parseYaml(phaseRaw) as unknown);
-    if (phase.tasks?.some((t) => t.id === taskId)) {
-      hits.push({ phaseId: phase.id, file: ref.path });
-    }
-  }
-
-  if (hits.length === 0) {
-    const err = new Error(`Task "${taskId}" not found in any phase.`);
-    (err as NodeJS.ErrnoException).code = "TASK_NOT_FOUND";
-    throw err;
-  }
-  if (hits.length > 1) {
-    const err = new Error(
-      `Task "${taskId}" exists in multiple phases: ${hits.map((h) => h.phaseId).join(", ")}`,
-    );
-    (err as NodeJS.ErrnoException).code = "AMBIGUOUS_TASK_ID";
-    (err as NodeJS.ErrnoException & { phases?: string[] }).phases = hits.map(
-      (h) => h.phaseId,
-    );
-    throw err;
-  }
-  return hits[0]!;
-}
-
 async function fileExists(p: string): Promise<boolean> {
   try {
     await readFile(p, "utf8");
@@ -126,8 +89,14 @@ export async function runTaskFinalize(
   const { cwd, taskId } = opts;
   const write = opts.write === true;
 
-  // 1. Resolve task → phase + file.
-  const { phaseId, file } = await resolveTaskPhase(cwd, taskId);
+  // 1. Resolve task → phase + file. The shared resolver returns
+  // `phasePath`; alias to the local `file` to keep the rest of this
+  // function (which feeds `file` into the safe-write classifier and
+  // the public FinalizeContext) byte-identical.
+  const { phaseId, phasePath: file } = await resolveTaskInRoadmap(
+    cwd,
+    taskId,
+  );
 
   // 2. Derive current state from progress.yaml.
   const { log } = await loadProgressLog(cwd);

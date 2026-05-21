@@ -2,14 +2,13 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { Project } from "../core/schemas/project.ts";
-import { Roadmap } from "../core/schemas/roadmap.ts";
-import { Phase } from "../core/schemas/phase.ts";
 import type { ProgressEvent } from "../core/schemas/progress-event.ts";
 import {
   appendEvent,
   loadProgressLog,
 } from "../core/progress/io.ts";
 import { deriveTaskState } from "../core/progress/task-state.ts";
+import { resolveTaskInRoadmap } from "../core/plan/resolve-task.ts";
 import { runVerify, type CheckResult } from "./verify.ts";
 
 export type TaskCompleteOptions = {
@@ -47,40 +46,6 @@ export type TaskCompleteResult =
       verify: { ok: true; checks: CheckResult[] };
     };
 
-/**
- * Mirrors `task-context.ts:resolveTaskPhase`. Collects every phase that
- * contains the task id and raises AMBIGUOUS_TASK_ID when more than one
- * matches. Kept here (not extracted) to keep this PR contained.
- */
-async function resolveTaskPhase(cwd: string, taskId: string): Promise<string> {
-  const roadmapRaw = await readFile(join(cwd, "design", "roadmap.yaml"), "utf8");
-  const roadmap = Roadmap.parse(parseYaml(roadmapRaw) as unknown);
-
-  const hits: string[] = [];
-  for (const ref of roadmap.phases) {
-    const phaseRaw = await readFile(join(cwd, ref.path), "utf8");
-    const phase = Phase.parse(parseYaml(phaseRaw) as unknown);
-    if (phase.tasks?.some((t) => t.id === taskId)) {
-      hits.push(phase.id);
-    }
-  }
-
-  if (hits.length === 0) {
-    const err = new Error(`Task "${taskId}" not found in any phase.`);
-    (err as NodeJS.ErrnoException).code = "TASK_NOT_FOUND";
-    throw err;
-  }
-  if (hits.length > 1) {
-    const err = new Error(
-      `Task "${taskId}" exists in multiple phases: ${hits.join(", ")}`,
-    );
-    (err as NodeJS.ErrnoException).code = "AMBIGUOUS_TASK_ID";
-    (err as NodeJS.ErrnoException & { phases?: string[] }).phases = hits;
-    throw err;
-  }
-  return hits[0]!;
-}
-
 async function loadProject(cwd: string): Promise<Project> {
   const raw = await readFile(join(cwd, ".code-pact", "project.yaml"), "utf8");
   return Project.parse(parseYaml(raw) as unknown);
@@ -111,7 +76,7 @@ export async function runTaskComplete(
   }
 
   // ---- Step 1: resolve phase from task id ----
-  const phaseId = await resolveTaskPhase(cwd, taskId);
+  const { phaseId } = await resolveTaskInRoadmap(cwd, taskId);
 
   // ---- Step 2: derive current state ----
   const { log } = await loadProgressLog(cwd);
