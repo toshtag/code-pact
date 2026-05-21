@@ -38,3 +38,6 @@ phases:
   - id: P13
     path: design/phases/P13-planning-ux-init-hardening.yaml
     weight: 15
+  - id: P14
+    path: design/phases/P14-governance.yaml
+    weight: 25

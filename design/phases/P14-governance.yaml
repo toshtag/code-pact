@@ -1,0 +1,451 @@
+id: P14
+name: Governance
+weight: 25
+confidence: medium
+risk: low
+status: planned
+objective: |
+  Add a deterministic governance layer on top of P10–P13's schema /
+  mutation / guidance / UX foundations. P14 is intentionally narrow:
+  three new code surfaces (advisory write lock, reserved-id
+  creation-time block, task→phase resolver core extraction) plus
+  four docs-only governance decisions (protected-path strict-mode
+  guidance, declared-writes-as-review-surface clarification,
+  roadmap mutation policy table, phase status manual-flip
+  convention). Larger governance (configurable protected paths,
+  actual write enforcement against declared writes, phase status
+  auto-flip implementation, --force-lock recovery, progress.yaml
+  locking) is explicitly deferred to P15+. Every change is
+  additive on the CLI contract: no new commands, no new schema
+  fields, one new public error code (LOCK_HELD), and no
+  behavioural changes to existing Stable commands beyond the new
+  lock acquisition (which is a transient retryable failure mode,
+  not a behavioural change to the success path).
+non_goals:
+  - any change to existing Stable command behaviour on the success path (task complete / task finalize / phase reconcile / task runbook / phase runbook / task add / init / phase import all unchanged on success)
+  - configurable protected paths via project.yaml / env (P15+)
+  - actual write enforcement against declared `writes` (P15+ — needs runner or VCS integration)
+  - phase status auto-flip implementation (new flag or new command; P14 documents the manual-flip convention but defers code to a future RFC)
+  - "`--force-lock` flag for stale lock recovery (P15+)"
+  - progress.yaml write locking (existing append-only contract makes lock-free safe)
+  - lock TTL / automatic stale detection
+  - cross-phase / multi-project locking
+  - configurable reserved-id list (TUTORIAL is the only reserved id in P14)
+  - "`RESERVED_ID_USAGE` advisory plan-lint diagnostic on existing TUTORIAL phases (P14 only blocks at creation time)"
+  - "new `--strict` semantics (P14 uses existing binary promotion; selective per-code promotion is P15+)"
+  - any LLM / RAG / MCP / multi-agent orchestration / scheduler / issue-tracker integration
+  - new task or phase schema field
+  - new commands (only one new public error code; everything else is additive on existing commands)
+definition_of_done:
+  - design/decisions/governance-rfc.md exists and is marked accepted
+  - design/roadmap.yaml lists P14
+  - design/phases/P14-governance.yaml exists with this objective and tasks list
+  - "the design-mutating paths acquire `.code-pact/locks/write.lock` at the CLI command handler level (not inside createPhase) and release on exit: createPhase callers (`init` sample-phase path, `phase add`, `phase new`, `phase import`) — for `phase import` the lock is held once around the entire multi-phase apply loop (no per-`createPhase` acquisition); `task add` write path; `task finalize --write`; `phase reconcile --write`"
+  - "`LOCK_HELD` ships in `KNOWN_CODES.public` and `docs/cli-contract.md`, with `data.lock_holder` carrying `{ pid, hostname, cmd, created_at }`"
+  - "`phase add --id TUTORIAL` and `phase import` of a TUTORIAL phase are blocked with `CONFIG_ERROR` at creation time. `init --sample-phase` continues to create TUTORIAL via an internal-only bypass on `createPhase`"
+  - "`phase import` validates the entire input for reserved-id TUTORIAL via a preflight scan before calling `createPhase` — if any imported phase carries `id: TUTORIAL`, the entire import fails with `CONFIG_ERROR` before any phase YAML or roadmap entry is written. Partial imports (some phases written, then TUTORIAL fails mid-loop) are not possible"
+  - "task→phase resolver is extracted into `src/core/plan/resolve-task.ts` exposing `resolveTaskInRoadmap` and `resolveTaskInPlanState`; the 8 duplicated sites (7 commands + 1 manual scan in task-runbook) migrate to the helper; existing unit tests for those commands pass unchanged"
+  - docs/cli-contract.md gains (a) the Public codes table entry for `LOCK_HELD`, (b) a roadmap mutation policy section, (c) lock semantics notes on the five design-mutating commands, (d) a `--strict` semantics note, (e) the reserved-id block on `phase add` / `phase import`
+  - docs/migration.md gains a v1.4.x → v1.5.0 section covering the four governance changes
+  - "docs/dogfood.md Troubleshooting gains a `LOCK_HELD` entry; the \"Adding work\" + release-prep sections gain guidance \"do not run `plan lint --strict` in release prep against the dogfood corpus\" (because P10-T1 / P10-T6 / P11-T1 declare legitimate writes against `design/roadmap.yaml` and `design/phases/*.yaml`)"
+  - "`KNOWN_CODES.public` extension contains exactly one new code (`LOCK_HELD`). The full surface remains additive"
+  - "`tests/integration/json-stdout.test.ts` continues to pass for every Stable command; new entries are added for LOCK_HELD and reserved-id CONFIG_ERROR paths"
+  - "`tests/integration/pack-byte-identical.test.ts` continues to pass (no `task context` pack change in P14)"
+  - existing wizard + non-interactive `task add` behaviour unchanged
+verification:
+  commands:
+    - pnpm typecheck
+    - pnpm test
+    - pnpm build
+    - node dist/cli.js plan lint --json
+    - node dist/cli.js plan normalize --check --json
+    - node dist/cli.js plan analyze --json
+    - node dist/cli.js validate --json
+    - node dist/cli.js doctor --json
+tasks:
+  - id: P14-T1
+    type: architecture
+    ambiguity: medium
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: planned
+    decision_refs:
+      - design/decisions/governance-rfc.md
+    writes:
+      - design/roadmap.yaml
+      - design/phases/P14-governance.yaml
+      - design/decisions/governance-rfc.md
+    acceptance_refs:
+      - design/decisions/governance-rfc.md
+    description: |
+      RFC acceptance. Register P14 in design/roadmap.yaml. Land
+      the design/decisions/governance-rfc.md document with
+      `Status: proposed`. Flip the RFC status line to `accepted`
+      in a follow-up commit on this PR before merge per the RFC
+      lifecycle. No code change in this task — its purpose is to
+      lock the governance decisions (advisory lock model with
+      LOCK_HELD as new public code, reserved-id creation-time
+      block via createPhase + bypass flag, task→phase resolver
+      core extraction, protected-path strict-mode as docs-only,
+      declared-writes as review-surface only, roadmap mutation
+      policy table, phase status manual-flip convention, P15+
+      deferrals) before any src/ touches.
+  - id: P14-T2
+    type: docs
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: planned
+    depends_on:
+      - P14-T1
+    decision_refs:
+      - design/decisions/governance-rfc.md
+    reads:
+      - src/commands/plan-lint.ts
+      - src/core/plan/checks.ts
+      - src/core/glob.ts
+      - docs/cli-contract.md
+      - docs/dogfood.md
+    writes:
+      - docs/cli-contract.md
+      - docs/dogfood.md
+    acceptance_refs:
+      - docs/cli-contract.md
+    description: |
+      Protected-path strict-mode docs. Existing `plan lint
+      --strict` behaviour already promotes `TASK_WRITES_PROTECTED_
+      PATH` (and all other warnings) to exit-relevant. P14
+      documents this in docs/cli-contract.md § Plan diagnostic
+      codes and the `--strict` semantics section. Adds explicit
+      guidance to docs/dogfood.md: "release prep does NOT use
+      `plan lint --strict` because the dogfood corpus contains
+      legitimate `TASK_WRITES_PROTECTED_PATH` advisories on P10-
+      T1 / P10-T6 / P11-T1 declared writes against design YAML
+      files". No code change. Configurable protected paths
+      remain a P15+ candidate.
+  - id: P14-T3
+    type: docs
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: planned
+    depends_on:
+      - P14-T1
+    decision_refs:
+      - design/decisions/governance-rfc.md
+    reads:
+      - docs/concepts/finalization-reconciliation.md
+      - docs/concepts/runbook.md
+      - src/commands/task-finalize.ts
+      - src/commands/task-runbook.ts
+    writes:
+      - docs/concepts/finalization-reconciliation.md
+      - docs/concepts/runbook.md
+    acceptance_refs:
+      - docs/concepts/finalization-reconciliation.md
+    description: |
+      Declared writes are review surface (P14 governance) not
+      enforcement (P15+). Adds a "Declared writes as a governance
+      review surface" subsection to docs/concepts/finalization-
+      reconciliation.md and docs/concepts/runbook.md, explicitly
+      noting that `task finalize` and `task runbook` already
+      surface `declared_writes` (P11 / P12) for human review, and
+      that actual write enforcement (git diff comparison /
+      runner integration) is P15+ scope. No code change.
+  - id: P14-T4
+    type: feature
+    ambiguity: low
+    risk: low
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: planned
+    depends_on:
+      - P14-T1
+    decision_refs:
+      - design/decisions/governance-rfc.md
+    reads:
+      - src/core/services/createPhase.ts
+      - src/commands/init.ts
+      - src/commands/phase-import.ts
+      - src/commands/phase.ts
+      - docs/cli-contract.md
+      - docs/migration.md
+    writes:
+      - src/core/services/createPhase.ts
+      - src/commands/init.ts
+      - src/commands/phase-import.ts
+      - tests/unit/core/services/createPhase.test.ts
+      - tests/unit/commands/phase-import.test.ts
+      - tests/integration/json-stdout.test.ts
+      - docs/cli-contract.md
+      - docs/migration.md
+      - docs/concepts/finalization-reconciliation.md
+    acceptance_refs:
+      - design/decisions/governance-rfc.md
+    description: |
+      Roadmap mutation policy docs + phase status manual-flip
+      convention docs + reserved-id creation-time block code.
+      (a) Adds a roadmap mutation policy table to docs/cli-
+      contract.md naming the four writers (init sample-phase
+      path, phase add, phase new, phase import — all via
+      createPhase) and the explicit non-writers (task lifecycle
+      commands). (b) Adds a phase-status manual-flip convention
+      note to docs/concepts/finalization-reconciliation.md and
+      docs/migration.md: "Release prep flips the phase's own
+      `status` field by hand after `phase reconcile --write`
+      finishes; auto-flip implementation is future RFC scope."
+      (c) Implements reserved-id block in createPhase: rejects
+      `id === "TUTORIAL"` unless an internal `_isSampleCreation:
+      true` flag is set (which only `writeSamplePhase` passes).
+      Reuses CONFIG_ERROR; no new error code. `phase import`
+      additionally performs a preflight scan of the entire
+      input for any `id: TUTORIAL` entry BEFORE calling
+      `createPhase` even once — if found, raise CONFIG_ERROR
+      and write nothing. This prevents partial imports where
+      earlier phases would be created and later ones rejected.
+      Tests assert: (1) `phase add --id TUTORIAL` → CONFIG_ERROR
+      with no roadmap mutation; (2) `phase import` containing a
+      TUTORIAL entry in any position rejects the entire input
+      and the roadmap is byte-identical; (3) `init --sample-phase`
+      continues to succeed.
+  - id: P14-T5
+    type: feature
+    ambiguity: medium
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: planned
+    depends_on:
+      - P14-T1
+    decision_refs:
+      - design/decisions/governance-rfc.md
+    reads:
+      - src/io/atomic-text.ts
+      - src/core/services/createPhase.ts
+      - src/commands/task-add.ts
+      - src/commands/task-finalize.ts
+      - src/commands/phase-reconcile.ts
+      - src/commands/init.ts
+      - src/commands/phase.ts
+      - src/commands/phase-new.ts
+      - src/commands/phase-import.ts
+      - src/cli.ts
+      - tests/unit/error-code-surface.test.ts
+    writes:
+      - src/core/locks/write-lock.ts
+      - src/cli.ts
+      - tests/unit/core/locks/write-lock.test.ts
+      - tests/integration/json-stdout.test.ts
+      - tests/unit/error-code-surface.test.ts
+      - docs/cli-contract.md
+    acceptance_refs:
+      - design/decisions/governance-rfc.md
+    description: |
+      Advisory lock model. New module src/core/locks/write-lock.ts
+      exposing `acquireWriteLock(cwd, cmd): Promise<LockHandle>`
+      and `LockHandle.release(): Promise<void>`. Implementation
+      uses `fs.writeFile` with `{ flag: "wx" }` for atomic
+      exclusive create. Lock file content is JSON `{ pid,
+      hostname, cmd, created_at }`. On EEXIST, reads the existing
+      lock content and throws an Error with `.code = "LOCK_HELD"`
+      and `.lock_holder` carrying the diagnostic struct.
+
+      Integration: lock is acquired at the CLI command handler
+      level, NOT inside createPhase. This gives `phase import`
+      multi-phase batch transactionality: cmdPhaseImport acquires
+      the lock once before calling runPhaseImport, holds it
+      through the entire apply loop (every createPhase call
+      inside is covered by the same single acquisition), and
+      releases on exit (success or failure). The seven direct
+      acquisition points are:
+        - cmdInit (when --sample-phase or wizard-yes triggers
+          writeSamplePhase)
+        - cmdPhaseAdd
+        - cmdPhaseNew (after wizard prompts finish)
+        - cmdPhaseImport (single acquisition covers the whole
+          multi-phase loop)
+        - cmdTaskAdd (write path: both wizard and non-interactive)
+        - cmdTaskFinalize (only when --write)
+        - cmdPhaseReconcile (only when --write — single
+          acquisition covers the whole reconcile batch)
+      createPhase itself is lock-agnostic (it assumes the caller
+      already holds the lock when batch mutation is in play).
+      Read-only commands do NOT acquire the lock.
+
+      Test escape: respects `CODE_PACT_DISABLE_LOCKS=1` env var
+      to skip acquisition. The env var is for tests UNRELATED
+      to lock behaviour (typically set globally in vitest setup
+      for parallel test runs). Lock-specific unit and integration
+      tests must run with the env var unset to exercise real
+      acquisition / EEXIST paths — these tests explicitly delete
+      the env var before running. The env var is NOT documented
+      in docs/cli-contract.md or any public-facing surface;
+      it's a test-only escape.
+
+      Adds `LOCK_HELD` to KNOWN_CODES.public + docs/cli-contract.md.
+      New unit tests for the helper (acquire / release / EEXIST
+      → LOCK_HELD with lock_holder); these tests run with
+      CODE_PACT_DISABLE_LOCKS unset. New integration test entry
+      for LOCK_HELD JSON envelope (concurrent invocation
+      simulated by manually creating the lock file before the
+      second command runs).
+  - id: P14-T6
+    type: refactor
+    ambiguity: low
+    risk: low
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: planned
+    depends_on:
+      - P14-T1
+    decision_refs:
+      - design/decisions/governance-rfc.md
+    reads:
+      - src/commands/task-context.ts
+      - src/commands/task-start.ts
+      - src/commands/task-block.ts
+      - src/commands/task-resume.ts
+      - src/commands/task-complete.ts
+      - src/commands/task-status.ts
+      - src/commands/task-finalize.ts
+      - src/commands/task-runbook.ts
+      - src/core/plan/state.ts
+    writes:
+      - src/core/plan/resolve-task.ts
+      - src/commands/task-context.ts
+      - src/commands/task-start.ts
+      - src/commands/task-block.ts
+      - src/commands/task-resume.ts
+      - src/commands/task-complete.ts
+      - src/commands/task-status.ts
+      - src/commands/task-finalize.ts
+      - src/commands/task-runbook.ts
+      - tests/unit/core/plan/resolve-task.test.ts
+    acceptance_refs:
+      - design/decisions/governance-rfc.md
+    description: |
+      Task→phase resolver core extraction. New module src/core/
+      plan/resolve-task.ts exporting `resolveTaskInRoadmap(cwd,
+      taskId): Promise<{ phaseId, phasePath }>` (I/O variant; for
+      commands that haven't loaded PlanState) and
+      `resolveTaskInPlanState(state, taskId): { phaseId, phase,
+      task }` (pure variant; for commands that already have
+      PlanState — task-runbook). Migrates the 7 string-returning
+      duplicate sites + the 1 struct-returning variant
+      (task-finalize uses `phasePath`, not `file`, in the new
+      API for consistency). The task-runbook manual ambiguity
+      rescan is replaced by `resolveTaskInPlanState` (the helper
+      is responsible for detecting ambiguity, not the caller).
+      Error codes (`TASK_NOT_FOUND` / `AMBIGUOUS_TASK_ID`) are
+      emitted identically — pure refactor. Existing unit tests
+      for all 8 commands pass unchanged, validating the no-
+      behaviour-change contract. New unit tests for the helper
+      cover ambiguity / not-found / single-match / no-roadmap
+      paths.
+  - id: P14-T7
+    type: docs
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: medium
+    verification_strength: medium
+    expected_duration: short
+    status: planned
+    depends_on:
+      - P14-T4
+      - P14-T5
+      - P14-T6
+    decision_refs:
+      - design/decisions/governance-rfc.md
+    reads:
+      - docs/cli-contract.md
+      - docs/migration.md
+      - docs/getting-started.md
+      - docs/dogfood.md
+      - docs/concepts/sample-phase.md
+    writes:
+      - docs/migration.md
+      - docs/getting-started.md
+      - docs/dogfood.md
+      - docs/concepts/sample-phase.md
+      - docs/concepts/governance.md
+    acceptance_refs:
+      - docs/migration.md
+    description: |
+      Docs / migration / dogfood update. Adds the v1.4.x →
+      v1.5.0 section to docs/migration.md covering the four
+      governance changes (reserved-id block, advisory lock,
+      resolver refactor as internal-only, the four docs-only
+      governance items). Adds a Troubleshooting entry for
+      LOCK_HELD to docs/dogfood.md (manual lock removal as last
+      resort only — do NOT document the test-only
+      `CODE_PACT_DISABLE_LOCKS` escape in public docs).
+      Mentions lock acquisition in docs/getting-started.md.
+      Updates docs/concepts/sample-phase.md with the TUTORIAL
+      creation-block notice (`phase add --id TUTORIAL` is
+      rejected; `init --sample-phase` is the only sanctioned
+      path). Adds docs/concepts/governance.md as the overview
+      walkthrough (mirrors docs/concepts/{runbook,finalization-
+      reconciliation,task-readiness-fields,sample-phase}.md
+      shape).
+  - id: P14-T8
+    type: docs
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: medium
+    verification_strength: medium
+    expected_duration: short
+    status: planned
+    depends_on:
+      - P14-T2
+      - P14-T3
+      - P14-T4
+      - P14-T5
+      - P14-T6
+      - P14-T7
+    decision_refs:
+      - design/decisions/governance-rfc.md
+    reads:
+      - CHANGELOG.md
+      - package.json
+      - design/phases/P14-governance.yaml
+    writes:
+      - CHANGELOG.md
+      - package.json
+      - design/phases/P14-governance.yaml
+    acceptance_refs:
+      - CHANGELOG.md
+    description: |
+      v1.5.0 release prep + governance dogfood validation. Bumps
+      package.json 1.4.0 → 1.5.0. Prepends CHANGELOG.md [1.5.0]
+      entry. Runs `phase reconcile P14 --write` to mechanize the
+      task-status flip (continuing the P11 release-prep
+      mechanization pattern, fourth consecutive). Runs `task
+      complete P14-T8` + `task finalize P14-T8 --write` per the
+      P13-T6 release-prep-as-phase-task pattern. Hand-edits the
+      P14 phase status to `done`. Records a governance dogfood
+      log in the PR description exercising every new flag /
+      behaviour in a tmp project: `phase add --id TUTORIAL` →
+      CONFIG_ERROR; two concurrent `task finalize --write`
+      invocations → second one returns LOCK_HELD with
+      `data.lock_holder`; resolver refactor invisible to user
+      (existing commands still emit TASK_NOT_FOUND /
+      AMBIGUOUS_TASK_ID identically). No src/ change in this
+      task itself — chore commit that validates the v1.5.0
+      governance additions.
