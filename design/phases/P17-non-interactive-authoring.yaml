@@ -203,7 +203,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
     description: |
       Apply T1–T3 patterns to `plan constitution`. Same three
       input modes (`--from-file`, `--stdin`, flag-driven), same
@@ -217,12 +217,16 @@ tasks:
       - design/phases/P17-non-interactive-authoring.yaml
     reads:
       - src/commands/plan-constitution.ts
+      - src/commands/plan-brief.ts
       - src/cli.ts
+      - tests/unit/commands/plan-constitution.test.ts
     writes:
       - src/commands/plan-constitution.ts
       - src/cli.ts
+      - tests/unit/commands/plan-constitution.test.ts
       - tests/integration/plan-constitution-non-interactive.test.ts
       - docs/cli-contract.md
+      - CHANGELOG.md
     acceptance_refs:
       - design/phases/P17-non-interactive-authoring.yaml
   - id: P17-T5
