@@ -44,6 +44,28 @@ identifiers. Starting with v1.0.0, stable releases use plain
   `plan lint --strict` per the existing binary promotion. Heuristic-only:
   the goal is to catch obvious "writes everywhere" declarations, not to
   encode a precise breadth metric.
+- **`plan constitution` non-interactive trifecta** (v1.6+, P17-T4).
+  Applies the P17-T1/T2/T3 plan-brief patterns to `plan constitution`:
+  `--from-file <yaml>` reads a YAML file, `--stdin` reads YAML from
+  `process.stdin`, and `--description <text>` / `--principle <text>`
+  (repeatable) supply the fields as command-line strings. Three
+  pairwise-mutually-exclusive modes; passing any combination returns
+  `CONFIG_ERROR` (exit 2). YAML schema (`ConstitutionFileSchema`)
+  has both fields optional and defaulted to empty so empty inputs
+  fall through to the locale-specific template defaults — matches
+  the wizard's empty-input behaviour exactly. Failure envelopes
+  mirror the plan-brief shapes: `--from-file` failures carry
+  `data: { detail, path }` with detail enum
+  `unsafe_path | unreadable | invalid_yaml | schema_invalid`;
+  `--stdin` failures carry `data: { detail, source: "stdin" }` with
+  detail enum `stdin_read_failed | invalid_yaml | schema_invalid`.
+  Flag-driven mode requires no specific fields (both are optional);
+  presence of any flag is the trigger. The non-TTY guard message
+  now lists all three modes. Wizard path unchanged. Constitution.md
+  produced via any non-interactive mode is byte-identical to one
+  produced by the wizard for equivalent input. P17 now covers both
+  `plan brief` and `plan constitution`; the v1.6 non-interactive
+  authoring contract is feature-complete.
 - **`plan brief` flag-driven mode** (v1.6+, P17-T3). New
   `--what <text>` / `--who <text>` / `--differentiator <text>` flags
   supply the brief fields directly as command-line strings. Mirrors

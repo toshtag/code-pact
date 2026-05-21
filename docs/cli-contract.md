@@ -391,9 +391,44 @@ JSON output includes `has_brief`, `has_constitution`, and `clipboard_copied` fla
 
 When `has_brief` or `has_constitution` is false, a leading step recommends `plan brief` / `plan constitution` first. The field is additive: existing JSON consumers (which read only `prompt` / `has_brief` / `has_constitution` / `clipboard_copied`) see no shape change.
 
-### `plan constitution [--force]`
+### `plan constitution [--force] [--from-file <yaml> | --stdin | --description <s> --principle <s>...] [--json]`
 
-Interactive wizard that collects a project description and comma-separated core principles, then writes `design/constitution.md`. Requires a TTY; exits 2 in non-interactive mode. `--force` overwrites an existing file. Empty input falls back to i18n defaults so the file is always a valid starting point.
+Interactive wizard that collects a project description and core principles, then writes `design/constitution.md`. Stability: **Stable (v0.2+)**. `--from-file`, `--stdin`, and `--description` / `--principle` are **Stable (v1.6+)** under P17-T4 (parallel to `plan brief` P17-T1 / T2 / T3).
+
+Default behaviour requires a TTY; exits 2 with `CONFIG_ERROR` in non-interactive mode. `--force` overwrites an existing file. Empty input — whether from the wizard, an empty YAML body, or absent flags — falls back to i18n defaults so the file is always a valid starting point.
+
+`plan constitution` supports three pairwise-mutually-exclusive non-interactive input modes plus the default TTY wizard:
+
+| Mode | Trigger | Source of content |
+| --- | --- | --- |
+| TTY wizard | no input flags + stdin is a TTY | interactive prompts (description + comma-separated principles) |
+| `--from-file` | `--from-file <yaml>` (v1.6+, P17-T4) | YAML file on disk |
+| `--stdin` | `--stdin` (v1.6+, P17-T4) | YAML on `process.stdin` |
+| flag-driven | any of `--description`, `--principle` (v1.6+, P17-T4) | command-line flags (`--principle` may repeat) |
+
+Passing any combination of the three non-interactive modes returns `CONFIG_ERROR` (exit 2) with a message listing the modes detected.
+
+YAML schema for `--from-file` and `--stdin`:
+
+```yaml
+description: <string, optional, defaults to "">
+principles:
+  - <string>
+  - <string>
+  # ... optional, defaults to []
+```
+
+Both fields are optional. Empty fields fall through to the locale-specific template defaults — same behaviour as the wizard's empty-input path. Unknown keys are rejected (strict schema).
+
+**`--from-file <yaml>` (v1.6+, P17-T4).** Reads the file at `<yaml>` (repo-root-relative; `assertSafeRelativePath` enforced). Failures return `CONFIG_ERROR` (exit 2) with the structured envelope `{ ok: false, error: { code: "CONFIG_ERROR", message }, data: { detail, path } }`. Detail enum: `unsafe_path | unreadable | invalid_yaml | schema_invalid`.
+
+**`--stdin` (v1.6+, P17-T4).** Reads the same YAML schema from `process.stdin`. Failure envelope mirrors `--from-file` with `source: "stdin"` replacing `path`; detail enum is `stdin_read_failed | invalid_yaml | schema_invalid` (the `unsafe_path` / `unreadable` details do not apply to stdin).
+
+**`--description <text>` / `--principle <text>` (v1.6+, P17-T4).** Supplies the constitution fields directly as command-line strings. Presence of ANY of the two flags triggers flag-driven mode. Both flags are optional — passing only `--description` uses locale-default principles; passing only `--principle` (one or more occurrences) uses the locale-default description. `--principle` is repeatable (`--principle "First" --principle "Second"`). Empty / absent fields fall back to locale defaults, identical to the wizard's empty-input behaviour.
+
+On success, `--json` emits `{ ok: true, data: { path: "..." } }` (same envelope as the wizard path on all four authoring modes). `design/constitution.md` produced via any non-interactive mode is byte-identical to one produced by the wizard for equivalent input.
+
+All non-interactive modes are partial-write-safe: any failure yields no write to `design/constitution.md`.
 
 ### `plan lint [--strict] [--include-quality] [--json]` (v0.7)
 
