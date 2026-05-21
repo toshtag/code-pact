@@ -21,45 +21,37 @@ objective: |
   layer additional input modes and extend the contract to
   `plan constitution`.
 non_goals:
-  - LLM API integration (no Anthropic / OpenAI SDK calls — the
-    user supplies brief / constitution content via their own
-    tooling)
-  - changes to the wizard UX itself (the wizard remains the
-    default TTY path, unchanged)
-  - changes to `design/brief.md` / `design/constitution.md`
-    file formats (atomic-write of the same template via
-    `generateBriefMd` / `generateConstitutionMd`)
-  - per-agent customization of brief / constitution authoring
-    paths (the input shape is agent-agnostic, same as the
-    wizard)
-  - retroactive non-interactive paths for already-implemented
-    wizards (`init`, `phase new`) — those already have
-    flag-driven equivalents via `init --non-interactive` and
-    `phase add`
+  - LLM API integration (no Anthropic / OpenAI SDK calls — the user supplies
+    brief / constitution content via their own tooling)
+  - changes to the wizard UX itself (the wizard remains the default TTY path,
+    unchanged)
+  - changes to `design/brief.md` / `design/constitution.md` file formats
+    (atomic-write of the same template via `generateBriefMd` /
+    `generateConstitutionMd`)
+  - per-agent customization of brief / constitution authoring paths (the input
+    shape is agent-agnostic, same as the wizard)
+  - retroactive non-interactive paths for already-implemented wizards (`init`,
+    `phase new`) — those already have flag-driven equivalents via `init
+    --non-interactive` and `phase add`
 definition_of_done:
-  - design/phases/P17-non-interactive-authoring.yaml exists
-    with this objective and tasks list
+  - design/phases/P17-non-interactive-authoring.yaml exists with this objective
+    and tasks list
   - design/roadmap.yaml lists P17
-  - "`plan brief --from-file <yaml>` reads, validates, and applies
-    the supplied YAML, writing `design/brief.md` without
-    requiring a TTY"
-  - non-TTY environments with `--from-file` succeed (no
-    `CONFIG_ERROR`); non-TTY environments without `--from-file`
-    continue to return `CONFIG_ERROR` (v1.5.1 behaviour
-    preserved)
-  - "`--from-file` + `--json` emits `{ok: true, data: {path}}` on
-    success (consistent with the existing TTY-mode JSON envelope)"
-  - file-read / YAML-parse / schema-validation failures all
-    return `CONFIG_ERROR` (exit 2) with a structured message;
-    no partial writes
-  - "`design/brief.md` produced via `--from-file` is byte-
-    identical to one produced via the wizard for the same input"
+  - "`plan brief --from-file <yaml>` reads, validates, and applies the supplied
+    YAML, writing `design/brief.md` without requiring a TTY"
+  - non-TTY environments with `--from-file` succeed (no `CONFIG_ERROR`); non-TTY
+    environments without `--from-file` continue to return `CONFIG_ERROR` (v1.5.1
+    behaviour preserved)
+  - "`--from-file` + `--json` emits `{ok: true, data: {path}}` on success
+    (consistent with the existing TTY-mode JSON envelope)"
+  - file-read / YAML-parse / schema-validation failures all return
+    `CONFIG_ERROR` (exit 2) with a structured message; no partial writes
+  - "`design/brief.md` produced via `--from-file` is byte- identical to one
+    produced via the wizard for the same input"
   - "`tests/integration/json-stdout.test.ts` continues to pass"
-  - human-mode `plan brief` (TTY wizard) is byte-identical to
-    v1.5.1
-  - docs/cli-contract.md documents the `--from-file` flag and
-    the YAML schema (P17-T1 scope only — T2/T3/T4/T5 add their
-    own sections incrementally)
+  - human-mode `plan brief` (TTY wizard) is byte-identical to v1.5.1
+  - docs/cli-contract.md documents the `--from-file` flag and the YAML schema
+    (P17-T1 scope only — T2/T3/T4/T5 add their own sections incrementally)
   - CHANGELOG.md gains a `[Unreleased]` entry covering P17-T1
 verification:
   commands:
@@ -78,7 +70,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: short
-    status: in_progress
+    status: done
     description: |
       `plan brief --from-file <yaml>`. Adds a typed YAML schema
       for the three fields the existing wizard collects (`what`,
