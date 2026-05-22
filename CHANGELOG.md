@@ -15,6 +15,30 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ### Added
 
+- **P21-T2 — Pure recommendation resolver.** New
+  `src/core/recommend/index.ts` exports
+  `resolveRecommendation(opts)` as a pure function that
+  computes the v2 recommendation envelope given an
+  already-loaded task and agent profile, with no I/O of its
+  own. The function is the same orchestration the existing
+  `code-pact recommend` CLI command used to do inline — the
+  six pure modules under `src/core/recommend/` (`tier`,
+  `context-profile`, `planning`, `escalation`, `preflight`,
+  `budget`) are unchanged. `buildStructuredReasons()` moved
+  from the CLI command file to this module. The
+  `code-pact recommend` JSON envelope is byte-identical to
+  v1.10 (verified by diff against the pre-refactor output);
+  the CLI command file shrinks to a thin wrapper around the
+  loaders and the pure resolver. New unit tests in
+  `tests/unit/core/recommend/resolve.test.ts` cover tier
+  routing, model-map fallback, structuredReasons emission,
+  planning derivation, ambiguity-action mapping, and the v2
+  envelope shape invariant. The motivation is the
+  forthcoming `code-pact task prepare` command (P21-T3),
+  which needs to call the recommendation logic with
+  already-loaded task data without paying the CLI's loader
+  cost twice.
+
 - **P21-T1 — Positioning docs.** New `docs/positioning.md`
   defines what `code-pact` is, what it deliberately is not
   (LLM API calls, orchestration framework, RAG / vector

@@ -1,0 +1,126 @@
+import type { AgentProfile } from "../schemas/agent-profile.ts";
+import type { ModelTier } from "../schemas/model-profile.ts";
+import {
+  RecommendResultV2,
+  type RecommendResultV2 as RecommendResultV2Type,
+  type StructuredReason,
+} from "../schemas/recommend-result.ts";
+import type { Task } from "../schemas/task.ts";
+import { recommendBudgetProfile } from "./budget.ts";
+import { recommendContextProfile } from "./context-profile.ts";
+import { recommendEscalation } from "./escalation.ts";
+import { isPlanningRequired, recommendAmbiguityAction } from "./planning.ts";
+import { recommendPreflight } from "./preflight.ts";
+import { recommendTier, type TierRecommendation } from "./tier.ts";
+
+export type ResolveRecommendationOptions = {
+  phaseId: string;
+  taskId: string;
+  task: Task;
+  agentName: string;
+  agentProfile: AgentProfile;
+};
+
+export type RecommendResult = RecommendResultV2Type;
+
+function buildStructuredReasons(task: Task, tier: ModelTier): StructuredReason[] {
+  const out: StructuredReason[] = [];
+
+  if (task.type === "architecture") {
+    out.push({ factor: "type", value: "architecture", effect: "tier=highest_reasoning" });
+  }
+
+  if (task.ambiguity === "high") {
+    out.push({ factor: "ambiguity", value: "high", effect: "tier=highest_reasoning" });
+  } else if (task.ambiguity === "medium") {
+    out.push({ factor: "ambiguity", value: "medium", effect: "planning_required" });
+  }
+
+  if (task.risk === "high") {
+    out.push({ factor: "risk", value: "high", effect: "planning_required" });
+  }
+
+  if (task.verification_strength === "weak") {
+    out.push({
+      factor: "verification_strength",
+      value: "weak",
+      effect: "tier=highest_reasoning",
+    });
+  }
+
+  if (task.requires_decision === true) {
+    out.push({
+      factor: "requires_decision",
+      value: "true",
+      effect: "ambiguity_action=clarify_before_implementation",
+    });
+  }
+
+  if (
+    task.expected_duration === "long" &&
+    task.write_surface === "high" &&
+    task.ambiguity === "medium" &&
+    task.risk !== "high"
+  ) {
+    out.push({
+      factor: "duration+write_surface",
+      value: "long+high",
+      effect: "ambiguity_action=split_recommended",
+    });
+  }
+
+  if (tier === "cheap_mechanical" && out.length === 0) {
+    out.push({
+      factor: "type+ambiguity+risk",
+      value: `${task.type}+low+low`,
+      effect: "tier=cheap_mechanical",
+    });
+  }
+
+  if (out.length === 0) {
+    out.push({ factor: "defaults", value: "standard", effect: "tier=balanced_coding" });
+  }
+
+  return out;
+}
+
+/**
+ * Pure recommendation resolver. Given an already-loaded task and agent
+ * profile, compute the v2 recommendation envelope.
+ *
+ * No I/O: callers (the `code-pact recommend` CLI command and the
+ * forthcoming `code-pact task prepare` compound command) load the
+ * inputs and pass them in.
+ *
+ * The output is byte-identical to the previous in-place implementation
+ * in `src/commands/recommend.ts`; existing snapshot and JSON envelope
+ * tests are the contract.
+ */
+export function resolveRecommendation(
+  opts: ResolveRecommendationOptions,
+): RecommendResult {
+  const { phaseId, taskId, task, agentName, agentProfile } = opts;
+
+  const rec: TierRecommendation = recommendTier(task);
+  const modelId = agentProfile.model_map[rec.tier] ?? rec.tier;
+
+  const result: RecommendResult = {
+    phaseId,
+    taskId,
+    agentName,
+    tier: rec.tier,
+    effort: rec.effort,
+    modelId,
+    reasons: rec.reasons,
+    contextProfile: recommendContextProfile(task),
+    verificationProfile: task.verification_strength,
+    planningRequired: isPlanningRequired(task),
+    ambiguityAction: recommendAmbiguityAction(task),
+    allowedEscalation: recommendEscalation(rec.tier),
+    preflight: recommendPreflight(task),
+    budgetProfile: recommendBudgetProfile(task),
+    structuredReasons: buildStructuredReasons(task, rec.tier),
+  };
+
+  return RecommendResultV2.parse(result);
+}
