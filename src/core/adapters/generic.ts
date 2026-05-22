@@ -57,6 +57,26 @@ function agentInstructionsMd(profile: AgentProfile, locale: Locale): string {
     `>`,
     `> ${t.packNote}`,
     ``,
+    // v1.7 P16-T3: Agent contract section (same shape as claude-code
+    // / codex). Heading strings are English-locked per
+    // design/decisions/agent-contract-rfc.md so the P16-T4 conformance
+    // regex anchors on them across locales. Body text is localised.
+    `## ${t.agentContract.sectionHeader}`,
+    ``,
+    t.agentContract.intro,
+    ``,
+    `### ${t.agentContract.whenHeader}`,
+    ``,
+    t.agentContract.whenBody,
+    ``,
+    `### ${t.agentContract.verifyHeader}`,
+    ``,
+    t.agentContract.verifyBody,
+    ``,
+    `### ${t.agentContract.failHeader}`,
+    ``,
+    t.agentContract.failBody,
+    ``,
     `## Context directory`,
     ``,
     `Context packs for this agent live under \`${profile.context_dir}/\`.`,
