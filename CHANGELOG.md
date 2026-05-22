@@ -15,6 +15,22 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ### Added
 
+- **P21-T1 — Positioning docs.** New `docs/positioning.md`
+  defines what `code-pact` is, what it deliberately is not
+  (LLM API calls, orchestration framework, RAG / vector
+  database, web UI, external tracker integration, multi-agent
+  orchestration — each ruled out on purpose), the core CLI
+  surfaces, and the success metrics the project measures
+  itself against (context pack p50 / p90 / max bytes,
+  first-pass verification rate, agent command adherence rate,
+  undeclared write rate, adapter drift detection rate).
+  Baseline numbers for the metrics are populated by Evidence
+  Harness v2 (P26); this document fixes the metric set up
+  front so the harness work targets the right shape. The
+  README "Reference docs" table now lists `positioning.md`
+  ahead of the existing getting-started / cli-contract /
+  migration / dogfood / community rows.
+
 - **P21-T0 — Agent Contract v2 RFC + phase registration.**
   `design/decisions/agent-contract-v2-rfc.md` opens at
   `Status: proposed` and locks the design decisions for the
@@ -34,6 +50,19 @@ identifiers. Starting with v1.0.0, stable releases use plain
   gains a P21 entry at weight 25. The status line on the RFC
   flips to `accepted` in a follow-up commit before merge per
   the P11–P20 lifecycle precedent.
+
+### Changed
+
+- **README "Relationship to spec-driven workflows" section
+  removed.** The section's positioning content is replaced by
+  the broader self-contained narrative in
+  `docs/positioning.md`. The README lead (`A vendor-neutral
+  control plane for AI coding agents.`) is unchanged.
+
+- **P21-T0 RFC flipped to `accepted`.** The Agent Contract v2
+  RFC opened at `Status: proposed` in PR #161 and is now
+  locked at `accepted`, closing the P21-T0 lifecycle and
+  unblocking P21-T1..T6 implementation work.
 
 ## [1.10.1] — 2026-05-22
 

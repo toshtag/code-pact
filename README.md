@@ -59,6 +59,7 @@ All three converge on the same per-task agent loop (`recommend` → `task contex
 
 | Doc | What it covers |
 | --- | --- |
+| [`docs/positioning.md`](docs/positioning.md) | What `code-pact` is, what it deliberately is not, the core CLI surfaces, and the success metrics the project measures itself against. |
 | [`docs/getting-started.md`](docs/getting-started.md) | First-thirty-minutes guide (three onboarding paths + the per-task loop). |
 | [`docs/cli-contract.md`](docs/cli-contract.md) | Full flag / exit code / JSON envelope / error code reference and the Stability taxonomy. |
 | [`docs/migration.md`](docs/migration.md) | Upgrade guidance from any prior alpha (v0.6 – v0.9) to v1.0. |
@@ -105,7 +106,3 @@ node dist/cli.js --version
 ```
 
 For dogfooding `code-pact` against `code-pact` itself, see [`docs/dogfood.md`](docs/dogfood.md).
-
-## Relationship to spec-driven workflows
-
-`code-pact` is complementary to spec-style tools that produce structured spec / plan / task documents for agents to read. The difference in emphasis: spec tools optimize the _documents_ an agent reads; `code-pact` optimizes the _command path_ an agent uses to retrieve context and confirm completion. Use both if it fits your workflow.
