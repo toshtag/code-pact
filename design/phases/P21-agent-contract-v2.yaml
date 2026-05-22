@@ -43,22 +43,37 @@ objective: |
 non_goals:
   - shipping `--budget-bytes` or any context truncation policy (deferred to P24)
   - bumping `adapter_schema_version` from 1 to 2 (deferred)
-  - executing the next command on the agent's behalf (`task prepare` returns intent only — no `--execute` flag)
+  - executing the next command on the agent's behalf (`task prepare` returns
+    intent only — no `--execute` flag)
   - splitting `src/cli.ts` into per-command modules (deferred to P27)
   - multi-agent or multi-task orchestration (single task, single agent)
-  - automatic remediation in `adapter conformance` (it is read-only; users re-run `adapter install` / `adapter upgrade` to repair)
-  - emitting `budget_reserved_for_later` from `task context --explain` in P21 (the enum value is reserved for P24)
+  - automatic remediation in `adapter conformance` (it is read-only; users
+    re-run `adapter install` / `adapter upgrade` to repair)
+  - emitting `budget_reserved_for_later` from `task context --explain` in P21
+    (the enum value is reserved for P24)
 definition_of_done:
-  - design/phases/P21-agent-contract-v2.yaml exists with this objective and tasks list (P21-T0)
+  - design/phases/P21-agent-contract-v2.yaml exists with this objective and
+    tasks list (P21-T0)
   - design/roadmap.yaml lists P21 (P21-T0)
-  - "design/decisions/agent-contract-v2-rfc.md exists with `Status: accepted` lock (P21-T0)"
-  - docs/positioning.md exists and is referenced from README's Reference docs table (P21-T1)
-  - "`src/core/recommend/` exposes a pure `resolveRecommendation()` and the existing `code-pact recommend` JSON envelope is byte-identical (P21-T2)"
-  - "`code-pact task prepare <task-id>` ships, is progress-read-only, supports `--dry-run`, returns a structured `next_action` + `commands` envelope, and writes nothing to progress.yaml in any state (P21-T3)"
-  - "`code-pact task context --explain` ships with per-section `bytes` + `reason_code` breakdown; the pack markdown `content` is byte-identical to v1.10 (P21-T4)"
-  - "`code-pact adapter conformance <agent>` ships, shares the required-surface spec with `adapter doctor`, and exits 1 on non-compliance (P21-T5)"
-  - stable adapter templates (`claude-code`, `codex`, `generic`) embed the v2 lifecycle/diagnostic surface and failure guidance so a fresh `adapter install` passes conformance (P21-T5)
-  - docs/agent-contract.md exists and is referenced from README's Reference docs table (P21-T6)
+  - "design/decisions/agent-contract-v2-rfc.md exists with `Status: accepted`
+    lock (P21-T0)"
+  - docs/positioning.md exists and is referenced from README's Reference docs
+    table (P21-T1)
+  - "`src/core/recommend/` exposes a pure `resolveRecommendation()` and the
+    existing `code-pact recommend` JSON envelope is byte-identical (P21-T2)"
+  - "`code-pact task prepare <task-id>` ships, is progress-read-only, supports
+    `--dry-run`, returns a structured `next_action` + `commands` envelope, and
+    writes nothing to progress.yaml in any state (P21-T3)"
+  - "`code-pact task context --explain` ships with per-section `bytes` +
+    `reason_code` breakdown; the pack markdown `content` is byte-identical to
+    v1.10 (P21-T4)"
+  - "`code-pact adapter conformance <agent>` ships, shares the required-surface
+    spec with `adapter doctor`, and exits 1 on non-compliance (P21-T5)"
+  - stable adapter templates (`claude-code`, `codex`, `generic`) embed the v2
+    lifecycle/diagnostic surface and failure guidance so a fresh `adapter
+    install` passes conformance (P21-T5)
+  - docs/agent-contract.md exists and is referenced from README's Reference docs
+    table (P21-T6)
   - CHANGELOG.md gains entries under `[Unreleased]` covering each P21 task
 verification:
   commands:
@@ -77,7 +92,7 @@ tasks:
     write_surface: low
     verification_strength: medium
     expected_duration: short
-    status: planned
+    status: done
     description: |
       RFC acceptance + phase registration.
 
@@ -119,7 +134,7 @@ tasks:
     write_surface: low
     verification_strength: medium
     expected_duration: short
-    status: planned
+    status: done
     description: |
       Self-contained product positioning + success metrics docs.
 
@@ -168,7 +183,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: short
-    status: planned
+    status: done
     description: |
       Extract `resolveRecommendation()` as a pure function in
       `src/core/recommend/` so `task prepare` can call the
@@ -214,7 +229,7 @@ tasks:
     write_surface: high
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
     description: |
       Add `code-pact task prepare <task-id> [--agent <name>]
       [--json] [--dry-run]` as a Stable (v1.11+) compound
@@ -295,7 +310,7 @@ tasks:
     write_surface: high
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
     description: |
       Add `code-pact task context --explain [--json]` as a
       Stable (v1.11+) flag.
@@ -367,7 +382,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
     description: |
       Add `code-pact adapter conformance <agent> [--json]` as
       a Stable (v1.11+) command.
@@ -459,7 +474,7 @@ tasks:
     write_surface: low
     verification_strength: medium
     expected_duration: short
-    status: planned
+    status: done
     description: |
       Ship `docs/agent-contract.md` — the formal definition
       of code-pact's v2 agent contract.
