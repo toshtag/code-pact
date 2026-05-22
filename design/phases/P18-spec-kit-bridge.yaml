@@ -219,7 +219,7 @@ tasks:
     write_surface: low
     verification_strength: medium
     expected_duration: short
-    status: planned
+    status: done
     description: |
       Read-only suggestion extraction for spec.md / plan.md.
       `code-pact spec import --suggest-from <path> --json`
