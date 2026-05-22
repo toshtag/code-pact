@@ -292,6 +292,25 @@ This is a **transient** failure: wait for the holding process to finish and re-r
 
 See [`docs/concepts/governance.md`](concepts/governance.md) for the v1.5 governance walkthrough and [`docs/dogfood.md` § Troubleshooting → `LOCK_HELD`](dogfood.md#lock_held-from-a-design-mutating-command-v15) for the recovery playbook.
 
+## Ingesting external specs (v1.8+, optional)
+
+If you are coming from Spec Kit or a similar spec-driven planning tool and already have a `tasks.md` (or `spec.md` / `plan.md`), the v1.8 **Spec Kit bridge** lets you bootstrap from those artifacts instead of starting from `plan brief`:
+
+```sh
+# Generate a draft phase YAML from a Spec Kit tasks.md (dry-run first)
+code-pact spec import --from tasks.md --phase-id P-feature --json
+
+# Persist to design/phases/P-feature-imported.yaml
+code-pact spec import --from tasks.md --phase-id P-feature --write
+
+# Extract brief / constitution candidates from spec.md without writing
+code-pact spec import --suggest-from spec.md --json
+```
+
+This is a **read-only one-way bridge** — code-pact does not re-implement Spec Kit and does not sync back. If you do not already have spec-driven planning artifacts, you do not need this command; use `init` + `plan brief` + `plan constitution` instead.
+
+See [`docs/spec-kit-bridge.md`](spec-kit-bridge.md) for the full walkthrough, the supported Markdown subset, and the post-import follow-up sequence.
+
 ## Adapter management later
 
 The `init` wizard (or step 5 in the manual / AI-assisted paths) is the only time most projects need to think about adapters. After that, the upgrade path looks like this:
@@ -311,3 +330,4 @@ code-pact adapter doctor --json                        # adapter-scoped health c
 - [`docs/migration.md`](migration.md) — upgrade guidance from any prior alpha (v0.6 – v0.9) up through v1.5.0.
 - [`docs/dogfood.md`](dogfood.md) — the real-project walkthrough, including troubleshooting for the most common error codes.
 - [`docs/concepts/governance.md`](concepts/governance.md) — the v1.5 governance layer (advisory write lock, reserved-id block, roadmap mutation policy, phase status manual-flip convention).
+- [`docs/spec-kit-bridge.md`](spec-kit-bridge.md) — the v1.8 read-only one-way importer for Spec Kit `tasks.md` / `spec.md` / `plan.md` artifacts.

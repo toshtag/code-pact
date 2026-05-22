@@ -3,7 +3,7 @@ name: Spec Kit Bridge
 weight: 25
 confidence: medium
 risk: medium
-status: in_progress
+status: done
 objective: |
   Ship a read-only one-way importer that converts external
   spec-driven planning artifacts (initially the `tasks.md`
@@ -262,7 +262,7 @@ tasks:
     write_surface: low
     verification_strength: medium
     expected_duration: short
-    status: planned
+    status: done
     description: |
       `docs/spec-kit-bridge.md` walkthrough covering both
       the tasks.md → phase YAML import and the spec.md /

@@ -15,6 +15,18 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ### Added
 
+- **P18-T5** — Spec Kit bridge: documentation + getting-started
+  integration (closes P18). New `docs/spec-kit-bridge.md` walks
+  through both `--from` and `--suggest-from` modes, the
+  supported Markdown subset, the generated phase shape, the
+  mutex constraints, and the post-import follow-up sequence.
+  `docs/cli-contract.md` gains a full `## spec import (v1.8+)`
+  section under Stable v1.0 commands with the success / failure
+  envelopes and the `data.detail` enum reference. `docs/getting-
+  started.md` gains a short "Ingesting external specs"
+  subsection pointing at the bridge as one bootstrap option.
+  P18 phase status flips to done since this task closes the phase.
+
 - **P18-T4** — Spec Kit bridge: read-only suggestion extraction
   for `spec.md` / `plan.md` files. New module
   `src/core/spec-import/spec-md-extractor.ts` exports
