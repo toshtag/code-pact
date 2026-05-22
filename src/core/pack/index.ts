@@ -7,10 +7,11 @@ import { AgentProfile } from "../schemas/agent-profile.ts";
 import { ProgressLog, type ProgressEvent } from "../schemas/progress-event.ts";
 import { parseFrontMatter } from "./front-matter.ts";
 import {
-  renderMarkdown,
+  renderSections,
   type DependsOnEntry,
   type DecisionDoc,
   type ReadGlobMatches,
+  type RenderedSection,
   type RuleDoc,
 } from "./formatters/markdown.ts";
 import { deriveTaskState } from "../progress/task-state.ts";
@@ -21,6 +22,56 @@ export type BuildContextPackOptions = {
   phaseId: string;
   taskId: string;
   agentName: string;
+  /**
+   * When true, the result includes section-level metadata (`sections`,
+   * `excluded`, `totalBytes`). The rendered `content` string is byte-
+   * identical regardless of this flag.
+   */
+  explain?: boolean;
+};
+
+/**
+ * Closed enum of reason codes attached to included sections in the
+ * explain output. New variants require an RFC.
+ *
+ * `budget_reserved_for_later` is intentionally absent here — it lives
+ * in {@link ContextExcludedReasonCode} and is reserved for P24.
+ */
+export type ContextSectionReasonCode =
+  | "always_included"
+  | "declared_by_task"
+  | "referenced_decision"
+  | "glob_match"
+  | "write_surface_high"
+  | "context_size_large"
+  | "ambiguity_high"
+  | "format_overhead";
+
+/**
+ * Closed enum of reason codes attached to excluded sections in the
+ * explain output. New variants require an RFC.
+ *
+ * `budget_reserved_for_later` is reserved for P24 (budget enforcement);
+ * the P21 implementation MUST NOT emit it. A unit test asserts the
+ * absence in every P21 output.
+ */
+export type ContextExcludedReasonCode =
+  | "context_size_small_and_ambiguity_low"
+  | "not_declared_by_task"
+  | "glob_no_match"
+  | "budget_reserved_for_later";
+
+export type ContextExplainSection = {
+  name: string;
+  bytes: number;
+  reason_code: ContextSectionReasonCode;
+  details?: Record<string, unknown>;
+};
+
+export type ContextExplainExcluded = {
+  name: string;
+  reason_code: ContextExcludedReasonCode;
+  details?: Record<string, unknown>;
 };
 
 export type ContextPackResult = {
@@ -29,9 +80,20 @@ export type ContextPackResult = {
   phaseId: string;
   agent: string;
   charCount: number;
+  /**
+   * UTF-8 byte length of `content`. Always populated. The acceptance
+   * invariant `sum(sections[].bytes) === totalBytes` holds in explain
+   * mode (the synthetic `format_overhead` section captures the
+   * inter-section newlines).
+   */
+  totalBytes: number;
   includedRules: string[];
   includedDecisions: string[];
   includedConstitution: boolean;
+  /** Present only when `explain: true` was passed to `buildContextPack`. */
+  sections?: ContextExplainSection[];
+  /** Present only when `explain: true` was passed to `buildContextPack`. */
+  excluded?: ContextExplainExcluded[];
 };
 
 export type WriteContextPackOptions = {
@@ -289,7 +351,7 @@ export async function buildContextPack(
       ? dependsOnIds.map((id) => ({ id, current: deriveTaskState(allEvents, id).current }))
       : undefined;
 
-  const content = renderMarkdown({
+  const renderedSections = renderSections({
     phase,
     task,
     agentName,
@@ -308,16 +370,197 @@ export async function buildContextPack(
     ...(acceptanceRefsList.length > 0 ? { acceptanceRefs: acceptanceRefsList } : {}),
   });
 
-  return {
+  const content = renderedSections.flatMap((s) => s.lines).join("\n");
+  const totalBytes = Buffer.byteLength(content, "utf8");
+
+  const result: ContextPackResult = {
     content,
     taskId,
     phaseId,
     agent: agentName,
     charCount: content.length,
+    totalBytes,
     includedRules: rules.map((r) => r.filename),
     includedDecisions: decisions.map((d) => d.filename),
     includedConstitution: constitution !== null,
   };
+
+  if (opts.explain === true) {
+    const flags = {
+      isSmall,
+      isLarge,
+      isHighAmbiguity,
+      isLargeWriteSurface,
+    };
+    const declared = {
+      dependsOn: dependsOnIds.length > 0,
+      reads: readGlobs.length > 0,
+      writes: writeGlobsList.length > 0,
+      declaredDecisions: decisionRefs.length > 0,
+      acceptanceRefs: acceptanceRefsList.length > 0,
+    };
+    result.sections = computeExplainSections(
+      renderedSections,
+      flags,
+      totalBytes,
+    );
+    result.excluded = computeExplainExcluded(flags, declared);
+  }
+
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// P21-T4 explain machinery
+//
+// `renderSections` returns the structured intermediate form of the
+// rendered pack. `computeExplainSections` annotates each section with
+// a reason code derived from the task readiness flags, attaches a
+// byte count computed with `Buffer.byteLength(..., "utf8")`, and
+// appends a synthetic `format_overhead` section that captures the
+// inter-section newlines so the acceptance invariant
+// `sum(sections[].bytes) === totalBytes` holds.
+// ---------------------------------------------------------------------------
+
+type ExplainFlags = {
+  isSmall: boolean;
+  isLarge: boolean;
+  isHighAmbiguity: boolean;
+  isLargeWriteSurface: boolean;
+};
+
+type ExplainDeclared = {
+  dependsOn: boolean;
+  reads: boolean;
+  writes: boolean;
+  declaredDecisions: boolean;
+  acceptanceRefs: boolean;
+};
+
+function reasonForSection(
+  name: string,
+  flags: ExplainFlags,
+): ContextSectionReasonCode {
+  switch (name) {
+    case "header":
+    case "phase_contract":
+    case "task_definition":
+    case "verification_commands":
+    case "progress_event_schema":
+      return "always_included";
+    case "constitution":
+      // includeConstitution = isLarge || isHighAmbiguity. When both
+      // are true, attribute to the more specific signal (isLarge),
+      // matching the precedence the renderer uses implicitly.
+      return flags.isLarge ? "context_size_large" : "ambiguity_high";
+    case "rules":
+      return flags.isLargeWriteSurface ? "write_surface_high" : "always_included";
+    case "depends_on":
+    case "writes":
+    case "acceptance_refs":
+      return "declared_by_task";
+    case "reads":
+      return "glob_match";
+    case "declared_decisions":
+      return "referenced_decision";
+    case "related_decisions":
+      return flags.isLarge ? "context_size_large" : "always_included";
+    case "completed_tasks":
+      return "ambiguity_high";
+    default:
+      return "always_included";
+  }
+}
+
+function computeExplainSections(
+  rendered: RenderedSection[],
+  flags: ExplainFlags,
+  totalBytes: number,
+): ContextExplainSection[] {
+  const result: ContextExplainSection[] = [];
+  let attributed = 0;
+  for (const s of rendered) {
+    const sectionContent = s.lines.join("\n");
+    const bytes = Buffer.byteLength(sectionContent, "utf8");
+    attributed += bytes;
+    result.push({
+      name: s.name,
+      bytes,
+      reason_code: reasonForSection(s.name, flags),
+      ...(s.details ? { details: s.details } : {}),
+    });
+  }
+  const overhead = totalBytes - attributed;
+  // Synthetic format_overhead section captures the `(n-1)` inter-
+  // section newlines introduced by the final `flatMap.join("\n")`.
+  // For multi-byte UTF-8 content the value is still correct because
+  // both totalBytes and the per-section bytes use Buffer.byteLength.
+  if (overhead > 0) {
+    result.push({
+      name: "format_overhead",
+      bytes: overhead,
+      reason_code: "format_overhead",
+      details: { kind: "inter_section_newlines" },
+    });
+  }
+  return result;
+}
+
+function computeExplainExcluded(
+  flags: ExplainFlags,
+  declared: ExplainDeclared,
+): ContextExplainExcluded[] {
+  const excluded: ContextExplainExcluded[] = [];
+
+  // Constitution is excluded when neither isLarge nor isHighAmbiguity.
+  if (!flags.isLarge && !flags.isHighAmbiguity) {
+    excluded.push({
+      name: "constitution",
+      reason_code: "context_size_small_and_ambiguity_low",
+    });
+  }
+
+  // Rules are excluded when context_size is small (no rules loaded).
+  if (flags.isSmall) {
+    excluded.push({
+      name: "rules",
+      reason_code: "context_size_small_and_ambiguity_low",
+    });
+  }
+
+  // P10 declared-section excluded entries — only emit when the task
+  // did not declare the corresponding field.
+  if (!declared.dependsOn) {
+    excluded.push({ name: "depends_on", reason_code: "not_declared_by_task" });
+  }
+  if (!declared.reads) {
+    excluded.push({ name: "reads", reason_code: "not_declared_by_task" });
+  }
+  if (!declared.writes) {
+    excluded.push({ name: "writes", reason_code: "not_declared_by_task" });
+  }
+  if (!declared.declaredDecisions) {
+    excluded.push({
+      name: "declared_decisions",
+      reason_code: "not_declared_by_task",
+    });
+  }
+  if (!declared.acceptanceRefs) {
+    excluded.push({
+      name: "acceptance_refs",
+      reason_code: "not_declared_by_task",
+    });
+  }
+
+  // Completed-task histogram is excluded when ambiguity is not high.
+  if (!flags.isHighAmbiguity) {
+    excluded.push({
+      name: "completed_tasks",
+      reason_code: "context_size_small_and_ambiguity_low",
+    });
+  }
+
+  return excluded;
 }
 
 /**

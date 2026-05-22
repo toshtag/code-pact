@@ -15,6 +15,64 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ### Added
 
+- **P21-T4 — `task context --explain` per-section breakdown.**
+  New flag `code-pact task context <task-id> --explain
+  [--json]` returns the per-section byte breakdown of the
+  rendered context pack and the list of sections that were
+  intentionally excluded. In `--json` mode the envelope gains
+  `total_bytes`, `context_pack_bytes`, `sections[]`, and
+  `excluded[]` fields; the existing `content` / `char_count`
+  / `agent` / `phase_id` / `task_id` fields are unchanged. In
+  human mode (`--explain` without `--json`) a table of
+  included and excluded sections is printed instead of the
+  pack body.
+
+  **Byte-identical contract preserved.** The rendered pack
+  `content` is byte-for-byte identical to v1.10 with or
+  without the flag — section metadata is computed alongside
+  the content and never injected into the rendered string.
+  The existing
+  `tests/integration/pack-byte-identical.test.ts` is asserted
+  unchanged.
+
+  **Acceptance invariant.** `sum(sections[].bytes) ===
+  total_bytes === context_pack_bytes`. A synthetic
+  `format_overhead` section captures the inter-section
+  newlines emitted by the final `join` so no bytes go
+  unattributed.
+
+  **Closed reason-code enums.** `sections[].reason_code` is
+  one of `always_included` / `declared_by_task` /
+  `referenced_decision` / `glob_match` /
+  `write_surface_high` / `context_size_large` /
+  `ambiguity_high` / `format_overhead`. `excluded[]
+  .reason_code` is one of
+  `context_size_small_and_ambiguity_low` /
+  `not_declared_by_task` / `glob_no_match` /
+  `budget_reserved_for_later`. The
+  `budget_reserved_for_later` value is reserved for P24
+  (budget enforcement) and **MUST NOT** be emitted in v1.11
+  — a unit test asserts the absence in every P21 output.
+
+  **Implementation seam.** The renderer in
+  `src/core/pack/formatters/markdown.ts` is split into
+  `renderSections()` (structured intermediate form) and
+  `renderMarkdown()` (joins and returns the string, the
+  pre-existing public entry point). `buildContextPack()`
+  consumes `renderSections()` directly and attaches the
+  reason codes from the task readiness flags
+  (`context_size`, `ambiguity`, `write_surface`) plus the
+  declared-section presence checks. No new error codes.
+
+  Unit coverage in `tests/unit/core/pack/explain.test.ts`
+  (11 tests) exercises the explain opt-in (off by default),
+  the byte invariant, the synthetic `format_overhead`
+  section, the closed enum membership of every emitted
+  reason code, the absence of `budget_reserved_for_later`,
+  the always-included section set, and the
+  `not_declared_by_task` exclusion entries for tasks that
+  declare no P10 fields.
+
 - **P21-T3 — `code-pact task prepare` compound entry point.**
   New CLI verb `code-pact task prepare <task-id> [--agent
   <name>] [--json] [--dry-run]` returns everything an agent

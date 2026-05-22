@@ -53,35 +53,76 @@ export type ReadGlobMatches = {
   matches: string[];
 };
 
-export function renderMarkdown(ctx: PackContext): string {
-  const sections: string[] = [];
+/**
+ * Internal intermediate representation produced by `renderSections`.
+ *
+ * Each entry corresponds to one logical section of the context pack.
+ * `lines` is the array of strings that will be joined by `"\n"` when
+ * the pack is rendered to disk. `name` is a stable identifier used by
+ * the explain machinery to attach reason codes to each section.
+ *
+ * The sum of `Buffer.byteLength(lines.join("\n"), "utf8")` over every
+ * section, plus `(sections.length - 1)` (the inter-section newlines
+ * introduced by the final `join`), equals the byte length of the
+ * rendered content. The `format_overhead` section in the explain
+ * output captures the inter-section newline byte count so consumers
+ * see a clean `sum(sections[].bytes) === total_bytes` invariant.
+ */
+export type RenderedSection = {
+  /** Stable identifier — see SECTION_NAMES for the closed set. */
+  name: string;
+  /** Optional extra detail (e.g. glob match count, decision filename). */
+  details?: Record<string, unknown>;
+  /** Lines that will be joined by `"\n"`. */
+  lines: string[];
+};
+
+/**
+ * Build the structured sections that compose the rendered context
+ * pack. The renderer is byte-identical to v1.0.2 — joining the
+ * concatenation of every section's lines with `"\n"` produces exactly
+ * the same string `renderMarkdown` returned in v1.10.
+ */
+export function renderSections(ctx: PackContext): RenderedSection[] {
+  const sections: RenderedSection[] = [];
 
   // 1. Header
-  sections.push(
-    `# Context Pack — ${ctx.phase.id} / ${ctx.task.id}`,
-    ``,
-    `**Agent:** ${ctx.agentName}  `,
-    `**Phase:** ${ctx.phase.id} — ${ctx.phase.name}  `,
-    `**Task:** ${ctx.task.id}`,
-    ``,
-  );
+  sections.push({
+    name: "header",
+    lines: [
+      `# Context Pack — ${ctx.phase.id} / ${ctx.task.id}`,
+      ``,
+      `**Agent:** ${ctx.agentName}  `,
+      `**Phase:** ${ctx.phase.id} — ${ctx.phase.name}  `,
+      `**Task:** ${ctx.task.id}`,
+      ``,
+    ],
+  });
 
   // 2. Constitution (context_size: large | ambiguity: high)
   if (ctx.constitution) {
-    sections.push(`## Project Constitution`, ``, ctx.constitution.trim(), ``);
+    sections.push({
+      name: "constitution",
+      lines: [`## Project Constitution`, ``, ctx.constitution.trim(), ``],
+    });
   }
 
   // 3. Applicable rules
   if (ctx.rules.length > 0) {
-    sections.push(`## Rules`);
+    const lines: string[] = [`## Rules`];
     for (const rule of ctx.rules) {
-      sections.push(``, `### ${rule.filename}`, ``, rule.body.trim());
+      lines.push(``, `### ${rule.filename}`, ``, rule.body.trim());
     }
-    sections.push(``);
+    lines.push(``);
+    sections.push({
+      name: "rules",
+      details: { rule_count: ctx.rules.length },
+      lines,
+    });
   }
 
   // 4. Phase contract
-  sections.push(
+  const phaseContractLines: string[] = [
     `## Phase Contract`,
     ``,
     `**Objective:** ${ctx.phase.objective.trim()}`,
@@ -89,18 +130,19 @@ export function renderMarkdown(ctx: PackContext): string {
     `**Definition of Done:**`,
     ...ctx.phase.definition_of_done.map((d) => `- ${d}`),
     ``,
-  );
+  ];
 
   if (ctx.phase.non_goals && ctx.phase.non_goals.length > 0) {
-    sections.push(
+    phaseContractLines.push(
       `**Non-Goals:**`,
       ...ctx.phase.non_goals.map((g) => `- ${g}`),
       ``,
     );
   }
+  sections.push({ name: "phase_contract", lines: phaseContractLines });
 
   // 5. Task definition
-  sections.push(
+  const taskDefinitionLines: string[] = [
     `## Task Definition`,
     ``,
     `| Field | Value |`,
@@ -115,20 +157,26 @@ export function renderMarkdown(ctx: PackContext): string {
     `| Expected duration | ${ctx.task.expected_duration} |`,
     `| Status | ${ctx.task.status} |`,
     ``,
-  );
+  ];
 
   if (ctx.task.description) {
-    sections.push(`**Description:** ${ctx.task.description}`, ``);
+    taskDefinitionLines.push(`**Description:** ${ctx.task.description}`, ``);
   }
+  sections.push({ name: "task_definition", lines: taskDefinitionLines });
 
   // 6a. Depends on — task-declared dependencies, P10. Each id is shown
   // with its current derived state from progress.yaml.
   if (ctx.dependsOn && ctx.dependsOn.length > 0) {
-    sections.push(`## Depends on`, ``);
+    const lines: string[] = [`## Depends on`, ``];
     for (const dep of ctx.dependsOn) {
-      sections.push(`- **${dep.id}** — ${dep.current}`);
+      lines.push(`- **${dep.id}** — ${dep.current}`);
     }
-    sections.push(``);
+    lines.push(``);
+    sections.push({
+      name: "depends_on",
+      details: { count: ctx.dependsOn.length },
+      lines,
+    });
   }
 
   // 6b. Declared read surface — P10. Each glob is shown with the set of
@@ -137,28 +185,43 @@ export function renderMarkdown(ctx: PackContext): string {
   // visible "no matches" line so the agent sees the lint warning's
   // counterpart in pack form.
   if (ctx.readMatches && ctx.readMatches.length > 0) {
-    sections.push(`## Declared read surface`, ``);
+    const lines: string[] = [`## Declared read surface`, ``];
+    let totalMatches = 0;
     for (const entry of ctx.readMatches) {
-      sections.push(`- \`${entry.glob}\``);
+      lines.push(`- \`${entry.glob}\``);
       if (entry.matches.length === 0) {
-        sections.push(`  - _(no current matches on disk)_`);
+        lines.push(`  - _(no current matches on disk)_`);
       } else {
         for (const m of entry.matches) {
-          sections.push(`  - \`${m}\``);
+          lines.push(`  - \`${m}\``);
         }
       }
+      totalMatches += entry.matches.length;
     }
-    sections.push(``);
+    lines.push(``);
+    sections.push({
+      name: "reads",
+      details: {
+        glob_count: ctx.readMatches.length,
+        match_count: totalMatches,
+      },
+      lines,
+    });
   }
 
   // 6c. Declared write surface — P10. Globs only; existence is by
   // definition future-tense for writes, so no fs lookup is done.
   if (ctx.writeGlobs && ctx.writeGlobs.length > 0) {
-    sections.push(`## Declared write surface`, ``);
+    const lines: string[] = [`## Declared write surface`, ``];
     for (const g of ctx.writeGlobs) {
-      sections.push(`- \`${g}\``);
+      lines.push(`- \`${g}\``);
     }
-    sections.push(``);
+    lines.push(``);
+    sections.push({
+      name: "writes",
+      details: { glob_count: ctx.writeGlobs.length },
+      lines,
+    });
   }
 
   // 6d. Declared decisions — P10. Full content of files referenced by
@@ -167,21 +230,34 @@ export function renderMarkdown(ctx: PackContext): string {
   // allDecisions path (rendered in section 6e) is filtered to avoid
   // re-printing files already shown here.
   if (ctx.declaredDecisions && ctx.declaredDecisions.length > 0) {
-    sections.push(`## Declared decisions`);
+    const lines: string[] = [`## Declared decisions`];
     for (const dec of ctx.declaredDecisions) {
-      sections.push(``, `### ${dec.filename}`, ``, dec.body.trim());
+      lines.push(``, `### ${dec.filename}`, ``, dec.body.trim());
     }
-    sections.push(``);
+    lines.push(``);
+    sections.push({
+      name: "declared_decisions",
+      details: {
+        count: ctx.declaredDecisions.length,
+        filenames: ctx.declaredDecisions.map((d) => d.filename),
+      },
+      lines,
+    });
   }
 
   // 6e. Acceptance references — P10. Path list only in P10; no content
   // excerpt and no semantic validation (deferred to P11 reconcile).
   if (ctx.acceptanceRefs && ctx.acceptanceRefs.length > 0) {
-    sections.push(`## Acceptance references`, ``);
+    const lines: string[] = [`## Acceptance references`, ``];
     for (const p of ctx.acceptanceRefs) {
-      sections.push(`- \`${p}\``);
+      lines.push(`- \`${p}\``);
     }
-    sections.push(``);
+    lines.push(``);
+    sections.push({
+      name: "acceptance_refs",
+      details: { count: ctx.acceptanceRefs.length },
+      lines,
+    });
   }
 
   // 6. Related decisions — existing v1.0 path (task-id filename match
@@ -195,51 +271,81 @@ export function renderMarkdown(ctx: PackContext): string {
     (d) => !declaredNames.has(d.filename),
   );
   if (relatedDecisions.length > 0) {
-    sections.push(`## Related Decisions`);
+    const lines: string[] = [`## Related Decisions`];
     for (const dec of relatedDecisions) {
-      sections.push(``, `### ${dec.filename}`, ``, dec.body.trim());
+      lines.push(``, `### ${dec.filename}`, ``, dec.body.trim());
     }
-    sections.push(``);
+    lines.push(``);
+    sections.push({
+      name: "related_decisions",
+      details: { count: relatedDecisions.length },
+      lines,
+    });
   }
 
   // 7. Completed tasks in this phase (ambiguity: high)
   if (ctx.doneEvents && ctx.doneEvents.length > 0) {
-    sections.push(`## Completed Tasks in This Phase`, ``);
+    const lines: string[] = [`## Completed Tasks in This Phase`, ``];
     for (const ev of ctx.doneEvents) {
       const agent = ev.agent ? ` by ${ev.agent}` : "";
-      const evidence = ev.evidence && ev.evidence.length > 0
-        ? `\n  Evidence: ${ev.evidence.join(", ")}`
-        : "";
-      sections.push(`- **${ev.task_id}** — done at ${ev.at}${agent}${evidence}`);
+      const evidence =
+        ev.evidence && ev.evidence.length > 0
+          ? `\n  Evidence: ${ev.evidence.join(", ")}`
+          : "";
+      lines.push(`- **${ev.task_id}** — done at ${ev.at}${agent}${evidence}`);
     }
-    sections.push(``);
+    lines.push(``);
+    sections.push({
+      name: "completed_tasks",
+      details: { count: ctx.doneEvents.length },
+      lines,
+    });
   }
 
   // 8. Verification commands
-  sections.push(
-    `## Verification Commands`,
-    ``,
-    ...ctx.phase.verification.commands.map((c) => `\`\`\`\n${c}\n\`\`\``),
-    ``,
-  );
+  sections.push({
+    name: "verification_commands",
+    lines: [
+      `## Verification Commands`,
+      ``,
+      ...ctx.phase.verification.commands.map((c) => `\`\`\`\n${c}\n\`\`\``),
+      ``,
+    ],
+  });
 
   // 9. Progress event schema hint
-  sections.push(
-    `## Progress Event`,
-    ``,
-    `When this task is complete, record an event in \`.code-pact/state/progress.yaml\`:`,
-    ``,
-    `\`\`\`yaml`,
-    `events:`,
-    `  - task_id: ${ctx.task.id}`,
-    `    status: done`,
-    `    at: "<ISO8601 with offset>"`,
-    `    actor: agent`,
-    `    evidence:`,
-    `      - <verification command or artifact>`,
-    `\`\`\``,
-    ``,
-  );
+  sections.push({
+    name: "progress_event_schema",
+    lines: [
+      `## Progress Event`,
+      ``,
+      `When this task is complete, record an event in \`.code-pact/state/progress.yaml\`:`,
+      ``,
+      `\`\`\`yaml`,
+      `events:`,
+      `  - task_id: ${ctx.task.id}`,
+      `    status: done`,
+      `    at: "<ISO8601 with offset>"`,
+      `    actor: agent`,
+      `    evidence:`,
+      `      - <verification command or artifact>`,
+      `\`\`\``,
+      ``,
+    ],
+  });
 
-  return sections.join("\n");
+  return sections;
+}
+
+/**
+ * Render the context pack to a single Markdown string.
+ *
+ * Byte-identical contract: for any input that produced a given output
+ * in v1.10, this function MUST produce the same bytes in v1.11. The
+ * contract is locked by
+ * `tests/integration/pack-byte-identical.test.ts`.
+ */
+export function renderMarkdown(ctx: PackContext): string {
+  const sections = renderSections(ctx);
+  return sections.flatMap((s) => s.lines).join("\n");
 }

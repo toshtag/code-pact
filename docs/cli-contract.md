@@ -1104,6 +1104,67 @@ When a task declares any of the [P10 Task Readiness Schema fields](#phase-import
 
 When a task declares **none** of the P10 fields, the pack body is byte-identical to v1.0.2. The byte-identical contract is locked by `tests/integration/pack-byte-identical.test.ts` against a checked-in golden fixture (`tests/fixtures/golden/pack-v1.0.2-shaped.md`).
 
+### `--explain` (v1.11+, P21)
+
+`code-pact task context <task-id> [--agent <name>] --explain [--json]` returns the per-section byte breakdown of the rendered context pack and the list of sections that were intentionally excluded.
+
+**Byte-identical guarantee.** The pack `content` returned in `--json` mode is byte-for-byte identical with or without `--explain` — the flag only attaches metadata. The existing byte-identical lock test (`tests/integration/pack-byte-identical.test.ts`) catches regressions.
+
+**JSON additions.** When `--explain --json` is passed, the existing envelope gains:
+
+| Field | Type | Notes |
+|---|---|---|
+| `total_bytes` | integer | `Buffer.byteLength(content, "utf8")` |
+| `context_pack_bytes` | integer | Alias of `total_bytes` for callers that read this name elsewhere (e.g. `task prepare`) |
+| `sections[]` | array | One entry per included section; see below |
+| `excluded[]` | array | Sections that were not emitted, with the reason; see below |
+
+**Acceptance invariant.** `sum(sections[].bytes) === total_bytes === context_pack_bytes`. The renderer's inter-section newlines are captured as a synthetic `format_overhead` section so the invariant holds without any unattributed bytes.
+
+**`sections[]` entry shape:**
+
+```json
+{
+  "name": "reads",
+  "bytes": 950,
+  "reason_code": "glob_match",
+  "details": { "glob_count": 3, "match_count": 12 }
+}
+```
+
+`reason_code` is a closed enum:
+
+| `reason_code` | Section(s) | Meaning |
+|---|---|---|
+| `always_included` | `header`, `phase_contract`, `task_definition`, `verification_commands`, `progress_event_schema`, `rules` (when `write_surface != high`), `related_decisions` (when `context_size != large`) | Unconditionally emitted |
+| `context_size_large` | `constitution` (when `context_size: large`), `related_decisions` (when `context_size: large`) | Emitted because the task's `context_size` is `large` |
+| `ambiguity_high` | `constitution` (when only `ambiguity: high`), `completed_tasks` | Emitted because the task's `ambiguity` is `high` |
+| `write_surface_high` | `rules` (when `write_surface: high`) | Emitted because the task's `write_surface` is `high` |
+| `declared_by_task` | `depends_on`, `writes`, `acceptance_refs` | Emitted because the task declared the corresponding P10 field |
+| `referenced_decision` | `declared_decisions` | Emitted because the task referenced one or more decision files |
+| `glob_match` | `reads` | Emitted because the task declared `reads` globs |
+| `format_overhead` | `format_overhead` | Synthetic section capturing inter-section newlines |
+
+**`excluded[]` entry shape:**
+
+```json
+{
+  "name": "constitution",
+  "reason_code": "context_size_small_and_ambiguity_low"
+}
+```
+
+`reason_code` for `excluded[]` is a separate closed enum:
+
+| `reason_code` | Emitted when |
+|---|---|
+| `context_size_small_and_ambiguity_low` | A section was excluded because the task's `context_size` is not `large` and `ambiguity` is not `high` (e.g. `constitution`, `completed_tasks`) — or because `context_size` is `small` (e.g. `rules`) |
+| `not_declared_by_task` | A P10 declared section (`depends_on`, `reads`, `writes`, `declared_decisions`, `acceptance_refs`) is absent because the task did not declare the corresponding field |
+| `glob_no_match` | Reserved for future per-glob exclusion detail; not emitted in v1.11 |
+| `budget_reserved_for_later` | Reserved for P24 (budget enforcement). **MUST NOT** be emitted in v1.11. A unit test asserts the absence. |
+
+**Human mode.** `--explain` without `--json` prints a table of included and excluded sections to stdout instead of the pack body.
+
 ## `task prepare` — single per-task entry point (v1.11+, P21)
 
 `code-pact task prepare <task-id> [--agent <name>] [--json] [--dry-run]` is a **progress-read-only** compound command that returns everything an agent needs to decide what to do next on a single task: current state, the recommendation envelope, context-pack metadata, a structured `next_action`, and a fully-formed `commands` dictionary for the per-task lifecycle.
