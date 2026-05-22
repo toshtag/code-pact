@@ -74,6 +74,7 @@ import { runDoctor, formatDoctor } from "./commands/doctor.ts";
 import { runValidate } from "./commands/validate.ts";
 import { runTaskContext } from "./commands/task-context.ts";
 import { runTaskComplete } from "./commands/task-complete.ts";
+import { runTaskPrepare } from "./commands/task-prepare.ts";
 import {
   runTaskFinalize,
   TaskFinalizeAuditStrictError,
@@ -2445,6 +2446,9 @@ async function cmdTask(argv: string[], locale: Locale, globalJson: boolean): Pro
   if (subcommand === "add") {
     return cmdTaskAdd(rest, locale, globalJson);
   }
+  if (subcommand === "prepare") {
+    return cmdTaskPrepare(rest, locale, globalJson);
+  }
   if (subcommand === "start") {
     return cmdTaskStart(rest, locale, globalJson);
   }
@@ -2464,7 +2468,7 @@ async function cmdTask(argv: string[], locale: Locale, globalJson: boolean): Pro
     return cmdTaskRunbook(rest, locale, globalJson);
   }
 
-  const msg = `task: unknown subcommand "${subcommand ?? ""}". Use: add | context | start | status | block | resume | complete | finalize | runbook`;
+  const msg = `task: unknown subcommand "${subcommand ?? ""}". Use: add | context | prepare | start | status | block | resume | complete | finalize | runbook`;
   if (globalJson) {
     process.stdout.write(
       `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
@@ -2805,6 +2809,133 @@ async function cmdTaskContext(
     } else {
       process.stdout.write(pack.content);
       if (!pack.content.endsWith("\n")) process.stdout.write("\n");
+    }
+    return 0;
+  } catch (err: unknown) {
+    if (!(err instanceof Error)) throw err;
+    const code = (err as NodeJS.ErrnoException).code;
+    let msg: string;
+    let outCode: string;
+    switch (code) {
+      case "TASK_NOT_FOUND":
+        msg = m.task.context.taskNotFound(taskId);
+        outCode = "TASK_NOT_FOUND";
+        break;
+      case "AMBIGUOUS_TASK_ID": {
+        const phases =
+          (err as NodeJS.ErrnoException & { phases?: string[] }).phases ?? [];
+        msg = m.task.context.ambiguous(taskId, phases);
+        outCode = "AMBIGUOUS_TASK_ID";
+        break;
+      }
+      case "AGENT_NOT_ENABLED":
+        msg = m.task.context.agentNotEnabled(agent ?? "");
+        outCode = "AGENT_NOT_ENABLED";
+        break;
+      case "AGENT_NOT_FOUND":
+        msg = m.task.context.agentNotFound(agent ?? "");
+        outCode = "AGENT_NOT_FOUND";
+        break;
+      default:
+        throw err;
+    }
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({ ok: false, error: { code: outCode, message: msg } })}\n`,
+      );
+    } else {
+      process.stderr.write(`${msg}\n`);
+    }
+    return 2;
+  }
+}
+
+async function cmdTaskPrepare(
+  argv: string[],
+  locale: Locale,
+  globalJson: boolean,
+): Promise<number> {
+  const m = messages[locale];
+
+  let values: Record<string, unknown>;
+  let positionals: string[];
+  try {
+    ({ values, positionals } = strictParse(
+      "task prepare",
+      argv,
+      {
+        agent: { type: "string" },
+        json: { type: "boolean" },
+        "dry-run": { type: "boolean" },
+      },
+      { allowPositionals: true },
+    ));
+  } catch (err) {
+    if (!(err instanceof ConfigError)) throw err;
+    const json = globalJson || argv.includes("--json");
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: err.message } })}\n`,
+      );
+    } else {
+      process.stderr.write(`${err.message}\n`);
+    }
+    return 2;
+  }
+
+  const json = globalJson || values.json === true;
+  const taskId = positionals[0];
+  if (!taskId) {
+    const msg = "task prepare requires a task id (e.g. `task prepare P1-T1`).";
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
+      );
+    } else {
+      process.stderr.write(`${msg}\n`);
+    }
+    return 2;
+  }
+  const agent = values.agent as string | undefined;
+  const dryRun = values["dry-run"] === true;
+  const cwd = process.cwd();
+
+  try {
+    const result = await runTaskPrepare({ cwd, taskId, agent, dryRun });
+    if (json) {
+      process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
+    } else {
+      const lines: string[] = [];
+      lines.push(`Task:           ${result.phase_id} / ${result.task_id}`);
+      lines.push(`Agent:          ${result.agent}`);
+      lines.push(`Current state:  ${result.current_state}`);
+      lines.push(`Next action:    ${result.next_action.type}`);
+      lines.push(`                ${result.next_action.message}`);
+      if (result.recommendation) {
+        lines.push(
+          `Recommendation: tier=${result.recommendation.tier} model=${result.recommendation.modelId} effort=${result.recommendation.effort}`,
+        );
+      }
+      if (result.blocked_by.length > 0) {
+        lines.push(`Blocked by:     ${result.blocked_by.join(", ")}`);
+      }
+      if (result.context_pack_path) {
+        lines.push(
+          `Context pack:   ${result.context_pack_path} (${result.context_pack_bytes} bytes)`,
+        );
+      } else if (result.would_write_context_pack_path) {
+        lines.push(
+          `Context pack:   (dry-run) would write to ${result.would_write_context_pack_path} (${result.context_pack_bytes} bytes)`,
+        );
+      }
+      lines.push("");
+      lines.push("Commands:");
+      lines.push(`  context:  ${result.commands.context}`);
+      lines.push(`  start:    ${result.commands.start}`);
+      lines.push(`  verify:   ${result.commands.verify}`);
+      lines.push(`  complete: ${result.commands.complete}`);
+      lines.push(`  finalize: ${result.commands.finalize}`);
+      process.stdout.write(`${lines.join("\n")}\n`);
     }
     return 0;
   } catch (err: unknown) {
