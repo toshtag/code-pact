@@ -3,7 +3,7 @@ name: Evidence Harness
 weight: 20
 confidence: medium
 risk: low
-status: in_progress
+status: done
 objective: |
   Add an internal-only measurement harness at
   `scripts/harness/` that captures deterministic-input
@@ -217,7 +217,7 @@ tasks:
     write_surface: low
     verification_strength: medium
     expected_duration: short
-    status: planned
+    status: done
     description: |
       `docs/concepts/evidence-harness.md` documents the metric set,
       the CSV column shapes, and how to cite rows in future

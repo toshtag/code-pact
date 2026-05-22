@@ -15,6 +15,18 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ### Added
 
+- **P20-T4** — Evidence harness docs + phase close (closes
+  P20). New `docs/concepts/evidence-harness.md` walks through
+  why the harness exists ("move design judgement from 感覚
+  to measurement"), what it measures (the 4-CSV metric set
+  in detail), how to invoke it, the byte-determinism
+  contract, how to cite rows in future RFCs, and the
+  explicit "what this is NOT" list. `docs/cli-contract.md`
+  gains a new `## Maintainer-only tooling (NOT part of the
+  CLI surface)` section forestalling the misread that
+  `pnpm harness` is a public command. P20 phase status flips
+  to done.
+
 - **P20-T3** — Baseline measurement on the dogfood corpus.
   Commits the first real-world output of the harness under
   `design/measurements/`:
