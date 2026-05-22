@@ -1,6 +1,6 @@
 # RFC: Spec Kit bridge
 
-**Status:** proposed (P18, 2026-05)
+**Status:** accepted (P18, 2026-05)
 **Scope:** one new top-level CLI command, `code-pact spec import`, that ingests external spec-driven planning artifacts (initially the `tasks.md` file format used by Spec Kit and similar tools) into code-pact phase YAML drafts. Read-only, one-way, opt-in. Adds new module `src/core/spec-import/` with a pure parser + a transform; adds `src/commands/spec-import.ts` for the CLI surface. No schema changes to existing phase YAML. No new error codes beyond `CONFIG_ERROR` (reused).
 **Owners:** maintainer
 **Related:**
