@@ -119,7 +119,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
     description: |
       `src/core/spec-import/tasks-md-parser.ts` parses the
       supported Spec Kit subset (Heading 3 sections +
