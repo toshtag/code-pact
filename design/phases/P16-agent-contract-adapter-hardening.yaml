@@ -3,7 +3,7 @@ name: Agent Contract Adapter Hardening
 weight: 25
 confidence: medium
 risk: medium
-status: in_progress
+status: done
 objective: |
   Elevate the three stable adapters (claude-code, codex,
   generic) from "instruction templates that generate per-agent
@@ -249,7 +249,7 @@ tasks:
     write_surface: low
     verification_strength: strong
     expected_duration: short
-    status: planned
+    status: done
     description: |
       Add `ADAPTER_CONTRACT_DRIFT` to `KNOWN_CODES.adapter`.
       Emitted by `adapter doctor` (single agent) and global
@@ -268,15 +268,13 @@ tasks:
     decision_refs:
       - design/decisions/agent-contract-rfc.md
     reads:
-      - src/commands/adapter.ts
-      - src/core/adapters/file-state.ts
+      - src/commands/adapter-doctor.ts
+      - src/commands/doctor.ts
       - src/core/adapters/manifest.ts
       - tests/unit/error-code-surface.test.ts
     writes:
-      - src/commands/adapter.ts
-      - src/core/adapters/file-state.ts
+      - src/commands/adapter-doctor.ts
       - tests/unit/commands/adapter-doctor.test.ts
-      - tests/integration/adapter-cli.test.ts
       - tests/unit/error-code-surface.test.ts
       - docs/cli-contract.md
       - CHANGELOG.md
