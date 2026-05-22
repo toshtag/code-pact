@@ -139,6 +139,28 @@ function claudeMd(
     `>`,
     `> ${t.packNote}`,
     ``,
+    // v1.7 P16-T2: Agent contract section. Heading strings
+    // (`Agent contract`, `When to invoke code-pact`,
+    // `What to verify first`, `How to handle failures`) are
+    // English-locked per design/decisions/agent-contract-rfc.md
+    // so the P16-T4 conformance regex anchors on them across
+    // locales. Body text is localised.
+    `## ${t.agentContract.sectionHeader}`,
+    ``,
+    t.agentContract.intro,
+    ``,
+    `### ${t.agentContract.whenHeader}`,
+    ``,
+    t.agentContract.whenBody,
+    ``,
+    `### ${t.agentContract.verifyHeader}`,
+    ``,
+    t.agentContract.verifyBody,
+    ``,
+    `### ${t.agentContract.failHeader}`,
+    ``,
+    t.agentContract.failBody,
+    ``,
     `## Model selection`,
     ``,
     tierSection,
