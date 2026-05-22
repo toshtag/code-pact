@@ -32,7 +32,7 @@ Today both patterns force the maintainer to encode cross-phase ordering in prose
 ## Decision
 
 1. **Accept cross-phase `depends_on` references.** The schema field stays `z.array(z.string().min(1)).optional()` — no type change. The resolver and lint detectors are extended to look across phases when a same-phase lookup fails.
-2. **Add multi-node cycle detection.** A new lint code `TASK_DEPENDS_ON_CYCLE` (warning, plan category) detects A → B → A, A → B → C → A, and any longer cycle. Self-cycles continue to fire the existing `TASK_DEPENDS_ON_SELF_REFERENCE` (we do not collapse them into the new code — they are a distinct, narrower diagnostic).
+2. **Add multi-node cycle detection.** A new lint code `TASK_DEPENDS_ON_CYCLE` (error, plan category — matches the existing `TASK_DEPENDS_ON_SELF_REFERENCE` severity for consistency) detects A → B → A, A → B → C → A, and any longer cycle. Self-cycles continue to fire the existing `TASK_DEPENDS_ON_SELF_REFERENCE` (we do not collapse them into the new code — they are a distinct, narrower diagnostic).
 3. **Add `phase runbook --across-phases [--json]`.** The flag aggregates the existing per-phase runbook steps across every phase whose status is `in_progress` or whose tasks have unsatisfied cross-phase dependencies on `in_progress` phases. Default (no flag) behavior is unchanged.
 4. **Update `task runbook` cross-phase display.** When a task's `depends_on` includes a cross-phase reference, the per-dependency line in the runbook output names the foreign phase (e.g. `P15-T5 (P15, in_progress, derived: planned)`) so the agent reading the runbook knows which phase to consult.
 
@@ -68,7 +68,7 @@ Build a directed graph where nodes are task ids (across all phases) and edges ar
 - Self-cycles (`a → a`) keep their existing dedicated diagnostic.
 - For multi-node cycles, run a standard DFS-based detection (iterative implementation to avoid stack overflow on deep chains). For each strongly connected component of size > 1, emit one `TASK_DEPENDS_ON_CYCLE` per task in the component, with `details.cycle: ["A", "B", "C"]` listing the cycle in traversal order.
 
-Severity: **warning**. We deliberately do not fail `plan lint` for cycles because dogfood may temporarily exhibit them during a multi-PR refactor; promoting to error would block legitimate WIP. The warning is enough to surface the problem.
+Severity: **error**. This matches the existing `TASK_DEPENDS_ON_SELF_REFERENCE` severity (also error), keeping the dep-graph diagnostic family internally consistent. The pragmatic concern that a multi-PR refactor might temporarily exhibit a cycle is real but rare — when it happens the maintainer either fixes the cycle in the same PR or ships a temporary `_skip` annotation (`plan analyze --skip <code>`); we do not pre-emptively demote to warning because a silently-introduced cycle in a roadmap with real cross-phase deps would be a costly footgun.
 
 ## `phase runbook --across-phases`
 

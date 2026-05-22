@@ -129,8 +129,9 @@ Issue-level codes emitted by `plan lint` against the optional task fields introd
 
 | Code | Severity | Trigger |
 |------|----------|---------|
-| `TASK_DEPENDS_ON_UNRESOLVED` | error | `depends_on` references a task id not present in the same phase |
-| `TASK_DEPENDS_ON_SELF_REFERENCE` | error | A task lists itself in `depends_on` (direct self-cycle; multi-node cycle detection is future work) |
+| `TASK_DEPENDS_ON_UNRESOLVED` | error | `depends_on` references a task id not present in any phase (v1.9+ resolves same-phase first, then cross-phase fallback) |
+| `TASK_DEPENDS_ON_SELF_REFERENCE` | error | A task lists itself in `depends_on` (direct self-cycle) |
+| `TASK_DEPENDS_ON_CYCLE` | error | Two or more tasks form a multi-node `depends_on` cycle, e.g. A → B → A or A → B → C → A. Self-cycles keep `TASK_DEPENDS_ON_SELF_REFERENCE`; this code covers length ≥ 2. `details.cycle` lists the cycle members. v1.9+ (P19). |
 | `TASK_DECISION_REF_NOT_FOUND` | error | `decision_refs` path does not exist on disk |
 | `TASK_DECISION_REF_UNSAFE_PATH` | error | `decision_refs` path fails `assertSafeRelativePath` (traversal / absolute / etc.) |
 | `TASK_READS_UNSAFE_PATH` | error | `reads` glob fails `assertSafeRelativePath` |

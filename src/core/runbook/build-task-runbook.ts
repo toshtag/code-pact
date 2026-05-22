@@ -34,6 +34,12 @@ export type BuildTaskRunbookInput = {
   task: Task;
   phaseId: string;
   events: readonly ProgressEvent[];
+  /**
+   * Optional task_id → phase_id index covering every phase in the project.
+   * When supplied, the dependency resolver annotates cross-phase entries
+   * with the foreign phase id (v1.9 P19 additive surface).
+   */
+  taskPhaseIndex?: ReadonlyMap<string, string>;
 };
 
 function step(
@@ -195,7 +201,7 @@ function lifecycleSteps(
 export function buildTaskRunbook(
   input: BuildTaskRunbookInput,
 ): TaskRunbookResult {
-  const { cwd, task, phaseId, events } = input;
+  const { cwd, task, phaseId, events, taskPhaseIndex } = input;
 
   const derived = deriveTaskState(events, task.id);
   const drift = classifyTaskDrift(
@@ -203,7 +209,10 @@ export function buildTaskRunbook(
     derived.current,
     derived.history.length > 0,
   );
-  const depends = resolveDependsOnStates(events, task);
+  const depends = resolveDependsOnStates(events, task, {
+    ownPhaseId: phaseId,
+    taskPhaseIndex,
+  });
   const acceptance = checkAcceptanceRefs(cwd, task);
 
   const state_summary: TaskStateSummary = {
