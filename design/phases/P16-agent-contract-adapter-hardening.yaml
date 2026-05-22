@@ -34,49 +34,45 @@ objective: |
   is the only public surface addition; the templates' textual
   body is the substantive change.
 non_goals:
-  - cursor / gemini-cli (experimental adapters) — left untouched in P16;
-    they remain experimental until a separate phase reviews their
-    conformance readiness
-  - changing the per-agent file output shape (CLAUDE.md / codex
-    instruction file / generic file all keep the same path + role +
-    manifest entry; only the body text changes)
+  - cursor / gemini-cli (experimental adapters) — left untouched in P16; they
+    remain experimental until a separate phase reviews their conformance
+    readiness
+  - changing the per-agent file output shape (CLAUDE.md / codex instruction file
+    / generic file all keep the same path + role + manifest entry; only the body
+    text changes)
   - LLM API integration of any kind
-  - changes to `adapter install` / `adapter upgrade` flag surface
-    (only the diagnostic emission set in `adapter doctor` is extended)
-  - per-locale customization of the new contract section (en-US +
-    ja-JP only, mirroring the existing localisation surface)
-  - retroactive forcing of the new contract section on projects that
-    have hand-edited their instruction file; the existing
-    `ADAPTER_FILE_DRIFT` flow continues to govern modify-without-
-    force conflicts
+  - changes to `adapter install` / `adapter upgrade` flag surface (only the
+    diagnostic emission set in `adapter doctor` is extended)
+  - per-locale customization of the new contract section (en-US + ja-JP only,
+    mirroring the existing localisation surface)
+  - retroactive forcing of the new contract section on projects that have
+    hand-edited their instruction file; the existing `ADAPTER_FILE_DRIFT` flow
+    continues to govern modify-without- force conflicts
 definition_of_done:
-  - design/phases/P16-agent-contract-adapter-hardening.yaml exists
-    with this objective and tasks list
+  - design/phases/P16-agent-contract-adapter-hardening.yaml exists with this
+    objective and tasks list
   - design/roadmap.yaml lists P16
-  - "design/decisions/agent-contract-rfc.md exists with `Status:
-    accepted` lock (P16-T1)"
-  - "stable claude-code adapter's instruction file body emits the
-    new \"## Agent contract\" section with the three axes
-    (when-to-invoke, first-verify, failure-handling) plus the
-    v1.6 surfaces inline (--audit-strict, --from-file, etc.)
-    (P16-T2)"
-  - codex + generic adapters emit functionally-identical contract
-    sections (P16-T3)
-  - "`tests/integration/adapter-conformance.test.ts` extends to
-    assert (a) every stable adapter's instruction file contains the
-    `## Agent contract` heading, (b) the three axes are each
-    mentioned by name, (c) the v1.6 audit surfaces are each
-    referenced at least once (P16-T4)"
+  - "design/decisions/agent-contract-rfc.md exists with `Status: accepted` lock
+    (P16-T1)"
+  - stable claude-code adapter's instruction file body emits the new "## Agent
+    contract" section with the three axes (when-to-invoke, first-verify,
+    failure-handling) plus the v1.6 surfaces inline (--audit-strict,
+    --from-file, etc.) (P16-T2)
+  - codex + generic adapters emit functionally-identical contract sections
+    (P16-T3)
+  - "`tests/integration/adapter-conformance.test.ts` extends to assert (a) every
+    stable adapter's instruction file contains the `## Agent contract` heading,
+    (b) the three axes are each mentioned by name, (c) the v1.6 audit surfaces
+    are each referenced at least once (P16-T4)"
   - "`ADAPTER_CONTRACT_DRIFT` ships in `KNOWN_CODES.adapter` and
-    `docs/cli-contract.md`; emitted by `adapter doctor` when a
-    managed instruction file is present but its contract section
-    is missing or out-of-shape (P16-T5)"
+    `docs/cli-contract.md`; emitted by `adapter doctor` when a managed
+    instruction file is present but its contract section is missing or
+    out-of-shape (P16-T5)"
   - "`tests/integration/json-stdout.test.ts` continues to pass"
   - non-stable adapters (cursor / gemini-cli) are unchanged
-  - docs/cli-contract.md gains the new diagnostic code; docs/
-    migration.md gains a v1.6.x → v1.7.0 section once P16 ships
-  - CHANGELOG.md gains entries under `[Unreleased]` covering each
-    P16 task
+  - docs/cli-contract.md gains the new diagnostic code; docs/ migration.md gains
+    a v1.6.x → v1.7.0 section once P16 ships
+  - CHANGELOG.md gains entries under `[Unreleased]` covering each P16 task
 verification:
   commands:
     - pnpm typecheck
@@ -94,7 +90,7 @@ tasks:
     write_surface: low
     verification_strength: medium
     expected_duration: short
-    status: in_progress
+    status: done
     description: |
       RFC acceptance. Land design/decisions/agent-contract-rfc.md
       with `Status: proposed` in this PR; the status line flips
