@@ -15,6 +15,23 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ### Added
 
+- **P21-T6 — Agent contract docs.** New
+  `docs/agent-contract.md` formally defines the v1.11+ agent
+  contract: what `code-pact` guarantees to agents (CLI
+  surface stability, JSON envelope shape, exit code
+  contract, error code stability, determinism, append-only
+  progress), what agents must do to satisfy `adapter
+  conformance` (required structural sections, lifecycle and
+  diagnostic CLI surface mentions, failure guidance
+  keywords, per-file integrity), the recommended per-task
+  lifecycle (visualised as `task prepare ─► task start ─►
+  implement ─► verify ─► task complete ─► task finalize`
+  with branches for `started` / `blocked` / `done`), and
+  the measurement set the Evidence Harness v2 work (P26)
+  will populate. The document closes the P21 cycle and is
+  referenced by `README.md`'s "Reference docs" table next
+  to `docs/positioning.md`. No code changes.
+
 - **P21-T5 — `code-pact adapter conformance <agent>` command.**
   New CLI verb `code-pact adapter conformance <agent>
   [--json]` is a focused read-only check that the installed
