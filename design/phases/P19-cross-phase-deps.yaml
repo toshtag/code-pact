@@ -1,0 +1,254 @@
+id: P19
+name: Cross-phase Dependencies
+weight: 20
+confidence: medium
+risk: medium
+status: in_progress
+objective: |
+  Extend `depends_on` to accept cross-phase task references
+  (e.g. `P15-T6`) so a phase can wait on work in another
+  phase. Add multi-node cycle detection covering the new
+  edge set. Add `phase runbook --across-phases` for
+  release-prep-style multi-phase sequencing, plus a small
+  display update on `task runbook` so the agent reading the
+  runbook knows which phase a cross-phase dep lives in.
+
+  The schema field stays `string[]` — no type change. The
+  resolver and lint detectors are extended to look across
+  phases when a same-phase lookup fails. One new diagnostic
+  (`TASK_DEPENDS_ON_CYCLE`, plan/warning) is added to
+  `KNOWN_CODES.plan` (the v1.0 contract permits additive
+  growth there).
+
+  Default `phase runbook <id>` behavior is unchanged;
+  `--across-phases` is purely additive.
+non_goals:
+  - changing the `depends_on` schema type (stays `string[]`)
+  - promoting cycle detection to plan-lint error (warning only — WIP-friendly)
+  - per-task `task runbook --across-phases` (phase-scoped is enough for v1.9)
+  - auto-fix mode for cycles
+  - cross-phase `acceptance_refs` referencing artifacts in sibling phases
+  - any change to `task finalize` eligibility semantics (gate stays "every dep's
+    derived state is done"; resolver now finds cross-phase deps too)
+definition_of_done:
+  - design/phases/P19-cross-phase-deps.yaml exists with this objective and tasks
+    list
+  - design/roadmap.yaml lists P19
+  - "design/decisions/cross-phase-deps-rfc.md exists with `Status: accepted` lock
+    (P19-T1)"
+  - cross-phase `depends_on` resolves correctly in `resolveDependsOnStates`
+    (P19-T2 includes the resolver extension alongside cycle detection)
+  - "`TASK_DEPENDS_ON_CYCLE` lint code lands under `KNOWN_CODES.plan` with
+    multi-node DFS detection (P19-T2)"
+  - "`phase runbook --across-phases [--json]` ships with aggregation
+    semantics from the RFC (P19-T3)"
+  - "`task runbook` per-dependency display names the foreign phase id
+    when a dep is cross-phase (P19-T4)"
+  - CHANGELOG.md gains entries under `[Unreleased]` covering each P19 task
+verification:
+  commands:
+    - pnpm typecheck
+    - pnpm test
+    - pnpm build
+    - node dist/cli.js plan lint --json
+    - node dist/cli.js validate --json
+    - node dist/cli.js doctor --json
+tasks:
+  - id: P19-T1
+    type: architecture
+    ambiguity: medium
+    risk: low
+    context_size: medium
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: in_progress
+    description: |
+      RFC acceptance. Land design/decisions/cross-phase-deps-rfc.md
+      with `Status: proposed` in this PR; the status line flips
+      to `accepted` in a follow-up commit before merge per the
+      P11–P18 lifecycle precedent. No src/ change in this task —
+      the purpose is to lock the design decisions before any
+      resolver / lint / runbook code is written:
+
+      - Cross-phase id format (just normal task ids; uniqueness
+        is enforced by the existing `TASK_DUPLICATE_ID_GLOBAL`)
+      - Resolver lookup algorithm (same-phase first, cross-phase
+        fallback, unresolved → existing warning)
+      - Cycle detection algorithm (iterative DFS, severity
+        warning, separate from self-cycle diagnostic)
+      - `--across-phases` inclusion criteria (in_progress phases
+        + tasks that are deps of in_progress phase tasks)
+      - Field-placement decisions (`phase_id` additive on
+        `depends_on_check[]` entries, only for cross-phase resolutions)
+      - Backward compatibility (no schema changes; no rename or
+        removal of existing diagnostics; field-presence preserved)
+
+      Register P19 in design/roadmap.yaml (weight 20). The phase
+      status line stays `in_progress` until P19-T4 lands.
+    decision_refs:
+      - design/decisions/cross-phase-deps-rfc.md
+    reads:
+      - src/core/schemas/task.ts
+      - src/core/plan/checks.ts
+      - src/core/runbook/depends-on.ts
+      - docs/cli-contract.md
+    writes:
+      - design/decisions/cross-phase-deps-rfc.md
+      - CHANGELOG.md
+    acceptance_refs:
+      - design/decisions/cross-phase-deps-rfc.md
+  - id: P19-T2
+    type: feature
+    ambiguity: medium
+    risk: medium
+    context_size: large
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: planned
+    description: |
+      Resolver extension + cycle detection. Two changes ship
+      together because they share the cross-phase graph
+      construction step:
+
+      1. `resolveDependsOnStates` (or a sibling helper) is
+         extended to look across phases when a same-phase lookup
+         fails, returning the foreign phase id alongside the
+         derived state. `task runbook` is taught to populate
+         `depends_on_check[i].phase_id` additively for
+         cross-phase resolutions.
+
+      2. A new lint check in `src/core/plan/checks.ts` builds
+         the dep graph across all phases and reports
+         `TASK_DEPENDS_ON_CYCLE` (plan/warning) per task in any
+         strongly connected component of size > 1. Self-cycles
+         keep firing `TASK_DEPENDS_ON_SELF_REFERENCE` (separate
+         diagnostic — narrower, kept distinct).
+
+      `TASK_DEPENDS_ON_CYCLE` lands in `KNOWN_CODES.plan` and in
+      `docs/cli-contract.md` Plan diagnostic codes table.
+
+      Unit tests cover: cross-phase resolution success, cross-
+      phase resolution miss (still fires UNRESOLVED), self-cycle
+      doesn't double-fire as CYCLE, 2-node cycle, 3-node cycle,
+      4-node cycle with extra dependents outside the cycle,
+      multiple disjoint cycles in the same graph, deep linear
+      chain (no cycle, no false positive), duplicate id collision
+      (cross-phase resolver picks deterministically — duplicate
+      diagnostic is what alerts the user, no double-warning).
+    depends_on:
+      - P19-T1
+    decision_refs:
+      - design/decisions/cross-phase-deps-rfc.md
+    reads:
+      - design/decisions/cross-phase-deps-rfc.md
+      - src/core/runbook/depends-on.ts
+      - src/core/plan/checks.ts
+      - tests/unit/error-code-surface.test.ts
+    writes:
+      - src/core/runbook/depends-on.ts
+      - src/core/plan/checks.ts
+      - tests/unit/error-code-surface.test.ts
+      - tests/unit/core/runbook/depends-on.test.ts
+      - tests/unit/core/plan/checks-cross-phase-cycle.test.ts
+      - CHANGELOG.md
+    acceptance_refs:
+      - design/phases/P19-cross-phase-deps.yaml
+  - id: P19-T3
+    type: feature
+    ambiguity: low
+    risk: low
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: planned
+    description: |
+      `phase runbook --across-phases [--json]`. Aggregates per-
+      phase runbook steps into a single ordered stream, scoped
+      to `in_progress` phases + phases hosting tasks that are
+      deps of `in_progress` phase tasks.
+
+      JSON envelope (success):
+        { ok: true, data: {
+            kind: "aggregated_runbook",
+            phases_considered: string[],
+            steps: [
+              { phase_id, step_kind, task_id?, summary },
+              ...
+            ]
+          } }
+
+      Step ordering: phase id ascending, then within-phase
+      P12 runbook order. Done / planned / cancelled phases are
+      excluded.
+
+      Default `phase runbook <id>` invocation is unchanged.
+      The new flag is purely additive.
+
+      Integration tests cover: 2-phase aggregation, done-phase
+      exclusion, planned-phase exclusion, dep-driven inclusion
+      (planned phase included because an in_progress phase
+      depends on its task), JSON envelope shape.
+    depends_on:
+      - P19-T2
+    decision_refs:
+      - design/decisions/cross-phase-deps-rfc.md
+    reads:
+      - src/commands/phase-runbook.ts
+      - src/core/runbook/build-phase-runbook.ts
+      - src/cli.ts
+    writes:
+      - src/commands/phase-runbook.ts
+      - src/core/runbook/build-phase-runbook.ts
+      - src/cli.ts
+      - tests/integration/phase-runbook-across-phases.test.ts
+      - CHANGELOG.md
+    acceptance_refs:
+      - design/phases/P19-cross-phase-deps.yaml
+  - id: P19-T4
+    type: feature
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: planned
+    description: |
+      `task runbook` cross-phase display update + docs +
+      phase status flip (closes P19).
+
+      Display update: when `depends_on_check[i].phase_id` is
+      present (cross-phase resolution from P19-T2), the human-
+      mode runbook line names the foreign phase, e.g.
+      `P15-T5 (P15, in_progress, derived: planned)`. The JSON
+      envelope shape was already locked in P19-T2; this task
+      just teaches the human formatter to surface it.
+
+      Docs: `docs/cli-contract.md` gains a short
+      "Cross-phase `depends_on`" note under the relevant
+      section + the `TASK_DEPENDS_ON_CYCLE` entry in the plan
+      diagnostic table. `docs/dogfood.md` gains a short
+      "Tracking release prep with --across-phases" subsection.
+
+      Also flips the P19 phase YAML status to `done` since this
+      task closes the phase.
+    depends_on:
+      - P19-T1
+      - P19-T2
+      - P19-T3
+    decision_refs:
+      - design/decisions/cross-phase-deps-rfc.md
+    reads:
+      - src/commands/task-runbook.ts
+      - docs/cli-contract.md
+      - docs/dogfood.md
+    writes:
+      - src/commands/task-runbook.ts
+      - docs/cli-contract.md
+      - docs/dogfood.md
+      - CHANGELOG.md
+    acceptance_refs:
+      - design/phases/P19-cross-phase-deps.yaml

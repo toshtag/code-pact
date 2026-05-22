@@ -13,6 +13,26 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+### Added
+
+- **P19-T1** — Cross-phase dependencies RFC. New phase
+  `P19 — Cross-phase Dependencies` registered in
+  `design/roadmap.yaml` (weight 20). RFC at
+  `design/decisions/cross-phase-deps-rfc.md` (accepted) locks
+  the design before any resolver / lint / runbook code is
+  written: cross-phase `depends_on` references resolve via
+  same-phase-first / cross-phase-fallback lookup; new
+  `TASK_DEPENDS_ON_CYCLE` lint code (plan/warning) covers
+  multi-node cycles via iterative DFS; `phase runbook
+  --across-phases [--json]` aggregates per-phase runbook
+  steps for `in_progress` phases + dep-driven inclusions;
+  `task runbook` per-dependency display gains an additive
+  `phase_id` field on `depends_on_check[]` entries (only
+  populated for cross-phase resolutions). No schema changes,
+  no `task finalize` eligibility changes, no existing
+  diagnostic rename/removal. Implementation lands in
+  P19-T2..T4; v1.9.0 target.
+
 ## [1.8.0] — 2026-05-22
 
 **Spec Kit bridge release.** P18 (Spec Kit Bridge) ships
