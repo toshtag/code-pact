@@ -69,7 +69,8 @@ tasks:
 
 ### `depends_on`
 
-- **In `plan lint`:** flags references to ids not in the same phase (`TASK_DEPENDS_ON_UNRESOLVED`) and direct self-cycles (`TASK_DEPENDS_ON_SELF_REFERENCE`). Multi-node cycle detection is future work.
+- **In `plan lint`:** flags references to ids not present in any phase (`TASK_DEPENDS_ON_UNRESOLVED` — v1.9 P19 made the resolver cross-phase aware; before that the check was same-phase only), direct self-cycles (`TASK_DEPENDS_ON_SELF_REFERENCE`), and multi-node `depends_on` cycles of length ≥ 2 (`TASK_DEPENDS_ON_CYCLE` — v1.9 P19, iterative Tarjan SCC over the whole roadmap dep graph).
+- **Cross-phase references** (v1.9 P19+): `depends_on` can name a task declared in any phase, not just the current one. `task runbook`'s `depends_on_check[i].phase_id` field is populated (additively) when a dep is cross-phase. `phase runbook --across-phases` (v1.9+) aggregates runbooks for every `in_progress` phase plus any phase pulled in via one level of transitive dep-driven inclusion.
 - **In `task context`:** the pack gains a `## Depends on` section. Each dependency is shown with its current derived state from `.code-pact/state/progress.yaml` (`planned` / `started` / `blocked` / `resumed` / `done` / `failed`). The agent can decide whether the dependency is ready before starting.
 - **No runtime enforcement:** `task start` does not refuse to begin a task whose dependencies are incomplete. The declaration is for context, documentation, and lint validation; runtime gating is a candidate for P12 runbook.
 
@@ -85,7 +86,8 @@ tasks:
 
 ### `writes`
 
-- **In `plan lint`:** path-safety (`TASK_WRITES_UNSAFE_PATH`), glob syntax (`TASK_WRITES_GLOB_INVALID`), and an advisory warning when the declared glob overlaps a protected path (`TASK_WRITES_PROTECTED_PATH`). The protected-path seed set in v1.1.0 is narrow and built-in: `.git/**`, `node_modules/**`, `.code-pact/**`, `design/roadmap.yaml`, `design/phases/*.yaml`. P14 governance may replace this with a configurable policy and promote the code to error severity.
+- **In `plan lint`:** path-safety (`TASK_WRITES_UNSAFE_PATH`), glob syntax (`TASK_WRITES_GLOB_INVALID`), over-broad declared globs (`TASK_WRITES_OVER_BROAD` — v1.6 P15-T2; flags patterns whose root segment is `**` such as `**`, `**/*`, `**/*.ts`), and an advisory warning when the declared glob overlaps a protected path (`TASK_WRITES_PROTECTED_PATH`). The protected-path seed list (`.git/**`, `node_modules/**`, `.code-pact/**`, `design/roadmap.yaml`, `design/phases/*.yaml`) is the v1.1 default; v1.6 P15-T3 made it **configurable** via [`design/rules/protected-paths.md`](../../design/rules/protected-paths.md) — projects can extend or override the list without forking. The diagnostic code remains a warning by default.
+- **`write_audit`** (v1.6 P15-T1+, `task finalize --json`): an advisory layer that compares declared `writes` globs against the actual working-tree diff (default) or branch-level merge-base (`--base-ref`). Emits `TASK_WRITES_AUDIT_OUTSIDE_DECLARED` when a touched file matches no declared glob, and `TASK_WRITES_AUDIT_DECLARED_UNUSED` (v1.6 P15-T4) when a declared glob matches zero touched files. Promote to exit-relevant with `task finalize --audit-strict --write --json`; in CI pair with `--base-ref <default-branch>` so the audit compares against the merge-base (otherwise a clean working tree fires `DECLARED_UNUSED` for every task that declared writes).
 - **In `task context`:** the pack gains a `## Declared write surface` section listing each declared glob. **No filesystem lookup** because writes are by definition future-tense.
 
 ### `acceptance_refs`

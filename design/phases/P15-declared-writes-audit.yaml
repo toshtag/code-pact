@@ -321,12 +321,11 @@ tasks:
       multi-task batch review.
 
       **Cancelled in v1.10 (status: cancelled).** After
-      shipping P15-T6 (`--audit-strict` on `task finalize`
-      and `phase reconcile`) and P19 (cross-phase `depends_on`
-      + `phase runbook --across-phases`), the original use
-      case for phase-level audit — release-prep review of
-      "what's left, with audit signal" — is already served
-      by:
+      shipping P15-T6 (`task finalize --audit-strict`) and
+      P19 (cross-phase `depends_on` + `phase runbook
+      --across-phases`), the original use case for
+      phase-level audit — release-prep review of "what's
+      left, with audit signal" — is already served by:
 
       1. `code-pact phase runbook --across-phases` (v1.9+)
          which surfaces every in_progress phase's runbook
@@ -351,12 +350,15 @@ tasks:
       justifies the new schema surface. P15-T5 is closed
       cancelled rather than deferred indefinitely.
 
-      The cancellation does NOT remove P15-T6's
-      `--audit-strict` flag from `phase reconcile`; that
-      remains the supported way to run audit-aware
-      reconciliation. P15-T5 was specifically about adding
-      a `write_audit` field to the `phase reconcile`
-      envelope itself, which we no longer plan to ship.
+      Note: `--audit-strict` was scope-reduced during P15-T6
+      implementation to apply to `task finalize` only — a
+      `phase reconcile --audit-strict` surface was never
+      shipped. Per-task `task finalize --audit-strict` run
+      across the phase via `phase runbook --across-phases`
+      is the supported way to run audit-aware reconciliation.
+      P15-T5 was specifically about adding a `write_audit`
+      data field to the `phase reconcile` envelope itself,
+      which we no longer plan to ship.
     depends_on:
       - P15-T1
     decision_refs:
@@ -373,14 +375,24 @@ tasks:
     expected_duration: short
     status: done
     description: |
-      Introduce `--audit-strict` flag on `task finalize` and
-      `phase reconcile`. When set, presence of any
-      `TASK_WRITES_AUDIT_*` warning in the envelope causes
-      exit 1 (advisory becomes enforcing). Kept distinct from
-      `--strict` (which is plan-lint-scoped) so existing CI
-      consumers are not affected. Tests: opt-in semantics,
-      exit-code matrix, JSON envelope still includes
-      `write_audit` on the failure path.
+      Introduce `--audit-strict` flag on `task finalize`.
+      When set, presence of any `TASK_WRITES_AUDIT_*` warning
+      in the envelope causes exit 1 (advisory becomes
+      enforcing). Kept distinct from `--strict` (which is
+      plan-lint-scoped) so existing CI consumers are not
+      affected. Tests: opt-in semantics, exit-code matrix,
+      JSON envelope still includes `write_audit` on the
+      failure path.
+
+      Scope note (v1.10 hindsight): the original planned
+      scope also included `phase reconcile --audit-strict`,
+      but implementation ended up shipping `--audit-strict`
+      on `task finalize` only. Per-task strict invocation
+      via `phase runbook --across-phases` covers the
+      release-prep case, and P15-T5 (the corresponding
+      `phase reconcile --json` write_audit data field) was
+      cancelled in v1.10. No `phase reconcile --audit-strict`
+      surface exists today and none is planned.
     depends_on:
       - P15-T1
       - P15-T4

@@ -13,6 +13,76 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+## [1.10.1] — 2026-05-22
+
+**Documentation patch.** No code change to the user-facing
+product surface. v1.10.1 fixes three documentation /
+design-metadata inconsistencies caught by an external review
+of the v1.10.0 source bundle. The patch matters for
+correctness in code-pact's "control plane" role: agents read
+phase YAML, CHANGELOG, migration docs, and adapter
+instruction files as source of truth, so a misleading
+sentence has the same blast radius as a misleading API.
+
+### Fixed
+
+- **`phase reconcile --audit-strict` references removed.**
+  The v1.10.0 CHANGELOG, `docs/migration.md` v1.10 section,
+  and `design/phases/P15-declared-writes-audit.yaml`'s P15-T5
+  cancellation note all claimed that `--audit-strict on
+  phase reconcile (P15-T6, v1.6+)` was unaffected by the
+  P15-T5 closure. **It was never shipped.** P15-T6
+  implementation scope-reduced to `task finalize
+  --audit-strict` only; the `phase reconcile --audit-strict`
+  surface does not exist in any released version. The P15-T6
+  task description is updated with a v1.10 hindsight note
+  documenting the scope reduction. The "supported way to run
+  audit-aware reconciliation" is now correctly described as
+  per-task `task finalize --audit-strict` driven by
+  `phase runbook --across-phases`.
+
+- **CI recommendation examples now include `--base-ref`.**
+  The previous wording in `src/i18n/en-US.ts`,
+  `src/i18n/ja-JP.ts`, `design/decisions/agent-contract-rfc.md`,
+  and `docs/migration.md` recommended `task finalize
+  --audit-strict --write --json` for CI. That command in a
+  clean working tree (the typical CI state — commits are
+  pushed, no uncommitted diff) returns
+  `files_touched: []` and fires
+  `TASK_WRITES_AUDIT_DECLARED_UNUSED` for every task whose
+  declared writes the working tree does not currently dirty,
+  which makes `--audit-strict` exit 1 every CI run. The fix
+  pairs `--audit-strict` with `--base-ref <default-branch>`
+  for CI (so the audit compares against the merge-base) and
+  keeps the bare form for local pre-commit review (where the
+  uncommitted working tree IS the audit target). Both
+  patterns are now documented side by side. Adapter
+  instruction files installed before v1.10.1 carry the old
+  wording; re-run `code-pact adapter upgrade <agent> --check`
+  to see the drift and `--write --accept-modified` to refresh.
+
+- **`docs/concepts/task-readiness-fields.md` refreshed.**
+  The `depends_on` section claimed "multi-node cycle
+  detection is future work" and "references to ids not in
+  the same phase" — both true for v1.1, but P19 (v1.9)
+  shipped cross-phase resolution + `TASK_DEPENDS_ON_CYCLE`.
+  The `writes` section described protected paths as a
+  built-in seed list "P14 governance may replace... with a
+  configurable policy" — but P15-T3 (v1.6) already shipped
+  the configurable policy via `design/rules/protected-paths.md`.
+  Both sections are updated to current state and gain a
+  `TASK_WRITES_OVER_BROAD` + `write_audit` summary alongside
+  the existing diagnostics.
+
+### Why this is a patch (1.10.1, not 1.11.0)
+
+No new commands. No new flags. No new error codes. No
+schema changes. No JSON envelope changes. Adapter manifests
+unchanged. Existing CLI behaviour byte-identical. The
+patch corrects documentation and design-metadata strings
+only — exactly the case `semver` reserves the patch
+position for.
+
 ## [1.10.0] — 2026-05-22
 
 **Evidence harness release.** P20 (Evidence Harness) ships
@@ -79,8 +149,8 @@ The release ships three things:
   description in `design/phases/P15-declared-writes-audit.yaml`
   is updated with the cancellation rationale; the P15
   phase status flips from `in_progress` to `done`.
-  `--audit-strict` on `phase reconcile` (added in P15-T6)
-  is unaffected.
+  `task finalize --audit-strict` (P15-T6, v1.6+, the only
+  `--audit-strict` surface that ever shipped) is unaffected.
 
 ### Why this is a minor (1.10.0, not 1.9.1)
 
