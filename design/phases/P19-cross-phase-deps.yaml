@@ -34,16 +34,16 @@ definition_of_done:
   - design/phases/P19-cross-phase-deps.yaml exists with this objective and tasks
     list
   - design/roadmap.yaml lists P19
-  - "design/decisions/cross-phase-deps-rfc.md exists with `Status: accepted` lock
-    (P19-T1)"
+  - "design/decisions/cross-phase-deps-rfc.md exists with `Status: accepted`
+    lock (P19-T1)"
   - cross-phase `depends_on` resolves correctly in `resolveDependsOnStates`
     (P19-T2 includes the resolver extension alongside cycle detection)
   - "`TASK_DEPENDS_ON_CYCLE` lint code lands under `KNOWN_CODES.plan` with
     multi-node DFS detection (P19-T2)"
-  - "`phase runbook --across-phases [--json]` ships with aggregation
-    semantics from the RFC (P19-T3)"
-  - "`task runbook` per-dependency display names the foreign phase id
-    when a dep is cross-phase (P19-T4)"
+  - "`phase runbook --across-phases [--json]` ships with aggregation semantics
+    from the RFC (P19-T3)"
+  - "`task runbook` per-dependency display names the foreign phase id when a dep
+    is cross-phase (P19-T4)"
   - CHANGELOG.md gains entries under `[Unreleased]` covering each P19 task
 verification:
   commands:
@@ -62,7 +62,7 @@ tasks:
     write_surface: low
     verification_strength: medium
     expected_duration: short
-    status: in_progress
+    status: done
     description: |
       RFC acceptance. Land design/decisions/cross-phase-deps-rfc.md
       with `Status: proposed` in this PR; the status line flips
