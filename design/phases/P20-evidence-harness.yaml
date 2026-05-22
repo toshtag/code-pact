@@ -3,7 +3,7 @@ name: Evidence Harness
 weight: 20
 confidence: medium
 risk: low
-status: in_progress
+status: done
 objective: |
   Add an internal-only measurement harness at
   `scripts/harness/` that captures deterministic-input
