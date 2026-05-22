@@ -31,6 +31,32 @@ const REQUIRED_CLI_REFS = [
   "code-pact validate",
 ];
 
+// v1.7 P16-T4: agent-contract conformance.
+//
+// The agent contract section's headings are English-locked across ALL
+// locales per design/decisions/agent-contract-rfc.md. The conformance
+// regex anchors on the verbatim heading strings below — drift in the
+// heading text is a contract break.
+const AGENT_CONTRACT_SECTION_HEADING = "## Agent contract";
+const AGENT_CONTRACT_AXIS_HEADINGS = [
+  "### When to invoke code-pact",
+  "### What to verify first",
+  "### How to handle failures",
+];
+// Every stable adapter's instruction file MUST mention every v1.6
+// audit surface at least once in the agent-contract body. These are
+// the surfaces the agent must learn about on day one:
+//   - `--audit-strict` (P15-T6) — opt-in audit gate
+//   - `--from-file`    (P17-T1/T4) — non-interactive plan brief/constitution
+//   - `--stdin`        (P17-T2/T4) — same family
+//   - `write_audit`    (P15-T1)    — the envelope field the audit produces
+const AGENT_CONTRACT_V16_SURFACES = [
+  "--audit-strict",
+  "--from-file",
+  "--stdin",
+  "write_audit",
+];
+
 const repoRoot = resolve(fileURLToPath(import.meta.url), "../../..");
 const fixturesRoot = join(repoRoot, "tests", "fixtures", "adapters");
 
@@ -166,6 +192,66 @@ describe.each(STABLE_AGENTS)("adapter conformance — %s", (agent) => {
       expect(f.path.startsWith("/")).toBe(false);
       expect(f.path).not.toMatch(/(^|\/)\.\.($|\/)/);
     }
+  });
+
+  // ---------------------------------------------------------------------
+  // v1.7 P16-T4: agent contract section
+  // ---------------------------------------------------------------------
+
+  it("instruction file contains the verbatim `## Agent contract` heading", async () => {
+    await installAdapter(agent);
+    const manifest = await readManifest(dir, agent);
+    const instruction = manifest!.files.find((f) => f.role === "instruction");
+    expect(instruction).toBeDefined();
+    const content = await readFile(join(dir, instruction!.path), "utf8");
+    expect(content).toContain(AGENT_CONTRACT_SECTION_HEADING);
+  });
+
+  it("instruction file contains all three agent-contract axis headings (verbatim, English-locked)", async () => {
+    await installAdapter(agent);
+    const manifest = await readManifest(dir, agent);
+    const instruction = manifest!.files.find((f) => f.role === "instruction");
+    const content = await readFile(join(dir, instruction!.path), "utf8");
+    for (const heading of AGENT_CONTRACT_AXIS_HEADINGS) {
+      expect(content).toContain(heading);
+    }
+  });
+
+  it("agent contract section references every v1.6 audit surface", async () => {
+    await installAdapter(agent);
+    const manifest = await readManifest(dir, agent);
+    const instruction = manifest!.files.find((f) => f.role === "instruction");
+    const content = await readFile(join(dir, instruction!.path), "utf8");
+    // Slice the body between the section heading and the next H2 so a
+    // surface mention elsewhere in the file (e.g. an unrelated example
+    // block) cannot satisfy this assertion.
+    const sectionStart = content.indexOf(AGENT_CONTRACT_SECTION_HEADING);
+    expect(sectionStart).toBeGreaterThanOrEqual(0);
+    const nextH2 = content.indexOf("\n## ", sectionStart + AGENT_CONTRACT_SECTION_HEADING.length);
+    const sectionBody =
+      nextH2 === -1 ? content.slice(sectionStart) : content.slice(sectionStart, nextH2);
+    for (const surface of AGENT_CONTRACT_V16_SURFACES) {
+      expect(
+        sectionBody,
+        `expected v1.6 surface "${surface}" inside the agent-contract section of ${agent}'s instruction file, got body:\n${sectionBody}`,
+      ).toContain(surface);
+    }
+  });
+
+  it("agent contract heading appears AFTER the per-task workflow header (placement check)", async () => {
+    await installAdapter(agent);
+    const manifest = await readManifest(dir, agent);
+    const instruction = manifest!.files.find((f) => f.role === "instruction");
+    const content = await readFile(join(dir, instruction!.path), "utf8");
+    const sectionStart = content.indexOf(AGENT_CONTRACT_SECTION_HEADING);
+    // The workflow header is the localised string for
+    // `templates.adapterCommon.workflowHeader`. Both en-US ("How to
+    // work on a task") and ja-JP ("タスクの進め方") emit an `## …`
+    // line; we install in en-US for conformance so we can match that
+    // text directly.
+    const workflowHeader = content.indexOf("## How to work on a task");
+    expect(workflowHeader).toBeGreaterThanOrEqual(0);
+    expect(sectionStart).toBeGreaterThan(workflowHeader);
   });
 });
 
