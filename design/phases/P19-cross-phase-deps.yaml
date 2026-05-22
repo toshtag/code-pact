@@ -3,7 +3,7 @@ name: Cross-phase Dependencies
 weight: 20
 confidence: medium
 risk: medium
-status: in_progress
+status: done
 objective: |
   Extend `depends_on` to accept cross-phase task references
   (e.g. `P15-T6`) so a phase can wait on work in another
