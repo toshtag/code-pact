@@ -13,6 +13,56 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+## [1.9.0] — 2026-05-22
+
+**Cross-phase dependencies release.** P19 (Cross-phase
+Dependencies) ships feature-complete (T1–T4, all done).
+v1.9 extends `depends_on` to accept references to tasks in
+other phases — the schema field stays `string[]`, but the
+resolver and lint detectors now look across phases when a
+same-phase lookup fails. This unlocks two real-world patterns
+that previously had to be tracked in PR descriptions / prose:
+
+1. **Release prep that bundles multiple in_progress phases.**
+   A v1.X.0 release prep task can now declare
+   `depends_on: ["P18-T5", "P19-T4"]` and the dep gate is
+   machine-checked end to end.
+2. **A phase that legitimately blocks on an earlier phase's
+   deferred task.** Useful for closing late spillover (e.g.
+   P15-T5) before downstream phases proceed past a certain
+   point.
+
+The release adds three things:
+
+- **`code-pact phase runbook --across-phases [--json]`** —
+  new aggregated runbook that emits one per-phase
+  `PhaseRunbookResult` for every phase in scope
+  (`in_progress` + one level of transitive dep-driven
+  inclusion). Default `phase runbook <id>` invocation is
+  unchanged.
+- **`TASK_DEPENDS_ON_CYCLE`** — new plan-lint code (severity
+  error) built on iterative Tarjan SCC over the multi-phase
+  dep graph. Catches A → B → A, A → B → C → A, etc.
+  Self-cycles keep their narrower
+  `TASK_DEPENDS_ON_SELF_REFERENCE` diagnostic.
+- **Cross-phase resolution semantics** for `depends_on`.
+  `TASK_DEPENDS_ON_UNRESOLVED` now fires only for ids absent
+  from the ENTIRE roadmap (was: absent from the same phase).
+  Existing JSON consumers see an additive `phase_id` field
+  on `task runbook`'s `depends_on_check[i]` entries for
+  cross-phase resolutions; same-phase deps omit the field.
+
+No `depends_on` schema type change, no `task finalize`
+eligibility change, no rename or removal of existing
+diagnostics. `KNOWN_CODES.public` is unchanged — the new
+code goes under `KNOWN_CODES.plan` per the v1.0 additive-
+growth contract.
+
+Why this is a minor (1.9.0, not 1.8.1): the release adds a
+new top-level Stable v1.0 flag (`--across-phases`) and a new
+plan-lint code. Patch releases are reserved for bug fixes
+and doc-only changes; new flags and codes move the minor.
+
 ### Added
 
 - **P19-T4** — `task runbook` cross-phase display update +
