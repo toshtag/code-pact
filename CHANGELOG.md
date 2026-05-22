@@ -15,6 +15,43 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ### Added
 
+- **P18-T4** — Spec Kit bridge: read-only suggestion extraction
+  for `spec.md` / `plan.md` files. New module
+  `src/core/spec-import/spec-md-extractor.ts` exports
+  `extractSpecMd(input: string): SpecMdExtractResult` returning
+  `{ brief_candidates: { what?, who?, differentiator? },
+     constitution_candidates: { description?, principles? },
+     recognised_sections[], skipped_sections[] }`. The
+  extractor is heading-level-agnostic and recognises a small
+  set of canonical Spec Kit headings (Problem statement / Goal
+  / Audience / Personas / Positioning / Background / Principles
+  / Constraints, etc.) plus their common synonyms. First-match-
+  wins so duplicate headings don't override.
+
+  CLI surface: `code-pact spec import --suggest-from <path>
+  --json` reads the file, runs the extractor, and prints the
+  result envelope. **Never writes any file** — the user pipes
+  the suggestions into `plan brief --from-file` /
+  `plan constitution --from-file` if they want to persist.
+
+  Mutex constraint: `--from` and `--suggest-from` cannot be
+  combined; passing both returns `CONFIG_ERROR` with
+  `data.detail: "mutex_violation"`. `--phase-id` is ignored
+  silently when only `--suggest-from` is passed (suggestion
+  mode has no use for it). Missing `--phase-id` with `--from`
+  is now reported with structured `data.detail: "missing_phase_id"`.
+
+  15 unit tests cover the extractor matrix (empty / typical
+  spec.md / typical constitution.md / unrecognised sections /
+  first-match-wins / heading levels h1–h6 / multi-line
+  paragraph collapsing / blank-line termination / code-fence
+  ignoring / Windows line endings / heading normalisation /
+  empty principles / Spec Kit Goals → what / Constraints →
+  principles / Unicode). 8 integration tests cover the
+  --suggest-from envelope, mutex_violation, missing source,
+  unsafe path, read-only invariant, and the silently-ignored
+  --phase-id case.
+
 - **P18-T3** — Spec Kit bridge: `code-pact spec import` CLI command
   (Stable v1.8+). New top-level `spec` namespace with the first
   subcommand `import`. Reads a `tasks.md` file, parses via the
