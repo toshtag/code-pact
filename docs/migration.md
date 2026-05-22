@@ -447,6 +447,57 @@ Projects running `plan lint --strict` / `plan analyze --strict` / `validate --st
 
 In semver terms, v1.4.0 is a minor release.
 
+## v1.10.0 → v1.10.1
+
+Doc-only patch. No code change to the user-facing product
+surface. Upgrade is a no-op for project state:
+
+```sh
+npm install -g code-pact@1.10.1
+```
+
+If you have an adapter installed (claude-code / codex /
+generic), the instruction-file body that v1.10.0 emitted
+carries the old CI recommendation `task finalize
+--audit-strict --write --json`. v1.10.1 replaces that with
+the `--base-ref <default-branch>` pair documented below. To
+refresh the instruction file body, run:
+
+```sh
+code-pact adapter upgrade <agent> --check     # see the drift
+code-pact adapter upgrade <agent> --write --accept-modified
+```
+
+`--accept-modified` preserves any user edits to other parts
+of the file.
+
+### What changed in the docs
+
+- The `phase reconcile --audit-strict` surface that v1.10.0
+  CHANGELOG / migration / P15 phase YAML referred to **does
+  not exist**. P15-T6 scope-reduced during implementation to
+  `task finalize --audit-strict` only. v1.10.1 corrects the
+  metadata.
+- CI examples now pair `--audit-strict` with `--base-ref
+  <default-branch>`. The bare `task finalize --audit-strict
+  --write --json` invocation works for local pre-commit
+  review (uncommitted working tree is the audit target) but
+  fails for CI (clean working tree → `DECLARED_UNUSED`
+  fires).
+- `docs/concepts/task-readiness-fields.md` is brought up to
+  date with P19 (cross-phase `depends_on` + multi-node cycle
+  detection) and P15 (configurable protected paths +
+  `write_audit` + `OVER_BROAD` lint).
+
+### CI recommendation matrix
+
+| Working tree state | Recommended invocation |
+| --- | --- |
+| Clean (CI / committed branches) | `task finalize <id> --audit-strict --write --json --base-ref origin/main` |
+| Dirty (local pre-commit) | `task finalize <id> --audit-strict --write --json` |
+
+In semver terms, v1.10.1 is a patch release.
+
 ## v1.9.x → v1.10.0
 
 ### Quick path
@@ -476,8 +527,9 @@ code-pact validate --json
   `write_audit` field on `phase reconcile --json` will not
   ship. The use case is already served by the v1.6+v1.9
   combination of `task finalize --audit-strict` +
-  `phase runbook --across-phases`. `--audit-strict` on
-  `phase reconcile` (P15-T6, v1.6+) is unaffected.
+  `phase runbook --across-phases`. `task finalize
+  --audit-strict` (P15-T6, v1.6+, the only `--audit-strict`
+  surface that ever shipped) is unaffected.
 - **P15 phase status** flips from `in_progress` to `done`
   in v1.10 as a consequence of the P15-T5 closure.
 
@@ -861,6 +913,14 @@ code-pact task finalize <task-id> --json --base-ref main \
   | jq .data.write_audit
 
 # Strict gate for CI — exit 1 if audit emits any warning.
+# In CI (working tree is clean / commits are pushed), combine with
+# --base-ref <default-branch> so the audit compares against the
+# merge-base; without --base-ref the audit only sees uncommitted
+# changes and `TASK_WRITES_AUDIT_DECLARED_UNUSED` will fire for any
+# task that declares writes the working tree doesn't currently dirty.
+code-pact task finalize <task-id> --json --audit-strict --write --base-ref origin/main
+
+# Local pre-commit review (uncommitted working tree is the audit target):
 code-pact task finalize <task-id> --json --audit-strict --write
 ```
 

@@ -83,7 +83,8 @@ The canonical pre-action checks. P16-T2/T3 templates cover:
 - **Before implementing**: `code-pact recommend --phase <p> --task <t> --agent <a> --json` for model tier + budget + planning posture. The agent SHOULD adapt its planning depth to the returned profile.
 - **Before declaring writes**: read the task's existing `writes` field and the project's `design/rules/protected-paths.md` (v1.6 P15-T3). Mirror real intent into `writes` so the v1.6 audit has a useful signal.
 - **Before `task finalize --write`**: run the same command with `--json` (no `--write`) once to inspect the `data.write_audit` envelope. If `outside_declared` or `declared_unused` is non-empty, fix the declared writes first OR document why the deviation is expected.
-- **In CI**: prefer `task finalize --audit-strict --write --json`. Promotes the audit advisory to exit-relevant. Distinct from `plan lint --strict` (plan-lint-scoped) — combining them is fine.
+- **In CI** (working tree is clean / commits are pushed): pair `--audit-strict` with `--base-ref <default-branch>` so the audit compares against the merge-base, e.g. `task finalize <id> --audit-strict --write --json --base-ref origin/main`. Without `--base-ref` the audit only sees uncommitted changes and `TASK_WRITES_AUDIT_DECLARED_UNUSED` fires for any task whose declared writes the working tree doesn't currently dirty.
+- **For local pre-commit review** (uncommitted working tree is the audit target): drop `--base-ref` — `task finalize <id> --audit-strict --write --json`. Distinct from `plan lint --strict` (plan-lint-scoped) — combining them is fine.
 
 ### C. How to handle failures
 
