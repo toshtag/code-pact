@@ -13,6 +13,83 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+## [1.10.0] — 2026-05-22
+
+**Evidence harness release.** P20 (Evidence Harness) ships
+feature-complete (T1–T4, all done) and v1.10 simultaneously
+closes the long-standing P15-T5 deferral. The release is the
+"move from 感覚 to measurement" payload — internal-only
+tooling that captures deterministic-input metrics from the
+dogfood corpus and emits committable CSV under
+`design/measurements/`. Future RFCs can cite specific row
+values verbatim ("the v1.10 baseline shows P14-T5 pack size
+is 59,346 bytes").
+
+**code-pact users see nothing new.** The harness is a
+maintainer tool — invoked via `pnpm harness`, NOT through
+the public CLI. `package.json` `bin` is unchanged. No new
+public commands, no new flags, no new error codes, no JSON
+envelope changes on any existing command. `dist/cli.js`
+size is unchanged.
+
+The release ships three things:
+
+- **`pnpm harness --corpus . [--write] [--json]`** —
+  internal-only measurement script at `scripts/harness/`.
+  Default `--check` prints to stdout, `--write` opt-in.
+- **Four CSV metrics** under `design/measurements/`:
+  `pack-size-by-task.csv` (per-task context pack size +
+  field cardinalities), `verify-success-rate.csv`
+  (first-pass vs retry), `task-event-density.csv` (progress
+  event histogram + event span in days),
+  `lint-issue-histogram.csv` (`plan lint` diagnostic counts
+  by phase + code). Plus `measurements.manifest.json`
+  recording the corpus git SHA + harness version + cli
+  version + date-only `generated_at`.
+- **Byte-determinism contract** — two runs against the same
+  corpus SHA produce byte-identical CSVs. Verified by an
+  integration test.
+
+### Closed (cancelled, not shipped)
+
+- **P15-T5** — `write_audit` in `phase reconcile --json`.
+  Originally deferred to "a future RFC" in v1.6; v1.10
+  formally closes it as `cancelled`. The use case (phase-
+  level audit during release prep) is already served by
+  the combination of `task finalize --audit-strict`
+  (P15-T6, v1.6+) and `phase runbook --across-phases`
+  (P19, v1.9+). The "diff attribution problem" (a single
+  working-tree diff cannot be deterministically sharded
+  across tasks) remains unsolved on the conceptual level —
+  meaning any phase-level audit would either over-report
+  or require new declared semantics for which task owns
+  which file. Given the existing surface covers the real-
+  world use case, the marginal value of a new schema
+  surface no longer justifies the cost. P15-T5's task
+  description in `design/phases/P15-declared-writes-audit.yaml`
+  is updated with the cancellation rationale; the P15
+  phase status flips from `in_progress` to `done`.
+  `--audit-strict` on `phase reconcile` (added in P15-T6)
+  is unaffected.
+
+### Why this is a minor (1.10.0, not 1.9.1)
+
+Strictly speaking, the user-visible product surface is
+unchanged in v1.10. The new harness is internal-only. We
+still cut a minor (not a patch) because:
+
+1. Cancelling P15-T5 is a meaningful design statement —
+   it closes a phase that had been in_progress for several
+   releases and removes a future schema-surface obligation.
+2. The committed baseline CSVs are a new repository artifact
+   that future RFCs depend on. A patch release with the
+   cancellation note alone would understate the work.
+
+A future release that ships actual user-visible features
+will use the version-bump bandwidth appropriately; for now,
+v1.10.0 marks "the harness exists, the baseline is frozen,
+P15 is closed."
+
 ### Added
 
 - **P20-T4** — Evidence harness docs + phase close (closes

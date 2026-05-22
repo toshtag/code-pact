@@ -3,7 +3,7 @@ name: Declared Writes Audit
 weight: 25
 confidence: medium
 risk: medium
-status: in_progress
+status: done
 objective: |
   Promote declared `writes` from a passive review surface into a
   deterministic, machine-checkable advisory layer. P14 governance
@@ -315,39 +315,52 @@ tasks:
     write_surface: medium
     verification_strength: medium
     expected_duration: medium
-    status: planned
+    status: cancelled
     description: |
       Expose `write_audit` via `phase reconcile --json` for
-      multi-task batch review. Requires solving the "diff
-      attribution" problem (a single working-tree diff cannot
-      be sharded across tasks deterministically). Initial
-      semantics likely: per-task audit using each task's
-      declared writes, plus an aggregate `outside_any_declared`
-      array highlighting files not covered by any task in the
-      phase. Schema and exact field shape to be finalized when
-      P15-T1–T4 results are in hand.
+      multi-task batch review.
 
-      **Deferred to v1.7+ pending semantics RFC.** v1.6 ships
-      with this task as the only outstanding P15 work item. The
-      use case (phase-level audit during release prep) overlaps
-      heavily with running `task finalize --audit-strict` on each
-      finalize-able task individually (P15-T6), so the marginal
-      value over per-task strictness is unclear. A v1.7+ RFC
-      should evaluate whether to ship this at all, and if so,
-      which of the per-task / aggregate / both shapes is most
-      useful in practice. Until then, P15 phase status stays
-      `in_progress` and v1.6 callouts the deferral in CHANGELOG.
+      **Cancelled in v1.10 (status: cancelled).** After
+      shipping P15-T6 (`--audit-strict` on `task finalize`
+      and `phase reconcile`) and P19 (cross-phase `depends_on`
+      + `phase runbook --across-phases`), the original use
+      case for phase-level audit — release-prep review of
+      "what's left, with audit signal" — is already served
+      by:
+
+      1. `code-pact phase runbook --across-phases` (v1.9+)
+         which surfaces every in_progress phase's runbook
+         steps in one envelope.
+      2. `code-pact task finalize --audit-strict --json`
+         (v1.6+) run per-task during release prep, which
+         already promotes any `TASK_WRITES_AUDIT_*` warning
+         to exit-relevant.
+
+      The "diff attribution problem" (a single working-tree
+      diff cannot be deterministically sharded across tasks)
+      remains unsolved on the conceptual level — meaning any
+      phase-level audit would either over-report (every
+      file counted against every task in the phase) or
+      require new declared semantics for what "this file
+      belongs to task T" means.
+
+      Given (a) the use case is already covered by the
+      v1.6+v1.9 surface and (b) the conceptual problem is
+      not just an implementation detail, the marginal value
+      of adding `write_audit` to `phase reconcile` no longer
+      justifies the new schema surface. P15-T5 is closed
+      cancelled rather than deferred indefinitely.
+
+      The cancellation does NOT remove P15-T6's
+      `--audit-strict` flag from `phase reconcile`; that
+      remains the supported way to run audit-aware
+      reconciliation. P15-T5 was specifically about adding
+      a `write_audit` field to the `phase reconcile`
+      envelope itself, which we no longer plan to ship.
     depends_on:
       - P15-T1
     decision_refs:
       - design/phases/P15-declared-writes-audit.yaml
-    reads:
-      - src/commands/phase-reconcile.ts
-      - src/core/audit/write-audit.ts
-    writes:
-      - src/commands/phase-reconcile.ts
-      - tests/integration/phase-reconcile-write-audit.test.ts
-      - docs/cli-contract.md
     acceptance_refs:
       - design/phases/P15-declared-writes-audit.yaml
   - id: P15-T6
