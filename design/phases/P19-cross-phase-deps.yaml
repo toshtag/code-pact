@@ -106,7 +106,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
     description: |
       Resolver extension + cycle detection. Two changes ship
       together because they share the cross-phase graph
