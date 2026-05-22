@@ -1,6 +1,6 @@
 # RFC: Agent Contract v2 — task prepare, context explain, adapter conformance
 
-**Status:** proposed (P21, 2026-05)
+**Status:** accepted (P21, 2026-05)
 **Scope:** new compound CLI command `code-pact task prepare`; new flag `code-pact task context --explain`; new CLI command `code-pact adapter conformance <agent>`; new pure-function module `src/core/recommend/` extracted from the existing `recommend` command; refresh of stable adapter instruction templates (`claude-code`, `codex`, `generic`) to embed the v2 contract surface; new shared spec module `src/core/adapters/conformance-spec.ts` consumed by both `adapter doctor` and `adapter conformance`; two new docs (`docs/positioning.md`, `docs/agent-contract.md`); two new CLI references (`docs/cli/task-prepare.md`, `docs/cli/adapter-conformance.md`). Adds metadata fields to the context pack JSON envelope (`--explain` mode only) without altering the markdown pack content (byte-identical contract preserved). Introduces no new public error codes; reuses `TASK_NOT_FOUND`, `AMBIGUOUS_TASK_ID`, `PHASE_NOT_FOUND`, `AGENT_NOT_FOUND`, `AGENT_NOT_ENABLED`, `CONFIG_ERROR`, and the `ADAPTER_*` family.
 **Owners:** maintainer
 **Related:**
