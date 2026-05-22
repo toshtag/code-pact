@@ -13,6 +13,27 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+### Added
+
+- **P20-T1** — Evidence harness RFC. New phase
+  `P20 — Evidence Harness` registered in
+  `design/roadmap.yaml` (weight 20). RFC at
+  `design/decisions/evidence-harness-rfc.md` (accepted) locks
+  the internal-only harness design before any code is written:
+  - Internal-only — NOT registered in `package.json` bin, no
+    public CLI surface, no JSON envelope changes
+  - Initial 4-CSV metric set (`pack-size-by-task`,
+    `verify-success-rate`, `task-event-density`,
+    `lint-issue-histogram`) — column shapes locked
+  - Output to `design/measurements/` (NOT gitignored — the
+    CSVs are committed artifacts for future RFC citation)
+  - Byte-determinism contract: no clock timestamps in CSV
+    cells; `generated_at` in manifest is a date only
+  - `pnpm harness --corpus . [--write] [--json]` invocation;
+    default `--check` mode prints to stdout, `--write` opt-in
+
+  Implementation lands in P20-T2..T4; v1.10.0 target.
+
 ## [1.9.0] — 2026-05-22
 
 **Cross-phase dependencies release.** P19 (Cross-phase
