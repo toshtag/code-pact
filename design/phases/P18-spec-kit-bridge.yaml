@@ -3,7 +3,7 @@ name: Spec Kit Bridge
 weight: 25
 confidence: medium
 risk: medium
-status: in_progress
+status: done
 objective: |
   Ship a read-only one-way importer that converts external
   spec-driven planning artifacts (initially the `tasks.md`

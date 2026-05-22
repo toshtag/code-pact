@@ -1,0 +1,198 @@
+# Spec Kit bridge
+
+`code-pact spec import` is a **read-only, one-way bridge** that ingests external spec-driven planning artifacts (initially the `tasks.md` file format used by Spec Kit and similar tools) into code-pact's phase YAML.
+
+> **code-pact does not re-implement Spec Kit.** It accepts artifacts produced by other tools so teams already invested in Spec Kit can adopt code-pact without throwing their planning work away. If you do not already have a `tasks.md`, you do not need this command — start with `code-pact init` and `code-pact plan brief`.
+
+This bridge ships in **v1.8+** and lives under the new top-level `spec` namespace. Two complementary modes share the same command:
+
+| Mode | What it does | Writes a file? |
+| --- | --- | --- |
+| `spec import --from <tasks.md> --phase-id <id> [--write]` | Parses tasks.md → draft phase YAML | Only with `--write` (to `design/phases/<id>-imported.yaml`) |
+| `spec import --suggest-from <spec.md\|plan.md>` | Extracts brief / constitution candidates | Never |
+
+## Mode 1 — importing `tasks.md` into a phase YAML draft
+
+### What gets parsed
+
+The parser accepts a deliberately minimal Markdown subset so it stays small and deterministic:
+
+```markdown
+### Setup (becomes one phase task group)
+
+- [ ] Install dependencies (becomes one task candidate)
+- [ ] Configure environment
+
+### Implementation
+
+- [ ] Build the parser
+- [x] Already done — silently dropped
+- [ ] Wire CLI command
+```
+
+Constructs **silently dropped** (counted in `skipped_lines`):
+
+- Other heading levels (`#`, `##`, `####`, `#####`, `######`)
+- Bullet items without checkboxes
+- Numbered lists
+- Checked items (`- [x]`)
+- Prose paragraphs
+- Code fences
+- Tables
+- HTML comments
+- Frontmatter (YAML/TOML at the file head)
+
+The supported subset is intentionally narrow — for richer Spec Kit input, run the importer to extract the structured tasks, then hand-edit the generated YAML for the rest. This is more honest than silently mis-mapping fields.
+
+### Generated phase shape
+
+Each `- [ ]` line becomes one code-pact task with sensible defaults:
+
+| code-pact task field | Default |
+| --- | --- |
+| `id` | Auto-generated `<phase-id>-T<n>` |
+| `description` | `[Section title] verbatim task text` |
+| `type` | `feature` |
+| `ambiguity` / `risk` / `context_size` / `write_surface` / `verification_strength` / `expected_duration` | `medium` |
+| `status` | `planned` |
+| `reads` / `writes` / `acceptance_refs` / `depends_on` / `decision_refs` | omitted (you add them after the import) |
+
+The phase itself carries `weight: 20`, `confidence: medium`, `risk: medium`, `status: planned`, a generic objective citing the source path, a generic `definition_of_done`, and `verification.commands: [pnpm test]`. **All of these are intentionally generic — you will edit them.**
+
+### Dry-run is the default
+
+```sh
+# Dry-run: prints the generated YAML to stdout, writes nothing
+code-pact spec import --from tasks.md --phase-id P-feature
+
+# JSON envelope dry-run (machine-readable)
+code-pact spec import --from tasks.md --phase-id P-feature --json
+```
+
+When you are happy with what the dry-run produced:
+
+```sh
+# Persist to design/phases/P-feature-imported.yaml
+code-pact spec import --from tasks.md --phase-id P-feature --write
+
+# Overwrite an existing imported YAML
+code-pact spec import --from tasks.md --phase-id P-feature --write --force
+```
+
+### What the importer does NOT do
+
+- **It does not add the new phase to `design/roadmap.yaml`.** P14 governance treats `design/roadmap.yaml` as a chokepoint; coupling import to roadmap mutation would silently bypass that contract. Run `phase add --id <id>` (or hand-edit `design/roadmap.yaml`) as the explicit follow-up.
+- **It does not call any LLM API.** The importer is a pure parser + transform.
+- **It does not watch the source file.** You re-run `spec import` explicitly when `tasks.md` changes.
+- **It does not support every Spec Kit construct.** Only the documented subset above. Constructs outside the subset are dropped, not silently mis-mapped.
+
+### Post-import follow-up
+
+```sh
+# 1. Review the generated phase
+$EDITOR design/phases/P-feature-imported.yaml
+
+# 2. Add the phase to design/roadmap.yaml (explicit, P14-governed step)
+# (hand-edit or `phase add --id P-feature` once that command lands)
+
+# 3. Validate
+code-pact plan lint --json
+code-pact validate --json
+
+# 4. (Optional) See the recommended per-task lifecycle
+code-pact task runbook P-feature-T1 --json
+```
+
+Running `plan lint --include-quality --strict` against an imported phase will likely warn about `PLACEHOLDER_VERIFICATION`, `WEAK_DOD`, and (once you add reads) `TASK_READS_NO_MATCH`. These are normal post-import advisories — the same posture as a brand-new phase added by hand. Fix them as you fill in the phase's real intent.
+
+## Mode 2 — extracting brief / constitution candidates from `spec.md` / `plan.md`
+
+```sh
+# Read-only suggestion mode
+code-pact spec import --suggest-from spec.md --json
+code-pact spec import --suggest-from plan.md --json
+```
+
+The extractor recognises a conservative set of canonical Spec Kit headings (and their common synonyms) and returns a structured envelope:
+
+```json
+{
+  "ok": true,
+  "data": {
+    "source_path": "spec.md",
+    "brief_candidates": {
+      "what": "...",
+      "who": "...",
+      "differentiator": "..."
+    },
+    "constitution_candidates": {
+      "description": "...",
+      "principles": ["..."]
+    },
+    "recognised_sections": ["Problem statement", "Audience"],
+    "skipped_sections": ["Implementation notes"]
+  }
+}
+```
+
+Each candidate field is independently optional. Only fields the extractor recognised get emitted.
+
+### Recognised headings
+
+| Bucket | Recognised headings (case-insensitive) |
+| --- | --- |
+| `what` | Problem statement, Problem, Overview, Summary, Goal, Goals, Objective, Objectives |
+| `who` | Audience, Users, Personas, Stakeholders, Target users |
+| `differentiator` | Positioning, Differentiator, Value proposition, Why now, Unique value |
+| `description` | Background, Context, Rationale, Motivation, Vision, Philosophy |
+| `principles` | Principles, Constraints, Tenets, Non-goals, Guidelines, Guiding principles |
+
+First match wins. Heading normalisation strips Markdown punctuation, so `## **Problem Statement**` and `## problem statement` go to the same bucket.
+
+### Why read-only
+
+Two opt-ins beats one coupled action. Once you have the suggestion envelope, you decide whether to feed it into the v1.6 P17 non-interactive paths:
+
+```sh
+# Pipe into plan brief --from-file (after extracting just the brief_candidates)
+code-pact spec import --suggest-from spec.md --json \
+  | jq '.data.brief_candidates' \
+  > /tmp/brief.yaml
+code-pact plan brief --from-file /tmp/brief.yaml --json
+
+# Same for constitution
+code-pact spec import --suggest-from plan.md --json \
+  | jq '.data.constitution_candidates' \
+  > /tmp/const.yaml
+code-pact plan constitution --from-file /tmp/const.yaml --json
+```
+
+Auto-apply is intentionally deferred to a future RFC. v1.8 ships extraction only.
+
+## Mutex constraints and error handling
+
+- `--from` and `--suggest-from` are mutually exclusive. Passing both returns `CONFIG_ERROR` with `data.detail: "mutex_violation"`.
+- `--from` without `--phase-id` returns `CONFIG_ERROR` with `data.detail: "missing_phase_id"`.
+- `--suggest-from` ignores `--phase-id` silently.
+
+All `spec import` failures reuse the existing `CONFIG_ERROR` code (no new public error codes were added in v1.8). The structured `data.detail` enum is documented in [cli-contract.md](./cli-contract.md#spec-import-v18) — `unsafe_path`, `file_not_found`, `unreadable`, `phase_id_invalid`, `phase_yaml_exists`, `no_sections_parsed`, `mutex_violation`, `missing_phase_id`.
+
+## Where this fits in the roadmap
+
+| Phase | What it gives you |
+| --- | --- |
+| P13 (`phase import`) | Bulk YAML roadmap import (you already have a `roadmap.yaml`) |
+| P17 (`plan brief --from-file` / `--stdin` / flag-driven) | Non-interactive brief / constitution authoring |
+| **P18 (`spec import`)** | **Ingest external spec-driven planning artifacts (Spec Kit tasks.md / spec.md / plan.md)** |
+
+If you do not already have spec-driven planning artifacts from another tool, you do not need this command — use `init` + `plan brief` + `plan constitution` as the bootstrap path.
+
+## Not supported (and why)
+
+- **Bidirectional sync** (code-pact phase YAML → Spec Kit tasks.md): out of charter. code-pact stays a control plane that other tools' outputs flow into.
+- **Live watch / auto-sync** on `tasks.md` file change: importer is explicitly invoked.
+- **Auto-apply `--suggest-from` to `design/brief.md` / `design/constitution.md`**: deferred to a future RFC. v1.8 ships suggestion-only.
+- **Importers for non-Spec-Kit formats** (Cursor rules, Linear specs, Notion exports): each would warrant its own phase + RFC with its own supported-subset analysis.
+- **A full Spec Kit-compatible spec generator**: out of charter. Re-implementing Spec Kit would invite the "code-pact replaces Spec Kit" misframing and dilute the control-plane positioning.
+
+See [design/decisions/spec-kit-bridge-rfc.md](../design/decisions/spec-kit-bridge-rfc.md) for the full design rationale and alternatives considered.

@@ -311,6 +311,113 @@ The field is additive: existing JSON consumers see no shape change.
 
 The validation pass detects logic errors before any write; ordinary disk failures during the per-phase write loop (disk full, permission denied) are out of scope for v0.2 and may leave a partial result.
 
+## `spec import` (v1.8+)
+
+`code-pact spec import` is a read-only one-way bridge that ingests external spec-driven planning artifacts into code-pact's phase YAML. **It does NOT re-implement Spec Kit or any spec-generation tool** — code-pact remains a control plane that accepts artifacts produced by other tools.
+
+Two mutually exclusive modes:
+
+### `spec import --from <tasks.md> --phase-id <id> [--write] [--force] [--json]`
+
+Parses a Spec Kit-style `tasks.md` (or any Markdown that follows the supported subset) into a draft phase YAML.
+
+**Supported subset:**
+- `### Heading 3` → one phase task group
+- `- [ ]` unchecked checkbox item → one task candidate
+- Everything else (other heading levels, plain bullets, numbered lists, checked items, prose, code fences, tables, frontmatter, HTML comments) is silently dropped and counted in `skipped_lines`.
+
+**Flags:**
+- `--from <path>` — required. Must pass `assertSafeRelativePath` (relative to cwd, no `..`, no absolute, no leading `~`).
+- `--phase-id <id>` — required. Must match `/^[A-Za-z][A-Za-z0-9_-]*$/`.
+- `--write` — persist to `design/phases/<id>-imported.yaml`. Default is dry-run (prints YAML to stdout).
+- `--force` — overwrite an existing `design/phases/<id>-imported.yaml`.
+- `--json` — emit the JSON envelope on stdout.
+
+**Generated phase shape:** tasks carry minimal P10 defaults — `type=feature`, all judgement axes (`ambiguity`, `risk`, `context_size`, `write_surface`, `verification_strength`, `expected_duration`) = `medium`, `status=planned`. Descriptions are the verbatim `- [ ]` text prefixed with the section title (`[Section Name] task text`). The user adds `reads` / `writes` / `acceptance_refs` after import.
+
+**The importer does NOT add the generated phase to `design/roadmap.yaml`** — that stays an explicit follow-up governed by P14 (`phase add --id <id>` or hand-edit). Coupling the two operations would silently bypass the P14 chokepoint contract.
+
+**Success envelope:**
+
+```json
+{
+  "ok": true,
+  "data": {
+    "kind": "would_import" | "imported",
+    "source_path": "tasks.md",
+    "phase_id": "P18",
+    "sections_imported": 2,
+    "tasks_imported": 4,
+    "skipped_lines": 3,
+    "output_path": "design/phases/P18-imported.yaml" | null,
+    "phase_yaml": "id: P18\nname: P18\n...",
+    "warnings": ["checked_task_dropped: 1 line(s)", ...]
+  }
+}
+```
+
+`output_path` is `null` on dry-run. `warnings` summarises dropped constructs by code+count.
+
+### `spec import --suggest-from <path> --json`
+
+Reads a Spec Kit `spec.md` or `plan.md` and surfaces brief / constitution candidates. **Never writes any file** — the user pipes the suggestions into `plan brief --from-file` / `plan constitution --from-file` (v1.6 P17 non-interactive paths) if they accept them.
+
+Recognised headings (case-insensitive, Markdown punctuation stripped):
+- **what:** Problem statement, Problem, Overview, Summary, Goal(s), Objective(s)
+- **who:** Audience, Users, Personas, Stakeholders, Target users
+- **differentiator:** Positioning, Differentiator, Value proposition, Why now, Unique value
+- **description:** Background, Context, Rationale, Motivation, Vision, Philosophy
+- **principles:** Principles, Constraints, Tenets, Non-goals, Guidelines, Guiding principles
+
+First match wins. Each candidate field is independently optional.
+
+**Success envelope:**
+
+```json
+{
+  "ok": true,
+  "data": {
+    "source_path": "spec.md",
+    "brief_candidates": {
+      "what": "...",
+      "who": "...",
+      "differentiator": "..."
+    },
+    "constitution_candidates": {
+      "description": "...",
+      "principles": ["..."]
+    },
+    "recognised_sections": ["Problem statement", "Audience"],
+    "skipped_sections": ["Implementation notes"]
+  }
+}
+```
+
+### Mutex constraints
+
+- `--from` and `--suggest-from` are mutually exclusive. Passing both → `CONFIG_ERROR` with `data.detail: "mutex_violation"`.
+- `--from` without `--phase-id` → `CONFIG_ERROR` with `data.detail: "missing_phase_id"`.
+- `--suggest-from` + `--phase-id` → `--phase-id` silently ignored (suggestion mode has no use for it).
+
+### Failure envelope
+
+All `spec import` failures reuse `CONFIG_ERROR` (exit 2). No new public error codes were added in v1.8. The structured `data.detail` enum is:
+
+| `detail` | When |
+| --- | --- |
+| `unsafe_path` | `--from` / `--suggest-from` failed `assertSafeRelativePath` |
+| `file_not_found` | source file does not exist |
+| `unreadable` | source file exists but cannot be read |
+| `phase_id_invalid` | `--phase-id` does not match `/^[A-Za-z][A-Za-z0-9_-]*$/` |
+| `phase_yaml_exists` | `--write` would clobber an existing imported YAML (use `--force`) |
+| `no_sections_parsed` | input has no Heading 3 sections (importer mode only) |
+| `mutex_violation` | `--from` + `--suggest-from` both passed |
+| `missing_phase_id` | `--from` passed without `--phase-id` |
+
+### Post-import advisories
+
+Running `plan lint --include-quality --strict` against an imported phase will likely warn about `PLACEHOLDER_VERIFICATION` (the default `pnpm test` may not match the project's actual verify command), `WEAK_DOD` (the default objective is generic), and `TASK_READS_NO_MATCH` if the user added reads. These are normal post-import advisories — the same posture as a brand-new phase added by hand.
+
 ## `plan`
 
 `code-pact plan <subcommand>` provides AI-assisted project planning tools that feed into the design directory.
