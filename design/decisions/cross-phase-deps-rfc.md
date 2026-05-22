@@ -1,6 +1,6 @@
 # RFC: Cross-phase dependencies + aggregated runbook
 
-**Status:** proposed (P19, 2026-05)
+**Status:** accepted (P19, 2026-05)
 **Scope:** extend `depends_on` to accept cross-phase task references (e.g. `P15-T6`) so a phase can wait on work in another phase; add cycle detection covering the new edge set; add `--across-phases` to `phase runbook` for release-prep-style multi-phase sequencing.
 **Owners:** maintainer
 **Related:**
