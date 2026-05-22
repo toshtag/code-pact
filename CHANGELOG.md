@@ -15,6 +15,54 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ### Added
 
+- **P21-T5 — `code-pact adapter conformance <agent>` command.**
+  New CLI verb `code-pact adapter conformance <agent>
+  [--json]` is a focused read-only check that the installed
+  adapter satisfies the v1.11+ agent contract. Exit code 0 on
+  compliance, 1 on non-compliance, 2 on CONFIG_ERROR /
+  AGENT_NOT_FOUND. Checks: `manifest_present`,
+  `instruction_file_present`, `contract_section_present`,
+  three axis sub-heading checks (`### When to invoke
+  code-pact` / `### What to verify first` / `### How to
+  handle failures`), `required_cli_surface_mentions` (every
+  lifecycle and diagnostic surface mentioned),
+  `required_failure_guidance` (every failure keyword
+  mentioned), and `file_checksum_match` per manifest file.
+
+  **Shared spec, single source of truth.** A new module
+  `src/core/adapters/conformance-spec.ts` exports
+  `AGENT_CONTRACT_SECTION_HEADING`,
+  `AGENT_CONTRACT_AXIS_HEADINGS`,
+  `LIFECYCLE_REQUIRED_SURFACES`,
+  `DIAGNOSTIC_REQUIRED_SURFACES`, and
+  `REQUIRED_FAILURE_GUIDANCE`. Both `adapter doctor`'s v1.7
+  contract-drift check and this new `adapter conformance`
+  command import from this module so the two callers can
+  never disagree.
+
+  **Adapter templates refreshed.** The `claude-code`,
+  `codex`, and `generic` adapter instruction templates (in
+  `src/i18n/en-US.ts` and `src/i18n/ja-JP.ts`) now mention
+  every required CLI surface and every failure-guidance
+  keyword by default, so a fresh `adapter install` passes
+  conformance by construction. Pre-existing installs WILL
+  surface `ADAPTER_FILE_DRIFT` in `adapter doctor` until
+  `adapter upgrade <agent> --write` is run; this matches the
+  v1.7 P16 precedent.
+
+  Reuses existing error codes only (`AGENT_NOT_FOUND`,
+  `CONFIG_ERROR`); no new public codes shipped. Unit
+  coverage in `tests/unit/commands/adapter-conformance.test.ts`
+  (10 tests) plus integration coverage in
+  `tests/integration/adapter-conformance.test.ts` (6 new
+  cases per stable agent × 3 agents = 18 new tests) covers
+  the compliant path, every failure path (missing manifest,
+  missing instruction file, tampered contract heading,
+  tampered axis heading, missing lifecycle surface, missing
+  diagnostic surface, missing failure-guidance keyword,
+  checksum drift), and the doctor / conformance single-
+  source-of-truth invariant.
+
 - **P21-T4 — `task context --explain` per-section breakdown.**
   New flag `code-pact task context <task-id> --explain
   [--json]` returns the per-section byte breakdown of the

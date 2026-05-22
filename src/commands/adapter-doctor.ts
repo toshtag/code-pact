@@ -139,18 +139,15 @@ function fingerprintsEqual(a: ProfileFingerprint, b: ProfileFingerprint): boolea
 // v1.7 P16-T5: Agent-contract section drift detection
 // ---------------------------------------------------------------------------
 
-/**
- * The verbatim, English-locked heading strings the conformance test
- * (P16-T4) and this diagnostic both anchor on. Source of truth lives
- * in `design/decisions/agent-contract-rfc.md`. Adapter templates emit
- * these via `messageCatalog[locale].templates.adapterCommon.agentContract.*`.
- */
-const AGENT_CONTRACT_SECTION_HEADING = "## Agent contract";
-const AGENT_CONTRACT_AXIS_HEADINGS: ReadonlyArray<string> = [
-  "### When to invoke code-pact",
-  "### What to verify first",
-  "### How to handle failures",
-];
+// Source of truth for the agent contract surface — heading strings
+// and required CLI surface mentions live in
+// `src/core/adapters/conformance-spec.ts` and are shared with the
+// P21-T5 `adapter conformance` command so the two callers can never
+// disagree.
+import {
+  AGENT_CONTRACT_SECTION_HEADING,
+  AGENT_CONTRACT_AXIS_HEADINGS,
+} from "../core/adapters/conformance-spec.ts";
 
 /**
  * Returns an `ADAPTER_CONTRACT_DRIFT` issue when an instruction file's
