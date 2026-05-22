@@ -44,6 +44,7 @@
     "test:ci": "pnpm typecheck && pnpm test:unit && pnpm build && vitest run --config vitest.integration.config.ts",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
+    "harness": "tsx scripts/harness/run.ts",
     "prepublishOnly": "node scripts/assert-package-metadata.mjs"
   },
   "dependencies": {
@@ -53,6 +54,7 @@
   "devDependencies": {
     "@types/node": "^24.0.0",
     "tsup": "^8.5.1",
+    "tsx": "^4.22.3",
     "typescript": "^6.0.3",
     "vite": "^6.4.2",
     "vitest": "^4.1.6"

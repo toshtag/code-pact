@@ -15,6 +15,39 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ### Added
 
+- **P20-T2** — Evidence harness implementation. New maintainer
+  script at `scripts/harness/run.ts` (invoked via `pnpm harness
+  --corpus . [--write] [--json]`). Walks the corpus, computes
+  the four metric sets locked in P20-T1, and either prints the
+  CSVs to stdout (default `--check`) or writes them under
+  `design/measurements/` (`--write`).
+
+  Implementation:
+  - `scripts/harness/metrics.ts` — pure metric computation
+    helpers (`buildPackSizeRow`, `buildVerifySuccessRow`,
+    `buildEventDensityRow`, `buildLintHistogram`, `rowsToCsv`)
+  - `scripts/harness/run.ts` — orchestrator. Loads plan state,
+    iterates phases/tasks sorted by id, builds context packs
+    via `buildContextPack`, walks progress events for verify-
+    success and event-density rows, runs `runPlanLint` for
+    the histogram, and serializes everything to CSV
+  - `package.json` `scripts.harness` (NOT `bin`) — the harness
+    is a maintainer tool, never a public CLI surface
+  - `tsx` added as a dev dependency for the `pnpm harness` script
+
+  Byte-determinism is preserved: rows sorted by `phase_id ASC`
+  then `task_id`/`code ASC`, `generated_at` in the manifest is
+  a date only (no clock time), git SHA read via `spawnSync`
+  with explicit argv (no shell interpolation).
+
+  Tests:
+  - 18 unit tests for the metric-computation helpers covering
+    pack-size cardinality, first-pass / retry detection,
+    event histograms, lint bucketing, CSV escaping
+  - 3 integration tests: `--write` persistence, default
+    `--check` no-write invariant, two consecutive `--write`
+    runs produce byte-identical CSVs
+
 - **P20-T1** — Evidence harness RFC. New phase
   `P20 — Evidence Harness` registered in
   `design/roadmap.yaml` (weight 20). RFC at
