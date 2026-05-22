@@ -172,7 +172,7 @@ tasks:
     write_surface: medium
     verification_strength: medium
     expected_duration: short
-    status: planned
+    status: done
     description: |
       Run the harness against the dogfood corpus and commit the
       baseline CSVs + manifest under `design/measurements/`.
