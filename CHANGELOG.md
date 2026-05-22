@@ -15,6 +15,23 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ### Added
 
+- **P19-T4** — `task runbook` cross-phase display update +
+  docs + phase close (closes P19). Human-mode `task runbook
+  <id>` output now prints a `depends_on:` block under the
+  state summary, naming the foreign phase inline when a dep
+  is cross-phase (e.g. `- P15-T5 (cross-phase: P15):
+  derived=planned (unsatisfied)`). The JSON envelope shape
+  was already locked in P19-T2 (`depends_on_check[i].phase_id`
+  additive field); this task just teaches the human formatter
+  to surface it.
+
+  `docs/cli-contract.md` gains `### --across-phases` and
+  `### Cross-phase depends_on` sections under
+  `## phase runbook`. `docs/dogfood.md` gains a short
+  "Tracking release prep with phase runbook --across-phases"
+  subsection under "Release prep uses strict-clean dogfood
+  checks". P19 phase status flips to done.
+
 - **P19-T3** — `phase runbook --across-phases [--json]`.
   New aggregated runbook that emits one per-phase
   `PhaseRunbookResult` for every phase in scope. Inclusion

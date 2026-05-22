@@ -3345,6 +3345,18 @@ async function cmdTaskRunbook(
     } else {
       process.stdout.write(`${m.task.runbook.header(taskId, result.phase_id)}\n`);
       process.stdout.write(`${m.task.runbook.stateSummary(result.state_summary)}\n`);
+      if (result.state_summary.depends_on.length > 0) {
+        process.stdout.write("  depends_on:\n");
+        for (const dep of result.state_summary.depends_on) {
+          const locator = dep.phase_id
+            ? ` (cross-phase: ${dep.phase_id})`
+            : "";
+          const satisfied = dep.satisfied ? "satisfied" : "unsatisfied";
+          process.stdout.write(
+            `    - ${dep.task_id}${locator}: derived=${dep.current} (${satisfied})\n`,
+          );
+        }
+      }
       if (result.next_steps.length === 0) {
         process.stdout.write(`${m.task.runbook.noSteps}\n`);
       } else {

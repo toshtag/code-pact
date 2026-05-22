@@ -1660,6 +1660,45 @@ code-pact phase runbook P9 --json
 code-pact phase reconcile P9 --write
 ```
 
+### `--across-phases` (v1.9+, P19)
+
+`code-pact phase runbook --across-phases [--json]` aggregates per-phase runbook steps across every phase in scope. **No `<phase-id>` positional argument is used in this mode.**
+
+Inclusion rules:
+
+- `phase.status === "in_progress"` — always included.
+- Phases that DECLARE a task referenced (via `depends_on`) by an in_progress phase task with derived state != done — pulled in via one level of transitive closure.
+
+Phases with status `done`, `planned`, or `cancelled` are excluded unless pulled in via the dep-driven rule. Order: phase id ascending.
+
+**JSON envelope (success):**
+
+```json
+{
+  "ok": true,
+  "data": {
+    "kind": "aggregated_runbook",
+    "phases_considered": ["P15", "P19"],
+    "phases": [
+      { "kind": "runbook", "phase_id": "P15", "phase_summary": { ... }, "next_steps": [...] },
+      { "kind": "runbook", "phase_id": "P19", "phase_summary": { ... }, "next_steps": [...] }
+    ]
+  }
+}
+```
+
+The `phases: PhaseRunbookResult[]` re-uses the existing per-phase shape — each entry is exactly what `phase runbook <id>` would return on its own.
+
+Default `phase runbook <phase-id>` invocation is **unchanged** — `--across-phases` is purely additive.
+
+### Cross-phase `depends_on` (v1.9+, P19)
+
+A task's `depends_on` may reference a task in a different phase (e.g. `["P15-T5"]` from inside `P19-T1`). The resolver looks same-phase first, cross-phase fallback. Ids that do not appear in any phase still fire `TASK_DEPENDS_ON_UNRESOLVED`.
+
+When a dep resolves to a foreign phase, the runbook's `depends_on_check[i]` JSON envelope entry gains an additive `phase_id` field; same-phase deps omit it. Human-mode output names the foreign phase inline.
+
+Multi-node cycles (length ≥ 2) surface as `TASK_DEPENDS_ON_CYCLE` (error). Self-cycles keep the narrower `TASK_DEPENDS_ON_SELF_REFERENCE`. See [Plan diagnostic codes](#plan-diagnostic-codes).
+
 ## `task start` / `task status` / `task block` / `task resume` (v0.6)
 
 These four commands fill the execution-state gap between `task context` and `task complete`. They all read and append to the same `.code-pact/state/progress.yaml` log used by `task complete`, and they share the same state-machine rules enforced via `deriveTaskState` and `assertTransition`.

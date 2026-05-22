@@ -455,6 +455,18 @@ code-pact doctor --json
 
 Selective per-code promotion ("strict on everything EXCEPT `TASK_WRITES_PROTECTED_PATH`") is **not** supported in v1.5+; it remains a P15+ candidate. Until then, the binary `--strict` flag is your only lever.
 
+### Tracking release prep with `phase runbook --across-phases` (v1.9+)
+
+When a release ships work from several in_progress phases (typical for a roadmap with cross-phase `depends_on` references), the aggregated runbook surfaces every phase still in scope in one shot:
+
+```sh
+code-pact phase runbook --across-phases --json
+```
+
+The `phases_considered` array is the machine-readable answer to "what's left before vX.Y.Z can ship?". Each entry in `phases[]` is exactly the same shape as a single-phase `phase runbook <id>` envelope — same `phase_summary`, same `next_steps`. Default `phase runbook <id>` invocation is unchanged.
+
+If you use cross-phase `depends_on` (e.g. `P19-T4` depends on `P15-T5`), the aggregator transitively pulls in the declaring phase so its runbook is visible even if its `phase.status` is still `planned`. Cycles (length ≥ 2) surface as `TASK_DEPENDS_ON_CYCLE` (error) when you run `plan lint`; self-cycles stay on the narrower `TASK_DEPENDS_ON_SELF_REFERENCE`.
+
 ## `task complete` vs `design/` (v1.0 contract)
 
 `task complete` records an operational fact: this task's verify command passed at this point in time. It writes a `done` event to `.code-pact/state/progress.yaml`. It **does not** modify the task's `status` field in `design/phases/<phase>.yaml`.
