@@ -31,16 +31,16 @@ non_goals:
   - LLM-side metrics (token cost, latency) — requires network + model API
   - metric trends over time (line-graph CSVs that diff against prior runs)
   - an RFC-citation tool that auto-embeds CSV rows into decision documents
-  - making `design/measurements/` gitignored (the whole point is to commit
-    the CSVs so future RFCs can cite specific row values)
+  - making `design/measurements/` gitignored (the whole point is to commit the
+    CSVs so future RFCs can cite specific row values)
 definition_of_done:
   - design/phases/P20-evidence-harness.yaml exists with this objective and tasks
     list
   - design/roadmap.yaml lists P20
-  - "design/decisions/evidence-harness-rfc.md exists with `Status: accepted` lock
-    (P20-T1)"
-  - "`scripts/harness/run.ts` ships and is invokable via `pnpm harness --corpus .
-    --write` (P20-T2)"
+  - "design/decisions/evidence-harness-rfc.md exists with `Status: accepted`
+    lock (P20-T1)"
+  - "`scripts/harness/run.ts` ships and is invokable via `pnpm harness --corpus
+    . --write` (P20-T2)"
   - the four CSVs and the manifest land under `design/measurements/` for the
     dogfood corpus (P20-T3)
   - byte-determinism test asserts that two runs against the same git SHA produce
@@ -65,7 +65,7 @@ tasks:
     write_surface: low
     verification_strength: medium
     expected_duration: short
-    status: in_progress
+    status: done
     description: |
       RFC acceptance. Land design/decisions/evidence-harness-rfc.md
       with `Status: proposed` in this PR; the status line flips to
