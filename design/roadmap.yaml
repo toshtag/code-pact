@@ -59,3 +59,6 @@ phases:
   - id: P20
     path: design/phases/P20-evidence-harness.yaml
     weight: 20
+  - id: P21
+    path: design/phases/P21-agent-contract-v2.yaml
+    weight: 25

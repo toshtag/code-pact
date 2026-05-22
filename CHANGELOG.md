@@ -13,6 +13,28 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+### Added
+
+- **P21-T0 — Agent Contract v2 RFC + phase registration.**
+  `design/decisions/agent-contract-v2-rfc.md` opens at
+  `Status: proposed` and locks the design decisions for the
+  v1.11 cycle: a new compound `task prepare` command (single
+  deterministic per-task entry point, progress-read-only,
+  structured `next_action` + `commands` envelope), a new
+  `task context --explain` mode (per-section `bytes` +
+  `reason_code` breakdown with byte-identical pack content),
+  a new `adapter conformance <agent>` command (focused
+  read-only check that consumes the same required-surface
+  spec as `adapter doctor`), and a refresh of stable adapter
+  instruction templates so a fresh install passes conformance
+  by construction. No new error codes, no
+  `adapter_schema_version` bump, no budget enforcement (P24).
+  `design/phases/P21-agent-contract-v2.yaml` registers the
+  phase tasks (P21-T0 through P21-T6); `design/roadmap.yaml`
+  gains a P21 entry at weight 25. The status line on the RFC
+  flips to `accepted` in a follow-up commit before merge per
+  the P11–P20 lifecycle precedent.
+
 ## [1.10.1] — 2026-05-22
 
 **Documentation patch.** No code change to the user-facing
