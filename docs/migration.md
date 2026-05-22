@@ -447,6 +447,64 @@ Projects running `plan lint --strict` / `plan analyze --strict` / `validate --st
 
 In semver terms, v1.4.0 is a minor release.
 
+## v1.9.x → v1.10.0
+
+### Quick path
+
+```sh
+# 1. Upgrade the CLI.
+npm install -g code-pact@1.10.0
+
+# 2. No project-side action is required. v1.10 changes nothing
+#    in the user-facing product surface — no new commands, no
+#    new flags, no new error codes, no JSON envelope changes.
+code-pact validate --json
+```
+
+### What's new
+
+- **Internal-only evidence harness** at `scripts/harness/`,
+  invoked via `pnpm harness --corpus . [--write] [--json]`.
+  Walks the corpus and emits four CSV metric files +
+  `measurements.manifest.json` under `design/measurements/`.
+  See [`docs/concepts/evidence-harness.md`](concepts/evidence-harness.md).
+- **The harness is NOT a product feature.** It is not
+  registered in `package.json` `bin`, never invoked through
+  `code-pact ...`, and has no stability commitment. End
+  users of the published npm package see nothing new.
+- **P15-T5 closed as `cancelled`.** The originally-deferred
+  `write_audit` field on `phase reconcile --json` will not
+  ship. The use case is already served by the v1.6+v1.9
+  combination of `task finalize --audit-strict` +
+  `phase runbook --across-phases`. `--audit-strict` on
+  `phase reconcile` (P15-T6, v1.6+) is unaffected.
+- **P15 phase status** flips from `in_progress` to `done`
+  in v1.10 as a consequence of the P15-T5 closure.
+
+### Why this is a minor (1.10.0, not 1.9.1)
+
+Strictly, the user-visible product surface is unchanged.
+We still cut a minor (not a patch) because cancelling
+P15-T5 is a meaningful design statement and the committed
+baseline CSVs are a new repository artifact that future
+RFCs will depend on. See the v1.10.0 CHANGELOG entry for
+the longer rationale.
+
+### What stayed the same
+
+- Every public command, every flag, every JSON envelope,
+  every error code — unchanged.
+- `KNOWN_CODES.public` — unchanged.
+- `progress.yaml` schema and contract — unchanged.
+- `task context` pack output — byte-identical with v1.9.0
+  (the harness reads packs but does not mutate them).
+- Existing adapter manifests — unchanged. No re-install /
+  upgrade required for the v1.10 release.
+- `dist/cli.js` bundle — size unchanged at 419.71 KB; the
+  harness is excluded from `tsup` build.
+
+In semver terms, v1.10.0 is a minor release.
+
 ## v1.8.x → v1.9.0
 
 ### Quick path
