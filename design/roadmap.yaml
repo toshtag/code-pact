@@ -53,3 +53,6 @@ phases:
   - id: P18
     path: design/phases/P18-spec-kit-bridge.yaml
     weight: 25
+  - id: P19
+    path: design/phases/P19-cross-phase-deps.yaml
+    weight: 20
