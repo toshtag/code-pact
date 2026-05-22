@@ -14,7 +14,7 @@
 - This document opens at status **proposed** in the P21-T0 PR.
 - After review approval, and **before** the P21-T0 PR merges (or in a small follow-up commit per the P11–P20 precedent), the maintainer flips the status line at the top of this file to **accepted**.
 - P21-T0 is considered done only after a commit with the status line reading `accepted` has landed on main.
-- Subsequent implementation PRs (P21-T1..T5) treat the accepted document as load-bearing; they may not change decisions in this RFC without a separate RFC-update PR.
+- Subsequent implementation PRs (P21-T1..T6) treat the accepted document as load-bearing; they may not change decisions in this RFC without a separate RFC-update PR.
 
 ## Background
 

@@ -382,11 +382,14 @@ tasks:
          `### How to handle failures`
       3. `required_cli_surface_mentions` split into two
          strict lists (ALL members of each list must be
-         mentioned in the instruction file):
-         - lifecycle_required: `task prepare`, `task start`,
-           `task complete`, `task finalize`
-         - diagnostic_required: `task context`, `verify`,
-           `validate`
+         mentioned in the instruction file; source of truth
+         is `src/core/adapters/conformance-spec.ts`, full
+         command strings):
+         - lifecycle_required: `code-pact task prepare`,
+           `code-pact task start`, `code-pact task complete`,
+           `code-pact task finalize`
+         - diagnostic_required: `code-pact task context`,
+           `code-pact verify`, `code-pact validate`
       4. `required_failure_guidance` keyword/heading match:
          `blocked dependency`, `verification failure`,
          `adapter drift`, `missing context pack`
@@ -481,9 +484,11 @@ tasks:
       tool or competitor name; positioning is expressed
       entirely in code-pact's own terms.
 
-      Also flips the P21 phase YAML status to `done` since
-      this task closes the phase.
+      Phase status is reconciled after all P21 tasks complete
+      via `code-pact phase reconcile P21 --write`; this task
+      does not edit the phase YAML directly.
     depends_on:
+      - P21-T1
       - P21-T3
       - P21-T4
       - P21-T5
