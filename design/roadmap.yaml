@@ -56,3 +56,6 @@ phases:
   - id: P19
     path: design/phases/P19-cross-phase-deps.yaml
     weight: 20
+  - id: P20
+    path: design/phases/P20-evidence-harness.yaml
+    weight: 20
