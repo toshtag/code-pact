@@ -447,6 +447,117 @@ Projects running `plan lint --strict` / `plan analyze --strict` / `validate --st
 
 In semver terms, v1.4.0 is a minor release.
 
+## v1.6.x → v1.7.0
+
+### Quick path
+
+```sh
+# 1. Upgrade the CLI.
+npm install -g code-pact@1.7.0
+
+# 2. (Optional) re-render every installed adapter's instruction file
+#    to take the v1.7 agent-contract section. Use --accept-modified to
+#    preserve any user edits to the file body.
+code-pact adapter upgrade claude-code --check --json
+code-pact adapter upgrade claude-code --write --accept-modified --json
+# Repeat for codex / generic if installed.
+
+# 3. (Optional) re-run adapter doctor to confirm no remaining
+#    ADAPTER_CONTRACT_DRIFT warnings.
+code-pact adapter doctor --json
+```
+
+### What's new
+
+- **`## Agent contract` section in every stable adapter's
+  instruction file** (claude-code, codex, generic). New
+  load-bearing Markdown section between the per-task workflow
+  and the next adapter-specific section. Names three axes
+  verbatim (`### When to invoke code-pact`, `### What to verify
+  first`, `### How to handle failures`) and references every
+  v1.6 audit / non-interactive surface inline. Heading strings
+  are English-locked across all locales; body text is localised
+  in en-US and ja-JP.
+- **Adapter conformance test extended.** `tests/integration/
+  adapter-conformance.test.ts` gains four new assertions per
+  stable adapter (section heading + 3 axis sub-headings +
+  v1.6 surface references with body-slice scope + placement
+  check). Test count moved from 21 to 31 adapter conformance
+  assertions.
+- **New `ADAPTER_CONTRACT_DRIFT` diagnostic** in
+  `adapter doctor`. Soft signal (severity: warning, does NOT
+  gate exit code). Independent of `ADAPTER_FILE_DRIFT` — both
+  can fire on the same file with different remediations.
+  Emitted when an instruction file is present but lacks the
+  agent-contract section heading
+  (`details: { kind: "section_missing" }`) or one of the three
+  axis sub-headings
+  (`details: { kind: "axes_incomplete", missing_axes: string[] }`).
+- **`AdapterDoctorIssue` gains `details?: Record<string,
+  unknown>`** field. Additive on the existing shape — consumers
+  that read only `code` / `severity` / `message` / `agent` /
+  `path` see no shape change. Mirrors the `PlanIssue.details`
+  convention used by plan lint.
+
+### Adoption pattern
+
+The minimum action is **none**. Existing CI pipelines, agents,
+and human workflows continue to behave byte-identically. The
+new diagnostic is advisory; the conformance regex only fires
+on adapter source changes.
+
+To take the new agent-contract section into your installed
+adapters:
+
+```sh
+# Preview the regen for each stable adapter you have installed.
+code-pact adapter upgrade claude-code --check --json
+code-pact adapter upgrade codex --check --json
+code-pact adapter upgrade generic --check --json
+
+# Apply. --accept-modified preserves any user edits to the body.
+code-pact adapter upgrade claude-code --write --accept-modified --json
+```
+
+After upgrading, an agent that re-reads `CLAUDE.md` (or
+`AGENTS.md` / `docs/code-pact/agent-instructions.md` for codex /
+generic) will see the new `## Agent contract` section listing
+the v1.6 surfaces it didn't previously know about
+(`--audit-strict`, `--from-file`, `--stdin`, `write_audit`).
+
+### Deferred to v1.8+
+
+- **P15-T5 — `phase reconcile --json` write_audit exposure** —
+  unchanged from v1.6.0 deferred status. Still pending a
+  diff-attribution-across-tasks semantics RFC.
+- **Auto-injection of the contract section on `adapter upgrade
+  --write --accept-modified`** — currently the diagnostic
+  surfaces missing sections but the user must rerun without
+  `--accept-modified` (or hand-edit the section back) to apply.
+  Surgical injection is a future refinement.
+- **cursor / gemini-cli stable promotion** — both stay
+  experimental.
+
+### Backward-compatibility notes
+
+- **Default invocations are byte-identical to v1.6.0** for every
+  existing command.
+- **No CLI flag changes, no schema changes, no exit-code
+  changes.** The new diagnostic is severity: warning and never
+  gates `adapter doctor`'s exit code.
+- **The `ADAPTER_FILE_DRIFT` warning will fire** on
+  `adapter upgrade --check` for every previously-installed
+  stable adapter, since the instruction file body changed. This
+  is expected — `--write` clears it.
+- **Hand-edited instruction files**: `--accept-modified`
+  continues to preserve user edits exactly as it did in v0.9+.
+  The new `ADAPTER_CONTRACT_DRIFT` diagnostic surfaces
+  separately if the user's edits removed the agent-contract
+  section.
+- **`tests/integration/json-stdout.test.ts`** continues to pass.
+
+In semver terms, v1.7.0 is a minor release.
+
 ## v1.5.x → v1.6.0
 
 ### Quick path

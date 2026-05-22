@@ -11,7 +11,56 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ---
 
-## [Unreleased]
+## [1.7.0] — 2026-05-22
+
+**Agent contract release.** P16 (Agent Contract Adapter Hardening)
+ships feature-complete in this release. The three stable adapters
+(claude-code, codex, generic) graduate from "instruction templates
+that produce per-agent files" to "agent contracts" — their
+instruction files now carry a load-bearing `## Agent contract`
+section between the per-task workflow and the model selection,
+naming the three axes every conforming agent must honor:
+
+- `### When to invoke code-pact` — the canonical command sequence
+  plus the v1.6 non-interactive bootstrap surfaces.
+- `### What to verify first` — pre-action checks plus the v1.6
+  audit-aware additions.
+- `### How to handle failures` — `LOCK_HELD`, `VERIFICATION_FAILED`,
+  `WRITES_AUDIT_STRICT_FAILED`, `TASK_FINALIZE_NOT_ELIGIBLE`,
+  `CONFIG_ERROR` recovery patterns.
+
+The v1.6 surfaces (`--audit-strict`, `--from-file`, `--stdin`,
+`write_audit`) are now referenced inline in every conforming
+instruction file, so an agent installed via `adapter install
+<agent>` sees them on day one. Heading strings are English-locked
+across all locales (en-US, ja-JP); body text is localised. Why
+agent contract matters now: v1.6 added 11 new CLI surfaces that
+the pre-P16 templates didn't teach — agents had no way to know
+`--audit-strict` existed or which envelope field to inspect
+before finalize.
+
+Two new structural surfaces close the loop:
+
+- The **adapter conformance test** anchors on the agent-contract
+  heading + axis sub-headings + v1.6 surface mentions, so any
+  future template drift fails a CI assertion.
+- The **`ADAPTER_CONTRACT_DRIFT` diagnostic** in `adapter doctor`
+  surfaces missing or out-of-shape contract sections on existing
+  installs (typically pre-P16 generator output). Independent of
+  `ADAPTER_FILE_DRIFT` (file-level hash drift) — both can fire
+  on the same file with different remediations.
+
+cursor and gemini-cli remain experimental and out-of-scope, per
+the P14 conformance posture.
+
+**Self-validation footnote.** The P15-T1 audit advisory caught
+real declared-writes omissions in **14 consecutive** v1.6 + v1.7
+implementation slices. The P15-T4 `DECLARED_UNUSED` warning fired
+on real scope deviations five times (P17-T3, P15-T6, P16-T2,
+P16-T3, P16-T5), three of which were "plan / implementation site
+mismatch" — the spec named one file but the implementation
+landed on another. The audit + conformance regime continues to
+pay for itself during the releases it ships in.
 
 ### Added
 
@@ -118,6 +167,55 @@ identifiers. Starting with v1.0.0, stable releases use plain
   preserves any user edits). codex / generic adapters
   follow in P16-T3; cursor / gemini-cli stay
   experimental-and-untouched.
+
+### Compatibility
+
+- **Default invocations are byte-identical to v1.6.0** for every
+  existing command. The only behavioural change ships through
+  `adapter install` / `adapter upgrade` — the generated
+  instruction file body grows by the new agent-contract section.
+- **No CLI flag changes, no schema changes, no exit-code
+  changes.** The new diagnostic is a warning that never gates
+  `adapter doctor`'s exit code.
+- **`KNOWN_CODES.adapter` extension is additive: one new code**
+  (`ADAPTER_CONTRACT_DRIFT`). `KNOWN_CODES.public` and
+  `KNOWN_CODES.plan` are unchanged.
+- **`AdapterDoctorIssue` gains an additive `details?:
+  Record<string, unknown>`** field. Mirrors the
+  `PlanIssue.details` convention; consumers reading only
+  `code` / `severity` / `message` / `agent` / `path` see no
+  shape change.
+- **Global `doctor`** continues to strip `details` per the
+  existing `adapterIssueToDoctor` cross-cutting helper. The
+  structured payload surfaces only on the dedicated
+  `adapter doctor` envelope.
+- **Existing v1.6 projects** will see `ADAPTER_FILE_DRIFT` on
+  `adapter upgrade --check` (the instruction file body changed
+  to add the new section) and `ADAPTER_CONTRACT_DRIFT` on
+  `adapter doctor` (until they run `adapter upgrade --write`).
+  `--accept-modified` preserves any user edits while applying
+  the new template.
+- **`tests/integration/json-stdout.test.ts`** continues to pass
+  for every Stable command. No envelope shape changes.
+- **cursor / gemini-cli adapters** stay experimental and
+  untouched.
+
+### Deferred to v1.8+
+
+- **P15-T5 — `phase reconcile --json` write_audit exposure** —
+  still deferred, no change from v1.6.0 status. The
+  "diff attribution across multiple tasks" semantics RFC is the
+  blocker.
+- **Auto-injection of the contract section on `adapter upgrade
+  --write --accept-modified`** — currently the diagnostic
+  surfaces missing sections but the user must rerun without
+  `--accept-modified` (or hand-edit the section back) to apply.
+  A surgical injection mechanism is a future refinement once
+  `ADAPTER_CONTRACT_DRIFT` has shown enough false-positive /
+  false-negative data to design the right machinery.
+- **cursor / gemini-cli stable promotion** — both adapters stay
+  experimental. Promotion requires conformance work first; not
+  in scope for v1.7.
 
 ---
 
