@@ -80,7 +80,10 @@ import {
 } from "./commands/task-finalize.ts";
 import { runTaskRunbook } from "./commands/task-runbook.ts";
 import { runPhaseReconcile } from "./commands/phase-reconcile.ts";
-import { runPhaseRunbook } from "./commands/phase-runbook.ts";
+import {
+  runPhaseRunbook,
+  runPhaseRunbookAcrossPhases,
+} from "./commands/phase-runbook.ts";
 import { runTaskStart } from "./commands/task-start.ts";
 import { runTaskBlock } from "./commands/task-block.ts";
 import { runTaskResume } from "./commands/task-resume.ts";
@@ -3580,6 +3583,7 @@ async function cmdPhaseRunbook(
       argv,
       {
         json: { type: "boolean" },
+        "across-phases": { type: "boolean" },
       },
       { allowPositionals: true },
     ));
@@ -3597,9 +3601,52 @@ async function cmdPhaseRunbook(
   }
 
   const json = globalJson || values.json === true;
+  const acrossPhases = values["across-phases"] === true;
   const phaseId = positionals[0];
+  const cwd = process.cwd();
+
+  if (acrossPhases) {
+    try {
+      const result = await runPhaseRunbookAcrossPhases({ cwd });
+      if (json) {
+        process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
+      } else {
+        process.stdout.write(
+          `Aggregated runbook across ${result.phases_considered.length} phase(s): ${result.phases_considered.join(", ")}\n`,
+        );
+        for (const phaseResult of result.phases) {
+          process.stdout.write(`\n${m.phase.runbook.header(phaseResult.phase_id)}\n`);
+          process.stdout.write(
+            `${m.phase.runbook.phaseSummary(phaseResult.phase_summary)}\n`,
+          );
+          if (phaseResult.next_steps.length === 0) {
+            process.stdout.write(`${m.phase.runbook.noSteps}\n`);
+          } else {
+            for (let i = 0; i < phaseResult.next_steps.length; i++) {
+              const step = phaseResult.next_steps[i]!;
+              process.stdout.write(`${m.phase.runbook.step(i + 1, step)}\n`);
+            }
+          }
+        }
+      }
+      return 0;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      const msg = (err as Error).message;
+      const outCode = code === "CONFIG_ERROR" ? "CONFIG_ERROR" : "INTERNAL_ERROR";
+      if (json) {
+        process.stdout.write(
+          `${JSON.stringify({ ok: false, error: { code: outCode, message: msg } })}\n`,
+        );
+      } else {
+        process.stderr.write(`${msg}\n`);
+      }
+      return 2;
+    }
+  }
+
   if (!phaseId) {
-    const msg = "phase runbook requires a phase id (e.g. `phase runbook P1`).";
+    const msg = "phase runbook requires a phase id (e.g. `phase runbook P1`) or `--across-phases`.";
     if (json) {
       process.stdout.write(
         `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
@@ -3609,7 +3656,6 @@ async function cmdPhaseRunbook(
     }
     return 2;
   }
-  const cwd = process.cwd();
 
   try {
     const result = await runPhaseRunbook({ cwd, phaseId });

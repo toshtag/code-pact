@@ -15,6 +15,36 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ### Added
 
+- **P19-T3** — `phase runbook --across-phases [--json]`.
+  New aggregated runbook that emits one per-phase
+  `PhaseRunbookResult` for every phase in scope. Inclusion
+  rules:
+  - `phase.status === "in_progress"` — always included.
+  - Phases that DECLARE a task referenced (via `depends_on`)
+    by an in_progress phase task with derived state != done
+    — pulled in via one level of transitive closure (enough
+    for release-prep semantics without surfacing the entire
+    roadmap).
+
+  Phases with status `done`, `planned`, or `cancelled` are
+  excluded unless pulled in via the dep-driven rule. Step
+  order: phase id ascending, then within-phase P12 runbook
+  order.
+
+  Envelope: `{ kind: "aggregated_runbook", phases_considered:
+  string[], phases: PhaseRunbookResult[] }` — re-uses the
+  existing `PhaseRunbookResult` shape so consumers can treat
+  each `phases[i]` exactly like a single-phase runbook.
+
+  Default `phase runbook <id>` invocation is unchanged —
+  the new flag is purely additive. The regression is
+  asserted by an integration test that still invokes the
+  classic single-phase form. 6 new integration tests cover
+  the two-in-progress aggregation, done/planned/cancelled
+  exclusion, dep-driven inclusion, no-in-progress empty
+  envelope, dep-no-dedup ordering, and the default-mode
+  regression.
+
 - **P19-T2** — Cross-phase `depends_on` resolver + multi-node
   cycle detection. `resolveDependsOnStates(events, task, options?)`
   gains an optional third argument `{ ownPhaseId, taskPhaseIndex }`
