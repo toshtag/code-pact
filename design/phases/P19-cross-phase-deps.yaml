@@ -163,7 +163,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
     description: |
       `phase runbook --across-phases [--json]`. Aggregates per-
       phase runbook steps into a single ordered stream, scoped
