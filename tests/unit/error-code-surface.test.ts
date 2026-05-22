@@ -117,6 +117,7 @@ const KNOWN_CODES: Record<string, "public" | "plan" | "doctor" | "adapter" | "in
   STALE_CONTEXT: "doctor",
 
   // Adapter platform diagnostics (manifest-aware + legacy)
+  ADAPTER_CONTRACT_DRIFT: "adapter",
   ADAPTER_DESIRED_STALE: "adapter",
   ADAPTER_FILE_DRIFT: "adapter",
   ADAPTER_FILE_MISSING: "adapter",

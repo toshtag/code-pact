@@ -36,6 +36,33 @@ identifiers. Starting with v1.0.0, stable releases use plain
 - **P16 phase registered** (v1.7+). `design/roadmap.yaml` lists
   P16 (Agent Contract Adapter Hardening, weight 25). Phase
   status stays `in_progress` until P16-T5 lands.
+- **`ADAPTER_CONTRACT_DRIFT` diagnostic in `adapter doctor`**
+  (v1.7+, P16-T5). New `KNOWN_CODES.adapter` entry. Soft signal
+  (severity: warning) — does NOT gate the doctor exit code.
+  Independent of `ADAPTER_FILE_DRIFT` (the existing file-level
+  hash drift signal); both diagnoses can fire in the same run
+  and require different remediations. Detection: scans every
+  managed instruction file's on-disk body for the verbatim
+  `## Agent contract` heading and three axis sub-headings; if
+  the section heading is absent, emits with
+  `details: { kind: "section_missing" }`; if the section heading
+  is present but any axis sub-heading is missing, emits with
+  `details: { kind: "axes_incomplete", missing_axes: string[] }`.
+  The `details` field is additive on the `AdapterDoctorIssue`
+  shape (mirrors the `PlanIssue.details` convention); consumers
+  that read only `code` / `severity` / `message` / `agent` /
+  `path` see no contract change. Resolution: `adapter upgrade
+  <agent> --write` reinstates the section; `--accept-modified`
+  preserves any user edits. Global `doctor` continues to strip
+  `details` per the existing cross-cutting `adapterIssueToDoctor`
+  contract — full structured details surface only on the
+  dedicated `adapter doctor` envelope.
+- **P16 phase complete (T1–T5 all done)** (v1.7+). Phase status
+  flipped from `in_progress` to `done` after T5 ships. P16 was
+  feature-scoped to elevating the three stable adapters
+  (claude-code, codex, generic) from "instruction templates" to
+  "agent contracts" — see `design/decisions/agent-contract-rfc.md`
+  for the full design lock.
 - **Adapter conformance test extended for agent-contract section**
   (v1.7+, P16-T4). `tests/integration/adapter-conformance.test.ts`
   gains four new assertions per stable adapter (claude-code,
