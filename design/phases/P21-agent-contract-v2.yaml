@@ -1,0 +1,504 @@
+id: P21
+name: Agent Contract v2 — task prepare, context explain, adapter conformance
+weight: 25
+confidence: high
+risk: low
+status: in_progress
+objective: |
+  Reduce agent operation errors and make context minimisation
+  verifiable by adding three coordinated CLI surfaces:
+
+  1. `code-pact task prepare <task-id>` — a single
+     progress-read-only compound command that returns current
+     state, recommendation, context pack metadata, a structured
+     `next_action`, and a `commands` dictionary so agents have
+     one deterministic entry point per task.
+  2. `code-pact task context --explain` — adds a per-section
+     `bytes` + `reason_code` breakdown to the JSON envelope so
+     the reasons each section is included (or excluded) become
+     auditable. Pack markdown `content` is byte-identical to
+     v1.10 (locked).
+  3. `code-pact adapter conformance <agent>` — a focused
+     read-only check that the installed adapter satisfies the
+     v2 agent contract (axis headings + lifecycle/diagnostic
+     surface mentions + failure guidance + checksum).
+
+  A `src/core/recommend/` pure-function extraction precedes the
+  prepare work so `task prepare` can call the same recommendation
+  logic as the existing `recommend` command without duplication.
+
+  Stable adapter templates (`claude-code`, `codex`, `generic`)
+  are refreshed so a freshly-installed adapter passes
+  conformance by construction. Doctor's existing contract drift
+  check and the new conformance command share a single required-
+  surface spec module so the two callers can never disagree.
+
+  Two new docs ship: `docs/positioning.md` (self-contained
+  product positioning + success metrics) and
+  `docs/agent-contract.md` (the v2 contract definition + the
+  recommended lifecycle).
+
+  No new error codes. No adapter schema bump. No budget
+  enforcement (deferred to P24).
+non_goals:
+  - shipping `--budget-bytes` or any context truncation policy (deferred to P24)
+  - bumping `adapter_schema_version` from 1 to 2 (deferred)
+  - executing the next command on the agent's behalf (`task prepare` returns intent only — no `--execute` flag)
+  - splitting `src/cli.ts` into per-command modules (deferred to P27)
+  - multi-agent or multi-task orchestration (single task, single agent)
+  - automatic remediation in `adapter conformance` (it is read-only; users re-run `adapter install` / `adapter upgrade` to repair)
+  - emitting `budget_reserved_for_later` from `task context --explain` in P21 (the enum value is reserved for P24)
+definition_of_done:
+  - design/phases/P21-agent-contract-v2.yaml exists with this objective and tasks list (P21-T0)
+  - design/roadmap.yaml lists P21 (P21-T0)
+  - "design/decisions/agent-contract-v2-rfc.md exists with `Status: accepted` lock (P21-T0)"
+  - docs/positioning.md exists and is referenced from README's Reference docs table (P21-T1)
+  - "`src/core/recommend/` exposes a pure `resolveRecommendation()` and the existing `code-pact recommend` JSON envelope is byte-identical (P21-T2)"
+  - "`code-pact task prepare <task-id>` ships, is progress-read-only, supports `--dry-run`, returns a structured `next_action` + `commands` envelope, and writes nothing to progress.yaml in any state (P21-T3)"
+  - "`code-pact task context --explain` ships with per-section `bytes` + `reason_code` breakdown; the pack markdown `content` is byte-identical to v1.10 (P21-T4)"
+  - "`code-pact adapter conformance <agent>` ships, shares the required-surface spec with `adapter doctor`, and exits 1 on non-compliance (P21-T5)"
+  - stable adapter templates (`claude-code`, `codex`, `generic`) embed the v2 lifecycle/diagnostic surface and failure guidance so a fresh `adapter install` passes conformance (P21-T5)
+  - docs/agent-contract.md exists and is referenced from README's Reference docs table (P21-T6)
+  - CHANGELOG.md gains entries under `[Unreleased]` covering each P21 task
+verification:
+  commands:
+    - pnpm typecheck
+    - pnpm test
+    - pnpm build
+    - node dist/cli.js plan lint --json
+    - node dist/cli.js validate --json
+    - node dist/cli.js doctor --json
+tasks:
+  - id: P21-T0
+    type: architecture
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: planned
+    description: |
+      RFC acceptance + phase registration.
+
+      Lands design/decisions/agent-contract-v2-rfc.md with
+      `Status: proposed` in this PR; the status line flips to
+      `accepted` in a small follow-up commit before merge per
+      the P11–P20 lifecycle precedent.
+
+      This task also bootstraps the P21 phase itself:
+      - design/phases/P21-agent-contract-v2.yaml (this file)
+      - design/roadmap.yaml gains a P21 entry (weight 25)
+      - CHANGELOG.md gains a P21-T0 entry under [Unreleased]
+
+      The phase YAML and roadmap.yaml updates are bootstrap
+      writes — they are protected paths under `plan lint
+      --strict` and are NOT listed in this task's `writes:`
+      block. The same precedent applies as in P20-T1.
+
+      The phase status stays `in_progress` until P21-T6 lands;
+      task statuses transition via the normal progress event
+      stream.
+    decision_refs:
+      - design/decisions/agent-contract-v2-rfc.md
+    reads:
+      - design/decisions/agent-contract-rfc.md
+      - design/decisions/task-readiness-schema-rfc.md
+      - design/decisions/evidence-harness-rfc.md
+      - docs/cli-contract.md
+    writes:
+      - design/decisions/agent-contract-v2-rfc.md
+      - CHANGELOG.md
+    acceptance_refs:
+      - design/phases/P21-agent-contract-v2.yaml
+  - id: P21-T1
+    type: docs
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: planned
+    description: |
+      Self-contained product positioning + success metrics docs.
+
+      Add a new `docs/positioning.md` that declares what
+      code-pact is, what it is not, the core CLI surfaces, and
+      the success metrics that future evidence work (P26) will
+      populate. The document MUST NOT reference any external
+      tool, competitor, or third-party project by name —
+      positioning is expressed entirely in code-pact's own
+      role-definition terms.
+
+      Update README's Reference docs table to include
+      positioning.md. README's lead sentence (`A vendor-neutral
+      control plane for AI coding agents.`) is already correct
+      and is left untouched. If existing README text mentions
+      third-party tools by name, evaluate within this task
+      whether to remove or neutralise those mentions; the
+      decision and any diff land in this task's PR.
+
+      Success metrics defined in this task (numbers are TBD,
+      populated by P26):
+      - context pack p50 / p90 / max bytes
+      - first-pass verification rate
+      - agent command adherence rate
+      - undeclared write rate
+      - adapter drift detection rate
+    depends_on:
+      - P21-T0
+    decision_refs:
+      - design/decisions/agent-contract-v2-rfc.md
+    reads:
+      - README.md
+      - docs/cli-contract.md
+      - docs/dogfood.md
+    writes:
+      - docs/positioning.md
+      - README.md
+      - CHANGELOG.md
+    acceptance_refs:
+      - design/phases/P21-agent-contract-v2.yaml
+  - id: P21-T2
+    type: refactor
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: short
+    status: planned
+    description: |
+      Extract `resolveRecommendation()` as a pure function in
+      `src/core/recommend/` so `task prepare` can call the
+      same recommendation logic the existing `code-pact
+      recommend` command uses, without duplication.
+
+      The existing `code-pact recommend` JSON envelope MUST
+      remain byte-identical (snapshot test added in this task
+      then verified against the refactored implementation).
+      The CLI command becomes a thin wrapper that constructs
+      the input options, calls the pure function, and prints
+      the envelope.
+
+      Return type captures: `tier`, `model`, `effort`
+      (`low`|`medium`|`high`), optional `thinking_enabled`,
+      `planning_posture` (`plan_first`|`direct`), optional
+      `budget.context_size_hint`.
+
+      Unit tests cover each tier mapping and the effort /
+      planning posture derivation rules. The existing
+      integration test (if any) for `code-pact recommend`
+      continues to pass against the wrapper.
+    depends_on:
+      - P21-T0
+    decision_refs:
+      - design/decisions/agent-contract-v2-rfc.md
+    reads:
+      - src/commands/recommend.ts
+      - src/core/schemas/project.ts
+      - design/decisions/agent-contract-v2-rfc.md
+    writes:
+      - src/core/recommend/index.ts
+      - src/commands/recommend.ts
+      - tests/unit/core/recommend/resolve.test.ts
+      - CHANGELOG.md
+    acceptance_refs:
+      - design/phases/P21-agent-contract-v2.yaml
+  - id: P21-T3
+    type: feature
+    ambiguity: medium
+    risk: low
+    context_size: medium
+    write_surface: high
+    verification_strength: strong
+    expected_duration: medium
+    status: planned
+    description: |
+      Add `code-pact task prepare <task-id> [--agent <name>]
+      [--json] [--dry-run]` as a Stable (v1.11+) compound
+      command.
+
+      The command is **progress-read-only**: it MUST NOT
+      mutate `.code-pact/state/progress.yaml`. It MAY write
+      the deterministic context pack at
+      `.context/<agent>/<task-id>.md` unless `--dry-run` is
+      passed.
+
+      Behaviour:
+      1. Resolve task to phase (`resolveTaskInRoadmap`).
+      2. Validate agent (same pattern as `task context`).
+      3. Derive current state from progress events
+         (`deriveTaskState`).
+      4. Early return when `current_state === "done"`:
+         no context pack write, `next_action.type =
+         "noop_already_done"`, `recommendation = null`,
+         `context_pack_path = null`, `context_pack_bytes = 0`.
+      5. Early return when `current_state === "blocked"`
+         OR any `depends_on` is unmet: no context pack write,
+         `next_action.type = "wait_for_dependencies"`,
+         `blocked_by = [...]`, `recommendation = null`,
+         `context_pack_path = null`, `context_pack_bytes = 0`.
+      6. Call `resolveRecommendation()` from P21-T2.
+      7. If `--dry-run`, build context pack but skip write
+         (return `would_write_context_pack_path`). Otherwise
+         build + write.
+      8. Map remaining states to `next_action.type`:
+         `planned → start_task`,
+         `started`/`resumed → continue_implementation`,
+         `failed → investigate_failure`.
+
+      The `commands` dictionary in every envelope contains
+      `context`, `start`, `verify`, `complete`, `finalize`
+      with fully-formed command strings (no extra whitespace,
+      shell-safe ordering).
+
+      Reuses existing error codes only: `TASK_NOT_FOUND`,
+      `AMBIGUOUS_TASK_ID`, `PHASE_NOT_FOUND`,
+      `AGENT_NOT_FOUND`, `AGENT_NOT_ENABLED`. No new error
+      codes ship.
+
+      Tests:
+      - progress-read-only invariant (diff progress.yaml
+        before/after for all states)
+      - --dry-run skips both context pack write
+      - blocked state and unmet-dependency state both early-
+        return with `wait_for_dependencies` (separate cases)
+      - done state early-returns with `noop_already_done`
+      - planned / started / resumed / failed mapping
+      - JSON envelope shape locked (snapshot test)
+    depends_on:
+      - P21-T2
+    decision_refs:
+      - design/decisions/agent-contract-v2-rfc.md
+    reads:
+      - src/commands/task-context.ts
+      - src/commands/task-start.ts
+      - src/core/plan/resolve-task.ts
+      - src/core/progress/task-state.ts
+      - src/core/pack/index.ts
+    writes:
+      - src/commands/task-prepare.ts
+      - src/cli.ts
+      - src/i18n/index.ts
+      - tests/unit/commands/task-prepare.test.ts
+      - docs/cli/task-prepare.md
+      - CHANGELOG.md
+    acceptance_refs:
+      - design/phases/P21-agent-contract-v2.yaml
+  - id: P21-T4
+    type: feature
+    ambiguity: medium
+    risk: medium
+    context_size: medium
+    write_surface: high
+    verification_strength: strong
+    expected_duration: medium
+    status: planned
+    description: |
+      Add `code-pact task context --explain [--json]` as a
+      Stable (v1.11+) flag.
+
+      In `--json --explain` mode, the existing context pack
+      envelope gains two arrays:
+      - `sections[]` — each `{ name, bytes, reason_code,
+        details? }` where `reason_code` is from a closed enum
+        `ContextSectionReasonCode` (always_included,
+        declared_by_task, referenced_decision, glob_match,
+        write_surface_high, context_size_large,
+        ambiguity_high, format_overhead).
+      - `excluded[]` — each `{ name, reason_code, details? }`
+        where `reason_code` is from a closed enum
+        `ContextExcludedReasonCode`
+        (context_size_small_and_ambiguity_low,
+        not_declared_by_task, glob_no_match,
+        budget_reserved_for_later).
+
+      Acceptance invariant: `sum(sections[].bytes) ===
+      total_bytes === context_pack_bytes`. Any byte not
+      attributable to a content section is summed into a
+      `format_overhead` section (headings, blank lines,
+      separators, generation header). Byte counts use
+      `Buffer.byteLength(content, "utf8")`.
+
+      `budget_reserved_for_later` is reserved for P24.
+      The P21 implementation MUST NOT emit it. A unit test
+      asserts the absence in every P21 output.
+
+      Without `--json`, `--explain` prints a human-readable
+      table using existing CLI formatting helpers.
+
+      The pack markdown `content` MUST be byte-identical to
+      v1.10. Section metadata is built alongside the pack
+      content and never injected into the rendered markdown.
+      The existing
+      `tests/integration/pack-byte-identical.test.ts` is
+      asserted unchanged.
+
+      Harness CSV columns may grow but the existing column
+      order is preserved so `tests/integration/harness.test.ts`
+      continues to pass.
+
+      Reuses existing error codes only.
+    depends_on:
+      - P21-T0
+    decision_refs:
+      - design/decisions/agent-contract-v2-rfc.md
+    reads:
+      - src/core/pack/index.ts
+      - scripts/harness/metrics.ts
+      - tests/integration/pack-byte-identical.test.ts
+    writes:
+      - src/core/pack/index.ts
+      - src/commands/task-context.ts
+      - src/cli.ts
+      - tests/unit/core/pack/explain.test.ts
+      - tests/integration/task-context-explain.test.ts
+      - docs/cli/task-context.md
+      - CHANGELOG.md
+    acceptance_refs:
+      - design/phases/P21-agent-contract-v2.yaml
+  - id: P21-T5
+    type: feature
+    ambiguity: low
+    risk: low
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: planned
+    description: |
+      Add `code-pact adapter conformance <agent> [--json]` as
+      a Stable (v1.11+) command.
+
+      Exit code 0 when compliant, 1 when not.
+
+      Checks:
+      1. `## Agent contract` section present
+      2. Three axis sub-headings present:
+         `### When to invoke code-pact`,
+         `### What to verify first`,
+         `### How to handle failures`
+      3. `required_cli_surface_mentions` split into two
+         strict lists (ALL members of each list must be
+         mentioned in the instruction file; source of truth
+         is `src/core/adapters/conformance-spec.ts`, full
+         command strings):
+         - lifecycle_required: `code-pact task prepare`,
+           `code-pact task start`, `code-pact task complete`,
+           `code-pact task finalize`
+         - diagnostic_required: `code-pact task context`,
+           `code-pact verify`, `code-pact validate`
+      4. `required_failure_guidance` keyword/heading match:
+         `blocked dependency`, `verification failure`,
+         `adapter drift`, `missing context pack`
+      5. Per-file checksum match against the manifest
+
+      The required-surface lists live in a new module
+      `src/core/adapters/conformance-spec.ts` imported by
+      both `adapter doctor`'s contract drift check and the
+      new `adapter conformance` command. A unit test enforces
+      the single-source-of-truth invariant.
+
+      Stable adapter templates (`claude-code`, `codex`,
+      `generic`) are refreshed so a fresh `adapter install`
+      passes conformance by construction. Experimental
+      adapters (`cursor`, `gemini-cli`) SHOULD carry the same
+      surface but are not required by conformance.
+
+      Fixtures:
+      `tests/fixtures/adapters/{claude-code,codex,generic}/
+      expected-files.txt` regenerated.
+
+      Tests:
+      - integration: each stable adapter passes conformance
+        immediately after `adapter install`
+      - integration: removing a lifecycle surface mention
+        causes exit code 1 and surfaces the specific missing
+        item in `missing_lifecycle`
+      - integration: doctor's contract drift check uses the
+        same spec (import-source invariant)
+      - unit: existing v1.7 contract drift behaviour is
+        preserved (no doctor envelope regression)
+
+      Reuses existing `ADAPTER_*` error codes only.
+    depends_on:
+      - P21-T0
+    decision_refs:
+      - design/decisions/agent-contract-v2-rfc.md
+    reads:
+      - src/commands/adapter-doctor.ts
+      - src/core/adapters/index.ts
+      - src/core/adapters/file-state.ts
+      - src/core/schemas/adapter-manifest.ts
+      - tests/integration/adapter-conformance.test.ts
+    writes:
+      - src/commands/adapter-conformance.ts
+      - src/commands/adapter-doctor.ts
+      - src/cli.ts
+      - src/i18n/index.ts
+      - src/core/adapters/conformance-spec.ts
+      - src/core/adapters/claude.ts
+      - src/core/adapters/codex.ts
+      - src/core/adapters/generic.ts
+      - tests/integration/adapter-conformance.test.ts
+      - tests/unit/commands/adapter-conformance.test.ts
+      - tests/fixtures/adapters/claude-code/expected-files.txt
+      - tests/fixtures/adapters/codex/expected-files.txt
+      - tests/fixtures/adapters/generic/expected-files.txt
+      - docs/cli/adapter-conformance.md
+      - CHANGELOG.md
+    acceptance_refs:
+      - design/phases/P21-agent-contract-v2.yaml
+  - id: P21-T6
+    type: docs
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: planned
+    description: |
+      Ship `docs/agent-contract.md` — the formal definition
+      of code-pact's v2 agent contract.
+
+      Sections:
+      1. The contract — what code-pact guarantees to agents
+         (CLI surface stability, JSON envelope shape, exit
+         codes, error codes).
+      2. What agents must do — the conformance checks
+         enforced by `code-pact adapter conformance` (mirrors
+         the spec in `src/core/adapters/conformance-spec.ts`).
+      3. Lifecycle — the recommended per-task flow,
+         visualised as `task prepare ─► ... ─► task finalize`
+         with `verify` between `implement` and `task complete`.
+      4. Measurement — the success metrics defined in
+         docs/positioning.md (numbers TBD, populated by P26).
+
+      Update README's Reference docs table to include
+      agent-contract.md.
+
+      Public-doc constraint: same as P21-T1 — no third-party
+      tool or competitor name; positioning is expressed
+      entirely in code-pact's own terms.
+
+      Phase status is reconciled after all P21 tasks complete
+      via `code-pact phase reconcile P21 --write`; this task
+      does not edit the phase YAML directly.
+    depends_on:
+      - P21-T1
+      - P21-T3
+      - P21-T4
+      - P21-T5
+    decision_refs:
+      - design/decisions/agent-contract-v2-rfc.md
+    reads:
+      - docs/cli-contract.md
+    writes:
+      - docs/agent-contract.md
+      - README.md
+      - CHANGELOG.md
+    acceptance_refs:
+      - design/phases/P21-agent-contract-v2.yaml
