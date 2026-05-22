@@ -1,6 +1,6 @@
 # RFC: Agent contract adapter hardening
 
-**Status:** proposed (P16, 2026-05)
+**Status:** accepted (P16, 2026-05)
 **Scope:** elevate the three stable adapters (claude-code, codex, generic) from "instruction templates that produce per-agent files" to "agent contracts" by adding a `## Agent contract` section to each stable adapter's instruction file body. The new section names the three axes of the canonical code-pact workflow (when to invoke code-pact, what to verify first, how to handle failures) and references the v1.6+ surfaces (`--from-file` / `--stdin` / flag-driven `plan brief` & `plan constitution`; configurable protected paths; `write_audit` envelope; `--base-ref`; `--audit-strict`). Adds one new diagnostic code (`ADAPTER_CONTRACT_DRIFT`) emitted by `adapter doctor` as a soft signal when a managed instruction file is present but its contract section is missing or out-of-shape.
 **Owners:** maintainer
 **Related:**
