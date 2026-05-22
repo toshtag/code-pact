@@ -15,6 +15,26 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ### Added
 
+- **P18-T3** — Spec Kit bridge: `code-pact spec import` CLI command
+  (Stable v1.8+). New top-level `spec` namespace with the first
+  subcommand `import`. Reads a `tasks.md` file, parses via the
+  P18-T2 parser, transforms into a draft phase YAML, and either
+  prints it to stdout (dry-run, default) or writes it to
+  `design/phases/<id>-imported.yaml` (`--write`). Flags:
+  `--from <path>` (required, safe relative path), `--phase-id <id>`
+  (required, must match `/^[A-Za-z][A-Za-z0-9_-]*$/`), `--write`,
+  `--force`, `--json`. Errors all reuse `CONFIG_ERROR` with a
+  structured `data.detail` enum: `unsafe_path` / `file_not_found`
+  / `unreadable` / `phase_id_invalid` / `phase_yaml_exists` /
+  `no_sections_parsed`. The importer does NOT add the new phase
+  to `design/roadmap.yaml` — that stays an explicit follow-up
+  governed by P14. JSON envelope success surface:
+  `{ kind: "would_import" | "imported", source_path, phase_id,
+  sections_imported, tasks_imported, skipped_lines, output_path,
+  phase_yaml, warnings[] }`. 11 integration tests cover the
+  dry-run, --write, --force, missing-flag, unsafe-path,
+  file-not-found, no-sections, and invalid-phase-id matrices.
+
 - **P18-T2** — Spec Kit bridge: `tasks.md` parser core. New module
   `src/core/spec-import/` ships `parseTasksMd(input: string):
   ParseResult` — a pure function (no file I/O) that consumes raw

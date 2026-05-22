@@ -166,7 +166,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
     description: |
       `code-pact spec import --from <path> --phase-id <id>
       [--write] [--json]` Stable v1.8+. Reads the file at
