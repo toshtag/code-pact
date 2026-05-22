@@ -455,77 +455,155 @@ In semver terms, v1.4.0 is a minor release.
 # 1. Upgrade the CLI.
 npm install -g code-pact@1.6.0
 
-# 2. No mandatory action. The new behaviour is JSON-only and advisory.
+# 2. No mandatory action. Every new surface is opt-in and additive.
 code-pact validate --json   # expect: ok
-code-pact plan analyze --json
+code-pact plan lint --json  # expect: ok (or new advisory warnings only)
 ```
 
-### What's new (additive only)
+### Two feature areas
 
-- **`task finalize --json` envelope gains `data.write_audit`.** Read-only
-  advisory comparing declared `writes` globs against actual filesystem
-  changes via git. Present on all three success kinds (`would_finalize` /
-  `finalized` / `already_finalized`) when `--json` is in effect. Default
-  range is the working tree (staged + unstaged + untracked); pass
-  `--base-ref <ref>` to opt into branch-level audit via `git merge-base`.
-  See [`docs/cli-contract.md` § `task finalize`](cli-contract.md) for the
-  full field-by-field contract.
-- **`task finalize --base-ref <ref>` flag** added. Requires `--json`;
-  passing it without `--json` returns `CONFIG_ERROR` (exit 2). The
-  combination of `--base-ref` + `--json` returns `base_kind: "merge-base"`
-  in the envelope; merge-base failures gracefully fall back to working-tree
-  mode with a `base_error` field. Exit code is unchanged in either path.
-- **New warning code `TASK_WRITES_AUDIT_OUTSIDE_DECLARED`** added to
-  `KNOWN_CODES.plan`. Emitted in `data.write_audit.warnings[]` when the
-  audit detects a file change outside any declared `writes` glob.
-  Advisory only — never alters the exit code in v1.6 P15-T1. The
-  `--audit-strict` flag (P15-T6) is the opt-in for exit-relevant
-  enforcement; not in this release.
-- **`design/roadmap.yaml` lists P15.** Existing v1.5.x projects do not
-  need to mirror this in their own roadmaps — the change is internal to
-  code-pact's own dogfood corpus.
+v1.6.0 ships two independent feature phases:
 
-### Adoption pattern
+- **P15 — Declared Writes Audit** (5 of 6 tasks): a read-only audit
+  layer that compares a task's declared `writes` globs against the
+  actual filesystem changes reported by git, surfaced via
+  `task finalize --json`. Plus three new plan-lint advisories.
+- **P17 — Non-interactive Authoring** (5 of 5 tasks, feature-complete):
+  `plan brief` and `plan constitution` (previously TTY-only) gain
+  three pairwise-mutually-exclusive non-interactive input modes
+  apiece.
 
-The minimum action is **none**. Existing CI pipelines, agents, and human
-workflows that run `task finalize` continue to behave byte-identically.
+Both areas are **purely additive**. Existing CI pipelines, agents,
+and human workflows continue to behave byte-identically until you
+opt in to the new flags.
 
-If you want to take advantage of the audit:
+### P15 — Declared Writes Audit (what's new)
+
+- **`task finalize --json` envelope gains `data.write_audit`.**
+  Field-presence-fixed shape (`git_available`, `reason?`, `base_kind`,
+  `base_ref`, `base_error?`, `files_touched`, `outside_declared`,
+  `declared_unused`, `warnings`). Present on all three success kinds
+  (`would_finalize` / `finalized` / `already_finalized`) when `--json`
+  is in effect. Default range is the working tree; pass `--base-ref
+  <ref>` for branch-level audit via `git merge-base`. Non-git projects
+  return the canonical unavailable shape.
+- **`task finalize --base-ref <ref>` flag** (Stable v1.6+). Requires
+  `--json`; merge-base failures gracefully fall back to working-tree
+  mode with a `base_error` field. Exit code unchanged in either path.
+- **`task finalize --audit-strict` flag** (Stable v1.6+). Opt-in
+  promotion: warnings present + `--audit-strict` set → exit **1**
+  with `WRITES_AUDIT_STRICT_FAILED`, and **no design YAML mutation**
+  (even with `--write`). Requires `--json`. Default invocations
+  (no flag) stay advisory.
+- **Three new advisory plan-lint warning codes**:
+  - `TASK_WRITES_AUDIT_OUTSIDE_DECLARED` — real filesystem changes
+    touched a file matched by no declared `writes` glob. Emitted in
+    `data.write_audit.warnings[]`.
+  - `TASK_WRITES_AUDIT_DECLARED_UNUSED` — a declared glob matched no
+    file in `files_touched`. Same emission path.
+  - `TASK_WRITES_OVER_BROAD` — declared glob's root segment is `**`
+    (matches the entire repo). Emitted by `plan lint`.
+- **One new public error code**: `WRITES_AUDIT_STRICT_FAILED`
+  (exit 1, `task finalize --audit-strict` only).
+- **Configurable protected paths** via `design/rules/protected-paths.md`.
+  Optional file; absent file → hardcoded v1.5 defaults (no change for
+  existing projects). When present, the file is the source of truth
+  (defaults are NOT layered on top). One glob per line, P10 supported
+  subset, `#` comments. Affects `TASK_WRITES_PROTECTED_PATH` lint
+  emission.
+
+### P17 — Non-interactive Authoring (what's new)
+
+- **`plan brief` and `plan constitution`** each gain three
+  non-interactive input modes (Stable v1.6+):
+  - `--from-file <yaml>` — read typed YAML from disk.
+  - `--stdin` — read typed YAML from `process.stdin`.
+  - Flag-driven — `--what` / `--who` / `--differentiator` for brief;
+    `--description` / `--principle` (repeatable) for constitution.
+  All three are pairwise mutually exclusive; passing any combination
+  returns `CONFIG_ERROR` (exit 2). Output is byte-identical to the
+  TTY wizard for equivalent input.
+- **Schema differences between brief and constitution**:
+  - `BriefFileSchema`: `what` and `who` required (non-empty);
+    `differentiator` optional. Empty required-field values are
+    rejected.
+  - `ConstitutionFileSchema`: both `description` and `principles[]`
+    are optional. Empty values fall through to the locale template
+    defaults — same as the wizard's empty-input behaviour.
+- **Failure envelopes** are parallel across both commands:
+  `--from-file` failures carry `data: { detail, path }`; `--stdin`
+  failures carry `data: { detail, source: "stdin" }`; flag-driven
+  failures (brief only) carry `data: { missing: string[] }`.
+- **TTY wizards are unchanged.** Non-TTY without one of the new
+  flags continues to return `CONFIG_ERROR` exactly as in v1.5.1;
+  the guidance message now lists the three v1.6+ alternatives.
+
+### Adoption patterns
+
+**Audit (opt-in)**:
 
 ```sh
-# Single-task review at finalize time.
+# Single-task review at finalize time (working-tree mode).
 code-pact task finalize <task-id> --json | jq .data.write_audit
 
-# Branch-level audit (compares against main's merge-base).
+# Branch-level review (compares against main's merge-base).
 code-pact task finalize <task-id> --json --base-ref main \
-  | jq .data.write_audit.outside_declared
+  | jq .data.write_audit
+
+# Strict gate for CI — exit 1 if audit emits any warning.
+code-pact task finalize <task-id> --json --audit-strict --write
 ```
 
-The audit operates **read-only** — paths only, never file contents — and
-never changes the exit code in v1.6.
+**CI bootstrap (opt-in)**:
+
+```sh
+code-pact init --non-interactive --agent claude-code --locale en-US --json
+code-pact plan brief \
+  --what "What we're building" \
+  --who  "Who it's for" \
+  --differentiator "What makes it different" \
+  --json
+code-pact plan constitution \
+  --description "Project description" \
+  --principle "First principle" \
+  --principle "Second principle" \
+  --json
+```
+
+### Deferred to v1.7+
+
+- **P15-T5 — `phase reconcile --json` write_audit exposure.** The
+  "diff attribution across multiple tasks" problem (a single
+  working-tree diff cannot be sharded across tasks deterministically)
+  needs its own semantics RFC. The use case overlaps with running
+  `task finalize --audit-strict` per task — the marginal value beyond
+  per-task strictness is unclear. P15 phase status stays
+  `in_progress` until this ships or is explicitly closed.
 
 ### Backward-compatibility notes
 
-- **Human-mode `task finalize` is byte-identical to v1.5.1.** No new
-  stdout lines, no git spawn, no behavioural difference. The audit is
-  JSON-only.
-- **`task complete` is unchanged.** The hot path is deliberately not
-  augmented — verify remains the single signal there.
-- **`phase reconcile --json` is unchanged in P15-T1.** Phase-level audit
-  (P15-T5) is deferred until the "diff attribution across multiple
-  tasks" semantics are designed.
+- **Default invocations are byte-identical to v1.5.1.** Human-mode
+  `task finalize` does not spawn git, does not compute the audit,
+  produces the same stdout / stderr.
+- **`task complete` is unchanged.** The hot path is deliberately
+  not augmented — `verify` remains the single failure signal there.
+- **`phase reconcile --json` is unchanged.** P15-T5 deferred.
+- **TTY wizards for `plan brief` / `plan constitution` are
+  unchanged.** Same prompts, same locale fallbacks, same output.
 - **The dogfood corpus may surface `TASK_WRITES_AUDIT_OUTSIDE_DECLARED`
-  advisories.** This is the expected behaviour, not a breakage —
-  releases that touch files outside the active task's declared writes
-  will see them flagged. The exit code stays 0.
-- **`progress.yaml` schema is unchanged.** No new event types, no SHA
-  recording at task start. That schema change is intentionally deferred
-  (the append-only contract vs rebase invariance trade-off needs its
-  own RFC).
-- **`KNOWN_CODES.public` is unchanged.** The new code lives in the
-  `plan` category.
-- **`tests/integration/json-stdout.test.ts` continues to pass.** The new
-  `data.write_audit` field is additive on the v1.0 envelope shape.
+  / `_DECLARED_UNUSED` advisories.** This is the expected behaviour,
+  not a breakage — releases that touch files outside the active
+  task's declared writes will see them flagged. The exit code stays
+  0 unless `--audit-strict` is opted into.
+- **`progress.yaml` schema is unchanged.** No new event types, no
+  SHA recording at task start. That schema change stays deferred
+  (the append-only contract vs rebase invariance trade-off needs
+  its own RFC).
+- **`KNOWN_CODES.public` extension is additive: one new code**
+  (`WRITES_AUDIT_STRICT_FAILED`). `KNOWN_CODES.plan` gains three
+  new advisory warning codes. Every existing code is unchanged.
+- **`tests/integration/json-stdout.test.ts` continues to pass.**
+  Every new envelope field is additive on the v1.0 contract.
 
 In semver terms, v1.6.0 is a minor release.
 

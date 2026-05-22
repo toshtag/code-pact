@@ -3,7 +3,7 @@ name: Non-interactive Authoring
 weight: 20
 confidence: high
 risk: low
-status: in_progress
+status: done
 objective: |
   Unblock CI / agent-session bootstrap by giving the two TTY-only
   plan authoring commands (`plan brief` and `plan constitution`)
