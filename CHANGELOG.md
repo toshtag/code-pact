@@ -50,6 +50,16 @@ The release ships three things:
   corpus SHA produce byte-identical CSVs. Verified by an
   integration test.
 
+### Changed
+
+- **`plan analyze`** now treats `cancelled` tasks as "closed"
+  for the `PHASE_DONE_WITH_OPEN_TASKS` check (same as `done`).
+  Previously, a phase marked `done` with any non-done task —
+  including `cancelled` — fired the error. The semantics are
+  now: a phase is consistent if every task is either `done`
+  or `cancelled`. This is necessary for the P15-T5 cancellation
+  to land cleanly. No new error code; no API surface change.
+
 ### Closed (cancelled, not shipped)
 
 - **P15-T5** — `write_audit` in `phase reconcile --json`.

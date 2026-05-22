@@ -158,7 +158,14 @@ export async function runAnalyze(
 
   for (const entry of state.phases) {
     if (entry.phase.status !== "done") continue;
-    const open = (entry.phase.tasks ?? []).filter((t) => t.status !== "done");
+    // v1.10 P15-T5: cancelled tasks count as "closed" for the
+    // phase-done check. A cancelled task is an intentional decision
+    // to not ship the work; treating it as "not done" would force a
+    // phase to stay in_progress forever even when its open work is
+    // formally closed.
+    const open = (entry.phase.tasks ?? []).filter(
+      (t) => t.status !== "done" && t.status !== "cancelled",
+    );
     if (open.length === 0) continue;
     issues.push({
       code: "PHASE_DONE_WITH_OPEN_TASKS",
