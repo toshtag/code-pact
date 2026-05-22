@@ -18,6 +18,7 @@ import {
   formatPhaseShow,
 } from "./commands/phase.ts";
 import { runPhaseImport } from "./commands/phase-import.ts";
+import { runSpecImport, SpecImportError } from "./commands/spec-import.ts";
 import {
   acquireWriteLock,
   isLockHeldError,
@@ -466,6 +467,128 @@ async function cmdValidate(argv: string[], globalJson: boolean): Promise<number>
   }
 
   return result.ok ? 0 : 1;
+}
+
+// ---------------------------------------------------------------------------
+// Command: spec (P18 — Spec Kit bridge)
+// ---------------------------------------------------------------------------
+
+async function cmdSpec(argv: string[], _locale: Locale, globalJson: boolean): Promise<number> {
+  const subcommand = argv[0];
+  const rest = argv.slice(1);
+
+  if (subcommand === "import") {
+    let values: Record<string, unknown>;
+    try {
+      ({ values } = strictParse(
+        "spec import",
+        rest,
+        {
+          from: { type: "string" },
+          "phase-id": { type: "string" },
+          write: { type: "boolean" },
+          force: { type: "boolean" },
+          json: { type: "boolean" },
+        },
+        { allowPositionals: false },
+      ));
+    } catch (err) {
+      if (!(err instanceof ConfigError)) throw err;
+      const json = globalJson || rest.includes("--json");
+      if (json) {
+        process.stdout.write(
+          `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: err.message } })}\n`,
+        );
+      } else {
+        process.stderr.write(`${err.message}\n`);
+      }
+      return 2;
+    }
+
+    const json = globalJson || values.json === true;
+    const fromPath = typeof values.from === "string" ? values.from : "";
+    const phaseId = typeof values["phase-id"] === "string" ? (values["phase-id"] as string) : "";
+    const write = values.write === true;
+    const force = values.force === true;
+
+    if (!fromPath) {
+      const msg = "spec import requires --from <path> to the source tasks.md";
+      if (json) {
+        process.stdout.write(
+          `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
+        );
+      } else {
+        process.stderr.write(`${msg}\n`);
+      }
+      return 2;
+    }
+    if (!phaseId) {
+      const msg = "spec import requires --phase-id <id> for the generated phase";
+      if (json) {
+        process.stdout.write(
+          `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
+        );
+      } else {
+        process.stderr.write(`${msg}\n`);
+      }
+      return 2;
+    }
+
+    const cwd = process.cwd();
+    try {
+      const result = await runSpecImport({ cwd, fromPath, phaseId, write, force });
+      if (json) {
+        process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
+      } else {
+        if (result.kind === "imported") {
+          process.stderr.write(
+            `Imported ${result.tasks_imported} task(s) from ${result.sections_imported} section(s) into ${result.output_path}.\n`,
+          );
+        } else {
+          process.stderr.write(
+            `Would import ${result.tasks_imported} task(s) from ${result.sections_imported} section(s). Re-run with --write to persist.\n`,
+          );
+          process.stdout.write(result.phase_yaml);
+        }
+        if (result.warnings.length > 0) {
+          for (const w of result.warnings) {
+            process.stderr.write(`  warning: ${w}\n`);
+          }
+        }
+      }
+      return 0;
+    } catch (err) {
+      if (err instanceof SpecImportError) {
+        if (json) {
+          process.stdout.write(
+            `${JSON.stringify({
+              ok: false,
+              error: { code: "CONFIG_ERROR", message: err.message },
+              data: {
+                detail: err.detail,
+                source_path: err.sourcePath ?? null,
+                phase_id: err.phaseId ?? null,
+              },
+            })}\n`,
+          );
+        } else {
+          process.stderr.write(`${err.message}\n`);
+        }
+        return 2;
+      }
+      throw err;
+    }
+  }
+
+  const msg = `spec: unknown subcommand "${subcommand ?? ""}". Use: import`;
+  if (globalJson) {
+    process.stdout.write(
+      `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
+    );
+  } else {
+    process.stderr.write(`${msg}\n`);
+  }
+  return 2;
 }
 
 // ---------------------------------------------------------------------------
@@ -3967,6 +4090,9 @@ async function main(): Promise<number> {
 
     case "validate":
       return cmdValidate(rest, json);
+
+    case "spec":
+      return cmdSpec(rest, locale, json);
 
     default: {
       if (json) {
