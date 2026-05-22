@@ -11,7 +11,44 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ---
 
-## [Unreleased]
+## [1.6.0] — 2026-05-22
+
+**Audit + non-interactive authoring release.** Two new feature
+phases ship together:
+
+- **P15 — Declared Writes Audit** (T1–T4, T6): `task finalize --json`
+  gains a read-only `write_audit` envelope that compares each task's
+  declared `writes` globs against the actual filesystem changes
+  reported by git. New plan-lint warnings flag over-broad declared
+  globs (`TASK_WRITES_OVER_BROAD`) and unused declarations
+  (`TASK_WRITES_AUDIT_DECLARED_UNUSED`). The protected-paths list is
+  now configurable via `design/rules/protected-paths.md`. The opt-in
+  `task finalize --audit-strict` flag promotes warnings to
+  exit-relevant (exit 1, `WRITES_AUDIT_STRICT_FAILED`) without
+  affecting default behaviour. **P15-T5 (phase reconcile audit) is
+  deferred to v1.7+** pending a "diff attribution across multiple
+  tasks" semantics RFC — the use case overlaps with running
+  `task finalize --audit-strict` per task, so the marginal value
+  isn't clear yet. P15 phase status stays `in_progress` in this
+  release to reflect that.
+- **P17 — Non-interactive Authoring** (T1–T5, feature-complete):
+  `plan brief` and `plan constitution` (previously TTY-only) each
+  gain three non-interactive input modes — `--from-file <yaml>`,
+  `--stdin`, and a flag-driven form (`--what` / `--who` /
+  `--differentiator` for brief; `--description` / `--principle` for
+  constitution). All three modes are pairwise mutually exclusive.
+  Output is byte-identical to the TTY wizard for equivalent input.
+  This closes the asymmetry where `task add` (v1.4) and
+  `phase import` (v0.4+) had non-interactive paths but the two
+  planning wizards did not — CI bootstrap is now end-to-end
+  scriptable.
+
+**Self-validation footnote.** The P15-T1 audit caught real declared-
+writes omissions in **10 consecutive** P15 / P17 implementation
+slices during this release cycle (some on its own dogfood, most on
+sister tasks). The P15-T4 `DECLARED_UNUSED` warning fired on real
+scope deviations twice (P17-T3, P15-T6). Both advisories paid for
+themselves during the release they shipped in.
 
 ### Added
 
@@ -181,15 +218,57 @@ identifiers. Starting with v1.0.0, stable releases use plain
 ### Changed
 
 - **`docs/cli-contract.md`** documents the new `write_audit` field, the
-  `--base-ref` flag, and the new warning code. The field-presence-by-kind
-  table for `task finalize` now lists `write_audit` as additive optional.
-- **`design/roadmap.yaml`** registers P15 (Declared Writes Audit, weight 25).
-- **`design/phases/P15-declared-writes-audit.yaml`** new phase YAML covering
-  T1 through T6 (T1 in_progress, T2–T6 planned).
+  `--base-ref` flag, the new warning codes, the `--audit-strict` gate,
+  and the `plan brief` / `plan constitution` non-interactive trifecta
+  per command. The field-presence-by-kind table for `task finalize`
+  now lists `write_audit` as additive optional.
+- **`design/roadmap.yaml`** registers P15 (Declared Writes Audit,
+  weight 25) and P17 (Non-interactive Authoring, weight 20).
+- **`design/phases/P15-declared-writes-audit.yaml`** new phase YAML
+  covering T1 through T6 (T1–T4 + T6 done, T5 deferred to v1.7+).
+- **`design/phases/P17-non-interactive-authoring.yaml`** new phase
+  YAML covering T1–T5 (all done; phase status: done).
+- **`docs/migration.md`** v1.5.x → v1.6.0 section documents the
+  additive surface and the migration story for both feature areas.
+- **`docs/dogfood.md`** gains a non-interactive `plan brief` /
+  `plan constitution` walkthrough and updates `BRIEF_MISSING` /
+  `CONSTITUTION_PLACEHOLDER` warning rows with v1.6+ resolution
+  paths.
+- **`docs/getting-started.md`** Path 2 (Manual) TTY-only callout is
+  rewritten as a fully-scripted v1.6+ CI bootstrap example.
 
-Human-mode `task finalize` (without `--json`) is byte-identical to v1.5.1:
-the audit is JSON-only, never spawns git in human mode, and never alters
-exit codes or stdout content.
+### Deferred to v1.7+
+
+- **P15-T5 — `phase reconcile --json` write_audit exposure.** The
+  "diff attribution across multiple tasks" problem (a single
+  working-tree diff cannot be sharded across tasks deterministically)
+  needs its own semantics RFC. The use case overlaps with running
+  `task finalize --audit-strict` per task — the marginal value of a
+  phase-level audit beyond per-task strictness is unclear. P15 phase
+  status stays `in_progress` until this ships or is explicitly
+  closed.
+
+### Compatibility
+
+- Default invocations of every existing command are byte-identical
+  to v1.5.1. Human-mode `task finalize` does not spawn git, does not
+  compute the audit, and produces the same stdout / stderr it did
+  in v1.5.1.
+- The TTY wizards for `plan brief` and `plan constitution` are
+  unchanged. Non-TTY environments without one of the new flags
+  continue to return `CONFIG_ERROR` exactly as in v1.5.1 (the
+  guidance message now lists the three v1.6+ alternatives, but
+  the contract is preserved).
+- `KNOWN_CODES.public` extension is additive: one new code
+  (`WRITES_AUDIT_STRICT_FAILED`). `KNOWN_CODES.plan` gains three
+  new advisory warning codes
+  (`TASK_WRITES_AUDIT_OUTSIDE_DECLARED`,
+  `TASK_WRITES_AUDIT_DECLARED_UNUSED`, `TASK_WRITES_OVER_BROAD`).
+  Every existing code is unchanged.
+- JSON envelope shapes are unchanged except for additive optional
+  fields (`task finalize` gains `data.write_audit`; failure
+  envelopes for new modes carry `data.detail` and either `data.path`
+  or `data.source`).
 
 ---
 

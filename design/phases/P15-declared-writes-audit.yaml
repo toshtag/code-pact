@@ -326,6 +326,17 @@ tasks:
       array highlighting files not covered by any task in the
       phase. Schema and exact field shape to be finalized when
       P15-T1–T4 results are in hand.
+
+      **Deferred to v1.7+ pending semantics RFC.** v1.6 ships
+      with this task as the only outstanding P15 work item. The
+      use case (phase-level audit during release prep) overlaps
+      heavily with running `task finalize --audit-strict` on each
+      finalize-able task individually (P15-T6), so the marginal
+      value over per-task strictness is unclear. A v1.7+ RFC
+      should evaluate whether to ship this at all, and if so,
+      which of the per-task / aggregate / both shapes is most
+      useful in practice. Until then, P15 phase status stays
+      `in_progress` and v1.6 callouts the deferral in CHANGELOG.
     depends_on:
       - P15-T1
     decision_refs:
