@@ -1104,6 +1104,73 @@ When a task declares any of the [P10 Task Readiness Schema fields](#phase-import
 
 When a task declares **none** of the P10 fields, the pack body is byte-identical to v1.0.2. The byte-identical contract is locked by `tests/integration/pack-byte-identical.test.ts` against a checked-in golden fixture (`tests/fixtures/golden/pack-v1.0.2-shaped.md`).
 
+## `task prepare` — single per-task entry point (v1.11+, P21)
+
+`code-pact task prepare <task-id> [--agent <name>] [--json] [--dry-run]` is a **progress-read-only** compound command that returns everything an agent needs to decide what to do next on a single task: current state, the recommendation envelope, context-pack metadata, a structured `next_action`, and a fully-formed `commands` dictionary for the per-task lifecycle.
+
+The command MUST NOT mutate `.code-pact/state/progress.yaml` on any code path. It MAY write the deterministic context pack at `<agent-profile>.context_dir/<task-id>.md` unless `--dry-run` is passed.
+
+### Flags
+
+| Flag | Effect |
+|---|---|
+| `--agent <name>` | Override the project's `default_agent`. Same validation as `task context` (`AGENT_NOT_FOUND` / `AGENT_NOT_ENABLED`). |
+| `--json` | Emit the full structured envelope on stdout. Without `--json`, a short human-readable summary is printed. |
+| `--dry-run` | Build the context pack in memory but do not write it; return `would_write_context_pack_path` instead of `context_pack_path`. |
+
+### JSON envelope
+
+```json
+{
+  "ok": true,
+  "data": {
+    "task_id": "P21-T4",
+    "phase_id": "P21",
+    "agent": "claude-code",
+    "current_state": "planned",
+    "recommendation": { /* full v2 RecommendResult, or null */ },
+    "context_pack_path": ".../<task-id>.md",
+    "context_pack_bytes": 18422,
+    "would_write_context_pack_path": ".../<task-id>.md",
+    "dry_run": false,
+    "next_action": { "type": "start_task", "message": "..." },
+    "commands": {
+      "context":  "code-pact task context  <task-id> --agent <agent>",
+      "start":    "code-pact task start    <task-id> --agent <agent>",
+      "verify":   "code-pact verify --phase <phase> --task <task-id>",
+      "complete": "code-pact task complete <task-id> --agent <agent>",
+      "finalize": "code-pact task finalize <task-id> --agent <agent>"
+    },
+    "blocked_by": [],
+    "already_done": true
+  }
+}
+```
+
+- `would_write_context_pack_path` is present only in `--dry-run` mode when a pack would have been written.
+- `already_done` is present (always `true`) only when `current_state === "done"`.
+
+### `next_action.type` enum (closed)
+
+| `type` | Reached when | `recommendation` | `context_pack_*` |
+|---|---|---|---|
+| `start_task` | `current_state === "planned"` and no unmet `depends_on` | populated | populated (or `would_write_*` in dry-run) |
+| `continue_implementation` | `current_state ∈ {"started", "resumed"}` | populated | populated |
+| `wait_for_dependencies` | `current_state === "blocked"` OR any `depends_on` is not `"done"` | `null` | `null`, bytes `0` |
+| `noop_already_done` | `current_state === "done"` | `null` | `null`, bytes `0` |
+| `investigate_failure` | `current_state === "failed"` | populated | populated |
+
+The `commands` dictionary is populated in every state — including the early-return states — so the agent can choose to invoke them directly after resolving the blocker.
+
+### Exit codes
+
+| Code | Condition |
+|---|---|
+| 0 | Envelope returned (including early-return states). |
+| 2 | `CONFIG_ERROR` (bad flag), `TASK_NOT_FOUND`, `AMBIGUOUS_TASK_ID`, `AGENT_NOT_FOUND`, `AGENT_NOT_ENABLED`. |
+
+No new error codes are introduced by `task prepare`; all failure modes reuse existing codes documented above.
+
 ## `doctor` — plan quality checks (v0.5.3)
 
 In addition to structural checks (orphan files, schema errors, duplicate IDs), `doctor` now

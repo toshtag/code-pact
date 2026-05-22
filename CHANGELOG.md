@@ -15,6 +15,47 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ### Added
 
+- **P21-T3 — `code-pact task prepare` compound entry point.**
+  New CLI verb `code-pact task prepare <task-id> [--agent
+  <name>] [--json] [--dry-run]` returns everything an agent
+  needs to decide what to do next on a single task: current
+  state, the full v2 recommendation envelope, context-pack
+  metadata (path + bytes, or `would_write_context_pack_path`
+  in dry-run mode), a structured `next_action` (closed enum:
+  `start_task` / `continue_implementation` /
+  `wait_for_dependencies` / `noop_already_done` /
+  `investigate_failure`), and a fully-formed `commands`
+  dictionary (`context` / `start` / `verify` / `complete` /
+  `finalize`) so the agent can invoke the next verb directly.
+
+  **Progress-read-only contract.** `task prepare` MUST NOT
+  mutate `.code-pact/state/progress.yaml` on any code path,
+  including failure paths. It MAY write the deterministic
+  context pack at the agent profile's `context_dir/<task-id>.md`
+  unless `--dry-run` is passed.
+
+  **Early-return states.** `done`, `blocked`, and any
+  unmet-`depends_on` state skip the context pack build
+  entirely; their envelope returns `recommendation: null`,
+  `context_pack_path: null`, `context_pack_bytes: 0`, and
+  populates `blocked_by` (for unmet deps) or `already_done:
+  true` (for done). The `commands` dictionary is still
+  populated so the agent can choose to invoke a verb directly
+  after resolving the blocker.
+
+  Reuses existing error codes only (`TASK_NOT_FOUND`,
+  `AMBIGUOUS_TASK_ID`, `AGENT_NOT_FOUND`,
+  `AGENT_NOT_ENABLED`, `CONFIG_ERROR`). The full envelope
+  shape is locked in `docs/cli-contract.md` under
+  `## task prepare`. Unit coverage in
+  `tests/unit/commands/task-prepare.test.ts` (15 tests)
+  exercises every `next_action.type`, the
+  progress-read-only invariant (diff progress.yaml
+  before/after), dry-run pack-skip behaviour, both blocked
+  paths (state-machine blocked vs unmet-dep blocked), agent
+  validation, task resolution errors, and the commands-dict
+  shape.
+
 - **P21-T2 — Pure recommendation resolver.** New
   `src/core/recommend/index.ts` exports
   `resolveRecommendation(opts)` as a pure function that
