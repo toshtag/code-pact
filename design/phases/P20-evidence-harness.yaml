@@ -217,7 +217,7 @@ tasks:
     write_surface: low
     verification_strength: medium
     expected_duration: short
-    status: planned
+    status: done
     description: |
       `docs/concepts/evidence-harness.md` documents the metric set,
       the CSV column shapes, and how to cite rows in future
