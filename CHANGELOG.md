@@ -15,6 +15,24 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ### Added
 
+- **P18-T2** — Spec Kit bridge: `tasks.md` parser core. New module
+  `src/core/spec-import/` ships `parseTasksMd(input: string):
+  ParseResult` — a pure function (no file I/O) that consumes raw
+  Markdown text and returns `{ sections: { title; tasks[] }[];
+  warnings: ParserWarning[]; skipped_lines: number }`. The
+  supported subset is Heading 3 sections + `- [ ]` checkbox list
+  items per the P18-T1 RFC. Constructs outside the subset
+  (other heading levels, plain bullets, numbered lists, code
+  fences, tables, frontmatter, HTML comments, checked tasks)
+  are silently dropped but counted in `skipped_lines` and
+  surfaced as typed `ParserWarning` records. Handles Windows
+  (`\r\n`), classic Mac (`\r`), and Unix (`\n`) line endings.
+  Unit tests cover empty input, only-headings, multiple
+  sections, checked/unchecked tasks, orphan checkboxes,
+  malformed checkboxes, frontmatter, code fences, tables,
+  HTML comments, Unicode/emoji in task text, and mixed line
+  endings.
+
 - **P18-T1** — Spec Kit bridge RFC. New phase `P18 — Spec Kit Bridge`
   registered in `design/roadmap.yaml` (weight 25). RFC at
   `design/decisions/spec-kit-bridge-rfc.md` (accepted) locks the
