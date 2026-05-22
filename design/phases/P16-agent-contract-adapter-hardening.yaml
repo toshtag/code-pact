@@ -129,7 +129,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
     description: |
       claude-code adapter's instruction template gains the
       `## Agent contract` section per the P16-T1 RFC. The
@@ -167,8 +167,6 @@ tasks:
       - src/core/adapters/claude.ts
       - src/i18n/en-US.ts
       - src/i18n/ja-JP.ts
-      - tests/fixtures/adapters/claude-code/expected-files.txt
-      - tests/integration/adapter-conformance.test.ts
       - CHANGELOG.md
     acceptance_refs:
       - design/decisions/agent-contract-rfc.md
