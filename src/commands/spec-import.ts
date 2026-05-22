@@ -6,6 +6,11 @@ import { stringify as stringifyYaml } from "yaml";
 import { atomicWriteText } from "../io/atomic-text.ts";
 import { assertSafeRelativePath } from "../core/path-safety.ts";
 import { parseTasksMd, type ParserWarning } from "../core/spec-import/tasks-md-parser.ts";
+import {
+  extractSpecMd,
+  type BriefCandidates,
+  type ConstitutionCandidates,
+} from "../core/spec-import/spec-md-extractor.ts";
 
 export type SpecImportDetail =
   | "unsafe_path"
@@ -13,7 +18,9 @@ export type SpecImportDetail =
   | "unreadable"
   | "phase_id_invalid"
   | "phase_yaml_exists"
-  | "no_sections_parsed";
+  | "no_sections_parsed"
+  | "mutex_violation"
+  | "missing_phase_id";
 
 export class SpecImportError extends Error {
   readonly detail: SpecImportDetail;
@@ -206,4 +213,61 @@ function summariseWarnings(warnings: ParserWarning[]): string[] {
     out.push(`${code}: ${count} line(s)`);
   }
   return out;
+}
+
+export interface SpecSuggestOptions {
+  cwd: string;
+  suggestFromPath: string;
+}
+
+export interface SpecSuggestResult {
+  source_path: string;
+  brief_candidates: BriefCandidates;
+  constitution_candidates: ConstitutionCandidates;
+  recognised_sections: string[];
+  skipped_sections: string[];
+}
+
+export async function runSpecSuggest(opts: SpecSuggestOptions): Promise<SpecSuggestResult> {
+  const { cwd, suggestFromPath } = opts;
+
+  try {
+    assertSafeRelativePath(suggestFromPath);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new SpecImportError(
+      "unsafe_path",
+      `spec import: --suggest-from path is unsafe: ${msg}`,
+      { sourcePath: suggestFromPath },
+    );
+  }
+
+  const absInput = join(cwd, suggestFromPath);
+  let raw: string;
+  try {
+    raw = await readFile(absInput, "utf8");
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") {
+      throw new SpecImportError(
+        "file_not_found",
+        `spec import: file not found: ${suggestFromPath}`,
+        { sourcePath: suggestFromPath },
+      );
+    }
+    throw new SpecImportError(
+      "unreadable",
+      `spec import: cannot read ${suggestFromPath}: ${err instanceof Error ? err.message : String(err)}`,
+      { sourcePath: suggestFromPath },
+    );
+  }
+
+  const extracted = extractSpecMd(raw);
+  return {
+    source_path: suggestFromPath,
+    brief_candidates: extracted.brief_candidates,
+    constitution_candidates: extracted.constitution_candidates,
+    recognised_sections: extracted.recognised_sections,
+    skipped_sections: extracted.skipped_sections,
+  };
 }

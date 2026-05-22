@@ -18,7 +18,11 @@ import {
   formatPhaseShow,
 } from "./commands/phase.ts";
 import { runPhaseImport } from "./commands/phase-import.ts";
-import { runSpecImport, SpecImportError } from "./commands/spec-import.ts";
+import {
+  runSpecImport,
+  runSpecSuggest,
+  SpecImportError,
+} from "./commands/spec-import.ts";
 import {
   acquireWriteLock,
   isLockHeldError,
@@ -485,6 +489,7 @@ async function cmdSpec(argv: string[], _locale: Locale, globalJson: boolean): Pr
         rest,
         {
           from: { type: "string" },
+          "suggest-from": { type: "string" },
           "phase-id": { type: "string" },
           write: { type: "boolean" },
           force: { type: "boolean" },
@@ -507,12 +512,67 @@ async function cmdSpec(argv: string[], _locale: Locale, globalJson: boolean): Pr
 
     const json = globalJson || values.json === true;
     const fromPath = typeof values.from === "string" ? values.from : "";
+    const suggestFromPath = typeof values["suggest-from"] === "string" ? (values["suggest-from"] as string) : "";
     const phaseId = typeof values["phase-id"] === "string" ? (values["phase-id"] as string) : "";
     const write = values.write === true;
     const force = values.force === true;
+    const cwd = process.cwd();
+
+    if (fromPath && suggestFromPath) {
+      const msg = "spec import: --from and --suggest-from are mutually exclusive";
+      if (json) {
+        process.stdout.write(
+          `${JSON.stringify({
+            ok: false,
+            error: { code: "CONFIG_ERROR", message: msg },
+            data: { detail: "mutex_violation", source_path: null, phase_id: null },
+          })}\n`,
+        );
+      } else {
+        process.stderr.write(`${msg}\n`);
+      }
+      return 2;
+    }
+
+    if (suggestFromPath) {
+      try {
+        const result = await runSpecSuggest({ cwd, suggestFromPath });
+        if (json) {
+          process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
+        } else {
+          const briefKeys = Object.keys(result.brief_candidates);
+          const constKeys = Object.keys(result.constitution_candidates);
+          process.stderr.write(
+            `Read ${suggestFromPath}: ${briefKeys.length} brief candidate(s), ${constKeys.length} constitution candidate(s), ${result.skipped_sections.length} skipped section(s).\n`,
+          );
+          process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+        }
+        return 0;
+      } catch (err) {
+        if (err instanceof SpecImportError) {
+          if (json) {
+            process.stdout.write(
+              `${JSON.stringify({
+                ok: false,
+                error: { code: "CONFIG_ERROR", message: err.message },
+                data: {
+                  detail: err.detail,
+                  source_path: err.sourcePath ?? null,
+                  phase_id: null,
+                },
+              })}\n`,
+            );
+          } else {
+            process.stderr.write(`${err.message}\n`);
+          }
+          return 2;
+        }
+        throw err;
+      }
+    }
 
     if (!fromPath) {
-      const msg = "spec import requires --from <path> to the source tasks.md";
+      const msg = "spec import requires --from <path> or --suggest-from <path>";
       if (json) {
         process.stdout.write(
           `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
@@ -526,7 +586,11 @@ async function cmdSpec(argv: string[], _locale: Locale, globalJson: boolean): Pr
       const msg = "spec import requires --phase-id <id> for the generated phase";
       if (json) {
         process.stdout.write(
-          `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
+          `${JSON.stringify({
+            ok: false,
+            error: { code: "CONFIG_ERROR", message: msg },
+            data: { detail: "missing_phase_id", source_path: fromPath, phase_id: null },
+          })}\n`,
         );
       } else {
         process.stderr.write(`${msg}\n`);
@@ -534,7 +598,6 @@ async function cmdSpec(argv: string[], _locale: Locale, globalJson: boolean): Pr
       return 2;
     }
 
-    const cwd = process.cwd();
     try {
       const result = await runSpecImport({ cwd, fromPath, phaseId, write, force });
       if (json) {
