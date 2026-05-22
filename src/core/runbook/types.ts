@@ -96,6 +96,19 @@ export type PhaseRunbookResult = {
 };
 
 /**
+ * v1.9 P19-T3 aggregated runbook. Surfaces one entry per
+ * phase in scope (`in_progress` + dep-driven inclusions).
+ * The shape intentionally re-uses PhaseRunbookResult so
+ * downstream consumers (e.g. CI dashboards) can treat each
+ * `phases[i]` exactly like a per-phase runbook envelope.
+ */
+export type AcrossPhasesRunbookResult = {
+  kind: "aggregated_runbook";
+  phases_considered: string[];
+  phases: PhaseRunbookResult[];
+};
+
+/**
  * Assertion helper for the command/manual_action invariant. Both builders
  * use this when constructing every step so the invariant is checked at
  * source. Tests assert this throws when both fields are null or both set.
