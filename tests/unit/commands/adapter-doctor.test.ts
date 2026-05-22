@@ -342,3 +342,123 @@ describe("adapter doctor — agent targeting", () => {
     expect(result.issues).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// v1.7 P16-T5: ADAPTER_CONTRACT_DRIFT
+// ---------------------------------------------------------------------------
+
+describe("adapter doctor — ADAPTER_CONTRACT_DRIFT (v1.7 P16-T5)", () => {
+  async function installFreshClaudeCode(): Promise<void> {
+    await runAdapterInstall({
+      cwd: dir,
+      agentName: "claude-code",
+      force: false,
+      locale: "en-US",
+      generatorVersionOverride: "0.9.0-alpha.0",
+    });
+  }
+
+  async function readClaudeMd(): Promise<string> {
+    return readFile(join(dir, "CLAUDE.md"), "utf8");
+  }
+
+  async function writeClaudeMd(content: string): Promise<void> {
+    await writeFile(join(dir, "CLAUDE.md"), content, "utf8");
+  }
+
+  it("pristine install → no ADAPTER_CONTRACT_DRIFT issue", async () => {
+    await installFreshClaudeCode();
+    const result = await runAdapterDoctor({
+      cwd: dir,
+      agentName: "claude-code",
+      locale: "en-US",
+    });
+    const drift = result.issues.find((i) => i.code === "ADAPTER_CONTRACT_DRIFT");
+    expect(drift).toBeUndefined();
+  });
+
+  it("section deleted → ADAPTER_CONTRACT_DRIFT with kind=section_missing", async () => {
+    await installFreshClaudeCode();
+    const original = await readClaudeMd();
+    // Strip the section by replacing it with nothing.
+    const without = original.replace(
+      /## Agent contract[\s\S]*?(?=\n## )/,
+      "",
+    );
+    expect(without).not.toContain("## Agent contract");
+    await writeClaudeMd(without);
+
+    const result = await runAdapterDoctor({
+      cwd: dir,
+      agentName: "claude-code",
+      locale: "en-US",
+    });
+    const drift = result.issues.find((i) => i.code === "ADAPTER_CONTRACT_DRIFT");
+    expect(drift).toBeDefined();
+    expect(drift!.severity).toBe("warning");
+    expect(drift!.details).toEqual({ kind: "section_missing" });
+  });
+
+  it("one axis sub-heading deleted → ADAPTER_CONTRACT_DRIFT with kind=axes_incomplete + missing_axes", async () => {
+    await installFreshClaudeCode();
+    const original = await readClaudeMd();
+    // Remove the "### What to verify first" sub-heading line only.
+    const without = original.replace(/### What to verify first\n/, "");
+    expect(without).toContain("## Agent contract"); // section heading kept
+    expect(without).not.toContain("### What to verify first");
+    await writeClaudeMd(without);
+
+    const result = await runAdapterDoctor({
+      cwd: dir,
+      agentName: "claude-code",
+      locale: "en-US",
+    });
+    const drift = result.issues.find((i) => i.code === "ADAPTER_CONTRACT_DRIFT");
+    expect(drift).toBeDefined();
+    expect(drift!.details).toEqual({
+      kind: "axes_incomplete",
+      missing_axes: ["### What to verify first"],
+    });
+  });
+
+  it("severity is warning — does NOT change the doctor exit code (soft signal)", async () => {
+    await installFreshClaudeCode();
+    const original = await readClaudeMd();
+    const without = original.replace(
+      /## Agent contract[\s\S]*?(?=\n## )/,
+      "",
+    );
+    await writeClaudeMd(without);
+
+    const result = await runAdapterDoctor({
+      cwd: dir,
+      agentName: "claude-code",
+      locale: "en-US",
+    });
+    // ok=true even though ADAPTER_CONTRACT_DRIFT fired — warnings
+    // never gate the exit code (ADAPTER_FILE_DRIFT also fires here
+    // but it's also a warning).
+    expect(result.ok).toBe(true);
+  });
+
+  it("fires INDEPENDENTLY of ADAPTER_FILE_DRIFT — both codes can appear in one run", async () => {
+    await installFreshClaudeCode();
+    const original = await readClaudeMd();
+    const without = original.replace(
+      /## Agent contract[\s\S]*?(?=\n## )/,
+      "",
+    );
+    await writeClaudeMd(without);
+
+    const result = await runAdapterDoctor({
+      cwd: dir,
+      agentName: "claude-code",
+      locale: "en-US",
+    });
+    const codes = result.issues.map((i) => i.code);
+    expect(codes).toContain("ADAPTER_CONTRACT_DRIFT");
+    // Hand-edit also trips the file-level drift signal — both codes
+    // are independent diagnoses per design/decisions/agent-contract-rfc.md.
+    expect(codes).toContain("ADAPTER_FILE_DRIFT");
+  });
+});

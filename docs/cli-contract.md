@@ -177,6 +177,7 @@ Emitted by `adapter doctor` and (manifest-aware) global `doctor`. See the `adapt
 | `ADAPTER_FILE_DRIFT` | warning | A managed file was locally modified AND the generator output also moved on |
 | `ADAPTER_DESIRED_STALE` | warning | A managed file is unchanged locally but the generator now produces different content |
 | `ADAPTER_UNMANAGED_FILE` | warning | A file under `ownedPathGlobs` exists on disk but is not in the manifest |
+| `ADAPTER_CONTRACT_DRIFT` (v1.7+, P16-T5) | warning | An instruction file's body lacks the v1.7+ agent-contract section or one of its three axis sub-headings. Soft signal — does NOT change the doctor exit code. Independent of `ADAPTER_FILE_DRIFT` (file-level hash drift); both can fire in the same run. `details.kind` is `"section_missing"` (whole `## Agent contract` heading absent) or `"axes_incomplete"` (heading present but one or more of `### When to invoke code-pact`, `### What to verify first`, `### How to handle failures` is missing). `details.missing_axes: string[]` enumerates which axes are missing when `kind === "axes_incomplete"`. Resolution: `adapter upgrade <agent> --write` (use `--accept-modified` to preserve user edits to the file body). |
 
 ### Stability rules for codes (v1.0)
 
