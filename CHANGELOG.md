@@ -36,6 +36,27 @@ identifiers. Starting with v1.0.0, stable releases use plain
 - **P16 phase registered** (v1.7+). `design/roadmap.yaml` lists
   P16 (Agent Contract Adapter Hardening, weight 25). Phase
   status stays `in_progress` until P16-T5 lands.
+- **claude-code adapter instruction template gains
+  `## Agent contract` section** (v1.7+, P16-T2). Per the
+  P16-T1 RFC, the canonical claude-code instruction file
+  (`CLAUDE.md`) now carries a load-bearing agent-contract
+  section between the per-task workflow and the model
+  selection. The section names three axes — `When to invoke
+  code-pact`, `What to verify first`, `How to handle
+  failures` — and references the v1.6+ surfaces inline
+  (`--audit-strict`, `--from-file`, `--stdin`, flag-driven
+  `plan brief` & `plan constitution`, configurable protected
+  paths, `write_audit`, `--base-ref`). Heading strings are
+  English-locked across all locales (en-US, ja-JP) so the
+  P16-T4 conformance regex can anchor on them; body text is
+  localised normally. Adapter manifest schema is unchanged;
+  `CLAUDE.md` path and role are unchanged — only the body
+  content grows. Existing projects see this as
+  `ADAPTER_FILE_DRIFT` on `adapter upgrade --check` until
+  they run `adapter upgrade --write` (`--accept-modified`
+  preserves any user edits). codex / generic adapters
+  follow in P16-T3; cursor / gemini-cli stay
+  experimental-and-untouched.
 
 ---
 
