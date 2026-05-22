@@ -36,6 +36,25 @@ identifiers. Starting with v1.0.0, stable releases use plain
 - **P16 phase registered** (v1.7+). `design/roadmap.yaml` lists
   P16 (Agent Contract Adapter Hardening, weight 25). Phase
   status stays `in_progress` until P16-T5 lands.
+- **Adapter conformance test extended for agent-contract section**
+  (v1.7+, P16-T4). `tests/integration/adapter-conformance.test.ts`
+  gains four new assertions per stable adapter (claude-code,
+  codex, generic): (a) the verbatim `## Agent contract` heading
+  is present, (b) the three axis sub-headings
+  (`### When to invoke code-pact`, `### What to verify first`,
+  `### How to handle failures`) are present verbatim, (c) the
+  agent-contract body (sliced between the section heading and
+  the next H2) references every v1.6 audit surface
+  (`--audit-strict`, `--from-file`, `--stdin`, `write_audit`),
+  and (d) the section appears AFTER the per-task workflow header
+  (placement check). The body-slice anchor ensures a surface
+  mention elsewhere in the file cannot satisfy assertion (c) —
+  the surfaces must live INSIDE the contract section.
+  Heading strings are English-locked per the RFC; the regex
+  anchors on the literal text across all locales. cursor /
+  gemini-cli stay excluded from conformance as before. Test
+  count: 286 (was 274 — +12 from the 4 new assertions × 3
+  stable adapters).
 - **codex + generic adapter instruction templates gain
   `## Agent contract` section** (v1.7+, P16-T3). Same shape and
   content as P16-T2's claude-code update: heading strings are
