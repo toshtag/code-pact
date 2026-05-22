@@ -447,6 +447,144 @@ Projects running `plan lint --strict` / `plan analyze --strict` / `validate --st
 
 In semver terms, v1.4.0 is a minor release.
 
+## v1.10.x → v1.11.0
+
+**Agent Contract v2.** v1.11.0 introduces three new
+public CLI surfaces and refreshes the stable adapter
+instruction templates. Upgrade is opt-in for new features;
+the existing `task context` / `recommend` envelopes are
+byte-identical to v1.10.
+
+### Quick path
+
+```sh
+npm install -g code-pact@1.11.0
+code-pact --version    # 1.11.0
+```
+
+### Required: refresh installed adapters
+
+The instruction templates for `claude-code`, `codex`, and
+`generic` now embed the v1.11+ lifecycle and diagnostic
+surface mentions and the failure-guidance keywords that
+`code-pact adapter conformance` requires. Existing installs
+will surface `ADAPTER_FILE_DRIFT` in `code-pact adapter
+doctor` until refreshed:
+
+```sh
+# See the drift
+code-pact adapter upgrade <agent> --check
+# Apply the v1.11 template; --accept-modified preserves user edits
+code-pact adapter upgrade <agent> --write --accept-modified
+```
+
+After upgrading, `code-pact adapter conformance <agent>`
+returns `compliant: true` (exit 0).
+
+### New: `code-pact task prepare <task-id>`
+
+Single progress-read-only per-task entry point. Returns
+current state, recommendation, context pack metadata, a
+structured `next_action`, and a `commands` dictionary with
+every per-task verb pre-formatted. Replaces manual
+`recommend → task context → state check` stitching:
+
+```sh
+code-pact task prepare <task-id> --agent claude-code --json
+```
+
+Flags: `--agent <name>`, `--json`, `--dry-run`. The
+`--dry-run` form builds the context pack in memory but skips
+the write; the envelope returns
+`would_write_context_pack_path` instead of
+`context_pack_path`. `task prepare` MUST NOT mutate
+`.code-pact/state/progress.yaml` on any code path.
+
+Closed enum for `next_action.type`: `start_task` /
+`continue_implementation` / `wait_for_dependencies` /
+`noop_already_done` / `investigate_failure`.
+
+### New: `code-pact task context --explain`
+
+Per-section byte breakdown of the rendered context pack:
+
+```sh
+code-pact task context <task-id> --agent claude-code --explain --json
+```
+
+The envelope gains `total_bytes`, `context_pack_bytes`,
+`sections[]`, and `excluded[]`. Each section carries a
+closed-enum `reason_code` (`always_included` /
+`declared_by_task` / `referenced_decision` / `glob_match` /
+`write_surface_high` / `context_size_large` /
+`ambiguity_high` / `format_overhead`); each excluded entry
+carries an `excluded_reason_code` from a separate closed
+enum (`context_size_small_and_ambiguity_low` /
+`not_declared_by_task` / `glob_no_match` /
+`budget_reserved_for_later`).
+
+Acceptance invariant: `sum(sections[].bytes) ===
+total_bytes === context_pack_bytes`. The pack `content` is
+byte-identical to v1.10 — the flag only attaches metadata.
+
+`budget_reserved_for_later` is reserved for P24 (budget
+enforcement). v1.11 NEVER emits it; a unit test asserts the
+absence.
+
+### New: `code-pact adapter conformance <agent>`
+
+Focused read-only check that the installed adapter
+satisfies the v1.11+ agent contract:
+
+```sh
+code-pact adapter conformance <agent> --json
+echo $?    # 0 if compliant, 1 if not
+```
+
+Conformance is intentionally narrower than `adapter doctor`
+— it inspects only the contract shape and per-file integrity.
+`ADAPTER_GENERATOR_STALE` / `ADAPTER_PROFILE_DRIFT` /
+`ADAPTER_UNMANAGED_FILE` remain doctor-only diagnostics.
+
+Check ids: `manifest_present`, `instruction_file_present`,
+`contract_section_present`, `axis_when_to_invoke`,
+`axis_what_to_verify`, `axis_how_to_handle`,
+`required_cli_surface_mentions`,
+`required_failure_guidance`, `file_checksum_match` (one
+per manifest file). The required-surface and
+required-failure-guidance lists live in
+`src/core/adapters/conformance-spec.ts` and are shared with
+`adapter doctor`'s contract drift check — the two callers
+cannot disagree.
+
+### No new error codes
+
+Every P21 failure mode reuses an existing public code
+(`TASK_NOT_FOUND`, `AMBIGUOUS_TASK_ID`, `PHASE_NOT_FOUND`,
+`AGENT_NOT_FOUND`, `AGENT_NOT_ENABLED`, `CONFIG_ERROR`, the
+`ADAPTER_*` family).
+
+### No adapter manifest schema bump
+
+`adapter_schema_version` stays at 1. The manifest layout is
+unchanged; only the instruction body text evolved, which is
+why a re-install is enough to refresh.
+
+### What's NOT in v1.11
+
+- **Budget enforcement.** `--budget-bytes` and related
+  truncation policy are deferred to P24.
+- **CLI module split.** `src/cli.ts` continues to dispatch
+  every command from one file. Splitting is deferred.
+- **Automatic conformance repair.** `adapter conformance` is
+  read-only — re-run `adapter install` / `adapter upgrade`
+  to remediate.
+- **Phase-level status flips in `phase reconcile`.** Task
+  status flips continue to be reconciled; the phase-level
+  `status:` field is still flipped by hand in release prep.
+
+In semver terms, v1.11.0 is a minor release — additive only.
+
 ## v1.10.0 → v1.10.1
 
 Doc-only patch. No code change to the user-facing product
