@@ -447,6 +447,79 @@ Projects running `plan lint --strict` / `plan analyze --strict` / `validate --st
 
 In semver terms, v1.4.0 is a minor release.
 
+## v1.8.x → v1.9.0
+
+### Quick path
+
+```sh
+# 1. Upgrade the CLI.
+npm install -g code-pact@1.9.0
+
+# 2. No project-side action is required. v1.9 is purely
+#    additive — no schema changes, no breaking flag changes,
+#    no error code renames, no existing-command behaviour
+#    changes.
+code-pact validate --json
+
+# 3. (Optional) once any task uses cross-phase depends_on,
+#    re-run strict lint to confirm no cycles slipped in.
+code-pact plan lint --include-quality --strict --json
+```
+
+### What's new
+
+- **`code-pact phase runbook --across-phases [--json]`** —
+  aggregated runbook envelope that emits one per-phase
+  `PhaseRunbookResult` for every `in_progress` phase plus
+  any phase pulled in via one level of transitive dep-driven
+  inclusion (`depends_on` from an in_progress task to a task
+  declared in another phase, with the dep still unsatisfied).
+- **Cross-phase `depends_on`** is now resolved. A task may
+  declare `depends_on: ["P15-T5"]` from inside `P19-T1`; the
+  resolver looks same-phase first, cross-phase fallback. An
+  id absent from the entire roadmap still surfaces
+  `TASK_DEPENDS_ON_UNRESOLVED`.
+- **`TASK_DEPENDS_ON_CYCLE`** new plan-lint code (severity
+  error) catches multi-node cycles (length ≥ 2). Self-cycles
+  keep their narrower `TASK_DEPENDS_ON_SELF_REFERENCE`
+  diagnostic.
+- New `phase_id` field on `task runbook`'s
+  `depends_on_check[i]` JSON entries — populated only for
+  cross-phase resolutions; same-phase deps omit it.
+- New docs section: [`docs/cli-contract.md → phase runbook
+  → --across-phases`](cli-contract.md#-across-phases-v19-p19);
+  new dogfood subsection: ["Tracking release prep with
+  phase runbook --across-phases"](dogfood.md).
+
+### Why this is a minor (1.9.0, not 1.8.1)
+
+The release adds a new top-level Stable v1.0 flag
+(`--across-phases`) and a new plan-lint code
+(`TASK_DEPENDS_ON_CYCLE`). Patch releases are reserved for
+bug fixes and doc-only changes; new flags and codes move the
+minor.
+
+### What stayed the same
+
+- The `depends_on` schema type — still `string[]`.
+- `task finalize` eligibility semantics — the gate is still
+  "every dep's derived state is done"; the resolver just
+  finds cross-phase deps too.
+- `KNOWN_CODES.public` — unchanged. The new code goes under
+  `KNOWN_CODES.plan` per the v1.0 additive-growth contract.
+- Every existing diagnostic name, severity, and message
+  shape (one message string changed from "not in the same
+  phase" to "not in any phase" — no existing test asserts it).
+- Default `phase runbook <id>` invocation — unchanged. The
+  new `--across-phases` flag is purely additive.
+- `progress.yaml` schema and contract — unchanged.
+- `task context` pack output — byte-identical with v1.8.0
+  (the cycle detection lives in `plan lint`, not in pack).
+- Existing adapter manifests — unchanged. No re-install /
+  upgrade required for the v1.9 release.
+
+In semver terms, v1.9.0 is a minor release.
+
 ## v1.7.x → v1.8.0
 
 ### Quick path
