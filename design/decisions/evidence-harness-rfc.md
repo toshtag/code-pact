@@ -1,6 +1,6 @@
 # RFC: Evidence harness — internal-only dogfood measurement
 
-**Status:** proposed (P20, 2026-05)
+**Status:** accepted (P20, 2026-05)
 **Scope:** add an internal-only measurement harness at `scripts/harness/` that captures deterministic, deterministic-input metrics from the dogfood corpus (`design/phases/*.yaml` + `.code-pact/state/progress.yaml`) and from a small set of external sample repos. Output is CSV in a stable column shape suitable for citation inside `design/decisions/*.md`. **Not a product feature** — never registered in `package.json` bin, never invoked by users, never surfaces in JSON envelopes or CLI help. The harness is a maintainer tool for moving design judgement from "感覚" to "measurement."
 **Owners:** maintainer
 **Related:**
