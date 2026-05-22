@@ -100,6 +100,7 @@ CI.
 | `TASK_FINALIZE_WRITE_REFUSED` | `task finalize --write` | Safety check refused the phase YAML write (unsafe path, outside `design/phases/`, symlink escape, unparseable, etc.) |
 | `PHASE_RECONCILE_WRITE_REFUSED` | `phase reconcile --write` | Every eligible task write in the phase was refused for safety reasons. Partial successes return exit 0; this fires only when **all** writes refused |
 | `LOCK_HELD` (v1.5+ / P14) | `init --sample-phase`, `init` wizard, `phase add`, `phase new`, `phase import`, `task add`, `task finalize --write`, `phase reconcile --write` | Another code-pact mutation is in progress on the same project. The envelope's `data.lock_holder` carries `{pid, hostname, cmd, created_at}` for diagnostic display; `data.lock_path` is the lock file path. Transient + retryable — wait for the holder to release, or manually delete the lock file if you are certain no process holds it |
+| `WRITES_AUDIT_STRICT_FAILED` (v1.6+ / P15-T6) | `task finalize --audit-strict` | The audit emitted at least one `TASK_WRITES_AUDIT_*` warning and `--audit-strict` was supplied. Exit code is **1** (not 2 — the invocation was well-formed; only the strict gate refused). The envelope carries the full `write_audit` plus `applied: false` to make the no-mutation guarantee machine-readable |
 | `INTERNAL_ERROR` | any command | Reserved for unhandled exceptions |
 
 ### Plan diagnostic codes
@@ -1134,7 +1135,7 @@ The `agent` field on `ProgressEvent` is optional for backward compatibility with
 
 ## `task finalize` — flip task design status to done (v1.2+, P11)
 
-`code-pact task finalize <task-id> [--write] [--base-ref <ref>] [--json]` flips the `status` field of a single task inside `design/phases/<phase>.yaml` from `planned` / `in_progress` to `done`. Stability: **Stable (v1.2+)**. `--base-ref` is **Stable (v1.6+)** under P15-T1.
+`code-pact task finalize <task-id> [--write] [--base-ref <ref>] [--audit-strict] [--json]` flips the `status` field of a single task inside `design/phases/<phase>.yaml` from `planned` / `in_progress` to `done`. Stability: **Stable (v1.2+)**. `--base-ref` and `--audit-strict` are **Stable (v1.6+)** under P15-T1 and P15-T6 respectively.
 
 Eligibility: the task's derived state from `.code-pact/state/progress.yaml` (via `deriveTaskState`) **must equal `done`**. Any other current state (no events, `started`, `blocked`, `resumed`, `failed`) raises `TASK_FINALIZE_NOT_ELIGIBLE` (`ok: false`, exit 2) in **both** dry-run and `--write` modes. Dry-run means "won't write", not "won't validate" — the dry-run output of a finalize-able task is a faithful preview of what `--write` would do.
 
@@ -1214,7 +1215,35 @@ Shape (field-presence-fixed — every key is always present):
 | `declared_unused` | string[] | Declared globs that matched no file in `files_touched`. Promotes to `TASK_WRITES_AUDIT_DECLARED_UNUSED` warning (v1.6+, P15-T4) when non-empty |
 | `warnings` | string[] | Advisory warning codes (see Plan diagnostics table) |
 
-The audit **never** changes the exit code in P15-T1. The `--audit-strict` flag (P15-T6) opts into exit-relevant enforcement.
+The audit defaults to advisory in v1.6 — it never changes the exit code unless `--audit-strict` is supplied (see below).
+
+### `--audit-strict` flag (v1.6+, P15-T6)
+
+Opt-in promotion of `TASK_WRITES_AUDIT_*` warnings from advisory to exit-relevant. When `--audit-strict` is supplied and the audit emits at least one warning, `task finalize` returns `WRITES_AUDIT_STRICT_FAILED` (exit **1**) instead of the success envelope, and the design YAML is **not** mutated even when `--write` is also set. Default invocations (no `--audit-strict`) are unchanged — warnings stay advisory and exit code stays 0.
+
+`--audit-strict` **requires `--json`** for the same reason `--base-ref` does: the audit it gates is JSON-only. Passing `--audit-strict` without `--json` returns `CONFIG_ERROR` (exit 2).
+
+Distinct from `plan lint --strict`: `--strict` is plan-lint-scoped (promotes plan diagnostics during static analysis); `--audit-strict` is task-finalize-scoped (promotes write_audit warnings at finalize time). Keeping them distinct preserves existing CI consumers of either flag.
+
+Strict-failure envelope:
+
+```json
+{
+  "ok": false,
+  "error": {
+    "code": "WRITES_AUDIT_STRICT_FAILED",
+    "message": "task finalize \"P9-T5\": --audit-strict and audit emitted warnings: TASK_WRITES_AUDIT_OUTSIDE_DECLARED. No design YAML mutation applied."
+  },
+  "data": {
+    "task_id": "P9-T5",
+    "phase_id": "P9",
+    "applied": false,
+    "write_audit": { ... }
+  }
+}
+```
+
+`applied: false` is a fixed invariant on the strict-failure path: the gate fires **before** `applyPlannedWrite`, so even `--write` invocations leave the phase YAML byte-identical when the audit refuses.
 
 ### Errors
 
@@ -1224,7 +1253,8 @@ The audit **never** changes the exit code in P15-T1. The `--audit-strict` flag (
 | `AMBIGUOUS_TASK_ID` | 2 | Task id appears in more than one phase |
 | `TASK_FINALIZE_NOT_ELIGIBLE` | 2 | Derived state from `progress.yaml` is not `done`. Raised in **both** dry-run and `--write`. `data.current` carries the actual derived state |
 | `TASK_FINALIZE_WRITE_REFUSED` | 2 | Safety check failed. `data.reason` carries one of `unsafe_path` / `outside_design_phases` / `not_yaml` / `symlink_escape` / `unreadable` / `unparseable_phase` / `task_not_found`. `data.file` carries the offending path |
-| `CONFIG_ERROR` | 2 | Missing positional task id, unknown flag, or `--base-ref` supplied without `--json` (v1.6+, P15-T1) |
+| `WRITES_AUDIT_STRICT_FAILED` (v1.6+, P15-T6) | **1** | `--audit-strict` was supplied and the audit emitted at least one `TASK_WRITES_AUDIT_*` warning. Exit code is **1** (not 2): the invocation was well-formed; only the strict gate refused. `data.applied: false` is fixed |
+| `CONFIG_ERROR` | 2 | Missing positional task id, unknown flag, `--base-ref` supplied without `--json` (v1.6+, P15-T1), or `--audit-strict` supplied without `--json` (v1.6+, P15-T6) |
 
 ### Usage example
 

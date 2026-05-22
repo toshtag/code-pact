@@ -50,7 +50,49 @@ export type TaskFinalizeOptions = {
    * `task finalize` remains identical to v1.5.1. v1.6 P15-T1.
    */
   includeWriteAudit?: boolean;
+  /**
+   * When true, presence of any `TASK_WRITES_AUDIT_*` warning in the
+   * audit result aborts the finalize: no design YAML mutation, the
+   * caller sees `TaskFinalizeAuditStrictError`. The CLI surfaces the
+   * error as `WRITES_AUDIT_STRICT_FAILED` (exit 1). Requires
+   * `includeWriteAudit: true`; supplying `auditStrict: true` with the
+   * audit disabled is a programmer error and is rejected. v1.6 P15-T6.
+   */
+  auditStrict?: boolean;
 };
+
+/**
+ * Thrown by `runTaskFinalize` when `auditStrict: true` and the audit
+ * emitted at least one warning. The exception carries the full audit
+ * envelope so the CLI can return the same `write_audit` shape callers
+ * already expect, just under an error envelope instead of a success
+ * envelope. v1.6 P15-T6.
+ */
+export class TaskFinalizeAuditStrictError extends Error {
+  readonly code = "WRITES_AUDIT_STRICT_FAILED";
+  readonly task_id: string;
+  readonly phase_id: string;
+  readonly write_audit: WriteAuditResult;
+  readonly applied: boolean;
+
+  constructor(
+    task_id: string,
+    phase_id: string,
+    write_audit: WriteAuditResult,
+    message: string,
+  ) {
+    super(message);
+    this.name = "TaskFinalizeAuditStrictError";
+    this.task_id = task_id;
+    this.phase_id = phase_id;
+    this.write_audit = write_audit;
+    // Strict gate fires BEFORE `applyPlannedWrite`, so no design YAML
+    // mutation ever happens on the strict path. Lock this fact into the
+    // error so future maintainers (and downstream tooling) can rely on
+    // it without re-deriving from the flow.
+    this.applied = false;
+  }
+}
 
 export type AcceptanceRefCheck = {
   path: string;
@@ -220,6 +262,30 @@ export async function runTaskFinalize(
       declaredWrites: baseContext.declared_writes,
       baseRef: opts.baseRef,
     });
+  } else if (opts.auditStrict === true) {
+    // Programmer-error guard: auditStrict without includeWriteAudit
+    // would silently degrade to "no strict gate ever fires". Refuse
+    // loudly so the CLI never lands in that state.
+    throw new Error(
+      "runTaskFinalize: auditStrict=true requires includeWriteAudit=true",
+    );
+  }
+
+  // v1.6 P15-T6: --audit-strict gate. Runs AFTER the audit but BEFORE
+  // any design YAML mutation (`applyPlannedWrite`), so the strict
+  // failure path never leaves a half-applied flip behind.
+  if (
+    opts.auditStrict === true &&
+    baseContext.write_audit !== undefined &&
+    baseContext.write_audit.warnings.length > 0
+  ) {
+    const warnList = baseContext.write_audit.warnings.join(", ");
+    throw new TaskFinalizeAuditStrictError(
+      taskId,
+      phaseId,
+      baseContext.write_audit,
+      `task finalize "${taskId}": --audit-strict and audit emitted warnings: ${warnList}. No design YAML mutation applied.`,
+    );
   }
 
   // 6. Idempotent no-op: already at target.

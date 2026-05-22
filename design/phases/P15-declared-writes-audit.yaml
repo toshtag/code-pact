@@ -347,7 +347,7 @@ tasks:
     write_surface: low
     verification_strength: strong
     expected_duration: short
-    status: planned
+    status: done
     description: |
       Introduce `--audit-strict` flag on `task finalize` and
       `phase reconcile`. When set, presence of any
@@ -364,13 +364,16 @@ tasks:
       - design/phases/P15-declared-writes-audit.yaml
     reads:
       - src/commands/task-finalize.ts
-      - src/commands/phase-reconcile.ts
       - src/cli.ts
+      - tests/unit/commands/task-finalize.test.ts
+      - tests/unit/error-code-surface.test.ts
     writes:
       - src/commands/task-finalize.ts
-      - src/commands/phase-reconcile.ts
       - src/cli.ts
+      - tests/unit/commands/task-finalize.test.ts
+      - tests/unit/error-code-surface.test.ts
       - tests/integration/task-finalize-audit-strict.test.ts
       - docs/cli-contract.md
+      - CHANGELOG.md
     acceptance_refs:
       - design/phases/P15-declared-writes-audit.yaml
