@@ -447,6 +447,74 @@ Projects running `plan lint --strict` / `plan analyze --strict` / `validate --st
 
 In semver terms, v1.4.0 is a minor release.
 
+## v1.7.x → v1.8.0
+
+### Quick path
+
+```sh
+# 1. Upgrade the CLI.
+npm install -g code-pact@1.8.0
+
+# 2. No project-side action is required. The v1.8 release is
+#    purely additive — no schema changes, no breaking flag
+#    changes, no error code renames, no existing-command
+#    behaviour changes.
+code-pact validate --json
+```
+
+### What's new
+
+- **`code-pact spec import`** — the new top-level **Spec Kit
+  bridge** command. Read-only, one-way importer for external
+  spec-driven planning artifacts. Two modes:
+  - `spec import --from <tasks.md> --phase-id <id> [--write]
+    [--force] [--json]` parses a Heading 3 + `- [ ]` checkbox
+    subset of Markdown into a draft phase YAML (printed to
+    stdout on dry-run, persisted to `design/phases/<id>-
+    imported.yaml` with `--write`).
+  - `spec import --suggest-from <spec.md|plan.md> --json`
+    extracts brief / constitution candidates without writing
+    any file; the user pipes them into `plan brief --from-file`
+    / `plan constitution --from-file` (v1.6 P17 non-interactive
+    paths) if they accept them.
+- **The importer does NOT add the generated phase to
+  `design/roadmap.yaml`.** That stays an explicit follow-up
+  governed by P14 (the chokepoint contract is preserved).
+- **No new public error codes.** Failures all reuse
+  `CONFIG_ERROR` with a structured `data.detail` enum
+  (`unsafe_path` / `file_not_found` / `unreadable` /
+  `phase_id_invalid` / `phase_yaml_exists` / `no_sections_parsed`
+  / `mutex_violation` / `missing_phase_id`).
+- **No schema changes.** Generated phase YAML is valid
+  existing phase YAML. `plan lint`, `validate`, and every
+  downstream consumer see imported phases as just another
+  phase file.
+- New docs: [`docs/spec-kit-bridge.md`](spec-kit-bridge.md)
+  for the full walkthrough; the `## spec import (v1.8+)`
+  section in [`docs/cli-contract.md`](cli-contract.md) for the
+  envelope reference.
+
+### Why this is a minor (1.8.0, not 1.7.1)
+
+The release adds a new top-level Stable v1.0 command. Patch
+releases (`1.x.y`) are reserved for bug fixes and doc-only
+changes; new commands move the minor.
+
+### What stayed the same
+
+- `phase import`, `plan brief`, `plan constitution`, every
+  other v1.0+ Stable command — **unchanged**. Same flags,
+  same JSON envelopes, same exit codes, same error codes.
+- `KNOWN_CODES.public` is unchanged.
+- `progress.yaml` schema and contract — **unchanged**.
+- `task context` pack output — **byte-identical** with v1.7.0
+  (the spec-import module is tree-shaken until you actually
+  invoke `spec import`).
+- Existing adapter manifests — **unchanged**. No re-install /
+  upgrade required for the v1.8 release.
+
+In semver terms, v1.8.0 is a minor release.
+
 ## v1.6.x → v1.7.0
 
 ### Quick path

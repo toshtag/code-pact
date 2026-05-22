@@ -13,6 +13,52 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+## [1.8.0] — 2026-05-22
+
+**Spec Kit bridge release.** P18 (Spec Kit Bridge) ships
+feature-complete (T1–T5, all done). v1.8 adds a new top-level
+`code-pact spec import` command — a read-only, one-way bridge
+that ingests external spec-driven planning artifacts (initially
+the `tasks.md` file format used by Spec Kit and similar tools)
+into code-pact's phase YAML. **code-pact does not re-implement
+Spec Kit and does not sync back** — the bridge exists so teams
+already invested in Spec Kit can adopt code-pact without
+throwing their planning work away.
+
+Two complementary modes share the same command:
+
+- `spec import --from <tasks.md> --phase-id <id> [--write]
+  [--force] [--json]` parses a Heading 3 + `- [ ]` checkbox
+  subset of Markdown into a draft `design/phases/<id>-
+  imported.yaml`. Dry-run by default; `--write` persists.
+  Generated tasks carry minimal P10 defaults (`type=feature`,
+  all judgement axes = `medium`, `status=planned`); the user
+  fills in `reads` / `writes` / `acceptance_refs` after the
+  import. **The importer does NOT add the new phase to
+  `design/roadmap.yaml`** — that stays an explicit follow-up
+  governed by P14 (the chokepoint contract is preserved).
+- `spec import --suggest-from <spec.md|plan.md> --json`
+  extracts brief / constitution candidates from a Spec Kit
+  `spec.md` or `plan.md` and prints the envelope. **Never
+  writes any file** — the user pipes the suggestions into
+  `plan brief --from-file` / `plan constitution --from-file`
+  (the v1.6 P17 non-interactive paths) if they accept them.
+
+No new public error codes — failures all reuse `CONFIG_ERROR`
+with a structured `data.detail` enum (`unsafe_path` /
+`file_not_found` / `unreadable` / `phase_id_invalid` /
+`phase_yaml_exists` / `no_sections_parsed` / `mutex_violation`
+/ `missing_phase_id`). The public error code surface stays
+size-stable. No phase YAML schema changes — the importer
+writes valid existing phase YAML.
+
+Why this matters now: code-pact's control-plane positioning
+hinges on accepting artifacts from other tools without
+demanding teams rewrite their planning. The Spec Kit bridge
+is the first explicit instance of that posture, and it sets
+the precedent for future importers (deliberately deferred to
+their own phases + RFCs).
+
 ### Added
 
 - **P18-T5** — Spec Kit bridge: documentation + getting-started
