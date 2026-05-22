@@ -15,6 +15,21 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ### Added
 
+- **P20-T3** — Baseline measurement on the dogfood corpus.
+  Commits the first real-world output of the harness under
+  `design/measurements/`:
+  - `pack-size-by-task.csv` — 105 task rows
+  - `verify-success-rate.csv` — 68 task rows (only tasks with
+    a `done` event are emitted)
+  - `task-event-density.csv` — 68 task rows
+  - `lint-issue-histogram.csv` — header-only (strict-clean
+    corpus produces 0 issues at v1.10 baseline)
+  - `measurements.manifest.json` — harness_version `0.1.0`,
+    cli_version `1.9.0`, `generated_at` `2026-05-22`
+
+  These CSVs are the seed any future RFC can cite. No
+  production code changes in this task.
+
 - **P20-T2** — Evidence harness implementation. New maintainer
   script at `scripts/harness/run.ts` (invoked via `pnpm harness
   --corpus . [--write] [--json]`). Walks the corpus, computes
