@@ -215,7 +215,7 @@ tasks:
     write_surface: low
     verification_strength: medium
     expected_duration: short
-    status: planned
+    status: done
     description: |
       `task runbook` cross-phase display update + docs +
       phase status flip (closes P19).
