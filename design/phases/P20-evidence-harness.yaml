@@ -108,7 +108,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
     description: |
       `scripts/harness/run.ts` implementation. The harness is an
       isolated maintainer tool — runs via `pnpm harness --corpus .
