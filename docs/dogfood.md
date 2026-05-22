@@ -238,6 +238,38 @@ code-pact init --non-interactive --agent claude-code --locale en-US --sample-pha
 
 See [`docs/concepts/sample-phase.md`](concepts/sample-phase.md) for the keep / rename / delete decision.
 
+### Ingesting an existing Spec Kit `tasks.md` (v1.8+)
+
+If you already have a `tasks.md` from Spec Kit (or any compatible tool that emits the Heading 3 + `- [ ]` checkbox subset), `spec import` bootstraps a draft phase YAML without re-typing the tasks:
+
+```sh
+# 1. Dry-run first — prints the generated YAML to stdout
+code-pact spec import --from path/to/tasks.md --phase-id P-imported --json
+
+# 2. Persist
+code-pact spec import --from path/to/tasks.md --phase-id P-imported --write
+
+# 3. Edit design/phases/P-imported-imported.yaml to fill in
+#    reads / writes / acceptance_refs (the importer writes minimal defaults).
+
+# 4. Explicit P14-governed follow-up: add the phase to design/roadmap.yaml
+#    (hand-edit; spec import deliberately does NOT touch roadmap.yaml).
+
+# 5. Validate before starting the per-task loop
+code-pact plan lint --include-quality --json
+code-pact validate --json
+```
+
+For Spec Kit `spec.md` / `plan.md`, the read-only suggestion mode emits brief / constitution candidates that you can pipe into the v1.6 P17 non-interactive paths:
+
+```sh
+code-pact spec import --suggest-from spec.md --json \
+  | jq '.data.brief_candidates' > /tmp/brief.yaml
+code-pact plan brief --from-file /tmp/brief.yaml --json
+```
+
+See [`docs/spec-kit-bridge.md`](spec-kit-bridge.md) for the full walkthrough including the supported Markdown subset, the mutex constraints, and the explicit non-goals.
+
 ## Resetting to a clean state in a temp dir
 
 Do **not** run `code-pact init` inside this repository — `.code-pact/` already exists
