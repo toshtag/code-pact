@@ -1,0 +1,294 @@
+id: P18
+name: Spec Kit Bridge
+weight: 25
+confidence: medium
+risk: medium
+status: in_progress
+objective: |
+  Ship a read-only one-way importer that converts external
+  spec-driven planning artifacts (initially the `tasks.md`
+  file format used by Spec Kit and similar tools) into
+  code-pact phase YAML drafts. The bridge positions
+  code-pact as a control plane that ingests planning
+  artifacts produced by other tools — NOT as a re-
+  implementation of those tools. New command surface:
+  `spec import --from <path> --phase-id <id> [--write]
+  [--json]`. Dry-run by default; `--write` persists the
+  generated phase YAML draft to `design/phases/<id>-
+  imported.yaml`. Future tasks layer in spec.md / plan.md
+  brief / constitution candidate extraction (T4) and the
+  full documentation walkthrough (T5).
+
+  Scope is intentionally minimal: we parse the subset of
+  Spec Kit syntax that maps cleanly onto code-pact's
+  phase YAML (Heading 3 sections + `- [ ]` checkbox
+  lists). Constructs outside that subset are silently
+  ignored or reported as advisory, never silently
+  mis-mapped. Spec Kit's upstream format may evolve;
+  the importer ships at Stable v1.8+ with an explicit
+  supported-subset doc so users know what's covered.
+non_goals:
+  - re-implementing Spec Kit (or any spec-generation tool); code-pact stays a
+    control plane that ingests external artifacts
+  - bidirectional sync (Spec Kit → code-pact AND back); the bridge is one-way
+    read-only
+  - live watch / auto-sync on file change; importer is invoked explicitly
+  - LLM API integration; the importer is pure parser + transform
+  - support for every Spec Kit construct; only the minimal subset that maps
+    cleanly onto code-pact's phase YAML is supported
+  - importer for other spec formats (e.g. Cursor rules, Linear specs); those
+    would warrant separate phases with their own RFCs
+  - schema changes to code-pact's phase YAML (the importer must produce valid
+    existing phase YAML)
+definition_of_done:
+  - design/phases/P18-spec-kit-bridge.yaml exists with this objective and tasks
+    list
+  - design/roadmap.yaml lists P18
+  - "design/decisions/spec-kit-bridge-rfc.md exists with `Status: accepted` lock
+    (P18-T1)"
+  - "`src/core/spec-import/tasks-md-parser.ts` parses the supported Spec Kit
+    subset into a typed intermediate representation (P18-T2)"
+  - "`code-pact spec import --from <path> --phase-id <id> [--write] [--json]`
+    ships as Stable v1.8+ (P18-T3); dry-run default with `--write` opt-in; JSON
+    envelope returns the generated phase YAML + any advisory warnings"
+  - spec.md / plan.md → brief / constitution candidate extraction is read-only
+    suggestion (P18-T4); does not write files in v1.8, just surfaces candidates
+  - "`docs/spec-kit-bridge.md` walkthrough + cli-contract entries +
+    getting-started example (P18-T5)"
+  - "`tests/integration/json-stdout.test.ts` continues to pass; the new command
+    added under Stable v1.0 commands"
+  - CHANGELOG.md gains entries under `[Unreleased]` covering each P18 task
+verification:
+  commands:
+    - pnpm typecheck
+    - pnpm test
+    - pnpm build
+    - node dist/cli.js plan lint --json
+    - node dist/cli.js validate --json
+    - node dist/cli.js doctor --json
+tasks:
+  - id: P18-T1
+    type: architecture
+    ambiguity: medium
+    risk: low
+    context_size: medium
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: done
+    description: |
+      RFC acceptance. Land design/decisions/spec-kit-bridge-rfc.md
+      with `Status: proposed` in this PR; the status line flips
+      to `accepted` in a follow-up commit before merge (per the
+      P11–P16 RFC lifecycle precedent). No src/ change in this
+      task — the purpose is to lock the design decisions before
+      any importer code is written:
+
+      - Supported Spec Kit subset (Heading 3 + `- [ ]` checkbox
+        list as the minimal viable grammar)
+      - Field mapping (tasks.md → code-pact phase YAML task shape)
+      - Command surface (`spec import` placement under existing
+        command hierarchy; flag set; envelope shape)
+      - Error handling (malformed input → CONFIG_ERROR; partial
+        parse → advisory warnings on the success envelope)
+      - Backward compatibility (pure additive new command;
+        no impact on existing surfaces)
+      - Deferred items (spec.md/plan.md extraction details to
+        T4; bidirectional sync explicitly out-of-scope)
+
+      Register P18 in design/roadmap.yaml (weight 25, this file's
+      objective + non-goals + DoD + tasks). The phase status
+      line stays `in_progress` until P18-T5 lands.
+    decision_refs:
+      - design/decisions/spec-kit-bridge-rfc.md
+    reads:
+      - src/commands/phase-import.ts
+      - src/core/schemas/phase.ts
+      - src/core/schemas/task.ts
+      - docs/cli-contract.md
+    writes:
+      - design/decisions/spec-kit-bridge-rfc.md
+      - CHANGELOG.md
+    acceptance_refs:
+      - design/decisions/spec-kit-bridge-rfc.md
+  - id: P18-T2
+    type: feature
+    ambiguity: low
+    risk: low
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: planned
+    description: |
+      `src/core/spec-import/tasks-md-parser.ts` parses the
+      supported Spec Kit subset (Heading 3 sections +
+      `- [ ]` checkbox list items) into a typed intermediate
+      representation. Pure function — no file I/O in the
+      parser itself; the caller provides raw markdown text.
+
+      Output shape: `{ sections: { title: string; tasks:
+      string[] }[]; warnings: ParserWarning[] }` (exact shape
+      to be locked in T1 RFC). Each Heading 3 becomes a
+      section; each `- [ ]` line under it becomes a task
+      candidate description.
+
+      Constructs outside the subset (other heading levels,
+      bullet lists without checkboxes, table syntax, etc.)
+      are silently dropped but counted in
+      `warnings: ParserWarning[]` so the CLI surface can
+      report "imported N tasks from M sections; skipped K
+      lines outside the supported subset" without losing
+      visibility.
+
+      Unit tests cover: empty input, only-headings input,
+      checkbox-only-without-headings, nested headings,
+      malformed checkbox syntax, Unicode in task text,
+      Windows line endings.
+    depends_on:
+      - P18-T1
+    decision_refs:
+      - design/decisions/spec-kit-bridge-rfc.md
+    reads:
+      - design/decisions/spec-kit-bridge-rfc.md
+    writes:
+      - src/core/spec-import/tasks-md-parser.ts
+      - src/core/spec-import/index.ts
+      - tests/unit/core/spec-import/tasks-md-parser.test.ts
+      - CHANGELOG.md
+    acceptance_refs:
+      - design/decisions/spec-kit-bridge-rfc.md
+  - id: P18-T3
+    type: feature
+    ambiguity: medium
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: planned
+    description: |
+      `code-pact spec import --from <path> --phase-id <id>
+      [--write] [--json]` Stable v1.8+. Reads the file at
+      <path> (safe relative path enforced), parses via the
+      T2 parser, transforms section + task candidates into
+      a valid phase YAML draft, and either prints the YAML
+      to stdout (dry-run, default) or writes it to
+      `design/phases/<id>-imported.yaml` (with `--write`).
+
+      Errors:
+        - missing file / unsafe path → CONFIG_ERROR (exit 2)
+        - --phase-id collision with existing phase →
+          CONFIG_ERROR (exit 2); --force opt-in for
+          overwrite (mirrors phase import / plan brief shape)
+        - parse failure (zero sections recognised) →
+          CONFIG_ERROR (exit 2) with
+          `data.detail: "no_sections_parsed"`
+
+      JSON envelope (success):
+        { ok: true, data: {
+            sections_imported: number,
+            tasks_imported: number,
+            skipped_lines: number,
+            output_path: string | null,  // null on dry-run
+            phase_yaml: string,  // the generated YAML
+            warnings: string[]
+          } }
+
+      Integration tests cover the dry-run / --write / error
+      matrix.
+    depends_on:
+      - P18-T2
+    decision_refs:
+      - design/decisions/spec-kit-bridge-rfc.md
+    reads:
+      - src/commands/phase-import.ts
+      - src/cli.ts
+    writes:
+      - src/commands/spec-import.ts
+      - src/cli.ts
+      - tests/integration/spec-import.test.ts
+      - CHANGELOG.md
+    acceptance_refs:
+      - design/phases/P18-spec-kit-bridge.yaml
+  - id: P18-T4
+    type: feature
+    ambiguity: high
+    risk: low
+    context_size: medium
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: planned
+    description: |
+      Read-only suggestion extraction for spec.md / plan.md.
+      `code-pact spec import --suggest-from <path> --json`
+      reads a Spec Kit spec.md or plan.md, extracts
+      candidate brief / constitution fields, and prints
+      them to stdout WITHOUT writing any file. The user
+      then decides whether to feed the suggestions into
+      `plan brief --from-file` / `plan constitution
+      --from-file` (the v1.6 P17 non-interactive paths).
+
+      Extraction is conservative — recognise standard
+      Spec Kit section headings (e.g. `## Problem statement`,
+      `## Goals`, `## Constraints`) and surface them as
+      `{ description?: string, what?: string, who?: string,
+      principles?: string[] }` candidates. Unknown sections
+      are skipped.
+
+      No file write in this task — the v1.8 release ships
+      suggestion-only. Auto-apply via piping to plan brief
+      is left as a user-side concern.
+    depends_on:
+      - P18-T2
+    decision_refs:
+      - design/decisions/spec-kit-bridge-rfc.md
+    reads:
+      - design/decisions/spec-kit-bridge-rfc.md
+    writes:
+      - src/core/spec-import/spec-md-extractor.ts
+      - src/commands/spec-import.ts
+      - tests/unit/core/spec-import/spec-md-extractor.test.ts
+      - tests/integration/spec-import-suggest.test.ts
+      - CHANGELOG.md
+    acceptance_refs:
+      - design/phases/P18-spec-kit-bridge.yaml
+  - id: P18-T5
+    type: docs
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: planned
+    description: |
+      `docs/spec-kit-bridge.md` walkthrough covering both
+      the tasks.md → phase YAML import and the spec.md /
+      plan.md suggestion extraction. docs/cli-contract.md
+      gains `spec import` command entry under Stable v1.0
+      commands. docs/getting-started.md gains a brief
+      "ingesting external specs" subsection pointing at
+      the bridge as one bootstrap option.
+
+      Also flips the P18 phase YAML status to `done` since
+      this task closes the phase.
+    depends_on:
+      - P18-T1
+      - P18-T2
+      - P18-T3
+      - P18-T4
+    decision_refs:
+      - design/decisions/spec-kit-bridge-rfc.md
+    reads:
+      - docs/cli-contract.md
+      - docs/getting-started.md
+      - docs/dogfood.md
+    writes:
+      - docs/spec-kit-bridge.md
+      - docs/cli-contract.md
+      - docs/getting-started.md
+      - CHANGELOG.md
+    acceptance_refs:
+      - design/phases/P18-spec-kit-bridge.yaml

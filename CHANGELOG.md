@@ -11,6 +11,25 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **P18-T1** — Spec Kit bridge RFC. New phase `P18 — Spec Kit Bridge`
+  registered in `design/roadmap.yaml` (weight 25). RFC at
+  `design/decisions/spec-kit-bridge-rfc.md` (accepted) locks the
+  read-only one-way importer design: a new top-level
+  `code-pact spec import --from <tasks.md> --phase-id <id>
+  [--write] [--force] [--json]` command, plus
+  `spec import --suggest-from <spec.md|plan.md> --json` for
+  brief / constitution candidate extraction. Supported subset
+  is intentionally narrow (Heading 3 sections + `- [ ]`
+  checkbox lists). No new public error codes — `CONFIG_ERROR`
+  is reused for unsafe path / collision / parse-failure.
+  Implementation lands in P18-T2..T5; v1.8.0 target.
+
+---
+
 ## [1.7.0] — 2026-05-22
 
 **Agent contract release.** P16 (Agent Contract Adapter Hardening)

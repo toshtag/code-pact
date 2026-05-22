@@ -50,3 +50,6 @@ phases:
   - id: P17
     path: design/phases/P17-non-interactive-authoring.yaml
     weight: 20
+  - id: P18
+    path: design/phases/P18-spec-kit-bridge.yaml
+    weight: 25
