@@ -36,6 +36,21 @@ identifiers. Starting with v1.0.0, stable releases use plain
 - **P16 phase registered** (v1.7+). `design/roadmap.yaml` lists
   P16 (Agent Contract Adapter Hardening, weight 25). Phase
   status stays `in_progress` until P16-T5 lands.
+- **codex + generic adapter instruction templates gain
+  `## Agent contract` section** (v1.7+, P16-T3). Same shape and
+  content as P16-T2's claude-code update: heading strings are
+  English-locked across all locales (en-US, ja-JP), body text is
+  localised, the section sits between the per-task workflow and
+  the next adapter-specific section (`## Model selection` for
+  codex, `## Context directory` for generic). The i18n strings
+  (`templates.adapterCommon.agentContract`) are shared with the
+  claude-code path — no new locale data; this PR only touches the
+  two adapter template builders (`src/core/adapters/codex.ts`,
+  `src/core/adapters/generic.ts`) and CHANGELOG. cursor /
+  gemini-cli adapters stay experimental and untouched. After this
+  PR, all three stable adapters carry the agent-contract section.
+  Conformance regex (P16-T4) and `ADAPTER_CONTRACT_DRIFT`
+  diagnostic (P16-T5) ship next.
 - **claude-code adapter instruction template gains
   `## Agent contract` section** (v1.7+, P16-T2). Per the
   P16-T1 RFC, the canonical claude-code instruction file

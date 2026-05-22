@@ -178,7 +178,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
     description: |
       codex and generic adapters gain functionally-identical
       contract sections — same three axes, same v1.6 surface
@@ -199,11 +199,6 @@ tasks:
     writes:
       - src/core/adapters/codex.ts
       - src/core/adapters/generic.ts
-      - src/i18n/en-US.ts
-      - src/i18n/ja-JP.ts
-      - tests/fixtures/adapters/codex/expected-files.txt
-      - tests/fixtures/adapters/generic/expected-files.txt
-      - tests/integration/adapter-conformance.test.ts
       - CHANGELOG.md
     acceptance_refs:
       - design/decisions/agent-contract-rfc.md
