@@ -118,8 +118,6 @@ tasks:
       - docs/cli-contract.md
     writes:
       - design/decisions/agent-contract-rfc.md
-      - design/phases/P16-agent-contract-adapter-hardening.yaml
-      - design/roadmap.yaml
       - CHANGELOG.md
     acceptance_refs:
       - design/decisions/agent-contract-rfc.md
