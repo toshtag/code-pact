@@ -1,6 +1,7 @@
 import { loadPlanState } from "../core/plan/state.ts";
 import { resolveTaskInPlanState } from "../core/plan/resolve-task.ts";
 import { buildTaskRunbook } from "../core/runbook/build-task-runbook.ts";
+import { buildTaskPhaseIndex } from "../core/runbook/depends-on.ts";
 import type { TaskRunbookResult } from "../core/runbook/types.ts";
 
 // ---------------------------------------------------------------------------
@@ -37,11 +38,15 @@ export async function runTaskRunbook(
   const { phaseId, task } = resolveTaskInPlanState(state, taskId);
 
   const events = state.progress?.events ?? [];
+  const taskPhaseIndex = buildTaskPhaseIndex(
+    state.phases.map((entry) => entry.phase),
+  );
 
   return buildTaskRunbook({
     cwd,
     task,
     phaseId,
     events,
+    taskPhaseIndex,
   });
 }

@@ -93,6 +93,7 @@ const KNOWN_CODES: Record<string, "public" | "plan" | "doctor" | "adapter" | "in
   TASK_ACCEPTANCE_REF_UNSAFE_PATH: "plan",
   TASK_DECISION_REF_NOT_FOUND: "plan",
   TASK_DECISION_REF_UNSAFE_PATH: "plan",
+  TASK_DEPENDS_ON_CYCLE: "plan",
   TASK_DEPENDS_ON_SELF_REFERENCE: "plan",
   TASK_DEPENDS_ON_UNRESOLVED: "plan",
   TASK_READS_GLOB_INVALID: "plan",

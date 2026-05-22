@@ -15,6 +15,34 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ### Added
 
+- **P19-T2** — Cross-phase `depends_on` resolver + multi-node
+  cycle detection. `resolveDependsOnStates(events, task, options?)`
+  gains an optional third argument `{ ownPhaseId, taskPhaseIndex }`
+  (with the latter built by the new `buildTaskPhaseIndex(phases)`
+  helper). When supplied, deps that resolve to a task declared in
+  a different phase populate an additive `phase_id` field on the
+  returned `DependsOnEntry`; same-phase deps and unresolved deps
+  omit the field — additive surface per the v1.0 contract.
+  `task runbook` wires the index automatically.
+
+  `detectTaskDependsOnUnresolved` becomes cross-phase aware:
+  a dep id present in any phase resolves (no warning); only ids
+  absent from the entire roadmap surface as `TASK_DEPENDS_ON_UNRESOLVED`.
+  This eliminates the false positive that previously fired
+  whenever a phase legitimately depended on a sibling phase's task.
+
+  New `TASK_DEPENDS_ON_CYCLE` lint code (plan, severity error)
+  built on iterative Tarjan SCC over the multi-phase dep graph.
+  Self-cycles keep firing the narrower `TASK_DEPENDS_ON_SELF_REFERENCE`
+  diagnostic; the new code covers cycles of length ≥ 2. Each
+  emitted issue carries `details.cycle: string[]` listing the
+  cycle members in canonical (lexicographic-min-rotated) order
+  for deterministic test fixtures. 14 unit tests cover the
+  2-/3-/4-node, same-phase / cross-phase, disjoint-cycle,
+  deep-linear-chain, and mixed-self+multi-node matrices; the
+  resolver gains 5 new unit tests for the cross-phase /
+  same-phase / mixed / no-index / duplicate-id-index cases.
+
 - **P19-T1** — Cross-phase dependencies RFC. New phase
   `P19 — Cross-phase Dependencies` registered in
   `design/roadmap.yaml` (weight 20). RFC at

@@ -34,6 +34,13 @@ export type DependsOnEntry = {
   task_id: string;
   current: TaskCurrentState;
   satisfied: boolean;
+  /**
+   * Phase id of the dependency, populated only when the dependency
+   * resolves to a task in a different phase from the depending task
+   * (v1.9 P19 cross-phase resolution). Omitted for same-phase
+   * dependencies so existing JSON consumers see no shape change.
+   */
+  phase_id?: string;
 };
 
 export type AcceptanceRefCheck = {

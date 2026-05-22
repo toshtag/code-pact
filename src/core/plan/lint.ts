@@ -8,6 +8,7 @@ import {
   detectTaskIdPhasePrefix,
   detectTaskDependsOnUnresolved,
   detectTaskDependsOnSelfReference,
+  detectTaskDependsOnCycle,
   detectTaskDecisionRefUnsafePath,
   detectTaskDecisionRefNotFound,
   detectTaskReadsUnsafePath,
@@ -78,6 +79,7 @@ export async function runLint(opts: LintOptions): Promise<LintResult> {
   // configuration error in the sync set is visible quickly.
   issues.push(...detectTaskDependsOnUnresolved(phases));
   issues.push(...detectTaskDependsOnSelfReference(phases));
+  issues.push(...detectTaskDependsOnCycle(phases));
   issues.push(...detectTaskDecisionRefUnsafePath(phases));
   issues.push(...detectTaskReadsUnsafePath(phases));
   issues.push(...detectTaskReadsGlobInvalid(phases));
