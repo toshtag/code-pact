@@ -28,39 +28,36 @@ objective: |
   the importer ships at Stable v1.8+ with an explicit
   supported-subset doc so users know what's covered.
 non_goals:
-  - re-implementing Spec Kit (or any spec-generation tool); code-pact stays
-    a control plane that ingests external artifacts
-  - bidirectional sync (Spec Kit → code-pact AND back); the bridge is
-    one-way read-only
+  - re-implementing Spec Kit (or any spec-generation tool); code-pact stays a
+    control plane that ingests external artifacts
+  - bidirectional sync (Spec Kit → code-pact AND back); the bridge is one-way
+    read-only
   - live watch / auto-sync on file change; importer is invoked explicitly
   - LLM API integration; the importer is pure parser + transform
-  - support for every Spec Kit construct; only the minimal subset that
-    maps cleanly onto code-pact's phase YAML is supported
-  - importer for other spec formats (e.g. Cursor rules, Linear specs);
-    those would warrant separate phases with their own RFCs
-  - schema changes to code-pact's phase YAML (the importer must produce
-    valid existing phase YAML)
+  - support for every Spec Kit construct; only the minimal subset that maps
+    cleanly onto code-pact's phase YAML is supported
+  - importer for other spec formats (e.g. Cursor rules, Linear specs); those
+    would warrant separate phases with their own RFCs
+  - schema changes to code-pact's phase YAML (the importer must produce valid
+    existing phase YAML)
 definition_of_done:
-  - design/phases/P18-spec-kit-bridge.yaml exists with this objective
-    and tasks list
+  - design/phases/P18-spec-kit-bridge.yaml exists with this objective and tasks
+    list
   - design/roadmap.yaml lists P18
-  - "design/decisions/spec-kit-bridge-rfc.md exists with `Status:
-    accepted` lock (P18-T1)"
-  - "`src/core/spec-import/tasks-md-parser.ts` parses the supported
-    Spec Kit subset into a typed intermediate representation (P18-T2)"
-  - "`code-pact spec import --from <path> --phase-id <id> [--write]
-    [--json]` ships as Stable v1.8+ (P18-T3); dry-run default with
-    `--write` opt-in; JSON envelope returns the generated phase YAML
-    + any advisory warnings"
-  - "spec.md / plan.md → brief / constitution candidate extraction
-    is read-only suggestion (P18-T4); does not write files in v1.8,
-    just surfaces candidates"
+  - "design/decisions/spec-kit-bridge-rfc.md exists with `Status: accepted` lock
+    (P18-T1)"
+  - "`src/core/spec-import/tasks-md-parser.ts` parses the supported Spec Kit
+    subset into a typed intermediate representation (P18-T2)"
+  - "`code-pact spec import --from <path> --phase-id <id> [--write] [--json]`
+    ships as Stable v1.8+ (P18-T3); dry-run default with `--write` opt-in; JSON
+    envelope returns the generated phase YAML + any advisory warnings"
+  - spec.md / plan.md → brief / constitution candidate extraction is read-only
+    suggestion (P18-T4); does not write files in v1.8, just surfaces candidates
   - "`docs/spec-kit-bridge.md` walkthrough + cli-contract entries +
     getting-started example (P18-T5)"
-  - "`tests/integration/json-stdout.test.ts` continues to pass; the
-    new command added under Stable v1.0 commands"
-  - CHANGELOG.md gains entries under `[Unreleased]` covering each
-    P18 task
+  - "`tests/integration/json-stdout.test.ts` continues to pass; the new command
+    added under Stable v1.0 commands"
+  - CHANGELOG.md gains entries under `[Unreleased]` covering each P18 task
 verification:
   commands:
     - pnpm typecheck
@@ -78,7 +75,7 @@ tasks:
     write_surface: low
     verification_strength: medium
     expected_duration: short
-    status: in_progress
+    status: done
     description: |
       RFC acceptance. Land design/decisions/spec-kit-bridge-rfc.md
       with `Status: proposed` in this PR; the status line flips
