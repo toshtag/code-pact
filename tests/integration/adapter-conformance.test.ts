@@ -6,11 +6,22 @@ import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 import { runInit } from "../../src/commands/init.ts";
 import { runAdapterInstall } from "../../src/commands/adapter-install.ts";
+import { runAdapterConformance } from "../../src/commands/adapter-conformance.ts";
 import { readManifest } from "../../src/core/adapters/manifest.ts";
 import { AdapterManifest } from "../../src/core/schemas/adapter-manifest.ts";
 import { AgentProfile } from "../../src/core/schemas/agent-profile.ts";
 import { adapterRegistry } from "../../src/core/adapters/index.ts";
 import { assertSafeRelativePath } from "../../src/core/adapters/file-state.ts";
+// P21-T5: single source of truth for the agent contract surface.
+// `adapter doctor`'s contract drift check and the `adapter conformance`
+// command both import the same constants from this module.
+import {
+  AGENT_CONTRACT_AXIS_HEADINGS as SHARED_AXIS_HEADINGS,
+  AGENT_CONTRACT_SECTION_HEADING as SHARED_SECTION_HEADING,
+  DIAGNOSTIC_REQUIRED_SURFACES,
+  LIFECYCLE_REQUIRED_SURFACES,
+  REQUIRED_FAILURE_GUIDANCE,
+} from "../../src/core/adapters/conformance-spec.ts";
 
 // ---------------------------------------------------------------------------
 // Stable adapters covered by conformance.
@@ -24,6 +35,10 @@ import { assertSafeRelativePath } from "../../src/core/adapters/file-state.ts";
 
 const STABLE_AGENTS = ["claude-code", "codex", "generic"] as const;
 
+// v1.6 audit surface mentions kept as a local constant — these are
+// not part of the v1.11+ conformance spec but the existing
+// `agent contract section references every v1.6 audit surface` test
+// still locks them.
 const REQUIRED_CLI_REFS = [
   "code-pact recommend",
   "code-pact task context",
@@ -31,18 +46,12 @@ const REQUIRED_CLI_REFS = [
   "code-pact validate",
 ];
 
-// v1.7 P16-T4: agent-contract conformance.
-//
-// The agent contract section's headings are English-locked across ALL
-// locales per design/decisions/agent-contract-rfc.md. The conformance
-// regex anchors on the verbatim heading strings below — drift in the
-// heading text is a contract break.
-const AGENT_CONTRACT_SECTION_HEADING = "## Agent contract";
-const AGENT_CONTRACT_AXIS_HEADINGS = [
-  "### When to invoke code-pact",
-  "### What to verify first",
-  "### How to handle failures",
-];
+// v1.7 P16-T4 / v1.11+ P21-T5: heading constants imported from the
+// shared `src/core/adapters/conformance-spec.ts`. The aliases here keep
+// the existing test assertions readable while making the single-source
+// invariant explicit.
+const AGENT_CONTRACT_SECTION_HEADING = SHARED_SECTION_HEADING;
+const AGENT_CONTRACT_AXIS_HEADINGS = SHARED_AXIS_HEADINGS;
 // Every stable adapter's instruction file MUST mention every v1.6
 // audit surface at least once in the agent-contract body. These are
 // the surfaces the agent must learn about on day one:
@@ -252,6 +261,96 @@ describe.each(STABLE_AGENTS)("adapter conformance — %s", (agent) => {
     const workflowHeader = content.indexOf("## How to work on a task");
     expect(workflowHeader).toBeGreaterThanOrEqual(0);
     expect(sectionStart).toBeGreaterThan(workflowHeader);
+  });
+
+  // ---------------------------------------------------------------------
+  // v1.11+ P21-T5: `code-pact adapter conformance <agent>` command
+  // ---------------------------------------------------------------------
+
+  it("instruction file mentions every lifecycle_required surface (v1.11+)", async () => {
+    await installAdapter(agent);
+    const manifest = await readManifest(dir, agent);
+    const instruction = manifest!.files.find((f) => f.role === "instruction");
+    const content = await readFile(join(dir, instruction!.path), "utf8");
+    for (const surface of LIFECYCLE_REQUIRED_SURFACES) {
+      expect(content).toContain(surface);
+    }
+  });
+
+  it("instruction file mentions every diagnostic_required surface (v1.11+)", async () => {
+    await installAdapter(agent);
+    const manifest = await readManifest(dir, agent);
+    const instruction = manifest!.files.find((f) => f.role === "instruction");
+    const content = await readFile(join(dir, instruction!.path), "utf8");
+    for (const surface of DIAGNOSTIC_REQUIRED_SURFACES) {
+      expect(content).toContain(surface);
+    }
+  });
+
+  it("instruction file mentions every required_failure_guidance keyword (v1.11+)", async () => {
+    await installAdapter(agent);
+    const manifest = await readManifest(dir, agent);
+    const instruction = manifest!.files.find((f) => f.role === "instruction");
+    const content = await readFile(join(dir, instruction!.path), "utf8");
+    for (const keyword of REQUIRED_FAILURE_GUIDANCE) {
+      expect(content).toContain(keyword);
+    }
+  });
+
+  it("runAdapterConformance returns compliant: true on a fresh install", async () => {
+    await installAdapter(agent);
+    const result = await runAdapterConformance({ cwd: dir, agentName: agent });
+    expect(result.agent).toBe(agent);
+    expect(result.compliant).toBe(true);
+    // Every check should pass on a fresh install.
+    const failed = result.checks.filter((c) => c.status === "fail");
+    expect(failed).toEqual([]);
+  });
+
+  it("runAdapterConformance returns compliant: false when the agent contract section is removed", async () => {
+    await installAdapter(agent);
+    const manifest = await readManifest(dir, agent);
+    const instruction = manifest!.files.find((f) => f.role === "instruction");
+    const path = join(dir, instruction!.path);
+    const original = await readFile(path, "utf8");
+    // Tamper: replace the exact `## Agent contract` heading text with a
+    // distinct heading. The substring match anchors on the verbatim
+    // string, so swapping the prefix word is enough to fail.
+    const tampered = original.replace(
+      "## Agent contract",
+      "## DRIFTED contract",
+    );
+    expect(tampered).not.toBe(original);
+    await import("node:fs/promises").then((fs) =>
+      fs.writeFile(path, tampered, "utf8"),
+    );
+
+    const result = await runAdapterConformance({ cwd: dir, agentName: agent });
+    expect(result.compliant).toBe(false);
+    const sectionCheck = result.checks.find(
+      (c) => c.id === "contract_section_present",
+    );
+    expect(sectionCheck?.status).toBe("fail");
+  });
+
+  it("runAdapterConformance returns compliant: false on file checksum mismatch", async () => {
+    await installAdapter(agent);
+    const manifest = await readManifest(dir, agent);
+    const instruction = manifest!.files.find((f) => f.role === "instruction");
+    const path = join(dir, instruction!.path);
+    const original = await readFile(path, "utf8");
+    // Append a single line so the sha256 mismatches the manifest but
+    // the contract heading + surfaces remain intact.
+    await import("node:fs/promises").then((fs) =>
+      fs.writeFile(path, original + "\n<!-- tampered -->\n", "utf8"),
+    );
+
+    const result = await runAdapterConformance({ cwd: dir, agentName: agent });
+    expect(result.compliant).toBe(false);
+    const checksumChecks = result.checks.filter(
+      (c) => c.id === "file_checksum_match",
+    );
+    expect(checksumChecks.some((c) => c.status === "fail")).toBe(true);
   });
 });
 

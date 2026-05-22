@@ -1075,6 +1075,77 @@ omitted, it defaults to `claude-code`. A one-line deprecation notice is printed 
 the notice is suppressed under `--json` so agents reading the JSON envelope are not
 surprised by an extra stderr line. The bare form will be removed in v1.1.
 
+### `adapter conformance <agent> [--json]` (v1.11+, P21)
+
+Focused read-only check that the installed adapter satisfies the agent contract. Returns `compliant: true` when every check passes; the CLI exits 0 when compliant, 1 when not. No state is mutated.
+
+Conformance is intentionally narrower than `adapter doctor` — it inspects only the contract shape and per-file integrity. `ADAPTER_GENERATOR_STALE` / `ADAPTER_PROFILE_DRIFT` / `ADAPTER_UNMANAGED_FILE` remain doctor-only diagnostics.
+
+```json
+{
+  "ok": true,
+  "data": {
+    "agent": "claude-code",
+    "compliant": true,
+    "checks": [
+      { "id": "manifest_present", "status": "pass" },
+      { "id": "instruction_file_present", "status": "pass", "file": "CLAUDE.md" },
+      { "id": "contract_section_present", "status": "pass", "file": "CLAUDE.md" },
+      { "id": "axis_when_to_invoke", "status": "pass", "file": "CLAUDE.md" },
+      { "id": "axis_what_to_verify", "status": "pass", "file": "CLAUDE.md" },
+      { "id": "axis_how_to_handle", "status": "pass", "file": "CLAUDE.md" },
+      {
+        "id": "required_cli_surface_mentions",
+        "status": "pass",
+        "file": "CLAUDE.md",
+        "details": {
+          "lifecycle_required": ["code-pact task prepare", "code-pact task start", "code-pact task complete", "code-pact task finalize"],
+          "diagnostic_required": ["code-pact task context", "code-pact verify", "code-pact validate"],
+          "missing_lifecycle": [],
+          "missing_diagnostic": []
+        }
+      },
+      {
+        "id": "required_failure_guidance",
+        "status": "pass",
+        "file": "CLAUDE.md",
+        "details": {
+          "required": ["blocked dependency", "verification failure", "adapter drift", "missing context pack"],
+          "missing": []
+        }
+      },
+      { "id": "file_checksum_match", "status": "pass", "file": "CLAUDE.md" }
+    ]
+  }
+}
+```
+
+#### Checks
+
+| Check id | What it asserts |
+|---|---|
+| `manifest_present` | `.code-pact/adapters/<agent>.manifest.yaml` exists and parses |
+| `instruction_file_present` | A manifest entry has `role: instruction` and the file is on disk |
+| `contract_section_present` | The instruction file contains the verbatim `## Agent contract` heading |
+| `axis_when_to_invoke` | The instruction file contains `### When to invoke code-pact` |
+| `axis_what_to_verify` | The instruction file contains `### What to verify first` |
+| `axis_how_to_handle` | The instruction file contains `### How to handle failures` |
+| `required_cli_surface_mentions` | Every entry in both `lifecycle_required` and `diagnostic_required` (defined in `src/core/adapters/conformance-spec.ts`) is mentioned somewhere in the instruction file |
+| `required_failure_guidance` | Every failure keyword (`blocked dependency`, `verification failure`, `adapter drift`, `missing context pack`) is mentioned somewhere in the instruction file |
+| `file_checksum_match` | One per manifest file: the on-disk LF-normalised UTF-8 sha256 equals the manifest's recorded value |
+
+The required-surface and required-failure-guidance lists live in a single source-of-truth module (`src/core/adapters/conformance-spec.ts`) consumed by both `adapter doctor`'s contract drift check and this command, so the two callers can never disagree.
+
+#### Exit codes
+
+| Code | Condition |
+|---|---|
+| 0 | `compliant: true` |
+| 1 | `compliant: false` |
+| 2 | `CONFIG_ERROR` (missing `<agent>` positional), `AGENT_NOT_FOUND` (unknown agent name) |
+
+No new error codes are introduced by `adapter conformance`; the existing `ADAPTER_*` and `AGENT_*` family covers every failure mode.
+
 ## `task context` — context quality gates (v0.5.1, v1.1 additions)
 
 `code-pact task context <task-id> [--agent <name>] [--json]` generates a context pack whose

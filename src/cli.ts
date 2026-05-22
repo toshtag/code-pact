@@ -37,6 +37,8 @@ import {
   runAdapterDoctor,
   runAdapterUpgrade,
 } from "./commands/adapter.ts";
+import { runAdapterConformance } from "./commands/adapter-conformance.ts";
+import { isSupportedAgent } from "./core/agents.ts";
 import {
   type BriefAnswers,
   loadBriefFromFile,
@@ -1175,6 +1177,7 @@ async function cmdAdapter(argv: string[], locale: Locale, globalJson: boolean): 
   if (sub === "install") return cmdAdapterInstall(argv.slice(1), locale, globalJson);
   if (sub === "doctor") return cmdAdapterDoctor(argv.slice(1), locale, globalJson);
   if (sub === "upgrade") return cmdAdapterUpgrade(argv.slice(1), locale, globalJson);
+  if (sub === "conformance") return cmdAdapterConformance(argv.slice(1), globalJson);
 
   // Effective --json honors both the global flag (before the command) and
   // a --json embedded in the subcommand args (after the command).
@@ -1182,7 +1185,7 @@ async function cmdAdapter(argv: string[], locale: Locale, globalJson: boolean): 
 
   // Reject other unknown sub-words (anything that doesn't start with `-`).
   if (sub !== undefined && !sub.startsWith("-")) {
-    const msg = `adapter: unknown subcommand "${sub}". Use: list | install | upgrade | doctor`;
+    const msg = `adapter: unknown subcommand "${sub}". Use: list | install | upgrade | doctor | conformance`;
     if (effectiveJson) {
       process.stdout.write(
         `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
@@ -1329,6 +1332,73 @@ async function cmdAdapterDoctor(
     }
     throw err;
   }
+}
+
+async function cmdAdapterConformance(
+  argv: string[],
+  globalJson: boolean,
+): Promise<number> {
+  const { values, positionals } = parseArgs({
+    args: argv,
+    options: {
+      json: { type: "boolean" },
+    },
+    strict: false,
+    allowPositionals: true,
+  });
+
+  const json = globalJson || values.json === true;
+  const agentName = positionals[0];
+
+  if (!agentName) {
+    const msg =
+      "adapter conformance requires an <agent> argument (e.g. claude-code).";
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
+      );
+    } else {
+      process.stderr.write(`${msg}\n`);
+    }
+    return 2;
+  }
+
+  if (!isSupportedAgent(agentName)) {
+    const msg = `Agent "${agentName}" is not a supported adapter.`;
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({ ok: false, error: { code: "AGENT_NOT_FOUND", message: msg } })}\n`,
+      );
+    } else {
+      process.stderr.write(`${msg}\n`);
+    }
+    return 2;
+  }
+
+  const cwd = process.cwd();
+  const result = await runAdapterConformance({ cwd, agentName });
+
+  if (json) {
+    process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
+  } else {
+    process.stdout.write(`Agent:     ${result.agent}\n`);
+    process.stdout.write(
+      `Compliant: ${result.compliant ? "yes" : "NO"}\n`,
+    );
+    process.stdout.write(`Checks:\n`);
+    for (const c of result.checks) {
+      const status = c.status === "pass" ? "PASS" : "FAIL";
+      const file = c.file ? ` (${c.file})` : "";
+      process.stdout.write(`  ${status}  ${c.id}${file}\n`);
+      if (c.status === "fail" && c.details) {
+        for (const [k, v] of Object.entries(c.details)) {
+          const v_str = Array.isArray(v) ? v.join(", ") : String(v);
+          process.stdout.write(`         ${k}: ${v_str}\n`);
+        }
+      }
+    }
+  }
+  return result.compliant ? 0 : 1;
 }
 
 async function cmdAdapterUpgrade(
