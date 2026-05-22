@@ -10,6 +10,12 @@ export type TaskContextOptions = {
   taskId: string;
   /** Optional. When omitted, project.yaml's default_agent is used. */
   agent?: string;
+  /**
+   * When true, the returned ContextPackResult includes section-level
+   * `sections` and `excluded` arrays. The rendered `content` string is
+   * byte-identical regardless of this flag.
+   */
+  explain?: boolean;
 };
 
 export type TaskContextResult = ContextPackResult;
@@ -45,5 +51,6 @@ export async function runTaskContext(opts: TaskContextOptions): Promise<TaskCont
     phaseId,
     taskId,
     agentName,
+    ...(opts.explain === true ? { explain: true as const } : {}),
   });
 }

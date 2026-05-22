@@ -2759,6 +2759,7 @@ async function cmdTaskContext(
       {
         agent: { type: "string" },
         json: { type: "boolean" },
+        explain: { type: "boolean" },
       },
       { allowPositionals: true },
     ));
@@ -2776,6 +2777,7 @@ async function cmdTaskContext(
   }
 
   const json = globalJson || values.json === true;
+  const explain = values.explain === true;
   const taskId = positionals[0];
   if (!taskId) {
     const msg = "task context requires a task id (e.g. `task context P1-T1`).";
@@ -2792,20 +2794,48 @@ async function cmdTaskContext(
   const cwd = process.cwd();
 
   try {
-    const pack = await runTaskContext({ cwd, taskId, agent });
+    const pack = await runTaskContext({
+      cwd,
+      taskId,
+      agent,
+      ...(explain ? { explain: true as const } : {}),
+    });
     if (json) {
-      process.stdout.write(
-        `${JSON.stringify({
-          ok: true,
-          data: {
-            task_id: pack.taskId,
-            phase_id: pack.phaseId,
-            agent: pack.agent,
-            char_count: pack.charCount,
-            content: pack.content,
-          },
-        })}\n`,
-      );
+      const data: Record<string, unknown> = {
+        task_id: pack.taskId,
+        phase_id: pack.phaseId,
+        agent: pack.agent,
+        char_count: pack.charCount,
+        content: pack.content,
+      };
+      if (explain) {
+        data.total_bytes = pack.totalBytes;
+        data.context_pack_bytes = pack.totalBytes;
+        data.sections = pack.sections;
+        data.excluded = pack.excluded;
+      }
+      process.stdout.write(`${JSON.stringify({ ok: true, data })}\n`);
+    } else if (explain) {
+      // --explain without --json prints the section breakdown table
+      // instead of the pack body.
+      const lines: string[] = [];
+      lines.push(`Task:        ${pack.phaseId} / ${pack.taskId}`);
+      lines.push(`Agent:       ${pack.agent}`);
+      lines.push(`Total bytes: ${pack.totalBytes}`);
+      lines.push(``);
+      lines.push(`Included sections:`);
+      for (const s of pack.sections ?? []) {
+        const padded = String(s.bytes).padStart(7);
+        lines.push(`  ${padded} bytes  ${s.name.padEnd(24)} ${s.reason_code}`);
+      }
+      if ((pack.excluded ?? []).length > 0) {
+        lines.push(``);
+        lines.push(`Excluded sections:`);
+        for (const x of pack.excluded ?? []) {
+          lines.push(`              ${x.name.padEnd(24)} ${x.reason_code}`);
+        }
+      }
+      process.stdout.write(`${lines.join("\n")}\n`);
     } else {
       process.stdout.write(pack.content);
       if (!pack.content.endsWith("\n")) process.stdout.write("\n");
