@@ -13,6 +13,53 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+## [1.11.0] — 2026-05-22
+
+**Agent Contract v2.** v1.11.0 closes P21 (Agent Contract v2)
+and adds three coordinated CLI surfaces that reduce agent
+operation errors and make context minimisation auditable:
+
+- `code-pact task prepare <task-id>` — single
+  progress-read-only per-task entry point. Returns current
+  state, recommendation, context pack metadata, structured
+  `next_action`, and a `commands` dictionary for every
+  per-task verb.
+- `code-pact task context <task-id> --explain` — adds a
+  per-section `bytes` + `reason_code` breakdown to the JSON
+  envelope. The acceptance invariant `sum(sections[].bytes)
+  === total_bytes === context_pack_bytes` holds; the pack
+  markdown `content` is byte-identical to v1.10.
+- `code-pact adapter conformance <agent>` — focused
+  read-only check that the installed adapter satisfies the
+  v1.11+ agent contract (`## Agent contract` heading + three
+  axis sub-headings + lifecycle / diagnostic CLI surface
+  mentions + failure guidance keywords + per-file checksum).
+
+A new shared spec module
+`src/core/adapters/conformance-spec.ts` is the single source
+of truth consumed by both `adapter doctor`'s v1.7 contract
+drift check and the new `adapter conformance` command. The
+stable adapter instruction templates (`claude-code`,
+`codex`, `generic`) are refreshed so a fresh `adapter
+install` passes conformance by construction. Existing
+installs will surface `ADAPTER_FILE_DRIFT` until `adapter
+upgrade <agent> --write` is run — see `docs/migration.md`
+v1.10.x → v1.11.0.
+
+Two new self-contained docs ship: `docs/positioning.md`
+(what code-pact is, what it deliberately is not, the core
+CLI surfaces, the success metric set) and
+`docs/agent-contract.md` (the v1.11+ contract definition,
+the conformance check id catalogue, the recommended
+lifecycle, the measurement set). README's "Reference docs"
+table now lists both at the top.
+
+No new error codes. No `adapter_schema_version` bump (still
+1). No CLI module split (deferred). No budget enforcement
+(deferred to P24); the `budget_reserved_for_later` value in
+`ContextExcludedReasonCode` is reserved for that work and
+MUST NOT be emitted in v1.11 (asserted by a unit test).
+
 ### Added
 
 - **P21-T6 — Agent contract docs.** New

@@ -3,7 +3,7 @@ name: Agent Contract v2 — task prepare, context explain, adapter conformance
 weight: 25
 confidence: high
 risk: low
-status: in_progress
+status: done
 objective: |
   Reduce agent operation errors and make context minimisation
   verifiable by adding three coordinated CLI surfaces:
