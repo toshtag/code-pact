@@ -11,6 +11,34 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **Agent contract RFC accepted** (v1.7+, P16-T1). New
+  `design/decisions/agent-contract-rfc.md` locks the design for
+  elevating stable adapters from "instruction templates" to
+  "agent contracts". The RFC names the three load-bearing axes
+  every conforming adapter MUST cover (when to invoke code-pact,
+  what to verify first, how to handle failures), specifies the
+  per-adapter scope (claude-code / codex / generic in;
+  cursor / gemini-cli out), pre-decides the new diagnostic code
+  `ADAPTER_CONTRACT_DRIFT` (severity: warning, soft signal —
+  does NOT change `adapter doctor` exit code), and documents the
+  backward-compatibility story (`--accept-modified` continues
+  to govern hand-edited files; the new diagnostic is independent
+  of `ADAPTER_FILE_DRIFT`). The RFC also closes P16's scope:
+  only the textual instruction-body changes, one new advisory
+  diagnostic, and the conformance test extension — no LLM API
+  integration, no file shape changes, no per-locale axis heading
+  variations. Subsequent P16-T2..T5 implementation PRs treat
+  this RFC as load-bearing.
+- **P16 phase registered** (v1.7+). `design/roadmap.yaml` lists
+  P16 (Agent Contract Adapter Hardening, weight 25). Phase
+  status stays `in_progress` until P16-T5 lands.
+
+---
+
 ## [1.6.0] — 2026-05-22
 
 **Audit + non-interactive authoring release.** Two new feature

@@ -44,6 +44,9 @@ phases:
   - id: P15
     path: design/phases/P15-declared-writes-audit.yaml
     weight: 25
+  - id: P16
+    path: design/phases/P16-agent-contract-adapter-hardening.yaml
+    weight: 25
   - id: P17
     path: design/phases/P17-non-interactive-authoring.yaml
     weight: 20
