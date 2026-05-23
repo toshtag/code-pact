@@ -1,6 +1,6 @@
 # Evidence harness
 
-> code-pact v1.10+. **Maintainer tooling, not a product feature.** The harness lives at `scripts/harness/` and is invoked via `pnpm harness`. It is never registered in `package.json` `bin`, never surfaces in JSON envelopes, and never appears in `code-pact --help`.
+> code-pact v1.10+ (v2 outputs added in v1.12 / P26). **Maintainer tooling, not a product feature.** The harness lives at `scripts/harness/` and is invoked via `pnpm harness`. It is never registered in `package.json` `bin`, never surfaces in JSON envelopes, and never appears in `code-pact --help`.
 
 ## Why this exists
 
@@ -12,7 +12,7 @@ See [`design/decisions/evidence-harness-rfc.md`](../../design/decisions/evidence
 
 ## What it measures
 
-Four CSV files, plus a manifest, under `design/measurements/`:
+Six CSV files plus a manifest and an aggregate summary, under `design/measurements/`:
 
 | File | One row per | What it tells you |
 | --- | --- | --- |
@@ -20,17 +20,59 @@ Four CSV files, plus a manifest, under `design/measurements/`:
 | `verify-success-rate.csv` | task with a `done` event | First-pass vs retry counts. Quantifies how strong verification commands are at catching real failures vs how often agents have to retry. |
 | `task-event-density.csv` | task with ≥ 1 event | Progress event histogram (started / blocked / resumed / done / failed) + `event_span_days`. Quantifies how often tasks bounce vs flow linearly. |
 | `lint-issue-histogram.csv` | (phase, code) pair | Count of each `plan lint --include-quality` diagnostic across the corpus. Quantifies the "noise floor" of the lint surface — a row count of 0 means the strict-clean dogfood regime is holding. |
+| `lifecycle-adherence-by-task.csv` *(v1.12+ / P26)* | task with ≥ 1 event | Per-task booleans: `started_before_done` (earliest started precedes earliest done), `had_retry`, `had_block`, `legacy_planned_to_done_shortcut`. Quantifies how often the recommended lifecycle is followed. |
+| `adapter-drift-by-agent.csv` *(v1.12+ / P26)* | agent referenced in any issue or progress event | `doctor_ok` + per-`ADAPTER_*`-code counts. Quantifies how often `adapter doctor` surfaces real drift. |
 
 The sibling `measurements.manifest.json` records the harness version, the corpus git SHA, the cli version, the generation date (date only, no clock time), and the CSV file list.
+
+`summary.json` *(v1.12+ / P26)* is an aggregate sidecar with `summary_schema_version: 1`. It computes the five success metrics the v1.11 [`docs/positioning.md`](../positioning.md) and [`docs/agent-contract.md`](../agent-contract.md) cite from the rows of the CSVs above. Shape:
+
+```json
+{
+  "harness_version": "0.2.0",
+  "summary_schema_version": 1,
+  "input_git_sha": "<commit>",
+  "code_pact_cli_version": "<version>",
+  "generated_at": "YYYY-MM-DD",
+  "metrics": {
+    "pack_size_p50_bytes": 0,
+    "pack_size_p90_bytes": 0,
+    "pack_size_max_bytes": 0,
+    "first_pass_verify_rate_percent": 0.0,
+    "lifecycle_adherence_rate_percent": 0.0,
+    "adapter_drift_rate_percent": 0.0,
+    "undeclared_write_rate_status": "deferred",
+    "undeclared_write_rate_note": "..."
+  },
+  "denominators": {
+    "tasks_done": 0,
+    "tasks_total": 0,
+    "agents_enabled": 0
+  }
+}
+```
+
+### Computation rules
+
+- **Percentiles use the lower-percentile rule** (no floating-point average). The `Math.ceil((p/100) × n)`-th element of the sorted ascending array, clamped to `[1, n]`. For `n=4`, `p=50` returns the second element, not the average of the two middle elements. This preserves integer byte values without rounding.
+- **Rates round to one decimal place.** `Math.round(100 × num / den × 10) / 10`. A `0/0` rate emits `0.0`, not `NaN`.
+- **Adherence numerator** = rows where `started_before_done && !legacy_planned_to_done_shortcut`. **Adherence denominator** = rows where `event_count > 0`. Tasks with zero events are excluded from the denominator — they are "not yet attempted", not "failures of adherence". `task prepare` is read-only and emits no event, so the metric measures state-machine adherence only.
+- **Adapter drift gate** = `doctor_ok` is `false` iff at least one issue has `severity: "error"`. Warning-only states (e.g. `ADAPTER_GENERATOR_STALE` alone) keep `doctor_ok: true`.
+
+### Undeclared-write-rate deferral
+
+`summary.json` carries `undeclared_write_rate_status: "deferred"` (never `"computed"` in v1.12). The metric is defined in `docs/positioning.md` but is intentionally not computed because the project does not enforce a formal commit → task link — commits often touch multiple tasks; many tasks have no clean git boundary. A historical retrofit would either over-claim or require new lifecycle instrumentation.
+
+A future phase may add an event-on-finalize that records the `task finalize --audit-strict` audit result to `progress.yaml`, making the metric observable historically without git attribution. The deferral is documented in [`design/decisions/evidence-harness-v2-rfc.md` Non-goals](../../design/decisions/evidence-harness-v2-rfc.md#non-goals-out-of-scope-for-p26).
 
 ## Running it
 
 ```sh
-# Default: print all four CSVs to stdout with `# filename` headers.
-# Writes nothing.
+# Default: print all six CSVs + summary.json to stdout with
+# `# filename` headers. Writes nothing.
 pnpm harness --corpus .
 
-# Persist to design/measurements/<five files>
+# Persist to design/measurements/<eight files>
 pnpm harness --corpus . --write
 
 # Machine-readable envelope (for CI dashboards)
@@ -38,7 +80,7 @@ pnpm harness --corpus . --json
 pnpm harness --corpus . --write --json
 ```
 
-The harness operates on any path that has a `design/` directory and (optionally) a `.code-pact/state/progress.yaml`. v1.10 ships baseline measurements for the dogfood corpus only.
+The harness operates on any path that has a `design/` directory and (optionally) a `.code-pact/state/progress.yaml`. v1.10 / v1.12 ships baseline measurements for the dogfood corpus only.
 
 ## Byte-determinism
 

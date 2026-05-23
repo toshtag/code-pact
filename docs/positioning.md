@@ -111,10 +111,9 @@ a fixed flag surface across the v1.x line.
 ## Success metrics
 
 These are the project's own measures of whether `code-pact` is
-delivering on its premise. Baseline numbers will be populated
-by the Evidence Harness v2 work (P26); this document defines
-the metric set up front so the harness work targets the right
-shape.
+delivering on its premise. Baseline values were measured by
+the Evidence Harness v2 (P26) against the dogfood corpus and
+are recomputed on every harness run.
 
 - **Context pack p50 / p90 / max bytes.** The cost of being
   the agent's context source. The promise is that
@@ -131,6 +130,14 @@ shape.
   task start ─► implement ─► verify ─► task complete ─► task
   finalize`) was followed without skipping or reordering. A
   proxy for whether the contract is legible enough to act on.
+  The v2 operational definition counts a task as adherent when
+  it has at least one `started` event before its first `done`
+  event AND does not exhibit the legacy v0.6 `planned → done`
+  shortcut. `task prepare` invocations are not currently
+  observable in `progress.yaml` (it is a read-only command and
+  emits no event), so the metric measures state-machine
+  adherence only — a future phase may add prepare-event
+  tracking and tighten the definition.
 - **Undeclared write rate.** Files changed by a task whose
   paths are not covered by the task's declared `writes` globs.
   A proxy for whether the task readiness schema is rich
@@ -139,7 +146,35 @@ shape.
   `adapter doctor` and `adapter conformance` surface real
   drift between expected and actual adapter state across the
   dogfood corpus. A proxy for whether the adapter contract is
-  enforced operationally rather than only declared.
+  enforced operationally rather than only declared. The v2
+  gate counts an agent as drifted when `adapter doctor`
+  returns any error-severity issue; warning-only states (e.g.
+  `ADAPTER_GENERATOR_STALE` alone) keep the agent counted as
+  clean.
+
+### Baseline values
+
+| metric | value |
+|---|---|
+| `pack_size_p50_bytes` | 20725 |
+| `pack_size_p90_bytes` | 50131 |
+| `pack_size_max_bytes` | 259650 |
+| `first_pass_verify_rate_percent` | 100.0 |
+| `lifecycle_adherence_rate_percent` | 81.3 |
+| `adapter_drift_rate_percent` | 0.0 |
+| `undeclared_write_rate_status` | deferred ([rationale](../design/decisions/evidence-harness-v2-rfc.md#non-goals-out-of-scope-for-p26)) |
+
+Source: [`design/measurements/summary.json`](../design/measurements/summary.json),
+measured against dogfood corpus git SHA `4627858` with
+denominators `tasks_done: 79`, `tasks_total: 116`,
+`agents_enabled: 1`. The ~19% non-adherence reflects historical
+tasks (mostly pre-v0.7) that used the legacy `planned → done`
+shortcut. The deferred undeclared-write-rate awaits a future
+phase that attributes git commits to tasks via lifecycle
+instrumentation — see the RFC link above.
+
+Reproduce: `pnpm harness --corpus . --check` (or `--write` to
+overwrite the committed snapshot).
 
 ## How positioning relates to scope
 

@@ -13,6 +13,43 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+### Changed
+
+- **P26-T3 — Baseline numbers populated in v1.11 docs.**
+  `docs/positioning.md` "Success metrics" and
+  `docs/agent-contract.md` "Measurement" sections flip
+  from "populated by P26" placeholders to the committed
+  baseline values (`pack_size_p50/p90/max_bytes` =
+  20725 / 50131 / 259650, `first_pass_verify_rate` =
+  100.0%, `lifecycle_adherence_rate` = 81.3%,
+  `adapter_drift_rate` = 0.0%, `undeclared_write_rate` =
+  deferred). Both tables now cite
+  `design/measurements/summary.json` against git SHA
+  `4627858` as the source, with denominators
+  (tasks_done=79, tasks_total=116, agents_enabled=1) and
+  a `pnpm harness --corpus . --check` reproduce hint.
+  Operational definitions tightened in `positioning.md`:
+  the agent command adherence rate explicitly counts a
+  task as adherent when it has at least one `started`
+  event before its first `done` event AND does not exhibit
+  the legacy v0.6 `planned → done` shortcut, with a note
+  that `task prepare` is read-only and emits no event so
+  the metric measures state-machine adherence only.
+
+  `docs/concepts/evidence-harness.md` updated for v1.12 /
+  P26 — the "What it measures" table grows from four to
+  six CSV files, gains a `summary.json` shape callout, and
+  documents the percentile rule (lower-percentile, no
+  float average), the rate-rounding rule (one decimal,
+  safe `0/0` divide), the adherence numerator/denominator
+  semantics, the adapter drift gate (error-severity only),
+  and the undeclared-write-rate deferral with a link to
+  the RFC Non-goals section. The "Running it" snippet
+  updates "four CSVs" → "six CSVs + summary.json".
+
+  No code changes. Closes P21's "populated by P26"
+  placeholders and P26 itself.
+
 ### Added
 
 - **P26-T2 — Evidence Harness v2 dogfood baseline.** Run
