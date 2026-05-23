@@ -15,6 +15,48 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ### Added
 
+- **P26-T2 — Evidence Harness v2 dogfood baseline.** Run
+  `pnpm harness --corpus . --write` against the dogfood
+  corpus at git SHA `4627858` and commit the resulting
+  baseline artefacts under `design/measurements/`:
+  `lifecycle-adherence-by-task.csv` (97 rows, one per task
+  with at least one event), `adapter-drift-by-agent.csv`
+  (1 row, claude-code, `doctor_ok: true` despite one
+  `ADAPTER_GENERATOR_STALE` warning), and `summary.json`
+  (`summary_schema_version: 1`). v1 CSV files regenerate
+  with column shape unchanged; row content reflects the
+  current corpus state (v1.11.0 release + P26 cycle
+  additions). `measurements.manifest.json` bumps
+  `harness_version: 0.1.0 → 0.2.0`, refreshes
+  `input_git_sha` / `code_pact_cli_version` /
+  `generated_at`, and appends the two new entries to
+  `csv_files`.
+
+  **Baseline values for the v1.11 success-metric set:**
+
+  | metric | value |
+  | --- | --- |
+  | `pack_size_p50_bytes` | 20725 |
+  | `pack_size_p90_bytes` | 50131 |
+  | `pack_size_max_bytes` | 259650 |
+  | `first_pass_verify_rate_percent` | 100.0 |
+  | `lifecycle_adherence_rate_percent` | 81.3 |
+  | `adapter_drift_rate_percent` | 0.0 |
+  | `tasks_done` | 79 |
+  | `tasks_total` | 116 |
+  | `agents_enabled` | 1 |
+  | `undeclared_write_rate_status` | deferred |
+
+  The ~19% non-adherence reflects historical tasks that
+  used the v0.6 `planned → done` shortcut without an
+  explicit `task start` event. The deferred undeclared-
+  write-rate field documents its non-computation per
+  evidence-harness-v2-rfc.md.
+
+  No production code changes — corpus measurement only.
+  P26-T3 will flip the v1.11 docs from "populated by P26"
+  placeholders to these committed values.
+
 - **P26-T1 — Evidence Harness v2 implementation.** The
   internal-only measurement harness at `scripts/harness/`
   now emits three additional artefacts alongside the v1
