@@ -1,5 +1,6 @@
 id: P27
-name: CLI maintainability hardening — split task and adapter clusters out of src/cli.ts
+name: CLI maintainability hardening — split task and adapter clusters out of
+  src/cli.ts
 weight: 15
 confidence: high
 risk: medium
@@ -34,21 +35,34 @@ objective: |
 non_goals:
   - new CLI commands, new flags, new error codes, or envelope adjustments
   - command base class / registry pattern / plugin system
-  - extracting init / plan / phase / doctor / verify / pack / progress / spec / recommend clusters (deferred to a future RFC if their growth justifies it)
-  - test refactoring — existing tests are the safety net; any test that needs modification means the refactor is doing more than it claims
-  - reorganising shared helpers (strictParse, ConfigError, emitTaskCommonError) — they stay in their current locations
-  - changes to src/commands/ (the pure-function command implementation layer; P27 extracts the CLI wrapper layer only)
-  - package.json `exports` map changes (the CLI is still consumed via the `bin` entry)
+  - extracting init / plan / phase / doctor / verify / pack / progress / spec /
+    recommend clusters (deferred to a future RFC if their growth justifies it)
+  - test refactoring — existing tests are the safety net; any test that needs
+    modification means the refactor is doing more than it claims
+  - reorganising shared helpers (strictParse, ConfigError, emitTaskCommonError)
+    — they stay in their current locations
+  - changes to src/commands/ (the pure-function command implementation layer;
+    P27 extracts the CLI wrapper layer only)
+  - package.json `exports` map changes (the CLI is still consumed via the `bin`
+    entry)
 definition_of_done:
-  - design/phases/P27-cli-maintainability.yaml exists with this objective and tasks list (P27-T0)
+  - design/phases/P27-cli-maintainability.yaml exists with this objective and
+    tasks list (P27-T0)
   - design/roadmap.yaml lists P27 (P27-T0)
-  - "design/decisions/cli-maintainability-rfc.md exists with `Status: accepted` lock (P27-T0)"
-  - "`src/cli/commands/task.ts` exists with cmdTask + 10 cmdTask* functions; src/cli.ts uses a single import for the task cluster (P27-T1)"
-  - "`src/cli/commands/adapter.ts` exists with cmdAdapter + 6 cmdAdapter* functions; src/cli.ts uses a single import for the adapter cluster (P27-T2)"
+  - "design/decisions/cli-maintainability-rfc.md exists with `Status: accepted`
+    lock (P27-T0)"
+  - "`src/cli/commands/task.ts` exists with cmdTask + 10 cmdTask* functions;
+    src/cli.ts uses a single import for the task cluster (P27-T1)"
+  - "`src/cli/commands/adapter.ts` exists with cmdAdapter + 6 cmdAdapter*
+    functions; src/cli.ts uses a single import for the adapter cluster (P27-T2)"
   - src/cli.ts shrinks from ~4559 lines to ~2500 lines (P27-T1 + T2 combined)
-  - "the existing 1262 unit + 333 integration tests pass without modification across both T1 and T2 (verified at the end of each task)"
-  - "`dist/cli.js` runtime behaviour byte-identical to v1.13 for representative commands: `task prepare`, `adapter conformance`, `task finalize --audit-strict` (P27-T1 + T2 verification)"
-  - docs/cli-contract.md notes the new file layout under "Where new commands go" or equivalent (P27-T3)
+  - the existing 1262 unit + 333 integration tests pass without modification
+    across both T1 and T2 (verified at the end of each task)
+  - "`dist/cli.js` runtime behaviour byte-identical to v1.13 for representative
+    commands: `task prepare`, `adapter conformance`, `task finalize
+    --audit-strict` (P27-T1 + T2 verification)"
+  - docs/cli-contract.md notes the new file layout under "Where new commands go"
+    or equivalent (P27-T3)
   - CHANGELOG.md gains entries under `[Unreleased]` covering each P27 task
 verification:
   commands:
@@ -67,7 +81,7 @@ tasks:
     write_surface: low
     verification_strength: medium
     expected_duration: short
-    status: planned
+    status: done
     description: |
       RFC acceptance + phase registration.
 
@@ -109,7 +123,7 @@ tasks:
     write_surface: high
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
     description: |
       Extract the task cluster.
 
@@ -174,7 +188,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: short
-    status: planned
+    status: done
     description: |
       Extract the adapter cluster.
 
@@ -216,7 +230,7 @@ tasks:
     write_surface: low
     verification_strength: medium
     expected_duration: short
-    status: planned
+    status: done
     description: |
       Document the new file layout.
 
