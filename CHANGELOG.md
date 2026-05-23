@@ -13,6 +13,48 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+### Changed
+
+- **P27-T1 — Task cluster extracted from `src/cli.ts`.**
+  Pure refactor. The `task` subcommand cluster (cmdTask +
+  cmdTaskAdd / cmdTaskContext / cmdTaskPrepare /
+  cmdTaskComplete / cmdTaskFinalize / cmdTaskRunbook /
+  cmdTaskStart / cmdTaskBlock / cmdTaskResume /
+  cmdTaskStatus, plus the cluster-private helpers
+  `TASK_ADD_NON_INTERACTIVE_ONLY_FLAGS`, `emitConfigError`,
+  `emitTaskCommonError`) moves out of `src/cli.ts` into a
+  new `src/cli/commands/task.ts` (~1700 lines).
+  `src/cli.ts` keeps its top-level routing and imports
+  `cmdTask` from the new file via a single line.
+
+  A small shared helper module
+  `src/cli/util.ts` is also added in this task. It hosts
+  `withWriteLock` — the P14 advisory-write-lock wrapper —
+  which was defined in `src/cli.ts` and is now consumed by
+  both `cli.ts` (for init / phase mutations) and
+  `cli/commands/task.ts` (for `task add` / `task finalize`
+  / etc.). Moving it to a shared file avoids the circular
+  import that would otherwise arise from `cli.ts` ↔
+  `task.ts`.
+
+  **Pure-refactor contract preserved.** Every command's
+  JSON envelope, exit code, error code, and flag surface
+  is byte-identical to v1.13. The full existing test
+  suite (1262 unit + 333 integration) passes WITHOUT
+  MODIFICATION — verified at commit time.
+
+  `src/cli.ts` shrinks from 4559 lines to 2850 lines
+  (−1709 lines, −37%). The duplicated `--budget-bytes`
+  parsing + `CONTEXT_OVER_BUDGET` error block from P24
+  now lives in one file alongside its peers, making
+  future cross-command flag refactors (e.g. extracting
+  the duplicated parse into a `parseBudgetBytes` helper)
+  a single-file change.
+
+  `dist/cli.js` grows from 447.82 KB to 452.85 KB (+5.03
+  KB) due to the new module boundary; runtime behaviour
+  is unchanged.
+
 ### Added
 
 - **P27-T0 — CLI maintainability hardening RFC + phase
