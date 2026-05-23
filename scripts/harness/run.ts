@@ -19,20 +19,28 @@ import { loadPlanState } from "../../src/core/plan/state.ts";
 import { runPlanLint } from "../../src/commands/plan-lint.ts";
 import { buildContextPack } from "../../src/core/pack/index.ts";
 import { readPackageVersion } from "../../src/lib/package-version.ts";
+import { runAdapterDoctor } from "../../src/commands/adapter-doctor.ts";
 
 import {
+  buildAdapterDriftRow,
   buildEventDensityRow,
+  buildLifecycleAdherenceRow,
   buildLintHistogram,
   buildPackSizeRow,
+  buildSummary,
   buildVerifySuccessRow,
   rowsToCsv,
+  type AdapterDriftRow,
   type EventDensityRow,
+  type LifecycleAdherenceRow,
   type LintIssueRow,
   type PackSizeRow,
+  type Summary,
   type VerifySuccessRow,
 } from "./metrics.ts";
 
-const HARNESS_VERSION = "0.1.0";
+const HARNESS_VERSION = "0.2.0";
+const SUMMARY_SCHEMA_VERSION = 1;
 
 interface HarnessOptions {
   corpus: string;
@@ -45,6 +53,9 @@ interface HarnessOutput {
   verifySuccessRows: VerifySuccessRow[];
   eventDensityRows: EventDensityRow[];
   lintIssueRows: LintIssueRow[];
+  lifecycleAdherenceRows: LifecycleAdherenceRow[];
+  adapterDriftRows: AdapterDriftRow[];
+  summary: Summary;
   manifest: {
     harness_version: string;
     input_git_sha: string;
@@ -75,6 +86,8 @@ async function buildHarnessOutput(opts: HarnessOptions): Promise<HarnessOutput> 
   const packSizeRows: PackSizeRow[] = [];
   const verifySuccessRows: VerifySuccessRow[] = [];
   const eventDensityRows: EventDensityRow[] = [];
+  const lifecycleAdherenceRows: LifecycleAdherenceRow[] = [];
+  let tasksTotal = 0;
 
   const phaseEntries = [...state.phases].sort((a, b) =>
     a.phase.id.localeCompare(b.phase.id),
@@ -86,6 +99,7 @@ async function buildHarnessOutput(opts: HarnessOptions): Promise<HarnessOutput> 
       a.id.localeCompare(b.id),
     );
     for (const task of tasks) {
+      tasksTotal++;
       try {
         const pack = await buildContextPack({
           cwd,
@@ -105,6 +119,11 @@ async function buildHarnessOutput(opts: HarnessOptions): Promise<HarnessOutput> 
       if (densityRow.total_events > 0) {
         eventDensityRows.push(densityRow);
       }
+
+      const adherenceRow = buildLifecycleAdherenceRow(phase.id, task.id, events);
+      if (adherenceRow !== null) {
+        lifecycleAdherenceRows.push(adherenceRow);
+      }
     }
   }
 
@@ -115,6 +134,41 @@ async function buildHarnessOutput(opts: HarnessOptions): Promise<HarnessOutput> 
   });
   const lintIssueRows = buildLintHistogram(lintResult.issues);
 
+  // P26-T1: adapter drift aggregation. Invoke runAdapterDoctor against
+  // every enabled agent (omit --agent → doctor walks the project.yaml
+  // agents:list itself) and bucket the resulting issues by agent.
+  let adapterDriftRows: AdapterDriftRow[] = [];
+  try {
+    const doctorResult = await runAdapterDoctor({ cwd, locale: "en-US" });
+    const issuesByAgent = new Map<string, typeof doctorResult.issues>();
+    for (const issue of doctorResult.issues) {
+      const bucket = issuesByAgent.get(issue.agent) ?? [];
+      bucket.push(issue);
+      issuesByAgent.set(issue.agent, bucket);
+    }
+    // Even agents with zero issues get a row when they are enabled;
+    // surface them by reading project.yaml directly via loadPlanState's
+    // sibling artefact. The simplest deterministic source is the
+    // issues map's keys plus any agent that produced no issues — but
+    // runAdapterDoctor never reports an "ok" agent in the issues list.
+    // We derive the enabled-agent set from progress events instead:
+    // if no project.yaml is loadable we still emit an empty CSV.
+    // For the dogfood corpus the issue map's keys equal the enabled
+    // set when at least one issue exists; for true silence we list the
+    // dogfood agents from progress events' `agent` field.
+    const enabledAgents = new Set<string>(issuesByAgent.keys());
+    for (const ev of events) {
+      if (ev.agent) enabledAgents.add(ev.agent);
+    }
+    const sortedAgents = [...enabledAgents].sort((a, b) => a.localeCompare(b));
+    adapterDriftRows = sortedAgents.map((agent) =>
+      buildAdapterDriftRow(agent, issuesByAgent.get(agent) ?? []),
+    );
+  } catch {
+    // No project.yaml or no enabled agents → empty drift CSV.
+    adapterDriftRows = [];
+  }
+
   const inputGitSha = readGitSha(cwd);
   const cliPackageJsonPath = join(import.meta.dirname, "..", "..", "package.json");
   const codePactCliVersion = await readPackageVersion(cliPackageJsonPath);
@@ -122,11 +176,27 @@ async function buildHarnessOutput(opts: HarnessOptions): Promise<HarnessOutput> 
   const today = new Date();
   const generatedAt = `${today.getUTCFullYear()}-${String(today.getUTCMonth() + 1).padStart(2, "0")}-${String(today.getUTCDate()).padStart(2, "0")}`;
 
+  const summary = buildSummary({
+    harnessVersion: HARNESS_VERSION,
+    summarySchemaVersion: SUMMARY_SCHEMA_VERSION,
+    inputGitSha,
+    codePactCliVersion,
+    generatedAt,
+    packSizeRows,
+    verifySuccessRows,
+    lifecycleAdherenceRows,
+    adapterDriftRows,
+    tasksTotal,
+  });
+
   return {
     packSizeRows,
     verifySuccessRows,
     eventDensityRows,
     lintIssueRows,
+    lifecycleAdherenceRows,
+    adapterDriftRows,
+    summary,
     manifest: {
       harness_version: HARNESS_VERSION,
       input_git_sha: inputGitSha,
@@ -137,6 +207,8 @@ async function buildHarnessOutput(opts: HarnessOptions): Promise<HarnessOutput> 
         "verify-success-rate.csv",
         "task-event-density.csv",
         "lint-issue-histogram.csv",
+        "lifecycle-adherence-by-task.csv",
+        "adapter-drift-by-agent.csv",
       ],
     },
   };
@@ -179,6 +251,33 @@ function serializeOutputs(output: HarnessOutput): Record<string, string> {
       "severity",
       "count",
     ]),
+    "lifecycle-adherence-by-task.csv": rowsToCsv(
+      output.lifecycleAdherenceRows,
+      [
+        "phase_id",
+        "task_id",
+        "started_before_done",
+        "had_retry",
+        "had_block",
+        "legacy_planned_to_done_shortcut",
+        "event_count",
+      ],
+    ),
+    "adapter-drift-by-agent.csv": rowsToCsv(output.adapterDriftRows, [
+      "agent",
+      "doctor_ok",
+      "issue_count",
+      "manifest_missing",
+      "manifest_invalid",
+      "generator_stale",
+      "schema_drift",
+      "profile_drift",
+      "file_missing",
+      "file_drift",
+      "desired_stale",
+      "contract_drift",
+      "unmanaged_file",
+    ]),
   };
 }
 
@@ -200,6 +299,8 @@ async function main(): Promise<number> {
   const output = await buildHarnessOutput({ corpus, write, json });
   const serialized = serializeOutputs(output);
 
+  const summaryJsonText = JSON.stringify(output.summary, null, 2) + "\n";
+
   if (write) {
     const outDir = join(resolve(corpus), "design", "measurements");
     await mkdir(outDir, { recursive: true });
@@ -211,9 +312,10 @@ async function main(): Promise<number> {
       JSON.stringify(output.manifest, null, 2) + "\n",
       "utf8",
     );
+    await writeFile(join(outDir, "summary.json"), summaryJsonText, "utf8");
     if (!json) {
       process.stderr.write(
-        `Wrote ${Object.keys(serialized).length} CSV(s) + manifest to ${outDir}\n`,
+        `Wrote ${Object.keys(serialized).length} CSV(s) + manifest + summary.json to ${outDir}\n`,
       );
     } else {
       process.stdout.write(
@@ -221,8 +323,13 @@ async function main(): Promise<number> {
           ok: true,
           data: {
             output_dir: outDir,
-            files: [...Object.keys(serialized), "measurements.manifest.json"],
+            files: [
+              ...Object.keys(serialized),
+              "measurements.manifest.json",
+              "summary.json",
+            ],
             manifest: output.manifest,
+            summary: output.summary,
           },
         }) + "\n",
       );
@@ -236,6 +343,7 @@ async function main(): Promise<number> {
         ok: true,
         data: {
           manifest: output.manifest,
+          summary: output.summary,
           csv: serialized,
         },
       }) + "\n",
@@ -246,8 +354,9 @@ async function main(): Promise<number> {
   for (const [name, content] of Object.entries(serialized)) {
     process.stdout.write(`# ${name}\n${content}\n`);
   }
+  process.stdout.write(`# summary.json\n${summaryJsonText}\n`);
   process.stderr.write(
-    `Generated ${Object.keys(serialized).length} CSV(s). Re-run with --write to persist.\n`,
+    `Generated ${Object.keys(serialized).length} CSV(s) + summary.json. Re-run with --write to persist.\n`,
   );
   return 0;
 }
