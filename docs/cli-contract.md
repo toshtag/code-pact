@@ -2296,6 +2296,38 @@ The release-prep convention since v1.2.0 is:
 
 Auto-flip implementation (e.g. a `--phase-status` flag on `phase reconcile`, or a separate `phase finalize` command) is **not part of v1.5** and is deferred to a future RFC. The decision and its rationale are documented in [design/decisions/governance-rfc.md](../design/decisions/governance-rfc.md) § Phase status policy.
 
+## Source layout (CLI wrapper layer)
+
+> v1.14+ / P27. **Not a stability contract** — this section
+> documents the on-disk layout so contributors know where new
+> commands go. The runtime behaviour of every command is
+> locked by the JSON envelope / exit code / error code
+> contract documented above, not by file paths.
+
+The CLI wrapper layer (argv parsing, flag validation, error envelope
+shaping) lives in two places. The pure-function command implementations
+that the wrappers call into live separately under [`src/commands/`](../src/commands/)
+and are untouched by this split.
+
+| File | Cluster | Contents |
+|---|---|---|
+| [`src/cli.ts`](../src/cli.ts) | top-level dispatch + init / doctor / validate / spec / recommend / plan / verify / pack / progress / phase | The main entry point. `main()` parses argv, resolves locale, and routes to per-cluster dispatchers. Roughly 2400 lines after P27. |
+| [`src/cli/commands/task.ts`](../src/cli/commands/task.ts) | task | `cmdTask` (exported) + `cmdTaskAdd` / `cmdTaskContext` / `cmdTaskPrepare` / `cmdTaskComplete` / `cmdTaskFinalize` / `cmdTaskRunbook` / `cmdTaskStart` / `cmdTaskBlock` / `cmdTaskResume` / `cmdTaskStatus` (private to module) + the cluster-private helpers `TASK_ADD_NON_INTERACTIVE_ONLY_FLAGS`, `emitConfigError`, `emitTaskCommonError`. |
+| [`src/cli/commands/adapter.ts`](../src/cli/commands/adapter.ts) | adapter | `cmdAdapter` (exported) + `cmdAdapterList` / `cmdAdapterInstall` / `cmdAdapterDoctor` / `cmdAdapterConformance` / `cmdAdapterUpgrade` / `cmdAdapterBareForm` (private to module) + the cluster-private `runAdapterInstallAndEmit` helper. |
+| [`src/cli/util.ts`](../src/cli/util.ts) | shared | `withWriteLock` — the P14 advisory-write-lock wrapper. Imported by both `src/cli.ts` (for init / phase mutations) and `src/cli/commands/task.ts` (for `task add` / `task finalize` / `phase reconcile` delegation). |
+
+### Where new commands go
+
+When adding a new CLI command:
+
+1. **If it extends an existing cluster (task or adapter)**, the new `cmd*` function goes in the corresponding `src/cli/commands/<cluster>.ts` file. Update the cluster dispatcher (`cmdTask` or `cmdAdapter`) to route the new subcommand. Update the unknown-subcommand help message.
+
+2. **If it is a new top-level command** in a cluster still hosted in `src/cli.ts` (phase, plan, init, doctor, validate, verify, pack, progress, spec, recommend), the new `cmd*` function goes in `src/cli.ts` next to its peers, and the top-level `main()` dispatch gains a new branch.
+
+3. **If a cluster currently hosted in `src/cli.ts` grows enough to warrant its own file**, file an RFC amendment to P27 (or a follow-up RFC) and extract the cluster in its own task. The pure-refactor invariant (existing tests pass without modification) is the safety guarantee.
+
+The pure-function implementation layer that the CLI wrappers call into lives separately under [`src/commands/`](../src/commands/) (e.g. `task-context.ts`, `adapter-conformance.ts`). That layer is unaffected by P27 — only the CLI wrapper layer is split.
+
 ## Maintainer-only tooling (NOT part of the CLI surface)
 
 The repository contains internal scripts under `scripts/` that are **not** part of the `code-pact` CLI contract. They are run via `pnpm <script-name>` (NOT through `code-pact ...`), live outside `dist/`, and are never registered in `package.json` `bin`.

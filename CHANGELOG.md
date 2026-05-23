@@ -15,6 +15,28 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ### Changed
 
+- **P27-T3 — Source layout documented.**
+  `docs/cli-contract.md` gains a new `## Source layout
+  (CLI wrapper layer)` section immediately before the
+  `## Maintainer-only tooling` section. The new section
+  documents the on-disk layout of the CLI wrapper layer
+  after P27-T1 + T2: `src/cli.ts` (main + remaining
+  clusters), `src/cli/commands/task.ts`,
+  `src/cli/commands/adapter.ts`, and `src/cli/util.ts`
+  (the shared `withWriteLock` module). A "Where new
+  commands go" subsection walks contributors through the
+  three cases (extend an existing cluster, add to a
+  cli.ts-hosted cluster, or extract a new cluster via an
+  RFC amendment). The note explicitly clarifies that the
+  source layout is NOT a stability contract — runtime
+  behaviour is locked by the JSON envelope / exit code /
+  error code contract, not by file paths. The
+  pure-function command implementation layer at
+  `src/commands/` is also referenced so contributors do
+  not confuse the two layers.
+
+  No code changes. Closes P27.
+
 - **P27-T2 — Adapter cluster extracted from `src/cli.ts`.**
   Pure refactor. The `adapter` subcommand cluster
   (cmdAdapter + cmdAdapterList / cmdAdapterInstall /
