@@ -13,6 +13,47 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+### Changed
+
+- **P22 cancelled — adapter schema v2 / template
+  signature tracking investigated, not shippable.** The
+  P22 RFC originally proposed bumping
+  `adapter_schema_version` to 2 with a per-file
+  `template_signature` field for drift attribution, plus
+  lifecycle hooks (`prepare_command` /
+  `finish_command`). Investigation found the
+  drift-attribution premise is **already satisfied** by
+  the v1 manifest plus the existing `adapter doctor`
+  two-axis classification (local state × desired state),
+  shipped since v0.9 (P7). Adding `template_signature`
+  would duplicate existing capability. Lifecycle hooks
+  have no concrete use case the project has been asked
+  to serve. Decision recorded in
+  `design/decisions/P22-cancelled-adapter-schema-v2.md`
+  (status: accepted). `design/phases/P22-adapter-schema-v2.yaml`
+  registers the phase with `status: cancelled` and the
+  single investigation task (P22-T0) also `cancelled`,
+  matching the v1.4 P15-T5 cancellation precedent. The
+  P22 number is preserved as a documented cancellation
+  rather than reused for unrelated work.
+
+- **Adapter doctor two-axis classification documented.**
+  `docs/cli-contract.md` gains a `#### Adapter file
+  drift classification (two-axis)` subsection under
+  `### adapter doctor` documenting the existing local
+  state × desired state matrix, the per-combination
+  doctor code (`ADAPTER_DESIRED_STALE`,
+  `ADAPTER_FILE_DRIFT`, `ADAPTER_FILE_MISSING`), and the
+  remediation step for each row. The names
+  (`ADAPTER_FILE_DRIFT` covers the "both axes diverged"
+  case, not the generic "any drift" case) are
+  imperfectly self-describing; rename would be a
+  breaking change to `KNOWN_CODES.public`, so the
+  semantics are documented here instead. The
+  documentation references the P22 cancellation decision
+  so future contributors can trace why
+  `template_signature` was not added.
+
 ## [1.13.2] — 2026-05-23
 
 **Dogfood baseline refresh.** Maintenance patch. The
