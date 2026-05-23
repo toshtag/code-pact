@@ -1,0 +1,303 @@
+id: P26
+name: Evidence Harness v2 — aggregate stats and adherence baselines
+weight: 18
+confidence: high
+risk: low
+status: in_progress
+objective: |
+  Populate the five success-metric baselines docs/positioning.md
+  and docs/agent-contract.md committed to in v1.11.0.
+
+  Extends the internal-only measurement harness (P20) with two
+  new per-task / per-agent CSVs and one aggregate JSON
+  sidecar:
+
+  1. `lifecycle-adherence-by-task.csv` — per-task booleans
+     derived from the existing task-event-density raw counts:
+     `started_before_done`, `had_retry`, `had_block`,
+     `legacy_planned_to_done_shortcut`. The "agent command
+     adherence rate" the v1.11 docs cite is the percentage
+     of done tasks with `started_before_done=true` AND
+     `legacy_planned_to_done_shortcut=false`.
+  2. `adapter-drift-by-agent.csv` — one row per enabled
+     agent, with `doctor_ok` + per-issue-code counts derived
+     from running `adapter doctor` on each.
+  3. `summary.json` — aggregate sidecar computing
+     `pack_size_p50/p90/max_bytes`,
+     `first_pass_verify_rate_percent`,
+     `lifecycle_adherence_rate_percent`,
+     `adapter_drift_rate_percent`, plus
+     `undeclared_write_rate_status: "deferred"` documenting
+     the one metric P26 honestly cannot retrofit.
+
+  The harness contract is preserved end-to-end: byte-
+  deterministic output for the same input git SHA; v1 CSV
+  columns unchanged (additive only); maintainer-only
+  invocation via `pnpm harness`; never a `bin` entry; never
+  surfaces in CLI help. The `harness_version` in
+  `measurements.manifest.json` bumps 0.1.0 → 0.2.0 to mark
+  the additive output set.
+
+  After the harness lands and the corpus is re-measured,
+  `docs/positioning.md` and `docs/agent-contract.md` flip
+  their "populated by P26" placeholders to the actual values
+  with a footnote linking the source CSV row.
+
+  Undeclared write rate is intentionally NOT computed in
+  P26 — attributing git commits to tasks requires either
+  formal commit→task linkage (which the project does not
+  enforce) or new lifecycle instrumentation. The
+  `undeclared_write_rate_status: "deferred"` field
+  documents the choice for future review.
+non_goals:
+  - "computing undeclared_write_rate from git history (deferred; documented in summary.json as `status: deferred`)"
+  - multi-repo corpus support (dogfood corpus only in v2)
+  - time-series CSVs / trend tracking (each harness run is a snapshot)
+  - web UI or dashboard for the metrics (CSVs are for RFC citation, visualisation is the consumer's problem)
+  - README badges (the dogfood numbers are project-specific, not universal quality signals)
+  - bumping `summary_schema_version` when adding a future metric field (additive changes are not bumps; only set/unit changes are)
+  - moving the harness to a public `bin` entry (it stays maintainer-only per P20)
+definition_of_done:
+  - design/phases/P26-evidence-harness-v2.yaml exists with this objective and tasks list (P26-T0)
+  - design/roadmap.yaml lists P26 (P26-T0)
+  - "design/decisions/evidence-harness-v2-rfc.md exists with `Status: accepted` lock (P26-T0)"
+  - "`scripts/harness/` emits `lifecycle-adherence-by-task.csv` and `adapter-drift-by-agent.csv` with the column shapes locked in the RFC (P26-T1)"
+  - "`scripts/harness/` emits `summary.json` with `summary_schema_version: 1` and every metric field defined in the RFC (P26-T1)"
+  - "`measurements.manifest.json` `harness_version` bumps 0.1.0 → 0.2.0 (P26-T1)"
+  - "byte-determinism test: two consecutive runs against the same git SHA produce identical CSV + summary.json outputs (P26-T1)"
+  - "`design/measurements/lifecycle-adherence-by-task.csv`, `design/measurements/adapter-drift-by-agent.csv`, and `design/measurements/summary.json` are committed against the dogfood corpus baseline (P26-T2)"
+  - "v1 CSV outputs (`pack-size-by-task.csv`, `verify-success-rate.csv`, `task-event-density.csv`, `lint-issue-histogram.csv`) regenerate byte-identically (P26-T2 verification)"
+  - "`docs/positioning.md` and `docs/agent-contract.md` baseline placeholders flip from `populated by P26` to the actual values, with a footnote linking `design/measurements/summary.json` (P26-T3)"
+  - "`docs/concepts/evidence-harness.md` updates with the new metric set, the summary.json shape, and the undeclared-write-rate deferral rationale (P26-T3)"
+  - CHANGELOG.md gains entries under `[Unreleased]` covering each P26 task
+verification:
+  commands:
+    - pnpm typecheck
+    - pnpm test
+    - pnpm build
+    - node dist/cli.js plan lint --json
+    - node dist/cli.js validate --json
+    - node dist/cli.js doctor --json
+tasks:
+  - id: P26-T0
+    type: architecture
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: planned
+    description: |
+      RFC acceptance + phase registration.
+
+      Lands design/decisions/evidence-harness-v2-rfc.md with
+      `Status: proposed` in this PR; the status line flips
+      to `accepted` in a small follow-up commit before merge
+      per the P11–P21 lifecycle precedent.
+
+      This task also bootstraps the P26 phase itself:
+      - design/phases/P26-evidence-harness-v2.yaml (this file)
+      - design/roadmap.yaml gains a P26 entry (weight 18)
+      - CHANGELOG.md gains a P26-T0 entry under [Unreleased]
+
+      The phase YAML and roadmap.yaml updates are bootstrap
+      writes — they are protected paths under `plan lint
+      --strict` and are NOT listed in this task's `writes:`
+      block. Same precedent as P21-T0.
+
+      The phase status stays `in_progress` until P26-T3
+      lands; task statuses transition via the normal
+      progress event stream.
+    decision_refs:
+      - design/decisions/evidence-harness-v2-rfc.md
+    reads:
+      - design/decisions/evidence-harness-rfc.md
+      - design/decisions/agent-contract-v2-rfc.md
+      - docs/positioning.md
+      - docs/agent-contract.md
+    writes:
+      - design/decisions/evidence-harness-v2-rfc.md
+      - CHANGELOG.md
+    acceptance_refs:
+      - design/phases/P26-evidence-harness-v2.yaml
+  - id: P26-T1
+    type: feature
+    ambiguity: low
+    risk: low
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: planned
+    description: |
+      Implement the v2 harness outputs.
+
+      Adds three new artefacts under `scripts/harness/`:
+
+      1. `lifecycle-adherence-by-task.csv` — derived from
+         the existing `task-event-density.csv` raw counts
+         plus the chronological order of `started` vs
+         `done` events from `.code-pact/state/progress.yaml`.
+         Columns locked in the RFC: `phase_id`, `task_id`,
+         `started_before_done`, `had_retry`, `had_block`,
+         `legacy_planned_to_done_shortcut`, `event_count`.
+      2. `adapter-drift-by-agent.csv` — one row per enabled
+         agent. Invokes `runAdapterDoctor` (importing the
+         function rather than spawning a subprocess) and
+         aggregates the resulting `data.issues[]` by `code`
+         into per-code count columns. Columns locked in the
+         RFC.
+      3. `summary.json` — aggregate sidecar computed from
+         every v1 + v2 CSV. Fields locked in the RFC:
+         `pack_size_p50/p90/max_bytes`,
+         `first_pass_verify_rate_percent`,
+         `lifecycle_adherence_rate_percent`,
+         `adapter_drift_rate_percent`,
+         `undeclared_write_rate_status: "deferred"` plus
+         note, and a `denominators` block. Percentiles use
+         the lower-median rule (no floating-point average)
+         to preserve integer byte values. Rates are rounded
+         to one decimal place.
+
+      `measurements.manifest.json` `harness_version` bumps
+      0.1.0 → 0.2.0.
+
+      Tests:
+      - Unit tests for each new metric helper (sort the
+        events to derive `started_before_done`; bucket
+        doctor codes into the per-code columns; compute the
+        lower-median percentile; compute the rate-rounding).
+      - Integration test: two consecutive `pnpm harness
+        --corpus tests/fixtures/sample-corpus --check` runs
+        produce byte-identical outputs (extends the
+        existing v1 byte-determinism test).
+      - Integration test: `summary.json` contains every
+        field documented in the RFC, with the deferred
+        field carrying `status: "deferred"` and a non-empty
+        note.
+
+      v1 CSV outputs are unchanged — verified by re-running
+      the existing v1 byte-determinism test against the
+      same fixture.
+    depends_on:
+      - P26-T0
+    decision_refs:
+      - design/decisions/evidence-harness-v2-rfc.md
+    reads:
+      - scripts/harness/run.ts
+      - scripts/harness/metrics.ts
+      - src/commands/adapter-doctor.ts
+      - src/core/progress/io.ts
+      - design/decisions/evidence-harness-v2-rfc.md
+    writes:
+      - scripts/harness/**
+      - tests/unit/scripts/harness/**
+      - tests/integration/harness.test.ts
+      - CHANGELOG.md
+    acceptance_refs:
+      - design/phases/P26-evidence-harness-v2.yaml
+  - id: P26-T2
+    type: feature
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: planned
+    description: |
+      Run the v2 harness against the dogfood corpus and
+      commit the resulting baseline CSVs + `summary.json`
+      under `design/measurements/`.
+
+      Steps:
+      1. `pnpm harness --corpus . --write`
+      2. Review the new outputs for sanity (no obvious
+         counting bugs that PR review would catch — e.g.
+         the lifecycle adherence rate should not be 0% or
+         100% on a healthy corpus, and the pack-size
+         percentiles should match a manual spot-check of
+         pack-size-by-task.csv).
+      3. Verify the v1 CSVs regenerated byte-identically
+         (`git diff design/measurements/pack-size-by-task.csv
+         design/measurements/verify-success-rate.csv
+         design/measurements/task-event-density.csv
+         design/measurements/lint-issue-histogram.csv`
+         shows no changes; only the three new files appear
+         in `git status`).
+      4. Commit
+         `design/measurements/lifecycle-adherence-by-task.csv`,
+         `design/measurements/adapter-drift-by-agent.csv`,
+         and `design/measurements/summary.json` plus the
+         manifest bump.
+
+      No production code changes. Corpus-only.
+    depends_on:
+      - P26-T1
+    decision_refs:
+      - design/decisions/evidence-harness-v2-rfc.md
+    reads:
+      - design/decisions/evidence-harness-v2-rfc.md
+      - scripts/harness/run.ts
+    writes:
+      - design/measurements/lifecycle-adherence-by-task.csv
+      - design/measurements/adapter-drift-by-agent.csv
+      - design/measurements/summary.json
+      - design/measurements/measurements.manifest.json
+      - CHANGELOG.md
+    acceptance_refs:
+      - design/phases/P26-evidence-harness-v2.yaml
+  - id: P26-T3
+    type: docs
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: planned
+    description: |
+      Populate the baseline numbers in v1.11 docs and
+      refresh the concept doc.
+
+      In `docs/positioning.md`, the "Success metrics" table
+      currently reads "populated by P26" for every numeric
+      column. P26-T3 replaces those placeholders with the
+      values from the committed `design/measurements/
+      summary.json`, with a footnote of the form:
+
+      > Baseline source: `design/measurements/summary.json`
+      > (generated against git SHA `<sha>` from the
+      > dogfood corpus, n=`<denominator>`).
+
+      The `undeclared_write_rate` row stays at "deferred"
+      with a link to `evidence-harness-v2-rfc.md` Non-goals.
+
+      `docs/agent-contract.md` Measurement section gets the
+      same flip.
+
+      `docs/concepts/evidence-harness.md` updates with:
+      - the new metric set + summary.json shape
+      - the percentile / rate computation rules
+      - the undeclared-write-rate deferral rationale +
+        future-instrumentation sketch
+
+      Also flips the P26 phase YAML status to `done` via
+      `code-pact phase reconcile P26 --write` in a second
+      commit on this branch (mirrors the P21-T6 close).
+    depends_on:
+      - P26-T2
+    decision_refs:
+      - design/decisions/evidence-harness-v2-rfc.md
+    reads:
+      - docs/positioning.md
+      - docs/agent-contract.md
+      - docs/concepts/evidence-harness.md
+    writes:
+      - docs/positioning.md
+      - docs/agent-contract.md
+      - docs/concepts/evidence-harness.md
+      - CHANGELOG.md
+    acceptance_refs:
+      - design/phases/P26-evidence-harness-v2.yaml
