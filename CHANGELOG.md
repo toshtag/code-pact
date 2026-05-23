@@ -13,6 +13,56 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+## [1.13.0] — 2026-05-23
+
+**Context budget enforcement.** v1.13.0 closes P24 and
+adds the `--budget-bytes <N>` flag to `code-pact task
+context` and `code-pact task prepare`. The flag enforces a
+deterministic upper bound on the rendered context pack
+size by progressively eliding sections in a fixed priority
+order (`completed_tasks` → `related_decisions` (when
+`context_size: large`) → `constitution` → `rules` (when
+`write_surface: high`) → `reads`). When even maximal
+elision cannot meet the budget, the command fails with a
+new public error code `CONTEXT_OVER_BUDGET` (exit 2).
+
+The new error envelope carries `data.budget_bytes`,
+`data.minimum_achievable_bytes` (the post-maximal-elision
+floor — re-running with this value as the budget produces
+a pack of exactly that size), and `data.unelidable_sections`
+(the structural floor: `header` / `phase_contract` /
+`task_definition` / `depends_on` / `writes` /
+`declared_decisions` / `acceptance_refs` /
+`verification_commands` / `progress_event_schema` /
+`format_overhead`).
+
+**Activates the P21-reserved enum value.** In `task
+context --explain --json` mode with `--budget-bytes`,
+every elided section emits `reason_code:
+budget_reserved_for_later` with a `details` block
+carrying `elided_for_budget_bytes` and `section_bytes`.
+The P21 unit test asserting the value is never emitted in
+the no-budget case continues to pass.
+
+**Byte-identical default preserved.** Without
+`--budget-bytes`, the rendered pack `content` is
+byte-for-byte identical to v1.12 (the existing
+`tests/integration/pack-byte-identical.test.ts` lock test
+continues to apply). The flag is opt-in per invocation.
+
+**Progress-read-only invariant preserved on the new
+failure path.** `task prepare --budget-bytes` does NOT
+mutate `.code-pact/state/progress.yaml` on the
+`CONTEXT_OVER_BUDGET` path.
+
+`docs/cli-contract.md` documents the flag, the locked
+elision priority, the `--explain --json` interaction, the
+error envelope shape, and the byte-identical default
+guarantee. `KNOWN_CODES.public` gains `CONTEXT_OVER_BUDGET`.
+
+No `adapter_schema_version` bump. No manifest schema bump.
+No `adapter upgrade` required for existing installs.
+
 ### Changed
 
 - **P24-T2 — `--budget-bytes` documentation.**

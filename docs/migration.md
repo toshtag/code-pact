@@ -447,6 +447,152 @@ Projects running `plan lint --strict` / `plan analyze --strict` / `validate --st
 
 In semver terms, v1.4.0 is a minor release.
 
+## v1.12.x → v1.13.0
+
+**Context budget enforcement.** v1.13.0 closes P24 and
+adds the `--budget-bytes <N>` flag to `code-pact task
+context` and `code-pact task prepare`. The flag is
+additive and opt-in; the no-flag default path is
+byte-identical to v1.12.
+
+### Quick path
+
+```sh
+npm install -g code-pact@1.13.0
+code-pact --version    # 1.13.0
+```
+
+No project-side action required. No `adapter upgrade`
+needed.
+
+### New: `--budget-bytes <N>` on `task context` and `task prepare`
+
+```sh
+# Cap the rendered pack at N UTF-8 bytes
+code-pact task context <task-id> --agent claude-code --budget-bytes 8000 --json
+code-pact task prepare <task-id> --agent claude-code --budget-bytes 8000 --json
+```
+
+`N` must be a positive integer (zero / negative /
+non-numeric values fail with `CONFIG_ERROR` at flag parse
+time).
+
+**Elision priority (locked).** When the rendered pack
+exceeds `N`, sections drop in this order until the bound
+is met:
+
+1. `completed_tasks` (gated by `ambiguity: high`)
+2. `related_decisions` (only when `context_size: large`)
+3. `constitution`
+4. `rules` (only when `write_surface: high`)
+5. `reads` (declared globs; declaration-only)
+
+Sections NOT in this list are unelidable: `header`,
+`phase_contract`, `task_definition`, `depends_on`,
+`writes`, `declared_decisions`, `acceptance_refs`,
+`verification_commands`, `progress_event_schema`,
+`format_overhead`. These are either always-included or
+carry task-declared intent.
+
+The locked source of truth is `ELISION_ORDER` in
+`src/core/pack/formatters/markdown.ts`. Changing the
+order requires an RFC amendment.
+
+### New: `CONTEXT_OVER_BUDGET` error code
+
+When maximal elision still exceeds the budget, the command
+fails with the new public error code:
+
+```json
+{
+  "ok": false,
+  "error": {
+    "code": "CONTEXT_OVER_BUDGET",
+    "message": "Context pack cannot be reduced below 1196 bytes; --budget-bytes 100 is unachievable for this task.",
+    "data": {
+      "budget_bytes": 100,
+      "minimum_achievable_bytes": 1196,
+      "unelidable_sections": ["header", "phase_contract", "task_definition", "verification_commands", "progress_event_schema"]
+    }
+  }
+}
+```
+
+Exit code 2. `data.minimum_achievable_bytes` is the
+post-maximal-elision floor — re-running with this value as
+the budget succeeds and produces a pack of exactly that
+size.
+
+### Activates `budget_reserved_for_later` in `--explain --json`
+
+P21-T4 reserved `budget_reserved_for_later` in
+`ContextExcludedReasonCode` for this work. In v1.13, when
+`task context --explain --json` is invoked with
+`--budget-bytes`, every elided section appears in the
+`excluded[]` array with this reason code:
+
+```json
+{
+  "excluded": [
+    {
+      "name": "rules",
+      "reason_code": "budget_reserved_for_later",
+      "details": {
+        "elided_for_budget_bytes": 2000,
+        "section_bytes": 4183
+      }
+    }
+  ]
+}
+```
+
+The P21 unit test asserting the value is never emitted in
+the no-budget case continues to pass — the new emission
+path is gated behind `--budget-bytes`.
+
+### What did NOT change
+
+- `dist/cli.js` JSON envelope for `task context` and `task
+  prepare` without `--budget-bytes` — byte-identical to
+  v1.12.
+- Pack `content` without `--budget-bytes` — byte-identical
+  to v1.12 (the existing
+  `tests/integration/pack-byte-identical.test.ts` lock
+  test continues to pass).
+- Every other public command, flag, JSON envelope, and
+  error code — unchanged.
+- Adapter manifest schema (`schema_version: 1`,
+  `adapter_schema_version: 1`) — unchanged.
+- Existing adapter instruction files — unchanged. No
+  `adapter upgrade` needed.
+- `progress.yaml` schema — unchanged.
+
+### Progress-read-only invariant preserved
+
+`task prepare --budget-bytes` does NOT mutate
+`.code-pact/state/progress.yaml` on the
+`CONTEXT_OVER_BUDGET` failure path. Verified by a
+dedicated unit test.
+
+### What's NOT in v1.13
+
+- **No `--budget-tokens` flag.** Token counting requires a
+  per-model-family tokenizer; bytes are the model-agnostic
+  proxy.
+- **No section-level truncation.** Whole-section elision
+  only; partial-body truncation is out of scope.
+- **No automatic budget inference from the agent profile.**
+  The flag is opt-in per invocation; a default-budget RFC
+  is deferred.
+- **No retroactive harness metric.** `summary.json` keeps
+  the unconditional `pack_size_*` stats; a
+  `pack_size_after_budget_*` metric (parameterised by a
+  fixed budget) is deferred.
+
+In semver terms, v1.13.0 is a minor release — additive
+only (new flag, new public error code; existing v1.12
+envelopes byte-identical).
+
 ## v1.11.x → v1.12.0
 
 **Evidence Harness v2 + baseline numbers in v1.11 docs.**

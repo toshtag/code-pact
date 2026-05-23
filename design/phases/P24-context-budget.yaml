@@ -3,7 +3,7 @@ name: Context budget enforcement — --budget-bytes on task context / task prepa
 weight: 18
 confidence: high
 risk: low
-status: in_progress
+status: done
 objective: |
   Add a `--budget-bytes <N>` flag to `code-pact task context`
   and `code-pact task prepare` that enforces a deterministic
