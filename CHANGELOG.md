@@ -13,6 +13,27 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+### Changed
+
+- **P24-T2 — `--budget-bytes` documentation.**
+  `docs/cli-contract.md` gains a new `### --budget-bytes
+  <N> (v1.13+, P24)` subsection under `## task context`
+  documenting the flag, the locked elision priority
+  table, the `--explain --json` interaction (the
+  `budget_reserved_for_later` emission shape with the
+  `details` block carrying `elided_for_budget_bytes` and
+  `section_bytes`), the `CONTEXT_OVER_BUDGET` error
+  envelope shape, and the byte-identical default
+  guarantee. The `## task prepare` flag table gains a
+  `--budget-bytes` row cross-referencing the task-context
+  section. The error-code reference table gains a row for
+  `CONTEXT_OVER_BUDGET (v1.13+ / P24)` documenting the
+  envelope fields. The `budget_reserved_for_later`
+  description in the explain reason-code table flips from
+  "Reserved for P24" to "Emitted by `--budget-bytes`".
+
+  No code changes. Closes P24.
+
 ### Added
 
 - **P24-T1 — Context budget enforcement implementation.**

@@ -101,6 +101,7 @@ CI.
 | `PHASE_RECONCILE_WRITE_REFUSED` | `phase reconcile --write` | Every eligible task write in the phase was refused for safety reasons. Partial successes return exit 0; this fires only when **all** writes refused |
 | `LOCK_HELD` (v1.5+ / P14) | `init --sample-phase`, `init` wizard, `phase add`, `phase new`, `phase import`, `task add`, `task finalize --write`, `phase reconcile --write` | Another code-pact mutation is in progress on the same project. The envelope's `data.lock_holder` carries `{pid, hostname, cmd, created_at}` for diagnostic display; `data.lock_path` is the lock file path. Transient + retryable — wait for the holder to release, or manually delete the lock file if you are certain no process holds it |
 | `WRITES_AUDIT_STRICT_FAILED` (v1.6+ / P15-T6) | `task finalize --audit-strict` | The audit emitted at least one `TASK_WRITES_AUDIT_*` warning and `--audit-strict` was supplied. Exit code is **1** (not 2 — the invocation was well-formed; only the strict gate refused). The envelope carries the full `write_audit` plus `applied: false` to make the no-mutation guarantee machine-readable |
+| `CONTEXT_OVER_BUDGET` (v1.13+ / P24) | `task context --budget-bytes`, `task prepare --budget-bytes` | Even maximal section elision could not bring the rendered pack at or below the requested byte budget. Exit code 2. The envelope carries `data.budget_bytes`, `data.minimum_achievable_bytes` (the post-maximal-elision size — re-running with this value as the budget succeeds), and `data.unelidable_sections` (the structural floor) |
 | `INTERNAL_ERROR` | any command | Reserved for unhandled exceptions |
 
 ### Plan diagnostic codes
@@ -1232,9 +1233,69 @@ When a task declares **none** of the P10 fields, the pack body is byte-identical
 | `context_size_small_and_ambiguity_low` | A section was excluded because the task's `context_size` is not `large` and `ambiguity` is not `high` (e.g. `constitution`, `completed_tasks`) — or because `context_size` is `small` (e.g. `rules`) |
 | `not_declared_by_task` | A P10 declared section (`depends_on`, `reads`, `writes`, `declared_decisions`, `acceptance_refs`) is absent because the task did not declare the corresponding field |
 | `glob_no_match` | Reserved for future per-glob exclusion detail; not emitted in v1.11 |
-| `budget_reserved_for_later` | Reserved for P24 (budget enforcement). **MUST NOT** be emitted in v1.11. A unit test asserts the absence. |
+| `budget_reserved_for_later` | Emitted by `--budget-bytes` (v1.13+, P24): the section was elided to meet the requested byte budget. In v1.11 / v1.12 the value was reserved and never emitted (a unit test asserts the absence in the no-budget path). |
 
 **Human mode.** `--explain` without `--json` prints a table of included and excluded sections to stdout instead of the pack body.
+
+### `--budget-bytes <N>` (v1.13+, P24)
+
+`code-pact task context <task-id> [--agent <name>] [--json] [--explain] --budget-bytes <N>` enforces a deterministic upper bound on the rendered pack size by progressively eliding sections in a fixed priority order until the rendered UTF-8 byte length falls at or below `N`. When even maximal elision cannot meet the bound, the command fails with the new public error code `CONTEXT_OVER_BUDGET`.
+
+**`N` validation.** `N` must be a positive integer (parsed with `Number.parseInt(value, 10)`). Zero, negative numbers, and non-numeric values are rejected with `CONFIG_ERROR` at flag parse time. The smallest meaningful budget is the size of the minimum-pack composition for the task (header + phase_contract + task_definition + verification_commands + progress_event_schema + format_overhead newlines).
+
+**Elision priority (locked).** Sections drop in this order until the budget is met:
+
+| Order | Section | Eligible when |
+|---|---|---|
+| 1 | `completed_tasks` | always (the section is itself gated behind `ambiguity: high`) |
+| 2 | `related_decisions` | only when `context_size: large` (the "all decisions" path; `decision_refs` stay) |
+| 3 | `constitution` | always (project-wide; not task-specific) |
+| 4 | `rules` | only when `write_surface: high` (the "all rules" path; default applies-to-matched subset stays) |
+| 5 | `reads` | always (declared globs; declaration-only, no inlined bodies) |
+
+Sections NOT in this list are **unelidable**: `header`, `phase_contract`, `task_definition`, `depends_on`, `writes`, `declared_decisions`, `acceptance_refs`, `verification_commands`, `progress_event_schema`, `format_overhead`. These are either always-included or carry task-declared intent the user explicitly opted into.
+
+The locked source of truth is `ELISION_ORDER` in [`src/core/pack/formatters/markdown.ts`](../src/core/pack/formatters/markdown.ts). Changing the order requires an RFC amendment.
+
+**`--explain --json` interaction.** When `--budget-bytes` triggers elision AND `--explain --json` is set, every elided section appears in `excluded[]` with `reason_code: budget_reserved_for_later` and a `details` block:
+
+```json
+{
+  "excluded": [
+    {
+      "name": "rules",
+      "reason_code": "budget_reserved_for_later",
+      "details": {
+        "elided_for_budget_bytes": 2000,
+        "section_bytes": 4183
+      }
+    }
+  ]
+}
+```
+
+Sections excluded by the v1.11 inclusion policy (e.g. `not_declared_by_task` for P10 fields the task did not declare) keep their v1.11 reason codes; budget elision applies only to sections that would otherwise have been included.
+
+**`CONTEXT_OVER_BUDGET` envelope.** When maximal elision still exceeds the budget:
+
+```json
+{
+  "ok": false,
+  "error": {
+    "code": "CONTEXT_OVER_BUDGET",
+    "message": "Context pack cannot be reduced below 1196 bytes; --budget-bytes 100 is unachievable for this task.",
+    "data": {
+      "budget_bytes": 100,
+      "minimum_achievable_bytes": 1196,
+      "unelidable_sections": ["header", "phase_contract", "task_definition", "verification_commands", "progress_event_schema"]
+    }
+  }
+}
+```
+
+Exit code 2. `data.minimum_achievable_bytes` tells the caller the floor for this task; re-running with `--budget-bytes <minimum_achievable_bytes>` succeeds and produces a pack of exactly that size.
+
+**Byte-identical default.** Without `--budget-bytes`, the rendered `content` is byte-for-byte identical to v1.12 (the existing [`tests/integration/pack-byte-identical.test.ts`](../tests/integration/pack-byte-identical.test.ts) lock test continues to apply). The flag only opts in to elision.
 
 ## `task prepare` — single per-task entry point (v1.11+, P21)
 
@@ -1249,6 +1310,7 @@ The command MUST NOT mutate `.code-pact/state/progress.yaml` on any code path. I
 | `--agent <name>` | Override the project's `default_agent`. Same validation as `task context` (`AGENT_NOT_FOUND` / `AGENT_NOT_ENABLED`). |
 | `--json` | Emit the full structured envelope on stdout. Without `--json`, a short human-readable summary is printed. |
 | `--dry-run` | Build the context pack in memory but do not write it; return `would_write_context_pack_path` instead of `context_pack_path`. |
+| `--budget-bytes <N>` (v1.13+, P24) | Cap the rendered pack at `N` UTF-8 bytes by eliding sections in the priority order defined in [`task context --budget-bytes`](#--budget-bytes-n-v113-p24). Same flag, same elision policy, same error envelope. The `context_pack_bytes` field in the response reflects the post-elision size. Throws `CONTEXT_OVER_BUDGET` (exit 2) when the budget is unachievable; `progress.yaml` is NOT mutated on the failure path (the progress-read-only invariant from P21-T3 is preserved). |
 
 ### JSON envelope
 
