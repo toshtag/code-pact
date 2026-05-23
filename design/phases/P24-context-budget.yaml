@@ -55,23 +55,41 @@ objective: |
   enforcement gives consumers a deterministic lever for
   context-constrained models.
 non_goals:
-  - automatic budget inference from agent profile (the flag is opt-in per invocation; a default-budget RFC is deferred)
+  - automatic budget inference from agent profile (the flag is opt-in per
+    invocation; a default-budget RFC is deferred)
   - section-level truncation / summarisation (P24 elides whole sections only)
-  - reordering of sections (the renderer's output order is fixed by the v1.11 contract)
-  - "`--budget-tokens` flag (requires per-model-family tokenizer; bytes are the model-agnostic proxy)"
-  - retroactive harness metric for post-budget pack size (the value depends on the chosen budget; would muddy the unconditional pack_size signal)
-  - applying budget enforcement to the legacy `code-pact pack` command (preferred entry is `task context`)
-  - new flag on `adapter conformance` (conformance is about adapter contract surface, not pack size)
+  - reordering of sections (the renderer's output order is fixed by the v1.11
+    contract)
+  - "`--budget-tokens` flag (requires per-model-family tokenizer; bytes are the
+    model-agnostic proxy)"
+  - retroactive harness metric for post-budget pack size (the value depends on
+    the chosen budget; would muddy the unconditional pack_size signal)
+  - applying budget enforcement to the legacy `code-pact pack` command
+    (preferred entry is `task context`)
+  - new flag on `adapter conformance` (conformance is about adapter contract
+    surface, not pack size)
 definition_of_done:
-  - design/phases/P24-context-budget.yaml exists with this objective and tasks list (P24-T0)
+  - design/phases/P24-context-budget.yaml exists with this objective and tasks
+    list (P24-T0)
   - design/roadmap.yaml lists P24 (P24-T0)
-  - "design/decisions/context-budget-rfc.md exists with `Status: accepted` lock (P24-T0)"
-  - "`code-pact task context --budget-bytes <N>` and `code-pact task prepare --budget-bytes <N>` accept the flag, enforce the elision priority, and emit CONTEXT_OVER_BUDGET when the budget is unachievable (P24-T1)"
-  - "`task context --explain --json` with `--budget-bytes` emits `reason_code: budget_reserved_for_later` for every elided section (P24-T1)"
-  - "byte-identical contract: without `--budget-bytes`, pack `content` is byte-identical to v1.12 — the existing `tests/integration/pack-byte-identical.test.ts` continues to pass without modification (P24-T1 verification)"
-  - "P21 unit test asserting `budget_reserved_for_later` is never emitted continues to pass for the no-budget case (P24-T1 verification)"
-  - "`CONTEXT_OVER_BUDGET` joins `KNOWN_CODES.public` in `docs/cli-contract.md` (P24-T2)"
-  - "`docs/cli-contract.md` sections for `task context` and `task prepare` document the new flag, the elision priority, the `--explain --json` interaction, and the error envelope shape (P24-T2)"
+  - "design/decisions/context-budget-rfc.md exists with `Status: accepted` lock
+    (P24-T0)"
+  - "`code-pact task context --budget-bytes <N>` and `code-pact task prepare
+    --budget-bytes <N>` accept the flag, enforce the elision priority, and emit
+    CONTEXT_OVER_BUDGET when the budget is unachievable (P24-T1)"
+  - "`task context --explain --json` with `--budget-bytes` emits `reason_code:
+    budget_reserved_for_later` for every elided section (P24-T1)"
+  - "byte-identical contract: without `--budget-bytes`, pack `content` is
+    byte-identical to v1.12 — the existing
+    `tests/integration/pack-byte-identical.test.ts` continues to pass without
+    modification (P24-T1 verification)"
+  - P21 unit test asserting `budget_reserved_for_later` is never emitted
+    continues to pass for the no-budget case (P24-T1 verification)
+  - "`CONTEXT_OVER_BUDGET` joins `KNOWN_CODES.public` in `docs/cli-contract.md`
+    (P24-T2)"
+  - "`docs/cli-contract.md` sections for `task context` and `task prepare`
+    document the new flag, the elision priority, the `--explain --json`
+    interaction, and the error envelope shape (P24-T2)"
   - CHANGELOG.md gains entries under `[Unreleased]` covering each P24 task
 verification:
   commands:
@@ -90,7 +108,7 @@ tasks:
     write_surface: low
     verification_strength: medium
     expected_duration: short
-    status: planned
+    status: done
     description: |
       RFC acceptance + phase registration.
 
@@ -132,7 +150,7 @@ tasks:
     write_surface: high
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
     description: |
       Implement budget enforcement.
 
@@ -236,7 +254,7 @@ tasks:
     write_surface: low
     verification_strength: medium
     expected_duration: short
-    status: planned
+    status: done
     description: |
       Document the budget enforcement surface.
 
