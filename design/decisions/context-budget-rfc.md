@@ -1,6 +1,6 @@
 # RFC: Context budget enforcement
 
-**Status:** proposed (P24, 2026-05)
+**Status:** accepted (P24, 2026-05)
 **Scope:** add a `--budget-bytes <N>` flag to `code-pact task context` and `code-pact task prepare` that enforces a deterministic upper bound on the rendered context pack size by progressively eliding sections in a fixed priority order. When the bound cannot be met without eliding `always_included` sections, the command fails with the new `CONTEXT_OVER_BUDGET` error code (the only new public code introduced by P24). The pack `content` byte-identical contract from v1.11 is preserved for the no-flag default path. The `excluded[]` array in `task context --explain --json` gains `budget_reserved_for_later` reason-code emissions (the v1.11 reserved value finally activates). Adapter conformance is not affected.
 **Owners:** maintainer
 **Related:**
