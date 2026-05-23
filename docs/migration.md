@@ -447,6 +447,82 @@ Projects running `plan lint --strict` / `plan analyze --strict` / `validate --st
 
 In semver terms, v1.4.0 is a minor release.
 
+## v1.11.x → v1.12.0
+
+**Evidence Harness v2 + baseline numbers in v1.11 docs.**
+v1.12.0 closes P26 and populates the five success-metric
+baselines `docs/positioning.md` and
+`docs/agent-contract.md` committed to in v1.11.0. No
+user-visible CLI surface change; `dist/cli.js` is
+unchanged from v1.11.0.
+
+### Quick path
+
+```sh
+npm install -g code-pact@1.12.0
+code-pact --version    # 1.12.0
+```
+
+No project-side action required.
+
+### What changed
+
+- **`docs/positioning.md` "Success metrics" + `docs/agent-contract.md` "Measurement"** flip from
+  "populated by P26" placeholders to the committed
+  baseline values from `design/measurements/summary.json`
+  (against git SHA `4627858`). Both docs now cite
+  reproducible numbers with a `pnpm harness --corpus .
+  --check` hint.
+- **`docs/concepts/evidence-harness.md`** updates for
+  v1.12 — the "What it measures" table grows from four
+  to six CSV files, gains a `summary.json` shape callout,
+  and documents the percentile rule, rate rounding, the
+  adherence numerator/denominator semantics, the adapter
+  drift gate, and the undeclared-write-rate deferral.
+- **`scripts/harness/`** gains two new CSV outputs
+  (`lifecycle-adherence-by-task.csv`,
+  `adapter-drift-by-agent.csv`) and one aggregate JSON
+  sidecar (`summary.json`). The harness remains
+  maintainer-only (not registered in `package.json`
+  `bin`).
+- **`measurements.manifest.json`** `harness_version` bumps
+  `0.1.0 → 0.2.0`. v1 CSV column shapes are unchanged
+  (additive only).
+
+### What did NOT change
+
+- `dist/cli.js` bundle — byte-identical to v1.11.0.
+- Every public command, flag, JSON envelope, and error
+  code — unchanged.
+- `recommend` / `task context` / `task context --explain`
+  / `task prepare` / `adapter conformance` JSON envelopes
+  — byte-identical to v1.11.0.
+- Adapter manifest schema (`schema_version: 1`,
+  `adapter_schema_version: 1`) — unchanged.
+- Existing adapter instruction files — unchanged; no
+  `adapter upgrade` needed.
+- `progress.yaml` schema — unchanged.
+
+### What's NOT in v1.12
+
+- **`undeclared_write_rate` is deferred, not computed.**
+  `summary.json` carries
+  `undeclared_write_rate_status: "deferred"` with a
+  pointer to `evidence-harness-v2-rfc.md` Non-goals. A
+  future phase may add lifecycle instrumentation to make
+  this metric observable.
+- **`task prepare` adherence tracking.** The lifecycle
+  adherence metric measures state-machine adherence
+  (`started` before `done`, no legacy shortcut). `task
+  prepare` is read-only and emits no event, so its
+  invocation cannot be counted. A future phase may add
+  prepare-event tracking.
+
+In semver terms, v1.12.0 is a minor release — additive
+only (no user-visible CLI surface change, but a meaningful
+phase close and a new committed repo artefact set future
+RFCs can cite, matching the v1.10.0 precedent).
+
 ## v1.10.x → v1.11.0
 
 **Agent Contract v2.** v1.11.0 introduces three new
