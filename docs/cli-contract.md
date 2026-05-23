@@ -1047,6 +1047,40 @@ issues additionally carry `path` (absolute).
 `managed-modified × current` (hash drift only) and `managed-clean × current`
 (happy path) are intentionally silent.
 
+#### Adapter file drift classification (two-axis)
+
+`adapter doctor` classifies every managed adapter file along **two
+independent axes** and emits a per-combination code. The classification has
+been stable since v0.9 (P7) and is what `adapter doctor` uses to decide
+whether each issue is "the upstream template changed", "the user edited
+the file", or both. Understanding the axes makes the imperfectly-named
+`ADAPTER_FILE_DRIFT` / `ADAPTER_DESIRED_STALE` codes self-explanatory.
+
+| local state | what it means | source of truth |
+|---|---|---|
+| `managed-clean` | The file on disk is byte-identical to what the manifest recorded at install time (disk hash == manifest hash). The user has not edited the file since `adapter install` / `adapter upgrade`. | manifest sha256 |
+| `managed-modified` | The disk hash differs from the manifest hash. The user has edited the file (or some non-adapter tool has touched it). | manifest sha256 |
+| `managed-missing` | A file the manifest lists is missing from disk. | manifest |
+
+| desired state | what it means | source of truth |
+|---|---|---|
+| `current` | The current generator output (i.e. what `adapter install` would produce now, with the current template / model / profile) is byte-identical to the file on disk. The upstream template has not drifted from the on-disk content. | generator output today |
+| `stale` | The current generator output differs from the on-disk content. The upstream template (or a profile field that affects output) has changed since the file was written. | generator output today |
+
+The doctor's emitted code is determined by the **combination** of the two axes:
+
+| local × desired | doctor code | meaning | remediation |
+|---|---|---|---|
+| `managed-clean × current` | (silent — happy path) | File untouched, template untouched. Nothing to do. | — |
+| `managed-clean × stale` | `ADAPTER_DESIRED_STALE` | **Upstream template changed; local file was NOT edited.** Pure upgrade case. | `code-pact adapter upgrade <agent> --write` |
+| `managed-modified × current` | (silent — manifest-hash-only drift) | File content already matches current desired output; only the manifest hash entry is out of date. Not a substantive divergence. | No action required. The next `adapter upgrade` will refresh the manifest. |
+| `managed-modified × stale` | `ADAPTER_FILE_DRIFT` | **Upstream template changed AND local file was edited.** Both axes diverge — overwriting would lose user edits. | Review local edits; if overwrite is intended, `code-pact adapter upgrade <agent> --write --accept-modified`. |
+| `managed-missing` | `ADAPTER_FILE_MISSING` | A managed file in the manifest is missing from disk. | Re-run `adapter install` or `adapter upgrade --write`. |
+
+The naming is imperfect — `ADAPTER_FILE_DRIFT` covers the "both axes diverged" case, not the generic "any drift" case it sounds like. The names predate the two-axis classification's full surface and are locked under the v1.0 stability contract; renaming them is a breaking change to `KNOWN_CODES.public`, so the semantics are documented here instead.
+
+This classification subsumes a `template_signature` field that was once considered for `adapter_schema_version: 2`. The investigation (P22, 2026-05) found the two-axis classification already covers the drift-attribution use case; see [`design/decisions/P22-cancelled-adapter-schema-v2.md`](../design/decisions/P22-cancelled-adapter-schema-v2.md).
+
 #### Interaction with global `doctor`
 
 The global `code-pact doctor` is **manifest-aware when a manifest exists**

@@ -71,3 +71,6 @@ phases:
   - id: P27
     path: design/phases/P27-cli-maintainability.yaml
     weight: 15
+  - id: P22
+    path: design/phases/P22-adapter-schema-v2.yaml
+    weight: 10

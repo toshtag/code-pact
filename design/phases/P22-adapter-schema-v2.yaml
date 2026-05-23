@@ -1,0 +1,105 @@
+id: P22
+name: Adapter schema v2 — investigated, cancelled (no shippable scope)
+weight: 10
+confidence: high
+risk: low
+status: cancelled
+objective: |
+  P22 was originally proposed to introduce
+  `adapter_schema_version: 2` with a per-file
+  `template_signature` field and lifecycle hooks
+  (`prepare_command` / `finish_command`) on the adapter
+  manifest.
+
+  Investigated and cancelled in v1.13.2-era review.
+
+  Finding: the premise that motivated `template_signature`
+  — distinguishing upstream template change from local
+  user edit — is already satisfied by the v1 manifest
+  plus the existing `adapter doctor` two-axis
+  classification (local state × desired state, with
+  per-combination doctor codes ADAPTER_DESIRED_STALE /
+  ADAPTER_FILE_DRIFT / ADAPTER_FILE_MISSING). Adding
+  `template_signature` would duplicate existing
+  capability.
+
+  Lifecycle hooks have no concrete use case the project
+  has been asked to serve; designing without one risks
+  contract drift on first contact with a real consumer.
+
+  Decision recorded in
+  `design/decisions/P22-cancelled-adapter-schema-v2.md`
+  (status: accepted).
+
+  The only follow-up action is a small documentation
+  patch in `docs/cli-contract.md` exposing the existing
+  two-axis classification table. That patch ships
+  independently (not as a P22 task) so the P22 slot
+  remains formally cancelled, not reused for unrelated
+  work.
+non_goals:
+  - shipping adapter_schema_version 2 (the v1 schema is sufficient)
+  - adding `template_signature` to ManifestFile (existing two-axis classification covers the drift-attribution use case)
+  - renaming public error codes ADAPTER_DESIRED_STALE / ADAPTER_FILE_DRIFT (rename is a breaking change to the KNOWN_CODES.public surface; the imperfect naming is documented instead)
+  - lifecycle hooks (prepare_command / finish_command) on the manifest without a concrete use case
+  - reusing the P22 number for unrelated work (the slot is preserved as a documented cancellation)
+definition_of_done:
+  - design/phases/P22-adapter-schema-v2.yaml exists with status cancelled and P22-T0 as the lone investigation task (P22-T0)
+  - design/roadmap.yaml lists P22 (P22-T0)
+  - "design/decisions/P22-cancelled-adapter-schema-v2.md exists with `Status: accepted` and documents the cancellation rationale (P22-T0)"
+  - CHANGELOG.md gains a P22 cancellation entry under [Unreleased]
+verification:
+  commands:
+    - pnpm typecheck
+    - pnpm test
+    - pnpm build
+    - node dist/cli.js plan lint --json
+    - node dist/cli.js validate --json
+    - node dist/cli.js doctor --json
+tasks:
+  - id: P22-T0
+    type: architecture
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: cancelled
+    description: |
+      Investigation task. Originally scoped to ship the
+      RFC for adapter schema v2 and lifecycle hooks.
+
+      **Cancelled in v1.13.2-era review (status:
+      cancelled).** After reading
+      `src/core/adapters/file-state.ts` and
+      `src/commands/adapter-doctor.ts` end-to-end, the
+      project's existing v1 manifest already classifies
+      adapter file state along two axes (local state ×
+      desired state) and emits per-combination doctor
+      codes that cover the drift-attribution use case
+      `template_signature` was supposed to enable.
+
+      Decision and consequences recorded in
+      `design/decisions/P22-cancelled-adapter-schema-v2.md`.
+
+      No code change ships under this task. The
+      cancellation itself is the deliverable.
+
+      The doctor documentation patch lives outside P22 —
+      it ships as part of a regular v1.13.x patch release
+      rather than as a P22 task, so the P22 slot remains
+      formally cancelled.
+    decision_refs:
+      - design/decisions/P22-cancelled-adapter-schema-v2.md
+    reads:
+      - src/core/adapters/file-state.ts
+      - src/commands/adapter-doctor.ts
+      - src/core/schemas/adapter-manifest.ts
+      - design/decisions/agent-contract-rfc.md
+      - design/decisions/agent-contract-v2-rfc.md
+    writes:
+      - design/decisions/P22-cancelled-adapter-schema-v2.md
+      - CHANGELOG.md
+    acceptance_refs:
+      - design/phases/P22-adapter-schema-v2.yaml
