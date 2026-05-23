@@ -1,0 +1,276 @@
+id: P24
+name: Context budget enforcement — --budget-bytes on task context / task prepare
+weight: 18
+confidence: high
+risk: low
+status: in_progress
+objective: |
+  Add a `--budget-bytes <N>` flag to `code-pact task context`
+  and `code-pact task prepare` that enforces a deterministic
+  upper bound on the rendered context pack size by progressively
+  eliding sections in a fixed priority order. Activates the
+  `budget_reserved_for_later` reason code that P21-T4 reserved
+  for this work in `ContextExcludedReasonCode`.
+
+  The elision priority is locked in the RFC:
+
+    1. completed_tasks  (ambiguity:high-only signal)
+    2. related_decisions when context_size:large
+    3. constitution
+    4. rules when write_surface:high
+    5. reads (declared globs)
+
+  Sections NOT in this list never elide (header,
+  phase_contract, task_definition, depends_on, writes,
+  declared_decisions, acceptance_refs, verification_commands,
+  progress_event_schema, format_overhead). When maximal
+  elision still cannot meet the budget, the command fails
+  with the new public error code CONTEXT_OVER_BUDGET, exit
+  code 2, with `data.minimum_achievable_bytes` and
+  `data.unelidable_sections` in the envelope so the caller
+  can adjust.
+
+  Byte-identical contract preserved: when `--budget-bytes` is
+  not set, the rendered pack content is byte-for-byte
+  identical to v1.12 (the existing pack-byte-identical lock
+  test continues to pass without modification). The flag is
+  opt-in per invocation.
+
+  In --explain --json mode with --budget-bytes, every elided
+  section appears in `excluded[]` with `reason_code:
+  budget_reserved_for_later` (the P21-reserved value finally
+  activates). Sections excluded by the v1.11 inclusion policy
+  keep their v1.11 reason codes; budget elision applies only
+  to sections that would otherwise have been included.
+
+  `task prepare` with `--budget-bytes` enforces the same
+  budget on the pack it writes (or simulates under
+  `--dry-run`). The progress-read-only invariant from P21-T3
+  is preserved on every path including the new CONTEXT_OVER_BUDGET
+  failure.
+
+  Motivated by the P26 dogfood baseline: `pack_size_max_bytes:
+  259650` is a real outlier task (P21-T0 inlining the full
+  agent-contract-v2-rfc.md via decision_refs). Budget
+  enforcement gives consumers a deterministic lever for
+  context-constrained models.
+non_goals:
+  - automatic budget inference from agent profile (the flag is opt-in per invocation; a default-budget RFC is deferred)
+  - section-level truncation / summarisation (P24 elides whole sections only)
+  - reordering of sections (the renderer's output order is fixed by the v1.11 contract)
+  - "`--budget-tokens` flag (requires per-model-family tokenizer; bytes are the model-agnostic proxy)"
+  - retroactive harness metric for post-budget pack size (the value depends on the chosen budget; would muddy the unconditional pack_size signal)
+  - applying budget enforcement to the legacy `code-pact pack` command (preferred entry is `task context`)
+  - new flag on `adapter conformance` (conformance is about adapter contract surface, not pack size)
+definition_of_done:
+  - design/phases/P24-context-budget.yaml exists with this objective and tasks list (P24-T0)
+  - design/roadmap.yaml lists P24 (P24-T0)
+  - "design/decisions/context-budget-rfc.md exists with `Status: accepted` lock (P24-T0)"
+  - "`code-pact task context --budget-bytes <N>` and `code-pact task prepare --budget-bytes <N>` accept the flag, enforce the elision priority, and emit CONTEXT_OVER_BUDGET when the budget is unachievable (P24-T1)"
+  - "`task context --explain --json` with `--budget-bytes` emits `reason_code: budget_reserved_for_later` for every elided section (P24-T1)"
+  - "byte-identical contract: without `--budget-bytes`, pack `content` is byte-identical to v1.12 — the existing `tests/integration/pack-byte-identical.test.ts` continues to pass without modification (P24-T1 verification)"
+  - "P21 unit test asserting `budget_reserved_for_later` is never emitted continues to pass for the no-budget case (P24-T1 verification)"
+  - "`CONTEXT_OVER_BUDGET` joins `KNOWN_CODES.public` in `docs/cli-contract.md` (P24-T2)"
+  - "`docs/cli-contract.md` sections for `task context` and `task prepare` document the new flag, the elision priority, the `--explain --json` interaction, and the error envelope shape (P24-T2)"
+  - CHANGELOG.md gains entries under `[Unreleased]` covering each P24 task
+verification:
+  commands:
+    - pnpm typecheck
+    - pnpm test
+    - pnpm build
+    - node dist/cli.js plan lint --json
+    - node dist/cli.js validate --json
+    - node dist/cli.js doctor --json
+tasks:
+  - id: P24-T0
+    type: architecture
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: planned
+    description: |
+      RFC acceptance + phase registration.
+
+      Lands design/decisions/context-budget-rfc.md with
+      `Status: proposed` in this PR; the status line flips
+      to `accepted` in a small follow-up commit before
+      merge per the P11–P21 lifecycle precedent.
+
+      This task also bootstraps the P24 phase itself:
+      - design/phases/P24-context-budget.yaml (this file)
+      - design/roadmap.yaml gains a P24 entry (weight 18)
+      - CHANGELOG.md gains a P24-T0 entry under [Unreleased]
+
+      The phase YAML and roadmap.yaml updates are bootstrap
+      writes — they are protected paths under `plan lint
+      --strict` and are NOT listed in this task's `writes:`
+      block. Same precedent as P21-T0 / P26-T0.
+
+      The phase status stays `in_progress` until P24-T2
+      lands; task statuses transition via the normal
+      progress event stream.
+    decision_refs:
+      - design/decisions/context-budget-rfc.md
+    reads:
+      - design/decisions/agent-contract-v2-rfc.md
+      - design/decisions/task-readiness-schema-rfc.md
+      - design/decisions/evidence-harness-v2-rfc.md
+      - docs/cli-contract.md
+    writes:
+      - design/decisions/context-budget-rfc.md
+      - CHANGELOG.md
+    acceptance_refs:
+      - design/phases/P24-context-budget.yaml
+  - id: P24-T1
+    type: feature
+    ambiguity: low
+    risk: medium
+    context_size: medium
+    write_surface: high
+    verification_strength: strong
+    expected_duration: medium
+    status: planned
+    description: |
+      Implement budget enforcement.
+
+      Add a `--budget-bytes <N>` flag to `code-pact task
+      context` and `code-pact task prepare`. The flag is
+      additive and opt-in; the default no-flag path is
+      byte-identical to v1.12 (locked by the existing
+      pack-byte-identical integration test).
+
+      Implementation outline:
+      1. Extend `BuildContextPackOptions` with optional
+         `budgetBytes?: number`.
+      2. Add an `ELISION_ORDER` constant next to
+         `renderSections` in
+         `src/core/pack/formatters/markdown.ts` so the
+         renderer's section catalogue and the elision
+         policy stay one file apart. Locked order:
+         completed_tasks → related_decisions(when
+         context_size:large) → constitution → rules(when
+         write_surface:high) → reads.
+      3. In `buildContextPack()`, after rendering sections,
+         if `budgetBytes` is set: compute the current
+         total, then in elision-order drop sections one at
+         a time, recomputing the total after each drop,
+         until the budget is met. Track elided sections
+         for the explain output.
+      4. If maximal elision cannot meet the budget, throw
+         a `ContextOverBudgetError` carrying
+         `budget_bytes`, `minimum_achievable_bytes`, and
+         `unelidable_sections`.
+      5. Wire the new error to a `CONTEXT_OVER_BUDGET`
+         code in the CLI envelope (exit 2). Add to
+         `KNOWN_CODES.public`.
+      6. In `--explain --json` mode, elided sections
+         appear in `excluded[]` with `reason_code:
+         budget_reserved_for_later` and a `details` block
+         carrying `elided_for_budget_bytes` and
+         `section_bytes`.
+      7. `task prepare` wires the same flag through to its
+         `buildContextPack` call. The progress-read-only
+         invariant is preserved on the new
+         CONTEXT_OVER_BUDGET failure path (no
+         progress.yaml mutation).
+
+      Tests (unit + integration):
+      - Unit: elision order — pick a synthetic pack with
+        all elidable sections, set budget tight, assert
+        sections drop in the documented priority order.
+      - Unit: byte invariant under elision — for any
+        budget that triggers k drops, the resulting
+        total_bytes equals sum of remaining section bytes
+        plus inter-section newlines, and matches
+        `Buffer.byteLength(content, "utf8")`.
+      - Unit: minimum-achievable computation —
+        ContextOverBudgetError's `minimum_achievable_bytes`
+        equals the total after maximal elision.
+      - Integration: `task context --budget-bytes` writes
+        a smaller pack and `--explain --json` emits
+        `budget_reserved_for_later`.
+      - Integration: `task prepare --budget-bytes` records
+        the post-elision `context_pack_bytes` and does NOT
+        mutate progress.yaml on either the success path or
+        the CONTEXT_OVER_BUDGET path.
+      - Regression: the existing
+        `tests/integration/pack-byte-identical.test.ts`
+        continues to pass (no-flag path byte-identical to
+        v1.12).
+      - Regression: the existing P21 unit test asserting
+        `budget_reserved_for_later` is never emitted
+        continues to pass for the no-budget case (the new
+        emission path is gated behind --budget-bytes).
+    depends_on:
+      - P24-T0
+    decision_refs:
+      - design/decisions/context-budget-rfc.md
+    reads:
+      - src/core/pack/index.ts
+      - src/core/pack/formatters/markdown.ts
+      - src/commands/task-context.ts
+      - src/commands/task-prepare.ts
+      - src/cli.ts
+      - design/decisions/context-budget-rfc.md
+    writes:
+      - src/core/pack/index.ts
+      - src/core/pack/formatters/markdown.ts
+      - src/commands/task-context.ts
+      - src/commands/task-prepare.ts
+      - src/cli.ts
+      - src/core/error-codes.ts
+      - tests/unit/core/pack/**
+      - tests/unit/commands/**
+      - tests/integration/task-context-budget.test.ts
+      - CHANGELOG.md
+    acceptance_refs:
+      - design/phases/P24-context-budget.yaml
+  - id: P24-T2
+    type: docs
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: planned
+    description: |
+      Document the budget enforcement surface.
+
+      `docs/cli-contract.md` updates:
+      - `task context --explain` section gains a
+        `--budget-bytes <N>` subsection covering the flag,
+        the elision priority, the
+        `--explain --json` interaction (the new
+        `budget_reserved_for_later` emission path), and
+        the CONTEXT_OVER_BUDGET error envelope shape.
+      - `task prepare` section gains the same flag with a
+        cross-reference to the task-context section.
+      - Error code reference table gains
+        `CONTEXT_OVER_BUDGET` with `task context`, `task
+        prepare` as the emitters and the brief description
+        from the RFC.
+
+      `docs/cli/task-context.md` (if it exists as a
+      standalone file; otherwise just the section in
+      cli-contract.md) and `docs/cli/task-prepare.md`
+      gain corresponding flag references.
+
+      Also flips the P24 phase YAML status to `done` via
+      `code-pact phase reconcile P24 --write` in a second
+      commit on this branch (mirrors the P21-T6 /
+      P26-T3 close pattern).
+    depends_on:
+      - P24-T1
+    decision_refs:
+      - design/decisions/context-budget-rfc.md
+    reads:
+      - docs/cli-contract.md
+    writes:
+      - docs/cli-contract.md
+      - CHANGELOG.md
+    acceptance_refs:
+      - design/phases/P24-context-budget.yaml
