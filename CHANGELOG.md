@@ -15,6 +15,35 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ### Changed
 
+- **P27-T2 — Adapter cluster extracted from `src/cli.ts`.**
+  Pure refactor. The `adapter` subcommand cluster
+  (cmdAdapter + cmdAdapterList / cmdAdapterInstall /
+  cmdAdapterDoctor / cmdAdapterConformance /
+  cmdAdapterUpgrade / cmdAdapterBareForm, plus the
+  cluster-private `runAdapterInstallAndEmit` helper that
+  cmdAdapterInstall and cmdAdapterBareForm both call)
+  moves out of `src/cli.ts` into a new
+  `src/cli/commands/adapter.ts` (~484 lines).
+  `src/cli.ts` keeps its top-level routing and imports
+  `cmdAdapter` from the new file via a single line.
+
+  **Pure-refactor contract preserved.** Every command's
+  JSON envelope, exit code, error code, and flag surface
+  is byte-identical to v1.13. The existing 1262 unit +
+  333 integration tests pass WITHOUT MODIFICATION.
+
+  `src/cli.ts` shrinks from 2850 lines (after P27-T1) to
+  **2388 lines (−462 additional lines)**. Cumulative
+  reduction from the v1.13 baseline (4559 lines):
+  −2171 lines, **−48%**.
+
+  `dist/cli.js` grows marginally from 452.85 KB to 452.96
+  KB (+0.11 KB); runtime behaviour is unchanged.
+
+  Manual smoke verified: `adapter conformance claude-code
+  --json` → `compliant: true`, `adapter doctor --json` →
+  `ok: true`, `adapter list --json` → 5 agents listed.
+
 - **P27-T1 — Task cluster extracted from `src/cli.ts`.**
   Pure refactor. The `task` subcommand cluster (cmdTask +
   cmdTaskAdd / cmdTaskContext / cmdTaskPrepare /
