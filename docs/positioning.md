@@ -156,22 +156,23 @@ are recomputed on every harness run.
 
 | metric | value |
 |---|---|
-| `pack_size_p50_bytes` | 20725 |
-| `pack_size_p90_bytes` | 50131 |
-| `pack_size_max_bytes` | 259650 |
+| `pack_size_p50_bytes` | 22072 |
+| `pack_size_p90_bytes` | 49654 |
+| `pack_size_max_bytes` | 290791 |
 | `first_pass_verify_rate_percent` | 100.0 |
-| `lifecycle_adherence_rate_percent` | 81.3 |
+| `lifecycle_adherence_rate_percent` | 81.8 |
 | `adapter_drift_rate_percent` | 0.0 |
 | `undeclared_write_rate_status` | deferred ([rationale](../design/decisions/evidence-harness-v2-rfc.md#non-goals-out-of-scope-for-p26)) |
 
 Source: [`design/measurements/summary.json`](../design/measurements/summary.json),
-measured against dogfood corpus git SHA `4627858` with
-denominators `tasks_done: 79`, `tasks_total: 116`,
-`agents_enabled: 1`. The ~19% non-adherence reflects historical
-tasks (mostly pre-v0.7) that used the legacy `planned → done`
-shortcut. The deferred undeclared-write-rate awaits a future
-phase that attributes git commits to tasks via lifecycle
-instrumentation — see the RFC link above.
+measured against dogfood corpus git SHA `7743d4f` (v1.13.1
+release commit) with denominators `tasks_done: 88`,
+`tasks_total: 123`, `agents_enabled: 1`. The ~18% non-adherence
+reflects historical tasks (mostly pre-v0.7) that used the
+legacy `planned → done` shortcut. The deferred
+undeclared-write-rate awaits a future phase that attributes
+git commits to tasks via lifecycle instrumentation — see the
+RFC link above.
 
 Reproduce: `pnpm harness --corpus . --check` (or `--write` to
 overwrite the committed snapshot).
