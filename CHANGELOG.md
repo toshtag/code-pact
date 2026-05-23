@@ -13,6 +13,43 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+### Added
+
+- **P24-T0 — Context budget enforcement RFC + phase
+  registration.**
+  `design/decisions/context-budget-rfc.md` opens at
+  `Status: proposed` and locks the design decisions for
+  v1.13: add a `--budget-bytes <N>` flag to `code-pact
+  task context` and `code-pact task prepare` that enforces
+  a deterministic upper bound on the rendered pack size by
+  eliding sections in a fixed priority order
+  (completed_tasks → related_decisions(when
+  context_size:large) → constitution → rules(when
+  write_surface:high) → reads). Sections not in that list
+  are unelidable (header, phase_contract, task_definition,
+  depends_on, writes, declared_decisions, acceptance_refs,
+  verification_commands, progress_event_schema,
+  format_overhead). When maximal elision cannot meet the
+  budget, the command fails with a new
+  `CONTEXT_OVER_BUDGET` public error code (exit 2) whose
+  envelope carries `minimum_achievable_bytes` and
+  `unelidable_sections`. The flag is opt-in per invocation;
+  the no-flag default path stays byte-identical to v1.12
+  (the existing `pack-byte-identical.test.ts` lock test
+  continues to apply). In `task context --explain --json`
+  mode, elided sections emit the
+  `budget_reserved_for_later` reason code that P21-T4
+  reserved for this work — finally activating the
+  forward-compatibility value the P21 unit test asserts as
+  absent. Motivated by the P26 dogfood baseline
+  `pack_size_max_bytes: 259650`, a real outlier task where
+  budget enforcement gives cheaper-tier-model consumers a
+  deterministic lever. `design/phases/P24-context-budget.yaml`
+  registers the phase tasks (P24-T0 through P24-T2);
+  `design/roadmap.yaml` gains a P24 entry at weight 18.
+  The status line on the RFC flips to `accepted` in a
+  follow-up commit before merge.
+
 ## [1.12.0] — 2026-05-23
 
 **Evidence Harness v2.** v1.12.0 closes P26 (Evidence

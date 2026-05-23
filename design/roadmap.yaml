@@ -65,3 +65,6 @@ phases:
   - id: P26
     path: design/phases/P26-evidence-harness-v2.yaml
     weight: 18
+  - id: P24
+    path: design/phases/P24-context-budget.yaml
+    weight: 18
