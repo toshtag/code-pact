@@ -68,3 +68,6 @@ phases:
   - id: P24
     path: design/phases/P24-context-budget.yaml
     weight: 18
+  - id: P27
+    path: design/phases/P27-cli-maintainability.yaml
+    weight: 15

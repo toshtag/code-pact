@@ -13,6 +13,35 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+### Added
+
+- **P27-T0 — CLI maintainability hardening RFC + phase
+  registration.**
+  `design/decisions/cli-maintainability-rfc.md` opens at
+  `Status: proposed` and locks the design decisions for
+  v1.14: a pure refactor that splits the two most active
+  subcommand clusters out of `src/cli.ts` (currently 4559
+  lines, 36 cmd functions) into per-cluster files under a
+  new `src/cli/commands/` directory. P27 ships two
+  extractions: the task cluster (cmdTask +
+  cmdTaskAdd/Context/Prepare/Complete/Finalize/Runbook/
+  Start/Block/Resume/Status; ~1500 lines moved) and the
+  adapter cluster (cmdAdapter + cmdAdapterList/Install/
+  Doctor/Conformance/Upgrade/BareForm; ~500 lines moved).
+  Every command's JSON envelope, exit code, error code,
+  and flag surface stays byte-identical to v1.13; the
+  existing 1262 unit + 333 integration tests are the
+  safety net (the refactor passes iff every test passes
+  without modification). The remaining clusters (init,
+  plan, phase, doctor, validate, verify, pack, progress,
+  spec, recommend) stay in `src/cli.ts` for v1.14 —
+  extracting them is mechanical follow-on work and is
+  deliberately deferred. `design/phases/P27-cli-
+  maintainability.yaml` registers the phase tasks (P27-T0
+  through P27-T3); `design/roadmap.yaml` gains a P27
+  entry at weight 15. The status line on the RFC flips to
+  `accepted` in a follow-up commit before merge.
+
 ## [1.13.0] — 2026-05-23
 
 **Context budget enforcement.** v1.13.0 closes P24 and
