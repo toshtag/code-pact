@@ -13,6 +13,46 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+## [1.13.3] — 2026-05-24
+
+**P22 cancellation + adapter doctor two-axis docs.**
+Documentation patch. No code change. `dist/cli.js` is
+byte-identical to v1.13.2. Closes the v1.11-era roadmap.
+
+P22 (Adapter schema v2) was the last item on the roadmap
+drafted at the start of the v1.11 development cycle.
+Investigation found the originally-proposed scope
+(`adapter_schema_version: 2` + `template_signature` +
+lifecycle hooks) has no shippable value: the
+drift-attribution use case `template_signature` was
+supposed to enable is **already satisfied** by the v1
+manifest plus the existing `adapter doctor` two-axis
+classification, and lifecycle hooks
+(`prepare_command` / `finish_command`) have no concrete
+use case the project has been asked to serve. P22 is
+formally cancelled, the decision is recorded as a design
+asset (`design/decisions/P22-cancelled-adapter-schema-v2.md`,
+status: accepted), and the P22 number is preserved as a
+documented cancellation rather than reused for unrelated
+work.
+
+The existing two-axis classification is now explicitly
+documented in `docs/cli-contract.md` under
+`#### Adapter file drift classification (two-axis)` so
+future contributors can trace the per-combination doctor
+codes (`ADAPTER_DESIRED_STALE`, `ADAPTER_FILE_DRIFT`,
+`ADAPTER_FILE_MISSING`) without re-reading
+`src/core/adapters/file-state.ts`. The names are
+imperfectly self-describing — `ADAPTER_FILE_DRIFT`
+covers the "both axes diverged" case, not the generic
+"any drift" case — but a rename would be a breaking
+change to `KNOWN_CODES.public`, so the documentation
+clarifies semantics instead.
+
+Going forward, new phases should be driven by surfaced
+user signals (issues, real use cases, observed drift in
+usage) rather than by completing a pre-drawn plan.
+
 ### Changed
 
 - **P22 cancelled — adapter schema v2 / template
