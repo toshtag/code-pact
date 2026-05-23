@@ -13,6 +13,66 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+## [1.12.0] — 2026-05-23
+
+**Evidence Harness v2.** v1.12.0 closes P26 (Evidence
+Harness v2) and populates the success-metric baselines
+v1.11.0 promised in `docs/positioning.md` and
+`docs/agent-contract.md`.
+
+The internal-only measurement harness at
+`scripts/harness/` gains two new per-task / per-agent CSVs
+(`lifecycle-adherence-by-task.csv`,
+`adapter-drift-by-agent.csv`) and one aggregate JSON
+sidecar (`summary.json`, `summary_schema_version: 1`) that
+computes the five v1.11 success metrics in a single
+committable artefact. `measurements.manifest.json` bumps
+`harness_version: 0.1.0 → 0.2.0`; v1 CSV column shapes are
+unchanged (additive only).
+
+The committed dogfood baseline (against git SHA `4627858`,
+denominators `tasks_done: 79`, `tasks_total: 116`,
+`agents_enabled: 1`):
+
+| metric | value |
+|---|---|
+| `pack_size_p50_bytes` | 20725 |
+| `pack_size_p90_bytes` | 50131 |
+| `pack_size_max_bytes` | 259650 |
+| `first_pass_verify_rate_percent` | 100.0 |
+| `lifecycle_adherence_rate_percent` | 81.3 |
+| `adapter_drift_rate_percent` | 0.0 |
+| `undeclared_write_rate_status` | deferred |
+
+`docs/positioning.md` and `docs/agent-contract.md` now
+cite these values from
+`design/measurements/summary.json` with reproduce hints
+(`pnpm harness --corpus . --check`). Operational
+definitions tightened in `positioning.md`: adherence
+counts only "started before done AND not legacy
+shortcut"; drift gate counts only error-severity issues.
+
+**Undeclared write rate is deferred, not omitted.**
+`summary.json` carries `undeclared_write_rate_status:
+"deferred"` with a note pointing at
+`evidence-harness-v2-rfc.md` Non-goals. The metric is
+defined in `positioning.md` but is intentionally not
+computed because the project does not enforce a formal
+commit→task link; a historical retrofit would either
+over-claim or require new lifecycle instrumentation. A
+future phase may add an event-on-finalize that records
+the audit result so the metric becomes observable
+historically.
+
+**No user-visible CLI surface change.** `dist/cli.js` is
+unchanged from v1.11.0. The harness remains internal-only
+(not registered in `package.json` `bin`, never surfaces
+in `code-pact --help`, never emits JSON envelopes). v1
+CSV files regenerate with the same column shape — row
+content reflects the current corpus state. No new error
+codes, no `adapter_schema_version` bump, no manifest
+schema bump.
+
 ### Changed
 
 - **P26-T3 — Baseline numbers populated in v1.11 docs.**

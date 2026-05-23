@@ -3,7 +3,7 @@ name: Evidence Harness v2 — aggregate stats and adherence baselines
 weight: 18
 confidence: high
 risk: low
-status: in_progress
+status: done
 objective: |
   Populate the five success-metric baselines docs/positioning.md
   and docs/agent-contract.md committed to in v1.11.0.
