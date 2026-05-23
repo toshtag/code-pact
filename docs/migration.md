@@ -447,6 +447,67 @@ Projects running `plan lint --strict` / `plan analyze --strict` / `validate --st
 
 In semver terms, v1.4.0 is a minor release.
 
+## v1.13.2 → v1.13.3
+
+**Documentation patch.** No code change. No CLI surface
+change. Upgrade is a no-op for project state:
+
+```sh
+npm install -g code-pact@1.13.3
+```
+
+### What changed
+
+- **P22 (Adapter schema v2) formally cancelled.** The
+  v1.11-era roadmap's last item is closed as
+  "investigated, no shippable scope" rather than
+  shipped. The originally-proposed
+  `adapter_schema_version: 2` + `template_signature` +
+  lifecycle hooks scope had no shippable value — the
+  drift-attribution use case is already satisfied by the
+  existing v1 manifest plus the `adapter doctor`
+  two-axis classification. Decision recorded in
+  `design/decisions/P22-cancelled-adapter-schema-v2.md`
+  (status: accepted). `design/phases/P22-adapter-schema-v2.yaml`
+  carries `status: cancelled` for both the phase and its
+  single investigation task, matching the v1.4 P15-T5
+  cancellation precedent.
+- **`docs/cli-contract.md` `### adapter doctor` section**
+  gains a `#### Adapter file drift classification
+  (two-axis)` subsection documenting the existing local
+  state × desired state matrix and the per-combination
+  doctor code (`ADAPTER_DESIRED_STALE`,
+  `ADAPTER_FILE_DRIFT`, `ADAPTER_FILE_MISSING`). The
+  semantics have been stable since v0.9 (P7); the
+  documentation finally makes them self-explanatory.
+
+### What did NOT change
+
+- `dist/cli.js` — byte-identical to v1.13.2.
+- Every public command, flag, JSON envelope, exit code,
+  and error code — byte-identical to v1.13.2.
+- `adapter_schema_version` — stays at 1.
+- `ManifestFile` schema — unchanged. **No
+  `template_signature` field added.**
+- Public error code names (`ADAPTER_DESIRED_STALE`,
+  `ADAPTER_FILE_DRIFT`, etc.) — unchanged. Rename was
+  considered and rejected as a breaking change to
+  `KNOWN_CODES.public`.
+- Adapter manifest schema — unchanged. **No `adapter
+  upgrade` needed.**
+- `progress.yaml` schema — unchanged.
+
+### Why a documentation patch (not 1.14.0)
+
+This release ships only documentation and a design
+decision artefact. No new commands, no new flags, no new
+error codes, no envelope changes, no manifest schema
+change. The v1.10.1 / v1.13.1 / v1.13.2 precedent for
+behaviour-preserving releases applies — patch is the
+correct semver position.
+
+In semver terms, v1.13.3 is a patch release.
+
 ## v1.13.1 → v1.13.2
 
 **Dogfood baseline refresh patch.** No code change. No
