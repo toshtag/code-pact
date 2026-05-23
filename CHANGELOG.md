@@ -15,6 +15,83 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ### Added
 
+- **P24-T1 — Context budget enforcement implementation.**
+  New `--budget-bytes <N>` flag on `code-pact task context`
+  and `code-pact task prepare` enforces a deterministic
+  upper bound on the rendered context pack size by eliding
+  sections in the locked priority order
+  (`completed_tasks` → `related_decisions` (when
+  `context_size: large`) → `constitution` → `rules` (when
+  `write_surface: high`) → `reads`). When maximal elision
+  cannot meet the budget, the command fails with the new
+  public error code `CONTEXT_OVER_BUDGET` (exit 2). The
+  error envelope carries `data.budget_bytes`,
+  `data.minimum_achievable_bytes`, and
+  `data.unelidable_sections` so callers can adjust the
+  budget or split the task. The new error code joins
+  `KNOWN_CODES.public` in the error-code-surface
+  invariant test.
+
+  **Activates the P21-reserved enum value.** In `task
+  context --explain --json` mode with `--budget-bytes`,
+  every elided section emits
+  `reason_code: budget_reserved_for_later` (the value P21
+  reserved for this work) with `details` carrying
+  `elided_for_budget_bytes` and `section_bytes`. The P21
+  unit test asserting the value is never emitted in the
+  no-budget case continues to pass.
+
+  **Byte-identical default preserved.** Without
+  `--budget-bytes`, the rendered pack `content` is byte-
+  for-byte identical to v1.12 — verified by the existing
+  `tests/integration/pack-byte-identical.test.ts` lock
+  test.
+
+  **Progress-read-only invariant preserved on the new
+  failure path.** `task prepare --budget-bytes` does NOT
+  mutate `.code-pact/state/progress.yaml` on the
+  CONTEXT_OVER_BUDGET path; verified by a dedicated unit
+  test.
+
+  Implementation:
+  - `src/core/pack/formatters/markdown.ts` exports
+    `ELISION_ORDER` as a readonly tuple next to
+    `renderSections`.
+  - `src/core/pack/index.ts` adds `applyBudgetElision()`
+    plus a new `ContextOverBudgetError` class carrying the
+    structured error fields.
+  - `buildContextPack()` accepts an optional
+    `budgetBytes`; when set, applies elision after
+    rendering and tracks elided section names + bytes for
+    the explain output.
+  - `src/commands/task-context.ts` and
+    `src/commands/task-prepare.ts` plumb the new option
+    through.
+  - `src/cli.ts` `cmdTaskContext` and `cmdTaskPrepare`
+    accept `--budget-bytes <N>` (positive integer; zero
+    / negative / NaN → `CONFIG_ERROR`) and surface the
+    new `CONTEXT_OVER_BUDGET` envelope with
+    `error.data.{budget_bytes, minimum_achievable_bytes,
+    unelidable_sections}`.
+
+  Tests:
+  - `tests/unit/core/pack/budget.test.ts` (new, 7 tests)
+    covers the no-budget passthrough, generous budget
+    (unchanged output), the byte-identical
+    explain-with-budget invariant, the
+    `ContextOverBudgetError` shape, the
+    `minimum_achievable_bytes` round-trip (passing it
+    back as the budget produces a pack of exactly that
+    size), the `budget_reserved_for_later` emission, and
+    the no-budget absence of the value.
+  - `tests/unit/commands/task-prepare.test.ts` gains 3
+    tests covering the budget passthrough, the
+    `CONTEXT_OVER_BUDGET` throw, and the
+    progress-read-only invariant on the new failure
+    path.
+  - `tests/unit/error-code-surface.test.ts` gains
+    `CONTEXT_OVER_BUDGET` to the `KNOWN_CODES.public` set.
+
 - **P24-T0 — Context budget enforcement RFC + phase
   registration.**
   `design/decisions/context-budget-rfc.md` opens at

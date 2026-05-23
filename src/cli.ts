@@ -2830,6 +2830,7 @@ async function cmdTaskContext(
         agent: { type: "string" },
         json: { type: "boolean" },
         explain: { type: "boolean" },
+        "budget-bytes": { type: "string" },
       },
       { allowPositionals: true },
     ));
@@ -2860,6 +2861,27 @@ async function cmdTaskContext(
     }
     return 2;
   }
+
+  // P24: --budget-bytes parsing. The arg-parser gives us a raw string;
+  // validate it as a positive integer, reject zero / negative / NaN.
+  const budgetRaw = values["budget-bytes"];
+  let budgetBytes: number | undefined;
+  if (typeof budgetRaw === "string") {
+    const n = Number.parseInt(budgetRaw, 10);
+    if (!Number.isInteger(n) || n <= 0 || String(n) !== budgetRaw.trim()) {
+      const msg = `task context: --budget-bytes requires a positive integer (got "${budgetRaw}").`;
+      if (json) {
+        process.stdout.write(
+          `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
+        );
+      } else {
+        process.stderr.write(`${msg}\n`);
+      }
+      return 2;
+    }
+    budgetBytes = n;
+  }
+
   const agent = values.agent as string | undefined;
   const cwd = process.cwd();
 
@@ -2869,6 +2891,7 @@ async function cmdTaskContext(
       taskId,
       agent,
       ...(explain ? { explain: true as const } : {}),
+      ...(budgetBytes !== undefined ? { budgetBytes } : {}),
     });
     if (json) {
       const data: Record<string, unknown> = {
@@ -2916,6 +2939,7 @@ async function cmdTaskContext(
     const code = (err as NodeJS.ErrnoException).code;
     let msg: string;
     let outCode: string;
+    let envelopeData: Record<string, unknown> | undefined;
     switch (code) {
       case "TASK_NOT_FOUND":
         msg = m.task.context.taskNotFound(taskId);
@@ -2936,12 +2960,29 @@ async function cmdTaskContext(
         msg = m.task.context.agentNotFound(agent ?? "");
         outCode = "AGENT_NOT_FOUND";
         break;
+      case "CONTEXT_OVER_BUDGET": {
+        const overBudget = err as Error & {
+          budget_bytes?: number;
+          minimum_achievable_bytes?: number;
+          unelidable_sections?: ReadonlyArray<string>;
+        };
+        msg = err.message;
+        outCode = "CONTEXT_OVER_BUDGET";
+        envelopeData = {
+          budget_bytes: overBudget.budget_bytes,
+          minimum_achievable_bytes: overBudget.minimum_achievable_bytes,
+          unelidable_sections: overBudget.unelidable_sections,
+        };
+        break;
+      }
       default:
         throw err;
     }
     if (json) {
+      const errorObj: Record<string, unknown> = { code: outCode, message: msg };
+      if (envelopeData !== undefined) errorObj.data = envelopeData;
       process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: outCode, message: msg } })}\n`,
+        `${JSON.stringify({ ok: false, error: errorObj })}\n`,
       );
     } else {
       process.stderr.write(`${msg}\n`);
@@ -2967,6 +3008,7 @@ async function cmdTaskPrepare(
         agent: { type: "string" },
         json: { type: "boolean" },
         "dry-run": { type: "boolean" },
+        "budget-bytes": { type: "string" },
       },
       { allowPositionals: true },
     ));
@@ -2998,10 +3040,37 @@ async function cmdTaskPrepare(
   }
   const agent = values.agent as string | undefined;
   const dryRun = values["dry-run"] === true;
+
+  // P24: --budget-bytes parsing. Same validation as task context —
+  // positive integer; reject zero / negative / NaN.
+  const budgetRaw = values["budget-bytes"];
+  let budgetBytes: number | undefined;
+  if (typeof budgetRaw === "string") {
+    const n = Number.parseInt(budgetRaw, 10);
+    if (!Number.isInteger(n) || n <= 0 || String(n) !== budgetRaw.trim()) {
+      const msg = `task prepare: --budget-bytes requires a positive integer (got "${budgetRaw}").`;
+      if (json) {
+        process.stdout.write(
+          `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
+        );
+      } else {
+        process.stderr.write(`${msg}\n`);
+      }
+      return 2;
+    }
+    budgetBytes = n;
+  }
+
   const cwd = process.cwd();
 
   try {
-    const result = await runTaskPrepare({ cwd, taskId, agent, dryRun });
+    const result = await runTaskPrepare({
+      cwd,
+      taskId,
+      agent,
+      dryRun,
+      ...(budgetBytes !== undefined ? { budgetBytes } : {}),
+    });
     if (json) {
       process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
     } else {
@@ -3043,6 +3112,7 @@ async function cmdTaskPrepare(
     const code = (err as NodeJS.ErrnoException).code;
     let msg: string;
     let outCode: string;
+    let envelopeData: Record<string, unknown> | undefined;
     switch (code) {
       case "TASK_NOT_FOUND":
         msg = m.task.context.taskNotFound(taskId);
@@ -3063,12 +3133,29 @@ async function cmdTaskPrepare(
         msg = m.task.context.agentNotFound(agent ?? "");
         outCode = "AGENT_NOT_FOUND";
         break;
+      case "CONTEXT_OVER_BUDGET": {
+        const overBudget = err as Error & {
+          budget_bytes?: number;
+          minimum_achievable_bytes?: number;
+          unelidable_sections?: ReadonlyArray<string>;
+        };
+        msg = err.message;
+        outCode = "CONTEXT_OVER_BUDGET";
+        envelopeData = {
+          budget_bytes: overBudget.budget_bytes,
+          minimum_achievable_bytes: overBudget.minimum_achievable_bytes,
+          unelidable_sections: overBudget.unelidable_sections,
+        };
+        break;
+      }
       default:
         throw err;
     }
     if (json) {
+      const errorObj: Record<string, unknown> = { code: outCode, message: msg };
+      if (envelopeData !== undefined) errorObj.data = envelopeData;
       process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: outCode, message: msg } })}\n`,
+        `${JSON.stringify({ ok: false, error: errorObj })}\n`,
       );
     } else {
       process.stderr.write(`${msg}\n`);

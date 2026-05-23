@@ -408,3 +408,60 @@ describe("runTaskPrepare — task resolution errors", () => {
     ).rejects.toMatchObject({ code: "TASK_NOT_FOUND" });
   });
 });
+
+describe("runTaskPrepare — budget enforcement (P24)", () => {
+  it("respects --budget-bytes and returns post-elision context_pack_bytes", async () => {
+    await setupProject(dir);
+    const baseline = await runTaskPrepare({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+      dryRun: true,
+    });
+    // P1-T1 in this fixture has small context_size with no elidable
+    // sections (no rules loaded because of small). So the only path is
+    // either generous budget (unchanged) or CONTEXT_OVER_BUDGET.
+    const result = await runTaskPrepare({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+      dryRun: true,
+      budgetBytes: baseline.context_pack_bytes + 10000,
+    });
+    expect(result.context_pack_bytes).toBe(baseline.context_pack_bytes);
+  });
+
+  it("throws CONTEXT_OVER_BUDGET when budget is unachievable", async () => {
+    await setupProject(dir);
+    await expect(
+      runTaskPrepare({
+        cwd: dir,
+        taskId: "P1-T1",
+        agent: "claude-code",
+        budgetBytes: 1,
+      }),
+    ).rejects.toMatchObject({ code: "CONTEXT_OVER_BUDGET" });
+  });
+
+  it("preserves progress-read-only invariant on the CONTEXT_OVER_BUDGET failure path", async () => {
+    await setupProject(dir);
+    const before = await readProgress(dir);
+
+    let threw = false;
+    try {
+      await runTaskPrepare({
+        cwd: dir,
+        taskId: "P1-T1",
+        agent: "claude-code",
+        budgetBytes: 1,
+      });
+    } catch (err) {
+      threw = true;
+      expect((err as { code?: string }).code).toBe("CONTEXT_OVER_BUDGET");
+    }
+    expect(threw).toBe(true);
+
+    const after = await readProgress(dir);
+    expect(after).toBe(before);
+  });
+});

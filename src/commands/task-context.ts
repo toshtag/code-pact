@@ -16,6 +16,13 @@ export type TaskContextOptions = {
    * byte-identical regardless of this flag.
    */
   explain?: boolean;
+  /**
+   * P24: upper bound on the rendered pack size in UTF-8 bytes. When
+   * set, sections elide in the locked priority order until the bound
+   * is met; throws `ContextOverBudgetError` when unachievable. The
+   * no-flag default path is byte-identical to v1.12.
+   */
+  budgetBytes?: number;
 };
 
 export type TaskContextResult = ContextPackResult;
@@ -52,5 +59,6 @@ export async function runTaskContext(opts: TaskContextOptions): Promise<TaskCont
     taskId,
     agentName,
     ...(opts.explain === true ? { explain: true as const } : {}),
+    ...(opts.budgetBytes !== undefined ? { budgetBytes: opts.budgetBytes } : {}),
   });
 }
