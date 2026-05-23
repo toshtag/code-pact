@@ -1,6 +1,6 @@
 # RFC: CLI maintainability hardening — `src/cli.ts` split
 
-**Status:** proposed (P27, 2026-05)
+**Status:** accepted (P27, 2026-05)
 **Scope:** split the most active subcommand clusters out of `src/cli.ts` (currently 4559 lines, 36 cmd functions) into per-cluster files under a new `src/cli/commands/` directory. P27 ships two extractions: the task cluster (`cmdTask` + cmdTaskAdd/Context/Prepare/Complete/Finalize/Runbook/Start/Block/Resume/Status; ~1500 lines moved) and the adapter cluster (`cmdAdapter` + cmdAdapterList/Install/Doctor/Conformance/Upgrade/BareForm; ~500 lines moved). The remaining clusters (init, plan, phase, doctor, validate, verify, pack, progress, spec, recommend) stay in `src/cli.ts` for v1.14 — extracting them is mechanical follow-on work, not P27 scope. **Pure refactor**: every command's JSON envelope, exit code, error code, and flag surface is byte-identical to v1.13. The existing 1262 unit tests + 333 integration tests are the safety net; the refactor passes iff every existing test passes without modification.
 **Owners:** maintainer
 **Related:**
