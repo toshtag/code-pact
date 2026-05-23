@@ -15,6 +15,60 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ### Added
 
+- **P26-T1 — Evidence Harness v2 implementation.** The
+  internal-only measurement harness at `scripts/harness/`
+  now emits three additional artefacts alongside the v1
+  CSVs:
+
+  - `lifecycle-adherence-by-task.csv` — per-task booleans
+    (`started_before_done`, `had_retry`, `had_block`,
+    `legacy_planned_to_done_shortcut`) derived from the
+    progress event log; one row per task with at least one
+    event.
+  - `adapter-drift-by-agent.csv` — one row per agent with
+    at least one issue or one progress event referencing
+    the agent. Aggregates `runAdapterDoctor` issues into a
+    `doctor_ok` boolean plus per-`ADAPTER_*`-code counts
+    (manifest_missing / manifest_invalid / generator_stale
+    / schema_drift / profile_drift / file_missing /
+    file_drift / desired_stale / contract_drift /
+    unmanaged_file).
+  - `summary.json` — aggregate sidecar with
+    `summary_schema_version: 1` and the five v1.11 success
+    metrics: `pack_size_p50/p90/max_bytes`,
+    `first_pass_verify_rate_percent`,
+    `lifecycle_adherence_rate_percent`,
+    `adapter_drift_rate_percent`, plus the
+    `undeclared_write_rate_status: "deferred"` field with a
+    note documenting the historical-attribution problem.
+
+  Percentile calculation uses the lower-median rule (no
+  floating-point average) so integer byte values stay
+  exact. Rates round to one decimal place. `0/0` rates
+  emit `0.0` (no NaN).
+
+  `measurements.manifest.json` `harness_version` bumps
+  `0.1.0` → `0.2.0`; v1 CSV columns and row counts are
+  unchanged (additive only). The byte-determinism contract
+  holds across the expanded output set — two consecutive
+  `--write` runs against the same git SHA produce
+  byte-identical CSVs, summary.json, and manifest.
+
+  Harness invocation surface is unchanged: `pnpm harness
+  --corpus <path> [--check | --write] [--json]`. The
+  harness remains internal-only (not registered in
+  `package.json` bin), per P20.
+
+  Unit coverage in
+  `tests/unit/scripts/harness/metrics.test.ts` (+20 tests,
+  total 38) covers the new lifecycle / adapter / summary /
+  percentile / rate helpers including the `0/0` safe-
+  divide case and the `legacy_planned_to_done_shortcut`
+  denominator-vs-numerator semantics. Integration coverage
+  in `tests/integration/harness.test.ts` exercises the
+  expanded file set, the summary.json shape, and the
+  byte-determinism contract.
+
 - **P26-T0 — Evidence Harness v2 RFC + phase registration.**
   `design/decisions/evidence-harness-v2-rfc.md` opens at
   `Status: proposed` and locks the design decisions for the

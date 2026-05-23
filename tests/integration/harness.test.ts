@@ -106,7 +106,7 @@ function runHarness(corpusDir: string, args: string[]): { code: number; stdout: 
 }
 
 describe("harness --write (persistence)", () => {
-  it("writes four CSVs + manifest under design/measurements/", async () => {
+  it("writes six CSVs + manifest + summary.json under design/measurements/", async () => {
     const p = await setupCorpus("write");
     const result = runHarness(p.dir, ["--write", "--json"]);
     expect(result.code).toBe(0);
@@ -117,7 +117,10 @@ describe("harness --write (persistence)", () => {
       "verify-success-rate.csv",
       "task-event-density.csv",
       "lint-issue-histogram.csv",
+      "lifecycle-adherence-by-task.csv",
+      "adapter-drift-by-agent.csv",
       "measurements.manifest.json",
+      "summary.json",
     ]) {
       const stats = await stat(join(outDir, f));
       expect(stats.isFile()).toBe(true);
@@ -132,9 +135,44 @@ describe("harness --write (persistence)", () => {
       "verify-success-rate.csv",
       "task-event-density.csv",
       "lint-issue-histogram.csv",
+      "lifecycle-adherence-by-task.csv",
+      "adapter-drift-by-agent.csv",
     ]);
     // generated_at is a date only (YYYY-MM-DD), no clock time
     expect(manifest.generated_at).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it("writes summary.json with every metric field defined in the v2 RFC", async () => {
+    const p = await setupCorpus("write-summary");
+    const result = runHarness(p.dir, ["--write", "--json"]);
+    expect(result.code).toBe(0);
+
+    const summary = JSON.parse(
+      await readFile(
+        join(p.dir, "design", "measurements", "summary.json"),
+        "utf8",
+      ),
+    );
+    expect(summary.summary_schema_version).toBe(1);
+    expect(summary.harness_version).toBe("0.2.0");
+    expect(summary.metrics).toMatchObject({
+      pack_size_p50_bytes: expect.any(Number),
+      pack_size_p90_bytes: expect.any(Number),
+      pack_size_max_bytes: expect.any(Number),
+      first_pass_verify_rate_percent: expect.any(Number),
+      lifecycle_adherence_rate_percent: expect.any(Number),
+      adapter_drift_rate_percent: expect.any(Number),
+      undeclared_write_rate_status: "deferred",
+      undeclared_write_rate_note: expect.any(String),
+    });
+    expect(summary.metrics.undeclared_write_rate_note.length).toBeGreaterThan(
+      0,
+    );
+    expect(summary.denominators).toMatchObject({
+      tasks_done: expect.any(Number),
+      tasks_total: expect.any(Number),
+      agents_enabled: expect.any(Number),
+    });
   });
 });
 
@@ -147,6 +185,9 @@ describe("harness (default --check)", () => {
     expect(result.stdout).toContain("# verify-success-rate.csv");
     expect(result.stdout).toContain("# task-event-density.csv");
     expect(result.stdout).toContain("# lint-issue-histogram.csv");
+    expect(result.stdout).toContain("# lifecycle-adherence-by-task.csv");
+    expect(result.stdout).toContain("# adapter-drift-by-agent.csv");
+    expect(result.stdout).toContain("# summary.json");
 
     let measurementsExists = false;
     try {
@@ -160,7 +201,7 @@ describe("harness (default --check)", () => {
 });
 
 describe("harness byte-determinism", () => {
-  it("two consecutive --write runs produce identical CSVs", async () => {
+  it("two consecutive --write runs produce identical CSVs + summary.json", async () => {
     const p = await setupCorpus("determinism");
 
     const first = runHarness(p.dir, ["--write"]);
@@ -173,6 +214,9 @@ describe("harness byte-determinism", () => {
       "verify-success-rate.csv",
       "task-event-density.csv",
       "lint-issue-histogram.csv",
+      "lifecycle-adherence-by-task.csv",
+      "adapter-drift-by-agent.csv",
+      "summary.json",
     ]) {
       firstSnapshot.set(f, await readFile(join(outDir, f), "utf8"));
     }

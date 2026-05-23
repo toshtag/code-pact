@@ -1,6 +1,6 @@
 # RFC: Evidence Harness v2 — aggregate stats and adherence baselines
 
-**Status:** proposed (P26, 2026-05)
+**Status:** accepted (P26, 2026-05)
 **Scope:** extend the internal-only measurement harness at `scripts/harness/` with two new CSV outputs (`lifecycle-adherence-by-task.csv`, `adapter-drift-by-agent.csv`) and one new aggregate JSON sidecar (`summary.json`) that computes p50 / p90 / max for pack size, percentages for first-pass verification rate and state-machine adherence rate, and a count-by-code histogram for adapter drift. Populate the v1.11 `docs/positioning.md` / `docs/agent-contract.md` baseline numbers from the resulting CSVs. **Not a product feature** — the harness remains maintainer-only, not registered in `package.json` `bin`, never invoked by users, never surfaces in JSON envelopes or CLI help. The v2 work follows the P20 contract: byte-deterministic given the same input git SHA; CSV outputs are committable artifacts for citation in future `design/decisions/*.md`.
 **Owners:** maintainer
 **Related:**
