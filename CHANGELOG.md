@@ -13,6 +13,35 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+### Added
+
+- **P26-T0 — Evidence Harness v2 RFC + phase registration.**
+  `design/decisions/evidence-harness-v2-rfc.md` opens at
+  `Status: proposed` and locks the design decisions for the
+  v1.12 cycle: extend the internal-only measurement harness
+  (P20) with two new CSV outputs
+  (`lifecycle-adherence-by-task.csv`,
+  `adapter-drift-by-agent.csv`) and one aggregate JSON
+  sidecar (`summary.json`) that computes p50 / p90 / max
+  for pack size, percentages for first-pass verification
+  rate and state-machine adherence rate, and a count-by-
+  code histogram for adapter drift. After the harness
+  lands, the v1.11 `docs/positioning.md` /
+  `docs/agent-contract.md` baseline placeholders flip from
+  "populated by P26" to the actual numbers from the
+  dogfood corpus. The RFC honestly defers
+  `undeclared_write_rate` (the project does not enforce
+  commit→task linkage; a historical retrofit would over-
+  claim) and documents the deferral as a `status:
+  "deferred"` field in `summary.json`. The harness remains
+  internal-only, never a `bin` entry; v1 CSV outputs are
+  byte-identical (additive only). `harness_version` bumps
+  0.1.0 → 0.2.0. `design/phases/P26-evidence-harness-v2.yaml`
+  registers the phase tasks (P26-T0 through P26-T3);
+  `design/roadmap.yaml` gains a P26 entry at weight 18.
+  The status line on the RFC flips to `accepted` in a
+  follow-up commit before merge.
+
 ## [1.11.0] — 2026-05-22
 
 **Agent Contract v2.** v1.11.0 closes P21 (Agent Contract v2)
