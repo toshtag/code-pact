@@ -338,6 +338,26 @@ export function renderSections(ctx: PackContext): RenderedSection[] {
 }
 
 /**
+ * Section elision priority for `--budget-bytes` (P24).
+ *
+ * When `buildContextPack` is invoked with `budgetBytes`, sections are
+ * dropped from the rendered output in this order until the total byte
+ * count falls at or below the budget. Sections NOT listed here are
+ * unelidable — they are either always-included or carry task-declared
+ * intent the user explicitly opted into.
+ *
+ * Locked by `design/decisions/context-budget-rfc.md`. New entries
+ * require an RFC amendment.
+ */
+export const ELISION_ORDER: ReadonlyArray<string> = [
+  "completed_tasks",
+  "related_decisions",
+  "constitution",
+  "rules",
+  "reads",
+];
+
+/**
  * Render the context pack to a single Markdown string.
  *
  * Byte-identical contract: for any input that produced a given output

@@ -52,6 +52,7 @@ const KNOWN_CODES: Record<string, "public" | "plan" | "doctor" | "adapter" | "in
   AMBIGUOUS_TASK_ID: "public",
   BASELINE_NOT_FOUND: "public",
   CONFIG_ERROR: "public",
+  CONTEXT_OVER_BUDGET: "public",
   DUPLICATE_PHASE_ID: "public",
   INVALID_TASK_TRANSITION: "public",
   LOCK_HELD: "public",

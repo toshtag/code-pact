@@ -7,6 +7,7 @@ import { AgentProfile } from "../schemas/agent-profile.ts";
 import { ProgressLog, type ProgressEvent } from "../schemas/progress-event.ts";
 import { parseFrontMatter } from "./front-matter.ts";
 import {
+  ELISION_ORDER,
   renderSections,
   type DependsOnEntry,
   type DecisionDoc,
@@ -28,7 +29,44 @@ export type BuildContextPackOptions = {
    * identical regardless of this flag.
    */
   explain?: boolean;
+  /**
+   * Optional P24 budget enforcement. When set, sections elide in the
+   * priority order locked in `src/core/pack/formatters/markdown.ts`
+   * (`ELISION_ORDER`) until the pack's UTF-8 byte length falls at or
+   * below `budgetBytes`. When the bound cannot be met after maximal
+   * elision, `buildContextPack` throws `ContextOverBudgetError`.
+   *
+   * The no-flag default path is byte-identical to v1.12 (locked by
+   * `tests/integration/pack-byte-identical.test.ts`).
+   */
+  budgetBytes?: number;
 };
+
+/**
+ * Thrown by `buildContextPack` when `budgetBytes` is set but maximal
+ * elision still leaves the pack above the requested bound. Carries
+ * structured details so callers can adjust the budget or split the
+ * task.
+ */
+export class ContextOverBudgetError extends Error {
+  readonly code = "CONTEXT_OVER_BUDGET";
+  readonly budget_bytes: number;
+  readonly minimum_achievable_bytes: number;
+  readonly unelidable_sections: ReadonlyArray<string>;
+  constructor(
+    budget: number,
+    minimum: number,
+    unelidable: ReadonlyArray<string>,
+  ) {
+    super(
+      `Context pack cannot be reduced below ${minimum} bytes; --budget-bytes ${budget} is unachievable for this task.`,
+    );
+    this.name = "ContextOverBudgetError";
+    this.budget_bytes = budget;
+    this.minimum_achievable_bytes = minimum;
+    this.unelidable_sections = unelidable;
+  }
+}
 
 /**
  * Closed enum of reason codes attached to included sections in the
@@ -351,7 +389,7 @@ export async function buildContextPack(
       ? dependsOnIds.map((id) => ({ id, current: deriveTaskState(allEvents, id).current }))
       : undefined;
 
-  const renderedSections = renderSections({
+  const allRendered = renderSections({
     phase,
     task,
     agentName,
@@ -369,6 +407,15 @@ export async function buildContextPack(
     ...(declaredDecisions.length > 0 ? { declaredDecisions } : {}),
     ...(acceptanceRefsList.length > 0 ? { acceptanceRefs: acceptanceRefsList } : {}),
   });
+
+  // P24: budget enforcement. When `budgetBytes` is set, elide sections
+  // in `ELISION_ORDER` until the pack falls within budget; throw
+  // `ContextOverBudgetError` if maximal elision still cannot meet it.
+  // The no-budget path is byte-identical to v1.12.
+  const budgetResult = applyBudgetElision(allRendered, opts.budgetBytes);
+  const renderedSections = budgetResult.sections;
+  const elidedNames = budgetResult.elidedNames;
+  const elidedSectionsBytes = budgetResult.elidedBytes;
 
   const content = renderedSections.flatMap((s) => s.lines).join("\n");
   const totalBytes = Buffer.byteLength(content, "utf8");
@@ -405,9 +452,96 @@ export async function buildContextPack(
       totalBytes,
     );
     result.excluded = computeExplainExcluded(flags, declared);
+
+    // P24: any section elided by --budget-bytes appears in excluded[]
+    // with `reason_code: budget_reserved_for_later`. This activates
+    // the value P21 reserved for this work. The new entries are
+    // appended after the v1.11 policy-driven exclusions; a single
+    // section can only be in one place (elision drops happen on
+    // sections that would otherwise have been included, so there is
+    // no double-counting).
+    if (opts.budgetBytes !== undefined && elidedNames.length > 0) {
+      for (const name of elidedNames) {
+        result.excluded.push({
+          name,
+          reason_code: "budget_reserved_for_later",
+          details: {
+            elided_for_budget_bytes: opts.budgetBytes,
+            section_bytes: elidedSectionsBytes.get(name) ?? 0,
+          },
+        });
+      }
+    }
   }
 
   return result;
+}
+
+// ---------------------------------------------------------------------------
+// P24 budget enforcement
+//
+// Pure helper: given the structured intermediate form from
+// `renderSections` and an optional byte budget, return the surviving
+// sections, the names of any elided sections (in elision order), and
+// a name → byte-size map for the elided sections so the explain
+// machinery can surface them.
+// ---------------------------------------------------------------------------
+
+type BudgetElisionResult = {
+  sections: RenderedSection[];
+  elidedNames: string[];
+  elidedBytes: Map<string, number>;
+};
+
+function computeRenderedBytes(sections: ReadonlyArray<RenderedSection>): number {
+  if (sections.length === 0) return 0;
+  return Buffer.byteLength(
+    sections.flatMap((s) => s.lines).join("\n"),
+    "utf8",
+  );
+}
+
+function sectionBytes(section: RenderedSection): number {
+  return Buffer.byteLength(section.lines.join("\n"), "utf8");
+}
+
+function applyBudgetElision(
+  rendered: ReadonlyArray<RenderedSection>,
+  budgetBytes: number | undefined,
+): BudgetElisionResult {
+  if (budgetBytes === undefined) {
+    return {
+      sections: [...rendered],
+      elidedNames: [],
+      elidedBytes: new Map(),
+    };
+  }
+
+  let surviving = [...rendered];
+  const elidedNames: string[] = [];
+  const elidedBytes = new Map<string, number>();
+
+  if (computeRenderedBytes(surviving) <= budgetBytes) {
+    return { sections: surviving, elidedNames, elidedBytes };
+  }
+
+  for (const name of ELISION_ORDER) {
+    const idx = surviving.findIndex((s) => s.name === name);
+    if (idx === -1) continue;
+    elidedBytes.set(name, sectionBytes(surviving[idx]!));
+    surviving = surviving.filter((_, i) => i !== idx);
+    elidedNames.push(name);
+    if (computeRenderedBytes(surviving) <= budgetBytes) {
+      return { sections: surviving, elidedNames, elidedBytes };
+    }
+  }
+
+  // Maximal elision performed; still over budget.
+  throw new ContextOverBudgetError(
+    budgetBytes,
+    computeRenderedBytes(surviving),
+    surviving.map((s) => s.name),
+  );
 }
 
 // ---------------------------------------------------------------------------

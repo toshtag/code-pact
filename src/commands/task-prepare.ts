@@ -28,6 +28,13 @@ export type TaskPrepareOptions = {
   agent?: string;
   /** When true, build the context pack but do not write it to disk. */
   dryRun?: boolean;
+  /**
+   * P24: upper bound on the rendered pack size in UTF-8 bytes. When
+   * set, sections elide in the locked priority order until the bound
+   * is met; throws `ContextOverBudgetError` when unachievable.
+   * Progress-read-only invariant is preserved on the new failure path.
+   */
+  budgetBytes?: number;
 };
 
 export type NextActionType =
@@ -272,7 +279,13 @@ export async function runTaskPrepare(
   });
 
   // 9. Context pack — build always, write unless dry-run.
-  const pack = await buildContextPack({ cwd, phaseId, taskId, agentName });
+  const pack = await buildContextPack({
+    cwd,
+    phaseId,
+    taskId,
+    agentName,
+    ...(opts.budgetBytes !== undefined ? { budgetBytes: opts.budgetBytes } : {}),
+  });
   const contextPackBytes = Buffer.byteLength(pack.content, "utf8");
 
   let contextPackPath: string | null = null;
