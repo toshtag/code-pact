@@ -245,16 +245,24 @@ short-circuits — the command does not build a context pack, returns
 
 The success metrics defined in
 [`docs/positioning.md`](positioning.md) are how the project measures
-whether the contract is working. The metric set is locked here so
-the Evidence Harness v2 work (P26) targets the right shape.
+whether the contract is working. The metric set is locked here; the
+Evidence Harness v2 (P26) computes the baseline values shown below
+and recomputes them on every harness run.
 
 | Metric | Definition | Baseline |
 |---|---|---|
-| Context pack p50 / p90 / max bytes | Per-task pack size distribution across the dogfood corpus | populated by P26 |
-| First-pass verification rate | Percentage of `task complete` invocations whose declared verification passes on the first attempt | populated by P26 |
-| Agent command adherence rate | Percentage of agent sessions where the recommended lifecycle was followed without skipping or reordering | populated by P26 |
-| Undeclared write rate | Files changed by a task whose paths are not covered by the task's declared `writes` globs | populated by P26 |
-| Adapter drift detection rate | Frequency at which `adapter doctor` / `adapter conformance` surface real drift against the dogfood corpus | populated by P26 |
+| Context pack p50 bytes | Per-task pack size, lower-median percentile across the dogfood corpus | 20725 |
+| Context pack p90 bytes | Per-task pack size, lower 90th percentile | 50131 |
+| Context pack max bytes | Largest single task's pack size | 259650 |
+| First-pass verification rate | Percentage of `task complete` invocations whose declared verification passes on the first attempt | 100.0% |
+| Agent command adherence rate | Percentage of `done` tasks with at least one `started` event before the first `done` event AND no legacy `planned → done` shortcut | 81.3% |
+| Undeclared write rate | Files changed by a task whose paths are not covered by the task's declared `writes` globs | deferred ([rationale](../design/decisions/evidence-harness-v2-rfc.md#non-goals-out-of-scope-for-p26)) |
+| Adapter drift detection rate | Percentage of enabled agents where `adapter doctor` returns at least one error-severity issue | 0.0% |
+
+Source: [`design/measurements/summary.json`](../design/measurements/summary.json),
+measured against dogfood corpus git SHA `4627858` with
+denominators `tasks_done: 79`, `tasks_total: 116`,
+`agents_enabled: 1`. Reproduce: `pnpm harness --corpus . --check`.
 
 These metrics evaluate the contract — they are not part of the
 contract. A drop in first-pass verification rate, for example, is a
