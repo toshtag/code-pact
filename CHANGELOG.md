@@ -13,6 +13,43 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+## [1.13.2] — 2026-05-23
+
+**Dogfood baseline refresh.** Maintenance patch. The
+`design/measurements/` artefacts P26-T2 committed against
+git SHA `4627858` (v1.11.0 era) are regenerated against
+git SHA `7743d4f` (v1.13.1 release commit) to reflect 18
+PR merges and 9 additional `done` events since the last
+measurement. `docs/positioning.md` and
+`docs/agent-contract.md` baseline tables update their
+cited values to match.
+
+**Baseline shifts (v1.11.0 → v1.13.1 corpus state):**
+
+| metric | v1.11 baseline | v1.13.1 baseline | Δ |
+|---|---|---|---|
+| `pack_size_p50_bytes` | 20725 | 22072 | +1347 |
+| `pack_size_p90_bytes` | 50131 | 49654 | −477 |
+| `pack_size_max_bytes` | 259650 | 290791 | +31141 |
+| `first_pass_verify_rate_percent` | 100.0 | 100.0 | unchanged |
+| `lifecycle_adherence_rate_percent` | 81.3 | 81.8 | +0.5 |
+| `adapter_drift_rate_percent` | 0.0 | 0.0 | unchanged |
+| `tasks_done` | 79 | 88 | +9 |
+| `tasks_total` | 116 | 123 | +7 |
+
+The `pack_size_max_bytes` shift (+31141 bytes, +12%) is
+the v1.13.1 release prep commit itself absorbing the
+expanded `decision_refs` from later phases. The slight
+adherence-rate climb (+0.5pp) reflects new tasks being
+properly started before completion (the 18 PRs in this
+window all used the v1.11+ lifecycle correctly).
+
+**No code change. No CLI surface change.** Every public
+command, flag, JSON envelope, exit code, and error code is
+byte-identical to v1.13.1. `dist/cli.js` is byte-identical
+to v1.13.1. The published tarball is identical in shape
+(5 files); only the version metadata changes.
+
 ## [1.13.1] — 2026-05-23
 
 **CLI maintainability refactor.** v1.13.1 ships P27 (CLI

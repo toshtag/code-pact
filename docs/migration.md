@@ -447,6 +447,53 @@ Projects running `plan lint --strict` / `plan analyze --strict` / `validate --st
 
 In semver terms, v1.4.0 is a minor release.
 
+## v1.13.1 → v1.13.2
+
+**Dogfood baseline refresh patch.** No code change. No
+CLI surface change. Upgrade is a no-op for project state:
+
+```sh
+npm install -g code-pact@1.13.2
+```
+
+### What changed
+
+- `design/measurements/` artefacts (the v1 + v2 CSVs and
+  `summary.json`) regenerated against git SHA `7743d4f`
+  (v1.13.1 release commit). The values P26-T2 committed
+  against git SHA `4627858` (v1.11.0 era) were 18 PR
+  merges and 9 additional `done` events stale.
+- `docs/positioning.md` "Baseline values" table and
+  `docs/agent-contract.md` "Measurement" table cite the
+  refreshed numbers.
+- `measurements.manifest.json` `input_git_sha` /
+  `code_pact_cli_version` / `generated_at` refresh.
+
+### What did NOT change
+
+- `dist/cli.js` — byte-identical to v1.13.1.
+- Every public command, flag, JSON envelope, exit code,
+  and error code — byte-identical to v1.13.1.
+- Adapter manifest schema — unchanged. No `adapter
+  upgrade` needed.
+- `progress.yaml` schema — unchanged.
+
+### Baseline shifts
+
+| metric | v1.11 baseline | v1.13.2 baseline | Δ |
+|---|---|---|---|
+| `pack_size_p50_bytes` | 20725 | 22072 | +1347 |
+| `pack_size_p90_bytes` | 50131 | 49654 | −477 |
+| `pack_size_max_bytes` | 259650 | 290791 | +31141 |
+| `first_pass_verify_rate_percent` | 100.0 | 100.0 | unchanged |
+| `lifecycle_adherence_rate_percent` | 81.3 | 81.8 | +0.5 |
+| `adapter_drift_rate_percent` | 0.0 | 0.0 | unchanged |
+| `tasks_done` | 79 | 88 | +9 |
+| `tasks_total` | 116 | 123 | +7 |
+
+In semver terms, v1.13.2 is a patch release — no
+behaviour change, only measurement data freshness.
+
 ## v1.13.0 → v1.13.1
 
 **Internal refactor patch.** No user-visible product
