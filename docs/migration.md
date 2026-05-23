@@ -447,6 +447,48 @@ Projects running `plan lint --strict` / `plan analyze --strict` / `validate --st
 
 In semver terms, v1.4.0 is a minor release.
 
+## v1.13.0 → v1.13.1
+
+**Internal refactor patch.** No user-visible product
+surface change. Upgrade is a no-op for project state:
+
+```sh
+npm install -g code-pact@1.13.1
+```
+
+### What changed
+
+- `src/cli.ts` (4559 → 2388 lines, −48%) — the `task` and
+  `adapter` subcommand clusters move to dedicated files
+  under `src/cli/commands/`. The P14 advisory-write-lock
+  wrapper (`withWriteLock`) is promoted to a shared
+  `src/cli/util.ts` module.
+- `dist/cli.js` grows from 447.82 KB to 452.96 KB
+  (+5.14 KB) due to the new module boundaries. Runtime
+  behaviour is byte-identical.
+- `docs/cli-contract.md` gains a `## Source layout (CLI
+  wrapper layer)` contributor-facing section documenting
+  where new commands go.
+
+### What did NOT change
+
+- Every public command, flag, JSON envelope, exit code,
+  and error code — byte-identical to v1.13.0.
+- The existing 1262 unit + 333 integration tests pass
+  WITHOUT MODIFICATION (the safety guarantee the
+  refactor operated under).
+- The published tarball still contains only `LICENSE` /
+  `README.md` / `dist/cli.js` / `dist/cli.js.map` /
+  `package.json` — the new `src/cli/commands/` directory
+  is not shipped to users.
+- Adapter manifest schema — unchanged. No `adapter
+  upgrade` needed.
+- `progress.yaml` schema — unchanged.
+
+In semver terms, v1.13.1 is a patch release — the v1.10.1
+precedent applies (behaviour-preserving change with
+internal restructuring).
+
 ## v1.12.x → v1.13.0
 
 **Context budget enforcement.** v1.13.0 closes P24 and

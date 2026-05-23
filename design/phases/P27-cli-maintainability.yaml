@@ -4,7 +4,7 @@ name: CLI maintainability hardening — split task and adapter clusters out of
 weight: 15
 confidence: high
 risk: medium
-status: in_progress
+status: done
 objective: |
   Pure refactor: split the two most active subcommand
   clusters out of `src/cli.ts` (currently 4559 lines, 36

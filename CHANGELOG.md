@@ -13,6 +13,44 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+## [1.13.1] — 2026-05-23
+
+**CLI maintainability refactor.** v1.13.1 ships P27 (CLI
+maintainability hardening) as a **patch release** because
+no user-visible surface changes: every public command,
+flag, JSON envelope, exit code, and error code is
+byte-identical to v1.13.0. The `src/` layout is
+reorganised internally so future cross-command refactors
+(e.g. factoring duplicated flag parsing) become
+single-file changes, but the published tarball still
+contains only `LICENSE` / `README.md` / `dist/cli.js` /
+`dist/cli.js.map` / `package.json` — the new
+`src/cli/commands/` directory is not shipped.
+
+The internal change in `src/cli.ts` is significant
+(4559 → 2388 lines, −48%), with the `task` and `adapter`
+subcommand clusters moving to dedicated files under
+`src/cli/commands/` and the P14 advisory-write-lock
+wrapper promoted to a shared `src/cli/util.ts` module.
+The existing 1262 unit + 333 integration tests passed
+WITHOUT MODIFICATION across all three implementation
+tasks — that was the safety guarantee the refactor
+operated under, and it held throughout.
+
+**Why a patch (not 1.14.0).** P27 ships no user-visible
+artifact. The v1.10.0 / v1.12.0 minor-per-phase precedent
+applied to phases that produced user-readable artifacts
+(committable CSVs, baseline numbers populated in docs).
+P27 produces nothing users observe. Patch is the more
+semver-honest position, matching the v1.10.1 precedent
+for behaviour-preserving releases.
+
+Commit messages in this release reference `v1.14` in
+their headers — that was a working version tag during
+phase implementation, not a release contract. The
+release positioning as v1.13.1 reflects the
+post-implementation review of what P27 actually ships.
+
 ### Changed
 
 - **P27-T3 — Source layout documented.**
