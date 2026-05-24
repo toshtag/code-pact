@@ -364,7 +364,7 @@ code-pact plan analyze --json
 
 P13 (Planning UX & init hardening) closes four small frictions in the planning / init / task-creation surface that P9 and P12 explicitly deferred. Every change is additive on the CLI contract — no new commands, no new error codes, no new schema fields, no behavioural changes to `task complete` / `task finalize` / `phase reconcile` / `task runbook` / `phase runbook`.
 
-- **`init --sample-phase`** (Stable v1.4+) — explicit opt-in flag. In non-interactive mode, enables sample-phase creation (which was previously wizard-only). In TTY wizard mode, skips the "create sample phase?" prompt and forces creation. The existing TTY-wizard default-yes behaviour is preserved unchanged.
+- **`init --sample-phase`** (Stable v1.4+) — explicit opt-in flag. In non-interactive mode, enables sample-phase creation (which was previously wizard-only). In TTY wizard mode, skips the "create sample phase?" prompt and forces creation. The existing TTY-wizard default-yes behaviour is preserved unchanged. _(Superseded in v1.15: the wizard prompt was removed entirely; `--sample-phase` is now the only way to create the sample phase. See § v1.14.0 → v1.15.0.)_
 - **`task add` non-interactive flags** (Stable v1.4+) — `--description` triggers a flag-driven path that bypasses the wizard entirely (no TTY required). `--type` is required in that mode. Six readiness fields (`--ambiguity` / `--risk` / `--context-size` / `--write-surface` / `--verification-strength` / `--expected-duration`) accept enum values; five P10 fields (`--depends-on` / `--decision-ref` / `--read` / `--write` / `--acceptance-ref`) are repeatable. `--status` is **intentionally not exposed** — newly added tasks are always `status: planned`; historical / migrated tasks use `phase import`. Partial flags (non-interactive flag without `--description`) raise `CONFIG_ERROR`. Wizard path is unchanged.
 - **`suggested_next_steps: string[]`** on `plan prompt --json` and `phase import --json` (Stable v1.4+) — additive field naming the canonical post-command sequence. `plan prompt` emits the 4-step AI-assisted planning flow (prompt → import → lint → phase runbook). `phase import` emits the post-import validation flow (lint → phase runbook per imported phase → task runbook on the first task) plus a defaults-review hint when `completed_fields[]` is non-empty.
 - **Sample-phase artifact renamed `P1-welcome.yaml` → `TUTORIAL-walkthrough.yaml`** with two minimal tutorial tasks added (`TUTORIAL-T1`, `TUTORIAL-T2`; the latter `depends_on: [TUTORIAL-T1]`). One bootstrap artifact now demos P10 (`depends_on`) + P11 (`task finalize` / `phase reconcile`) + P12 (`task runbook` blocking step) end-to-end. **This is the only behavioural change for new init runs.** Existing v1.3.x projects with a `P1-welcome.yaml` are untouched.
@@ -432,7 +432,7 @@ Projects running `plan lint --strict` / `plan analyze --strict` / `validate --st
 
 - `init` flag surface gains `--sample-phase` (additive); all existing flags unchanged.
 - `init` JSON envelope unchanged.
-- `init` TTY wizard prompts and default-yes behaviour are unchanged. The `--sample-phase` flag, when passed to a TTY-wizard invocation, only skips the existing prompt (the wizard's default behaviour without the flag is identical to v1.3.x).
+- `init` TTY wizard prompts and default-yes behaviour are unchanged. The `--sample-phase` flag, when passed to a TTY-wizard invocation, only skips the existing prompt (the wizard's default behaviour without the flag is identical to v1.3.x). _(Superseded in v1.15: the sample-phase prompt was removed; see § v1.14.0 → v1.15.0.)_
 - **`init` generated artifact is renamed** (`P1-welcome.yaml` → `TUTORIAL-walkthrough.yaml`; phase id `P1` → `TUTORIAL`; two tutorial tasks added). This affects only NEW init runs. Existing projects with a v1.3.x-or-earlier `P1-welcome.yaml` are untouched.
 - `task add` flag surface gains the non-interactive flag set (additive); existing positional + `--id` behaviour unchanged.
 - `task add` JSON envelope unchanged (`{ phaseId, taskId, phasePath }`).
@@ -446,6 +446,38 @@ Projects running `plan lint --strict` / `plan analyze --strict` / `validate --st
 - No new task or phase schema field. v1.3.x phase YAMLs parse and behave identically.
 
 In semver terms, v1.4.0 is a minor release.
+
+## v1.14.0 → v1.15.0
+
+**Minor release.** Adds the `code-pact tutorial` command and removes the
+interactive sample-phase prompt from the `init` wizard. No breaking
+change — `--sample-phase` is unchanged, and non-interactive / CI `init`
+was already opt-in.
+
+```sh
+npm install -g code-pact@1.15.0
+```
+
+### What changed
+
+- **New command `code-pact tutorial`.** Runs the per-task loop end to end
+  in a throwaway sandbox (deleted afterward) and narrates each step.
+  Nothing is written to your project. `--json` emits a step transcript;
+  `--keep` retains the sandbox. Stable (v1.15+).
+- **The `init` wizard no longer asks "Create a tutorial sample phase?".**
+  The prompt is gone. To scaffold the `TUTORIAL` sample phase into your
+  project, pass `--sample-phase` explicitly (interactive or not) — exactly
+  as before. To just watch the loop run, use `code-pact tutorial`. After
+  `init` the wizard now prints two footer hints pointing at both.
+
+### Do you need to do anything?
+
+- **No.** If you scripted `init --sample-phase`, it behaves identically.
+- If you relied on the interactive wizard creating the sample phase by
+  answering "yes", add the `--sample-phase` flag to your `init`
+  invocation, or run `code-pact tutorial` instead.
+
+In semver terms, v1.15.0 is a minor release.
 
 ## v1.13.3 → v1.14.0
 
