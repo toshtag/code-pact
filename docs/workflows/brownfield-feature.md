@@ -22,7 +22,7 @@ Everything else stays untouched. `code-pact` writes only to `design/`, `.code-pa
 | --- | --- |
 | ...know exactly what the feature is and have ~30 minutes | [Manual path](../getting-started.md#path-2--manual) |
 | ...want an AI agent to draft the phase + task breakdown from a brief | [AI-assisted path](../getting-started.md#path-3--ai-assisted) |
-| ...just want to smoke-test the install against this repo | [Tutorial path](../getting-started.md#path-1--tutorial) (then delete the sample phase before adding the real one) |
+| ...just want to smoke-test the install against this repo | [Tutorial path](../getting-started.md#path-1--tutorial) — `code-pact tutorial` writes nothing to this repo |
 
 The **manual path is usually right** for brownfield. You already know the codebase; the AI agent can't draft anything you couldn't write in five minutes yourself, and `plan brief` / `plan constitution` content for a brownfield project often duplicates what's already in your existing docs.
 

@@ -31,7 +31,7 @@ v1.0 より前の挙動に固定したプロジェクトでは `npm install -g c
 
 | 経路 | 向いている場面 | 最初の `task complete` までの目安 |
 | --- | --- | --- |
-| **チュートリアル** | エンドツーエンドの動作確認をいちばん速く済ませたい | 約5分 |
+| **チュートリアル** | エンドツーエンドの動作確認をいちばん速く済ませたい — `code-pact tutorial` はリポジトリに何も書き込みません | 約1分 |
 | **手動** | 作るものの形がすでに見えていて、ロードマップを自分で書きたい | 約15分 |
 | **AI 支援** | プロジェクトのブリーフから AI エージェントにフェーズとタスクを起こさせたい | 約20分 |
 
@@ -39,30 +39,54 @@ v1.0 より前の挙動に固定したプロジェクトでは `npm install -g c
 
 ## 経路 1 — チュートリアル
 
-`init` ウィザードが用意するサンプルフェーズを使い、ループ全体が通ることを確認する経路です。**計画用の成果物は不要**で、インストールが健全であることの確認専用です。
+インストールが健全であること、そしてタスク単位のループが通ることをいちばん速く確認する経路です。やり方は2通りあります。
+
+### 方法A — `code-pact tutorial`（プロジェクトには何も書き込みません）
 
 ```sh
-# 1. 初期化。ウィザードは順に次を尋ねます:
-#    言語 → エージェント → デフォルトエージェント →
-#    アダプタファイルをいま生成するか (yes) → 検証コマンド (pnpm test) →
-#    サンプルフェーズを作るか (yes) → ブリーフを集めるか (ここではスキップ)
-code-pact init
-
-# 2. サンプルフェーズ P1 ("Welcome") が作成されていますが、タスクはまだありません。
-#    対話的にひとつ追加します。
-code-pact task add P1
-
-# 3. Markdown のコンテキストパックを取得して、エージェントが実装します。
-code-pact task context P1-T1 --agent claude-code
-
-# 4. 実装が終わったら完了をマークします。フェーズの verify コマンドが走り、
-#    通れば `done` イベントが追記されます。
-code-pact task complete P1-T1 --agent claude-code
+code-pact tutorial
 ```
 
-`pnpm test` がこのリポジトリにふさわしくない場合は、ウィザード（手順1）で別のコマンドを指定してください。スモークテスト目的なら `node --version` のようなコマンドも安全な選択肢です。
+`init` → `task prepare` → `task start` → `task complete` → `task finalize` というループ全体と、タスク間の依存ゲートまでを使い捨てのサンドボックスで実行し、各ステップを平易に解説したうえでサンドボックスを削除します。あなたのリポジトリには一切触れません。`--keep` でサンドボックスを残して中身を確認でき、`--json` で機械可読のトランスクリプトが得られます。
 
-> サンプルフェーズの名前は `P1 — Welcome` で、プロジェクト構造と検証パイプラインの確認のためだけに存在します。本物のフェーズができたら、残すか、改名するか、削除するかを判断してください。サンプルフェーズの概念は別ドキュメント（[`docs/concepts/sample-phase.md`](../concepts/sample-phase.md)）で詳しく扱っています。
+準備も後片付けも不要で、おすすめの動作確認方法です。自分で実行するのと同じコマンドを走らせるため、出力が実際の挙動からズレることがありません。
+
+### 方法B — 実際のサンプルフェーズを作る（`--sample-phase`）
+
+自分のリポジトリ内で実物のフェーズをいじってみたい場合は、`--sample-phase` フラグで明示的に作成します:
+
+```sh
+code-pact init --sample-phase
+# CI / 非対話の場合:
+code-pact init --non-interactive --agent claude-code --locale en-US --sample-phase
+```
+
+> 対話的な `init` ウィザードは、サンプルフェーズを作るかどうかをもう尋ねません（v1.15 で削除）。`--sample-phase` を明示的に指定するか、上記の `code-pact tutorial` でループを眺めてください。
+
+これは `design/` に `TUTORIAL` フェーズ（`TUTORIAL-T1` と `TUTORIAL-T2`）を書き出します。`TUTORIAL-T2` は `depends_on: [TUTORIAL-T1]` を宣言しているので、依存フィールドと `task runbook` のブロッキング表示を試せます。あとは手でループを回します:
+
+```sh
+# 1. Markdown のコンテキストパックを取得して最初のタスクを実装します。
+code-pact task context TUTORIAL-T1 --agent claude-code
+
+# 2. 実装が終わったら完了をマークします。フェーズの verify コマンドが走り、
+#    通れば .code-pact/state/progress.yaml に `done` イベントが追記されます。
+#    design YAML の status はこのコマンドでは変更されません（v1.0 契約）。
+code-pact task complete TUTORIAL-T1 --agent claude-code
+
+# 3. (任意, v1.2+) design YAML の status を done に揃えます。既定は dry-run、
+#    --write で実際に書き換えます。
+code-pact task finalize TUTORIAL-T1 --write
+
+# 4. TUTORIAL-T2 についても手順1〜3を繰り返します（TUTORIAL-T1 の完了に依存）。
+code-pact task context TUTORIAL-T2 --agent claude-code
+code-pact task complete TUTORIAL-T2 --agent claude-code
+code-pact task finalize TUTORIAL-T2 --write
+```
+
+`pnpm test` がこのリポジトリにふさわしくない場合は、`init` に別のコマンドを渡してください。スモークテスト目的なら `node --version` のようなコマンドも安全な選択肢です。
+
+> サンプルフェーズの成果物は `TUTORIAL — Walkthrough`（v1.4+）で、プロジェクト構造と検証パイプラインの確認のためだけに存在します。本物のフェーズができたら、ファイル `design/phases/TUTORIAL-walkthrough.yaml` と roadmap のエントリを削除してください。サンプルフェーズの詳細は [`docs/concepts/sample-phase.md`](../concepts/sample-phase.md) で扱っています。
 
 ---
 
