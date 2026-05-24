@@ -13,6 +13,85 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+### P28 — Spec-conformance remediation
+
+**P28-T0.** Phase bootstrap + RFC acceptance. An external static
+review of v1.13.3 found three accepted-RFC-vs-implementation
+divergences (re-verified against source before this phase opened):
+P24 `--budget-bytes` elides `related_decisions` / `rules` that the
+context-budget RFC marks unelidable; the P26 harness counts
+`pack_bytes` as characters not UTF-8 bytes; the P26 adapter-drift
+denominator is derived from observed signals instead of
+`.code-pact/project.yaml` enabled agents. P28 is a **remediation
+phase** — it does not change the accepted P24/P26 contracts, it
+restores implementation and tests to match them, and it pins the
+load-bearing RFC clauses with tests whose names quote the clause.
+Lands `design/decisions/spec-conformance-rfc.md` (status: accepted),
+`design/phases/P28-spec-conformance-remediation.yaml`, and a P28
+roadmap entry (weight 12). No code or public CLI surface change in
+T0.
+
+**P28-T1.** P24 conditional elision. `--budget-bytes` no longer elides
+`related_decisions` / `rules` when they are the default task-id-matched
+decisions / `applies_to`-matched rules — only the `context_size: large`
+"all decisions" and `write_surface: high` "all rules" expansions are
+elidable, exactly as `context-budget-rfc.md` specifies. `completed_tasks`
+/ `constitution` / `reads` stay unconditionally elidable; `ELISION_ORDER`
+(the priority) is unchanged — only the per-invocation eligible subset
+narrows. When a non-elidable section keeps the pack over budget,
+`CONTEXT_OVER_BUDGET` fires with that section in `unelidable_sections`.
+The default (no-`--budget-bytes`) path is byte-identical. The previous
+budget test, which hard-coded the unconditional elidable set and asserted
+that elision *happens*, is corrected; four new tests pin each RFC
+eligibility clause by name. `tests/unit/core/pack/budget.test.ts` 11
+passed; full suite 1262 unit + 333 integration green.
+
+**P28-T2.** P26 evidence-harness correctness. `pack_bytes` now uses
+`Buffer.byteLength(packContent, "utf8")` instead of `String.length`
+(UTF-16 code units). The enabled-agent set for `adapter-drift-by-agent.csv`
+— the denominator of `adapter_drift_rate_percent` — is read from the
+declared source of truth (`.code-pact/project.yaml` `agents[]`, `enabled
+!= false`) instead of being inferred from doctor issues + progress events,
+so a clean enabled agent with zero issues and zero events still gets a
+row. `scripts/harness/index.ts` re-exports the P26 builders for surface
+parity. Baseline under `design/measurements/` regenerated. Isolation
+finding: on the same corpus, the byte-vs-char correction moves
+`pack_size_max_bytes` by +1400 (304753 → 306153, +0.46%) and the p50 by
++0.33% — small because the design corpus is English (the residual comes
+from multi-byte typographic punctuation like em-dashes). The larger
+290791 → 306153 shift vs the prior baseline is corpus growth (v1.13.1 →
+v1.13.3 + P28 tasks), not the byte fix. The denominator change is
+currently inert (single enabled agent) and latent for multi-agent
+projects; both fixes are correctness/evidence-fidelity hygiene, as P28's
+RFC states. Added a non-ASCII `pack_bytes` unit test; full suite green.
+
+**P28-T3.** Design-document consistency. Corrected declared `writes`
+that referenced files which were never created: P21 (`docs/cli/*.md` →
+`docs/cli-contract.md`, where the CLI reference was actually
+consolidated; dropped a duplicate `tests/integration/task-context-explain.test.ts`
+already covered by the listed unit test) and P24 (dropped
+`src/core/error-codes.ts` — `CONTEXT_OVER_BUDGET` lives in
+`src/core/pack/index.ts`, already listed — and a
+`tests/integration/task-context-budget.test.ts` covered by the listed
+`tests/unit/core/pack/**` glob). Fixed P27-T1's manual smoke command:
+`task prepare` accepts `--budget-bytes` but not `--explain` (which is a
+`task context` flag), so `--json --explain --budget-bytes` never ran as
+written. Corrected `docs/cli-contract.md`: `adapter doctor` and `adapter
+conformance` share the `conformance-spec.ts` module but check different
+things — doctor's `ADAPTER_CONTRACT_DRIFT` consumes only the heading
+constants (asserting the `## Agent contract` section and axis
+sub-headings are present), while the required-CLI-surface and
+failure-guidance checks are `adapter conformance`-only; the previous
+wording overstated a shared required-surface contract. P25/P27 roadmap
+honesty: P27's partial split (task/adapter clusters extracted; init /
+plan / phase / doctor / validate / verify / pack / progress / spec /
+recommend still in `src/cli.ts`) is already accurately documented in the
+Source layout section, and P25 (Spec Kit Bridge v2) remains unstarted —
+recorded in P28's RFC, with no doc overclaim to correct. The P21 / P24 /
+P27 phase YAML are protected paths edited as bootstrap-class writes (not
+listed in this task's `writes:`); T3 finalizes without `--audit-strict`,
+deviation recorded here per the P27-T0 precedent.
+
 ## [1.13.3] — 2026-05-24
 
 **P22 cancellation + adapter doctor two-axis docs.**

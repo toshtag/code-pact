@@ -11,15 +11,17 @@
 // --check).
 
 import { parseArgs } from "node:util";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
+import { parse as parseYaml } from "yaml";
 
 import { loadPlanState } from "../../src/core/plan/state.ts";
 import { runPlanLint } from "../../src/commands/plan-lint.ts";
 import { buildContextPack } from "../../src/core/pack/index.ts";
 import { readPackageVersion } from "../../src/lib/package-version.ts";
 import { runAdapterDoctor } from "../../src/commands/adapter-doctor.ts";
+import { Project } from "../../src/core/schemas/project.ts";
 
 import {
   buildAdapterDriftRow,
@@ -76,6 +78,23 @@ function readGitSha(cwd: string): string {
     return result.stdout.trim();
   }
   return "unknown";
+}
+
+// P28: the declared enabled-agent set, read from .code-pact/project.yaml.
+// This is the denominator for adapter_drift_rate_percent — it must be the
+// declared source of truth, not inferred from observed doctor issues or
+// progress events. Mirrors adapter-doctor's loadProjectSafe + enabled
+// filter. Returns [] when project.yaml is absent or unparseable.
+async function loadEnabledAgents(cwd: string): Promise<string[]> {
+  try {
+    const raw = await readFile(join(cwd, ".code-pact", "project.yaml"), "utf8");
+    const project = Project.parse(parseYaml(raw) as unknown);
+    return project.agents
+      .filter((a) => a.enabled !== false)
+      .map((a) => a.name);
+  } catch {
+    return [];
+  }
 }
 
 async function buildHarnessOutput(opts: HarnessOptions): Promise<HarnessOutput> {
@@ -146,20 +165,14 @@ async function buildHarnessOutput(opts: HarnessOptions): Promise<HarnessOutput> 
       bucket.push(issue);
       issuesByAgent.set(issue.agent, bucket);
     }
-    // Even agents with zero issues get a row when they are enabled;
-    // surface them by reading project.yaml directly via loadPlanState's
-    // sibling artefact. The simplest deterministic source is the
-    // issues map's keys plus any agent that produced no issues — but
-    // runAdapterDoctor never reports an "ok" agent in the issues list.
-    // We derive the enabled-agent set from progress events instead:
-    // if no project.yaml is loadable we still emit an empty CSV.
-    // For the dogfood corpus the issue map's keys equal the enabled
-    // set when at least one issue exists; for true silence we list the
-    // dogfood agents from progress events' `agent` field.
-    const enabledAgents = new Set<string>(issuesByAgent.keys());
-    for (const ev of events) {
-      if (ev.agent) enabledAgents.add(ev.agent);
-    }
+    // P28: the enabled-agent set is the denominator of
+    // adapter_drift_rate_percent, so it MUST come from the declared
+    // source of truth (.code-pact/project.yaml agents[] with enabled
+    // != false) — not from observed signals. Deriving it from doctor
+    // issues + progress events silently drops any enabled agent that
+    // happens to have zero issues and zero events, corrupting the rate.
+    // Every enabled agent gets exactly one row, including a clean one.
+    const enabledAgents = await loadEnabledAgents(cwd);
     const sortedAgents = [...enabledAgents].sort((a, b) => a.localeCompare(b));
     adapterDriftRows = sortedAgents.map((agent) =>
       buildAdapterDriftRow(agent, issuesByAgent.get(agent) ?? []),

@@ -62,7 +62,11 @@ export function buildPackSizeRow(
   return {
     phase_id: phase.id,
     task_id: task.id,
-    pack_bytes: packContent.length,
+    // P28: the column is named *_bytes and the project locks
+    // Buffer.byteLength(..., "utf8") as the byte measurement everywhere
+    // (core pack rendering already does). String.length is a UTF-16 code
+    // unit count that diverges for any non-ASCII pack content.
+    pack_bytes: Buffer.byteLength(packContent, "utf8"),
     pack_lines: packContent.split("\n").length,
     pack_sections: sectionCount,
     reads_glob_count: task.reads?.length ?? 0,

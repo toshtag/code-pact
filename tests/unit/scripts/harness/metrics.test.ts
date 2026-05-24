@@ -68,6 +68,16 @@ describe("buildPackSizeRow", () => {
     expect(row.pack_sections).toBe(2);
   });
 
+  it("counts UTF-8 bytes, not UTF-16 code units, for non-ASCII content (P28)", () => {
+    // Japanese + emoji: String.length (code units) is strictly less than
+    // the UTF-8 byte length. The column is named *_bytes, so it must
+    // report Buffer.byteLength, not content.length.
+    const content = "## 設計ノート\n日本語の本文と絵文字 🎯\n";
+    const row = buildPackSizeRow(phase, makeTask(), content);
+    expect(row.pack_bytes).toBe(Buffer.byteLength(content, "utf8"));
+    expect(row.pack_bytes).toBeGreaterThan(content.length);
+  });
+
   it("captures cardinality of task array fields", () => {
     const task = makeTask({
       reads: ["a", "b", "c"],

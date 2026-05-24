@@ -74,3 +74,6 @@ phases:
   - id: P22
     path: design/phases/P22-adapter-schema-v2.yaml
     weight: 10
+  - id: P28
+    path: design/phases/P28-spec-conformance-remediation.yaml
+    weight: 12

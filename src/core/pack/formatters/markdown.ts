@@ -338,7 +338,7 @@ export function renderSections(ctx: PackContext): RenderedSection[] {
 }
 
 /**
- * Section elision priority for `--budget-bytes` (P24).
+ * Section elision PRIORITY for `--budget-bytes` (P24).
  *
  * When `buildContextPack` is invoked with `budgetBytes`, sections are
  * dropped from the rendered output in this order until the total byte
@@ -346,8 +346,15 @@ export function renderSections(ctx: PackContext): RenderedSection[] {
  * unelidable — they are either always-included or carry task-declared
  * intent the user explicitly opted into.
  *
- * Locked by `design/decisions/context-budget-rfc.md`. New entries
- * require an RFC amendment.
+ * This constant is the priority ORDER only. Elision ELIGIBILITY is
+ * conditional (P28, enforced in `applyBudgetElision`): `related_decisions`
+ * is elidable only when it is the `context_size: large` "all decisions"
+ * expansion, and `rules` only when it is the `write_surface: high` "all
+ * rules" expansion. The applies_to-matched / task-id-matched subsets that
+ * appear outside those expansions are never elided.
+ *
+ * Locked by `design/decisions/context-budget-rfc.md`. New entries or
+ * eligibility changes require an RFC amendment.
  */
 export const ELISION_ORDER: ReadonlyArray<string> = [
   "completed_tasks",

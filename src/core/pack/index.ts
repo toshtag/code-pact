@@ -412,7 +412,10 @@ export async function buildContextPack(
   // in `ELISION_ORDER` until the pack falls within budget; throw
   // `ContextOverBudgetError` if maximal elision still cannot meet it.
   // The no-budget path is byte-identical to v1.12.
-  const budgetResult = applyBudgetElision(allRendered, opts.budgetBytes);
+  const budgetResult = applyBudgetElision(allRendered, opts.budgetBytes, {
+    isLarge,
+    isLargeWriteSurface,
+  });
   const renderedSections = budgetResult.sections;
   const elidedNames = budgetResult.elidedNames;
   const elidedSectionsBytes = budgetResult.elidedBytes;
@@ -493,6 +496,14 @@ type BudgetElisionResult = {
   elidedBytes: Map<string, number>;
 };
 
+// P28: the readiness signals that gate conditional elision eligibility.
+// `related_decisions` / `rules` are only elidable when they are the
+// large-context / high-write-surface expansions — see applyBudgetElision.
+type BudgetElisionEligibility = {
+  isLarge: boolean;
+  isLargeWriteSurface: boolean;
+};
+
 function computeRenderedBytes(sections: ReadonlyArray<RenderedSection>): number {
   if (sections.length === 0) return 0;
   return Buffer.byteLength(
@@ -508,6 +519,7 @@ function sectionBytes(section: RenderedSection): number {
 function applyBudgetElision(
   rendered: ReadonlyArray<RenderedSection>,
   budgetBytes: number | undefined,
+  eligibility: BudgetElisionEligibility,
 ): BudgetElisionResult {
   if (budgetBytes === undefined) {
     return {
@@ -525,7 +537,22 @@ function applyBudgetElision(
     return { sections: surviving, elidedNames, elidedBytes };
   }
 
-  for (const name of ELISION_ORDER) {
+  // P28: elision ELIGIBILITY is conditional, per context-budget-rfc.md.
+  // `related_decisions` is elidable only when it is the `context_size:
+  // large` "all decisions" expansion; `rules` only when it is the
+  // `write_surface: high` "all rules" expansion. Outside those
+  // expansions the section holds task-id-matched decisions /
+  // applies_to-matched rules the RFC marks unelidable — dropping them
+  // for budget would silently remove context the task opted into. The
+  // priority (ELISION_ORDER) is unchanged; only the eligible subset
+  // narrows per invocation.
+  const eligibleOrder = ELISION_ORDER.filter((name) => {
+    if (name === "related_decisions") return eligibility.isLarge;
+    if (name === "rules") return eligibility.isLargeWriteSurface;
+    return true;
+  });
+
+  for (const name of eligibleOrder) {
     const idx = surviving.findIndex((s) => s.name === name);
     if (idx === -1) continue;
     elidedBytes.set(name, sectionBytes(surviving[idx]!));
