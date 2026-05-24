@@ -369,10 +369,10 @@ export const messages = {
       editNotice:
         'Edit the sections marked "Project-specific" to reflect your project\'s conventions.',
       workflowHeader: "How to work on a task",
-      step0: "Get an execution recommendation (model tier, effort, planning posture, budget):",
+      step0: "Prepare the task — the single per-task entry point. One call returns the current state, the execution recommendation (model tier, effort, planning posture, budget), the context pack metadata, a structured `next_action`, and a `commands` dictionary with the exact next commands to run:",
       step0Detail:
-        "The JSON drives model selection, context budget, and whether to plan or proceed directly.",
-      step1: "Fetch the context pack:",
+        "`recommend` and `task context` remain available as standalone diagnostics, but `task prepare` runs both for you and returns their results in one envelope. Drive the rest of the lifecycle from the returned `commands` dictionary.",
+      step1: "Fetch the context pack directly only if you need it outside `task prepare` (diagnostic — `task prepare` already reports its metadata):",
       step2: "Implement the task.",
       step3: "Mark the task complete. This runs verify and, on pass, appends a `done` event to `.code-pact/state/progress.yaml`:",
       step3FailDetail:
@@ -442,6 +442,13 @@ export const messages = {
           "```",
           "",
           "For sequencing guidance, `code-pact task runbook <id> --json` and `code-pact phase runbook <id> --json` are read-only.",
+          "",
+          "Activation rules (how the agent should behave):",
+          "",
+          "- When the user names a task to implement (e.g. \"work on P1-T1\"), start with `task prepare`.",
+          "- If `next_action.type` is `wait_for_dependencies`, do not implement — resolve the blocking tasks or re-run `task prepare`.",
+          "- On `CONTEXT_OVER_BUDGET`, do not widen context unasked; report the budget, a task split, or the minimum achievable bytes.",
+          "- Run `task finalize --write` only after `task complete` has recorded the `done` event.",
         ].join("\n"),
         verifyBody: [
           "Before implementing:",

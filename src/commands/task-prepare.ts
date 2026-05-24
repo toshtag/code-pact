@@ -113,7 +113,7 @@ function buildCommands(agent: string, phaseId: string, taskId: string): TaskPrep
     start: `code-pact task start ${taskId} --agent ${agent}`,
     verify: `code-pact verify --phase ${phaseId} --task ${taskId}`,
     complete: `code-pact task complete ${taskId} --agent ${agent}`,
-    finalize: `code-pact task finalize ${taskId} --agent ${agent}`,
+    finalize: `code-pact task finalize ${taskId} --write --json`,
   };
 }
 

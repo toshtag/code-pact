@@ -212,31 +212,34 @@ The lenient `phase import` mode is intentional. It lets the AI focus on getting 
 Once you have at least one task, every path converges on the same deterministic loop. This is what an agent (or you) runs per task.
 
 ```sh
-# A. Get the execution plan for the task — model tier, effort, context
-#    profile, whether planning is required, preflight commands, budget
-#    profile. Strictly additive; safe to ignore fields you don't need.
-code-pact recommend --phase P1 --task P1-T1 --json
+# A. Prepare the task — the single per-task entry point. One call returns
+#    the current state, the execution recommendation (model tier, effort,
+#    planning posture, budget), the context pack metadata, a structured
+#    next_action, and a `commands` dictionary with the exact next commands.
+code-pact task prepare P1-T1 --agent claude-code --json
 
-# B. Fetch the markdown context pack (stdout, no side effects).
-#    Content adapts automatically to task attributes (context_size,
-#    ambiguity, write_surface).
-code-pact task context P1-T1 --agent claude-code
-
-# C. Record that the task is started so handoff and status views know.
+# B. Record that the task is started so handoff and status views know.
 code-pact task start P1-T1 --agent claude-code
 
-# D. If the task gets blocked, record why explicitly.
+# C. If the task gets blocked, record why explicitly.
 code-pact task block P1-T1 --reason "Waiting for review on PR #42"
 code-pact task resume P1-T1 --agent claude-code
 
-# E. Inspect the derived state and full event history at any time.
+# D. Inspect the derived state and full event history at any time.
 code-pact task status P1-T1 --json
 
-# F. After implementation, mark the task complete. This runs the phase's
+# E. After implementation, mark the task complete. This runs the phase's
 #    verify command and, on pass, appends a `done` event to
 #    .code-pact/state/progress.yaml.
 code-pact task complete P1-T1 --agent claude-code
+
+# F. Reconcile the design status to `done`. Run the dry-run first to
+#    inspect the write audit, then --write to apply.
+code-pact task finalize P1-T1 --json
+code-pact task finalize P1-T1 --write --json
 ```
+
+`task prepare` is the recommended entry point — `recommend` and `task context` remain available as standalone diagnostics, but `task prepare` runs both for you and returns their results (plus the next-action and command dictionary) in one envelope.
 
 A few invariants worth knowing:
 

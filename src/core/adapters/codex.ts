@@ -36,7 +36,7 @@ function agentsMd(profile: AgentProfile, modelProfiles: ModelProfile[], locale: 
     ``,
     `0. ${t.step0}`,
     `   \`\`\`sh`,
-    `   code-pact recommend --phase <phase-id> --task <task-id> --agent codex --json`,
+    `   code-pact task prepare <task-id> --agent codex --json`,
     `   \`\`\``,
     `   ${t.step0Detail}`,
     ``,

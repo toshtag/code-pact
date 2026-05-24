@@ -1367,7 +1367,7 @@ The command MUST NOT mutate `.code-pact/state/progress.yaml` on any code path. I
       "start":    "code-pact task start    <task-id> --agent <agent>",
       "verify":   "code-pact verify --phase <phase> --task <task-id>",
       "complete": "code-pact task complete <task-id> --agent <agent>",
-      "finalize": "code-pact task finalize <task-id> --agent <agent>"
+      "finalize": "code-pact task finalize <task-id> --write --json"
     },
     "blocked_by": [],
     "already_done": true

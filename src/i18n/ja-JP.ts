@@ -369,10 +369,10 @@ export const messages = {
       editNotice:
         "「プロジェクト固有」とマークされたセクションを編集して、プロジェクトの規約を反映させてください。",
       workflowHeader: "タスクの進め方",
-      step0: "実行推奨を取得する (モデル階層、エフォート、計画姿勢、バジェット):",
+      step0: "タスクを prepare する — タスク単位の単一の入口。1 回の呼び出しで現在の状態、実行推奨 (モデル階層、エフォート、計画姿勢、バジェット)、コンテキストパックのメタデータ、構造化された `next_action`、そして次に実行すべき正確なコマンドの `commands` 辞書がまとめて返る:",
       step0Detail:
-        "JSON 出力からモデル選択、コンテキストバジェット、計画 vs 即着手の判断を行う。",
-      step1: "コンテキストパックを取得する:",
+        "`recommend` と `task context` は単体の診断コマンドとして引き続き使えるが、`task prepare` は両者を内部で実行して結果を 1 つの envelope で返す。以降のライフサイクルは返ってきた `commands` 辞書をそのまま使って進める。",
+      step1: "`task prepare` の外でコンテキストパックが必要な場合のみ、直接取得する (診断用 — `task prepare` は既にそのメタデータを返している):",
       step2: "タスクを実装する。",
       step3: "タスクを完了としてマークする。verify を実行し、成功すれば `done` イベントを `.code-pact/state/progress.yaml` に追記する:",
       step3FailDetail:
@@ -441,6 +441,13 @@ export const messages = {
           "```",
           "",
           "順序ガイダンスには `code-pact task runbook <id> --json` と `code-pact phase runbook <id> --json` が read-only で使えます。",
+          "",
+          "起動ルール (エージェントの振る舞い):",
+          "",
+          "- ユーザーがタスクを指定して実装を依頼したら (例: 「P1-T1 をやって」)、まず `task prepare` から始める。",
+          "- `next_action.type` が `wait_for_dependencies` の場合は実装しない — ブロックしているタスクを解消するか `task prepare` を再実行する。",
+          "- `CONTEXT_OVER_BUDGET` のときは勝手にコンテキストを広げず、バジェット・タスク分割・達成可能な最小バイト数を報告する。",
+          "- `task finalize --write` は `task complete` が `done` イベントを記録した後にのみ実行する。",
         ].join("\n"),
         verifyBody: [
           "実装前:",

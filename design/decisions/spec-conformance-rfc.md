@@ -54,7 +54,7 @@ The P24 divergence survived a full test suite and the dogfood harness. The exist
 
 - **No RFC amendments.** `context-budget-rfc.md` and `evidence-harness-v2-rfc.md` are correct as written; P28 changes code and tests to match them, not the reverse.
 - **No new public CLI surface, flag, or error code; no error-code rename.** `CONTEXT_OVER_BUDGET` keeps its name and envelope.
-- **No new feature work.** P25 (Spec Kit Bridge v2) stays unstarted; it is a roadmap item, not a P28 defect. P27's deferred full CLI split stays deferred; P27 shipped its committed task/adapter-cluster scope. T3 records these as documentation honesty, not as bugs.
+- **No new feature work.** Spec Kit Bridge v2 stays unstarted — it is an unscheduled future capability, not a numbered roadmap phase (`design/roadmap.yaml` enumerates no `P25`), and not a P28 defect. P27's deferred full CLI split stays deferred; P27 shipped its committed task/adapter-cluster scope. T3 records these as documentation honesty, not as bugs.
 - **No retroactive rewrite of shipped behaviour beyond RFC compliance.** The no-`--budget-bytes` default path stays byte-identical; `pack-byte-identical.test.ts` continues to pass unmodified.
 
 ## Backward compatibility

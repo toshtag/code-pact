@@ -16,13 +16,16 @@ v1.0 ships **stable** adapters for `claude-code`, `codex`, and `generic`. The `c
 # 30-second tour
 npx code-pact init --non-interactive --agent claude-code --locale en-US
 code-pact adapter install claude-code --json
-code-pact recommend --phase P1 --task P1-T1 --json    # deterministic execution plan
-code-pact task context P1-T1 --agent claude-code      # markdown context pack for the agent
+code-pact task prepare P1-T1 --agent claude-code --json  # single per-task entry: state + recommendation + the exact commands to run
 code-pact task start P1-T1
 # ... agent implements ...
-code-pact task complete P1-T1                          # runs verify, appends a done event
-code-pact validate                                     # CI-friendly health check
+code-pact verify --phase P1 --task P1-T1                 # run the phase's verification commands
+code-pact task complete P1-T1                            # re-runs verify, appends a done event
+code-pact task finalize P1-T1 --write --json             # reconcile design status to done
+code-pact validate                                       # CI-friendly health check
 ```
+
+`task prepare` is the recommended per-task entry point: one call returns the current state, the execution recommendation, the context pack metadata, and a `commands` dictionary with the exact next commands. `recommend` and `task context` remain available as standalone diagnostics.
 
 ## Status
 
@@ -53,7 +56,7 @@ Contributors can also run from a clone with `pnpm link --global`, or install a l
 - **Manual path** — write the roadmap by hand with a mix of interactive wizards and flag-based commands.
 - **AI-assisted path** — generate a planning prompt with `plan prompt`, have your agent draft the YAML, then bulk-import with `phase import`.
 
-All three converge on the same per-task agent loop (`recommend` → `task context` → `task start` → implement → `task complete`).
+All three converge on the same per-task agent loop, entered through `task prepare` (`task prepare` → `task start` → implement → `verify` → `task complete` → `task finalize`). `recommend` and `task context` remain available as standalone diagnostics — `task prepare` surfaces both for you in one call.
 
 ## Reference docs
 

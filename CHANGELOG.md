@@ -13,6 +13,74 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+### P29 — Contract truth & baseline integrity
+
+**P29-T0.** Phase bootstrap. An external static review of v1.13.3 found
+that `task prepare` — the v1.11+ single per-task entry point — emits a
+`commands.finalize` string the CLI parser rejects (`code-pact task
+finalize <id> --agent <agent>` → `CONFIG_ERROR "Unknown option
+'--agent'"`); `task finalize` is a design/progress reconciliation
+command and takes no `--agent` (already documented in this changelog).
+The bug survived because the unit test pinned the broken string as
+expected and no test ran the emitted commands through the parser. P29 is
+a **remediation phase** scoped strictly to contract truth: fix the
+broken command and its copies, add the missing parser regression, and
+align the docs/measurement baselines that the same review found drifted.
+Lands `design/phases/P29-contract-truth.yaml` and a P29 roadmap entry
+(weight 8). No code or public CLI surface change in T0.
+
+**P29-T1.** Fix the broken finalize command. `task prepare`'s
+`commands.finalize` changes from the parser-rejected `code-pact task
+finalize <id> --agent <agent>` to `code-pact task finalize <id> --write
+--json` (single field; no envelope-shape change). The two copies that
+propagated the bug are corrected: the `task prepare` unit-test
+expectation (`tests/unit/commands/task-prepare.test.ts`) and the
+`docs/cli-contract.md` commands example. `commands.finalize` is now
+executable verbatim.
+
+**P29-T2.** Add the parser regression the pinned test masked.
+`tests/integration/task-prepare-commands-contract.test.ts` runs every
+command `task prepare --json` emits through the built CLI and fails on
+any "Unknown option" rejection, then walks start → complete → finalize
+using the emitted commands. Closes the structural gap that let T1's bug
+through — a string-equality unit test could not catch an unsupported
+flag.
+
+**P29-T3.** Make `task prepare` the primary per-task entry point in the
+docs and generated adapter guidance. The README 30-second tour, both
+`docs/getting-started.md` guides, and the `claude` / `codex` / `generic`
+adapter workflow sections now lead with `task prepare`; `recommend` and
+`task context` are presented as standalone diagnostics that `task
+prepare` already runs for you. Adds compact activation rules to the
+agent contract (`task prepare` on a named task; do not implement on
+`wait_for_dependencies`; report rather than widen on
+`CONTEXT_OVER_BUDGET`; `task finalize --write` only after `task
+complete`). No new required conformance surface — `adapter conformance`
+already required `task prepare`; this aligns the top-of-file workflow
+with the contract section below it.
+
+**P29-T4.** Sync measurement baseline docs with the measured artifact.
+`docs/positioning.md` and `docs/agent-contract.md` quoted a stale
+v1.13.1 (`7743d4f`) baseline; both now match
+`design/measurements/summary.json` (`5f61e3c`): `pack_size_p50_bytes`
+22072→21052, `pack_size_p90_bytes` 49654→49885, `pack_size_max_bytes`
+290791→306153, `lifecycle_adherence_rate_percent` 81.8→82.4, and
+denominators `tasks_done` 88→90 / `tasks_total` 123→128. The
+release-over-release delta table in `docs/migration.md` is intentionally
+historical and is left unchanged. Follow-up (not in this phase): a CI
+guard that asserts the baseline tables match `summary.json` — deferred
+because parsing the two distinct markdown table shapes is non-trivial.
+
+**P29-T5.** Clean phantom-`P25` references. Docs and the P28 RFC named
+"P25 (Spec Kit Bridge v2)" as a roadmap item, but `design/roadmap.yaml`
+enumerates no `P25` — a source-of-truth inconsistency for a tool whose
+thesis is design/ as source of truth. Spec Kit Bridge v2 is now
+described as an **unscheduled future capability, not a numbered roadmap
+phase** in `design/decisions/spec-conformance-rfc.md` and the P28 RFC
+changelog entry; no `planned` P25 phase stub is added (that would
+overstate commitment to unscoped work). The P28 phase YAML keeps its
+historical wording as an internal phase record.
+
 ### P28 — Spec-conformance remediation
 
 **P28-T0.** Phase bootstrap + RFC acceptance. An external static
@@ -82,12 +150,13 @@ things — doctor's `ADAPTER_CONTRACT_DRIFT` consumes only the heading
 constants (asserting the `## Agent contract` section and axis
 sub-headings are present), while the required-CLI-surface and
 failure-guidance checks are `adapter conformance`-only; the previous
-wording overstated a shared required-surface contract. P25/P27 roadmap
-honesty: P27's partial split (task/adapter clusters extracted; init /
-plan / phase / doctor / validate / verify / pack / progress / spec /
-recommend still in `src/cli.ts`) is already accurately documented in the
-Source layout section, and P25 (Spec Kit Bridge v2) remains unstarted —
-recorded in P28's RFC, with no doc overclaim to correct. The P21 / P24 /
+wording overstated a shared required-surface contract. Spec Kit Bridge /
+P27 roadmap honesty: P27's partial split (task/adapter clusters
+extracted; init / plan / phase / doctor / validate / verify / pack /
+progress / spec / recommend still in `src/cli.ts`) is already accurately
+documented in the Source layout section, and Spec Kit Bridge v2 remains
+unstarted — recorded in P28's RFC as an unscheduled future capability,
+with no doc overclaim to correct. The P21 / P24 /
 P27 phase YAML are protected paths edited as bootstrap-class writes (not
 listed in this task's `writes:`); T3 finalizes without `--audit-strict`,
 deviation recorded here per the P27-T0 precedent.
