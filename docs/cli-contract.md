@@ -92,6 +92,7 @@ CI.
 | `VERIFICATION_FAILED` | `verify`, `task complete` | Deterministic completion check did not pass |
 | `VALIDATE_FAILED` | `validate` | One or more errors (or, under `--strict`, any issue) detected by the underlying doctor checks |
 | `DOCTOR_FAILED` | `doctor` | One or more error-severity doctor issues found |
+| `TUTORIAL_FAILED` (v1.15+) | `tutorial` | A step in the sandbox walkthrough threw; the sandbox is still cleaned up (unless `--keep`). The message carries the underlying error |
 | `PLAN_LINT_FAILED` | `plan lint` | One or more lint issues found (under `--strict`, includes warnings) |
 | `PLAN_NORMALIZE_REQUIRED` | `plan normalize --check` | At least one file needs normalization |
 | `PLAN_NORMALIZE_CONFLICT` | `plan normalize` | `--check` and `--write` both passed |

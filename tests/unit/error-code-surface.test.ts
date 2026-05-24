@@ -62,6 +62,7 @@ const KNOWN_CODES: Record<string, "public" | "plan" | "doctor" | "adapter" | "in
   TASK_FINALIZE_NOT_ELIGIBLE: "public",
   TASK_FINALIZE_WRITE_REFUSED: "public",
   TASK_NOT_FOUND: "public",
+  TUTORIAL_FAILED: "public",
   UNKNOWN_COMMAND: "public",
   VALIDATE_FAILED: "public",
   VERIFICATION_FAILED: "public",
