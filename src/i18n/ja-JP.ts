@@ -142,10 +142,11 @@ export const messages = {
       localePrompt: "Select language",
       localeOptionEn: "English",
       localeOptionJa: "日本語",
-      agentsPrompt: "サポートするエージェントを選択してください (カンマ区切り)",
+      agentsPrompt: "サポートするエージェントを選択してください",
       defaultAgentPrompt: "デフォルトのエージェントを選択してください",
       verifyCommandPrompt: "デフォルトの検証コマンド",
       verifyCommandHint: "そのままで良ければ Enter",
+      verifyCustomOption: "カスタムコマンド…",
       createSamplePrompt:
         "per-task ループの確認用にチュートリアルフェーズ (TUTORIAL) を作成しますか？スモークテスト後に削除して構いません。",
       generateAdaptersPrompt:
