@@ -64,7 +64,7 @@ describe("runInitWizard — locale", () => {
       "2", // locale: 日本語
       "1", // agents: Claude Code
       "n", // generate adapters: no
-      "", // verify command: default
+      "1", // verify: preset pnpm test
       "n", // create sample phase: no
       "n", // collect brief: no
     ]);
@@ -78,7 +78,7 @@ describe("runInitWizard — locale", () => {
       "1", // locale: English
       "1", // agents: Claude Code
       "n", // adapters
-      "", // verify
+      "1", // verify: preset pnpm test
       "n", // sample
       "n", // brief
     ]);
@@ -94,7 +94,7 @@ describe("runInitWizard — default_agent", () => {
       "1", // locale
       "1", // agents: just Claude Code
       "n", // adapters
-      "", // verify
+      "1", // verify: preset pnpm test
       "n", // sample
       "n", // brief
     ]);
@@ -112,7 +112,7 @@ describe("runInitWizard — default_agent", () => {
       "1,2", // agents: Claude Code + Codex
       "2", // default_agent: Codex (second in selection)
       "n", // adapters
-      "", // verify
+      "1", // verify: preset pnpm test
       "n", // sample
       "n", // brief
     ]);
@@ -125,12 +125,12 @@ describe("runInitWizard — default_agent", () => {
 });
 
 describe("runInitWizard — verify command", () => {
-  it("uses the default verify command when input is empty", async () => {
+  it("uses the pnpm test preset when the first option is chosen", async () => {
     const { prompter } = makePrompter([
       "1", // locale
       "1", // agents
       "n", // adapters
-      "", // verify: blank
+      "1", // verify: preset pnpm test
       "y", // sample yes
       "n", // brief
     ]);
@@ -142,12 +142,13 @@ describe("runInitWizard — verify command", () => {
     expect(phase).toContain("pnpm test");
   });
 
-  it("uses the typed verify command when provided", async () => {
+  it("uses a typed command when the custom option is chosen", async () => {
     const { prompter } = makePrompter([
       "1", // locale
       "1", // agents
       "n", // adapters
-      "vitest run", // verify
+      "4", // verify: custom option (last entry)
+      "vitest run", // verify: typed custom command
       "y", // sample yes
       "n", // brief
     ]);
@@ -166,7 +167,7 @@ describe("runInitWizard — output routing", () => {
       "1", // locale
       "1", // agents
       "n", // adapters
-      "", // verify
+      "1", // verify: preset pnpm test
       "n", // sample
       "n", // brief
     ]);
@@ -181,7 +182,7 @@ describe("runInitWizard — sample phase", () => {
       "1", // locale
       "1", // agents
       "n", // adapters
-      "", // verify
+      "1", // verify: preset pnpm test
       "y", // sample yes
       "n", // brief
     ]);
@@ -195,7 +196,7 @@ describe("runInitWizard — sample phase", () => {
       "1", // locale
       "1", // agents
       "n", // adapters
-      "", // verify
+      "1", // verify: preset pnpm test
       "n", // sample no
       "n", // brief
     ]);
@@ -211,7 +212,7 @@ describe("runInitWizard — adapter generation", () => {
       "1", // locale
       "1", // agents: claude-code
       "y", // adapters: yes
-      "", // verify
+      "1", // verify: preset pnpm test
       "n", // sample
       "n", // brief
     ]);
@@ -225,7 +226,7 @@ describe("runInitWizard — adapter generation", () => {
       "1", // locale
       "1", // agents
       "n", // adapters: no
-      "", // verify
+      "1", // verify: preset pnpm test
       "n", // sample
       "n", // brief
     ]);
@@ -240,7 +241,7 @@ describe("runInitWizard — adapter generation", () => {
       "1,3", // agents: claude-code + generic
       "1", // default_agent: claude-code
       "y", // adapters: yes
-      "", // verify
+      "1", // verify: preset pnpm test
       "n", // sample
       "n", // brief
     ]);
@@ -258,7 +259,7 @@ describe("runInitWizard — project brief", () => {
       "1", // locale: en-US
       "1", // agents: claude-code
       "n", // adapters
-      "", // verify
+      "1", // verify: preset pnpm test
       "n", // sample
       "y", // brief: yes
       "A task management CLI", // what
@@ -281,7 +282,7 @@ describe("runInitWizard — project brief", () => {
       "2", // locale: 日本語
       "1", // agents
       "n", // adapters
-      "", // verify
+      "1", // verify: preset pnpm test
       "n", // sample
       "y", // brief: yes
       "タスク管理 CLI", // what
@@ -300,7 +301,7 @@ describe("runInitWizard — project brief", () => {
       "1", // locale
       "1", // agents
       "n", // adapters
-      "", // verify
+      "1", // verify: preset pnpm test
       "n", // sample
       "n", // brief: no
     ]);

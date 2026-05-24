@@ -142,10 +142,11 @@ export const messages = {
       localePrompt: "Select language",
       localeOptionEn: "English",
       localeOptionJa: "日本語",
-      agentsPrompt: "Which agents do you want to support? (comma separated)",
+      agentsPrompt: "Which agents do you want to support?",
       defaultAgentPrompt: "Which agent should be the default?",
       verifyCommandPrompt: "Default verification command",
       verifyCommandHint: "Press Enter to keep the default",
+      verifyCustomOption: "Custom command…",
       createSamplePrompt:
         "Create a tutorial sample phase (TUTORIAL) to walk through the per-task loop? It is safe to delete after the smoke test.",
       generateAdaptersPrompt:
