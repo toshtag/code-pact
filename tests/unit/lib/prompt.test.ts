@@ -135,3 +135,92 @@ describe("Prompter session", () => {
     expect({ name, choice, ok }).toEqual({ name: "first", choice: 1, ok: true });
   });
 });
+
+// --- raw-mode (arrow-key) selectors -------------------------------------
+//
+// The wizard only renders arrow-key selectors when stdin is an interactive
+// TTY. We can't open a real TTY in unit tests, so we feed a PassThrough that
+// claims to be a TTY and push the raw byte sequences that node:readline's
+// `emitKeypressEvents` decodes into keypresses:
+//   ESC[A = up, ESC[B = down, "\r" = enter, " " = space, "\x03" = ctrl-c.
+const KEY = {
+  up: "\x1b[A",
+  down: "\x1b[B",
+  enter: "\r",
+  space: " ",
+} as const;
+
+function rawSetup(): { prompter: Prompter; input: PassThrough } {
+  const input = new PassThrough() as PassThrough & {
+    isTTY?: boolean;
+    setRawMode?: (mode: boolean) => void;
+  };
+  input.isTTY = true;
+  input.setRawMode = () => {};
+  const output = new PassThrough();
+  output.resume();
+  // The reader is unused on the raw path; a stub satisfies the constructor.
+  const reader = new ScriptedReader([]);
+  const prompter = new Prompter(reader, output, { input, interactive: true });
+  return { prompter, input };
+}
+
+describe("Prompter.askChoice — raw mode", () => {
+  it("navigates with arrow keys and confirms with Enter", async () => {
+    const { prompter, input } = rawSetup();
+    const p = prompter.askChoice("pick?", ["a", "b", "c"]);
+    input.write(KEY.down);
+    input.write(KEY.down);
+    input.write(KEY.enter);
+    expect(await p).toBe(2);
+  });
+
+  it("wraps around when moving up from the first item", async () => {
+    const { prompter, input } = rawSetup();
+    const p = prompter.askChoice("pick?", ["a", "b", "c"]);
+    input.write(KEY.up); // wraps to last
+    input.write(KEY.enter);
+    expect(await p).toBe(2);
+  });
+});
+
+describe("Prompter.askYesNo — raw mode", () => {
+  it("starts on Yes when default is true and Enter confirms it", async () => {
+    const { prompter, input } = rawSetup();
+    const p = prompter.askYesNo("ok?", true);
+    input.write(KEY.enter);
+    expect(await p).toBe(true);
+  });
+
+  it("can move to No and confirm", async () => {
+    const { prompter, input } = rawSetup();
+    const p = prompter.askYesNo("ok?", true);
+    input.write(KEY.down); // Yes -> No
+    input.write(KEY.enter);
+    expect(await p).toBe(false);
+  });
+});
+
+describe("Prompter.askMulti — raw mode", () => {
+  it("toggles with Space and confirms with Enter", async () => {
+    const { prompter, input } = rawSetup();
+    const p = prompter.askMulti("pick?", ["a", "b", "c"], 1);
+    input.write(KEY.space); // toggle a (index 0)
+    input.write(KEY.down);
+    input.write(KEY.down); // move to c (index 2)
+    input.write(KEY.space); // toggle c
+    input.write(KEY.enter);
+    expect(await p).toEqual([0, 2]);
+  });
+
+  it("refuses to confirm below the minimum, then accepts once satisfied", async () => {
+    const { prompter, input } = rawSetup();
+    const p = prompter.askMulti("pick?", ["a", "b", "c"], 2);
+    input.write(KEY.enter); // nothing selected — must be ignored
+    input.write(KEY.space); // toggle a
+    input.write(KEY.down);
+    input.write(KEY.space); // toggle b
+    input.write(KEY.enter); // now 2 selected — accepted
+    expect(await p).toEqual([0, 1]);
+  });
+});
