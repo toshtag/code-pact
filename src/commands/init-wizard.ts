@@ -64,11 +64,22 @@ export async function runInitWizard(opts: InitWizardOptions): Promise<InitResult
     //    adapter registry covers every supported agent.
     const generateAdapters = await prompter.askYesNo(m.generateAdaptersPrompt, true);
 
-    // 5. Verification command — Enter accepts the default.
+    // 5. Verification command — preset select so the common case needs only
+    //    arrow keys + Enter. The last option drops to free-text for anything
+    //    not covered by the presets.
     const defaultVerify = "pnpm test";
-    const verifyPrompt = `${m.verifyCommandPrompt} [${defaultVerify}] (${m.verifyCommandHint})`;
-    const verifyRaw = await prompter.ask(verifyPrompt);
-    const verifyCommand = verifyRaw.length > 0 ? verifyRaw : defaultVerify;
+    const verifyPresets = [defaultVerify, "npm test", "yarn test"] as const;
+    const verifyIdx = await prompter.askChoice(m.verifyCommandPrompt, [
+      ...verifyPresets,
+      m.verifyCustomOption,
+    ]);
+    let verifyCommand: string;
+    if (verifyIdx < verifyPresets.length) {
+      verifyCommand = verifyPresets[verifyIdx]!;
+    } else {
+      const verifyRaw = await prompter.ask(m.verifyCommandPrompt);
+      verifyCommand = verifyRaw.length > 0 ? verifyRaw : defaultVerify;
+    }
 
     // 6. Sample phase — yes/no. When the CLI passed `--sample-phase`,
     //    the wizard skips this prompt and forces creation (per the
