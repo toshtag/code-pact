@@ -93,14 +93,12 @@ export const REQUIRED_FAILURE_GUIDANCE: ReadonlyArray<string> = [
  * `advisory` below — so installs that predate the hardened templates
  * warn rather than hard-fail.
  *
- * RELEASE-COUPLED: release prep MUST confirm the actual P30 release
- * version and bump this if it differs, so "required" only ever applies
- * to installs that actually carry the hardened templates. P29 + P30 are
- * unreleased; the current released line (1.13.3) still leads with
- * `recommend`, so the threshold must be strictly greater than 1.13.3.
+ * Confirmed at the 1.14.0 release prep: P30 ships in 1.14.0, so adapters
+ * generated at or after 1.14.0 carry the hardened templates and are held
+ * to the `required` tier. The released 1.13.x line (whose templates still
+ * lead with `recommend`) stays `advisory` until re-upgraded — which is
+ * why the threshold is strictly greater than 1.13.3.
  */
-// TODO(release-prep): confirm this equals the actual P30 release version
-// (and bump if it differs) before publishing — see the RFC's release-coupled note.
 export const ADAPTER_CONTRACT_HARDENING_FROM_VERSION = "1.14.0";
 
 /**

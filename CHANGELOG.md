@@ -13,6 +13,8 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+## [1.14.0] — 2026-05-24
+
 ### P30 — Adapter contract hardening
 
 **P30 follow-up (test-only).** Added the end-to-end integration coverage
