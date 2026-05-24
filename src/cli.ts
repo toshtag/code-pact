@@ -9,6 +9,7 @@ import { isInteractive, isCIEnv } from "./lib/tty.ts";
 import { messages, type Locale } from "./i18n/index.ts";
 import { runInit, type SupportedAgent } from "./commands/init.ts";
 import { runInitWizard } from "./commands/init-wizard.ts";
+import { runTutorial } from "./commands/tutorial.ts";
 import { SUPPORTED_AGENTS } from "./core/agents.ts";
 import {
   runPhaseAdd,
@@ -325,6 +326,47 @@ async function cmdInit(
     return withWriteLock(cwd, "init --sample-phase", json, runImpl);
   }
   return runImpl();
+}
+
+// ---------------------------------------------------------------------------
+// Command: tutorial
+// ---------------------------------------------------------------------------
+
+async function cmdTutorial(
+  argv: string[],
+  locale: Locale,
+  globalJson: boolean,
+): Promise<number> {
+  const { values } = parseArgs({
+    args: argv,
+    options: {
+      json: { type: "boolean" },
+      keep: { type: "boolean" },
+    },
+    strict: false,
+    allowPositionals: false,
+  });
+
+  const json = globalJson || values.json === true;
+  const keep = values.keep === true;
+
+  try {
+    const result = await runTutorial({ locale, json, keep });
+    if (json) {
+      process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
+    }
+    return 0;
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({ ok: false, error: { code: "TUTORIAL_FAILED", message: msg } })}\n`,
+      );
+    } else {
+      process.stderr.write(`tutorial failed: ${msg}\n`);
+    }
+    return 1;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -2325,6 +2367,9 @@ async function main(): Promise<number> {
   switch (command) {
     case "init":
       return cmdInit(rest, locale, json);
+
+    case "tutorial":
+      return cmdTutorial(rest, locale, json);
 
     case "plan":
       return cmdPlan(rest, locale, json);

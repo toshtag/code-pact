@@ -8,6 +8,7 @@ export const messages = {
     "",
     "Commands:",
     "  init       initialize a project (interactive in a TTY, flag-based otherwise)",
+    "  tutorial   watch the task workflow run end to end in a throwaway sandbox",
     "  plan       project planning tools (brief | prompt | constitution)",
     "  phase      manage phase contracts (add | new | ls | show | import)",
     "  task       manage tasks (add) and agent-facing commands (context | complete)",
@@ -31,6 +32,35 @@ export const messages = {
       `".code-pact/" already exists in ${dir}. Use --force to overwrite.`,
     created: (n: number): string => `Created ${n} file(s).`,
     done: "Project initialized successfully.",
+  },
+  tutorial: {
+    header: "code-pact tutorial — a short tour of the task workflow",
+    sandboxNote: (dir: string): string =>
+      `Running in a throwaway sandbox (deleted at the end): ${dir}`,
+    step: {
+      init: "Scaffold a throwaway project — this is what `code-pact init --sample-phase` writes.",
+      prepareT1:
+        "Ask code-pact what to do next; it returns the current state and the exact commands to run.",
+      start: "Mark the task in-progress so progress is tracked.",
+      prepareT2Blocked:
+        "TUTORIAL-T2 depends on TUTORIAL-T1, so prepare reports it blocked — work can't start out of order.",
+      complete: "Run verification; on pass, a `done` event is recorded.",
+      finalize: "Reconcile the design state to match what actually happened.",
+      prepareT2Ready:
+        "TUTORIAL-T1 is done, so TUTORIAL-T2 is now unblocked and ready to start.",
+    },
+    result: {
+      init: (n: number): string =>
+        `created ${n} files (project.yaml, roadmap.yaml, TUTORIAL phase)`,
+      prepare: (state: string, next: string): string => `state: ${state} · next: ${next}`,
+      started: "started",
+      blocked: (deps: string): string => `blocked · waiting on: ${deps}`,
+      completed: (n: number): string => `verify passed (${n} checks) · done event recorded`,
+      finalized: "finalized",
+    },
+    done: "Done. The sandbox was deleted — nothing was written to your project.",
+    keptNote: (dir: string): string => `Done. Sandbox kept at: ${dir}`,
+    realNextSteps: "When you're ready, run `code-pact init` in your own project.",
   },
   phase: {
     added: (id: string, path: string): string => `Phase "${id}" added at ${path}`,

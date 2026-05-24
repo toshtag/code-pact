@@ -8,6 +8,7 @@ export const messages = {
     "",
     "コマンド:",
     "  init       プロジェクトを初期化 (TTY なら対話、それ以外はフラグ)",
+    "  tutorial   使い捨てサンドボックスでタスクの進め方を通しで実演",
     "  plan       プロジェクト計画ツール (brief | prompt | constitution)",
     "  phase      フェーズ契約を管理 (add | new | ls | show | import)",
     "  task       タスクの管理 (add) と Agent 向けコマンド (context | complete)",
@@ -31,6 +32,35 @@ export const messages = {
       `"${dir}" に ".code-pact/" が既に存在します。上書きするには --force を使ってください。`,
     created: (n: number): string => `${n} 件のファイルを作成しました。`,
     done: "プロジェクトを初期化しました。",
+  },
+  tutorial: {
+    header: "code-pact tutorial — タスクの進め方を通しで体験します",
+    sandboxNote: (dir: string): string =>
+      `使い捨てのサンドボックスで実行します（最後に削除します）: ${dir}`,
+    step: {
+      init: "使い捨てのプロジェクトを用意します（`code-pact init --sample-phase` が書き出すものと同じです）。",
+      prepareT1:
+        "次に何をすべきかを code-pact に尋ねます。現在の状態と、実行すべきコマンドが返ります。",
+      start: "タスクを着手中にして、進捗を記録できるようにします。",
+      prepareT2Blocked:
+        "TUTORIAL-T2 は TUTORIAL-T1 に依存するため、prepare はブロック中と報告します — 順序を飛ばして着手できません。",
+      complete: "検証を実行し、成功したら `done` イベントを記録します。",
+      finalize: "実際に起きたことに合わせて design の状態を同期します。",
+      prepareT2Ready:
+        "TUTORIAL-T1 が完了したので、TUTORIAL-T2 のブロックが解け、着手できる状態になりました。",
+    },
+    result: {
+      init: (n: number): string =>
+        `${n} 個のファイルを作成（project.yaml, roadmap.yaml, TUTORIAL フェーズ）`,
+      prepare: (state: string, next: string): string => `状態: ${state} · 次: ${next}`,
+      started: "着手しました",
+      blocked: (deps: string): string => `ブロック中 · 待機対象: ${deps}`,
+      completed: (n: number): string => `検証成功（${n} チェック）· done イベントを記録`,
+      finalized: "同期完了",
+    },
+    done: "完了。サンドボックスは削除しました — あなたのプロジェクトには何も書き込んでいません。",
+    keptNote: (dir: string): string => `完了。サンドボックスを残しました: ${dir}`,
+    realNextSteps: "準備ができたら、自分のプロジェクトで `code-pact init` を実行してください。",
   },
   phase: {
     added: (id: string, path: string): string => `フェーズ "${id}" を ${path} に追加しました`,
