@@ -239,10 +239,8 @@ tasks:
       - src/commands/task-context.ts
       - src/commands/task-prepare.ts
       - src/cli.ts
-      - src/core/error-codes.ts
       - tests/unit/core/pack/**
       - tests/unit/commands/**
-      - tests/integration/task-context-budget.test.ts
       - CHANGELOG.md
     acceptance_refs:
       - design/phases/P24-context-budget.yaml

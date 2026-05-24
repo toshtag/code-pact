@@ -1169,7 +1169,7 @@ Conformance is intentionally narrower than `adapter doctor` — it inspects only
 | `required_failure_guidance` | Every failure keyword (`blocked dependency`, `verification failure`, `adapter drift`, `missing context pack`) is mentioned somewhere in the instruction file |
 | `file_checksum_match` | One per manifest file: the on-disk LF-normalised UTF-8 sha256 equals the manifest's recorded value |
 
-The required-surface and required-failure-guidance lists live in a single source-of-truth module (`src/core/adapters/conformance-spec.ts`) consumed by both `adapter doctor`'s contract drift check and this command, so the two callers can never disagree.
+`adapter conformance` and `adapter doctor` share the module `src/core/adapters/conformance-spec.ts`, but they consume different parts of it and check different things. `adapter conformance` is the only caller that reads the `lifecycle_required` / `diagnostic_required` surface lists and the `REQUIRED_FAILURE_GUIDANCE` keywords (the `required_cli_surface_mentions` and `required_failure_guidance` checks above). `adapter doctor`'s `ADAPTER_CONTRACT_DRIFT` check consumes only the heading constants from the same module (`AGENT_CONTRACT_SECTION_HEADING` and `AGENT_CONTRACT_AXIS_HEADINGS`) — it asserts the `## Agent contract` section and its three axis sub-headings are present, not that the required CLI surface or failure guidance is mentioned. So the shared module guarantees the two callers agree on the contract's *headings*; the required-surface and failure-guidance checks are `adapter conformance`-only.
 
 #### Exit codes
 

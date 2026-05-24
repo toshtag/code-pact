@@ -152,9 +152,11 @@ tasks:
       - `pnpm test:unit` and `pnpm test:integration` pass
         WITHOUT MODIFICATION. Any test that needs change
         means the refactor is doing more than extraction.
-      - Manual: `task prepare <id> --json --explain
-        --budget-bytes <N>` produces the same envelope
-        before and after the move.
+      - Manual: `task prepare <id> --json --budget-bytes
+        <N>` produces the same envelope before and after
+        the move (`task prepare` accepts `--budget-bytes`
+        but not `--explain`; `--explain` is a `task context`
+        flag).
       - Manual: `task finalize <id> --audit-strict --write
         --json --base-ref origin/main` produces the same
         envelope.

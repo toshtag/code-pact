@@ -298,7 +298,7 @@ tasks:
       - src/cli.ts
       - src/i18n/index.ts
       - tests/unit/commands/task-prepare.test.ts
-      - docs/cli/task-prepare.md
+      - docs/cli-contract.md
       - CHANGELOG.md
     acceptance_refs:
       - design/phases/P21-agent-contract-v2.yaml
@@ -369,8 +369,7 @@ tasks:
       - src/commands/task-context.ts
       - src/cli.ts
       - tests/unit/core/pack/explain.test.ts
-      - tests/integration/task-context-explain.test.ts
-      - docs/cli/task-context.md
+      - docs/cli-contract.md
       - CHANGELOG.md
     acceptance_refs:
       - design/phases/P21-agent-contract-v2.yaml
@@ -462,7 +461,7 @@ tasks:
       - tests/fixtures/adapters/claude-code/expected-files.txt
       - tests/fixtures/adapters/codex/expected-files.txt
       - tests/fixtures/adapters/generic/expected-files.txt
-      - docs/cli/adapter-conformance.md
+      - docs/cli-contract.md
       - CHANGELOG.md
     acceptance_refs:
       - design/phases/P21-agent-contract-v2.yaml
