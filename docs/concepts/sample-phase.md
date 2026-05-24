@@ -1,27 +1,26 @@
 # The sample phase
 
-This document explains the **sample phase** the `init` wizard offers to create (and that `init --sample-phase` creates non-interactively), what it actually contains, and how to decide whether to keep it, rename it, or delete it.
+This document explains the **sample phase** that `code-pact init --sample-phase` creates, what it actually contains, and how to decide whether to keep it, rename it, or delete it.
 
-For where the sample phase fits in the broader onboarding flow, see [`docs/getting-started.md`](../getting-started.md#path-1--tutorial). For the per-task / per-phase guidance commands the tutorial artifact demos, see [`docs/concepts/runbook.md`](runbook.md).
+> Just want to watch the per-task loop run, without writing anything to your project? Use [`code-pact tutorial`](../getting-started.md#path-1--tutorial) instead — it runs the loop in a throwaway sandbox and deletes it. The sample phase described here is for when you want a real, editable phase in your own repo.
 
-**v1.4 rename.** Before v1.4 the sample phase used `id: P1`, `name: Welcome`, and no tasks. From v1.4 onward, both the TTY wizard and `init --non-interactive --sample-phase` produce `id: TUTORIAL`, `name: Walkthrough`, with two minimal tutorial tasks (`TUTORIAL-T1`, `TUTORIAL-T2`). The `TUTORIAL` id is chosen so it does not collide with the natural first user phase. **Existing projects with a pre-v1.4 `design/phases/P1-welcome.yaml` are untouched** — only new `init` runs produce the TUTORIAL artifact.
+For where the sample phase fits in the broader onboarding flow, see [`docs/getting-started.md`](../getting-started.md#path-1--tutorial). For the per-task / per-phase guidance commands it demos, see [`docs/concepts/runbook.md`](runbook.md).
+
+**v1.4 rename.** Before v1.4 the sample phase used `id: P1`, `name: Welcome`, and no tasks. From v1.4 onward, `init --sample-phase` produces `id: TUTORIAL`, `name: Walkthrough`, with two minimal tutorial tasks (`TUTORIAL-T1`, `TUTORIAL-T2`). The `TUTORIAL` id is chosen so it does not collide with the natural first user phase. **Existing projects with a pre-v1.4 `design/phases/P1-welcome.yaml` are untouched** — only new `init --sample-phase` runs produce the TUTORIAL artifact.
 
 ## How to create it
 
-Two paths produce the same artifact:
+The sample phase is opt-in via the `--sample-phase` flag, in both interactive and non-interactive `init`:
 
 ```sh
-# TTY wizard — answer "yes" to the "Create a tutorial sample phase?" prompt
-# (default yes). `--sample-phase` is optional in wizard mode; when set it
-# skips the prompt and forces creation.
-code-pact init
-code-pact init --sample-phase   # also valid; same artifact
-
-# Non-interactive (v1.4+) — explicit opt-in is required.
+code-pact init --sample-phase
+# non-interactive / CI:
 code-pact init --non-interactive --locale en-US --agent claude-code --sample-phase
 ```
 
-Without `--sample-phase` in non-interactive mode, the sample phase is NOT created — `init --non-interactive` produces an empty `roadmap.yaml` (unchanged from v1.3.x).
+Without `--sample-phase`, `init` produces an empty `roadmap.yaml` and no sample phase.
+
+> **Changed in v1.15.** The interactive `init` wizard previously *prompted* ("Create a tutorial sample phase?", default yes). That prompt was removed: it pushed undefined jargon ("per-task loop", "smoke test") at the very first-run moment and left an artifact users had to remember to delete. Creation is now explicit via `--sample-phase`, and [`code-pact tutorial`](../getting-started.md#path-1--tutorial) covers the "just show me the loop" case with no cleanup.
 
 ## What gets created
 
@@ -76,9 +75,9 @@ phases:
     weight: 1
 ```
 
-The verification command is whatever you answered to the earlier wizard prompt *"Default verification command:"* (pressing Enter accepts `pnpm test`). The non-interactive path uses `pnpm test` as the default.
+The verification command is whatever the wizard's *"Default verification command"* step recorded when you ran `init --sample-phase` in a TTY (pressing Enter accepts `pnpm test`). The non-interactive path uses `pnpm test` as the default.
 
-## Why the wizard / flag offers it
+## Why the sample phase exists
 
 The tutorial artifact exists to do three things:
 

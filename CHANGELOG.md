@@ -13,6 +13,54 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+## [1.15.0] — 2026-05-24
+
+### Onboarding UX — `tutorial` command + init prompt removal
+
+**`code-pact tutorial` (new command).** Runs the full per-task loop —
+`init` → `task prepare` → `task start` → `task complete` →
+`task finalize` — plus the cross-task dependency gate, end to end inside a
+throwaway `mkdtemp` sandbox, narrating each step in plain language, then
+deletes the sandbox. Nothing is written to your project. Because it drives
+the same service-layer functions the CLI uses (not canned example output),
+the narrated results cannot drift from real behaviour. Flags: `--json`
+emits a structured step transcript; `--keep` retains the sandbox for
+inspection. Strings are localized (en-US / ja-JP). Stability: **Stable
+(v1.15+)**, with unit + subprocess integration coverage.
+
+**Init wizard no longer prompts for the sample phase.** The interactive
+`init` wizard previously asked *"Create a tutorial sample phase (TUTORIAL)
+to walk through the per-task loop? It is safe to delete after the smoke
+test."* — three undefined terms ("per-task loop", "tutorial phase", "smoke
+test") in a yes/no, at the very first-run moment, before the user knows
+any code-pact vocabulary. It also taxed every `init` (including repeat
+users and CI) to benefit only first-time evaluators, and left a `TUTORIAL`
+phase + roadmap entry the user had to remember to delete.
+
+The prompt is removed. Sample-phase creation is now **opt-in only via the
+existing `--sample-phase` flag** (unchanged, Stable). Discoverability moves
+to two footer hints printed after `init`: one pointing at `code-pact
+tutorial` (watch the loop, no cleanup), one at `init --sample-phase`
+(scaffold a real starter phase into `design/`). The unused
+`createSamplePrompt` i18n key was removed from both locales.
+
+This is **not a breaking change**: `--sample-phase` behaves exactly as
+before, and non-interactive / CI `init` was already opt-in. Only the
+interactive prompt is gone.
+
+### Docs
+
+- `docs/getting-started.md` (en) Path 1 rebuilt around the two options;
+  `docs/ja/getting-started.md` brought up from the stale pre-v1.4
+  `P1 Welcome` flow it was still on.
+- `docs/concepts/sample-phase.md`, `docs/cli-contract.md`,
+  `docs/workflows/{greenfield,brownfield-feature}.md`, and `README.md`
+  updated; the stale `P1 Welcome` / `DUPLICATE_PHASE_ID` collision note in
+  the greenfield workflow was corrected (the sample id is the reserved
+  `TUTORIAL`, v1.4+).
+
+No change to `ADAPTER_CONTRACT_HARDENING_FROM_VERSION` (stays `1.14.0`).
+
 ## [1.14.0] — 2026-05-24
 
 ### P30 — Adapter contract hardening

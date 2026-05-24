@@ -92,6 +92,7 @@ CI.
 | `VERIFICATION_FAILED` | `verify`, `task complete` | Deterministic completion check did not pass |
 | `VALIDATE_FAILED` | `validate` | One or more errors (or, under `--strict`, any issue) detected by the underlying doctor checks |
 | `DOCTOR_FAILED` | `doctor` | One or more error-severity doctor issues found |
+| `TUTORIAL_FAILED` (v1.15+) | `tutorial` | A step in the sandbox walkthrough threw; the sandbox is still cleaned up (unless `--keep`). The message carries the underlying error |
 | `PLAN_LINT_FAILED` | `plan lint` | One or more lint issues found (under `--strict`, includes warnings) |
 | `PLAN_NORMALIZE_REQUIRED` | `plan normalize --check` | At least one file needs normalization |
 | `PLAN_NORMALIZE_CONFLICT` | `plan normalize` | `--check` and `--write` both passed |
@@ -2253,7 +2254,7 @@ Running two design-mutating `code-pact` commands against the same project in par
 | Command | Acquired when | Coverage |
 |---------|---------------|----------|
 | `init --sample-phase` | The `--sample-phase` flag is set in non-interactive mode | The whole `runInit` (which calls `writeSamplePhase` → `createPhase`) |
-| `init` (wizard) | Always (wizard may answer yes to the sample-phase prompt) | The whole wizard + any `writeSamplePhase` call |
+| `init` (wizard) | Whenever `.code-pact/` already exists (defensive) | The whole wizard + an optional `writeSamplePhase` call when `--sample-phase` is passed |
 | `phase add` (flag-based or wizard) | After parsing / wizard prompts finish, before `runPhaseAdd` | The single `createPhase` call |
 | `phase new` (wizard) | At command entry — held through wizard prompts and write | The single `createPhase` call |
 | `phase import` | At command entry, before `runPhaseImport` is called | The entire multi-phase apply loop (every `createPhase` inside) |
@@ -2262,6 +2263,8 @@ Running two design-mutating `code-pact` commands against the same project in par
 | `phase reconcile` | Only when `--write` | The entire reconcile batch (all flips under one acquisition) |
 
 `task finalize` and `phase reconcile` **dry-runs do NOT acquire the lock** (they don't write).
+
+`tutorial` (v1.15+) runs entirely inside a throwaway `mkdtemp` sandbox outside the project and **never acquires the project lock** — it writes nothing under the project root.
 
 **`LOCK_HELD` envelope shape.**
 
@@ -2304,7 +2307,7 @@ Automation (PID liveness check, age-based stale detection, a `--force-lock` flag
 
 | Command | Writes `design/roadmap.yaml`? | Mechanism |
 |---------|-------------------------------|-----------|
-| `init` (sample-phase path: `--sample-phase`, or wizard-yes) | yes | `writeSamplePhase()` → `createPhase` (with internal `_isSampleCreation: true` bypass for the reserved `TUTORIAL` id) |
+| `init --sample-phase` (interactive or non-interactive) | yes | `writeSamplePhase()` → `createPhase` (with internal `_isSampleCreation: true` bypass for the reserved `TUTORIAL` id) |
 | `phase add` (flag-based) | yes | `runPhaseAdd` → `createPhase` |
 | `phase new` (TTY wizard) | yes | `runPhaseNew` → `createPhase` |
 | `phase import` | yes (per imported phase, after reserved-id preflight) | `runPhaseImport` → `createPhase` |
@@ -2323,7 +2326,7 @@ The id `TUTORIAL` is **reserved** for the sample-phase artifact created by `code
 
 | Path | Outcome |
 |------|---------|
-| `init --sample-phase` (or `init` wizard answering yes to the sample-phase prompt) | **Allowed.** `writeSamplePhase()` passes the internal `_isSampleCreation: true` flag to `createPhase` |
+| `init --sample-phase` (interactive or non-interactive) | **Allowed.** `writeSamplePhase()` passes the internal `_isSampleCreation: true` flag to `createPhase` |
 | `phase add --id TUTORIAL ...` | `CONFIG_ERROR` (exit 2). Roadmap is byte-identical (no write) |
 | `phase new` (TTY wizard) → typing `TUTORIAL` as the id | `CONFIG_ERROR` (exit 2). Roadmap is byte-identical |
 | `phase import` containing any entry with `id: TUTORIAL` | `CONFIG_ERROR` (exit 2) from a **preflight scan** that runs before the first `createPhase` call. The entire import is rejected — no partial-import state where earlier phases are written and the TUTORIAL entry is rejected mid-loop |
@@ -2402,6 +2405,7 @@ coverage. Agents and CI may rely on these.
 |---------|-------|
 | `--version` | Both human and `--json` modes |
 | `init` | TTY wizard, but `--non-interactive --agent X --locale Y --json` is supported and tested |
+| `tutorial` | v1.15+. Runs the per-task loop in a throwaway sandbox; `--json` emits a step transcript, `--keep` retains the sandbox |
 | `doctor` | |
 | `validate` | |
 | `recommend` | |

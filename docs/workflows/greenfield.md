@@ -47,7 +47,7 @@ Weights are an annotated estimate, not a budget. 5–30 is the typical band per 
 
 ## When to keep the sample phase
 
-The `init` wizard offers to create a **sample phase** (`P1 Welcome`) by default. For greenfield projects with non-trivial scope, **delete it once `plan prompt` + `phase import` have produced your real `P1`** — the AI-generated phase id will collide with the sample phase, so importing without removing the sample first raises `DUPLICATE_PHASE_ID`. See [`docs/concepts/sample-phase.md`](../concepts/sample-phase.md) for the keep/rename/delete decision in full.
+`code-pact init --sample-phase` writes an opt-in **sample phase** (`TUTORIAL`, v1.4+). Its id is reserved, so it never collides with your real `P1` — importing your generated roadmap is safe even if the sample phase is still present. Still, **delete it once `plan prompt` + `phase import` have produced your real phases**: it is tutorial-only scaffolding, not part of your roadmap. See [`docs/concepts/sample-phase.md`](../concepts/sample-phase.md) for the keep/rename/delete decision in full. If you only wanted to watch the loop run, prefer `code-pact tutorial` — it leaves nothing to delete.
 
 ## Recommended first PR
 

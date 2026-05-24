@@ -52,7 +52,7 @@ Contributors can also run from a clone with `pnpm link --global`, or install a l
 
 [`docs/getting-started.md`](docs/getting-started.md) is the canonical first-thirty-minutes guide. It walks three onboarding paths side by side:
 
-- **Tutorial path** — fastest way to confirm the loop works end to end against the wizard's sample phase.
+- **Tutorial path** — `code-pact tutorial` runs the whole loop end to end in a throwaway sandbox (nothing is written to your repo); or scaffold a real sample phase with `init --sample-phase`.
 - **Manual path** — write the roadmap by hand with a mix of interactive wizards and flag-based commands.
 - **AI-assisted path** — generate a planning prompt with `plan prompt`, have your agent draft the YAML, then bulk-import with `phase import`.
 

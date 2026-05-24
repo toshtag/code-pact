@@ -230,7 +230,15 @@ code-pact task add <phase-id> \
 
 ### Tutorial bootstrap (v1.4+)
 
-If you want a single-command end-to-end scripted bootstrap, the `--sample-phase` flag on `init` creates the TUTORIAL phase + tutorial tasks in one shot:
+If you just want to *watch* the per-task loop run without writing anything to a project, use the `code-pact tutorial` command (v1.15+) — it runs the whole loop in a throwaway sandbox and deletes it:
+
+```sh
+code-pact tutorial          # narrated; nothing written to your repo
+code-pact tutorial --json   # machine-readable step transcript
+code-pact tutorial --keep   # leave the sandbox on disk to inspect
+```
+
+If instead you want a real, editable sample phase scaffolded into a project, the `--sample-phase` flag on `init` creates the TUTORIAL phase + tutorial tasks in one shot:
 
 ```sh
 code-pact init --non-interactive --agent claude-code --locale en-US --sample-phase
@@ -238,6 +246,8 @@ code-pact init --non-interactive --agent claude-code --locale en-US --sample-pha
 # → TUTORIAL-T1 (no deps) and TUTORIAL-T2 (depends_on: [TUTORIAL-T1])
 # → ready for the per-task loop above
 ```
+
+> The interactive `init` wizard no longer prompts to create the sample phase (removed in v1.15) — pass `--sample-phase` explicitly.
 
 See [`docs/concepts/sample-phase.md`](concepts/sample-phase.md) for the keep / rename / delete decision.
 

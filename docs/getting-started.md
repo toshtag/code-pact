@@ -29,7 +29,7 @@ Pick the path that matches how you want to bootstrap your roadmap. All three con
 
 | Path | When to use it | Time to first `task complete` |
 | --- | --- | --- |
-| **Tutorial** | You want the fastest possible end-to-end smoke test. | ~5 minutes |
+| **Tutorial** | You want the fastest end-to-end smoke test — `code-pact tutorial` writes nothing to your repo. | ~1 minute |
 | **Manual** | You already know what you want to build and prefer typing the roadmap by hand. | ~15 minutes |
 | **AI-assisted** | You want an AI agent to draft the phases and tasks from your project brief. | ~20 minutes |
 
@@ -37,36 +37,49 @@ Pick the path that matches how you want to bootstrap your roadmap. All three con
 
 ## Path 1 — Tutorial
 
-Use the `init` wizard's built-in sample phase to confirm the full loop works end to end. This path **does not require any planning artifacts** — it exists to verify that your install is healthy.
+Fastest way to confirm your install is healthy and watch the per-task loop run end to end. There are two ways to do it.
+
+### Option A — `code-pact tutorial` (nothing is written to your project)
 
 ```sh
-# 1. Initialize. The wizard asks: language → agents → default agent →
-#    generate adapter files now (yes) → verification command (pnpm test) →
-#    create a tutorial sample phase (yes) → collect a project brief (skip).
-code-pact init
+code-pact tutorial
+```
 
-# 2. The tutorial sample phase TUTORIAL (with TUTORIAL-T1 and TUTORIAL-T2)
-#    was created. v1.4+ ships two minimal tutorial tasks; TUTORIAL-T2
-#    declares `depends_on: [TUTORIAL-T1]` so you can demo the P10
-#    dependency field + the P12 task runbook blocking-step output
-#    in one bootstrap.
+Runs the whole loop — `init` → `task prepare` → `task start` → `task complete` → `task finalize` — plus the cross-task dependency gate, inside a throwaway sandbox, narrating each step in plain language, then deletes the sandbox. Nothing touches your repo. Add `--keep` to leave the sandbox on disk for inspection, or `--json` for a machine-readable transcript.
 
-# 3. Fetch the markdown context pack and implement the first task.
+This is the recommended smoke test: zero setup, zero cleanup. Because it drives the same commands you would run yourself, the output cannot drift from real behaviour.
+
+### Option B — scaffold a real sample phase (`--sample-phase`)
+
+If you would rather poke at a real phase inside your own repo, opt in with the `--sample-phase` flag:
+
+```sh
+code-pact init --sample-phase
+# CI / non-TTY equivalent:
+code-pact init --non-interactive --agent claude-code --locale en-US --sample-phase
+```
+
+> The interactive `init` wizard no longer asks whether to create the sample phase (removed in v1.15). Pass `--sample-phase` explicitly, or use `code-pact tutorial` above to just watch the loop. Pre-v1.4 `init --non-interactive` produced an empty roadmap with no sample phase.
+
+This writes the `TUTORIAL` phase into `design/`. v1.4+ ships two minimal tutorial tasks; TUTORIAL-T2 declares `depends_on: [TUTORIAL-T1]` so you can demo the dependency field + the `task runbook` blocking-step output. Then walk the loop by hand:
+
+```sh
+# 1. Fetch the markdown context pack and implement the first task.
 code-pact task context TUTORIAL-T1 --agent claude-code
 
-# 4. After implementation, mark complete. This runs the phase's
+# 2. After implementation, mark complete. This runs the phase's
 #    verify command and, on pass, appends a `done` event to
 #    .code-pact/state/progress.yaml. The design YAML's `status` field
 #    is NOT mutated by this command — that is the v1.0 contract.
 code-pact task complete TUTORIAL-T1 --agent claude-code
 
-# 5. (Optional, v1.2+) Flip the design YAML's `status` field to `done`
+# 3. (Optional, v1.2+) Flip the design YAML's `status` field to `done`
 #    so design intent matches the operational fact. Defaults to dry-run;
 #    pass --write to actually mutate the phase YAML. The bulk
 #    counterpart is `code-pact phase reconcile TUTORIAL --write`.
 code-pact task finalize TUTORIAL-T1 --write
 
-# 6. Repeat steps 3–5 for TUTORIAL-T2 (depends on TUTORIAL-T1 being done).
+# 4. Repeat steps 1–3 for TUTORIAL-T2 (depends on TUTORIAL-T1 being done).
 code-pact task context TUTORIAL-T2 --agent claude-code
 code-pact task complete TUTORIAL-T2 --agent claude-code
 code-pact task finalize TUTORIAL-T2 --write
@@ -78,15 +91,13 @@ code-pact task runbook TUTORIAL-T2 --json   # per-task next steps
 code-pact phase runbook TUTORIAL --json     # per-phase next steps (histograms + reconcile candidate)
 ```
 
-If `pnpm test` is not the right verification command for your repo, choose another one when the wizard prompts for it (step 1) — `node --version` is a safe choice for a smoke test.
+If `pnpm test` is not the right verification command for your repo, pass a different one to `init` (`node --version` is a safe placeholder for a smoke test).
 
-> **Try the dependency demo.** After `init`, before completing TUTORIAL-T1, run `code-pact task runbook TUTORIAL-T2 --json`. The first step in `data.next_steps[]` will be a blocking `manual_action` step ("Wait for TUTORIAL-T1 to reach derived state: done"). This is the P10 + P12 integration the tutorial artifact exists to demo.
+> **Try the dependency demo.** Before completing TUTORIAL-T1, run `code-pact task runbook TUTORIAL-T2 --json`. The first step in `data.next_steps[]` will be a blocking `manual_action` step ("Wait for TUTORIAL-T1 to reach derived state: done"). This is the same dependency gate `code-pact tutorial` demonstrates automatically.
 
-> Steps 5/6 and the runbook commands are opt-in. v1.0 / v1.1 projects can keep flipping `status` by hand if they prefer; `task finalize` and `phase reconcile` exist to mechanize the step in release-prep PRs. `task runbook` and `phase runbook` (v1.3+) return read-only sequencing guidance — they never execute anything. See [`docs/concepts/finalization-reconciliation.md`](concepts/finalization-reconciliation.md) and [`docs/concepts/runbook.md`](concepts/runbook.md) for the walkthroughs.
+> Steps 3/4 and the runbook commands are opt-in. v1.0 / v1.1 projects can keep flipping `status` by hand if they prefer; `task finalize` and `phase reconcile` exist to mechanize the step in release-prep PRs. `task runbook` and `phase runbook` (v1.3+) return read-only sequencing guidance — they never execute anything. See [`docs/concepts/finalization-reconciliation.md`](concepts/finalization-reconciliation.md) and [`docs/concepts/runbook.md`](concepts/runbook.md) for the walkthroughs.
 
-> The tutorial artifact is named `TUTORIAL — Walkthrough` (v1.4+) and exists only to confirm the project structure and verification pipeline. Delete it (or its filename `design/phases/TUTORIAL-walkthrough.yaml` plus the roadmap entry) once you have real phases. See [`docs/concepts/sample-phase.md`](concepts/sample-phase.md) for the full keep / rename / delete decision. Pre-v1.4 projects that still have a `P1-welcome.yaml` are untouched by upgrades.
-
-> **CI / non-TTY users (v1.4+).** The tutorial path is also scriptable as a single command: `code-pact init --non-interactive --agent claude-code --locale en-US --sample-phase` produces the same TUTORIAL artifact without a TTY. Before v1.4 the wizard was the only path; pre-v1.4 `init --non-interactive` produces an empty roadmap with no sample phase.
+> The sample-phase artifact is named `TUTORIAL — Walkthrough` (v1.4+) and exists only to confirm the project structure and verification pipeline. Delete it (the file `design/phases/TUTORIAL-walkthrough.yaml` plus the roadmap entry) once you have real phases. See [`docs/concepts/sample-phase.md`](concepts/sample-phase.md) for the full keep / rename / delete decision. Pre-v1.4 projects that still have a `P1-welcome.yaml` are untouched by upgrades.
 
 ---
 
