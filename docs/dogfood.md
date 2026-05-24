@@ -31,14 +31,17 @@ code-pact validate       # exits 1 if any errors exist
 ## Per-task flow
 
 ```sh
-# 0. Start every task here. recommend returns a deterministic execution
-#    plan for the task — model tier and effort to use, context profile,
-#    whether planning is required, escalation order, a preflight command
-#    list, and a categorical budget profile. v0.8+.
-code-pact recommend --phase <phase-id> --task <task-id> --json
+# 0. Start every task here. task prepare is the single per-task entry
+#    point — one call returns the current state, the execution
+#    recommendation (model tier, effort, planning posture, budget), the
+#    context pack metadata, a structured next_action, and a `commands`
+#    dictionary with the exact next commands to run. v1.11+.
+code-pact task prepare <task-id> --agent claude-code --json
 
-# 1. Pick a task from the current phase and fetch its context pack.
-#    Output goes to stdout — no files written.
+# 1. (Diagnostic) Fetch the context pack directly only if you need it
+#    outside task prepare — output goes to stdout, no files written.
+#    `recommend` is likewise available standalone (see "Reading
+#    recommend --json" below); task prepare runs both for you.
 code-pact task context <task-id> --agent claude-code
 
 # 2. Mark the task started so handoff and downstream tools can see who's on it.

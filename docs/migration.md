@@ -447,6 +447,69 @@ Projects running `plan lint --strict` / `plan analyze --strict` / `validate --st
 
 In semver terms, v1.4.0 is a minor release.
 
+## v1.13.3 → v1.14.0
+
+**Minor release.** The `task prepare` primary contract is now
+documented and mechanically checked, and `adapter conformance` gains new
+checks plus a `severity` field. No breaking change — older installs keep
+working and warn rather than hard-fail.
+
+```sh
+npm install -g code-pact@1.14.0
+```
+
+### What changed
+
+- **`task prepare` is the primary per-task entrypoint (P29).** The
+  README, both getting-started guides, and the generated adapter
+  guidance now lead with `task prepare`; `recommend` and `task context`
+  are diagnostics that `task prepare` already runs for you.
+- **Fixed the `task prepare` finalize command (P29).**
+  `commands.finalize` emitted `task finalize <id> --agent <agent>`,
+  which the CLI rejects with `CONFIG_ERROR` (finalize takes no
+  `--agent`). It now emits `task finalize <id> --write --json`.
+- **`adapter conformance` hardening (P30).** Three new checks —
+  `task_prepare_is_primary`, `no_contract_antipatterns` (rejects the
+  `task finalize ... --agent` anti-pattern), and
+  `activation_rules_documented` (documentation presence, not runtime
+  obedience). Each check now carries a `severity` (`required` |
+  `advisory`); `compliant` is false only when a *required* check fails.
+- **Hybrid version gating (P30).** The new checks are `required` for
+  adapters whose manifest `generator_version` is semver >= `1.14.0` and
+  `advisory` below, so installs predating the P29-aligned templates warn
+  (with an `adapter upgrade` remediation) rather than hard-fail.
+- **Metric wording.** "Agent command adherence rate" → "Task lifecycle
+  adherence rate" — it measures state-machine `started`→`done`
+  adherence; `task prepare` is read-only and prepare-adherence is not
+  measured.
+
+### Recommended action
+
+```sh
+code-pact adapter upgrade <agent> --write
+```
+
+Re-upgrading picks up the P29-aligned guidance and moves the new
+conformance checks to the `required` tier. It is optional — a pre-1.14.0
+install keeps working and reports the new checks as advisory warnings.
+
+### What did NOT change
+
+- `progress.yaml` schema, `adapter_schema_version`, and the
+  `ManifestFile` schema — unchanged. No data migration.
+- No public error code added or renamed; the conformance exit codes
+  (0 compliant / 1 not) are unchanged.
+- `task prepare` stays read-only — no `--record`, emits no progress
+  event.
+
+### Why a minor release
+
+P30 adds new public surface to the `adapter conformance` envelope (the
+`severity` field and three new check ids) and P29 changes the
+`task prepare` `commands.finalize` value. The changes are additive and
+gated to avoid breaking older installs, so minor is the correct semver
+position.
+
 ## v1.13.2 → v1.13.3
 
 **Documentation patch.** No code change. No CLI surface
