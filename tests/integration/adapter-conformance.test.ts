@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdtemp, readFile, realpath, rm } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -392,6 +393,82 @@ describe.each(STABLE_AGENTS)("adapter conformance — %s", (agent) => {
       at.checks.find((c) => c.id === "task_prepare_is_primary")?.severity,
     ).toBe("required");
     expect(at.compliant).toBe(true);
+  });
+});
+
+// P30: end-to-end severity behavior of a *violating* instruction. The
+// per-adapter suite above only exercises conformant templates (the checks
+// pass) and the severity *assignment*; the unit suite covers the pure
+// predicates. This block closes the gap the P30 DoD calls for — the join
+// of manifest generator_version + violating content + remediation +
+// compliant — through runAdapterConformance. claude-code only is enough.
+describe("adapter conformance — P30 violating fixture severity (claude-code)", () => {
+  const agent = "claude-code" as const;
+
+  // Inject the P29 anti-pattern (`task finalize ... --agent`) WITHOUT
+  // removing any required content, so `no_contract_antipatterns` is the
+  // only check that fails. The manifest sha256 is re-synced to the
+  // tampered content so `file_checksum_match` (a required check) does not
+  // mask the hardening-check behavior under test.
+  async function injectAntipatternKeepingChecksumValid(): Promise<{
+    originalSha: string;
+  }> {
+    const manifest = await readManifest(dir, agent);
+    const instr = manifest!.files.find((f) => f.role === "instruction")!;
+    const instrPath = join(dir, instr.path);
+    const original = await readFile(instrPath, "utf8");
+    const tampered =
+      original +
+      "\n\nExample (DO NOT FOLLOW): code-pact task finalize <id> --agent claude-code\n";
+    await writeFile(instrPath, tampered, "utf8");
+
+    const newSha = createHash("sha256")
+      .update(tampered.replace(/\r\n/g, "\n"), "utf8")
+      .digest("hex");
+    const manifestPath = join(dir, ".code-pact", "adapters", `${agent}.manifest.yaml`);
+    const raw = await readFile(manifestPath, "utf8");
+    const updated = raw.replace(instr.sha256, newSha);
+    expect(updated).not.toBe(raw); // the instruction sha was present and swapped
+    await writeFile(manifestPath, updated, "utf8");
+    return { originalSha: instr.sha256 };
+  }
+
+  async function setGeneratorVersion(version: string): Promise<void> {
+    const manifestPath = join(dir, ".code-pact", "adapters", `${agent}.manifest.yaml`);
+    const raw = await readFile(manifestPath, "utf8");
+    const updated = raw.replace(/generator_version: .*/, `generator_version: ${version}`);
+    expect(updated).not.toBe(raw);
+    await writeFile(manifestPath, updated, "utf8");
+  }
+
+  it("below threshold: the anti-pattern is an advisory failure — compliant stays true, with remediation", async () => {
+    await installAdapter(agent); // generator_version 0.9.0-alpha.0 < 1.14.0
+    await injectAntipatternKeepingChecksumValid();
+
+    const result = await runAdapterConformance({ cwd: dir, agentName: agent });
+    const check = result.checks.find((c) => c.id === "no_contract_antipatterns")!;
+    expect(check.status).toBe("fail");
+    expect(check.severity).toBe("advisory");
+    expect(result.compliant).toBe(true);
+    expect(check.details?.remediation).toBe(`adapter upgrade ${agent} --write`);
+    // The sha re-sync must hold so checksum failure does not mask the behavior.
+    expect(
+      result.checks.find(
+        (c) => c.id === "file_checksum_match" && c.status === "fail",
+      ),
+    ).toBeUndefined();
+  });
+
+  it("at the threshold: the same anti-pattern is a required failure — compliant becomes false", async () => {
+    await installAdapter(agent);
+    await injectAntipatternKeepingChecksumValid();
+    await setGeneratorVersion("1.14.0");
+
+    const result = await runAdapterConformance({ cwd: dir, agentName: agent });
+    const check = result.checks.find((c) => c.id === "no_contract_antipatterns")!;
+    expect(check.status).toBe("fail");
+    expect(check.severity).toBe("required");
+    expect(result.compliant).toBe(false);
   });
 });
 
