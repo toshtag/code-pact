@@ -48,9 +48,10 @@ objective: |
 non_goals:
   - Spec Kit Bridge v2 / P25 feature work (stays unstarted; this phase only
     corrects how docs refer to it)
-  - read_refs / line-range context schema (P32 idea — deferred, stale-range cost
-    is a separate product bet)
-  - evidence harness reproducibility v2 (P30 idea — separate phase if pursued)
+  - read_refs / line-range context schema (an unnumbered future capability —
+    deferred, stale-range cost is a separate product bet)
+  - evidence harness reproducibility v2 (an unnumbered future capability —
+    separate phase if pursued)
   - new commands dict fields (no finalize_dry_run / finalize_write split; no
     envelope-shape change)
   - README positioning changes that name external OSS projects as comparison

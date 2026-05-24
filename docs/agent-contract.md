@@ -179,10 +179,22 @@ ids require an RFC and an entry in `src/core/adapters/conformance-spec.ts`.
 | `axis_how_to_handle` | `### How to handle failures` present |
 | `required_cli_surface_mentions` | Every lifecycle and diagnostic surface mentioned |
 | `required_failure_guidance` | Every failure keyword mentioned |
+| `task_prepare_is_primary` | `code-pact task prepare` appears and precedes the first `recommend` / `task context` mention (it is the primary per-task entrypoint, not the pre-P29 loop) |
+| `no_contract_antipatterns` | The guidance is free of P29 anti-patterns (e.g. `task finalize ... --agent`, which takes no `--agent`) |
+| `activation_rules_documented` | The activation rules are documented — `task finalize --write` only after `task complete`, `wait_for_dependencies`, `CONTEXT_OVER_BUDGET`. Verifies **documentation presence, not runtime obedience** |
 | `file_checksum_match` | Per-file: on-disk sha256 equals manifest |
 
-A pass on every check produces `compliant: true` and exit 0. Any
-failure produces `compliant: false` and exit 1.
+**Severity (v1.x, P30).** Each check carries a `severity` of `required`
+or `advisory`. `compliant` is `true` unless a **required** check fails;
+a failing `advisory` check is surfaced (with an `adapter upgrade`
+remediation) but does not break compliance. The three hardening checks
+above (`task_prepare_is_primary`, `no_contract_antipatterns`,
+`activation_rules_documented`) are `required` for adapters whose manifest
+`generator_version` is semver >= the hardening threshold
+(`ADAPTER_CONTRACT_HARDENING_FROM_VERSION`) and `advisory` below, so
+installs that predate the P29-aligned templates warn rather than
+hard-fail until re-upgraded. All other checks are `required`. Exit is 0
+when `compliant`, 1 otherwise.
 
 ## 3. Recommended lifecycle
 
@@ -255,7 +267,7 @@ and recomputes them on every harness run.
 | Context pack p90 bytes | Per-task pack size, lower 90th percentile | 49885 |
 | Context pack max bytes | Largest single task's pack size | 306153 |
 | First-pass verification rate | Percentage of `task complete` invocations whose declared verification passes on the first attempt | 100.0% |
-| Agent command adherence rate | Percentage of `done` tasks with at least one `started` event before the first `done` event AND no legacy `planned → done` shortcut | 82.4% |
+| Task lifecycle adherence rate | State-machine adherence: percentage of `done` tasks with at least one `started` event before the first `done` event AND no legacy `planned → done` shortcut. `task prepare` is read-only and emits no event, so prepare-adherence is **not** measured | 82.4% |
 | Undeclared write rate | Files changed by a task whose paths are not covered by the task's declared `writes` globs | deferred ([rationale](../design/decisions/evidence-harness-v2-rfc.md#non-goals-out-of-scope-for-p26)) |
 | Adapter drift detection rate | Percentage of enabled agents where `adapter doctor` returns at least one error-severity issue | 0.0% |
 

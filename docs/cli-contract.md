@@ -1112,7 +1112,7 @@ surprised by an extra stderr line. The bare form will be removed in v1.1.
 
 ### `adapter conformance <agent> [--json]` (v1.11+, P21)
 
-Focused read-only check that the installed adapter satisfies the agent contract. Returns `compliant: true` when every check passes; the CLI exits 0 when compliant, 1 when not. No state is mutated.
+Focused read-only check that the installed adapter satisfies the agent contract. Each check carries a `severity` (`required` | `advisory`); `compliant` is `true` unless a **required** check fails. The CLI exits 0 when compliant, 1 when not. No state is mutated.
 
 Conformance is intentionally narrower than `adapter doctor` — it inspects only the contract shape and per-file integrity. `ADAPTER_GENERATOR_STALE` / `ADAPTER_PROFILE_DRIFT` / `ADAPTER_UNMANAGED_FILE` remain doctor-only diagnostics.
 
@@ -1123,8 +1123,8 @@ Conformance is intentionally narrower than `adapter doctor` — it inspects only
     "agent": "claude-code",
     "compliant": true,
     "checks": [
-      { "id": "manifest_present", "status": "pass" },
-      { "id": "instruction_file_present", "status": "pass", "file": "CLAUDE.md" },
+      { "id": "manifest_present", "status": "pass", "severity": "required" },
+      { "id": "instruction_file_present", "status": "pass", "severity": "required", "file": "CLAUDE.md" },
       { "id": "contract_section_present", "status": "pass", "file": "CLAUDE.md" },
       { "id": "axis_when_to_invoke", "status": "pass", "file": "CLAUDE.md" },
       { "id": "axis_what_to_verify", "status": "pass", "file": "CLAUDE.md" },
@@ -1149,11 +1149,16 @@ Conformance is intentionally narrower than `adapter doctor` — it inspects only
           "missing": []
         }
       },
-      { "id": "file_checksum_match", "status": "pass", "file": "CLAUDE.md" }
+      { "id": "task_prepare_is_primary", "status": "pass", "severity": "advisory", "file": "CLAUDE.md" },
+      { "id": "no_contract_antipatterns", "status": "pass", "severity": "advisory", "file": "CLAUDE.md" },
+      { "id": "activation_rules_documented", "status": "pass", "severity": "advisory", "file": "CLAUDE.md" },
+      { "id": "file_checksum_match", "status": "pass", "severity": "required", "file": "CLAUDE.md" }
     ]
   }
 }
 ```
+
+Every check object carries a `severity` (`required` | `advisory`). The three P30 hardening checks (`task_prepare_is_primary`, `no_contract_antipatterns`, `activation_rules_documented`) show `advisory` above because this example's manifest `generator_version` predates the hardening threshold; on an adapter generated at or after it they are `required`.
 
 #### Checks
 
@@ -1167,7 +1172,14 @@ Conformance is intentionally narrower than `adapter doctor` — it inspects only
 | `axis_how_to_handle` | The instruction file contains `### How to handle failures` |
 | `required_cli_surface_mentions` | Every entry in both `lifecycle_required` and `diagnostic_required` (defined in `src/core/adapters/conformance-spec.ts`) is mentioned somewhere in the instruction file |
 | `required_failure_guidance` | Every failure keyword (`blocked dependency`, `verification failure`, `adapter drift`, `missing context pack`) is mentioned somewhere in the instruction file |
+| `task_prepare_is_primary` | `code-pact task prepare` appears in the instruction and precedes the first `code-pact recommend` / `code-pact task context` mention (it is the primary per-task entrypoint) |
+| `no_contract_antipatterns` | The instruction / its examples contain no P29 anti-pattern (e.g. `task finalize ... --agent`) |
+| `activation_rules_documented` | The activation-rule anchors (`task finalize --write`, `wait_for_dependencies`, `CONTEXT_OVER_BUDGET`) are present — verifies documentation presence, not runtime obedience |
 | `file_checksum_match` | One per manifest file: the on-disk LF-normalised UTF-8 sha256 equals the manifest's recorded value |
+
+#### Severity (v1.x, P30)
+
+Each check carries a `severity`: `required` or `advisory`. `compliant` is `true` unless a **required** check fails; a failing `advisory` check is reported (its `details` carry an `adapter upgrade <agent> --write` remediation) but does not break compliance or change the exit code. All checks are `required` except the three P30 hardening checks (`task_prepare_is_primary`, `no_contract_antipatterns`, `activation_rules_documented`), whose severity is resolved per install from the manifest `generator_version`: `required` when it is semver >= `ADAPTER_CONTRACT_HARDENING_FROM_VERSION` (defined in `src/core/adapters/conformance-spec.ts`), `advisory` below (or when the version is missing / unparseable). This keeps adapters that predate the P29-aligned templates warning rather than hard-failing until they are re-upgraded.
 
 `adapter conformance` and `adapter doctor` share the module `src/core/adapters/conformance-spec.ts`, but they consume different parts of it and check different things. `adapter conformance` is the only caller that reads the `lifecycle_required` / `diagnostic_required` surface lists and the `REQUIRED_FAILURE_GUIDANCE` keywords (the `required_cli_surface_mentions` and `required_failure_guidance` checks above). `adapter doctor`'s `ADAPTER_CONTRACT_DRIFT` check consumes only the heading constants from the same module (`AGENT_CONTRACT_SECTION_HEADING` and `AGENT_CONTRACT_AXIS_HEADINGS`) — it asserts the `## Agent contract` section and its three axis sub-headings are present, not that the required CLI surface or failure guidance is mentioned. So the shared module guarantees the two callers agree on the contract's *headings*; the required-surface and failure-guidance checks are `adapter conformance`-only.
 

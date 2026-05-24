@@ -80,3 +80,6 @@ phases:
   - id: P29
     path: design/phases/P29-contract-truth.yaml
     weight: 8
+  - id: P30
+    path: design/phases/P30-adapter-contract-hardening.yaml
+    weight: 8
