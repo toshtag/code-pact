@@ -147,8 +147,6 @@ export const messages = {
       verifyCommandPrompt: "Default verification command",
       verifyCommandHint: "Press Enter to keep the default",
       verifyCustomOption: "Custom command…",
-      createSamplePrompt:
-        "Create a tutorial sample phase (TUTORIAL) to walk through the per-task loop? It is safe to delete after the smoke test.",
       generateAdaptersPrompt:
         "Generate AI agent instruction files now? (CLAUDE.md / AGENTS.md etc.)",
       summary: (agents: string[], defaultAgent: string): string =>
@@ -159,6 +157,10 @@ export const messages = {
       nextStep1: "1. Create a phase:        code-pact phase add",
       nextStep2: "2. Add tasks to a phase:  code-pact task add <phase-id>",
       nextStep3: "3. Start agent workflow:  code-pact task context <task-id>",
+      tutorialHint:
+        "New to the task workflow? Run `code-pact tutorial` to watch it run end to end — nothing is written to your project.",
+      samplePhaseHint:
+        "Want a starter phase scaffolded into design/? Re-run `code-pact init --sample-phase`.",
     },
     phase: {
       idPrompt: "Phase ID (e.g. P1)",

@@ -81,13 +81,12 @@ export async function runInitWizard(opts: InitWizardOptions): Promise<InitResult
       verifyCommand = verifyRaw.length > 0 ? verifyRaw : defaultVerify;
     }
 
-    // 6. Sample phase — yes/no. When the CLI passed `--sample-phase`,
-    //    the wizard skips this prompt and forces creation (per the
-    //    P13 RFC's generation-policy table).
-    const createSamplePhase =
-      opts.samplePhaseOverride === true
-        ? true
-        : await prompter.askYesNo(m.createSamplePrompt, true);
+    // 6. Sample phase — no longer prompted (v1.15+). The TUTORIAL sample
+    //    phase is opt-in only via `--sample-phase`; learning the loop is
+    //    handled by the no-cleanup `code-pact tutorial` command, surfaced
+    //    in the footer hints below. This removes a jargon-heavy yes/no
+    //    ("per-task loop", "smoke test") from the very first-run moment.
+    const createSamplePhase = opts.samplePhaseOverride === true;
 
     // 7. Project brief — optional, yes by default. Questions are collected
     //    upfront (before any file operations) so the wizard feels linear.
@@ -133,7 +132,8 @@ export async function runInitWizard(opts: InitWizardOptions): Promise<InitResult
 
     const ns = messageCatalog[locale].wizard.init;
     prompter.write(
-      `\n${ns.nextStepsHeader}\n  ${ns.nextStep1}\n  ${ns.nextStep2}\n  ${ns.nextStep3}\n`,
+      `\n${ns.nextStepsHeader}\n  ${ns.nextStep1}\n  ${ns.nextStep2}\n  ${ns.nextStep3}\n` +
+        `\n  ${ns.tutorialHint}\n  ${ns.samplePhaseHint}\n`,
     );
 
     return result;

@@ -58,6 +58,11 @@ async function readProjectYaml(): Promise<{
   return parseYaml(raw) as ReturnType<typeof readProjectYaml> extends Promise<infer T> ? T : never;
 }
 
+// v1.15: the wizard no longer prompts for the sample phase. The prompt
+// sequence is: locale, agents, [default_agent], adapters, verify, brief.
+// Sample-phase creation is opt-in only via `samplePhaseOverride` (the
+// `--sample-phase` CLI flag).
+
 describe("runInitWizard — locale", () => {
   it("writes ja-JP into project.yaml when option 2 is chosen", async () => {
     const { prompter } = makePrompter([
@@ -65,7 +70,6 @@ describe("runInitWizard — locale", () => {
       "1", // agents: Claude Code
       "n", // generate adapters: no
       "1", // verify: preset pnpm test
-      "n", // create sample phase: no
       "n", // collect brief: no
     ]);
     await runInitWizard({ cwd: tmpDir, force: false, json: false, prompter });
@@ -79,7 +83,6 @@ describe("runInitWizard — locale", () => {
       "1", // agents: Claude Code
       "n", // adapters
       "1", // verify: preset pnpm test
-      "n", // sample
       "n", // brief
     ]);
     await runInitWizard({ cwd: tmpDir, force: false, json: false, prompter });
@@ -95,15 +98,14 @@ describe("runInitWizard — default_agent", () => {
       "1", // agents: just Claude Code
       "n", // adapters
       "1", // verify: preset pnpm test
-      "n", // sample
       "n", // brief
     ]);
     await runInitWizard({ cwd: tmpDir, force: false, json: false, prompter });
     const project = await readProjectYaml();
     expect(project.default_agent).toBe("claude-code");
     expect(project.agents).toHaveLength(1);
-    // 6 prompts total: locale, agents, adapters, verify, sample, brief.
-    expect(reader.prompts).toHaveLength(6);
+    // 5 prompts total: locale, agents, adapters, verify, brief.
+    expect(reader.prompts).toHaveLength(5);
   });
 
   it("asks default_agent when multiple agents are selected", async () => {
@@ -113,14 +115,13 @@ describe("runInitWizard — default_agent", () => {
       "2", // default_agent: Codex (second in selection)
       "n", // adapters
       "1", // verify: preset pnpm test
-      "n", // sample
       "n", // brief
     ]);
     await runInitWizard({ cwd: tmpDir, force: false, json: false, prompter });
     const project = await readProjectYaml();
     expect(project.default_agent).toBe("codex");
     expect(project.agents.map((a) => a.name)).toEqual(["claude-code", "codex"]);
-    expect(reader.prompts).toHaveLength(7);
+    expect(reader.prompts).toHaveLength(6);
   });
 });
 
@@ -131,10 +132,17 @@ describe("runInitWizard — verify command", () => {
       "1", // agents
       "n", // adapters
       "1", // verify: preset pnpm test
-      "y", // sample yes
       "n", // brief
     ]);
-    await runInitWizard({ cwd: tmpDir, force: false, json: false, prompter });
+    // samplePhaseOverride forces creation so we can inspect the verify
+    // command baked into the sample phase (the wizard no longer prompts).
+    await runInitWizard({
+      cwd: tmpDir,
+      force: false,
+      json: false,
+      samplePhaseOverride: true,
+      prompter,
+    });
     const phase = await readFile(
       join(tmpDir, "design", "phases", "TUTORIAL-walkthrough.yaml"),
       "utf8",
@@ -149,10 +157,15 @@ describe("runInitWizard — verify command", () => {
       "n", // adapters
       "4", // verify: custom option (last entry)
       "vitest run", // verify: typed custom command
-      "y", // sample yes
       "n", // brief
     ]);
-    await runInitWizard({ cwd: tmpDir, force: false, json: false, prompter });
+    await runInitWizard({
+      cwd: tmpDir,
+      force: false,
+      json: false,
+      samplePhaseOverride: true,
+      prompter,
+    });
     const phase = await readFile(
       join(tmpDir, "design", "phases", "TUTORIAL-walkthrough.yaml"),
       "utf8",
@@ -162,47 +175,57 @@ describe("runInitWizard — verify command", () => {
 });
 
 describe("runInitWizard — output routing", () => {
-  it("writes next steps to the injected prompter output", async () => {
+  it("writes next steps and the tutorial/sample-phase hints to the output", async () => {
     const { prompter, getOutput } = makePrompter([
       "1", // locale
       "1", // agents
       "n", // adapters
       "1", // verify: preset pnpm test
-      "n", // sample
       "n", // brief
     ]);
     await runInitWizard({ cwd: tmpDir, force: false, json: false, prompter });
-    expect(getOutput()).toContain("Next steps");
+    const out = getOutput();
+    expect(out).toContain("Next steps");
+    // The removed sample-phase prompt is replaced by discoverable footer
+    // hints pointing at the two opt-in paths.
+    expect(out).toContain("code-pact tutorial");
+    expect(out).toContain("init --sample-phase");
   });
 });
 
 describe("runInitWizard — sample phase", () => {
-  it("creates the sample phase when answered yes", async () => {
+  it("creates the sample phase when samplePhaseOverride is set", async () => {
     const { prompter } = makePrompter([
       "1", // locale
       "1", // agents
       "n", // adapters
       "1", // verify: preset pnpm test
-      "y", // sample yes
       "n", // brief
     ]);
-    const result = await runInitWizard({ cwd: tmpDir, force: false, json: false, prompter });
+    const result = await runInitWizard({
+      cwd: tmpDir,
+      force: false,
+      json: false,
+      samplePhaseOverride: true,
+      prompter,
+    });
     const phaseCreated = result.created.some((p) => p.includes("TUTORIAL-walkthrough.yaml"));
     expect(phaseCreated).toBe(true);
   });
 
-  it("skips the sample phase when answered no", async () => {
-    const { prompter } = makePrompter([
+  it("does not create the sample phase by default (no prompt, no override)", async () => {
+    const { prompter, reader } = makePrompter([
       "1", // locale
       "1", // agents
       "n", // adapters
       "1", // verify: preset pnpm test
-      "n", // sample no
       "n", // brief
     ]);
     const result = await runInitWizard({ cwd: tmpDir, force: false, json: false, prompter });
     const phaseCreated = result.created.some((p) => p.includes("TUTORIAL-walkthrough.yaml"));
     expect(phaseCreated).toBe(false);
+    // No sample-phase prompt is ever shown.
+    expect(reader.prompts).toHaveLength(5);
   });
 });
 
@@ -213,7 +236,6 @@ describe("runInitWizard — adapter generation", () => {
       "1", // agents: claude-code
       "y", // adapters: yes
       "1", // verify: preset pnpm test
-      "n", // sample
       "n", // brief
     ]);
     const result = await runInitWizard({ cwd: tmpDir, force: false, json: false, prompter });
@@ -227,7 +249,6 @@ describe("runInitWizard — adapter generation", () => {
       "1", // agents
       "n", // adapters: no
       "1", // verify: preset pnpm test
-      "n", // sample
       "n", // brief
     ]);
     const result = await runInitWizard({ cwd: tmpDir, force: false, json: false, prompter });
@@ -242,7 +263,6 @@ describe("runInitWizard — adapter generation", () => {
       "1", // default_agent: claude-code
       "y", // adapters: yes
       "1", // verify: preset pnpm test
-      "n", // sample
       "n", // brief
     ]);
     const result = await runInitWizard({ cwd: tmpDir, force: false, json: false, prompter });
@@ -260,7 +280,6 @@ describe("runInitWizard — project brief", () => {
       "1", // agents: claude-code
       "n", // adapters
       "1", // verify: preset pnpm test
-      "n", // sample
       "y", // brief: yes
       "A task management CLI", // what
       "Developers", // who
@@ -283,7 +302,6 @@ describe("runInitWizard — project brief", () => {
       "1", // agents
       "n", // adapters
       "1", // verify: preset pnpm test
-      "n", // sample
       "y", // brief: yes
       "タスク管理 CLI", // what
       "開発者", // who
@@ -302,7 +320,6 @@ describe("runInitWizard — project brief", () => {
       "1", // agents
       "n", // adapters
       "1", // verify: preset pnpm test
-      "n", // sample
       "n", // brief: no
     ]);
     const result = await runInitWizard({ cwd: tmpDir, force: false, json: false, prompter });

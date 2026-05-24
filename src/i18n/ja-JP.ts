@@ -147,8 +147,6 @@ export const messages = {
       verifyCommandPrompt: "デフォルトの検証コマンド",
       verifyCommandHint: "そのままで良ければ Enter",
       verifyCustomOption: "カスタムコマンド…",
-      createSamplePrompt:
-        "per-task ループの確認用にチュートリアルフェーズ (TUTORIAL) を作成しますか？スモークテスト後に削除して構いません。",
       generateAdaptersPrompt:
         "AI エージェント用の instruction ファイルをいま生成しますか? (CLAUDE.md / AGENTS.md など)",
       summary: (agents: string[], defaultAgent: string): string =>
@@ -159,6 +157,10 @@ export const messages = {
       nextStep1: "1. フェーズを作成する:        code-pact phase add",
       nextStep2: "2. タスクを追加する:          code-pact task add <phase-id>",
       nextStep3: "3. Agent ワークフローを開始:  code-pact task context <task-id>",
+      tutorialHint:
+        "タスクの進め方を一度通しで見たいなら `code-pact tutorial` を実行してください（プロジェクトには何も書き込みません）。",
+      samplePhaseHint:
+        "design/ に起点フェーズを作りたい場合は `code-pact init --sample-phase` を実行してください。",
     },
     phase: {
       idPrompt: "フェーズ ID (例: P1)",
