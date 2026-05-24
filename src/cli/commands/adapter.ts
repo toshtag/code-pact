@@ -241,7 +241,14 @@ async function cmdAdapterConformance(
     );
     process.stdout.write(`Checks:\n`);
     for (const c of result.checks) {
-      const status = c.status === "pass" ? "PASS" : "FAIL";
+      // A failing advisory check is a non-blocking warning (it keeps
+      // compliance); mark it distinctly from a hard (required) failure.
+      const status =
+        c.status === "pass"
+          ? "PASS"
+          : c.severity === "advisory"
+            ? "WARN"
+            : "FAIL";
       const file = c.file ? ` (${c.file})` : "";
       process.stdout.write(`  ${status}  ${c.id}${file}\n`);
       if (c.status === "fail" && c.details) {

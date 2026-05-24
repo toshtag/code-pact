@@ -352,6 +352,47 @@ describe.each(STABLE_AGENTS)("adapter conformance — %s", (agent) => {
     );
     expect(checksumChecks.some((c) => c.status === "fail")).toBe(true);
   });
+
+  // ----- P30: adapter contract hardening -----
+
+  it("the P30 hardening checks pass on a fresh install (template is P29-aligned)", async () => {
+    await installAdapter(agent);
+    const result = await runAdapterConformance({ cwd: dir, agentName: agent });
+    for (const id of [
+      "task_prepare_is_primary",
+      "no_contract_antipatterns",
+      "activation_rules_documented",
+    ]) {
+      const c = result.checks.find((x) => x.id === id);
+      expect(c, `${id} present`).toBeDefined();
+      expect(c!.status, `${id} passes`).toBe("pass");
+    }
+  });
+
+  it("P30 checks are advisory below the hardening version and required at/above it", async () => {
+    // Default install records generator_version 0.9.0-alpha.0 → advisory.
+    await installAdapter(agent);
+    const below = await runAdapterConformance({ cwd: dir, agentName: agent });
+    expect(
+      below.checks.find((c) => c.id === "task_prepare_is_primary")?.severity,
+    ).toBe("advisory");
+
+    // Re-install at the hardening threshold → required. Templates are
+    // unchanged (content does not depend on generator_version), so the
+    // checks still pass and the adapter stays compliant.
+    await runAdapterInstall({
+      cwd: dir,
+      agentName: agent,
+      force: true,
+      locale: "en-US",
+      generatorVersionOverride: "1.14.0",
+    });
+    const at = await runAdapterConformance({ cwd: dir, agentName: agent });
+    expect(
+      at.checks.find((c) => c.id === "task_prepare_is_primary")?.severity,
+    ).toBe("required");
+    expect(at.compliant).toBe(true);
+  });
 });
 
 // claude-code-only: skill files follow the .claude/skills/<verb>.md slash

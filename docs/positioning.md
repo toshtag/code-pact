@@ -125,7 +125,7 @@ are recomputed on every harness run.
   the first attempt, across the dogfood corpus. A proxy for
   whether the context pack delivered what the agent needed to
   implement the task correctly.
-- **Agent command adherence rate.** Percentage of agent
+- **Task lifecycle adherence rate.** Percentage of agent
   sessions where the recommended lifecycle (`task prepare ─►
   task start ─► implement ─► verify ─► task complete ─► task
   finalize`) was followed without skipping or reordering. A

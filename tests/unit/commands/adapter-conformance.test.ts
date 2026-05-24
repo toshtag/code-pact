@@ -31,6 +31,12 @@ code-pact verify --phase <p> --task <task-id>
 code-pact validate --json
 \`\`\`
 
+Activation rules:
+
+- Run \`task finalize --write\` only after \`task complete\`.
+- If \`next_action.type\` is \`wait_for_dependencies\`, do not implement.
+- On \`CONTEXT_OVER_BUDGET\`, report rather than widen.
+
 ### What to verify first
 
 - run verify

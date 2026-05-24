@@ -77,3 +77,77 @@ export const REQUIRED_FAILURE_GUIDANCE: ReadonlyArray<string> = [
   "adapter drift",
   "missing context pack",
 ];
+
+// ---------------------------------------------------------------------------
+// P30 — Adapter contract hardening
+//
+// These constants back the v1.x P30 checks that enforce the post-P29
+// `task prepare` primary contract in adapter guidance. See
+// design/decisions/adapter-contract-hardening-rfc.md.
+// ---------------------------------------------------------------------------
+
+/**
+ * Release that first ships the P29-aligned templates (the ones that
+ * satisfy the P30 checks). The P30 checks run at `required` severity for
+ * adapters whose manifest `generator_version` is semver >= this, and
+ * `advisory` below — so installs that predate the hardened templates
+ * warn rather than hard-fail.
+ *
+ * RELEASE-COUPLED: release prep MUST confirm the actual P30 release
+ * version and bump this if it differs, so "required" only ever applies
+ * to installs that actually carry the hardened templates. P29 + P30 are
+ * unreleased; the current released line (1.13.3) still leads with
+ * `recommend`, so the threshold must be strictly greater than 1.13.3.
+ */
+// TODO(release-prep): confirm this equals the actual P30 release version
+// (and bump if it differs) before publishing — see the RFC's release-coupled note.
+export const ADAPTER_CONTRACT_HARDENING_FROM_VERSION = "1.14.0";
+
+/**
+ * The surface that must be presented as the PRIMARY per-task entrypoint.
+ */
+export const PRIMARY_ENTRYPOINT_SURFACE = "code-pact task prepare";
+
+/**
+ * Surfaces that `task prepare` must appear ahead of — they are
+ * diagnostics, not the primary loop. If any of these is introduced
+ * before `task prepare`, the guidance is teaching the pre-P29 loop.
+ */
+export const PRIMARY_PRECEDES_SURFACES: ReadonlyArray<string> = [
+  "code-pact recommend",
+  "code-pact task context",
+];
+
+/**
+ * Anti-patterns that must NOT appear in generated instructions or their
+ * examples. Each `pattern` is matched against the instruction body.
+ * `task finalize ... --agent` is the exact P29 bug class (finalize takes
+ * no `--agent`); this is the conformance-layer analogue of P29's parser
+ * roundtrip test.
+ */
+export const CONTRACT_ANTIPATTERNS: ReadonlyArray<{
+  id: string;
+  pattern: RegExp;
+  note: string;
+}> = [
+  {
+    id: "finalize_agent_flag",
+    pattern: /task finalize[^\n]*--agent/,
+    note: "`task finalize` takes no `--agent`; emits CONFIG_ERROR (P29).",
+  },
+];
+
+/**
+ * Activation rules that must be DOCUMENTED in the guidance, detected by
+ * locale-independent anchor tokens (the prose is localised; the CLI /
+ * error tokens are not). PRESENCE is the contract — this verifies the
+ * rule is documented, NOT that an agent obeys it at runtime.
+ */
+export const ACTIVATION_RULE_ANCHORS: ReadonlyArray<{
+  id: string;
+  anchor: string;
+}> = [
+  { id: "finalize_after_complete", anchor: "task finalize --write" },
+  { id: "wait_for_dependencies", anchor: "wait_for_dependencies" },
+  { id: "context_over_budget", anchor: "CONTEXT_OVER_BUDGET" },
+];

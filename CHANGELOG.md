@@ -13,6 +13,61 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+### P30 — Adapter contract hardening
+
+**P30-T0.** Phase bootstrap. Continuation of P29: its root cause was that
+the contract surface handed to agents was not mechanically checked. P29
+closed the commands-dictionary gap with a parser roundtrip test; P30
+closes the adjacent gap — `adapter conformance` checks only that
+required CLI surfaces are *mentioned* (substring), not that the guidance
+presents `task prepare` as primary or is free of the anti-patterns P29
+removed. Lands `design/decisions/adapter-contract-hardening-rfc.md`
+(status: accepted — hybrid version-gated severity) and a P30 roadmap
+entry (weight 8). Also corrects P29's own non_goals phantom phase-id
+labels (`P30 idea` / `P32 idea` → `unnumbered future capability`), the
+same inconsistency P29-T5 cleaned up. No code or public CLI surface
+change in T0.
+
+**P30-T1.** Severity-aware conformance + `task prepare` primary +
+anti-pattern rejection. `ConformanceCheck` gains an explicit `severity`
+(`required` | `advisory`); `compliant` is now false only when a
+*required* check fails (`isAdapterCompliant`). Two new checks:
+`task_prepare_is_primary` (asserts `code-pact task prepare` appears and
+precedes the first `recommend` / `task context` mention — the primary
+per-task entrypoint, not the pre-P29 loop) and `no_contract_antipatterns`
+(fails on `task finalize ... --agent`, the exact P29 bug class — the
+conformance-layer analogue of P29's parser roundtrip test). The
+human-output renderer marks a failing advisory check `WARN` vs a
+required `FAIL`.
+
+**P30-T2.** `activation_rules_documented` check. Verifies the P29-T3
+activation rules are present via locale-independent anchors
+(`task finalize --write`, `wait_for_dependencies`, `CONTEXT_OVER_BUDGET`).
+The check id, `details`, and docs state it verifies **documentation
+presence, not runtime obedience** — a static instruction-file check
+cannot observe an agent's runtime behaviour, and claiming otherwise
+would re-introduce the contract-overstatement P28/P29 corrected.
+
+**P30-T3.** Hybrid version-gated severity + docs. The three hardening
+checks are `required` for adapters whose manifest `generator_version` is
+semver >= `ADAPTER_CONTRACT_HARDENING_FROM_VERSION` ("1.14.0",
+release-coupled) and `advisory` below, so installs predating the
+P29-aligned templates warn (with an `adapter upgrade` remediation)
+rather than hard-fail. The package version is **not** bumped here
+(release-prep concern), so in-tree / CI installs run the checks at
+advisory; template *content* conformance is asserted directly,
+independent of severity. `docs/agent-contract.md` and
+`docs/cli-contract.md` document the new checks, the severity model, and
+the version gating.
+
+**P30-T4.** Measurement honesty. The metric labelled "Agent command
+adherence rate" is renamed "Task lifecycle adherence rate" in
+`docs/agent-contract.md` and `docs/positioning.md` to match what it
+measures (state-machine `started`→`done` adherence) and the
+`lifecycle_adherence_rate_percent` summary key; both note `task prepare`
+is read-only and prepare-adherence is not measured (`task prepare
+--record` stays a deferred future consideration, out of scope).
+
 ### P29 — Contract truth & baseline integrity
 
 **P29-T0.** Phase bootstrap. An external static review of v1.13.3 found
