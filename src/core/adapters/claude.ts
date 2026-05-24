@@ -113,7 +113,7 @@ function claudeMd(
     ``,
     `0. ${t.step0}`,
     `   \`\`\`sh`,
-    `   code-pact recommend --phase <phase-id> --task <task-id> --agent claude-code --json`,
+    `   code-pact task prepare <task-id> --agent claude-code --json`,
     `   \`\`\``,
     `   ${t.step0Detail}`,
     ``,

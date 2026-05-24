@@ -31,7 +31,7 @@ function agentInstructionsMd(profile: AgentProfile, locale: Locale): string {
     ``,
     `0. ${t.step0}`,
     `   \`\`\`sh`,
-    `   code-pact recommend --phase <phase-id> --task <task-id> --agent generic --json`,
+    `   code-pact task prepare <task-id> --agent generic --json`,
     `   \`\`\``,
     `   ${t.step0Detail}`,
     ``,

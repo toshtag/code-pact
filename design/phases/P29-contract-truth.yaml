@@ -1,0 +1,327 @@
+id: P29
+name: Contract truth & baseline integrity — make `task prepare`'s emitted
+  commands, the docs, and the measurement baselines all executable and
+  consistent
+weight: 8
+confidence: high
+risk: low
+status: done
+objective: |
+  Remediation phase, not new feature work. An external static
+  review of v1.13.3 found that `task prepare` — the v1.11+ single
+  per-task entry point — emits a `commands.finalize` string that
+  the CLI parser rejects:
+
+    code-pact task finalize <id> --agent <agent>
+      → CONFIG_ERROR "Unknown option '--agent'"
+
+  `task finalize` is a design/progress reconciliation command and
+  takes no `--agent` (CHANGELOG.md already documents this). The
+  bug was load-bearing-invisible because the unit test PINNED the
+  broken string as expected, and no test runs the emitted commands
+  through the parser. For a tool whose value proposition is a
+  deterministic, reliable contract surface for agents, a broken
+  command in its own single entry point is the most important
+  finding — exactly the self-drift class P28 was opened to close.
+
+  Honest priority (reflects blast radius):
+
+    1. T1 — fix the emitted command + every pinned/documented copy.
+       The only currently-broken contract surface.
+    2. T2 — add the regression that the broken test masked: feed
+       every command `task prepare --json` returns back through the
+       built CLI and fail on any unsupported flag. This is the
+       structural fix; T1 alone would let the same bug class recur.
+    3. T3..T5 — consistency cleanup the same review surfaced:
+       README/getting-started/adapter guidance still teach the
+       pre-prepare loop as canonical; positioning/agent-contract
+       measurement baselines drifted from
+       design/measurements/summary.json; docs reference a P25
+       roadmap phase that design/roadmap.yaml does not enumerate.
+
+  Strictly scoped to contract truth. No new CLI surface, flag,
+  error code, or envelope-shape change: `commands.finalize` keeps
+  its single field (value changes from the invalid `--agent` form
+  to `--write --json`, matching the finalize line CLAUDE.md already
+  ships). The dry-run-first refinement stays documented in
+  docs/agent-contract.md, not encoded as a second command field.
+non_goals:
+  - Spec Kit Bridge v2 / P25 feature work (stays unstarted; this phase only
+    corrects how docs refer to it)
+  - read_refs / line-range context schema (P32 idea — deferred, stale-range cost
+    is a separate product bet)
+  - evidence harness reproducibility v2 (P30 idea — separate phase if pursued)
+  - new commands dict fields (no finalize_dry_run / finalize_write split; no
+    envelope-shape change)
+  - README positioning changes that name external OSS projects as comparison
+    targets (positioning is stated via code-pact's own role)
+  - any adapter architecture rewrite
+definition_of_done:
+  - "`code-pact task prepare <id> --agent <name> --json` returns a
+    `commands.finalize` the CLI parser accepts (no CONFIG_ERROR); no generated
+    or documented command says `task finalize <id> --agent <agent>` (P29-T1)"
+  - tests/unit/commands/task-prepare.test.ts expects the corrected finalize
+    string (P29-T1)
+  - docs/cli-contract.md task prepare commands example shows the corrected
+    finalize string (P29-T1)
+  - a new integration test runs every command from `task prepare --json` through
+    the built CLI and fails if any emits an "Unknown option" / CONFIG_ERROR; it
+    would have failed on the `--agent` bug (P29-T2)
+  - README / docs/getting-started.md / docs/ja/getting-started.md / generated
+    adapter guidance present `task prepare` as the primary per-task entry point;
+    `recommend` and `task context` are kept as diagnostic/fallback surfaces
+    (P29-T3)
+  - docs/positioning.md and docs/agent-contract.md measurement baseline tables
+    match design/measurements/summary.json (values + git SHA) (P29-T4)
+  - docs no longer imply a P25 roadmap phase is actively tracked; P25 references
+    describe an unstarted/future capability without asserting a roadmap entry
+    that design/roadmap.yaml lacks (P29-T5)
+  - CHANGELOG.md gains entries under `[Unreleased]` covering each P29 task
+verification:
+  commands:
+    - pnpm typecheck
+    - pnpm test
+    - pnpm build
+    - node dist/cli.js validate --json
+    - node dist/cli.js plan lint --strict --json
+    - node dist/cli.js adapter conformance --agent claude-code --json
+tasks:
+  - id: P29-T0
+    type: architecture
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: done
+    description: |
+      Phase registration.
+
+      Bootstraps the P29 phase itself:
+      - design/phases/P29-contract-truth.yaml (this file)
+      - design/roadmap.yaml gains a P29 entry (weight 8)
+      - CHANGELOG.md gains a P29-T0 entry under [Unreleased]
+
+      The phase YAML and roadmap.yaml updates are bootstrap
+      writes — protected paths under `plan lint --strict`, NOT
+      listed in this task's `writes:` block. Same precedent as
+      P21-T0 / P24-T0 / P26-T0 / P27-T0 / P28-T0.
+    reads:
+      - design/phases/P28-spec-conformance-remediation.yaml
+      - design/roadmap.yaml
+    writes:
+      - CHANGELOG.md
+    acceptance_refs:
+      - design/phases/P29-contract-truth.yaml
+  - id: P29-T1
+    type: feature
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: short
+    status: done
+    description: |
+      Fix the broken finalize command everywhere it appears.
+
+      Root: src/commands/task-prepare.ts `buildCommands()` emits
+      `code-pact task finalize ${taskId} --agent ${agent}`. The
+      finalize parser (src/cli/commands/task.ts) allows only
+      json / write / base-ref / audit-strict, so `--agent` raises
+      CONFIG_ERROR "Unknown option".
+
+      Change the emitted value to:
+        code-pact task finalize ${taskId} --write --json
+      matching the finalize line CLAUDE.md ships and surfacing the
+      JSON-only write_audit at the finalize boundary. Single field;
+      no envelope-shape change.
+
+      Fix the two copies that propagated the bug:
+      - tests/unit/commands/task-prepare.test.ts: the
+        "emits a fully-populated commands dictionary" expectation.
+      - docs/cli-contract.md: the task prepare commands example
+        block.
+
+      The CHANGELOG.md:2334 note ("No `--agent` flag: finalize is a
+      design/progress reconciliation command") is already correct
+      and is the cited authority — left unchanged.
+    depends_on:
+      - P29-T0
+    reads:
+      - src/commands/task-prepare.ts
+      - src/cli/commands/task.ts
+      - tests/unit/commands/task-prepare.test.ts
+      - docs/cli-contract.md
+    writes:
+      - src/commands/task-prepare.ts
+      - tests/unit/commands/task-prepare.test.ts
+      - docs/cli-contract.md
+      - CHANGELOG.md
+    acceptance_refs:
+      - design/phases/P29-contract-truth.yaml
+  - id: P29-T2
+    type: feature
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: done
+    description: |
+      Add the regression the pinned test masked.
+
+      Root cause of T1's bug: the only test of the commands
+      dictionary asserts an expected literal string; nothing runs
+      the emitted commands through the parser. A string typo or an
+      unsupported flag passes review.
+
+      New integration test
+      (tests/integration/task-prepare-commands-contract.test.ts):
+      - parser-contract layer: set up a temp project with a real
+        task, run `task prepare <id> --agent claude-code --json`,
+        and for EVERY value in `commands` run it verbatim through
+        the built CLI. Assert combined stdout+stderr does NOT
+        contain "Unknown option" (the strict parseArgs message,
+        mode-independent). This fails on `task finalize --agent`.
+      - lifecycle layer: walk start → complete → finalize using the
+        emitted commands; assert finalize reaches a finalize
+        outcome (would_finalize / finalized / already_finalized),
+        not CONFIG_ERROR. State-dependent errors
+        (TASK_FINALIZE_NOT_ELIGIBLE, VERIFICATION_FAILED) are
+        tolerated — only unsupported-flag failures fail the test.
+
+      Uses tests/helpers/cli.ts (createTempProject / run /
+      expectJsonOk). Deterministic, no network, no sleeps.
+    depends_on:
+      - P29-T1
+    reads:
+      - src/commands/task-prepare.ts
+      - tests/helpers/cli.ts
+      - tests/integration/e2e-workflow.test.ts
+    writes:
+      - tests/integration/task-prepare-commands-contract.test.ts
+      - CHANGELOG.md
+    acceptance_refs:
+      - design/phases/P29-contract-truth.yaml
+  - id: P29-T3
+    type: docs
+    ambiguity: low
+    risk: low
+    context_size: medium
+    write_surface: medium
+    verification_strength: medium
+    expected_duration: medium
+    status: done
+    description: |
+      Make `task prepare` the primary per-task loop in docs.
+
+      Agents read top-down; today README's 30-second tour and
+      docs/getting-started.md lead with
+      recommend → task context → task start → task complete and
+      mention `task prepare` only later (or not at all). The old
+      loop on top silently outlives the new entry point.
+
+      - README.md: 30-second tour and the "all three converge"
+        sentence lead with
+        `task prepare → task start → verify → task complete →
+        task finalize --write --json`. `recommend` / `task context`
+        stay shown as diagnostic/fallback surfaces, not removed.
+      - docs/getting-started.md + docs/ja/getting-started.md: same
+        primary-loop alignment.
+      - generated adapter guidance (templates/adapter instruction
+        sources): primary loop = `task prepare`; keep `recommend` /
+        `task context` as diagnostics. Add low-cost activation
+        rules to the agent instruction:
+          * user names a task id to implement → `task prepare`
+          * next_action.type === "wait_for_dependencies" → do not
+            implement; resolve deps / re-run prepare
+          * CONTEXT_OVER_BUDGET → do not widen context unasked;
+            report budget / task-split / minimum achievable bytes
+          * `task finalize --write` only after `task complete`
+      - Does NOT add external-OSS comparison framing.
+    depends_on:
+      - P29-T2
+    reads:
+      - README.md
+      - docs/getting-started.md
+      - docs/ja/getting-started.md
+      - docs/agent-contract.md
+    writes:
+      - README.md
+      - docs/getting-started.md
+      - docs/ja/getting-started.md
+      - CHANGELOG.md
+    acceptance_refs:
+      - design/phases/P29-contract-truth.yaml
+  - id: P29-T4
+    type: docs
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: done
+    description: |
+      Sync measurement baseline docs with the measured artifact.
+
+      design/measurements/summary.json (input_git_sha 5f61e3c) is
+      the source of truth; docs/positioning.md and
+      docs/agent-contract.md still quote the prior v1.13.1 (7743d4f)
+      baseline:
+        p50 22072→21052, p90 49654→49885, max 290791→306153,
+        SHA 7743d4f→5f61e3c.
+      Update both baseline tables to match summary.json exactly.
+
+      If a cheap guard (a small script asserting docs match
+      summary.json, runnable in CI) is feasible, add it; if it is
+      non-trivial, record it as a follow-up in CHANGELOG rather
+      than expanding this phase.
+    depends_on:
+      - P29-T3
+    reads:
+      - design/measurements/summary.json
+      - docs/positioning.md
+      - docs/agent-contract.md
+    writes:
+      - docs/positioning.md
+      - docs/agent-contract.md
+      - CHANGELOG.md
+    acceptance_refs:
+      - design/phases/P29-contract-truth.yaml
+  - id: P29-T5
+    type: docs
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: done
+    description: |
+      Clean P25 references.
+
+      RFC / P28 YAML / CHANGELOG describe "P25 (Spec Kit Bridge
+      v2)" as a roadmap item, but design/roadmap.yaml enumerates no
+      P25 — a source-of-truth inconsistency for a tool whose thesis
+      is design/ as source of truth.
+
+      Resolution (minimal, no phase stub): keep the references but
+      stop asserting a tracked phase id. Describe it as an
+      unstarted/future capability without implying design/roadmap
+      already lists it. Do NOT add a `planned` P25 phase stub
+      (overstates commitment to unscoped work).
+    depends_on:
+      - P29-T4
+    reads:
+      - design/decisions/spec-conformance-rfc.md
+      - design/roadmap.yaml
+      - CHANGELOG.md
+    writes:
+      - design/decisions/spec-conformance-rfc.md
+      - CHANGELOG.md
+    acceptance_refs:
+      - design/phases/P29-contract-truth.yaml

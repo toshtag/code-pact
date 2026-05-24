@@ -164,7 +164,7 @@ describe("runTaskPrepare — planned state", () => {
       start: "code-pact task start P1-T1 --agent claude-code",
       verify: "code-pact verify --phase P1 --task P1-T1",
       complete: "code-pact task complete P1-T1 --agent claude-code",
-      finalize: "code-pact task finalize P1-T1 --agent claude-code",
+      finalize: "code-pact task finalize P1-T1 --write --json",
     });
   });
 });

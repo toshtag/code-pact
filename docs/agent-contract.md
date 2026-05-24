@@ -251,18 +251,18 @@ and recomputes them on every harness run.
 
 | Metric | Definition | Baseline |
 |---|---|---|
-| Context pack p50 bytes | Per-task pack size, lower-median percentile across the dogfood corpus | 22072 |
-| Context pack p90 bytes | Per-task pack size, lower 90th percentile | 49654 |
-| Context pack max bytes | Largest single task's pack size | 290791 |
+| Context pack p50 bytes | Per-task pack size, lower-median percentile across the dogfood corpus | 21052 |
+| Context pack p90 bytes | Per-task pack size, lower 90th percentile | 49885 |
+| Context pack max bytes | Largest single task's pack size | 306153 |
 | First-pass verification rate | Percentage of `task complete` invocations whose declared verification passes on the first attempt | 100.0% |
-| Agent command adherence rate | Percentage of `done` tasks with at least one `started` event before the first `done` event AND no legacy `planned → done` shortcut | 81.8% |
+| Agent command adherence rate | Percentage of `done` tasks with at least one `started` event before the first `done` event AND no legacy `planned → done` shortcut | 82.4% |
 | Undeclared write rate | Files changed by a task whose paths are not covered by the task's declared `writes` globs | deferred ([rationale](../design/decisions/evidence-harness-v2-rfc.md#non-goals-out-of-scope-for-p26)) |
 | Adapter drift detection rate | Percentage of enabled agents where `adapter doctor` returns at least one error-severity issue | 0.0% |
 
 Source: [`design/measurements/summary.json`](../design/measurements/summary.json),
-measured against dogfood corpus git SHA `7743d4f` (v1.13.1
-release commit) with denominators `tasks_done: 88`,
-`tasks_total: 123`, `agents_enabled: 1`. Reproduce:
+measured against dogfood corpus git SHA `5f61e3c` (v1.13.3
+release-prep commit) with denominators `tasks_done: 90`,
+`tasks_total: 128`, `agents_enabled: 1`. Reproduce:
 `pnpm harness --corpus . --check`.
 
 These metrics evaluate the contract — they are not part of the

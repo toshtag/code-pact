@@ -153,31 +153,34 @@ code-pact task complete P1-T1 --agent claude-code
 タスクがひとつでもできれば、3つの経路はすべて同じ決定論的なループに合流します。エージェント（または人）がタスクごとに走らせる流れは次のとおりです。
 
 ```sh
-# A. タスクの実行計画を取得します — モデル tier・effort、context profile、
-#    planning が必要かどうか、preflight コマンド、budget profile が返ります。
-#    厳密に additive なので、必要のないフィールドは無視して構いません。
-code-pact recommend --phase P1 --task P1-T1 --json
+# A. タスクを prepare します — タスク単位の単一の入口です。1 回の呼び出しで
+#    現在の状態、実行推奨（モデル tier・effort、planning posture、budget）、
+#    コンテキストパックのメタデータ、構造化された next_action、そして次に
+#    実行すべき正確なコマンドの `commands` 辞書がまとめて返ります。
+code-pact task prepare P1-T1 --agent claude-code --json
 
-# B. Markdown のコンテキストパックを取得します（stdout、副作用なし）。
-#    内容は task の属性（context_size、ambiguity、write_surface）で
-#    自動的に変わります。
-code-pact task context P1-T1 --agent claude-code
-
-# C. ハンドオフやステータス表示に「誰が手をつけているか」を残すため、
+# B. ハンドオフやステータス表示に「誰が手をつけているか」を残すため、
 #    タスクの開始を記録します。
 code-pact task start P1-T1 --agent claude-code
 
-# D. タスクがブロックされた場合は、理由を明示的に記録します。
+# C. タスクがブロックされた場合は、理由を明示的に記録します。
 code-pact task block P1-T1 --reason "Waiting for review on PR #42"
 code-pact task resume P1-T1 --agent claude-code
 
-# E. 派生状態と全イベント履歴はいつでも参照できます。
+# D. 派生状態と全イベント履歴はいつでも参照できます。
 code-pact task status P1-T1 --json
 
-# F. 実装が終わったら完了をマークします。フェーズの verify コマンドが走り、
+# E. 実装が終わったら完了をマークします。フェーズの verify コマンドが走り、
 #    通れば `done` イベントが .code-pact/state/progress.yaml に追記されます。
 code-pact task complete P1-T1 --agent claude-code
+
+# F. design のステータスを `done` に整合させます。まず dry-run で write audit を
+#    確認し、その後 --write で適用します。
+code-pact task finalize P1-T1 --json
+code-pact task finalize P1-T1 --write --json
 ```
+
+`task prepare` が推奨の入口です。`recommend` と `task context` は単体の診断コマンドとして引き続き使えますが、`task prepare` は両者を内部で実行し、その結果（さらに next_action とコマンド辞書）を 1 つの envelope で返します。
 
 知っておくと役立つ不変条件がいくつかあります。
 

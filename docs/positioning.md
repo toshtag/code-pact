@@ -156,18 +156,18 @@ are recomputed on every harness run.
 
 | metric | value |
 |---|---|
-| `pack_size_p50_bytes` | 22072 |
-| `pack_size_p90_bytes` | 49654 |
-| `pack_size_max_bytes` | 290791 |
+| `pack_size_p50_bytes` | 21052 |
+| `pack_size_p90_bytes` | 49885 |
+| `pack_size_max_bytes` | 306153 |
 | `first_pass_verify_rate_percent` | 100.0 |
-| `lifecycle_adherence_rate_percent` | 81.8 |
+| `lifecycle_adherence_rate_percent` | 82.4 |
 | `adapter_drift_rate_percent` | 0.0 |
 | `undeclared_write_rate_status` | deferred ([rationale](../design/decisions/evidence-harness-v2-rfc.md#non-goals-out-of-scope-for-p26)) |
 
 Source: [`design/measurements/summary.json`](../design/measurements/summary.json),
-measured against dogfood corpus git SHA `7743d4f` (v1.13.1
-release commit) with denominators `tasks_done: 88`,
-`tasks_total: 123`, `agents_enabled: 1`. The ~18% non-adherence
+measured against dogfood corpus git SHA `5f61e3c` (v1.13.3
+release-prep commit) with denominators `tasks_done: 90`,
+`tasks_total: 128`, `agents_enabled: 1`. The ~18% non-adherence
 reflects historical tasks (mostly pre-v0.7) that used the
 legacy `planned → done` shortcut. The deferred
 undeclared-write-rate awaits a future phase that attributes

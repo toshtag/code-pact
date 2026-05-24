@@ -77,3 +77,6 @@ phases:
   - id: P28
     path: design/phases/P28-spec-conformance-remediation.yaml
     weight: 12
+  - id: P29
+    path: design/phases/P29-contract-truth.yaml
+    weight: 8
