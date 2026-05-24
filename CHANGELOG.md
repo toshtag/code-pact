@@ -15,6 +15,16 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ### P30 — Adapter contract hardening
 
+**P30 follow-up (test-only).** Added the end-to-end integration coverage
+the P30 DoD calls for but the initial PR left to unit tests + pass-case
+integration: a *violating* instruction (`task finalize ... --agent`,
+with the manifest sha re-synced so `file_checksum_match` does not mask
+it) now pins the full join through `runAdapterConformance` — below the
+hardening threshold it is an advisory failure (`compliant: true`, with
+the `adapter upgrade` remediation in `details`), and at the threshold the
+same violation is a required failure (`compliant: false`). No product
+behaviour change; no package version bump.
+
 **P30-T0.** Phase bootstrap. Continuation of P29: its root cause was that
 the contract surface handed to agents was not mechanically checked. P29
 closed the commands-dictionary gap with a parser roundtrip test; P30
