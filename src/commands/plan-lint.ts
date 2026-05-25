@@ -18,6 +18,12 @@ export type PlanLintResult = {
   errors: number;
   warnings: number;
   /**
+   * Visible issues that never affect the exit code (`affects_exit: false`).
+   * Counted separately from `warnings` so `--strict` semantics stay honest:
+   * these stay advisory even under `--strict`.
+   */
+  advisories: number;
+  /**
    * Every issue surfaced by the lenient loader plus the orchestrator,
    * regardless of hidden_by_default. Callers decide what to render.
    */
@@ -41,6 +47,9 @@ export async function runPlanLint(
   const exitRelevant = visible.filter(isExitRelevant);
   const errors = exitRelevant.filter((i) => i.severity === "error").length;
   const warnings = exitRelevant.filter((i) => i.severity === "warning").length;
+  // Visible but non-exit-relevant (e.g. P31 clarify advisories). Disjoint
+  // from errors/warnings, which only count exit-relevant issues.
+  const advisories = visible.filter((i) => !isExitRelevant(i)).length;
 
   const ok = strict ? errors + warnings === 0 : errors === 0;
 
@@ -48,6 +57,7 @@ export async function runPlanLint(
     ok,
     errors,
     warnings,
+    advisories,
     issues: visible,
     skippedChecks,
     includeQuality,
@@ -62,6 +72,7 @@ export function serializePlanLintData(
   return {
     errors: result.errors,
     warnings: result.warnings,
+    advisories: result.advisories,
     include_quality: result.includeQuality,
     strict: result.strict,
     skipped_checks: result.skippedChecks,
@@ -74,6 +85,8 @@ export function serializePlanLintData(
       ...(i.phase_id !== undefined ? { phase_id: i.phase_id } : {}),
       ...(i.task_id !== undefined ? { task_id: i.task_id } : {}),
       ...(i.details !== undefined ? { details: i.details } : {}),
+      ...(i.affects_exit === false ? { affects_exit: false } : {}),
+      ...(i.hidden_by_default === true ? { hidden_by_default: true } : {}),
     })),
   };
 }
@@ -84,6 +97,11 @@ export function summarizePlanLint(result: PlanLintResult): string {
   parts.push(
     `${result.warnings} warning${result.warnings === 1 ? "" : "s"}`,
   );
+  if (result.advisories > 0) {
+    parts.push(
+      `${result.advisories} advisor${result.advisories === 1 ? "y" : "ies"}`,
+    );
+  }
   if (result.skippedChecks.length > 0) {
     parts.push(
       `${result.skippedChecks.length} skipped check${result.skippedChecks.length === 1 ? "" : "s"}`,
@@ -98,7 +116,11 @@ export function formatPlanLintHuman(result: PlanLintResult): string {
   }
   const lines: string[] = [`plan lint: ${summarizePlanLint(result)}`];
   for (const issue of result.issues) {
-    const mark = issue.severity === "error" ? "[error]" : "[warn] ";
+    const mark = isExitRelevant(issue)
+      ? issue.severity === "error"
+        ? "[error]"
+        : "[warn] "
+      : "[advisory]";
     const loc = issue.file !== undefined ? ` ${issue.file}` : "";
     const path = issue.path !== undefined ? `:${issue.path}` : "";
     lines.push(`  ${mark} ${issue.code}${loc}${path} — ${issue.message}`);
