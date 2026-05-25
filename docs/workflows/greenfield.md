@@ -47,6 +47,8 @@ A greenfield project typically wants a **foundations phase first**, then **one f
 
 Weights are an annotated estimate, not a budget. 5–30 is the typical band per phase. Equal weights across phases is fine for a first pass.
 
+`plan prompt` asks the agent to annotate every task with `ambiguity`, `risk`, `context_size`, `write_surface`, and `verification_strength` (so `recommend` and the context pack can reason about each task) and to mark genuine uncertainty explicitly — `confidence: low` on a phase, `requires_decision: true` on a task — instead of guessing `medium`. After `phase import`, run `plan lint --include-quality`: it surfaces those markers as clarify advisories (`PHASE_CONFIDENCE_LOW`, `TASK_DECISION_UNRESOLVED`) for you to settle before relying on runbooks. They are advisories — visible, never failing `--strict`.
+
 ## When to keep the sample phase
 
 `code-pact init --sample-phase` writes an opt-in **sample phase** (`TUTORIAL`, v1.4+). Its id is reserved, so it never collides with your real `P1` — importing your generated roadmap is safe even if the sample phase is still present. Still, **delete it once `plan prompt` + `phase import` have produced your real phases**: it is tutorial-only scaffolding, not part of your roadmap. See [`docs/concepts/sample-phase.md`](../concepts/sample-phase.md) for the keep/rename/delete decision in full. If you only wanted to watch the loop run, prefer `code-pact tutorial` — it leaves nothing to delete.

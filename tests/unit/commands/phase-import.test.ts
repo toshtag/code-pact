@@ -766,7 +766,9 @@ describe("runPhaseImport — suggested_next_steps (P13-T4)", () => {
     );
     const result = await runPhaseImport({ cwd: dir, inputPath });
     const joined = result.suggested_next_steps.join("\n");
-    expect(joined).toMatch(/plan lint/);
+    expect(joined).toMatch(/plan lint --include-quality/);
+    expect(joined).toMatch(/clarify advisor(?:y|ies)/);
+    expect(joined).toContain("TASK_DECISION_UNRESOLVED");
     expect(joined).toMatch(/phase runbook P1/);
     expect(joined).toMatch(/task runbook P1-T1/);
   });

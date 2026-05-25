@@ -335,7 +335,10 @@ function buildSuggestedNextSteps(
     );
   }
 
-  steps.push("Run `code-pact plan lint --json` to validate the imported phase(s).");
+  steps.push(
+    "Run `code-pact plan lint --include-quality --json` to validate the imported phase(s) and surface any clarify advisories.",
+    "Review the clarify advisories `plan lint --include-quality` surfaces (TASK_DECISION_UNRESOLVED, PHASE_CONFIDENCE_LOW) before relying on phase/task runbooks — they mark deliberately-uncertain design a human should settle first.",
+  );
 
   // One runbook step per imported phase. Keep the suggestions tight when
   // many phases are imported by listing the id explicitly so the user can
