@@ -269,7 +269,6 @@ export function generateBriefMd(answers: BriefAnswers, locale: Locale): string {
 // ---------------------------------------------------------------------------
 
 export type BriefWizardMessages = {
-  collectBriefPrompt: string;
   whatPrompt: string;
   whoPrompt: string;
   differentiatorPrompt: string;
