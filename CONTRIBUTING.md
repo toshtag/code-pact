@@ -10,6 +10,21 @@
 
 Internal planning notes that are not meant for public consumption belong in `.local/` (gitignored).
 
+## Source layout
+
+The CLI is layered. When adding or changing a command, follow the layer that fits:
+
+| Layer | Path | Responsibility |
+| ----- | ---- | -------------- |
+| Dispatcher | `src/cli.ts` | Global flags, locale detection, the top-level `switch`, and the single-verb commands that have no subcommand surface (`init`, `tutorial`, `doctor`, `validate`, `recommend`, `verify`, `pack`, `progress`). |
+| CLI clusters | `src/cli/commands/<group>.ts` | One module per subcommand cluster (`adapter`, `task`, `plan`, `phase`, `spec`). Owns arg parsing, JSON envelopes, exit codes, and error-code mapping. Exports only its `cmd<Group>` entry; per-subcommand handlers stay private. |
+| Implementations | `src/commands/<verb>.ts` | The `run*` / `format*` functions the CLI layer calls. No `process.exit`, no argv parsing — return values, throw tagged errors. |
+| Domain logic | `src/core/` | Plan state, context packing, recommendation, adapters, schemas, locks. Pure logic, no CLI concerns. |
+| Shared utilities | `src/lib/` | Small cross-cutting helpers (`argv`, `tty`, `prompt`, `package-version`). |
+| Messages | `src/i18n/` | Locale message tables (`en-US`, `ja-JP`). |
+
+Rule of thumb: a new multi-subcommand verb gets a `src/cli/commands/<group>.ts` cluster; its logic lives in `src/commands/` and `src/core/`. Keep the CLI layer thin — parsing and presentation only.
+
 ## Commit style
 
 Conventional Commits. Examples:
