@@ -22,6 +22,10 @@ import {
   detectTaskAcceptanceRefNotFound,
 } from "./checks.ts";
 import { loadProtectedPaths } from "../rules/protected-paths.ts";
+import {
+  hasDecisionAdrForTaskId,
+  readDecisionAdrFiles,
+} from "../decisions/adr.ts";
 import type { PhaseEntry, PlanState } from "./state.ts";
 import { collectPlanArtifacts } from "./state.ts";
 import type { PlanIssue } from "./shared.ts";
@@ -33,9 +37,11 @@ const PLACEHOLDER_VERIFICATION_PATTERN = /^\s*(echo|true|noop)\b/i;
 export type LintOptions = {
   cwd: string;
   /**
-   * When true, runs subjective quality heuristics (WEAK_DOD,
-   * PLACEHOLDER_VERIFICATION). Off by default so CI pipelines do not
-   * fail on style judgments.
+   * When true, runs opt-in quality/readiness advisories (WEAK_DOD,
+   * PLACEHOLDER_VERIFICATION, TASK_DECISION_UNRESOLVED, PHASE_CONFIDENCE_LOW,
+   * TASK_DESCRIPTION_MISSING). Off by default so the base lint stays lean;
+   * the P31 advisories are also `affects_exit: false`, so they never fail
+   * `--strict` even when this is on.
    */
   includeQuality?: boolean;
 };
@@ -109,6 +115,11 @@ export async function runLint(opts: LintOptions): Promise<LintResult> {
   if (includeQuality) {
     issues.push(...detectWeakDoD(phases));
     issues.push(...detectPlaceholderVerification(phases));
+    // P31 clarify advisories. All `affects_exit: false` — they surface
+    // uncertainty for human review and never fail `--strict`.
+    issues.push(...(await detectUnresolvedDecision(opts.cwd, phases)));
+    issues.push(...detectLowConfidencePhase(phases));
+    issues.push(...detectMissingTaskDescription(phases));
   }
 
   return { issues, skippedChecks, includeQuality };
@@ -154,6 +165,97 @@ function detectPlaceholderVerification(phases: PhaseEntry[]): PlanIssue[] {
         });
       }
     });
+  }
+  return issues;
+}
+
+/**
+ * Clarify advisory: a task (or its phase) is marked `requires_decision`
+ * but no ADR resolves it yet. Shares `verify`'s resolution predicate via
+ * the `design/decisions/` helper, so what counts as "resolved" cannot
+ * diverge between lint and verify. Advisory (`affects_exit: false`): it
+ * surfaces the decision early (verify blocks completion later) without
+ * failing CI on a deliberately-unresolved design point.
+ */
+async function detectUnresolvedDecision(
+  cwd: string,
+  phases: PhaseEntry[],
+): Promise<PlanIssue[]> {
+  const issues: PlanIssue[] = [];
+  // Read design/decisions/ once for the whole lint run.
+  const adrEntries = await readDecisionAdrFiles(cwd);
+  for (const { phase, ref } of phases) {
+    for (const task of phase.tasks ?? []) {
+      const requiresDecision =
+        task.requires_decision === true || phase.requires_decision === true;
+      if (!requiresDecision) continue;
+      if (hasDecisionAdrForTaskId(adrEntries, task.id)) continue;
+      issues.push({
+        code: "TASK_DECISION_UNRESOLVED",
+        severity: "warning",
+        affects_exit: false,
+        message: `Task "${task.id}" requires a decision but has no ADR in design/decisions/ — add one (a .md whose name includes the task id) before implementation; verify will block completion until it exists.`,
+        file: ref.path,
+        phase_id: phase.id,
+        task_id: task.id,
+        path: "requires_decision",
+        details: {
+          source: task.requires_decision === true ? "task" : "phase",
+        },
+      });
+    }
+  }
+  return issues;
+}
+
+/**
+ * Clarify advisory: a phase is `confidence: low`. Nothing else consumes
+ * this field as a surfaced signal, so the advisory is the only place a
+ * reviewer is told to settle the design before driving the phase.
+ */
+function detectLowConfidencePhase(phases: PhaseEntry[]): PlanIssue[] {
+  const issues: PlanIssue[] = [];
+  for (const { phase, ref } of phases) {
+    if (phase.confidence === "low") {
+      issues.push({
+        code: "PHASE_CONFIDENCE_LOW",
+        severity: "warning",
+        affects_exit: false,
+        message: `Phase "${phase.id}" has confidence: low — review the design before treating its tasks as ready (split, clarify, or raise confidence once resolved).`,
+        file: ref.path,
+        phase_id: phase.id,
+        path: "confidence",
+      });
+    }
+  }
+  return issues;
+}
+
+/**
+ * Readiness advisory: a task has no description at all. Deterministic
+ * (empty/unset only — no subjective length floor) so it never fires on a
+ * terse-but-present description.
+ */
+function detectMissingTaskDescription(phases: PhaseEntry[]): PlanIssue[] {
+  const issues: PlanIssue[] = [];
+  for (const { phase, ref } of phases) {
+    for (const task of phase.tasks ?? []) {
+      if (
+        task.description === undefined ||
+        task.description.trim().length === 0
+      ) {
+        issues.push({
+          code: "TASK_DESCRIPTION_MISSING",
+          severity: "warning",
+          affects_exit: false,
+          message: `Task "${task.id}" has no description — add one sentence stating what the task changes and why.`,
+          file: ref.path,
+          phase_id: phase.id,
+          task_id: task.id,
+          path: "description",
+        });
+      }
+    }
   }
   return issues;
 }

@@ -88,6 +88,12 @@ const KNOWN_CODES: Record<string, "public" | "plan" | "doctor" | "adapter" | "in
   TASK_ID_PHASE_PREFIX: "plan",
   WEAK_DOD: "plan",
 
+  // Plan clarify/readiness advisories added in P31 (all affects_exit: false,
+  // surfaced under `plan lint --include-quality`).
+  PHASE_CONFIDENCE_LOW: "plan",
+  TASK_DECISION_UNRESOLVED: "plan",
+  TASK_DESCRIPTION_MISSING: "plan",
+
   // Plan diagnostics added in P10 — Task Readiness Schema. All emitted
   // by `plan lint` against the new optional task fields declared in
   // design/decisions/task-readiness-schema-rfc.md.
