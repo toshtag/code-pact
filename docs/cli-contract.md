@@ -121,6 +121,9 @@ Issue-level codes emitted by `plan lint` and `plan analyze` inside `data.issues[
 | `TASK_ID_PHASE_PREFIX` | warning | `plan lint` | Task id does not match `<phase>-T<N>` |
 | `WEAK_DOD` | warning | `plan lint --include-quality` | DoD entry is suspiciously short or contains `TODO`/`FIXME`/`tbd` |
 | `PLACEHOLDER_VERIFICATION` | warning | `plan lint --include-quality` | Verification command starts with `echo`/`true`/`noop` |
+| `TASK_DECISION_UNRESOLVED` (v1.17+, P31) | warning | `plan lint --include-quality` | A task (or its phase) is `requires_decision: true` but no ADR in `design/decisions/` resolves it (same predicate `verify` uses). Advisory: `affects_exit: false` — stays advisory even under `--strict`. `details.source` is `"task"` or `"phase"` |
+| `PHASE_CONFIDENCE_LOW` (v1.17+, P31) | warning | `plan lint --include-quality` | Phase is `confidence: low`. Advisory: `affects_exit: false` |
+| `TASK_DESCRIPTION_MISSING` (v1.17+, P31) | warning | `plan lint --include-quality` | Task has no description (empty/unset; no length floor). Advisory: `affects_exit: false` |
 | `STATUS_DRIFT` | error/warning | `plan analyze` | Design status disagrees with derived progress state (see `details.kind`) |
 | `PHASE_DONE_WITH_OPEN_TASKS` | error | `plan analyze` | Phase marked done but at least one task is still open |
 | `ORPHAN_PROGRESS_EVENT` | warning | `plan analyze`, `doctor` | Progress event references a `task_id` that does not exist in any phase |
@@ -557,13 +560,16 @@ Read-only static integrity check over `design/roadmap.yaml` and every referenced
 - `PHASE_ID_NAMING` (warning) — phase id does not match `P<N>`
 - `TASK_ID_PHASE_PREFIX` (warning) — task id does not match `<phase>-T<N>`
 
-**`--include-quality` (opt-in heuristics):**
+**`--include-quality` (opt-in quality/readiness advisories):**
 - `WEAK_DOD` (warning) — DoD bullets shorter than 10 chars or matching `/TODO|FIXME|tbd/i`
 - `PLACEHOLDER_VERIFICATION` (warning) — verification commands starting with `echo`, `true`, or `noop`
+- `TASK_DECISION_UNRESOLVED` (advisory, `affects_exit: false`) — a `requires_decision` task/phase with no resolving ADR in `design/decisions/`
+- `PHASE_CONFIDENCE_LOW` (advisory, `affects_exit: false`) — a `confidence: low` phase
+- `TASK_DESCRIPTION_MISSING` (advisory, `affects_exit: false`) — a task with no description
 
-Quality heuristics are intentionally off by default so `--strict` does not fail CI on subjective judgments.
+These are off by default so the base lint stays lean. `WEAK_DOD` and `PLACEHOLDER_VERIFICATION` are subjective heuristics; the three P31 codes are readiness advisories (surfacing uncertainty a human should settle).
 
-**`--strict` semantics (binary promotion).** When `--strict` is passed, **all** warnings — regardless of code — become exit-relevant. This includes P10's `TASK_WRITES_PROTECTED_PATH` advisory: a task that declares `writes: design/roadmap.yaml` is informational under default lint and exit-relevant under `--strict`. Selective per-code promotion ("promote only `TASK_WRITES_PROTECTED_PATH`, leave other warnings advisory") is **not** supported in v1.5+; it remains a P15+ candidate. Choose `--strict` when you want a fail-fast posture on any advisory; omit it when the project legitimately declares advisories you want to keep as warnings (e.g. governance tasks writing to design YAML files — see [`docs/dogfood.md` § Release prep](dogfood.md) for the dogfood corpus's posture).
+**`--strict` semantics (binary promotion).** When `--strict` is passed, **exit-relevant** warnings — regardless of code — become failures. Issues marked `affects_exit: false` (the P31 clarify/readiness advisories above, mirroring `plan analyze`'s `done-historical`) stay advisory even under `--strict`: they are visible in output and counted under `advisories`, but never change the exit code. Among exit-relevant warnings this includes P10's `TASK_WRITES_PROTECTED_PATH`: a task that declares `writes: design/roadmap.yaml` is informational under default lint and exit-relevant under `--strict`. Selective per-code promotion ("promote only `TASK_WRITES_PROTECTED_PATH`, leave other warnings advisory") is **not** supported in v1.5+; it remains a P15+ candidate. Choose `--strict` when you want a fail-fast posture on any exit-relevant advisory; omit it when the project legitimately declares advisories you want to keep as warnings (e.g. governance tasks writing to design YAML files — see [`docs/dogfood.md` § Release prep](dogfood.md) for the dogfood corpus's posture).
 
 **Configurable protected paths (v1.6+, P15-T3).** The list of patterns that trigger `TASK_WRITES_PROTECTED_PATH` is loaded from `design/rules/protected-paths.md` when the file is present. The file format is one glob per line (P10 supported subset), with `#` comments and blank lines ignored, and end-of-line `# ...` comments stripped. Malformed entries (unsafe paths, glob syntax outside the P10 subset) are silently skipped. When the file is **absent**, code-pact falls back to the hardcoded defaults (`.git/**`, `node_modules/**`, `.code-pact/**`, `design/roadmap.yaml`, `design/phases/*.yaml`) — v1.5 behaviour. When the file is **present but contains zero valid entries** (empty / comment-only / all malformed), the list is treated as explicit "no protected paths"; the loader does NOT silently revert to defaults. Delete the file to return to v1.5 behaviour.
 
@@ -579,6 +585,7 @@ Quality heuristics are intentionally off by default so `--strict` does not fail 
   "data": {
     "errors": 0,
     "warnings": 0,
+    "advisories": 0,
     "include_quality": false,
     "strict": false,
     "skipped_checks": [],
@@ -586,6 +593,8 @@ Quality heuristics are intentionally off by default so `--strict` does not fail 
   }
 }
 ```
+
+`warnings` counts only exit-relevant warnings. `advisories` (v1.17+) counts visible issues with `affects_exit: false` — these never change the exit code, even under `--strict`. Such issues carry `"affects_exit": false` inside their `data.issues[]` entry (the field is omitted for exit-relevant issues, mirroring `plan analyze`).
 
 **JSON shape (failure):**
 ```json
@@ -595,6 +604,7 @@ Quality heuristics are intentionally off by default so `--strict` does not fail 
   "data": {
     "errors": 1,
     "warnings": 0,
+    "advisories": 0,
     "include_quality": false,
     "strict": false,
     "skipped_checks": [],
