@@ -13,6 +13,39 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+## [1.17.1] — 2026-05-25
+
+### Internal: CLI cluster extraction + docs (no behavior change)
+
+**`src/cli.ts` shrinks from 2430 to 796 lines (−67%).** Continuing the
+P27 refactor (which moved the `adapter` and `task` clusters into
+`src/cli/commands/`), the three remaining multi-subcommand clusters are
+extracted into their own modules:
+
+- `src/cli/commands/plan.ts` — `plan brief|prompt|constitution|lint|normalize|analyze`
+- `src/cli/commands/phase.ts` — `phase add|new|ls|show|import|reconcile|runbook`
+- `src/cli/commands/spec.ts` — `spec import`
+
+`cli.ts` is now a thin dispatcher plus the single-verb commands that
+have no subcommand surface (`init`, `tutorial`, `doctor`, `validate`,
+`recommend`, `verify`, `pack`, `progress`). This is pure code movement:
+JSON envelopes, exit codes, error codes, and flag surfaces are
+byte-identical to v1.17.0. There is no change to any published command,
+flag, or output — patch-level, behavior-preserving.
+
+Also in this release:
+
+- **`CONTRIBUTING.md`** gains a "Source layout" table documenting the
+  dispatcher → CLI-wrapper → implementation → core layering, so the two
+  similarly named `commands` directories are no longer something a
+  reader has to infer.
+- **Evidence-harness metrics refreshed.** `design/measurements/` and the
+  baseline tables in `docs/agent-contract.md` / `docs/positioning.md`
+  are recomputed against the current dogfood corpus (SHA `28b4df1`,
+  144 tasks / 108 done), replacing the stale v1.13.3 snapshot. Context
+  pack p50 19275 B, p90 49555 B, max 314774 B; first-pass verify 100.0%;
+  lifecycle adherence 80.6%; adapter drift 0.0%.
+
 ## [1.17.0] — 2026-05-25
 
 ### Deterministic stabilization of AI-assisted roadmap generation (P31)
