@@ -51,10 +51,21 @@ describe("generatePlanningPrompt — en-US", () => {
     expect(prompt).toContain("tasks:");
   });
 
-  it("includes guidelines section", () => {
+  it("asks for the six per-task attributes recommend/lint run on", () => {
+    const prompt = generatePlanningPrompt(null, null, "en-US");
+    expect(prompt).toContain("ambiguity:");
+    expect(prompt).toContain("context_size:");
+    expect(prompt).toContain("write_surface:");
+    expect(prompt).toContain("verification_strength:");
+    expect(prompt).toContain("requires_decision:");
+  });
+
+  it("includes guidelines section with the uncertainty-marker guidance", () => {
     const prompt = generatePlanningPrompt(null, null, "en-US");
     expect(prompt).toContain("Guidelines");
     expect(prompt).toContain("3–7 phases");
+    expect(prompt).toContain("confidence: low");
+    expect(prompt).toContain("one task = one PR");
   });
 
   it("ends with a newline", () => {
@@ -81,6 +92,14 @@ describe("generatePlanningPrompt — ja-JP", () => {
     const prompt = generatePlanningPrompt(null, "原則: 明示より暗示", "ja-JP");
     expect(prompt).toContain("プロジェクト方針");
     expect(prompt).toContain("原則: 明示より暗示");
+  });
+
+  it("asks for per-task attributes and the uncertainty-marker guidance", () => {
+    const prompt = generatePlanningPrompt(null, null, "ja-JP");
+    expect(prompt).toContain("write_surface:");
+    expect(prompt).toContain("requires_decision:");
+    expect(prompt).toContain("confidence: low");
+    expect(prompt).toContain("1 タスク = 1 PR");
   });
 });
 
