@@ -50,7 +50,13 @@ phases:
     tasks:
       - id: P1-T1
         description: <task description>
-        type: feature | bugfix | refactor | docs | architecture | test`;
+        type: feature | bugfix | refactor | docs | architecture | test
+        ambiguity: low | medium | high
+        risk: low | medium | high
+        context_size: small | medium | large
+        write_surface: low | medium | high
+        verification_strength: weak | medium | strong
+        requires_decision: true | false`;
 
 // ---------------------------------------------------------------------------
 // Prompt generation
