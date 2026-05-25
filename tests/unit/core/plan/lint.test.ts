@@ -192,3 +192,136 @@ describe("runLint — quality heuristics", () => {
     expect(placeholder?.severity).toBe("warning");
   });
 });
+
+describe("runLint — P31 clarify advisories", () => {
+  const ROADMAP = `phases:\n  - id: P1\n    path: design/phases/P1.yaml\n    weight: 10\n`;
+
+  // A phase whose single task carries the given extra YAML lines. Phase-level
+  // fields (confidence, requires_decision) are templated via `phaseExtra`.
+  function phaseDoc(opts: {
+    confidence?: string;
+    phaseRequiresDecision?: boolean;
+    taskLines?: string[];
+  }): string {
+    const taskLines = opts.taskLines ?? [
+      "description: Implements the thing",
+    ];
+    return `id: P1
+name: P1
+weight: 10
+confidence: ${opts.confidence ?? "medium"}
+risk: low
+status: planned
+objective: An objective long enough
+${opts.phaseRequiresDecision ? "requires_decision: true\n" : ""}definition_of_done:
+  - DoD that is clearly long enough to read
+verification:
+  commands:
+    - pnpm test
+tasks:
+  - id: P1-T1
+    type: feature
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: planned
+${taskLines.map((l) => `    ${l}`).join("\n")}
+`;
+  }
+
+  async function writeAdr(name: string): Promise<void> {
+    await mkdir(join(cwd, "design", "decisions"), { recursive: true });
+    await writeFile(join(cwd, "design", "decisions", name), "x", "utf8");
+  }
+
+  it("reports TASK_DECISION_UNRESOLVED (source task) when requires_decision and no ADR", async () => {
+    await writeRoadmap(ROADMAP);
+    await writePhase(
+      "P1.yaml",
+      phaseDoc({ taskLines: ["description: x", "requires_decision: true"] }),
+    );
+
+    const result = await runLint({ cwd, includeQuality: true });
+    const issue = result.issues.find((i) => i.code === "TASK_DECISION_UNRESOLVED");
+    expect(issue).toBeDefined();
+    expect(issue?.affects_exit).toBe(false);
+    expect(issue?.task_id).toBe("P1-T1");
+    expect(issue?.details?.source).toBe("task");
+  });
+
+  it("does NOT report TASK_DECISION_UNRESOLVED once a matching ADR exists", async () => {
+    await writeRoadmap(ROADMAP);
+    await writePhase(
+      "P1.yaml",
+      phaseDoc({ taskLines: ["description: x", "requires_decision: true"] }),
+    );
+    await writeAdr("P1-T1-decision.md");
+
+    const result = await runLint({ cwd, includeQuality: true });
+    expect(
+      result.issues.some((i) => i.code === "TASK_DECISION_UNRESOLVED"),
+    ).toBe(false);
+  });
+
+  it("reports TASK_DECISION_UNRESOLVED (source phase) for a phase-level requires_decision", async () => {
+    await writeRoadmap(ROADMAP);
+    await writePhase(
+      "P1.yaml",
+      phaseDoc({ phaseRequiresDecision: true, taskLines: ["description: x"] }),
+    );
+
+    const result = await runLint({ cwd, includeQuality: true });
+    const issue = result.issues.find((i) => i.code === "TASK_DECISION_UNRESOLVED");
+    expect(issue).toBeDefined();
+    expect(issue?.details?.source).toBe("phase");
+  });
+
+  it("reports PHASE_CONFIDENCE_LOW for confidence: low, not for medium", async () => {
+    await writeRoadmap(ROADMAP);
+    await writePhase("P1.yaml", phaseDoc({ confidence: "low" }));
+    let result = await runLint({ cwd, includeQuality: true });
+    const low = result.issues.find((i) => i.code === "PHASE_CONFIDENCE_LOW");
+    expect(low).toBeDefined();
+    expect(low?.affects_exit).toBe(false);
+
+    await writePhase("P1.yaml", phaseDoc({ confidence: "high" }));
+    result = await runLint({ cwd, includeQuality: true });
+    expect(result.issues.some((i) => i.code === "PHASE_CONFIDENCE_LOW")).toBe(
+      false,
+    );
+  });
+
+  it("reports TASK_DESCRIPTION_MISSING when description is absent, not when present", async () => {
+    await writeRoadmap(ROADMAP);
+    // No extra task lines → description absent.
+    await writePhase("P1.yaml", phaseDoc({ taskLines: [] }));
+    let result = await runLint({ cwd, includeQuality: true });
+    const missing = result.issues.find(
+      (i) => i.code === "TASK_DESCRIPTION_MISSING",
+    );
+    expect(missing).toBeDefined();
+    expect(missing?.affects_exit).toBe(false);
+
+    await writePhase("P1.yaml", phaseDoc({ taskLines: ["description: present"] }));
+    result = await runLint({ cwd, includeQuality: true });
+    expect(
+      result.issues.some((i) => i.code === "TASK_DESCRIPTION_MISSING"),
+    ).toBe(false);
+  });
+
+  it("does NOT report any P31 advisory without --include-quality", async () => {
+    await writeRoadmap(ROADMAP);
+    await writePhase(
+      "P1.yaml",
+      phaseDoc({ confidence: "low", taskLines: ["requires_decision: true"] }),
+    );
+    const result = await runLint({ cwd });
+    const codes = result.issues.map((i) => i.code);
+    expect(codes).not.toContain("TASK_DECISION_UNRESOLVED");
+    expect(codes).not.toContain("PHASE_CONFIDENCE_LOW");
+    expect(codes).not.toContain("TASK_DESCRIPTION_MISSING");
+  });
+});
