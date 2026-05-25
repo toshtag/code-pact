@@ -144,7 +144,8 @@ function buildSuggestedNextSteps(
   steps.push(
     "Run the planning prompt above through your AI agent of choice (Claude, ChatGPT, etc.) and capture its YAML response into a file (e.g. `design/imports/p1.yaml`).",
     "Run `code-pact phase import design/imports/p1.yaml --json` to ingest the AI-generated YAML.",
-    "Run `code-pact plan lint --json` to validate the imported phase.",
+    "Run `code-pact plan lint --include-quality --json` to validate the imported phase and surface any clarify advisories.",
+    "Review and resolve the clarify advisories lint reports (TASK_DECISION_UNRESOLVED, PHASE_CONFIDENCE_LOW) before relying on runbooks for implementation planning — add an ADR under design/decisions/ for decision tasks (verify blocks completion without it), or raise the phase confidence once the design is settled.",
     "Run `code-pact phase runbook <imported-phase-id> --json` to see the recommended per-phase next steps.",
   );
   return steps;
