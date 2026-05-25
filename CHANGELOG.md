@@ -13,6 +13,35 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+## [1.16.0] — 2026-05-25
+
+### Init wizard simplification + documentation discoverability
+
+**Init wizard no longer prompts for a project brief.** The interactive
+`init` wizard previously asked whether to collect a project brief
+(what / who / differentiator) and wrote `design/brief.md`. That step only
+fed `plan prompt` (the AI-roadmap-generation prompt), its value depended
+entirely on the specificity of the input, and most users skipped it — so it
+added a decision to first-run without helping anyone who answered no. The
+prompt and its now-unused `collectBriefPrompt` i18n key are removed.
+`code-pact plan brief` is unchanged and still writes `design/brief.md` on
+demand.
+
+**Clearer init / adapter prompt wording.** The init adapter prompt and the
+`adapter` help line said "instruction ファイル" / "instruction files"; both
+now say "rule file / ルールファイル" consistently, resolving an
+English/Japanese mix in the Japanese locale. The brief prompt (now only on
+the standalone `plan brief` command) was reworded so "収集" no longer reads
+as auto-collection.
+
+**Documentation hub + Japanese workflow guides.** `docs/README.md` and
+`docs/ja/README.md` are new EN/JA documentation indexes (GitHub renders
+`docs/README.md` when browsing `docs/`). The greenfield and brownfield
+workflow guides — previously unreachable from the README — are now linked
+from the hub and from a one-line pointer in the README, and are translated
+into Japanese under `docs/ja/workflows/`. English pages gained EN→JA
+language switchers.
+
 ## [1.15.0] — 2026-05-24
 
 ### Onboarding UX — `tutorial` command + init prompt removal
