@@ -15,7 +15,7 @@ export const messages = {
     "  progress   show weighted progress against a baseline snapshot",
     "  pack       write a context pack file under .context/<agent>/",
     "  verify     run deterministic completion criteria",
-    "  adapter    generate or refresh per-agent instruction files",
+    "  adapter    generate or refresh per-agent rule files",
     "  recommend  suggest a model tier for a task",
     "  doctor     report project structure issues (human-friendly)",
     "  validate   check project validity for CI (exit 1 on errors, --strict for warnings)",
@@ -178,7 +178,7 @@ export const messages = {
       verifyCommandHint: "Press Enter to keep the default",
       verifyCustomOption: "Custom command…",
       generateAdaptersPrompt:
-        "Generate AI agent instruction files now? (CLAUDE.md / AGENTS.md etc.)",
+        "Generate AI agent rule files now? (CLAUDE.md / AGENTS.md etc.)",
       summary: (agents: string[], defaultAgent: string): string =>
         `Will initialize with agents: ${agents.join(", ")} (default: ${defaultAgent}).`,
       invalidChoice: "Invalid choice. Please try again.",
@@ -210,7 +210,7 @@ export const messages = {
       typePrompt: "Task type",
     },
     brief: {
-      collectBriefPrompt: "Collect a project brief? (creates design/brief.md)",
+      collectBriefPrompt: "Do you know what you're building? (creates design/brief.md)",
       whatPrompt: "What are you building? (1–3 sentences)",
       whoPrompt: "Who is it for? (primary users or stakeholders)",
       differentiatorPrompt: "What makes it different? (optional — press Enter to skip)",

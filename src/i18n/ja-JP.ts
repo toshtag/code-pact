@@ -15,7 +15,7 @@ export const messages = {
     "  progress   baseline に対する重み付き進捗を表示",
     "  pack       .context/<agent>/ に context pack ファイルを書き出し",
     "  verify     決定論的な完了条件を検証",
-    "  adapter    Agent 別の instruction ファイルを生成/更新",
+    "  adapter    Agent 別のルールファイルを生成/更新",
     "  recommend  タスクに適したモデル tier を提案",
     "  doctor     プロジェクト構造の問題を報告 (人間向け)",
     "  validate   CI 向けプロジェクト検証 (エラー時 exit 1、--strict で警告も対象)",
@@ -52,21 +52,27 @@ export const messages = {
     result: {
       init: (n: number): string =>
         `${n} 個のファイルを作成（project.yaml, roadmap.yaml, TUTORIAL フェーズ）`,
-      prepare: (state: string, next: string): string => `状態: ${state} · 次: ${next}`,
+      prepare: (state: string, next: string): string =>
+        `状態: ${state} · 次: ${next}`,
       started: "着手しました",
       blocked: (deps: string): string => `ブロック中 · 待機対象: ${deps}`,
-      completed: (n: number): string => `検証成功（${n} チェック）· done イベントを記録`,
+      completed: (n: number): string =>
+        `検証成功（${n} チェック）· done イベントを記録`,
       finalized: "同期完了",
     },
     done: "完了。サンドボックスは削除しました — あなたのプロジェクトには何も書き込んでいません。",
-    keptNote: (dir: string): string => `完了。サンドボックスを残しました: ${dir}`,
-    realNextSteps: "準備ができたら、自分のプロジェクトで `code-pact init` を実行してください。",
+    keptNote: (dir: string): string =>
+      `完了。サンドボックスを残しました: ${dir}`,
+    realNextSteps:
+      "準備ができたら、自分のプロジェクトで `code-pact init` を実行してください。",
   },
   phase: {
-    added: (id: string, path: string): string => `フェーズ "${id}" を ${path} に追加しました`,
+    added: (id: string, path: string): string =>
+      `フェーズ "${id}" を ${path} に追加しました`,
     duplicateId: (id: string): string =>
       `フェーズ "${id}" は既に存在します。別の ID を指定してください。`,
-    notFound: (id: string): string => `フェーズ "${id}" が roadmap.yaml に見つかりません。`,
+    notFound: (id: string): string =>
+      `フェーズ "${id}" が roadmap.yaml に見つかりません。`,
     noPhases: "フェーズがありません。",
     importDone: (
       phaseCount: number,
@@ -126,7 +132,9 @@ export const messages = {
       ): string => {
         const action = step.command ?? `手動: ${step.manual_action}`;
         const prefix = step.blocking ? "[blocking] " : "";
-        const safety = step.safety_note ? `\n      安全注意: ${step.safety_note}` : "";
+        const safety = step.safety_note
+          ? `\n      安全注意: ${step.safety_note}`
+          : "";
         const expected = step.expected_result
           ? `\n      期待結果: ${step.expected_result}`
           : "";
@@ -139,21 +147,24 @@ export const messages = {
       `ベースライン "${name}" が .code-pact/state/baselines/ に見つかりません。`,
   },
   pack: {
-    phaseNotFound: (id: string): string => `フェーズ "${id}" が roadmap.yaml に見つかりません。`,
+    phaseNotFound: (id: string): string =>
+      `フェーズ "${id}" が roadmap.yaml に見つかりません。`,
     taskNotFound: (taskId: string, phaseId: string): string =>
       `タスク "${taskId}" がフェーズ "${phaseId}" に見つかりません。`,
     written: (path: string, chars: number): string =>
       `コンテキストパックを ${path} に書き込みました (${chars} 文字)`,
   },
   verify: {
-    phaseNotFound: (id: string): string => `フェーズ "${id}" が roadmap.yaml に見つかりません。`,
+    phaseNotFound: (id: string): string =>
+      `フェーズ "${id}" が roadmap.yaml に見つかりません。`,
     taskNotFound: (taskId: string, phaseId: string): string =>
       `タスク "${taskId}" がフェーズ "${phaseId}" に見つかりません。`,
   },
   adapter: {
     agentNotFound: (name: string): string =>
       `エージェント "${name}" が見つかりません。先に "code-pact init --agent ${name}" を実行してください。`,
-    done: (name: string): string => `エージェント "${name}" のアダプターを生成しました。`,
+    done: (name: string): string =>
+      `エージェント "${name}" のアダプターを生成しました。`,
   },
   doctor: {
     healthy: "問題は見つかりませんでした。プロジェクトは健全です。",
@@ -161,7 +172,8 @@ export const messages = {
       `エラー ${errors} 件、警告 ${warnings} 件が見つかりました。`,
   },
   recommend: {
-    phaseNotFound: (id: string): string => `フェーズ "${id}" が roadmap.yaml に見つかりません。`,
+    phaseNotFound: (id: string): string =>
+      `フェーズ "${id}" が roadmap.yaml に見つかりません。`,
     taskNotFound: (taskId: string, phaseId: string): string =>
       `タスク "${taskId}" がフェーズ "${phaseId}" に見つかりません。`,
     agentNotFound: (name: string): string =>
@@ -178,7 +190,7 @@ export const messages = {
       verifyCommandHint: "そのままで良ければ Enter",
       verifyCustomOption: "カスタムコマンド…",
       generateAdaptersPrompt:
-        "AI エージェント用の instruction ファイルをいま生成しますか? (CLAUDE.md / AGENTS.md など)",
+        "AI エージェント用のルールファイルを生成しますか? (CLAUDE.md / AGENTS.md など)",
       summary: (agents: string[], defaultAgent: string): string =>
         `次の構成で初期化します: ${agents.join(", ")} (既定: ${defaultAgent})`,
       invalidChoice: "選択が不正です。もう一度入力してください。",
@@ -186,7 +198,8 @@ export const messages = {
       nextStepsHeader: "次のステップ:",
       nextStep1: "1. フェーズを作成する:        code-pact phase add",
       nextStep2: "2. タスクを追加する:          code-pact task add <phase-id>",
-      nextStep3: "3. Agent ワークフローを開始:  code-pact task context <task-id>",
+      nextStep3:
+        "3. Agent ワークフローを開始:  code-pact task context <task-id>",
       tutorialHint:
         "タスクの進め方を一度通しで見たいなら `code-pact tutorial` を実行してください（プロジェクトには何も書き込みません）。",
       samplePhaseHint:
@@ -210,10 +223,12 @@ export const messages = {
       typePrompt: "タスクの種類",
     },
     brief: {
-      collectBriefPrompt: "プロジェクト概要を収集しますか？ (design/brief.md を作成)",
+      collectBriefPrompt:
+        "何をつくるか決まっていますか？ (design/brief.md を作成)",
       whatPrompt: "何を作りますか？ (1〜3 文で)",
       whoPrompt: "誰のためですか？ (主なユーザーや関係者)",
-      differentiatorPrompt: "特徴的なところは何ですか？ (任意 — スキップするなら Enter)",
+      differentiatorPrompt:
+        "特徴的なところは何ですか？ (任意 — スキップするなら Enter)",
     },
     constitution: {
       descriptionPrompt:
@@ -223,15 +238,19 @@ export const messages = {
     },
   },
   plan: {
-    briefDone: (path: string): string => `プロジェクト概要を ${path} に書き出しました`,
+    briefDone: (path: string): string =>
+      `プロジェクト概要を ${path} に書き出しました`,
     briefSkipped: (path: string): string =>
       `${path} は既に存在します。上書きするには --force を使ってください。`,
-    constitutionDone: (path: string): string => `プロジェクト方針を ${path} に書き出しました`,
+    constitutionDone: (path: string): string =>
+      `プロジェクト方針を ${path} に書き出しました`,
     constitutionSkipped: (path: string): string =>
       `${path} は既に存在します。上書きするには --force を使ってください。`,
     promptClipboardCopied: "プロンプトをクリップボードにコピーしました。",
-    promptClipboardFailed: "クリップボードへのコピーに失敗しました (pbcopy/xclip コマンドが使えません)。",
-    promptNoBrief: "ヒント: 先に `code-pact plan brief` を実行してプロジェクト説明を追加してください。",
+    promptClipboardFailed:
+      "クリップボードへのコピーに失敗しました (pbcopy/xclip コマンドが使えません)。",
+    promptNoBrief:
+      "ヒント: 先に `code-pact plan brief` を実行してプロジェクト説明を追加してください。",
   },
   task: {
     added: (taskId: string, phaseId: string, path: string): string =>
@@ -291,8 +310,7 @@ export const messages = {
         drift_kind: string | null;
       }): string =>
         `  state: design=${summary.design_status}, derived=${summary.derived_state}${summary.drift_kind ? `, drift=${summary.drift_kind}` : ""}`,
-      noSteps:
-        "  (次の step はありません — タスクは整合しています)",
+      noSteps: "  (次の step はありません — タスクは整合しています)",
       step: (
         index: number,
         step: {
@@ -306,7 +324,9 @@ export const messages = {
       ): string => {
         const action = step.command ?? `手動: ${step.manual_action}`;
         const prefix = step.blocking ? "[blocking] " : "";
-        const safety = step.safety_note ? `\n      安全注意: ${step.safety_note}` : "";
+        const safety = step.safety_note
+          ? `\n      安全注意: ${step.safety_note}`
+          : "";
         const expected = step.expected_result
           ? `\n      期待結果: ${step.expected_result}`
           : "";
@@ -325,7 +345,7 @@ export const messages = {
       success: (taskId: string, reason: string): string =>
         `タスク "${taskId}" の blocked イベントを記録しました (reason: ${reason})。`,
       reasonRequired:
-        "task block には --reason \"<text>\" でブロック理由を指定する必要があります。",
+        'task block には --reason "<text>" でブロック理由を指定する必要があります。',
       invalidTransition: (taskId: string, current: string): string =>
         `状態 "${current}" からタスク "${taskId}" を block できません。block は started / resumed からのみ可能です。`,
     },
@@ -358,7 +378,8 @@ export const messages = {
         "計画上の判断は `design/decisions/` に記録する。",
         "完了条件は決定論的に検証できるものにする。",
       ],
-      editHint: "このファイルを編集して、プロジェクト固有の原則を反映させてください。",
+      editHint:
+        "このファイルを編集して、プロジェクト固有の原則を反映させてください。",
     },
     codingStyle: {
       header: "コーディングスタイルルール",
@@ -367,7 +388,8 @@ export const messages = {
         "コミットにコメントアウトしたコードを含めない。",
         "ファイルレベルのエクスポートのみ使用し、内部ヘルパーのバレル再エクスポートは避ける。",
       ],
-      editHint: "このファイルを編集または削除して、プロジェクトの規約に合わせてください。",
+      editHint:
+        "このファイルを編集または削除して、プロジェクトの規約に合わせてください。",
     },
     brief: {
       header: "プロジェクト概要",
@@ -402,12 +424,15 @@ export const messages = {
       editNotice:
         "「プロジェクト固有」とマークされたセクションを編集して、プロジェクトの規約を反映させてください。",
       workflowHeader: "タスクの進め方",
-      step0: "タスクを prepare する — タスク単位の単一の入口。1 回の呼び出しで現在の状態、実行推奨 (モデル階層、エフォート、計画姿勢、バジェット)、コンテキストパックのメタデータ、構造化された `next_action`、そして次に実行すべき正確なコマンドの `commands` 辞書がまとめて返る:",
+      step0:
+        "タスクを prepare する — タスク単位の単一の入口。1 回の呼び出しで現在の状態、実行推奨 (モデル階層、エフォート、計画姿勢、バジェット)、コンテキストパックのメタデータ、構造化された `next_action`、そして次に実行すべき正確なコマンドの `commands` 辞書がまとめて返る:",
       step0Detail:
         "`recommend` と `task context` は単体の診断コマンドとして引き続き使えるが、`task prepare` は両者を内部で実行して結果を 1 つの envelope で返す。以降のライフサイクルは返ってきた `commands` 辞書をそのまま使って進める。",
-      step1: "`task prepare` の外でコンテキストパックが必要な場合のみ、直接取得する (診断用 — `task prepare` は既にそのメタデータを返している):",
+      step1:
+        "`task prepare` の外でコンテキストパックが必要な場合のみ、直接取得する (診断用 — `task prepare` は既にそのメタデータを返している):",
       step2: "タスクを実装する。",
-      step3: "タスクを完了としてマークする。verify を実行し、成功すれば `done` イベントを `.code-pact/state/progress.yaml` に追記する:",
+      step3:
+        "タスクを完了としてマークする。verify を実行し、成功すれば `done` イベントを `.code-pact/state/progress.yaml` に追記する:",
       step3FailDetail:
         "verify が失敗した場合、このコマンドは exit 1 を返し progress.yaml は変更されません。",
       step3IdempotentDetail:
@@ -424,7 +449,8 @@ export const messages = {
         "このセクションを編集して、実際のプロジェクト規約を記述してください。",
       projectConventionsSource:
         "`design/constitution.md` と `design/rules/` が規約の source of truth です。",
-      projectConventionsDefault: "`design/rules/coding-style.md` のコーディングスタイルに従う。",
+      projectConventionsDefault:
+        "`design/rules/coding-style.md` のコーディングスタイルに従う。",
       agentContract: {
         // 見出し文字列は design/decisions/agent-contract-rfc.md により
         // ロケール横断で英語固定 (P16-T4 conformance regex が anchor として使う)。
@@ -443,11 +469,11 @@ export const messages = {
           "# plan brief: 3 つの相互排他的モード",
           "code-pact plan brief --from-file brief.yaml --json",
           "# または: cat brief.yaml | code-pact plan brief --stdin --json",
-          "# または: code-pact plan brief --what \"...\" --who \"...\" --differentiator \"...\" --json",
+          '# または: code-pact plan brief --what "..." --who "..." --differentiator "..." --json',
           "",
           "# plan constitution: 同じ 3 モード構造",
           "code-pact plan constitution --from-file constitution.yaml --json",
-          "# または: code-pact plan constitution --description \"...\" --principle \"...\" --principle \"...\" --json",
+          '# または: code-pact plan constitution --description "..." --principle "..." --principle "..." --json',
           "```",
           "",
           "タスクごと (v1.11+ 推奨入口: `task prepare`):",
