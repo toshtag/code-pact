@@ -83,3 +83,6 @@ phases:
   - id: P30
     path: design/phases/P30-adapter-contract-hardening.yaml
     weight: 8
+  - id: P31
+    path: design/phases/P31-deterministic-roadmap-stabilization.yaml
+    weight: 8
