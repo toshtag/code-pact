@@ -171,12 +171,21 @@ describe("runPlanPrompt — suggested_next_steps (P13-T4)", () => {
     expect(result.suggested_next_steps[0]).toMatch(/AI agent/);
   });
 
-  it("always includes the canonical 4-step AI-assisted planning sequence", async () => {
+  it("always includes the canonical AI-assisted planning sequence", async () => {
     const result = await runPlanPrompt({ cwd: tmpDir, locale: "en-US", clipboard: false });
     const joined = result.suggested_next_steps.join("\n");
     expect(joined).toMatch(/AI agent/);
     expect(joined).toMatch(/phase import/);
     expect(joined).toMatch(/plan lint/);
     expect(joined).toMatch(/phase runbook/);
+  });
+
+  it("wires clarify-advisory resolution before the runbook step", async () => {
+    const result = await runPlanPrompt({ cwd: tmpDir, locale: "en-US", clipboard: false });
+    const joined = result.suggested_next_steps.join("\n");
+    expect(joined).toMatch(/clarify advisor(?:y|ies)/);
+    expect(joined).toContain("TASK_DECISION_UNRESOLVED");
+    // lint is invoked with --include-quality so the advisories actually surface.
+    expect(joined).toContain("plan lint --include-quality");
   });
 });
