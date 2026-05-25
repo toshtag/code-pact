@@ -1,5 +1,7 @@
 # Getting started
 
+> 🌐 日本語版: [はじめに](ja/getting-started.md)
+
 This guide takes you from an empty project to a successful `task complete` in about thirty minutes. It documents **three onboarding paths** side by side so you can pick the one that matches how you want to build your roadmap.
 
 If you only want a sixty-second overview of what `code-pact` is, read the [README](../README.md) first.

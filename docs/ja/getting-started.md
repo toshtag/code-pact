@@ -2,7 +2,7 @@
 
 このドキュメントは、空のプロジェクトから最初の `task complete` を成功させるまでを約30分でたどるためのガイドです。ロードマップを立ち上げる方法は3つあり、それぞれを並べて説明します。自分のやり方に合うものを選んでください。
 
-> このリポジトリで日本語ドキュメントが用意されているのは現在この `getting-started.md` のみです。それ以外（README、`docs/cli-contract.md`、`docs/migration.md`、`docs/dogfood.md` など）はすべて英語が一次資料です。
+> 日本語で読めるドキュメントの一覧は [docs/ja/](README.md) にあります。現在この `getting-started.md` と [ワークフローガイド](workflows/greenfield.md)（ゼロから / 既存に導入）が日本語で用意されています。それ以外（`docs/cli-contract.md`、`docs/migration.md`、`docs/dogfood.md` など）は英語が一次資料です。
 >
 > 60秒で `code-pact` の概要だけ知りたい場合は、まず英語の [README](../../README.md) を読むことをおすすめします。
 
