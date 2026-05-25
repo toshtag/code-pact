@@ -13,6 +13,8 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+## [1.17.0] — 2026-05-25
+
 ### Deterministic stabilization of AI-assisted roadmap generation (P31)
 
 **The planning prompt now elicits the signals the tool runs on.** The
