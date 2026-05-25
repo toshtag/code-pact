@@ -1,13 +1,13 @@
 id: P31
-name: Deterministic roadmap-generation stabilization — make AI-assisted
-  planning elicit the signals the tool runs on, and surface uncertainty
-  deterministically
+name: Deterministic roadmap-generation stabilization — make AI-assisted planning
+  elicit the signals the tool runs on, and surface uncertainty deterministically
 weight: 8
 confidence: high
 risk: medium
-status: planned
-objective: |
+status: done
+objective: >
   The AI-assisted planning loop (`plan prompt` → `phase import` →
+
   `plan lint` → runbook) underuses the schema in two ways:
 
     1. The planning prompt's YAML example only shows id/description/type
@@ -21,10 +21,15 @@ objective: |
        code-pact's value does not absorb the place AI is least reliable.
 
   This phase closes both with zero schema additions: the prompt elicits
+
   six task attributes plus uncertainty markers, and `plan lint` gains
+
   three advisory checks that surface uncertainty without failing CI
+
   (`affects_exit: false`). The decision-resolution predicate is shared
+
   with `verify` so lint and verify can never diverge.
+
 
   Scope discipline (deliberately small, 5 tasks):
 
@@ -36,7 +41,8 @@ objective: |
     - T3 — prompt: six task attributes + uncertainty-marker guidelines.
     - T4 — wire the loop: next-steps + greenfield docs.
 
-  Design recorded in design/decisions/deterministic-roadmap-stabilization-rfc.md.
+  Design recorded in
+  design/decisions/deterministic-roadmap-stabilization-rfc.md.
 non_goals:
   - a hard `--clarify-strict` gate (deferred; add only if a real need appears)
   - any new schema fields (every attribute already exists as optional)
@@ -47,8 +53,8 @@ definition_of_done:
   - plan lint --include-quality surfaces TASK_DECISION_UNRESOLVED,
     PHASE_CONFIDENCE_LOW, and TASK_DESCRIPTION_MISSING as advisories
     (affects_exit false; they do not fail --strict)
-  - the ADR-resolution predicate is a single shared helper used by both
-    verify and lint, pinned by a characterization test
+  - the ADR-resolution predicate is a single shared helper used by both verify
+    and lint, pinned by a characterization test
   - plan lint --json emits affects_exit on advisory issues and a top-level
     advisories count; human output renders advisory lines as [advisory]
   - plan prompt asks for ambiguity, risk, context_size, write_surface,
@@ -73,7 +79,7 @@ tasks:
     write_surface: low
     verification_strength: medium
     expected_duration: short
-    status: planned
+    status: done
     description: |
       RFC + phase registration (bootstrap).
 
@@ -100,7 +106,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
     description: |
       Extract the ADR-resolution predicate into a shared helper and
       refactor verify onto it (behaviour-preserving).
@@ -129,7 +135,7 @@ tasks:
     write_surface: high
     verification_strength: strong
     expected_duration: long
-    status: planned
+    status: done
     description: |
       Three lint advisories + output contract.
 
@@ -167,7 +173,7 @@ tasks:
     write_surface: low
     verification_strength: medium
     expected_duration: short
-    status: planned
+    status: done
     description: |
       Prompt elicits six task attributes + uncertainty markers.
 
@@ -197,7 +203,7 @@ tasks:
     write_surface: medium
     verification_strength: medium
     expected_duration: short
-    status: planned
+    status: done
     description: |
       Wire the loop: next-steps + greenfield docs.
 
