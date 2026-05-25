@@ -6,6 +6,7 @@ import { Roadmap } from "../core/schemas/roadmap.ts";
 import { Phase } from "../core/schemas/phase.ts";
 import { Task } from "../core/schemas/task.ts";
 import { ProgressLog } from "../core/schemas/progress-event.ts";
+import { hasDecisionAdrForTaskId } from "../core/decisions/adr.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -191,8 +192,10 @@ async function checkDecision(
     };
   }
 
-  const hasAdr = entries.some((f) => f.endsWith(".md") && f.includes(taskId));
-  if (!hasAdr) {
+  // Shared predicate with plan lint's TASK_DECISION_UNRESOLVED advisory so
+  // verify and lint never diverge on what "resolved" means. The dir-existence
+  // distinction above is kept verify-side for its more specific reason.
+  if (!hasDecisionAdrForTaskId(entries, taskId)) {
     return {
       name: "decision",
       ok: false,
