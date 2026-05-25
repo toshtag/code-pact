@@ -13,6 +13,37 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+### Deterministic stabilization of AI-assisted roadmap generation (P31)
+
+**The planning prompt now elicits the signals the tool runs on.** The
+`plan prompt` YAML example previously showed only `id` / `description` /
+`type` for tasks, so AI-authored roadmaps omitted `ambiguity`, `risk`,
+`context_size`, `write_surface`, `verification_strength`, and
+`requires_decision` — `phase import` then defaulted them to `medium`, and
+attribute-driven `recommend` (tier / effort / budget) and context-pack rule
+selection barely fired on the exact path where they help most. The prompt
+now asks for all six per task, plus guidance to mark genuine uncertainty
+explicitly (`confidence: low` / `requires_decision: true`) instead of
+guessing `medium`, and to shape phases foundations → capabilities →
+stabilization (one task = one PR) — keeping the prompt and the greenfield
+docs in agreement.
+
+**`plan lint --include-quality` now surfaces uncertainty as advisories.**
+Three new checks — `TASK_DECISION_UNRESOLVED` (a `requires_decision` task or
+phase with no resolving ADR in `design/decisions/`), `PHASE_CONFIDENCE_LOW`,
+and `TASK_DESCRIPTION_MISSING` — ship as advisories (`affects_exit: false`):
+visible in `--include-quality` output and CI logs, but they never fail
+`--strict`. Resolving a design decision is human judgment, so the tool
+surfaces it rather than blocking. `TASK_DECISION_UNRESOLVED` reuses the same
+decision-resolution predicate as `verify` (a shared helper in
+`src/core/decisions/adr.ts`) so lint and verify can never diverge.
+
+**`plan lint` output gains an `advisories` count.** `plan lint --json` now
+emits `affects_exit` on advisory issues and a top-level `advisories` count;
+`warnings` continues to count only exit-relevant warnings, and human output
+renders advisory lines as `[advisory]` so it never shows "0 warnings" above
+visible advisory lines.
+
 ## [1.16.0] — 2026-05-25
 
 ### Init wizard simplification + documentation discoverability
