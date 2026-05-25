@@ -58,6 +58,8 @@ Contributors can also run from a clone with `pnpm link --global`, or install a l
 
 All three converge on the same per-task agent loop, entered through `task prepare` (`task prepare` → `task start` → implement → `verify` → `task complete` → `task finalize`). `recommend` and `task context` remain available as standalone diagnostics — `task prepare` surfaces both for you in one call.
 
+**Starting fresh, or adopting on an existing repo?** Two workflow guides cover each case — [greenfield](docs/workflows/greenfield.md) and [brownfield](docs/workflows/brownfield-feature.md). The full documentation index — including the Japanese docs — lives at [`docs/`](docs/README.md) ([日本語](docs/ja/README.md)).
+
 ## Reference docs
 
 | Doc | What it covers |
