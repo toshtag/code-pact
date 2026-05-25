@@ -210,7 +210,6 @@ export const messages = {
       typePrompt: "Task type",
     },
     brief: {
-      collectBriefPrompt: "Do you know what you're building? (creates design/brief.md)",
       whatPrompt: "What are you building? (1–3 sentences)",
       whoPrompt: "Who is it for? (primary users or stakeholders)",
       differentiatorPrompt: "What makes it different? (optional — press Enter to skip)",

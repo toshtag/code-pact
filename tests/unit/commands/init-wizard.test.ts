@@ -59,7 +59,7 @@ async function readProjectYaml(): Promise<{
 }
 
 // v1.15: the wizard no longer prompts for the sample phase. The prompt
-// sequence is: locale, agents, [default_agent], adapters, verify, brief.
+// sequence is: locale, agents, [default_agent], adapters, verify.
 // Sample-phase creation is opt-in only via `samplePhaseOverride` (the
 // `--sample-phase` CLI flag).
 
@@ -70,7 +70,6 @@ describe("runInitWizard — locale", () => {
       "1", // agents: Claude Code
       "n", // generate adapters: no
       "1", // verify: preset pnpm test
-      "n", // collect brief: no
     ]);
     await runInitWizard({ cwd: tmpDir, force: false, json: false, prompter });
     const project = await readProjectYaml();
@@ -83,7 +82,6 @@ describe("runInitWizard — locale", () => {
       "1", // agents: Claude Code
       "n", // adapters
       "1", // verify: preset pnpm test
-      "n", // brief
     ]);
     await runInitWizard({ cwd: tmpDir, force: false, json: false, prompter });
     const project = await readProjectYaml();
@@ -98,14 +96,13 @@ describe("runInitWizard — default_agent", () => {
       "1", // agents: just Claude Code
       "n", // adapters
       "1", // verify: preset pnpm test
-      "n", // brief
     ]);
     await runInitWizard({ cwd: tmpDir, force: false, json: false, prompter });
     const project = await readProjectYaml();
     expect(project.default_agent).toBe("claude-code");
     expect(project.agents).toHaveLength(1);
-    // 5 prompts total: locale, agents, adapters, verify, brief.
-    expect(reader.prompts).toHaveLength(5);
+    // 4 prompts total: locale, agents, adapters, verify.
+    expect(reader.prompts).toHaveLength(4);
   });
 
   it("asks default_agent when multiple agents are selected", async () => {
@@ -115,13 +112,12 @@ describe("runInitWizard — default_agent", () => {
       "2", // default_agent: Codex (second in selection)
       "n", // adapters
       "1", // verify: preset pnpm test
-      "n", // brief
     ]);
     await runInitWizard({ cwd: tmpDir, force: false, json: false, prompter });
     const project = await readProjectYaml();
     expect(project.default_agent).toBe("codex");
     expect(project.agents.map((a) => a.name)).toEqual(["claude-code", "codex"]);
-    expect(reader.prompts).toHaveLength(6);
+    expect(reader.prompts).toHaveLength(5);
   });
 });
 
@@ -132,7 +128,6 @@ describe("runInitWizard — verify command", () => {
       "1", // agents
       "n", // adapters
       "1", // verify: preset pnpm test
-      "n", // brief
     ]);
     // samplePhaseOverride forces creation so we can inspect the verify
     // command baked into the sample phase (the wizard no longer prompts).
@@ -157,7 +152,6 @@ describe("runInitWizard — verify command", () => {
       "n", // adapters
       "4", // verify: custom option (last entry)
       "vitest run", // verify: typed custom command
-      "n", // brief
     ]);
     await runInitWizard({
       cwd: tmpDir,
@@ -181,7 +175,6 @@ describe("runInitWizard — output routing", () => {
       "1", // agents
       "n", // adapters
       "1", // verify: preset pnpm test
-      "n", // brief
     ]);
     await runInitWizard({ cwd: tmpDir, force: false, json: false, prompter });
     const out = getOutput();
@@ -200,7 +193,6 @@ describe("runInitWizard — sample phase", () => {
       "1", // agents
       "n", // adapters
       "1", // verify: preset pnpm test
-      "n", // brief
     ]);
     const result = await runInitWizard({
       cwd: tmpDir,
@@ -219,13 +211,12 @@ describe("runInitWizard — sample phase", () => {
       "1", // agents
       "n", // adapters
       "1", // verify: preset pnpm test
-      "n", // brief
     ]);
     const result = await runInitWizard({ cwd: tmpDir, force: false, json: false, prompter });
     const phaseCreated = result.created.some((p) => p.includes("TUTORIAL-walkthrough.yaml"));
     expect(phaseCreated).toBe(false);
     // No sample-phase prompt is ever shown.
-    expect(reader.prompts).toHaveLength(5);
+    expect(reader.prompts).toHaveLength(4);
   });
 });
 
@@ -236,7 +227,6 @@ describe("runInitWizard — adapter generation", () => {
       "1", // agents: claude-code
       "y", // adapters: yes
       "1", // verify: preset pnpm test
-      "n", // brief
     ]);
     const result = await runInitWizard({ cwd: tmpDir, force: false, json: false, prompter });
     const claudeMdCreated = result.created.some((p) => p.endsWith("CLAUDE.md"));
@@ -249,7 +239,6 @@ describe("runInitWizard — adapter generation", () => {
       "1", // agents
       "n", // adapters: no
       "1", // verify: preset pnpm test
-      "n", // brief
     ]);
     const result = await runInitWizard({ cwd: tmpDir, force: false, json: false, prompter });
     const claudeMdCreated = result.created.some((p) => p.endsWith("CLAUDE.md"));
@@ -263,67 +252,11 @@ describe("runInitWizard — adapter generation", () => {
       "1", // default_agent: claude-code
       "y", // adapters: yes
       "1", // verify: preset pnpm test
-      "n", // brief
     ]);
     const result = await runInitWizard({ cwd: tmpDir, force: false, json: false, prompter });
     const hasClaude = result.created.some((p) => p.endsWith("CLAUDE.md"));
     const hasGeneric = result.created.some((p) => p.endsWith("agent-instructions.md"));
     expect(hasClaude).toBe(true);
     expect(hasGeneric).toBe(true);
-  });
-});
-
-describe("runInitWizard — project brief", () => {
-  it("creates design/brief.md when answered yes with content", async () => {
-    const { prompter } = makePrompter([
-      "1", // locale: en-US
-      "1", // agents: claude-code
-      "n", // adapters
-      "1", // verify: preset pnpm test
-      "y", // brief: yes
-      "A task management CLI", // what
-      "Developers", // who
-      "Integrates with AI agents", // differentiator
-    ]);
-    const result = await runInitWizard({ cwd: tmpDir, force: false, json: false, prompter });
-    const briefCreated = result.created.some((p) => p.endsWith("brief.md"));
-    expect(briefCreated).toBe(true);
-
-    const content = await readFile(join(tmpDir, "design", "brief.md"), "utf8");
-    expect(content).toContain("Project Brief");
-    expect(content).toContain("A task management CLI");
-    expect(content).toContain("Developers");
-    expect(content).toContain("Integrates with AI agents");
-  });
-
-  it("brief.md uses ja-JP locale when ja-JP is selected", async () => {
-    const { prompter } = makePrompter([
-      "2", // locale: 日本語
-      "1", // agents
-      "n", // adapters
-      "1", // verify: preset pnpm test
-      "y", // brief: yes
-      "タスク管理 CLI", // what
-      "開発者", // who
-      "", // differentiator: skip
-    ]);
-    await runInitWizard({ cwd: tmpDir, force: false, json: false, prompter });
-    const content = await readFile(join(tmpDir, "design", "brief.md"), "utf8");
-    expect(content).toContain("プロジェクト概要");
-    expect(content).toContain("タスク管理 CLI");
-    expect(content).toContain("(未記入)");
-  });
-
-  it("does not create design/brief.md when answered no", async () => {
-    const { prompter } = makePrompter([
-      "1", // locale
-      "1", // agents
-      "n", // adapters
-      "1", // verify: preset pnpm test
-      "n", // brief: no
-    ]);
-    const result = await runInitWizard({ cwd: tmpDir, force: false, json: false, prompter });
-    const briefCreated = result.created.some((p) => p.endsWith("brief.md"));
-    expect(briefCreated).toBe(false);
   });
 });

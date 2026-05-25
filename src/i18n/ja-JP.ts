@@ -223,8 +223,6 @@ export const messages = {
       typePrompt: "タスクの種類",
     },
     brief: {
-      collectBriefPrompt:
-        "何をつくるか決まっていますか？ (design/brief.md を作成)",
       whatPrompt: "何を作りますか？ (1〜3 文で)",
       whoPrompt: "誰のためですか？ (主なユーザーや関係者)",
       differentiatorPrompt:
