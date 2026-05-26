@@ -5,6 +5,10 @@
 **Owners:** maintainer
 **Related:** [design/decisions/task-readiness-schema-rfc.md](task-readiness-schema-rfc.md) (P10 — provides the `writes` and `acceptance_refs` fields P11 reads). [docs/migration.md § task complete records progress, but does NOT mutate design YAML](../../docs/migration.md) (the v1.0 contract P11 explicitly preserves).
 
+## Summary
+
+`task complete` records the operational fact in `progress.yaml` but deliberately never edits design intent, so a phase YAML's `status` field drifted until someone hand-edited it. This RFC adds `task finalize` (one task) and `phase reconcile` (a whole phase) to flip design `status` to `done` safely, plus a `remediation` hint on the existing `STATUS_DRIFT` warning. User-facing walkthrough: [docs/concepts/finalization-reconciliation.md](../../docs/concepts/finalization-reconciliation.md).
+
 ## Status lifecycle
 
 - This document opens at status **proposed** in PR1.

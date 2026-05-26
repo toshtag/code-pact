@@ -5,6 +5,10 @@
 **Owners:** maintainer
 **Related:** [design/decisions/task-readiness-schema-rfc.md](task-readiness-schema-rfc.md) (P10 — provides `writes` + `TASK_WRITES_PROTECTED_PATH`). [design/decisions/finalization-reconciliation-rfc.md](finalization-reconciliation-rfc.md) (P11 — provides `task finalize` / `phase reconcile` — the two commands that gain lock acquisition). [design/decisions/lightweight-runbook-rfc.md](lightweight-runbook-rfc.md) (P12 — defers task→phase resolver extraction to P14). [design/decisions/planning-ux-init-hardening-rfc.md](planning-ux-init-hardening-rfc.md) (P13 — introduces TUTORIAL sample-phase artifact; P14 hardens it via creation-time block).
 
+## Summary
+
+Before P14, nothing stopped two design-mutating commands from racing on the same files, `TUTORIAL` could be created as an ordinary phase, and the task→phase resolver was copy-pasted across commands. This RFC adds an **advisory write lock** (surfaced as the `LOCK_HELD` error code), **reserves the `TUTORIAL` phase id** at creation time, and **extracts the resolver** to one module — plus docs-only governance for protected paths, the declared-writes review surface, and the phase-status manual-flip convention. User-facing walkthrough: [docs/concepts/governance.md](../../docs/concepts/governance.md).
+
 ## Status lifecycle
 
 - This document opens at status **proposed** in PR1.
