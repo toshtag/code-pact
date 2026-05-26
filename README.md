@@ -31,7 +31,7 @@ code-pact validate                                       # CI-friendly health ch
 
 v1.0 freezes the public CLI surface — flags, exit codes, JSON envelope shapes, and error codes are stable across the v1.x line. The full stability taxonomy (`Stable (v1.0)` / `Stable (human-output)` / `Experimental` / `Deprecated`) lives in [`docs/cli-contract.md`](docs/cli-contract.md#stability-taxonomy-v10).
 
-Release notes live in [`CHANGELOG.md`](CHANGELOG.md). Migration guidance for projects upgrading from v0.6 / v0.7 / v0.8 / v0.9 lives in [`docs/migration.md`](docs/migration.md).
+Release notes live in [`CHANGELOG.md`](CHANGELOG.md). Upgrade guidance lives in [`docs/upgrading.md`](docs/upgrading.md) (within v1.x it is just a version bump; pre-v1.0 alpha notes are archived in [`docs/migration.md`](docs/migration.md)).
 
 ## Install
 
@@ -74,7 +74,7 @@ New to the terms used here (context pack, envelope, derived state, …)? The [`d
 | [`docs/agent-contract.md`](docs/agent-contract.md) | The v1.11+ agent contract: what `code-pact` guarantees, what `adapter conformance` requires of each agent integration, and the recommended per-task lifecycle. |
 | [`docs/getting-started.md`](docs/getting-started.md) | First-thirty-minutes guide (onboarding approaches + the per-task loop). |
 | [`docs/cli-contract.md`](docs/cli-contract.md) | Full flag / exit code / JSON envelope / error code reference and the Stability taxonomy. |
-| [`docs/migration.md`](docs/migration.md) | Upgrade guidance from any prior alpha (v0.6 – v0.9) to v1.0. |
+| [`docs/upgrading.md`](docs/upgrading.md) | How to upgrade — additive within v1.x; pointers for coming from a pre-v1.0 alpha. |
 | [`docs/troubleshooting.md`](docs/troubleshooting.md) | Diagnostic code → recovery action for the most common error codes. |
 | [`docs/dogfood.md`](docs/dogfood.md) | Real-project walkthrough — running `code-pact` on `code-pact` itself. |
 | [`docs/community.md`](docs/community.md) | Where to file issues / discussions / PRs, the GitHub Discussions intent, and the scope-discipline rule for the Non-goals list. |
