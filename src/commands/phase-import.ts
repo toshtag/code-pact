@@ -107,7 +107,7 @@ async function collectExistingTaskIds(cwd: string): Promise<Set<string>> {
  * if a canonical `verify_commands` is also present (in which case the
  * legacy block is silently ignored — the user should know).
  */
-function collectMisshapeWarnings(parsed: unknown): ImportWarning[] {
+export function collectMisshapeWarnings(parsed: unknown): ImportWarning[] {
   const warnings: ImportWarning[] = [];
   if (parsed === null || typeof parsed !== "object") return warnings;
   const phases = (parsed as { phases?: unknown }).phases;
@@ -212,8 +212,6 @@ export async function runPhaseImport(
   opts: PhaseImportOptions,
 ): Promise<PhaseImportResult> {
   const { cwd, inputPath } = opts;
-  const force = opts.force === true;
-  const strict = opts.strict === true;
 
   // ---- Read + schema-validate ------------------------------------------
   let raw: string;
@@ -229,6 +227,42 @@ export async function runPhaseImport(
     throw e;
   }
   const { input, warnings } = parseInput(raw);
+  return applyParsedPhaseImport({
+    cwd,
+    input,
+    warnings,
+    force: opts.force === true,
+    strict: opts.strict === true,
+  });
+}
+
+/**
+ * Options for {@link applyParsedPhaseImport}. Mirrors {@link PhaseImportOptions}
+ * but takes an already-parsed `PhaseImportInput` (plus any advisories
+ * collected while parsing) instead of a file path. Lets callers that build
+ * the input in memory — e.g. `plan adopt` — reuse the exact same validation
+ * and write pass without round-tripping through a temp file.
+ */
+export type ApplyParsedPhaseImportOptions = {
+  cwd: string;
+  input: PhaseImportInput;
+  /** Advisories to carry into the result (e.g. mis-shape warnings). */
+  warnings: ImportWarning[];
+  force?: boolean;
+  strict?: boolean;
+};
+
+/**
+ * The validation + write pass of `phase import`, operating on an
+ * already-parsed input. `runPhaseImport` is the file-reading wrapper around
+ * this; `plan adopt` calls it directly with an input it built in memory.
+ */
+export async function applyParsedPhaseImport(
+  opts: ApplyParsedPhaseImportOptions,
+): Promise<PhaseImportResult> {
+  const { cwd, input, warnings } = opts;
+  const force = opts.force === true;
+  const strict = opts.strict === true;
 
   // ---- Reserved-id preflight (P14 governance) -------------------------
   // Reject the entire import if ANY phase entry uses a reserved id (e.g.
