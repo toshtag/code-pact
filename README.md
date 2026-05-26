@@ -58,7 +58,9 @@ Contributors can also run from a clone with `pnpm link --global`, or install a l
 - **Code-pact-first** — capture a brief + constitution, then `plan prompt` and have your agent draft the full roadmap from them.
 - **Manual** — write the roadmap by hand with a mix of interactive wizards and flag-based commands.
 
-They all converge on the same per-task agent loop, entered through `task prepare` (`task prepare` → `task start` → implement → `verify` → `task complete` → `task finalize`). `recommend` and `task context` remain available as standalone diagnostics — `task prepare` surfaces both for you in one call.
+They all converge on the same per-task agent loop, entered through `task prepare` (`task prepare` → `task start` → implement → `verify` → `task complete` → `task finalize`). See [`docs/per-task-loop.md`](docs/per-task-loop.md) for the lifecycle diagram and a worked example. `recommend` and `task context` remain available as standalone diagnostics — `task prepare` surfaces both for you in one call.
+
+New to the terms used here (context pack, envelope, derived state, …)? The [`docs/glossary.md`](docs/glossary.md) defines them in plain language.
 
 **Starting fresh, or adopting on an existing repo?** Two workflow guides cover each case — [greenfield](docs/workflows/greenfield.md) and [brownfield](docs/workflows/brownfield-feature.md). The full documentation index — including the Japanese docs — lives at [`docs/`](docs/README.md) ([日本語](docs/ja/README.md)).
 
@@ -66,6 +68,8 @@ They all converge on the same per-task agent loop, entered through `task prepare
 
 | Doc | What it covers |
 | --- | --- |
+| [`docs/per-task-loop.md`](docs/per-task-loop.md) | The canonical per-task lifecycle — state diagram, the verbs, and a worked example. |
+| [`docs/glossary.md`](docs/glossary.md) | Plain-language definitions for every `code-pact` term used in the docs. |
 | [`docs/positioning.md`](docs/positioning.md) | What `code-pact` is, what it deliberately is not, the core CLI surfaces, and the success metrics the project measures itself against. |
 | [`docs/agent-contract.md`](docs/agent-contract.md) | The v1.11+ agent contract: what `code-pact` guarantees, what `adapter conformance` requires of each agent integration, and the recommended per-task lifecycle. |
 | [`docs/getting-started.md`](docs/getting-started.md) | First-thirty-minutes guide (onboarding approaches + the per-task loop). |

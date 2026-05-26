@@ -9,6 +9,8 @@ The fastest way in is [`getting-started.md`](getting-started.md) — empty proje
 | Doc | What it covers |
 | --- | --- |
 | [getting-started.md](getting-started.md) | First-thirty-minutes guide — onboarding approaches (smoke test / agent-first / plan adopt / code-pact-first / manual) and the per-task loop. |
+| [per-task-loop.md](per-task-loop.md) | The canonical per-task lifecycle — the state diagram, the verbs, and a worked example. |
+| [glossary.md](glossary.md) | Plain-language definitions for every code-pact term used in these docs. |
 | [positioning.md](positioning.md) | What code-pact is, what it deliberately is not, the core CLI surfaces, and the success metrics it measures itself against. |
 
 ## Workflows

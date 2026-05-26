@@ -4,7 +4,7 @@
 
 This guide takes you from an empty project to a successful `task complete` in about thirty minutes. It documents **several onboarding approaches** side by side so you can pick the one that matches how your roadmap comes into being.
 
-If you only want a sixty-second overview of what `code-pact` is, read the [README](../README.md) first.
+If you only want a sixty-second overview of what `code-pact` is, read the [README](../README.md) first. If a term here is unfamiliar (context pack, envelope, derived state, …), the [glossary](glossary.md) defines them in plain language.
 
 ## Prerequisites
 
@@ -275,7 +275,7 @@ code-pact adapter install claude-code
 
 ## The per-task agent loop
 
-Once you have at least one task, every path converges on the same deterministic loop. This is what an agent (or you) runs per task.
+Once you have at least one task, every path converges on the same deterministic loop. This is what an agent (or you) runs per task. [`docs/per-task-loop.md`](per-task-loop.md) is the canonical reference for this loop — the lifecycle diagram, every verb, and the invariants.
 
 ```sh
 # A. Prepare the task — the single per-task entry point. One call returns
