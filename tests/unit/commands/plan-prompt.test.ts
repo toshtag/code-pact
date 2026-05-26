@@ -47,8 +47,28 @@ describe("generatePlanningPrompt — en-US", () => {
     const prompt = generatePlanningPrompt(null, null, "en-US");
     expect(prompt).toContain("phases:");
     expect(prompt).toContain("definition_of_done:");
-    expect(prompt).toContain("verification:");
+    expect(prompt).toContain("verify_commands:");
     expect(prompt).toContain("tasks:");
+  });
+
+  it("uses the phase-import schema shape (verify_commands, NOT verification.commands)", () => {
+    // Regression guard for the v1.x schema mismatch: the example must use
+    // the flat `verify_commands` key that `phase import` actually reads,
+    // not the nested `verification:` block (the full Phase shape). When the
+    // two diverge, AI-generated YAML silently loses its verify commands.
+    const prompt = generatePlanningPrompt(null, null, "en-US");
+    expect(prompt).toContain("verify_commands:");
+    expect(prompt).not.toContain("verification:");
+  });
+
+  it("shows the full 8-value task type enum and lenient-default fields", () => {
+    const prompt = generatePlanningPrompt(null, null, "en-US");
+    // The actual TaskType enum has 8 values — the example must not under-list.
+    expect(prompt).toContain("mechanical_refactor");
+    expect(prompt).toContain("other");
+    // expected_duration / status are accepted by TaskImport; advertise them.
+    expect(prompt).toContain("expected_duration:");
+    expect(prompt).toContain("status:");
   });
 
   it("asks for the six per-task attributes recommend/lint run on", () => {

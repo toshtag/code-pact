@@ -26,12 +26,34 @@ export type CompletedField = {
   fields: string[];
 };
 
+/**
+ * Advisory surfaced by the import (never fails the command). The first
+ * use (PR1) is `PHASE_VERIFY_COMMANDS_MISSHAPED`: the input used the full
+ * Phase shape `verification: { commands: [...] }` instead of the import
+ * shape `verify_commands: [...]`. Because `PhaseImportEntry` is not
+ * `.strict()`, zod silently drops the unknown `verification` key — so the
+ * mis-shape is detected on the RAW parsed YAML before validation, never
+ * on the validated entry (where the evidence is already gone).
+ */
+export type ImportWarning = {
+  code: "PHASE_VERIFY_COMMANDS_MISSHAPED";
+  /** Phase id when the raw entry carried a string `id`, else undefined. */
+  phase_id?: string;
+  message: string;
+};
+
 export type PhaseImportResult = {
   imported_phases: PhaseRef[];
   imported_tasks: string[];
   skipped_phases: string[];
   /** Task fields that were filled with defaults (empty when --strict or no gaps). */
   completed_fields: CompletedField[];
+  /**
+   * Advisories surfaced from the input. Always present, even as [].
+   * Field-presence-fixed like `suggested_next_steps`: JSON consumers can
+   * assume the key exists. Never affects the exit code.
+   */
+  warnings: ImportWarning[];
   /**
    * Additive guidance (v1.4 P13-T4). Always present, even as []. Names
    * the canonical post-import sequence (plan lint → phase runbook → task
@@ -73,7 +95,46 @@ async function collectExistingTaskIds(cwd: string): Promise<Set<string>> {
   return ids;
 }
 
-function parseInput(raw: string): PhaseImportInput {
+/**
+ * Detect the `verification: { commands: [...] }` mis-shape on the RAW
+ * parsed YAML, BEFORE zod validation. `PhaseImportEntry` has no
+ * `.strict()`, so `PhaseImportInput.safeParse` silently strips the unknown
+ * `verification` key — inspecting the validated entry would never see it.
+ * This guard is the only place the evidence still exists, which is why it
+ * runs here and not on the parsed `PhaseImportInput`.
+ *
+ * Warns whenever a phase entry carries `verification.commands` at all, even
+ * if a canonical `verify_commands` is also present (in which case the
+ * legacy block is silently ignored — the user should know).
+ */
+function collectMisshapeWarnings(parsed: unknown): ImportWarning[] {
+  const warnings: ImportWarning[] = [];
+  if (parsed === null || typeof parsed !== "object") return warnings;
+  const phases = (parsed as { phases?: unknown }).phases;
+  if (!Array.isArray(phases)) return warnings;
+
+  for (const entry of phases) {
+    if (entry === null || typeof entry !== "object") continue;
+    const e = entry as Record<string, unknown>;
+    const verification = e.verification;
+    const hasLegacyCommands =
+      verification !== null &&
+      typeof verification === "object" &&
+      Array.isArray((verification as Record<string, unknown>).commands);
+    if (!hasLegacyCommands) continue;
+
+    const phaseId = typeof e.id === "string" ? e.id : undefined;
+    const label = phaseId ? `Phase "${phaseId}"` : "A phase entry";
+    const hasCanonical = e.verify_commands !== undefined;
+    const message = hasCanonical
+      ? `${label} declares both \`verify_commands\` and legacy \`verification.commands\`. \`verify_commands\` is canonical and will be used; the nested \`verification.commands\` is ignored.`
+      : `${label} uses \`verification.commands\` (the full Phase shape), which \`phase import\` does not read — it is ignored and the phase falls back to the default verify command. Use \`verify_commands\` (a flat top-level list) instead.`;
+    warnings.push({ code: "PHASE_VERIFY_COMMANDS_MISSHAPED", ...(phaseId !== undefined ? { phase_id: phaseId } : {}), message });
+  }
+  return warnings;
+}
+
+function parseInput(raw: string): { input: PhaseImportInput; warnings: ImportWarning[] } {
   let parsed: unknown;
   try {
     parsed = parseYaml(raw);
@@ -83,6 +144,8 @@ function parseInput(raw: string): PhaseImportInput {
     (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
     throw e;
   }
+  // Inspect the raw object BEFORE zod strips unknown keys.
+  const warnings = collectMisshapeWarnings(parsed);
   const result = PhaseImportInput.safeParse(parsed);
   if (!result.success) {
     const e = new Error(
@@ -91,7 +154,7 @@ function parseInput(raw: string): PhaseImportInput {
     (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
     throw e;
   }
-  return result.data;
+  return { input: result.data, warnings };
 }
 
 function applyTaskDefaults(raw: TaskImport): { task: Task; completedFields: string[] } {
@@ -165,7 +228,7 @@ export async function runPhaseImport(
     (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
     throw e;
   }
-  const input = parseInput(raw);
+  const { input, warnings } = parseInput(raw);
 
   // ---- Reserved-id preflight (P14 governance) -------------------------
   // Reject the entire import if ANY phase entry uses a reserved id (e.g.
@@ -306,6 +369,7 @@ export async function runPhaseImport(
     imported_tasks: importedTaskIds,
     skipped_phases: skippedPhaseIds,
     completed_fields: completedFieldsAll,
+    warnings,
     suggested_next_steps: buildSuggestedNextSteps(
       importedRefs,
       importedTaskIds,

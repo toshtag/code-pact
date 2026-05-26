@@ -42,20 +42,21 @@ phases:
     objective: <objective of this phase>
     confidence: low | medium | high
     risk: low | medium | high
+    verify_commands:
+      - <verification command>
     definition_of_done:
       - <done criterion>
-    verification:
-      commands:
-        - <verification command>
     tasks:
       - id: P1-T1
         description: <task description>
-        type: feature | bugfix | refactor | docs | architecture | test
+        type: feature | bugfix | refactor | docs | architecture | test | mechanical_refactor | other
         ambiguity: low | medium | high
         risk: low | medium | high
         context_size: small | medium | large
         write_surface: low | medium | high
         verification_strength: weak | medium | strong
+        expected_duration: short | medium | long
+        status: planned
         requires_decision: true | false`;
 
 // ---------------------------------------------------------------------------
