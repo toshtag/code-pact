@@ -67,32 +67,20 @@ code-pact init --non-interactive --agent claude-code --locale en-US --sample-pha
 
 > The interactive `init` wizard no longer asks whether to create the sample phase (removed in v1.15). Pass `--sample-phase` explicitly, or use `code-pact tutorial` above to just watch the loop. Pre-v1.4 `init --non-interactive` produced an empty roadmap with no sample phase.
 
-This writes the `TUTORIAL` phase into `design/`. v1.4+ ships two minimal tutorial tasks; TUTORIAL-T2 declares `depends_on: [TUTORIAL-T1]` so you can demo the dependency field + the `task runbook` blocking-step output. Then walk the loop by hand:
+This writes the `TUTORIAL` phase into `design/`. v1.4+ ships two minimal tutorial tasks; TUTORIAL-T2 declares `depends_on: [TUTORIAL-T1]` so you can demo the dependency field + the `task runbook` blocking-step output. Then walk [the per-task loop](per-task-loop.md) by hand (that page explains what each verb does):
 
 ```sh
-# 1. Fetch the markdown context pack and implement the first task.
+# TUTORIAL-T1: fetch context + implement, complete, then flip design status.
 code-pact task context TUTORIAL-T1 --agent claude-code
-
-# 2. After implementation, mark complete. This runs the phase's
-#    verify command and, on pass, appends a `done` event to
-#    .code-pact/state/progress.yaml. The design YAML's `status` field
-#    is NOT mutated by this command — that is the v1.0 contract.
 code-pact task complete TUTORIAL-T1 --agent claude-code
-
-# 3. (Optional, v1.2+) Flip the design YAML's `status` field to `done`
-#    so design intent matches the operational fact. Defaults to dry-run;
-#    pass --write to actually mutate the phase YAML. The bulk
-#    counterpart is `code-pact phase reconcile TUTORIAL --write`.
 code-pact task finalize TUTORIAL-T1 --write
 
-# 4. Repeat steps 1–3 for TUTORIAL-T2 (depends on TUTORIAL-T1 being done).
+# TUTORIAL-T2 depends on TUTORIAL-T1 — repeat once T1 is done.
 code-pact task context TUTORIAL-T2 --agent claude-code
 code-pact task complete TUTORIAL-T2 --agent claude-code
 code-pact task finalize TUTORIAL-T2 --write
 
-# (Optional, v1.3+) Anywhere in the loop, ask the CLI "what should I
-# do next?" instead of guessing. Read-only — runbook never executes
-# anything, it just returns the recommended sequence of commands.
+# Anywhere: ask the CLI "what should I do next?" — read-only, never executes.
 code-pact task runbook TUTORIAL-T2 --json   # per-task next steps
 code-pact phase runbook TUTORIAL --json     # per-phase next steps (histograms + reconcile candidate)
 ```
@@ -150,9 +138,7 @@ code-pact task add P1 \
 #    do this for you; this is the standalone command for later use.
 code-pact adapter install claude-code
 
-# 6. Per-task agent loop (described below).
-code-pact task context P1-T1 --agent claude-code
-code-pact task complete P1-T1 --agent claude-code
+# 6. Then run the per-task loop — see per-task-loop.md.
 ```
 
 Multi-word verification commands must be quoted, otherwise the trailing tokens raise `CONFIG_ERROR`:
@@ -207,7 +193,7 @@ code-pact plan prompt --schema-only
 # 3. Ingest the YAML deterministically.
 code-pact phase import draft-roadmap.yaml --json
 
-# 4. Install the adapter and enter the per-task loop (below).
+# 4. Install the adapter, then run the per-task loop (see per-task-loop.md).
 code-pact adapter install claude-code
 ```
 
@@ -238,9 +224,7 @@ code-pact phase import draft-roadmap.yaml --strict
 # 5. Install the adapter for the agent that will implement the tasks.
 code-pact adapter install claude-code
 
-# 6. Per-task agent loop (described below).
-code-pact task context P1-T1 --agent claude-code
-code-pact task complete P1-T1 --agent claude-code
+# 6. Then run the per-task loop — see per-task-loop.md.
 ```
 
 The lenient `phase import` mode is intentional. It lets the AI focus on getting `id`s right and trust `code-pact` to fill in the rest; you can audit the filled-in defaults in the JSON response or by running `code-pact plan lint --json`.
@@ -264,7 +248,7 @@ code-pact plan adopt roadmap.md --json
 # 3. Apply it (creates the phase(s) and tasks).
 code-pact plan adopt roadmap.md --write --json
 
-# 4. Validate, install the adapter, enter the per-task loop (below).
+# 4. Validate, install the adapter, then run the per-task loop (see per-task-loop.md).
 code-pact plan lint --include-quality --json
 code-pact adapter install claude-code
 ```
@@ -275,43 +259,13 @@ code-pact adapter install claude-code
 
 ## The per-task agent loop
 
-Once you have at least one task, every path converges on the same deterministic loop. This is what an agent (or you) runs per task. [`docs/per-task-loop.md`](per-task-loop.md) is the canonical reference for this loop — the lifecycle diagram, every verb, and the invariants.
+Once you have at least one task, every path converges on the same deterministic loop:
 
-```sh
-# A. Prepare the task — the single per-task entry point. One call returns
-#    the current state, the execution recommendation (model tier, effort,
-#    planning posture, budget), the context pack metadata, a structured
-#    next_action, and a `commands` dictionary with the exact next commands.
-code-pact task prepare P1-T1 --agent claude-code --json
-
-# B. Record that the task is started so handoff and status views know.
-code-pact task start P1-T1 --agent claude-code
-
-# C. If the task gets blocked, record why explicitly.
-code-pact task block P1-T1 --reason "Waiting for review on PR #42"
-code-pact task resume P1-T1 --agent claude-code
-
-# D. Inspect the derived state and full event history at any time.
-code-pact task status P1-T1 --json
-
-# E. After implementation, mark the task complete. This runs the phase's
-#    verify command and, on pass, appends a `done` event to
-#    .code-pact/state/progress.yaml.
-code-pact task complete P1-T1 --agent claude-code
-
-# F. Reconcile the design status to `done`. Run the dry-run first to
-#    inspect the write audit, then --write to apply.
-code-pact task finalize P1-T1 --json
-code-pact task finalize P1-T1 --write --json
+```text
+task prepare → task start → implement → verify → task complete → task finalize
 ```
 
-`task prepare` is the recommended entry point — `recommend` and `task context` remain available as standalone diagnostics, but `task prepare` runs both for you and returns their results (plus the next-action and command dictionary) in one envelope.
-
-A few invariants worth knowing:
-
-- `task start` and `task complete` are **idempotent** — re-running on a task that is already started / done returns `already_started: true` / `already_done: true`.
-- A `blocked` task cannot complete directly. `task complete` returns `INVALID_TASK_TRANSITION` until the task is resumed, so the `resume` event captures the unblock decision.
-- `task complete` records progress, but **does not mutate `design/`**. The design YAML is intent; `progress.yaml` is what actually happened. If they diverge, `code-pact plan analyze` reports a `STATUS_DRIFT` warning.
+[`docs/per-task-loop.md`](per-task-loop.md) is the canonical reference — the lifecycle diagram, every verb (and whether it records an event), a worked example, and the invariants (`start` / `complete` are idempotent; a `blocked` task cannot complete until resumed; `task complete` records progress but never mutates `design/`). `task prepare` is the entry point; `recommend` and `task context` remain available as standalone diagnostics that `task prepare` bundles for you.
 
 ## Optional task readiness fields (v1.1+)
 
