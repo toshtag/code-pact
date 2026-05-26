@@ -75,7 +75,8 @@ New to the terms used here (context pack, envelope, derived state, …)? The [`d
 | [`docs/getting-started.md`](docs/getting-started.md) | First-thirty-minutes guide (onboarding approaches + the per-task loop). |
 | [`docs/cli-contract.md`](docs/cli-contract.md) | Full flag / exit code / JSON envelope / error code reference and the Stability taxonomy. |
 | [`docs/migration.md`](docs/migration.md) | Upgrade guidance from any prior alpha (v0.6 – v0.9) to v1.0. |
-| [`docs/dogfood.md`](docs/dogfood.md) | Real-project walkthrough and troubleshooting for the most common error codes. |
+| [`docs/troubleshooting.md`](docs/troubleshooting.md) | Diagnostic code → recovery action for the most common error codes. |
+| [`docs/dogfood.md`](docs/dogfood.md) | Real-project walkthrough — running `code-pact` on `code-pact` itself. |
 | [`docs/community.md`](docs/community.md) | Where to file issues / discussions / PRs, the GitHub Discussions intent, and the scope-discipline rule for the Non-goals list. |
 
 ## Supported agents

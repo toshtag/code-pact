@@ -46,5 +46,6 @@ Pick the guide that matches where you're starting from. Both defer to `getting-s
 
 | Doc | What it covers |
 | --- | --- |
-| [dogfood.md](dogfood.md) | Real-project walkthrough and troubleshooting for the most common error codes. |
+| [troubleshooting.md](troubleshooting.md) | Diagnostic code → recovery action for the most common error codes. |
+| [dogfood.md](dogfood.md) | Real-project walkthrough — running code-pact on code-pact itself. |
 | [community.md](community.md) | Where to file issues / discussions / PRs and the scope-discipline rule for the Non-goals list. |
