@@ -264,6 +264,7 @@ async function cmdPlanPrompt(
     args: argv,
     options: {
       clipboard: { type: "boolean" },
+      "schema-only": { type: "boolean" },
       json: { type: "boolean" },
     },
     strict: false,
@@ -272,9 +273,10 @@ async function cmdPlanPrompt(
 
   const json = globalJson || values.json === true;
   const clipboard = values.clipboard === true;
+  const schemaOnly = values["schema-only"] === true;
   const cwd = process.cwd();
 
-  const result = await runPlanPrompt({ cwd, locale, clipboard });
+  const result = await runPlanPrompt({ cwd, locale, clipboard, schemaOnly });
 
   if (json) {
     process.stdout.write(
@@ -282,6 +284,7 @@ async function cmdPlanPrompt(
         ok: true,
         data: {
           prompt: result.prompt,
+          schema_only: result.schemaOnly,
           has_brief: result.hasBrief,
           has_constitution: result.hasConstitution,
           clipboard_copied: result.clipboardCopied,
@@ -296,7 +299,9 @@ async function cmdPlanPrompt(
   process.stdout.write(result.prompt);
   if (!result.prompt.endsWith("\n")) process.stdout.write("\n");
 
-  if (!result.hasBrief) {
+  // Schema-only deliberately ignores the brief, so the "no brief" nudge
+  // would be noise — suppress it in that mode.
+  if (!result.schemaOnly && !result.hasBrief) {
     process.stderr.write(`${m.plan.promptNoBrief}\n`);
   }
   if (clipboard) {

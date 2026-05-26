@@ -391,13 +391,25 @@ export const messages = {
         "Assign 3–8 tasks per phase.",
         "Total weight across all phases should be approximately 100.",
         "confidence reflects design certainty; risk reflects implementation difficulty.",
-        "verification.commands must be real, runnable shell commands (e.g. pnpm test).",
+        "verify_commands must be real, runnable shell commands (e.g. pnpm test).",
         "Annotate every task with ambiguity, risk, context_size, write_surface, and verification_strength so downstream recommend/lint can reason about it.",
         "Do NOT guess your way to 'medium'. Where the design is genuinely uncertain or you assumed something, mark it explicitly: set the phase's confidence: low and the task's requires_decision: true rather than picking a middle value to look complete.",
         "Order phases foundations → capabilities → stabilization: a foundations phase first (heavy on type: architecture), then one phase per externally-observable capability (type: feature dominates), then a stabilization phase before any release (type: test / type: docs dominate).",
         "Scope each task so it maps to a single PR (one task = one PR). Phase weights are estimates, not budgets — 5–30 is the typical band per phase.",
         "Output ONLY the YAML — no explanation text before or after.",
       ],
+      schemaOnly: {
+        intro:
+          "Output a code-pact roadmap as YAML in exactly the format below. Your project context is already in this session — this prompt only fixes the output shape, so re-use the plan you already have rather than inventing a new one.",
+        rulesHeader: "Output Rules",
+        rules: [
+          "Output ONLY the YAML document — no surrounding prose, and no Markdown code fences.",
+          "The top-level key must be `phases:` (an array of phase objects).",
+          "Use `verify_commands` (a flat list of real, runnable shell commands, e.g. pnpm test) — NOT the nested `verification:` block.",
+          "Annotate every task with ambiguity, risk, context_size, write_surface, and verification_strength.",
+          "Where the design is genuinely uncertain, mark it explicitly: set the phase's confidence: low and the task's requires_decision: true instead of defaulting to medium.",
+        ],
+      },
     },
     adapterCommon: {
       managedNotice:

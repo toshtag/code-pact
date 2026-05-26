@@ -162,6 +162,53 @@ describe("CLI: plan prompt", () => {
     expect(res.stdout.trimStart().startsWith("{")).toBe(false);
   });
 
+  it("plan prompt --schema-only --json returns {ok:true,data:{schema_only:true}} exit 0", () => {
+    const res = run(["plan", "prompt", "--schema-only", "--json"]);
+    expect(res.code).toBe(0);
+    const parsed = JSON.parse(res.stdout) as {
+      ok: boolean;
+      data: {
+        prompt: string;
+        schema_only: boolean;
+        has_brief: boolean;
+        suggested_next_steps: string[];
+      };
+    };
+    expect(parsed.ok).toBe(true);
+    expect(parsed.data.schema_only).toBe(true);
+    expect(parsed.data.prompt).toContain("verify_commands:");
+    expect(parsed.data.prompt).toContain("phases:");
+    expect(parsed.data.suggested_next_steps.length).toBeGreaterThan(0);
+  });
+
+  it("plan prompt --schema-only ignores design/brief.md even when present", async () => {
+    run(["init", "--non-interactive", "--locale", "en-US", "--agent", "claude-code", "--json"]);
+    await mkdir(join(tmpDir, "design"), { recursive: true });
+    await writeFile(
+      join(tmpDir, "design", "brief.md"),
+      "# Brief\n\nSCHEMA_ONLY_LEAK_CHECK content.\n",
+    );
+    const res = run(["plan", "prompt", "--schema-only", "--json"]);
+    expect(res.code).toBe(0);
+    const parsed = JSON.parse(res.stdout) as {
+      ok: boolean;
+      data: { schema_only: boolean; has_brief: boolean; prompt: string };
+    };
+    expect(parsed.data.schema_only).toBe(true);
+    expect(parsed.data.has_brief).toBe(false);
+    expect(parsed.data.prompt).not.toContain("SCHEMA_ONLY_LEAK_CHECK");
+  });
+
+  it("plan prompt --json includes schema_only:false in normal mode (additive field)", () => {
+    const res = run(["plan", "prompt", "--json"]);
+    expect(res.code).toBe(0);
+    const parsed = JSON.parse(res.stdout) as {
+      ok: boolean;
+      data: { schema_only: boolean };
+    };
+    expect(parsed.data.schema_only).toBe(false);
+  });
+
   it("plan prompt rejects unknown options with parseArgs strict:false behaviour (tolerant)", () => {
     // plan prompt currently uses parseArgs strict:false, so unknown flags
     // are quietly ignored. This test pins that behaviour so the v1.0

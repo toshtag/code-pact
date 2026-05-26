@@ -412,13 +412,25 @@ export const messages = {
         "各フェーズに 3〜8 個のタスクを割り当てる。",
         "全フェーズの weight 合計は目安として 100 前後にする。",
         "confidence は設計の確度、risk は実装難易度を反映する。",
-        "verification.commands は実際に実行できるシェルコマンドにする（例: pnpm test）。",
+        "verify_commands は実際に実行できるシェルコマンドにする（例: pnpm test）。",
         "各タスクに ambiguity / risk / context_size / write_surface / verification_strength を必ず付け、後段の recommend・lint が判断できるようにする。",
         "推測で 'medium' に逃げない。設計が本当に不確実な箇所や前提を置いた箇所は、中間値で体裁を整えず、フェーズの confidence: low とタスクの requires_decision: true で明示する。",
         "フェーズは 基盤 → 能力 → 安定化 の順に並べる。最初に基盤フェーズ（type: architecture 中心）、次に外部から観測できる能力ごとに 1 フェーズ（type: feature 中心）、最後にリリース前の安定化フェーズ（type: test / type: docs 中心）。",
         "各タスクは 1 つの PR に収まる粒度にする（1 タスク = 1 PR）。フェーズの weight は予算ではなく見積もりで、1 フェーズあたり 5〜30 が目安。",
         "出力は YAML のみとし、前後に説明文を含めない。",
       ],
+      schemaOnly: {
+        intro:
+          "以下の形式どおりに code-pact ロードマップを YAML で出力してください。プロジェクトの文脈はこのセッションに既にあります。このプロンプトは出力形式だけを固定するものなので、新たに考え直さず手元の計画をそのまま使ってください。",
+        rulesHeader: "出力ルール",
+        rules: [
+          "出力は YAML ドキュメントのみ。前後の説明文も Markdown のコードフェンスも付けない。",
+          "トップレベルのキーは `phases:`（フェーズオブジェクトの配列）にする。",
+          "ネストした `verification:` ブロックではなく `verify_commands`（実行可能なシェルコマンドのフラットな配列、例: pnpm test）を使う。",
+          "各タスクに ambiguity / risk / context_size / write_surface / verification_strength を必ず付ける。",
+          "設計が本当に不確実な箇所は中間値で逃げず、フェーズの confidence: low とタスクの requires_decision: true で明示する。",
+        ],
+      },
     },
     adapterCommon: {
       managedNotice:

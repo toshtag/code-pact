@@ -498,11 +498,13 @@ On success, `--json` emits `{ ok: true, data: { path: "..." } }` (same envelope 
 
 `source: "stdin"` replaces `--from-file`'s `path` field, so consumers can disambiguate the two input modes from the envelope alone. The `unsafe_path` and `unreadable` details do not apply (stdin has no path). `--stdin` is partial-write-safe: any failure yields no write to `design/brief.md`.
 
-### `plan prompt [--clipboard]`
+### `plan prompt [--clipboard] [--schema-only]`
 
 Reads `design/brief.md` and `design/constitution.md` (both optional), assembles a structured AI planning prompt, and writes it to stdout. Add `--clipboard` to also copy to the clipboard (via `pbcopy` on macOS or `xclip` on Linux). Does not require a TTY.
 
-JSON output includes `has_brief`, `has_constitution`, and `clipboard_copied` flags alongside the prompt string.
+JSON output includes `schema_only`, `has_brief`, `has_constitution`, and `clipboard_copied` flags alongside the prompt string.
+
+**`--schema-only` (v1.x+).** Emits only the YAML format example plus terse output rules — no brief/constitution sections, and `design/brief.md` / `design/constitution.md` are **not read** (`has_brief` / `has_constitution` are always `false`). For agents that already hold the project context in-session and only need the output shape fixed: ask the agent to emit YAML in that format, save it, and `phase import` it. The rules direct the agent to output raw YAML (no Markdown fences) with a top-level `phases:` key using the canonical `verify_commands` field. `data.schema_only` is `true`; `suggested_next_steps` points straight at the import → lint → runbook loop (no brief/constitution capture hint). `data.schema_only` is `false` in normal mode — the field is always present (additive).
 
 **v1.4+ additive field** — `data.suggested_next_steps: string[]` is always present (field-presence-fixed). Names the canonical AI-assisted planning sequence:
 

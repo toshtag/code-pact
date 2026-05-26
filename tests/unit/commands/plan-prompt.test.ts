@@ -2,7 +2,11 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { generatePlanningPrompt, runPlanPrompt } from "../../../src/commands/plan-prompt.ts";
+import {
+  generatePlanningPrompt,
+  generateSchemaOnlyPrompt,
+  runPlanPrompt,
+} from "../../../src/commands/plan-prompt.ts";
 
 let tmpDir: string;
 
@@ -59,6 +63,10 @@ describe("generatePlanningPrompt — en-US", () => {
     const prompt = generatePlanningPrompt(null, null, "en-US");
     expect(prompt).toContain("verify_commands:");
     expect(prompt).not.toContain("verification:");
+    // The guideline text used `verification.commands` too — guard the whole
+    // prompt against any `verification.` reference (verification_strength
+    // uses an underscore, so this does not catch the legitimate attribute).
+    expect(prompt).not.toContain("verification.");
   });
 
   it("shows the full 8-value task type enum and lenient-default fields", () => {
@@ -124,6 +132,43 @@ describe("generatePlanningPrompt — ja-JP", () => {
 });
 
 // ---------------------------------------------------------------------------
+// generateSchemaOnlyPrompt — unit (P2)
+// ---------------------------------------------------------------------------
+
+describe("generateSchemaOnlyPrompt", () => {
+  it("includes the YAML format example with the canonical verify_commands key", () => {
+    const prompt = generateSchemaOnlyPrompt("en-US");
+    expect(prompt).toContain("phases:");
+    expect(prompt).toContain("verify_commands:");
+    expect(prompt).not.toContain("verification.");
+  });
+
+  it("states the output rules: YAML only, no Markdown fences, top-level phases", () => {
+    const prompt = generateSchemaOnlyPrompt("en-US");
+    expect(prompt).toMatch(/no Markdown code fences/i);
+    expect(prompt).toContain("`phases:`");
+    expect(prompt).toMatch(/Output ONLY the YAML/i);
+  });
+
+  it("omits the brief and constitution sections entirely", () => {
+    const prompt = generateSchemaOnlyPrompt("en-US");
+    expect(prompt).not.toContain("Project Brief");
+    expect(prompt).not.toContain("Project Constitution");
+    expect(prompt).not.toContain("design/brief.md");
+  });
+
+  it("ends with a newline", () => {
+    expect(generateSchemaOnlyPrompt("en-US").endsWith("\n")).toBe(true);
+  });
+
+  it("produces a ja-JP variant", () => {
+    const prompt = generateSchemaOnlyPrompt("ja-JP");
+    expect(prompt).toContain("出力ルール");
+    expect(prompt).toContain("verify_commands");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // runPlanPrompt — integration (reads files from tmpDir)
 // ---------------------------------------------------------------------------
 
@@ -157,6 +202,63 @@ describe("runPlanPrompt", () => {
   it("produces ja-JP prompt when locale is ja-JP", async () => {
     const result = await runPlanPrompt({ cwd: tmpDir, locale: "ja-JP", clipboard: false });
     expect(result.prompt).toContain("以下のプロジェクト情報を読んで");
+  });
+
+  it("schemaOnly defaults to false in normal mode (additive field)", async () => {
+    const result = await runPlanPrompt({ cwd: tmpDir, locale: "en-US", clipboard: false });
+    expect(result.schemaOnly).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// runPlanPrompt — schema-only mode (P2)
+// ---------------------------------------------------------------------------
+
+describe("runPlanPrompt — schemaOnly", () => {
+  it("returns the schema-only prompt and forces hasBrief/hasConstitution false", async () => {
+    const result = await runPlanPrompt({
+      cwd: tmpDir,
+      locale: "en-US",
+      clipboard: false,
+      schemaOnly: true,
+    });
+    expect(result.schemaOnly).toBe(true);
+    expect(result.hasBrief).toBe(false);
+    expect(result.hasConstitution).toBe(false);
+    expect(result.prompt).toContain("verify_commands:");
+  });
+
+  it("does NOT read design/brief.md even when it exists", async () => {
+    await writeFile(
+      join(tmpDir, "design", "brief.md"),
+      "# Brief\n\nSECRET_BRIEF_MARKER should not leak.",
+      "utf8",
+    );
+    const result = await runPlanPrompt({
+      cwd: tmpDir,
+      locale: "en-US",
+      clipboard: false,
+      schemaOnly: true,
+    });
+    // The whole point of schema-only: the existing context is the agent's,
+    // not the brief file. The brief content must never appear.
+    expect(result.prompt).not.toContain("SECRET_BRIEF_MARKER");
+    expect(result.hasBrief).toBe(false);
+  });
+
+  it("suggested_next_steps skip the brief/constitution hint and point at import → lint → runbook", async () => {
+    const result = await runPlanPrompt({
+      cwd: tmpDir,
+      locale: "en-US",
+      clipboard: false,
+      schemaOnly: true,
+    });
+    const joined = result.suggested_next_steps.join("\n");
+    expect(joined).not.toMatch(/plan brief/);
+    expect(joined).not.toMatch(/plan constitution/);
+    expect(joined).toMatch(/phase import/);
+    expect(joined).toContain("plan lint --include-quality");
+    expect(joined).toMatch(/phase runbook/);
   });
 });
 
