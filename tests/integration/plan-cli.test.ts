@@ -220,3 +220,96 @@ describe("CLI: plan prompt", () => {
     expect(parsed.ok).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// plan adopt
+// ---------------------------------------------------------------------------
+
+describe("CLI: plan adopt", () => {
+  async function initAndWrite(name: string, body: string): Promise<void> {
+    run(["init", "--non-interactive", "--locale", "en-US", "--agent", "claude-code", "--json"]);
+    await writeFile(join(tmpDir, name), body);
+  }
+
+  it("plan adopt <md> --json dry-runs, does not write, returns would_adopt", async () => {
+    await initAndWrite(
+      "roadmap.md",
+      `## Phase 1: Foundations\n- Scaffold the package\n- Write the README docs\n`,
+    );
+    const res = run(["plan", "adopt", "roadmap.md", "--json"]);
+    expect(res.code).toBe(0);
+    const parsed = JSON.parse(res.stdout) as {
+      ok: boolean;
+      data: {
+        kind: string;
+        source_type: string;
+        phases_detected: number;
+        tasks_detected: number;
+        generated_import_yaml: string;
+        import_result: unknown;
+      };
+    };
+    expect(parsed.ok).toBe(true);
+    expect(parsed.data.kind).toBe("would_adopt");
+    expect(parsed.data.source_type).toBe("markdown");
+    expect(parsed.data.tasks_detected).toBe(2);
+    expect(parsed.data.generated_import_yaml).toContain("verify_commands");
+    expect(parsed.data.import_result).toBeNull();
+
+    // dry-run must not have created any phase
+    const ls = run(["phase", "ls", "--json"]);
+    const lsParsed = JSON.parse(ls.stdout) as { data: { id: string }[] };
+    expect(lsParsed.data).toHaveLength(0);
+  });
+
+  it("plan adopt <md> --write --json creates the phases via phase import", async () => {
+    await initAndWrite(
+      "roadmap.md",
+      `## Phase 1: Foundations\n- Scaffold\n- Wire the CLI\n`,
+    );
+    const res = run(["plan", "adopt", "roadmap.md", "--write", "--json"]);
+    expect(res.code).toBe(0);
+    const parsed = JSON.parse(res.stdout) as {
+      ok: boolean;
+      data: { kind: string; import_result: { imported_tasks: string[] } | null };
+    };
+    expect(parsed.ok).toBe(true);
+    expect(parsed.data.kind).toBe("adopted");
+    expect(parsed.data.import_result?.imported_tasks).toEqual(["P1-T1", "P1-T2"]);
+
+    const ls = run(["phase", "ls", "--json"]);
+    const lsParsed = JSON.parse(ls.stdout) as { data: { id: string }[] };
+    expect(lsParsed.data.map((p) => p.id)).toContain("P1");
+  });
+
+  it("plan adopt with no path returns CONFIG_ERROR exit 2", async () => {
+    run(["init", "--non-interactive", "--locale", "en-US", "--agent", "claude-code", "--json"]);
+    const res = run(["plan", "adopt", "--json"]);
+    expect(res.code).toBe(2);
+    const parsed = JSON.parse(res.stdout) as { ok: boolean; error: { code: string } };
+    expect(parsed.ok).toBe(false);
+    expect(parsed.error.code).toBe("CONFIG_ERROR");
+  });
+
+  it("plan adopt of a prose file returns no_plan_items_detected", async () => {
+    await initAndWrite("notes.md", `# Notes\n\nJust prose, no bullet lists at all.\n`);
+    const res = run(["plan", "adopt", "notes.md", "--json"]);
+    expect(res.code).toBe(2);
+    const parsed = JSON.parse(res.stdout) as {
+      ok: boolean;
+      error: { code: string };
+      data: { detail: string };
+    };
+    expect(parsed.ok).toBe(false);
+    expect(parsed.error.code).toBe("CONFIG_ERROR");
+    expect(parsed.data.detail).toBe("no_plan_items_detected");
+  });
+
+  it("plan adopt of an unsafe path is rejected", async () => {
+    run(["init", "--non-interactive", "--locale", "en-US", "--agent", "claude-code", "--json"]);
+    const res = run(["plan", "adopt", "../escape.md", "--json"]);
+    expect(res.code).toBe(2);
+    const parsed = JSON.parse(res.stdout) as { data: { detail: string } };
+    expect(parsed.data.detail).toBe("unsafe_path");
+  });
+});

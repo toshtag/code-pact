@@ -8,8 +8,11 @@
 // private to this module.
 
 import { parseArgs } from "node:util";
+import { strictParse, ConfigError } from "../../lib/argv.ts";
+import { withWriteLock } from "../util.ts";
 import { isInteractive } from "../../lib/tty.ts";
 import { messages, type Locale } from "../../i18n/index.ts";
+import { runPlanAdopt, PlanAdoptError } from "../../commands/plan-adopt.ts";
 import {
   type BriefAnswers,
   loadBriefFromFile,
@@ -55,6 +58,10 @@ export async function cmdPlan(argv: string[], locale: Locale, globalJson: boolea
     return cmdPlanPrompt(rest, locale, globalJson);
   }
 
+  if (subcommand === "adopt") {
+    return cmdPlanAdopt(rest, globalJson);
+  }
+
   if (subcommand === "constitution") {
     return cmdPlanConstitution(rest, locale, globalJson);
   }
@@ -71,7 +78,7 @@ export async function cmdPlan(argv: string[], locale: Locale, globalJson: boolea
     return cmdPlanAnalyze(rest, locale, globalJson);
   }
 
-  const msg = `plan: unknown subcommand "${subcommand ?? ""}". Use: brief | prompt | constitution | lint | normalize | analyze`;
+  const msg = `plan: unknown subcommand "${subcommand ?? ""}". Use: brief | prompt | adopt | constitution | lint | normalize | analyze`;
   if (globalJson) {
     process.stdout.write(
       `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
@@ -313,6 +320,121 @@ async function cmdPlanPrompt(
   }
 
   return 0;
+}
+
+async function cmdPlanAdopt(argv: string[], globalJson: boolean): Promise<number> {
+  let values: Record<string, unknown>;
+  let positionals: string[];
+  try {
+    ({ values, positionals } = strictParse(
+      "plan adopt",
+      argv,
+      {
+        write: { type: "boolean" },
+        json: { type: "boolean" },
+      },
+      { allowPositionals: true },
+    ));
+  } catch (err) {
+    if (!(err instanceof ConfigError)) throw err;
+    const json = globalJson || argv.includes("--json");
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: err.message } })}\n`,
+      );
+    } else {
+      process.stderr.write(`${err.message}\n`);
+    }
+    return 2;
+  }
+
+  const json = globalJson || values.json === true;
+  const write = values.write === true;
+  const fromPath = positionals[0];
+  const cwd = process.cwd();
+
+  if (!fromPath) {
+    const msg =
+      "plan adopt requires a path, e.g. `plan adopt roadmap.md` (dry-run) or `plan adopt roadmap.md --write`";
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
+      );
+    } else {
+      process.stderr.write(`${msg}\n`);
+    }
+    return 2;
+  }
+
+  const run = async (): Promise<number> => {
+    try {
+      const result = await runPlanAdopt({ cwd, fromPath, write });
+      if (json) {
+        process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
+        return 0;
+      }
+      // Human: dry-run prints the generated YAML to stdout so it can be
+      // piped/saved; warnings + next steps go to stderr in both modes.
+      if (!write) {
+        process.stdout.write(result.generated_import_yaml);
+        if (!result.generated_import_yaml.endsWith("\n")) process.stdout.write("\n");
+        process.stderr.write(
+          `Would adopt ${result.phases_detected} phase(s), ${result.tasks_detected} task(s) from ${result.source_path} (source: ${result.source_type}).\n`,
+        );
+      } else {
+        const imported = result.import_result;
+        process.stderr.write(
+          `Adopted ${imported?.imported_phases.length ?? 0} phase(s), ${imported?.imported_tasks.length ?? 0} task(s) from ${result.source_path} (source: ${result.source_type}).\n`,
+        );
+      }
+      for (const w of result.warnings) {
+        process.stderr.write(
+          `  warning [${w.code}]${w.line !== undefined ? ` line ${w.line}` : ""}: ${w.message}\n`,
+        );
+      }
+      for (const step of result.suggested_next_steps) {
+        process.stderr.write(`  next: ${step}\n`);
+      }
+      return 0;
+    } catch (err: unknown) {
+      if (err instanceof PlanAdoptError) {
+        if (json) {
+          process.stdout.write(
+            `${JSON.stringify({
+              ok: false,
+              error: { code: "CONFIG_ERROR", message: err.message },
+              data: { detail: err.detail, source_path: err.sourcePath ?? null },
+            })}\n`,
+          );
+        } else {
+          process.stderr.write(`${err.message}\n`);
+        }
+        return 2;
+      }
+      // Errors propagated from applyParsedPhaseImport on --write
+      // (DUPLICATE_PHASE_ID / AMBIGUOUS_TASK_ID / CONFIG_ERROR).
+      const code = (err as NodeJS.ErrnoException).code;
+      const message = err instanceof Error ? err.message : String(err);
+      if (
+        code === "CONFIG_ERROR" ||
+        code === "DUPLICATE_PHASE_ID" ||
+        code === "AMBIGUOUS_TASK_ID"
+      ) {
+        if (json) {
+          process.stdout.write(
+            `${JSON.stringify({ ok: false, error: { code, message } })}\n`,
+          );
+        } else {
+          process.stderr.write(`${message}\n`);
+        }
+        return 2;
+      }
+      throw err;
+    }
+  };
+
+  // Only the --write path mutates design YAML, so only it takes the lock.
+  return write ? withWriteLock(cwd, "plan adopt --write", json, run) : run();
 }
 
 async function cmdPlanConstitution(
