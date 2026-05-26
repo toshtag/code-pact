@@ -8,7 +8,7 @@ The fastest way in is [`getting-started.md`](getting-started.md) — empty proje
 
 | Doc | What it covers |
 | --- | --- |
-| [getting-started.md](getting-started.md) | First-thirty-minutes guide — three onboarding paths (tutorial / manual / AI-assisted) and the per-task loop. |
+| [getting-started.md](getting-started.md) | First-thirty-minutes guide — onboarding approaches (smoke test / agent-first / plan adopt / code-pact-first / manual) and the per-task loop. |
 | [positioning.md](positioning.md) | What code-pact is, what it deliberately is not, the core CLI surfaces, and the success metrics it measures itself against. |
 
 ## Workflows

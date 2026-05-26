@@ -52,5 +52,5 @@ The project does not ship a separate Code of Conduct file at this time. Treat is
 ## Related docs
 
 - [`CONTRIBUTING.md`](../CONTRIBUTING.md) — branch / commit / JSON output / tag signing / npm publish mechanics.
-- [`docs/getting-started.md`](getting-started.md) — first-thirty-minutes onboarding (three paths).
+- [`docs/getting-started.md`](getting-started.md) — first-thirty-minutes onboarding (several approaches).
 - [`docs/cli-contract.md`](cli-contract.md) — the stable surface this community process is built to protect.
