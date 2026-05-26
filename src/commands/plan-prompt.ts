@@ -12,10 +12,19 @@ export type PlanPromptOptions = {
   cwd: string;
   locale: Locale;
   clipboard: boolean;
+  /**
+   * Schema-only mode (P2). Emits just the YAML format example + output
+   * rules, without reading design/brief.md or design/constitution.md.
+   * For agents that already hold the project context and only need the
+   * output shape fixed. `hasBrief` / `hasConstitution` are forced false.
+   */
+  schemaOnly?: boolean;
 };
 
 export type PlanPromptResult = {
   prompt: string;
+  /** True when the prompt was generated in schema-only mode (P2). */
+  schemaOnly: boolean;
   hasBrief: boolean;
   hasConstitution: boolean;
   clipboardCopied: boolean;
@@ -91,6 +100,23 @@ export function generatePlanningPrompt(
   return sections.join("\n\n") + "\n";
 }
 
+/**
+ * Schema-only prompt (P2): the YAML format example plus terse output
+ * rules, with no brief/constitution sections. The example is shown fenced
+ * for readability; the rules tell the agent its OWN output must be raw
+ * YAML (no fences) so `phase import` can read the saved file directly.
+ */
+export function generateSchemaOnlyPrompt(locale: Locale): string {
+  const t = messageCatalog[locale].templates.planPrompt;
+  const s = t.schemaOnly;
+  const rules = s.rules.map((r) => `- ${r}`).join("\n");
+  return [
+    s.intro,
+    `## ${t.formatHeader}\n\n\`\`\`yaml\n${YAML_FORMAT_EXAMPLE}\n\`\`\``,
+    `## ${s.rulesHeader}\n\n${rules}`,
+  ].join("\n\n") + "\n";
+}
+
 // ---------------------------------------------------------------------------
 // Clipboard helper
 // ---------------------------------------------------------------------------
@@ -152,8 +178,38 @@ function buildSuggestedNextSteps(
   return steps;
 }
 
+/**
+ * Schema-only next steps (P2). Skips the brief/constitution capture hint
+ * (schema-only deliberately bypasses them) and points straight at the
+ * save → import → lint → runbook loop.
+ */
+function buildSchemaOnlyNextSteps(): string[] {
+  return [
+    "Ask your agent to emit the roadmap in the format above and capture its YAML response into a file (e.g. `design/imports/p1.yaml`).",
+    "Run `code-pact phase import design/imports/p1.yaml --json` to ingest the YAML.",
+    "Run `code-pact plan lint --include-quality --json` to validate the imported phase(s) and surface any clarify advisories.",
+    "Run `code-pact phase runbook <imported-phase-id> --json` to see the recommended per-phase next steps.",
+  ];
+}
+
 export async function runPlanPrompt(opts: PlanPromptOptions): Promise<PlanPromptResult> {
   const { cwd, locale, clipboard } = opts;
+  const schemaOnly = opts.schemaOnly === true;
+
+  // Schema-only short-circuits file reads: it never grounds on the brief
+  // or constitution, so the agent's existing context stays the source.
+  if (schemaOnly) {
+    const prompt = generateSchemaOnlyPrompt(locale);
+    const clipboardCopied = clipboard ? await copyToClipboard(prompt) : false;
+    return {
+      prompt,
+      schemaOnly: true,
+      hasBrief: false,
+      hasConstitution: false,
+      clipboardCopied,
+      suggested_next_steps: buildSchemaOnlyNextSteps(),
+    };
+  }
 
   const [brief, constitution] = await Promise.all([
     readFileOrNull(join(cwd, "design", "brief.md")),
@@ -172,6 +228,7 @@ export async function runPlanPrompt(opts: PlanPromptOptions): Promise<PlanPrompt
 
   return {
     prompt,
+    schemaOnly: false,
     hasBrief,
     hasConstitution,
     clipboardCopied,
