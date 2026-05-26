@@ -172,10 +172,19 @@ const EMISSION_PATTERNS: RegExp[] = [
 // `error.code` and never affects the exit code, so it is deliberately out
 // of the v1.0 public error-code table. It is documented under the
 // `phase import` section of docs/cli-contract.md instead.
+//
+// `CHECKED_TASK_SKIPPED` / `PHASE_ID_INFERRED` / `READINESS_FIELDS_NOT_INFERRED`
+// are the same kind of advisory for `plan adopt`: they live in the adopt
+// envelope's `data.warnings[].code` array, never become top-level
+// `error.code`, and never affect the exit code. Documented under the
+// `plan adopt` section of docs/cli-contract.md.
 const NON_ERROR_CODES = new Set<string>([
   "MERGE_BASE_NOT_FOUND",
   "REF_NOT_FOUND",
   "PHASE_VERIFY_COMMANDS_MISSHAPED",
+  "CHECKED_TASK_SKIPPED",
+  "PHASE_ID_INFERRED",
+  "READINESS_FIELDS_NOT_INFERRED",
 ]);
 
 async function walkSrc(dir: string): Promise<string[]> {
