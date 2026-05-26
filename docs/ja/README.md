@@ -11,6 +11,8 @@
 | ドキュメント | 内容 |
 | --- | --- |
 | [はじめに](getting-started.md) | 30分ガイド — 導入アプローチ（スモークテスト / エージェント先行 / plan adopt / code-pact 先行 / 手動）とタスク単位のループ。 |
+| [タスク単位のループ](per-task-loop.md) | タスクのライフサイクルの正典 — 状態遷移図、各コマンド、実例。 |
+| [用語集](glossary.md) | このドキュメント群で使う code-pact 用語の平易な定義。 |
 | [positioning.md](../positioning.md) (英語) | code-pact が何であり、何を意図的にやらないか。中核となる CLI と、プロジェクトが自らを測る成功指標。 |
 
 ## ワークフロー
@@ -29,7 +31,7 @@
 | [cli-contract.md](../cli-contract.md) (英語) | フラグ / 終了コード / JSON エンベロープ / エラーコードの全リファレンスと安定性区分。 |
 | [agent-contract.md](../agent-contract.md) (英語) | v1.11+ のエージェント契約と、各エージェント統合に `adapter conformance` が要求する内容。 |
 | [spec-kit-bridge.md](../spec-kit-bridge.md) (英語) | 既存の Spec Kit `tasks.md` / `spec.md` を code-pact のロードマップに取り込む。 |
-| [migration.md](../migration.md) (英語) | 旧アルファ（v0.6 – v0.9）から v1.0 へのアップグレード指針。 |
+| [upgrading.md](../upgrading.md) (英語) | アップグレード方法 — v1.x 内は追加のみ。pre-v1.0 alpha からの移行ポインタ。 |
 
 ## 概念
 
@@ -46,5 +48,6 @@
 
 | ドキュメント | 内容 |
 | --- | --- |
-| [dogfood.md](../dogfood.md) (英語) | 実プロジェクトでの一連の流れと、よくあるエラーコードのトラブルシュート。 |
+| [troubleshooting.md](../troubleshooting.md) (英語) | 診断コードごとの復旧アクション（よく出るエラーコード）。 |
+| [dogfood.md](../dogfood.md) (英語) | 実プロジェクトでの一連の流れ — code-pact で code-pact 自身を回す。 |
 | [community.md](../community.md) (英語) | issue / discussion / PR の出し方と、Non-goals リストに関するスコープ規律。 |
