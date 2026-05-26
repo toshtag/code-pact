@@ -1,6 +1,6 @@
 # はじめに
 
-このドキュメントは、空のプロジェクトから最初の `task complete` を成功させるまでを約30分でたどるためのガイドです。ロードマップを立ち上げる方法は3つあり、それぞれを並べて説明します。自分のやり方に合うものを選んでください。
+このドキュメントは、空のプロジェクトから最初の `task complete` を成功させるまでを約30分でたどるためのガイドです。ロードマップの作られ方に合わせて、いくつかの導入アプローチを並べて説明します。自分のやり方に合うものを選んでください。
 
 > 日本語で読めるドキュメントの一覧は [docs/ja/](README.md) にあります。現在この `getting-started.md` と [ワークフローガイド](workflows/greenfield.md)（ゼロから / 既存に導入）が日本語で用意されています。それ以外（`docs/cli-contract.md`、`docs/migration.md`、`docs/dogfood.md` など）は英語が一次資料です。
 >
@@ -27,13 +27,17 @@ v1.0 より前の挙動に固定したプロジェクトでは `npm install -g c
 
 ## どの経路を選ぶか
 
-ロードマップの作り方に合わせて経路を選びます。3つの経路はいずれも最終的に同じタスク単位のループ（ドキュメント末尾で説明）に合流するので、後から経路を切り替えるのも難しくありません。
+ロードマップの作られ方に合わせてアプローチを選びます。いずれも最終的に同じタスク単位のループ（ドキュメント末尾で説明）に合流するので、後から切り替えるのも容易です。
 
-| 経路 | 向いている場面 | 最初の `task complete` までの目安 |
+| アプローチ | 向いている場面 | 最初の `task complete` までの目安 |
 | --- | --- | --- |
-| **チュートリアル** | エンドツーエンドの動作確認をいちばん速く済ませたい — `code-pact tutorial` はリポジトリに何も書き込みません | 約1分 |
-| **手動** | 作るものの形がすでに見えていて、ロードマップを自分で書きたい | 約15分 |
-| **AI 支援** | プロジェクトのブリーフから AI エージェントにフェーズとタスクを起こさせたい | 約20分 |
+| **スモークテスト**（チュートリアル） | ループの動きをひととおり見たいだけ — `code-pact tutorial` はリポジトリに何も書き込みません | 約1分 |
+| **エージェント先行**（schema-only プロンプト） | エージェント（Claude Code など）がすでにプロジェクト文脈を持っていて、ロードマップ YAML を直接出力できる | 約10分 |
+| **既存プランの取り込み**（`plan adopt`） | すでに構造化された `roadmap.md` / `TODO.md` / `tasks.md` や YAML 草案があり、決定論的に取り込みたい | 約5分 |
+| **code-pact 先行**（brief → prompt） | ゼロから始める。brief と constitution を記録してから、それを元にエージェントにロードマップを起こさせる | 約20分 |
+| **手動** | 細かく制御したく、各フェーズとタスクを自分で書きたい | 約15分 |
+
+エージェント利用者の多くは **エージェント先行** か **既存プランの取り込み** が向いています。計画はエージェント（またはエージェントが既に出した計画）が担い、code-pact はその結果を決定論的に取り込む — 形を直すためだけの2回目の AI 往復は不要です。
 
 ---
 
@@ -138,7 +142,32 @@ code-pact phase add ... --verify-command node --version
 
 ## 経路 3 — AI 支援
 
-プロジェクトのブリーフをもとに、AI エージェントにフェーズとタスクを起こさせたいときの経路です。`code-pact` 自身が LLM を呼ぶことはありません。`plan prompt` はあなたが自分のエージェント（Claude、Codex、Gemini など）に貼り付けるためのプロンプト文字列を組み立て、`phase import` はエージェントが返してきた YAML を読み込みます。
+`code-pact` 自身が LLM を呼ぶことはありません。あなたのエージェントに渡すプロンプトを組み立て、エージェントが返す YAML を取り込みます。プロジェクト文脈がすでにエージェントのセッションにあるかどうかで、入口が2通りあります。
+
+### エージェント先行 — `plan prompt --schema-only`
+
+エージェント（Claude Code、Codex など）がすでにプロジェクト文脈を持っていて、出力の形だけ固定すればよいときに使います。brief や constitution は不要です。
+
+```sh
+# 1. 初期化。
+code-pact init --non-interactive --agent claude-code --locale en-US
+
+# 2. brief.md / constitution.md を読まず、YAML の出力形式だけを固定する
+#    短いプロンプトを出力します。
+code-pact plan prompt --schema-only
+#    その形式でロードマップを出力させ、返答を draft-roadmap.yaml として
+#    保存します（生の YAML、Markdown のコードフェンスなし）。
+
+# 3. 決定論的に取り込みます。
+code-pact phase import draft-roadmap.yaml --json
+
+# 4. アダプタを入れて、タスク単位のループ（後述）へ。
+code-pact adapter install claude-code
+```
+
+### code-pact 先行 — brief + constitution + `plan prompt`
+
+ゼロから始め、先に code-pact に意図を記録させて、計画用プロンプトを brief と constitution に地盤づけたいときに使います。
 
 ```sh
 # 1. 初期化。
@@ -172,9 +201,33 @@ code-pact task complete P1-T1 --agent claude-code
 
 ---
 
+## 既存プランの取り込み — `plan adopt`
+
+すでに計画がありますか。構造化された `roadmap.md` / `TODO.md` / `tasks.md`（見出しの下にタスクの箇条書き）やフェーズ YAML の草案があるなら、`plan adopt` がそれを決定論的にフェーズとタスクへ変換します。形を直すための AI 往復は不要です。
+
+```sh
+# 1. 初期化。
+code-pact init --non-interactive --agent claude-code --locale en-US
+
+# 2. dry-run: 作成される phase-import YAML を表示するだけ。確認してください。
+#    plan adopt は意味的なフィルタリングをしません。
+code-pact plan adopt roadmap.md --json
+
+# 3. 適用します（フェーズとタスクを作成）。
+code-pact plan adopt roadmap.md --write --json
+
+# 4. 検証し、アダプタを入れて、タスク単位のループ（後述）へ。
+code-pact plan lint --include-quality --json
+code-pact adapter install claude-code
+```
+
+`plan adopt` は **構造化された** プラン向けです。「リスク」「非目標」リストの箇条書きもタスクとして拾うため、`--write` の前に必ず dry-run を確認してください。タスクが散文や code fence の中にある **物語的な** ロードマップは `no_plan_items_detected` になります。その場合は上の **エージェント先行** を使い、エージェントに YAML を出させてください。検出順と advisory コードは [`docs/cli-contract.md`](../cli-contract.md) を参照。
+
+---
+
 ## タスク単位のエージェントループ
 
-タスクがひとつでもできれば、3つの経路はすべて同じ決定論的なループに合流します。エージェント（または人）がタスクごとに走らせる流れは次のとおりです。
+タスクがひとつでもできれば、どのアプローチもすべて同じ決定論的なループに合流します。エージェント（または人）がタスクごとに走らせる流れは次のとおりです。
 
 ```sh
 # A. タスクを prepare します — タスク単位の単一の入口です。1 回の呼び出しで
