@@ -1202,7 +1202,7 @@ code-pact plan lint --include-quality --strict --json
   `depends_on_check[i]` JSON entries — populated only for
   cross-phase resolutions; same-phase deps omit it.
 - New docs section: [`docs/cli-contract.md → phase runbook
-  → --across-phases`](cli-contract.md#-across-phases-v19-p19);
+  → --across-phases`](cli-contract.md#--across-phases-v19-p19);
   new dogfood subsection: ["Tracking release prep with
   phase runbook --across-phases"](dogfood.md).
 

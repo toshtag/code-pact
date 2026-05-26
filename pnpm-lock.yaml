@@ -18,6 +18,9 @@ importers:
       '@types/node':
         specifier: ^24.0.0
         version: 24.12.4
+      github-slugger:
+        specifier: ^2.0.0
+        version: 2.0.0
       tsup:
         specifier: ^8.5.1
         version: 8.5.1(postcss@8.5.14)(tsx@4.22.3)(typescript@6.0.3)(yaml@2.9.0)
@@ -796,6 +799,9 @@ packages:
     resolution: {integrity: sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw==}
     engines: {node: ^8.16.0 || ^10.6.0 || >=11.0.0}
     os: [darwin]
+
+  github-slugger@2.0.0:
+    resolution: {integrity: sha512-IaOQ9puYtjrkq7Y0Ygl9KDZnrf/aiUJYUpVf89y8kyaxbRG7Y1SrX/jaumrv81vc61+kiMempujsM3Yw7w5qcw==}
 
   joycon@3.1.1:
     resolution: {integrity: sha512-34wB/Y7MW7bzjKRjUKTa46I2Z7eV62Rkhva+KkopW7Qvv/OSWBqvkSY7vusOPrNuZcUG3tApvdVgNB8POj3SPw==}
@@ -1592,6 +1598,8 @@ snapshots:
 
   fsevents@2.3.3:
     optional: true
+
+  github-slugger@2.0.0: {}
 
   joycon@3.1.1: {}
 

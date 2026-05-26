@@ -45,6 +45,7 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "harness": "tsx scripts/harness/run.ts",
+    "check:doc-links": "node scripts/check-doc-links.mjs",
     "prepublishOnly": "node scripts/assert-package-metadata.mjs"
   },
   "dependencies": {
@@ -53,6 +54,7 @@
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "github-slugger": "^2.0.0",
     "tsup": "^8.5.1",
     "tsx": "^4.22.3",
     "typescript": "^6.0.3",
