@@ -33,6 +33,8 @@ Pick the guide that matches where you're starting from. Both defer to `getting-s
 
 ## Concepts
 
+These explain how a feature works for users. The *why* behind each — the design decisions — is indexed in [`design/decisions/`](../design/decisions/README.md).
+
 | Doc | What it covers |
 | --- | --- |
 | [concepts/task-readiness-fields.md](concepts/task-readiness-fields.md) | Optional task schema fields (`depends_on` / `reads` / `writes` / …) and their `plan lint` impact. |
