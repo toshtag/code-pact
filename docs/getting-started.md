@@ -2,7 +2,7 @@
 
 > 🌐 日本語版: [はじめに](ja/getting-started.md)
 
-This guide takes you from an empty project to a successful `task complete` in about thirty minutes. It documents **three onboarding paths** side by side so you can pick the one that matches how you want to build your roadmap.
+This guide takes you from an empty project to a successful `task complete` in about thirty minutes. It documents **several onboarding approaches** side by side so you can pick the one that matches how your roadmap comes into being.
 
 If you only want a sixty-second overview of what `code-pact` is, read the [README](../README.md) first.
 
@@ -27,13 +27,17 @@ If you have a project with pinned pre-v1.0 behaviour, `npm install -g code-pact@
 
 ## Choose your path
 
-Pick the path that matches how you want to bootstrap your roadmap. All three converge on the same per-task agent loop (described at the end), so switching between them later is not painful.
+Pick the approach that matches how your roadmap comes into being. They all converge on the same per-task agent loop (described at the end), so switching later is cheap.
 
-| Path | When to use it | Time to first `task complete` |
+| Approach | When to use it | Time to first `task complete` |
 | --- | --- | --- |
-| **Tutorial** | You want the fastest end-to-end smoke test — `code-pact tutorial` writes nothing to your repo. | ~1 minute |
-| **Manual** | You already know what you want to build and prefer typing the roadmap by hand. | ~15 minutes |
-| **AI-assisted** | You want an AI agent to draft the phases and tasks from your project brief. | ~20 minutes |
+| **Smoke test** ([tutorial](#path-1--tutorial)) | You just want to watch the loop run end to end — `code-pact tutorial` writes nothing to your repo. | ~1 minute |
+| **Agent-first** ([schema-only prompt](#path-3--ai-assisted)) | Your agent (Claude Code, …) already holds the project context and can emit a roadmap YAML directly. | ~10 minutes |
+| **Existing-plan adoption** ([`plan adopt`](#existing-plan-adoption--plan-adopt)) | You already have a structured plan — a `roadmap.md`, `TODO.md`, `tasks.md`, or a draft YAML — and want to ingest it deterministically. | ~5 minutes |
+| **Code-pact-first** ([brief → prompt](#path-3--ai-assisted)) | Starting from scratch: capture a brief + constitution, then have an agent draft the full roadmap from them. | ~20 minutes |
+| **Manual** ([by hand](#path-2--manual)) | You want precise control and prefer to type each phase and task yourself. | ~15 minutes |
+
+Most agent users want **Agent-first** or **Existing-plan adoption**: the agent (or a plan it already produced) does the planning, and code-pact ingests the result deterministically — no second AI round-trip just to reshape it.
 
 ---
 
@@ -184,7 +188,32 @@ code-pact phase add ... --verify-command node --version
 
 ## Path 3 — AI-assisted
 
-Use this path when you want an AI agent to draft your phases and tasks from a project brief. `code-pact` itself never calls an LLM — `plan prompt` builds a prompt string that you paste into your agent (Claude, Codex, Gemini, …), and `phase import` reads the YAML the agent gives back.
+`code-pact` never calls an LLM. It builds prompts you hand to your agent and ingests the YAML the agent returns. There are two ways in, depending on whether the project context already lives in your agent session.
+
+### Agent-first — `plan prompt --schema-only`
+
+Use this when your agent (Claude Code, Codex, …) already holds the project context and only needs the output shape fixed. No brief or constitution required.
+
+```sh
+# 1. Initialize.
+code-pact init --non-interactive --agent claude-code --locale en-US
+
+# 2. Emit a short, context-free prompt that only fixes the YAML output
+#    shape (it does not read brief.md / constitution.md).
+code-pact plan prompt --schema-only
+#    Ask your agent to emit the roadmap in that format and save its reply
+#    as draft-roadmap.yaml (raw YAML, no Markdown fences).
+
+# 3. Ingest the YAML deterministically.
+code-pact phase import draft-roadmap.yaml --json
+
+# 4. Install the adapter and enter the per-task loop (below).
+code-pact adapter install claude-code
+```
+
+### Code-pact-first — brief + constitution + `plan prompt`
+
+Use this when you're starting from scratch and want code-pact to capture intent first, so the planning prompt is grounded in a brief and constitution.
 
 ```sh
 # 1. Initialize.
@@ -216,7 +245,31 @@ code-pact task complete P1-T1 --agent claude-code
 
 The lenient `phase import` mode is intentional. It lets the AI focus on getting `id`s right and trust `code-pact` to fill in the rest; you can audit the filled-in defaults in the JSON response or by running `code-pact plan lint --json`.
 
-> **TTY required for steps 2 and 3.** `plan brief` and `plan constitution` are interactive and need a TTY. `plan prompt` itself runs fine without them — if `design/brief.md` is missing, the generated prompt includes a line *"No design/brief.md found. Add a project description above this section manually."* so the AI agent knows to ask for it. The full AI-assisted path is therefore feasible without ever running the brief / constitution wizards, but you give the AI less to ground on.
+> **TTY required for the brief / constitution wizards.** `plan brief` and `plan constitution` are interactive and need a TTY (or use their `--from-file` / `--stdin` / flag forms — see the Manual path's CI note). `plan prompt` runs fine without them, and `plan prompt --schema-only` ignores them entirely. The code-pact-first flow is feasible without ever running the wizards, but you give the AI less to ground on.
+
+---
+
+## Existing-plan adoption — `plan adopt`
+
+Already have a plan? If you hold a structured `roadmap.md` / `TODO.md` / `tasks.md` (task bullets under headings) or a draft phase YAML, `plan adopt` converts it into phases and tasks deterministically — no AI round-trip to reshape it.
+
+```sh
+# 1. Initialize.
+code-pact init --non-interactive --agent claude-code --locale en-US
+
+# 2. Dry-run: prints the phase-import YAML it WOULD create. Review it —
+#    plan adopt does no semantic filtering.
+code-pact plan adopt roadmap.md --json
+
+# 3. Apply it (creates the phase(s) and tasks).
+code-pact plan adopt roadmap.md --write --json
+
+# 4. Validate, install the adapter, enter the per-task loop (below).
+code-pact plan lint --include-quality --json
+code-pact adapter install claude-code
+```
+
+`plan adopt` targets **structured** plans. Bullets in a "Risks" / "Non-goals" list are picked up as tasks too, so always review the dry-run before `--write`. A **narrative** roadmap whose tasks live in prose or fenced code blocks returns `no_plan_items_detected` — for those, use the **Agent-first** flow above and let the agent emit YAML. See [`docs/cli-contract.md`](cli-contract.md) for the full detection order and advisory codes.
 
 ---
 
@@ -308,9 +361,11 @@ This is a **transient** failure: wait for the holding process to finish and re-r
 
 See [`docs/concepts/governance.md`](concepts/governance.md) for the v1.5 governance walkthrough and [`docs/dogfood.md` § Troubleshooting → `LOCK_HELD`](dogfood.md#lock_held-from-a-design-mutating-command-v15) for the recovery playbook.
 
-## Ingesting external specs (v1.8+, optional)
+## Ingesting external specs — Spec Kit bridge (v1.8+, optional)
 
-If you are coming from Spec Kit or a similar spec-driven planning tool and already have a `tasks.md` (or `spec.md` / `plan.md`), the v1.8 **Spec Kit bridge** lets you bootstrap from those artifacts instead of starting from `plan brief`:
+> For a general structured plan (a `roadmap.md` / `TODO.md` / draft YAML), use **[Existing-plan adoption](#existing-plan-adoption--plan-adopt)** (`plan adopt`) above. This section is specifically the **Spec Kit** bridge — a narrower importer for that tool's `tasks.md` / `spec.md` / `plan.md` artifacts.
+
+If you are coming from Spec Kit or a similar spec-driven planning tool and already have a `tasks.md` (or `spec.md` / `plan.md`), the v1.8 **Spec Kit bridge** lets you bootstrap from those artifacts:
 
 ```sh
 # Generate a draft phase YAML from a Spec Kit tasks.md (dry-run first)

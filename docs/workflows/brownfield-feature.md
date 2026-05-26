@@ -22,11 +22,12 @@ Everything else stays untouched. `code-pact` writes only to `design/`, `.code-pa
 
 | If you... | Use |
 | --- | --- |
-| ...know exactly what the feature is and have ~30 minutes | [Manual path](../getting-started.md#path-2--manual) |
-| ...want an AI agent to draft the phase + task breakdown from a brief | [AI-assisted path](../getting-started.md#path-3--ai-assisted) |
-| ...just want to smoke-test the install against this repo | [Tutorial path](../getting-started.md#path-1--tutorial) — `code-pact tutorial` writes nothing to this repo |
+| ...had an agent read the codebase and produce a work plan already | [Existing-plan adoption (`plan adopt`)](../getting-started.md#existing-plan-adoption--plan-adopt) |
+| ...want your agent to draft the breakdown now and emit YAML | [Agent-first](../getting-started.md#path-3--ai-assisted) |
+| ...prefer to write the phase + tasks by hand | [Manual path](../getting-started.md#path-2--manual) |
+| ...just want to smoke-test the install against this repo | [Smoke test (tutorial)](../getting-started.md#path-1--tutorial) — `code-pact tutorial` writes nothing to this repo |
 
-The **manual path is usually right** for brownfield. You already know the codebase; the AI agent can't draft anything you couldn't write in five minutes yourself, and `plan brief` / `plan constitution` content for a brownfield project often duplicates what's already in your existing docs.
+For brownfield, the most natural flow is **agent-driven**: point your coding agent at the existing code, have it produce the next feature's phase + task breakdown, then ingest that deterministically — `plan adopt` for a structured markdown/plan it emits, or `phase import` for a YAML it emits. The brief/constitution wizards are usually skippable here: a brownfield project's intent and principles already live in its existing docs and `CLAUDE.md`, which the agent already reads — grounding the plan in those beats re-typing them. Reach for the **Manual** path when you want precise, hand-authored control over the breakdown.
 
 ## Coexisting with an existing `CLAUDE.md` or `AGENTS.md`
 
@@ -78,6 +79,6 @@ You can always switch the verify command later by editing `design/phases/<phase>
 
 ## Next reading
 
-- [`docs/getting-started.md`](../getting-started.md) — command sequences for all three onboarding paths.
+- [`docs/getting-started.md`](../getting-started.md) — command sequences for every onboarding approach.
 - [`docs/cli-contract.md`](../cli-contract.md) — full `adapter install --force` semantics, `task complete` contract, error code reference.
 - [`docs/migration.md`](../migration.md) — if you're upgrading an existing `code-pact` project (not adopting on a brand new one), the migration guide is the right entry point instead.

@@ -10,7 +10,7 @@
 
 | ドキュメント | 内容 |
 | --- | --- |
-| [はじめに](getting-started.md) | 30分ガイド — 3つの導入パス（tutorial / manual / AI-assisted）とタスク単位のループ。 |
+| [はじめに](getting-started.md) | 30分ガイド — 導入アプローチ（スモークテスト / エージェント先行 / plan adopt / code-pact 先行 / 手動）とタスク単位のループ。 |
 | [positioning.md](../positioning.md) (英語) | code-pact が何であり、何を意図的にやらないか。中核となる CLI と、プロジェクトが自らを測る成功指標。 |
 
 ## ワークフロー

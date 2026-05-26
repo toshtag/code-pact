@@ -50,13 +50,15 @@ Contributors can also run from a clone with `pnpm link --global`, or install a l
 
 ## Getting started
 
-[`docs/getting-started.md`](docs/getting-started.md) is the canonical first-thirty-minutes guide. It walks three onboarding paths side by side:
+[`docs/getting-started.md`](docs/getting-started.md) is the canonical first-thirty-minutes guide. It walks several onboarding approaches side by side:
 
-- **Tutorial path** — `code-pact tutorial` runs the whole loop end to end in a throwaway sandbox (nothing is written to your repo); or scaffold a real sample phase with `init --sample-phase`.
-- **Manual path** — write the roadmap by hand with a mix of interactive wizards and flag-based commands.
-- **AI-assisted path** — generate a planning prompt with `plan prompt`, have your agent draft the YAML, then bulk-import with `phase import`.
+- **Smoke test** — `code-pact tutorial` runs the whole loop end to end in a throwaway sandbox (nothing is written to your repo); or scaffold a real sample phase with `init --sample-phase`.
+- **Agent-first** — `plan prompt --schema-only` gives your agent the output shape; it emits a roadmap YAML you ingest with `phase import`.
+- **Existing-plan adoption** — already have a `roadmap.md` / `TODO.md` / draft YAML? `plan adopt` converts it into phases and tasks deterministically, no AI round-trip.
+- **Code-pact-first** — capture a brief + constitution, then `plan prompt` and have your agent draft the full roadmap from them.
+- **Manual** — write the roadmap by hand with a mix of interactive wizards and flag-based commands.
 
-All three converge on the same per-task agent loop, entered through `task prepare` (`task prepare` → `task start` → implement → `verify` → `task complete` → `task finalize`). `recommend` and `task context` remain available as standalone diagnostics — `task prepare` surfaces both for you in one call.
+They all converge on the same per-task agent loop, entered through `task prepare` (`task prepare` → `task start` → implement → `verify` → `task complete` → `task finalize`). `recommend` and `task context` remain available as standalone diagnostics — `task prepare` surfaces both for you in one call.
 
 **Starting fresh, or adopting on an existing repo?** Two workflow guides cover each case — [greenfield](docs/workflows/greenfield.md) and [brownfield](docs/workflows/brownfield-feature.md). The full documentation index — including the Japanese docs — lives at [`docs/`](docs/README.md) ([日本語](docs/ja/README.md)).
 
@@ -66,7 +68,7 @@ All three converge on the same per-task agent loop, entered through `task prepar
 | --- | --- |
 | [`docs/positioning.md`](docs/positioning.md) | What `code-pact` is, what it deliberately is not, the core CLI surfaces, and the success metrics the project measures itself against. |
 | [`docs/agent-contract.md`](docs/agent-contract.md) | The v1.11+ agent contract: what `code-pact` guarantees, what `adapter conformance` requires of each agent integration, and the recommended per-task lifecycle. |
-| [`docs/getting-started.md`](docs/getting-started.md) | First-thirty-minutes guide (three onboarding paths + the per-task loop). |
+| [`docs/getting-started.md`](docs/getting-started.md) | First-thirty-minutes guide (onboarding approaches + the per-task loop). |
 | [`docs/cli-contract.md`](docs/cli-contract.md) | Full flag / exit code / JSON envelope / error code reference and the Stability taxonomy. |
 | [`docs/migration.md`](docs/migration.md) | Upgrade guidance from any prior alpha (v0.6 – v0.9) to v1.0. |
 | [`docs/dogfood.md`](docs/dogfood.md) | Real-project walkthrough and troubleshooting for the most common error codes. |

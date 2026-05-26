@@ -10,15 +10,17 @@ If you're adding `code-pact` to an existing codebase, read [`brownfield-feature.
 
 | If you... | Use |
 | --- | --- |
-| ...just want to verify the install works against a throwaway repo | [Tutorial path](../getting-started.md#path-1--tutorial) |
-| ...already have a clear mental model of the first 1-2 phases | [Manual path](../getting-started.md#path-2--manual) |
-| ...want an AI agent to draft the full roadmap from a brief | [AI-assisted path](../getting-started.md#path-3--ai-assisted) |
+| ...just want to verify the install works against a throwaway repo | [Smoke test (tutorial)](../getting-started.md#path-1--tutorial) |
+| ...already have a roadmap/plan from an agent or ChatGPT | [Existing-plan adoption (`plan adopt`)](../getting-started.md#existing-plan-adoption--plan-adopt) |
+| ...have an agent holding the project context that can emit YAML | [Agent-first](../getting-started.md#path-3--ai-assisted) |
+| ...are starting cold and want a brief-grounded roadmap | [Code-pact-first](../getting-started.md#path-3--ai-assisted) |
+| ...prefer to type the first 1-2 phases by hand | [Manual](../getting-started.md#path-2--manual) |
 
-For most greenfield projects with non-trivial scope, **AI-assisted is the highest-leverage path** — you give your agent the brief and constitution, it produces a phase breakdown in one pass, and `phase import` ingests the YAML deterministically.
+For most greenfield projects with non-trivial scope, the highest-leverage path is **agent-driven**: either adopt a plan your agent (or ChatGPT) already produced with `plan adopt`, or have the agent draft one from a schema-only prompt. Both `plan adopt` and `phase import` ingest the result deterministically — code-pact never re-runs an LLM to reshape it.
 
 ## What to put in the brief and constitution
 
-Two interactive wizards, run once at the start of the project, write the foundation that every later prompt and context pack will reference. Filling them with real content is what makes the AI-assisted path produce a useful roadmap instead of generic scaffolding.
+Two interactive wizards, run once at the start of the project, write the foundation that every later prompt and context pack will reference. Filling them with real content is what makes the code-pact-first path produce a useful roadmap instead of generic scaffolding.
 
 ```sh
 code-pact plan brief         # → design/brief.md
@@ -65,6 +67,6 @@ After that single round trip, the rest of the roadmap is mechanical.
 
 ## Next reading
 
-- [`docs/getting-started.md`](../getting-started.md) — command sequences for all three onboarding paths.
+- [`docs/getting-started.md`](../getting-started.md) — command sequences for every onboarding approach.
 - [`docs/concepts/sample-phase.md`](../concepts/sample-phase.md) — keep / rename / delete decision for the wizard's sample phase.
 - [`docs/cli-contract.md`](../cli-contract.md) — full flag and JSON envelope reference.
