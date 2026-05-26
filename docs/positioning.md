@@ -2,7 +2,8 @@
 
 This document defines what `code-pact` is, what it deliberately
 is not, the surfaces it exposes, and the metrics by which the
-project measures whether it is delivering on its premise.
+project measures whether it is delivering on its premise. Unfamiliar
+with a term used here? See the [glossary](glossary.md).
 
 ## What code-pact is
 

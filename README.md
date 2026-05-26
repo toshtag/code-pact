@@ -96,11 +96,13 @@ The `generic` adapter writes one human-readable instructions file that you can c
 
 ## Non-goals (MVP)
 
-- No LLM API calls
-- No web UI, daemon, or vector database
-- No GitHub / Linear / Jira integrations
-- No multi-agent orchestration
-- No RAG / semantic search
+These are deliberate, permanent boundaries — not a backlog. `code-pact` will not add them; each is ruled out to keep the "agent calls one stable CLI" promise (see [`docs/positioning.md`](docs/positioning.md#what-code-pact-is-not)).
+
+- **No LLM API calls** — your agent does the inference; `code-pact` never calls a model.
+- **No web UI, daemon, or vector database** — it runs as a CLI and exits.
+- **No GitHub / Linear / Jira integration** — you wire those into your own agent or CI.
+- **No multi-agent orchestration** — one task, one agent per invocation.
+- **No RAG / semantic search** — context selection is deterministic, not embedding-based.
 
 ## Requirements
 

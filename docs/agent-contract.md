@@ -1,5 +1,10 @@
 # Agent contract
 
+> **Audience: agent integrators and maintainers.** If you just want to *use*
+> code-pact with an already-supported agent, you can skip this — start with
+> [getting-started.md](getting-started.md). Read on if you are integrating a
+> new agent, reviewing an adapter, or judging whether a feature is in scope.
+
 This document defines the contract between `code-pact` and any AI
 coding agent that drives work in a code-pact project. It pairs with
 [`docs/positioning.md`](positioning.md) (what the project is and is
@@ -98,10 +103,11 @@ files), the same input produces the same on-disk bytes.
 ### Progress is append-only
 
 `.code-pact/state/progress.yaml` is an append-only event log. The
-only verbs that mutate it are `task start`, `task block`, `task
-resume`, `task complete`, and `task finalize`. Read-only verbs —
-including `task prepare` (v1.11+) — never touch it. The progress-read
--only invariant is locked by unit tests.
+only verbs that append to it are `task start`, `task block`, `task
+resume`, and `task complete`. Read-only verbs — including `task
+prepare` (v1.11+) — never touch it, and `task finalize` writes only
+the design YAML status, never `progress.yaml`. The progress-read-only
+invariant is locked by unit tests.
 
 ## 2. What agents must do
 
