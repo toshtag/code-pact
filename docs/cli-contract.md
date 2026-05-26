@@ -7,6 +7,46 @@ codes, error codes, TTY/CI detection, and interactive-mode rules.
 The contract is part of the public API. Breaking changes here require
 a version bump and a migration note.
 
+## Quick reference
+
+The 90% you reach for first; each link jumps to the full section below.
+
+**Exit codes** — `0` success · `1` a check failed (e.g. verification) · `2` usage / config error · `3` internal error. Full table: [Exit codes](#exit-codes).
+
+**JSON envelope** — every `--json` command emits exactly one of these to stdout:
+
+```json
+{ "ok": true,  "data": { ... } }
+{ "ok": false, "error": { "code": "...", "message": "..." }, "data": { ... } }
+```
+
+Details: [JSON output shape](#json-output-shape).
+
+**Most common error codes**
+
+| Code | Exit | When it fires | What to do |
+| --- | --- | --- | --- |
+| `CONFIG_ERROR` | 2 | Bad flag, missing input, or malformed YAML | Re-check the command's flag surface below |
+| `TASK_NOT_FOUND` | 2 | Task id isn't in any phase | Verify the id (the `P1-T1` form) |
+| `AMBIGUOUS_TASK_ID` | 2 | Same id exists in multiple phases | The message lists them — qualify the id |
+| `VERIFICATION_FAILED` | 1 | `verify` / `task complete` check did not pass | Fix the failing command, then re-run |
+| `INVALID_TASK_TRANSITION` | 2 | Illegal state move (e.g. completing a `blocked` task) | `task resume` first, then complete |
+| `TASK_FINALIZE_NOT_ELIGIBLE` | 2 | Task's derived state isn't `done` yet | Run `task complete` first |
+| `LOCK_HELD` | 2 | Another mutation is in progress (transient) | Wait and retry; read-only commands are unaffected |
+| `CONTEXT_OVER_BUDGET` | 2 | Pack can't fit `--budget-bytes` | Re-run with the returned `data.minimum_achievable_bytes` |
+
+The complete catalog (Public / Plan / Doctor / Adapter) is in [Error codes](#error-codes).
+
+## Contents
+
+- **Output & exit contract** — [Stdout / stderr](#stdout--stderr) · [JSON output shape](#json-output-shape) · [Exit codes](#exit-codes) · [Error codes](#error-codes)
+- **Environment** — [TTY and CI detection](#tty-and-ci-detection) · [`--non-interactive`](#--non-interactive) · [Locale resolution](#locale-resolution) · [State file write guarantees](#state-file-write-guarantees)
+- **Planning & import** — [`plan`](#plan) · [`phase import`](#phase-import) · [`spec import`](#spec-import-v18)
+- **Per-task lifecycle** — [`task prepare`](#task-prepare--single-per-task-entry-point-v111-p21) · [`task context`](#task-context--context-quality-gates-v051-v11-additions) · [`task start` / `status` / `block` / `resume`](#task-start--task-status--task-block--task-resume-v06) · [`task complete`](#task-complete) · [`task finalize`](#task-finalize--flip-task-design-status-to-done-v12-p11) · [`task add`](#task-add--append-a-task-to-a-phase-v06-non-interactive-in-v14)
+- **Phase-level & sequencing** — [`phase reconcile`](#phase-reconcile--bulk-flip-task-design-statuses-for-a-phase-v12-p11) · [`task runbook`](#task-runbook--read-only-guidance-for-a-single-task-v13-p12) · [`phase runbook`](#phase-runbook--read-only-guidance-for-an-entire-phase-v13-p12)
+- **Adapters & diagnostics** — [`adapter`](#adapter-v09) · [`doctor`](#doctor--plan-quality-checks-v053) · [`recommend`](#recommend-v08)
+- **Stability** — [Stability taxonomy (v1.0)](#stability-taxonomy-v10) · [Stability](#stability)
+
 ## Stdout / stderr
 
 - **stdout** carries the primary command result. In human mode, this is
