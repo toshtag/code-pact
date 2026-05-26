@@ -81,4 +81,4 @@ You can always switch the verify command later by editing `design/phases/<phase>
 
 - [`docs/getting-started.md`](../getting-started.md) — command sequences for every onboarding approach.
 - [`docs/cli-contract.md`](../cli-contract.md) — full `adapter install --force` semantics, `task complete` contract, error code reference.
-- [`docs/migration.md`](../migration.md) — if you're upgrading an existing `code-pact` project (not adopting on a brand new one), the migration guide is the right entry point instead.
+- [`docs/upgrading.md`](../upgrading.md) — if you're upgrading an existing `code-pact` project (not adopting on a brand new one), the upgrade guide is the right entry point instead.

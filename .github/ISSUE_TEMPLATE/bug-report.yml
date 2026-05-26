@@ -8,7 +8,7 @@ body:
       value: |
         Thanks for filing a bug report.
 
-        Before submitting, please check whether the behaviour you are reporting is documented as intentional in [`docs/cli-contract.md`](../../docs/cli-contract.md) (e.g. `STATUS_DRIFT` warnings, `LOCAL_NOT_GITIGNORED`, the `task complete` design-vs-progress separation). If you are upgrading from a prior alpha, [`docs/migration.md`](../../docs/migration.md) covers the expected v0.6 → v1.0 transitions.
+        Before submitting, please check whether the behaviour you are reporting is documented as intentional in [`docs/cli-contract.md`](../../docs/cli-contract.md) (e.g. `STATUS_DRIFT` warnings, `LOCAL_NOT_GITIGNORED`, the `task complete` design-vs-progress separation). If you are upgrading, [`docs/upgrading.md`](../../docs/upgrading.md) covers the path (pre-v1.0 alpha notes are archived in [`docs/migration.md`](../../docs/migration.md)).
 
   - type: input
     id: version

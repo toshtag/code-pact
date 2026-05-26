@@ -172,7 +172,7 @@ code-pact adapter upgrade <agent> --write
 # pass --accept-modified (the only flag that overwrites local edits).
 ```
 
-See [`docs/migration.md`](migration.md) for the full upgrade path between alpha releases.
+See [`docs/upgrading.md`](upgrading.md) for the upgrade path (the alpha-era detail is archived in `migration.md`).
 
 ## Expected warnings after a non-interactive bootstrap
 

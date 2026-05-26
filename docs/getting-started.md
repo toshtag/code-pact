@@ -352,7 +352,7 @@ code-pact adapter doctor --json                        # adapter-scoped health c
 ## Next reading
 
 - [`docs/cli-contract.md`](cli-contract.md) — full flag / exit code / JSON envelope / error code reference and the Stability taxonomy.
-- [`docs/migration.md`](migration.md) — upgrade guidance from any prior alpha (v0.6 – v0.9) up through v1.5.0.
+- [`docs/upgrading.md`](upgrading.md) — how to upgrade (additive within v1.x; pre-v1.0 alpha notes archived in `migration.md`).
 - [`docs/dogfood.md`](dogfood.md) — the real-project walkthrough, including troubleshooting for the most common error codes.
 - [`docs/concepts/governance.md`](concepts/governance.md) — the v1.5 governance layer (advisory write lock, reserved-id block, roadmap mutation policy, phase status manual-flip convention).
 - [`docs/spec-kit-bridge.md`](spec-kit-bridge.md) — the v1.8 read-only one-way importer for Spec Kit `tasks.md` / `spec.md` / `plan.md` artifacts.
