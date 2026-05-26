@@ -266,6 +266,8 @@ phases:
         acceptance_refs: [docs/cli-contract.md]   # acceptance criteria paths
 ```
 
+**Verification key (`verify_commands`, NOT `verification`).** The import shape uses a flat top-level `verify_commands: [...]` list. This is **distinct from** the full Phase schema written under `design/phases/*.yaml`, which nests the same data as `verification: { commands: [...] }`. `PhaseImportEntry` is not strict, so a nested `verification:` block is silently dropped by validation and the phase falls back to the default verify command (`pnpm test`). To make this footgun visible rather than silent, import emits a `PHASE_VERIFY_COMMANDS_MISSHAPED` advisory (see `warnings` below) whenever an input phase carries `verification.commands` — including when a canonical `verify_commands` is also present, in which case the nested block is ignored.
+
 **Lenient task schema (v0.4+):** Only `id` is required on each task entry. Missing detail fields are filled with sensible defaults at import time. This allows AI-generated roadmap YAML (which often omits `ambiguity`, `context_size`, etc.) to be imported directly without manual field-filling.
 
 **P10 Task Readiness Schema fields (v1.1+):** `depends_on` / `decision_refs` / `reads` / `writes` / `acceptance_refs` are additive optional fields. They have **no synthetic default** — when omitted from the input they stay `undefined` on the parsed task and the corresponding pack section is omitted. Field semantics, validation rules, the supported glob subset (literal segments, single-segment `*`, full-segment `**` only), and the protected-path seed set live in [`design/decisions/task-readiness-schema-rfc.md`](../design/decisions/task-readiness-schema-rfc.md). The twelve additive lint codes that validate them are listed below under [§ Plan diagnostic codes](#plan-diagnostic-codes) → Task Readiness Schema diagnostics.
@@ -294,6 +296,7 @@ On success the JSON envelope returns
     "completed_fields": [
       { "taskId": "P1-T1", "fields": ["type", "ambiguity", "risk"] }
     ],
+    "warnings": [],
     "suggested_next_steps": [
       "Review the `completed_fields` array — every entry is a task field code-pact filled with a default. Confirm each is appropriate before treating the imported tasks as source-of-truth.",
       "Run `code-pact plan lint --json` to validate the imported phase(s).",
@@ -305,6 +308,10 @@ On success the JSON envelope returns
 ```
 
 `completed_fields` is non-empty only when defaults were applied. In strict mode it is always `[]`.
+
+**`warnings` (additive field).** Always present, even as `[]` (field-presence-fixed, like `suggested_next_steps`). Each entry is `{ code, phase_id?, message }`. Warnings are advisories only — they never change the exit code. The current code is:
+
+- `PHASE_VERIFY_COMMANDS_MISSHAPED` — an input phase used the nested `verification: { commands: [...] }` (full Phase) shape instead of the flat `verify_commands: [...]` (import) shape. Detected on the raw parsed YAML before schema validation, so it fires even though zod strips the unknown key. `phase_id` carries the offending phase id when the entry had a string `id`.
 
 **`suggested_next_steps` (v1.4+ additive field).** Always present, even as `[]`. Names the canonical post-import sequence:
 
