@@ -599,6 +599,97 @@ describe("runPhaseImport — lenient import (AI-generated YAML)", () => {
 });
 
 // ---------------------------------------------------------------------------
+// PR1 — verification.commands mis-shape advisory (PHASE_VERIFY_COMMANDS_MISSHAPED)
+// ---------------------------------------------------------------------------
+
+describe("runPhaseImport — verification.commands mis-shape advisory", () => {
+  it("warnings is always present (field-presence-fixed) and empty for clean input", async () => {
+    await setupEmptyProject(dir);
+    const inputPath = await writeInput(
+      dir,
+      `phases:
+  - id: P1
+    name: Foundation
+    weight: 10
+    objective: Clean canonical input
+    verify_commands:
+      - "echo ok"
+`,
+    );
+    const result = await runPhaseImport({ cwd: dir, inputPath });
+    expect(Array.isArray(result.warnings)).toBe(true);
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("verification.commands ONLY → warning emitted AND verify command falls to default", async () => {
+    await setupEmptyProject(dir);
+    const inputPath = await writeInput(
+      dir,
+      `phases:
+  - id: P1
+    name: Foundation
+    weight: 10
+    objective: Used the full Phase shape by mistake
+    verification:
+      commands:
+        - "pnpm exec vitest run src/feature/"
+`,
+    );
+    const result = await runPhaseImport({ cwd: dir, inputPath });
+
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0]!.code).toBe("PHASE_VERIFY_COMMANDS_MISSHAPED");
+    expect(result.warnings[0]!.phase_id).toBe("P1");
+
+    // The nested commands were dropped by zod → phase falls back to the
+    // createPhase default, NOT the value the author intended.
+    const phaseRaw = await readFile(
+      join(dir, "design", "phases", "P1-foundation.yaml"),
+      "utf8",
+    );
+    const phase = Phase.parse(parseYaml(phaseRaw) as unknown);
+    expect(phase.verification.commands).toEqual(["pnpm test"]);
+    expect(phase.verification.commands).not.toContain(
+      "pnpm exec vitest run src/feature/",
+    );
+  });
+
+  it("BOTH verify_commands and verification.commands → warning AND verify_commands is canonical", async () => {
+    await setupEmptyProject(dir);
+    const inputPath = await writeInput(
+      dir,
+      `phases:
+  - id: P1
+    name: Foundation
+    weight: 10
+    objective: Declares both shapes
+    verify_commands:
+      - "echo canonical"
+    verification:
+      commands:
+        - "echo legacy-ignored"
+`,
+    );
+    const result = await runPhaseImport({ cwd: dir, inputPath });
+
+    // Regression guard: a warning must fire even though verify_commands is
+    // present — otherwise the "if verify_commands exists, skip the warning"
+    // shortcut would let the silently-ignored legacy block go unnoticed.
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0]!.code).toBe("PHASE_VERIFY_COMMANDS_MISSHAPED");
+    expect(result.warnings[0]!.phase_id).toBe("P1");
+
+    const phaseRaw = await readFile(
+      join(dir, "design", "phases", "P1-foundation.yaml"),
+      "utf8",
+    );
+    const phase = Phase.parse(parseYaml(phaseRaw) as unknown);
+    expect(phase.verification.commands).toEqual(["echo canonical"]);
+    expect(phase.verification.commands).not.toContain("echo legacy-ignored");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // P10 — Task Readiness Schema additions
 // ---------------------------------------------------------------------------
 

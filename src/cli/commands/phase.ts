@@ -432,6 +432,9 @@ export async function cmdPhase(argv: string[], locale: Locale, globalJson: boole
           for (const cf of result.completed_fields) {
             process.stderr.write(`  completed defaults for ${cf.taskId}: ${cf.fields.join(", ")}\n`);
           }
+          for (const w of result.warnings) {
+            process.stderr.write(`  warning [${w.code}]${w.phase_id ? ` ${w.phase_id}` : ""}: ${w.message}\n`);
+          }
         }
         return 0;
       } catch (err: unknown) {

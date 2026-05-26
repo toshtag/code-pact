@@ -165,9 +165,17 @@ const EMISSION_PATTERNS: RegExp[] = [
 // emitted on `write_audit.base_error.code` — they live inside the
 // advisory `write_audit` envelope and never propagate to top-level
 // `error.code`, so they are deliberately out of the v1.0 public surface.
+//
+// `PHASE_VERIFY_COMMANDS_MISSHAPED` is a `phase import` advisory that lives
+// inside the import envelope's `data.warnings[].code` array. Like the
+// write_audit sub-codes above, it never propagates to top-level
+// `error.code` and never affects the exit code, so it is deliberately out
+// of the v1.0 public error-code table. It is documented under the
+// `phase import` section of docs/cli-contract.md instead.
 const NON_ERROR_CODES = new Set<string>([
   "MERGE_BASE_NOT_FOUND",
   "REF_NOT_FOUND",
+  "PHASE_VERIFY_COMMANDS_MISSHAPED",
 ]);
 
 async function walkSrc(dir: string): Promise<string[]> {
