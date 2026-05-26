@@ -313,7 +313,7 @@ code-pact phase reconcile P1 --write --json
 
 This is a **transient** failure: wait for the holding process to finish and re-run. Read-only commands (`plan lint`, `plan analyze`, `task runbook`, `phase runbook`, `validate`, `doctor`, `recommend`, `task context`, `task status`) do NOT acquire the lock and can be used to observe state while a mutation is pending. If a process crashed and left the lock file behind, you can delete `.code-pact/locks/write.lock` manually — but only after confirming no `code-pact` process is actually running.
 
-See [`docs/concepts/governance.md`](concepts/governance.md) for the v1.5 governance walkthrough and [`docs/dogfood.md` § Troubleshooting → `LOCK_HELD`](dogfood.md#lock_held-from-a-design-mutating-command-v15) for the recovery playbook.
+See [`docs/concepts/governance.md`](concepts/governance.md) for the v1.5 governance walkthrough and [`docs/troubleshooting.md` § `LOCK_HELD`](troubleshooting.md#lock_held-from-a-design-mutating-command-v15) for the recovery playbook.
 
 ## Ingesting external specs — Spec Kit bridge (v1.8+, optional)
 
