@@ -5,6 +5,10 @@
 **Owners:** maintainer
 **Related:** [design/decisions/lightweight-runbook-rfc.md](lightweight-runbook-rfc.md) (P12 — explicitly deferred init/UX polish to P13). [design/decisions/task-readiness-schema-rfc.md](task-readiness-schema-rfc.md) (P10 — provides the optional task fields P13's new `task add` flags can declare).
 
+## Summary
+
+The first-run experience had sharp edges: `init` always scaffolded a `P1` sample phase, `task add` was TTY-only, and planning commands gave no "what next" hint. This RFC makes the sample phase **opt-in** via `init --sample-phase` (renamed `P1` → `TUTORIAL` with real tutorial tasks), adds a **non-interactive flag set for `task add`**, and adds an additive **`suggested_next_steps`** field to `plan prompt` / `phase import`.
+
 ## Status lifecycle
 
 - This document opens at status **proposed** in PR1.

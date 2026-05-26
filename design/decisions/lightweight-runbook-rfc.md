@@ -5,6 +5,10 @@
 **Owners:** maintainer
 **Related:** [design/decisions/task-readiness-schema-rfc.md](task-readiness-schema-rfc.md) (P10 — provides `depends_on`, `decision_refs`, `acceptance_refs`, `writes` that the runbook reads). [design/decisions/finalization-reconciliation-rfc.md](finalization-reconciliation-rfc.md) (P11 — provides `task finalize` / `phase reconcile` that the runbook proposes as steps).
 
+## Summary
+
+Agents had to infer the next command from raw task/phase state. This RFC adds two **read-only** commands — `task runbook` and `phase runbook` — that return the recommended next steps as command strings and never execute anything, backed by shared helpers under `src/core/runbook/`. User-facing walkthrough: [docs/concepts/runbook.md](../../docs/concepts/runbook.md).
+
 ## Status lifecycle
 
 - This document opens at status **proposed** in PR1.
