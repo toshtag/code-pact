@@ -515,6 +515,31 @@ JSON output includes `schema_only`, `has_brief`, `has_constitution`, and `clipbo
 
 When `has_brief` or `has_constitution` is false, a leading step recommends `plan brief` / `plan constitution` first. The field is additive: existing JSON consumers (which read only `prompt` / `has_brief` / `has_constitution` / `clipboard_copied`) see no shape change.
 
+### `plan adopt <path> [--write] [--json]` (v1.x+)
+
+Deterministically converts an existing plan file into the `phase import` input shape. **Dry-run by default** — it prints the generated YAML and writes nothing. `--write` applies it by reusing the `phase import` validation and write pass (under the same advisory write lock). code-pact never calls an LLM here.
+
+For **structured** plans (task bullets under headings). A narrative roadmap whose tasks live in prose or fenced code blocks yields no list items and returns `no_plan_items_detected` — the signal to use `plan prompt --schema-only` + an agent instead. No `--force`: id collisions surface through the existing `phase import` errors.
+
+**Input detection order** (`data.source_type`):
+
+1. `phase_import_yaml` — a top-level `phases:` document already matching the import schema; passed through unchanged (the `verification.commands` mis-shape advisory still fires).
+2. `single_phase_yaml` — one Phase-shaped object (`id` / `name` / `objective` plus `tasks` and/or a verify list). Accepts the canonical `verify_commands` **and** the legacy nested `verification.commands` (normalised to `verify_commands`, with an advisory). Wrapped as `{ phases: [entry] }`.
+3. `markdown` — a narrow list parser: checkbox / plain / numbered bullets grouped under phase-marker headings (`P1` / `Phase N` / `Milestone` / `Epic` / `Sprint`), or a single inferred phase for a flat list. Phase ids are assigned sequentially past the existing roadmap's `P`-numbers. Tasks get a conservative `type` inference; remaining fields fall to `phase import` defaults. **No semantic filtering** — bullets in a "Risks" / "Non-goals" list become tasks too, so review the dry-run before `--write`.
+
+If none match → `CONFIG_ERROR` (exit 2) with `data.detail: "no_plan_items_detected"`. Other detail values: `unsafe_path`, `file_not_found`, `unreadable`.
+
+**JSON result** (`data`): `kind` (`would_adopt` | `adopted`), `source_path`, `source_type`, `phases_detected`, `tasks_detected`, `generated_import_yaml`, `warnings[]`, `import_result` (the `phase import` result on `--write`, else `null`), and `suggested_next_steps`.
+
+**`warnings[]`** entries are `{ code, message, line? }` — advisory only, never affect the exit code:
+
+- `PHASE_VERIFY_COMMANDS_MISSHAPED` — a nested `verification.commands` block was seen (pass-through / single-phase paths).
+- `CHECKED_TASK_SKIPPED` — a `- [x]` done item was skipped (design `done` comes from `task finalize`, not import).
+- `PHASE_ID_INFERRED` — no phase-marker heading; a single phase id was inferred.
+- `READINESS_FIELDS_NOT_INFERRED` — one per source: `depends_on` / `reads` / `writes` / `acceptance_refs` / `decision_refs` are never inferred from prose.
+
+On `--write`, errors from the import pass (`DUPLICATE_PHASE_ID`, `AMBIGUOUS_TASK_ID`, reserved-id `CONFIG_ERROR`) propagate unchanged.
+
 ### `plan constitution [--force] [--from-file <yaml> | --stdin | --description <s> --principle <s>...] [--json]`
 
 Interactive wizard that collects a project description and core principles, then writes `design/constitution.md`. Stability: **Stable (v0.2+)**. `--from-file`, `--stdin`, and `--description` / `--principle` are **Stable (v1.6+)** under P17-T4 (parallel to `plan brief` P17-T1 / T2 / T3).
