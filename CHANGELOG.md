@@ -13,6 +13,27 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+## [1.18.0] — 2026-05-26
+
+### Roadmap adoption — bring your own plan
+
+This release closes the gap between "an agent (or ChatGPT) already produced a roadmap" and "code-pact can execute it", without a second AI round-trip and without code-pact ever calling an LLM.
+
+**Added**
+
+- **`code-pact plan adopt <path>`** — deterministically convert an existing plan into phases and tasks. Dry-run by default (prints the phase-import YAML it would create); `--write` applies it by reusing the `phase import` validation + write pass under the advisory write lock. Detection order: a phase-import YAML (`phases:`), a single Phase-shaped YAML (accepts `verify_commands` or legacy `verification.commands`, normalised), or a structured markdown plan (`roadmap.md` / `TODO.md` / `tasks.md` — checkbox / plain / numbered bullets under `P1` / `Phase N` / `Milestone` / `Epic` / `Sprint` headings, or a single inferred phase for a flat list). A narrative plan whose tasks live in prose returns `no_plan_items_detected` — the signal to use the agent-first flow instead. No semantic filtering: review the dry-run before `--write`. Advisory `warnings[]` (`PHASE_VERIFY_COMMANDS_MISSHAPED`, `CHECKED_TASK_SKIPPED`, `PHASE_ID_INFERRED`, `READINESS_FIELDS_NOT_INFERRED`) never affect the exit code.
+- **`code-pact plan prompt --schema-only`** — emit just the YAML format example plus output rules, without reading `design/brief.md` / `design/constitution.md`. For agents that already hold the project context and only need the output shape fixed. JSON gains an always-present `data.schema_only` flag.
+
+**Fixed**
+
+- **Planning-prompt / phase-import schema mismatch (silent data loss).** `plan prompt` advertised the full Phase shape `verification: { commands: [...] }`, but `phase import` reads the flat `verify_commands: [...]` key — and `PhaseImportEntry` is not strict, so zod silently dropped the nested block and the phase fell back to the default verify command. The prompt example now uses `verify_commands` (and lists all eight `type` values plus `expected_duration` / `status`), and `phase import` detects the mis-shape on the raw YAML before validation and surfaces it as a `PHASE_VERIFY_COMMANDS_MISSHAPED` advisory in the new, always-present `data.warnings[]` array. Advisory only — never changes the exit code.
+
+**Changed**
+
+- **Onboarding docs restructured** around how the roadmap is produced: five approaches (Smoke test / Agent-first / Existing-plan adoption / Code-pact-first / Manual), with agent-driven adoption promoted and the brownfield guide no longer steering to "the manual path is usually right". The Spec Kit bridge is repositioned as the narrower, tool-specific importer; general structured-plan adoption is `plan adopt`. Japanese mirror updated to match. Existing getting-started anchors are preserved.
+
+All new fields (`data.schema_only` on `plan prompt`, `data.warnings[]` on `phase import`) are additive and field-presence-fixed; existing JSON consumers see no shape change.
+
 ## [1.17.1] — 2026-05-25
 
 ### Internal: CLI cluster extraction + docs (no behavior change)
