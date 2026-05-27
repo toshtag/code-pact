@@ -51,4 +51,5 @@ These explain how a feature works for users. The *why* behind each — the desig
 | [troubleshooting.md](troubleshooting.md) | Diagnostic code → recovery action for the most common error codes. |
 | [dogfood.md](dogfood.md) | Maintainer quick guide — running code-pact on code-pact itself (setup, per-task flow, checkpoints). |
 | [maintainers/operations.md](maintainers/operations.md) | Deeper maintainer topics — planning wizards, model-aware adapters, adapter-upgrade internals, Spec Kit import, release-prep posture. |
+| [maintainers/docs-maintenance.md](maintainers/docs-maintenance.md) | How these docs are organized and **which doc to update for which change** (the ownership map). |
 | [community.md](community.md) | Where to file issues / discussions / PRs and the scope-discipline rule for the Non-goals list. |
