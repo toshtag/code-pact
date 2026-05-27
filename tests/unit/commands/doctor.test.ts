@@ -301,15 +301,38 @@ describe("runDoctor — BRIEF_MISSING (v0.5.3)", () => {
 });
 
 describe("runDoctor — CONSTITUTION_PLACEHOLDER (v0.5.3)", () => {
-  it("reports CONSTITUTION_PLACEHOLDER when constitution.md contains the initial edit hint", async () => {
-    // Fresh init creates constitution.md with the placeholder text
+  // The placeholder warning is gated on a real (non-TUTORIAL) phase existing,
+  // so a fresh-init project must add one before the warning can fire.
+  async function addRealPhase(): Promise<void> {
+    await runPhaseAdd({
+      cwd: dir,
+      id: "P1",
+      name: "Foundation",
+      weight: 10,
+      objective: "Establish the project foundation.",
+      confidence: "high",
+      risk: "low",
+      verifyCommands: ["echo ok"],
+      definitionOfDone: ["Done"],
+    });
+  }
+
+  it("reports CONSTITUTION_PLACEHOLDER when a real phase exists and the constitution is still the placeholder", async () => {
+    await addRealPhase();
     const result = await runDoctor(dir);
     const issue = result.issues.find((i) => i.code === "CONSTITUTION_PLACEHOLDER");
     expect(issue).toBeDefined();
     expect(issue?.severity).toBe("warning");
   });
 
+  it("does not report CONSTITUTION_PLACEHOLDER on a fresh project with no real phase (noise suppression)", async () => {
+    const result = await runDoctor(dir);
+    const issue = result.issues.find((i) => i.code === "CONSTITUTION_PLACEHOLDER");
+    expect(issue).toBeUndefined();
+  });
+
   it("does not report CONSTITUTION_PLACEHOLDER when the hint text is removed", async () => {
+    await addRealPhase();
     await writeFile(
       join(dir, "design", "constitution.md"),
       "# My Project Constitution\n\n- Keep it simple.\n",
@@ -394,12 +417,24 @@ describe("runDoctor — disabled_checks via .code-pact/doctor.yaml (v0.5.3)", ()
   });
 
   it("other checks still fire when only some are disabled", async () => {
+    // A real phase is needed for CONSTITUTION_PLACEHOLDER to fire at all.
+    await runPhaseAdd({
+      cwd: dir,
+      id: "P1",
+      name: "Foundation",
+      weight: 10,
+      objective: "Establish the project foundation.",
+      confidence: "high",
+      risk: "low",
+      verifyCommands: ["echo ok"],
+      definitionOfDone: ["Done"],
+    });
     await writeFile(
       join(dir, ".code-pact", "doctor.yaml"),
       "disabled_checks:\n  - BRIEF_MISSING\n",
       "utf8",
     );
-    // CONSTITUTION_PLACEHOLDER should still fire (fresh init = unedited template)
+    // CONSTITUTION_PLACEHOLDER should still fire (constitution still unedited)
     const result = await runDoctor(dir);
     expect(result.issues.find((i) => i.code === "BRIEF_MISSING")).toBeUndefined();
     expect(result.issues.find((i) => i.code === "CONSTITUTION_PLACEHOLDER")).toBeDefined();

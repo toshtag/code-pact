@@ -18,6 +18,7 @@ import {
 import type { PhaseEntry } from "../core/plan/state.ts";
 import type { PlanIssue } from "../core/plan/shared.ts";
 import { isSupportedAgent, type SupportedAgent } from "../core/agents.ts";
+import { CONSTITUTION_PLACEHOLDER_MARKERS } from "../core/constitution.ts";
 import { readManifest } from "../core/adapters/manifest.ts";
 import { inspectAgent, type AdapterDoctorIssue } from "./adapter-doctor.ts";
 import { readPackageVersion } from "../lib/package-version.ts";
@@ -483,14 +484,21 @@ async function checkBriefMissing(cwd: string, issues: DoctorIssue[]): Promise<vo
   }
 }
 
-// Sentinel strings that indicate constitution.md hasn't been edited from its initial template.
-const CONSTITUTION_PLACEHOLDER_MARKERS = [
-  "Edit this file to reflect the actual principles of your project",
-  "このファイルを編集して、プロジェクト固有の原則を反映させてください",
-];
+// Check 13: constitution.md is not the unedited initial template.
+//
+// Gated on a real phase existing: a brand-new project (no phases, or only the
+// TUTORIAL sample) hasn't started real work yet, so nagging about the
+// placeholder is pure noise. init surfaces the edit nudge via
+// suggested_next_steps instead; this warning fires once the project has a
+// non-tutorial phase and the constitution is still untouched.
+async function checkConstitutionPlaceholder(
+  cwd: string,
+  phases: Phase[],
+  issues: DoctorIssue[],
+): Promise<void> {
+  const hasRealPhase = phases.some((p) => p.id !== "TUTORIAL");
+  if (!hasRealPhase) return;
 
-// Check 13: constitution.md is not the unedited initial template
-async function checkConstitutionPlaceholder(cwd: string, issues: DoctorIssue[]): Promise<void> {
   const path = join(cwd, "design", "constitution.md");
   let content: string;
   try {
@@ -637,8 +645,8 @@ export async function runDoctor(cwd: string): Promise<DoctorResult> {
   // 12. design/brief.md present
   await checkBriefMissing(cwd, allIssues);
 
-  // 13. constitution.md is not the unedited template
-  await checkConstitutionPlaceholder(cwd, allIssues);
+  // 13. constitution.md is not the unedited template (only once a real phase exists)
+  await checkConstitutionPlaceholder(cwd, phases, allIssues);
 
   // 14. phase objectives are non-trivial
   checkEmptyObjectives(phases, allIssues);
