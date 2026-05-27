@@ -51,9 +51,9 @@ Fastest way to confirm your install is healthy and watch the per-task loop run e
 code-pact tutorial
 ```
 
-Runs the whole loop — `init` → `task prepare` → `task start` → `task complete` → `task finalize` — plus the cross-task dependency gate, inside a throwaway sandbox, narrating each step in plain language, then deletes the sandbox. Nothing touches your repo. Add `--keep` to leave the sandbox on disk for inspection, or `--json` for a machine-readable transcript.
+Runs an **end-to-end smoke loop** — `init` → `task prepare` → `task start` → `task complete` (which runs verification internally) → `task finalize` — plus the cross-task dependency gate, inside a throwaway sandbox, narrating each step in plain language, then deletes the sandbox. Nothing touches your repo. Add `--keep` to leave the sandbox on disk for inspection, or `--json` for a machine-readable transcript.
 
-This is the recommended smoke test: zero setup, zero cleanup. Because it drives the same commands you would run yourself, the output cannot drift from real behaviour.
+This is the recommended smoke test: zero setup, zero cleanup. It does not call standalone `verify` (that runs inside `task complete`); for the command-by-command canonical loop, including the optional standalone `verify`, see Option B and [per-task-loop.md](per-task-loop.md).
 
 ### Option B — scaffold a real sample phase (`--sample-phase`)
 
@@ -74,24 +74,29 @@ This writes the `TUTORIAL` phase into `design/`. v1.4+ ships two minimal tutoria
 code-pact task prepare TUTORIAL-T1 --agent claude-code --json
 code-pact task start TUTORIAL-T1 --agent claude-code
 code-pact verify --phase TUTORIAL --task TUTORIAL-T1
+
+# Optional dependency demo: TUTORIAL-T2 is still blocked until T1 is done.
+code-pact task runbook TUTORIAL-T2 --json
+
 code-pact task complete TUTORIAL-T1 --agent claude-code
-code-pact task finalize TUTORIAL-T1 --write
+code-pact task finalize TUTORIAL-T1 --json          # preview (dry-run is the default)
+code-pact task finalize TUTORIAL-T1 --write --json  # apply
 
 # TUTORIAL-T2 depends on TUTORIAL-T1 — repeat once T1 is done.
 code-pact task prepare TUTORIAL-T2 --agent claude-code --json
 code-pact task start TUTORIAL-T2 --agent claude-code
 code-pact verify --phase TUTORIAL --task TUTORIAL-T2
 code-pact task complete TUTORIAL-T2 --agent claude-code
-code-pact task finalize TUTORIAL-T2 --write
+code-pact task finalize TUTORIAL-T2 --json
+code-pact task finalize TUTORIAL-T2 --write --json
 
-# Anywhere: ask the CLI "what should I do next?" — read-only, never executes.
-code-pact task runbook TUTORIAL-T2 --json   # per-task next steps
-code-pact phase runbook TUTORIAL --json     # per-phase next steps (histograms + reconcile candidate)
+# Phase-level read-only guidance, any time:
+code-pact phase runbook TUTORIAL --json
 ```
 
 If `pnpm test` is not the right verification command for your repo, pass a different one to `init` (`node --version` is a safe placeholder for a smoke test).
 
-> **Try the dependency demo.** Before completing TUTORIAL-T1, run `code-pact task runbook TUTORIAL-T2 --json`. The first step in `data.next_steps[]` will be a blocking `manual_action` step ("Wait for TUTORIAL-T1 to reach derived state: done"). This is the same dependency gate `code-pact tutorial` demonstrates automatically.
+> **The dependency demo** (the `task runbook TUTORIAL-T2` line above, run before T1 is done): the first step in `data.next_steps[]` is a blocking `manual_action` ("Wait for TUTORIAL-T1 to reach derived state: done"). This is the same dependency gate `code-pact tutorial` demonstrates automatically.
 
 > Steps 3/4 and the runbook commands are opt-in. v1.0 / v1.1 projects can keep flipping `status` by hand if they prefer; `task finalize` and `phase reconcile` exist to mechanize the step in release-prep PRs. `task runbook` and `phase runbook` (v1.3+) return read-only sequencing guidance — they never execute anything. See [`docs/concepts/finalization-reconciliation.md`](concepts/finalization-reconciliation.md) and [`docs/concepts/runbook.md`](concepts/runbook.md) for the walkthroughs.
 

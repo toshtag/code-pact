@@ -51,9 +51,9 @@ v1.0 より前の挙動に固定したプロジェクトでは `npm install -g c
 code-pact tutorial
 ```
 
-`init` → `task prepare` → `task start` → `task complete` → `task finalize` というループ全体と、タスク間の依存ゲートまでを使い捨てのサンドボックスで実行し、各ステップを平易に解説したうえでサンドボックスを削除します。あなたのリポジトリには一切触れません。`--keep` でサンドボックスを残して中身を確認でき、`--json` で機械可読のトランスクリプトが得られます。
+`init` → `task prepare` → `task start` → `task complete`（検証は内部で走ります）→ `task finalize` という **end-to-end のスモークループ**と、タスク間の依存ゲートまでを使い捨てのサンドボックスで実行し、各ステップを平易に解説したうえでサンドボックスを削除します。あなたのリポジトリには一切触れません。`--keep` でサンドボックスを残して中身を確認でき、`--json` で機械可読のトランスクリプトが得られます。
 
-準備も後片付けも不要で、おすすめの動作確認方法です。自分で実行するのと同じコマンドを走らせるため、出力が実際の挙動からズレることがありません。
+準備も後片付けも不要で、おすすめの動作確認方法です。standalone の `verify` は個別に実行しません（検証は `task complete` の中で走ります）。コマンド単位の正典ループ（任意の standalone `verify` を含む）は方法Bと [per-task-loop.md](per-task-loop.md) を参照してください。
 
 ### 方法B — 実際のサンプルフェーズを作る（`--sample-phase`）
 
@@ -74,15 +74,24 @@ code-pact init --non-interactive --agent claude-code --locale en-US --sample-pha
 code-pact task prepare TUTORIAL-T1 --agent claude-code --json
 code-pact task start TUTORIAL-T1 --agent claude-code
 code-pact verify --phase TUTORIAL --task TUTORIAL-T1
+
+# 任意の依存デモ: TUTORIAL-T1 が done になるまで TUTORIAL-T2 はブロックされる。
+code-pact task runbook TUTORIAL-T2 --json
+
 code-pact task complete TUTORIAL-T1 --agent claude-code
-code-pact task finalize TUTORIAL-T1 --write
+code-pact task finalize TUTORIAL-T1 --json          # プレビュー（既定は dry-run）
+code-pact task finalize TUTORIAL-T1 --write --json  # 適用
 
 # TUTORIAL-T2 は TUTORIAL-T1 に依存 — T1 が done になったら繰り返す。
 code-pact task prepare TUTORIAL-T2 --agent claude-code --json
 code-pact task start TUTORIAL-T2 --agent claude-code
 code-pact verify --phase TUTORIAL --task TUTORIAL-T2
 code-pact task complete TUTORIAL-T2 --agent claude-code
-code-pact task finalize TUTORIAL-T2 --write
+code-pact task finalize TUTORIAL-T2 --json
+code-pact task finalize TUTORIAL-T2 --write --json
+
+# フェーズ単位の読み取り専用ガイダンスはいつでも:
+code-pact phase runbook TUTORIAL --json
 ```
 
 `pnpm test` がこのリポジトリにふさわしくない場合は、`init` に別のコマンドを渡してください。スモークテスト目的なら `node --version` のようなコマンドも安全な選択肢です。
