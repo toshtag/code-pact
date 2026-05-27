@@ -9,29 +9,30 @@
 
 Documentation review found that several command and file names are not self-explanatory to newcomers, so the docs spend words compensating: `task finalize` (why, after `task complete`?), `phase import` (sounds single-phase), `runbook` (jargon), and the file name `dogfood.md`. This RFC catalogs **additive** aliases that read better for first-time users, alongside the compatibility rules that keep them safe.
 
-**Implemented:** `task next` → `task runbook`, `phase next` → `phase runbook`, `task reconcile` → `task finalize`, `plan import` → `phase import`. Each is thin dispatch sugar to the same handler (same flags / exit codes / envelope / error codes), documented as an alias in [`docs/cli-contract.md` § Command aliases](../../docs/cli-contract.md#command-aliases), and covered by `tests/integration/cli-aliases.test.ts` (byte-identical-output assertions). The canonical names remain the contract surface and are what `adapter` generation emits.
+**Implemented:** `task next` → `task runbook`, `phase next` → `phase runbook`, `task reconcile` → `task finalize`, `plan import` → `phase import`. Each is thin dispatch sugar to the same handler (same flags / exit codes / envelope / error codes), documented in [`docs/cli-contract.md` § Command aliases](../../docs/cli-contract.md#command-aliases), and covered by `tests/integration/cli-aliases.test.ts` (structural-equivalence assertions plus alias-specific human-facing error wording — not blanket byte-identical output). Canonical commands remain the **primary** documented and adapter-emitted commands; the aliases are **secondary Stable public aliases**: additive, not removable during v1.x, and never semantically divergent from their canonical command.
 
 **Not done:** the `dogfood.md` → `maintainer-quick-guide.md` rename — its bookkeeping cost (a compat stub + many `design/phases/*.yaml` references) outweighs the benefit, and the doc is already clearly framed as a maintainer guide.
 
-## Why this is a separate, deferred decision
+## Why aliases are constrained
 
-The v1.0 stability taxonomy freezes the public CLI surface (command names, flags, exit codes, envelope shapes, error codes) across the v1.x line. Aliases are **additive** — adding `task next` does not remove `task runbook` — so they are *allowed* under the taxonomy. But every alias is still public surface the project then has to keep stable forever, and it splits "one obvious way to do it" into two. That cost is real, so aliases should be added only with intent, not reflexively. Hence: documented here, implemented later (if at all).
+The v1.0 stability taxonomy freezes the public CLI surface (command names, flags, exit codes, envelope shapes, error codes) across the v1.x line. Aliases are **additive** — adding `task next` does not remove `task runbook` — so they are *allowed* under the taxonomy. But each alias, once documented, is itself public surface the project must keep stable, and it splits "one obvious way to do it" into two. That is why the set is small, the canonical name stays primary, and the constraints below are load-bearing.
 
-## Candidate aliases
+## Implemented aliases
 
-| Today | Candidate alias | Rationale | Risk / notes |
-| --- | --- | --- | --- |
-| `task runbook <id>` | `task next <id>` | "what do I do next?" is what newcomers actually ask | Semantics must match exactly. `runbook` stays the canonical/contract name; `next` is the friendly door. |
-| `phase runbook <id>` | `phase next <id>` | mirrors `task next` | Same as above. |
-| `task finalize <id>` | `task reconcile <id>` | aligns with the existing `phase reconcile`; "reconcile design status" is clearer than "finalize" | Verb consistency with `phase reconcile` is the main win. |
-| `phase import <yaml>` | `plan import <yaml>` (or `roadmap import`) | the command imports a whole multi-phase roadmap, not one phase | `plan import` fits the existing `plan` cluster; docs could prefer it for newcomers. |
-| `plan adopt <path>` | (leave as-is) | `adopt` ("adopt an existing plan") is acceptable | Low priority — listed only for completeness. |
+| Canonical | Alias | Why |
+| --- | --- | --- |
+| `task runbook <id>` | `task next <id>` | "what do I do next?" is what newcomers actually ask. `runbook` stays the canonical/contract name; `next` is the friendly door. |
+| `phase runbook <id>` | `phase next <id>` | mirrors `task next`. |
+| `task finalize <id>` | `task reconcile <id>` | verb-consistent with the existing `phase reconcile`; "reconcile design status" reads clearer than "finalize". |
+| `phase import <yaml>` | `plan import <yaml>` | the command ingests a whole multi-phase roadmap, not one phase; `plan import` fits the `plan` cluster. |
 
-## Candidate doc rename
+`plan adopt` was considered and intentionally **left as-is** (`adopt` is acceptable; no alias added).
 
-| Today | Candidate | Rationale | Risk / notes |
-| --- | --- | --- | --- |
-| `docs/dogfood.md` | `docs/maintainer-quick-guide.md` | "dogfood" is insider jargon; the file is a maintainer quick guide | **Must** keep `docs/dogfood.md` as a compatibility stub — it is referenced by many `design/phases/*.yaml` fields and would otherwise trip `plan lint`'s `TASK_*_REF_NOT_FOUND` (same lesson as the `migration.md` archive). |
+## Deferred doc rename
+
+| Today | Deferred candidate | Why deferred |
+| --- | --- | --- |
+| `docs/dogfood.md` | `docs/maintainer-quick-guide.md` | "dogfood" is insider jargon, but the rename would need a compatibility stub (it is referenced by many `design/phases/*.yaml` fields, which would otherwise trip `plan lint`'s `TASK_*_REF_NOT_FOUND`, per the `migration.md` lesson). The doc is already framed as a maintainer guide, so the cost outweighs the benefit for now. |
 
 ## Constraints any implementation must honor
 
@@ -42,6 +43,6 @@ The v1.0 stability taxonomy freezes the public CLI surface (command names, flags
 5. **File renames keep a compatibility stub** at the old path (the `migration.md` precedent), and update `design/phases/*.yaml` references only if the stub is later removed.
 6. **Tests + docs land together.** An alias without a documented mapping and a test is drift.
 
-## Recommendation
+## Outcome
 
-Treat aliases as a small, opt-in UX phase, prioritized as: `task next` / `phase next` (highest newcomer value, exact-semantics) > `task reconcile` (verb consistency) > `plan import` (docs-preference, maybe alias-only). The `dogfood.md` rename is lowest priority and highest bookkeeping cost; defer unless a broader docs reorg is happening anyway. Until a phase adopts this, the docs compensate with plain-language framing and the glossary — which is the cheaper lever.
+The four command aliases shipped together (one small PR + a UX-polish follow-up that made alias error messages name the alias). The `dogfood.md` rename stayed deferred. Onboarding docs continue to teach the canonical commands; the aliases are discoverable from `docs/cli-contract.md`. Introducing the aliases into beginner docs, or revisiting the rename, would be a separate deliberate copy pass — not required by this decision.
