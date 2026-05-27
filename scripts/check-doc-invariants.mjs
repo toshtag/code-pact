@@ -5,6 +5,9 @@
 // links/text that are still *valid* but semantically stale or unsafe — the
 // kind of drift that re-appears every time a feature is added. Each rule
 // below encodes a lesson from a past regression so CI can stop it recurring.
+// It also guards one non-doc evidence invariant: the committed measurements
+// snapshot must match the package version (so releases can't ship stale
+// measurements, as v1.18.0 nearly did).
 //
 // Rules are intentionally narrow and prose-scoped (code fences and <details>
 // blocks are stripped before scanning) to avoid false positives on legitimate
@@ -98,6 +101,21 @@ for (const rel of ["docs/getting-started.md", "docs/ja/getting-started.md"]) {
     if (m) {
       fail(rel, `beginner prose contains ${label}: "${m[0]}" — move to <details>, upgrading.md, or operations.md`);
     }
+  }
+}
+
+// 7. The committed measurements snapshot must reflect the current release —
+//    its `code_pact_cli_version` must equal package.json's version. This
+//    catches "released without re-running the harness" (the v1.18.0 class,
+//    which shipped a v1.17.1 snapshot). Run `pnpm harness --corpus . --write`.
+{
+  const pkgVersion = JSON.parse(read("package.json")).version;
+  const summaryVersion = JSON.parse(read("design/measurements/summary.json")).code_pact_cli_version;
+  if (pkgVersion !== summaryVersion) {
+    fail(
+      "design/measurements/summary.json",
+      `code_pact_cli_version "${summaryVersion}" != package.json "${pkgVersion}" — run \`pnpm harness --corpus . --write\` to refresh the snapshot`,
+    );
   }
 }
 

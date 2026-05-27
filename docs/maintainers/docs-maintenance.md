@@ -37,6 +37,7 @@ docs/ja/*                        Japanese mirror of first-run / user guides only
 | Maintainer-only operation | [`maintainers/operations.md`](operations.md) | `dogfood.md` only if it belongs in the daily path | Do not expose it in getting-started |
 | Design rationale | [`design/decisions/*.md`](../../design/decisions/README.md) | concept-doc summary if user-facing | Do not make users read RFCs to use a feature |
 | Release notes | [`CHANGELOG.md`](../../CHANGELOG.md) | `upgrading.md` if it changes the upgrade story | Do not restate release history in migration.md |
+| Cutting a release | [`maintainers/releasing.md`](releasing.md) (the runbook) | CHANGELOG, `package.json`, `design/measurements/` | Do not hand-copy measurement values into prose |
 | New term | [`glossary.md`](../glossary.md) | the doc that introduces it (one-line) | Do not re-define terms per-doc |
 | Japanese | `docs/ja/*` (first-run / user guides only) | link to the English primary for everything else | Do not partially translate reference contracts |
 
