@@ -56,13 +56,20 @@ After the release-prep PR merges to `main`:
    ```sh
    npm publish
    ```
-8. **GitHub Release** from the tag, using the CHANGELOG section as the body.
-   Do **not** hand-copy a tarball checksum into the notes: `npm publish`
-   attaches a provenance signature and the registry exposes a sha512
-   `integrity`, which `npm install` verifies automatically — a manual sha1 is
-   weaker, redundant, and drift-prone. If you ever do need the published
-   tarball's hash, read it from `npm view code-pact dist` **after** publish
-   (never from `pnpm pack`, which is not the published tarball).
+8. **GitHub Release** from the tag, using the CHANGELOG section as the body,
+   **plus an `## Integrity` section** recording the published tarball's
+   `shasum` and `integrity`. This is a documented supply-chain policy
+   ([SECURITY.md](../../SECURITY.md): "the published tarball shasum is recorded
+   in the corresponding GitHub Release notes"), so it is **required**. Take the
+   values **after** publish from the registry — `pnpm pack` is not the
+   published tarball, and `npm view … dist` can return a stale `E404` right
+   after publish, so read the registry JSON directly:
+   ```sh
+   curl -s https://registry.npmjs.org/code-pact \
+     | node -e 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>{const v=JSON.parse(d).versions["<version>"].dist;console.log("shasum:",v.shasum);console.log("integrity:",v.integrity)})'
+   ```
+   As a final check, download that `dist.tarball` and recompute `shasum` to
+   confirm it matches the notes.
 
 ## What does NOT need a release
 
