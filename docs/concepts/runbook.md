@@ -156,7 +156,7 @@ Both commands introduce **zero new error codes**. They reuse:
 The RFC § Open questions enumerates deferrals. The headline items:
 
 - **`task runbook --execute`** — a flag that would run each recommended step automatically. The runbook's value is judgement, not orchestration; revisit only if usage signal warrants.
-- **`task next` / `phase next` aliases** — out of v1.3 scope, but since shipped as secondary Stable public aliases for `task runbook` / `phase runbook`. `runbook` remains the canonical contract name and the command emitted in machine-readable runbook output (`next_steps[].command`). See [`docs/cli-contract.md` § Command aliases](../cli-contract.md#command-aliases).
+- **`task next` / `phase next` aliases** — not part of the original v1.3 runbook scope, but have since shipped as secondary Stable public aliases for `task runbook` / `phase runbook`. `runbook` remains the canonical contract name and the command emitted in machine-readable runbook output (`next_steps[].command`). See [`docs/cli-contract.md` § Command aliases](../cli-contract.md#command-aliases).
 - **Schema-level `human_gate` field** — manual checkpoints are expressed as `RunbookStep` content (`command: null` + `manual_action: "..."`) without a task-schema field. Promotion to a schema field requires more usage signal.
 - **Multi-phase `phase runbook --all`** — per-phase only in v1.3.
 - **Bundling `recommend` output into `task runbook`** — separate commands, intentionally. Bundling is a P13 candidate.
