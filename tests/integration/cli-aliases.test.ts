@@ -10,8 +10,9 @@
 //  1. Dispatch equivalence — an alias and its canonical command produce the
 //     same machine result (exit code, ok, error.code, and — for success and
 //     semantic errors that carry no command name — byte-identical stdout).
-//  2. Alias-facing UX — when an alias is *misused* (missing argument), the
-//     human-facing message names the alias, not the canonical command.
+//  2. Alias-facing UX — when an alias is *misused* (missing argument or parse
+//     error), the human-facing message names the alias, not the canonical
+//     command.
 
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
 import { spawnSync } from "node:child_process";
@@ -144,19 +145,25 @@ describe("misused aliases name the alias, not the canonical command", () => {
   });
 
   it("`phase next --bogus` (unknown flag) is alias-aware", () => {
-    const { stdout } = run(["phase", "next", "--bogus", "--json"]);
+    const { code, stdout } = run(["phase", "next", "--bogus", "--json"]);
+    expect(code).toBe(2);
+    expect(envelope(stdout).error?.code).toBe("CONFIG_ERROR");
     expect(stdout).toContain("phase next");
     expect(stdout).toContain("alias for `phase runbook`");
   });
 
   it("`task reconcile --bogus` (unknown flag) is alias-aware", () => {
-    const { stdout } = run(["task", "reconcile", "--bogus", "--json"]);
+    const { code, stdout } = run(["task", "reconcile", "--bogus", "--json"]);
+    expect(code).toBe(2);
+    expect(envelope(stdout).error?.code).toBe("CONFIG_ERROR");
     expect(stdout).toContain("task reconcile");
     expect(stdout).toContain("alias for `task finalize`");
   });
 
   it("`plan import --bogus` (unknown flag) is alias-aware", () => {
-    const { stdout } = run(["plan", "import", "--bogus", "--json"]);
+    const { code, stdout } = run(["plan", "import", "--bogus", "--json"]);
+    expect(code).toBe(2);
+    expect(envelope(stdout).error?.code).toBe("CONFIG_ERROR");
     expect(stdout).toContain("plan import");
     expect(stdout).toContain("alias for `phase import`");
   });

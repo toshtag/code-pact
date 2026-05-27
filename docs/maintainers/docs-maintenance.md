@@ -56,5 +56,7 @@ Rules:
 
 ## Checks
 
-- [`scripts/check-doc-links.mjs`](../../scripts/check-doc-links.mjs) (`pnpm check:doc-links`, run in CI) verifies relative `.md` links and `.md#anchor` targets resolve.
+- [`scripts/check-doc-links.mjs`](../../scripts/check-doc-links.mjs) (`pnpm check:doc-links`) verifies relative `.md` links and `.md#anchor` targets resolve.
+- [`scripts/check-doc-invariants.mjs`](../../scripts/check-doc-invariants.mjs) (`pnpm check:doc-invariants`) enforces semantic invariants the link checker can't see — e.g. the README tour stays runnable, beginner docs carry no version/RFC noise, and `dogfood.md` stays a quick guide.
+- `pnpm check:docs` runs both, and CI runs it on every matrix entry.
 - It **cannot** catch *semantically* stale links — a link whose target file still exists but whose section has moved (e.g. a "see dogfood § Release prep" pointer after Release prep moved to `operations.md`). When you move a section, grep for prose that points at its old home, not just the anchor.
