@@ -159,6 +159,7 @@ CI.
 | `WRITES_AUDIT_STRICT_FAILED` (v1.6+ / P15-T6) | `task finalize --audit-strict` | The audit emitted at least one `TASK_WRITES_AUDIT_*` warning and `--audit-strict` was supplied. Exit code is **1** (not 2 — the invocation was well-formed; only the strict gate refused). The envelope carries the full `write_audit` plus `applied: false` to make the no-mutation guarantee machine-readable |
 | `CONTEXT_OVER_BUDGET` (v1.13+ / P24) | `task context --budget-bytes`, `task prepare --budget-bytes` | Even maximal section elision could not bring the rendered pack at or below the requested byte budget. Exit code 2. The envelope carries `data.budget_bytes`, `data.minimum_achievable_bytes` (the post-maximal-elision size — re-running with this value as the budget succeeds), and `data.unelidable_sections` (the structural floor) |
 | `INTERNAL_ERROR` | any command | Reserved for unhandled exceptions |
+| `ADAPTER_DESIRED_PATH_CONFLICT` (v1.20+) | `adapter install`, `adapter upgrade --write` | Defense-in-depth invariant: an adapter generator produced two desired files at the same path with differing content. Should never fire in practice (each adapter uniquifies its own paths); surfaced as an unhandled exception (exit 3), not a structured envelope |
 
 ### Plan diagnostic codes
 

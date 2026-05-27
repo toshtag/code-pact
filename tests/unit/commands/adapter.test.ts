@@ -386,14 +386,22 @@ describe("runGenerateAdapter — claude-code model-aware (v0.5)", () => {
     expect(content).not.toContain("Model guidance");
   });
 
-  it("unknown model string: includes fallback note instead of crashing", async () => {
-    await runGenerateAdapter({
-      cwd: dir, agentName: "claude-code", force: true, locale: "en-US",
-      modelVersion: "future-model-99",
-    });
-    const content = await readFile(join(dir, "CLAUDE.md"), "utf8");
-    expect(content).toContain("Model guidance (future-model-99)");
-    expect(content).toContain("No model-specific guidance available");
+  it("unknown model string: rejects with CONFIG_ERROR before any mutation", async () => {
+    await expect(
+      runGenerateAdapter({
+        cwd: dir, agentName: "claude-code", force: true, locale: "en-US",
+        modelVersion: "future-model-99",
+      }),
+    ).rejects.toMatchObject({ code: "CONFIG_ERROR" });
+
+    // Validation runs before any filesystem write: the profile is not pinned
+    // and no instruction file was produced.
+    const profile = await readFile(
+      join(dir, ".code-pact", "agent-profiles", "claude-code.yaml"),
+      "utf8",
+    );
+    expect(profile).not.toContain("model_version");
+    await expect(readFile(join(dir, "CLAUDE.md"), "utf8")).rejects.toThrow();
   });
 
   it("model_version from profile.yaml is used when no CLI override", async () => {

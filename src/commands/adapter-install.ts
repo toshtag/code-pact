@@ -18,6 +18,8 @@ import {
   readManifest,
   writeManifest,
 } from "../core/adapters/manifest.ts";
+import { dedupeDesiredFiles } from "../core/adapters/desired.ts";
+import { resolveAndPinModelVersion } from "../core/adapters/model-version.ts";
 import type {
   AdapterManifest,
   ManifestFile,
@@ -177,16 +179,32 @@ export async function runAdapterInstall(
     loadModelProfiles(cwd),
   ]);
 
-  const descriptor = adapterRegistry[agentName];
-  const desiredFiles = await descriptor.generateDesiredFiles({
+  // Validate `--model` and pin it to the agent profile BEFORE any other
+  // filesystem mutation. An unknown value throws CONFIG_ERROR here, before
+  // a single directory or file is written.
+  const resolvedModelVersion = await resolveAndPinModelVersion({
     cwd,
+    agentName,
     profile,
-    modelProfiles,
-    locale,
-    modelVersion,
+    modelVersionInput: modelVersion,
   });
 
-  const existingManifest = await readManifest(cwd, agentName);
+  const descriptor = adapterRegistry[agentName];
+  const desiredFiles = dedupeDesiredFiles(
+    await descriptor.generateDesiredFiles({
+      cwd,
+      profile,
+      modelProfiles,
+      locale,
+      modelVersion: resolvedModelVersion,
+    }),
+  );
+
+  // Tolerant read: a legacy manifest with duplicate paths is repairable here —
+  // we regenerate a unique manifest below — so it must not abort the install.
+  const existingManifest = await readManifest(cwd, agentName, {
+    tolerantDuplicatePaths: true,
+  });
   const existingByPath = new Map<string, ManifestFile>(
     (existingManifest?.files ?? []).map((f) => [f.path, f]),
   );
@@ -268,7 +286,7 @@ export async function runAdapterInstall(
 
   const generatorVersion =
     generatorVersionOverride ?? (await readPackageVersion());
-  const resolvedModel = modelVersion ?? profile.model_version;
+  const resolvedModel = resolvedModelVersion;
 
   const manifest: AdapterManifest = {
     schema_version: 1,

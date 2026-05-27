@@ -151,11 +151,28 @@ describe("adapter upgrade — CLI", () => {
     expect(parsed.error.code).toBe("MANIFEST_NOT_FOUND");
   });
 
+  it("--check --model → CONFIG_ERROR exit 2 (read-only must not pin)", () => {
+    runCli(["adapter", "install", "claude-code", "--json"]);
+    const res = runCli(["adapter", "upgrade", "claude-code", "--check", "--model", "opus-4.7", "--json"]);
+    expect(res.status).toBe(2);
+    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string; message: string } };
+    expect(parsed.error.code).toBe("CONFIG_ERROR");
+    expect(parsed.error.message).toMatch(/--model.*--check|--check.*--model/);
+  });
+
   it("unknown agent → AGENT_NOT_FOUND exit 2", () => {
     const res = runCli(["adapter", "upgrade", "no-such-agent", "--check", "--json"]);
     expect(res.status).toBe(2);
     const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
     expect(parsed.error.code).toBe("AGENT_NOT_FOUND");
+  });
+
+  it("--write --model (unknown value) → CONFIG_ERROR exit 2", () => {
+    runCli(["adapter", "install", "claude-code", "--json"]);
+    const res = runCli(["adapter", "upgrade", "claude-code", "--write", "--model", "gpt-9", "--json"]);
+    expect(res.status).toBe(2);
+    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+    expect(parsed.error.code).toBe("CONFIG_ERROR");
   });
 
   it("--check after fresh install → clean true, exit 0", () => {

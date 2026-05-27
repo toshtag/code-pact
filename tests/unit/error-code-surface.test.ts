@@ -140,6 +140,11 @@ const KNOWN_CODES: Record<string, "public" | "plan" | "doctor" | "adapter" | "in
 
   // Internal
   INTERNAL_ERROR: "internal",
+  // Defense-in-depth invariant: an adapter generator produced two desired
+  // files at the same path with differing content. Should never fire (each
+  // adapter uniquifies its own paths); surfaced as an unhandled exception
+  // (exit 3) rather than a structured envelope.
+  ADAPTER_DESIRED_PATH_CONFLICT: "internal",
 };
 
 // Emission patterns we recognize:
