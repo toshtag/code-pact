@@ -66,14 +66,17 @@ export async function cmdTask(argv: string[], locale: Locale, globalJson: boolea
   if (subcommand === "resume") {
     return cmdTaskResume(rest, locale, globalJson);
   }
-  if (subcommand === "finalize") {
+  // `reconcile` is a beginner-friendly alias for `finalize` (verb-consistent
+  // with `phase reconcile`). See design/decisions/cli-alias-ux-rfc.md.
+  if (subcommand === "finalize" || subcommand === "reconcile") {
     return cmdTaskFinalize(rest, locale, globalJson);
   }
-  if (subcommand === "runbook") {
+  // `next` is a beginner-friendly alias for `runbook` ("what should I do next?").
+  if (subcommand === "runbook" || subcommand === "next") {
     return cmdTaskRunbook(rest, locale, globalJson);
   }
 
-  const msg = `task: unknown subcommand "${subcommand ?? ""}". Use: add | context | prepare | start | status | block | resume | complete | finalize | runbook`;
+  const msg = `task: unknown subcommand "${subcommand ?? ""}". Use: add | context | prepare | start | status | block | resume | complete | finalize | runbook (aliases: reconcile = finalize, next = runbook)`;
   if (globalJson) {
     process.stdout.write(
       `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,

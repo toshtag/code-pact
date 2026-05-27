@@ -369,7 +369,9 @@ export async function cmdPhase(argv: string[], locale: Locale, globalJson: boole
     return cmdPhaseReconcile(rest, locale, globalJson);
   }
 
-  if (subcommand === "runbook") {
+  // `next` is a beginner-friendly alias for `runbook` ("what should I do
+  // next?"). See design/decisions/cli-alias-ux-rfc.md.
+  if (subcommand === "runbook" || subcommand === "next") {
     return cmdPhaseRunbook(rest, locale, globalJson);
   }
 
@@ -460,7 +462,7 @@ export async function cmdPhase(argv: string[], locale: Locale, globalJson: boole
   }
 
   // Unknown subcommand
-  const msg = `phase: unknown subcommand "${subcommand ?? ""}". Use: add | new | ls | show | import | reconcile | runbook`;
+  const msg = `phase: unknown subcommand "${subcommand ?? ""}". Use: add | new | ls | show | import | reconcile | runbook (alias: next = runbook)`;
   if (globalJson) {
     process.stdout.write(
       `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
