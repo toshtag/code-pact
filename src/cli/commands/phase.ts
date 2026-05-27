@@ -372,93 +372,12 @@ export async function cmdPhase(argv: string[], locale: Locale, globalJson: boole
   // `next` is a beginner-friendly alias for `runbook` ("what should I do
   // next?"). See design/decisions/cli-alias-ux-rfc.md.
   if (subcommand === "runbook" || subcommand === "next") {
-    return cmdPhaseRunbook(rest, locale, globalJson);
+    return cmdPhaseRunbook(rest, locale, globalJson, `phase ${subcommand}`);
   }
 
-  // ---- phase import ----
+  // ---- phase import ---- (also reachable as the `plan import` alias)
   if (subcommand === "import") {
-    let values: Record<string, unknown>;
-    let positionals: string[];
-    try {
-      ({ values, positionals } = strictParse(
-        "phase import",
-        rest,
-        {
-          force: { type: "boolean" },
-          strict: { type: "boolean" },
-          json: { type: "boolean" },
-        },
-        { allowPositionals: true },
-      ));
-    } catch (err) {
-      if (!(err instanceof ConfigError)) throw err;
-      const json = globalJson || rest.includes("--json");
-      if (json) {
-        process.stdout.write(
-          `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: err.message } })}\n`,
-        );
-      } else {
-        process.stderr.write(`${err.message}\n`);
-      }
-      return 2;
-    }
-
-    const json = globalJson || values.json === true;
-    const force = values.force === true;
-    const strict = values.strict === true;
-    const inputPath = positionals[0];
-    if (!inputPath) {
-      const msg = "phase import requires an input YAML path, e.g. `phase import design/roadmap-draft.yaml`";
-      if (json) {
-        process.stdout.write(
-          `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
-        );
-      } else {
-        process.stderr.write(`${msg}\n`);
-      }
-      return 2;
-    }
-
-    // P14 advisory write lock: a single acquisition covers
-    // `runPhaseImport`'s multi-phase apply loop (every `createPhase`
-    // call inside runs under the same lock — batch transactionality).
-    // `createPhase` itself stays lock-agnostic so the inner calls
-    // don't try to re-acquire.
-    return withWriteLock(cwd, "phase import", json, async (): Promise<number> => {
-      try {
-        const result = await runPhaseImport({ cwd, inputPath, force, strict });
-        if (json) {
-          process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
-        } else {
-          process.stderr.write(`${m.phase.importDone(result.imported_phases.length, result.imported_tasks.length, result.skipped_phases.length)}\n`);
-          for (const cf of result.completed_fields) {
-            process.stderr.write(`  completed defaults for ${cf.taskId}: ${cf.fields.join(", ")}\n`);
-          }
-          for (const w of result.warnings) {
-            process.stderr.write(`  warning [${w.code}]${w.phase_id ? ` ${w.phase_id}` : ""}: ${w.message}\n`);
-          }
-        }
-        return 0;
-      } catch (err: unknown) {
-        const code = (err as NodeJS.ErrnoException).code;
-        const message = err instanceof Error ? err.message : String(err);
-        if (
-          code === "CONFIG_ERROR" ||
-          code === "DUPLICATE_PHASE_ID" ||
-          code === "AMBIGUOUS_TASK_ID"
-        ) {
-          if (json) {
-            process.stdout.write(
-              `${JSON.stringify({ ok: false, error: { code, message } })}\n`,
-            );
-          } else {
-            process.stderr.write(`${message}\n`);
-          }
-          return 2;
-        }
-        throw err;
-      }
-    });
+    return cmdPhaseImport(rest, locale, globalJson);
   }
 
   // Unknown subcommand
@@ -652,10 +571,105 @@ async function cmdPhaseReconcile(
 }
 
 // phase runbook (v1.3 P12)
+// Shared by `phase import` and the `plan import` alias. `invokedAs` labels the
+// user-facing CONFIG_ERROR messages so an alias names itself; the write-lock
+// identity stays canonical.
+export async function cmdPhaseImport(
+  argv: string[],
+  locale: Locale,
+  globalJson: boolean,
+  invokedAs: string = "phase import",
+): Promise<number> {
+  const m = messages[locale];
+  const cwd = process.cwd();
+
+  let values: Record<string, unknown>;
+  let positionals: string[];
+  try {
+    ({ values, positionals } = strictParse(
+      invokedAs,
+      argv,
+      {
+        force: { type: "boolean" },
+        strict: { type: "boolean" },
+        json: { type: "boolean" },
+      },
+      { allowPositionals: true },
+    ));
+  } catch (err) {
+    if (!(err instanceof ConfigError)) throw err;
+    const json = globalJson || argv.includes("--json");
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: err.message } })}\n`,
+      );
+    } else {
+      process.stderr.write(`${err.message}\n`);
+    }
+    return 2;
+  }
+
+  const json = globalJson || values.json === true;
+  const force = values.force === true;
+  const strict = values.strict === true;
+  const inputPath = positionals[0];
+  if (!inputPath) {
+    const aliasNote = invokedAs === "phase import" ? "" : " (alias for `phase import`)";
+    const msg = `${invokedAs} requires an input YAML path, e.g. \`${invokedAs} design/roadmap-draft.yaml\`${aliasNote}`;
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
+      );
+    } else {
+      process.stderr.write(`${msg}\n`);
+    }
+    return 2;
+  }
+
+  // P14 advisory write lock: a single acquisition covers runPhaseImport's
+  // multi-phase apply loop (every inner createPhase runs under the same lock).
+  return withWriteLock(cwd, "phase import", json, async (): Promise<number> => {
+    try {
+      const result = await runPhaseImport({ cwd, inputPath, force, strict });
+      if (json) {
+        process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
+      } else {
+        process.stderr.write(`${m.phase.importDone(result.imported_phases.length, result.imported_tasks.length, result.skipped_phases.length)}\n`);
+        for (const cf of result.completed_fields) {
+          process.stderr.write(`  completed defaults for ${cf.taskId}: ${cf.fields.join(", ")}\n`);
+        }
+        for (const w of result.warnings) {
+          process.stderr.write(`  warning [${w.code}]${w.phase_id ? ` ${w.phase_id}` : ""}: ${w.message}\n`);
+        }
+      }
+      return 0;
+    } catch (err: unknown) {
+      const code = (err as NodeJS.ErrnoException).code;
+      const message = err instanceof Error ? err.message : String(err);
+      if (
+        code === "CONFIG_ERROR" ||
+        code === "DUPLICATE_PHASE_ID" ||
+        code === "AMBIGUOUS_TASK_ID"
+      ) {
+        if (json) {
+          process.stdout.write(
+            `${JSON.stringify({ ok: false, error: { code, message } })}\n`,
+          );
+        } else {
+          process.stderr.write(`${message}\n`);
+        }
+        return 2;
+      }
+      throw err;
+    }
+  });
+}
+
 async function cmdPhaseRunbook(
   argv: string[],
   locale: Locale,
   globalJson: boolean,
+  invokedAs: string = "phase runbook",
 ): Promise<number> {
   const m = messages[locale];
 
@@ -663,7 +677,7 @@ async function cmdPhaseRunbook(
   let positionals: string[];
   try {
     ({ values, positionals } = strictParse(
-      "phase runbook",
+      invokedAs,
       argv,
       {
         json: { type: "boolean" },
@@ -730,7 +744,8 @@ async function cmdPhaseRunbook(
   }
 
   if (!phaseId) {
-    const msg = "phase runbook requires a phase id (e.g. `phase runbook P1`) or `--across-phases`.";
+    const aliasNote = invokedAs === "phase runbook" ? "" : " (alias for `phase runbook`)";
+    const msg = `${invokedAs} requires a phase id (e.g. \`${invokedAs} P1\`) or \`--across-phases\`${aliasNote}.`;
     if (json) {
       process.stdout.write(
         `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
