@@ -20,6 +20,11 @@ import {
   readManifest,
   writeManifest,
 } from "../core/adapters/manifest.ts";
+import { dedupeDesiredFiles } from "../core/adapters/desired.ts";
+import {
+  resolveAndPinModelVersion,
+  validateModelVersionInput,
+} from "../core/adapters/model-version.ts";
 import type {
   AdapterManifest,
   ManifestFile,
@@ -186,7 +191,13 @@ export async function runAdapterUpgrade(
     throw err;
   }
 
-  const existingManifest = await readManifest(cwd, agentName);
+  // Tolerant read: a legacy manifest with duplicate paths is repairable by
+  // `--write` (we regenerate a unique manifest below), and `--check` must
+  // report drift rather than crash with a schema error. Either way the
+  // duplicate-path strict check must not abort before we can act.
+  const existingManifest = await readManifest(cwd, agentName, {
+    tolerantDuplicatePaths: true,
+  });
   if (existingManifest === null) {
     const err = new Error(
       `No manifest at .code-pact/adapters/${agentName}.manifest.yaml — run "code-pact adapter install ${agentName}" first.`,
@@ -200,14 +211,30 @@ export async function runAdapterUpgrade(
     loadModelProfiles(cwd),
   ]);
 
+  // `--write` pins `--model` to the profile (after validation). `--check` is
+  // read-only: it validates the value (unknown → CONFIG_ERROR) but never
+  // persists. The CLI also rejects `--check --model` outright; this keeps the
+  // core honest if called directly.
+  const resolvedModelVersion =
+    mode === "write"
+      ? await resolveAndPinModelVersion({
+          cwd,
+          agentName,
+          profile,
+          modelVersionInput: modelVersion,
+        })
+      : (validateModelVersionInput(modelVersion) ?? profile.model_version);
+
   const descriptor = adapterRegistry[agentName];
-  const desiredFiles = await descriptor.generateDesiredFiles({
-    cwd,
-    profile,
-    modelProfiles,
-    locale,
-    modelVersion,
-  });
+  const desiredFiles = dedupeDesiredFiles(
+    await descriptor.generateDesiredFiles({
+      cwd,
+      profile,
+      modelProfiles,
+      locale,
+      modelVersion: resolvedModelVersion,
+    }),
+  );
 
   const existingByPath = new Map<string, ManifestFile>(
     existingManifest.files.map((f) => [f.path, f]),
@@ -305,7 +332,7 @@ export async function runAdapterUpgrade(
   // Build the result + (for --write) write the manifest.
   const generatorVersion =
     generatorVersionOverride ?? (await readPackageVersion());
-  const resolvedModel = modelVersion ?? profile.model_version;
+  const resolvedModel = resolvedModelVersion;
 
   if (mode === "check") {
     return {

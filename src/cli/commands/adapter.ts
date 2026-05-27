@@ -319,6 +319,22 @@ async function cmdAdapterUpgrade(
     return 2;
   }
 
+  // `--model` persists the pin to the agent profile — a write. `--check` is
+  // contractually read-only, so the combination is incoherent: reject it
+  // rather than silently ignore or silently mutate.
+  if (check && modelVersion !== undefined) {
+    const msg =
+      "adapter upgrade: --model cannot be combined with --check (--model pins the profile, which --check must not do). Use --write to pin a model.";
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
+      );
+    } else {
+      process.stderr.write(`${msg}\n`);
+    }
+    return 2;
+  }
+
   const mode = check ? "check" : "write";
 
   try {
@@ -386,6 +402,16 @@ async function cmdAdapterUpgrade(
         if (json) {
           process.stdout.write(
             `${JSON.stringify({ ok: false, error: { code: "MANIFEST_NOT_FOUND", message: err.message } })}\n`,
+          );
+        } else {
+          process.stderr.write(`${err.message}\n`);
+        }
+        return 2;
+      }
+      if (code === "CONFIG_ERROR") {
+        if (json) {
+          process.stdout.write(
+            `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: err.message } })}\n`,
           );
         } else {
           process.stderr.write(`${err.message}\n`);
@@ -475,16 +501,29 @@ async function runAdapterInstallAndEmit(args: {
     }
     return 0;
   } catch (err: unknown) {
-    if (err instanceof Error && (err as NodeJS.ErrnoException).code === "AGENT_NOT_FOUND") {
-      const msg = m.adapter.agentNotFound(agentName);
-      if (json) {
-        process.stdout.write(
-          `${JSON.stringify({ ok: false, error: { code: "AGENT_NOT_FOUND", message: msg } })}\n`,
-        );
-      } else {
-        process.stderr.write(`${msg}\n`);
+    if (err instanceof Error) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === "AGENT_NOT_FOUND") {
+        const msg = m.adapter.agentNotFound(agentName);
+        if (json) {
+          process.stdout.write(
+            `${JSON.stringify({ ok: false, error: { code: "AGENT_NOT_FOUND", message: msg } })}\n`,
+          );
+        } else {
+          process.stderr.write(`${msg}\n`);
+        }
+        return 2;
       }
-      return 2;
+      if (code === "CONFIG_ERROR") {
+        if (json) {
+          process.stdout.write(
+            `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: err.message } })}\n`,
+          );
+        } else {
+          process.stderr.write(`${err.message}\n`);
+        }
+        return 2;
+      }
     }
     throw err;
   }

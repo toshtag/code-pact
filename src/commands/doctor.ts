@@ -6,7 +6,10 @@ import { Roadmap } from "../core/schemas/roadmap.ts";
 import { Phase } from "../core/schemas/phase.ts";
 import { ProgressLog } from "../core/schemas/progress-event.ts";
 import { Project } from "../core/schemas/project.ts";
-import { AgentProfile } from "../core/schemas/agent-profile.ts";
+import {
+  ACCEPTED_MODEL_VERSION_INPUTS,
+  AgentProfile,
+} from "../core/schemas/agent-profile.ts";
 import { ModelProfile, ModelTier } from "../core/schemas/model-profile.ts";
 import {
   detectDuplicateTaskIds,
@@ -535,7 +538,7 @@ async function checkAdapterStale(
       issues.push({
         code: "ADAPTER_STALE",
         severity: "warning",
-        message: `Agent "${parsed.data.name}" has no model_version set — run "code-pact adapter install ${agentRef.name} --model <version>" to pin a model`,
+        message: `Agent "${parsed.data.name}" has no model_version set — run "code-pact adapter install ${agentRef.name} --model <version>" to pin a model (accepted: ${ACCEPTED_MODEL_VERSION_INPUTS.join(", ")})`,
       });
     }
   }

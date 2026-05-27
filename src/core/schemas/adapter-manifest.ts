@@ -47,7 +47,12 @@ export const ProfileFingerprint = z
   .strict();
 export type ProfileFingerprint = z.infer<typeof ProfileFingerprint>;
 
-export const AdapterManifest = z
+// Base object shape, shared by the strict and lenient parsers below. The
+// lenient form (no duplicate-path refinement) exists only so the
+// `adapter upgrade` repair path can READ a legacy manifest that already has
+// duplicate `files[].path` entries without the strict parse aborting before
+// it can regenerate a clean, unique manifest.
+const AdapterManifestObject = z
   .object({
     // Bump on breaking manifest layout changes only. v0.9 ships schema_version 1.
     schema_version: z.literal(1),
@@ -64,4 +69,31 @@ export const AdapterManifest = z
     files: z.array(ManifestFile),
   })
   .strict();
+
+/**
+ * Lenient parser — same shape as {@link AdapterManifest} but WITHOUT the
+ * duplicate-path constraint. Only the `adapter install`/`adapter upgrade`
+ * repair paths should use this (via `readManifest(..., { tolerantDuplicatePaths: true })`).
+ * Everything else must use the strict {@link AdapterManifest}.
+ */
+export const AdapterManifestLenient = AdapterManifestObject;
+
+// Strict manifest contract: every `files[].path` must be unique. A manifest
+// with duplicate paths is a corrupt/legacy artifact — `writeManifest` rejects
+// producing one, and strict reads reject consuming one (callers map the throw
+// to ADAPTER_MANIFEST_INVALID rather than crashing).
+export const AdapterManifest = AdapterManifestObject.superRefine((manifest, ctx) => {
+  const seen = new Set<string>();
+  manifest.files.forEach((file, index) => {
+    if (seen.has(file.path)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["files", index, "path"],
+        message: `duplicate manifest file path: "${file.path}"`,
+      });
+      return;
+    }
+    seen.add(file.path);
+  });
+});
 export type AdapterManifest = z.infer<typeof AdapterManifest>;

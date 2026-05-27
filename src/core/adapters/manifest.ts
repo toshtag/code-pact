@@ -3,7 +3,10 @@ import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { atomicWriteText } from "../../io/atomic-text.ts";
-import { AdapterManifest } from "../schemas/adapter-manifest.ts";
+import {
+  AdapterManifest,
+  AdapterManifestLenient,
+} from "../schemas/adapter-manifest.ts";
 
 // ---------------------------------------------------------------------------
 // Per-agent manifest paths
@@ -23,6 +26,18 @@ export function manifestPath(cwd: string, agentName: string): string {
 // Read / Write
 // ---------------------------------------------------------------------------
 
+export type ReadManifestOptions = {
+  /**
+   * When true, parse with the lenient schema that does NOT reject duplicate
+   * `files[].path` entries. Only the `adapter install`/`adapter upgrade`
+   * repair paths set this so they can read a legacy duplicate-path manifest,
+   * regenerate unique desired files, and write a clean manifest. All other
+   * callers (doctor, list, conformance) use the strict default, which throws
+   * on duplicates so they can report ADAPTER_MANIFEST_INVALID.
+   */
+  tolerantDuplicatePaths?: boolean;
+};
+
 /**
  * Reads and zod-parses the adapter manifest at
  * `.code-pact/adapters/<agent>.manifest.yaml`. Returns `null` when the file
@@ -33,6 +48,7 @@ export function manifestPath(cwd: string, agentName: string): string {
 export async function readManifest(
   cwd: string,
   agentName: string,
+  opts: ReadManifestOptions = {},
 ): Promise<AdapterManifest | null> {
   const path = manifestPath(cwd, agentName);
   let raw: string;
@@ -42,7 +58,8 @@ export async function readManifest(
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw err;
   }
-  return AdapterManifest.parse(parseYaml(raw) as unknown);
+  const schema = opts.tolerantDuplicatePaths ? AdapterManifestLenient : AdapterManifest;
+  return schema.parse(parseYaml(raw) as unknown);
 }
 
 /**

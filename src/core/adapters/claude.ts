@@ -233,6 +233,25 @@ function sanitizeSkillName(s: string): string {
   return cleaned || "cmd";
 }
 
+// Built-in skill names that always exist (context.md / verify.md /
+// progress.md). Verification-command-derived skills must not collide with
+// these — a roadmap whose verification command is `code-pact verify ...`
+// derives the name "verify", which would otherwise clobber the built-in
+// verify.md and break adapter convergence.
+const RESERVED_SKILL_NAMES = ["context", "verify", "progress"] as const;
+
+/**
+ * Returns `base` if free, else the first `base-2`, `base-3`, … not already
+ * taken. Deterministic given the (insertion-ordered) `taken` set, so repeated
+ * generation produces a stable, convergent file set.
+ */
+function uniquifySkillName(base: string, taken: ReadonlySet<string>): string {
+  if (!taken.has(base)) return base;
+  let suffix = 2;
+  while (taken.has(`${base}-${suffix}`)) suffix++;
+  return `${base}-${suffix}`;
+}
+
 function buildCommandSkill(skillName: string, command: string): string {
   return [`# /${skillName} — ${command}`, ``, `Usage: /${skillName}`, ``, `Runs: ${command}`, ``].join("\n");
 }
@@ -286,11 +305,14 @@ export async function generateClaudeDesiredFiles(
   ];
 
   const verificationCommands = await readVerificationCommands(cwd);
-  const seenSkillNames = new Set<string>();
+  // Seed with the built-in skill names so a derived name that collides with a
+  // built-in (or with an earlier derived name) is deterministically uniquified
+  // rather than silently dropped or clobbering the built-in. The final name is
+  // used for BOTH the path and the rendered skill body so they never diverge.
+  const takenSkillNames = new Set<string>(RESERVED_SKILL_NAMES);
   for (const cmd of verificationCommands) {
-    const skillName = deriveSkillName(cmd);
-    if (seenSkillNames.has(skillName)) continue;
-    seenSkillNames.add(skillName);
+    const skillName = uniquifySkillName(deriveSkillName(cmd), takenSkillNames);
+    takenSkillNames.add(skillName);
     files.push({
       path: `${skillDir}/${skillName}.md`,
       role: "skill",
