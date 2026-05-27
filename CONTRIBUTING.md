@@ -45,6 +45,7 @@ test(progress): cover expanded_work for project-b fixture
 - Fast local loop: `pnpm test:unit`.
 - Full local gate before merge: `pnpm test:ci`.
 - CI must be green before merge. Node 22 runs the full gate; Node 24 runs typecheck, unit tests, build, and CLI smoke checks.
+- Touching docs? See [`docs/maintainers/docs-maintenance.md`](docs/maintainers/docs-maintenance.md) for which doc owns which kind of change, so updates don't drift across files.
 
 ## Runtime dependency policy
 
