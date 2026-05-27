@@ -8,6 +8,7 @@
 
 import { parseArgs } from "node:util";
 import { strictParse, strictParseAlias, ConfigError } from "../../lib/argv.ts";
+import { clusterUsage, emitUsage, hasHelpFlag, isHelpToken, subcommandUsage } from "../usage.ts";
 import { isInteractive } from "../../lib/tty.ts";
 import { messages, type Locale } from "../../i18n/index.ts";
 import { withWriteLock } from "../util.ts";
@@ -33,6 +34,15 @@ export async function cmdPhase(argv: string[], locale: Locale, globalJson: boole
   const subcommand = argv[0];
   const rest = argv.slice(1);
   const cwd = process.cwd();
+
+  // `phase`, `phase help`, `phase --help`, `phase -h` → cluster usage (exit 0).
+  if (subcommand === undefined || isHelpToken(subcommand)) {
+    return emitUsage(clusterUsage("phase"));
+  }
+  // `phase <sub> --help` → per-subcommand usage (exit 0).
+  if (hasHelpFlag(rest)) {
+    return emitUsage(subcommandUsage("phase", subcommand));
+  }
 
   // ---- phase add ----
   if (subcommand === "add") {

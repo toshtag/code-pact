@@ -873,10 +873,11 @@ Cross-artifact integrity check. Compares design intent (task and phase `status`)
 ## `adapter` (v0.9)
 
 In v0.9 `adapter` becomes a subcommand group. Each subcommand produces a stable
-`{ok, data} | {ok:false, error:{code, message}}` JSON envelope under `--json`. The bare-form
-`code-pact adapter [--agent <name>] ...` (v0.5–v0.8) continues to work and routes internally
-to `adapter install` with a one-line stderr deprecation notice (suppressed under `--json`);
-it will be removed in v1.1.
+`{ok, data} | {ok:false, error:{code, message}}` JSON envelope under `--json`. The bare form
+`code-pact adapter [--agent <name>] ...` (v0.5–v0.8) is **removed** (v1.20+): a bare
+`code-pact adapter` with no subcommand now returns `CONFIG_ERROR` (exit 2) with no side
+effects, directing the user to `code-pact adapter install <agent>`. `code-pact adapter --help`
+(`-h`, `help`) prints usage and exits 0.
 
 - `adapter list [--json]` — enumerate registered adapters with manifest state
 - `adapter install <agent> [--force] [--model <v>] [--regen-skills] [--json]` — first-time install + writes manifest
@@ -1203,13 +1204,13 @@ Findings from manifest-aware checks appear in global `doctor` output with
 a `[agent-name]` prefix on the message so consumers can attribute issues
 without changing the global `DoctorIssue` shape.
 
-### Bare-form back-compat (deprecated)
+### Bare-form removed (v1.20+)
 
-`code-pact adapter [--agent <name>] [--force] [--model <v>] [--regen-skills] [--json]`
-continues to work in v0.9 and is internally routed to `adapter install`. When `--agent` is
-omitted, it defaults to `claude-code`. A one-line deprecation notice is printed to stderr;
-the notice is suppressed under `--json` so agents reading the JSON envelope are not
-surprised by an extra stderr line. The bare form will be removed in v1.1.
+The bare form `code-pact adapter [--agent <name>] ...` (which implicitly ran `adapter install`)
+is **removed**. A `code-pact adapter` invocation with no subcommand now returns `CONFIG_ERROR`
+(exit 2) and performs **no** filesystem mutation — a warning that also installs was exactly the
+"warning + side effect" hazard the v1.20 hardening pass closed. Use `code-pact adapter install
+<agent>` explicitly. `code-pact adapter --help` / `-h` / `help` prints usage and exits 0.
 
 ### `adapter conformance <agent> [--json]` (v1.11+, P21)
 
@@ -2547,16 +2548,15 @@ changes. They are intentionally excluded from
 | `cursor` | Writes `.cursor/rules/code-pact.mdc`. Cursor's `.mdc` format and placement may change. |
 | `gemini-cli` | Writes `GEMINI.md`. Gemini CLI's discovery rules may change. |
 
-### Deprecated
+### Deprecated / removed
 
-Surfaces that still work in v1.x but are scheduled for removal.
+| Surface | Replacement | Status |
+|---------|-------------|--------|
+| Bare-form `code-pact adapter [--agent X] [--force] [--regen-skills]` | `code-pact adapter install <agent>` | **Removed in v1.20** — now `CONFIG_ERROR` (exit 2), no side effects |
 
-| Surface | Replacement | Removal target |
-|---------|-------------|----------------|
-| Bare-form `code-pact adapter [--agent X] [--force] [--regen-skills]` | `code-pact adapter install <agent>` | v1.1 (originally v0.10) |
-
-The bare form currently prints a one-line deprecation notice on stderr
-(suppressed under `--json`) and routes internally to `adapter install`.
+The bare form previously printed a deprecation notice and routed internally to
+`adapter install`. As of v1.20 it is removed: a bare `code-pact adapter` returns
+`CONFIG_ERROR` and installs nothing.
 
 ### What is NOT a stability claim
 

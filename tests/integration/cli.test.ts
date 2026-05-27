@@ -1191,7 +1191,7 @@ describe("CLI: adapter --agent cursor (v0.2 experimental)", () => {
     ]);
     expect(initRes.code).toBe(0);
 
-    const adapterRes = run(["adapter", "--agent", "cursor", "--json"]);
+    const adapterRes = run(["adapter", "install", "cursor", "--json"]);
     expect(adapterRes.code).toBe(0);
     const parsed = JSON.parse(adapterRes.stdout) as { ok: boolean };
     expect(parsed.ok).toBe(true);
@@ -1252,7 +1252,7 @@ describe("CLI: adapter --agent gemini-cli (v0.2 experimental)", () => {
     ]);
     expect(initRes.code).toBe(0);
 
-    const adapterRes = run(["adapter", "--agent", "gemini-cli", "--json"]);
+    const adapterRes = run(["adapter", "install", "gemini-cli", "--json"]);
     expect(adapterRes.code).toBe(0);
     const parsed = JSON.parse(adapterRes.stdout) as { ok: boolean };
     expect(parsed.ok).toBe(true);
