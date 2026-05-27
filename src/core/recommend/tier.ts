@@ -9,14 +9,24 @@ import type { ModelTier } from "../schemas/model-profile.ts";
 // 1. highest_reasoning — any of:
 //    - type is "architecture"
 //    - ambiguity is "high"
-//    - verification_strength is "weak"  (weak verification → need stronger reasoning)
 //    - risk is "high" AND ambiguity is "medium"
+//
+//    verification_strength is deliberately NOT here. Weak verification alone
+//    does not justify the most expensive tier — escalating on it punishes
+//    honestly declaring weak checks. It is reflected instead in
+//    budgetProfile.verificationCommands (=minimal) and structuredReasons.
 //
 // 2. cheap_mechanical — all of:
 //    - type is "docs", "formatting", or "mechanical_refactor"
 //    - ambiguity is "low"
 //    - risk is "low"
-//    - verification_strength is "medium" or "strong"
+//    - write_surface is "low"
+//    - context_size is "small"
+//
+//    Not gated on verification_strength: a small, low-risk docs/formatting
+//    edit stays cheap even with weak verification. But write_surface and
+//    context_size ARE gated, so a sprawling docs rewrite (large surface or
+//    large context) does not get under-priced just because its type is docs.
 //
 // 3. balanced_coding — everything else
 // ---------------------------------------------------------------------------
@@ -40,9 +50,6 @@ export function recommendTier(task: Task): TierRecommendation {
   if (task.ambiguity === "high") {
     reasons.push("ambiguity is high");
   }
-  if (task.verification_strength === "weak") {
-    reasons.push("verification strength is weak — reasoning helps compensate");
-  }
   if (task.risk === "high" && task.ambiguity === "medium") {
     reasons.push("high risk with medium ambiguity");
   }
@@ -60,12 +67,15 @@ export function recommendTier(task: Task): TierRecommendation {
     CHEAP_TYPES.has(task.type) &&
     task.ambiguity === "low" &&
     task.risk === "low" &&
-    task.verification_strength !== "weak"
+    task.write_surface === "low" &&
+    task.context_size === "small"
   ) {
     return {
       tier: "cheap_mechanical",
       effort: "low",
-      reasons: [`task type is ${task.type} with low ambiguity and low risk`],
+      reasons: [
+        `task type is ${task.type} with low ambiguity, low risk, low write surface, and small context`,
+      ],
     };
   }
 

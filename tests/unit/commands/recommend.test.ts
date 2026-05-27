@@ -37,10 +37,12 @@ describe("recommendTier — highest_reasoning triggers", () => {
     expect(rec.reasons.some((r) => r.includes("ambiguity"))).toBe(true);
   });
 
-  it("weak verification → highest_reasoning", () => {
-    const rec = recommendTier({ ...BASE_TASK, verification_strength: "weak" });
-    expect(rec.tier).toBe("highest_reasoning");
-    expect(rec.reasons.some((r) => r.includes("weak"))).toBe(true);
+  it("weak verification alone does NOT escalate the tier", () => {
+    // A standard feature with weak verification stays balanced_coding — weak
+    // checks should not punish the author into the most expensive tier.
+    const rec = recommendTier({ ...BASE_TASK, type: "feature", verification_strength: "weak" });
+    expect(rec.tier).toBe("balanced_coding");
+    expect(rec.reasons.some((r) => r.includes("weak"))).toBe(false);
   });
 
   it("high risk + medium ambiguity → highest_reasoning", () => {
@@ -73,15 +75,44 @@ describe("recommendTier — cheap_mechanical triggers", () => {
     expect(rec.tier).toBe("cheap_mechanical");
   });
 
-  it("docs with weak verification → highest_reasoning (not cheap)", () => {
+  it("small docs with weak verification → cheap_mechanical (weak no longer blocks)", () => {
+    // BASE_TASK is low write_surface + small context; weak verification on a
+    // small, low-risk docs edit stays cheap.
     const rec = recommendTier({
       ...BASE_TASK,
       type: "docs",
       ambiguity: "low",
       risk: "low",
+      write_surface: "low",
+      context_size: "small",
       verification_strength: "weak",
     });
-    expect(rec.tier).toBe("highest_reasoning");
+    expect(rec.tier).toBe("cheap_mechanical");
+    expect(rec.effort).toBe("low");
+  });
+
+  it("broad docs (high write_surface) is NOT cheap despite type=docs", () => {
+    const rec = recommendTier({
+      ...BASE_TASK,
+      type: "docs",
+      ambiguity: "low",
+      risk: "low",
+      write_surface: "high",
+      context_size: "small",
+    });
+    expect(rec.tier).not.toBe("cheap_mechanical");
+  });
+
+  it("large-context docs is NOT cheap despite type=docs", () => {
+    const rec = recommendTier({
+      ...BASE_TASK,
+      type: "docs",
+      ambiguity: "low",
+      risk: "low",
+      write_surface: "low",
+      context_size: "large",
+    });
+    expect(rec.tier).not.toBe("cheap_mechanical");
   });
 });
 

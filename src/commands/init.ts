@@ -60,7 +60,7 @@ export type InitResult = {
 const MODEL_PROFILES: ModelProfile[] = [
   {
     tier: "highest_reasoning",
-    purpose: ["architecture", "high_ambiguity", "weak_verification"],
+    purpose: ["architecture", "high_ambiguity"],
     effort_levels: ["medium", "high"],
     supports_thinking: true,
   },

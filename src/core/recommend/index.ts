@@ -41,10 +41,12 @@ function buildStructuredReasons(task: Task, tier: ModelTier): StructuredReason[]
   }
 
   if (task.verification_strength === "weak") {
+    // Weak verification reflects in the budget (fewer verification commands to
+    // lean on), NOT in tier escalation — see recommend/tier.ts.
     out.push({
       factor: "verification_strength",
       value: "weak",
-      effect: "tier=highest_reasoning",
+      effect: "budgetProfile.verificationCommands=minimal",
     });
   }
 
