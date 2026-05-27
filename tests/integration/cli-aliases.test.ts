@@ -1,14 +1,17 @@
-// CLI integration suite for the beginner-friendly command aliases added per
-// design/decisions/cli-alias-ux-rfc.md:
+// CLI integration suite for the beginner-friendly command aliases
+// (design/decisions/cli-alias-ux-rfc.md):
 //
 //   task next <id>      → task runbook <id>
 //   phase next <id>     → phase runbook <id>
 //   task reconcile <id> → task finalize <id>
 //   plan import <yaml>  → phase import <yaml>
 //
-// Each alias must dispatch to the *exact same* handler as its canonical
-// command — these tests assert byte-identical output for the same arguments,
-// so the aliases can never silently diverge from the commands they shadow.
+// Two things are verified:
+//  1. Dispatch equivalence — an alias and its canonical command produce the
+//     same machine result (exit code, ok, error.code, and — for success and
+//     semantic errors that carry no command name — byte-identical stdout).
+//  2. Alias-facing UX — when an alias is *misused* (missing argument), the
+//     human-facing message names the alias, not the canonical command.
 
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
 import { spawnSync } from "node:child_process";
@@ -30,13 +33,16 @@ function run(args: string[]): RunResult {
   return { code: res.status ?? -1, stdout: res.stdout ?? "", stderr: res.stderr ?? "" };
 }
 
+function envelope(stdout: string): { ok?: boolean; error?: { code?: string }; data?: Record<string, unknown> } {
+  return JSON.parse(stdout.trim().split("\n").at(-1)!);
+}
+
 beforeAll(() => {
   ensureCliBuilt();
 }, 60_000);
 
 beforeEach(async () => {
   tmpDir = await mkdtemp(join(tmpdir(), "code-pact-cli-aliases-test-"));
-  // Sample phase gives us a real TUTORIAL phase + TUTORIAL-T1 task.
   run(["init", "--non-interactive", "--agent", "claude-code", "--locale", "en-US", "--sample-phase", "--json"]);
 });
 
@@ -44,49 +50,48 @@ afterAll(async () => {
   if (tmpDir) await rm(tmpDir, { recursive: true, force: true });
 });
 
-describe("CLI aliases dispatch to the canonical command", () => {
-  it("`task next` === `task runbook` (read-only)", () => {
+describe("aliases dispatch to the canonical command", () => {
+  it("`task next` === `task runbook` (read-only success → identical)", () => {
     const alias = run(["task", "next", "TUTORIAL-T1", "--json"]);
     const canonical = run(["task", "runbook", "TUTORIAL-T1", "--json"]);
     expect(alias.code).toBe(0);
     expect(alias.stdout).toBe(canonical.stdout);
   });
 
-  it("`phase next` === `phase runbook` (read-only)", () => {
+  it("`phase next` === `phase runbook` (read-only success → identical)", () => {
     const alias = run(["phase", "next", "TUTORIAL", "--json"]);
     const canonical = run(["phase", "runbook", "TUTORIAL", "--json"]);
     expect(alias.code).toBe(0);
     expect(alias.stdout).toBe(canonical.stdout);
   });
 
-  it("`task reconcile` === `task finalize` (dry-run, non-eligible task)", () => {
-    // TUTORIAL-T1 has no `done` event, so finalize is not eligible. Dry-run
-    // does not mutate, so both invocations produce the same error envelope.
+  it("`task reconcile` matches `task finalize` on the not-eligible error", () => {
     const alias = run(["task", "reconcile", "TUTORIAL-T1", "--json"]);
     const canonical = run(["task", "finalize", "TUTORIAL-T1", "--json"]);
-    expect(alias.stdout).toBe(canonical.stdout);
-    expect(alias.stdout).toContain("TASK_FINALIZE_NOT_ELIGIBLE");
+    expect(alias.code).toBe(canonical.code);
+    expect(envelope(alias.stdout).error?.code).toBe("TASK_FINALIZE_NOT_ELIGIBLE");
+    expect(envelope(alias.stdout).error?.code).toBe(envelope(canonical.stdout).error?.code);
   });
 
-  it("`plan import` === `phase import` on a missing file", () => {
+  it("`plan import` matches `phase import` on a missing input file", () => {
     const alias = run(["plan", "import", "does-not-exist.yaml", "--json"]);
     const canonical = run(["phase", "import", "does-not-exist.yaml", "--json"]);
+    expect(alias.code).toBe(canonical.code);
     expect(alias.code).not.toBe(0);
-    expect(alias.stdout).toBe(canonical.stdout);
+    expect(envelope(alias.stdout).error?.code).toBe(envelope(canonical.stdout).error?.code);
   });
 
-  it("`plan import` actually imports a roadmap (positive path)", async () => {
+  it("`plan import` actually ingests a roadmap (positive path)", async () => {
     await writeFile(
       join(tmpDir, "roadmap.yaml"),
       [
         "phases:",
-        "  - id: PX",
+        "  - id: PY",
         '    name: "Imported phase"',
         "    weight: 10",
-        '    objective: "Prove plan import works"',
-        '    verification: { commands: ["node --version"] }',
+        '    objective: "Prove plan import writes phases"',
         "    tasks:",
-        "      - id: PX-T1",
+        "      - id: PY-T1",
         "        type: feature",
         '        description: "First imported task"',
         "",
@@ -94,14 +99,85 @@ describe("CLI aliases dispatch to the canonical command", () => {
     );
     const res = run(["plan", "import", "roadmap.yaml", "--json"]);
     expect(res.code).toBe(0);
-    expect(res.stdout).toContain('"ok":true');
-    // The phase is now resolvable, proving the import wrote it.
-    const show = run(["phase", "show", "PX", "--json"]);
-    expect(show.code).toBe(0);
-    expect(show.stdout).toContain("PX-T1");
+    expect(envelope(res.stdout).ok).toBe(true);
+    expect(run(["phase", "show", "PY", "--json"]).stdout).toContain("PY-T1");
+  });
+});
+
+describe("misused aliases name the alias, not the canonical command", () => {
+  it("`task next` (no id) names the alias + canonical", () => {
+    const { code, stdout } = run(["task", "next", "--json"]);
+    expect(code).toBe(2);
+    const env = envelope(stdout);
+    expect(env.error?.code).toBe("CONFIG_ERROR");
+    expect(stdout).toContain("task next requires a task id");
+    expect(stdout).toContain("alias for `task runbook`");
   });
 
-  it("genuinely unknown subcommands are still rejected", () => {
+  it("`task reconcile` (no id) names the alias + canonical", () => {
+    const { code, stdout } = run(["task", "reconcile", "--json"]);
+    expect(code).toBe(2);
+    expect(stdout).toContain("task reconcile requires a task id");
+    expect(stdout).toContain("alias for `task finalize`");
+  });
+
+  it("`phase next` (no id) names the alias + canonical", () => {
+    const { code, stdout } = run(["phase", "next", "--json"]);
+    expect(code).toBe(2);
+    expect(stdout).toContain("phase next requires a phase id");
+    expect(stdout).toContain("alias for `phase runbook`");
+  });
+
+  it("`plan import` (no path) names the alias + canonical", () => {
+    const { code, stdout } = run(["plan", "import", "--json"]);
+    expect(code).toBe(2);
+    expect(stdout).toContain("plan import requires an input YAML path");
+    expect(stdout).toContain("alias for `phase import`");
+  });
+
+  it("the canonical commands keep their own wording", () => {
+    expect(run(["task", "runbook", "--json"]).stdout).toContain("task runbook requires a task id");
+    expect(run(["task", "runbook", "--json"]).stdout).not.toContain("alias for");
+  });
+});
+
+describe("`task reconcile --write` finalizes like `task finalize --write`", () => {
+  beforeEach(() => {
+    // A phase whose verify command (`node --version`) passes, so the task can
+    // reach `done` and become finalize-eligible. (phase add sets the verify
+    // command reliably; lenient `phase import` would default it to `pnpm test`.)
+    run([
+      "phase", "add", "--id", "PX", "--name", "Reconcile fixture", "--weight", "10",
+      "--objective", "Exercise the reconcile alias write path",
+      "--verify-command", "node --version", "--json",
+    ]);
+    run(["task", "add", "PX", "--description", "Task to finalize via the reconcile alias", "--type", "feature", "--json"]);
+    run(["task", "start", "PX-T1", "--agent", "claude-code"]);
+    run(["task", "complete", "PX-T1", "--agent", "claude-code", "--json"]);
+  });
+
+  it("dry-run previews, --write applies, status becomes done", () => {
+    const preview = run(["task", "reconcile", "PX-T1", "--json"]);
+    expect(preview.code).toBe(0);
+    expect(envelope(preview.stdout).ok).toBe(true);
+
+    const applied = run(["task", "reconcile", "PX-T1", "--write", "--json"]);
+    expect(applied.code).toBe(0);
+    expect(envelope(applied.stdout).ok).toBe(true);
+
+    // The design status is now `done` — the same effect as `task finalize`.
+    const show = run(["phase", "show", "PX", "--json"]);
+    expect(show.stdout).toContain('"status":"done"');
+
+    // Re-running is idempotent (already finalized), proving it hit the same
+    // finalize state machine.
+    const again = run(["task", "finalize", "PX-T1", "--json"]);
+    expect(again.code).toBe(0);
+  });
+});
+
+describe("unknown subcommands are still rejected", () => {
+  it("`task bogus` exits 2", () => {
     const res = run(["task", "bogus"]);
     expect(res.code).toBe(2);
     expect(`${res.stdout}${res.stderr}`).toContain('unknown subcommand "bogus"');

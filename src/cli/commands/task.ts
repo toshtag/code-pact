@@ -67,13 +67,14 @@ export async function cmdTask(argv: string[], locale: Locale, globalJson: boolea
     return cmdTaskResume(rest, locale, globalJson);
   }
   // `reconcile` is a beginner-friendly alias for `finalize` (verb-consistent
-  // with `phase reconcile`). See design/decisions/cli-alias-ux-rfc.md.
+  // with `phase reconcile`). See design/decisions/cli-alias-ux-rfc.md. The
+  // invoked name is threaded through so error messages name the alias.
   if (subcommand === "finalize" || subcommand === "reconcile") {
-    return cmdTaskFinalize(rest, locale, globalJson);
+    return cmdTaskFinalize(rest, locale, globalJson, `task ${subcommand}`);
   }
   // `next` is a beginner-friendly alias for `runbook` ("what should I do next?").
   if (subcommand === "runbook" || subcommand === "next") {
-    return cmdTaskRunbook(rest, locale, globalJson);
+    return cmdTaskRunbook(rest, locale, globalJson, `task ${subcommand}`);
   }
 
   const msg = `task: unknown subcommand "${subcommand ?? ""}". Use: add | context | prepare | start | status | block | resume | complete | finalize | runbook (aliases: reconcile = finalize, next = runbook)`;
@@ -885,6 +886,7 @@ async function cmdTaskFinalize(
   argv: string[],
   locale: Locale,
   globalJson: boolean,
+  invokedAs: string = "task finalize",
 ): Promise<number> {
   const m = messages[locale];
 
@@ -892,7 +894,7 @@ async function cmdTaskFinalize(
   let positionals: string[];
   try {
     ({ values, positionals } = strictParse(
-      "task finalize",
+      invokedAs,
       argv,
       {
         json: { type: "boolean" },
@@ -921,7 +923,8 @@ async function cmdTaskFinalize(
   const auditStrict = values["audit-strict"] === true;
   const taskId = positionals[0];
   if (!taskId) {
-    const msg = "task finalize requires a task id (e.g. `task finalize P1-T1`).";
+    const aliasNote = invokedAs === "task finalize" ? "" : " (alias for `task finalize`)";
+    const msg = `${invokedAs} requires a task id (e.g. \`${invokedAs} P1-T1\`)${aliasNote}.`;
     if (json) {
       process.stdout.write(
         `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
@@ -1151,6 +1154,7 @@ async function cmdTaskRunbook(
   argv: string[],
   locale: Locale,
   globalJson: boolean,
+  invokedAs: string = "task runbook",
 ): Promise<number> {
   const m = messages[locale];
 
@@ -1158,7 +1162,7 @@ async function cmdTaskRunbook(
   let positionals: string[];
   try {
     ({ values, positionals } = strictParse(
-      "task runbook",
+      invokedAs,
       argv,
       {
         json: { type: "boolean" },
@@ -1181,7 +1185,8 @@ async function cmdTaskRunbook(
   const json = globalJson || values.json === true;
   const taskId = positionals[0];
   if (!taskId) {
-    const msg = "task runbook requires a task id (e.g. `task runbook P1-T1`).";
+    const aliasNote = invokedAs === "task runbook" ? "" : " (alias for `task runbook`)";
+    const msg = `${invokedAs} requires a task id (e.g. \`${invokedAs} P1-T1\`)${aliasNote}.`;
     if (json) {
       process.stdout.write(
         `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
