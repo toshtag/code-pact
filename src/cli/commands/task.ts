@@ -8,7 +8,7 @@
 // private to this module.
 
 import { parseArgs } from "node:util";
-import { strictParse, ConfigError } from "../../lib/argv.ts";
+import { strictParse, strictParseAlias, ConfigError } from "../../lib/argv.ts";
 import { isInteractive } from "../../lib/tty.ts";
 import { messages, type Locale } from "../../i18n/index.ts";
 import { withWriteLock } from "../util.ts";
@@ -893,8 +893,9 @@ async function cmdTaskFinalize(
   let values: Record<string, unknown>;
   let positionals: string[];
   try {
-    ({ values, positionals } = strictParse(
+    ({ values, positionals } = strictParseAlias(
       invokedAs,
+      "task finalize",
       argv,
       {
         json: { type: "boolean" },
@@ -1161,8 +1162,9 @@ async function cmdTaskRunbook(
   let values: Record<string, unknown>;
   let positionals: string[];
   try {
-    ({ values, positionals } = strictParse(
+    ({ values, positionals } = strictParseAlias(
       invokedAs,
+      "task runbook",
       argv,
       {
         json: { type: "boolean" },

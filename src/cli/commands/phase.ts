@@ -7,7 +7,7 @@
 // The `reconcile` / `runbook` handlers are private to this module.
 
 import { parseArgs } from "node:util";
-import { strictParse, ConfigError } from "../../lib/argv.ts";
+import { strictParse, strictParseAlias, ConfigError } from "../../lib/argv.ts";
 import { isInteractive } from "../../lib/tty.ts";
 import { messages, type Locale } from "../../i18n/index.ts";
 import { withWriteLock } from "../util.ts";
@@ -586,8 +586,9 @@ export async function cmdPhaseImport(
   let values: Record<string, unknown>;
   let positionals: string[];
   try {
-    ({ values, positionals } = strictParse(
+    ({ values, positionals } = strictParseAlias(
       invokedAs,
+      "phase import",
       argv,
       {
         force: { type: "boolean" },
@@ -676,8 +677,9 @@ async function cmdPhaseRunbook(
   let values: Record<string, unknown>;
   let positionals: string[];
   try {
-    ({ values, positionals } = strictParse(
+    ({ values, positionals } = strictParseAlias(
       invokedAs,
+      "phase runbook",
       argv,
       {
         json: { type: "boolean" },
