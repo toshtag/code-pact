@@ -283,4 +283,3 @@ code-pact validate                  # CI 向け、エラーで exit 1
 - [`docs/cli-contract.md`](../cli-contract.md) — フラグ / 終了コード / JSON envelope / エラーコードの完全リファレンスと Stability taxonomy（英語）。
 - [`docs/upgrading.md`](../upgrading.md) — アップグレード方法（v1.x 内は追加のみ。pre-v1.0 alpha の詳細は `migration.md` にアーカイブ）（英語）。
 - [`docs/troubleshooting.md`](../troubleshooting.md) — 診断コードごとの復旧アクション（英語）。
-- [`docs/dogfood.md`](../dogfood.md) — code-pact で code-pact 自身を回す maintainer quick guide（英語）。

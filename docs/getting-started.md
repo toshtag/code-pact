@@ -88,7 +88,7 @@ code-pact init --non-interactive --agent claude-code --locale en-US --sample-pha
 
 > The interactive `init` wizard does not create the sample phase — pass `--sample-phase` explicitly, or use `code-pact tutorial` above to just watch the loop.
 
-This writes the `TUTORIAL` phase into `design/`. v1.4+ ships two minimal tutorial tasks; TUTORIAL-T2 declares `depends_on: [TUTORIAL-T1]` so you can demo the dependency field + the `task runbook` blocking-step output. Then walk [the per-task loop](per-task-loop.md) by hand — the same canonical sequence that page describes:
+This writes the `TUTORIAL` phase into `design/`. It ships two minimal tutorial tasks; TUTORIAL-T2 declares `depends_on: [TUTORIAL-T1]` so you can demo the dependency field + the `task runbook` blocking-step output. Then walk [the per-task loop](per-task-loop.md) by hand — the same canonical sequence that page describes:
 
 ```sh
 # TUTORIAL-T1: prepare → start → (implement) → verify → complete → finalize.
@@ -155,10 +155,10 @@ code-pact phase add \
 
 # 4. Add a task to the phase. TWO paths:
 #
-#    (a) Interactive (existing v0.6 path):
+#    (a) Interactive (TTY wizard):
 code-pact task add P1
 #
-#    (b) Non-interactive (v1.4+; `--description` triggers flag-driven mode):
+#    (b) Non-interactive (`--description` triggers flag-driven mode):
 code-pact task add P1 \
   --description "Login form" \
   --type feature \
@@ -186,24 +186,29 @@ code-pact phase add ... --verify-command "node --version"
 code-pact phase add ... --verify-command node --version
 ```
 
-> **CI / non-TTY users (v1.6+).** Steps 2, 4(a), and the wizards in general all have non-interactive equivalents now. `plan brief` and `plan constitution` (P17) each accept three modes — `--from-file <yaml>`, `--stdin`, or a flag-driven form (`--what` / `--who` / `--differentiator` for brief; `--description` / `--principle` for constitution). `task add` (v1.4 P13-T3) has had `--description` + readiness flags since v1.4. `phase import` (v0.4+) bulk-loads a YAML roadmap. A fully scripted CI bootstrap looks like:
->
-> ```sh
-> code-pact init --non-interactive --agent claude-code --locale en-US --json
-> code-pact plan brief \
->   --what "What we're building" \
->   --who  "Who it's for" \
->   --differentiator "What makes it different" \
->   --json
-> code-pact plan constitution \
->   --description "Project description" \
->   --principle "First principle" \
->   --principle "Second principle" \
->   --json
-> # ... then phase add / task add / adapter install as in step 3+.
-> ```
->
-> The non-interactive modes above also clear the `BRIEF_MISSING` / `CONSTITUTION_PLACEHOLDER` warnings that a non-interactive `init` otherwise leaves. See [`docs/maintainers/operations.md` § Non-interactive `plan brief` / `plan constitution`](maintainers/operations.md#non-interactive-plan-brief--plan-constitution-v16-p17) for the full walkthrough and `docs/cli-contract.md` for the envelope shapes.
+<details>
+<summary>Scripted / CI setup (non-interactive)</summary>
+
+Every wizard step has a non-interactive equivalent. `plan brief` / `plan constitution` accept `--from-file <yaml>`, `--stdin`, or flags; `task add` takes `--description` + readiness flags; `phase import` bulk-loads a YAML roadmap. A fully scripted bootstrap:
+
+```sh
+code-pact init --non-interactive --agent claude-code --locale en-US --json
+code-pact plan brief \
+  --what "What we're building" \
+  --who  "Who it's for" \
+  --differentiator "What makes it different" \
+  --json
+code-pact plan constitution \
+  --description "Project description" \
+  --principle "First principle" \
+  --principle "Second principle" \
+  --json
+# ... then phase add / task add / adapter install as in step 3+.
+```
+
+These modes also clear the `BRIEF_MISSING` / `CONSTITUTION_PLACEHOLDER` warnings a non-interactive `init` otherwise leaves. See [`docs/maintainers/operations.md` § Non-interactive `plan brief` / `plan constitution`](maintainers/operations.md#non-interactive-plan-brief--plan-constitution-v16-p17) and `docs/cli-contract.md` for the envelope shapes.
+
+</details>
 
 ---
 
