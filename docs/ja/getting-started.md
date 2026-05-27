@@ -70,13 +70,17 @@ code-pact init --non-interactive --agent claude-code --locale en-US --sample-pha
 これは `design/` に `TUTORIAL` フェーズ（`TUTORIAL-T1` と `TUTORIAL-T2`）を書き出します。`TUTORIAL-T2` は `depends_on: [TUTORIAL-T1]` を宣言しているので、依存フィールドと `task runbook` のブロッキング表示を試せます。あとは手で [タスク単位のループ](per-task-loop.md) を回します（各コマンドの意味はそのページを参照）:
 
 ```sh
-# TUTORIAL-T1: コンテキスト取得 + 実装、complete、最後に design status を更新。
-code-pact task context TUTORIAL-T1 --agent claude-code
+# TUTORIAL-T1: prepare → start →（実装）→ verify → complete → finalize。
+code-pact task prepare TUTORIAL-T1 --agent claude-code --json
+code-pact task start TUTORIAL-T1 --agent claude-code
+code-pact verify --phase TUTORIAL --task TUTORIAL-T1
 code-pact task complete TUTORIAL-T1 --agent claude-code
 code-pact task finalize TUTORIAL-T1 --write
 
 # TUTORIAL-T2 は TUTORIAL-T1 に依存 — T1 が done になったら繰り返す。
-code-pact task context TUTORIAL-T2 --agent claude-code
+code-pact task prepare TUTORIAL-T2 --agent claude-code --json
+code-pact task start TUTORIAL-T2 --agent claude-code
+code-pact verify --phase TUTORIAL --task TUTORIAL-T2
 code-pact task complete TUTORIAL-T2 --agent claude-code
 code-pact task finalize TUTORIAL-T2 --write
 ```
@@ -236,18 +240,14 @@ code-pact validate                  # CI 向け、エラーで exit 1
 
 `plan lint` と `plan analyze` はいずれも `--strict` で warning を error に昇格できます。`plan normalize --write` は YAML コメントと Markdown のハードラインブレークを保ちます。
 
-## アダプタの運用
+## さらに進む
 
-`init` ウィザード（または手動 / AI 支援の手順5）でアダプタは一度だけ設定すれば、たいていのプロジェクトはそれ以降アダプタを意識する必要はありません。あとは次のような upgrade パスになります。
+最初のタスクを終えたら、次に手を伸ばすもの。それぞれ専用ページがあります。
 
-```sh
-code-pact adapter list --json                          # 登録済みアダプタの一覧
-code-pact adapter upgrade claude-code --check --json   # drift だけ確認（書き込みなし）
-code-pact adapter upgrade claude-code --write          # 安全な更新を適用
-code-pact adapter doctor --json                        # アダプタ単位のヘルスチェック
-```
-
-`--force` は **unmanaged-adoption 専用** です。`managed-modified` ファイルを上書きすることはありません。ローカルで編集された managed ファイルを破壊的に上書きするには `adapter upgrade --write --accept-modified` が必須で、これは CI スクリプトの `--force` の付け忘れでローカルの編集が吹き飛ばないようにするための意図的な分離です。
+- **任意のタスク readiness フィールド**（`depends_on` / `reads` / `writes` / `decision_refs` / `acceptance_refs`） — タスクの依存と read/write 面を宣言してコンテキストパックを形作る。完全に任意で、pre-v1.1 YAML は不変。→ [task-readiness-fields.md](../concepts/task-readiness-fields.md)（英語）
+- **並行実行と write lock** — `LOCK_HELD` の意味と復旧方法。→ [troubleshooting.md](../troubleshooting.md#lock_held-from-a-design-mutating-command-v15)（英語）・[governance.md](../concepts/governance.md)（英語）
+- **Spec Kit プランの取り込み**（`tasks.md` / `spec.md`） — 読み取り専用の一方向ブリッジ。→ [spec-kit-bridge.md](../spec-kit-bridge.md)（英語）
+- **アダプタの継続運用**（`adapter upgrade`、drift） — 一度きりのインストール後。→ [upgrading.md](../upgrading.md)（英語）
 
 ## 次に読むもの
 
