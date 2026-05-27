@@ -29,6 +29,24 @@ If you have a project with pinned pre-v1.0 behaviour, `npm install -g code-pact@
 
 Pick the approach that matches how your roadmap comes into being. They all converge on the same per-task agent loop (described at the end), so switching later is cheap.
 
+```mermaid
+flowchart TD
+    A([Start]) --> B{Just want to watch<br/>code-pact run?}
+    B -- Yes --> T[Smoke test:<br/>code-pact tutorial]
+    B -- No --> C{Already have a structured<br/>plan file?}
+    C -- Yes --> D[Existing-plan adoption:<br/>plan adopt]
+    C -- No --> E{Agent already holds<br/>the project context?}
+    E -- Yes --> F[Agent-first:<br/>plan prompt --schema-only]
+    E -- No --> G{Prefer to type each<br/>phase and task yourself?}
+    G -- Yes --> M[Manual:<br/>phase add / task add]
+    G -- No --> H[Code-pact-first:<br/>brief + constitution + plan prompt]
+    T --> Z([Per-task loop])
+    D --> Z
+    F --> Z
+    M --> Z
+    H --> Z
+```
+
 | Approach | When to use it | Time to first `task complete` |
 | --- | --- | --- |
 | **Smoke test** ([tutorial](#path-1--tutorial)) | You just want to watch the loop run end to end — `code-pact tutorial` writes nothing to your repo. | ~1 minute |
@@ -42,6 +60,9 @@ Most agent users want **Agent-first** or **Existing-plan adoption**: the agent (
 ---
 
 ## Path 1 — Tutorial
+
+> [!TIP]
+> Brand new to code-pact? Start here. `code-pact tutorial` runs the whole loop in a throwaway sandbox and writes nothing to your repo.
 
 Fastest way to confirm your install is healthy and watch the per-task loop run end to end. There are two ways to do it.
 
@@ -65,7 +86,7 @@ code-pact init --sample-phase
 code-pact init --non-interactive --agent claude-code --locale en-US --sample-phase
 ```
 
-> The interactive `init` wizard no longer asks whether to create the sample phase (removed in v1.15). Pass `--sample-phase` explicitly, or use `code-pact tutorial` above to just watch the loop. Pre-v1.4 `init --non-interactive` produced an empty roadmap with no sample phase.
+> The interactive `init` wizard does not create the sample phase — pass `--sample-phase` explicitly, or use `code-pact tutorial` above to just watch the loop.
 
 This writes the `TUTORIAL` phase into `design/`. v1.4+ ships two minimal tutorial tasks; TUTORIAL-T2 declares `depends_on: [TUTORIAL-T1]` so you can demo the dependency field + the `task runbook` blocking-step output. Then walk [the per-task loop](per-task-loop.md) by hand — the same canonical sequence that page describes:
 
@@ -96,11 +117,16 @@ code-pact phase runbook TUTORIAL --json
 
 If `pnpm test` is not the right verification command for your repo, pass a different one to `init` (`node --version` is a safe placeholder for a smoke test).
 
-> **The dependency demo** (the `task runbook TUTORIAL-T2` line above, run before T1 is done): the first step in `data.next_steps[]` is a blocking `manual_action` ("Wait for TUTORIAL-T1 to reach derived state: done"). This is the same dependency gate `code-pact tutorial` demonstrates automatically.
+> [!NOTE]
+> **The dependency demo** (the `task runbook TUTORIAL-T2` line above, run before T1 is done): the first step in `data.next_steps[]` is a blocking `manual_action` ("Wait for TUTORIAL-T1 to reach derived state: done") — the same gate `code-pact tutorial` shows automatically.
 
-> Steps 3/4 and the runbook commands are opt-in. v1.0 / v1.1 projects can keep flipping `status` by hand if they prefer; `task finalize` and `phase reconcile` exist to mechanize the step in release-prep PRs. `task runbook` and `phase runbook` (v1.3+) return read-only sequencing guidance — they never execute anything. See [`docs/concepts/finalization-reconciliation.md`](concepts/finalization-reconciliation.md) and [`docs/concepts/runbook.md`](concepts/runbook.md) for the walkthroughs.
+<details>
+<summary>Notes on the sample phase</summary>
 
-> The sample-phase artifact is named `TUTORIAL — Walkthrough` (v1.4+) and exists only to confirm the project structure and verification pipeline. Delete it (the file `design/phases/TUTORIAL-walkthrough.yaml` plus the roadmap entry) once you have real phases. See [`docs/concepts/sample-phase.md`](concepts/sample-phase.md) for the full keep / rename / delete decision. Pre-v1.4 projects that still have a `P1-welcome.yaml` are untouched by upgrades.
+- `task finalize` / `phase reconcile` are optional — you can flip `status` by hand; they exist to mechanize it in release-prep PRs. `task runbook` / `phase runbook` are read-only and never execute anything. See [`concepts/finalization-reconciliation.md`](concepts/finalization-reconciliation.md) and [`concepts/runbook.md`](concepts/runbook.md).
+- The artifact is named `TUTORIAL — Walkthrough` and exists only to confirm the project structure and verification pipeline. Delete it (`design/phases/TUTORIAL-walkthrough.yaml` plus the roadmap entry) once you have real phases — see [`concepts/sample-phase.md`](concepts/sample-phase.md).
+
+</details>
 
 ---
 
@@ -177,7 +203,7 @@ code-pact phase add ... --verify-command node --version
 > # ... then phase add / task add / adapter install as in step 3+.
 > ```
 >
-> Pre-v1.6, `plan brief` and `plan constitution` were TTY-only — after a non-interactive `init`, `code-pact validate` reported `BRIEF_MISSING` / `CONSTITUTION_PLACEHOLDER` warnings that required either a TTY visit or hand-editing the files. v1.6+ resolves both from CI with the modes above. See [`docs/dogfood.md` § Non-interactive `plan brief` / `plan constitution`](dogfood.md) for the full walkthrough and `docs/cli-contract.md` for the envelope shapes.
+> The non-interactive modes above also clear the `BRIEF_MISSING` / `CONSTITUTION_PLACEHOLDER` warnings that a non-interactive `init` otherwise leaves. See [`docs/maintainers/operations.md` § Non-interactive `plan brief` / `plan constitution`](maintainers/operations.md#non-interactive-plan-brief--plan-constitution-v16-p17) for the full walkthrough and `docs/cli-contract.md` for the envelope shapes.
 
 ---
 
@@ -292,7 +318,7 @@ Both `plan lint` and `plan analyze` accept `--strict` to fail on warnings. `plan
 
 The essentials above get you through your first task. These are the next things to reach for — each has its own page:
 
-- **Optional task readiness fields** (`depends_on` / `reads` / `writes` / `decision_refs` / `acceptance_refs`) — declare a task's dependencies and read/write surface to shape its context pack. Fully optional; pre-v1.1 YAML is unchanged. → [concepts/task-readiness-fields.md](concepts/task-readiness-fields.md)
+- **Optional task readiness fields** (`depends_on` / `reads` / `writes` / `decision_refs` / `acceptance_refs`) — declare a task's dependencies and read/write surface to shape its context pack. Fully optional. → [concepts/task-readiness-fields.md](concepts/task-readiness-fields.md)
 - **Concurrent runs & the write lock** — what `LOCK_HELD` means and how to recover. → [troubleshooting.md § `LOCK_HELD`](troubleshooting.md#lock_held-from-a-design-mutating-command-v15) · [concepts/governance.md](concepts/governance.md)
 - **Importing a Spec Kit plan** (`tasks.md` / `spec.md`) — the read-only one-way bridge. → [spec-kit-bridge.md](spec-kit-bridge.md)
 - **Managing adapters over time** (`adapter upgrade`, drift) — after the one-time install. → [upgrading.md](upgrading.md)
@@ -300,7 +326,7 @@ The essentials above get you through your first task. These are the next things 
 ## Next reading
 
 - [`docs/cli-contract.md`](cli-contract.md) — full flag / exit code / JSON envelope / error code reference and the Stability taxonomy.
-- [`docs/upgrading.md`](upgrading.md) — how to upgrade (additive within v1.x; pre-v1.0 alpha notes archived in `migration.md`).
-- [`docs/dogfood.md`](dogfood.md) — the real-project walkthrough, including troubleshooting for the most common error codes.
-- [`docs/concepts/governance.md`](concepts/governance.md) — the v1.5 governance layer (advisory write lock, reserved-id block, roadmap mutation policy, phase status manual-flip convention).
-- [`docs/spec-kit-bridge.md`](spec-kit-bridge.md) — the v1.8 read-only one-way importer for Spec Kit `tasks.md` / `spec.md` / `plan.md` artifacts.
+- [`docs/troubleshooting.md`](troubleshooting.md) — diagnostic code → recovery action for the most common error codes.
+- [`docs/upgrading.md`](upgrading.md) — how to upgrade an existing project.
+- [`docs/concepts/governance.md`](concepts/governance.md) — the governance layer (advisory write lock, reserved ids, roadmap mutation policy).
+- [`docs/spec-kit-bridge.md`](spec-kit-bridge.md) — the read-only one-way importer for Spec Kit `tasks.md` / `spec.md` / `plan.md`.

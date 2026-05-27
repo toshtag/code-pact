@@ -49,5 +49,6 @@
 | ドキュメント | 内容 |
 | --- | --- |
 | [troubleshooting.md](../troubleshooting.md) (英語) | 診断コードごとの復旧アクション（よく出るエラーコード）。 |
-| [dogfood.md](../dogfood.md) (英語) | 実プロジェクトでの一連の流れ — code-pact で code-pact 自身を回す。 |
+| [dogfood.md](../dogfood.md) (英語) | maintainer quick guide — code-pact で code-pact 自身を回す（setup・per-task flow・checkpoints）。 |
+| [maintainers/operations.md](../maintainers/operations.md) (英語) | より深い maintainer 向け詳細 — 計画ウィザード、アダプタ運用、Spec Kit 取り込み、リリース準備。 |
 | [community.md](../community.md) (英語) | issue / discussion / PR の出し方と、Non-goals リストに関するスコープ規律。 |

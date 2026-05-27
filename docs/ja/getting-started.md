@@ -29,6 +29,24 @@ v1.0 より前の挙動に固定したプロジェクトでは `npm install -g c
 
 ロードマップの作られ方に合わせてアプローチを選びます。いずれも最終的に同じタスク単位のループ（ドキュメント末尾で説明）に合流するので、後から切り替えるのも容易です。
 
+```mermaid
+flowchart TD
+    A([開始]) --> B{動きを見たいだけ?}
+    B -- はい --> T[スモークテスト:<br/>code-pact tutorial]
+    B -- いいえ --> C{構造化されたプランが<br/>すでにある?}
+    C -- はい --> D[既存プラン取り込み:<br/>plan adopt]
+    C -- いいえ --> E{エージェントが既に<br/>文脈を持っている?}
+    E -- はい --> F[エージェント先行:<br/>plan prompt --schema-only]
+    E -- いいえ --> G{各フェーズ/タスクを<br/>自分で書きたい?}
+    G -- はい --> M[手動:<br/>phase add / task add]
+    G -- いいえ --> H[code-pact 先行:<br/>brief + constitution + plan prompt]
+    T --> Z([タスク単位のループ])
+    D --> Z
+    F --> Z
+    M --> Z
+    H --> Z
+```
+
 | アプローチ | 向いている場面 | 最初の `task complete` までの目安 |
 | --- | --- | --- |
 | **スモークテスト**（チュートリアル） | ループの動きをひととおり見たいだけ — `code-pact tutorial` はリポジトリに何も書き込みません | 約1分 |
@@ -264,4 +282,5 @@ code-pact validate                  # CI 向け、エラーで exit 1
 - [`README.md`](../../README.md) — `code-pact` 全体の紹介とリファレンスへのリンクハブ（英語）。
 - [`docs/cli-contract.md`](../cli-contract.md) — フラグ / 終了コード / JSON envelope / エラーコードの完全リファレンスと Stability taxonomy（英語）。
 - [`docs/upgrading.md`](../upgrading.md) — アップグレード方法（v1.x 内は追加のみ。pre-v1.0 alpha の詳細は `migration.md` にアーカイブ）（英語）。
-- [`docs/dogfood.md`](../dogfood.md) — 実プロジェクトでのウォークスルーと、よく出るエラーコードのトラブルシュート（英語）。
+- [`docs/troubleshooting.md`](../troubleshooting.md) — 診断コードごとの復旧アクション（英語）。
+- [`docs/dogfood.md`](../dogfood.md) — code-pact で code-pact 自身を回す maintainer quick guide（英語）。
