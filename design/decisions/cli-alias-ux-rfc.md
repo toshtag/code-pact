@@ -36,10 +36,11 @@ The v1.0 stability taxonomy freezes the public CLI surface (command names, flags
 ## Constraints any implementation must honor
 
 1. **Additive only.** Existing names (`task finalize`, `phase import`, `task runbook`, …) keep working unchanged. Aliases dispatch to the same handlers.
-2. **One canonical name per surface in the contract.** `docs/cli-contract.md` documents the canonical command; aliases are listed as aliases, not duplicated as first-class entries. Conformance/`adapter` generation keeps emitting the canonical names.
-3. **Runbook output is Stable (v1.3+).** `next_steps[].command` strings must keep emitting canonical commands unless a separate compatibility note explicitly modernizes them.
-4. **File renames keep a compatibility stub** at the old path (the `migration.md` precedent), and update `design/phases/*.yaml` references only if the stub is later removed.
-5. **Tests + docs land together.** An alias without a documented mapping and a test is drift.
+2. **Aliases are secondary Stable public aliases — not "free" sugar.** Once an alias is documented in `docs/cli-contract.md` it is public surface users may depend on: it cannot be removed, and it must not diverge semantically from its canonical command. The canonical name stays the **primary** documented command and is what conformance / `adapter` generation emits; aliases are listed *as aliases*, not duplicated as first-class entries.
+3. **Alias-facing UX.** Because aliases target newcomers, their human-facing CONFIG_ERROR / usage messages name the invoked alias (and point at the canonical command), even though the JSON envelope shape, exit code, and error code are identical to the canonical command.
+4. **Runbook output is Stable (v1.3+).** `next_steps[].command` strings must keep emitting canonical commands unless a separate compatibility note explicitly modernizes them.
+5. **File renames keep a compatibility stub** at the old path (the `migration.md` precedent), and update `design/phases/*.yaml` references only if the stub is later removed.
+6. **Tests + docs land together.** An alias without a documented mapping and a test is drift.
 
 ## Recommendation
 

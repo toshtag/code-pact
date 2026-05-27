@@ -49,7 +49,9 @@ The complete catalog (Public / Plan / Doctor / Adapter) is in [Error codes](#err
 
 ## Command aliases
 
-A few commands have beginner-friendly aliases. Each alias dispatches to the **exact same handler** as its canonical command (same flags, exit codes, envelope, error codes) — it is sugar, not a separate surface. The canonical name is the one documented per-command below; the alias is **Stable (v1.x+)**.
+A few commands have beginner-friendly aliases. Each alias dispatches to the **exact same handler** as its canonical command (same flags, exit codes, JSON envelope, error codes); when an alias is misused, its human-facing error message names the alias and points back at the canonical command.
+
+Canonical names remain the **primary** documented commands and the names emitted by adapters. The aliases are **secondary Stable (v1.x+) public aliases** — once listed here they are public surface you can depend on, so they stay additive and must not diverge semantically from the command they shadow.
 
 | Alias | Canonical | Reads better as |
 | --- | --- | --- |
