@@ -1,4 +1,4 @@
-import { mkdir, access } from "node:fs/promises";
+import { mkdir, access, readFile } from "node:fs/promises";
 import { atomicWriteText } from "../io/atomic-text.ts";
 import { join } from "node:path";
 import { stringify as toYaml } from "yaml";
@@ -9,6 +9,7 @@ import type { Roadmap } from "../core/schemas/roadmap.ts";
 import type { ProgressLog } from "../core/schemas/progress-event.ts";
 import type { BaselineSnapshot } from "../core/schemas/baseline-snapshot.ts";
 import { DEFAULT_AGENT_PROFILES, type SupportedAgent } from "../core/agents.ts";
+import { renderInitConstitution } from "../core/constitution.ts";
 import { messages as messageCatalog } from "../i18n/index.ts";
 
 export type { SupportedAgent } from "../core/agents.ts";
@@ -51,6 +52,12 @@ export type InitCoreOptions = InitOptions & {
 export type InitResult = {
   created: string[];
   skipped: string[];
+  /**
+   * Onboarding guidance surfaced after a successful init. Advisory only;
+   * keeps the placeholder-edit nudge out of `doctor` (which now stays quiet
+   * until a real phase exists) and in front of the user at the right moment.
+   */
+  suggested_next_steps: string[];
 };
 
 // ---------------------------------------------------------------------------
@@ -81,21 +88,6 @@ const MODEL_PROFILES: ModelProfile[] = [
 // ---------------------------------------------------------------------------
 // Template strings
 // ---------------------------------------------------------------------------
-
-function constitutionMd(projectName: string, locale: LocaleCode): string {
-  const t = messageCatalog[locale].templates.constitution;
-  return [
-    `# ${projectName} — Constitution`,
-    "",
-    t.description,
-    "",
-    `## ${t.corePrinciplesHeader}`,
-    "",
-    ...t.principles.map((p) => `- ${p}`),
-    "",
-    `> ${t.editHint}`,
-  ].join("\n");
-}
 
 function codingStyleMd(locale: LocaleCode): string {
   const t = messageCatalog[locale].templates.codingStyle;
@@ -142,6 +134,55 @@ async function writeIfAbsent(
   // identical to the previous writeFile call for the happy path.
   await atomicWriteText(p, content);
   created.push(p);
+}
+
+/** Compare gitignore patterns ignoring leading/trailing slash + whitespace. */
+function gitignoreKey(line: string): string {
+  return line.trim().replace(/^\/+/, "").replace(/\/+$/, "");
+}
+
+/**
+ * Idempotently ensures `entries` are present in `<cwd>/.gitignore`, preserving
+ * any existing content. Unlike a plain writeIfAbsent, an existing .gitignore is
+ * MERGED into, not skipped — so re-running init (or running it in a repo that
+ * already has a .gitignore) still gets code-pact's ignores without clobbering
+ * the user's. Entries already present (compared slash-insensitively, so
+ * `.local/` satisfies `/.local/`) are not duplicated.
+ */
+async function ensureGitignoreEntries(
+  cwd: string,
+  entries: string[],
+  created: string[],
+): Promise<void> {
+  const path = join(cwd, ".gitignore");
+  let existing: string | null = null;
+  try {
+    existing = await readFile(path, "utf8");
+  } catch {
+    existing = null;
+  }
+
+  const present = new Set(
+    (existing ?? "").split("\n").map(gitignoreKey).filter((k) => k.length > 0),
+  );
+  const missing = entries.filter((e) => !present.has(gitignoreKey(e)));
+
+  if (missing.length === 0) {
+    // The existing .gitignore already covers every entry — nothing to do.
+    // Not recorded as "skipped" (that connotes skipped-because-exists); the
+    // merge target was simply already complete, so this is a clean no-op.
+    return;
+  }
+
+  let next: string;
+  if (existing === null || existing.length === 0) {
+    next = `${missing.join("\n")}\n`;
+  } else {
+    const sep = existing.endsWith("\n") ? "" : "\n";
+    next = `${existing}${sep}${missing.join("\n")}\n`;
+  }
+  await atomicWriteText(path, next);
+  created.push(path);
 }
 
 async function mkdirp(p: string): Promise<void> {
@@ -246,14 +287,9 @@ export async function runInitCore(opts: InitCoreOptions): Promise<InitResult> {
     skipped,
   );
 
-  // .gitignore — ensure .local/ is excluded from version control
-  await writeIfAbsent(
-    join(cwd, ".gitignore"),
-    ".local/\n",
-    force,
-    created,
-    skipped,
-  );
+  // .gitignore — ensure code-pact's per-developer state is excluded from
+  // version control. Merged into any existing .gitignore (idempotent).
+  await ensureGitignoreEntries(cwd, ["/.local/", "/.context/"], created);
 
   // -------------------------------------------------------------------------
   // design/
@@ -265,7 +301,7 @@ export async function runInitCore(opts: InitCoreOptions): Promise<InitResult> {
   // constitution.md
   await writeIfAbsent(
     join(cwd, "design", "constitution.md"),
-    constitutionMd(projectName, locale),
+    renderInitConstitution(projectName, locale),
     force,
     created,
     skipped,
@@ -298,7 +334,12 @@ export async function runInitCore(opts: InitCoreOptions): Promise<InitResult> {
     if (samplePath) created.push(samplePath);
   }
 
-  return { created, skipped };
+  const suggested_next_steps = [
+    "Edit design/constitution.md to capture your project's principles (or run: code-pact plan constitution).",
+    "Define your first phase: code-pact phase add.",
+  ];
+
+  return { created, skipped, suggested_next_steps };
 }
 
 /**

@@ -5,6 +5,9 @@ import { z } from "zod";
 import { atomicWriteText } from "../io/atomic-text.ts";
 import { Prompter } from "../lib/prompt.ts";
 import { assertSafeRelativePath } from "../core/path-safety.ts";
+import { Project } from "../core/schemas/project.ts";
+import type { LocaleCode } from "../core/schemas/locale.ts";
+import { isPristineInitConstitution } from "../core/constitution.ts";
 import type { Locale } from "../i18n/index.ts";
 import { messages as messageCatalog } from "../i18n/index.ts";
 
@@ -262,6 +265,28 @@ export async function runConstitutionWizard(
 // Main command
 // ---------------------------------------------------------------------------
 
+/**
+ * Without --force, an existing constitution is only safe to overwrite when it
+ * is still the pristine placeholder `init` generated. Reconstructs that exact
+ * placeholder from `.code-pact/project.yaml` (name + locale) and compares.
+ * Any user edit — or an unreadable/absent project.yaml we cannot reconstruct
+ * from — counts as a real constitution worth protecting.
+ */
+async function existingIsPristinePlaceholder(
+  cwd: string,
+  existing: string,
+): Promise<boolean> {
+  try {
+    const raw = await readFile(join(cwd, ".code-pact", "project.yaml"), "utf8");
+    const project = Project.parse(parseYaml(raw) as unknown);
+    const localeCode: LocaleCode =
+      typeof project.locale === "string" ? project.locale : project.locale.default;
+    return isPristineInitConstitution(existing, project.name, localeCode);
+  } catch {
+    return false;
+  }
+}
+
 export async function runPlanConstitution(
   opts: PlanConstitutionOptions,
 ): Promise<PlanConstitutionResult> {
@@ -269,11 +294,16 @@ export async function runPlanConstitution(
   const constitutionPath = join(cwd, "design", "constitution.md");
 
   if (!force) {
+    let existing: string | null = null;
     try {
-      await readFile(constitutionPath);
-      return { path: constitutionPath, skipped: true };
+      existing = await readFile(constitutionPath, "utf8");
     } catch {
-      // file doesn't exist — proceed
+      existing = null; // file doesn't exist — proceed to generate
+    }
+    // A pristine init placeholder may be replaced without --force; a
+    // user-edited constitution is protected (skipped) until --force.
+    if (existing !== null && !(await existingIsPristinePlaceholder(cwd, existing))) {
+      return { path: constitutionPath, skipped: true };
     }
   }
 

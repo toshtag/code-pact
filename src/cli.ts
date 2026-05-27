@@ -146,6 +146,9 @@ async function cmdInit(
           process.stderr.write(`  skipped  ${f} (already exists)\n`);
         }
         process.stderr.write(`\n${m.init.done}\n`);
+        for (const step of result.suggested_next_steps) {
+          process.stderr.write(`  → ${step}\n`);
+        }
         return 0;
       } catch (err: unknown) {
         if (
@@ -237,6 +240,9 @@ async function cmdInit(
           process.stderr.write(`  skipped  ${f} (already exists)\n`);
         }
         process.stderr.write(`\n${m.init.done}\n`);
+        for (const step of result.suggested_next_steps) {
+          process.stderr.write(`  → ${step}\n`);
+        }
       }
       return 0;
     } catch (err: unknown) {
