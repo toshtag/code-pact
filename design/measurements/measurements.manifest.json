@@ -1,7 +1,7 @@
 {
   "harness_version": "0.2.0",
-  "input_git_sha": "8f5ef02918ba5df2950e544ec2197c47ba01cbfe",
-  "code_pact_cli_version": "1.19.0",
+  "input_git_sha": "7e70114311b46bb11e84609b8a8f37b09e896cce",
+  "code_pact_cli_version": "1.20.0",
   "generated_at": "2026-05-27",
   "csv_files": [
     "pack-size-by-task.csv",

@@ -13,6 +13,33 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+## [1.20.0] — 2026-05-27
+
+### Trust hardening — deterministic adapters, honest `--model`, cost-correct recommendations
+
+Dogfooding `code-pact` in another project exposed a class of trust bugs where the control plane wobbled on its own generated output. This release closes them. One **breaking** CLI change: the long-deprecated bare `code-pact adapter` form is removed.
+
+**Removed**
+
+- **BREAKING:** the deprecated bare `code-pact adapter` form (including `adapter --agent <name>`, which implicitly ran `adapter install`) now returns `CONFIG_ERROR` (exit 2) with **no side effects**. Use `code-pact adapter install <agent>`. A form that warned *and* mutated the project was the exact "warning + side effect" hazard this release removes. `code-pact adapter --help` / `-h` / `help` prints usage and exits 0.
+
+**Fixed**
+
+- **Adapter convergence.** A verification command whose derived skill name collides with a built-in skill (`context` / `verify` / `progress`) no longer clobbers the built-in — the derived skill is deterministically uniquified (e.g. `verify-2`), with the final name propagated to its path, body, and manifest entry. `AdapterManifest` now rejects duplicate `files[].path`, and `adapter install` / `adapter upgrade --write` repair a legacy duplicate-path manifest instead of aborting on it. `install → upgrade --check → upgrade --write → doctor` converges clean.
+- **`--model` actually pins.** `adapter install`/`adapter upgrade --model <v>` now persists `model_version` to the agent profile (it was previously fingerprint-only), so `doctor`'s `ADAPTER_STALE` remediation actually works. Validation runs before any filesystem mutation; an unknown `--model` is `CONFIG_ERROR`.
+- **Recommendation cost.** `verification_strength: weak` no longer escalates a task to `highest_reasoning` on its own — it is reflected in the budget profile instead. `cheap_mechanical` is now additionally gated on `write_surface=low` + `context_size=small`, so a small docs/formatting edit stays cheap even with weak verification, while a sprawling docs change is not under-priced just because its type is `docs`.
+- **init self-consistency.** An existing `.gitignore` is now merged (gaining `/.local/` and `/.context/`) instead of being skipped; `doctor`'s `CONSTITUTION_PLACEHOLDER` warning is suppressed until a real (non-tutorial) phase exists; and `plan constitution` overwrites only the pristine generated placeholder without `--force`, protecting a user-edited constitution even if it still contains the edit-hint line.
+
+**Added**
+
+- `--model` accepts vendor-id aliases that normalize to the canonical version (`claude-opus-4-7` → `opus-4.7`, `claude-sonnet-4-6` → `sonnet-4.6`).
+- `--help` / `-h` / `help` on the `plan`, `task`, `phase`, and `adapter` command groups (and `<group> <subcommand> --help`) now prints usage and exits 0 instead of `CONFIG_ERROR`. Bare `plan` / `task` / `phase` also print usage; bare `adapter` is an error (see **Removed**).
+- `init` now returns `suggested_next_steps` (edit the constitution / add a phase), surfaced in both the JSON envelope and the human output.
+
+**Changed**
+
+- `adapter upgrade --check --model <v>` now returns `CONFIG_ERROR`: `--check` is read-only and must not pin a model.
+
 ## [1.19.0] — 2026-05-27
 
 ### Beginner-friendly command aliases + a documentation overhaul
