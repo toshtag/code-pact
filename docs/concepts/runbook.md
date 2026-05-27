@@ -4,7 +4,7 @@ This document is the agent- and reviewer-facing walkthrough of `task runbook` an
 
 ## Why the runbook exists
 
-After P10 (task readiness fields) and P11 (`task finalize` / `phase reconcile`), `code-pact` has the mechanical tools to keep design intent and operational fact in sync. But the per-task and per-phase command sequence is implicit — it lives in `docs/dogfood.md`'s per-task flow and in the maintainer's muscle memory, not in a CLI-emitted form.
+After P10 (task readiness fields) and P11 (`task finalize` / `phase reconcile`), `code-pact` has the mechanical tools to keep design intent and operational fact in sync. But the per-task and per-phase command sequence was implicit — historically it lived in the dogfood walkthrough and in the maintainer's muscle memory, not in a CLI-emitted form. (The human-facing canonical loop is now [`docs/per-task-loop.md`](../per-task-loop.md); `runbook` is the machine-readable sequencing surface.)
 
 The cost of an implicit sequence:
 
