@@ -9,6 +9,7 @@
 
 import { parseArgs } from "node:util";
 import { strictParse, strictParseAlias, ConfigError } from "../../lib/argv.ts";
+import { clusterUsage, emitUsage, hasHelpFlag, isHelpToken, subcommandUsage } from "../usage.ts";
 import { isInteractive } from "../../lib/tty.ts";
 import { messages, type Locale } from "../../i18n/index.ts";
 import { withWriteLock } from "../util.ts";
@@ -41,6 +42,15 @@ import {
 export async function cmdTask(argv: string[], locale: Locale, globalJson: boolean): Promise<number> {
   const subcommand = argv[0];
   const rest = argv.slice(1);
+
+  // `task`, `task help`, `task --help`, `task -h` → cluster usage (exit 0).
+  if (subcommand === undefined || isHelpToken(subcommand)) {
+    return emitUsage(clusterUsage("task"));
+  }
+  // `task <sub> --help` → per-subcommand usage (exit 0).
+  if (hasHelpFlag(rest)) {
+    return emitUsage(subcommandUsage("task", subcommand));
+  }
 
   if (subcommand === "context") {
     return cmdTaskContext(rest, locale, globalJson);

@@ -9,6 +9,7 @@
 
 import { parseArgs } from "node:util";
 import { strictParse, ConfigError } from "../../lib/argv.ts";
+import { clusterUsage, emitUsage, hasHelpFlag, isHelpToken, subcommandUsage } from "../usage.ts";
 import { cmdPhaseImport } from "./phase.ts";
 import { withWriteLock } from "../util.ts";
 import { isInteractive } from "../../lib/tty.ts";
@@ -50,6 +51,15 @@ import {
 export async function cmdPlan(argv: string[], locale: Locale, globalJson: boolean): Promise<number> {
   const subcommand = argv[0];
   const rest = argv.slice(1);
+
+  // `plan`, `plan help`, `plan --help`, `plan -h` → cluster usage (exit 0).
+  if (subcommand === undefined || isHelpToken(subcommand)) {
+    return emitUsage(clusterUsage("plan"));
+  }
+  // `plan <sub> --help` → per-subcommand usage (exit 0), before strictParse.
+  if (hasHelpFlag(rest)) {
+    return emitUsage(subcommandUsage("plan", subcommand));
+  }
 
   if (subcommand === "brief") {
     return cmdPlanBrief(rest, locale, globalJson);

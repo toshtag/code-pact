@@ -11,6 +11,7 @@
 
 import { parseArgs } from "node:util";
 import { messages, type Locale } from "../../i18n/index.ts";
+import { clusterUsage, emitUsage, hasHelpFlag, isHelpToken, subcommandUsage } from "../usage.ts";
 import { isSupportedAgent } from "../../core/agents.ts";
 import {
   runAdapterInstall,
@@ -26,18 +27,32 @@ import { runAdapterConformance } from "../../commands/adapter-conformance.ts";
 
 export async function cmdAdapter(argv: string[], locale: Locale, globalJson: boolean): Promise<number> {
   const sub = argv[0];
-
-  if (sub === "list") return cmdAdapterList(argv.slice(1), globalJson);
-  if (sub === "install") return cmdAdapterInstall(argv.slice(1), locale, globalJson);
-  if (sub === "doctor") return cmdAdapterDoctor(argv.slice(1), locale, globalJson);
-  if (sub === "upgrade") return cmdAdapterUpgrade(argv.slice(1), locale, globalJson);
-  if (sub === "conformance") return cmdAdapterConformance(argv.slice(1), globalJson);
+  const rest = argv.slice(1);
 
   // Effective --json honors both the global flag (before the command) and
   // a --json embedded in the subcommand args (after the command).
   const effectiveJson = globalJson || argv.includes("--json");
 
-  // Reject other unknown sub-words (anything that doesn't start with `-`).
+  // `adapter --help` / `-h` / `help` → cluster usage (exit 0). Note: bare
+  // `adapter` (no subcommand) is deliberately NOT treated as help — it is a
+  // CONFIG_ERROR below, since the old implicit-install bare form is removed.
+  if (isHelpToken(sub)) {
+    return emitUsage(clusterUsage("adapter"));
+  }
+
+  const KNOWN_SUBCOMMANDS = new Set(["list", "install", "upgrade", "doctor", "conformance"]);
+  // `adapter <sub> --help` → per-subcommand usage (exit 0).
+  if (sub !== undefined && KNOWN_SUBCOMMANDS.has(sub) && hasHelpFlag(rest)) {
+    return emitUsage(subcommandUsage("adapter", sub));
+  }
+
+  if (sub === "list") return cmdAdapterList(rest, globalJson);
+  if (sub === "install") return cmdAdapterInstall(rest, locale, globalJson);
+  if (sub === "doctor") return cmdAdapterDoctor(rest, locale, globalJson);
+  if (sub === "upgrade") return cmdAdapterUpgrade(rest, locale, globalJson);
+  if (sub === "conformance") return cmdAdapterConformance(rest, globalJson);
+
+  // Reject unknown sub-words (anything that doesn't start with `-`).
   if (sub !== undefined && !sub.startsWith("-")) {
     const msg = `adapter: unknown subcommand "${sub}". Use: list | install | upgrade | doctor | conformance`;
     if (effectiveJson) {
@@ -50,11 +65,20 @@ export async function cmdAdapter(argv: string[], locale: Locale, globalJson: boo
     return 2;
   }
 
-  // Bare-form back-compat: `code-pact adapter [--agent X] ...` routes to
-  // install with a deprecation notice on stderr (suppressed under --json
-  // so agents consuming the JSON envelope are not surprised by an extra
-  // stderr line). Removal is scheduled for v0.10.
-  return cmdAdapterBareForm(argv, locale, globalJson);
+  // Bare `code-pact adapter` (no subcommand, or flag-only like `--agent X`).
+  // The deprecated implicit-install bare form is removed: a warning that also
+  // mutates the project is exactly the "warning + side effect" hazard this
+  // hardening pass is closing. Require the explicit subcommand. No side effects.
+  const msg =
+    "adapter requires a subcommand — the bare form is removed. Use: code-pact adapter install <agent> (or list | upgrade | doctor | conformance). Run \"code-pact adapter --help\".";
+  if (effectiveJson) {
+    process.stdout.write(
+      `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
+    );
+  } else {
+    process.stderr.write(`${msg}\n`);
+  }
+  return 2;
 }
 
 async function cmdAdapterList(argv: string[], globalJson: boolean): Promise<number> {
@@ -130,7 +154,6 @@ async function cmdAdapterInstall(
     regenSkills,
     json,
     m,
-    deprecated: false,
   });
 }
 
@@ -423,49 +446,6 @@ async function cmdAdapterUpgrade(
   }
 }
 
-async function cmdAdapterBareForm(
-  argv: string[],
-  locale: Locale,
-  globalJson: boolean,
-): Promise<number> {
-  const m = messages[locale];
-  const { values } = parseArgs({
-    args: argv,
-    options: {
-      agent: { type: "string" },
-      force: { type: "boolean" },
-      json: { type: "boolean" },
-      model: { type: "string" },
-      "regen-skills": { type: "boolean" },
-    },
-    strict: false,
-    allowPositionals: false,
-  });
-
-  const json = globalJson || values.json === true;
-  const agentName = (values.agent as string | undefined) ?? "claude-code";
-  const force = values.force === true;
-  const modelVersion = values.model as string | undefined;
-  const regenSkills = values["regen-skills"] === true;
-
-  if (!json) {
-    process.stderr.write(
-      `[deprecated] bare 'code-pact adapter' is deprecated; use 'code-pact adapter install ${agentName}'. The bare form will be removed in v1.1.\n`,
-    );
-  }
-
-  return runAdapterInstallAndEmit({
-    agentName,
-    force,
-    locale,
-    modelVersion,
-    regenSkills,
-    json,
-    m,
-    deprecated: true,
-  });
-}
-
 async function runAdapterInstallAndEmit(args: {
   agentName: string;
   force: boolean;
@@ -474,7 +454,6 @@ async function runAdapterInstallAndEmit(args: {
   regenSkills: boolean;
   json: boolean;
   m: (typeof messages)[Locale];
-  deprecated: boolean;
 }): Promise<number> {
   const { agentName, force, locale, modelVersion, regenSkills, json, m } = args;
   const cwd = process.cwd();

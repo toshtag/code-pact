@@ -95,28 +95,57 @@ describe("adapter install <agent> — CLI", () => {
   });
 });
 
-describe("adapter bare-form back-compat — CLI", () => {
-  it("bare-form without --json emits a deprecation notice on stderr", () => {
-    const res = runCli(["adapter", "--agent", "claude-code"]);
-    expect(res.status).toBe(0);
-    expect(res.stderr).toMatch(/deprecated/i);
-    expect(res.stderr).toMatch(/adapter install claude-code/);
-  });
-
-  it("bare-form with --json SUPPRESSES the deprecation notice on stderr", () => {
-    const res = runCli(["adapter", "--agent", "claude-code", "--json"]);
-    expect(res.status).toBe(0);
-    // stderr stays quiet under --json so agents reading JSON aren't surprised.
-    expect(res.stderr).not.toMatch(/deprecated/i);
-    const parsed = JSON.parse(res.stdout) as { ok: boolean; data: { manifestPath: string } };
-    expect(parsed.ok).toBe(true);
-    expect(parsed.data.manifestPath).toContain("claude-code.manifest.yaml");
-  });
-
-  it("bare-form routes to install (manifest is created)", () => {
-    runCli(["adapter", "--agent", "claude-code", "--json"]);
+describe("adapter bare-form removed — CLI", () => {
+  it("bare `adapter` (no subcommand) → CONFIG_ERROR exit 2, no side effects", () => {
+    const res = runCli(["adapter", "--json"]);
+    expect(res.status).toBe(2);
+    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string; message: string } };
+    expect(parsed.ok).toBe(false);
+    expect(parsed.error.code).toBe("CONFIG_ERROR");
+    expect(parsed.error.message).toMatch(/adapter install/);
+    // No implicit install: no manifest was created.
     const manifestPath = join(dir, ".code-pact", "adapters", "claude-code.manifest.yaml");
-    expect(existsSync(manifestPath)).toBe(true);
+    expect(existsSync(manifestPath)).toBe(false);
+  });
+
+  it("former bare-form `adapter --agent claude-code` → CONFIG_ERROR, no manifest", () => {
+    const res = runCli(["adapter", "--agent", "claude-code", "--json"]);
+    expect(res.status).toBe(2);
+    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+    expect(parsed.error.code).toBe("CONFIG_ERROR");
+    const manifestPath = join(dir, ".code-pact", "adapters", "claude-code.manifest.yaml");
+    expect(existsSync(manifestPath)).toBe(false);
+  });
+
+  it("no deprecation notice is emitted (the warning + side-effect form is gone)", () => {
+    const res = runCli(["adapter", "--agent", "claude-code"]);
+    expect(res.status).toBe(2);
+    expect(res.stderr).not.toMatch(/deprecated/i);
+  });
+});
+
+describe("adapter --help — CLI", () => {
+  it("`adapter --help` → usage on stdout, exit 0", () => {
+    const res = runCli(["adapter", "--help"]);
+    expect(res.status).toBe(0);
+    expect(res.stdout).toMatch(/Subcommands:/);
+    expect(res.stdout).toMatch(/install/);
+  });
+
+  it("`adapter -h` and `adapter help` also print usage, exit 0", () => {
+    for (const variant of [["adapter", "-h"], ["adapter", "help"]]) {
+      const res = runCli(variant);
+      expect(res.status).toBe(0);
+      expect(res.stdout).toMatch(/Subcommands:/);
+    }
+  });
+
+  it("`adapter install --help` → per-subcommand usage, exit 0, no install", () => {
+    const res = runCli(["adapter", "install", "--help"]);
+    expect(res.status).toBe(0);
+    expect(res.stdout).toMatch(/adapter install/);
+    const manifestPath = join(dir, ".code-pact", "adapters", "claude-code.manifest.yaml");
+    expect(existsSync(manifestPath)).toBe(false);
   });
 });
 
