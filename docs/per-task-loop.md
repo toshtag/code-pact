@@ -77,6 +77,9 @@ code-pact task finalize P1-T1 --json
 code-pact task finalize P1-T1 --write --json
 ```
 
+> [!WARNING]
+> `task finalize --write` mutates the phase YAML in `design/`. Run it without `--write` first to preview the change (dry-run is the default).
+
 ## Invariants worth knowing
 
 - **`task start` and `task complete` are idempotent.** Re-running on an
