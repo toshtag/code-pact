@@ -42,7 +42,9 @@ The command resolves the task id by scanning every phase referenced by `design/r
 
 ### State → steps mapping
 
-The runbook maps `(derived state, design status, drift kind)` → recommended steps. `task start` is part of the primary loop for `planned + no events` tasks because it records the `planned → started` state-machine transition; downstream tools and handoff scripts depend on that event existing.
+> **Relationship to the canonical loop.** For starting work directly, the recommended entry point is `task prepare` (see [per-task-loop.md](../per-task-loop.md)), which bundles `task context`. The runbook predates `task prepare` and emits `task context` in its ready-task sequence below; this is **Stable (v1.3+)** output, so the command strings are kept as-is for contract stability. `task context` remains a supported diagnostic. Modernizing the runbook's emitted commands to `task prepare` would be a separate, compatibility-gated change.
+
+The runbook maps `(derived state, design status, drift kind)` → recommended steps. `task start` is the first step of the ready-task sequence for `planned + no events` tasks because it records the `planned → started` state-machine transition; downstream tools and handoff scripts depend on that event existing.
 
 | Derived | Design | Drift kind | Steps |
 | --- | --- | --- | --- |
@@ -84,7 +86,7 @@ The phase runbook iterates `phase.tasks[]` once, classifies each task, and assem
 | 2 | Failed / complex-drift tasks | yes | manual_review pointing at `plan analyze` for `failed` state and `done-blocked-conflict` / `done-with-incomplete-events` drift |
 | 3 | Eligible reconcile batch | no | exactly one `phase reconcile <id> --write` step covering every `flip` candidate |
 | 4 | In-progress task hints | no | one `task runbook <task-id>` step per `started` / `resumed` task |
-| 5 | Untouched ready tasks | no | the four-step primary loop (`task start` → `task context` → implement → `task complete`) for each `planned` task whose `depends_on` is satisfied |
+| 5 | Untouched ready tasks | no | the four-step ready-task sequence (`task start` → `task context` → implement → `task complete`) for each `planned` task whose `depends_on` is satisfied |
 | 6 | Phase-status advisory | no | manual_action recommending the phase's own `status` flip when every task would be `done` post-reconcile and the phase isn't already `done` |
 
 The phase-status advisory is the closing step. Phase reconcile itself never writes the phase status field; the runbook continues that contract by surfacing the advisory as a `manual_action`, not a command.
