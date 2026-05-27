@@ -6,9 +6,11 @@
 
 This page is kept as a compatibility archive. Older design phases, RFC decision
 records, and a few concept docs link to its per-version anchors, so the file
-and its section anchors are preserved. The detailed, release-by-release history
-now lives in [`CHANGELOG.md`](../CHANGELOG.md); the concepts behind each
-addition live in the [concepts guides](README.md#concepts).
+path and the section anchors that current docs still link to are preserved
+below. Many of the original fine-grained per-release sections were not — the
+detailed, release-by-release history now lives in
+[`CHANGELOG.md`](../CHANGELOG.md), and the concepts behind each addition live in
+the [concepts guides](README.md#concepts).
 
 ## v1.0 — the frozen surface
 
