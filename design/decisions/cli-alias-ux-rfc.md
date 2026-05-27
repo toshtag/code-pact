@@ -1,13 +1,17 @@
 # RFC: Beginner-friendly CLI aliases
 
-**Status:** proposed (not yet scheduled)
-**Scope:** *candidate* additive command aliases and one doc rename, surfaced by documentation UX review. No implementation is authorized by this RFC — it records the design space and the compatibility constraints so a future phase can decide deliberately.
+**Status:** accepted (command aliases implemented; the `dogfood.md` rename remains deferred)
+**Scope:** additive command aliases (`task next`, `phase next`, `task reconcile`, `plan import`) and one *still-deferred* doc rename, surfaced by documentation UX review. The four command aliases are implemented as thin dispatch sugar; the `dogfood.md` rename is intentionally not done (see below).
 **Owners:** maintainer
 **Related:** [agent-contract-v2-rfc.md](agent-contract-v2-rfc.md) (P21 — introduced `task prepare`, the modern entry point these aliases relate to). [lightweight-runbook-rfc.md](lightweight-runbook-rfc.md) (P12 — `task runbook` / `phase runbook`). [stability-taxonomy.md](stability-taxonomy.md) (the v1.0 freeze these aliases must not violate).
 
 ## Summary
 
-Documentation review found that several command and file names are not self-explanatory to newcomers, so the docs spend words compensating: `task finalize` (why, after `task complete`?), `phase import` (sounds single-phase), `runbook` (jargon), and the file name `dogfood.md`. This RFC catalogs **additive** aliases that would read better for first-time users, alongside the compatibility rules that make them safe — or risky. It decides nothing; it exists so the trade-offs are written down before anyone changes the Stable CLI surface.
+Documentation review found that several command and file names are not self-explanatory to newcomers, so the docs spend words compensating: `task finalize` (why, after `task complete`?), `phase import` (sounds single-phase), `runbook` (jargon), and the file name `dogfood.md`. This RFC catalogs **additive** aliases that read better for first-time users, alongside the compatibility rules that keep them safe.
+
+**Implemented:** `task next` → `task runbook`, `phase next` → `phase runbook`, `task reconcile` → `task finalize`, `plan import` → `phase import`. Each is thin dispatch sugar to the same handler (same flags / exit codes / envelope / error codes), documented as an alias in [`docs/cli-contract.md` § Command aliases](../../docs/cli-contract.md#command-aliases), and covered by `tests/integration/cli-aliases.test.ts` (byte-identical-output assertions). The canonical names remain the contract surface and are what `adapter` generation emits.
+
+**Not done:** the `dogfood.md` → `maintainer-quick-guide.md` rename — its bookkeeping cost (a compat stub + many `design/phases/*.yaml` references) outweighs the benefit, and the doc is already clearly framed as a maintainer guide.
 
 ## Why this is a separate, deferred decision
 

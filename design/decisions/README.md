@@ -29,12 +29,7 @@ the *why* behind the code — the user-facing *how* lives in [`docs/`](../../doc
 | P28 | [Spec-conformance remediation](spec-conformance-rfc.md) | Established the RFC-conformance test convention. |
 | P30 | [Adapter contract hardening](adapter-contract-hardening-rfc.md) | Further hardened the adapter contract checks. |
 | — | [Deterministic roadmap stabilization](deterministic-roadmap-stabilization-rfc.md) | Made AI-assisted roadmap generation reproducible. |
-
-## Proposed (not yet scheduled)
-
-| Decision | What it proposes |
-| --- | --- |
-| [Beginner-friendly CLI aliases](cli-alias-ux-rfc.md) | **Proposed.** Candidate additive aliases (`task next`, `phase next`, `task reconcile`, `plan import`) + a `dogfood.md` rename, with the compatibility rules. Records the design space; implements nothing. |
+| — | [Beginner-friendly CLI aliases](cli-alias-ux-rfc.md) | Added additive aliases `task next` / `phase next` / `task reconcile` / `plan import` (thin sugar to the canonical handlers). The `dogfood.md` rename stays deferred. |
 
 ## Rules
 
