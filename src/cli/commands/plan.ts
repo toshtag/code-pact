@@ -9,6 +9,7 @@
 
 import { parseArgs } from "node:util";
 import { strictParse, ConfigError } from "../../lib/argv.ts";
+import { cmdPhase } from "./phase.ts";
 import { withWriteLock } from "../util.ts";
 import { isInteractive } from "../../lib/tty.ts";
 import { messages, type Locale } from "../../i18n/index.ts";
@@ -78,7 +79,14 @@ export async function cmdPlan(argv: string[], locale: Locale, globalJson: boolea
     return cmdPlanAnalyze(rest, locale, globalJson);
   }
 
-  const msg = `plan: unknown subcommand "${subcommand ?? ""}". Use: brief | prompt | adopt | constitution | lint | normalize | analyze`;
+  // `plan import` is a beginner-friendly alias for `phase import` (it ingests a
+  // whole multi-phase roadmap, which "phase import" undersells). Delegates to
+  // the exact same handler. See design/decisions/cli-alias-ux-rfc.md.
+  if (subcommand === "import") {
+    return cmdPhase(["import", ...rest], locale, globalJson);
+  }
+
+  const msg = `plan: unknown subcommand "${subcommand ?? ""}". Use: brief | prompt | adopt | constitution | lint | normalize | analyze | import (alias for "phase import")`;
   if (globalJson) {
     process.stdout.write(
       `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,

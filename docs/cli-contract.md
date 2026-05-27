@@ -47,6 +47,19 @@ The complete catalog (Public / Plan / Doctor / Adapter) is in [Error codes](#err
 - **Adapters & diagnostics** — [`adapter`](#adapter-v09) · [`doctor`](#doctor--plan-quality-checks-v053) · [`recommend`](#recommend-v08)
 - **Stability** — [Stability taxonomy (v1.0)](#stability-taxonomy-v10) · [Stability](#stability)
 
+## Command aliases
+
+A few commands have beginner-friendly aliases. Each alias dispatches to the **exact same handler** as its canonical command (same flags, exit codes, envelope, error codes) — it is sugar, not a separate surface. The canonical name is the one documented per-command below; the alias is **Stable (v1.x+)**.
+
+| Alias | Canonical | Reads better as |
+| --- | --- | --- |
+| `task next <id>` | [`task runbook`](#task-runbook--read-only-guidance-for-a-single-task-v13-p12) | "what should I do next on this task?" |
+| `phase next <id>` | [`phase runbook`](#phase-runbook--read-only-guidance-for-an-entire-phase-v13-p12) | "what should I do next in this phase?" |
+| `task reconcile <id>` | [`task finalize`](#task-finalize--flip-task-design-status-to-done-v12-p11) | verb-consistent with `phase reconcile` |
+| `plan import <yaml>` | [`phase import`](#phase-import) | it ingests a whole multi-phase roadmap |
+
+Rationale and the compatibility constraints are in [`design/decisions/cli-alias-ux-rfc.md`](../design/decisions/cli-alias-ux-rfc.md).
+
 ## Stdout / stderr
 
 - **stdout** carries the primary command result. In human mode, this is
