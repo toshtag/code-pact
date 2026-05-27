@@ -30,6 +30,12 @@ the *why* behind the code — the user-facing *how* lives in [`docs/`](../../doc
 | P30 | [Adapter contract hardening](adapter-contract-hardening-rfc.md) | Further hardened the adapter contract checks. |
 | — | [Deterministic roadmap stabilization](deterministic-roadmap-stabilization-rfc.md) | Made AI-assisted roadmap generation reproducible. |
 
+## Proposed (not yet scheduled)
+
+| Decision | What it proposes |
+| --- | --- |
+| [Beginner-friendly CLI aliases](cli-alias-ux-rfc.md) | **Proposed.** Candidate additive aliases (`task next`, `phase next`, `task reconcile`, `plan import`) + a `dogfood.md` rename, with the compatibility rules. Records the design space; implements nothing. |
+
 ## Rules
 
 Enforcement rules referenced by the CLI live alongside the decisions:
