@@ -67,16 +67,20 @@ code-pact init --non-interactive --agent claude-code --locale en-US --sample-pha
 
 > The interactive `init` wizard no longer asks whether to create the sample phase (removed in v1.15). Pass `--sample-phase` explicitly, or use `code-pact tutorial` above to just watch the loop. Pre-v1.4 `init --non-interactive` produced an empty roadmap with no sample phase.
 
-This writes the `TUTORIAL` phase into `design/`. v1.4+ ships two minimal tutorial tasks; TUTORIAL-T2 declares `depends_on: [TUTORIAL-T1]` so you can demo the dependency field + the `task runbook` blocking-step output. Then walk [the per-task loop](per-task-loop.md) by hand (that page explains what each verb does):
+This writes the `TUTORIAL` phase into `design/`. v1.4+ ships two minimal tutorial tasks; TUTORIAL-T2 declares `depends_on: [TUTORIAL-T1]` so you can demo the dependency field + the `task runbook` blocking-step output. Then walk [the per-task loop](per-task-loop.md) by hand — the same canonical sequence that page describes:
 
 ```sh
-# TUTORIAL-T1: fetch context + implement, complete, then flip design status.
-code-pact task context TUTORIAL-T1 --agent claude-code
+# TUTORIAL-T1: prepare → start → (implement) → verify → complete → finalize.
+code-pact task prepare TUTORIAL-T1 --agent claude-code --json
+code-pact task start TUTORIAL-T1 --agent claude-code
+code-pact verify --phase TUTORIAL --task TUTORIAL-T1
 code-pact task complete TUTORIAL-T1 --agent claude-code
 code-pact task finalize TUTORIAL-T1 --write
 
 # TUTORIAL-T2 depends on TUTORIAL-T1 — repeat once T1 is done.
-code-pact task context TUTORIAL-T2 --agent claude-code
+code-pact task prepare TUTORIAL-T2 --agent claude-code --json
+code-pact task start TUTORIAL-T2 --agent claude-code
+code-pact verify --phase TUTORIAL --task TUTORIAL-T2
 code-pact task complete TUTORIAL-T2 --agent claude-code
 code-pact task finalize TUTORIAL-T2 --write
 
@@ -267,27 +271,6 @@ task prepare → task start → implement → verify → task complete → task 
 
 [`docs/per-task-loop.md`](per-task-loop.md) is the canonical reference — the lifecycle diagram, every verb (and whether it records an event), a worked example, and the invariants (`start` / `complete` are idempotent; a `blocked` task cannot complete until resumed; `task complete` records progress but never mutates `design/`). `task prepare` is the entry point; `recommend` and `task context` remain available as standalone diagnostics that `task prepare` bundles for you.
 
-## Optional task readiness fields (v1.1+)
-
-v1.1.0 adds five optional fields to the task schema that let a task declare its own context-pack targets, dependencies, read / write surface, and acceptance references. They are **fully optional** — pre-v1.1 phase YAML continues to work unchanged, and a task that declares none of these fields produces the same `task context` output it did under v1.0.2.
-
-```yaml
-# Excerpt from design/phases/<phase>.yaml
-tasks:
-  - id: P1-T1
-    type: feature
-    # ... existing required fields ...
-    depends_on: [P1-T0]                       # same-phase task ids
-    decision_refs: [design/decisions/x.md]    # files surfaced into the pack
-    reads: [src/core/**/*.ts]                 # declared read surface (globs)
-    writes: [src/core/foo.ts]                 # declared write surface (globs)
-    acceptance_refs: [docs/cli-contract.md]   # acceptance criteria paths
-```
-
-When declared, each field adds a corresponding section to the `task context` output: **Depends on** (with derived state from `progress.yaml`), **Declared read surface** (each glob plus matched files), **Declared write surface** (globs only), **Declared decisions** (full body of referenced files), and **Acceptance references** (path list).
-
-`plan lint` validates the new fields automatically when present (twelve additive `TASK_*` codes — see [`docs/cli-contract.md` § Plan diagnostic codes — Task Readiness Schema diagnostics](cli-contract.md#plan-diagnostic-codes)). The recommended adoption pattern is to declare new fields on **new** tasks first; retroactive backfill on existing tasks is unnecessary. For a walkthrough of a phase YAML that uses every field, see [`docs/concepts/task-readiness-fields.md`](concepts/task-readiness-fields.md). For the migration story from v1.0.x, see [`docs/migration.md` § v1.0.x → v1.1.0](migration.md#v10x--v110).
-
 ## Checkpoints at phase / PR boundaries
 
 ```sh
@@ -300,54 +283,14 @@ code-pact validate                  # CI-friendly, exit 1 on errors
 
 Both `plan lint` and `plan analyze` accept `--strict` to fail on warnings. `plan normalize --write` preserves YAML comments and Markdown hard line breaks.
 
-## Concurrent processes (v1.5+)
+## Going further
 
-`code-pact` is designed to be run by a single user (or a single agent) at a time per project. If a workflow ends up running two design-mutating commands in parallel against the same project — for example, an agent calling `task finalize` while a human runs `phase reconcile --write` — the second invocation fails fast with `LOCK_HELD` (exit 2):
+The essentials above get you through your first task. These are the next things to reach for — each has its own page:
 
-```sh
-code-pact phase reconcile P1 --write --json
-# {"ok":false,"error":{"code":"LOCK_HELD",
-#   "message":"Another code-pact mutation is in progress: task finalize P1-T1 --write (pid: 12345, ...). If you are certain no command is running, remove .code-pact/locks/write.lock and retry."},
-#  "data":{"lock_holder":{"pid":12345,"hostname":"laptop.local","cmd":"task finalize P1-T1 --write","created_at":"..."},"lock_path":"..."}}
-```
-
-This is a **transient** failure: wait for the holding process to finish and re-run. Read-only commands (`plan lint`, `plan analyze`, `task runbook`, `phase runbook`, `validate`, `doctor`, `recommend`, `task context`, `task status`) do NOT acquire the lock and can be used to observe state while a mutation is pending. If a process crashed and left the lock file behind, you can delete `.code-pact/locks/write.lock` manually — but only after confirming no `code-pact` process is actually running.
-
-See [`docs/concepts/governance.md`](concepts/governance.md) for the v1.5 governance walkthrough and [`docs/troubleshooting.md` § `LOCK_HELD`](troubleshooting.md#lock_held-from-a-design-mutating-command-v15) for the recovery playbook.
-
-## Ingesting external specs — Spec Kit bridge (v1.8+, optional)
-
-> For a general structured plan (a `roadmap.md` / `TODO.md` / draft YAML), use **[Existing-plan adoption](#existing-plan-adoption--plan-adopt)** (`plan adopt`) above. This section is specifically the **Spec Kit** bridge — a narrower importer for that tool's `tasks.md` / `spec.md` / `plan.md` artifacts.
-
-If you are coming from Spec Kit or a similar spec-driven planning tool and already have a `tasks.md` (or `spec.md` / `plan.md`), the v1.8 **Spec Kit bridge** lets you bootstrap from those artifacts:
-
-```sh
-# Generate a draft phase YAML from a Spec Kit tasks.md (dry-run first)
-code-pact spec import --from tasks.md --phase-id P-feature --json
-
-# Persist to design/phases/P-feature-imported.yaml
-code-pact spec import --from tasks.md --phase-id P-feature --write
-
-# Extract brief / constitution candidates from spec.md without writing
-code-pact spec import --suggest-from spec.md --json
-```
-
-This is a **read-only one-way bridge** — code-pact does not re-implement Spec Kit and does not sync back. If you do not already have spec-driven planning artifacts, you do not need this command; use `init` + `plan brief` + `plan constitution` instead.
-
-See [`docs/spec-kit-bridge.md`](spec-kit-bridge.md) for the full walkthrough, the supported Markdown subset, and the post-import follow-up sequence.
-
-## Adapter management later
-
-The `init` wizard (or step 5 in the manual / AI-assisted paths) is the only time most projects need to think about adapters. After that, the upgrade path looks like this:
-
-```sh
-code-pact adapter list --json                          # show registered adapters
-code-pact adapter upgrade claude-code --check --json   # inspect drift, write nothing
-code-pact adapter upgrade claude-code --write          # apply safe updates
-code-pact adapter doctor --json                        # adapter-scoped health check
-```
-
-`--force` is **unmanaged-adoption only** — it never overrides a `managed-modified` file. Destructive overwrite of locally edited managed files is gated behind `adapter upgrade --write --accept-modified` so a stray `--force` in a CI script cannot blow away local edits.
+- **Optional task readiness fields** (`depends_on` / `reads` / `writes` / `decision_refs` / `acceptance_refs`) — declare a task's dependencies and read/write surface to shape its context pack. Fully optional; pre-v1.1 YAML is unchanged. → [concepts/task-readiness-fields.md](concepts/task-readiness-fields.md)
+- **Concurrent runs & the write lock** — what `LOCK_HELD` means and how to recover. → [troubleshooting.md § `LOCK_HELD`](troubleshooting.md#lock_held-from-a-design-mutating-command-v15) · [concepts/governance.md](concepts/governance.md)
+- **Importing a Spec Kit plan** (`tasks.md` / `spec.md`) — the read-only one-way bridge. → [spec-kit-bridge.md](spec-kit-bridge.md)
+- **Managing adapters over time** (`adapter upgrade`, drift) — after the one-time install. → [upgrading.md](upgrading.md)
 
 ## Next reading
 
