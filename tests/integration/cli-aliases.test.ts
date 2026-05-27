@@ -135,9 +135,43 @@ describe("misused aliases name the alias, not the canonical command", () => {
     expect(stdout).toContain("alias for `phase import`");
   });
 
-  it("the canonical commands keep their own wording", () => {
-    expect(run(["task", "runbook", "--json"]).stdout).toContain("task runbook requires a task id");
-    expect(run(["task", "runbook", "--json"]).stdout).not.toContain("alias for");
+  it("`task next --bogus` (unknown flag) is alias-aware", () => {
+    const { code, stdout } = run(["task", "next", "--bogus", "--json"]);
+    expect(code).toBe(2);
+    expect(envelope(stdout).error?.code).toBe("CONFIG_ERROR");
+    expect(stdout).toContain("task next");
+    expect(stdout).toContain("alias for `task runbook`");
+  });
+
+  it("`phase next --bogus` (unknown flag) is alias-aware", () => {
+    const { stdout } = run(["phase", "next", "--bogus", "--json"]);
+    expect(stdout).toContain("phase next");
+    expect(stdout).toContain("alias for `phase runbook`");
+  });
+
+  it("`task reconcile --bogus` (unknown flag) is alias-aware", () => {
+    const { stdout } = run(["task", "reconcile", "--bogus", "--json"]);
+    expect(stdout).toContain("task reconcile");
+    expect(stdout).toContain("alias for `task finalize`");
+  });
+
+  it("`plan import --bogus` (unknown flag) is alias-aware", () => {
+    const { stdout } = run(["plan", "import", "--bogus", "--json"]);
+    expect(stdout).toContain("plan import");
+    expect(stdout).toContain("alias for `phase import`");
+  });
+
+  it("canonical commands never emit an `alias for` note", () => {
+    for (const args of [
+      ["task", "runbook", "--json"],
+      ["phase", "runbook", "--json"],
+      ["task", "finalize", "--json"],
+      ["phase", "import", "--json"],
+      ["task", "runbook", "--bogus", "--json"],
+      ["phase", "import", "--bogus", "--json"],
+    ]) {
+      expect(run(args).stdout).not.toContain("alias for");
+    }
   });
 });
 

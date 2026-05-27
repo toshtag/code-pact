@@ -57,6 +57,31 @@ export function strictParse<T extends Record<string, unknown>>(
   }
 }
 
+/**
+ * `strictParse` for an aliased command. `label` is the invoked name (e.g.
+ * `task next`) and `canonical` is the real command (`task runbook`). Any
+ * `ConfigError` (unknown flag, bad value) gets `(alias for \`canonical\`)`
+ * appended, so parse errors stay alias-aware — matching the missing-argument
+ * messages the handlers emit. When `label === canonical` it is a plain
+ * `strictParse`.
+ */
+export function strictParseAlias<T extends Record<string, unknown>>(
+  label: string,
+  canonical: string,
+  args: string[],
+  options: StrictParseOptions,
+  opts: { allowPositionals?: boolean } = {},
+): { values: T; positionals: string[] } {
+  try {
+    return strictParse<T>(label, args, options, opts);
+  } catch (err) {
+    if (err instanceof ConfigError && label !== canonical) {
+      throw new ConfigError(`${err.message} (alias for \`${canonical}\`)`);
+    }
+    throw err;
+  }
+}
+
 export function splitArgv(argv: string[]): {
   globalValues: GlobalArgv;
   command: string | undefined;
