@@ -13,6 +13,33 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+## [1.19.0] — 2026-05-27
+
+### Beginner-friendly command aliases + a documentation overhaul
+
+The shipped behaviour change is small and additive; the bulk of this release is a documentation pass plus the tooling to keep docs from drifting.
+
+**Added**
+
+- **Beginner-friendly CLI aliases** — additive sugar that dispatches to the exact same handlers as the canonical commands (same flags, exit codes, JSON envelope, error codes):
+  - `task next <id>` → `task runbook <id>`
+  - `phase next <id>` → `phase runbook <id>`
+  - `task reconcile <id>` → `task finalize <id>` (verb-consistent with `phase reconcile`)
+  - `plan import <yaml>` → `phase import <yaml>`
+
+  Canonical names remain the primary documented and adapter-emitted commands; the aliases are secondary Stable (v1.x+) public aliases. When an alias is misused (missing argument or unknown flag) the error message names the alias and points at the canonical command. See [`docs/cli-contract.md` § Command aliases](docs/cli-contract.md#command-aliases) and [`design/decisions/cli-alias-ux-rfc.md`](design/decisions/cli-alias-ux-rfc.md).
+
+**Changed (documentation)**
+
+- Reworked the docs around a single canonical per-task loop ([`docs/per-task-loop.md`](docs/per-task-loop.md), with a Mermaid lifecycle diagram), a [glossary](docs/glossary.md), a [getting-started](docs/getting-started.md) decision tree, a dedicated [troubleshooting](docs/troubleshooting.md) page, and [`docs/upgrading.md`](docs/upgrading.md); `docs/migration.md` is now a compatibility archive. `docs/dogfood.md` is a maintainer quick guide with the deeper material in [`docs/maintainers/operations.md`](docs/maintainers/operations.md). The Japanese mirror was re-synced.
+- The internal `design/decisions/` RFCs gained summaries and an [index](design/decisions/README.md), and a [documentation ownership map](docs/maintainers/docs-maintenance.md) records which doc owns which kind of change.
+
+**Tooling**
+
+- `pnpm check:docs` (run in CI) — a relative-link checker plus a semantic-invariant checker (`scripts/check-doc-links.mjs`, `scripts/check-doc-invariants.mjs`) that guard against broken and semantically stale docs, and assert the committed measurements snapshot matches the package version.
+
+This release regenerates the Evidence Harness measurements snapshot (`design/measurements/`); `docs/positioning.md` now points at that snapshot instead of duplicating the figures. None of `design/` or `docs/` ships in the npm package (`files: dist, LICENSE`); the alias commands are the only user-facing change.
+
 ## [1.18.0] — 2026-05-26
 
 ### Roadmap adoption — bring your own plan
