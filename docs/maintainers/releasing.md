@@ -56,9 +56,13 @@ After the release-prep PR merges to `main`:
    ```sh
    npm publish
    ```
-8. **GitHub Release** from the tag, using the CHANGELOG section as the body. The
-   tarball `shasum` for the notes comes from `npm view code-pact dist` **after**
-   publish — `pnpm pack` output is not the published tarball.
+8. **GitHub Release** from the tag, using the CHANGELOG section as the body.
+   Do **not** hand-copy a tarball checksum into the notes: `npm publish`
+   attaches a provenance signature and the registry exposes a sha512
+   `integrity`, which `npm install` verifies automatically — a manual sha1 is
+   weaker, redundant, and drift-prone. If you ever do need the published
+   tarball's hash, read it from `npm view code-pact dist` **after** publish
+   (never from `pnpm pack`, which is not the published tarball).
 
 ## What does NOT need a release
 
