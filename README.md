@@ -13,19 +13,26 @@ Claude Code writes `CLAUDE.md`. Codex writes `AGENTS.md`. Cursor writes `.cursor
 v1.0 ships **stable** adapters for `claude-code`, `codex`, and `generic`. The `cursor` and `gemini-cli` adapters are **experimental** — they ship, they work, but their generated file formats may shift in minor releases to track upstream tooling changes.
 
 ```sh
-# 30-second tour
-npx code-pact init --non-interactive --agent claude-code --locale en-US
-code-pact adapter install claude-code --json
-code-pact task prepare P1-T1 --agent claude-code --json  # single per-task entry: state + recommendation + the exact commands to run
-code-pact task start P1-T1
-# ... agent implements ...
-code-pact verify --phase P1 --task P1-T1                 # run the phase's verification commands
-code-pact task complete P1-T1                            # re-runs verify, appends a done event
-code-pact task finalize P1-T1 --write --json             # reconcile design status to done
-code-pact validate                                       # CI-friendly health check
+# 30-second tour — runs the whole loop in a throwaway sandbox, writes nothing to your repo:
+npx code-pact tutorial
 ```
 
-`task prepare` is the recommended per-task entry point: one call returns the current state, the execution recommendation, the context pack metadata, and a `commands` dictionary with the exact next commands. `recommend` and `task context` remain available as standalone diagnostics.
+Want to drive the loop yourself in a real project? Scaffold the sample `TUTORIAL` phase, then walk it command by command:
+
+```sh
+npx code-pact init --non-interactive --agent claude-code --locale en-US --sample-phase
+code-pact adapter install claude-code --json
+code-pact task prepare TUTORIAL-T1 --agent claude-code --json  # single per-task entry: state + recommendation + the exact commands to run
+code-pact task start TUTORIAL-T1
+# ... agent implements ...
+code-pact verify --phase TUTORIAL --task TUTORIAL-T1           # run the phase's verification commands
+code-pact task complete TUTORIAL-T1                            # re-runs verify, appends a done event
+code-pact task finalize TUTORIAL-T1 --json                    # preview the design-status flip (dry-run is the default)
+code-pact task finalize TUTORIAL-T1 --write --json            # apply it
+code-pact validate                                            # CI-friendly health check
+```
+
+`task prepare` is the recommended per-task entry point: one call returns the current state, the execution recommendation, the context pack metadata, and a `commands` dictionary with the exact next commands. `recommend` and `task context` remain available as standalone diagnostics. (A plain `init` without `--sample-phase` starts with an empty roadmap — you add your own phases; see [getting-started](docs/getting-started.md).)
 
 ## Status
 
@@ -76,8 +83,9 @@ New to the terms used here (context pack, envelope, derived state, …)? The [`d
 | [`docs/cli-contract.md`](docs/cli-contract.md) | Full flag / exit code / JSON envelope / error code reference and the Stability taxonomy. |
 | [`docs/upgrading.md`](docs/upgrading.md) | How to upgrade — additive within v1.x; pointers for coming from a pre-v1.0 alpha. |
 | [`docs/troubleshooting.md`](docs/troubleshooting.md) | Diagnostic code → recovery action for the most common error codes. |
-| [`docs/dogfood.md`](docs/dogfood.md) | Real-project walkthrough — running `code-pact` on `code-pact` itself. |
 | [`docs/community.md`](docs/community.md) | Where to file issues / discussions / PRs, the GitHub Discussions intent, and the scope-discipline rule for the Non-goals list. |
+
+Maintainers: see [`docs/dogfood.md`](docs/dogfood.md) (quick guide) and [`docs/maintainers/operations.md`](docs/maintainers/operations.md) (deeper operations) for running `code-pact` on `code-pact` itself.
 
 ## Supported agents
 
