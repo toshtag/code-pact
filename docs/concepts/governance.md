@@ -109,7 +109,7 @@ P14-T2 documented the existing `plan lint --strict` semantics for `TASK_WRITES_P
 
 **Release-prep posture.** As of v1.5.1, the code-pact dogfood corpus is strict-clean: `plan lint --include-quality --strict --json` is expected to pass with zero warnings. Completed historical meta-design tasks do not keep protected design YAML writes declared solely to prove the advisory exists.
 
-See [`docs/cli-contract.md` § Plan diagnostic codes → Task Readiness Schema diagnostics → `--strict`](../cli-contract.md#plan-diagnostic-codes) and [`docs/dogfood.md`](../dogfood.md) (Release prep section) for the canonical guidance.
+See [`docs/cli-contract.md` § Plan diagnostic codes → Task Readiness Schema diagnostics → `--strict`](../cli-contract.md#plan-diagnostic-codes) and [`docs/maintainers/operations.md`](../maintainers/operations.md#release-prep-uses-strict-clean-dogfood-checks-v151-guidance) (Release prep section) for the canonical guidance.
 
 ### Declared writes as a governance review surface
 

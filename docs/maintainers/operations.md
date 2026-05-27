@@ -5,6 +5,17 @@ Detailed, lower-frequency maintainer notes split out of [dogfood.md](../dogfood.
 per-version behaviour that maintainers occasionally need but rarely read top to
 bottom.
 
+## Quick map
+
+| If you need to… | Read |
+| --- | --- |
+| Script project setup without a TTY | [Non-interactive `plan brief` / `plan constitution`](#non-interactive-plan-brief--plan-constitution-v16-p17) |
+| Add work to the roadmap | [Adding work](#adding-work) |
+| Import Spec Kit artifacts | [Ingesting a Spec Kit `tasks.md`](#ingesting-an-existing-spec-kit-tasksmd-v18) |
+| Refresh generated agent files | [Upgrading an adapter safely](#upgrading-an-adapter-safely-v09) |
+| Prepare a release PR | [Planning integrity](#planning-integrity-v07--checkpoint-commands) · [Release prep](#release-prep-uses-strict-clean-dogfood-checks-v151-guidance) |
+| Understand design-vs-progress drift | [`task complete` vs `design/`](#task-complete-vs-design-v10-contract) |
+
 ## Reading `recommend --json` (v0.8)
 
 The fields most worth wiring into agent behavior:
