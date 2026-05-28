@@ -4,7 +4,7 @@ name: CI branch-drift detection — catch "real code changed but the control pla
 weight: 8
 confidence: high
 risk: medium
-status: planned
+status: done
 objective: >
   For code-pact to act as a control plane (not just a local ledger), CI needs to
 
@@ -189,7 +189,7 @@ tasks:
     write_surface: medium
     verification_strength: medium
     expected_duration: short
-    status: planned
+    status: done
     description: >
       Docs + CHANGELOG.
 
