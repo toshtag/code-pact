@@ -4,7 +4,7 @@ import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { Roadmap } from "../core/schemas/roadmap.ts";
 import { Phase } from "../core/schemas/phase.ts";
-import { ProgressLog } from "../core/schemas/progress-event.ts";
+import { ProgressLog, type ProgressEvent } from "../core/schemas/progress-event.ts";
 import { Project } from "../core/schemas/project.ts";
 import {
   ACCEPTED_MODEL_VERSION_INPUTS,
@@ -20,6 +20,7 @@ import type { PlanIssue } from "../core/plan/shared.ts";
 import { isSupportedAgent, type SupportedAgent } from "../core/agents.ts";
 import { CONSTITUTION_PLACEHOLDER_MARKERS } from "../core/constitution.ts";
 import { readManifest } from "../core/adapters/manifest.ts";
+import { auditWrites } from "../core/audit/index.ts";
 import { inspectAgent, type AdapterDoctorIssue } from "./adapter-doctor.ts";
 import { readPackageVersion } from "../lib/package-version.ts";
 import type { Locale } from "../i18n/index.ts";
@@ -589,6 +590,66 @@ async function checkStaleContext(
   }
 }
 
+// Check 16: the control plane is scaffolded but not being driven (RFC §2).
+// Advisory (warning): fires only when a real (non-TUTORIAL) task exists, the
+// loop has never been driven for a non-TUTORIAL task, AND git shows
+// uncommitted working changes — i.e. real code is happening outside the loop.
+// git-unavailable is a silent skip (never an error).
+async function checkControlPlaneNotDriven(
+  cwd: string,
+  phases: Phase[],
+  issues: DoctorIssue[],
+): Promise<void> {
+  // Gate 1: at least one non-TUTORIAL task is planned.
+  const realTasks = phases
+    .filter((p) => p.id !== "TUTORIAL")
+    .reduce((n, p) => n + (p.tasks?.length ?? 0), 0);
+  if (realTasks === 0) return;
+
+  // Gate 2: no non-TUTORIAL forward motion. Absent progress.yaml → no events.
+  // Unreadable / invalid YAML / schema-invalid → skip and let checkProgressLog
+  // own the real INVALID_YAML / SCHEMA_ERROR (don't stack a speculative
+  // advisory on a broken state file).
+  const progressPath = join(cwd, ".code-pact", "state", "progress.yaml");
+  let events: ProgressEvent[] = [];
+  try {
+    const raw = await readFile(progressPath, "utf8");
+    let doc: unknown;
+    try {
+      doc = parseYaml(raw);
+    } catch {
+      return; // invalid YAML
+    }
+    const parsed = ProgressLog.safeParse(doc);
+    if (!parsed.success) return; // schema invalid
+    events = parsed.data.events;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") return; // unreadable
+    // ENOENT → absent → events stays []
+  }
+  const drivenForReal = events.some(
+    (e) =>
+      (e.status === "started" || e.status === "done") &&
+      !e.task_id.startsWith("TUTORIAL-"),
+  );
+  if (drivenForReal) return;
+
+  // Gate 3: git available AND uncommitted working changes exist (excluding
+  // code-pact's own runtime state, handled by auditWrites). git-unavailable
+  // (no repo / no git binary) → git_available:false → silent skip.
+  const audit = await auditWrites({ cwd, declaredWrites: [] });
+  if (!audit.git_available || audit.files_touched.length === 0) return;
+
+  issues.push({
+    code: "CONTROL_PLANE_NOT_DRIVEN",
+    severity: "warning",
+    message:
+      `${realTasks} task(s) are planned and git has uncommitted changes, but progress.yaml has no started/done event for a non-TUTORIAL task — the code-pact scaffold exists but isn't being driven. ` +
+      "Start a task with `code-pact task prepare <id> --agent <agent>`, or record out-of-loop work with `code-pact task record-done <id> --evidence \"...\"`. " +
+      "Silence via .code-pact/doctor.yaml (disabled_checks: [CONTROL_PLANE_NOT_DRIVEN]).",
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
@@ -654,6 +715,12 @@ export async function runDoctor(cwd: string): Promise<DoctorResult> {
   // 15. enabled agents have model_version set
   if (project) {
     await checkAdapterStale(cwd, project, allIssues);
+  }
+
+  // 16. control plane scaffolded but not driven (RFC §2). Guarded so a
+  // disabled advisory never spawns git; the trailing filter still covers it.
+  if (!disabled.has("CONTROL_PLANE_NOT_DRIVEN")) {
+    await checkControlPlaneNotDriven(cwd, phases, allIssues);
   }
 
   // Apply disabled_checks filter

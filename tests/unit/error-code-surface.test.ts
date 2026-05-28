@@ -121,6 +121,7 @@ const KNOWN_CODES: Record<string, "public" | "plan" | "doctor" | "adapter" | "in
   BAK_FILE: "doctor",
   BRIEF_MISSING: "doctor",
   CONSTITUTION_PLACEHOLDER: "doctor",
+  CONTROL_PLANE_NOT_DRIVEN: "doctor",
   EMPTY_OBJECTIVE: "doctor",
   LOCAL_NOT_GITIGNORED: "doctor",
   MISSING_DIR: "doctor",

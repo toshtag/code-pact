@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtemp, rm, readFile, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { spawn } from "node:child_process";
 import { runInit } from "../../../src/commands/init.ts";
 import { runPhaseAdd } from "../../../src/commands/phase.ts";
 import { runDoctor } from "../../../src/commands/doctor.ts";
@@ -520,5 +521,140 @@ describe("runDoctor — v0.9 manifest-aware adapter health", () => {
     expect(issue).toBeDefined();
     expect(issue!.severity).toBe("error");
     expect(result.ok).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CONTROL_PLANE_NOT_DRIVEN (RFC §2)
+// ---------------------------------------------------------------------------
+
+describe("runDoctor — CONTROL_PLANE_NOT_DRIVEN", () => {
+  function git(cwd: string, args: readonly string[]): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const proc = spawn("git", args, {
+        cwd,
+        stdio: ["ignore", "ignore", "pipe"],
+        env: {
+          ...process.env,
+          GIT_AUTHOR_NAME: "t",
+          GIT_AUTHOR_EMAIL: "t@e.com",
+          GIT_COMMITTER_NAME: "t",
+          GIT_COMMITTER_EMAIL: "t@e.com",
+        },
+      });
+      proc.on("close", (code) => (code === 0 ? resolve() : reject(new Error(`git ${args.join(" ")} (${code})`))));
+      proc.on("error", reject);
+    });
+  }
+
+  const PHASE_YAML = (id = "P1", taskId = "P1-T1") =>
+    [
+      `id: ${id}`,
+      "name: Foundation",
+      "weight: 10",
+      "confidence: high",
+      "risk: low",
+      "status: planned",
+      "objective: Establish the foundation of the project",
+      "definition_of_done:",
+      "  - tests pass",
+      "verification:",
+      "  commands:",
+      "    - echo ok",
+      "tasks:",
+      `  - id: ${taskId}`,
+      "    type: feature",
+      "    ambiguity: low",
+      "    risk: low",
+      "    context_size: small",
+      "    write_surface: low",
+      "    verification_strength: weak",
+      "    expected_duration: short",
+      "    status: planned",
+    ].join("\n") + "\n";
+
+  // Replace the empty init roadmap with one real (non-TUTORIAL) phase + task.
+  async function writeRealPhase(id = "P1"): Promise<void> {
+    await writeFile(
+      join(dir, "design", "roadmap.yaml"),
+      `phases:\n  - id: ${id}\n    path: design/phases/${id}.yaml\n    weight: 10\n`,
+      "utf8",
+    );
+    await mkdir(join(dir, "design", "phases"), { recursive: true });
+    await writeFile(join(dir, "design", "phases", `${id}.yaml`), PHASE_YAML(id), "utf8");
+  }
+
+  const setProgress = (yaml: string) =>
+    writeFile(join(dir, ".code-pact", "state", "progress.yaml"), yaml, "utf8");
+
+  const find = (r: Awaited<ReturnType<typeof runDoctor>>) =>
+    r.issues.find((i) => i.code === "CONTROL_PLANE_NOT_DRIVEN");
+
+  it("fires (warning, advisory) when scaffold has a real task, progress is empty, and git is dirty", async () => {
+    await writeRealPhase();
+    await git(dir, ["init", "--quiet", "--initial-branch=main"]); // scaffolding now untracked = dirty
+    const result = await runDoctor(dir);
+    const issue = find(result);
+    expect(issue).toBeDefined();
+    expect(issue!.severity).toBe("warning");
+    expect(result.ok).toBe(true); // advisory — does not fail doctor
+  });
+
+  it("silent when not a git repo (default fixture is non-git)", async () => {
+    await writeRealPhase();
+    expect(find(await runDoctor(dir))).toBeUndefined();
+  });
+
+  it("silent when a non-TUTORIAL task has forward motion", async () => {
+    await writeRealPhase();
+    await git(dir, ["init", "--quiet", "--initial-branch=main"]);
+    await setProgress(
+      `events:\n  - task_id: P1-T1\n    status: started\n    at: "2026-05-18T09:00:00+00:00"\n    actor: agent\n`,
+    );
+    expect(find(await runDoctor(dir))).toBeUndefined();
+  });
+
+  it("FIRES when only TUTORIAL was driven (tutorial usage is not real forward motion)", async () => {
+    await writeRealPhase();
+    await git(dir, ["init", "--quiet", "--initial-branch=main"]);
+    await setProgress(
+      `events:\n  - task_id: TUTORIAL-T1\n    status: started\n    at: "2026-05-18T09:00:00+00:00"\n    actor: agent\n`,
+    );
+    expect(find(await runDoctor(dir))).toBeDefined();
+  });
+
+  it("silent when only a TUTORIAL phase exists (no real task)", async () => {
+    await writeRealPhase("TUTORIAL");
+    await git(dir, ["init", "--quiet", "--initial-branch=main"]);
+    expect(find(await runDoctor(dir))).toBeUndefined();
+  });
+
+  it("silent when the working tree is clean (committed)", async () => {
+    await writeRealPhase();
+    await git(dir, ["init", "--quiet", "--initial-branch=main"]);
+    await git(dir, ["add", "-A"]);
+    await git(dir, ["commit", "--quiet", "-m", "init"]);
+    expect(find(await runDoctor(dir))).toBeUndefined();
+  });
+
+  it("skips (does not fire) when progress.yaml is invalid — doctor's own error owns it", async () => {
+    await writeRealPhase();
+    await git(dir, ["init", "--quiet", "--initial-branch=main"]);
+    await setProgress("events: [ this is not: valid: yaml\n");
+    const result = await runDoctor(dir);
+    expect(find(result)).toBeUndefined();
+    // The real problem is reported by the existing progress check.
+    expect(result.issues.some((i) => i.code === "INVALID_YAML" || i.code === "SCHEMA_ERROR")).toBe(true);
+  });
+
+  it("is suppressed by .code-pact/doctor.yaml disabled_checks", async () => {
+    await writeRealPhase();
+    await git(dir, ["init", "--quiet", "--initial-branch=main"]);
+    await writeFile(
+      join(dir, ".code-pact", "doctor.yaml"),
+      "disabled_checks:\n  - CONTROL_PLANE_NOT_DRIVEN\n",
+      "utf8",
+    );
+    expect(find(await runDoctor(dir))).toBeUndefined();
   });
 });

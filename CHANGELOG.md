@@ -13,6 +13,18 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+### `CONTROL_PLANE_NOT_DRIVEN` doctor advisory (RFC §2)
+
+Completes the dogfood-trust-hardening RFC (§1 · §2 · §3 all now landed). Surfaces a project that adopted code-pact scaffolding but stopped driving it — real code lands in git while `progress.yaml` never advances.
+
+**Added**
+
+- **`CONTROL_PLANE_NOT_DRIVEN`** — a `doctor` advisory (`severity: warning`, never fails doctor's exit) that fires only when **all** of: a non-TUTORIAL task is planned; `progress.yaml` has no `started`/`done` event for a non-TUTORIAL task (running the tutorial does **not** count as driving the loop); and git shows uncommitted working changes (excluding code-pact's own runtime state, via `auditWrites`). **git-unavailable is a silent skip** (never an error), and a broken/unparseable `progress.yaml` is also skipped — the existing `INVALID_YAML`/`SCHEMA_ERROR` owns that. Silence via `.code-pact/doctor.yaml` → `disabled_checks: [CONTROL_PLANE_NOT_DRIVEN]`.
+
+**Internal**
+
+- `dogfood-trust-hardening-rfc.md` status flipped — §1, §2, and §3 (A/B/C/D) are all implemented; the RFC is fully realized.
+
 ## [1.24.0] — 2026-05-28
 
 ### `ADR_STATUS_UNRECOGNIZED` lint advisory

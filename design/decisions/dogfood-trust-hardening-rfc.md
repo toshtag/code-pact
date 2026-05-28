@@ -1,6 +1,6 @@
 # RFC: Dogfood Trust Hardening — External Completion, Drift Detection, ADR Status
 
-**Status:** accepted (§3-A/B/C/D · §1 implemented; §2 control-plane-not-driven deferred, 2026-05)
+**Status:** accepted (§1 · §2 · §3-A/B/C/D all implemented, 2026-05)
 **Scope:** design-only. Records constraints and a phased plan for three deferred capabilities — loop-external completion recording, "scaffold not driven" detection, and status-aware ADR resolution + proposed-stub generation. No code lands with this document.
 **Owners:** maintainer
 **Related:** the implemented hardening PRs this RFC is the design-only tail of — adapter convergence + `--model` pin (#233), recommendation cost correction (#234), init self-consistency (#235), subcommand `--help` + bare-adapter removal (#236). Touch points named below: [src/core/decisions/adr.ts](../../src/core/decisions/adr.ts), [src/core/schemas/progress-event.ts](../../src/core/schemas/progress-event.ts), [src/core/progress/task-state.ts](../../src/core/progress/task-state.ts), [src/commands/verify.ts](../../src/commands/verify.ts), [src/commands/doctor.ts](../../src/commands/doctor.ts).
