@@ -133,7 +133,7 @@ tasks:
     write_surface: high
     verification_strength: strong
     expected_duration: long
-    status: planned
+    status: done
     description: >
       --base-ref plumbing + branch-drift check + exclude_globs + tests.
 
