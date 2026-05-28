@@ -13,6 +13,8 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+## [1.23.0] — 2026-05-28
+
 ### Opt-in proposed-ADR scaffolding (RFC §3-D)
 
 Importing an AI-generated roadmap full of `requires_decision: true` tasks left every one of them gated with no ADR to fill — the human had to hand-create each `design/decisions/<task-id>.md` before the gate could ever pass. `--scaffold-decisions` closes that gap.

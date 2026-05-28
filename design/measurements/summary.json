@@ -1,13 +1,13 @@
 {
   "harness_version": "0.2.0",
   "summary_schema_version": 1,
-  "input_git_sha": "6716306518261ef20a1921727872fffb82921f91",
-  "code_pact_cli_version": "1.22.0",
+  "input_git_sha": "2ce943948be63a939a2adedca443ea3335974c34",
+  "code_pact_cli_version": "1.23.0",
   "generated_at": "2026-05-28",
   "metrics": {
     "pack_size_p50_bytes": 19275,
     "pack_size_p90_bytes": 49995,
-    "pack_size_max_bytes": 338222,
+    "pack_size_max_bytes": 338650,
     "first_pass_verify_rate_percent": 100,
     "lifecycle_adherence_rate_percent": 80.6,
     "adapter_drift_rate_percent": 0,
