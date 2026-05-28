@@ -48,7 +48,7 @@ async function loadRoadmap(cwd: string): Promise<Roadmap> {
   return Roadmap.parse(parseYaml(raw) as unknown);
 }
 
-async function loadPhase(cwd: string, path: string): Promise<Phase> {
+export async function loadPhase(cwd: string, path: string): Promise<Phase> {
   const raw = await readFile(join(cwd, path), "utf8");
   return Phase.parse(parseYaml(raw) as unknown);
 }
@@ -170,7 +170,7 @@ async function checkProgressEvent(
   return { name: "progress_event", ok: true };
 }
 
-async function checkDecision(
+export async function checkDecision(
   cwd: string,
   phase: Phase,
   task: Task,
