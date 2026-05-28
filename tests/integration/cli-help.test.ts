@@ -72,6 +72,15 @@ describe("cluster --help → usage, exit 0", () => {
     });
   }
 
+  it("`phase import --help` documents --scaffold-decisions and the skip (not overwrite) semantics of --force", () => {
+    const res = runCli(["phase", "import", "--help"]);
+    expect(res.status).toBe(0);
+    expect(res.stdout).toMatch(/--scaffold-decisions/);
+    // --force skips colliding phases; it must not claim to overwrite them.
+    expect(res.stdout).toMatch(/--force\s[\s\S]*Skip phases whose ids already exist/);
+    expect(res.stdout).not.toMatch(/Overwrite phases whose ids already exist/);
+  });
+
   it("an actual unknown subcommand is still CONFIG_ERROR exit 2", () => {
     // Global --json (before the command) so the unknown-subcommand handler
     // emits the JSON envelope on stdout.

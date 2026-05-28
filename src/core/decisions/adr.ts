@@ -1,6 +1,7 @@
 import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { parseFrontMatter } from "../pack/front-matter.ts";
+import { resolveWithinProject } from "../path-safety.ts";
 
 /**
  * True when `error` means `design/decisions/` simply is not there
@@ -90,8 +91,15 @@ const BLOCKING_STATUSES = new Set(["proposed", "draft", "rejected", "superseded"
 /** Acceptance verdict for one ADR file's content. */
 export type AdrAcceptance = "accepted" | "blocked" | "empty" | "unknown_status";
 
-/** Adds the I/O-absent case for a declared `decision_refs` path. */
-export type ConsideredAcceptance = AdrAcceptance | "missing";
+/**
+ * Extends the content verdicts with the two I/O outcomes the gate can hit on a
+ * declared `decision_refs` path: `missing` (no such file) and `unsafe_path`
+ * (escapes the project root — `..`, an absolute path, or a symlink out). Both
+ * are fail-closed: the gate does NOT resolve on them, and the file is never
+ * read. The gate is self-enforcing — it does not rely on `plan lint`'s
+ * `TASK_DECISION_REF_UNSAFE_PATH` advisory having run first.
+ */
+export type ConsideredAcceptance = AdrAcceptance | "missing" | "unsafe_path";
 
 export type AdrStatus = {
   /** First token after the status label, lowercased; null when none found. */
@@ -178,15 +186,33 @@ export type DecisionResolution = {
   reason: string;
 };
 
-/** Reads a repo-relative file; returns null when it does not exist. */
-type RelFileReader = (relPath: string) => Promise<string | null>;
+/**
+ * Reads a repo-relative file through the project-root boundary. `ok` carries
+ * the content; `missing` = no such file; `unsafe` = the path escapes the
+ * project root (`..`, absolute, Windows drive, or an existing-ancestor symlink
+ * that resolves outside `cwd`). This is the gate's fail-closed I/O primitive:
+ * an unsafe `decision_refs` path is never read.
+ */
+type ReadResult =
+  | { kind: "ok"; content: string }
+  | { kind: "missing" }
+  | { kind: "unsafe" };
+type RelFileReader = (relPath: string) => Promise<ReadResult>;
 
 function diskReader(cwd: string): RelFileReader {
   return async (relPath) => {
+    let abs: string;
     try {
-      return await readFile(join(cwd, relPath), "utf8");
+      // Structural path-safety + symlink-escape guard. Throws on `..`,
+      // absolute paths, drive letters, and ancestors that realpath outside cwd.
+      abs = await resolveWithinProject(cwd, relPath);
+    } catch {
+      return { kind: "unsafe" };
+    }
+    try {
+      return { kind: "ok", content: await readFile(abs, "utf8") };
     } catch (error) {
-      if (isAbsentDecisionsDirError(error)) return null;
+      if (isAbsentDecisionsDirError(error)) return { kind: "missing" };
       throw error;
     }
   };
@@ -202,6 +228,8 @@ function whyNotAccepted(c: ConsideredAdr): string {
       return `${c.path} has unrecognized status "${c.status}"`;
     case "missing":
       return `${c.path} (file not found)`;
+    case "unsafe_path":
+      return `${c.path} (unsafe path — escapes the project root)`;
     default:
       return c.path;
   }
@@ -218,12 +246,17 @@ async function resolveWith(
     const considered: ConsideredAdr[] = [];
     for (const ref of decisionRefs) {
       const path = toPosix(ref);
-      const content = await read(ref);
-      if (content === null) {
+      const r = await read(ref);
+      if (r.kind === "unsafe") {
+        // Fail-closed: an escaping path is never read and never resolves.
+        considered.push({ path, status: null, accepted: false, acceptance: "unsafe_path" });
+        continue;
+      }
+      if (r.kind === "missing") {
         considered.push({ path, status: null, accepted: false, acceptance: "missing" });
         continue;
       }
-      const { acceptance, status } = classifyAdr(content);
+      const { acceptance, status } = classifyAdr(r.content);
       considered.push({
         path,
         status: status.word,
@@ -248,8 +281,19 @@ async function resolveWith(
   const considered: ConsideredAdr[] = [];
   for (const f of dir.entries.filter((e) => matchesTaskId(e, taskId))) {
     const rel = `design/decisions/${f}`;
-    const content = (await read(rel)) ?? "";
-    const { acceptance, status } = classifyAdr(content);
+    const r = await read(rel);
+    if (r.kind !== "ok") {
+      // Internally-constructed path, so this is a race (file removed between
+      // readdir and read) or a symlink out — either way it does not resolve.
+      considered.push({
+        path: rel,
+        status: null,
+        accepted: false,
+        acceptance: r.kind === "unsafe" ? "unsafe_path" : "missing",
+      });
+      continue;
+    }
+    const { acceptance, status } = classifyAdr(r.content);
     considered.push({
       path: rel,
       status: status.word,
@@ -301,7 +345,7 @@ export async function makeDecisionResolver(
   cwd: string,
 ): Promise<{ resolve(taskId: string, decisionRefs?: string[]): Promise<DecisionResolution> }> {
   const dir = await readDecisionsDir(cwd);
-  const cache = new Map<string, string | null>();
+  const cache = new Map<string, ReadResult>();
   const base = diskReader(cwd);
   const cachedRead: RelFileReader = async (relPath) => {
     if (cache.has(relPath)) return cache.get(relPath)!;
@@ -322,6 +366,15 @@ export async function makeDecisionResolver(
  * `**Status:**` line). Powers the `ADR_STATUS_UNRECOGNIZED` lint advisory.
  * Non-`.md` entries (e.g. `.DS_Store`) are ignored; returns `[]` when the
  * decisions directory is absent.
+ *
+ * Scope (deliberate): this is a **flat, top-level** scan of `design/decisions/`
+ * — it does not recurse into subdirectories. The decision *gate*
+ * ({@link resolveDecisionGate}) reads nested `decision_refs` paths (e.g.
+ * `design/decisions/p3/adr.md`) just fine, so a nested ADR with a typo'd status
+ * still BLOCKS the gate correctly; only the `ADR_STATUS_UNRECOGNIZED` advisory
+ * — which warns about the typo before you hit the block — does not see nested
+ * files yet. Recursing here is a possible future refinement; it was left out of
+ * the trust-hardening RFC to avoid a behavior change at release time.
  */
 export async function classifyDecisionAdrs(cwd: string): Promise<
   {

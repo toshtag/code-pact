@@ -377,6 +377,26 @@ describe("runTaskRecordDone — evidence validation", () => {
     ).rejects.toMatchObject({ code: "CONFIG_ERROR" });
   });
 
+  it("rejects a mix of valid and whitespace-only items (blank items are not silently dropped)", async () => {
+    await setupProject(dir);
+    const before = await readFile(
+      join(dir, ".code-pact", "state", "progress.yaml"),
+      "utf8",
+    );
+    await expect(
+      runTaskRecordDone({
+        cwd: dir,
+        taskId: "P1-T1",
+        evidence: ["PR #123", "   "],
+      }),
+    ).rejects.toMatchObject({ code: "CONFIG_ERROR" });
+    const after = await readFile(
+      join(dir, ".code-pact", "state", "progress.yaml"),
+      "utf8",
+    );
+    expect(after).toBe(before);
+  });
+
   it("evidence is validated before project/roadmap is read (missing project still CONFIG_ERROR)", async () => {
     // No setupProject — the dir has no .code-pact/project.yaml. If evidence
     // were validated after loading the project, this would throw ENOENT.

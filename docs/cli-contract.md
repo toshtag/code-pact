@@ -370,7 +370,7 @@ On success the JSON envelope returns
 
 `completed_fields` is non-empty only when defaults were applied. In strict mode it is always `[]`.
 
-**`--scaffold-decisions` (v1.22+ / RFC §3-D, opt-in).** When set, after the phase write pass the importer scaffolds a `**Status:** proposed` ADR stub for every task the decision gate would block (`requires_decision` on the task **or** its phase). The stub opens at `proposed`, so the status-aware gate (RFC §3-C) still **blocks** `verify` / `task complete` / `task record-done` until a human flips it to `accepted` — scaffolding fills the work-surface, it does not pre-approve anything. Targets:
+**`--scaffold-decisions` (v1.23+ / RFC §3-D, opt-in).** When set, after the phase write pass the importer scaffolds a `**Status:** proposed` ADR stub for every task the decision gate would block (`requires_decision` on the task **or** its phase). The stub opens at `proposed`, so the status-aware gate (RFC §3-C) still **blocks** `verify` / `task complete` / `task record-done` until a human flips it to `accepted` — scaffolding fills the work-surface, it does not pre-approve anything. Targets:
 
 - a task with `decision_refs` → each referenced path **under `design/decisions/`** that is missing is scaffolded (the all-must-be-accepted contract); the task shape is never modified;
 - a task without `decision_refs` → the default `design/decisions/<task-id>.md`, skipped when a matching ADR filename already exists.

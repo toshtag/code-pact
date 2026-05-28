@@ -25,6 +25,16 @@ Completes the dogfood-trust-hardening RFC (§1 · §2 · §3 all now landed). Su
 
 - `dogfood-trust-hardening-rfc.md` status flipped — §1, §2, and §3 (A/B/C/D) are all implemented; the RFC is fully realized.
 
+### Hardening + DX polish (pre-1.25 review fixes)
+
+**Fixed**
+
+- **Decision gate is now fail-closed on unsafe `decision_refs`.** A `decision_refs` entry that escapes the project root (`..`, an absolute path, or a symlink out of `design/decisions/`) is never read and never resolves the gate — previously the gate's file reader could follow such a path. The path-safety guard (`resolveWithinProject`) now backs the gate itself, not only the `TASK_DECISION_REF_UNSAFE_PATH` lint advisory, so `verify` / `task complete` / `task record-done` stay blocked regardless of whether `plan lint` ran first.
+- **`task record-done` rejects blank evidence items instead of silently dropping them.** `--evidence` (or a programmatic `evidence` array) containing an empty/whitespace-only item is now a `CONFIG_ERROR`, so recorded proof can never be padded with empty entries.
+- **`phase import --help`** now documents `--scaffold-decisions` and corrects the `--force` description — `--force` **skips** colliding phase ids (the rest still import), it does not overwrite them.
+- **`writeProposedAdrIfAbsent`** only treats `ENOENT`/`ENOTDIR` as "file absent — safe to write"; any other `access` failure (e.g. `EACCES`) is rethrown rather than silently overwriting a file it could not stat.
+- **Docs:** `--scaffold-decisions` is tagged `v1.23+` (the release it shipped in), corrected from `v1.22+`.
+
 ## [1.24.0] — 2026-05-28
 
 ### `ADR_STATUS_UNRECOGNIZED` lint advisory
