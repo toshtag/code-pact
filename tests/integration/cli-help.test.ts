@@ -50,6 +50,14 @@ describe("cluster --help → usage, exit 0", () => {
     expect(res.stdout).toMatch(/code-pact plan lint/);
   });
 
+  it("`task record-done --help` → rich usage with flags and examples, exit 0", () => {
+    const res = runCli(["task", "record-done", "--help"]);
+    expect(res.status).toBe(0);
+    expect(res.stdout).toMatch(/Usage: code-pact task record-done/);
+    expect(res.stdout).toMatch(/--evidence/);
+    expect(res.stdout).toMatch(/Examples:/);
+  });
+
   it("an actual unknown subcommand is still CONFIG_ERROR exit 2", () => {
     // Global --json (before the command) so the unknown-subcommand handler
     // emits the JSON envelope on stdout.

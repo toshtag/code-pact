@@ -646,6 +646,44 @@ describe("json-stdout contract: state-mutating Stable (v1.0) commands", () => {
     );
   });
 
+  it("task record-done P1-T1 --json", async () => {
+    const p = await projectWithTask("task-record-done");
+    expectStdoutIsJson(
+      p.run([
+        "task",
+        "record-done",
+        "P1-T1",
+        "--evidence",
+        "PR #123",
+        "--agent",
+        "claude-code",
+        "--json",
+      ]),
+      "task record-done",
+    );
+  });
+
+  it("task finalize P1-T1 --write --json (finalized after record-done)", async () => {
+    // record-done records an external done event; finalize must treat it
+    // identically to a loop done event (it never inspects `source`).
+    const p = await projectWithTask("task-finalize-after-record-done");
+    p.run([
+      "task",
+      "record-done",
+      "P1-T1",
+      "--evidence",
+      "PR #123",
+      "--agent",
+      "claude-code",
+      "--json",
+    ]);
+    const res = p.run(["task", "finalize", "P1-T1", "--write", "--json"]);
+    expectStdoutIsJson(res, "task finalize --write after record-done");
+    expect(res.code).toBe(0);
+    const envelope = JSON.parse(res.stdout) as { ok: boolean };
+    expect(envelope.ok).toBe(true);
+  });
+
   it("task finalize P1-T1 --json (would_finalize after task complete)", async () => {
     // After task complete, the derived state is done but design YAML
     // still says planned — task finalize default-mode (dry-run) emits

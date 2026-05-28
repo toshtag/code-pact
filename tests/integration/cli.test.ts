@@ -763,6 +763,218 @@ describe("CLI: task complete (v0.2)", () => {
 });
 
 // ---------------------------------------------------------------------------
+// v1.21: task record-done
+// ---------------------------------------------------------------------------
+
+describe("CLI: task record-done (v1.21)", () => {
+  // Sets up P1-T1 with a FAILING verification command so we can prove
+  // record-done ignores it. `requiresDecision` optionally marks the task.
+  async function setupRecordDone(requiresDecision = false): Promise<void> {
+    const initRes = run([
+      "init",
+      "--non-interactive",
+      "--locale",
+      "en-US",
+      "--agent",
+      "claude-code",
+      "--json",
+    ]);
+    expect(initRes.code).toBe(0);
+    const addRes = run([
+      "phase",
+      "add",
+      "--id",
+      "P1",
+      "--name",
+      "Foundation",
+      "--objective",
+      "Foundation",
+      "--weight",
+      "10",
+      "--json",
+    ]);
+    expect(addRes.code).toBe(0);
+
+    const phasePath = join(tmpDir, "design", "phases", "P1-foundation.yaml");
+    const doc = parseYaml(await readFile(phasePath, "utf8")) as Record<
+      string,
+      unknown
+    >;
+    doc.verification = { commands: ["false"] }; // would fail under task complete
+    doc.tasks = [
+      {
+        id: "P1-T1",
+        type: "feature",
+        ambiguity: "low",
+        risk: "low",
+        context_size: "small",
+        write_surface: "low",
+        verification_strength: "weak",
+        expected_duration: "short",
+        status: "planned",
+        description: "record-done integration task",
+        ...(requiresDecision ? { requires_decision: true } : {}),
+      },
+    ];
+    await writeFile(phasePath, stringifyYaml(doc), "utf8");
+  }
+
+  it("happy path: appends external done event despite failing verify command; idempotent on re-run", async () => {
+    await setupRecordDone();
+
+    const first = run([
+      "task",
+      "record-done",
+      "P1-T1",
+      "--evidence",
+      "PR #123",
+      "--notes",
+      "Already merged",
+      "--json",
+    ]);
+    expect(first.code).toBe(0);
+    const firstParsed = JSON.parse(first.stdout) as {
+      ok: boolean;
+      data: {
+        task_id: string;
+        phase_id: string;
+        agent: string;
+        event: { source: string; evidence: string[]; notes?: string };
+      };
+    };
+    expect(firstParsed.ok).toBe(true);
+    expect(firstParsed.data.task_id).toBe("P1-T1");
+    expect(firstParsed.data.event.source).toBe("external");
+    expect(firstParsed.data.event.evidence).toEqual(["PR #123"]);
+    expect(firstParsed.data.event.notes).toBe("Already merged");
+
+    const before = await readFile(
+      join(tmpDir, ".code-pact", "state", "progress.yaml"),
+      "utf8",
+    );
+
+    const second = run([
+      "task",
+      "record-done",
+      "P1-T1",
+      "--evidence",
+      "PR #123",
+      "--json",
+    ]);
+    expect(second.code).toBe(0);
+    const secondParsed = JSON.parse(second.stdout) as {
+      ok: boolean;
+      data: { already_done: boolean };
+    };
+    expect(secondParsed.data.already_done).toBe(true);
+
+    const after = await readFile(
+      join(tmpDir, ".code-pact", "state", "progress.yaml"),
+      "utf8",
+    );
+    expect(after).toBe(before);
+  });
+
+  it("DECISION_REQUIRED surfaces structured top-level data; progress unchanged", async () => {
+    await setupRecordDone(true);
+    const before = await readFile(
+      join(tmpDir, ".code-pact", "state", "progress.yaml"),
+      "utf8",
+    );
+
+    const res = run([
+      "task",
+      "record-done",
+      "P1-T1",
+      "--evidence",
+      "PR #123",
+      "--json",
+    ]);
+    expect(res.code).toBe(2);
+    const parsed = JSON.parse(res.stdout) as {
+      ok: boolean;
+      error: { code: string; message: string };
+      data?: {
+        task_id: string;
+        current_resolution: string;
+        expected_pattern: string;
+        decision_check: { ok: boolean; reason?: string };
+      };
+    };
+    expect(parsed.ok).toBe(false);
+    expect(parsed.error.code).toBe("DECISION_REQUIRED");
+    expect(parsed.data).toBeDefined();
+    expect(parsed.data!.task_id).toBe("P1-T1");
+    expect(parsed.data!.current_resolution).toBe("file-presence-by-task-id");
+    expect(parsed.data!.expected_pattern).toBe("design/decisions/*P1-T1*.md");
+    expect(parsed.data!.decision_check.ok).toBe(false);
+
+    const after = await readFile(
+      join(tmpDir, ".code-pact", "state", "progress.yaml"),
+      "utf8",
+    );
+    expect(after).toBe(before);
+  });
+
+  it("missing --evidence fails with CONFIG_ERROR", async () => {
+    await setupRecordDone();
+    const res = run(["task", "record-done", "P1-T1", "--json"]);
+    expect(res.code).toBe(2);
+    const parsed = JSON.parse(res.stdout) as {
+      ok: boolean;
+      error: { code: string };
+    };
+    expect(parsed.ok).toBe(false);
+    expect(parsed.error.code).toBe("CONFIG_ERROR");
+  });
+
+  it("dry-run returns would_append and leaves progress.yaml byte-identical", async () => {
+    await setupRecordDone();
+    const before = await readFile(
+      join(tmpDir, ".code-pact", "state", "progress.yaml"),
+      "utf8",
+    );
+    const res = run([
+      "task",
+      "record-done",
+      "P1-T1",
+      "--evidence",
+      "PR #123",
+      "--dry-run",
+      "--json",
+    ]);
+    expect(res.code).toBe(0);
+    const parsed = JSON.parse(res.stdout) as {
+      ok: boolean;
+      data: { dry_run: boolean; would_append: { source: string } };
+    };
+    expect(parsed.data.dry_run).toBe(true);
+    expect(parsed.data.would_append.source).toBe("external");
+    const after = await readFile(
+      join(tmpDir, ".code-pact", "state", "progress.yaml"),
+      "utf8",
+    );
+    expect(after).toBe(before);
+  });
+
+  it("--help returns rich usage (exit 0) with flags and examples", () => {
+    const res = run(["task", "record-done", "--help"]);
+    expect(res.code).toBe(0);
+    expect(res.stdout).toContain("Usage: code-pact task record-done");
+    expect(res.stdout).toContain("--evidence");
+    expect(res.stdout).toContain("Examples:");
+  });
+
+  it("unknown-subcommand hint lists record-done", () => {
+    // Global --json (before the command) routes the unknown-subcommand
+    // envelope to stdout; otherwise the hint goes to stderr.
+    const res = run(["--json", "task", "bogus-sub"]);
+    expect(res.code).toBe(2);
+    expect(res.stdout).toContain("record-done");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // v0.6: task state machine (start / status / block / resume + complete)
 // ---------------------------------------------------------------------------
 
