@@ -9,7 +9,7 @@
 
 import { parseArgs } from "node:util";
 import { strictParse, strictParseAlias, ConfigError } from "../../lib/argv.ts";
-import { clusterUsage, emitUsage, hasHelpFlag, isHelpToken, subcommandUsage, taskRecordDoneUsage } from "../usage.ts";
+import { clusterUsage, emitUsage, hasHelpFlag, isHelpToken, subcommandUsage } from "../usage.ts";
 import { isInteractive } from "../../lib/tty.ts";
 import { messages, type Locale } from "../../i18n/index.ts";
 import { withWriteLock } from "../util.ts";
@@ -51,13 +51,8 @@ export async function cmdTask(argv: string[], locale: Locale, globalJson: boolea
   if (subcommand === undefined || isHelpToken(subcommand)) {
     return emitUsage(clusterUsage("task"));
   }
-  // `task record-done --help` → rich, command-specific usage (exit 0).
-  // Intercepted before the generic stub below because record-done is a newly
-  // added public command and a generic stub invites misuse.
-  if (subcommand === "record-done" && hasHelpFlag(rest)) {
-    return emitUsage(taskRecordDoneUsage());
-  }
-  // `task <sub> --help` → per-subcommand usage (exit 0).
+  // `task <sub> --help` → per-subcommand usage (exit 0). subcommandUsage
+  // returns rich leaf help for the lifecycle verbs, else a generic stub.
   if (hasHelpFlag(rest)) {
     return emitUsage(subcommandUsage("task", subcommand));
   }
