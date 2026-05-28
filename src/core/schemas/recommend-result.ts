@@ -75,6 +75,11 @@ export const StructuredReason = z
   .strict();
 export type StructuredReason = z.infer<typeof StructuredReason>;
 
+// P33: the recommended lifecycle for this task — which loop an agent should run.
+// Advisory only; code-pact's own loop behavior is unchanged.
+export const LifecycleMode = z.enum(["full_loop", "record_only", "decision_loop"]);
+export type LifecycleMode = z.infer<typeof LifecycleMode>;
+
 export const RecommendResultV2 = z
   .object({
     // existing v0.7 fields — UNCHANGED
@@ -95,6 +100,9 @@ export const RecommendResultV2 = z
     preflight: z.array(PreflightEntry).max(3),
     budgetProfile: BudgetProfile,
     structuredReasons: z.array(StructuredReason).min(1),
+
+    // new in P33 — strictly additive
+    lifecycleMode: LifecycleMode,
   })
   .strict();
 export type RecommendResultV2 = z.infer<typeof RecommendResultV2>;

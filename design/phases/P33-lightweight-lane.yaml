@@ -119,7 +119,7 @@ tasks:
     write_surface: high
     verification_strength: strong
     expected_duration: long
-    status: planned
+    status: done
     description: >
       lifecycleMode field + consumption guidance — COMBINED (never field-only).
 
@@ -177,12 +177,12 @@ tasks:
       - src/core/recommend/lifecycle.ts
       - src/core/recommend/index.ts
       - src/commands/recommend.ts
+      - src/commands/task-prepare.ts
       - src/i18n/en-US.ts
       - src/i18n/ja-JP.ts
-      - src/core/adapters/claude.ts
-      - src/core/adapters/generic.ts
-      - CLAUDE.md
       - tests/unit/core/recommend/lifecycle.test.ts
+      - tests/unit/i18n/agent-contract-consumption.test.ts
+      - tests/unit/schemas/recommend-result.test.ts
       - tests/integration/recommend-v2.test.ts
   - id: P33-T2
     type: feature

@@ -522,7 +522,11 @@ export const messages = {
         verifyBody: [
           "Before implementing:",
           "",
-          "- `code-pact recommend ... --json` returns model tier, effort, planning posture, and budget. Adapt planning depth to this profile.",
+          "- After `task prepare --json` (or `recommend --json`), read `data.recommendation` and treat it as an execution profile, not a report:",
+          "  - `tier` / `modelId` → continue, switch model, or — when the runtime **cannot switch model** — report the limitation rather than silently ignoring the recommendation.",
+          "  - `effort` → reasoning depth. `planningRequired` → write a plan before editing when true.",
+          "  - `lifecycleMode` → choose the loop: `full_loop` (prepare→start→complete→finalize), `decision_loop` (resolve the decision ADR first), or `record_only`.",
+          "- `record_only` is a lighter *loop*, not lighter verification: do **not** skip the project verification commands. Implement normally, run verification, then record honest completion with `task record-done --evidence \"...\"` (which still requires evidence and honors the decision gate).",
           "- Read the task's `writes` field. Mirror real intent into it so the v1.6+ `write_audit` advisory has a useful signal.",
           "",
           "Before `task finalize --write`:",

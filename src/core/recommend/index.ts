@@ -12,6 +12,7 @@ import { recommendEscalation } from "./escalation.ts";
 import { isPlanningRequired, recommendAmbiguityAction } from "./planning.ts";
 import { recommendPreflight } from "./preflight.ts";
 import { recommendTier, type TierRecommendation } from "./tier.ts";
+import { recommendLifecycleMode } from "./lifecycle.ts";
 
 export type ResolveRecommendationOptions = {
   phaseId: string;
@@ -19,6 +20,12 @@ export type ResolveRecommendationOptions = {
   task: Task;
   agentName: string;
   agentProfile: AgentProfile;
+  /**
+   * Decision context for the lifecycle recommendation. Meaning-closed rather
+   * than a bare boolean so `requires_decision` stays an explicit control axis.
+   * Defaults to `{ phaseRequiresDecision: false }` when omitted.
+   */
+  decisionContext?: { phaseRequiresDecision: boolean };
 };
 
 export type RecommendResult = RecommendResultV2Type;
@@ -102,6 +109,7 @@ export function resolveRecommendation(
   opts: ResolveRecommendationOptions,
 ): RecommendResult {
   const { phaseId, taskId, task, agentName, agentProfile } = opts;
+  const decisionContext = opts.decisionContext ?? { phaseRequiresDecision: false };
 
   const rec: TierRecommendation = recommendTier(task);
   const modelId = agentProfile.model_map[rec.tier] ?? rec.tier;
@@ -122,6 +130,7 @@ export function resolveRecommendation(
     preflight: recommendPreflight(task),
     budgetProfile: recommendBudgetProfile(task),
     structuredReasons: buildStructuredReasons(task, rec.tier),
+    lifecycleMode: recommendLifecycleMode(task, decisionContext),
   };
 
   return RecommendResultV2.parse(result);
