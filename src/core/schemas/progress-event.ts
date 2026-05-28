@@ -9,6 +9,13 @@ export const EventStatus = z.enum([
 ]);
 export const ActorType = z.enum(["human", "agent"]);
 
+// Provenance of a `done` event. `loop` = produced by the normal
+// `task complete` path (loop-verified). `external` = recorded by
+// `task record-done` for work completed outside the code-pact loop.
+// Only meaningful on `done` events (enforced by superRefine below);
+// missing source on a legacy `done` event is treated as `loop` by readers.
+export const EventSource = z.enum(["loop", "external"]);
+
 export const ProgressEvent = z
   .object({
     task_id: z.string().min(1),
@@ -24,6 +31,8 @@ export const ProgressEvent = z
     // Justification for a state transition. Required for `blocked` events
     // (enforced by superRefine below). Distinct from `notes` (free-form memo).
     reason: z.string().min(1).optional(),
+    // Completion provenance. Only valid on `done` events.
+    source: EventSource.optional(),
   })
   .superRefine((value, ctx) => {
     if (value.status === "blocked" && !value.reason) {
@@ -31,6 +40,13 @@ export const ProgressEvent = z
         code: "custom",
         path: ["reason"],
         message: 'reason is required when status is "blocked"',
+      });
+    }
+    if (value.source !== undefined && value.status !== "done") {
+      ctx.addIssue({
+        code: "custom",
+        path: ["source"],
+        message: 'source is only valid on "done" events',
       });
     }
   });
