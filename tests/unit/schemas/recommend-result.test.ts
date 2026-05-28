@@ -48,6 +48,7 @@ const VALID_RESULT: unknown = {
   preflight: [VALID_PREFLIGHT],
   budgetProfile: VALID_BUDGET,
   structuredReasons: [VALID_REASON],
+  lifecycleMode: "full_loop",
 };
 
 describe("RecommendResultV2 — happy path", () => {

@@ -546,7 +546,11 @@ export const messages = {
         verifyBody: [
           "実装前:",
           "",
-          "- `code-pact recommend ... --json` がモデル階層 / エフォート / 計画姿勢 / バジェットを返します。これに応じて計画の深さを調整してください。",
+          "- `task prepare --json`（または `recommend --json`）の後、`data.recommendation` を読み、レポートではなく実行プロファイルとして扱ってください:",
+          "  - `tier` / `modelId` → 継続 / モデル切替 / runtime が **cannot switch model**（モデルを切り替えられない）場合は無視せず限界として報告する。",
+          "  - `effort` → 推論の深さ。`planningRequired` が true なら編集前に plan を書く。",
+          "  - `lifecycleMode` → ループを選ぶ: `full_loop`（prepare→start→complete→finalize）/ `decision_loop`（先に decision ADR を解決）/ `record_only`。",
+          "- `record_only` は**ループを軽くするだけで、検証を省くものではない**: プロジェクトの検証コマンドを省略せず実行し、その後 `task record-done --evidence \"...\"` で正直に記録する（evidence 必須・decision gate も honor）。",
           "- タスクの `writes` field を読み、実際の意図を正確に反映させます。これにより v1.6+ `write_audit` advisory が有効な signal を出せます。",
           "",
           "`task finalize --write` の前:",
