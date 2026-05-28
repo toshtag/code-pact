@@ -639,15 +639,90 @@ describe("CLI: task complete (v0.2)", () => {
     const parsed = JSON.parse(res.stdout) as {
       ok: boolean;
       error: { code: string };
+      data: {
+        verify: { ok: boolean; checks: { name: string }[] };
+        failed_checks: string[];
+        first_failure: { name: string; reason: string } | null;
+        suggested_next_command: string | null;
+      };
     };
     expect(parsed.ok).toBe(false);
     expect(parsed.error.code).toBe("VERIFICATION_FAILED");
+
+    // P32: failure clarity — the root cause is surfaced near the top of data,
+    // additive to the unchanged data.verify.checks.
+    expect(parsed.data.verify.checks.length).toBeGreaterThan(0);
+    expect(parsed.data.failed_checks).toContain("commands");
+    expect(parsed.data.first_failure?.name).toBe("commands");
+    expect(parsed.data.first_failure?.reason ?? "").toMatch(/exited with code/);
+    expect(parsed.data.suggested_next_command).toBe(
+      "code-pact task complete P1-T1",
+    );
 
     const after = await readFile(
       join(tmpDir, ".code-pact", "state", "progress.yaml"),
       "utf8",
     );
     expect(after).toBe(before);
+  });
+
+  it("verify failure (--dry-run --json): still runs verification and surfaces the failure fields", async () => {
+    await setupWithTask();
+    await rewritePhaseCommands(true);
+
+    const before = await readFile(
+      join(tmpDir, ".code-pact", "state", "progress.yaml"),
+      "utf8",
+    );
+
+    // --dry-run does NOT skip verification: verify runs before the dry-run
+    // short-circuit, so a failing dry-run is still VERIFICATION_FAILED and
+    // carries the same clarity fields.
+    const res = run([
+      "task",
+      "complete",
+      "P1-T1",
+      "--agent",
+      "claude-code",
+      "--dry-run",
+      "--json",
+    ]);
+    expect(res.code).toBe(1);
+    const parsed = JSON.parse(res.stdout) as {
+      ok: boolean;
+      error: { code: string };
+      data: {
+        failed_checks: string[];
+        first_failure: { name: string } | null;
+        suggested_next_command: string | null;
+      };
+    };
+    expect(parsed.ok).toBe(false);
+    expect(parsed.error.code).toBe("VERIFICATION_FAILED");
+    expect(parsed.data.failed_checks).toContain("commands");
+    expect(parsed.data.first_failure?.name).toBe("commands");
+    expect(parsed.data.suggested_next_command).toBe(
+      "code-pact task complete P1-T1",
+    );
+
+    const after = await readFile(
+      join(tmpDir, ".code-pact", "state", "progress.yaml"),
+      "utf8",
+    );
+    expect(after).toBe(before);
+  });
+
+  it("verify failure (human): prints the cause and rerun-after-fixing lines to stderr", async () => {
+    await setupWithTask();
+    await rewritePhaseCommands(true);
+
+    const res = run(["task", "complete", "P1-T1", "--agent", "claude-code"]);
+    expect(res.code).toBe(1);
+    // Existing generic line is preserved...
+    expect(res.stderr).toMatch(/Verification failed for "P1-T1"/);
+    // ...with the new clarity lines below it.
+    expect(res.stderr).toMatch(/cause: commands —/);
+    expect(res.stderr).toMatch(/rerun after fixing: code-pact task complete P1-T1/);
   });
 
   it("dry-run leaves progress.yaml byte-identical and returns would_append", async () => {

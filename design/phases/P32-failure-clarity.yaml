@@ -145,7 +145,7 @@ tasks:
     write_surface: high
     verification_strength: strong
     expected_duration: long
-    status: planned
+    status: done
     description: |
       Wire `task complete` failure clarity + shared CLI render helper + i18n.
 

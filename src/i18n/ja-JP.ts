@@ -283,6 +283,11 @@ export const messages = {
       invalidTransition: (taskId: string, current: string): string =>
         `タスク "${taskId}" は ${current} 状態です。先に \`code-pact task resume ${taskId}\` を実行してください。`,
     },
+    failure: {
+      cause: (name: string, reason: string): string => `  原因: ${name} — ${reason}`,
+      otherChecks: (names: string[]): string => `  他に失敗: ${names.join(", ")}`,
+      rerunAfterFixing: (cmd: string): string => `  修正後に再実行: ${cmd}`,
+    },
     recordDone: {
       evidenceRequired:
         "task record-done には、ループ外で完了した作業を示す --evidence \"<text>\" が必要です。",
