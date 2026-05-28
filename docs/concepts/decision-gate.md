@@ -37,7 +37,7 @@ The status word governs the gate:
 
 Two resolution paths, by whether the task declares [`decision_refs`](task-readiness-fields.md#decision_refs):
 
-- **Explicit `decision_refs` → all-must-be-accepted.** Every path the task lists must resolve to an `accepted` ADR. A single `proposed` / `empty` / `missing` / unknown-status reference fails the gate. Explicit references are a strong contract — use them when a task depends on more than one decision.
+- **Explicit `decision_refs` → all-must-be-accepted.** Every path the task lists must resolve to an `accepted` ADR. A single `proposed` / `empty` / `missing` / unknown-status / unsafe reference fails the gate. A reference that escapes the project root (`..`, an absolute path, or a symlink out of the repo) is **fail-closed**: it is never read and never resolves — so a planted `accepted` ADR outside the repo cannot satisfy the gate. Explicit references are a strong contract — use them when a task depends on more than one decision. (A `decision_refs` path may point at any *safe, repo-relative* decision document; it is not currently restricted to `design/decisions/`.)
 - **No `decision_refs` → filename scan (any-accepted-wins).** The gate scans `design/decisions/` for any `.md` whose filename contains the task id (e.g. `P1-T1` matches `design/decisions/P1-T1.md` or `P1-T1-rfc.md`) and resolves if **any** match is accepted. The substring match is a long-standing compatibility quirk (`P1-T1` also matches `P1-T10-*.md`).
 
 ## Scaffolding the stubs: `--scaffold-decisions`

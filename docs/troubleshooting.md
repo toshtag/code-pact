@@ -219,7 +219,7 @@ code-pact task record-done <task-id> --evidence "PR #123" --json
 
 Recovery: make an ADR for the task **accepted**.
 - If `data.via` is `"filename-scan"`, create or edit `design/decisions/<task-id>.md` (the `data.expected_pattern`) so its `**Status:**` line reads `accepted`.
-- If `data.via` is `"decision_refs"`, **every** path in the task's `decision_refs` must resolve to an `accepted` ADR (all-must-be-accepted). Fix the ones `data.considered[]` shows as `blocked` / `empty` / `missing` / `unknown_status`.
+- If `data.via` is `"decision_refs"`, **every** path in the task's `decision_refs` must resolve to an `accepted` ADR (all-must-be-accepted). Fix the ones `data.considered[]` shows as `blocked` / `empty` / `missing` / `unknown_status` / `unsafe_path`. For `unsafe_path`, the reference escapes the project root (`..`, an absolute path, or a symlink out) and is never read — replace it with a safe repo-relative path that stays inside the project (normally under `design/decisions/`).
 
 The gate is the same one `verify` and `task complete` enforce, and since v1.22 it reads the ADR's status (see the [decision-gate concept](concepts/decision-gate.md)). To generate `proposed` stubs to fill in, import with `--scaffold-decisions`.
 
