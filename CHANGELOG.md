@@ -13,6 +13,8 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+## [1.22.0] — 2026-05-28
+
 ### Status-aware ADR decision gate (RFC §3-C)
 
 The `requires_decision` gate used by `verify` / `task complete` / `task record-done` / `plan lint --include-quality` now actually reads the ADR's status, not just its filename. Before this, any `.md` whose name contained the task id resolved the gate — including a `proposed` draft or an empty stub. The gate's whole purpose (a human has *accepted* the design decision) was therefore not enforced.
