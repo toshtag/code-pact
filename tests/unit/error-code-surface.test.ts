@@ -122,6 +122,7 @@ const KNOWN_CODES: Record<string, "public" | "plan" | "doctor" | "adapter" | "in
   BRIEF_MISSING: "doctor",
   CONSTITUTION_PLACEHOLDER: "doctor",
   CONTROL_PLANE_NOT_DRIVEN: "doctor",
+  CONTROL_PLANE_BRANCH_NOT_DRIVEN: "doctor",
   EMPTY_OBJECTIVE: "doctor",
   LOCAL_NOT_GITIGNORED: "doctor",
   MISSING_DIR: "doctor",
