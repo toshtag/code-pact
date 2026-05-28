@@ -1,8 +1,8 @@
 {
   "harness_version": "0.2.0",
   "summary_schema_version": 1,
-  "input_git_sha": "2ce943948be63a939a2adedca443ea3335974c34",
-  "code_pact_cli_version": "1.23.0",
+  "input_git_sha": "aa65d03d845aaa8dfe112b6bdd9a0a50d5d2d853",
+  "code_pact_cli_version": "1.24.0",
   "generated_at": "2026-05-28",
   "metrics": {
     "pack_size_p50_bytes": 19275,
