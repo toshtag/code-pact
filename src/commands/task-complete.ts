@@ -143,6 +143,7 @@ export async function runTaskComplete(
     actor: "agent",
     agent: agentName,
     evidence: verifyResult.checks.filter((c) => c.ok).map((c) => c.name),
+    source: "loop",
   };
 
   // ---- Step 5: dry-run short circuit ----
