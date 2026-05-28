@@ -188,6 +188,65 @@ describe("runVerify — requires_decision with ADR present", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Status-aware ADR gate (RFC §3-C, v1.22)
+// ---------------------------------------------------------------------------
+
+describe("runVerify — status-aware ADR gate", () => {
+  let dir: string;
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "code-pact-verify-status-"));
+    await setupProject(dir, { requiresDecision: true, hasAdr: false });
+    await mkdir(join(dir, "design", "decisions"), { recursive: true });
+  });
+  afterEach(() => rm(dir, { recursive: true, force: true }));
+
+  it("**Status:** accepted ADR resolves the decision check", async () => {
+    await writeFile(
+      join(dir, "design", "decisions", "P1-T1-rfc.md"),
+      "**Status:** accepted (P1, 2026-05)\n",
+      "utf8",
+    );
+    const result = await runVerify({ cwd: dir, phaseId: "P1", taskId: "P1-T1", dryRun: true });
+    const check = result.checks.find((c) => c.name === "decision");
+    expect(check?.ok).toBe(true);
+  });
+
+  it("**Status:** proposed ADR does NOT resolve the decision check (status-aware)", async () => {
+    await writeFile(
+      join(dir, "design", "decisions", "P1-T1-rfc.md"),
+      "**Status:** proposed (unscheduled, 2026-05)\n",
+      "utf8",
+    );
+    const result = await runVerify({ cwd: dir, phaseId: "P1", taskId: "P1-T1", dryRun: true });
+    const check = result.checks.find((c) => c.name === "decision");
+    expect(check?.ok).toBe(false);
+    expect(check?.reason).toContain('is "proposed"');
+  });
+
+  it("explicit unknown status (typo) does NOT resolve", async () => {
+    await writeFile(
+      join(dir, "design", "decisions", "P1-T1-rfc.md"),
+      "**Status:** acceptd\n",
+      "utf8",
+    );
+    const result = await runVerify({ cwd: dir, phaseId: "P1", taskId: "P1-T1", dryRun: true });
+    expect(result.checks.find((c) => c.name === "decision")?.ok).toBe(false);
+  });
+
+  it("empty ADR file does NOT resolve", async () => {
+    await writeFile(
+      join(dir, "design", "decisions", "P1-T1-rfc.md"),
+      "\n",
+      "utf8",
+    );
+    expect(
+      (await runVerify({ cwd: dir, phaseId: "P1", taskId: "P1-T1", dryRun: true }))
+        .checks.find((c) => c.name === "decision")?.ok,
+    ).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Error cases
 // ---------------------------------------------------------------------------
 
