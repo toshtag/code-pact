@@ -26,6 +26,8 @@
 | **context pack（コンテキストパック）** | code-pact が 1 タスク向けに作る Markdown ファイル。実装に必要なものだけ（タスクの説明、読むべきファイル、関連する決定、受け入れ基準）を含み、`.context/<agent>/<task-id>.md` に書かれます。 |
 | **verification command（検証コマンド）** | フェーズが宣言する、タスクの動作を証明するシェルコマンド（例: `pnpm test`）。`task complete` はこれを実行し、通った場合だけ `done` を記録します。 |
 | **finalize / reconcile** | `task finalize` は 1 タスクの design status を `done` に、`phase reconcile` はフェーズ全体を一度に揃えます。どちらも作業後に意図を事実へ同期します。 |
+| **record-done** | ループの**外**で完了した作業（既にマージ済み、または作業ツリーから検証できない）に `done` イベントを記録します。検証コマンドは実行せず根拠は `--evidence`、イベントは `source: external` を持ちます。`task complete` の代替ではなく、decision gate は依然適用されます。 |
+| **source（loop / external）** | `done` progress イベントのフィールド：`loop` = 通常の `task complete` 経由、`external` = `task record-done` で記録。ループ検証済みの完了と、外部主張による完了を後の診断で区別できます。 |
 
 ## 計画とスキーマ
 
@@ -35,6 +37,8 @@
 | **plan adopt** | 既存の構造化プラン（`roadmap.md` / `TODO.md` / `tasks.md` や YAML 草案）を code-pact のフェーズとタスクへ変換するコマンド — AI 往復なし。 |
 | **task readiness fields（タスクの readiness フィールド）** | タスクがコンテキストパックを形作りチェックを有効化するために宣言できる任意フィールド：`depends_on`、`reads`、`writes`、`decision_refs`、`acceptance_refs`。すべて任意で、無くても動きます。[task readiness fields](../concepts/task-readiness-fields.md)（英語）を参照。 |
 | **write audit（書き込み監査）** | タスクを finalize すると、`writes` で宣言したファイルと実際に変更されたファイルを比較し、不一致を advisory として報告します。`--audit-strict` はその advisory を非ゼロ終了（CI 向け）に昇格します。 |
+| **decision gate（決定ゲート）** | `requires_decision` タスクが完了する前に **accepted** な ADR の存在を強制するチェック。存在するまで `verify` / `task complete` / `task record-done` をブロックします。[the decision gate](../concepts/decision-gate.md)（英語）を参照。 |
+| **ADR（決定記録）** | Architecture Decision Record：`design/decisions/` 配下の markdown で、その `**Status:**` 行（`accepted` / `proposed` / `draft` / `rejected` / `superseded`）を decision gate が読みます。`accepted` がゲートを通します。 |
 
 ## 出力と診断
 

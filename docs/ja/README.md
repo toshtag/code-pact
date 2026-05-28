@@ -38,6 +38,7 @@
 | ドキュメント | 内容 |
 | --- | --- |
 | [task-readiness-fields.md](../concepts/task-readiness-fields.md) (英語) | 任意のタスクスキーマフィールド（`depends_on` / `reads` / `writes` など）と `plan lint` への影響。 |
+| [decision-gate.md](../concepts/decision-gate.md) (英語) | 決定ゲート — `requires_decision` タスクが **accepted** な ADR でゲートされる仕組み、status-aware な解決、`--scaffold-decisions`。 |
 | [runbook.md](../concepts/runbook.md) (英語) | `task runbook` / `phase runbook` — 依存関係のゲートと finalize 候補の提示。 |
 | [finalization-reconciliation.md](../concepts/finalization-reconciliation.md) (英語) | `task finalize` / `phase reconcile` — design の状態を進捗ログに同期する。 |
 | [governance.md](../concepts/governance.md) (英語) | ガバナンス層 — write lock、予約 ID、保護パス。 |

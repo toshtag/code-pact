@@ -57,6 +57,7 @@ Use these only when you need them — none are part of the normal flow:
 | Ask "what should I do next?" (read-only) | `code-pact task runbook <task-id> --json` / `code-pact phase runbook <phase-id> --json` |
 | Record a blocker | `code-pact task block <task-id> --reason "..."` |
 | Resume after a blocker | `code-pact task resume <task-id> --agent claude-code` |
+| Record work done outside the loop (already merged) | `code-pact task record-done <task-id> --evidence "PR #123"` (records `done` with `source: external`; the decision gate still applies) |
 | Reconcile a whole phase at once | `code-pact phase reconcile <phase-id> --write` |
 | Audit declared vs actual writes | `code-pact task finalize <task-id> --json \| jq .data.write_audit` ([detail](cli-contract.md#task-finalize--flip-task-design-status-to-done-v12-p11)) |
 

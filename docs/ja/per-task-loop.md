@@ -52,6 +52,16 @@ stateDiagram-v2
 | `task block <id> --reason "…"` | 理由つきで `blocked` にする。 | `blocked` |
 | `task resume <id> --agent <a>` | ブロックを解除し、`resumed` にする。 | `resumed` |
 
+### ループの外で完了した作業を記録する
+
+タスクがこのループの**外**で完了することもあります — 既にマージ済み、あるいは現在の作業ツリーからは検証できない場合です。`task record-done` は、ループの実行を偽装せずにそれを正直に記録する手段です:
+
+| コマンド | 何をするか | イベント記録 |
+| --- | --- | --- |
+| `task record-done <id> --evidence "PR #123"` | ループ外で完了した作業に `done` を記録。検証コマンドは実行せず、根拠は `--evidence`。イベントは `source: external` を持つ。`requires_decision` タスクでは decision gate が依然として適用される。 | `done`（`source: external`） |
+
+作業ツリーから検証できる場合は通常の `complete` を優先してください。`record-done` は本当にループ外で完了した場合のみに留めます。`source: external` のマーカーにより、その区別が後の診断で見えるようになります。
+
 ## 実例
 
 ```sh
