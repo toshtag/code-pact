@@ -177,6 +177,8 @@ tasks:
       - src/commands/doctor.ts
       - src/commands/validate.ts
       - src/cli.ts
+      - src/core/audit/index.ts
+      - src/core/audit/write-audit.ts
       - tests/unit/commands/doctor.test.ts
       - tests/unit/error-code-surface.test.ts
   - id: P34-T2
