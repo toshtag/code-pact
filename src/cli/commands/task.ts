@@ -44,7 +44,9 @@ import {
 } from "../../core/schemas/task.ts";
 import {
   buildFailureSummaryFromChecks,
+  buildFailureSummaryFromFinalizeCode,
   type FailureCheckLike,
+  type FailureSummary,
 } from "../../core/failure/failure-summary.ts";
 import { renderFailureSummaryLines } from "../render/failure-summary.ts";
 
@@ -1302,6 +1304,11 @@ async function cmdTaskFinalize(
     // would on the success path, plus `applied: false` to make the
     // no-mutation guarantee machine-readable.
     if (err instanceof TaskFinalizeAuditStrictError) {
+      const summary = buildFailureSummaryFromFinalizeCode(
+        "WRITES_AUDIT_STRICT_FAILED",
+        err.task_id,
+        err.message,
+      );
       if (json) {
         process.stdout.write(
           `${JSON.stringify({
@@ -1315,11 +1322,16 @@ async function cmdTaskFinalize(
               phase_id: err.phase_id,
               applied: err.applied,
               write_audit: err.write_audit,
+              failed_checks: summary.failed_checks,
+              first_failure: summary.first_failure,
+              suggested_next_command: summary.suggested_next_command,
             },
           })}\n`,
         );
       } else {
         process.stderr.write(`${err.message}\n`);
+        const lines = renderFailureSummaryLines(m.task.failure, summary);
+        if (lines.length > 0) process.stderr.write(`${lines.join("\n")}\n`);
       }
       return 1;
     }
@@ -1329,6 +1341,10 @@ async function cmdTaskFinalize(
     let msg: string;
     let outCode: string;
     let extraData: Record<string, unknown> | undefined;
+    // Set only for the finalize failure codes that map to a clarity summary
+    // (NOT_ELIGIBLE / WRITE_REFUSED). TASK_NOT_FOUND / AMBIGUOUS_TASK_ID are
+    // resolution errors, not finalize-gate failures, so they get no summary.
+    let summary: FailureSummary | null = null;
 
     switch (code) {
       case "TASK_NOT_FOUND":
@@ -1349,7 +1365,19 @@ async function cmdTaskFinalize(
           (err as NodeJS.ErrnoException & { phase_id?: string }).phase_id ?? "";
         msg = m.task.finalize.notEligible(taskId, current);
         outCode = "TASK_FINALIZE_NOT_ELIGIBLE";
-        extraData = { task_id: taskId, phase_id, current };
+        summary = buildFailureSummaryFromFinalizeCode(
+          "TASK_FINALIZE_NOT_ELIGIBLE",
+          taskId,
+          err.message,
+        );
+        extraData = {
+          task_id: taskId,
+          phase_id,
+          current,
+          failed_checks: summary.failed_checks,
+          first_failure: summary.first_failure,
+          suggested_next_command: summary.suggested_next_command,
+        };
         break;
       }
       case "TASK_FINALIZE_WRITE_REFUSED": {
@@ -1359,7 +1387,19 @@ async function cmdTaskFinalize(
           (err as NodeJS.ErrnoException & { file?: string }).file ?? "";
         msg = m.task.finalize.writeRefused(taskId, err.message);
         outCode = "TASK_FINALIZE_WRITE_REFUSED";
-        extraData = { task_id: taskId, file, reason };
+        summary = buildFailureSummaryFromFinalizeCode(
+          "TASK_FINALIZE_WRITE_REFUSED",
+          taskId,
+          err.message,
+        );
+        extraData = {
+          task_id: taskId,
+          file,
+          reason,
+          failed_checks: summary.failed_checks,
+          first_failure: summary.first_failure,
+          suggested_next_command: summary.suggested_next_command,
+        };
         break;
       }
       default:
@@ -1374,6 +1414,10 @@ async function cmdTaskFinalize(
       process.stdout.write(`${JSON.stringify(envelope)}\n`);
     } else {
       process.stderr.write(`${msg}\n`);
+      if (summary) {
+        const lines = renderFailureSummaryLines(m.task.failure, summary);
+        if (lines.length > 0) process.stderr.write(`${lines.join("\n")}\n`);
+      }
     }
     return 2;
   }

@@ -1807,12 +1807,19 @@ Strict-failure envelope:
     "task_id": "P9-T5",
     "phase_id": "P9",
     "applied": false,
-    "write_audit": { ... }
+    "write_audit": { ... },
+    "failed_checks": ["write_audit"],
+    "first_failure": { "name": "write_audit", "reason": "task finalize \"P9-T5\": --audit-strict and audit emitted warnings: ..." },
+    "suggested_next_command": null
   }
 }
 ```
 
 `applied: false` is a fixed invariant on the strict-failure path: the gate fires **before** `applyPlannedWrite`, so even `--write` invocations leave the phase YAML byte-identical when the audit refuses.
+
+### Failure clarity fields (v1.26+, P32 — additive)
+
+Every `task finalize` **failure** envelope (`TASK_FINALIZE_NOT_ELIGIBLE`, `TASK_FINALIZE_WRITE_REFUSED`, `WRITES_AUDIT_STRICT_FAILED`) carries the same three additive `data` fields as `task complete` (see [`task complete`](#task-complete)): `failed_checks`, `first_failure: { name, reason } | null`, and `suggested_next_command: string | null`. Because `finalize` produces no verify `checks`, a single pseudo-check is synthesized per failure code — `eligibility` / `write_safety` / `write_audit` respectively — with `reason` set to the error message (the full structured detail stays in the existing fields, e.g. `data.write_audit`). `suggested_next_command` is the deterministic rerun-**after-fixing** command (`code-pact task complete <id>` for `TASK_FINALIZE_NOT_ELIGIBLE`; `null` for the two that require a human edit). Human output prints the cause and (when present) a `rerun after fixing:` line to stderr below the existing message. No new error codes; existing fields (`write_audit`, `current`, `reason`, `file`) are unchanged.
 
 ### Errors
 
