@@ -26,6 +26,12 @@ When a `task complete` / `task finalize` failure occurred, the root cause alread
 
 - New pure helper `src/core/failure/failure-summary.ts` (no dependency on `src/commands/`; takes a structural `FailureCheckLike`) and a shared CLI renderer `src/cli/render/failure-summary.ts`, reused by both `task complete` and `task finalize`.
 
+### Lightweight lane + recommendation consumption (P33)
+
+**Internal**
+
+- **P33-T0** — registers the P33 phase. `recommend` / `task prepare` will gain an additive `lifecycleMode` field (`full_loop` | `record_only` | `decision_loop`) computed by a conservative deterministic switch, AND the generated adapter guidance that tells agents to consume the recommendation (and use `task record-done` without skipping verification for `record_only`) — shipped together so the field is never a produced-but-unused signal. New conformance checks verify the guidance, version-gated on a new threshold so existing adapters are not broken. Design in `design/decisions/lightweight-lane-rfc.md`.
+
 ## [1.25.0] — 2026-05-28
 
 ### `CONTROL_PLANE_NOT_DRIVEN` doctor advisory (RFC §2)
