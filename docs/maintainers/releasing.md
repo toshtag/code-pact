@@ -31,7 +31,21 @@ On a `chore/release-<version>` branch:
    snapshot rather than copying numbers, so it needs no edit.
 3. **CHANGELOG:** add a `## [<version>] — <date>` section (Keep a Changelog
    format: Added / Changed / Fixed). Lead with the user-facing shipped change.
-4. **Verify** (the same gates CI runs):
+4. **Docs-sync audit** — confirm everything shipped since the last tag followed
+   the [docs ownership map](docs-maintenance.md#ownership-map--what-to-update-for-which-change).
+   `check:docs` covers links + the error-code contract, but two rules are
+   [deliberately manual](docs-maintenance.md#deliberately-not-auto-enforced-verify-by-hand-at-release-prep) — confirm them now:
+   - every new **user-recoverable** error/diagnostic code has a
+     `troubleshooting.md` recovery entry;
+   - every change to a mirrored EN usage doc has its `docs/ja/*` counterpart.
+
+   ```sh
+   git diff <last-tag>..HEAD --name-only -- docs/ design/decisions/
+   # scan for: new error codes without a troubleshooting entry,
+   # and EN usage-doc changes (per-task-loop / getting-started /
+   # glossary / workflows) with no matching docs/ja/ change.
+   ```
+5. **Verify** (the same gates CI runs):
    ```sh
    pnpm typecheck && pnpm test:unit && pnpm build \
      && pnpm exec vitest run --config vitest.integration.config.ts \
@@ -40,23 +54,23 @@ On a `chore/release-<version>` branch:
      && node dist/cli.js plan analyze --strict --json \
      && node dist/cli.js validate --json
    ```
-5. Open the PR; merge once CI is green.
+6. Open the PR; merge once CI is green.
 
 ## Tag + publish (maintainer-local)
 
 After the release-prep PR merges to `main`:
 
-6. **Annotated, signed tag** on the merge commit (lightweight tags are rejected
+7. **Annotated, signed tag** on the merge commit (lightweight tags are rejected
    by a hook; signing setup is in [CONTRIBUTING](../../CONTRIBUTING.md#tag-signing-maintainer-only)):
    ```sh
    git tag -a v<version> -m "v<version> — <theme>"
    git push origin v<version>
    ```
-7. **Publish** (`prepublishOnly` re-checks package metadata):
+8. **Publish** (`prepublishOnly` re-checks package metadata):
    ```sh
    npm publish
    ```
-8. **GitHub Release** from the tag, using the CHANGELOG section as the body,
+9. **GitHub Release** from the tag, using the CHANGELOG section as the body,
    **plus an `## Integrity` section** recording the published tarball's
    `shasum` and `integrity`. This is a documented supply-chain policy
    ([SECURITY.md](../../SECURITY.md): "the published tarball shasum is recorded

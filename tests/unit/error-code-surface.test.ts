@@ -232,7 +232,7 @@ describe("error code surface (v1.0 contract anchor)", () => {
     const found = await collectCodes();
     const expected = new Set(Object.keys(KNOWN_CODES));
     const missing = [...found].filter((c) => !expected.has(c)).sort();
-    expect(missing, `New error code(s) found in src/ but not categorized in KNOWN_CODES. Add them here AND in docs/cli-contract.md.`).toEqual([]);
+    expect(missing, `New error code(s) found in src/ but not categorized in KNOWN_CODES. Add them here AND in docs/cli-contract.md — and, if the code is user-recoverable, add a recovery entry to docs/troubleshooting.md (see docs/maintainers/docs-maintenance.md ownership map).`).toEqual([]);
   });
 
   it("every code in KNOWN_CODES is still emitted somewhere in src/", async () => {
