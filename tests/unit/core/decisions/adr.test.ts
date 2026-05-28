@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -290,6 +290,74 @@ describe("resolveDecisionGate — decision_refs (all-must-be-accepted)", () => {
       "design/decisions/b.md",
     ]);
     expect(res.resolved).toBe(false);
+  });
+});
+
+describe("resolveDecisionGate — decision_refs path safety (fail-closed)", () => {
+  let cwd: string;
+  let outsideDir: string;
+  beforeEach(async () => {
+    cwd = await mkdtemp(join(tmpdir(), "adr-safety-"));
+    outsideDir = await mkdtemp(join(tmpdir(), "adr-outside-"));
+    await mkdir(join(cwd, "design", "decisions"), { recursive: true });
+  });
+  afterEach(async () => {
+    await rm(cwd, { recursive: true, force: true });
+    await rm(outsideDir, { recursive: true, force: true });
+  });
+
+  it("traversal ref ('../outside.md') → unsafe_path, unresolved, no throw, file never read", async () => {
+    // An accepted ADR sits just outside the project root; the gate must NOT
+    // read it and must NOT resolve — the path is fail-closed at the boundary.
+    await writeFile(join(outsideDir, "outside.md"), "**Status:** accepted\n");
+    const res = await resolveDecisionGate(cwd, "P1-T1", ["../outside.md"]);
+    expect(res.resolved).toBe(false);
+    const entry = res.considered.find((c) => c.path.includes("outside.md"));
+    expect(entry?.acceptance).toBe("unsafe_path");
+    expect(entry?.accepted).toBe(false);
+    expect(res.reason).toContain("unsafe path");
+  });
+
+  it("symlink escape inside design/decisions/ → unsafe_path, unresolved", async () => {
+    // A symlink in design/decisions/ that points to an accepted ADR outside
+    // the project must not resolve the gate.
+    await writeFile(join(outsideDir, "target.md"), "**Status:** accepted\n");
+    await symlink(
+      join(outsideDir, "target.md"),
+      join(cwd, "design", "decisions", "escape.md"),
+    );
+    const res = await resolveDecisionGate(cwd, "P1-T1", [
+      "design/decisions/escape.md",
+    ]);
+    expect(res.resolved).toBe(false);
+    const entry = res.considered.find((c) => c.path.includes("escape.md"));
+    expect(entry?.acceptance).toBe("unsafe_path");
+  });
+
+  it("one safe-accepted + one traversal ref → unresolved (all-must-be-accepted, fail-closed)", async () => {
+    await writeFile(
+      join(cwd, "design", "decisions", "a.md"),
+      "**Status:** accepted\n",
+    );
+    await writeFile(join(outsideDir, "b.md"), "**Status:** accepted\n");
+    const res = await resolveDecisionGate(cwd, "P1-T1", [
+      "design/decisions/a.md",
+      "../b.md",
+    ]);
+    expect(res.resolved).toBe(false);
+    expect(
+      res.considered.find((c) => c.path.includes("b.md"))?.acceptance,
+    ).toBe("unsafe_path");
+  });
+
+  it("makeDecisionResolver is fail-closed on a traversal ref too", async () => {
+    await writeFile(join(outsideDir, "outside.md"), "**Status:** accepted\n");
+    const resolver = await makeDecisionResolver(cwd);
+    const res = await resolver.resolve("P1-T1", ["../outside.md"]);
+    expect(res.resolved).toBe(false);
+    expect(
+      res.considered.find((c) => c.path.includes("outside.md"))?.acceptance,
+    ).toBe("unsafe_path");
   });
 });
 
