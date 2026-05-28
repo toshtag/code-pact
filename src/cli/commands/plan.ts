@@ -350,6 +350,7 @@ async function cmdPlanAdopt(argv: string[], globalJson: boolean): Promise<number
       argv,
       {
         write: { type: "boolean" },
+        "scaffold-decisions": { type: "boolean" },
         json: { type: "boolean" },
       },
       { allowPositionals: true },
@@ -369,6 +370,7 @@ async function cmdPlanAdopt(argv: string[], globalJson: boolean): Promise<number
 
   const json = globalJson || values.json === true;
   const write = values.write === true;
+  const scaffoldDecisions = values["scaffold-decisions"] === true;
   const fromPath = positionals[0];
   const cwd = process.cwd();
 
@@ -387,7 +389,7 @@ async function cmdPlanAdopt(argv: string[], globalJson: boolean): Promise<number
 
   const run = async (): Promise<number> => {
     try {
-      const result = await runPlanAdopt({ cwd, fromPath, write });
+      const result = await runPlanAdopt({ cwd, fromPath, write, scaffoldDecisions });
       if (json) {
         process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
         return 0;
