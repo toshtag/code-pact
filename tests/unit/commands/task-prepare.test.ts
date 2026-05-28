@@ -76,7 +76,7 @@ tasks:
 
 async function setupProject(
   dir: string,
-  opts: { progressYaml?: string } = {},
+  opts: { progressYaml?: string; phaseYaml?: string } = {},
 ): Promise<void> {
   await mkdir(join(dir, ".code-pact", "state"), { recursive: true });
   await mkdir(join(dir, ".code-pact", "agent-profiles"), { recursive: true });
@@ -99,7 +99,7 @@ async function setupProject(
   await writeFile(join(dir, "design", "roadmap.yaml"), ROADMAP_YAML, "utf8");
   await writeFile(
     join(dir, "design", "phases", "P1-foundation.yaml"),
-    PHASE_YAML,
+    opts.phaseYaml ?? PHASE_YAML,
     "utf8",
   );
 }
@@ -166,6 +166,87 @@ describe("runTaskPrepare — planned state", () => {
       complete: "code-pact task complete P1-T1 --agent claude-code",
       finalize: "code-pact task finalize P1-T1 --write --json",
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Recommendation observability (regression) — locks the v1.20 cost fixes so
+// `task prepare` callers can trust tier selection without a second
+// `recommend` call. The recommend unit tests cover the tier logic itself;
+// these assert it survives the prepare round-trip.
+// ---------------------------------------------------------------------------
+
+const PHASE_YAML_RECO = `id: P1
+name: Foundation
+weight: 12
+confidence: high
+risk: low
+status: in_progress
+objective: test phase
+definition_of_done:
+  - tests pass
+verification:
+  commands:
+    - echo ok
+tasks:
+  - id: P1-DOCS
+    type: docs
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: weak
+    expected_duration: short
+    status: planned
+  - id: P1-WEAK
+    type: feature
+    ambiguity: low
+    risk: low
+    context_size: medium
+    write_surface: medium
+    verification_strength: weak
+    expected_duration: medium
+    status: planned
+`;
+
+describe("runTaskPrepare — recommendation observability (regression)", () => {
+  it("planned task carries a non-null recommendation with tier/effort/modelId present", async () => {
+    await setupProject(dir, { phaseYaml: PHASE_YAML_RECO });
+    const result = await runTaskPrepare({
+      cwd: dir,
+      taskId: "P1-DOCS",
+      agent: "claude-code",
+    });
+    expect(result.recommendation).not.toBeNull();
+    const rec = result.recommendation!;
+    expect(typeof rec.tier).toBe("string");
+    expect(typeof rec.effort).toBe("string");
+    expect(typeof rec.modelId).toBe("string");
+    expect(rec.modelId.length).toBeGreaterThan(0);
+  });
+
+  it("a small/low-risk docs task resolves to cheap_mechanical (haiku) even with weak verification", async () => {
+    await setupProject(dir, { phaseYaml: PHASE_YAML_RECO });
+    const result = await runTaskPrepare({
+      cwd: dir,
+      taskId: "P1-DOCS",
+      agent: "claude-code",
+    });
+    const rec = result.recommendation!;
+    expect(rec.tier).toBe("cheap_mechanical");
+    expect(rec.modelId).toBe("claude-haiku-4-5");
+  });
+
+  it("weak verification alone does NOT escalate a balanced task to highest_reasoning", async () => {
+    await setupProject(dir, { phaseYaml: PHASE_YAML_RECO });
+    const result = await runTaskPrepare({
+      cwd: dir,
+      taskId: "P1-WEAK",
+      agent: "claude-code",
+    });
+    const rec = result.recommendation!;
+    expect(rec.tier).not.toBe("highest_reasoning");
+    expect(rec.tier).toBe("balanced_coding");
   });
 });
 
