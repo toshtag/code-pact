@@ -1387,6 +1387,92 @@ describe("CLI: phase import (v0.2)", () => {
 });
 
 // ---------------------------------------------------------------------------
+// v1.22+: --scaffold-decisions (RFC §3-D)
+// ---------------------------------------------------------------------------
+
+describe("CLI: --scaffold-decisions (RFC §3-D)", () => {
+  const DRAFT = `phases:
+  - id: P1
+    name: Foundation
+    weight: 12
+    objective: Establish foundation
+    tasks:
+      - id: P1-T1
+        type: feature
+        ambiguity: low
+        risk: low
+        context_size: small
+        write_surface: low
+        verification_strength: weak
+        expected_duration: short
+        status: planned
+        description: needs a decision
+        requires_decision: true
+`;
+
+  async function initEmpty(): Promise<void> {
+    const res = run(["init", "--non-interactive", "--locale", "en-US", "--agent", "claude-code", "--json"]);
+    expect(res.code).toBe(0);
+  }
+
+  it("phase import --scaffold-decisions creates a proposed stub; record-done is then blocked; without the flag nothing is scaffolded", async () => {
+    await initEmpty();
+    await writeFile(join(tmpDir, "draft.yaml"), DRAFT, "utf8");
+
+    // Without the flag: no scaffolding.
+    const noFlag = run(["phase", "import", "draft.yaml", "--json"]);
+    expect(noFlag.code).toBe(0);
+    const noFlagData = JSON.parse(noFlag.stdout) as {
+      data: { scaffolded_decisions: string[]; scaffold_skipped: unknown[] };
+    };
+    expect(noFlagData.data.scaffolded_decisions).toEqual([]);
+    expect(noFlagData.data.scaffold_skipped).toEqual([]);
+
+    // record-done is blocked (no accepted ADR).
+    const blocked = run(["task", "record-done", "P1-T1", "--evidence", "PR #1", "--json"]);
+    expect(blocked.code).toBe(2);
+    expect((JSON.parse(blocked.stdout) as { error: { code: string } }).error.code).toBe(
+      "DECISION_REQUIRED",
+    );
+
+    // With the flag, on a fresh project: stub scaffolded.
+    tmpDir = await mkdtemp(join(tmpdir(), "code-pact-cli-test-"));
+    await initEmpty();
+    await writeFile(join(tmpDir, "draft.yaml"), DRAFT, "utf8");
+    const withFlag = run(["phase", "import", "draft.yaml", "--scaffold-decisions", "--json"]);
+    expect(withFlag.code).toBe(0);
+    const withFlagData = JSON.parse(withFlag.stdout) as {
+      data: { scaffolded_decisions: string[] };
+    };
+    expect(withFlagData.data.scaffolded_decisions).toEqual(["design/decisions/P1-T1.md"]);
+    const stub = await readFile(join(tmpDir, "design", "decisions", "P1-T1.md"), "utf8");
+    expect(stub).toContain("**Status:** proposed");
+
+    // The proposed stub still blocks record-done (status-aware gate).
+    const stillBlocked = run(["task", "record-done", "P1-T1", "--evidence", "PR #1", "--json"]);
+    expect(stillBlocked.code).toBe(2);
+    expect((JSON.parse(stillBlocked.stdout) as { error: { code: string } }).error.code).toBe(
+      "DECISION_REQUIRED",
+    );
+  });
+
+  it("plan adopt --write --scaffold-decisions scaffolds for a requires_decision task", async () => {
+    await initEmpty();
+    await writeFile(join(tmpDir, "plan.yaml"), DRAFT, "utf8");
+    const res = run(["plan", "adopt", "plan.yaml", "--write", "--scaffold-decisions", "--json"]);
+    expect(res.code).toBe(0);
+    const parsed = JSON.parse(res.stdout) as {
+      ok: boolean;
+      data: { import_result: { scaffolded_decisions: string[] } | null };
+    };
+    expect(parsed.ok).toBe(true);
+    expect(parsed.data.import_result?.scaffolded_decisions).toEqual([
+      "design/decisions/P1-T1.md",
+    ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // v0.2: cursor adapter (experimental)
 // ---------------------------------------------------------------------------
 
