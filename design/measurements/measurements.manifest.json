@@ -1,8 +1,8 @@
 {
   "harness_version": "0.2.0",
-  "input_git_sha": "7e70114311b46bb11e84609b8a8f37b09e896cce",
-  "code_pact_cli_version": "1.20.0",
-  "generated_at": "2026-05-27",
+  "input_git_sha": "26a4c03c700a8d39eaaf688b7d7013c31defcd82",
+  "code_pact_cli_version": "1.21.0",
+  "generated_at": "2026-05-28",
   "csv_files": [
     "pack-size-by-task.csv",
     "verify-success-rate.csv",
