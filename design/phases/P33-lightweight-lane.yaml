@@ -4,7 +4,7 @@ name: Lightweight lane + recommendation consumption — let code-pact steer how 
 weight: 8
 confidence: high
 risk: medium
-status: planned
+status: done
 objective: >
   `task prepare` / `recommend` already return a correct execution profile
 
@@ -192,7 +192,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
     description: |
       Version-gated conformance checks + docs + CHANGELOG.
 
