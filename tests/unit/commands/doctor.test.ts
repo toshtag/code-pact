@@ -587,7 +587,7 @@ describe("runDoctor — CONTROL_PLANE_NOT_DRIVEN", () => {
   const setProgress = (yaml: string) =>
     writeFile(join(dir, ".code-pact", "state", "progress.yaml"), yaml, "utf8");
 
-  const find = (r: { issues: { code: string }[] }) =>
+  const find = (r: Awaited<ReturnType<typeof runDoctor>>) =>
     r.issues.find((i) => i.code === "CONTROL_PLANE_NOT_DRIVEN");
 
   it("fires (warning, advisory) when scaffold has a real task, progress is empty, and git is dirty", async () => {

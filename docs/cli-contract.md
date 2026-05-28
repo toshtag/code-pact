@@ -224,6 +224,7 @@ Issue-level codes emitted by `doctor` / `validate` for general project health.
 | `CONSTITUTION_PLACEHOLDER` | warning | `design/constitution.md` still contains the template edit hint |
 | `ADAPTER_STALE` | warning | An enabled agent profile has no `model_version` set |
 | `STALE_CONTEXT` | warning | A cached context file is older than its source design files |
+| `CONTROL_PLANE_NOT_DRIVEN` (v1.25+) | warning | The scaffold exists but isn't being driven. Fires only when **all** of: a non-TUTORIAL task is planned; `progress.yaml` has no `started`/`done` event for a non-TUTORIAL task (tutorial usage does not count); and git shows uncommitted working changes (excluding code-pact's own runtime state). **git-unavailable is a silent skip** (never an error); a broken/unparseable `progress.yaml` is also skipped (the existing `INVALID_YAML`/`SCHEMA_ERROR` reports that). Advisory: `severity: warning`, never affects doctor's exit. Silence via `.code-pact/doctor.yaml` → `disabled_checks: [CONTROL_PLANE_NOT_DRIVEN]` |
 
 ### Adapter diagnostic codes
 
@@ -1543,6 +1544,7 @@ reports plan quality issues:
 | `CONSTITUTION_PLACEHOLDER` | warning | `design/constitution.md` still contains the initial template edit hint |
 | `EMPTY_OBJECTIVE` | error | A phase `objective` is blank or fewer than 10 characters |
 | `ADAPTER_STALE` | warning | An enabled agent profile has no `model_version` set |
+| `CONTROL_PLANE_NOT_DRIVEN` (v1.25+) | warning | Scaffold adopted but not driven — a non-TUTORIAL task is planned, `progress.yaml` has no non-TUTORIAL `started`/`done` event, and git shows uncommitted changes. git-unavailable (or a broken `progress.yaml`) → silent skip. Advisory only |
 
 Individual checks can be suppressed per project without touching source code by creating
 `.code-pact/doctor.yaml`:
