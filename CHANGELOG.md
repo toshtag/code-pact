@@ -13,6 +13,8 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+## [1.24.0] — 2026-05-28
+
 ### `ADR_STATUS_UNRECOGNIZED` lint advisory
 
 The status-aware gate (v1.22) treats an explicit-but-unrecognized ADR status word (e.g. a typo `**Status:** acceptd`) as `unknown_status` — it does **not** resolve — which is safe but confusing: a decision stays blocked with no obvious cause. This surfaces the typo.
