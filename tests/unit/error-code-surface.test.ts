@@ -91,6 +91,7 @@ const KNOWN_CODES: Record<string, "public" | "plan" | "doctor" | "adapter" | "in
 
   // Plan clarify/readiness advisories added in P31 (all affects_exit: false,
   // surfaced under `plan lint --include-quality`).
+  ADR_STATUS_UNRECOGNIZED: "plan",
   PHASE_CONFIDENCE_LOW: "plan",
   TASK_DECISION_UNRESOLVED: "plan",
   TASK_DESCRIPTION_MISSING: "plan",

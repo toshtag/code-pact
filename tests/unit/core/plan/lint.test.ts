@@ -302,6 +302,70 @@ ${taskLines.map((l) => `    ${l}`).join("\n")}
     expect(issue?.details?.source).toBe("phase");
   });
 
+  async function writeAdrContent(name: string, content: string): Promise<void> {
+    await mkdir(join(cwd, "design", "decisions"), { recursive: true });
+    await writeFile(join(cwd, "design", "decisions", name), content, "utf8");
+  }
+
+  it("reports ADR_STATUS_UNRECOGNIZED for a typo'd bold-line status", async () => {
+    await writeRoadmap(ROADMAP);
+    await writePhase("P1.yaml", phaseDoc({}));
+    await writeAdrContent("some-adr.md", "**Status:** acceptd\n");
+
+    const result = await runLint({ cwd, includeQuality: true });
+    const issue = result.issues.find((i) => i.code === "ADR_STATUS_UNRECOGNIZED");
+    expect(issue).toBeDefined();
+    expect(issue?.affects_exit).toBe(false);
+    expect(issue?.file).toBe("design/decisions/some-adr.md");
+    expect(issue?.details?.status).toBe("acceptd");
+    expect(issue?.details?.status_source).toBe("bold-line");
+  });
+
+  it("reports ADR_STATUS_UNRECOGNIZED with status_source frontmatter (frontmatter wins)", async () => {
+    await writeRoadmap(ROADMAP);
+    await writePhase("P1.yaml", phaseDoc({}));
+    await writeAdrContent("fm-adr.md", "---\nstatus: acceptd\n---\n\n**Status:** accepted\n");
+
+    const result = await runLint({ cwd, includeQuality: true });
+    const issue = result.issues.find((i) => i.code === "ADR_STATUS_UNRECOGNIZED");
+    expect(issue?.details?.status).toBe("acceptd");
+    expect(issue?.details?.status_source).toBe("frontmatter");
+  });
+
+  it("does NOT report ADR_STATUS_UNRECOGNIZED for accepted / proposed / no-status / empty ADRs", async () => {
+    await writeRoadmap(ROADMAP);
+    await writePhase("P1.yaml", phaseDoc({}));
+    await writeAdrContent("a.md", "**Status:** accepted\n");
+    await writeAdrContent("b.md", "**Status:** proposed\n");
+    await writeAdrContent("c.md", "# Decision\nbody\n");
+    await writeAdrContent("d.md", "\n");
+
+    const result = await runLint({ cwd, includeQuality: true });
+    expect(result.issues.some((i) => i.code === "ADR_STATUS_UNRECOGNIZED")).toBe(false);
+  });
+
+  it("does NOT report ADR_STATUS_UNRECOGNIZED when includeQuality is off", async () => {
+    await writeRoadmap(ROADMAP);
+    await writePhase("P1.yaml", phaseDoc({}));
+    await writeAdrContent("some-adr.md", "**Status:** acceptd\n");
+
+    const result = await runLint({ cwd });
+    expect(result.issues.some((i) => i.code === "ADR_STATUS_UNRECOGNIZED")).toBe(false);
+  });
+
+  it("a gated task pointing at a typo'd ADR fires BOTH TASK_DECISION_UNRESOLVED and ADR_STATUS_UNRECOGNIZED", async () => {
+    await writeRoadmap(ROADMAP);
+    await writePhase(
+      "P1.yaml",
+      phaseDoc({ taskLines: ["description: x", "requires_decision: true"] }),
+    );
+    await writeAdrContent("P1-T1-rfc.md", "**Status:** acceptd\n");
+
+    const codes = (await runLint({ cwd, includeQuality: true })).issues.map((i) => i.code);
+    expect(codes).toContain("TASK_DECISION_UNRESOLVED");
+    expect(codes).toContain("ADR_STATUS_UNRECOGNIZED");
+  });
+
   it("reports PHASE_CONFIDENCE_LOW for confidence: low, not for medium", async () => {
     await writeRoadmap(ROADMAP);
     await writePhase("P1.yaml", phaseDoc({ confidence: "low" }));

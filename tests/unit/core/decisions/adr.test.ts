@@ -11,6 +11,7 @@ import {
   classifyAdr,
   resolveDecisionGate,
   makeDecisionResolver,
+  classifyDecisionAdrs,
 } from "../../../../src/core/decisions/adr.ts";
 
 describe("hasDecisionAdrForTaskId", () => {
@@ -311,5 +312,61 @@ describe("makeDecisionResolver", () => {
     } finally {
       await rm(cwd, { recursive: true, force: true });
     }
+  });
+});
+
+describe("classifyDecisionAdrs", () => {
+  let cwd: string;
+  beforeEach(async () => {
+    cwd = await mkdtemp(join(tmpdir(), "adr-classify-dir-"));
+  });
+  afterEach(async () => {
+    await rm(cwd, { recursive: true, force: true });
+  });
+  const writeAdr = async (name: string, content: string) => {
+    await mkdir(join(cwd, "design", "decisions"), { recursive: true });
+    await writeFile(join(cwd, "design", "decisions", name), content, "utf8");
+  };
+
+  it("returns [] when design/decisions/ is absent", async () => {
+    expect(await classifyDecisionAdrs(cwd)).toEqual([]);
+  });
+
+  it("classifies each .md with acceptance + status + statusSource", async () => {
+    await writeAdr("accepted.md", "**Status:** accepted (P1, 2026)\n");
+    await writeAdr("proposed.md", "**Status:** proposed\n");
+    await writeAdr("typo.md", "**Status:** acceptd\n");
+    await writeAdr("nostatus.md", "# Decision\nbody\n");
+    await writeAdr("empty.md", "\n");
+
+    const byFile = Object.fromEntries(
+      (await classifyDecisionAdrs(cwd)).map((a) => [a.file, a]),
+    );
+    expect(byFile["design/decisions/accepted.md"]!.acceptance).toBe("accepted");
+    expect(byFile["design/decisions/proposed.md"]!.acceptance).toBe("blocked");
+    expect(byFile["design/decisions/typo.md"]).toMatchObject({
+      acceptance: "unknown_status",
+      status: "acceptd",
+      statusSource: "bold-line",
+    });
+    expect(byFile["design/decisions/nostatus.md"]!.acceptance).toBe("accepted");
+    expect(byFile["design/decisions/empty.md"]!.acceptance).toBe("empty");
+  });
+
+  it("frontmatter typo wins over an accepted bold line", async () => {
+    await writeAdr("fm.md", "---\nstatus: acceptd\n---\n\n**Status:** accepted\n");
+    const [entry] = await classifyDecisionAdrs(cwd);
+    expect(entry).toMatchObject({
+      acceptance: "unknown_status",
+      status: "acceptd",
+      statusSource: "frontmatter",
+    });
+  });
+
+  it("ignores non-.md entries", async () => {
+    await writeAdr("real.md", "**Status:** accepted\n");
+    await writeAdr(".DS_Store", "binary-ish\n");
+    const files = (await classifyDecisionAdrs(cwd)).map((a) => a.file);
+    expect(files).toEqual(["design/decisions/real.md"]);
   });
 });

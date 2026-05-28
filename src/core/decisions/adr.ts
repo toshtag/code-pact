@@ -314,3 +314,42 @@ export async function makeDecisionResolver(
       resolveWith(taskId, decisionRefs, dir, cachedRead),
   };
 }
+
+/**
+ * Classify every ADR markdown file in `design/decisions/`. Reads each `.md`
+ * entry and runs the pure {@link classifyAdr}, returning per-file acceptance
+ * plus the parsed status word and its source (frontmatter wins over the bold
+ * `**Status:**` line). Powers the `ADR_STATUS_UNRECOGNIZED` lint advisory.
+ * Non-`.md` entries (e.g. `.DS_Store`) are ignored; returns `[]` when the
+ * decisions directory is absent.
+ */
+export async function classifyDecisionAdrs(cwd: string): Promise<
+  {
+    file: string;
+    acceptance: AdrAcceptance;
+    status: string | null;
+    statusSource: AdrStatus["source"];
+  }[]
+> {
+  const out: {
+    file: string;
+    acceptance: AdrAcceptance;
+    status: string | null;
+    statusSource: AdrStatus["source"];
+  }[] = [];
+  for (const name of await readDecisionAdrFiles(cwd)) {
+    if (!name.endsWith(".md")) continue;
+    const content = await readFile(
+      join(cwd, "design", "decisions", name),
+      "utf8",
+    );
+    const { acceptance, status } = classifyAdr(content);
+    out.push({
+      file: `design/decisions/${name}`,
+      acceptance,
+      status: status.word,
+      statusSource: status.source,
+    });
+  }
+  return out;
+}
