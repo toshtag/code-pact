@@ -92,3 +92,6 @@ phases:
   - id: P33
     path: design/phases/P33-lightweight-lane.yaml
     weight: 8
+  - id: P34
+    path: design/phases/P34-ci-branch-drift.yaml
+    weight: 8

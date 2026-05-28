@@ -13,6 +13,12 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+### CI branch-drift detection (P34)
+
+**Internal**
+
+- **P34-T0** — registers the P34 phase. `doctor` / `validate` will gain a `--base-ref <ref>` flag and a new advisory `CONTROL_PLANE_BRANCH_NOT_DRIVEN` that compares the PR branch diff (merge-base..HEAD) and fires when real, non-excluded files changed but no **known** non-TUTORIAL task got a `started`/`done` event on the branch — catching "code changed, control plane not driven" in PR CI (the working-tree `CONTROL_PLANE_NOT_DRIVEN` can't, since CI checkouts are clean). Advisory by default; `validate --strict --base-ref origin/main` gates. Team-declared `exclude_globs` (default empty); silent skip when `progress.yaml` is not git-tracked. No `ci scaffold` command. Design in `design/decisions/ci-branch-drift-rfc.md`.
+
 ### Failure clarity for `task complete` / `task finalize` (P32)
 
 When a `task complete` / `task finalize` failure occurred, the root cause already existed in the result but the surfaces an agent reads hid it — human output was a single generic line and JSON only carried `data.verify.checks`. An agent had to re-run the lower-level `verify` to decide its next action. This surfaces the cause and the next action at the point of failure. Design in `design/decisions/failure-clarity-rfc.md`.
