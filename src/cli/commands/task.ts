@@ -42,6 +42,11 @@ import {
   VerificationStrength,
   ExpectedDuration,
 } from "../../core/schemas/task.ts";
+import {
+  buildFailureSummaryFromChecks,
+  type FailureCheckLike,
+} from "../../core/failure/failure-summary.ts";
+import { renderFailureSummaryLines } from "../render/failure-summary.ts";
 
 export async function cmdTask(argv: string[], locale: Locale, globalJson: boolean): Promise<number> {
   const subcommand = argv[0];
@@ -837,18 +842,27 @@ async function cmdTaskComplete(
 
     if (code === "VERIFICATION_FAILED") {
       const checks =
-        (err as NodeJS.ErrnoException & { checks?: unknown[] }).checks ?? [];
+        (err as NodeJS.ErrnoException & { checks?: FailureCheckLike[] }).checks ?? [];
+      const summary = buildFailureSummaryFromChecks(checks, taskId);
       const msg = m.task.complete.verificationFailed(taskId);
       if (json) {
         process.stdout.write(
           `${JSON.stringify({
             ok: false,
             error: { code: "VERIFICATION_FAILED", message: msg },
-            data: { task_id: taskId, verify: { ok: false, checks } },
+            data: {
+              task_id: taskId,
+              verify: { ok: false, checks },
+              failed_checks: summary.failed_checks,
+              first_failure: summary.first_failure,
+              suggested_next_command: summary.suggested_next_command,
+            },
           })}\n`,
         );
       } else {
         process.stderr.write(`${msg}\n`);
+        const lines = renderFailureSummaryLines(m.task.failure, summary);
+        if (lines.length > 0) process.stderr.write(`${lines.join("\n")}\n`);
       }
       return 1;
     }

@@ -265,6 +265,11 @@ export const messages = {
       invalidTransition: (taskId: string, current: string): string =>
         `Task "${taskId}" is ${current}. Run \`code-pact task resume ${taskId}\` before completing.`,
     },
+    failure: {
+      cause: (name: string, reason: string): string => `  cause: ${name} — ${reason}`,
+      otherChecks: (names: string[]): string => `  also failed: ${names.join(", ")}`,
+      rerunAfterFixing: (cmd: string): string => `  rerun after fixing: ${cmd}`,
+    },
     recordDone: {
       evidenceRequired:
         "task record-done requires --evidence \"<text>\" describing the externally-completed work.",
