@@ -86,3 +86,6 @@ phases:
   - id: P31
     path: design/phases/P31-deterministic-roadmap-stabilization.yaml
     weight: 8
+  - id: P32
+    path: design/phases/P32-failure-clarity.yaml
+    weight: 8

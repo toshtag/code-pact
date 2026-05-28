@@ -11,6 +11,14 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ---
 
+## [Unreleased]
+
+### Failure clarity for `task complete` / `task finalize` (P32)
+
+**Internal**
+
+- **P32-T0** — registers the P32 "failure clarity" phase. `task complete` / `task finalize` failures will gain three additive `data` fields (`failed_checks`, `first_failure`, `suggested_next_command`) plus richer human output, so an agent can decide its next action without re-running the lower-level `verify`. No new error codes; `data.verify.checks` / `data.write_audit` are unchanged. Design in `design/decisions/failure-clarity-rfc.md`.
+
 ## [1.25.0] — 2026-05-28
 
 ### `CONTROL_PLANE_NOT_DRIVEN` doctor advisory (RFC §2)
