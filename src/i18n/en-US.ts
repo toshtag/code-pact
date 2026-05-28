@@ -265,6 +265,20 @@ export const messages = {
       invalidTransition: (taskId: string, current: string): string =>
         `Task "${taskId}" is ${current}. Run \`code-pact task resume ${taskId}\` before completing.`,
     },
+    recordDone: {
+      evidenceRequired:
+        "task record-done requires --evidence \"<text>\" describing the externally-completed work.",
+      decisionRequired: (taskId: string): string =>
+        `Task "${taskId}" requires a decision ADR before it can be marked done.`,
+      alreadyDone: (taskId: string): string =>
+        `Task "${taskId}" already has a done event. progress.yaml was not modified (idempotent).`,
+      success: (taskId: string, agent: string): string =>
+        `Recorded external done event for "${taskId}" (agent: ${agent}).`,
+      dryRun: (taskId: string): string =>
+        `Dry run: would append external done event for "${taskId}". progress.yaml was not modified.`,
+      invalidTransition: (taskId: string, current: string): string =>
+        `Task "${taskId}" is ${current}. Run \`code-pact task resume ${taskId}\` before recording done.`,
+    },
     finalize: {
       taskNotFound: (taskId: string): string =>
         `Task "${taskId}" not found in any phase.`,
