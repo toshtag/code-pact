@@ -31,6 +31,35 @@ the *why* behind the code — the user-facing *how* lives in [`docs/`](../../doc
 | — | [Deterministic roadmap stabilization](deterministic-roadmap-stabilization-rfc.md) | Made AI-assisted roadmap generation reproducible. |
 | — | [Beginner-friendly CLI aliases](cli-alias-ux-rfc.md) | Added additive aliases `task next` / `phase next` / `task reconcile` / `plan import` (thin sugar to the canonical handlers). The `dogfood.md` rename stays deferred. |
 
+## ADR status convention
+
+Each ADR opens with a status line on the second line of the file:
+
+```
+# <RFC title>
+
+**Status:** accepted (<phase or scope>, <YYYY-MM>)
+```
+
+YAML frontmatter is also recognized (`status: accepted` between `---` delimiters at the very top); when both are present, the frontmatter wins.
+
+The status word governs the [decision gate](../../docs/cli-contract.md#error-codes) that protects `requires_decision` tasks (since v1.22, RFC §3-C):
+
+| Word | Gate verdict |
+| --- | --- |
+| `accepted` | resolves the gate |
+| `proposed` / `draft` / `rejected` / `superseded` | does **not** resolve |
+| empty file | does **not** resolve |
+| explicit unknown word (e.g. a typo) | does **not** resolve |
+| **no status line** (non-empty body) | resolves as accepted — the only lenient case, for backward compat with projects that pre-date status-aware parsing |
+
+Resolution chooses one of two paths:
+
+- **`task.decision_refs` (explicit references)** — every referenced ADR must be `accepted`. A single `proposed` / missing / empty / unknown ref fails the gate. This is the strong contract.
+- **Filename scan over `design/decisions/`** (no `decision_refs`) — the gate resolves if **any** `.md` whose filename contains the task id is accepted. The any-accepted-wins rule preserves the substring-collision compat (e.g. `P1-T1` also matches `P1-T10-*.md`) that has shipped since v0.x.
+
+When a decision is intentionally not yet settled, leave the ADR at `proposed`. `plan lint --include-quality` surfaces `TASK_DECISION_UNRESOLVED` early; `verify` / `task complete` / `task record-done` block completion until the status is flipped to `accepted`.
+
 ## Rules
 
 Enforcement rules referenced by the CLI live alongside the decisions:

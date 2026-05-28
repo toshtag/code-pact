@@ -22,10 +22,7 @@ import {
   detectTaskAcceptanceRefNotFound,
 } from "./checks.ts";
 import { loadProtectedPaths } from "../rules/protected-paths.ts";
-import {
-  hasDecisionAdrForTaskId,
-  readDecisionAdrFiles,
-} from "../decisions/adr.ts";
+import { makeDecisionResolver } from "../decisions/adr.ts";
 import type { PhaseEntry, PlanState } from "./state.ts";
 import { collectPlanArtifacts } from "./state.ts";
 import type { PlanIssue } from "./shared.ts";
@@ -182,25 +179,32 @@ async function detectUnresolvedDecision(
   phases: PhaseEntry[],
 ): Promise<PlanIssue[]> {
   const issues: PlanIssue[] = [];
-  // Read design/decisions/ once for the whole lint run.
-  const adrEntries = await readDecisionAdrFiles(cwd);
+  // Read design/decisions/ once and memoize file reads across the N
+  // requires_decision tasks. The resolver is shared with verify/record-done
+  // (same parseAdrStatus + classifyAdr + matchesTaskId), so what counts as
+  // "resolved" cannot diverge.
+  const resolver = await makeDecisionResolver(cwd);
   for (const { phase, ref } of phases) {
     for (const task of phase.tasks ?? []) {
       const requiresDecision =
         task.requires_decision === true || phase.requires_decision === true;
       if (!requiresDecision) continue;
-      if (hasDecisionAdrForTaskId(adrEntries, task.id)) continue;
+      const res = await resolver.resolve(task.id, task.decision_refs);
+      if (res.resolved) continue;
       issues.push({
         code: "TASK_DECISION_UNRESOLVED",
         severity: "warning",
         affects_exit: false,
-        message: `Task "${task.id}" requires a decision but has no ADR in design/decisions/ — add one (a .md whose name includes the task id) before implementation; verify will block completion until it exists.`,
+        message: `Task "${task.id}" requires a decision that is not resolved: ${res.reason}. Add or accept an ADR (verify will block completion until it resolves).`,
         file: ref.path,
         phase_id: phase.id,
         task_id: task.id,
         path: "requires_decision",
         details: {
           source: task.requires_decision === true ? "task" : "phase",
+          via: res.via,
+          reason: res.reason,
+          considered: res.considered,
         },
       });
     }

@@ -905,7 +905,7 @@ describe("CLI: task record-done (v1.21)", () => {
     expect(parsed.error.code).toBe("DECISION_REQUIRED");
     expect(parsed.data).toBeDefined();
     expect(parsed.data!.task_id).toBe("P1-T1");
-    expect(parsed.data!.current_resolution).toBe("file-presence-by-task-id");
+    expect(parsed.data!.current_resolution).toBe("status-aware");
     expect(parsed.data!.expected_pattern).toBe("design/decisions/*P1-T1*.md");
     expect(parsed.data!.decision_check.ok).toBe(false);
 

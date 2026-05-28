@@ -13,6 +13,23 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+### Status-aware ADR decision gate (RFC §3-C)
+
+The `requires_decision` gate used by `verify` / `task complete` / `task record-done` / `plan lint --include-quality` now actually reads the ADR's status, not just its filename. Before this, any `.md` whose name contained the task id resolved the gate — including a `proposed` draft or an empty stub. The gate's whole purpose (a human has *accepted* the design decision) was therefore not enforced.
+
+**Changed**
+
+- **Status-aware resolution.** A decision resolves only when its ADR's status is `accepted`. The status is read from YAML frontmatter `status:` (preferred) or the `**Status:** <word>` markdown bold line. `proposed` / `draft` / `rejected` / `superseded`, empty files, and explicit unknown statuses (e.g. typos like `acceptd`) do **not** resolve.
+- **Lenient backward compat.** A non-empty ADR with **no** status line still resolves as accepted — the only lenient case — so projects that pre-date status-aware parsing keep working.
+- **`task.decision_refs` are now consulted by the gate** with **all-must-be-accepted** semantics: a single non-accepted, missing, empty, or unknown-status ref fails the gate. The fallback filename scan over `design/decisions/` keeps **any-accepted-wins** to preserve the substring-collision compat (`P1-T1` also matches `P1-T10-*.md`).
+- **`DECISION_REQUIRED.data` now carries** `via` (`"decision_refs"` or `"filename-scan"`), `considered[]` (per-ADR `{path, status, accepted, acceptance}` where `acceptance` ∈ `accepted | blocked | empty | unknown_status | missing`), and `expected_pattern` only when `via === "filename-scan"`. `current_resolution` is now `"status-aware"`.
+- **`TASK_DECISION_UNRESOLVED`** (advisory, `affects_exit: false`) now fires for a `proposed` / `draft` / `rejected` / `superseded` / empty / unknown-status ADR as well as for a missing one. `details.via` / `details.reason` / `details.considered` carry the resolver verdict.
+- **Single shared resolver.** All four consumers (`verify`, `task complete` via verify, `task record-done`, `plan lint`) route through one `resolveDecisionGate` (with a memoized batch variant for lint), so they cannot diverge on what "resolved" means — the central RFC §3 constraint.
+
+**Internal**
+
+- `dogfood-trust-hardening-rfc.md` flipped to `accepted` for §3-A/B/C and §1; §3-D (auto-generated `proposed` stubs) remains deferred.
+
 ## [1.21.0] — 2026-05-28
 
 ### `task record-done` — an honest path for work completed outside the loop

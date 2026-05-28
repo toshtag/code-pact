@@ -7,6 +7,7 @@ import { appendEvent, loadProgressLog } from "../core/progress/io.ts";
 import { deriveTaskState } from "../core/progress/task-state.ts";
 import { resolveTaskInRoadmap } from "../core/plan/resolve-task.ts";
 import { checkDecision, loadPhase, type CheckResult } from "./verify.ts";
+import type { ConsideredAcceptance } from "../core/decisions/adr.ts";
 
 export type TaskRecordDoneOptions = {
   cwd: string;
@@ -50,12 +51,21 @@ export type TaskRecordDoneResult =
 export type DecisionRequiredData = {
   task_id: string;
   decision_check: CheckResult;
-  /** How the current gate resolves an ADR. Deliberately not status-aware in v1.21. */
-  current_resolution: "file-presence-by-task-id";
-  /** The filename pattern the gate looks for. */
-  expected_pattern: string;
-  /** task.decision_refs, surfaced as informational only — the gate does NOT use them. */
+  /** How the gate resolves an ADR. Status-aware since v1.22 (RFC §3-C). */
+  current_resolution: "status-aware";
+  /** Which source drove resolution: explicit `decision_refs` or the filename scan. */
+  via: "decision_refs" | "filename-scan";
+  /** Every ADR the gate considered — with its parsed status and verdict. */
+  considered: {
+    path: string;
+    status: string | null;
+    accepted: boolean;
+    acceptance: ConsideredAcceptance;
+  }[];
+  /** `task.decision_refs`, surfaced as informational input. */
   declared_decision_refs: string[];
+  /** The filename glob the scan looked for. Present only when `via === "filename-scan"`. */
+  expected_pattern?: string;
 };
 
 async function loadProject(cwd: string): Promise<Project> {
@@ -141,20 +151,36 @@ export async function runTaskRecordDone(
   // not call assertTransition here (planned→done is a command-layer shortcut).
 
   // ---- Step 6: decision gate (same gate as verify, no verification commands) ----
+  // Resolve once: the same checkDecision call drives both the CheckResult and
+  // the structured data, so they cannot drift apart between two reads of the
+  // filesystem.
   const phase = await loadPhase(cwd, phasePath);
   const task = phase.tasks!.find((t) => t.id === taskId)!;
-  const decisionCheck = await checkDecision(cwd, phase, task);
-  if (!decisionCheck.ok) {
+  const { check, resolution } = await checkDecision(cwd, phase, task);
+  if (!check.ok) {
     const err = new Error(
       `Task "${taskId}" requires a decision ADR before it can be marked done.`,
     );
     (err as NodeJS.ErrnoException).code = "DECISION_REQUIRED";
+    // resolution is non-null whenever check.ok is false: checkDecision only
+    // skips resolution when neither phase nor task has requires_decision, in
+    // which case check.ok is true and we never enter this branch.
+    const res = resolution!;
     const data: DecisionRequiredData = {
       task_id: taskId,
-      decision_check: decisionCheck,
-      current_resolution: "file-presence-by-task-id",
-      expected_pattern: `design/decisions/*${taskId}*.md`,
+      decision_check: check,
+      current_resolution: "status-aware",
+      via: res.via,
+      considered: res.considered.map((c) => ({
+        path: c.path,
+        status: c.status,
+        accepted: c.accepted,
+        acceptance: c.acceptance,
+      })),
       declared_decision_refs: task.decision_refs ?? [],
+      ...(res.via === "filename-scan"
+        ? { expected_pattern: `design/decisions/*${taskId}*.md` }
+        : {}),
     };
     (err as NodeJS.ErrnoException & { data?: DecisionRequiredData }).data = data;
     throw err;

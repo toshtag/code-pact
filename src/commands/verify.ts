@@ -1,4 +1,4 @@
-import { readFile, readdir } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { parse as parseYaml } from "yaml";
@@ -6,7 +6,10 @@ import { Roadmap } from "../core/schemas/roadmap.ts";
 import { Phase } from "../core/schemas/phase.ts";
 import { Task } from "../core/schemas/task.ts";
 import { ProgressLog } from "../core/schemas/progress-event.ts";
-import { hasDecisionAdrForTaskId } from "../core/decisions/adr.ts";
+import {
+  resolveDecisionGate,
+  type DecisionResolution,
+} from "../core/decisions/adr.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -170,39 +173,36 @@ async function checkProgressEvent(
   return { name: "progress_event", ok: true };
 }
 
+export type DecisionGateResult = {
+  check: CheckResult;
+  /** The underlying resolution, or null when the task has no decision gate. */
+  resolution: DecisionResolution | null;
+};
+
+/** Project a status-aware resolution onto the verify CheckResult shape. */
+export function decisionResolutionToCheck(res: DecisionResolution): CheckResult {
+  return res.resolved
+    ? { name: "decision", ok: true }
+    : { name: "decision", ok: false, reason: res.reason };
+}
+
+/**
+ * The single decision gate. Routes through the shared status-aware resolver
+ * (RFC §3-C) so verify, task complete, task record-done, and plan lint cannot
+ * diverge on what "resolved" means. Returns both the CheckResult (for
+ * runVerify) and the full resolution (so record-done can surface `considered`
+ * / `via` without re-resolving).
+ */
 export async function checkDecision(
   cwd: string,
   phase: Phase,
   task: Task,
-): Promise<CheckResult> {
-  const taskId = task.id;
+): Promise<DecisionGateResult> {
   if (!phase.requires_decision && !task.requires_decision) {
-    return { name: "decision", ok: true };
+    return { check: { name: "decision", ok: true }, resolution: null };
   }
-
-  const decisionsDir = join(cwd, "design", "decisions");
-  let entries: string[];
-  try {
-    entries = await readdir(decisionsDir);
-  } catch {
-    return {
-      name: "decision",
-      ok: false,
-      reason: `design/decisions/ does not exist but requires_decision is true`,
-    };
-  }
-
-  // Shared predicate with plan lint's TASK_DECISION_UNRESOLVED advisory so
-  // verify and lint never diverge on what "resolved" means. The dir-existence
-  // distinction above is kept verify-side for its more specific reason.
-  if (!hasDecisionAdrForTaskId(entries, taskId)) {
-    return {
-      name: "decision",
-      ok: false,
-      reason: `No ADR found for task "${taskId}" in design/decisions/`,
-    };
-  }
-  return { name: "decision", ok: true };
+  const resolution = await resolveDecisionGate(cwd, task.id, task.decision_refs);
+  return { check: decisionResolutionToCheck(resolution), resolution };
 }
 
 function checkTaskStatus(phase: Phase, taskId: string): CheckResult {
@@ -259,7 +259,7 @@ export async function runVerify(opts: VerifyOptions): Promise<VerifyResult> {
   // skipConsistencyChecks: true so these are the only checks evaluated.
   const checks: CheckResult[] = [
     await checkCommands(phase.verification.commands, cwd, dryRun),
-    await checkDecision(cwd, phase, task),
+    (await checkDecision(cwd, phase, task)).check,
   ];
 
   // State-consistency checks: only meaningful AFTER the task has been

@@ -391,7 +391,7 @@ describe("runTaskRecordDone — evidence validation", () => {
 // ---------------------------------------------------------------------------
 
 describe("runTaskRecordDone — decision gate", () => {
-  it("requires_decision with no ADR → DECISION_REQUIRED with structured data, progress byte-identical", async () => {
+  it("requires_decision with no ADR → DECISION_REQUIRED, status-aware data, progress byte-identical", async () => {
     await setupProject(dir, { requiresDecision: true, hasAdr: false });
     const before = await readFile(
       join(dir, ".code-pact", "state", "progress.yaml"),
@@ -406,8 +406,10 @@ describe("runTaskRecordDone — decision gate", () => {
       expect(e.code).toBe("DECISION_REQUIRED");
       expect(e.data).toBeDefined();
       expect(e.data!.task_id).toBe("P1-T1");
-      expect(e.data!.current_resolution).toBe("file-presence-by-task-id");
+      expect(e.data!.current_resolution).toBe("status-aware");
+      expect(e.data!.via).toBe("filename-scan");
       expect(e.data!.expected_pattern).toBe("design/decisions/*P1-T1*.md");
+      expect(e.data!.considered).toEqual([]);
       const check = e.data!.decision_check as { name: string; ok: boolean; reason?: string };
       expect(check.name).toBe("decision");
       expect(check.ok).toBe(false);
@@ -421,7 +423,9 @@ describe("runTaskRecordDone — decision gate", () => {
     expect(after).toBe(before);
   });
 
-  it("requires_decision with a matching ADR → succeeds", async () => {
+  it("requires_decision with a no-status ADR → succeeds (backward compat)", async () => {
+    // setupProject writes a body-only "# Decision\nSome decision body.\n" — no
+    // **Status:** line. Under the lenient rule this still resolves as accepted.
     await setupProject(dir, { requiresDecision: true, hasAdr: true });
     const result = await runTaskRecordDone({
       cwd: dir,
@@ -431,6 +435,124 @@ describe("runTaskRecordDone — decision gate", () => {
     expect(result.kind).toBe("done");
     if (result.kind !== "done") throw new Error("type narrow");
     expect(result.event.source).toBe("external");
+  });
+
+  it("requires_decision with a PROPOSED ADR → DECISION_REQUIRED; considered shows acceptance=blocked", async () => {
+    await setupProject(dir, { requiresDecision: true });
+    await mkdir(join(dir, "design", "decisions"), { recursive: true });
+    await writeFile(
+      join(dir, "design", "decisions", "P1-T1-rfc.md"),
+      "**Status:** proposed (unscheduled, 2026-05)\n",
+      "utf8",
+    );
+
+    try {
+      await runTaskRecordDone({ cwd: dir, taskId: "P1-T1", evidence: ["x"] });
+      throw new Error("should have thrown");
+    } catch (err: unknown) {
+      const e = err as Error & { code?: string; data?: Record<string, unknown> };
+      expect(e.code).toBe("DECISION_REQUIRED");
+      expect(e.data!.via).toBe("filename-scan");
+      expect(e.data!.expected_pattern).toBe("design/decisions/*P1-T1*.md");
+      const considered = e.data!.considered as Array<{
+        path: string;
+        status: string | null;
+        accepted: boolean;
+        acceptance: string;
+      }>;
+      expect(considered).toHaveLength(1);
+      expect(considered[0]!.acceptance).toBe("blocked");
+      expect(considered[0]!.status).toBe("proposed");
+      expect(considered[0]!.accepted).toBe(false);
+    }
+  });
+
+  it("requires_decision with EXPLICIT decision_refs (accepted + proposed) → DECISION_REQUIRED via decision_refs, no expected_pattern", async () => {
+    // Same fixture, but with task.decision_refs set in the phase YAML, plus
+    // one accepted + one proposed ref. all-must-be-accepted → unresolved.
+    await mkdir(join(dir, ".code-pact", "state"), { recursive: true });
+    await mkdir(join(dir, "design", "phases"), { recursive: true });
+    await mkdir(join(dir, "design", "decisions"), { recursive: true });
+    await writeFile(
+      join(dir, ".code-pact", "project.yaml"),
+      "name: x\nversion: 0.1.0\nlocale: en-US\ndefault_agent: claude-code\nagents:\n  - name: claude-code\n    profile: agent-profiles/claude-code.yaml\n    enabled: true\n",
+      "utf8",
+    );
+    await writeFile(
+      join(dir, ".code-pact", "state", "progress.yaml"),
+      "events: []\n",
+      "utf8",
+    );
+    await writeFile(
+      join(dir, "design", "roadmap.yaml"),
+      "phases:\n  - id: P1\n    path: design/phases/P1-foundation.yaml\n    weight: 12\n",
+      "utf8",
+    );
+    await writeFile(
+      join(dir, "design", "phases", "P1-foundation.yaml"),
+      [
+        "id: P1",
+        "name: F",
+        "weight: 12",
+        "confidence: high",
+        "risk: low",
+        "status: planned",
+        "objective: test",
+        "definition_of_done:",
+        "  - tests pass",
+        "verification:",
+        "  commands:",
+        "    - echo ok",
+        "tasks:",
+        "  - id: P1-T1",
+        "    type: feature",
+        "    ambiguity: low",
+        "    risk: low",
+        "    context_size: small",
+        "    write_surface: low",
+        "    verification_strength: weak",
+        "    expected_duration: short",
+        "    status: planned",
+        "    requires_decision: true",
+        "    decision_refs:",
+        "      - design/decisions/accepted-base.md",
+        "      - design/decisions/proposed-risky.md",
+      ].join("\n") + "\n",
+      "utf8",
+    );
+    await writeFile(
+      join(dir, "design", "decisions", "accepted-base.md"),
+      "**Status:** accepted (P1, 2026-05)\n",
+      "utf8",
+    );
+    await writeFile(
+      join(dir, "design", "decisions", "proposed-risky.md"),
+      "**Status:** proposed\n",
+      "utf8",
+    );
+
+    try {
+      await runTaskRecordDone({ cwd: dir, taskId: "P1-T1", evidence: ["x"] });
+      throw new Error("should have thrown");
+    } catch (err: unknown) {
+      const e = err as Error & { code?: string; data?: Record<string, unknown> };
+      expect(e.code).toBe("DECISION_REQUIRED");
+      expect(e.data!.via).toBe("decision_refs");
+      // expected_pattern is filename-scan specific and must NOT be present.
+      expect(e.data!.expected_pattern).toBeUndefined();
+      expect(e.data!.declared_decision_refs).toEqual([
+        "design/decisions/accepted-base.md",
+        "design/decisions/proposed-risky.md",
+      ]);
+      const considered = e.data!.considered as Array<{
+        path: string;
+        accepted: boolean;
+        acceptance: string;
+      }>;
+      expect(considered).toHaveLength(2);
+      expect(considered.find((c) => c.path.endsWith("accepted-base.md"))!.accepted).toBe(true);
+      expect(considered.find((c) => c.path.endsWith("proposed-risky.md"))!.acceptance).toBe("blocked");
+    }
   });
 });
 

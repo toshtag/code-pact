@@ -266,6 +266,29 @@ ${taskLines.map((l) => `    ${l}`).join("\n")}
     ).toBe(false);
   });
 
+  it("still reports TASK_DECISION_UNRESOLVED when the ADR exists but is `proposed` (status-aware)", async () => {
+    await writeRoadmap(ROADMAP);
+    await writePhase(
+      "P1.yaml",
+      phaseDoc({ taskLines: ["description: x", "requires_decision: true"] }),
+    );
+    await mkdir(join(cwd, "design", "decisions"), { recursive: true });
+    await writeFile(
+      join(cwd, "design", "decisions", "P1-T1-decision.md"),
+      "**Status:** proposed (unscheduled, 2026-05)\n",
+      "utf8",
+    );
+
+    const result = await runLint({ cwd, includeQuality: true });
+    const issue = result.issues.find((i) => i.code === "TASK_DECISION_UNRESOLVED");
+    expect(issue).toBeDefined();
+    expect(issue?.affects_exit).toBe(false);
+    expect(issue?.message).toContain('is "proposed"');
+    const details = issue?.details as { via?: string; reason?: string } | undefined;
+    expect(details?.via).toBe("filename-scan");
+    expect(details?.reason).toContain('is "proposed"');
+  });
+
   it("reports TASK_DECISION_UNRESOLVED (source phase) for a phase-level requires_decision", async () => {
     await writeRoadmap(ROADMAP);
     await writePhase(
