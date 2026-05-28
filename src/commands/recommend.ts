@@ -83,6 +83,7 @@ export async function runRecommend(opts: RecommendOptions): Promise<RecommendRes
     task,
     agentName,
     agentProfile,
+    decisionContext: { phaseRequiresDecision: phase.requires_decision === true },
   });
 }
 
@@ -117,6 +118,8 @@ export function formatRecommend(r: RecommendResult): string {
   );
 
   sections.push(["Reasons:", ...r.reasons.map((reason) => `  - ${reason}`)].join("\n"));
+
+  sections.push(`Lifecycle: ${r.lifecycleMode}`);
 
   sections.push(
     [

@@ -192,6 +192,19 @@ describe("recommend v0.8 — human formatter", () => {
     expect(out).toContain("Verification:");
   });
 
+  it("includes lifecycleMode on the result and a Lifecycle line in human output", async () => {
+    const result = await runRecommend({
+      cwd: fixtureDir,
+      phaseId: "P2",
+      taskId: "P2-E1-T1",
+      agentName: "claude-code",
+    });
+    expect(["full_loop", "record_only", "decision_loop"]).toContain(
+      result.lifecycleMode,
+    );
+    expect(formatRecommend(result)).toContain("Lifecycle:");
+  });
+
   it("includes numbered Escalation section", async () => {
     const result = await runRecommend({
       cwd: fixtureDir,
@@ -225,6 +238,7 @@ describe("recommend v0.8 — human formatter", () => {
       preflight: [],
       budgetProfile: { toolCalls: "low", contextFiles: "few", verificationCommands: "full" },
       structuredReasons: [{ factor: "stub", value: "stub", effect: "stub" }],
+      lifecycleMode: "full_loop",
     };
     const out = formatRecommend(stub);
     expect(out).toContain("Preflight: (none)");

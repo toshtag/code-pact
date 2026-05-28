@@ -276,6 +276,7 @@ export async function runTaskPrepare(
     task,
     agentName,
     agentProfile,
+    decisionContext: { phaseRequiresDecision: phase.requires_decision === true },
   });
 
   // 9. Context pack — build always, write unless dry-run.
