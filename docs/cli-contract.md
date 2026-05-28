@@ -42,7 +42,7 @@ The complete catalog (Public / Plan / Doctor / Adapter) is in [Error codes](#err
 - **Output & exit contract** — [Stdout / stderr](#stdout--stderr) · [JSON output shape](#json-output-shape) · [Exit codes](#exit-codes) · [Error codes](#error-codes)
 - **Environment** — [TTY and CI detection](#tty-and-ci-detection) · [`--non-interactive`](#--non-interactive) · [Locale resolution](#locale-resolution) · [State file write guarantees](#state-file-write-guarantees)
 - **Planning & import** — [`plan`](#plan) · [`phase import`](#phase-import) · [`spec import`](#spec-import-v18)
-- **Per-task lifecycle** — [`task prepare`](#task-prepare--single-per-task-entry-point-v111-p21) · [`task context`](#task-context--context-quality-gates-v051-v11-additions) · [`task start` / `status` / `block` / `resume`](#task-start--task-status--task-block--task-resume-v06) · [`task complete`](#task-complete) · [`task finalize`](#task-finalize--flip-task-design-status-to-done-v12-p11) · [`task add`](#task-add--append-a-task-to-a-phase-v06-non-interactive-in-v14)
+- **Per-task lifecycle** — [`task prepare`](#task-prepare--single-per-task-entry-point-v111-p21) · [`task context`](#task-context--context-quality-gates-v051-v11-additions) · [`task start` / `status` / `block` / `resume`](#task-start--task-status--task-block--task-resume-v06) · [`task complete`](#task-complete) · [`task record-done`](#task-record-done--record-externally-completed-work-v121) · [`task finalize`](#task-finalize--flip-task-design-status-to-done-v12-p11) · [`task add`](#task-add--append-a-task-to-a-phase-v06-non-interactive-in-v14)
 - **Phase-level & sequencing** — [`phase reconcile`](#phase-reconcile--bulk-flip-task-design-statuses-for-a-phase-v12-p11) · [`task runbook`](#task-runbook--read-only-guidance-for-a-single-task-v13-p12) · [`phase runbook`](#phase-runbook--read-only-guidance-for-an-entire-phase-v13-p12)
 - **Adapters & diagnostics** — [`adapter`](#adapter-v09) · [`doctor`](#doctor--plan-quality-checks-v053) · [`recommend`](#recommend-v08)
 - **Stability** — [Stability taxonomy (v1.0)](#stability-taxonomy-v10) · [Stability](#stability)
@@ -137,14 +137,15 @@ CI.
 | `ALREADY_EXISTS` | `plan brief`, `plan constitution` | Target design file already exists without `--force` |
 | `BASELINE_NOT_FOUND` | `progress` | Named baseline snapshot missing |
 | `PHASE_NOT_FOUND` | `phase show`, `pack`, `verify`, `recommend` | Phase id not in `roadmap.yaml` |
-| `TASK_NOT_FOUND` | `pack`, `verify`, `task context`, `task start/block/resume/complete/status` | Task id not present anywhere |
-| `AMBIGUOUS_TASK_ID` | `task context`, `task start/block/resume/complete/status` | Same task id exists in multiple phases |
-| `AGENT_NOT_FOUND` | `pack`, `adapter *`, `task context`, `task start/block/resume/complete` | Agent name not in `project.yaml` |
-| `AGENT_NOT_ENABLED` | `task context`, `task start/block/resume/complete` | Agent is configured but has `enabled: false` |
-| `INVALID_TASK_TRANSITION` | `task start/block/resume/complete` | Requested state transition is not allowed from the current state |
+| `TASK_NOT_FOUND` | `pack`, `verify`, `task context`, `task start/block/resume/complete/record-done/status` | Task id not present anywhere |
+| `AMBIGUOUS_TASK_ID` | `task context`, `task start/block/resume/complete/record-done/status` | Same task id exists in multiple phases |
+| `AGENT_NOT_FOUND` | `pack`, `adapter *`, `task context`, `task start/block/resume/complete/record-done` | Agent name not in `project.yaml` |
+| `AGENT_NOT_ENABLED` | `task context`, `task start/block/resume/complete/record-done` | Agent is configured but has `enabled: false` |
+| `INVALID_TASK_TRANSITION` | `task start/block/resume/complete/record-done` | Requested state transition is not allowed from the current state |
 | `DUPLICATE_PHASE_ID` | `phase add`, `phase import` | Phase id collides with an existing or imported phase |
 | `MANIFEST_NOT_FOUND` | `adapter upgrade` | `.code-pact/adapters/<agent>.manifest.yaml` does not exist (run `adapter install` first) |
 | `VERIFICATION_FAILED` | `verify`, `task complete` | Deterministic completion check did not pass |
+| `DECISION_REQUIRED` (v1.21+) | `task record-done` | A `requires_decision` task's ADR could not be resolved by the decision gate. Exit code 2; `progress.yaml` is left untouched. The envelope carries `data.task_id`, `data.decision_check` (the gate's `{name, ok, reason}`), `data.current_resolution` (`"file-presence-by-task-id"` in v1.21 — the gate is **not** status-aware), `data.expected_pattern` (`design/decisions/*<task-id>*.md`), and `data.declared_decision_refs` (the task's `decision_refs`, informational only — the gate does not use them) |
 | `VALIDATE_FAILED` | `validate` | One or more errors (or, under `--strict`, any issue) detected by the underlying doctor checks |
 | `DOCTOR_FAILED` | `doctor` | One or more error-severity doctor issues found |
 | `TUTORIAL_FAILED` (v1.15+) | `tutorial` | A step in the sandbox walkthrough threw; the sandbox is still cleaned up (unless `--keep`). The message carries the underlying error |
@@ -1646,10 +1647,30 @@ Order of operations:
 2. **Task resolution**. The same logic as `task context`: scans every phase referenced by `design/roadmap.yaml`. `TASK_NOT_FOUND` / `AMBIGUOUS_TASK_ID` are raised for missing / duplicate task ids.
 3. **State check**. Derived from the append-only progress log via `deriveTaskState`. If the current state is `done`, returns `{ ok: true, data: { already_done: true } }` with exit 0 and **does not re-run verification** (to force re-verification, use `task complete --rerun` — planned for a later release). If the current state is `blocked`, exits 2 with `INVALID_TASK_TRANSITION`: the task must be resumed via `task resume <id>` before it can complete, so the resume event records the unblock decision. Other current states (`planned`, `started`, `resumed`, `failed`) proceed to verification. `planned → done` is permitted at the command layer for v0.5 backwards compatibility, even though the state machine itself does not list that transition.
 4. **Verification (preflight mode)**. Runs the deterministic checks from `code-pact verify` — `commands` and `decision` — but skips the state-consistency checks (`progress_event`, `task_status`) because `task complete` is the action that produces that state. On failure, exits 1 with `VERIFICATION_FAILED`; `progress.yaml` is left byte-identical. Standalone `code-pact verify` still runs all four checks for after-the-fact consistency auditing.
-5. **Progress append**. On verify pass, appends a `done` event with shape `{ task_id, status: "done", at, actor: "agent", agent, evidence }` to `progress.yaml`. The write uses best-effort atomic replacement (`writeFile` to a temp file + `rename`) to prevent partial-write corruption. Concurrent `task complete` calls are out of scope for v0.2.
+5. **Progress append**. On verify pass, appends a `done` event with shape `{ task_id, status: "done", at, actor: "agent", agent, evidence, source: "loop" }` to `progress.yaml`. The write uses best-effort atomic replacement (`writeFile` to a temp file + `rename`) to prevent partial-write corruption. Concurrent `task complete` calls are out of scope for v0.2.
 6. **`--dry-run`**. Skips the progress append. Returns `{ ok: true, data: { dry_run: true, would_append: <event> } }`. `progress.yaml` is byte-identical.
 
-The `agent` field on `ProgressEvent` is optional for backward compatibility with v0.1 logs that predate `task complete`.
+The `agent` field on `ProgressEvent` is optional for backward compatibility with v0.1 logs that predate `task complete`. The `source` field (v1.21+) is `"loop"` for events produced by `task complete` and `"external"` for events produced by `task record-done`; it is optional, and a legacy `done` event with no `source` is treated as `"loop"` by readers.
+
+## `task record-done` — record externally-completed work (v1.21+)
+
+`code-pact task record-done <task-id> --evidence "<text>" [--notes "<text>"] [--agent <name>] [--json] [--dry-run]` records a `done` event for work that was completed **outside** the code-pact loop — already-merged work, or changes that cannot be verified from the current working tree. It is the honest "external completion accounting" path, **not** a replacement for the normal `prepare → start → complete → finalize` loop:
+
+- Use `task complete` for work performed inside the code-pact loop (it runs verification commands and records `source: "loop"`).
+- Use `task record-done` for work completed outside the loop (it does **not** run verification commands; the proof is the `--evidence` you supply, and it records `source: "external"`).
+- `source: "external"` is recorded intentionally so future diagnostics can distinguish loop-verified completion from externally-asserted completion.
+
+Order of operations:
+
+1. **Evidence validation**. `--evidence` is required and must be non-empty / non-whitespace. An empty or whitespace-only value raises `CONFIG_ERROR` (exit 2) **before** any project / roadmap / progress file is read, so an invalid invocation never depends on environment state.
+2. **Agent validation**. Same as `task complete`: unknown agent → `AGENT_NOT_FOUND`, disabled agent → `AGENT_NOT_ENABLED`. `--agent` defaults to `project.yaml.default_agent`.
+3. **Task resolution**. Same as `task complete`: `TASK_NOT_FOUND` / `AMBIGUOUS_TASK_ID` for missing / duplicate ids.
+4. **State check**. Derived via `deriveTaskState`. `done` → idempotent `{ ok: true, data: { already_done: true } }` (exit 0, no duplicate event). `blocked` → exit 2 `INVALID_TASK_TRANSITION` (resume first). Other states (`planned`, `started`, `resumed`, `failed`) proceed.
+5. **Decision gate**. The **same** gate as `verify` / `task complete`. For a `requires_decision` task (on the task or its phase), the gate must resolve an ADR. If it cannot, exits 2 with `DECISION_REQUIRED` and `progress.yaml` is left untouched. **No verification commands are run.** The gate respects the existing decision check, but v1.21 does **not** introduce status-aware ADR parsing — the gate remains file-presence based (a `.md` under `design/decisions/` whose name contains the task id). Stronger ADR validation is planned separately.
+6. **Progress append**. Appends `{ task_id, status: "done", at, actor: "agent", agent, evidence: [<--evidence>], notes?, source: "external" }` via the same atomic write as `task complete`.
+7. **`--dry-run`**. Skips the append; returns `{ ok: true, data: { dry_run: true, would_append: <event> } }`. `progress.yaml` is byte-identical.
+
+`task finalize` works after `task record-done` exactly as it does after `task complete` — finalize never inspects `source`.
 
 ## `task finalize` — flip task design status to done (v1.2+, P11)
 

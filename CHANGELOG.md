@@ -13,6 +13,24 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+### `task record-done` — an honest path for work completed outside the loop
+
+Dogfooding exposed a gap: when a task was finished **outside** the code-pact loop (already merged, or otherwise not verifiable from the working tree), there was no honest way to record it. Agents were forced either to leave `progress.yaml` drifting from reality or to fake a full loop run against a working tree that no longer holds the change. This adds the missing path.
+
+**Added**
+
+- **`code-pact task record-done <task-id> --evidence "<text>" [--notes "<text>"] [--agent <name>] [--json] [--dry-run]`** — records a `done` event for externally-completed work. It does **not** run verification commands; the proof is the required `--evidence`. The event is recorded with `source: external`. Idempotent (`already_done` on a task already done), supports `--dry-run` (`would_append`, no write), and ships with full `--help` (usage, flags, examples). It is **not** a replacement for the normal `prepare → start → complete → finalize` loop — use it only for genuinely external completion.
+- **`ProgressEvent.source`** — `loop` (produced by `task complete`) or `external` (produced by `task record-done`). Optional; a legacy `done` event with no `source` is treated as `loop` by readers. Only valid on `done` events.
+- **`DECISION_REQUIRED`** public error code — surfaced when `task record-done` is run on a `requires_decision` task whose required ADR cannot be resolved by the current file-presence-based gate. Exit 2, `progress.yaml` untouched. The envelope carries `data.decision_check`, `data.current_resolution`, `data.expected_pattern`, and `data.declared_decision_refs` (informational only).
+
+**Changed**
+
+- `task complete` now records `source: loop` on its `done` event.
+
+**Important limitation**
+
+- `task record-done` respects the existing decision gate and will not mark a `requires_decision` task done unless the current ADR resolution logic succeeds. In v1.21.0 that gate remains **file-presence based** (a `.md` under `design/decisions/` whose name contains the task id) — it does **not** parse ADR status/frontmatter. Status-aware ADR validation is planned separately.
+
 ## [1.20.0] — 2026-05-27
 
 ### Trust hardening — deterministic adapters, honest `--model`, cost-correct recommendations

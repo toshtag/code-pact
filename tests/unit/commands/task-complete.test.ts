@@ -150,6 +150,7 @@ describe("runTaskComplete — happy path", () => {
     expect(result.event.actor).toBe("agent");
     expect(result.event.agent).toBe("claude-code");
     expect(result.event.at).toBe("2026-05-16T15:00:00.000Z");
+    expect(result.event.source).toBe("loop");
     expect(result.verify.ok).toBe(true);
 
     const { log } = await readProgress(dir);
@@ -157,6 +158,7 @@ describe("runTaskComplete — happy path", () => {
     expect(log.events[0]!.task_id).toBe("P1-T1");
     expect(log.events[0]!.status).toBe("done");
     expect(log.events[0]!.agent).toBe("claude-code");
+    expect(log.events[0]!.source).toBe("loop");
   });
 
   it("uses default_agent when --agent is omitted", async () => {

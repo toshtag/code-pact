@@ -283,6 +283,20 @@ export const messages = {
       invalidTransition: (taskId: string, current: string): string =>
         `タスク "${taskId}" は ${current} 状態です。先に \`code-pact task resume ${taskId}\` を実行してください。`,
     },
+    recordDone: {
+      evidenceRequired:
+        "task record-done には、ループ外で完了した作業を示す --evidence \"<text>\" が必要です。",
+      decisionRequired: (taskId: string): string =>
+        `タスク "${taskId}" を done にするには decision ADR が必要です。`,
+      alreadyDone: (taskId: string): string =>
+        `タスク "${taskId}" には既に done イベントが存在します。progress.yaml は変更されていません (idempotent)。`,
+      success: (taskId: string, agent: string): string =>
+        `タスク "${taskId}" の external done イベントを記録しました (agent: ${agent})。`,
+      dryRun: (taskId: string): string =>
+        `Dry run: タスク "${taskId}" の external done イベントを追記する想定です。progress.yaml は変更されていません。`,
+      invalidTransition: (taskId: string, current: string): string =>
+        `タスク "${taskId}" は ${current} 状態です。先に \`code-pact task resume ${taskId}\` を実行してください。`,
+    },
     finalize: {
       taskNotFound: (taskId: string): string =>
         `タスク "${taskId}" がどのフェーズにも見つかりません。`,

@@ -104,10 +104,11 @@ files), the same input produces the same on-disk bytes.
 
 `.code-pact/state/progress.yaml` is an append-only event log. The
 only verbs that append to it are `task start`, `task block`, `task
-resume`, and `task complete`. Read-only verbs — including `task
-prepare` (v1.11+) — never touch it, and `task finalize` writes only
-the design YAML status, never `progress.yaml`. The progress-read-only
-invariant is locked by unit tests.
+resume`, `task complete`, and `task record-done` (v1.21+, which records
+a `done` event with `source: external` for work completed outside the
+loop). Read-only verbs — including `task prepare` (v1.11+) — never touch
+it, and `task finalize` writes only the design YAML status, never
+`progress.yaml`. The progress-read-only invariant is locked by unit tests.
 
 ## 2. What agents must do
 
@@ -244,8 +245,17 @@ The verbs in detail:
   full stdout / stderr in the JSON envelope.
 
 - **`task complete <task-id>`** — runs verification and, on pass,
-  appends a `done` event. Idempotent — a second call from `done`
-  state returns success without appending a duplicate event.
+  appends a `done` event (`source: loop`). Idempotent — a second call
+  from `done` state returns success without appending a duplicate event.
+
+- **`task record-done <task-id> --evidence "<text>"`** (v1.21+) — for
+  work completed **outside** the loop. Appends a `done` event with
+  `source: external` **without** running verification commands; the
+  proof is `--evidence`. The decision gate still applies — a
+  `requires_decision` task with no resolvable ADR returns
+  `DECISION_REQUIRED` (exit 2) and leaves `progress.yaml` untouched.
+  Not a replacement for `task complete`; use it only for genuinely
+  external completion.
 
 - **`task finalize <task-id> [--write] [--audit-strict] [--base-ref
   <ref>]`** — flips the task's design YAML status to `done` and
