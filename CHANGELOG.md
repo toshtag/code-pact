@@ -15,9 +15,16 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ### Failure clarity for `task complete` / `task finalize` (P32)
 
+When a `task complete` / `task finalize` failure occurred, the root cause already existed in the result but the surfaces an agent reads hid it — human output was a single generic line and JSON only carried `data.verify.checks`. An agent had to re-run the lower-level `verify` to decide its next action. This surfaces the cause and the next action at the point of failure. Design in `design/decisions/failure-clarity-rfc.md`.
+
+**Added**
+
+- **Three additive `data` fields on the `task complete` / `task finalize` failure envelopes** — `failed_checks: string[]`, `first_failure: { name, reason } | null`, and `suggested_next_command: string | null`, placed alongside the unchanged `data.verify.checks` / `data.write_audit`. `suggested_next_command` is a deterministic, AI-free switch on the failing check (or finalize code) → an exact command, and is a **rerun-*after-fixing*** command (it does not imply an unchanged rerun will succeed). `task complete --dry-run` failures carry the same fields (verification runs before the dry-run short-circuit). `task finalize` synthesizes a pseudo-check per failure code (`eligibility` / `write_safety` / `write_audit`). **No new error codes**, and existing fields are unchanged, so any consumer that ignores unknown fields is unaffected.
+- **Richer human output** — below the existing generic failure message, `cause:` and a `rerun after fixing:` line (ja: `原因:` / `修正後に再実行:`) are printed to stderr. The label is deliberately *not* `next:`, so an agent does not read it as "just rerun unchanged".
+
 **Internal**
 
-- **P32-T0** — registers the P32 "failure clarity" phase. `task complete` / `task finalize` failures will gain three additive `data` fields (`failed_checks`, `first_failure`, `suggested_next_command`) plus richer human output, so an agent can decide its next action without re-running the lower-level `verify`. No new error codes; `data.verify.checks` / `data.write_audit` are unchanged. Design in `design/decisions/failure-clarity-rfc.md`.
+- New pure helper `src/core/failure/failure-summary.ts` (no dependency on `src/commands/`; takes a structural `FailureCheckLike`) and a shared CLI renderer `src/cli/render/failure-summary.ts`, reused by both `task complete` and `task finalize`.
 
 ## [1.25.0] — 2026-05-28
 

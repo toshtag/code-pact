@@ -4,7 +4,7 @@ name: Failure clarity — surface the true root cause and the deterministic next
 weight: 8
 confidence: high
 risk: low
-status: planned
+status: done
 objective: |
   When `task complete` fails verification, the root cause already exists in the
   thrown error's `checks` array (each check carries a human-readable `reason`),
@@ -188,7 +188,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
     description: |
       Wire `task finalize` failure clarity (reuses T2's render helper + i18n).
 

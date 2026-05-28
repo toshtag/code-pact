@@ -55,7 +55,7 @@ function git(cwd: string, args: readonly string[]): void {
 
 async function projectWithFinalizableTask(
   prefix: string,
-  opts: { declaredWrites?: string[]; initGit?: boolean } = {},
+  opts: { declaredWrites?: string[]; initGit?: boolean; complete?: boolean } = {},
 ): Promise<Project> {
   const p = await createTempProject({
     prefix: `code-pact-task-finalize-audit-strict-${prefix}-`,
@@ -103,8 +103,10 @@ async function projectWithFinalizableTask(
   ];
   await writeFile(phasePath, stringifyYaml(doc), "utf8");
 
-  p.run(["task", "start", "P1-T1", "--agent", "claude-code", "--json"]);
-  p.run(["task", "complete", "P1-T1", "--agent", "claude-code", "--json"]);
+  if (opts.complete ?? true) {
+    p.run(["task", "start", "P1-T1", "--agent", "claude-code", "--json"]);
+    p.run(["task", "complete", "P1-T1", "--agent", "claude-code", "--json"]);
+  }
 
   if (opts.initGit ?? false) {
     git(p.dir, ["init", "--quiet", "--initial-branch=main"]);
@@ -120,6 +122,11 @@ type StrictData = {
   phase_id?: string;
   applied?: boolean;
   write_audit?: { warnings?: string[]; outside_declared?: string[] };
+  // P32 failure-clarity fields
+  failed_checks?: string[];
+  first_failure?: { name: string; reason: string } | null;
+  suggested_next_command?: string | null;
+  current?: string;
 };
 
 // ---------------------------------------------------------------------------
@@ -232,6 +239,10 @@ describe("task finalize --audit-strict warning path", () => {
       expect(data?.write_audit?.outside_declared).toContain(
         "src/stray/outside.ts",
       );
+      // P32: failure-clarity fields, additive to the unchanged write_audit.
+      expect(data?.failed_checks).toEqual(["write_audit"]);
+      expect(data?.first_failure?.name).toBe("write_audit");
+      expect(data?.suggested_next_command).toBeNull();
     }
   });
 
@@ -298,6 +309,49 @@ describe("task finalize --audit-strict warning path", () => {
         "TASK_WRITES_AUDIT_DECLARED_UNUSED",
       );
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P32: failure clarity on the non-audit finalize failure (NOT_ELIGIBLE)
+// ---------------------------------------------------------------------------
+
+describe("task finalize failure clarity (TASK_FINALIZE_NOT_ELIGIBLE)", () => {
+  it("not-done task → exit 2 + eligibility pseudo-check + `task complete` next command", async () => {
+    // Task is never completed, so its derived state is not `done`.
+    const p = await projectWithFinalizableTask("not-eligible", {
+      complete: false,
+    });
+    const res = p.run(["task", "finalize", "P1-T1", "--json"]);
+    expect(res.code).toBe(2);
+    const env = JSON.parse(res.stdout) as JsonEnvelope<unknown>;
+    expect(env.ok).toBe(false);
+    if (!env.ok) {
+      expect(env.error.code).toBe("TASK_FINALIZE_NOT_ELIGIBLE");
+      const data = env.data as StrictData | undefined;
+      // Existing fields unchanged...
+      expect(data?.task_id).toBe("P1-T1");
+      expect(data?.current).toBeDefined();
+      // ...plus the additive P32 clarity fields.
+      expect(data?.failed_checks).toEqual(["eligibility"]);
+      expect(data?.first_failure?.name).toBe("eligibility");
+      expect(data?.suggested_next_command).toBe(
+        "code-pact task complete P1-T1",
+      );
+    }
+  });
+
+  it("human mode prints the cause and rerun-after-fixing line to stderr", async () => {
+    const p = await projectWithFinalizableTask("not-eligible-human", {
+      complete: false,
+    });
+    const res = p.run(["task", "finalize", "P1-T1"]);
+    expect(res.code).toBe(2);
+    expect(res.stderr).toMatch(/not finalize-eligible/);
+    expect(res.stderr).toMatch(/cause: eligibility —/);
+    expect(res.stderr).toMatch(
+      /rerun after fixing: code-pact task complete P1-T1/,
+    );
   });
 });
 
