@@ -118,3 +118,11 @@ A→B may land together; C is a prerequisite for D; D must never precede C.
 - No orchestration: `record-done` records, it does not run anyone's CI or PR.
 - No change to the implemented PRs (#233–#236); this RFC neither revisits nor depends on their internals beyond the named shared predicate.
 - No new roadmap phase is created by this document; it is a design record. Implementation, when scheduled, will add its own phase(s).
+
+## Post-implementation follow-ups (not blockers)
+
+Surfaced during the pre-1.25 hardening review of the §3 implementation. None block 1.25.0; recorded here so they are not lost.
+
+1. **`ADR_STATUS_UNRECOGNIZED` does not recurse into nested ADR directories.** [`classifyDecisionAdrs`](../../src/core/decisions/adr.ts) is a flat scan of `design/decisions/`. The **gate** ([`resolveDecisionGate`](../../src/core/decisions/adr.ts)) correctly reads a nested `decision_refs` path (e.g. `design/decisions/p3/adr.md`), so a nested ADR with a typo'd status still *blocks* the gate — only the advisory that would *warn* about the typo before you hit the block does not see nested files. A recursive walk is the refinement; left out to avoid a behavior change at release time.
+2. **`classifyDecisionAdrs` reads top-level entries with a plain `readFile`**, not via `resolveWithinProject`. It is a read-only classifier feeding an advisory (not the gate), so this is a consistency nit rather than a hole, but routing it through the same path-safety primitive as the gate would make the boundary uniform.
+3. **`decision_refs` is not restricted to `design/decisions/`.** The gate now rejects *unsafe* paths (escaping the repo → `unsafe_path`, fail-closed), but a *safe* repo-relative path outside `design/decisions/` (e.g. `docs/foo.md` with `**Status:** accepted`) still resolves the gate. This is the current, documented behavior ([decision-gate concept](../../docs/concepts/decision-gate.md)). Whether to constrain ADRs to `design/decisions/**` — e.g. a `TASK_DECISION_REF_OUTSIDE_DECISIONS` advisory — is an open policy question for a later minor, deliberately not changed pre-1.25.
