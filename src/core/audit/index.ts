@@ -1,5 +1,7 @@
 export {
   auditWrites,
+  runGit,
+  type GitRun,
   type AuditWritesOptions,
   type BaseErrorCode,
   type BaseKind,

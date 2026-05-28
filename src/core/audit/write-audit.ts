@@ -61,9 +61,9 @@ export type AuditWritesOptions = {
   baseRef?: string;
 };
 
-type GitRun = { ok: true; stdout: string } | { ok: false; reason: "spawn" | "exit" };
+export type GitRun = { ok: true; stdout: string } | { ok: false; reason: "spawn" | "exit" };
 
-function runGit(cwd: string, args: readonly string[]): Promise<GitRun> {
+export function runGit(cwd: string, args: readonly string[]): Promise<GitRun> {
   return new Promise((resolve) => {
     let proc;
     try {

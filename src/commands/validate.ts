@@ -4,6 +4,8 @@ export type ValidateOptions = {
   cwd: string;
   /** When true, warnings also count as failures (exit 1). */
   strict?: boolean;
+  /** Branch base ref for the CI branch-drift check (P34). */
+  baseRef?: string;
 };
 
 export type ValidateResult = {
@@ -21,7 +23,10 @@ export type ValidateResult = {
  * stays pure and machine-readable.
  */
 export async function runValidate(opts: ValidateOptions): Promise<ValidateResult> {
-  const result = await runDoctor(opts.cwd);
+  const result = await runDoctor(
+    opts.cwd,
+    opts.baseRef !== undefined ? { baseRef: opts.baseRef } : {},
+  );
   const ok = opts.strict
     ? result.issues.length === 0
     : result.issues.every((i) => i.severity !== "error");

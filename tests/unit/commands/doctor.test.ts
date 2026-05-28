@@ -658,3 +658,182 @@ describe("runDoctor — CONTROL_PLANE_NOT_DRIVEN", () => {
     expect(find(await runDoctor(dir))).toBeUndefined();
   });
 });
+
+// ---------------------------------------------------------------------------
+// CONTROL_PLANE_BRANCH_NOT_DRIVEN (P34) — branch-diff drift for PR CI
+// ---------------------------------------------------------------------------
+
+describe("runDoctor — CONTROL_PLANE_BRANCH_NOT_DRIVEN (P34)", () => {
+  const PROGRESS_REL = ".code-pact/state/progress.yaml";
+
+  function git(cwd: string, args: readonly string[]): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const proc = spawn("git", args, {
+        cwd,
+        stdio: ["ignore", "ignore", "pipe"],
+        env: {
+          ...process.env,
+          GIT_AUTHOR_NAME: "t",
+          GIT_AUTHOR_EMAIL: "t@e.com",
+          GIT_COMMITTER_NAME: "t",
+          GIT_COMMITTER_EMAIL: "t@e.com",
+        },
+      });
+      proc.on("close", (code) =>
+        code === 0 ? resolve() : reject(new Error(`git ${args.join(" ")} (${code})`)),
+      );
+      proc.on("error", reject);
+    });
+  }
+
+  const PHASE_YAML =
+    [
+      "id: P1",
+      "name: Foundation",
+      "weight: 10",
+      "confidence: high",
+      "risk: low",
+      "status: planned",
+      "objective: Establish the foundation of the project",
+      "definition_of_done:",
+      "  - tests pass",
+      "verification:",
+      "  commands:",
+      "    - echo ok",
+      "tasks:",
+      "  - id: P1-T1",
+      "    type: feature",
+      "    ambiguity: low",
+      "    risk: low",
+      "    context_size: small",
+      "    write_surface: low",
+      "    verification_strength: weak",
+      "    expected_duration: short",
+      "    status: planned",
+    ].join("\n") + "\n";
+
+  const setProgress = (yaml: string) =>
+    writeFile(join(dir, ".code-pact", "state", "progress.yaml"), yaml, "utf8");
+
+  const ev = (taskId: string, status: string, at = "2026-05-28T09:00:00+00:00") =>
+    `  - task_id: ${taskId}\n    status: ${status}\n    at: "${at}"\n    actor: agent\n`;
+
+  const find = (r: Awaited<ReturnType<typeof runDoctor>>) =>
+    r.issues.find((i) => i.code === "CONTROL_PLANE_BRANCH_NOT_DRIVEN");
+
+  // Base on `main`: a real phase, .gitignore'd .code-pact, and (optionally) a
+  // committed progress.yaml. Then branch to `feature`. The ledger is gitignored
+  // by default so it is only tracked when force-added (trackProgress).
+  async function setupBaseAndBranch(
+    opts: { baseProgress?: string; trackProgress?: boolean } = {},
+  ): Promise<void> {
+    await writeFile(
+      join(dir, "design", "roadmap.yaml"),
+      `phases:\n  - id: P1\n    path: design/phases/P1.yaml\n    weight: 10\n`,
+      "utf8",
+    );
+    await mkdir(join(dir, "design", "phases"), { recursive: true });
+    await writeFile(join(dir, "design", "phases", "P1.yaml"), PHASE_YAML, "utf8");
+    await writeFile(join(dir, ".gitignore"), "/.code-pact/\n", "utf8");
+    await mkdir(join(dir, ".code-pact", "state"), { recursive: true });
+    await setProgress(opts.baseProgress ?? "events: []\n");
+
+    await git(dir, ["init", "--quiet", "--initial-branch=main"]);
+    await git(dir, ["add", "-A"]);
+    if (opts.trackProgress ?? true) await git(dir, ["add", "-f", PROGRESS_REL]);
+    await git(dir, ["commit", "--quiet", "-m", "base"]);
+    await git(dir, ["checkout", "--quiet", "-b", "feature"]);
+  }
+
+  async function commitBranchCode(relPath = "src/foo.ts"): Promise<void> {
+    await mkdir(join(dir, relPath, ".."), { recursive: true });
+    await writeFile(join(dir, relPath), "export const x = 1;\n", "utf8");
+    await git(dir, ["add", "-A"]);
+    await git(dir, ["commit", "--quiet", "-m", `code ${relPath}`]);
+  }
+
+  async function commitProgress(yaml: string): Promise<void> {
+    await setProgress(yaml);
+    await git(dir, ["add", "-f", PROGRESS_REL]);
+    await git(dir, ["commit", "--quiet", "-m", "progress"]);
+  }
+
+  it("fires (warning, advisory) when the branch changed real code but added no known started/done", async () => {
+    await setupBaseAndBranch();
+    await commitBranchCode();
+    const r = await runDoctor(dir, { baseRef: "main" });
+    const issue = find(r);
+    expect(issue).toBeDefined();
+    expect(issue!.severity).toBe("warning");
+    expect(r.ok).toBe(true); // advisory — does not fail doctor on its own
+  });
+
+  it("skips when the branch added a known non-TUTORIAL started (started alone suffices)", async () => {
+    await setupBaseAndBranch();
+    await commitBranchCode();
+    await commitProgress(`events:\n${ev("P1-T1", "started")}`);
+    expect(find(await runDoctor(dir, { baseRef: "main" }))).toBeUndefined();
+  });
+
+  it("skips when the branch added a known non-TUTORIAL done", async () => {
+    await setupBaseAndBranch();
+    await commitBranchCode();
+    await commitProgress(`events:\n${ev("P1-T1", "done")}`);
+    expect(find(await runDoctor(dir, { baseRef: "main" }))).toBeUndefined();
+  });
+
+  it("fires when the only added event is an unknown task_id (not in the plan)", async () => {
+    await setupBaseAndBranch();
+    await commitBranchCode();
+    await commitProgress(`events:\n${ev("P99-TX", "started")}`);
+    expect(find(await runDoctor(dir, { baseRef: "main" }))).toBeDefined();
+  });
+
+  it("fires when the only added event is TUTORIAL", async () => {
+    await setupBaseAndBranch();
+    await commitBranchCode();
+    await commitProgress(`events:\n${ev("TUTORIAL-T1", "started")}`);
+    expect(find(await runDoctor(dir, { baseRef: "main" }))).toBeDefined();
+  });
+
+  it("skips when only exclude_globs paths changed", async () => {
+    await setupBaseAndBranch();
+    await commitBranchCode("docs/guide.md");
+    // doctor.yaml is gitignored (.code-pact/) — read from disk regardless of git.
+    await writeFile(
+      join(dir, ".code-pact", "doctor.yaml"),
+      "control_plane_branch_not_driven:\n  exclude_globs:\n    - \"docs/**\"\n",
+      "utf8",
+    );
+    expect(find(await runDoctor(dir, { baseRef: "main" }))).toBeUndefined();
+  });
+
+  it("is silent when progress.yaml is not git-tracked (ledger not committed)", async () => {
+    await setupBaseAndBranch({ trackProgress: false });
+    await commitBranchCode();
+    expect(find(await runDoctor(dir, { baseRef: "main" }))).toBeUndefined();
+  });
+
+  it("does not run without --base-ref", async () => {
+    await setupBaseAndBranch();
+    await commitBranchCode();
+    expect(find(await runDoctor(dir))).toBeUndefined();
+  });
+
+  it("is silent when the base ref does not resolve (no merge-base)", async () => {
+    await setupBaseAndBranch();
+    await commitBranchCode();
+    expect(find(await runDoctor(dir, { baseRef: "no-such-ref" }))).toBeUndefined();
+  });
+
+  it("is suppressed by disabled_checks", async () => {
+    await setupBaseAndBranch();
+    await commitBranchCode();
+    await writeFile(
+      join(dir, ".code-pact", "doctor.yaml"),
+      "disabled_checks:\n  - CONTROL_PLANE_BRANCH_NOT_DRIVEN\n",
+      "utf8",
+    );
+    expect(find(await runDoctor(dir, { baseRef: "main" }))).toBeUndefined();
+  });
+});

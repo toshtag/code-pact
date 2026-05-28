@@ -20,7 +20,8 @@ import type { PlanIssue } from "../core/plan/shared.ts";
 import { isSupportedAgent, type SupportedAgent } from "../core/agents.ts";
 import { CONSTITUTION_PLACEHOLDER_MARKERS } from "../core/constitution.ts";
 import { readManifest } from "../core/adapters/manifest.ts";
-import { auditWrites } from "../core/audit/index.ts";
+import { auditWrites, runGit } from "../core/audit/index.ts";
+import { globToRegex, validateGlobSyntax } from "../core/glob.ts";
 import { inspectAgent, type AdapterDoctorIssue } from "./adapter-doctor.ts";
 import { readPackageVersion } from "../lib/package-version.ts";
 import type { Locale } from "../i18n/index.ts";
@@ -28,6 +29,14 @@ import type { Locale } from "../i18n/index.ts";
 // Optional per-project doctor configuration (.code-pact/doctor.yaml)
 const DoctorConfig = z.object({
   disabled_checks: z.array(z.string()).optional().default([]),
+  // P34: team-declared escape hatch for CONTROL_PLANE_BRANCH_NOT_DRIVEN.
+  // Default empty — no built-in docs/config exemption (a repo decides which
+  // paths legitimately change without driving the loop).
+  control_plane_branch_not_driven: z
+    .object({
+      exclude_globs: z.array(z.string()).optional().default([]),
+    })
+    .optional(),
 });
 type DoctorConfig = z.infer<typeof DoctorConfig>;
 
@@ -650,11 +659,122 @@ async function checkControlPlaneNotDriven(
   });
 }
 
+// Reads the committed progress.yaml at a git revision. Returns:
+//   - ProgressEvent[]  — present and parseable
+//   - []               — absent at that revision (git show failed)
+//   - null             — present but unparseable / schema-invalid
+async function readProgressEventsAtRev(
+  cwd: string,
+  rev: string,
+): Promise<ProgressEvent[] | null> {
+  const res = await runGit(cwd, [
+    "show",
+    `${rev}:.code-pact/state/progress.yaml`,
+  ]);
+  if (!res.ok) return []; // absent at this revision
+  let doc: unknown;
+  try {
+    doc = parseYaml(res.stdout);
+  } catch {
+    return null; // present but invalid YAML
+  }
+  const parsed = ProgressLog.safeParse(doc);
+  if (!parsed.success) return null; // schema invalid
+  return parsed.data.events;
+}
+
+// A stable identity key for a progress event. progress.yaml is append-only,
+// so "added on the branch" = HEAD events whose key is absent at the base.
+function eventKey(e: ProgressEvent): string {
+  return `${e.task_id}|${e.status}|${e.at}|${e.actor}|${e.source ?? ""}`;
+}
+
+// Check 17 (P34): branch-diff control-plane drift, for PR CI. Advisory
+// (warning). Runs ONLY when `--base-ref` is supplied. Fires when real,
+// non-excluded files changed on the branch (merge-base..HEAD) but the branch
+// added NO event that is a started/done for a KNOWN non-TUTORIAL task — i.e.
+// code changed without driving the loop. Conservative skips: no git /
+// unresolved merge-base / untracked progress.yaml / unparseable HEAD
+// progress.yaml / only excluded paths changed. See ci-branch-drift-rfc.md.
+async function checkControlPlaneBranchNotDriven(
+  cwd: string,
+  phases: Phase[],
+  issues: DoctorIssue[],
+  baseRef: string,
+  excludeGlobs: string[],
+): Promise<void> {
+  // Gate 1: at least one non-TUTORIAL task; collect known task ids.
+  const realTaskIds = new Set<string>();
+  for (const p of phases) {
+    if (p.id === "TUTORIAL") continue;
+    for (const t of p.tasks ?? []) realTaskIds.add(t.id);
+  }
+  if (realTaskIds.size === 0) return;
+
+  // Gate 2: branch diff (merge-base mode). Skip when git/merge-base unavailable.
+  const audit = await auditWrites({ cwd, declaredWrites: [], baseRef });
+  if (!audit.git_available || audit.base_kind !== "merge-base") return;
+
+  // files_touched already excludes code-pact runtime state. Drop team-declared
+  // exclude_globs (default empty). If nothing real remains → skip.
+  const compiled = excludeGlobs
+    .filter((g) => validateGlobSyntax(g) === null)
+    .map((g) => globToRegex(g));
+  const realChanged = audit.files_touched.filter(
+    (f) => !compiled.some((re) => re.test(f)),
+  );
+  if (realChanged.length === 0) return;
+
+  // Gate 3: progress.yaml must be git-tracked — a repo that does not commit the
+  // ledger cannot be audited by CI, so stay silent rather than cry wolf.
+  const tracked = await runGit(cwd, [
+    "ls-files",
+    "--error-unmatch",
+    ".code-pact/state/progress.yaml",
+  ]);
+  if (!tracked.ok) return;
+
+  // Gate 4: did the branch ADD a started/done for a KNOWN non-TUTORIAL task?
+  const mb = await runGit(cwd, ["merge-base", "HEAD", baseRef]);
+  if (!mb.ok) return;
+  const baseSha = mb.stdout.trim();
+  const headEvents = await readProgressEventsAtRev(cwd, "HEAD");
+  if (headEvents === null) return; // unparseable HEAD → INVALID_YAML/SCHEMA_ERROR owns it
+  const baseEvents = (await readProgressEventsAtRev(cwd, baseSha)) ?? [];
+  const baseKeys = new Set(baseEvents.map(eventKey));
+  const driven = headEvents.some(
+    (e) =>
+      !baseKeys.has(eventKey(e)) &&
+      (e.status === "started" || e.status === "done") &&
+      !e.task_id.startsWith("TUTORIAL-") &&
+      realTaskIds.has(e.task_id),
+  );
+  if (driven) return;
+
+  issues.push({
+    code: "CONTROL_PLANE_BRANCH_NOT_DRIVEN",
+    severity: "warning",
+    message:
+      `This branch changed real files vs ${baseRef} but added no started/done event for a known non-TUTORIAL task in progress.yaml — code changed without driving the control plane. ` +
+      "Drive a task with `code-pact task prepare <id> --agent <agent>` (or record out-of-loop work with `code-pact task record-done <id> --evidence \"...\"`) and commit progress.yaml. " +
+      "Exempt docs/config-only paths via .code-pact/doctor.yaml (control_plane_branch_not_driven.exclude_globs), or silence via disabled_checks: [CONTROL_PLANE_BRANCH_NOT_DRIVEN].",
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
-export async function runDoctor(cwd: string): Promise<DoctorResult> {
+export type RunDoctorOptions = {
+  /** Branch base ref for the CI branch-drift check (P34). When omitted,
+   * CONTROL_PLANE_BRANCH_NOT_DRIVEN does not run. */
+  baseRef?: string;
+};
+
+export async function runDoctor(
+  cwd: string,
+  opts: RunDoctorOptions = {},
+): Promise<DoctorResult> {
   const allIssues: DoctorIssue[] = [];
   const config = await loadDoctorConfig(cwd);
   const disabled = new Set(config.disabled_checks);
@@ -721,6 +841,21 @@ export async function runDoctor(cwd: string): Promise<DoctorResult> {
   // disabled advisory never spawns git; the trailing filter still covers it.
   if (!disabled.has("CONTROL_PLANE_NOT_DRIVEN")) {
     await checkControlPlaneNotDriven(cwd, phases, allIssues);
+  }
+
+  // 17. branch-diff control-plane drift (P34). Runs only when --base-ref is
+  // given (CI). Guarded so a disabled advisory never spawns git.
+  if (
+    opts.baseRef !== undefined &&
+    !disabled.has("CONTROL_PLANE_BRANCH_NOT_DRIVEN")
+  ) {
+    await checkControlPlaneBranchNotDriven(
+      cwd,
+      phases,
+      allIssues,
+      opts.baseRef,
+      config.control_plane_branch_not_driven?.exclude_globs ?? [],
+    );
   }
 
   // Apply disabled_checks filter
