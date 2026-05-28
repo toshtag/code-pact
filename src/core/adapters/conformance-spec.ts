@@ -149,3 +149,50 @@ export const ACTIVATION_RULE_ANCHORS: ReadonlyArray<{
   { id: "wait_for_dependencies", anchor: "wait_for_dependencies" },
   { id: "context_over_budget", anchor: "CONTEXT_OVER_BUDGET" },
 ];
+
+// ---------------------------------------------------------------------------
+// P33 — recommendation consumption guidance
+//
+// The agent contract must tell agents to CONSUME the recommendation
+// (data.recommendation → tier/effort/planning/lifecycleMode), to report a
+// limitation when the runtime cannot switch model, and to use the lightweight
+// `record_only` lane via `task record-done`. These checks verify the guidance
+// is PRESENT in the generated instruction — not that an agent obeys it.
+//
+// They are gated on their OWN release threshold (NOT
+// ADAPTER_CONTRACT_HARDENING_FROM_VERSION): reusing the 1.14.0 threshold would
+// make every 1.14–1.25 adapter non-compliant at once. Below the new threshold
+// the checks are advisory.
+// ---------------------------------------------------------------------------
+
+/**
+ * Release that first ships the P33 consumption-guidance templates. The P33
+ * checks run at `required` for adapters whose manifest `generator_version` is
+ * semver >= this, and `advisory` below. PLACEHOLDER — confirm at release prep
+ * that this equals the version P33 actually ships in.
+ */
+export const RECOMMENDATION_CONSUMPTION_FROM_VERSION = "1.26.0";
+
+/**
+ * Each entry is one conformance check: every `anchor` must be substring-matched
+ * in the instruction body for the check to pass. Anchors are short, stable
+ * tokens (code literals + an English-locked phrase) so localized wording
+ * changes do not break them.
+ */
+export const RECOMMENDATION_CONSUMPTION_ANCHORS: ReadonlyArray<{
+  id: string;
+  anchors: ReadonlyArray<string>;
+}> = [
+  {
+    id: "recommendation_consumption_guidance_present",
+    anchors: ["data.recommendation"],
+  },
+  {
+    id: "lifecycle_mode_guidance_present",
+    anchors: ["lifecycleMode", "record_only"],
+  },
+  {
+    id: "cannot_switch_model_fallback_present",
+    anchors: ["cannot switch model"],
+  },
+];

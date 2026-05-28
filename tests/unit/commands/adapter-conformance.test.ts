@@ -41,6 +41,8 @@ Activation rules:
 
 - run verify
 - check the audit
+- Read \`data.recommendation\`; let \`lifecycleMode\` pick the loop. When the runtime cannot switch model, report the limitation.
+- \`record_only\` is a lighter loop, not lighter verification — run verification, then \`task record-done\`.
 
 ### How to handle failures
 

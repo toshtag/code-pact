@@ -189,6 +189,9 @@ ids require an RFC and an entry in `src/core/adapters/conformance-spec.ts`.
 | `task_prepare_is_primary` | `code-pact task prepare` appears and precedes the first `recommend` / `task context` mention (it is the primary per-task entrypoint, not the pre-P29 loop) |
 | `no_contract_antipatterns` | The guidance is free of P29 anti-patterns (e.g. `task finalize ... --agent`, which takes no `--agent`) |
 | `activation_rules_documented` | The activation rules are documented — `task finalize --write` only after `task complete`, `wait_for_dependencies`, `CONTEXT_OVER_BUDGET`. Verifies **documentation presence, not runtime obedience** |
+| `recommendation_consumption_guidance_present` | The guidance tells the agent to consume the recommendation (anchored on `data.recommendation`). Verifies **documentation presence, not runtime obedience** |
+| `lifecycle_mode_guidance_present` | The guidance documents `lifecycleMode` and the `record_only` lane (anchored on `lifecycleMode` + `record_only`) |
+| `cannot_switch_model_fallback_present` | The guidance tells the agent to report a limitation when it `cannot switch model` rather than ignore the recommendation |
 | `file_checksum_match` | Per-file: on-disk sha256 equals manifest |
 
 **Severity (v1.x, P30).** Each check carries a `severity` of `required`
@@ -200,7 +203,13 @@ above (`task_prepare_is_primary`, `no_contract_antipatterns`,
 `generator_version` is semver >= the hardening threshold
 (`ADAPTER_CONTRACT_HARDENING_FROM_VERSION`) and `advisory` below, so
 installs that predate the P29-aligned templates warn rather than
-hard-fail until re-upgraded. All other checks are `required`. Exit is 0
+hard-fail until re-upgraded. The three P33 consumption-guidance checks
+(`recommendation_consumption_guidance_present`,
+`lifecycle_mode_guidance_present`, `cannot_switch_model_fallback_present`)
+are gated the same way but on their **own** threshold
+(`RECOMMENDATION_CONSUMPTION_FROM_VERSION`, not the P30 one) so adapters
+generated between the P30 and P33 releases stay advisory rather than
+failing en masse. All other checks are `required`. Exit is 0
 when `compliant`, 1 otherwise.
 
 ## 3. Recommended lifecycle

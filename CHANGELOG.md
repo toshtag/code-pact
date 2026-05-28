@@ -28,9 +28,17 @@ When a `task complete` / `task finalize` failure occurred, the root cause alread
 
 ### Lightweight lane + recommendation consumption (P33)
 
+`recommend` / `task prepare` returned a correct execution profile, but every task ran the full loop (ceremony for small, strongly-verified work) and nothing told an agent to *consume* the recommendation — a correct recommendation was produced but not acted on. This adds a lifecycle signal and the consumption contract together. Design in `design/decisions/lightweight-lane-rfc.md`.
+
+**Added**
+
+- **`lifecycleMode` on `recommend` / `task prepare`** — an additive field (`full_loop` | `record_only` | `decision_loop`) from a conservative deterministic switch: `decision_loop` when the task or phase `requires_decision`; `record_only` when `type ∈ {docs, test}` AND `ambiguity == low` AND `risk == low` AND `verification_strength == strong`; otherwise `full_loop`. `architecture` is **not** auto-`decision_loop`. Advisory only — code-pact's own `task complete` / `task record-done` behavior is unchanged.
+- **Recommendation-consumption guidance in generated adapters** (both locales) — the "What to verify first" axis now tells agents to read `data.recommendation` as an execution profile (`tier`/`effort`/`planningRequired`/`lifecycleMode`), to report a limitation when the runtime **cannot switch model**, and that `record_only` is a lighter *loop* — **not** lighter verification (run the project verification commands, then `task record-done --evidence`).
+- **Three version-gated `adapter conformance` checks** — `recommendation_consumption_guidance_present`, `lifecycle_mode_guidance_present`, `cannot_switch_model_fallback_present` verify the guidance is present (anchored on short stable tokens). Gated on a new `RECOMMENDATION_CONSUMPTION_FROM_VERSION` threshold (not the P30 one), so adapters generated between the P30 and P33 releases stay advisory rather than failing en masse.
+
 **Internal**
 
-- **P33-T0** — registers the P33 phase. `recommend` / `task prepare` will gain an additive `lifecycleMode` field (`full_loop` | `record_only` | `decision_loop`) computed by a conservative deterministic switch, AND the generated adapter guidance that tells agents to consume the recommendation (and use `task record-done` without skipping verification for `record_only`) — shipped together so the field is never a produced-but-unused signal. New conformance checks verify the guidance, version-gated on a new threshold so existing adapters are not broken. Design in `design/decisions/lightweight-lane-rfc.md`.
+- New `src/core/recommend/lifecycle.ts` (`recommendLifecycleMode`, reuses `isDecisionRequiredForTask`); `resolveRecommendation` takes a meaning-closed `decisionContext`. No `agent_action` JSON field (it would duplicate the prose guidance without adding enforcement).
 
 ## [1.25.0] — 2026-05-28
 
