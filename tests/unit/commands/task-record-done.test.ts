@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtemp, rm, mkdir, writeFile, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { tmpdir } from "node:os";
 import { parse as parseYaml } from "yaml";
 import { runTaskRecordDone } from "../../../src/commands/task-record-done.ts";
@@ -572,6 +572,100 @@ describe("runTaskRecordDone — decision gate", () => {
       expect(considered).toHaveLength(2);
       expect(considered.find((c) => c.path.endsWith("accepted-base.md"))!.accepted).toBe(true);
       expect(considered.find((c) => c.path.endsWith("proposed-risky.md"))!.acceptance).toBe("blocked");
+    }
+  });
+
+  it("requires_decision with an UNSAFE decision_refs ('..' to an accepted ADR outside the repo) → DECISION_REQUIRED, acceptance=unsafe_path, progress unchanged", async () => {
+    // The regression this pins: an `accepted` ADR planted OUTSIDE the project
+    // root must never satisfy the gate. `decision_refs` carries no schema-level
+    // path refinement (task.ts: z.string().min(1)), so an escaping ref reaches
+    // the gate — which is fail-closed (never reads it) and reports unsafe_path.
+    const outsideDir = await mkdtemp(join(tmpdir(), "code-pact-outside-"));
+    try {
+      await writeFile(
+        join(outsideDir, "outside.md"),
+        "**Status:** accepted\n",
+        "utf8",
+      );
+      // Relative path from the project root to the planted file — begins with "..".
+      const unsafeRef = relative(dir, join(outsideDir, "outside.md"));
+      expect(unsafeRef.startsWith("..")).toBe(true);
+
+      await mkdir(join(dir, ".code-pact", "state"), { recursive: true });
+      await mkdir(join(dir, "design", "phases"), { recursive: true });
+      await writeFile(
+        join(dir, ".code-pact", "project.yaml"),
+        "name: x\nversion: 0.1.0\nlocale: en-US\ndefault_agent: claude-code\nagents:\n  - name: claude-code\n    profile: agent-profiles/claude-code.yaml\n    enabled: true\n",
+        "utf8",
+      );
+      await writeFile(
+        join(dir, ".code-pact", "state", "progress.yaml"),
+        "events: []\n",
+        "utf8",
+      );
+      await writeFile(
+        join(dir, "design", "roadmap.yaml"),
+        "phases:\n  - id: P1\n    path: design/phases/P1-foundation.yaml\n    weight: 12\n",
+        "utf8",
+      );
+      await writeFile(
+        join(dir, "design", "phases", "P1-foundation.yaml"),
+        [
+          "id: P1",
+          "name: F",
+          "weight: 12",
+          "confidence: high",
+          "risk: low",
+          "status: planned",
+          "objective: test",
+          "definition_of_done:",
+          "  - tests pass",
+          "verification:",
+          "  commands:",
+          "    - echo ok",
+          "tasks:",
+          "  - id: P1-T1",
+          "    type: feature",
+          "    ambiguity: low",
+          "    risk: low",
+          "    context_size: small",
+          "    write_surface: low",
+          "    verification_strength: weak",
+          "    expected_duration: short",
+          "    status: planned",
+          "    requires_decision: true",
+          "    decision_refs:",
+          `      - ${JSON.stringify(unsafeRef)}`,
+        ].join("\n") + "\n",
+        "utf8",
+      );
+
+      const before = await readFile(
+        join(dir, ".code-pact", "state", "progress.yaml"),
+        "utf8",
+      );
+      try {
+        await runTaskRecordDone({ cwd: dir, taskId: "P1-T1", evidence: ["x"] });
+        throw new Error("should have thrown");
+      } catch (err: unknown) {
+        const e = err as Error & { code?: string; data?: Record<string, unknown> };
+        expect(e.code).toBe("DECISION_REQUIRED");
+        expect(e.data!.via).toBe("decision_refs");
+        const considered = e.data!.considered as Array<{
+          accepted: boolean;
+          acceptance: string;
+        }>;
+        expect(considered).toHaveLength(1);
+        expect(considered[0]!.acceptance).toBe("unsafe_path");
+        expect(considered[0]!.accepted).toBe(false);
+      }
+      const after = await readFile(
+        join(dir, ".code-pact", "state", "progress.yaml"),
+        "utf8",
+      );
+      expect(after).toBe(before);
+    } finally {
+      await rm(outsideDir, { recursive: true, force: true });
     }
   });
 });
