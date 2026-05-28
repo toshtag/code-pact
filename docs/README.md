@@ -38,6 +38,7 @@ These explain how a feature works for users. The *why* behind each — the desig
 | Doc | What it covers |
 | --- | --- |
 | [concepts/task-readiness-fields.md](concepts/task-readiness-fields.md) | Optional task schema fields (`depends_on` / `reads` / `writes` / …) and their `plan lint` impact. |
+| [concepts/decision-gate.md](concepts/decision-gate.md) | The decision gate — how `requires_decision` tasks are gated on an `accepted` ADR, status-aware resolution, and `--scaffold-decisions`. |
 | [concepts/runbook.md](concepts/runbook.md) | `task runbook` / `phase runbook` — dependency gating and finalize-candidate reporting. |
 | [concepts/finalization-reconciliation.md](concepts/finalization-reconciliation.md) | `task finalize` / `phase reconcile` — syncing design status with the progress log. |
 | [concepts/governance.md](concepts/governance.md) | The governance layer — write lock, reserved IDs, protected paths. |

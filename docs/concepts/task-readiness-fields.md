@@ -78,6 +78,7 @@ tasks:
 
 - **In `plan lint`:** path-safety check (`TASK_DECISION_REF_UNSAFE_PATH`) and existence check on disk (`TASK_DECISION_REF_NOT_FOUND`).
 - **In `task context`:** the pack gains a `## Declared decisions` section with the full body of each referenced file, **inserted regardless of `context_size`**. This is additive to the existing `context_size: large` allDecisions path; files appearing in both are surfaced once under "Declared decisions" and filtered out of the existing "Related Decisions" section.
+- **In the decision gate (v1.22+):** when a task (or its phase) is `requires_decision: true`, `decision_refs` feed the [decision gate](decision-gate.md) with **all-must-be-accepted** semantics — `verify` / `task complete` / `task record-done` stay blocked until **every** referenced ADR is `**Status:** accepted`. With no `decision_refs`, the gate falls back to a filename scan of `design/decisions/` (any-accepted-wins). `phase import --scaffold-decisions` (v1.23+) auto-generates `proposed` ADR stubs for the referenced paths (or the default `design/decisions/<task-id>.md`) so there is something to fill in and accept. See the [decision-gate concept](decision-gate.md) for the full model.
 
 ### `reads`
 

@@ -26,6 +26,8 @@ these terms describe, see [the per-task loop](per-task-loop.md).
 | **context pack** | A Markdown file code-pact builds for a single task, containing exactly what the agent needs to implement it: the task description, the files it should read, relevant decisions, and acceptance criteria. Written to `.context/<agent>/<task-id>.md`. |
 | **verification command** | The shell command a phase declares to prove its tasks work (e.g. `pnpm test`). `task complete` runs it and only records `done` if it passes. |
 | **finalize / reconcile** | `task finalize` flips one task's design status to `done`; `phase reconcile` does it for a whole phase at once. Both sync design intent up to the operational fact after the work is done. |
+| **record-done** | Records a `done` event for work completed **outside** the loop (already merged, or not verifiable from the working tree). Skips verification commands — the proof is `--evidence` — and marks the event `source: external`. It is not a replacement for `task complete`; the decision gate still applies. |
+| **source (loop / external)** | A field on a `done` progress event: `loop` = completed through the normal `task complete` flow; `external` = recorded by `task record-done`. Lets later diagnostics tell loop-verified completion from externally-asserted completion. |
 
 ## Planning and schema
 
@@ -35,6 +37,8 @@ these terms describe, see [the per-task loop](per-task-loop.md).
 | **plan adopt** | A command that converts an existing structured plan (a `roadmap.md` / `TODO.md` / `tasks.md`, or a draft YAML) into code-pact phases and tasks — no AI round-trip. |
 | **task readiness fields** | Optional fields a task can declare to shape its context pack and enable checks: `depends_on`, `reads`, `writes`, `decision_refs`, `acceptance_refs`. All optional; tasks work without them. See [task readiness fields](concepts/task-readiness-fields.md). |
 | **write audit** | When you finalize a task, code-pact compares the files it declared in `writes` against the files actually changed, and reports mismatches as advisories. `--audit-strict` turns those advisories into a non-zero exit (for CI). |
+| **decision gate** | The enforced check that a `requires_decision` task has an **accepted** ADR before it can complete — it blocks `verify` / `task complete` / `task record-done` until one exists. See [the decision gate](concepts/decision-gate.md). |
+| **ADR (decision record)** | An Architecture Decision Record: a markdown file under `design/decisions/` whose `**Status:**` line (`accepted` / `proposed` / `draft` / `rejected` / `superseded`) the decision gate reads. `accepted` resolves the gate. |
 
 ## Output and diagnostics
 
