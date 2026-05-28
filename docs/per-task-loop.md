@@ -57,6 +57,20 @@ If a task is waiting on something, record it explicitly:
 | `task block <id> --reason "…"` | Marks the task `blocked` with a reason. | `blocked` |
 | `task resume <id> --agent <a>` | Clears the block; the task becomes `resumed`. | `resumed` |
 
+### Recording work done outside the loop
+
+Sometimes a task is finished **outside** this loop — already merged, or otherwise
+not verifiable from the current working tree. `task record-done` is the honest way
+to record that, without faking a loop run:
+
+| Command | What it does | Records an event? |
+| --- | --- | --- |
+| `task record-done <id> --evidence "PR #123"` | Records `done` for externally-completed work. Does **not** run verification commands — the proof is `--evidence`. The event carries `source: external`. The decision gate still applies for `requires_decision` tasks. | `done` (`source: external`) |
+
+Prefer the normal `complete` path whenever the work can be verified from the
+working tree. Reach for `record-done` only for genuinely external completion;
+the `source: external` marker keeps that distinction visible for later diagnostics.
+
 ## A worked example
 
 ```sh
