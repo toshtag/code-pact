@@ -15,9 +15,14 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ### CI branch-drift detection (P34)
 
-**Internal**
+The working-tree `CONTROL_PLANE_NOT_DRIVEN` (v1.25) never fires in PR CI because the checkout is clean. This adds a branch-diff signal so CI can catch "real code changed but the control plane was not driven on this branch." Design in `design/decisions/ci-branch-drift-rfc.md`.
 
-- **P34-T0** — registers the P34 phase. `doctor` / `validate` will gain a `--base-ref <ref>` flag and a new advisory `CONTROL_PLANE_BRANCH_NOT_DRIVEN` that compares the PR branch diff (merge-base..HEAD) and fires when real, non-excluded files changed but no **known** non-TUTORIAL task got a `started`/`done` event on the branch — catching "code changed, control plane not driven" in PR CI (the working-tree `CONTROL_PLANE_NOT_DRIVEN` can't, since CI checkouts are clean). Advisory by default; `validate --strict --base-ref origin/main` gates. Team-declared `exclude_globs` (default empty); silent skip when `progress.yaml` is not git-tracked. No `ci scaffold` command. Design in `design/decisions/ci-branch-drift-rfc.md`.
+**Added**
+
+- **`--base-ref <ref>` on `doctor` / `validate`** and a new advisory **`CONTROL_PLANE_BRANCH_NOT_DRIVEN`**. The check runs **only** when `--base-ref` is supplied and compares the branch diff (`merge-base..HEAD`, via the existing `auditWrites` merge-base mode). It fires when real, non-excluded files changed but the branch added **no** event that is `started`/`done` AND non-TUTORIAL AND a `task_id` present in the loaded plan — so merely touching `progress.yaml` (or appending an unrelated/unknown/TUTORIAL event) does not pass. A `started` **or** `done` for a known task suppresses it (usage detection, not completion guarantee).
+- **Gate model.** Advisory (`severity: warning`) by default — plain `doctor` / `validate` exit unchanged. `validate --strict --base-ref origin/main` promotes it to exit 1 (existing strict semantics). Three-layer opt-in: no `--base-ref` → does not run; no `--strict` → does not fail; `disabled_checks` → off.
+- **Team-declared exemptions.** `.code-pact/doctor.yaml` `control_plane_branch_not_driven.exclude_globs` (default **empty** — no built-in docs/config exemption) lets a repo declare paths whose change does not require driving the loop.
+- **Conservative skips.** Silent skip when git/merge-base is unavailable, `progress.yaml` is not git-tracked (the ledger must be committed for CI to audit it), or HEAD `progress.yaml` is unparseable (`INVALID_YAML`/`SCHEMA_ERROR` owns that). docs ship a version-pinned GitHub Actions example; **no `ci scaffold` command**.
 
 ### Failure clarity for `task complete` / `task finalize` (P32)
 
