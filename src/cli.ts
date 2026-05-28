@@ -329,14 +329,16 @@ async function cmdDoctor(argv: string[], globalJson: boolean): Promise<number> {
     args: argv,
     options: {
       json: { type: "boolean" },
+      "base-ref": { type: "string" },
     },
     strict: false,
     allowPositionals: false,
   });
 
   const json = globalJson || values.json === true;
+  const baseRef = values["base-ref"] as string | undefined;
   const cwd = process.cwd();
-  const result = await runDoctor(cwd);
+  const result = await runDoctor(cwd, baseRef !== undefined ? { baseRef } : {});
 
   if (json) {
     if (result.ok) {
@@ -368,6 +370,7 @@ async function cmdValidate(argv: string[], globalJson: boolean): Promise<number>
     options: {
       json: { type: "boolean" },
       strict: { type: "boolean" },
+      "base-ref": { type: "string" },
     },
     strict: false,
     allowPositionals: false,
@@ -375,8 +378,13 @@ async function cmdValidate(argv: string[], globalJson: boolean): Promise<number>
 
   const json = globalJson || values.json === true;
   const strict = values.strict === true;
+  const baseRef = values["base-ref"] as string | undefined;
   const cwd = process.cwd();
-  const result = await runValidate({ cwd, strict });
+  const result = await runValidate({
+    cwd,
+    strict,
+    ...(baseRef !== undefined ? { baseRef } : {}),
+  });
 
   if (json) {
     if (result.ok) {
