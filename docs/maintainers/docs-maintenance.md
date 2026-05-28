@@ -61,3 +61,11 @@ Rules:
 - [`scripts/check-doc-invariants.mjs`](../../scripts/check-doc-invariants.mjs) (`pnpm check:doc-invariants`) enforces semantic invariants the link checker can't see — e.g. the README tour stays runnable, beginner docs carry no version/RFC noise, and `dogfood.md` stays a quick guide.
 - `pnpm check:docs` runs both, and CI runs it on every matrix entry.
 - It **cannot** catch *semantically* stale links — a link whose target file still exists but whose section has moved (e.g. a "see dogfood § Release prep" pointer after Release prep moved to `operations.md`). When you move a section, grep for prose that points at its old home, not just the anchor.
+- `tests/unit/error-code-surface.test.ts` hard-fails when a `code:` in `src/` is missing from `KNOWN_CODES` / `cli-contract.md` — so **every error code is always in the contract**. Its failure message also reminds you to add a `troubleshooting.md` recovery entry when the code is user-recoverable.
+
+### Deliberately NOT auto-enforced (verify by hand at release prep)
+
+Two ownership-map rules are **human judgement**, so they are intentionally left as a manual check rather than a CI gate (a hard gate here would either over-fire on formatting edits or force a brittle exemption list — and would punish honest doc work). The release-prep runbook ([releasing.md](releasing.md#release-prep-pr-all-automatable-steps)) is where you confirm them for everything shipped since the last tag:
+
+1. **User-recoverable error/diagnostic code → `troubleshooting.md` entry.** Not every code needs one (many are self-explanatory or CI-only); the judgement of "is this worth a recovery walkthrough?" stays with you.
+2. **EN usage-doc change → matching `docs/ja/*` update.** Only the mirrored usage docs (`per-task-loop.md`, `getting-started.md`, `glossary.md`, `workflows/*`) — reference contracts stay English-only on purpose. A `git diff <last-tag>..HEAD -- docs/per-task-loop.md docs/getting-started.md docs/glossary.md docs/workflows/` that shows EN changes with no `docs/ja/` counterpart is the signal to sync.
