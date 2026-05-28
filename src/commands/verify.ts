@@ -8,6 +8,7 @@ import { Task } from "../core/schemas/task.ts";
 import { ProgressLog } from "../core/schemas/progress-event.ts";
 import {
   resolveDecisionGate,
+  isDecisionRequiredForTask,
   type DecisionResolution,
 } from "../core/decisions/adr.ts";
 
@@ -198,7 +199,7 @@ export async function checkDecision(
   phase: Phase,
   task: Task,
 ): Promise<DecisionGateResult> {
-  if (!phase.requires_decision && !task.requires_decision) {
+  if (!isDecisionRequiredForTask(phase, task)) {
     return { check: { name: "decision", ok: true }, resolution: null };
   }
   const resolution = await resolveDecisionGate(cwd, task.id, task.decision_refs);

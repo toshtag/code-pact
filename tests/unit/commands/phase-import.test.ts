@@ -1019,3 +1019,232 @@ describe("runPhaseImport — suggested_next_steps (P13-T4)", () => {
     expect(result.suggested_next_steps).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// --scaffold-decisions (RFC §3-D)
+// ---------------------------------------------------------------------------
+
+describe("runPhaseImport — scaffold decisions (RFC §3-D)", () => {
+  async function adrExists(d: string, rel: string): Promise<boolean> {
+    try {
+      await readFile(join(d, rel), "utf8");
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  const phaseWithDecisionTask = (extra = ""): string =>
+    `phases:
+  - id: P1
+    name: Foundation
+    weight: 12
+    objective: Establish foundation
+    tasks:
+      - id: P1-T1
+        type: feature
+        ambiguity: low
+        risk: low
+        context_size: small
+        write_surface: low
+        verification_strength: weak
+        expected_duration: short
+        status: planned
+        description: x
+        requires_decision: true${extra}
+`;
+
+  it("scaffolds design/decisions/<id>.md (proposed) for a task-level requires_decision task", async () => {
+    await setupEmptyProject(dir);
+    const inputPath = await writeInput(dir, phaseWithDecisionTask());
+    const result = await runPhaseImport({ cwd: dir, inputPath, scaffoldDecisions: true });
+
+    expect(result.scaffolded_decisions).toEqual(["design/decisions/P1-T1.md"]);
+    expect(result.scaffold_skipped).toEqual([]);
+    expect(await adrExists(dir, "design/decisions/P1-T1.md")).toBe(true);
+    const content = await readFile(join(dir, "design", "decisions", "P1-T1.md"), "utf8");
+    expect(content).toContain("**Status:** proposed");
+  });
+
+  it("does NOT scaffold without the flag", async () => {
+    await setupEmptyProject(dir);
+    const inputPath = await writeInput(dir, phaseWithDecisionTask());
+    const result = await runPhaseImport({ cwd: dir, inputPath });
+    expect(result.scaffolded_decisions).toEqual([]);
+    expect(result.scaffold_skipped).toEqual([]);
+    expect(await adrExists(dir, "design/decisions/P1-T1.md")).toBe(false);
+  });
+
+  it("scaffolds for a PHASE-level requires_decision task (effective-gate parity)", async () => {
+    await setupEmptyProject(dir);
+    const inputPath = await writeInput(
+      dir,
+      `phases:
+  - id: P1
+    name: Foundation
+    weight: 12
+    objective: Establish foundation
+    requires_decision: true
+    tasks:
+      - id: P1-T1
+        type: feature
+        ambiguity: low
+        risk: low
+        context_size: small
+        write_surface: low
+        verification_strength: weak
+        expected_duration: short
+        status: planned
+        description: x
+`,
+    );
+    const result = await runPhaseImport({ cwd: dir, inputPath, scaffoldDecisions: true });
+    expect(result.scaffolded_decisions).toEqual(["design/decisions/P1-T1.md"]);
+  });
+
+  it("scaffolds a missing decision_ref under design/decisions/, leaving the task shape unchanged", async () => {
+    await setupEmptyProject(dir);
+    const inputPath = await writeInput(
+      dir,
+      phaseWithDecisionTask(`
+        decision_refs:
+          - design/decisions/P1-T1-rfc.md`),
+    );
+    const result = await runPhaseImport({ cwd: dir, inputPath, scaffoldDecisions: true });
+    expect(result.scaffolded_decisions).toEqual(["design/decisions/P1-T1-rfc.md"]);
+    expect(await adrExists(dir, "design/decisions/P1-T1-rfc.md")).toBe(true);
+    // Task shape unchanged: decision_refs preserved as written.
+    const phaseRaw = await readFile(join(dir, "design", "phases", "P1-foundation.yaml"), "utf8");
+    const phase = Phase.parse(parseYaml(phaseRaw) as unknown);
+    expect(phase.tasks!.find((t) => t.id === "P1-T1")!.decision_refs).toEqual([
+      "design/decisions/P1-T1-rfc.md",
+    ]);
+  });
+
+  it("never overwrites an existing decision_ref file", async () => {
+    await setupEmptyProject(dir);
+    await mkdir(join(dir, "design", "decisions"), { recursive: true });
+    await writeFile(join(dir, "design", "decisions", "P1-T1-rfc.md"), "original\n", "utf8");
+    const inputPath = await writeInput(
+      dir,
+      phaseWithDecisionTask(`
+        decision_refs:
+          - design/decisions/P1-T1-rfc.md`),
+    );
+    const result = await runPhaseImport({ cwd: dir, inputPath, scaffoldDecisions: true });
+    expect(result.scaffolded_decisions).toEqual([]);
+    const content = await readFile(join(dir, "design", "decisions", "P1-T1-rfc.md"), "utf8");
+    expect(content).toBe("original\n");
+  });
+
+  it("reports a safe decision_ref OUTSIDE design/decisions/ as scaffold_skipped; phases still imported", async () => {
+    await setupEmptyProject(dir);
+    const inputPath = await writeInput(
+      dir,
+      phaseWithDecisionTask(`
+        decision_refs:
+          - docs/foo.md`),
+    );
+    const result = await runPhaseImport({ cwd: dir, inputPath, scaffoldDecisions: true });
+    expect(result.imported_phases).toHaveLength(1);
+    expect(result.scaffolded_decisions).toEqual([]);
+    expect(result.scaffold_skipped).toEqual([
+      { ref: "docs/foo.md", reason: "outside design/decisions/" },
+    ]);
+    expect(await adrExists(dir, "docs/foo.md")).toBe(false);
+  });
+
+  it("rejects an UNSAFE decision_ref with CONFIG_ERROR and writes nothing (atomic)", async () => {
+    await setupEmptyProject(dir);
+    const before = (await readRoadmap(dir)).raw;
+    const inputPath = await writeInput(
+      dir,
+      phaseWithDecisionTask(`
+        decision_refs:
+          - ../escape.md`),
+    );
+    await expect(
+      runPhaseImport({ cwd: dir, inputPath, scaffoldDecisions: true }),
+    ).rejects.toMatchObject({ code: "CONFIG_ERROR" });
+    expect((await readRoadmap(dir)).raw).toBe(before);
+    expect(await listPhaseFiles(dir)).toEqual([]);
+  });
+
+  it("rejects an UNSAFE task id (P1/T1) with CONFIG_ERROR and writes nothing", async () => {
+    await setupEmptyProject(dir);
+    const before = (await readRoadmap(dir)).raw;
+    const inputPath = await writeInput(
+      dir,
+      `phases:
+  - id: P1
+    name: Foundation
+    weight: 12
+    objective: Establish foundation
+    tasks:
+      - id: P1/T1
+        type: feature
+        ambiguity: low
+        risk: low
+        context_size: small
+        write_surface: low
+        verification_strength: weak
+        expected_duration: short
+        status: planned
+        description: x
+        requires_decision: true
+`,
+    );
+    await expect(
+      runPhaseImport({ cwd: dir, inputPath, scaffoldDecisions: true }),
+    ).rejects.toMatchObject({ code: "CONFIG_ERROR" });
+    expect((await readRoadmap(dir)).raw).toBe(before);
+    expect(await listPhaseFiles(dir)).toEqual([]);
+  });
+
+  it("does not scaffold when a matching ADR filename already exists (default path)", async () => {
+    await setupEmptyProject(dir);
+    await mkdir(join(dir, "design", "decisions"), { recursive: true });
+    await writeFile(join(dir, "design", "decisions", "P1-T1-existing.md"), "**Status:** accepted\n", "utf8");
+    const inputPath = await writeInput(dir, phaseWithDecisionTask());
+    const result = await runPhaseImport({ cwd: dir, inputPath, scaffoldDecisions: true });
+    expect(result.scaffolded_decisions).toEqual([]);
+    expect(await adrExists(dir, "design/decisions/P1-T1.md")).toBe(false);
+  });
+
+  it("substring collision: scaffolding P1-T1 is skipped when P1-T10.md already exists (pins the shared filename rule)", async () => {
+    await setupEmptyProject(dir);
+    await mkdir(join(dir, "design", "decisions"), { recursive: true });
+    await writeFile(join(dir, "design", "decisions", "P1-T10.md"), "**Status:** accepted\n", "utf8");
+    const inputPath = await writeInput(dir, phaseWithDecisionTask());
+    const result = await runPhaseImport({ cwd: dir, inputPath, scaffoldDecisions: true });
+    expect(result.scaffolded_decisions).toEqual([]);
+    expect(await adrExists(dir, "design/decisions/P1-T1.md")).toBe(false);
+  });
+
+  it("does not scaffold a task without requires_decision", async () => {
+    await setupEmptyProject(dir);
+    const inputPath = await writeInput(
+      dir,
+      `phases:
+  - id: P1
+    name: Foundation
+    weight: 12
+    objective: Establish foundation
+    tasks:
+      - id: P1-T1
+        type: feature
+        ambiguity: low
+        risk: low
+        context_size: small
+        write_surface: low
+        verification_strength: weak
+        expected_duration: short
+        status: planned
+        description: x
+`,
+    );
+    const result = await runPhaseImport({ cwd: dir, inputPath, scaffoldDecisions: true });
+    expect(result.scaffolded_decisions).toEqual([]);
+    expect(await adrExists(dir, "design/decisions/P1-T1.md")).toBe(false);
+  });
+});

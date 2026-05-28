@@ -6,6 +6,18 @@ import { Task } from "../core/schemas/task.ts";
 import { Roadmap, type PhaseRef } from "../core/schemas/roadmap.ts";
 import { Phase } from "../core/schemas/phase.ts";
 import { createPhase, RESERVED_PHASE_IDS } from "../core/services/createPhase.ts";
+import {
+  isDecisionRequiredForTask,
+  readDecisionAdrFiles,
+  hasDecisionAdrForTaskId,
+} from "../core/decisions/adr.ts";
+import {
+  scaffoldTargetsForTask,
+  assertSafeDecisionFilenameSegment,
+  isUnderDecisionsDir,
+  writeProposedAdrIfAbsent,
+} from "../core/decisions/scaffold.ts";
+import { assertSafeRelativePath } from "../core/path-safety.ts";
 
 export type PhaseImportOptions = {
   cwd: string;
@@ -19,6 +31,11 @@ export type PhaseImportOptions = {
    * and reported in `result.completed_fields`.
    */
   strict?: boolean;
+  /**
+   * When true, scaffold a `proposed` ADR stub for every requires_decision
+   * task that has no resolving ADR yet (RFC §3-D). Opt-in; default off.
+   */
+  scaffoldDecisions?: boolean;
 };
 
 export type CompletedField = {
@@ -63,6 +80,18 @@ export type PhaseImportResult = {
    * P13: JSON consumers can assume the schema is constant.
    */
   suggested_next_steps: string[];
+  /**
+   * Repo-relative POSIX paths of `proposed` ADR stubs created by
+   * `--scaffold-decisions` (RFC §3-D). Always present, `[]` when the flag is
+   * off or nothing was scaffolded.
+   */
+  scaffolded_decisions: string[];
+  /**
+   * Scaffold targets that were intentionally NOT written — e.g. a
+   * `decision_refs` path outside `design/decisions/`. Always present, `[]`
+   * when nothing was skipped. Surfaced so the omission is never silent.
+   */
+  scaffold_skipped: { ref: string; reason: string }[];
 };
 
 async function loadRoadmap(cwd: string): Promise<Roadmap> {
@@ -233,6 +262,7 @@ export async function runPhaseImport(
     warnings,
     force: opts.force === true,
     strict: opts.strict === true,
+    scaffoldDecisions: opts.scaffoldDecisions === true,
   });
 }
 
@@ -250,6 +280,8 @@ export type ApplyParsedPhaseImportOptions = {
   warnings: ImportWarning[];
   force?: boolean;
   strict?: boolean;
+  /** Scaffold `proposed` ADR stubs for requires_decision tasks (RFC §3-D). */
+  scaffoldDecisions?: boolean;
 };
 
 /**
@@ -263,6 +295,7 @@ export async function applyParsedPhaseImport(
   const { cwd, input, warnings } = opts;
   const force = opts.force === true;
   const strict = opts.strict === true;
+  const scaffoldDecisions = opts.scaffoldDecisions === true;
 
   // ---- Reserved-id preflight (P14 governance) -------------------------
   // Reject the entire import if ANY phase entry uses a reserved id (e.g.
@@ -389,6 +422,35 @@ export async function applyParsedPhaseImport(
     return { entry, tasks };
   });
 
+  // ---- Scaffold preflight (RFC §3-D, atomic) --------------------------
+  // Validate every scaffold target BEFORE any write, so an unsafe task id or
+  // decision_ref fails the whole import with the roadmap byte-identical — no
+  // partial-write state. Unsafe → CONFIG_ERROR here; a safe path that simply
+  // lives outside design/decisions/ is NOT an error (reported as
+  // scaffold_skipped at write time).
+  if (scaffoldDecisions) {
+    for (const { entry, tasks } of resolved) {
+      for (const task of tasks) {
+        if (!isDecisionRequiredForTask(entry, task)) continue;
+        const refs = task.decision_refs;
+        if (!refs || refs.length === 0) {
+          assertSafeDecisionFilenameSegment(task.id); // throws CONFIG_ERROR
+        }
+        for (const target of scaffoldTargetsForTask(task.id, refs)) {
+          try {
+            assertSafeRelativePath(target);
+          } catch {
+            const e = new Error(
+              `Cannot scaffold decision for task "${task.id}": unsafe path "${target}".`,
+            );
+            (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+            throw e;
+          }
+        }
+      }
+    }
+  }
+
   // ---- Write pass (one createPhase call per target) -------------------
   const importedRefs: PhaseRef[] = [];
   const importedTaskIds: string[] = [];
@@ -396,6 +458,36 @@ export async function applyParsedPhaseImport(
     const created = await createPhase(entryToCreatePhaseInput(cwd, entry, tasks));
     importedRefs.push(created.ref);
     for (const t of tasks) importedTaskIds.push(t.id);
+  }
+
+  // ---- Scaffold proposed ADR stubs (RFC §3-D) -------------------------
+  // Lock still held. Targets were path-validated in the preflight above.
+  const scaffoldedDecisions: string[] = [];
+  const scaffoldSkipped: { ref: string; reason: string }[] = [];
+  if (scaffoldDecisions) {
+    const existingAdrs = await readDecisionAdrFiles(cwd);
+    for (const { entry, tasks } of resolved) {
+      for (const task of tasks) {
+        if (!isDecisionRequiredForTask(entry, task)) continue;
+        const refs = task.decision_refs;
+        const usingDefault = !refs || refs.length === 0;
+        for (const target of scaffoldTargetsForTask(task.id, refs)) {
+          if (!isUnderDecisionsDir(target)) {
+            scaffoldSkipped.push({ ref: target, reason: "outside design/decisions/" });
+            continue;
+          }
+          // Default `<task-id>.md` target: skip when a matching ADR filename
+          // already exists (filename-substring rule shared with the gate —
+          // not status-aware). decision_refs targets rely on the exact-path
+          // existence check inside writeProposedAdrIfAbsent instead.
+          if (usingDefault && hasDecisionAdrForTaskId(existingAdrs, task.id)) {
+            continue;
+          }
+          const outcome = await writeProposedAdrIfAbsent(cwd, target, task.id);
+          if (outcome === "created") scaffoldedDecisions.push(target);
+        }
+      }
+    }
   }
 
   return {
@@ -408,7 +500,10 @@ export async function applyParsedPhaseImport(
       importedRefs,
       importedTaskIds,
       completedFieldsAll,
+      scaffoldedDecisions,
     ),
+    scaffolded_decisions: scaffoldedDecisions,
+    scaffold_skipped: scaffoldSkipped,
   };
 }
 
@@ -422,6 +517,7 @@ function buildSuggestedNextSteps(
   importedRefs: PhaseRef[],
   importedTaskIds: string[],
   completedFieldsAll: CompletedField[],
+  scaffoldedDecisions: string[],
 ): string[] {
   if (importedRefs.length === 0) return [];
 
@@ -430,6 +526,12 @@ function buildSuggestedNextSteps(
   if (completedFieldsAll.length > 0) {
     steps.push(
       "Review the `completed_fields` array — every entry is a task field code-pact filled with a default. Confirm each is appropriate before treating the imported tasks as source-of-truth.",
+    );
+  }
+
+  if (scaffoldedDecisions.length > 0) {
+    steps.push(
+      `Fill in and accept the scaffolded decision records (flip **Status** to \`accepted\` once settled — that releases the gate): ${scaffoldedDecisions.join(", ")}`,
     );
   }
 

@@ -389,6 +389,30 @@ describe("json-stdout contract: state-mutating Stable (v1.0) commands", () => {
     expectStdoutIsJson(p.run(["phase", "import", importPath, "--json"]), "phase import");
   });
 
+  it("phase import --scaffold-decisions --json", async () => {
+    const p = await freshProject("phase-import-scaffold");
+    const importPath = join(p.dir, "draft.yaml");
+    await writeFile(
+      importPath,
+      stringifyYaml({
+        phases: [
+          {
+            id: "P1",
+            name: "Foundation",
+            weight: 10,
+            objective: "scaffold-decisions stdout test",
+            tasks: [{ id: "P1-T1", requires_decision: true }],
+          },
+        ],
+      }),
+      "utf8",
+    );
+    expectStdoutIsJson(
+      p.run(["phase", "import", importPath, "--scaffold-decisions", "--json"]),
+      "phase import --scaffold-decisions",
+    );
+  });
+
   // P14 governance: reserved-id (TUTORIAL) creation-time block — both
   // `phase add` and `phase import` reject the entire operation with
   // CONFIG_ERROR (exit 2). Roadmap stays byte-identical on failure.

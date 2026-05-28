@@ -603,6 +603,7 @@ export async function cmdPhaseImport(
       {
         force: { type: "boolean" },
         strict: { type: "boolean" },
+        "scaffold-decisions": { type: "boolean" },
         json: { type: "boolean" },
       },
       { allowPositionals: true },
@@ -623,6 +624,7 @@ export async function cmdPhaseImport(
   const json = globalJson || values.json === true;
   const force = values.force === true;
   const strict = values.strict === true;
+  const scaffoldDecisions = values["scaffold-decisions"] === true;
   const inputPath = positionals[0];
   if (!inputPath) {
     const aliasNote = invokedAs === "phase import" ? "" : " (alias for `phase import`)";
@@ -641,7 +643,7 @@ export async function cmdPhaseImport(
   // multi-phase apply loop (every inner createPhase runs under the same lock).
   return withWriteLock(cwd, "phase import", json, async (): Promise<number> => {
     try {
-      const result = await runPhaseImport({ cwd, inputPath, force, strict });
+      const result = await runPhaseImport({ cwd, inputPath, force, strict, scaffoldDecisions });
       if (json) {
         process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
       } else {
@@ -651,6 +653,12 @@ export async function cmdPhaseImport(
         }
         for (const w of result.warnings) {
           process.stderr.write(`  warning [${w.code}]${w.phase_id ? ` ${w.phase_id}` : ""}: ${w.message}\n`);
+        }
+        for (const p of result.scaffolded_decisions) {
+          process.stderr.write(`  scaffolded decision (proposed): ${p}\n`);
+        }
+        for (const s of result.scaffold_skipped) {
+          process.stderr.write(`  scaffold skipped [${s.reason}]: ${s.ref}\n`);
         }
       }
       return 0;

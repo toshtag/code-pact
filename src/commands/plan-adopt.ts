@@ -77,6 +77,8 @@ export type PlanAdoptOptions = {
   cwd: string;
   fromPath: string;
   write: boolean;
+  /** Scaffold `proposed` ADR stubs for requires_decision tasks (RFC §3-D). */
+  scaffoldDecisions?: boolean;
 };
 
 // ---------------------------------------------------------------------------
@@ -369,6 +371,7 @@ export async function runPlanAdopt(
   opts: PlanAdoptOptions,
 ): Promise<PlanAdoptResult> {
   const { cwd, fromPath, write } = opts;
+  const scaffoldDecisions = opts.scaffoldDecisions === true;
 
   try {
     assertSafeRelativePath(fromPath);
@@ -409,6 +412,7 @@ export async function runPlanAdopt(
       cwd,
       input: detected.input,
       warnings: detected.importWarnings,
+      scaffoldDecisions,
     });
   }
 

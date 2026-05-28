@@ -286,7 +286,7 @@ the list becomes `default_agent` in the generated `project.yaml`.
 
 ## `phase import`
 
-`code-pact phase import <path> [--force] [--strict] [--json]` bulk-imports a draft roadmap. Input shape:
+`code-pact phase import <path> [--force] [--strict] [--scaffold-decisions] [--json]` bulk-imports a draft roadmap. Input shape:
 
 ```yaml
 phases:
@@ -359,12 +359,24 @@ On success the JSON envelope returns
       "Run `code-pact plan lint --json` to validate the imported phase(s).",
       "Run `code-pact phase runbook P1 --json` to see the recommended per-phase next steps (reconcile-batch step is the natural follow-up after the per-task loop starts).",
       "Run `code-pact task runbook P1-T1 --json` to see the per-task lifecycle starting from a fresh task."
-    ]
+    ],
+    "scaffolded_decisions": [],
+    "scaffold_skipped": []
   }
 }
 ```
 
 `completed_fields` is non-empty only when defaults were applied. In strict mode it is always `[]`.
+
+**`--scaffold-decisions` (v1.22+ / RFC §3-D, opt-in).** When set, after the phase write pass the importer scaffolds a `**Status:** proposed` ADR stub for every task the decision gate would block (`requires_decision` on the task **or** its phase). The stub opens at `proposed`, so the status-aware gate (RFC §3-C) still **blocks** `verify` / `task complete` / `task record-done` until a human flips it to `accepted` — scaffolding fills the work-surface, it does not pre-approve anything. Targets:
+
+- a task with `decision_refs` → each referenced path **under `design/decisions/`** that is missing is scaffolded (the all-must-be-accepted contract); the task shape is never modified;
+- a task without `decision_refs` → the default `design/decisions/<task-id>.md`, skipped when a matching ADR filename already exists.
+
+Existing files are never overwritten. Path safety is enforced in the **preflight** (before any write): an unsafe `decision_refs` path (`../x.md`, `/tmp/x.md`, …) or an unsafe task-id filename segment (`P1/T1`) → `CONFIG_ERROR` (exit 2) with **nothing written** and the roadmap byte-identical. A *safe* `decision_refs` path that simply lives **outside** `design/decisions/` is not an error: it is left unwritten and reported in `scaffold_skipped`.
+
+- `scaffolded_decisions: string[]` — repo-relative POSIX paths of the stubs created. Always present, `[]` when the flag is off or nothing was scaffolded.
+- `scaffold_skipped: { ref: string; reason: string }[]` — targets intentionally not written (e.g. `reason: "outside design/decisions/"`). Always present. Existing-file skips are silent (idempotent); only surfacing-worthy omissions appear here.
 
 **`warnings` (additive field).** Always present, even as `[]` (field-presence-fixed, like `suggested_next_steps`). Each entry is `{ code, phase_id?, message }`. Warnings are advisories only — they never change the exit code. The current code is:
 
@@ -574,9 +586,9 @@ The YAML example also shows the optional task **readiness fields** (`depends_on`
 
 When `has_brief` or `has_constitution` is false, a leading step recommends `plan brief` / `plan constitution` first. The field is additive: existing JSON consumers (which read only `prompt` / `has_brief` / `has_constitution` / `clipboard_copied`) see no shape change.
 
-### `plan adopt <path> [--write] [--json]` (v1.x+)
+### `plan adopt <path> [--write] [--scaffold-decisions] [--json]` (v1.x+)
 
-Deterministically converts an existing plan file into the `phase import` input shape. **Dry-run by default** — it prints the generated YAML and writes nothing. `--write` applies it by reusing the `phase import` validation and write pass (under the same advisory write lock). code-pact never calls an LLM here.
+Deterministically converts an existing plan file into the `phase import` input shape. **Dry-run by default** — it prints the generated YAML and writes nothing. `--write` applies it by reusing the `phase import` validation and write pass (under the same advisory write lock). `--scaffold-decisions` (only meaningful with `--write`) forwards to that same pass, so it scaffolds `proposed` ADR stubs exactly as `phase import --scaffold-decisions` does; the results appear under `data.import_result.scaffolded_decisions` / `scaffold_skipped`. code-pact never calls an LLM here.
 
 For **structured** plans (task bullets under headings). A narrative roadmap whose tasks live in prose or fenced code blocks yields no list items and returns `no_plan_items_detected` — the signal to use `plan prompt --schema-only` + an agent instead. No `--force`: id collisions surface through the existing `phase import` errors.
 

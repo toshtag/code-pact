@@ -6,6 +6,7 @@ import {
   readDecisionAdrFiles,
   hasDecisionAdrForTaskId,
   isAbsentDecisionsDirError,
+  isDecisionRequiredForTask,
   parseAdrStatus,
   classifyAdr,
   resolveDecisionGate,
@@ -74,6 +75,21 @@ describe("isAbsentDecisionsDirError", () => {
     expect(isAbsentDecisionsDirError(new Error("boom"))).toBe(false);
     expect(isAbsentDecisionsDirError(null)).toBe(false);
     expect(isAbsentDecisionsDirError("nope")).toBe(false);
+  });
+});
+
+describe("isDecisionRequiredForTask", () => {
+  it("is true when the task requires a decision", () => {
+    expect(isDecisionRequiredForTask({}, { requires_decision: true })).toBe(true);
+  });
+  it("is true when the phase requires a decision (parity with verify)", () => {
+    expect(isDecisionRequiredForTask({ requires_decision: true }, {})).toBe(true);
+  });
+  it("is false when neither does", () => {
+    expect(isDecisionRequiredForTask({}, {})).toBe(false);
+    expect(
+      isDecisionRequiredForTask({ requires_decision: false }, { requires_decision: false }),
+    ).toBe(false);
   });
 });
 

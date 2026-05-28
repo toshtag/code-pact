@@ -13,6 +13,21 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+### Opt-in proposed-ADR scaffolding (RFC §3-D)
+
+Importing an AI-generated roadmap full of `requires_decision: true` tasks left every one of them gated with no ADR to fill — the human had to hand-create each `design/decisions/<task-id>.md` before the gate could ever pass. `--scaffold-decisions` closes that gap.
+
+**Added**
+
+- **`phase import --scaffold-decisions`** (and **`plan adopt --write --scaffold-decisions`**) — opt-in flag that scaffolds a `**Status:** proposed` ADR stub for every task the decision gate would block (`requires_decision` on the task **or** its phase, via the shared `isDecisionRequiredForTask`). The stub opens at `proposed`, so the status-aware gate (RFC §3-C) still blocks `verify` / `task complete` / `task record-done` until a human flips it to `accepted` — scaffolding fills the work-surface, it does not pre-approve. Off by default; existing ADRs are never overwritten.
+  - For a task with `decision_refs`, the missing referenced files **under `design/decisions/`** are scaffolded (the all-must-be-accepted contract); the task shape is never modified. Without `decision_refs`, the default `design/decisions/<task-id>.md` is used (skipped when a matching ADR filename already exists).
+  - Path safety is enforced atomically in the import preflight: an unsafe `decision_refs` path or unsafe task-id filename segment (`P1/T1`) → `CONFIG_ERROR` with nothing written and the roadmap byte-identical. A safe `decision_refs` path outside `design/decisions/` is reported in `scaffold_skipped` rather than written.
+- `phase import` / `plan adopt` results gain `scaffolded_decisions: string[]` and `scaffold_skipped: { ref, reason }[]` (always present).
+
+**Internal**
+
+- `dogfood-trust-hardening-rfc.md` flipped to record §3-D implemented; §2 (`CONTROL_PLANE_NOT_DRIVEN`) remains the one deferred item.
+
 ## [1.22.0] — 2026-05-28
 
 ### Status-aware ADR decision gate (RFC §3-C)
