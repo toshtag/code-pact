@@ -224,6 +224,60 @@ describe("auditWrites — working-tree mode", () => {
 });
 
 // ---------------------------------------------------------------------------
+// code-pact runtime-state exclusion (progress.yaml + locks)
+// ---------------------------------------------------------------------------
+
+describe("auditWrites — excludes code-pact runtime state", () => {
+  beforeEach(async () => {
+    await git(cwd, ["init", "--quiet", "--initial-branch=main"]);
+    await touch(cwd, "README.md", "initial\n");
+    await git(cwd, ["add", "."]);
+    await git(cwd, ["commit", "--quiet", "-m", "initial"]);
+  });
+
+  it("drops progress.yaml and locks/** so files_touched is empty when only those are dirty", async () => {
+    await touch(cwd, ".code-pact/state/progress.yaml", "events: []\n");
+    await touch(cwd, ".code-pact/locks/write.lock", "{}\n");
+    const result = await auditWrites({ cwd, declaredWrites: [] });
+    expect(result.files_touched).toEqual([]);
+    // Nothing outside the (empty) declaration either — the runtime state
+    // never reaches the classifier.
+    expect(result.outside_declared).toEqual([]);
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("keeps real work product while dropping runtime state", async () => {
+    await touch(cwd, ".code-pact/state/progress.yaml", "events: []\n");
+    await touch(cwd, ".code-pact/locks/write.lock", "{}\n");
+    await touch(cwd, "src/foo.ts", "// new\n");
+    const result = await auditWrites({ cwd, declaredWrites: ["src/**"] });
+    expect(result.files_touched).toEqual(["src/foo.ts"]);
+    expect(result.outside_declared).toEqual([]);
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("does NOT exclude .code-pact/project.yaml — a user-edited config file is real work product", async () => {
+    await touch(cwd, ".code-pact/project.yaml", "name: x\n");
+    const result = await auditWrites({ cwd, declaredWrites: [] });
+    expect(result.files_touched).toEqual([".code-pact/project.yaml"]);
+    expect(result.outside_declared).toEqual([".code-pact/project.yaml"]);
+    expect(result.warnings).toEqual(["TASK_WRITES_AUDIT_OUTSIDE_DECLARED"]);
+  });
+
+  it("does NOT exclude .code-pact/agent-profiles/** — adapter/profile edits are real work product", async () => {
+    await touch(cwd, ".code-pact/agent-profiles/claude-code.yaml", "model: x\n");
+    const result = await auditWrites({
+      cwd,
+      declaredWrites: [".code-pact/agent-profiles/**"],
+    });
+    expect(result.files_touched).toEqual([
+      ".code-pact/agent-profiles/claude-code.yaml",
+    ]);
+    expect(result.outside_declared).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Merge-base mode (--base-ref)
 // ---------------------------------------------------------------------------
 
