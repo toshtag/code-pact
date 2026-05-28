@@ -1,0 +1,227 @@
+id: P33
+name: Lightweight lane + recommendation consumption — let code-pact steer how an
+  agent proceeds, not just what it must verify
+weight: 8
+confidence: high
+risk: medium
+status: planned
+objective: >
+  `task prepare` / `recommend` already return a correct execution profile
+
+  (tier/effort/planning/budget), but every task is pushed through the full loop
+
+  (prepare → start → complete → finalize) — ceremony for small,
+  strongly-verified
+
+  work — and nothing tells an agent to consume the recommendation as an
+  execution
+
+  profile. A correct recommendation is produced but not acted on.
+
+
+  This phase adds a `lifecycleMode` field (`full_loop` | `record_only` |
+
+  `decision_loop`) to RecommendResultV2 (additive) AND ships the adapter
+  guidance
+
+  that tells agents to consume it — in the SAME task — so the field is never a
+
+  produced-but-unused signal (the reason the original P33 + P35 are merged).
+
+  `lifecycleMode` is a conservative, deterministic switch on task attributes;
+
+  conformance verifies the consumption guidance is present, version-gated on a
+
+  new threshold so existing adapters are not broken.
+
+
+  Design recorded in design/decisions/lightweight-lane-rfc.md.
+
+
+  Scope discipline (3 tasks):
+
+    - T0 — RFC + phase registration (bootstrap).
+    - T1 — lifecycleMode field + consumption guidance COMBINED (schema, recommend
+      wiring, formatRecommend, adapter guidance i18n + templates, repo CLAUDE.md
+      regen, tests). Field and guidance ship together; never field-only.
+    - T2 — version-gated conformance checks + docs + CHANGELOG.
+non_goals:
+  - adding an agent_action JSON field (duplicates prose guidance without
+    enforcement)
+  - auto decision_loop for type architecture (only explicit requires_decision)
+  - changing how task complete / task record-done behave (lifecycle is advisory)
+  - record_only for bugfix / refactor (conservative; revisit with usage data)
+  - any bug-detection capability
+definition_of_done:
+  - RecommendResultV2 carries lifecycleMode (full_loop | record_only |
+    decision_loop), computed by a deterministic finite switch reusing
+    isDecisionRequiredForTask; task prepare / recommend surface it and
+    RecommendResultV2.parse accepts it
+  - record_only fires only when requiresDecision is false AND type in
+    {docs,test} AND ambiguity low AND risk low AND verification_strength strong;
+    decision takes precedence; everything else is full_loop
+  - the generated adapter instruction files (both locales) tell agents to read
+    data.recommendation and let tier/effort/planning/lifecycleMode drive
+    behavior, to report a limitation when model switching is impossible, and to
+    use task record-done (without skipping project verification) for record_only
+  - three version-gated conformance checks
+    (recommendation_consumption_guidance_present,
+    lifecycle_mode_guidance_present, cannot_switch_model_fallback_present)
+    verify the guidance is present, gated on a new
+    RECOMMENDATION_CONSUMPTION_FROM_VERSION (not the 1.14 threshold); below it
+    they are advisory
+  - lifecycleMode is the field name everywhere (camelCase); values are full_loop
+    / record_only / decision_loop
+verification:
+  commands:
+    - pnpm typecheck
+    - pnpm test
+    - pnpm build
+    - node dist/cli.js validate --json
+tasks:
+  - id: P33-T0
+    type: architecture
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: done
+    description: |
+      RFC + phase registration (bootstrap).
+
+      Lands design/decisions/lightweight-lane-rfc.md (status: accepted) and
+      bootstraps the phase (phase YAML + roadmap entry, weight 8) as
+      protected-path bootstrap writes NOT listed in `writes:`, per the
+      P28-P32 precedent (writes carries the RFC + CHANGELOG only; the phase YAML
+      is in acceptance_refs and design/roadmap.yaml is excluded as a plan-lint
+      --strict protected path). The RFC records the conservative determination
+      table, the consumption contract, the version-gate approach, the no-
+      agent_action decision, and why the field + guidance ship in one task.
+    decision_refs:
+      - design/decisions/lightweight-lane-rfc.md
+    reads:
+      - src/core/recommend/index.ts
+      - src/core/schemas/recommend-result.ts
+      - src/core/adapters/claude.ts
+      - src/commands/adapter-conformance.ts
+    writes:
+      - design/decisions/lightweight-lane-rfc.md
+      - CHANGELOG.md
+    acceptance_refs:
+      - design/phases/P33-lightweight-lane.yaml
+  - id: P33-T1
+    type: feature
+    ambiguity: low
+    risk: medium
+    context_size: large
+    write_surface: high
+    verification_strength: strong
+    expected_duration: long
+    status: planned
+    description: >
+      lifecycleMode field + consumption guidance — COMBINED (never field-only).
+
+
+      core:
+
+      - recommend-result.ts: LifecycleMode enum + additive lifecycleMode field
+      on
+        RecommendResultV2.
+      - new src/core/recommend/lifecycle.ts: recommendLifecycleMode(task,
+        decisionContext) — deterministic switch reusing isDecisionRequiredForTask;
+        record_only branch states requiresDecision === false explicitly.
+      - resolveRecommendation: add decisionContext?: { phaseRequiresDecision }
+        (meaning-closed, not a bare boolean); set lifecycleMode on the result.
+      - recommend.ts / task-prepare.ts: pass decisionContext from the loaded
+        phase; formatRecommend shows lifecycleMode.
+
+      adapter guidance (same PR):
+
+      - i18n agentContract verifyBody (en-US + ja-JP): read data.recommendation;
+        tier/modelId/effort/planning/lifecycleMode drive behavior; report a
+        limitation if model switching is impossible; record_only = lighter loop
+        but DO NOT skip project verification (implement, run verification, then
+        task record-done --evidence). Include the short anchor tokens verbatim in
+        both locales (data.recommendation / lifecycleMode / record_only /
+        task record-done + an English-locked model-switch phrase).
+      - claude.ts / generic.ts templates wire the new guidance.
+
+      - regenerate the repo's own CLAUDE.md via adapter upgrade
+      --accept-modified
+        (preserve project-specific edits; review the diff).
+
+      tests: recommend lifecycleMode (3 modes + counter-examples + parse);
+
+      generated-content assertions for the anchors in both locales.
+
+
+      PR stays single; commits are split logically (schema+fn → wiring →
+
+      guidance → CLAUDE.md regen).
+    decision_refs:
+      - design/decisions/lightweight-lane-rfc.md
+    reads:
+      - src/core/recommend/index.ts
+      - src/core/schemas/recommend-result.ts
+      - src/core/decisions/adr.ts
+      - src/commands/recommend.ts
+      - src/commands/task-prepare.ts
+      - src/i18n/en-US.ts
+      - src/i18n/ja-JP.ts
+      - src/core/adapters/claude.ts
+      - src/core/adapters/generic.ts
+    writes:
+      - src/core/schemas/recommend-result.ts
+      - src/core/recommend/lifecycle.ts
+      - src/core/recommend/index.ts
+      - src/commands/recommend.ts
+      - src/i18n/en-US.ts
+      - src/i18n/ja-JP.ts
+      - src/core/adapters/claude.ts
+      - src/core/adapters/generic.ts
+      - CLAUDE.md
+      - tests/unit/core/recommend/lifecycle.test.ts
+      - tests/integration/recommend-v2.test.ts
+  - id: P33-T2
+    type: feature
+    ambiguity: low
+    risk: low
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: planned
+    description: |
+      Version-gated conformance checks + docs + CHANGELOG.
+
+      - conformance-spec.ts: short stable anchors + a NEW threshold constant
+        RECOMMENDATION_CONSUMPTION_FROM_VERSION (= P33's release version,
+        placeholder confirmed at release prep). Must NOT reuse
+        ADAPTER_CONTRACT_HARDENING_FROM_VERSION (1.14.0).
+      - adapter-conformance.ts: three checks
+        (recommendation_consumption_guidance_present →  data.recommendation;
+        lifecycle_mode_guidance_present → lifecycleMode + record_only;
+        cannot_switch_model_fallback_present → short English-locked phrase),
+        same includes(anchor) shape as required_cli_surface_mentions, gated by a
+        new-threshold severity resolver (below → advisory, at/above → required).
+      - docs: agent-contract.md check table (+3 ids); cli-contract.md recommend
+        section (+lifecycleMode).
+      - CHANGELOG [Unreleased] P33 feature.
+      - tests: new checks pass/fail + version-gate advisory for old
+        generator_version (adapter-conformance-hardening.test.ts pattern).
+    decision_refs:
+      - design/decisions/lightweight-lane-rfc.md
+    reads:
+      - src/core/adapters/conformance-spec.ts
+      - src/commands/adapter-conformance.ts
+      - docs/agent-contract.md
+      - docs/cli-contract.md
+    writes:
+      - src/core/adapters/conformance-spec.ts
+      - src/commands/adapter-conformance.ts
+      - docs/agent-contract.md
+      - docs/cli-contract.md
+      - CHANGELOG.md
+      - tests/unit/commands/adapter-conformance-hardening.test.ts

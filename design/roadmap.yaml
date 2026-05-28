@@ -89,3 +89,6 @@ phases:
   - id: P32
     path: design/phases/P32-failure-clarity.yaml
     weight: 8
+  - id: P33
+    path: design/phases/P33-lightweight-lane.yaml
+    weight: 8
