@@ -161,10 +161,27 @@ describe("generateSchemaOnlyPrompt", () => {
     expect(generateSchemaOnlyPrompt("en-US").endsWith("\n")).toBe(true);
   });
 
+  it("includes the optional readiness fields (writes powers the audit)", () => {
+    const prompt = generateSchemaOnlyPrompt("en-US");
+    for (const field of [
+      "depends_on:",
+      "reads:",
+      "writes:",
+      "decision_refs:",
+      "acceptance_refs:",
+    ]) {
+      expect(prompt).toContain(field);
+    }
+    // The rule text must tell the agent these are optional, not empty-array.
+    expect(prompt).toMatch(/optional/i);
+    expect(prompt).toMatch(/do not emit empty arrays/i);
+  });
+
   it("produces a ja-JP variant", () => {
     const prompt = generateSchemaOnlyPrompt("ja-JP");
     expect(prompt).toContain("出力ルール");
     expect(prompt).toContain("verify_commands");
+    expect(prompt).toContain("writes:");
   });
 });
 

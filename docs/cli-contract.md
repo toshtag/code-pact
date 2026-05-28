@@ -563,6 +563,8 @@ JSON output includes `schema_only`, `has_brief`, `has_constitution`, and `clipbo
 
 **`--schema-only` (v1.x+).** Emits only the YAML format example plus terse output rules — no brief/constitution sections, and `design/brief.md` / `design/constitution.md` are **not read** (`has_brief` / `has_constitution` are always `false`). For agents that already hold the project context in-session and only need the output shape fixed: ask the agent to emit YAML in that format, save it, and `phase import` it. The rules direct the agent to output raw YAML (no Markdown fences) with a top-level `phases:` key using the canonical `verify_commands` field. `data.schema_only` is `true`; `suggested_next_steps` points straight at the import → lint → runbook loop (no brief/constitution capture hint). `data.schema_only` is `false` in normal mode — the field is always present (additive).
 
+The YAML example also shows the optional task **readiness fields** (`depends_on`, `reads`, `writes`, `decision_refs`, `acceptance_refs`) that `phase import` already accepts (v1.21+). The output rules instruct the agent to fill the ones it can determine and omit the rest rather than emit empty arrays. `writes` in particular feeds the `task finalize` declared-writes audit, so setting it where the output paths are known is what makes that audit useful.
+
 **v1.4+ additive field** — `data.suggested_next_steps: string[]` is always present (field-presence-fixed). Names the canonical AI-assisted planning sequence:
 
 1. Run the planning prompt through your AI agent of choice and capture its YAML response into a file (e.g. `design/imports/p1.yaml`).
@@ -1505,6 +1507,8 @@ The command MUST NOT mutate `.code-pact/state/progress.yaml` on any code path. I
 
 The `commands` dictionary is populated in every state — including the early-return states — so the agent can choose to invoke them directly after resolving the blocker.
 
+`recommendation` is `null` **only** in the early-return states (`wait_for_dependencies`, `noop_already_done`) — i.e. `done`, `blocked`, or an unmet `depends_on`. In every workable state (`planned`, `started`, `resumed`, `failed`) it is a populated `RecommendResult` whose `tier` / `effort` / `modelId` an agent can trust without a separate `recommend` call. A `null` here means "nothing to recommend yet", never "recommendation unavailable".
+
 ### Exit codes
 
 | Code | Condition |
@@ -1739,6 +1743,8 @@ Field presence by kind:
 Read-only advisory comparing the task's declared `writes` globs against the actual filesystem changes reported by git. Present on **all three success kinds** when `--json` is in effect. Human-mode `task finalize` (no `--json`) does **not** compute the audit and does **not** spawn git — the field is JSON-only.
 
 Default range is the **working tree** only: staged (`git diff --cached --name-only`) + unstaged (`git diff --name-only`) + untracked (`git ls-files --others --exclude-standard`), all merged, POSIX-normalized, and sorted. Pass `--base-ref <ref>` to additionally include the branch-level diff (`git diff --name-only $(git merge-base HEAD <ref>) HEAD`). `--base-ref` **requires** `--json`; passing it without `--json` returns `CONFIG_ERROR` (exit 2).
+
+**code-pact runtime state is excluded (v1.21+).** `files_touched` drops `.code-pact/state/progress.yaml` and anything under `.code-pact/locks/` — these are code-pact's own operational log and advisory lock, written by the tool during the very commands an agent runs, never a task's work product. Config files the user edits on purpose (`.code-pact/project.yaml`, `.code-pact/agent-profiles/**`) and design/adapter files are **not** excluded.
 
 Shape (field-presence-fixed — every key is always present):
 

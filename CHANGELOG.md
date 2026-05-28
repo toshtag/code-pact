@@ -31,6 +31,20 @@ Dogfooding exposed a gap: when a task was finished **outside** the code-pact loo
 
 - `task record-done` respects the existing decision gate and will not mark a `requires_decision` task done unless the current ADR resolution logic succeeds. In v1.21.0 that gate remains **file-presence based** (a `.md` under `design/decisions/` whose name contains the task id) — it does **not** parse ADR status/frontmatter. Status-aware ADR validation is planned separately.
 
+### Developer-experience: trustworthy prepare, precise audit, planning-prompt readiness fields, richer help
+
+A batch of ergonomics fixes that make the control plane easier to trust and use day-to-day.
+
+**Changed**
+
+- **Write audit excludes code-pact runtime state.** `task finalize`'s `data.write_audit.files_touched` no longer lists `.code-pact/state/progress.yaml` or anything under `.code-pact/locks/` — these are the tool's own operational log and advisory lock, never a task's work product, and previously showed up as `outside_declared` noise. User-edited config (`.code-pact/project.yaml`, `.code-pact/agent-profiles/**`) and design/adapter files are still audited.
+- **`plan prompt --schema-only` emits the task readiness fields.** The YAML format example now shows the optional `depends_on`, `reads`, `writes`, `decision_refs`, and `acceptance_refs` fields (which `phase import` already accepts), with output rules telling the agent to fill what it knows and omit the rest rather than emit empty arrays. `writes` is what powers the declared-writes audit, so generated roadmaps can now carry it.
+- **Richer `--help` for the lifecycle verbs.** `task prepare`, `task complete`, `task finalize`, `task record-done`, `plan prompt`, and `phase import` now answer `--help` with a full synopsis (flags + examples) instead of the generic two-line stub. Unregistered subcommands keep the stub.
+
+**Internal**
+
+- Regression tests lock the v1.20 recommendation cost fixes through the `task prepare` round-trip: a small/low-risk docs task resolves to `cheap_mechanical`, and `verification_strength: weak` alone does not escalate to `highest_reasoning`. `recommendation` is documented to be `null` only in the early-return states (`done` / `blocked` / unmet `depends_on`).
+
 ## [1.20.0] — 2026-05-27
 
 ### Trust hardening — deterministic adapters, honest `--model`, cost-correct recommendations

@@ -96,6 +96,23 @@ function toPosix(p: string): string {
   return p.split(/[\\/]/).join("/");
 }
 
+/**
+ * True for code-pact's own runtime state — the operational log and the
+ * advisory lock. These are written by code-pact itself during the very
+ * commands an agent runs (`task complete` appends to `progress.yaml`;
+ * mutating verbs touch `locks/`), so they are never a task's work product
+ * and must not show up in the declared-writes audit as `outside_declared`
+ * noise. Config files the user edits on purpose (`.code-pact/project.yaml`,
+ * `.code-pact/agent-profiles/**`) are deliberately NOT excluded — those are
+ * legitimate task artifacts. Paths are repo-root-relative + POSIX-normalized.
+ */
+function isCodePactRuntimeState(file: string): boolean {
+  return (
+    file === ".code-pact/state/progress.yaml" ||
+    file.startsWith(".code-pact/locks/")
+  );
+}
+
 function parseLines(out: string): string[] {
   return out
     .split(/\r?\n/)
@@ -174,7 +191,9 @@ export async function auditWrites(
     }
   }
 
-  const filesTouched = [...fileSet].sort();
+  const filesTouched = [...fileSet]
+    .filter((file) => !isCodePactRuntimeState(file))
+    .sort();
 
   const validGlobs = declaredWrites.filter(
     (glob) => validateGlobSyntax(glob) === null,
