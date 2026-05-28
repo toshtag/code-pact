@@ -12,6 +12,8 @@ import {
   LIFECYCLE_REQUIRED_SURFACES,
   PRIMARY_ENTRYPOINT_SURFACE,
   PRIMARY_PRECEDES_SURFACES,
+  RECOMMENDATION_CONSUMPTION_ANCHORS,
+  RECOMMENDATION_CONSUMPTION_FROM_VERSION,
   REQUIRED_FAILURE_GUIDANCE,
 } from "../core/adapters/conformance-spec.ts";
 import { readManifest } from "../core/adapters/manifest.ts";
@@ -141,6 +143,29 @@ export function resolveHardeningSeverity(
   return gteVersion(generatorVersion, ADAPTER_CONTRACT_HARDENING_FROM_VERSION)
     ? "required"
     : "advisory";
+}
+
+/**
+ * Severity of the P33 consumption-guidance checks, gated on their own release
+ * threshold (not the P30 threshold) so existing 1.14–1.25 adapters stay
+ * advisory rather than failing en masse.
+ */
+export function resolveConsumptionSeverity(
+  generatorVersion: string | undefined,
+): ConformanceSeverity {
+  if (!generatorVersion) return "advisory";
+  return gteVersion(generatorVersion, RECOMMENDATION_CONSUMPTION_FROM_VERSION)
+    ? "required"
+    : "advisory";
+}
+
+/** Every `anchor` substring is present in the instruction body. */
+export function checkConsumptionAnchors(
+  content: string,
+  anchors: ReadonlyArray<string>,
+): HardeningCheckResult {
+  const missing = anchors.filter((a) => !content.includes(a));
+  return { ok: missing.length === 0, details: { anchors: [...anchors], missing } };
 }
 
 /**
@@ -398,6 +423,27 @@ export async function runAdapterConformance(
           instructionEntry.path,
           { ...result.details, remediation },
           hardeningSeverity,
+        ),
+      );
+    }
+  }
+
+  // ----- P33: recommendation consumption guidance -----
+  // Verifies the guidance is PRESENT (anchored on short stable tokens), not
+  // that an agent obeys it. Gated on its own release threshold so existing
+  // 1.14–1.25 adapters stay advisory rather than failing en masse.
+  const consumptionSeverity = resolveConsumptionSeverity(manifest.generator_version);
+  for (const { id, anchors } of RECOMMENDATION_CONSUMPTION_ANCHORS) {
+    const result = checkConsumptionAnchors(instructionContent, anchors);
+    if (result.ok) {
+      checks.push(pass(id, instructionEntry.path, result.details, consumptionSeverity));
+    } else {
+      checks.push(
+        fail(
+          id,
+          instructionEntry.path,
+          { ...result.details, remediation },
+          consumptionSeverity,
         ),
       );
     }

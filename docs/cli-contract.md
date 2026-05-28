@@ -2274,7 +2274,8 @@ All field names are camelCase. Enum / identifier values are snake_case where app
     },
     "structuredReasons": [
       { "factor": "type", "value": "architecture", "effect": "tier=highest_reasoning" }
-    ]
+    ],
+    "lifecycleMode": "full_loop"
   }
 }
 ```
@@ -2307,6 +2308,12 @@ The output is zod-validated before return. The contract uses strict mode at ever
 | `preflight` | PreflightEntry[] | Suggested commands to run **before** implementation. Capped at 3 entries. v0.8 emits, in order: `plan lint` and `plan analyze` when `planningRequired == true`; `task status <id>` when `task.status == "in_progress"`. Agent decides whether to run them. |
 | `budgetProfile` | BudgetProfile | Three categorical magnitudes — **not** token / cost / time estimates. See below. |
 | `structuredReasons` | StructuredReason[] | Machine-readable mirror of `reasons[]`. Each entry pairs one Task factor with one effect on the output. Always at least one entry. |
+
+**P33 additive field:**
+
+| Field | Type | Trigger |
+|---|---|---|
+| `lifecycleMode` | `full_loop` \| `record_only` \| `decision_loop` | The recommended loop for this task (advisory; code-pact's own loop behavior is unchanged). Deterministic switch: `decision_loop` when the task or its phase `requires_decision`; else `record_only` when `type ∈ {docs, test}` AND `ambiguity == low` AND `risk == low` AND `verification_strength == strong`; else `full_loop`. `record_only` means a lighter *loop* (implement, run verification, then `task record-done`), **not** lighter verification. |
 
 **PreflightEntry shape:**
 

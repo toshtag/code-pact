@@ -8,13 +8,18 @@ import { describe, it, expect } from "vitest";
 import {
   gteVersion,
   resolveHardeningSeverity,
+  resolveConsumptionSeverity,
+  checkConsumptionAnchors,
   checkTaskPrepareIsPrimary,
   checkNoContractAntipatterns,
   checkActivationRulesDocumented,
   isAdapterCompliant,
   type ConformanceCheck,
 } from "../../../src/commands/adapter-conformance.ts";
-import { ADAPTER_CONTRACT_HARDENING_FROM_VERSION } from "../../../src/core/adapters/conformance-spec.ts";
+import {
+  ADAPTER_CONTRACT_HARDENING_FROM_VERSION,
+  RECOMMENDATION_CONSUMPTION_FROM_VERSION,
+} from "../../../src/core/adapters/conformance-spec.ts";
 
 describe("gteVersion", () => {
   it("compares semver cores numerically (not lexically)", () => {
@@ -49,6 +54,44 @@ describe("resolveHardeningSeverity", () => {
     );
     expect(resolveHardeningSeverity("1.14.0")).toBe("required");
     expect(resolveHardeningSeverity("2.3.4")).toBe("required");
+  });
+});
+
+describe("resolveConsumptionSeverity (P33, own threshold)", () => {
+  it("is advisory when generator_version is missing or below the P33 threshold", () => {
+    expect(resolveConsumptionSeverity(undefined)).toBe("advisory");
+    // The existing P30 threshold (1.14.0) must NOT make P33 checks required —
+    // 1.14–1.25 adapters predate the consumption guidance.
+    expect(resolveConsumptionSeverity(ADAPTER_CONTRACT_HARDENING_FROM_VERSION)).toBe(
+      "advisory",
+    );
+    expect(resolveConsumptionSeverity("1.25.0")).toBe("advisory");
+  });
+
+  it("is required at or above the P33 threshold", () => {
+    expect(
+      resolveConsumptionSeverity(RECOMMENDATION_CONSUMPTION_FROM_VERSION),
+    ).toBe("required");
+    expect(resolveConsumptionSeverity("2.0.0")).toBe("required");
+  });
+});
+
+describe("checkConsumptionAnchors (P33)", () => {
+  it("passes when every anchor is present", () => {
+    const content = "read data.recommendation; lifecycleMode record_only";
+    expect(checkConsumptionAnchors(content, ["data.recommendation"]).ok).toBe(true);
+    expect(
+      checkConsumptionAnchors(content, ["lifecycleMode", "record_only"]).ok,
+    ).toBe(true);
+  });
+
+  it("fails and names the missing anchors", () => {
+    const r = checkConsumptionAnchors("only lifecycleMode here", [
+      "lifecycleMode",
+      "record_only",
+    ]);
+    expect(r.ok).toBe(false);
+    expect(r.details.missing).toEqual(["record_only"]);
   });
 });
 

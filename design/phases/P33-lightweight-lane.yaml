@@ -224,4 +224,5 @@ tasks:
       - docs/agent-contract.md
       - docs/cli-contract.md
       - CHANGELOG.md
+      - tests/unit/commands/adapter-conformance.test.ts
       - tests/unit/commands/adapter-conformance-hardening.test.ts
