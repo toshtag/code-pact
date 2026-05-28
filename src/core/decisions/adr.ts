@@ -67,6 +67,19 @@ export function hasDecisionAdrForTaskId(
   return entries.some((f) => matchesTaskId(f, taskId));
 }
 
+/**
+ * Whether the decision gate applies to a task — true when the task OR its
+ * phase declares `requires_decision`. The single source of truth for "is this
+ * task gated", shared by `verify`'s `checkDecision` and the §3-D scaffolder so
+ * scaffolding never diverges from what `verify` actually blocks.
+ */
+export function isDecisionRequiredForTask(
+  phase: { requires_decision?: boolean },
+  task: { requires_decision?: boolean },
+): boolean {
+  return phase.requires_decision === true || task.requires_decision === true;
+}
+
 // ---------------------------------------------------------------------------
 // Status-aware resolution (RFC §3-C)
 // ---------------------------------------------------------------------------
