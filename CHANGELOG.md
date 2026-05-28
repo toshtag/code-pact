@@ -13,6 +13,8 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+## [1.21.0] — 2026-05-28
+
 ### `task record-done` — an honest path for work completed outside the loop
 
 Dogfooding exposed a gap: when a task was finished **outside** the code-pact loop (already merged, or otherwise not verifiable from the working tree), there was no honest way to record it. Agents were forced either to leave `progress.yaml` drifting from reality or to fake a full loop run against a working tree that no longer holds the change. This adds the missing path.
