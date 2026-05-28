@@ -22,7 +22,7 @@ import {
   detectTaskAcceptanceRefNotFound,
 } from "./checks.ts";
 import { loadProtectedPaths } from "../rules/protected-paths.ts";
-import { makeDecisionResolver } from "../decisions/adr.ts";
+import { makeDecisionResolver, classifyDecisionAdrs } from "../decisions/adr.ts";
 import type { PhaseEntry, PlanState } from "./state.ts";
 import { collectPlanArtifacts } from "./state.ts";
 import type { PlanIssue } from "./shared.ts";
@@ -115,6 +115,7 @@ export async function runLint(opts: LintOptions): Promise<LintResult> {
     // P31 clarify advisories. All `affects_exit: false` — they surface
     // uncertainty for human review and never fail `--strict`.
     issues.push(...(await detectUnresolvedDecision(opts.cwd, phases)));
+    issues.push(...(await detectAdrStatusUnrecognized(opts.cwd)));
     issues.push(...detectLowConfidencePhase(phases));
     issues.push(...detectMissingTaskDescription(phases));
   }
@@ -208,6 +209,33 @@ async function detectUnresolvedDecision(
         },
       });
     }
+  }
+  return issues;
+}
+
+/**
+ * Clarify advisory: an ADR in `design/decisions/` declares an explicit status
+ * word that is not recognized (e.g. a typo `**Status:** acceptd`). Since v1.22
+ * the gate treats an unrecognized status as `unknown_status` — it does NOT
+ * resolve — so a typo silently keeps a decision blocked with no obvious cause.
+ * This surfaces the typo and which channel to fix (`details.status_source`).
+ * Advisory (`affects_exit: false`); does not change gate behavior.
+ */
+async function detectAdrStatusUnrecognized(cwd: string): Promise<PlanIssue[]> {
+  const issues: PlanIssue[] = [];
+  for (const adr of await classifyDecisionAdrs(cwd)) {
+    if (adr.acceptance !== "unknown_status") continue;
+    issues.push({
+      code: "ADR_STATUS_UNRECOGNIZED",
+      severity: "warning",
+      affects_exit: false,
+      message: `ADR "${adr.file}" has an unrecognized status "${adr.status}" (${adr.statusSource}) — expected one of accepted | proposed | draft | rejected | superseded. A typo here keeps the decision gate blocked (it never resolves as accepted).`,
+      file: adr.file,
+      details: {
+        status: adr.status,
+        status_source: adr.statusSource,
+      },
+    });
   }
   return issues;
 }

@@ -179,6 +179,7 @@ Issue-level codes emitted by `plan lint` and `plan analyze` inside `data.issues[
 | `WEAK_DOD` | warning | `plan lint --include-quality` | DoD entry is suspiciously short or contains `TODO`/`FIXME`/`tbd` |
 | `PLACEHOLDER_VERIFICATION` | warning | `plan lint --include-quality` | Verification command starts with `echo`/`true`/`noop` |
 | `TASK_DECISION_UNRESOLVED` (v1.17+, P31; status-aware since v1.22) | warning | `plan lint --include-quality` | A task (or its phase) is `requires_decision: true` but the decision gate does not resolve it (uses the same shared status-aware resolver as `verify` / `task record-done`). Fires when no ADR matches **and** when an ADR exists but is `proposed` / `draft` / `rejected` / `superseded` / empty / unknown-status, or when explicit `decision_refs` are not all accepted. Advisory: `affects_exit: false` — stays advisory even under `--strict`. `details.source` is `"task"` or `"phase"`; `details.via` and `details.reason` carry the resolver verdict; `details.considered[]` lists the ADRs the resolver inspected. |
+| `ADR_STATUS_UNRECOGNIZED` (v1.24+) | warning | `plan lint --include-quality` | An ADR in `design/decisions/*.md` declares an **explicit but unrecognized** status word (e.g. a typo `**Status:** acceptd`). Since v1.22 the gate treats an unrecognized status as `unknown_status` — it does **not** resolve — so a typo silently keeps a decision blocked; this surfaces it. File-centric: fires per ADR file even if no task references it yet, and complements `TASK_DECISION_UNRESOLVED`. Advisory: `affects_exit: false`. `details.status` is the offending word and `details.status_source` (`"frontmatter"` or `"bold-line"`) is which channel to fix. Not raised for `accepted` / `proposed` / `draft` / `rejected` / `superseded`, a missing status line, or an empty file. |
 | `PHASE_CONFIDENCE_LOW` (v1.17+, P31) | warning | `plan lint --include-quality` | Phase is `confidence: low`. Advisory: `affects_exit: false` |
 | `TASK_DESCRIPTION_MISSING` (v1.17+, P31) | warning | `plan lint --include-quality` | Task has no description (empty/unset; no length floor). Advisory: `affects_exit: false` |
 | `STATUS_DRIFT` | error/warning | `plan analyze` | Design status disagrees with derived progress state (see `details.kind`) |
@@ -669,6 +670,7 @@ Read-only static integrity check over `design/roadmap.yaml` and every referenced
 - `WEAK_DOD` (warning) — DoD bullets shorter than 10 chars or matching `/TODO|FIXME|tbd/i`
 - `PLACEHOLDER_VERIFICATION` (warning) — verification commands starting with `echo`, `true`, or `noop`
 - `TASK_DECISION_UNRESOLVED` (advisory, `affects_exit: false`) — a `requires_decision` task/phase with no resolving ADR in `design/decisions/`
+- `ADR_STATUS_UNRECOGNIZED` (advisory, `affects_exit: false`) — an ADR with an explicit but unrecognized status word (likely a typo); `details.status_source` says whether to fix the frontmatter or the bold `**Status:**` line
 - `PHASE_CONFIDENCE_LOW` (advisory, `affects_exit: false`) — a `confidence: low` phase
 - `TASK_DESCRIPTION_MISSING` (advisory, `affects_exit: false`) — a task with no description
 

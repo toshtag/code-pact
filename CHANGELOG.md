@@ -13,6 +13,14 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+### `ADR_STATUS_UNRECOGNIZED` lint advisory
+
+The status-aware gate (v1.22) treats an explicit-but-unrecognized ADR status word (e.g. a typo `**Status:** acceptd`) as `unknown_status` — it does **not** resolve — which is safe but confusing: a decision stays blocked with no obvious cause. This surfaces the typo.
+
+**Added**
+
+- **`ADR_STATUS_UNRECOGNIZED`** — a `plan lint --include-quality` advisory (`warning`, `affects_exit: false`) that flags any `design/decisions/*.md` whose explicit status word is not one of `accepted` / `proposed` / `draft` / `rejected` / `superseded`. `details.status` is the offending word and `details.status_source` (`"frontmatter"` | `"bold-line"`) says which channel to fix (frontmatter wins over the bold line). File-centric (fires even for ADRs no task references yet) and complementary to `TASK_DECISION_UNRESOLVED`. Not raised for a missing status line or an empty file. Gate behavior is unchanged — this only explains *why* a gate is blocked.
+
 ## [1.23.0] — 2026-05-28
 
 ### Opt-in proposed-ADR scaffolding (RFC §3-D)
