@@ -111,8 +111,12 @@ export async function writeProposedAdrIfAbsent(
   try {
     await access(abs);
     return "exists";
-  } catch {
-    // Not present — safe to write.
+  } catch (err) {
+    // Only ENOENT/ENOTDIR means "not present — safe to write". Any other
+    // access failure (e.g. EACCES) is a real environment problem: rethrow it
+    // rather than overwriting a file we could not stat.
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code !== "ENOENT" && code !== "ENOTDIR") throw err;
   }
   await atomicWriteText(abs, proposedAdrStub(label));
   return "created";

@@ -92,17 +92,23 @@ export async function runTaskRecordDone(
   const now = opts.now ?? (() => new Date());
 
   // ---- Step 1: evidence validation (before any project/roadmap/progress I/O) ----
-  // Reject empty arrays and empty/whitespace-only items deterministically so
-  // an invalid invocation never depends on the environment. This is the final
-  // defense for direct/internal callers; the CLI may also pre-check.
-  const evidence = opts.evidence.map((e) => e.trim()).filter((e) => e.length > 0);
-  if (evidence.length === 0) {
+  // Reject empty arrays AND any empty/whitespace-only item deterministically so
+  // an invalid invocation never depends on the environment. Whitespace-only
+  // items are rejected outright rather than silently dropped — a blank
+  // `--evidence ""` is an error, not a no-op, so the recorded proof can never be
+  // padded with empty entries. This is the final defense for direct/internal
+  // callers; the CLI may also pre-check.
+  if (
+    opts.evidence.length === 0 ||
+    opts.evidence.some((e) => e.trim().length === 0)
+  ) {
     const err = new Error(
-      "task record-done requires --evidence \"<text>\" describing the externally-completed work.",
+      "task record-done requires --evidence \"<text>\" describing the externally-completed work (no empty or whitespace-only items).",
     );
     (err as NodeJS.ErrnoException).code = "CONFIG_ERROR";
     throw err;
   }
+  const evidence = opts.evidence.map((e) => e.trim());
 
   // ---- Step 2: agent validation (reads project.yaml; before progress mutation) ----
   const project = await loadProject(cwd);
