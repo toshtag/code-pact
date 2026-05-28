@@ -66,7 +66,18 @@ phases:
         verification_strength: weak | medium | strong
         expected_duration: short | medium | long
         status: planned
-        requires_decision: true | false`;
+        requires_decision: true | false
+        # Optional readiness fields — include what you know, omit if unknown (do not emit empty arrays):
+        depends_on:
+          - <task id>
+        reads:
+          - <repo-relative path or glob>
+        writes:
+          - <repo-relative path or glob>
+        decision_refs:
+          - <repo-relative ADR path>
+        acceptance_refs:
+          - <repo-relative evidence path>`;
 
 // ---------------------------------------------------------------------------
 // Prompt generation

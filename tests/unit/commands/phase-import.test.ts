@@ -133,6 +133,55 @@ describe("runPhaseImport — happy path", () => {
     expect(phase.tasks?.map((t) => t.id)).toEqual(["P1-T1", "P1-T2"]);
   });
 
+  it("accepts the optional task readiness fields emitted by `plan prompt --schema-only`", async () => {
+    await setupEmptyProject(dir);
+    const inputPath = await writeInput(
+      dir,
+      `phases:
+  - id: P1
+    name: Foundation
+    weight: 12
+    objective: Establish foundation
+    tasks:
+      - id: P1-T1
+        type: feature
+        ambiguity: low
+        risk: low
+        context_size: small
+        write_surface: medium
+        verification_strength: strong
+        expected_duration: short
+        status: planned
+        description: First task
+        depends_on:
+          - P0-T9
+        reads:
+          - src/lib/**
+        writes:
+          - src/feature/**
+        decision_refs:
+          - design/decisions/P1-T1-rfc.md
+        acceptance_refs:
+          - tests/unit/feature.test.ts
+`,
+    );
+
+    const result = await runPhaseImport({ cwd: dir, inputPath });
+    expect(result.imported_tasks).toEqual(["P1-T1"]);
+
+    const phaseRaw = await readFile(
+      join(dir, "design", "phases", "P1-foundation.yaml"),
+      "utf8",
+    );
+    const phase = Phase.parse(parseYaml(phaseRaw) as unknown);
+    const task = phase.tasks!.find((t) => t.id === "P1-T1")!;
+    expect(task.depends_on).toEqual(["P0-T9"]);
+    expect(task.reads).toEqual(["src/lib/**"]);
+    expect(task.writes).toEqual(["src/feature/**"]);
+    expect(task.decision_refs).toEqual(["design/decisions/P1-T1-rfc.md"]);
+    expect(task.acceptance_refs).toEqual(["tests/unit/feature.test.ts"]);
+  });
+
   it("honors optional fields (confidence/risk/non_goals/requires_decision)", async () => {
     await setupEmptyProject(dir);
     const inputPath = await writeInput(

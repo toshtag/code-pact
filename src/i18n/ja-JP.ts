@@ -431,6 +431,7 @@ export const messages = {
         "推測で 'medium' に逃げない。設計が本当に不確実な箇所や前提を置いた箇所は、中間値で体裁を整えず、フェーズの confidence: low とタスクの requires_decision: true で明示する。",
         "フェーズは 基盤 → 能力 → 安定化 の順に並べる。最初に基盤フェーズ（type: architecture 中心）、次に外部から観測できる能力ごとに 1 フェーズ（type: feature 中心）、最後にリリース前の安定化フェーズ（type: test / type: docs 中心）。",
         "各タスクは 1 つの PR に収まる粒度にする（1 タスク = 1 PR）。フェーズの weight は予算ではなく見積もりで、1 フェーズあたり 5〜30 が目安。",
+        "readiness フィールド（depends_on / reads / writes / decision_refs / acceptance_refs）は任意。分かるものだけ入れ、不明なものは省略する（空配列は出さない）。`writes` は declared-writes 監査の入力になるので、タスクの出力パスが分かる場合は設定する。",
         "出力は YAML のみとし、前後に説明文を含めない。",
       ],
       schemaOnly: {
@@ -443,6 +444,7 @@ export const messages = {
           "ネストした `verification:` ブロックではなく `verify_commands`（実行可能なシェルコマンドのフラットな配列、例: pnpm test）を使う。",
           "各タスクに ambiguity / risk / context_size / write_surface / verification_strength を必ず付ける。",
           "設計が本当に不確実な箇所は中間値で逃げず、フェーズの confidence: low とタスクの requires_decision: true で明示する。",
+          "readiness フィールド（depends_on / reads / writes / decision_refs / acceptance_refs）は任意。分かるものだけ入れ、不明なものは省略する（空配列は出さない）。`writes` は declared-writes 監査の入力になるので、タスクの出力パスが分かる場合は設定する。",
         ],
       },
     },
