@@ -22,7 +22,15 @@ import {
   detectTaskAcceptanceRefNotFound,
 } from "./checks.ts";
 import { loadProtectedPaths } from "../rules/protected-paths.ts";
-import { makeDecisionResolver, classifyDecisionAdrs } from "../decisions/adr.ts";
+import {
+  makeDecisionResolver,
+  classifyDecisionAdrs,
+  readDecisionAdrFiles,
+  classifyAdr,
+} from "../decisions/adr.ts";
+import { parseFrontMatter } from "../pack/front-matter.ts";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import type { PhaseEntry, PlanState } from "./state.ts";
 import { collectPlanArtifacts } from "./state.ts";
 import type { PlanIssue } from "./shared.ts";
@@ -30,6 +38,20 @@ import type { PlanIssue } from "./shared.ts";
 const WEAK_DOD_PATTERN = /\b(TODO|FIXME|tbd)\b/i;
 const WEAK_DOD_MIN_CHARS = 10;
 const PLACEHOLDER_VERIFICATION_PATTERN = /^\s*(echo|true|noop)\b/i;
+
+// P36: ADR_ACCEPTED_BODY_THIN fires only when an accepted ADR's substantive
+// body is below this AND the body has zero h2 headings. Calibrated against the
+// real ADR corpus — the smallest legitimate ADR in this repo is ~3610 bytes
+// with 3 h2 headings, so 400 chars leaves a wide margin: only empty-to-a-few-
+// lines stubs (no headings, a few dozen chars) can fire. NO heading-name
+// matching — see design/decisions/adr-quality-advisory-rfc.md.
+const ADR_THIN_BODY_CHARS = 400;
+// Lines that are status declarations or the h1 title — stripped before
+// measuring substantive body length so a stub that is *just* a status line
+// (the case P36 most wants to catch) measures as empty.
+const ADR_STATUS_LINE_PATTERN = /^\s*(?:[-*]\s*)?(?:\*\*Status:\*\*|Status:)/i;
+const ADR_H1_PATTERN = /^\s*#\s/;
+const ADR_H2_PATTERN = /^\s*##\s/;
 
 export type LintOptions = {
   cwd: string;
@@ -116,6 +138,7 @@ export async function runLint(opts: LintOptions): Promise<LintResult> {
     // uncertainty for human review and never fail `--strict`.
     issues.push(...(await detectUnresolvedDecision(opts.cwd, phases)));
     issues.push(...(await detectAdrStatusUnrecognized(opts.cwd)));
+    issues.push(...(await detectAdrAcceptedBodyThin(opts.cwd)));
     issues.push(...detectLowConfidencePhase(phases));
     issues.push(...detectMissingTaskDescription(phases));
   }
@@ -236,6 +259,61 @@ async function detectAdrStatusUnrecognized(cwd: string): Promise<PlanIssue[]> {
         status_source: adr.statusSource,
       },
     });
+  }
+  return issues;
+}
+
+/**
+ * Quality advisory (P36): an `accepted` ADR whose body is an empty stub — an
+ * accepted decision with no recorded reasoning. Structure-independent and
+ * heading-name-agnostic by design: this repo's legitimate ADRs use a wide
+ * variety of heading sets (decision/goals/rationale, never ## Consequences /
+ * ## Alternatives), so name-matching would false-positive. Fires only when
+ * BOTH the substantive body (frontmatter removed; status line + h1 stripped;
+ * whitespace normalized) is below `ADR_THIN_BODY_CHARS` AND the raw body has
+ * zero h2 headings. Advisory (`affects_exit: false`); does not change the
+ * decision gate. See design/decisions/adr-quality-advisory-rfc.md.
+ */
+async function detectAdrAcceptedBodyThin(cwd: string): Promise<PlanIssue[]> {
+  const issues: PlanIssue[] = [];
+  for (const name of await readDecisionAdrFiles(cwd)) {
+    if (!name.endsWith(".md")) continue;
+    const content = await readFile(
+      join(cwd, "design", "decisions", name),
+      "utf8",
+    );
+    // Only accepted ADRs carry the "approved but empty" contradiction. A 0-byte
+    // file classifies as "empty" (a different concern); a `**Status:** accepted`
+    // line — even with no other body — classifies as "accepted" and IS in scope.
+    if (classifyAdr(content).acceptance !== "accepted") continue;
+
+    const { body } = parseFrontMatter(content);
+    const lines = body.split(/\r?\n/);
+    // h2 count is taken from the raw body (before stripping) so the structure
+    // signal is stable regardless of the substantive-text computation.
+    const headingCount = lines.filter((l) => ADR_H2_PATTERN.test(l)).length;
+    const substantive = lines
+      .filter(
+        (l) => !ADR_STATUS_LINE_PATTERN.test(l) && !ADR_H1_PATTERN.test(l),
+      )
+      .join(" ")
+      .replace(/\s+/g, " ")
+      .trim();
+    const bodyChars = substantive.length;
+
+    if (bodyChars < ADR_THIN_BODY_CHARS && headingCount === 0) {
+      issues.push({
+        code: "ADR_ACCEPTED_BODY_THIN",
+        severity: "warning",
+        affects_exit: false,
+        message: `ADR "design/decisions/${name}" is accepted but its body is nearly empty (${bodyChars} chars, no sections) — an accepted decision with no recorded reasoning. Add the decision and its rationale, or revert the status to proposed.`,
+        file: `design/decisions/${name}`,
+        details: {
+          body_chars: bodyChars,
+          heading_count: headingCount,
+        },
+      });
+    }
   }
   return issues;
 }
