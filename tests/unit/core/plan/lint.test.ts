@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { runLint } from "../../../../src/core/plan/lint.ts";
+import { runLint, detectAdrAcceptedBodyThin } from "../../../../src/core/plan/lint.ts";
 
 let cwd: string;
 
@@ -496,5 +496,17 @@ verification:
     expect(result.issues.map((i) => i.code)).not.toContain(
       "ADR_ACCEPTED_BODY_THIN",
     );
+  });
+
+  // Regression pin: this repo's own ADRs are all real (the smallest is several
+  // KB with multiple h2 sections), so the advisory must NEVER fire against the
+  // live corpus. If someone lands a genuine accepted-but-empty stub under
+  // design/decisions/, this test SHOULD fail — that is the intended signal.
+  // Calls the detector directly (not full runLint) so it only reads the ADR
+  // corpus, staying fast and deterministic.
+  it("produces zero ADR_ACCEPTED_BODY_THIN against this repo's real ADRs", async () => {
+    const repoRoot = new URL("../../../../", import.meta.url).pathname;
+    const issues = await detectAdrAcceptedBodyThin(repoRoot);
+    expect(issues.map((i) => i.file)).toEqual([]);
   });
 });

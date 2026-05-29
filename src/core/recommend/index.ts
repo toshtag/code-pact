@@ -98,12 +98,13 @@ function buildStructuredReasons(task: Task, tier: ModelTier): StructuredReason[]
  * profile, compute the v2 recommendation envelope.
  *
  * No I/O: callers (the `code-pact recommend` CLI command and the
- * forthcoming `code-pact task prepare` compound command) load the
- * inputs and pass them in.
+ * `code-pact task prepare` compound command) load the inputs and pass
+ * them in.
  *
- * The output is byte-identical to the previous in-place implementation
- * in `src/commands/recommend.ts`; existing snapshot and JSON envelope
- * tests are the contract.
+ * The original v0.8 fields preserve their earlier in-place semantics; later
+ * fields (e.g. P33's `lifecycleMode`) are strictly additive. The existing
+ * snapshot and JSON envelope tests, plus `RecommendResultV2.parse`, are the
+ * contract.
  */
 export function resolveRecommendation(
   opts: ResolveRecommendationOptions,

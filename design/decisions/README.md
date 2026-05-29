@@ -28,7 +28,12 @@ the *why* behind the code — the user-facing *how* lives in [`docs/`](../../doc
 | P27 | [CLI maintainability](cli-maintainability-rfc.md) | Split the monolithic `src/cli.ts` into a command-cluster layout. |
 | P28 | [Spec-conformance remediation](spec-conformance-rfc.md) | Established the RFC-conformance test convention. |
 | P30 | [Adapter contract hardening](adapter-contract-hardening-rfc.md) | Further hardened the adapter contract checks. |
-| — | [Deterministic roadmap stabilization](deterministic-roadmap-stabilization-rfc.md) | Made AI-assisted roadmap generation reproducible. |
+| P31 | [Deterministic roadmap stabilization](deterministic-roadmap-stabilization-rfc.md) | Made AI-assisted roadmap generation reproducible. |
+| P32 | [Failure clarity](failure-clarity-rfc.md) | Surfaced the failing check, its reason, and the rerun-after-fixing command on `task complete` / `task finalize` failures. |
+| P33 | [Lightweight lane + recommendation consumption](lightweight-lane-rfc.md) | Added `lifecycleMode` (`full_loop` / `record_only` / `decision_loop`) and the adapter guidance that consumes the recommendation (P35 merged in). |
+| P34 | [CI branch-drift detection](ci-branch-drift-rfc.md) | Added `--base-ref` + the `CONTROL_PLANE_BRANCH_NOT_DRIVEN` advisory for PR CI. |
+| P36 | [ADR quality advisory](adr-quality-advisory-rfc.md) | Added the `ADR_ACCEPTED_BODY_THIN` stub advisory (no heading-name sniffing). |
+| P37 | [Outcome audit — deferred](P37-deferred-outcome-audit.md) | **Deferred.** Recorded why effectiveness-measurement was not built (gameable subjective fields; not reliably derivable from `progress.yaml` today). |
 | — | [Beginner-friendly CLI aliases](cli-alias-ux-rfc.md) | Added additive aliases `task next` / `phase next` / `task reconcile` / `plan import` (thin sugar to the canonical handlers). The `dogfood.md` rename stays deferred. |
 
 ## ADR status convention
