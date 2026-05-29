@@ -274,7 +274,11 @@ async function detectAdrStatusUnrecognized(cwd: string): Promise<PlanIssue[]> {
  * zero h2 headings. Advisory (`affects_exit: false`); does not change the
  * decision gate. See design/decisions/adr-quality-advisory-rfc.md.
  */
-async function detectAdrAcceptedBodyThin(cwd: string): Promise<PlanIssue[]> {
+// Exported so a regression test can run it directly against the live
+// `design/decisions/` corpus without paying for a full `runLint` (which also
+// globs every phase's reads/writes against the filesystem). This detector only
+// reads the ADR files, so the direct call is fast and deterministic.
+export async function detectAdrAcceptedBodyThin(cwd: string): Promise<PlanIssue[]> {
   const issues: PlanIssue[] = [];
   for (const name of await readDecisionAdrFiles(cwd)) {
     if (!name.endsWith(".md")) continue;
