@@ -95,3 +95,6 @@ phases:
   - id: P34
     path: design/phases/P34-ci-branch-drift.yaml
     weight: 8
+  - id: P36
+    path: design/phases/P36-adr-quality-advisory.yaml
+    weight: 6
