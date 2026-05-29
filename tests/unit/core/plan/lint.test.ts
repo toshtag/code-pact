@@ -412,3 +412,89 @@ ${taskLines.map((l) => `    ${l}`).join("\n")}
     expect(codes).not.toContain("TASK_DESCRIPTION_MISSING");
   });
 });
+
+describe("runLint — ADR_ACCEPTED_BODY_THIN (P36)", () => {
+  // A minimal, lint-clean plan so the run reaches the quality block.
+  const ROADMAP = `phases:\n  - id: P1\n    path: design/phases/P1.yaml\n    weight: 10\n`;
+  const PHASE = `id: P1
+name: P1
+weight: 10
+confidence: medium
+risk: low
+status: planned
+objective: An objective long enough
+definition_of_done:
+  - DoD that is clearly long enough to read
+verification:
+  commands:
+    - pnpm test
+`;
+
+  async function writeAdr(name: string, content: string): Promise<void> {
+    await mkdir(join(cwd, "design", "decisions"), { recursive: true });
+    await writeFile(join(cwd, "design", "decisions", name), content, "utf8");
+  }
+
+  async function run(): Promise<string[]> {
+    await writeRoadmap(ROADMAP);
+    await writePhase("P1.yaml", PHASE);
+    const result = await runLint({ cwd, includeQuality: true });
+    return result.issues
+      .filter((i) => i.code === "ADR_ACCEPTED_BODY_THIN")
+      .map((i) => i.file ?? "");
+  }
+
+  // A body long enough to clear the threshold (~80 chars × several lines).
+  const FAT = Array.from(
+    { length: 8 },
+    (_, i) => `Sentence number ${i} that adds a fair amount of substantive prose here.`,
+  ).join("\n\n");
+
+  it("fires for an accepted ADR that is just a status line (the target stub)", async () => {
+    await writeAdr("stub.md", "**Status:** accepted\n");
+    expect(await run()).toContain("design/decisions/stub.md");
+  });
+
+  it("fires for an accepted ADR with a title + status line but no real body", async () => {
+    await writeAdr("thin.md", "# Decision X\n\n**Status:** accepted\n");
+    expect(await run()).toContain("design/decisions/thin.md");
+  });
+
+  it("does NOT fire when the accepted ADR has substantive prose (no headings)", async () => {
+    await writeAdr("prose.md", `**Status:** accepted\n\n${FAT}\n`);
+    expect(await run()).not.toContain("design/decisions/prose.md");
+  });
+
+  it("does NOT fire when a short accepted ADR has at least one h2 heading", async () => {
+    await writeAdr(
+      "structured.md",
+      "**Status:** accepted\n\n## Decision\n\nShort.\n",
+    );
+    expect(await run()).not.toContain("design/decisions/structured.md");
+  });
+
+  it("does NOT fire for a thin proposed ADR (only accepted is in scope)", async () => {
+    await writeAdr("proposed.md", "**Status:** proposed\n");
+    expect(await run()).not.toContain("design/decisions/proposed.md");
+  });
+
+  it("does NOT fire for a 0-byte empty file (acceptance: empty)", async () => {
+    await writeAdr("empty.md", "");
+    expect(await run()).not.toContain("design/decisions/empty.md");
+  });
+
+  it("strips a `- Status:` list-format line too (still fires when thin)", async () => {
+    await writeAdr("list.md", "# T\n\n- Status: accepted\n");
+    expect(await run()).toContain("design/decisions/list.md");
+  });
+
+  it("does not run without --include-quality", async () => {
+    await writeRoadmap(ROADMAP);
+    await writePhase("P1.yaml", PHASE);
+    await writeAdr("stub.md", "**Status:** accepted\n");
+    const result = await runLint({ cwd });
+    expect(result.issues.map((i) => i.code)).not.toContain(
+      "ADR_ACCEPTED_BODY_THIN",
+    );
+  });
+});
