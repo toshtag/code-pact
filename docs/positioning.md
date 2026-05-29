@@ -68,7 +68,8 @@ a fixed flag surface across the v1.x line.
 
 - **`code-pact recommend`** — returns an execution plan for a
   given task: model tier, effort, planning posture, context
-  budget profile, preflight steps.
+  budget profile, preflight steps, and `lifecycleMode`
+  (`full_loop` / `record_only` / `decision_loop`).
 - **`code-pact task prepare`** *(v1.11+)* — single
   progress-read-only entry point per task. Returns current
   state, recommendation, context pack metadata, a structured
