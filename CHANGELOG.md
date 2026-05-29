@@ -13,6 +13,12 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+### Roadmap: P37 (outcome audit) deferred
+
+**Internal**
+
+- **P37 deferred** — the reshape roadmap's outcome-audit / effectiveness-measurement item is deferred with no implementation: no phase, no `stats` / `task outcome` command, no `outcome` schema field. Subjective agent-reported metrics are gameable, a bugs-found metric contradicts code-pact's control-plane role, and the signals worth measuring (recommendation history, decision-gate blocks, verify failures) are not reliably derivable from `progress.yaml` today. The reshape closes at P36; the next step is real-world dogfooding and release prep. Rationale + revisit conditions in `design/decisions/P37-deferred-outcome-audit.md`.
+
 ### ADR quality advisory (P36)
 
 The value of the ADR gate is that writing the ADR elicits the decision — but today an ADR only needs `status: accepted` to pass, so an accepted ADR with an empty body slips through. This surfaces that, without enforcing a template. Design in `design/decisions/adr-quality-advisory-rfc.md`.
