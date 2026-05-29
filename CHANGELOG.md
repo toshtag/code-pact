@@ -15,9 +15,11 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ### ADR quality advisory (P36)
 
-**Internal**
+The value of the ADR gate is that writing the ADR elicits the decision — but today an ADR only needs `status: accepted` to pass, so an accepted ADR with an empty body slips through. This surfaces that, without enforcing a template. Design in `design/decisions/adr-quality-advisory-rfc.md`.
 
-- **P36-T0** — registers the P36 phase. `plan lint --include-quality` will gain a single advisory `ADR_ACCEPTED_BODY_THIN` that surfaces an `accepted` ADR whose body is an empty stub, **without** heading-name sniffing — fire only when the substantive body is below a calibrated threshold AND the body has zero h2 headings (this repo's legitimate ADRs vary widely in structure, so name-matching would false-positive). Advisory only (`affects_exit: false`); the `task complete` / `verify` decision gate is unchanged. Design in `design/decisions/adr-quality-advisory-rfc.md`.
+**Added**
+
+- **`ADR_ACCEPTED_BODY_THIN`** — a single `plan lint --include-quality` advisory (`warning`, `affects_exit: false`) that flags an `accepted` ADR whose body is an empty stub. **Structure-independent — no heading-name matching**: fires only when the substantive body (frontmatter removed, status line + h1 title stripped, whitespace normalized) is below `ADR_THIN_BODY_CHARS` (400) **AND** the raw body has zero `##` (h2) headings. This repo's legitimate ADRs vary widely in structure (they never use `## Consequences` / `## Alternatives`), so name-matching would false-positive; the AND keeps "short but structured" and "long but heading-free" ADRs from firing. A file that is *just* a `**Status:** accepted` line is in scope; a 0-byte empty file and proposed/draft ADRs are not. Advisory only — the `task complete` / `verify` decision gate is unchanged. (A canonical-template-based check, if ever wanted, is a separate future phase.)
 
 ### CI branch-drift detection (P34)
 
