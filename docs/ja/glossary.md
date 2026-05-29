@@ -47,7 +47,7 @@
 | **envelope（エンベロープ）** | `--json` 応答の形：成功時は `{ "ok": true, "data": {…} }`、失敗時は `{ "ok": false, "error": { "code", "message" } }`。この一貫したラッパーが「envelope」です。 |
 | **exit codes（終了コード）** | `0` 成功・`1` チェック失敗（例: 検証）・`2` 使い方/設定エラー・`3` 内部エラー。全表は [cli-contract.md](../cli-contract.md#exit-codes)（英語）。 |
 | **advisory** | 知っておく価値はあるがコマンドを失敗させない警告コード（`affects_exit` が false）。`--strict` / `--audit-strict` のような strict フラグは advisory を失敗に昇格できます。 |
-| **recommendation（recommend）** | code-pact がタスクに提案する実行プラン：モデル tier、effort、planning posture、context budget profile。`recommend` 単体で返るほか、`task prepare` に同梱されます。 |
+| **recommendation（recommend）** | code-pact がタスクに提案する実行プラン：モデル tier、effort、planning posture、context budget profile、そしてどの**ライフサイクル**で進めるか（`lifecycleMode`：`full_loop` / `record_only` / `decision_loop` — `record_only` は小さく検証の強いタスク向けの軽量レーンで、検証は省かず `record-done` で記録する）。`recommend` 単体で返るほか、`task prepare` に同梱されます。 |
 | **dry-run** | プレビューモード — 変更内容を表示するが何も書きません。実際に適用するには `--write` を付けます。 |
 
 ## アダプタと統合
