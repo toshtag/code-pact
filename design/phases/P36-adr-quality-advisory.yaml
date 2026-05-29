@@ -4,7 +4,7 @@ name: ADR quality advisory — surface an accepted ADR whose body is an empty
 weight: 6
 confidence: high
 risk: low
-status: planned
+status: done
 objective: |
   The value of the ADR gate is that writing the ADR elicits the design decision,
   but today an ADR only needs status accepted to pass — an accepted ADR with an
@@ -106,7 +106,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
     description: >
       detectAdrAcceptedBodyThin + wiring + error code + docs + tests.
 
