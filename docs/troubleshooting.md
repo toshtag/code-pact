@@ -19,6 +19,8 @@ When a command surfaces one of the diagnostic codes below, this page maps it to 
 | [`DECISION_REQUIRED`](#decision_required-from-task-record-done-v121) | A `requires_decision` task has no **accepted** ADR | Flip the ADR's `**Status:**` to `accepted` |
 | [`ADR_STATUS_UNRECOGNIZED`](#adr_status_unrecognized-from-plan-lint---include-quality-v124) | An ADR's status word is a typo | Fix the `**Status:**` line named in `details.status_source` |
 | [`CONTROL_PLANE_NOT_DRIVEN`](#control_plane_not_driven-from-doctor-v125) | Scaffold adopted but the loop isn't being driven | Start a task, or silence the check |
+| [`CONTROL_PLANE_BRANCH_NOT_DRIVEN`](#control_plane_branch_not_driven-from-doctor--validate---base-ref-v126) | A PR branch changed real code but never drove the loop | Drive a task (or `record-done`) and commit `progress.yaml`, or exempt the path |
+| [`ADR_ACCEPTED_BODY_THIN`](#adr_accepted_body_thin-from-plan-lint---include-quality-v126) | An accepted ADR's body is an empty stub | Add the decision + rationale, or revert status to `proposed` |
 
 ## `MANIFEST_NOT_FOUND` from `adapter upgrade --check` / `--write`
 
@@ -67,6 +69,8 @@ code-pact verify --phase <phase-id> --task <task-id>
 ```
 
 If the verify command itself is wrong (typo, dependency missing) rather than the task's implementation, edit `design/phases/<phase>.yaml` `verification.commands` and re-run.
+
+**v1.26+ (P32): you often don't need to re-run `verify` to see why.** The `VERIFICATION_FAILED` envelope from `task complete` (and the `task finalize` failure envelopes) carry `failed_checks`, `first_failure: { name, reason }`, and `suggested_next_command` under `data`, alongside the unchanged `data.verify.checks`. Human (non-`--json`) output prints the cause and a `rerun after fixing:` line below the generic message. `suggested_next_command` is the command to rerun **after fixing** `first_failure` — not a hint that re-running unchanged will pass.
 
 ## `TASK_FINALIZE_NOT_ELIGIBLE` from `task finalize` (v1.2+)
 
@@ -250,3 +254,41 @@ Recovery — pick whichever matches reality:
   ```
 
 It is a **silent skip** outside a git repo or when git isn't installed, so it never fires in CI sandboxes that aren't checkouts.
+
+## `CONTROL_PLANE_BRANCH_NOT_DRIVEN` from `doctor` / `validate --base-ref` (v1.26+)
+
+The PR branch changed real code (vs the base ref's merge-base) but added **no** `started`/`done` event for a **known** non-TUTORIAL task to `progress.yaml` — code changed without driving the loop. Unlike `CONTROL_PLANE_NOT_DRIVEN` (which looks at the uncommitted working tree and so never fires in CI after a clean checkout), this is branch-diff based and is meant for PR CI. It runs **only** when `--base-ref` is supplied, and is advisory (`severity: warning`); pair it with `validate --strict` to make it a gate.
+
+```sh
+code-pact validate --strict --base-ref origin/main --json
+# → CONTROL_PLANE_BRANCH_NOT_DRIVEN when real, non-excluded files
+#   changed but no known non-TUTORIAL task got a started/done event
+#   on the branch.
+```
+
+Recovery — pick whichever matches reality:
+- **Drive the loop**: `code-pact task prepare <task-id> --agent <agent> --json`, then `task start` / `task complete`, and **commit `progress.yaml`** (the gate reads the committed ledger, not the working tree).
+- **Record out-of-loop work**: `code-pact task record-done <task-id> --evidence "..."`, then commit.
+- **Exempt docs/config-only paths** the team agrees don't need the loop, in `.code-pact/doctor.yaml`:
+  ```yaml
+  control_plane_branch_not_driven:
+    exclude_globs:
+      - "docs/**"
+      - "**/*.md"
+  ```
+- **Silence it**: add `CONTROL_PLANE_BRANCH_NOT_DRIVEN` to `disabled_checks`.
+
+**Precondition.** `.code-pact/` is gitignored by default, so the check **silently skips** unless `.code-pact/state/progress.yaml` is committed — to use the CI gate, commit the ledger. It also skips when git/merge-base is unavailable. See [`docs/cli-contract.md` § `doctor`](cli-contract.md#--base-ref-and-ci-branch-drift-gating-v126-p34) for the full GitHub Actions example.
+
+## `ADR_ACCEPTED_BODY_THIN` from `plan lint --include-quality` (v1.26+)
+
+An `accepted` ADR in `design/decisions/` has an empty-stub body — an accepted decision with no recorded reasoning. The check is **structure-independent** (no heading-name matching): it fires only when the substantive body (frontmatter removed, status line + h1 title stripped, whitespace normalized) is below an internal threshold **and** the body has zero `##` (h2) headings. So a short-but-structured or long-but-heading-free ADR never fires. Advisory only (`affects_exit: false`); it does not change the decision gate.
+
+```sh
+code-pact plan lint --include-quality --json
+# → issues[] entry with code ADR_ACCEPTED_BODY_THIN
+# details.body_chars     — substantive body length measured
+# details.heading_count  — number of h2 headings found (0 to fire)
+```
+
+Recovery: add the decision and its rationale to the ADR body, or — if it isn't actually decided yet — revert its `**Status:**` to `proposed` (then the [decision gate](concepts/decision-gate.md) correctly blocks completion until it's accepted with real content). A file that is just a `**Status:** accepted` line is exactly the stub this surfaces; a 0-byte empty file and `proposed`/`draft` ADRs are not flagged.

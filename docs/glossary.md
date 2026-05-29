@@ -47,7 +47,7 @@ these terms describe, see [the per-task loop](per-task-loop.md).
 | **envelope** | The shape of a `--json` response: `{ "ok": true, "data": {…} }` on success, or `{ "ok": false, "error": { "code", "message" } }` on failure. The "envelope" is just that consistent wrapper. |
 | **exit codes** | `0` success · `1` a check failed (e.g. verification) · `2` a usage/validation error · `3` an internal error. The full table is in [cli-contract.md](cli-contract.md#exit-codes). |
 | **advisory** | A warning code that reports something worth knowing but does **not** fail the command (its `affects_exit` is false). Strict flags like `--strict` / `--audit-strict` can promote advisories to failures. |
-| **recommendation (recommend)** | The execution plan code-pact suggests for a task: which model tier, how much effort, how much to plan, and a context-budget profile. Returned on its own by `recommend`, and bundled into `task prepare`. |
+| **recommendation (recommend)** | The execution plan code-pact suggests for a task: which model tier, how much effort, how much to plan, a context-budget profile, and which **lifecycle** to run (`lifecycleMode`: `full_loop` / `record_only` / `decision_loop` — `record_only` is the lighter lane for small, strongly-verified work, completed via `record-done` without skipping verification). Returned on its own by `recommend`, and bundled into `task prepare`. |
 | **dry-run** | Preview mode — the command shows what it *would* change but writes nothing. Pass `--write` to actually apply it. |
 
 ## Adapters and integration
