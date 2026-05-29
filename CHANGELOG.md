@@ -13,6 +13,12 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+### ADR quality advisory (P36)
+
+**Internal**
+
+- **P36-T0** — registers the P36 phase. `plan lint --include-quality` will gain a single advisory `ADR_ACCEPTED_BODY_THIN` that surfaces an `accepted` ADR whose body is an empty stub, **without** heading-name sniffing — fire only when the substantive body is below a calibrated threshold AND the body has zero h2 headings (this repo's legitimate ADRs vary widely in structure, so name-matching would false-positive). Advisory only (`affects_exit: false`); the `task complete` / `verify` decision gate is unchanged. Design in `design/decisions/adr-quality-advisory-rfc.md`.
+
 ### CI branch-drift detection (P34)
 
 The working-tree `CONTROL_PLANE_NOT_DRIVEN` (v1.25) never fires in PR CI because the checkout is clean. This adds a branch-diff signal so CI can catch "real code changed but the control plane was not driven on this branch." Design in `design/decisions/ci-branch-drift-rfc.md`.
