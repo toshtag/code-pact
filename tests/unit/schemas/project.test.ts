@@ -73,6 +73,15 @@ describe("AgentRef.enabled", () => {
     ).toThrow();
   });
 
+  // `profile` is read as `join(cwd, ".code-pact", profile)`, so it must be a
+  // project-relative POSIX path — reject traversal / absolute values.
+  it.each(["../agent-profiles/evil.yaml", "/etc/passwd", "a/../b.yaml", "~/x.yaml"])(
+    "rejects unsafe profile %j",
+    (profile) => {
+      expect(() => AgentRef.parse({ name: "claude-code", profile })).toThrow();
+    },
+  );
+
   it("Project preserves agents[].enabled defaulting through nested parse", () => {
     const result = Project.parse(VALID);
     const first = result.agents[0];

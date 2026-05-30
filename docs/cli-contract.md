@@ -84,7 +84,11 @@ Rationale and the compatibility constraints are in [`design/decisions/cli-alias-
 > filesystem paths, so the schema constrains them to
 > `^[A-Za-z0-9][A-Za-z0-9._-]*$` (leading char must be alphanumeric, so an id
 > can never be read as a CLI option like `--json`) regardless of trust — see
-> the id charset rule in the schema layer.)
+> the id charset rule in the schema layer.) Likewise, agent-profile path
+> fields (`instruction_filename`, `context_dir`, `skill_dir`, `hook_dir`) and
+> `agents[].profile` are project-relative POSIX paths: the schema rejects
+> absolute paths, `..`, `.`, empty segments, and backslashes, so a profile
+> cannot redirect context-pack or adapter writes outside the project root.
 
 ## JSON output shape
 
