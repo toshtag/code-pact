@@ -69,7 +69,7 @@ tasks:
     write_surface: low
     verification_strength: medium
     expected_duration: short
-    status: planned
+    status: done
     description: >
       RFC + phase registration (bootstrap).
 
@@ -98,7 +98,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
     description: >
       Shared security corpus + write-entrypoint coverage.
 
@@ -140,7 +140,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
     description: >
       Release version consistency checker + release:check + trust-boundary doc.
 
