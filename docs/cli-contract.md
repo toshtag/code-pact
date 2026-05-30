@@ -75,20 +75,25 @@ Rationale and the compatibility constraints are in [`design/decisions/cli-alias-
   human mode or included inside the JSON `data` envelope in JSON mode.
   It is never written directly to stdout.
 
-> **Trust boundary.** A phase's `verification.commands` are executed
-> through the shell by `verify` and `task complete`. Treat phase YAML as
-> trusted project configuration — equivalent to a CI script — and do not
-> run `verify` / `task complete` against unreviewed plans from untrusted
-> sources. (Plan identifiers such as task/phase ids and agent names are a
-> separate, stricter case: they flow into generated command strings and
-> filesystem paths, so the schema constrains them to
-> `^[A-Za-z0-9][A-Za-z0-9._-]*$` (leading char must be alphanumeric, so an id
-> can never be read as a CLI option like `--json`) regardless of trust — see
-> the id charset rule in the schema layer.) Likewise, agent-profile path
-> fields (`instruction_filename`, `context_dir`, `skill_dir`, `hook_dir`) and
-> `agents[].profile` are project-relative POSIX paths: the schema rejects
-> absolute paths, `..`, `.`, empty segments, and backslashes, so a profile
-> cannot redirect context-pack or adapter writes outside the project root.
+> **Trust boundaries.** code-pact distinguishes three, and they are
+> deliberately not collapsed into "the plan is trusted, so anything goes":
+>
+> - **Execution boundary — trusted.** A phase's `verification.commands` are
+>   executed through the shell by `verify` and `task complete`. Phase YAML is
+>   trusted project configuration, equivalent to a CI script — do not run
+>   `verify` / `task complete` against unreviewed plans from untrusted sources.
+> - **Path boundary — constrained even when trusted.** Any config value used as
+>   a filesystem path (agent-profile `instruction_filename` / `context_dir` /
+>   `skill_dir` / `hook_dir`, `agents[].profile`, `decision_refs`) is a
+>   project-relative POSIX path: the schema (or `resolveWithinProject` at the
+>   read/write site) rejects absolute paths, `..`, `.`, empty segments,
+>   backslashes, and symlink escape, so a plan cannot redirect reads or writes
+>   outside the project root. Trusted config does not imply unconstrained write
+>   destinations.
+> - **Identifier boundary — constrained even when trusted.** Task/phase ids and
+>   agent names flow into generated command strings and path segments, so the
+>   schema constrains them to `^[A-Za-z0-9][A-Za-z0-9._-]*$` (leading char
+>   alphanumeric, so an id can never be read as a CLI option like `--json`).
 
 ## JSON output shape
 
