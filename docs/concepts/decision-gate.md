@@ -4,7 +4,7 @@ The decision gate is the one thing code-pact **enforces** for design-sensitive t
 
 ## Why it exists
 
-A roadmap often contains tasks whose *how* is genuinely uncertain — they need a human design decision before implementation. Marking such a task `requires_decision: true` (on the task, or on its phase to cover all its tasks) turns that intent into an enforced gate: code-pact will not record the task as `done` until the decision has been written down **and accepted**. It is the single most valuable guard the control plane provides for design work, which is why it is deliberately **not** bypassable — even `task record-done`, which skips verification commands for out-of-loop work, still runs this gate.
+A roadmap often contains tasks whose *how* is genuinely uncertain — they need a human design decision before implementation. Marking such a task `requires_decision: true` (on the task, or on its phase to cover all its tasks) turns that intent into an enforced gate: code-pact will not record the task as `done` until the decision has been written down **and accepted**. It is the single most valuable guard the control plane provides for design work, which is why it is deliberately **not** bypassable — even `task record-done`, which skips verification commands for work recorded without `task complete` (external completion or a `record_only` task), still runs this gate.
 
 ## What an ADR looks like
 
@@ -65,7 +65,7 @@ For each gated task it writes a `**Status:** proposed` stub (at the task's `deci
 1. Mark genuinely design-uncertain tasks `requires_decision: true` (rather than guessing a middle value). `plan prompt` guidance encourages this.
 2. Run `plan lint --include-quality` to see `TASK_DECISION_UNRESOLVED` early.
 3. Write the ADR (or scaffold stubs with `--scaffold-decisions`), settle the decision, and flip **Status** to `accepted`.
-4. `verify` / `task complete` now pass; `task record-done` also passes for out-of-loop work.
+4. `verify` / `task complete` now pass; `task record-done` also passes (external completion or a `record_only` task).
 
 ## See also
 

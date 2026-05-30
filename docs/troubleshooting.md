@@ -212,7 +212,7 @@ A separate `STATUS_DRIFT done-but-design-not-done` warning from `plan analyze --
 
 ## `DECISION_REQUIRED` from `task record-done` (v1.21+)
 
-The task (or its phase) is `requires_decision: true`, and the [decision gate](concepts/decision-gate.md) cannot resolve an **accepted** ADR for it. `task record-done` skips verification commands, so this gate is the only thing standing between an external completion and a `done` event — it is **not** bypassable. `progress.yaml` is left untouched (exit 2).
+The task (or its phase) is `requires_decision: true`, and the [decision gate](concepts/decision-gate.md) cannot resolve an **accepted** ADR for it. `task record-done` skips verification commands, so this gate is the only thing standing between a non-`task complete` completion path (external completion or a `record_only` task) and a `done` event — it is **not** bypassable. `progress.yaml` is left untouched (exit 2).
 
 ```sh
 code-pact task record-done <task-id> --evidence "PR #123" --json

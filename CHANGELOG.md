@@ -11,7 +11,21 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ---
 
-## [Unreleased]
+## [1.26.0] — 2026-05-30
+
+### Identifier & path hardening (security)
+
+Plan identifiers and agent-profile path fields flow into agent-facing command strings and filesystem paths. They are now constrained at the schema boundary so untrusted or malformed plan content cannot produce broken commands or escape the project root.
+
+**Security**
+
+- **Plan-identifier charset.** `Task.id`, `Phase.id`, roadmap `PhaseRef.id`, and agent names (`Project.default_agent`, `AgentRef.name`, `AgentProfile.name`) are constrained to `^[A-Za-z0-9][A-Za-z0-9._-]*$` — the leading character must be alphanumeric, which rejects `..`, slashes, whitespace, shell metacharacters, and option-like ids (`--json`, `-P1`) that a generated command would otherwise misread as a flag. Enforced on the write entrypoints too (`phase import`, `phase add` / `createPhase`, `task add --id`) and on the raw `--agent` of `recommend` / `pack`; the write paths run `Phase.parse` / `PhaseRef.parse` before persisting. Conventional ids (`P1-T1`, `P34-ci-branch-drift`, `claude-code`) are unaffected.
+- **Agent-profile path fields.** `AgentProfile.instruction_filename` / `context_dir` / `skill_dir` / `hook_dir` and `AgentRef.profile` are now project-relative POSIX paths (`RelativePosixPath`): absolute paths, `~`, `..`, `.`, empty segments, and backslashes are rejected, so a profile cannot redirect context-pack or adapter writes outside the project root.
+- **Project-root confinement in pack.** Context-pack reads and writes are confined via `resolveWithinProject` (lexical traversal **and** symlink escape): `decision_refs`, the `design/decisions` / `design/rules` readdir loaders, and the `.context/<agent>` output directory. The `acceptance_refs` existence checks and the `--baseline` name are likewise constrained.
+
+**Fixed**
+
+- **`CONTEXT_OVER_BUDGET` envelope.** `task context` / `task prepare --budget-bytes` now place `budget_bytes` / `minimum_achievable_bytes` / `unelidable_sections` under a **top-level `data`** (matching the documented envelope convention and `doctor` / `validate`), not under `error.data`. An agent following the cli-contract recovery prose (`data.minimum_achievable_bytes`) now finds the fields.
 
 ### Roadmap: P37 (outcome audit) deferred
 
