@@ -1,0 +1,206 @@
+id: P38
+name: Release readiness invariants — mechanically catch the surface-drift,
+  schema-application, unsafe-input, and version-consistency classes that the
+  1.26.0 review found by hand
+weight: 6
+confidence: high
+risk: low
+status: planned
+objective: |
+  The 1.26.0 cycle reached release quality only after many rounds of external
+  human review. The findings clustered into four mechanically-detectable
+  classes: surface drift (record-done help vs docs), schema applied to reads
+  but not write entrypoints (PlanId / RelativePosixPath), unsafe input reaching
+  path/command sinks (re-discovered per site), and release-version
+  inconsistency. P38 closes those classes with the minimum tooling, by
+  EXTENDING existing tests/fixtures/scripts — not new frameworks.
+
+  P38 is internal quality infrastructure, NOT a product feature: no CLI
+  surface, no stats, no outcome audit, no AI quality judgement. It protects
+  code-pact's own change quality.
+
+  Design recorded in design/decisions/release-readiness-invariants-rfc.md.
+
+  Scope discipline (4 tasks):
+
+    - T0 — RFC + phase registration (bootstrap).
+    - T1 — shared security corpus (BAD_PLAN_IDS / BAD_RELATIVE_PATHS) + a
+      write-entrypoint coverage test pinned to a documented inventory.
+    - T2 — check-release-version.mjs + pnpm release:check + trust-boundary doc.
+    - T3 — PR self-report template + record-done/record_only required-term test.
+non_goals:
+  - Contract Surface Matrix (concept -> files -> required_terms YAML) — becomes
+    a third source of truth and string-matching detects absence not
+    contradiction; extend check-doc-invariants.mjs for a named concept instead
+  - Golden Consumer Repo framework — extend existing project-a / project-b
+    fixtures + CLI integration tests if a scenario is missing
+  - outcome audit / stats / task outcome (that is P37, deferred)
+  - large new doc-invariant framework (extend check-doc-invariants.mjs only)
+  - any new shipped CLI surface (release:check + version checker are dev/CI
+    tooling, not in the published package)
+definition_of_done:
+  - a single shared BAD_PLAN_IDS / BAD_RELATIVE_PATHS corpus is exercised at
+    every plan/agent write entrypoint and schema boundary, pinned against a
+    documented write-entrypoint inventory so a new entrypoint without coverage
+    fails the test
+  - scripts/check-release-version.mjs verifies package.json / CHANGELOG section
+    / docs code-pact@x.y.z / RECOMMENDATION_CONSUMPTION_FROM_VERSION /
+    design/measurements version agree, and pnpm release:check bundles it with
+    the existing gates
+  - a PR self-report template enumerates changed contract / command surface /
+    docs-help surface / schema-validation boundary / write entrypoints / added
+    invariant tests / trust-boundary impact
+  - the three trust boundaries (execution / path / identifier) are documented,
+    and a required-term test pins the record-done / record_only help+docs
+    wording
+  - no Contract Surface Matrix and no Golden Consumer Repo framework are added
+verification:
+  commands:
+    - pnpm typecheck
+    - pnpm test
+    - pnpm build
+    - node dist/cli.js validate --json
+tasks:
+  - id: P38-T0
+    type: architecture
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: planned
+    description: >
+      RFC + phase registration (bootstrap).
+
+
+      Lands design/decisions/release-readiness-invariants-rfc.md (status:
+      accepted) and bootstraps the phase (phase YAML + roadmap entry, weight 6)
+      as protected-path bootstrap writes NOT listed in `writes:`, per the
+      P28–P36 precedent (writes carries the RFC only; the phase YAML is in
+      acceptance_refs and design/roadmap.yaml is excluded as a plan-lint
+      --strict protected path). The RFC records the minimal-cut decision, the
+      four findings classes it targets, and the explicit non-goals (no Contract
+      Surface Matrix, no Golden Consumer Repo framework, no stats/outcome audit).
+    decision_refs:
+      - design/decisions/release-readiness-invariants-rfc.md
+    reads:
+      - design/decisions/release-readiness-invariants-rfc.md
+    writes:
+      - design/decisions/release-readiness-invariants-rfc.md
+    acceptance_refs:
+      - design/phases/P38-release-readiness-invariants.yaml
+  - id: P38-T1
+    type: test
+    ambiguity: low
+    risk: low
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: planned
+    description: >
+      Shared security corpus + write-entrypoint coverage.
+
+
+      - A single fixture module exporting BAD_PLAN_IDS (e.g. "../evil", "P1/T1",
+        "P1 T1", "P1;echo owned", "--json", "-P1", ".", "..", "a\\b") and
+        BAD_RELATIVE_PATHS (e.g. "../outside", "/tmp/x", "a/../b", "a//b", ".",
+        "C:\\tmp", "~/.ssh").
+
+      - A coverage test that runs the corpus through EVERY write entrypoint and
+        schema boundary: schema parse (PlanId / RelativePosixPath), phase
+        import, createPhase, task add --id, recommend --agent, pack --agent,
+        agent-profile path fields, and the pack decision_refs / output-dir
+        guards — asserting each rejects (or skips) the unsafe value.
+
+      - A documented write-entrypoint inventory the test is pinned against, so
+        adding a new entrypoint without corpus coverage fails the test.
+    decision_refs:
+      - design/decisions/release-readiness-invariants-rfc.md
+    reads:
+      - src/core/schemas/plan-id.ts
+      - src/core/schemas/relative-path.ts
+      - src/commands/phase-import.ts
+      - src/core/services/createPhase.ts
+      - src/commands/task-add.ts
+      - src/commands/recommend.ts
+      - src/core/pack/index.ts
+    writes:
+      - tests/fixtures/security-corpus.ts
+      - tests/unit/security/write-entrypoint-coverage.test.ts
+      - CHANGELOG.md
+    acceptance_refs:
+      - design/phases/P38-release-readiness-invariants.yaml
+  - id: P38-T2
+    type: feature
+    ambiguity: low
+    risk: low
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: planned
+    description: >
+      Release version consistency checker + release:check + trust-boundary doc.
+
+
+      - scripts/check-release-version.mjs: assert package.json version,
+        CHANGELOG top release section, docs code-pact@x.y.z examples,
+        RECOMMENDATION_CONSUMPTION_FROM_VERSION, and design/measurements
+        summary version all agree; non-zero exit on mismatch.
+
+      - package.json "release:check" script bundling: typecheck, test, build,
+        check:docs, check-release-version, validate --json, plan lint
+        --include-quality --strict --json.
+
+      - docs: a short trust-boundary note (execution / path / identifier) in
+        cli-contract.md.
+    decision_refs:
+      - design/decisions/release-readiness-invariants-rfc.md
+    reads:
+      - package.json
+      - CHANGELOG.md
+      - scripts/check-doc-invariants.mjs
+      - docs/cli-contract.md
+      - design/measurements/summary.json
+    writes:
+      - scripts/check-release-version.mjs
+      - package.json
+      - docs/cli-contract.md
+      - tests/unit/scripts/check-release-version.test.ts
+      - CHANGELOG.md
+    acceptance_refs:
+      - design/phases/P38-release-readiness-invariants.yaml
+  - id: P38-T3
+    type: docs
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: planned
+    description: >
+      PR self-report template + record-done/record_only required-term test.
+
+
+      - A PR self-report template (.github/pull_request_template.md or a
+        CONTRIBUTING section) with the surface-enumeration table.
+
+      - A small required-term test pinning that task record-done --help and the
+        record_only docs use the reconciled vocabulary (record_only, project
+        verification, does not run verification, evidence), modeled on the
+        existing adapter-conformance required-term checks.
+    decision_refs:
+      - design/decisions/release-readiness-invariants-rfc.md
+    reads:
+      - src/cli/usage.ts
+      - docs/cli-contract.md
+      - CONTRIBUTING.md
+    writes:
+      - .github/pull_request_template.md
+      - tests/unit/cli/record-done-help-terms.test.ts
+      - CHANGELOG.md
+    acceptance_refs:
+      - design/phases/P38-release-readiness-invariants.yaml
