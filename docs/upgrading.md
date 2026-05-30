@@ -10,6 +10,15 @@ Just bump the version. Existing phase YAML, progress logs, and generated adapter
 
 One v1.22 change is backward-compatible but worth flagging because it can make a previously-passing task **start blocking**. The decision gate for `requires_decision` tasks now reads the ADR's status, not just its filename: a decision resolves only when its ADR is `**Status:** accepted`. A non-empty ADR with **no** status line still resolves (so projects that predate status-aware parsing are unaffected), but an ADR that explicitly says `proposed` / `draft` / `rejected` / `superseded` — which used to satisfy the gate by filename match alone — will now hold `verify` / `task complete` / `task record-done` until you flip it to `accepted`. If a bump suddenly blocks a task, check the referenced ADR's `**Status:**` line. See the [decision-gate concept](concepts/decision-gate.md) and [`DECISION_REQUIRED` in troubleshooting](troubleshooting.md#decision_required-from-task-record-done-v121).
 
+### Worth knowing: identifier & path validation (v1.26)
+
+v1.26 tightens two schema rules so that values flowing into generated commands and filesystem paths are safe. Both are backward-compatible for conventional projects but can make a previously-parsing plan **start failing** if it used an unusual value:
+
+- **Plan identifiers** (`Task.id`, `Phase.id`, roadmap `PhaseRef.id`, and agent names) must match `^[A-Za-z0-9][A-Za-z0-9._-]*$` — start with a letter or digit, then letters/digits/`.`/`_`/`-`. This rejects whitespace, slashes, `..`, shell metacharacters, and option-like ids (`--json`, `-P1`). Conventional ids such as `P1-T1`, `P34-ci-branch-drift`, and `claude-code` are unaffected.
+- **Agent-profile path fields** (`instruction_filename`, `context_dir`, `skill_dir`, `hook_dir`) and `agents[].profile` must be project-relative POSIX paths: absolute paths, `~`, `..`, `.`, empty segments, and backslashes are rejected. The defaults (`.context/<agent>`, `.claude/skills`, `CLAUDE.md`, `agent-profiles/<name>.yaml`, …) all pass.
+
+If a bump suddenly reports a schema error on a task/phase id, an agent name, or an agent-profile path, rename the offending value to fit these rules.
+
 After bumping the CLI, refresh the generated adapter files:
 
 ```sh
