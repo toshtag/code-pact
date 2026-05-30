@@ -52,15 +52,18 @@ stateDiagram-v2
 | `task block <id> --reason "…"` | 理由つきで `blocked` にする。 | `blocked` |
 | `task resume <id> --agent <a>` | ブロックを解除し、`resumed` にする。 | `resumed` |
 
-### ループの外で完了した作業を記録する
+### `task complete` を通さずに `done` を記録する
 
-タスクがこのループの**外**で完了することもあります — 既にマージ済み、あるいは現在の作業ツリーからは検証できない場合です。`task record-done` は、ループの実行を偽装せずにそれを正直に記録する手段です:
+`task record-done` は、ループの検証コマンドを**実行せずに** `done` イベントを記録します — 根拠は与える `--evidence` です。次の2つのケースのための正直な経路です:
+
+1. **外部完了** — 既にマージ済み、あるいは現在の作業ツリーからは検証できない作業。
+2. **`record_only` 軽量レーン（v1.26+）** — `task prepare` が `lifecycleMode: record_only`（小さく低リスクで検証の強い docs/test タスク）を推奨した場合、プロジェクトの検証を**自分で**実行し、その結果をここに記録します。`record_only` は*ループ*を軽くするのであって、**検証を省くものではありません**。
 
 | コマンド | 何をするか | イベント記録 |
 | --- | --- | --- |
-| `task record-done <id> --evidence "PR #123"` | ループ外で完了した作業に `done` を記録。検証コマンドは実行せず、根拠は `--evidence`。イベントは `source: external` を持つ。`requires_decision` タスクでは decision gate が依然として適用される。 | `done`（`source: external`） |
+| `task record-done <id> --evidence "PR #123 · pnpm test green"` | 検証コマンドを実行せずに `done` を記録 — 根拠は `--evidence`（PR、CI リンク、または実行した検証）。イベントは `source: external` を持つ。`requires_decision` タスクでは decision gate が依然として適用される。 | `done`（`source: external`） |
 
-作業ツリーから検証できる場合は通常の `complete` を優先してください。`record-done` は本当にループ外で完了した場合のみに留めます。`source: external` のマーカーにより、その区別が後の診断で見えるようになります。
+作業ツリーから検証でき、かつ `lifecycleMode` が `record_only` でない場合は、通常の `complete`（検証を代わりに実行してくれる）を優先してください。`source: external` は、`task complete` のループ検証を**通っていない**イベントを示すマーカーで、後の診断で両者を区別できます。`--evidence` には実際の根拠（PR 番号、CI 結果、実行した検証コマンド）を書いてください。
 
 ## 実例
 

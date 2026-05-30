@@ -8,9 +8,10 @@
 //
 // Design (per design/decisions/governance-rfc.md § Advisory lock model):
 //
-//   - Lock path: `<cwd>/.code-pact/locks/write.lock`. `.code-pact/`
-//     is gitignored at the root anchor so the lock file is never
-//     accidentally committed.
+//   - Lock path: `<cwd>/.code-pact/locks/write.lock`. In this repo
+//     `.code-pact/` is gitignored, so the lock is never committed.
+//     Consumers who track `.code-pact/` config should ignore
+//     `.code-pact/locks/` (it is runtime state, not a work product).
 //   - Atomic exclusive create via `fs.writeFile(..., { flag: "wx" })`.
 //     Cross-platform safe (no POSIX flock dependency).
 //   - Lock content is JSON `{ pid, hostname, cmd, created_at }` for

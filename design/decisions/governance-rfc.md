@@ -153,7 +153,7 @@ P14 explicitly does NOT design or implement this. docs/migration.md and docs/con
 
 ### Lock file location and format
 
-Path: `.code-pact/locks/write.lock` (single file). `.code-pact/` is already in `.gitignore` (root anchor `/.code-pact/`), so the lock directory is automatically excluded from VCS.
+Path: `.code-pact/locks/write.lock` (single file). In *this* repo `.code-pact/` is in `.gitignore` (root anchor `/.code-pact/`), so the lock directory is excluded from VCS. Note that `init` does **not** gitignore `.code-pact/` for consumer projects — a consumer that tracks `.code-pact/` config should ignore `.code-pact/locks/` itself, since the lock is per-run runtime state, not a work product.
 
 Content: JSON with diagnostic metadata.
 

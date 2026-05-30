@@ -57,19 +57,29 @@ If a task is waiting on something, record it explicitly:
 | `task block <id> --reason "…"` | Marks the task `blocked` with a reason. | `blocked` |
 | `task resume <id> --agent <a>` | Clears the block; the task becomes `resumed`. | `resumed` |
 
-### Recording work done outside the loop
+### Recording a `done` without `task complete`
 
-Sometimes a task is finished **outside** this loop — already merged, or otherwise
-not verifiable from the current working tree. `task record-done` is the honest way
-to record that, without faking a loop run:
+`task record-done` records a `done` event **without** running the loop's
+verification commands — the proof is the `--evidence` you supply. It is the
+honest path for two cases:
+
+1. **External completion** — work already merged, or not verifiable from the
+   current working tree.
+2. **The `record_only` lightweight lane (v1.26+)** — when `task prepare`
+   recommends `lifecycleMode: record_only` (a small, low-risk, strongly-verified
+   docs/test task), you run the project's verification **yourself**, then record
+   the result here. `record_only` is a lighter *loop*, **not** lighter
+   verification.
 
 | Command | What it does | Records an event? |
 | --- | --- | --- |
-| `task record-done <id> --evidence "PR #123"` | Records `done` for externally-completed work. Does **not** run verification commands — the proof is `--evidence`. The event carries `source: external`. The decision gate still applies for `requires_decision` tasks. | `done` (`source: external`) |
+| `task record-done <id> --evidence "PR #123 · pnpm test green"` | Records `done` without running verification commands — the proof is `--evidence` (a PR, CI link, or the verification you ran). The event carries `source: external`. The decision gate still applies for `requires_decision` tasks. | `done` (`source: external`) |
 
-Prefer the normal `complete` path whenever the work can be verified from the
-working tree. Reach for `record-done` only for genuinely external completion;
-the `source: external` marker keeps that distinction visible for later diagnostics.
+When the work can be verified from the working tree and `lifecycleMode` is not
+`record_only`, prefer the normal `complete` path (it runs verification for you).
+`source: external` marks an event that did **not** go through `task complete`'s
+loop verification — so later diagnostics can tell the two apart. Put real proof
+in `--evidence`: a PR number, a CI result, or the verification command you ran.
 
 ## A worked example
 

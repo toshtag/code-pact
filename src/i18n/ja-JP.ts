@@ -290,7 +290,7 @@ export const messages = {
     },
     recordDone: {
       evidenceRequired:
-        "task record-done には、ループ外で完了した作業を示す --evidence \"<text>\" が必要です。",
+        "task record-done には、完了の根拠（PR、CI 結果、または実行した検証）を示す --evidence \"<text>\" が必要です。",
       decisionRequired: (taskId: string): string =>
         `タスク "${taskId}" を done にするには decision ADR が必要です。`,
       alreadyDone: (taskId: string): string =>
