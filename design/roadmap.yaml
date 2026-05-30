@@ -98,3 +98,6 @@ phases:
   - id: P36
     path: design/phases/P36-adr-quality-advisory.yaml
     weight: 6
+  - id: P38
+    path: design/phases/P38-release-readiness-invariants.yaml
+    weight: 6
