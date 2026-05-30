@@ -170,4 +170,21 @@ describe("createPhase", () => {
       expect(captured!.message).toContain("init --sample-phase");
     });
   });
+
+  // Identifier safety: an unsafe id must be rejected BEFORE any path is built,
+  // so a traversal like `../evil` can never escape design/phases/.
+  describe("unsafe phase id (write-path traversal)", () => {
+    it.each(["../evil", "../../evil", "P1/T1", "P1; echo owned", "."])(
+      "rejects id %j with CONFIG_ERROR and writes nothing",
+      async (badId) => {
+        const roadmapPath = join(cwd, "design", "roadmap.yaml");
+        const before = await readFile(roadmapPath, "utf8");
+        await expect(
+          createPhase({ cwd, id: badId, name: "x", weight: 1, objective: "x" }),
+        ).rejects.toMatchObject({ code: "CONFIG_ERROR" });
+        // roadmap untouched — no phase ref appended, no file leaked.
+        expect(await readFile(roadmapPath, "utf8")).toBe(before);
+      },
+    );
+  });
 });
