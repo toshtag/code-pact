@@ -101,3 +101,6 @@ phases:
   - id: P38
     path: design/phases/P38-release-readiness-invariants.yaml
     weight: 6
+  - id: P39
+    path: design/phases/P39-root-cause-completion-errors.yaml
+    weight: 6
