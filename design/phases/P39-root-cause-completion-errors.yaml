@@ -138,8 +138,8 @@ tasks:
         commands -> COMMANDS_FAILED) — the cause_code literals live at the
         emission site, not in a core helper, so the error-code-surface scan
         pins them. Replace the generic error.message with an actionable message
-        chosen by first_failure.name (the command cause additionally embeds
-        first_failure.reason). Leave the P32 data fields exactly where they are
+        keyed off first_failure.name and embeds first_failure.reason for both
+        commands and decision causes. Leave the P32 data fields exactly where they are
         — do NOT copy them into error, and do NOT add a structured
         DecisionRequiredData block.
 

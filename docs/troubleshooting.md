@@ -6,7 +6,7 @@ When a command surfaces one of the diagnostic codes below, this page maps it to 
 
 | Code | Usually means | Start here |
 | --- | --- | --- |
-| [`VERIFICATION_FAILED`](#verification_failed-from-task-complete-or-standalone-verify) | A completion check failed (command **or** decision gate) | Read `error.cause_code` (`COMMANDS_FAILED` / `DECISION_REQUIRED`); or run `verify` standalone |
+| [`VERIFICATION_FAILED`](#verification_failed-from-task-complete-or-standalone-verify) | A completion check failed (command **or** decision gate) | On `task complete`: read `error.cause_code` (`COMMANDS_FAILED` / `DECISION_REQUIRED`). On standalone `verify`: inspect `data.checks` |
 | [`INVALID_TASK_TRANSITION`](#invalid_task_transition-from-task-start--block--resume--complete) | Wrong state transition (e.g. complete a blocked task) | Check `task status`; `task resume` first |
 | [`TASK_FINALIZE_NOT_ELIGIBLE`](#task_finalize_not_eligible-from-task-finalize-v12) | Task isn't `done` yet | Run `task complete` first |
 | [`TASK_FINALIZE_WRITE_REFUSED`](#task_finalize_write_refused-from-task-finalize---write-v12) | Phase-YAML write blocked by the safety check | Read `data.reason`; usually fix the phase file |
