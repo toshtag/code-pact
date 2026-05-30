@@ -549,7 +549,7 @@ export const messages = {
         ].join("\n"),
         failBody: [
           "- **blocked dependency** (from `task prepare`) — `next_action.type` is `wait_for_dependencies` and `blocked_by` lists the upstream task ids. Either resolve those tasks first (a real block) or `code-pact task resume <task-id>` if the block was a manual `task block` whose reason is resolved.",
-          "- **verification failure** (from `task complete`) — the phase's `verification.commands` failed (`VERIFICATION_FAILED`). Fix the failing command and re-run; `task complete` is idempotent.",
+          "- **verification failure** (from `task complete`) — `error.code` is `VERIFICATION_FAILED` (exit 1). Read `error.cause_code`: `COMMANDS_FAILED` → fix the failing verification command; `DECISION_REQUIRED` → a `requires_decision` task needs an accepted ADR (write/accept it). `error.message` is actionable. Fix the cause and re-run; `task complete` is idempotent.",
           "- **missing context pack** — `code-pact task prepare <task-id> --agent <name> --json` rebuilds the pack at `.context/<agent>/<task-id>.md`. Pass `--dry-run` to inspect the path without writing.",
           "- **adapter drift** (from `code-pact adapter doctor` or `code-pact adapter conformance <agent>`) — the installed adapter files diverged from the manifest, or the agent contract surface is incomplete. Re-run `code-pact adapter upgrade <agent> --write` (use `--accept-modified` to preserve manual edits).",
           "- **`LOCK_HELD`** — another code-pact mutation is in progress. Wait and retry; `data.lock_holder` identifies the holder.",

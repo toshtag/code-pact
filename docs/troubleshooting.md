@@ -6,7 +6,7 @@ When a command surfaces one of the diagnostic codes below, this page maps it to 
 
 | Code | Usually means | Start here |
 | --- | --- | --- |
-| [`VERIFICATION_FAILED`](#verification_failed-from-task-complete-or-standalone-verify) | The verify command failed | Run `verify` standalone and read the output |
+| [`VERIFICATION_FAILED`](#verification_failed-from-task-complete-or-standalone-verify) | A completion check failed (command **or** decision gate) | Read `error.cause_code` (`COMMANDS_FAILED` / `DECISION_REQUIRED`); or run `verify` standalone |
 | [`INVALID_TASK_TRANSITION`](#invalid_task_transition-from-task-start--block--resume--complete) | Wrong state transition (e.g. complete a blocked task) | Check `task status`; `task resume` first |
 | [`TASK_FINALIZE_NOT_ELIGIBLE`](#task_finalize_not_eligible-from-task-finalize-v12) | Task isn't `done` yet | Run `task complete` first |
 | [`TASK_FINALIZE_WRITE_REFUSED`](#task_finalize_write_refused-from-task-finalize---write-v12) | Phase-YAML write blocked by the safety check | Read `data.reason`; usually fix the phase file |
@@ -59,18 +59,21 @@ code-pact plan normalize --write
 
 ## `VERIFICATION_FAILED` from `task complete` (or standalone `verify`)
 
-The phase's `verify.commands` did not pass.
+A deterministic completion check did not pass. `task complete` runs two checks — `commands` (the phase's `verification.commands`) and `decision` (the `requires_decision` ADR gate) — so `VERIFICATION_FAILED` is **not** only a command failure.
+
+**v1.27+ (P39): read `error.cause_code` first — you usually don't need to re-run `verify`.** On `task complete`, the `VERIFICATION_FAILED` envelope carries an additive `error.cause_code` and an actionable `error.message`:
+
+- `error.cause_code: "COMMANDS_FAILED"` → a verification command failed. `error.message` embeds the failing command's reason. Fix the command (or, if the command itself is wrong — typo, missing dependency — edit `design/phases/<phase>.yaml` `verification.commands`), then re-run.
+- `error.cause_code: "DECISION_REQUIRED"` → the task `requires_decision` and no **accepted** ADR resolves the gate. `error.message` says an accepted ADR is required. Write/accept the ADR (see [`DECISION_REQUIRED` from `task record-done`](#decision_required-from-task-record-done-v121) for the gate semantics), then re-run. `error.code` stays `VERIFICATION_FAILED` at exit 1 (the full structured `DecisionRequiredData` block only appears on `task record-done`).
 
 ```sh
 code-pact verify --phase <phase-id> --task <task-id>
-# Runs the same commands stand-alone so you can read the failure
-# output directly. progress.yaml is NOT mutated when verify fails;
-# you can re-run task complete after fixing the underlying issue.
+# Runs the same checks stand-alone so you can read the full output.
+# progress.yaml is NOT mutated when verify fails; re-run task complete
+# after fixing the underlying issue.
 ```
 
-If the verify command itself is wrong (typo, dependency missing) rather than the task's implementation, edit `design/phases/<phase>.yaml` `verification.commands` and re-run.
-
-**v1.26+ (P32): you often don't need to re-run `verify` to see why.** The `VERIFICATION_FAILED` envelope from `task complete` (and the `task finalize` failure envelopes) carry `failed_checks`, `first_failure: { name, reason }`, and `suggested_next_command` under `data`, alongside the unchanged `data.verify.checks`. Human (non-`--json`) output prints the cause and a `rerun after fixing:` line below the generic message. `suggested_next_command` is the command to rerun **after fixing** `first_failure` — not a hint that re-running unchanged will pass.
+**v1.26+ (P32) `data` detail.** The same envelope (and the `task finalize` failure envelopes) also carry `failed_checks`, `first_failure: { name, reason }`, and `suggested_next_command` under `data`, alongside the unchanged `data.verify.checks`. Human (non-`--json`) output leads with the actionable cause headline (the `cause_code` message above — no longer a generic line) and prints `cause:` and `rerun after fixing:` lines below it. `suggested_next_command` is the command to rerun **after fixing** `first_failure` — not a hint that re-running unchanged will pass.
 
 ## `TASK_FINALIZE_NOT_ELIGIBLE` from `task finalize` (v1.2+)
 
