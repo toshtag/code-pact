@@ -543,11 +543,15 @@ async function cmdTaskContext(
         throw err;
     }
     if (json) {
-      const errorObj: Record<string, unknown> = { code: outCode, message: msg };
-      if (envelopeData !== undefined) errorObj.data = envelopeData;
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: errorObj })}\n`,
-      );
+      // Failure detail goes in a TOP-LEVEL `data` (the documented envelope
+      // convention, matching doctor / validate and the cli-contract recovery
+      // prose `data.minimum_achievable_bytes`), not under `error.data`.
+      const envelope: Record<string, unknown> = {
+        ok: false,
+        error: { code: outCode, message: msg },
+      };
+      if (envelopeData !== undefined) envelope.data = envelopeData;
+      process.stdout.write(`${JSON.stringify(envelope)}\n`);
     } else {
       process.stderr.write(`${msg}\n`);
     }
@@ -716,11 +720,15 @@ async function cmdTaskPrepare(
         throw err;
     }
     if (json) {
-      const errorObj: Record<string, unknown> = { code: outCode, message: msg };
-      if (envelopeData !== undefined) errorObj.data = envelopeData;
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: errorObj })}\n`,
-      );
+      // Failure detail goes in a TOP-LEVEL `data` (the documented envelope
+      // convention, matching doctor / validate and the cli-contract recovery
+      // prose `data.minimum_achievable_bytes`), not under `error.data`.
+      const envelope: Record<string, unknown> = {
+        ok: false,
+        error: { code: outCode, message: msg },
+      };
+      if (envelopeData !== undefined) envelope.data = envelopeData;
+      process.stdout.write(`${JSON.stringify(envelope)}\n`);
     } else {
       process.stderr.write(`${msg}\n`);
     }

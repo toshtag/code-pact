@@ -1258,13 +1258,14 @@ Conformance is intentionally narrower than `adapter doctor` — it inspects only
     "checks": [
       { "id": "manifest_present", "status": "pass", "severity": "required" },
       { "id": "instruction_file_present", "status": "pass", "severity": "required", "file": "CLAUDE.md" },
-      { "id": "contract_section_present", "status": "pass", "file": "CLAUDE.md" },
-      { "id": "axis_when_to_invoke", "status": "pass", "file": "CLAUDE.md" },
-      { "id": "axis_what_to_verify", "status": "pass", "file": "CLAUDE.md" },
-      { "id": "axis_how_to_handle", "status": "pass", "file": "CLAUDE.md" },
+      { "id": "contract_section_present", "status": "pass", "severity": "required", "file": "CLAUDE.md" },
+      { "id": "axis_when_to_invoke", "status": "pass", "severity": "required", "file": "CLAUDE.md" },
+      { "id": "axis_what_to_verify", "status": "pass", "severity": "required", "file": "CLAUDE.md" },
+      { "id": "axis_how_to_handle", "status": "pass", "severity": "required", "file": "CLAUDE.md" },
       {
         "id": "required_cli_surface_mentions",
         "status": "pass",
+        "severity": "required",
         "file": "CLAUDE.md",
         "details": {
           "lifecycle_required": ["code-pact task prepare", "code-pact task start", "code-pact task complete", "code-pact task finalize"],
@@ -1276,6 +1277,7 @@ Conformance is intentionally narrower than `adapter doctor` — it inspects only
       {
         "id": "required_failure_guidance",
         "status": "pass",
+        "severity": "required",
         "file": "CLAUDE.md",
         "details": {
           "required": ["blocked dependency", "verification failure", "adapter drift", "missing context pack"],
@@ -1462,12 +1464,12 @@ Sections excluded by the v1.11 inclusion policy (e.g. `not_declared_by_task` for
   "ok": false,
   "error": {
     "code": "CONTEXT_OVER_BUDGET",
-    "message": "Context pack cannot be reduced below 1196 bytes; --budget-bytes 100 is unachievable for this task.",
-    "data": {
-      "budget_bytes": 100,
-      "minimum_achievable_bytes": 1196,
-      "unelidable_sections": ["header", "phase_contract", "task_definition", "verification_commands", "progress_event_schema"]
-    }
+    "message": "Context pack cannot be reduced below 1196 bytes; --budget-bytes 100 is unachievable for this task."
+  },
+  "data": {
+    "budget_bytes": 100,
+    "minimum_achievable_bytes": 1196,
+    "unelidable_sections": ["header", "phase_contract", "task_definition", "verification_commands", "progress_event_schema"]
   }
 }
 ```
