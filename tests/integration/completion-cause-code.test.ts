@@ -278,24 +278,28 @@ describe("P39: task complete cause_code", () => {
   });
 
   // P39 contract boundary: error.cause_code is a `task complete`-only surface.
-  // standalone `verify --json` reports per-check results in data.checks and does
-  // NOT use the {ok:false, error} envelope at all (it returns ok:true with
-  // data.ok:false, exit 0) — so there is no error object and no cause_code.
-  // Pinned so a future change to verify's surface is a conscious decision.
+  // standalone `verify --json` uses the generic VERIFICATION_FAILED envelope
+  // (ok:false, exit 1) and reports per-check results in data.checks. Crucially
+  // its error carries NO cause_code — that enrichment (DECISION_REQUIRED /
+  // COMMANDS_FAILED) is added only by `task complete`. Pinned so a future change
+  // to verify's surface is a conscious decision.
   it("standalone verify failure has NO error.cause_code (cause_code is task complete-only)", async () => {
     await setupTask((t) => {
       t.requires_decision = true;
     });
 
     const res = run(["verify", "--phase", "P1", "--task", "P1-T1", "--json"]);
+    expect(res.code).toBe(1);
     const env = JSON.parse(res.stdout) as {
       ok: boolean;
-      error?: { cause_code?: string };
-      data: { ok: boolean; checks: { name: string; ok: boolean }[] };
+      error?: { code?: string; cause_code?: string };
+      data: { checks: { name: string; ok: boolean }[] };
     };
-    // verify reports the failing check in data.checks, not via error.cause_code.
-    expect(env).not.toHaveProperty("error");
-    expect(env.data.ok).toBe(false);
+    // verify uses the generic VERIFICATION_FAILED envelope and reports the
+    // failing check in data.checks — but it does NOT carry error.cause_code.
+    expect(env.ok).toBe(false);
+    expect(env.error?.code).toBe("VERIFICATION_FAILED");
+    expect(env.error).not.toHaveProperty("cause_code");
     expect(env.data.checks.some((c) => c.name === "decision" && !c.ok)).toBe(
       true,
     );
