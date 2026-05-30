@@ -20,6 +20,7 @@ import {
   type AcceptanceRefCheck,
   type DependsOnEntry,
 } from "./types.ts";
+import { assertSafeRelativePath } from "../path-safety.ts";
 
 // ---------------------------------------------------------------------------
 // Task runbook builder — v1.3 P12-T2.
@@ -61,10 +62,18 @@ function checkAcceptanceRefs(
   cwd: string,
   task: Task,
 ): AcceptanceRefCheck[] {
-  return (task.acceptance_refs ?? []).map((path) => ({
-    path,
-    exists: existsSync(join(cwd, path)),
-  }));
+  return (task.acceptance_refs ?? []).map((path) => {
+    // Confine the existence probe to the project root (reject `..` / absolute)
+    // so an unsafe ref can't be used as an out-of-tree existence oracle.
+    let exists = false;
+    try {
+      assertSafeRelativePath(path);
+      exists = existsSync(join(cwd, path));
+    } catch {
+      exists = false;
+    }
+    return { path, exists };
+  });
 }
 
 function blockingDependsOnStep(unsatisfied: DependsOnEntry[]): RunbookStep {

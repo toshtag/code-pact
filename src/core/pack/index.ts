@@ -18,6 +18,22 @@ import {
 import { deriveTaskState } from "../progress/task-state.ts";
 import { validateGlobSyntax, walkAndMatch } from "../glob.ts";
 import { assertSafePlanId } from "../schemas/plan-id.ts";
+import { resolveWithinProject } from "../path-safety.ts";
+
+/**
+ * Read a project file only if `relPath` resolves within the project root —
+ * rejects `..`/absolute (lexical) AND symlink escape (via resolveWithinProject).
+ * Returns null when unsafe or unreadable so callers can skip silently. This is
+ * the read-side guard for every file whose path is derived from loaded YAML
+ * (decision_refs) or from a readdir entry (which could be a symlink).
+ */
+async function readWithinProject(cwd: string, relPath: string): Promise<string | null> {
+  try {
+    return await readFile(await resolveWithinProject(cwd, relPath), "utf8");
+  } catch {
+    return null;
+  }
+}
 
 export type BuildContextPackOptions = {
   cwd: string;
@@ -200,7 +216,8 @@ async function loadRules(
     // constitution.md is included via the dedicated constitution slot, not rules
     if (entry === "constitution.md") continue;
 
-    const raw = await readFile(join(rulesDir, entry), "utf8");
+    const raw = await readWithinProject(cwd, `design/rules/${entry}`);
+    if (raw === null) continue; // unsafe (e.g. symlink escape) or unreadable
     const { frontMatter, body } = parseFrontMatter(raw);
     const tags: string[] = Array.isArray(frontMatter.tags) ? (frontMatter.tags as string[]) : [];
     const appliesTo: string[] = Array.isArray(frontMatter.applies_to)
@@ -233,7 +250,8 @@ async function loadDecisions(
     if (!entry.endsWith(".md")) continue;
     if (!allDecisions && !entry.includes(taskId)) continue;
 
-    const raw = await readFile(join(decisionsDir, entry), "utf8");
+    const raw = await readWithinProject(cwd, `design/decisions/${entry}`);
+    if (raw === null) continue; // unsafe (e.g. symlink escape) or unreadable
     const { body } = parseFrontMatter(raw);
     docs.push({ filename: entry, body });
   }
@@ -283,17 +301,20 @@ async function loadDeclaredDecisions(
 ): Promise<DecisionDoc[]> {
   const docs: DecisionDoc[] = [];
   for (const ref of refs) {
-    try {
-      const raw = await readFile(join(cwd, ref), "utf8");
-      const { body } = parseFrontMatter(raw);
-      // Use just the basename for the section header so the rendered
-      // pack matches the existing "Related Decisions" presentation
-      // (which keys by filename, not full path).
-      const filename = ref.split("/").pop() ?? ref;
-      docs.push({ filename, body });
-    } catch {
-      // Skipped silently here — see comment above.
-    }
+    // `ref` comes from task.decision_refs (loaded YAML) and is read into the
+    // pack body, so it must be confined to the project root — a value like
+    // `../../.ssh/id_rsa` would otherwise exfiltrate an arbitrary file into
+    // the context pack. resolveWithinProject also rejects symlink escape. The
+    // decision gate (adr.ts) already fail-closes unsafe refs; this is the
+    // matching guard on the pack-render path.
+    const raw = await readWithinProject(cwd, ref);
+    if (raw === null) continue; // unsafe path or not loadable — see comment above
+    const { body } = parseFrontMatter(raw);
+    // Use just the basename for the section header so the rendered
+    // pack matches the existing "Related Decisions" presentation
+    // (which keys by filename, not full path).
+    const filename = ref.split("/").pop() ?? ref;
+    docs.push({ filename, body });
   }
   return docs;
 }
@@ -741,7 +762,13 @@ export async function writeContextPack(
 ): Promise<WriteContextPackResult> {
   const { cwd, agentName, outputDir } = opts;
   const profile = await loadAgentProfile(cwd, agentName);
-  const outDir = outputDir ?? join(cwd, profile?.context_dir ?? join(".context", agentName));
+  // An explicit `outputDir` is a deliberate caller/CLI choice (`--output-dir`),
+  // left as-is. The profile-derived dir is confined to the project root:
+  // context_dir is lexically a RelativePosixPath, but resolveWithinProject also
+  // rejects symlink escape (e.g. `.context/<agent>` symlinked outside), so a
+  // profile cannot redirect the pack write out of the repo.
+  const outDir =
+    outputDir ?? (await resolveWithinProject(cwd, profile?.context_dir ?? `.context/${agentName}`));
   await mkdir(outDir, { recursive: true });
   const outputPath = join(outDir, `${pack.taskId}.md`);
   await writeFile(outputPath, pack.content, "utf8");

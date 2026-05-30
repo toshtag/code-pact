@@ -14,6 +14,7 @@ import {
 import type { TaskStatusDiff } from "../core/finalize/diff.ts";
 import { resolveTaskInRoadmap } from "../core/plan/resolve-task.ts";
 import { auditWrites, type WriteAuditResult } from "../core/audit/index.ts";
+import { assertSafeRelativePath } from "../core/path-safety.ts";
 
 // ---------------------------------------------------------------------------
 // `task finalize <task-id>` — v1.2 P11
@@ -228,10 +229,16 @@ export async function runTaskFinalize(
 
   const acceptanceRefsCheck: AcceptanceRefCheck[] = [];
   for (const ref of task.acceptance_refs ?? []) {
-    acceptanceRefsCheck.push({
-      path: ref,
-      exists: await fileExists(join(cwd, ref)),
-    });
+    // Confine the existence probe to the project root so an unsafe ref
+    // (`../../.ssh/id_rsa`) can't be used as an out-of-tree existence oracle.
+    let exists = false;
+    try {
+      assertSafeRelativePath(ref);
+      exists = await fileExists(join(cwd, ref));
+    } catch {
+      exists = false;
+    }
+    acceptanceRefsCheck.push({ path: ref, exists });
   }
 
   const dependsOnCheck: DependsOnCheck[] = (task.depends_on ?? []).map(
