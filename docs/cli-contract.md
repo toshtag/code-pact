@@ -81,8 +81,10 @@ Rationale and the compatibility constraints are in [`design/decisions/cli-alias-
 > run `verify` / `task complete` against unreviewed plans from untrusted
 > sources. (Plan identifiers such as task/phase ids and agent names are a
 > separate, stricter case: they flow into generated command strings and
-> filesystem paths, so the schema constrains them to `^[A-Za-z0-9._-]+$`
-> regardless of trust — see the id charset rule in the schema layer.)
+> filesystem paths, so the schema constrains them to
+> `^[A-Za-z0-9][A-Za-z0-9._-]*$` (leading char must be alphanumeric, so an id
+> can never be read as a CLI option like `--json`) regardless of trust — see
+> the id charset rule in the schema layer.)
 
 ## JSON output shape
 

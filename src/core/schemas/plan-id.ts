@@ -20,30 +20,35 @@ import { z } from "zod";
 // Mirrors the runtime allowlist in `assertSafeDecisionFilenameSegment`
 // (core/decisions/scaffold.ts), which imports this same pattern.
 //
-// Allowed: ASCII letters, digits, ".", "_", "-".
-// Rejected: spaces/tabs/newlines, slashes, shell metacharacters
-// (; | & $ ` " ' etc.), and the path segments "." and "..".
+// Allowed: an ASCII letter/digit first char, then letters, digits, ".", "_",
+// "-". The leading char MUST be alphanumeric so an id can never look like a
+// CLI option (`--json`, `-P1`) when interpolated into a generated command —
+// otherwise an agent running e.g. `code-pact task complete --json` would have
+// the id swallowed as a flag (argument confusion).
+// Rejected: a leading "-" / "." / "_", spaces/tabs/newlines, slashes, shell
+// metacharacters (; | & $ ` " ' etc.), and the path segments "." and "..".
 // ---------------------------------------------------------------------------
 
-export const PLAN_ID_PATTERN = /^[A-Za-z0-9._-]+$/;
+export const PLAN_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 export const PLAN_ID_MESSAGE =
-  'identifier must match ^[A-Za-z0-9._-]+$ (letters, digits, ".", "_", "-") ' +
-  'and must not be "." or ".." — no spaces, slashes, or shell metacharacters';
+  "identifier must start with a letter or digit and then match " +
+  '[A-Za-z0-9._-]* — no leading "-"/"."/"_", spaces, slashes, or shell ' +
+  'metacharacters (and it must not be "." or "..")';
 
 export const PlanId = z
   .string()
   .min(1)
-  .refine(
-    (s) => s !== "." && s !== ".." && PLAN_ID_PATTERN.test(s),
-    PLAN_ID_MESSAGE,
-  );
+  .refine((s) => PLAN_ID_PATTERN.test(s), PLAN_ID_MESSAGE);
 
 export type PlanId = z.infer<typeof PlanId>;
 
-/** True when `value` is a safe plan identifier (same rule as {@link PlanId}). */
+/**
+ * True when `value` is a safe plan identifier (same rule as {@link PlanId}).
+ * The pattern already excludes "." / ".." (they start with a non-alphanumeric).
+ */
 export function isSafePlanId(value: string): boolean {
-  return value !== "." && value !== ".." && PLAN_ID_PATTERN.test(value);
+  return PLAN_ID_PATTERN.test(value);
 }
 
 /**
