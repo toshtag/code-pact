@@ -278,7 +278,7 @@ Recovery — pick whichever matches reality:
   ```
 - **Silence it**: add `CONTROL_PLANE_BRANCH_NOT_DRIVEN` to `disabled_checks`.
 
-**Precondition.** `.code-pact/` is gitignored by default, so the check **silently skips** unless `.code-pact/state/progress.yaml` is committed — to use the CI gate, commit the ledger. It also skips when git/merge-base is unavailable. See [`docs/cli-contract.md` § `doctor`](cli-contract.md#--base-ref-and-ci-branch-drift-gating-v126-p34) for the full GitHub Actions example.
+**Precondition.** The gate reads the **committed** `progress.yaml`. `init` does *not* gitignore `.code-pact/` (it only ignores `/.local/` and `/.context/`), so by default the ledger is committable — commit it and the gate works. The check **silently skips** when `progress.yaml` is not git-tracked (e.g. you deliberately ignore `.code-pact/` — then `git add -f .code-pact/state/progress.yaml`) or when git/merge-base is unavailable. `validate` also needs the project config (`.code-pact/project.yaml`, agent/model profiles) in the CI checkout. See [`docs/cli-contract.md` § `doctor`](cli-contract.md#--base-ref-and-ci-branch-drift-gating-v126-p34) for the full GitHub Actions example and the precondition.
 
 ## `ADR_ACCEPTED_BODY_THIN` from `plan lint --include-quality` (v1.26+)
 

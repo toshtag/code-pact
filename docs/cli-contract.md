@@ -220,7 +220,7 @@ Issue-level codes emitted by `doctor` / `validate` for general project health.
 | `MISSING_MODEL_TIER` | error | An agent profile is missing a required `model_map` tier |
 | `EMPTY_OBJECTIVE` | error | A phase `objective` is blank or fewer than 10 characters |
 | `BAK_FILE` | warning | A `.bak` file is present alongside a tracked file |
-| `LOCAL_NOT_GITIGNORED` | warning | `.code-pact/` is not listed in `.gitignore` |
+| `LOCAL_NOT_GITIGNORED` | warning | `.local/` is not listed in `.gitignore` (the private planning-notes dir; `init` adds `/.local/` and `/.context/`, so this fires only if `.gitignore` was edited away) |
 | `BRIEF_MISSING` | warning | `design/brief.md` does not exist |
 | `CONSTITUTION_PLACEHOLDER` | warning | `design/constitution.md` still contains the template edit hint |
 | `ADAPTER_STALE` | warning | An enabled agent profile has no `model_version` set |
@@ -1598,11 +1598,24 @@ jobs:
       - run: npx -y code-pact@1.26.0 validate --strict --base-ref origin/${{ github.base_ref }} --json
 ```
 
-**Precondition — commit the ledger.** `.code-pact/` is gitignored by default
-(per-developer runtime state). For the gate to see whether the branch drove the
-loop, `.code-pact/state/progress.yaml` **must be committed** in the consumer
-repo; otherwise the check silently skips (it never cries wolf at a repo that
-does not commit the ledger).
+**Precondition — the ledger *and* the project config must be in the CI checkout.**
+`init` does **not** add `.code-pact/` to `.gitignore` — it only ignores
+`/.local/` (private planning notes) and `/.context/` (regenerable context
+packs). So by default `.code-pact/` (the project config **and**
+`state/progress.yaml`) is committable, and in the normal case you commit it. Two
+things must hold for the gate:
+
+- **The ledger is tracked.** The gate reads the *committed* `progress.yaml`; if
+  it is not git-tracked the check **silently skips** (it never cries wolf at a
+  repo that does not commit the ledger). If your repo deliberately gitignores
+  `.code-pact/` (or `.code-pact/state/`), force-add just the ledger so CI can
+  see it: `git add -f .code-pact/state/progress.yaml`.
+- **The project config is available.** `validate` itself reads
+  `.code-pact/project.yaml`, `agent-profiles/`, `model-profiles/` (and
+  `doctor.yaml` if you use `exclude_globs`). These must be present in the CI
+  checkout — committed in the normal case, or force-added if you ignore
+  `.code-pact/`. Force-adding only `progress.yaml` is not enough when the rest
+  of the config is ignored.
 
 ## `task add` — append a task to a phase (v0.6, non-interactive in v1.4+)
 
