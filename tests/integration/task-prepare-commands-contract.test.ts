@@ -140,3 +140,41 @@ describe("task prepare — emitted commands are accepted by the CLI parser", () 
     expect(["would_finalize", "finalized", "already_finalized"]).toContain(env.data.kind);
   });
 });
+
+// Codex pre-release audit (Finding 1): the CONTEXT_OVER_BUDGET envelope must
+// expose its budget fields under a TOP-LEVEL `data` — the documented
+// convention and what the cli-contract recovery prose tells agents to read
+// (`data.minimum_achievable_bytes`). A prior build nested them under
+// `error.data`, so an agent following the docs found nothing. This locks the
+// shape for both `task context` and `task prepare`.
+describe("CONTEXT_OVER_BUDGET envelope — budget detail is top-level data", () => {
+  let project: Awaited<ReturnType<typeof createTempProject>>;
+
+  beforeEach(async () => {
+    project = await createTempProject({ prefix: "code-pact-budget-env-" });
+    await setupTask(project);
+  });
+
+  afterEach(async () => {
+    await project.cleanup();
+  });
+
+  it.each([
+    ["task context", ["task", "context", "P1-T1", "--agent", "claude-code", "--budget-bytes", "1", "--json"]],
+    ["task prepare", ["task", "prepare", "P1-T1", "--agent", "claude-code", "--budget-bytes", "1", "--json"]],
+  ])("%s emits budget fields under top-level data, not error.data", (_label, argv) => {
+    const res = project.run(argv);
+    const env = JSON.parse(res.stdout.trim()) as {
+      ok: boolean;
+      error: { code: string; data?: unknown };
+      data?: { budget_bytes?: number; minimum_achievable_bytes?: number; unelidable_sections?: unknown };
+    };
+    expect(env.ok).toBe(false);
+    expect(env.error.code).toBe("CONTEXT_OVER_BUDGET");
+    expect(env.error.data).toBeUndefined();
+    expect(env.data?.budget_bytes).toBe(1);
+    expect(typeof env.data?.minimum_achievable_bytes).toBe("number");
+    expect(Array.isArray(env.data?.unelidable_sections)).toBe(true);
+    expect(res.code).toBe(2);
+  });
+});
