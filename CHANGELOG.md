@@ -13,6 +13,41 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+### Self-describing adapter skill names + orphan prune on upgrade
+
+Dogfooding the Claude Code adapter surfaced two related defects in how
+verification-command skills are generated under `.claude/skills/`. Both are
+fixed here; no public CLI surface changes.
+
+**Fixed**
+
+- **Self-describing skill names.** Skill names derived from a phase's
+  `verification.commands` used to take only the command's *last* token, so
+  distinct commands collapsed to the same name and were disambiguated with
+  opaque numeric suffixes (`doctor-2.md`, `claude-code-2.md`), and a flag
+  *value* could leak into the name (`adapter doctor --agent claude-code` →
+  `claude-code`, the v1.19 collision). Name derivation now strips the runner
+  prefix (`pnpm`/`npm`/`yarn`/`bun` + optional `run`, `node <script>`, bare
+  `code-pact`), joins the subcommand *words* up to the first flag
+  (`adapter-doctor`, `plan-lint`, `validate`), and resolves any genuine
+  collision by walking a deterministic flag-qualified ladder
+  (`adapter-upgrade`, `adapter-upgrade-check`, `adapter-upgrade-check-json`)
+  before ever falling back to a numeric suffix. The first flag is the
+  word/flag boundary, so a flag value or trailing positional never leaks into
+  the name regardless of which flags take values. Determinism, uniqueness, and
+  reserved-name safety (`context`/`verify`/`progress`) are preserved.
+- **Orphan prune on `adapter upgrade`.** Renaming a generated skill used to
+  leave the old file on disk untracked — `upgrade` did not remove a path the
+  generator no longer emits, and `doctor` did not surface it (its
+  `ownedPathGlobs` are deliberately narrow). `upgrade` now prunes orphans: a
+  path tracked by the previous manifest but absent from the new generator
+  output is deleted (`action: "prune"`) when its disk content still matches the
+  manifest hash, and refused (`action: "refuse"`, left on disk and still
+  tracked) when the user edited it. `--check` reports the actions without
+  touching disk; a second `--write` is a clean no-op. Hand-authored skills that
+  were never manifest-tracked are never considered. `"prune"` is a new
+  `FileAction`.
+
 ### Root-cause-first completion errors (P39)
 
 Make `task complete` name the real cause on the primary error face so an agent reading `error` first is not misdirected. Design in `design/decisions/root-cause-completion-errors-rfc.md`.
