@@ -96,7 +96,7 @@ tasks:
     write_surface: low
     verification_strength: medium
     expected_duration: short
-    status: planned
+    status: done
     description: >
       RFC + phase registration (bootstrap).
 
@@ -126,7 +126,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
     description: >
       task complete JSON failure envelope: cause_code + actionable message.
 
@@ -182,8 +182,12 @@ tasks:
       - docs/cli-contract.md
       - tests/unit/error-code-surface.test.ts
     writes:
-      - src/core/failure/failure-summary.ts
       - src/cli/commands/task.ts
+      - src/i18n/en-US.ts
+      - src/i18n/ja-JP.ts
+      - tests/integration/completion-cause-code.test.ts
+      - tests/integration/cli.test.ts
+      - tests/integration/e2e-workflow.test.ts
       - tests/unit/error-code-surface.test.ts
       - docs/cli-contract.md
       - CHANGELOG.md
@@ -197,7 +201,7 @@ tasks:
     write_surface: low
     verification_strength: strong
     expected_duration: short
-    status: planned
+    status: done
     description: >
       Human output parity (task complete) + docs.
 
@@ -232,8 +236,10 @@ tasks:
       - docs/cli-contract.md
     writes:
       - src/cli/commands/task.ts
+      - src/i18n/en-US.ts
+      - src/i18n/ja-JP.ts
+      - tests/integration/completion-cause-code.test.ts
       - docs/cli-contract.md
-      - tests/unit/error-code-surface.test.ts
       - CHANGELOG.md
     acceptance_refs:
       - design/phases/P39-root-cause-completion-errors.yaml
