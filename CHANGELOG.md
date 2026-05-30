@@ -13,6 +13,14 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+### Root-cause-first completion errors (P39)
+
+Make `task complete` name the real cause on the primary error face so an agent reading `error` first is not misdirected. Design in `design/decisions/root-cause-completion-errors-rfc.md`.
+
+**Added**
+
+- **P39-T1 — `error.cause_code` + actionable message on `task complete`.** On a `VERIFICATION_FAILED` failure, `task complete` now sets `error.cause_code` — `DECISION_REQUIRED` when the decision gate is unresolved (a `requires_decision` task with no accepted ADR), or `COMMANDS_FAILED` when a verification command failed — and an actionable `error.message` (e.g. `"P3-T1 requires an accepted ADR before completion."`) derived from the first failing check. This ports the cause that `task record-done` already surfaces. `error.code` stays `VERIFICATION_FAILED` (exit 1) for backward compatibility; the P32 `data` fields (`failed_checks` / `first_failure` / `suggested_next_command`) are unchanged and are **not** duplicated into `error`, and no structured decision block is added. `COMMANDS_FAILED` is a new `cause_code` value, registered in the error-code surface (the surface test now also scans `cause_code:` literals). `task finalize` is unchanged — it does not run the decision gate.
+
 ### Release readiness invariants (P38)
 
 Internal quality infrastructure that closes the mechanically-detectable classes the 1.26.0 review found by hand. No CLI surface, no stats, no outcome audit. Design in `design/decisions/release-readiness-invariants-rfc.md`.

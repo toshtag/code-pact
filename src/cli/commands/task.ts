@@ -854,12 +854,43 @@ async function cmdTaskComplete(
       const checks =
         (err as NodeJS.ErrnoException & { checks?: FailureCheckLike[] }).checks ?? [];
       const summary = buildFailureSummaryFromChecks(checks, taskId);
-      const msg = m.task.complete.verificationFailed(taskId);
+      // P39: name the real cause on the primary error face. error.code stays
+      // VERIFICATION_FAILED (v1-stable, exit 1); add an additive cause_code +
+      // an actionable message derived from the first failing check. The
+      // cause_code literals live here (as `cause_code: "..."`) so the
+      // error-code-surface scan pins them. task complete runs only the
+      // `commands` + `decision` checks, so those are the only two causes. The
+      // P32 data fields are left exactly where they are — not copied into
+      // error, and no structured decision block is added. See
+      // design/decisions/root-cause-completion-errors-rfc.md.
+      let errorObj: { code: string; cause_code?: string; message: string };
+      switch (summary.first_failure?.name) {
+        case "decision":
+          errorObj = {
+            code: "VERIFICATION_FAILED",
+            cause_code: "DECISION_REQUIRED",
+            message: m.task.complete.causeDecision(taskId),
+          };
+          break;
+        case "commands":
+          errorObj = {
+            code: "VERIFICATION_FAILED",
+            cause_code: "COMMANDS_FAILED",
+            message: m.task.complete.causeCommands(taskId),
+          };
+          break;
+        default:
+          errorObj = {
+            code: "VERIFICATION_FAILED",
+            message: m.task.complete.verificationFailed(taskId),
+          };
+      }
+      const msg = errorObj.message;
       if (json) {
         process.stdout.write(
           `${JSON.stringify({
             ok: false,
-            error: { code: "VERIFICATION_FAILED", message: msg },
+            error: errorObj,
             data: {
               task_id: taskId,
               verify: { ok: false, checks },
