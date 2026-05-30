@@ -40,4 +40,32 @@ describe("AgentProfile", () => {
   it("rejects empty instruction_filename", () => {
     expect(() => AgentProfile.parse({ ...VALID, instruction_filename: "" })).toThrow();
   });
+
+  // Path fields must be project-relative POSIX paths so they cannot escape the
+  // project root when joined onto cwd for mkdir / writeFile / readFile.
+  it.each([
+    ["context_dir", "../outside"],
+    ["context_dir", "a/../b"],
+    ["context_dir", "/tmp"],
+    ["context_dir", "~/evil"],
+    ["context_dir", "a\\b"],
+    ["hook_dir", "../hooks"],
+    ["skill_dir", "a//b"],
+    ["skill_dir", "/abs"],
+    ["instruction_filename", "../CLAUDE.md"],
+    ["instruction_filename", "/etc/passwd"],
+  ])("rejects unsafe %s = %j", (field, value) => {
+    expect(() => AgentProfile.parse({ ...VALID, [field]: value })).toThrow();
+  });
+
+  it("accepts the conventional relative path fields", () => {
+    const a = AgentProfile.parse({
+      ...VALID,
+      instruction_filename: ".cursor/rules/code-pact.mdc",
+      context_dir: ".context/cursor",
+      skill_dir: ".claude/skills",
+      hook_dir: ".claude/hooks",
+    });
+    expect(a.context_dir).toBe(".context/cursor");
+  });
 });

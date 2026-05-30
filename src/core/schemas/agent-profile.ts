@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { PlanId } from "./plan-id.ts";
+import { RelativePosixPath } from "./relative-path.ts";
 
 // Supported Claude model versions for model-aware adapter generation.
 // "generic" (or undefined) produces the baseline template.
@@ -40,10 +41,16 @@ export const AgentProfile = z.object({
   // Same charset constraint as AgentRef.name (project.ts): the profile name
   // is the agent identifier used in command strings and path segments.
   name: PlanId,
-  instruction_filename: z.string().min(1),
-  context_dir: z.string().min(1),
-  skill_dir: z.string().optional(),
-  hook_dir: z.string().optional(),
+  // Path fields are project-relative POSIX paths: they flow into
+  // `join(cwd, ...)` → mkdir / writeFile (context pack output, adapter
+  // install dirs) and readFile (doctor), so an unconstrained value like
+  // `../../tmp` or `/etc` would escape the project root. Constrain at the
+  // schema boundary — the same "paths use a path schema" rule the read
+  // schemas (roadmap PhaseRef.path) already follow.
+  instruction_filename: RelativePosixPath,
+  context_dir: RelativePosixPath,
+  skill_dir: RelativePosixPath.optional(),
+  hook_dir: RelativePosixPath.optional(),
   // Maps abstract model tiers to concrete vendor model IDs.
   // Keeping the mapping here, not in core schema, means the core stays
   // vendor-agnostic and model names can be bumped without touching phases.
