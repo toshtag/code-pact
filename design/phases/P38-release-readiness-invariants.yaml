@@ -5,7 +5,7 @@ name: Release readiness invariants — mechanically catch the surface-drift,
 weight: 6
 confidence: high
 risk: low
-status: planned
+status: done
 objective: |
   The 1.26.0 cycle reached release quality only after many rounds of external
   human review. The findings clustered into four mechanically-detectable
@@ -180,7 +180,7 @@ tasks:
     write_surface: low
     verification_strength: medium
     expected_duration: short
-    status: planned
+    status: done
     description: >
       PR self-report template + record-done/record_only required-term test.
 
