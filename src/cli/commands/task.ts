@@ -876,7 +876,10 @@ async function cmdTaskComplete(
           errorObj = {
             code: "VERIFICATION_FAILED",
             cause_code: "COMMANDS_FAILED",
-            message: m.task.complete.causeCommands(taskId),
+            message: m.task.complete.causeCommands(
+              taskId,
+              summary.first_failure?.reason ?? "",
+            ),
           };
           break;
         default:
