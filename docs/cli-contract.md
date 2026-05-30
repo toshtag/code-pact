@@ -75,6 +75,15 @@ Rationale and the compatibility constraints are in [`design/decisions/cli-alias-
   human mode or included inside the JSON `data` envelope in JSON mode.
   It is never written directly to stdout.
 
+> **Trust boundary.** A phase's `verification.commands` are executed
+> through the shell by `verify` and `task complete`. Treat phase YAML as
+> trusted project configuration — equivalent to a CI script — and do not
+> run `verify` / `task complete` against unreviewed plans from untrusted
+> sources. (Plan identifiers such as task/phase ids and agent names are a
+> separate, stricter case: they flow into generated command strings and
+> filesystem paths, so the schema constrains them to `^[A-Za-z0-9._-]+$`
+> regardless of trust — see the id charset rule in the schema layer.)
+
 ## JSON output shape
 
 `--json` is accepted both before and after the command name. The two

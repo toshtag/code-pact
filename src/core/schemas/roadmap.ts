@@ -1,10 +1,11 @@
 import { z } from "zod";
+import { PlanId } from "./plan-id.ts";
 import { RelativePosixPath } from "./relative-path.ts";
 
 // PhaseRef is a lightweight pointer stored in roadmap.yaml.
 // total_weight is NOT stored here; it is derived from phase refs at runtime.
 export const PhaseRef = z.object({
-  id: z.string().min(1),
+  id: PlanId,
   path: RelativePosixPath
     .refine(
       (s) => s.startsWith("design/phases/"),

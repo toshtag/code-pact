@@ -287,8 +287,11 @@ export async function runInitCore(opts: InitCoreOptions): Promise<InitResult> {
     skipped,
   );
 
-  // .gitignore — ensure code-pact's per-developer state is excluded from
-  // version control. Merged into any existing .gitignore (idempotent).
+  // .gitignore — ignore only the two derived/per-developer dirs: `.local/`
+  // (per-developer overrides) and `.context/` (regenerated context packs).
+  // `.code-pact/` itself is NOT ignored — project.yaml, agent/model profiles,
+  // and the progress ledger are shared, version-controlled state. Merged into
+  // any existing .gitignore (idempotent).
   await ensureGitignoreEntries(cwd, ["/.local/", "/.context/"], created);
 
   // -------------------------------------------------------------------------
