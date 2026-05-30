@@ -2,7 +2,7 @@
 
 How to run `code-pact` against the `code-pact` repository itself.
 
-The repo is already initialized (`.code-pact/` is committed), so `init` is not needed. The `design/` directory containing phases and tasks is the source of truth for work in progress.
+The repo is already initialized (`.code-pact/` exists as the maintainer's local working state — this repo gitignores `/.code-pact/`, so it is **not** committed; `design/` is the committed source of truth for phases and tasks). So `init` is not needed.
 
 This page is the **day-to-day quick guide**. Deeper, lower-frequency maintainer topics — planning wizards, model-aware adapters, adapter-upgrade internals, Spec Kit import, release-prep posture, and the design-vs-progress contract — live in [maintainers/operations.md](maintainers/operations.md).
 
