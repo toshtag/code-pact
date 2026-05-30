@@ -718,8 +718,9 @@ describe("CLI: task complete (v0.2)", () => {
 
     const res = run(["task", "complete", "P1-T1", "--agent", "claude-code"]);
     expect(res.code).toBe(1);
-    // Existing generic line is preserved...
-    expect(res.stderr).toMatch(/Verification failed for "P1-T1"/);
+    // P39: the headline is now the actionable cause message (was the generic
+    // "Verification failed for ..." string before P39).
+    expect(res.stderr).toMatch(/P1-T1: a verification command failed/);
     // ...with the new clarity lines below it.
     expect(res.stderr).toMatch(/cause: commands —/);
     expect(res.stderr).toMatch(/rerun after fixing: code-pact task complete P1-T1/);
