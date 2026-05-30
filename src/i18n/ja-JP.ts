@@ -274,6 +274,10 @@ export const messages = {
         `エージェント "${name}" は project.yaml に設定されていません。`,
       verificationFailed: (taskId: string): string =>
         `タスク "${taskId}" の verify が失敗しました。progress.yaml は変更されていません。`,
+      causeDecision: (taskId: string): string =>
+        `${taskId} は完了前に accepted な ADR が必要です。progress.yaml は変更されていません。`,
+      causeCommands: (taskId: string): string =>
+        `${taskId}: 検証コマンドが失敗しました。progress.yaml は変更されていません。`,
       alreadyDone: (taskId: string): string =>
         `タスク "${taskId}" には既に done イベントが存在します。再 verify をスキップしました (idempotent)。`,
       success: (taskId: string, agent: string): string =>

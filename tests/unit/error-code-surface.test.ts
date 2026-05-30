@@ -51,6 +51,7 @@ const KNOWN_CODES: Record<string, "public" | "plan" | "doctor" | "adapter" | "in
   ALREADY_INITIALIZED: "public",
   AMBIGUOUS_TASK_ID: "public",
   BASELINE_NOT_FOUND: "public",
+  COMMANDS_FAILED: "public",
   CONFIG_ERROR: "public",
   CONTEXT_OVER_BUDGET: "public",
   DECISION_REQUIRED: "public",
@@ -166,6 +167,10 @@ const EMISSION_PATTERNS: RegExp[] = [
   /\.code\s*=\s*"([A-Z][A-Z0-9_]+)"/g,
   /\boutCode\s*=\s*"([A-Z][A-Z0-9_]+)"/g,
   /\bwarnings\.push\(\s*"([A-Z][A-Z0-9_]+)"\s*\)/g,
+  // P39: error.cause_code values. The `\bcode:` pattern above does NOT match
+  // `cause_code:` (the `_` defeats the word boundary), so cause codes need
+  // their own pattern to stay pinned to KNOWN_CODES + docs/cli-contract.md.
+  /\bcause_code:\s*"([A-Z][A-Z0-9_]+)"/g,
 ];
 
 // Strings that look like UPPER_SNAKE_CASE error codes but aren't part of the
