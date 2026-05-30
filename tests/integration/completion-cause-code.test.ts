@@ -212,8 +212,37 @@ describe("P39: task complete cause_code", () => {
     const env = JSON.parse(res.stdout) as Envelope;
     expect(env.error.code).toBe("VERIFICATION_FAILED");
     expect(env.error.cause_code).toBe("COMMANDS_FAILED");
+    // The command cause embeds the failing command's reason in the message.
+    expect(env.error.message).toMatch(/a verification command failed:/);
     expect(env.data.failed_checks).toContain("commands");
     expect(env.data.first_failure?.name).toBe("commands");
+  });
+
+  // P39 spec pin: verify runs `commands` before `decision`, so when BOTH fail
+  // (a failing command AND a missing ADR), first-failure precedence makes the
+  // command the cause. This is the accepted behavior — pinned so a future
+  // reorder or a switch to priority-based selection is a conscious change.
+  it("command + decision both fail -> COMMANDS_FAILED wins; both in failed_checks", async () => {
+    await setupTask((t) => {
+      t.requires_decision = true;
+    }, ["false"]);
+
+    const res = run([
+      "task",
+      "complete",
+      "P1-T1",
+      "--agent",
+      "claude-code",
+      "--json",
+      "--dry-run",
+    ]);
+    expect(res.code).toBe(1);
+    const env = JSON.parse(res.stdout) as Envelope;
+    expect(env.error.code).toBe("VERIFICATION_FAILED");
+    expect(env.error.cause_code).toBe("COMMANDS_FAILED");
+    expect(env.data.first_failure?.name).toBe("commands");
+    expect(env.data.failed_checks).toContain("commands");
+    expect(env.data.failed_checks).toContain("decision");
   });
 
   // P39-T2: human (non-JSON) parity. The plain-text path must also name the

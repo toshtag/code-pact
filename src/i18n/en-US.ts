@@ -258,8 +258,10 @@ export const messages = {
         `Verification failed for "${taskId}". progress.yaml was not modified.`,
       causeDecision: (taskId: string): string =>
         `${taskId} requires an accepted ADR before completion. progress.yaml was not modified.`,
-      causeCommands: (taskId: string): string =>
-        `${taskId}: a verification command failed. progress.yaml was not modified.`,
+      causeCommands: (taskId: string, reason: string): string =>
+        reason
+          ? `${taskId}: a verification command failed: ${reason}. progress.yaml was not modified.`
+          : `${taskId}: a verification command failed. progress.yaml was not modified.`,
       alreadyDone: (taskId: string): string =>
         `Task "${taskId}" already has a done event. Skipped re-verification (idempotent).`,
       success: (taskId: string, agent: string): string =>
