@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { PlanId } from "./plan-id.ts";
 
 export const TaskType = z.enum([
   "architecture",
@@ -20,7 +21,7 @@ export const ExpectedDuration = z.enum(["short", "medium", "long"]);
 export const TaskStatus = z.enum(["planned", "in_progress", "done", "cancelled"]);
 
 export const Task = z.object({
-  id: z.string().min(1),
+  id: PlanId,
   type: TaskType,
   ambiguity: AmbiguityLevel,
   risk: RiskLevel,

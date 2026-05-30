@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { PlanId } from "./plan-id.ts";
 import { Task } from "./task.ts";
 
 export const PhaseStatus = z.enum(["planned", "in_progress", "done", "cancelled"]);
@@ -11,7 +12,7 @@ export const PhaseVerification = z.object({
 export type PhaseStatus = z.infer<typeof PhaseStatus>;
 
 export const Phase = z.object({
-  id: z.string().min(1),
+  id: PlanId,
   name: z.string().min(1),
   weight: z.number().positive(),
   confidence: ConfidenceLevel,

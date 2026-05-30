@@ -246,7 +246,7 @@ Recovery: fix the status word to one of `accepted` / `proposed` / `draft` / `rej
 
 Recovery — pick whichever matches reality:
 - **Drive the loop**: `code-pact task prepare <task-id> --agent <agent> --json`, then `task start`.
-- **Record out-of-loop work**: if the work already happened outside code-pact, `code-pact task record-done <task-id> --evidence "..."` (records a `done` with `source: external`).
+- **Record completion without `task complete`**: for external completion *or* the `record_only` lane after you ran the project's verification by hand, `code-pact task record-done <task-id> --evidence "..."` (records a `done` with `source: external`; the decision gate still applies).
 - **Silence it** (you knowingly aren't driving this project through code-pact): add to `.code-pact/doctor.yaml`:
   ```yaml
   disabled_checks:
@@ -268,7 +268,7 @@ code-pact validate --strict --base-ref origin/main --json
 
 Recovery — pick whichever matches reality:
 - **Drive the loop**: `code-pact task prepare <task-id> --agent <agent> --json`, then `task start` / `task complete`, and **commit `progress.yaml`** (the gate reads the committed ledger, not the working tree).
-- **Record out-of-loop work**: `code-pact task record-done <task-id> --evidence "..."`, then commit.
+- **Record completion without `task complete`**: for external completion *or* the `record_only` lane after verification, `code-pact task record-done <task-id> --evidence "..."`, then commit.
 - **Exempt docs/config-only paths** the team agrees don't need the loop, in `.code-pact/doctor.yaml`:
   ```yaml
   control_plane_branch_not_driven:

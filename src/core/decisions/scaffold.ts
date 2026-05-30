@@ -1,6 +1,7 @@
 import { access } from "node:fs/promises";
 import { atomicWriteText } from "../../io/atomic-text.ts";
 import { assertSafeRelativePath, resolveWithinProject } from "../path-safety.ts";
+import { PLAN_ID_PATTERN } from "../schemas/plan-id.ts";
 
 // ---------------------------------------------------------------------------
 // Proposed-ADR stub scaffolding (RFC §3-D)
@@ -27,14 +28,16 @@ export function isUnderDecisionsDir(relPath: string): boolean {
  * Throws CONFIG_ERROR if `taskId` is not safe as a single filename segment.
  * `assertSafeRelativePath` alone is insufficient: `P1/T1` is a valid relative
  * path but an invalid filename segment, and would otherwise produce a nested
- * `design/decisions/P1/T1.md` from a task id. Conservative allowlist.
+ * `design/decisions/P1/T1.md` from a task id. Conservative allowlist — the
+ * same {@link PLAN_ID_PATTERN} the Task/Phase schemas enforce at parse time,
+ * applied here as runtime defense-in-depth at the filesystem boundary.
  */
 export function assertSafeDecisionFilenameSegment(taskId: string): void {
   if (
     taskId.length === 0 ||
     taskId === "." ||
     taskId === ".." ||
-    !/^[A-Za-z0-9._-]+$/.test(taskId)
+    !PLAN_ID_PATTERN.test(taskId)
   ) {
     const err = new Error(
       `Task id "${taskId}" is not a safe filename segment for an ADR stub (allowed: letters, digits, "._-").`,

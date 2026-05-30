@@ -12,7 +12,10 @@ import type { ConsideredAcceptance } from "../core/decisions/adr.ts";
 export type TaskRecordDoneOptions = {
   cwd: string;
   taskId: string;
-  /** Evidence for the externally-completed work. Must be non-empty. */
+  /**
+   * Completion proof — a PR, a CI result, or the verification the caller ran
+   * (covers both external completion and the `record_only` lane). Non-empty.
+   */
   evidence: string[];
   /** Optional. When omitted, project.yaml's default_agent is used. */
   agent?: string;

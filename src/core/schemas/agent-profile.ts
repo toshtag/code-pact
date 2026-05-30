@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { PlanId } from "./plan-id.ts";
 
 // Supported Claude model versions for model-aware adapter generation.
 // "generic" (or undefined) produces the baseline template.
@@ -36,7 +37,9 @@ export function normalizeModelVersion(input: string): ClaudeModelVersion | null 
 }
 
 export const AgentProfile = z.object({
-  name: z.string().min(1),
+  // Same charset constraint as AgentRef.name (project.ts): the profile name
+  // is the agent identifier used in command strings and path segments.
+  name: PlanId,
   instruction_filename: z.string().min(1),
   context_dir: z.string().min(1),
   skill_dir: z.string().optional(),

@@ -105,8 +105,10 @@ files), the same input produces the same on-disk bytes.
 `.code-pact/state/progress.yaml` is an append-only event log. The
 only verbs that append to it are `task start`, `task block`, `task
 resume`, `task complete`, and `task record-done` (v1.21+, which records
-a `done` event with `source: external` for work completed outside the
-loop). Read-only verbs — including `task prepare` (v1.11+) — never touch
+a `done` event with `source: external` — either for work completed
+outside the loop or for the `record_only` lane after you ran the
+project's verification by hand). Read-only verbs — including `task
+prepare` (v1.11+) — never touch
 it, and `task finalize` writes only the design YAML status, never
 `progress.yaml`. The progress-read-only invariant is locked by unit tests.
 
