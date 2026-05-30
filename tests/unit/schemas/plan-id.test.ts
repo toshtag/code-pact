@@ -45,7 +45,9 @@ describe("PlanId", () => {
     "P34-ci-branch-drift",
     "P36-adr-quality-advisory",
     "TUTORIAL-1",
+    "claude-code",
     "a.b_c-1",
+    "1",
   ])("accepts the conventional id %s", (id) => {
     expect(PlanId.parse(id)).toBe(id);
   });
@@ -68,6 +70,15 @@ describe("PlanId", () => {
     ".",
     "..",
     "",
+    // Leading non-alphanumeric: would be read as a CLI option / hidden file
+    // when interpolated into a generated command or path.
+    "-P1",
+    "--json",
+    "--help",
+    "-",
+    "-.foo",
+    ".foo",
+    "_foo",
   ])("rejects the unsafe id %j", (id) => {
     expect(() => PlanId.parse(id)).toThrow();
   });
