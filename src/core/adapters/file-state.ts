@@ -98,6 +98,7 @@ export type FileAction =
   | "update" // overwrite managed file with desired content (managed-clean × stale or accepted managed-modified × stale)
   | "update_manifest" // update only the manifest hash (managed-modified × current)
   | "refuse" // would destroy local modifications; requires --accept-modified
+  | "prune" // delete a managed-clean file the generator no longer emits (orphan cleanup on upgrade)
   | "warn"; // surfaceable issue but no action (e.g. unmanaged without --force in check mode)
 
 export type ActionDecisionInput = {

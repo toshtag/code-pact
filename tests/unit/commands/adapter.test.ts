@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { runInit } from "../../../src/commands/init.ts";
 import { runInitCore } from "../../../src/commands/init.ts";
 import { runGenerateAdapter } from "../../../src/commands/adapter.ts";
-import { deriveSkillName } from "../../../src/core/adapters/claude.ts";
+import { deriveSkillName, deriveSkillNameVariants } from "../../../src/core/adapters/claude.ts";
 
 let dir: string;
 
@@ -455,13 +455,89 @@ describe("runGenerateAdapter — unknown agent", () => {
 // ---------------------------------------------------------------------------
 
 describe("deriveSkillName", () => {
+  // Single-word package-manager tasks: the runner prefix (pnpm/npm/yarn/bun,
+  // and an optional `run`) is stripped; the task name is the skill name.
   it("pnpm test → test", () => expect(deriveSkillName("pnpm test")).toBe("test"));
   it("pnpm typecheck → typecheck", () => expect(deriveSkillName("pnpm typecheck")).toBe("typecheck"));
   it("pnpm build → build", () => expect(deriveSkillName("pnpm build")).toBe("build"));
   it("npm run lint → lint", () => expect(deriveSkillName("npm run lint")).toBe("lint"));
   it("yarn dev → dev", () => expect(deriveSkillName("yarn dev")).toBe("dev"));
   it("bun run test:unit → test-unit", () => expect(deriveSkillName("bun run test:unit")).toBe("test-unit"));
-  it("make build → build", () => expect(deriveSkillName("make build")).toBe("build"));
+
+  // `make` is NOT a recognised runner: it is a distinct build tool whose
+  // subcommand carries meaning (`make build` vs `make test`). The name keeps
+  // the full invocation so the two never collapse to the same skill — the
+  // self-describing behaviour this helper exists to provide.
+  it("make build → make-build", () => expect(deriveSkillName("make build")).toBe("make-build"));
+
+  // Multi-word subcommands keep every word, joined with `-`, so the skill name
+  // describes the command instead of reducing to its last token.
+  it("code-pact adapter doctor → adapter-doctor", () =>
+    expect(deriveSkillName("code-pact adapter doctor")).toBe("adapter-doctor"));
+  it("code-pact plan lint → plan-lint", () =>
+    expect(deriveSkillName("code-pact plan lint")).toBe("plan-lint"));
+  it("node dist/cli.js validate → validate", () =>
+    expect(deriveSkillName("node dist/cli.js validate")).toBe("validate"));
+
+  // A space-separated flag value must not leak into the name (the v1.19
+  // `claude-code` collision bug): `--agent claude-code` is dropped entirely.
+  it("drops a space-separated flag value (adapter doctor --agent claude-code)", () =>
+    expect(deriveSkillName("code-pact adapter doctor --agent claude-code")).toBe("adapter-doctor"));
+  it("drops a --flag=value form (validate --json)", () =>
+    expect(deriveSkillName("node dist/cli.js validate --json")).toBe("validate"));
+
+  // No words at all → fall back to the first flag name.
+  it("flag-only command falls back to the first flag (--json → json)", () =>
+    expect(deriveSkillName("pnpm --json")).toBe("json"));
+
+  // A flag as the LAST token (no following value) must not crash and must not
+  // pull a non-existent value into the name.
+  it("trailing flag with no value (adapter doctor --agent)", () =>
+    expect(deriveSkillName("code-pact adapter doctor --agent")).toBe("adapter-doctor"));
+
+  // The first flag is the word/flag boundary: a bare token AFTER a flag is a
+  // value or positional and is NOT a naming word, so a (boolean) flag placed
+  // before a word never eats that word in a way that changes the name set.
+  // `code-pact plan lint` and `code-pact plan lint --json` share the base
+  // `plan-lint`; flags only EXTEND the ladder, never replace the base.
+  it("a flag does not consume a following word for naming (plan lint --strict extra)", () =>
+    expect(deriveSkillName("code-pact plan lint --strict extra")).toBe("plan-lint"));
+});
+
+// ---------------------------------------------------------------------------
+// deriveSkillNameVariants — the self-describing candidate ladder
+// ---------------------------------------------------------------------------
+
+describe("deriveSkillNameVariants", () => {
+  it("a plain command yields just its base name", () => {
+    expect(deriveSkillNameVariants("pnpm test")).toEqual(["test"]);
+  });
+
+  it("walks base → flag-qualified forms in order", () => {
+    expect(deriveSkillNameVariants("code-pact adapter upgrade --check --json")).toEqual([
+      "adapter-upgrade",
+      "adapter-upgrade-check",
+      "adapter-upgrade-check-json",
+    ]);
+  });
+
+  it("ignores flag values when qualifying (only flag names extend the ladder)", () => {
+    expect(deriveSkillNameVariants("code-pact adapter doctor --agent claude-code --json")).toEqual([
+      "adapter-doctor",
+      "adapter-doctor-agent",
+      "adapter-doctor-agent-json",
+    ]);
+  });
+
+  it("is deterministic: same command → same ladder", () => {
+    const cmd = "node dist/cli.js plan lint --include-quality --strict --json";
+    expect(deriveSkillNameVariants(cmd)).toEqual(deriveSkillNameVariants(cmd));
+  });
+
+  it("the base name is always the first candidate", () => {
+    const variants = deriveSkillNameVariants("code-pact plan lint --strict");
+    expect(variants[0]).toBe("plan-lint");
+  });
 });
 
 // ---------------------------------------------------------------------------
