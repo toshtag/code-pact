@@ -152,6 +152,9 @@ describe("P39: task complete cause_code", () => {
     expect(env.error.cause_code).toBe("DECISION_REQUIRED");
     expect(env.error.message).toMatch(/accepted ADR/i);
     expect(env.error.message).not.toBe(GENERIC);
+    // The decision cause embeds first_failure.reason so an agent reading only
+    // `error` learns WHY the gate is unresolved (missing / proposed / etc.).
+    expect(env.error.message).toContain(env.data.first_failure!.reason);
 
     // No error-side duplication of P32 data fields and no structured block.
     expect(env.error).not.toHaveProperty("failed_checks");
@@ -272,5 +275,33 @@ describe("P39: task complete cause_code", () => {
     expect(res.stderr).toMatch(/a verification command failed/i);
     expect(res.stderr).toMatch(/cause: commands —/);
     expect(res.stderr).toMatch(/rerun after fixing: code-pact task complete P1-T1/);
+  });
+
+  // P39 contract boundary: error.cause_code is a `task complete`-only surface.
+  // standalone `verify --json` uses the generic VERIFICATION_FAILED envelope
+  // (ok:false, exit 1) and reports per-check results in data.checks. Crucially
+  // its error carries NO cause_code — that enrichment (DECISION_REQUIRED /
+  // COMMANDS_FAILED) is added only by `task complete`. Pinned so a future change
+  // to verify's surface is a conscious decision.
+  it("standalone verify failure has NO error.cause_code (cause_code is task complete-only)", async () => {
+    await setupTask((t) => {
+      t.requires_decision = true;
+    });
+
+    const res = run(["verify", "--phase", "P1", "--task", "P1-T1", "--json"]);
+    expect(res.code).toBe(1);
+    const env = JSON.parse(res.stdout) as {
+      ok: boolean;
+      error?: { code?: string; cause_code?: string };
+      data: { checks: { name: string; ok: boolean }[] };
+    };
+    // verify uses the generic VERIFICATION_FAILED envelope and reports the
+    // failing check in data.checks — but it does NOT carry error.cause_code.
+    expect(env.ok).toBe(false);
+    expect(env.error?.code).toBe("VERIFICATION_FAILED");
+    expect(env.error).not.toHaveProperty("cause_code");
+    expect(env.data.checks.some((c) => c.name === "decision" && !c.ok)).toBe(
+      true,
+    );
   });
 });
