@@ -152,6 +152,9 @@ describe("P39: task complete cause_code", () => {
     expect(env.error.cause_code).toBe("DECISION_REQUIRED");
     expect(env.error.message).toMatch(/accepted ADR/i);
     expect(env.error.message).not.toBe(GENERIC);
+    // The decision cause embeds first_failure.reason so an agent reading only
+    // `error` learns WHY the gate is unresolved (missing / proposed / etc.).
+    expect(env.error.message).toContain(env.data.first_failure!.reason);
 
     // No error-side duplication of P32 data fields and no structured block.
     expect(env.error).not.toHaveProperty("failed_checks");
@@ -272,5 +275,29 @@ describe("P39: task complete cause_code", () => {
     expect(res.stderr).toMatch(/a verification command failed/i);
     expect(res.stderr).toMatch(/cause: commands —/);
     expect(res.stderr).toMatch(/rerun after fixing: code-pact task complete P1-T1/);
+  });
+
+  // P39 contract boundary: error.cause_code is a `task complete`-only surface.
+  // standalone `verify --json` reports per-check results in data.checks and does
+  // NOT use the {ok:false, error} envelope at all (it returns ok:true with
+  // data.ok:false, exit 0) — so there is no error object and no cause_code.
+  // Pinned so a future change to verify's surface is a conscious decision.
+  it("standalone verify failure has NO error.cause_code (cause_code is task complete-only)", async () => {
+    await setupTask((t) => {
+      t.requires_decision = true;
+    });
+
+    const res = run(["verify", "--phase", "P1", "--task", "P1-T1", "--json"]);
+    const env = JSON.parse(res.stdout) as {
+      ok: boolean;
+      error?: { cause_code?: string };
+      data: { ok: boolean; checks: { name: string; ok: boolean }[] };
+    };
+    // verify reports the failing check in data.checks, not via error.cause_code.
+    expect(env).not.toHaveProperty("error");
+    expect(env.data.ok).toBe(false);
+    expect(env.data.checks.some((c) => c.name === "decision" && !c.ok)).toBe(
+      true,
+    );
   });
 });

@@ -260,6 +260,12 @@ The verbs in detail:
 - **`task complete <task-id>`** — runs verification and, on pass,
   appends a `done` event (`source: loop`). Idempotent — a second call
   from `done` state returns success without appending a duplicate event.
+  On failure it exits 1 with `error.code: VERIFICATION_FAILED`; read
+  `error.cause_code` (v1.27+) **first** to know what to fix:
+  `COMMANDS_FAILED` → fix the failing verification command;
+  `DECISION_REQUIRED` → write or accept the required ADR. `error.message`
+  is actionable (and embeds the failing-check reason). Do **not** blindly
+  re-run `verify` — fix the reported cause first.
 
 - **`task record-done <task-id> --evidence "<text>"`** (v1.21+) —
   records a `done` event with `source: external` **without** running

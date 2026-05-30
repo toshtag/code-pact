@@ -256,8 +256,10 @@ export const messages = {
         `Agent "${name}" is not configured in project.yaml.`,
       verificationFailed: (taskId: string): string =>
         `Verification failed for "${taskId}". progress.yaml was not modified.`,
-      causeDecision: (taskId: string): string =>
-        `${taskId} requires an accepted ADR before completion. progress.yaml was not modified.`,
+      causeDecision: (taskId: string, reason: string): string =>
+        reason
+          ? `${taskId} requires an accepted ADR before completion: ${reason}. progress.yaml was not modified.`
+          : `${taskId} requires an accepted ADR before completion. progress.yaml was not modified.`,
       causeCommands: (taskId: string, reason: string): string =>
         reason
           ? `${taskId}: a verification command failed: ${reason}. progress.yaml was not modified.`

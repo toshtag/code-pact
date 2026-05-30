@@ -869,7 +869,10 @@ async function cmdTaskComplete(
           errorObj = {
             code: "VERIFICATION_FAILED",
             cause_code: "DECISION_REQUIRED",
-            message: m.task.complete.causeDecision(taskId),
+            message: m.task.complete.causeDecision(
+              taskId,
+              summary.first_failure?.reason ?? "",
+            ),
           };
           break;
         case "commands":
