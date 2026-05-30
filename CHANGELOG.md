@@ -11,6 +11,18 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ---
 
+## [Unreleased]
+
+### Release readiness invariants (P38)
+
+Internal quality infrastructure that closes the mechanically-detectable classes the 1.26.0 review found by hand. No CLI surface, no stats, no outcome audit. Design in `design/decisions/release-readiness-invariants-rfc.md`.
+
+**Internal**
+
+- **P38-T1 — shared security corpus + write-entrypoint coverage.** A single `tests/fixtures/security-corpus.ts` (`BAD_PLAN_IDS` / `BAD_RELATIVE_PATHS` + conventional-value counterparts) is now exercised at every plan/agent write entrypoint and schema boundary by `tests/unit/security/write-entrypoint-coverage.test.ts` — `PlanId` / `RelativePosixPath` and the `Task.id` / `Phase.id` / roadmap `PhaseRef.id` / `AgentRef.name` / `AgentProfile.{name,instruction_filename,context_dir,skill_dir,hook_dir}` / `AgentRef.profile` / `TaskImport.id` / `PhaseImportEntry.id` schemas, plus the runtime `createPhase` / `task add --id` / `recommend --agent` / `pack --agent` guards. The covered set is a pinned inventory so it can't silently shrink. Prevents the "constrained the read schema but missed a write entrypoint" regression that recurred across the 1.26.0 hardening rounds.
+
+---
+
 ## [1.26.0] — 2026-05-30
 
 ### Identifier & path hardening (security)
