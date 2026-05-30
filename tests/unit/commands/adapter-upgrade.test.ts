@@ -605,6 +605,123 @@ describe("adapter upgrade — --check is fully read-only", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Orphan prune — a path the OLD manifest tracked but the generator no longer
+// emits (e.g. a skill rename) is deleted when clean, refused when user-edited.
+// ---------------------------------------------------------------------------
+
+describe("adapter upgrade — orphan prune", () => {
+  // Inject an orphan: a managed file the generator does NOT produce. We write
+  // it to disk and register it in the manifest with a matching hash, so it is
+  // managed-clean and (because the generator never emits this path) an orphan.
+  async function seedOrphan(relPath: string, content: string): Promise<void> {
+    await writeFile(join(dir, relPath), content, "utf8");
+    const m = await readManifestMut();
+    m.files.push({
+      path: relPath,
+      sha256: computeContentHash(content),
+      managed: true,
+      role: "skill",
+    });
+    await writeManifest(dir, "claude-code", m);
+  }
+
+  beforeEach(async () => {
+    await freshInstall();
+  });
+
+  it("--check reports action: prune for a managed-clean orphan (no disk change)", async () => {
+    const orphan = ".claude/skills/old-renamed-skill.md";
+    await seedOrphan(orphan, "# old skill\nRuns: pnpm old\n");
+
+    const result = await runAdapterUpgrade({
+      cwd: dir, agentName: "claude-code", mode: "check",
+      force: false, acceptModified: false, locale: "en-US",
+    });
+
+    const entry = result.plan.find((p) => p.relPath === orphan)!;
+    expect(entry.action).toBe("prune");
+    expect(entry.local).toBe("managed-clean");
+    expect(entry.desired).toBe("stale");
+    expect(result.clean).toBe(false);
+    // read-only: the file is still on disk after --check.
+    expect(existsSync(join(dir, orphan))).toBe(true);
+  });
+
+  it("--write deletes the managed-clean orphan and drops it from the manifest", async () => {
+    const orphan = ".claude/skills/old-renamed-skill.md";
+    await seedOrphan(orphan, "# old skill\nRuns: pnpm old\n");
+
+    const result = await runAdapterUpgrade({
+      cwd: dir, agentName: "claude-code", mode: "write",
+      force: false, acceptModified: false, locale: "en-US",
+      generatorVersionOverride: "0.9.0-alpha.0",
+    });
+
+    expect(result.plan.find((p) => p.relPath === orphan)!.action).toBe("prune");
+    // Deleted from disk.
+    expect(existsSync(join(dir, orphan))).toBe(false);
+    // Dropped from the manifest.
+    const m = await readManifestMut();
+    expect(m.files.some((f) => f.path === orphan)).toBe(false);
+  });
+
+  it("REFUSES to prune an orphan the user edited (managed-modified); keeps file + manifest entry", async () => {
+    const orphan = ".claude/skills/old-renamed-skill.md";
+    await seedOrphan(orphan, "# old skill\nRuns: pnpm old\n");
+    // User edits the orphan after it was tracked → disk hash != manifest hash.
+    await writeFile(join(dir, orphan), "# old skill — USER EDIT\n", "utf8");
+
+    const result = await runAdapterUpgrade({
+      cwd: dir, agentName: "claude-code", mode: "write",
+      force: false, acceptModified: false, locale: "en-US",
+      generatorVersionOverride: "0.9.0-alpha.0",
+    });
+
+    const entry = result.plan.find((p) => p.relPath === orphan)!;
+    expect(entry.action).toBe("refuse");
+    expect(entry.local).toBe("managed-modified");
+    // File preserved on disk with the user's edit intact.
+    expect(await readFile(join(dir, orphan), "utf8")).toContain("USER EDIT");
+    // Still tracked in the manifest so the next run refuses again (not surprise-unmanaged).
+    const m = await readManifestMut();
+    expect(m.files.some((f) => f.path === orphan)).toBe(true);
+  });
+
+  it("never touches a hand-authored skill that was never in the manifest", async () => {
+    // ship-task.md / release.md are authored by hand and never manifest-tracked.
+    const manual = ".claude/skills/my-hand-authored.md";
+    await writeFile(join(dir, manual), "# mine\n", "utf8");
+
+    const result = await runAdapterUpgrade({
+      cwd: dir, agentName: "claude-code", mode: "write",
+      force: false, acceptModified: false, locale: "en-US",
+      generatorVersionOverride: "0.9.0-alpha.0",
+    });
+
+    // It is not a manifest entry, so prune never considers it.
+    expect(result.plan.some((p) => p.relPath === manual && p.action === "prune")).toBe(false);
+    expect(existsSync(join(dir, manual))).toBe(true);
+  });
+
+  it("after a --write prune, a second --write is a clean no-op (convergent)", async () => {
+    const orphan = ".claude/skills/old-renamed-skill.md";
+    await seedOrphan(orphan, "# old skill\nRuns: pnpm old\n");
+
+    await runAdapterUpgrade({
+      cwd: dir, agentName: "claude-code", mode: "write",
+      force: false, acceptModified: false, locale: "en-US",
+      generatorVersionOverride: "0.9.0-alpha.0",
+    });
+    const second = await runAdapterUpgrade({
+      cwd: dir, agentName: "claude-code", mode: "check",
+      force: false, acceptModified: false, locale: "en-US",
+    });
+    expect(second.clean).toBe(true);
+    expect(second.plan.every((p) => p.action === "skip")).toBe(true);
+  });
+});
+
 // Helper used above — placed at the end for legibility.
 async function readMutableManifest(
   cwd: string,
