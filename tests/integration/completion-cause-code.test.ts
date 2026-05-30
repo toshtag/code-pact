@@ -215,4 +215,33 @@ describe("P39: task complete cause_code", () => {
     expect(env.data.failed_checks).toContain("commands");
     expect(env.data.first_failure?.name).toBe("commands");
   });
+
+  // P39-T2: human (non-JSON) parity. The plain-text path must also name the
+  // cause and the rerun-after-fixing line for BOTH failure causes, so an agent
+  // reading stderr is not left with only the generic message. The command-cause
+  // human case is covered in cli.test.ts; this pins the decision cause.
+  it("human output (decision failure): actionable headline + cause + rerun line", async () => {
+    await setupTask((t) => {
+      t.requires_decision = true;
+    });
+
+    const res = run(["task", "complete", "P1-T1", "--agent", "claude-code"]);
+    expect(res.code).toBe(1);
+    // Headline is the actionable cause message, not the generic string.
+    expect(res.stderr).toMatch(/requires an accepted ADR/i);
+    expect(res.stderr).not.toBe(GENERIC);
+    // The shared failure-summary lines below it.
+    expect(res.stderr).toMatch(/cause: decision —/);
+    expect(res.stderr).toMatch(/rerun after fixing: code-pact task complete P1-T1/);
+  });
+
+  it("human output (command failure): actionable headline + cause + rerun line", async () => {
+    await setupTask(() => {}, ["false"]);
+
+    const res = run(["task", "complete", "P1-T1", "--agent", "claude-code"]);
+    expect(res.code).toBe(1);
+    expect(res.stderr).toMatch(/a verification command failed/i);
+    expect(res.stderr).toMatch(/cause: commands —/);
+    expect(res.stderr).toMatch(/rerun after fixing: code-pact task complete P1-T1/);
+  });
 });
