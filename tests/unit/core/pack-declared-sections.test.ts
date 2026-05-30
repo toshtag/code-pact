@@ -249,6 +249,23 @@ describe("buildContextPack — Declared decisions", () => {
     expect(out).toContain("body of the decision");
   });
 
+  // Security: a decision_ref is loaded YAML content read into the pack body, so
+  // a traversal value must NOT be read (it would otherwise exfiltrate an
+  // arbitrary file into the context pack shown to the agent).
+  it("does NOT read a decision_ref that escapes the project root", async () => {
+    const secretName = `pack-traversal-secret-${Date.now()}.md`;
+    const secretAbs = join(work, "..", secretName);
+    await writeFile(secretAbs, "**Status:** accepted\n\nLEAKED-SECRET-MARKER-9f3a", "utf8");
+    try {
+      await setupProject({ taskExtras: { decision_refs: [`../${secretName}`] } });
+      const out = await buildPack();
+      expect(out).not.toContain("LEAKED-SECRET-MARKER-9f3a");
+      expect(out).not.toContain("## Declared decisions");
+    } finally {
+      await rm(secretAbs, { force: true });
+    }
+  });
+
   it("dedupes content against the existing Related Decisions section", async () => {
     // task_id matches the filename so the existing path WOULD have
     // surfaced this file under Related Decisions. Once declared, it

@@ -103,6 +103,17 @@ describe("runProgress — missing baseline", () => {
       code: "BASELINE_NOT_FOUND",
     });
   });
+
+  // `--baseline` is interpolated into `baselines/<name>.json`; an unsafe name
+  // must be rejected before the read so it can't escape the baselines dir.
+  it.each(["../../../../etc/passwd", "../initial", "a/b", "--json"])(
+    "rejects an unsafe baseline name %j with CONFIG_ERROR",
+    async (name) => {
+      await expect(runProgress({ cwd: dir, baseline: name })).rejects.toMatchObject({
+        code: "CONFIG_ERROR",
+      });
+    },
+  );
 });
 
 // ---------------------------------------------------------------------------

@@ -4,6 +4,7 @@ import { parse as parseYaml } from "yaml";
 import { Roadmap } from "../core/schemas/roadmap.ts";
 import { Phase } from "../core/schemas/phase.ts";
 import { BaselineSnapshot } from "../core/schemas/baseline-snapshot.ts";
+import { assertSafePlanId } from "../core/schemas/plan-id.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -57,6 +58,10 @@ function throwBaselineNotFound(name: string): never {
 }
 
 async function loadBaseline(cwd: string, name: string): Promise<BaselineSnapshot> {
+  // `name` is interpolated into `baselines/${name}.json`, so a value like
+  // `../../../../outside` would escape the baselines dir. Baseline names are
+  // identifiers (default "initial"), so constrain to the PlanId charset.
+  assertSafePlanId(name, "Baseline name");
   let raw: string;
   try {
     raw = await readFile(
