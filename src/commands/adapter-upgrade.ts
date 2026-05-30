@@ -1,4 +1,4 @@
-import { readFile, readdir, mkdir } from "node:fs/promises";
+import { readFile, readdir, mkdir, rm } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { AgentProfile } from "../core/schemas/agent-profile.ts";
@@ -165,10 +165,16 @@ function buildFingerprint(
  * **mode: "write"** executes the action matrix. The new manifest reflects
  * the post-write state: files written / adopted have their hash refreshed,
  * skipped managed files preserve their existing hash, refused entries are
- * preserved unchanged, and orphans (manifest entries no longer emitted by
- * the generator) drop out. Files on disk that are no longer in the new
- * manifest stay where they are — `adapter doctor` will surface them as
- * `ADAPTER_UNMANAGED_FILE` if they fall under the adapter's `ownedPathGlobs`.
+ * preserved unchanged.
+ *
+ * **Orphan prune:** a path the OLD manifest tracked but the generator no
+ * longer emits (e.g. a renamed skill) is pruned — deleted from disk when its
+ * content still matches the manifest hash (`action: "prune"`), or refused and
+ * left in place when the user edited it (`action: "refuse"`). `--check`
+ * reports the same actions without touching disk. This keeps the generated
+ * skill set convergent: a rename leaves no stale `-N` file behind. Files never
+ * tracked by the manifest (hand-authored skills) are not manifest entries, so
+ * they are never pruned.
  */
 export async function runAdapterUpgrade(
   opts: AdapterUpgradeOptions,
@@ -323,6 +329,57 @@ export async function runAdapterUpgrade(
         sha256: recordedHash,
         managed: true,
         role: desired.role,
+      });
+    }
+  }
+
+  // ---- Orphan prune ----
+  // A path the OLD manifest tracked but the generator no longer emits (it
+  // dropped out of `desiredFiles`) is an orphan. This happens when a skill is
+  // renamed — e.g. the self-describing skill-name change turned `claude-code-2`
+  // into `adapter-doctor`, leaving the old file on disk. We delete only orphans
+  // whose disk content still matches the manifest hash (managed-clean): they are
+  // verbatim generator output, safe to remove. An orphan the user edited
+  // (managed-modified) is REFUSED — left on disk and surfaced — so a manual
+  // change is never silently destroyed. A manifest entry whose disk file is
+  // already gone (managed-missing) needs no action. Files never tracked by the
+  // manifest (hand-authored skills like ship-task.md) are not in
+  // `existingByPath`, so they are never considered here.
+  const desiredPaths = new Set(desiredFiles.map((d) => d.path));
+  for (const [relPath, entry] of existingByPath) {
+    if (desiredPaths.has(relPath)) continue; // still emitted — handled above
+    assertSafeRelativePath(relPath);
+    const absPath = await resolveWithinProject(cwd, relPath);
+    const diskContent = await readFileMaybe(absPath);
+    if (diskContent === null) continue; // managed-missing: nothing on disk to prune
+
+    const diskHash = computeContentHash(diskContent);
+    const isClean = diskHash === entry.sha256;
+    const action: FileAction = isClean ? "prune" : "refuse";
+
+    plan.push({
+      path: absPath,
+      relPath,
+      role: entry.role,
+      local: isClean ? "managed-clean" : "managed-modified",
+      desired: "stale", // generator no longer emits this path
+      action,
+    });
+
+    if (mode === "check") continue; // read-only
+
+    if (action === "prune") {
+      await rm(absPath, { force: true });
+      // Orphan is intentionally NOT added to newManifestFiles — it is gone.
+    } else {
+      // refuse: keep the user's modified file on disk AND keep tracking it, so
+      // the next run still sees it as managed (and still refuses) rather than
+      // re-classifying it as an unmanaged surprise.
+      newManifestFiles.push({
+        path: relPath,
+        sha256: entry.sha256,
+        managed: true,
+        role: entry.role,
       });
     }
   }
