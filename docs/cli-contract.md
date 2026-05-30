@@ -29,7 +29,7 @@ Details: [JSON output shape](#json-output-shape).
 | `CONFIG_ERROR` | 2 | Bad flag, missing input, or malformed YAML | Re-check the command's flag surface below |
 | `TASK_NOT_FOUND` | 2 | Task id isn't in any phase | Verify the id (the `P1-T1` form) |
 | `AMBIGUOUS_TASK_ID` | 2 | Same id exists in multiple phases | The message lists them — qualify the id |
-| `VERIFICATION_FAILED` | 1 | `verify` / `task complete` check did not pass | Fix the failing command, then re-run |
+| `VERIFICATION_FAILED` | 1 | `verify` / `task complete` check did not pass | Read `error.cause_code`: `COMMANDS_FAILED` → fix the failing command; `DECISION_REQUIRED` → add an accepted ADR. Then re-run |
 | `INVALID_TASK_TRANSITION` | 2 | Illegal state move (e.g. completing a `blocked` task) | `task resume` first, then complete |
 | `TASK_FINALIZE_NOT_ELIGIBLE` | 2 | Task's derived state isn't `done` yet | Run `task complete` first |
 | `LOCK_HELD` | 2 | Another mutation is in progress (transient) | Wait and retry; read-only commands are unaffected |
@@ -132,22 +132,25 @@ invalid project structure exit 2. Unhandled exceptions exit 3.
 
 ## Error codes
 
-Error codes appear in the `error.code` field of the JSON envelope and
+Most stable codes appear in the `error.code` field of the JSON envelope and
 in stderr messages, or as `code` on individual diagnostic issues from
 `doctor` / `validate` / `plan lint` / `plan analyze` / `adapter doctor`.
-They are stable identifiers that callers can match against.
+A small number are **cause codes** that appear in `error.cause_code` (an
+additive sibling of `error.code`) on a documented envelope rather than as a
+top-level `error.code` — these are listed in their own table below. All are
+stable identifiers that callers can match against.
 
 The full v1.0 surface is anchored by `tests/unit/error-code-surface.test.ts`,
 which fails if src/ emits a code that isn't listed below or if a code
-listed below is no longer emitted. Codes are partitioned into four
-categories — adding a new code in `src/` requires updating both the test
-and the appropriate table below.
+listed below is no longer emitted. Codes are partitioned into categories —
+adding a new code in `src/` requires updating both the test and the
+appropriate table below.
 
 ### Public codes (top-level error envelopes)
 
 These appear in `error.code` of `{ok:false, error}` envelopes returned by
 the listed commands. They are the primary failure signal for agents and
-CI.
+CI. (For `error.cause_code` values, see [Public cause codes](#public-cause-codes) below.)
 
 | Code | Raised by | Meaning |
 |------|-----------|---------|
@@ -164,9 +167,8 @@ CI.
 | `INVALID_TASK_TRANSITION` | `task start/block/resume/complete/record-done` | Requested state transition is not allowed from the current state |
 | `DUPLICATE_PHASE_ID` | `phase add`, `phase import` | Phase id collides with an existing or imported phase |
 | `MANIFEST_NOT_FOUND` | `adapter upgrade` | `.code-pact/adapters/<agent>.manifest.yaml` does not exist (run `adapter install` first) |
-| `VERIFICATION_FAILED` | `verify`, `task complete` | Deterministic completion check did not pass. On `task complete` (v1.27+, P39) the envelope also carries `error.cause_code` (`DECISION_REQUIRED` or `COMMANDS_FAILED`) and an actionable `error.message`; `error.code` stays `VERIFICATION_FAILED` at exit 1 |
-| `COMMANDS_FAILED` (v1.27+) | `task complete` *(cause_code)* | An `error.cause_code` value — **never** a top-level `error.code` — set on a `VERIFICATION_FAILED` envelope (exit 1) when a verification command failed. `error.message` names the failing command's reason; the P32 fields stay under `data` |
-| `DECISION_REQUIRED` (v1.21+) | `task record-done` (as `error.code`); `task complete` (v1.27+, as `error.cause_code`) *(cause_code)* | A `requires_decision` task's ADR could not be resolved by the decision gate. **The two surfaces differ.** **On `task record-done` (as `error.code`):** exit code 2, `progress.yaml` untouched, and the full structured envelope — `data.task_id`, `data.decision_check` (the gate's `{name, ok, reason}`), `data.current_resolution` (`"status-aware"` since v1.22), `data.via` (`"decision_refs"` or `"filename-scan"`), `data.considered` (per-ADR `{path, status, accepted, acceptance}`; `acceptance` ∈ `"accepted" \| "blocked" \| "empty" \| "unknown_status" \| "missing" \| "unsafe_path"`), `data.declared_decision_refs`, and `data.expected_pattern` (only when `via === "filename-scan"`). **On `task complete` (as `error.cause_code`):** `error.code` stays `VERIFICATION_FAILED` at exit 1, there is **no** full `DecisionRequiredData` block, and the P32 fields (`failed_checks` / `first_failure` / `suggested_next_command`) stay under `data` — see the [`task complete`](#task-complete) failure envelope. Resolution semantics (shared by both surfaces): explicit `decision_refs` use **all-must-be-accepted**; the filename scan uses **any-accepted-wins** (preserves the substring-collision compat). A `decision_refs` entry that is structurally unsafe or resolves outside the project root (`..`, an absolute path, or a symlink out of the repo) is **fail-closed**: it is never read and reported as `acceptance: "unsafe_path"` with `accepted: false`, so the gate stays unresolved regardless of the file's contents. |
+| `VERIFICATION_FAILED` | `verify`, `task complete` | Deterministic completion check did not pass. On `task complete` (v1.27+, P39) the envelope also carries `error.cause_code` (`DECISION_REQUIRED` or `COMMANDS_FAILED` — see [Public cause codes](#public-cause-codes)) and an actionable `error.message`; `error.code` stays `VERIFICATION_FAILED` at exit 1 |
+| `DECISION_REQUIRED` (v1.21+) | `task record-done` (as `error.code`); `task complete` (v1.27+, as `error.cause_code` — see [Public cause codes](#public-cause-codes)) | A `requires_decision` task's ADR could not be resolved by the decision gate. **The two surfaces differ.** **On `task record-done` (as `error.code`):** exit code 2, `progress.yaml` untouched, and the full structured envelope — `data.task_id`, `data.decision_check` (the gate's `{name, ok, reason}`), `data.current_resolution` (`"status-aware"` since v1.22), `data.via` (`"decision_refs"` or `"filename-scan"`), `data.considered` (per-ADR `{path, status, accepted, acceptance}`; `acceptance` ∈ `"accepted" \| "blocked" \| "empty" \| "unknown_status" \| "missing" \| "unsafe_path"`), `data.declared_decision_refs`, and `data.expected_pattern` (only when `via === "filename-scan"`). **On `task complete` (as `error.cause_code`):** `error.code` stays `VERIFICATION_FAILED` at exit 1, there is **no** full `DecisionRequiredData` block, and the P32 fields (`failed_checks` / `first_failure` / `suggested_next_command`) stay under `data` — see the [`task complete`](#task-complete) failure envelope. Resolution semantics (shared by both surfaces): explicit `decision_refs` use **all-must-be-accepted**; the filename scan uses **any-accepted-wins** (preserves the substring-collision compat). A `decision_refs` entry that is structurally unsafe or resolves outside the project root (`..`, an absolute path, or a symlink out of the repo) is **fail-closed**: it is never read and reported as `acceptance: "unsafe_path"` with `accepted: false`, so the gate stays unresolved regardless of the file's contents. |
 | `VALIDATE_FAILED` | `validate` | One or more errors (or, under `--strict`, any issue) detected by the underlying doctor checks |
 | `DOCTOR_FAILED` | `doctor` | One or more error-severity doctor issues found |
 | `TUTORIAL_FAILED` (v1.15+) | `tutorial` | A step in the sandbox walkthrough threw; the sandbox is still cleaned up (unless `--keep`). The message carries the underlying error |
@@ -182,6 +184,21 @@ CI.
 | `CONTEXT_OVER_BUDGET` (v1.13+ / P24) | `task context --budget-bytes`, `task prepare --budget-bytes` | Even maximal section elision could not bring the rendered pack at or below the requested byte budget. Exit code 2. The envelope carries `data.budget_bytes`, `data.minimum_achievable_bytes` (the post-maximal-elision size — re-running with this value as the budget succeeds), and `data.unelidable_sections` (the structural floor) |
 | `INTERNAL_ERROR` | any command | Reserved for unhandled exceptions |
 | `ADAPTER_DESIRED_PATH_CONFLICT` (v1.20+) | `adapter install`, `adapter upgrade --write` | Defense-in-depth invariant: an adapter generator produced two desired files at the same path with differing content. Should never fire in practice (each adapter uniquifies its own paths); surfaced as an unhandled exception (exit 3), not a structured envelope |
+
+### Public cause codes
+
+These appear in `error.cause_code` — an **additive sibling** of `error.code`, not a
+top-level code — on a documented failure envelope. They name the root cause when
+`error.code` is a broad code such as `VERIFICATION_FAILED`, so an agent reading
+only `error` knows what failed without dropping into `data`. Added in v1.27+
+(P39); pinned by the same `tests/unit/error-code-surface.test.ts` scan as
+top-level codes (it also matches `cause_code:` literals). See the
+[`task complete`](#task-complete) failure envelope for the full shape.
+
+| Code | Appears on | Meaning |
+|------|------------|---------|
+| `COMMANDS_FAILED` (v1.27+) | `error.cause_code` on a `task complete` `VERIFICATION_FAILED` envelope (exit 1) | A verification command failed. `error.message` embeds the failing command's reason; the P32 fields (`failed_checks` / `first_failure` / `suggested_next_command`) stay under `data` |
+| `DECISION_REQUIRED` (v1.27+ as a cause code) | `error.cause_code` on a `task complete` `VERIFICATION_FAILED` envelope (exit 1) | The decision gate is unresolved (a `requires_decision` task with no accepted ADR). `error.message` names that an accepted ADR is required. There is **no** full `DecisionRequiredData` block here — that richer envelope only appears on `task record-done`, where `DECISION_REQUIRED` is the top-level `error.code` at exit 2 (see the [Public codes](#public-codes-top-level-error-envelopes) `DECISION_REQUIRED` row) |
 
 ### Plan diagnostic codes
 

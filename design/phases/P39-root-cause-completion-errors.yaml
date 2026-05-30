@@ -4,7 +4,7 @@ name: Root-cause-first completion errors — surface the real cause (decision /
 weight: 6
 confidence: high
 risk: low
-status: planned
+status: done
 objective: |
   task complete still misdirects AI agents on the primary judgement surface. P32
   put the root cause in data (failed_checks, first_failure,
@@ -131,18 +131,16 @@ tasks:
       task complete JSON failure envelope: cause_code + actionable message.
 
 
-      - Add a deterministic causeCodeFor(checkName) map next to the P32
-        FailureSummary code (src/core/failure/failure-summary.ts), covering the
-        checks task complete can produce: decision -> DECISION_REQUIRED,
-        commands -> COMMANDS_FAILED.
-
       - In the task complete VERIFICATION_FAILED handler
-        (src/cli/commands/task.ts ~853-878): keep error.code VERIFICATION_FAILED
-        and exit 1; add error.cause_code = causeCodeFor(first_failure.name);
-        replace the generic error.message with a first-failure-derived actionable
-        sentence built from data.first_failure.reason (for the decision case,
-        name that an accepted ADR is required). Leave the P32 data fields exactly
-        where they are — do NOT copy them into error, and do NOT add a structured
+        (src/cli/commands/task.ts): keep error.code VERIFICATION_FAILED and
+        exit 1; map the first failing check name to error.cause_code with an
+        inline switch at the emission site (decision -> DECISION_REQUIRED,
+        commands -> COMMANDS_FAILED) — the cause_code literals live at the
+        emission site, not in a core helper, so the error-code-surface scan
+        pins them. Replace the generic error.message with an actionable message
+        chosen by first_failure.name (the command cause additionally embeds
+        first_failure.reason). Leave the P32 data fields exactly where they are
+        — do NOT copy them into error, and do NOT add a structured
         DecisionRequiredData block.
 
       - Register the new public code COMMANDS_FAILED in KNOWN_CODES and
@@ -176,9 +174,11 @@ tasks:
     depends_on:
       - P39-T0
     reads:
+      - src/cli/commands/task.ts
       - src/core/failure/failure-summary.ts
       - src/commands/verify.ts
-      - src/cli/commands/task.ts
+      - src/i18n/en-US.ts
+      - src/i18n/ja-JP.ts
       - docs/cli-contract.md
       - tests/unit/error-code-surface.test.ts
     writes:

@@ -249,11 +249,13 @@ The verbs in detail:
   does not run during this phase; it is invoked again only at the
   next verb boundary.
 
-- **`verify --phase <p> --task <id>`** — run the task's declared
-  verification commands without recording a progress event. Useful
-  as a pre-flight before `task complete`. Returns
-  `VERIFICATION_FAILED` (exit 1) on the first failing command, with
-  full stdout / stderr in the JSON envelope.
+- **`verify --phase <p> --task <id>`** — run the task's deterministic
+  checks (the declared verification commands **and** the
+  `requires_decision` decision gate) without recording a progress event.
+  Useful as a pre-flight before `task complete`. Returns
+  `VERIFICATION_FAILED` (exit 1) when any check fails — a verification
+  command or the decision gate — with the per-check results (including
+  the failing `decision` check) in `data.verify.checks`.
 
 - **`task complete <task-id>`** — runs verification and, on pass,
   appends a `done` event (`source: loop`). Idempotent — a second call

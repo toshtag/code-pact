@@ -50,15 +50,19 @@ code-pact phase import roadmap.yaml --scaffold-decisions      # also: plan adopt
 
 For each gated task it writes a `**Status:** proposed` stub (at the task's `decision_refs` paths under `design/decisions/`, or the default `design/decisions/<task-id>.md`). A `proposed` stub does **not** pass the gate — filling it in and flipping **Status** to `accepted` is the human act that releases it. Existing ADRs are never overwritten; unsafe paths are rejected; off by default. See [`cli-contract.md` § `phase import`](../cli-contract.md#phase-import).
 
-## The three diagnostics
+## Where the gate surfaces
+
+The same shared resolver drives every surface below, so they never disagree on
+what "resolved" means. The completion commands enforce the gate; `plan lint`
+surfaces it earlier as advisories.
 
 | Surface | Code | When | Blocks? |
 | --- | --- | --- | --- |
-| `verify` / `task complete` / `task record-done` | `DECISION_REQUIRED` (on `record-done`) / a failed `decision` check (on `verify`/`complete`) | At completion time, when the gate can't resolve an accepted ADR | **Yes** (exit non-zero; `progress.yaml` untouched) |
+| `task complete` | `error.code: VERIFICATION_FAILED` + `error.cause_code: DECISION_REQUIRED` (v1.27+, exit 1) | At completion time, when the gate can't resolve an accepted ADR | **Yes** (`progress.yaml` untouched) |
+| `task record-done` | `error.code: DECISION_REQUIRED` (exit 2) + full `DecisionRequiredData` | At completion time, when the gate can't resolve an accepted ADR | **Yes** (`progress.yaml` untouched) |
+| `verify` (standalone) | a failed `decision` check in `data.verify.checks` | At completion time, when the gate can't resolve an accepted ADR | **Yes** (exit non-zero) |
 | `plan lint --include-quality` | `TASK_DECISION_UNRESOLVED` | A `requires_decision` task whose gate doesn't resolve (no ADR, or one that is proposed/empty/etc.) | No (advisory) |
 | `plan lint --include-quality` | `ADR_STATUS_UNRECOGNIZED` | An ADR whose explicit status word is a typo | No (advisory) — surfaces *why* the gate won't resolve |
-
-`plan lint` surfaces the problem early; the completion commands enforce it. All three go through one shared resolver, so lint and verify never disagree on what "resolved" means.
 
 ## Recommended flow
 
