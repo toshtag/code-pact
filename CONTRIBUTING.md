@@ -77,6 +77,8 @@ When `--json` is set, **stdout must be JSON only**. All human-readable logs, war
 
 Stable error code strings are the public contract; do not rename them lightly.
 
+Some documented envelopes may carry additive stable fields under `error`, such as `cause_code` (v1.27+, P39). Do not invent ad-hoc `error` fields — document any addition in `docs/cli-contract.md` and pin it in `tests/unit/error-code-surface.test.ts`.
+
 ## Tag signing (maintainer only)
 
 From `v0.2.0-alpha.0` onward, release tags are signed with SSH so the GitHub tag page shows a "Verified" badge and downstream consumers can audit the chain locally. This section is for the maintainer cutting a release; it is not required for ordinary contributors who only open PRs.

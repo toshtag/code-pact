@@ -255,7 +255,7 @@ The verbs in detail:
   Useful as a pre-flight before `task complete`. Returns
   `VERIFICATION_FAILED` (exit 1) when any check fails — a verification
   command or the decision gate — with the per-check results (including
-  the failing `decision` check) in `data.verify.checks`.
+  the failing check) in `data.checks` (standalone `verify` uses this path; `task complete` failure places its checks under `data.verify.checks`).
 
 - **`task complete <task-id>`** — runs verification and, on pass,
   appends a `done` event (`source: loop`). Idempotent — a second call

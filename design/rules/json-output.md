@@ -19,7 +19,8 @@ When a `code-pact` command is invoked with `--json` (accepted before or after th
 
 - `ok: true` always implies `data` is present (it may be an empty object).
 - `ok: false` always implies `error.code` is one of the public error codes documented in `docs/cli-contract.md` § Error codes. Adding a new error code is part of the stable surface — bump the table when you add one and make sure `tests/unit/error-code-surface.test.ts` still asserts the full set.
-- `error.message` is human-readable. Programs should branch on `error.code`, not on the message string.
+- `error.message` is human-readable and **must not be parsed** — it may change between releases and is for humans/logs only.
+- Programs should branch on `error.code`. When a documented broad code (e.g. `VERIFICATION_FAILED` on `task complete`) includes an additive `error.cause_code`, branch on **`(error.code, error.cause_code)` together** for the root cause — `error.code` alone cannot distinguish `DECISION_REQUIRED` (write an ADR) from `COMMANDS_FAILED` (fix the command). See the Public cause codes table in `docs/cli-contract.md`.
 
 ## Why it matters
 

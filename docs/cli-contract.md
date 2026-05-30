@@ -20,6 +20,8 @@ The 90% you reach for first; each link jumps to the full section below.
 { "ok": false, "error": { "code": "...", "message": "..." }, "data": { ... } }
 ```
 
+Some documented error envelopes carry additive `error` fields — e.g. `error.cause_code` on `task complete` `VERIFICATION_FAILED` (v1.27+, P39). Branch on `error.code`; when `error.cause_code` is documented for a broad code, branch on it too for the root cause. `error.message` must not be parsed.
+
 Details: [JSON output shape](#json-output-shape).
 
 **Most common error codes**
@@ -29,7 +31,7 @@ Details: [JSON output shape](#json-output-shape).
 | `CONFIG_ERROR` | 2 | Bad flag, missing input, or malformed YAML | Re-check the command's flag surface below |
 | `TASK_NOT_FOUND` | 2 | Task id isn't in any phase | Verify the id (the `P1-T1` form) |
 | `AMBIGUOUS_TASK_ID` | 2 | Same id exists in multiple phases | The message lists them — qualify the id |
-| `VERIFICATION_FAILED` | 1 | `verify` / `task complete` check did not pass | Read `error.cause_code`: `COMMANDS_FAILED` → fix the failing command; `DECISION_REQUIRED` → add an accepted ADR. Then re-run |
+| `VERIFICATION_FAILED` | 1 | `verify` / `task complete` check did not pass | On `task complete`: read `error.cause_code` — `COMMANDS_FAILED` → fix the command; `DECISION_REQUIRED` → add/accept the ADR. On standalone `verify`: inspect `data.checks` (no `cause_code`). Then re-run |
 | `INVALID_TASK_TRANSITION` | 2 | Illegal state move (e.g. completing a `blocked` task) | `task resume` first, then complete |
 | `TASK_FINALIZE_NOT_ELIGIBLE` | 2 | Task's derived state isn't `done` yet | Run `task complete` first |
 | `LOCK_HELD` | 2 | Another mutation is in progress (transient) | Wait and retry; read-only commands are unaffected |
