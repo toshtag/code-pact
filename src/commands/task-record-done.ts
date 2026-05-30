@@ -74,15 +74,17 @@ async function loadProject(cwd: string): Promise<Project> {
 }
 
 /**
- * Record a task as done for work completed OUTSIDE the code-pact loop
- * (already-merged work, docs-only changes whose loop cost is clearly
- * excessive, etc.). Unlike `task complete` this does NOT run verification
- * commands — the proof is delegated to `evidence`. The existing decision
- * gate is still honored: a `requires_decision` task with no resolvable ADR
- * fails with DECISION_REQUIRED and progress.yaml is left untouched.
+ * Record a task as done without running `task complete`'s verification —
+ * the proof is delegated to `evidence`. Two intended uses: work completed
+ * OUTSIDE the code-pact loop (already-merged work, changes not verifiable
+ * from the tree), and the `record_only` lane where `recommend` advised
+ * `lifecycleMode: record_only` and the caller ran the project's verification
+ * itself. The existing decision gate is still honored: a `requires_decision`
+ * task with no resolvable ADR fails with DECISION_REQUIRED and progress.yaml
+ * is left untouched.
  *
  * The emitted event carries `source: "external"` so future diagnostics can
- * distinguish externally-asserted completion from loop-verified completion.
+ * distinguish completion asserted via evidence from loop-verified completion.
  */
 export async function runTaskRecordDone(
   opts: TaskRecordDoneOptions,
@@ -103,7 +105,7 @@ export async function runTaskRecordDone(
     opts.evidence.some((e) => e.trim().length === 0)
   ) {
     const err = new Error(
-      "task record-done requires --evidence \"<text>\" describing the externally-completed work (no empty or whitespace-only items).",
+      "task record-done requires --evidence \"<text>\" describing the proof of completion — a PR, a CI result, or the verification you ran (no empty or whitespace-only items).",
     );
     (err as NodeJS.ErrnoException).code = "CONFIG_ERROR";
     throw err;

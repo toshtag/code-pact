@@ -11,7 +11,8 @@ export const ActorType = z.enum(["human", "agent"]);
 
 // Provenance of a `done` event. `loop` = produced by the normal
 // `task complete` path (loop-verified). `external` = recorded by
-// `task record-done` for work completed outside the code-pact loop.
+// `task record-done` — for work completed outside the loop, or for the
+// `record_only` lane where verification was run outside `task complete`.
 // Only meaningful on `done` events (enforced by superRefine below);
 // missing source on a legacy `done` event is treated as `loop` by readers.
 export const EventSource = z.enum(["loop", "external"]);

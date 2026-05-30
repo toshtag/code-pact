@@ -42,7 +42,7 @@ The complete catalog (Public / Plan / Doctor / Adapter) is in [Error codes](#err
 - **Output & exit contract** — [Stdout / stderr](#stdout--stderr) · [JSON output shape](#json-output-shape) · [Exit codes](#exit-codes) · [Error codes](#error-codes)
 - **Environment** — [TTY and CI detection](#tty-and-ci-detection) · [`--non-interactive`](#--non-interactive) · [Locale resolution](#locale-resolution) · [State file write guarantees](#state-file-write-guarantees)
 - **Planning & import** — [`plan`](#plan) · [`phase import`](#phase-import) · [`spec import`](#spec-import-v18)
-- **Per-task lifecycle** — [`task prepare`](#task-prepare--single-per-task-entry-point-v111-p21) · [`task context`](#task-context--context-quality-gates-v051-v11-additions) · [`task start` / `status` / `block` / `resume`](#task-start--task-status--task-block--task-resume-v06) · [`task complete`](#task-complete) · [`task record-done`](#task-record-done--record-externally-completed-work-v121) · [`task finalize`](#task-finalize--flip-task-design-status-to-done-v12-p11) · [`task add`](#task-add--append-a-task-to-a-phase-v06-non-interactive-in-v14)
+- **Per-task lifecycle** — [`task prepare`](#task-prepare--single-per-task-entry-point-v111-p21) · [`task context`](#task-context--context-quality-gates-v051-v11-additions) · [`task start` / `status` / `block` / `resume`](#task-start--task-status--task-block--task-resume-v06) · [`task complete`](#task-complete) · [`task record-done`](#task-record-done--record-completion-without-task-complete-v121) · [`task finalize`](#task-finalize--flip-task-design-status-to-done-v12-p11) · [`task add`](#task-add--append-a-task-to-a-phase-v06-non-interactive-in-v14)
 - **Phase-level & sequencing** — [`phase reconcile`](#phase-reconcile--bulk-flip-task-design-statuses-for-a-phase-v12-p11) · [`task runbook`](#task-runbook--read-only-guidance-for-a-single-task-v13-p12) · [`phase runbook`](#phase-runbook--read-only-guidance-for-an-entire-phase-v13-p12)
 - **Adapters & diagnostics** — [`adapter`](#adapter-v09) · [`doctor`](#doctor--plan-quality-checks-v053) · [`recommend`](#recommend-v08)
 - **Stability** — [Stability taxonomy (v1.0)](#stability-taxonomy-v10) · [Stability](#stability)
@@ -1740,13 +1740,18 @@ Order of operations:
 
 The `agent` field on `ProgressEvent` is optional for backward compatibility with v0.1 logs that predate `task complete`. The `source` field (v1.21+) is `"loop"` for events produced by `task complete` and `"external"` for events produced by `task record-done`; it is optional, and a legacy `done` event with no `source` is treated as `"loop"` by readers.
 
-## `task record-done` — record externally-completed work (v1.21+)
+## `task record-done` — record completion without `task complete` (v1.21+)
 
-`code-pact task record-done <task-id> --evidence "<text>" [--notes "<text>"] [--agent <name>] [--json] [--dry-run]` records a `done` event for work that was completed **outside** the code-pact loop — already-merged work, or changes that cannot be verified from the current working tree. It is the honest "external completion accounting" path, **not** a replacement for the normal `prepare → start → complete → finalize` loop:
+`code-pact task record-done <task-id> --evidence "<text>" [--notes "<text>"] [--agent <name>] [--json] [--dry-run]` records a `done` event **without** running the loop's verification commands — the proof is the `--evidence` you supply, and it records `source: "external"`. Two uses:
 
-- Use `task complete` for work performed inside the code-pact loop (it runs verification commands and records `source: "loop"`).
-- Use `task record-done` for work completed outside the loop (it does **not** run verification commands; the proof is the `--evidence` you supply, and it records `source: "external"`).
-- `source: "external"` is recorded intentionally so future diagnostics can distinguish loop-verified completion from externally-asserted completion.
+- **External completion** — already-merged work, or changes that cannot be verified from the current working tree.
+- **The `record_only` lane (v1.26+)** — when `task prepare` recommends `lifecycleMode: record_only` (a small, low-risk, strongly-verified docs/test task), you run the project's verification **yourself** and record the result here. `record_only` is a lighter *loop*, **not** lighter verification.
+
+It is a distinct path from the loop's `task complete`, not a way to skip verification:
+
+- Use `task complete` for work verified inside the loop (it runs verification commands and records `source: "loop"`).
+- Use `task record-done` when verification happened outside `task complete` — externally, or because you ran it yourself for a `record_only` task (it does **not** run verification commands; the proof is the `--evidence` you supply, and it records `source: "external"`).
+- `source: "external"` is recorded intentionally so future diagnostics can distinguish loop-verified completion from completion asserted via evidence.
 
 Order of operations:
 

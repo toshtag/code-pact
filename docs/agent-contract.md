@@ -257,14 +257,18 @@ The verbs in detail:
   appends a `done` event (`source: loop`). Idempotent — a second call
   from `done` state returns success without appending a duplicate event.
 
-- **`task record-done <task-id> --evidence "<text>"`** (v1.21+) — for
-  work completed **outside** the loop. Appends a `done` event with
-  `source: external` **without** running verification commands; the
-  proof is `--evidence`. The decision gate still applies — a
+- **`task record-done <task-id> --evidence "<text>"`** (v1.21+) —
+  records a `done` event with `source: external` **without** running
+  verification commands; the proof is `--evidence`. Two uses: work
+  completed **outside** the loop (already merged / not verifiable from
+  the tree), and the `record_only` lane (v1.26+) where `task prepare`
+  recommended `lifecycleMode: record_only` and you ran the project's
+  verification yourself. The decision gate still applies — a
   `requires_decision` task with no resolvable ADR returns
   `DECISION_REQUIRED` (exit 2) and leaves `progress.yaml` untouched.
-  Not a replacement for `task complete`; use it only for genuinely
-  external completion.
+  It is a distinct path from `task complete`, not a way to skip
+  verification: `record_only` is a lighter loop, not lighter
+  verification.
 
 - **`task finalize <task-id> [--write] [--audit-strict] [--base-ref
   <ref>]`** — flips the task's design YAML status to `done` and

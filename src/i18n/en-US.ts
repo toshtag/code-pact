@@ -272,7 +272,7 @@ export const messages = {
     },
     recordDone: {
       evidenceRequired:
-        "task record-done requires --evidence \"<text>\" describing the externally-completed work.",
+        "task record-done requires --evidence \"<text>\" — the proof of completion (a PR, a CI result, or the verification you ran).",
       decisionRequired: (taskId: string): string =>
         `Task "${taskId}" requires a decision ADR before it can be marked done.`,
       alreadyDone: (taskId: string): string =>
