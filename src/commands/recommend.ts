@@ -5,6 +5,7 @@ import { AgentProfile } from "../core/schemas/agent-profile.ts";
 import { Phase } from "../core/schemas/phase.ts";
 import { Roadmap } from "../core/schemas/roadmap.ts";
 import type { Task } from "../core/schemas/task.ts";
+import { assertSafePlanId } from "../core/schemas/plan-id.ts";
 import {
   resolveRecommendation,
   type RecommendResult,
@@ -38,6 +39,9 @@ async function loadPhase(cwd: string, path: string): Promise<Phase> {
 }
 
 async function loadAgentProfile(cwd: string, agentName: string): Promise<AgentProfile> {
+  // `agentName` (raw `--agent`) becomes a path segment below; reject unsafe
+  // names before the join so `../evil` can never read outside agent-profiles/.
+  assertSafePlanId(agentName, "Agent");
   const path = join(cwd, ".code-pact", "agent-profiles", `${agentName}.yaml`);
   let raw: string;
   try {

@@ -9,13 +9,16 @@ import {
   ExpectedDuration,
   TaskStatus,
 } from "./task.ts";
+import { PlanId } from "./plan-id.ts";
 
 // Lenient task schema for imports. Only `id` is required; all detail
 // fields have defaults applied by runPhaseImport() unless --strict is set.
 // This lets AI-generated YAML (which often omits ambiguity/context_size
 // etc.) be imported without manual field-filling.
 export const TaskImport = z.object({
-  id: z.string().min(1),
+  // Imported (often AI-generated / external) ids flow into command strings and
+  // path segments just like authored ids — same charset constraint applies.
+  id: PlanId,
   description: z.string().optional(),
   type: TaskType.optional(),
   ambiguity: AmbiguityLevel.optional(),
@@ -48,7 +51,7 @@ export type TaskImport = z.infer<typeof TaskImport>;
 // Tasks use TaskImport (lenient). runPhaseImport() applies defaults for
 // any omitted fields unless --strict prevents it.
 export const PhaseImportEntry = z.object({
-  id: z.string().min(1),
+  id: PlanId,
   name: z.string().min(1),
   weight: z.number().positive(),
   objective: z.string().min(1),

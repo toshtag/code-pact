@@ -17,6 +17,7 @@ import {
 } from "./formatters/markdown.ts";
 import { deriveTaskState } from "../progress/task-state.ts";
 import { validateGlobSyntax, walkAndMatch } from "../glob.ts";
+import { assertSafePlanId } from "../schemas/plan-id.ts";
 
 export type BuildContextPackOptions = {
   cwd: string;
@@ -155,6 +156,11 @@ async function loadPhase(cwd: string, path: string): Promise<Phase> {
 }
 
 async function loadAgentProfile(cwd: string, agentName: string): Promise<AgentProfile | null> {
+  // Validate BEFORE the try (and before the join) so an unsafe `agentName` is a
+  // hard CONFIG_ERROR rather than being swallowed by the catch — and so a
+  // `../evil` name can never read outside agent-profiles/. A missing-but-safe
+  // profile still degrades gracefully to null.
+  assertSafePlanId(agentName, "Agent");
   try {
     const raw = await readFile(
       join(cwd, ".code-pact", "agent-profiles", `${agentName}.yaml`),

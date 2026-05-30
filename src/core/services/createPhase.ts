@@ -4,7 +4,8 @@ import { parse as parseYaml, stringify as toYaml } from "yaml";
 import { atomicWriteText } from "../../io/atomic-text.ts";
 import { Phase } from "../schemas/phase.ts";
 import type { Task } from "../schemas/task.ts";
-import { Roadmap, type PhaseRef } from "../schemas/roadmap.ts";
+import { Roadmap, PhaseRef } from "../schemas/roadmap.ts";
+import { assertSafePlanId } from "../schemas/plan-id.ts";
 
 export type Confidence = "low" | "medium" | "high";
 export type Risk = "low" | "medium" | "high";
@@ -93,6 +94,13 @@ export async function createPhase(opts: CreatePhaseInput): Promise<CreatePhaseRe
     doneCriteria = ["All tasks are done"],
   } = opts;
 
+  // Identifier safety (write chokepoint). `id` becomes a path segment below
+  // (`design/phases/<id>-<slug>.yaml`); an id like `../evil` would escape the
+  // phases dir. Validate BEFORE any path construction so a traversal attempt
+  // never reaches atomicWriteText. (The read schemas already enforce this for
+  // existing files; this closes the create path.)
+  assertSafePlanId(id, "Phase id");
+
   // Reserved-id check (P14 governance). Block creation of phases with a
   // reserved id unless the internal `_isSampleCreation: true` bypass is
   // set — only `writeSamplePhase` (init's sample-phase generator) does so.
@@ -117,7 +125,9 @@ export async function createPhase(opts: CreatePhaseInput): Promise<CreatePhaseRe
   const relPath = `design/phases/${filename}`;
   const absPath = join(cwd, relPath);
 
-  const phase: Phase = {
+  // Parse the assembled phase before writing so no invalid plan state (e.g. an
+  // unsafe id smuggled in via an embedded imported task) is ever persisted.
+  const phase: Phase = Phase.parse({
     id,
     name,
     weight,
@@ -130,12 +140,12 @@ export async function createPhase(opts: CreatePhaseInput): Promise<CreatePhaseRe
     ...(opts.nonGoals && opts.nonGoals.length > 0 ? { non_goals: opts.nonGoals } : {}),
     ...(opts.requiresDecision === true ? { requires_decision: true } : {}),
     ...(opts.tasks && opts.tasks.length > 0 ? { tasks: opts.tasks } : {}),
-  };
+  });
 
   await mkdir(join(cwd, "design", "phases"), { recursive: true });
   await atomicWriteText(absPath, toYaml(phase));
 
-  const ref: PhaseRef = { id, path: relPath, weight };
+  const ref: PhaseRef = PhaseRef.parse({ id, path: relPath, weight });
   roadmap.phases.push(ref);
   await saveRoadmap(cwd, roadmap);
 

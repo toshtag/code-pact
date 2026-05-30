@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { PassThrough } from "node:stream";
-import { mkdtemp, rm, readFile } from "node:fs/promises";
+import { mkdtemp, rm, readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { parse as parseYaml } from "yaml";
@@ -119,6 +119,20 @@ describe("runTaskAdd — error cases", () => {
       runTaskAdd({ cwd, phaseId: "P1", locale: "en-US", id: "P1-T1", prompter: p2 }),
     ).rejects.toMatchObject({ code: "DUPLICATE_TASK_ID" });
   });
+
+  it.each(["P1/T1", "P1-T1; echo owned", "../evil"])(
+    "rejects an unsafe explicit --id %j with CONFIG_ERROR and leaves the phase unchanged",
+    async (badId) => {
+      const phasesDir = join(cwd, "design", "phases");
+      const fileName = (await readdir(phasesDir)).find((f) => f.startsWith("P1-"))!;
+      const before = await readFile(join(phasesDir, fileName), "utf8");
+      const prompter = makePrompter(["unused", "2"]);
+      await expect(
+        runTaskAdd({ cwd, phaseId: "P1", locale: "en-US", id: badId, prompter }),
+      ).rejects.toMatchObject({ code: "CONFIG_ERROR" });
+      expect(await readFile(join(phasesDir, fileName), "utf8")).toBe(before);
+    },
+  );
 });
 
 // ---------------------------------------------------------------------------

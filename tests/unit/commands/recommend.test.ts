@@ -206,4 +206,11 @@ describe("runRecommend — integration", () => {
       runRecommend({ cwd: fixtureDir, phaseId: "P2", taskId: "P2-E1-T1", agentName: "gemini" }),
     ).rejects.toMatchObject({ code: "AGENT_NOT_FOUND" });
   });
+
+  it("rejects an unsafe --agent (path traversal) with CONFIG_ERROR before reading outside agent-profiles/", async () => {
+    const fixtureDir = new URL("../../../tests/fixtures/project-a", import.meta.url).pathname;
+    await expect(
+      runRecommend({ cwd: fixtureDir, phaseId: "P2", taskId: "P2-E1-T1", agentName: "../evil" }),
+    ).rejects.toMatchObject({ code: "CONFIG_ERROR" });
+  });
 });

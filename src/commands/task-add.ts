@@ -5,6 +5,7 @@ import { atomicWriteText } from "../io/atomic-text.ts";
 import { Roadmap } from "../core/schemas/roadmap.ts";
 import { Phase } from "../core/schemas/phase.ts";
 import { TaskType, type Task } from "../core/schemas/task.ts";
+import { assertSafePlanId } from "../core/schemas/plan-id.ts";
 import { Prompter } from "../lib/prompt.ts";
 import { messages as messageCatalog, type Locale } from "../i18n/index.ts";
 
@@ -144,6 +145,12 @@ export async function runTaskAdd(opts: TaskAddOptions): Promise<TaskAddResult> {
 
     const taskId = opts.id ?? nextTaskId(opts.phaseId, existingTasks);
 
+    // A user-supplied `--id` flows into the phase YAML (and downstream into
+    // command strings / decision-stub paths), so validate it before writing.
+    // Generated ids from nextTaskId are always safe, but guard unconditionally
+    // for defense-in-depth — it is a no-op for valid ids.
+    assertSafePlanId(taskId, "Task id");
+
     if (existingTasks.some((t) => t.id === taskId)) {
       const err = new Error(`Task "${taskId}" already exists in phase "${opts.phaseId}".`);
       (err as NodeJS.ErrnoException).code = "DUPLICATE_TASK_ID";
@@ -174,10 +181,12 @@ export async function runTaskAdd(opts: TaskAddOptions): Promise<TaskAddResult> {
       };
     }
 
-    const updatedPhase: Phase = {
+    // Parse the assembled phase before writing so no invalid plan state is
+    // ever persisted (final integrity guard at the write chokepoint).
+    const updatedPhase: Phase = Phase.parse({
       ...phase,
       tasks: [...existingTasks, newTask],
-    };
+    });
 
     const absPath = join(opts.cwd, ref.path);
     await atomicWriteText(absPath, toYaml(updatedPhase));

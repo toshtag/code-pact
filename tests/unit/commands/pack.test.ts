@@ -139,6 +139,12 @@ describe("runPack — error cases", () => {
       runPack({ cwd: fixtureDir, phaseId: "P2", taskId: "NOPE", agentName: "claude-code" }),
     ).rejects.toMatchObject({ code: "TASK_NOT_FOUND" });
   });
+
+  it("rejects an unsafe --agent (path traversal) with CONFIG_ERROR, never reading outside agent-profiles/", async () => {
+    await expect(
+      runPack({ cwd: fixtureDir, phaseId: "P2", taskId: "P2-E1-T1", agentName: "../evil" }),
+    ).rejects.toMatchObject({ code: "CONFIG_ERROR" });
+  });
 });
 
 // ---------------------------------------------------------------------------

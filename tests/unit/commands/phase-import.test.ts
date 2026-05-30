@@ -1201,6 +1201,47 @@ describe("runPhaseImport — scaffold decisions (RFC §3-D)", () => {
     expect(await listPhaseFiles(dir)).toEqual([]);
   });
 
+  it("rejects an UNSAFE phase id (../evil) at parse with CONFIG_ERROR and writes nothing", async () => {
+    await setupEmptyProject(dir);
+    const before = (await readRoadmap(dir)).raw;
+    const inputPath = await writeInput(
+      dir,
+      `phases:
+  - id: ../evil
+    name: Foundation
+    weight: 12
+    objective: Establish foundation
+`,
+    );
+    await expect(
+      runPhaseImport({ cwd: dir, inputPath }),
+    ).rejects.toMatchObject({ code: "CONFIG_ERROR" });
+    expect((await readRoadmap(dir)).raw).toBe(before);
+    expect(await listPhaseFiles(dir)).toEqual([]);
+  });
+
+  it("rejects an UNSAFE task id with shell metacharacters at parse with CONFIG_ERROR", async () => {
+    await setupEmptyProject(dir);
+    const before = (await readRoadmap(dir)).raw;
+    const inputPath = await writeInput(
+      dir,
+      `phases:
+  - id: P1
+    name: Foundation
+    weight: 12
+    objective: Establish foundation
+    tasks:
+      - id: "P1-T1; echo owned"
+        type: feature
+`,
+    );
+    await expect(
+      runPhaseImport({ cwd: dir, inputPath }),
+    ).rejects.toMatchObject({ code: "CONFIG_ERROR" });
+    expect((await readRoadmap(dir)).raw).toBe(before);
+    expect(await listPhaseFiles(dir)).toEqual([]);
+  });
+
   it("does not scaffold when a matching ADR filename already exists (default path)", async () => {
     await setupEmptyProject(dir);
     await mkdir(join(dir, "design", "decisions"), { recursive: true });

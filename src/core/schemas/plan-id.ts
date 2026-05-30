@@ -40,3 +40,24 @@ export const PlanId = z
   );
 
 export type PlanId = z.infer<typeof PlanId>;
+
+/** True when `value` is a safe plan identifier (same rule as {@link PlanId}). */
+export function isSafePlanId(value: string): boolean {
+  return value !== "." && value !== ".." && PLAN_ID_PATTERN.test(value);
+}
+
+/**
+ * Runtime guard for write/CLI entrypoints that build a filesystem path or an
+ * agent-facing command from a raw identifier *before* any schema parse runs
+ * (e.g. `createPhase` derives `design/phases/<id>-<slug>.yaml`; `recommend` /
+ * `pack` derive `agent-profiles/<agent>.yaml`). Throws a CONFIG_ERROR-coded
+ * Error so the CLI surfaces a clean exit-2 usage error instead of a raw
+ * ZodError. `label` names the field for the message (e.g. "Phase id").
+ */
+export function assertSafePlanId(value: string, label = "identifier"): void {
+  if (!isSafePlanId(value)) {
+    const err = new Error(`${label} "${value}" is invalid: ${PLAN_ID_MESSAGE}.`);
+    (err as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+    throw err;
+  }
+}
