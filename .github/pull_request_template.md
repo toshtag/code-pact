@@ -10,6 +10,26 @@
 
 <!-- One or two sentences. What changed and why. -->
 
+## Surface self-report
+
+<!--
+  Enumerate the surfaces this PR touches (write "—" / "N/A" when none). The
+  point is to force the surface inventory at authoring time — the 1.26.0 review
+  found schema constraints applied to read schemas but missed on write
+  entrypoints, and docs reconciled while CLI help drifted, precisely because no
+  one enumerated these up front (P38).
+-->
+
+| Surface | Changed? (what / N/A) |
+| --- | --- |
+| Public contract (flag / exit code / JSON envelope / error code) | |
+| Command surface (new or changed command/flag) | |
+| Docs / CLI help surface | |
+| Schema / validation boundary | |
+| Write entrypoints (an id/path/agent flowing to a filesystem path or command) | |
+| Invariant / regression tests added | |
+| Trust-boundary impact (execution / path / identifier) | |
+
 ## Test plan
 
 - [ ] `pnpm typecheck`
