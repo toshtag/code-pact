@@ -16,6 +16,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
+import { parse as parseYaml } from "yaml";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (rel) => readFileSync(resolve(repoRoot, rel), "utf8");
@@ -185,6 +186,43 @@ for (const rel of ["docs/getting-started.md", "docs/ja/getting-started.md"]) {
           `CHANGELOG.md says "closes ${phaseId}" but the phase status is "${status}", not "done" — flip the phase (and its tasks) to done, or drop the "closes" claim`,
         );
       }
+    }
+  }
+}
+
+// 10. Control-plane completion consistency. A roadmap-registered phase whose
+//     tasks are ALL `done` must itself be `done` (or an explicit non-completing
+//     status: cancelled / deferred). This catches the recurrence rule #9 could
+//     NOT — a final task merges, every task is done, but the phase status is
+//     left `planned` and nobody wrote a "closes PNN" claim to trip rule #9. It
+//     happened on P43, P41, and P40. The obligation is derived from the tasks'
+//     own states, so a shipped-but-not-flipped phase fails CI before review.
+{
+  const NON_COMPLETING = new Set(["done", "cancelled", "deferred"]);
+  let roadmap;
+  try {
+    roadmap = parseYaml(read("design/roadmap.yaml"));
+  } catch {
+    roadmap = null;
+  }
+  const phaseRefs = Array.isArray(roadmap?.phases) ? roadmap.phases : [];
+  for (const ref of phaseRefs) {
+    if (typeof ref?.path !== "string") continue;
+    let phase;
+    try {
+      phase = parseYaml(read(ref.path));
+    } catch {
+      continue; // unparseable phase YAML is validate's job, not ours
+    }
+    const tasks = Array.isArray(phase?.tasks) ? phase.tasks : [];
+    if (tasks.length === 0) continue; // no tasks → nothing to conclude
+    const allTasksDone = tasks.every((t) => t?.status === "done");
+    const phaseStatus = typeof phase?.status === "string" ? phase.status : "(none)";
+    if (allTasksDone && !NON_COMPLETING.has(phaseStatus)) {
+      fail(
+        ref.path,
+        `every task is "done" but the phase status is "${phaseStatus}" — flip the phase to "done" (a shipped phase whose control-plane was left stale; or set an explicit cancelled/deferred status)`,
+      );
     }
   }
 }
