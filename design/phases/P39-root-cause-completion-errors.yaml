@@ -238,7 +238,13 @@ tasks:
       - src/i18n/en-US.ts
       - src/i18n/ja-JP.ts
       - tests/integration/completion-cause-code.test.ts
+      - tests/unit/error-code-surface.test.ts
       - docs/cli-contract.md
+      - docs/agent-contract.md
+      - docs/troubleshooting.md
+      - docs/concepts/decision-gate.md
+      - design/rules/json-output.md
+      - CONTRIBUTING.md
       - CHANGELOG.md
     acceptance_refs:
       - design/phases/P39-root-cause-completion-errors.yaml

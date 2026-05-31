@@ -200,7 +200,7 @@ top-level codes (it also matches `cause_code:` literals). See the
 | Code | Appears on | Meaning |
 |------|------------|---------|
 | `COMMANDS_FAILED` (v1.27+) | `error.cause_code` on a `task complete` `VERIFICATION_FAILED` envelope (exit 1) | A verification command failed. `error.message` embeds the failing command's reason; the P32 fields (`failed_checks` / `first_failure` / `suggested_next_command`) stay under `data` |
-| `DECISION_REQUIRED` (v1.27+ as a cause code) | `error.cause_code` on a `task complete` `VERIFICATION_FAILED` envelope (exit 1) | The decision gate is unresolved (a `requires_decision` task with no accepted ADR). `error.message` names that an accepted ADR is required. There is **no** full `DecisionRequiredData` block here — that richer envelope only appears on `task record-done`, where `DECISION_REQUIRED` is the top-level `error.code` at exit 2 (see the [Public codes](#public-codes-top-level-error-envelopes) `DECISION_REQUIRED` row) |
+| `DECISION_REQUIRED` (v1.27+ as a cause code) | `error.cause_code` on a `task complete` `VERIFICATION_FAILED` envelope (exit 1) | The decision gate is unresolved (a `requires_decision` task with no accepted ADR). `error.message` names that an accepted ADR is required **and embeds the gate's reason** (e.g. `… requires an accepted ADR before completion: No accepted ADR found for "P1-T1". …`). There is **no** full `DecisionRequiredData` block here — that richer envelope only appears on `task record-done`, where `DECISION_REQUIRED` is the top-level `error.code` at exit 2 (see the [Public codes](#public-codes-top-level-error-envelopes) `DECISION_REQUIRED` row) |
 
 ### Plan diagnostic codes
 
