@@ -102,6 +102,8 @@ const KNOWN_CODES: Record<string, "public" | "plan" | "doctor" | "adapter" | "in
   TASK_DESCRIPTION_MISSING: "plan",
   // P36 — ADR quality advisory (affects_exit: false, --include-quality).
   ADR_ACCEPTED_BODY_THIN: "plan",
+  // P43 — ADR downstream-commitments advisory (affects_exit: false, --include-quality).
+  ADR_COMMITMENTS_EMPTY: "plan",
 
   // Plan diagnostics added in P10 — Task Readiness Schema. All emitted
   // by `plan lint` against the new optional task fields declared in

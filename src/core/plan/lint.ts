@@ -27,6 +27,7 @@ import {
   classifyDecisionAdrs,
   readDecisionAdrFiles,
   classifyAdr,
+  parseAdrCommitments,
 } from "../decisions/adr.ts";
 import { parseFrontMatter } from "../pack/front-matter.ts";
 import { readFile } from "node:fs/promises";
@@ -139,6 +140,7 @@ export async function runLint(opts: LintOptions): Promise<LintResult> {
     issues.push(...(await detectUnresolvedDecision(opts.cwd, phases)));
     issues.push(...(await detectAdrStatusUnrecognized(opts.cwd)));
     issues.push(...(await detectAdrAcceptedBodyThin(opts.cwd)));
+    issues.push(...(await detectAdrCommitmentsEmpty(opts.cwd, phases)));
     issues.push(...detectLowConfidencePhase(phases));
     issues.push(...detectMissingTaskDescription(phases));
   }
@@ -318,6 +320,77 @@ export async function detectAdrAcceptedBodyThin(cwd: string): Promise<PlanIssue[
         },
       });
     }
+  }
+  return issues;
+}
+
+/**
+ * Quality advisory (P43): an ACCEPTED ADR that resolves a `requires_decision`
+ * task's decision gate records no implementation commitments — no
+ * `## Implementation commitments` section, or the section is present but has
+ * zero checkbox items. Surfaces "you recorded a decision but committed to no
+ * follow-through".
+ *
+ * Scope: accepted ADRs that are REFERENCED by a gated task (via the shared
+ * resolver — the same one `detectUnresolvedDecision` / verify use). This is
+ * deliberately narrower than the file-centric P31/P36 advisories: a pure
+ * file-centric scope would fire on every historical accepted ADR (none carry
+ * the section yet), so it is scoped to gated-task-referenced ADRs to stay
+ * signal, not noise. One issue per ADR file (first referencing task wins).
+ * Advisory (`affects_exit: false`); never gates completion, even under
+ * `--strict`.
+ */
+async function detectAdrCommitmentsEmpty(
+  cwd: string,
+  phases: PhaseEntry[],
+): Promise<PlanIssue[]> {
+  const resolver = await makeDecisionResolver(cwd);
+  // Unique accepted ADR path -> the first gated task that referenced it.
+  const accepted = new Map<string, { task_id: string; phase_id: string; file: string }>();
+  for (const { phase, ref } of phases) {
+    for (const task of phase.tasks ?? []) {
+      const requiresDecision =
+        task.requires_decision === true || phase.requires_decision === true;
+      if (!requiresDecision) continue;
+      const res = await resolver.resolve(task.id, task.decision_refs);
+      for (const considered of res.considered) {
+        if (!considered.accepted) continue;
+        if (accepted.has(considered.path)) continue; // first referencing task wins
+        accepted.set(considered.path, {
+          task_id: task.id,
+          phase_id: phase.id,
+          file: ref.path,
+        });
+      }
+    }
+  }
+
+  const issues: PlanIssue[] = [];
+  for (const [adrPath, { task_id, phase_id }] of accepted) {
+    let content: string;
+    try {
+      content = await readFile(join(cwd, adrPath), "utf8");
+    } catch {
+      continue; // referenced ADR vanished — nothing to advise on
+    }
+    const { hasSection, items } = parseAdrCommitments(content);
+    if (hasSection && items.length > 0) continue; // has real commitments — fine
+    const reason = hasSection
+      ? "the section has no checkbox items"
+      : "no ## Implementation commitments section";
+    issues.push({
+      code: "ADR_COMMITMENTS_EMPTY",
+      severity: "warning",
+      affects_exit: false,
+      message: `Accepted ADR "${adrPath}" resolves the decision gate for task "${task_id}" but records no implementation commitments (${reason}). Add a "## Implementation commitments" checkbox list; if the decision genuinely implies no downstream work, record that explicitly as a checked item (e.g. "- [x] No downstream implementation work.").`,
+      file: adrPath,
+      phase_id,
+      task_id,
+      details: {
+        has_section: hasSection,
+        item_count: items.length,
+      },
+    });
   }
   return issues;
 }
