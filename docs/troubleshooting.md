@@ -21,6 +21,7 @@ When a command surfaces one of the diagnostic codes below, this page maps it to 
 | [`CONTROL_PLANE_NOT_DRIVEN`](#control_plane_not_driven-from-doctor-v125) | Scaffold adopted but the loop isn't being driven | Start a task, or silence the check |
 | [`CONTROL_PLANE_BRANCH_NOT_DRIVEN`](#control_plane_branch_not_driven-from-doctor--validate---base-ref-v126) | A PR branch changed real code but never drove the loop | Drive a task (or `record-done`) and commit `progress.yaml`, or exempt the path |
 | [`ADR_ACCEPTED_BODY_THIN`](#adr_accepted_body_thin-from-plan-lint---include-quality-v126) | An accepted ADR's body is an empty stub | Add the decision + rationale, or revert status to `proposed` |
+| [`ADR_COMMITMENTS_EMPTY`](#adr_commitments_empty-from-plan-lint---include-quality-v127) | An accepted gating ADR records no implementation commitments | Add a `## Implementation commitments` checkbox list (warning only — never blocks) |
 
 ## `MANIFEST_NOT_FOUND` from `adapter upgrade --check` / `--write`
 
@@ -295,3 +296,20 @@ code-pact plan lint --include-quality --json
 ```
 
 Recovery: add the decision and its rationale to the ADR body, or — if it isn't actually decided yet — revert its `**Status:**` to `proposed` (then the [decision gate](concepts/decision-gate.md) correctly blocks completion until it's accepted with real content). A file that is just a `**Status:** accepted` line is exactly the stub this surfaces; a 0-byte empty file and `proposed`/`draft` ADRs are not flagged.
+
+## `ADR_COMMITMENTS_EMPTY` from `plan lint --include-quality` (v1.27+)
+
+An **accepted** ADR that resolves a `requires_decision` task's [decision gate](concepts/decision-gate.md) records no implementation commitments — it has no `## Implementation commitments` section, or the section is present but has zero `- [ ]` checkbox items. The decision is settled, but the downstream work it implies is unrecorded.
+
+This is a **warning, not a blocker**: `affects_exit: false`, so it never changes the exit code, **including under `--strict`**. It is scoped to accepted ADRs that a gated task actually references, so historical ADRs no task points at never fire.
+
+```sh
+code-pact plan lint --include-quality --json
+# → issues[] entry with code ADR_COMMITMENTS_EMPTY
+# file                  — the ADR path (there is no `path` field; the subject is ADR content)
+# task_id / phase_id    — the gated task that references the ADR
+# details.has_section   — false = no section; true = section present
+# details.item_count    — number of checkbox items (0 to fire)
+```
+
+Recovery: add a `## Implementation commitments` checkbox list to the accepted ADR — the concrete downstream work the decision implies (`- [ ]` for work to do, `- [x]` for work already satisfied). If the decision genuinely implies no downstream work, record that explicitly as a checked item: `- [x] No downstream implementation work.` — use this **only when there truly is none**, not merely to silence the advisory (the point of recording commitments is to make the consequences deliberate).
