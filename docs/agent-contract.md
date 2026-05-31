@@ -279,14 +279,13 @@ The verbs in detail:
   records a `done` event with `source: external` **without** running
   verification commands; the proof is `--evidence`. Two uses: work
   completed **outside** the loop (already merged / not verifiable from
-  the tree), and the `record_only` lane (v1.26+) where `task prepare`
-  recommended `lifecycleMode: record_only` and you ran the project's
-  verification yourself. The decision gate still applies — a
-  `requires_decision` task with no resolvable ADR returns
-  `DECISION_REQUIRED` (exit 2) and leaves `progress.yaml` untouched.
-  It is a distinct path from `task complete`, not a way to skip
-  verification: `record_only` is a lighter loop, not lighter
-  verification.
+  the tree), and the `record_only` lane (v1.26+). The decision gate
+  still applies — a `requires_decision` task with no resolvable ADR
+  returns `DECISION_REQUIRED` (exit 2) and leaves `progress.yaml`
+  untouched. It is a distinct path from `task complete`, not a way to
+  skip verification. See
+  [`per-task-loop.md` § Recording a done without task complete](per-task-loop.md#recording-a-done-without-task-complete)
+  for the lifecycle explanation (a lighter loop, not lighter verification).
 
 - **`task finalize <task-id> [--write] [--audit-strict] [--base-ref
   <ref>]`** — flips the task's design YAML status to `done` and
