@@ -13,6 +13,14 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+### task prepare lifecycle-aware (P40)
+
+Make `task prepare`'s existing guidance reflect `recommendation.lifecycleMode`, without adding a third "what next" representation. Design in `design/decisions/task-prepare-lifecycle-aware-rfc.md`.
+
+**Added**
+
+- **P40-T1 — `record-done` command + mode-aware `next_action.message`.** `task prepare`'s `commands` dict gains an always-present additive `record-done` key (every mode) — the one non-runnable entry, emitted as the template `code-pact task record-done <id> --agent <agent> --evidence "<verification you ran>"` (`--evidence` is agent-supplied). The other 5 keys are unchanged; `commands` stays a complete, mode-agnostic lookup table. `next_action.message` becomes the single mode-aware guidance surface for the two workable states (`start_task` / `continue_implementation`): `record_only` points at `task record-done --evidence` (and says "lighter loop, not lighter verification") rather than "complete the task"; `decision_loop` says resolve/accept the gating ADR first (verify/complete block on the gate) and a generic implement→verify step — it does **not** decide complete-vs-record-done (the mode stays `decision_loop` whenever `requires_decision` is true, independent of ADR acceptance, so it never implies the post-gate path); `full_loop` keeps the current wording. Early-return states (done/blocked/failed) keep their static messages. No new `recommended_flow`, no ordered array, no new `next_action.type`; no behavior change to `task complete` / `record-done` / `verify`.
+
 ### Leaf help + docs straightening (P41)
 
 Bring the task lifecycle verbs' `--help` to parity and pin it, so agents that read leaf help as an exploration surface get consistent guidance. Design in `design/decisions/leaf-help-docs-straightening-rfc.md`.
