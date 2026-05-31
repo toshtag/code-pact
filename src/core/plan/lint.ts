@@ -135,6 +135,7 @@ export async function runLint(opts: LintOptions): Promise<LintResult> {
   if (includeQuality) {
     issues.push(...detectWeakDoD(phases));
     issues.push(...detectPlaceholderVerification(phases));
+    issues.push(...detectPhaseDocsWriteNoDocCheck(phases));
     // P31 clarify advisories. All `affects_exit: false` — they surface
     // uncertainty for human review and never fail `--strict`.
     issues.push(...(await detectUnresolvedDecision(opts.cwd, phases)));
@@ -165,6 +166,61 @@ function detectWeakDoD(phases: PhaseEntry[]): PlanIssue[] {
         });
       }
     });
+  }
+  return issues;
+}
+
+/** A write target that `pnpm check:docs` (links + invariants) actually guards.
+ *  Only `docs/**` and root-level public docs other than CHANGELOG.md qualify:
+ *  CHANGELOG.md is explicitly EXCLUDED from check:docs's source scan
+ *  (`ROOT_SOURCE_SKIP` in scripts/check-doc-links.mjs), so a CHANGELOG write is
+ *  not something check:docs verifies — requiring a doc check for it would be a
+ *  false positive. `design/**` is also excluded — that tree is validated by
+ *  `validate` / `plan lint`, not the public-docs checker. */
+function isPublicDocWrite(path: string): boolean {
+  if (path.startsWith("docs/")) return true;
+  if (path.includes("/")) return false; // not root-level
+  if (path === "CHANGELOG.md") return false; // not scanned by check:docs
+  return path.toLowerCase().endsWith(".md");
+}
+
+/**
+ * Control-plane integrity: if a NOT-yet-done phase has a task whose `writes`
+ * includes a public doc that `pnpm check:docs` guards (a `docs/` file or a
+ * root-level public `.md`, excluding CHANGELOG.md), the phase's
+ * `verification.commands` must include a doc check (`check:docs` /
+ * `check:doc-links` / `check:doc-invariants`). Otherwise the phase will edit
+ * public docs without verifying them — the docs-drift class P43 was meant to
+ * stop recurring. Scoped to phases that are not yet `done`: this is a
+ * forward-looking guard for work still to be done, so it never retroactively
+ * scolds historical phases (which can't be changed and would be pure noise).
+ * Deterministic and structural (phase YAML only — no free-text parsing), so it
+ * cannot misfire. Advisory (`affects_exit: false`).
+ */
+function detectPhaseDocsWriteNoDocCheck(phases: PhaseEntry[]): PlanIssue[] {
+  const issues: PlanIssue[] = [];
+  for (const { phase, ref } of phases) {
+    if (phase.status === "done") continue; // forward-looking only
+    const hasDocCheck = phase.verification.commands.some((c) =>
+      c.includes("check:doc"),
+    );
+    if (hasDocCheck) continue;
+    for (const task of phase.tasks ?? []) {
+      const docWrite = (task.writes ?? []).find(isPublicDocWrite);
+      if (docWrite === undefined) continue;
+      issues.push({
+        code: "PHASE_DOCS_WRITE_NO_DOC_CHECK",
+        severity: "warning",
+        affects_exit: false,
+        message: `Phase "${phase.id}" has a task ("${task.id}") that writes a public doc ("${docWrite}") but the phase's verification.commands run no doc check — add \`pnpm check:docs\` so doc edits are verified (the docs-drift guard).`,
+        file: ref.path,
+        phase_id: phase.id,
+        task_id: task.id,
+        path: "verification.commands",
+        details: { doc_write: docWrite },
+      });
+      break; // one issue per phase is enough
+    }
   }
   return issues;
 }
@@ -353,6 +409,12 @@ async function detectAdrCommitmentsEmpty(
         task.requires_decision === true || phase.requires_decision === true;
       if (!requiresDecision) continue;
       const res = await resolver.resolve(task.id, task.decision_refs);
+      // Only an ADR that actually RESOLVES the gate is in scope — the message
+      // says "resolves the decision gate", so a partially-accepted explicit
+      // `decision_refs` set (all-must-be-accepted, hence unresolved) must not
+      // fire on its one accepted ref. `TASK_DECISION_UNRESOLVED` covers that
+      // unresolved case instead.
+      if (!res.resolved) continue;
       for (const considered of res.considered) {
         if (!considered.accepted) continue;
         if (accepted.has(considered.path)) continue; // first referencing task wins

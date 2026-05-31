@@ -104,6 +104,9 @@ const KNOWN_CODES: Record<string, "public" | "plan" | "doctor" | "adapter" | "in
   ADR_ACCEPTED_BODY_THIN: "plan",
   // P43 — ADR downstream-commitments advisory (affects_exit: false, --include-quality).
   ADR_COMMITMENTS_EMPTY: "plan",
+  // P43 — docs-drift guard: a not-done phase writing public docs with no doc
+  // check in verification (affects_exit: false, --include-quality).
+  PHASE_DOCS_WRITE_NO_DOC_CHECK: "plan",
 
   // Plan diagnostics added in P10 — Task Readiness Schema. All emitted
   // by `plan lint` against the new optional task fields declared in

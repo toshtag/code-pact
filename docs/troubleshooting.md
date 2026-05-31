@@ -299,7 +299,7 @@ Recovery: add the decision and its rationale to the ADR body, or — if it isn't
 
 ## `ADR_COMMITMENTS_EMPTY` from `plan lint --include-quality` (v1.27+)
 
-An **accepted** ADR that resolves a `requires_decision` task's [decision gate](concepts/decision-gate.md) records no implementation commitments — it has no `## Implementation commitments` section, or the section is present but has zero `- [ ]` checkbox items. The decision is settled, but the downstream work it implies is unrecorded.
+An **accepted** ADR that **resolves** a `requires_decision` task's [decision gate](concepts/decision-gate.md) records no implementation commitments — it has no `## Implementation commitments` section, or the section is present but has zero GFM checkbox items (`- [ ]`, `- [x]`, `* [ ]`, `* [x]` — checked **and** unchecked all count toward `item_count`). The decision is settled, but the downstream work it implies is unrecorded. (Only a gate that actually resolves is in scope: a partially-accepted explicit `decision_refs` set is unresolved and surfaces `TASK_DECISION_UNRESOLVED` instead.)
 
 This is a **warning, not a blocker**: `affects_exit: false`, so it never changes the exit code, **including under `--strict`**. It is scoped to accepted ADRs that a gated task actually references, so historical ADRs no task points at never fire.
 
