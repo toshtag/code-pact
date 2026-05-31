@@ -402,8 +402,8 @@ async function detectAdrCommitmentsEmpty(
 ): Promise<PlanIssue[]> {
   const resolver = await makeDecisionResolver(cwd);
   // Unique accepted ADR path -> the first gated task that referenced it.
-  const accepted = new Map<string, { task_id: string; phase_id: string; file: string }>();
-  for (const { phase, ref } of phases) {
+  const accepted = new Map<string, { task_id: string; phase_id: string }>();
+  for (const { phase } of phases) {
     for (const task of phase.tasks ?? []) {
       const requiresDecision =
         task.requires_decision === true || phase.requires_decision === true;
@@ -421,7 +421,6 @@ async function detectAdrCommitmentsEmpty(
         accepted.set(considered.path, {
           task_id: task.id,
           phase_id: phase.id,
-          file: ref.path,
         });
       }
     }
