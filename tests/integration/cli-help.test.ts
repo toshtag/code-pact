@@ -59,6 +59,14 @@ describe("cluster --help → usage, exit 0", () => {
     [["task", "complete", "--help"], /Usage: code-pact task complete/, /--dry-run/],
     [["task", "record-done", "--help"], /Usage: code-pact task record-done/, /--evidence/],
     [["task", "finalize", "--help"], /Usage: code-pact task finalize/, /--audit-strict/],
+    // P41 — the 7 task lifecycle verbs brought to parity.
+    [["task", "add", "--help"], /Usage: code-pact task add/, /--description/],
+    [["task", "context", "--help"], /Usage: code-pact task context/, /--budget-bytes/],
+    [["task", "start", "--help"], /Usage: code-pact task start/, /--agent/],
+    [["task", "status", "--help"], /Usage: code-pact task status/, /--json/],
+    [["task", "block", "--help"], /Usage: code-pact task block/, /--reason/],
+    [["task", "resume", "--help"], /Usage: code-pact task resume/, /--agent/],
+    [["task", "runbook", "--help"], /Usage: code-pact task runbook/, /--json/],
     [["plan", "prompt", "--help"], /Usage: code-pact plan prompt/, /--schema-only/],
     [["phase", "import", "--help"], /Usage: code-pact phase import/, /--strict/],
   ];
