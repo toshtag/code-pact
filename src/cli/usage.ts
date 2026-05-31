@@ -180,6 +180,128 @@ const LEAF_USAGE: Record<string, () => string> = {
       "  code-pact phase import design/roadmap-draft.yaml --json",
       "  code-pact phase import design/roadmap-draft.yaml --scaffold-decisions --json",
     ].join("\n"),
+
+  "task add": () =>
+    [
+      "Usage: code-pact task add <phase-id> [options]",
+      "",
+      "Append a task to a phase. Two paths: with no --description on a TTY it runs",
+      "an interactive wizard; with --description it is non-interactive and --type",
+      "is required. For bulk creation from a draft, use `phase import` instead.",
+      "",
+      "Options:",
+      "  --description <text>     Add non-interactively (skips the wizard); requires --type.",
+      "  --type <type>            Task type (feature | refactor | docs | test | …). Required with --description.",
+      "  --id <task-id>           Override the generated task id. Valid in both paths.",
+      "  --depends-on <id>        Upstream task dependency. Repeatable.",
+      "  --decision-ref <path>    ADR this task depends on. Repeatable.",
+      "  --read <path>            Declared read scope. Repeatable.",
+      "  --write <path>           Declared write scope. Repeatable.",
+      "  --acceptance-ref <path>  Acceptance reference. Repeatable.",
+      "  --ambiguity, --risk, --context-size, --write-surface, --verification-strength, --expected-duration",
+      "                           Optional sizing/readiness fields; see the task schema for allowed values.",
+      "  --json                   Emit JSON. Valid in both paths.",
+      "",
+      "Examples:",
+      "  code-pact task add P1                         # interactive wizard (TTY)",
+      "  code-pact task add P1 --description \"Add X\" --type feature --json",
+    ].join("\n"),
+
+  "task context": () =>
+    [
+      "Usage: code-pact task context <task-id> [options]",
+      "",
+      "Build and print the task's context pack. Read-only — never mutates",
+      "progress.yaml. `task prepare` bundles this with the recommendation; call",
+      "`task context` directly when you only need the pack.",
+      "",
+      "Options:",
+      "  --agent <name>        Agent name. Defaults to project default_agent.",
+      "  --explain             Print the section-budget table instead of the pack body.",
+      "  --budget-bytes <N>    Cap the pack at N bytes (positive integer); over budget",
+      "                        returns CONTEXT_OVER_BUDGET with the minimum achievable size.",
+      "  --json                Emit JSON.",
+      "",
+      "Examples:",
+      "  code-pact task context P1-T1 --agent claude-code --json",
+      "  code-pact task context P1-T1 --explain",
+    ].join("\n"),
+
+  "task start": () =>
+    [
+      "Usage: code-pact task start <task-id> [options]",
+      "",
+      "Append a `started` event to progress.yaml. Idempotent — a second call from",
+      "`started` returns already_started without a duplicate event. Run once per",
+      "implementation pass; then `task complete` when verification passes.",
+      "",
+      "Options:",
+      "  --agent <name>    Agent name. Defaults to project default_agent.",
+      "  --json            Emit JSON.",
+      "",
+      "Examples:",
+      "  code-pact task start P1-T1 --agent claude-code --json",
+    ].join("\n"),
+
+  "task status": () =>
+    [
+      "Usage: code-pact task status <task-id> [options]",
+      "",
+      "Print the task's derived state (planned / started / resumed / blocked /",
+      "done / failed) and its progress-event history. Read-only — never mutates",
+      "progress.yaml. Agent-neutral (takes no --agent).",
+      "",
+      "Options:",
+      "  --json    Emit JSON.",
+      "",
+      "Examples:",
+      "  code-pact task status P1-T1 --json",
+    ].join("\n"),
+
+  "task block": () =>
+    [
+      "Usage: code-pact task block <task-id> --reason <text> [options]",
+      "",
+      "Append a `blocked` event to progress.yaml. A blocked task must be resumed",
+      "(`task resume`) before it can complete. `--reason` is required.",
+      "",
+      "Options:",
+      "  --reason <text>   Required. Why the task is blocked.",
+      "  --agent <name>    Agent name. Defaults to project default_agent.",
+      "  --json            Emit JSON.",
+      "",
+      "Examples:",
+      "  code-pact task block P1-T1 --reason \"waiting on upstream API\" --json",
+    ].join("\n"),
+
+  "task resume": () =>
+    [
+      "Usage: code-pact task resume <task-id> [options]",
+      "",
+      "Append a `resumed` event to progress.yaml, clearing a prior block. A",
+      "`blocked` task must be resumed before `task complete` will run.",
+      "",
+      "Options:",
+      "  --agent <name>    Agent name. Defaults to project default_agent.",
+      "  --json            Emit JSON.",
+      "",
+      "Examples:",
+      "  code-pact task resume P1-T1 --agent claude-code --json",
+    ].join("\n"),
+
+  "task runbook": () =>
+    [
+      "Usage: code-pact task runbook <task-id> [options]",
+      "",
+      "Print the ordered next-steps for a task (\"what should I do next?\") from its",
+      "derived state. Read-only — never mutates progress.yaml. Alias: `task next`.",
+      "",
+      "Options:",
+      "  --json    Emit JSON (read data.next_steps[0].command for the next command).",
+      "",
+      "Examples:",
+      "  code-pact task runbook P1-T1 --json",
+    ].join("\n"),
 };
 
 /**
