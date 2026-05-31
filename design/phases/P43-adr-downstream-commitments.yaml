@@ -4,7 +4,7 @@ name: ADR downstream commitments — surface an accepted ADR's implementation
 weight: 5
 confidence: high
 risk: low
-status: planned
+status: done
 objective: |
   code-pact's differentiating effect is the ADR->downstream link: a
   requires_decision task cannot complete until an accepted ADR resolves its
@@ -115,6 +115,7 @@ verification:
     - pnpm typecheck
     - pnpm test
     - pnpm build
+    - pnpm check:docs
     - node dist/cli.js validate --json
     - node dist/cli.js plan lint --include-quality --strict --json
 tasks:
@@ -126,7 +127,7 @@ tasks:
     write_surface: low
     verification_strength: medium
     expected_duration: short
-    status: planned
+    status: done
     description: >
       RFC + phase registration (bootstrap).
 
@@ -159,7 +160,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
     description: >
       Parse + surface: parseAdrCommitments + task prepare decision_commitments.
 
@@ -231,7 +232,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
     description: >
       Advisory: ADR_COMMITMENTS_EMPTY in plan lint.
 
