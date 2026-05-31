@@ -13,6 +13,14 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+### Leaf help + docs straightening (P41)
+
+Bring the task lifecycle verbs' `--help` to parity and pin it, so agents that read leaf help as an exploration surface get consistent guidance. Design in `design/decisions/leaf-help-docs-straightening-rfc.md`.
+
+**Added**
+
+- **P41-T1 — rich `--help` for the 7 stubbed task lifecycle verbs.** `task add`, `task context`, `task start`, `task status`, `task block`, `task resume`, and `task runbook` now have rich help (Usage line, description with cross-refs, an `Options:` list of the verb's actual flags, and `Examples:`) instead of the 2-line stub — joining the already-rich `prepare`/`complete`/`record-done`/`finalize`. `task add` documents its `<phase-id>` positional, the wizard-vs-non-interactive split, `--type` required-with-`--description`, the repeatable scope flags, and folds the six sizing/readiness enums into one line; `task block` marks `--reason` required; `task context` documents `--explain` / `--budget-bytes` (read-only). A new unit suite `tests/unit/cli/task-lifecycle-help-terms.test.ts` pins all 11 rich task verbs to a per-verb required-term set (and that each is not the stub), and `tests/integration/cli-help.test.ts` checks the 7 through the built CLI (Usage + a flag + `Examples:`). No behavior change — help text only. (`task next` / `task reconcile` aliases intentionally stay stubs.)
+
 ### ADR downstream commitments (P43)
 
 Make the proven ADR→downstream effect first-class: an accepted ADR may record the concrete work its decision implies, and `task prepare` surfaces it. Deterministic and advisory-only — no new gate, no LLM summary. Design in `design/decisions/adr-downstream-commitments-rfc.md`.
