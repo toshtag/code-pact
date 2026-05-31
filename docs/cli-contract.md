@@ -118,6 +118,14 @@ The `data` field on errors is optional and used when the command was
 able to compute partial results before failing (for example, `verify`
 returning the failed criteria alongside the error code).
 
+The `error` object always contains `code` and `message`. Some documented
+envelopes carry **additive** `error` fields beyond those two — e.g.
+`error.cause_code` on a `task complete` `VERIFICATION_FAILED` failure
+(v1.27+, P39; see [Public cause codes](#public-cause-codes)). Consumers must
+not assume `error` has only `code` and `message`, and must not parse
+`error.message`; branch only on documented stable fields (`error.code`, and
+`error.cause_code` where documented).
+
 ## Exit codes
 
 | Code | Meaning |
