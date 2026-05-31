@@ -387,12 +387,15 @@ export async function detectAdrAcceptedBodyThin(cwd: string): Promise<PlanIssue[
  * zero checkbox items. Surfaces "you recorded a decision but committed to no
  * follow-through".
  *
- * Scope: accepted ADRs that are REFERENCED by a gated task (via the shared
- * resolver — the same one `detectUnresolvedDecision` / verify use). This is
- * deliberately narrower than the file-centric P31/P36 advisories: a pure
- * file-centric scope would fire on every historical accepted ADR (none carry
- * the section yet), so it is scoped to gated-task-referenced ADRs to stay
- * signal, not noise. One issue per ADR file (first referencing task wins).
+ * Scope: accepted ADRs from a RESOLVED requires_decision gate (via the shared
+ * resolver — the same one `detectUnresolvedDecision` / verify use; we skip the
+ * task unless `res.resolved`). This is deliberately narrower than the
+ * file-centric P31/P36 advisories: a pure file-centric scope would fire on every
+ * historical accepted ADR (none carry the section yet). It is also narrower than
+ * "referenced by a gated task": a historical/unreferenced ADR never fires, and
+ * an accepted ref inside an UNRESOLVED explicit decision_refs set (one proposed
+ * ref leaves the gate unresolved) does not fire either — the message says the
+ * ADR "resolves the gate", so it must. One issue per ADR file (first task wins).
  * Advisory (`affects_exit: false`); never gates completion, even under
  * `--strict`.
  */
