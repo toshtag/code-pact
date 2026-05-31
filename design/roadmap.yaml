@@ -104,3 +104,6 @@ phases:
   - id: P39
     path: design/phases/P39-root-cause-completion-errors.yaml
     weight: 6
+  - id: P43
+    path: design/phases/P43-adr-downstream-commitments.yaml
+    weight: 5
