@@ -1,0 +1,250 @@
+id: P40
+name: task prepare lifecycle-aware — make the existing prepare guidance reflect
+  recommendation.lifecycleMode (additive record-done command + mode-aware
+  next_action.message), without adding a third "what next" representation
+weight: 4
+confidence: high
+risk: low
+status: planned
+objective: |
+  task prepare returns recommendation.lifecycleMode (full_loop / record_only /
+  decision_loop) but its guidance surfaces ignore it: the commands dict is built
+  with 5 fixed keys regardless of mode (no record-done key), and
+  next_action.message is static per task-state and assumes full_loop ("then
+  complete"). So an agent on a record_only task is told to complete when it should
+  run task record-done, and a decision_loop task is not told to resolve its ADR
+  first. P40 (backlog, next remaining) closes that gap.
+
+  This is a contract-shape change with explicit bloat risk, authored as a
+  decision_loop phase (P40-T0 is requires_decision, gated on its own RFC).
+
+  Contract-shape decision (maintainer-approved, Option C): commands stays the
+  stable mode-agnostic lookup table (all 5 keys unchanged) and gains ONE
+  always-present record-done key (additive, in every mode — the same additive
+  discipline decision_commitments followed in P43). The single mode-aware
+  what-next surface is next_action.message. No recommended_flow, no ordered-key
+  array, no new next_action.type value. Filtering commands by mode (breaking) and
+  an ordered hint array (the rejected third representation) were both rejected.
+
+  record-done is the one non-runnable template (--evidence is agent-supplied), so
+  it is emitted with an angle-bracket token:
+  code-pact task record-done <id> --agent <agent> --evidence "<verification you ran>".
+  The key is exactly record-done (hyphen), accessed commands["record-done"].
+
+  next_action.message gains a lifecycleMode parameter, branched for the two
+  workable pre-completion states only (start_task, continue_implementation); the
+  early-return states keep static messages (recommendation is null there). The
+  messages restate lifecycle.ts / per-task-loop.md semantics, inventing nothing.
+
+  decision_loop does NOT decide complete-vs-record-done for the agent. Verified in
+  lifecycle.ts:34: decision_loop is returned whenever requires_decision is true
+  (highest priority, independent of ADR acceptance), so a gated task stays
+  decision_loop even after its gate resolves and the mode does not imply the
+  post-gate completion path. The decision_loop message states only the gate fact
+  and the generic implement/verify step. Advisory only; no new gate; P43's
+  decision_commitments + verify/complete remain the enforcers.
+
+  Docs-drift discipline (P39/P41/P43 lesson): T2 writes public docs, so the phase
+  verification includes pnpm check:docs (the P43 PHASE_DOCS_WRITE_NO_DOC_CHECK
+  guard requires it). T2 must not redefine per-task-loop lifecycle prose (link to
+  it) and must grep the docs tree for stale full_loop-only prepare guidance.
+
+  Design recorded in design/decisions/task-prepare-lifecycle-aware-rfc.md.
+
+  Scope discipline (3 tasks):
+
+    - T0 — RFC + phase registration (bootstrap; requires_decision, decision_loop).
+    - T1 — record-done command key + mode-aware next_action.message + tests.
+    - T2 — docs (cli-contract + agent-contract) + the stale-guidance grep.
+non_goals:
+  - A new recommended_flow structure, an ordered-key array, or a new
+    next_action.type value — all would be the third what-next representation or a
+    v1-breaking enum growth the backlog rejects.
+  - Filtering the commands dict by mode (a breaking change to a v1-stable,
+    additive-only envelope) — commands keeps all 5 keys in every mode plus the
+    additive record-done.
+  - Any new gate or behavioral change to task complete / task record-done /
+    verify — lifecycleMode stays advisory; P40 only makes prepare's existing
+    guidance reflect it.
+  - Deciding complete-vs-record-done for a decision_loop task — the mode does not
+    imply the post-gate completion path (lifecycle.ts:34).
+  - A task context echo, a JA rewrite of reference contracts, or any new CLI
+    parser/help abstraction.
+definition_of_done:
+  - task prepare commands includes an always-present record-done key (exactly that
+    hyphenated name) in every lifecycle mode, emitted as the template
+    code-pact task record-done <id> --agent <agent> --evidence "<verification you ran>"
+    (the one non-runnable entry; --evidence is agent-supplied)
+  - the existing 5 commands keys (context, start, verify, complete, finalize) are
+    unchanged and present in every mode — commands stays a mode-agnostic lookup
+    table, not filtered by mode
+  - next_action.message is mode-aware for the two workable states start_task and
+    continue_implementation — record_only points at task record-done --evidence
+    (and says lighter loop not lighter verification), decision_loop says resolve
+    the ADR first without deciding complete-vs-record-done, full_loop keeps the
+    current wording; early-return states keep static messages
+  - next_action.type enum is unchanged; no recommended_flow or ordered array added
+  - the record-done template is pinned by tests (includes task record-done,
+    --evidence, the placeholder, and produces no Unknown option) and mode-aware
+    messages are pinned across full_loop / record_only / decision_loop
+  - docs (cli-contract task prepare envelope + agent-contract) reflect the
+    record-done key (exact name + not-runnable-verbatim note) and that
+    next_action.message is the mode-aware surface; per-task-loop is linked, not
+    redefined; no stale full_loop-only prepare guidance remains in the docs tree
+  - no behavioral change to task complete / record-done / verify / finalize
+verification:
+  commands:
+    - pnpm typecheck
+    - pnpm test
+    - pnpm build
+    - pnpm check:docs
+    - node dist/cli.js validate --json
+    - node dist/cli.js plan lint --include-quality --strict --json
+tasks:
+  - id: P40-T0
+    type: architecture
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: planned
+    requires_decision: true
+    description: >
+      RFC + phase registration (bootstrap; decision_loop / requires_decision).
+
+
+      Lands design/decisions/task-prepare-lifecycle-aware-rfc.md (status: accepted)
+      and bootstraps the phase (phase YAML + roadmap entry, weight 4) as
+      protected-path bootstrap writes NOT listed in writes, per the P41/P43
+      precedent (writes carries the RFC only; the phase YAML is in acceptance_refs
+      and design/roadmap.yaml is excluded as a plan-lint --strict protected path).
+      This task carries requires_decision true with decision_refs pointing at the
+      RFC, so the decision gate is satisfied by the accepted RFC (a decision_loop
+      phase, as the backlog mandates for this contract-shape change). The RFC
+      records the Option-C decision and its v1-stability/additive argument, the
+      lookup-table-vs-recommendation resolution, the record-done key + --evidence
+      placeholder, the full mode-to-message table, the workable-states-only scope,
+      the decision_loop "no complete-vs-record-done decision" finding
+      (lifecycle.ts:34), and a Documentation contract checklist.
+    decision_refs:
+      - design/decisions/task-prepare-lifecycle-aware-rfc.md
+    reads:
+      - design/decisions/task-prepare-lifecycle-aware-rfc.md
+    writes:
+      - design/decisions/task-prepare-lifecycle-aware-rfc.md
+    acceptance_refs:
+      - design/phases/P40-task-prepare-lifecycle-aware.yaml
+  - id: P40-T1
+    type: feature
+    ambiguity: low
+    risk: low
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: planned
+    description: >
+      record-done command key + mode-aware next_action.message + tests.
+
+
+      - In src/commands/task-prepare.ts: add "record-done" to TaskPrepareCommands
+        and buildCommands (the --evidence "<verification you ran>" template).
+        Thread recommendation?.lifecycleMode into messageFor for the two workable
+        states only (start_task, continue_implementation); early-return states
+        keep static messages (recommendation is null there). Use the mode-to-message
+        table from the RFC. decision_loop message states only the gate fact + a
+        generic implement/verify step — it does NOT decide complete vs record-done.
+
+      - In src/cli/commands/task.ts: add a record-done line to the human-summary
+        Commands block. The human next_action.message print already echoes
+        result.next_action.message, so it picks up mode-awareness for free.
+
+      - Tests: extend tests/integration/task-prepare-commands-contract.test.ts
+        (the Commands type + the Object.entries parser loop to the 6th key; pin the
+        record-done template surface — includes task record-done, --evidence, the
+        exact placeholder, and produces no Unknown option). Add to
+        tests/unit/commands/task-prepare.test.ts mode-aware next_action.message
+        assertions (full_loop default, record_only docs/test task, decision_loop
+        gated task) and that commands["record-done"] is present in all modes.
+
+
+      Required tests:
+
+      - commands["record-done"] present in full_loop, record_only, decision_loop.
+
+      - record-done template includes task record-done, --evidence, the placeholder;
+        no Unknown option from the parser loop.
+
+      - next_action.message is mode-specific for start_task / continue_implementation
+        across the three modes; record_only does not say "task complete"; decision_loop
+        does not decide complete vs record-done.
+
+      - the existing 5 commands keys are unchanged and present in every mode.
+    decision_refs:
+      - design/decisions/task-prepare-lifecycle-aware-rfc.md
+    depends_on:
+      - P40-T0
+    reads:
+      - src/commands/task-prepare.ts
+      - src/cli/commands/task.ts
+      - src/core/recommend/lifecycle.ts
+      - src/core/schemas/recommend-result.ts
+      - tests/integration/task-prepare-commands-contract.test.ts
+      - tests/unit/commands/task-prepare.test.ts
+    writes:
+      - src/commands/task-prepare.ts
+      - src/cli/commands/task.ts
+      - tests/integration/task-prepare-commands-contract.test.ts
+      - tests/unit/commands/task-prepare.test.ts
+      - CHANGELOG.md
+    acceptance_refs:
+      - design/phases/P40-task-prepare-lifecycle-aware.yaml
+  - id: P40-T2
+    type: docs
+    ambiguity: low
+    risk: low
+    context_size: medium
+    write_surface: low
+    verification_strength: strong
+    expected_duration: short
+    status: planned
+    description: >
+      docs — cli-contract + agent-contract reflect the mode-aware prepare.
+
+
+      - docs/cli-contract.md: add record-done to the task prepare envelope commands
+        block; state the key is exactly record-done (hyphen, commands["record-done"],
+        not record_done) and that its --evidence is agent-supplied (the one template
+        entry, not runnable verbatim); add a sentence that next_action.message is the
+        mode-aware guidance surface while commands is a complete mode-agnostic verb
+        table. No change to the lifecycleMode field row beyond an optional cross-link.
+
+      - docs/agent-contract.md: update the task prepare bullet — commands now
+        includes record-done; next_action is mode-aware. Reuse the existing
+        per-task-loop link for record_only semantics (P41 consolidated it; do not
+        re-explain).
+
+      - Do NOT redefine per-task-loop lifecycle prose. Before finishing, grep the
+        docs tree for stale full_loop-only task prepare guidance (old "then
+        complete"-style wording around prepare / record_only); fix or link any
+        found and add that file to writes if edited.
+
+
+      Required tests: none new (docs only); check:doc-links + the existing help/
+      prepare tests cover the surface. pnpm check:docs must pass.
+    decision_refs:
+      - design/decisions/task-prepare-lifecycle-aware-rfc.md
+    depends_on:
+      - P40-T0
+    reads:
+      - docs/cli-contract.md
+      - docs/agent-contract.md
+      - docs/per-task-loop.md
+    writes:
+      - docs/cli-contract.md
+      - docs/agent-contract.md
+      - CHANGELOG.md
+    acceptance_refs:
+      - design/phases/P40-task-prepare-lifecycle-aware.yaml
