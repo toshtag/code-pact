@@ -168,7 +168,7 @@ function messageFor(
         case "record_only":
           return "Run task start, implement, run project verification yourself, then record completion with `task record-done --evidence`. This is a lighter loop, not lighter verification.";
         case "decision_loop":
-          return "Resolve/accept the gating ADR first; verify and complete block on the decision gate. Then run task start, implement, and verify.";
+          return "Resolve/accept the gating ADR first; verification and completion-recording paths block on the decision gate. Then run task start, implement, and verify.";
         default:
           return "Run task start, then implement, verify, complete.";
       }
@@ -177,7 +177,7 @@ function messageFor(
         case "record_only":
           return "Implement, run project verification yourself, then record completion with `task record-done --evidence`. This is a lighter loop, not lighter verification.";
         case "decision_loop":
-          return "Resolve/accept the gating ADR first; verify and complete block on the decision gate. Then implement and verify.";
+          return "Resolve/accept the gating ADR first; verification and completion-recording paths block on the decision gate. Then implement and verify.";
         default:
           return "Implement the task, run verification, then complete the task.";
       }

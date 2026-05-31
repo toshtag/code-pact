@@ -5,7 +5,7 @@ name: task prepare lifecycle-aware — make the existing prepare guidance reflec
 weight: 4
 confidence: high
 risk: low
-status: planned
+status: done
 objective: |
   task prepare returns recommendation.lifecycleMode (full_loop / record_only /
   decision_loop) but its guidance surfaces ignore it: the commands dict is built
@@ -109,7 +109,7 @@ tasks:
     write_surface: low
     verification_strength: medium
     expected_duration: short
-    status: planned
+    status: done
     requires_decision: true
     description: >
       RFC + phase registration (bootstrap; decision_loop / requires_decision).
@@ -144,7 +144,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
     description: >
       record-done command key + mode-aware next_action.message + tests.
 
@@ -209,7 +209,7 @@ tasks:
     write_surface: low
     verification_strength: strong
     expected_duration: short
-    status: planned
+    status: done
     description: >
       docs — cli-contract + agent-contract reflect the mode-aware prepare.
 
