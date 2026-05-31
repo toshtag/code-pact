@@ -9,6 +9,7 @@ import {
   isDecisionRequiredForTask,
   parseAdrStatus,
   classifyAdr,
+  parseAdrCommitments,
   resolveDecisionGate,
   makeDecisionResolver,
   classifyDecisionAdrs,
@@ -436,5 +437,136 @@ describe("classifyDecisionAdrs", () => {
     await writeAdr(".DS_Store", "binary-ish\n");
     const files = (await classifyDecisionAdrs(cwd)).map((a) => a.file);
     expect(files).toEqual(["design/decisions/real.md"]);
+  });
+});
+
+describe("parseAdrCommitments", () => {
+  it("returns hasSection:false / no items when the section is absent", () => {
+    expect(parseAdrCommitments("# T\n\n## Decision\n\nBody.\n")).toEqual({
+      hasSection: false,
+      items: [],
+    });
+  });
+
+  it("returns hasSection:true / no items when the section has zero checkboxes", () => {
+    const content = "## Implementation commitments\n\nProse only, no checkboxes.\n";
+    expect(parseAdrCommitments(content)).toEqual({ hasSection: true, items: [] });
+  });
+
+  it("extracts mixed checked/unchecked items (`- [ ]` / `- [x]` / `- [X]`)", () => {
+    const content = [
+      "# Decision",
+      "",
+      "## Implementation commitments",
+      "",
+      "- [ ] Migrate call sites of foo()",
+      "- [x] Update docs/cli-contract.md",
+      "- [X] Add a regression test",
+      "",
+    ].join("\n");
+    expect(parseAdrCommitments(content).items).toEqual([
+      { text: "Migrate call sites of foo()", done: false },
+      { text: "Update docs/cli-contract.md", done: true },
+      { text: "Add a regression test", done: true },
+    ]);
+  });
+
+  it("accepts `*` bullets as well as `-`", () => {
+    const content = "## Implementation commitments\n\n* [ ] Star-bulleted item\n";
+    expect(parseAdrCommitments(content).items).toEqual([
+      { text: "Star-bulleted item", done: false },
+    ]);
+  });
+
+  it("ignores non-checkbox prose inside the section", () => {
+    const content = [
+      "## Implementation commitments",
+      "",
+      "Some explanatory prose.",
+      "- [ ] A real item",
+      "- a plain bullet, not a checkbox",
+      "",
+    ].join("\n");
+    expect(parseAdrCommitments(content).items).toEqual([
+      { text: "A real item", done: false },
+    ]);
+  });
+
+  it("handles CRLF line endings identically", () => {
+    const content = "## Implementation commitments\r\n\r\n- [x] Done item\r\n";
+    expect(parseAdrCommitments(content)).toEqual({
+      hasSection: true,
+      items: [{ text: "Done item", done: true }],
+    });
+  });
+
+  it("stops at the next h2 (items after it are excluded)", () => {
+    const content = [
+      "## Implementation commitments",
+      "- [ ] In section",
+      "## Consequences",
+      "- [ ] In a later section, not a commitment",
+      "",
+    ].join("\n");
+    expect(parseAdrCommitments(content).items).toEqual([
+      { text: "In section", done: false },
+    ]);
+  });
+
+  it("matches the heading case-insensitively", () => {
+    const content = "## implementation COMMITMENTS\n\n- [ ] item\n";
+    expect(parseAdrCommitments(content)).toEqual({
+      hasSection: true,
+      items: [{ text: "item", done: false }],
+    });
+  });
+
+  it("does NOT match an h3 `### Implementation commitments`", () => {
+    const content = "### Implementation commitments\n\n- [ ] item\n";
+    expect(parseAdrCommitments(content)).toEqual({ hasSection: false, items: [] });
+  });
+
+  it("does NOT match a heading with trailing text after the title", () => {
+    const content = "## Implementation commitments and more\n\n- [ ] item\n";
+    expect(parseAdrCommitments(content)).toEqual({ hasSection: false, items: [] });
+  });
+
+  it("tolerates leading whitespace before `##` (same h2 detection as the rest of the codebase)", () => {
+    // Pins the current behavior: the heading/h2 regexes use `^\s*##` everywhere
+    // (parseAdrStatus's siblings, plan-lint's ADR_H2_PATTERN), so a slightly
+    // indented heading is still treated as the section.
+    const content = "  ## Implementation commitments\n\n- [ ] item\n";
+    expect(parseAdrCommitments(content)).toEqual({
+      hasSection: true,
+      items: [{ text: "item", done: false }],
+    });
+  });
+
+  it("ignores a checkbox item with empty text (`- [ ] ` with nothing after)", () => {
+    const content = "## Implementation commitments\n\n- [ ] \n- [ ] real\n";
+    expect(parseAdrCommitments(content).items).toEqual([{ text: "real", done: false }]);
+  });
+
+  it("does not mistake a front-matter `status:` for body, and reads the body section", () => {
+    const content =
+      "---\nstatus: accepted\n---\n# T\n\n## Implementation commitments\n\n- [ ] item\n";
+    expect(parseAdrCommitments(content)).toEqual({
+      hasSection: true,
+      items: [{ text: "item", done: false }],
+    });
+  });
+
+  it("reads only the FIRST matching section", () => {
+    const content = [
+      "## Implementation commitments",
+      "- [ ] first",
+      "## Other",
+      "## Implementation commitments",
+      "- [ ] second",
+      "",
+    ].join("\n");
+    expect(parseAdrCommitments(content).items).toEqual([
+      { text: "first", done: false },
+    ]);
   });
 });

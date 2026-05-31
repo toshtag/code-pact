@@ -165,6 +165,61 @@ export function classifyAdr(content: string): {
   return { acceptance: "unknown_status", status };
 }
 
+// ---------------------------------------------------------------------------
+// Implementation commitments (P43)
+// ---------------------------------------------------------------------------
+
+/** One GFM task-list item under an ADR's `## Implementation commitments`. */
+export type AdrCommitment = {
+  /** The item text after the checkbox. */
+  text: string;
+  /** True for `- [x]` / `- [X]`; false for `- [ ]`. */
+  done: boolean;
+};
+
+/**
+ * Result of scanning an ADR body for its `## Implementation commitments`
+ * section. `hasSection` distinguishes "no section at all" from "section present
+ * but zero checkbox items" — both surface as `items: []`, but the lint and the
+ * `task prepare` surface need to tell them apart.
+ */
+export type AdrCommitments = {
+  hasSection: boolean;
+  items: AdrCommitment[];
+};
+
+/** Matches an `## Implementation commitments` heading (exact h2, case-insensitive title). */
+const COMMITMENTS_HEADING = /^\s*##\s+implementation commitments\s*$/i;
+/** Any h2 — marks the end of the commitments section. */
+const ANY_H2 = /^\s*##\s/;
+/** A GFM task-list item: `- [ ] text` / `* [x] text`. */
+const CHECKBOX_ITEM = /^\s*[-*]\s+\[([ xX])\]\s+(.+?)\s*$/;
+
+/**
+ * Parse an ADR's `## Implementation commitments` checkbox list. Pure and
+ * deterministic (no I/O, no summarization) — mirrors {@link parseAdrStatus}:
+ * normalize newlines, strip front-matter (so a `status:` key is never mistaken
+ * for body), then scan the body. Reads the FIRST matching h2 section, from after
+ * the heading to the next h2 or EOF, and extracts only GFM task-list items;
+ * prose and blank lines in the section are ignored. `### ` (h3) does not match.
+ */
+export function parseAdrCommitments(content: string): AdrCommitments {
+  const { body } = parseFrontMatter(normalizeNewlines(content));
+  const lines = body.split("\n");
+
+  const start = lines.findIndex((l) => COMMITMENTS_HEADING.test(l));
+  if (start === -1) return { hasSection: false, items: [] };
+
+  const items: AdrCommitment[] = [];
+  for (let i = start + 1; i < lines.length; i++) {
+    const line = lines[i]!;
+    if (ANY_H2.test(line)) break; // next section
+    const m = line.match(CHECKBOX_ITEM);
+    if (m) items.push({ text: m[2]!, done: m[1]!.toLowerCase() === "x" });
+  }
+  return { hasSection: true, items };
+}
+
 export type ConsideredAdr = {
   /** Repo-root-relative POSIX path. */
   path: string;

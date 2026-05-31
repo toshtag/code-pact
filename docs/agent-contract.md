@@ -239,6 +239,11 @@ The verbs in detail:
   `investigate_failure`), and a `commands` dictionary with every
   per-task verb pre-formatted. Progress-read-only. Optional
   `--dry-run` skips the context pack write.
+  For a `requires_decision` task it also returns `decision_commitments`
+  (v1.27+, P43): the parsed `## Implementation commitments` of each
+  accepted gating ADR. Read it as **advisory implementation context**
+  — the concrete downstream work the decision implies — not as a gate;
+  it never blocks completion and an unresolved gate yields `[]`.
 
 - **`task start <task-id>`** — record a `started` event. The agent
   invokes this exactly once per implementation pass for a task; the

@@ -1554,13 +1554,20 @@ The command MUST NOT mutate `.code-pact/state/progress.yaml` on any code path. I
       "finalize": "code-pact task finalize <task-id> --write --json"
     },
     "blocked_by": [],
-    "already_done": true
+    "already_done": true,
+    "decision_commitments": [
+      { "adr": "design/decisions/<file>.md", "has_section": true, "items": [
+        { "text": "Migrate call sites of foo()", "done": false },
+        { "text": "Update docs/cli-contract.md", "done": true }
+      ] }
+    ]
   }
 }
 ```
 
 - `would_write_context_pack_path` is present only in `--dry-run` mode when a pack would have been written.
 - `already_done` is present (always `true`) only when `current_state === "done"`.
+- `decision_commitments` (v1.27+, P43) is present (possibly `[]`) **only for a `requires_decision` task**; it is omitted entirely for non-gated tasks. Each entry is one **accepted** ADR that the decision gate considered, with its parsed `## Implementation commitments` checkbox items (`{ text, done }`) and a `has_section` flag. `has_section: false` means the ADR has no `## Implementation commitments` section; `has_section: true` with `items: []` means the section is present but has no checkbox items. It is **empty (`[]`)** when the gate is unresolved (no accepted ADR) — `task prepare` does not fail or add a decision-error surface, and does not duplicate the `verify` / `task complete` gate enforcement; the commitments are advisory implementation context, not a gate. Entries preserve the decision resolver's `considered[]` order — consumers must **not** infer chronological, priority, or dependency semantics from the order. `done` semantics: an unchecked item is downstream work still to implement; a checked item is work already satisfied, or an explicit non-work statement. This is an additive `data` field (the JSON output shape already documents that envelopes carry additive fields).
 
 ### `next_action.type` enum (closed)
 
