@@ -183,3 +183,56 @@ describe("plan lint --json", () => {
     ).toBe(true);
   });
 });
+
+describe("plan lint — ADR_COMMITMENTS_EMPTY is advisory even under --strict (P43)", () => {
+  const ROADMAP = `phases:\n  - id: P1\n    path: design/phases/P1.yaml\n    weight: 10\n`;
+  // A gated task; the filename scan matches an accepted ADR named P1-T1-*.md.
+  const GATED_PHASE = `id: P1
+name: P1
+weight: 10
+confidence: medium
+risk: low
+status: planned
+objective: An objective long enough
+definition_of_done:
+  - DoD long enough to read
+verification:
+  commands:
+    - pnpm test
+tasks:
+  - id: P1-T1
+    type: feature
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: planned
+    requires_decision: true
+    description: gated task
+`;
+
+  async function writeAdr(name: string, content: string): Promise<void> {
+    await mkdir(join(tmpDir, "design", "decisions"), { recursive: true });
+    await writeFile(join(tmpDir, "design", "decisions", name), content, "utf8");
+  }
+
+  it("fires the advisory but keeps exit 0 even with --strict", async () => {
+    await writeRoadmap(ROADMAP);
+    await writePhase("P1.yaml", GATED_PHASE);
+    // Accepted ADR resolving the gate, but with no commitments section.
+    await writeAdr("P1-T1-rfc.md", "**Status:** accepted\n\n## Decision\n\nChose X.\n");
+
+    const res = run(["plan", "lint", "--include-quality", "--strict", "--json"]);
+    const parsed = parseLint(res.stdout);
+
+    // Advisory is present...
+    expect(
+      parsed.data?.issues.some((i) => i.code === "ADR_COMMITMENTS_EMPTY"),
+    ).toBe(true);
+    // ...but it never promotes to a failure, even under --strict.
+    expect(res.code).toBe(0);
+    expect(parsed.ok).toBe(true);
+  });
+});

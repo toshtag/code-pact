@@ -683,4 +683,129 @@ tasks:
     expect(issue).toBeDefined();
     expect(issue?.affects_exit).toBe(false);
   });
+
+  it("omits the `path` field (the subject is ADR content, not a plan-YAML field)", async () => {
+    const result = await runGated("P1-T1-rfc.md", "**Status:** accepted\n\n## Decision\n\nX.\n");
+    const issue = commitmentsIssues(result)[0];
+    expect(issue).toBeDefined();
+    expect(issue?.path).toBeUndefined();
+  });
+
+  it("does NOT fire when explicit decision_refs are only partially accepted (gate unresolved)", async () => {
+    // all-must-be-accepted: one proposed ref leaves the gate UNRESOLVED, so the
+    // one accepted ref must not fire (the message claims the ADR "resolves" the
+    // gate — it does not). TASK_DECISION_UNRESOLVED covers the unresolved case.
+    await writeRoadmap(ROADMAP);
+    await writePhase(
+      "P1.yaml",
+      phaseDoc({
+        taskLines: [
+          "description: x",
+          "requires_decision: true",
+          "decision_refs:",
+          "  - design/decisions/a.md",
+          "  - design/decisions/b.md",
+        ],
+      }),
+    );
+    await writeAdr("a.md", "**Status:** accepted\n\n## Decision\n\nX (no commitments).\n");
+    await writeAdr("b.md", "**Status:** proposed\n\n## Decision\n\nY.\n");
+    const result = await runLint({ cwd, includeQuality: true });
+    expect(commitmentsIssues(result)).toEqual([]);
+    // sanity: the gate really is unresolved here
+    expect(result.issues.some((i) => i.code === "TASK_DECISION_UNRESOLVED")).toBe(true);
+  });
+});
+
+describe("runLint — PHASE_DOCS_WRITE_NO_DOC_CHECK (P43 docs-drift guard)", () => {
+  const ROADMAP = `phases:\n  - id: P1\n    path: design/phases/P1.yaml\n    weight: 10\n`;
+
+  // A phase with the given status, verification commands, and a single task
+  // whose `writes` is `taskWrites`.
+  function phaseDoc(opts: {
+    status?: string;
+    commands?: string[];
+    taskWrites?: string[];
+  }): string {
+    const commands = opts.commands ?? ["pnpm test"];
+    const writes = opts.taskWrites ?? [];
+    return `id: P1
+name: P1
+weight: 10
+confidence: medium
+risk: low
+status: ${opts.status ?? "planned"}
+objective: An objective long enough
+definition_of_done:
+  - DoD that is clearly long enough to read
+verification:
+  commands:
+${commands.map((c) => `    - ${c}`).join("\n")}
+tasks:
+  - id: P1-T1
+    type: feature
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: planned
+    description: a task long enough to read
+${writes.length > 0 ? `    writes:\n${writes.map((w) => `      - ${w}`).join("\n")}\n` : ""}`;
+  }
+
+  function fired(result: Awaited<ReturnType<typeof runLint>>): boolean {
+    return result.issues.some((i) => i.code === "PHASE_DOCS_WRITE_NO_DOC_CHECK");
+  }
+
+  it("fires for a not-done phase that writes a docs/ file but runs no doc check", async () => {
+    await writeRoadmap(ROADMAP);
+    await writePhase("P1.yaml", phaseDoc({ taskWrites: ["docs/cli-contract.md"] }));
+    const result = await runLint({ cwd, includeQuality: true });
+    const issue = result.issues.find((i) => i.code === "PHASE_DOCS_WRITE_NO_DOC_CHECK");
+    expect(issue).toBeDefined();
+    expect(issue?.affects_exit).toBe(false);
+    expect(issue?.phase_id).toBe("P1");
+    expect(issue?.details?.doc_write).toBe("docs/cli-contract.md");
+  });
+
+  it("does NOT fire when the phase verification includes a doc check", async () => {
+    await writeRoadmap(ROADMAP);
+    await writePhase(
+      "P1.yaml",
+      phaseDoc({ commands: ["pnpm test", "pnpm check:docs"], taskWrites: ["docs/cli-contract.md"] }),
+    );
+    expect(fired(await runLint({ cwd, includeQuality: true }))).toBe(false);
+  });
+
+  it("does NOT fire for a CHANGELOG.md write (check:docs does not scan it)", async () => {
+    await writeRoadmap(ROADMAP);
+    await writePhase("P1.yaml", phaseDoc({ taskWrites: ["CHANGELOG.md"] }));
+    expect(fired(await runLint({ cwd, includeQuality: true }))).toBe(false);
+  });
+
+  it("does NOT fire for a design/ write (validated elsewhere, not by check:docs)", async () => {
+    await writeRoadmap(ROADMAP);
+    await writePhase("P1.yaml", phaseDoc({ taskWrites: ["design/decisions/some-rfc.md"] }));
+    expect(fired(await runLint({ cwd, includeQuality: true }))).toBe(false);
+  });
+
+  it("does NOT fire for a done phase (forward-looking guard only)", async () => {
+    await writeRoadmap(ROADMAP);
+    await writePhase("P1.yaml", phaseDoc({ status: "done", taskWrites: ["docs/cli-contract.md"] }));
+    expect(fired(await runLint({ cwd, includeQuality: true }))).toBe(false);
+  });
+
+  it("fires on a root-level public .md (e.g. README.md) too", async () => {
+    await writeRoadmap(ROADMAP);
+    await writePhase("P1.yaml", phaseDoc({ taskWrites: ["README.md"] }));
+    expect(fired(await runLint({ cwd, includeQuality: true }))).toBe(true);
+  });
+
+  it("does not run without --include-quality", async () => {
+    await writeRoadmap(ROADMAP);
+    await writePhase("P1.yaml", phaseDoc({ taskWrites: ["docs/cli-contract.md"] }));
+    expect(fired(await runLint({ cwd }))).toBe(false);
+  });
 });
