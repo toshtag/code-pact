@@ -107,3 +107,6 @@ phases:
   - id: P43
     path: design/phases/P43-adr-downstream-commitments.yaml
     weight: 5
+  - id: P41
+    path: design/phases/P41-leaf-help-docs-straightening.yaml
+    weight: 4

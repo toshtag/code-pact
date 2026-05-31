@@ -1,0 +1,248 @@
+id: P41
+name: Leaf help + docs straightening — bring the 7 stubbed task lifecycle verbs'
+  --help to parity behind a coverage test, and consolidate the record_only
+  explanation to its one canonical home
+weight: 4
+confidence: high
+risk: low
+status: planned
+objective: |
+  Agents use --help as an exploration surface, but only 6 leaf commands have rich
+  help; the rest fall back to a 2-line stub (the 1.26.0 feedback flagged
+  task add --help as a stub while task complete --help is rich). Separately, the
+  record_only lifecycle mode is explained in FULL in 6 docs, so they drift (the
+  P39/P43 docs-drift pain). P41 (backlog "cheap fill", next after P43) fixes both
+  WITHOUT growing the docs set.
+
+  Scope (maintainer-approved):
+
+    - --help parity limited to the 7 stubbed task lifecycle verbs: add, context,
+      start, status, block, resume, runbook. plan/phase/adapter stubs are a later
+      task; widening here turns P41 into a full CLI-surface redesign.
+    - record_only consolidates into the EXISTING docs/per-task-loop.md (the
+      docs-role-map canonical home); no new concept page.
+
+  Approach:
+
+    - Add 7 LEAF_USAGE entries in src/cli/usage.ts mirroring the task complete
+      shape (Usage / description / Options / Examples). task add is the length
+      exception (15 flags) — group it, show all flag names, fold the six
+      sizing/readiness enums into one line; never inline enum values.
+    - Pin parity with a coverage test: a new unit suite (subcommandUsage +
+      it.each per-verb required terms, all 11 rich task verbs) plus rows added to
+      the integration cli-help table (Usage + flag + Examples via the built CLI).
+    - record_only: link out exactly the 2 concept-duplicate blocks
+      (cli-contract record-done concept prose; agent-contract two-uses prose) to
+      per-task-loop; keep role-appropriate content (cli-contract schema rule,
+      agent-contract gate facts + conformance token, glossary term def, CLAUDE.md
+      template). A per-block role judgment, not a count to defend.
+
+  Verified flag surfaces (read from src/cli/commands/task.ts): add takes a
+  <phase-id> positional plus --description --type --ambiguity --risk
+  --context-size --write-surface --verification-strength --expected-duration
+  --depends-on --decision-ref --read --write --acceptance-ref --id --json (wizard
+  when --description omitted; --type required with --description); context takes
+  --agent --json --explain --budget-bytes; start --agent --json; status --json;
+  block --agent --reason(required) --json; resume --agent --json; runbook --json
+  (alias next). Read-only: context, status, runbook. Append progress: add, start,
+  block, resume.
+
+  Docs-drift-first discipline (the P39/P43 lesson): T2 writes public docs, so the
+  phase verification includes pnpm check:docs (the P43 PHASE_DOCS_WRITE_NO_DOC_CHECK
+  guard requires it). The Documentation contract checklist lives in the RFC.
+
+  Design recorded in design/decisions/leaf-help-docs-straightening-rfc.md.
+
+  Scope discipline (3 tasks):
+
+    - T0 — RFC + phase registration (bootstrap).
+    - T1 — rich --help for the 7 task verbs + unit & integration help-coverage tests.
+    - T2 — record_only consolidation (link out the 2 concept-duplicates).
+non_goals:
+  - Rich --help for plan / phase / adapter stubs or top-level commands (init,
+    verify, recommend, doctor, validate) — a later task, not P41.
+  - Rich help for command aliases (task next, task reconcile) — they stay stubs;
+    subcommandUsage keys on the canonical name only.
+  - Any new docs page, any JA rewrite, or any CLI parser/help-generator
+    abstraction — 7 hand-written LEAF_USAGE entries are enough.
+  - Editing the cli-contract lifecycleMode schema rule, the CLAUDE.md template,
+    the agent-contract conformance row, or the glossary term def — they look like
+    record_only duplicates but are role-appropriate and stay.
+  - Changing decision-gate / lifecycle behavior — P41 is help text + docs only.
+definition_of_done:
+  - the 7 task verbs (add, context, start, status, block, resume, runbook) each
+    have rich --help via a LEAF_USAGE entry (Usage line, description with
+    cross-refs, Options listing the verified flags, Examples) instead of the
+    2-line stub
+  - task add help shows the <phase-id> positional, the wizard-vs-non-interactive
+    split, --type required-with-description, all repeatable scope flags, and folds
+    the six sizing/readiness enums into one line that still names all six flags
+  - task block help marks --reason required; task context help shows --explain and
+    --budget-bytes; task runbook is rich while the alias task next stays a stub
+  - a new unit suite tests/unit/cli/task-lifecycle-help-terms.test.ts pins all 11
+    rich task verbs (the 7 new + prepare/complete/record-done/finalize) to a
+    per-verb required-term set and asserts help is not the stub line; task add is
+    pinned thickly
+  - tests/integration/cli-help.test.ts RICH_LEAF_HELP covers the 7 new verbs
+    (Usage + a flag + Examples through the built CLI)
+  - the record_only lifecycle explanation has one canonical home
+    (docs/per-task-loop.md); the 2 concept-duplicate blocks in cli-contract and
+    agent-contract link to it while keeping their role-specific content; no new
+    docs page is created; no JA rewrite
+  - no decision-gate / lifecycle behavioral change
+verification:
+  commands:
+    - pnpm typecheck
+    - pnpm test
+    - pnpm build
+    - pnpm check:docs
+    - node dist/cli.js validate --json
+    - node dist/cli.js plan lint --include-quality --strict --json
+tasks:
+  - id: P41-T0
+    type: architecture
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: planned
+    description: >
+      RFC + phase registration (bootstrap).
+
+
+      Lands design/decisions/leaf-help-docs-straightening-rfc.md (status: accepted)
+      and bootstraps the phase (phase YAML + roadmap entry, weight 4) as
+      protected-path bootstrap writes NOT listed in writes, per the P28-P43
+      precedent (writes carries the RFC only; the phase YAML is in acceptance_refs
+      and design/roadmap.yaml is excluded as a plan-lint --strict protected path).
+      The RFC records the verified flag tables, the 7-verb rich-help approach with
+      the task add length exception, the both-layers help-coverage test decision,
+      the record_only classification table (the 2 concept-duplicates to link vs
+      the role-appropriate keeps), the no-JA-edit note, the alias-stays-stub
+      non-goal, and a Documentation contract checklist enumerating which doc each
+      task writes.
+    decision_refs:
+      - design/decisions/leaf-help-docs-straightening-rfc.md
+    reads:
+      - design/decisions/leaf-help-docs-straightening-rfc.md
+    writes:
+      - design/decisions/leaf-help-docs-straightening-rfc.md
+    acceptance_refs:
+      - design/phases/P41-leaf-help-docs-straightening.yaml
+  - id: P41-T1
+    type: feature
+    ambiguity: low
+    risk: low
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: medium
+    status: planned
+    description: >
+      Rich --help for the 7 task verbs + help-coverage tests.
+
+
+      - In src/cli/usage.ts: add 7 LEAF_USAGE entries (after phase import) for add,
+        context, start, status, block, resume, runbook, each mirroring the
+        task complete shape and documenting the verified flags. Keep most verbs
+        at or below task complete length; task add is the exception (15 flags) —
+        group it, show all flag names, fold the six sizing/readiness enums into one
+        line, never inline enum values. State task add's <phase-id> positional,
+        the wizard-vs-non-interactive split, and --type required-with-description.
+        Mark task block --reason required. No other source change (dispatch already
+        calls subcommandUsage).
+
+      - Add tests/unit/cli/task-lifecycle-help-terms.test.ts (sibling of the
+        record-done help test): import subcommandUsage, it.each a per-verb
+        required-term table for all 11 rich task verbs; assert the Usage line, each
+        documented flag token, a purpose phrase, and that help is not the stub
+        line. Pin task add thickly (phase-id positional, repeatable + essential
+        flags, interactive/wizard, requires --type), task block (--reason +
+        required), task context (--budget-bytes + --explain).
+
+      - Add the 7 verbs to tests/integration/cli-help.test.ts RICH_LEAF_HELP; the
+        existing spawn loop then checks Usage + a flag + Examples through the
+        built CLI.
+
+
+      Required tests:
+
+      - unit: each of the 7 new verbs has rich help (not the stub); task add
+        thick-pinned; block/context anchor flags pinned; the existing 4 rich verbs
+        stay rich.
+
+      - integration: cli-help spawn loop passes for all 7 new RICH_LEAF_HELP rows.
+    decision_refs:
+      - design/decisions/leaf-help-docs-straightening-rfc.md
+    depends_on:
+      - P41-T0
+    reads:
+      - src/cli/usage.ts
+      - src/cli/commands/task.ts
+      - tests/unit/cli/record-done-help-terms.test.ts
+      - tests/integration/cli-help.test.ts
+    writes:
+      - src/cli/usage.ts
+      - tests/unit/cli/task-lifecycle-help-terms.test.ts
+      - tests/integration/cli-help.test.ts
+      - CHANGELOG.md
+    acceptance_refs:
+      - design/phases/P41-leaf-help-docs-straightening.yaml
+  - id: P41-T2
+    type: docs
+    ambiguity: low
+    risk: low
+    context_size: medium
+    write_surface: low
+    verification_strength: strong
+    expected_duration: short
+    status: planned
+    description: >
+      record_only consolidation — link out the 2 concept-duplicates.
+
+
+      Canonical home stays docs/per-task-loop.md. Default target is exactly 2 files
+      (cli-contract, agent-contract) — a per-block role judgment, not a count:
+
+      - docs/cli-contract.md: replace the task record-done section's two-use
+        concept prose with a link to per-task-loop; KEEP the contract-specific
+        flags/exit/envelope content AND the separate lifecycleMode schema decision
+        rule (cli-contract's job, not a duplicate).
+
+      - docs/agent-contract.md: replace the two-uses / lighter-loop-not-lighter-
+        verification concept prose with a link; KEEP the agent-specific facts
+        (decision gate still applies; distinct path from complete) and the
+        conformance-table row anchored on the literal record_only token.
+
+
+      Left as-is (role-appropriate): glossary term def; per-task-loop (canonical);
+      cli-contract schema rule; CLAUDE.md template; brief mentions in
+      troubleshooting/positioning/dogfood/README. No new docs page. No JA edit
+      planned (the 2 edited files are English-only reference contracts) — record a
+      follow-up if a material JA/EN contradiction surfaces, do not expand P41.
+
+      per-task-loop.md stays content-unchanged; if the link target anchor is
+      unclear, a minimal heading/anchor clarification is allowed and MUST then be
+      added to this task's writes. New links use the relative per-task-loop.md
+      anchor form; check:doc-links hard-fails a wrong slug.
+
+
+      Required tests: none new (docs only); the existing record-done help test and
+      check:doc-links cover the surface. pnpm check:docs must pass.
+    decision_refs:
+      - design/decisions/leaf-help-docs-straightening-rfc.md
+    depends_on:
+      - P41-T0
+    reads:
+      - docs/per-task-loop.md
+      - docs/cli-contract.md
+      - docs/agent-contract.md
+      - docs/maintainers/docs-maintenance.md
+    writes:
+      - docs/cli-contract.md
+      - docs/agent-contract.md
+      - CHANGELOG.md
+    acceptance_refs:
+      - design/phases/P41-leaf-help-docs-straightening.yaml
