@@ -510,3 +510,177 @@ verification:
     expect(issues.map((i) => i.file)).toEqual([]);
   });
 });
+
+describe("runLint — ADR_COMMITMENTS_EMPTY (P43)", () => {
+  const ROADMAP = `phases:\n  - id: P1\n    path: design/phases/P1.yaml\n    weight: 10\n`;
+
+  // A lint-clean phase whose single task carries the given extra YAML lines.
+  function phaseDoc(opts: { phaseRequiresDecision?: boolean; taskLines?: string[] }): string {
+    const taskLines = opts.taskLines ?? ["description: Implements the thing"];
+    return `id: P1
+name: P1
+weight: 10
+confidence: medium
+risk: low
+status: planned
+objective: An objective long enough
+${opts.phaseRequiresDecision ? "requires_decision: true\n" : ""}definition_of_done:
+  - DoD that is clearly long enough to read
+verification:
+  commands:
+    - pnpm test
+tasks:
+  - id: P1-T1
+    type: feature
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: planned
+${taskLines.map((l) => `    ${l}`).join("\n")}
+`;
+  }
+
+  async function writeAdr(name: string, content: string): Promise<void> {
+    await mkdir(join(cwd, "design", "decisions"), { recursive: true });
+    await writeFile(join(cwd, "design", "decisions", name), content, "utf8");
+  }
+
+  /** Run with a gated task (filename-scan matches `P1-T1-*.md`) + the given ADR. */
+  async function runGated(adrName: string, adrContent: string, includeQuality = true) {
+    await writeRoadmap(ROADMAP);
+    await writePhase("P1.yaml", phaseDoc({ taskLines: ["description: x", "requires_decision: true"] }));
+    await writeAdr(adrName, adrContent);
+    return runLint({ cwd, ...(includeQuality ? { includeQuality: true } : {}) });
+  }
+
+  function commitmentsIssues(result: Awaited<ReturnType<typeof runLint>>) {
+    return result.issues.filter((i) => i.code === "ADR_COMMITMENTS_EMPTY");
+  }
+
+  it("does NOT fire when the accepted ADR has commitment items", async () => {
+    const result = await runGated(
+      "P1-T1-rfc.md",
+      "**Status:** accepted\n\n## Implementation commitments\n\n- [ ] Do the work\n",
+    );
+    expect(commitmentsIssues(result)).toEqual([]);
+  });
+
+  it("fires when the referenced accepted ADR has NO commitments section", async () => {
+    const result = await runGated("P1-T1-rfc.md", "**Status:** accepted\n\n## Decision\n\nChose X.\n");
+    const issues = commitmentsIssues(result);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.affects_exit).toBe(false);
+    expect(issues[0]?.file).toBe("design/decisions/P1-T1-rfc.md");
+    expect(issues[0]?.task_id).toBe("P1-T1");
+    expect(issues[0]?.details?.has_section).toBe(false);
+  });
+
+  it("fires when the section is present but has zero checkbox items", async () => {
+    const result = await runGated(
+      "P1-T1-rfc.md",
+      "**Status:** accepted\n\n## Implementation commitments\n\nTBD, prose only.\n",
+    );
+    const issues = commitmentsIssues(result);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.details?.has_section).toBe(true);
+    expect(issues[0]?.details?.item_count).toBe(0);
+  });
+
+  it("does NOT fire for a PROPOSED ADR (only accepted is in scope)", async () => {
+    const result = await runGated("P1-T1-rfc.md", "**Status:** proposed\n\n## Decision\n\nX.\n");
+    expect(commitmentsIssues(result)).toEqual([]);
+  });
+
+  it("does NOT fire for an accepted ADR that no gated task references", async () => {
+    await writeRoadmap(ROADMAP);
+    // Task is NOT requires_decision → the ADR is not gated-task-referenced.
+    await writePhase("P1.yaml", phaseDoc({ taskLines: ["description: x"] }));
+    await writeAdr("P1-T1-rfc.md", "**Status:** accepted\n\n## Decision\n\nX.\n");
+    const result = await runLint({ cwd, includeQuality: true });
+    expect(commitmentsIssues(result)).toEqual([]);
+  });
+
+  it("does not run without --include-quality", async () => {
+    const result = await runGated("P1-T1-rfc.md", "**Status:** accepted\n\n## Decision\n\nX.\n", false);
+    expect(commitmentsIssues(result)).toEqual([]);
+  });
+
+  it("does NOT fire when the only item is a checked no-work statement", async () => {
+    const result = await runGated(
+      "P1-T1-rfc.md",
+      "**Status:** accepted\n\n## Implementation commitments\n\n- [x] No downstream implementation work.\n",
+    );
+    expect(commitmentsIssues(result)).toEqual([]);
+  });
+
+  it("emits exactly one issue when one ADR is referenced by two gated tasks", async () => {
+    await writeRoadmap(ROADMAP);
+    // Two gated tasks both pointing at the same ADR via explicit decision_refs.
+    await writePhase(
+      "P1.yaml",
+      `id: P1
+name: P1
+weight: 10
+confidence: medium
+risk: low
+status: planned
+objective: An objective long enough
+definition_of_done:
+  - DoD that is clearly long enough to read
+verification:
+  commands:
+    - pnpm test
+tasks:
+  - id: P1-T1
+    type: feature
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: planned
+    description: x
+    requires_decision: true
+    decision_refs:
+      - design/decisions/shared-rfc.md
+  - id: P1-T2
+    type: feature
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: planned
+    description: y
+    requires_decision: true
+    decision_refs:
+      - design/decisions/shared-rfc.md
+`,
+    );
+    await writeAdr("shared-rfc.md", "**Status:** accepted\n\n## Decision\n\nX.\n");
+    const issues = commitmentsIssues(await runLint({ cwd, includeQuality: true }));
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.file).toBe("design/decisions/shared-rfc.md");
+  });
+
+  it("fires for a phase-level requires_decision task", async () => {
+    await writeRoadmap(ROADMAP);
+    await writePhase("P1.yaml", phaseDoc({ phaseRequiresDecision: true, taskLines: ["description: x"] }));
+    await writeAdr("P1-T1-rfc.md", "**Status:** accepted\n\n## Decision\n\nX.\n");
+    const issues = commitmentsIssues(await runLint({ cwd, includeQuality: true }));
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.task_id).toBe("P1-T1");
+  });
+
+  it("never changes the exit code (affects_exit:false), even under --strict", async () => {
+    const result = await runGated("P1-T1-rfc.md", "**Status:** accepted\n\n## Decision\n\nX.\n");
+    const issue = commitmentsIssues(result)[0];
+    expect(issue).toBeDefined();
+    expect(issue?.affects_exit).toBe(false);
+  });
+});
