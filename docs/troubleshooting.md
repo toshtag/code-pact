@@ -22,6 +22,7 @@ When a command surfaces one of the diagnostic codes below, this page maps it to 
 | [`CONTROL_PLANE_BRANCH_NOT_DRIVEN`](#control_plane_branch_not_driven-from-doctor--validate---base-ref-v126) | A PR branch changed real code but never drove the loop | Drive a task (or `record-done`) and commit `progress.yaml`, or exempt the path |
 | [`ADR_ACCEPTED_BODY_THIN`](#adr_accepted_body_thin-from-plan-lint---include-quality-v126) | An accepted ADR's body is an empty stub | Add the decision + rationale, or revert status to `proposed` |
 | [`ADR_COMMITMENTS_EMPTY`](#adr_commitments_empty-from-plan-lint---include-quality-v127) | An accepted gating ADR records no implementation commitments | Add a `## Implementation commitments` checkbox list (warning only — never blocks) |
+| [`PHASE_DOCS_WRITE_NO_DOC_CHECK`](#phase_docs_write_no_doc_check-from-plan-lint---include-quality-v127) | A not-done phase writes public docs but runs no doc check | Add `pnpm check:docs` to the phase's verification.commands (warning only) |
 
 ## `MANIFEST_NOT_FOUND` from `adapter upgrade --check` / `--write`
 
@@ -301,7 +302,7 @@ Recovery: add the decision and its rationale to the ADR body, or — if it isn't
 
 An **accepted** ADR that **resolves** a `requires_decision` task's [decision gate](concepts/decision-gate.md) records no implementation commitments — it has no `## Implementation commitments` section, or the section is present but has zero GFM checkbox items (`- [ ]`, `- [x]`, `* [ ]`, `* [x]` — checked **and** unchecked all count toward `item_count`). The decision is settled, but the downstream work it implies is unrecorded. (Only a gate that actually resolves is in scope: a partially-accepted explicit `decision_refs` set is unresolved and surfaces `TASK_DECISION_UNRESOLVED` instead.)
 
-This is a **warning, not a blocker**: `affects_exit: false`, so it never changes the exit code, **including under `--strict`**. It is scoped to accepted ADRs that a gated task actually references, so historical ADRs no task points at never fire.
+This is a **warning, not a blocker**: `affects_exit: false`, so it never changes the exit code, **including under `--strict`**. It is scoped to accepted ADRs that **resolve** a gated task's gate, so unreferenced ADRs and unresolved (partially-accepted) gates never fire.
 
 ```sh
 code-pact plan lint --include-quality --json
@@ -313,3 +314,19 @@ code-pact plan lint --include-quality --json
 ```
 
 Recovery: add a `## Implementation commitments` checkbox list to the accepted ADR — the concrete downstream work the decision implies (`- [ ]` for work to do, `- [x]` for work already satisfied). If the decision genuinely implies no downstream work, record that explicitly as a checked item: `- [x] No downstream implementation work.` — use this **only when there truly is none**, not merely to silence the advisory (the point of recording commitments is to make the consequences deliberate).
+
+## `PHASE_DOCS_WRITE_NO_DOC_CHECK` from `plan lint --include-quality` (v1.27+)
+
+A **not-yet-`done`** phase has a task whose `writes` includes a public doc that `pnpm check:docs` guards (a `docs/**` file or a root-level public `.md`), but the phase's `verification.commands` run no doc check. The phase will edit public docs without verifying them — the docs-drift class P43 exists to stop.
+
+This is a **warning, not a blocker**: `affects_exit: false`. CHANGELOG.md is excluded (it is not scanned by `check:docs`), `design/**` is excluded (validated by `validate` / `plan lint`), and `done` phases are never flagged (it is a forward-looking guard — a frozen phase can't be changed).
+
+```sh
+code-pact plan lint --include-quality --json
+# → issues[] entry with code PHASE_DOCS_WRITE_NO_DOC_CHECK
+# file              — the phase YAML path
+# phase_id / task_id — the phase and the task whose writes triggered it
+# details.doc_write — the offending public-doc write target
+```
+
+Recovery: add a doc check (`pnpm check:docs`, or `check:doc-links` / `check:doc-invariants`) to the phase's `verification.commands` so the doc edits are verified; or, if the declared doc write is stale, remove it from the task's `writes`.

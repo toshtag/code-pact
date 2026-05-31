@@ -29,7 +29,10 @@ objective: |
     - Advisory: plan lint gains ADR_COMMITMENTS_EMPTY (affects_exit false, even
       under --strict) — an ACCEPTED ADR that resolves a requires_decision task's
       gate has no commitments section, or one with zero checkbox items. Scoped to
-      accepted ADRs referenced by a gated task, so historical ADRs never warn.
+      accepted ADRs that RESOLVE a gated task's gate, so historical/unreferenced
+      ADRs and partially-accepted (unresolved) decision_refs never warn. T2 also
+      adds PHASE_DOCS_WRITE_NO_DOC_CHECK, a forward-looking docs-drift guard for a
+      not-done phase that writes public docs with no doc check in verification.
 
   This reuses existing machinery: ADR status/acceptance parsing and the shared
   decision resolver in src/core/decisions/adr.ts, the task prepare envelope, and
@@ -88,22 +91,32 @@ definition_of_done:
     with empty items when the section is absent, hasSection true with empty items
     when the section is present but has zero checkbox items, and ignores
     non-checkbox prose; covered by characterization tests
-  - task prepare on a requires_decision task whose gate is resolved by an
-    accepted ADR includes an additive decision_commitments array (per-ADR entries
-    with adr + has_section + items, in considered[] order); for a gated task with
-    no accepted ADR it is an empty array; the field is omitted for non-gated
-    tasks; existing prepare fields are unchanged and task prepare never fails on
-    an unresolved gate
+  - task prepare on a requires_decision task surfaces an additive
+    decision_commitments array of the accepted CONSIDERED ADRs (per-ADR entries
+    with adr + has_section + items, in considered[] order); it is an empty array
+    only when the resolver found no accepted ADR entries (an unresolved explicit
+    decision_refs gate may still surface its accepted refs — task prepare is
+    advisory context, not gate enforcement, and never fails); the field is
+    omitted for non-gated tasks; existing prepare fields are unchanged
   - plan lint emits ADR_COMMITMENTS_EMPTY (severity warning, affects_exit false)
-    for an ACCEPTED ADR that resolves a requires_decision task and has no
+    for an ACCEPTED ADR that RESOLVES a requires_decision task's gate and has no
     commitments section or an empty one; a proposed/draft ADR never triggers it;
-    an accepted ADR no gated task references never triggers it; the advisory never
-    changes the exit code, even under --strict
+    an accepted ADR no gated task references never triggers it; an accepted ref
+    inside an unresolved decision_refs set (gate not resolved) never triggers it;
+    the advisory never changes the exit code, even under --strict
+  - plan lint emits PHASE_DOCS_WRITE_NO_DOC_CHECK (severity warning, affects_exit
+    false) for a not-done phase whose task writes a public doc (docs/** or a
+    root-level .md, excluding CHANGELOG.md and design/**) while its verification
+    runs no doc check; done phases are never flagged (forward-looking guard)
   - ADR_COMMITMENTS_EMPTY sets file to the ADR path and omits path (matching the
     existing ADR-centric advisories — the subject is ADR content, not a plan-YAML
     field); details carries has_section and item_count
-  - ADR_COMMITMENTS_EMPTY is registered in KNOWN_CODES + the plan diagnostic
-    codes table in docs/cli-contract.md, pinned by error-code-surface.test.ts
+  - PHASE_DOCS_WRITE_NO_DOC_CHECK sets file to the phase YAML path and path to
+    verification.commands (a plan-YAML field, unlike the ADR-content advisories),
+    names the offending task via task_id/phase_id, and details carries doc_write
+  - both ADR_COMMITMENTS_EMPTY and PHASE_DOCS_WRITE_NO_DOC_CHECK are registered in
+    KNOWN_CODES + the plan diagnostic codes table in docs/cli-contract.md, pinned
+    by error-code-surface.test.ts
   - the docs in the RFC Documentation contract checklist are updated (cli-contract,
     agent-contract, decision-gate for T1; cli-contract, troubleshooting,
     decision-gate for T2), including the done-checkbox semantics, the no-work
@@ -178,14 +191,15 @@ tasks:
         (isDecisionRequiredForTask), call resolveDecisionGate and for each
         accepted considered[] entry re-read the ADR by path and parseAdrCommitments
         it; attach an additive decision_commitments array (adr + has_section +
-        items) in considered[] order. Present as empty for a gated task with no
-        accepted ADR; omitted for non-gated tasks. Kept off the early-return paths
-        so the progress-read-only invariant holds. task prepare never fails on an
-        unresolved gate.
+        items) in considered[] order. It is empty only when the resolver found no
+        accepted ADR entries (an unresolved explicit decision_refs gate may still
+        surface its accepted refs — prepare is advisory context, not enforcement);
+        omitted for non-gated tasks. Kept off the early-return paths so the
+        progress-read-only invariant holds. task prepare never fails on the gate.
 
       - Update docs per the RFC checklist: docs/cli-contract.md (the task prepare
-        envelope + decision_commitments shape, gated-only presence, empty-array
-        unresolved case, done semantics, considered[] order note),
+        envelope + decision_commitments shape, gated-only presence, the
+        []-when-no-accepted-entries case, done semantics, considered[] order note),
         docs/agent-contract.md (task prepare reads decision_commitments as advisory
         context, not a gate), docs/concepts/decision-gate.md (the
         "## Implementation commitments" section in the ADR shape, done semantics,
@@ -240,38 +254,48 @@ tasks:
       - In src/core/plan/lint.ts: add detectAdrCommitmentsEmpty(cwd, phases) beside
         the P31/P36 ADR advisories, wired into the runLint quality block under
         includeQuality only. Using makeDecisionResolver, for each requires_decision
-        task (task- or phase-level) resolve and collect accepted considered[].path
-        into a map keyed by ADR path (first referencing task wins -> one issue per
-        ADR). For each unique accepted+referenced ADR, read it, parseAdrCommitments,
-        and if not hasSection or zero items push ADR_COMMITMENTS_EMPTY (severity
-        warning, affects_exit false, file = ADR path, task_id, phase_id, details
+        task (task- or phase-level) resolve the gate; SKIP the task unless the gate
+        resolves (if not res.resolved continue). For a resolved gate, collect
+        accepted considered[].path into a map keyed by ADR path (first task wins ->
+        one issue per ADR). For each, read it, parseAdrCommitments, and if not
+        hasSection or zero items push ADR_COMMITMENTS_EMPTY (severity warning,
+        affects_exit false, file = ADR path, task_id, phase_id, details
         has_section + item_count; path omitted, matching the existing ADR-centric
-        advisories). Only accepted ADRs; only those referenced by a gated task.
+        advisories). Scope: accepted ADRs that RESOLVE a gated task's gate.
 
-      - Register ADR_COMMITMENTS_EMPTY in KNOWN_CODES (category plan) and the plan
-        diagnostic codes table in docs/cli-contract.md so the error-code-surface
-        scan pins it.
+      - Also add detectPhaseDocsWriteNoDocCheck(phases): emit
+        PHASE_DOCS_WRITE_NO_DOC_CHECK (warning, affects_exit false) for a not-done
+        phase whose task writes a public doc check:docs guards (docs/** or a
+        root-level .md; CHANGELOG.md and design/** excluded) while verification
+        runs no doc check. Forward-looking docs-drift guard; done phases never fire.
 
-      - Update docs per the RFC checklist: docs/cli-contract.md (the advisory row:
-        advisory-only incl. under --strict, file = ADR, no path,
-        details.has_section/item_count), docs/troubleshooting.md (warning not
-        blocker; fix; the no-work anti-abuse note), docs/concepts/decision-gate.md
-        (advisory scope: accepted + gated-task-referenced only).
+      - Register ADR_COMMITMENTS_EMPTY and PHASE_DOCS_WRITE_NO_DOC_CHECK in
+        KNOWN_CODES (category plan) and the plan diagnostic codes table in
+        docs/cli-contract.md so the error-code-surface scan pins them.
+
+      - Update docs per the RFC checklist: docs/cli-contract.md (both advisory rows
+        + the --include-quality bullets), docs/troubleshooting.md (ADR_COMMITMENTS_EMPTY
+        recovery + the no-work anti-abuse note), docs/concepts/decision-gate.md
+        (advisory scope: accepted ADRs that resolve a gated task's gate).
 
 
       Required tests (unit):
 
-      - referenced accepted ADR WITH items -> no advisory.
+      - accepted ADR (resolved gate) WITH items -> no advisory.
 
-      - referenced accepted ADR with NO section -> advisory, affects_exit false,
-        details.has_section false.
+      - accepted ADR (resolved gate) with NO section -> advisory, affects_exit
+        false, details.has_section false.
 
-      - referenced accepted ADR with an EMPTY section -> advisory,
+      - accepted ADR (resolved gate) with an EMPTY section -> advisory,
         details.has_section true, item_count 0.
 
-      - referenced PROPOSED ADR -> no advisory (only accepted is in scope).
+      - PROPOSED ADR -> no advisory (only accepted is in scope).
+
+      - partially-accepted explicit decision_refs (gate unresolved) -> no advisory.
 
       - accepted ADR NOT referenced by any gated task -> no advisory (scope guard).
+
+      - issue omits the path field.
 
       - silent without --include-quality.
 
@@ -280,6 +304,13 @@ tasks:
       - one ADR referenced by two gated tasks -> exactly one advisory.
 
       - phase-level requires_decision -> advisory fires for a task under it.
+
+      - integration: ADR_COMMITMENTS_EMPTY present under --include-quality --strict
+        yet exit stays 0 (advisory, not a gate).
+
+      - PHASE_DOCS_WRITE_NO_DOC_CHECK: fires for a not-done docs-writing phase with
+        no doc check; silent with check:docs, for CHANGELOG.md, for design/ writes,
+        for a done phase, and without --include-quality.
     decision_refs:
       - design/decisions/adr-downstream-commitments-rfc.md
     depends_on:
@@ -292,6 +323,7 @@ tasks:
       - src/core/plan/lint.ts
       - tests/unit/error-code-surface.test.ts
       - tests/unit/core/plan/lint.test.ts
+      - tests/integration/plan-lint.test.ts
       - docs/cli-contract.md
       - docs/troubleshooting.md
       - docs/concepts/decision-gate.md

@@ -78,7 +78,7 @@ surfaces it earlier as advisories.
 | `verify` (standalone) | a failed `decision` check in `data.checks` (note: NOT `data.verify.checks`, which is the `task complete` path) | At completion time, when the gate can't resolve an accepted ADR | **Yes** (exit non-zero) |
 | `plan lint --include-quality` | `TASK_DECISION_UNRESOLVED` | A `requires_decision` task whose gate doesn't resolve (no ADR, or one that is proposed/empty/etc.) | No (advisory) |
 | `plan lint --include-quality` | `ADR_STATUS_UNRECOGNIZED` | An ADR whose explicit status word is a typo | No (advisory) — surfaces *why* the gate won't resolve |
-| `plan lint --include-quality` | [`ADR_COMMITMENTS_EMPTY`](../troubleshooting.md#adr_commitments_empty-from-plan-lint---include-quality-v127) (v1.27+, P43) | An accepted, gated-task-referenced ADR with no/empty `## Implementation commitments` | No (advisory) — historical ADRs no task references never fire |
+| `plan lint --include-quality` | [`ADR_COMMITMENTS_EMPTY`](../troubleshooting.md#adr_commitments_empty-from-plan-lint---include-quality-v127) (v1.27+, P43) | An accepted ADR that **resolves** a gated task's gate, with no/empty `## Implementation commitments` | No (advisory) — unreferenced ADRs and unresolved (partially-accepted) gates never fire |
 | `task prepare` | `decision_commitments` (v1.27+, P43) | A `requires_decision` task — echoes each accepted ADR's parsed `## Implementation commitments` | No (advisory context, not a gate) |
 
 ## Recommended flow
