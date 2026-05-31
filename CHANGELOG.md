@@ -13,6 +13,14 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+### ADR downstream commitments (P43)
+
+Make the proven ADR→downstream effect first-class: an accepted ADR may record the concrete work its decision implies, and `task prepare` surfaces it. Deterministic and advisory-only — no new gate, no LLM summary. Design in `design/decisions/adr-downstream-commitments-rfc.md`.
+
+**Added**
+
+- **P43-T1 — `## Implementation commitments` parsing + `decision_commitments` on `task prepare`.** An accepted ADR may carry a `## Implementation commitments` section (a GFM checkbox list). `parseAdrCommitments` (in `src/core/decisions/adr.ts`) extracts its items deterministically — checkbox extraction under the fixed heading, no summarization — returning `{ hasSection, items: { text, done }[] }` (`hasSection` distinguishes "no section" from "present but empty"). `task prepare` now resolves the decision gate for a `requires_decision` task (read-only — the progress-read-only invariant holds) and adds an additive `decision_commitments` field: one entry per **accepted** ADR the gate considered, each with `adr` / `has_section` / `items`, in the resolver's `considered[]` order (no priority/chronological meaning). The field is present (possibly `[]`) only for gated tasks and omitted otherwise; an unresolved gate yields `[]` — `task prepare` does not fail, adds no decision-error surface, and does not duplicate the `verify` / `task complete` gate enforcement. `done` semantics: unchecked = downstream work to do; checked = already satisfied or an explicit non-work statement. Documented in `docs/cli-contract.md` (the `task prepare` envelope), `docs/agent-contract.md` (read it as advisory context, not a gate), and `docs/concepts/decision-gate.md` (the ADR section + `done` semantics + the no-work anti-abuse note).
+
 ### Self-describing adapter skill names + orphan prune on upgrade
 
 Dogfooding the Claude Code adapter surfaced two related defects in how

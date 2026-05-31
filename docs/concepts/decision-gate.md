@@ -33,6 +33,21 @@ The status word governs the gate:
 | explicit unknown word (e.g. a typo `acceptd`) | does **not** resolve (surfaced as [`ADR_STATUS_UNRECOGNIZED`](../troubleshooting.md#adr_status_unrecognized-from-plan-lint---include-quality-v124)) |
 | **no status line** (non-empty body) | resolves as accepted — the only lenient case, kept so projects that predate status-aware parsing (v1.22) are not broken on upgrade |
 
+### Implementation commitments (v1.27+, P43)
+
+An accepted ADR may carry an optional `## Implementation commitments` section: a GitHub-flavored checkbox list of the concrete downstream work the decision implies.
+
+```md
+## Implementation commitments
+
+- [ ] Migrate call sites of foo() to bar()
+- [x] Update docs/cli-contract.md
+```
+
+`done` semantics: an **unchecked** item (`- [ ]`) is downstream work still to implement; a **checked** item (`- [x]`) is work already satisfied, or an explicit non-work statement (`- [x] No downstream implementation work.`). Use the no-work item **only when the ADR genuinely has no implementation consequences — not merely to silence the `ADR_COMMITMENTS_EMPTY` advisory** (the point of recording commitments is to make the downstream consequences deliberate).
+
+`task prepare` echoes these for a gated task as `decision_commitments` (parsed deterministically — checkbox extraction under the fixed heading, no summarization). It is advisory context, not a gate.
+
 ## How a task is matched to an ADR
 
 Two resolution paths, by whether the task declares [`decision_refs`](task-readiness-fields.md#decision_refs):
@@ -63,6 +78,7 @@ surfaces it earlier as advisories.
 | `verify` (standalone) | a failed `decision` check in `data.checks` (note: NOT `data.verify.checks`, which is the `task complete` path) | At completion time, when the gate can't resolve an accepted ADR | **Yes** (exit non-zero) |
 | `plan lint --include-quality` | `TASK_DECISION_UNRESOLVED` | A `requires_decision` task whose gate doesn't resolve (no ADR, or one that is proposed/empty/etc.) | No (advisory) |
 | `plan lint --include-quality` | `ADR_STATUS_UNRECOGNIZED` | An ADR whose explicit status word is a typo | No (advisory) — surfaces *why* the gate won't resolve |
+| `task prepare` | `decision_commitments` (v1.27+, P43) | A `requires_decision` task — echoes each accepted ADR's parsed `## Implementation commitments` | No (advisory context, not a gate) |
 
 ## Recommended flow
 
