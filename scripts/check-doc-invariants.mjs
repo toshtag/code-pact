@@ -119,6 +119,31 @@ for (const rel of ["docs/getting-started.md", "docs/ja/getting-started.md"]) {
   }
 }
 
+// 8. Contract↔code invariant for the JSON error envelope (the P39 class).
+//    If src/ emits `error.cause_code` (an ADDITIVE error field beyond
+//    code/message), then docs/cli-contract.md's "JSON output shape" section
+//    MUST tell consumers the error object can carry additive fields — otherwise
+//    a reader of that section alone concludes `error` is only {code, message}
+//    and writes a brittle parser. This caught itself: the shape section
+//    documented only {code, message} for several releases after cause_code
+//    shipped. The check derives the obligation from code (does src emit
+//    cause_code?), so it can't go stale relative to the implementation.
+{
+  const emitsCauseCode = /\bcause_code\s*:/.test(read("src/cli/commands/task.ts"));
+  if (emitsCauseCode) {
+    const contract = read("docs/cli-contract.md");
+    // Locate the "## JSON output shape" section body (up to the next "## ").
+    const m = contract.match(/##\s+JSON output shape\b([\s\S]*?)(?=\n##\s)/);
+    const section = m ? m[1] : "";
+    if (!/error\.cause_code/.test(section) || !/additive/i.test(section)) {
+      fail(
+        "docs/cli-contract.md",
+        'src emits `error.cause_code` but the "JSON output shape" section does not describe additive `error` fields (must mention `error.cause_code` and that `error` carries additive fields) — a reader of that section alone would assume `error` is only {code, message}',
+      );
+    }
+  }
+}
+
 if (problems.length > 0) {
   console.error(`check-doc-invariants: ${problems.length} issue(s):`);
   for (const p of problems) console.error(`  - ${p}`);
