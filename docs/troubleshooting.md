@@ -73,7 +73,7 @@ code-pact verify --phase <phase-id> --task <task-id>
 # after fixing the underlying issue.
 ```
 
-**v1.26+ (P32) `data` detail.** The same envelope (and the `task finalize` failure envelopes) also carry `failed_checks`, `first_failure: { name, reason }`, and `suggested_next_command` under `data`, alongside the unchanged `data.verify.checks`. Human (non-`--json`) output leads with the actionable cause headline (the `cause_code` message above — no longer a generic line) and prints `cause:` and `rerun after fixing:` lines below it. `suggested_next_command` is the command to rerun **after fixing** `first_failure` — not a hint that re-running unchanged will pass.
+**v1.26+ (P32) `data` detail.** The `task complete` failure envelope carries `failed_checks`, `first_failure: { name, reason }`, and `suggested_next_command` under `data`, alongside `data.verify.checks`. The same three P32 summary fields also appear on the `task finalize` failure envelopes (`TASK_FINALIZE_NOT_ELIGIBLE`, `TASK_FINALIZE_WRITE_REFUSED`, `WRITES_AUDIT_STRICT_FAILED`) — but `finalize` does **not** run verify, so there is no `data.verify.checks` there; the summary sits alongside the finalize-specific `data` instead (e.g. `data.write_audit` on `WRITES_AUDIT_STRICT_FAILED`, `data.current` / `data.phase_id` on `TASK_FINALIZE_NOT_ELIGIBLE`). Human (non-`--json`) output leads with the actionable cause headline (the `cause_code` message above — no longer a generic line) and prints `cause:` and `rerun after fixing:` lines below it. `suggested_next_command` is the command to rerun **after fixing** `first_failure` — not a hint that re-running unchanged will pass.
 
 ## `TASK_FINALIZE_NOT_ELIGIBLE` from `task finalize` (v1.2+)
 

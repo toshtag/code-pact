@@ -187,7 +187,6 @@ tasks:
       - src/i18n/ja-JP.ts
       - tests/integration/completion-cause-code.test.ts
       - tests/integration/cli.test.ts
-      - tests/integration/e2e-workflow.test.ts
       - tests/unit/error-code-surface.test.ts
       - docs/cli-contract.md
       - CHANGELOG.md
