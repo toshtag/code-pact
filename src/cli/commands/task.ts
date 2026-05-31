@@ -672,6 +672,7 @@ async function cmdTaskPrepare(
       lines.push(`  verify:   ${result.commands.verify}`);
       lines.push(`  complete: ${result.commands.complete}`);
       lines.push(`  finalize: ${result.commands.finalize}`);
+      lines.push(`  record-done: ${result.commands["record-done"]}`);
       process.stdout.write(`${lines.join("\n")}\n`);
     }
     return 0;
