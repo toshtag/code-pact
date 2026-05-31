@@ -29,11 +29,15 @@ const srcRoot = join(repoRoot, "src");
 // contract category. The category determines how they appear in
 // docs/cli-contract.md.
 //
-// - "public":       Top-level error envelope codes returned to agents and
-//                   CI as the primary failure signal. Stable surface.
-//                   ADAPTER_MISSING lives here for v0.8 back-compat reasons
-//                   (legacy global doctor still emits it on projects without
-//                   a manifest).
+// - "public":       Stable agent-facing codes. This covers BOTH top-level
+//                   `error.code` envelope values (the primary failure signal
+//                   for agents and CI) AND documented `error.cause_code`
+//                   values (v1.27+ / P39 — e.g. `COMMANDS_FAILED` and the
+//                   cause-code use of `DECISION_REQUIRED`, which appear under
+//                   a broad `VERIFICATION_FAILED` envelope on `task complete`,
+//                   not as top-level codes). A single category keeps the scan
+//                   simple; docs/cli-contract.md splits them into the
+//                   "Public codes" and "Public cause codes" tables.
 // - "plan":         Plan integrity diagnostics emitted by plan lint /
 //                   plan normalize / plan analyze. Issue-level codes carry
 //                   severity error|warning.
