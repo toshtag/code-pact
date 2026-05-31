@@ -1814,7 +1814,7 @@ The `agent` field on `ProgressEvent` is optional for backward compatibility with
 `code-pact task record-done <task-id> --evidence "<text>" [--notes "<text>"] [--agent <name>] [--json] [--dry-run]` records a `done` event **without** running the loop's verification commands — the proof is the `--evidence` you supply, and it records `source: "external"`. Two uses:
 
 - **External completion** — already-merged work, or changes that cannot be verified from the current working tree.
-- **The `record_only` lane (v1.26+)** — when `task prepare` recommends `lifecycleMode: record_only` (a small, low-risk, strongly-verified docs/test task), you run the project's verification **yourself** and record the result here. `record_only` is a lighter *loop*, **not** lighter verification.
+- **The `record_only` lane (v1.26+)** — a small, low-risk, strongly-verified docs/test task where `task prepare` recommends `lifecycleMode: record_only`; you run the project's verification yourself, then record the result here. See [`per-task-loop.md` § Recording a done without task complete](per-task-loop.md#recording-a-done-without-task-complete) for the lifecycle explanation (it is a lighter *loop*, not lighter verification).
 
 It is a distinct path from the loop's `task complete`, not a way to skip verification:
 
