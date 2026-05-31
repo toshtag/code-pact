@@ -6,6 +6,11 @@ import {
   type RecommendResult,
 } from "../core/recommend/index.ts";
 import { buildContextPack, writeContextPack } from "../core/pack/index.ts";
+import {
+  isDecisionRequiredForTask,
+  resolveDecisionGate,
+  parseAdrCommitments,
+} from "../core/decisions/adr.ts";
 import { resolveTaskInRoadmap } from "../core/plan/resolve-task.ts";
 import { loadProgressLog } from "../core/progress/io.ts";
 import {
@@ -71,6 +76,19 @@ export type TaskPrepareResult = {
   blocked_by: string[];
   /** Present (true) only when current_state is "done". */
   already_done?: boolean;
+  /**
+   * P43 — parsed `## Implementation commitments` of each ACCEPTED ADR that the
+   * decision gate considered for this task. Present (possibly `[]`) only for a
+   * `requires_decision` task; omitted entirely otherwise. Empty when the gate is
+   * unresolved (no accepted ADR) or the accepted ADRs carry no commitments.
+   * Additive (P39); advisory context, never a gate. Entries follow the resolver's
+   * `considered[]` order — no chronological/priority/dependency meaning.
+   */
+  decision_commitments?: {
+    adr: string;
+    has_section: boolean;
+    items: { text: string; done: boolean }[];
+  }[];
 };
 
 // ---------------------------------------------------------------------------
@@ -279,6 +297,37 @@ export async function runTaskPrepare(
     decisionContext: { phaseRequiresDecision: phase.requires_decision === true },
   });
 
+  // 8b. P43 — decision commitments. For a requires_decision task, resolve the
+  // gate (read-only — preserves the progress-read-only invariant) and surface
+  // the parsed `## Implementation commitments` of each ACCEPTED ADR considered,
+  // in considered[] order. Present (possibly []) only for gated tasks; an
+  // unresolved gate yields []. This does NOT enforce the gate — task complete /
+  // verify own that — it only surfaces the commitments as implementation context.
+  let decisionCommitments:
+    | { adr: string; has_section: boolean; items: { text: string; done: boolean }[] }[]
+    | undefined;
+  if (isDecisionRequiredForTask(phase, task)) {
+    const resolution = await resolveDecisionGate(cwd, taskId, task.decision_refs);
+    decisionCommitments = [];
+    for (const considered of resolution.considered) {
+      if (!considered.accepted) continue;
+      // The gate already classified this accepted ADR by reading it; re-read to
+      // parse commitments. If it vanished in between (a TOCTOU race), skip it
+      // rather than failing the whole prepare — commitments are advisory context,
+      // and the gate's accepted verdict already stands. `considered.path` is the
+      // gate's repo-root-relative, safety-checked path (an unsafe path is never
+      // `accepted`), so this read cannot escape the project root.
+      let adrContent: string;
+      try {
+        adrContent = await readFile(join(cwd, considered.path), "utf8");
+      } catch {
+        continue;
+      }
+      const { hasSection, items } = parseAdrCommitments(adrContent);
+      decisionCommitments.push({ adr: considered.path, has_section: hasSection, items });
+    }
+  }
+
   // 9. Context pack — build always, write unless dry-run.
   const pack = await buildContextPack({
     cwd,
@@ -322,6 +371,10 @@ export async function runTaskPrepare(
 
   if (wouldWritePath !== undefined) {
     result.would_write_context_pack_path = wouldWritePath;
+  }
+
+  if (decisionCommitments !== undefined) {
+    result.decision_commitments = decisionCommitments;
   }
 
   return result;
