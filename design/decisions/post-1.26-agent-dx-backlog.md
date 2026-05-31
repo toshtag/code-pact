@@ -22,8 +22,8 @@ out below as a re-scope to settle in the phase's RFC.
 
 ## Sequence (differentiation-first)
 
-~~P39~~ → ~~P43~~ → ~~P41~~ → ~~P40~~ → **P42 → P44** (P39, P43, P41, and P40
-shipped; remaining sequence is P42 → P44). Rationale: after P39 closed the largest
+~~P39~~ → ~~P43~~ → ~~P41~~ → ~~P40~~ → ~~P42~~ → **P44** (P39, P43, P41, P40, and
+P42 shipped; remaining is P44). Rationale: after P39 closed the largest
 current pain, we led with the one capability the feedback empirically validated
 (P43 — shipped), banked the cheap trust fill (P41 — shipped), then took the first
 contract-shape decision (P40 — shipped, the most bloat-prone, done conservatively
@@ -86,19 +86,27 @@ risk, whereas P43 strengthened a proven win.
   Final: **no command filtering, no ordered array, no `recommended_flow`, no new
   `next_action.type`** — only one additive `commands` key + a mode-aware
   `next_action.message`.
-- **Remaining sequence.** P42 → P44.
+- **Remaining sequence.** P44.
 
-## P42 — project-side version pinning (re-scope to docs-first)
+## P42 — project-side version pinning — **shipped (docs-first; no new mechanism)**
 
-- **Re-scope (settle in RFC).** The feedback itself says this is the
-  *consumer's* responsibility (pin the `devDependency`; stop following
-  `npx code-pact@latest`). A `.code-pact/code-pact.version` file + a
-  `CODE_PACT_VERSION_MISMATCH` diagnostic is self-referential: it cannot
-  guarantee the *running* CLI matches, and it drifts silently in exactly the
-  case it is meant to catch (an unpinned consumer). Lead with docs — drop
-  `npx @latest` as the default recommendation, document `devDependency` pin + CI
-  using the pinned binary — and consider only a lightweight `validate` advisory.
-  The full `.version` mechanism is lower priority and may not be built.
+- **Outcome.** Closed as a docs-first phase, not a build phase
+  (RFC: `design/decisions/version-pinning-guidance-rfc.md`, accepted). An audit
+  found the CI side already covered (`docs/cli-contract.md` pins the binary and
+  says "do NOT track @latest in CI"); the one real gap was the entry point —
+  `docs/getting-started.md` offered only global-install / `npx` with no
+  `devDependency` pin path. P42 added that one Install block (pin as a
+  `devDependency`, recommended for teams/CI; global/`npx` kept for one-off use),
+  which also resolves the mild incoherence between the entry point and the CI
+  requirement. Single-file docs change.
+- **Rejected (explicit non-goal).** The `.code-pact/code-pact.version` file +
+  `CODE_PACT_VERSION_MISMATCH` diagnostic — self-referential (a committed version
+  file cannot constrain the *running* CLI, and drifts silently in exactly the
+  unpinned-consumer case). The pin belongs in the consumer's `package.json` + CI,
+  not in a code-pact mechanism. Not built, not deferred — closed.
+- **Held scope.** No `docs/ja` mirror sync (known follow-up), no reconcile of the
+  other docs that mention pinning in passing (README / upgrading.md / migration.md)
+  — widening would re-grow the docs surface P39/P41 just trimmed.
 
 ## P44 — CI / adoption kit (docs + template, last)
 
