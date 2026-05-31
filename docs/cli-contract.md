@@ -1552,11 +1552,12 @@ The command MUST NOT mutate `.code-pact/state/progress.yaml` on any code path. I
     "dry_run": false,
     "next_action": { "type": "start_task", "message": "..." },
     "commands": {
-      "context":  "code-pact task context  <task-id> --agent <agent>",
-      "start":    "code-pact task start    <task-id> --agent <agent>",
-      "verify":   "code-pact verify --phase <phase> --task <task-id>",
-      "complete": "code-pact task complete <task-id> --agent <agent>",
-      "finalize": "code-pact task finalize <task-id> --write --json"
+      "context":     "code-pact task context  <task-id> --agent <agent>",
+      "start":       "code-pact task start    <task-id> --agent <agent>",
+      "verify":      "code-pact verify --phase <phase> --task <task-id>",
+      "complete":    "code-pact task complete <task-id> --agent <agent>",
+      "finalize":    "code-pact task finalize <task-id> --write --json",
+      "record-done": "code-pact task record-done <task-id> --agent <agent> --evidence \"<verification you ran>\""
     },
     "blocked_by": [],
     "already_done": true,
@@ -1572,6 +1573,7 @@ The command MUST NOT mutate `.code-pact/state/progress.yaml` on any code path. I
 
 - `would_write_context_pack_path` is present only in `--dry-run` mode when a pack would have been written.
 - `already_done` is present (always `true`) only when `current_state === "done"`.
+- `commands` (v1.27+, P40) is a complete, **mode-agnostic lookup table** — all keys are present in every `lifecycleMode`. The key is **exactly `record-done`** (hyphen; read it as `commands["record-done"]`, not `record_done`). It is the one entry **not runnable verbatim**: `--evidence` is agent-supplied, so it is emitted as a template with the `"<verification you ran>"` token. `next_action.message` (not `commands`) is the lifecycle-aware "what next" surface — for a `record_only` task it points at `task record-done` (a lighter loop, not lighter verification); for a `decision_loop` task it says to resolve the gating ADR first (it does **not** decide complete-vs-record-done); for `full_loop` it is the standard start→implement→verify→complete wording. Only the workable states (`start_task` / `continue_implementation`) vary by mode.
 - `decision_commitments` (v1.27+, P43) is present (possibly `[]`) **only for a `requires_decision` task**; it is omitted entirely for non-gated tasks. Each entry is one **accepted** ADR among those the decision gate *considered*, with its parsed `## Implementation commitments` checkbox items (`{ text, done }`) and a `has_section` flag. `has_section: false` means the ADR has no `## Implementation commitments` section; `has_section: true` with `items: []` means the section is present but has no checkbox items. It is **empty (`[]`)** when the resolver found **no accepted ADR entries**. Note: this surfaces *every accepted considered ADR* even if the gate as a whole is unresolved — e.g. with explicit `decision_refs` (all-must-be-accepted), if one ref is accepted and another is proposed, the gate is unresolved but the accepted ref's commitments still surface here, because `task prepare` is advisory implementation context, **not** a gate (it never fails, adds no decision-error surface, and does not duplicate `verify` / `task complete` enforcement). This differs deliberately from the `ADR_COMMITMENTS_EMPTY` lint advisory, which fires only when the gate actually **resolves**. Entries preserve the decision resolver's `considered[]` order — consumers must **not** infer chronological, priority, or dependency semantics from the order. `done` semantics: an unchecked item is downstream work still to implement; a checked item is work already satisfied, or an explicit non-work statement. This is an additive `data` field (the JSON output shape already documents that envelopes carry additive fields).
 
 ### `next_action.type` enum (closed)
