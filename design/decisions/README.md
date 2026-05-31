@@ -36,7 +36,7 @@ the *why* behind the code — the user-facing *how* lives in [`docs/`](../../doc
 | P37 | [Outcome audit — deferred](P37-deferred-outcome-audit.md) | **Deferred.** Recorded why effectiveness-measurement was not built (gameable subjective fields; not reliably derivable from `progress.yaml` today). |
 | P39 | [Root-cause-first completion errors](root-cause-completion-errors-rfc.md) | Add `error.cause_code` + an actionable `error.message` on `task complete` failures (port the `record-done` cause); minimal surface — no error-side duplication of the P32 `data` fields, no new structured block, `finalize` unchanged (it never runs the decision gate). |
 | — | [Beginner-friendly CLI aliases](cli-alias-ux-rfc.md) | Added additive aliases `task next` / `phase next` / `task reconcile` / `plan import` (thin sugar to the canonical handlers). The `dogfood.md` rename stays deferred. |
-| — | [Post-1.26 agent-DX backlog](post-1.26-agent-dx-backlog.md) | **Planning.** Sequencing + re-scope intent for P40-P44. P43 and P41 shipped; remaining sequence P40 → P42 → P44. Each ships with its own RFC at its turn. |
+| — | [Post-1.26 agent-DX backlog](post-1.26-agent-dx-backlog.md) | **Planning.** Sequencing + re-scope intent for P40-P44. P43, P41, and P40 shipped; remaining sequence P42 → P44. Each ships with its own RFC at its turn. |
 
 ## ADR status convention
 

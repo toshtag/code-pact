@@ -22,14 +22,14 @@ out below as a re-scope to settle in the phase's RFC.
 
 ## Sequence (differentiation-first)
 
-~~P39~~ → ~~P43~~ → ~~P41~~ → **P40 → P42 → P44** (P39, P43, and P41 shipped;
-remaining sequence is P40 → P42 → P44). Rationale: after P39 closed the largest
+~~P39~~ → ~~P43~~ → ~~P41~~ → ~~P40~~ → **P42 → P44** (P39, P43, P41, and P40
+shipped; remaining sequence is P42 → P44). Rationale: after P39 closed the largest
 current pain, we led with the one capability the feedback empirically validated
-(P43 — shipped), banked the cheap trust fill (P41 — shipped), and next take the
-contract-shape decisions (P40, P42) deliberately. A pain-first ordering (P40
-before P43) was considered and rejected: P40 is a contract-shape change that
-needs its own ADR and carries a real bloat risk, whereas P43 strengthened a
-proven win.
+(P43 — shipped), banked the cheap trust fill (P41 — shipped), then took the first
+contract-shape decision (P40 — shipped, the most bloat-prone, done conservatively
+via Option C). A pain-first ordering (P40 before P43) was considered and rejected:
+P40 is a contract-shape change that needs its own ADR and carries a real bloat
+risk, whereas P43 strengthened a proven win.
 
 ## P43 — ADR downstream commitments — **shipped**
 
@@ -49,7 +49,7 @@ proven win.
   only, never an LLM free-summary (explicitly rejected). Resolved open questions:
   commitment syntax is a checkbox list under the fixed `## Implementation
   commitments` heading; `task context` does **not** echo commitments (prepare-only).
-- **Follow-on sequence:** remaining backlog is P40 → P42 → P44 (P41 has since shipped).
+- **Follow-on sequence:** remaining backlog is P42 → P44 (P41 and P40 have since shipped).
 
 ## P41 — leaf help + docs straightening — **shipped**
 
@@ -66,20 +66,27 @@ proven win.
 - **Scope held:** `--help` parity was limited to the 7 task verbs (plan/phase/
   adapter stubs deferred); docs were reduced (duplication removed), not grown.
 
-## P40 — task prepare lifecycle-aware (contract decision)
+## P40 — task prepare lifecycle-aware — **shipped**
 
-- **Verified premise.** `task prepare`'s `commands` dict is built once and is
-  identical regardless of `recommendation.lifecycleMode`; `next_action.message`
-  is static per task-state, not mode-aware. So the gap is real.
-- **Re-scope (settle in RFC).** The proposed fix adds a NEW `recommended_flow`
-  structure. That would be a **third** "what next" representation alongside the
-  existing `commands` and `next_action` — ambiguous (which is authoritative?)
-  and contrary to "small surfaces, clear contracts", i.e. it works against the
-  very goal of not making the agent guess. Prefer making the **existing**
-  surfaces mode-aware: filter/order `commands` by `lifecycleMode` and reflect
-  the mode in `next_action.message`. If a `recommended_flow` is still wanted,
-  `next_action` must be derived from it (one source of truth), not added beside
-  it. This is a contract-shape decision → author as a `decision_loop` phase.
+- **Outcome.** Shipped as `design/phases/P40-task-prepare-lifecycle-aware.yaml`
+  (RFC: `design/decisions/task-prepare-lifecycle-aware-rfc.md`), authored as the
+  mandated `decision_loop` phase (P40-T0 `requires_decision`, gated on its RFC).
+  `task prepare` keeps `commands` as a complete, **mode-agnostic lookup table**
+  and adds the additive `commands["record-done"]` template (every mode; the one
+  non-runnable entry — `--evidence` is agent-supplied). `next_action.message`
+  became the **single** lifecycle-aware guidance surface (workable states only):
+  `record_only` points at `task record-done`, `decision_loop` says resolve the
+  gating ADR first (without deciding complete-vs-record-done), `full_loop` keeps
+  the standard wording.
+- **Contract decision — Option C (the bloat-avoiding choice).** The original
+  re-scope considered making the existing surfaces mode-aware by *filtering/
+  ordering* `commands` by `lifecycleMode`. That was **rejected during the RFC**:
+  filtering `commands` is a v1-breaking change, and any ordered-key hint is the
+  same "third what-next representation" the proposed `recommended_flow` would be.
+  Final: **no command filtering, no ordered array, no `recommended_flow`, no new
+  `next_action.type`** — only one additive `commands` key + a mode-aware
+  `next_action.message`.
+- **Remaining sequence.** P42 → P44.
 
 ## P42 — project-side version pinning (re-scope to docs-first)
 
