@@ -237,8 +237,12 @@ The verbs in detail:
   structured `next_action` (`start_task` / `continue_implementation`
   / `wait_for_dependencies` / `noop_already_done` /
   `investigate_failure`), and a `commands` dictionary with every
-  per-task verb pre-formatted. Progress-read-only. Optional
-  `--dry-run` skips the context pack write.
+  per-task verb pre-formatted (including `commands["record-done"]`, a
+  template whose `--evidence` you supply). Progress-read-only. Optional
+  `--dry-run` skips the context pack write. `next_action.message` is
+  **lifecycle-aware** (v1.27+, P40): on a `record_only` task it points at
+  `task record-done`; on a `decision_loop` task it says to resolve the
+  gating ADR first; `commands` itself stays a complete mode-agnostic table.
   For a `requires_decision` task it also returns `decision_commitments`
   (v1.27+, P43): the parsed `## Implementation commitments` of each
   **accepted considered** ADR. Read it as **advisory implementation
