@@ -22,10 +22,10 @@ out below as a re-scope to settle in the phase's RFC.
 
 ## Sequence (differentiation-first)
 
-~~P39~~ → ~~P43~~ → **P41 → P40 → P42 → P44** (P39 and P43 shipped; remaining
-sequence is P41 → P40 → P42 → P44). Rationale: after P39 closed the largest
+~~P39~~ → ~~P43~~ → ~~P41~~ → **P40 → P42 → P44** (P39, P43, and P41 shipped;
+remaining sequence is P40 → P42 → P44). Rationale: after P39 closed the largest
 current pain, we led with the one capability the feedback empirically validated
-(P43 — shipped), and next bank the cheap trust fill (P41), then take the
+(P43 — shipped), banked the cheap trust fill (P41 — shipped), and next take the
 contract-shape decisions (P40, P42) deliberately. A pain-first ordering (P40
 before P43) was considered and rejected: P40 is a contract-shape change that
 needs its own ADR and carries a real bloat risk, whereas P43 strengthened a
@@ -49,20 +49,22 @@ proven win.
   only, never an LLM free-summary (explicitly rejected). Resolved open questions:
   commitment syntax is a checkbox list under the fixed `## Implementation
   commitments` heading; `task context` does **not** echo commitments (prepare-only).
-- **Follow-on sequence:** remaining backlog is P41 → P40 → P42 → P44.
+- **Follow-on sequence:** remaining backlog is P40 → P42 → P44 (P41 has since shipped).
 
-## P41 — leaf help + docs straightening (cheap fill)
+## P41 — leaf help + docs straightening — **shipped**
 
-- **Goal.** Bring every lifecycle verb's leaf `--help` to parity (the feedback
-  flagged `task add --help` as a stub while `task complete --help` is rich), and
-  pin it with a help-coverage test (same mechanism as P38-T3's record-done
-  required-term test). Straighten the duplicated `record_only` explanation across
-  docs into one home and link to it.
-- **Why cheap.** Agents use `--help` as an exploration surface; the test makes
-  coverage mechanical. Low risk, independent of the contract work.
-- **Constraints.** Honor the docs structure (English-primary + `docs/ja` mirror,
-  hub aggregation; do not bloat README). Any new concept page (e.g. a
-  lifecycle-modes page) follows that layout.
+- **Outcome.** Shipped as `design/phases/P41-leaf-help-docs-straightening.yaml`
+  (RFC: `design/decisions/leaf-help-docs-straightening-rfc.md`). The 7 stubbed
+  task lifecycle verbs (`add`, `context`, `start`, `status`, `block`, `resume`,
+  `runbook`) now have rich leaf `--help`, pinned by a unit suite
+  (`task-lifecycle-help-terms.test.ts`, all 11 rich task verbs) and the
+  integration `cli-help` table. The `record_only` lifecycle explanation is
+  consolidated to its canonical home `docs/per-task-loop.md`; `cli-contract.md`
+  and `agent-contract.md` link out for the concept while keeping their
+  role-specific contract/agent facts. No new docs page; aliases (`next`/
+  `reconcile`) intentionally stay stubs (a later task).
+- **Scope held:** `--help` parity was limited to the 7 task verbs (plan/phase/
+  adapter stubs deferred); docs were reduced (duplication removed), not grown.
 
 ## P40 — task prepare lifecycle-aware (contract decision)
 

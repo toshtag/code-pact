@@ -5,7 +5,7 @@ name: Leaf help + docs straightening — bring the 7 stubbed task lifecycle verb
 weight: 4
 confidence: high
 risk: low
-status: planned
+status: done
 objective: |
   Agents use --help as an exploration surface, but only 6 leaf commands have rich
   help; the rest fall back to a 2-line stub (the 1.26.0 feedback flagged
@@ -107,7 +107,7 @@ tasks:
     write_surface: low
     verification_strength: medium
     expected_duration: short
-    status: planned
+    status: done
     description: >
       RFC + phase registration (bootstrap).
 
@@ -139,7 +139,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: medium
-    status: planned
+    status: done
     description: >
       Rich --help for the 7 task verbs + help-coverage tests.
 
@@ -198,7 +198,7 @@ tasks:
     write_surface: low
     verification_strength: strong
     expected_duration: short
-    status: planned
+    status: done
     description: >
       record_only consolidation — link out the 2 concept-duplicates.
 
