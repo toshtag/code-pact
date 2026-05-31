@@ -13,7 +13,7 @@
 // blocks are stripped before scanning) to avoid false positives on legitimate
 // examples.
 
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
@@ -140,6 +140,51 @@ for (const rel of ["docs/getting-started.md", "docs/ja/getting-started.md"]) {
         "docs/cli-contract.md",
         'src emits `error.cause_code` but the "JSON output shape" section does not describe additive `error` fields (must mention `error.cause_code` and that `error` carries additive fields) — a reader of that section alone would assume `error` is only {code, message}',
       );
+    }
+  }
+}
+
+// 9. Control-plane↔CHANGELOG consistency. If CHANGELOG.md claims a phase is done
+//    ("closes P43", "(closes P41)"), that phase's YAML must actually be
+//    `status: done`. This caught itself TWICE (P43 and P41 both shipped with the
+//    phase/task status left `planned` while the CHANGELOG said "closes" — found
+//    only in post-merge review). The check derives the obligation from the
+//    CHANGELOG's own claim, so a future "closes PNN" can no longer ship with a
+//    stale phase status; CI fails before review.
+{
+  const changelog = read("CHANGELOG.md");
+  const claimed = new Set(
+    [...changelog.matchAll(/closes\s+(P\d+)\b/gi)].map((m) => m[1].toUpperCase()),
+  );
+  if (claimed.size > 0) {
+    const phaseDir = "design/phases";
+    const files = readdirSync(resolve(repoRoot, phaseDir)).filter((f) =>
+      f.endsWith(".yaml"),
+    );
+    // Map phase id -> its YAML file (id read from the file, not the name).
+    const byId = new Map();
+    for (const f of files) {
+      const body = read(`${phaseDir}/${f}`);
+      const idMatch = body.match(/^id:\s*(P\d+)\b/m);
+      if (idMatch) byId.set(idMatch[1].toUpperCase(), { file: f, body });
+    }
+    for (const phaseId of claimed) {
+      const entry = byId.get(phaseId);
+      if (!entry) {
+        fail(
+          "CHANGELOG.md",
+          `claims "closes ${phaseId}" but no design/phases/*.yaml has \`id: ${phaseId}\``,
+        );
+        continue;
+      }
+      const statusMatch = entry.body.match(/^status:\s*(\S+)/m);
+      const status = statusMatch ? statusMatch[1] : "(none)";
+      if (status !== "done") {
+        fail(
+          `${phaseDir}/${entry.file}`,
+          `CHANGELOG.md says "closes ${phaseId}" but the phase status is "${status}", not "done" — flip the phase (and its tasks) to done, or drop the "closes" claim`,
+        );
+      }
     }
   }
 }
