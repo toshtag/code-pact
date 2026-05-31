@@ -15,13 +15,19 @@ If you only want a sixty-second overview of what `code-pact` is, read the [READM
 ## Install
 
 ```sh
-# Global install
+# Recommended for teams & CI: pin in your project's devDependencies
+npm install --save-dev code-pact
+npx code-pact --version   # runs the pinned binary
+
+# One-off / individual use: global install
 npm install -g code-pact
 code-pact --version
 
-# Or use without installing
+# Or run without installing
 npx code-pact --version
 ```
+
+For teams and CI, pin code-pact as a `devDependency` so every contributor and every pipeline run uses the same version — code-pact's contract and `state/progress.yaml` semantics evolve across versions, so a floating `@latest` can change behaviour between runs. The global install and `npx` paths are fine for a quick look or individual use; the CLI contract's CI example pins the version explicitly for the same reason.
 
 If you have a project with pinned pre-v1.0 behaviour, `npm install -g code-pact@alpha` still works. New projects should use the default `latest` tag.
 
