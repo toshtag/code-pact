@@ -55,6 +55,13 @@ export type TaskPrepareCommands = {
   verify: string;
   complete: string;
   finalize: string;
+  /**
+   * P40 — additive, always present in every lifecycle mode. The ONE non-runnable
+   * entry: `--evidence` is agent-supplied, so it is a template with an
+   * angle-bracket token, not a ready-to-run string like the others. The key is
+   * exactly `record-done` (hyphen), accessed `commands["record-done"]`.
+   */
+  "record-done": string;
 };
 
 export type TaskPrepareResult = {
@@ -135,15 +142,45 @@ function buildCommands(agent: string, phaseId: string, taskId: string): TaskPrep
     verify: `code-pact verify --phase ${phaseId} --task ${taskId}`,
     complete: `code-pact task complete ${taskId} --agent ${agent}`,
     finalize: `code-pact task finalize ${taskId} --write --json`,
+    // Template, not ready-to-run: `--evidence` is the agent's completion proof.
+    "record-done": `code-pact task record-done ${taskId} --agent ${agent} --evidence "<verification you ran>"`,
   };
 }
 
-function messageFor(actionType: NextActionType): string {
+/**
+ * P40 — the one mode-aware guidance surface. `mode` is consulted ONLY for the two
+ * workable, pre-completion states (`start_task` / `continue_implementation`); the
+ * early-return states pass no mode (recommendation is null there by construction)
+ * and keep their static, mode-agnostic messages. The mode→message wording restates
+ * `lifecycle.ts` / `per-task-loop.md` semantics, inventing nothing. The
+ * `decision_loop` message states only the gate fact + a generic implement/verify
+ * step — it does NOT decide complete-vs-record-done (lifecycle.ts returns
+ * decision_loop whenever requires_decision is true, independent of ADR acceptance,
+ * so the mode never implies the post-gate completion path).
+ */
+function messageFor(
+  actionType: NextActionType,
+  mode?: RecommendResult["lifecycleMode"],
+): string {
   switch (actionType) {
     case "start_task":
-      return "Run task start, then implement, verify, complete.";
+      switch (mode) {
+        case "record_only":
+          return "Run task start, implement, run project verification yourself, then record completion with `task record-done --evidence`. This is a lighter loop, not lighter verification.";
+        case "decision_loop":
+          return "Resolve/accept the gating ADR first; verify and complete block on the decision gate. Then run task start, implement, and verify.";
+        default:
+          return "Run task start, then implement, verify, complete.";
+      }
     case "continue_implementation":
-      return "Implement the task, run verification, then complete the task.";
+      switch (mode) {
+        case "record_only":
+          return "Implement, run project verification yourself, then record completion with `task record-done --evidence`. This is a lighter loop, not lighter verification.";
+        case "decision_loop":
+          return "Resolve/accept the gating ADR first; verify and complete block on the decision gate. Then implement and verify.";
+        default:
+          return "Implement the task, run verification, then complete the task.";
+      }
     case "wait_for_dependencies":
       return "Resolve blocking dependencies, then re-run task prepare.";
     case "noop_already_done":
@@ -369,7 +406,7 @@ export async function runTaskPrepare(
     dry_run: dryRun,
     next_action: {
       type: nextActionType,
-      message: messageFor(nextActionType),
+      message: messageFor(nextActionType, recommendation.lifecycleMode),
     },
     commands,
     blocked_by: [],
