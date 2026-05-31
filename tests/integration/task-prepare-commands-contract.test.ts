@@ -82,6 +82,7 @@ type Commands = {
   verify: string;
   complete: string;
   finalize: string;
+  "record-done": string;
 };
 
 function prepareCommands(
@@ -126,6 +127,17 @@ describe("task prepare — emitted commands are accepted by the CLI parser", () 
   it("commands.finalize carries no --agent flag (finalize takes none)", () => {
     const commands = prepareCommands(project);
     expect(commands.finalize).not.toContain("--agent");
+  });
+
+  it("commands[\"record-done\"] is a correct template (P40): task record-done + --evidence placeholder", () => {
+    const commands = prepareCommands(project);
+    const rd = commands["record-done"];
+    // The one non-runnable entry: --evidence is agent-supplied, so it is a
+    // template with an angle-bracket token. Pin the template surface, not just
+    // "no Unknown option" (the parser loop above already covers that).
+    expect(rd).toContain("task record-done");
+    expect(rd).toContain("--evidence");
+    expect(rd).toContain('"<verification you ran>"');
   });
 
   it("emitted commands drive start → complete → finalize end-to-end", () => {

@@ -165,6 +165,8 @@ describe("runTaskPrepare — planned state", () => {
       verify: "code-pact verify --phase P1 --task P1-T1",
       complete: "code-pact task complete P1-T1 --agent claude-code",
       finalize: "code-pact task finalize P1-T1 --write --json",
+      // P40 — additive, always present; the one non-runnable template.
+      "record-done": 'code-pact task record-done P1-T1 --agent claude-code --evidence "<verification you ran>"',
     });
   });
 });
@@ -544,5 +546,80 @@ describe("runTaskPrepare — budget enforcement (P24)", () => {
 
     const after = await readProgress(dir);
     expect(after).toBe(before);
+  });
+});
+
+describe("runTaskPrepare — lifecycle-aware next_action + record-done (P40)", () => {
+  // A single-task phase whose one task drives a given lifecycleMode.
+  // full_loop: type feature; record_only: type docs + low/low/strong;
+  // decision_loop: requires_decision (extra task line).
+  function phaseYaml(opts: { type?: string; extraTaskLines?: string[] } = {}): string {
+    const type = opts.type ?? "feature";
+    const extra = (opts.extraTaskLines ?? []).map((l) => `    ${l}`).join("\n");
+    return `id: P1
+name: Foundation
+weight: 12
+confidence: high
+risk: low
+status: in_progress
+objective: test phase
+definition_of_done:
+  - tests pass
+verification:
+  commands:
+    - echo ok
+tasks:
+  - id: P1-T1
+    type: ${type}
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: strong
+    expected_duration: short
+    status: planned
+${extra}
+`;
+  }
+
+  it("full_loop: message keeps the complete wording; record-done present", async () => {
+    await setupProject(dir, { phaseYaml: phaseYaml() });
+    const result = await runTaskPrepare({ cwd: dir, taskId: "P1-T1", agent: "claude-code" });
+    expect(result.recommendation?.lifecycleMode).toBe("full_loop");
+    expect(result.next_action.message).toContain("complete");
+    expect(result.commands["record-done"]).toContain("task record-done");
+    expect(result.commands["record-done"]).toContain("--evidence");
+  });
+
+  it("record_only: message points at task record-done, not task complete", async () => {
+    // type: docs + low/low/strong → record_only per the deterministic switch.
+    await setupProject(dir, { phaseYaml: phaseYaml({ type: "docs" }) });
+    const result = await runTaskPrepare({ cwd: dir, taskId: "P1-T1", agent: "claude-code" });
+    expect(result.recommendation?.lifecycleMode).toBe("record_only");
+    expect(result.next_action.message).toContain("task record-done --evidence");
+    expect(result.next_action.message).toContain("not lighter verification");
+    expect(result.next_action.message).not.toContain("complete the task");
+    expect(result.commands["record-done"]).toContain("task record-done");
+  });
+
+  it("decision_loop: message says resolve the ADR first; does not decide complete-vs-record-done", async () => {
+    await setupProject(dir, { phaseYaml: phaseYaml({ extraTaskLines: ["requires_decision: true"] }) });
+    const result = await runTaskPrepare({ cwd: dir, taskId: "P1-T1", agent: "claude-code" });
+    expect(result.recommendation?.lifecycleMode).toBe("decision_loop");
+    expect(result.next_action.message).toContain("Resolve/accept the gating ADR first");
+    expect(result.next_action.message).not.toContain("task record-done");
+    expect(result.next_action.message).not.toContain("complete the task");
+    expect(result.commands["record-done"]).toContain("task record-done");
+  });
+
+  it("record-done is present in every mode (the lookup table stays complete)", async () => {
+    const cases = [phaseYaml(), phaseYaml({ extraTaskLines: ["requires_decision: true"] })];
+    for (const py of cases) {
+      await setupProject(dir, { phaseYaml: py });
+      const result = await runTaskPrepare({ cwd: dir, taskId: "P1-T1", agent: "claude-code" });
+      expect(result.commands["record-done"]).toContain("task record-done");
+      expect(result.commands.complete).toContain("task complete");
+      expect(result.commands.finalize).toContain("task finalize");
+    }
   });
 });
