@@ -21,7 +21,7 @@ When a command surfaces one of the diagnostic codes below, this page maps it to 
 | [`CONTROL_PLANE_NOT_DRIVEN`](#control_plane_not_driven-from-doctor-v125) | Scaffold adopted but the loop isn't being driven | Start a task, or silence the check |
 | [`CONTROL_PLANE_BRANCH_NOT_DRIVEN`](#control_plane_branch_not_driven-from-doctor--validate---base-ref-v126) | A PR branch changed real code but never drove the loop | Drive a task (or `record-done`) and commit `progress.yaml`, or exempt the path |
 | [`ADR_ACCEPTED_BODY_THIN`](#adr_accepted_body_thin-from-plan-lint---include-quality-v126) | An accepted ADR's body is an empty stub | Add the decision + rationale, or revert status to `proposed` |
-| [`ADR_COMMITMENTS_EMPTY`](#adr_commitments_empty-from-plan-lint---include-quality-v127) | An accepted gating ADR records no implementation commitments | Add a `## Implementation commitments` checkbox list (warning only — never blocks) |
+| [`ADR_COMMITMENTS_EMPTY`](#adr_commitments_empty-from-plan-lint---include-quality-v127) | An accepted ADR that resolves a gated task's gate records no implementation commitments | Add a `## Implementation commitments` checkbox list (warning only — never blocks) |
 | [`PHASE_DOCS_WRITE_NO_DOC_CHECK`](#phase_docs_write_no_doc_check-from-plan-lint---include-quality-v127) | A not-done phase writes public docs but runs no doc check | Add `pnpm check:docs` to the phase's verification.commands (warning only) |
 
 ## `MANIFEST_NOT_FOUND` from `adapter upgrade --check` / `--write`
