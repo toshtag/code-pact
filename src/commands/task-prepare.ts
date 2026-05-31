@@ -77,12 +77,15 @@ export type TaskPrepareResult = {
   /** Present (true) only when current_state is "done". */
   already_done?: boolean;
   /**
-   * P43 — parsed `## Implementation commitments` of each ACCEPTED ADR that the
+   * P43 — parsed `## Implementation commitments` of each ACCEPTED ADR the
    * decision gate considered for this task. Present (possibly `[]`) only for a
-   * `requires_decision` task; omitted entirely otherwise. Empty when the gate is
-   * unresolved (no accepted ADR) or the accepted ADRs carry no commitments.
-   * Additive (P39); advisory context, never a gate. Entries follow the resolver's
-   * `considered[]` order — no chronological/priority/dependency meaning.
+   * `requires_decision` task; omitted entirely otherwise. It is `[]` only when
+   * the resolver found no accepted ADR entries — note an unresolved explicit
+   * `decision_refs` gate may still surface its accepted refs (this surface is
+   * advisory context, NOT gate enforcement; unlike the `ADR_COMMITMENTS_EMPTY`
+   * lint advisory it does not require the gate to resolve). Additive (P39).
+   * Entries follow the resolver's `considered[]` order — no
+   * chronological/priority/dependency meaning.
    */
   decision_commitments?: {
     adr: string;
@@ -299,10 +302,13 @@ export async function runTaskPrepare(
 
   // 8b. P43 — decision commitments. For a requires_decision task, resolve the
   // gate (read-only — preserves the progress-read-only invariant) and surface
-  // the parsed `## Implementation commitments` of each ACCEPTED ADR considered,
-  // in considered[] order. Present (possibly []) only for gated tasks; an
-  // unresolved gate yields []. This does NOT enforce the gate — task complete /
-  // verify own that — it only surfaces the commitments as implementation context.
+  // the parsed `## Implementation commitments` of each ACCEPTED ADR in
+  // resolution.considered[], in considered[] order. Present (possibly []) only
+  // for gated tasks; it is [] only when the resolver found no accepted ADR
+  // entries. An unresolved explicit decision_refs gate may still surface
+  // accepted refs — task prepare is advisory implementation context, NOT gate
+  // enforcement (task complete / verify own that). Unlike the
+  // ADR_COMMITMENTS_EMPTY lint advisory, this does NOT require res.resolved.
   let decisionCommitments:
     | { adr: string; has_section: boolean; items: { text: string; done: boolean }[] }[]
     | undefined;

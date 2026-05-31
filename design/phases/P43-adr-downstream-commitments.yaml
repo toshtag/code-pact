@@ -24,8 +24,10 @@ objective: |
       non-work statement.
     - Surfacing: task prepare adds an additive decision_commitments envelope
       field — the parsed commitment items (text + done + has_section) for the
-      accepted ADR(s) resolving the task's gate, in considered[] order.
-      Deterministic parse, no summarization.
+      accepted ADRs the resolver considered, in considered[] order. Advisory
+      implementation context, not gate enforcement: an unresolved explicit
+      decision_refs gate may still surface its accepted refs. Deterministic
+      parse, no summarization.
     - Advisory: plan lint gains ADR_COMMITMENTS_EMPTY (affects_exit false, even
       under --strict) — an ACCEPTED ADR that resolves a requires_decision task's
       gate has no commitments section, or one with zero checkbox items. Scoped to
