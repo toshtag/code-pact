@@ -79,10 +79,10 @@ restates `lifecycle.ts` / `per-task-loop.md` semantics, inventing nothing:
 | --- | --- | --- |
 | start_task | full_loop | Run task start, then implement, verify, and complete. |
 | start_task | record_only | Run task start, implement, run project verification yourself, then record completion with `task record-done --evidence`. This is a lighter loop, not lighter verification. |
-| start_task | decision_loop | Resolve/accept the gating ADR first; verify and complete block on the decision gate. Then run task start, implement, and verify. |
+| start_task | decision_loop | Resolve/accept the gating ADR first; verification and completion-recording paths block on the decision gate. Then run task start, implement, and verify. |
 | continue_implementation | full_loop | Implement, run verification, then complete the task. |
 | continue_implementation | record_only | Implement, run project verification yourself, then record completion with `task record-done --evidence`. |
-| continue_implementation | decision_loop | Resolve/accept the gating ADR first; verify and complete block on the decision gate. Then implement and verify. |
+| continue_implementation | decision_loop | Resolve/accept the gating ADR first; verification and completion-recording paths block on the decision gate. Then implement and verify. |
 
 ### decision_loop does NOT decide complete-vs-record-done (verified)
 
@@ -92,7 +92,7 @@ independent of whether the ADR is accepted**. So a gated task stays
 `decision_loop` even after its gate resolves; the mode does NOT imply the
 post-gate completion path (a gated docs/test task could still be completed via
 either path). The `decision_loop` message therefore states only the gate fact
-("resolve the ADR; verify/complete block on it") and the generic implement→verify
+("resolve the ADR; verification and completion-recording paths block on it") and the generic implement→verify
 step — it must **not** decide "complete" vs "record-done" for the agent. Advisory
 text only; no new gate, no resolved/unresolved branch. The agent already has
 `decision_commitments` (P43) for the concrete ADR work; `verify` / `task complete`

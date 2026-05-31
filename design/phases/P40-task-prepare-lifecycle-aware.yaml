@@ -13,7 +13,7 @@ objective: |
   next_action.message is static per task-state and assumes full_loop ("then
   complete"). So an agent on a record_only task is told to complete when it should
   run task record-done, and a decision_loop task is not told to resolve its ADR
-  first. P40 (backlog, next remaining) closes that gap.
+  first. This phase closes that gap.
 
   This is a contract-shape change with explicit bloat risk, authored as a
   decision_loop phase (P40-T0 is requires_decision, gated on its own RFC).
