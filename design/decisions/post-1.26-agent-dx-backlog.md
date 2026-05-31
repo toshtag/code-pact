@@ -22,26 +22,34 @@ out below as a re-scope to settle in the phase's RFC.
 
 ## Sequence (differentiation-first)
 
-P39 → **P43 → P41 → P40 → P42 → P44**. Rationale: after P39 closes the largest
-current pain, lead with the one capability the feedback empirically validated
-(P43), bank the cheap trust fill (P41), then take the contract-shape decisions
-(P40, P42) deliberately. A pain-first ordering (P40 before P43) was considered
-and rejected for now: P40 is a contract-shape change that needs its own ADR and
-carries a real bloat risk, whereas P43 strengthens a proven win.
+~~P39~~ → ~~P43~~ → **P41 → P40 → P42 → P44** (P39 and P43 shipped; remaining
+sequence is P41 → P40 → P42 → P44). Rationale: after P39 closed the largest
+current pain, we led with the one capability the feedback empirically validated
+(P43 — shipped), and next bank the cheap trust fill (P41), then take the
+contract-shape decisions (P40, P42) deliberately. A pain-first ordering (P40
+before P43) was considered and rejected: P40 is a contract-shape change that
+needs its own ADR and carries a real bloat risk, whereas P43 strengthened a
+proven win.
 
-## P43 — ADR downstream commitments (next after P39)
+## P43 — ADR downstream commitments — **shipped**
 
-- **Goal.** Make the proven ADR→downstream effect first-class: a structured
-  `## Implementation commitments` checklist in the ADR, surfaced by
-  `task prepare` as `decision_commitments`, plus a `plan lint` advisory
-  `ADR_COMMITMENTS_EMPTY` when an accepted ADR referenced by a task has no
-  commitments block.
-- **Why first.** It doubles down on the single thing 1.26.0 use proved unique.
-  It also fits the enforcement philosophy: deterministic surfacing, advisory
-  (`affects_exit: false`), never an LLM free-summary (that would be
-  non-deterministic — explicitly rejected).
-- **Open at RFC time.** Exact commitment syntax (checkbox list under a fixed
-  heading) and whether `task context` echoes commitments too.
+- **Outcome.** Shipped as `design/phases/P43-adr-downstream-commitments.yaml`
+  (RFC: `design/decisions/adr-downstream-commitments-rfc.md`). An ADR may carry a
+  `## Implementation commitments` checkbox list. `task prepare` surfaces the
+  parsed commitments of the **accepted ADRs the decision resolver considered** as
+  an additive `decision_commitments` field (advisory context, not gate
+  enforcement — an unresolved explicit `decision_refs` gate may still surface its
+  accepted refs). `plan lint --include-quality` emits `ADR_COMMITMENTS_EMPTY`
+  (`affects_exit: false`) only for an accepted ADR that **resolves** a
+  `requires_decision` task's gate and records no implementation commitments.
+- **Also shipped:** `PHASE_DOCS_WRITE_NO_DOC_CHECK` — a forward-looking
+  docs-drift guard (a not-`done` phase that writes public docs but runs no doc
+  check in its verification), generalizing the P39/P43 docs-drift lesson.
+- **Fit with the enforcement philosophy:** deterministic surfacing, advisory
+  only, never an LLM free-summary (explicitly rejected). Resolved open questions:
+  commitment syntax is a checkbox list under the fixed `## Implementation
+  commitments` heading; `task context` does **not** echo commitments (prepare-only).
+- **Follow-on sequence:** remaining backlog is P41 → P40 → P42 → P44.
 
 ## P41 — leaf help + docs straightening (cheap fill)
 
