@@ -1,0 +1,102 @@
+id: P42
+name: Project-side version pinning guidance — close docs-first (devDependency
+  pin path in getting-started; reject the .code-pact/code-pact.version mechanism)
+weight: 4
+confidence: high
+risk: low
+status: done
+objective: |
+  The 1.26.0 real-use feedback flagged a reproducibility gap: a consumer running
+  `npx code-pact@latest` (or a floating global install) can silently change CLI
+  version between runs, which matters because code-pact's contract and
+  state/progress.yaml semantics evolve across versions. The feedback's own
+  conclusion (recorded in post-1.26-agent-dx-backlog.md) is that pinning is the
+  CONSUMER's responsibility — pin the devDependency, stop following @latest —
+  not something code-pact should police with a new mechanism.
+
+  P42 is a close-out phase, not a build phase. An audit found the CI side already
+  covered (docs/cli-contract.md pins the binary and says "do NOT track @latest in
+  CI"); the one real gap was the entry point — docs/getting-started.md offered
+  only global-install / npx with no devDependency pin path and no team/CI-prefers
+  -pin statement. P42 fills exactly that gap with one Install-section edit and
+  records the posture in an accepted RFC.
+
+  Explicit non-goal: the .code-pact/code-pact.version file + a
+  CODE_PACT_VERSION_MISMATCH diagnostic. It is self-referential — a committed
+  version file cannot constrain the RUNNING CLI and drifts silently in exactly
+  the unpinned-consumer case it would mean to catch. The pin belongs in the
+  consumer's package.json (exact-pinned devDependency) + lockfile + CI. Rejected,
+  not deferred.
+
+  Held scope (to avoid re-growing the docs surface P39/P41 just trimmed): no
+  reconcile of the other docs that mention pinning in passing (README /
+  upgrading.md / migration.md), and no docs/ja/getting-started.md sync — the ja
+  mirror is a recorded follow-up, not part of P42.
+
+  Design recorded in design/decisions/version-pinning-guidance-rfc.md.
+non_goals:
+  - A .code-pact/code-pact.version file or any CODE_PACT_VERSION_MISMATCH
+    diagnostic / validate advisory — rejected as self-referential (the pin must
+    live in the consumer's package.json + lockfile + CI, where it constrains the
+    running binary)
+  - A full reconcile of every doc that mentions pinning (README / upgrading.md /
+    migration.md) — out of scope to avoid re-growing the docs surface
+  - docs/ja/getting-started.md sync — a recorded follow-up, not this phase
+  - Any change to install tags (latest / alpha) or the dist-tag policy
+  - Any code, schema, new diagnostic, or CI change
+definition_of_done:
+  - docs/getting-started.md Install section presents an EXACT devDependency pin
+    (--save-exact code-pact@<version>) as the recommended path for teams/CI,
+    alongside the existing global/npx paths for one-off use, and tells the reader
+    to commit package.json + the lockfile
+  - the accepted RFC design/decisions/version-pinning-guidance-rfc.md records
+    the posture and the .version-mechanism non-goal, closing the backlog question
+  - the post-1.26 backlog and design/decisions/README.md mark P42 shipped
+    (docs-first; no new mechanism); the docs/ja follow-up is recorded
+  - pnpm check:docs passes; no doc other than getting-started.md is changed for
+    content (index/backlog rows are control-plane sync, not new guidance)
+verification:
+  commands:
+    - pnpm check:docs
+    - node dist/cli.js validate --json
+    - node dist/cli.js plan lint --include-quality --strict --json
+tasks:
+  - id: P42-T0
+    type: docs
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: done
+    description: >
+      RFC + the single docs gap + control-plane sync (close-out bootstrap).
+
+
+      Lands design/decisions/version-pinning-guidance-rfc.md (status: accepted)
+      and bootstraps the phase (phase YAML + roadmap entry, weight 4) as
+      protected-path bootstrap writes NOT listed in writes, per the P39-P43
+      precedent (writes carries the RFC + the docs edits; the phase YAML is in
+      acceptance_refs and design/roadmap.yaml is excluded as a plan-lint --strict
+      protected path). The RFC records the docs-first decision, the audit (CI side
+      already covered; entry-point gap), the exact-pin guidance, the
+      .version-mechanism non-goal, the held scope, and the docs/ja follow-up.
+
+
+      Adds the devDependency exact-pin path to docs/getting-started.md's Install
+      section (the one real gap) and syncs the control-plane: the post-1.26
+      backlog and design/decisions/README.md mark P42 shipped.
+    decision_refs:
+      - design/decisions/version-pinning-guidance-rfc.md
+    reads:
+      - design/decisions/version-pinning-guidance-rfc.md
+      - docs/getting-started.md
+      - docs/cli-contract.md
+    writes:
+      - design/decisions/version-pinning-guidance-rfc.md
+      - docs/getting-started.md
+      - design/decisions/post-1.26-agent-dx-backlog.md
+      - design/decisions/README.md
+    acceptance_refs:
+      - design/phases/P42-version-pinning-guidance.yaml
