@@ -178,3 +178,148 @@ describe("CONTEXT_OVER_BUDGET envelope — budget detail is top-level data", () 
     expect(res.code).toBe(2);
   });
 });
+
+// P43: task prepare surfaces an accepted gating ADR's `## Implementation
+// commitments` as an additive `decision_commitments` field. Advisory context,
+// never a gate; field-presence parity (gated tasks only).
+describe("task prepare — decision_commitments (P43)", () => {
+  let project: Awaited<ReturnType<typeof createTempProject>>;
+
+  beforeEach(async () => {
+    project = await createTempProject({ prefix: "code-pact-prepare-commit-" });
+  });
+
+  afterEach(async () => {
+    await project.cleanup();
+  });
+
+  type Envelope = {
+    ok: boolean;
+    data: {
+      decision_commitments?: {
+        adr: string;
+        has_section: boolean;
+        items: { text: string; done: boolean }[];
+      }[];
+    };
+  };
+
+  /** Add phase P1 + a single task, optionally requires_decision, optionally with extra task fields. */
+  async function writeTask(
+    opts: { requiresDecision?: boolean; phaseRequiresDecision?: boolean; decisionRefs?: string[] } = {},
+  ): Promise<void> {
+    expectJsonOk(
+      project.run([
+        "phase", "add", "--id", "P1", "--name", "Foundation",
+        "--objective", "Foundation phase for the decision_commitments test",
+        "--weight", "10", "--verify-command", "node --version", "--json",
+      ]),
+    );
+    const phasePath = join(project.dir, "design", "phases", "P1-foundation.yaml");
+    const doc = parseYaml(await readFile(phasePath, "utf8")) as Record<string, unknown>;
+    if (opts.phaseRequiresDecision) doc.requires_decision = true;
+    const task: Record<string, unknown> = {
+      id: "P1-T1",
+      type: "feature",
+      ambiguity: "low",
+      risk: "low",
+      context_size: "small",
+      write_surface: "low",
+      verification_strength: "weak",
+      expected_duration: "short",
+      status: "planned",
+      description: "decision_commitments test task",
+    };
+    if (opts.requiresDecision) task.requires_decision = true;
+    if (opts.decisionRefs) task.decision_refs = opts.decisionRefs;
+    doc.tasks = [task];
+    await writeFile(phasePath, stringifyYaml(doc), "utf8");
+  }
+
+  async function writeAdr(filename: string, body: string): Promise<void> {
+    const path = join(project.dir, "design", "decisions", filename);
+    await writeFile(path, body, "utf8");
+  }
+
+  function prepare(): Envelope {
+    const res = project.run(["task", "prepare", "P1-T1", "--agent", "claude-code", "--json"]);
+    return JSON.parse(res.stdout.trim()) as Envelope;
+  }
+
+  it("gated task + accepted ADR with a commitments list → items surfaced, has_section true", async () => {
+    await writeTask({ requiresDecision: true });
+    await writeAdr(
+      "P1-T1-rfc.md",
+      "**Status:** accepted\n\n## Implementation commitments\n\n- [ ] Wire the thing\n- [x] Update docs\n",
+    );
+    const env = prepare();
+    expect(env.ok).toBe(true);
+    expect(env.data.decision_commitments).toEqual([
+      {
+        adr: "design/decisions/P1-T1-rfc.md",
+        has_section: true,
+        items: [
+          { text: "Wire the thing", done: false },
+          { text: "Update docs", done: true },
+        ],
+      },
+    ]);
+  });
+
+  it("gated task + accepted ADR with no commitments section → has_section false, items []", async () => {
+    await writeTask({ requiresDecision: true });
+    await writeAdr("P1-T1-rfc.md", "**Status:** accepted\n\n## Decision\n\nChose X.\n");
+    const env = prepare();
+    expect(env.data.decision_commitments).toEqual([
+      { adr: "design/decisions/P1-T1-rfc.md", has_section: false, items: [] },
+    ]);
+  });
+
+  it("gated task + accepted ADR with an empty section → has_section true, items []", async () => {
+    await writeTask({ requiresDecision: true });
+    await writeAdr("P1-T1-rfc.md", "**Status:** accepted\n\n## Implementation commitments\n\nTBD.\n");
+    const env = prepare();
+    expect(env.data.decision_commitments).toEqual([
+      { adr: "design/decisions/P1-T1-rfc.md", has_section: true, items: [] },
+    ]);
+  });
+
+  it("gated task with no accepted ADR → decision_commitments is present as []", async () => {
+    await writeTask({ requiresDecision: true });
+    await writeAdr("P1-T1-rfc.md", "**Status:** proposed\n\n## Implementation commitments\n\n- [ ] x\n");
+    const env = prepare();
+    expect(env.data.decision_commitments).toEqual([]);
+  });
+
+  it("non-gated task → decision_commitments omitted entirely", async () => {
+    await writeTask({ requiresDecision: false });
+    await writeAdr("P1-T1-rfc.md", "**Status:** accepted\n\n## Implementation commitments\n\n- [ ] x\n");
+    const env = prepare();
+    expect(env.data.decision_commitments).toBeUndefined();
+  });
+
+  it("phase-level requires_decision also surfaces commitments", async () => {
+    await writeTask({ phaseRequiresDecision: true });
+    await writeAdr("P1-T1-rfc.md", "**Status:** accepted\n\n## Implementation commitments\n\n- [x] done\n");
+    const env = prepare();
+    expect(env.data.decision_commitments).toEqual([
+      { adr: "design/decisions/P1-T1-rfc.md", has_section: true, items: [{ text: "done", done: true }] },
+    ]);
+  });
+
+  it("explicit decision_refs with two accepted ADRs → both surfaced in considered[] order", async () => {
+    await writeTask({
+      requiresDecision: true,
+      decisionRefs: ["design/decisions/a-rfc.md", "design/decisions/b-rfc.md"],
+    });
+    await writeAdr("a-rfc.md", "**Status:** accepted\n\n## Implementation commitments\n\n- [ ] from a\n");
+    await writeAdr("b-rfc.md", "**Status:** accepted\n\n## Implementation commitments\n\n- [ ] from b\n");
+    const env = prepare();
+    expect(env.data.decision_commitments?.map((c) => c.adr)).toEqual([
+      "design/decisions/a-rfc.md",
+      "design/decisions/b-rfc.md",
+    ]);
+    expect(env.data.decision_commitments?.[0]?.items).toEqual([{ text: "from a", done: false }]);
+    expect(env.data.decision_commitments?.[1]?.items).toEqual([{ text: "from b", done: false }]);
+  });
+});
