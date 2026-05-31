@@ -110,3 +110,6 @@ phases:
   - id: P41
     path: design/phases/P41-leaf-help-docs-straightening.yaml
     weight: 4
+  - id: P40
+    path: design/phases/P40-task-prepare-lifecycle-aware.yaml
+    weight: 4
