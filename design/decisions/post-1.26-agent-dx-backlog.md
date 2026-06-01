@@ -104,9 +104,13 @@ risk, whereas P43 strengthened a proven win.
   file cannot constrain the *running* CLI, and drifts silently in exactly the
   unpinned-consumer case). The pin belongs in the consumer's `package.json` + CI,
   not in a code-pact mechanism. Not built, not deferred — closed.
-- **Held scope.** No `docs/ja` mirror sync (known follow-up), no reconcile of the
-  other docs that mention pinning in passing (README / upgrading.md / migration.md)
-  — widening would re-grow the docs surface P39/P41 just trimmed.
+- **Held scope.** No reconcile of the other docs that mention pinning in passing
+  (README / upgrading.md / migration.md) — widening would re-grow the docs
+  surface P39/P41 just trimmed.
+- **Follow-up.** Sync `docs/ja/getting-started.md`'s Install guidance to match the
+  English devDependency exact-pin path (the ja getting-started is linked from the
+  English page, so ja readers currently see the older install guidance). Not done
+  in P42 — translation work would defeat the close-small intent.
 
 ## P44 — CI / adoption kit (docs + template, last)
 

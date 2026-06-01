@@ -113,3 +113,6 @@ phases:
   - id: P40
     path: design/phases/P40-task-prepare-lifecycle-aware.yaml
     weight: 4
+  - id: P42
+    path: design/phases/P42-version-pinning-guidance.yaml
+    weight: 4
