@@ -308,24 +308,21 @@ short-circuits — the command does not build a context pack, returns
 The success metrics defined in
 [`docs/positioning.md`](positioning.md) are how the project measures
 whether the contract is working. The metric set is locked here; the
-Evidence Harness v2 (P26) computes the baseline values shown below
-and recomputes them on every harness run.
+Evidence Harness v2 (P26) computes these and recomputes them on every
+harness run. The metric set is fixed here; the **values** live only in
+[`design/measurements/summary.json`](../design/measurements/summary.json)
+(plus the per-task CSVs beside it) so the numbers can never drift between
+this prose and the source of truth — reproduce with `pnpm harness --corpus . --check`.
 
-| Metric | Definition | Baseline |
-|---|---|---|
-| Context pack p50 bytes | Per-task pack size, lower-median percentile across the dogfood corpus | 19275 |
-| Context pack p90 bytes | Per-task pack size, lower 90th percentile | 49555 |
-| Context pack max bytes | Largest single task's pack size | 314774 |
-| First-pass verification rate | Percentage of `task complete` invocations whose declared verification passes on the first attempt | 100.0% |
-| Task lifecycle adherence rate | State-machine adherence: percentage of `done` tasks with at least one `started` event before the first `done` event AND no legacy `planned → done` shortcut. `task prepare` is read-only and emits no event, so prepare-adherence is **not** measured | 80.6% |
-| Undeclared write rate | Files changed by a task whose paths are not covered by the task's declared `writes` globs | deferred ([rationale](../design/decisions/evidence-harness-v2-rfc.md#non-goals-out-of-scope-for-p26)) |
-| Adapter drift detection rate | Percentage of enabled agents where `adapter doctor` returns at least one error-severity issue | 0.0% |
-
-Source: [`design/measurements/summary.json`](../design/measurements/summary.json),
-measured against dogfood corpus git SHA `28b4df1` (the v1.17.1
-release commit) with denominators `tasks_done: 108`,
-`tasks_total: 144`, `agents_enabled: 1`. Reproduce:
-`pnpm harness --corpus . --check`.
+| Metric | Definition |
+|---|---|
+| Context pack p50 bytes | Per-task pack size, lower-median percentile across the dogfood corpus |
+| Context pack p90 bytes | Per-task pack size, lower 90th percentile |
+| Context pack max bytes | Largest single task's pack size |
+| First-pass verification rate | Percentage of `task complete` invocations whose declared verification passes on the first attempt |
+| Task lifecycle adherence rate | State-machine adherence: among tasks that have any progress events, the percentage with at least one `started` event before the first `done` event AND no legacy `planned → done` shortcut. `task prepare` is read-only and emits no event, so prepare-adherence is **not** measured. Sits below 100% because of historical (mostly pre-v0.7) tasks that used the legacy `planned → done` shortcut, not current behaviour |
+| Undeclared write rate | Files changed by a task whose paths are not covered by the task's declared `writes` globs. Currently `deferred` ([rationale](../design/decisions/evidence-harness-v2-rfc.md#non-goals-out-of-scope-for-p26)) |
+| Adapter drift detection rate | Percentage of enabled agents where `adapter doctor` returns at least one error-severity issue |
 
 These metrics evaluate the contract — they are not part of the
 contract. A drop in first-pass verification rate, for example, is a
