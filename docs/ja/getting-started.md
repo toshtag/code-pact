@@ -15,15 +15,23 @@
 ## インストール
 
 ```sh
-# グローバルインストール
+# チーム & CI 推奨: devDependencies に正確なバージョンを pin する
+npm install --save-dev --save-exact code-pact@<version>
+npm exec -- code-pact --version   # プロジェクトローカルの pin したバイナリを実行
+
+# 単発 / 個人利用: グローバルインストール
 npm install -g code-pact
 code-pact --version
 
-# インストールせずに使う
+# 単発 / 個人利用のみ: インストールせずに実行
 npx code-pact --version
 ```
 
-v1.0 より前の挙動に固定したプロジェクトでは `npm install -g code-pact@alpha` も引き続き使えます。新規プロジェクトはデフォルトの `latest` タグを使ってください。
+チームと CI では、code-pact を `devDependencies` に **正確な**バージョンで pin してください（`--save-exact`）。code-pact のコントラクトや `state/progress.yaml` のセマンティクスはバージョン間で進化するため、floating な `@latest`（あるいは `^` レンジでも）は実行ごとに挙動が変わりえます。`package.json` と lockfile をコミットして、CI とコントリビューターが同じバージョンを解決するようにしてください。グローバルインストールと `npx` の経路は、ちょっとした確認や個人利用には十分です。
+
+> このガイドの以降のコマンド例は、簡潔さのため bare な `code-pact …` で書いています。上記の pin した `devDependency` の経路を使う場合は、パッケージランナー経由で実行してください — `npm exec -- code-pact …`（または `npm` スクリプト経由）—— プロジェクトローカルの pin したバイナリが解決されます。
+
+v1.0 より前の挙動に意図的に固定したプロジェクトでは `code-pact@alpha` も引き続き使えます。新規プロジェクトは、レガシーな `alpha` タグではなく、現行の安定リリースラインから正確なバージョンを pin してください。
 
 ## どの経路を選ぶか
 

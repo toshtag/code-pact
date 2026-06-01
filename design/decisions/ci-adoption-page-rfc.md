@@ -84,9 +84,11 @@ canonical home (cli-contract / getting-started) for the full explanation.
   page. Both get the reciprocal language-switcher line.
 - **Hub registration:** one row in `docs/README.md` and one in `docs/ja/README.md`
   (Workflows section).
-- **`cli-contract.md` Actions example widened to the full gate** (the one real
-  content fix — issue 1 above), kept in its existing canonical section. `ci.md`
-  links to it; it is NOT copied into `ci.md`.
+- **`cli-contract.md`'s runnable Actions YAML is removed** (the one real content
+  move — issue 1 above): its CI section keeps the `--base-ref` contract +
+  diagnostics and links to `ci.md`. `ci.md` owns the one canonical template (the
+  full recommended gate). This keeps the anti-duplication rule below: there is no
+  competing YAML, and `ci.md` is not a copy of a cli-contract block.
 - **`docs/maintainers/docs-maintenance.md`:** add the CI page to the doc
   ownership map / ja-sync list so future CI guidance has a registered home.
 - The template is delivered as a **fenced YAML block inside `ci.md`**, not a
@@ -115,9 +117,10 @@ canonical home (cli-contract / getting-started) for the full explanation.
   language-switcher lines on both.
 - `docs/README.md` + `docs/ja/README.md` each gain one Workflows row linking the
   page.
-- `cli-contract.md`'s Actions example is widened to the full recommended gate
-  (plan lint --strict + plan analyze --strict + finalize --audit-strict
-  --base-ref, alongside the existing validate --strict --base-ref).
+- `cli-contract.md` holds no runnable Actions YAML: its CI section is the
+  `--base-ref` contract + diagnostics plus a link to `ci.md`. `ci.md`'s example
+  is the full recommended gate (validate --strict --base-ref + plan lint --strict
+  + plan analyze --strict).
 - `docs/maintainers/docs-maintenance.md` registers the CI page in the ownership
   map / ja-sync list.
 - `pnpm check:docs` (links + invariants) passes; `validate` / `plan lint

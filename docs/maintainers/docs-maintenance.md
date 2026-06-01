@@ -34,7 +34,7 @@ docs/ja/*                        Japanese mirror of first-run / user guides only
 | Per-task lifecycle change | [`per-task-loop.md`](../per-task-loop.md) | README, getting-started, agent-contract, dogfood (pointers only) | Do not re-define the lifecycle anywhere else |
 | New diagnostic / error code | [`cli-contract.md`](../cli-contract.md) | [`troubleshooting.md`](../troubleshooting.md) if user-recoverable | Do not put recovery prose in dogfood |
 | New concept / feature | [`concepts/<feature>.md`](../concepts/) | `docs/README.md` index, `glossary.md` if new terms | Do not bury concept docs inside dogfood |
-| CI / adoption guidance | [`workflows/ci.md`](../workflows/ci.md) | `cli-contract.md` owns the Actions YAML + detector specs (link, don't copy); `getting-started.md` owns pinning | Do not scatter new CI steps across cli-contract / getting-started / dogfood |
+| CI / adoption guidance | [`workflows/ci.md`](../workflows/ci.md) (owns the runnable Actions template) | `cli-contract.md` owns the `--base-ref` contract + detector specs (link to ci.md, don't add YAML); `getting-started.md` owns pinning | Do not scatter new CI steps across cli-contract / getting-started / dogfood |
 | Maintainer-only operation | [`maintainers/operations.md`](operations.md) | `dogfood.md` only if it belongs in the daily path | Do not expose it in getting-started |
 | Design rationale | [`design/decisions/*.md`](../../design/decisions/README.md) | concept-doc summary if user-facing | Do not make users read RFCs to use a feature |
 | Release notes | [`CHANGELOG.md`](../../CHANGELOG.md) | `upgrading.md` if it changes the upgrade story | Do not restate release history in migration.md |
