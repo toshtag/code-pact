@@ -23,6 +23,7 @@
 | --- | --- |
 | [ゼロから (greenfield)](workflows/greenfield.md) | **空のリポジトリから始める。** brief と constitution に何を書くか、最初のフェーズの形、最小で意味のある初回 PR。 |
 | [既存に導入 (brownfield)](workflows/brownfield-feature.md) | **既存コードベースに code-pact を導入する。** 1機能にスコープを絞る、既存の `CLAUDE.md` / `AGENTS.md` との共存、verify コマンドの選び方。 |
+| [CI で動かす](workflows/ci.md) | **code-pact を CI に組み込む。** どのチェックをいつ走らせるか（コントリビューター / メンテナのループ）、pin したバイナリを使う最小の GitHub Actions ゲート、前提チェックリスト。 |
 
 ## リファレンス
 

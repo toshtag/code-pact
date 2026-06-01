@@ -1644,7 +1644,9 @@ The check is **advisory** by default. To make it a CI gate, pair `--base-ref`
 with `validate --strict` (strict already promotes warnings to exit 1):
 
 ```yaml
-# .github/workflows/code-pact.yml
+# .github/workflows/code-pact.yml — the full recommended gate.
+# For the contributor-vs-maintainer split and the preconditions checklist, see
+# the adoption page: docs/workflows/ci.md.
 name: code-pact
 on:
   pull_request:
@@ -1658,8 +1660,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      # Pin the version — do NOT track @latest in CI.
+      # Pin the version — do NOT track @latest in CI. (A project that pins
+      # code-pact as a devDependency runs its installed binary instead.)
       - run: npx -y code-pact@1.26.0 validate --strict --base-ref origin/${{ github.base_ref }} --json
+      - run: npx -y code-pact@1.26.0 plan lint --include-quality --strict --json
+      - run: npx -y code-pact@1.26.0 plan analyze --strict --json
+      # Per-task write audit against the merge-base (so a clean tree does not fire
+      # DECLARED_UNUSED). Run for the tasks the PR advanced; <id> is the task id.
+      # - run: npx -y code-pact@1.26.0 task finalize <id> --audit-strict --base-ref origin/${{ github.base_ref }} --json
 ```
 
 **Precondition — the ledger *and* the project config must be in the CI checkout.**

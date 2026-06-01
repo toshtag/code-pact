@@ -116,3 +116,6 @@ phases:
   - id: P42
     path: design/phases/P42-version-pinning-guidance.yaml
     weight: 4
+  - id: P44
+    path: design/phases/P44-ci-adoption-page.yaml
+    weight: 4
