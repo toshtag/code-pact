@@ -1,7 +1,7 @@
 id: P44
 name: CI / adoption page — a single findable home for running code-pact in CI
-  (docs/workflows/ci.md + ja mirror), widen the cli-contract Actions example to
-  the full gate
+  (docs/workflows/ci.md + ja mirror); move the runnable Actions template out of
+  cli-contract into ci.md so there is one canonical CI home
 weight: 4
 confidence: high
 risk: low
@@ -27,8 +27,9 @@ objective: |
   per P42, never npx @latest), explains that some plan lint --include-quality
   diagnostics are advisory (affects_exit false) review guidance not hard blockers,
   and consolidates the preconditions into one checklist linking canonical homes.
-  The one real content fix is widening cli-contract.md's Actions example to the
-  full recommended gate.
+  The one real content move is taking cli-contract.md's Actions YAML out (it now
+  holds only the --base-ref contract + a link to ci.md) and making ci.md's
+  example the full recommended gate — one canonical template, no duplication.
 
   Design recorded in design/decisions/ci-adoption-page-rfc.md.
 non_goals:
@@ -49,9 +50,10 @@ definition_of_done:
   - docs/ja/workflows/ci.md mirror ships in the same change, with reciprocal
     language-switcher lines on both pages
   - docs/README.md and docs/ja/README.md each gain one Workflows row linking it
-  - cli-contract.md Actions example is widened to the full recommended gate
-    (plan lint --strict + plan analyze --strict + finalize --audit-strict
-    --base-ref alongside the existing validate --strict --base-ref)
+  - cli-contract.md no longer holds a runnable Actions YAML — its CI section is
+    the --base-ref contract + diagnostics plus a link to ci.md; ci.md's example
+    is the full recommended gate (validate --strict --base-ref + plan lint
+    --strict + plan analyze --strict)
   - docs/maintainers/docs-maintenance.md registers the CI page in the ownership
     map / ja-sync list
   - pnpm check:docs passes; validate and plan lint --include-quality --strict and
@@ -61,6 +63,7 @@ verification:
     - pnpm check:docs
     - node dist/cli.js validate --json
     - node dist/cli.js plan lint --include-quality --strict --json
+    - node dist/cli.js plan analyze --strict --json
 tasks:
   - id: P44-T0
     type: docs
@@ -72,8 +75,9 @@ tasks:
     expected_duration: medium
     status: done
     description: >
-      RFC + the CI adoption page + ja mirror + hub rows + cli-contract widening
-      + docs-maintenance registration (close-out bootstrap).
+      RFC + the CI adoption page + ja mirror + hub rows + moving the Actions
+      template out of cli-contract + docs-maintenance registration (close-out
+      bootstrap).
 
 
       Lands design/decisions/ci-adoption-page-rfc.md (status accepted) and
@@ -88,8 +92,11 @@ tasks:
       project-local pinned binary, the include-quality advisory nuance, the
       preconditions checklist linking cli-contract / getting-started) and its
       docs/ja/workflows/ci.md mirror; adds the Workflows hub row to docs/README.md
-      and docs/ja/README.md; widens cli-contract.md's Actions example to the full
-      recommended gate; registers the page in docs/maintainers/docs-maintenance.md.
+      and docs/ja/README.md; replaces cli-contract.md's Actions YAML with the
+      --base-ref contract text plus a link to ci.md (ci.md owns the template, no
+      duplication); syncs docs/ja/getting-started.md's install section to the
+      exact-pin path (the ja CI page links to it); registers the page in
+      docs/maintainers/docs-maintenance.md; adds a CHANGELOG entry.
     decision_refs:
       - design/decisions/ci-adoption-page-rfc.md
     reads:
@@ -99,11 +106,16 @@ tasks:
       - docs/README.md
       - docs/maintainers/docs-maintenance.md
     writes:
+      - design/decisions/ci-adoption-page-rfc.md
       - docs/workflows/ci.md
       - docs/ja/workflows/ci.md
       - docs/README.md
       - docs/ja/README.md
       - docs/cli-contract.md
+      - docs/ja/getting-started.md
       - docs/maintainers/docs-maintenance.md
+      - design/decisions/post-1.26-agent-dx-backlog.md
+      - design/decisions/README.md
+      - CHANGELOG.md
     acceptance_refs:
       - design/phases/P44-ci-adoption-page.yaml

@@ -22,8 +22,8 @@ out below as a re-scope to settle in the phase's RFC.
 
 ## Sequence (differentiation-first)
 
-~~P39~~ → ~~P43~~ → ~~P41~~ → ~~P40~~ → ~~P42~~ → **P44** (P39, P43, P41, P40, and
-P42 shipped; remaining is P44). Rationale: after P39 closed the largest
+~~P39~~ → ~~P43~~ → ~~P41~~ → ~~P40~~ → ~~P42~~ → ~~P44~~ (all shipped; the
+post-1.26 agent-DX backlog is complete). Rationale: after P39 closed the largest
 current pain, we led with the one capability the feedback empirically validated
 (P43 — shipped), banked the cheap trust fill (P41 — shipped), then took the first
 contract-shape decision (P40 — shipped, the most bloat-prone, done conservatively
@@ -108,19 +108,28 @@ risk, whereas P43 strengthened a proven win.
 - **Held scope.** No reconcile of the other docs that mention pinning in passing
   (README / upgrading.md / migration.md) — widening would re-grow the docs
   surface P39/P41 just trimmed.
-- **Follow-up.** Sync `docs/ja/getting-started.md`'s Install guidance to match the
-  English devDependency exact-pin path (the ja getting-started is linked from the
-  English page, so ja readers currently see the older install guidance). Not done
-  in P42 — translation work would defeat the close-small intent.
+- **Follow-up (done in P44).** `docs/ja/getting-started.md`'s Install guidance
+  was synced to the English devDependency exact-pin path as part of P44 (the ja
+  CI page links to it, so the two had to agree).
 
-## P44 — CI / adoption kit (docs + template, last)
+## P44 — CI / adoption page — **shipped**
 
-- **Goal.** Lower adoption friction: a `docs/` CI page (the `validate --strict`
-  / `doctor --base-ref` / `plan lint --strict` sequence) and a GitHub Actions
-  template. The detectors it documents (`CONTROL_PLANE_*`, branch-drift) already
-  exist (P33/P34), so this is purely docs + template.
-- **Constraints.** No external-tool name-drops in public docs; English-primary +
-  `docs/ja` mirror.
+- **Outcome.** Shipped as `design/phases/P44-ci-adoption-page.yaml`
+  (RFC: `design/decisions/ci-adoption-page-rfc.md`). Added `docs/workflows/ci.md`
+  (+ its `docs/ja` mirror) as the single CI adoption home: a thin orchestration
+  page that splits a before-a-PR contributor loop from a maintainer/release full
+  loop, ships one minimal `pull_request` GitHub Actions workflow on the
+  project-local pinned binary, explains the `plan lint --include-quality`
+  advisory nuance, and consolidates the CI preconditions into one checklist. The
+  copy-paste workflow template is **owned by `ci.md`**; `cli-contract.md`
+  documents only the `--base-ref` contract + diagnostics and links to it. A
+  `CI / adoption guidance` row was added to the docs ownership map so future CI
+  docs do not re-scatter.
+- **Held scope.** No new CLI/flag/detector (the detectors exist — P33/P34), no
+  `init`-scaffolded workflow file, no matrix/publish automation, no non-GitHub
+  provider pages, no duplicated Actions YAML / detector specs.
+- **Constraint met.** No external-tool name-drops; English-primary + `docs/ja`
+  mirror shipped together (workflows/* is in the ja-sync list).
 
 ## Non-goals (this backlog)
 

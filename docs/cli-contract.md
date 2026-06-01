@@ -276,7 +276,7 @@ Issue-level codes emitted by `doctor` / `validate` for general project health.
 | `ADAPTER_STALE` | warning | An enabled agent profile has no `model_version` set |
 | `STALE_CONTEXT` | warning | A cached context file is older than its source design files |
 | `CONTROL_PLANE_NOT_DRIVEN` (v1.25+) | warning | The scaffold exists but isn't being driven. Fires only when **all** of: a non-TUTORIAL task is planned; `progress.yaml` has no `started`/`done` event for a non-TUTORIAL task (tutorial usage does not count); and git shows uncommitted working changes (excluding code-pact's own runtime state). **git-unavailable is a silent skip** (never an error); a broken/unparseable `progress.yaml` is also skipped (the existing `INVALID_YAML`/`SCHEMA_ERROR` reports that). Advisory: `severity: warning`, never affects doctor's exit. Silence via `.code-pact/doctor.yaml` → `disabled_checks: [CONTROL_PLANE_NOT_DRIVEN]` |
-| `CONTROL_PLANE_BRANCH_NOT_DRIVEN` (v1.26+, P34) | warning | Branch-diff drift for PR CI. Runs only when `doctor` / `validate` is given `--base-ref <ref>`. Fires when the branch (`merge-base..HEAD`) changed real, non-excluded files but added no `started`/`done` event for a **known** non-TUTORIAL task — code changed without driving the loop. Silent skip when `--base-ref` is absent, git/merge-base is unavailable, `progress.yaml` is not git-tracked, or HEAD `progress.yaml` is unparseable. Advisory; gate via `validate --strict --base-ref`. Exempt paths via `control_plane_branch_not_driven.exclude_globs` (default empty); silence via `disabled_checks`. See the `doctor` section for the GitHub Actions example and the committed-ledger precondition |
+| `CONTROL_PLANE_BRANCH_NOT_DRIVEN` (v1.26+, P34) | warning | Branch-diff drift for PR CI. Runs only when `doctor` / `validate` is given `--base-ref <ref>`. Fires when the branch (`merge-base..HEAD`) changed real, non-excluded files but added no `started`/`done` event for a **known** non-TUTORIAL task — code changed without driving the loop. Silent skip when `--base-ref` is absent, git/merge-base is unavailable, `progress.yaml` is not git-tracked, or HEAD `progress.yaml` is unparseable. Advisory; gate via `validate --strict --base-ref`. Exempt paths via `control_plane_branch_not_driven.exclude_globs` (default empty); silence via `disabled_checks`. See the `doctor` section for the committed-ledger precondition, and [Running code-pact in CI](workflows/ci.md) for the copy-paste GitHub Actions workflow |
 
 ### Adapter diagnostic codes
 
@@ -1643,32 +1643,17 @@ the PR branch against `merge-base(HEAD, <ref>)`. Unlike the working-tree
 The check is **advisory** by default. To make it a CI gate, pair `--base-ref`
 with `validate --strict` (strict already promotes warnings to exit 1):
 
-```yaml
-# .github/workflows/code-pact.yml — the full recommended gate.
-# For the contributor-vs-maintainer split and the preconditions checklist, see
-# the adoption page: docs/workflows/ci.md.
-name: code-pact
-on:
-  pull_request:
-jobs:
-  control-plane:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0          # need history for merge-base
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      # Pin the version — do NOT track @latest in CI. (A project that pins
-      # code-pact as a devDependency runs its installed binary instead.)
-      - run: npx -y code-pact@1.26.0 validate --strict --base-ref origin/${{ github.base_ref }} --json
-      - run: npx -y code-pact@1.26.0 plan lint --include-quality --strict --json
-      - run: npx -y code-pact@1.26.0 plan analyze --strict --json
-      # Per-task write audit against the merge-base (so a clean tree does not fire
-      # DECLARED_UNUSED). Run for the tasks the PR advanced; <id> is the task id.
-      # - run: npx -y code-pact@1.26.0 task finalize <id> --audit-strict --base-ref origin/${{ github.base_ref }} --json
-```
+In CI, supply `--base-ref origin/${{ github.base_ref }}` (or your provider's
+base-ref variable) on a `pull_request` run, with `fetch-depth: 0` so the
+merge-base is reachable. Pair it with `--strict` to make the branch-drift
+advisory a gate.
+
+> For the copy-paste GitHub Actions workflow — the full recommended gate
+> (`validate --strict --base-ref` + `plan lint --strict` + `plan analyze
+> --strict`), the contributor-vs-maintainer loop split, and the preconditions
+> checklist — see [Running code-pact in CI](workflows/ci.md). This section
+> documents the `--base-ref` contract and the diagnostic behavior; the runnable
+> workflow template lives there.
 
 **Precondition — the ledger *and* the project config must be in the CI checkout.**
 `init` does **not** add `.code-pact/` to `.gitignore` — it only ignores

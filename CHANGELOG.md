@@ -13,6 +13,12 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+### CI / adoption page (P44)
+
+**Added**
+
+- **P44 — `docs/workflows/ci.md`** (+ its `docs/ja/workflows/ci.md` mirror) as the single CI adoption home: a thin orchestration page that separates a before-a-PR contributor loop from a maintainer/release full loop, ships one minimal `pull_request` GitHub Actions workflow on the project-local **pinned** binary (not a floating tag), explains that some `plan lint --include-quality` diagnostics are advisory (`affects_exit: false`) review guidance rather than hard blockers, and consolidates the CI preconditions (commit the ledger, `fetch-depth: 0`, exact pin, `--audit-strict` + `--base-ref`) into one checklist. The copy-paste workflow template is owned by `ci.md`; `cli-contract.md` keeps only the `--base-ref` contract + diagnostics and links to it. Also synced `docs/ja/getting-started.md`'s install section to the exact-pin path (P42 follow-up). Design in `design/decisions/ci-adoption-page-rfc.md`. Closes the post-1.26 agent-DX backlog.
+
 ### task prepare lifecycle-aware (P40)
 
 Make `task prepare`'s existing guidance reflect `recommendation.lifecycleMode`, without adding a third "what next" representation. Design in `design/decisions/task-prepare-lifecycle-aware-rfc.md`.
