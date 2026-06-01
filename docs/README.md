@@ -21,6 +21,7 @@ Pick the guide that matches where you're starting from. Both defer to `getting-s
 | --- | --- |
 | [workflows/greenfield.md](workflows/greenfield.md) | **Starting from an empty repo.** What to put in the brief and constitution, how to shape the first phases, the smallest useful first PR. |
 | [workflows/brownfield-feature.md](workflows/brownfield-feature.md) | **Adopting code-pact on an existing codebase.** Scoping to one feature, coexisting with an existing `CLAUDE.md` / `AGENTS.md`, choosing a verify command. |
+| [workflows/ci.md](workflows/ci.md) | **Running code-pact in CI.** Which checks to run when (contributor vs maintainer loop), a minimal GitHub Actions gate on the pinned binary, and the preconditions checklist. |
 
 ## Reference
 

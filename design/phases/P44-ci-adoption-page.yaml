@@ -1,0 +1,109 @@
+id: P44
+name: CI / adoption page — a single findable home for running code-pact in CI
+  (docs/workflows/ci.md + ja mirror), widen the cli-contract Actions example to
+  the full gate
+weight: 4
+confidence: high
+risk: low
+status: done
+objective: |
+  Running code-pact in CI is documented, but scattered across six+ docs with no
+  single home and no docs-hub entry. The one copy-pasteable GitHub Actions
+  example (in cli-contract.md) runs only validate --strict --base-ref, so a
+  consumer who copies it ships a CI that misses plan-integrity and write-audit
+  regressions. The preconditions that cause the most common CI failures (untracked
+  progress.yaml silently skips the gate; missing --base-ref fires DECLARED_UNUSED;
+  merge-base needs full git history) are scattered footnotes, not one checklist.
+
+  The detectors already exist (P33/P34 — CONTROL_PLANE_*, branch-drift). The gap
+  is a findable adoption home, not new machinery. Same theme as P39-P43.
+
+  P44 adds one new usage page, docs/workflows/ci.md, as the single CI adoption
+  home, plus its mandatory docs/ja mirror (workflows/* is in the ja-sync list, so
+  the mirror is not deferrable). It is a thin orchestration page: it sequences and
+  links the existing facts rather than restating them. Contributor-DX safe — the
+  page splits a before-a-PR contributor loop from a maintainer/release full loop,
+  ships only a minimal pull_request Actions example (project-local pinned binary
+  per P42, never npx @latest), explains that some plan lint --include-quality
+  diagnostics are advisory (affects_exit false) review guidance not hard blockers,
+  and consolidates the preconditions into one checklist linking canonical homes.
+  The one real content fix is widening cli-contract.md's Actions example to the
+  full recommended gate.
+
+  Design recorded in design/decisions/ci-adoption-page-rfc.md.
+non_goals:
+  - No new CLI command, flag, detector, or schema — the detectors exist (P33/P34)
+  - No init-scaffolded workflow file or .code-pact/templates artifact
+  - No matrix, caching, release, or npm-publish automation in the example
+  - No non-GitHub CI provider pages — provider-neutral requirements may be stated
+    in prose, but only the GitHub Actions example ships
+  - No restatement of the Actions YAML, envelope shapes, or detector specs that
+    cli-contract.md owns — ci.md links to them (anti-duplication rule)
+  - No external-tool name-drops in public docs
+definition_of_done:
+  - docs/workflows/ci.md exists with a contributor loop vs maintainer/release loop
+    split, a minimal pull_request Actions example using the project-local pinned
+    binary (no npx @latest), the plan lint --include-quality --strict advisory
+    nuance explained, and a consolidated preconditions checklist linking canonical
+    homes — no duplicated YAML or detector spec
+  - docs/ja/workflows/ci.md mirror ships in the same change, with reciprocal
+    language-switcher lines on both pages
+  - docs/README.md and docs/ja/README.md each gain one Workflows row linking it
+  - cli-contract.md Actions example is widened to the full recommended gate
+    (plan lint --strict + plan analyze --strict + finalize --audit-strict
+    --base-ref alongside the existing validate --strict --base-ref)
+  - docs/maintainers/docs-maintenance.md registers the CI page in the ownership
+    map / ja-sync list
+  - pnpm check:docs passes; validate and plan lint --include-quality --strict and
+    plan analyze --strict stay green
+verification:
+  commands:
+    - pnpm check:docs
+    - node dist/cli.js validate --json
+    - node dist/cli.js plan lint --include-quality --strict --json
+tasks:
+  - id: P44-T0
+    type: docs
+    ambiguity: low
+    risk: low
+    context_size: medium
+    write_surface: medium
+    verification_strength: medium
+    expected_duration: medium
+    status: done
+    description: >
+      RFC + the CI adoption page + ja mirror + hub rows + cli-contract widening
+      + docs-maintenance registration (close-out bootstrap).
+
+
+      Lands design/decisions/ci-adoption-page-rfc.md (status accepted) and
+      bootstraps the phase (phase YAML + roadmap entry, weight 4) as protected
+      -path bootstrap writes NOT listed in writes, per the P39-P43 precedent (the
+      phase YAML is in acceptance_refs and design/roadmap.yaml is a plan-lint
+      --strict protected path).
+
+
+      Creates docs/workflows/ci.md (thin orchestration: contributor vs
+      maintainer/release loops, minimal pull_request Actions example on the
+      project-local pinned binary, the include-quality advisory nuance, the
+      preconditions checklist linking cli-contract / getting-started) and its
+      docs/ja/workflows/ci.md mirror; adds the Workflows hub row to docs/README.md
+      and docs/ja/README.md; widens cli-contract.md's Actions example to the full
+      recommended gate; registers the page in docs/maintainers/docs-maintenance.md.
+    decision_refs:
+      - design/decisions/ci-adoption-page-rfc.md
+    reads:
+      - design/decisions/ci-adoption-page-rfc.md
+      - docs/cli-contract.md
+      - docs/workflows/greenfield.md
+      - docs/README.md
+      - docs/maintainers/docs-maintenance.md
+    writes:
+      - docs/workflows/ci.md
+      - docs/ja/workflows/ci.md
+      - docs/README.md
+      - docs/ja/README.md
+      - docs/cli-contract.md
+      - docs/maintainers/docs-maintenance.md
+    acceptance_refs:
+      - design/phases/P44-ci-adoption-page.yaml
