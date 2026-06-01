@@ -47,6 +47,39 @@ describe("CommandSpec derivation (P46)", () => {
     for (const ex of spec.examples) expect(ref).toContain(ex);
   });
 
+  // `task add` is the highest-risk port (stdlib parseArgs directly, the largest
+  // mixed required/repeatable flag set). Pin its parse surface specifically:
+  // the spec must reproduce the exact options the hand-written literal had.
+  describe("task add parse surface (P46 step 2)", () => {
+    const opts = toParseOptions(TASK_SPECS.add!);
+
+    it("repeatable flags map to multiple:true", () => {
+      for (const name of ["depends-on", "decision-ref", "read", "write", "acceptance-ref"]) {
+        expect(opts[name]).toEqual({ type: "string", multiple: true });
+      }
+    });
+
+    it("string-valued flags are string, no multiple", () => {
+      for (const name of ["description", "type", "id", "ambiguity", "risk", "context-size", "write-surface", "verification-strength", "expected-duration"]) {
+        expect(opts[name]).toEqual({ type: "string" });
+      }
+    });
+
+    it("--json is boolean", () => {
+      expect(opts.json).toEqual({ type: "boolean" });
+    });
+
+    it("covers exactly the 15 documented flags (no addition, no drop)", () => {
+      expect(Object.keys(opts).sort()).toEqual(
+        [
+          "acceptance-ref", "ambiguity", "context-size", "decision-ref",
+          "depends-on", "description", "expected-duration", "id", "json",
+          "read", "risk", "type", "verification-strength", "write", "write-surface",
+        ].sort(),
+      );
+    });
+  });
+
   it("required is presentation-only: it does not appear in parseArgs config", () => {
     // A synthetic spec with a required flag must still produce a plain
     // string/boolean parseArgs entry — no "required" key leaks through.

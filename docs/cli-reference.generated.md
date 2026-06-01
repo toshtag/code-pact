@@ -10,6 +10,56 @@ exit codes, error codes, stability taxonomy — lives in
 
 ## task
 
+## `task add`
+
+`code-pact task add <phase-id> [options]`
+
+Append a task to a phase. Two paths: with no --description on a TTY it runs
+an interactive wizard; with --description it is non-interactive and --type
+is required. For bulk creation from a draft, use `phase import` instead.
+
+| Flag | Value | Description |
+| --- | --- | --- |
+| `--description` | `<text>` | Add non-interactively (skips the wizard); requires --type. |
+| `--type` | `<type>` | Task type (feature | refactor | docs | test | …). Required with --description. |
+| `--id` | `<task-id>` | Override the generated task id. Valid in both paths. |
+| `--depends-on` | `<id>` | Upstream task dependency. (repeatable) |
+| `--decision-ref` | `<path>` | ADR this task depends on. (repeatable) |
+| `--read` | `<path>` | Declared read scope. (repeatable) |
+| `--write` | `<path>` | Declared write scope. (repeatable) |
+| `--acceptance-ref` | `<path>` | Acceptance reference. (repeatable) |
+| `--ambiguity` | `<level>` | Optional sizing/readiness field; see the task schema for allowed values. |
+| `--risk` | `<level>` | Optional sizing/readiness field; see the task schema for allowed values. |
+| `--context-size` | `<size>` | Optional sizing/readiness field; see the task schema for allowed values. |
+| `--write-surface` | `<size>` | Optional sizing/readiness field; see the task schema for allowed values. |
+| `--verification-strength` | `<level>` | Optional sizing/readiness field; see the task schema for allowed values. |
+| `--expected-duration` | `<dur>` | Optional sizing/readiness field; see the task schema for allowed values. |
+| `--json` | — | Emit JSON. Valid in both paths. |
+
+```sh
+code-pact task add P1                         # interactive wizard (TTY)
+code-pact task add P1 --description "Add X" --type feature --json
+```
+
+## `task context`
+
+`code-pact task context <task-id> [options]`
+
+Build and print the task's context pack. `task prepare` bundles this with
+the recommendation; call `task context` directly when you only need the pack. Read-only — never mutates progress.yaml.
+
+| Flag | Value | Description |
+| --- | --- | --- |
+| `--agent` | `<name>` | Agent name. Defaults to project default_agent. |
+| `--explain` | — | Print the section-budget table instead of the pack body. |
+| `--budget-bytes` | `<N>` | Cap the pack at N bytes (positive integer); over budget returns CONTEXT_OVER_BUDGET with the minimum achievable size. |
+| `--json` | — | Emit JSON. |
+
+```sh
+code-pact task context P1-T1 --agent claude-code --json
+code-pact task context P1-T1 --explain
+```
+
 ## `task prepare`
 
 `code-pact task prepare <task-id> [options]`
@@ -30,6 +80,86 @@ commands to run. Read-only — never mutates progress.yaml.
 code-pact task prepare P1-T1 --agent claude-code --json
 ```
 
+## `task start`
+
+`code-pact task start <task-id> [options]`
+
+Append a `started` event to progress.yaml. Idempotent — a second call from
+`started` returns already_started without a duplicate event. Run once per
+implementation pass; then `task complete` when verification passes.
+
+| Flag | Value | Description |
+| --- | --- | --- |
+| `--agent` | `<name>` | Agent name. Defaults to project default_agent. |
+| `--json` | — | Emit JSON. |
+
+```sh
+code-pact task start P1-T1 --agent claude-code --json
+```
+
+## `task status`
+
+`code-pact task status <task-id> [options]`
+
+Print the task's derived state (planned / started / resumed / blocked /
+done / failed) and its progress-event history. Agent-neutral (takes no --agent). Read-only — never mutates progress.yaml.
+
+| Flag | Value | Description |
+| --- | --- | --- |
+| `--json` | — | Emit JSON. |
+
+```sh
+code-pact task status P1-T1 --json
+```
+
+## `task block`
+
+`code-pact task block <task-id> [options]`
+
+Append a `blocked` event to progress.yaml. A blocked task must be resumed
+(`task resume`) before it can complete. `--reason` is required.
+
+| Flag | Value | Description |
+| --- | --- | --- |
+| `--reason` (required) | `<text>` | Why the task is blocked. |
+| `--agent` | `<name>` | Agent name. Defaults to project default_agent. |
+| `--json` | — | Emit JSON. |
+
+```sh
+code-pact task block P1-T1 --reason "waiting on upstream API" --json
+```
+
+## `task resume`
+
+`code-pact task resume <task-id> [options]`
+
+Append a `resumed` event to progress.yaml, clearing a prior block. A
+`blocked` task must be resumed before `task complete` will run.
+
+| Flag | Value | Description |
+| --- | --- | --- |
+| `--agent` | `<name>` | Agent name. Defaults to project default_agent. |
+| `--json` | — | Emit JSON. |
+
+```sh
+code-pact task resume P1-T1 --agent claude-code --json
+```
+
+## `task runbook`
+
+`code-pact task runbook <task-id> [options]`
+
+Print the ordered next-steps for a task ("what should I do next?") from its
+derived state. Alias: `task next`. Read-only — never mutates progress.yaml.
+
+| Flag | Value | Description |
+| --- | --- | --- |
+| `--json` | — | Emit JSON (read data.next_steps[0].command for the next command). |
+
+```sh
+code-pact task runbook P1-T1 --json
+```
+
 ## `task complete`
 
 `code-pact task complete <task-id> [options]`
@@ -48,6 +178,36 @@ yourself — use `task record-done` instead.
 
 ```sh
 code-pact task complete P1-T1 --agent claude-code --json
+```
+
+## `task record-done`
+
+`code-pact task record-done <task-id> [options]`
+
+Record a task as done WITHOUT running task complete's verification.
+
+Use this for:
+  1. externally completed work — already-merged work, or changes that
+     cannot be verified from the current working tree.
+  2. lifecycleMode: record_only tasks — after you have run the project
+     verification yourself (record_only is a lighter loop, not lighter
+     verification).
+
+This does NOT run verification commands — the proof is the --evidence you
+supply. The decision gate is still enforced for requires_decision tasks.
+The event is recorded with source: external.
+
+| Flag | Value | Description |
+| --- | --- | --- |
+| `--evidence` (required) | `<text>` | Completion proof — a PR, a CI result, or the verification command you ran. |
+| `--notes` | `<text>` | Optional note stored on the progress event. |
+| `--agent` | `<name>` | Agent name. Defaults to project default_agent. |
+| `--dry-run` | — | Show the event without writing progress.yaml. |
+| `--json` | — | Emit JSON. |
+
+```sh
+code-pact task record-done P1-T1 --evidence "PR #123" --notes "Already merged"
+code-pact task record-done P1-T2 --evidence "pnpm test passed; docs-only record_only task"
 ```
 
 ## `task finalize`

@@ -39,8 +39,20 @@ function render(): string {
     "",
   ];
 
-  // Deterministic order: the step-1 vertical slice, then any others by key.
-  const order = ["prepare", "complete", "finalize"];
+  // Deterministic order: lifecycle reading order, then any others by key.
+  const order = [
+    "add",
+    "context",
+    "prepare",
+    "start",
+    "status",
+    "block",
+    "resume",
+    "runbook",
+    "complete",
+    "record-done",
+    "finalize",
+  ];
   const keys = [
     ...order.filter((k) => k in TASK_SPECS),
     ...Object.keys(TASK_SPECS).filter((k) => !order.includes(k)),
