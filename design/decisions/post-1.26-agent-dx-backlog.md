@@ -1,6 +1,6 @@
 # Post-1.26 agent-DX backlog (P40-P44 intent)
 
-- Status: planning (intent record, not an implementation RFC)
+- Status: complete (intent record, not an implementation RFC; P40-P44 all shipped)
 - Date: 2026-05-30
 - Related: [Root-cause-first completion errors](root-cause-completion-errors-rfc.md) (P39, accepted)
 
@@ -17,8 +17,8 @@ P2-T2). That is code-pact's demonstrated differentiator, and it shapes the order
 The theme across all of these is the same as P39: **do not add value the agent
 can't find — make the control surface carry it.** Several of the proposed
 phases, taken literally, would *widen* the contract (a third "what next"
-structure, a self-referential version file). Where that risk exists it is called
-out below as a re-scope to settle in the phase's RFC.
+structure, a self-referential version file). Where that risk existed it was
+called out below as a re-scope, then settled in the phase's RFC.
 
 ## Sequence (differentiation-first)
 
@@ -85,7 +85,7 @@ risk, whereas P43 strengthened a proven win.
   Final: **no command filtering, no ordered array, no `recommended_flow`, no new
   `next_action.type`** — only one additive `commands` key + a mode-aware
   `next_action.message`.
-- **Remaining sequence.** P44.
+- **Follow-on sequence.** P42 then P44 — both since shipped.
 
 ## P42 — project-side version pinning — **shipped (docs-first; no new mechanism)**
 
@@ -134,8 +134,8 @@ risk, whereas P43 strengthened a proven win.
 ## Non-goals (this backlog)
 
 - It did not authorize implementing P40-P44 up front. When this backlog was
-  written P39 was the only phase registered in `design/roadmap.yaml`; each of
-  P40-P44 was registered with its own accepted RFC at its turn (P40, P41, P42,
-  P43 have since shipped and are registered; P44 remains).
-- It does not lock the re-scopes above; they are the recommended starting
-  position for each phase's RFC, to be confirmed or overridden there.
+  written P39 was the only phase registered in `design/roadmap.yaml`; P40-P44
+  were each registered with their own accepted RFC at their turn and have since
+  shipped.
+- It did not lock the re-scopes above; they were the recommended starting
+  position for each phase's RFC, confirmed or overridden there as each shipped.

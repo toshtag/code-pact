@@ -53,9 +53,11 @@ definition_of_done:
   - cli-contract.md no longer holds a runnable Actions YAML — its CI section is
     the --base-ref contract + diagnostics plus a link to ci.md; ci.md's example
     is the full recommended gate (validate --strict --base-ref + plan lint
-    --strict + plan analyze --strict)
+    --include-quality --strict + plan analyze --strict)
   - docs/maintainers/docs-maintenance.md registers the CI page in the ownership
     map / ja-sync list
+  - docs/ja/getting-started.md install-facing guidance (Prerequisites + Install)
+    is synced to the exact-pin path the ja CI page links to (P42 ja follow-up)
   - pnpm check:docs passes; validate and plan lint --include-quality --strict and
     plan analyze --strict stay green
 verification:
@@ -94,8 +96,9 @@ tasks:
       docs/ja/workflows/ci.md mirror; adds the Workflows hub row to docs/README.md
       and docs/ja/README.md; replaces cli-contract.md's Actions YAML with the
       --base-ref contract text plus a link to ci.md (ci.md owns the template, no
-      duplication); syncs docs/ja/getting-started.md's install section to the
-      exact-pin path (the ja CI page links to it); registers the page in
+      duplication); syncs docs/ja/getting-started.md's install-facing guidance
+      (Prerequisites + Install) to the exact-pin path (the ja CI page links to
+      it); registers the page in
       docs/maintainers/docs-maintenance.md; adds a CHANGELOG entry.
     decision_refs:
       - design/decisions/ci-adoption-page-rfc.md

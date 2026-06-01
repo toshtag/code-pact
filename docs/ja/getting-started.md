@@ -27,7 +27,7 @@ code-pact --version
 npx code-pact --version
 ```
 
-チームと CI では、code-pact を `devDependencies` に **正確な**バージョンで pin してください（`--save-exact`）。code-pact のコントラクトや `state/progress.yaml` のセマンティクスはバージョン間で進化するため、floating な `@latest`（あるいは `^` レンジでも）は実行ごとに挙動が変わりえます。`package.json` と lockfile をコミットして、CI とコントリビューターが同じバージョンを解決するようにしてください。グローバルインストールと `npx` の経路は、ちょっとした確認や個人利用には十分です。
+チームと CI では、code-pact を `devDependencies` に **正確な**バージョンで pin してください（`--save-exact`）。code-pact のコントラクトや `state/progress.yaml` のセマンティクスはバージョン間で進化するため、floating な `@latest`（あるいは `^` レンジでも）は実行ごとに挙動が変わりえます。`package.json` と lockfile をコミットして、CI とコントリビューターが同じバージョンを解決するようにしてください。グローバルインストールと `npx` の経路は、ちょっとした確認や個人利用には十分です。[CI ガイド](workflows/ci.md)の GitHub Actions 例も、同じ理由でバージョンを明示的に pin しています。
 
 > このガイドの以降のコマンド例は、簡潔さのため bare な `code-pact …` で書いています。上記の pin した `devDependency` の経路を使う場合は、パッケージランナー経由で実行してください — `npm exec -- code-pact …`（または `npm` スクリプト経由）—— プロジェクトローカルの pin したバイナリが解決されます。
 
