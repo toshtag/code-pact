@@ -69,6 +69,17 @@ describe("cluster --help → usage, exit 0", () => {
     [["task", "runbook", "--help"], /Usage: code-pact task runbook/, /--json/],
     [["plan", "prompt", "--help"], /Usage: code-pact plan prompt/, /--schema-only/],
     [["phase", "import", "--help"], /Usage: code-pact phase import/, /--strict/],
+    // P52 step 2 — the 9 mutating / JSON-emitting non-task commands brought
+    // from stub to rich help.
+    [["plan", "brief", "--help"], /Usage: code-pact plan brief/, /--from-file/],
+    [["plan", "constitution", "--help"], /Usage: code-pact plan constitution/, /--principle/],
+    [["plan", "adopt", "--help"], /Usage: code-pact plan adopt/, /--write/],
+    [["plan", "normalize", "--help"], /Usage: code-pact plan normalize/, /--check/],
+    [["phase", "add", "--help"], /Usage: code-pact phase add/, /--objective/],
+    [["phase", "new", "--help"], /Usage: code-pact phase new/, /[Ii]nteractive/],
+    [["phase", "reconcile", "--help"], /Usage: code-pact phase reconcile/, /--write/],
+    [["adapter", "install", "--help"], /Usage: code-pact adapter install/, /--force/],
+    [["adapter", "upgrade", "--help"], /Usage: code-pact adapter upgrade/, /--accept-modified/],
   ];
   for (const [argv, usageRe, flagRe] of RICH_LEAF_HELP) {
     it(`\`${argv.slice(0, -1).join(" ")} --help\` → rich usage with flags and examples, exit 0`, () => {

@@ -59,21 +59,15 @@ const COMMANDS: Cmd[] = [
 // growing: a new mutating/JSON command must ship with rich help, not an
 // allowlist entry.
 const STUB_ALLOWLIST = new Set<string>([
-  "plan brief",
-  "plan adopt",
-  "plan constitution",
+  // Read-only commands still on the stub (P52 step 2 filled the mutating ones).
+  // These remain a known, listed gap — fill them in a later pass and remove the
+  // entry. The list only shrinks.
   "plan lint",
-  "plan normalize",
   "plan analyze",
-  "phase add",
-  "phase new",
   "phase ls",
   "phase show",
-  "phase reconcile",
   "phase runbook",
   "adapter list",
-  "adapter install",
-  "adapter upgrade",
   "adapter doctor",
   "adapter conformance",
 ]);
