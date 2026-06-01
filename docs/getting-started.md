@@ -9,7 +9,7 @@ If you only want a sixty-second overview of what `code-pact` is, read the [READM
 ## Prerequisites
 
 - Node.js **22 or newer** (LTS or current)
-- A terminal where you can run `npm install -g code-pact` (or `npx code-pact …`)
+- A terminal where you can run `npm install` / `npm exec`; teams and CI should use the pinned devDependency path below
 - One of the supported agents: `claude-code`, `codex`, or `generic` (Stable). `cursor` and `gemini-cli` work but are Experimental.
 
 ## Install
@@ -29,7 +29,7 @@ npx code-pact --version
 
 For teams and CI, pin code-pact to an **exact** version in your `devDependencies` (`--save-exact`) so every contributor and every pipeline run resolves the same CLI — code-pact's contract and `state/progress.yaml` semantics evolve across versions, so a floating `@latest` (or even a `^` range) can change behaviour between runs. Commit `package.json` and your lockfile so CI and contributors resolve the same version. The global install and `npx` paths are fine for a quick look or individual use; the CLI contract's CI example pins the version explicitly for the same reason.
 
-If you have a project with pinned pre-v1.0 behaviour, `npm install -g code-pact@alpha` still works. New projects should use the default `latest` tag.
+`code-pact@alpha` remains available for projects intentionally pinned to pre-v1.0 behaviour. New projects should pin an exact version from the current stable release line rather than the legacy `alpha` tag.
 
 ## Choose your path
 
