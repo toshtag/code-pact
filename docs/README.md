@@ -1,6 +1,6 @@
 # code-pact documentation
 
-> 🌐 日本語のドキュメント一覧は [docs/ja/](ja/README.md) にあります。
+> 🌐 日本語の入口は [docs/ja/](ja/README.md) にあります（一次ドキュメントは英語です）。
 
 The fastest way in is [`getting-started.md`](getting-started.md) — empty project to your first `task complete` in about thirty minutes. If you already know the shape of the work, jump straight to the workflow guide that matches your situation: starting from scratch, or adopting code-pact on an existing repo.
 

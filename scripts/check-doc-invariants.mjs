@@ -46,16 +46,7 @@ function prose(text) {
   }
 }
 
-// 2. The Japanese getting-started must not list dogfood.md as newcomer
-//    "next reading" (it is a maintainer doc; EN dropped it).
-{
-  const ja = read("docs/ja/getting-started.md");
-  if (/]\((\.\.\/)?dogfood\.md[)#]/.test(ja)) {
-    fail("docs/ja/getting-started.md", "must not link dogfood.md (maintainer doc — keep it out of the newcomer path)");
-  }
-}
-
-// 3. dogfood.md is a maintainer *quick* guide — keep it lean. Deep material
+// 2. dogfood.md is a maintainer *quick* guide — keep it lean. Deep material
 //    belongs in maintainers/operations.md.
 {
   const lines = read("docs/dogfood.md").split("\n").length;
@@ -75,9 +66,9 @@ function prose(text) {
   }
 }
 
-// 5. getting-started (EN + JA) must teach `task finalize` as preview → apply
+// 5. getting-started must teach `task finalize` as preview → apply
 //    (dry-run is the default), matching per-task-loop.md.
-for (const rel of ["docs/getting-started.md", "docs/ja/getting-started.md"]) {
+for (const rel of ["docs/getting-started.md"]) {
   const body = read(rel);
   const hasPreview = body.includes("task finalize TUTORIAL-T1 --json");
   const hasApply = body.includes("task finalize TUTORIAL-T1 --write --json");
@@ -95,7 +86,7 @@ const NOISE = [
   { re: /\(v\d+\.\d+\+/, label: "feature-version tag (e.g. (v1.4+)" },
   { re: /\bP1[0-9]\b(?!-)/, label: "bare phase/RFC reference (e.g. P17)" },
 ];
-for (const rel of ["docs/getting-started.md", "docs/ja/getting-started.md"]) {
+for (const rel of ["docs/getting-started.md"]) {
   const text = prose(read(rel));
   for (const { re, label } of NOISE) {
     const m = text.match(re);

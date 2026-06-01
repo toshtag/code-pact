@@ -1,7 +1,5 @@
 # Greenfield workflow
 
-> 🌐 日本語版: [ゼロから (greenfield)](../ja/workflows/greenfield.md)
-
 This guide is for projects where **no production code exists yet**. You are starting from an empty git repo (or one with only scaffolding) and want `code-pact` to structure the build from day one.
 
 If you're adding `code-pact` to an existing codebase, read [`brownfield-feature.md`](brownfield-feature.md) instead. For the command sequences themselves, see [`docs/getting-started.md`](../getting-started.md) — this document covers **what to write in the prompts**, **how to shape the first phases**, and **which onboarding path matches a greenfield project**.

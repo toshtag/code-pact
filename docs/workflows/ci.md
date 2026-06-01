@@ -1,7 +1,5 @@
 # Running code-pact in CI
 
-> 🌐 日本語版: [CI で code-pact を動かす](../ja/workflows/ci.md)
-
 This page is the single home for wiring code-pact into CI. It **sequences and
 links** the pieces — it does not restate them. The detectors it relies on already
 exist (`CONTROL_PLANE_*`, branch-drift; see [`cli-contract.md`](../cli-contract.md#error-codes)).

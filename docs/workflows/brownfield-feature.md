@@ -1,7 +1,5 @@
 # Brownfield workflow — adopting code-pact on an existing project
 
-> 🌐 日本語版: [既存に導入 (brownfield)](../ja/workflows/brownfield-feature.md)
-
 This guide is for projects with **existing production code, existing docs, and probably an existing `CLAUDE.md` / `AGENTS.md` / agent rules file**. You want to drive **a specific feature or refactor** through `code-pact`, not retroactively backfill the entire repo's history.
 
 If you're starting from an empty repo, read [`greenfield.md`](greenfield.md) instead. For the command sequences themselves, see [`docs/getting-started.md`](../getting-started.md) — this document covers **scope**, **coexistence with existing agent files**, and **the smallest sensible adoption surface**.
