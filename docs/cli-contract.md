@@ -1528,12 +1528,7 @@ The command MUST NOT mutate `.code-pact/state/progress.yaml` on any code path. I
 
 ### Flags
 
-| Flag | Effect |
-|---|---|
-| `--agent <name>` | Override the project's `default_agent`. Same validation as `task context` (`AGENT_NOT_FOUND` / `AGENT_NOT_ENABLED`). |
-| `--json` | Emit the full structured envelope on stdout. Without `--json`, a short human-readable summary is printed. |
-| `--dry-run` | Build the context pack in memory but do not write it; return `would_write_context_pack_path` instead of `context_pack_path`. |
-| `--budget-bytes <N>` (v1.13+, P24) | Cap the rendered pack at `N` UTF-8 bytes by eliding sections in the priority order defined in [`task context --budget-bytes`](#--budget-bytes-n-v113-p24). Same flag, same elision policy, same error envelope. The `context_pack_bytes` field in the response reflects the post-elision size. Throws `CONTEXT_OVER_BUDGET` (exit 2) when the budget is unachievable; `progress.yaml` is NOT mutated on the failure path (the progress-read-only invariant from P21-T3 is preserved). |
+The flag list, value types, and examples live in the generated [CLI reference § `task prepare`](cli-reference.generated.md). Contract notes on specific flags: `--agent` shares `task context`'s validation (`AGENT_NOT_FOUND` / `AGENT_NOT_ENABLED`); `--dry-run` returns `would_write_context_pack_path` instead of `context_pack_path`; `--budget-bytes <N>` (v1.13+, P24) elides sections in the priority order defined in [`task context --budget-bytes`](#--budget-bytes-n-v113-p24) and throws `CONTEXT_OVER_BUDGET` (exit 2) when unachievable, with `progress.yaml` NOT mutated on the failure path (the progress-read-only invariant from P21-T3).
 
 ### JSON envelope
 
@@ -1692,25 +1687,9 @@ The presence of `--description` is the mode switch. Three branches:
 | `--description` absent, no other non-interactive flags, no TTY | CONFIG_ERROR with non-interactive guidance. |
 | `--description` absent, one or more non-interactive-only flags present (e.g. `--type`, `--depends-on`) | **CONFIG_ERROR**. The CLI never silently enters the wizard or silently ignores the flags — predictable for scripts that lose TTY capability mid-pipeline. |
 
-### Non-interactive flag table (v1.4+)
+### Non-interactive flags (v1.4+)
 
-| Flag | Type | Required? | Default | Notes |
-| --- | --- | --- | --- | --- |
-| `--description` | string | yes (mode trigger) | — | Required in non-interactive mode |
-| `--type` | enum (`architecture` / `feature` / `bugfix` / `refactor` / `docs` / `test` / `mechanical_refactor` / `other`) | yes | — | Wizard prompts; non-interactive requires it |
-| `--id` | string | no | auto-generated as `<phaseId>-T<n>` | Valid in both wizard and non-interactive paths |
-| `--ambiguity` | enum (`low` / `medium` / `high`) | no | `medium` | Wizard default |
-| `--risk` | enum (`low` / `medium` / `high`) | no | `medium` | Wizard default |
-| `--context-size` | enum (`small` / `medium` / `large`) | no | `medium` | Wizard default |
-| `--write-surface` | enum (`low` / `medium` / `high`) | no | `medium` | Wizard default |
-| `--verification-strength` | enum (`weak` / `medium` / `strong`) | no | `medium` | Wizard default |
-| `--expected-duration` | enum (`short` / `medium` / `long`) | no | `medium` | Wizard default |
-| `--depends-on <id>` | string, **repeatable** | no | (none) | P10 field; pass multiple flags, not a comma-separated list |
-| `--decision-ref <path>` | string, **repeatable** | no | (none) | P10 field |
-| `--read <glob>` | string, **repeatable** | no | (none) | P10 field |
-| `--write <glob>` | string, **repeatable** | no | (none) | P10 field |
-| `--acceptance-ref <path>` | string, **repeatable** | no | (none) | P10 field |
-| `--json` | boolean | no | false | Valid in both paths |
+The flag list, value types, repeatability, and examples live in the generated [CLI reference § `task add`](cli-reference.generated.md). Contract notes that the reference does not carry: `--description` is the **mode trigger** (its presence selects the non-interactive path) and `--type` is then required; all readiness fields (`--ambiguity` / `--risk` / `--context-size` / `--write-surface` / `--verification-strength` / `--expected-duration`) default to `medium`; the P10 fields (`--depends-on` / `--decision-ref` / `--read` / `--write` / `--acceptance-ref`) are repeatable — pass multiple flags, not a comma-separated list; enum values are validated (invalid → `CONFIG_ERROR`).
 
 **`--status` is intentionally not exposed.** Newly added tasks are always written with `status: planned`. Historical or already-done tasks must use `phase import` — this preserves the P11/P12 contract that design `done` is the result of `task finalize` / `phase reconcile` after `task complete`, never a starting point declared at creation time.
 
@@ -1745,34 +1724,7 @@ No new error codes in v1.4. All paths reuse existing public codes:
 
 ### Usage examples
 
-```sh
-# Wizard path (unchanged from v0.6) — TTY required.
-code-pact task add P1
-
-# Non-interactive (v1.4+) — minimal required flags.
-code-pact task add P1 --description "Add login form" --type feature
-
-# Non-interactive with explicit id + readiness overrides.
-code-pact task add P1 \
-  --id P1-AUTH \
-  --description "OAuth migration spike" \
-  --type architecture \
-  --ambiguity high \
-  --risk high \
-  --verification-strength strong
-
-# Non-interactive with P10 declarations (repeatable flags).
-code-pact task add P1 \
-  --description "Wire the new flow" \
-  --type feature \
-  --depends-on P1-AUTH \
-  --read "src/auth/**" \
-  --read "src/middleware/**" \
-  --write "src/handlers/login.ts" \
-  --decision-ref design/decisions/auth-oauth-rfc.md \
-  --acceptance-ref docs/acceptance/login-flow.md \
-  --json
-```
+See the generated [CLI reference § `task add`](cli-reference.generated.md).
 
 ## `task complete`
 
@@ -1963,16 +1915,7 @@ Every `task finalize` **failure** envelope (`TASK_FINALIZE_NOT_ELIGIBLE`, `TASK_
 
 ### Usage example
 
-```sh
-# Preview — what would finalize do?
-code-pact task finalize P9-T5 --json
-
-# Apply — flip the status in the phase YAML.
-code-pact task finalize P9-T5 --write --json
-
-# Recommended adoption: stop hand-editing design status in release prep.
-# Use this command (or `phase reconcile`, P11-T4) instead.
-```
+See the generated [CLI reference § `task finalize`](cli-reference.generated.md) for the preview→apply examples. Recommended adoption: stop hand-editing design status in release prep — use `task finalize` (or `phase reconcile`, P11-T4) instead.
 
 ## `phase reconcile` — bulk-flip task design statuses for a phase (v1.2+, P11)
 
@@ -2167,14 +2110,7 @@ Both take a task id; neither calls the other. Bundling them is an open question 
 
 ### Usage example
 
-```sh
-# Single task — see what to do next.
-code-pact task runbook P9-T5 --json
-
-# After implementation + task complete, runbook recommends finalize.
-code-pact task complete P9-T5
-code-pact task runbook P9-T5 --json   # → step: task finalize P9-T5 --write
-```
+See the generated [CLI reference § `task runbook`](cli-reference.generated.md).
 
 ## `phase runbook` — read-only guidance for an entire phase (v1.3+, P12)
 
