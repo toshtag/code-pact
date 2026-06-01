@@ -49,7 +49,6 @@ risk, whereas P43 strengthened a proven win.
   only, never an LLM free-summary (explicitly rejected). Resolved open questions:
   commitment syntax is a checkbox list under the fixed `## Implementation
   commitments` heading; `task context` does **not** echo commitments (prepare-only).
-- **Follow-on sequence:** remaining backlog is P42 → P44 (P41 and P40 have since shipped).
 
 ## P41 — leaf help + docs straightening — **shipped**
 
