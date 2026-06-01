@@ -56,10 +56,31 @@ async function loadDoctorConfig(cwd: string): Promise<DoctorConfig> {
 // Types
 // ---------------------------------------------------------------------------
 
+/**
+ * Machine-readable recovery guidance for a diagnostic (v1.28+, additive).
+ *
+ * The `message` already names the recommended command, alternatives, and how
+ * to silence the check — but only as prose an agent has to parse. `recovery`
+ * surfaces the same three things as structured fields so an agent can pick the
+ * next action from JSON without natural-language parsing. Older issues omit it
+ * entirely; consumers reading only `code` / `severity` / `message` are
+ * unaffected.
+ */
+export type DoctorIssueRecovery = {
+  /** The recommended next command (a runnable template; placeholders in <…>). */
+  primary: string;
+  /** Equally-valid alternative commands, if any (e.g. record out-of-loop work). */
+  alternatives?: string[];
+  /** How to scope/silence the check: a config key or docs pointer. */
+  reference?: string;
+};
+
 export type DoctorIssue = {
   code: string;
   severity: "error" | "warning";
   message: string;
+  /** Structured recovery guidance (v1.28+, additive). Present on CONTROL_PLANE_* only. */
+  recovery?: DoctorIssueRecovery;
 };
 
 export type DoctorResult = {
@@ -656,6 +677,11 @@ async function checkControlPlaneNotDriven(
       `${realTasks} task(s) are planned and git has uncommitted changes, but progress.yaml has no started/done event for a non-TUTORIAL task — the code-pact scaffold exists but isn't being driven. ` +
       "Start a task with `code-pact task prepare <id> --agent <agent>`, or record out-of-loop work with `code-pact task record-done <id> --evidence \"...\"`. " +
       "Silence via .code-pact/doctor.yaml (disabled_checks: [CONTROL_PLANE_NOT_DRIVEN]).",
+    recovery: {
+      primary: "code-pact task prepare <id> --agent <agent>",
+      alternatives: ['code-pact task record-done <id> --evidence "..."'],
+      reference: ".code-pact/doctor.yaml (disabled_checks: [CONTROL_PLANE_NOT_DRIVEN])",
+    },
   });
 }
 
@@ -758,6 +784,12 @@ async function checkControlPlaneBranchNotDriven(
       `This branch changed real files vs ${baseRef} but added no started/done event for a known non-TUTORIAL task in progress.yaml — code changed without driving the control plane. ` +
       "Drive a task with `code-pact task prepare <id> --agent <agent>` (or record out-of-loop work with `code-pact task record-done <id> --evidence \"...\"`) and commit progress.yaml. " +
       "Exempt docs/config-only paths via .code-pact/doctor.yaml (control_plane_branch_not_driven.exclude_globs), or silence via disabled_checks: [CONTROL_PLANE_BRANCH_NOT_DRIVEN].",
+    recovery: {
+      primary: "code-pact task prepare <id> --agent <agent>",
+      alternatives: ['code-pact task record-done <id> --evidence "..."'],
+      reference:
+        ".code-pact/doctor.yaml (control_plane_branch_not_driven.exclude_globs to exempt paths; disabled_checks: [CONTROL_PLANE_BRANCH_NOT_DRIVEN] to silence)",
+    },
   });
 }
 

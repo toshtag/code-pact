@@ -278,6 +278,20 @@ Issue-level codes emitted by `doctor` / `validate` for general project health.
 | `CONTROL_PLANE_NOT_DRIVEN` (v1.25+) | warning | The scaffold exists but isn't being driven. Fires only when **all** of: a non-TUTORIAL task is planned; `progress.yaml` has no `started`/`done` event for a non-TUTORIAL task (tutorial usage does not count); and git shows uncommitted working changes (excluding code-pact's own runtime state). **git-unavailable is a silent skip** (never an error); a broken/unparseable `progress.yaml` is also skipped (the existing `INVALID_YAML`/`SCHEMA_ERROR` reports that). Advisory: `severity: warning`, never affects doctor's exit. Silence via `.code-pact/doctor.yaml` → `disabled_checks: [CONTROL_PLANE_NOT_DRIVEN]` |
 | `CONTROL_PLANE_BRANCH_NOT_DRIVEN` (v1.26+, P34) | warning | Branch-diff drift for PR CI. Runs only when `doctor` / `validate` is given `--base-ref <ref>`. Fires when the branch (`merge-base..HEAD`) changed real, non-excluded files but added no `started`/`done` event for a **known** non-TUTORIAL task — code changed without driving the loop. Silent skip when `--base-ref` is absent, git/merge-base is unavailable, `progress.yaml` is not git-tracked, or HEAD `progress.yaml` is unparseable. Advisory; gate via `validate --strict --base-ref`. Exempt paths via `control_plane_branch_not_driven.exclude_globs` (default empty); silence via `disabled_checks`. See the `doctor` section for the committed-ledger precondition, and [Running code-pact in CI](workflows/ci.md) for the copy-paste GitHub Actions workflow |
 
+**`issue.recovery` (v1.28+ — additive).** The two `CONTROL_PLANE_*` issues above carry a structured `recovery` object alongside `message`, so an agent can pick the next action from JSON without parsing the prose. Shape:
+
+```json
+{
+  "recovery": {
+    "primary": "code-pact task prepare <id> --agent <agent>",
+    "alternatives": ["code-pact task record-done <id> --evidence \"...\""],
+    "reference": ".code-pact/doctor.yaml (disabled_checks: [CONTROL_PLANE_NOT_DRIVEN])"
+  }
+}
+```
+
+`primary` is the recommended next command (a runnable template; `<…>` placeholders are agent-supplied). `alternatives` (optional) lists equally-valid commands. `reference` (optional) names the config key / docs pointer to scope or silence the check. It is **additive and present on `CONTROL_PLANE_*` only** — every other diagnostic omits `recovery`, and a consumer reading just `code` / `severity` / `message` sees no change. The same `message` prose is retained for human output.
+
 ### Adapter diagnostic codes
 
 Emitted by `adapter doctor` and (manifest-aware) global `doctor`. See the `adapter doctor` section above for severity rules and the rationale for each code.
