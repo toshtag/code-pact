@@ -11,7 +11,7 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ---
 
-## [Unreleased]
+## [1.27.0] — 2026-06-01
 
 ### CI / adoption page (P44)
 
