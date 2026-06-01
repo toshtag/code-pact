@@ -3,6 +3,9 @@
 // back as CONFIG_ERROR — hostile to both humans and agents probing the CLI.
 // These helpers let each cluster emit usage (exit 0) instead.
 
+import { renderLeafHelp } from "./spec/render.ts";
+import { TASK_SPECS } from "./spec/task.ts";
+
 /** The subcommand list shown for each cluster, mirroring the unknown-subcommand hints. */
 const CLUSTER_SUBCOMMANDS: Record<string, string> = {
   plan: "brief | prompt | adopt | constitution | lint | normalize | analyze | import (alias for \"phase import\")",
@@ -50,43 +53,11 @@ function subcommandStub(cluster: string, subcommand: string): string {
 // ---------------------------------------------------------------------------
 
 const LEAF_USAGE: Record<string, () => string> = {
-  "task prepare": () =>
-    [
-      "Usage: code-pact task prepare <task-id> [options]",
-      "",
-      "The single per-task entry point. Returns the current state, the execution",
-      "recommendation (tier/model/effort/budget), context-pack metadata, a",
-      "structured next_action, and a commands dictionary with the exact next",
-      "commands to run. Read-only — never mutates progress.yaml.",
-      "",
-      "Options:",
-      "  --agent <name>        Agent name. Defaults to project default_agent.",
-      "  --budget-bytes <N>    Cap the rendered context pack at N bytes.",
-      "  --dry-run             Report the would-write pack path without writing it.",
-      "  --json                Emit JSON.",
-      "",
-      "Examples:",
-      "  code-pact task prepare P1-T1 --agent claude-code --json",
-    ].join("\n"),
+  // P46 step 1 — prepare / complete / finalize derive from CommandSpec
+  // (src/cli/spec/task.ts) so parse + help + reference share one source.
+  "task prepare": () => renderLeafHelp(TASK_SPECS.prepare!),
 
-  "task complete": () =>
-    [
-      "Usage: code-pact task complete <task-id> [options]",
-      "",
-      "Run verification and, on pass, append a `done` event (source: loop) to",
-      "progress.yaml. Idempotent — a second call from `done` returns already_done.",
-      "A `blocked` task must be resumed first. To record a `done` without running",
-      "verification here — external completion, or a record_only task you verified",
-      "yourself — use `task record-done` instead.",
-      "",
-      "Options:",
-      "  --agent <name>    Agent name. Defaults to project default_agent.",
-      "  --dry-run         Show the event without writing progress.yaml.",
-      "  --json            Emit JSON.",
-      "",
-      "Examples:",
-      "  code-pact task complete P1-T1 --agent claude-code --json",
-    ].join("\n"),
+  "task complete": () => renderLeafHelp(TASK_SPECS.complete!),
 
   "task record-done": () =>
     [
@@ -118,26 +89,7 @@ const LEAF_USAGE: Record<string, () => string> = {
       "  code-pact task record-done P1-T2 --evidence \"pnpm test passed; docs-only record_only task\"",
     ].join("\n"),
 
-  "task finalize": () =>
-    [
-      "Usage: code-pact task finalize <task-id> [options]",
-      "",
-      "Flip the task's design status to `done` in its phase YAML and audit declared",
-      "vs. actual writes. Eligibility: the task's derived state must be `done` (run",
-      "`task complete` or `task record-done` first). Dry-run is the default — pass",
-      "--write to apply.",
-      "",
-      "Options:",
-      "  --write             Apply the status flip (default is a dry-run preview).",
-      "  --base-ref <ref>    Audit against the merge-base with <ref> (branch-level).",
-      "  --audit-strict      Promote write-audit warnings to a non-zero exit.",
-      "  --json              Emit JSON.",
-      "",
-      "Examples:",
-      "  code-pact task finalize P1-T1 --json",
-      "  code-pact task finalize P1-T1 --write --json",
-      "  code-pact task finalize P1-T1 --audit-strict --base-ref origin/main --write --json",
-    ].join("\n"),
+  "task finalize": () => renderLeafHelp(TASK_SPECS.finalize!),
 
   "plan prompt": () =>
     [
