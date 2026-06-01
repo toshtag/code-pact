@@ -1649,8 +1649,8 @@ merge-base is reachable. Pair it with `--strict` to make the branch-drift
 advisory a gate.
 
 > For the copy-paste GitHub Actions workflow — the full recommended gate
-> (`validate --strict --base-ref` + `plan lint --strict` + `plan analyze
-> --strict`), the contributor-vs-maintainer loop split, and the preconditions
+> (`validate --strict --base-ref` + `plan lint --include-quality --strict` +
+> `plan analyze --strict`), the contributor-vs-maintainer loop split, and the preconditions
 > checklist — see [Running code-pact in CI](workflows/ci.md). This section
 > documents the `--base-ref` contract and the diagnostic behavior; the runnable
 > workflow template lives there.

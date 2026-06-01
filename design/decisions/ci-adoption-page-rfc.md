@@ -103,8 +103,9 @@ canonical home (cli-contract / getting-started) for the full explanation.
 - No non-GitHub CI provider pages (GitLab/Circle/Jenkins) — the page may state
   the provider-neutral requirements (full history, base-ref, exact pin) in prose,
   but ships only the GitHub Actions example.
-- No re-statement of the Actions YAML, envelope shapes, or detector specs that
-  `cli-contract.md` owns — `ci.md` links to them (anti-duplication rule).
+- No duplication of the envelope shapes or detector specs that `cli-contract.md`
+  owns, and no second copy of the Actions workflow (`ci.md` owns the one
+  template; `cli-contract.md` links to it) — the anti-duplication rule.
 - No `external-tool` name-drops (constitution / docs convention).
 
 ## Definition of done
@@ -119,8 +120,8 @@ canonical home (cli-contract / getting-started) for the full explanation.
   page.
 - `cli-contract.md` holds no runnable Actions YAML: its CI section is the
   `--base-ref` contract + diagnostics plus a link to `ci.md`. `ci.md`'s example
-  is the full recommended gate (validate --strict --base-ref + plan lint --strict
-  + plan analyze --strict).
+  is the full recommended gate (validate --strict --base-ref + plan lint
+  --include-quality --strict + plan analyze --strict).
 - `docs/maintainers/docs-maintenance.md` registers the CI page in the ownership
   map / ja-sync list.
 - `pnpm check:docs` (links + invariants) passes; `validate` / `plan lint
