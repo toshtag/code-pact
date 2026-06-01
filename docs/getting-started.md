@@ -29,6 +29,8 @@ npx code-pact --version
 
 For teams and CI, pin code-pact to an **exact** version in your `devDependencies` (`--save-exact`) so every contributor and every pipeline run resolves the same CLI — code-pact's contract and `state/progress.yaml` semantics evolve across versions, so a floating `@latest` (or even a `^` range) can change behaviour between runs. Commit `package.json` and your lockfile so CI and contributors resolve the same version. The global install and `npx` paths are fine for a quick look or individual use; the CLI contract's CI example pins the version explicitly for the same reason.
 
+> The command examples in the rest of this guide are written as bare `code-pact …` for brevity. If you used the pinned `devDependency` path above, run them through your package runner — `npm exec -- code-pact …` (or via an `npm` script) — so they resolve the project-local pinned binary.
+
 `code-pact@alpha` remains available for projects intentionally pinned to pre-v1.0 behaviour. New projects should pin an exact version from the current stable release line rather than the legacy `alpha` tag.
 
 ## Choose your path

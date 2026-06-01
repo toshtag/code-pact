@@ -89,9 +89,11 @@ tasks:
       .version-mechanism non-goal, the held scope, and the docs/ja follow-up.
 
 
-      Adds the devDependency exact-pin path to docs/getting-started.md's Install
-      section (the one real gap) and syncs the control-plane: the post-1.26
-      backlog and design/decisions/README.md mark P42 shipped.
+      Adds the devDependency exact-pin path to docs/getting-started.md's
+      install-facing guidance (Prerequisites + Install commands + the
+      alpha/stable-line note — they must agree, or the page recommends pinning
+      and floating at once) and syncs the control-plane: the post-1.26 backlog
+      and design/decisions/README.md mark P42 shipped.
     decision_refs:
       - design/decisions/version-pinning-guidance-rfc.md
     reads:

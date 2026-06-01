@@ -59,8 +59,11 @@ requires a pinned binary in CI).
 - **Docs change is limited to `docs/getting-started.md`'s install-facing
   guidance** (Prerequisites + Install commands + the alpha/stable-line note) —
   the added pin block plus the surrounding lines aligned to it. No new
-  concept page; no `docs/ja` mirror edit in this phase; no `upgrading.md` /
-  `README.md` / `cli-contract.md` rewrite.
+  concept page. The other docs that mention pinning in passing — the root
+  `README.md`, `upgrading.md`, `migration.md`, and the `docs/ja` mirror — are
+  **not** reconciled here (that is the docs-surface re-growth P42 avoids).
+  `cli-contract.md` is not rewritten either, but for a different reason: it
+  already carries the CI pin guidance (see Audit), so it needs no change.
 - **`docs/ja/getting-started.md` is intentionally NOT synced here.** The ja
   mirror is a known follow-up; widening P42 to translation work would defeat the
   "close small" intent. Recorded as a follow-up note, not done.
@@ -98,11 +101,15 @@ Mild incoherence (resolved by the one edit, not separately reconciled):
 
 - `docs/getting-started.md`'s install-facing guidance (Prerequisites + Install
   commands + the alpha/stable-line note) presents the exact `devDependency` pin
-  as the recommended path for teams/CI, alongside the global/npx paths for
-  one-off use, with no remaining line that recommends floating on `@latest`.
+  (`npm install --save-dev --save-exact code-pact@<version>`) as the recommended
+  path for teams/CI, tells the reader to commit `package.json` + the lockfile,
+  keeps the global/npx paths for one-off use, and leaves no line recommending a
+  floating `@latest` install.
 - This RFC records the `.version`-mechanism non-goal so the backlog question
   ("is the mechanism still coming?") is closed, not left ambiguous.
-- The post-1.26 backlog marks P42 shipped (docs-first guidance; no new
-  mechanism).
-- `pnpm check:docs` and the doc-link/invariant checks pass; no other doc is
-  changed.
+- The post-1.26 backlog and `design/decisions/README.md` mark P42 shipped
+  (docs-first guidance; no new mechanism).
+- `pnpm check:docs` and the doc-link/invariant checks pass; `getting-started.md`
+  is the only doc changed for *content* (the backlog and the
+  `design/decisions/README.md` index rows are control-plane sync — marking P42
+  shipped — not new guidance).
