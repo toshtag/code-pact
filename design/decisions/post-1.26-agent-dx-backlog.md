@@ -94,10 +94,12 @@ risk, whereas P43 strengthened a proven win.
   found the CI side already covered (`docs/cli-contract.md` pins the binary and
   says "do NOT track @latest in CI"); the one real gap was the entry point —
   `docs/getting-started.md` offered only global-install / `npx` with no
-  `devDependency` pin path. P42 added that one Install block (pin as a
-  `devDependency`, recommended for teams/CI; global/`npx` kept for one-off use),
-  which also resolves the mild incoherence between the entry point and the CI
-  requirement. Single-file docs change.
+  `devDependency` pin path. P42 aligned getting-started.md's install-facing
+  guidance (Prerequisites + the Install commands + the alpha/stable-line note)
+  to the exact `devDependency` pin (recommended for teams/CI; global/`npx` kept
+  for one-off use), which also resolves the mild incoherence between the entry
+  point and the CI requirement. One file (getting-started.md), three
+  install-facing spots aligned.
 - **Rejected (explicit non-goal).** The `.code-pact/code-pact.version` file +
   `CODE_PACT_VERSION_MISMATCH` diagnostic — self-referential (a committed version
   file cannot constrain the *running* CLI, and drifts silently in exactly the
@@ -122,8 +124,9 @@ risk, whereas P43 strengthened a proven win.
 
 ## Non-goals (this backlog)
 
-- It does not authorize implementing P40-P44 now. P39 is the only phase
-  registered in `design/roadmap.yaml`; each of P40-P44 is registered with its own
-  accepted RFC when its turn comes.
+- It did not authorize implementing P40-P44 up front. When this backlog was
+  written P39 was the only phase registered in `design/roadmap.yaml`; each of
+  P40-P44 was registered with its own accepted RFC at its turn (P40, P41, P42,
+  P43 have since shipped and are registered; P44 remains).
 - It does not lock the re-scopes above; they are the recommended starting
   position for each phase's RFC, to be confirmed or overridden there.
