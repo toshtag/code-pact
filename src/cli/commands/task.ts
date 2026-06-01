@@ -10,6 +10,8 @@
 import { parseArgs } from "node:util";
 import { strictParse, strictParseAlias, ConfigError } from "../../lib/argv.ts";
 import { clusterUsage, emitUsage, hasHelpFlag, isHelpToken, subcommandUsage } from "../usage.ts";
+import { toParseOptions } from "../spec/render.ts";
+import { TASK_SPECS } from "../spec/task.ts";
 import { isInteractive } from "../../lib/tty.ts";
 import { messages, type Locale } from "../../i18n/index.ts";
 import { withWriteLock } from "../util.ts";
@@ -572,12 +574,7 @@ async function cmdTaskPrepare(
     ({ values, positionals } = strictParse(
       "task prepare",
       argv,
-      {
-        agent: { type: "string" },
-        json: { type: "boolean" },
-        "dry-run": { type: "boolean" },
-        "budget-bytes": { type: "string" },
-      },
+      toParseOptions(TASK_SPECS.prepare!),
       { allowPositionals: true },
     ));
   } catch (err) {
@@ -750,11 +747,7 @@ async function cmdTaskComplete(
     ({ values, positionals } = strictParse(
       "task complete",
       argv,
-      {
-        agent: { type: "string" },
-        json: { type: "boolean" },
-        "dry-run": { type: "boolean" },
-      },
+      toParseOptions(TASK_SPECS.complete!),
       { allowPositionals: true },
     ));
   } catch (err) {
@@ -1189,12 +1182,7 @@ async function cmdTaskFinalize(
       invokedAs,
       "task finalize",
       argv,
-      {
-        json: { type: "boolean" },
-        write: { type: "boolean" },
-        "base-ref": { type: "string" },
-        "audit-strict": { type: "boolean" },
-      },
+      toParseOptions(TASK_SPECS.finalize!),
       { allowPositionals: true },
     ));
   } catch (err) {
