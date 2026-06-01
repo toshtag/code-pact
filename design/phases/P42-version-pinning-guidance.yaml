@@ -18,8 +18,11 @@ objective: |
   covered (docs/cli-contract.md pins the binary and says "do NOT track @latest in
   CI"); the one real gap was the entry point — docs/getting-started.md offered
   only global-install / npx with no devDependency pin path and no team/CI-prefers
-  -pin statement. P42 fills exactly that gap with one Install-section edit and
-  records the posture in an accepted RFC.
+  -pin statement. P42 fills exactly that gap by aligning getting-started.md's
+  install-facing guidance (Prerequisites + Install commands + the
+  alpha/stable-line note) to the exact-pin recommendation — one file, but the
+  three install-facing spots must agree — and records the posture in an accepted
+  RFC.
 
   Explicit non-goal: the .code-pact/code-pact.version file + a
   CODE_PACT_VERSION_MISMATCH diagnostic. It is self-referential — a committed
@@ -45,10 +48,12 @@ non_goals:
   - Any change to install tags (latest / alpha) or the dist-tag policy
   - Any code, schema, new diagnostic, or CI change
 definition_of_done:
-  - docs/getting-started.md Install section presents an EXACT devDependency pin
+  - docs/getting-started.md install-facing guidance (Prerequisites + Install
+    commands + the alpha/stable-line note) presents an EXACT devDependency pin
     (--save-exact code-pact@<version>) as the recommended path for teams/CI,
-    alongside the existing global/npx paths for one-off use, and tells the reader
-    to commit package.json + the lockfile
+    alongside the global/npx paths for one-off use, tells the reader to commit
+    package.json + the lockfile, and leaves no line recommending a floating
+    @latest install
   - the accepted RFC design/decisions/version-pinning-guidance-rfc.md records
     the posture and the .version-mechanism non-goal, closing the backlog question
   - the post-1.26 backlog and design/decisions/README.md mark P42 shipped

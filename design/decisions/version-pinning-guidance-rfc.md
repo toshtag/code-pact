@@ -45,17 +45,20 @@ adds **no new mechanism.**
 
 ### The one gap P42 fills
 
-`docs/getting-started.md` Install section gains a third install path —
-`devDependency` pin — presented as the recommended path for teams and CI, with
-`npm install -g` / `npx` kept for one-off / individual use. This is the single
-edit; it also resolves the mild incoherence the audit flagged (the entry-point
-recommending a global install while `cli-contract.md` requires a pinned binary
-in CI).
+`docs/getting-started.md`'s install-facing guidance — its Prerequisites line,
+the Install commands, and the alpha/stable-release-line note — is updated so the
+exact `devDependency` pin is the recommended path for teams and CI, with
+`npm install -g` / `npx` kept for one-off / individual use. It is one file, but
+not one line: the three install-facing spots must agree, or the page recommends
+pinning and floating at once. This also resolves the mild incoherence the audit
+flagged (the entry point recommending a global install while `cli-contract.md`
+requires a pinned binary in CI).
 
 ## Scope (maintainer-approved)
 
-- **Docs change is limited to `docs/getting-started.md`'s Install section** —
-  one added block plus a one-line "recommended for teams & CI" framing. No new
+- **Docs change is limited to `docs/getting-started.md`'s install-facing
+  guidance** (Prerequisites + Install commands + the alpha/stable-line note) —
+  the added pin block plus the surrounding lines aligned to it. No new
   concept page; no `docs/ja` mirror edit in this phase; no `upgrading.md` /
   `README.md` / `cli-contract.md` rewrite.
 - **`docs/ja/getting-started.md` is intentionally NOT synced here.** The ja
@@ -93,9 +96,10 @@ Mild incoherence (resolved by the one edit, not separately reconciled):
 
 ## Definition of done
 
-- `docs/getting-started.md` Install section presents `devDependency` pin as the
-  recommended path for teams/CI, alongside the existing global/npx paths for
-  one-off use.
+- `docs/getting-started.md`'s install-facing guidance (Prerequisites + Install
+  commands + the alpha/stable-line note) presents the exact `devDependency` pin
+  as the recommended path for teams/CI, alongside the global/npx paths for
+  one-off use, with no remaining line that recommends floating on `@latest`.
 - This RFC records the `.version`-mechanism non-goal so the backlog question
   ("is the mechanism still coming?") is closed, not left ambiguous.
 - The post-1.26 backlog marks P42 shipped (docs-first guidance; no new

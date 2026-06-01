@@ -23,7 +23,7 @@ npm exec -- code-pact --version   # runs the project-local pinned binary
 npm install -g code-pact
 code-pact --version
 
-# Or run without installing
+# One-off / individual use only: run without installing
 npx code-pact --version
 ```
 
