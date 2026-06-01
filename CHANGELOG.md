@@ -11,6 +11,39 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ---
 
+## [1.28.0] — 2026-06-01
+
+Maintenance-surface reduction and agent discoverability, driven by external agent feedback on 1.27.0. No behavior change to task command parsing.
+
+### Maintenance surface reduction
+
+**Changed**
+
+- **docs/ja mirror removed.** The Japanese docs were a full mirror of the first-run / user guides, hand-synced every release. `docs/ja/` now keeps only `README.md` as an entry point into the English docs (the single source). CLI / adapter runtime output stays localizable; the spec/contract/usage docs do not. The per-release JA sync obligation is gone.
+- **task CLI reference is generated from a single source.** A `CommandSpec` per task subcommand (`src/cli/spec/`) is now the one place the flag surface is declared; parse (`toParseOptions`), help (`renderLeafHelp`), and `docs/cli-reference.generated.md` (`renderReference`) all derive from it. All 11 task verbs ported. `src/cli/usage.ts` dropped 321 → 137 lines. Flag-surface drift across parse/help/reference is structurally impossible. Design in `design/decisions/cli-command-spec-rfc.md`.
+- **cli-contract.md task flag-table duplication removed.** The 11 task flag tables / usage / examples in `docs/cli-contract.md` became pointers to the generated reference; the JSON envelopes, exit/error codes, enums, and other semantics stay (they are not generatable from the spec).
+
+### Agent discoverability
+
+**Added**
+
+- **Machine-readable recovery on `CONTROL_PLANE_*` issues.** `CONTROL_PLANE_NOT_DRIVEN` and `CONTROL_PLANE_BRANCH_NOT_DRIVEN` carry an additive `recovery` object (`{ primary, alternatives?, reference? }`) alongside the unchanged `message`, so an agent can pick the next action from JSON without parsing prose. It rides through `validate --json` (both stringify the same `DoctorResult`). Scoped to the two `CONTROL_PLANE_*` codes; documented under `docs/cli-contract.md` § Doctor diagnostic codes.
+- **Richer leaf help for mutating / JSON-emitting commands.** The 9 mutating non-task commands (`plan brief` / `adopt` / `constitution` / `normalize`, `phase add` / `new` / `reconcile`, `adapter install` / `upgrade`) gained rich `--help` — synopsis, options, examples, `--json` — replacing the 2-line stub.
+
+### Guardrails
+
+**Added**
+
+- **Generated CLI reference check.** `pnpm check:cli-reference` (wired into `check:docs` and CI) fails if `docs/cli-reference.generated.md` is stale relative to the specs.
+- **Leaf help coverage test.** Pins that every mutating / JSON-emitting `plan` / `phase` / `adapter` command answers `--help` with rich help (or is an explicit, shrinking allowlisted stub), so a new such command can't ship as a silent stub.
+- **Agent feedback corpus.** `design/measurements/agent-feedback/` records external-agent feedback, classified (implemented-but-undiscovered / docs-duplication / genuinely-missing), so prioritization doesn't depend on a chat log.
+
+### Explicit non-changes
+
+- **No `docs/ownership.yaml`.** A path-diff "you touched src but not docs" checker is a heuristic, not a derivable invariant — it would add a false-positive surface and a new managed file, against the goal of this arc. Revisit only as a specific `check-doc-invariants` rule, if one becomes derivable.
+- **No standalone docs-reduction or `record_only`-dedupe pass.** The real duplication was already absorbed by the docs/ja removal and the cli-contract cut; what remained on inspection was primary sources, already-linked pointers, and context-bound mentions — not removable duplication.
+- **No behavior change to task command parsing.** The verified flag sets are preserved; only the *source* of the flag surface (and where help/reference come from) changed.
+
 ## [1.27.0] — 2026-06-01
 
 ### CI / adoption page (P44)
