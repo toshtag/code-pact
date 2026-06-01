@@ -600,6 +600,25 @@ describe("runDoctor — CONTROL_PLANE_NOT_DRIVEN", () => {
     expect(result.ok).toBe(true); // advisory — does not fail doctor
   });
 
+  it("carries machine-readable recovery (v1.28+) — primary, alternatives, reference", async () => {
+    await writeRealPhase();
+    await git(dir, ["init", "--quiet", "--initial-branch=main"]);
+    const result = await runDoctor(dir);
+    const issue = find(result);
+    expect(issue!.recovery).toBeDefined();
+    expect(issue!.recovery!.primary).toContain("task prepare");
+    expect(issue!.recovery!.alternatives?.[0]).toContain("task record-done");
+    expect(issue!.recovery!.reference).toContain("disabled_checks");
+
+    // recovery survives JSON serialization — it must reach `doctor --json` /
+    // `validate --json` consumers (both stringify the same DoctorResult).
+    const roundTripped = JSON.parse(JSON.stringify(result)) as typeof result;
+    const rtIssue = roundTripped.issues.find(
+      (i) => i.code === "CONTROL_PLANE_NOT_DRIVEN",
+    );
+    expect(rtIssue?.recovery?.primary).toBe(issue!.recovery!.primary);
+  });
+
   it("silent when not a git repo (default fixture is non-git)", async () => {
     await writeRealPhase();
     expect(find(await runDoctor(dir))).toBeUndefined();
@@ -766,6 +785,17 @@ describe("runDoctor — CONTROL_PLANE_BRANCH_NOT_DRIVEN (P34)", () => {
     expect(issue).toBeDefined();
     expect(issue!.severity).toBe("warning");
     expect(r.ok).toBe(true); // advisory — does not fail doctor on its own
+  });
+
+  it("carries machine-readable recovery (v1.28+) — primary, alternatives, reference", async () => {
+    await setupBaseAndBranch();
+    await commitBranchCode();
+    const r = await runDoctor(dir, { baseRef: "main" });
+    const issue = find(r);
+    expect(issue!.recovery).toBeDefined();
+    expect(issue!.recovery!.primary).toContain("task prepare");
+    expect(issue!.recovery!.alternatives?.[0]).toContain("task record-done");
+    expect(issue!.recovery!.reference).toContain("exclude_globs");
   });
 
   it("skips when the branch added a known non-TUTORIAL started (started alone suffices)", async () => {
