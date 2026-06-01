@@ -23,7 +23,7 @@ docs/dogfood.md                 Maintainer quick guide (running code-pact on its
 docs/maintainers/operations.md  Deeper, lower-frequency maintainer detail.
 design/decisions/*.md           Design rationale / RFCs (the "why").
 CHANGELOG.md                     Per-release record of what changed.
-docs/ja/*                        Japanese mirror of first-run / user guides only.
+docs/ja/README.md               Japanese entry point only — links into the English docs. NOT a mirror.
 ```
 
 ## Ownership map — what to update for which change
@@ -40,7 +40,7 @@ docs/ja/*                        Japanese mirror of first-run / user guides only
 | Release notes | [`CHANGELOG.md`](../../CHANGELOG.md) | `upgrading.md` if it changes the upgrade story | Do not restate release history in migration.md |
 | Cutting a release | [`maintainers/releasing.md`](releasing.md) (the runbook) | CHANGELOG, `package.json`, `design/measurements/` | Do not hand-copy measurement values into prose |
 | New term | [`glossary.md`](../glossary.md) | the doc that introduces it (one-line) | Do not re-define terms per-doc |
-| Japanese | `docs/ja/*` (first-run / user guides only) | link to the English primary for everything else | Do not partially translate reference contracts |
+| Japanese | `docs/ja/README.md` (entry point only) | — | Do not mirror English docs into `docs/ja/` — the English docs are the single source; only CLI/adapter runtime output is localized |
 
 ## Public vs. maintainer vs. private
 
@@ -66,7 +66,8 @@ Rules:
 
 ### Deliberately NOT auto-enforced (verify by hand at release prep)
 
-Two ownership-map rules are **human judgement**, so they are intentionally left as a manual check rather than a CI gate (a hard gate here would either over-fire on formatting edits or force a brittle exemption list — and would punish honest doc work). The release-prep runbook ([releasing.md](releasing.md#release-prep-pr-all-automatable-steps)) is where you confirm them for everything shipped since the last tag:
+One ownership-map rule is **human judgement**, so it is intentionally left as a manual check rather than a CI gate (a hard gate here would either over-fire on formatting edits or force a brittle exemption list — and would punish honest doc work). The release-prep runbook ([releasing.md](releasing.md#release-prep-pr-all-automatable-steps)) is where you confirm it for everything shipped since the last tag:
 
 1. **User-recoverable error/diagnostic code → `troubleshooting.md` entry.** Not every code needs one (many are self-explanatory or CI-only); the judgement of "is this worth a recovery walkthrough?" stays with you.
-2. **EN usage-doc change → matching `docs/ja/*` update.** Only the mirrored usage docs (`per-task-loop.md`, `getting-started.md`, `glossary.md`, `workflows/*`) — reference contracts stay English-only on purpose. A `git diff <last-tag>..HEAD -- docs/per-task-loop.md docs/getting-started.md docs/glossary.md docs/workflows/` that shows EN changes with no `docs/ja/` counterpart is the signal to sync.
+
+> **No Japanese mirror to sync.** `docs/ja/` holds only `README.md` (an entry point into the English docs). Changing an English usage doc creates **no** `docs/ja/` obligation. Do not reintroduce mirrored `docs/ja/*` pages.

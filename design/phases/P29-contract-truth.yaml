@@ -248,12 +248,10 @@ tasks:
     reads:
       - README.md
       - docs/getting-started.md
-      - docs/ja/getting-started.md
       - docs/agent-contract.md
     writes:
       - README.md
       - docs/getting-started.md
-      - docs/ja/getting-started.md
       - CHANGELOG.md
     acceptance_refs:
       - design/phases/P29-contract-truth.yaml

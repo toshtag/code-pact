@@ -1,7 +1,5 @@
 # Getting started
 
-> 🌐 日本語版: [はじめに](ja/getting-started.md)
-
 This guide takes you from an empty project to a successful `task complete` in about thirty minutes. It documents **several onboarding approaches** side by side so you can pick the one that matches how your roadmap comes into being.
 
 If you only want a sixty-second overview of what `code-pact` is, read the [README](../README.md) first. If a term here is unfamiliar (context pack, envelope, derived state, …), the [glossary](glossary.md) defines them in plain language.

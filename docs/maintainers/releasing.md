@@ -33,17 +33,16 @@ On a `chore/release-<version>` branch:
    format: Added / Changed / Fixed). Lead with the user-facing shipped change.
 4. **Docs-sync audit** — confirm everything shipped since the last tag followed
    the [docs ownership map](docs-maintenance.md#ownership-map--what-to-update-for-which-change).
-   `check:docs` covers links + the error-code contract, but two rules are
-   [deliberately manual](docs-maintenance.md#deliberately-not-auto-enforced-verify-by-hand-at-release-prep) — confirm them now:
+   `check:docs` covers links + the error-code contract, but one rule is
+   [deliberately manual](docs-maintenance.md#deliberately-not-auto-enforced-verify-by-hand-at-release-prep) — confirm it now:
    - every new **user-recoverable** error/diagnostic code has a
-     `troubleshooting.md` recovery entry;
-   - every change to a mirrored EN usage doc has its `docs/ja/*` counterpart.
+     `troubleshooting.md` recovery entry.
+
+   (There is no `docs/ja/` mirror to sync — `docs/ja/` is an entry point only.)
 
    ```sh
    git diff <last-tag>..HEAD --name-only -- docs/ design/decisions/
-   # scan for: new error codes without a troubleshooting entry,
-   # and EN usage-doc changes (per-task-loop / getting-started /
-   # glossary / workflows) with no matching docs/ja/ change.
+   # scan for: new error codes without a troubleshooting entry.
    ```
 5. **Verify** (the same gates CI runs):
    ```sh

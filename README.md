@@ -69,7 +69,7 @@ They all converge on the same per-task agent loop, entered through `task prepare
 
 New to the terms used here (context pack, envelope, derived state, …)? The [`docs/glossary.md`](docs/glossary.md) defines them in plain language.
 
-**Starting fresh, or adopting on an existing repo?** Two workflow guides cover each case — [greenfield](docs/workflows/greenfield.md) and [brownfield](docs/workflows/brownfield-feature.md). The full documentation index — including the Japanese docs — lives at [`docs/`](docs/README.md) ([日本語](docs/ja/README.md)).
+**Starting fresh, or adopting on an existing repo?** Two workflow guides cover each case — [greenfield](docs/workflows/greenfield.md) and [brownfield](docs/workflows/brownfield-feature.md). The full documentation index lives at [`docs/`](docs/README.md). Japanese readers: a [日本語の入口](docs/ja/README.md) links into the English docs (the primary source).
 
 ## Reference docs
 
