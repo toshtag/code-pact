@@ -167,23 +167,7 @@ async function cmdTaskAdd(
   try {
     const parsed = parseArgs({
       args: argv,
-      options: {
-        json: { type: "boolean" },
-        id: { type: "string" },
-        description: { type: "string" },
-        type: { type: "string" },
-        ambiguity: { type: "string" },
-        risk: { type: "string" },
-        "context-size": { type: "string" },
-        "write-surface": { type: "string" },
-        "verification-strength": { type: "string" },
-        "expected-duration": { type: "string" },
-        "depends-on": { type: "string", multiple: true },
-        "decision-ref": { type: "string", multiple: true },
-        read: { type: "string", multiple: true },
-        write: { type: "string", multiple: true },
-        "acceptance-ref": { type: "string", multiple: true },
-      },
+      options: toParseOptions(TASK_SPECS.add!),
       strict: true,
       allowPositionals: true,
     });
@@ -392,12 +376,7 @@ async function cmdTaskContext(
     ({ values, positionals } = strictParse(
       "task context",
       argv,
-      {
-        agent: { type: "string" },
-        json: { type: "boolean" },
-        explain: { type: "boolean" },
-        "budget-bytes": { type: "string" },
-      },
+      toParseOptions(TASK_SPECS.context!),
       { allowPositionals: true },
     ));
   } catch (err) {
@@ -968,13 +947,7 @@ async function cmdTaskRecordDone(
     ({ values, positionals } = strictParse(
       "task record-done",
       argv,
-      {
-        agent: { type: "string" },
-        evidence: { type: "string" },
-        notes: { type: "string" },
-        json: { type: "boolean" },
-        "dry-run": { type: "boolean" },
-      },
+      toParseOptions(TASK_SPECS["record-done"]!),
       { allowPositionals: true },
     ));
   } catch (err) {
@@ -1488,9 +1461,7 @@ async function cmdTaskRunbook(
       invokedAs,
       "task runbook",
       argv,
-      {
-        json: { type: "boolean" },
-      },
+      toParseOptions(TASK_SPECS.runbook!),
       { allowPositionals: true },
     ));
   } catch (err) {
@@ -1655,10 +1626,7 @@ async function cmdTaskStart(
     ({ values, positionals } = strictParse(
       "task start",
       argv,
-      {
-        agent: { type: "string" },
-        json: { type: "boolean" },
-      },
+      toParseOptions(TASK_SPECS.start!),
       { allowPositionals: true },
     ));
   } catch (err) {
@@ -1755,11 +1723,7 @@ async function cmdTaskBlock(
     ({ values, positionals } = strictParse(
       "task block",
       argv,
-      {
-        agent: { type: "string" },
-        reason: { type: "string" },
-        json: { type: "boolean" },
-      },
+      toParseOptions(TASK_SPECS.block!),
       { allowPositionals: true },
     ));
   } catch (err) {
@@ -1849,10 +1813,7 @@ async function cmdTaskResume(
     ({ values, positionals } = strictParse(
       "task resume",
       argv,
-      {
-        agent: { type: "string" },
-        json: { type: "boolean" },
-      },
+      toParseOptions(TASK_SPECS.resume!),
       { allowPositionals: true },
     ));
   } catch (err) {
@@ -1930,9 +1891,7 @@ async function cmdTaskStatus(
     ({ values, positionals } = strictParse(
       "task status",
       argv,
-      {
-        json: { type: "boolean" },
-      },
+      toParseOptions(TASK_SPECS.status!),
       { allowPositionals: true },
     ));
   } catch (err) {
