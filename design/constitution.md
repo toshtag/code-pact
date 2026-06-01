@@ -26,3 +26,15 @@ decision in this project.
 
 - **Small surfaces, clear contracts.** Each command does one thing.
   Options that modify behavior must be explicit flags — no ambient magic.
+
+- **Enforce mechanics, surface judgment.** The CLI's enforcing power (anything
+  that `fail`s / blocks / changes exit code) is spent on exactly two things:
+  (1) supplying the right information, and (2) replacing steps that need no human
+  judgment with deterministic logic. Anything that genuinely needs human judgment
+  — a design decision, a confidence level, an intentionally low-confidence phase —
+  is surfaced deterministically as **advisory** (`affects_exit: false`), never
+  hard-blocked. code-pact's value is absorbing an agent's instability with a thin
+  deterministic control plane, not making the agent smarter; hard-blocking a
+  judgment call contradicts that and would constrain legitimate authoring. New
+  features decide "enforce vs. surface" by this test: if it is (1) or (2), enforce;
+  otherwise surface. No speculative strict flags (e.g. a `--clarify-strict`).
