@@ -9,7 +9,7 @@
 ## 前提
 
 - Node.js **22 以上**（LTS または current）
-- `npm install -g code-pact`（または `npx code-pact …`）を実行できるターミナル
+- `npm install` / `npm exec` を実行できるターミナル。チームと CI では、下記の pin した `devDependency` 経路を使ってください
 - サポートされているエージェントのいずれか：`claude-code`、`codex`、`generic`（いずれも Stable）。`cursor` と `gemini-cli` も動作しますが Experimental です。
 
 ## インストール
