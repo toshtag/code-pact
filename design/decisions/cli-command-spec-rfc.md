@@ -224,7 +224,11 @@ not a command.
 ## Non-goals (explicitly out)
 
 - Other clusters (plan/phase/adapter). task-only this round; the type carries a
-  `cluster` field so widening is additive.
+  `cluster` field so widening is additive. **Future candidate:** plan/phase/adapter
+  leaf help was brought to parity by hand in P52 (the 9 mutating/JSON commands);
+  porting those clusters onto `CommandSpec` — so their parse/help/reference share
+  one source like task's — is a deferred follow-up, not done here. The P52
+  hand-written help is the interim; CommandSpec-izing it is the eventual dedupe.
 - Any flag/behaviour change. Pure refactor + generation; the verified flag sets
   are preserved byte-for-byte.
 - Touching `cli-contract.md` sections other than the 11 task flag tables.
