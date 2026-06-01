@@ -13,7 +13,8 @@ docs/getting-started.md         First-run guide (onboarding paths + pointer to t
 docs/per-task-loop.md           The canonical per-task lifecycle (the single source for it).
 docs/glossary.md                Plain-language term definitions.
 docs/troubleshooting.md         Diagnostic code → recovery action (user-recoverable).
-docs/cli-contract.md            The public CLI contract: flags, exit codes, envelopes, error codes.
+docs/cli-contract.md            CLI contract SEMANTICS: JSON envelopes, exit codes, error/cause codes, stability. NOT the task flag tables (those are generated).
+docs/cli-reference.generated.md GENERATED from src/cli/spec/* (CommandSpec) — task command flags/usage/examples. Do not hand-edit; run `pnpm gen:cli-reference`.
 docs/agent-contract.md          What code-pact guarantees agents + adapter conformance.
 docs/positioning.md             What code-pact is / is not + success metrics.
 docs/concepts/<feature>.md      How one feature works, for users.
@@ -30,7 +31,9 @@ docs/ja/README.md               Japanese entry point only — links into the Eng
 
 | Change type | Primary doc to update | Secondary | Do **not** duplicate |
 | --- | --- | --- | --- |
-| New CLI command / flag / JSON field | [`cli-contract.md`](../cli-contract.md) | `getting-started.md` only if beginner-facing | Do not repeat envelope shapes outside `cli-contract.md` |
+| New task command / flag | `src/cli/spec/*` (the `CommandSpec`) — parse, help, and [`cli-reference.generated.md`](../cli-reference.generated.md) all derive from it; run `pnpm gen:cli-reference` | — | Do not hand-write the task flag table into `cli-contract.md` (it points at the generated reference) |
+| New plan/phase/adapter command / flag | The command's `LEAF_USAGE` rich help (`src/cli/usage.ts`) + the [leaf-help coverage test](../../tests/unit/cli/leaf-help-coverage.test.ts) | `cli-contract.md` for its semantics | Don't ship a mutating/JSON command as a 2-line stub |
+| New JSON field / envelope / error code | [`cli-contract.md`](../cli-contract.md) (the contract semantics) | `troubleshooting.md` if user-recoverable | Do not put envelope shapes in the generated reference; do not repeat them outside `cli-contract.md` |
 | Per-task lifecycle change | [`per-task-loop.md`](../per-task-loop.md) | README, getting-started, agent-contract, dogfood (pointers only) | Do not re-define the lifecycle anywhere else |
 | New diagnostic / error code | [`cli-contract.md`](../cli-contract.md) | [`troubleshooting.md`](../troubleshooting.md) if user-recoverable | Do not put recovery prose in dogfood |
 | New concept / feature | [`concepts/<feature>.md`](../concepts/) | `docs/README.md` index, `glossary.md` if new terms | Do not bury concept docs inside dogfood |

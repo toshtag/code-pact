@@ -15,7 +15,7 @@ concept is explained in multiple places, so the canonical one is unclear), or
 |---|---|---|
 | `CONTROL_PLANE_NOT_DRIVEN` looked "not implemented" | implemented-but-undiscovered | The check existed; its `message` named the fix only as prose. Fixed by adding machine-readable `recovery` to the JSON (v1.28). |
 | `CONTROL_PLANE_BRANCH_NOT_DRIVEN` same | implemented-but-undiscovered | Same fix. |
-| `record_only` perceived as under-documented | docs-duplication | A correct definition existed (glossary); the term was *re-defined* in several places, so no obvious primary. Addressed by consolidating to pointers. |
+| `record_only` perceived as under-documented | docs-duplication / already resolved | A correct definition existed (glossary / per-task-loop). A re-audit found the remaining mentions were canonical, already-linked pointers, generated, or context-specific — the real duplication had been absorbed by the docs/ja removal and the cli-contract cut. No additional dedupe shipped. |
 | `task prepare --json` record_only evidence guidance "missing" | implemented-but-undiscovered | `commands["record-done"]` + `next_action.message` already carried it (P40). No new field needed. |
 | Leaf `--help` inconsistency (some rich, some stub) | implemented-but-undiscovered | task cluster is uniform (CommandSpec); plan/phase/adapter still have stub help. Coverage to be pinned by a test + filled per command. |
 | CLI help / contract / docs drift | docs-duplication | Flag surface was hand-copied in three places. Fixed structurally by CommandSpec single source (parse/help/generated reference all derive from it). |
@@ -34,5 +34,8 @@ single-source spec — not new features.
 - CommandSpec single source for the task cluster's parse/help/reference.
 - `cli-contract.md` task flag tables → generated-reference pointers.
 - `CONTROL_PLANE_*` issues carry machine-readable `recovery`.
+- Rich `--help` for the 9 mutating / JSON-emitting non-task commands.
+- A leaf-help coverage test guards those (and any new mutating/JSON command)
+  from regressing to a stub.
 
 See `design/decisions/cli-command-spec-rfc.md` for the spec design.

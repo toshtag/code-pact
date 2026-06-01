@@ -1,6 +1,8 @@
 # RFC: CLI command spec — single source for parse, help, and reference docs
 
-> Status: **proposed** (design only — no implementation yet)
+> Status: **accepted — implemented in v1.28.0** (task cluster: parse/help/
+> reference derive from CommandSpec; cli-contract task flag tables point at the
+> generated reference).
 > Scope: P46. task cluster only. No behaviour change to any command.
 
 ## Problem
@@ -54,7 +56,7 @@ src/cli/spec/task.ts   ── CommandSpec[] (the single source)
   - the narrative prose and the JSON envelope / error-code sections of
     `cli-contract.md` — owned and tested separately.
 - **Generation runs under tsx** (chosen over reading `dist/`): the spec stays
-  TypeScript in `src/`, `scripts/gen-cli-reference.mjs` imports it via tsx and
+  TypeScript in `src/`, `scripts/gen-cli-reference.ts` imports it via tsx and
   writes `docs/cli-reference.generated.md`. Type-safe, no build prerequisite,
   matches the existing `scripts/harness/run.ts` tsx precedent.
 

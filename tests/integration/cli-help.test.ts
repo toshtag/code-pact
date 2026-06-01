@@ -80,6 +80,9 @@ describe("cluster --help → usage, exit 0", () => {
     [["phase", "reconcile", "--help"], /Usage: code-pact phase reconcile/, /--write/],
     [["adapter", "install", "--help"], /Usage: code-pact adapter install/, /--force/],
     [["adapter", "upgrade", "--help"], /Usage: code-pact adapter upgrade/, /--accept-modified/],
+    // `plan import` is an alias for `phase import`; its --help routes to the
+    // same rich entry (cmdPlan dispatch), so it must not be a stub.
+    [["plan", "import", "--help"], /Usage: code-pact phase import/, /--scaffold-decisions/],
   ];
   for (const [argv, usageRe, flagRe] of RICH_LEAF_HELP) {
     it(`\`${argv.slice(0, -1).join(" ")} --help\` → rich usage with flags and examples, exit 0`, () => {
