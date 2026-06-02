@@ -86,38 +86,34 @@ export const CLAUDE_TIER_MODEL_IDS = {
 // ---------------------------------------------------------------------------
 
 export type ModelGuidance = {
-  supportsHighEffort: boolean;
   effortGuidance: string;
   thinkingNote: string;
 };
 
-const OPUS_GUIDANCE: ModelGuidance = {
-  supportsHighEffort: true,
-  effortGuidance: [
-    "- `high` — large context, complex architecture decisions, or tasks with `ambiguity: high`",
-    "- `medium` — standard feature work (default)",
-    "- `low` — small mechanical tasks (`type: refactor`, `expected_duration: short`)",
-  ].join("\n"),
+// Generation-resistant guidance. Per-model prose about thinking mechanics
+// drifts every release (Opus 4.7+ dropped manual extended thinking; effort
+// support and adaptive availability vary by generation; "high not supported on
+// Sonnet 4.6" was once written here and is false — Sonnet 4.6 supports high,
+// the default). This layer is advisory, so a single note that holds for every
+// current Claude version beats version-specific detail that goes stale. The
+// authoritative per-model capability table lives in Anthropic's docs, not here.
+const STANDARD_EFFORT_GUIDANCE = [
+  "- `high` — complex architecture decisions, high-ambiguity tasks, or large context",
+  "- `medium` — standard feature work (default)",
+  "- `low` — small mechanical tasks (`type: refactor`, `expected_duration: short`)",
+].join("\n");
+
+const GENERAL_GUIDANCE: ModelGuidance = {
+  effortGuidance: STANDARD_EFFORT_GUIDANCE,
   thinkingNote:
-    "Extended thinking is supported. Enable it for tasks flagged `ambiguity: high` or `context_size: large`.",
+    "For complex or `ambiguity: high` tasks, rely on the model's adaptive thinking and the effort level rather than a fixed manual thinking budget. See the model's current Anthropic documentation for its exact thinking support.",
 };
 
 export const CLAUDE_MODEL_GUIDANCE: Record<ClaudeModelVersion, ModelGuidance> = {
-  // opus-4.8 is a non-breaking successor to 4.7; keep guidance conservative and
-  // version-agnostic (no vendor-specific effort taxonomy parroted here).
-  "opus-4.8": OPUS_GUIDANCE,
-  "opus-4.7": OPUS_GUIDANCE,
-  "opus-4.6": OPUS_GUIDANCE,
-  "sonnet-4.6": {
-    supportsHighEffort: false,
-    effortGuidance: [
-      "- `medium` — standard feature work (default)",
-      "- `low` — small mechanical tasks (`type: refactor`, `expected_duration: short`)",
-      "- `high` is **not supported** on this model — switch to the `highest_reasoning` tier for complex tasks.",
-    ].join("\n"),
-    thinkingNote:
-      "Extended thinking is supported. For tasks requiring deep reasoning (`ambiguity: high`), consider switching to the `highest_reasoning` tier model.",
-  },
+  "opus-4.8": GENERAL_GUIDANCE,
+  "opus-4.7": GENERAL_GUIDANCE,
+  "opus-4.6": GENERAL_GUIDANCE,
+  "sonnet-4.6": GENERAL_GUIDANCE,
 };
 
 // ---------------------------------------------------------------------------

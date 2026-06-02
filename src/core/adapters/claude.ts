@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import type { AgentProfile } from "../schemas/agent-profile.ts";
+import { normalizeModelVersion } from "../schemas/agent-profile.ts";
 import {
   CLAUDE_MODEL_VERSIONS,
   CLAUDE_MODEL_GUIDANCE,
@@ -39,7 +40,7 @@ function modelGuidanceSection(modelVersion: string): string {
     `**Effort levels:**`,
     g.effortGuidance,
     ``,
-    `**Extended thinking:** ${g.thinkingNote}`,
+    `**Thinking:** ${g.thinkingNote}`,
   ].join("\n");
 }
 
@@ -332,7 +333,16 @@ export async function generateClaudeDesiredFiles(
   input: AdapterGenerateInput,
 ): Promise<DesiredAdapterFile[]> {
   const { cwd, profile, modelProfiles, locale, modelVersion } = input;
-  const resolvedModelVersion = modelVersion ?? profile.model_version;
+  // Normalize to the canonical version before rendering guidance: a profile
+  // may carry a vendor-id alias (e.g. `model_version: claude-opus-4-8`), which
+  // doctor accepts as valid. Without this, the guidance lookup (keyed by the
+  // short canonical id) would miss it and fall back to the generic block.
+  // Unknown values pass through unchanged → the generic block, as before.
+  const rawModelVersion = modelVersion ?? profile.model_version;
+  const resolvedModelVersion =
+    rawModelVersion === undefined
+      ? undefined
+      : (normalizeModelVersion(rawModelVersion) ?? rawModelVersion);
   const skillDir = profile.skill_dir ?? ".claude/skills";
 
   const files: DesiredAdapterFile[] = [

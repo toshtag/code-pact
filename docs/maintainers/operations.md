@@ -194,7 +194,7 @@ See [`docs/spec-kit-bridge.md`](../spec-kit-bridge.md) for the full walkthrough 
 
 ## Model-aware adapter (v0.5.0)
 
-Pin a Claude model version so the adapter generates effort and extended-thinking guidance
+Pin a Claude model version so the adapter generates effort and model-specific thinking guidance
 tailored to that model:
 
 ```sh

@@ -267,10 +267,10 @@ Issue-level codes emitted by `doctor` / `validate` for general project health.
 | Code | Severity | Meaning |
 |------|----------|---------|
 | `MISSING_DIR` | error | A required directory under `.code-pact/` or `design/` is absent |
-| `MISSING_MODEL_TIER` | error | An agent profile is missing a required `model_map` tier |
+| `MISSING_MODEL_TIER` | warning | An agent profile is missing a required `model_map` tier |
 | `EMPTY_OBJECTIVE` | error | A phase `objective` is blank or fewer than 10 characters |
-| `MODEL_ID_UNKNOWN` (v1.29+) | warning | The `claude-code` profile has a `model_map` value or `model_version` that is not a known Claude model id (a typo or a retired model). Offline check against the bundled model catalog (`src/core/models/catalog.ts`) |
-| `MODEL_MAP_STALE` (v1.29+) | warning | The `claude-code` profile's `model_map` points at a known Claude id that is no longer the current catalog default (e.g. the profile predates a model bump). A difference from the default, **not** an invalid value — to follow it, hand-edit the tier in `.code-pact/agent-profiles/<agent>.yaml` then run `adapter upgrade <agent> --write` to regenerate (note: `--model` re-pins `model_version` only, never `model_map`). Keep it if the pin is intentional, or silence via `.code-pact/doctor.yaml` → `disabled_checks: [MODEL_MAP_STALE]`. Scoped to `claude-code`; never fires for codex/other agents |
+| `MODEL_ID_UNKNOWN` (v1.29+) | warning | The `claude-code` profile has a `model_map` value or `model_version` that is not present in the bundled Claude catalog — typically a typo, or a model id code-pact does not track yet. Offline check against `src/core/models/catalog.ts` |
+| `MODEL_MAP_STALE` (v1.29+) | warning | The `claude-code` profile's `model_map` points at a known Claude id that is no longer the current catalog default (e.g. the profile predates a model bump). A difference from the default, **not** an invalid value — to follow it, hand-edit the tier in the profile path doctor names (e.g. `.code-pact/agent-profiles/<agent>.yaml`) then run `adapter upgrade <agent> --write` to regenerate (note: `--model` re-pins `model_version` only, never `model_map`). Keep it if the pin is intentional, or silence via `.code-pact/doctor.yaml` → `disabled_checks: [MODEL_MAP_STALE]`. Scoped to `claude-code`; never fires for codex/other agents |
 | `BAK_FILE` | warning | A `.bak` file is present alongside a tracked file |
 | `LOCAL_NOT_GITIGNORED` | warning | `.local/` is not listed in `.gitignore` (the private planning-notes dir; `init` adds `/.local/` and `/.context/`, so this fires only if `.gitignore` was edited away) |
 | `BRIEF_MISSING` | warning | `design/brief.md` does not exist |
@@ -1038,10 +1038,13 @@ for the parse error.
 Generates the adapter for `<agent>` (positional, required) and writes the manifest.
 
 `--model <version>` produces a **model-aware** instruction file for the claude-code adapter
-with effort-level and extended-thinking guidance tailored to a specific Claude version
-(`opus-4.7`, `opus-4.6`, `sonnet-4.6`). Unknown values produce a fallback note rather than
-an error. Takes precedence over `model_version` in the agent profile YAML; if neither is
-set, the version-agnostic template is used.
+with effort-level and model-specific thinking guidance tailored to a specific Claude version
+(`opus-4.8`, `opus-4.7`, `opus-4.6`, `sonnet-4.6`, plus vendor-id aliases such as
+`claude-opus-4-8`). An unknown CLI `--model` value fails with `CONFIG_ERROR` (it is rejected
+before anything is written). Takes precedence over `model_version` in the agent profile YAML;
+if neither is set, the version-agnostic template is used. (Separately: if an existing profile
+already contains an unrecognized `model_version`, generation falls back to the generic
+guidance block and `doctor` reports `MODEL_ID_UNKNOWN`.)
 
 `--regen-skills` is the role-scoped `--force` described above; documented separately because
 it's the common way users handle stale dynamic skill files after the roadmap's
@@ -2322,7 +2325,7 @@ All field names are camelCase. Enum / identifier values are snake_case where app
     "agentName": "claude-code",
     "tier": "highest_reasoning",
     "effort": "high",
-    "modelId": "claude-opus-4-7",
+    "modelId": "claude-opus-4-8",
     "reasons": ["task type is architecture"],
 
     "contextProfile": "large",

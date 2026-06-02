@@ -322,11 +322,13 @@ async function checkAgentProfiles(
         const id = parsed.data.model_map[tier];
         if (!id) continue; // absence already reported as MISSING_MODEL_TIER
         if (!knownVendorIds.has(id)) {
-          // Unknown vendor id: a typo or a retired model.
+          // Unknown vendor id: a typo, or a model id not represented in the
+          // bundled catalog (e.g. a newer/older release code-pact does not
+          // track yet).
           issues.push({
             code: "MODEL_ID_UNKNOWN",
             severity: "warning",
-            message: `Agent "${parsed.data.name}" model_map.${tier} is "${id}", which is not a known Claude model id (known: ${CLAUDE_KNOWN_VENDOR_MODEL_IDS.join(", ")}). Check for a typo or a retired model.`,
+            message: `Agent "${parsed.data.name}" model_map.${tier} is "${id}", which is not in the bundled Claude catalog (known: ${CLAUDE_KNOWN_VENDOR_MODEL_IDS.join(", ")}). Check for a typo, or a model id code-pact does not track yet.`,
           });
         } else if (id !== CLAUDE_TIER_MODEL_IDS[tier]) {
           // Known but not the current catalog default — i.e. the profile was
@@ -338,7 +340,7 @@ async function checkAgentProfiles(
           issues.push({
             code: "MODEL_MAP_STALE",
             severity: "warning",
-            message: `Agent "${parsed.data.name}" model_map.${tier} is "${id}", but the current catalog default is "${CLAUDE_TIER_MODEL_IDS[tier]}" — a difference from the default, not an invalid value. To follow it, set model_map.${tier} to "${CLAUDE_TIER_MODEL_IDS[tier]}" in .code-pact/agent-profiles/${agentRef.name}.yaml, then run "code-pact adapter upgrade ${agentRef.name} --write" to regenerate the instruction file. Keep it if the pin is intentional, or silence via .code-pact/doctor.yaml (disabled_checks: [MODEL_MAP_STALE]).`,
+            message: `Agent "${parsed.data.name}" model_map.${tier} is "${id}", but the current catalog default is "${CLAUDE_TIER_MODEL_IDS[tier]}" — a difference from the default, not an invalid value. To follow it, set model_map.${tier} to "${CLAUDE_TIER_MODEL_IDS[tier]}" in .code-pact/${agentRef.profile}, then run "code-pact adapter upgrade ${agentRef.name} --write" to regenerate the instruction file. Keep it if the pin is intentional, or silence via .code-pact/doctor.yaml (disabled_checks: [MODEL_MAP_STALE]).`,
           });
         }
       }

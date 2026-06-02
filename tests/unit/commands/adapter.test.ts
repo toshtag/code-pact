@@ -354,7 +354,10 @@ describe("runGenerateAdapter — claude-code model-aware (v0.5)", () => {
     expect(content).toContain("`high`");
     expect(content).toContain("`medium`");
     expect(content).toContain("`low`");
-    expect(content).toContain("Extended thinking");
+    // Guidance is generation-resistant: it points at adaptive thinking, not a
+    // manual extended-thinking budget.
+    expect(content).toContain("adaptive thinking");
+    expect(content).not.toContain("Extended thinking is supported");
   });
 
   it("--model opus-4.6: includes effort guidance with high/medium/low", async () => {
@@ -367,15 +370,19 @@ describe("runGenerateAdapter — claude-code model-aware (v0.5)", () => {
     expect(content).toContain("`high`");
   });
 
-  it("--model sonnet-4.6: notes that effort:high is NOT supported", async () => {
+  it("--model sonnet-4.6: guidance does not falsely claim high effort is unsupported", async () => {
     await runGenerateAdapter({
       cwd: dir, agentName: "claude-code", force: true, locale: "en-US",
       modelVersion: "sonnet-4.6",
     });
     const content = await readFile(join(dir, "CLAUDE.md"), "utf8");
     expect(content).toContain("Model guidance (sonnet-4.6)");
-    expect(content).toContain("not supported");
-    expect(content).toContain("highest_reasoning");
+    expect(content).toContain("`high`");
+    // Sonnet 4.6 supports high effort (it is the default); the old
+    // "high is not supported" claim was false and must not reappear.
+    expect(content).not.toContain("not supported** on this model");
+    expect(content).not.toContain("Extended thinking is supported. Enable it");
+    expect(content).toContain("adaptive thinking");
   });
 
   it("no --model: CLAUDE.md does not include Model guidance section", async () => {
@@ -416,6 +423,23 @@ describe("runGenerateAdapter — claude-code model-aware (v0.5)", () => {
     });
     const content = await readFile(join(dir, "CLAUDE.md"), "utf8");
     expect(content).toContain("Model guidance (opus-4.7)");
+  });
+
+  it("normalizes a vendor-id model_version from the profile before rendering guidance", async () => {
+    const { writeFile: wf } = await import("node:fs/promises");
+    const profilePath = join(dir, ".code-pact", "agent-profiles", "claude-code.yaml");
+    const original = await readFile(profilePath, "utf8");
+    // A vendor-id alias is a valid model_version (doctor accepts it via
+    // normalizeModelVersion); generation must canonicalize it, not fall back to
+    // the generic "no guidance" block keyed on the short canonical id.
+    await wf(profilePath, original + "model_version: claude-opus-4-8\n", "utf8");
+
+    await runGenerateAdapter({
+      cwd: dir, agentName: "claude-code", force: true, locale: "en-US",
+    });
+    const content = await readFile(join(dir, "CLAUDE.md"), "utf8");
+    expect(content).toContain("Model guidance (opus-4.8)");
+    expect(content).not.toContain("No model-specific guidance available");
   });
 
   it("CLI modelVersion overrides model_version from profile.yaml", async () => {
