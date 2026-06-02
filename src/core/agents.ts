@@ -46,6 +46,12 @@ const CODEX_PROFILE: AgentProfile = {
   name: "codex",
   instruction_filename: "AGENTS.md",
   context_dir: ".context/codex",
+  // Advisory display only. Unlike claude-code, these vendor ids are NOT backed
+  // by a catalog: there is no OpenAI version validator, no model guidance, and
+  // the doctor MODEL_ID_UNKNOWN / MODEL_MAP_STALE checks are claude-code scoped,
+  // so these are user-maintained and not drift-checked. Refresh by hand, or run
+  // a provider audit before adding catalog/doctor coverage (see
+  // docs/maintainers/operations.md → "Provider scope").
   model_map: {
     highest_reasoning: "o3",
     balanced_coding: "o4-mini",

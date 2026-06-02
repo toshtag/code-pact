@@ -211,6 +211,17 @@ aliases, e.g. `claude-opus-4-8`). These live in `CLAUDE_MODEL_VERSIONS` in
 `model_version` field in `.code-pact/agent-profiles/claude-code.yaml` is used as the
 default when `--model` is not passed on the CLI.
 
+**Provider scope (Claude-only model governance).** Model-aware `CLAUDE.md` guidance,
+the `--model` validator, and the `MODEL_ID_UNKNOWN` / `MODEL_MAP_STALE` doctor checks
+all read the bundled Claude catalog and apply to the `claude-code` profile only. Other
+agents' `model_map` values — e.g. `codex` (`o3` / `o4-mini` / `gpt-4.1-mini`) — are
+**advisory display only**: they render in the generated instruction file but are
+user-maintained, not validated against any catalog, and not drift-checked. `gemini-cli`,
+`cursor`, and `generic` ship with an empty `model_map` by design. A per-provider catalog
+and drift check for Codex / Gemini is intentionally **not** implemented; it would be
+added only after a provider-specific audit confirms a real inconsistency (no equivalent
+of the Claude help-vs-validator mismatch has been found for those agents).
+
 After adapter generation, `.claude/skills/` is populated with:
 - Fixed skills: `/context`, `/verify`, `/progress`
 - Dynamic skills derived from `verification.commands` in all roadmap phases
