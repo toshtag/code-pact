@@ -46,10 +46,20 @@ const CODEX_PROFILE: AgentProfile = {
   name: "codex",
   instruction_filename: "AGENTS.md",
   context_dir: ".context/codex",
+  // Advisory display only. Unlike claude-code, these vendor ids are NOT backed
+  // by a catalog: there is no OpenAI version validator, no model guidance, and
+  // the doctor MODEL_ID_UNKNOWN / MODEL_MAP_STALE checks are claude-code scoped,
+  // so these are user-maintained and not drift-checked. Refresh by hand, or run
+  // a provider audit before adding catalog/doctor coverage (see
+  // docs/maintainers/operations.md → "Provider scope").
+  // Current OpenAI Codex models per https://developers.openai.com/codex/models
+  // (verified 2026-06): gpt-5.5 flagship, gpt-5.4 professional/agentic,
+  // gpt-5.4-mini efficient/budget. Advisory only — refresh by hand when OpenAI
+  // bumps the lineup (no validator/doctor catches codex drift; see comment above).
   model_map: {
-    highest_reasoning: "o3",
-    balanced_coding: "o4-mini",
-    cheap_mechanical: "gpt-4.1-mini",
+    highest_reasoning: "gpt-5.5",
+    balanced_coding: "gpt-5.4",
+    cheap_mechanical: "gpt-5.4-mini",
   },
 };
 

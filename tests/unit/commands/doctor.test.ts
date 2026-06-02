@@ -960,9 +960,9 @@ describe("runDoctor — model-id drift checks", () => {
     expect(result.issues.find((i) => i.code === "MODEL_ID_UNKNOWN")).toBeDefined();
   });
 
-  it("does not false-positive on non-Claude agents (codex o3/o4-mini)", async () => {
-    // Re-init with codex added; its model_map (o3 / o4-mini / gpt-4.1-mini) is
-    // not a Claude id, but the checks are scoped to claude-code so it must not
+  it("does not false-positive on non-Claude agents (codex gpt-5.x)", async () => {
+    // Re-init with codex added; its model_map (gpt-5.5 / gpt-5.4 / gpt-5.4-mini)
+    // is not a Claude id, but the checks are scoped to claude-code so it must not
     // trigger MODEL_ID_UNKNOWN / MODEL_MAP_STALE.
     await runInit({
       cwd: dir,

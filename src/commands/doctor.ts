@@ -313,7 +313,7 @@ async function checkAgentProfiles(
     }
 
     // Model-id drift checks. Scoped to the claude-code (anthropic) profile:
-    // the catalog describes Claude ids only, so comparing codex (o3/o4-mini)
+    // the catalog describes Claude ids only, so comparing codex (gpt-5.x)
     // or other agents against it would emit false positives. Offline — these
     // compare against the bundled catalog, never the network.
     if (parsed.data.name === "claude-code") {

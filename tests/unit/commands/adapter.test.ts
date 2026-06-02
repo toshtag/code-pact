@@ -171,7 +171,7 @@ describe("runGenerateAdapter — codex", () => {
     await runGenerateAdapter({ cwd: dir, agentName: "codex", force: false, locale: "en-US" });
     const content = await readFile(join(dir, "AGENTS.md"), "utf8");
     expect(content).toContain("highest_reasoning");
-    expect(content).toContain("o3");
+    expect(content).toContain("gpt-5.5");
     expect(content).toContain("balanced_coding");
     expect(content).toContain("cheap_mechanical");
   });
