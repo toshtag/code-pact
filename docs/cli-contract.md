@@ -2450,7 +2450,7 @@ This means that once a project is initialized with `ja-JP`, all subsequent comma
 
 ## State file write guarantees
 
-`code-pact` writes a small, well-defined set of files into the project tree. Every disk write goes through the same atomic primitive so an interrupted process cannot leave a half-written file behind.
+`code-pact` writes a small, well-defined set of files into the project tree. Every file-content write goes through the same atomic primitive so an interrupted process cannot leave a half-written file behind. (Directory creation — e.g. an adapter making the `context_dir` — is a separate `mkdir` and outside this guarantee; there is no half-written directory to protect against.)
 
 ### Files written by `code-pact`
 
@@ -2467,11 +2467,11 @@ This means that once a project is initialized with `ja-JP`, all subsequent comma
 | `design/roadmap.yaml` | `init --sample-phase`, `phase add`, `phase new`, `phase import` (all via `createPhase`) | One append per phase added |
 | `design/phases/<phase>.yaml` | `init --sample-phase`, `phase add`, `phase new`, `phase import`, `task add`, `task finalize --write`, `phase reconcile --write` | Phase creation: one write per phase. Task lifecycle: one write per `task add` / status flip |
 | `<agent-profile>.context_dir/<task-id>.md` (context pack; default `.context/<agent>/<task-id>.md`) | `task prepare` (unless `--dry-run`), `pack` | One write per `task prepare` / `pack` invocation. `task context` does **not** write — it builds and returns/prints the same bytes. The file is regenerable; the default context dir is gitignored (`/.context/`), and a custom `context_dir` should likewise be treated as ignorable agent output. Not tracked in the adapter manifest |
-| `<adapter-owned files>` (e.g. `CLAUDE.md`, `.claude/skills/*.md`) | `adapter install`, `adapter upgrade --write` | Generated from the agent's `AdapterDescriptor`; manifest tracks every file. `adapter install` / `upgrade` also create the (initially empty) `.context/<agent>/` directory, but the per-task packs inside it are written by `task prepare` / `pack` (row above), not the adapter |
+| `<adapter-owned files>` (e.g. `CLAUDE.md`, `.claude/skills/*.md`) | `adapter install`, `adapter upgrade --write` | Generated from the agent's `AdapterDescriptor`; manifest tracks every file. `adapter install` / `upgrade` may also create the agent profile's `context_dir` directory (a `mkdir`, not a file-content write), but the per-task packs inside it are written by `task prepare` / `pack` (row above), not the adapter |
 
 ### Atomic write strategy
 
-Every write listed above goes through `atomicWriteText` (`src/io/atomic-text.ts`):
+Every file-content write listed above goes through `atomicWriteText` (`src/io/atomic-text.ts`):
 
 1. Write content to `<path>.tmp-<pid>-<timestamp>` in the same directory.
 2. `fs.rename(tmp, path)` — on POSIX, this is a single inode swap.

@@ -218,8 +218,8 @@ function nextActionTypeFor(state: TaskCurrentState): NextActionType {
  *
  * Progress invariant: this function MUST NOT mutate
  * `.code-pact/state/progress.yaml`. It MAY write the deterministic
- * context pack at `.context/<agent>/<task-id>.md` unless `dryRun` is
- * passed.
+ * context pack at the agent profile's `context_dir/<task-id>.md`
+ * (default `.context/<agent>/<task-id>.md`) unless `dryRun` is passed.
  *
  * Early-return states (`done`, `blocked`, unmet dependencies) skip
  * the context pack build entirely; their envelope returns

@@ -5,7 +5,10 @@ export type PackOptions = {
   phaseId: string;
   taskId: string;
   agentName: string;
-  /** Override output root; defaults to cwd/.context/<agentName> */
+  /**
+   * Override output root; otherwise uses the agent profile's `context_dir`,
+   * falling back to `cwd/.context/<agentName>` when no profile exists.
+   */
   outputDir?: string;
 };
 

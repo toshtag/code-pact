@@ -254,7 +254,7 @@ for (const rel of ["docs/getting-started.md"]) {
   //      is ever dropped).
   const contract = read("docs/cli-contract.md");
   const guaranteesContextPackAtomic =
-    /State file write guarantees[\s\S]*?\(context pack[\s\S]*?Every write listed above goes through `atomicWriteText`/.test(
+    /State file write guarantees[\s\S]*?\(context pack[\s\S]*?goes through `atomicWriteText`/.test(
       contract,
     );
   if (guaranteesContextPackAtomic) {
