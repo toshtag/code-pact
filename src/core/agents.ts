@@ -1,4 +1,5 @@
 import type { AgentProfile } from "./schemas/agent-profile.ts";
+import { CLAUDE_TIER_MODEL_IDS } from "./models/catalog.ts";
 
 export type SupportedAgent =
   | "claude-code"
@@ -35,11 +36,10 @@ const CLAUDE_PROFILE: AgentProfile = {
   context_dir: ".context/claude-code",
   skill_dir: ".claude/skills",
   hook_dir: ".claude/hooks",
-  model_map: {
-    highest_reasoning: "claude-opus-4-7",
-    balanced_coding: "claude-sonnet-4-6",
-    cheap_mechanical: "claude-haiku-4-5",
-  },
+  // Concrete vendor model ids per tier come from the model catalog (single
+  // source of truth) so a model bump is a one-file edit, not a hunt across
+  // agents.ts / init.ts / agent-profile.ts / claude.ts.
+  model_map: { ...CLAUDE_TIER_MODEL_IDS },
 };
 
 const CODEX_PROFILE: AgentProfile = {

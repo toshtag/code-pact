@@ -1,21 +1,17 @@
 import { z } from "zod";
 import { PlanId } from "./plan-id.ts";
 import { RelativePosixPath } from "./relative-path.ts";
+import {
+  CLAUDE_MODEL_VERSIONS,
+  MODEL_VERSION_ALIASES,
+  type ClaudeModelVersion,
+} from "../models/catalog.ts";
 
-// Supported Claude model versions for model-aware adapter generation.
-// "generic" (or undefined) produces the baseline template.
-export const CLAUDE_MODEL_VERSIONS = ["opus-4.6", "opus-4.7", "sonnet-4.6"] as const;
-export type ClaudeModelVersion = (typeof CLAUDE_MODEL_VERSIONS)[number];
-
-// Accepted aliases for the `--model` flag. The full vendor model id
-// (e.g. "claude-opus-4-7") normalizes to the canonical profile value
-// (e.g. "opus-4.7") so users can pass whichever form they have on hand.
-// Canonical values pass through unchanged.
-const MODEL_VERSION_ALIASES: Readonly<Record<string, ClaudeModelVersion>> = {
-  "claude-opus-4-6": "opus-4.6",
-  "claude-opus-4-7": "opus-4.7",
-  "claude-sonnet-4-6": "sonnet-4.6",
-};
+// The supported-version list and `--model` aliases now live in the model
+// catalog (the single source of truth). Re-export the names existing import
+// sites — and tests — depend on, so `from "./agent-profile.ts"` keeps working.
+export { CLAUDE_MODEL_VERSIONS };
+export type { ClaudeModelVersion };
 
 /** Every input string `normalizeModelVersion` accepts, for error messages. */
 export const ACCEPTED_MODEL_VERSION_INPUTS: readonly string[] = [
@@ -61,7 +57,8 @@ export const AgentProfile = z.object({
   }),
   // Optional: pin the primary Claude model version for model-aware CLAUDE.md generation.
   // When set, the adapter includes model-specific effort and capability guidance.
-  // Supported values: "opus-4.6" | "opus-4.7" | "sonnet-4.6"
+  // Supported values: see CLAUDE_MODEL_VERSIONS in core/models/catalog.ts
+  // (e.g. "opus-4.8" | "opus-4.7" | "opus-4.6" | "sonnet-4.6").
   // Omit for the generic (version-agnostic) template.
   model_version: z.string().optional(),
 });

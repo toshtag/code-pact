@@ -9,7 +9,12 @@ import { Project } from "../core/schemas/project.ts";
 import {
   ACCEPTED_MODEL_VERSION_INPUTS,
   AgentProfile,
+  normalizeModelVersion,
 } from "../core/schemas/agent-profile.ts";
+import {
+  CLAUDE_KNOWN_VENDOR_MODEL_IDS,
+  CLAUDE_TIER_MODEL_IDS,
+} from "../core/models/catalog.ts";
 import { ModelProfile, ModelTier } from "../core/schemas/model-profile.ts";
 import {
   detectDuplicateTaskIds,
@@ -303,6 +308,49 @@ async function checkAgentProfiles(
           code: "MISSING_MODEL_TIER",
           severity: "warning",
           message: `Agent "${parsed.data.name}" is missing model_map entry for tier "${tier}"`,
+        });
+      }
+    }
+
+    // Model-id drift checks. Scoped to the claude-code (anthropic) profile:
+    // the catalog describes Claude ids only, so comparing codex (o3/o4-mini)
+    // or other agents against it would emit false positives. Offline — these
+    // compare against the bundled catalog, never the network.
+    if (parsed.data.name === "claude-code") {
+      const knownVendorIds = new Set(CLAUDE_KNOWN_VENDOR_MODEL_IDS);
+      for (const tier of knownTiers) {
+        const id = parsed.data.model_map[tier];
+        if (!id) continue; // absence already reported as MISSING_MODEL_TIER
+        if (!knownVendorIds.has(id)) {
+          // Unknown vendor id: a typo or a retired model.
+          issues.push({
+            code: "MODEL_ID_UNKNOWN",
+            severity: "warning",
+            message: `Agent "${parsed.data.name}" model_map.${tier} is "${id}", which is not a known Claude model id (known: ${CLAUDE_KNOWN_VENDOR_MODEL_IDS.join(", ")}). Check for a typo or a retired model.`,
+          });
+        } else if (id !== CLAUDE_TIER_MODEL_IDS[tier]) {
+          // Known but not the current catalog default — i.e. the profile was
+          // generated before a model bump. Not invalid: a deliberate pin is
+          // fine. Surface it so a forgotten default does not silently rot.
+          // NB: `adapter upgrade --model` only re-pins model_version, never
+          // model_map, so the remediation is a hand-edit of model_map followed
+          // by a plain regenerate — do NOT advise --model here.
+          issues.push({
+            code: "MODEL_MAP_STALE",
+            severity: "warning",
+            message: `Agent "${parsed.data.name}" model_map.${tier} is "${id}", but the current catalog default is "${CLAUDE_TIER_MODEL_IDS[tier]}" — a difference from the default, not an invalid value. To follow it, set model_map.${tier} to "${CLAUDE_TIER_MODEL_IDS[tier]}" in .code-pact/agent-profiles/${agentRef.name}.yaml, then run "code-pact adapter upgrade ${agentRef.name} --write" to regenerate the instruction file. Keep it if the pin is intentional, or silence via .code-pact/doctor.yaml (disabled_checks: [MODEL_MAP_STALE]).`,
+          });
+        }
+      }
+      // model_version is a deliberate user pin (set via --model). Flag only a
+      // truly unrecognized value; never treat an older-but-known version as
+      // "stale" — that would nag a user who explicitly pinned it.
+      const mv = parsed.data.model_version;
+      if (mv !== undefined && normalizeModelVersion(mv) === null) {
+        issues.push({
+          code: "MODEL_ID_UNKNOWN",
+          severity: "warning",
+          message: `Agent "${parsed.data.name}" model_version is "${mv}", which is not a recognized Claude model version (accepted: ${ACCEPTED_MODEL_VERSION_INPUTS.join(", ")}).`,
         });
       }
     }

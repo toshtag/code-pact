@@ -310,6 +310,15 @@ const LEAF_USAGE: Record<string, () => string> = {
 };
 
 /**
+ * Every rendered rich leaf-help string. Introspection helper: lets a guard
+ * test scan all examples (e.g. assert every `--model <value>` example actually
+ * validates) without reaching into the private LEAF_USAGE registry.
+ */
+export function allLeafUsages(): string[] {
+  return Object.values(LEAF_USAGE).map((render) => render());
+}
+
+/**
  * Per-subcommand usage. Returns the rich leaf help when one is registered for
  * `"<cluster> <subcommand>"`, otherwise the generic two-line stub. Synopsis is
  * intentionally light for unregistered commands; points back to cluster help.

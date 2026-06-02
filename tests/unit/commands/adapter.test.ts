@@ -40,7 +40,7 @@ describe("runGenerateAdapter — claude-code", () => {
     await runGenerateAdapter({ cwd: dir, agentName: "claude-code", force: false, locale: "en-US" });
     const content = await readFile(join(dir, "CLAUDE.md"), "utf8");
     expect(content).toContain("highest_reasoning");
-    expect(content).toContain("claude-opus-4-7");
+    expect(content).toContain("claude-opus-4-8");
     expect(content).toContain("balanced_coding");
     expect(content).toContain("cheap_mechanical");
   });

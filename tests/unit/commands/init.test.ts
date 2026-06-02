@@ -76,7 +76,7 @@ describe("runInit — default options (claude-code, ja-JP)", () => {
     const data = await readYaml(".code-pact/agent-profiles/claude-code.yaml");
     const profile = AgentProfile.parse(data);
     expect(profile.name).toBe("claude-code");
-    expect(profile.model_map.highest_reasoning).toBe("claude-opus-4-7");
+    expect(profile.model_map.highest_reasoning).toBe("claude-opus-4-8");
   });
 
   it("generates all three model profiles", async () => {

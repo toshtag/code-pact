@@ -7,12 +7,14 @@ import { validateModelVersionInput } from "../../../../src/core/adapters/model-v
 
 describe("normalizeModelVersion", () => {
   it("passes canonical versions through unchanged", () => {
+    expect(normalizeModelVersion("opus-4.8")).toBe("opus-4.8");
     expect(normalizeModelVersion("opus-4.7")).toBe("opus-4.7");
     expect(normalizeModelVersion("opus-4.6")).toBe("opus-4.6");
     expect(normalizeModelVersion("sonnet-4.6")).toBe("sonnet-4.6");
   });
 
   it("normalizes vendor-id aliases", () => {
+    expect(normalizeModelVersion("claude-opus-4-8")).toBe("opus-4.8");
     expect(normalizeModelVersion("claude-opus-4-7")).toBe("opus-4.7");
     expect(normalizeModelVersion("claude-opus-4-6")).toBe("opus-4.6");
     expect(normalizeModelVersion("claude-sonnet-4-6")).toBe("sonnet-4.6");
