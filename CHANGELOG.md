@@ -11,6 +11,29 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ---
 
+## [1.29.0] — 2026-06-02
+
+Model-config accuracy. Claude model facts are now a single source of truth, Opus 4.8 is supported, model drift is detected offline, and the codex defaults are current. No breaking changes — the surface is advisory (recommendation display, generated guidance, doctor diagnostics) and the new doctor codes are additive.
+
+### Added
+
+- **Single-source model catalog (`src/core/models/catalog.ts`).** The Claude version list, `--model` aliases, vendor model ids, default `model_map`, default model profiles, and generated-guidance text now live in one leaf module instead of being duplicated across `agents.ts` / `init.ts` / `agent-profile.ts` / `claude.ts`. Bumping a model is a one-file edit. Two namespaces are kept distinct: `CLAUDE_MODEL_VERSIONS` (short canonical, for `--model` / `model_version`) and `CLAUDE_KNOWN_VENDOR_MODEL_IDS` (vendor ids, for `model_map`).
+- **Claude Opus 4.8 support.** `--model opus-4.8` (and the `claude-opus-4-8` vendor alias) is accepted, and the default `highest_reasoning` model for the claude-code adapter is now `claude-opus-4-8`. This fixes a real bug: the documented `adapter install claude-code --model claude-opus-4-8` help example previously failed with `CONFIG_ERROR`. A regression test asserts every `--model` value shown in help validates.
+- **Offline model-drift doctor checks (claude-code).** `MODEL_ID_UNKNOWN` (a `model_map` value or `model_version` not in the bundled catalog) and `MODEL_MAP_STALE` (a known `model_map` id that is no longer the current catalog default — e.g. a profile generated before a model bump). Both are warnings, offline (no network), scoped to the `claude-code` profile so codex/other agents never false-positive, and suppressible via `.code-pact/doctor.yaml` → `disabled_checks`. Documented under `docs/cli-contract.md` § Doctor diagnostic codes.
+
+### Changed
+
+- **codex default `model_map` refreshed** to OpenAI's current Codex lineup (`gpt-5.5` / `gpt-5.4` / `gpt-5.4-mini`), replacing the older `o3` / `o4-mini` / `gpt-4.1-mini`. These render as advisory display only — codex/gemini `model_map` is user-maintained and not catalog-backed; model governance (catalog + drift checks) is claude-code-only, now stated in `docs/maintainers/operations.md`. `gemini-cli` / `cursor` / `generic` keep an empty `model_map` by design.
+- **Generated CLAUDE.md model guidance is generation-resistant.** The per-model thinking prose drifted with each release (it shipped an incorrect "Opus 4.8 supports extended thinking" and a false "Sonnet 4.6 does not support high effort"). It is replaced by a single note that holds for every current Claude version — rely on adaptive thinking and the effort level, defer exact capabilities to Anthropic's docs. The guidance heading is now "Thinking:" (was "Extended thinking:").
+
+### Fixed
+
+- A vendor-id `model_version` in an agent profile (e.g. `model_version: claude-opus-4-8`) now renders the correct model-aware guidance instead of falling back to the generic block — it is normalized before lookup, matching how `doctor` already accepts it.
+- `MODEL_MAP_STALE` remediation names the actual profile path (`agentRef.profile`), not a hardcoded default, so a custom `profile` in `project.yaml` is handled.
+- Doc accuracy: `MISSING_MODEL_TIER` is a `warning` (not `error`) in the contract table; the `adapter install --model` description reflects adaptive thinking, Opus 4.8, vendor-id aliases, and that an unknown CLI `--model` fails with `CONFIG_ERROR`.
+
+---
+
 ## [1.28.0] — 2026-06-01
 
 Maintenance-surface reduction and agent discoverability, driven by external agent feedback on 1.27.0. No behavior change to task command parsing.
