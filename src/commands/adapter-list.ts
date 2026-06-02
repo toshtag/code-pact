@@ -55,9 +55,9 @@ async function loadEnabledAgentNames(cwd: string): Promise<Set<string>> {
     }
     return names;
   } catch {
-    // Missing or malformed project.yaml → no agents are enabled. The CLI
-    // bare-form / `adapter install` will surface AGENT_NOT_FOUND later
-    // when the user actually tries to install.
+    // Missing project.yaml → no agents are enabled (the lister stays quiet).
+    // A present-but-broken project.yaml is surfaced as CONFIG_ERROR later by
+    // resolveAgentProfilePath() while building each entry's profilePath.
     return new Set<string>();
   }
 }

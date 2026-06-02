@@ -80,6 +80,28 @@ describe("resolveAgentProfileRel / resolveAgentProfilePath", () => {
     });
   });
 
+  it("rejects project.yaml with a missing agents field (parses, but broken)", async () => {
+    await writeFile(
+      join(dir, ".code-pact", "project.yaml"),
+      "name: demo\nversion: 0.1.0\nlocale: en-US\ndefault_agent: claude-code\n",
+      "utf8",
+    );
+    await expect(resolveAgentProfileRel(dir, "claude-code")).rejects.toMatchObject({
+      code: "CONFIG_ERROR",
+    });
+  });
+
+  it("rejects project.yaml with a non-array agents field", async () => {
+    await writeFile(
+      join(dir, ".code-pact", "project.yaml"),
+      "name: demo\nversion: 0.1.0\nlocale: en-US\ndefault_agent: claude-code\nagents: nope\n",
+      "utf8",
+    );
+    await expect(resolveAgentProfileRel(dir, "claude-code")).rejects.toMatchObject({
+      code: "CONFIG_ERROR",
+    });
+  });
+
   it("falls back to the convention when project.yaml has no matching agent", async () => {
     // codex is not enabled in this project; resolve must not throw.
     expect(await resolveAgentProfileRel(dir, "codex")).toBe(
@@ -137,6 +159,16 @@ describe("resolver-using commands do not fall back on a broken project.yaml", ()
     await expect(
       runGenerateAdapter({ cwd: dir, agentName: "claude-code", force: true, locale: "en-US" }),
     ).rejects.toMatchObject({ code: "CONFIG_ERROR" });
+  });
+
+  it("adapter list fails with CONFIG_ERROR on a non-array agents field (no silent fallback)", async () => {
+    const { runAdapterList } = await import("../../../src/commands/adapter.ts");
+    await writeFile(
+      join(dir, ".code-pact", "project.yaml"),
+      "name: demo\nversion: 0.1.0\nlocale: en-US\ndefault_agent: claude-code\nagents: nope\n",
+      "utf8",
+    );
+    await expect(runAdapterList({ cwd: dir })).rejects.toMatchObject({ code: "CONFIG_ERROR" });
   });
 
   it("adapter doctor surfaces an invalid agents[].profile as CONFIG_ERROR (not silent)", async () => {

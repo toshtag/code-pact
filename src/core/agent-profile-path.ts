@@ -36,13 +36,13 @@ function defaultProfileRel(agentName: string): string {
  * not silently redirect a custom profile back to the default.
  *
  * Falls back to the convention only when project.yaml is absent (ENOENT) or the
- * agent is not listed. A present-but-broken config — unreadable or unparseable
- * project.yaml, or a matched agent whose `profile` is an *invalid* path
- * (e.g. `../../etc/x`) — throws `CONFIG_ERROR` rather than falling back: the
- * project exists and (for the profile case) explicitly declared that path, so
- * silently reading/writing a different file would hide the misconfiguration.
- * The resolved path is validated (`RelativePosixPath`: no `..`, no absolute, no
- * backslash) before use.
+ * agent is not listed in a valid `agents` array. A present-but-broken config —
+ * unreadable or unparseable project.yaml, a missing / non-array `agents`, or a
+ * matched agent whose `profile` is an *invalid* path (e.g. `../../etc/x`) —
+ * throws `CONFIG_ERROR` rather than falling back: the project exists and (for
+ * the profile case) explicitly declared that path, so silently reading/writing
+ * a different file would hide the misconfiguration. The resolved path is
+ * validated (`RelativePosixPath`: no `..`, no absolute, no backslash) before use.
  */
 export async function resolveAgentProfileRel(
   cwd: string,
@@ -77,22 +77,32 @@ export async function resolveAgentProfileRel(
     (err as NodeJS.ErrnoException).code = "CONFIG_ERROR";
     throw err;
   }
-  const agents = (doc as { agents?: unknown })?.agents;
-  if (Array.isArray(agents)) {
-    for (const a of agents) {
-      if (a && typeof a === "object" && (a as { name?: unknown }).name === agentName) {
-        const parsed = RelativePosixPath.safeParse((a as { profile?: unknown }).profile);
-        if (parsed.success) return parsed.data;
-        // Matched the agent but its declared profile is an invalid path —
-        // surface it instead of silently reading/writing the default file.
-        const err = new Error(
-          `Agent "${agentName}" has an invalid "profile" in .code-pact/project.yaml: ${parsed.error.issues[0]?.message ?? "invalid relative POSIX path"}`,
-        );
-        (err as NodeJS.ErrnoException).code = "CONFIG_ERROR";
-        throw err;
-      }
+  // `agents` is the field we actually read, and the Project schema requires it
+  // (array, min 1). A present project.yaml that lacks it / has a non-array
+  // `agents` is broken — not "agent unlisted" — so surface it rather than
+  // falling back. (Unrelated fields are still ignored; only `agents` is read.)
+  const agents = (doc as { agents?: unknown } | null)?.agents;
+  if (!doc || typeof doc !== "object" || !Array.isArray(agents)) {
+    const err = new Error(
+      `Cannot resolve the agent profile for "${agentName}": .code-pact/project.yaml has no valid "agents" array.`,
+    );
+    (err as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+    throw err;
+  }
+  for (const a of agents) {
+    if (a && typeof a === "object" && (a as { name?: unknown }).name === agentName) {
+      const parsed = RelativePosixPath.safeParse((a as { profile?: unknown }).profile);
+      if (parsed.success) return parsed.data;
+      // Matched the agent but its declared profile is an invalid path —
+      // surface it instead of silently reading/writing the default file.
+      const err = new Error(
+        `Agent "${agentName}" has an invalid "profile" in .code-pact/project.yaml: ${parsed.error.issues[0]?.message ?? "invalid relative POSIX path"}`,
+      );
+      (err as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+      throw err;
     }
   }
+  // agents array exists but the target agent is not listed → convention.
   return defaultProfileRel(agentName);
 }
 
