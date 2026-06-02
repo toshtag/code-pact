@@ -62,7 +62,10 @@ function claudeMd(
       const modelId = tier(mp.tier);
       const purposes = mp.purpose.join(", ");
       const efforts = mp.effort_levels.join(" | ");
-      const thinking = mp.supports_thinking ? " (thinking enabled)" : "";
+      // "thinking-capable", not "thinking enabled": the current top-tier model
+      // (Opus 4.8/4.7) uses adaptive thinking — there is no manual enable step.
+      // Tier-level flag, so the label stays version-agnostic.
+      const thinking = mp.supports_thinking ? " (thinking-capable)" : "";
       return `- **${mp.tier}** → \`${modelId}\`${thinking}\n  - Use for: ${purposes}\n  - Effort: ${efforts}`;
     })
     .join("\n");

@@ -43,6 +43,10 @@ describe("runGenerateAdapter — claude-code", () => {
     expect(content).toContain("claude-opus-4-8");
     expect(content).toContain("balanced_coding");
     expect(content).toContain("cheap_mechanical");
+    // The thinking-capable tier is labelled by capability, not as a manual
+    // "enabled" step (the current top-tier model uses adaptive thinking).
+    expect(content).toContain("(thinking-capable)");
+    expect(content).not.toContain("(thinking enabled)");
   });
 
   it("CLAUDE.md instructs the agent to use task context + task complete", async () => {
