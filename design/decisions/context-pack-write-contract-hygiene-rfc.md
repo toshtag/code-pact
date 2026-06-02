@@ -7,9 +7,9 @@
 ## Summary
 
 The context pack is part of code-pact's deterministic agent-facing artifact
-surface, so the disk write that produces it should use the same atomic
-primitive (`atomicWriteText`) as every other code-pact write. It did not — it
-used a raw `writeFile`. This is a patch-level (v1.29.1) contract-hygiene change:
+surface, so the file-content write that produces it should use the same atomic
+primitive (`atomicWriteText`) as the other managed file-content writes code-pact
+lists in its write-guarantees contract. It did not — it used a raw `writeFile`. This is a patch-level (v1.29.1) contract-hygiene change:
 align the implementation with the already-published atomic-write guarantee, and
 correct the docs that blur which command actually writes the pack file. No new
 command, flag, JSON field, error code, schema field, or user workflow.
@@ -19,10 +19,10 @@ command, flag, JSON field, error code, schema field, or user workflow.
 Two small but real inconsistencies between the published contract and the code:
 
 1. **The atomic-write guarantee was false for context packs.**
-   `docs/cli-contract.md` § "State file write guarantees" states *"Every disk
-   write goes through the same atomic primitive so an interrupted process cannot
-   leave a half-written file behind"* and *"Every write listed above goes
-   through `atomicWriteText`"*. But `writeContextPack()` in
+   `docs/cli-contract.md` § "State file write guarantees" guaranteed — in prose
+   that P45 has since narrowed to "every file-content write listed in the table"
+   — that managed writes go through `atomicWriteText` so an interrupted process
+   cannot leave a half-written file behind. But `writeContextPack()` in
    `src/core/pack/index.ts` wrote the pack with a raw
    `writeFile(outputPath, pack.content, "utf8")`. An interrupted `task prepare`
    / `pack` could therefore leave a half-written `.context/<agent>/<task-id>.md`
@@ -61,8 +61,8 @@ re-grows every time the pack surface is touched.
    row (written by `task prepare` / `pack`, regenerable, default-gitignored, not
    in the adapter manifest) and the `<adapter-owned files>` row drops the
    `.context/<agent>/*` claim (clarified to "creates the directory"). With the
-   row present and the implementation atomic, the "every write goes through
-   `atomicWriteText`" sentence becomes true. `positioning.md`, `glossary.md`,
+   row present and the implementation atomic, the table-scoped file-content
+   write guarantee now covers the context pack (a listed, atomic write). `positioning.md`, `glossary.md`,
    and `agent-contract.md` distinguish `task context` (builds / returns / prints)
    from `task prepare` / `pack` (write).
 

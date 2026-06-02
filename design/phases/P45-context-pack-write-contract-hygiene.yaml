@@ -7,13 +7,14 @@ risk: low
 status: done
 objective: |
   The context pack is part of code-pact's deterministic agent-facing artifact
-  surface, but its disk write did not match the published contract. `docs/cli-
-  contract.md` § "State file write guarantees" asserts every disk write goes
-  through `atomicWriteText` so an interrupted process cannot leave a half-written
-  file — yet `writeContextPack()` used a raw `writeFile`, and the context pack
-  was absent from the write-guarantees table (the `<adapter-owned files>` row
-  even listed `.context/<agent>/*` as adapter-written, though the adapter only
-  mkdirs the directory; the per-task packs are written by `task prepare` / `pack`).
+  surface, but its file-content write did not match the published contract.
+  `docs/cli-contract.md` § "State file write guarantees" guarantees that the
+  managed file-content writes it lists go through `atomicWriteText` so an
+  interrupted process cannot leave a half-written file — yet `writeContextPack()`
+  used a raw `writeFile`, and the context pack was absent from the
+  write-guarantees table (the `<adapter-owned files>` row even listed
+  `.context/<agent>/*` as adapter-written, though the adapter only mkdirs the
+  directory; the per-task packs are written by `task prepare` / `pack`).
 
   Separately, `docs/positioning.md` described `task context` as writing the pack
   file. In the code, `task context` only builds and returns/prints the content;
@@ -41,7 +42,7 @@ definition_of_done:
   - docs/cli-contract.md § "State file write guarantees" lists the context pack
     as a write performed by `task prepare` / `pack`, and the `<adapter-owned
     files>` row no longer claims the adapter writes the per-task packs — so the
-    "every write goes through atomicWriteText" sentence is true
+    table-scoped file-content write guarantee covers the context pack
   - docs/positioning.md, docs/glossary.md, and docs/agent-contract.md distinguish
     `task context` (builds / returns / prints) from `task prepare` / `pack` (write)
   - scripts/check-doc-invariants.mjs gains one narrow rule preventing the false
