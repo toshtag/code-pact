@@ -6,6 +6,7 @@ import { ModelProfile } from "../core/schemas/model-profile.ts";
 import { Project } from "../core/schemas/project.ts";
 import { adapterRegistry } from "../core/adapters/index.ts";
 import { isSupportedAgent, type SupportedAgent } from "../core/agents.ts";
+import { resolveAgentProfilePath } from "../core/agent-profile-path.ts";
 import {
   computeContentHash,
   manifestPath,
@@ -71,10 +72,8 @@ async function loadAgentProfileSafe(
   agentName: string,
 ): Promise<AgentProfile | null> {
   try {
-    const raw = await readFile(
-      join(cwd, ".code-pact", "agent-profiles", `${agentName}.yaml`),
-      "utf8",
-    );
+    const path = await resolveAgentProfilePath(cwd, agentName);
+    const raw = await readFile(path, "utf8");
     return AgentProfile.parse(parseYaml(raw) as unknown);
   } catch {
     return null;

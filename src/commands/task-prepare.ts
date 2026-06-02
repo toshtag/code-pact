@@ -18,6 +18,7 @@ import {
   type TaskCurrentState,
 } from "../core/progress/task-state.ts";
 import { AgentProfile } from "../core/schemas/agent-profile.ts";
+import { resolveAgentProfilePath } from "../core/agent-profile-path.ts";
 import { Phase, type Phase as PhaseT } from "../core/schemas/phase.ts";
 import { Project } from "../core/schemas/project.ts";
 import type { Task as TaskT } from "../core/schemas/task.ts";
@@ -119,7 +120,7 @@ async function loadAgentProfile(
   cwd: string,
   agentName: string,
 ): Promise<AgentProfile> {
-  const path = join(cwd, ".code-pact", "agent-profiles", `${agentName}.yaml`);
+  const path = await resolveAgentProfilePath(cwd, agentName);
   let raw: string;
   try {
     raw = await readFile(path, "utf8");
