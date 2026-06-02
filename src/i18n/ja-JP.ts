@@ -13,7 +13,7 @@ export const messages = {
     "  phase      フェーズ契約を管理 (add | new | ls | show | import)",
     "  task       タスクの管理 (add) と Agent 向けコマンド (context | complete)",
     "  progress   baseline に対する重み付き進捗を表示",
-    "  pack       .context/<agent>/ に context pack ファイルを書き出し",
+    "  pack       agent profile の context_dir に context pack ファイルを書き出し",
     "  verify     決定論的な完了条件を検証",
     "  adapter    Agent 別のルールファイルを生成/更新",
     "  recommend  タスクに適したモデル tier を提案",
@@ -576,7 +576,7 @@ export const messages = {
         failBody: [
           "- **blocked dependency** (`task prepare` から) — `next_action.type` が `wait_for_dependencies` で、`blocked_by` に未完の上流タスク id が並びます。実際にブロックされている場合は依存タスクを先に解消し、`task block` の手動ブロックなら理由解消後に `code-pact task resume <task-id>` を実行してください。",
           "- **verification failure** (`task complete` から) — `error.code` は `VERIFICATION_FAILED`（exit 1）。`error.cause_code` を確認: `COMMANDS_FAILED` → 失敗した検証コマンドを修正; `DECISION_REQUIRED` → `requires_decision` タスクに accepted な ADR が必要（作成・accept する）。`error.message` は actionable です。原因を修正して再実行。`task complete` は idempotent です。",
-          "- **missing context pack** — `code-pact task prepare <task-id> --agent <name> --json` で `.context/<agent>/<task-id>.md` の pack を再生成できます。書き込み前にパスだけ確認したい場合は `--dry-run` を付けます。",
+          "- **missing context pack** — `code-pact task prepare <task-id> --agent <name> --json` で agent profile の `context_dir`（default `.context/<agent>/<task-id>.md`）に pack を再生成できます。書き込み前にパスだけ確認したい場合は `--dry-run` を付けます。",
           "- **adapter drift** (`code-pact adapter doctor` / `code-pact adapter conformance <agent>` から) — インストール済み adapter ファイルが manifest と乖離している、または agent contract surface が不完全。`code-pact adapter upgrade <agent> --write` で再適用してください（手動編集を残したい場合は `--accept-modified`）。",
           "- **`LOCK_HELD`** — 別の code-pact mutation が同プロジェクトで進行中。待って retry。`data.lock_holder` で保持者を確認できます。",
           "- **`TASK_FINALIZE_NOT_ELIGIBLE`** — 先に `code-pact task complete <task-id>` を経由してください。derived state が進めば finalize 可能になります。",
