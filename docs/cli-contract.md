@@ -1194,6 +1194,18 @@ Exit codes: `0` ok (all changes applied or all-skip), `1` when any file was
 same `CONFIG_ERROR` / `AGENT_NOT_FOUND` / `MANIFEST_NOT_FOUND` conditions as
 `--check`.
 
+`adapter upgrade` repairs generator/desired file drift; it deliberately does
+**not** rewrite a profile's `model_map` (a pin may be intentional), so a
+`MODEL_MAP_STALE` advisory survives a `--write`. To make that non-obvious (run
+upgrade, one advisory remains, "why?"), a `--write` that leaves the `claude-code`
+`model_map` pinned to a known-but-not-current id prints a human-only
+**"Remaining manual advisory: MODEL_MAP_STALE"** note on stderr naming the stale
+tier, the current default, the profile path to hand-edit, and the
+`doctor.yaml` silence path. It never advises `--model` (which re-pins
+`model_version`, not `model_map`) and never mutates `model_map`. The note is
+human-output only — the `--json` envelope is unchanged; `doctor --json`
+remains the machine-readable source for the advisory.
+
 ### `adapter doctor [--agent <name>] [--json]`
 
 Read-only manifest-aware health check. Reports issues per agent without
