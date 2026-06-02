@@ -60,10 +60,14 @@ On a `chore/release-<version>` branch:
 
 After the release-prep PR merges to `main`:
 
-7. **Annotated, signed tag** on the merge commit (lightweight tags are rejected
-   by a hook; signing setup is in [CONTRIBUTING](../../CONTRIBUTING.md#tag-signing-maintainer-only)):
+7. **SSH-signed annotated tag** on the merge commit. `SECURITY.md` requires
+   v1.x releases to use SSH-signed tags (so the GitHub tag page shows
+   "Verified"); use `-s` (not `-a`, which is annotated but not signed).
+   Lightweight tags are rejected by a hook; signing setup is in
+   [CONTRIBUTING](../../CONTRIBUTING.md#tag-signing-maintainer-only):
    ```sh
-   git tag -a v<version> -m "v<version> — <theme>"
+   git tag -s v<version> -m "v<version> — <theme>"
+   git verify-tag v<version>   # expect a good signature before pushing
    git push origin v<version>
    ```
 8. **Publish** (`prepublishOnly` re-checks package metadata):
