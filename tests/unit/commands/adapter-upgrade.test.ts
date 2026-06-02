@@ -5,7 +5,10 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runInit } from "../../../src/commands/init.ts";
 import { runAdapterInstall } from "../../../src/commands/adapter-install.ts";
-import { runAdapterUpgrade } from "../../../src/commands/adapter-upgrade.ts";
+import {
+  runAdapterUpgrade,
+  detectAgentModelMapDrift,
+} from "../../../src/commands/adapter-upgrade.ts";
 import {
   computeContentHash,
   readManifest,
@@ -719,6 +722,57 @@ describe("adapter upgrade — orphan prune", () => {
     });
     expect(second.clean).toBe(true);
     expect(second.plan.every((p) => p.action === "skip")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// detectAgentModelMapDrift — backs the `adapter upgrade --write` remaining-
+// advisory hint. `adapter upgrade` never rewrites model_map, so a stale pin
+// survives a --write; this surfaces it without re-running doctor.
+// ---------------------------------------------------------------------------
+
+describe("detectAgentModelMapDrift", () => {
+  async function pinHighestReasoning(id: string): Promise<void> {
+    const path = join(dir, ".code-pact", "agent-profiles", "claude-code.yaml");
+    const raw = await readFile(path, "utf8");
+    const next = raw.replace(
+      /(highest_reasoning:\s*)\S+/,
+      `$1${id}`,
+    );
+    if (next === raw) throw new Error("expected to rewrite highest_reasoning pin");
+    await writeFile(path, next, "utf8");
+  }
+
+  it("returns no drift for a freshly initialised claude-code profile", async () => {
+    const { drift, profileRel } = await detectAgentModelMapDrift(dir, "claude-code");
+    expect(drift).toEqual([]);
+    expect(profileRel).toBe("agent-profiles/claude-code.yaml");
+  });
+
+  it("reports drift when model_map pins a known-but-older id", async () => {
+    await pinHighestReasoning("claude-opus-4-7");
+    const { drift } = await detectAgentModelMapDrift(dir, "claude-code");
+    expect(drift).toHaveLength(1);
+    expect(drift[0]?.tier).toBe("highest_reasoning");
+    expect(drift[0]?.current).toBe("claude-opus-4-7");
+    expect(drift[0]?.expected).toBe("claude-opus-4-8");
+  });
+
+  it("is scoped to claude-code — other agents always return empty drift", async () => {
+    const { drift } = await detectAgentModelMapDrift(dir, "codex");
+    expect(drift).toEqual([]);
+  });
+
+  it("survives an `adapter upgrade --write`: the stale pin is not rewritten", async () => {
+    await freshInstall();
+    await pinHighestReasoning("claude-opus-4-7");
+    await runAdapterUpgrade({
+      cwd: dir, agentName: "claude-code", mode: "write",
+      force: false, acceptModified: false, locale: "en-US",
+      generatorVersionOverride: "0.9.0-alpha.0",
+    });
+    const { drift } = await detectAgentModelMapDrift(dir, "claude-code");
+    expect(drift.map((d) => d.tier)).toEqual(["highest_reasoning"]);
   });
 });
 
