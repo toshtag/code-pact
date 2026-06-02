@@ -13,6 +13,18 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+## [1.29.2] — 2026-06-02
+
+Adapter-upgrade friction cut. `adapter upgrade --write` now explains, in place, why a `MODEL_MAP_STALE` advisory can survive a write — closing the "I upgraded, why is one advisory still there?" gap without growing the command's job. No new command, flag, schema field, or error code; the change is human-output and an internal refactor.
+
+### Added
+
+- **`adapter upgrade claude-code --write` surfaces a remaining-advisory hint.** `adapter upgrade` repairs generator/desired file drift but deliberately never rewrites a profile's `model_map` (a pin may be intentional), so a `MODEL_MAP_STALE` advisory persists across a `--write`. A write that leaves the `claude-code` `model_map` pinned to a known-but-not-current catalog id now prints a human-only `Remaining manual advisory: MODEL_MAP_STALE` note on stderr — naming the stale tier, the current default, the profile path to hand-edit, and the `.code-pact/doctor.yaml` silence path. It never advises `--model` (which re-pins `model_version`, not `model_map`) and never mutates `model_map`. Scoped to `claude-code`'s `model_map` only; it does not run the global `doctor` or widen to other advisories. The `--json` envelope is unchanged (`doctor --json` remains the machine-readable source); the hint is human-output only.
+
+### Changed
+
+- **The `MODEL_MAP_STALE` condition is now a single shared function (`src/core/models/model-map-drift.ts`).** `doctor` and the new `adapter upgrade` hint both derive staleness from `detectModelMapDrift`, so the two can never disagree about whether a profile is stale. Pure + offline (compares against the bundled catalog only). No behavior change to `doctor`'s existing `MODEL_MAP_STALE` / `MODEL_ID_UNKNOWN` output.
+
 ## [1.29.1] — 2026-06-02
 
 Contract hygiene. Context-pack writes are now atomic (matching the table-scoped `atomicWriteText` guarantee for managed file-content writes), the docs no longer blur which command writes the pack, and the fresh-project `doctor` / agent-profile-path fixes from this cycle ship in the same patch. No new surface — all changes are advisory/internal or correct an existing contract.
