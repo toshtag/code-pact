@@ -420,6 +420,23 @@ describe("runGenerateAdapter — claude-code model-aware (v0.5)", () => {
     expect(content).toContain("Model guidance (opus-4.7)");
   });
 
+  it("normalizes a vendor-id model_version from the profile before rendering guidance", async () => {
+    const { writeFile: wf } = await import("node:fs/promises");
+    const profilePath = join(dir, ".code-pact", "agent-profiles", "claude-code.yaml");
+    const original = await readFile(profilePath, "utf8");
+    // A vendor-id alias is a valid model_version (doctor accepts it via
+    // normalizeModelVersion); generation must canonicalize it, not fall back to
+    // the generic "no guidance" block keyed on the short canonical id.
+    await wf(profilePath, original + "model_version: claude-opus-4-8\n", "utf8");
+
+    await runGenerateAdapter({
+      cwd: dir, agentName: "claude-code", force: true, locale: "en-US",
+    });
+    const content = await readFile(join(dir, "CLAUDE.md"), "utf8");
+    expect(content).toContain("Model guidance (opus-4.8)");
+    expect(content).not.toContain("No model-specific guidance available");
+  });
+
   it("CLI modelVersion overrides model_version from profile.yaml", async () => {
     const { writeFile: wf } = await import("node:fs/promises");
     const profilePath = join(dir, ".code-pact", "agent-profiles", "claude-code.yaml");
