@@ -201,7 +201,7 @@ code-pact adapter upgrade <agent> --write
 
 See [`docs/upgrading.md`](upgrading.md) for the upgrade path (the alpha-era detail is archived in `migration.md`).
 
-## Expected warnings after a non-interactive bootstrap
+## Expected warnings around non-interactive setup
 
 If you ran `code-pact init --non-interactive --agent <agent> --locale <locale>` from CI or a script, the project does not have generated instruction files or a pinned model version yet. `code-pact validate --json` then reports two warnings as expected state:
 
