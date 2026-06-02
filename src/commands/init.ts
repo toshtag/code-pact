@@ -3,7 +3,7 @@ import { atomicWriteText } from "../io/atomic-text.ts";
 import { join } from "node:path";
 import { stringify as toYaml } from "yaml";
 import type { LocaleCode } from "../core/schemas/locale.ts";
-import type { ModelProfile } from "../core/schemas/model-profile.ts";
+import { DEFAULT_MODEL_PROFILES } from "../core/models/catalog.ts";
 import type { Project } from "../core/schemas/project.ts";
 import type { Roadmap } from "../core/schemas/roadmap.ts";
 import type { ProgressLog } from "../core/schemas/progress-event.ts";
@@ -59,31 +59,6 @@ export type InitResult = {
    */
   suggested_next_steps: string[];
 };
-
-// ---------------------------------------------------------------------------
-// Default profile fixtures
-// ---------------------------------------------------------------------------
-
-const MODEL_PROFILES: ModelProfile[] = [
-  {
-    tier: "highest_reasoning",
-    purpose: ["architecture", "high_ambiguity"],
-    effort_levels: ["medium", "high"],
-    supports_thinking: true,
-  },
-  {
-    tier: "balanced_coding",
-    purpose: ["feature", "refactor"],
-    effort_levels: ["low", "medium", "high"],
-    supports_thinking: false,
-  },
-  {
-    tier: "cheap_mechanical",
-    purpose: ["docs", "formatting"],
-    effort_levels: ["low"],
-    supports_thinking: false,
-  },
-];
 
 // ---------------------------------------------------------------------------
 // Template strings
@@ -252,7 +227,7 @@ export async function runInitCore(opts: InitCoreOptions): Promise<InitResult> {
   }
 
   // model profiles
-  for (const mp of MODEL_PROFILES) {
+  for (const mp of DEFAULT_MODEL_PROFILES) {
     await writeIfAbsent(
       join(cwd, ".code-pact", "model-profiles", `${mp.tier.replace(/_/g, "-")}.yaml`),
       toYaml(mp),

@@ -867,3 +867,114 @@ describe("runDoctor — CONTROL_PLANE_BRANCH_NOT_DRIVEN (P34)", () => {
     expect(find(await runDoctor(dir, { baseRef: "main" }))).toBeUndefined();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Model-id drift checks (MODEL_ID_UNKNOWN / MODEL_MAP_STALE), offline,
+// scoped to the claude-code (anthropic) profile.
+// ---------------------------------------------------------------------------
+
+describe("runDoctor — model-id drift checks", () => {
+  // Overwrite the claude-code profile with a custom model_map / model_version.
+  async function writeClaudeProfile(
+    modelMap: Record<string, string>,
+    modelVersion?: string,
+  ): Promise<void> {
+    const body = [
+      "name: claude-code",
+      "instruction_filename: CLAUDE.md",
+      "context_dir: .context/claude-code",
+      "skill_dir: .claude/skills",
+      "hook_dir: .claude/hooks",
+      "model_map:",
+      ...Object.entries(modelMap).map(([k, v]) => `  ${k}: ${v}`),
+      ...(modelVersion ? [`model_version: ${modelVersion}`] : []),
+      "",
+    ].join("\n");
+    await writeFile(
+      join(dir, ".code-pact", "agent-profiles", "claude-code.yaml"),
+      body,
+      "utf8",
+    );
+  }
+
+  const CURRENT_DEFAULTS = {
+    highest_reasoning: "claude-opus-4-8",
+    balanced_coding: "claude-sonnet-4-6",
+    cheap_mechanical: "claude-haiku-4-5",
+  };
+
+  it("does not flag a freshly initialised claude-code profile (matches catalog default)", async () => {
+    const result = await runDoctor(dir);
+    expect(result.issues.find((i) => i.code === "MODEL_MAP_STALE")).toBeUndefined();
+    expect(result.issues.find((i) => i.code === "MODEL_ID_UNKNOWN")).toBeUndefined();
+  });
+
+  it("reports MODEL_MAP_STALE (warning) when a model_map id is known but not the current default", async () => {
+    await writeClaudeProfile({ ...CURRENT_DEFAULTS, highest_reasoning: "claude-opus-4-7" });
+    const result = await runDoctor(dir);
+    const issue = result.issues.find((i) => i.code === "MODEL_MAP_STALE");
+    expect(issue).toBeDefined();
+    expect(issue?.severity).toBe("warning");
+    // Message names the current default so the user knows what to follow.
+    expect(issue?.message).toContain("claude-opus-4-8");
+    // Remediation must be honest: model_map is updated by a hand-edit + plain
+    // regenerate. `adapter upgrade --model` only re-pins model_version and would
+    // NOT clear this warning, so the message must not advise it.
+    expect(issue?.message).toContain(".code-pact/agent-profiles/claude-code.yaml");
+    expect(issue?.message).not.toContain("--model");
+    // opus-4-7 is a *known* id, so it must NOT also be flagged as unknown.
+    expect(result.issues.find((i) => i.code === "MODEL_ID_UNKNOWN")).toBeUndefined();
+    // Drift is advisory only — never an error.
+    expect(result.ok).toBe(true);
+  });
+
+  it("reports MODEL_ID_UNKNOWN (warning) for an unrecognised model_map id", async () => {
+    await writeClaudeProfile({ ...CURRENT_DEFAULTS, highest_reasoning: "claude-opus-9-9" });
+    const result = await runDoctor(dir);
+    const issue = result.issues.find((i) => i.code === "MODEL_ID_UNKNOWN");
+    expect(issue).toBeDefined();
+    expect(issue?.severity).toBe("warning");
+  });
+
+  it("suppresses MODEL_MAP_STALE via .code-pact/doctor.yaml disabled_checks", async () => {
+    await writeClaudeProfile({ ...CURRENT_DEFAULTS, highest_reasoning: "claude-opus-4-7" });
+    await writeFile(
+      join(dir, ".code-pact", "doctor.yaml"),
+      "disabled_checks:\n  - MODEL_MAP_STALE\n",
+      "utf8",
+    );
+    const result = await runDoctor(dir);
+    expect(result.issues.find((i) => i.code === "MODEL_MAP_STALE")).toBeUndefined();
+  });
+
+  it("treats model_version as a pin: a known-but-older value is not flagged", async () => {
+    await writeClaudeProfile(CURRENT_DEFAULTS, "opus-4.7");
+    const result = await runDoctor(dir);
+    expect(result.issues.find((i) => i.code === "MODEL_ID_UNKNOWN")).toBeUndefined();
+    expect(result.issues.find((i) => i.code === "MODEL_MAP_STALE")).toBeUndefined();
+  });
+
+  it("flags an unrecognised model_version as MODEL_ID_UNKNOWN", async () => {
+    await writeClaudeProfile(CURRENT_DEFAULTS, "opus-9.9");
+    const result = await runDoctor(dir);
+    expect(result.issues.find((i) => i.code === "MODEL_ID_UNKNOWN")).toBeDefined();
+  });
+
+  it("does not false-positive on non-Claude agents (codex o3/o4-mini)", async () => {
+    // Re-init with codex added; its model_map (o3 / o4-mini / gpt-4.1-mini) is
+    // not a Claude id, but the checks are scoped to claude-code so it must not
+    // trigger MODEL_ID_UNKNOWN / MODEL_MAP_STALE.
+    await runInit({
+      cwd: dir,
+      locale: "en-US",
+      agents: ["claude-code", "codex"],
+      force: true,
+      json: false,
+    });
+    const result = await runDoctor(dir);
+    const claudeOnly = result.issues.filter(
+      (i) => i.code === "MODEL_ID_UNKNOWN" || i.code === "MODEL_MAP_STALE",
+    );
+    expect(claudeOnly).toHaveLength(0);
+  });
+});

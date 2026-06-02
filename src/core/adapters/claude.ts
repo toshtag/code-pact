@@ -2,7 +2,11 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import type { AgentProfile } from "../schemas/agent-profile.ts";
-import { CLAUDE_MODEL_VERSIONS, type ClaudeModelVersion } from "../schemas/agent-profile.ts";
+import {
+  CLAUDE_MODEL_VERSIONS,
+  CLAUDE_MODEL_GUIDANCE,
+  type ClaudeModelVersion,
+} from "../models/catalog.ts";
 import type { ModelProfile } from "../schemas/model-profile.ts";
 import { ModelTier } from "../schemas/model-profile.ts";
 import { Roadmap } from "../schemas/roadmap.ts";
@@ -16,47 +20,8 @@ import type {
 } from "./types.ts";
 
 // ---------------------------------------------------------------------------
-// Model-specific guidance blocks
+// Model-specific guidance blocks (data lives in core/models/catalog.ts)
 // ---------------------------------------------------------------------------
-
-type ModelGuidance = {
-  supportsHighEffort: boolean;
-  effortGuidance: string;
-  thinkingNote: string;
-};
-
-const MODEL_GUIDANCE: Record<ClaudeModelVersion, ModelGuidance> = {
-  "opus-4.7": {
-    supportsHighEffort: true,
-    effortGuidance: [
-      "- `high` — large context, complex architecture decisions, or tasks with `ambiguity: high`",
-      "- `medium` — standard feature work (default)",
-      "- `low` — small mechanical tasks (`type: refactor`, `expected_duration: short`)",
-    ].join("\n"),
-    thinkingNote:
-      "Extended thinking is supported. Enable it for tasks flagged `ambiguity: high` or `context_size: large`.",
-  },
-  "opus-4.6": {
-    supportsHighEffort: true,
-    effortGuidance: [
-      "- `high` — large context, complex architecture decisions, or tasks with `ambiguity: high`",
-      "- `medium` — standard feature work (default)",
-      "- `low` — small mechanical tasks (`type: refactor`, `expected_duration: short`)",
-    ].join("\n"),
-    thinkingNote:
-      "Extended thinking is supported. Enable it for tasks flagged `ambiguity: high` or `context_size: large`.",
-  },
-  "sonnet-4.6": {
-    supportsHighEffort: false,
-    effortGuidance: [
-      "- `medium` — standard feature work (default)",
-      "- `low` — small mechanical tasks (`type: refactor`, `expected_duration: short`)",
-      "- `high` is **not supported** on this model — switch to the `highest_reasoning` tier for complex tasks.",
-    ].join("\n"),
-    thinkingNote:
-      "Extended thinking is supported. For tasks requiring deep reasoning (`ambiguity: high`), consider switching to the `highest_reasoning` tier model.",
-  },
-};
 
 function modelGuidanceSection(modelVersion: string): string {
   const isKnown = (CLAUDE_MODEL_VERSIONS as readonly string[]).includes(modelVersion);
@@ -67,7 +32,7 @@ function modelGuidanceSection(modelVersion: string): string {
       `No model-specific guidance available for \`${modelVersion}\`. Refer to the Anthropic documentation.`,
     ].join("\n");
   }
-  const g = MODEL_GUIDANCE[modelVersion as ClaudeModelVersion];
+  const g = CLAUDE_MODEL_GUIDANCE[modelVersion as ClaudeModelVersion];
   return [
     `## Model guidance (${modelVersion})`,
     ``,

@@ -139,6 +139,8 @@ const KNOWN_CODES: Record<string, "public" | "plan" | "doctor" | "adapter" | "in
   LOCAL_NOT_GITIGNORED: "doctor",
   MISSING_DIR: "doctor",
   MISSING_MODEL_TIER: "doctor",
+  MODEL_ID_UNKNOWN: "doctor",
+  MODEL_MAP_STALE: "doctor",
   STALE_CONTEXT: "doctor",
 
   // Adapter platform diagnostics (manifest-aware + legacy)
