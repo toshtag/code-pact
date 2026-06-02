@@ -236,7 +236,7 @@ code-pact plan constitution \
 # ... then phase add / task add / adapter install as in step 3+.
 ```
 
-These modes also clear the `BRIEF_MISSING` / `CONSTITUTION_PLACEHOLDER` warnings a non-interactive `init` otherwise leaves. See [`docs/maintainers/operations.md` § Non-interactive `plan brief` / `plan constitution`](maintainers/operations.md#non-interactive-plan-brief--plan-constitution-v16-p17) and `docs/cli-contract.md` for the envelope shapes.
+These modes capture a brief and constitution from CI without a TTY, so the `BRIEF_MISSING` / `CONSTITUTION_PLACEHOLDER` warnings never fire once you add a real phase (both are gated on a non-`TUTORIAL` phase existing, so a fresh project stays quiet either way). See [`docs/maintainers/operations.md` § Non-interactive `plan brief` / `plan constitution`](maintainers/operations.md#non-interactive-plan-brief--plan-constitution-v16-p17) and `docs/cli-contract.md` for the envelope shapes.
 
 </details>
 

@@ -311,8 +311,8 @@ code-pact doctor
 ```
 
 New warning/error codes:
-- `BRIEF_MISSING` — `design/brief.md` not created yet
-- `CONSTITUTION_PLACEHOLDER` — constitution.md still contains the template edit hint
+- `BRIEF_MISSING` — `design/brief.md` not created yet (only once a real non-`TUTORIAL` phase exists; `brief.md` is optional and not scaffolded by `init`)
+- `CONSTITUTION_PLACEHOLDER` — constitution.md still contains the template edit hint (only once a real non-`TUTORIAL` phase exists)
 - `EMPTY_OBJECTIVE` — a phase objective is blank or very short
 - `ADAPTER_STALE` — an agent profile has no `model_version` pinned
 

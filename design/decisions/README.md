@@ -5,9 +5,11 @@ ships. Each file states a **Status**, **Scope**, **Owners**, and **Related**
 decisions; the longer ones open with a plain-language **Summary**. These are
 the *why* behind the code — the user-facing *how* lives in [`docs/`](../../docs/README.md).
 
-> RFC files are referenced by `acceptance_refs` / `decision_refs` in
-> `design/phases/*.yaml`. **Do not rename or move them** — update the index
-> here instead.
+> **Do not rename or move a gate-referenced RFC** unless you update every
+> `acceptance_refs` / `decision_refs` that names it in `design/phases/*.yaml`
+> (and the index below). A non-gate history record — one no `decision_refs` /
+> `acceptance_refs` points at — may be moved out after you confirm that; see
+> [What belongs here](#what-belongs-here-and-what-does-not) for where it goes.
 
 | Phase | Decision | What it decided |
 | --- | --- | --- |
@@ -71,6 +73,13 @@ Before moving anything, confirm it is not named by a `decision_refs` /
 `acceptance_refs` in `design/phases/*.yaml` (those are the gate-bearing
 references — see the move warning at the top). A `reads` / `writes` mention is
 not a gate reference and does not block a move.
+
+After a move, leave those historical `reads` / `writes` paths and prose
+mentions in already-shipped phases pointing at the old location. They record
+where a completed task actually read or wrote **at the time**; rewriting them to
+the new path would fabricate history, and `plan lint` does not flag a stale
+`writes` glob. (The post-1.26 move left its mentions in P39/P42/P44 untouched
+for exactly this reason.)
 
 ## ADR status convention
 

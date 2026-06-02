@@ -273,8 +273,8 @@ Issue-level codes emitted by `doctor` / `validate` for general project health.
 | `MODEL_MAP_STALE` (v1.29+) | warning | The `claude-code` profile's `model_map` points at a known Claude id that is no longer the current catalog default (e.g. the profile predates a model bump). A difference from the default, **not** an invalid value — to follow it, hand-edit the tier in the profile path doctor names (e.g. `.code-pact/agent-profiles/<agent>.yaml`) then run `adapter upgrade <agent> --write` to regenerate (note: `--model` re-pins `model_version` only, never `model_map`). Keep it if the pin is intentional, or silence via `.code-pact/doctor.yaml` → `disabled_checks: [MODEL_MAP_STALE]`. Scoped to `claude-code`; never fires for codex/other agents |
 | `BAK_FILE` | warning | A `.bak` file is present alongside a tracked file |
 | `LOCAL_NOT_GITIGNORED` | warning | `.local/` is not listed in `.gitignore` (the private planning-notes dir; `init` adds `/.local/` and `/.context/`, so this fires only if `.gitignore` was edited away) |
-| `BRIEF_MISSING` | warning | `design/brief.md` does not exist |
-| `CONSTITUTION_PLACEHOLDER` | warning | `design/constitution.md` still contains the template edit hint |
+| `BRIEF_MISSING` | warning | `design/brief.md` does not exist (gated on a real non-`TUTORIAL` phase existing — never fires on a fresh project; `brief.md` is optional and not created by `init`) |
+| `CONSTITUTION_PLACEHOLDER` | warning | `design/constitution.md` still contains the template edit hint (gated on a real non-`TUTORIAL` phase existing — never fires on a fresh project) |
 | `ADAPTER_STALE` | warning | An enabled agent profile has no `model_version` set |
 | `STALE_CONTEXT` | warning | A cached context file is older than its source design files |
 | `CONTROL_PLANE_NOT_DRIVEN` (v1.25+) | warning | The scaffold exists but isn't being driven. Fires only when **all** of: a non-TUTORIAL task is planned; `progress.yaml` has no `started`/`done` event for a non-TUTORIAL task (tutorial usage does not count); and git shows uncommitted working changes (excluding code-pact's own runtime state). **git-unavailable is a silent skip** (never an error); a broken/unparseable `progress.yaml` is also skipped (the existing `INVALID_YAML`/`SCHEMA_ERROR` reports that). Advisory: `severity: warning`, never affects doctor's exit. Silence via `.code-pact/doctor.yaml` → `disabled_checks: [CONTROL_PLANE_NOT_DRIVEN]` |
@@ -1622,8 +1622,8 @@ reports plan quality issues:
 
 | Code | Severity | Condition |
 |---|---|---|
-| `BRIEF_MISSING` | warning | `design/brief.md` does not exist |
-| `CONSTITUTION_PLACEHOLDER` | warning | `design/constitution.md` still contains the initial template edit hint |
+| `BRIEF_MISSING` | warning | `design/brief.md` does not exist (only once a real non-`TUTORIAL` phase exists; `brief.md` is optional and not scaffolded by `init`) |
+| `CONSTITUTION_PLACEHOLDER` | warning | `design/constitution.md` still contains the initial template edit hint (only once a real non-`TUTORIAL` phase exists) |
 | `EMPTY_OBJECTIVE` | error | A phase `objective` is blank or fewer than 10 characters |
 | `ADAPTER_STALE` | warning | An enabled agent profile has no `model_version` set |
 | `CONTROL_PLANE_NOT_DRIVEN` (v1.25+) | warning | Scaffold adopted but not driven — a non-TUTORIAL task is planned, `progress.yaml` has no non-TUTORIAL `started`/`done` event, and git shows uncommitted changes. git-unavailable (or a broken `progress.yaml`) → silent skip. Advisory only |
