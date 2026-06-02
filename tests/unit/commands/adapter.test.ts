@@ -354,8 +354,9 @@ describe("runGenerateAdapter — claude-code model-aware (v0.5)", () => {
     expect(content).toContain("`high`");
     expect(content).toContain("`medium`");
     expect(content).toContain("`low`");
-    // Opus 4.7 uses adaptive thinking (extended thinking is not supported).
-    expect(content).toContain("Adaptive thinking");
+    // Guidance is generation-resistant: it points at adaptive thinking, not a
+    // manual extended-thinking budget.
+    expect(content).toContain("adaptive thinking");
     expect(content).not.toContain("Extended thinking is supported");
   });
 
@@ -369,15 +370,19 @@ describe("runGenerateAdapter — claude-code model-aware (v0.5)", () => {
     expect(content).toContain("`high`");
   });
 
-  it("--model sonnet-4.6: notes that effort:high is NOT supported", async () => {
+  it("--model sonnet-4.6: guidance does not falsely claim high effort is unsupported", async () => {
     await runGenerateAdapter({
       cwd: dir, agentName: "claude-code", force: true, locale: "en-US",
       modelVersion: "sonnet-4.6",
     });
     const content = await readFile(join(dir, "CLAUDE.md"), "utf8");
     expect(content).toContain("Model guidance (sonnet-4.6)");
-    expect(content).toContain("not supported");
-    expect(content).toContain("highest_reasoning");
+    expect(content).toContain("`high`");
+    // Sonnet 4.6 supports high effort (it is the default); the old
+    // "high is not supported" claim was false and must not reappear.
+    expect(content).not.toContain("not supported** on this model");
+    expect(content).not.toContain("Extended thinking is supported. Enable it");
+    expect(content).toContain("adaptive thinking");
   });
 
   it("no --model: CLAUDE.md does not include Model guidance section", async () => {
