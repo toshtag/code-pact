@@ -198,16 +198,18 @@ Pin a Claude model version so the adapter generates effort and extended-thinking
 tailored to that model:
 
 ```sh
-# Generate CLAUDE.md with Opus 4.7–specific guidance:
-code-pact adapter install claude-code --model opus-4.7
+# Generate CLAUDE.md with Opus 4.8–specific guidance:
+code-pact adapter install claude-code --model opus-4.8
 
 # Re-run skills only (skill files regenerated, CLAUDE.md left untouched):
 code-pact adapter install claude-code --regen-skills
 ```
 
-Supported values: `opus-4.7`, `opus-4.6`, `sonnet-4.6`. The `model_version` field in
-`.code-pact/agent-profiles/claude-code.yaml` is used as the default when `--model` is
-not passed on the CLI.
+Supported values: `opus-4.8`, `opus-4.7`, `opus-4.6`, `sonnet-4.6` (and their vendor-id
+aliases, e.g. `claude-opus-4-8`). These live in `CLAUDE_MODEL_VERSIONS` in
+`src/core/models/catalog.ts` — the single source of truth for Claude model facts. The
+`model_version` field in `.code-pact/agent-profiles/claude-code.yaml` is used as the
+default when `--model` is not passed on the CLI.
 
 After adapter generation, `.claude/skills/` is populated with:
 - Fixed skills: `/context`, `/verify`, `/progress`
