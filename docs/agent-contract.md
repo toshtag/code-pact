@@ -322,7 +322,7 @@ this prose and the source of truth — reproduce with `pnpm harness --corpus . -
 | Context pack p90 bytes | Per-task pack size, lower 90th percentile |
 | Context pack max bytes | Largest single task's pack size |
 | First-pass verification rate | Percentage of `task complete` invocations whose declared verification passes on the first attempt |
-| Task lifecycle adherence rate | State-machine adherence: among tasks that have any progress events, the percentage with at least one `started` event before the first `done` event AND no legacy `planned → done` shortcut. `task prepare` is read-only and emits no event, so prepare-adherence is **not** measured. Sits below 100% because of historical (mostly pre-v0.7) tasks that used the legacy `planned → done` shortcut, not current behaviour |
+| Task lifecycle adherence rate | State-machine adherence: among tasks that have any progress events, the percentage with at least one `started` event before the first `done` event AND no legacy `planned → done` shortcut. `task prepare` emits no progress event, so prepare-adherence is **not** measured. Sits below 100% because of historical (mostly pre-v0.7) tasks that used the legacy `planned → done` shortcut, not current behaviour |
 | Undeclared write rate | Files changed by a task whose paths are not covered by the task's declared `writes` globs. Currently `deferred` ([rationale](../design/decisions/evidence-harness-v2-rfc.md#non-goals-out-of-scope-for-p26)) |
 | Adapter drift detection rate | Percentage of enabled agents where `adapter doctor` returns at least one error-severity issue |
 

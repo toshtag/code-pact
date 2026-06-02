@@ -56,7 +56,7 @@ The sibling `measurements.manifest.json` records the harness version, the corpus
 
 - **Percentiles use the lower-percentile rule** (no floating-point average). The `Math.ceil((p/100) × n)`-th element of the sorted ascending array, clamped to `[1, n]`. For `n=4`, `p=50` returns the second element, not the average of the two middle elements. This preserves integer byte values without rounding.
 - **Rates round to one decimal place.** `Math.round(100 × num / den × 10) / 10`. A `0/0` rate emits `0.0`, not `NaN`.
-- **Adherence numerator** = rows where `started_before_done && !legacy_planned_to_done_shortcut`. **Adherence denominator** = rows where `event_count > 0`. Tasks with zero events are excluded from the denominator — they are "not yet attempted", not "failures of adherence". `task prepare` is read-only and emits no event, so the metric measures state-machine adherence only.
+- **Adherence numerator** = rows where `started_before_done && !legacy_planned_to_done_shortcut`. **Adherence denominator** = rows where `event_count > 0`. Tasks with zero events are excluded from the denominator — they are "not yet attempted", not "failures of adherence". `task prepare` emits no progress event, so the metric measures state-machine adherence only.
 - **Adapter drift gate** = `doctor_ok` is `false` iff at least one issue has `severity: "error"`. Warning-only states (e.g. `ADAPTER_GENERATOR_STALE` alone) keep `doctor_ok: true`.
 
 ### Undeclared-write-rate deferral
