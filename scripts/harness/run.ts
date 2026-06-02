@@ -7,7 +7,7 @@
 // NOT a product feature. Not registered in package.json bin. Walks the
 // dogfood corpus (or any path with a design/ directory), computes the
 // four metric sets locked in the P20-T1 RFC, and emits CSV files under
-// design/measurements/ on --write (or prints them to stdout on default
+// docs/maintainers/measurements/ on --write (or prints them to stdout on default
 // --check).
 
 import { parseArgs } from "node:util";
@@ -315,7 +315,7 @@ async function main(): Promise<number> {
   const summaryJsonText = JSON.stringify(output.summary, null, 2) + "\n";
 
   if (write) {
-    const outDir = join(resolve(corpus), "design", "measurements");
+    const outDir = join(resolve(corpus), "docs", "maintainers", "measurements");
     await mkdir(outDir, { recursive: true });
     for (const [name, content] of Object.entries(serialized)) {
       await writeFile(join(outDir, name), content, "utf8");

@@ -2636,7 +2636,7 @@ The repository contains internal scripts under `scripts/` that are **not** part 
 
 The current maintainer-only tools are:
 
-- **`pnpm harness`** (v1.10+, P20) — evidence harness that walks the corpus and emits CSV metrics under `design/measurements/`. See [`docs/concepts/evidence-harness.md`](concepts/evidence-harness.md). This is **not** `code-pact harness` — the command does not exist on the public CLI.
+- **`pnpm harness`** (v1.10+, P20) — evidence harness that walks the corpus and emits CSV metrics under `docs/maintainers/measurements/`. See [`docs/concepts/evidence-harness.md`](concepts/evidence-harness.md). This is **not** `code-pact harness` — the command does not exist on the public CLI.
 
 These tools have no stability commitment, no JSON envelope contract, no error code surface. They can change shape between minors without a deprecation cycle. If you find yourself wanting to depend on one from outside the repository, open an issue first to discuss promoting it to a public surface.
 

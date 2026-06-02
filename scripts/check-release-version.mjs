@@ -77,10 +77,10 @@ export function checkReleaseVersion(root) {
 
   // 2. Measurements snapshot version (also guarded by check-doc-invariants;
   //    bundled here so `release:check` is self-contained).
-  const summaryVersion = JSON.parse(read("design/measurements/summary.json")).code_pact_cli_version;
+  const summaryVersion = JSON.parse(read("docs/maintainers/measurements/summary.json")).code_pact_cli_version;
   if (summaryVersion !== pkgVersion) {
     problems.push(
-      `design/measurements/summary.json: code_pact_cli_version "${summaryVersion}" != package.json "${pkgVersion}" — run \`pnpm harness --corpus . --write\``,
+      `docs/maintainers/measurements/summary.json: code_pact_cli_version "${summaryVersion}" != package.json "${pkgVersion}" — run \`pnpm harness --corpus . --write\``,
     );
   }
 

@@ -6,7 +6,7 @@
 **Related:**
 - [design/decisions/agent-contract-v2-rfc.md](agent-contract-v2-rfc.md) (P21 — defines the section-level metadata `task context --explain` exposes and reserves `budget_reserved_for_later` for this RFC to activate).
 - [design/decisions/task-readiness-schema-rfc.md](task-readiness-schema-rfc.md) (P10 — defines the task readiness fields `context_size` / `ambiguity` / `write_surface` that already drive section inclusion; budget enforcement layers on top, not in place of, those signals).
-- [design/decisions/evidence-harness-v2-rfc.md](evidence-harness-v2-rfc.md) (P26 — committed the `pack_size_p50/p90/max_bytes` baseline that motivates this work; the `pack_size_max_bytes: 259650` outlier in `design/measurements/summary.json` is exactly the case `--budget-bytes` targets).
+- [design/decisions/evidence-harness-v2-rfc.md](evidence-harness-v2-rfc.md) (P26 — committed the `pack_size_p50/p90/max_bytes` baseline that motivates this work; the `pack_size_max_bytes: 259650` outlier in `docs/maintainers/measurements/summary.json` is exactly the case `--budget-bytes` targets).
 
 ## Status lifecycle
 
@@ -18,7 +18,7 @@
 
 [P21-T4](agent-contract-v2-rfc.md) shipped `code-pact task context --explain` with a per-section `bytes` + `reason_code` breakdown so context pack composition becomes auditable. The RFC explicitly reserved `budget_reserved_for_later` in `ContextExcludedReasonCode` for P24 ("budget enforcement"); a P21 unit test asserts P21 never emits the value, intentionally pressuring this RFC to be the one that activates it.
 
-[P26-T2](../measurements/summary.json) committed the dogfood baseline:
+[P26-T2](../../docs/maintainers/measurements/summary.json) committed the dogfood baseline:
 
 | metric | value |
 |---|---|

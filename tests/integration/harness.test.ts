@@ -6,8 +6,8 @@
 //     `code_pact_cli_version` which is read at runtime — that field
 //     stays stable across runs in a single CI session anyway).
 //   * --check (default) prints CSVs to stdout AND does NOT touch
-//     design/measurements/.
-//   * --write persists the four CSVs + manifest under design/measurements/.
+//     docs/maintainers/measurements/.
+//   * --write persists the four CSVs + manifest under docs/maintainers/measurements/.
 
 import { describe, it, expect, beforeAll, afterEach } from "vitest";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
@@ -106,12 +106,12 @@ function runHarness(corpusDir: string, args: string[]): { code: number; stdout: 
 }
 
 describe("harness --write (persistence)", () => {
-  it("writes six CSVs + manifest + summary.json under design/measurements/", async () => {
+  it("writes six CSVs + manifest + summary.json under docs/maintainers/measurements/", async () => {
     const p = await setupCorpus("write");
     const result = runHarness(p.dir, ["--write", "--json"]);
     expect(result.code).toBe(0);
 
-    const outDir = join(p.dir, "design", "measurements");
+    const outDir = join(p.dir, "docs", "maintainers", "measurements");
     for (const f of [
       "pack-size-by-task.csv",
       "verify-success-rate.csv",
@@ -149,7 +149,7 @@ describe("harness --write (persistence)", () => {
 
     const summary = JSON.parse(
       await readFile(
-        join(p.dir, "design", "measurements", "summary.json"),
+        join(p.dir, "docs", "maintainers", "measurements", "summary.json"),
         "utf8",
       ),
     );
@@ -191,7 +191,7 @@ describe("harness (default --check)", () => {
 
     let measurementsExists = false;
     try {
-      await stat(join(p.dir, "design", "measurements"));
+      await stat(join(p.dir, "docs", "maintainers", "measurements"));
       measurementsExists = true;
     } catch {
       measurementsExists = false;
@@ -206,7 +206,7 @@ describe("harness byte-determinism", () => {
 
     const first = runHarness(p.dir, ["--write"]);
     expect(first.code).toBe(0);
-    const outDir = join(p.dir, "design", "measurements");
+    const outDir = join(p.dir, "docs", "maintainers", "measurements");
 
     const firstSnapshot = new Map<string, string>();
     for (const f of [
