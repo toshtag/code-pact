@@ -68,7 +68,8 @@ code-pact task context P1-T1 --explain
 The single per-task entry point. Returns the current state, the execution
 recommendation (tier/model/effort/budget), context-pack metadata, a
 structured next_action, and a commands dictionary with the exact next
-commands to run. Read-only — never mutates progress.yaml.
+commands to run. Progress-read-only — never mutates progress.yaml, but
+writes the context pack unless --dry-run is passed.
 
 | Flag | Value | Description |
 | --- | --- | --- |
