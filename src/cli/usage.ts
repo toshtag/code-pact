@@ -173,6 +173,8 @@ const LEAF_USAGE: Record<string, () => string> = {
       "any input that needs defaulting. Reserved ids (e.g. TUTORIAL) and id",
       "collisions are rejected with the whole input left unwritten.",
       "",
+      "Alias: `code-pact plan import` routes here.",
+      "",
       "Options:",
       "  --force                Skip phases whose ids already exist in the roadmap",
       "                         (the rest still import). Task-id collisions are",

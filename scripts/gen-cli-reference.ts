@@ -38,8 +38,6 @@ function render(): string {
     "envelope, exit codes, error codes, stability taxonomy — also lives in",
     "[`cli-contract.md`](cli-contract.md).",
     "",
-    "## task",
-    "",
   ];
 
   // Deterministic order: lifecycle reading order, then any others by key.

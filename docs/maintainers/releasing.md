@@ -44,15 +44,16 @@ On a `chore/release-<version>` branch:
    git diff <last-tag>..HEAD --name-only -- docs/ design/decisions/
    # scan for: new error codes without a troubleshooting entry.
    ```
-5. **Verify** (the same gates CI runs):
+5. **Verify** — one command, the release gate:
    ```sh
-   pnpm typecheck && pnpm test:unit && pnpm build \
-     && pnpm exec vitest run --config vitest.integration.config.ts \
-     && pnpm check:docs \
-     && node dist/cli.js plan lint --include-quality --strict --json \
-     && node dist/cli.js plan analyze --strict --json \
-     && node dist/cli.js validate --json
+   pnpm release:check
    ```
+   `release:check` (in `package.json`) runs typecheck, the full test suite,
+   build, `check:docs` (links + invariants + generated-reference drift),
+   `check:release-version` (package.json ↔ CHANGELOG ↔ measurements agree),
+   then `validate --json`, `plan lint --include-quality --strict --json`, and
+   `plan analyze --strict --json`. This is the single source of the release
+   gate — don't re-list the steps here, or the runbook drifts from the script.
 6. Open the PR; merge once CI is green.
 
 ## Tag + publish (maintainer-local)

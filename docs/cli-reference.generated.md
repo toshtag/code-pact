@@ -11,8 +11,6 @@ command's `--help`, and their semantics in
 envelope, exit codes, error codes, stability taxonomy — also lives in
 [`cli-contract.md`](cli-contract.md).
 
-## task
-
 ## `task add`
 
 `code-pact task add <phase-id> [options]`
