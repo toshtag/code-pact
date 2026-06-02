@@ -17,6 +17,14 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 - **Agent-profile path resolution is unified across commands.** `adapter install` / `adapter upgrade` / `adapter doctor` / `adapter list`, `recommend`, `task prepare`, `pack`, and the `model_version` pin all now honor `project.yaml`'s `agents[].profile` (the path `doctor` already used), via a single `resolveAgentProfilePath` helper. Previously every command except `doctor` hardcoded `agent-profiles/<name>.yaml`, so a non-default `agents[].profile` made `doctor` (and the `MODEL_MAP_STALE` remediation) point at one file while `adapter upgrade --write` read/wrote another. The conventional `agent-profiles/<name>.yaml` remains the fallback when project.yaml is absent or the agent is unlisted; a matched agent whose `profile` is an invalid path now fails with `CONFIG_ERROR` rather than silently using the default. Default projects are unaffected. Completes the follow-up noted in 1.29.0 (#330), and supersedes the 1.29.0 note about `adapter install` / `adapter upgrade` reading the conventional path.
 
+### Fixed
+
+- **`doctor` no longer nags for `design/brief.md` on a fresh project.** `BRIEF_MISSING` is now gated on a real (non-`TUTORIAL`) phase existing, matching the existing `CONSTITUTION_PLACEHOLDER` gate — a brand-new project (which `init` never gives a `brief.md`) has not started real work, so the warning is pure noise there. It fires once the project has a non-tutorial phase, where a project overview becomes useful; `plan prompt` still notices a missing brief on its own. `brief.md` stays optional (adopting an existing roadmap or planning by hand never needs it). The docs describing post-`init` warnings (`troubleshooting.md`, `getting-started.md`, `cli-contract.md`, `maintainers/operations.md`) were corrected to match — a fresh non-interactive `init` surfaces `ADAPTER_MISSING` + `ADAPTER_STALE`, not `BRIEF_MISSING`. `getting-started.md` also gained a "What `init` creates" table.
+
+### Maintenance (no runtime/package effect)
+
+- Moved maintainer release evidence from `design/measurements/` to `docs/maintainers/measurements/`, separating the active control plane (`design/`) from generated artifacts (the npm package ships neither). Documented the `design/decisions/` responsibility boundary in its README and moved the completed `post-1.26-agent-dx-backlog` sequencing record to `docs/maintainers/history/`.
+
 ---
 
 ## [1.29.0] — 2026-06-02
