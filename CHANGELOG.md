@@ -28,7 +28,7 @@ Maintenance-surface reduction and agent discoverability, driven by external agen
 **Added**
 
 - **Machine-readable recovery on `CONTROL_PLANE_*` issues.** `CONTROL_PLANE_NOT_DRIVEN` and `CONTROL_PLANE_BRANCH_NOT_DRIVEN` carry an additive `recovery` object (`{ primary, alternatives?, reference? }`) alongside the unchanged `message`, so an agent can pick the next action from JSON without parsing prose. It rides through `validate --json` (both stringify the same `DoctorResult`). Scoped to the two `CONTROL_PLANE_*` codes; documented under `docs/cli-contract.md` § Doctor diagnostic codes.
-- **Richer leaf help for mutating / JSON-emitting commands.** The 9 mutating non-task commands (`plan brief` / `adopt` / `constitution` / `normalize`, `phase add` / `new` / `reconcile`, `adapter install` / `upgrade`) gained rich `--help` — synopsis, options, examples, `--json` — replacing the 2-line stub.
+- **Richer leaf help for mutating commands.** The 9 mutating non-task commands (`plan brief` / `adopt` / `constitution` / `normalize`, `phase add` / `new` / `reconcile`, `adapter install` / `upgrade`) now have rich `--help` with synopsis, options where applicable, and examples, replacing the 2-line stub.
 
 ### Guardrails
 
