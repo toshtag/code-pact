@@ -71,8 +71,12 @@ async function loadAgentProfileSafe(
   cwd: string,
   agentName: string,
 ): Promise<AgentProfile | null> {
+  // Resolve OUTSIDE the try so a CONFIG_ERROR (unparseable project.yaml or an
+  // invalid `agents[].profile`) propagates — consistent with the other commands
+  // rather than masked as "no profile". Missing/malformed profile *content* is
+  // still lenient (null), which the adapter doctor checks surface as issues.
+  const path = await resolveAgentProfilePath(cwd, agentName);
   try {
-    const path = await resolveAgentProfilePath(cwd, agentName);
     const raw = await readFile(path, "utf8");
     return AgentProfile.parse(parseYaml(raw) as unknown);
   } catch {

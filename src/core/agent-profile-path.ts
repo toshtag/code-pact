@@ -14,10 +14,12 @@ import { assertSafePlanId } from "./schemas/plan-id.ts";
 // These helpers make all of them agree with doctor.
 //
 // Resolution honors `project.yaml`'s matching `agents[].profile`, falling back
-// to the conventional `agent-profiles/<name>.yaml` (what `init` writes) when
-// project.yaml is absent or the agent is not listed. A matched agent whose
-// `profile` is an invalid path fails with CONFIG_ERROR (it is not masked behind
-// the default).
+// to the conventional `agent-profiles/<name>.yaml` (what `init` writes) ONLY
+// when project.yaml is absent or the agent is not listed. A present-but-broken
+// config — unparseable project.yaml, or a matched agent whose `profile` is an
+// invalid path — fails with CONFIG_ERROR rather than being masked behind the
+// default. (An unrelated invalid field elsewhere does not block resolution: we
+// read just the matched agent's `profile`.)
 
 /** The conventional profile path (relative to `.code-pact/`), POSIX-separated. */
 function defaultProfileRel(agentName: string): string {
@@ -55,7 +57,13 @@ export async function resolveAgentProfileRel(
   try {
     doc = parseYaml(raw) as unknown;
   } catch {
-    return defaultProfileRel(agentName); // unparseable → convention
+    // project.yaml is present but not parseable YAML — a real misconfiguration.
+    // Surface it rather than silently reading/writing the default file.
+    const err = new Error(
+      `Cannot parse .code-pact/project.yaml while resolving the agent profile for "${agentName}".`,
+    );
+    (err as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+    throw err;
   }
   const agents = (doc as { agents?: unknown })?.agents;
   if (Array.isArray(agents)) {

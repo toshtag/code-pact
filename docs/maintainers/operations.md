@@ -199,7 +199,7 @@ model. The guidance is generation-resistant — it avoids per-generation capabil
 defers exact capabilities to Anthropic's current docs:
 
 ```sh
-# Generate CLAUDE.md with Opus 4.8–specific guidance:
+# Generate CLAUDE.md with model-aware Opus 4.8 guidance:
 code-pact adapter install claude-code --model opus-4.8
 
 # Re-run skills only (skill files regenerated, CLAUDE.md left untouched):

@@ -72,6 +72,14 @@ describe("resolveAgentProfileRel / resolveAgentProfilePath", () => {
     });
   });
 
+  it("rejects a present-but-unparseable project.yaml with CONFIG_ERROR (no fallback)", async () => {
+    // Malformed YAML — present but broken. Falling back would mask it.
+    await writeFile(join(dir, ".code-pact", "project.yaml"), "agents: {unclosed", "utf8");
+    await expect(resolveAgentProfileRel(dir, "claude-code")).rejects.toMatchObject({
+      code: "CONFIG_ERROR",
+    });
+  });
+
   it("falls back to the convention when project.yaml has no matching agent", async () => {
     // codex is not enabled in this project; resolve must not throw.
     expect(await resolveAgentProfileRel(dir, "codex")).toBe(
@@ -108,6 +116,27 @@ describe("adapter list honors a custom profile path", () => {
     await expect(runAdapterList({ cwd: dir })).rejects.toMatchObject({
       code: "CONFIG_ERROR",
     });
+  });
+});
+
+describe("resolver-using commands do not fall back on a broken project.yaml", () => {
+  it("adapter install fails with CONFIG_ERROR on malformed project.yaml", async () => {
+    const { runGenerateAdapter } = await import("../../../src/commands/adapter.ts");
+    await writeFile(join(dir, ".code-pact", "project.yaml"), "agents: {unclosed", "utf8");
+    await expect(
+      runGenerateAdapter({ cwd: dir, agentName: "claude-code", force: true, locale: "en-US" }),
+    ).rejects.toMatchObject({ code: "CONFIG_ERROR" });
+  });
+
+  it("adapter doctor surfaces an invalid agents[].profile as CONFIG_ERROR (not silent)", async () => {
+    const { runGenerateAdapter, runAdapterDoctor } = await import("../../../src/commands/adapter.ts");
+    // Install first so a manifest exists — otherwise inspectAgent returns at the
+    // missing-manifest check before it ever loads the profile.
+    await runGenerateAdapter({ cwd: dir, agentName: "claude-code", force: true, locale: "en-US" });
+    await setProfileRel("claude-code", "../../etc/evil.yaml");
+    await expect(
+      runAdapterDoctor({ cwd: dir, agentName: "claude-code", locale: "en-US" }),
+    ).rejects.toMatchObject({ code: "CONFIG_ERROR" });
   });
 });
 
