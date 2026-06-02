@@ -241,7 +241,7 @@ describe("adapter upgrade — MODEL_MAP_STALE remaining-advisory hint (CLI)", ()
     fs.writeFileSync(path, next, "utf8");
   }
 
-  it("clean --write with a stale model_map pin prints the hint on stderr", () => {
+  it("non-refused --write with a stale model_map pin prints the hint on stderr", () => {
     runCli(["adapter", "install", "claude-code", "--json"]);
     pinStale();
     const res = runCli(["adapter", "upgrade", "claude-code", "--write"]);

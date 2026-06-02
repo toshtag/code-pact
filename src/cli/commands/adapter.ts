@@ -396,37 +396,39 @@ async function cmdAdapterUpgrade(
           );
         } else {
           process.stderr.write(`${m.adapter.done(agentName)} Manifest: ${result.manifestPath}\n`);
-          // Remaining-advisory hint (human-only) — emitted ONLY on a fully
-          // clean write. `adapter upgrade` repairs generator/desired drift but
-          // deliberately never rewrites model_map (a pin may be intentional),
-          // so a MODEL_MAP_STALE advisory survives a --write. Surfacing it here
-          // closes the "I upgraded — why is one advisory still there?" gap
-          // without turning upgrade into a doctor runner: it is scoped to
-          // claude-code's model_map, honors doctor.yaml suppression, and never
-          // advises --model (which re-pins model_version, not model_map). It is
-          // withheld when files were refused — there the actionable next step is
-          // --accept-modified, and the hint's "re-run --write" would contradict
-          // it. Best-effort: a profile read failure must not fail the write.
-          try {
-            const { profileRel, drift } = await detectAgentModelMapDrift(
-              process.cwd(),
-              agentName,
-            );
-            if (drift.length > 0) {
-              process.stderr.write(
-                `Remaining manual advisory: MODEL_MAP_STALE (${drift.length})\n`,
+          // Human-only hint for the one advisory adapter upgrade intentionally
+          // cannot fix: model_map pins may be deliberate, so upgrade never
+          // rewrites them and a MODEL_MAP_STALE advisory survives a --write.
+          // Emitted on a successful --write with no refused files (the rationale
+          // and contract live in docs/cli-contract.md and the tests). Withheld
+          // when files were refused — there --accept-modified is the next step,
+          // which the hint's "re-run --write" would contradict. Best-effort: a
+          // profile read failure must not fail the already-successful write.
+          //
+          // Gated on claude-code (the only catalog-backed agent) so non-claude
+          // upgrades never touch the profile at all — no read, no failure path.
+          if (agentName === "claude-code") {
+            try {
+              const { profileRel, drift } = await detectAgentModelMapDrift(
+                process.cwd(),
+                agentName,
               );
-              for (const d of drift) {
+              if (drift.length > 0) {
                 process.stderr.write(
-                  `  model_map.${d.tier} is pinned to "${d.current}"; current catalog default is "${d.expected}".\n`,
+                  `Remaining manual advisory: MODEL_MAP_STALE (${drift.length})\n`,
+                );
+                for (const d of drift) {
+                  process.stderr.write(
+                    `  model_map.${d.tier} is pinned to "${d.current}"; current catalog default is "${d.expected}".\n`,
+                  );
+                }
+                process.stderr.write(
+                  `adapter upgrade does not change model_map pins. To follow the default, edit .code-pact/${profileRel} and re-run "code-pact adapter upgrade ${agentName} --write". Keep it if the pin is intentional, or silence via .code-pact/doctor.yaml (disabled_checks: [MODEL_MAP_STALE]).\n`,
                 );
               }
-              process.stderr.write(
-                `adapter upgrade does not change model_map pins. To follow the default, edit .code-pact/${profileRel} and re-run "code-pact adapter upgrade ${agentName} --write". Keep it if the pin is intentional, or silence via .code-pact/doctor.yaml (disabled_checks: [MODEL_MAP_STALE]).\n`,
-              );
+            } catch {
+              // Ignore — the write succeeded; the hint is a best-effort nicety.
             }
-          } catch {
-            // Ignore — the write succeeded; the hint is a best-effort nicety.
           }
         }
       }

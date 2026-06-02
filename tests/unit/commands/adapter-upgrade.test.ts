@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtemp, readFile, rm, writeFile, unlink } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile, unlink } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -761,6 +761,38 @@ describe("detectAgentModelMapDrift", () => {
   it("is scoped to claude-code — other agents always return empty drift", async () => {
     const { drift } = await detectAgentModelMapDrift(dir, "codex");
     expect(drift).toEqual([]);
+  });
+
+  it("reads the custom agents[].profile path, not the default (regression: 1.29.1 path-resolution)", async () => {
+    // Point project.yaml at a non-default profile path and put the STALE pin
+    // there, while leaving the default agent-profiles/claude-code.yaml at fresh
+    // catalog defaults. Drift can therefore only be detected if the helper read
+    // the custom profile — and the reported path must be the custom one.
+    const projectPath = join(dir, ".code-pact", "project.yaml");
+    const project = await readFile(projectPath, "utf8");
+    await writeFile(
+      projectPath,
+      project.replace(
+        "profile: agent-profiles/claude-code.yaml",
+        "profile: custom/claude.yaml",
+      ),
+      "utf8",
+    );
+    const defaultProfile = await readFile(
+      join(dir, ".code-pact", "agent-profiles", "claude-code.yaml"),
+      "utf8",
+    );
+    // default stays fresh; custom gets the stale pin
+    await mkdir(join(dir, ".code-pact", "custom"), { recursive: true });
+    await writeFile(
+      join(dir, ".code-pact", "custom", "claude.yaml"),
+      defaultProfile.replace(/(highest_reasoning:\s*)\S+/, "$1claude-opus-4-7"),
+      "utf8",
+    );
+
+    const { profileRel, drift } = await detectAgentModelMapDrift(dir, "claude-code");
+    expect(profileRel).toBe("custom/claude.yaml");
+    expect(drift.map((d) => d.current)).toEqual(["claude-opus-4-7"]);
   });
 
   it("honors doctor.yaml suppression: a silenced MODEL_MAP_STALE yields no drift", async () => {
