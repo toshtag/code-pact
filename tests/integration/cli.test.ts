@@ -1695,8 +1695,10 @@ describe("CLI: validate", () => {
   });
 
   it("validate --strict --json on a project with warnings returns {ok:false,error:VALIDATE_FAILED} and exit 1", () => {
-    // A fresh init project has no design/brief.md → BRIEF_MISSING warning.
-    // Under --strict, that warning should trip exit 1.
+    // A fresh init project enables claude-code without a synced adapter
+    // manifest/model_version → ADAPTER_MISSING + ADAPTER_STALE warnings.
+    // (BRIEF_MISSING is gated on a real phase, so it does not fire here.)
+    // Under --strict, any warning should trip exit 1.
     run(["init", "--non-interactive", "--locale", "en-US", "--agent", "claude-code", "--json"]);
     const res = run(["validate", "--strict", "--json"]);
     expect(res.code).toBe(1);
