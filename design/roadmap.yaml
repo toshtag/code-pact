@@ -119,3 +119,6 @@ phases:
   - id: P44
     path: design/phases/P44-ci-adoption-page.yaml
     weight: 4
+  - id: P45
+    path: design/phases/P45-context-pack-write-contract-hygiene.yaml
+    weight: 3

@@ -2310,7 +2310,7 @@ Appends a `resumed` event. Allowed only from `blocked` — any other current sta
 
 `code-pact recommend --phase <id> --task <id> [--agent <name>] [--json]` returns a deterministic execution plan for a given task — model tier, effort, context profile, planning posture, escalation order, preflight commands, and a categorical budget profile — based on Task metadata (`type`, `ambiguity`, `risk`, `context_size`, `write_surface`, `verification_strength`, `expected_duration`, `requires_decision`).
 
-This is the entry point of the agent-facing loop: agents should call `recommend` first, **before** fetching the context pack or marking the task started, then use its output to decide what to load, how hard to think, and what to verify before implementation.
+Since v1.11, `task prepare` is the primary per-task entry point for the agent-facing loop and embeds this recommendation in its response. Call `recommend` directly when you need to inspect the deterministic recommendation in isolation, debug recommendation inputs, or support an older/manual loop — then use its output to decide what to load, how hard to think, and what to verify before implementation. It is read-only and does not fetch or write the context pack.
 
 Read-only. The command does not mutate any state.
 
@@ -2450,7 +2450,7 @@ This means that once a project is initialized with `ja-JP`, all subsequent comma
 
 ## State file write guarantees
 
-`code-pact` writes a small, well-defined set of files into the project tree. Every disk write goes through the same atomic primitive so an interrupted process cannot leave a half-written file behind.
+`code-pact` writes a small, well-defined set of state, design, adapter, and regenerable artifact files into the project tree. Every file-content write **listed in the table below** goes through the same atomic primitive, so an interrupted process cannot leave a half-written managed file behind. (Two writes are deliberately outside this guarantee and documented below: directory creation — e.g. an adapter making the `context_dir` — is a separate `mkdir` with no half-written-directory risk, and the advisory write lock uses exclusive file creation (`flag: "wx"`) rather than `atomicWriteText`.)
 
 ### Files written by `code-pact`
 
@@ -2466,11 +2466,12 @@ This means that once a project is initialized with `ja-JP`, all subsequent comma
 | `design/brief.md`, `design/constitution.md` | `plan brief`, `plan constitution` | Once per wizard run |
 | `design/roadmap.yaml` | `init --sample-phase`, `phase add`, `phase new`, `phase import` (all via `createPhase`) | One append per phase added |
 | `design/phases/<phase>.yaml` | `init --sample-phase`, `phase add`, `phase new`, `phase import`, `task add`, `task finalize --write`, `phase reconcile --write` | Phase creation: one write per phase. Task lifecycle: one write per `task add` / status flip |
-| `<adapter-owned files>` (e.g. `CLAUDE.md`, `.claude/skills/*.md`, `.context/<agent>/*`) | `adapter install`, `adapter upgrade --write` | Generated from the agent's `AdapterDescriptor`; manifest tracks every file |
+| `<agent-profile>.context_dir/<task-id>.md` (context pack; default `.context/<agent>/<task-id>.md`) | `task prepare` (unless `--dry-run`), `pack` | One write per `task prepare` / `pack` invocation. `task context` does **not** write — it builds and returns/prints the same bytes. The file is regenerable; the default context dir is gitignored (`/.context/`), and a custom `context_dir` should likewise be treated as ignorable agent output. Not tracked in the adapter manifest |
+| `<adapter-owned files>` (e.g. `CLAUDE.md`, `.claude/skills/*.md`) | `adapter install`, `adapter upgrade --write` | Generated from the agent's `AdapterDescriptor`; manifest tracks every file. `adapter install` / `upgrade` may also create the agent profile's `context_dir` directory (a `mkdir`, not a file-content write), but the per-task packs inside it are written by `task prepare` / `pack` (row above), not the adapter |
 
 ### Atomic write strategy
 
-Every write listed above goes through `atomicWriteText` (`src/io/atomic-text.ts`):
+Every file-content write listed above goes through `atomicWriteText` (`src/io/atomic-text.ts`):
 
 1. Write content to `<path>.tmp-<pid>-<timestamp>` in the same directory.
 2. `fs.rename(tmp, path)` — on POSIX, this is a single inode swap.

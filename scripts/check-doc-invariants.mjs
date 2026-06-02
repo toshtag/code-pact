@@ -218,6 +218,60 @@ for (const rel of ["docs/getting-started.md"]) {
   }
 }
 
+// 11. Context-pack writer accuracy (the P45 class). Two narrow invariants
+//     keep the docs/code story straight about WHO writes the context pack:
+//     `task context` builds and returns it (read-only); `task prepare` and the
+//     low-level `pack` are the writers. Both rules are scoped to one slice each
+//     so they cannot false-positive on legitimate `task prepare` prose.
+{
+  // 11a. positioning.md must not describe `task context` as writing the pack
+  //      file. Scan ONLY the `task context` bullet (from its bold label to the
+  //      next top-level bullet) so the adjacent `task prepare` bullet — which
+  //      legitimately says it writes `.context/<agent>/<task-id>.md` — is not
+  //      caught.
+  const positioning = read("docs/positioning.md");
+  const bulletMatch = positioning.match(
+    /-\s+\*\*`code-pact task context`\*\*([\s\S]*?)(?=\n-\s+\*\*`)/,
+  );
+  const bullet = bulletMatch ? bulletMatch[1] : "";
+  if (/\bwrites?\b[\s\S]*?\.context\//i.test(bullet) || /\bwrites? it to\b/i.test(bullet)) {
+    fail(
+      "docs/positioning.md",
+      "the `task context` bullet describes it as writing the pack file — `task context` is a read-only diagnostic; `task prepare` / `pack` are the writers (say it builds and returns/prints the pack)",
+    );
+  }
+
+  // 11b. Contract↔code invariant. When cli-contract.md's "State file write
+  //      guarantees" section lists the context pack as a written file AND
+  //      asserts every such write goes through `atomicWriteText`, the
+  //      implementation `writeContextPack()` MUST actually use atomicWriteText
+  //      (not raw `writeFile`). This was false before v1.29.1 — the contract
+  //      claimed atomic, the code used a raw write. The obligation is derived
+  //      from the doc's own claim, so it cannot go stale relative to the prose.
+  //      Anchored on the `(context pack` row LABEL, not a specific path string,
+  //      so it survives the canonical `<agent-profile>.context_dir/...` form
+  //      (and would not silently go dormant if the default-path parenthetical
+  //      is ever dropped).
+  const contract = read("docs/cli-contract.md");
+  const guaranteesContextPackAtomic =
+    /State file write guarantees[\s\S]*?\(context pack[\s\S]*?goes through `atomicWriteText`/.test(
+      contract,
+    );
+  if (guaranteesContextPackAtomic) {
+    const packSrc = read("src/core/pack/index.ts");
+    const fnMatch = packSrc.match(
+      /export async function writeContextPack[\s\S]*?\n\}/,
+    );
+    const fnBody = fnMatch ? fnMatch[0] : "";
+    if (!/atomicWriteText\s*\(/.test(fnBody) || /\bwriteFile\s*\(/.test(fnBody)) {
+      fail(
+        "src/core/pack/index.ts",
+        "cli-contract.md guarantees context-pack writes go through `atomicWriteText`, but `writeContextPack()` does not use it (or still calls raw `writeFile`) — align the implementation with the published atomic-write contract",
+      );
+    }
+  }
+}
+
 if (problems.length > 0) {
   console.error(`check-doc-invariants: ${problems.length} issue(s):`);
   for (const p of problems) console.error(`  - ${p}`);

@@ -1,5 +1,6 @@
-import { readFile, readdir, mkdir, writeFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
+import { atomicWriteText } from "../../io/atomic-text.ts";
 import { parse as parseYaml } from "yaml";
 import { Roadmap } from "../schemas/roadmap.ts";
 import { Phase } from "../schemas/phase.ts";
@@ -756,6 +757,13 @@ function computeExplainExcluded(
  * Writes a previously built ContextPackResult to disk under the agent's
  * configured context_dir (or an explicit outputDir override). Returns
  * the resolved outputPath.
+ *
+ * The write goes through `atomicWriteText` (temp-file + rename), so an
+ * interrupted process can never leave a half-written pack on disk. The
+ * context pack is part of the deterministic agent-facing artifact surface
+ * the cli-contract.md "State file write guarantees" section covers, so it
+ * uses the same atomic primitive as the managed file-content writes listed
+ * there (directory creation and the advisory lock are separate mechanisms).
  */
 export async function writeContextPack(
   pack: ContextPackResult,
@@ -770,8 +778,10 @@ export async function writeContextPack(
   // profile cannot redirect the pack write out of the repo.
   const outDir =
     outputDir ?? (await resolveWithinProject(cwd, profile?.context_dir ?? `.context/${agentName}`));
-  await mkdir(outDir, { recursive: true });
   const outputPath = join(outDir, `${pack.taskId}.md`);
-  await writeFile(outputPath, pack.content, "utf8");
+  // atomicWriteText recursively creates the parent dir before writing, so no
+  // separate mkdir(outDir) is needed — the output path is byte-identical to
+  // the previous raw-writeFile path.
+  await atomicWriteText(outputPath, pack.content);
   return { outputPath };
 }

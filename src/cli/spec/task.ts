@@ -14,9 +14,14 @@ const prepare: CommandSpec = {
     "The single per-task entry point. Returns the current state, the execution",
     "recommendation (tier/model/effort/budget), context-pack metadata, a",
     "structured next_action, and a commands dictionary with the exact next",
-    "commands to run.",
+    "commands to run. Progress-read-only — never mutates progress.yaml, but",
+    "writes the context pack unless --dry-run is passed.",
   ].join("\n"),
-  readOnly: true,
+  // NOT `readOnly: true`: prepare leaves progress.yaml untouched but DOES write
+  // the context pack (unless --dry-run), so the generic "Read-only — never
+  // mutates progress.yaml" note would mislead. The precise progress-read-only
+  // note is inlined in the summary above.
+  // See design/decisions/context-pack-write-contract-hygiene-rfc.md.
   flags: [
     { name: "agent", value: "<name>", description: "Agent name. Defaults to project default_agent." },
     { name: "budget-bytes", value: "<N>", description: "Cap the rendered context pack at N bytes." },

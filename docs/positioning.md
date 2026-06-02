@@ -74,13 +74,19 @@ a fixed flag surface across the v1.x line.
   progress-read-only entry point per task. Returns current
   state, recommendation, context pack metadata, a structured
   `next_action`, and a `commands` dictionary listing every
-  per-task verb. Replaces the older pattern of agents stitching
-  `recommend` + `task context` + state inspection manually.
+  per-task verb. As the primary entry point it also writes the
+  deterministic context pack to the agent profile's
+  `context_dir` (default `.context/<agent>/<task-id>.md`)
+  unless `--dry-run`. Replaces the older pattern of agents
+  stitching `recommend` + `task context` + state inspection
+  manually.
 - **`code-pact task context`** — builds the deterministic
-  Markdown context pack for a task and writes it to
-  `.context/<agent>/<task-id>.md`. With `--explain` *(v1.11+)*
-  the JSON envelope adds a per-section `bytes` + `reason_code`
-  breakdown so the inclusion decisions become auditable.
+  Markdown context pack for a task and returns/prints it; it is
+  a read-only diagnostic and does not write the pack file
+  (`task prepare` and the low-level `pack` are the writers).
+  With `--explain` *(v1.11+)* the JSON envelope adds a
+  per-section `bytes` + `reason_code` breakdown so the
+  inclusion decisions become auditable.
 - **`code-pact task start` / `task complete` / `task
   finalize`** — the state-machine transitions. `start` records
   the `started` event; `complete` runs the verification

@@ -79,7 +79,9 @@ const REQUIRED_TERMS: Record<string, readonly string[]> = {
     "--json",
   ],
   // The 4 pre-existing rich verbs — keep them rich (anchor flag/term each).
-  prepare: ["Usage: code-pact task prepare <task-id>", "--budget-bytes", "Read-only"],
+  // prepare is progress-read-only but DOES write the context pack — pin the
+  // precise token, not the generic "Read-only" note (P45).
+  prepare: ["Usage: code-pact task prepare <task-id>", "--budget-bytes", "Progress-read-only", "writes the context pack"],
   complete: ["Usage: code-pact task complete <task-id>", "--dry-run", "record-done"],
   "record-done": ["Usage: code-pact task record-done <task-id>", "--evidence", "record_only"],
   finalize: ["Usage: code-pact task finalize <task-id>", "--audit-strict", "--write"],

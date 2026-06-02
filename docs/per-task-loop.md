@@ -43,7 +43,7 @@ Full set of allowed transitions (the deterministic state machine):
 
 | Step | Command | What it does | Records an event? |
 | --- | --- | --- | --- |
-| **Prepare** | `task prepare <id> --agent <a> --json` | The single entry point. Returns current state, the recommendation, context-pack metadata, a structured `next_action`, and a `commands` dictionary with the exact next commands. | No (read-only) |
+| **Prepare** | `task prepare <id> --agent <a> --json` | The single entry point. Returns current state, the recommendation, context-pack metadata, a structured `next_action`, and a `commands` dictionary with the exact next commands. | No — progress-read-only (writes the context pack unless `--dry-run`) |
 | **Start** | `task start <id> --agent <a>` | Records `started`. Idempotent — a second call returns `already_started`. | `started` |
 | *(implement)* | — | Your agent's own work. code-pact is not running. | — |
 | **Verify** | `verify --phase <p> --task <id>` | Runs the phase's verification commands without recording anything. A pre-flight for `complete`. | No |
