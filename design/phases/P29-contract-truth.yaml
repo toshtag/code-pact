@@ -282,7 +282,7 @@ tasks:
     depends_on:
       - P29-T3
     reads:
-      - design/measurements/summary.json
+      - docs/maintainers/measurements/summary.json
       - docs/positioning.md
       - docs/agent-contract.md
     writes:

@@ -163,7 +163,7 @@ tasks:
       - CHANGELOG.md
       - scripts/check-doc-invariants.mjs
       - docs/cli-contract.md
-      - design/measurements/summary.json
+      - docs/maintainers/measurements/summary.json
     writes:
       - scripts/check-release-version.mjs
       - package.json

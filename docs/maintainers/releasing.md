@@ -24,7 +24,7 @@ On a `chore/release-<version>` branch:
 
 1. **Bump** `package.json` `version`.
 2. **Refresh measurements:** `pnpm harness --corpus . --write`. This rewrites
-   `design/measurements/` so the snapshot reflects this release (version, git
+   `docs/maintainers/measurements/` so the snapshot reflects this release (version, git
    SHA, date, and any metric drift). CI enforces that the snapshot's
    `code_pact_cli_version` matches `package.json` (see `check:doc-invariants`),
    so this step cannot be silently skipped. `docs/positioning.md` points at the

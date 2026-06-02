@@ -12,7 +12,7 @@ See [`design/decisions/evidence-harness-rfc.md`](../../design/decisions/evidence
 
 ## What it measures
 
-Six CSV files plus a manifest and an aggregate summary, under `design/measurements/`:
+Six CSV files plus a manifest and an aggregate summary, under `docs/maintainers/measurements/`:
 
 | File | One row per | What it tells you |
 | --- | --- | --- |
@@ -72,7 +72,7 @@ A future phase may add an event-on-finalize that records the `task finalize --au
 # `# filename` headers. Writes nothing.
 pnpm harness --corpus .
 
-# Persist to design/measurements/<eight files>
+# Persist to docs/maintainers/measurements/<eight files>
 pnpm harness --corpus . --write
 
 # Machine-readable envelope (for CI dashboards)
@@ -95,12 +95,12 @@ This determinism is asserted by an integration test (`tests/integration/harness.
 
 ## Citing rows in RFCs
 
-Once the CSVs are committed under `design/measurements/`, future `design/decisions/*.md` can reference specific rows verbatim:
+Once the CSVs are committed under `docs/maintainers/measurements/`, future `design/decisions/*.md` can reference specific rows verbatim:
 
 ```markdown
 > The v1.10 baseline shows P14-T5 has the largest context pack
 > in the corpus at 59,346 bytes
-> ([`design/measurements/pack-size-by-task.csv`](../measurements/pack-size-by-task.csv)).
+> ([`docs/maintainers/measurements/pack-size-by-task.csv`](../../docs/maintainers/measurements/pack-size-by-task.csv)).
 > A task whose pack exceeds 80KB would be an outlier worth
 > reviewing for over-scope.
 ```

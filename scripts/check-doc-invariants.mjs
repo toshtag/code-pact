@@ -102,10 +102,10 @@ for (const rel of ["docs/getting-started.md"]) {
 //    which shipped a v1.17.1 snapshot). Run `pnpm harness --corpus . --write`.
 {
   const pkgVersion = JSON.parse(read("package.json")).version;
-  const summaryVersion = JSON.parse(read("design/measurements/summary.json")).code_pact_cli_version;
+  const summaryVersion = JSON.parse(read("docs/maintainers/measurements/summary.json")).code_pact_cli_version;
   if (pkgVersion !== summaryVersion) {
     fail(
-      "design/measurements/summary.json",
+      "docs/maintainers/measurements/summary.json",
       `code_pact_cli_version "${summaryVersion}" != package.json "${pkgVersion}" — run \`pnpm harness --corpus . --write\` to refresh the snapshot`,
     );
   }

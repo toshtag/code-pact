@@ -310,7 +310,7 @@ The success metrics defined in
 whether the contract is working. The metric set is locked here; the
 Evidence Harness v2 (P26) computes these and recomputes them on every
 harness run. The metric set is fixed here; the **values** live only in
-[`design/measurements/summary.json`](../design/measurements/summary.json)
+[`docs/maintainers/measurements/summary.json`](maintainers/measurements/summary.json)
 (plus the per-task CSVs beside it) so the numbers can never drift between
 this prose and the source of truth — reproduce with `pnpm harness --corpus . --check`.
 
