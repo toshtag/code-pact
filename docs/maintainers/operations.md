@@ -199,7 +199,7 @@ model. The guidance is generation-resistant — it avoids per-generation capabil
 defers exact capabilities to Anthropic's current docs:
 
 ```sh
-# Generate CLAUDE.md with Opus 4.8–specific guidance:
+# Generate CLAUDE.md with model-aware Opus 4.8 guidance:
 code-pact adapter install claude-code --model opus-4.8
 
 # Re-run skills only (skill files regenerated, CLAUDE.md left untouched):
@@ -209,8 +209,10 @@ code-pact adapter install claude-code --regen-skills
 Supported values: `opus-4.8`, `opus-4.7`, `opus-4.6`, `sonnet-4.6` (and their vendor-id
 aliases, e.g. `claude-opus-4-8`). These live in `CLAUDE_MODEL_VERSIONS` in
 `src/core/models/catalog.ts` — the single source of truth for Claude model facts. The
-`model_version` field in `.code-pact/agent-profiles/claude-code.yaml` is used as the
-default when `--model` is not passed on the CLI.
+`model_version` field in the claude-code agent profile (default:
+`.code-pact/agent-profiles/claude-code.yaml`, or the path set by `agents[].profile` in
+`project.yaml`) is used as the default when `--model` is not passed on the CLI. Adapter
+install/upgrade and the `--model` pin read and write that configured profile path.
 
 **Provider scope (Claude-only model governance).** Model-aware `CLAUDE.md` guidance,
 the `--model` validator, and the `MODEL_ID_UNKNOWN` / `MODEL_MAP_STALE` doctor checks

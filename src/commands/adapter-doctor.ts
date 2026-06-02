@@ -6,6 +6,7 @@ import { ModelProfile } from "../core/schemas/model-profile.ts";
 import { Project } from "../core/schemas/project.ts";
 import { adapterRegistry } from "../core/adapters/index.ts";
 import { isSupportedAgent, type SupportedAgent } from "../core/agents.ts";
+import { resolveAgentProfilePath } from "../core/agent-profile-path.ts";
 import {
   computeContentHash,
   manifestPath,
@@ -57,12 +58,27 @@ export type AdapterDoctorOptions = {
 // Loaders (lenient — doctor never throws on absence)
 // ---------------------------------------------------------------------------
 
+// Missing project.yaml → null (adapter doctor is a no-op without a project).
+// But a present-but-broken project.yaml (unreadable, unparseable, or
+// schema-invalid) is surfaced as CONFIG_ERROR rather than masked as "no
+// project", so `adapter doctor` doesn't report a clean bill on a broken config.
 async function loadProjectSafe(cwd: string): Promise<Project | null> {
+  const path = join(cwd, ".code-pact", "project.yaml");
+  let raw: string;
   try {
-    const raw = await readFile(join(cwd, ".code-pact", "project.yaml"), "utf8");
+    raw = await readFile(path, "utf8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+    const e = new Error(`Cannot read ${path}.`);
+    (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+    throw e;
+  }
+  try {
     return Project.parse(parseYaml(raw) as unknown);
-  } catch {
-    return null;
+  } catch (err) {
+    const e = new Error(`Cannot parse or validate ${path}: ${(err as Error).message}`);
+    (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+    throw e;
   }
 }
 
@@ -70,11 +86,13 @@ async function loadAgentProfileSafe(
   cwd: string,
   agentName: string,
 ): Promise<AgentProfile | null> {
+  // Resolve OUTSIDE the try so a CONFIG_ERROR (unparseable project.yaml or an
+  // invalid `agents[].profile`) propagates — consistent with the other commands
+  // rather than masked as "no profile". Missing/malformed profile *content* is
+  // still lenient (null), which the adapter doctor checks surface as issues.
+  const path = await resolveAgentProfilePath(cwd, agentName);
   try {
-    const raw = await readFile(
-      join(cwd, ".code-pact", "agent-profiles", `${agentName}.yaml`),
-      "utf8",
-    );
+    const raw = await readFile(path, "utf8");
     return AgentProfile.parse(parseYaml(raw) as unknown);
   } catch {
     return null;
@@ -450,8 +468,9 @@ export async function runAdapterDoctor(
 
   // Target set:
   //  - With --agent: just that agent, regardless of enabled state.
-  //  - Without --agent: every enabled agent (no project.yaml → no targets,
-  //    result is { ok: true, issues: [] } — adapter doctor is a no-op).
+  //  - Without --agent: every enabled agent. A *missing* project.yaml → no
+  //    targets → { ok: true, issues: [] } (no-op); a present-but-broken
+  //    project.yaml already threw CONFIG_ERROR in loadProjectSafe above.
   const targets: SupportedAgent[] = agentName
     ? [agentName as SupportedAgent]
     : [...enabledNames];

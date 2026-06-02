@@ -11,6 +11,14 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ---
 
+## [Unreleased]
+
+### Changed
+
+- **Agent-profile path resolution is unified across commands.** `adapter install` / `adapter upgrade` / `adapter doctor` / `adapter list`, `recommend`, `task prepare`, `pack`, and the `model_version` pin all now honor `project.yaml`'s `agents[].profile` (the path `doctor` already used), via a single `resolveAgentProfilePath` helper. Previously every command except `doctor` hardcoded `agent-profiles/<name>.yaml`, so a non-default `agents[].profile` made `doctor` (and the `MODEL_MAP_STALE` remediation) point at one file while `adapter upgrade --write` read/wrote another. The conventional `agent-profiles/<name>.yaml` remains the fallback when project.yaml is absent or the agent is unlisted; a matched agent whose `profile` is an invalid path now fails with `CONFIG_ERROR` rather than silently using the default. Default projects are unaffected. Completes the follow-up noted in 1.29.0 (#330), and supersedes the 1.29.0 note about `adapter install` / `adapter upgrade` reading the conventional path.
+
+---
+
 ## [1.29.0] — 2026-06-02
 
 Model-config accuracy. Claude model facts are now a single source of truth, Opus 4.8 is supported, model drift is detected offline, and the codex defaults are current. No breaking changes — the surface is advisory (recommendation display, generated guidance, doctor diagnostics) and the new doctor codes are additive.

@@ -5,6 +5,7 @@ import { AgentProfile } from "../core/schemas/agent-profile.ts";
 import { ModelProfile } from "../core/schemas/model-profile.ts";
 import { adapterRegistry } from "../core/adapters/index.ts";
 import { isSupportedAgent } from "../core/agents.ts";
+import { resolveAgentProfilePath } from "../core/agent-profile-path.ts";
 import type { DesiredAdapterFileRole } from "../core/adapters/types.ts";
 import {
   assertSafeRelativePath,
@@ -78,7 +79,7 @@ async function loadAgentProfile(
   cwd: string,
   agentName: string,
 ): Promise<AgentProfile> {
-  const path = join(cwd, ".code-pact", "agent-profiles", `${agentName}.yaml`);
+  const path = await resolveAgentProfilePath(cwd, agentName);
   let raw: string;
   try {
     raw = await readFile(path, "utf8");

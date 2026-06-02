@@ -8,6 +8,7 @@ import {
   type SupportedAgent,
 } from "../core/agents.ts";
 import { manifestPath, readManifest } from "../core/adapters/manifest.ts";
+import { resolveAgentProfilePath } from "../core/agent-profile-path.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -21,9 +22,9 @@ export type AdapterListEntry = {
   experimental: boolean;
   /** True if listed under project.yaml `agents:` with enabled != false. */
   enabled: boolean;
-  /** Project-relative manifest path even when the file does not exist. */
+  /** Absolute manifest path even when the file does not exist. */
   manifestPath: string;
-  /** Project-relative profile path even when the file does not exist. */
+  /** Absolute profile path even when the file does not exist. */
   profilePath: string;
   manifestPresent: boolean;
   /** Set only when manifestPresent and the YAML failed to parse/validate. */
@@ -54,9 +55,9 @@ async function loadEnabledAgentNames(cwd: string): Promise<Set<string>> {
     }
     return names;
   } catch {
-    // Missing or malformed project.yaml → no agents are enabled. The CLI
-    // bare-form / `adapter install` will surface AGENT_NOT_FOUND later
-    // when the user actually tries to install.
+    // Missing project.yaml → no agents are enabled (the lister stays quiet).
+    // A present-but-broken project.yaml is surfaced as CONFIG_ERROR later by
+    // resolveAgentProfilePath() while building each entry's profilePath.
     return new Set<string>();
   }
 }
@@ -81,12 +82,13 @@ export async function runAdapterList(opts: {
   const agents: AdapterListEntry[] = [];
 
   for (const name of SUPPORTED_AGENTS) {
-    const profilePath = join(
-      cwd,
-      ".code-pact",
-      "agent-profiles",
-      `${name}.yaml`,
-    );
+    // Honor a non-default `agents[].profile` from project.yaml (matching doctor
+    // and the adapter/recommend commands). A matched agent whose profile is an
+    // invalid path surfaces as CONFIG_ERROR (consistent with the other
+    // commands) rather than being masked behind a plausible default path —
+    // adapter list's non-throwing contract covers missing project.yaml /
+    // malformed manifests, not an explicitly invalid project config path.
+    const profilePath = await resolveAgentProfilePath(cwd, name);
     const mPath = manifestPath(cwd, name);
 
     let manifestPresent = false;

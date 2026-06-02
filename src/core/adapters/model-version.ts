@@ -1,4 +1,3 @@
-import { join } from "node:path";
 import { stringify as toYaml } from "yaml";
 import { atomicWriteText } from "../../io/atomic-text.ts";
 import {
@@ -6,10 +5,7 @@ import {
   AgentProfile,
   normalizeModelVersion,
 } from "../schemas/agent-profile.ts";
-
-export function agentProfilePath(cwd: string, agentName: string): string {
-  return join(cwd, ".code-pact", "agent-profiles", `${agentName}.yaml`);
-}
+import { resolveAgentProfilePath } from "../agent-profile-path.ts";
 
 /**
  * Validates a `--model` input and returns its canonical form, or throws a
@@ -56,7 +52,7 @@ export async function resolveAndPinModelVersion(opts: {
   if (normalized !== profile.model_version) {
     profile.model_version = normalized;
     await atomicWriteText(
-      agentProfilePath(cwd, agentName),
+      await resolveAgentProfilePath(cwd, agentName),
       toYaml(AgentProfile.parse(profile)),
     );
   }
