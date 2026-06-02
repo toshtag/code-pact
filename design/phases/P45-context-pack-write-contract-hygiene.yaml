@@ -145,12 +145,13 @@ tasks:
       Correct the docs that blur `task context` and context-pack file writing.
       docs/cli-contract.md § "State file write guarantees" gains an explicit
       context-pack row (written by `task prepare` / `pack`, regenerable,
-      gitignored, not in the adapter manifest) and the `<adapter-owned files>`
-      row drops the `.context/<agent>/*` claim (clarified to "creates the
+      default-gitignored, not in the adapter manifest) and the `<adapter-owned
+      files>` row drops the `.context/<agent>/*` claim (clarified to "creates the
       directory"). docs/positioning.md describes `task context` as building and
       returning/printing the pack while `task prepare` writes it.
       docs/glossary.md says the pack is deterministic Markdown content that
-      `task prepare` / `pack` write to `.context/<agent>/<task-id>.md`.
+      `task prepare` / `pack` write to the agent profile's `context_dir`
+      (default `.context/<agent>/<task-id>.md`).
       docs/agent-contract.md changes "task context would write" to "produces".
     decision_refs:
       - design/decisions/context-pack-write-contract-hygiene-rfc.md
