@@ -763,6 +763,20 @@ describe("detectAgentModelMapDrift", () => {
     expect(drift).toEqual([]);
   });
 
+  it("honors doctor.yaml suppression: a silenced MODEL_MAP_STALE yields no drift", async () => {
+    await pinHighestReasoning("claude-opus-4-7");
+    // Sanity: drift is real before suppression.
+    expect((await detectAgentModelMapDrift(dir, "claude-code")).drift).toHaveLength(1);
+    await writeFile(
+      join(dir, ".code-pact", "doctor.yaml"),
+      "disabled_checks:\n  - MODEL_MAP_STALE\n",
+      "utf8",
+    );
+    // Suppressed: the hint must not re-nag about a pin the team chose to keep,
+    // and must not contradict its own "silence via doctor.yaml" guidance.
+    expect((await detectAgentModelMapDrift(dir, "claude-code")).drift).toEqual([]);
+  });
+
   it("survives an `adapter upgrade --write`: the stale pin is not rewritten", async () => {
     await freshInstall();
     await pinHighestReasoning("claude-opus-4-7");
