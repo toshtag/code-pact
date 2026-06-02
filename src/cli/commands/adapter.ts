@@ -423,7 +423,12 @@ async function cmdAdapterUpgrade(
                   );
                 }
                 process.stderr.write(
-                  `adapter upgrade does not change model_map pins. To follow the default, edit .code-pact/${profileRel} and re-run "code-pact adapter upgrade ${agentName} --write". Keep it if the pin is intentional, or silence via .code-pact/doctor.yaml (disabled_checks: [MODEL_MAP_STALE]).\n`,
+                  `adapter upgrade does not change model_map pins.\n` +
+                    `To follow the default:\n` +
+                    `  1. Edit .code-pact/${profileRel}\n` +
+                    `  2. Re-run: code-pact adapter upgrade ${agentName} --write\n` +
+                    `Keep the pin if intentional, or silence in .code-pact/doctor.yaml:\n` +
+                    `  disabled_checks: [MODEL_MAP_STALE]\n`,
                 );
               }
             } catch {
