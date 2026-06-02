@@ -1038,10 +1038,13 @@ for the parse error.
 Generates the adapter for `<agent>` (positional, required) and writes the manifest.
 
 `--model <version>` produces a **model-aware** instruction file for the claude-code adapter
-with effort-level and extended-thinking guidance tailored to a specific Claude version
-(`opus-4.7`, `opus-4.6`, `sonnet-4.6`). Unknown values produce a fallback note rather than
-an error. Takes precedence over `model_version` in the agent profile YAML; if neither is
-set, the version-agnostic template is used.
+with effort-level and model-specific thinking guidance tailored to a specific Claude version
+(`opus-4.8`, `opus-4.7`, `opus-4.6`, `sonnet-4.6`, plus vendor-id aliases such as
+`claude-opus-4-8`). An unknown CLI `--model` value fails with `CONFIG_ERROR` (it is rejected
+before anything is written). Takes precedence over `model_version` in the agent profile YAML;
+if neither is set, the version-agnostic template is used. (Separately: if an existing profile
+already contains an unrecognized `model_version`, generation falls back to the generic
+guidance block and `doctor` reports `MODEL_ID_UNKNOWN`.)
 
 `--regen-skills` is the role-scoped `--force` described above; documented separately because
 it's the common way users handle stale dynamic skill files after the roadmap's
