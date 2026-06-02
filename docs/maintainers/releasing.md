@@ -44,25 +44,30 @@ On a `chore/release-<version>` branch:
    git diff <last-tag>..HEAD --name-only -- docs/ design/decisions/
    # scan for: new error codes without a troubleshooting entry.
    ```
-5. **Verify** (the same gates CI runs):
+5. **Verify** — one command, the release gate:
    ```sh
-   pnpm typecheck && pnpm test:unit && pnpm build \
-     && pnpm exec vitest run --config vitest.integration.config.ts \
-     && pnpm check:docs \
-     && node dist/cli.js plan lint --include-quality --strict --json \
-     && node dist/cli.js plan analyze --strict --json \
-     && node dist/cli.js validate --json
+   pnpm release:check
    ```
+   `release:check` (in `package.json`) runs typecheck, the full test suite,
+   build, `check:docs` (links + invariants + generated-reference drift),
+   `check:release-version` (package.json ↔ CHANGELOG ↔ measurements agree),
+   then `validate --json`, `plan lint --include-quality --strict --json`, and
+   `plan analyze --strict --json`. This is the single source of the release
+   gate — don't re-list the steps here, or the runbook drifts from the script.
 6. Open the PR; merge once CI is green.
 
 ## Tag + publish (maintainer-local)
 
 After the release-prep PR merges to `main`:
 
-7. **Annotated, signed tag** on the merge commit (lightweight tags are rejected
-   by a hook; signing setup is in [CONTRIBUTING](../../CONTRIBUTING.md#tag-signing-maintainer-only)):
+7. **SSH-signed annotated tag** on the merge commit. `SECURITY.md` requires
+   v1.x releases to use SSH-signed tags (so the GitHub tag page shows
+   "Verified"); use `-s` (not `-a`, which is annotated but not signed).
+   Lightweight tags are rejected by a hook; signing setup is in
+   [CONTRIBUTING](../../CONTRIBUTING.md#tag-signing-maintainer-only):
    ```sh
-   git tag -a v<version> -m "v<version> — <theme>"
+   git tag -s v<version> -m "v<version> — <theme>"
+   git verify-tag v<version>   # expect a good signature before pushing
    git push origin v<version>
    ```
 8. **Publish** (`prepublishOnly` re-checks package metadata):

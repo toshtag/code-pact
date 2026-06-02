@@ -41,7 +41,11 @@
 ## Contract checklist
 
 - [ ] **No Stable (v1.0) contract change** — no rename / removal / shape change to any flag, exit code, JSON envelope, error code, or human-stdout/stderr surface classified `Stable (v1.0)` or `Stable (human-output)` in [`docs/cli-contract.md`](../docs/cli-contract.md). If unchecked, explain below why the change is safe (additive, behind a new flag, etc.).
-- [ ] **Docs updated** if the change is user-visible. New flags / new commands → `docs/cli-contract.md`. New onboarding surface → `docs/getting-started.md`. Upgrade relevance → `docs/upgrading.md`.
+- [ ] **Docs updated** if the change is user-visible:
+  - Task command / flag → edit `src/cli/spec/*` (the `CommandSpec`) and run `pnpm gen:cli-reference`; parse, help, and the generated reference all derive from it — do **not** hand-write the task flag table into `docs/cli-contract.md`.
+  - Non-task (plan/phase/adapter) command / flag → update the command's rich leaf help in `src/cli/usage.ts` (a mutating/JSON-emitting command must not ship as a stub — see `tests/unit/cli/leaf-help-coverage.test.ts`) + its semantics in `docs/cli-contract.md`.
+  - JSON envelope / error code / exit semantics → `docs/cli-contract.md`. User-recoverable error → `docs/troubleshooting.md`.
+  - New onboarding surface → `docs/getting-started.md`. Upgrade relevance → `docs/upgrading.md`.
 - [ ] **Atomic-write contract preserved** if writing to `design/` or `.code-pact/state/` — go through `src/io/atomic-text.ts` (see [`docs/cli-contract.md` § State file write guarantees](../docs/cli-contract.md#state-file-write-guarantees)).
 - [ ] **No new runtime dependency** added without an explicit RFC. See [Runtime dependency policy in CONTRIBUTING.md](../CONTRIBUTING.md#runtime-dependency-policy).
 

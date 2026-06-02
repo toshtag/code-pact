@@ -26,7 +26,9 @@ type Cmd = {
 };
 
 // The non-task cluster surface, classified (see the P52 audit). `plan import`
-// is an alias for `phase import` (shares its rich help) and is excluded. Bare
+// is an alias for `phase import`: this pure-function test can't see the alias
+// (the routing lives in cmdPlan's dispatch, not subcommandUsage), so it is
+// excluded here and covered by cli-help.test.ts at the built-CLI level. Bare
 // `adapter` is an error, not a subcommand, and is excluded.
 const COMMANDS: Cmd[] = [
   // plan

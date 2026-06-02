@@ -57,8 +57,11 @@ export async function cmdPlan(argv: string[], locale: Locale, globalJson: boolea
     return emitUsage(clusterUsage("plan"));
   }
   // `plan <sub> --help` → per-subcommand usage (exit 0), before strictParse.
+  // `plan import` is an alias for `phase import`; route its help to the same
+  // rich entry so the alias is discoverable, not a 2-line stub.
   if (hasHelpFlag(rest)) {
-    return emitUsage(subcommandUsage("plan", subcommand));
+    const cluster = subcommand === "import" ? "phase" : "plan";
+    return emitUsage(subcommandUsage(cluster, subcommand));
   }
 
   if (subcommand === "brief") {
