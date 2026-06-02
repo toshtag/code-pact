@@ -75,8 +75,9 @@ a fixed flag surface across the v1.x line.
   state, recommendation, context pack metadata, a structured
   `next_action`, and a `commands` dictionary listing every
   per-task verb. As the primary entry point it also writes the
-  deterministic context pack to `.context/<agent>/<task-id>.md`
-  (unless `--dry-run`). Replaces the older pattern of agents
+  deterministic context pack to the agent profile's
+  `context_dir` (default `.context/<agent>/<task-id>.md`)
+  unless `--dry-run`. Replaces the older pattern of agents
   stitching `recommend` + `task context` + state inspection
   manually.
 - **`code-pact task context`** — builds the deterministic

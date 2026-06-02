@@ -207,7 +207,7 @@ tasks:
       - Unit: minimum-achievable computation —
         ContextOverBudgetError's `minimum_achievable_bytes`
         equals the total after maximal elision.
-      - Integration: `task context --budget-bytes` writes
+      - Integration: `task context --budget-bytes` produces
         a smaller pack and `--explain --json` emits
         `budget_reserved_for_later`.
       - Integration: `task prepare --budget-bytes` records
