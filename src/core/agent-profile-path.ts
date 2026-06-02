@@ -15,7 +15,9 @@ import { assertSafePlanId } from "./schemas/plan-id.ts";
 //
 // Resolution honors `project.yaml`'s matching `agents[].profile`, falling back
 // to the conventional `agent-profiles/<name>.yaml` (what `init` writes) when
-// project.yaml is absent, the agent is not listed, or its profile is unusable.
+// project.yaml is absent or the agent is not listed. A matched agent whose
+// `profile` is an invalid path fails with CONFIG_ERROR (it is not masked behind
+// the default).
 
 /** The conventional profile path (relative to `.code-pact/`), POSIX-separated. */
 function defaultProfileRel(agentName: string): string {

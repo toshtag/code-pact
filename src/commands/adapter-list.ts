@@ -22,9 +22,9 @@ export type AdapterListEntry = {
   experimental: boolean;
   /** True if listed under project.yaml `agents:` with enabled != false. */
   enabled: boolean;
-  /** Project-relative manifest path even when the file does not exist. */
+  /** Absolute manifest path even when the file does not exist. */
   manifestPath: string;
-  /** Project-relative profile path even when the file does not exist. */
+  /** Absolute profile path even when the file does not exist. */
   profilePath: string;
   manifestPresent: boolean;
   /** Set only when manifestPresent and the YAML failed to parse/validate. */
@@ -83,16 +83,12 @@ export async function runAdapterList(opts: {
 
   for (const name of SUPPORTED_AGENTS) {
     // Honor a non-default `agents[].profile` from project.yaml (matching doctor
-    // and the adapter/recommend commands). adapter list is a non-throwing
-    // lister, so an invalid configured profile degrades to the conventional
-    // path for display rather than erroring — doctor/validate surface the bad
-    // config separately.
-    let profilePath: string;
-    try {
-      profilePath = await resolveAgentProfilePath(cwd, name);
-    } catch {
-      profilePath = join(cwd, ".code-pact", "agent-profiles", `${name}.yaml`);
-    }
+    // and the adapter/recommend commands). A matched agent whose profile is an
+    // invalid path surfaces as CONFIG_ERROR (consistent with the other
+    // commands) rather than being masked behind a plausible default path —
+    // adapter list's non-throwing contract covers missing project.yaml /
+    // malformed manifests, not an explicitly invalid project config path.
+    const profilePath = await resolveAgentProfilePath(cwd, name);
     const mPath = manifestPath(cwd, name);
 
     let manifestPresent = false;

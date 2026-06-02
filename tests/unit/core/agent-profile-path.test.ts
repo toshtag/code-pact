@@ -101,6 +101,14 @@ describe("adapter list honors a custom profile path", () => {
     const cc = result.agents.find((a) => a.name === "claude-code");
     expect(cc?.profilePath).toBe(join(dir, ".code-pact", "custom", "cc.yaml"));
   });
+
+  it("fails with CONFIG_ERROR on an invalid matching agents[].profile (no silent fallback)", async () => {
+    const { runAdapterList } = await import("../../../src/commands/adapter-list.ts");
+    await setProfileRel("claude-code", "../../etc/evil.yaml");
+    await expect(runAdapterList({ cwd: dir })).rejects.toMatchObject({
+      code: "CONFIG_ERROR",
+    });
+  });
 });
 
 describe("adapter generation honors a custom profile path end-to-end", () => {
