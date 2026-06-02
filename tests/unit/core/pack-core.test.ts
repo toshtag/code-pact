@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtemp, rm, stat, mkdir, readFile, writeFile, cp } from "node:fs/promises";
+import { mkdtemp, rm, stat, mkdir, readFile, writeFile, cp, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -132,6 +132,34 @@ describe("writeContextPack — side effects", () => {
       agentName: "unconfigured-agent",
     });
     expect(result.outputPath).toContain(join(".context", "unconfigured-agent"));
+  });
+
+  it("writes atomically: creates a missing nested dir and leaves no temp file", async () => {
+    // The fallback context_dir does not exist yet under workDir. This proves
+    // the atomic write path recreates the parent dir on its own (no separate
+    // mkdir(outDir) in writeContextPack) AND leaves no `.tmp-*` artifact from
+    // the temp-file + rename — the cli-contract.md atomic-write guarantee.
+    // `unconfigured-agent` has no profile, so the dir falls back to
+    // `.context/<agentName>`, which does not exist under the fresh workDir.
+    const pack = await buildContextPack({
+      cwd: workDir,
+      phaseId: "P2",
+      taskId: "P2-E1-T1",
+      agentName: "unconfigured-agent",
+    });
+    const contextDir = join(workDir, ".context", "unconfigured-agent");
+    expect(await exists(contextDir)).toBe(false);
+
+    const result = await writeContextPack(pack, {
+      cwd: workDir,
+      agentName: "unconfigured-agent",
+    });
+
+    expect(result.outputPath).toBe(join(contextDir, "P2-E1-T1.md"));
+    expect(await readFile(result.outputPath, "utf8")).toBe(pack.content);
+    // No temp file (`<path>.tmp-<pid>-<ts>`) is left behind after the rename.
+    const entries = await readdir(contextDir);
+    expect(entries).toEqual(["P2-E1-T1.md"]);
   });
 
   it("respects agent profile context_dir over fallback", async () => {
