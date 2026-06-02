@@ -2310,7 +2310,7 @@ Appends a `resumed` event. Allowed only from `blocked` — any other current sta
 
 `code-pact recommend --phase <id> --task <id> [--agent <name>] [--json]` returns a deterministic execution plan for a given task — model tier, effort, context profile, planning posture, escalation order, preflight commands, and a categorical budget profile — based on Task metadata (`type`, `ambiguity`, `risk`, `context_size`, `write_surface`, `verification_strength`, `expected_duration`, `requires_decision`).
 
-This is the entry point of the agent-facing loop: agents should call `recommend` first, **before** fetching the context pack or marking the task started, then use its output to decide what to load, how hard to think, and what to verify before implementation.
+Since v1.11, `task prepare` is the primary per-task entry point for the agent-facing loop and embeds this recommendation in its response. Call `recommend` directly when you need to inspect the deterministic recommendation in isolation, debug recommendation inputs, or support an older/manual loop — then use its output to decide what to load, how hard to think, and what to verify before implementation. It is read-only and does not fetch or write the context pack.
 
 Read-only. The command does not mutate any state.
 
