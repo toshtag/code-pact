@@ -248,9 +248,13 @@ for (const rel of ["docs/getting-started.md"]) {
   //      (not raw `writeFile`). This was false before v1.29.1 — the contract
   //      claimed atomic, the code used a raw write. The obligation is derived
   //      from the doc's own claim, so it cannot go stale relative to the prose.
+  //      Anchored on the `(context pack` row LABEL, not a specific path string,
+  //      so it survives the canonical `<agent-profile>.context_dir/...` form
+  //      (and would not silently go dormant if the default-path parenthetical
+  //      is ever dropped).
   const contract = read("docs/cli-contract.md");
   const guaranteesContextPackAtomic =
-    /State file write guarantees[\s\S]*?\.context\/<agent>\/<task-id>\.md[\s\S]*?Every write listed above goes through `atomicWriteText`/.test(
+    /State file write guarantees[\s\S]*?\(context pack[\s\S]*?Every write listed above goes through `atomicWriteText`/.test(
       contract,
     );
   if (guaranteesContextPackAtomic) {
