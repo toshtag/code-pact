@@ -58,8 +58,8 @@ re-grows every time the pack surface is touched.
    the write primitive.
 
 2. **Correct the writer docs.** `cli-contract.md` gains an explicit context-pack
-   row (written by `task prepare` / `pack`, regenerable, gitignored, not in the
-   adapter manifest) and the `<adapter-owned files>` row drops the
+   row (written by `task prepare` / `pack`, regenerable, default-gitignored, not
+   in the adapter manifest) and the `<adapter-owned files>` row drops the
    `.context/<agent>/*` claim (clarified to "creates the directory"). With the
    row present and the implementation atomic, the "every write goes through
    `atomicWriteText`" sentence becomes true. `positioning.md`, `glossary.md`,

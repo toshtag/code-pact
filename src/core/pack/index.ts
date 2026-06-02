@@ -762,7 +762,8 @@ function computeExplainExcluded(
  * interrupted process can never leave a half-written pack on disk. The
  * context pack is part of the deterministic agent-facing artifact surface
  * the cli-contract.md "State file write guarantees" section covers, so it
- * uses the same atomic primitive as every other code-pact disk write.
+ * uses the same atomic primitive as the managed file-content writes listed
+ * there (directory creation and the advisory lock are separate mechanisms).
  */
 export async function writeContextPack(
   pack: ContextPackResult,

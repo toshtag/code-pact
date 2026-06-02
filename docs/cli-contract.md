@@ -2450,7 +2450,7 @@ This means that once a project is initialized with `ja-JP`, all subsequent comma
 
 ## State file write guarantees
 
-`code-pact` writes a small, well-defined set of files into the project tree. Every file-content write goes through the same atomic primitive so an interrupted process cannot leave a half-written file behind. (Directory creation — e.g. an adapter making the `context_dir` — is a separate `mkdir` and outside this guarantee; there is no half-written directory to protect against.)
+`code-pact` writes a small, well-defined set of state, design, adapter, and regenerable artifact files into the project tree. Every file-content write **listed in the table below** goes through the same atomic primitive, so an interrupted process cannot leave a half-written managed file behind. (Two writes are deliberately outside this guarantee and documented below: directory creation — e.g. an adapter making the `context_dir` — is a separate `mkdir` with no half-written-directory risk, and the advisory write lock uses exclusive file creation (`flag: "wx"`) rather than `atomicWriteText`.)
 
 ### Files written by `code-pact`
 
