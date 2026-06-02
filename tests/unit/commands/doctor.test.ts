@@ -286,14 +286,38 @@ describe("runDoctor — ADAPTER_MISSING", () => {
 // ---------------------------------------------------------------------------
 
 describe("runDoctor — BRIEF_MISSING (v0.5.3)", () => {
-  it("reports BRIEF_MISSING warning when design/brief.md does not exist", async () => {
+  // Like CONSTITUTION_PLACEHOLDER, BRIEF_MISSING is gated on a real
+  // (non-TUTORIAL) phase existing, so a fresh-init project never sees the nag.
+  async function addRealPhase(): Promise<void> {
+    await runPhaseAdd({
+      cwd: dir,
+      id: "P1",
+      name: "Foundation",
+      weight: 10,
+      objective: "Establish the project foundation.",
+      confidence: "high",
+      risk: "low",
+      verifyCommands: ["echo ok"],
+      definitionOfDone: ["Done"],
+    });
+  }
+
+  it("reports BRIEF_MISSING warning when a real phase exists and design/brief.md does not", async () => {
+    await addRealPhase();
     const result = await runDoctor(dir);
     const issue = result.issues.find((i) => i.code === "BRIEF_MISSING");
     expect(issue).toBeDefined();
     expect(issue?.severity).toBe("warning");
   });
 
+  it("does not report BRIEF_MISSING on a fresh project with no real phase (noise suppression)", async () => {
+    const result = await runDoctor(dir);
+    const issue = result.issues.find((i) => i.code === "BRIEF_MISSING");
+    expect(issue).toBeUndefined();
+  });
+
   it("does not report BRIEF_MISSING when design/brief.md exists", async () => {
+    await addRealPhase();
     await writeFile(join(dir, "design", "brief.md"), "# Brief\n\nWe are building something.\n", "utf8");
     const result = await runDoctor(dir);
     const issue = result.issues.find((i) => i.code === "BRIEF_MISSING");
@@ -406,6 +430,20 @@ describe("runDoctor — ADAPTER_STALE (v0.5.3)", () => {
 
 describe("runDoctor — disabled_checks via .code-pact/doctor.yaml (v0.5.3)", () => {
   it("suppresses checks listed in disabled_checks", async () => {
+    // A real phase is needed for BRIEF_MISSING and CONSTITUTION_PLACEHOLDER to
+    // fire at all (both are gated on non-tutorial work existing); otherwise
+    // this would assert suppression of warnings that never appear.
+    await runPhaseAdd({
+      cwd: dir,
+      id: "P1",
+      name: "Foundation",
+      weight: 10,
+      objective: "Establish the project foundation.",
+      confidence: "high",
+      risk: "low",
+      verifyCommands: ["echo ok"],
+      definitionOfDone: ["Done"],
+    });
     await writeFile(
       join(dir, ".code-pact", "doctor.yaml"),
       "disabled_checks:\n  - BRIEF_MISSING\n  - CONSTITUTION_PLACEHOLDER\n  - ADAPTER_STALE\n",

@@ -33,7 +33,7 @@ these terms describe, see [the per-task loop](per-task-loop.md).
 
 | Term | What it means |
 | --- | --- |
-| **brief / constitution** | Two short documents that capture project intent. The **brief** says what you are building and for whom; the **constitution** lists the principles every decision should respect. Stored in `design/`. |
+| **brief / constitution** | Two short documents that capture project intent. The **brief** says what you are building and for whom; the **constitution** lists the principles every decision should respect. Stored in `design/`. The constitution is scaffolded by `init`; the brief is optional and created on demand by `plan brief` (or `plan prompt`), not by `init`. |
 | **plan adopt** | A command that converts an existing structured plan (a `roadmap.md` / `TODO.md` / `tasks.md`, or a draft YAML) into code-pact phases and tasks — no AI round-trip. |
 | **task readiness fields** | Optional fields a task can declare to shape its context pack and enable checks: `depends_on`, `reads`, `writes`, `decision_refs`, `acceptance_refs`. All optional; tasks work without them. See [task readiness fields](concepts/task-readiness-fields.md). |
 | **write audit** | When you finalize a task, code-pact compares the files it declared in `writes` against the files actually changed, and reports mismatches as advisories. `--audit-strict` turns those advisories into a non-zero exit (for CI). |

@@ -261,8 +261,9 @@ describe("e2e: full agent-facing loop (init → adapter install → recommend �
     }
 
     // 13. doctor --json — manifest is present, so manifest-aware checks
-    //     run. No errors expected. (BRIEF_MISSING / CONSTITUTION_PLACEHOLDER
-    //     warnings are acceptable for a freshly-init'd e2e project.)
+    //     run. No errors expected. (Gated warnings like BRIEF_MISSING /
+    //     CONSTITUTION_PLACEHOLDER are acceptable once this project has a real
+    //     phase; only errors are asserted against.)
     {
       const env = project.runJson<{
         ok: boolean;

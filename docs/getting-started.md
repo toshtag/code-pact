@@ -136,6 +136,30 @@ If `pnpm test` is not the right verification command for your repo, pass a diffe
 
 ---
 
+## What `init` creates
+
+`code-pact init` scaffolds a small, readable `design/` directory — the **active
+control plane** for your project. Nothing else is generated; everything below is
+meant to be edited or deleted as your project takes shape.
+
+| Path | What it is | Edit or delete? |
+| --- | --- | --- |
+| `design/roadmap.yaml` | The ordered list of phases. Starts empty; `phase add` / `phase import` fill it. | Edit (grows as you plan) |
+| `design/phases/` | One YAML file per phase, holding its tasks. Empty at init. | Grows with your plan |
+| `design/decisions/` | ADRs for `requires_decision` tasks. Empty until you need one. | Add when a task needs a recorded decision |
+| `design/rules/` | Project conventions injected into agent context packs. | Edit |
+| `design/rules/coding-style.md` | A **starter example** rule, with `tags` / `applies_to` frontmatter showing how rules target task types. | Edit to fit your project, or delete if unused |
+| `design/constitution.md` | Placeholder principles every decision should respect. `plan constitution` rewrites it. | Edit (or run `plan constitution`) |
+
+`design/brief.md` is **not** created by `init`. It is optional — useful when you
+plan with `plan prompt` / `plan brief`, unnecessary when adopting an existing
+roadmap or working by hand. `doctor` only nudges for it once the project has a
+real (non-tutorial) phase.
+
+Generated, non-design state lives elsewhere: progress events in
+`.code-pact/state/`, agent instruction files at the repo root (e.g. `CLAUDE.md`),
+and maintainer evidence under `docs/maintainers/measurements/`.
+
 ## Path 2 — Manual
 
 Use this path when you already know the shape of your roadmap. You will write each phase and task yourself, mixing interactive and flag-based commands.
