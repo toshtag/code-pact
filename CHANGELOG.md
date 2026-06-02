@@ -29,7 +29,7 @@ Model-config accuracy. Claude model facts are now a single source of truth, Opus
 ### Fixed
 
 - A vendor-id `model_version` in an agent profile (e.g. `model_version: claude-opus-4-8`) now renders the correct model-aware guidance instead of falling back to the generic block — it is normalized before lookup, matching how `doctor` already accepts it.
-- `MODEL_MAP_STALE` remediation names the profile path `doctor` evaluated (`agentRef.profile`), not a hardcoded default. (Note: `adapter install` / `adapter upgrade` still read the conventional `agent-profiles/<name>.yaml`; unifying profile-path resolution across all commands for non-default `agents[].profile` is tracked as a follow-up.)
+- `MODEL_MAP_STALE` remediation names the profile path `doctor` evaluated (`agentRef.profile`), not a hardcoded default. (Note: `adapter install` / `adapter upgrade` still read the conventional `agent-profiles/<name>.yaml`; unifying profile-path resolution across all commands for non-default `agents[].profile` is tracked in #330.)
 - Doc accuracy: `MISSING_MODEL_TIER` is a `warning` (not `error`) in the contract table; the `adapter install --model` description reflects adaptive thinking, Opus 4.8, vendor-id aliases, and that an unknown CLI `--model` fails with `CONFIG_ERROR`.
 
 ---
