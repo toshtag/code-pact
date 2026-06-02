@@ -35,12 +35,14 @@ function defaultProfileRel(agentName: string): string {
  * `Project` schema, so an unrelated invalid field elsewhere in project.yaml does
  * not silently redirect a custom profile back to the default.
  *
- * Falls back to the convention when project.yaml is absent/unparseable or the
- * agent is not listed. But a matched agent whose `profile` is an *invalid* path
- * (e.g. `../../etc/x`) throws `CONFIG_ERROR` rather than falling back: the
- * project explicitly declared that path, so silently reading/writing a
- * different file would hide the misconfiguration. The resolved path is validated
- * (`RelativePosixPath`: no `..`, no absolute, no backslash) before use.
+ * Falls back to the convention only when project.yaml is absent (ENOENT) or the
+ * agent is not listed. A present-but-broken config — unreadable or unparseable
+ * project.yaml, or a matched agent whose `profile` is an *invalid* path
+ * (e.g. `../../etc/x`) — throws `CONFIG_ERROR` rather than falling back: the
+ * project exists and (for the profile case) explicitly declared that path, so
+ * silently reading/writing a different file would hide the misconfiguration.
+ * The resolved path is validated (`RelativePosixPath`: no `..`, no absolute, no
+ * backslash) before use.
  */
 export async function resolveAgentProfileRel(
   cwd: string,
@@ -50,8 +52,18 @@ export async function resolveAgentProfileRel(
   let raw: string;
   try {
     raw = await readFile(join(cwd, ".code-pact", "project.yaml"), "utf8");
-  } catch {
-    return defaultProfileRel(agentName); // no project.yaml → convention
+  } catch (err) {
+    // Absent project.yaml → convention. But a present-but-unreadable file
+    // (EACCES, EISDIR, transient I/O) is a real problem: surface it rather than
+    // silently reading/writing the default profile.
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      return defaultProfileRel(agentName);
+    }
+    const e = new Error(
+      `Cannot read .code-pact/project.yaml while resolving the agent profile for "${agentName}".`,
+    );
+    (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+    throw e;
   }
   let doc: unknown;
   try {

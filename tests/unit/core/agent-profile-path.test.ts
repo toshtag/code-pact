@@ -87,11 +87,22 @@ describe("resolveAgentProfileRel / resolveAgentProfilePath", () => {
     );
   });
 
-  it("falls back to the convention when project.yaml is absent/unreadable", async () => {
+  it("falls back to the convention when project.yaml is absent (ENOENT)", async () => {
     await rm(join(dir, ".code-pact", "project.yaml"), { force: true });
     expect(await resolveAgentProfileRel(dir, "claude-code")).toBe(
       "agent-profiles/claude-code.yaml",
     );
+  });
+
+  it("rejects a present-but-unreadable project.yaml with CONFIG_ERROR (EISDIR)", async () => {
+    // Replace the file with a directory → readFile fails with EISDIR (not
+    // ENOENT). Present-but-unreadable must surface, not fall back.
+    const p = join(dir, ".code-pact", "project.yaml");
+    await rm(p, { force: true });
+    await mkdir(p);
+    await expect(resolveAgentProfileRel(dir, "claude-code")).rejects.toMatchObject({
+      code: "CONFIG_ERROR",
+    });
   });
 
   it("rejects an unsafe agent name before it becomes a path segment", async () => {
@@ -136,6 +147,14 @@ describe("resolver-using commands do not fall back on a broken project.yaml", ()
     await setProfileRel("claude-code", "../../etc/evil.yaml");
     await expect(
       runAdapterDoctor({ cwd: dir, agentName: "claude-code", locale: "en-US" }),
+    ).rejects.toMatchObject({ code: "CONFIG_ERROR" });
+  });
+
+  it("adapter doctor without --agent does not return a clean bill on a broken project.yaml", async () => {
+    const { runAdapterDoctor } = await import("../../../src/commands/adapter.ts");
+    await writeFile(join(dir, ".code-pact", "project.yaml"), "agents: {unclosed", "utf8");
+    await expect(
+      runAdapterDoctor({ cwd: dir, locale: "en-US" }),
     ).rejects.toMatchObject({ code: "CONFIG_ERROR" });
   });
 });
