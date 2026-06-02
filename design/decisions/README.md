@@ -37,7 +37,40 @@ the *why* behind the code — the user-facing *how* lives in [`docs/`](../../doc
 | P39 | [Root-cause-first completion errors](root-cause-completion-errors-rfc.md) | Add `error.cause_code` + an actionable `error.message` on `task complete` failures (port the `record-done` cause); minimal surface — no error-side duplication of the P32 `data` fields, no new structured block, `finalize` unchanged (it never runs the decision gate). |
 | — | [Beginner-friendly CLI aliases](cli-alias-ux-rfc.md) | Added additive aliases `task next` / `phase next` / `task reconcile` / `plan import` (thin sugar to the canonical handlers). The `dogfood.md` rename stays deferred. |
 | P44 | [CI / adoption page](ci-adoption-page-rfc.md) | Added `docs/workflows/ci.md` (+ ja mirror) as the single CI adoption home — a thin orchestration page (contributor-vs-maintainer loops, one minimal pinned GitHub Actions gate, a preconditions checklist) that links to `cli-contract.md` for the `--base-ref` contract rather than duplicating the workflow YAML. |
-| — | [Post-1.26 agent-DX backlog](post-1.26-agent-dx-backlog.md) | **Complete.** Sequencing + re-scope intent for P40-P44. P43, P41, P40, P42, and P44 shipped; the post-1.26 agent-DX backlog is done. Each shipped with its own RFC. |
+| — | [Post-1.26 agent-DX backlog](../../docs/maintainers/history/post-1.26-agent-dx-backlog.md) → *moved to history* | **Complete.** Sequencing + re-scope intent for P40-P44 (not a gated decision). P43, P41, P40, P42, and P44 each shipped with its own RFC; this backlog now lives under [`docs/maintainers/history/`](../../docs/maintainers/history/post-1.26-agent-dx-backlog.md). |
+
+## What belongs here (and what does not)
+
+`design/decisions/` is the **decision layer**, not a general archive. The
+filename scan and `decision_refs` resolution treat every `.md` here as a
+candidate gate-resolving ADR, so the directory should hold decisions and only
+decisions.
+
+**Put here:**
+
+- An RFC for any significant, durable design decision and its rationale.
+- *Negative-space* decisions — a cancellation, deferral, or supersession that a
+  future contributor would otherwise re-litigate (e.g. [P22 cancelled](P22-cancelled-adapter-schema-v2.md),
+  [P37 deferred](P37-deferred-outcome-audit.md)). These stay `accepted` (the
+  decision *to not build* was made and approved) and say so in their title and
+  first line, so they read as closed, not as live commitments.
+
+**Do not put here** — move these to [`docs/maintainers/history/`](../../docs/maintainers/history/) instead:
+
+- **Sequencing / backlog intent records** that schedule work but do not
+  themselves decide a design (e.g. "do P40 before P43"). No gate references
+  them; they are planning provenance, not contracts. The
+  [post-1.26 agent-DX backlog](../../docs/maintainers/history/post-1.26-agent-dx-backlog.md)
+  is the worked example — it lived here, gated nothing, and moved out.
+- **"Complete" markers for a body of work** — a backlog whose every item shipped
+  is history. Record the closure in CHANGELOG and the shipped phases' own RFCs.
+- **Per-task implementation notes** — those belong in `progress.yaml` and the
+  task context pack, not as an ADR.
+
+Before moving anything, confirm it is not named by a `decision_refs` /
+`acceptance_refs` in `design/phases/*.yaml` (those are the gate-bearing
+references — see the move warning at the top). A `reads` / `writes` mention is
+not a gate reference and does not block a move.
 
 ## ADR status convention
 
@@ -60,6 +93,18 @@ The status word governs the [decision gate](../../docs/cli-contract.md#error-cod
 | empty file | does **not** resolve |
 | explicit unknown word (e.g. a typo) | does **not** resolve |
 | **no status line** (non-empty body) | resolves as accepted — the only lenient case, for backward compat with projects that pre-date status-aware parsing |
+
+**Status answers one question only: is this record live and gate-resolving?**
+It deliberately does *not* say what was decided. A decision to **cancel** or
+**defer** a feature is still a real, approved decision, so it stays `accepted`
+(so the gate resolves and it never reads as unfinished work) and records the
+cancellation/deferral in its title and first line — see [P22](P22-cancelled-adapter-schema-v2.md)
+and [P37](P37-deferred-outcome-audit.md). Use `status: superseded` (which does
+*not* resolve the gate) only when you genuinely want the gate to stop resolving
+against an ADR a later one replaces. There is no separate machine-read `outcome`
+field today: with cancellations and deferrals this rare, the human-readable
+title plus this index's "What it decided" column carry the distinction. Add a
+structured field only if a command or lint actually needs to consume it.
 
 Resolution chooses one of two paths:
 

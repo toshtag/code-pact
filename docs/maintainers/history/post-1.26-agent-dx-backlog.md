@@ -1,8 +1,13 @@
 # Post-1.26 agent-DX backlog (P40-P44 intent)
 
+> Historical record — moved here from `design/decisions/` in the decisions
+> responsibility cleanup. This is a sequencing/intent backlog, not a design
+> decision that any gate references; each phase it scoped (P40-P44) shipped with
+> its own accepted RFC under [`design/decisions/`](../../../design/decisions/README.md).
+
 - Status: complete (intent record, not an implementation RFC; P40-P44 all shipped)
 - Date: 2026-05-30
-- Related: [Root-cause-first completion errors](root-cause-completion-errors-rfc.md) (P39, accepted)
+- Related: [Root-cause-first completion errors](../../../design/decisions/root-cause-completion-errors-rfc.md) (P39, accepted)
 
 ## What this is
 
