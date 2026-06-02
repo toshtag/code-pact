@@ -267,7 +267,7 @@ Issue-level codes emitted by `doctor` / `validate` for general project health.
 | Code | Severity | Meaning |
 |------|----------|---------|
 | `MISSING_DIR` | error | A required directory under `.code-pact/` or `design/` is absent |
-| `MISSING_MODEL_TIER` | error | An agent profile is missing a required `model_map` tier |
+| `MISSING_MODEL_TIER` | warning | An agent profile is missing a required `model_map` tier |
 | `EMPTY_OBJECTIVE` | error | A phase `objective` is blank or fewer than 10 characters |
 | `MODEL_ID_UNKNOWN` (v1.29+) | warning | The `claude-code` profile has a `model_map` value or `model_version` that is not a known Claude model id (a typo or a retired model). Offline check against the bundled model catalog (`src/core/models/catalog.ts`) |
 | `MODEL_MAP_STALE` (v1.29+) | warning | The `claude-code` profile's `model_map` points at a known Claude id that is no longer the current catalog default (e.g. the profile predates a model bump). A difference from the default, **not** an invalid value — to follow it, hand-edit the tier in `.code-pact/agent-profiles/<agent>.yaml` then run `adapter upgrade <agent> --write` to regenerate (note: `--model` re-pins `model_version` only, never `model_map`). Keep it if the pin is intentional, or silence via `.code-pact/doctor.yaml` → `disabled_checks: [MODEL_MAP_STALE]`. Scoped to `claude-code`; never fires for codex/other agents |

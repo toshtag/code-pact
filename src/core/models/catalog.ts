@@ -86,30 +86,38 @@ export const CLAUDE_TIER_MODEL_IDS = {
 // ---------------------------------------------------------------------------
 
 export type ModelGuidance = {
-  supportsHighEffort: boolean;
   effortGuidance: string;
   thinkingNote: string;
 };
 
-const OPUS_GUIDANCE: ModelGuidance = {
-  supportsHighEffort: true,
-  effortGuidance: [
-    "- `high` — large context, complex architecture decisions, or tasks with `ambiguity: high`",
-    "- `medium` — standard feature work (default)",
-    "- `low` — small mechanical tasks (`type: refactor`, `expected_duration: short`)",
-  ].join("\n"),
+const OPUS_EFFORT_GUIDANCE = [
+  "- `high` — large context, complex architecture decisions, or tasks with `ambiguity: high`",
+  "- `medium` — standard feature work (default)",
+  "- `low` — small mechanical tasks (`type: refactor`, `expected_duration: short`)",
+].join("\n");
+
+// Opus 4.7 and 4.8: per Anthropic's models table, Extended thinking: No,
+// Adaptive thinking: Yes. Manual extended-thinking budgets are not supported;
+// the model scales its own reasoning depth.
+const OPUS_ADAPTIVE_GUIDANCE: ModelGuidance = {
+  effortGuidance: OPUS_EFFORT_GUIDANCE,
+  thinkingNote:
+    "Adaptive thinking is supported; manual extended thinking is not. The model adapts its reasoning depth automatically for complex or `ambiguity: high` tasks — there is no explicit enable step.",
+};
+
+// Opus 4.6: Extended thinking: Yes, Adaptive thinking: Yes.
+const OPUS_46_GUIDANCE: ModelGuidance = {
+  effortGuidance: OPUS_EFFORT_GUIDANCE,
   thinkingNote:
     "Extended thinking is supported. Enable it for tasks flagged `ambiguity: high` or `context_size: large`.",
 };
 
 export const CLAUDE_MODEL_GUIDANCE: Record<ClaudeModelVersion, ModelGuidance> = {
-  // opus-4.8 is a non-breaking successor to 4.7; keep guidance conservative and
-  // version-agnostic (no vendor-specific effort taxonomy parroted here).
-  "opus-4.8": OPUS_GUIDANCE,
-  "opus-4.7": OPUS_GUIDANCE,
-  "opus-4.6": OPUS_GUIDANCE,
+  "opus-4.8": OPUS_ADAPTIVE_GUIDANCE,
+  "opus-4.7": OPUS_ADAPTIVE_GUIDANCE,
+  "opus-4.6": OPUS_46_GUIDANCE,
   "sonnet-4.6": {
-    supportsHighEffort: false,
+    // Sonnet 4.6: Extended thinking: Yes, Adaptive thinking: Yes.
     effortGuidance: [
       "- `medium` — standard feature work (default)",
       "- `low` — small mechanical tasks (`type: refactor`, `expected_duration: short`)",

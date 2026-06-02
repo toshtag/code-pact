@@ -39,7 +39,7 @@ function modelGuidanceSection(modelVersion: string): string {
     `**Effort levels:**`,
     g.effortGuidance,
     ``,
-    `**Extended thinking:** ${g.thinkingNote}`,
+    `**Thinking:** ${g.thinkingNote}`,
   ].join("\n");
 }
 

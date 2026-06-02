@@ -354,7 +354,9 @@ describe("runGenerateAdapter — claude-code model-aware (v0.5)", () => {
     expect(content).toContain("`high`");
     expect(content).toContain("`medium`");
     expect(content).toContain("`low`");
-    expect(content).toContain("Extended thinking");
+    // Opus 4.7 uses adaptive thinking (extended thinking is not supported).
+    expect(content).toContain("Adaptive thinking");
+    expect(content).not.toContain("Extended thinking is supported");
   });
 
   it("--model opus-4.6: includes effort guidance with high/medium/low", async () => {
