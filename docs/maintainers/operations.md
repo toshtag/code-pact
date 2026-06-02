@@ -194,8 +194,9 @@ See [`docs/spec-kit-bridge.md`](../spec-kit-bridge.md) for the full walkthrough 
 
 ## Model-aware adapter (v0.5.0)
 
-Pin a Claude model version so the adapter generates effort and model-specific thinking guidance
-tailored to that model:
+Pin a Claude model version so the adapter adds an effort and thinking guidance block for that
+model. The guidance is generation-resistant — it avoids per-generation capability claims and
+defers exact capabilities to Anthropic's current docs:
 
 ```sh
 # Generate CLAUDE.md with Opus 4.8–specific guidance:

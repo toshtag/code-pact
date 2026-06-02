@@ -99,7 +99,7 @@ export type ModelGuidance = {
 // authoritative per-model capability table lives in Anthropic's docs, not here.
 const STANDARD_EFFORT_GUIDANCE = [
   "- `high` — complex architecture decisions, high-ambiguity tasks, or large context",
-  "- `medium` — standard feature work (default)",
+  "- `medium` — standard feature work",
   "- `low` — small mechanical tasks (`type: refactor`, `expected_duration: short`)",
 ].join("\n");
 
