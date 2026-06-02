@@ -40,6 +40,7 @@ import {
   detectModelMapDrift,
   type ModelMapDrift,
 } from "../core/models/model-map-drift.ts";
+import { isDoctorCheckDisabled } from "../core/doctor-config.ts";
 import type { Locale } from "../i18n/index.ts";
 
 // ---------------------------------------------------------------------------
@@ -449,6 +450,11 @@ export type AgentModelMapDrift = {
  * empty `drift` for any other agent. Reads the profile fresh from disk (after
  * the write), reusing the shared {@link detectModelMapDrift} condition so the
  * hint can never disagree with doctor's `MODEL_MAP_STALE`.
+ *
+ * Honors the same suppression as doctor: a project that silenced the advisory
+ * via `.code-pact/doctor.yaml` (`disabled_checks: [MODEL_MAP_STALE]`) gets an
+ * empty `drift`, so the hint never re-nags about a pin the team already chose
+ * to keep — and never contradicts its own "silence via doctor.yaml" guidance.
  */
 export async function detectAgentModelMapDrift(
   cwd: string,
@@ -456,6 +462,9 @@ export async function detectAgentModelMapDrift(
 ): Promise<AgentModelMapDrift> {
   const profileRel = await resolveAgentProfileRel(cwd, agentName);
   if (agentName !== "claude-code") return { profileRel, drift: [] };
+  if (await isDoctorCheckDisabled(cwd, "MODEL_MAP_STALE")) {
+    return { profileRel, drift: [] };
+  }
   const profile = await loadAgentProfile(cwd, agentName);
   return { profileRel, drift: detectModelMapDrift(profile.model_map) };
 }

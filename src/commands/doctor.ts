@@ -1,7 +1,6 @@
 import { readFile, readdir, access } from "node:fs/promises";
 import { join, basename, extname } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { z } from "zod";
 import { Roadmap } from "../core/schemas/roadmap.ts";
 import { Phase } from "../core/schemas/phase.ts";
 import { ProgressLog, type ProgressEvent } from "../core/schemas/progress-event.ts";
@@ -16,6 +15,7 @@ import {
   CLAUDE_TIER_MODEL_IDS,
 } from "../core/models/catalog.ts";
 import { detectModelMapDrift } from "../core/models/model-map-drift.ts";
+import { loadDoctorConfig } from "../core/doctor-config.ts";
 import { ModelProfile, ModelTier } from "../core/schemas/model-profile.ts";
 import {
   detectDuplicateTaskIds,
@@ -32,31 +32,10 @@ import { inspectAgent, type AdapterDoctorIssue } from "./adapter-doctor.ts";
 import { readPackageVersion } from "../lib/package-version.ts";
 import type { Locale } from "../i18n/index.ts";
 
-// Optional per-project doctor configuration (.code-pact/doctor.yaml)
-const DoctorConfig = z.object({
-  disabled_checks: z.array(z.string()).optional().default([]),
-  // P34: team-declared escape hatch for CONTROL_PLANE_BRANCH_NOT_DRIVEN.
-  // Default empty — no built-in docs/config exemption (a repo decides which
-  // paths legitimately change without driving the loop).
-  control_plane_branch_not_driven: z
-    .object({
-      exclude_globs: z.array(z.string()).optional().default([]),
-    })
-    .optional(),
-});
-type DoctorConfig = z.infer<typeof DoctorConfig>;
-
-async function loadDoctorConfig(cwd: string): Promise<DoctorConfig> {
-  const path = join(cwd, ".code-pact", "doctor.yaml");
-  try {
-    const raw = await readFile(path, "utf8");
-    const parsed = DoctorConfig.safeParse(parseYaml(raw));
-    if (parsed.success) return parsed.data;
-  } catch {
-    // file absent or unreadable — use defaults
-  }
-  return { disabled_checks: [] };
-}
+// Per-project doctor configuration (`.code-pact/doctor.yaml`) is loaded via the
+// shared `core/doctor-config.ts` so every `disabled_checks` consumer — doctor
+// here and the `adapter upgrade --write` MODEL_MAP_STALE hint — reads it
+// identically.
 
 // ---------------------------------------------------------------------------
 // Types
