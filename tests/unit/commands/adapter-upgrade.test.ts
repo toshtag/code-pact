@@ -763,6 +763,16 @@ describe("detectAgentModelMapDrift", () => {
     expect(drift).toEqual([]);
   });
 
+  it("non-claude returns empty drift without touching the filesystem (even with a broken project.yaml)", async () => {
+    // The non-claude gate must be first: a broken project.yaml cannot make a
+    // non-claude call throw before it returns empty (documented contract).
+    await writeFile(join(dir, ".code-pact", "project.yaml"), ": not valid yaml :\n", "utf8");
+    await expect(detectAgentModelMapDrift(dir, "codex")).resolves.toEqual({
+      profileRel: "agent-profiles/codex.yaml",
+      drift: [],
+    });
+  });
+
   it("reads the custom agents[].profile path, not the default (regression: 1.29.1 path-resolution)", async () => {
     // Point project.yaml at a non-default profile path and put the STALE pin
     // there, while leaving the default agent-profiles/claude-code.yaml at fresh

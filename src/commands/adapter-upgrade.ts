@@ -447,7 +447,10 @@ export type AgentModelMapDrift = {
  * remained rather than leaving them to re-run `doctor` to find out.
  *
  * Scoped to claude-code — the only catalog-backed agent — so it returns an
- * empty `drift` for any other agent. Reads the profile fresh from disk (after
+ * empty `drift` for any other agent, without touching the filesystem at all:
+ * the non-claude gate is first, so a broken `project.yaml` cannot make a
+ * non-claude call throw before it returns empty (the documented contract holds
+ * unconditionally). For claude-code it reads the profile fresh from disk (after
  * the write), reusing the shared {@link detectModelMapDrift} condition so the
  * hint can never disagree with doctor's `MODEL_MAP_STALE`.
  *
@@ -460,8 +463,14 @@ export async function detectAgentModelMapDrift(
   cwd: string,
   agentName: string,
 ): Promise<AgentModelMapDrift> {
+  // Non-claude first: no profile resolution, no I/O, no failure path. The
+  // returned `profileRel` is the convention only as a placeholder — non-claude
+  // callers never consume it (drift is always empty, and the CLI gates the call
+  // on claude-code), so it is never resolved against a custom agents[].profile.
+  if (agentName !== "claude-code") {
+    return { profileRel: `agent-profiles/${agentName}.yaml`, drift: [] };
+  }
   const profileRel = await resolveAgentProfileRel(cwd, agentName);
-  if (agentName !== "claude-code") return { profileRel, drift: [] };
   if (await isDoctorCheckDisabled(cwd, "MODEL_MAP_STALE")) {
     return { profileRel, drift: [] };
   }
