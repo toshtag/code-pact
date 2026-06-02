@@ -2466,7 +2466,8 @@ This means that once a project is initialized with `ja-JP`, all subsequent comma
 | `design/brief.md`, `design/constitution.md` | `plan brief`, `plan constitution` | Once per wizard run |
 | `design/roadmap.yaml` | `init --sample-phase`, `phase add`, `phase new`, `phase import` (all via `createPhase`) | One append per phase added |
 | `design/phases/<phase>.yaml` | `init --sample-phase`, `phase add`, `phase new`, `phase import`, `task add`, `task finalize --write`, `phase reconcile --write` | Phase creation: one write per phase. Task lifecycle: one write per `task add` / status flip |
-| `<adapter-owned files>` (e.g. `CLAUDE.md`, `.claude/skills/*.md`, `.context/<agent>/*`) | `adapter install`, `adapter upgrade --write` | Generated from the agent's `AdapterDescriptor`; manifest tracks every file |
+| `.context/<agent>/<task-id>.md` (context pack) | `task prepare` (unless `--dry-run`), `pack` | One write per `task prepare` / `pack` invocation. `task context` does **not** write — it builds and returns/prints the same bytes. The file is regenerable and gitignored (`/.context/`), not tracked in the adapter manifest |
+| `<adapter-owned files>` (e.g. `CLAUDE.md`, `.claude/skills/*.md`) | `adapter install`, `adapter upgrade --write` | Generated from the agent's `AdapterDescriptor`; manifest tracks every file. `adapter install` / `upgrade` also create the (initially empty) `.context/<agent>/` directory, but the per-task packs inside it are written by `task prepare` / `pack` (row above), not the adapter |
 
 ### Atomic write strategy
 

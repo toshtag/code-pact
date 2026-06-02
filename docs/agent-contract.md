@@ -95,7 +95,9 @@ For the same git SHA and the same inputs:
 - `task context --explain --json` (v1.11+) attaches metadata but the
   `content` string is byte-identical to non-explain mode.
 - `task prepare` (v1.11+) writes the same context pack bytes that
-  `task context` would write for the same task.
+  `task context` produces for the same task (`task context` builds and
+  returns the content; `task prepare` and the low-level `pack` are the
+  commands that write it to disk).
 
 Where a command writes deterministic artifacts (context pack, adapter
 files), the same input produces the same on-disk bytes.
