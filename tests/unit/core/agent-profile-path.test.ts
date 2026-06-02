@@ -63,13 +63,13 @@ describe("resolveAgentProfileRel / resolveAgentProfilePath", () => {
     expect(await resolveAgentProfileRel(dir, "claude-code")).toBe("custom/cc.yaml");
   });
 
-  it("falls back to the convention when an agent's profile is itself unsafe", async () => {
+  it("rejects an unsafe agents[].profile with CONFIG_ERROR (no silent fallback)", async () => {
     await setProfileRel("claude-code", "../../etc/evil.yaml");
-    // RelativePosixPath rejects `..`; the resolver must not return the unsafe
-    // path — it degrades to the convention instead.
-    expect(await resolveAgentProfileRel(dir, "claude-code")).toBe(
-      "agent-profiles/claude-code.yaml",
-    );
+    // The project explicitly declared an invalid path; surfacing it beats
+    // silently reading/writing the default file elsewhere.
+    await expect(resolveAgentProfileRel(dir, "claude-code")).rejects.toMatchObject({
+      code: "CONFIG_ERROR",
+    });
   });
 
   it("falls back to the convention when project.yaml has no matching agent", async () => {
@@ -90,6 +90,16 @@ describe("resolveAgentProfileRel / resolveAgentProfilePath", () => {
     await expect(resolveAgentProfilePath(dir, "../evil")).rejects.toMatchObject({
       code: "CONFIG_ERROR",
     });
+  });
+});
+
+describe("adapter list honors a custom profile path", () => {
+  it("reports the project.yaml agents[].profile path in profilePath", async () => {
+    const { runAdapterList } = await import("../../../src/commands/adapter-list.ts");
+    await setProfileRel("claude-code", "custom/cc.yaml");
+    const result = await runAdapterList({ cwd: dir });
+    const cc = result.agents.find((a) => a.name === "claude-code");
+    expect(cc?.profilePath).toBe(join(dir, ".code-pact", "custom", "cc.yaml"));
   });
 });
 

@@ -17,9 +17,9 @@ import { assertSafePlanId } from "./schemas/plan-id.ts";
 // to the conventional `agent-profiles/<name>.yaml` (what `init` writes) when
 // project.yaml is absent, the agent is not listed, or its profile is unusable.
 
-/** The conventional profile path (relative to `.code-pact/`). */
+/** The conventional profile path (relative to `.code-pact/`), POSIX-separated. */
 function defaultProfileRel(agentName: string): string {
-  return join("agent-profiles", `${agentName}.yaml`);
+  return `agent-profiles/${agentName}.yaml`;
 }
 
 /**
@@ -29,11 +29,14 @@ function defaultProfileRel(agentName: string): string {
  *
  * Reads only the matching agent's `profile` rather than full-parsing the whole
  * `Project` schema, so an unrelated invalid field elsewhere in project.yaml does
- * not silently redirect a custom profile back to the default. The resolved path
- * is still validated (`RelativePosixPath`: no `..`, no absolute, no backslash)
- * before use. Whole-file validity is `doctor` / `validate`'s concern — this
- * helper deliberately degrades to the convention rather than coupling every
- * command to it.
+ * not silently redirect a custom profile back to the default.
+ *
+ * Falls back to the convention when project.yaml is absent/unparseable or the
+ * agent is not listed. But a matched agent whose `profile` is an *invalid* path
+ * (e.g. `../../etc/x`) throws `CONFIG_ERROR` rather than falling back: the
+ * project explicitly declared that path, so silently reading/writing a
+ * different file would hide the misconfiguration. The resolved path is validated
+ * (`RelativePosixPath`: no `..`, no absolute, no backslash) before use.
  */
 export async function resolveAgentProfileRel(
   cwd: string,
@@ -58,7 +61,13 @@ export async function resolveAgentProfileRel(
       if (a && typeof a === "object" && (a as { name?: unknown }).name === agentName) {
         const parsed = RelativePosixPath.safeParse((a as { profile?: unknown }).profile);
         if (parsed.success) return parsed.data;
-        break; // matched the agent, but its profile is unusable → convention
+        // Matched the agent but its declared profile is an invalid path —
+        // surface it instead of silently reading/writing the default file.
+        const err = new Error(
+          `Agent "${agentName}" has an invalid "profile" in .code-pact/project.yaml: ${parsed.error.issues[0]?.message ?? "invalid relative POSIX path"}`,
+        );
+        (err as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+        throw err;
       }
     }
   }

@@ -2457,7 +2457,8 @@ This means that once a project is initialized with `ja-JP`, all subsequent comma
 | Path | Written by | Frequency |
 |------|------------|-----------|
 | `.code-pact/project.yaml` | `init` | Once at project bootstrap |
-| `.code-pact/agent-profiles/<agent>.yaml` | `init`, `adapter install`, `adapter upgrade --write` | Once at bootstrap; refreshed when adapter profile fields change |
+| `.code-pact/agent-profiles/<agent>.yaml` | `init` | The default profile, created once at bootstrap |
+| `.code-pact/<agents[].profile>` (default: `agent-profiles/<agent>.yaml`) | `adapter install`, `adapter upgrade --write`, `--model` pinning | Reads/writes the profile path configured in `project.yaml`; refreshed when adapter profile fields change |
 | `.code-pact/model-profiles/*.yaml` | `init` | Once at bootstrap (default tier templates) |
 | `.code-pact/state/progress.yaml` | `task start` / `task block` / `task resume` / `task complete` | One append per state transition |
 | `.code-pact/state/baselines/*.json` | `init`, future baseline commands | Once at bootstrap (`initial.json`) |

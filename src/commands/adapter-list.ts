@@ -8,6 +8,7 @@ import {
   type SupportedAgent,
 } from "../core/agents.ts";
 import { manifestPath, readManifest } from "../core/adapters/manifest.ts";
+import { resolveAgentProfilePath } from "../core/agent-profile-path.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -81,12 +82,17 @@ export async function runAdapterList(opts: {
   const agents: AdapterListEntry[] = [];
 
   for (const name of SUPPORTED_AGENTS) {
-    const profilePath = join(
-      cwd,
-      ".code-pact",
-      "agent-profiles",
-      `${name}.yaml`,
-    );
+    // Honor a non-default `agents[].profile` from project.yaml (matching doctor
+    // and the adapter/recommend commands). adapter list is a non-throwing
+    // lister, so an invalid configured profile degrades to the conventional
+    // path for display rather than erroring — doctor/validate surface the bad
+    // config separately.
+    let profilePath: string;
+    try {
+      profilePath = await resolveAgentProfilePath(cwd, name);
+    } catch {
+      profilePath = join(cwd, ".code-pact", "agent-profiles", `${name}.yaml`);
+    }
     const mPath = manifestPath(cwd, name);
 
     let manifestPresent = false;
