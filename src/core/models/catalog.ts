@@ -102,7 +102,7 @@ const OPUS_EFFORT_GUIDANCE = [
 const OPUS_ADAPTIVE_GUIDANCE: ModelGuidance = {
   effortGuidance: OPUS_EFFORT_GUIDANCE,
   thinkingNote:
-    "Adaptive thinking is supported; manual extended thinking is not. The model adapts its reasoning depth automatically for complex or `ambiguity: high` tasks — there is no explicit enable step.",
+    "Adaptive thinking is the supported mode; manual extended-thinking budgets are not. Lean on adaptive thinking and the effort level for complex or `ambiguity: high` tasks.",
 };
 
 // Opus 4.6: Extended thinking: Yes, Adaptive thinking: Yes.
