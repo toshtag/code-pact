@@ -214,13 +214,15 @@ default when `--model` is not passed on the CLI.
 **Provider scope (Claude-only model governance).** Model-aware `CLAUDE.md` guidance,
 the `--model` validator, and the `MODEL_ID_UNKNOWN` / `MODEL_MAP_STALE` doctor checks
 all read the bundled Claude catalog and apply to the `claude-code` profile only. Other
-agents' `model_map` values — e.g. `codex` (`o3` / `o4-mini` / `gpt-4.1-mini`) — are
+agents' `model_map` values — e.g. `codex` (`gpt-5.5` / `gpt-5.4` / `gpt-5.4-mini`) — are
 **advisory display only**: they render in the generated instruction file but are
 user-maintained, not validated against any catalog, and not drift-checked. `gemini-cli`,
-`cursor`, and `generic` ship with an empty `model_map` by design. A per-provider catalog
-and drift check for Codex / Gemini is intentionally **not** implemented; it would be
-added only after a provider-specific audit confirms a real inconsistency (no equivalent
-of the Claude help-vs-validator mismatch has been found for those agents).
+`cursor`, and `generic` ship with an empty `model_map` by design. The codex defaults are
+kept current by hand (refreshed 2026-06 to OpenAI's documented Codex lineup, replacing the
+older `o3` / `o4-mini` / `gpt-4.1-mini`); a per-provider catalog and drift check for Codex
+/ Gemini is intentionally **not** implemented; it would be added only after a
+provider-specific audit confirms a real inconsistency (no equivalent of the Claude
+help-vs-validator mismatch has been found for those agents).
 
 After adapter generation, `.claude/skills/` is populated with:
 - Fixed skills: `/context`, `/verify`, `/progress`
