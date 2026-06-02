@@ -229,6 +229,83 @@ describe("adapter upgrade — CLI", () => {
   });
 });
 
+describe("adapter upgrade — MODEL_MAP_STALE remaining-advisory hint (CLI)", () => {
+  const profileRel = ".code-pact/agent-profiles/claude-code.yaml";
+
+  function pinStale(): void {
+    const fs = require("node:fs") as typeof import("node:fs");
+    const path = join(dir, profileRel);
+    const raw = fs.readFileSync(path, "utf8");
+    const next = raw.replace(/(highest_reasoning:\s*)\S+/, "$1claude-opus-4-7");
+    expect(next).not.toBe(raw);
+    fs.writeFileSync(path, next, "utf8");
+  }
+
+  it("non-refused --write with a stale model_map pin prints the hint on stderr", () => {
+    runCli(["adapter", "install", "claude-code", "--json"]);
+    pinStale();
+    const res = runCli(["adapter", "upgrade", "claude-code", "--write"]);
+    expect(res.status).toBe(0);
+    expect(res.stderr).toContain("Remaining manual advisory: MODEL_MAP_STALE");
+    expect(res.stderr).toContain("claude-opus-4-7");
+    expect(res.stderr).toContain("claude-opus-4-8");
+    // Must not advise --model (it re-pins model_version, not model_map).
+    expect(res.stderr).not.toContain("--model");
+    // Must not mutate model_map — the stale pin is still on disk afterward.
+    const fs = require("node:fs") as typeof import("node:fs");
+    expect(fs.readFileSync(join(dir, profileRel), "utf8")).toContain(
+      "highest_reasoning: claude-opus-4-7",
+    );
+  });
+
+  it("fresh (default) model_map → no hint", () => {
+    runCli(["adapter", "install", "claude-code", "--json"]);
+    const res = runCli(["adapter", "upgrade", "claude-code", "--write"]);
+    expect(res.status).toBe(0);
+    expect(res.stderr).not.toContain("MODEL_MAP_STALE");
+  });
+
+  it("--json never emits the hint (human-only; envelope stays clean)", () => {
+    runCli(["adapter", "install", "claude-code", "--json"]);
+    pinStale();
+    const res = runCli(["adapter", "upgrade", "claude-code", "--write", "--json"]);
+    expect(res.status).toBe(0);
+    expect(res.stderr).not.toContain("MODEL_MAP_STALE");
+    const parsed = JSON.parse(res.stdout) as { ok: boolean; data: Record<string, unknown> };
+    expect(parsed.ok).toBe(true);
+    expect("drift" in parsed.data).toBe(false);
+  });
+
+  it("doctor.yaml disabled_checks suppresses the hint (no contradiction with its own silence guidance)", () => {
+    runCli(["adapter", "install", "claude-code", "--json"]);
+    pinStale();
+    const fs = require("node:fs") as typeof import("node:fs");
+    fs.writeFileSync(
+      join(dir, ".code-pact", "doctor.yaml"),
+      "disabled_checks:\n  - MODEL_MAP_STALE\n",
+      "utf8",
+    );
+    const res = runCli(["adapter", "upgrade", "claude-code", "--write"]);
+    expect(res.status).toBe(0);
+    expect(res.stderr).not.toContain("MODEL_MAP_STALE");
+  });
+
+  it("withholds the hint when a file was refused (--accept-modified is the real next step)", () => {
+    runCli(["adapter", "install", "claude-code", "--json"]);
+    pinStale(); // makes desired CLAUDE.md stale relative to the new pin
+    const fs = require("node:fs") as typeof import("node:fs");
+    // Locally edit the managed CLAUDE.md → managed-modified × stale → refuse.
+    const claudeMd = join(dir, "CLAUDE.md");
+    fs.writeFileSync(claudeMd, fs.readFileSync(claudeMd, "utf8") + "\n<!-- local edit -->\n", "utf8");
+    const res = runCli(["adapter", "upgrade", "claude-code", "--write"]);
+    expect(res.status).toBe(1); // a refusal exits 1
+    expect(res.stderr).toContain("refused");
+    // The hint would tell the user to re-run --write; the refusal already told
+    // them to use --accept-modified. Suppress the contradictory hint here.
+    expect(res.stderr).not.toContain("MODEL_MAP_STALE");
+  });
+});
+
 describe("adapter doctor — CLI", () => {
   it("--json returns ok envelope with issues array (exit 0 for warning-only state)", () => {
     const res = runCli(["adapter", "doctor", "--json"]);

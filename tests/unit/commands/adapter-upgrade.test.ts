@@ -1,11 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtemp, readFile, rm, writeFile, unlink } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile, unlink } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runInit } from "../../../src/commands/init.ts";
 import { runAdapterInstall } from "../../../src/commands/adapter-install.ts";
-import { runAdapterUpgrade } from "../../../src/commands/adapter-upgrade.ts";
+import {
+  runAdapterUpgrade,
+  detectAgentModelMapDrift,
+} from "../../../src/commands/adapter-upgrade.ts";
 import {
   computeContentHash,
   readManifest,
@@ -719,6 +722,113 @@ describe("adapter upgrade — orphan prune", () => {
     });
     expect(second.clean).toBe(true);
     expect(second.plan.every((p) => p.action === "skip")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// detectAgentModelMapDrift — backs the `adapter upgrade --write` remaining-
+// advisory hint. `adapter upgrade` never rewrites model_map, so a stale pin
+// survives a --write; this surfaces it without re-running doctor.
+// ---------------------------------------------------------------------------
+
+describe("detectAgentModelMapDrift", () => {
+  async function pinHighestReasoning(id: string): Promise<void> {
+    const path = join(dir, ".code-pact", "agent-profiles", "claude-code.yaml");
+    const raw = await readFile(path, "utf8");
+    const next = raw.replace(
+      /(highest_reasoning:\s*)\S+/,
+      `$1${id}`,
+    );
+    if (next === raw) throw new Error("expected to rewrite highest_reasoning pin");
+    await writeFile(path, next, "utf8");
+  }
+
+  it("returns no drift for a freshly initialised claude-code profile", async () => {
+    const { drift, profileRel } = await detectAgentModelMapDrift(dir, "claude-code");
+    expect(drift).toEqual([]);
+    expect(profileRel).toBe("agent-profiles/claude-code.yaml");
+  });
+
+  it("reports drift when model_map pins a known-but-older id", async () => {
+    await pinHighestReasoning("claude-opus-4-7");
+    const { drift } = await detectAgentModelMapDrift(dir, "claude-code");
+    expect(drift).toHaveLength(1);
+    expect(drift[0]?.tier).toBe("highest_reasoning");
+    expect(drift[0]?.current).toBe("claude-opus-4-7");
+    expect(drift[0]?.expected).toBe("claude-opus-4-8");
+  });
+
+  it("is scoped to claude-code — other agents always return empty drift", async () => {
+    const { drift } = await detectAgentModelMapDrift(dir, "codex");
+    expect(drift).toEqual([]);
+  });
+
+  it("non-claude returns empty drift without touching the filesystem (even with a broken project.yaml)", async () => {
+    // The non-claude gate must be first: a broken project.yaml cannot make a
+    // non-claude call throw before it returns empty (documented contract).
+    await writeFile(join(dir, ".code-pact", "project.yaml"), ": not valid yaml :\n", "utf8");
+    await expect(detectAgentModelMapDrift(dir, "codex")).resolves.toEqual({
+      profileRel: "agent-profiles/codex.yaml",
+      drift: [],
+    });
+  });
+
+  it("reads the custom agents[].profile path, not the default (regression: 1.29.1 path-resolution)", async () => {
+    // Point project.yaml at a non-default profile path and put the STALE pin
+    // there, while leaving the default agent-profiles/claude-code.yaml at fresh
+    // catalog defaults. Drift can therefore only be detected if the helper read
+    // the custom profile — and the reported path must be the custom one.
+    const projectPath = join(dir, ".code-pact", "project.yaml");
+    const project = await readFile(projectPath, "utf8");
+    await writeFile(
+      projectPath,
+      project.replace(
+        "profile: agent-profiles/claude-code.yaml",
+        "profile: custom/claude.yaml",
+      ),
+      "utf8",
+    );
+    const defaultProfile = await readFile(
+      join(dir, ".code-pact", "agent-profiles", "claude-code.yaml"),
+      "utf8",
+    );
+    // default stays fresh; custom gets the stale pin
+    await mkdir(join(dir, ".code-pact", "custom"), { recursive: true });
+    await writeFile(
+      join(dir, ".code-pact", "custom", "claude.yaml"),
+      defaultProfile.replace(/(highest_reasoning:\s*)\S+/, "$1claude-opus-4-7"),
+      "utf8",
+    );
+
+    const { profileRel, drift } = await detectAgentModelMapDrift(dir, "claude-code");
+    expect(profileRel).toBe("custom/claude.yaml");
+    expect(drift.map((d) => d.current)).toEqual(["claude-opus-4-7"]);
+  });
+
+  it("honors doctor.yaml suppression: a silenced MODEL_MAP_STALE yields no drift", async () => {
+    await pinHighestReasoning("claude-opus-4-7");
+    // Sanity: drift is real before suppression.
+    expect((await detectAgentModelMapDrift(dir, "claude-code")).drift).toHaveLength(1);
+    await writeFile(
+      join(dir, ".code-pact", "doctor.yaml"),
+      "disabled_checks:\n  - MODEL_MAP_STALE\n",
+      "utf8",
+    );
+    // Suppressed: the hint must not re-nag about a pin the team chose to keep,
+    // and must not contradict its own "silence via doctor.yaml" guidance.
+    expect((await detectAgentModelMapDrift(dir, "claude-code")).drift).toEqual([]);
+  });
+
+  it("survives an `adapter upgrade --write`: the stale pin is not rewritten", async () => {
+    await freshInstall();
+    await pinHighestReasoning("claude-opus-4-7");
+    await runAdapterUpgrade({
+      cwd: dir, agentName: "claude-code", mode: "write",
+      force: false, acceptModified: false, locale: "en-US",
+      generatorVersionOverride: "0.9.0-alpha.0",
+    });
+    const { drift } = await detectAgentModelMapDrift(dir, "claude-code");
+    expect(drift.map((d) => d.tier)).toEqual(["highest_reasoning"]);
   });
 });
 

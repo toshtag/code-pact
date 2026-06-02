@@ -5,7 +5,10 @@ import { AgentProfile } from "../core/schemas/agent-profile.ts";
 import { ModelProfile } from "../core/schemas/model-profile.ts";
 import { adapterRegistry } from "../core/adapters/index.ts";
 import { isSupportedAgent } from "../core/agents.ts";
-import { resolveAgentProfilePath } from "../core/agent-profile-path.ts";
+import {
+  resolveAgentProfilePath,
+  resolveAgentProfileRel,
+} from "../core/agent-profile-path.ts";
 import type { DesiredAdapterFileRole } from "../core/adapters/types.ts";
 import {
   assertSafeRelativePath,
@@ -33,6 +36,11 @@ import type {
 } from "../core/schemas/adapter-manifest.ts";
 import { atomicWriteText } from "../io/atomic-text.ts";
 import { readPackageVersion } from "../lib/package-version.ts";
+import {
+  detectModelMapDrift,
+  type ModelMapDrift,
+} from "../core/models/model-map-drift.ts";
+import { isDoctorCheckDisabled } from "../core/doctor-config.ts";
 import type { Locale } from "../i18n/index.ts";
 
 // ---------------------------------------------------------------------------
@@ -423,4 +431,49 @@ export async function runAdapterUpgrade(
     clean,
     plan,
   };
+}
+
+export type AgentModelMapDrift = {
+  /** Project-relative (under `.code-pact/`) path of the agent profile read. */
+  profileRel: string;
+  drift: ModelMapDrift[];
+};
+
+/**
+ * Detect MODEL_MAP_STALE drift for an agent's `model_map`, for the
+ * `adapter upgrade --write` remaining-advisory hint. `adapter upgrade` never
+ * rewrites `model_map` (a deliberate pin may be intentional), so a stale entry
+ * survives a `--write`; this lets the CLI tell the user *why* an advisory
+ * remained rather than leaving them to re-run `doctor` to find out.
+ *
+ * Scoped to claude-code — the only catalog-backed agent — so it returns an
+ * empty `drift` for any other agent, without touching the filesystem at all:
+ * the non-claude gate is first, so a broken `project.yaml` cannot make a
+ * non-claude call throw before it returns empty (the documented contract holds
+ * unconditionally). For claude-code it reads the profile fresh from disk (after
+ * the write), reusing the shared {@link detectModelMapDrift} condition so the
+ * hint can never disagree with doctor's `MODEL_MAP_STALE`.
+ *
+ * Honors the same suppression as doctor: a project that silenced the advisory
+ * via `.code-pact/doctor.yaml` (`disabled_checks: [MODEL_MAP_STALE]`) gets an
+ * empty `drift`, so the hint never re-nags about a pin the team already chose
+ * to keep — and never contradicts its own "silence via doctor.yaml" guidance.
+ */
+export async function detectAgentModelMapDrift(
+  cwd: string,
+  agentName: string,
+): Promise<AgentModelMapDrift> {
+  // Non-claude first: no profile resolution, no I/O, no failure path. The
+  // returned `profileRel` is the convention only as a placeholder — non-claude
+  // callers never consume it (drift is always empty, and the CLI gates the call
+  // on claude-code), so it is never resolved against a custom agents[].profile.
+  if (agentName !== "claude-code") {
+    return { profileRel: `agent-profiles/${agentName}.yaml`, drift: [] };
+  }
+  const profileRel = await resolveAgentProfileRel(cwd, agentName);
+  if (await isDoctorCheckDisabled(cwd, "MODEL_MAP_STALE")) {
+    return { profileRel, drift: [] };
+  }
+  const profile = await loadAgentProfile(cwd, agentName);
+  return { profileRel, drift: detectModelMapDrift(profile.model_map) };
 }
