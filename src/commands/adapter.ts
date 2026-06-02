@@ -27,12 +27,13 @@ export type {
   AdapterDoctorResult,
 } from "./adapter-doctor.ts";
 
-export { runAdapterUpgrade } from "./adapter-upgrade.ts";
+export { runAdapterUpgrade, detectAgentModelMapDrift } from "./adapter-upgrade.ts";
 export type {
   AdapterUpgradeMode,
   AdapterUpgradeOptions,
   AdapterUpgradePlanEntry,
   AdapterUpgradeResult,
+  AgentModelMapDrift,
 } from "./adapter-upgrade.ts";
 
 // ---------------------------------------------------------------------------

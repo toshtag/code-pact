@@ -15,6 +15,7 @@ import {
   CLAUDE_KNOWN_VENDOR_MODEL_IDS,
   CLAUDE_TIER_MODEL_IDS,
 } from "../core/models/catalog.ts";
+import { detectModelMapDrift } from "../core/models/model-map-drift.ts";
 import { ModelProfile, ModelTier } from "../core/schemas/model-profile.ts";
 import {
   detectDuplicateTaskIds,
@@ -318,6 +319,13 @@ async function checkAgentProfiles(
     // compare against the bundled catalog, never the network.
     if (parsed.data.name === "claude-code") {
       const knownVendorIds = new Set(CLAUDE_KNOWN_VENDOR_MODEL_IDS);
+      // The MODEL_MAP_STALE *condition* is owned by detectModelMapDrift so
+      // `adapter upgrade --write`'s remaining-advisory hint can never disagree
+      // with doctor about whether a profile is stale. The message text stays
+      // here (doctor's full remediation differs from the upgrade hint).
+      const staleByTier = new Map(
+        detectModelMapDrift(parsed.data.model_map).map((d) => [d.tier, d]),
+      );
       for (const tier of knownTiers) {
         const id = parsed.data.model_map[tier];
         if (!id) continue; // absence already reported as MISSING_MODEL_TIER
@@ -330,7 +338,7 @@ async function checkAgentProfiles(
             severity: "warning",
             message: `Agent "${parsed.data.name}" model_map.${tier} is "${id}", which is not in the bundled Claude catalog (known: ${CLAUDE_KNOWN_VENDOR_MODEL_IDS.join(", ")}). Check for a typo, or a model id code-pact does not track yet.`,
           });
-        } else if (id !== CLAUDE_TIER_MODEL_IDS[tier]) {
+        } else if (staleByTier.has(tier)) {
           // Known but not the current catalog default — i.e. the profile was
           // generated before a model bump. Not invalid: a deliberate pin is
           // fine. Surface it so a forgotten default does not silently rot.

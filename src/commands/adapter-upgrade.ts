@@ -5,7 +5,10 @@ import { AgentProfile } from "../core/schemas/agent-profile.ts";
 import { ModelProfile } from "../core/schemas/model-profile.ts";
 import { adapterRegistry } from "../core/adapters/index.ts";
 import { isSupportedAgent } from "../core/agents.ts";
-import { resolveAgentProfilePath } from "../core/agent-profile-path.ts";
+import {
+  resolveAgentProfilePath,
+  resolveAgentProfileRel,
+} from "../core/agent-profile-path.ts";
 import type { DesiredAdapterFileRole } from "../core/adapters/types.ts";
 import {
   assertSafeRelativePath,
@@ -33,6 +36,10 @@ import type {
 } from "../core/schemas/adapter-manifest.ts";
 import { atomicWriteText } from "../io/atomic-text.ts";
 import { readPackageVersion } from "../lib/package-version.ts";
+import {
+  detectModelMapDrift,
+  type ModelMapDrift,
+} from "../core/models/model-map-drift.ts";
 import type { Locale } from "../i18n/index.ts";
 
 // ---------------------------------------------------------------------------
@@ -423,4 +430,32 @@ export async function runAdapterUpgrade(
     clean,
     plan,
   };
+}
+
+export type AgentModelMapDrift = {
+  /** Project-relative (under `.code-pact/`) path of the agent profile read. */
+  profileRel: string;
+  drift: ModelMapDrift[];
+};
+
+/**
+ * Detect MODEL_MAP_STALE drift for an agent's `model_map`, for the
+ * `adapter upgrade --write` remaining-advisory hint. `adapter upgrade` never
+ * rewrites `model_map` (a deliberate pin may be intentional), so a stale entry
+ * survives a `--write`; this lets the CLI tell the user *why* an advisory
+ * remained rather than leaving them to re-run `doctor` to find out.
+ *
+ * Scoped to claude-code — the only catalog-backed agent — so it returns an
+ * empty `drift` for any other agent. Reads the profile fresh from disk (after
+ * the write), reusing the shared {@link detectModelMapDrift} condition so the
+ * hint can never disagree with doctor's `MODEL_MAP_STALE`.
+ */
+export async function detectAgentModelMapDrift(
+  cwd: string,
+  agentName: string,
+): Promise<AgentModelMapDrift> {
+  const profileRel = await resolveAgentProfileRel(cwd, agentName);
+  if (agentName !== "claude-code") return { profileRel, drift: [] };
+  const profile = await loadAgentProfile(cwd, agentName);
+  return { profileRel, drift: detectModelMapDrift(profile.model_map) };
 }
