@@ -556,6 +556,24 @@ async function cmdTaskContext(
         data.context_pack_bytes = pack.totalBytes;
         data.sections = pack.sections;
         data.excluded = pack.excluded;
+        // P49 (Context Fit, layer c) — additive byte metrics. `final_bytes`
+        // equals total_bytes == context_pack_bytes; `budget_bytes` is emitted
+        // only when a budget was applied (--budget-bytes / --context-budget);
+        // `minimum_achievable_bytes` is the same floor CONTEXT_OVER_BUDGET
+        // reports. Byte-based and deterministic — no tokenizer / model / network.
+        const em = pack.explainMetrics;
+        if (em) {
+          data.natural_bytes = em.naturalBytes;
+          data.final_bytes = em.finalBytes;
+          if (em.budgetBytes !== undefined) data.budget_bytes = em.budgetBytes;
+          data.saved_bytes = em.savedBytes;
+          data.saved_ratio = em.savedRatio;
+          data.minimum_achievable_bytes = em.minimumAchievableBytes;
+          data.elided_sections = em.elidedSections.map((e) => ({
+            name: e.name,
+            bytes: e.bytes,
+          }));
+        }
       }
       process.stdout.write(`${JSON.stringify({ ok: true, data })}\n`);
     } else if (explain) {
