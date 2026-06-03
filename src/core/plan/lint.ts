@@ -32,6 +32,9 @@ import {
 import { parseFrontMatter } from "../pack/front-matter.ts";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { parse as parseYaml } from "yaml";
+import { Project } from "../schemas/project.ts";
+import { detectContextFitAdvisories } from "../context-fit/advisories.ts";
 import type { PhaseEntry, PlanState } from "./state.ts";
 import { collectPlanArtifacts } from "./state.ts";
 import type { PlanIssue } from "./shared.ts";
@@ -59,9 +62,11 @@ export type LintOptions = {
   /**
    * When true, runs opt-in quality/readiness advisories (WEAK_DOD,
    * PLACEHOLDER_VERIFICATION, TASK_DECISION_UNRESOLVED, PHASE_CONFIDENCE_LOW,
-   * TASK_DESCRIPTION_MISSING). Off by default so the base lint stays lean;
-   * the P31 advisories are also `affects_exit: false`, so they never fail
-   * `--strict` even when this is on.
+   * TASK_DESCRIPTION_MISSING, and the P50 Context Fit advisories
+   * TASK_CONTEXT_PACK_LARGE, TASK_CONTEXT_BUDGET_UNACHIEVABLE,
+   * TASK_DECLARED_DECISION_LARGE, TASK_READS_MATCH_TOO_MANY). Off by default so
+   * the base lint stays lean; all of these advisories are `affects_exit:
+   * false`, so they never fail `--strict` even when this is on.
    */
   includeQuality?: boolean;
 };
@@ -144,9 +149,34 @@ export async function runLint(opts: LintOptions): Promise<LintResult> {
     issues.push(...(await detectAdrCommitmentsEmpty(opts.cwd, phases)));
     issues.push(...detectLowConfidencePhase(phases));
     issues.push(...detectMissingTaskDescription(phases));
+    // P50 — Context Fit advisories (layer d). All `affects_exit: false`; they
+    // reuse the P49 explain metrics (natural / minimum-achievable floor) and
+    // the P48 budget mapping, read decision files, and expand reads globs —
+    // local and deterministic, no network/model/tokenizer. The pack-size
+    // advisories need an agent name for the build, resolved best-effort from
+    // project.yaml's default_agent.
+    const agentName = await resolveDefaultAgent(opts.cwd);
+    issues.push(
+      ...(await detectContextFitAdvisories({ cwd: opts.cwd, phases, agentName })),
+    );
   }
 
   return { issues, skippedChecks, includeQuality };
+}
+
+/**
+ * Best-effort resolution of the project's default agent name, used only by the
+ * P50 pack-size advisories to build a task's context pack. Returns undefined
+ * when project.yaml is absent or unparseable — the advisory pass then skips the
+ * pack-size advisories rather than failing the lint.
+ */
+async function resolveDefaultAgent(cwd: string): Promise<string | undefined> {
+  try {
+    const raw = await readFile(join(cwd, ".code-pact", "project.yaml"), "utf8");
+    return Project.parse(parseYaml(raw) as unknown).default_agent;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Quality heuristic: DoD bullets that look unfinished. */

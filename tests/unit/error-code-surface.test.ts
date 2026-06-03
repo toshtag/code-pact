@@ -107,6 +107,11 @@ const KNOWN_CODES: Record<string, "public" | "plan" | "doctor" | "adapter" | "in
   // P43 — docs-drift guard: a not-done phase writing public docs with no doc
   // check in verification (affects_exit: false, --include-quality).
   PHASE_DOCS_WRITE_NO_DOC_CHECK: "plan",
+  // P50 — Context Fit advisories (affects_exit: false, --include-quality).
+  TASK_CONTEXT_PACK_LARGE: "plan",
+  TASK_CONTEXT_BUDGET_UNACHIEVABLE: "plan",
+  TASK_DECLARED_DECISION_LARGE: "plan",
+  TASK_READS_MATCH_TOO_MANY: "plan",
 
   // Plan diagnostics added in P10 — Task Readiness Schema. All emitted
   // by `plan lint` against the new optional task fields declared in
