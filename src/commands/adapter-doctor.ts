@@ -13,11 +13,13 @@ import {
   readManifest,
 } from "../core/adapters/manifest.ts";
 import { classifyFileState } from "../core/adapters/file-state.ts";
+import { dedupeDesiredFiles } from "../core/adapters/desired.ts";
 import { readPackageVersion } from "../lib/package-version.ts";
 import type {
   AdapterManifest,
   ProfileFingerprint,
 } from "../core/schemas/adapter-manifest.ts";
+import type { DesiredAdapterFile } from "../core/adapters/types.ts";
 import type { Locale } from "../i18n/index.ts";
 
 // ---------------------------------------------------------------------------
@@ -213,6 +215,61 @@ function detectContractDrift(
 }
 
 // ---------------------------------------------------------------------------
+// Issue #340: stamp-only generator_version lag
+// ---------------------------------------------------------------------------
+
+/**
+ * True when the manifest's recorded file set is byte-identical to what the
+ * generator would produce right now — i.e. a `generator_version` mismatch is a
+ * pure version-stamp lag, not real adapter-content drift.
+ *
+ * The comparison is intentionally narrow (Issue #340): it looks ONLY at the
+ * desired file content and path set, never at `generator_version` /
+ * `generated_at` (the version stamp is exactly what we are trying to discount).
+ *
+ *  - Path sets must match exactly. A desired file the manifest never recorded,
+ *    or a manifest path the generator no longer produces, both count as a
+ *    mismatch — these are the new-path / orphan-path cases that the manifest-
+ *    iterating file-level checks below would otherwise miss.
+ *  - Every desired file's content hash must equal the manifest entry's sha256
+ *    at the same path.
+ *
+ * `desiredFiles` is run through `dedupeDesiredFiles` first, mirroring the
+ * install/upgrade engines, so the path set we compare is the same converged
+ * set those engines would write — not the raw generator output.
+ *
+ * Returns `false` (conservative: keep the warning) if dedup throws, so a
+ * generator regression that can't even produce a clean desired set never gets
+ * silently waved through as "equivalent".
+ */
+function desiredEquivalentToManifest(
+  manifest: AdapterManifest,
+  desiredFiles: readonly DesiredAdapterFile[],
+): boolean {
+  let deduped: DesiredAdapterFile[];
+  try {
+    deduped = dedupeDesiredFiles(desiredFiles);
+  } catch {
+    return false;
+  }
+
+  if (deduped.length !== manifest.files.length) return false;
+
+  const manifestHashByPath = new Map(
+    manifest.files.map((f) => [f.path, f.sha256]),
+  );
+  if (manifestHashByPath.size !== manifest.files.length) return false; // dup paths
+
+  for (const desired of deduped) {
+    const manifestHash = manifestHashByPath.get(desired.path);
+    if (manifestHash === undefined) return false; // desired path absent from manifest
+    if (computeContentHash(desired.content) !== manifestHash) return false;
+  }
+
+  return true;
+}
+
+// ---------------------------------------------------------------------------
 // Per-agent inspection (exported so the global doctor can reuse it)
 // ---------------------------------------------------------------------------
 
@@ -266,15 +323,13 @@ export async function inspectAgent(
   // ---- Manifest present: version + schema + fingerprint drift ----
   const descriptor = adapterRegistry[agentName];
 
-  if (manifest.generator_version !== packageVersion) {
-    issues.push({
-      code: "ADAPTER_GENERATOR_STALE",
-      severity: "warning",
-      message: `Manifest generator_version is "${manifest.generator_version}" but the current code-pact version is "${packageVersion}".`,
-      agent: agentName,
-      path: manifestPath(cwd, agentName),
-    });
-  }
+  // ADAPTER_GENERATOR_STALE (Issue #340) is decided AFTER desired files are
+  // generated, inside the `profile` block below — a version-stamp mismatch is
+  // only worth reporting when the desired adapter output actually differs from
+  // the manifest. The flag is hoisted here so the version check reads in the
+  // same place as the schema/fingerprint checks; it is resolved once we know
+  // whether the desired output is byte-identical (stamp-only lag → silent).
+  const versionStale = manifest.generator_version !== packageVersion;
 
   if (manifest.adapter_schema_version < descriptor.adapterSchemaVersion) {
     issues.push({
@@ -310,6 +365,22 @@ export async function inspectAgent(
       locale,
       modelVersion: profile.model_version,
     });
+
+    // Issue #340: a generator_version mismatch only earns ADAPTER_GENERATOR_STALE
+    // when the desired output is NOT byte-identical to the manifest. A pure
+    // version-stamp lag (patch bump that changes no managed file) stays silent —
+    // running `adapter upgrade --write` would only re-stamp generator_version /
+    // generated_at, which is not drift worth nagging about.
+    if (versionStale && !desiredEquivalentToManifest(manifest, desiredFiles)) {
+      issues.push({
+        code: "ADAPTER_GENERATOR_STALE",
+        severity: "warning",
+        message: `Manifest generator_version is "${manifest.generator_version}" but the current code-pact version is "${packageVersion}", and the generated adapter output no longer matches the manifest. Run "adapter upgrade ${agentName} --write".`,
+        agent: agentName,
+        path: manifestPath(cwd, agentName),
+      });
+    }
+
     const desiredByPath = new Map(desiredFiles.map((f) => [f.path, f]));
 
     for (const entry of manifest.files) {
@@ -393,6 +464,17 @@ export async function inspectAgent(
         });
       }
     }
+  } else if (versionStale) {
+    // No agent profile → the generator cannot produce desired files, so we
+    // cannot prove the output is byte-identical. Stay conservative (Issue #340)
+    // and keep the legacy version-stamp warning rather than silently suppress.
+    issues.push({
+      code: "ADAPTER_GENERATOR_STALE",
+      severity: "warning",
+      message: `Manifest generator_version is "${manifest.generator_version}" but the current code-pact version is "${packageVersion}".`,
+      agent: agentName,
+      path: manifestPath(cwd, agentName),
+    });
   }
 
   return issues;
