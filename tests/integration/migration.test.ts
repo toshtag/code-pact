@@ -321,13 +321,31 @@ describe("migration: v0.8-era project (mixed events + historical tasks)", () => 
 // v0.9-era shape: manifest exists, generator_version is stale
 // ---------------------------------------------------------------------------
 //
-// After upgrading from v0.9.x to v1.0.0, every existing manifest on disk
-// will carry a generator_version like "0.9.0-alpha.0" while the running
-// package is "1.0.0". This must surface as ADAPTER_GENERATOR_STALE
-// (warning) — not as an error, not silently.
+// After upgrading from v0.9.x to a newer release, every existing manifest on
+// disk carries a generator_version like "0.8.0-alpha.0" while the running
+// package is newer.
+//
+// Issue #340 (v1.30.1): a stale generator_version is NOT, on its own, a reason
+// to nag. ADAPTER_GENERATOR_STALE now fires only when the current desired
+// adapter output also differs from the manifest. A pure version-stamp lag —
+// the generated files are byte-identical to what the current generator would
+// produce — stays silent (running `adapter upgrade --write` would only
+// re-stamp generator_version / generated_at). When the desired output also
+// moved on, the warning still fires. Neither case is ever an error.
 
 describe("migration: v0.9-era project (manifest with stale generator_version)", () => {
-  async function buildV09StaleProject(prefix: string): Promise<{
+  // Builds a project whose manifest carries a pre-release generator_version.
+  //
+  //  - mutateOutput=false (default): only the manifest stamp lags; the managed
+  //    files on disk and in the manifest stay byte-identical to the current
+  //    generator output. This is the Issue #340 stamp-only-lag case.
+  //  - mutateOutput=true: in addition to the stale stamp, one managed file's
+  //    recorded hash is broken so the desired output provably differs from the
+  //    manifest, exercising the path where ADAPTER_GENERATOR_STALE must fire.
+  async function buildV09StaleProject(
+    prefix: string,
+    opts: { mutateOutput?: boolean } = {},
+  ): Promise<{
     project: Project;
     manifestPath: string;
     originalVersion: string;
@@ -362,13 +380,40 @@ describe("migration: v0.9-era project (manifest with stale generator_version)", 
     const manifest = parseYaml(manifestText) as Record<string, unknown>;
     const originalVersion = manifest.generator_version as string;
     manifest.generator_version = "0.8.0-alpha.0";
+    if (opts.mutateOutput) {
+      // Break one recorded hash so the desired output no longer matches the
+      // manifest — turning the stamp-only lag into a real content-drift case.
+      const files = manifest.files as { path: string; sha256: string }[];
+      const claudeMd = files.find((f) => f.path === "CLAUDE.md");
+      if (claudeMd === undefined) throw new Error("expected CLAUDE.md in manifest");
+      claudeMd.sha256 = "a".repeat(64);
+    }
     await writeFile(manifestPath, stringifyYaml(manifest), "utf8");
 
     return { project: p, manifestPath, originalVersion };
   }
 
-  it("adapter doctor surfaces ADAPTER_GENERATOR_STALE without erroring", async () => {
+  it("adapter doctor stays silent on stamp-only lag (Issue #340) — no error, no STALE", async () => {
     const { project: p } = await buildV09StaleProject("v09-adapter-doctor");
+    const env = p.runJson<{
+      ok: boolean;
+      issues: { code: string; severity: string }[];
+    }>(["adapter", "doctor", "--json"]);
+    expect(env.ok).toBe(true);
+    if (env.ok) {
+      const errors = env.data.issues.filter((i) => i.severity === "error");
+      expect(errors).toEqual([]);
+      const codes = env.data.issues.map((i) => i.code);
+      // Stamp-only lag: the generated files are byte-identical to the current
+      // generator output, so the version mismatch alone must not warn.
+      expect(codes).not.toContain("ADAPTER_GENERATOR_STALE");
+    }
+  });
+
+  it("adapter doctor surfaces ADAPTER_GENERATOR_STALE when the desired output also drifted", async () => {
+    const { project: p } = await buildV09StaleProject("v09-adapter-doctor-drift", {
+      mutateOutput: true,
+    });
     const env = p.runJson<{
       ok: boolean;
       issues: { code: string; severity: string }[];
@@ -382,7 +427,7 @@ describe("migration: v0.9-era project (manifest with stale generator_version)", 
     }
   });
 
-  it("global doctor is manifest-aware: legacy ADAPTER_MISSING is gone, ADAPTER_GENERATOR_STALE surfaces", async () => {
+  it("global doctor is manifest-aware: legacy ADAPTER_MISSING is gone, stamp-only lag stays silent", async () => {
     const { project: p } = await buildV09StaleProject("v09-global-doctor");
     const env = p.runJson<{
       ok: boolean;
@@ -394,7 +439,8 @@ describe("migration: v0.9-era project (manifest with stale generator_version)", 
       expect(errors).toEqual([]);
       const codes = env.data.issues.map((i) => i.code);
       expect(codes).not.toContain("ADAPTER_MISSING");
-      expect(codes).toContain("ADAPTER_GENERATOR_STALE");
+      // Issue #340: byte-identical output → no nag on version stamp alone.
+      expect(codes).not.toContain("ADAPTER_GENERATOR_STALE");
     }
   });
 
@@ -424,7 +470,7 @@ describe("migration: v0.9-era project (manifest with stale generator_version)", 
     }
   });
 
-  it("validate exits 0 — STALE is a warning, not an error", async () => {
+  it("validate exits 0 — stamp-only lag does not even warn (Issue #340)", async () => {
     const { project: p } = await buildV09StaleProject("v09-validate");
     const res = p.run(["validate"]);
     expect(res.code).toBe(0);
