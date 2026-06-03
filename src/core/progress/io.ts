@@ -84,24 +84,15 @@ export async function loadMergedProgress(cwd: string): Promise<LoadedProgress> {
 }
 
 /**
- * Read and Zod-parse the legacy `progress.yaml`. Throws if the file is missing
- * or does not satisfy the schema; callers map errors to the appropriate CLI
- * error code.
- *
- * NOTE: this still reads ONLY `progress.yaml` — it does not yet merge the
- * per-event files. This is deliberate for Bucket B PR 1, which ships the
- * `loadMergedProgress` machinery additively with **no behaviour change**: a
- * repo with no event files (every repo today) is unaffected, and a repo that
- * somehow had event files would NOT get a half-merged view from one reader
- * while others stay legacy-only. PR 2 routes every progress reader (this one,
- * `verify`, `pack`, `doctor`/branch-drift) onto `loadMergedProgress` together,
- * in the same change that flips the writers to event files.
+ * Read the progress log — the merged view of legacy `progress.yaml` plus the
+ * per-event files (delegates to {@link loadMergedProgress}). Kept as the
+ * historical name so callers need no change. Throws on an unreadable /
+ * schema-invalid legacy file or event file; callers map errors to the
+ * appropriate CLI error code. (Bucket B PR 2 wires every progress reader onto
+ * the merged view together with the writer flip.)
  */
 export async function loadProgressLog(cwd: string): Promise<LoadedProgress> {
-  const path = progressPath(cwd);
-  const raw = await readFile(path, "utf8");
-  const log = ProgressLog.parse(parseYaml(raw) as unknown);
-  return { raw, log, path };
+  return loadMergedProgress(cwd);
 }
 
 /**
