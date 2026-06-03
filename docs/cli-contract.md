@@ -276,7 +276,7 @@ Issue-level codes emitted by `doctor` / `validate` for general project health.
 | `MODEL_ID_UNKNOWN` (v1.29+) | warning | The `claude-code` profile has a `model_map` value or `model_version` that is not present in the bundled Claude catalog — typically a typo, or a model id code-pact does not track yet. Offline check against `src/core/models/catalog.ts` |
 | `MODEL_MAP_STALE` (v1.29+) | warning | The `claude-code` profile's `model_map` points at a known Claude id that is no longer the current catalog default (e.g. the profile predates a model bump). A difference from the default, **not** an invalid value — to follow it, hand-edit the tier in the profile path doctor names (e.g. `.code-pact/agent-profiles/<agent>.yaml`) then run `adapter upgrade <agent> --write` to regenerate (note: `--model` re-pins `model_version` only, never `model_map`). Keep it if the pin is intentional, or silence via `.code-pact/doctor.yaml` → `disabled_checks: [MODEL_MAP_STALE]`. Scoped to `claude-code`; never fires for codex/other agents |
 | `BAK_FILE` | warning | A `.bak` file is present alongside a tracked file |
-| `LOCAL_NOT_GITIGNORED` | warning | `.local/` is not listed in `.gitignore` (the private planning-notes dir; `init` adds `/.local/` and `/.context/`, so this fires only if `.gitignore` was edited away) |
+| `LOCAL_NOT_GITIGNORED` | warning | `.local/` is not listed in `.gitignore` (the private planning-notes dir; `init` adds `/.local/` among its ignore entries, so this fires only if `.gitignore` was edited away) |
 | `BRIEF_MISSING` | warning | `design/brief.md` does not exist (gated on a real non-`TUTORIAL` phase existing — never fires on a fresh project; `brief.md` is optional and not created by `init`) |
 | `CONSTITUTION_PLACEHOLDER` | warning | `design/constitution.md` still contains the template edit hint (gated on a real non-`TUTORIAL` phase existing — never fires on a fresh project) |
 | `ADAPTER_STALE` | warning | An enabled agent profile has no `model_version` set |
@@ -1764,11 +1764,13 @@ advisory a gate.
 > workflow template lives there.
 
 **Precondition — the ledger *and* the project config must be in the CI checkout.**
-`init` does **not** add `.code-pact/` to `.gitignore` — it only ignores
-`/.local/` (private planning notes) and `/.context/` (regenerable context
-packs). So by default `.code-pact/` (the project config **and**
-`state/progress.yaml`) is committable, and in the normal case you commit it. Two
-things must hold for the gate:
+`init` ignores only the machine-local / derived subset of `.code-pact/` —
+`/.code-pact/locks/` (advisory locks), `/.code-pact/cache/` (reserved, derived),
+plus `/.local/` (private planning notes) and `/.context/` (regenerable context
+packs). So by default the **rest** of `.code-pact/` (the project config **and**
+`state/progress.yaml`) is committable, and in the normal case you commit it (see
+[§ State file write guarantees → *Committed vs ignored*](#state-file-write-guarantees)).
+Two things must hold for the gate:
 
 - **The ledger is tracked.** The gate reads the *committed* `progress.yaml`; if
   it is not git-tracked the check **silently skips** (it never cries wolf at a
@@ -2582,6 +2584,8 @@ This means that once a project is initialized with `ja-JP`, all subsequent comma
 | `<agent-profile>.context_dir/<task-id>.md` (context pack; default `.context/<agent>/<task-id>.md`) | `task prepare` (unless `--dry-run`), `pack` | One write per `task prepare` / `pack` invocation. `task context` does **not** write — it builds and returns/prints the same bytes. The file is regenerable; the default context dir is gitignored (`/.context/`), and a custom `context_dir` should likewise be treated as ignorable agent output. Not tracked in the adapter manifest |
 | `<adapter-owned files>` (e.g. `CLAUDE.md`, `.claude/skills/*.md`) | `adapter install`, `adapter upgrade --write` | Generated from the agent's `AdapterDescriptor`; manifest tracks every file. `adapter install` / `upgrade` may also create the agent profile's `context_dir` directory (a `mkdir`, not a file-content write), but the per-task packs inside it are written by `task prepare` / `pack` (row above), not the adapter |
 
+**Committed vs ignored.** Everything `code-pact` writes under `.code-pact/` is *shared, version-controlled* state **except** the machine-local / derived paths: `.code-pact/locks/` (advisory locks — pid/hostname) and `.code-pact/cache/` (reserved, derived). `init` adds exactly those two (plus `/.local/` and `/.context/`) to `.gitignore`; `project.yaml`, `agent-profiles/`, `model-profiles/`, `state/baselines/`, and the progress ledger are committed. **Adapter manifests are conditional:** commit `.code-pact/adapters/<agent>.manifest.yaml` **only together with** the adapter-owned generated files it lists (e.g. `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `.claude/skills/*`, `.cursor/**`) — a committed manifest whose managed files are absent fails `adapter doctor` with `ADAPTER_FILE_MISSING` on a clean checkout. A repo that treats adapter output as regenerated/ignored (as code-pact's own repo does) ignores the manifest too. (The progress ledger is moving from the single `state/progress.yaml` to per-event files under `state/events/` per the accepted collaboration-safe-state RFC; both forms are committable, but only the per-event form is merge-safe.)
+
 ### Atomic write strategy
 
 Every file-content write listed above goes through `atomicWriteText` (`src/io/atomic-text.ts`):
@@ -2594,7 +2598,7 @@ Every file-content write listed above goes through `atomicWriteText` (`src/io/at
 **What `code-pact` does NOT do** (intentional, documented limits):
 
 - **No `fsync`.** A power loss between the rename and the OS flushing the dirty buffers can lose the most recent write. This is acceptable for a local dev tool — the next run will recover from the prior state.
-- **No progress-log write lock.** Two concurrent `task complete` invocations against the same project may interleave appends. The progress log is append-only, so the worst case is event reordering, not corruption. Design mutations are different: v1.5+ serializes roadmap and phase YAML writes with the advisory lock documented below.
+- **No progress-log write lock — and the monolithic ledger is not concurrency-safe.** `task start` / `task complete` etc. currently *read the whole* `progress.yaml`, append in memory, and rewrite the file. Two concurrent invocations against the same project therefore race on the rewrite: last-writer-wins can **lose** an event (not merely reorder it), and a branch merge of the single shared array can conflict or silently drop events. In practice a single developer runs these serially, so the exposure is real but low. The accepted collaboration-safe-state RFC removes it by writing **one file per event** (conflict-free and lost-update-free by construction); until that lands, avoid concurrent `task complete` against the same project. Design mutations are different: v1.5+ serializes roadmap and phase YAML writes with the advisory lock documented below.
 - **No backup file** (`.bak`). The doctor `BAK_FILE` warning fires if a `.bak` file appears next to a tracked file — it's expected to be a leftover from manual edits, not code-pact output.
 
 ### Path safety
@@ -2666,7 +2670,7 @@ Automation (PID liveness check, age-based stale detection, a `--force-lock` flag
 
 **Relationship to atomic-text.** The lock is layered ON TOP of the existing atomic-write contract — it does not replace it. Atomic-text gives file-level durability (interrupted writes never leave a half-written file); the lock gives semantic guard against concurrent semantic mutations of the same project. Both are needed.
 
-**`progress.yaml` is intentionally NOT locked.** The append-only operational-log contract documented above (worst case is event reordering, not corruption) makes lock-free safe for `task complete` / `task start` / `task block` / `task resume`. Adding a lock to those high-frequency commands would have no integrity benefit and would add per-invocation acquisition overhead.
+**`progress.yaml` is intentionally NOT locked — at the cost of concurrency safety (a known limitation).** The lock-free choice keeps these high-frequency commands cheap, but the monolithic read-append-rewrite writer means two concurrent writers can lose an event (see *No progress-log write lock* above) — lock-free here is **not** the same as safe. The accepted collaboration-safe-state RFC makes lock-free *actually* safe by moving to per-event files: a new file per event needs no lock and cannot lose a concurrent write. A write lock on the monolithic file would only paper over the underlying data-model issue, so it is deliberately not added.
 
 ### Roadmap mutation policy (v1.5+ / P14)
 
@@ -2679,7 +2683,7 @@ Automation (PID liveness check, age-based stale detection, a `--force-lock` flag
 | `phase new` (TTY wizard) | yes | `runPhaseNew` → `createPhase` |
 | `phase import` | yes (per imported phase, after reserved-id preflight) | `runPhaseImport` → `createPhase` |
 | `task add` | no | Writes phase YAML only (`design/phases/<phase>.yaml`) |
-| `task complete` | no | Writes `progress.yaml` (append-only) |
+| `task complete` | no | Writes `progress.yaml` (append; lock-free — not concurrency-safe, see § State file write guarantees) |
 | `task finalize --write` | no | Writes phase YAML only (flips `tasks[].status`) |
 | `phase reconcile --write` | no | Writes phase YAML only (batch flip of `tasks[].status`) |
 | `task start` / `task block` / `task resume` / `task status` | no | Writes `progress.yaml` only, or read-only |

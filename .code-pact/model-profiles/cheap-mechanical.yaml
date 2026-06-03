@@ -1,0 +1,7 @@
+tier: cheap_mechanical
+purpose:
+  - docs
+  - formatting
+effort_levels:
+  - low
+supports_thinking: false
