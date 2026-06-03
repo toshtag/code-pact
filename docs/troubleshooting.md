@@ -23,6 +23,10 @@ When a command surfaces one of the diagnostic codes below, this page maps it to 
 | [`ADR_ACCEPTED_BODY_THIN`](#adr_accepted_body_thin-from-plan-lint---include-quality-v126) | An accepted ADR's body is an empty stub | Add the decision + rationale, or revert status to `proposed` |
 | [`ADR_COMMITMENTS_EMPTY`](#adr_commitments_empty-from-plan-lint---include-quality-v127) | An accepted ADR that resolves a gated task's gate records no implementation commitments | Add a `## Implementation commitments` checkbox list (warning only — never blocks) |
 | [`PHASE_DOCS_WRITE_NO_DOC_CHECK`](#phase_docs_write_no_doc_check-from-plan-lint---include-quality-v127) | A not-done phase writes public docs but runs no doc check | Add `pnpm check:docs` to the phase's verification.commands (warning only) |
+| [`TASK_CONTEXT_PACK_LARGE`](#context-fit-advisories-from-plan-lint---include-quality-v130) | Natural context pack > balanced budget (60000 bytes) | Consider a wider profile or review task scope (advisory only) |
+| [`TASK_CONTEXT_BUDGET_UNACHIEVABLE`](#context-fit-advisories-from-plan-lint---include-quality-v130) | Recommended budget below the achievable floor | Use a wider profile or split the task (advisory only) |
+| [`TASK_DECLARED_DECISION_LARGE`](#context-fit-advisories-from-plan-lint---include-quality-v130) | A `decision_refs` body > tight budget (30000 bytes) | Split follow-up tasks or confirm scope (advisory only) |
+| [`TASK_READS_MATCH_TOO_MANY`](#context-fit-advisories-from-plan-lint---include-quality-v130) | A `reads` glob matches > 100 files | Narrow the glob if the task can be scoped (advisory only) |
 
 ## `MANIFEST_NOT_FOUND` from `adapter upgrade --check` / `--write`
 
@@ -331,3 +335,19 @@ code-pact plan lint --include-quality --json
 ```
 
 Recovery: add a doc check (`pnpm check:docs`, or `check:doc-links` / `check:doc-invariants`) to the phase's `verification.commands` so the doc edits are verified; or, if the declared doc write is stale, remove it from the task's `writes`.
+
+## Context Fit advisories from `plan lint --include-quality` (v1.30+)
+
+The four Context Fit advisories (P50, Context Fit layer d) flag likely **context-size risk** before a task runs. They appear **only** under `--include-quality`, are **absent** without it, and every one is `affects_exit: false` — they never change the exit code, even under `--strict`. Thresholds are deterministic byte/count values; the pass is local and deterministic (no model / tokenizer / summarization / compression / network), changes no context pack content, and applies no budget automatically.
+
+These are **readiness signals, not correctness failures**. A large context pack, a large declared decision, or a broad `reads` glob can all be legitimate — the advisories help you notice size risk early, not block work or force premature micro-optimization.
+
+```sh
+code-pact plan lint --include-quality --json
+# → issues[] entries (all affects_exit: false)
+```
+
+- **`TASK_CONTEXT_PACK_LARGE`** — the task's **natural** (pre-elision) context pack exceeds the `balanced` budget (60000 bytes). `details.natural_bytes` / `details.threshold_bytes` / `details.recommended_profile` (`"wide"`). Reuses the P49 `natural_bytes` explain metric. Recovery (optional): pass `--context-budget wide` when building the pack, or split the task if its scope is genuinely too broad. Needs a resolvable project `default_agent` for the pack build; skipped otherwise.
+- **`TASK_CONTEXT_BUDGET_UNACHIEVABLE`** — the deterministically recommended budget (P48 mapping; the default agent's same-name `context_budget` override when available, else the built-in fallback — the same byte value `recommend` surfaces) cannot fit even after maximal eligible elision: `minimum_achievable_bytes > budget_bytes`. `details.profile` / `details.budget_bytes` / `details.minimum_achievable_bytes` (the **same floor `CONTEXT_OVER_BUDGET` reports**). Recovery (optional): use a wider profile or split the task. It does not change the recommendation or fail lint. Needs a resolvable `default_agent`; skipped otherwise.
+- **`TASK_DECLARED_DECISION_LARGE`** — a `decision_refs` entry points to a decision body larger than the `tight` budget (30000 bytes), large enough to dominate a tight pack. `details.path` / `details.bytes` / `details.threshold_bytes`. This is **not** an ADR-quality error — do not delete the ADR; consider splitting follow-up tasks, using a wider profile, or confirming the task scope justifies the large reference. Unsafe/missing refs are reported by `TASK_DECISION_REF_UNSAFE_PATH` / `TASK_DECISION_REF_NOT_FOUND` instead.
+- **`TASK_READS_MATCH_TOO_MANY`** — a `reads` glob matches more than 100 files and may inflate context planning cost. `details.glob` / `details.match_count` / `details.threshold_count`. Recovery (optional): narrow the glob if the task can be scoped more precisely. Broad reads can be valid for cross-cutting refactors.

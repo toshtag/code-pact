@@ -134,3 +134,6 @@ phases:
   - id: P49
     path: design/phases/P49-context-fit-explain-metrics.yaml
     weight: 5
+  - id: P50
+    path: design/phases/P50-context-fit-advisories.yaml
+    weight: 5

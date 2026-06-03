@@ -809,3 +809,74 @@ ${writes.length > 0 ? `    writes:\n${writes.map((w) => `      - ${w}`).join("\n
     expect(fired(await runLint({ cwd }))).toBe(false);
   });
 });
+
+// P50 — Context Fit advisories gate. Uses TASK_DECLARED_DECISION_LARGE because
+// it does not need an agent/pack build, so the gating contract is exercised
+// without coupling to context-pack byte sizes (those are covered in
+// tests/unit/core/context-fit/advisories.test.ts).
+describe("runLint — P50 context-fit advisories (--include-quality gate)", () => {
+  const P50_CODES = new Set([
+    "TASK_CONTEXT_PACK_LARGE",
+    "TASK_CONTEXT_BUDGET_UNACHIEVABLE",
+    "TASK_DECLARED_DECISION_LARGE",
+    "TASK_READS_MATCH_TOO_MANY",
+  ]);
+
+  async function writeBigDecisionPlan(): Promise<void> {
+    await writeRoadmap(
+      `phases:\n  - id: P1\n    path: design/phases/P1.yaml\n    weight: 10\n`,
+    );
+    await writePhase(
+      "P1.yaml",
+      `id: P1
+name: P1
+weight: 10
+confidence: medium
+risk: low
+status: planned
+objective: An objective long enough
+definition_of_done:
+  - A definition of done that is long enough
+verification:
+  commands:
+    - pnpm test
+tasks:
+  - id: P1-T1
+    type: feature
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: planned
+    decision_refs:
+      - design/decisions/big.md
+`,
+    );
+    await mkdir(join(cwd, "design", "decisions"), { recursive: true });
+    const header = "# big\n\n**Status:** accepted\n\n";
+    await writeFile(
+      join(cwd, "design", "decisions", "big.md"),
+      header + "x".repeat(42150 - header.length),
+      "utf8",
+    );
+  }
+
+  it("emits no P50 advisory without --include-quality", async () => {
+    await writeBigDecisionPlan();
+    const result = await runLint({ cwd });
+    expect(result.issues.filter((i) => P50_CODES.has(i.code))).toEqual([]);
+  });
+
+  it("emits a P50 advisory under --include-quality, always affects_exit:false", async () => {
+    await writeBigDecisionPlan();
+    const result = await runLint({ cwd, includeQuality: true });
+    const p50 = result.issues.filter((i) => P50_CODES.has(i.code));
+    expect(p50.length).toBeGreaterThan(0);
+    for (const issue of p50) expect(issue.affects_exit).toBe(false);
+    expect(
+      p50.some((i) => i.code === "TASK_DECLARED_DECISION_LARGE"),
+    ).toBe(true);
+  });
+});

@@ -87,7 +87,14 @@ type LintJson = {
     include_quality: boolean;
     strict: boolean;
     skipped_checks: string[];
-    issues: Array<{ code: string; severity: string; message: string }>;
+    advisories?: number;
+    issues: Array<{
+      code: string;
+      severity: string;
+      message: string;
+      affects_exit?: boolean;
+      details?: Record<string, unknown>;
+    }>;
   };
 };
 
@@ -232,6 +239,79 @@ tasks:
       parsed.data?.issues.some((i) => i.code === "ADR_COMMITMENTS_EMPTY"),
     ).toBe(true);
     // ...but it never promotes to a failure, even under --strict.
+    expect(res.code).toBe(0);
+    expect(parsed.ok).toBe(true);
+  });
+});
+
+describe("plan lint --include-quality — P50 context-fit advisories", () => {
+  async function writeBigDecisionPlan(): Promise<void> {
+    await writeRoadmap(
+      `phases:\n  - id: P1\n    path: design/phases/P1.yaml\n    weight: 10\n`,
+    );
+    await writePhase(
+      "P1.yaml",
+      `id: P1
+name: P1
+weight: 10
+confidence: medium
+risk: low
+status: planned
+objective: An objective long enough
+definition_of_done:
+  - A definition of done long enough to read
+verification:
+  commands:
+    - pnpm test
+tasks:
+  - id: P1-T1
+    type: feature
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: planned
+    decision_refs:
+      - design/decisions/big.md
+`,
+    );
+    await mkdir(join(tmpDir, "design", "decisions"), { recursive: true });
+    const header = "# big\n\n**Status:** accepted\n\n";
+    await writeFile(
+      join(tmpDir, "design", "decisions", "big.md"),
+      header + "x".repeat(42150 - header.length),
+      "utf8",
+    );
+  }
+
+  it("emits no P50 advisory without --include-quality", async () => {
+    await writeBigDecisionPlan();
+    const res = run(["plan", "lint", "--json"]);
+    expect(res.code).toBe(0);
+    const parsed = parseLint(res.stdout);
+    expect(
+      parsed.data?.issues.some((i) => i.code === "TASK_DECLARED_DECISION_LARGE"),
+    ).toBe(false);
+  });
+
+  it("emits the advisory under --include-quality and keeps exit 0 even with --strict", async () => {
+    await writeBigDecisionPlan();
+    const res = run(["plan", "lint", "--include-quality", "--strict", "--json"]);
+    const parsed = parseLint(res.stdout);
+
+    const fired = parsed.data?.issues.find(
+      (i) => i.code === "TASK_DECLARED_DECISION_LARGE",
+    );
+    expect(fired).toBeDefined();
+    expect(fired?.affects_exit).toBe(false);
+    expect(fired?.details).toMatchObject({
+      path: "design/decisions/big.md",
+      bytes: 42150,
+      threshold_bytes: 30000,
+    });
+    // affects_exit:false → --strict never promotes it to a failure.
     expect(res.code).toBe(0);
     expect(parsed.ok).toBe(true);
   });
