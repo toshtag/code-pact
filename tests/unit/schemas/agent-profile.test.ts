@@ -69,3 +69,101 @@ describe("AgentProfile", () => {
     expect(a.context_dir).toBe(".context/cursor");
   });
 });
+
+// P47 (Context Fit, layer a) — optional `context_budget` block.
+describe("AgentProfile.context_budget (P47)", () => {
+  it("a missing context_budget block is valid (backward compatible)", () => {
+    const a = AgentProfile.parse(VALID);
+    expect(a.context_budget).toBeUndefined();
+  });
+
+  it("accepts the three standard profiles", () => {
+    const a = AgentProfile.parse({
+      ...VALID,
+      context_budget: {
+        profiles: {
+          tight: { max_bytes: 30000 },
+          balanced: { max_bytes: 60000 },
+          wide: { max_bytes: 120000 },
+        },
+      },
+    });
+    expect(a.context_budget?.profiles.balanced?.max_bytes).toBe(60000);
+  });
+
+  it("accepts a custom profile name", () => {
+    const a = AgentProfile.parse({
+      ...VALID,
+      context_budget: { profiles: { review_pack: { max_bytes: 45000 } } },
+    });
+    expect(a.context_budget?.profiles.review_pack?.max_bytes).toBe(45000);
+  });
+
+  it("accepts a default_profile that references a declared profile", () => {
+    const a = AgentProfile.parse({
+      ...VALID,
+      context_budget: {
+        default_profile: "balanced",
+        profiles: { balanced: { max_bytes: 60000 } },
+      },
+    });
+    expect(a.context_budget?.default_profile).toBe("balanced");
+  });
+
+  it("rejects max_bytes: 0", () => {
+    expect(() =>
+      AgentProfile.parse({
+        ...VALID,
+        context_budget: { profiles: { tight: { max_bytes: 0 } } },
+      }),
+    ).toThrow();
+  });
+
+  it("rejects a negative max_bytes", () => {
+    expect(() =>
+      AgentProfile.parse({
+        ...VALID,
+        context_budget: { profiles: { tight: { max_bytes: -1 } } },
+      }),
+    ).toThrow();
+  });
+
+  it("rejects a non-integer max_bytes", () => {
+    expect(() =>
+      AgentProfile.parse({
+        ...VALID,
+        context_budget: { profiles: { tight: { max_bytes: 30000.5 } } },
+      }),
+    ).toThrow();
+  });
+
+  it("rejects an empty profiles object", () => {
+    expect(() =>
+      AgentProfile.parse({ ...VALID, context_budget: { profiles: {} } }),
+    ).toThrow();
+  });
+
+  it("rejects a dangling default_profile (not in profiles)", () => {
+    expect(() =>
+      AgentProfile.parse({
+        ...VALID,
+        context_budget: {
+          default_profile: "wide",
+          profiles: { tight: { max_bytes: 30000 } },
+        },
+      }),
+    ).toThrow();
+  });
+
+  it.each([["", "empty"], ["has space", "space"], ["a/b", "slash"], ["a.b", "dot"]])(
+    "rejects an unsafe profile name %j (%s)",
+    (name) => {
+      expect(() =>
+        AgentProfile.parse({
+          ...VALID,
+          context_budget: { profiles: { [name]: { max_bytes: 30000 } } },
+        }),
+      ).toThrow();
+    },
+  );
+});
