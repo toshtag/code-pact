@@ -235,7 +235,9 @@ export async function detectContextFitAdvisories(
       }
 
       // TASK_CONTEXT_BUDGET_UNACHIEVABLE: compare the deterministically
-      // recommended budget (P48 mapping; built-in fallback bytes) against the
+      // recommended budget (P48 mapping; the default-agent same-name
+      // context_budget override when available, else the built-in fallback —
+      // the same byte value recommend / task prepare surface) against the
       // shared minimum-achievable floor. Fires only when even maximal eligible
       // elision cannot reach the recommended budget.
       const recommendation = recommendContextFit({
