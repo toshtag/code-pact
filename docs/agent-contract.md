@@ -93,7 +93,12 @@ For the same git SHA and the same inputs:
   `tests/integration/pack-byte-identical.test.ts`).
 - `recommend` produces a byte-identical JSON envelope.
 - `task context --explain --json` (v1.11+) attaches metadata but the
-  `content` string is byte-identical to non-explain mode.
+  `content` string is byte-identical to non-explain mode. The v1.30+ (P49)
+  Context Fit explain metrics it adds — `natural_bytes`, `final_bytes`,
+  `saved_bytes`, `saved_ratio`, `minimum_achievable_bytes`, `elided_sections`,
+  and `budget_bytes` (only when a budget was applied) — are byte-based and
+  deterministic (no tokenizer, summarization, model, or network), and
+  `minimum_achievable_bytes` is the same floor `CONTEXT_OVER_BUDGET` reports.
 - `task prepare` (v1.11+) writes the same context pack bytes that
   `task context` produces for the same task (`task context` builds and
   returns the content; `task prepare` and the low-level `pack` are the
