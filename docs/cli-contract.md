@@ -2362,7 +2362,7 @@ Appends a `resumed` event. Allowed only from `blocked` — any other current sta
 
 ## `recommend` (v0.8)
 
-`code-pact recommend --phase <id> --task <id> [--agent <name>] [--json]` returns a deterministic execution plan for a given task — model tier, effort, context profile, planning posture, escalation order, preflight commands, and a categorical budget profile — based on Task metadata (`type`, `ambiguity`, `risk`, `context_size`, `write_surface`, `verification_strength`, `expected_duration`, `requires_decision`).
+`code-pact recommend --phase <id> --task <id> [--agent <name>] [--json]` returns a deterministic execution plan for a given task — model tier, effort, context profile, planning posture, escalation order, preflight commands, a categorical budget profile, and (additively, P48) a recommended context budget profile (`contextFit`) — based on Task metadata (`type`, `ambiguity`, `risk`, `context_size`, `write_surface`, `verification_strength`, `expected_duration`, `requires_decision`).
 
 Since v1.11, `task prepare` is the primary per-task entry point for the agent-facing loop and embeds this recommendation in its response. Call `recommend` directly when you need to inspect the deterministic recommendation in isolation, debug recommendation inputs, or support an older/manual loop — then use its output to decide what to load, how hard to think, and what to verify before implementation. It is read-only and does not fetch or write the context pack.
 
@@ -2415,7 +2415,12 @@ All field names are camelCase. Enum / identifier values are snake_case where app
     "structuredReasons": [
       { "factor": "type", "value": "architecture", "effect": "tier=highest_reasoning" }
     ],
-    "lifecycleMode": "full_loop"
+    "lifecycleMode": "full_loop",
+    "contextFit": {
+      "recommendedProfile": "wide",
+      "recommendedBudgetBytes": 120000,
+      "reason": "context_size=large -> wide; bytes from built-in fallback"
+    }
   }
 }
 ```
@@ -2454,6 +2459,22 @@ The output is zod-validated before return. The contract uses strict mode at ever
 | Field | Type | Trigger |
 |---|---|---|
 | `lifecycleMode` | `full_loop` \| `record_only` \| `decision_loop` | The recommended loop for this task (advisory; code-pact's own loop behavior is unchanged). Deterministic switch: `decision_loop` when the task or its phase `requires_decision`; else `record_only` when `type ∈ {docs, test}` AND `ambiguity == low` AND `risk == low` AND `verification_strength == strong`; else `full_loop`. `record_only` means a lighter *loop* (implement, run verification, then `task record-done`), **not** lighter verification. |
+
+**P48 additive field (Context Fit, layer b):**
+
+| Field | Type | Trigger |
+|---|---|---|
+| `contextFit` | ContextFitRecommendation \| absent | A **recommended** standard context budget profile, derived deterministically from `context_size` / `ambiguity` / `write_surface`. **Optional and additive** — absent on `recommendation: null` early-return states and on existing V2 consumers. It is a *suggestion*, **not** auto-applied: re-sizing the pack stays explicit via [`--context-budget <profile>`](#--context-budget-profile-v130-p47). |
+
+`contextFit` is distinct from `budgetProfile`: `budgetProfile` is a categorical tool-call / context-file / verification magnitude, while `contextFit` names a byte-valued *budget* profile. Context Fit does not overload `budgetProfile`. No network, model, or tokenizer is consulted to compute it.
+
+**ContextFitRecommendation shape:**
+
+| Field | Type | Decision rule |
+|---|---|---|
+| `recommendedProfile` | `tight` \| `balanced` \| `wide` | A **closed enum** of the three standard names. `context_size == large` OR `ambiguity == high` OR `write_surface == high` → `wide`; else `context_size == medium` → `balanced`; else `tight`. `requires_decision` does **not** shrink it. Custom agent-profile profile names (a `--context-budget` resolution concern only) are **never** emitted here. |
+| `recommendedBudgetBytes` | positive integer | The profile's byte cap: an agent profile's same-named `context_budget.profiles[<profile>].max_bytes` **override** when present, else the built-in fallback (`tight` 30000, `balanced` 60000, `wide` 120000). |
+| `reason` | string | One line recording the driving signal and which byte source was used (e.g. `context_size=medium -> balanced; bytes from built-in fallback`). |
 
 **PreflightEntry shape:**
 

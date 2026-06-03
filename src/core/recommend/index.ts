@@ -13,6 +13,7 @@ import { isPlanningRequired, recommendAmbiguityAction } from "./planning.ts";
 import { recommendPreflight } from "./preflight.ts";
 import { recommendTier, type TierRecommendation } from "./tier.ts";
 import { recommendLifecycleMode } from "./lifecycle.ts";
+import { recommendContextFit } from "./context-fit.ts";
 
 export type ResolveRecommendationOptions = {
   phaseId: string;
@@ -132,6 +133,16 @@ export function resolveRecommendation(
     budgetProfile: recommendBudgetProfile(task),
     structuredReasons: buildStructuredReasons(task, rec.tier),
     lifecycleMode: recommendLifecycleMode(task, decisionContext),
+    // P48 — additive, recommendation-only context budget. Reuses the already-
+    // loaded agent profile's context_budget for the same-name byte override, so
+    // no extra I/O. Never auto-applied; surfaced for the agent to act on.
+    contextFit: recommendContextFit({
+      contextSize: task.context_size,
+      ambiguity: task.ambiguity,
+      writeSurface: task.write_surface,
+      requiresDecision: task.requires_decision,
+      agentContextBudgetProfiles: agentProfile.context_budget?.profiles,
+    }),
   };
 
   return RecommendResultV2.parse(result);

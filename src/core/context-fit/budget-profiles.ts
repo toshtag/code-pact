@@ -31,9 +31,31 @@ export const STANDARD_CONTEXT_BUDGET_PROFILES = {
 export type StandardContextBudgetProfile =
   keyof typeof STANDARD_CONTEXT_BUDGET_PROFILES;
 
-/** The standard profile names as an array, for help text and error messages. */
-export const STANDARD_CONTEXT_BUDGET_PROFILE_NAMES: readonly StandardContextBudgetProfile[] =
-  Object.keys(STANDARD_CONTEXT_BUDGET_PROFILES) as StandardContextBudgetProfile[];
+/**
+ * The standard profile names as a literal tuple, for help text, error messages,
+ * and — importantly — as the single source the recommend-result schema derives
+ * its `recommendedProfile` enum from (so the schema enum and the pure mapping
+ * helper that emits these names cannot silently diverge). Kept as a `[...] as
+ * const` tuple (not `Object.keys`, which would widen to `string[]` and drop the
+ * literal types `z.enum` needs).
+ */
+export const STANDARD_CONTEXT_BUDGET_PROFILE_NAMES = [
+  "tight",
+  "balanced",
+  "wide",
+] as const satisfies readonly StandardContextBudgetProfile[];
+
+// Exhaustiveness guard (compile-time only, zero runtime cost). `satisfies` above
+// already rejects a tuple entry that is not a profile name; this rejects the
+// other direction — a profile added to STANDARD_CONTEXT_BUDGET_PROFILES but not
+// to the tuple. Together they pin the tuple to be EXACTLY the object's keys, so
+// the schema enum derived from it can never silently under- or over-populate.
+type _AssertProfileNamesExhaustive = StandardContextBudgetProfile extends
+  (typeof STANDARD_CONTEXT_BUDGET_PROFILE_NAMES)[number]
+  ? true
+  : ["missing profile name in STANDARD_CONTEXT_BUDGET_PROFILE_NAMES"];
+const _profileNamesExhaustive: _AssertProfileNamesExhaustive = true;
+void _profileNamesExhaustive;
 
 /** Narrows an arbitrary string to one of the three standard profile names. */
 export function isStandardContextBudgetProfile(

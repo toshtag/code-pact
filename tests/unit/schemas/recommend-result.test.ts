@@ -8,6 +8,7 @@ import {
   EscalationStep,
   ContextProfile,
   VerificationProfile,
+  ContextFitRecommendation,
 } from "../../../src/core/schemas/recommend-result.ts";
 
 const VALID_PREFLIGHT: unknown = {
@@ -216,6 +217,90 @@ describe("StructuredReason — inner shape", () => {
 
   it("rejects empty factor", () => {
     expect(() => StructuredReason.parse({ ...(VALID_REASON as object), factor: "" })).toThrow();
+  });
+});
+
+const VALID_CONTEXT_FIT: unknown = {
+  recommendedProfile: "balanced",
+  recommendedBudgetBytes: 60000,
+  reason: "context_size=medium -> balanced; bytes from built-in fallback",
+};
+
+describe("RecommendResultV2 — optional contextFit (P48, additive)", () => {
+  it("accepts a result with NO contextFit (recommendation-null / legacy fixtures)", () => {
+    const r = RecommendResultV2.parse(VALID_RESULT);
+    expect(r.contextFit).toBeUndefined();
+  });
+
+  it("accepts a result WITH a valid contextFit", () => {
+    const r = RecommendResultV2.parse({
+      ...(VALID_RESULT as object),
+      contextFit: VALID_CONTEXT_FIT,
+    });
+    expect(r.contextFit?.recommendedProfile).toBe("balanced");
+    expect(r.contextFit?.recommendedBudgetBytes).toBe(60000);
+  });
+
+  it("rejects an invalid recommendedProfile (non-standard name)", () => {
+    expect(() =>
+      RecommendResultV2.parse({
+        ...(VALID_RESULT as object),
+        contextFit: { ...(VALID_CONTEXT_FIT as object), recommendedProfile: "surgical" },
+      }),
+    ).toThrow();
+  });
+
+  it("rejects a non-positive recommendedBudgetBytes", () => {
+    expect(() =>
+      RecommendResultV2.parse({
+        ...(VALID_RESULT as object),
+        contextFit: { ...(VALID_CONTEXT_FIT as object), recommendedBudgetBytes: 0 },
+      }),
+    ).toThrow();
+  });
+
+  it("rejects a non-integer recommendedBudgetBytes", () => {
+    expect(() =>
+      RecommendResultV2.parse({
+        ...(VALID_RESULT as object),
+        contextFit: { ...(VALID_CONTEXT_FIT as object), recommendedBudgetBytes: 12.5 },
+      }),
+    ).toThrow();
+  });
+
+  it("rejects an empty reason", () => {
+    expect(() =>
+      RecommendResultV2.parse({
+        ...(VALID_RESULT as object),
+        contextFit: { ...(VALID_CONTEXT_FIT as object), reason: "" },
+      }),
+    ).toThrow();
+  });
+
+  it("rejects an unknown field inside contextFit (strict)", () => {
+    expect(() =>
+      RecommendResultV2.parse({
+        ...(VALID_RESULT as object),
+        contextFit: { ...(VALID_CONTEXT_FIT as object), tokens: 1234 },
+      }),
+    ).toThrow();
+  });
+});
+
+describe("ContextFitRecommendation — inner shape", () => {
+  it("accepts a valid recommendation", () => {
+    const c = ContextFitRecommendation.parse(VALID_CONTEXT_FIT);
+    expect(c.recommendedProfile).toBe("balanced");
+  });
+
+  it("accepts all three standard profile names", () => {
+    for (const name of ["tight", "balanced", "wide"] as const) {
+      const c = ContextFitRecommendation.parse({
+        ...(VALID_CONTEXT_FIT as object),
+        recommendedProfile: name,
+      });
+      expect(c.recommendedProfile).toBe(name);
+    }
   });
 });
 

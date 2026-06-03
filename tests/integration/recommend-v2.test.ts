@@ -1,8 +1,13 @@
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { spawnSync } from "node:child_process";
+import { cpSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runRecommend, formatRecommend, type RecommendResult } from "../../src/commands/recommend.ts";
 import { RecommendResultV2 } from "../../src/core/schemas/recommend-result.ts";
+import { resolveRecommendation } from "../../src/core/recommend/index.ts";
+import { AgentProfile } from "../../src/core/schemas/agent-profile.ts";
+import { Task } from "../../src/core/schemas/task.ts";
 import { cliPath, ensureCliBuilt, repoRoot } from "../helpers/cli.ts";
 
 const fixtureDir = join(repoRoot, "tests", "fixtures", "project-a");
@@ -272,6 +277,128 @@ describe("recommend v0.8 — human formatter", () => {
   });
 });
 
+describe("recommend — P48 contextFit (additive)", () => {
+  it("runRecommend surfaces a contextFit for the P2-E1-T1 fixture (medium -> balanced, built-in fallback)", async () => {
+    const result = await runRecommend({
+      cwd: fixtureDir,
+      phaseId: "P2",
+      taskId: "P2-E1-T1",
+      agentName: "claude-code",
+    });
+    // context_size=medium, ambiguity=medium, write_surface=medium -> balanced.
+    expect(result.contextFit).toBeDefined();
+    expect(result.contextFit?.recommendedProfile).toBe("balanced");
+    expect(result.contextFit?.recommendedBudgetBytes).toBe(60000);
+    expect(result.contextFit?.reason).toContain("built-in fallback");
+  });
+
+  it("contextFit is distinct from the categorical budgetProfile (no overload)", async () => {
+    const result = await runRecommend({
+      cwd: fixtureDir,
+      phaseId: "P2",
+      taskId: "P2-E1-T1",
+      agentName: "claude-code",
+    });
+    // budgetProfile stays categorical and unchanged; contextFit is a separate,
+    // byte-valued recommendation.
+    expect(result.budgetProfile).toEqual({
+      toolCalls: "medium",
+      contextFiles: "several",
+      verificationCommands: "full",
+    });
+    expect(result.contextFit?.recommendedBudgetBytes).toBe(60000);
+  });
+
+  it("the human formatter includes one clear, suggestion-worded context fit line", async () => {
+    const result = await runRecommend({
+      cwd: fixtureDir,
+      phaseId: "P2",
+      taskId: "P2-E1-T1",
+      agentName: "claude-code",
+    });
+    const out = formatRecommend(result);
+    expect(out).toContain("Context fit:");
+    expect(out).toContain("recommended context budget balanced");
+    expect(out).toContain("(60000 bytes)");
+    // Must NOT imply automatic application.
+    expect(out).not.toContain("Using context budget");
+    expect(out).not.toContain("Applying");
+  });
+
+  it("--json carries contextFit through the CLI envelope (subprocess)", () => {
+    const res = spawnSync(
+      process.execPath,
+      [cliPath, "recommend", "--phase", "P2", "--task", "P2-E1-T1", "--json"],
+      { cwd: fixtureDir, encoding: "utf8", env: process.env },
+    );
+    expect(res.status).toBe(0);
+    const parsed = JSON.parse(res.stdout.trim());
+    expect(parsed.data.contextFit).toBeDefined();
+    expect(parsed.data.contextFit.recommendedProfile).toBe("balanced");
+    expect(parsed.data.contextFit.recommendedBudgetBytes).toBe(60000);
+  });
+
+  it("a selected agent profile same-name override changes recommendedBudgetBytes", () => {
+    // Exercise the real resolver with an agent profile that overrides the
+    // 'balanced' bytes; no shared fixture is mutated.
+    const agentProfile = AgentProfile.parse({
+      name: "claude-code",
+      instruction_filename: "CLAUDE.md",
+      context_dir: ".context/claude",
+      skill_dir: ".claude/skills",
+      hook_dir: ".claude/hooks",
+      model_map: {
+        highest_reasoning: "claude-opus-4-7",
+        balanced_coding: "claude-sonnet-4-6",
+        cheap_mechanical: "claude-haiku-4-5",
+      },
+      context_budget: { profiles: { balanced: { max_bytes: 65536 } } },
+    });
+    const task = Task.parse({
+      id: "P9-T1",
+      type: "feature",
+      ambiguity: "medium",
+      risk: "medium",
+      context_size: "medium",
+      write_surface: "medium",
+      verification_strength: "medium",
+      expected_duration: "short",
+      status: "planned",
+    });
+    const overridden = resolveRecommendation({
+      phaseId: "P9",
+      taskId: "P9-T1",
+      task,
+      agentName: "claude-code",
+      agentProfile,
+    });
+    expect(overridden.contextFit?.recommendedProfile).toBe("balanced");
+    expect(overridden.contextFit?.recommendedBudgetBytes).toBe(65536);
+    expect(overridden.contextFit?.reason).toContain("agent profile override");
+
+    // Same task with NO override -> built-in fallback bytes.
+    const noOverride = resolveRecommendation({
+      phaseId: "P9",
+      taskId: "P9-T1",
+      task,
+      agentName: "claude-code",
+      agentProfile: AgentProfile.parse({
+        name: "claude-code",
+        instruction_filename: "CLAUDE.md",
+        context_dir: ".context/claude",
+        skill_dir: ".claude/skills",
+        hook_dir: ".claude/hooks",
+        model_map: {
+          highest_reasoning: "claude-opus-4-7",
+          balanced_coding: "claude-sonnet-4-6",
+          cheap_mechanical: "claude-haiku-4-5",
+        },
+      }),
+    });
+    expect(noOverride.contextFit?.recommendedBudgetBytes).toBe(60000);
+  });
+});
+
 describe("recommend v0.8 — CLI envelope (subprocess)", () => {
   it("--json wraps the v0.8 result in {ok:true, data:...} envelope", () => {
     const res = spawnSync(
@@ -292,5 +419,84 @@ describe("recommend v0.8 — CLI envelope (subprocess)", () => {
     expect(Array.isArray(parsed.data.preflight)).toBe(true);
     // schema-validate the envelope payload
     expect(() => RecommendResultV2.parse(parsed.data)).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P48 — a malformed agent profile (especially an invalid P47 `context_budget`
+// block, which `recommend` now reads to resolve the contextFit byte override)
+// must surface as a clean CONFIG_ERROR envelope with exit 2, NOT a raw Zod/YAML
+// throw printed as "internal error" with exit 0. This matches task prepare.
+// ---------------------------------------------------------------------------
+
+describe("recommend — malformed agent profile is CONFIG_ERROR (P48)", () => {
+  let tmp: string;
+
+  afterEach(() => {
+    if (tmp) rmSync(tmp, { recursive: true, force: true });
+  });
+
+  function tmpProjectWithProfile(profileYaml: string): string {
+    tmp = mkdtempSync(join(tmpdir(), "code-pact-recommend-cfgerr-"));
+    cpSync(fixtureDir, tmp, { recursive: true });
+    writeFileSync(
+      join(tmp, ".code-pact", "agent-profiles", "claude-code.yaml"),
+      profileYaml,
+      "utf8",
+    );
+    return tmp;
+  }
+
+  const VALID_HEAD = `name: claude-code
+instruction_filename: CLAUDE.md
+context_dir: .context/claude
+skill_dir: .claude/skills
+hook_dir: .claude/hooks
+model_map:
+  highest_reasoning: claude-opus-4-7
+  balanced_coding: claude-sonnet-4-6
+  cheap_mechanical: claude-haiku-4-5
+`;
+
+  it("invalid context_budget (max_bytes: 0) → CONFIG_ERROR, exit 2", () => {
+    const dir = tmpProjectWithProfile(
+      `${VALID_HEAD}context_budget:\n  profiles:\n    balanced:\n      max_bytes: 0\n`,
+    );
+    const res = spawnSync(
+      process.execPath,
+      [cliPath, "recommend", "--phase", "P2", "--task", "P2-E1-T1", "--json"],
+      { cwd: dir, encoding: "utf8", env: process.env },
+    );
+    expect(res.status).toBe(2);
+    const parsed = JSON.parse(res.stdout.trim());
+    expect(parsed.ok).toBe(false);
+    expect(parsed.error.code).toBe("CONFIG_ERROR");
+    // The raw Zod error must NOT leak as an "internal error" string.
+    expect(res.stdout).not.toContain("internal error");
+  });
+
+  it("malformed YAML profile → CONFIG_ERROR, exit 2", () => {
+    const dir = tmpProjectWithProfile("name: claude-code\n  bad: : indent\n:::\n");
+    const res = spawnSync(
+      process.execPath,
+      [cliPath, "recommend", "--phase", "P2", "--task", "P2-E1-T1", "--json"],
+      { cwd: dir, encoding: "utf8", env: process.env },
+    );
+    expect(res.status).toBe(2);
+    const parsed = JSON.parse(res.stdout.trim());
+    expect(parsed.ok).toBe(false);
+    expect(parsed.error.code).toBe("CONFIG_ERROR");
+  });
+
+  it("missing agent profile → AGENT_NOT_FOUND, exit 2 (unchanged)", () => {
+    const res = spawnSync(
+      process.execPath,
+      [cliPath, "recommend", "--phase", "P2", "--task", "P2-E1-T1", "--agent", "nonexistent", "--json"],
+      { cwd: fixtureDir, encoding: "utf8", env: process.env },
+    );
+    expect(res.status).toBe(2);
+    const parsed = JSON.parse(res.stdout.trim());
+    expect(parsed.ok).toBe(false);
+    expect(parsed.error.code).toBe("AGENT_NOT_FOUND");
   });
 });

@@ -252,6 +252,77 @@ describe("runTaskPrepare — recommendation observability (regression)", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// P48 — Context Fit recommendation (layer b). `task prepare` surfaces
+// recommendation.contextFit through the shared resolveRecommendation path. It
+// is a SUGGESTION only: no auto-apply, no extra reads, the commands dictionary
+// is unchanged, and the context pack bytes are unchanged without an explicit
+// --context-budget.
+// ---------------------------------------------------------------------------
+
+describe("runTaskPrepare — P48 contextFit", () => {
+  it("surfaces recommendation.contextFit on a planned task (small -> tight, built-in fallback)", async () => {
+    await setupProject(dir);
+    const result = await runTaskPrepare({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+    });
+    expect(result.recommendation).not.toBeNull();
+    const cf = result.recommendation!.contextFit;
+    expect(cf).toBeDefined();
+    // P1-T1: context_size=small, ambiguity=low, write_surface=low -> tight.
+    expect(cf?.recommendedProfile).toBe("tight");
+    expect(cf?.recommendedBudgetBytes).toBe(30000);
+    expect(cf?.reason).toContain("built-in fallback");
+  });
+
+  it("does NOT auto-apply the recommended budget — pack bytes match a no-flag prepare", async () => {
+    await setupProject(dir);
+    const a = await runTaskPrepare({ cwd: dir, taskId: "P1-T1", agent: "claude-code" });
+    const b = await runTaskPrepare({ cwd: dir, taskId: "P1-T1", agent: "claude-code" });
+    // contextFit recommends 'tight' (30000), but no budget is applied: the pack
+    // is built with no budgetBytes, so its size is stable and unreduced.
+    expect(a.context_pack_bytes).toBeGreaterThan(0);
+    expect(b.context_pack_bytes).toBe(a.context_pack_bytes);
+    expect(a.recommendation!.contextFit?.recommendedProfile).toBe("tight");
+  });
+
+  it("the commands dictionary does NOT echo --context-budget", async () => {
+    await setupProject(dir);
+    const result = await runTaskPrepare({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+    });
+    for (const cmd of Object.values(result.commands)) {
+      expect(cmd).not.toContain("--context-budget");
+    }
+    expect(result.commands.context).toBe(
+      "code-pact task context P1-T1 --agent claude-code",
+    );
+  });
+
+  it("early-return done state stays unchanged — null recommendation, no contextFit", async () => {
+    const progressWithDone = `events:
+  - task_id: P1-T1
+    status: done
+    at: "2026-05-18T10:00:00+00:00"
+    actor: agent
+    agent: claude-code
+`;
+    await setupProject(dir, { progressYaml: progressWithDone });
+    const result = await runTaskPrepare({
+      cwd: dir,
+      taskId: "P1-T1",
+      agent: "claude-code",
+    });
+    expect(result.current_state).toBe("done");
+    expect(result.recommendation).toBeNull();
+    expect(result.context_pack_bytes).toBe(0);
+  });
+});
+
 describe("runTaskPrepare — progress-read-only invariant", () => {
   it("does not mutate progress.yaml on any path", async () => {
     await setupProject(dir);

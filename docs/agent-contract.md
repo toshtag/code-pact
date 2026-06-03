@@ -253,6 +253,12 @@ The verbs in detail:
   found no accepted ADR entries; an unresolved explicit `decision_refs`
   gate may still surface commitments for its accepted refs (enforcement
   stays with `verify` / `task complete`).
+  The embedded `recommendation` carries (additively, P48) an optional
+  `contextFit` — a recommended standard context budget profile (`tight` /
+  `balanced` / `wide`), its byte value, and a reason. It is a **suggestion**:
+  it is **not** auto-applied and never re-sizes the context pack on its own.
+  To act on it, pass `--context-budget <profile>` to `task context` /
+  `task prepare` explicitly; the `commands` dictionary does **not** echo it.
 
 - **`task start <task-id>`** — record a `started` event. The agent
   invokes this exactly once per implementation pass for a task; the

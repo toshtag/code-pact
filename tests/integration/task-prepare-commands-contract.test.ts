@@ -129,6 +129,33 @@ describe("task prepare — emitted commands are accepted by the CLI parser", () 
     expect(commands.finalize).not.toContain("--agent");
   });
 
+  it("P48 — no emitted command echoes --context-budget (per-invocation policy)", () => {
+    const commands = prepareCommands(project);
+    for (const command of Object.values(commands)) {
+      expect(command).not.toContain("--context-budget");
+    }
+  });
+
+  it("P48 — the --json envelope surfaces recommendation.contextFit (suggestion only)", () => {
+    const res = project.run([
+      "task", "prepare", "P1-T1", "--agent", "claude-code", "--json",
+    ]);
+    const env = expectJsonOk<{
+      recommendation: {
+        contextFit?: {
+          recommendedProfile: string;
+          recommendedBudgetBytes: number;
+          reason: string;
+        };
+      } | null;
+    }>(res);
+    // P1-T1: context_size=small, ambiguity=low, write_surface=low -> tight.
+    expect(env.data.recommendation).not.toBeNull();
+    expect(env.data.recommendation!.contextFit).toBeDefined();
+    expect(env.data.recommendation!.contextFit!.recommendedProfile).toBe("tight");
+    expect(env.data.recommendation!.contextFit!.recommendedBudgetBytes).toBe(30000);
+  });
+
   it("commands[\"record-done\"] is a correct template (P40): task record-done + --evidence placeholder", () => {
     const commands = prepareCommands(project);
     const rd = commands["record-done"];
