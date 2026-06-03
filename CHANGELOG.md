@@ -13,6 +13,10 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+### Added
+
+- **`task context` / `task prepare` gain `--context-budget <profile>` (P47, Context Fit layer a).** A named, ergonomic alias for a byte budget: the profile resolves to a `max_bytes` value that then drives the unchanged P24 `--budget-bytes` enforcement path (same locked elision order, same `CONTEXT_OVER_BUDGET`). Three built-in profiles ship — `tight` (30000), `balanced` (60000), `wide` (120000) — and resolve even with no agent profile selected. An agent profile may declare an optional `context_budget` block to override a built-in byte value or name custom profiles; `default_profile` is validated but **not** auto-applied. `--context-budget` and `--budget-bytes` are mutually exclusive (`CONFIG_ERROR`, exit 2); an unknown profile is `CONFIG_ERROR`. The no-flag default pack stays byte-identical, `--budget-bytes` is unchanged, and the `task prepare` `commands` dictionary does not echo `--context-budget`. `wide` is intentionally not `full` — it can still elide or hit `CONTEXT_OVER_BUDGET`. No tokenizer, summarization, or network behavior is introduced.
+
 ## [1.29.2] — 2026-06-02
 
 Adapter-upgrade friction cut. `adapter upgrade --write` now explains, in place, why a `MODEL_MAP_STALE` advisory can survive a write — closing the "I upgraded, why is one advisory still there?" gap without growing the command's job. No new command, flag, schema field, or error code; the change is human-output and an internal refactor.

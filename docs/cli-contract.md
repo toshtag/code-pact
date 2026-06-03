@@ -1557,6 +1557,44 @@ Exit code 2. `data.minimum_achievable_bytes` tells the caller the floor for this
 
 **Byte-identical default.** Without `--budget-bytes`, the rendered `content` is byte-for-byte identical to v1.12 (the existing [`tests/integration/pack-byte-identical.test.ts`](../tests/integration/pack-byte-identical.test.ts) lock test continues to apply). The flag only opts in to elision.
 
+### `--context-budget <profile>` (v1.30+, P47)
+
+`code-pact task context <task-id> [--agent <name>] [--json] [--explain] --context-budget <profile>` and the same flag on `task prepare` are an **ergonomic alias** for a byte budget: the named profile resolves to a `max_bytes` value, which then drives the **unchanged** `--budget-bytes` enforcement path above (same locked elision order, same `CONTEXT_OVER_BUDGET` on an unachievable budget). It is a name for a number — it introduces no new pack behavior, no tokenizer, no summarization, and no network call.
+
+**Built-in profiles.** Three standard names ship with built-in byte fallbacks:
+
+| Profile | Built-in `max_bytes` |
+|---|---|
+| `tight` | `30000` |
+| `balanced` | `60000` |
+| `wide` | `120000` |
+
+`wide` is **not** `full`: it is a generous byte-capped profile, not a promise that every pack fits without elision — a large task can still elide or hit `CONTEXT_OVER_BUDGET` at `wide`.
+
+**Agent-defined profiles.** An agent profile may declare an optional `context_budget` block that **overrides** a standard byte value or names additional custom profiles:
+
+```yaml
+context_budget:
+  default_profile: balanced   # optional; validated, but NOT auto-applied in P47
+  profiles:
+    tight:    { max_bytes: 30000 }
+    balanced: { max_bytes: 60000 }
+    wide:     { max_bytes: 120000 }
+    review:   { max_bytes: 45000 }   # a custom profile
+```
+
+`max_bytes` is a positive integer. A missing `context_budget` block is valid (backward compatible). `default_profile`, when present, must reference a declared profile — but it is **not** applied automatically to any command in P47; an invocation with no flag stays byte-identical to the no-flag default above. A malformed, explicitly-configured `context_budget` surfaces as `CONFIG_ERROR` when a `--context-budget` invocation needs to parse it.
+
+**Resolution.** A standard name (`tight` / `balanced` / `wide`) resolves to its built-in byte value even with **no** agent profile in play, so the ergonomic name is usable without forcing `--agent`. An agent profile only *overrides* the byte value, or supplies a custom name. An unknown profile name fails with `CONFIG_ERROR` (exit 2), naming the missing profile and the agent.
+
+**Mutual exclusion.** `--context-budget` and `--budget-bytes` are mutually exclusive; supplying both is `CONFIG_ERROR` (exit 2):
+
+```json
+{ "ok": false, "error": { "code": "CONFIG_ERROR", "message": "task context: --budget-bytes and --context-budget are mutually exclusive." } }
+```
+
+**`commands` dictionary.** Like `--budget-bytes`, `--context-budget` is per-invocation policy, not project state: the `task prepare` `commands` dictionary does **not** echo it.
+
 ## `task prepare` — single per-task entry point (v1.11+, P21)
 
 `code-pact task prepare <task-id> [--agent <name>] [--json] [--dry-run]` is a **progress-read-only** compound command that returns everything an agent needs to decide what to do next on a single task: current state, the recommendation envelope, context-pack metadata, a structured `next_action`, and a fully-formed `commands` dictionary for the per-task lifecycle.
@@ -1565,7 +1603,7 @@ The command MUST NOT mutate `.code-pact/state/progress.yaml` on any code path. I
 
 ### Flags
 
-The flag list, value types, and examples live in the generated [CLI reference § `task prepare`](cli-reference.generated.md). Contract notes on specific flags: `--agent` shares `task context`'s validation (`AGENT_NOT_FOUND` / `AGENT_NOT_ENABLED`); `--dry-run` returns `would_write_context_pack_path` instead of `context_pack_path`; `--budget-bytes <N>` (v1.13+, P24) elides sections in the priority order defined in [`task context --budget-bytes`](#--budget-bytes-n-v113-p24) and throws `CONTEXT_OVER_BUDGET` (exit 2) when unachievable, with `progress.yaml` NOT mutated on the failure path (the progress-read-only invariant from P21-T3).
+The flag list, value types, and examples live in the generated [CLI reference § `task prepare`](cli-reference.generated.md). Contract notes on specific flags: `--agent` shares `task context`'s validation (`AGENT_NOT_FOUND` / `AGENT_NOT_ENABLED`); `--dry-run` returns `would_write_context_pack_path` instead of `context_pack_path`; `--budget-bytes <N>` (v1.13+, P24) elides sections in the priority order defined in [`task context --budget-bytes`](#--budget-bytes-n-v113-p24) and throws `CONTEXT_OVER_BUDGET` (exit 2) when unachievable, with `progress.yaml` NOT mutated on the failure path (the progress-read-only invariant from P21-T3); `--context-budget <profile>` (v1.30+, P47) is the ergonomic alias for `--budget-bytes`, resolving a named profile to bytes before that same path (see [`task context --context-budget`](#--context-budget-profile-v130-p47)), mutually exclusive with `--budget-bytes`, and **not** echoed into the returned `commands` dictionary.
 
 ### JSON envelope
 
