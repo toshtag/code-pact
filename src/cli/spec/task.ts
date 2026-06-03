@@ -25,6 +25,7 @@ const prepare: CommandSpec = {
   flags: [
     { name: "agent", value: "<name>", description: "Agent name. Defaults to project default_agent." },
     { name: "budget-bytes", value: "<N>", description: "Cap the rendered context pack at N bytes." },
+    { name: "context-budget", value: "<profile>", description: "Use a named context budget profile (tight, balanced, wide, or an agent-defined profile). Resolves to a byte budget. Mutually exclusive with --budget-bytes." },
     { name: "dry-run", description: "Report the would-write pack path without writing it." },
     { name: "json", description: "Emit JSON." },
   ],
@@ -118,6 +119,7 @@ const context: CommandSpec = {
     { name: "agent", value: "<name>", description: "Agent name. Defaults to project default_agent." },
     { name: "explain", description: "Print the section-budget table instead of the pack body." },
     { name: "budget-bytes", value: "<N>", description: "Cap the pack at N bytes (positive integer); over budget returns CONTEXT_OVER_BUDGET with the minimum achievable size." },
+    { name: "context-budget", value: "<profile>", description: "Use a named context budget profile (tight, balanced, wide, or an agent-defined profile). Resolves to a byte budget. Mutually exclusive with --budget-bytes." },
     { name: "json", description: "Emit JSON." },
   ],
   examples: [
