@@ -144,14 +144,47 @@ describe("adapter doctor — version drifts", () => {
     });
   });
 
-  it("emits GENERATOR_STALE when manifest.generator_version differs from current", async () => {
-    // The install used override 0.9.0-alpha.0 but the running package may be a different version.
+  // Issue #340: ADAPTER_GENERATOR_STALE is a version-stamp signal that only
+  // earns a warning when the desired adapter output actually differs from the
+  // manifest. A stamp-only lag — generator_version is older but every managed
+  // file is byte-identical to what the current generator produces — stays
+  // silent. (The install above used generatorVersionOverride "0.9.0-alpha.0",
+  // so the manifest stamp already lags the running package version while the
+  // generated file contents are version-independent, i.e. byte-identical.)
+  it("does NOT emit GENERATOR_STALE on stamp-only lag (version differs, desired output byte-identical)", async () => {
     const m = await readMutableManifest(dir, "claude-code");
     m.generator_version = "stale-0.0.0";
     await writeManifest(dir, "claude-code", m);
     const result = await runAdapterDoctor({ cwd: dir, locale: "en-US" });
     const codes = result.issues.map((i) => i.code);
-    expect(codes).toContain("ADAPTER_GENERATOR_STALE");
+    expect(codes).not.toContain("ADAPTER_GENERATOR_STALE");
+  });
+
+  it("emits GENERATOR_STALE when version differs AND a manifest file hash no longer matches the desired output", async () => {
+    const m = await readMutableManifest(dir, "claude-code");
+    m.generator_version = "stale-0.0.0";
+    // Make the recorded hash for a managed file diverge from what the current
+    // generator produces, so the desired output is provably NOT equivalent to
+    // the manifest. (The on-disk file is irrelevant to the equivalence check —
+    // it compares manifest sha256 against current desired content.)
+    const file = m.files.find((f) => f.path === "CLAUDE.md")!;
+    file.sha256 = "a".repeat(64); // arbitrary non-matching hash
+    await writeManifest(dir, "claude-code", m);
+    const result = await runAdapterDoctor({ cwd: dir, locale: "en-US" });
+    expect(result.issues.map((i) => i.code)).toContain("ADAPTER_GENERATOR_STALE");
+  });
+
+  it("emits GENERATOR_STALE when version differs AND the manifest path set diverges from the desired output", async () => {
+    const m = await readMutableManifest(dir, "claude-code");
+    m.generator_version = "stale-0.0.0";
+    // Drop a real managed file from the manifest so the recorded path set no
+    // longer matches the generator's current desired path set. The hash check
+    // alone would not catch this (it iterates manifest paths), so the path-set
+    // comparison in desiredEquivalentToManifest is what flags it.
+    m.files = m.files.filter((f) => f.path !== ".claude/skills/context.md");
+    await writeManifest(dir, "claude-code", m);
+    const result = await runAdapterDoctor({ cwd: dir, locale: "en-US" });
+    expect(result.issues.map((i) => i.code)).toContain("ADAPTER_GENERATOR_STALE");
   });
 
   it("does NOT emit GENERATOR_STALE when versions match", async () => {

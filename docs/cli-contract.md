@@ -307,7 +307,7 @@ Emitted by `adapter doctor` and (manifest-aware) global `doctor`. See the `adapt
 | `ADAPTER_MISSING` | warning | (legacy v0.8) Enabled agent has no instruction file AND no manifest. Replaced by manifest-aware codes once a manifest exists. |
 | `ADAPTER_MANIFEST_MISSING` | warning | `adapter doctor` only — no manifest for an enabled agent. Never emitted by global `doctor`. |
 | `ADAPTER_MANIFEST_INVALID` | error | Manifest YAML failed parse or schema validation |
-| `ADAPTER_GENERATOR_STALE` | warning | Manifest's `generator_version` differs from the current package version |
+| `ADAPTER_GENERATOR_STALE` | warning | Manifest's `generator_version` differs from the current package version **and** the current desired generated output differs from the manifest (or cannot be proven equivalent). Stamp-only version lag with byte-identical output is silent (Issue #340, v1.30.1). |
 | `ADAPTER_SCHEMA_DRIFT` | warning | Manifest's `adapter_schema_version` is older than the module's declared version |
 | `ADAPTER_PROFILE_DRIFT` | warning | Profile fields recorded in `profile_fingerprint` have changed since install |
 | `ADAPTER_FILE_MISSING` | error | A file listed in the manifest is missing from disk |
@@ -1258,7 +1258,7 @@ issues additionally carry `path` (absolute).
 |---|---|---|
 | `ADAPTER_MANIFEST_MISSING` | warning | Agent is enabled but `.code-pact/adapters/<agent>.manifest.yaml` does not exist. **`adapter doctor` only — never emitted by global `doctor`.** |
 | `ADAPTER_MANIFEST_INVALID` | error | Manifest YAML failed to parse or failed schema validation. Aborts further per-agent checks. |
-| `ADAPTER_GENERATOR_STALE` | warning | Manifest's `generator_version` differs from the current code-pact package version (simple equality, no semver ordering). |
+| `ADAPTER_GENERATOR_STALE` | warning | Manifest's `generator_version` differs from the current code-pact package version (simple equality, no semver ordering) **and** the current desired generated adapter output is not byte-identical to the manifest. A stamp-only version lag — the generated files match what the current generator produces — is silent (Issue #340, v1.30.1); when the agent profile is unreadable and equivalence cannot be proven, the warning is kept conservatively. |
 | `ADAPTER_SCHEMA_DRIFT` | warning | Manifest's `adapter_schema_version` is older than the adapter module's declared value. |
 | `ADAPTER_PROFILE_DRIFT` | warning | Agent profile fields recorded in `profile_fingerprint` (instruction_filename, context_dir, optional skill_dir / hook_dir / resolved_model) have changed since install. |
 | `ADAPTER_FILE_MISSING` | error | A file listed in the manifest is missing from disk (`managed-missing` × `absent`). |
