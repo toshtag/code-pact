@@ -14,8 +14,11 @@
 // elide or hit CONTEXT_OVER_BUDGET at `wide`). `full` / `max` / `large` were
 // rejected in P46 precisely because they read as a no-elision guarantee.
 //
-// Do NOT duplicate these numbers anywhere else (CLI code, schemas, docs prose,
-// tests). Import this constant — it is the one place the values live.
+// Do NOT create a second RUNTIME source of truth in CLI code or schemas —
+// import this constant; it is the one place the values are computed from.
+// Docs and tests MAY repeat the values as public contract assertions (a doc
+// stating the byte cap, a test pinning the expected number), which is the
+// intended way to lock the contract, not a duplicate source of truth.
 
 /** The three standard context budget profiles and their fallback byte caps. */
 export const STANDARD_CONTEXT_BUDGET_PROFILES = {

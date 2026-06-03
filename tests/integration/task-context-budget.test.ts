@@ -342,11 +342,15 @@ describe("task context --context-budget agent-less resolution (P47)", () => {
     expect(res.code).toBe(2);
   });
 
-  it("an unrelated invalid profile field does NOT sink a standard built-in fallback", async () => {
-    // Best-effort standard resolution validates ONLY context_budget; an
-    // unrelated bad field must not block the tight fallback.
-    const raw = await readFile(profilePath(project.dir), "utf8");
-    await writeFile(profilePath(project.dir), raw + "\nbogus_unknown_field: [unbalanced\n", "utf8");
+  it("an unrelated schema-invalid profile field does NOT sink a standard built-in fallback", async () => {
+    // Best-effort standard resolution validates ONLY the context_budget block,
+    // not the whole AgentProfile — so a profile that the full schema would
+    // reject for an UNRELATED reason (here: an absolute instruction_filename,
+    // which RelativePosixPath rejects) must still let the tight fallback apply.
+    // The YAML stays syntactically valid; only the schema is violated.
+    const profile = parseYaml(await readFile(profilePath(project.dir), "utf8")) as Record<string, unknown>;
+    profile.instruction_filename = "/etc/passwd"; // absolute → schema-invalid, unrelated to context_budget
+    await writeFile(profilePath(project.dir), stringifyYaml(profile), "utf8");
     const byProfile = expectJsonOk<{ content: string }>(
       project.run([
         "task", "context", "P1-T1", "--agent", "claude-code",
@@ -402,5 +406,52 @@ describe("task prepare --context-budget skips resolution on early-return states 
     expect(env.data.next_action.type).toBe("noop_already_done");
     expect(env.data.context_pack_bytes).toBe(0);
     expect(env.data.context_pack_path).toBeNull();
+  });
+});
+
+// P47: the documented error contract — "a malformed, explicitly-configured
+// context_budget surfaces as CONFIG_ERROR when a --context-budget invocation
+// needs to parse it" — must hold on the `task prepare` build path too, not only
+// `task context`. On a buildable (planned) task, a broken context_budget block
+// must produce a CONFIG_ERROR envelope, exit 2 — never an unclassified throw.
+describe("task prepare --context-budget broken context_budget is CONFIG_ERROR (P47)", () => {
+  let project: Awaited<ReturnType<typeof createTempProject>>;
+  const profilePath = (dir: string) =>
+    join(dir, ".code-pact", "agent-profiles", "claude-code.yaml");
+
+  beforeEach(async () => {
+    project = await createTempProject({ prefix: "code-pact-prep-broken-" });
+    await setupTask(project);
+  });
+
+  afterEach(async () => {
+    await project.cleanup();
+  });
+
+  async function writeBrokenContextBudget(): Promise<void> {
+    const profile = parseYaml(await readFile(profilePath(project.dir), "utf8")) as Record<string, unknown>;
+    // Invalid: max_bytes must be a positive integer.
+    profile.context_budget = { profiles: { tight: { max_bytes: 0 } } };
+    await writeFile(profilePath(project.dir), stringifyYaml(profile), "utf8");
+  }
+
+  it("a standard profile against a broken context_budget is CONFIG_ERROR / exit 2", async () => {
+    await writeBrokenContextBudget();
+    const res = project.run([
+      "task", "prepare", "P1-T1", "--agent", "claude-code",
+      "--context-budget", "tight", "--dry-run", "--json",
+    ]);
+    expectJsonErr(res, "CONFIG_ERROR");
+    expect(res.code).toBe(2);
+  });
+
+  it("a custom profile against a broken context_budget is CONFIG_ERROR / exit 2", async () => {
+    await writeBrokenContextBudget();
+    const res = project.run([
+      "task", "prepare", "P1-T1", "--agent", "claude-code",
+      "--context-budget", "review", "--dry-run", "--json",
+    ]);
+    expectJsonErr(res, "CONFIG_ERROR");
+    expect(res.code).toBe(2);
   });
 });
