@@ -68,6 +68,15 @@ export type ContextFitAdvisoryOptions = {
    * skipped; the file/glob advisories still run.
    */
   agentName: string | undefined;
+  /**
+   * The default agent profile's `context_budget.profiles` block, best-effort
+   * resolved at the lint boundary. Passed through to the P48 recommendation so
+   * `TASK_CONTEXT_BUDGET_UNACHIEVABLE` judges against the SAME recommended byte
+   * value `recommend` / `task prepare` surface — a same-named standard profile
+   * override wins over the built-in fallback, exactly as P48 resolves it. Omit
+   * (undefined) to use built-in fallback bytes (no override, or none readable).
+   */
+  agentContextBudgetProfiles?: Record<string, { max_bytes: number }>;
 };
 
 /** A repo-root-relative POSIX path is safe (the lint path-safety contract). */
@@ -90,7 +99,7 @@ function isSafePath(path: string): boolean {
 export async function detectContextFitAdvisories(
   opts: ContextFitAdvisoryOptions,
 ): Promise<PlanIssue[]> {
-  const { cwd, phases, agentName } = opts;
+  const { cwd, phases, agentName, agentContextBudgetProfiles } = opts;
   const issues: PlanIssue[] = [];
 
   // Per-run caches so a repeated decision path / reads glob is measured once,
@@ -180,7 +189,7 @@ export async function detectContextFitAdvisories(
       // the shared minimum_achievable_bytes floor). Skip when no agent could
       // be resolved — a pack build needs an agent name.
       if (agentName === undefined) continue;
-      const cacheKey = `${phase.id} ${task.id}`;
+      const cacheKey = JSON.stringify([phase.id, task.id]);
       let metrics = packMetricsCache.get(cacheKey);
       if (metrics === undefined) {
         try {
@@ -235,6 +244,9 @@ export async function detectContextFitAdvisories(
         writeSurface: task.write_surface,
         ...(task.requires_decision !== undefined
           ? { requiresDecision: task.requires_decision }
+          : {}),
+        ...(agentContextBudgetProfiles !== undefined
+          ? { agentContextBudgetProfiles }
           : {}),
       });
       if (metrics.minimumAchievableBytes > recommendation.recommendedBudgetBytes) {

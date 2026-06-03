@@ -34,7 +34,10 @@ objective: |
   (natural_bytes, minimum_achievable_bytes) — the same shared floor helper
   CONTEXT_OVER_BUDGET uses — by building each task's context pack once per
   lint run and caching the result. The recommended budget reuses the P48
-  deterministic profile mapping. The decision-size and reads-count advisories
+  deterministic profile mapping, honoring the default agent's same-name
+  context_budget override when available (else the built-in fallback) so the
+  advisory judges against the same byte value recommend / task prepare
+  surface. The decision-size and reads-count advisories
   read files / expand globs directly, with per-run caches so a repeated path
   or glob is measured once.
 

@@ -35,6 +35,7 @@ import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { Project } from "../schemas/project.ts";
 import { detectContextFitAdvisories } from "../context-fit/advisories.ts";
+import { loadAgentContextBudgetBestEffort } from "../context-fit/load-context-budget.ts";
 import type { PhaseEntry, PlanState } from "./state.ts";
 import { collectPlanArtifacts } from "./state.ts";
 import type { PlanIssue } from "./shared.ts";
@@ -154,10 +155,30 @@ export async function runLint(opts: LintOptions): Promise<LintResult> {
     // the P48 budget mapping, read decision files, and expand reads globs —
     // local and deterministic, no network/model/tokenizer. The pack-size
     // advisories need an agent name for the build, resolved best-effort from
-    // project.yaml's default_agent.
+    // project.yaml's default_agent; the default agent's `context_budget`
+    // profiles (also best-effort) let `TASK_CONTEXT_BUDGET_UNACHIEVABLE` judge
+    // against the same recommended byte value `recommend` / `task prepare`
+    // surface (a same-name override wins over the built-in fallback). A
+    // malformed block must not fail an advisory pass, so it degrades to the
+    // built-in fallback rather than throwing.
     const agentName = await resolveDefaultAgent(opts.cwd);
+    let agentContextBudgetProfiles: Record<string, { max_bytes: number }> | undefined;
+    try {
+      agentContextBudgetProfiles = (
+        await loadAgentContextBudgetBestEffort(opts.cwd, undefined)
+      )?.profiles;
+    } catch {
+      agentContextBudgetProfiles = undefined;
+    }
     issues.push(
-      ...(await detectContextFitAdvisories({ cwd: opts.cwd, phases, agentName })),
+      ...(await detectContextFitAdvisories({
+        cwd: opts.cwd,
+        phases,
+        agentName,
+        ...(agentContextBudgetProfiles !== undefined
+          ? { agentContextBudgetProfiles }
+          : {}),
+      })),
     );
   }
 

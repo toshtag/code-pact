@@ -210,6 +210,36 @@ describe("TASK_CONTEXT_BUDGET_UNACHIEVABLE", () => {
     expect(fired[0]!.details!.minimum_achievable_bytes as number).toBeGreaterThan(30000);
   });
 
+  it("honors a P48 same-name agent override so it judges against the recommended byte value", async () => {
+    // A ~50KB unelidable declared decision: floor sits between the built-in
+    // tight fallback (30000) and an 80000 override. With the built-in fallback
+    // the advisory fires; with the override it must NOT, matching how
+    // `recommend` / `task prepare` would resolve the recommended bytes.
+    await writeDecision("mid.md", 50000);
+    await writePlan("P1-T1", {
+      contextSize: "small",
+      decisionRefs: ["design/decisions/mid.md"],
+    });
+
+    const { state, fallbackPhases } = await collectPlanArtifacts(cwd);
+    const phases = state?.phases ?? fallbackPhases;
+
+    const withFallback = await detectContextFitAdvisories({
+      cwd,
+      phases,
+      agentName: AGENT,
+    });
+    expect(byCode(withFallback, "TASK_CONTEXT_BUDGET_UNACHIEVABLE")).toHaveLength(1);
+
+    const withOverride = await detectContextFitAdvisories({
+      cwd,
+      phases,
+      agentName: AGENT,
+      agentContextBudgetProfiles: { tight: { max_bytes: 80000 } },
+    });
+    expect(byCode(withOverride, "TASK_CONTEXT_BUDGET_UNACHIEVABLE")).toHaveLength(0);
+  });
+
   it("derives minimum_achievable_bytes from the same shared floor the pack build reports", async () => {
     await writeDecision("huge.md", 70000);
     await writePlan("P1-T1", {
