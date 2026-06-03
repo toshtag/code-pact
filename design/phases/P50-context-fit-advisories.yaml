@@ -1,12 +1,12 @@
 id: P50
 name: Context Fit advisories — four opt-in, non-exit-affecting plan-lint
-  advisories under --include-quality that flag likely context-size risk
-  (large natural pack, unachievable recommended budget, oversized declared
-  decision, over-broad reads glob) before a task runs
+  advisories under --include-quality that flag likely context-size risk (large
+  natural pack, unachievable recommended budget, oversized declared decision,
+  over-broad reads glob) before a task runs
 weight: 5
 confidence: medium
 risk: medium
-status: planned
+status: done
 objective: |
   P50 ships layer (d) of Context Fit (design/decisions/context-fit-rfc.md):
   four opt-in, non-exit-affecting advisories under `plan lint
@@ -56,19 +56,19 @@ objective: |
 
   Design recorded in design/decisions/context-fit-rfc.md § Layer (d).
 non_goals:
-  - Context Fit layers beyond (d) — deterministic structural compaction (P51)
-    or external context sources (P52). P50 is layer (d) only.
+  - Context Fit layers beyond (d) — deterministic structural compaction (P51) or
+    external context sources (P52). P50 is layer (d) only.
   - Any change to context pack rendering, `task context`, `task prepare`,
     `recommend`, or any existing lifecycle behavior. P50 is an
     advisory/readiness layer that only reads existing deterministic data.
   - Any new exit-affecting behavior. Every P50 advisory sets affects_exit to
-    false; `plan lint` and `plan lint --strict` exit semantics are unchanged
-    for existing inputs, gaining only additional non-exit-affecting advisory
-    records when `--include-quality` is present.
+    false; `plan lint` and `plan lint --strict` exit semantics are unchanged for
+    existing inputs, gaining only additional non-exit-affecting advisory records
+    when `--include-quality` is present.
   - Promoting any P50 advisory to a hard validation error, or emitting any P50
     advisory without `--include-quality`.
-  - Token counting, a tokenizer dependency, summarization, compression,
-    semantic ranking, embeddings, a proxy, or any network access.
+  - Token counting, a tokenizer dependency, summarization, compression, semantic
+    ranking, embeddings, a proxy, or any network access.
   - A second floor calculation — TASK_CONTEXT_BUDGET_UNACHIEVABLE derives
     minimum_achievable_bytes from the same P49 shared helper used by
     CONTEXT_OVER_BUDGET, not a separate hard-coded floor.
@@ -80,8 +80,8 @@ definition_of_done:
     TASK_CONTEXT_BUDGET_UNACHIEVABLE, TASK_DECLARED_DECISION_LARGE, and
     TASK_READS_MATCH_TOO_MANY. Thresholds live in one runtime source of truth
     (largeContextBalancedBytes = balanced 60000, largeDecisionBytes = tight
-    30000, readsMatchCount = 100), sourced from
-    STANDARD_CONTEXT_BUDGET_PROFILES where applicable.
+    30000, readsMatchCount = 100), sourced from STANDARD_CONTEXT_BUDGET_PROFILES
+    where applicable.
   - The pack-size advisories reuse the P49 explain metrics (natural_bytes and
     the shared minimum_achievable_bytes floor) via one context-pack build per
     task per lint run, cached; the budget recommendation reuses the P48
@@ -96,7 +96,7 @@ definition_of_done:
     (tests/integration/pack-byte-identical.test.ts unchanged). Per-run caches
     avoid rebuilding a task's pack, re-reading a decision file, or re-expanding
     a reads glob more than once.
-  - cli-contract.md, agent-contract.md, the glossary, and CHANGELOG record the
+  - cli-contract.md, the glossary, troubleshooting, and CHANGELOG record the
     shipped P50 behavior (the four codes, their deterministic thresholds, that
     they appear only under --include-quality, set affects_exit to false, never
     change --strict exit behavior, change no pack content, apply no budget
@@ -123,7 +123,7 @@ tasks:
     write_surface: low
     verification_strength: medium
     expected_duration: short
-    status: planned
+    status: done
     description: >
       Phase registration / RFC alignment. Registers the P50 phase (this phase
       YAML + a design/roadmap.yaml entry, weight 5) implementing Context Fit
@@ -144,7 +144,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: short
-    status: planned
+    status: done
     description: >
       Deterministic context-fit advisory helpers. Adds a helper module that
       computes the four advisories from existing project/task data: the
@@ -177,11 +177,11 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: short
-    status: planned
+    status: done
     description: >
       plan lint --include-quality integration. Wires the context-fit advisory
-      helper into runLint behind the existing includeQuality gate, resolving
-      the project default agent (best-effort) for the pack-size builds. The
+      helper into runLint behind the existing includeQuality gate, resolving the
+      project default agent (best-effort) for the pack-size builds. The
       advisories are absent without --include-quality and never affect the exit
       code; serialization already carries affects_exit and details, so no new
       diagnostic system is introduced.
@@ -208,27 +208,28 @@ tasks:
     write_surface: low
     verification_strength: strong
     expected_duration: short
-    status: planned
+    status: done
     description: >
       Docs + CHANGELOG. Documents the four P50 advisory codes, their
       deterministic byte/count thresholds, that they appear only under `plan
       lint --include-quality`, are affects_exit: false, never change --strict
       exit behavior, change no pack content, apply no budget automatically, and
       use no model / tokenizer / network / summarization, in cli-contract.md,
-      agent-contract.md, the glossary, and the CHANGELOG. The generated CLI
-      reference is a no-op (P50 adds no new flag or command). check:docs passes.
+      the glossary, troubleshooting, and the CHANGELOG. The agent contract
+      surface is unchanged (the advisories are surfaced through the existing
+      plan lint --include-quality flag, not a new agent-facing verb), so
+      agent-contract.md is not a write target. The generated CLI reference is a
+      no-op (P50 adds no new flag or command). check:docs passes.
     depends_on:
       - P50-T2
     decision_refs:
       - design/decisions/context-fit-rfc.md
     reads:
       - docs/cli-contract.md
-      - docs/agent-contract.md
       - docs/glossary.md
       - docs/troubleshooting.md
     writes:
       - docs/cli-contract.md
-      - docs/agent-contract.md
       - docs/glossary.md
       - docs/troubleshooting.md
       - CHANGELOG.md
