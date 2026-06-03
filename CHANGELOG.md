@@ -13,6 +13,10 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+## [1.30.1] — 2026-06-03
+
+Adapter-drift signal hygiene. `ADAPTER_GENERATOR_STALE` no longer nags on a no-op patch bump — a stale `generator_version` stamp alone is silent when the generated adapter output is byte-identical to the manifest. No new command, flag, diagnostic code, or manifest schema change.
+
 ### Fixed
 
 - **`ADAPTER_GENERATOR_STALE` no longer fires on version-stamp lag alone ([#340]).** `adapter doctor` / global `doctor` previously raised this warning whenever a manifest's `generator_version` differed from the running package version, via a pure string inequality — so **every** version bump, including no-op patch releases that change nothing about the generated adapter files, nagged the user to run `adapter upgrade`. The check now fires only when the version differs **and** the current desired generated output is not byte-identical to the manifest (path set + per-file sha256, compared after the same `dedupeDesiredFiles` pass the install/upgrade engines use). A stamp-only lag — where `adapter upgrade --write` would re-stamp `generator_version` / `generated_at` and touch no managed content — is silent. When the agent profile can't be read (so the desired output can't be generated and equivalence can't be proven), the warning is kept conservatively, as before. No new command, flag, diagnostic code, or manifest schema change; `ADAPTER_DESIRED_STALE` / `ADAPTER_FILE_DRIFT` / `ADAPTER_PROFILE_DRIFT` and `adapter upgrade --write` write semantics are unchanged.
