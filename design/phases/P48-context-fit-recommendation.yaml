@@ -74,12 +74,14 @@ definition_of_done:
     recommendation exists; the context pack bytes are unchanged without an
     explicit --context-budget; the `commands` dictionary does not include
     --context-budget; early-return states are unchanged.
-  - The generated CLI reference, cli-contract.md, agent-contract.md, glossary,
-    and CHANGELOG record the new shipped behavior (contextFit is a
-    recommendation, not auto-applied; built-in names tight|balanced|wide; custom
-    names accepted by --context-budget but never recommended; budgetProfile and
-    contextFit are distinct; agent same-name overrides change the bytes; no
-    network/model/tokenizer), and check:docs passes.
+  - cli-contract.md, agent-contract.md, glossary, and CHANGELOG record the new
+    shipped behavior (contextFit is a recommendation, not auto-applied; built-in
+    names tight|balanced|wide; custom names accepted by --context-budget but
+    never recommended; budgetProfile and contextFit are distinct; agent
+    same-name overrides change the bytes; no network/model/tokenizer). The
+    generated CLI reference is checked/regenerated as a no-op because P48 adds no
+    new flag or command (contextFit is a JSON result field, not a CLI surface).
+    check:docs passes.
   - The phase is registered (this phase YAML plus a design/roadmap.yaml entry);
     validate --json and plan lint --include-quality --strict --json are clean.
 verification:
@@ -208,13 +210,14 @@ tasks:
     expected_duration: short
     status: done
     description: >
-      Docs + generated CLI reference + CHANGELOG. Regenerates the CLI reference
-      and documents contextFit (a recommendation, not auto-applied; built-in
-      names tight|balanced|wide; custom names accepted by --context-budget but
-      never recommended; budgetProfile vs contextFit distinction; agent same-name
-      overrides change the bytes; no network/model/tokenizer) in cli-contract.md,
-      agent-contract.md, and the glossary, and records the CHANGELOG entry.
-      check:docs passes.
+      Docs + CHANGELOG. Documents contextFit (a recommendation, not
+      auto-applied; built-in names tight|balanced|wide; custom names accepted by
+      --context-budget but never recommended; budgetProfile vs contextFit
+      distinction; agent same-name overrides change the bytes; no
+      network/model/tokenizer) in cli-contract.md, agent-contract.md, and the
+      glossary, and records the CHANGELOG entry. The generated CLI reference is
+      checked/regenerated as a no-op (P48 adds no new flag or command), so it is
+      not a write target. check:docs passes.
     depends_on:
       - P48-T3
     decision_refs:
