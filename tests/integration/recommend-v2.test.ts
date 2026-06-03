@@ -1,5 +1,7 @@
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { spawnSync } from "node:child_process";
+import { cpSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runRecommend, formatRecommend, type RecommendResult } from "../../src/commands/recommend.ts";
 import { RecommendResultV2 } from "../../src/core/schemas/recommend-result.ts";
@@ -417,5 +419,84 @@ describe("recommend v0.8 — CLI envelope (subprocess)", () => {
     expect(Array.isArray(parsed.data.preflight)).toBe(true);
     // schema-validate the envelope payload
     expect(() => RecommendResultV2.parse(parsed.data)).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P48 — a malformed agent profile (especially an invalid P47 `context_budget`
+// block, which `recommend` now reads to resolve the contextFit byte override)
+// must surface as a clean CONFIG_ERROR envelope with exit 2, NOT a raw Zod/YAML
+// throw printed as "internal error" with exit 0. This matches task prepare.
+// ---------------------------------------------------------------------------
+
+describe("recommend — malformed agent profile is CONFIG_ERROR (P48)", () => {
+  let tmp: string;
+
+  afterEach(() => {
+    if (tmp) rmSync(tmp, { recursive: true, force: true });
+  });
+
+  function tmpProjectWithProfile(profileYaml: string): string {
+    tmp = mkdtempSync(join(tmpdir(), "code-pact-recommend-cfgerr-"));
+    cpSync(fixtureDir, tmp, { recursive: true });
+    writeFileSync(
+      join(tmp, ".code-pact", "agent-profiles", "claude-code.yaml"),
+      profileYaml,
+      "utf8",
+    );
+    return tmp;
+  }
+
+  const VALID_HEAD = `name: claude-code
+instruction_filename: CLAUDE.md
+context_dir: .context/claude
+skill_dir: .claude/skills
+hook_dir: .claude/hooks
+model_map:
+  highest_reasoning: claude-opus-4-7
+  balanced_coding: claude-sonnet-4-6
+  cheap_mechanical: claude-haiku-4-5
+`;
+
+  it("invalid context_budget (max_bytes: 0) → CONFIG_ERROR, exit 2", () => {
+    const dir = tmpProjectWithProfile(
+      `${VALID_HEAD}context_budget:\n  profiles:\n    balanced:\n      max_bytes: 0\n`,
+    );
+    const res = spawnSync(
+      process.execPath,
+      [cliPath, "recommend", "--phase", "P2", "--task", "P2-E1-T1", "--json"],
+      { cwd: dir, encoding: "utf8", env: process.env },
+    );
+    expect(res.status).toBe(2);
+    const parsed = JSON.parse(res.stdout.trim());
+    expect(parsed.ok).toBe(false);
+    expect(parsed.error.code).toBe("CONFIG_ERROR");
+    // The raw Zod error must NOT leak as an "internal error" string.
+    expect(res.stdout).not.toContain("internal error");
+  });
+
+  it("malformed YAML profile → CONFIG_ERROR, exit 2", () => {
+    const dir = tmpProjectWithProfile("name: claude-code\n  bad: : indent\n:::\n");
+    const res = spawnSync(
+      process.execPath,
+      [cliPath, "recommend", "--phase", "P2", "--task", "P2-E1-T1", "--json"],
+      { cwd: dir, encoding: "utf8", env: process.env },
+    );
+    expect(res.status).toBe(2);
+    const parsed = JSON.parse(res.stdout.trim());
+    expect(parsed.ok).toBe(false);
+    expect(parsed.error.code).toBe("CONFIG_ERROR");
+  });
+
+  it("missing agent profile → AGENT_NOT_FOUND, exit 2 (unchanged)", () => {
+    const res = spawnSync(
+      process.execPath,
+      [cliPath, "recommend", "--phase", "P2", "--task", "P2-E1-T1", "--agent", "nonexistent", "--json"],
+      { cwd: fixtureDir, encoding: "utf8", env: process.env },
+    );
+    expect(res.status).toBe(2);
+    const parsed = JSON.parse(res.stdout.trim());
+    expect(parsed.ok).toBe(false);
+    expect(parsed.error.code).toBe("AGENT_NOT_FOUND");
   });
 });

@@ -53,7 +53,21 @@ async function loadAgentProfile(cwd: string, agentName: string): Promise<AgentPr
     (err as NodeJS.ErrnoException).code = "AGENT_NOT_FOUND";
     throw err;
   }
-  return AgentProfile.parse(parseYaml(raw) as unknown);
+  // A malformed profile — including an explicitly-configured but invalid P47
+  // `context_budget` block, which P48 now reads to resolve the contextFit byte
+  // override — surfaces as CONFIG_ERROR rather than an unclassified YAML/Zod
+  // throw, mirroring task-prepare.ts so `recommend` renders a clean envelope.
+  try {
+    return AgentProfile.parse(parseYaml(raw) as unknown);
+  } catch (cause) {
+    const err = new Error(
+      `Agent profile for "${agentName}" is invalid: ${
+        cause instanceof Error ? cause.message : String(cause)
+      }`,
+    );
+    (err as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+    throw err;
+  }
 }
 
 // ---------------------------------------------------------------------------

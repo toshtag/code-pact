@@ -496,6 +496,21 @@ async function cmdRecommend(argv: string[], locale: Locale, globalJson: boolean)
       }
       return 2;
     }
+    // A malformed agent profile / invalid P47 context_budget block surfaces as a
+    // clean CONFIG_ERROR (exit 2) rather than leaking a raw Zod/YAML throw — this
+    // matters in P48 because `recommend` now reads context_budget to resolve the
+    // contextFit byte override. Mirrors task prepare's CONFIG_ERROR envelope.
+    if (code === "CONFIG_ERROR") {
+      const msg = err instanceof Error ? err.message : "Invalid configuration.";
+      if (json) {
+        process.stdout.write(
+          `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
+        );
+      } else {
+        process.stderr.write(`${msg}\n`);
+      }
+      return 2;
+    }
     throw err;
   }
 }
