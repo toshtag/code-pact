@@ -54,6 +54,7 @@ the recommendation; call `task context` directly when you only need the pack. Re
 | `--agent` | `<name>` | Agent name. Defaults to project default_agent. |
 | `--explain` | — | Print the section-budget table instead of the pack body. |
 | `--budget-bytes` | `<N>` | Cap the pack at N bytes (positive integer); over budget returns CONTEXT_OVER_BUDGET with the minimum achievable size. |
+| `--context-budget` | `<profile>` | Use a named context budget profile (tight, balanced, wide, or an agent-defined profile). Resolves to a byte budget. Mutually exclusive with --budget-bytes. |
 | `--json` | — | Emit JSON. |
 
 ```sh
@@ -75,6 +76,7 @@ writes the context pack unless --dry-run is passed.
 | --- | --- | --- |
 | `--agent` | `<name>` | Agent name. Defaults to project default_agent. |
 | `--budget-bytes` | `<N>` | Cap the rendered context pack at N bytes. |
+| `--context-budget` | `<profile>` | Use a named context budget profile (tight, balanced, wide, or an agent-defined profile). Resolves to a byte budget. Mutually exclusive with --budget-bytes. |
 | `--dry-run` | — | Report the would-write pack path without writing it. |
 | `--json` | — | Emit JSON. |
 

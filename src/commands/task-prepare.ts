@@ -41,6 +41,15 @@ export type TaskPrepareOptions = {
    * Progress-read-only invariant is preserved on the new failure path.
    */
   budgetBytes?: number;
+  /**
+   * P47: lazy budget resolver, invoked ONLY on the pack-build path (after the
+   * done / blocked / unmet-deps early returns). This lets `task prepare
+   * --context-budget <profile>` defer profile resolution — and the agent-
+   * profile read it entails — so an early-return state never pays for it.
+   * Mutually exclusive with `budgetBytes` at the call site. Its resolved value
+   * (when not undefined) is used exactly like `budgetBytes`.
+   */
+  resolveBudgetBytes?: () => Promise<number | undefined>;
 };
 
 export type NextActionType =
@@ -129,7 +138,21 @@ async function loadAgentProfile(
     (err as NodeJS.ErrnoException).code = "AGENT_NOT_FOUND";
     throw err;
   }
-  return AgentProfile.parse(parseYaml(raw) as unknown);
+  // A malformed profile (e.g. an explicitly-configured but invalid
+  // context_budget block — P47) surfaces as CONFIG_ERROR rather than an
+  // unclassified YAML/Zod throw, so `task prepare --context-budget …` matches
+  // the documented error contract and the CLI renders a clean envelope.
+  try {
+    return AgentProfile.parse(parseYaml(raw) as unknown);
+  } catch (cause) {
+    const err = new Error(
+      `Agent profile for "${agentName}" is invalid: ${
+        cause instanceof Error ? cause.message : String(cause)
+      }`,
+    );
+    (err as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+    throw err;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -372,13 +395,21 @@ export async function runTaskPrepare(
     }
   }
 
-  // 9. Context pack — build always, write unless dry-run.
+  // 9. Context pack — build always, write unless dry-run. The P47 budget is
+  // resolved here, on the build path, so the done / blocked / unmet-deps early
+  // returns above never trigger profile resolution or an agent-profile read.
+  const budgetBytes =
+    opts.budgetBytes !== undefined
+      ? opts.budgetBytes
+      : opts.resolveBudgetBytes
+        ? await opts.resolveBudgetBytes()
+        : undefined;
   const pack = await buildContextPack({
     cwd,
     phaseId,
     taskId,
     agentName,
-    ...(opts.budgetBytes !== undefined ? { budgetBytes: opts.budgetBytes } : {}),
+    ...(budgetBytes !== undefined ? { budgetBytes } : {}),
   });
   const contextPackBytes = Buffer.byteLength(pack.content, "utf8");
 

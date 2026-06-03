@@ -16,6 +16,16 @@ import { isInteractive } from "../../lib/tty.ts";
 import { messages, type Locale } from "../../i18n/index.ts";
 import { withWriteLock } from "../util.ts";
 import { runTaskContext } from "../../commands/task-context.ts";
+import {
+  resolveContextBudgetProfile,
+  ContextBudgetProfileError,
+} from "../../core/context-fit/resolve-budget-profile.ts";
+import {
+  loadAgentContextBudget,
+  loadAgentContextBudgetBestEffort,
+} from "../../core/context-fit/load-context-budget.ts";
+import { isStandardContextBudgetProfile } from "../../core/context-fit/budget-profiles.ts";
+import type { ContextBudgetProfiles } from "../../core/schemas/agent-profile.ts";
 import { runTaskComplete } from "../../commands/task-complete.ts";
 import {
   runTaskRecordDone,
@@ -149,6 +159,98 @@ function emitConfigError(
   } else {
     process.stderr.write(`${message}\n`);
   }
+}
+
+// P47 (Context Fit, layer a). Resolve a context byte budget from the two
+// mutually-exclusive flags `--budget-bytes` and `--context-budget`, shared by
+// `task context` and `task prepare`. Returns:
+//   { kind: "ok", budgetBytes }   — at most one source provided & valid
+//   { kind: "error", exitCode }   — a CONFIG_ERROR envelope was already emitted
+//
+// P47 budget-flag handling is two-phase so `task prepare`'s early-return
+// states (done / blocked / unmet-deps, which skip the pack build) never pay
+// for profile resolution or an agent-profile read:
+//
+//   1. validateBudgetFlags() — PURE, no I/O. Checks --budget-bytes /
+//      --context-budget mutual exclusion and the --budget-bytes integer form.
+//      Returns the immediate byte budget (--budget-bytes), a pending profile
+//      name (--context-budget, not yet resolved), or neither.
+//   2. resolveContextBudgetFlag() — ASYNC, reads the agent profile. Turns a
+//      pending profile name into a byte budget per the RFC's agent-less
+//      contract. `task context` (always builds) calls it immediately; `task
+//      prepare` defers it behind the early-return decision.
+
+type ValidatedBudget =
+  | { kind: "bytes"; budgetBytes: number }
+  | { kind: "profile"; profileName: string }
+  | { kind: "none" }
+  | { kind: "error"; exitCode: number };
+
+function validateBudgetFlags(
+  command: "task context" | "task prepare",
+  values: Record<string, unknown>,
+  json: boolean,
+): ValidatedBudget {
+  const budgetRaw = values["budget-bytes"];
+  const profileRaw = values["context-budget"];
+  const hasBudgetBytes = typeof budgetRaw === "string";
+  const hasContextBudget = typeof profileRaw === "string";
+
+  // Mutual exclusion (mirrors plan brief's three-mode exclusion).
+  if (hasBudgetBytes && hasContextBudget) {
+    emitConfigError(
+      `${command}: --budget-bytes and --context-budget are mutually exclusive.`,
+      json,
+    );
+    return { kind: "error", exitCode: 2 };
+  }
+
+  // --budget-bytes: unchanged P24 positive-integer validation.
+  if (hasBudgetBytes) {
+    const n = Number.parseInt(budgetRaw, 10);
+    if (!Number.isInteger(n) || n <= 0 || String(n) !== budgetRaw.trim()) {
+      emitConfigError(
+        `${command}: --budget-bytes requires a positive integer (got "${budgetRaw}").`,
+        json,
+      );
+      return { kind: "error", exitCode: 2 };
+    }
+    return { kind: "bytes", budgetBytes: n };
+  }
+
+  if (hasContextBudget) {
+    return { kind: "profile", profileName: profileRaw.trim() };
+  }
+  return { kind: "none" };
+}
+
+/**
+ * Resolve a `--context-budget` profile name to a byte budget per the RFC's
+ * agent-less-resolution contract. Throws `ContextBudgetProfileError`
+ * (`CONFIG_ERROR`) on an unknown profile and `code`-tagged errors on a strict
+ * agent-profile load failure (custom-name path only).
+ *
+ * - A STANDARD name (tight/balanced/wide) resolves to its built-in byte value
+ *   WITHOUT requiring an agent profile; the profile is consulted best-effort
+ *   only for an OVERRIDE, and its absence is never fatal.
+ * - A CUSTOM name lives only inside an agent profile, so it requires the strict
+ *   load and is CONFIG_ERROR when undeclared.
+ */
+async function resolveContextBudgetFlag(
+  cwd: string,
+  agent: string | undefined,
+  profileName: string,
+): Promise<number> {
+  let contextBudget: ContextBudgetProfiles | undefined;
+  let agentName: string | undefined = agent;
+  if (isStandardContextBudgetProfile(profileName)) {
+    contextBudget = await loadAgentContextBudgetBestEffort(cwd, agent);
+  } else {
+    const loaded = await loadAgentContextBudget(cwd, agent);
+    agentName = loaded.agentName;
+    contextBudget = loaded.contextBudget;
+  }
+  return resolveContextBudgetProfile({ profileName, contextBudget, agentName });
 }
 
 async function cmdTaskAdd(
@@ -407,30 +509,33 @@ async function cmdTaskContext(
     return 2;
   }
 
-  // P24: --budget-bytes parsing. The arg-parser gives us a raw string;
-  // validate it as a positive integer, reject zero / negative / NaN.
-  const budgetRaw = values["budget-bytes"];
-  let budgetBytes: number | undefined;
-  if (typeof budgetRaw === "string") {
-    const n = Number.parseInt(budgetRaw, 10);
-    if (!Number.isInteger(n) || n <= 0 || String(n) !== budgetRaw.trim()) {
-      const msg = `task context: --budget-bytes requires a positive integer (got "${budgetRaw}").`;
-      if (json) {
-        process.stdout.write(
-          `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
-        );
-      } else {
-        process.stderr.write(`${msg}\n`);
-      }
-      return 2;
-    }
-    budgetBytes = n;
-  }
-
   const agent = values.agent as string | undefined;
   const cwd = process.cwd();
 
+  // P24 --budget-bytes / P47 --context-budget mutual exclusion + integer form.
+  // Pure, no I/O; a bad combination emits CONFIG_ERROR and returns.
+  const budget = validateBudgetFlags("task context", values, json);
+  if (budget.kind === "error") return budget.exitCode;
+
   try {
+    // task context always builds the pack, so resolve a profile now. A
+    // profile/agent resolution error emits CONFIG_ERROR (ContextBudgetProfileError)
+    // or throws a `code`-tagged error routed through the catch below.
+    let budgetBytes: number | undefined;
+    if (budget.kind === "bytes") {
+      budgetBytes = budget.budgetBytes;
+    } else if (budget.kind === "profile") {
+      try {
+        budgetBytes = await resolveContextBudgetFlag(cwd, agent, budget.profileName);
+      } catch (err) {
+        if (err instanceof ContextBudgetProfileError) {
+          emitConfigError(`task context: ${err.message}`, json);
+          return 2;
+        }
+        throw err;
+      }
+    }
+
     const pack = await runTaskContext({
       cwd,
       taskId,
@@ -504,6 +609,13 @@ async function cmdTaskContext(
       case "AGENT_NOT_FOUND":
         msg = m.task.context.agentNotFound(agent ?? "");
         outCode = "AGENT_NOT_FOUND";
+        break;
+      // P47 — a malformed, explicitly-configured context_budget (surfaced by
+      // loadAgentContextBudget while resolving --context-budget) is a config
+      // problem, not an internal error.
+      case "CONFIG_ERROR":
+        msg = err.message;
+        outCode = "CONFIG_ERROR";
         break;
       case "CONTEXT_OVER_BUDGET": {
         const overBudget = err as Error & {
@@ -585,35 +697,30 @@ async function cmdTaskPrepare(
   const agent = values.agent as string | undefined;
   const dryRun = values["dry-run"] === true;
 
-  // P24: --budget-bytes parsing. Same validation as task context —
-  // positive integer; reject zero / negative / NaN.
-  const budgetRaw = values["budget-bytes"];
-  let budgetBytes: number | undefined;
-  if (typeof budgetRaw === "string") {
-    const n = Number.parseInt(budgetRaw, 10);
-    if (!Number.isInteger(n) || n <= 0 || String(n) !== budgetRaw.trim()) {
-      const msg = `task prepare: --budget-bytes requires a positive integer (got "${budgetRaw}").`;
-      if (json) {
-        process.stdout.write(
-          `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
-        );
-      } else {
-        process.stderr.write(`${msg}\n`);
-      }
-      return 2;
-    }
-    budgetBytes = n;
-  }
-
   const cwd = process.cwd();
 
+  // P24 --budget-bytes / P47 --context-budget mutual exclusion + integer form.
+  // Pure, no I/O; a bad combination emits CONFIG_ERROR and returns.
+  const budget = validateBudgetFlags("task prepare", values, json);
+  if (budget.kind === "error") return budget.exitCode;
+
   try {
+    // Resolution is DEFERRED behind a thunk so `task prepare`'s early-return
+    // states (done / blocked / unmet-deps) skip both the pack build and the
+    // profile read. The thunk runs only on the build path inside the runner;
+    // a ContextBudgetProfileError (code CONFIG_ERROR) or `code`-tagged agent
+    // error it throws there routes through this command's catch below.
+    // --context-budget stays per-invocation policy and is NOT echoed into the
+    // returned `commands` dictionary (buildCommands is unchanged).
     const result = await runTaskPrepare({
       cwd,
       taskId,
       agent,
       dryRun,
-      ...(budgetBytes !== undefined ? { budgetBytes } : {}),
+      ...(budget.kind === "bytes" ? { budgetBytes: budget.budgetBytes } : {}),
+      ...(budget.kind === "profile"
+        ? { resolveBudgetBytes: () => resolveContextBudgetFlag(cwd, agent, budget.profileName) }
+        : {}),
     });
     if (json) {
       process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
@@ -677,6 +784,12 @@ async function cmdTaskPrepare(
       case "AGENT_NOT_FOUND":
         msg = m.task.context.agentNotFound(agent ?? "");
         outCode = "AGENT_NOT_FOUND";
+        break;
+      // P47 — malformed, explicitly-configured context_budget while resolving
+      // --context-budget. A config problem, not an internal error.
+      case "CONFIG_ERROR":
+        msg = err.message;
+        outCode = "CONFIG_ERROR";
         break;
       case "CONTEXT_OVER_BUDGET": {
         const overBudget = err as Error & {

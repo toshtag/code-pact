@@ -1,0 +1,201 @@
+id: P47
+name: Context budget profiles — named, ergonomic context budgets that resolve to
+  a byte budget and reuse the unchanged P24 enforcement path
+weight: 4
+confidence: medium
+risk: medium
+status: done
+objective: |
+  P47 ships layer (a) of Context Fit (design/decisions/context-fit-rfc.md):
+  named context budget profiles on the agent profile plus a
+  --context-budget <profile> flag on `task context` and `task prepare`.
+
+  A profile name resolves to a byte budget, which then drives the UNCHANGED
+  P24 --budget-bytes enforcement path (same locked elision order, same
+  CONTEXT_OVER_BUDGET on an unachievable budget). It is a NAME for a NUMBER —
+  it introduces no tokenizer, no summarization, no compression, no semantic
+  ranking, no embeddings, no network behavior, and no default-on context
+  reduction.
+
+  Three standard profile names ship with built-in fallback byte values, the
+  single source of truth defined in the RFC and mirrored once in code
+  (src/core/context-fit/budget-profiles.ts): tight (30000), balanced (60000),
+  wide (120000). The standard names resolve even with no agent profile in play
+  ("agent-less resolution"). An agent profile may declare an optional
+  context_budget block that OVERRIDES a standard byte value or names custom
+  profiles; default_profile is validated but NOT auto-applied in P47.
+
+  Invariants held: the no-flag context pack stays byte-identical; --budget-bytes
+  behavior is unchanged; --budget-bytes and --context-budget are mutually
+  exclusive (CONFIG_ERROR, exit 2); an unknown profile is CONFIG_ERROR; the
+  task prepare `commands` dictionary does not echo --context-budget (per-
+  invocation policy, like --budget-bytes); wide is deliberately not `full`.
+
+  Scope is layer (a) only. P48 (recommended budget on recommend / task prepare),
+  P49 (explain metrics), and P50 (readiness advisories) are NOT in this phase.
+
+  Design recorded in design/decisions/context-fit-rfc.md § Layer (a).
+non_goals:
+  - Any of Context Fit layers (b)/(c)/(d) — recommend.contextFit, explain
+    metrics, or plan-lint context-fit advisories. P47 is layer (a) only.
+  - Token counting, a tokenizer dependency, summarization, compression, semantic
+    ranking, embeddings, or any network access.
+  - Default-on context reduction — no flag means the current byte-identical
+    behavior, with no hidden reduction.
+  - Any change to the P24 elision order / eligibility, the Buffer.byteLength
+    byte measurement, or the CONTEXT_OVER_BUDGET contract.
+  - Auto-applying context_budget.default_profile to any command (validated for
+    future ergonomics only).
+  - A `full` profile name (rejected in P46 — it reads as a no-elision guarantee).
+definition_of_done:
+  - The agent profile schema accepts and validates an optional context_budget
+    block (profiles non-empty, max_bytes a positive integer, profile names safe
+    CLI identifiers, default_profile must reference a declared profile); a
+    missing block stays valid and is never auto-applied.
+  - A single code-level source of truth for the standard profiles
+    (src/core/context-fit/budget-profiles.ts) carries tight=30000,
+    balanced=60000, wide=120000, with no second runtime source of truth in CLI
+    code or schemas; docs and tests may repeat the values as contract
+    assertions.
+  - A pure resolver (src/core/context-fit/resolve-budget-profile.ts) resolves a
+    profile name to bytes via agent-profile override, then standard fallback,
+    then CONFIG_ERROR; standard names resolve agent-less.
+  - task context and task prepare accept --context-budget <profile>, resolve it
+    to a byte budget, and reuse the existing budgetBytes path; --context-budget
+    and --budget-bytes are mutually exclusive (CONFIG_ERROR, exit 2); an unknown
+    profile is CONFIG_ERROR; the task prepare commands dictionary does not echo
+    --context-budget.
+  - The no-flag content is byte-identical and --budget-bytes behavior is
+    unchanged; tests prove --context-budget standard equals --budget-bytes
+    fallback for the same task, and a custom or overriding agent profile
+    resolves correctly.
+  - The generated CLI reference, cli-contract.md, and CHANGELOG record the new
+    shipped behavior, and check:docs passes.
+  - The phase is registered (this phase YAML plus a design/roadmap.yaml entry);
+    validate --json and plan lint --include-quality --strict --json are clean.
+verification:
+  commands:
+    - pnpm typecheck
+    - pnpm test
+    - pnpm build
+    - pnpm check:docs
+    - node dist/cli.js validate --json
+    - node dist/cli.js plan lint --include-quality --strict --json
+tasks:
+  - id: P47-T0
+    type: architecture
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: done
+    description: >
+      Phase registration / design alignment. Registers the P47 phase (this phase
+      YAML + a design/roadmap.yaml entry, weight 4) implementing Context Fit
+      layer (a) from the accepted RFC. The phase YAML is a protected-path
+      bootstrap write (it is in acceptance_refs) and design/roadmap.yaml is a
+      plan-lint --strict protected path, so neither is listed in writes.
+    decision_refs:
+      - design/decisions/context-fit-rfc.md
+    reads:
+      - design/decisions/context-fit-rfc.md
+    acceptance_refs:
+      - design/phases/P47-context-budget-profiles.yaml
+  - id: P47-T1
+    type: feature
+    ambiguity: low
+    risk: medium
+    context_size: small
+    write_surface: low
+    verification_strength: strong
+    expected_duration: short
+    status: done
+    description: >
+      Agent profile schema + resolver helper. Adds the optional context_budget
+      block to AgentProfile (profiles non-empty; max_bytes positive integer;
+      safe profile names; default_profile references a declared profile). Adds
+      the single source of truth for the standard profiles
+      (src/core/context-fit/budget-profiles.ts: tight/balanced/wide) and a pure
+      resolver (src/core/context-fit/resolve-budget-profile.ts): override →
+      standard fallback → CONFIG_ERROR, with agent-less standard resolution.
+    depends_on:
+      - P47-T0
+    decision_refs:
+      - design/decisions/context-fit-rfc.md
+    reads:
+      - design/decisions/context-fit-rfc.md
+      - src/core/schemas/agent-profile.ts
+    writes:
+      - src/core/schemas/agent-profile.ts
+      - src/core/context-fit/budget-profiles.ts
+      - src/core/context-fit/resolve-budget-profile.ts
+      - tests/unit/schemas/agent-profile.test.ts
+      - tests/unit/core/context-fit/resolve-budget-profile.test.ts
+    acceptance_refs:
+      - design/phases/P47-context-budget-profiles.yaml
+  - id: P47-T2
+    type: feature
+    ambiguity: low
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: short
+    status: done
+    description: >
+      CLI flag for task context + task prepare. Adds --context-budget <profile>
+      to the task context / task prepare specs and wires resolution at the CLI
+      boundary (load the agent profile's context_budget only when needed),
+      reusing the existing budgetBytes path. Enforces --budget-bytes /
+      --context-budget mutual exclusion (CONFIG_ERROR, exit 2) and routes
+      unknown-profile / malformed-config errors as CONFIG_ERROR. The task
+      prepare commands dictionary is unchanged (no --context-budget echo).
+    depends_on:
+      - P47-T1
+    decision_refs:
+      - design/decisions/context-fit-rfc.md
+    reads:
+      - src/cli/spec/task.ts
+      - src/cli/commands/task.ts
+      - src/commands/task-context.ts
+      - src/commands/task-prepare.ts
+    writes:
+      - src/cli/spec/task.ts
+      - src/cli/commands/task.ts
+      - src/core/context-fit/load-context-budget.ts
+      - tests/integration/task-context-budget.test.ts
+    acceptance_refs:
+      - design/phases/P47-context-budget-profiles.yaml
+  - id: P47-T3
+    type: docs
+    ambiguity: low
+    risk: low
+    context_size: medium
+    write_surface: low
+    verification_strength: strong
+    expected_duration: short
+    status: done
+    description: >
+      Docs + generated CLI reference + compatibility. Regenerates the CLI
+      reference, documents --context-budget in cli-contract.md (ergonomic alias
+      for a byte budget; built-ins tight/balanced/wide; wide is not full; mutual
+      exclusion with --budget-bytes; no-flag is current behavior;
+      default_profile not auto-applied), and records the CHANGELOG entry.
+      check:docs (doc-links + doc-invariants + cli-reference) passes.
+    depends_on:
+      - P47-T2
+    decision_refs:
+      - design/decisions/context-fit-rfc.md
+    reads:
+      - docs/cli-contract.md
+      - docs/cli-reference.generated.md
+      - docs/glossary.md
+    writes:
+      - docs/cli-contract.md
+      - docs/cli-reference.generated.md
+      - docs/glossary.md
+      - CHANGELOG.md
+    acceptance_refs:
+      - design/phases/P47-context-budget-profiles.yaml

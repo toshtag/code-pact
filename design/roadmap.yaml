@@ -125,3 +125,6 @@ phases:
   - id: P46
     path: design/phases/P46-context-fit.yaml
     weight: 3
+  - id: P47
+    path: design/phases/P47-context-budget-profiles.yaml
+    weight: 4
