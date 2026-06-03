@@ -1,0 +1,10 @@
+name: claude-code
+instruction_filename: CLAUDE.md
+context_dir: .context/claude
+skill_dir: .claude/skills
+hook_dir: .claude/hooks
+model_map:
+  highest_reasoning: claude-opus-4-8
+  balanced_coding: claude-sonnet-4-6
+  cheap_mechanical: claude-haiku-4-5
+model_version: opus-4.8
