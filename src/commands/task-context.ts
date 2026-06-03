@@ -12,8 +12,9 @@ export type TaskContextOptions = {
   agent?: string;
   /**
    * When true, the returned ContextPackResult includes section-level
-   * `sections` and `excluded` arrays. The rendered `content` string is
-   * byte-identical regardless of this flag.
+   * `sections` and `excluded` arrays plus the P49 `explainMetrics`
+   * (natural / final / saved / minimum-achievable bytes + elided sections).
+   * The rendered `content` string is byte-identical regardless of this flag.
    */
   explain?: boolean;
   /**

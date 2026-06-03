@@ -1453,6 +1453,34 @@ When a task declares **none** of the P10 fields, the pack body is byte-identical
 
 **Acceptance invariant.** `sum(sections[].bytes) === total_bytes === context_pack_bytes`. The renderer's inter-section newlines are captured as a synthetic `format_overhead` section so the invariant holds without any unattributed bytes.
 
+**Context Fit explain metrics (v1.30+, P49).** `--explain --json` additionally surfaces byte metrics that make the pack's *fit* observable. They are **byte-based, not token-based** (every value is `Buffer.byteLength(…, "utf8")`), computed **locally and deterministically** — no tokenizer, summarization, model call, or network access is involved — and they never change the rendered `content`. The fields are additive; the existing fields above are unchanged.
+
+| Field | Type | Notes |
+|---|---|---|
+| `natural_bytes` | integer | The **pre-budget** pack size: the bytes the no-budget builder would render for this task (after the existing deterministic relevance/readiness selection, before any budget-driven elision). Not a whole-repository size, not a token count. |
+| `final_bytes` | integer | The post-budget pack size. **Equals `total_bytes` == `context_pack_bytes`.** |
+| `budget_bytes` | integer | Present **only when a budget was applied** (via `--budget-bytes` or `--context-budget`); omitted otherwise. Equals the resolved byte budget (an agent same-name `context_budget` override is reflected here). |
+| `saved_bytes` | integer | `natural_bytes - final_bytes` — the bytes removed by **budget-driven elision only**. `0` when no section was elided. |
+| `saved_ratio` | number | `saved_bytes / natural_bytes` (a fraction in `[0, 1]`; `0` when `natural_bytes === 0`). The illustrative value below is rounded for readability — the field is the exact quotient. |
+| `minimum_achievable_bytes` | integer | The floor below which no budget can drive this task — the size after every budget-**eligible** section is elided, honoring the P28 conditional eligibility (`related_decisions` elidable only when `context_size: large`; `rules` only when `write_surface: high`). **This is the same floor the [`CONTEXT_OVER_BUDGET`](#--budget-bytes-n-v113-p24) error reports, computed by the same shared helper** — the success path and the error path can never disagree. |
+| `elided_sections[]` | array | A convenience projection of the **budget-elided** sections only, in actual elision order — `{ "name": string, "bytes": number }`. Mirrors the `budget_reserved_for_later` subset of `excluded[]`. `[]` when no budget elision occurred. |
+
+```jsonc
+{
+  "natural_bytes": 95000,
+  "final_bytes": 58720,            // == total_bytes == context_pack_bytes
+  "budget_bytes": 60000,           // present only when a budget was applied
+  "saved_bytes": 36280,            // natural_bytes - final_bytes (0 with no elision)
+  "saved_ratio": 0.381,            // saved_bytes / natural_bytes (rounded here for display)
+  "minimum_achievable_bytes": 28120,
+  "elided_sections": [
+    { "name": "completed_tasks", "bytes": 1200 }
+  ]
+}
+```
+
+With **no** budget, `natural_bytes === final_bytes`, `saved_bytes === 0`, `saved_ratio === 0`, `elided_sections === []`, and `budget_bytes` is omitted. The metrics make the existing P24/P47 budget behavior observable; they introduce **no new reduction policy** — only an explicit `--budget-bytes` / `--context-budget` invocation can elide sections, and the no-flag pack stays byte-identical. The metrics surface only on `--explain --json` (not on normal `task context` output, and not on `task prepare`).
+
 **`sections[]` entry shape:**
 
 ```json

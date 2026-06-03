@@ -1,0 +1,229 @@
+id: P49
+name: Context Fit explain metrics — additive byte metrics on task context
+  --explain --json that make the natural pack size, the budget-driven savings,
+  and the achievable floor observable, sharing one floor helper with
+  CONTEXT_OVER_BUDGET
+weight: 5
+confidence: medium
+risk: medium
+status: done
+objective: |
+  P49 ships layer (c) of Context Fit (design/decisions/context-fit-rfc.md):
+  additive, byte-based explain metrics on `task context --explain --json`.
+
+  The existing explain fields (total_bytes, context_pack_bytes, sections,
+  excluded) are unchanged. The new keys are strictly additive:
+
+    natural_bytes             pre-elision pack size (the bytes the no-budget
+                              builder would render for this task)
+    final_bytes               post-budget pack size; equals total_bytes ==
+                              context_pack_bytes
+    budget_bytes              present ONLY when a budget was applied (via
+                              --budget-bytes or --context-budget); omitted
+                              otherwise
+    saved_bytes               natural_bytes - final_bytes (0 with no elision)
+    saved_ratio               saved_bytes / natural_bytes (0 when natural is 0)
+    minimum_achievable_bytes  the floor after all budget-ELIGIBLE elisions for
+                              THIS task
+    elided_sections           convenience projection of the budget-elided
+                              sections, in elision order: { name, bytes }
+
+  Highest-risk invariant (single most delicate correctness property of Context
+  Fit): the minimum_achievable_bytes a successful --explain build reports and
+  the minimum_achievable_bytes the CONTEXT_OVER_BUDGET error reports for the
+  same task and eligibility state come from ONE shared pure helper. The success
+  path and the error path must never disagree about the floor. The helper honors
+  the current P28 conditional eligibility: related_decisions is budget-elidable
+  only when context_size: large; rules only when write_surface: high; the locked
+  ELISION_ORDER and the always-included sections are unchanged.
+
+  Computing the metrics is pure and does NOT change the rendered content: the
+  no-flag pack stays byte-identical, and only an explicit --budget-bytes /
+  --context-budget invocation can elide sections (the unchanged P24/P47 path).
+  No token counting, tokenizer, summarization, compression, semantic ranking,
+  embeddings, proxy, or network behavior is introduced. The metrics surface only
+  on --explain --json; normal non-explain context output is unchanged.
+
+  Scope is layer (c) only. P50 (plan-lint context-fit advisories), P51
+  (structural compaction), and P52 (external context sources) are NOT in this
+  phase.
+
+  Design recorded in design/decisions/context-fit-rfc.md § Layer (c).
+non_goals:
+  - Context Fit layers (d) and beyond — plan-lint context-fit advisories (P50),
+    deterministic structural compaction (P51), or external context sources
+    (P52). P49 is layer (c) only, and adds no new advisory code.
+  - Token counting, a tokenizer dependency, summarization, compression, semantic
+    ranking, embeddings, a proxy, or any network access.
+  - Any new context reduction policy — P49 only makes the EXISTING P24/P47
+    budget behavior observable; it never changes pack content except via the
+    elision the user already opted into with --budget-bytes / --context-budget.
+  - Any change to the P24 ELISION_ORDER / eligibility, the Buffer.byteLength
+    byte measurement, or the CONTEXT_OVER_BUDGET error code / exit code /
+    envelope.
+  - Adding explain metrics to `task prepare` JSON or to normal (non-explain)
+    `task context` output — the metrics live only on `task context --explain
+    --json`, exactly as the accepted RFC scopes layer (c).
+  - A second, separate floor calculation — minimum_achievable_bytes for the
+    success path and for CONTEXT_OVER_BUDGET must derive from one helper.
+definition_of_done:
+  - A single shared pure helper computes the budget-eligible elision order and
+    the minimum-achievable floor honoring P28 conditional eligibility
+    (related_decisions only when context_size is large; rules only when
+    write_surface is high), and BOTH the successful --explain metrics and the
+    CONTEXT_OVER_BUDGET error derive minimum_achievable_bytes from it. A
+    regression test asserts the two report the same floor for the same task.
+  - The `task context --explain --json` output includes natural_bytes,
+    final_bytes, saved_bytes, saved_ratio, minimum_achievable_bytes, and
+    elided_sections, plus budget_bytes only when a budget was applied. The
+    existing explain fields (total_bytes, context_pack_bytes, sections,
+    excluded) are unchanged, and final_bytes === total_bytes ===
+    context_pack_bytes.
+  - With no budget the metrics report natural_bytes === final_bytes, saved_bytes
+    === 0, saved_ratio === 0, elided_sections === [], and budget_bytes is
+    omitted; with a budget that fits without elision, saved_bytes === 0 and
+    budget_bytes is present; with a budget that triggers elision, saved_bytes
+    === natural_bytes - final_bytes and elided_sections lists the budget-elided
+    sections in elision order.
+  - --context-budget and --budget-bytes produce equivalent explain metrics when
+    they resolve to the same byte value (built-in balanced === --budget-bytes
+    60000; an agent same-name override is reflected in budget_bytes).
+  - The no-flag context pack content stays byte-identical
+    (tests/integration/pack-byte-identical.test.ts unchanged); computing metrics
+    does not change rendered content; normal non-explain output is unchanged.
+  - cli-contract.md, agent-contract.md, the glossary, and CHANGELOG record the
+    shipped P49 behavior (byte-based not token-based; natural_bytes is the
+    pre-budget pack size; final_bytes equals total_bytes / context_pack_bytes;
+    budget_bytes appears only when a budget was applied; saved_bytes /
+    saved_ratio measure budget-driven elision only; minimum_achievable_bytes is
+    the same floor used by CONTEXT_OVER_BUDGET; elided_sections lists
+    budget-elided sections only; metrics are local and deterministic with no
+    summarization / model / tokenizer / network). The generated CLI reference is
+    checked/regenerated as a no-op because P49 adds no new flag or command (the
+    metrics are JSON result fields, not a CLI surface). check:docs passes.
+  - The phase is registered (this phase YAML plus a design/roadmap.yaml entry);
+    validate --json and plan lint --include-quality --strict --json are clean.
+verification:
+  commands:
+    - pnpm typecheck
+    - pnpm test
+    - pnpm build
+    - pnpm check:docs
+    - node dist/cli.js validate --json
+    - node dist/cli.js plan lint --include-quality --strict --json
+tasks:
+  - id: P49-T0
+    type: architecture
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: done
+    description: >
+      Phase registration / RFC alignment. Registers the P49 phase (this phase
+      YAML + a design/roadmap.yaml entry, weight 5) implementing Context Fit
+      layer (c) from the accepted RFC. The phase YAML is a protected-path
+      bootstrap write (it is in acceptance_refs) and design/roadmap.yaml is a
+      plan-lint --strict protected path, so neither is listed in writes.
+    decision_refs:
+      - design/decisions/context-fit-rfc.md
+    reads:
+      - design/decisions/context-fit-rfc.md
+    acceptance_refs:
+      - design/phases/P49-context-fit-explain-metrics.yaml
+  - id: P49-T1
+    type: feature
+    ambiguity: low
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: short
+    status: done
+    description: >
+      Shared budget floor / elision metrics helper. Extracts pure helpers in
+      src/core/pack/index.ts that compute the budget-eligible elision order and
+      the minimum-achievable floor (honoring P28 conditional eligibility), and
+      routes BOTH the CONTEXT_OVER_BUDGET error and a new BudgetElisionMetrics
+      result (natural / final / minimum-achievable / elided sections) through
+      them. No new floor path is introduced; the success and error floors share
+      one helper.
+    depends_on:
+      - P49-T0
+    decision_refs:
+      - design/decisions/context-fit-rfc.md
+    reads:
+      - design/decisions/context-fit-rfc.md
+      - src/core/pack/index.ts
+      - src/core/pack/formatters/markdown.ts
+    writes:
+      - src/core/pack/index.ts
+      - tests/unit/core/pack/budget.test.ts
+    acceptance_refs:
+      - design/phases/P49-context-fit-explain-metrics.yaml
+  - id: P49-T2
+    type: feature
+    ambiguity: low
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: short
+    status: done
+    description: >
+      Explain JSON output wiring. Surfaces the BudgetElisionMetrics-derived
+      explain metrics (natural_bytes, final_bytes, saved_bytes, saved_ratio,
+      minimum_achievable_bytes, elided_sections, and budget_bytes only when a
+      budget was applied) on `task context --explain --json`, keeping existing
+      explain fields unchanged and human / non-explain output untouched.
+    depends_on:
+      - P49-T1
+    decision_refs:
+      - design/decisions/context-fit-rfc.md
+    reads:
+      - src/commands/task-context.ts
+      - src/cli/commands/task.ts
+    writes:
+      - src/commands/task-context.ts
+      - src/cli/commands/task.ts
+      - tests/integration/task-context-explain-metrics.test.ts
+    acceptance_refs:
+      - design/phases/P49-context-fit-explain-metrics.yaml
+  - id: P49-T3
+    type: docs
+    ambiguity: low
+    risk: low
+    context_size: medium
+    write_surface: low
+    verification_strength: strong
+    expected_duration: short
+    status: done
+    description: >
+      Docs + CHANGELOG. Documents the explain metrics (byte-based not
+      token-based; natural_bytes is the pre-budget pack size; final_bytes equals
+      total_bytes / context_pack_bytes; budget_bytes only when a budget was
+      applied; saved_bytes / saved_ratio measure budget-driven elision only;
+      minimum_achievable_bytes is the same floor used by CONTEXT_OVER_BUDGET;
+      elided_sections lists budget-elided sections only; local and
+      deterministic, no summarization / model / tokenizer / network) in
+      cli-contract.md, agent-contract.md, and the glossary, and records the
+      CHANGELOG entry. The generated CLI reference is a no-op (P49 adds no new
+      flag or command), so it is not a write target. check:docs passes.
+    depends_on:
+      - P49-T2
+    decision_refs:
+      - design/decisions/context-fit-rfc.md
+    reads:
+      - docs/cli-contract.md
+      - docs/agent-contract.md
+      - docs/glossary.md
+      - docs/cli-reference.generated.md
+    writes:
+      - docs/cli-contract.md
+      - docs/agent-contract.md
+      - docs/glossary.md
+      - CHANGELOG.md
+    acceptance_refs:
+      - design/phases/P49-context-fit-explain-metrics.yaml
