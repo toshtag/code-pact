@@ -194,6 +194,7 @@ CI. (For `error.cause_code` values, see [Public cause codes](#public-cause-codes
 | `CONTEXT_OVER_BUDGET` (v1.13+ / P24) | `task context --budget-bytes`, `task prepare --budget-bytes` | Even maximal section elision could not bring the rendered pack at or below the requested byte budget. Exit code 2. The envelope carries `data.budget_bytes`, `data.minimum_achievable_bytes` (the post-maximal-elision size — re-running with this value as the budget succeeds), and `data.unelidable_sections` (the structural floor) |
 | `INTERNAL_ERROR` | any command | Reserved for unhandled exceptions |
 | `ADAPTER_DESIRED_PATH_CONFLICT` (v1.20+) | `adapter install`, `adapter upgrade --write` | Defense-in-depth invariant: an adapter generator produced two desired files at the same path with differing content. Should never fire in practice (each adapter uniquifies its own paths); surfaced as an unhandled exception (exit 3), not a structured envelope |
+| `EVENT_FILE_ID_MISMATCH` (collaboration-safe-state RFC, B1/B5) | per-event progress ledger reads/writes | Data-integrity invariant: an event file's content (or its stored `id`) does not match its filename, which **is** the full content id. Fail-closed so a corrupt / partial / hand-edited ledger entry is never read or written-over silently. Surfaced as an unhandled exception, not a structured envelope. The per-event ledger reader/writer is not CLI-wired until Bucket B PR 2 |
 
 ### Public cause codes
 
