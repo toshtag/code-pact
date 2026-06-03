@@ -308,10 +308,12 @@ digest, stored in the event body. **The filename is `<at-compact>-<full-id>.yaml
 **normalized (UTC) `at`** rendered compactly (`YYYYMMDDTHHMMSSsssZ`) for a
 human-browsable, roughly-chronological `ls`. Both parts are fully determined by
 content, so the **filename is a bijection with the `id`**: a filename collision
-occurs **iff** the events are byte-identical. That collapses the write-path
-collision question to a single rule — a `wx` exclusive-create failing with
-`EEXIST` means *the identical event is already on disk* (idempotent success, B1),
-never a distinct-event clash needing a longer suffix or fallback. (A truncated
+occurs **iff** the events are *canonically identical* (same canonical payload).
+That collapses the write-path collision question to a single rule — a
+pre-existing final file (published via a temp file + `link`, so it is never
+overwritten) means *the canonically identical event is already on disk*
+(idempotent success, B1), never a distinct-event clash needing a longer suffix or
+fallback. (A truncated
 `id12` filename would reintroduce an undefined case: two distinct events sharing
 an `at`-ms **and** a 12-hex prefix collide on path while differing in full id.
 The full-digest filename is ~90 chars — well under the 255 limit — and buys an

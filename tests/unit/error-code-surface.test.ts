@@ -168,6 +168,12 @@ const KNOWN_CODES: Record<string, "public" | "plan" | "doctor" | "adapter" | "in
   // adapter uniquifies its own paths); surfaced as an unhandled exception
   // (exit 3) rather than a structured envelope.
   ADAPTER_DESIRED_PATH_CONFLICT: "internal",
+  // Data-integrity invariant (collaboration-safe-state RFC, B1/B5): an event
+  // file's content (or its stored id) does not match its filename, which IS the
+  // full content id. Fail-closed so the writer never reports success over a
+  // corrupt / partial / hand-edited ledger entry. Thrown as an exception; the
+  // per-event readers/writers are not CLI-wired until Bucket B PR 2.
+  EVENT_FILE_ID_MISMATCH: "internal",
 };
 
 // Emission patterns we recognize:
