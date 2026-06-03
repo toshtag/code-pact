@@ -131,6 +131,39 @@ export type ContextExplainExcluded = {
   details?: Record<string, unknown>;
 };
 
+/**
+ * P49 (Context Fit, layer c) — additive, byte-based explain metrics surfaced
+ * on `task context --explain --json`. Every value is a UTF-8 byte count
+ * computed with `Buffer.byteLength(..., "utf8")` (never tokens), derived
+ * locally and deterministically: no tokenizer, summarization, model call, or
+ * network access is involved.
+ *
+ * These are an OBSERVABILITY layer over the existing P24/P47 budget path; they
+ * never change the rendered `content`. The no-flag pack stays byte-identical,
+ * and only an explicit `--budget-bytes` / `--context-budget` invocation elides
+ * sections.
+ */
+export type ContextExplainMetrics = {
+  /** Pre-elision pack size: the bytes the no-budget builder renders for this task. */
+  naturalBytes: number;
+  /** Post-budget pack size. Equals the result's `totalBytes` (== context_pack_bytes). */
+  finalBytes: number;
+  /** Present only when a budget was applied (via --budget-bytes / --context-budget). */
+  budgetBytes?: number;
+  /** `naturalBytes - finalBytes`; 0 when no section was elided. */
+  savedBytes: number;
+  /** `savedBytes / naturalBytes`; 0 when `naturalBytes === 0`. */
+  savedRatio: number;
+  /**
+   * The floor after all budget-ELIGIBLE elisions for this task — the SAME
+   * value `CONTEXT_OVER_BUDGET` reports, computed by the same shared helper
+   * (honoring the P28 conditional eligibility).
+   */
+  minimumAchievableBytes: number;
+  /** Budget-elided sections only, in actual elision order. */
+  elidedSections: Array<{ name: string; bytes: number }>;
+};
+
 export type ContextPackResult = {
   content: string;
   taskId: string;
@@ -151,6 +184,11 @@ export type ContextPackResult = {
   sections?: ContextExplainSection[];
   /** Present only when `explain: true` was passed to `buildContextPack`. */
   excluded?: ContextExplainExcluded[];
+  /**
+   * P49 explain metrics. Present only when `explain: true`. Byte-based and
+   * deterministic; computing them does not change `content`.
+   */
+  explainMetrics?: ContextExplainMetrics;
 };
 
 export type WriteContextPackOptions = {
@@ -485,6 +523,21 @@ export async function buildContextPack(
     );
     result.excluded = computeExplainExcluded(flags, declared);
 
+    // P49 — additive byte metrics. `saved_*` are the trivial projection of the
+    // shared budget facts; `budgetBytes` is attached only when a budget was
+    // actually applied (per-invocation, like the P24/P47 elision itself).
+    const bm = budgetResult.metrics;
+    const savedBytes = bm.naturalBytes - bm.finalBytes;
+    result.explainMetrics = {
+      naturalBytes: bm.naturalBytes,
+      finalBytes: bm.finalBytes,
+      ...(opts.budgetBytes !== undefined ? { budgetBytes: opts.budgetBytes } : {}),
+      savedBytes,
+      savedRatio: bm.naturalBytes === 0 ? 0 : savedBytes / bm.naturalBytes,
+      minimumAchievableBytes: bm.minimumAchievableBytes,
+      elidedSections: bm.elidedSections,
+    };
+
     // P24: any section elided by --budget-bytes appears in excluded[]
     // with `reason_code: budget_reserved_for_later`. This activates
     // the value P21 reserved for this work. The new entries are
@@ -519,10 +572,22 @@ export async function buildContextPack(
 // machinery can surface them.
 // ---------------------------------------------------------------------------
 
+// P49: byte facts derived from one application of the budget path. Pure
+// (UTF-8 byte counts only) and unit-testable. `saved_bytes` / `saved_ratio`
+// are NOT stored here — they are a trivial projection the explain layer
+// derives (see buildContextPack), keeping this struct to raw measured bytes.
+type BudgetElisionMetrics = {
+  naturalBytes: number;
+  finalBytes: number;
+  minimumAchievableBytes: number;
+  elidedSections: Array<{ name: string; bytes: number }>;
+};
+
 type BudgetElisionResult = {
   sections: RenderedSection[];
   elidedNames: string[];
   elidedBytes: Map<string, number>;
+  metrics: BudgetElisionMetrics;
 };
 
 // P28: the readiness signals that gate conditional elision eligibility.
@@ -545,17 +610,73 @@ function sectionBytes(section: RenderedSection): number {
   return Buffer.byteLength(section.lines.join("\n"), "utf8");
 }
 
+// P28: elision ELIGIBILITY is conditional, per context-budget-rfc.md.
+// `related_decisions` is elidable only when it is the `context_size: large`
+// "all decisions" expansion; `rules` only when it is the `write_surface: high`
+// "all rules" expansion. Outside those expansions the section holds task-id-
+// matched decisions / applies_to-matched rules the RFC marks unelidable —
+// dropping them for budget would silently remove context the task opted into.
+// The priority (ELISION_ORDER) is unchanged; only the eligible subset narrows
+// per invocation. This is the SINGLE source of the eligible set: both the
+// elision loop and the minimum-achievable floor read it.
+function eligibleElisionOrder(eligibility: BudgetElisionEligibility): string[] {
+  return ELISION_ORDER.filter((name) => {
+    if (name === "related_decisions") return eligibility.isLarge;
+    if (name === "rules") return eligibility.isLargeWriteSurface;
+    return true;
+  });
+}
+
+// P49: the floor below which no budget can drive this task — the rendered byte
+// size after every budget-ELIGIBLE section is removed. This is the SINGLE
+// helper behind both the successful `--explain` `minimum_achievable_bytes` and
+// the `CONTEXT_OVER_BUDGET` error's `minimum_achievable_bytes`; the two can
+// never disagree (the RFC's principal correctness invariant). It is order-
+// independent (it removes the whole eligible set), so it agrees with the
+// loop's post-maximal-elision `surviving` size: sections not present are no-ops
+// in the filter, and the loop removes exactly the eligible-and-present set.
+function computeMinimumAchievableBytes(
+  rendered: ReadonlyArray<RenderedSection>,
+  eligibility: BudgetElisionEligibility,
+): number {
+  const eligible = new Set(eligibleElisionOrder(eligibility));
+  return computeRenderedBytes(rendered.filter((s) => !eligible.has(s.name)));
+}
+
 function applyBudgetElision(
   rendered: ReadonlyArray<RenderedSection>,
   budgetBytes: number | undefined,
   eligibility: BudgetElisionEligibility,
 ): BudgetElisionResult {
+  // Byte facts that hold regardless of which return path we take. The floor is
+  // derived from the shared helper so the success and CONTEXT_OVER_BUDGET paths
+  // can never report a different minimum.
+  const naturalBytes = computeRenderedBytes(rendered);
+  const minimumAchievableBytes = computeMinimumAchievableBytes(rendered, eligibility);
+
+  const makeResult = (
+    sections: RenderedSection[],
+    elidedNames: string[],
+    elidedBytes: Map<string, number>,
+  ): BudgetElisionResult => ({
+    sections,
+    elidedNames,
+    elidedBytes,
+    metrics: {
+      naturalBytes,
+      // Recomputed from the surviving sections with the same join+byteLength
+      // the pack body uses, so it equals the caller's `totalBytes`.
+      finalBytes: computeRenderedBytes(sections),
+      minimumAchievableBytes,
+      elidedSections: elidedNames.map((name) => ({
+        name,
+        bytes: elidedBytes.get(name) ?? 0,
+      })),
+    },
+  });
+
   if (budgetBytes === undefined) {
-    return {
-      sections: [...rendered],
-      elidedNames: [],
-      elidedBytes: new Map(),
-    };
+    return makeResult([...rendered], [], new Map());
   }
 
   let surviving = [...rendered];
@@ -563,39 +684,25 @@ function applyBudgetElision(
   const elidedBytes = new Map<string, number>();
 
   if (computeRenderedBytes(surviving) <= budgetBytes) {
-    return { sections: surviving, elidedNames, elidedBytes };
+    return makeResult(surviving, elidedNames, elidedBytes);
   }
 
-  // P28: elision ELIGIBILITY is conditional, per context-budget-rfc.md.
-  // `related_decisions` is elidable only when it is the `context_size:
-  // large` "all decisions" expansion; `rules` only when it is the
-  // `write_surface: high` "all rules" expansion. Outside those
-  // expansions the section holds task-id-matched decisions /
-  // applies_to-matched rules the RFC marks unelidable — dropping them
-  // for budget would silently remove context the task opted into. The
-  // priority (ELISION_ORDER) is unchanged; only the eligible subset
-  // narrows per invocation.
-  const eligibleOrder = ELISION_ORDER.filter((name) => {
-    if (name === "related_decisions") return eligibility.isLarge;
-    if (name === "rules") return eligibility.isLargeWriteSurface;
-    return true;
-  });
-
-  for (const name of eligibleOrder) {
+  for (const name of eligibleElisionOrder(eligibility)) {
     const idx = surviving.findIndex((s) => s.name === name);
     if (idx === -1) continue;
     elidedBytes.set(name, sectionBytes(surviving[idx]!));
     surviving = surviving.filter((_, i) => i !== idx);
     elidedNames.push(name);
     if (computeRenderedBytes(surviving) <= budgetBytes) {
-      return { sections: surviving, elidedNames, elidedBytes };
+      return makeResult(surviving, elidedNames, elidedBytes);
     }
   }
 
-  // Maximal elision performed; still over budget.
+  // Maximal elision performed; still over budget. The reported floor comes from
+  // the shared helper (not a second computation), matching the explain floor.
   throw new ContextOverBudgetError(
     budgetBytes,
-    computeRenderedBytes(surviving),
+    minimumAchievableBytes,
     surviving.map((s) => s.name),
   );
 }
