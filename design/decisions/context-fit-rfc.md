@@ -76,7 +76,7 @@ Context Fit defines exactly **three standard profile names** and their **built-i
 | --------- | -------------------- | ------------------------------------------------ |
 | `tight`   | `30000`              | Above the `pack_size_p50_bytes` (20725): most small/medium tasks fit; constrained tiers. |
 | `balanced`| `60000`              | Above the `pack_size_p90_bytes` (50131): ~90% of tasks fit without elision. |
-| `wide`    | `120000`             | Generous headroom below the `pack_size_max_bytes` outlier (259650); large/ambiguous tasks. Still a byte-capped profile — **not** a promise every pack fits without elision. |
+| `wide`    | `120000`             | Generous margin below the `pack_size_max_bytes` outlier (259650); large/ambiguous tasks. Still a byte-capped profile — **not** a promise every pack fits without elision. |
 
 Rationale is observable, not guessed: the values bracket the committed P26 baseline (`docs/maintainers/measurements/summary.json`), so each is a real percentile boundary rather than a round number. An agent profile (layer **a**) may **override** any of these byte values by declaring a profile of the same name; when it does not, the fallback above applies. The recommendation layer (**b**) only ever emits one of these three names. `wide` is intentionally **not** named `full`: it is a generous byte-capped profile, not a promise that every context pack fits without elision (a large task can still elide or hit `CONTEXT_OVER_BUDGET` at `wide`). `large` / `max` / `full` were rejected — `large` collides with the `context_size: large` value, and `max` / `full` read as a no-elision guarantee.
 

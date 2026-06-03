@@ -7,7 +7,7 @@
 // so each is a real percentile boundary rather than a round guess —
 //   tight    30000  (above pack_size_p50_bytes)
 //   balanced 60000  (above pack_size_p90_bytes)
-//   wide     120000 (generous headroom below the pack_size_max outlier)
+//   wide     120000 (generous margin below the pack_size_max outlier)
 //
 // `wide` is intentionally NOT `full`: it is a generous byte-capped profile,
 // not a promise that every pack fits without elision (a large pack can still
