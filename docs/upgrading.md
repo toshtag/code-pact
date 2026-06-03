@@ -19,14 +19,14 @@ v1.26 tightens two schema rules so that values flowing into generated commands a
 
 If a bump suddenly reports a schema error on a task/phase id, an agent name, or an agent-profile path, rename the offending value to fit these rules.
 
-After bumping the CLI, refresh the generated adapter files:
+If `doctor` reports adapter drift after a CLI bump, refresh the generated adapter files:
 
 ```sh
 code-pact adapter upgrade <agent> --check --json   # inspect drift, write nothing
 code-pact adapter upgrade <agent> --write          # apply safe updates
 ```
 
-Since v1.30.1 (Issue #340), a CLI bump that changes nothing about your generated adapter files raises **no** `ADAPTER_GENERATOR_STALE` warning — a stale `generator_version` stamp alone is silent. The warning appears only when the bump actually moved the generated output, in which case the `--check` → `--write` flow above applies. See [troubleshooting.md](troubleshooting.md#adapter_generator_stale-from-adapter-doctor--global-doctor).
+A CLI bump on its own is **not** a reason to run `adapter upgrade`. Since v1.30.1 (Issue #340), a bump that changes nothing about your generated adapter files raises **no** `ADAPTER_GENERATOR_STALE` warning — a stale `generator_version` stamp alone is silent. The warning (and the `--check` → `--write` flow above) appears only when the bump actually moved the generated output. See [troubleshooting.md](troubleshooting.md#adapter_generator_stale-from-adapter-doctor--global-doctor).
 
 ## What changed in each release
 
