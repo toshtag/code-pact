@@ -32,6 +32,9 @@ describe("init — .gitignore merge", () => {
     const content = await readFile(gitignorePath(), "utf8");
     expect(content).toMatch(/^\/\.local\/$/m);
     expect(content).toMatch(/^\/\.context\/$/m);
+    // machine-local / derived .code-pact paths are ignored; the rest is shared
+    expect(content).toMatch(/^\/\.code-pact\/locks\/$/m);
+    expect(content).toMatch(/^\/\.code-pact\/cache\/$/m);
   });
 
   it("merges into an existing .gitignore, preserving user lines and not duplicating", async () => {
@@ -50,6 +53,30 @@ describe("init — .gitignore merge", () => {
     // `.local/` already satisfies `/.local/`, so no second entry is appended.
     const localCount = content.split("\n").filter((l) => l.trim().replace(/^\/+/, "").replace(/\/+$/, "") === ".local").length;
     expect(localCount).toBe(1);
+  });
+
+  it("does not duplicate /.code-pact/locks/ or /.code-pact/cache/ when already present", async () => {
+    await writeFile(gitignorePath(), "/.code-pact/locks/\n/.code-pact/cache/\n", "utf8");
+    await runInit({ cwd: dir, locale: "en-US", agents: ["claude-code"], force: false, json: false });
+    const content = await readFile(gitignorePath(), "utf8");
+    const count = (entry: string) =>
+      content.split("\n").filter((l) => l.trim() === entry).length;
+    expect(count("/.code-pact/locks/")).toBe(1);
+    expect(count("/.code-pact/cache/")).toBe(1);
+  });
+
+  it("never deletes a pre-existing blanket /.code-pact/ ignore (init merges, never removes user lines)", async () => {
+    // A user/repo that blanket-ignores .code-pact/. init must not silently
+    // rewrite it away; it only appends the narrow entries. (Surfacing that the
+    // blanket ignore defeats the shared-vs-local policy is a deferred advisory —
+    // see the collaboration-safe-state RFC; here we just pin the no-delete
+    // behavior so it can't regress.)
+    await writeFile(gitignorePath(), "/.code-pact/\n", "utf8");
+    await runInit({ cwd: dir, locale: "en-US", agents: ["claude-code"], force: false, json: false });
+    const content = await readFile(gitignorePath(), "utf8");
+    expect(content).toMatch(/^\/\.code-pact\/$/m); // user's blanket line preserved
+    expect(content).toMatch(/^\/\.code-pact\/locks\/$/m); // narrow entries still added
+    expect(content).toMatch(/^\/\.code-pact\/cache\/$/m);
   });
 
   it("re-running init --force does not duplicate or skip-record an already-complete .gitignore", async () => {

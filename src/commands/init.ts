@@ -262,12 +262,23 @@ export async function runInitCore(opts: InitCoreOptions): Promise<InitResult> {
     skipped,
   );
 
-  // .gitignore — ignore only the two derived/per-developer dirs: `.local/`
-  // (per-developer overrides) and `.context/` (regenerated context packs).
-  // `.code-pact/` itself is NOT ignored — project.yaml, agent/model profiles,
-  // and the progress ledger are shared, version-controlled state. Merged into
-  // any existing .gitignore (idempotent).
-  await ensureGitignoreEntries(cwd, ["/.local/", "/.context/"], created);
+  // .gitignore — ignore the machine-local / derived paths only; the rest of
+  // `.code-pact/` (project.yaml, agent/model profiles, baselines, and the
+  // progress ledger) is shared, version-controlled state. Adapter manifests are
+  // conditional — shared only when the adapter-owned generated files they list
+  // (e.g. CLAUDE.md, AGENTS.md, GEMINI.md, .claude/skills/*, .cursor/**) are also
+  // tracked; a
+  // repo that ignores regenerated adapter output should ignore the manifest too.
+  // Ignored: `.code-pact/locks/` (machine-local advisory locks — pid/hostname),
+  // `.code-pact/cache/` (reserved, derived), `/.local/` (per-developer
+  // overrides), `/.context/` (regenerated context packs). Merged into any
+  // existing .gitignore (idempotent). See the collaboration-safe-state RFC for
+  // the shared-vs-local policy.
+  await ensureGitignoreEntries(
+    cwd,
+    ["/.code-pact/locks/", "/.code-pact/cache/", "/.local/", "/.context/"],
+    created,
+  );
 
   // -------------------------------------------------------------------------
   // design/
