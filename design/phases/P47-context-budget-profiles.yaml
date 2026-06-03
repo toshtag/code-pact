@@ -4,7 +4,7 @@ name: Context budget profiles — named, ergonomic context budgets that resolve 
 weight: 4
 confidence: medium
 risk: medium
-status: planned
+status: done
 objective: |
   P47 ships layer (a) of Context Fit (design/decisions/context-fit-rfc.md):
   named context budget profiles on the agent profile plus a
@@ -38,47 +38,40 @@ objective: |
 non_goals:
   - Any of Context Fit layers (b)/(c)/(d) — recommend.contextFit, explain
     metrics, or plan-lint context-fit advisories. P47 is layer (a) only.
-  - Token counting, a tokenizer dependency, summarization, compression,
-    semantic ranking, embeddings, or any network access.
+  - Token counting, a tokenizer dependency, summarization, compression, semantic
+    ranking, embeddings, or any network access.
   - Default-on context reduction — no flag means the current byte-identical
     behavior, with no hidden reduction.
   - Any change to the P24 elision order / eligibility, the Buffer.byteLength
     byte measurement, or the CONTEXT_OVER_BUDGET contract.
   - Auto-applying context_budget.default_profile to any command (validated for
     future ergonomics only).
-  - A `full` profile name (rejected in P46 — it reads as a no-elision
-    guarantee).
+  - A `full` profile name (rejected in P46 — it reads as a no-elision guarantee).
 definition_of_done:
-  - >-
-    The agent profile schema accepts and validates an optional context_budget
+  - The agent profile schema accepts and validates an optional context_budget
     block (profiles non-empty, max_bytes a positive integer, profile names safe
     CLI identifiers, default_profile must reference a declared profile); a
     missing block stays valid and is never auto-applied.
-  - >-
-    A single code-level source of truth for the standard profiles
+  - A single code-level source of truth for the standard profiles
     (src/core/context-fit/budget-profiles.ts) carries tight=30000,
-    balanced=60000, wide=120000, with no second copy of the values in CLI code,
-    schemas, docs, or tests.
-  - >-
-    A pure resolver (src/core/context-fit/resolve-budget-profile.ts) resolves a
+    balanced=60000, wide=120000, with no second runtime source of truth in CLI
+    code or schemas; docs and tests may repeat the values as contract
+    assertions.
+  - A pure resolver (src/core/context-fit/resolve-budget-profile.ts) resolves a
     profile name to bytes via agent-profile override, then standard fallback,
     then CONFIG_ERROR; standard names resolve agent-less.
-  - >-
-    task context and task prepare accept --context-budget <profile>, resolve it
+  - task context and task prepare accept --context-budget <profile>, resolve it
     to a byte budget, and reuse the existing budgetBytes path; --context-budget
     and --budget-bytes are mutually exclusive (CONFIG_ERROR, exit 2); an unknown
     profile is CONFIG_ERROR; the task prepare commands dictionary does not echo
     --context-budget.
-  - >-
-    The no-flag content is byte-identical and --budget-bytes behavior is
+  - The no-flag content is byte-identical and --budget-bytes behavior is
     unchanged; tests prove --context-budget standard equals --budget-bytes
     fallback for the same task, and a custom or overriding agent profile
     resolves correctly.
-  - >-
-    The generated CLI reference, cli-contract.md, and CHANGELOG record the new
+  - The generated CLI reference, cli-contract.md, and CHANGELOG record the new
     shipped behavior, and check:docs passes.
-  - >-
-    The phase is registered (this phase YAML plus a design/roadmap.yaml entry);
+  - The phase is registered (this phase YAML plus a design/roadmap.yaml entry);
     validate --json and plan lint --include-quality --strict --json are clean.
 verification:
   commands:
@@ -97,7 +90,7 @@ tasks:
     write_surface: low
     verification_strength: medium
     expected_duration: short
-    status: planned
+    status: done
     description: >
       Phase registration / design alignment. Registers the P47 phase (this phase
       YAML + a design/roadmap.yaml entry, weight 4) implementing Context Fit
@@ -118,7 +111,7 @@ tasks:
     write_surface: low
     verification_strength: strong
     expected_duration: short
-    status: planned
+    status: done
     description: >
       Agent profile schema + resolver helper. Adds the optional context_budget
       block to AgentProfile (profiles non-empty; max_bytes positive integer;
@@ -127,10 +120,10 @@ tasks:
       (src/core/context-fit/budget-profiles.ts: tight/balanced/wide) and a pure
       resolver (src/core/context-fit/resolve-budget-profile.ts): override →
       standard fallback → CONFIG_ERROR, with agent-less standard resolution.
-    decision_refs:
-      - design/decisions/context-fit-rfc.md
     depends_on:
       - P47-T0
+    decision_refs:
+      - design/decisions/context-fit-rfc.md
     reads:
       - design/decisions/context-fit-rfc.md
       - src/core/schemas/agent-profile.ts
@@ -150,7 +143,7 @@ tasks:
     write_surface: medium
     verification_strength: strong
     expected_duration: short
-    status: planned
+    status: done
     description: >
       CLI flag for task context + task prepare. Adds --context-budget <profile>
       to the task context / task prepare specs and wires resolution at the CLI
@@ -159,10 +152,10 @@ tasks:
       --context-budget mutual exclusion (CONFIG_ERROR, exit 2) and routes
       unknown-profile / malformed-config errors as CONFIG_ERROR. The task
       prepare commands dictionary is unchanged (no --context-budget echo).
-    decision_refs:
-      - design/decisions/context-fit-rfc.md
     depends_on:
       - P47-T1
+    decision_refs:
+      - design/decisions/context-fit-rfc.md
     reads:
       - src/cli/spec/task.ts
       - src/cli/commands/task.ts
@@ -183,18 +176,18 @@ tasks:
     write_surface: low
     verification_strength: strong
     expected_duration: short
-    status: planned
+    status: done
     description: >
       Docs + generated CLI reference + compatibility. Regenerates the CLI
       reference, documents --context-budget in cli-contract.md (ergonomic alias
-      for a byte budget; built-ins tight/balanced/wide; wide is not full;
-      mutual exclusion with --budget-bytes; no-flag is current behavior;
+      for a byte budget; built-ins tight/balanced/wide; wide is not full; mutual
+      exclusion with --budget-bytes; no-flag is current behavior;
       default_profile not auto-applied), and records the CHANGELOG entry.
       check:docs (doc-links + doc-invariants + cli-reference) passes.
-    decision_refs:
-      - design/decisions/context-fit-rfc.md
     depends_on:
       - P47-T2
+    decision_refs:
+      - design/decisions/context-fit-rfc.md
     reads:
       - docs/cli-contract.md
       - docs/cli-reference.generated.md
