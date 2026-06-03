@@ -26,7 +26,7 @@ code-pact adapter upgrade <agent> --check --json   # inspect drift, write nothin
 code-pact adapter upgrade <agent> --write          # apply safe updates
 ```
 
-An `ADAPTER_GENERATOR_STALE` warning right after a CLI bump is expected — see [troubleshooting.md](troubleshooting.md#adapter_generator_stale-from-adapter-doctor--global-doctor).
+Since v1.30.1 (Issue #340), a CLI bump that changes nothing about your generated adapter files raises **no** `ADAPTER_GENERATOR_STALE` warning — a stale `generator_version` stamp alone is silent. The warning appears only when the bump actually moved the generated output, in which case the `--check` → `--write` flow above applies. See [troubleshooting.md](troubleshooting.md#adapter_generator_stale-from-adapter-doctor--global-doctor).
 
 ## What changed in each release
 

@@ -13,6 +13,12 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+### Fixed
+
+- **`ADAPTER_GENERATOR_STALE` no longer fires on version-stamp lag alone ([#340]).** `adapter doctor` / global `doctor` previously raised this warning whenever a manifest's `generator_version` differed from the running package version, via a pure string inequality — so **every** version bump, including no-op patch releases that change nothing about the generated adapter files, nagged the user to run `adapter upgrade`. The check now fires only when the version differs **and** the current desired generated output is not byte-identical to the manifest (path set + per-file sha256, compared after the same `dedupeDesiredFiles` pass the install/upgrade engines use). A stamp-only lag — where `adapter upgrade --write` would re-stamp `generator_version` / `generated_at` and touch no managed content — is silent. When the agent profile can't be read (so the desired output can't be generated and equivalence can't be proven), the warning is kept conservatively, as before. No new command, flag, diagnostic code, or manifest schema change; `ADAPTER_DESIRED_STALE` / `ADAPTER_FILE_DRIFT` / `ADAPTER_PROFILE_DRIFT` and `adapter upgrade --write` write semantics are unchanged.
+
+[#340]: https://github.com/toshtag/code-pact/issues/340
+
 ## [1.30.0] — 2026-06-03
 
 Context Fit — make context pack size controllable, explainable, and lint-able, all additive and backward-compatible (P46–P50). Named budget profiles with `--context-budget`, a recommended budget on `recommend` / `task prepare`, byte-based explain metrics, and four opt-in `plan lint --include-quality` readiness advisories. The default no-flag context pack stays byte-identical; nothing here calls a model, tokenizer, or the network, and no budget is ever applied automatically.
