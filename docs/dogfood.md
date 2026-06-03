@@ -2,7 +2,7 @@
 
 How to run `code-pact` against the `code-pact` repository itself.
 
-The repo is already initialized (`.code-pact/` exists as the maintainer's local working state — this repo gitignores `/.code-pact/`, so it is **not** committed; `design/` is the committed source of truth for phases and tasks). So `init` is not needed.
+The repo is already initialized (`.code-pact/` exists as the maintainer's working state). The `.gitignore` ignores the machine-local / derived paths under `.code-pact/` — `locks/`, `cache/`, `adapters/`, and (for now) the legacy `state/progress.yaml`, which stays ignored until the per-event ledger replaces it. The shared config (`project.yaml`, profiles, `state/baselines/`) is tracked. The **adapter manifest** (`.code-pact/adapters/`) is **intentionally ignored** here: this repo regenerates and ignores the adapter-owned output (`CLAUDE.md`, `.claude/skills/*`), so manifest and its generated files travel together or not at all. `design/` remains the committed source of truth for phases and tasks, so `init` is not needed.
 
 This page is the **day-to-day quick guide**. Deeper, lower-frequency maintainer topics — planning wizards, model-aware adapters, adapter-upgrade internals, Spec Kit import, release-prep posture, and the design-vs-progress contract — live in [maintainers/operations.md](maintainers/operations.md).
 
@@ -29,6 +29,8 @@ Run a health check to confirm the project structure is clean:
 code-pact doctor
 code-pact validate       # exits 1 if any errors exist
 ```
+
+> A **fresh clone** may report an `ADAPTER_MISSING` advisory (`claude-code` is enabled but `CLAUDE.md` / `.claude/skills/*` are absent) until you regenerate the adapter output with `code-pact adapter install claude-code`. This is **expected** for this repo — the adapter output is regenerated and gitignored (see above) — and it is **warning-only**: plain `validate` does not fail on it. Note that `validate --strict` *does* promote this warning to a failure, so for strict validation regenerate the adapter output first (`adapter install`) or use non-strict `validate` for the dogfood health check.
 
 ## Daily path
 

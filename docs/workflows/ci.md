@@ -81,11 +81,18 @@ scope here; add them per your project's own conventions.
 The most common CI surprise is a gate that silently skips or mis-fires. Before
 the workflow above will do anything useful:
 
-- [ ] **Commit `.code-pact/`** — the project config **and** `state/progress.yaml`.
-      `init` does not gitignore it. The branch-drift gate reads the *committed*
-      `progress.yaml`; if the ledger is untracked the check **silently skips**.
-      If your repo deliberately ignores `.code-pact/`, force-add the ledger:
-      `git add -f .code-pact/state/progress.yaml`. Full note:
+- [ ] **Commit the shared `.code-pact` state — not the local/derived paths.**
+      Commit `project.yaml`, `agent-profiles/`, `model-profiles/`,
+      `state/baselines/`, and the ledger (`state/progress.yaml` today;
+      `state/events/**` after the event-file ledger lands). **Do not** commit
+      `.code-pact/locks/` or `.code-pact/cache/` (machine-local), and commit
+      `.code-pact/adapters/*.manifest.yaml` **only together with** the adapter
+      files it lists (e.g. `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`,
+      `.claude/skills/*`, `.cursor/**`) — a committed manifest
+      whose files are absent fails `adapter doctor`. The branch-drift gate reads
+      the *committed* ledger; if it is untracked the check **silently skips**
+      (`git add -f .code-pact/state/progress.yaml` if your repo otherwise ignores
+      it). Full note:
       [`cli-contract.md`](../cli-contract.md#--base-ref-and-ci-branch-drift-gating-v126-p34).
 - [ ] **`fetch-depth: 0`** — `--base-ref` compares against the merge-base, which
       needs full history. A shallow checkout breaks it.
@@ -94,6 +101,13 @@ the workflow above will do anything useful:
       CLI. See [`getting-started.md`](../getting-started.md).
 - [ ] **Pair `--audit-strict` with `--base-ref`** — without it, a clean CI
       checkout reports `DECLARED_UNUSED` for every task that declared writes.
+- [ ] **If you intentionally ignore adapter-generated output *and* its manifest**,
+      a clean CI checkout can report `ADAPTER_MISSING` (an agent is enabled but its
+      instruction file is absent). Because `validate --strict` promotes warnings to
+      failures, either commit the adapter output **and** its manifest together,
+      regenerate them before validation (`adapter install`), or suppress it via
+      `.code-pact/doctor.yaml` (`disabled_checks: [ADAPTER_MISSING]`). Most repos
+      commit the adapter output, so this does not arise.
 
 ## See also
 
