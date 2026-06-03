@@ -6,14 +6,27 @@ build/
 .DS_Store
 *.tsbuildinfo
 
-# Root-level tool state (anchored with / so tests/fixtures/**/.code-pact/ is not affected)
-/.code-pact/
+# Root-level tool state. Only machine-local / derived / regenerated paths under
+# /.code-pact/ are ignored; the shared config (project.yaml, agent/model
+# profiles, state/baselines) is committed. Anchored with / so
+# tests/fixtures/**/.code-pact/ is not affected.
+# Ignored exceptions specific to this repo:
+#  - state/progress.yaml — legacy monolithic ledger; stays ignored until the
+#    per-event ledger (Bucket B / collaboration-safe-state RFC) replaces it.
+#  - adapters/ — this repo is the SOURCE of the adapter templates and regenerates
+#    CLAUDE.md / .claude/skills/* (ignored below), so committing the manifest
+#    alone would orphan it (clean checkout -> ADAPTER_FILE_MISSING in adapter
+#    doctor). Manifest and its generated files travel together or not at all.
+/.code-pact/locks/
+/.code-pact/cache/
+/.code-pact/state/progress.yaml
+/.code-pact/adapters/
 
 # Root-level generated context output
 /.context/
 
-# Root-level adapter-generated files (per-developer state, consistent with
-# /.code-pact/ being gitignored — see CHANGELOG v0.9.0 release-prep note).
+# Root-level adapter-generated output (regenerable via `adapter upgrade`;
+# ignored independently of the .code-pact policy above).
 /CLAUDE.md
 /AGENTS.md
 /GEMINI.md
