@@ -191,9 +191,11 @@ tasks:
     reads:
       - docs/cli-contract.md
       - docs/cli-reference.generated.md
+      - docs/glossary.md
     writes:
       - docs/cli-contract.md
       - docs/cli-reference.generated.md
+      - docs/glossary.md
       - CHANGELOG.md
     acceptance_refs:
       - design/phases/P47-context-budget-profiles.yaml
