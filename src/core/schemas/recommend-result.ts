@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { ModelTier, EffortLevel } from "./model-profile.ts";
+import { STANDARD_CONTEXT_BUDGET_PROFILE_NAMES } from "../context-fit/budget-profiles.ts";
 
 // ---------------------------------------------------------------------------
 // v0.8 Budgeted Execution / Context Budgeting — recommend output contract
@@ -80,6 +81,34 @@ export type StructuredReason = z.infer<typeof StructuredReason>;
 export const LifecycleMode = z.enum(["full_loop", "record_only", "decision_loop"]);
 export type LifecycleMode = z.infer<typeof LifecycleMode>;
 
+// P48 (Context Fit, layer b): an optional, recommended standard context budget
+// profile, derived deterministically from existing task readiness fields. This
+// is a SUGGESTION the agent/user may apply via `--context-budget <profile>`; it
+// is NOT auto-applied and does NOT change the default no-flag context pack.
+//
+// `recommendedProfile` is a CLOSED enum of the three standard names — recommend
+// only ever speaks the standard vocabulary. Custom agent-profile profile names
+// live only in layer (a)'s `--context-budget` resolution namespace; they are
+// never emitted here. `recommendedBudgetBytes` resolves agent-profile same-name
+// override first, then the built-in fallback. It is unrelated to the categorical
+// `budgetProfile` (tool-call / context-file / verification estimate) and does
+// not overload it. See design/decisions/context-fit-rfc.md § Layer (b).
+//
+// The enum is derived from the SINGLE source of truth for the standard profile
+// names (budget-profiles.ts), so the schema and the pure mapping helper
+// (src/core/recommend/context-fit.ts, which types `recommendedProfile` via the
+// same constant's keys) can never silently diverge — adding a standard profile
+// in one place widens both. This mirrors how budget.ts / lifecycle.ts derive
+// their enums once.
+export const ContextFitRecommendation = z
+  .object({
+    recommendedProfile: z.enum(STANDARD_CONTEXT_BUDGET_PROFILE_NAMES),
+    recommendedBudgetBytes: z.number().int().positive(),
+    reason: z.string().min(1),
+  })
+  .strict();
+export type ContextFitRecommendation = z.infer<typeof ContextFitRecommendation>;
+
 export const RecommendResultV2 = z
   .object({
     // existing v0.7 fields — UNCHANGED
@@ -103,6 +132,10 @@ export const RecommendResultV2 = z
 
     // new in P33 — strictly additive
     lifecycleMode: LifecycleMode,
+
+    // new in P48 — OPTIONAL strictly-additive. Absent on `recommendation: null`
+    // early-return states and unaffected on existing V2 fixtures/consumers.
+    contextFit: ContextFitRecommendation.optional(),
   })
   .strict();
 export type RecommendResultV2 = z.infer<typeof RecommendResultV2>;
