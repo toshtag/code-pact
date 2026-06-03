@@ -1,0 +1,233 @@
+id: P48
+name: Context Fit recommendation integration — an optional, additive contextFit
+  recommendation on recommend / task prepare, derived deterministically from
+  task readiness fields
+weight: 4
+confidence: medium
+risk: medium
+status: done
+objective: |
+  P48 ships layer (b) of Context Fit (design/decisions/context-fit-rfc.md):
+  an optional, strictly-additive `contextFit` field on RecommendResultV2,
+  surfaced through `recommend` and `task prepare`.
+
+  contextFit names a recommended STANDARD context budget profile
+  (tight | balanced | wide), its resolved byte value, and a one-line reason.
+  The recommended profile is derived by a pure, deterministic, total mapping
+  over existing P10 task readiness fields (context_size, ambiguity,
+  write_surface):
+
+    context_size=large OR ambiguity=high OR write_surface=high -> wide
+    else if context_size=medium                                -> balanced
+    else                                                       -> tight
+
+  requires_decision does NOT shrink the recommendation — a gated task usually
+  needs more context, not less. recommendedBudgetBytes resolves an agent-profile
+  same-name override first (reusing the already-loaded agent profile, no extra
+  I/O), then the P47 built-in fallback (tight=30000, balanced=60000,
+  wide=120000). recommendedProfile is a closed enum of the three standard names:
+  custom agent-profile profile names (a layer-(a) --context-budget concern only)
+  are never emitted by recommend.
+
+  contextFit is a SUGGESTION. It is never auto-applied: applying a profile stays
+  explicit via `task context --context-budget <profile>` /
+  `task prepare --context-budget <profile>`. The default no-flag context pack
+  stays byte-identical; the task prepare `commands` dictionary still does not
+  echo --context-budget; no token counting, tokenizer, summarization,
+  compression, semantic ranking, embeddings, or network behavior is introduced.
+
+  Scope is layer (b) only. P49 (explain metrics) and P50 (readiness advisories)
+  are NOT in this phase.
+
+  Design recorded in design/decisions/context-fit-rfc.md § Layer (b).
+non_goals:
+  - Context Fit layers (c)/(d) — explain metrics (P49) or plan-lint context-fit
+    advisories (P50). P48 is layer (b) only.
+  - Token counting, a tokenizer dependency, summarization, compression, semantic
+    ranking, embeddings, or any network access.
+  - Auto-applying the recommended budget — recommend only SUGGESTS; the pack is
+    re-sized only by an explicit --context-budget / --budget-bytes flag.
+  - Any change to the default no-flag context pack content, the P24 elision
+    order, or the CONTEXT_OVER_BUDGET contract.
+  - Echoing --context-budget into the task prepare `commands` dictionary
+    (per-invocation policy, unchanged from P47).
+  - Emitting custom agent-profile profile names as the recommendedProfile, or
+    overloading the existing categorical budgetProfile.
+definition_of_done:
+  - RecommendResultV2 gains an optional, strictly-additive `contextFit` object
+    holding a closed recommendedProfile enum (tight|balanced|wide), a positive
+    integer recommendedBudgetBytes, and a non-empty reason string. A missing
+    contextFit stays valid — the recommendation-null early-return states and
+    existing V2 fixtures are unaffected — and top-level strict mode is preserved.
+  - A pure, total mapping helper (src/core/recommend/context-fit.ts) maps the
+    readiness fields to one of tight|balanced|wide exactly per the RFC table,
+    resolves bytes via agent-profile same-name override then built-in fallback,
+    and records the driving signal and byte source in reason. It performs no
+    I/O, reads no file contents, and uses no model/tokenizer/network input.
+  - resolveRecommendation populates contextFit from the already-loaded task and
+    agent profile (no new mandatory reads); requires_decision does not shrink
+    the recommendation.
+  - The `recommend --json` output includes contextFit under the recommendation
+    result; the `recommend` human output adds one clear, suggestion-worded
+    context fit line; the existing budgetProfile output is unchanged.
+  - The `task prepare --json` output surfaces recommendation.contextFit when a
+    recommendation exists; the context pack bytes are unchanged without an
+    explicit --context-budget; the `commands` dictionary does not include
+    --context-budget; early-return states are unchanged.
+  - The generated CLI reference, cli-contract.md, agent-contract.md, glossary,
+    and CHANGELOG record the new shipped behavior (contextFit is a
+    recommendation, not auto-applied; built-in names tight|balanced|wide; custom
+    names accepted by --context-budget but never recommended; budgetProfile and
+    contextFit are distinct; agent same-name overrides change the bytes; no
+    network/model/tokenizer), and check:docs passes.
+  - The phase is registered (this phase YAML plus a design/roadmap.yaml entry);
+    validate --json and plan lint --include-quality --strict --json are clean.
+verification:
+  commands:
+    - pnpm typecheck
+    - pnpm test
+    - pnpm build
+    - pnpm check:docs
+    - node dist/cli.js validate --json
+    - node dist/cli.js plan lint --include-quality --strict --json
+tasks:
+  - id: P48-T0
+    type: architecture
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: done
+    description: >
+      Phase registration / RFC alignment. Registers the P48 phase (this phase
+      YAML + a design/roadmap.yaml entry, weight 4) implementing Context Fit
+      layer (b) from the accepted RFC. The phase YAML is a protected-path
+      bootstrap write (it is in acceptance_refs) and design/roadmap.yaml is a
+      plan-lint --strict protected path, so neither is listed in writes.
+    decision_refs:
+      - design/decisions/context-fit-rfc.md
+    reads:
+      - design/decisions/context-fit-rfc.md
+    acceptance_refs:
+      - design/phases/P48-context-fit-recommendation.yaml
+  - id: P48-T1
+    type: feature
+    ambiguity: low
+    risk: medium
+    context_size: small
+    write_surface: low
+    verification_strength: strong
+    expected_duration: short
+    status: done
+    description: >
+      Recommendation schema + pure mapping helper. Adds the optional contextFit
+      field to RecommendResultV2 (closed tight|balanced|wide enum;
+      recommendedBudgetBytes a positive integer; non-empty reason; top-level
+      strict preserved) and a pure, total helper
+      (src/core/recommend/context-fit.ts) mapping readiness fields to a standard
+      profile exactly per the RFC table, with agent-profile override -> built-in
+      fallback byte resolution. requires_decision does not shrink.
+    depends_on:
+      - P48-T0
+    decision_refs:
+      - design/decisions/context-fit-rfc.md
+    reads:
+      - design/decisions/context-fit-rfc.md
+      - src/core/schemas/recommend-result.ts
+      - src/core/context-fit/budget-profiles.ts
+    writes:
+      - src/core/schemas/recommend-result.ts
+      - src/core/recommend/context-fit.ts
+      - tests/unit/schemas/recommend-result.test.ts
+      - tests/unit/core/recommend/context-fit.test.ts
+    acceptance_refs:
+      - design/phases/P48-context-fit-recommendation.yaml
+  - id: P48-T2
+    type: feature
+    ambiguity: low
+    risk: medium
+    context_size: medium
+    write_surface: medium
+    verification_strength: strong
+    expected_duration: short
+    status: done
+    description: >
+      recommend command JSON/human output. Wires recommendContextFit into
+      resolveRecommendation (reusing the already-loaded agent profile's
+      context_budget for the byte override) so `recommend --json` carries
+      contextFit, and adds one clear, suggestion-worded context fit line to the
+      human formatter without conflating it with budgetProfile.
+    depends_on:
+      - P48-T1
+    decision_refs:
+      - design/decisions/context-fit-rfc.md
+    reads:
+      - src/core/recommend/index.ts
+      - src/commands/recommend.ts
+    writes:
+      - src/core/recommend/index.ts
+      - src/commands/recommend.ts
+      - tests/integration/recommend-v2.test.ts
+    acceptance_refs:
+      - design/phases/P48-context-fit-recommendation.yaml
+  - id: P48-T3
+    type: feature
+    ambiguity: low
+    risk: low
+    context_size: medium
+    write_surface: low
+    verification_strength: strong
+    expected_duration: short
+    status: done
+    description: >
+      task prepare recommendation propagation. Confirms `task prepare --json`
+      surfaces recommendation.contextFit through the shared resolveRecommendation
+      path (no auto-apply, no extra reads, commands dictionary unchanged, context
+      pack bytes unchanged without --context-budget, early-return states
+      unchanged) and pins the behavior in tests.
+    depends_on:
+      - P48-T2
+    decision_refs:
+      - design/decisions/context-fit-rfc.md
+    reads:
+      - src/commands/task-prepare.ts
+    writes:
+      - tests/unit/commands/task-prepare.test.ts
+      - tests/integration/task-prepare-commands-contract.test.ts
+    acceptance_refs:
+      - design/phases/P48-context-fit-recommendation.yaml
+  - id: P48-T4
+    type: docs
+    ambiguity: low
+    risk: low
+    context_size: medium
+    write_surface: low
+    verification_strength: strong
+    expected_duration: short
+    status: done
+    description: >
+      Docs + generated CLI reference + CHANGELOG. Regenerates the CLI reference
+      and documents contextFit (a recommendation, not auto-applied; built-in
+      names tight|balanced|wide; custom names accepted by --context-budget but
+      never recommended; budgetProfile vs contextFit distinction; agent same-name
+      overrides change the bytes; no network/model/tokenizer) in cli-contract.md,
+      agent-contract.md, and the glossary, and records the CHANGELOG entry.
+      check:docs passes.
+    depends_on:
+      - P48-T3
+    decision_refs:
+      - design/decisions/context-fit-rfc.md
+    reads:
+      - docs/cli-contract.md
+      - docs/agent-contract.md
+      - docs/glossary.md
+      - docs/cli-reference.generated.md
+    writes:
+      - docs/cli-contract.md
+      - docs/agent-contract.md
+      - docs/glossary.md
+      - CHANGELOG.md
+    acceptance_refs:
+      - design/phases/P48-context-fit-recommendation.yaml
