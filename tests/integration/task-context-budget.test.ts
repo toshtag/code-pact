@@ -11,7 +11,7 @@
 // network, no sleeps.
 
 import { describe, it, expect, beforeAll, beforeEach, afterEach } from "vitest";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
@@ -256,5 +256,151 @@ describe("task context --context-budget with an agent-defined profile (P47)", ()
       ]),
     );
     expect(byProfile.data.content).toBe(byBytes.data.content);
+  });
+});
+
+// P47 agent-less-resolution contract (RFC § Layer (a)): a STANDARD profile must
+// resolve from its built-in fallback WITHOUT requiring an agent profile, while
+// a CUSTOM profile — which only an agent profile can declare — needs the strict
+// load and is CONFIG_ERROR when undeclared. Built-in resolution must not become
+// stricter than the no-flag / --budget-bytes path it aliases.
+describe("task context --context-budget agent-less resolution (P47)", () => {
+  let project: Awaited<ReturnType<typeof createTempProject>>;
+  const profilePath = (dir: string) =>
+    join(dir, ".code-pact", "agent-profiles", "claude-code.yaml");
+
+  beforeEach(async () => {
+    project = await createTempProject({ prefix: "code-pact-ctx-agentless-" });
+    await setupTask(project);
+  });
+
+  afterEach(async () => {
+    await project.cleanup();
+  });
+
+  it("a standard profile resolves with the agent profile file deleted (built-in fallback)", async () => {
+    await rm(profilePath(project.dir));
+    const byProfile = expectJsonOk<{ content: string }>(
+      project.run([
+        "task", "context", "P1-T1", "--agent", "claude-code",
+        "--context-budget", "tight", "--json",
+      ]),
+    );
+    // A standard name with no agent profile must equal --budget-bytes 30000 and
+    // must NOT fail like a missing-profile error.
+    const byBytes = expectJsonOk<{ content: string }>(
+      project.run([
+        "task", "context", "P1-T1", "--agent", "claude-code",
+        "--budget-bytes", "30000", "--json",
+      ]),
+    );
+    expect(byProfile.data.content).toBe(byBytes.data.content);
+  });
+
+  it("a standard profile resolves when the agent profile has no context_budget block", () => {
+    // The seeded profile has no context_budget by default — assert the built-in
+    // fallback still applies (no override present).
+    const byProfile = expectJsonOk<{ content: string }>(
+      project.run([
+        "task", "context", "P1-T1", "--agent", "claude-code",
+        "--context-budget", "balanced", "--json",
+      ]),
+    );
+    const byBytes = expectJsonOk<{ content: string }>(
+      project.run([
+        "task", "context", "P1-T1", "--agent", "claude-code",
+        "--budget-bytes", "60000", "--json",
+      ]),
+    );
+    expect(byProfile.data.content).toBe(byBytes.data.content);
+  });
+
+  it("a custom profile is CONFIG_ERROR when the agent profile file is deleted", async () => {
+    await rm(profilePath(project.dir));
+    const res = project.run([
+      "task", "context", "P1-T1", "--agent", "claude-code",
+      "--context-budget", "review", "--json",
+    ]);
+    // Custom names require an agent profile; absence is a real error.
+    expect(res.code).toBe(2);
+    const env = JSON.parse(res.stdout) as { ok: boolean; error: { code: string } };
+    expect(env.ok).toBe(false);
+    // AGENT_NOT_FOUND (missing profile file) is the strict-load failure code.
+    expect(["AGENT_NOT_FOUND", "CONFIG_ERROR"]).toContain(env.error.code);
+  });
+
+  it("an explicitly-declared but broken context_budget is CONFIG_ERROR even for a standard name", async () => {
+    const profile = parseYaml(await readFile(profilePath(project.dir), "utf8")) as Record<string, unknown>;
+    // Invalid: max_bytes must be a positive integer.
+    profile.context_budget = { profiles: { tight: { max_bytes: 0 } } };
+    await writeFile(profilePath(project.dir), stringifyYaml(profile), "utf8");
+    const res = project.run([
+      "task", "context", "P1-T1", "--agent", "claude-code",
+      "--context-budget", "tight", "--json",
+    ]);
+    expectJsonErr(res, "CONFIG_ERROR");
+    expect(res.code).toBe(2);
+  });
+
+  it("an unrelated invalid profile field does NOT sink a standard built-in fallback", async () => {
+    // Best-effort standard resolution validates ONLY context_budget; an
+    // unrelated bad field must not block the tight fallback.
+    const raw = await readFile(profilePath(project.dir), "utf8");
+    await writeFile(profilePath(project.dir), raw + "\nbogus_unknown_field: [unbalanced\n", "utf8");
+    const byProfile = expectJsonOk<{ content: string }>(
+      project.run([
+        "task", "context", "P1-T1", "--agent", "claude-code",
+        "--context-budget", "tight", "--json",
+      ]),
+    );
+    const byBytes = expectJsonOk<{ content: string }>(
+      project.run([
+        "task", "context", "P1-T1", "--agent", "claude-code",
+        "--budget-bytes", "30000", "--json",
+      ]),
+    );
+    expect(byProfile.data.content).toBe(byBytes.data.content);
+  });
+});
+
+// P47-6: task prepare's early-return states (done / blocked / unmet deps) skip
+// the pack build, and must therefore NOT pay for --context-budget profile
+// resolution. A done task asked to prepare with a profile that would otherwise
+// be a hard CONFIG_ERROR must still return noop_already_done, proving the
+// resolution is deferred behind the early return.
+describe("task prepare --context-budget skips resolution on early-return states (P47)", () => {
+  let project: Awaited<ReturnType<typeof createTempProject>>;
+
+  beforeEach(async () => {
+    project = await createTempProject({ prefix: "code-pact-prep-early-" });
+    await setupTask(project);
+  });
+
+  afterEach(async () => {
+    await project.cleanup();
+  });
+
+  it("a done task returns noop_already_done even with an unknown --context-budget profile", () => {
+    // Drive the task to done via the real lifecycle (node --version verify).
+    expectJsonOk(project.run(["task", "start", "P1-T1", "--agent", "claude-code", "--json"]));
+    expectJsonOk(project.run(["task", "complete", "P1-T1", "--agent", "claude-code", "--json"]));
+
+    // An UNKNOWN profile would be CONFIG_ERROR on the build path; on a done
+    // task it must be skipped entirely.
+    const env = expectJsonOk<{
+      current_state: string;
+      next_action: { type: string };
+      context_pack_bytes: number;
+      context_pack_path: string | null;
+    }>(
+      project.run([
+        "task", "prepare", "P1-T1", "--agent", "claude-code",
+        "--context-budget", "definitely-not-a-profile", "--json",
+      ]),
+    );
+    expect(env.data.current_state).toBe("done");
+    expect(env.data.next_action.type).toBe("noop_already_done");
+    expect(env.data.context_pack_bytes).toBe(0);
+    expect(env.data.context_pack_path).toBeNull();
   });
 });
