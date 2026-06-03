@@ -152,5 +152,14 @@ export function formatRecommend(r: RecommendResult): string {
     ].join("\n"),
   );
 
+  // P48 — recommended (not applied) context budget. Worded to make clear this is
+  // a suggestion; applying it stays explicit via `--context-budget <profile>`.
+  if (r.contextFit) {
+    sections.push(
+      `Context fit: recommended context budget ${r.contextFit.recommendedProfile} ` +
+        `(${r.contextFit.recommendedBudgetBytes} bytes) — ${r.contextFit.reason}`,
+    );
+  }
+
   return sections.join("\n\n");
 }

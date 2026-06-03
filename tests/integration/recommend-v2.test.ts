@@ -3,6 +3,9 @@ import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { runRecommend, formatRecommend, type RecommendResult } from "../../src/commands/recommend.ts";
 import { RecommendResultV2 } from "../../src/core/schemas/recommend-result.ts";
+import { resolveRecommendation } from "../../src/core/recommend/index.ts";
+import { AgentProfile } from "../../src/core/schemas/agent-profile.ts";
+import { Task } from "../../src/core/schemas/task.ts";
 import { cliPath, ensureCliBuilt, repoRoot } from "../helpers/cli.ts";
 
 const fixtureDir = join(repoRoot, "tests", "fixtures", "project-a");
@@ -269,6 +272,128 @@ describe("recommend v0.8 — human formatter", () => {
     expect(out).toContain("Tool calls:");
     expect(out).toContain("Context files:");
     expect(out).toContain("Verification commands:");
+  });
+});
+
+describe("recommend — P48 contextFit (additive)", () => {
+  it("runRecommend surfaces a contextFit for the P2-E1-T1 fixture (medium -> balanced, built-in fallback)", async () => {
+    const result = await runRecommend({
+      cwd: fixtureDir,
+      phaseId: "P2",
+      taskId: "P2-E1-T1",
+      agentName: "claude-code",
+    });
+    // context_size=medium, ambiguity=medium, write_surface=medium -> balanced.
+    expect(result.contextFit).toBeDefined();
+    expect(result.contextFit?.recommendedProfile).toBe("balanced");
+    expect(result.contextFit?.recommendedBudgetBytes).toBe(60000);
+    expect(result.contextFit?.reason).toContain("built-in fallback");
+  });
+
+  it("contextFit is distinct from the categorical budgetProfile (no overload)", async () => {
+    const result = await runRecommend({
+      cwd: fixtureDir,
+      phaseId: "P2",
+      taskId: "P2-E1-T1",
+      agentName: "claude-code",
+    });
+    // budgetProfile stays categorical and unchanged; contextFit is a separate,
+    // byte-valued recommendation.
+    expect(result.budgetProfile).toEqual({
+      toolCalls: "medium",
+      contextFiles: "several",
+      verificationCommands: "full",
+    });
+    expect(result.contextFit?.recommendedBudgetBytes).toBe(60000);
+  });
+
+  it("the human formatter includes one clear, suggestion-worded context fit line", async () => {
+    const result = await runRecommend({
+      cwd: fixtureDir,
+      phaseId: "P2",
+      taskId: "P2-E1-T1",
+      agentName: "claude-code",
+    });
+    const out = formatRecommend(result);
+    expect(out).toContain("Context fit:");
+    expect(out).toContain("recommended context budget balanced");
+    expect(out).toContain("(60000 bytes)");
+    // Must NOT imply automatic application.
+    expect(out).not.toContain("Using context budget");
+    expect(out).not.toContain("Applying");
+  });
+
+  it("--json carries contextFit through the CLI envelope (subprocess)", () => {
+    const res = spawnSync(
+      process.execPath,
+      [cliPath, "recommend", "--phase", "P2", "--task", "P2-E1-T1", "--json"],
+      { cwd: fixtureDir, encoding: "utf8", env: process.env },
+    );
+    expect(res.status).toBe(0);
+    const parsed = JSON.parse(res.stdout.trim());
+    expect(parsed.data.contextFit).toBeDefined();
+    expect(parsed.data.contextFit.recommendedProfile).toBe("balanced");
+    expect(parsed.data.contextFit.recommendedBudgetBytes).toBe(60000);
+  });
+
+  it("a selected agent profile same-name override changes recommendedBudgetBytes", () => {
+    // Exercise the real resolver with an agent profile that overrides the
+    // 'balanced' bytes; no shared fixture is mutated.
+    const agentProfile = AgentProfile.parse({
+      name: "claude-code",
+      instruction_filename: "CLAUDE.md",
+      context_dir: ".context/claude",
+      skill_dir: ".claude/skills",
+      hook_dir: ".claude/hooks",
+      model_map: {
+        highest_reasoning: "claude-opus-4-7",
+        balanced_coding: "claude-sonnet-4-6",
+        cheap_mechanical: "claude-haiku-4-5",
+      },
+      context_budget: { profiles: { balanced: { max_bytes: 65536 } } },
+    });
+    const task = Task.parse({
+      id: "P9-T1",
+      type: "feature",
+      ambiguity: "medium",
+      risk: "medium",
+      context_size: "medium",
+      write_surface: "medium",
+      verification_strength: "medium",
+      expected_duration: "short",
+      status: "planned",
+    });
+    const overridden = resolveRecommendation({
+      phaseId: "P9",
+      taskId: "P9-T1",
+      task,
+      agentName: "claude-code",
+      agentProfile,
+    });
+    expect(overridden.contextFit?.recommendedProfile).toBe("balanced");
+    expect(overridden.contextFit?.recommendedBudgetBytes).toBe(65536);
+    expect(overridden.contextFit?.reason).toContain("agent profile override");
+
+    // Same task with NO override -> built-in fallback bytes.
+    const noOverride = resolveRecommendation({
+      phaseId: "P9",
+      taskId: "P9-T1",
+      task,
+      agentName: "claude-code",
+      agentProfile: AgentProfile.parse({
+        name: "claude-code",
+        instruction_filename: "CLAUDE.md",
+        context_dir: ".context/claude",
+        skill_dir: ".claude/skills",
+        hook_dir: ".claude/hooks",
+        model_map: {
+          highest_reasoning: "claude-opus-4-7",
+          balanced_coding: "claude-sonnet-4-6",
+          cheap_mechanical: "claude-haiku-4-5",
+        },
+      }),
+    });
+    expect(noOverride.contextFit?.recommendedBudgetBytes).toBe(60000);
   });
 });
 
