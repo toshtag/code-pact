@@ -13,6 +13,64 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+## [1.31.0] — 2026-06-04
+
+Collaboration-safe shared state. The progress ledger moves from a single
+`.code-pact/state/progress.yaml` array to **one file per event** under
+`.code-pact/state/events/`, so contributors on separate branches can record
+progress and merge cleanly — no lost updates, no merge-corrupted log. Existing
+projects keep working unchanged: the legacy `progress.yaml` is read-merged and
+never rewritten.
+
+> **Scope note.** This release makes the **progress ledger** collaboration-safe.
+> It does **not** change phase ids (`P<N>`), `roadmap.yaml`, or inline task
+> layout — the other multi-contributor control-plane conflicts are deferred to a
+> follow-up v2 control-plane RFC, gated on real demand (a second active
+> contributor or an external adopter).
+
+### Added
+
+- **Per-event progress ledger** (collaboration-safe-state RFC). `task start` /
+  `complete` / `block` / `resume` / `record-done` write one content-addressed
+  file under `.code-pact/state/events/`; readers merge it with the legacy
+  `progress.yaml` deterministically (`at`, then content id). Concurrent writers
+  and divergent branches no longer lose or reorder events — the write path is
+  lock-free by construction (one no-overwrite file per event).
+- **`plan migrate`** — convert a legacy monolithic `progress.yaml` into the
+  per-event ledger. Dry-run by default, idempotent, and it reports any task whose
+  derived state would change under the merged ordering. The legacy file is left
+  in place (never deleted or auto-rewritten).
+- **`PROGRESS_EVENT_CONFLICT`** diagnostic (`doctor` / `plan analyze`) — surfaces
+  incompatible same-task lifecycle events (e.g. two branches that both `done` a
+  task) instead of silently picking a winner. Advisory; `validate --strict`
+  promotes it.
+- **`PLAN_MIGRATE_FAILED`** public error code — `plan migrate`'s command-level
+  failure (e.g. a corrupt event file), with the underlying cause in
+  `error.message`.
+- **`EVENT_FILE_ID_MISMATCH`** ledger-integrity diagnostic (`doctor` /
+  `plan lint`) — fail-closed when an event file's content does not match its
+  content-addressed filename.
+
+### Changed
+
+- **Shared-vs-local `.code-pact/` policy is now consistent.** `init` ignores only
+  the machine-local / derived paths (`locks/`, `cache/`, plus `/.local/`,
+  `/.context/`); the project config, baselines, and the progress ledger
+  (`state/events/**`) are committed. The branch-drift gate
+  (`CONTROL_PLANE_BRANCH_NOT_DRIVEN`) reads the **committed** ledger — legacy
+  `progress.yaml` **and** `state/events/**`.
+- `plan analyze` / `plan migrate` wrap a ledger-read integrity failure into their
+  own command-level code (`PLAN_ANALYZE_FAILED` / `PLAN_MIGRATE_FAILED`) rather
+  than leaking `EVENT_FILE_ID_MISMATCH` as a top-level `error.code`. The
+  governance / cli-contract docs are reconciled to the event-file safety model.
+
+### Fixed
+
+- `init` no longer ignores the progress ledger or commits machine-local lock
+  files: it adds `/.code-pact/locks/` and `/.code-pact/cache/` to `.gitignore`
+  (previously only `/.local/` and `/.context/` were ignored, so a user repo could
+  commit pid/hostname lock state).
+
 ## [1.30.1] — 2026-06-03
 
 Adapter-drift signal hygiene. `ADAPTER_GENERATOR_STALE` no longer nags on a no-op patch bump — a stale `generator_version` stamp alone is silent when the generated adapter output is byte-identical to the manifest. No new command, flag, diagnostic code, or manifest schema change.

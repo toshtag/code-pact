@@ -27,6 +27,8 @@ When a command surfaces one of the diagnostic codes below, this page maps it to 
 | [`TASK_CONTEXT_BUDGET_UNACHIEVABLE`](#context-fit-advisories-from-plan-lint---include-quality-v130) | Recommended budget below the achievable floor | Use a wider profile or split the task (advisory only) |
 | [`TASK_DECLARED_DECISION_LARGE`](#context-fit-advisories-from-plan-lint---include-quality-v130) | A `decision_refs` body > tight budget (30000 bytes) | Split follow-up tasks or confirm scope (advisory only) |
 | [`TASK_READS_MATCH_TOO_MANY`](#context-fit-advisories-from-plan-lint---include-quality-v130) | A `reads` glob matches > 100 files | Narrow the glob if the task can be scoped (advisory only) |
+| [`EVENT_FILE_ID_MISMATCH`](#event_file_id_mismatch-from-doctor--plan-lint-v131) | A per-event ledger file's content doesn't match its content-addressed name (corrupt / hand-edited) | Restore from git or remove the file named in the message, then re-run |
+| [`PROGRESS_EVENT_CONFLICT`](#progress_event_conflict-from-doctor--plan-analyze-v131) | Incompatible same-task lifecycle events (e.g. two branches both `done` a task) | Reconcile the conflicting event(s) for the named task |
 
 ## `MANIFEST_NOT_FOUND` from `adapter upgrade --check` / `--write`
 
@@ -355,3 +357,44 @@ code-pact plan lint --include-quality --json
 - **`TASK_CONTEXT_BUDGET_UNACHIEVABLE`** — the deterministically recommended budget (P48 mapping; the default agent's same-name `context_budget` override when available, else the built-in fallback — the same byte value `recommend` surfaces) cannot fit even after maximal eligible elision: `minimum_achievable_bytes > budget_bytes`. `details.profile` / `details.budget_bytes` / `details.minimum_achievable_bytes` (the **same floor `CONTEXT_OVER_BUDGET` reports**). Recovery (optional): use a wider profile or split the task. It does not change the recommendation or fail lint. Needs a resolvable `default_agent`; skipped otherwise.
 - **`TASK_DECLARED_DECISION_LARGE`** — a `decision_refs` entry points to a decision body larger than the `tight` budget (30000 bytes), large enough to dominate a tight pack. `details.path` / `details.bytes` / `details.threshold_bytes`. This is **not** an ADR-quality error — do not delete the ADR; consider splitting follow-up tasks, using a wider profile, or confirming the task scope justifies the large reference. Unsafe/missing refs are reported by `TASK_DECISION_REF_UNSAFE_PATH` / `TASK_DECISION_REF_NOT_FOUND` instead.
 - **`TASK_READS_MATCH_TOO_MANY`** — a `reads` glob matches more than 100 files and may inflate context planning cost. `details.glob` / `details.match_count` / `details.threshold_count`. Recovery (optional): narrow the glob if the task can be scoped more precisely. Broad reads can be valid for cross-cutting refactors.
+
+## `EVENT_FILE_ID_MISMATCH` from `doctor` / `plan lint` (v1.31)
+
+A per-event progress-ledger file under `.code-pact/state/events/` failed the
+filename↔content invariant: its content (or its stored `id`) does not match its
+filename, which **is** the full content id. This is fail-closed — a corrupt,
+partial, or hand-edited event file is never read or written over silently.
+
+```sh
+# The message names the offending file, e.g.
+#   Event file 2026…-<id>.yaml: content id (<a>) does not match filename id (<b>)
+git checkout -- .code-pact/state/events/<file>   # restore it if it was committed
+# or, if it is a stray / corrupt local file:
+rm .code-pact/state/events/<file>
+```
+
+Do **not** hand-edit event files — they are content-addressed (the filename is a
+sha256 of the canonical event). To change recorded progress, append a new event
+via the `task` verbs. On the strict-loader commands the same corruption surfaces
+as a command failure — `plan analyze` → `PLAN_ANALYZE_FAILED`, `plan migrate` →
+`PLAN_MIGRATE_FAILED`, `task *` / `verify` abort — with this diagnostic carried in
+`error.message`.
+
+## `PROGRESS_EVENT_CONFLICT` from `doctor` / `plan analyze` (v1.31)
+
+The merged ledger contains incompatible lifecycle events for one task — e.g. two
+branches that each recorded `done` for the same task, a second `started` while it
+was already `started`, or a `done` / `blocked` with no intervening `resumed`. The
+reducer still derives a state, but the conflict is **surfaced, not silently
+resolved**.
+
+```sh
+code-pact doctor --json | jq '.data.issues[] | select(.code=="PROGRESS_EVENT_CONFLICT")'
+# Find the conflicting event files for the named task under
+# .code-pact/state/events/, decide which is correct, and remove or correct the
+# other — then re-run doctor / plan analyze to confirm it is gone.
+```
+
+Advisory by default (`severity: warning`); `validate --strict` promotes it to a
+failure so CI can gate on it. It is **not** auto-resolved because a same-task
+concurrent edit is a genuine collaboration conflict a human should adjudicate.
