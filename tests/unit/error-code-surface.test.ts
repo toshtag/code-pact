@@ -74,6 +74,7 @@ const KNOWN_CODES: Record<string, "public" | "plan" | "doctor" | "adapter" | "in
   VERIFICATION_FAILED: "public",
   DOCTOR_FAILED: "public",
   PLAN_ANALYZE_FAILED: "public",
+  PLAN_MIGRATE_FAILED: "public",
   PLAN_LINT_FAILED: "public",
   PLAN_NORMALIZE_CONFLICT: "public",
   PLAN_NORMALIZE_REQUIRED: "public",
@@ -93,9 +94,9 @@ const KNOWN_CODES: Record<string, "public" | "plan" | "doctor" | "adapter" | "in
   // / SCHEMA_ERROR, hence the "plan" category. It is never a public top-level
   // error.code: the strict-loader readers `task *` / `verify` abort raw (exit 3,
   // like a corrupt legacy progress.yaml), while `plan analyze` / `plan migrate`
-  // wrap it into the command's own failure code (PLAN_ANALYZE_FAILED) with the
-  // cause in error.message (see cmdPlanAnalyze / docs/cli-contract.md). `pack` is
-  // best-effort and skips it.
+  // wrap it into the command's own failure code (PLAN_ANALYZE_FAILED /
+  // PLAN_MIGRATE_FAILED) with the cause in error.message (see cmdPlanAnalyze /
+  // cmdPlanMigrate / docs/cli-contract.md). `pack` is best-effort and skips it.
   EVENT_FILE_ID_MISMATCH: "plan",
   PHASE_DONE_WITH_OPEN_TASKS: "plan",
   PHASE_ID_MISMATCH: "plan",

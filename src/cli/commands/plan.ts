@@ -875,14 +875,20 @@ async function cmdPlanMigrate(
     }
     return 0;
   } catch (err: unknown) {
-    // Same wrap as plan analyze: a corrupt existing event file read during
-    // migration must not leak EVENT_FILE_ID_MISMATCH as a top-level error.code.
-    const code = planCatchCode(err, "INTERNAL_ERROR");
+    // A corrupt existing event file read during migration must not leak
+    // EVENT_FILE_ID_MISMATCH (etc.) as a top-level error.code — ledger-read
+    // integrity codes and code-less throws are wrapped into the command-level
+    // PLAN_MIGRATE_FAILED (the literal below is what the error-code-surface scan
+    // pins, mirroring plan analyze's PLAN_ANALYZE_FAILED); the cause stays in
+    // error.message. A non-ledger coded error keeps its own code.
     const message = err instanceof Error ? err.message : String(err);
+    const raw = (err as NodeJS.ErrnoException).code;
+    const error =
+      raw !== undefined && !LEDGER_READ_INTEGRITY_CODES.has(raw)
+        ? { code: raw, message }
+        : { code: "PLAN_MIGRATE_FAILED", message };
     if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code, message } })}\n`,
-      );
+      process.stdout.write(`${JSON.stringify({ ok: false, error })}\n`);
     } else {
       process.stderr.write(`${message}\n`);
     }

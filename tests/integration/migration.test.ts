@@ -39,7 +39,7 @@
 //     model-profiles, etc.) is a future refinement, not a v1.0 gate.
 
 import { describe, it, expect, beforeAll, afterEach } from "vitest";
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
@@ -475,5 +475,38 @@ describe("migration: v0.9-era project (manifest with stale generator_version)", 
     const res = p.run(["validate"]);
     expect(res.code).toBe(0);
     expect(res.stdout).toContain("Project validation passed.");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// plan migrate: a corrupt per-event ledger file must not leak the
+// ledger-integrity diagnostic (EVENT_FILE_ID_MISMATCH) as a top-level error.code
+// — it is wrapped into the command-level PLAN_MIGRATE_FAILED (B4 contract).
+// ---------------------------------------------------------------------------
+
+describe("migration: plan migrate wraps a corrupt event file into PLAN_MIGRATE_FAILED", () => {
+  it("never leaks EVENT_FILE_ID_MISMATCH as the top-level error.code", async () => {
+    const p = await freshProject("migrate-corrupt");
+    // A name that parses as a valid event-file name but whose 64-hex id does not
+    // match the body — readEventFiles throws EVENT_FILE_ID_MISMATCH during migrate.
+    const eventsDir = join(p.dir, ".code-pact", "state", "events");
+    await mkdir(eventsDir, { recursive: true });
+    await writeFile(
+      join(eventsDir, `20260518T000000000Z-${"0".repeat(64)}.yaml`),
+      `task_id: P1-T1\nstatus: done\nat: "2026-05-18T00:00:00.000Z"\nactor: agent\n`,
+      "utf8",
+    );
+
+    const res = p.run(["plan", "migrate", "--json"]);
+    expect(res.code).toBe(1);
+    const parsed = JSON.parse(res.stdout) as {
+      ok: boolean;
+      error?: { code: string; message: string };
+    };
+    expect(parsed.ok).toBe(false);
+    expect(parsed.error?.code).toBe("PLAN_MIGRATE_FAILED");
+    expect(parsed.error?.code).not.toBe("EVENT_FILE_ID_MISMATCH");
+    // The original ledger diagnostic is preserved in the message.
+    expect(parsed.error?.message ?? "").toContain("filename id");
   });
 });
