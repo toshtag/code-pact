@@ -7,14 +7,14 @@
 - Owners: maintainer
 - Related: [Collaboration-safe state](collaboration-safe-state-rfc.md) (this RFC takes up its explicitly-deferred **Bucket C**, C1–C4), [CI branch-drift](ci-branch-drift-rfc.md) (the committed-control-plane precondition), [Deterministic roadmap stabilization](deterministic-roadmap-stabilization-rfc.md) (reproducible roadmap generation), [Cross-phase dependencies](cross-phase-deps-rfc.md) (`depends_on` across phases), [P22 cancelled](P22-cancelled-adapter-schema-v2.md) / [P37 deferred](P37-deferred-outcome-audit.md) (the no-preemptive-engineering precedent this RFC is now allowed to cross)
 
-> **This is a proposed RFC, not an accepted spec.** It deliberately does **not**
-> pre-commit to a v2 layout, a v2.0.0 version, or a single big-bang PR. Its job is
-> to record the demand, decompose the problem, weigh alternatives honestly, fix
-> the semver story, and propose an *incremental, additive* rollout gated on a soak
-> and on a first-hand incident analysis we do **not** yet have. **No
-> implementation follows from accepting this draft** — accepting it authorizes the
-> investigation, **PR0** (a no-behavior-change refactor) and **PR1** (warning-default
-> diagnostics) only; PR2+ stay gated on §5. Nothing more.
+> **This is a scope-limited *accepted* RFC, not an accepted v2 layout spec.** It
+> deliberately does **not** pre-commit to a v2 layout, a v2.0.0 version, or a
+> single big-bang PR. Its job is to record the demand (the first-hand incident in
+> [§1](#1-incident-analysis)), decompose the problem, weigh alternatives honestly,
+> fix the semver story, and propose an *incremental, additive* rollout.
+> **Acceptance authorizes the investigation, PR0 (a no-behaviour-change refactor)
+> and PR1 (warning-default diagnostics) only; PR2+ stay gated on §5. Nothing
+> more.**
 
 ## Summary
 
@@ -102,6 +102,12 @@ conflict, the same shape the ledger had before v1.31.0.
 > `phase.ts:12`, `phase-import.ts:97`). Any change to discovery touches all of
 > them unless they are first consolidated behind one seam. This is a named
 > prerequisite (PR0 in [Rollout](#6-recommended-rollout)), not a footnote.
+> **Scope note:** these 8 are the *byte-equivalent* copies PR0 consolidates;
+> other roadmap readers with **distinct contracts** — `resolveTaskInRoadmap`
+> (`resolve-task.ts`), `doctor`'s validating reader, `plan adopt`'s id-minting
+> reader, `phase reconcile`, and adapter generation (`adapters/claude.ts`) —
+> are **not** part of PR0 and are addressed when the discovery contract itself
+> changes (PR2+).
 
 ### Tasks are inline in the phase YAML
 
@@ -293,8 +299,9 @@ diagnostics PR is gated** on all of:
    forensic trace is still missing** (no diffs / conflict markers / merge commits /
    recovery-time figure). The forensic backfill is **required before PR2+**, not
    before PR1.
-4. **At least one focused design review** of this RFC is accepted (status flips
-   `proposed` → `accepted`).
+4. **At least one focused design review** of this RFC — ✅ satisfied: two
+   adversarial reviews ran and their must-fixes were applied; status was flipped
+   to scope-limited `accepted`.
 
 Diagnostics (PR1 below) are exempt from gates 2–4 **only while they stay
 warning-default and do not affect exit outside an explicit `--strict`** (the
@@ -309,9 +316,14 @@ that *help gather* the incident data and are safe to ship early.
 Additive sequence, value-first. **No big-bang.** Each PR is independently
 shippable as a MINOR and independently revertible.
 
-- **PR0 — Consolidate the discovery seam (refactor, no behavior change).** Replace
-  the 8 duplicated `loadRoadmap` implementations with one. Prerequisite for D3;
-  worth doing regardless. Patch/minor, zero contract change.
+- **PR0 — Consolidate the byte-equivalent strict readers (refactor, no behaviour
+  change).** Replace the 8 duplicated command-local `loadRoadmap` implementations
+  with one shared helper. A **first** step toward D3 — **not** the whole discovery
+  seam: other roadmap readers with distinct contracts (`resolveTaskInRoadmap`,
+  `doctor`'s validating reader, `plan adopt`'s id-minting reader, `phase reconcile`,
+  adapter generation, the lenient lint loader) stay separate and are handled in
+  their own later PRs, when the discovery contract actually changes. Patch/minor,
+  zero contract change.
 - **PR1 — Diagnostics first (the §1-confirmed highest-value first ship).** The
   worst incident failures are *git-silent* (duplicate ids in separate files;
   clean-but-wrong scalar merges), so a tool-side detector is the only guard. Note
@@ -428,7 +440,7 @@ convention when the work is taken up.)
 
 ## Deliverables of this RFC
 
-- This draft at `design/decisions/control-plane-v2-rfc.md`, **status: proposed**.
+- This RFC at `design/decisions/control-plane-v2-rfc.md`, **status: accepted (scope-limited — PR0 + PR1 only)**.
 - The [open questions / required incident data](#open-questions--required-incident-data) below.
 - The [recommended next-PR sequence](#6-recommended-rollout) (PR0→Final).
 - The [semver recommendation](#4-semver-analysis): additive minors; v2.0.0 only as
@@ -466,7 +478,7 @@ convention when the work is taken up.)
   --control-plane` contracts, the new advisories, and an explicit "`P<N>` is a
   legacy/display ordinal, not the canonical key" note.
 - `design/decisions/README.md` — index row (added with this draft, marked
-  proposed).
+  accepted / scope-limited).
 - `docs/` getting-started / planning / dogfood / ci — anywhere that calls
   `roadmap.yaml` the mandatory registry or `P<N>` the canonical id.
 - The ja mirror under `docs/ja/` for every English page changed (per the
