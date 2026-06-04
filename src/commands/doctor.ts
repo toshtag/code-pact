@@ -27,6 +27,7 @@ import { ModelProfile, ModelTier } from "../core/schemas/model-profile.ts";
 import {
   detectDuplicateTaskIds,
   detectOrphanProgressEvents,
+  detectProgressEventConflicts,
 } from "../core/plan/checks.ts";
 import type { PhaseEntry } from "../core/plan/state.ts";
 import type { PlanIssue } from "../core/plan/shared.ts";
@@ -261,6 +262,9 @@ async function checkProgressLog(
     for (const task of phase.tasks ?? []) taskIndex.set(task.id, true);
   }
   for (const planIssue of detectOrphanProgressEvents(events, taskIndex)) {
+    issues.push(planIssueToDoctor(planIssue));
+  }
+  for (const planIssue of detectProgressEventConflicts(events)) {
     issues.push(planIssueToDoctor(planIssue));
   }
 }

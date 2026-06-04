@@ -3,6 +3,11 @@ import { join } from "node:path";
 import type { PhaseEntry } from "./state.ts";
 import type { PlanIssue } from "./shared.ts";
 import type { ProgressEvent } from "../schemas/progress-event.ts";
+import {
+  assertTransition,
+  type TaskCurrentState,
+  type TaskTransition,
+} from "../progress/task-state.ts";
 import type { Roadmap } from "../schemas/roadmap.ts";
 import { assertSafeRelativePath } from "../path-safety.ts";
 import {
@@ -181,6 +186,63 @@ export function detectOrphanProgressEvents(
       message: `progress.yaml references task "${event.task_id}" which does not exist in any phase`,
       task_id: event.task_id,
     });
+  }
+  return issues;
+}
+
+// `planned -> done` is the v0.5 legacy command-layer shortcut (task complete on
+// a never-started task), so it is acceptable, not a conflict.
+function isAcceptableTransition(
+  current: TaskCurrentState,
+  next: TaskTransition,
+): boolean {
+  if (current === "planned" && next === "done") return true;
+  try {
+    assertTransition(current, next);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Detect conflicting progress events for a task (collaboration-safe-state RFC,
+ * B6). With the per-event ledger, two contributors/branches can produce events
+ * that, once merged, form a sequence no single writer would: a second `started`
+ * while already started, a `done` after `done`, a `blocked`/`started` after a
+ * terminal `done`, etc. Folding each task's merged events through the lifecycle
+ * state machine surfaces these as `PROGRESS_EVENT_CONFLICT` (warning) instead of
+ * letting the reducer silently pick a last-writer winner.
+ *
+ * `deriveTaskState` is intentionally NOT made conflict-aware — it stays total;
+ * this is the detection surface. One conflict is reported per task (the first),
+ * to avoid cascading noise from a single divergence.
+ */
+export function detectProgressEventConflicts(
+  events: readonly ProgressEvent[],
+): PlanIssue[] {
+  const issues: PlanIssue[] = [];
+  const byTask = new Map<string, ProgressEvent[]>();
+  for (const e of events) {
+    const list = byTask.get(e.task_id);
+    if (list) list.push(e);
+    else byTask.set(e.task_id, [e]);
+  }
+  for (const [taskId, taskEvents] of byTask) {
+    let current: TaskCurrentState = "planned";
+    for (const e of taskEvents) {
+      const next = e.status as TaskTransition;
+      if (!isAcceptableTransition(current, next)) {
+        issues.push({
+          code: "PROGRESS_EVENT_CONFLICT",
+          severity: "warning",
+          message: `Task "${taskId}" has conflicting progress events: "${current}" → "${next}" is not a valid lifecycle transition (incompatible or concurrent events from different sources). Inspect .code-pact/state/events/ and reconcile the offending event.`,
+          task_id: taskId,
+        });
+        break;
+      }
+      current = next;
+    }
   }
   return issues;
 }

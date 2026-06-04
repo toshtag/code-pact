@@ -85,6 +85,7 @@ const KNOWN_CODES: Record<string, "public" | "plan" | "doctor" | "adapter" | "in
   MISSING_PHASE_FILE: "plan",
   ORPHAN_PHASE_FILE: "plan",
   ORPHAN_PROGRESS_EVENT: "plan",
+  PROGRESS_EVENT_CONFLICT: "plan",
   PHASE_DONE_WITH_OPEN_TASKS: "plan",
   PHASE_ID_MISMATCH: "plan",
   PHASE_ID_NAMING: "plan",

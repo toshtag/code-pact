@@ -241,6 +241,7 @@ Issue-level codes emitted by `plan lint` and `plan analyze` inside `data.issues[
 | `STATUS_DRIFT` | error/warning | `plan analyze` | Design status disagrees with derived progress state (see `details.kind`) |
 | `PHASE_DONE_WITH_OPEN_TASKS` | error | `plan analyze` | Phase marked done but at least one task is still open |
 | `ORPHAN_PROGRESS_EVENT` | warning | `plan analyze`, `doctor` | Progress event references a `task_id` that does not exist in any phase |
+| `PROGRESS_EVENT_CONFLICT` (collaboration-safe-state RFC, B6) | warning | `plan analyze`, `doctor` | A task's merged progress events form an invalid lifecycle sequence (e.g. two `started`, `done` after `done`, an event after a terminal `done`) — incompatible / concurrent events from different sources. The reducer stays total; this is the detection surface. Gate it in CI with `validate --strict` |
 
 #### Task Readiness Schema diagnostics (P10, v1.1+)
 

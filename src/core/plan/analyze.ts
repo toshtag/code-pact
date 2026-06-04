@@ -1,4 +1,7 @@
-import { detectOrphanProgressEvents } from "./checks.ts";
+import {
+  detectOrphanProgressEvents,
+  detectProgressEventConflicts,
+} from "./checks.ts";
 import { loadPlanState, type PlanState } from "./state.ts";
 import type { PlanIssue } from "./shared.ts";
 import {
@@ -179,6 +182,7 @@ export async function runAnalyze(
 
   if (events.length > 0) {
     issues.push(...detectOrphanProgressEvents(events, state.taskIndex));
+    issues.push(...detectProgressEventConflicts(events));
   }
 
   return { state, issues };
