@@ -4,6 +4,7 @@ import { parse as parseYaml } from "yaml";
 import { Phase, type PhaseStatus } from "../core/schemas/phase.ts";
 import { PhaseRef } from "../core/schemas/roadmap.ts";
 import { loadRoadmap } from "../core/plan/roadmap.ts";
+import { resolvePhaseInRoadmap } from "../core/plan/resolve-phase.ts";
 import { createPhase } from "../core/services/createPhase.ts";
 
 // ---------------------------------------------------------------------------
@@ -101,13 +102,7 @@ export type PhaseShowOptions = {
 
 export async function runPhaseShow(opts: PhaseShowOptions): Promise<Phase> {
   const { cwd, id } = opts;
-  const roadmap = await loadRoadmap(cwd);
-  const ref = roadmap.phases.find((p) => p.id === id);
-  if (!ref) {
-    const err = new Error(`Phase "${id}" not found in roadmap.yaml.`);
-    (err as NodeJS.ErrnoException).code = "PHASE_NOT_FOUND";
-    throw err;
-  }
+  const ref = await resolvePhaseInRoadmap(cwd, id);
   return loadPhase(cwd, ref);
 }
 

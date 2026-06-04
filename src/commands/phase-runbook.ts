@@ -1,4 +1,8 @@
 import { loadPlanState } from "../core/plan/state.ts";
+import {
+  resolvePhaseInPlanState,
+  findUniquePhaseInPlanState,
+} from "../core/plan/resolve-phase.ts";
 import { buildPhaseRunbook } from "../core/runbook/build-phase-runbook.ts";
 import { buildTaskPhaseIndex } from "../core/runbook/depends-on.ts";
 import { deriveTaskState } from "../core/progress/task-state.ts";
@@ -16,8 +20,8 @@ import type {
 // Every recommended step is a command string the user runs separately,
 // or a manual_action describing a human checkpoint.
 //
-// Error codes reused (no new codes): PHASE_NOT_FOUND / CONFIG_ERROR
-// (in cli.ts argv parsing).
+// Error codes: PHASE_NOT_FOUND / AMBIGUOUS_PHASE_ID (duplicate phase id —
+// control-plane v2 PR1a) / CONFIG_ERROR (in cli.ts argv parsing).
 // ---------------------------------------------------------------------------
 
 export type PhaseRunbookOptions = {
@@ -31,13 +35,7 @@ export async function runPhaseRunbook(
   const { cwd, phaseId } = opts;
 
   const state = await loadPlanState(cwd);
-  const entry = state.phases.find((e) => e.phase.id === phaseId);
-
-  if (!entry) {
-    const err = new Error(`Phase "${phaseId}" not found in roadmap.yaml.`);
-    (err as NodeJS.ErrnoException).code = "PHASE_NOT_FOUND";
-    throw err;
-  }
+  const entry = resolvePhaseInPlanState(state, phaseId);
 
   const events = state.progress?.events ?? [];
 
@@ -98,7 +96,7 @@ export async function runPhaseRunbookAcrossPhases(opts: {
 
   const phaseResults: PhaseRunbookResult[] = [];
   for (const phaseId of considered) {
-    const entry = state.phases.find((e) => e.phase.id === phaseId);
+    const entry = findUniquePhaseInPlanState(state, phaseId);
     if (!entry) continue;
     phaseResults.push(
       buildPhaseRunbook({

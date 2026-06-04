@@ -474,6 +474,19 @@ async function cmdRecommend(argv: string[], locale: Locale, globalJson: boolean)
       }
       return 2;
     }
+    if (code === "AMBIGUOUS_PHASE_ID") {
+      const phases =
+        (err as NodeJS.ErrnoException & { phases?: string[] }).phases ?? [];
+      const msg = err instanceof Error ? err.message : `Phase "${phaseId}" is ambiguous.`;
+      if (json) {
+        process.stdout.write(
+          `${JSON.stringify({ ok: false, error: { code: "AMBIGUOUS_PHASE_ID", message: msg }, data: { phases } })}\n`,
+        );
+      } else {
+        process.stderr.write(`${msg}\n`);
+      }
+      return 2;
+    }
     if (code === "TASK_NOT_FOUND") {
       const msg = m.recommend.taskNotFound(taskId, phaseId);
       if (json) {
@@ -587,6 +600,19 @@ async function cmdVerify(argv: string[], locale: Locale, globalJson: boolean): P
       }
       return 2;
     }
+    if (code === "AMBIGUOUS_PHASE_ID") {
+      const phases =
+        (err as NodeJS.ErrnoException & { phases?: string[] }).phases ?? [];
+      const msg = err instanceof Error ? err.message : `Phase "${phaseId}" is ambiguous.`;
+      if (json) {
+        process.stdout.write(
+          `${JSON.stringify({ ok: false, error: { code: "AMBIGUOUS_PHASE_ID", message: msg }, data: { phases } })}\n`,
+        );
+      } else {
+        process.stderr.write(`${msg}\n`);
+      }
+      return 2;
+    }
     if (code === "TASK_NOT_FOUND") {
       const msg = m.verify.taskNotFound(taskId, phaseId);
       if (json) {
@@ -654,6 +680,19 @@ async function cmdPack(argv: string[], locale: Locale, globalJson: boolean): Pro
       if (json) {
         process.stdout.write(
           `${JSON.stringify({ ok: false, error: { code: "PHASE_NOT_FOUND", message: msg } })}\n`,
+        );
+      } else {
+        process.stderr.write(`${msg}\n`);
+      }
+      return 2;
+    }
+    if (code === "AMBIGUOUS_PHASE_ID") {
+      const phases =
+        (err as NodeJS.ErrnoException & { phases?: string[] }).phases ?? [];
+      const msg = err instanceof Error ? err.message : `Phase "${phaseId}" is ambiguous.`;
+      if (json) {
+        process.stdout.write(
+          `${JSON.stringify({ ok: false, error: { code: "AMBIGUOUS_PHASE_ID", message: msg }, data: { phases } })}\n`,
         );
       } else {
         process.stderr.write(`${msg}\n`);

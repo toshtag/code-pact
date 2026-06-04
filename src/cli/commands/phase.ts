@@ -370,6 +370,18 @@ export async function cmdPhase(argv: string[], locale: Locale, globalJson: boole
         }
         return 2;
       }
+      if (err instanceof Error && (err as NodeJS.ErrnoException).code === "AMBIGUOUS_PHASE_ID") {
+        const phases =
+          (err as NodeJS.ErrnoException & { phases?: string[] }).phases ?? [];
+        if (json) {
+          process.stdout.write(
+            `${JSON.stringify({ ok: false, error: { code: "AMBIGUOUS_PHASE_ID", message: err.message }, data: { phases } })}\n`,
+          );
+        } else {
+          process.stderr.write(`${err.message}\n`);
+        }
+        return 2;
+      }
       throw err;
     }
   }
@@ -538,6 +550,14 @@ async function cmdPhaseReconcile(
       case "PHASE_NOT_FOUND":
         msg = m.phase.reconcile.phaseNotFound(phaseId);
         outCode = "PHASE_NOT_FOUND";
+        break;
+      case "AMBIGUOUS_PHASE_ID":
+        msg = (err as Error).message;
+        outCode = "AMBIGUOUS_PHASE_ID";
+        extraData = {
+          phases:
+            (err as NodeJS.ErrnoException & { phases?: string[] }).phases ?? [],
+        };
         break;
       case "PHASE_RECONCILE_WRITE_REFUSED": {
         const file =
@@ -751,11 +771,24 @@ async function cmdPhaseRunbook(
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
       const msg = (err as Error).message;
-      const outCode = code === "CONFIG_ERROR" ? "CONFIG_ERROR" : "INTERNAL_ERROR";
+      let outCode = "INTERNAL_ERROR";
+      if (code === "CONFIG_ERROR") {
+        outCode = "CONFIG_ERROR";
+      } else if (code === "AMBIGUOUS_PHASE_ID") {
+        outCode = "AMBIGUOUS_PHASE_ID";
+      }
       if (json) {
-        process.stdout.write(
-          `${JSON.stringify({ ok: false, error: { code: outCode, message: msg } })}\n`,
-        );
+        const envelope: Record<string, unknown> = {
+          ok: false,
+          error: { code: outCode, message: msg },
+        };
+        if (code === "AMBIGUOUS_PHASE_ID") {
+          envelope.data = {
+            phases:
+              (err as NodeJS.ErrnoException & { phases?: string[] }).phases ?? [],
+          };
+        }
+        process.stdout.write(`${JSON.stringify(envelope)}\n`);
       } else {
         process.stderr.write(`${msg}\n`);
       }
@@ -802,13 +835,23 @@ async function cmdPhaseRunbook(
     let outCode = "INTERNAL_ERROR";
     if (code === "PHASE_NOT_FOUND") {
       outCode = "PHASE_NOT_FOUND";
+    } else if (code === "AMBIGUOUS_PHASE_ID") {
+      outCode = "AMBIGUOUS_PHASE_ID";
     } else if (code === "CONFIG_ERROR") {
       outCode = "CONFIG_ERROR";
     }
     if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: outCode, message: msg } })}\n`,
-      );
+      const envelope: Record<string, unknown> = {
+        ok: false,
+        error: { code: outCode, message: msg },
+      };
+      if (code === "AMBIGUOUS_PHASE_ID") {
+        envelope.data = {
+          phases:
+            (err as NodeJS.ErrnoException & { phases?: string[] }).phases ?? [],
+        };
+      }
+      process.stdout.write(`${JSON.stringify(envelope)}\n`);
     } else {
       process.stderr.write(`${msg}\n`);
     }

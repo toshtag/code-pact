@@ -81,7 +81,7 @@ branch on the value.
 The P21 commands (`task prepare`, `task context --explain`, `adapter
 conformance`) deliberately ship **no new public error codes**. Every
 failure mode reuses an existing code (`TASK_NOT_FOUND`,
-`AMBIGUOUS_TASK_ID`, `PHASE_NOT_FOUND`, `AGENT_NOT_FOUND`,
+`AMBIGUOUS_TASK_ID`, `AMBIGUOUS_PHASE_ID`, `PHASE_NOT_FOUND`, `AGENT_NOT_FOUND`,
 `AGENT_NOT_ENABLED`, `CONFIG_ERROR`, the existing `ADAPTER_*`
 family).
 

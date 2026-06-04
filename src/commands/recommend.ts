@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { AgentProfile } from "../core/schemas/agent-profile.ts";
 import { Phase } from "../core/schemas/phase.ts";
-import { loadRoadmap } from "../core/plan/roadmap.ts";
+import { resolvePhaseInRoadmap } from "../core/plan/resolve-phase.ts";
 import type { Task } from "../core/schemas/task.ts";
 import { assertSafePlanId } from "../core/schemas/plan-id.ts";
 import { resolveAgentProfilePath } from "../core/agent-profile-path.ts";
@@ -72,13 +72,7 @@ async function loadAgentProfile(cwd: string, agentName: string): Promise<AgentPr
 export async function runRecommend(opts: RecommendOptions): Promise<RecommendResult> {
   const { cwd, phaseId, taskId, agentName } = opts;
 
-  const roadmap = await loadRoadmap(cwd);
-  const ref = roadmap.phases.find((p) => p.id === phaseId);
-  if (!ref) {
-    const err = new Error(`Phase "${phaseId}" not found in roadmap.yaml.`);
-    (err as NodeJS.ErrnoException).code = "PHASE_NOT_FOUND";
-    throw err;
-  }
+  const ref = await resolvePhaseInRoadmap(cwd, phaseId);
 
   const [phase, agentProfile] = await Promise.all([
     loadPhase(cwd, ref.path),

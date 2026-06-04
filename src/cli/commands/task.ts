@@ -449,15 +449,28 @@ async function cmdTaskAdd(
       } catch (err: unknown) {
         const code = (err as NodeJS.ErrnoException).code;
         const message = err instanceof Error ? err.message : String(err);
-        if (code === "PHASE_NOT_FOUND" || code === "DUPLICATE_TASK_ID") {
+        if (
+          code === "PHASE_NOT_FOUND" ||
+          code === "AMBIGUOUS_PHASE_ID" ||
+          code === "DUPLICATE_TASK_ID"
+        ) {
           if (json) {
-            process.stdout.write(
-              `${JSON.stringify({ ok: false, error: { code, message } })}\n`,
-            );
+            const envelope: Record<string, unknown> = {
+              ok: false,
+              error: { code, message },
+            };
+            if (code === "AMBIGUOUS_PHASE_ID") {
+              envelope.data = {
+                phases:
+                  (err as NodeJS.ErrnoException & { phases?: string[] }).phases ??
+                  [],
+              };
+            }
+            process.stdout.write(`${JSON.stringify(envelope)}\n`);
           } else {
             process.stderr.write(`${message}\n`);
           }
-          return code === "PHASE_NOT_FOUND" ? 2 : 1;
+          return code === "DUPLICATE_TASK_ID" ? 1 : 2;
         }
         throw err;
       }
@@ -618,6 +631,15 @@ async function cmdTaskContext(
           (err as NodeJS.ErrnoException & { phases?: string[] }).phases ?? [];
         msg = m.task.context.ambiguous(taskId, phases);
         outCode = "AMBIGUOUS_TASK_ID";
+        break;
+      }
+      case "AMBIGUOUS_PHASE_ID": {
+        msg = err.message;
+        outCode = "AMBIGUOUS_PHASE_ID";
+        envelopeData = {
+          phases:
+            (err as NodeJS.ErrnoException & { phases?: string[] }).phases ?? [],
+        };
         break;
       }
       case "AGENT_NOT_ENABLED":
@@ -793,6 +815,15 @@ async function cmdTaskPrepare(
           (err as NodeJS.ErrnoException & { phases?: string[] }).phases ?? [];
         msg = m.task.context.ambiguous(taskId, phases);
         outCode = "AMBIGUOUS_TASK_ID";
+        break;
+      }
+      case "AMBIGUOUS_PHASE_ID": {
+        msg = err.message;
+        outCode = "AMBIGUOUS_PHASE_ID";
+        envelopeData = {
+          phases:
+            (err as NodeJS.ErrnoException & { phases?: string[] }).phases ?? [],
+        };
         break;
       }
       case "AGENT_NOT_ENABLED":
