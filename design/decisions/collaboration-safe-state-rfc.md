@@ -500,8 +500,10 @@ conflict — driven by the tool, not human discipline. Concretely:
    the default, no gate.) After B lands, this repo commits
    `.code-pact/state/events/.gitkeep` until the first real event file exists, so
    the committed-ledger precondition (`CONTROL_PLANE_BRANCH_NOT_DRIVEN`'s
-   tracked-ledger gate) is satisfied — and the branch-drift gate is actually
-   dogfooded — without committing the legacy monolithic `progress.yaml`. The
+   tracked-ledger gate) is satisfied — making the branch-drift gate **dogfoodable**
+   (it no longer silently skips here; wiring `--base-ref` into this repo's own CI
+   is a separate follow-up) — without committing the legacy monolithic
+   `progress.yaml`. The
    ledger readers ignore any name that is not an `<at-compact>-<id>.yaml` event
    file, so the sentinel never affects derived state.
 2. **B5 → B1 → B2/B3** (id, writer, reader) behind the existing readers; new
