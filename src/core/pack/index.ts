@@ -2,7 +2,7 @@ import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { atomicWriteText } from "../../io/atomic-text.ts";
 import { parse as parseYaml } from "yaml";
-import { loadRoadmap } from "../plan/roadmap.ts";
+import { resolvePhaseInRoadmap } from "../plan/resolve-phase.ts";
 import { Phase } from "../schemas/phase.ts";
 import { AgentProfile } from "../schemas/agent-profile.ts";
 import { type ProgressEvent } from "../schemas/progress-event.ts";
@@ -399,13 +399,7 @@ export async function buildContextPack(
 ): Promise<ContextPackResult> {
   const { cwd, phaseId, taskId, agentName } = opts;
 
-  const roadmap = await loadRoadmap(cwd);
-  const ref = roadmap.phases.find((p) => p.id === phaseId);
-  if (!ref) {
-    const err = new Error(`Phase "${phaseId}" not found in roadmap.yaml.`);
-    (err as NodeJS.ErrnoException).code = "PHASE_NOT_FOUND";
-    throw err;
-  }
+  const ref = await resolvePhaseInRoadmap(cwd, phaseId);
 
   const phase = await loadPhase(cwd, ref.path);
 

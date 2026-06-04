@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parse as parseYaml, stringify as toYaml } from "yaml";
 import { atomicWriteText } from "../io/atomic-text.ts";
-import { loadRoadmap } from "../core/plan/roadmap.ts";
+import { resolvePhaseInRoadmap } from "../core/plan/resolve-phase.ts";
 import { Phase } from "../core/schemas/phase.ts";
 import { TaskType, type Task } from "../core/schemas/task.ts";
 import { assertSafePlanId } from "../core/schemas/plan-id.ts";
@@ -127,13 +127,7 @@ export async function runTaskAdd(opts: TaskAddOptions): Promise<TaskAddResult> {
   const m = messageCatalog[opts.locale].wizard.task;
 
   try {
-    const roadmap = await loadRoadmap(opts.cwd);
-    const ref = roadmap.phases.find((p) => p.id === opts.phaseId);
-    if (!ref) {
-      const err = new Error(`Phase "${opts.phaseId}" not found in roadmap.yaml.`);
-      (err as NodeJS.ErrnoException).code = "PHASE_NOT_FOUND";
-      throw err;
-    }
+    const ref = await resolvePhaseInRoadmap(opts.cwd, opts.phaseId);
 
     const phase = await loadPhase(opts.cwd, ref.path);
     const existingTasks = phase.tasks ?? [];

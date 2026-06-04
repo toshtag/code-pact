@@ -1,4 +1,8 @@
 import { loadPlanState } from "../core/plan/state.ts";
+import {
+  resolvePhaseInPlanState,
+  findUniquePhaseInPlanState,
+} from "../core/plan/resolve-phase.ts";
 import { buildPhaseRunbook } from "../core/runbook/build-phase-runbook.ts";
 import { buildTaskPhaseIndex } from "../core/runbook/depends-on.ts";
 import { deriveTaskState } from "../core/progress/task-state.ts";
@@ -31,13 +35,7 @@ export async function runPhaseRunbook(
   const { cwd, phaseId } = opts;
 
   const state = await loadPlanState(cwd);
-  const entry = state.phases.find((e) => e.phase.id === phaseId);
-
-  if (!entry) {
-    const err = new Error(`Phase "${phaseId}" not found in roadmap.yaml.`);
-    (err as NodeJS.ErrnoException).code = "PHASE_NOT_FOUND";
-    throw err;
-  }
+  const entry = resolvePhaseInPlanState(state, phaseId);
 
   const events = state.progress?.events ?? [];
 
@@ -98,7 +96,7 @@ export async function runPhaseRunbookAcrossPhases(opts: {
 
   const phaseResults: PhaseRunbookResult[] = [];
   for (const phaseId of considered) {
-    const entry = state.phases.find((e) => e.phase.id === phaseId);
+    const entry = findUniquePhaseInPlanState(state, phaseId);
     if (!entry) continue;
     phaseResults.push(
       buildPhaseRunbook({

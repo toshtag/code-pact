@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { parse as parseYaml } from "yaml";
-import { loadRoadmap } from "../core/plan/roadmap.ts";
+import { resolvePhaseInRoadmap } from "../core/plan/resolve-phase.ts";
 import { Phase } from "../core/schemas/phase.ts";
 import { Task } from "../core/schemas/task.ts";
 import { ProgressLog } from "../core/schemas/progress-event.ts";
@@ -229,13 +229,7 @@ export async function runVerify(opts: VerifyOptions): Promise<VerifyResult> {
   const skipConsistency = opts.skipConsistencyChecks === true;
 
   // Resolve phase
-  const roadmap = await loadRoadmap(cwd);
-  const ref = roadmap.phases.find((p) => p.id === phaseId);
-  if (!ref) {
-    const err = new Error(`Phase "${phaseId}" not found in roadmap.yaml.`);
-    (err as NodeJS.ErrnoException).code = "PHASE_NOT_FOUND";
-    throw err;
-  }
+  const ref = await resolvePhaseInRoadmap(cwd, phaseId);
 
   // The progress ledger is only loaded when the consistency checks need it.
   const phase = await loadPhase(cwd, ref.path);
