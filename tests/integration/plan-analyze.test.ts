@@ -276,4 +276,31 @@ describe("plan analyze", () => {
       ),
     ).toBe(true);
   });
+
+  it("corrupt event file: wraps the ledger-read failure into PLAN_ANALYZE_FAILED (never leaks EVENT_FILE_ID_MISMATCH as the top-level code)", async () => {
+    await writeFixture({
+      phases: [{ id: "P1", tasks: [{ id: "P1-T1", status: "planned" }] }],
+      events: [],
+    });
+    // A name that parses as a valid event-file name but whose 64-hex id does not
+    // match the body — the strict loader throws EVENT_FILE_ID_MISMATCH.
+    const eventsDir = join(tmpDir, ".code-pact", "state", "events");
+    await mkdir(eventsDir, { recursive: true });
+    const wrongId = "0".repeat(64);
+    await writeFile(
+      join(eventsDir, `20260518T000000000Z-${wrongId}.yaml`),
+      `task_id: P1-T1\nstatus: done\nat: "2026-05-18T00:00:00.000Z"\nactor: agent\n`,
+      "utf8",
+    );
+
+    const res = run(["plan", "analyze", "--json"]);
+    expect(res.code).toBe(1);
+    const parsed = parseAnalyze(res.stdout);
+    expect(parsed.ok).toBe(false);
+    // Wrapped — NOT surfaced as a public EVENT_FILE_ID_MISMATCH command error.
+    expect(parsed.error?.code).toBe("PLAN_ANALYZE_FAILED");
+    expect(parsed.error?.code).not.toBe("EVENT_FILE_ID_MISMATCH");
+    // The original cause is preserved in the message.
+    expect(parsed.error?.message ?? "").toContain("filename id");
+  });
 });

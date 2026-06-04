@@ -761,6 +761,25 @@ async function cmdPlanNormalize(
   }
 }
 
+// Ledger-read failures (collaboration-safe-state RFC, B1/B5) are integrity
+// DIAGNOSTICS, not public command errors — the lenient loaders (`doctor`,
+// `plan lint`) surface them as structured `data.issues[]` entries. When a
+// strict-loader plan command catches one, wrap it in the command's own failure
+// code so `EVENT_FILE_ID_MISMATCH` / `INVALID_YAML` / `SCHEMA_ERROR` never leak as
+// a top-level `error.code`; the original cause stays in `error.message`. See
+// docs/cli-contract.md § Plan diagnostic codes.
+const LEDGER_READ_INTEGRITY_CODES = new Set<string>([
+  "EVENT_FILE_ID_MISMATCH",
+  "INVALID_YAML",
+  "SCHEMA_ERROR",
+]);
+
+function planCatchCode(err: unknown, fallback: string): string {
+  const raw = (err as NodeJS.ErrnoException).code;
+  if (raw === undefined || LEDGER_READ_INTEGRITY_CODES.has(raw)) return fallback;
+  return raw;
+}
+
 async function cmdPlanAnalyze(
   argv: string[],
   locale: Locale,
@@ -803,8 +822,10 @@ async function cmdPlanAnalyze(
 
     return result.ok ? 0 : 1;
   } catch (err: unknown) {
-    const code =
-      (err as NodeJS.ErrnoException).code ?? "PLAN_ANALYZE_FAILED";
+    // A ledger-read integrity failure (EVENT_FILE_ID_MISMATCH / INVALID_YAML /
+    // SCHEMA_ERROR from the strict loader) is wrapped into PLAN_ANALYZE_FAILED so
+    // it never surfaces as a public top-level error.code; the cause is in message.
+    const code = planCatchCode(err, "PLAN_ANALYZE_FAILED");
     const message = err instanceof Error ? err.message : String(err);
     if (json) {
       process.stdout.write(
@@ -854,7 +875,9 @@ async function cmdPlanMigrate(
     }
     return 0;
   } catch (err: unknown) {
-    const code = (err as NodeJS.ErrnoException).code ?? "INTERNAL_ERROR";
+    // Same wrap as plan analyze: a corrupt existing event file read during
+    // migration must not leak EVENT_FILE_ID_MISMATCH as a top-level error.code.
+    const code = planCatchCode(err, "INTERNAL_ERROR");
     const message = err instanceof Error ? err.message : String(err);
     if (json) {
       process.stdout.write(

@@ -90,11 +90,11 @@ const KNOWN_CODES: Record<string, "public" | "plan" | "doctor" | "adapter" | "in
   // file's content (or its stored id) does not match its filename, which IS the
   // full content id. Surfaced as a structured error issue (data.issues[]) by the
   // LENIENT-loader surfaces — `doctor` and `plan lint` — exactly like INVALID_YAML
-  // / SCHEMA_ERROR, hence the "plan" category. The STRICT-loader commands
-  // (`task *`, `verify`, `plan analyze`) read the merged ledger eagerly, so a
-  // corrupt entry aborts the command as a raw failure (exit 3) — the same way a
-  // corrupt legacy progress.yaml always has; it is deliberately NOT remapped to a
-  // public structured command error (see docs/cli-contract.md). `pack` is
+  // / SCHEMA_ERROR, hence the "plan" category. It is never a public top-level
+  // error.code: the strict-loader readers `task *` / `verify` abort raw (exit 3,
+  // like a corrupt legacy progress.yaml), while `plan analyze` / `plan migrate`
+  // wrap it into the command's own failure code (PLAN_ANALYZE_FAILED) with the
+  // cause in error.message (see cmdPlanAnalyze / docs/cli-contract.md). `pack` is
   // best-effort and skips it.
   EVENT_FILE_ID_MISMATCH: "plan",
   PHASE_DONE_WITH_OPEN_TASKS: "plan",
