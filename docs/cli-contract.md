@@ -2303,8 +2303,9 @@ For each phase, runbook iterates `phase.tasks[]` and emits steps in this priorit
 ### Errors
 
 Reuses existing codes; phase-id resolution additionally surfaces
-`AMBIGUOUS_PHASE_ID` (control-plane v2 PR1a), for both `phase runbook <id>` and
-`--across-phases`:
+`AMBIGUOUS_PHASE_ID` (control-plane v2 PR1a). For `phase runbook <id>` it fires
+when the requested id is duplicated; for `--across-phases`, when an *included*
+phase id is duplicated during aggregation:
 
 | Code | Exit | When |
 | --- | --- | --- |
