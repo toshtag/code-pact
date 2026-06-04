@@ -6,6 +6,7 @@ import { spawn } from "node:child_process";
 import { runInit } from "../../../src/commands/init.ts";
 import { runPhaseAdd } from "../../../src/commands/phase.ts";
 import { runDoctor } from "../../../src/commands/doctor.ts";
+import { writeEventFile } from "../../../src/core/progress/events-io.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -854,6 +855,39 @@ describe("runDoctor — CONTROL_PLANE_BRANCH_NOT_DRIVEN (P34)", () => {
     await setupBaseAndBranch();
     await commitBranchCode();
     await commitProgress(`events:\n${ev("P99-TX", "started")}`);
+    expect(find(await runDoctor(dir, { baseRef: "main" }))).toBeDefined();
+  });
+
+  // Bucket B PR2: the branch-drift gate reads the committed git tree —
+  // legacy progress.yaml AND per-event files — so a flipped writer that commits
+  // an event file (not progress.yaml) still counts as "driven".
+  async function commitEventFile(
+    taskId: string,
+    status: "started" | "done",
+  ): Promise<void> {
+    await writeEventFile(dir, {
+      task_id: taskId,
+      status,
+      at: "2026-05-28T10:00:00.000Z",
+      actor: "agent",
+      agent: "claude-code",
+      ...(status === "done" ? { source: "loop" } : {}),
+    } as Parameters<typeof writeEventFile>[1]);
+    await git(dir, ["add", "-f", ".code-pact/state/events/"]);
+    await git(dir, ["commit", "--quiet", "-m", "event"]);
+  }
+
+  it("skips when the branch added a known started/done as a committed EVENT FILE", async () => {
+    await setupBaseAndBranch();
+    await commitBranchCode();
+    await commitEventFile("P1-T1", "started");
+    expect(find(await runDoctor(dir, { baseRef: "main" }))).toBeUndefined();
+  });
+
+  it("fires when the branch's only added event file is an unknown task id", async () => {
+    await setupBaseAndBranch();
+    await commitBranchCode();
+    await commitEventFile("P99-TX", "started");
     expect(find(await runDoctor(dir, { baseRef: "main" }))).toBeDefined();
   });
 

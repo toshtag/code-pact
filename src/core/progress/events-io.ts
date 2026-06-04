@@ -35,7 +35,10 @@ export type LoadedEventFile = {
 /** Strict event-file name: `<at-compact>-<64-hex sha256>.yaml`. */
 const EVENT_FILE_RE = /^(\d{8}T\d{9}Z)-([0-9a-f]{64})\.yaml$/;
 
-function parseEventFileName(file: string): { atCompact: string; id: string } | null {
+/** Parse an event-file basename into its parts, or `null` if it is not one. */
+export function parseEventFileName(
+  file: string,
+): { atCompact: string; id: string } | null {
   const m = EVENT_FILE_RE.exec(file);
   return m ? { atCompact: m[1]!, id: m[2]! } : null;
 }
@@ -59,10 +62,15 @@ function eventFileMismatch(message: string, file: string): NodeJS.ErrnoException
  *    or mismatched stored id is rejected; a missing stored id is allowed since
  *    the filename already carries the full id)
  */
-async function readValidatedEventFile(path: string, file: string): Promise<LoadedEventFile> {
+/**
+ * Validate an event file's raw CONTENT against its filename↔content bijection.
+ * Content-based (no disk) so it is shared by every source — the workspace
+ * reader and the git-tree reader (branch-drift) — guaranteeing identical
+ * validation everywhere. Throws `EVENT_FILE_ID_MISMATCH` on any divergence.
+ */
+export function validateEventFileContent(file: string, raw: string): LoadedEventFile {
   const name = parseEventFileName(file);
   if (!name) throw eventFileMismatch("not a valid event-file name", file);
-  const raw = await readFile(path, "utf8");
   const doc = parseYaml(raw) as Record<string, unknown> | null;
   // The stored `id` is not part of the event schema; strip before parsing.
   const { id: storedId, ...rest } = doc ?? {};
@@ -84,6 +92,10 @@ async function readValidatedEventFile(path: string, file: string): Promise<Loade
     );
   }
   return { event, id, file };
+}
+
+async function readValidatedEventFile(path: string, file: string): Promise<LoadedEventFile> {
+  return validateEventFileContent(file, await readFile(path, "utf8"));
 }
 
 export type WrittenEvent = {
