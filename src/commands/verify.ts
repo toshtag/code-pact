@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { parse as parseYaml } from "yaml";
-import { Roadmap } from "../core/schemas/roadmap.ts";
+import { loadRoadmap } from "../core/plan/roadmap.ts";
 import { Phase } from "../core/schemas/phase.ts";
 import { Task } from "../core/schemas/task.ts";
 import { ProgressLog } from "../core/schemas/progress-event.ts";
@@ -47,11 +47,6 @@ export type VerifyResult = {
 // ---------------------------------------------------------------------------
 // Loaders
 // ---------------------------------------------------------------------------
-
-async function loadRoadmap(cwd: string): Promise<Roadmap> {
-  const raw = await readFile(join(cwd, "design", "roadmap.yaml"), "utf8");
-  return Roadmap.parse(parseYaml(raw) as unknown);
-}
 
 export async function loadPhase(cwd: string, path: string): Promise<Phase> {
   const raw = await readFile(join(cwd, path), "utf8");
