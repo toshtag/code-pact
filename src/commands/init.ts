@@ -237,7 +237,12 @@ export async function runInitCore(opts: InitCoreOptions): Promise<InitResult> {
     );
   }
 
-  // progress.yaml (empty event log)
+  // progress.yaml — an empty legacy compatibility artifact. The per-event ledger
+  // (collaboration-safe-state RFC, B1) is where the task verbs now write
+  // (.code-pact/state/events/); this file is never written by them. It is created
+  // empty so a fresh project has the legacy read-merge target present (harmless,
+  // and a committed sentinel that keeps the CI branch-drift gate from skipping on
+  // an untracked ledger). See docs/upgrading.md § event-file progress ledger.
   const emptyLog: ProgressLog = { events: [] };
   await writeIfAbsent(
     join(cwd, ".code-pact", "state", "progress.yaml"),

@@ -28,6 +28,16 @@ code-pact adapter upgrade <agent> --write          # apply safe updates
 
 A CLI bump on its own is **not** a reason to run `adapter upgrade`. Since v1.30.1 (Issue #340), a bump that changes nothing about your generated adapter files raises **no** `ADAPTER_GENERATOR_STALE` warning — a stale `generator_version` stamp alone is silent. The warning (and the `--check` → `--write` flow above) appears only when the bump actually moved the generated output. See [troubleshooting.md](troubleshooting.md#adapter_generator_stale-from-adapter-doctor--global-doctor).
 
+### Worth knowing: the event-file progress ledger (collaboration-safe state)
+
+The progress ledger moved from a single `.code-pact/state/progress.yaml` array to **one file per event** under `.code-pact/state/events/`. The change is backward-compatible and needs no action, but a few things are worth knowing:
+
+- **Your existing `progress.yaml` keeps working.** It is **read-merged** with any per-event files, so derived task state is unchanged. A legacy-only repo (no `state/events/`) reads byte-for-byte identically — array order is preserved, not silently re-sorted.
+- **New events are written as per-event files.** `task start` / `complete` / `block` / `resume` / `record-done` now append one file under `state/events/**` and **no longer write `progress.yaml`**. Per-event files are conflict-free, so two branches can record progress and merge cleanly — that is the point of the change.
+- **Migration is optional.** `code-pact plan migrate --write` converts the legacy `progress.yaml` into per-event files (dry-run by default; idempotent; it reports any task whose derived state would change under the merged ordering, so you can review before committing). It **never deletes or rewrites** `progress.yaml` — emptying or removing it is a separate, manual step once you have fully cut over.
+- **`init` still writes an empty `progress.yaml`.** A freshly initialized project gets an empty `.code-pact/state/progress.yaml` as a legacy compatibility artifact; the task verbs never write to it (new events go to `state/events/`). It is harmless — leave it as-is, or remove it once you only have event files.
+- **Commit `state/events/**`.** It is shared, merge-safe operational state, and CI's branch-drift gate reads the *committed* ledger. See [`cli-contract.md` § State file write guarantees](cli-contract.md#state-file-write-guarantees) for the shared-vs-local policy.
+
 ## What changed in each release
 
 [`CHANGELOG.md`](../CHANGELOG.md) is the per-release record of what's new. For the concepts behind the larger additions, see the [concepts guides](README.md#concepts).
