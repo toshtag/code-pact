@@ -85,7 +85,8 @@ the workflow above will do anything useful:
       Commit `project.yaml`, `agent-profiles/`, `model-profiles/`,
       `state/baselines/`, and the **progress ledger** — `state/events/**` (one
       file per event; this is where the task verbs now write) plus the legacy
-      `state/progress.yaml` while it still holds events. **Do not** commit
+      `state/progress.yaml` while it contains legacy events or as the empty
+      tracking sentinel `init` creates (task commands no longer write it). **Do not** commit
       `.code-pact/locks/` or `.code-pact/cache/` (machine-local), and commit
       `.code-pact/adapters/*.manifest.yaml` **only together with** the adapter
       files it lists (e.g. `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`,
