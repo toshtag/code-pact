@@ -178,7 +178,7 @@ CI. (For `error.cause_code` values, see [Public cause codes](#public-cause-codes
 | `DUPLICATE_PHASE_ID` | `phase add`, `phase import` | Phase id collides with an existing or imported phase |
 | `MANIFEST_NOT_FOUND` | `adapter upgrade` | `.code-pact/adapters/<agent>.manifest.yaml` does not exist (run `adapter install` first) |
 | `VERIFICATION_FAILED` | `verify`, `task complete` | Deterministic completion check did not pass. On `task complete` (v1.27+, P39) the envelope also carries `error.cause_code` (`DECISION_REQUIRED` or `COMMANDS_FAILED` — see [Public cause codes](#public-cause-codes)) and an actionable `error.message`; `error.code` stays `VERIFICATION_FAILED` at exit 1 |
-| `DECISION_REQUIRED` (v1.21+) | `task record-done` | A `requires_decision` task's ADR could not be resolved by the decision gate. As a **top-level `error.code`** this is raised only by `task record-done`; on `task complete` the *same semantic cause* appears only as `error.cause_code` under `VERIFICATION_FAILED` (see [Public cause codes](#public-cause-codes)). **The two surfaces differ.** **On `task record-done` (as `error.code`):** exit code 2, `progress.yaml` untouched, and the full structured envelope — `data.task_id`, `data.decision_check` (the gate's `{name, ok, reason}`), `data.current_resolution` (`"status-aware"` since v1.22), `data.via` (`"decision_refs"` or `"filename-scan"`), `data.considered` (per-ADR `{path, status, accepted, acceptance}`; `acceptance` ∈ `"accepted" \| "blocked" \| "empty" \| "unknown_status" \| "missing" \| "unsafe_path"`), `data.declared_decision_refs`, and `data.expected_pattern` (only when `via === "filename-scan"`). **On `task complete` (as `error.cause_code`):** `error.code` stays `VERIFICATION_FAILED` at exit 1, there is **no** full `DecisionRequiredData` block, and the P32 fields (`failed_checks` / `first_failure` / `suggested_next_command`) stay under `data` — see the [`task complete`](#task-complete) failure envelope. Resolution semantics (shared by both surfaces): explicit `decision_refs` use **all-must-be-accepted**; the filename scan uses **any-accepted-wins** (preserves the substring-collision compat). A `decision_refs` entry that is structurally unsafe or resolves outside the project root (`..`, an absolute path, or a symlink out of the repo) is **fail-closed**: it is never read and reported as `acceptance: "unsafe_path"` with `accepted: false`, so the gate stays unresolved regardless of the file's contents. |
+| `DECISION_REQUIRED` (v1.21+) | `task record-done` | A `requires_decision` task's ADR could not be resolved by the decision gate. As a **top-level `error.code`** this is raised only by `task record-done`; on `task complete` the *same semantic cause* appears only as `error.cause_code` under `VERIFICATION_FAILED` (see [Public cause codes](#public-cause-codes)). **The two surfaces differ.** **On `task record-done` (as `error.code`):** exit code 2, no progress event recorded, and the full structured envelope — `data.task_id`, `data.decision_check` (the gate's `{name, ok, reason}`), `data.current_resolution` (`"status-aware"` since v1.22), `data.via` (`"decision_refs"` or `"filename-scan"`), `data.considered` (per-ADR `{path, status, accepted, acceptance}`; `acceptance` ∈ `"accepted" \| "blocked" \| "empty" \| "unknown_status" \| "missing" \| "unsafe_path"`), `data.declared_decision_refs`, and `data.expected_pattern` (only when `via === "filename-scan"`). **On `task complete` (as `error.cause_code`):** `error.code` stays `VERIFICATION_FAILED` at exit 1, there is **no** full `DecisionRequiredData` block, and the P32 fields (`failed_checks` / `first_failure` / `suggested_next_command`) stay under `data` — see the [`task complete`](#task-complete) failure envelope. Resolution semantics (shared by both surfaces): explicit `decision_refs` use **all-must-be-accepted**; the filename scan uses **any-accepted-wins** (preserves the substring-collision compat). A `decision_refs` entry that is structurally unsafe or resolves outside the project root (`..`, an absolute path, or a symlink out of the repo) is **fail-closed**: it is never read and reported as `acceptance: "unsafe_path"` with `accepted: false`, so the gate stays unresolved regardless of the file's contents. |
 | `VALIDATE_FAILED` | `validate` | One or more errors (or, under `--strict`, any issue) detected by the underlying doctor checks |
 | `DOCTOR_FAILED` | `doctor` | One or more error-severity doctor issues found |
 | `TUTORIAL_FAILED` (v1.15+) | `tutorial` | A step in the sandbox walkthrough threw; the sandbox is still cleaned up (unless `--keep`). The message carries the underlying error |
@@ -186,7 +186,7 @@ CI. (For `error.cause_code` values, see [Public cause codes](#public-cause-codes
 | `PLAN_NORMALIZE_REQUIRED` | `plan normalize --check` | At least one file needs normalization |
 | `PLAN_NORMALIZE_CONFLICT` | `plan normalize` | `--check` and `--write` both passed |
 | `PLAN_ANALYZE_FAILED` | `plan analyze` | One or more exit-relevant drift issues found |
-| `TASK_FINALIZE_NOT_ELIGIBLE` | `task finalize` | Task's derived state from `progress.yaml` is not `done` (raised in **both** dry-run and `--write`) |
+| `TASK_FINALIZE_NOT_ELIGIBLE` | `task finalize` | Task's derived state from the progress ledger is not `done` (raised in **both** dry-run and `--write`) |
 | `TASK_FINALIZE_WRITE_REFUSED` | `task finalize --write` | Safety check refused the phase YAML write (unsafe path, outside `design/phases/`, symlink escape, unparseable, etc.) |
 | `PHASE_RECONCILE_WRITE_REFUSED` | `phase reconcile --write` | Every eligible task write in the phase was refused for safety reasons. Partial successes return exit 0; this fires only when **all** writes refused |
 | `LOCK_HELD` (v1.5+ / P14) | `init --sample-phase`, `init` wizard, `phase add`, `phase new`, `phase import`, `task add`, `task finalize --write`, `phase reconcile --write` | Another code-pact mutation is in progress on the same project. The envelope's `data.lock_holder` carries `{pid, hostname, cmd, created_at}` for diagnostic display; `data.lock_path` is the lock file path. Transient + retryable — wait for the holder to release, or manually delete the lock file if you are certain no process holds it |
@@ -820,7 +820,7 @@ Conservative, line-based normalization for files under `design/` and the progres
 
 **Targets:**
 - Every `*.yaml` and `*.md` file reachable from `design/` (recursive).
-- `.code-pact/state/progress.yaml` (located via the shared progress IO helper, not hard-coded).
+- The legacy `.code-pact/state/progress.yaml`, if present (located via the shared progress IO helper, not hard-coded). Per-event files under `.code-pact/state/events/` are machine-generated and content-addressed, so they are **not** normalized.
 
 **Normalization by file kind:**
 
@@ -891,7 +891,7 @@ Markdown trailing whitespace is preserved because two trailing spaces are a mean
 
 ### `plan analyze [--strict] [--include-historical] [--json]` (v0.7)
 
-Cross-artifact integrity check. Compares design intent (task and phase `status`) against derived progress state (`deriveTaskState` over `.code-pact/state/progress.yaml`). Read-only.
+Cross-artifact integrity check. Compares design intent (task and phase `status`) against derived progress state (`deriveTaskState` over the progress ledger). Read-only.
 
 **Issue families:**
 
@@ -1440,7 +1440,7 @@ When a task declares any of the [P10 Task Readiness Schema fields](#phase-import
 
 | Order | Section | Contents when declared |
 |---|---|---|
-| 1 | `## Depends on` | List of declared task ids with derived current state from `.code-pact/state/progress.yaml` (`planned` / `started` / `blocked` / `resumed` / `done` / `failed`). |
+| 1 | `## Depends on` | List of declared task ids with derived current state from the progress ledger (`planned` / `started` / `blocked` / `resumed` / `done` / `failed`). |
 | 2 | `## Declared read surface` | Each `reads` glob with currently-matched repo-relative file paths. `_(no current matches on disk)_` line when the glob matches nothing (mirrors the `TASK_READS_NO_MATCH` lint warning). |
 | 3 | `## Declared write surface` | Each `writes` glob, declaration-only — no fs lookup because writes are future-tense. |
 | 4 | `## Declared decisions` | Full body of every file referenced by `decision_refs`. Surfaced **regardless** of `context_size` (in addition to, not replacing, the existing `context_size: large` allDecisions path). Files referenced via `decision_refs` are removed from the existing "Related Decisions" section to avoid printing the same content twice. |
@@ -1639,11 +1639,11 @@ context_budget:
 
 `code-pact task prepare <task-id> [--agent <name>] [--json] [--dry-run]` is a **progress-read-only** compound command that returns everything an agent needs to decide what to do next on a single task: current state, the recommendation envelope, context-pack metadata, a structured `next_action`, and a fully-formed `commands` dictionary for the per-task lifecycle.
 
-The command MUST NOT mutate `.code-pact/state/progress.yaml` on any code path. It MAY write the deterministic context pack at `<agent-profile>.context_dir/<task-id>.md` unless `--dry-run` is passed.
+The command MUST NOT record a progress event (the ledger is left unchanged) on any code path. It MAY write the deterministic context pack at `<agent-profile>.context_dir/<task-id>.md` unless `--dry-run` is passed.
 
 ### Flags
 
-The flag list, value types, and examples live in the generated [CLI reference § `task prepare`](cli-reference.generated.md). Contract notes on specific flags: `--agent` shares `task context`'s validation (`AGENT_NOT_FOUND` / `AGENT_NOT_ENABLED`); `--dry-run` returns `would_write_context_pack_path` instead of `context_pack_path`; `--budget-bytes <N>` (v1.13+, P24) elides sections in the priority order defined in [`task context --budget-bytes`](#--budget-bytes-n-v113-p24) and throws `CONTEXT_OVER_BUDGET` (exit 2) when unachievable, with `progress.yaml` NOT mutated on the failure path (the progress-read-only invariant from P21-T3); `--context-budget <profile>` (v1.30+, P47) is the ergonomic alias for `--budget-bytes`, resolving a named profile to bytes before that same path (see [`task context --context-budget`](#--context-budget-profile-v130-p47)), mutually exclusive with `--budget-bytes`, and **not** echoed into the returned `commands` dictionary.
+The flag list, value types, and examples live in the generated [CLI reference § `task prepare`](cli-reference.generated.md). Contract notes on specific flags: `--agent` shares `task context`'s validation (`AGENT_NOT_FOUND` / `AGENT_NOT_ENABLED`); `--dry-run` returns `would_write_context_pack_path` instead of `context_pack_path`; `--budget-bytes <N>` (v1.13+, P24) elides sections in the priority order defined in [`task context --budget-bytes`](#--budget-bytes-n-v113-p24) and throws `CONTEXT_OVER_BUDGET` (exit 2) when unachievable, with no progress event recorded on the failure path (the progress-read-only invariant from P21-T3); `--context-budget <profile>` (v1.30+, P47) is the ergonomic alias for `--budget-bytes`, resolving a named profile to bytes before that same path (see [`task context --context-budget`](#--context-budget-profile-v130-p47)), mutually exclusive with `--budget-bytes`, and **not** echoed into the returned `commands` dictionary.
 
 ### JSON envelope
 
@@ -1770,20 +1770,23 @@ advisory a gate.
 `/.code-pact/locks/` (advisory locks), `/.code-pact/cache/` (reserved, derived),
 plus `/.local/` (private planning notes) and `/.context/` (regenerable context
 packs). So by default the **rest** of `.code-pact/` (the project config **and**
-`state/progress.yaml`) is committable, and in the normal case you commit it (see
+the progress ledger — per-event files under `state/events/`, plus the legacy
+`state/progress.yaml` if present) is committable, and in the normal case you
+commit it (see
 [§ State file write guarantees → *Committed vs ignored*](#state-file-write-guarantees)).
 Two things must hold for the gate:
 
-- **The ledger is tracked.** The gate reads the *committed* `progress.yaml`; if
-  it is not git-tracked the check **silently skips** (it never cries wolf at a
-  repo that does not commit the ledger). If your repo deliberately gitignores
+- **The ledger is tracked.** The gate reads the *committed* ledger
+  (`state/events/**` merged with any legacy `state/progress.yaml`); if neither
+  is git-tracked the check **silently skips** (it never cries wolf at a repo that
+  does not commit the ledger). If your repo deliberately gitignores
   `.code-pact/` (or `.code-pact/state/`), force-add just the ledger so CI can
-  see it: `git add -f .code-pact/state/progress.yaml`.
+  see it: `git add -f .code-pact/state/`.
 - **The project config is available.** `validate` itself reads
   `.code-pact/project.yaml`, `agent-profiles/`, `model-profiles/` (and
   `doctor.yaml` if you use `exclude_globs`). These must be present in the CI
   checkout — committed in the normal case, or force-added if you ignore
-  `.code-pact/`. Force-adding only `progress.yaml` is not enough when the rest
+  `.code-pact/`. Force-adding only the ledger is not enough when the rest
   of the config is ignored.
 
 ## `task add` — append a task to a phase (v0.6, non-interactive in v1.4+)
@@ -1852,9 +1855,9 @@ Order of operations:
 1. **Agent validation**. The same checks as `task context`: unknown agent → `AGENT_NOT_FOUND`, disabled agent → `AGENT_NOT_ENABLED`. When `--agent` is omitted, `project.yaml.default_agent` is used.
 2. **Task resolution**. The same logic as `task context`: scans every phase referenced by `design/roadmap.yaml`. `TASK_NOT_FOUND` / `AMBIGUOUS_TASK_ID` are raised for missing / duplicate task ids.
 3. **State check**. Derived from the append-only progress ledger (per-event files under `state/events/` merged with the legacy `progress.yaml`) via `deriveTaskState`. If the current state is `done`, returns `{ ok: true, data: { already_done: true } }` with exit 0 and **does not re-run verification** (to force re-verification, use `task complete --rerun` — planned for a later release). If the current state is `blocked`, exits 2 with `INVALID_TASK_TRANSITION`: the task must be resumed via `task resume <id>` before it can complete, so the resume event records the unblock decision. Other current states (`planned`, `started`, `resumed`, `failed`) proceed to verification. `planned → done` is permitted at the command layer for v0.5 backwards compatibility, even though the state machine itself does not list that transition.
-4. **Verification (preflight mode)**. Runs the deterministic checks from `code-pact verify` — `commands` and `decision` — but skips the state-consistency checks (`progress_event`, `task_status`) because `task complete` is the action that produces that state. On failure, exits 1 with `VERIFICATION_FAILED`; `progress.yaml` is left byte-identical. Standalone `code-pact verify` still runs all four checks for after-the-fact consistency auditing.
-5. **Progress append**. On verify pass, appends a `done` event with shape `{ task_id, status: "done", at, actor: "agent", agent, evidence, source: "loop" }` to `progress.yaml`. The write uses best-effort atomic replacement (`writeFile` to a temp file + `rename`) to prevent partial-write corruption. Concurrent `task complete` calls are out of scope for v0.2.
-6. **`--dry-run`**. Skips the progress append. Returns `{ ok: true, data: { dry_run: true, would_append: <event> } }`. `progress.yaml` is byte-identical. **`--dry-run` does not skip verification** — step 4 runs before the dry-run short-circuit, so a failing `--dry-run` still exits 1 with `VERIFICATION_FAILED` and the same failure-clarity fields below.
+4. **Verification (preflight mode)**. Runs the deterministic checks from `code-pact verify` — `commands` and `decision` — but skips the state-consistency checks (`progress_event`, `task_status`) because `task complete` is the action that produces that state. On failure, exits 1 with `VERIFICATION_FAILED`; no progress event is recorded (the ledger is unchanged). Standalone `code-pact verify` still runs all four checks for after-the-fact consistency auditing.
+5. **Progress record**. On verify pass, records a `done` event with shape `{ task_id, status: "done", at, actor: "agent", agent, evidence, source: "loop" }` as **one new file** under `.code-pact/state/events/` (the progress ledger). The write is lock-free by construction: each event is published as a separate no-overwrite file (write a temp file, then `link` it onto the final path, whose name is the event's content id), so two concurrent `task complete` runs produce two distinct files and neither is lost. The legacy `.code-pact/state/progress.yaml` is **not** written. Re-recording the canonically identical event is idempotent (the file already exists).
+6. **`--dry-run`**. Skips the progress record. Returns `{ ok: true, data: { dry_run: true, would_append: <event> } }`. No event file is written. **`--dry-run` does not skip verification** — step 4 runs before the dry-run short-circuit, so a failing `--dry-run` still exits 1 with `VERIFICATION_FAILED` and the same failure-clarity fields below.
 
 **Failure envelope (v1.26+, P32 — additive).** On `VERIFICATION_FAILED`, the `data` object carries three additive fields alongside the unchanged `data.verify.checks`:
 
@@ -1892,9 +1895,9 @@ Order of operations:
 2. **Agent validation**. Same as `task complete`: unknown agent → `AGENT_NOT_FOUND`, disabled agent → `AGENT_NOT_ENABLED`. `--agent` defaults to `project.yaml.default_agent`.
 3. **Task resolution**. Same as `task complete`: `TASK_NOT_FOUND` / `AMBIGUOUS_TASK_ID` for missing / duplicate ids.
 4. **State check**. Derived via `deriveTaskState`. `done` → idempotent `{ ok: true, data: { already_done: true } }` (exit 0, no duplicate event). `blocked` → exit 2 `INVALID_TASK_TRANSITION` (resume first). Other states (`planned`, `started`, `resumed`, `failed`) proceed.
-5. **Decision gate** (status-aware since v1.22, RFC §3-C). The **same** shared resolver as `verify` / `task complete` / `plan lint`. For a `requires_decision` task (on the task or its phase), the gate parses each candidate ADR's status — from YAML frontmatter `status:` (preferred) or the `**Status:** <word>` markdown bold line — and resolves only when an `accepted` ADR is found. `proposed` / `draft` / `rejected` / `superseded` / empty files / explicit unknown status (typos) all fail to resolve. A non-empty ADR with **no** status line resolves as accepted (backward-compat for projects that pre-date status-aware parsing — the **only** lenient case). Resolution semantics: explicit `task.decision_refs` use **all-must-be-accepted** (a single bad ref fails the gate); the filename scan over `design/decisions/` uses **any-accepted-wins** to preserve the substring-collision compat (`P1-T1` matches `P1-T10-*.md`). On failure: exits 2 with `DECISION_REQUIRED` and `progress.yaml` is left untouched. **No verification commands are run.**
-6. **Progress append**. Appends `{ task_id, status: "done", at, actor: "agent", agent, evidence: [<--evidence>], notes?, source: "external" }` via the same atomic write as `task complete`.
-7. **`--dry-run`**. Skips the append; returns `{ ok: true, data: { dry_run: true, would_append: <event> } }`. `progress.yaml` is byte-identical.
+5. **Decision gate** (status-aware since v1.22, RFC §3-C). The **same** shared resolver as `verify` / `task complete` / `plan lint`. For a `requires_decision` task (on the task or its phase), the gate parses each candidate ADR's status — from YAML frontmatter `status:` (preferred) or the `**Status:** <word>` markdown bold line — and resolves only when an `accepted` ADR is found. `proposed` / `draft` / `rejected` / `superseded` / empty files / explicit unknown status (typos) all fail to resolve. A non-empty ADR with **no** status line resolves as accepted (backward-compat for projects that pre-date status-aware parsing — the **only** lenient case). Resolution semantics: explicit `task.decision_refs` use **all-must-be-accepted** (a single bad ref fails the gate); the filename scan over `design/decisions/` uses **any-accepted-wins** to preserve the substring-collision compat (`P1-T1` matches `P1-T10-*.md`). On failure: exits 2 with `DECISION_REQUIRED` and no progress event is recorded. **No verification commands are run.**
+6. **Progress record**. Records `{ task_id, status: "done", at, actor: "agent", agent, evidence: [<--evidence>], notes?, source: "external" }` as one new event file under `.code-pact/state/events/`, via the same lock-free per-event write as `task complete`.
+7. **`--dry-run`**. Skips the record; returns `{ ok: true, data: { dry_run: true, would_append: <event> } }`. No event file is written.
 
 `task finalize` works after `task record-done` exactly as it does after `task complete` — finalize never inspects `source`.
 
@@ -1902,19 +1905,19 @@ Order of operations:
 
 `code-pact task finalize <task-id> [--write] [--base-ref <ref>] [--audit-strict] [--json]` flips the `status` field of a single task inside `design/phases/<phase>.yaml` from `planned` / `in_progress` to `done`. Stability: **Stable (v1.2+)**. `--base-ref` and `--audit-strict` are **Stable (v1.6+)** under P15-T1 and P15-T6 respectively.
 
-Eligibility: the task's derived state from `.code-pact/state/progress.yaml` (via `deriveTaskState`) **must equal `done`**. Any other current state (no events, `started`, `blocked`, `resumed`, `failed`) raises `TASK_FINALIZE_NOT_ELIGIBLE` (`ok: false`, exit 2) in **both** dry-run and `--write` modes. Dry-run means "won't write", not "won't validate" — the dry-run output of a finalize-able task is a faithful preview of what `--write` would do.
+Eligibility: the task's derived state from the progress ledger (via `deriveTaskState`) **must equal `done`**. Any other current state (no events, `started`, `blocked`, `resumed`, `failed`) raises `TASK_FINALIZE_NOT_ELIGIBLE` (`ok: false`, exit 2) in **both** dry-run and `--write` modes. Dry-run means "won't write", not "won't validate" — the dry-run output of a finalize-able task is a faithful preview of what `--write` would do.
 
 Default mode is dry-run. Pass `--write` to apply the mutation. No `--agent` flag — this is a design/progress reconciliation command that never calls an adapter.
 
 Order of operations:
 
 1. **Task resolution.** Scans every phase referenced by `design/roadmap.yaml`. `TASK_NOT_FOUND` / `AMBIGUOUS_TASK_ID` are raised for missing / duplicate task ids (same logic as `task complete`).
-2. **Eligibility check.** Reads `progress.yaml`, derives the task state, raises `TASK_FINALIZE_NOT_ELIGIBLE` if not `done`.
+2. **Eligibility check.** Reads the progress ledger, derives the task state, raises `TASK_FINALIZE_NOT_ELIGIBLE` if not `done`.
 3. **Safe-write classification.** Validates the resolved phase file via `src/core/path-safety.ts` (`assertSafeRelativePath` + `resolveWithinProject`), reads it, parses it as Phase, confirms the task is present. Any failure raises `TASK_FINALIZE_WRITE_REFUSED` (exit 2) with a structured reason in `data.reason` (`unsafe_path` / `outside_design_phases` / `not_yaml` / `symlink_escape` / `unreadable` / `unparseable_phase` / `task_not_found`).
 4. **Idempotency check.** If the phase YAML already has `status: done` for this task, returns `kind: "already_finalized"` (exit 0) with no write attempt.
 5. **Dry-run or `--write`.** In dry-run, returns `kind: "would_finalize"` with `planned_writes[]`. In `--write`, calls `atomicWriteText` to apply the change and returns `kind: "finalized"` with `applied_writes[]`.
 
-`task finalize` **never** mutates `progress.yaml`, **never** writes to `design/roadmap.yaml`, and **never** flips the phase's own `status` field. The v1.0 append-only progress contract and the v1.2 narrow-write-target contract are both preserved.
+`task finalize` **never** writes to the progress ledger, **never** writes to `design/roadmap.yaml`, and **never** flips the phase's own `status` field. The v1.0 append-only progress contract and the v1.2 narrow-write-target contract are both preserved.
 
 ### JSON envelope (success)
 
@@ -1966,7 +1969,7 @@ Read-only advisory comparing the task's declared `writes` globs against the actu
 
 Default range is the **working tree** only: staged (`git diff --cached --name-only`) + unstaged (`git diff --name-only`) + untracked (`git ls-files --others --exclude-standard`), all merged, POSIX-normalized, and sorted. Pass `--base-ref <ref>` to additionally include the branch-level diff (`git diff --name-only $(git merge-base HEAD <ref>) HEAD`). `--base-ref` **requires** `--json`; passing it without `--json` returns `CONFIG_ERROR` (exit 2).
 
-**code-pact runtime state is excluded (v1.21+).** `files_touched` drops `.code-pact/state/progress.yaml` and anything under `.code-pact/locks/` — these are code-pact's own operational log and advisory lock, written by the tool during the very commands an agent runs, never a task's work product. Config files the user edits on purpose (`.code-pact/project.yaml`, `.code-pact/agent-profiles/**`) and design/adapter files are **not** excluded.
+**code-pact runtime state is excluded (v1.21+).** `files_touched` drops the progress ledger (`.code-pact/state/progress.yaml` and everything under `.code-pact/state/events/`) and anything under `.code-pact/locks/` — these are code-pact's own operational log and advisory lock, written by the tool during the very commands an agent runs, never a task's work product. Config files the user edits on purpose (`.code-pact/project.yaml`, `.code-pact/agent-profiles/**`) and design/adapter files are **not** excluded.
 
 Shape (field-presence-fixed — every key is always present):
 
@@ -2025,7 +2028,7 @@ Every `task finalize` **failure** envelope (`TASK_FINALIZE_NOT_ELIGIBLE`, `TASK_
 | --- | --- | --- |
 | `TASK_NOT_FOUND` | 2 | Task id is not present in any phase |
 | `AMBIGUOUS_TASK_ID` | 2 | Task id appears in more than one phase |
-| `TASK_FINALIZE_NOT_ELIGIBLE` | 2 | Derived state from `progress.yaml` is not `done`. Raised in **both** dry-run and `--write`. `data.current` carries the actual derived state |
+| `TASK_FINALIZE_NOT_ELIGIBLE` | 2 | Derived state from the progress ledger is not `done`. Raised in **both** dry-run and `--write`. `data.current` carries the actual derived state |
 | `TASK_FINALIZE_WRITE_REFUSED` | 2 | Safety check failed. `data.reason` carries one of `unsafe_path` / `outside_design_phases` / `not_yaml` / `symlink_escape` / `unreadable` / `unparseable_phase` / `task_not_found`. `data.file` carries the offending path |
 | `WRITES_AUDIT_STRICT_FAILED` (v1.6+, P15-T6) | **1** | `--audit-strict` was supplied and the audit emitted at least one `TASK_WRITES_AUDIT_*` warning. Exit code is **1** (not 2): the invocation was well-formed; only the strict gate refused. `data.applied: false` is fixed |
 | `CONFIG_ERROR` | 2 | Missing positional task id, unknown flag, `--base-ref` supplied without `--json` (v1.6+, P15-T1), or `--audit-strict` supplied without `--json` (v1.6+, P15-T6) |
@@ -2036,11 +2039,11 @@ See the generated [CLI reference § `task finalize`](cli-reference.generated.md)
 
 ## `phase reconcile` — bulk-flip task design statuses for a phase (v1.2+, P11)
 
-`code-pact phase reconcile <phase-id> [--write] [--json]` walks every task inside `design/phases/<phase>.yaml`, classifies each one against its derived state from `.code-pact/state/progress.yaml`, and (with `--write`) flips the `status` field for every task whose derived state is `done` while its design status is still `planned` / `in_progress`. Stability: **Stable (v1.2+)**.
+`code-pact phase reconcile <phase-id> [--write] [--json]` walks every task inside `design/phases/<phase>.yaml`, classifies each one against its derived state from the progress ledger, and (with `--write`) flips the `status` field for every task whose derived state is `done` while its design status is still `planned` / `in_progress`. Stability: **Stable (v1.2+)**.
 
 Default mode is dry-run. Pass `--write` to apply the mutations. No `--agent` flag — like `task finalize`, this is a design/progress reconciliation command that never calls an adapter.
 
-`phase reconcile` **never** auto-flips the phase's own `status` field in v1.2. It computes a `phase_status_candidate` and surfaces it as advisory only. The phase status itself continues to be flipped by hand in release prep until P14 governance owns the policy. `phase reconcile` also **never** mutates `progress.yaml` and **never** writes to `design/roadmap.yaml`.
+`phase reconcile` **never** auto-flips the phase's own `status` field in v1.2. It computes a `phase_status_candidate` and surfaces it as advisory only. The phase status itself continues to be flipped by hand in release prep until P14 governance owns the policy. `phase reconcile` also **never** writes to the progress ledger and **never** writes to `design/roadmap.yaml`.
 
 ### Per-task classification
 
@@ -2132,7 +2135,7 @@ code-pact phase reconcile P11 --write --json
 
 The command is **read-only**. It emits command strings the user (or an agent) runs separately, or a `manual_action` describing a human checkpoint. There is no `--write` flag, no `--execute` flag, no `--agent` flag — runbook is sequencing guidance, not orchestration. Agent choice belongs to whichever command in the recommended sequence needs an adapter (e.g. `code-pact task context <id> --agent claude-code`).
 
-The command **never** mutates `progress.yaml`, **never** writes to `design/`, and **never** calls an adapter. It only reads the roadmap, phase YAMLs, and the progress log.
+The command **never** writes to the progress ledger, **never** writes to `design/`, and **never** calls an adapter. It only reads the roadmap, phase YAMLs, and the progress ledger.
 
 ### Step generation
 
@@ -2183,7 +2186,7 @@ Mapping table:
       {
         "command": "code-pact task finalize P9-T5 --write",
         "manual_action": null,
-        "reason": "Task is done in progress.yaml but design status is still planned/in_progress. `task finalize` is the deterministic resolver.",
+        "reason": "Task is done in the progress ledger but design status is still planned/in_progress. `task finalize` is the deterministic resolver.",
         "blocking": false,
         "safety_note": "This is a --write operation. Preview first with `code-pact task finalize P9-T5 --json` (dry-run).",
         "expected_result": "design/phases/<phase>.yaml task status flips to done; STATUS_DRIFT done-but-design-not-done clears on next plan analyze."
@@ -2235,7 +2238,7 @@ See the generated [CLI reference § `task runbook`](cli-reference.generated.md).
 
 Mirrors `task runbook` at phase level. The command is **read-only**: every recommended step is a CLI invocation the user runs separately, or a `manual_action` describing a human checkpoint. There is no `--write`, no `--execute`, no `--agent` flag, and no multi-phase `--all`.
 
-The command **never** mutates `progress.yaml`, **never** writes to `design/` (including `design/roadmap.yaml`), and **never** flips the phase's own `status` field. The `phase_status_candidate` reported in `phase_summary` is advisory only — consistent with the v1.2 `phase reconcile` contract.
+The command **never** writes to the progress ledger, **never** writes to `design/` (including `design/roadmap.yaml`), and **never** flips the phase's own `status` field. The `phase_status_candidate` reported in `phase_summary` is advisory only — consistent with the v1.2 `phase reconcile` contract.
 
 ### Step priority order
 
@@ -2277,7 +2280,7 @@ For each phase, runbook iterates `phase.tasks[]` and emits steps in this priorit
       {
         "command": "code-pact phase reconcile P12 --write",
         "manual_action": null,
-        "reason": "2 task(s) (P12-T1, P12-T2) are done in progress.yaml but design status is still planned/in_progress. `phase reconcile --write` flips them in one atomic batch.",
+        "reason": "2 task(s) (P12-T1, P12-T2) are done in the progress ledger but design status is still planned/in_progress. `phase reconcile --write` flips them in one atomic batch.",
         "blocking": false,
         "safety_note": "This is a --write operation. Preview first with `code-pact phase reconcile P12 --json` (dry-run).",
         "expected_result": "design/phases/<phase>.yaml task statuses flip planned → done; STATUS_DRIFT done-but-design-not-done clears for each task."
@@ -2350,7 +2353,7 @@ Multi-node cycles (length ≥ 2) surface as `TASK_DEPENDS_ON_CYCLE` (error). Sel
 
 ## `task start` / `task status` / `task block` / `task resume` (v0.6)
 
-These four commands fill the execution-state gap between `task context` and `task complete`. They all read and append to the same `.code-pact/state/progress.yaml` log used by `task complete`, and they share the same state-machine rules enforced via `deriveTaskState` and `assertTransition`.
+These four commands fill the execution-state gap between `task context` and `task complete`. They all read the same progress ledger used by `task complete` and record events to it — one new file per event under `.code-pact/state/events/` (the legacy `.code-pact/state/progress.yaml` is read-merged for compatibility but is no longer written) — and they share the same state-machine rules enforced via `deriveTaskState` and `assertTransition`.
 
 **Allowed transitions:**
 
@@ -2363,13 +2366,13 @@ done      → terminal
 failed    → started   (internal retry path, not user-facing in v0.6)
 ```
 
-Any disallowed transition exits 2 with `INVALID_TASK_TRANSITION` and leaves `progress.yaml` byte-identical.
+Any disallowed transition exits 2 with `INVALID_TASK_TRANSITION` and records no progress event.
 
 ### `task start <task-id> [--agent <name>] [--json]`
 
-Appends a `started` event. Validates `--agent` against `project.yaml` (defaults to `default_agent` when omitted) and emits the standard `AGENT_NOT_FOUND` / `AGENT_NOT_ENABLED` errors.
+Records a `started` event. Validates `--agent` against `project.yaml` (defaults to `default_agent` when omitted) and emits the standard `AGENT_NOT_FOUND` / `AGENT_NOT_ENABLED` errors.
 
-Idempotency: if the current state is already `started`, the command exits 0 with `{ ok: true, data: { already_started: true, ... } }` and `progress.yaml` is byte-identical.
+Idempotency: if the current state is already `started`, the command exits 0 with `{ ok: true, data: { already_started: true, ... } }` and records no progress event.
 
 ### `task status <task-id> [--json]`
 
@@ -2394,13 +2397,13 @@ JSON envelope:
 
 ### `task block <task-id> --reason "<text>" [--agent <name>] [--json]`
 
-Appends a `blocked` event. `--reason` is **required** at the CLI layer and stored in the new `ProgressEvent.reason` field (distinct from `notes`, which remains a free-form memo). An empty or whitespace-only reason raises `CONFIG_ERROR` (exit 2). The schema also enforces non-empty `reason` for blocked events via `superRefine`, so progress.yaml stays honest even under hand-editing.
+Records a `blocked` event. `--reason` is **required** at the CLI layer and stored in the new `ProgressEvent.reason` field (distinct from `notes`, which remains a free-form memo). An empty or whitespace-only reason raises `CONFIG_ERROR` (exit 2). The schema also enforces non-empty `reason` for blocked events via `superRefine`, so the ledger stays honest even under hand-editing.
 
 Allowed only from `started` or `resumed`. Block from `planned`, `blocked`, or `done` returns `INVALID_TASK_TRANSITION` (exit 2).
 
 ### `task resume <task-id> [--agent <name>] [--json]`
 
-Appends a `resumed` event. Allowed only from `blocked` — any other current state returns `INVALID_TASK_TRANSITION` (exit 2).
+Records a `resumed` event. Allowed only from `blocked` — any other current state returns `INVALID_TASK_TRANSITION` (exit 2).
 
 ## `recommend` (v0.8)
 
@@ -2577,7 +2580,7 @@ This means that once a project is initialized with `ja-JP`, all subsequent comma
 | `.code-pact/agent-profiles/<agent>.yaml` | `init` | The default profile, created once at bootstrap |
 | `.code-pact/<agents[].profile>` (default: `agent-profiles/<agent>.yaml`) | `adapter install`, `adapter upgrade --write`, `--model` pinning | Reads/writes the profile path configured in `project.yaml`; refreshed when adapter profile fields change |
 | `.code-pact/model-profiles/*.yaml` | `init` | Once at bootstrap (default tier templates) |
-| `.code-pact/state/progress.yaml` | `task start` / `task block` / `task resume` / `task complete` | One append per state transition |
+| `.code-pact/state/events/<at>-<id>.yaml` (progress ledger) | `task start` / `task block` / `task resume` / `task complete` / `task record-done` | One new event file per state transition (the legacy `.code-pact/state/progress.yaml` is read-merged for compatibility but no longer written) |
 | `.code-pact/state/baselines/*.json` | `init`, future baseline commands | Once at bootstrap (`initial.json`) |
 | `.code-pact/adapters/<agent>.manifest.yaml` | `adapter install`, `adapter upgrade --write` | Each install or write-mode upgrade |
 | `design/brief.md`, `design/constitution.md` | `plan brief`, `plan constitution` | Once per wizard run |
@@ -2586,7 +2589,7 @@ This means that once a project is initialized with `ja-JP`, all subsequent comma
 | `<agent-profile>.context_dir/<task-id>.md` (context pack; default `.context/<agent>/<task-id>.md`) | `task prepare` (unless `--dry-run`), `pack` | One write per `task prepare` / `pack` invocation. `task context` does **not** write — it builds and returns/prints the same bytes. The file is regenerable; the default context dir is gitignored (`/.context/`), and a custom `context_dir` should likewise be treated as ignorable agent output. Not tracked in the adapter manifest |
 | `<adapter-owned files>` (e.g. `CLAUDE.md`, `.claude/skills/*.md`) | `adapter install`, `adapter upgrade --write` | Generated from the agent's `AdapterDescriptor`; manifest tracks every file. `adapter install` / `upgrade` may also create the agent profile's `context_dir` directory (a `mkdir`, not a file-content write), but the per-task packs inside it are written by `task prepare` / `pack` (row above), not the adapter |
 
-**Committed vs ignored.** Everything `code-pact` writes under `.code-pact/` is *shared, version-controlled* state **except** the machine-local / derived paths: `.code-pact/locks/` (advisory locks — pid/hostname) and `.code-pact/cache/` (reserved, derived). `init` adds exactly those two (plus `/.local/` and `/.context/`) to `.gitignore`; `project.yaml`, `agent-profiles/`, `model-profiles/`, `state/baselines/`, and the progress ledger are committed. **Adapter manifests are conditional:** commit `.code-pact/adapters/<agent>.manifest.yaml` **only together with** the adapter-owned generated files it lists (e.g. `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `.claude/skills/*`, `.cursor/**`) — a committed manifest whose managed files are absent fails `adapter doctor` with `ADAPTER_FILE_MISSING` on a clean checkout. A repo that treats adapter output as regenerated/ignored (as code-pact's own repo does) ignores the manifest too. (The progress ledger is moving from the single `state/progress.yaml` to per-event files under `state/events/` per the accepted collaboration-safe-state RFC; both forms are committable, but only the per-event form is merge-safe.)
+**Committed vs ignored.** Everything `code-pact` writes under `.code-pact/` is *shared, version-controlled* state **except** the machine-local / derived paths: `.code-pact/locks/` (advisory locks — pid/hostname) and `.code-pact/cache/` (reserved, derived). `init` adds exactly those two (plus `/.local/` and `/.context/`) to `.gitignore`; `project.yaml`, `agent-profiles/`, `model-profiles/`, `state/baselines/`, and the progress ledger are committed. **Adapter manifests are conditional:** commit `.code-pact/adapters/<agent>.manifest.yaml` **only together with** the adapter-owned generated files it lists (e.g. `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `.claude/skills/*`, `.cursor/**`) — a committed manifest whose managed files are absent fails `adapter doctor` with `ADAPTER_FILE_MISSING` on a clean checkout. A repo that treats adapter output as regenerated/ignored (as code-pact's own repo does) ignores the manifest too. (The progress ledger is **per-event files under `state/events/`** — collaboration-safe-state RFC, B1. The legacy single `state/progress.yaml`, if present, is still read and merged but no longer written. Both forms are committable; only the per-event form is merge-safe, so commit `state/events/**`.)
 
 ### Atomic write strategy
 
@@ -2597,10 +2600,12 @@ Every file-content write listed above goes through `atomicWriteText` (`src/io/at
 
 `fs.rename` within the same filesystem is atomic on POSIX (the destination either points at the old content or the new content, never a partial file). This is sufficient for code-pact's "interrupted-process safety" requirement and is verified end-to-end by the test suite.
 
+The one exception is the **per-event progress ledger** (`.code-pact/state/events/`, collaboration-safe-state RFC B1): each event is published with a temp file plus `fs.link` onto a content-addressed final path (a no-overwrite publish, **not** a rename), so two concurrent writers cannot clobber each other and a re-recorded identical event is an idempotent no-op rather than a partial write.
+
 **What `code-pact` does NOT do** (intentional, documented limits):
 
 - **No `fsync`.** A power loss between the rename and the OS flushing the dirty buffers can lose the most recent write. This is acceptable for a local dev tool — the next run will recover from the prior state.
-- **No progress-log write lock — and the monolithic ledger is not concurrency-safe.** `task start` / `task complete` etc. currently *read the whole* `progress.yaml`, append in memory, and rewrite the file. Two concurrent invocations against the same project therefore race on the rewrite: last-writer-wins can **lose** an event (not merely reorder it), and a branch merge of the single shared array can conflict or silently drop events. In practice a single developer runs these serially, so the exposure is real but low. The accepted collaboration-safe-state RFC removes it by writing **one file per event** (conflict-free and lost-update-free by construction); until that lands, avoid concurrent `task complete` against the same project. Design mutations are different: v1.5+ serializes roadmap and phase YAML writes with the advisory lock documented below.
+- **No progress-log write lock — and none is needed.** `task start` / `task complete` etc. write **one file per event** under `.code-pact/state/events/` (collaboration-safe-state RFC, B1): each event is published as a distinct no-overwrite file (temp + `link` onto a content-addressed name), so two concurrent invocations against the same project produce two different files and neither is lost, and two branches that each add events merge cleanly. The legacy monolithic `progress.yaml` (read-the-whole-file-append-rewrite, where a concurrent writer could lose an event) is **no longer written** — it is still read and merged for back-compat. Design mutations are different: v1.5+ serializes roadmap and phase YAML writes with the advisory lock documented below.
 - **No backup file** (`.bak`). The doctor `BAK_FILE` warning fires if a `.bak` file appears next to a tracked file — it's expected to be a leftover from manual edits, not code-pact output.
 
 ### Path safety
@@ -2610,7 +2615,7 @@ The v1.0 path-traversal hardening is intentionally scoped to **adapter-managed g
 - `assertSafeRelativePath` (`src/core/adapters/file-state.ts`) rejects absolute paths, leading `~`, backslashes, Windows drive letters, `..`, `.`, and empty path segments at the zod-schema layer.
 - `resolveWithinProject` walks ancestor directory realpaths and rejects symlink escape (a directory symlink under `cwd` resolving to a location outside the project root).
 
-Other project state files — `progress.yaml`, phase YAMLs, the design tree, agent profiles — remain protected by their existing schema validation and atomic-write behaviour. They are written to paths derived from project config or constants, not from user-supplied generator output, so the adapter-style traversal helpers do not currently apply.
+Other project state files — the progress ledger, phase YAMLs, the design tree, agent profiles — remain protected by their existing schema validation and atomic-write behaviour. They are written to paths derived from project config or constants, not from user-supplied generator output, so the adapter-style traversal helpers do not currently apply.
 
 Extending the adapter-style helpers to other state-file writes is **deferred unless a concrete risk appears**. It is not a "we don't need validation there" claim — it's a scope statement about what kind of write surface the helpers are designed for.
 
@@ -2672,7 +2677,7 @@ Automation (PID liveness check, age-based stale detection, a `--force-lock` flag
 
 **Relationship to atomic-text.** The lock is layered ON TOP of the existing atomic-write contract — it does not replace it. Atomic-text gives file-level durability (interrupted writes never leave a half-written file); the lock gives semantic guard against concurrent semantic mutations of the same project. Both are needed.
 
-**`progress.yaml` is intentionally NOT locked — at the cost of concurrency safety (a known limitation).** The lock-free choice keeps these high-frequency commands cheap, but the monolithic read-append-rewrite writer means two concurrent writers can lose an event (see *No progress-log write lock* above) — lock-free here is **not** the same as safe. The accepted collaboration-safe-state RFC makes lock-free *actually* safe by moving to per-event files: a new file per event needs no lock and cannot lose a concurrent write. A write lock on the monolithic file would only paper over the underlying data-model issue, so it is deliberately not added.
+**The progress ledger is intentionally NOT locked — and does not need a lock.** The lock-free choice keeps these high-frequency commands cheap, and per-event files (collaboration-safe-state RFC, B1) make lock-free *actually* safe: a new file per event under `state/events/` needs no lock and cannot lose a concurrent write (see *No progress-log write lock* above). The legacy monolithic `progress.yaml` read-append-rewrite writer — where two concurrent writers could lose an event — is **no longer written** (still read-merged for back-compat). A write lock on the monolithic file would only have papered over the underlying data-model issue, so none was added; the data model was fixed instead.
 
 ### Roadmap mutation policy (v1.5+ / P14)
 
@@ -2685,10 +2690,10 @@ Automation (PID liveness check, age-based stale detection, a `--force-lock` flag
 | `phase new` (TTY wizard) | yes | `runPhaseNew` → `createPhase` |
 | `phase import` | yes (per imported phase, after reserved-id preflight) | `runPhaseImport` → `createPhase` |
 | `task add` | no | Writes phase YAML only (`design/phases/<phase>.yaml`) |
-| `task complete` | no | Writes `progress.yaml` (append; lock-free — not concurrency-safe, see § State file write guarantees) |
+| `task complete` | no | Writes one event file under `state/events/` (lock-free per-event; concurrency-safe by construction, see § State file write guarantees) |
 | `task finalize --write` | no | Writes phase YAML only (flips `tasks[].status`) |
 | `phase reconcile --write` | no | Writes phase YAML only (batch flip of `tasks[].status`) |
-| `task start` / `task block` / `task resume` / `task status` | no | Writes `progress.yaml` only, or read-only |
+| `task start` / `task block` / `task resume` / `task status` | no | Writes one event file under `state/events/` only, or read-only (`task status`) |
 | `plan lint` / `plan normalize` / `plan analyze` / `validate` / `doctor` / `recommend` / `task runbook` / `phase runbook` / `task context` | no | Read-only |
 
 The four `createPhase` callers are the **only** code paths that mutate `roadmap.yaml`. This is enforced structurally — no other module calls into the roadmap saver. Future commands that need to mutate the roadmap MUST go through `createPhase` (or land an RFC-update that extends this writer list).
@@ -2837,7 +2842,7 @@ The following shapes are documented but **not** locked by v1.0:
 - Human-readable stdout / stderr text content (translation, phrasing, log line ordering)
 - The presence of optional / advisory JSON fields beyond the documented contract — fields can be added; existing fields cannot be removed or change type
 - Internal module names, file layouts under `src/`, and TypeScript exported types
-- The format of files under `.code-pact/state/` beyond the documented `progress.yaml` schema
+- The format of files under `.code-pact/state/` beyond the documented progress-event schema (legacy `progress.yaml` and per-event files under `state/events/`)
 - The exact filename pattern of `.code-pact/adapters/<agent>.manifest.yaml` (the directory and schema are stable; the per-agent filename mapping follows `<agent>.manifest.yaml`)
 
 ## Stability

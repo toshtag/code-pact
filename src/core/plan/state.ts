@@ -132,11 +132,15 @@ function pushParseIssue(issues: FileIssue[], err: unknown, file: string): void {
     });
     return;
   }
-  // A corrupt per-event file (filename↔content invariant) keeps its own code so
-  // `plan lint` matches what `doctor` reports, rather than a generic INVALID_YAML.
-  if ((err as NodeJS.ErrnoException).code === "EVENT_FILE_ID_MISMATCH") {
+  // A corrupt per-event file keeps the diagnostic code that
+  // validateEventFileContent tagged it with (EVENT_FILE_ID_MISMATCH for the
+  // filename↔content invariant, SCHEMA_ERROR for a parseable-but-invalid event)
+  // so `plan lint` matches what `doctor` reports, rather than collapsing both to
+  // a generic INVALID_YAML. A genuinely unparseable body keeps INVALID_YAML below.
+  const tag = (err as NodeJS.ErrnoException).code;
+  if (tag === "EVENT_FILE_ID_MISMATCH" || tag === "SCHEMA_ERROR") {
     issues.push({
-      code: "EVENT_FILE_ID_MISMATCH",
+      code: tag,
       severity: "error",
       message: err instanceof Error ? err.message : String(err),
       file,

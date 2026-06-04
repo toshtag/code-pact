@@ -254,16 +254,17 @@ async function checkProgressLog(
   }
 
   // Merge the per-event ledger for orphan + conflict detection. A corrupt event
-  // file is its own error: EVENT_FILE_ID_MISMATCH for a broken filename↔content
-  // invariant, SCHEMA_ERROR for an unparseable / schema-invalid event body.
+  // file carries its own diagnostic code (set by validateEventFileContent):
+  // EVENT_FILE_ID_MISMATCH for a broken filename↔content invariant, INVALID_YAML
+  // for an unparseable body, SCHEMA_ERROR for a parseable-but-invalid event. We
+  // map it straight through so doctor and plan lint never disagree on the code.
   let eventFiles;
   try {
     eventFiles = await readEventFiles(cwd);
   } catch (err) {
+    const tag = (err as NodeJS.ErrnoException).code;
     const code =
-      (err as NodeJS.ErrnoException).code === "EVENT_FILE_ID_MISMATCH"
-        ? "EVENT_FILE_ID_MISMATCH"
-        : "SCHEMA_ERROR";
+      tag === "EVENT_FILE_ID_MISMATCH" || tag === "INVALID_YAML" ? tag : "SCHEMA_ERROR";
     issues.push({ code, severity: "error", message: (err as Error).message });
     return;
   }

@@ -14,7 +14,7 @@ export type TaskCompleteOptions = {
   taskId: string;
   /** Optional. When omitted, project.yaml's default_agent is used. */
   agent?: string;
-  /** When true, do not modify progress.yaml. */
+  /** When true, do not record a progress event (the ledger is unchanged). */
   dryRun?: boolean;
   /** Date injection for tests. Defaults to new Date(). */
   now?: () => Date;

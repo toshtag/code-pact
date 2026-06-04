@@ -18,7 +18,7 @@ The project keeps two state surfaces:
   phase YAML, task readiness fields, decisions, acceptance
   references, and rules all live here, version-controlled,
   schema-validated, lint-able.
-- **`.code-pact/state/progress.yaml`** — the operational log.
+- **the progress ledger (`.code-pact/state/events/`)** — the operational log.
   An append-only event stream of `started` / `done` / `failed` /
   `blocked` / `resumed` events that drives state-machine
   transitions and renders runbook output.
@@ -142,7 +142,7 @@ are recomputed on every harness run.
   it has at least one `started` event before its first `done`
   event AND does not exhibit the legacy v0.6 `planned → done`
   shortcut. `task prepare` invocations are not currently
-  observable in `progress.yaml` (it is a read-only command and
+  observable in the progress ledger (it is a read-only command and
   emits no event), so the metric measures state-machine
   adherence only — a future phase may add prepare-event
   tracking and tighten the definition.

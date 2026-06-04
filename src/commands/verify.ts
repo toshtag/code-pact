@@ -242,7 +242,7 @@ export async function runVerify(opts: VerifyOptions): Promise<VerifyResult> {
     throw err;
   }
 
-  // progress.yaml is only loaded when the consistency checks need it.
+  // The progress ledger is only loaded when the consistency checks need it.
   const phase = await loadPhase(cwd, ref.path);
 
   // Verify task exists in phase before running checks

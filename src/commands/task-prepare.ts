@@ -239,8 +239,8 @@ function nextActionTypeFor(state: TaskCurrentState): NextActionType {
  * point per task. Returns current state, recommendation, context pack
  * metadata, a structured `next_action`, and a `commands` dictionary.
  *
- * Progress invariant: this function MUST NOT mutate
- * `.code-pact/state/progress.yaml`. It MAY write the deterministic
+ * Progress invariant: this function MUST NOT record a progress event
+ * (the ledger is left unchanged). It MAY write the deterministic
  * context pack at the agent profile's `context_dir/<task-id>.md`
  * (default `.context/<agent>/<task-id>.md`) unless `dryRun` is passed.
  *

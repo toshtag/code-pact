@@ -20,7 +20,7 @@ import { assertSafeRelativePath } from "../core/path-safety.ts";
 // `task finalize <task-id>` — v1.2 P11
 //
 // Flips a single task's design YAML `status` field to `done`, but only
-// when the task already has a `done` event in progress.yaml. Default
+// when the task already has a `done` event in the progress ledger. Default
 // mode is dry-run; `--write` is the explicit opt-in to mutate disk.
 //
 // The v1.0 contract that `task complete` records progress only and
@@ -161,7 +161,7 @@ export async function runTaskFinalize(
     taskId,
   );
 
-  // 2. Derive current state from progress.yaml.
+  // 2. Derive current state from the progress ledger.
   const { log } = await loadProgressLog(cwd);
   const state = deriveTaskState(log.events, taskId);
 

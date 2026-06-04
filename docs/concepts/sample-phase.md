@@ -114,7 +114,7 @@ code-pact plan lint --json
 code-pact validate --json
 ```
 
-If you have already started or completed any TUTORIAL-T* tasks before deleting, `code-pact plan analyze` will surface them as `ORPHAN_PROGRESS_EVENT` warnings (events for task ids no longer in any phase). The resolution is either to restore the phase file (events become consistent) or to remove the orphaned events from `.code-pact/state/progress.yaml` by hand (the operational log is append-only by convention, but not enforced — for a tutorial cleanup that's fine).
+If you have already started or completed any TUTORIAL-T* tasks before deleting, `code-pact plan analyze` will surface them as `ORPHAN_PROGRESS_EVENT` warnings (events for task ids no longer in any phase). The resolution is either to restore the phase file (events become consistent) or to delete the orphaned event files from `.code-pact/state/events/` by hand (or remove them from a legacy `.code-pact/state/progress.yaml`) — the operational log is append-only by convention, but not enforced, so for a tutorial cleanup that's fine.
 
 ## How to rename it
 

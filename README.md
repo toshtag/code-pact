@@ -8,7 +8,7 @@
 
 Claude Code writes `CLAUDE.md`. Codex writes `AGENTS.md`. Cursor writes `.cursor/rules/`. Each AI coding agent has its own conventions for instruction files, skills, and progress tracking. Switching between them — or running more than one against the same project — means hand-editing parallel state.
 
-`code-pact` gives any supported agent the same deterministic CLI for fetching task context, recording progress, and verifying completion criteria. The agent calls a small set of commands; `code-pact` keeps `design/` as the structured source of truth and `.code-pact/state/progress.yaml` as the operational log. Adapters generate the per-agent instruction files so each agent sees its own world without the project state diverging.
+`code-pact` gives any supported agent the same deterministic CLI for fetching task context, recording progress, and verifying completion criteria. The agent calls a small set of commands; `code-pact` keeps `design/` as the structured source of truth and the progress ledger (per-event files under `.code-pact/state/events/`) as the operational log. Adapters generate the per-agent instruction files so each agent sees its own world without the project state diverging.
 
 v1.0 ships **stable** adapters for `claude-code`, `codex`, and `generic`. The `cursor` and `gemini-cli` adapters are **experimental** — they ship, they work, but their generated file formats may shift in minor releases to track upstream tooling changes.
 

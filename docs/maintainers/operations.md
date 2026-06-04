@@ -399,12 +399,12 @@ If you use cross-phase `depends_on` (e.g. `P19-T4` depends on `P15-T5`), the agg
 
 ## `task complete` vs `design/` (v1.0 contract)
 
-`task complete` records an operational fact: this task's verify command passed at this point in time. It writes a `done` event to `.code-pact/state/progress.yaml`. It **does not** modify the task's `status` field in `design/phases/<phase>.yaml`.
+`task complete` records an operational fact: this task's verify command passed at this point in time. It records a `done` event to the progress ledger (a new file under `.code-pact/state/events/`). It **does not** modify the task's `status` field in `design/phases/<phase>.yaml`.
 
 This separation is intentional:
 
 - `design/` is the source of truth for **intent** — what the human/agent decided this task should be.
-- `.code-pact/state/progress.yaml` is the operational log of **what actually happened** — when it started, blocked, resumed, completed.
+- the progress ledger (`.code-pact/state/events/`) is the operational log of **what actually happened** — when it started, blocked, resumed, completed.
 
 When the two diverge, `plan analyze` surfaces a `STATUS_DRIFT` warning so it's visible:
 

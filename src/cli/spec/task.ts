@@ -17,9 +17,9 @@ const prepare: CommandSpec = {
     "commands to run. Progress-read-only — never records a progress event, but",
     "writes the context pack unless --dry-run is passed.",
   ].join("\n"),
-  // NOT `readOnly: true`: prepare leaves progress.yaml untouched but DOES write
+  // NOT `readOnly: true`: prepare records no progress event but DOES write
   // the context pack (unless --dry-run), so the generic "Read-only — never
-  // mutates progress.yaml" note would mislead. The precise progress-read-only
+  // records a progress event" note would mislead. The precise progress-read-only
   // note is inlined in the summary above.
   // See design/decisions/context-pack-write-contract-hygiene-rfc.md.
   flags: [

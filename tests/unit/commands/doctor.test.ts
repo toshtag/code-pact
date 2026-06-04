@@ -6,7 +6,7 @@ import { spawn } from "node:child_process";
 import { runInit } from "../../../src/commands/init.ts";
 import { runPhaseAdd } from "../../../src/commands/phase.ts";
 import { runDoctor } from "../../../src/commands/doctor.ts";
-import { writeEventFile } from "../../../src/core/progress/events-io.ts";
+import { eventsDir, writeEventFile } from "../../../src/core/progress/events-io.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -138,6 +138,24 @@ describe("runDoctor — orphan progress event", () => {
     const orphan = result.issues.find((i) => i.code === "ORPHAN_PROGRESS_EVENT");
     expect(orphan).toBeDefined();
     expect(orphan?.message).toContain("GHOST-T99");
+  });
+
+  it("reports INVALID_YAML (not SCHEMA_ERROR) for an unparseable event-file body", async () => {
+    await mkdir(eventsDir(dir), { recursive: true });
+    const name = `20260518T100000000Z-${"a".repeat(64)}.yaml`;
+    await writeFile(join(eventsDir(dir), name), "{ unclosed flow mapping", "utf8");
+    const result = await runDoctor(dir);
+    expect(result.issues.find((i) => i.code === "INVALID_YAML")).toBeDefined();
+    expect(result.issues.find((i) => i.code === "SCHEMA_ERROR")).toBeUndefined();
+  });
+
+  it("reports SCHEMA_ERROR (not EVENT_FILE_ID_MISMATCH) for a parseable-but-invalid event body", async () => {
+    await mkdir(eventsDir(dir), { recursive: true });
+    const name = `20260518T100000000Z-${"a".repeat(64)}.yaml`;
+    await writeFile(join(eventsDir(dir), name), "status: not_a_status\n", "utf8");
+    const result = await runDoctor(dir);
+    expect(result.issues.find((i) => i.code === "SCHEMA_ERROR")).toBeDefined();
+    expect(result.issues.find((i) => i.code === "EVENT_FILE_ID_MISMATCH")).toBeUndefined();
   });
 });
 

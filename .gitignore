@@ -11,8 +11,11 @@ build/
 # profiles, state/baselines) is committed. Anchored with / so
 # tests/fixtures/**/.code-pact/ is not affected.
 # Ignored exceptions specific to this repo:
-#  - state/progress.yaml — legacy monolithic ledger; stays ignored until the
-#    per-event ledger (Bucket B / collaboration-safe-state RFC) replaces it.
+#  - state/events/ and the legacy state/progress.yaml — the progress ledger.
+#    A user project commits the ledger (it is shared, merge-safe operational
+#    state); code-pact's OWN repo ignores it on purpose — the maintainer's local
+#    task-completion events are dogfooding noise, not project history (the same
+#    reason the legacy progress.yaml was ignored, and the adapter output below).
 #  - adapters/ — this repo is the SOURCE of the adapter templates and regenerates
 #    CLAUDE.md / .claude/skills/* (ignored below), so committing the manifest
 #    alone would orphan it (clean checkout -> ADAPTER_FILE_MISSING in adapter
@@ -20,6 +23,7 @@ build/
 /.code-pact/locks/
 /.code-pact/cache/
 /.code-pact/state/progress.yaml
+/.code-pact/state/events/
 /.code-pact/adapters/
 
 # Root-level generated context output

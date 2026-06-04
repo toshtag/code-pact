@@ -7,7 +7,7 @@ of repeating it. New to the vocabulary? See the [glossary](glossary.md).
 ## The lifecycle
 
 A task moves through states that code-pact **derives** from the append-only
-[`progress.yaml`](glossary.md#state-and-the-per-task-loop) log. With no events
+[progress ledger](glossary.md#state-and-the-per-task-loop). With no events
 yet, a task is `planned`.
 
 ```mermaid

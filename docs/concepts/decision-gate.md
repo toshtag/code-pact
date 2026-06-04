@@ -73,8 +73,8 @@ surfaces it earlier as advisories.
 
 | Surface | Code | When | Blocks? |
 | --- | --- | --- | --- |
-| `task complete` | `error.code: VERIFICATION_FAILED` + `error.cause_code: DECISION_REQUIRED` (v1.27+, exit 1) | At completion time, when the gate can't resolve an accepted ADR | **Yes** (`progress.yaml` untouched) |
-| `task record-done` | `error.code: DECISION_REQUIRED` (exit 2) + full `DecisionRequiredData` | At completion time, when the gate can't resolve an accepted ADR | **Yes** (`progress.yaml` untouched) |
+| `task complete` | `error.code: VERIFICATION_FAILED` + `error.cause_code: DECISION_REQUIRED` (v1.27+, exit 1) | At completion time, when the gate can't resolve an accepted ADR | **Yes** (no progress event recorded) |
+| `task record-done` | `error.code: DECISION_REQUIRED` (exit 2) + full `DecisionRequiredData` | At completion time, when the gate can't resolve an accepted ADR | **Yes** (no progress event recorded) |
 | `verify` (standalone) | a failed `decision` check in `data.checks` (note: NOT `data.verify.checks`, which is the `task complete` path) | At completion time, when the gate can't resolve an accepted ADR | **Yes** (exit non-zero) |
 | `plan lint --include-quality` | `TASK_DECISION_UNRESOLVED` | A `requires_decision` task whose gate doesn't resolve (no ADR, or one that is proposed/empty/etc.) | No (advisory) |
 | `plan lint --include-quality` | `ADR_STATUS_UNRECOGNIZED` | An ADR whose explicit status word is a typo | No (advisory) — surfaces *why* the gate won't resolve |

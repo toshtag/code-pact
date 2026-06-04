@@ -22,7 +22,7 @@ export type TaskRecordDoneOptions = {
   agent?: string;
   /** Optional free-form note stored on the progress event. */
   notes?: string;
-  /** When true, do not modify progress.yaml. */
+  /** When true, do not record a progress event (the ledger is unchanged). */
   dryRun?: boolean;
   /** Date injection for tests. Defaults to new Date(). */
   now?: () => Date;
@@ -84,8 +84,8 @@ async function loadProject(cwd: string): Promise<Project> {
  * from the tree), and the `record_only` lane where `recommend` advised
  * `lifecycleMode: record_only` and the caller ran the project's verification
  * itself. The existing decision gate is still honored: a `requires_decision`
- * task with no resolvable ADR fails with DECISION_REQUIRED and progress.yaml
- * is left untouched.
+ * task with no resolvable ADR fails with DECISION_REQUIRED and no progress
+ * event is recorded.
  *
  * The emitted event carries `source: "external"` so future diagnostics can
  * distinguish completion asserted via evidence from loop-verified completion.

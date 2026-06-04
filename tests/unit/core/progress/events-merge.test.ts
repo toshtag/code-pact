@@ -126,6 +126,23 @@ describe("merged progress — event files (B1/B2/B3)", () => {
     await expect(readEventFiles(dir)).rejects.toMatchObject({ code: "EVENT_FILE_ID_MISMATCH" });
   });
 
+  it("readEventFiles tags an unparseable event body INVALID_YAML (not SCHEMA_ERROR)", async () => {
+    await mkdir(eventsDir(dir), { recursive: true });
+    // Structurally valid event-file name, but the body is not parseable YAML.
+    const name = `20260518T100000000Z-${"a".repeat(64)}.yaml`;
+    await writeFile(join(eventsDir(dir), name), "{ unclosed flow mapping", "utf8");
+    await expect(readEventFiles(dir)).rejects.toMatchObject({ code: "INVALID_YAML" });
+  });
+
+  it("readEventFiles tags a parseable-but-invalid event body SCHEMA_ERROR (not EVENT_FILE_ID_MISMATCH)", async () => {
+    await mkdir(eventsDir(dir), { recursive: true });
+    // Parses as YAML, but is not a ProgressEvent — the schema check must fire
+    // BEFORE the id check, so the code is SCHEMA_ERROR rather than a mismatch.
+    const name = `20260518T100000000Z-${"a".repeat(64)}.yaml`;
+    await writeFile(join(eventsDir(dir), name), toYaml({ status: "not_a_status" }), "utf8");
+    await expect(readEventFiles(dir)).rejects.toMatchObject({ code: "SCHEMA_ERROR" });
+  });
+
   it("readEventFiles rejects a present-but-non-string stored id", async () => {
     const { path } = await writeEventFile(
       dir,

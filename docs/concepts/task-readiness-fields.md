@@ -71,7 +71,7 @@ tasks:
 
 - **In `plan lint`:** flags references to ids not present in any phase (`TASK_DEPENDS_ON_UNRESOLVED` — v1.9 P19 made the resolver cross-phase aware; before that the check was same-phase only), direct self-cycles (`TASK_DEPENDS_ON_SELF_REFERENCE`), and multi-node `depends_on` cycles of length ≥ 2 (`TASK_DEPENDS_ON_CYCLE` — v1.9 P19, iterative Tarjan SCC over the whole roadmap dep graph).
 - **Cross-phase references** (v1.9 P19+): `depends_on` can name a task declared in any phase, not just the current one. `task runbook`'s `depends_on_check[i].phase_id` field is populated (additively) when a dep is cross-phase. `phase runbook --across-phases` (v1.9+) aggregates runbooks for every `in_progress` phase plus any phase pulled in via one level of transitive dep-driven inclusion.
-- **In `task context`:** the pack gains a `## Depends on` section. Each dependency is shown with its current derived state from `.code-pact/state/progress.yaml` (`planned` / `started` / `blocked` / `resumed` / `done` / `failed`). The agent can decide whether the dependency is ready before starting.
+- **In `task context`:** the pack gains a `## Depends on` section. Each dependency is shown with its current derived state from the progress ledger (`planned` / `started` / `blocked` / `resumed` / `done` / `failed`). The agent can decide whether the dependency is ready before starting.
 - **No runtime enforcement:** `task start` does not refuse to begin a task whose dependencies are incomplete. The declaration is for context, documentation, and lint validation; runtime gating is a candidate for P12 runbook.
 
 ### `decision_refs`

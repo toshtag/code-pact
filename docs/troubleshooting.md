@@ -19,7 +19,7 @@ When a command surfaces one of the diagnostic codes below, this page maps it to 
 | [`DECISION_REQUIRED`](#decision_required-from-task-record-done-v121) | A `requires_decision` task has no **accepted** ADR | Flip the ADR's `**Status:**` to `accepted` |
 | [`ADR_STATUS_UNRECOGNIZED`](#adr_status_unrecognized-from-plan-lint---include-quality-v124) | An ADR's status word is a typo | Fix the `**Status:**` line named in `details.status_source` |
 | [`CONTROL_PLANE_NOT_DRIVEN`](#control_plane_not_driven-from-doctor-v125) | Scaffold adopted but the loop isn't being driven | Start a task, or silence the check |
-| [`CONTROL_PLANE_BRANCH_NOT_DRIVEN`](#control_plane_branch_not_driven-from-doctor--validate---base-ref-v126) | A PR branch changed real code but never drove the loop | Drive a task (or `record-done`) and commit `progress.yaml`, or exempt the path |
+| [`CONTROL_PLANE_BRANCH_NOT_DRIVEN`](#control_plane_branch_not_driven-from-doctor--validate---base-ref-v126) | A PR branch changed real code but never drove the loop | Drive a task (or `record-done`) and commit the ledger (`state/events/**`), or exempt the path |
 | [`ADR_ACCEPTED_BODY_THIN`](#adr_accepted_body_thin-from-plan-lint---include-quality-v126) | An accepted ADR's body is an empty stub | Add the decision + rationale, or revert status to `proposed` |
 | [`ADR_COMMITMENTS_EMPTY`](#adr_commitments_empty-from-plan-lint---include-quality-v127) | An accepted ADR that resolves a gated task's gate records no implementation commitments | Add a `## Implementation commitments` checkbox list (warning only — never blocks) |
 | [`PHASE_DOCS_WRITE_NO_DOC_CHECK`](#phase_docs_write_no_doc_check-from-plan-lint---include-quality-v127) | A not-done phase writes public docs but runs no doc check | Add `pnpm check:docs` to the phase's verification.commands (warning only) |
@@ -41,7 +41,7 @@ Distinct from the `ADAPTER_MANIFEST_MISSING` *warning* surfaced by `adapter doct
 
 ## `INVALID_TASK_TRANSITION` from `task start` / `block` / `resume` / `complete`
 
-The current state derived from `progress.yaml` doesn't allow the requested transition. The most common case is `task complete` against a `blocked` task — the task must be `resume`d first so the `resumed` event records the unblock decision.
+The current state derived from the progress ledger doesn't allow the requested transition. The most common case is `task complete` against a `blocked` task — the task must be `resume`d first so the `resumed` event records the unblock decision.
 
 ```sh
 code-pact task status <task-id> --json
@@ -54,7 +54,7 @@ code-pact task complete <task-id>
 
 ## `PLAN_NORMALIZE_REQUIRED` from `plan normalize --check`
 
-A file under `design/` or `.code-pact/state/progress.yaml` has trailing whitespace, CRLF line endings, or a missing/extra final newline.
+A file under `design/` or the legacy `.code-pact/state/progress.yaml` has trailing whitespace, CRLF line endings, or a missing/extra final newline. (Per-event files under `.code-pact/state/events/` are machine-generated and not normalized.)
 
 ```sh
 code-pact plan normalize --write
@@ -75,7 +75,7 @@ A deterministic completion check did not pass. `task complete` runs two checks �
 ```sh
 code-pact verify --phase <phase-id> --task <task-id>
 # Runs the same checks stand-alone so you can read the full output.
-# progress.yaml is NOT mutated when verify fails; re-run task complete
+# No progress event is recorded when verify fails; re-run task complete
 # after fixing the underlying issue.
 ```
 
@@ -83,7 +83,7 @@ code-pact verify --phase <phase-id> --task <task-id>
 
 ## `TASK_FINALIZE_NOT_ELIGIBLE` from `task finalize` (v1.2+)
 
-The task's derived state from `progress.yaml` is not `done`, so flipping its design YAML status would create a worse drift (design says done, progress says otherwise). The check fires in **both** dry-run and `--write` — dry-run means "won't write", not "won't validate".
+The task's derived state from the progress ledger is not `done`, so flipping its design YAML status would create a worse drift (design says done, progress says otherwise). The check fires in **both** dry-run and `--write` — dry-run means "won't write", not "won't validate".
 
 ```sh
 code-pact task status <task-id> --json
@@ -226,7 +226,7 @@ A separate `STATUS_DRIFT done-but-design-not-done` warning from `plan analyze --
 
 ## `DECISION_REQUIRED` from `task record-done` (v1.21+)
 
-The task (or its phase) is `requires_decision: true`, and the [decision gate](concepts/decision-gate.md) cannot resolve an **accepted** ADR for it. `task record-done` skips verification commands, so this gate is the only thing standing between a non-`task complete` completion path (external completion or a `record_only` task) and a `done` event — it is **not** bypassable. `progress.yaml` is left untouched (exit 2).
+The task (or its phase) is `requires_decision: true`, and the [decision gate](concepts/decision-gate.md) cannot resolve an **accepted** ADR for it. `task record-done` skips verification commands, so this gate is the only thing standing between a non-`task complete` completion path (external completion or a `record_only` task) and a `done` event — it is **not** bypassable. No progress event is recorded (exit 2).
 
 ```sh
 code-pact task record-done <task-id> --evidence "PR #123" --json

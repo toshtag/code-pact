@@ -39,7 +39,7 @@ export type DecisionDoc = {
 export type DependsOnEntry = {
   id: string;
   /**
-   * Derived state from progress.yaml. `"unknown"` is reserved for ids
+   * Derived state from the progress ledger. `"unknown"` is reserved for ids
    * that fail to resolve at all — this should not occur because the
    * lint surface (`TASK_DEPENDS_ON_UNRESOLVED`) catches missing ids
    * before pack time, but the type tolerates the case so the renderer
@@ -165,7 +165,7 @@ export function renderSections(ctx: PackContext): RenderedSection[] {
   sections.push({ name: "task_definition", lines: taskDefinitionLines });
 
   // 6a. Depends on — task-declared dependencies, P10. Each id is shown
-  // with its current derived state from progress.yaml.
+  // with its current derived state from the progress ledger.
   if (ctx.dependsOn && ctx.dependsOn.length > 0) {
     const lines: string[] = [`## Depends on`, ``];
     for (const dep of ctx.dependsOn) {

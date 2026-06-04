@@ -49,11 +49,11 @@ Design-mutating commands acquire `.code-pact/locks/write.lock` at the CLI comman
 | `plan lint` / `plan analyze` / `plan normalize --check` | **No** (read-only) |
 | `task runbook` / `phase runbook` | **No** (read-only) |
 | `task context` / `task status` / `validate` / `doctor` / `recommend` | **No** (read-only) |
-| `task complete` / `task start` / `task block` / `task resume` | **No** — progress writes are lock-free. With today's monolithic ledger this is *not* concurrency-safe (a concurrent writer can lose an event); the accepted collaboration-safe-state RFC fixes that with per-event files. See [`docs/cli-contract.md`](../cli-contract.md#state-file-write-guarantees) |
+| `task complete` / `task start` / `task block` / `task resume` | **No** — and none is needed: progress writes are lock-free *and* concurrency-safe. Each event is a separate no-overwrite file under `state/events/` (collaboration-safe-state RFC, B1), so concurrent writers cannot lose an event. The legacy monolithic `progress.yaml` writer (which could) is no longer written. See [`docs/cli-contract.md`](../cli-contract.md#state-file-write-guarantees) |
 
 **Stale lock recovery is manual in v1.5.** If a `code-pact` command crashed without releasing the lock, verify no process holds it, manually delete `.code-pact/locks/write.lock`, and re-run. Auto-detection (PID liveness, age thresholds, a `--force-lock` flag) is deferred to a future RFC.
 
-For the full envelope shape, lock acquisition matrix, and the rationale for excluding `progress.yaml`, see [`docs/cli-contract.md` § Advisory write lock (v1.5+ / P14)](../cli-contract.md#advisory-write-lock-v15--p14).
+For the full envelope shape, lock acquisition matrix, and the rationale for not locking the progress ledger, see [`docs/cli-contract.md` § Advisory write lock (v1.5+ / P14)](../cli-contract.md#advisory-write-lock-v15--p14).
 
 ### 2. Reserved phase id (`TUTORIAL`)
 
@@ -131,7 +131,7 @@ The RFC § Non-goals enumerates deferrals. The headline items:
 - **Actual write enforcement against declared `writes`.** No git-diff comparison, no runner integration. Declared writes remain a review surface only.
 - **Phase status auto-flip implementation.** Manual flip remains the release-prep convention. A future RFC may design a `phase reconcile --write --phase-status` flag or a `phase finalize` command; P14 does NOT.
 - **`--force-lock` flag for stale lock recovery.** Manual delete is the only mechanism in v1.5.
-- **Progress.yaml write locking.** Progress writes stay lock-free for the high-frequency `task complete` / `task start` / `task block` / `task resume` paths. Note this is *not* concurrency-safe with today's monolithic read-append-rewrite ledger (a concurrent writer can lose an event, not merely reorder it); a write lock would only paper over the data-model issue. The accepted collaboration-safe-state RFC removes the problem structurally by moving to per-event files — that is the fix, not locking.
+- **Progress-ledger write locking.** Progress writes stay lock-free for the high-frequency `task complete` / `task start` / `task block` / `task resume` paths — and need no lock to be concurrency-safe. The collaboration-safe-state RFC (B1) made lock-free *actually* safe by moving to per-event files (a separate no-overwrite file per event under `state/events/`, so a concurrent writer cannot lose an event); the legacy monolithic read-append-rewrite `progress.yaml` writer, which could, is no longer written. A write lock would only have papered over the data-model issue — fixing the data model was the right fix, not locking.
 - **Lock TTL / automatic stale detection.** P14 ships manual-recovery; PID liveness checks are P15+.
 - **Cross-phase / multi-project locking.** Single project, single lock file.
 - **Configurable reserved-id list.** `TUTORIAL` is the only reserved id in v1.5.

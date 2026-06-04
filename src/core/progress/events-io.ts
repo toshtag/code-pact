@@ -43,7 +43,29 @@ export function parseEventFileName(
   return m ? { atCompact: m[1]!, id: m[2]! } : null;
 }
 
+/**
+ * Tag an event-file error with the diagnostic `code` that every consumer
+ * (doctor, plan lint, branch-drift) maps straight through, so the same broken
+ * file reports the same code on every surface:
+ *  - `INVALID_YAML` — the body is not parseable YAML
+ *  - `SCHEMA_ERROR` — it parses but is not a valid `ProgressEvent`
+ *
+ * The third code, `EVENT_FILE_ID_MISMATCH` (broken filename↔content bijection),
+ * is emitted by {@link eventFileMismatch} with a literal assignment.
+ */
+function taggedEventError(
+  code: "INVALID_YAML" | "SCHEMA_ERROR",
+  message: string,
+  file: string,
+): NodeJS.ErrnoException {
+  const err = new Error(`Event file ${file}: ${message}`) as NodeJS.ErrnoException;
+  err.code = code;
+  return err;
+}
+
 function eventFileMismatch(message: string, file: string): NodeJS.ErrnoException {
+  // Literal `.code =` assignment (not via taggedEventError's variable) so the
+  // error-code-surface scan sees EVENT_FILE_ID_MISMATCH as an emitted code.
   const err = new Error(`Event file ${file}: ${message}`) as NodeJS.ErrnoException;
   err.code = "EVENT_FILE_ID_MISMATCH";
   return err;
@@ -71,10 +93,19 @@ function eventFileMismatch(message: string, file: string): NodeJS.ErrnoException
 export function validateEventFileContent(file: string, raw: string): LoadedEventFile {
   const name = parseEventFileName(file);
   if (!name) throw eventFileMismatch("not a valid event-file name", file);
-  const doc = parseYaml(raw) as Record<string, unknown> | null;
+  let doc: Record<string, unknown> | null;
+  try {
+    doc = parseYaml(raw) as Record<string, unknown> | null;
+  } catch (err) {
+    // Unparseable YAML body — INVALID_YAML, matching the legacy file's surface.
+    throw taggedEventError("INVALID_YAML", (err as Error).message, file);
+  }
   // The stored `id` is not part of the event schema; strip before parsing.
   const { id: storedId, ...rest } = doc ?? {};
-  const event = ProgressEvent.parse(rest);
+  const parsed = ProgressEvent.safeParse(rest);
+  // Parses but is not a valid ProgressEvent — SCHEMA_ERROR, not EVENT_FILE_ID_MISMATCH.
+  if (!parsed.success) throw taggedEventError("SCHEMA_ERROR", parsed.error.message, file);
+  const event = parsed.data;
   const id = computeEventId(event);
   if (id !== name.id) {
     throw eventFileMismatch(`content id (${id}) does not match filename id (${name.id})`, file);

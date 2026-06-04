@@ -189,6 +189,29 @@ describe("plan lint --json", () => {
       parsed.data?.issues.some((i) => i.code === "INVALID_YAML"),
     ).toBe(true);
   });
+
+  // A corrupt per-event file must report the SAME diagnostic code on `plan lint`
+  // as on `doctor` — the two integrity surfaces must not disagree.
+  async function writeCorruptEvent(body: string): Promise<void> {
+    await writeRoadmap(`phases:\n  - id: P1\n    path: design/phases/P1.yaml\n    weight: 10\n`);
+    await writePhase("P1.yaml", phaseYaml("P1", ["P1-T1"]));
+    const events = join(tmpDir, ".code-pact", "state", "events");
+    await mkdir(events, { recursive: true });
+    await writeFile(join(events, `20260518T100000000Z-${"a".repeat(64)}.yaml`), body, "utf8");
+  }
+
+  it("reports SCHEMA_ERROR (not INVALID_YAML) for a parseable-but-invalid event body", async () => {
+    await writeCorruptEvent("status: not_a_status\n");
+    const parsed = parseLint(run(["plan", "lint", "--json"]).stdout);
+    expect(parsed.data?.issues.some((i) => i.code === "SCHEMA_ERROR")).toBe(true);
+    expect(parsed.data?.issues.some((i) => i.code === "INVALID_YAML")).toBe(false);
+  });
+
+  it("reports INVALID_YAML for an unparseable event body", async () => {
+    await writeCorruptEvent("{ unclosed flow mapping");
+    const parsed = parseLint(run(["plan", "lint", "--json"]).stdout);
+    expect(parsed.data?.issues.some((i) => i.code === "INVALID_YAML")).toBe(true);
+  });
 });
 
 describe("plan lint — ADR_COMMITMENTS_EMPTY is advisory even under --strict (P43)", () => {

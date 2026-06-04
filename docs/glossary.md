@@ -10,7 +10,7 @@ these terms describe, see [the per-task loop](per-task-loop.md).
 | --- | --- |
 | **agent** | The AI coding tool you use — Claude Code, Codex, Cursor, Gemini CLI, etc. code-pact does not include one; it gives the agent you already use a common set of commands to call. |
 | **control plane** | The thin layer that sits between your agent and your project. code-pact is the control plane: the agent asks it "what's the context for this task?", "record that I finished", "did verification pass?" — and it keeps the project's state consistent. |
-| **design intent vs. operational fact** | Two separate records code-pact keeps on purpose. **Design intent** is what you planned (`design/`). **Operational fact** is what actually happened (`.code-pact/state/progress.yaml`). They are allowed to differ; commands tell you when they do. |
+| **design intent vs. operational fact** | Two separate records code-pact keeps on purpose. **Design intent** is what you planned (`design/`). **Operational fact** is what actually happened (the **progress ledger** — see below). They are allowed to differ; commands tell you when they do. |
 | **roadmap** | The ordered list of phases for a project, stored in `design/roadmap.yaml`. |
 | **phase** | A group of related tasks with one objective and one verification command. Stored as `design/phases/<phase>.yaml`. |
 | **task** | The unit of work an agent picks up. Identified as `P1-T1` (see below). |
