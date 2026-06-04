@@ -22,6 +22,12 @@ progress and merge cleanly — no lost updates, no merge-corrupted log. Existing
 projects keep working unchanged: the legacy `progress.yaml` is read-merged and
 never rewritten.
 
+> **Scope note.** This release makes the **progress ledger** collaboration-safe.
+> It does **not** change phase ids (`P<N>`), `roadmap.yaml`, or inline task
+> layout — the other multi-contributor control-plane conflicts are deferred to a
+> follow-up v2 control-plane RFC, gated on real demand (a second active
+> contributor or an external adopter).
+
 ### Added
 
 - **Per-event progress ledger** (collaboration-safe-state RFC). `task start` /
