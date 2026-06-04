@@ -6,6 +6,7 @@ import { spawn } from "node:child_process";
 import { runInit } from "../../../src/commands/init.ts";
 import { runPhaseAdd } from "../../../src/commands/phase.ts";
 import { runDoctor } from "../../../src/commands/doctor.ts";
+import { eventsDir, writeEventFile } from "../../../src/core/progress/events-io.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -121,6 +122,40 @@ describe("runDoctor — orphan progress event", () => {
     expect(issue).toBeDefined();
     expect(issue?.severity).toBe("warning");
     expect(issue?.message).toContain("GHOST-T99");
+  });
+
+  it("treats a missing progress.yaml as empty and still reads event files (no false INVALID_YAML)", async () => {
+    await rm(join(dir, ".code-pact", "state", "progress.yaml"), { force: true });
+    await writeEventFile(dir, {
+      task_id: "GHOST-T99",
+      status: "done",
+      at: "2026-05-15T10:00:00.000Z",
+      actor: "human",
+      source: "loop",
+    } as Parameters<typeof writeEventFile>[1]);
+    const result = await runDoctor(dir);
+    expect(result.issues.find((i) => i.code === "INVALID_YAML")).toBeUndefined();
+    const orphan = result.issues.find((i) => i.code === "ORPHAN_PROGRESS_EVENT");
+    expect(orphan).toBeDefined();
+    expect(orphan?.message).toContain("GHOST-T99");
+  });
+
+  it("reports INVALID_YAML (not SCHEMA_ERROR) for an unparseable event-file body", async () => {
+    await mkdir(eventsDir(dir), { recursive: true });
+    const name = `20260518T100000000Z-${"a".repeat(64)}.yaml`;
+    await writeFile(join(eventsDir(dir), name), "{ unclosed flow mapping", "utf8");
+    const result = await runDoctor(dir);
+    expect(result.issues.find((i) => i.code === "INVALID_YAML")).toBeDefined();
+    expect(result.issues.find((i) => i.code === "SCHEMA_ERROR")).toBeUndefined();
+  });
+
+  it("reports SCHEMA_ERROR (not EVENT_FILE_ID_MISMATCH) for a parseable-but-invalid event body", async () => {
+    await mkdir(eventsDir(dir), { recursive: true });
+    const name = `20260518T100000000Z-${"a".repeat(64)}.yaml`;
+    await writeFile(join(eventsDir(dir), name), "status: not_a_status\n", "utf8");
+    const result = await runDoctor(dir);
+    expect(result.issues.find((i) => i.code === "SCHEMA_ERROR")).toBeDefined();
+    expect(result.issues.find((i) => i.code === "EVENT_FILE_ID_MISMATCH")).toBeUndefined();
   });
 });
 
@@ -782,7 +817,12 @@ describe("runDoctor — CONTROL_PLANE_BRANCH_NOT_DRIVEN (P34)", () => {
   // committed progress.yaml. Then branch to `feature`. The ledger is gitignored
   // by default so it is only tracked when force-added (trackProgress).
   async function setupBaseAndBranch(
-    opts: { baseProgress?: string; trackProgress?: boolean } = {},
+    opts: {
+      baseProgress?: string;
+      trackProgress?: boolean;
+      baseEvents?: import("../../../src/core/schemas/progress-event.ts").ProgressEvent[];
+      trackEventsGitkeep?: boolean;
+    } = {},
   ): Promise<void> {
     await writeFile(
       join(dir, "design", "roadmap.yaml"),
@@ -794,12 +834,30 @@ describe("runDoctor — CONTROL_PLANE_BRANCH_NOT_DRIVEN (P34)", () => {
     await writeFile(join(dir, ".gitignore"), "/.code-pact/\n", "utf8");
     await mkdir(join(dir, ".code-pact", "state"), { recursive: true });
     await setProgress(opts.baseProgress ?? "events: []\n");
+    for (const e of opts.baseEvents ?? []) {
+      await writeEventFile(dir, e as Parameters<typeof writeEventFile>[1]);
+    }
+    if (opts.trackEventsGitkeep) {
+      await mkdir(join(dir, ".code-pact", "state", "events"), { recursive: true });
+      await writeFile(join(dir, ".code-pact", "state", "events", ".gitkeep"), "", "utf8");
+    }
 
     await git(dir, ["init", "--quiet", "--initial-branch=main"]);
     await git(dir, ["add", "-A"]);
     if (opts.trackProgress ?? true) await git(dir, ["add", "-f", PROGRESS_REL]);
+    if ((opts.baseEvents ?? []).length > 0 || opts.trackEventsGitkeep) {
+      await git(dir, ["add", "-f", ".code-pact/state/events/"]);
+    }
     await git(dir, ["commit", "--quiet", "-m", "base"]);
     await git(dir, ["checkout", "--quiet", "-b", "feature"]);
+  }
+
+  async function commitEventFileFull(
+    event: import("../../../src/core/schemas/progress-event.ts").ProgressEvent,
+  ): Promise<void> {
+    await writeEventFile(dir, event as Parameters<typeof writeEventFile>[1]);
+    await git(dir, ["add", "-f", ".code-pact/state/events/"]);
+    await git(dir, ["commit", "--quiet", "-m", "event"]);
   }
 
   async function commitBranchCode(relPath = "src/foo.ts"): Promise<void> {
@@ -857,6 +915,66 @@ describe("runDoctor — CONTROL_PLANE_BRANCH_NOT_DRIVEN (P34)", () => {
     expect(find(await runDoctor(dir, { baseRef: "main" }))).toBeDefined();
   });
 
+  // Bucket B PR2: the branch-drift gate reads the committed git tree —
+  // legacy progress.yaml AND per-event files — so a flipped writer that commits
+  // an event file (not progress.yaml) still counts as "driven".
+  async function commitEventFile(
+    taskId: string,
+    status: "started" | "done",
+  ): Promise<void> {
+    await writeEventFile(dir, {
+      task_id: taskId,
+      status,
+      at: "2026-05-28T10:00:00.000Z",
+      actor: "agent",
+      agent: "claude-code",
+      ...(status === "done" ? { source: "loop" } : {}),
+    } as Parameters<typeof writeEventFile>[1]);
+    await git(dir, ["add", "-f", ".code-pact/state/events/"]);
+    await git(dir, ["commit", "--quiet", "-m", "event"]);
+  }
+
+  it("skips when the branch added a known started/done as a committed EVENT FILE", async () => {
+    await setupBaseAndBranch();
+    await commitBranchCode();
+    await commitEventFile("P1-T1", "started");
+    expect(find(await runDoctor(dir, { baseRef: "main" }))).toBeUndefined();
+  });
+
+  it("fires when the branch's only added event file is an unknown task id", async () => {
+    await setupBaseAndBranch();
+    await commitBranchCode();
+    await commitEventFile("P99-TX", "started");
+    expect(find(await runDoctor(dir, { baseRef: "main" }))).toBeDefined();
+  });
+
+  it("uses the content id for identity: a content-different event on the branch counts as added (driven)", async () => {
+    const baseDone = {
+      task_id: "P1-T1",
+      status: "done",
+      at: "2026-05-28T09:00:00.000Z",
+      actor: "agent",
+      source: "loop",
+      evidence: ["old"],
+    } as import("../../../src/core/schemas/progress-event.ts").ProgressEvent;
+    await setupBaseAndBranch({ baseEvents: [baseDone] });
+    await commitBranchCode();
+    // Same task/status/at/actor/source, DIFFERENT evidence → a distinct content
+    // id, so the branch DID add a started/done. A coarse key would miss this.
+    await commitEventFileFull({ ...baseDone, evidence: ["new"] });
+    expect(find(await runDoctor(dir, { baseRef: "main" }))).toBeUndefined();
+  });
+
+  it("skips (does not fire) when the BASE ledger is unparseable — can't diff, so don't guess", async () => {
+    // base commits an invalid progress.yaml; HEAD fixes it but adds only an
+    // unknown-task event. With base treated as []=empty the gate would FIRE
+    // (false signal); base=null must skip instead.
+    await setupBaseAndBranch({ baseProgress: "events: [unclosed" });
+    await commitBranchCode();
+    await commitProgress(`events:\n${ev("P99-TX", "started")}`);
+    expect(find(await runDoctor(dir, { baseRef: "main" }))).toBeUndefined();
+  });
+
   it("fires when the only added event is TUTORIAL", async () => {
     await setupBaseAndBranch();
     await commitBranchCode();
@@ -880,6 +998,21 @@ describe("runDoctor — CONTROL_PLANE_BRANCH_NOT_DRIVEN (P34)", () => {
     await setupBaseAndBranch({ trackProgress: false });
     await commitBranchCode();
     expect(find(await runDoctor(dir, { baseRef: "main" }))).toBeUndefined();
+  });
+
+  it("FIRES with only events/.gitkeep tracked (no progress.yaml, no real event files) — the dogfood A3 sentinel keeps the gate active, not silently skipped", async () => {
+    // Dogfood A3: this repo commits `.code-pact/state/events/.gitkeep` so the
+    // committed-ledger precondition (ledgerTracked) is satisfied WITHOUT
+    // committing the legacy monolithic progress.yaml. The path is tracked but
+    // holds no real events, so a code-changing branch that drives nothing must
+    // still fire — proving the sentinel flips the gate from skip to active
+    // (contrast: the test just above, where nothing is tracked, stays silent).
+    await setupBaseAndBranch({ trackProgress: false, trackEventsGitkeep: true });
+    await commitBranchCode();
+    const r = await runDoctor(dir, { baseRef: "main" });
+    const issue = find(r);
+    expect(issue).toBeDefined();
+    expect(issue!.severity).toBe("warning");
   });
 
   it("does not run without --base-ref", async () => {

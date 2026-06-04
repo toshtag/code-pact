@@ -2,10 +2,9 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtemp, rm, mkdir, writeFile, readFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { tmpdir } from "node:os";
-import { parse as parseYaml } from "yaml";
 import { runTaskRecordDone } from "../../../src/commands/task-record-done.ts";
 import { runTaskComplete } from "../../../src/commands/task-complete.ts";
-import { ProgressLog } from "../../../src/core/schemas/progress-event.ts";
+import { loadMergedProgress } from "../../../src/core/progress/io.ts";
 
 // ---------------------------------------------------------------------------
 // Minimal project fixture. record-done never runs verification commands, so
@@ -127,11 +126,9 @@ async function setupProject(
 }
 
 async function readProgress(dir: string) {
-  const raw = await readFile(
-    join(dir, ".code-pact", "state", "progress.yaml"),
-    "utf8",
-  );
-  return { raw, log: ProgressLog.parse(parseYaml(raw) as unknown) };
+  // Merged view (legacy progress.yaml + per-event files).
+  const { raw, log } = await loadMergedProgress(dir);
+  return { raw, log };
 }
 
 let dir: string;

@@ -7,7 +7,7 @@ import {
   type ProgressEvent,
 } from "../schemas/progress-event.ts";
 import { computeEventId, normalizeAt } from "./event-id.ts";
-import { readEventFiles } from "./events-io.ts";
+import { type LoadedEventFile, readEventFiles } from "./events-io.ts";
 
 export const PROGRESS_PATH_SEGMENTS = [".code-pact", "state", "progress.yaml"];
 
@@ -40,6 +40,54 @@ export type LoadedProgress = {
  * map errors to the appropriate CLI error code. A missing `progress.yaml` is
  * treated as an empty legacy log (event files may still supply events).
  */
+/**
+ * Deterministically merge a legacy `progress.yaml` event array with the
+ * per-event files (B2/B3). Glob-order-independent — shared by every progress
+ * source (workspace and git-tree) so the ordering is identical everywhere:
+ *  - Legacy-only fast path: with NO event files, the legacy events are returned
+ *    in their original array order, unsorted — byte-for-byte the same reducer
+ *    input as before this RFC (the backward-compat guarantee).
+ *  - Otherwise the union is deduped by full content id (a legacy event also
+ *    migrated to a file collapses to one) and sorted by `at`, then `id`, then
+ *    the legacy array index as a final tiebreaker.
+ */
+export function mergeProgressStreams(
+  legacyEvents: readonly ProgressEvent[],
+  eventFiles: readonly LoadedEventFile[],
+): ProgressEvent[] {
+  if (eventFiles.length === 0) return [...legacyEvents];
+
+  const byId = new Map<string, { event: ProgressEvent; order: number }>();
+  legacyEvents.forEach((event, i) => {
+    const id = computeEventId(event);
+    if (!byId.has(id)) byId.set(id, { event, order: i });
+  });
+  for (const { event, id } of eventFiles) {
+    if (!byId.has(id)) byId.set(id, { event, order: Number.MAX_SAFE_INTEGER });
+  }
+  return [...byId.entries()]
+    .map(([id, { event, order }]) => ({ id, event, order, at: normalizeAt(event.at) }))
+    .sort(
+      (a, b) =>
+        (a.at < b.at ? -1 : a.at > b.at ? 1 : 0) ||
+        (a.id < b.id ? -1 : a.id > b.id ? 1 : 0) ||
+        a.order - b.order,
+    )
+    .map((m) => m.event);
+}
+
+/**
+ * Workspace progress loader: the merged view of the working-tree legacy
+ * `progress.yaml` (if present) plus every per-event file under
+ * `.code-pact/state/events/`. Throws on an unreadable / schema-invalid legacy
+ * file or event file; callers map errors to the appropriate CLI surface. A
+ * missing `progress.yaml` is treated as an empty legacy log (event files may
+ * still supply events).
+ *
+ * NB: reads the WORKSPACE only. The branch-drift gate reads a committed git
+ * revision instead — see `loadMergedProgressFromGitTree` — and the two must
+ * never be mixed.
+ */
 export async function loadMergedProgress(cwd: string): Promise<LoadedProgress> {
   const path = progressPath(cwd);
 
@@ -53,55 +101,19 @@ export async function loadMergedProgress(cwd: string): Promise<LoadedProgress> {
   }
 
   const eventFiles = await readEventFiles(cwd);
-
-  // Legacy-only fast path — identical to today's behaviour.
-  if (eventFiles.length === 0) {
-    return { raw, log: { events: legacyEvents }, path };
-  }
-
-  // Merge: dedup by full content id, then sort by (at, id, source_order).
-  const byId = new Map<string, { event: ProgressEvent; order: number }>();
-  legacyEvents.forEach((event, i) => {
-    const id = computeEventId(event);
-    if (!byId.has(id)) byId.set(id, { event, order: i });
-  });
-  for (const { event, id } of eventFiles) {
-    if (!byId.has(id)) {
-      byId.set(id, { event, order: Number.MAX_SAFE_INTEGER });
-    }
-  }
-  const events = [...byId.entries()]
-    .map(([id, { event, order }]) => ({ id, event, order, at: normalizeAt(event.at) }))
-    .sort(
-      (a, b) =>
-        (a.at < b.at ? -1 : a.at > b.at ? 1 : 0) ||
-        (a.id < b.id ? -1 : a.id > b.id ? 1 : 0) ||
-        a.order - b.order,
-    )
-    .map((m) => m.event);
-
-  return { raw, log: { events }, path };
+  return { raw, log: { events: mergeProgressStreams(legacyEvents, eventFiles) }, path };
 }
 
 /**
- * Read and Zod-parse the legacy `progress.yaml`. Throws if the file is missing
- * or does not satisfy the schema; callers map errors to the appropriate CLI
- * error code.
- *
- * NOTE: this still reads ONLY `progress.yaml` — it does not yet merge the
- * per-event files. This is deliberate for Bucket B PR 1, which ships the
- * `loadMergedProgress` machinery additively with **no behaviour change**: a
- * repo with no event files (every repo today) is unaffected, and a repo that
- * somehow had event files would NOT get a half-merged view from one reader
- * while others stay legacy-only. PR 2 routes every progress reader (this one,
- * `verify`, `pack`, `doctor`/branch-drift) onto `loadMergedProgress` together,
- * in the same change that flips the writers to event files.
+ * Read the progress log — the merged view of legacy `progress.yaml` plus the
+ * per-event files (delegates to {@link loadMergedProgress}). Kept as the
+ * historical name so callers need no change. Throws on an unreadable /
+ * schema-invalid legacy file or event file; callers map errors to the
+ * appropriate CLI error code. (Bucket B PR 2 wires every progress reader onto
+ * the merged view together with the writer flip.)
  */
 export async function loadProgressLog(cwd: string): Promise<LoadedProgress> {
-  const path = progressPath(cwd);
-  const raw = await readFile(path, "utf8");
-  const log = ProgressLog.parse(parseYaml(raw) as unknown);
-  return { raw, log, path };
+  return loadMergedProgress(cwd);
 }
 
 /**
@@ -116,22 +128,7 @@ export async function atomicWriteYaml(
   await atomicWriteText(path, stringifyYaml(value));
 }
 
-/**
- * Append a single ProgressEvent to the legacy `progress.yaml`. Reads that file
- * **directly** — NOT the merged view — because this is the monolithic-file
- * appender: it must append based on `progress.yaml`'s own contents and must
- * never fold event-file events back into it. A missing `progress.yaml` throws
- * ENOENT, exactly as before this RFC. (Bucket B PR 2 retires this in favour of
- * `writeEventFile`; until then the production writers still call it.)
- */
-export async function appendEvent(
-  cwd: string,
-  event: ProgressEvent,
-): Promise<{ path: string; nextLog: ProgressLog }> {
-  const path = progressPath(cwd);
-  const raw = await readFile(path, "utf8");
-  const log = ProgressLog.parse(parseYaml(raw) as unknown);
-  const nextLog: ProgressLog = { events: [...log.events, event] };
-  await atomicWriteYaml(path, nextLog);
-  return { path, nextLog };
-}
+// `appendEvent` (the legacy monolithic-file appender) was removed in Bucket B
+// PR 2: every progress writer now writes a per-event file via `writeEventFile`,
+// and `progress.yaml` is read-merge-only. Keeping no legacy appender makes the
+// "writers never touch progress.yaml" rule structural.

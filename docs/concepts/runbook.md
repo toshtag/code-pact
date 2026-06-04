@@ -38,7 +38,7 @@ code-pact task complete P9-T5
 code-pact task runbook P9-T5 --json   # → step: task finalize P9-T5 --write
 ```
 
-The command resolves the task id by scanning every phase referenced by `design/roadmap.yaml` (same logic as `task context` / `task complete`). It derives the task's current state from `progress.yaml`, classifies any drift kind, resolves `depends_on` states, and emits the recommended next steps.
+The command resolves the task id by scanning every phase referenced by `design/roadmap.yaml` (same logic as `task context` / `task complete`). It derives the task's current state from the progress ledger, classifies any drift kind, resolves `depends_on` states, and emits the recommended next steps.
 
 ### State → steps mapping
 

@@ -497,7 +497,15 @@ conflict — driven by the tool, not human discipline. Concretely:
    gated:** A3 commits this public repo's previously-untracked state, so the PR is
    opened and reviewed but the `git add` merges only on explicit maintainer
    approval. (For a *user's* own repo, A1's `init` change makes the same policy
-   the default, no gate.)
+   the default, no gate.) After B lands, this repo commits
+   `.code-pact/state/events/.gitkeep` until the first real event file exists, so
+   the committed-ledger precondition (`CONTROL_PLANE_BRANCH_NOT_DRIVEN`'s
+   tracked-ledger gate) is satisfied — making the branch-drift gate **dogfoodable**
+   (it no longer silently skips here; wiring `--base-ref` into this repo's own CI
+   is a separate follow-up) — without committing the legacy monolithic
+   `progress.yaml`. The
+   ledger readers ignore any name that is not an `<at-compact>-<id>.yaml` event
+   file, so the sentinel never affects derived state.
 2. **B5 → B1 → B2/B3** (id, writer, reader) behind the existing readers; new
    writes go to event-files, dual-read merges legacy. **B6** lands with B3 (the
    reader is where conflict detection runs).

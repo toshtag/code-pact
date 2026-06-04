@@ -6,6 +6,7 @@ import { Roadmap } from "../core/schemas/roadmap.ts";
 import { Phase } from "../core/schemas/phase.ts";
 import { Task } from "../core/schemas/task.ts";
 import { ProgressLog } from "../core/schemas/progress-event.ts";
+import { loadMergedProgress } from "../core/progress/io.ts";
 import {
   resolveDecisionGate,
   isDecisionRequiredForTask,
@@ -58,8 +59,7 @@ export async function loadPhase(cwd: string, path: string): Promise<Phase> {
 }
 
 async function loadProgressLog(cwd: string): Promise<ProgressLog> {
-  const raw = await readFile(join(cwd, ".code-pact", "state", "progress.yaml"), "utf8");
-  return ProgressLog.parse(parseYaml(raw) as unknown);
+  return (await loadMergedProgress(cwd)).log;
 }
 
 // ---------------------------------------------------------------------------
@@ -167,7 +167,7 @@ async function checkProgressEvent(
     return {
       name: "progress_event",
       ok: false,
-      reason: `No "done" event for task "${taskId}" in progress.yaml`,
+      reason: `No "done" event for task "${taskId}" in the progress ledger`,
     };
   }
   // Zod already validates the datetime format, so if it parsed it's valid
@@ -242,7 +242,7 @@ export async function runVerify(opts: VerifyOptions): Promise<VerifyResult> {
     throw err;
   }
 
-  // progress.yaml is only loaded when the consistency checks need it.
+  // The progress ledger is only loaded when the consistency checks need it.
   const phase = await loadPhase(cwd, ref.path);
 
   // Verify task exists in phase before running checks

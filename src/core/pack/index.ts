@@ -5,7 +5,7 @@ import { parse as parseYaml } from "yaml";
 import { Roadmap } from "../schemas/roadmap.ts";
 import { Phase } from "../schemas/phase.ts";
 import { AgentProfile } from "../schemas/agent-profile.ts";
-import { ProgressLog, type ProgressEvent } from "../schemas/progress-event.ts";
+import { type ProgressEvent } from "../schemas/progress-event.ts";
 import { parseFrontMatter } from "./front-matter.ts";
 import {
   ELISION_ORDER,
@@ -17,6 +17,7 @@ import {
   type RuleDoc,
 } from "./formatters/markdown.ts";
 import { deriveTaskState } from "../progress/task-state.ts";
+import { loadMergedProgress } from "../progress/io.ts";
 import { validateGlobSyntax, walkAndMatch } from "../glob.ts";
 import { assertSafePlanId } from "../schemas/plan-id.ts";
 import { resolveWithinProject } from "../path-safety.ts";
@@ -307,8 +308,7 @@ async function loadDoneEventsInPhase(
   const taskIds = new Set((phase.tasks ?? []).map((t) => t.id));
   if (taskIds.size === 0) return [];
   try {
-    const raw = await readFile(join(cwd, ".code-pact", "state", "progress.yaml"), "utf8");
-    const log = ProgressLog.parse(parseYaml(raw) as unknown);
+    const { log } = await loadMergedProgress(cwd);
     return log.events
       .filter((e) => e.status === "done" && taskIds.has(e.task_id))
       .slice(-5);
@@ -317,13 +317,13 @@ async function loadDoneEventsInPhase(
   }
 }
 
-// Loads every event from .code-pact/state/progress.yaml or returns []
-// when the log is missing / unparseable. The pack uses this to derive
-// the current state of each id listed in task.depends_on (P10).
+// Loads every event from the progress ledger (per-event files under
+// .code-pact/state/events/ merged with the legacy .code-pact/state/progress.yaml)
+// or returns [] when the ledger is missing / unparseable. The pack uses this to
+// derive the current state of each id listed in task.depends_on (P10).
 async function loadAllProgressEvents(cwd: string): Promise<ProgressEvent[]> {
   try {
-    const raw = await readFile(join(cwd, ".code-pact", "state", "progress.yaml"), "utf8");
-    const log = ProgressLog.parse(parseYaml(raw) as unknown);
+    const { log } = await loadMergedProgress(cwd);
     return log.events;
   } catch {
     return [];

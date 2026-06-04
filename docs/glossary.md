@@ -10,7 +10,7 @@ these terms describe, see [the per-task loop](per-task-loop.md).
 | --- | --- |
 | **agent** | The AI coding tool you use — Claude Code, Codex, Cursor, Gemini CLI, etc. code-pact does not include one; it gives the agent you already use a common set of commands to call. |
 | **control plane** | The thin layer that sits between your agent and your project. code-pact is the control plane: the agent asks it "what's the context for this task?", "record that I finished", "did verification pass?" — and it keeps the project's state consistent. |
-| **design intent vs. operational fact** | Two separate records code-pact keeps on purpose. **Design intent** is what you planned (`design/`). **Operational fact** is what actually happened (`.code-pact/state/progress.yaml`). They are allowed to differ; commands tell you when they do. |
+| **design intent vs. operational fact** | Two separate records code-pact keeps on purpose. **Design intent** is what you planned (`design/`). **Operational fact** is what actually happened (the **progress ledger** — see below). They are allowed to differ; commands tell you when they do. |
 | **roadmap** | The ordered list of phases for a project, stored in `design/roadmap.yaml`. |
 | **phase** | A group of related tasks with one objective and one verification command. Stored as `design/phases/<phase>.yaml`. |
 | **task** | The unit of work an agent picks up. Identified as `P1-T1` (see below). |
@@ -20,7 +20,7 @@ these terms describe, see [the per-task loop](per-task-loop.md).
 
 | Term | What it means |
 | --- | --- |
-| **progress.yaml** | The append-only log of what happened: `started` / `done` / `blocked` / `resumed` / `failed` events. code-pact never edits past entries, only appends. Lives at `.code-pact/state/progress.yaml`. |
+| **progress ledger** | The append-only log of what happened: `started` / `done` / `blocked` / `resumed` / `failed` events; code-pact never edits a past event. Stored as one file per event under `.code-pact/state/events/` (merge-safe for collaboration); a legacy monolithic `.code-pact/state/progress.yaml`, if present, is still read and merged. |
 | **derived state** | A task's current state, computed from its latest progress event: `planned` (no events yet) → `started` → `done`, with `blocked` / `resumed` / `failed` along the way. See [the lifecycle diagram](per-task-loop.md). |
 | **design status** | The `status` field inside a phase YAML (`planned` / `in_progress` / `done`). This is design intent — it is **not** changed by `task complete`; you flip it with `task finalize` once the work is actually done. |
 | **context pack** | Deterministic Markdown content code-pact builds for a single task, containing exactly what the agent needs to implement it: the task description, the files it should read, relevant decisions, and acceptance criteria. `task context` builds and returns/prints it; `task prepare` (and the low-level `pack`) write it to the agent profile's `context_dir` (default `.context/<agent>/<task-id>.md`). |

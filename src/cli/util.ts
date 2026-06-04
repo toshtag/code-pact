@@ -4,7 +4,8 @@
 //
 // Current contents:
 //   - `withWriteLock`: P14 advisory-write-lock wrapper used by every
-//     CLI command that mutates `design/` or `progress.yaml`.
+//     CLI command that mutates `design/` (roadmap and phase YAML). The
+//     per-event progress ledger is lock-free and does not use this wrapper.
 
 import {
   acquireWriteLock,

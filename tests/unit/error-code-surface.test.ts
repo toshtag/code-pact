@@ -74,6 +74,7 @@ const KNOWN_CODES: Record<string, "public" | "plan" | "doctor" | "adapter" | "in
   VERIFICATION_FAILED: "public",
   DOCTOR_FAILED: "public",
   PLAN_ANALYZE_FAILED: "public",
+  PLAN_MIGRATE_FAILED: "public",
   PLAN_LINT_FAILED: "public",
   PLAN_NORMALIZE_CONFLICT: "public",
   PLAN_NORMALIZE_REQUIRED: "public",
@@ -85,6 +86,18 @@ const KNOWN_CODES: Record<string, "public" | "plan" | "doctor" | "adapter" | "in
   MISSING_PHASE_FILE: "plan",
   ORPHAN_PHASE_FILE: "plan",
   ORPHAN_PROGRESS_EVENT: "plan",
+  PROGRESS_EVENT_CONFLICT: "plan",
+  // Ledger-integrity diagnostic (collaboration-safe-state RFC, B1/B5): an event
+  // file's content (or its stored id) does not match its filename, which IS the
+  // full content id. Surfaced as a structured error issue (data.issues[]) by the
+  // LENIENT-loader surfaces — `doctor` and `plan lint` — exactly like INVALID_YAML
+  // / SCHEMA_ERROR, hence the "plan" category. It is never a public top-level
+  // error.code: the strict-loader readers `task *` / `verify` abort raw (exit 3,
+  // like a corrupt legacy progress.yaml), while `plan analyze` / `plan migrate`
+  // wrap it into the command's own failure code (PLAN_ANALYZE_FAILED /
+  // PLAN_MIGRATE_FAILED) with the cause in error.message (see cmdPlanAnalyze /
+  // cmdPlanMigrate / docs/cli-contract.md). `pack` is best-effort and skips it.
+  EVENT_FILE_ID_MISMATCH: "plan",
   PHASE_DONE_WITH_OPEN_TASKS: "plan",
   PHASE_ID_MISMATCH: "plan",
   PHASE_ID_NAMING: "plan",
@@ -168,12 +181,6 @@ const KNOWN_CODES: Record<string, "public" | "plan" | "doctor" | "adapter" | "in
   // adapter uniquifies its own paths); surfaced as an unhandled exception
   // (exit 3) rather than a structured envelope.
   ADAPTER_DESIRED_PATH_CONFLICT: "internal",
-  // Data-integrity invariant (collaboration-safe-state RFC, B1/B5): an event
-  // file's content (or its stored id) does not match its filename, which IS the
-  // full content id. Fail-closed so the writer never reports success over a
-  // corrupt / partial / hand-edited ledger entry. Thrown as an exception; the
-  // per-event readers/writers are not CLI-wired until Bucket B PR 2.
-  EVENT_FILE_ID_MISMATCH: "internal",
 };
 
 // Emission patterns we recognize:

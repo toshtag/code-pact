@@ -177,7 +177,7 @@ function reconcileBatchStep(
   const ids = flipTaskIds.join(", ");
   return step({
     command: `code-pact phase reconcile ${phaseId} --write`,
-    reason: `${flipTaskIds.length} task(s) (${ids}) are done in progress.yaml but design status is still planned/in_progress. \`phase reconcile --write\` flips them in one atomic batch.`,
+    reason: `${flipTaskIds.length} task(s) (${ids}) are done in the progress ledger but design status is still planned/in_progress. \`phase reconcile --write\` flips them in one atomic batch.`,
     safety_note: `This is a --write operation. Preview first with \`code-pact phase reconcile ${phaseId} --json\` (dry-run).`,
     expected_result: `design/phases/<phase>.yaml task statuses flip planned → done; STATUS_DRIFT done-but-design-not-done clears for each task.`,
   });

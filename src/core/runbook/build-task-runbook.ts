@@ -103,7 +103,7 @@ function primaryLoopSteps(taskId: string): RunbookStep[] {
     }),
     step({
       command: `code-pact task complete ${taskId}`,
-      reason: "Run verify and, on pass, append a done event to .code-pact/state/progress.yaml.",
+      reason: "Run verify and, on pass, record a done event (written as a file under .code-pact/state/events/).",
       expected_result: "task derived state becomes done; design YAML status is NOT mutated (that is task finalize's job).",
     }),
   ];
@@ -117,7 +117,7 @@ function continueImplementationSteps(taskId: string): RunbookStep[] {
     }),
     step({
       command: `code-pact task complete ${taskId}`,
-      reason: "Run verify and, on pass, append a done event to .code-pact/state/progress.yaml.",
+      reason: "Run verify and, on pass, record a done event (written as a file under .code-pact/state/events/).",
       expected_result: "task derived state becomes done; design YAML status is NOT mutated.",
     }),
   ];
@@ -155,7 +155,7 @@ function failedSteps(taskId: string): RunbookStep[] {
 function finalizeStep(taskId: string): RunbookStep {
   return step({
     command: `code-pact task finalize ${taskId} --write`,
-    reason: "Task is done in progress.yaml but design status is still planned/in_progress. `task finalize` is the deterministic resolver.",
+    reason: "Task is done in the progress ledger but design status is still planned/in_progress. `task finalize` is the deterministic resolver.",
     safety_note: `This is a --write operation. Preview first with \`code-pact task finalize ${taskId} --json\` (dry-run).`,
     expected_result: "design/phases/<phase>.yaml task status flips to done; STATUS_DRIFT done-but-design-not-done clears on next plan analyze.",
   });

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { parse as parseYaml, stringify as toYaml } from "yaml";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ProgressEvent } from "../../../../src/core/schemas/progress-event.ts";
-import { appendEvent, loadMergedProgress } from "../../../../src/core/progress/io.ts";
+import { loadMergedProgress } from "../../../../src/core/progress/io.ts";
 import { eventFileName } from "../../../../src/core/progress/event-id.ts";
 import {
   eventsDir,
@@ -126,6 +126,23 @@ describe("merged progress — event files (B1/B2/B3)", () => {
     await expect(readEventFiles(dir)).rejects.toMatchObject({ code: "EVENT_FILE_ID_MISMATCH" });
   });
 
+  it("readEventFiles tags an unparseable event body INVALID_YAML (not SCHEMA_ERROR)", async () => {
+    await mkdir(eventsDir(dir), { recursive: true });
+    // Structurally valid event-file name, but the body is not parseable YAML.
+    const name = `20260518T100000000Z-${"a".repeat(64)}.yaml`;
+    await writeFile(join(eventsDir(dir), name), "{ unclosed flow mapping", "utf8");
+    await expect(readEventFiles(dir)).rejects.toMatchObject({ code: "INVALID_YAML" });
+  });
+
+  it("readEventFiles tags a parseable-but-invalid event body SCHEMA_ERROR (not EVENT_FILE_ID_MISMATCH)", async () => {
+    await mkdir(eventsDir(dir), { recursive: true });
+    // Parses as YAML, but is not a ProgressEvent — the schema check must fire
+    // BEFORE the id check, so the code is SCHEMA_ERROR rather than a mismatch.
+    const name = `20260518T100000000Z-${"a".repeat(64)}.yaml`;
+    await writeFile(join(eventsDir(dir), name), toYaml({ status: "not_a_status" }), "utf8");
+    await expect(readEventFiles(dir)).rejects.toMatchObject({ code: "SCHEMA_ERROR" });
+  });
+
   it("readEventFiles rejects a present-but-non-string stored id", async () => {
     const { path } = await writeEventFile(
       dir,
@@ -184,25 +201,5 @@ describe("merged progress — event files (B1/B2/B3)", () => {
     const { log } = await loadMergedProgress(dir);
     // event-file event (earlier `at`) sorts first; would be ["done","started"] if the merge favored legacy-first
     expect(log.events.map((e) => e.status)).toEqual(["started", "done"]);
-  });
-});
-
-describe("appendEvent — stays a direct legacy-file appender (PR1 review fix)", () => {
-  it("throws ENOENT on a missing progress.yaml (does not silently create it)", async () => {
-    await expect(appendEvent(dir, ev({}))).rejects.toMatchObject({ code: "ENOENT" });
-  });
-
-  it("never folds event-file events into progress.yaml", async () => {
-    await writeLegacy([ev({ task_id: "P1-T1", status: "started", at: "2026-05-18T10:00:00.000Z" })]);
-    await writeEventFile(dir, ev({ task_id: "P1-T9", status: "started", at: "2026-05-18T11:00:00.000Z" }));
-    await appendEvent(
-      dir,
-      ev({ task_id: "P1-T1", status: "done", source: "loop", at: "2026-05-18T10:30:00.000Z" }),
-    );
-    const raw = await readFile(join(dir, ".code-pact", "state", "progress.yaml"), "utf8");
-    const parsed = parseYaml(raw) as { events: ProgressEvent[] };
-    // only progress.yaml's own legacy + appended events — the event-file event is NOT pulled in
-    expect(parsed.events.map((e) => e.task_id)).toEqual(["P1-T1", "P1-T1"]);
-    expect(parsed.events.some((e) => e.task_id === "P1-T9")).toBe(false);
   });
 });

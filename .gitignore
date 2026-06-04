@@ -11,8 +11,15 @@ build/
 # profiles, state/baselines) is committed. Anchored with / so
 # tests/fixtures/**/.code-pact/ is not affected.
 # Ignored exceptions specific to this repo:
-#  - state/progress.yaml — legacy monolithic ledger; stays ignored until the
-#    per-event ledger (Bucket B / collaboration-safe-state RFC) replaces it.
+#  - state/progress.yaml (legacy ONLY — NOT state/events/). The per-event ledger
+#    under state/events/ IS committed here, exactly as a user project commits it:
+#    it is the shared, merge-safe operational state this RFC made conflict-free,
+#    and committing it is what lets this repo dogfood the CI branch-drift gate
+#    (collaboration-safe-state RFC A3 / Resolved Q1). Only the legacy *monolithic*
+#    progress.yaml stays ignored — it is the maintainer's pre-event-file history,
+#    read-merged locally; per RFC A3 it stays ignored until per-event files
+#    replace it (committing the monolithic file would reintroduce the very merge
+#    problem the event ledger fixes).
 #  - adapters/ — this repo is the SOURCE of the adapter templates and regenerates
 #    CLAUDE.md / .claude/skills/* (ignored below), so committing the manifest
 #    alone would orphan it (clean checkout -> ADAPTER_FILE_MISSING in adapter

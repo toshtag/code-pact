@@ -4,6 +4,14 @@ import { parse as parseYaml } from "yaml";
 import { Roadmap } from "../core/schemas/roadmap.ts";
 import { Phase } from "../core/schemas/phase.ts";
 import { ProgressLog, type ProgressEvent } from "../core/schemas/progress-event.ts";
+import { loadMergedProgress, mergeProgressStreams } from "../core/progress/io.ts";
+import { computeEventId } from "../core/progress/event-id.ts";
+import {
+  type LoadedEventFile,
+  parseEventFileName,
+  readEventFiles,
+  validateEventFileContent,
+} from "../core/progress/events-io.ts";
 import { Project } from "../core/schemas/project.ts";
 import {
   ACCEPTED_MODEL_VERSION_INPUTS,
@@ -20,6 +28,7 @@ import { ModelProfile, ModelTier } from "../core/schemas/model-profile.ts";
 import {
   detectDuplicateTaskIds,
   detectOrphanProgressEvents,
+  detectProgressEventConflicts,
 } from "../core/plan/checks.ts";
 import type { PhaseEntry } from "../core/plan/state.ts";
 import type { PlanIssue } from "../core/plan/shared.ts";
@@ -213,31 +222,63 @@ async function checkProgressLog(
   issues: DoctorIssue[],
 ): Promise<void> {
   const path = join(cwd, ".code-pact", "state", "progress.yaml");
-  const result = await safeReadYaml(path);
-  if (!result.ok) {
-    issues.push({
-      code: "INVALID_YAML",
-      severity: "error",
-      message: `Cannot read ${path}`,
-    });
+  // A missing progress.yaml is NOT an error — event files may still supply
+  // events (the post-migration / events-only state). Only an existing but
+  // unreadable / schema-invalid legacy file is INVALID_YAML / SCHEMA_ERROR.
+  let legacyEvents: ProgressEvent[] = [];
+  try {
+    const raw = await readFile(path, "utf8");
+    let doc: unknown;
+    try {
+      doc = parseYaml(raw);
+    } catch {
+      issues.push({ code: "INVALID_YAML", severity: "error", message: `Cannot read ${path}` });
+      return;
+    }
+    const parsed = ProgressLog.safeParse(doc);
+    if (!parsed.success) {
+      issues.push({
+        code: "SCHEMA_ERROR",
+        severity: "error",
+        message: `progress.yaml failed schema validation: ${parsed.error.issues[0]?.message ?? "unknown"}`,
+      });
+      return;
+    }
+    legacyEvents = parsed.data.events;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+      issues.push({ code: "INVALID_YAML", severity: "error", message: `Cannot read ${path}` });
+      return;
+    }
+    // ENOENT → missing legacy file; fall through with empty legacy events.
+  }
+
+  // Merge the per-event ledger for orphan + conflict detection. A corrupt event
+  // file carries its own diagnostic code (set by validateEventFileContent):
+  // EVENT_FILE_ID_MISMATCH for a broken filename↔content invariant, INVALID_YAML
+  // for an unparseable body, SCHEMA_ERROR for a parseable-but-invalid event. We
+  // map it straight through so doctor and plan lint never disagree on the code.
+  let eventFiles;
+  try {
+    eventFiles = await readEventFiles(cwd);
+  } catch (err) {
+    const tag = (err as NodeJS.ErrnoException).code;
+    const code =
+      tag === "EVENT_FILE_ID_MISMATCH" || tag === "INVALID_YAML" ? tag : "SCHEMA_ERROR";
+    issues.push({ code, severity: "error", message: (err as Error).message });
     return;
   }
-  const parsed = ProgressLog.safeParse(result.data);
-  if (!parsed.success) {
-    issues.push({
-      code: "SCHEMA_ERROR",
-      severity: "error",
-      message: `progress.yaml failed schema validation: ${parsed.error.issues[0]?.message ?? "unknown"}`,
-    });
-    return;
-  }
+  const events = mergeProgressStreams(legacyEvents, eventFiles);
 
   // Build a task index for the shared orphan-event detector.
   const taskIndex = new Map<string, true>();
   for (const phase of phases) {
     for (const task of phase.tasks ?? []) taskIndex.set(task.id, true);
   }
-  for (const planIssue of detectOrphanProgressEvents(parsed.data.events, taskIndex)) {
+  for (const planIssue of detectOrphanProgressEvents(events, taskIndex)) {
+    issues.push(planIssueToDoctor(planIssue));
+  }
+  for (const planIssue of detectProgressEventConflicts(events)) {
     issues.push(planIssueToDoctor(planIssue));
   }
 }
@@ -688,26 +729,16 @@ async function checkControlPlaneNotDriven(
     .reduce((n, p) => n + (p.tasks?.length ?? 0), 0);
   if (realTasks === 0) return;
 
-  // Gate 2: no non-TUTORIAL forward motion. Absent progress.yaml → no events.
-  // Unreadable / invalid YAML / schema-invalid → skip and let checkProgressLog
-  // own the real INVALID_YAML / SCHEMA_ERROR (don't stack a speculative
-  // advisory on a broken state file).
-  const progressPath = join(cwd, ".code-pact", "state", "progress.yaml");
+  // Gate 2: no non-TUTORIAL forward motion. Merged workspace view (legacy
+  // progress.yaml + per-event files). Unreadable / invalid / corrupt ledger →
+  // skip and let checkProgressLog own the real INVALID_YAML / SCHEMA_ERROR /
+  // EVENT_FILE_ID_MISMATCH (don't stack a speculative advisory on a broken
+  // state file).
   let events: ProgressEvent[] = [];
   try {
-    const raw = await readFile(progressPath, "utf8");
-    let doc: unknown;
-    try {
-      doc = parseYaml(raw);
-    } catch {
-      return; // invalid YAML
-    }
-    const parsed = ProgressLog.safeParse(doc);
-    if (!parsed.success) return; // schema invalid
-    events = parsed.data.events;
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== "ENOENT") return; // unreadable
-    // ENOENT → absent → events stays []
+    events = (await loadMergedProgress(cwd)).log.events;
+  } catch {
+    return;
   }
   const drivenForReal = events.some(
     (e) =>
@@ -726,7 +757,7 @@ async function checkControlPlaneNotDriven(
     code: "CONTROL_PLANE_NOT_DRIVEN",
     severity: "warning",
     message:
-      `${realTasks} task(s) are planned and git has uncommitted changes, but progress.yaml has no started/done event for a non-TUTORIAL task — the code-pact scaffold exists but isn't being driven. ` +
+      `${realTasks} task(s) are planned and git has uncommitted changes, but the progress ledger has no started/done event for a non-TUTORIAL task — the code-pact scaffold exists but isn't being driven. ` +
       "Start a task with `code-pact task prepare <id> --agent <agent>`, or record out-of-loop work with `code-pact task record-done <id> --evidence \"...\"`. " +
       "Silence via .code-pact/doctor.yaml (disabled_checks: [CONTROL_PLANE_NOT_DRIVEN]).",
     recovery: {
@@ -761,10 +792,60 @@ async function readProgressEventsAtRev(
   return parsed.data.events;
 }
 
-// A stable identity key for a progress event. progress.yaml is append-only,
-// so "added on the branch" = HEAD events whose key is absent at the base.
+// Reads the committed per-event files at a git revision. Returns:
+//   - LoadedEventFile[] — validated event files present at that revision
+//   - []                — none present at that revision
+//   - null              — a committed event file is corrupt / breaks its invariant
+async function readEventFilesAtRev(
+  cwd: string,
+  rev: string,
+): Promise<LoadedEventFile[] | null> {
+  const ls = await runGit(cwd, [
+    "ls-tree",
+    "-r",
+    "--name-only",
+    rev,
+    ".code-pact/state/events/",
+  ]);
+  if (!ls.ok) return []; // no events tree at this revision
+  const paths = ls.stdout
+    .split("\n")
+    .map((s) => s.trim())
+    .filter((p) => p.length > 0 && parseEventFileName(basename(p)) !== null);
+  const out: LoadedEventFile[] = [];
+  for (const p of paths) {
+    const show = await runGit(cwd, ["show", `${rev}:${p}`]);
+    if (!show.ok) continue;
+    try {
+      out.push(validateEventFileContent(basename(p), show.stdout));
+    } catch {
+      return null; // corrupt committed event file
+    }
+  }
+  return out;
+}
+
+// The merged committed ledger at a revision: legacy progress.yaml + per-event
+// files. Reads the git OBJECT tree ONLY — never the workspace, so a dirty
+// working tree cannot leak into the branch-diff. null when either source is
+// unparseable / corrupt at that revision.
+async function readMergedEventsAtRev(
+  cwd: string,
+  rev: string,
+): Promise<ProgressEvent[] | null> {
+  const legacy = await readProgressEventsAtRev(cwd, rev);
+  if (legacy === null) return null;
+  const events = await readEventFilesAtRev(cwd, rev);
+  if (events === null) return null;
+  return mergeProgressStreams(legacy, events);
+}
+
+// A stable identity key for a progress event — the same content id the ledger
+// uses everywhere (B5), so two events that differ in any persisted field
+// (evidence, reason, agent, …) are distinct. The ledger is append-only, so
+// "added on the branch" = HEAD events whose id is absent at the base.
 function eventKey(e: ProgressEvent): string {
-  return `${e.task_id}|${e.status}|${e.at}|${e.actor}|${e.source ?? ""}`;
+  return computeEventId(e);
 }
 
 // Check 17 (P34): branch-diff control-plane drift, for PR CI. Advisory
@@ -803,22 +884,32 @@ async function checkControlPlaneBranchNotDriven(
   );
   if (realChanged.length === 0) return;
 
-  // Gate 3: progress.yaml must be git-tracked — a repo that does not commit the
-  // ledger cannot be audited by CI, so stay silent rather than cry wolf.
-  const tracked = await runGit(cwd, [
+  // Gate 3: the committed ledger must be git-tracked — `progress.yaml` and/or
+  // the per-event files. A repo that commits neither cannot be audited by CI,
+  // so stay silent rather than cry wolf.
+  const trackedLegacy = await runGit(cwd, [
     "ls-files",
     "--error-unmatch",
     ".code-pact/state/progress.yaml",
   ]);
-  if (!tracked.ok) return;
+  const trackedEvents = await runGit(cwd, ["ls-files", ".code-pact/state/events/"]);
+  const ledgerTracked =
+    trackedLegacy.ok || (trackedEvents.ok && trackedEvents.stdout.trim().length > 0);
+  if (!ledgerTracked) return;
 
   // Gate 4: did the branch ADD a started/done for a KNOWN non-TUTORIAL task?
+  // Reads the committed git tree (legacy progress.yaml + per-event files) at
+  // each revision — never the workspace.
   const mb = await runGit(cwd, ["merge-base", "HEAD", baseRef]);
   if (!mb.ok) return;
   const baseSha = mb.stdout.trim();
-  const headEvents = await readProgressEventsAtRev(cwd, "HEAD");
+  const headEvents = await readMergedEventsAtRev(cwd, "HEAD");
   if (headEvents === null) return; // unparseable HEAD → INVALID_YAML/SCHEMA_ERROR owns it
-  const baseEvents = (await readProgressEventsAtRev(cwd, baseSha)) ?? [];
+  const baseEvents = await readMergedEventsAtRev(cwd, baseSha);
+  // A corrupt/unparseable BASE ledger must NOT be treated as empty: that would
+  // make every historical event look "added on the branch" and falsely satisfy
+  // the gate. Can't compute the diff → skip.
+  if (baseEvents === null) return;
   const baseKeys = new Set(baseEvents.map(eventKey));
   const driven = headEvents.some(
     (e) =>
@@ -833,8 +924,8 @@ async function checkControlPlaneBranchNotDriven(
     code: "CONTROL_PLANE_BRANCH_NOT_DRIVEN",
     severity: "warning",
     message:
-      `This branch changed real files vs ${baseRef} but added no started/done event for a known non-TUTORIAL task in progress.yaml — code changed without driving the control plane. ` +
-      "Drive a task with `code-pact task prepare <id> --agent <agent>` (or record out-of-loop work with `code-pact task record-done <id> --evidence \"...\"`) and commit progress.yaml. " +
+      `This branch changed real files vs ${baseRef} but added no started/done event for a known non-TUTORIAL task in the committed ledger — code changed without driving the control plane. ` +
+      "Drive a task with `code-pact task prepare <id> --agent <agent>` (or record out-of-loop work with `code-pact task record-done <id> --evidence \"...\"`) and commit the new event file(s) under .code-pact/state/events/. " +
       "Exempt docs/config-only paths via .code-pact/doctor.yaml (control_plane_branch_not_driven.exclude_globs), or silence via disabled_checks: [CONTROL_PLANE_BRANCH_NOT_DRIVEN].",
     recovery: {
       primary: "code-pact task prepare <id> --agent <agent>",

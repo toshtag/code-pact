@@ -255,21 +255,21 @@ export const messages = {
       agentNotFound: (name: string): string =>
         `Agent "${name}" is not configured in project.yaml.`,
       verificationFailed: (taskId: string): string =>
-        `Verification failed for "${taskId}". progress.yaml was not modified.`,
+        `Verification failed for "${taskId}". no progress event was recorded.`,
       causeDecision: (taskId: string, reason: string): string =>
         reason
-          ? `${taskId} requires an accepted ADR before completion: ${reason}. progress.yaml was not modified.`
-          : `${taskId} requires an accepted ADR before completion. progress.yaml was not modified.`,
+          ? `${taskId} requires an accepted ADR before completion: ${reason}. no progress event was recorded.`
+          : `${taskId} requires an accepted ADR before completion. no progress event was recorded.`,
       causeCommands: (taskId: string, reason: string): string =>
         reason
-          ? `${taskId}: a verification command failed: ${reason}. progress.yaml was not modified.`
-          : `${taskId}: a verification command failed. progress.yaml was not modified.`,
+          ? `${taskId}: a verification command failed: ${reason}. no progress event was recorded.`
+          : `${taskId}: a verification command failed. no progress event was recorded.`,
       alreadyDone: (taskId: string): string =>
         `Task "${taskId}" already has a done event. Skipped re-verification (idempotent).`,
       success: (taskId: string, agent: string): string =>
         `Recorded done event for "${taskId}" (agent: ${agent}).`,
       dryRun: (taskId: string): string =>
-        `Dry run: would append done event for "${taskId}". progress.yaml was not modified.`,
+        `Dry run: would append done event for "${taskId}". no progress event was recorded.`,
       invalidTransition: (taskId: string, current: string): string =>
         `Task "${taskId}" is ${current}. Run \`code-pact task resume ${taskId}\` before completing.`,
     },
@@ -284,11 +284,11 @@ export const messages = {
       decisionRequired: (taskId: string): string =>
         `Task "${taskId}" requires a decision ADR before it can be marked done.`,
       alreadyDone: (taskId: string): string =>
-        `Task "${taskId}" already has a done event. progress.yaml was not modified (idempotent).`,
+        `Task "${taskId}" already has a done event. no progress event was recorded (idempotent).`,
       success: (taskId: string, agent: string): string =>
         `Recorded external done event for "${taskId}" (agent: ${agent}).`,
       dryRun: (taskId: string): string =>
-        `Dry run: would append external done event for "${taskId}". progress.yaml was not modified.`,
+        `Dry run: would append external done event for "${taskId}". no progress event was recorded.`,
       invalidTransition: (taskId: string, current: string): string =>
         `Task "${taskId}" is ${current}. Run \`code-pact task resume ${taskId}\` before recording done.`,
     },
@@ -343,7 +343,7 @@ export const messages = {
       success: (taskId: string, agent: string): string =>
         `Recorded started event for "${taskId}" (agent: ${agent}).`,
       alreadyStarted: (taskId: string): string =>
-        `Task "${taskId}" is already started. progress.yaml was not modified.`,
+        `Task "${taskId}" is already started. no progress event was recorded.`,
       invalidTransition: (taskId: string, current: string): string =>
         `Cannot start task "${taskId}" from state "${current}".`,
     },
@@ -451,9 +451,9 @@ export const messages = {
         "`recommend` and `task context` remain available as standalone diagnostics, but `task prepare` runs both for you and returns their results in one envelope. Drive the rest of the lifecycle from the returned `commands` dictionary.",
       step1: "Fetch the context pack directly only if you need it outside `task prepare` (diagnostic — `task prepare` already reports its metadata):",
       step2: "Implement the task.",
-      step3: "Mark the task complete. This runs verify and, on pass, appends a `done` event to `.code-pact/state/progress.yaml`:",
+      step3: "Mark the task complete. This runs verify and, on pass, records a `done` event under `.code-pact/state/events/`:",
       step3FailDetail:
-        "If verify fails, this command exits 1 and progress.yaml is left unchanged.",
+        "If verify fails, this command exits 1 and no progress event is recorded.",
       step3IdempotentDetail:
         "If a `done` event already exists, it is a no-op (`already_done: true`).",
       step4: "Report the result to the user.",

@@ -35,12 +35,37 @@ export type LoadedEventFile = {
 /** Strict event-file name: `<at-compact>-<64-hex sha256>.yaml`. */
 const EVENT_FILE_RE = /^(\d{8}T\d{9}Z)-([0-9a-f]{64})\.yaml$/;
 
-function parseEventFileName(file: string): { atCompact: string; id: string } | null {
+/** Parse an event-file basename into its parts, or `null` if it is not one. */
+export function parseEventFileName(
+  file: string,
+): { atCompact: string; id: string } | null {
   const m = EVENT_FILE_RE.exec(file);
   return m ? { atCompact: m[1]!, id: m[2]! } : null;
 }
 
+/**
+ * Tag an event-file error with the diagnostic `code` that every consumer
+ * (doctor, plan lint, branch-drift) maps straight through, so the same broken
+ * file reports the same code on every surface:
+ *  - `INVALID_YAML` — the body is not parseable YAML
+ *  - `SCHEMA_ERROR` — it parses but is not a valid `ProgressEvent`
+ *
+ * The third code, `EVENT_FILE_ID_MISMATCH` (broken filename↔content bijection),
+ * is emitted by {@link eventFileMismatch} with a literal assignment.
+ */
+function taggedEventError(
+  code: "INVALID_YAML" | "SCHEMA_ERROR",
+  message: string,
+  file: string,
+): NodeJS.ErrnoException {
+  const err = new Error(`Event file ${file}: ${message}`) as NodeJS.ErrnoException;
+  err.code = code;
+  return err;
+}
+
 function eventFileMismatch(message: string, file: string): NodeJS.ErrnoException {
+  // Literal `.code =` assignment (not via taggedEventError's variable) so the
+  // error-code-surface scan sees EVENT_FILE_ID_MISMATCH as an emitted code.
   const err = new Error(`Event file ${file}: ${message}`) as NodeJS.ErrnoException;
   err.code = "EVENT_FILE_ID_MISMATCH";
   return err;
@@ -59,14 +84,28 @@ function eventFileMismatch(message: string, file: string): NodeJS.ErrnoException
  *    or mismatched stored id is rejected; a missing stored id is allowed since
  *    the filename already carries the full id)
  */
-async function readValidatedEventFile(path: string, file: string): Promise<LoadedEventFile> {
+/**
+ * Validate an event file's raw CONTENT against its filename↔content bijection.
+ * Content-based (no disk) so it is shared by every source — the workspace
+ * reader and the git-tree reader (branch-drift) — guaranteeing identical
+ * validation everywhere. Throws `EVENT_FILE_ID_MISMATCH` on any divergence.
+ */
+export function validateEventFileContent(file: string, raw: string): LoadedEventFile {
   const name = parseEventFileName(file);
   if (!name) throw eventFileMismatch("not a valid event-file name", file);
-  const raw = await readFile(path, "utf8");
-  const doc = parseYaml(raw) as Record<string, unknown> | null;
+  let doc: Record<string, unknown> | null;
+  try {
+    doc = parseYaml(raw) as Record<string, unknown> | null;
+  } catch (err) {
+    // Unparseable YAML body — INVALID_YAML, matching the legacy file's surface.
+    throw taggedEventError("INVALID_YAML", (err as Error).message, file);
+  }
   // The stored `id` is not part of the event schema; strip before parsing.
   const { id: storedId, ...rest } = doc ?? {};
-  const event = ProgressEvent.parse(rest);
+  const parsed = ProgressEvent.safeParse(rest);
+  // Parses but is not a valid ProgressEvent — SCHEMA_ERROR, not EVENT_FILE_ID_MISMATCH.
+  if (!parsed.success) throw taggedEventError("SCHEMA_ERROR", parsed.error.message, file);
+  const event = parsed.data;
   const id = computeEventId(event);
   if (id !== name.id) {
     throw eventFileMismatch(`content id (${id}) does not match filename id (${name.id})`, file);
@@ -84,6 +123,10 @@ async function readValidatedEventFile(path: string, file: string): Promise<Loade
     );
   }
   return { event, id, file };
+}
+
+async function readValidatedEventFile(path: string, file: string): Promise<LoadedEventFile> {
+  return validateEventFileContent(file, await readFile(path, "utf8"));
 }
 
 export type WrittenEvent = {
@@ -125,17 +168,23 @@ export async function writeEventFile(
   // uuid so it can't collide with a stale temp / reused pid; `wx` refuses to
   // reuse an existing temp rather than clobber it.
   const tmp = join(dir, `.tmp-${process.pid}-${randomUUID()}-${file}`);
-  await writeFile(tmp, body, { encoding: "utf8", flag: "wx" });
+  // Outer try guarantees the temp is removed even if the temp write itself
+  // fails partway; the inner try/catch handles ONLY `link`'s EEXIST (a temp
+  // collision is impossible via the uuid, so its errors must propagate, not be
+  // mistaken for "the final already exists").
   try {
-    await link(tmp, path); // atomic, no-overwrite publish
-    return { id, path, alreadyExisted: false };
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
-    // Final already exists. A valid event here necessarily hashes to our id (the
-    // filename), so it IS the same event; corruption / wrong stored id /
-    // mismatched prefix throws EVENT_FILE_ID_MISMATCH.
-    await readValidatedEventFile(path, file);
-    return { id, path, alreadyExisted: true };
+    await writeFile(tmp, body, { encoding: "utf8", flag: "wx" });
+    try {
+      await link(tmp, path); // atomic, no-overwrite publish
+      return { id, path, alreadyExisted: false };
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+      // Final already exists. A valid event here necessarily hashes to our id
+      // (the filename), so it IS the same event; corruption / wrong stored id /
+      // mismatched prefix throws EVENT_FILE_ID_MISMATCH.
+      await readValidatedEventFile(path, file);
+      return { id, path, alreadyExisted: true };
+    }
   } finally {
     await rm(tmp, { force: true });
   }

@@ -109,7 +109,7 @@ describe("runPack — project-a / P2-E1-T1", () => {
     expect(result.includedDecisions).toContain("P2-E1-T1-use-parseargs.md");
   });
 
-  it("output contains progress event schema hint", async () => {
+  it("output guides progress recording via the CLI, not hand-written YAML", async () => {
     const result = await runPack({
       cwd: fixtureDir,
       phaseId: "P2",
@@ -118,8 +118,9 @@ describe("runPack — project-a / P2-E1-T1", () => {
       outputDir: tmpOut,
     });
     const content = await readFile(result.outputPath, "utf8");
-    expect(content).toContain("progress.yaml");
-    expect(content).toContain("status: done");
+    expect(content).toContain("## Recording progress");
+    expect(content).toContain("code-pact task complete P2-E1-T1");
+    expect(content).toContain(".code-pact/state/events/");
   });
 });
 

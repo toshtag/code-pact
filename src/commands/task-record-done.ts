@@ -3,7 +3,8 @@ import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { Project } from "../core/schemas/project.ts";
 import type { ProgressEvent } from "../core/schemas/progress-event.ts";
-import { appendEvent, loadProgressLog } from "../core/progress/io.ts";
+import { loadProgressLog } from "../core/progress/io.ts";
+import { writeEventFile } from "../core/progress/events-io.ts";
 import { deriveTaskState } from "../core/progress/task-state.ts";
 import { resolveTaskInRoadmap } from "../core/plan/resolve-task.ts";
 import { checkDecision, loadPhase, type CheckResult } from "./verify.ts";
@@ -21,7 +22,7 @@ export type TaskRecordDoneOptions = {
   agent?: string;
   /** Optional free-form note stored on the progress event. */
   notes?: string;
-  /** When true, do not modify progress.yaml. */
+  /** When true, do not record a progress event (the ledger is unchanged). */
   dryRun?: boolean;
   /** Date injection for tests. Defaults to new Date(). */
   now?: () => Date;
@@ -83,8 +84,8 @@ async function loadProject(cwd: string): Promise<Project> {
  * from the tree), and the `record_only` lane where `recommend` advised
  * `lifecycleMode: record_only` and the caller ran the project's verification
  * itself. The existing decision gate is still honored: a `requires_decision`
- * task with no resolvable ADR fails with DECISION_REQUIRED and progress.yaml
- * is left untouched.
+ * task with no resolvable ADR fails with DECISION_REQUIRED and no progress
+ * event is recorded.
  *
  * The emitted event carries `source: "external"` so future diagnostics can
  * distinguish completion asserted via evidence from loop-verified completion.
@@ -223,7 +224,7 @@ export async function runTaskRecordDone(
   }
 
   // ---- Step 9: append + atomic write (shared helper) ----
-  await appendEvent(cwd, event);
+  await writeEventFile(cwd, event);
 
   return {
     kind: "done",

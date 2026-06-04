@@ -83,16 +83,17 @@ the workflow above will do anything useful:
 
 - [ ] **Commit the shared `.code-pact` state — not the local/derived paths.**
       Commit `project.yaml`, `agent-profiles/`, `model-profiles/`,
-      `state/baselines/`, and the ledger (`state/progress.yaml` today;
-      `state/events/**` after the event-file ledger lands). **Do not** commit
+      `state/baselines/`, and the **progress ledger** — `state/events/**` (one
+      file per event; this is where the task verbs now write) plus the legacy
+      `state/progress.yaml` while it contains legacy events or as the empty
+      tracking sentinel `init` creates (task commands no longer write it). **Do not** commit
       `.code-pact/locks/` or `.code-pact/cache/` (machine-local), and commit
       `.code-pact/adapters/*.manifest.yaml` **only together with** the adapter
       files it lists (e.g. `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`,
       `.claude/skills/*`, `.cursor/**`) — a committed manifest
       whose files are absent fails `adapter doctor`. The branch-drift gate reads
-      the *committed* ledger; if it is untracked the check **silently skips**
-      (`git add -f .code-pact/state/progress.yaml` if your repo otherwise ignores
-      it). Full note:
+      the *committed* ledger (legacy `progress.yaml` **and** `state/events/**`);
+      if neither is tracked the check **silently skips**. Full note:
       [`cli-contract.md`](../cli-contract.md#--base-ref-and-ci-branch-drift-gating-v126-p34).
 - [ ] **`fetch-depth: 0`** — `--base-ref` compares against the merge-base, which
       needs full history. A shallow checkout breaks it.

@@ -87,16 +87,18 @@ pnpm typecheck
 pnpm build
 ```
 
-## Progress Event
+## Recording progress
 
-When this task is complete, record an event in `.code-pact/state/progress.yaml`:
+Do NOT hand-write the ledger. When this task is complete, record it with:
 
-```yaml
-events:
-  - task_id: P2-E1-T1
-    status: done
-    at: "<ISO8601 with offset>"
-    actor: agent
-    evidence:
-      - <verification command or artifact>
+```sh
+code-pact task complete P2-E1-T1 --agent <agent>
 ```
+
+If the work was completed outside the loop, record it with evidence instead:
+
+```sh
+code-pact task record-done P2-E1-T1 --evidence "<verification command or artifact>"
+```
+
+Either writes one merge-safe event file under `.code-pact/state/events/`.

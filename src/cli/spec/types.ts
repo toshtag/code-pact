@@ -49,7 +49,7 @@ export type CommandSpec = {
   flags: FlagSpec[];
   /** Full example command lines. */
   examples: string[];
-  /** Surfaces the standard "Read-only — never mutates progress.yaml" note. */
+  /** Surfaces the standard "Read-only — never records a progress event" note. */
   readOnly?: boolean;
 };
 

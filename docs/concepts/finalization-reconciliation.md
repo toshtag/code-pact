@@ -4,9 +4,9 @@ This document is the agent- and reviewer-facing walkthrough of `task finalize` a
 
 ## The drift these commands close
 
-`code-pact` keeps a deliberate split between **design intent** (`design/phases/*.yaml`) and **operational fact** (`.code-pact/state/progress.yaml`):
+`code-pact` keeps a deliberate split between **design intent** (`design/phases/*.yaml`) and **operational fact** (the progress ledger):
 
-- `task complete` records the fact ("verify passed, the task is done") by appending a `done` event to `progress.yaml`.
+- `task complete` records the fact ("verify passed, the task is done") by recording a `done` event to the progress ledger (a new file under `.code-pact/state/events/`).
 - It **never** mutates `status: planned` in the phase YAML.
 
 That split protects the v1.0 contract — agents and CI tooling can rely on `task complete` being side-effect-free at the design layer — but it accumulates drift. After every `task complete`, `plan analyze` reports a `STATUS_DRIFT done-but-design-not-done` warning until someone hand-edits the phase YAML to flip `status: planned` → `status: done`. Through v1.1.x, that hand-edit was a manual step in every release-prep PR.
@@ -26,13 +26,13 @@ code-pact task finalize P9-T5 --write --json
 What it does:
 
 1. Resolves `<task-id>` via the same roadmap scan as `task context` / `task complete`.
-2. Reads `progress.yaml`, derives the task's current state, and refuses with `TASK_FINALIZE_NOT_ELIGIBLE` (exit 2) unless that state is `done`. The check is identical in dry-run and `--write` — dry-run means "won't write", not "won't validate".
+2. Reads the progress ledger, derives the task's current state, and refuses with `TASK_FINALIZE_NOT_ELIGIBLE` (exit 2) unless that state is `done`. The check is identical in dry-run and `--write` — dry-run means "won't write", not "won't validate".
 3. If the phase YAML already shows `status: done` for this task, returns `kind: "already_finalized"` (exit 0) with no write.
 4. Otherwise, rewrites `tasks[].status` for that one task via atomic write. Other fields and other tasks in the file are untouched.
 
 What it does **not** do:
 
-- Touch `progress.yaml`. The append-only contract is preserved.
+- Touch the progress ledger. The append-only contract is preserved.
 - Write to `design/roadmap.yaml`. That stays a manual release-prep step until P14.
 - Flip the phase's own `status` field. That stays manual until P14.
 - Call any adapter. There is no `--agent` flag.
@@ -183,7 +183,7 @@ Three new public error codes ship in v1.2.0 (all additive in `KNOWN_CODES.public
 
 | Code | Exit | Raised by | Trigger |
 | --- | --- | --- | --- |
-| `TASK_FINALIZE_NOT_ELIGIBLE` | 2 | `task finalize` (both modes) | Derived state from `progress.yaml` is not `done` |
+| `TASK_FINALIZE_NOT_ELIGIBLE` | 2 | `task finalize` (both modes) | Derived state from the progress ledger is not `done` |
 | `TASK_FINALIZE_WRITE_REFUSED` | 2 | `task finalize --write` | Safety check refused the phase YAML write (unsafe path, outside `design/phases/`, symlink escape, unparseable phase, etc.) |
 | `PHASE_RECONCILE_WRITE_REFUSED` | 2 | `phase reconcile --write` | Every eligible task write was refused for safety reasons (partial successes return exit 0) |
 
@@ -192,7 +192,7 @@ Three new public error codes ship in v1.2.0 (all additive in `KNOWN_CODES.public
 ## What stays the same
 
 - `task complete` is unchanged. Same flags, same JSON envelope, same exit codes, same error codes. The v1.0 contract — `task complete` records progress only and never mutates design YAML — is preserved.
-- `progress.yaml` is read-only for the new commands. The append-only operational-log contract is preserved.
+- The progress ledger is read-only for the new commands. The append-only operational-log contract is preserved.
 - No new STATUS_DRIFT kind. No existing kind changes severity or `hidden_by_default`. The `details.remediation` field is purely additive.
 - `task context` pack output for v1.0 / v1.1 tasks remains unchanged (the byte-identical pack regression test passes without modification).
 - The `KNOWN_CODES.public` surface lock is extended additively. No existing entry is renamed or recategorized.

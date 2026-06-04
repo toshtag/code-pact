@@ -63,7 +63,7 @@ The sibling `measurements.manifest.json` records the harness version, the corpus
 
 `summary.json` carries `undeclared_write_rate_status: "deferred"` (never `"computed"` in v1.12). The metric is defined in `docs/positioning.md` but is intentionally not computed because the project does not enforce a formal commit → task link — commits often touch multiple tasks; many tasks have no clean git boundary. A historical retrofit would either over-claim or require new lifecycle instrumentation.
 
-A future phase may add an event-on-finalize that records the `task finalize --audit-strict` audit result to `progress.yaml`, making the metric observable historically without git attribution. The deferral is documented in [`design/decisions/evidence-harness-v2-rfc.md` Non-goals](../../design/decisions/evidence-harness-v2-rfc.md#non-goals-out-of-scope-for-p26).
+A future phase may add an event-on-finalize that records the `task finalize --audit-strict` audit result to the progress ledger, making the metric observable historically without git attribution. The deferral is documented in [`design/decisions/evidence-harness-v2-rfc.md` Non-goals](../../design/decisions/evidence-harness-v2-rfc.md#non-goals-out-of-scope-for-p26).
 
 ## Running it
 
@@ -80,7 +80,7 @@ pnpm harness --corpus . --json
 pnpm harness --corpus . --write --json
 ```
 
-The harness operates on any path that has a `design/` directory and (optionally) a `.code-pact/state/progress.yaml`. v1.10 / v1.12 ships baseline measurements for the dogfood corpus only.
+The harness operates on any path that has a `design/` directory and (optionally) a progress ledger under `.code-pact/state/`. v1.10 / v1.12 ships baseline measurements for the dogfood corpus only.
 
 ## Byte-determinism
 

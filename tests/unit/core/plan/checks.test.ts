@@ -6,6 +6,7 @@ import {
   detectDuplicatePhaseIds,
   detectDuplicateTaskIds,
   detectOrphanProgressEvents,
+  detectProgressEventConflicts,
   detectPhaseIdMismatches,
   detectPhaseIdNaming,
   detectTaskIdPhasePrefix,
@@ -644,5 +645,71 @@ describe("detectTaskAcceptanceRefNotFound (fs-backed)", () => {
     expect(issues).toHaveLength(1);
     expect(issues[0]?.code).toBe("TASK_ACCEPTANCE_REF_NOT_FOUND");
     expect(issues[0]?.severity).toBe("error");
+  });
+});
+
+describe("detectProgressEventConflicts (B6)", () => {
+  const ev = (
+    task_id: string,
+    status: ProgressEvent["status"],
+    at: string,
+    extra: Partial<ProgressEvent> = {},
+  ): ProgressEvent =>
+    ({ task_id, status, at, actor: "agent", ...extra }) as ProgressEvent;
+
+  it("no conflict on a valid lifecycle (started → blocked → resumed → done)", () => {
+    const issues = detectProgressEventConflicts([
+      ev("P1-T1", "started", "2026-05-18T10:00:00.000Z"),
+      ev("P1-T1", "blocked", "2026-05-18T11:00:00.000Z", { reason: "x" }),
+      ev("P1-T1", "resumed", "2026-05-18T12:00:00.000Z"),
+      ev("P1-T1", "done", "2026-05-18T13:00:00.000Z", { source: "loop" }),
+    ]);
+    expect(issues).toHaveLength(0);
+  });
+
+  it("no conflict on the planned → done legacy shortcut", () => {
+    const issues = detectProgressEventConflicts([
+      ev("P1-T1", "done", "2026-05-18T10:00:00.000Z", { source: "loop" }),
+    ]);
+    expect(issues).toHaveLength(0);
+  });
+
+  it("flags a second started while already started", () => {
+    const issues = detectProgressEventConflicts([
+      ev("P1-T1", "started", "2026-05-18T10:00:00.000Z"),
+      ev("P1-T1", "started", "2026-05-18T10:00:01.000Z"),
+    ]);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.code).toBe("PROGRESS_EVENT_CONFLICT");
+    expect(issues[0]?.severity).toBe("warning");
+    expect(issues[0]?.task_id).toBe("P1-T1");
+  });
+
+  it("flags done after done, and an event after a terminal done", () => {
+    expect(
+      detectProgressEventConflicts([
+        ev("P1-T1", "done", "2026-05-18T10:00:00.000Z", { source: "loop" }),
+        ev("P1-T1", "done", "2026-05-18T11:00:00.000Z", { source: "loop" }),
+      ]),
+    ).toHaveLength(1);
+    expect(
+      detectProgressEventConflicts([
+        ev("P1-T1", "started", "2026-05-18T10:00:00.000Z"),
+        ev("P1-T1", "done", "2026-05-18T11:00:00.000Z", { source: "loop" }),
+        ev("P1-T1", "blocked", "2026-05-18T12:00:00.000Z", { reason: "x" }),
+      ]),
+    ).toHaveLength(1);
+  });
+
+  it("reports at most one conflict per task and keeps tasks independent", () => {
+    const issues = detectProgressEventConflicts([
+      ev("P1-T1", "started", "2026-05-18T10:00:00.000Z"),
+      ev("P1-T1", "started", "2026-05-18T10:00:01.000Z"),
+      ev("P1-T1", "started", "2026-05-18T10:00:02.000Z"),
+      ev("P1-T2", "started", "2026-05-18T10:00:00.000Z"),
+      ev("P1-T2", "done", "2026-05-18T11:00:00.000Z", { source: "loop" }),
+    ]);
+    expect(issues).toHaveLength(1); // only P1-T1, once
+    expect(issues[0]?.task_id).toBe("P1-T1");
   });
 });

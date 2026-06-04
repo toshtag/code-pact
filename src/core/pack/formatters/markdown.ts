@@ -39,7 +39,7 @@ export type DecisionDoc = {
 export type DependsOnEntry = {
   id: string;
   /**
-   * Derived state from progress.yaml. `"unknown"` is reserved for ids
+   * Derived state from the progress ledger. `"unknown"` is reserved for ids
    * that fail to resolve at all — this should not occur because the
    * lint surface (`TASK_DEPENDS_ON_UNRESOLVED`) catches missing ids
    * before pack time, but the type tolerates the case so the renderer
@@ -165,7 +165,7 @@ export function renderSections(ctx: PackContext): RenderedSection[] {
   sections.push({ name: "task_definition", lines: taskDefinitionLines });
 
   // 6a. Depends on — task-declared dependencies, P10. Each id is shown
-  // with its current derived state from progress.yaml.
+  // with its current derived state from the progress ledger.
   if (ctx.dependsOn && ctx.dependsOn.length > 0) {
     const lines: string[] = [`## Depends on`, ``];
     for (const dep of ctx.dependsOn) {
@@ -313,23 +313,27 @@ export function renderSections(ctx: PackContext): RenderedSection[] {
     ],
   });
 
-  // 9. Progress event schema hint
+  // 9. Progress recording hint — command-guided. The ledger is a set of
+  // per-event files under .code-pact/state/events/; agents record via the CLI,
+  // never by hand-editing the ledger.
   sections.push({
     name: "progress_event_schema",
     lines: [
-      `## Progress Event`,
+      `## Recording progress`,
       ``,
-      `When this task is complete, record an event in \`.code-pact/state/progress.yaml\`:`,
+      `Do NOT hand-write the ledger. When this task is complete, record it with:`,
       ``,
-      `\`\`\`yaml`,
-      `events:`,
-      `  - task_id: ${ctx.task.id}`,
-      `    status: done`,
-      `    at: "<ISO8601 with offset>"`,
-      `    actor: agent`,
-      `    evidence:`,
-      `      - <verification command or artifact>`,
+      `\`\`\`sh`,
+      `code-pact task complete ${ctx.task.id} --agent <agent>`,
       `\`\`\``,
+      ``,
+      `If the work was completed outside the loop, record it with evidence instead:`,
+      ``,
+      `\`\`\`sh`,
+      `code-pact task record-done ${ctx.task.id} --evidence "<verification command or artifact>"`,
+      `\`\`\``,
+      ``,
+      `Either writes one merge-safe event file under \`.code-pact/state/events/\`.`,
       ``,
     ],
   });

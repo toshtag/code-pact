@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { cliPath, ensureCliBuilt } from "../helpers/cli.ts";
+import { loadMergedProgress } from "../../src/core/progress/io.ts";
 
 let tmpDir: string;
 
@@ -586,11 +587,14 @@ describe("CLI: task complete (v0.2)", () => {
     expect(firstParsed.data.agent).toBe("claude-code");
     expect(firstParsed.data.event.agent).toBe("claude-code");
 
+    // The flipped writer puts the done event in .code-pact/state/events/, so the
+    // merged view (legacy + event files) has it; the legacy progress.yaml is
+    // left untouched (asserted byte-identical across the idempotent re-run).
     const progressYaml = await readFile(
       join(tmpDir, ".code-pact", "state", "progress.yaml"),
       "utf8",
     );
-    const log = parseYaml(progressYaml) as { events: unknown[] };
+    const { log } = await loadMergedProgress(tmpDir);
     expect(log.events).toHaveLength(1);
 
     // Second run: already_done, byte-identical progress.yaml
@@ -1105,11 +1109,8 @@ describe("CLI: task state machine (v0.6)", () => {
   }
 
   async function readProgress(): Promise<{ raw: string; events: unknown[] }> {
-    const raw = await readFile(
-      join(tmpDir, ".code-pact", "state", "progress.yaml"),
-      "utf8",
-    );
-    const log = parseYaml(raw) as { events: unknown[] };
+    // Merged view (legacy progress.yaml + per-event files).
+    const { raw, log } = await loadMergedProgress(tmpDir);
     return { raw, events: log.events };
   }
 

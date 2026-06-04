@@ -1,10 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { parse as parseYaml } from "yaml";
 import { runTaskResume } from "../../../src/commands/task-resume.ts";
-import { ProgressLog } from "../../../src/core/schemas/progress-event.ts";
+import { loadMergedProgress } from "../../../src/core/progress/io.ts";
 
 const ROADMAP_YAML = `phases:
   - id: P1
@@ -108,11 +107,7 @@ describe("runTaskResume", () => {
       agent: "claude-code",
     });
     expect(result.kind).toBe("resumed");
-    const raw = await readFile(
-      join(dir, ".code-pact", "state", "progress.yaml"),
-      "utf8",
-    );
-    const log = ProgressLog.parse(parseYaml(raw) as unknown);
+    const { log } = await loadMergedProgress(dir);
     expect(log.events.map((e) => e.status)).toEqual([
       "started",
       "blocked",

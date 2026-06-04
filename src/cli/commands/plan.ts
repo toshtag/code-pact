@@ -47,6 +47,7 @@ import {
   runPlanAnalyze,
   serializePlanAnalyzeData,
 } from "../../commands/plan-analyze.ts";
+import { migrateProgressToEvents } from "../../core/progress/migrate.ts";
 
 export async function cmdPlan(argv: string[], locale: Locale, globalJson: boolean): Promise<number> {
   const subcommand = argv[0];
@@ -92,6 +93,10 @@ export async function cmdPlan(argv: string[], locale: Locale, globalJson: boolea
     return cmdPlanAnalyze(rest, locale, globalJson);
   }
 
+  if (subcommand === "migrate") {
+    return cmdPlanMigrate(rest, locale, globalJson);
+  }
+
   // `plan import` is a beginner-friendly alias for `phase import` (it ingests a
   // whole multi-phase roadmap, which "phase import" undersells). Shares the
   // same handler; the invoked name labels its error messages. See
@@ -100,7 +105,7 @@ export async function cmdPlan(argv: string[], locale: Locale, globalJson: boolea
     return cmdPhaseImport(rest, locale, globalJson, "plan import");
   }
 
-  const msg = `plan: unknown subcommand "${subcommand ?? ""}". Use: brief | prompt | adopt | constitution | lint | normalize | analyze | import (alias for "phase import")`;
+  const msg = `plan: unknown subcommand "${subcommand ?? ""}". Use: brief | prompt | adopt | constitution | lint | normalize | analyze | migrate | import (alias for "phase import")`;
   if (globalJson) {
     process.stdout.write(
       `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
@@ -756,6 +761,25 @@ async function cmdPlanNormalize(
   }
 }
 
+// Ledger-read failures (collaboration-safe-state RFC, B1/B5) are integrity
+// DIAGNOSTICS, not public command errors — the lenient loaders (`doctor`,
+// `plan lint`) surface them as structured `data.issues[]` entries. When a
+// strict-loader plan command catches one, wrap it in the command's own failure
+// code so `EVENT_FILE_ID_MISMATCH` / `INVALID_YAML` / `SCHEMA_ERROR` never leak as
+// a top-level `error.code`; the original cause stays in `error.message`. See
+// docs/cli-contract.md § Plan diagnostic codes.
+const LEDGER_READ_INTEGRITY_CODES = new Set<string>([
+  "EVENT_FILE_ID_MISMATCH",
+  "INVALID_YAML",
+  "SCHEMA_ERROR",
+]);
+
+function planCatchCode(err: unknown, fallback: string): string {
+  const raw = (err as NodeJS.ErrnoException).code;
+  if (raw === undefined || LEDGER_READ_INTEGRITY_CODES.has(raw)) return fallback;
+  return raw;
+}
+
 async function cmdPlanAnalyze(
   argv: string[],
   locale: Locale,
@@ -798,13 +822,73 @@ async function cmdPlanAnalyze(
 
     return result.ok ? 0 : 1;
   } catch (err: unknown) {
-    const code =
-      (err as NodeJS.ErrnoException).code ?? "PLAN_ANALYZE_FAILED";
+    // A ledger-read integrity failure (EVENT_FILE_ID_MISMATCH / INVALID_YAML /
+    // SCHEMA_ERROR from the strict loader) is wrapped into PLAN_ANALYZE_FAILED so
+    // it never surfaces as a public top-level error.code; the cause is in message.
+    const code = planCatchCode(err, "PLAN_ANALYZE_FAILED");
     const message = err instanceof Error ? err.message : String(err);
     if (json) {
       process.stdout.write(
         `${JSON.stringify({ ok: false, error: { code, message } })}\n`,
       );
+    } else {
+      process.stderr.write(`${message}\n`);
+    }
+    return 1;
+  }
+}
+
+// `plan migrate` — convert a legacy monolithic progress.yaml into the per-event
+// ledger (collaboration-safe-state RFC, B4). Idempotent; dry-run by default.
+async function cmdPlanMigrate(
+  argv: string[],
+  locale: Locale,
+  globalJson: boolean,
+): Promise<number> {
+  void locale;
+  const { values } = parseArgs({
+    args: argv,
+    options: { json: { type: "boolean" }, write: { type: "boolean" } },
+    strict: false,
+  });
+  const json = globalJson || values.json === true;
+  const write = values.write === true;
+  const cwd = process.cwd();
+
+  try {
+    const result = await migrateProgressToEvents(cwd, { write });
+    if (json) {
+      process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
+    } else {
+      const lines = [
+        result.dry_run
+          ? `Dry run (re-run with --write to migrate). ${result.legacy_events} legacy event(s) would be written to .code-pact/state/events/.`
+          : `Migrated to per-event files: ${result.written} written, ${result.already_present} already present (of ${result.legacy_events} legacy event(s)). progress.yaml is left in place.`,
+        ...(result.state_changes.length > 0
+          ? [
+              `${result.state_changes.length} task(s) change derived state under merged ordering — review before committing:`,
+              ...result.state_changes.map((c) => `  ${c.task_id}: ${c.before} → ${c.after}`),
+            ]
+          : []),
+      ];
+      process.stderr.write(`${lines.join("\n")}\n`);
+    }
+    return 0;
+  } catch (err: unknown) {
+    // A corrupt existing event file read during migration must not leak
+    // EVENT_FILE_ID_MISMATCH (etc.) as a top-level error.code — ledger-read
+    // integrity codes and code-less throws are wrapped into the command-level
+    // PLAN_MIGRATE_FAILED (the literal below is what the error-code-surface scan
+    // pins, mirroring plan analyze's PLAN_ANALYZE_FAILED); the cause stays in
+    // error.message. A non-ledger coded error keeps its own code.
+    const message = err instanceof Error ? err.message : String(err);
+    const raw = (err as NodeJS.ErrnoException).code;
+    const error =
+      raw !== undefined && !LEDGER_READ_INTEGRITY_CODES.has(raw)
+        ? { code: raw, message }
+        : { code: "PLAN_MIGRATE_FAILED", message };
+    if (json) {
+      process.stdout.write(`${JSON.stringify({ ok: false, error })}\n`);
     } else {
       process.stderr.write(`${message}\n`);
     }

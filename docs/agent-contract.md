@@ -107,17 +107,19 @@ For the same git SHA and the same inputs:
 Where a command writes deterministic artifacts (context pack, adapter
 files), the same input produces the same on-disk bytes.
 
-### Progress is append-only
+### Progress is an append-only event log
 
-`.code-pact/state/progress.yaml` is an append-only event log. The
-only verbs that append to it are `task start`, `task block`, `task
-resume`, `task complete`, and `task record-done` (v1.21+, which records
+The progress ledger is an append-only event log — code-pact never edits a past
+event. Each event is its own file under `.code-pact/state/events/` (a legacy
+monolithic `.code-pact/state/progress.yaml`, if present, is still read and
+merged). The only verbs that record an event are `task start`, `task block`,
+`task resume`, `task complete`, and `task record-done` (v1.21+, which records
 a `done` event with `source: external` — either for work completed
 outside the loop or for the `record_only` lane after you ran the
 project's verification by hand). Read-only verbs — including `task
 prepare` (v1.11+) — never touch
 it, and `task finalize` writes only the design YAML status, never
-`progress.yaml`. The progress-read-only invariant is locked by unit tests.
+the progress ledger. The progress-read-only invariant is locked by unit tests.
 
 ## 2. What agents must do
 
@@ -298,8 +300,8 @@ The verbs in detail:
   completed **outside** the loop (already merged / not verifiable from
   the tree), and the `record_only` lane (v1.26+). The decision gate
   still applies — a `requires_decision` task with no resolvable ADR
-  returns `DECISION_REQUIRED` (exit 2) and leaves `progress.yaml`
-  untouched. It is a distinct path from `task complete`, not a way to
+  returns `DECISION_REQUIRED` (exit 2) and records no progress event
+  (the ledger is unchanged). It is a distinct path from `task complete`, not a way to
   skip verification. See
   [`per-task-loop.md` § Recording a done without task complete](per-task-loop.md#recording-a-done-without-task-complete)
   for the lifecycle explanation (a lighter loop, not lighter verification).

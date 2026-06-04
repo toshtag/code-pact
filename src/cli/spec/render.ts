@@ -37,7 +37,7 @@ function flagSyntax(f: FlagSpec): string {
   return f.value ? `--${f.name} ${f.value}` : `--${f.name}`;
 }
 
-const READONLY_NOTE = "Read-only — never mutates progress.yaml.";
+const READONLY_NOTE = "Read-only — never records a progress event.";
 
 /**
  * Render the rich leaf-help text for a command, matching the established

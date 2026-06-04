@@ -53,7 +53,9 @@ export const ProgressEvent = z
   });
 export type ProgressEvent = z.infer<typeof ProgressEvent>;
 
-// The file stored at .code-pact/state/progress.yaml
+// The shape of the legacy monolithic file stored at .code-pact/state/progress.yaml.
+// Per-event files under .code-pact/state/events/ each store a single ProgressEvent
+// (plus a content-id), not a ProgressLog.
 export const ProgressLog = z.object({
   events: z.array(ProgressEvent),
 });
