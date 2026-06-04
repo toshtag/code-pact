@@ -1839,11 +1839,13 @@ Same shape in both modes:
 
 ### Errors
 
-No new error codes in v1.4. All paths reuse existing public codes:
+Reuses existing public codes; phase-id resolution additionally surfaces
+`AMBIGUOUS_PHASE_ID` since control-plane v2 PR1a:
 
 | Code | Exit | When |
 | --- | --- | --- |
 | `PHASE_NOT_FOUND` | 2 | Phase id is not in `design/roadmap.yaml` |
+| `AMBIGUOUS_PHASE_ID` | 2 | The `<phase-id>` appears in more than one `roadmap.yaml` entry; `data.phases[]` lists the colliding files |
 | `DUPLICATE_TASK_ID` | 1 | Task id already exists in the phase (pre-v1.4 exit code preserved) |
 | `CONFIG_ERROR` | 2 | Missing positional `<phase-id>`; `--description` absent with no TTY; `--description` provided without `--type`; non-interactive flag without `--description`; invalid enum value; unknown flag |
 
@@ -2064,7 +2066,7 @@ Each task in the phase is classified into one of three actions:
 
 ### Order of operations
 
-1. **Phase resolution.** Reads `design/roadmap.yaml`, finds the phase, loads its YAML. `PHASE_NOT_FOUND` is raised if the phase id is unknown.
+1. **Phase resolution.** Reads `design/roadmap.yaml`, finds the phase, loads its YAML. `PHASE_NOT_FOUND` is raised if the phase id is unknown; `AMBIGUOUS_PHASE_ID` if it appears in more than one roadmap entry.
 2. **Classification.** For each task, derives state via `deriveTaskState` and applies the table above.
 3. **Phase status candidate.** Computes a suggested phase status by simulating the post-flip state. Surfaced as `phase_status_candidate` (advisory). Never written.
 4. **No eligible writes.** If no task is classified as `flip`, returns `kind: "no_eligible_tasks"` with exit 0 in both dry-run and `--write`. This is **not** an error — it just means there is nothing to reconcile.
@@ -2117,6 +2119,7 @@ Field presence by kind:
 | Code | Exit | When |
 | --- | --- | --- |
 | `PHASE_NOT_FOUND` | 2 | Phase id is not present in `design/roadmap.yaml` |
+| `AMBIGUOUS_PHASE_ID` | 2 | The phase id appears in more than one `roadmap.yaml` entry; `data.phases[]` lists the colliding files |
 | `PHASE_RECONCILE_WRITE_REFUSED` | 2 | `--write` was requested AND every eligible task write was refused for safety reasons. `data.skipped_writes[]` carries the per-task refusal detail. Not raised when at least one write applied successfully |
 | `CONFIG_ERROR` | 2 | Missing positional phase id, or unknown flag |
 
@@ -2299,11 +2302,14 @@ For each phase, runbook iterates `phase.tasks[]` and emits steps in this priorit
 
 ### Errors
 
-No new error codes. Reused:
+Reuses existing codes; phase-id resolution additionally surfaces
+`AMBIGUOUS_PHASE_ID` (control-plane v2 PR1a), for both `phase runbook <id>` and
+`--across-phases`:
 
 | Code | Exit | When |
 | --- | --- | --- |
 | `PHASE_NOT_FOUND` | 2 | Phase id is not present in `design/roadmap.yaml` |
+| `AMBIGUOUS_PHASE_ID` | 2 | The phase id appears in more than one `roadmap.yaml` entry; `data.phases[]` lists the colliding files |
 | `CONFIG_ERROR` | 2 | Missing positional phase id, or unknown flag |
 
 ### Usage example
@@ -2559,7 +2565,7 @@ The output is zod-validated before return. The contract uses strict mode at ever
 - `0` — success
 - `2` — missing `--phase` / `--task`, or unknown phase / task / agent
 
-**Error codes:** `PHASE_NOT_FOUND`, `TASK_NOT_FOUND`, `AGENT_NOT_FOUND`, `CONFIG_ERROR`.
+**Error codes:** `PHASE_NOT_FOUND`, `AMBIGUOUS_PHASE_ID` (duplicate phase id; `data.phases[]` lists the colliding files), `TASK_NOT_FOUND`, `AGENT_NOT_FOUND`, `CONFIG_ERROR`.
 
 ## Locale resolution
 
