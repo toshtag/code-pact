@@ -821,6 +821,7 @@ describe("runDoctor — CONTROL_PLANE_BRANCH_NOT_DRIVEN (P34)", () => {
       baseProgress?: string;
       trackProgress?: boolean;
       baseEvents?: import("../../../src/core/schemas/progress-event.ts").ProgressEvent[];
+      trackEventsGitkeep?: boolean;
     } = {},
   ): Promise<void> {
     await writeFile(
@@ -836,11 +837,15 @@ describe("runDoctor — CONTROL_PLANE_BRANCH_NOT_DRIVEN (P34)", () => {
     for (const e of opts.baseEvents ?? []) {
       await writeEventFile(dir, e as Parameters<typeof writeEventFile>[1]);
     }
+    if (opts.trackEventsGitkeep) {
+      await mkdir(join(dir, ".code-pact", "state", "events"), { recursive: true });
+      await writeFile(join(dir, ".code-pact", "state", "events", ".gitkeep"), "", "utf8");
+    }
 
     await git(dir, ["init", "--quiet", "--initial-branch=main"]);
     await git(dir, ["add", "-A"]);
     if (opts.trackProgress ?? true) await git(dir, ["add", "-f", PROGRESS_REL]);
-    if ((opts.baseEvents ?? []).length > 0) {
+    if ((opts.baseEvents ?? []).length > 0 || opts.trackEventsGitkeep) {
       await git(dir, ["add", "-f", ".code-pact/state/events/"]);
     }
     await git(dir, ["commit", "--quiet", "-m", "base"]);
@@ -993,6 +998,21 @@ describe("runDoctor — CONTROL_PLANE_BRANCH_NOT_DRIVEN (P34)", () => {
     await setupBaseAndBranch({ trackProgress: false });
     await commitBranchCode();
     expect(find(await runDoctor(dir, { baseRef: "main" }))).toBeUndefined();
+  });
+
+  it("FIRES with only events/.gitkeep tracked (no progress.yaml, no real event files) — the dogfood A3 sentinel keeps the gate active, not silently skipped", async () => {
+    // Dogfood A3: this repo commits `.code-pact/state/events/.gitkeep` so the
+    // committed-ledger precondition (ledgerTracked) is satisfied WITHOUT
+    // committing the legacy monolithic progress.yaml. The path is tracked but
+    // holds no real events, so a code-changing branch that drives nothing must
+    // still fire — proving the sentinel flips the gate from skip to active
+    // (contrast: the test just above, where nothing is tracked, stays silent).
+    await setupBaseAndBranch({ trackProgress: false, trackEventsGitkeep: true });
+    await commitBranchCode();
+    const r = await runDoctor(dir, { baseRef: "main" });
+    const issue = find(r);
+    expect(issue).toBeDefined();
+    expect(issue!.severity).toBe("warning");
   });
 
   it("does not run without --base-ref", async () => {
