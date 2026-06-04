@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parse as parseYaml, stringify as toYaml } from "yaml";
 import { atomicWriteText } from "../io/atomic-text.ts";
-import { Roadmap } from "../core/schemas/roadmap.ts";
+import { loadRoadmap } from "../core/plan/roadmap.ts";
 import { Phase } from "../core/schemas/phase.ts";
 import { TaskType, type Task } from "../core/schemas/task.ts";
 import { assertSafePlanId } from "../core/schemas/plan-id.ts";
@@ -64,11 +64,6 @@ const TASK_TYPE_LABELS: Record<string, string> = {
 };
 
 const TASK_TYPE_VALUES = TaskType.options;
-
-async function loadRoadmap(cwd: string): Promise<Roadmap> {
-  const raw = await readFile(join(cwd, "design", "roadmap.yaml"), "utf8");
-  return Roadmap.parse(parseYaml(raw) as unknown);
-}
 
 async function loadPhase(cwd: string, relPath: string): Promise<Phase> {
   const raw = await readFile(join(cwd, relPath), "utf8");

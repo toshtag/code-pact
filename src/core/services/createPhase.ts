@@ -1,10 +1,11 @@
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { parse as parseYaml, stringify as toYaml } from "yaml";
+import { stringify as toYaml } from "yaml";
 import { atomicWriteText } from "../../io/atomic-text.ts";
 import { Phase } from "../schemas/phase.ts";
 import type { Task } from "../schemas/task.ts";
 import { Roadmap, PhaseRef } from "../schemas/roadmap.ts";
+import { loadRoadmap } from "../plan/roadmap.ts";
 import { assertSafePlanId } from "../schemas/plan-id.ts";
 
 export type Confidence = "low" | "medium" | "high";
@@ -55,11 +56,6 @@ export type CreatePhaseResult = {
   path: string;
   ref: PhaseRef;
 };
-
-async function loadRoadmap(cwd: string): Promise<Roadmap> {
-  const raw = await readFile(join(cwd, "design", "roadmap.yaml"), "utf8");
-  return Roadmap.parse(parseYaml(raw) as unknown);
-}
 
 async function saveRoadmap(cwd: string, roadmap: Roadmap): Promise<void> {
   await atomicWriteText(join(cwd, "design", "roadmap.yaml"), toYaml(roadmap));

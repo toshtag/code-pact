@@ -13,6 +13,17 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+### Changed
+
+- **Internal (no behaviour change).** Consolidated the eight byte-equivalent
+  command-local strict `loadRoadmap` readers into one shared
+  `src/core/plan/roadmap.ts`. A **first** consolidation step toward control-plane
+  v2 glob discovery — **not** the complete roadmap-discovery seam: other
+  roadmap-reading paths with distinct contracts (`resolveTaskInRoadmap`, `doctor`,
+  `plan adopt`, `phase reconcile`, adapter generation, and the lenient
+  `plan lint` / `collectPlanArtifacts` loader) stay intentionally separate and are
+  handled in later PRs. See `design/decisions/control-plane-v2-rfc.md` (PR0).
+
 ## [1.31.0] — 2026-06-04
 
 Collaboration-safe shared state. The progress ledger moves from a single

@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { AgentProfile } from "../core/schemas/agent-profile.ts";
 import { Phase } from "../core/schemas/phase.ts";
-import { Roadmap } from "../core/schemas/roadmap.ts";
+import { loadRoadmap } from "../core/plan/roadmap.ts";
 import type { Task } from "../core/schemas/task.ts";
 import { assertSafePlanId } from "../core/schemas/plan-id.ts";
 import { resolveAgentProfilePath } from "../core/agent-profile-path.ts";
@@ -28,11 +28,6 @@ export type { RecommendResult };
 // ---------------------------------------------------------------------------
 // Loaders
 // ---------------------------------------------------------------------------
-
-async function loadRoadmap(cwd: string): Promise<Roadmap> {
-  const raw = await readFile(join(cwd, "design", "roadmap.yaml"), "utf8");
-  return Roadmap.parse(parseYaml(raw) as unknown);
-}
 
 async function loadPhase(cwd: string, path: string): Promise<Phase> {
   const raw = await readFile(join(cwd, path), "utf8");

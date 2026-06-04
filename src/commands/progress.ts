@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { Roadmap } from "../core/schemas/roadmap.ts";
+import { loadRoadmap } from "../core/plan/roadmap.ts";
 import { Phase } from "../core/schemas/phase.ts";
 import { BaselineSnapshot } from "../core/schemas/baseline-snapshot.ts";
 import { assertSafePlanId } from "../core/schemas/plan-id.ts";
@@ -40,11 +40,6 @@ const STATUS_FACTOR: Record<string, number> = {
 // ---------------------------------------------------------------------------
 // Loaders
 // ---------------------------------------------------------------------------
-
-async function loadRoadmap(cwd: string): Promise<Roadmap> {
-  const raw = await readFile(join(cwd, "design", "roadmap.yaml"), "utf8");
-  return Roadmap.parse(parseYaml(raw) as unknown);
-}
 
 async function loadPhase(cwd: string, path: string): Promise<Phase> {
   const raw = await readFile(join(cwd, path), "utf8");

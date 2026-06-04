@@ -2,7 +2,7 @@ import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { atomicWriteText } from "../../io/atomic-text.ts";
 import { parse as parseYaml } from "yaml";
-import { Roadmap } from "../schemas/roadmap.ts";
+import { loadRoadmap } from "../plan/roadmap.ts";
 import { Phase } from "../schemas/phase.ts";
 import { AgentProfile } from "../schemas/agent-profile.ts";
 import { type ProgressEvent } from "../schemas/progress-event.ts";
@@ -201,11 +201,6 @@ export type WriteContextPackOptions = {
 export type WriteContextPackResult = {
   outputPath: string;
 };
-
-async function loadRoadmap(cwd: string): Promise<Roadmap> {
-  const raw = await readFile(join(cwd, "design", "roadmap.yaml"), "utf8");
-  return Roadmap.parse(parseYaml(raw) as unknown);
-}
 
 async function loadPhase(cwd: string, path: string): Promise<Phase> {
   const raw = await readFile(join(cwd, path), "utf8");
