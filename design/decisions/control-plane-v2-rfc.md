@@ -182,6 +182,15 @@ the real mechanism is the branch-local `max+1` mint in `plan-adopt` / `createPha
    new dangerous-moment / cross-branch surface must be a **separate
    `warning`-severity advisory** (not a re-run of the error check) to stay inside
    the §5 diagnostics exemption.
+3. **Task-id ambiguity is *already* fail-closed; the silent path was PHASE ids.**
+   `resolveTaskInRoadmap` (P14) already throws `AMBIGUOUS_TASK_ID` for a duplicate
+   *task* id, so the §1 "duplicate `P1-T5` → wrong context pack" symptom was
+   already covered. The real fail-**open** was *phase*-id resolution: eight call
+   sites did `roadmap.phases.find((p) => p.id === id)` and silently took the first
+   match on a duplicate phase id. **PR1a (shipped) closes this** — a shared
+   `src/core/plan/resolve-phase.ts` throws the new `AMBIGUOUS_PHASE_ID` (exit 2,
+   `data.phases[]` lists the colliding files) across all eight, mirroring the P14
+   task resolver.
 
 ### Decision-gate verdict
 
@@ -336,9 +345,11 @@ shippable as a MINOR and independently revertible.
   (roadmap-id ↔ inner phase-id, which `PHASE_ID_MISMATCH` already models). It does
   **not** promise to catch arbitrary semantic scalar drift (e.g. an unintended
   `weight`): with no cross-contributor invariant to violate (§1) that is
-  undecidable, so it stays a non-goal. (d) **fail closed** when `task prepare` /
-  `task context` hit an ambiguous id instead of silently picking one (the §1
-  agent-confusion root). The **net-new** surface must be emitted at `warning`
+  undecidable, so it stays a non-goal. (d) **fail closed on an ambiguous *phase*
+  id** — task-id ambiguity is already closed (`AMBIGUOUS_TASK_ID`, P14); the
+  silent path was phase-id resolution. **Shipped in PR1a** as the new
+  `AMBIGUOUS_PHASE_ID` (exit 2, `data.phases[]`) across the eight phase resolvers,
+  via a shared `resolve-phase.ts`. The **net-new** surface must be emitted at `warning`
   severity (not by re-running the existing error-severity checks) so PR1 stays a
   soak-exempt advisory per §5; `--strict` promotes (precedent B6). Plus the legacy
   advisories (`LEGACY_SEQUENTIAL_PHASE_ID`, `LEGACY_INLINE_TASKS`). **Not gated on
