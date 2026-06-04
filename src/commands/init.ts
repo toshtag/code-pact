@@ -11,6 +11,7 @@ import type { BaselineSnapshot } from "../core/schemas/baseline-snapshot.ts";
 import { DEFAULT_AGENT_PROFILES, type SupportedAgent } from "../core/agents.ts";
 import { renderInitConstitution } from "../core/constitution.ts";
 import { messages as messageCatalog } from "../i18n/index.ts";
+import { isGitRepo, gitIgnoredControlPlaneAreas } from "../core/control-plane-ignore.ts";
 
 export type { SupportedAgent } from "../core/agents.ts";
 
@@ -58,6 +59,15 @@ export type InitResult = {
    * until a real phase exists) and in front of the user at the right moment.
    */
   suggested_next_steps: string[];
+  /**
+   * Non-fatal advisories raised during init (additive, v1.32+). Currently: a
+   * pre-existing blanket `/.code-pact/` .gitignore rule that defeats the narrow
+   * shared-vs-local policy `init` just wrote (collaboration state would never
+   * reach git). `init` never edits a user's existing .gitignore lines, so this
+   * surfaces the gap instead of silently writing dead narrow entries. Consumers
+   * reading only `created` / `skipped` / `suggested_next_steps` are unaffected.
+   */
+  warnings: string[];
 };
 
 // ---------------------------------------------------------------------------
@@ -111,9 +121,51 @@ async function writeIfAbsent(
   created.push(p);
 }
 
+/**
+ * The local/derived subset `init` writes to `.gitignore`. Everything else under
+ * `.code-pact/` is shared, version-controlled control-plane state. Kept as a
+ * single constant so the entries `init` writes and the entries the blanket-ignore
+ * advisory tells the user to keep cannot drift apart.
+ */
+const LOCAL_ONLY_IGNORE_ENTRIES = [
+  "/.code-pact/locks/",
+  "/.code-pact/cache/",
+  "/.local/",
+  "/.context/",
+];
+
 /** Compare gitignore patterns ignoring leading/trailing slash + whitespace. */
 function gitignoreKey(line: string): string {
   return line.trim().replace(/^\/+/, "").replace(/\/+$/, "");
+}
+
+/**
+ * Best-effort detection of a pre-existing blanket `/.code-pact/` ignore that
+ * would defeat the narrow shared-vs-local policy. Returns the offending raw
+ * line, or null. `gitignoreKey` strips only leading/trailing slashes, so the
+ * common blanket forms collapse to one of a few keys: `.code-pact` (from
+ * `.code-pact`, `.code-pact/`, `/.code-pact/`, …) and the wildcard variants
+ * `.code-pact/*` / `.code-pact/**`. The narrow entries collapse to
+ * `.code-pact/locks`, `.code-pact/cache`, etc., so the small key set cleanly
+ * isolates the blanket case without misfiring on them (or on a scoped rule like
+ * `.code-pact/*.log`). Negation lines (`!…`) are skipped — they re-include
+ * rather than ignore. This is a heuristic prompt, not a verdict: it does not try
+ * to cover every exotic form (e.g. a leading double-star glob before
+ * `.code-pact`); `git check-ignore` in `doctor` is the authoritative catch-all
+ * (it reflects git's real semantics,
+ * e.g. that a negation under an excluded parent dir is ineffective), and the
+ * warning points the user there.
+ */
+const BLANKET_IGNORE_KEYS = new Set([".code-pact", ".code-pact/*", ".code-pact/**"]);
+function detectBlanketCodePactIgnore(content: string): string | null {
+  for (const raw of content.split("\n")) {
+    const line = raw.trim();
+    if (line.length === 0 || line.startsWith("#") || line.startsWith("!")) {
+      continue;
+    }
+    if (BLANKET_IGNORE_KEYS.has(gitignoreKey(line))) return line;
+  }
+  return null;
 }
 
 /**
@@ -279,11 +331,44 @@ export async function runInitCore(opts: InitCoreOptions): Promise<InitResult> {
   // overrides), `/.context/` (regenerated context packs). Merged into any
   // existing .gitignore (idempotent). See the collaboration-safe-state RFC for
   // the shared-vs-local policy.
-  await ensureGitignoreEntries(
-    cwd,
-    ["/.code-pact/locks/", "/.code-pact/cache/", "/.local/", "/.context/"],
-    created,
-  );
+  await ensureGitignoreEntries(cwd, LOCAL_ONLY_IGNORE_ENTRIES, created);
+
+  // A pre-existing blanket (or file-scoped) ignore overrides the narrow entries
+  // we just wrote, so the shared control plane would never reach git. `init`
+  // never edits a user's existing .gitignore lines (non-destructive by contract),
+  // so surface the gap as an advisory pointing at the authoritative `doctor`
+  // check (CONTROL_PLANE_GITIGNORED) rather than silently leaving dead entries.
+  //
+  // In a git repo we use the SAME authoritative, whole-control-plane check as
+  // `doctor` (`git check-ignore` over project.yaml / profiles / baselines / the
+  // ledger), so the warning is a verdict — no false positive from a negation
+  // re-include, and a file-scoped `events/*.yaml` rule is caught. Outside a git
+  // repo (e.g. `init` before `git init`) git cannot answer, so we fall back to a
+  // text heuristic for the blanket form and soften the wording to a possibility —
+  // the user confirms with `code-pact doctor` once the repo exists.
+  const KEEP_HINT =
+    "keep only `/.code-pact/locks/`, `/.code-pact/cache/`, `/.local/`, `/.context/` ignored";
+  const warnings: string[] = [];
+  const blanketLine = await readFile(join(cwd, ".gitignore"), "utf8")
+    .then((c) => detectBlanketCodePactIgnore(c))
+    .catch(() => null);
+  if (await isGitRepo(cwd)) {
+    const ignoredAreas = await gitIgnoredControlPlaneAreas(cwd);
+    if (ignoredAreas.length > 0) {
+      warnings.push(
+        `Your .gitignore keeps shared control-plane state out of git — these areas will NOT reach git: ${ignoredAreas.join(", ")}. ` +
+          "It overrides the narrow local-only ignores code-pact just added, so teammates never see your progress and the branch-drift CI gate silently skips. " +
+          `init does not edit existing .gitignore lines: narrow the rule yourself (${KEEP_HINT}), then run \`code-pact doctor\` to confirm (CONTROL_PLANE_GITIGNORED). See the shared-vs-local table in docs/cli-contract.md.`,
+      );
+    }
+    // git repo + nothing ignored → no warning (authoritative).
+  } else if (blanketLine !== null) {
+    warnings.push(
+      `Your .gitignore appears to ignore all of .code-pact/ (line: "${blanketLine}"). ` +
+        "Once this is a git repo, that may prevent shared control-plane state (the progress ledger, project.yaml, agent/model profiles, baselines) from reaching git — so teammates would not see your progress and the branch-drift CI gate would silently skip. " +
+        `init does not edit existing .gitignore lines: if you intend to share state, narrow the rule yourself (${KEEP_HINT}). Run \`code-pact doctor\` to confirm (CONTROL_PLANE_GITIGNORED). See the shared-vs-local table in docs/cli-contract.md.`,
+    );
+  }
 
   // -------------------------------------------------------------------------
   // design/
@@ -333,7 +418,7 @@ export async function runInitCore(opts: InitCoreOptions): Promise<InitResult> {
     "Define your first phase: code-pact phase add.",
   ];
 
-  return { created, skipped, suggested_next_steps };
+  return { created, skipped, suggested_next_steps, warnings };
 }
 
 /**

@@ -29,6 +29,7 @@ When a command surfaces one of the diagnostic codes below, this page maps it to 
 | [`TASK_READS_MATCH_TOO_MANY`](#context-fit-advisories-from-plan-lint---include-quality-v130) | A `reads` glob matches > 100 files | Narrow the glob if the task can be scoped (advisory only) |
 | [`EVENT_FILE_ID_MISMATCH`](#event_file_id_mismatch-from-doctor--plan-lint-v131) | A per-event ledger file's content doesn't match its content-addressed name (corrupt / hand-edited) | Restore from git or remove the file named in the message, then re-run |
 | [`PROGRESS_EVENT_CONFLICT`](#progress_event_conflict-from-doctor--plan-analyze-v131) | Incompatible same-task lifecycle events (e.g. two branches both `done` a task) | Reconcile the conflicting event(s) for the named task |
+| [`CONTROL_PLANE_GITIGNORED`](#control_plane_gitignored-from-doctor-v132) | A `.gitignore` rule keeps part of the shared control plane off git, so collaboration silently breaks | Narrow the `.gitignore` to the local-only subset and commit the shared control plane (project.yaml, profiles, baselines, state/events/) |
 
 ## `MANIFEST_NOT_FOUND` from `adapter upgrade --check` / `--write`
 
@@ -398,3 +399,59 @@ code-pact doctor --json | jq '.data.issues[] | select(.code=="PROGRESS_EVENT_CON
 Advisory by default (`severity: warning`); `validate --strict` promotes it to a
 failure so CI can gate on it. It is **not** auto-resolved because a same-task
 concurrent edit is a genuine collaboration conflict a human should adjudicate.
+
+## `CONTROL_PLANE_GITIGNORED` from `doctor` (v1.32)
+
+Your `.gitignore` keeps part of the shared control plane out of git. The
+`message` names which areas — any of `project.yaml`, `agent-profiles/`,
+`model-profiles/`, `state/baselines/`, or `state/events/` (the progress ledger).
+Whatever it names **never reaches git**, so the collaboration model silently
+no-ops: teammates never see your progress (or have no project config on a clean
+checkout), and the `CONTROL_PLANE_BRANCH_NOT_DRIVEN` CI gate skips because it has
+no tracked ledger to read.
+
+The usual cause is a **blanket `/.code-pact/` ignore**, but a **file-scoped** rule
+like `/.code-pact/state/events/*.yaml` is just as dangerous — the `events/`
+directory is not ignored, yet every *new* event file is. `init` *merges* its
+narrow entries into an existing `.gitignore` and **never deletes your lines**, so a
+pre-existing rule survives and overrides them. `doctor` reports this
+authoritatively: it asks git (`git check-ignore --no-index`) for a representative
+*file* in each shared area, so a force-added `.gitkeep` does not mask it and a
+`!`-negation re-include is honoured.
+
+```sh
+# Confirm the diagnosis the same way doctor does (rule-based, index-independent).
+# Probe a representative NEW file in each shared area — exit 0 prints the ignored ones:
+git check-ignore --no-index \
+  .code-pact/project.yaml \
+  .code-pact/agent-profiles/x.yaml \
+  .code-pact/model-profiles/x.yaml \
+  .code-pact/state/baselines/x.json \
+  .code-pact/state/events/19700101T000000Z-x.yaml
+# (no output + exit 1 = nothing ignored = ok)
+```
+
+Add `-v` to see *which* rule matches, but read it carefully: a printed `!`-negation
+line can mean a path is actually **re-included** (not ignored). `code-pact doctor`
+(`CONTROL_PLANE_GITIGNORED`) is the authority — it interprets negations the same way.
+
+Fix it by **narrowing** the rule yourself (neither `init` nor `doctor` edits your
+`.gitignore`). Keep only the local/derived subset ignored:
+
+```gitignore
+/.code-pact/locks/
+/.code-pact/cache/
+/.local/
+/.context/
+```
+
+Remove or narrow the offending rule (the blanket `/.code-pact/` line, or the
+file-scoped one the `-v` output named), then commit the shared state
+(`project.yaml`, `agent-profiles/`, `model-profiles/`, `state/baselines/`,
+`state/events/`) and re-run `code-pact doctor` to confirm. See the shared-vs-local
+table in [State file write guarantees](cli-contract.md#state-file-write-guarantees).
+
+Advisory (`severity: warning`): `doctor` and default `validate` do not fail on
+it, but `validate --strict` promotes it to exit-relevant (like other doctor
+warnings), so CI can gate on it. If the repo is intentionally solo/throwaway,
+silence it via `.code-pact/doctor.yaml` (`disabled_checks: [CONTROL_PLANE_GITIGNORED]`).

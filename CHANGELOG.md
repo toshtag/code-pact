@@ -15,6 +15,48 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ### Added
 
+- **`CONTROL_PLANE_GITIGNORED`** (collaboration-safe-state RFC A1 follow-up). An
+  over-broad `.gitignore` rule silently defeats the whole collaboration model: any
+  shared control-plane state — the per-event progress ledger, `project.yaml`,
+  agent/model profiles, baselines — that does not reach git means teammates never
+  see your progress (or have no project config on a clean checkout) and the
+  `CONTROL_PLANE_BRANCH_NOT_DRIVEN` CI gate skips because it has no tracked ledger
+  to read. `init` *merges* its narrow ignore entries into an existing `.gitignore`
+  and **never deletes a user's lines**, so a pre-existing rule survives and
+  overrides them — the policy is written yet defeated. This adds two
+  **non-destructive** detectors:
+  - `doctor` reports `CONTROL_PLANE_GITIGNORED` (warning) authoritatively via
+    `git check-ignore --no-index` over a representative **file** in *each* shared
+    area (`project.yaml`, `agent-profiles/`, `model-profiles/`, `state/baselines/`,
+    `state/events/`). Probing files, not directories, catches a **file-scoped**
+    rule like `state/events/*.yaml` (the dir is not ignored, yet every new event
+    file is); probing the whole control plane (not just the ledger) catches a
+    config that re-includes only the ledger but still ignores `project.yaml` /
+    profiles / baselines. Rule-based, so a force-added `.gitkeep` does not mask it
+    and negation re-includes are honoured. The `message` names the affected
+    area(s). Its structured `recovery` uses `manual_action` + `confirm` (the fix
+    is a manual `.gitignore` edit, not a runnable command — so `primary`, which is
+    contractually executable, is omitted). Silent skip when git is unavailable /
+    not a repo, or `.code-pact/project.yaml` is absent. Advisory
+    (`severity: warning`): `doctor` / default `validate` do not fail on it;
+    `validate --strict` promotes it (like other doctor warnings), so CI can gate
+    on it. Silence via `.code-pact/doctor.yaml`
+    (`disabled_checks: [CONTROL_PLANE_GITIGNORED]`).
+  - `init` now returns a `warnings[]` field (additive on `InitResult`) and warns
+    when a pre-existing `.gitignore` would keep shared control-plane state off git.
+    In a git repo it uses the **same** authoritative, whole-control-plane
+    `git check-ignore` check as `doctor` (so a negation re-include is not a false
+    positive, and a file-scoped rule is caught); before `git init` it falls back
+    to a text heuristic for the blanket form and softens the wording to a
+    possibility. Neither path edits the user's `.gitignore`. The check is shared
+    via `src/core/control-plane-ignore.ts` so `init` and `doctor` cannot drift.
+  - **`DoctorIssueRecovery`** gains optional `manual_action` and `confirm` fields
+    (additive); `primary` is now optional. A manual-fix diagnostic sets
+    `manual_action` (the edit instruction — never a shell command) + `confirm` (a
+    runnable verify command) instead of `primary`, keeping `primary` strictly
+    executable so an agent never runs prose. See
+    `design/decisions/collaboration-safe-state-rfc.md` (A1) and the shared-vs-local
+    table in `docs/cli-contract.md` § State file write guarantees.
 - **`AMBIGUOUS_PHASE_ID`** (control-plane v2 PR1a). Phase-id resolution now **fails
   closed** on a duplicate phase id — two `roadmap.yaml` entries sharing an id (e.g.
   two branches that both minted `P1`, then merged: separate files, no git
