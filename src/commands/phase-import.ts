@@ -3,7 +3,8 @@ import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { PhaseImportInput, type PhaseImportEntry, type TaskImport } from "../core/schemas/phase-import.ts";
 import { Task } from "../core/schemas/task.ts";
-import { Roadmap, type PhaseRef } from "../core/schemas/roadmap.ts";
+import { type PhaseRef } from "../core/schemas/roadmap.ts";
+import { loadRoadmap } from "../core/plan/roadmap.ts";
 import { Phase } from "../core/schemas/phase.ts";
 import { createPhase, RESERVED_PHASE_IDS } from "../core/services/createPhase.ts";
 import {
@@ -93,11 +94,6 @@ export type PhaseImportResult = {
    */
   scaffold_skipped: { ref: string; reason: string }[];
 };
-
-async function loadRoadmap(cwd: string): Promise<Roadmap> {
-  const raw = await readFile(join(cwd, "design", "roadmap.yaml"), "utf8");
-  return Roadmap.parse(parseYaml(raw) as unknown);
-}
 
 async function loadPhase(cwd: string, relPath: string): Promise<Phase> {
   const raw = await readFile(join(cwd, relPath), "utf8");
