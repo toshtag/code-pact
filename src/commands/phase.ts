@@ -2,18 +2,13 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { Phase, type PhaseStatus } from "../core/schemas/phase.ts";
-import { Roadmap, PhaseRef } from "../core/schemas/roadmap.ts";
+import { PhaseRef } from "../core/schemas/roadmap.ts";
+import { loadRoadmap } from "../core/plan/roadmap.ts";
 import { createPhase } from "../core/services/createPhase.ts";
 
 // ---------------------------------------------------------------------------
 // Shared helpers
 // ---------------------------------------------------------------------------
-
-async function loadRoadmap(cwd: string): Promise<Roadmap> {
-  const raw = await readFile(join(cwd, "design", "roadmap.yaml"), "utf8");
-  const data: unknown = parseYaml(raw);
-  return Roadmap.parse(data);
-}
 
 async function loadPhase(cwd: string, ref: PhaseRef): Promise<Phase> {
   const raw = await readFile(join(cwd, ref.path), "utf8");
