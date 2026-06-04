@@ -799,7 +799,11 @@ describe("runDoctor — CONTROL_PLANE_BRANCH_NOT_DRIVEN (P34)", () => {
   // committed progress.yaml. Then branch to `feature`. The ledger is gitignored
   // by default so it is only tracked when force-added (trackProgress).
   async function setupBaseAndBranch(
-    opts: { baseProgress?: string; trackProgress?: boolean } = {},
+    opts: {
+      baseProgress?: string;
+      trackProgress?: boolean;
+      baseEvents?: import("../../../src/core/schemas/progress-event.ts").ProgressEvent[];
+    } = {},
   ): Promise<void> {
     await writeFile(
       join(dir, "design", "roadmap.yaml"),
@@ -811,12 +815,26 @@ describe("runDoctor — CONTROL_PLANE_BRANCH_NOT_DRIVEN (P34)", () => {
     await writeFile(join(dir, ".gitignore"), "/.code-pact/\n", "utf8");
     await mkdir(join(dir, ".code-pact", "state"), { recursive: true });
     await setProgress(opts.baseProgress ?? "events: []\n");
+    for (const e of opts.baseEvents ?? []) {
+      await writeEventFile(dir, e as Parameters<typeof writeEventFile>[1]);
+    }
 
     await git(dir, ["init", "--quiet", "--initial-branch=main"]);
     await git(dir, ["add", "-A"]);
     if (opts.trackProgress ?? true) await git(dir, ["add", "-f", PROGRESS_REL]);
+    if ((opts.baseEvents ?? []).length > 0) {
+      await git(dir, ["add", "-f", ".code-pact/state/events/"]);
+    }
     await git(dir, ["commit", "--quiet", "-m", "base"]);
     await git(dir, ["checkout", "--quiet", "-b", "feature"]);
+  }
+
+  async function commitEventFileFull(
+    event: import("../../../src/core/schemas/progress-event.ts").ProgressEvent,
+  ): Promise<void> {
+    await writeEventFile(dir, event as Parameters<typeof writeEventFile>[1]);
+    await git(dir, ["add", "-f", ".code-pact/state/events/"]);
+    await git(dir, ["commit", "--quiet", "-m", "event"]);
   }
 
   async function commitBranchCode(relPath = "src/foo.ts"): Promise<void> {
@@ -905,6 +923,33 @@ describe("runDoctor — CONTROL_PLANE_BRANCH_NOT_DRIVEN (P34)", () => {
     await commitBranchCode();
     await commitEventFile("P99-TX", "started");
     expect(find(await runDoctor(dir, { baseRef: "main" }))).toBeDefined();
+  });
+
+  it("uses the content id for identity: a content-different event on the branch counts as added (driven)", async () => {
+    const baseDone = {
+      task_id: "P1-T1",
+      status: "done",
+      at: "2026-05-28T09:00:00.000Z",
+      actor: "agent",
+      source: "loop",
+      evidence: ["old"],
+    } as import("../../../src/core/schemas/progress-event.ts").ProgressEvent;
+    await setupBaseAndBranch({ baseEvents: [baseDone] });
+    await commitBranchCode();
+    // Same task/status/at/actor/source, DIFFERENT evidence → a distinct content
+    // id, so the branch DID add a started/done. A coarse key would miss this.
+    await commitEventFileFull({ ...baseDone, evidence: ["new"] });
+    expect(find(await runDoctor(dir, { baseRef: "main" }))).toBeUndefined();
+  });
+
+  it("skips (does not fire) when the BASE ledger is unparseable — can't diff, so don't guess", async () => {
+    // base commits an invalid progress.yaml; HEAD fixes it but adds only an
+    // unknown-task event. With base treated as []=empty the gate would FIRE
+    // (false signal); base=null must skip instead.
+    await setupBaseAndBranch({ baseProgress: "events: [unclosed" });
+    await commitBranchCode();
+    await commitProgress(`events:\n${ev("P99-TX", "started")}`);
+    expect(find(await runDoctor(dir, { baseRef: "main" }))).toBeUndefined();
   });
 
   it("fires when the only added event is TUTORIAL", async () => {

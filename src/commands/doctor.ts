@@ -5,6 +5,7 @@ import { Roadmap } from "../core/schemas/roadmap.ts";
 import { Phase } from "../core/schemas/phase.ts";
 import { ProgressLog, type ProgressEvent } from "../core/schemas/progress-event.ts";
 import { loadMergedProgress, mergeProgressStreams } from "../core/progress/io.ts";
+import { computeEventId } from "../core/progress/event-id.ts";
 import {
   type LoadedEventFile,
   parseEventFileName,
@@ -838,11 +839,12 @@ async function readMergedEventsAtRev(
   return mergeProgressStreams(legacy, events);
 }
 
-// A stable identity key for a progress event. The ledger is append-only
-// (events are never edited), so "added on the branch" = HEAD events whose key
-// is absent at the base.
+// A stable identity key for a progress event — the same content id the ledger
+// uses everywhere (B5), so two events that differ in any persisted field
+// (evidence, reason, agent, …) are distinct. The ledger is append-only, so
+// "added on the branch" = HEAD events whose id is absent at the base.
 function eventKey(e: ProgressEvent): string {
-  return `${e.task_id}|${e.status}|${e.at}|${e.actor}|${e.source ?? ""}`;
+  return computeEventId(e);
 }
 
 // Check 17 (P34): branch-diff control-plane drift, for PR CI. Advisory
@@ -902,7 +904,11 @@ async function checkControlPlaneBranchNotDriven(
   const baseSha = mb.stdout.trim();
   const headEvents = await readMergedEventsAtRev(cwd, "HEAD");
   if (headEvents === null) return; // unparseable HEAD → INVALID_YAML/SCHEMA_ERROR owns it
-  const baseEvents = (await readMergedEventsAtRev(cwd, baseSha)) ?? [];
+  const baseEvents = await readMergedEventsAtRev(cwd, baseSha);
+  // A corrupt/unparseable BASE ledger must NOT be treated as empty: that would
+  // make every historical event look "added on the branch" and falsely satisfy
+  // the gate. Can't compute the diff → skip.
+  if (baseEvents === null) return;
   const baseKeys = new Set(baseEvents.map(eventKey));
   const driven = headEvents.some(
     (e) =>

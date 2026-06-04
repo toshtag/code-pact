@@ -132,6 +132,17 @@ function pushParseIssue(issues: FileIssue[], err: unknown, file: string): void {
     });
     return;
   }
+  // A corrupt per-event file (filename↔content invariant) keeps its own code so
+  // `plan lint` matches what `doctor` reports, rather than a generic INVALID_YAML.
+  if ((err as NodeJS.ErrnoException).code === "EVENT_FILE_ID_MISMATCH") {
+    issues.push({
+      code: "EVENT_FILE_ID_MISMATCH",
+      severity: "error",
+      message: err instanceof Error ? err.message : String(err),
+      file,
+    });
+    return;
+  }
   const msg = err instanceof Error ? err.message : String(err);
   issues.push({
     code: "INVALID_YAML",

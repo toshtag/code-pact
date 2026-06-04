@@ -137,17 +137,23 @@ export async function writeEventFile(
   // uuid so it can't collide with a stale temp / reused pid; `wx` refuses to
   // reuse an existing temp rather than clobber it.
   const tmp = join(dir, `.tmp-${process.pid}-${randomUUID()}-${file}`);
-  await writeFile(tmp, body, { encoding: "utf8", flag: "wx" });
+  // Outer try guarantees the temp is removed even if the temp write itself
+  // fails partway; the inner try/catch handles ONLY `link`'s EEXIST (a temp
+  // collision is impossible via the uuid, so its errors must propagate, not be
+  // mistaken for "the final already exists").
   try {
-    await link(tmp, path); // atomic, no-overwrite publish
-    return { id, path, alreadyExisted: false };
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
-    // Final already exists. A valid event here necessarily hashes to our id (the
-    // filename), so it IS the same event; corruption / wrong stored id /
-    // mismatched prefix throws EVENT_FILE_ID_MISMATCH.
-    await readValidatedEventFile(path, file);
-    return { id, path, alreadyExisted: true };
+    await writeFile(tmp, body, { encoding: "utf8", flag: "wx" });
+    try {
+      await link(tmp, path); // atomic, no-overwrite publish
+      return { id, path, alreadyExisted: false };
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+      // Final already exists. A valid event here necessarily hashes to our id
+      // (the filename), so it IS the same event; corruption / wrong stored id /
+      // mismatched prefix throws EVENT_FILE_ID_MISMATCH.
+      await readValidatedEventFile(path, file);
+      return { id, path, alreadyExisted: true };
+    }
   } finally {
     await rm(tmp, { force: true });
   }

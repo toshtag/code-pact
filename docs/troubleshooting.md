@@ -256,7 +256,7 @@ Recovery: fix the status word to one of `accepted` / `proposed` / `draft` / `rej
 
 ## `CONTROL_PLANE_NOT_DRIVEN` from `doctor` (v1.25+)
 
-`doctor` noticed the project has real (non-TUTORIAL) tasks and uncommitted git changes, but `progress.yaml` has never recorded a `started`/`done` event for a non-TUTORIAL task — i.e. the scaffold is in place but the loop isn't being driven. Advisory only (`severity: warning`; never fails `doctor`).
+`doctor` noticed the project has real (non-TUTORIAL) tasks and uncommitted git changes, but the progress ledger has never recorded a `started`/`done` event for a non-TUTORIAL task — i.e. the scaffold is in place but the loop isn't being driven. Advisory only (`severity: warning`; never fails `doctor`).
 
 Recovery — pick whichever matches reality:
 - **Drive the loop**: `code-pact task prepare <task-id> --agent <agent> --json`, then `task start`.
@@ -271,7 +271,7 @@ It is a **silent skip** outside a git repo or when git isn't installed, so it ne
 
 ## `CONTROL_PLANE_BRANCH_NOT_DRIVEN` from `doctor` / `validate --base-ref` (v1.26+)
 
-The PR branch changed real code (vs the base ref's merge-base) but added **no** `started`/`done` event for a **known** non-TUTORIAL task to `progress.yaml` — code changed without driving the loop. Unlike `CONTROL_PLANE_NOT_DRIVEN` (which looks at the uncommitted working tree and so never fires in CI after a clean checkout), this is branch-diff based and is meant for PR CI. It runs **only** when `--base-ref` is supplied, and is advisory (`severity: warning`); pair it with `validate --strict` to make it a gate.
+The PR branch changed real code (vs the base ref's merge-base) but added **no** `started`/`done` event for a **known** non-TUTORIAL task to the committed ledger (legacy `progress.yaml` or `state/events/**`) — code changed without driving the loop. Unlike `CONTROL_PLANE_NOT_DRIVEN` (which looks at the uncommitted working tree and so never fires in CI after a clean checkout), this is branch-diff based and is meant for PR CI. It runs **only** when `--base-ref` is supplied, and is advisory (`severity: warning`); pair it with `validate --strict` to make it a gate.
 
 ```sh
 code-pact validate --strict --base-ref origin/main --json
@@ -281,7 +281,7 @@ code-pact validate --strict --base-ref origin/main --json
 ```
 
 Recovery — pick whichever matches reality:
-- **Drive the loop**: `code-pact task prepare <task-id> --agent <agent> --json`, then `task start` / `task complete`, and **commit `progress.yaml`** (the gate reads the committed ledger, not the working tree).
+- **Drive the loop**: `code-pact task prepare <task-id> --agent <agent> --json`, then `task start` / `task complete`, and **commit the new event file(s)** under `.code-pact/state/events/` (the gate reads the committed ledger, not the working tree).
 - **Record completion without `task complete`**: for external completion *or* the `record_only` lane after verification, `code-pact task record-done <task-id> --evidence "..."`, then commit.
 - **Exempt docs/config-only paths** the team agrees don't need the loop, in `.code-pact/doctor.yaml`:
   ```yaml
@@ -292,7 +292,7 @@ Recovery — pick whichever matches reality:
   ```
 - **Silence it**: add `CONTROL_PLANE_BRANCH_NOT_DRIVEN` to `disabled_checks`.
 
-**Precondition.** The gate reads the **committed** `progress.yaml`. `init` ignores only the machine-local / derived subset of `.code-pact/` (`/.code-pact/locks/`, `/.code-pact/cache/`, plus `/.local/` and `/.context/`), so by default the ledger is committable — commit it and the gate works. The check **silently skips** when `progress.yaml` is not git-tracked (e.g. you deliberately ignore `.code-pact/` — then `git add -f .code-pact/state/progress.yaml`) or when git/merge-base is unavailable. `validate` also needs the project config (`.code-pact/project.yaml`, agent/model profiles) in the CI checkout. See [Running code-pact in CI](workflows/ci.md) for the copy-paste GitHub Actions workflow, and [`docs/cli-contract.md` § `doctor`](cli-contract.md#--base-ref-and-ci-branch-drift-gating-v126-p34) for the `--base-ref` contract and the precondition.
+**Precondition.** The gate reads the **committed** ledger — the per-event files under `.code-pact/state/events/` **and** the legacy `.code-pact/state/progress.yaml`. `init` ignores only the machine-local / derived subset of `.code-pact/` (`/.code-pact/locks/`, `/.code-pact/cache/`, plus `/.local/` and `/.context/`), so by default the ledger is committable — commit it and the gate works. The check **silently skips** when neither the event files nor `progress.yaml` is git-tracked (e.g. you deliberately ignore `.code-pact/` — then `git add -f .code-pact/state/events/ .code-pact/state/progress.yaml`) or when git/merge-base is unavailable. `validate` also needs the project config (`.code-pact/project.yaml`, agent/model profiles) in the CI checkout. See [Running code-pact in CI](workflows/ci.md) for the copy-paste GitHub Actions workflow, and [`docs/cli-contract.md` § `doctor`](cli-contract.md#--base-ref-and-ci-branch-drift-gating-v126-p34) for the `--base-ref` contract and the precondition.
 
 ## `ADR_ACCEPTED_BODY_THIN` from `plan lint --include-quality` (v1.26+)
 

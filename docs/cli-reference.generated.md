@@ -69,7 +69,7 @@ code-pact task context P1-T1 --explain
 The single per-task entry point. Returns the current state, the execution
 recommendation (tier/model/effort/budget), context-pack metadata, a
 structured next_action, and a commands dictionary with the exact next
-commands to run. Progress-read-only — never mutates progress.yaml, but
+commands to run. Progress-read-only — never records a progress event, but
 writes the context pack unless --dry-run is passed.
 
 | Flag | Value | Description |
@@ -88,7 +88,7 @@ code-pact task prepare P1-T1 --agent claude-code --json
 
 `code-pact task start <task-id> [options]`
 
-Append a `started` event to progress.yaml. Idempotent — a second call from
+Record a `started` event in the progress ledger. Idempotent — a second call from
 `started` returns already_started without a duplicate event. Run once per
 implementation pass; then `task complete` when verification passes.
 
@@ -120,7 +120,7 @@ code-pact task status P1-T1 --json
 
 `code-pact task block <task-id> [options]`
 
-Append a `blocked` event to progress.yaml. A blocked task must be resumed
+Record a `blocked` event in the progress ledger. A blocked task must be resumed
 (`task resume`) before it can complete. `--reason` is required.
 
 | Flag | Value | Description |
@@ -137,7 +137,7 @@ code-pact task block P1-T1 --reason "waiting on upstream API" --json
 
 `code-pact task resume <task-id> [options]`
 
-Append a `resumed` event to progress.yaml, clearing a prior block. A
+Record a `resumed` event in the progress ledger, clearing a prior block. A
 `blocked` task must be resumed before `task complete` will run.
 
 | Flag | Value | Description |
@@ -168,8 +168,8 @@ code-pact task runbook P1-T1 --json
 
 `code-pact task complete <task-id> [options]`
 
-Run verification and, on pass, append a `done` event (source: loop) to
-progress.yaml. Idempotent — a second call from `done` returns already_done.
+Run verification and, on pass, record a `done` event (source: loop) in the
+progress ledger. Idempotent — a second call from `done` returns already_done.
 A `blocked` task must be resumed first. To record a `done` without running
 verification here — external completion, or a record_only task you verified
 yourself — use `task record-done` instead.
@@ -177,7 +177,7 @@ yourself — use `task record-done` instead.
 | Flag | Value | Description |
 | --- | --- | --- |
 | `--agent` | `<name>` | Agent name. Defaults to project default_agent. |
-| `--dry-run` | — | Show the event without writing progress.yaml. |
+| `--dry-run` | — | Show the event without recording it. |
 | `--json` | — | Emit JSON. |
 
 ```sh
@@ -206,7 +206,7 @@ The event is recorded with source: external.
 | `--evidence` (required) | `<text>` | Completion proof — a PR, a CI result, or the verification command you ran. |
 | `--notes` | `<text>` | Optional note stored on the progress event. |
 | `--agent` | `<name>` | Agent name. Defaults to project default_agent. |
-| `--dry-run` | — | Show the event without writing progress.yaml. |
+| `--dry-run` | — | Show the event without recording it. |
 | `--json` | — | Emit JSON. |
 
 ```sh

@@ -273,21 +273,21 @@ export const messages = {
       agentNotFound: (name: string): string =>
         `エージェント "${name}" は project.yaml に設定されていません。`,
       verificationFailed: (taskId: string): string =>
-        `タスク "${taskId}" の verify が失敗しました。progress.yaml は変更されていません。`,
+        `タスク "${taskId}" の verify が失敗しました。progress イベントは記録されていません。`,
       causeDecision: (taskId: string, reason: string): string =>
         reason
-          ? `${taskId} は完了前に accepted な ADR が必要です: ${reason}。progress.yaml は変更されていません。`
-          : `${taskId} は完了前に accepted な ADR が必要です。progress.yaml は変更されていません。`,
+          ? `${taskId} は完了前に accepted な ADR が必要です: ${reason}。progress イベントは記録されていません。`
+          : `${taskId} は完了前に accepted な ADR が必要です。progress イベントは記録されていません。`,
       causeCommands: (taskId: string, reason: string): string =>
         reason
-          ? `${taskId}: 検証コマンドが失敗しました: ${reason}。progress.yaml は変更されていません。`
-          : `${taskId}: 検証コマンドが失敗しました。progress.yaml は変更されていません。`,
+          ? `${taskId}: 検証コマンドが失敗しました: ${reason}。progress イベントは記録されていません。`
+          : `${taskId}: 検証コマンドが失敗しました。progress イベントは記録されていません。`,
       alreadyDone: (taskId: string): string =>
         `タスク "${taskId}" には既に done イベントが存在します。再 verify をスキップしました (idempotent)。`,
       success: (taskId: string, agent: string): string =>
         `タスク "${taskId}" の done イベントを記録しました (agent: ${agent})。`,
       dryRun: (taskId: string): string =>
-        `Dry run: タスク "${taskId}" の done イベントを追記する想定です。progress.yaml は変更されていません。`,
+        `Dry run: タスク "${taskId}" の done イベントを追記する想定です。progress イベントは記録されていません。`,
       invalidTransition: (taskId: string, current: string): string =>
         `タスク "${taskId}" は ${current} 状態です。先に \`code-pact task resume ${taskId}\` を実行してください。`,
     },
@@ -302,11 +302,11 @@ export const messages = {
       decisionRequired: (taskId: string): string =>
         `タスク "${taskId}" を done にするには decision ADR が必要です。`,
       alreadyDone: (taskId: string): string =>
-        `タスク "${taskId}" には既に done イベントが存在します。progress.yaml は変更されていません (idempotent)。`,
+        `タスク "${taskId}" には既に done イベントが存在します。progress イベントは記録されていません (idempotent)。`,
       success: (taskId: string, agent: string): string =>
         `タスク "${taskId}" の external done イベントを記録しました (agent: ${agent})。`,
       dryRun: (taskId: string): string =>
-        `Dry run: タスク "${taskId}" の external done イベントを追記する想定です。progress.yaml は変更されていません。`,
+        `Dry run: タスク "${taskId}" の external done イベントを追記する想定です。progress イベントは記録されていません。`,
       invalidTransition: (taskId: string, current: string): string =>
         `タスク "${taskId}" は ${current} 状態です。先に \`code-pact task resume ${taskId}\` を実行してください。`,
     },
@@ -362,7 +362,7 @@ export const messages = {
       success: (taskId: string, agent: string): string =>
         `タスク "${taskId}" の started イベントを記録しました (agent: ${agent})。`,
       alreadyStarted: (taskId: string): string =>
-        `タスク "${taskId}" は既に started 状態です。progress.yaml は変更されていません。`,
+        `タスク "${taskId}" は既に started 状態です。progress イベントは記録されていません。`,
       invalidTransition: (taskId: string, current: string): string =>
         `状態 "${current}" からタスク "${taskId}" を start できません。`,
     },
@@ -475,7 +475,7 @@ export const messages = {
         "`task prepare` の外でコンテキストパックが必要な場合のみ、直接取得する (診断用 — `task prepare` は既にそのメタデータを返している):",
       step2: "タスクを実装する。",
       step3:
-        "タスクを完了としてマークする。verify を実行し、成功すれば `done` イベントを `.code-pact/state/progress.yaml` に追記する:",
+        "タスクを完了としてマークする。verify を実行し、成功すれば `done` イベントを `.code-pact/state/events/` に記録する:",
       step3FailDetail:
         "verify が失敗した場合、このコマンドは exit 1 を返し progress.yaml は変更されません。",
       step3IdempotentDetail:

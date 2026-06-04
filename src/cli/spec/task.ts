@@ -14,7 +14,7 @@ const prepare: CommandSpec = {
     "The single per-task entry point. Returns the current state, the execution",
     "recommendation (tier/model/effort/budget), context-pack metadata, a",
     "structured next_action, and a commands dictionary with the exact next",
-    "commands to run. Progress-read-only — never mutates progress.yaml, but",
+    "commands to run. Progress-read-only — never records a progress event, but",
     "writes the context pack unless --dry-run is passed.",
   ].join("\n"),
   // NOT `readOnly: true`: prepare leaves progress.yaml untouched but DOES write
@@ -37,15 +37,15 @@ const complete: CommandSpec = {
   command: "complete",
   positional: "<task-id>",
   summary: [
-    "Run verification and, on pass, append a `done` event (source: loop) to",
-    "progress.yaml. Idempotent — a second call from `done` returns already_done.",
+    "Run verification and, on pass, record a `done` event (source: loop) in the",
+    "progress ledger. Idempotent — a second call from `done` returns already_done.",
     "A `blocked` task must be resumed first. To record a `done` without running",
     "verification here — external completion, or a record_only task you verified",
     "yourself — use `task record-done` instead.",
   ].join("\n"),
   flags: [
     { name: "agent", value: "<name>", description: "Agent name. Defaults to project default_agent." },
-    { name: "dry-run", description: "Show the event without writing progress.yaml." },
+    { name: "dry-run", description: "Show the event without recording it." },
     { name: "json", description: "Emit JSON." },
   ],
   examples: ["code-pact task complete P1-T1 --agent claude-code --json"],
@@ -133,7 +133,7 @@ const start: CommandSpec = {
   command: "start",
   positional: "<task-id>",
   summary: [
-    "Append a `started` event to progress.yaml. Idempotent — a second call from",
+    "Record a `started` event in the progress ledger. Idempotent — a second call from",
     "`started` returns already_started without a duplicate event. Run once per",
     "implementation pass; then `task complete` when verification passes.",
   ].join("\n"),
@@ -162,7 +162,7 @@ const block: CommandSpec = {
   command: "block",
   positional: "<task-id>",
   summary: [
-    "Append a `blocked` event to progress.yaml. A blocked task must be resumed",
+    "Record a `blocked` event in the progress ledger. A blocked task must be resumed",
     "(`task resume`) before it can complete. `--reason` is required.",
   ].join("\n"),
   flags: [
@@ -178,7 +178,7 @@ const resume: CommandSpec = {
   command: "resume",
   positional: "<task-id>",
   summary: [
-    "Append a `resumed` event to progress.yaml, clearing a prior block. A",
+    "Record a `resumed` event in the progress ledger, clearing a prior block. A",
     "`blocked` task must be resumed before `task complete` will run.",
   ].join("\n"),
   flags: [
@@ -225,7 +225,7 @@ const recordDone: CommandSpec = {
     { name: "evidence", value: "<text>", required: true, description: "Completion proof — a PR, a CI result, or the verification command you ran." },
     { name: "notes", value: "<text>", description: "Optional note stored on the progress event." },
     { name: "agent", value: "<name>", description: "Agent name. Defaults to project default_agent." },
-    { name: "dry-run", description: "Show the event without writing progress.yaml." },
+    { name: "dry-run", description: "Show the event without recording it." },
     { name: "json", description: "Emit JSON." },
   ],
   examples: [

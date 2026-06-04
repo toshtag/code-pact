@@ -80,9 +80,9 @@ See [`docs/concepts/sample-phase.md` § TUTORIAL is a reserved phase id](sample-
 | `init` (sample-phase path) | Yes | `writeSamplePhase()` → `createPhase` (with bypass for the reserved `TUTORIAL` id) |
 | `phase add` / `phase new` / `phase import` | Yes | All route through `createPhase` |
 | `task add` | No | Phase YAML only |
-| `task complete` | No | `progress.yaml` (lock-free; concurrency caveat — see § Advisory write lock) |
+| `task complete` | No | writes a per-event file under `state/events/` (lock-free — distinct files are concurrency-safe by construction; see § Advisory write lock) |
 | `task finalize --write` / `phase reconcile --write` | No | Phase YAML only (`tasks[].status` flips) |
-| `task start` / `task block` / `task resume` / `task status` | No | `progress.yaml` only, or read-only |
+| `task start` / `task block` / `task resume` / `task status` | No | a per-event file under `state/events/` only, or read-only |
 
 The four `createPhase` callers are the **only** code paths that mutate the roadmap. This is enforced structurally — no other module calls into the roadmap saver. Future commands that need to mutate the roadmap must go through `createPhase` (or land an RFC update that extends this writer list).
 
