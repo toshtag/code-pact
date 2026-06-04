@@ -107,11 +107,13 @@ For the same git SHA and the same inputs:
 Where a command writes deterministic artifacts (context pack, adapter
 files), the same input produces the same on-disk bytes.
 
-### Progress is append-only
+### Progress is an append-only event log
 
-`.code-pact/state/progress.yaml` is an append-only event log. The
-only verbs that append to it are `task start`, `task block`, `task
-resume`, `task complete`, and `task record-done` (v1.21+, which records
+The progress ledger is an append-only event log — code-pact never edits a past
+event. Each event is its own file under `.code-pact/state/events/` (a legacy
+monolithic `.code-pact/state/progress.yaml`, if present, is still read and
+merged). The only verbs that record an event are `task start`, `task block`,
+`task resume`, `task complete`, and `task record-done` (v1.21+, which records
 a `done` event with `source: external` — either for work completed
 outside the loop or for the `record_only` lane after you ran the
 project's verification by hand). Read-only verbs — including `task
