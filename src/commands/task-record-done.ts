@@ -3,7 +3,8 @@ import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { Project } from "../core/schemas/project.ts";
 import type { ProgressEvent } from "../core/schemas/progress-event.ts";
-import { appendEvent, loadProgressLog } from "../core/progress/io.ts";
+import { loadProgressLog } from "../core/progress/io.ts";
+import { writeEventFile } from "../core/progress/events-io.ts";
 import { deriveTaskState } from "../core/progress/task-state.ts";
 import { resolveTaskInRoadmap } from "../core/plan/resolve-task.ts";
 import { checkDecision, loadPhase, type CheckResult } from "./verify.ts";
@@ -223,7 +224,7 @@ export async function runTaskRecordDone(
   }
 
   // ---- Step 9: append + atomic write (shared helper) ----
-  await appendEvent(cwd, event);
+  await writeEventFile(cwd, event);
 
   return {
     kind: "done",

@@ -9,7 +9,12 @@ import {
 } from "../schemas/progress-event.ts";
 import { Roadmap, type PhaseRef, type Roadmap as RoadmapT } from "../schemas/roadmap.ts";
 import type { Task as TaskT } from "../schemas/task.ts";
-import { progressPath } from "../progress/io.ts";
+import { mergeProgressStreams, progressPath } from "../progress/io.ts";
+import {
+  eventsDir,
+  type LoadedEventFile,
+  readEventFiles,
+} from "../progress/events-io.ts";
 import type { FileIssue } from "./shared.ts";
 
 export type PhaseEntry = {
@@ -86,16 +91,24 @@ export async function loadPlanState(cwd: string): Promise<PlanState> {
 
   let progress: PlanState["progress"] = null;
   const progPath = progressPath(cwd);
+  let legacyEvents: ProgressEvent[] = [];
+  let hasLegacy = false;
   try {
     const raw = await readFile(progPath, "utf8");
     const parsed = ProgressLog.safeParse(parseYaml(raw) as unknown);
     if (!parsed.success) {
       throw new ParseError(progPath, parsed.error.issues);
     }
-    progress = { path: progPath, events: parsed.data.events };
+    legacyEvents = parsed.data.events;
+    hasLegacy = true;
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code !== "ENOENT") throw err;
+  }
+  // Merge the per-event ledger (strict: a corrupt event file propagates).
+  const eventFiles = await readEventFiles(cwd);
+  if (hasLegacy || eventFiles.length > 0) {
+    progress = { path: progPath, events: mergeProgressStreams(legacyEvents, eventFiles) };
   }
 
   return {
@@ -177,11 +190,14 @@ export async function collectPlanArtifacts(
 
   let progress: PlanState["progress"] = null;
   const progPath = progressPath(cwd);
+  let legacyEvents: ProgressEvent[] = [];
+  let hasLegacy = false;
   try {
     const raw = await readFile(progPath, "utf8");
     const parsed = ProgressLog.safeParse(parseYaml(raw) as unknown);
     if (parsed.success) {
-      progress = { path: progPath, events: parsed.data.events };
+      legacyEvents = parsed.data.events;
+      hasLegacy = true;
     } else {
       fileIssues.push({
         code: "SCHEMA_ERROR",
@@ -194,6 +210,17 @@ export async function collectPlanArtifacts(
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code !== "ENOENT") pushParseIssue(fileIssues, err, progPath);
+  }
+  // Merge the per-event ledger (lenient: a corrupt event file is collected, not
+  // thrown, so the rest of plan lint still runs).
+  let eventFiles: LoadedEventFile[] = [];
+  try {
+    eventFiles = await readEventFiles(cwd);
+  } catch (err) {
+    pushParseIssue(fileIssues, err, eventsDir(cwd));
+  }
+  if (hasLegacy || eventFiles.length > 0) {
+    progress = { path: progPath, events: mergeProgressStreams(legacyEvents, eventFiles) };
   }
 
   const state: PlanState = {

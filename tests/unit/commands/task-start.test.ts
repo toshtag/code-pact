@@ -2,9 +2,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { parse as parseYaml } from "yaml";
 import { runTaskStart } from "../../../src/commands/task-start.ts";
-import { ProgressLog } from "../../../src/core/schemas/progress-event.ts";
+import { loadMergedProgress } from "../../../src/core/progress/io.ts";
 
 const ROADMAP_YAML = `phases:
   - id: P1
@@ -91,11 +90,10 @@ async function setupProject(
 }
 
 async function readProgress(dir: string) {
-  const raw = await readFile(
-    join(dir, ".code-pact", "state", "progress.yaml"),
-    "utf8",
-  );
-  return { raw, log: ProgressLog.parse(parseYaml(raw) as unknown) };
+  // Merged view (legacy progress.yaml + per-event files) — events written by
+  // the flipped writers land in `.code-pact/state/events/`, not progress.yaml.
+  const { raw, log } = await loadMergedProgress(dir);
+  return { raw, log };
 }
 
 let dir: string;

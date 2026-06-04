@@ -4,6 +4,8 @@ import { parse as parseYaml } from "yaml";
 import { Roadmap } from "../core/schemas/roadmap.ts";
 import { Phase } from "../core/schemas/phase.ts";
 import { ProgressLog, type ProgressEvent } from "../core/schemas/progress-event.ts";
+import { mergeProgressStreams } from "../core/progress/io.ts";
+import { readEventFiles } from "../core/progress/events-io.ts";
 import { Project } from "../core/schemas/project.ts";
 import {
   ACCEPTED_MODEL_VERSION_INPUTS,
@@ -232,12 +234,28 @@ async function checkProgressLog(
     return;
   }
 
+  // Merge the per-event ledger for orphan detection. The legacy file's
+  // INVALID_YAML / SCHEMA_ERROR classification above is unchanged; a corrupt
+  // event file is its own data-integrity error.
+  let eventFiles;
+  try {
+    eventFiles = await readEventFiles(cwd);
+  } catch (err) {
+    issues.push({
+      code: "EVENT_FILE_ID_MISMATCH",
+      severity: "error",
+      message: (err as Error).message,
+    });
+    return;
+  }
+  const events = mergeProgressStreams(parsed.data.events, eventFiles);
+
   // Build a task index for the shared orphan-event detector.
   const taskIndex = new Map<string, true>();
   for (const phase of phases) {
     for (const task of phase.tasks ?? []) taskIndex.set(task.id, true);
   }
-  for (const planIssue of detectOrphanProgressEvents(parsed.data.events, taskIndex)) {
+  for (const planIssue of detectOrphanProgressEvents(events, taskIndex)) {
     issues.push(planIssueToDoctor(planIssue));
   }
 }

@@ -1,10 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { parse as parseYaml } from "yaml";
 import { runTaskBlock } from "../../../src/commands/task-block.ts";
-import { ProgressLog } from "../../../src/core/schemas/progress-event.ts";
+import { loadMergedProgress } from "../../../src/core/progress/io.ts";
 
 const ROADMAP_YAML = `phases:
   - id: P1
@@ -117,11 +116,7 @@ describe("runTaskBlock — happy path", () => {
     expect(result.event.reason).toBe("waiting on schema review");
     expect(result.event.notes).toBeUndefined();
 
-    const raw = await readFile(
-      join(dir, ".code-pact", "state", "progress.yaml"),
-      "utf8",
-    );
-    const log = ProgressLog.parse(parseYaml(raw) as unknown);
+    const { log } = await loadMergedProgress(dir);
     expect(log.events).toHaveLength(2);
     expect(log.events[1]?.status).toBe("blocked");
     expect(log.events[1]?.reason).toBe("waiting on schema review");
@@ -135,11 +130,7 @@ describe("runTaskBlock — happy path", () => {
       reason: "another blocker",
       agent: "claude-code",
     });
-    const raw = await readFile(
-      join(dir, ".code-pact", "state", "progress.yaml"),
-      "utf8",
-    );
-    const log = ProgressLog.parse(parseYaml(raw) as unknown);
+    const { log } = await loadMergedProgress(dir);
     expect(log.events.map((e) => e.status)).toEqual([
       "started",
       "blocked",
@@ -157,11 +148,7 @@ describe("runTaskBlock — happy path", () => {
       reason,
       agent: "claude-code",
     });
-    const raw = await readFile(
-      join(dir, ".code-pact", "state", "progress.yaml"),
-      "utf8",
-    );
-    const log = ProgressLog.parse(parseYaml(raw) as unknown);
+    const { log } = await loadMergedProgress(dir);
     expect(log.events[1]?.reason).toBe(reason);
   });
 });
