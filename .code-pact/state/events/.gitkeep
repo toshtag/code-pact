@@ -1,0 +1,8 @@
+# Keeps the per-event progress ledger path tracked in this (dogfood) repo until
+# the first real event file is committed. The collaboration-safe-state RFC (A3)
+# has code-pact commit its own event ledger so it can dogfood the CI branch-drift
+# gate (CONTROL_PLANE_BRANCH_NOT_DRIVEN) — that gate silently skips when the
+# ledger is untracked (`git ls-files .code-pact/state/events/` is empty). This
+# sentinel makes the path tracked. The ledger readers (readEventFiles /
+# readEventFilesAtRev) ignore any name that is not an `<at-compact>-<id>.yaml`
+# event file, so `.gitkeep` never affects derived state.
