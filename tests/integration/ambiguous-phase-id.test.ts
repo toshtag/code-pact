@@ -32,14 +32,14 @@ afterEach(async () => {
 const PATH_A = "design/phases/P1-a.yaml";
 const PATH_B = "design/phases/P1-b.yaml";
 
-function phaseYaml(name: string, taskId: string): string {
+function phaseYaml(name: string, taskId: string, status = "planned"): string {
   return [
     "id: P1",
     `name: ${name}`,
     "weight: 10",
     "confidence: medium",
     "risk: low",
-    "status: planned",
+    `status: ${status}`,
     "objective: |",
     "  Duplicate-id fixture.",
     "definition_of_done:",
@@ -113,6 +113,34 @@ describe("AMBIGUOUS_PHASE_ID — phase-id resolution fails closed", () => {
       expect(env.data).toMatchObject({ phases: [PATH_A, PATH_B] });
     });
   }
+
+  it("phase runbook --across-phases also fails closed (in_progress duplicate)", async () => {
+    // --across-phases has its own catch; an in_progress duplicate id is pulled
+    // into scope, so the aggregation loop must surface AMBIGUOUS_PHASE_ID (not
+    // INTERNAL_ERROR).
+    const p = await createTempProject({ prefix: "code-pact-ambiguous-phase-agg-" });
+    cleanups.push(p.cleanup);
+    await mkdir(join(p.dir, "design", "phases"), { recursive: true });
+    await writeFile(
+      join(p.dir, "design", "roadmap.yaml"),
+      [
+        "phases:",
+        "  - id: P1",
+        `    path: ${PATH_A}`,
+        "    weight: 10",
+        "  - id: P1",
+        `    path: ${PATH_B}`,
+        "    weight: 10",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    await writeFile(join(p.dir, PATH_A), phaseYaml("A", "P1-T1", "in_progress"), "utf8");
+    await writeFile(join(p.dir, PATH_B), phaseYaml("B", "P1-T2", "in_progress"), "utf8");
+    const res = p.run(["phase", "runbook", "--across-phases", "--json"]);
+    expect(res.code).toBe(2);
+    expectJsonErr(res, "AMBIGUOUS_PHASE_ID");
+  });
 
   it("does NOT regress a valid (unique-id) project: phase show resolves", async () => {
     const p = await createTempProject({
