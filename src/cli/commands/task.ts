@@ -455,9 +455,18 @@ async function cmdTaskAdd(
           code === "DUPLICATE_TASK_ID"
         ) {
           if (json) {
-            process.stdout.write(
-              `${JSON.stringify({ ok: false, error: { code, message } })}\n`,
-            );
+            const envelope: Record<string, unknown> = {
+              ok: false,
+              error: { code, message },
+            };
+            if (code === "AMBIGUOUS_PHASE_ID") {
+              envelope.data = {
+                phases:
+                  (err as NodeJS.ErrnoException & { phases?: string[] }).phases ??
+                  [],
+              };
+            }
+            process.stdout.write(`${JSON.stringify(envelope)}\n`);
           } else {
             process.stderr.write(`${message}\n`);
           }

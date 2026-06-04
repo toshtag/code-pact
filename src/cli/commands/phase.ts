@@ -771,11 +771,24 @@ async function cmdPhaseRunbook(
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
       const msg = (err as Error).message;
-      const outCode = code === "CONFIG_ERROR" ? "CONFIG_ERROR" : "INTERNAL_ERROR";
+      let outCode = "INTERNAL_ERROR";
+      if (code === "CONFIG_ERROR") {
+        outCode = "CONFIG_ERROR";
+      } else if (code === "AMBIGUOUS_PHASE_ID") {
+        outCode = "AMBIGUOUS_PHASE_ID";
+      }
       if (json) {
-        process.stdout.write(
-          `${JSON.stringify({ ok: false, error: { code: outCode, message: msg } })}\n`,
-        );
+        const envelope: Record<string, unknown> = {
+          ok: false,
+          error: { code: outCode, message: msg },
+        };
+        if (code === "AMBIGUOUS_PHASE_ID") {
+          envelope.data = {
+            phases:
+              (err as NodeJS.ErrnoException & { phases?: string[] }).phases ?? [],
+          };
+        }
+        process.stdout.write(`${JSON.stringify(envelope)}\n`);
       } else {
         process.stderr.write(`${msg}\n`);
       }
