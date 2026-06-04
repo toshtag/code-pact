@@ -756,7 +756,7 @@ async function checkControlPlaneNotDriven(
     code: "CONTROL_PLANE_NOT_DRIVEN",
     severity: "warning",
     message:
-      `${realTasks} task(s) are planned and git has uncommitted changes, but progress.yaml has no started/done event for a non-TUTORIAL task — the code-pact scaffold exists but isn't being driven. ` +
+      `${realTasks} task(s) are planned and git has uncommitted changes, but the progress ledger has no started/done event for a non-TUTORIAL task — the code-pact scaffold exists but isn't being driven. ` +
       "Start a task with `code-pact task prepare <id> --agent <agent>`, or record out-of-loop work with `code-pact task record-done <id> --evidence \"...\"`. " +
       "Silence via .code-pact/doctor.yaml (disabled_checks: [CONTROL_PLANE_NOT_DRIVEN]).",
     recovery: {

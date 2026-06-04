@@ -167,7 +167,7 @@ async function checkProgressEvent(
     return {
       name: "progress_event",
       ok: false,
-      reason: `No "done" event for task "${taskId}" in progress.yaml`,
+      reason: `No "done" event for task "${taskId}" in the progress ledger`,
     };
   }
   // Zod already validates the datetime format, so if it parsed it's valid

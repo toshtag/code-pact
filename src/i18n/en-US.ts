@@ -453,7 +453,7 @@ export const messages = {
       step2: "Implement the task.",
       step3: "Mark the task complete. This runs verify and, on pass, records a `done` event under `.code-pact/state/events/`:",
       step3FailDetail:
-        "If verify fails, this command exits 1 and progress.yaml is left unchanged.",
+        "If verify fails, this command exits 1 and no progress event is recorded.",
       step3IdempotentDetail:
         "If a `done` event already exists, it is a no-op (`already_done: true`).",
       step4: "Report the result to the user.",

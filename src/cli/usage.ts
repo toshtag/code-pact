@@ -258,7 +258,7 @@ const LEAF_USAGE: Record<string, () => string> = {
       "",
       "Bulk-flip every task in the phase whose derived state is `done` but whose",
       "design status is still open. Dry-run is the default — pass --write to apply.",
-      "Mutating only with --write. Never mutates progress.yaml; advisory-only on the",
+      "Mutating only with --write. Never mutates the progress ledger; advisory-only on the",
       "phase's own status. Alias: `phase next` → `phase runbook` (not this command).",
       "",
       "Options:",

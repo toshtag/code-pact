@@ -477,7 +477,7 @@ export const messages = {
       step3:
         "タスクを完了としてマークする。verify を実行し、成功すれば `done` イベントを `.code-pact/state/events/` に記録する:",
       step3FailDetail:
-        "verify が失敗した場合、このコマンドは exit 1 を返し progress.yaml は変更されません。",
+        "verify が失敗した場合、このコマンドは exit 1 を返し progress イベントは記録されません。",
       step3IdempotentDetail:
         "`done` イベントが既に存在する場合は no-op (`already_done: true`) となります。",
       step4: "結果をユーザーに報告する。",

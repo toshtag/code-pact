@@ -123,9 +123,9 @@ export async function runTaskComplete(
   });
 
   if (!verifyResult.ok) {
-    // Surface verify result without touching progress.yaml.
+    // Surface verify result without recording an event.
     const err = new Error(
-      `Verification failed for "${taskId}". progress.yaml was not modified.`,
+      `Verification failed for "${taskId}". No progress event was recorded.`,
     );
     (err as NodeJS.ErrnoException).code = "VERIFICATION_FAILED";
     (err as NodeJS.ErrnoException & { checks?: CheckResult[] }).checks =

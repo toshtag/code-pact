@@ -183,7 +183,7 @@ export function detectOrphanProgressEvents(
     issues.push({
       code: "ORPHAN_PROGRESS_EVENT",
       severity: "warning",
-      message: `progress.yaml references task "${event.task_id}" which does not exist in any phase`,
+      message: `the progress ledger references task "${event.task_id}" which does not exist in any phase`,
       task_id: event.task_id,
     });
   }
