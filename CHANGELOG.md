@@ -13,6 +13,20 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+### Added
+
+- **`AMBIGUOUS_PHASE_ID`** (control-plane v2 PR1a). Phase-id resolution now **fails
+  closed** on a duplicate phase id — two `roadmap.yaml` entries sharing an id (e.g.
+  two branches that both minted `P1`, then merged: separate files, no git
+  conflict) — instead of silently resolving the first match. A shared
+  `src/core/plan/resolve-phase.ts` throws the new public `AMBIGUOUS_PHASE_ID`
+  (exit 2; `data.phases[]` lists the colliding files) across all eight phase
+  resolvers (`pack`, `task prepare` / `task context`, `phase show` / `reconcile` /
+  `runbook`, `verify`, `recommend`, `task add`), mirroring the P14
+  `AMBIGUOUS_TASK_ID` task resolver. Task-id ambiguity was already fail-closed;
+  only phase-id resolution silently took the first match. Valid (unique-id)
+  projects are unaffected. See `design/decisions/control-plane-v2-rfc.md` (PR1a).
+
 ### Changed
 
 - **Internal (no behaviour change).** Consolidated the eight byte-equivalent
