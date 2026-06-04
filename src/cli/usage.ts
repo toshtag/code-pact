@@ -8,7 +8,7 @@ import { TASK_SPECS } from "./spec/task.ts";
 
 /** The subcommand list shown for each cluster, mirroring the unknown-subcommand hints. */
 const CLUSTER_SUBCOMMANDS: Record<string, string> = {
-  plan: "brief | prompt | adopt | constitution | lint | normalize | analyze | import (alias for \"phase import\")",
+  plan: "brief | prompt | adopt | constitution | lint | normalize | analyze | migrate | import (alias for \"phase import\")",
   task: "add | context | prepare | start | status | block | resume | complete | record-done | finalize | runbook (aliases: reconcile = finalize, next = runbook)",
   phase: "add | new | ls | show | import | reconcile | runbook (alias: next = runbook)",
   adapter: "list | install | upgrade | doctor | conformance",
@@ -162,6 +162,25 @@ const LEAF_USAGE: Record<string, () => string> = {
       "Examples:",
       "  code-pact plan normalize --json          # check mode (default)",
       "  code-pact plan normalize --write --json  # apply",
+    ].join("\n"),
+
+  "plan migrate": () =>
+    [
+      "Usage: code-pact plan migrate [options]",
+      "",
+      "Convert a legacy monolithic .code-pact/state/progress.yaml into the",
+      "per-event ledger (one file per event under .code-pact/state/events/).",
+      "Idempotent and dry-run by default; progress.yaml is left in place (readers",
+      "merge it). Reports any task whose derived state changes under the merged",
+      "(at, id) ordering, so review those before committing.",
+      "",
+      "Options:",
+      "  --write    Write the event files (default: dry run).",
+      "  --json     Emit JSON.",
+      "",
+      "Examples:",
+      "  code-pact plan migrate --json          # dry run",
+      "  code-pact plan migrate --write --json  # migrate",
     ].join("\n"),
 
   "phase import": () =>

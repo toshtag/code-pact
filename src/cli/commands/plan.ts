@@ -47,6 +47,7 @@ import {
   runPlanAnalyze,
   serializePlanAnalyzeData,
 } from "../../commands/plan-analyze.ts";
+import { migrateProgressToEvents } from "../../core/progress/migrate.ts";
 
 export async function cmdPlan(argv: string[], locale: Locale, globalJson: boolean): Promise<number> {
   const subcommand = argv[0];
@@ -92,6 +93,10 @@ export async function cmdPlan(argv: string[], locale: Locale, globalJson: boolea
     return cmdPlanAnalyze(rest, locale, globalJson);
   }
 
+  if (subcommand === "migrate") {
+    return cmdPlanMigrate(rest, locale, globalJson);
+  }
+
   // `plan import` is a beginner-friendly alias for `phase import` (it ingests a
   // whole multi-phase roadmap, which "phase import" undersells). Shares the
   // same handler; the invoked name labels its error messages. See
@@ -100,7 +105,7 @@ export async function cmdPlan(argv: string[], locale: Locale, globalJson: boolea
     return cmdPhaseImport(rest, locale, globalJson, "plan import");
   }
 
-  const msg = `plan: unknown subcommand "${subcommand ?? ""}". Use: brief | prompt | adopt | constitution | lint | normalize | analyze | import (alias for "phase import")`;
+  const msg = `plan: unknown subcommand "${subcommand ?? ""}". Use: brief | prompt | adopt | constitution | lint | normalize | analyze | migrate | import (alias for "phase import")`;
   if (globalJson) {
     process.stdout.write(
       `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
@@ -800,6 +805,56 @@ async function cmdPlanAnalyze(
   } catch (err: unknown) {
     const code =
       (err as NodeJS.ErrnoException).code ?? "PLAN_ANALYZE_FAILED";
+    const message = err instanceof Error ? err.message : String(err);
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({ ok: false, error: { code, message } })}\n`,
+      );
+    } else {
+      process.stderr.write(`${message}\n`);
+    }
+    return 1;
+  }
+}
+
+// `plan migrate` — convert a legacy monolithic progress.yaml into the per-event
+// ledger (collaboration-safe-state RFC, B4). Idempotent; dry-run by default.
+async function cmdPlanMigrate(
+  argv: string[],
+  locale: Locale,
+  globalJson: boolean,
+): Promise<number> {
+  void locale;
+  const { values } = parseArgs({
+    args: argv,
+    options: { json: { type: "boolean" }, write: { type: "boolean" } },
+    strict: false,
+  });
+  const json = globalJson || values.json === true;
+  const write = values.write === true;
+  const cwd = process.cwd();
+
+  try {
+    const result = await migrateProgressToEvents(cwd, { write });
+    if (json) {
+      process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
+    } else {
+      const lines = [
+        result.dry_run
+          ? `Dry run (re-run with --write to migrate). ${result.legacy_events} legacy event(s) would be written to .code-pact/state/events/.`
+          : `Migrated to per-event files: ${result.written} written, ${result.already_present} already present (of ${result.legacy_events} legacy event(s)). progress.yaml is left in place.`,
+        ...(result.state_changes.length > 0
+          ? [
+              `${result.state_changes.length} task(s) change derived state under merged ordering — review before committing:`,
+              ...result.state_changes.map((c) => `  ${c.task_id}: ${c.before} → ${c.after}`),
+            ]
+          : []),
+      ];
+      process.stderr.write(`${lines.join("\n")}\n`);
+    }
+    return 0;
+  } catch (err: unknown) {
+    const code = (err as NodeJS.ErrnoException).code ?? "INTERNAL_ERROR";
     const message = err instanceof Error ? err.message : String(err);
     if (json) {
       process.stdout.write(
