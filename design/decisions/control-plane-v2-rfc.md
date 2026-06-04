@@ -1,6 +1,6 @@
 # RFC: Control-plane v2 — collaboration-safe phases, discovery, and task layout
 
-**Status:** accepted (scope-limited — authorizes PR0 + PR1 only; PR2+ gated on §5; 2026-06)
+**Status:** accepted (scope-limited — authorizes PR0 + PR1a + PR1b only; PR2+ gated on §5; 2026-06)
 
 - Phase: — (unassigned; assign at acceptance per the project's current id convention)
 - Date: 2026-06-04
@@ -12,9 +12,10 @@
 > single big-bang PR. Its job is to record the demand (the first-hand incident in
 > [§1](#1-incident-analysis)), decompose the problem, weigh alternatives honestly,
 > fix the semver story, and propose an *incremental, additive* rollout.
-> **Acceptance authorizes the investigation, PR0 (a no-behaviour-change refactor)
-> and PR1 (warning-default diagnostics) only; PR2+ stay gated on §5. Nothing
-> more.**
+> **Acceptance authorizes the investigation, PR0 (a no-behaviour-change
+> refactor), PR1a (fail-closed phase-id resolution safety — `AMBIGUOUS_PHASE_ID`,
+> exit 2) and PR1b (warning-default diagnostics) only; PR2+ stay gated on §5.
+> Nothing more.**
 
 ## Summary
 
@@ -273,8 +274,9 @@ The semver question has exactly one decisive test:
 - existing **canonical-id semantics** that downstream consumers depend on are
   changed in a breaking way.
 
-> **One PR1 behavior brushes the second trigger — and is still additive.** PR1
-> makes `task prepare` / `task context` *fail closed* on an ambiguous id. That is a
+> **One PR1a behavior brushes the second trigger — and is still additive.** PR1a
+> makes phase-id resolution *fail closed* on an ambiguous id (surfaced by
+> `task prepare` / `task context` via the context pack). That is a
 > **new error on previously-undefined input** (lenient resolution of a duplicate id
 > was never a guaranteed success contract), not a breaking change to a *working*
 > `task prepare` shape — so it is additive, not a MAJOR trigger. Flagged so the
@@ -312,7 +314,14 @@ diagnostics PR is gated** on all of:
    adversarial reviews ran and their must-fixes were applied; status was flipped
    to scope-limited `accepted`.
 
-Diagnostics (PR1 below) are exempt from gates 2–4 **only while they stay
+**PR1a is not a diagnostic and is not covered by this exemption.** It is a
+fail-closed **resolver safety fix** for undefined / corrupt input — a duplicate
+phase id that was previously resolved to a silent first match — surfacing
+`AMBIGUOUS_PHASE_ID` at exit 2. It changes an *error* path, not a warning surface,
+and ships on its own merit (a new error on previously-undefined input, §4), not
+under a soak exemption.
+
+**PR1b diagnostics** are exempt from gates 2–4 **only while they stay
 warning-default and do not affect exit outside an explicit `--strict`** (the
 established `PROGRESS_EVENT_CONFLICT` / branch-drift semantics: warning by
 default, `validate --strict` promotes). A diagnostic that is error-by-default, or
@@ -323,7 +332,9 @@ that *help gather* the incident data and are safe to ship early.
 ## 6. Recommended rollout
 
 Additive sequence, value-first. **No big-bang.** Each PR is independently
-shippable as a MINOR and independently revertible.
+shippable as a MINOR and independently revertible. (§§1–5 refer to the first
+diagnostic/safety step collectively as "**PR1**"; it is split here into the
+fail-closed **PR1a** — shipped — and the warning-default **PR1b**.)
 
 - **PR0 — Consolidate the byte-equivalent strict readers (refactor, no behaviour
   change).** Replace the 8 duplicated command-local `loadRoadmap` implementations
@@ -333,27 +344,32 @@ shippable as a MINOR and independently revertible.
   adapter generation, the lenient lint loader) stay separate and are handled in
   their own later PRs, when the discovery contract actually changes. Patch/minor,
   zero contract change.
-- **PR1 — Diagnostics first (the §1-confirmed highest-value first ship).** The
-  worst incident failures are *git-silent* (duplicate ids in separate files;
-  clean-but-wrong scalar merges), so a tool-side detector is the only guard. Note
-  `plan lint` **already** emits `DUPLICATE_PHASE_ID` / `DUPLICATE_TASK_ID` /
-  `PHASE_ID_MISMATCH` (`checks.ts:47,69,92`), all `severity: error` — single-tree,
-  post-hoc, exit-failing by default. PR1's net-new surface is therefore:
-  (a) run / surface those at the dangerous moment (merge / pre-branch, not just on
-  demand); (b) cross-branch awareness; (c) a detector for the **decidable** slice of
-  D9 only — **cross-file duplicate canonical ids** and **structural id-mismatch**
-  (roadmap-id ↔ inner phase-id, which `PHASE_ID_MISMATCH` already models). It does
-  **not** promise to catch arbitrary semantic scalar drift (e.g. an unintended
-  `weight`): with no cross-contributor invariant to violate (§1) that is
-  undecidable, so it stays a non-goal. (d) **fail closed on an ambiguous *phase*
-  id** — task-id ambiguity is already closed (`AMBIGUOUS_TASK_ID`, P14); the
-  silent path was phase-id resolution. **Shipped in PR1a** as the new
-  `AMBIGUOUS_PHASE_ID` (exit 2, `data.phases[]`) across the eight phase resolvers,
-  via a shared `resolve-phase.ts`. The **net-new** surface must be emitted at `warning`
-  severity (not by re-running the existing error-severity checks) so PR1 stays a
-  soak-exempt advisory per §5; `--strict` promotes (precedent B6). Plus the legacy
-  advisories (`LEGACY_SEQUENTIAL_PHASE_ID`, `LEGACY_INLINE_TASKS`). **Not gated on
-  the soak.**
+- **PR1a — Fail closed on an ambiguous phase id (shipped).** Phase-id resolution
+  used `roadmap.phases.find((p) => p.id === id)` in eight places — a silent
+  first-match on a duplicate id (two branches both minted `P1`, then merged). A
+  shared `src/core/plan/resolve-phase.ts` now throws the new **`AMBIGUOUS_PHASE_ID`**
+  (exit 2; `data.phases[]` lists the colliding files), mirroring the P14
+  `resolve-task.ts` / `AMBIGUOUS_TASK_ID`. Task-id ambiguity was already
+  fail-closed (`AMBIGUOUS_TASK_ID`, P14); only phase-id resolution was silently
+  first-match. This is a **fail-closed safety fix, not a warning diagnostic** — it
+  is *not* soak-exempt as a diagnostic (§5); it ships as a new error on
+  previously-undefined input (§4).
+- **PR1b — Warning-default diagnostics.** The git-silent failures (duplicate ids
+  in separate files; clean-but-wrong scalar merges) want surfacing *before* they
+  bite. `plan lint` **already** emits `DUPLICATE_PHASE_ID` / `DUPLICATE_TASK_ID` /
+  `PHASE_ID_MISMATCH` (`checks.ts:47,69,92`, all `severity: error`, single-tree,
+  post-hoc). PR1b's net-new is **warning-default** advisories —
+  `LEGACY_SEQUENTIAL_PHASE_ID`, `LEGACY_INLINE_TASKS`, and surfacing of the
+  *decidable* D9 slice (cross-file duplicate ids / structural id-mismatch,
+  `PHASE_ID_MISMATCH`-shaped) at the dangerous moment — warning by default,
+  `--strict` promotes (precedent B6). It does **not** promise arbitrary
+  semantic-scalar-drift detection (no cross-contributor invariant to violate, §1).
+  Soak-exempt **only** under the §5 warning-default condition.
+- **PR1c — Cross-branch / `--base-ref` surfacing (deferred).** Surfacing a
+  duplicate id *before* merge (branch vs base, like
+  `CONTROL_PLANE_BRANCH_NOT_DRIVEN`) is heavier and lower marginal value now that
+  single-tree detection + PR1a's fail-closed cover the post-merge case. Deferred
+  pending the forensic backfill.
 - **PR2 — Glob phase discovery, `roadmap.yaml` advisory/generated (D3/D4).**
   Discover `design/phases/*.yaml` by glob (infra exists: `src/core/glob.ts`,
   `PHASES_DIR_SEGMENTS`); honor the registry when present (dual-read); add
@@ -405,7 +421,7 @@ rollout a MINOR.
 
 Concrete, testable. **These define the *end state* of the full sequence — not a
 bar each intermediate PR must clear.** An incremental PR satisfies a subset and
-must not be judged against criteria it does not yet target. Rough mapping: PR1 →
+must not be judged against criteria it does not yet target. Rough mapping: PR1b →
 #2; PR2 → #3; PR2+PR3 → #1; PR4 → #4, #8; PR5 → #6; legacy compatibility (#5, #7)
 must hold at **every** step. (These become RFC-conformance tests per the P28
 convention when the work is taken up.)
@@ -444,14 +460,15 @@ convention when the work is taken up.)
 - **No breaking read compatibility** for existing `P<N>` / `roadmap.yaml` /
   inline-task / ledger projects.
 - **No Bucket C implementation in this RFC.** Accepting this draft authorizes the
-  incident analysis, **PR0** (no-behavior-change refactor), and **PR1**
+  incident analysis, **PR0** (no-behaviour-change refactor), **PR1a** (fail-closed
+  phase-id resolution safety — `AMBIGUOUS_PHASE_ID`, exit 2), and **PR1b**
   (warning-default diagnostics) only; PR2+ stay gated on §5.
 - **No logical/vector clocks** (out of scope; the ledger already routed this to
   detection, not silent resolution).
 
 ## Deliverables of this RFC
 
-- This RFC at `design/decisions/control-plane-v2-rfc.md`, **status: accepted (scope-limited — PR0 + PR1 only)**.
+- This RFC at `design/decisions/control-plane-v2-rfc.md`, **status: accepted (scope-limited — PR0 + PR1a + PR1b only)**.
 - The [open questions / required incident data](#open-questions--required-incident-data) below.
 - The [recommended next-PR sequence](#6-recommended-rollout) (PR0→Final).
 - The [semver recommendation](#4-semver-analysis): additive minors; v2.0.0 only as
