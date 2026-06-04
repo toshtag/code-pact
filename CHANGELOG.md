@@ -13,6 +13,14 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+### Changed
+
+- **Internal (no behaviour change).** Consolidated the eight identical
+  per-command strict `loadRoadmap` readers into one shared
+  `src/core/plan/roadmap.ts`. Prerequisite for the control-plane v2 glob-discovery
+  work (see `design/decisions/control-plane-v2-rfc.md`, PR0); the lenient
+  `plan lint` / `collectPlanArtifacts` loader is intentionally left separate.
+
 ## [1.31.0] — 2026-06-04
 
 Collaboration-safe shared state. The progress ledger moves from a single
