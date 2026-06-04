@@ -235,9 +235,16 @@ describe("auditWrites — excludes code-pact runtime state", () => {
     await git(cwd, ["commit", "--quiet", "-m", "initial"]);
   });
 
-  it("drops progress.yaml and locks/** so files_touched is empty when only those are dirty", async () => {
+  it("drops progress.yaml, state/events/**, and locks/** so files_touched is empty when only those are dirty", async () => {
     await touch(cwd, ".code-pact/state/progress.yaml", "events: []\n");
     await touch(cwd, ".code-pact/locks/write.lock", "{}\n");
+    // Per-event ledger files are runtime state too (Bucket B): a flipped writer
+    // creates them on every task command, so they must not pollute the audit.
+    await touch(
+      cwd,
+      `.code-pact/state/events/20260518T100000000Z-${"a".repeat(64)}.yaml`,
+      "task_id: P1-T1\n",
+    );
     const result = await auditWrites({ cwd, declaredWrites: [] });
     expect(result.files_touched).toEqual([]);
     // Nothing outside the (empty) declaration either — the runtime state

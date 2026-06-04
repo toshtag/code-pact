@@ -123,6 +123,22 @@ describe("runDoctor — orphan progress event", () => {
     expect(issue?.severity).toBe("warning");
     expect(issue?.message).toContain("GHOST-T99");
   });
+
+  it("treats a missing progress.yaml as empty and still reads event files (no false INVALID_YAML)", async () => {
+    await rm(join(dir, ".code-pact", "state", "progress.yaml"), { force: true });
+    await writeEventFile(dir, {
+      task_id: "GHOST-T99",
+      status: "done",
+      at: "2026-05-15T10:00:00.000Z",
+      actor: "human",
+      source: "loop",
+    } as Parameters<typeof writeEventFile>[1]);
+    const result = await runDoctor(dir);
+    expect(result.issues.find((i) => i.code === "INVALID_YAML")).toBeUndefined();
+    const orphan = result.issues.find((i) => i.code === "ORPHAN_PROGRESS_EVENT");
+    expect(orphan).toBeDefined();
+    expect(orphan?.message).toContain("GHOST-T99");
+  });
 });
 
 // ---------------------------------------------------------------------------

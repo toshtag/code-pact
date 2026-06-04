@@ -221,40 +221,52 @@ async function checkProgressLog(
   issues: DoctorIssue[],
 ): Promise<void> {
   const path = join(cwd, ".code-pact", "state", "progress.yaml");
-  const result = await safeReadYaml(path);
-  if (!result.ok) {
-    issues.push({
-      code: "INVALID_YAML",
-      severity: "error",
-      message: `Cannot read ${path}`,
-    });
-    return;
-  }
-  const parsed = ProgressLog.safeParse(result.data);
-  if (!parsed.success) {
-    issues.push({
-      code: "SCHEMA_ERROR",
-      severity: "error",
-      message: `progress.yaml failed schema validation: ${parsed.error.issues[0]?.message ?? "unknown"}`,
-    });
-    return;
+  // A missing progress.yaml is NOT an error — event files may still supply
+  // events (the post-migration / events-only state). Only an existing but
+  // unreadable / schema-invalid legacy file is INVALID_YAML / SCHEMA_ERROR.
+  let legacyEvents: ProgressEvent[] = [];
+  try {
+    const raw = await readFile(path, "utf8");
+    let doc: unknown;
+    try {
+      doc = parseYaml(raw);
+    } catch {
+      issues.push({ code: "INVALID_YAML", severity: "error", message: `Cannot read ${path}` });
+      return;
+    }
+    const parsed = ProgressLog.safeParse(doc);
+    if (!parsed.success) {
+      issues.push({
+        code: "SCHEMA_ERROR",
+        severity: "error",
+        message: `progress.yaml failed schema validation: ${parsed.error.issues[0]?.message ?? "unknown"}`,
+      });
+      return;
+    }
+    legacyEvents = parsed.data.events;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+      issues.push({ code: "INVALID_YAML", severity: "error", message: `Cannot read ${path}` });
+      return;
+    }
+    // ENOENT → missing legacy file; fall through with empty legacy events.
   }
 
-  // Merge the per-event ledger for orphan detection. The legacy file's
-  // INVALID_YAML / SCHEMA_ERROR classification above is unchanged; a corrupt
-  // event file is its own data-integrity error.
+  // Merge the per-event ledger for orphan + conflict detection. A corrupt event
+  // file is its own error: EVENT_FILE_ID_MISMATCH for a broken filename↔content
+  // invariant, SCHEMA_ERROR for an unparseable / schema-invalid event body.
   let eventFiles;
   try {
     eventFiles = await readEventFiles(cwd);
   } catch (err) {
-    issues.push({
-      code: "EVENT_FILE_ID_MISMATCH",
-      severity: "error",
-      message: (err as Error).message,
-    });
+    const code =
+      (err as NodeJS.ErrnoException).code === "EVENT_FILE_ID_MISMATCH"
+        ? "EVENT_FILE_ID_MISMATCH"
+        : "SCHEMA_ERROR";
+    issues.push({ code, severity: "error", message: (err as Error).message });
     return;
   }
-  const events = mergeProgressStreams(parsed.data.events, eventFiles);
+  const events = mergeProgressStreams(legacyEvents, eventFiles);
 
   // Build a task index for the shared orphan-event detector.
   const taskIndex = new Map<string, true>();
