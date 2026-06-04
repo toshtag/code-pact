@@ -20,8 +20,8 @@ import type {
 // Every recommended step is a command string the user runs separately,
 // or a manual_action describing a human checkpoint.
 //
-// Error codes reused (no new codes): PHASE_NOT_FOUND / CONFIG_ERROR
-// (in cli.ts argv parsing).
+// Error codes: PHASE_NOT_FOUND / AMBIGUOUS_PHASE_ID (duplicate phase id —
+// control-plane v2 PR1a) / CONFIG_ERROR (in cli.ts argv parsing).
 // ---------------------------------------------------------------------------
 
 export type PhaseRunbookOptions = {
