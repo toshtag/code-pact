@@ -31,6 +31,7 @@ Details: [JSON output shape](#json-output-shape).
 | `CONFIG_ERROR` | 2 | Bad flag, missing input, or malformed YAML | Re-check the command's flag surface below |
 | `TASK_NOT_FOUND` | 2 | Task id isn't in any phase | Verify the id (the `P1-T1` form) |
 | `AMBIGUOUS_TASK_ID` | 2 | Same id exists in multiple phases | The message lists them — qualify the id |
+| `AMBIGUOUS_PHASE_ID` | 2 | Same phase id exists in more than one `roadmap.yaml` entry (e.g. two branches both minted it, then merged) | `data.phases[]` lists the colliding files — remove or renumber the duplicate |
 | `VERIFICATION_FAILED` | 1 | `verify` / `task complete` check did not pass | On `task complete`: read `error.cause_code` — `COMMANDS_FAILED` → fix the command; `DECISION_REQUIRED` → add/accept the ADR. On standalone `verify`: inspect `data.checks` (no `cause_code`). Then re-run |
 | `INVALID_TASK_TRANSITION` | 2 | Illegal state move (e.g. completing a `blocked` task) | `task resume` first, then complete |
 | `TASK_FINALIZE_NOT_ELIGIBLE` | 2 | Task's derived state isn't `done` yet | Run `task complete` first |
@@ -172,6 +173,7 @@ CI. (For `error.cause_code` values, see [Public cause codes](#public-cause-codes
 | `PHASE_NOT_FOUND` | `phase show`, `pack`, `verify`, `recommend` | Phase id not in `roadmap.yaml` |
 | `TASK_NOT_FOUND` | `pack`, `verify`, `task context`, `task start/block/resume/complete/record-done/status` | Task id not present anywhere |
 | `AMBIGUOUS_TASK_ID` | `task context`, `task start/block/resume/complete/record-done/status` | Same task id exists in multiple phases |
+| `AMBIGUOUS_PHASE_ID` | `phase show`, `phase reconcile`, `phase runbook`, `pack`, `verify`, `recommend`, `task prepare`, `task context`, `task add` | Same phase id exists in more than one `roadmap.yaml` entry; `data.phases[]` lists the colliding files |
 | `AGENT_NOT_FOUND` | `pack`, `adapter *`, `task context`, `task start/block/resume/complete/record-done` | Agent name not in `project.yaml` |
 | `AGENT_NOT_ENABLED` | `task context`, `task start/block/resume/complete/record-done` | Agent is configured but has `enabled: false` |
 | `INVALID_TASK_TRANSITION` | `task start/block/resume/complete/record-done` | Requested state transition is not allowed from the current state |
@@ -1708,7 +1710,7 @@ The `commands` dictionary is populated in every state — including the early-re
 | Code | Condition |
 |---|---|
 | 0 | Envelope returned (including early-return states). |
-| 2 | `CONFIG_ERROR` (bad flag), `TASK_NOT_FOUND`, `AMBIGUOUS_TASK_ID`, `AGENT_NOT_FOUND`, `AGENT_NOT_ENABLED`. |
+| 2 | `CONFIG_ERROR` (bad flag), `TASK_NOT_FOUND`, `AMBIGUOUS_TASK_ID`, `AMBIGUOUS_PHASE_ID`, `AGENT_NOT_FOUND`, `AGENT_NOT_ENABLED`. |
 
 No new error codes are introduced by `task prepare`; all failure modes reuse existing codes documented above.
 
