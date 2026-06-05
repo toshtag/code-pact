@@ -11,7 +11,7 @@ import { runInit, type SupportedAgent } from "./commands/init.ts";
 import { runInitWizard } from "./commands/init-wizard.ts";
 import { runTutorial } from "./commands/tutorial.ts";
 import { SUPPORTED_AGENTS } from "./core/agents.ts";
-import { withWriteLock } from "./cli/util.ts";
+import { withWriteLock, emitOk, emitError } from "./cli/util.ts";
 import { runProgress, formatProgress } from "./commands/progress.ts";
 import { runPack } from "./commands/pack.ts";
 import { runVerify, formatVerify } from "./commands/verify.ts";
@@ -190,13 +190,7 @@ async function cmdInit(
       .filter((v): v is string => v !== null)
       .join(", ");
     const msg = `init in non-interactive/CI mode requires ${missing}. See docs/cli-contract.md.`;
-    if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
-      );
-    } else {
-      process.stderr.write(`${msg}\n`);
-    }
+    emitError(json, "CONFIG_ERROR", msg);
     return 2;
   }
 
@@ -208,13 +202,7 @@ async function cmdInit(
 
   if (agents.length === 0) {
     const msg = `Unknown agent(s): ${agentRaw}. Supported: ${[...KNOWN_AGENTS].join(", ")}`;
-    if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
-      );
-    } else {
-      process.stderr.write(`${msg}\n`);
-    }
+    emitError(json, "CONFIG_ERROR", msg);
     return 2;
   }
 
@@ -235,7 +223,7 @@ async function cmdInit(
       });
 
       if (json) {
-        process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
+        emitOk(result);
       } else {
         for (const f of result.created) {
           process.stderr.write(`  created  ${f}\n`);
@@ -259,13 +247,7 @@ async function cmdInit(
 
       if (isAlreadyInit) {
         const msg = m.init.alreadyInitialized(cwd);
-        if (json) {
-          process.stdout.write(
-            `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
-          );
-        } else {
-          process.stderr.write(`${msg}\n`);
-        }
+        emitError(json, "CONFIG_ERROR", msg);
         return 2;
       }
       throw err;
@@ -311,18 +293,12 @@ async function cmdTutorial(
   try {
     const result = await runTutorial({ locale, json, keep });
     if (json) {
-      process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
+      emitOk(result);
     }
     return 0;
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
-    if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: "TUTORIAL_FAILED", message: msg } })}\n`,
-      );
-    } else {
-      process.stderr.write(`tutorial failed: ${msg}\n`);
-    }
+    emitError(json, "TUTORIAL_FAILED", msg, { human: `tutorial failed: ${msg}` });
     return 1;
   }
 }
@@ -349,15 +325,11 @@ async function cmdDoctor(argv: string[], globalJson: boolean): Promise<number> {
 
   if (json) {
     if (result.ok) {
-      process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
+      emitOk(result);
     } else {
-      process.stdout.write(
-        `${JSON.stringify({
-          ok: false,
-          error: { code: "DOCTOR_FAILED", message: "Project health check failed" },
-          data: result,
-        })}\n`,
-      );
+      emitError(json, "DOCTOR_FAILED", "Project health check failed", {
+        data: result,
+      });
     }
   } else {
     process.stdout.write(`${formatDoctor(result)}\n`);
@@ -395,17 +367,13 @@ async function cmdValidate(argv: string[], globalJson: boolean): Promise<number>
 
   if (json) {
     if (result.ok) {
-      process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
+      emitOk(result);
     } else {
-      process.stdout.write(
-        `${JSON.stringify({
-          ok: false,
-          error: {
-            code: "VALIDATE_FAILED",
-            message: strict ? "Project has issues (strict mode)" : "Project has errors",
-          },
-          data: result,
-        })}\n`,
+      emitError(
+        json,
+        "VALIDATE_FAILED",
+        strict ? "Project has issues (strict mode)" : "Project has errors",
+        { data: result },
       );
     }
   } else {
@@ -458,13 +426,7 @@ async function cmdStatus(argv: string[], globalJson: boolean): Promise<number> {
   } catch (err) {
     if (!(err instanceof ConfigError)) throw err;
     const json = globalJson || argv.includes("--json");
-    if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: err.message } })}\n`,
-      );
-    } else {
-      process.stderr.write(`${err.message}\n`);
-    }
+    emitError(json, "CONFIG_ERROR", err.message);
     return 2;
   }
 
@@ -477,7 +439,7 @@ async function cmdStatus(argv: string[], globalJson: boolean): Promise<number> {
       ...(typeof values.phase === "string" ? { phase: values.phase } : {}),
     });
     if (json) {
-      process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
+      emitOk(result);
     } else {
       process.stdout.write(`${formatStatus(result)}\n`);
     }
@@ -489,15 +451,12 @@ async function cmdStatus(argv: string[], globalJson: boolean): Promise<number> {
     // PHASE_NOT_FOUND / AMBIGUOUS_PHASE_ID are argument-resolution errors → exit 2
     // (AMBIGUOUS surfaces the colliding paths in data.phases, like other handlers).
     const argError = code === "PHASE_NOT_FOUND" || code === "AMBIGUOUS_PHASE_ID";
-    if (json) {
-      const payload =
-        code === "AMBIGUOUS_PHASE_ID"
-          ? { ok: false, error: { code, message }, data: { phases: e.phases ?? [] } }
-          : { ok: false, error: { code, message } };
-      process.stdout.write(`${JSON.stringify(payload)}\n`);
-    } else {
-      process.stderr.write(`${message}\n`);
-    }
+    emitError(
+      json,
+      code,
+      message,
+      code === "AMBIGUOUS_PHASE_ID" ? { data: { phases: e.phases ?? [] } } : {},
+    );
     return argError ? 2 : 3;
   }
 }
@@ -581,13 +540,7 @@ async function cmdRecommend(argv: string[], locale: Locale, globalJson: boolean)
 
   if (!phaseId || !taskId) {
     const msg = "recommend requires --phase and --task";
-    if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
-      );
-    } else {
-      process.stderr.write(`${msg}\n`);
-    }
+    emitError(json, "CONFIG_ERROR", msg);
     return 2;
   }
 
@@ -596,7 +549,7 @@ async function cmdRecommend(argv: string[], locale: Locale, globalJson: boolean)
   try {
     const result = await runRecommend({ cwd, phaseId, taskId, agentName });
     if (json) {
-      process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
+      emitOk(result);
     } else {
       process.stdout.write(`${formatRecommend(result)}\n`);
     }
@@ -605,48 +558,24 @@ async function cmdRecommend(argv: string[], locale: Locale, globalJson: boolean)
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "PHASE_NOT_FOUND") {
       const msg = m.recommend.phaseNotFound(phaseId);
-      if (json) {
-        process.stdout.write(
-          `${JSON.stringify({ ok: false, error: { code: "PHASE_NOT_FOUND", message: msg } })}\n`,
-        );
-      } else {
-        process.stderr.write(`${msg}\n`);
-      }
+      emitError(json, "PHASE_NOT_FOUND", msg);
       return 2;
     }
     if (code === "AMBIGUOUS_PHASE_ID") {
       const phases =
         (err as NodeJS.ErrnoException & { phases?: string[] }).phases ?? [];
       const msg = err instanceof Error ? err.message : `Phase "${phaseId}" is ambiguous.`;
-      if (json) {
-        process.stdout.write(
-          `${JSON.stringify({ ok: false, error: { code: "AMBIGUOUS_PHASE_ID", message: msg }, data: { phases } })}\n`,
-        );
-      } else {
-        process.stderr.write(`${msg}\n`);
-      }
+      emitError(json, "AMBIGUOUS_PHASE_ID", msg, { data: { phases } });
       return 2;
     }
     if (code === "TASK_NOT_FOUND") {
       const msg = m.recommend.taskNotFound(taskId, phaseId);
-      if (json) {
-        process.stdout.write(
-          `${JSON.stringify({ ok: false, error: { code: "TASK_NOT_FOUND", message: msg } })}\n`,
-        );
-      } else {
-        process.stderr.write(`${msg}\n`);
-      }
+      emitError(json, "TASK_NOT_FOUND", msg);
       return 2;
     }
     if (code === "AGENT_NOT_FOUND") {
       const msg = m.recommend.agentNotFound(agentName);
-      if (json) {
-        process.stdout.write(
-          `${JSON.stringify({ ok: false, error: { code: "AGENT_NOT_FOUND", message: msg } })}\n`,
-        );
-      } else {
-        process.stderr.write(`${msg}\n`);
-      }
+      emitError(json, "AGENT_NOT_FOUND", msg);
       return 2;
     }
     // A malformed agent profile / invalid P47 context_budget block surfaces as a
@@ -655,13 +584,7 @@ async function cmdRecommend(argv: string[], locale: Locale, globalJson: boolean)
     // contextFit byte override. Mirrors task prepare's CONFIG_ERROR envelope.
     if (code === "CONFIG_ERROR") {
       const msg = err instanceof Error ? err.message : "Invalid configuration.";
-      if (json) {
-        process.stdout.write(
-          `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
-        );
-      } else {
-        process.stderr.write(`${msg}\n`);
-      }
+      emitError(json, "CONFIG_ERROR", msg);
       return 2;
     }
     throw err;
@@ -693,13 +616,7 @@ async function cmdVerify(argv: string[], locale: Locale, globalJson: boolean): P
 
   if (!phaseId || !taskId) {
     const msg = "verify requires --phase and --task";
-    if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
-      );
-    } else {
-      process.stderr.write(`${msg}\n`);
-    }
+    emitError(json, "CONFIG_ERROR", msg);
     return 2;
   }
 
@@ -709,15 +626,11 @@ async function cmdVerify(argv: string[], locale: Locale, globalJson: boolean): P
     const result = await runVerify({ cwd, phaseId, taskId, dryRun });
     if (json) {
       if (result.ok) {
-        process.stdout.write(`${JSON.stringify({ ok: true, data: { checks: result.checks } })}\n`);
+        emitOk({ checks: result.checks });
       } else {
-        process.stdout.write(
-          `${JSON.stringify({
-            ok: false,
-            error: { code: "VERIFICATION_FAILED", message: "Verification failed" },
-            data: { checks: result.checks },
-          })}\n`,
-        );
+        emitError(json, "VERIFICATION_FAILED", "Verification failed", {
+          data: { checks: result.checks },
+        });
       }
     } else {
       for (const c of result.checks) {
@@ -731,37 +644,19 @@ async function cmdVerify(argv: string[], locale: Locale, globalJson: boolean): P
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "PHASE_NOT_FOUND") {
       const msg = m.verify.phaseNotFound(phaseId);
-      if (json) {
-        process.stdout.write(
-          `${JSON.stringify({ ok: false, error: { code: "PHASE_NOT_FOUND", message: msg } })}\n`,
-        );
-      } else {
-        process.stderr.write(`${msg}\n`);
-      }
+      emitError(json, "PHASE_NOT_FOUND", msg);
       return 2;
     }
     if (code === "AMBIGUOUS_PHASE_ID") {
       const phases =
         (err as NodeJS.ErrnoException & { phases?: string[] }).phases ?? [];
       const msg = err instanceof Error ? err.message : `Phase "${phaseId}" is ambiguous.`;
-      if (json) {
-        process.stdout.write(
-          `${JSON.stringify({ ok: false, error: { code: "AMBIGUOUS_PHASE_ID", message: msg }, data: { phases } })}\n`,
-        );
-      } else {
-        process.stderr.write(`${msg}\n`);
-      }
+      emitError(json, "AMBIGUOUS_PHASE_ID", msg, { data: { phases } });
       return 2;
     }
     if (code === "TASK_NOT_FOUND") {
       const msg = m.verify.taskNotFound(taskId, phaseId);
-      if (json) {
-        process.stdout.write(
-          `${JSON.stringify({ ok: false, error: { code: "TASK_NOT_FOUND", message: msg } })}\n`,
-        );
-      } else {
-        process.stderr.write(`${msg}\n`);
-      }
+      emitError(json, "TASK_NOT_FOUND", msg);
       return 2;
     }
     throw err;
@@ -793,13 +688,7 @@ async function cmdPack(argv: string[], locale: Locale, globalJson: boolean): Pro
 
   if (!phaseId || !taskId) {
     const msg = "pack requires --phase and --task";
-    if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
-      );
-    } else {
-      process.stderr.write(`${msg}\n`);
-    }
+    emitError(json, "CONFIG_ERROR", msg);
     return 2;
   }
 
@@ -808,7 +697,7 @@ async function cmdPack(argv: string[], locale: Locale, globalJson: boolean): Pro
   try {
     const result = await runPack({ cwd, phaseId, taskId, agentName });
     if (json) {
-      process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
+      emitOk(result);
     } else {
       process.stderr.write(`${m.pack.written(result.outputPath, result.charCount)}\n`);
     }
@@ -817,37 +706,19 @@ async function cmdPack(argv: string[], locale: Locale, globalJson: boolean): Pro
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "PHASE_NOT_FOUND") {
       const msg = m.pack.phaseNotFound(phaseId);
-      if (json) {
-        process.stdout.write(
-          `${JSON.stringify({ ok: false, error: { code: "PHASE_NOT_FOUND", message: msg } })}\n`,
-        );
-      } else {
-        process.stderr.write(`${msg}\n`);
-      }
+      emitError(json, "PHASE_NOT_FOUND", msg);
       return 2;
     }
     if (code === "AMBIGUOUS_PHASE_ID") {
       const phases =
         (err as NodeJS.ErrnoException & { phases?: string[] }).phases ?? [];
       const msg = err instanceof Error ? err.message : `Phase "${phaseId}" is ambiguous.`;
-      if (json) {
-        process.stdout.write(
-          `${JSON.stringify({ ok: false, error: { code: "AMBIGUOUS_PHASE_ID", message: msg }, data: { phases } })}\n`,
-        );
-      } else {
-        process.stderr.write(`${msg}\n`);
-      }
+      emitError(json, "AMBIGUOUS_PHASE_ID", msg, { data: { phases } });
       return 2;
     }
     if (code === "TASK_NOT_FOUND") {
       const msg = m.pack.taskNotFound(taskId, phaseId);
-      if (json) {
-        process.stdout.write(
-          `${JSON.stringify({ ok: false, error: { code: "TASK_NOT_FOUND", message: msg } })}\n`,
-        );
-      } else {
-        process.stderr.write(`${msg}\n`);
-      }
+      emitError(json, "TASK_NOT_FOUND", msg);
       return 2;
     }
     throw err;
@@ -871,13 +742,7 @@ async function cmdProgress(argv: string[], locale: Locale, globalJson: boolean):
     // Strict parsing failed before --json could be read from values; fall back
     // to argv inspection so post-command --json is still honored.
     const json = globalJson || argv.includes("--json");
-    if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: err.message } })}\n`,
-      );
-    } else {
-      process.stderr.write(`${err.message}\n`);
-    }
+    emitError(json, "CONFIG_ERROR", err.message);
     return 2;
   }
 
@@ -888,7 +753,7 @@ async function cmdProgress(argv: string[], locale: Locale, globalJson: boolean):
   try {
     const result = await runProgress({ cwd, baseline: baselineName });
     if (json) {
-      process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
+      emitOk(result);
     } else {
       process.stdout.write(`${formatProgress(result)}\n`);
     }
@@ -896,13 +761,7 @@ async function cmdProgress(argv: string[], locale: Locale, globalJson: boolean):
   } catch (err: unknown) {
     if (err instanceof Error && (err as NodeJS.ErrnoException).code === "BASELINE_NOT_FOUND") {
       const msg = m.progress.baselineNotFound(baselineName);
-      if (json) {
-        process.stdout.write(
-          `${JSON.stringify({ ok: false, error: { code: "BASELINE_NOT_FOUND", message: msg } })}\n`,
-        );
-      } else {
-        process.stderr.write(`${msg}\n`);
-      }
+      emitError(json, "BASELINE_NOT_FOUND", msg);
       return 2;
     }
     throw err;
@@ -926,7 +785,7 @@ async function main(): Promise<number> {
   if (globalValues.version) {
     const version = await readPackageVersion();
     if (json) {
-      process.stdout.write(`${JSON.stringify({ ok: true, data: { version } })}\n`);
+      emitOk({ version });
     } else {
       process.stdout.write(`${version}\n`);
     }
@@ -982,16 +841,7 @@ async function main(): Promise<number> {
       return cmdSpec(rest, locale, json);
 
     default: {
-      if (json) {
-        process.stdout.write(
-          `${JSON.stringify({
-            ok: false,
-            error: { code: "UNKNOWN_COMMAND", message: m.unknownCommand(command ?? "") },
-          })}\n`,
-        );
-      } else {
-        process.stderr.write(`${m.unknownCommand(command ?? "")}\n`);
-      }
+      emitError(json, "UNKNOWN_COMMAND", m.unknownCommand(command ?? ""));
       return 2;
     }
   }
