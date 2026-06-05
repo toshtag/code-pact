@@ -510,6 +510,23 @@ function formatStatus(r: StatusResult): string {
     lines.push(`(filtered to author: ${r.filter.author} — matches your resolved author identity)`);
   }
   const who = (a?: string) => (a ? ` — ${a}` : "");
+  // Conflicts are an exception signal — printed first and only when present, so
+  // a healthy project stays calm and a real conflict stands out. (The JSON
+  // envelope always carries `conflicts`, possibly empty; this is human-only.)
+  if (r.conflicts.length > 0) {
+    lines.push(`Conflicts (${r.conflicts.length}) — reconcile progress events (see code-pact status --json data.conflicts[].details.events[]):`);
+    for (const c of r.conflicts) {
+      // Normally always populated; if attribution degraded to empty sides, say so
+      // rather than printing an empty `()` — the conflict signal still stands.
+      const sides =
+        c.details.events.length > 0
+          ? c.details.events
+              .map((e) => (e.author ? `${e.status} by ${e.author}` : e.status))
+              .join(" vs ")
+          : "details unavailable";
+      lines.push(`  ${c.task_id}  (${sides})`);
+    }
+  }
   lines.push(`In flight (${r.in_flight.length}):`);
   for (const e of r.in_flight) lines.push(`  ${e.task_id}${who(e.author)}`);
   lines.push(`Blocked (${r.blocked.length}):`);

@@ -107,10 +107,26 @@ corruption is invisible until a check runs. An agent must treat these as
   ids** that both define the task). Do **not** retry the same id; resolve the
   underlying duplicate first (the `plan lint` errors above), then re-run the
   original command.
+- `PROGRESS_EVENT_CONFLICT` (warning from `plan analyze` / `doctor`, and the
+  `code-pact status` overview as `data.conflicts[]`) — two contributors recorded
+  **incompatible lifecycle events** for one task (a `done` after `done`, a second
+  `started`, an event after a terminal `done`). The reducer stays total, so this
+  is advisory by default — but it is a real concurrent edit. It carries a
+  structured `details.events[]` (`{ event_id, status, author?, at }`, D3) naming
+  *who* produced each side, so you do not parse prose: read it from
+  `code-pact status --json | jq '.data.conflicts[]'` (or `doctor --json`),
+  decide which event is correct, and remove/correct the other. `event_id` is the
+  content id — the *suffix* of a per-event filename `<at-compact>-<event_id>.yaml`,
+  so locate the file with the `.code-pact/state/events/*-<event_id>.yaml` glob
+  (the filename has an `<at-compact>-` prefix, so the id alone is not the name);
+  for an event that lives only in a legacy `.code-pact/state/progress.yaml` there
+  is no per-event file (reconcile `progress.yaml`, or migrate it, instead). Do
+  **not** auto-pick a winner.
 
 The tool deliberately surfaces these rather than auto-resolving them — picking a
 winner silently is how a teammate's work gets overwritten. Full per-code recovery
-steps: [`docs/troubleshooting.md` § Id collisions & mismatches](troubleshooting.md#id-collisions--mismatches-collaboration).
+steps: [`docs/troubleshooting.md` § Id collisions & mismatches](troubleshooting.md#id-collisions--mismatches-collaboration)
+and [§ `PROGRESS_EVENT_CONFLICT`](troubleshooting.md#progress_event_conflict-from-doctor--plan-analyze-v131).
 
 ### Determinism
 

@@ -211,17 +211,18 @@ no load, no array spread, no whole-file rewrite. Consequences:
   survive. (The advisory-lock exclusion at `governance.md:52` becomes safe by
   construction rather than by unkept promise.)
 - **Idempotent create**: the writer uses `wx`; an `EEXIST` means the identical
-  event is already on disk (same content → same full-id filename, B5) → treat as
+  event is already on disk (same content → same `<at-compact>-<id>.yaml` filename, B5) → treat as
   success, not error. This is what makes re-runs and migration (B4) safe with no
   bookkeeping, and it is the *only* write-path collision case — there is no
   distinct-event filename clash to resolve.
 - **No branch-merge corruption**: distinct filenames mean git never has to merge
   two appends to the same line. Two branches each adding *different* events merge
   cleanly (new files on both sides). The only path-level collision is two
-  branches writing the **same** event — same content → same full-id filename →
+  branches writing the **same** event — same content → same `<at-compact>-<id>.yaml` filename →
   git sees identical files, a trivial resolution. *Semantic* conflicts (different
   events asserting incompatible task lifecycles) are **not** filename collisions;
-  they are detected at read time by B6.
+  they are detected at read time by B6 (surfaced by `plan analyze` / `doctor`,
+  and `status.data.conflicts[]` since D3).
 
 ### B2 — Deterministic, glob-order-independent merge order
 
@@ -278,8 +279,8 @@ array is assembled, not its shape**, so consumers are untouched.
 
 The reducer `deriveTaskState` keeps using `history[length-1]` unchanged. **It is
 deliberately not made conflict-aware** — it stays total and deterministic for
-compatibility; surfacing genuine conflicts is B6's job (doctor/verify), not the
-reducer's.
+compatibility; surfacing genuine conflicts is B6's job (`plan analyze` / `doctor`,
+and `status.data.conflicts[]` since D3), not the reducer's.
 
 ### B4 — Idempotent migration
 
@@ -287,9 +288,9 @@ reducer's.
 
 - For each event in the legacy `progress.yaml`, write the corresponding
   event-file. Idempotent by construction: the id is content-derived **and the
-  filename is the full id** (B5), so a re-run's `wx` hits `EEXIST` on the *same*
-  event and treats it as "already migrated → skip" — there is no distinct-event
-  ambiguity to disambiguate.
+  filename embeds the full id as its suffix** (`<at-compact>-<id>.yaml`, B5), so a
+  re-run's `wx` hits `EEXIST` on the *same* event and treats it as "already
+  migrated → skip" — there is no distinct-event ambiguity to disambiguate.
 - Leaves `progress.yaml` in place (readers keep merging it), so re-running is a
   no-op and partial migrations are safe. Optionally emptying/removing it is a
   later, separate step once a repo has fully cut over.
@@ -307,8 +308,10 @@ digest, stored in the event body. **The filename is `<at-compact>-<full-id>.yaml
 — the full digest, not a truncated prefix** — where `<at-compact>` is the
 **normalized (UTC) `at`** rendered compactly (`YYYYMMDDTHHMMSSsssZ`) for a
 human-browsable, roughly-chronological `ls`. Both parts are fully determined by
-content, so the **filename is a bijection with the `id`**: a filename collision
-occurs **iff** the events are *canonically identical* (same canonical payload).
+the canonical event, so the **filename is deterministically derived from content**
+— and in bijection with the `id` (same `id` ⟺ same filename, since `<at-compact>`
+is itself content-derived): a filename collision occurs **iff** the events are
+*canonically identical* (same canonical payload).
 That collapses the write-path collision question to a single rule — a
 pre-existing final file (published via a temp file + `link`, so it is never
 overwritten) means *the canonically identical event is already on disk*
@@ -316,9 +319,10 @@ overwritten) means *the canonically identical event is already on disk*
 fallback. (A truncated
 `id12` filename would reintroduce an undefined case: two distinct events sharing
 an `at`-ms **and** a 12-hex prefix collide on path while differing in full id.
-The full-digest filename is ~90 chars — well under the 255 limit — and buys an
-unconditional collision-free property; readability is the cheaper thing to give
-up.) Dedup is on the full `id`, which now equals the filename. Reuse the
+The `<at-compact>-<id>.yaml` filename (full digest, not a truncated prefix) is
+~90 chars — well under the 255 limit — and buys an unconditional collision-free
+property; readability is the cheaper thing to give up.) Dedup is on the full `id`
+(the digest carried as the filename suffix). Reuse the
 project's existing sha256-hex convention (`node:crypto` `createHash`, as in
 [`src/core/adapters/manifest.ts:95`](../../src/core/adapters/manifest.ts)); add
 only the `canonicalizeEvent` step below.
@@ -358,10 +362,14 @@ genuine semantic conflict that should *surface*. But the reducer (B3) takes
 real only if something detects the conflict. That detector is a new
 `detectProgressEventConflicts(events)` in `src/core/plan/checks.ts`, mirroring
 the existing `detectOrphanProgressEvents` (same file, same issue shape), emitting
-`PROGRESS_EVENT_CONFLICT` (`severity: "warning"`) from `doctor` (and reported in
-`verify`'s consistency pass). **default → warning; `validate --strict` →
-failure.** Advisory by default — never changes exit on its own; promoted to a
-hard failure by `validate --strict`, the same established strict path that gates
+`PROGRESS_EVENT_CONFLICT` (`severity: "warning"`) from `plan analyze` and
+`doctor` (and, since Collaboration UX D3, from `code-pact status` as
+`data.conflicts[]` with structured attribution). It is **not** a `plan lint`
+diagnostic and `verify` does not surface it. **default → warning; `validate
+--strict` → failure** because `validate` delegates to `doctor` (`runDoctor()`)
+and promotes its warnings under `--strict`; `plan analyze` is a separate reporting
+surface. Advisory by default — never changes exit on its own; promoted to a hard
+failure by `validate --strict`, the same established strict path that gates
 P34's branch-drift advisory (see
 [`ci-branch-drift-rfc.md`](ci-branch-drift-rfc.md): `runValidate`'s strict
 semantics already fail on warnings, so no new gate machinery is needed). This is
@@ -457,7 +465,8 @@ conflict — driven by the tool, not human discipline. Concretely:
    path in this RFC.
 7. A merged event set with incompatible lifecycle events for one task (e.g. two
    branches both `done` it) yields a `PROGRESS_EVENT_CONFLICT` from
-   `doctor`/`verify` — the conflict surfaces, it is not silently resolved.
+   `plan analyze` / `doctor` (and `status.data.conflicts[]` since D3) — the
+   conflict surfaces, it is not silently resolved.
 8. Migration reports any task whose derived state changes under `at`-sort versus
    the legacy array order.
 
@@ -476,12 +485,13 @@ conflict — driven by the tool, not human discipline. Concretely:
   optional is **rejected by `ProgressEvent.parse`**, not silently normalized.
 - **Concurrency / idempotent create:** two writers producing distinct event-files
   both survive (no read-modify-write race); re-writing the *same* event hits
-  `wx` `EEXIST` on the identical full-id filename and is treated as success.
+  `wx` `EEXIST` on the identical `<at-compact>-<id>.yaml` filename and is treated as success.
 - **Merge:** apply two divergent branches' event sets; assert union, no loss, no
   dup (conflict-free; RFC-conformance test per the P28 convention).
 - **Conflict detection:** a merged set with incompatible same-task lifecycle
-  events emits `PROGRESS_EVENT_CONFLICT` (warning) from doctor/verify, while the
-  reducer still returns a derived state.
+  events emits `PROGRESS_EVENT_CONFLICT` (warning) from `plan analyze` / `doctor`
+  (and `status.data.conflicts[]` since D3), while the reducer still returns a
+  derived state.
 - **Migration idempotency + report:** run twice → second run is a no-op
   (unchanged tree); a fixture whose array order ≠ `at` order is flagged as a
   derived-state change on migrate.
@@ -527,9 +537,11 @@ Residual after review (decide at implementation):
 
 - **Migration command name:** `plan migrate --events` vs `task migrate` vs a new
   verb — pick to fit the existing command clustering (P27).
-- **Lint inclusion:** is `PROGRESS_EVENT_CONFLICT` *also* surfaced by `plan lint`,
-  or doctor/verify-only? Mirror the `ORPHAN_PROGRESS_EVENT` choice, which is
-  analyze/doctor-only and deliberately not in lint (`src/core/plan/lint.ts:89`).
+- **Lint inclusion (decided by implementation):** `PROGRESS_EVENT_CONFLICT` stays
+  **out** of `plan lint`. It is surfaced by `plan analyze` / `doctor`, and — since
+  Collaboration UX D3 — by `status.data.conflicts[]`; `verify` does not surface
+  it. This mirrors the `ORPHAN_PROGRESS_EVENT` choice, which is analyze/doctor-only
+  and deliberately not in lint (`src/core/plan/lint.ts:89`).
 - **Blanket-ignore advisory (A1 follow-up):** `init` cannot delete a user's
   pre-existing blanket `/.code-pact/` ignore (it never removes user lines), so the
   shared-vs-local policy is *written*, not *enforced*. A `doctor` (and/or `init`)
@@ -544,7 +556,8 @@ Resolved during review (B2/B5/backward-compat hardening):
   ignore; the "solo exception" framing is rejected.
 - **Q2.** `progress.yaml` is read-merged indefinitely; the new writer never
   rewrites it; cleanup is a future explicit opt-in command.
-- **Q3.** Full sha256 id stored in the event body; **filename uses the full id**
-  (not a truncated prefix — see the B5 rationale for why `id12` is rejected);
+- **Q3.** Full sha256 id stored in the event body; **filename uses the full id as
+  its suffix** (`<at-compact>-<id>.yaml`, not a truncated prefix — see the B5
+  rationale for why `id12` is rejected);
   dedup on the full id. Reuse `node:crypto` `createHash`; add only
   `canonicalizeEvent()`.

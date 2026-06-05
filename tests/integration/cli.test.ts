@@ -3,7 +3,7 @@
 // starts so files can run in parallel without racing tsup cleanup.
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
 import { spawnSync } from "node:child_process";
-import { mkdtemp, rm, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
@@ -962,6 +962,67 @@ describe("CLI: status (v1.32)", () => {
     expect(res.code).toBe(0);
     expect(res.stdout).toContain("Totals are for the selected scope, not only --mine results.");
     expect(res.stdout).not.toContain("whole project");
+  });
+
+  it("surfaces conflicts[] with attributed details.events[] (D3), JSON + human", async () => {
+    await setupWithTask();
+    // Two `done` events for P1-T1 (done-after-done) — what two branches merging
+    // can produce. A real PROGRESS_EVENT_CONFLICT the overview must name.
+    await mkdir(join(tmpDir, ".code-pact", "state"), { recursive: true });
+    await writeFile(
+      join(tmpDir, ".code-pact", "state", "progress.yaml"),
+      [
+        "events:",
+        "  - task_id: P1-T1",
+        "    status: done",
+        '    at: "2026-06-01T10:00:00.000Z"',
+        "    actor: agent",
+        "    agent: claude-code",
+        "    author: Ada",
+        "    source: loop",
+        "  - task_id: P1-T1",
+        "    status: done",
+        '    at: "2026-06-01T11:00:00.000Z"',
+        "    actor: agent",
+        "    agent: claude-code",
+        "    author: Bo",
+        "    source: loop",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const res = run(["status", "--json"]);
+    expect(res.code).toBe(0);
+    const parsed = JSON.parse(res.stdout) as {
+      data: {
+        conflicts: {
+          task_id: string;
+          code: string;
+          details: { events: { author?: string; status: string; event_id: string }[] };
+        }[];
+      };
+    };
+    expect(parsed.data.conflicts).toHaveLength(1);
+    expect(parsed.data.conflicts[0]?.task_id).toBe("P1-T1");
+    expect(parsed.data.conflicts[0]?.code).toBe("PROGRESS_EVENT_CONFLICT");
+    expect(parsed.data.conflicts[0]?.details.events.map((e) => e.author)).toEqual([
+      "Ada",
+      "Bo",
+    ]);
+    for (const e of parsed.data.conflicts[0]!.details.events) {
+      expect(e.event_id).toMatch(/^[0-9a-f]{64}$/);
+    }
+
+    // Human output prints a prominent Conflicts section naming the authors.
+    const human = run(["status"]);
+    expect(human.code).toBe(0);
+    expect(human.stdout).toContain("Conflicts (1)");
+    expect(human.stdout).toContain("done by Ada vs done by Bo");
+    // This conflict came from a LEGACY progress.yaml — there is no per-event file,
+    // so the recovery hint must NOT assert `.code-pact/state/events/` (it would
+    // send a user hunting for a file that does not exist).
+    expect(human.stdout).not.toContain(".code-pact/state/events/");
   });
 });
 

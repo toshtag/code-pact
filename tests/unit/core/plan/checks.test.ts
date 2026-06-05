@@ -718,6 +718,60 @@ describe("detectProgressEventConflicts (B6)", () => {
     expect(issues[0]?.task_id).toBe("P1-T1");
   });
 
+  it("names the conflicting side(s) with attribution in details.events[] (D3)", () => {
+    const issues = detectProgressEventConflicts([
+      ev("P1-T1", "done", "2026-05-18T10:00:00.000Z", { source: "loop", author: "Ada" }),
+      ev("P1-T1", "done", "2026-05-18T11:00:00.000Z", { source: "loop", author: "Bo" }),
+    ]);
+    expect(issues).toHaveLength(1);
+    const events = (issues[0]?.details as { events: unknown[] }).events as {
+      event_id: string;
+      status: string;
+      at: string;
+      author?: string;
+    }[];
+    // Both conflicting sides named here, chronological (the establishing event
+    // then the offender); the first-event-invalid case below names just one.
+    expect(events).toHaveLength(2);
+    expect(events.map((e) => e.status)).toEqual(["done", "done"]);
+    expect(events.map((e) => e.author)).toEqual(["Ada", "Bo"]);
+    expect(events.map((e) => e.at)).toEqual([
+      "2026-05-18T10:00:00.000Z",
+      "2026-05-18T11:00:00.000Z",
+    ]);
+    // event_id is the 64-hex content id (the filename's id suffix), the two differ.
+    for (const e of events) expect(e.event_id).toMatch(/^[0-9a-f]{64}$/);
+    expect(events[0]?.event_id).not.toBe(events[1]?.event_id);
+    // The human message names the authors too (the same facts, rendered).
+    expect(issues[0]?.message).toContain("by Ada");
+    expect(issues[0]?.message).toContain("by Bo");
+    // The message must NOT assert a per-event file path: the conflict can come
+    // from a legacy progress.yaml with no `.code-pact/state/events/` file. It
+    // points at details.events[] instead.
+    expect(issues[0]?.message).not.toContain(".code-pact/state/events/");
+    expect(issues[0]?.message).toContain("details.events[]");
+  });
+
+  it("omits author per-event for legacy/anonymous events (D3)", () => {
+    const issues = detectProgressEventConflicts([
+      ev("P1-T1", "started", "2026-05-18T10:00:00.000Z"), // no author
+      ev("P1-T1", "started", "2026-05-18T10:00:01.000Z", { author: "Bo" }),
+    ]);
+    const events = (issues[0]?.details as { events: { author?: string }[] }).events;
+    expect(events[0]).not.toHaveProperty("author");
+    expect(events[1]?.author).toBe("Bo");
+  });
+
+  it("names the single side when the very first event is invalid (no prior event)", () => {
+    // resumed from planned: no establishing event exists, so only one side.
+    const issues = detectProgressEventConflicts([
+      ev("P1-T1", "resumed", "2026-05-18T10:00:00.000Z", { author: "Ada" }),
+    ]);
+    expect(issues).toHaveLength(1);
+    const events = (issues[0]?.details as { events: unknown[] }).events;
+    expect(events).toHaveLength(1);
+  });
+
   it("flags done after done, and an event after a terminal done", () => {
     expect(
       detectProgressEventConflicts([

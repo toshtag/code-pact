@@ -186,8 +186,10 @@ The envelope always carries a **`data.filter`** object so an agent can tell
 // status --mine (no identity) → { "mine": true, "supported": false, "reason": "AUTHOR_UNAVAILABLE" }
 ```
 
-When `supported: false`, all buckets are empty (it is "can't filter", not "no
-work"). Reason codes are pinned: **`AUTHOR_CAPTURE_DISABLED`** (`collaboration.author:
+When `supported: false`, the four **activity** buckets (`in_flight` / `blocked` /
+`available` / `waiting`) are empty (it is "can't filter", not "no work"); `conflicts`
+(D3) and `totals` are scope-level and stay populated — they are never narrowed by
+`--mine`. Reason codes are pinned: **`AUTHOR_CAPTURE_DISABLED`** (`collaboration.author:
 off`) and **`AUTHOR_UNAVAILABLE`** (resolver yielded nothing — no git identity).
 `--mine` is identity *display-string* matching, not account matching (D1's
 self-reported scope): a renamed `user.name` stops matching older events — an
@@ -248,7 +250,7 @@ accepted coordination-view limitation, noted in the human output.
   are never silently dropped: every planned task is in exactly one of `available` /
   `waiting`, so the overview answers both "what can I start" *and* "why not".
 - **`conflicts`** (added in **D3**, not D2) = **`PROGRESS_EVENT_CONFLICT` only**,
-  each with the structured `details.events[]` (D3 shape — same as the `plan lint` /
+  each with the structured `details.events[]` (D3 shape — same as the `plan analyze` /
   `doctor` surface) so it names *who* produced each side. It is **not** in the D2
   output (D2 has no `conflicts` key); it lands with D3 once attribution can fill
   the "who". The structural id conflicts (`DUPLICATE_*` / `PHASE_ID_MISMATCH`) stay
@@ -267,6 +269,12 @@ non-blocking "claim" is just a `started` event, which `in_flight` already shows.
 change. Works on any existing ledger (author simply absent pre-D1).
 
 ### D3 — Attribution-enabled conflict recovery (mostly already shipped)
+
+**Shipped (v1.33+):** structured `details.events[]` (`{ event_id, status,
+author?, at }`) on every `PROGRESS_EVENT_CONFLICT` surface (`detectProgressEventConflicts`
+→ `plan analyze` / `doctor`) + `code-pact status` `data.conflicts[]`. Read-side
+enrichment only — no new gate, no exit change, no persisted state schema change
+(additive JSON output fields only).
 
 **Minimal spec.** D3 is deliberately small — the heavy lifting (detection +
 `recovery`) shipped in control-plane v2 PR1b. What this adds, *enabled by D1*:
@@ -425,7 +433,7 @@ implementer):
 - **`waiting.reasons[].code` → exactly `WAITING_FOR_DEPENDENCY` / `MISSING_DECISION`**
   (MVP); structural invalidity stays a `doctor` / `plan lint` / `verify` concern. (D2)
 - **Conflict attribution → structured `details.events[]` required** (not
-  message-only; same shape on the `status` `conflicts[]` and the `plan lint` /
+  message-only; same shape on the `status` `conflicts[]` and the `plan analyze` /
   `doctor` surfaces); `message` is the human rendering. (D3)
 - **`conflicts[]` scope → `PROGRESS_EVENT_CONFLICT` only**; structural id conflicts
   stay with `doctor` / `plan lint`. (D3 — `status` has no `conflicts` key until D3.)

@@ -95,7 +95,8 @@ export type DoctorIssue = {
    * diagnostics DUPLICATE_PHASE_ID / DUPLICATE_TASK_ID / PHASE_ID_MISMATCH). */
   recovery?: DoctorIssueRecovery;
   /** Structured extras threaded from a shared plan detector (additive). e.g. the
-   * id-conflict diagnostics carry `colliding_files` / `colliding_phases`. */
+   * id-conflict diagnostics carry `colliding_files` / `colliding_phases`, and
+   * `PROGRESS_EVENT_CONFLICT` carries `details.events[]` (D3 attribution). */
   details?: Record<string, unknown>;
 };
 

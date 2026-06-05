@@ -13,9 +13,9 @@ import { atCompact, computeEventId, eventFileName, normalizeAt } from "./event-i
  * see {@link writeEventFile}). There is no load / array-spread / whole-file
  * rewrite, so two concurrent writers produce two different files and neither is
  * lost, and two branches that each add events merge cleanly (distinct
- * filenames). The filename is the full content id, so a pre-existing final means
- * the canonically identical event is already on disk — idempotent success, not a
- * clash.
+ * filenames). The filename — `<at-compact>-<id>.yaml` — embeds the full content
+ * id as its suffix, so a pre-existing final means the canonically identical event
+ * is already on disk — idempotent success, not a clash.
  */
 
 export const EVENTS_DIR_SEGMENTS = [".code-pact", "state", "events"];

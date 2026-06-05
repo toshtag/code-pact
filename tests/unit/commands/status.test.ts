@@ -115,7 +115,9 @@ const PROGRESS = `events:
     reason: waiting on infra
 `;
 
-async function setup(opts: { collaborationOff?: boolean } = {}): Promise<void> {
+async function setup(
+  opts: { collaborationOff?: boolean; progress?: string } = {},
+): Promise<void> {
   await mkdir(join(dir, ".code-pact", "state"), { recursive: true });
   await mkdir(join(dir, "design", "phases"), { recursive: true });
   const collab = opts.collaborationOff ? "\ncollaboration:\n  author: off\n" : "\n";
@@ -124,11 +126,34 @@ async function setup(opts: { collaborationOff?: boolean } = {}): Promise<void> {
     `name: t\nversion: 1.0.0\nlocale: en-US\ndefault_agent: claude-code\nagents:\n  - name: claude-code\n    profile: agent-profiles/claude-code.yaml${collab}`,
     "utf8",
   );
-  await writeFile(join(dir, ".code-pact", "state", "progress.yaml"), PROGRESS, "utf8");
+  await writeFile(
+    join(dir, ".code-pact", "state", "progress.yaml"),
+    opts.progress ?? PROGRESS,
+    "utf8",
+  );
   await writeFile(join(dir, "design", "roadmap.yaml"), ROADMAP, "utf8");
   await writeFile(join(dir, "design", "phases", "P1.yaml"), P1, "utf8");
   await writeFile(join(dir, "design", "phases", "P2.yaml"), P2, "utf8");
 }
+
+// A ledger with one real conflict: P1-T1 marked `done` by two people (a `done`
+// after `done` — what two branches merging can produce). The rest stay healthy.
+const CONFLICT_PROGRESS = `events:
+  - task_id: P1-T1
+    status: done
+    at: "2026-06-01T10:00:00.000Z"
+    actor: agent
+    agent: claude-code
+    author: Ada
+    source: loop
+  - task_id: P1-T1
+    status: done
+    at: "2026-06-01T11:00:00.000Z"
+    actor: agent
+    agent: claude-code
+    author: Bo
+    source: loop
+`;
 
 describe("runStatus — activity buckets (Collaboration UX D2)", () => {
   it("partitions tasks into in_flight / blocked / available / waiting with author + reasons", async () => {
@@ -294,5 +319,40 @@ describe("runStatus — --mine filter (D2)", () => {
       delete process.env.GIT_CONFIG_GLOBAL;
       delete process.env.GIT_CONFIG_SYSTEM;
     }
+  });
+});
+
+describe("runStatus — conflicts[] (Collaboration UX D3)", () => {
+  it("a healthy ledger reports no conflicts (the key is present, empty)", async () => {
+    await setup(); // the default ledger has a valid started→blocked, no conflict
+    const r = await runStatus({ cwd: dir });
+    expect(r.conflicts).toEqual([]);
+  });
+
+  it("surfaces a PROGRESS_EVENT_CONFLICT with attributed details.events[]", async () => {
+    await setup({ progress: CONFLICT_PROGRESS });
+    const r = await runStatus({ cwd: dir });
+    expect(r.conflicts).toHaveLength(1);
+    const c = r.conflicts[0]!;
+    expect(c.task_id).toBe("P1-T1");
+    expect(c.code).toBe("PROGRESS_EVENT_CONFLICT");
+    expect(c.details.events.map((e) => e.status)).toEqual(["done", "done"]);
+    expect(c.details.events.map((e) => e.author)).toEqual(["Ada", "Bo"]);
+    for (const e of c.details.events) expect(e.event_id).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("is scoped by --phase (a P1 conflict is absent when scoped to P2)", async () => {
+    await setup({ progress: CONFLICT_PROGRESS });
+    expect((await runStatus({ cwd: dir, phase: "P1" })).conflicts).toHaveLength(1);
+    expect((await runStatus({ cwd: dir, phase: "P2" })).conflicts).toEqual([]);
+  });
+
+  it("is NOT narrowed by --mine (a conflict is a scope-level safety signal)", async () => {
+    await setup({ progress: CONFLICT_PROGRESS });
+    process.env[ENV] = "Bo";
+    const r = await runStatus({ cwd: dir, mine: true });
+    // in_flight/blocked are narrowed to Bo (none here), but the conflict stays.
+    expect(r.conflicts).toHaveLength(1);
+    expect(r.conflicts[0]?.task_id).toBe("P1-T1");
   });
 });
