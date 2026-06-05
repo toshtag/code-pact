@@ -3,10 +3,11 @@
 // the cluster modules do not need to import back from `src/cli.ts`.
 //
 // Current contents:
-//   - `emitOk` / `emitError`: the canonical JSON-envelope writers. Every
-//     command's stdout/stderr error contract flows through these so the
-//     `{ok,error,data}` shape, key order, and exit-stream split live in one
-//     place instead of being hand-rolled at ~150 call sites.
+//   - `emitOk` / `emitError`: the canonical JSON-envelope writers. cli.ts
+//     routes its stdout/stderr error contract through these, and the command
+//     modules under `src/cli/commands/` migrate onto them incrementally, so
+//     the `{ok,error,data}` shape, key order, and exit-stream split live in
+//     one place instead of being hand-rolled at each call site.
 //   - `withWriteLock`: P14 advisory-write-lock wrapper used by every
 //     CLI command that mutates `design/` (roadmap and phase YAML). The
 //     per-event progress ledger is lock-free and does not use this wrapper.
