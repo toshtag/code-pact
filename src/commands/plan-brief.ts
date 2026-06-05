@@ -59,8 +59,6 @@ export const BriefFileSchema = z
   })
   .strict();
 
-export type BriefFileInput = z.infer<typeof BriefFileSchema>;
-
 export class PlanBriefFromFileError extends Error {
   readonly code = "CONFIG_ERROR";
   readonly detail:

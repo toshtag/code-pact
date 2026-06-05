@@ -65,8 +65,6 @@ export const ConstitutionFileSchema = z
   })
   .strict();
 
-export type ConstitutionFileInput = z.infer<typeof ConstitutionFileSchema>;
-
 export class PlanConstitutionFromFileError extends Error {
   readonly code = "CONFIG_ERROR";
   readonly detail:

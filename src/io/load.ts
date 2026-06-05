@@ -24,16 +24,3 @@ export async function loadYaml<Output>(
   }
   return result.data;
 }
-
-export function parseYamlString<Output>(
-  content: string,
-  schema: ZodType<Output>,
-  label = "<string>",
-): Output {
-  const data: unknown = parseYaml(content);
-  const result = schema.safeParse(data);
-  if (!result.success) {
-    throw new ParseError(label, result.error.issues);
-  }
-  return result.data;
-}
