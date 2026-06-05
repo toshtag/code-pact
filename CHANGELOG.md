@@ -15,6 +15,23 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ### Added
 
+- **`code-pact status` — team activity overview** (Collaboration UX RFC, D2). A
+  **read-only** top-level command (no `--agent`, no writes, no lock) that
+  aggregates the derived state of every task and answers: *what is in flight (by
+  whom), what is blocked (why/by whom), what is free to pick up — and, for what
+  isn't, why.* `data` carries `in_flight` / `blocked` (with `author` + `since`
+  from D1), `available` (planned + `depends_on` all done + any `requires_decision`
+  satisfied by an accepted ADR — reusing the shared decision gate), `waiting`
+  (with `reasons[]`: `WAITING_FOR_DEPENDENCY` / `MISSING_DECISION`), and `totals`.
+  `--mine` filters active work to your resolved author identity, returning a `data.filter`
+  that distinguishes "nothing is mine" from "can't tell who I am"
+  (`AUTHOR_CAPTURE_DISABLED` / `AUTHOR_UNAVAILABLE`); `--phase <id>` scopes to one
+  phase. **Not a lock** — it surfaces overlap so a team coordinates; it never
+  reserves a task. Pure aggregation over `deriveTaskState` + `depends_on` + the
+  decision resolver — no new core. (`conflicts[]` is deferred to D3, which
+  populates the "who".) See `design/decisions/collaboration-ux-rfc.md` (D2) and
+  `docs/cli-contract.md` § `status`.
+
 - **Progress-event `author` attribution** (Collaboration UX RFC, D1). Every
   progress event (`task start` / `complete` / `block` / `resume` / `record-done`)
   now records an optional **`author`** — the human who ran the verb — so a team's

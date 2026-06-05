@@ -48,7 +48,7 @@ Design-mutating commands acquire `.code-pact/locks/write.lock` at the CLI comman
 | `phase reconcile --write` | Yes (dry-run is lock-free) |
 | `plan lint` / `plan analyze` / `plan normalize --check` | **No** (read-only) |
 | `task runbook` / `phase runbook` | **No** (read-only) |
-| `task context` / `task status` / `validate` / `doctor` / `recommend` | **No** (read-only) |
+| `status` / `task context` / `task status` / `validate` / `doctor` / `recommend` | **No** (read-only) |
 | `task complete` / `task start` / `task block` / `task resume` | **No** — and none is needed: progress writes are lock-free *and* concurrency-safe. Each event is a separate no-overwrite file under `state/events/` (collaboration-safe-state RFC, B1), so concurrent writers cannot lose an event. The legacy monolithic `progress.yaml` writer (which could) is no longer written. See [`docs/cli-contract.md`](../cli-contract.md#state-file-write-guarantees) |
 
 **Stale lock recovery is manual in v1.5.** If a `code-pact` command crashed without releasing the lock, verify no process holds it, manually delete `.code-pact/locks/write.lock`, and re-run. Auto-detection (PID liveness, age thresholds, a `--force-lock` flag) is deferred to a future RFC.
@@ -83,6 +83,7 @@ See [`docs/concepts/sample-phase.md` § TUTORIAL is a reserved phase id](sample-
 | `task complete` | No | writes a per-event file under `state/events/` (lock-free — distinct files are concurrency-safe by construction; see § Advisory write lock) |
 | `task finalize --write` / `phase reconcile --write` | No | Phase YAML only (`tasks[].status` flips) |
 | `task start` / `task block` / `task resume` / `task status` | No | a per-event file under `state/events/` only, or read-only |
+| `status` (project activity overview) | No | read-only — writes nothing |
 
 The four `createPhase` callers are the **only** code paths that mutate the roadmap. This is enforced structurally — no other module calls into the roadmap saver. Future commands that need to mutate the roadmap must go through `createPhase` (or land an RFC update that extends this writer list).
 

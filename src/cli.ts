@@ -18,6 +18,7 @@ import { runVerify, formatVerify } from "./commands/verify.ts";
 import { runRecommend, formatRecommend } from "./commands/recommend.ts";
 import { runDoctor, formatDoctor } from "./commands/doctor.ts";
 import { runValidate } from "./commands/validate.ts";
+import { runStatus, type StatusResult } from "./commands/status.ts";
 // Subcommand clusters each live in `./cli/commands/<group>.ts` and
 // expose only their cluster-entry dispatch (`cmd<Group>`); the
 // per-subcommand handlers are private to that module. cli.ts keeps the
@@ -420,6 +421,122 @@ async function cmdValidate(argv: string[], globalJson: boolean): Promise<number>
   }
 
   return result.ok ? 0 : 1;
+}
+
+// ---------------------------------------------------------------------------
+// Command: status — read-only team activity overview (Collaboration UX D2)
+// ---------------------------------------------------------------------------
+
+async function cmdStatus(argv: string[], globalJson: boolean): Promise<number> {
+  if (argv.includes("--help") || argv.includes("-h") || argv[0] === "help") {
+    process.stdout.write(
+      [
+        "Usage: code-pact status [options]",
+        "",
+        "Team activity overview: in flight / blocked / available / waiting.",
+        "Pure read — no --agent, no writes, no lock.",
+        "",
+        "Options:",
+        "  --json        Emit the JSON envelope.",
+        "  --phase <id>  Restrict to one phase.",
+        "  --mine        Show only active work matching your current author identity.",
+      ].join("\n") + "\n",
+    );
+    return 0;
+  }
+
+  // Strict parsing so a value-less `--phase` (which would silently degrade to
+  // "no phase" and run the whole project), an unknown flag, or a stray
+  // positional fails closed as CONFIG_ERROR (exit 2) — like the other commands.
+  let values: Record<string, unknown>;
+  try {
+    ({ values } = strictParse("status", argv, {
+      json: { type: "boolean" },
+      mine: { type: "boolean" },
+      phase: { type: "string" },
+    }));
+  } catch (err) {
+    if (!(err instanceof ConfigError)) throw err;
+    const json = globalJson || argv.includes("--json");
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: err.message } })}\n`,
+      );
+    } else {
+      process.stderr.write(`${err.message}\n`);
+    }
+    return 2;
+  }
+
+  const json = globalJson || values.json === true;
+  const cwd = process.cwd();
+  try {
+    const result = await runStatus({
+      cwd,
+      ...(values.mine === true ? { mine: true } : {}),
+      ...(typeof values.phase === "string" ? { phase: values.phase } : {}),
+    });
+    if (json) {
+      process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
+    } else {
+      process.stdout.write(`${formatStatus(result)}\n`);
+    }
+    return 0;
+  } catch (err) {
+    const e = err as NodeJS.ErrnoException & { phases?: string[] };
+    const code = e.code ?? "INTERNAL_ERROR";
+    const message = err instanceof Error ? err.message : String(err);
+    // PHASE_NOT_FOUND / AMBIGUOUS_PHASE_ID are argument-resolution errors → exit 2
+    // (AMBIGUOUS surfaces the colliding paths in data.phases, like other handlers).
+    const argError = code === "PHASE_NOT_FOUND" || code === "AMBIGUOUS_PHASE_ID";
+    if (json) {
+      const payload =
+        code === "AMBIGUOUS_PHASE_ID"
+          ? { ok: false, error: { code, message }, data: { phases: e.phases ?? [] } }
+          : { ok: false, error: { code, message } };
+      process.stdout.write(`${JSON.stringify(payload)}\n`);
+    } else {
+      process.stderr.write(`${message}\n`);
+    }
+    return argError ? 2 : 3;
+  }
+}
+
+function formatStatus(r: StatusResult): string {
+  const lines: string[] = [];
+  if (r.filter.mine && r.filter.supported === false) {
+    lines.push(`(--mine unavailable: ${r.filter.reason})`);
+  } else if (r.filter.mine && r.filter.supported === true) {
+    lines.push(`(filtered to author: ${r.filter.author} — matches your resolved author identity)`);
+  }
+  const who = (a?: string) => (a ? ` — ${a}` : "");
+  lines.push(`In flight (${r.in_flight.length}):`);
+  for (const e of r.in_flight) lines.push(`  ${e.task_id}${who(e.author)}`);
+  lines.push(`Blocked (${r.blocked.length}):`);
+  for (const e of r.blocked) lines.push(`  ${e.task_id}${who(e.author)}${e.reason ? `  reason: ${e.reason}` : ""}`);
+  lines.push(`Available to pick up (${r.available.length}):`);
+  for (const e of r.available) lines.push(`  ${e.task_id}`);
+  lines.push(`Waiting (${r.waiting.length}):`);
+  for (const e of r.waiting) {
+    const why = e.reasons
+      .map((x) =>
+        x.code === "WAITING_FOR_DEPENDENCY"
+          ? `needs ${x.task_id}`
+          : x.decision_ref
+            ? `needs accepted decision ${x.decision_ref}`
+            : "needs accepted decision",
+      )
+      .join(", ");
+    lines.push(`  ${e.task_id}  (${why})`);
+  }
+  const t = r.totals;
+  lines.push(
+    `Totals: ${t.tasks} task(s) — done ${t.by_state.done}, in-flight ${t.by_state.started + t.by_state.resumed}, blocked ${t.by_state.blocked}, planned ${t.by_state.planned}`,
+  );
+  if (r.filter.mine === true) {
+    lines.push("(Totals are for the selected scope, not only --mine results.)");
+  }
+  return lines.join("\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -840,6 +957,9 @@ async function main(): Promise<number> {
 
     case "validate":
       return cmdValidate(rest, json);
+
+    case "status":
+      return cmdStatus(rest, json);
 
     case "spec":
       return cmdSpec(rest, locale, json);

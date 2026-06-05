@@ -19,6 +19,7 @@ export const messages = {
     "  recommend  タスクに適したモデル tier を提案",
     "  doctor     プロジェクト構造の問題を報告 (人間向け)",
     "  validate   CI 向けプロジェクト検証 (エラー時 exit 1、--strict で警告も対象)",
+    "  status     チームの活動概観: 進行中 / blocked / 着手可能 / 待機",
     "",
     "グローバルオプション:",
     "  -v, --version    バージョンを表示",

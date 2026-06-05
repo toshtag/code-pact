@@ -24,8 +24,10 @@ import { parse as parseYaml } from "yaml";
 import { runGit } from "../audit/index.ts";
 
 /** True iff project.yaml explicitly sets `collaboration.author: off`. Tolerant:
- * a missing / unparseable / partial project.yaml is treated as "not off". */
-async function authorCaptureDisabled(cwd: string): Promise<boolean> {
+ * a missing / unparseable / partial project.yaml is treated as "not off".
+ * Exported so `code-pact status --mine` can distinguish "capture disabled"
+ * (`AUTHOR_CAPTURE_DISABLED`) from "no identity resolved" (`AUTHOR_UNAVAILABLE`). */
+export async function isAuthorCaptureDisabled(cwd: string): Promise<boolean> {
   let raw: string;
   try {
     raw = await readFile(join(cwd, ".code-pact", "project.yaml"), "utf8");
@@ -45,7 +47,7 @@ async function authorCaptureDisabled(cwd: string): Promise<boolean> {
  * See the precedence above. Never throws.
  */
 export async function resolveEventAuthor(cwd: string): Promise<string | undefined> {
-  if (await authorCaptureDisabled(cwd)) return undefined;
+  if (await isAuthorCaptureDisabled(cwd)) return undefined;
 
   const env = process.env.CODE_PACT_AUTHOR?.trim();
   if (env) return env;
