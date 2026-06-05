@@ -1149,3 +1149,119 @@ describe("runDoctor — model-id drift checks", () => {
     expect(claudeOnly).toHaveLength(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// CONTROL_PLANE_GITIGNORED (v1.32) — the shared control plane is git-ignored.
+// Authoritative via `git check-ignore --no-index` over the WHOLE shared control
+// plane (project.yaml / agent+model profiles / baselines / the event ledger),
+// each probed via a representative FILE path so a file-scoped rule
+// (`events/*.yaml`) is caught and a force-added .gitkeep does not mask it.
+// Requires a real git repo.
+// ---------------------------------------------------------------------------
+
+describe("runDoctor — CONTROL_PLANE_GITIGNORED (v1.32)", () => {
+  function git(cwd: string, args: readonly string[]): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const proc = spawn("git", args, {
+        cwd,
+        stdio: ["ignore", "ignore", "pipe"],
+        env: {
+          ...process.env,
+          GIT_AUTHOR_NAME: "t",
+          GIT_AUTHOR_EMAIL: "t@e.com",
+          GIT_COMMITTER_NAME: "t",
+          GIT_COMMITTER_EMAIL: "t@e.com",
+        },
+      });
+      proc.on("close", (code) =>
+        code === 0 ? resolve() : reject(new Error(`git ${args.join(" ")} (${code})`)),
+      );
+      proc.on("error", reject);
+    });
+  }
+
+  const find = (r: Awaited<ReturnType<typeof runDoctor>>) =>
+    r.issues.find((i) => i.code === "CONTROL_PLANE_GITIGNORED");
+
+  it("fires (warning) when a blanket /.code-pact/ ignore is present in a git repo", async () => {
+    await writeFile(join(dir, ".gitignore"), "/.code-pact/\nnode_modules/\n", "utf8");
+    await git(dir, ["init", "--quiet", "--initial-branch=main"]);
+    const issue = find(await runDoctor(dir));
+    expect(issue).toBeDefined();
+    expect(issue?.severity).toBe("warning");
+    // Recovery is a MANUAL edit (not a runnable command), with a confirm command.
+    expect(issue?.recovery?.manual_action).toBeDefined();
+    expect(issue?.recovery?.confirm).toBe("code-pact doctor");
+    expect(issue?.recovery?.primary).toBeUndefined();
+    // The message names which shared area(s) are affected.
+    expect(issue?.message).toContain(".code-pact/state/events/");
+  });
+
+  it("FIRES on a file-scoped ledger ignore (events/*.yaml) a directory probe would miss", async () => {
+    // The events/ dir is NOT ignored, but every NEW event file is — the exact
+    // silent-breakage Gap1 targets. A directory probe stays quiet; the file probe
+    // catches it.
+    await writeFile(join(dir, ".gitignore"), "/.code-pact/state/events/*.yaml\n", "utf8");
+    await git(dir, ["init", "--quiet", "--initial-branch=main"]);
+    expect(find(await runDoctor(dir))).toBeDefined();
+  });
+
+  it("FIRES when only the ledger is re-included but shared CONFIG stays ignored", async () => {
+    // The diagnostic covers the whole shared control plane: re-including just the
+    // ledger leaves project.yaml / profiles / baselines off git — a teammate's
+    // clean checkout would have no project config.
+    await writeFile(
+      join(dir, ".gitignore"),
+      "/.code-pact/*\n!/.code-pact/state\n/.code-pact/state/*\n!/.code-pact/state/events\n",
+      "utf8",
+    );
+    await git(dir, ["init", "--quiet", "--initial-branch=main"]);
+    const issue = find(await runDoctor(dir));
+    expect(issue).toBeDefined();
+    // It should name a config area, not only the ledger.
+    expect(issue?.message).toContain(".code-pact/project.yaml");
+  });
+
+  it("FIRES on a config-only ignore even when the ledger is committable", async () => {
+    await writeFile(join(dir, ".gitignore"), "/.code-pact/project.yaml\n", "utf8");
+    await git(dir, ["init", "--quiet", "--initial-branch=main"]);
+    const issue = find(await runDoctor(dir));
+    expect(issue).toBeDefined();
+    expect(issue?.message).toContain(".code-pact/project.yaml");
+  });
+
+  it("is silent with the narrow ignore init writes (whole control plane committable)", async () => {
+    // beforeEach already ran init → narrow .gitignore. Just make it a git repo.
+    await git(dir, ["init", "--quiet", "--initial-branch=main"]);
+    expect(find(await runDoctor(dir))).toBeUndefined();
+  });
+
+  it("is silent when the directory is not a git repo (check-ignore unavailable)", async () => {
+    await writeFile(join(dir, ".gitignore"), "/.code-pact/\n", "utf8");
+    // No `git init` — git check-ignore fails → conservative skip.
+    expect(find(await runDoctor(dir))).toBeUndefined();
+  });
+
+  it("still fires when a .gitkeep was force-added under the blanket ignore (--no-index)", async () => {
+    // A force-added file does not change the ignore RULE: NEW event files are
+    // still ignored. --no-index makes the check see the rule, not the index.
+    await writeFile(join(dir, ".gitignore"), "/.code-pact/\n", "utf8");
+    await mkdir(join(dir, ".code-pact", "state", "events"), { recursive: true });
+    await writeFile(join(dir, ".code-pact", "state", "events", ".gitkeep"), "", "utf8");
+    await git(dir, ["init", "--quiet", "--initial-branch=main"]);
+    await git(dir, ["add", "-f", ".code-pact/state/events/.gitkeep"]);
+    await git(dir, ["commit", "--quiet", "-m", "force-add gitkeep"]);
+    expect(find(await runDoctor(dir))).toBeDefined();
+  });
+
+  it("is silenced by disabled_checks in .code-pact/doctor.yaml", async () => {
+    await writeFile(join(dir, ".gitignore"), "/.code-pact/\n", "utf8");
+    await git(dir, ["init", "--quiet", "--initial-branch=main"]);
+    await writeFile(
+      join(dir, ".code-pact", "doctor.yaml"),
+      "disabled_checks:\n  - CONTROL_PLANE_GITIGNORED\n",
+      "utf8",
+    );
+    expect(find(await runDoctor(dir))).toBeUndefined();
+  });
+});

@@ -146,6 +146,9 @@ async function cmdInit(
           process.stderr.write(`  skipped  ${f} (already exists)\n`);
         }
         process.stderr.write(`\n${m.init.done}\n`);
+        for (const w of result.warnings) {
+          process.stderr.write(`  ⚠ ${w}\n`);
+        }
         for (const step of result.suggested_next_steps) {
           process.stderr.write(`  → ${step}\n`);
         }
@@ -240,6 +243,9 @@ async function cmdInit(
           process.stderr.write(`  skipped  ${f} (already exists)\n`);
         }
         process.stderr.write(`\n${m.init.done}\n`);
+        for (const w of result.warnings) {
+          process.stderr.write(`  ⚠ ${w}\n`);
+        }
         for (const step of result.suggested_next_steps) {
           process.stderr.write(`  → ${step}\n`);
         }

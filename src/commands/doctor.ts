@@ -36,6 +36,7 @@ import { isSupportedAgent, type SupportedAgent } from "../core/agents.ts";
 import { CONSTITUTION_PLACEHOLDER_MARKERS } from "../core/constitution.ts";
 import { readManifest } from "../core/adapters/manifest.ts";
 import { auditWrites, runGit } from "../core/audit/index.ts";
+import { gitIgnoredControlPlaneAreas } from "../core/control-plane-ignore.ts";
 import { globToRegex, validateGlobSyntax } from "../core/glob.ts";
 import { inspectAgent, type AdapterDoctorIssue } from "./adapter-doctor.ts";
 import { readPackageVersion } from "../lib/package-version.ts";
@@ -61,8 +62,22 @@ import type { Locale } from "../i18n/index.ts";
  * unaffected.
  */
 export type DoctorIssueRecovery = {
-  /** The recommended next command (a runnable template; placeholders in <…>). */
-  primary: string;
+  /**
+   * The recommended next command — a runnable template (`<…>` placeholders are
+   * agent-supplied). Present when a single command can drive the fix (e.g.
+   * `CONTROL_PLANE_NOT_DRIVEN`). Omitted when the fix is a manual edit with no
+   * single command — those set `manual_action` instead, so an agent never
+   * mistakes prose for something it can execute.
+   */
+  primary?: string;
+  /**
+   * A manual fix instruction, for diagnostics whose remedy is an edit with no
+   * single runnable command (e.g. narrowing a `.gitignore`). Set INSTEAD of
+   * `primary`. Not a shell command — do not execute it.
+   */
+  manual_action?: string;
+  /** A runnable command that verifies the fix worked (e.g. re-run `code-pact doctor`). */
+  confirm?: string;
   /** Equally-valid alternative commands, if any (e.g. record out-of-loop work). */
   alternatives?: string[];
   /** How to scope/silence the check: a config key or docs pointer. */
@@ -768,6 +783,55 @@ async function checkControlPlaneNotDriven(
   });
 }
 
+// Check 18 (collaboration-safe-state RFC A1 follow-up): the shared control
+// plane is git-ignored. A blanket `/.code-pact/` .gitignore (or any rule that
+// matches the event ledger) means new progress events — and the shared config
+// they live beside — never reach git. The collaboration model then silently
+// no-ops: teammates never see your progress, and the
+// CONTROL_PLANE_BRANCH_NOT_DRIVEN CI gate skips because it has no tracked ledger
+// to read. `init` writes a NARROW ignore but never deletes a user's pre-existing
+// blanket line, so the policy can be written yet defeated — this is the
+// authoritative detector for that gap.
+//
+// Authoritative because it asks git, not the .gitignore text: `git check-ignore
+// --no-index` matches against the ignore RULES only (what a NEW, untracked file
+// would hit), so a force-added file under a blanket ignore does not mask the
+// problem, and a negation re-include (`!…`) is honoured (no false positive).
+// `gitIgnoredControlPlaneAreas` probes the WHOLE shared control plane (the
+// ledger AND project.yaml / profiles / baselines), each via a representative file
+// path so a file-scoped rule (`events/*.yaml`) is caught too. Conservative skips:
+// no git / not a repo / not a real project. Advisory (warning); disabled_checks
+// silences it.
+async function checkControlPlaneGitignored(
+  cwd: string,
+  issues: DoctorIssue[],
+): Promise<void> {
+  // Only meaningful for a real, initialized project.
+  if (!(await fileExists(join(cwd, ".code-pact", "project.yaml")))) return;
+  const ignoredAreas = await gitIgnoredControlPlaneAreas(cwd);
+  if (ignoredAreas.length === 0) return; // none ignored, or git could not answer
+
+  issues.push({
+    code: "CONTROL_PLANE_GITIGNORED",
+    severity: "warning",
+    message:
+      `The shared control plane is git-ignored — these areas will not reach git: ${ignoredAreas.join(", ")}. ` +
+      "That state stays local: a clean checkout (a teammate, or CI) may be missing the project config, profiles, baselines, or the progress ledger. " +
+      "If the ledger itself is ignored, CONTROL_PLANE_BRANCH_NOT_DRIVEN also silently skips — it has no tracked ledger to read. " +
+      "A blanket `/.code-pact/` ignore (or a file-scoped rule like `state/events/*.yaml`) is the usual cause; keep only the local/derived subset ignored (`/.code-pact/locks/`, `/.code-pact/cache/`, `/.local/`, `/.context/`) and commit the rest (project.yaml, agent/model profiles, baselines, state/events/). " +
+      "code-pact never edits existing .gitignore lines, so narrow the rule yourself, then re-run `code-pact doctor` to confirm. " +
+      "Silence via .code-pact/doctor.yaml (disabled_checks: [CONTROL_PLANE_GITIGNORED]) if this repo is intentionally solo/throwaway.",
+    recovery: {
+      // A manual edit, not a runnable command — `manual_action`, not `primary`.
+      manual_action:
+        "Narrow .gitignore: remove the blanket `/.code-pact/` (or file-scoped) rule; keep only `/.code-pact/locks/`, `/.code-pact/cache/`, `/.local/`, `/.context/` ignored; commit project.yaml, agent-profiles/, model-profiles/, state/baselines/, and state/events/.",
+      confirm: "code-pact doctor",
+      reference:
+        "docs/cli-contract.md § State file write guarantees (shared-vs-local table); silence via .code-pact/doctor.yaml (disabled_checks: [CONTROL_PLANE_GITIGNORED])",
+    },
+  });
+}
+
 // Reads the committed progress.yaml at a git revision. Returns:
 //   - ProgressEvent[]  — present and parseable
 //   - []               — absent at that revision (git show failed)
@@ -1031,6 +1095,12 @@ export async function runDoctor(
       opts.baseRef,
       config.control_plane_branch_not_driven?.exclude_globs ?? [],
     );
+  }
+
+  // 18. shared control plane git-ignored (collaboration-safe-state RFC A1
+  // follow-up). Guarded so a disabled advisory never spawns git.
+  if (!disabled.has("CONTROL_PLANE_GITIGNORED")) {
+    await checkControlPlaneGitignored(cwd, allIssues);
   }
 
   // Apply disabled_checks filter
