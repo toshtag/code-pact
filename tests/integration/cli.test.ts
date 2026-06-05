@@ -1277,6 +1277,18 @@ describe("CLI: task state machine (v0.6)", () => {
     };
     expect(parsed.error.code).toBe("CONFIG_ERROR");
   });
+
+  it("task status human output shows author= for an attributed event (D1)", async () => {
+    await setupWithTask();
+    const startRes = run(["task", "start", "P1-T1", "--agent", "claude-code"], {
+      CODE_PACT_AUTHOR: "Ada Lovelace", // env wins over git → deterministic
+    });
+    expect(startRes.code).toBe(0);
+    // Human (non-JSON) status output renders the captured author.
+    const statusRes = run(["task", "status", "P1-T1"]);
+    expect(statusRes.code).toBe(0);
+    expect(statusRes.stdout).toContain("author=Ada Lovelace");
+  });
 });
 
 // ---------------------------------------------------------------------------
