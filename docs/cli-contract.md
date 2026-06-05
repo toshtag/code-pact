@@ -2429,7 +2429,7 @@ JSON envelope:
     "task_id": "P1-T1",
     "phase_id": "P1",
     "current": "blocked",
-    "last_event": { "task_id": "P1-T1", "status": "blocked", "at": "...", "actor": "agent", "agent": "claude-code", "reason": "..." },
+    "last_event": { "task_id": "P1-T1", "status": "blocked", "at": "...", "actor": "agent", "agent": "claude-code", "author": "Ada Lovelace", "reason": "..." },
     "history": [ /* full chronological history for this task */ ]
   }
 }

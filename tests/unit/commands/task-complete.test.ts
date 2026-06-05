@@ -185,6 +185,22 @@ describe("runTaskComplete — happy path", () => {
     expect(log.events[0]!.task_id).toBe("P0-T9");
     expect(log.events[1]!.task_id).toBe("P1-T1");
   });
+
+  it("persists author on the real (non-dry-run) done event (D1)", async () => {
+    await setupProject(dir);
+    const saved = process.env.CODE_PACT_AUTHOR;
+    process.env.CODE_PACT_AUTHOR = "Ada Lovelace";
+    try {
+      const result = await runTaskComplete({ cwd: dir, taskId: "P1-T1", agent: "claude-code" });
+      if (result.kind !== "done") throw new Error("type narrow");
+      expect(result.event.author).toBe("Ada Lovelace");
+      const { log } = await readProgress(dir);
+      expect(log.events.at(-1)?.author).toBe("Ada Lovelace");
+    } finally {
+      if (saved === undefined) delete process.env.CODE_PACT_AUTHOR;
+      else process.env.CODE_PACT_AUTHOR = saved;
+    }
+  });
 });
 
 describe("runTaskComplete — idempotency", () => {
