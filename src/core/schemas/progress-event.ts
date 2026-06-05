@@ -27,6 +27,13 @@ export const ProgressEvent = z
     // Agent name that produced the event. Optional for backward compatibility
     // with v0.1 logs written before `task complete` existed.
     agent: z.string().min(1).optional(),
+    // Human identity of whoever ran the verb (Collaboration UX RFC, D1) — the
+    // git `user.name` (or `CODE_PACT_AUTHOR`) captured at write time, regardless
+    // of `actor`. Optional and additive: legacy events omit it (and hash
+    // identically to before — `canonicalizeEvent` omits absent fields), and
+    // capture can be disabled (`collaboration.author: off`). Self-reported
+    // coordination metadata, not an audit/security control.
+    author: z.string().min(1).optional(),
     evidence: z.array(z.string()).optional(),
     notes: z.string().optional(),
     // Justification for a state transition. Required for `blocked` events

@@ -15,6 +15,24 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ### Added
 
+- **Progress-event `author` attribution** (Collaboration UX RFC, D1). Every
+  progress event (`task start` / `complete` / `block` / `resume` / `record-done`)
+  now records an optional **`author`** — the human who ran the verb — so a team's
+  ledger answers *who did what* (it was otherwise actor-anonymous: `actor` +
+  agent profile name only). Captured at write time by a fixed precedence:
+  `collaboration.author: off` (project.yaml) wins first → omit; else
+  `CODE_PACT_AUTHOR` (trimmed; blank-after-trim ignored); else `git config user.name`; else omit. **No
+  automatic `user.email` fallback** (PII — set `CODE_PACT_AUTHOR` for
+  email-as-identity). Additive and optional: legacy events omit it and **hash
+  identically to before** (`author` joins the content id only when present, so two
+  people recording the same transition produce distinct events surfaced by
+  `PROGRESS_EVENT_CONFLICT`, never silently merged). New optional `project.yaml`
+  `collaboration: { author: auto | off }`. Self-reported coordination metadata
+  (as trustworthy as `git blame`), not an audit/security control. See
+  `design/decisions/collaboration-ux-rfc.md` (D1) and `docs/cli-contract.md`
+  § Author attribution. D2 (`code-pact status` overview) and D3 (attribution-named
+  conflicts) follow as separate MINORs.
+
 - **`CONTROL_PLANE_GITIGNORED`** (collaboration-safe-state RFC A1 follow-up). An
   over-broad `.gitignore` rule silently defeats the whole collaboration model: any
   shared control-plane state — the per-event progress ledger, `project.yaml`,

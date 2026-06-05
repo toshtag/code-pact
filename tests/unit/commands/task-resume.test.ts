@@ -136,3 +136,23 @@ describe("runTaskResume", () => {
     ).rejects.toMatchObject({ code: "INVALID_TASK_TRANSITION" });
   });
 });
+
+describe("runTaskResume — author attribution (D1)", () => {
+  let savedAuthor: string | undefined;
+  beforeEach(() => {
+    savedAuthor = process.env.CODE_PACT_AUTHOR;
+    process.env.CODE_PACT_AUTHOR = "Ada Lovelace";
+  });
+  afterEach(() => {
+    if (savedAuthor === undefined) delete process.env.CODE_PACT_AUTHOR;
+    else process.env.CODE_PACT_AUTHOR = savedAuthor;
+  });
+
+  it("stamps the resumed event with author", async () => {
+    await setup(dir, BLOCKED_YAML);
+    const result = await runTaskResume({ cwd: dir, taskId: "P1-T1", agent: "claude-code" });
+    expect(result.event.author).toBe("Ada Lovelace");
+    const { log } = await loadMergedProgress(dir);
+    expect(log.events.at(-1)?.author).toBe("Ada Lovelace");
+  });
+});

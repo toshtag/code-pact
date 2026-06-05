@@ -347,6 +347,47 @@ describe("runTaskRecordDone — dry run", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Author attribution (D1)
+// ---------------------------------------------------------------------------
+
+describe("runTaskRecordDone — author attribution (D1)", () => {
+  let savedAuthor: string | undefined;
+  beforeEach(() => {
+    savedAuthor = process.env.CODE_PACT_AUTHOR;
+    process.env.CODE_PACT_AUTHOR = "Ada Lovelace";
+  });
+  afterEach(() => {
+    if (savedAuthor === undefined) delete process.env.CODE_PACT_AUTHOR;
+    else process.env.CODE_PACT_AUTHOR = savedAuthor;
+  });
+
+  it("stamps the recorded done event with author", async () => {
+    await setupProject(dir);
+    const result = await runTaskRecordDone({
+      cwd: dir,
+      taskId: "P1-T1",
+      evidence: ["PR #123"],
+    });
+    if (result.kind !== "done") throw new Error("type narrow");
+    expect(result.event.author).toBe("Ada Lovelace");
+    const { log } = await readProgress(dir);
+    expect(log.events.at(-1)?.author).toBe("Ada Lovelace");
+  });
+
+  it("dry-run would_append carries author", async () => {
+    await setupProject(dir);
+    const result = await runTaskRecordDone({
+      cwd: dir,
+      taskId: "P1-T1",
+      evidence: ["PR #123"],
+      dryRun: true,
+    });
+    if (result.kind !== "dry_run") throw new Error("type narrow");
+    expect(result.would_append.author).toBe("Ada Lovelace");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Evidence validation (core is the final defense)
 // ---------------------------------------------------------------------------
 

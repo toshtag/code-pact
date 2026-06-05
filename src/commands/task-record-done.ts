@@ -5,6 +5,7 @@ import { Project } from "../core/schemas/project.ts";
 import type { ProgressEvent } from "../core/schemas/progress-event.ts";
 import { loadProgressLog } from "../core/progress/io.ts";
 import { writeEventFile } from "../core/progress/events-io.ts";
+import { resolveEventAuthor } from "../core/progress/author.ts";
 import { deriveTaskState } from "../core/progress/task-state.ts";
 import { resolveTaskInRoadmap } from "../core/plan/resolve-task.ts";
 import { checkDecision, loadPhase, type CheckResult } from "./verify.ts";
@@ -199,6 +200,7 @@ export async function runTaskRecordDone(
   }
 
   // ---- Step 7: build the done event (source: external) ----
+  const author = await resolveEventAuthor(cwd);
   const event: ProgressEvent = {
     task_id: taskId,
     status: "done",
@@ -210,6 +212,7 @@ export async function runTaskRecordDone(
     ...(opts.notes !== undefined && opts.notes.trim().length > 0
       ? { notes: opts.notes }
       : {}),
+    ...(author !== undefined ? { author } : {}),
   };
 
   // ---- Step 8: dry-run short circuit ----

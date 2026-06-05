@@ -15,11 +15,22 @@ export const AgentRef = z.object({
 });
 export type AgentRef = z.infer<typeof AgentRef>;
 
+// Team-collaboration settings (Collaboration UX RFC). Additive and optional;
+// absence means defaults.
+export const CollaborationConfig = z.object({
+  // Whether to capture the `author` (git user.name) on progress events.
+  // `auto` (default): capture when an identity is resolvable. `off`: never
+  // capture — the strongest signal, not overridable by `CODE_PACT_AUTHOR`.
+  author: z.enum(["auto", "off"]).optional().default("auto"),
+});
+export type CollaborationConfig = z.infer<typeof CollaborationConfig>;
+
 export const Project = z.object({
   name: z.string().min(1),
   version: z.string().min(1),
   locale: LocaleConfig,
   default_agent: PlanId,
   agents: z.array(AgentRef).min(1),
+  collaboration: CollaborationConfig.optional(),
 });
 export type Project = z.infer<typeof Project>;

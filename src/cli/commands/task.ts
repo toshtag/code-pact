@@ -2106,6 +2106,8 @@ async function cmdTaskStatus(
       } else {
         for (const ev of result.history) {
           const extras: string[] = [];
+          // "who" first — author (human) before agent (tool) before reason.
+          if (ev.author) extras.push(`author=${ev.author}`);
           if (ev.agent) extras.push(`agent=${ev.agent}`);
           if (ev.reason) extras.push(`reason=${ev.reason}`);
           const suffix = extras.length > 0 ? `  (${extras.join(", ")})` : "";
