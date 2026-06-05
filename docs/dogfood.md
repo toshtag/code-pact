@@ -30,6 +30,13 @@ code-pact doctor
 code-pact validate       # exits 1 if any errors exist
 ```
 
+For an *activity* (not structural) view — read-only, no lock — what is in flight,
+blocked, free to pick up, and any attributed progress-event conflicts (v1.32+):
+
+```sh
+code-pact status          # human overview; add --json for the structured envelope
+```
+
 > A **fresh clone** may report an `ADAPTER_MISSING` advisory (`claude-code` is enabled but `CLAUDE.md` / `.claude/skills/*` are absent) until you regenerate the adapter output with `code-pact adapter install claude-code`. This is **expected** for this repo — the adapter output is regenerated and gitignored (see above) — and it is **warning-only**: plain `validate` does not fail on it. Note that `validate --strict` *does* promote this warning to a failure, so for strict validation regenerate the adapter output first (`adapter install`) or use non-strict `validate` for the dogfood health check.
 
 ## Daily path

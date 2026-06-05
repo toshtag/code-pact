@@ -357,7 +357,7 @@ export async function runInitCore(opts: InitCoreOptions): Promise<InitResult> {
     if (ignoredAreas.length > 0) {
       warnings.push(
         `Your .gitignore keeps shared control-plane state out of git — these areas will NOT reach git: ${ignoredAreas.join(", ")}. ` +
-          "It overrides the narrow local-only ignores code-pact just added, so teammates never see your progress and the branch-drift CI gate silently skips. " +
+          "It overrides the narrow local-only ignores code-pact just added, so teammates or clean checkouts miss whatever is ignored. If the ledger itself is ignored, the branch-drift CI gate (CONTROL_PLANE_BRANCH_NOT_DRIVEN) also silently skips because there is no tracked ledger to read. " +
           `init does not edit existing .gitignore lines: narrow the rule yourself (${KEEP_HINT}), then run \`code-pact doctor\` to confirm (CONTROL_PLANE_GITIGNORED). See the shared-vs-local table in docs/cli-contract.md.`,
       );
     }

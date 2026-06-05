@@ -70,8 +70,13 @@ After the release-prep PR merges to `main`:
    git verify-tag v<version>   # expect a good signature before pushing
    git push origin v<version>
    ```
-8. **Publish** (`prepublishOnly` re-checks package metadata):
+8. **Publish.** `dist/` is gitignored, yet `files: ["dist", …]` / `bin: dist/cli.js`
+   ship it — so a fresh checkout (or a clean `main`) has **nothing to publish**
+   until you build. Build first, then publish (`prepublishOnly` re-checks package
+   metadata as a backstop, but does not build for you):
    ```sh
+   pnpm install --frozen-lockfile
+   pnpm build            # or `pnpm release:check` for the full pre-publish gate
    npm publish
    ```
 9. **GitHub Release** from the tag, using the CHANGELOG section as the body,

@@ -807,13 +807,15 @@ async function checkControlPlaneNotDriven(
 
 // Check 18 (collaboration-safe-state RFC A1 follow-up): the shared control
 // plane is git-ignored. A blanket `/.code-pact/` .gitignore (or any rule that
-// matches the event ledger) means new progress events — and the shared config
-// they live beside — never reach git. The collaboration model then silently
-// no-ops: teammates never see your progress, and the
-// CONTROL_PLANE_BRANCH_NOT_DRIVEN CI gate skips because it has no tracked ledger
-// to read. `init` writes a NARROW ignore but never deletes a user's pre-existing
-// blanket line, so the policy can be written yet defeated — this is the
-// authoritative detector for that gap.
+// matches a shared area) means that state never reaches git, and the
+// collaboration model silently no-ops for whatever is ignored: a clean checkout
+// or a teammate may miss the project config, profiles, baselines, or the
+// progress ledger. ONLY when the ledger itself is ignored does the
+// CONTROL_PLANE_BRANCH_NOT_DRIVEN CI gate also silently skip (no tracked ledger
+// to read) — a config/profile-only ignore does not affect that gate. `init`
+// writes a NARROW ignore but never deletes a user's pre-existing blanket line,
+// so the policy can be written yet defeated — this is the authoritative detector
+// for that gap.
 //
 // Authoritative because it asks git, not the .gitignore text: `git check-ignore
 // --no-index` matches against the ignore RULES only (what a NEW, untracked file

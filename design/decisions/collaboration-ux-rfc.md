@@ -270,7 +270,7 @@ change. Works on any existing ledger (author simply absent pre-D1).
 
 ### D3 — Attribution-enabled conflict recovery (mostly already shipped)
 
-**Shipped (v1.33+):** structured `details.events[]` (`{ event_id, status,
+**Shipped (v1.32+):** structured `details.events[]` (`{ event_id, status,
 author?, at }`) on every `PROGRESS_EVENT_CONFLICT` surface (`detectProgressEventConflicts`
 → `plan analyze` / `doctor`) + `code-pact status` `data.conflicts[]`. Read-side
 enrichment only — no new gate, no exit change, no persisted state schema change
@@ -301,8 +301,11 @@ enrichment only — no new gate, no exit change, no persisted state schema chang
   existing `details` convention on plan/doctor issues (e.g. PR1b's
   `details.colliding_files`), not a root-level `events`. The **same** shape is used
   on the `code-pact status` `data.conflicts[]` entry. `author` is omitted
-  per-event for legacy events that lack it. Pure read-side enrichment of the
-  existing `detectProgressEventConflicts`.
+  per-event for legacy events that lack it. `event_id` is the content id — the
+  *suffix* of a per-event filename `.code-pact/state/events/<at-compact>-<event_id>.yaml`
+  (locate it with `*-<event_id>.yaml`), **not** the whole filename; an event that
+  lives only in a legacy `progress.yaml` has no per-event file. Pure read-side
+  enrichment of the existing `detectProgressEventConflicts`.
 - **Surface conflicts in the `code-pact status` overview** as `data.conflicts[]`
   (added in D3 — D2 has no `conflicts` key).
 - **Agent playbook already exists** (`docs/agent-contract.md` "Collaboration

@@ -13,6 +13,20 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+## [1.32.0] — 2026-06-05
+
+Collaboration: a team can now see *who did what, who is on what, and where two
+people collided* — without leaving git. Author attribution on every progress
+event (D1), a read-only `code-pact status` team overview (D2), and
+attribution-named progress-event conflicts (D3), plus the control-plane v2 PR1a
+fail-closed phase-id resolver and the collaboration-safe-state gitignore /
+id-conflict recovery follow-ups. All **backward-compatible**: valid existing
+projects keep working, existing event ids are unchanged, and persisted changes
+are additive/optional (the `author` progress-event field, the `collaboration.author`
+config). Ambiguous or collaboration-broken states now **surface earlier** — via a
+fail-closed error (`AMBIGUOUS_PHASE_ID` on duplicate phase ids) or an advisory
+warning (`CONTROL_PLANE_GITIGNORED`) — instead of silently proceeding.
+
 ### Added
 
 - **Attributed `PROGRESS_EVENT_CONFLICT` + `status` `conflicts[]`** (Collaboration
@@ -71,15 +85,17 @@ identifiers. Starting with v1.0.0, stable releases use plain
   (as trustworthy as `git blame`), not an audit/security control. See
   `design/decisions/collaboration-ux-rfc.md` (D1) and `docs/cli-contract.md`
   § Author attribution. D2 (`code-pact status` overview) and D3 (attribution-named
-  conflicts) follow as separate MINORs.
+  conflicts) ship together with D1 in this same release.
 
 - **`CONTROL_PLANE_GITIGNORED`** (collaboration-safe-state RFC A1 follow-up). An
   over-broad `.gitignore` rule silently defeats the whole collaboration model: any
   shared control-plane state — the per-event progress ledger, `project.yaml`,
-  agent/model profiles, baselines — that does not reach git means teammates never
-  see your progress (or have no project config on a clean checkout) and the
-  `CONTROL_PLANE_BRANCH_NOT_DRIVEN` CI gate skips because it has no tracked ledger
-  to read. `init` *merges* its narrow ignore entries into an existing `.gitignore`
+  agent/model profiles, baselines — that does not reach git stays local, so a
+  teammate or clean checkout misses whatever is ignored. **Only when the ledger
+  itself is ignored** does the `CONTROL_PLANE_BRANCH_NOT_DRIVEN` CI gate *also*
+  silently skip (no tracked ledger to read) — a config/profile/baseline-only
+  ignore does not affect that gate.
+  `init` *merges* its narrow ignore entries into an existing `.gitignore`
   and **never deletes a user's lines**, so a pre-existing rule survives and
   overrides them — the policy is written yet defeated. This adds two
   **non-destructive** detectors:
@@ -155,7 +171,8 @@ identifiers. Starting with v1.0.0, stable releases use plain
   `src/core/plan/resolve-phase.ts` throws the new public `AMBIGUOUS_PHASE_ID`
   (exit 2; `data.phases[]` lists the colliding files) across the phase-id
   resolution paths — `pack`, `phase show`, `phase reconcile`, `phase runbook`
-  (incl. `--across-phases`), `verify`, `recommend`, and `task add` — mirroring the
+  (incl. `--across-phases`), `verify`, `recommend`, `task add`, and the new
+  `status --phase` (D2) — mirroring the
   P14 `AMBIGUOUS_TASK_ID` task resolver. Agent-facing context generation
   (`task context`, and `task prepare` outside its early-return states) surfaces
   the same error when it resolves a phase by id. Task-id ambiguity was already
