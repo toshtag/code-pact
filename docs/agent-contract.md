@@ -85,6 +85,33 @@ failure mode reuses an existing code (`TASK_NOT_FOUND`,
 `AGENT_NOT_ENABLED`, `CONFIG_ERROR`, the existing `ADAPTER_*`
 family).
 
+### Collaboration conflicts: fail closed, then recover
+
+When two contributors work on separate branches, the dangerous failures are
+**id collisions that git merges cleanly** — two branches each mint the same
+`P<N>` / `P<N>-T<M>` id in separate files, so there is no git conflict and the
+corruption is invisible until a check runs. An agent must treat these as
+**fix-before-proceed**, never work around them:
+
+- `DUPLICATE_PHASE_ID` / `DUPLICATE_TASK_ID` / `PHASE_ID_MISMATCH` (errors from
+  `plan lint` / `doctor`, `data.issues[]`) — each carries a structured
+  `recovery` object. The fix is a manual id rename, so it is `recovery.manual_action`
+  (the exact edit — **not** a shell command) + `recovery.confirm` (the re-verify
+  command, `code-pact plan lint`); `recovery.reference` names what collides and
+  where. Apply `manual_action` (renumber one side + update the things that
+  reference it), then run `confirm`.
+- `AMBIGUOUS_PHASE_ID` / `AMBIGUOUS_TASK_ID` (top-level `error.code`, **exit 2**)
+  — a resolver **failed closed** rather than guessing which duplicate you meant
+  (control-plane v2 PR1a). `data.phases[]` lists the colliding locations
+  (`AMBIGUOUS_PHASE_ID`: the phase **file paths**; `AMBIGUOUS_TASK_ID`: the **phase
+  ids** that both define the task). Do **not** retry the same id; resolve the
+  underlying duplicate first (the `plan lint` errors above), then re-run the
+  original command.
+
+The tool deliberately surfaces these rather than auto-resolving them — picking a
+winner silently is how a teammate's work gets overwritten. Full per-code recovery
+steps: [`docs/troubleshooting.md` § Id collisions & mismatches](troubleshooting.md#id-collisions--mismatches-collaboration).
+
 ### Determinism
 
 For the same git SHA and the same inputs:

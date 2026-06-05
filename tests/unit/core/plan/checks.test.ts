@@ -92,6 +92,22 @@ describe("detectDuplicateTaskIds", () => {
     expect(issues[0]?.severity).toBe("error");
     expect(issues[0]?.message).toContain("SHARED-T1");
     expect(issues[0]?.task_id).toBe("SHARED-T1");
+    // Disambiguate by FILE, not just phase id — so two phase files that also
+    // share a phase id don't both read as "phase P7".
+    expect(issues[0]?.file).toBe("design/phases/P2.yaml");
+    expect(issues[0]?.message).toContain("design/phases/P2.yaml");
+    // Machine-readable collision pair (JSON-first DX): both files, both phases.
+    expect(issues[0]?.details?.colliding_files).toEqual([
+      "design/phases/P1.yaml",
+      "design/phases/P2.yaml",
+    ]);
+    expect(issues[0]?.details?.colliding_phases).toEqual(["P1", "P2"]);
+    // Actionable recovery (control-plane v2 PR1b re-scope): manual edit +
+    // re-verify command, naming both colliding files.
+    expect(issues[0]?.recovery?.manual_action).toContain("design/phases/P2.yaml");
+    expect(issues[0]?.recovery?.confirm).toBe("code-pact plan lint");
+    expect(issues[0]?.recovery?.reference).toContain("design/phases/P1.yaml");
+    expect(issues[0]?.recovery?.reference).toContain("DUPLICATE_TASK_ID");
   });
 });
 
@@ -102,11 +118,24 @@ describe("detectDuplicatePhaseIds", () => {
   });
 
   it("reports the second occurrence", () => {
-    const entries = [entry(phase("P1")), entry(phase("P1"))];
+    // Two phase files that both claim id P1 (the clean-but-wrong merge): same id,
+    // DISTINCT paths — so the collision pair names two real files.
+    const entries: PhaseEntry[] = [
+      { ref: { id: "P1", path: "design/phases/P1-a.yaml", weight: 10 }, absPath: "/tmp/a.yaml", phase: phase("P1") },
+      { ref: { id: "P1", path: "design/phases/P1-b.yaml", weight: 10 }, absPath: "/tmp/b.yaml", phase: phase("P1") },
+    ];
     const issues = detectDuplicatePhaseIds(entries);
     expect(issues).toHaveLength(1);
     expect(issues[0]?.code).toBe("DUPLICATE_PHASE_ID");
     expect(issues[0]?.severity).toBe("error");
+    expect(issues[0]?.recovery?.manual_action).toContain("design/roadmap.yaml");
+    expect(issues[0]?.recovery?.confirm).toBe("code-pact plan lint");
+    expect(issues[0]?.recovery?.reference).toContain("DUPLICATE_PHASE_ID");
+    // Machine-readable collision pair (both phase-file paths).
+    expect(issues[0]?.details?.colliding_files).toEqual([
+      "design/phases/P1-a.yaml",
+      "design/phases/P1-b.yaml",
+    ]);
   });
 });
 
@@ -122,6 +151,10 @@ describe("detectPhaseIdMismatches", () => {
     expect(issues).toHaveLength(1);
     expect(issues[0]?.code).toBe("PHASE_ID_MISMATCH");
     expect(issues[0]?.severity).toBe("error");
+    // Recovery encodes expected vs actual + both ways to reconcile.
+    expect(issues[0]?.recovery?.manual_action).toContain("id: P9"); // expected (ref.id)
+    expect(issues[0]?.recovery?.manual_action).toContain('"P1"'); // actual (phase.id)
+    expect(issues[0]?.recovery?.confirm).toBe("code-pact plan lint");
   });
 });
 

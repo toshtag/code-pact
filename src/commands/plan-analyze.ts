@@ -97,6 +97,7 @@ function serializeIssue(i: PlanIssue): Record<string, unknown> {
     ...(i.details !== undefined ? { details: i.details } : {}),
     ...(i.hidden_by_default ? { hidden_by_default: true } : {}),
     ...(i.affects_exit === false ? { affects_exit: false } : {}),
+    ...(i.recovery !== undefined ? { recovery: i.recovery } : {}),
   };
 }
 

@@ -57,6 +57,39 @@ identifiers. Starting with v1.0.0, stable releases use plain
     executable so an agent never runs prose. See
     `design/decisions/collaboration-safe-state-rfc.md` (A1) and the shared-vs-local
     table in `docs/cli-contract.md` § State file write guarantees.
+- **Actionable recovery for collaboration id-conflict diagnostics** (control-plane
+  v2 PR1b, re-scoped). The conflict diagnostics that catch the dangerous
+  clean-but-wrong branch merge — `DUPLICATE_PHASE_ID`, `DUPLICATE_TASK_ID`,
+  `PHASE_ID_MISMATCH` — now carry a structured `recovery` object (the same shape
+  as the `CONTROL_PLANE_*` advisories) wherever they surface (`plan lint` and
+  `doctor`, in `data.issues[]`). `doctor` also now surfaces `DUPLICATE_PHASE_ID`
+  (previously it detected only duplicate *task* ids), so the
+  two-files-both-claim-`P1` merge is caught on the `doctor` path too — parity with
+  `plan lint`. The fix is a manual id rename, so `recovery` uses
+  `manual_action` (rename one colliding id + update what references it) + `confirm`
+  (`code-pact plan lint`) rather than a prose `primary`, keeping `primary` strictly
+  executable; `recovery.reference` names what collides. New
+  `docs/troubleshooting.md` § *Id collisions & mismatches* documents all five
+  collaboration codes (the three above plus the fail-closed `AMBIGUOUS_PHASE_ID` /
+  `AMBIGUOUS_TASK_ID`), and `docs/agent-contract.md` gains a *Collaboration
+  conflicts: fail closed, then recover* section so an agent has a playbook for the
+  exact failures the tool detects. **No new diagnostics and no new default
+  warnings** — a valid current project (`P<N>` ids, inline tasks) stays as quiet
+  under `plan lint` / `doctor` / `--strict` as before; this only enriches errors
+  that already fire. Severity, codes, and exit behavior are unchanged.
+
+  > **PR1b re-scope (note).** The control-plane v2 RFC originally named
+  > warning-default `LEGACY_SEQUENTIAL_PHASE_ID` / `LEGACY_INLINE_TASKS`
+  > advisories for PR1b. Those are **superseded / deferred**: they would flag the
+  > *current canonical* layout as "legacy" before any non-legacy alternative
+  > exists (slug ids / per-task files land in later, deferred PRs), directly
+  > contradict the shipped `PHASE_ID_NAMING` check (which treats `P<N>` as
+  > correct), and fire on essentially every project — noise, not signal. The
+  > duplicate-id detection PR1b targeted is already met (more strongly) by the
+  > shipped error-severity checks. Migration-readiness advisories belong to a
+  > future explicit `upgrade` / `migrate --check` surface, shown only when a user
+  > intentionally runs a migration check — not in default `lint` / `doctor`. See
+  > `design/decisions/control-plane-v2-rfc.md` (PR1b).
 - **`AMBIGUOUS_PHASE_ID`** (control-plane v2 PR1a). Phase-id resolution now **fails
   closed** on a duplicate phase id — two `roadmap.yaml` entries sharing an id (e.g.
   two branches that both minted `P1`, then merged: separate files, no git

@@ -30,6 +30,11 @@ When a command surfaces one of the diagnostic codes below, this page maps it to 
 | [`EVENT_FILE_ID_MISMATCH`](#event_file_id_mismatch-from-doctor--plan-lint-v131) | A per-event ledger file's content doesn't match its content-addressed name (corrupt / hand-edited) | Restore from git or remove the file named in the message, then re-run |
 | [`PROGRESS_EVENT_CONFLICT`](#progress_event_conflict-from-doctor--plan-analyze-v131) | Incompatible same-task lifecycle events (e.g. two branches both `done` a task) | Reconcile the conflicting event(s) for the named task |
 | [`CONTROL_PLANE_GITIGNORED`](#control_plane_gitignored-from-doctor-v132) | A `.gitignore` rule keeps part of the shared control plane off git, so collaboration silently breaks | Narrow the `.gitignore` to the local-only subset and commit the shared control plane (project.yaml, profiles, baselines, state/events/) |
+| [`DUPLICATE_PHASE_ID`](#duplicate_phase_id-from-plan-lint--doctor) | Two phase files claim the same `P<N>` id (often a clean-but-wrong branch merge) | Renumber one phase + its roadmap entry, then re-run `plan lint` |
+| [`DUPLICATE_TASK_ID`](#duplicate_task_id-from-plan-lint--doctor) | One task id appears in two phases | Renumber one task (+ refs to it), then re-run `plan lint` |
+| [`PHASE_ID_MISMATCH`](#phase_id_mismatch-from-plan-lint--doctor) | A phase file's inner `id:` differs from its roadmap entry | Make the two ids match, then re-run `plan lint` |
+| [`AMBIGUOUS_PHASE_ID`](#ambiguous_phase_id-and-ambiguous_task_id-fail-closed-id-resolution) | A command resolved a phase id that two files claim — fails closed (exit 2) | Resolve the duplicate (see `data.phases`), then retry |
+| [`AMBIGUOUS_TASK_ID`](#ambiguous_phase_id-and-ambiguous_task_id-fail-closed-id-resolution) | A command resolved a task id that two phases claim — fails closed (exit 2) | Resolve the duplicate (see `data.phases`), then retry |
 
 ## `MANIFEST_NOT_FOUND` from `adapter upgrade --check` / `--write`
 
@@ -455,3 +460,79 @@ Advisory (`severity: warning`): `doctor` and default `validate` do not fail on
 it, but `validate --strict` promotes it to exit-relevant (like other doctor
 warnings), so CI can gate on it. If the repo is intentionally solo/throwaway,
 silence it via `.code-pact/doctor.yaml` (`disabled_checks: [CONTROL_PLANE_GITIGNORED]`).
+
+## Id collisions & mismatches (collaboration)
+
+These are the **clean-but-wrong merge** class: two contributors on separate
+branches each mint the same `P<N>` / `P<N>-T<M>` id in separate files, git
+auto-merges with no conflict, and the corruption only surfaces when a check runs.
+They are **errors** (they fail `plan lint` / `doctor` by default — no `--strict`
+needed), and each now carries a structured `recovery` object (`recovery.manual_action`
+= the edit, `recovery.confirm` = the re-verify command, `recovery.reference`) in
+JSON so an agent can act without parsing prose. The manual fix is always the same
+shape: **give one of the colliding things a unique id, update anything that
+references it, then re-run the check.**
+
+### `DUPLICATE_PHASE_ID` from `plan lint` / `doctor`
+
+Two roadmap entries (and their phase files) claim the same phase id — e.g. both
+branches minted `P7`. The message names both files.
+
+```sh
+code-pact plan lint --json | jq '.data.issues[] | select(.code=="DUPLICATE_PHASE_ID")'
+# .recovery.manual_action names the exact edit; .recovery.confirm is the re-verify
+# command; .file is one colliding file.
+```
+
+Fix: pick one phase, give it a unique id — edit its `id:` field and update its
+entry in `design/roadmap.yaml` (rename the file/path too if the filename embeds
+the old id or to keep the `<id>-<slug>.yaml` convention). If that phase has tasks
+whose ids use the **old phase prefix** (e.g. `P7-T1`), rename those task ids too
+and update any `depends_on` that references them — then re-run
+`code-pact plan lint` and address any follow-up `TASK_ID_PHASE_PREFIX` /
+`DUPLICATE_TASK_ID`. If the two files are actually the **same** phase merged from
+two branches, delete the duplicate file and its roadmap entry instead of
+renumbering.
+
+### `DUPLICATE_TASK_ID` from `plan lint` / `doctor`
+
+One task id appears under two phases. The message names both phases **and their
+files** — the file path disambiguates the compound case where two phase files
+also share a phase id (in that case, fix `DUPLICATE_PHASE_ID` first).
+
+Fix: renumber one task — change its `id:` under that phase's `tasks:`, **and any
+`depends_on` entry (in any task) that references the old id**. Note `decision_refs`
+/ `acceptance_refs` are **file paths**, not task-id references — only touch them if
+a path intentionally embeds the old id. If **progress events already exist** for
+the duplicated id, check which task they belong to *before* editing — do not
+blindly rewrite event files. Then re-run `code-pact plan lint`. If the task was
+duplicated by a merge, delete the redundant copy instead.
+
+### `PHASE_ID_MISMATCH` from `plan lint` / `doctor`
+
+A phase file's inner `id:` does not match the id the roadmap uses to reference it
+(`<file> has id="<actual>" but roadmap expects "<expected>"`) — usually a phase
+file cloned without updating its id, or a half-resolved merge.
+
+Fix one of the two to agree: set `id: <expected>` inside the file, **or** change
+that file's entry id in `design/roadmap.yaml` to `<actual>`. Then re-run
+`code-pact plan lint`.
+
+### `AMBIGUOUS_PHASE_ID` and `AMBIGUOUS_TASK_ID` (fail-closed id resolution)
+
+A command tried to **resolve** an id that two files (phase) or two phases (task)
+claim, and **failed closed** (exit 2) rather than silently acting on the first
+match (control-plane v2 PR1a). The colliding locations are in **`data.phases[]`**
+(`AMBIGUOUS_TASK_ID`: the phase ids that both define the task; `AMBIGUOUS_PHASE_ID`:
+the phase file paths).
+
+```sh
+code-pact task prepare P7-T1 --agent claude-code --json | jq '{error, data}'
+# { "error": { "code": "AMBIGUOUS_TASK_ID", "message": "..." },
+#   "data": { "phases": ["P3","P7"] } }
+```
+
+This is a symptom of an unresolved `DUPLICATE_PHASE_ID` / `DUPLICATE_TASK_ID`:
+resolve that first (sections above) — renumber the duplicate and re-run
+`code-pact plan lint` until clean — then retry the original command. The tool
+refuses to guess which one you meant, by design.

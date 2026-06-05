@@ -217,7 +217,7 @@ top-level codes (it also matches `cause_code:` literals). See the
 
 ### Plan diagnostic codes
 
-Issue-level codes emitted by `plan lint` and `plan analyze` inside `data.issues[]`. Carry severity `error` or `warning`.
+Issue-level codes emitted by diagnostic surfaces — `plan lint`, `plan analyze`, and selected shared `doctor` checks (e.g. the id-conflict diagnostics) — inside `data.issues[]`. Carry severity `error` or `warning`. The id-conflict diagnostics (`DUPLICATE_PHASE_ID` / `DUPLICATE_TASK_ID`) also carry `details.colliding_files` (a `string[]` of the colliding phase-file paths; `DUPLICATE_TASK_ID` adds `details.colliding_phases`) so an agent can read the collision pair without parsing the prose `message` — `issue.file` is single-valued (the second occurrence).
 
 | Code | Severity | Emitter | Meaning |
 |------|----------|---------|---------|
@@ -225,8 +225,9 @@ Issue-level codes emitted by `plan lint` and `plan analyze` inside `data.issues[
 | `SCHEMA_ERROR` | error | `plan lint` | A YAML file parsed but failed Zod schema validation |
 | `EVENT_FILE_ID_MISMATCH` (collaboration-safe-state RFC, B1/B5) | error | `plan lint` / `doctor` | A per-event progress-ledger file's content (or its stored `id`) does not match its filename, which **is** the full content id — a broken / partial / hand-edited entry. Fail-closed: emitted as a structured issue **only** by the lenient-loader surfaces (`plan lint`, `doctor`). The strict-loader readers never expose it as a top-level `error.code`: `task *` / `verify` abort raw (exit 3); `plan analyze` / `plan migrate` wrap it in the command's own failure code (`PLAN_ANALYZE_FAILED` / `PLAN_MIGRATE_FAILED`) with the cause in `error.message`. `pack` is best-effort and skips it. A genuinely unparseable event body reports `INVALID_YAML`; a parseable-but-invalid one reports `SCHEMA_ERROR` |
 | `MISSING_PHASE_FILE` | error | `plan lint` | `roadmap.yaml` references a phase file that does not exist |
-| `DUPLICATE_TASK_ID` | error | `plan lint` | The same task id appears in more than one phase |
-| `PHASE_ID_MISMATCH` | error | `plan lint` | `phase.id` inside the YAML does not match the roadmap reference |
+| `DUPLICATE_TASK_ID` | error | `plan lint` / `doctor` | The same task id appears in more than one phase. Carries `recovery` (`manual_action` + `confirm`) |
+| `DUPLICATE_PHASE_ID` | error | `plan lint` / `doctor` | Two roadmap entries / phase files claim the same phase id (e.g. a clean-but-wrong branch merge — no git conflict). Carries `recovery` (`manual_action` + `confirm`). Also a top-level exit-2 `error.code` from `phase add` / `phase import` (see Public codes) |
+| `PHASE_ID_MISMATCH` | error | `plan lint` / `doctor` | `phase.id` inside the YAML does not match the roadmap reference. Carries `recovery` (`manual_action` + `confirm`) |
 | `ORPHAN_PHASE_FILE` | warning | `plan lint` | A phase file exists on disk but is not in `roadmap.yaml` |
 | `PHASE_ID_NAMING` | warning | `plan lint` | Phase id does not match `P<N>` |
 | `TASK_ID_PHASE_PREFIX` | warning | `plan lint` | Task id does not match `<phase>-T<N>` |
@@ -280,6 +281,9 @@ Issue-level codes emitted by `doctor` / `validate` for general project health.
 | `MISSING_DIR` | error | A required directory under `.code-pact/` or `design/` is absent |
 | `MISSING_MODEL_TIER` | warning | An agent profile is missing a required `model_map` tier |
 | `EMPTY_OBJECTIVE` | error | A phase `objective` is blank or fewer than 10 characters |
+| `DUPLICATE_PHASE_ID` | error | Two roadmap entries / phase files claim the same phase id (a clean-but-wrong branch merge — no git conflict). Shared detector with `plan lint`. Carries `recovery` (`manual_action` + `confirm`) |
+| `DUPLICATE_TASK_ID` | error | The same task id appears in more than one phase. Shared detector with `plan lint`. Carries `recovery` (`manual_action` + `confirm`) |
+| `PHASE_ID_MISMATCH` | error | `phase.id` inside a phase YAML does not match its `roadmap.yaml` reference. Carries `recovery` (`manual_action` + `confirm`) |
 | `MODEL_ID_UNKNOWN` (v1.29+) | warning | The `claude-code` profile has a `model_map` value or `model_version` that is not present in the bundled Claude catalog — typically a typo, or a model id code-pact does not track yet. Offline check against `src/core/models/catalog.ts` |
 | `MODEL_MAP_STALE` (v1.29+) | warning | The `claude-code` profile's `model_map` points at a known Claude id that is no longer the current catalog default (e.g. the profile predates a model bump). A difference from the default, **not** an invalid value — to follow it, hand-edit the tier in the profile path doctor names (e.g. `.code-pact/agent-profiles/<agent>.yaml`) then run `adapter upgrade <agent> --write` to regenerate (note: `--model` re-pins `model_version` only, never `model_map`). Keep it if the pin is intentional, or silence via `.code-pact/doctor.yaml` → `disabled_checks: [MODEL_MAP_STALE]`. Scoped to `claude-code`; never fires for codex/other agents |
 | `BAK_FILE` | warning | A `.bak` file is present alongside a tracked file |
@@ -304,9 +308,9 @@ Issue-level codes emitted by `doctor` / `validate` for general project health.
 }
 ```
 
-`primary` is the recommended next command — a runnable template (`<…>` placeholders are agent-supplied). `alternatives` (optional) lists equally-valid commands. `reference` (optional) names the config key / docs pointer to scope or silence the check.
+`primary` is the recommended next command — a runnable template (`<…>` placeholders are agent-supplied). `alternatives` (optional) lists equally-valid commands. `reference` (optional) names the config key / docs pointer to scope, silence, or read more about the check.
 
-**Manual-fix variant (v1.32+).** When the remedy is an edit with **no single runnable command** (e.g. `CONTROL_PLANE_GITIGNORED`, whose fix is narrowing `.gitignore`), `recovery` omits `primary` and instead carries `manual_action` (the instruction — **not** a shell command; do not execute it) and `confirm` (a runnable command that verifies the fix). This keeps `primary` strictly executable, so an agent never mistakes prose for something it can run:
+**Manual-fix variant (v1.32+).** When the remedy is an edit with **no single runnable command** (e.g. `CONTROL_PLANE_GITIGNORED`, whose fix is narrowing `.gitignore`, or the id-conflict diagnostics, whose fix is renaming a colliding id), `recovery` omits `primary` and instead carries `manual_action` (the instruction — **not** a shell command; do not execute it) and `confirm` (a runnable command that verifies the fix). This keeps `primary` strictly executable, so an agent never mistakes prose for something it can run:
 
 ```json
 {
@@ -318,7 +322,7 @@ Issue-level codes emitted by `doctor` / `validate` for general project health.
 }
 ```
 
-`recovery` is **additive and present on `CONTROL_PLANE_*` only** — every other diagnostic omits it, and a consumer reading just `code` / `severity` / `message` sees no change. The same `message` prose is retained for human output.
+`recovery` is **additive** — every diagnostic that omits it behaves exactly as before, and a consumer reading just `code` / `severity` / `message` sees no change. The same `message` prose is retained for human output. It is currently populated on: the `CONTROL_PLANE_*` doctor advisories above, and (v1.32+) the collaboration **conflict** diagnostics `DUPLICATE_PHASE_ID` / `DUPLICATE_TASK_ID` / `PHASE_ID_MISMATCH` — wherever they surface (`plan lint` and `doctor`, in `data.issues[]`; the `plan lint` orchestrator runs these three id checks, `plan analyze` does not). The conflict diagnostics use the manual-fix variant (`manual_action` = rename one colliding id + update what references it; `confirm` = `code-pact plan lint`; `reference` names what collides and points at [`docs/troubleshooting.md`](troubleshooting.md#id-collisions--mismatches-collaboration)). The fail-closed `AMBIGUOUS_PHASE_ID` / `AMBIGUOUS_TASK_ID` errors do not carry `recovery` (their `data.phases[]` already lists the colliding locations); their recovery steps live in troubleshooting.
 
 ### Adapter diagnostic codes
 
@@ -823,9 +827,19 @@ These are off by default so the base lint stays lean. `WEAK_DOD` and `PLACEHOLDE
       {
         "code": "DUPLICATE_TASK_ID",
         "severity": "error",
-        "message": "Task \"SHARED-T1\" appears in both phase \"P1\" and \"P2\"",
+        "message": "Task \"SHARED-T1\" appears in both phase \"P1\" (design/phases/P1-a.yaml) and \"P2\" (design/phases/P2-b.yaml)",
         "phase_id": "P2",
-        "task_id": "SHARED-T1"
+        "task_id": "SHARED-T1",
+        "file": "design/phases/P2-b.yaml",
+        "details": {
+          "colliding_files": ["design/phases/P1-a.yaml", "design/phases/P2-b.yaml"],
+          "colliding_phases": ["P1", "P2"]
+        },
+        "recovery": {
+          "manual_action": "Renumber one task to a unique id: change its `id:` under the `tasks:` of phase \"P2\" (design/phases/P2-b.yaml), and update any `depends_on` entry that references the old id \"SHARED-T1\". ...",
+          "confirm": "code-pact plan lint",
+          "reference": "Task id \"SHARED-T1\" is claimed by phase \"P1\" (design/phases/P1-a.yaml) and phase \"P2\" (design/phases/P2-b.yaml). If the two phases also share an id, fix DUPLICATE_PHASE_ID first. See docs/troubleshooting.md (DUPLICATE_TASK_ID)."
+        }
       }
     ]
   }

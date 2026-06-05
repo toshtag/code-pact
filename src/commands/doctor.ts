@@ -26,9 +26,11 @@ import { detectModelMapDrift } from "../core/models/model-map-drift.ts";
 import { loadDoctorConfig } from "../core/doctor-config.ts";
 import { ModelProfile, ModelTier } from "../core/schemas/model-profile.ts";
 import {
+  detectDuplicatePhaseIds,
   detectDuplicateTaskIds,
   detectOrphanProgressEvents,
   detectProgressEventConflicts,
+  phaseIdMismatchRecovery,
 } from "../core/plan/checks.ts";
 import type { PhaseEntry } from "../core/plan/state.ts";
 import type { PlanIssue } from "../core/plan/shared.ts";
@@ -88,8 +90,13 @@ export type DoctorIssue = {
   code: string;
   severity: "error" | "warning";
   message: string;
-  /** Structured recovery guidance (v1.28+, additive). Present on CONTROL_PLANE_* only. */
+  /** Structured recovery guidance (v1.28+, additive). Present on selected
+   * actionable diagnostics (the `CONTROL_PLANE_*` advisories and the id-conflict
+   * diagnostics DUPLICATE_PHASE_ID / DUPLICATE_TASK_ID / PHASE_ID_MISMATCH). */
   recovery?: DoctorIssueRecovery;
+  /** Structured extras threaded from a shared plan detector (additive). e.g. the
+   * id-conflict diagnostics carry `colliding_files` / `colliding_phases`. */
+  details?: Record<string, unknown>;
 };
 
 export type DoctorResult = {
@@ -165,8 +172,12 @@ async function checkPhases(
   cwd: string,
   roadmap: Roadmap,
   issues: DoctorIssue[],
-): Promise<Phase[]> {
+): Promise<{ phases: Phase[]; phaseEntries: PhaseEntry[] }> {
   const phases: Phase[] = [];
+  // PhaseEntry[] (with the REAL roadmap ref + path) so duplicate-id detection
+  // can name the colliding files. Built here because this is the only place that
+  // has both the ref and the parsed phase.
+  const phaseEntries: PhaseEntry[] = [];
 
   for (const ref of roadmap.phases) {
     const absPath = join(cwd, ref.path);
@@ -202,9 +213,11 @@ async function checkPhases(
         code: "PHASE_ID_MISMATCH",
         severity: "error",
         message: `${ref.path} has id="${parsed.data.id}" but roadmap expects "${ref.id}"`,
+        recovery: phaseIdMismatchRecovery(ref.path, ref.id, parsed.data.id),
       });
     }
     phases.push(parsed.data);
+    phaseEntries.push({ ref, absPath, phase: parsed.data });
   }
 
   // Check for phase YAML files in design/phases/ not referenced in roadmap
@@ -228,7 +241,7 @@ async function checkPhases(
     }
   }
 
-  return phases;
+  return { phases, phaseEntries };
 }
 
 async function checkProgressLog(
@@ -299,16 +312,19 @@ async function checkProgressLog(
 }
 
 function planIssueToDoctor(issue: PlanIssue): DoctorIssue {
-  return { code: issue.code, severity: issue.severity, message: issue.message };
+  return {
+    code: issue.code,
+    severity: issue.severity,
+    message: issue.message,
+    // Thread structured recovery + details through to the doctor surface
+    // (additive). PlanIssueRecovery is shape-identical to DoctorIssueRecovery, so
+    // collab conflict diagnostics keep their fix guidance and `colliding_files` in
+    // `doctor --json` too — parity with `plan lint`.
+    ...(issue.recovery !== undefined ? { recovery: issue.recovery } : {}),
+    ...(issue.details !== undefined ? { details: issue.details } : {}),
+  };
 }
 
-function phasesToEntries(phases: Phase[]): PhaseEntry[] {
-  return phases.map((phase) => ({
-    ref: { id: phase.id, path: "", weight: phase.weight },
-    absPath: "",
-    phase,
-  }));
-}
 
 async function checkAgentProfiles(
   cwd: string,
@@ -463,11 +479,16 @@ async function checkBakFiles(cwd: string, issues: DoctorIssue[]): Promise<void> 
   }
 }
 
-// Check 9: duplicate task ids across phases — delegates to the shared
-// detector in src/core/plan/checks.ts so plan lint (T2) and doctor stay
-// in sync.
-function checkDuplicateTaskIds(phases: Phase[], issues: DoctorIssue[]): void {
-  for (const planIssue of detectDuplicateTaskIds(phasesToEntries(phases))) {
+// Check 9: duplicate phase/task ids across the roadmap — delegates to the shared
+// detectors in src/core/plan/checks.ts so `plan lint` and `doctor` surface the
+// SAME conflict diagnostics (and the same `recovery`). Uses the real PhaseEntry[]
+// (with roadmap ref + path) so DUPLICATE_PHASE_ID can name the colliding files —
+// the clean-but-wrong merge where two phase files both claim `P1`.
+function checkDuplicateIds(phaseEntries: PhaseEntry[], issues: DoctorIssue[]): void {
+  for (const planIssue of detectDuplicatePhaseIds(phaseEntries)) {
+    issues.push(planIssueToDoctor(planIssue));
+  }
+  for (const planIssue of detectDuplicateTaskIds(phaseEntries)) {
     issues.push(planIssueToDoctor(planIssue));
   }
 }
@@ -1025,7 +1046,9 @@ export async function runDoctor(
   const roadmap = await checkRoadmap(cwd, allIssues);
 
   // 3. phase files (requires roadmap)
-  const phases = roadmap ? await checkPhases(cwd, roadmap, allIssues) : [];
+  const { phases, phaseEntries } = roadmap
+    ? await checkPhases(cwd, roadmap, allIssues)
+    : { phases: [] as Phase[], phaseEntries: [] as PhaseEntry[] };
 
   // 4. progress.yaml (requires phases for orphan check)
   await checkProgressLog(cwd, phases, allIssues);
@@ -1046,8 +1069,8 @@ export async function runDoctor(
     await checkStaleContext(cwd, phases, project, allIssues);
   }
 
-  // 9. duplicate task ids across phases
-  checkDuplicateTaskIds(phases, allIssues);
+  // 9. duplicate phase/task ids across the roadmap
+  checkDuplicateIds(phaseEntries, allIssues);
 
   // 10. .local/ gitignored
   await checkLocalGitignored(cwd, allIssues);
