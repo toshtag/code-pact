@@ -199,6 +199,10 @@ describe("runDoctor — phase id mismatch", () => {
     const issue = result.issues.find((i) => i.code === "PHASE_ID_MISMATCH");
     expect(issue).toBeDefined();
     expect(issue?.severity).toBe("error");
+    // PR1b re-scope: the doctor surface carries actionable recovery too
+    // (manual edit + confirm command, mirroring the CONTROL_PLANE_* convention).
+    expect(issue?.recovery?.manual_action).toContain("id: P1"); // expected (roadmap ref)
+    expect(issue?.recovery?.confirm).toBe("code-pact plan lint");
   });
 });
 
@@ -279,6 +283,50 @@ describe("runDoctor — duplicate task ids", () => {
     expect(issue).toBeDefined();
     expect(issue?.severity).toBe("error");
     expect(issue?.message).toContain("SHARED-T1");
+    // doctor surfaces the same recovery shape as plan lint (manual_action + confirm).
+    expect(issue?.recovery?.manual_action).toBeDefined();
+    expect(issue?.recovery?.confirm).toBe("code-pact plan lint");
+  });
+});
+
+describe("runDoctor — duplicate PHASE ids (clean-but-wrong merge)", () => {
+  const phaseBody = (name: string) =>
+    [
+      "id: P1", `name: ${name}`, "weight: 10", "confidence: high", "risk: low",
+      "status: planned", "objective: An objective that is long enough to pass",
+      "definition_of_done:", "  - A definition of done long enough to read",
+      "verification:", "  commands:", "    - echo ok",
+    ].join("\n");
+
+  it("reports DUPLICATE_PHASE_ID (with recovery) when two phase files claim the same id", async () => {
+    // The exact incident: two branches each minted P1 in a separate file; the
+    // merged roadmap has two P1 entries, no git conflict. `plan lint` already
+    // caught this; this asserts `doctor` now does too (PR1b parity).
+    await writeFile(
+      join(dir, "design", "roadmap.yaml"),
+      [
+        "phases:",
+        "  - id: P1", "    path: design/phases/P1-a.yaml", "    weight: 10",
+        "  - id: P1", "    path: design/phases/P1-b.yaml", "    weight: 10",
+      ].join("\n"),
+      "utf8",
+    );
+    await writeFile(join(dir, "design", "phases", "P1-a.yaml"), phaseBody("Alpha"), "utf8");
+    await writeFile(join(dir, "design", "phases", "P1-b.yaml"), phaseBody("Beta"), "utf8");
+
+    const result = await runDoctor(dir);
+    const issue = result.issues.find((i) => i.code === "DUPLICATE_PHASE_ID");
+    expect(issue).toBeDefined();
+    expect(issue?.severity).toBe("error");
+    // Names a colliding FILE (needs the real roadmap ref path, not an empty one).
+    expect(issue?.message).toContain("design/phases/P1-b.yaml");
+    expect(issue?.recovery?.manual_action).toContain("design/roadmap.yaml");
+    expect(issue?.recovery?.confirm).toBe("code-pact plan lint");
+  });
+
+  it("does not report DUPLICATE_PHASE_ID for a healthy unique-id project", async () => {
+    const result = await runDoctor(dir); // fresh init → empty roadmap
+    expect(result.issues.find((i) => i.code === "DUPLICATE_PHASE_ID")).toBeUndefined();
   });
 });
 

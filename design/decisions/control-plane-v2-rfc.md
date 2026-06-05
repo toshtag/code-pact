@@ -14,8 +14,9 @@
 > fix the semver story, and propose an *incremental, additive* rollout.
 > **Acceptance authorizes the investigation, PR0 (a no-behaviour-change
 > refactor), PR1a (fail-closed phase-id resolution safety — `AMBIGUOUS_PHASE_ID`,
-> exit 2) and PR1b (warning-default diagnostics) only; PR2+ stay gated on §5.
-> Nothing more.**
+> exit 2) and PR1b (re-scoped to conflict-recovery actionability — see §6; the
+> original `LEGACY_*` warning-default advisories are superseded/deferred) only;
+> PR2+ stay gated on §5. Nothing more.**
 
 ## Summary
 
@@ -321,13 +322,16 @@ phase id that was previously resolved to a silent first match — surfacing
 and ships on its own merit (a new error on previously-undefined input, §4), not
 under a soak exemption.
 
-**PR1b diagnostics** are exempt from gates 2–4 **only while they stay
-warning-default and do not affect exit outside an explicit `--strict`** (the
-established `PROGRESS_EVENT_CONFLICT` / branch-drift semantics: warning by
-default, `validate --strict` promotes). A diagnostic that is error-by-default, or
-that changes exit outside explicit strict mode, is **not** exempt — it alters the
-workflow and re-enters the soak gate. So scoped, they are pure additive advisories
-that *help gather* the incident data and are safe to ship early.
+**PR1b** is exempt from gates 2–4 because, as **re-scoped** (§6), it adds **no new
+diagnostic and no new exit behaviour**: it attaches an additive `recovery` field
+to conflict errors that *already* fire, and adds docs. A consumer reading only
+`code` / `severity` / `message` sees no change, and a valid current project gains
+zero new issues — so nothing in the workflow changes and there is nothing to soak.
+(The original PR1b draft proposed warning-default `LEGACY_*` advisories; those are
+superseded/deferred per §6, so the earlier "exempt only while warning-default"
+caveat is moot. Any *future* migration-readiness advisory ships on an explicit
+`upgrade` / `migrate --check` surface, not default lint/doctor, and re-enters the
+gate on its own merits.)
 
 ## 6. Recommended rollout
 
@@ -354,17 +358,48 @@ fail-closed **PR1a** — shipped — and the warning-default **PR1b**.)
   first-match. This is a **fail-closed safety fix, not a warning diagnostic** — it
   is *not* soak-exempt as a diagnostic (§5); it ships as a new error on
   previously-undefined input (§4).
-- **PR1b — Warning-default diagnostics.** The git-silent failures (duplicate ids
-  in separate files; clean-but-wrong scalar merges) want surfacing *before* they
-  bite. `plan lint` **already** emits `DUPLICATE_PHASE_ID` / `DUPLICATE_TASK_ID` /
-  `PHASE_ID_MISMATCH` (`checks.ts:47,69,92`, all `severity: error`, single-tree,
-  post-hoc). PR1b's net-new is **warning-default** advisories —
-  `LEGACY_SEQUENTIAL_PHASE_ID`, `LEGACY_INLINE_TASKS`, and surfacing of the
-  *decidable* D9 slice (cross-file duplicate ids / structural id-mismatch,
-  `PHASE_ID_MISMATCH`-shaped) at the dangerous moment — warning by default,
-  `--strict` promotes (precedent B6). It does **not** promise arbitrary
-  semantic-scalar-drift detection (no cross-contributor invariant to violate, §1).
-  Soak-exempt **only** under the §5 warning-default condition.
+- **PR1b — Conflict-recovery actionability (re-scoped; shipped). The original
+  warning-default `LEGACY_*` advisories are superseded/deferred.** The git-silent
+  failures (duplicate ids in separate files; clean-but-wrong scalar merges) want
+  surfacing *before* they bite. `plan lint` **already** emits `DUPLICATE_PHASE_ID`
+  / `DUPLICATE_TASK_ID` / `PHASE_ID_MISMATCH` (`checks.ts`, all `severity: error`,
+  single-tree) and `doctor` mirrors them — so PR1b's original acceptance target
+  (§8 #2, "duplicate-id detection as a *warning*; `--strict` promotes") is in fact
+  **already met, and more strongly** (these are errors, not warnings, and fail
+  the default exit). What was *missing* is not detection but **recovery**: a
+  contributor or agent that hits the collision had no guided way out. So the
+  shipped PR1b adds a structured `recovery` object (the `CONTROL_PLANE_*` shape)
+  to those three conflict diagnostics — minimal manual fix + re-verify command,
+  threaded through `plan lint` and `doctor` `data.issues[]` (the surfaces that run
+  the id checks; `plan analyze` does not run them) — plus
+  a `docs/troubleshooting.md` § *Id collisions & mismatches* covering all five
+  collaboration codes (incl. the fail-closed `AMBIGUOUS_PHASE_ID` /
+  `AMBIGUOUS_TASK_ID`) and a `docs/agent-contract.md` recovery playbook. It adds
+  **no new diagnostics and no new default warnings** — a valid current project
+  stays exactly as quiet.
+
+  **Superseded/deferred: `LEGACY_SEQUENTIAL_PHASE_ID` and `LEGACY_INLINE_TASKS`.**
+  The original draft named these warning-default advisories as PR1b's net-new.
+  They are **not** shipped, for three verified reasons:
+  1. **They flag the current *canonical* layout as "legacy" before any
+     non-legacy alternative exists.** Slug ids (PR3) and per-task files (PR4) are
+     deferred; until they land, `P<N>` and inline tasks are the *only* options.
+     Warning every project that it is on the only available layout is noise, not
+     signal — the product telling the user a true-and-correct state is wrong.
+  2. **`LEGACY_SEQUENTIAL_PHASE_ID` directly contradicts the shipped
+     `PHASE_ID_NAMING` check** (`checks.ts` `detectPhaseIdNaming`), which warns
+     when a phase id does **not** match `P<N>` — i.e. the code treats `P<N>` as
+     correct. Shipping both means every phase earns a warning either way; that is
+     incoherent until PR3 flips the convention.
+  3. **`LEGACY_INLINE_TASKS` would fire on every phase with tasks.** With no
+     per-task-file alternative (PR4) it is pure noise.
+
+  These migration-readiness advisories are **moved out of default `lint` / `doctor`
+  entirely** and re-homed on a future, explicit `upgrade` / `migrate --check`
+  surface (its own RFC, alongside PR2–PR5): "your current layout is a future
+  migration target" should appear **only when a user intentionally runs a
+  migration check**, never as ambient lint/doctor noise. Until that surface and
+  the non-legacy alternatives exist, no `LEGACY_*` advisory ships.
 - **PR1c — Cross-branch / `--base-ref` surfacing (deferred).** Surfacing a
   duplicate id *before* merge (branch vs base, like
   `CONTROL_PLANE_BRANCH_NOT_DRIVEN`) is heavier and lower marginal value now that
@@ -422,16 +457,20 @@ rollout a MINOR.
 Concrete, testable. **These define the *end state* of the full sequence — not a
 bar each intermediate PR must clear.** An incremental PR satisfies a subset and
 must not be judged against criteria it does not yet target. Rough mapping: PR1b →
-#2; PR2 → #3; PR2+PR3 → #1; PR4 → #4, #8; PR5 → #6; legacy compatibility (#5, #7)
-must hold at **every** step. (These become RFC-conformance tests per the P28
-convention when the work is taken up.)
+#2 (**already satisfied** by the shipped error-severity `DUPLICATE_*` /
+`PHASE_ID_MISMATCH` checks — see the re-scoped PR1b in §6: it adds *recovery* on
+top, not detection); PR2 → #3; PR2+PR3 → #1; PR4 → #4, #8; PR5 → #6; legacy
+compatibility (#5, #7) must hold at **every** step. (These become RFC-conformance
+tests per the P28 convention when the work is taken up.)
 
 1. **Independent phase add:** two branches each `createPhase` and merge with **no**
    git conflict and **no** lost or duplicated phase. (Today: both mint `P51` and
    the registry conflicts.)
 2. **Duplicate-id detection:** a tree containing two phases with the same
-   canonical id yields a `doctor`/`plan lint` advisory (warning; `--strict`
-   promotes). No silent acceptance.
+   canonical id yields a `doctor`/`plan lint` conflict diagnostic. In the shipped
+   implementation this is **error-severity** (`DUPLICATE_PHASE_ID`, fails the
+   default exit — stronger than the originally-drafted warning); PR1b adds
+   structured `recovery` guidance, not a new warning. No silent acceptance.
 3. **Roadmap-optional discovery:** a project with phase files but **no**
    `roadmap.yaml` discovers and orders all phases correctly; `plan index --write`
    regenerates a roadmap that round-trips.
@@ -462,7 +501,8 @@ convention when the work is taken up.)
 - **No Bucket C implementation in this RFC.** Accepting this draft authorizes the
   incident analysis, **PR0** (no-behaviour-change refactor), **PR1a** (fail-closed
   phase-id resolution safety — `AMBIGUOUS_PHASE_ID`, exit 2), and **PR1b**
-  (warning-default diagnostics) only; PR2+ stay gated on §5.
+  (re-scoped to conflict-recovery actionability — §6; `LEGACY_*` advisories
+  superseded/deferred) only; PR2+ stay gated on §5.
 - **No logical/vector clocks** (out of scope; the ledger already routed this to
   detection, not silent resolution).
 

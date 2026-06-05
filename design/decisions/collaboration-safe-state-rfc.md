@@ -425,6 +425,13 @@ refuse without observed pain ([P22](P22-cancelled-adapter-schema-v2.md),
   to split inline tasks. The one genuine layout change for tasks.
 - **C4 — `plan lint` legacy advisories** (`LEGACY_SEQUENTIAL_PHASE_ID`,
   `LEGACY_INLINE_TASKS`, `LEGACY_MONOLITHIC_PROGRESS_LOG`), warning-only.
+  **Superseded by the control-plane-v2 PR1b re-scope:** these
+  migration-readiness advisories must **not** ship on default `plan lint` /
+  `doctor` — they would flag the *current canonical* layout (`P<N>` ids, inline
+  tasks) as "legacy" before any non-legacy alternative exists, and contradict the
+  shipped `PHASE_ID_NAMING` check. They belong to a future **explicit**
+  `upgrade` / `migrate --check` surface, shown only when a user intentionally runs
+  a migration check. See [control-plane-v2](control-plane-v2-rfc.md) (PR1b).
 - **Logical clocks** for event ordering (see B2 rationale).
 - **No server, daemon, database, remote lock, or GitHub integration.**
 

@@ -87,6 +87,7 @@ export function serializePlanLintData(
       ...(i.details !== undefined ? { details: i.details } : {}),
       ...(i.affects_exit === false ? { affects_exit: false } : {}),
       ...(i.hidden_by_default === true ? { hidden_by_default: true } : {}),
+      ...(i.recovery !== undefined ? { recovery: i.recovery } : {}),
     })),
   };
 }
