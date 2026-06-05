@@ -258,4 +258,21 @@ describe("runInit — blanket /.code-pact/ ignore advisory (v1.32)", () => {
     );
     expect((await run()).warnings).toHaveLength(0);
   });
+
+  it("config-only ignore: warns, but does NOT unconditionally claim the branch-drift gate skips", async () => {
+    // Only project.yaml is ignored; the ledger (state/events/) is NOT. The
+    // problem is a clean checkout missing project config — the branch-drift CI
+    // gate skip happens ONLY when the LEDGER is ignored, so the warning must
+    // state that as a condition, not unconditionally (Gap1 accuracy).
+    await git(dir, ["init", "--quiet", "--initial-branch=main"]);
+    await writeFile(join(dir, ".gitignore"), "/.code-pact/project.yaml\n", "utf8");
+    const result = await run();
+    expect(result.warnings.length).toBeGreaterThan(0);
+    const w = result.warnings.join("\n");
+    expect(w).toContain("CONTROL_PLANE_GITIGNORED");
+    expect(w).toContain("project.yaml"); // the ignored area is named
+    // Conditional phrasing present; the old unconditional coupling is gone.
+    expect(w).toContain("If the ledger itself is ignored");
+    expect(w).not.toContain("the branch-drift CI gate silently skips");
+  });
 });

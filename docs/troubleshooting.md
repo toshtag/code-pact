@@ -408,7 +408,7 @@ code-pact doctor --json | jq '.data.issues[] | select(.code=="PROGRESS_EVENT_CON
 # analyze to confirm.
 ```
 
-**Who collided (v1.33+, Collaboration UX RFC D3).** The issue carries a
+**Who collided (v1.32+, Collaboration UX RFC D3).** The issue carries a
 structured `details.events[]` naming the conflicting side(s) — `{ event_id,
 status, author?, at }` (usually two, the establishing event and the offender; one
 when the first event for a task is itself invalid) — so you (and an agent) see
@@ -439,10 +439,12 @@ concurrent edit is a genuine collaboration conflict a human should adjudicate.
 Your `.gitignore` keeps part of the shared control plane out of git. The
 `message` names which areas — any of `project.yaml`, `agent-profiles/`,
 `model-profiles/`, `state/baselines/`, or `state/events/` (the progress ledger).
-Whatever it names **never reaches git**, so the collaboration model silently
-no-ops: teammates never see your progress (or have no project config on a clean
-checkout), and the `CONTROL_PLANE_BRANCH_NOT_DRIVEN` CI gate skips because it has
-no tracked ledger to read.
+Whatever it names **never reaches git**, so that state stays local: a teammate or
+a clean checkout misses whatever is ignored — project config, profiles,
+baselines, or the progress ledger. **If the ledger itself is ignored**, the
+`CONTROL_PLANE_BRANCH_NOT_DRIVEN` CI gate *also* silently skips because it has no
+tracked ledger to read (a config/profile/baseline-only ignore does not affect
+that gate).
 
 The usual cause is a **blanket `/.code-pact/` ignore**, but a **file-scoped** rule
 like `/.code-pact/state/events/*.yaml` is just as dangerous — the `events/`
