@@ -253,3 +253,38 @@ describe("runTaskStart — error codes", () => {
     ).rejects.toMatchObject({ code: "AGENT_NOT_ENABLED" });
   });
 });
+
+describe("runTaskStart — author attribution (Collaboration UX RFC D1)", () => {
+  // Use CODE_PACT_AUTHOR for determinism (no dependence on the machine's git
+  // identity); the full resolver precedence is unit-tested in author.test.ts.
+  let savedAuthor: string | undefined;
+  beforeEach(() => {
+    savedAuthor = process.env.CODE_PACT_AUTHOR;
+    process.env.CODE_PACT_AUTHOR = "Ada Lovelace";
+  });
+  afterEach(() => {
+    if (savedAuthor === undefined) delete process.env.CODE_PACT_AUTHOR;
+    else process.env.CODE_PACT_AUTHOR = savedAuthor;
+  });
+
+  it("stamps the recorded event with author", async () => {
+    await setupProject(dir);
+    const result = await runTaskStart({ cwd: dir, taskId: "P1-T1", agent: "claude-code" });
+    if (result.kind !== "started") throw new Error("type narrow");
+    expect(result.event.author).toBe("Ada Lovelace");
+    // and it is persisted to the event file (round-trips through the ledger)
+    const { log } = await readProgress(dir);
+    expect(log.events[0]?.author).toBe("Ada Lovelace");
+  });
+
+  it("omits author when collaboration.author: off (off beats CODE_PACT_AUTHOR)", async () => {
+    await setupProject(dir, {
+      projectYaml: PROJECT_YAML() + "collaboration:\n  author: off\n",
+    });
+    const result = await runTaskStart({ cwd: dir, taskId: "P1-T1", agent: "claude-code" });
+    if (result.kind !== "started") throw new Error("type narrow");
+    expect(result.event.author).toBeUndefined();
+    const { log } = await readProgress(dir);
+    expect(log.events[0]?.author).toBeUndefined();
+  });
+});

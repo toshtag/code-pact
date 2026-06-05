@@ -289,6 +289,25 @@ describe("runTaskComplete — dry run", () => {
     );
     expect(after).toBe(before);
   });
+
+  it("would_append carries author (dry-run preview matches what would be written)", async () => {
+    await setupProject(dir);
+    const saved = process.env.CODE_PACT_AUTHOR;
+    process.env.CODE_PACT_AUTHOR = "Ada Lovelace";
+    try {
+      const result = await runTaskComplete({
+        cwd: dir,
+        taskId: "P1-T1",
+        agent: "claude-code",
+        dryRun: true,
+      });
+      if (result.kind !== "dry_run") throw new Error("type narrow");
+      expect(result.would_append.author).toBe("Ada Lovelace");
+    } finally {
+      if (saved === undefined) delete process.env.CODE_PACT_AUTHOR;
+      else process.env.CODE_PACT_AUTHOR = saved;
+    }
+  });
 });
 
 describe("runTaskComplete — error codes", () => {

@@ -216,3 +216,28 @@ describe("runTaskBlock — invalid transitions", () => {
     ).rejects.toMatchObject({ code: "INVALID_TASK_TRANSITION" });
   });
 });
+
+describe("runTaskBlock — author attribution (D1)", () => {
+  let savedAuthor: string | undefined;
+  beforeEach(() => {
+    savedAuthor = process.env.CODE_PACT_AUTHOR;
+    process.env.CODE_PACT_AUTHOR = "Ada Lovelace";
+  });
+  afterEach(() => {
+    if (savedAuthor === undefined) delete process.env.CODE_PACT_AUTHOR;
+    else process.env.CODE_PACT_AUTHOR = savedAuthor;
+  });
+
+  it("stamps the blocked event with author", async () => {
+    await setup(dir, STARTED_YAML);
+    const result = await runTaskBlock({
+      cwd: dir,
+      taskId: "P1-T1",
+      reason: "waiting",
+      agent: "claude-code",
+    });
+    expect(result.event.author).toBe("Ada Lovelace");
+    const { log } = await loadMergedProgress(dir);
+    expect(log.events.at(-1)?.author).toBe("Ada Lovelace");
+  });
+});

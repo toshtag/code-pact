@@ -5,6 +5,7 @@ import { Project } from "../core/schemas/project.ts";
 import type { ProgressEvent } from "../core/schemas/progress-event.ts";
 import { loadProgressLog } from "../core/progress/io.ts";
 import { writeEventFile } from "../core/progress/events-io.ts";
+import { resolveEventAuthor } from "../core/progress/author.ts";
 import {
   assertTransition,
   deriveTaskState,
@@ -79,12 +80,14 @@ export async function runTaskStart(
 
   assertTransition(state.current, "started");
 
+  const author = await resolveEventAuthor(cwd);
   const event: ProgressEvent = {
     task_id: taskId,
     status: "started",
     at: now().toISOString(),
     actor: "agent",
     agent: agentName,
+    ...(author !== undefined ? { author } : {}),
   };
 
   await writeEventFile(cwd, event);

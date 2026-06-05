@@ -5,6 +5,7 @@ import { Project } from "../core/schemas/project.ts";
 import type { ProgressEvent } from "../core/schemas/progress-event.ts";
 import { loadProgressLog } from "../core/progress/io.ts";
 import { writeEventFile } from "../core/progress/events-io.ts";
+import { resolveEventAuthor } from "../core/progress/author.ts";
 import {
   assertTransition,
   deriveTaskState,
@@ -68,6 +69,7 @@ export async function runTaskBlock(
   const state = deriveTaskState(log.events, taskId);
   assertTransition(state.current, "blocked");
 
+  const author = await resolveEventAuthor(cwd);
   const event: ProgressEvent = {
     task_id: taskId,
     status: "blocked",
@@ -75,6 +77,7 @@ export async function runTaskBlock(
     actor: "agent",
     agent: agentName,
     reason,
+    ...(author !== undefined ? { author } : {}),
   };
 
   await writeEventFile(cwd, event);

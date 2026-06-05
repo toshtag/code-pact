@@ -5,6 +5,7 @@ import { Project } from "../core/schemas/project.ts";
 import type { ProgressEvent } from "../core/schemas/progress-event.ts";
 import { loadProgressLog } from "../core/progress/io.ts";
 import { writeEventFile } from "../core/progress/events-io.ts";
+import { resolveEventAuthor } from "../core/progress/author.ts";
 import { deriveTaskState } from "../core/progress/task-state.ts";
 import { resolveTaskInRoadmap } from "../core/plan/resolve-task.ts";
 import { runVerify, type CheckResult } from "./verify.ts";
@@ -134,6 +135,7 @@ export async function runTaskComplete(
   }
 
   // ---- Step 4: build the done event ----
+  const author = await resolveEventAuthor(cwd);
   const event: ProgressEvent = {
     task_id: taskId,
     status: "done",
@@ -142,6 +144,7 @@ export async function runTaskComplete(
     agent: agentName,
     evidence: verifyResult.checks.filter((c) => c.ok).map((c) => c.name),
     source: "loop",
+    ...(author !== undefined ? { author } : {}),
   };
 
   // ---- Step 5: dry-run short circuit ----

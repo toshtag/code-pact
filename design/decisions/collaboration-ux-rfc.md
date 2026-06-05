@@ -106,7 +106,7 @@ author?: string   // git identity of whoever ran the verb, e.g. "Ada Lovelace"
   an env var, so `off` genuinely means *never capture*:
 
   1. `collaboration.author: off` in `project.yaml` → **omit** (capture disabled; wins over everything).
-  2. else `CODE_PACT_AUTHOR` env var, if non-empty → use it verbatim.
+  2. else `CODE_PACT_AUTHOR` env var → use it **trimmed** (a blank-after-trim value is ignored — falls through).
   3. else `git config user.name` (via the existing `runGit` helper), if present → use it.
   4. else → **omit** (never a fabricated or empty value).
 
