@@ -171,7 +171,7 @@ Another `code-pact` mutation is in progress on the same project. The advisory wr
 
 Do not blindly delete the lock file just because LOCK_HELD fired — if a concurrent mutation IS in progress, deleting the lock undermines the guarantee. The conservative manual-recovery default in v1.5 deliberately favours wait-and-retry over automation, because automated stale detection is subtle (two processes can both decide the other is stale and clobber a real lock).
 
-Read-only commands (`plan lint`, `plan analyze`, `task runbook`, `phase runbook`, `validate`, `doctor`, `recommend`, `task context`, `task status`) do NOT acquire the lock and can be used to observe project state while a mutation is pending.
+Read-only commands (`status`, `plan lint`, `plan analyze`, `task runbook`, `phase runbook`, `validate`, `doctor`, `recommend`, `task context`, `task status`) do NOT acquire the lock and can be used to observe project state while a mutation is pending.
 
 See [`docs/concepts/governance.md`](concepts/governance.md) for the v1.5 governance walkthrough and [`docs/cli-contract.md` § Advisory write lock](cli-contract.md#advisory-write-lock-v15--p14) for the full acquisition-point matrix.
 
@@ -367,9 +367,13 @@ code-pact plan lint --include-quality --json
 ## `EVENT_FILE_ID_MISMATCH` from `doctor` / `plan lint` (v1.31)
 
 A per-event progress-ledger file under `.code-pact/state/events/` failed the
-filename↔content invariant: its content (or its stored `id`) does not match its
-filename, which **is** the full content id. This is fail-closed — a corrupt,
-partial, or hand-edited event file is never read or written over silently.
+filename↔content invariant. The filename is `<at-compact>-<id>.yaml`, where the
+`<id>` suffix is the sha256 content id and the `<at-compact>` prefix is the
+event's normalized `at`. The check fails when any of these disagree: the
+recomputed content id does not match the filename's id suffix, the event's `at`
+does not match the filename prefix, or its stored `id` disagrees with the
+recomputed content id. This is fail-closed — a corrupt, partial, or hand-edited
+event file is never read or written over silently.
 
 ```sh
 # The message names the offending file, e.g.
@@ -379,8 +383,9 @@ git checkout -- .code-pact/state/events/<file>   # restore it if it was committe
 rm .code-pact/state/events/<file>
 ```
 
-Do **not** hand-edit event files — they are content-addressed (the filename is a
-sha256 of the canonical event). To change recorded progress, append a new event
+Do **not** hand-edit event files — they are content-addressed: the filename
+embeds the event's timestamp prefix and the sha256 content id suffix
+(`<at-compact>-<id>.yaml`). To change recorded progress, append a new event
 via the `task` verbs. On the strict-loader commands the same corruption surfaces
 as a command failure — `plan analyze` → `PLAN_ANALYZE_FAILED`, `plan migrate` →
 `PLAN_MIGRATE_FAILED`, `task *` / `verify` abort — with this diagnostic carried in
@@ -396,9 +401,33 @@ resolved**.
 
 ```sh
 code-pact doctor --json | jq '.data.issues[] | select(.code=="PROGRESS_EVENT_CONFLICT")'
-# Find the conflicting event files for the named task under
-# .code-pact/state/events/, decide which is correct, and remove or correct the
-# other — then re-run doctor / plan analyze to confirm it is gone.
+# Inspect details.events[] for the named task, decide which event is correct,
+# then remove or correct the other. For a per-event ledger entry find the file as
+# .code-pact/state/events/*-<event_id>.yaml; for a legacy ledger, reconcile the
+# matching entry in .code-pact/state/progress.yaml — then re-run doctor / plan
+# analyze to confirm.
+```
+
+**Who collided (v1.33+, Collaboration UX RFC D3).** The issue carries a
+structured `details.events[]` naming the conflicting side(s) — `{ event_id,
+status, author?, at }` (usually two, the establishing event and the offender; one
+when the first event for a task is itself invalid) — so you (and an agent) see
+*who* produced each event without opening the files (`author` is omitted for
+legacy / capture-off events). `event_id` is the **content id**, and where the
+offending event lives depends on the ledger:
+
+- **Per-event ledger** — `event_id` is the *suffix* of the filename `<at-compact>-<event_id>.yaml`, not the whole name; locate it with `.code-pact/state/events/*-<event_id>.yaml`.
+- **Legacy `.code-pact/state/progress.yaml`** — there is **no** per-event file; reconcile the matching entry in `progress.yaml` (or migrate the legacy ledger first).
+
+The same conflict also shows up in the team overview:
+
+```sh
+# Same facts, from the activity overview (PROGRESS_EVENT_CONFLICT only):
+code-pact status --json | jq '.data.conflicts[]'
+# Each side: { event_id, status, author?, at }. Decide which is correct, then
+# remove/correct the other event — for a per-event ledger entry the file is
+# .code-pact/state/events/*-<event_id>.yaml; for a legacy ledger, the matching
+# entry in .code-pact/state/progress.yaml — and re-run.
 ```
 
 Advisory by default (`severity: warning`); `validate --strict` promotes it to a

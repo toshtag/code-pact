@@ -15,6 +15,29 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ### Added
 
+- **Attributed `PROGRESS_EVENT_CONFLICT` + `status` `conflicts[]`** (Collaboration
+  UX RFC, D3). When two contributors record incompatible lifecycle events for one
+  task (a `done` after `done`, a second `started`, an event after a terminal
+  `done` — what two branches merging can produce), the existing
+  `PROGRESS_EVENT_CONFLICT` warning now carries a structured **`details.events[]`**
+  (`{ event_id, status, author?, at }`) naming the conflicting side(s) — the
+  establishing event, when present, and the offender — so an agent reads *who*
+  collided without parsing the
+  message (`author` omitted per-event for legacy / capture-off events; `event_id`
+  is the content id — the suffix of a per-event filename
+  `.code-pact/state/events/<at-compact>-<event_id>.yaml`, not the whole name,
+  while a legacy `progress.yaml`-only event has no per-event file). The same shape
+  surfaces on every existing surface (`plan analyze` / `doctor`), and
+  `code-pact status` now returns a
+  **`data.conflicts[]`** array (`PROGRESS_EVENT_CONFLICT` only) carrying it —
+  scoped to the selected tasks (narrowed by `--phase`), reported at scope level
+  like `totals` and **not** narrowed by `--mine` (a conflict is a multi-author
+  safety signal). Read-side only: no new gate, no exit change, no persisted state
+  schema change (additive JSON output fields only); a healthy project gets
+  `conflicts: []`. See
+  `design/decisions/collaboration-ux-rfc.md` (D3) and `docs/cli-contract.md`
+  § `status` / § Plan diagnostic codes.
+
 - **`code-pact status` — team activity overview** (Collaboration UX RFC, D2). A
   **read-only** top-level command (no `--agent`, no writes, no lock) that
   aggregates the derived state of every task and answers: *what is in flight (by
@@ -28,8 +51,8 @@ identifiers. Starting with v1.0.0, stable releases use plain
   (`AUTHOR_CAPTURE_DISABLED` / `AUTHOR_UNAVAILABLE`); `--phase <id>` scopes to one
   phase. **Not a lock** — it surfaces overlap so a team coordinates; it never
   reserves a task. Pure aggregation over `deriveTaskState` + `depends_on` + the
-  decision resolver — no new core. (`conflicts[]` is deferred to D3, which
-  populates the "who".) See `design/decisions/collaboration-ux-rfc.md` (D2) and
+  decision resolver — no new core. (`conflicts[]` was added in D3 — see the entry
+  above.) See `design/decisions/collaboration-ux-rfc.md` (D2) and
   `docs/cli-contract.md` § `status`.
 
 - **Progress-event `author` attribution** (Collaboration UX RFC, D1). Every

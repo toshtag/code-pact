@@ -17,6 +17,10 @@ import { findUniquePhaseInPlanState } from "../core/plan/resolve-phase.ts";
 import { deriveTaskState, type TaskCurrentState } from "../core/progress/task-state.ts";
 import { makeDecisionResolver, isDecisionRequiredForTask } from "../core/decisions/adr.ts";
 import { isAuthorCaptureDisabled, resolveEventAuthor } from "../core/progress/author.ts";
+import {
+  detectProgressEventConflicts,
+  type ConflictEventEntry,
+} from "../core/plan/checks.ts";
 
 export type StatusOptions = {
   cwd: string;
@@ -56,6 +60,20 @@ export type WaitingEntry = {
   phase_id: string;
   reasons: WaitingReason[];
 };
+/**
+ * A detected `PROGRESS_EVENT_CONFLICT` for a task in scope (Collaboration UX
+ * RFC, D3). `details.events[]` names the conflicting side(s) — usually two (the
+ * establishing event and the offender), one when the first event is itself
+ * invalid — the same structured shape the `plan analyze` / `doctor` surfaces
+ * carry, so an agent reads *who* collided without parsing prose. Structural id
+ * conflicts (`DUPLICATE_*` / `PHASE_ID_MISMATCH`) are NOT here — they stay with
+ * `doctor` / `plan lint`.
+ */
+export type ConflictEntry = {
+  task_id: string;
+  code: "PROGRESS_EVENT_CONFLICT";
+  details: { events: ConflictEventEntry[] };
+};
 
 export type StatusResult = {
   filter: StatusFilter;
@@ -63,6 +81,7 @@ export type StatusResult = {
   blocked: BlockedEntry[];
   available: AvailableEntry[];
   waiting: WaitingEntry[];
+  conflicts: ConflictEntry[];
   totals: { tasks: number; by_state: Record<TaskCurrentState, number> };
 };
 
@@ -123,9 +142,14 @@ export async function runStatus(opts: StatusOptions): Promise<StatusResult> {
   // Derived state by task id across the WHOLE plan (deps may live in any phase).
   const derivedFor = (taskId: string) => deriveTaskState(events, taskId);
 
+  // Tasks in scope (the whole plan, or just the --phase one) — used to scope
+  // conflicts[] to the same view the buckets present.
+  const selectedTaskIds = new Set<string>();
+
   for (const entry of entries) {
     const phaseId = entry.phase.id;
     for (const task of entry.phase.tasks ?? []) {
+      selectedTaskIds.add(task.id);
       tasks += 1;
       const derived = derivedFor(task.id);
       by_state[derived.current] += 1;
@@ -185,6 +209,34 @@ export async function runStatus(opts: StatusOptions): Promise<StatusResult> {
     }
   }
 
+  // conflicts[] (D3): PROGRESS_EVENT_CONFLICT only, scoped to the tasks in view
+  // (the whole plan, or just the --phase one). Reported at scope level like
+  // `totals` and NOT narrowed by `--mine`: a conflict is inherently multi-author
+  // and is a safety signal, so hiding one you are a party to would be unsafe —
+  // `--mine` narrows *your activity buckets*, not the project's conflicts.
+  // Structural id conflicts stay with `doctor` / `plan lint` (this is the
+  // activity view), so only the event-lifecycle conflict surfaces here. A
+  // conflict on an ORPHAN task (an event whose task_id is in no phase) is not in
+  // `selectedTaskIds`, so it is excluded here by design — orphan events remain a
+  // `plan analyze` / `doctor` (`detectOrphanProgressEvents`) concern, not activity.
+  const conflicts: ConflictEntry[] = [];
+  for (const issue of detectProgressEventConflicts(events)) {
+    const taskId = issue.task_id;
+    if (taskId === undefined || !selectedTaskIds.has(taskId)) continue;
+    // The sole producer (`detectProgressEventConflicts`) always attaches a
+    // non-empty `details.events[]`; read it through a typed guard rather than a
+    // bare cast. If it is ever absent we still surface the conflict (never drop a
+    // safety signal) but with empty sides — attribution degrades, the signal does
+    // not. `event_id`/`status`/`author?`/`at` shape is owned by the producer.
+    const sides =
+      (issue.details as { events?: ConflictEventEntry[] } | undefined)?.events ?? [];
+    conflicts.push({
+      task_id: taskId,
+      code: "PROGRESS_EVENT_CONFLICT",
+      details: { events: sides },
+    });
+  }
+
   // --mine: keep only MY active work (in-flight + blocked authored by me).
   // `available` / `waiting` are unauthored project suggestions — not "mine".
   // When the filter is unsupported, return empty buckets (can't filter ≠ no work).
@@ -196,6 +248,7 @@ export async function runStatus(opts: StatusOptions): Promise<StatusResult> {
         blocked: blocked.filter((e) => e.author === mineAuthor),
         available: [],
         waiting: [],
+        conflicts,
         totals: { tasks, by_state },
       };
     }
@@ -205,9 +258,18 @@ export async function runStatus(opts: StatusOptions): Promise<StatusResult> {
       blocked: [],
       available: [],
       waiting: [],
+      conflicts,
       totals: { tasks, by_state },
     };
   }
 
-  return { filter, in_flight, blocked, available, waiting, totals: { tasks, by_state } };
+  return {
+    filter,
+    in_flight,
+    blocked,
+    available,
+    waiting,
+    conflicts,
+    totals: { tasks, by_state },
+  };
 }

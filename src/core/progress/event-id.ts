@@ -6,11 +6,14 @@ import type { ProgressEvent } from "../schemas/progress-event.ts";
  *
  * A progress event's identity is a content hash of its canonical payload, so
  * the same logical event always hashes to the same id. That makes legacy↔file
- * dedup (B3) and idempotent migration (B4) free, and makes the per-event-file
- * filename a bijection with the id: a filename collision happens iff two events
- * are *canonically identical* (same canonical payload), so a pre-existing final
- * file means the canonically identical event is already on disk (idempotent
- * success, B1) — never a distinct-event clash.
+ * dedup (B3) and idempotent migration (B4) free. The per-event-file filename
+ * embeds that content id as its suffix — `<at-compact>-<id>.yaml`, where the
+ * `<at-compact>` prefix is also content-derived (the normalized `at`), so the id
+ * is NOT the whole filename. The filename is thus deterministically derived from
+ * the canonical event, and a filename collision happens iff two events are
+ * *canonically identical* (same canonical payload), so a pre-existing final file
+ * means the canonically identical event is already on disk (idempotent success,
+ * B1) — never a distinct-event clash.
  *
  * The canonical payload MUST be pinned exactly or the id is not reproducible:
  *  - every persisted event field EXCEPT `id`; `at` is included
@@ -68,8 +71,11 @@ export function atCompact(at: string): string {
 }
 
 /**
- * Event-file name `<at-compact>-<full-id>.yaml`. The full digest (not a
- * truncated prefix) makes the filename a bijection with the id.
+ * Event-file name `<at-compact>-<full-id>.yaml`. The full digest is carried as
+ * the filename *suffix* (not a truncated prefix, and not the whole name); the
+ * `<at-compact>` prefix is also content-derived. The filename is therefore
+ * deterministically derived from the canonical event, so a filename collision
+ * means the canonical event is identical — but the id is not the whole filename.
  */
 export function eventFileName(event: ProgressEvent): string {
   return `${atCompact(event.at)}-${computeEventId(event)}.yaml`;
