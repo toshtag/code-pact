@@ -19,6 +19,7 @@ export const messages = {
     "  recommend  suggest a model tier for a task",
     "  doctor     report project structure issues (human-friendly)",
     "  validate   check project validity for CI (exit 1 on errors, --strict for warnings)",
+    "  status     team activity overview: in flight / blocked / available / waiting",
     "",
     "Global options:",
     "  -v, --version    print version",

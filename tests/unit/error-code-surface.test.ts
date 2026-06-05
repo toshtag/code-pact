@@ -232,6 +232,12 @@ const NON_ERROR_CODES = new Set<string>([
   "CHECKED_TASK_SKIPPED",
   "PHASE_ID_INFERRED",
   "READINESS_FIELDS_NOT_INFERRED",
+  // `code-pact status` (Collaboration UX RFC, D2) reason codes — they live in
+  // the read-only overview's `data.waiting[].reasons[].code`, never become a
+  // top-level `error.code`, and never affect exit. A separate documented
+  // contract (cli-contract.md § `status`), not part of the error-code surface.
+  "WAITING_FOR_DEPENDENCY",
+  "MISSING_DECISION",
 ]);
 
 async function walkSrc(dir: string): Promise<string[]> {

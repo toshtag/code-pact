@@ -843,6 +843,129 @@ describe("CLI: task complete (v0.2)", () => {
 });
 
 // ---------------------------------------------------------------------------
+// v1.32: code-pact status (Collaboration UX D2)
+// ---------------------------------------------------------------------------
+
+describe("CLI: status (v1.32)", () => {
+  async function setupWithTask(): Promise<void> {
+    run(["init", "--non-interactive", "--locale", "en-US", "--agent", "claude-code", "--json"]);
+    run(["phase", "add", "--id", "P1", "--name", "Foundation", "--objective", "Foundation", "--weight", "10", "--json"]);
+    const phasePath = join(tmpDir, "design", "phases", "P1-foundation.yaml");
+    const doc = parseYaml(await readFile(phasePath, "utf8")) as Record<string, unknown>;
+    doc.tasks = [
+      {
+        id: "P1-T1", type: "feature", ambiguity: "low", risk: "low",
+        context_size: "small", write_surface: "low", verification_strength: "weak",
+        expected_duration: "short", status: "planned", description: "t",
+      },
+    ];
+    await writeFile(phasePath, stringifyYaml(doc), "utf8");
+  }
+
+  it("lists a planned task as available, then in_flight (with author) after start", async () => {
+    await setupWithTask();
+    const before = run(["status", "--json"]);
+    expect(before.code).toBe(0);
+    const b = JSON.parse(before.stdout) as {
+      ok: boolean;
+      data: { available: { task_id: string }[]; in_flight: unknown[] };
+    };
+    expect(b.ok).toBe(true);
+    expect(b.data.available.map((e) => e.task_id)).toContain("P1-T1");
+    expect(b.data.in_flight).toEqual([]);
+
+    const startRes = run(["task", "start", "P1-T1", "--agent", "claude-code"], {
+      CODE_PACT_AUTHOR: "Ada Lovelace",
+    });
+    expect(startRes.code).toBe(0);
+
+    const after = run(["status", "--json"]);
+    const a = JSON.parse(after.stdout) as {
+      data: { in_flight: { task_id: string; author?: string }[]; available: { task_id: string }[] };
+    };
+    expect(a.data.in_flight.map((e) => e.task_id)).toEqual(["P1-T1"]);
+    expect(a.data.in_flight[0]?.author).toBe("Ada Lovelace");
+    expect(a.data.available.map((e) => e.task_id)).not.toContain("P1-T1");
+  });
+
+  it("is agent-neutral — runs with no agent setup (like doctor/validate)", async () => {
+    await setupWithTask();
+    // Pure read: no --agent needed; succeeds and returns the envelope.
+    const res = run(["status", "--json"]);
+    expect(res.code).toBe(0);
+    const parsed = JSON.parse(res.stdout) as { ok: boolean; data: { filter: unknown } };
+    expect(parsed.ok).toBe(true);
+    expect(parsed.data.filter).toEqual({ mine: false });
+  });
+
+  it("--help (and -h) prints usage and exits 0 without reading the project", () => {
+    // No setup at all — --help must not reach into the project.
+    for (const flag of ["--help", "-h"]) {
+      const res = run(["status", flag]);
+      expect(res.code).toBe(0);
+      expect(res.stdout).toContain("Usage: code-pact status");
+      expect(res.stdout).toContain("--mine");
+      expect(res.stdout).toContain("--phase");
+      expect(res.stdout).toContain("--json");
+    }
+  });
+
+  it("rejects malformed args as CONFIG_ERROR (exit 2), not a silent run", async () => {
+    await setupWithTask();
+    // value-less --phase must NOT silently degrade to a whole-project status.
+    for (const args of [["status", "--phase", "--json"], ["status", "--bogus", "--json"], ["status", "P1", "--json"]]) {
+      const res = run(args);
+      expect(res.code).toBe(2);
+      const parsed = JSON.parse(res.stdout) as { ok: boolean; error: { code: string } };
+      expect(parsed.ok).toBe(false);
+      expect(parsed.error.code).toBe("CONFIG_ERROR");
+    }
+  });
+
+  it("--phase with a duplicate phase id fails closed (AMBIGUOUS_PHASE_ID, exit 2)", async () => {
+    run(["init", "--non-interactive", "--locale", "en-US", "--agent", "claude-code", "--json"]);
+    await writeFile(
+      join(tmpDir, "design", "roadmap.yaml"),
+      "phases:\n  - id: P2\n    path: design/phases/P2-a.yaml\n    weight: 10\n  - id: P2\n    path: design/phases/P2-b.yaml\n    weight: 10\n",
+      "utf8",
+    );
+    const body = (n: string) =>
+      `id: P2\nname: ${n}\nweight: 10\nconfidence: high\nrisk: low\nstatus: planned\nobjective: phase objective long enough\ndefinition_of_done:\n  - done\nverification:\n  commands:\n    - echo ok\n`;
+    await writeFile(join(tmpDir, "design", "phases", "P2-a.yaml"), body("A"), "utf8");
+    await writeFile(join(tmpDir, "design", "phases", "P2-b.yaml"), body("B"), "utf8");
+
+    const res = run(["status", "--phase", "P2", "--json"]);
+    expect(res.code).toBe(2);
+    const parsed = JSON.parse(res.stdout) as {
+      ok: boolean;
+      error: { code: string };
+      data?: { phases?: string[] };
+    };
+    expect(parsed.ok).toBe(false);
+    expect(parsed.error.code).toBe("AMBIGUOUS_PHASE_ID");
+    expect(parsed.data?.phases).toEqual([
+      "design/phases/P2-a.yaml",
+      "design/phases/P2-b.yaml",
+    ]);
+  });
+
+  it("human --phase --mine output notes totals are for the selected scope", async () => {
+    await setupWithTask();
+    run(["task", "start", "P1-T1", "--agent", "claude-code"], {
+      CODE_PACT_AUTHOR: "Ada Lovelace",
+    });
+    // Human output (no --json) under --mine + --phase must clarify that the
+    // totals reflect the selected scope (the phase), not the --mine subset.
+    const res = run(["status", "--phase", "P1", "--mine"], {
+      CODE_PACT_AUTHOR: "Ada Lovelace",
+    });
+    expect(res.code).toBe(0);
+    expect(res.stdout).toContain("Totals are for the selected scope, not only --mine results.");
+    expect(res.stdout).not.toContain("whole project");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // v1.21: task record-done
 // ---------------------------------------------------------------------------
 

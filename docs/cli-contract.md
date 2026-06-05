@@ -47,6 +47,7 @@ The complete catalog (Public / Plan / Doctor / Adapter) is in [Error codes](#err
 - **Planning & import** — [`plan`](#plan) · [`phase import`](#phase-import) · [`spec import`](#spec-import-v18)
 - **Per-task lifecycle** — [`task prepare`](#task-prepare--single-per-task-entry-point-v111-p21) · [`task context`](#task-context--context-quality-gates-v051-v11-additions) · [`task start` / `status` / `block` / `resume`](#task-start--task-status--task-block--task-resume-v06) · [`task complete`](#task-complete) · [`task record-done`](#task-record-done--record-completion-without-task-complete-v121) · [`task finalize`](#task-finalize--flip-task-design-status-to-done-v12-p11) · [`task add`](#task-add--append-a-task-to-a-phase-v06-non-interactive-in-v14)
 - **Phase-level & sequencing** — [`phase reconcile`](#phase-reconcile--bulk-flip-task-design-statuses-for-a-phase-v12-p11) · [`task runbook`](#task-runbook--read-only-guidance-for-a-single-task-v13-p12) · [`phase runbook`](#phase-runbook--read-only-guidance-for-an-entire-phase-v13-p12)
+- **Collaboration** — [`status`](#status--team-activity-overview-v132-collaboration-ux-rfc-d2)
 - **Adapters & diagnostics** — [`adapter`](#adapter-v09) · [`doctor`](#doctor--plan-quality-checks-v053) · [`recommend`](#recommend-v08)
 - **Stability** — [Stability taxonomy (v1.0)](#stability-taxonomy-v10) · [Stability](#stability)
 
@@ -170,10 +171,10 @@ CI. (For `error.cause_code` values, see [Public cause codes](#public-cause-codes
 | `ALREADY_INITIALIZED` | `init` | `.code-pact/` already exists without `--force` |
 | `ALREADY_EXISTS` | `plan brief`, `plan constitution` | Target design file already exists without `--force` |
 | `BASELINE_NOT_FOUND` | `progress` | Named baseline snapshot missing |
-| `PHASE_NOT_FOUND` | `phase show`, `pack`, `verify`, `recommend` | Phase id not in `roadmap.yaml` |
+| `PHASE_NOT_FOUND` | `phase show`, `pack`, `verify`, `recommend`, `status` | Phase id not in `roadmap.yaml` |
 | `TASK_NOT_FOUND` | `pack`, `verify`, `task context`, `task start/block/resume/complete/record-done/status` | Task id not present anywhere |
 | `AMBIGUOUS_TASK_ID` | `task context`, `task start/block/resume/complete/record-done/status` | Same task id exists in multiple phases |
-| `AMBIGUOUS_PHASE_ID` | `phase show`, `phase reconcile`, `phase runbook`, `pack`, `verify`, `recommend`, `task prepare`, `task context`, `task add` | Same phase id exists in more than one `roadmap.yaml` entry; `data.phases[]` lists the colliding files |
+| `AMBIGUOUS_PHASE_ID` | `phase show`, `phase reconcile`, `phase runbook`, `pack`, `verify`, `recommend`, `task prepare`, `task context`, `task add`, `status` | Same phase id exists in more than one `roadmap.yaml` entry; `data.phases[]` lists the colliding files |
 | `AGENT_NOT_FOUND` | `pack`, `adapter *`, `task context`, `task start/block/resume/complete/record-done` | Agent name not in `project.yaml` |
 | `AGENT_NOT_ENABLED` | `task context`, `task start/block/resume/complete/record-done` | Agent is configured but has `enabled: false` |
 | `INVALID_TASK_TRANSITION` | `task start/block/resume/complete/record-done` | Requested state transition is not allowed from the current state |
@@ -2447,6 +2448,40 @@ Allowed only from `started` or `resumed`. Block from `planned`, `blocked`, or `d
 
 Records a `resumed` event. Allowed only from `blocked` — any other current state returns `INVALID_TASK_TRANSITION` (exit 2).
 
+## `status` — team activity overview (v1.32+, Collaboration UX RFC D2)
+
+`code-pact status [--json] [--phase <id>] [--mine]`. **Pure read** — no `--agent`, no agent config, no writes, no lock. Aggregates the derived state of every task and answers the sit-down questions: *what is in flight (by whom), what is blocked (why/by whom), what is free to pick up — and, for what isn't, why.* It is an **activity** view, not a structural-diagnostics aggregator: `DUPLICATE_*` / `PHASE_ID_MISMATCH` stay with `doctor` / `plan lint`. It **never reserves or locks** a task — it surfaces overlap so humans coordinate; two people picking the same task is made *visible*, not *prevented* (if both proceed, `PROGRESS_EVENT_CONFLICT` catches it).
+
+JSON envelope:
+
+```json
+{
+  "ok": true,
+  "data": {
+    "filter": { "mine": false },
+    "in_flight": [{ "task_id": "P3-T2", "phase_id": "P3", "since": "2026-06-05T…Z", "author": "Ada" }],
+    "blocked":   [{ "task_id": "P4-T1", "phase_id": "P4", "reason": "waiting on infra", "author": "Bo", "since": "…" }],
+    "available": [{ "task_id": "P3-T3", "phase_id": "P3" }],
+    "waiting":   [{ "task_id": "P4-T2", "phase_id": "P4", "reasons": [
+      { "code": "WAITING_FOR_DEPENDENCY", "task_id": "P3-T1" },
+      { "code": "MISSING_DECISION", "decision_ref": "design/decisions/x.md" }
+    ] }],
+    "totals": { "tasks": 12, "by_state": { "planned": 5, "started": 2, "resumed": 0, "blocked": 1, "done": 4, "failed": 0 } }
+  }
+}
+```
+
+- **`in_flight`** — derived `started` / `resumed` (not `done`); `author` / `since` from the latest state-advancing event (D1).
+- **`blocked`** — derived `blocked`, with the `reason` (required on `blocked` events), `author`, `since`.
+- **`available`** — a `planned`, not-started task that is **ready to pick up**: `depends_on` all `done`, and — if `requires_decision` — an **accepted** decision exists (the shared status-aware gate, as in `verify` / `task record-done`).
+- **`waiting`** — a `planned` task that is **not** ready, with **`reasons[]`** (`code` ∈ `WAITING_FOR_DEPENDENCY` (+`task_id`) / `MISSING_DECISION` (+`decision_ref`)). These are **status reason codes**, not error codes — they never become a top-level `error.code` and never affect exit. Every planned task is in exactly one of `available` / `waiting`. `MISSING_DECISION.decision_ref` names the **actually-blocking** ADR (`decision_refs` is all-must-be-accepted, so it is the first *non-accepted* one, not necessarily `decision_refs[0]`). `status` **collapses any unresolved decision gate into `MISSING_DECISION`** — it does **not** expose structural sub-reasons (e.g. an `unsafe_path` `decision_refs` entry); for those, run `doctor` / `plan lint` / `verify`. When the blocker is a structurally-invalid path, `decision_ref` is **omitted** (a dangerous path is never surfaced as "the ADR to fix"); it is also omitted when no ADR was considered (filename-scan with no match).
+- **`totals.by_state`** counts every derived `TaskCurrentState` (`done` / `failed` are counted but not bucketed). `totals` always reflects the **selected scope** (the whole project, or the single phase under `--phase`), **not** the `--mine`-filtered subset.
+- **`filter`** — always present. `--mine` filters `in_flight` + `blocked` to your resolved author identity (D1 — `CODE_PACT_AUTHOR`, else `git config user.name`) and empties `available` / `waiting` (unauthored suggestions). Shapes: `{ "mine": false }`; `{ "mine": true, "supported": true, "author": "Ada" }`; or, when identity can't drive the filter, `{ "mine": true, "supported": false, "reason": "AUTHOR_CAPTURE_DISABLED" | "AUTHOR_UNAVAILABLE" }` with **all buckets empty** (can't-filter ≠ no-work). `AUTHOR_CAPTURE_DISABLED` = `collaboration.author: off`; `AUTHOR_UNAVAILABLE` = no identity resolved.
+
+`--phase <id>` restricts to one phase, resolved through the shared phase resolver: an unknown id → `PHASE_NOT_FOUND` (exit 2); a **duplicate** phase id **fails closed** with `AMBIGUOUS_PHASE_ID` (exit 2) and `data.phases[]` listing the colliding files (PR1a parity — never a silent union). `--help` prints usage and exits 0. Otherwise the command exits 0 on success; argument errors aside, it has no failure/exit semantics of its own (a corrupt roadmap / phase / ledger follows the existing strict-reader behavior — exit 3).
+
+> **`conflicts[]` is deferred to D3.** The RFC's full overview shape includes a `conflicts[]` array (`PROGRESS_EVENT_CONFLICT` with `details.events[]`); it lands with D3 (attribution-named conflicts) so the "who" is populated. D2 ships the four activity buckets.
+
 ## `recommend` (v0.8)
 
 `code-pact recommend --phase <id> --task <id> [--agent <name>] [--json]` returns a deterministic execution plan for a given task — model tier, effort, context profile, planning posture, escalation order, preflight commands, a categorical budget profile, and (additively, P48) a recommended context budget profile (`contextFit`) — based on Task metadata (`type`, `ambiguity`, `risk`, `context_size`, `write_surface`, `verification_strength`, `expected_duration`, `requires_decision`).
@@ -2683,7 +2718,7 @@ Extending the adapter-style helpers to other state-file writes is **deferred unl
 
 ### Concurrent writers
 
-Running two design-mutating `code-pact` commands against the same project in parallel is **detected** in v1.5+ via the advisory write lock (P14 governance — see § Advisory write lock below). The second invocation fails fast with `LOCK_HELD` (exit 2) and a diagnostic envelope. Read-only commands (`plan lint`, `plan analyze`, `task runbook`, `phase runbook`, `validate`, `doctor`, `recommend`, `task context`, `task status`) do not acquire the lock and can run concurrently with mutations (observing the project at whatever transitional state is on disk when they read).
+Running two design-mutating `code-pact` commands against the same project in parallel is **detected** in v1.5+ via the advisory write lock (P14 governance — see § Advisory write lock below). The second invocation fails fast with `LOCK_HELD` (exit 2) and a diagnostic envelope. Read-only commands (`status`, `plan lint`, `plan analyze`, `task runbook`, `phase runbook`, `validate`, `doctor`, `recommend`, `task context`, `task status`) do not acquire the lock and can run concurrently with mutations (observing the project at whatever transitional state is on disk when they read).
 
 ### Advisory write lock (v1.5+ / P14)
 
@@ -2756,7 +2791,7 @@ Automation (PID liveness check, age-based stale detection, a `--force-lock` flag
 | `task finalize --write` | no | Writes phase YAML only (flips `tasks[].status`) |
 | `phase reconcile --write` | no | Writes phase YAML only (batch flip of `tasks[].status`) |
 | `task start` / `task block` / `task resume` / `task status` | no | Writes one event file under `state/events/` only, or read-only (`task status`) |
-| `plan lint` / `plan normalize` / `plan analyze` / `validate` / `doctor` / `recommend` / `task runbook` / `phase runbook` / `task context` | no | Read-only |
+| `status` / `plan lint` / `plan normalize` / `plan analyze` / `validate` / `doctor` / `recommend` / `task runbook` / `phase runbook` / `task context` | no | Read-only |
 
 The four `createPhase` callers are the **only** code paths that mutate `roadmap.yaml`. This is enforced structurally — no other module calls into the roadmap saver. Future commands that need to mutate the roadmap MUST go through `createPhase` (or land an RFC-update that extends this writer list).
 

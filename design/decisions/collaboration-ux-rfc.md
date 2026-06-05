@@ -218,22 +218,15 @@ accepted coordination-view limitation, noted in the human output.
         ]
       }
     ],
-    "conflicts": [
-      {
-        "task_id": "P3-T2",
-        "code": "PROGRESS_EVENT_CONFLICT",
-        "details": {
-          "events": [
-            { "event_id": "…", "status": "done", "author": "Ada", "at": "2026-06-05T…Z" },
-            { "event_id": "…", "status": "done", "author": "Bo",  "at": "2026-06-05T…Z" }
-          ]
-        }
-      }
-    ],
-    "totals": { "tasks": 12, "by_state": { "planned": 5, "started": 2, "blocked": 1, "done": 4 } }
+    "totals": { "tasks": 12, "by_state": { "planned": 5, "started": 2, "resumed": 0, "blocked": 1, "done": 4, "failed": 0 } }
   }
 }
 ```
+
+> **`conflicts[]` ships in D3, not D2.** D2 ships the four activity buckets above.
+> D3 adds a `data.conflicts[]` array (`PROGRESS_EVENT_CONFLICT` only, each with
+> the structured `details.events[]` naming *who* produced each side — see D3) once
+> attribution can populate the "who". A D2-era consumer sees no `conflicts` key.
 
 - **`in_flight`** = derived `started` / `resumed`, not `done`. The "someone is
   on this" signal; `author` from the latest state-advancing event (D1).
@@ -254,13 +247,14 @@ accepted coordination-view limitation, noted in the human output.
   `plan lint` / `verify`; `status` only answers *activity* readiness. Planned tasks
   are never silently dropped: every planned task is in exactly one of `available` /
   `waiting`, so the overview answers both "what can I start" *and* "why not".
-- **`conflicts`** (MVP, decided) = **`PROGRESS_EVENT_CONFLICT` only**, each with
-  the structured `details.events[]` (D3 shape — same as the `plan lint` / `doctor`
-  surface). The structural id conflicts (`DUPLICATE_*` / `PHASE_ID_MISMATCH`) stay
+- **`conflicts`** (added in **D3**, not D2) = **`PROGRESS_EVENT_CONFLICT` only**,
+  each with the structured `details.events[]` (D3 shape — same as the `plan lint` /
+  `doctor` surface) so it names *who* produced each side. It is **not** in the D2
+  output (D2 has no `conflicts` key); it lands with D3 once attribution can fill
+  the "who". The structural id conflicts (`DUPLICATE_*` / `PHASE_ID_MISMATCH`) stay
   the responsibility of `doctor` / `plan lint` — the overview is an *activity* view
   (in flight / blocked / available / waiting), not a structural-diagnostics
-  aggregator; folding all of `plan lint` into it would bloat the command. Merging
-  a structural-health section into the overview, if ever wanted, is a separate PR.
+  aggregator; folding all of `plan lint` into it would bloat the command.
 
 **Explicitly NOT a lock.** The overview **surfaces** overlap so humans coordinate;
 it does **not** reserve, claim, or block. Two people can still pick the same
@@ -301,7 +295,8 @@ change. Works on any existing ledger (author simply absent pre-D1).
   on the `code-pact status` `data.conflicts[]` entry. `author` is omitted
   per-event for legacy events that lack it. Pure read-side enrichment of the
   existing `detectProgressEventConflicts`.
-- **Surface conflicts in the overview** (D2 `conflicts[]`).
+- **Surface conflicts in the `code-pact status` overview** as `data.conflicts[]`
+  (added in D3 — D2 has no `conflicts` key).
 - **Agent playbook already exists** (`docs/agent-contract.md` "Collaboration
   conflicts: fail closed, then recover", PR1b) — extend it with the attribution
   note.
@@ -342,19 +337,20 @@ no) → **MINOR**, matching the collaboration-safe-state / control-plane-v2 prec
    events with `author` **omitted** and reads byte-for-byte as today.
 2. **No id churn:** every pre-existing event hashes to the same id after D1
    (golden-fixture lock); legacy↔file dedup unaffected; no migration runs.
-3. **Overview answers the questions:** `status --json` lists `in_flight` (with
+3. **Overview answers the questions (D2):** `status --json` lists `in_flight` (with
    `author`), `blocked` (with `reason` + `author`), `available` (ready to pick up),
    and `waiting` (with `reasons[]`); every planned task is in exactly one of
-   `available` / `waiting`. `conflicts[]` carries `PROGRESS_EVENT_CONFLICT` only.
+   `available` / `waiting`. (D2 has **no** `conflicts` key — see #6, a D3 criterion.)
 4. **`available` is honestly ready:** a `requires_decision` task with no accepted
    decision, or a task with an unsatisfied `depends_on`, appears in `waiting`
    (with the reason), **never** in `available`.
 5. **Overview is read-only and lock-free:** it never writes the ledger or design
    YAML and needs no agent config; two contributors picking the same task is
    *visible*, not *prevented*.
-6. **Named conflicts (structured):** a `PROGRESS_EVENT_CONFLICT` exposes a
+6. **Named conflicts (structured) — D3:** a `PROGRESS_EVENT_CONFLICT` exposes a
    structured `details.events[]` (`event_id` / `status` / `author?` / `at`) — an
-   agent reads who produced each side without parsing the `message`.
+   agent reads who produced each side without parsing the `message`. D3 also adds
+   `status` `data.conflicts[]` carrying these (`PROGRESS_EVENT_CONFLICT` only).
 7. **`--mine` is exact-match and excludes anonymous events:** legacy / capture-off
    events never appear; capture-off repos get an explicit empty/unsupported result.
 8. **No new default noise:** a healthy current project gains no new warning from
@@ -432,7 +428,7 @@ implementer):
   message-only; same shape on the `status` `conflicts[]` and the `plan lint` /
   `doctor` surfaces); `message` is the human rendering. (D3)
 - **`conflicts[]` scope → `PROGRESS_EVENT_CONFLICT` only**; structural id conflicts
-  stay with `doctor` / `plan lint`. (D2)
+  stay with `doctor` / `plan lint`. (D3 — `status` has no `conflicts` key until D3.)
 
 ## Non-contract implementation notes (not blocking acceptance)
 
