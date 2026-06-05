@@ -193,6 +193,11 @@ const KNOWN_CODES: Record<string, "public" | "plan" | "doctor" | "adapter" | "in
 //     but the surface presented to agents is still UPPER_SNAKE_CASE)
 // 4. Advisory warnings pushed into an envelope array (v1.6 P15-T1):
 //    warnings.push("TASK_WRITES_AUDIT_OUTSIDE_DECLARED")
+// 5. The canonical error-envelope writer emitError(json, "CODE", message, …)
+//    from src/cli/util.ts. The code is the 2nd positional arg, so it no
+//    longer appears as a `code: "…"` object property at the call site —
+//    codes emitted ONLY through this helper (e.g. DOCTOR_FAILED) need this
+//    pattern to stay pinned to KNOWN_CODES + docs/cli-contract.md.
 const EMISSION_PATTERNS: RegExp[] = [
   /\bcode:\s*"([A-Z][A-Z0-9_]+)"/g,
   /\.code\s*=\s*"([A-Z][A-Z0-9_]+)"/g,
@@ -202,6 +207,8 @@ const EMISSION_PATTERNS: RegExp[] = [
   // `cause_code:` (the `_` defeats the word boundary), so cause codes need
   // their own pattern to stay pinned to KNOWN_CODES + docs/cli-contract.md.
   /\bcause_code:\s*"([A-Z][A-Z0-9_]+)"/g,
+  // emitError(json, "CODE", …) — the 2nd positional arg is the error code.
+  /\bemitError\(\s*[^,]+,\s*"([A-Z][A-Z0-9_]+)"/g,
 ];
 
 // Strings that look like UPPER_SNAKE_CASE error codes but aren't part of the
