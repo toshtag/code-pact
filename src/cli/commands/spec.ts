@@ -1,7 +1,7 @@
-// Extracted from src/cli.ts (v1.17.1). The CLI wrapper layer for the
-// `spec` subcommand cluster (P18 — Spec Kit bridge). Routes
-// `spec <subcommand>` to its handlers. JSON envelopes, exit codes,
-// error codes, and flag surfaces are byte-identical to v1.17.
+// The CLI wrapper layer for the `spec` subcommand cluster (the Spec Kit
+// bridge). Routes `spec <subcommand>` to its handlers. JSON envelopes,
+// exit codes, error codes, and flag surfaces are part of the stable CLI
+// contract.
 //
 // `cmdSpec` is the cluster-entry dispatch and is the only export.
 

@@ -1,10 +1,10 @@
 // Shared test helpers for subprocess-based CLI integration tests.
 //
-// Each existing integration test file (cli.test.ts, adapter-cli.test.ts,
-// plan-*.test.ts, recommend-v2.test.ts) inlines its own spawnSync wrapper,
-// mkdtemp boilerplate, and JSON-envelope assertions. Newer tests should
-// import this module instead. Existing tests are left untouched per the
-// v1.0 P8-T2 scope (no forced migration).
+// Integration tests spawn the built CLI and assert on its JSON envelopes.
+// This module owns the spawnSync wrapper, mkdtemp boilerplate, and envelope
+// assertions so the test files import a shared `run()`/`RunResult` instead
+// of re-implementing them. A couple of tests with special spawn needs keep
+// their own wrappers.
 //
 // Build posture: integration tests expect dist/cli.js to have been built
 // before Vitest starts. `pnpm test:integration` and CI both run `pnpm build`
