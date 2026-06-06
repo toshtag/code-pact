@@ -1,11 +1,16 @@
 import type { AgentProfile } from "../schemas/agent-profile.ts";
 import type { Locale } from "../../i18n/index.ts";
-import { messages as messageCatalog } from "../../i18n/index.ts";
 import type {
   AdapterDescriptor,
   AdapterGenerateInput,
   DesiredAdapterFile,
 } from "./types.ts";
+import {
+  adapterCommon,
+  renderWorkflowSection,
+  renderContextDirectorySection,
+  renderProjectConventionsSection,
+} from "./template-sections.ts";
 
 // Gemini CLI adapter (experimental, v0.2).
 //
@@ -27,7 +32,7 @@ import type {
 // memory/discovery semantics evolve.
 
 function geminiMd(profile: AgentProfile, locale: Locale): string {
-  const t = messageCatalog[locale].templates.adapterCommon;
+  const t = adapterCommon(locale);
 
   return [
     `# Gemini CLI — Project Instructions (code-pact)`,
@@ -39,38 +44,11 @@ function geminiMd(profile: AgentProfile, locale: Locale): string {
     `> Install only from the official org (\`google-gemini\`) — typosquat`,
     `> packages with similar names have been reported on npm.`,
     ``,
-    `## ${t.workflowHeader}`,
+    ...renderWorkflowSection(t, "gemini-cli", { step0: false, validateNote: false }),
     ``,
-    `1. ${t.step1}`,
-    `   \`\`\`sh`,
-    `   code-pact task context <task-id> --agent gemini-cli`,
-    `   \`\`\``,
+    ...renderContextDirectorySection(profile),
     ``,
-    `2. ${t.step2}`,
-    ``,
-    `3. ${t.step3}`,
-    `   \`\`\`sh`,
-    `   code-pact task complete <task-id> --agent gemini-cli`,
-    `   \`\`\``,
-    `   ${t.step3FailDetail}`,
-    `   ${t.step3IdempotentDetail}`,
-    ``,
-    `4. ${t.step4}`,
-    ``,
-    `> ${t.verifyNote}`,
-    `>`,
-    `> ${t.packNote}`,
-    ``,
-    `## Context directory`,
-    ``,
-    `Context packs for this agent live under \`${profile.context_dir}/\`.`,
-    ``,
-    `## ${t.projectConventionsHeader}`,
-    ``,
-    `> ${t.projectConventionsHint}`,
-    `> ${t.projectConventionsSource}`,
-    ``,
-    `- ${t.projectConventionsDefault}`,
+    ...renderProjectConventionsSection(t),
   ].join("\n");
 }
 

@@ -1,11 +1,17 @@
 import type { AgentProfile } from "../schemas/agent-profile.ts";
 import type { Locale } from "../../i18n/index.ts";
-import { messages as messageCatalog } from "../../i18n/index.ts";
 import type {
   AdapterDescriptor,
   AdapterGenerateInput,
   DesiredAdapterFile,
 } from "./types.ts";
+import {
+  adapterCommon,
+  renderWorkflowSection,
+  renderAgentContractSection,
+  renderContextDirectorySection,
+  renderProjectConventionsSection,
+} from "./template-sections.ts";
 
 // The generic adapter targets any agent that does not have a dedicated
 // instruction file convention (CLAUDE.md, AGENTS.md, etc). It writes one
@@ -13,7 +19,7 @@ import type {
 // with arbitrary project docs.
 
 function agentInstructionsMd(profile: AgentProfile, locale: Locale): string {
-  const t = messageCatalog[locale].templates.adapterCommon;
+  const t = adapterCommon(locale);
 
   return [
     `# Agent Instructions — Generic`,
@@ -27,66 +33,13 @@ function agentInstructionsMd(profile: AgentProfile, locale: Locale): string {
     `Ensure \`code-pact\` is available in your PATH. During local development,`,
     `\`pnpm link --global\` or a local tarball install both work.`,
     ``,
-    `## ${t.workflowHeader}`,
+    ...renderWorkflowSection(t, "generic", { step0: true, validateNote: true }),
     ``,
-    `0. ${t.step0}`,
-    `   \`\`\`sh`,
-    `   code-pact task prepare <task-id> --agent generic --json`,
-    `   \`\`\``,
-    `   ${t.step0Detail}`,
+    ...renderAgentContractSection(t),
     ``,
-    `1. ${t.step1}`,
-    `   \`\`\`sh`,
-    `   code-pact task context <task-id> --agent generic`,
-    `   \`\`\``,
+    ...renderContextDirectorySection(profile),
     ``,
-    `2. ${t.step2}`,
-    ``,
-    `3. ${t.step3}`,
-    `   \`\`\`sh`,
-    `   code-pact task complete <task-id> --agent generic`,
-    `   \`\`\``,
-    `   ${t.step3FailDetail}`,
-    `   ${t.step3IdempotentDetail}`,
-    ``,
-    `4. ${t.step4}`,
-    ``,
-    `> ${t.verifyNote}`,
-    `>`,
-    `> ${t.validateNote}`,
-    `>`,
-    `> ${t.packNote}`,
-    ``,
-    // v1.7 P16-T3: Agent contract section (same shape as claude-code
-    // / codex). Heading strings are English-locked per
-    // design/decisions/agent-contract-rfc.md so the P16-T4 conformance
-    // regex anchors on them across locales. Body text is localised.
-    `## ${t.agentContract.sectionHeader}`,
-    ``,
-    t.agentContract.intro,
-    ``,
-    `### ${t.agentContract.whenHeader}`,
-    ``,
-    t.agentContract.whenBody,
-    ``,
-    `### ${t.agentContract.verifyHeader}`,
-    ``,
-    t.agentContract.verifyBody,
-    ``,
-    `### ${t.agentContract.failHeader}`,
-    ``,
-    t.agentContract.failBody,
-    ``,
-    `## Context directory`,
-    ``,
-    `Context packs for this agent live under \`${profile.context_dir}/\`.`,
-    ``,
-    `## ${t.projectConventionsHeader}`,
-    ``,
-    `> ${t.projectConventionsHint}`,
-    `> ${t.projectConventionsSource}`,
-    ``,
-    `- ${t.projectConventionsDefault}`,
+    ...renderProjectConventionsSection(t),
   ].join("\n");
 }
 

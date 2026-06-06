@@ -1,11 +1,16 @@
 import type { AgentProfile } from "../schemas/agent-profile.ts";
 import type { Locale } from "../../i18n/index.ts";
-import { messages as messageCatalog } from "../../i18n/index.ts";
 import type {
   AdapterDescriptor,
   AdapterGenerateInput,
   DesiredAdapterFile,
 } from "./types.ts";
+import {
+  adapterCommon,
+  renderWorkflowSection,
+  renderContextDirectorySection,
+  renderProjectConventionsSection,
+} from "./template-sections.ts";
 
 // Cursor adapter (experimental, v0.2).
 //
@@ -34,7 +39,7 @@ function cursorMdc(profile: AgentProfile, locale: Locale): string {
     "---",
   ].join("\n");
 
-  const t = messageCatalog[locale].templates.adapterCommon;
+  const t = adapterCommon(locale);
 
   const body = [
     `# Cursor — Project Instructions (code-pact)`,
@@ -44,38 +49,11 @@ function cursorMdc(profile: AgentProfile, locale: Locale): string {
     `> and \`.cursor/rules/\` placement may shift across Cursor releases.`,
     `> Source: https://cursor.com/docs/context/rules`,
     ``,
-    `## ${t.workflowHeader}`,
+    ...renderWorkflowSection(t, "cursor", { step0: false, validateNote: false }),
     ``,
-    `1. ${t.step1}`,
-    `   \`\`\`sh`,
-    `   code-pact task context <task-id> --agent cursor`,
-    `   \`\`\``,
+    ...renderContextDirectorySection(profile),
     ``,
-    `2. ${t.step2}`,
-    ``,
-    `3. ${t.step3}`,
-    `   \`\`\`sh`,
-    `   code-pact task complete <task-id> --agent cursor`,
-    `   \`\`\``,
-    `   ${t.step3FailDetail}`,
-    `   ${t.step3IdempotentDetail}`,
-    ``,
-    `4. ${t.step4}`,
-    ``,
-    `> ${t.verifyNote}`,
-    `>`,
-    `> ${t.packNote}`,
-    ``,
-    `## Context directory`,
-    ``,
-    `Context packs for this agent live under \`${profile.context_dir}/\`.`,
-    ``,
-    `## ${t.projectConventionsHeader}`,
-    ``,
-    `> ${t.projectConventionsHint}`,
-    `> ${t.projectConventionsSource}`,
-    ``,
-    `- ${t.projectConventionsDefault}`,
+    ...renderProjectConventionsSection(t),
   ].join("\n");
 
   return `${frontmatter}\n\n${body}\n`;

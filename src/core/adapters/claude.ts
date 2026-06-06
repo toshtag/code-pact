@@ -9,16 +9,21 @@ import {
   type ClaudeModelVersion,
 } from "../models/catalog.ts";
 import type { ModelProfile } from "../schemas/model-profile.ts";
-import { ModelTier } from "../schemas/model-profile.ts";
 import { Roadmap } from "../schemas/roadmap.ts";
 import { Phase } from "../schemas/phase.ts";
 import type { Locale } from "../../i18n/index.ts";
-import { messages as messageCatalog } from "../../i18n/index.ts";
 import type {
   AdapterDescriptor,
   AdapterGenerateInput,
   DesiredAdapterFile,
 } from "./types.ts";
+import {
+  adapterCommon,
+  renderWorkflowSection,
+  renderAgentContractSection,
+  renderModelSelectionSection,
+  renderProjectConventionsSection,
+} from "./template-sections.ts";
 
 // ---------------------------------------------------------------------------
 // Model-specific guidance blocks (data lives in core/models/catalog.ts)
@@ -54,22 +59,7 @@ function claudeMd(
   locale: Locale,
   modelVersion?: string,
 ): string {
-  const tier = (t: string) => profile.model_map[t as ModelTier] ?? t;
-  const t = messageCatalog[locale].templates.adapterCommon;
-
-  const tierSection = modelProfiles
-    .map((mp) => {
-      const modelId = tier(mp.tier);
-      const purposes = mp.purpose.join(", ");
-      const efforts = mp.effort_levels.join(" | ");
-      // "thinking-capable", not "thinking enabled": this is a tier-level flag.
-      // The actual thinking mode and effort behavior are model/provider-specific
-      // (defer to the model's current docs); keep the label version-agnostic.
-      const thinking = mp.supports_thinking ? " (thinking-capable)" : "";
-      return `- **${mp.tier}** → \`${modelId}\`${thinking}\n  - Use for: ${purposes}\n  - Effort: ${efforts}`;
-    })
-    .join("\n");
-
+  const t = adapterCommon(locale);
   const modelSection = modelVersion ? `\n\n${modelGuidanceSection(modelVersion)}` : "";
 
   return [
@@ -78,61 +68,11 @@ function claudeMd(
     `> ${t.managedNotice}`,
     `> ${t.editNotice}`,
     ``,
-    `## ${t.workflowHeader}`,
+    ...renderWorkflowSection(t, "claude-code", { step0: true, validateNote: true }),
     ``,
-    `0. ${t.step0}`,
-    `   \`\`\`sh`,
-    `   code-pact task prepare <task-id> --agent claude-code --json`,
-    `   \`\`\``,
-    `   ${t.step0Detail}`,
+    ...renderAgentContractSection(t),
     ``,
-    `1. ${t.step1}`,
-    `   \`\`\`sh`,
-    `   code-pact task context <task-id> --agent claude-code`,
-    `   \`\`\``,
-    ``,
-    `2. ${t.step2}`,
-    ``,
-    `3. ${t.step3}`,
-    `   \`\`\`sh`,
-    `   code-pact task complete <task-id> --agent claude-code`,
-    `   \`\`\``,
-    `   ${t.step3FailDetail}`,
-    `   ${t.step3IdempotentDetail}`,
-    ``,
-    `4. ${t.step4}`,
-    ``,
-    `> ${t.verifyNote}`,
-    `>`,
-    `> ${t.validateNote}`,
-    `>`,
-    `> ${t.packNote}`,
-    ``,
-    // v1.7 P16-T2: Agent contract section. Heading strings
-    // (`Agent contract`, `When to invoke code-pact`,
-    // `What to verify first`, `How to handle failures`) are
-    // English-locked per design/decisions/agent-contract-rfc.md
-    // so the P16-T4 conformance regex anchors on them across
-    // locales. Body text is localised.
-    `## ${t.agentContract.sectionHeader}`,
-    ``,
-    t.agentContract.intro,
-    ``,
-    `### ${t.agentContract.whenHeader}`,
-    ``,
-    t.agentContract.whenBody,
-    ``,
-    `### ${t.agentContract.verifyHeader}`,
-    ``,
-    t.agentContract.verifyBody,
-    ``,
-    `### ${t.agentContract.failHeader}`,
-    ``,
-    t.agentContract.failBody,
-    ``,
-    `## Model selection`,
-    ``,
-    tierSection,
+    ...renderModelSelectionSection(modelProfiles, profile, { thinking: true }),
     modelSection,
     ``,
     `## Skills`,
@@ -144,12 +84,7 @@ function claudeMd(
     ``,
     `Hooks are stored in \`${profile.hook_dir ?? ".claude/hooks"}/\`.`,
     ``,
-    `## ${t.projectConventionsHeader}`,
-    ``,
-    `> ${t.projectConventionsHint}`,
-    `> ${t.projectConventionsSource}`,
-    ``,
-    `- ${t.projectConventionsDefault}`,
+    ...renderProjectConventionsSection(t),
   ].join("\n");
 }
 
