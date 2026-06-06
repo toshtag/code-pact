@@ -20,7 +20,7 @@ import {
 import { AgentProfile } from "../core/schemas/agent-profile.ts";
 import { resolveAgentProfilePath } from "../core/agent-profile-path.ts";
 import { Phase, type Phase as PhaseT } from "../core/schemas/phase.ts";
-import { Project } from "../core/schemas/project.ts";
+import { loadProject, resolveEnabledAgent } from "../core/project.ts";
 import type { Task as TaskT } from "../core/schemas/task.ts";
 
 // ---------------------------------------------------------------------------
@@ -114,11 +114,6 @@ export type TaskPrepareResult = {
 // ---------------------------------------------------------------------------
 // Loaders
 // ---------------------------------------------------------------------------
-
-async function loadProject(cwd: string): Promise<Project> {
-  const raw = await readFile(join(cwd, ".code-pact", "project.yaml"), "utf8");
-  return Project.parse(parseYaml(raw) as unknown);
-}
 
 async function loadPhase(cwd: string, path: string): Promise<PhaseT> {
   const raw = await readFile(join(cwd, path), "utf8");
@@ -257,20 +252,7 @@ export async function runTaskPrepare(
 
   // 1. Agent validation (mirrors task context / task start order).
   const project = await loadProject(cwd);
-  const agentName = opts.agent ?? project.default_agent;
-  const agentRef = project.agents.find((a) => a.name === agentName);
-  if (!agentRef) {
-    const err = new Error(`Agent "${agentName}" is not configured in project.yaml.`);
-    (err as NodeJS.ErrnoException).code = "AGENT_NOT_FOUND";
-    throw err;
-  }
-  if (agentRef.enabled === false) {
-    const err = new Error(
-      `Agent "${agentName}" is disabled in project.yaml (enabled: false).`,
-    );
-    (err as NodeJS.ErrnoException).code = "AGENT_NOT_ENABLED";
-    throw err;
-  }
+  const agentName = resolveEnabledAgent(project, opts.agent);
 
   // 2. Resolve task to phase.
   const { phaseId, phasePath } = await resolveTaskInRoadmap(cwd, taskId);
