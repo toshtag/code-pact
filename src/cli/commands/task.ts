@@ -37,9 +37,11 @@ import {
   TaskFinalizeAuditStrictError,
 } from "../../commands/task-finalize.ts";
 import { runTaskRunbook } from "../../commands/task-runbook.ts";
-import { runTaskStart } from "../../commands/task-start.ts";
-import { runTaskBlock } from "../../commands/task-block.ts";
-import { runTaskResume } from "../../commands/task-resume.ts";
+import {
+  runTaskStart,
+  runTaskBlock,
+  runTaskResume,
+} from "../../commands/task-progress.ts";
 import { runTaskStatus } from "../../commands/task-status.ts";
 import {
   runTaskAdd,

@@ -172,9 +172,7 @@ tasks:
       - src/commands/task-complete.ts
       - src/commands/task-finalize.ts
       - src/commands/task-runbook.ts
-      - src/commands/task-start.ts
-      - src/commands/task-block.ts
-      - src/commands/task-resume.ts
+      - src/commands/task-progress.ts
       - design/decisions/cli-maintainability-rfc.md
     writes:
       - src/cli.ts

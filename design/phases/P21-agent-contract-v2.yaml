@@ -289,7 +289,7 @@ tasks:
       - design/decisions/agent-contract-v2-rfc.md
     reads:
       - src/commands/task-context.ts
-      - src/commands/task-start.ts
+      - src/commands/task-progress.ts
       - src/core/plan/resolve-task.ts
       - src/core/progress/task-state.ts
       - src/core/pack/index.ts
