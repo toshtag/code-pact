@@ -11,7 +11,7 @@ import { strictParse, strictParseAlias, ConfigError } from "../../lib/argv.ts";
 import { clusterUsage, emitUsage, hasHelpFlag, isHelpToken, subcommandUsage } from "../usage.ts";
 import { isInteractive } from "../../lib/tty.ts";
 import { messages, type Locale } from "../../i18n/index.ts";
-import { withWriteLock } from "../util.ts";
+import { withWriteLock, emitOk, emitError } from "../util.ts";
 import {
   runPhaseAdd,
   runPhaseLs,
@@ -64,13 +64,7 @@ export async function cmdPhase(argv: string[], locale: Locale, globalJson: boole
       if (!(err instanceof ConfigError)) throw err;
       const msg = `${err.message}. Quote multi-word values, e.g. --verify-command "node --version".`;
       const json = globalJson || rest.includes("--json");
-      if (json) {
-        process.stdout.write(
-          `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
-        );
-      } else {
-        process.stderr.write(`${msg}\n`);
-      }
+      emitError(json, "CONFIG_ERROR", msg);
       return 2;
     }
 
@@ -138,26 +132,14 @@ export async function cmdPhase(argv: string[], locale: Locale, globalJson: boole
       const msg = nonInteractive
         ? m.cliContract.nonInteractiveMissing("--id, --name, --weight, --objective")
         : "phase add requires --id, --name, --weight, --objective";
-      if (json) {
-        process.stdout.write(
-          `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
-        );
-      } else {
-        process.stderr.write(`${msg}\n`);
-      }
+      emitError(json, "CONFIG_ERROR", msg);
       return 2;
     }
 
     const weight = Number(weightRaw);
     if (!Number.isFinite(weight) || weight <= 0) {
       const msg = "--weight must be a positive number";
-      if (json) {
-        process.stdout.write(
-          `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
-        );
-      } else {
-        process.stderr.write(`${msg}\n`);
-      }
+      emitError(json, "CONFIG_ERROR", msg);
       return 2;
     }
 
@@ -184,7 +166,7 @@ export async function cmdPhase(argv: string[], locale: Locale, globalJson: boole
           definitionOfDone,
         });
         if (json) {
-          process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
+          emitOk(result);
         } else {
           process.stderr.write(`${m.phase.added(id, result.path)}\n`);
         }
@@ -192,26 +174,14 @@ export async function cmdPhase(argv: string[], locale: Locale, globalJson: boole
       } catch (err: unknown) {
         if (err instanceof Error && (err as NodeJS.ErrnoException).code === "DUPLICATE_PHASE_ID") {
           const msg = m.phase.duplicateId(id);
-          if (json) {
-            process.stdout.write(
-              `${JSON.stringify({ ok: false, error: { code: "DUPLICATE_PHASE_ID", message: msg } })}\n`,
-            );
-          } else {
-            process.stderr.write(`${msg}\n`);
-          }
+          emitError(json, "DUPLICATE_PHASE_ID", msg);
           return 2;
         }
         // P14 reserved-id (TUTORIAL) block surfaces as CONFIG_ERROR from
         // createPhase. Propagate the message verbatim — it already names
         // the reserved id and points at `init --sample-phase`.
         if (err instanceof Error && (err as NodeJS.ErrnoException).code === "CONFIG_ERROR") {
-          if (json) {
-            process.stdout.write(
-              `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: err.message } })}\n`,
-            );
-          } else {
-            process.stderr.write(`${err.message}\n`);
-          }
+          emitError(json, "CONFIG_ERROR", err.message);
           return 2;
         }
         throw err;
@@ -224,13 +194,7 @@ export async function cmdPhase(argv: string[], locale: Locale, globalJson: boole
     if (!isInteractive()) {
       const msg =
         "phase new is interactive and cannot run in a non-TTY context. Use \`phase add\` with flags instead.";
-      if (globalJson) {
-        process.stdout.write(
-          `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
-        );
-      } else {
-        process.stderr.write(`${msg}\n`);
-      }
+      emitError(globalJson, "CONFIG_ERROR", msg);
       return 2;
     }
     const initialName = rest[0]?.startsWith("-") ? undefined : rest[0];
@@ -245,7 +209,7 @@ export async function cmdPhase(argv: string[], locale: Locale, globalJson: boole
         try {
           const result = await runPhaseNew({ cwd, locale, initialName });
           if (globalJson) {
-            process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
+            emitOk(result);
           } else {
             process.stderr.write(`${m.phase.added(result.ref.id, result.path)}\n`);
           }
@@ -255,25 +219,13 @@ export async function cmdPhase(argv: string[], locale: Locale, globalJson: boole
             const id =
               err.message.match(/"([^"]+)"/)?.[1] ?? "";
             const msg = m.phase.duplicateId(id);
-            if (globalJson) {
-              process.stdout.write(
-                `${JSON.stringify({ ok: false, error: { code: "DUPLICATE_PHASE_ID", message: msg } })}\n`,
-              );
-            } else {
-              process.stderr.write(`${msg}\n`);
-            }
+            emitError(globalJson, "DUPLICATE_PHASE_ID", msg);
             return 2;
           }
           // P14 reserved-id (TUTORIAL) block surfaces as CONFIG_ERROR from
           // createPhase (the wizard never asks for the bypass flag).
           if (err instanceof Error && (err as NodeJS.ErrnoException).code === "CONFIG_ERROR") {
-            if (globalJson) {
-              process.stdout.write(
-                `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: err.message } })}\n`,
-              );
-            } else {
-              process.stderr.write(`${err.message}\n`);
-            }
+            emitError(globalJson, "CONFIG_ERROR", err.message);
             return 2;
           }
           throw err;
@@ -293,13 +245,7 @@ export async function cmdPhase(argv: string[], locale: Locale, globalJson: boole
     } catch (err) {
       if (!(err instanceof ConfigError)) throw err;
       const json = globalJson || rest.includes("--json");
-      if (json) {
-        process.stdout.write(
-          `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: err.message } })}\n`,
-        );
-      } else {
-        process.stderr.write(`${err.message}\n`);
-      }
+      emitError(json, "CONFIG_ERROR", err.message);
       return 2;
     }
 
@@ -309,20 +255,14 @@ export async function cmdPhase(argv: string[], locale: Locale, globalJson: boole
     try {
       const items = await runPhaseLs({ cwd, status: statusFilter });
       if (json) {
-        process.stdout.write(`${JSON.stringify({ ok: true, data: items })}\n`);
+        emitOk(items);
       } else {
         process.stdout.write(`${formatPhaseLsTable(items)}\n`);
       }
       return 0;
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      if (json) {
-        process.stdout.write(
-          `${JSON.stringify({ ok: false, error: { code: "INTERNAL_ERROR", message: msg } })}\n`,
-        );
-      } else {
-        process.stderr.write(`${msg}\n`);
-      }
+      emitError(json, "INTERNAL_ERROR", msg);
       return 3;
     }
   }
@@ -340,20 +280,14 @@ export async function cmdPhase(argv: string[], locale: Locale, globalJson: boole
     const id = pos[0];
     if (!id) {
       const msg = "phase show requires a phase ID";
-      if (json) {
-        process.stdout.write(
-          `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
-        );
-      } else {
-        process.stderr.write(`${msg}\n`);
-      }
+      emitError(json, "CONFIG_ERROR", msg);
       return 2;
     }
 
     try {
       const phase = await runPhaseShow({ cwd, id });
       if (json) {
-        process.stdout.write(`${JSON.stringify({ ok: true, data: phase })}\n`);
+        emitOk(phase);
       } else {
         process.stdout.write(`${formatPhaseShow(phase)}\n`);
       }
@@ -361,25 +295,13 @@ export async function cmdPhase(argv: string[], locale: Locale, globalJson: boole
     } catch (err: unknown) {
       if (err instanceof Error && (err as NodeJS.ErrnoException).code === "PHASE_NOT_FOUND") {
         const msg = m.phase.notFound(id);
-        if (json) {
-          process.stdout.write(
-            `${JSON.stringify({ ok: false, error: { code: "PHASE_NOT_FOUND", message: msg } })}\n`,
-          );
-        } else {
-          process.stderr.write(`${msg}\n`);
-        }
+        emitError(json, "PHASE_NOT_FOUND", msg);
         return 2;
       }
       if (err instanceof Error && (err as NodeJS.ErrnoException).code === "AMBIGUOUS_PHASE_ID") {
         const phases =
           (err as NodeJS.ErrnoException & { phases?: string[] }).phases ?? [];
-        if (json) {
-          process.stdout.write(
-            `${JSON.stringify({ ok: false, error: { code: "AMBIGUOUS_PHASE_ID", message: err.message }, data: { phases } })}\n`,
-          );
-        } else {
-          process.stderr.write(`${err.message}\n`);
-        }
+        emitError(json, "AMBIGUOUS_PHASE_ID", err.message, { data: { phases } });
         return 2;
       }
       throw err;
@@ -404,13 +326,7 @@ export async function cmdPhase(argv: string[], locale: Locale, globalJson: boole
 
   // Unknown subcommand
   const msg = `phase: unknown subcommand "${subcommand ?? ""}". Use: add | new | ls | show | import | reconcile | runbook (alias: next = runbook)`;
-  if (globalJson) {
-    process.stdout.write(
-      `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
-    );
-  } else {
-    process.stderr.write(`${msg}\n`);
-  }
+  emitError(globalJson, "CONFIG_ERROR", msg);
   return 2;
 }
 
@@ -437,13 +353,7 @@ async function cmdPhaseReconcile(
   } catch (err) {
     if (!(err instanceof ConfigError)) throw err;
     const json = globalJson || argv.includes("--json");
-    if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: err.message } })}\n`,
-      );
-    } else {
-      process.stderr.write(`${err.message}\n`);
-    }
+    emitError(json, "CONFIG_ERROR", err.message);
     return 2;
   }
 
@@ -453,13 +363,7 @@ async function cmdPhaseReconcile(
   if (!phaseId) {
     const msg =
       "phase reconcile requires a phase id (e.g. `phase reconcile P1`).";
-    if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
-      );
-    } else {
-      process.stderr.write(`${msg}\n`);
-    }
+    emitError(json, "CONFIG_ERROR", msg);
     return 2;
   }
   const cwd = process.cwd();
@@ -470,19 +374,14 @@ async function cmdPhaseReconcile(
 
     if (result.kind === "no_eligible_tasks") {
       if (json) {
-        process.stdout.write(
-          `${JSON.stringify({
-            ok: true,
-            data: {
-              kind: "no_eligible_tasks",
-              phase_id: result.phase_id,
-              file: result.file,
-              tasks: result.tasks,
-              phase_status_candidate: result.phase_status_candidate,
-              phase_status_note: result.phase_status_note,
-            },
-          })}\n`,
-        );
+        emitOk({
+          kind: "no_eligible_tasks",
+          phase_id: result.phase_id,
+          file: result.file,
+          tasks: result.tasks,
+          phase_status_candidate: result.phase_status_candidate,
+          phase_status_note: result.phase_status_note,
+        });
       } else {
         process.stdout.write(
           `${m.phase.reconcile.noEligible(phaseId)}\n`,
@@ -493,20 +392,15 @@ async function cmdPhaseReconcile(
 
     if (result.kind === "would_reconcile") {
       if (json) {
-        process.stdout.write(
-          `${JSON.stringify({
-            ok: true,
-            data: {
-              kind: "would_reconcile",
-              phase_id: result.phase_id,
-              file: result.file,
-              tasks: result.tasks,
-              planned_writes: result.planned_writes,
-              phase_status_candidate: result.phase_status_candidate,
-              phase_status_note: result.phase_status_note,
-            },
-          })}\n`,
-        );
+        emitOk({
+          kind: "would_reconcile",
+          phase_id: result.phase_id,
+          file: result.file,
+          tasks: result.tasks,
+          planned_writes: result.planned_writes,
+          phase_status_candidate: result.phase_status_candidate,
+          phase_status_note: result.phase_status_note,
+        });
       } else {
         process.stdout.write(
           `${m.phase.reconcile.wouldReconcile(phaseId, result.planned_writes.length)}\n`,
@@ -517,21 +411,16 @@ async function cmdPhaseReconcile(
 
     // result.kind === "reconciled"
     if (json) {
-      process.stdout.write(
-        `${JSON.stringify({
-          ok: true,
-          data: {
-            kind: "reconciled",
-            phase_id: result.phase_id,
-            file: result.file,
-            tasks: result.tasks,
-            applied_writes: result.applied_writes,
-            skipped_writes: result.skipped_writes,
-            phase_status_candidate: result.phase_status_candidate,
-            phase_status_note: result.phase_status_note,
-          },
-        })}\n`,
-      );
+      emitOk({
+        kind: "reconciled",
+        phase_id: result.phase_id,
+        file: result.file,
+        tasks: result.tasks,
+        applied_writes: result.applied_writes,
+        skipped_writes: result.skipped_writes,
+        phase_status_candidate: result.phase_status_candidate,
+        phase_status_note: result.phase_status_note,
+      });
     } else {
       process.stdout.write(
         `${m.phase.reconcile.reconciled(phaseId, result.applied_writes.length, result.skipped_writes.length)}\n`,
@@ -574,16 +463,7 @@ async function cmdPhaseReconcile(
       default:
         throw err;
     }
-    if (json) {
-      const envelope: Record<string, unknown> = {
-        ok: false,
-        error: { code: outCode, message: msg },
-      };
-      if (extraData) envelope.data = extraData;
-      process.stdout.write(`${JSON.stringify(envelope)}\n`);
-    } else {
-      process.stderr.write(`${msg}\n`);
-    }
+    emitError(json, outCode, msg, extraData ? { data: extraData } : {});
     return 2;
   }
   };
@@ -631,13 +511,7 @@ export async function cmdPhaseImport(
   } catch (err) {
     if (!(err instanceof ConfigError)) throw err;
     const json = globalJson || argv.includes("--json");
-    if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: err.message } })}\n`,
-      );
-    } else {
-      process.stderr.write(`${err.message}\n`);
-    }
+    emitError(json, "CONFIG_ERROR", err.message);
     return 2;
   }
 
@@ -649,13 +523,7 @@ export async function cmdPhaseImport(
   if (!inputPath) {
     const aliasNote = invokedAs === "phase import" ? "" : " (alias for `phase import`)";
     const msg = `${invokedAs} requires an input YAML path, e.g. \`${invokedAs} design/roadmap-draft.yaml\`${aliasNote}`;
-    if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
-      );
-    } else {
-      process.stderr.write(`${msg}\n`);
-    }
+    emitError(json, "CONFIG_ERROR", msg);
     return 2;
   }
 
@@ -665,7 +533,7 @@ export async function cmdPhaseImport(
     try {
       const result = await runPhaseImport({ cwd, inputPath, force, strict, scaffoldDecisions });
       if (json) {
-        process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
+        emitOk(result);
       } else {
         process.stderr.write(`${m.phase.importDone(result.imported_phases.length, result.imported_tasks.length, result.skipped_phases.length)}\n`);
         for (const cf of result.completed_fields) {
@@ -690,13 +558,7 @@ export async function cmdPhaseImport(
         code === "DUPLICATE_PHASE_ID" ||
         code === "AMBIGUOUS_TASK_ID"
       ) {
-        if (json) {
-          process.stdout.write(
-            `${JSON.stringify({ ok: false, error: { code, message } })}\n`,
-          );
-        } else {
-          process.stderr.write(`${message}\n`);
-        }
+        emitError(json, code, message);
         return 2;
       }
       throw err;
@@ -728,13 +590,7 @@ async function cmdPhaseRunbook(
   } catch (err) {
     if (!(err instanceof ConfigError)) throw err;
     const json = globalJson || argv.includes("--json");
-    if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: err.message } })}\n`,
-      );
-    } else {
-      process.stderr.write(`${err.message}\n`);
-    }
+    emitError(json, "CONFIG_ERROR", err.message);
     return 2;
   }
 
@@ -747,7 +603,7 @@ async function cmdPhaseRunbook(
     try {
       const result = await runPhaseRunbookAcrossPhases({ cwd });
       if (json) {
-        process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
+        emitOk(result);
       } else {
         process.stdout.write(
           `Aggregated runbook across ${result.phases_considered.length} phase(s): ${result.phases_considered.join(", ")}\n`,
@@ -777,21 +633,19 @@ async function cmdPhaseRunbook(
       } else if (code === "AMBIGUOUS_PHASE_ID") {
         outCode = "AMBIGUOUS_PHASE_ID";
       }
-      if (json) {
-        const envelope: Record<string, unknown> = {
-          ok: false,
-          error: { code: outCode, message: msg },
-        };
-        if (code === "AMBIGUOUS_PHASE_ID") {
-          envelope.data = {
-            phases:
-              (err as NodeJS.ErrnoException & { phases?: string[] }).phases ?? [],
-          };
-        }
-        process.stdout.write(`${JSON.stringify(envelope)}\n`);
-      } else {
-        process.stderr.write(`${msg}\n`);
-      }
+      emitError(
+        json,
+        outCode,
+        msg,
+        code === "AMBIGUOUS_PHASE_ID"
+          ? {
+              data: {
+                phases:
+                  (err as NodeJS.ErrnoException & { phases?: string[] }).phases ?? [],
+              },
+            }
+          : {},
+      );
       return 2;
     }
   }
@@ -799,13 +653,7 @@ async function cmdPhaseRunbook(
   if (!phaseId) {
     const aliasNote = invokedAs === "phase runbook" ? "" : " (alias for `phase runbook`)";
     const msg = `${invokedAs} requires a phase id (e.g. \`${invokedAs} P1\`) or \`--across-phases\`${aliasNote}.`;
-    if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
-      );
-    } else {
-      process.stderr.write(`${msg}\n`);
-    }
+    emitError(json, "CONFIG_ERROR", msg);
     return 2;
   }
 
@@ -813,7 +661,7 @@ async function cmdPhaseRunbook(
     const result = await runPhaseRunbook({ cwd, phaseId });
 
     if (json) {
-      process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
+      emitOk(result);
     } else {
       process.stdout.write(`${m.phase.runbook.header(phaseId)}\n`);
       process.stdout.write(
@@ -840,21 +688,19 @@ async function cmdPhaseRunbook(
     } else if (code === "CONFIG_ERROR") {
       outCode = "CONFIG_ERROR";
     }
-    if (json) {
-      const envelope: Record<string, unknown> = {
-        ok: false,
-        error: { code: outCode, message: msg },
-      };
-      if (code === "AMBIGUOUS_PHASE_ID") {
-        envelope.data = {
-          phases:
-            (err as NodeJS.ErrnoException & { phases?: string[] }).phases ?? [],
-        };
-      }
-      process.stdout.write(`${JSON.stringify(envelope)}\n`);
-    } else {
-      process.stderr.write(`${msg}\n`);
-    }
+    emitError(
+      json,
+      outCode,
+      msg,
+      code === "AMBIGUOUS_PHASE_ID"
+        ? {
+            data: {
+              phases:
+                (err as NodeJS.ErrnoException & { phases?: string[] }).phases ?? [],
+            },
+          }
+        : {},
+    );
     return 2;
   }
 }

@@ -11,7 +11,7 @@ import { parseArgs } from "node:util";
 import { strictParse, ConfigError } from "../../lib/argv.ts";
 import { clusterUsage, emitUsage, hasHelpFlag, isHelpToken, subcommandUsage } from "../usage.ts";
 import { cmdPhaseImport } from "./phase.ts";
-import { withWriteLock } from "../util.ts";
+import { withWriteLock, emitOk, emitError } from "../util.ts";
 import { isInteractive } from "../../lib/tty.ts";
 import { messages, type Locale } from "../../i18n/index.ts";
 import { runPlanAdopt, PlanAdoptError } from "../../commands/plan-adopt.ts";
@@ -106,13 +106,7 @@ export async function cmdPlan(argv: string[], locale: Locale, globalJson: boolea
   }
 
   const msg = `plan: unknown subcommand "${subcommand ?? ""}". Use: brief | prompt | adopt | constitution | lint | normalize | analyze | migrate | import (alias for "phase import")`;
-  if (globalJson) {
-    process.stdout.write(
-      `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
-    );
-  } else {
-    process.stderr.write(`${msg}\n`);
-  }
+  emitError(globalJson, "CONFIG_ERROR", msg);
   return 2;
 }
 
@@ -161,13 +155,7 @@ async function cmdPlanBrief(
   if (flagDriven) inputModes.push("--what/--who/--differentiator");
   if (inputModes.length > 1) {
     const msg = `plan brief: ${inputModes.join(", ")} are mutually exclusive. Pick one input source.`;
-    if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
-      );
-    } else {
-      process.stderr.write(`${msg}\n`);
-    }
+    emitError(json, "CONFIG_ERROR", msg);
     return 2;
   }
 
@@ -182,17 +170,7 @@ async function cmdPlanBrief(
     if (who === undefined || who.length === 0) missing.push("--who");
     if (missing.length > 0) {
       const msg = `plan brief: flag-driven mode requires non-empty ${missing.join(" and ")}. Pass the missing flag(s) or use --from-file / --stdin / the TTY wizard instead.`;
-      if (json) {
-        process.stdout.write(
-          `${JSON.stringify({
-            ok: false,
-            error: { code: "CONFIG_ERROR", message: msg },
-            data: { missing },
-          })}\n`,
-        );
-      } else {
-        process.stderr.write(`${msg}\n`);
-      }
+      emitError(json, "CONFIG_ERROR", msg, { data: { missing } });
       return 2;
     }
   }
@@ -206,17 +184,9 @@ async function cmdPlanBrief(
       preCollectedAnswers = await loadBriefFromFile(cwd, fromFile);
     } catch (err) {
       if (err instanceof PlanBriefFromFileError) {
-        if (json) {
-          process.stdout.write(
-            `${JSON.stringify({
-              ok: false,
-              error: { code: "CONFIG_ERROR", message: err.message },
-              data: { detail: err.detail, path: err.path },
-            })}\n`,
-          );
-        } else {
-          process.stderr.write(`${err.message}\n`);
-        }
+        emitError(json, "CONFIG_ERROR", err.message, {
+          data: { detail: err.detail, path: err.path },
+        });
         return 2;
       }
       throw err;
@@ -226,17 +196,9 @@ async function cmdPlanBrief(
       preCollectedAnswers = await loadBriefFromStdin(process.stdin);
     } catch (err) {
       if (err instanceof PlanBriefFromStdinError) {
-        if (json) {
-          process.stdout.write(
-            `${JSON.stringify({
-              ok: false,
-              error: { code: "CONFIG_ERROR", message: err.message },
-              data: { detail: err.detail, source: "stdin" },
-            })}\n`,
-          );
-        } else {
-          process.stderr.write(`${err.message}\n`);
-        }
+        emitError(json, "CONFIG_ERROR", err.message, {
+          data: { detail: err.detail, source: "stdin" },
+        });
         return 2;
       }
       throw err;
@@ -253,13 +215,7 @@ async function cmdPlanBrief(
     };
   } else if (!isInteractive()) {
     const msg = "plan brief is interactive and requires a TTY (use --from-file <yaml>, --stdin, or --what/--who[/--differentiator] for non-interactive input).";
-    if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
-      );
-    } else {
-      process.stderr.write(`${msg}\n`);
-    }
+    emitError(json, "CONFIG_ERROR", msg);
     return 2;
   }
 
@@ -270,18 +226,12 @@ async function cmdPlanBrief(
     answers: preCollectedAnswers,
   });
   if (result.skipped) {
-    if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: "ALREADY_EXISTS", message: m.plan.briefSkipped(result.path) } })}\n`,
-      );
-    } else {
-      process.stderr.write(`${m.plan.briefSkipped(result.path)}\n`);
-    }
+    emitError(json, "ALREADY_EXISTS", m.plan.briefSkipped(result.path));
     return 2;
   }
 
   if (json) {
-    process.stdout.write(`${JSON.stringify({ ok: true, data: { path: result.path } })}\n`);
+    emitOk({ path: result.path });
   } else {
     process.stderr.write(`${m.plan.briefDone(result.path)}\n`);
   }
@@ -313,19 +263,14 @@ async function cmdPlanPrompt(
   const result = await runPlanPrompt({ cwd, locale, clipboard, schemaOnly });
 
   if (json) {
-    process.stdout.write(
-      `${JSON.stringify({
-        ok: true,
-        data: {
-          prompt: result.prompt,
-          schema_only: result.schemaOnly,
-          has_brief: result.hasBrief,
-          has_constitution: result.hasConstitution,
-          clipboard_copied: result.clipboardCopied,
-          suggested_next_steps: result.suggested_next_steps,
-        },
-      })}\n`,
-    );
+    emitOk({
+      prompt: result.prompt,
+      schema_only: result.schemaOnly,
+      has_brief: result.hasBrief,
+      has_constitution: result.hasConstitution,
+      clipboard_copied: result.clipboardCopied,
+      suggested_next_steps: result.suggested_next_steps,
+    });
     return 0;
   }
 
@@ -366,13 +311,7 @@ async function cmdPlanAdopt(argv: string[], globalJson: boolean): Promise<number
   } catch (err) {
     if (!(err instanceof ConfigError)) throw err;
     const json = globalJson || argv.includes("--json");
-    if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: err.message } })}\n`,
-      );
-    } else {
-      process.stderr.write(`${err.message}\n`);
-    }
+    emitError(json, "CONFIG_ERROR", err.message);
     return 2;
   }
 
@@ -385,13 +324,7 @@ async function cmdPlanAdopt(argv: string[], globalJson: boolean): Promise<number
   if (!fromPath) {
     const msg =
       "plan adopt requires a path, e.g. `plan adopt roadmap.md` (dry-run) or `plan adopt roadmap.md --write`";
-    if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
-      );
-    } else {
-      process.stderr.write(`${msg}\n`);
-    }
+    emitError(json, "CONFIG_ERROR", msg);
     return 2;
   }
 
@@ -399,7 +332,7 @@ async function cmdPlanAdopt(argv: string[], globalJson: boolean): Promise<number
     try {
       const result = await runPlanAdopt({ cwd, fromPath, write, scaffoldDecisions });
       if (json) {
-        process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
+        emitOk(result);
         return 0;
       }
       // Human: dry-run prints the generated YAML to stdout so it can be
@@ -427,17 +360,9 @@ async function cmdPlanAdopt(argv: string[], globalJson: boolean): Promise<number
       return 0;
     } catch (err: unknown) {
       if (err instanceof PlanAdoptError) {
-        if (json) {
-          process.stdout.write(
-            `${JSON.stringify({
-              ok: false,
-              error: { code: "CONFIG_ERROR", message: err.message },
-              data: { detail: err.detail, source_path: err.sourcePath ?? null },
-            })}\n`,
-          );
-        } else {
-          process.stderr.write(`${err.message}\n`);
-        }
+        emitError(json, "CONFIG_ERROR", err.message, {
+          data: { detail: err.detail, source_path: err.sourcePath ?? null },
+        });
         return 2;
       }
       // Errors propagated from applyParsedPhaseImport on --write
@@ -449,13 +374,7 @@ async function cmdPlanAdopt(argv: string[], globalJson: boolean): Promise<number
         code === "DUPLICATE_PHASE_ID" ||
         code === "AMBIGUOUS_TASK_ID"
       ) {
-        if (json) {
-          process.stdout.write(
-            `${JSON.stringify({ ok: false, error: { code, message } })}\n`,
-          );
-        } else {
-          process.stderr.write(`${message}\n`);
-        }
+        emitError(json, code, message);
         return 2;
       }
       throw err;
@@ -513,13 +432,7 @@ async function cmdPlanConstitution(
   if (flagDriven) inputModes.push("--description/--principle");
   if (inputModes.length > 1) {
     const msg = `plan constitution: ${inputModes.join(", ")} are mutually exclusive. Pick one input source.`;
-    if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
-      );
-    } else {
-      process.stderr.write(`${msg}\n`);
-    }
+    emitError(json, "CONFIG_ERROR", msg);
     return 2;
   }
 
@@ -536,17 +449,9 @@ async function cmdPlanConstitution(
       preCollectedAnswers = await loadConstitutionFromFile(cwd, fromFile);
     } catch (err) {
       if (err instanceof PlanConstitutionFromFileError) {
-        if (json) {
-          process.stdout.write(
-            `${JSON.stringify({
-              ok: false,
-              error: { code: "CONFIG_ERROR", message: err.message },
-              data: { detail: err.detail, path: err.path },
-            })}\n`,
-          );
-        } else {
-          process.stderr.write(`${err.message}\n`);
-        }
+        emitError(json, "CONFIG_ERROR", err.message, {
+          data: { detail: err.detail, path: err.path },
+        });
         return 2;
       }
       throw err;
@@ -556,17 +461,9 @@ async function cmdPlanConstitution(
       preCollectedAnswers = await loadConstitutionFromStdin(process.stdin);
     } catch (err) {
       if (err instanceof PlanConstitutionFromStdinError) {
-        if (json) {
-          process.stdout.write(
-            `${JSON.stringify({
-              ok: false,
-              error: { code: "CONFIG_ERROR", message: err.message },
-              data: { detail: err.detail, source: "stdin" },
-            })}\n`,
-          );
-        } else {
-          process.stderr.write(`${err.message}\n`);
-        }
+        emitError(json, "CONFIG_ERROR", err.message, {
+          data: { detail: err.detail, source: "stdin" },
+        });
         return 2;
       }
       throw err;
@@ -582,13 +479,7 @@ async function cmdPlanConstitution(
     };
   } else if (!isInteractive()) {
     const msg = "plan constitution is interactive and requires a TTY (use --from-file <yaml>, --stdin, or --description/--principle for non-interactive input).";
-    if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
-      );
-    } else {
-      process.stderr.write(`${msg}\n`);
-    }
+    emitError(json, "CONFIG_ERROR", msg);
     return 2;
   }
 
@@ -599,18 +490,12 @@ async function cmdPlanConstitution(
     answers: preCollectedAnswers,
   });
   if (result.skipped) {
-    if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: "ALREADY_EXISTS", message: m.plan.constitutionSkipped(result.path) } })}\n`,
-      );
-    } else {
-      process.stderr.write(`${m.plan.constitutionSkipped(result.path)}\n`);
-    }
+    emitError(json, "ALREADY_EXISTS", m.plan.constitutionSkipped(result.path));
     return 2;
   }
 
   if (json) {
-    process.stdout.write(`${JSON.stringify({ ok: true, data: { path: result.path } })}\n`);
+    emitOk({ path: result.path });
   } else {
     process.stderr.write(`${m.plan.constitutionDone(result.path)}\n`);
   }
@@ -642,17 +527,16 @@ async function cmdPlanLint(
     const data = serializePlanLintData(result);
 
     if (json) {
-      const payload = result.ok
-        ? { ok: true, data }
-        : {
-            ok: false,
-            error: {
-              code: "PLAN_LINT_FAILED",
-              message: `plan lint failed: ${result.errors} error(s), ${result.warnings} warning(s)`,
-            },
-            data,
-          };
-      process.stdout.write(`${JSON.stringify(payload)}\n`);
+      if (result.ok) {
+        emitOk(data);
+      } else {
+        emitError(
+          json,
+          "PLAN_LINT_FAILED",
+          `plan lint failed: ${result.errors} error(s), ${result.warnings} warning(s)`,
+          { data },
+        );
+      }
     } else {
       process.stderr.write(`${formatPlanLintHuman(result)}\n`);
     }
@@ -662,13 +546,7 @@ async function cmdPlanLint(
     const code =
       (err as NodeJS.ErrnoException).code ?? "PLAN_LINT_FAILED";
     const message = err instanceof Error ? err.message : String(err);
-    if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code, message } })}\n`,
-      );
-    } else {
-      process.stderr.write(`${message}\n`);
-    }
+    emitError(json, code, message);
     return 2;
   }
 }
@@ -700,26 +578,14 @@ async function cmdPlanNormalize(
   const unknown = Object.keys(values).filter((k) => !allowedKeys.has(k));
   if (unknown.length > 0) {
     const message = `plan normalize: unknown option(s): ${unknown.map((k) => `--${k}`).join(", ")}`;
-    if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message } })}\n`,
-      );
-    } else {
-      process.stderr.write(`${message}\n`);
-    }
+    emitError(json, "CONFIG_ERROR", message);
     return 2;
   }
 
   if (checkFlag && writeFlag) {
     const message =
       "plan normalize: --check and --write are mutually exclusive.";
-    if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: "PLAN_NORMALIZE_CONFLICT", message } })}\n`,
-      );
-    } else {
-      process.stderr.write(`${message}\n`);
-    }
+    emitError(json, "PLAN_NORMALIZE_CONFLICT", message);
     return 2;
   }
 
@@ -730,17 +596,16 @@ async function cmdPlanNormalize(
     const data = serializePlanNormalizeData(result);
 
     if (json) {
-      const payload = result.ok
-        ? { ok: true, data }
-        : {
-            ok: false,
-            error: {
-              code: "PLAN_NORMALIZE_REQUIRED",
-              message: `plan normalize: ${result.changedCount} file(s) need normalization`,
-            },
-            data,
-          };
-      process.stdout.write(`${JSON.stringify(payload)}\n`);
+      if (result.ok) {
+        emitOk(data);
+      } else {
+        emitError(
+          json,
+          "PLAN_NORMALIZE_REQUIRED",
+          `plan normalize: ${result.changedCount} file(s) need normalization`,
+          { data },
+        );
+      }
     } else {
       process.stderr.write(`${formatPlanNormalizeHuman(result)}\n`);
     }
@@ -750,13 +615,7 @@ async function cmdPlanNormalize(
     const code =
       (err as NodeJS.ErrnoException).code ?? "PLAN_NORMALIZE_FAILED";
     const message = err instanceof Error ? err.message : String(err);
-    if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code, message } })}\n`,
-      );
-    } else {
-      process.stderr.write(`${message}\n`);
-    }
+    emitError(json, code, message);
     return 3;
   }
 }
@@ -805,17 +664,16 @@ async function cmdPlanAnalyze(
     const data = serializePlanAnalyzeData(result);
 
     if (json) {
-      const payload = result.ok
-        ? { ok: true, data }
-        : {
-            ok: false,
-            error: {
-              code: "PLAN_ANALYZE_FAILED",
-              message: `plan analyze failed: ${result.errors} error(s), ${result.warnings} warning(s)`,
-            },
-            data,
-          };
-      process.stdout.write(`${JSON.stringify(payload)}\n`);
+      if (result.ok) {
+        emitOk(data);
+      } else {
+        emitError(
+          json,
+          "PLAN_ANALYZE_FAILED",
+          `plan analyze failed: ${result.errors} error(s), ${result.warnings} warning(s)`,
+          { data },
+        );
+      }
     } else {
       process.stderr.write(`${formatPlanAnalyzeHuman(result)}\n`);
     }
@@ -827,13 +685,7 @@ async function cmdPlanAnalyze(
     // it never surfaces as a public top-level error.code; the cause is in message.
     const code = planCatchCode(err, "PLAN_ANALYZE_FAILED");
     const message = err instanceof Error ? err.message : String(err);
-    if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code, message } })}\n`,
-      );
-    } else {
-      process.stderr.write(`${message}\n`);
-    }
+    emitError(json, code, message);
     return 1;
   }
 }
@@ -858,7 +710,7 @@ async function cmdPlanMigrate(
   try {
     const result = await migrateProgressToEvents(cwd, { write });
     if (json) {
-      process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
+      emitOk(result);
     } else {
       const lines = [
         result.dry_run
@@ -883,14 +735,10 @@ async function cmdPlanMigrate(
     // error.message. A non-ledger coded error keeps its own code.
     const message = err instanceof Error ? err.message : String(err);
     const raw = (err as NodeJS.ErrnoException).code;
-    const error =
-      raw !== undefined && !LEDGER_READ_INTEGRITY_CODES.has(raw)
-        ? { code: raw, message }
-        : { code: "PLAN_MIGRATE_FAILED", message };
-    if (json) {
-      process.stdout.write(`${JSON.stringify({ ok: false, error })}\n`);
+    if (raw !== undefined && !LEDGER_READ_INTEGRITY_CODES.has(raw)) {
+      emitError(json, raw, message);
     } else {
-      process.stderr.write(`${message}\n`);
+      emitError(json, "PLAN_MIGRATE_FAILED", message);
     }
     return 1;
   }
