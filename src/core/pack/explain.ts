@@ -1,4 +1,4 @@
-// P21-T4 explain machinery. `renderSections` returns the structured
+// Explain machinery. `renderSections` returns the structured
 // intermediate form of the rendered pack; `computeExplainSections` annotates
 // each section with a reason code derived from the task readiness flags,
 // attaches a `Buffer.byteLength(..., "utf8")` byte count, and appends a
@@ -13,7 +13,7 @@ import { type RenderedSection } from "./formatters/markdown.ts";
  * explain output. New variants require an RFC.
  *
  * `budget_reserved_for_later` is intentionally absent here — it lives
- * in {@link ContextExcludedReasonCode} and is reserved for P24.
+ * in {@link ContextExcludedReasonCode} and is reserved for budget enforcement.
  */
 export type ContextSectionReasonCode =
   | "always_included"
@@ -29,9 +29,9 @@ export type ContextSectionReasonCode =
  * Closed enum of reason codes attached to excluded sections in the
  * explain output. New variants require an RFC.
  *
- * `budget_reserved_for_later` is reserved for P24 (budget enforcement);
- * the P21 implementation MUST NOT emit it. A unit test asserts the
- * absence in every P21 output.
+ * `budget_reserved_for_later` is reserved for budget enforcement;
+ * a non-budget explain pass MUST NOT emit it. A unit test asserts the
+ * absence in every no-budget output.
  */
 export type ContextExcludedReasonCode =
   | "context_size_small_and_ambiguity_low"
@@ -53,13 +53,13 @@ export type ContextExplainExcluded = {
 };
 
 /**
- * P49 (Context Fit, layer c) — additive, byte-based explain metrics surfaced
+ * Additive, byte-based explain metrics surfaced
  * on `task context --explain --json`. Every value is a UTF-8 byte count
  * computed with `Buffer.byteLength(..., "utf8")` (never tokens), derived
  * locally and deterministically: no tokenizer, summarization, model call, or
  * network access is involved.
  *
- * These are an OBSERVABILITY layer over the existing P24/P47 budget path; they
+ * These are an OBSERVABILITY layer over the budget path; they
  * never change the rendered `content`. The no-flag pack stays byte-identical,
  * and only an explicit `--budget-bytes` / `--context-budget` invocation elides
  * sections.
@@ -78,7 +78,7 @@ export type ContextExplainMetrics = {
   /**
    * The floor after all budget-ELIGIBLE elisions for this task — the SAME
    * value `CONTEXT_OVER_BUDGET` reports, computed by the same shared helper
-   * (honoring the P28 conditional eligibility).
+   * (honoring the conditional eligibility).
    */
   minimumAchievableBytes: number;
   /** Budget-elided sections only, in actual elision order. */
@@ -191,7 +191,7 @@ export function computeExplainExcluded(
     });
   }
 
-  // P10 declared-section excluded entries — only emit when the task
+  // Declared-section excluded entries — only emit when the task
   // did not declare the corresponding field.
   if (!declared.dependsOn) {
     excluded.push({ name: "depends_on", reason_code: "not_declared_by_task" });

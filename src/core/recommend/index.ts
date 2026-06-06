@@ -102,8 +102,8 @@ function buildStructuredReasons(task: Task, tier: ModelTier): StructuredReason[]
  * `code-pact task prepare` compound command) load the inputs and pass
  * them in.
  *
- * The original v0.8 fields preserve their earlier in-place semantics; later
- * fields (e.g. P33's `lifecycleMode`) are strictly additive. The existing
+ * Earlier fields preserve their in-place semantics; newer fields (e.g.
+ * `lifecycleMode`) are strictly additive. The existing
  * snapshot and JSON envelope tests, plus `RecommendResultV2.parse`, are the
  * contract.
  */
@@ -133,7 +133,7 @@ export function resolveRecommendation(
     budgetProfile: recommendBudgetProfile(task),
     structuredReasons: buildStructuredReasons(task, rec.tier),
     lifecycleMode: recommendLifecycleMode(task, decisionContext),
-    // P48 — additive, recommendation-only context budget. Reuses the already-
+    // Additive, recommendation-only context budget. Reuses the already-
     // loaded agent profile's context_budget for the same-name byte override, so
     // no extra I/O. Never auto-applied; surfaced for the agent to act on.
     contextFit: recommendContextFit({

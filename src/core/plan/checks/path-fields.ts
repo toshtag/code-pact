@@ -11,15 +11,13 @@ import {
 import { fileExists } from "./fs.ts";
 
 // ---------------------------------------------------------------------------
-// P10 — Task Readiness Schema detectors
+// Task Readiness Schema detectors
 //
-// Field-by-field validation for the optional fields declared in
-// design/decisions/task-readiness-schema-rfc.md. All detectors are
-// additive — existing v1.0.x tasks declare none of these fields and so
-// produce no new issues. See docs/cli-contract.md § Plan diagnostic codes
+// Field-by-field validation for the optional task-readiness fields. All
+// detectors are additive — a task that declares none of these fields
+// produces no new issues. See docs/cli-contract.md § Plan diagnostic codes
 // for the public surface. Path safety helpers live in
-// `src/core/path-safety.ts` (promoted from the adapter layer in P10-T3
-// so plan lint imports from a neutral module).
+// `src/core/path-safety.ts` so plan lint imports from a neutral module.
 // ---------------------------------------------------------------------------
 
 function safePathReason(path: string): string {
@@ -117,7 +115,7 @@ export function detectTaskReadsUnsafePath(phases: PhaseEntry[]): PlanIssue[] {
   return issues;
 }
 
-/** `reads` glob uses syntax outside the P10 supported subset. */
+/** `reads` glob uses syntax outside the supported subset. */
 export function detectTaskReadsGlobInvalid(phases: PhaseEntry[]): PlanIssue[] {
   const issues: PlanIssue[] = [];
   for (const { phase, ref } of phases) {
@@ -203,7 +201,7 @@ export function detectTaskWritesUnsafePath(phases: PhaseEntry[]): PlanIssue[] {
   return issues;
 }
 
-/** `writes` glob uses syntax outside the P10 supported subset. */
+/** `writes` glob uses syntax outside the supported subset. */
 export function detectTaskWritesGlobInvalid(phases: PhaseEntry[]): PlanIssue[] {
   const issues: PlanIssue[] = [];
   for (const { phase, ref } of phases) {
@@ -231,9 +229,9 @@ export function detectTaskWritesGlobInvalid(phases: PhaseEntry[]): PlanIssue[] {
 }
 
 /**
- * `writes` glob covers a protected path. P10 advisory warning. The
+ * `writes` glob covers a protected path. Advisory warning. The
  * protected-paths list is loaded from `design/rules/protected-paths.md`
- * via `loadProtectedPaths` (v1.6 P15-T3); when the rule file is absent
+ * via `loadProtectedPaths`; when the rule file is absent
  * the hardcoded `PROTECTED_PATHS` constant in `src/core/glob.ts` is
  * the fallback.
  *
@@ -275,7 +273,7 @@ export function detectTaskWritesProtectedPath(
 
 // `writes` glob is too coarse — its root path segment is the doublestar
 // (`**`), meaning the glob matches the entire repository (or huge
-// swaths of it). v1.6 P15-T2.
+// swaths of it).
 //
 // Examples that trip this check (root segment is doublestar):
 //   - just `**`

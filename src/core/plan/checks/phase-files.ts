@@ -6,7 +6,7 @@ import { fileExists } from "./fs.ts";
 
 /**
  * Roadmap references a phase file that does not exist on disk. doctor
- * historically reports this under the `ORPHAN_PHASE_FILE` code; plan
+ * reports this under the `ORPHAN_PHASE_FILE` code; plan
  * lint uses the clearer `MISSING_PHASE_FILE` code via
  * `detectMissingPhaseFiles`. Both call sites should treat this as an
  * error.

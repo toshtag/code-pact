@@ -5,13 +5,11 @@ import { RelativePosixPath } from "./schemas/relative-path.ts";
 // ---------------------------------------------------------------------------
 // Neutral path-safety module
 //
-// Originally defined under src/core/adapters/file-state.ts in v0.9 (the
-// adapter platform). v1.1 (P10-T3) promotes these helpers to a neutral
-// module so plan lint, future P11 finalize, and future P14 governance
-// can call them without taking an adapter dependency. The adapter file
-// re-exports the same symbols so existing call sites
-// (adapter-install / adapter-upgrade / adapter-file-state tests)
-// remain untouched.
+// These helpers live in a neutral module so non-adapter callers
+// (plan lint, finalize, governance) can use them without taking an
+// adapter dependency. The adapter file re-exports the same symbols so
+// existing call sites (adapter-install / adapter-upgrade /
+// adapter-file-state tests) remain untouched.
 // ---------------------------------------------------------------------------
 
 /**

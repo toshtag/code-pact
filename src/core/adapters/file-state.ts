@@ -1,12 +1,10 @@
 // ---------------------------------------------------------------------------
 // Path safety — re-exported from the neutral module
 //
-// v1.1 (P10-T3) promoted `assertSafeRelativePath` / `resolveWithinProject`
-// from this file to `src/core/path-safety.ts` so plan lint, future P11
-// finalize, and future P14 governance can call them without taking an
-// adapter dependency. The re-exports below keep existing call sites
-// (src/commands/adapter-install.ts, src/commands/adapter-upgrade.ts,
-// tests/unit/core/adapter-file-state.test.ts) working unchanged.
+// `assertSafeRelativePath` / `resolveWithinProject` live in the neutral
+// `src/core/path-safety.ts` so non-adapter callers (plan lint, finalize,
+// governance) can use them without taking an adapter dependency. The
+// re-exports below keep existing adapter call sites working unchanged.
 // ---------------------------------------------------------------------------
 
 export {

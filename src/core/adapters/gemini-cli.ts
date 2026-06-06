@@ -12,9 +12,9 @@ import {
   renderProjectConventionsSection,
 } from "./template-sections.ts";
 
-// Gemini CLI adapter (experimental, v0.2).
+// Gemini CLI adapter (experimental).
 //
-// Format source (verified for the v0.2 PR):
+// Format source:
 //   https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/gemini-md.md
 //
 // Gemini CLI discovers `GEMINI.md` hierarchically: it walks from the

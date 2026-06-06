@@ -5,15 +5,14 @@ import { buildTaskPhaseIndex } from "../core/runbook/depends-on.ts";
 import type { TaskRunbookResult } from "../core/runbook/types.ts";
 
 // ---------------------------------------------------------------------------
-// `task runbook <task-id>` — v1.3 P12-T3
+// `task runbook <task-id>`
 //
 // Read-only guidance command. Returns a deterministic list of next
 // recommended steps for the given task. The command itself does no
 // mutation; every recommended step is a command string the user runs
 // separately, or a manual_action describing a human checkpoint.
 //
-// Per the accepted P12 RFC (design/decisions/lightweight-runbook-rfc.md),
-// this command does NOT take an --agent flag. Agent choice belongs to
+// This command does NOT take an --agent flag. Agent choice belongs to
 // whichever command in the recommended sequence needs an adapter.
 //
 // Error codes reused (no new codes): TASK_NOT_FOUND / AMBIGUOUS_TASK_ID /
@@ -32,9 +31,8 @@ export async function runTaskRunbook(
 
   const state = await loadPlanState(cwd);
 
-  // P14-T6: resolver core does the ambiguity scan that `PlanState.
-  // taskIndex` silently elides (first-match). One call replaces the
-  // previous manual rescan in this command.
+  // The resolver core does the ambiguity scan that `PlanState.
+  // taskIndex` silently elides (first-match).
   const { phaseId, task } = resolveTaskInPlanState(state, taskId);
 
   const events = state.progress?.events ?? [];

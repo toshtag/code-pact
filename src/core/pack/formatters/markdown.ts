@@ -13,10 +13,10 @@ export type PackContext = {
   constitution?: string | null;
   /** Recent done events in this phase — included when ambiguity:high */
   doneEvents?: ProgressEvent[];
-  // P10 — Task Readiness Schema declared-section data. Each field is
+  // Task Readiness Schema declared-section data. Each field is
   // optional; when absent the corresponding pack section is omitted
-  // entirely so output stays byte-identical to v1.0.2 for tasks that
-  // declare none of the new fields.
+  // entirely so output stays byte-identical for tasks that
+  // declare none of these fields.
   dependsOn?: DependsOnEntry[];
   readMatches?: ReadGlobMatches[];
   writeGlobs?: string[];
@@ -79,9 +79,8 @@ export type RenderedSection = {
 
 /**
  * Build the structured sections that compose the rendered context
- * pack. The renderer is byte-identical to v1.0.2 — joining the
- * concatenation of every section's lines with `"\n"` produces exactly
- * the same string `renderMarkdown` returned in v1.10.
+ * pack. Joining the concatenation of every section's lines with `"\n"`
+ * produces exactly the same string `renderMarkdown` returns.
  */
 export function renderSections(ctx: PackContext): RenderedSection[] {
   const sections: RenderedSection[] = [];
@@ -164,7 +163,7 @@ export function renderSections(ctx: PackContext): RenderedSection[] {
   }
   sections.push({ name: "task_definition", lines: taskDefinitionLines });
 
-  // 6a. Depends on — task-declared dependencies, P10. Each id is shown
+  // 6a. Depends on — task-declared dependencies. Each id is shown
   // with its current derived state from the progress ledger.
   if (ctx.dependsOn && ctx.dependsOn.length > 0) {
     const lines: string[] = [`## Depends on`, ``];
@@ -179,9 +178,9 @@ export function renderSections(ctx: PackContext): RenderedSection[] {
     });
   }
 
-  // 6b. Declared read surface — P10. Each glob is shown with the set of
-  // currently-matched files under it; file contents are not inlined in
-  // P10 (declaration-only). An empty matches list is rendered as a
+  // 6b. Declared read surface. Each glob is shown with the set of
+  // currently-matched files under it; file contents are not inlined
+  // (declaration-only). An empty matches list is rendered as a
   // visible "no matches" line so the agent sees the lint warning's
   // counterpart in pack form.
   if (ctx.readMatches && ctx.readMatches.length > 0) {
@@ -209,7 +208,7 @@ export function renderSections(ctx: PackContext): RenderedSection[] {
     });
   }
 
-  // 6c. Declared write surface — P10. Globs only; existence is by
+  // 6c. Declared write surface. Globs only; existence is by
   // definition future-tense for writes, so no fs lookup is done.
   if (ctx.writeGlobs && ctx.writeGlobs.length > 0) {
     const lines: string[] = [`## Declared write surface`, ``];
@@ -224,9 +223,9 @@ export function renderSections(ctx: PackContext): RenderedSection[] {
     });
   }
 
-  // 6d. Declared decisions — P10. Full content of files referenced by
+  // 6d. Declared decisions. Full content of files referenced by
   // task.decision_refs, inserted under each filename. Surfaced
-  // regardless of context_size. The existing context_size:large
+  // regardless of context_size. The context_size:large
   // allDecisions path (rendered in section 6e) is filtered to avoid
   // re-printing files already shown here.
   if (ctx.declaredDecisions && ctx.declaredDecisions.length > 0) {
@@ -245,8 +244,8 @@ export function renderSections(ctx: PackContext): RenderedSection[] {
     });
   }
 
-  // 6e. Acceptance references — P10. Path list only in P10; no content
-  // excerpt and no semantic validation (deferred to P11 reconcile).
+  // 6e. Acceptance references. Path list only; no content
+  // excerpt and no semantic validation (deferred to reconcile).
   if (ctx.acceptanceRefs && ctx.acceptanceRefs.length > 0) {
     const lines: string[] = [`## Acceptance references`, ``];
     for (const p of ctx.acceptanceRefs) {
@@ -260,8 +259,8 @@ export function renderSections(ctx: PackContext): RenderedSection[] {
     });
   }
 
-  // 6. Related decisions — existing v1.0 path (task-id filename match
-  // and the context_size:large allDecisions case). Deduped against
+  // 6. Related decisions (task-id filename match and the
+  // context_size:large allDecisions case). Deduped against
   // declared decisions so content is not printed twice when a file is
   // both referenced and matched.
   const declaredNames = new Set(
@@ -342,7 +341,7 @@ export function renderSections(ctx: PackContext): RenderedSection[] {
 }
 
 /**
- * Section elision PRIORITY for `--budget-bytes` (P24).
+ * Section elision PRIORITY for `--budget-bytes`.
  *
  * When `buildContextPack` is invoked with `budgetBytes`, sections are
  * dropped from the rendered output in this order until the total byte
@@ -351,7 +350,7 @@ export function renderSections(ctx: PackContext): RenderedSection[] {
  * intent the user explicitly opted into.
  *
  * This constant is the priority ORDER only. Elision ELIGIBILITY is
- * conditional (P28, enforced in `applyBudgetElision`): `related_decisions`
+ * conditional (enforced in `applyBudgetElision`): `related_decisions`
  * is elidable only when it is the `context_size: large` "all decisions"
  * expansion, and `rules` only when it is the `write_surface: high` "all
  * rules" expansion. The applies_to-matched / task-id-matched subsets that
@@ -371,9 +370,8 @@ export const ELISION_ORDER: ReadonlyArray<string> = [
 /**
  * Render the context pack to a single Markdown string.
  *
- * Byte-identical contract: for any input that produced a given output
- * in v1.10, this function MUST produce the same bytes in v1.11. The
- * contract is locked by
+ * Byte-identical contract: equivalent inputs MUST produce the same
+ * bytes. The contract is locked by
  * `tests/integration/pack-byte-identical.test.ts`.
  */
 export function renderMarkdown(ctx: PackContext): string {

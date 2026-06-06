@@ -4,12 +4,12 @@ import { assertSafeRelativePath, resolveWithinProject } from "../path-safety.ts"
 import { PLAN_ID_PATTERN } from "../schemas/plan-id.ts";
 
 // ---------------------------------------------------------------------------
-// Proposed-ADR stub scaffolding (RFC §3-D)
+// Proposed-ADR stub scaffolding
 //
 // Generates `**Status:** proposed` ADR stubs for requires_decision tasks that
 // have no decision yet, so an imported roadmap arrives with the decision
 // work-surfaces already in place. A proposed stub is classified `blocked` by
-// the status-aware gate (RFC §3-C) and does NOT resolve — flipping it to
+// the status-aware gate and does NOT resolve — flipping it to
 // `accepted` is the human act that releases the gate. Opt-in only.
 // ---------------------------------------------------------------------------
 

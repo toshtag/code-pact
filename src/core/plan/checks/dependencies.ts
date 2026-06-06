@@ -4,9 +4,9 @@ import type { PlanIssue } from "../shared.ts";
 /**
  * `depends_on` references a task id not present in any phase.
  *
- * v1.9 (P19-T2): same-phase lookup first; cross-phase lookup as
- * fallback. An id present in another phase is a valid cross-phase
- * dependency and is NOT reported here.
+ * Same-phase lookup first; cross-phase lookup as fallback. An id
+ * present in another phase is a valid cross-phase dependency and is
+ * NOT reported here.
  */
 export function detectTaskDependsOnUnresolved(phases: PhaseEntry[]): PlanIssue[] {
   const issues: PlanIssue[] = [];
@@ -42,7 +42,7 @@ export function detectTaskDependsOnUnresolved(phases: PhaseEntry[]): PlanIssue[]
  * `depends_on` includes the task's own id — a direct self-cycle.
  *
  * Multi-node cycles (A → B → A, A → B → C → A, etc.) are reported
- * separately by `detectTaskDependsOnCycle` (v1.9 P19-T2). Self-cycles
+ * separately by `detectTaskDependsOnCycle`. Self-cycles
  * keep this dedicated diagnostic because it is narrower and points
  * directly at the offending line.
  */
@@ -72,7 +72,7 @@ export function detectTaskDependsOnSelfReference(phases: PhaseEntry[]): PlanIssu
 /**
  * Multi-node depends_on cycles across the entire project graph.
  *
- * v1.9 P19-T2. Builds a directed graph (task id → its depends_on list)
+ * Builds a directed graph (task id → its depends_on list)
  * over every task in every phase, then runs Tarjan's strongly connected
  * components algorithm iteratively (no recursion, safe for deep chains).
  *
@@ -83,8 +83,7 @@ export function detectTaskDependsOnSelfReference(phases: PhaseEntry[]): PlanIssu
  *
  * Self-cycles (size-1 SCCs whose only node has a self-edge) are
  * intentionally NOT reported here — they keep their dedicated
- * `TASK_DEPENDS_ON_SELF_REFERENCE` diagnostic, which is narrower and
- * already in the v1.0 surface.
+ * `TASK_DEPENDS_ON_SELF_REFERENCE` diagnostic, which is narrower.
  *
  * Severity matches `TASK_DEPENDS_ON_SELF_REFERENCE` (error) — both are
  * dep-graph integrity diagnostics; demoting only the multi-node case

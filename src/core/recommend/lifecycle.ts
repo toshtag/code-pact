@@ -10,7 +10,7 @@ export type DecisionContext = { phaseRequiresDecision: boolean };
  * deterministic — a finite switch on task attributes, never free-form.
  *
  * Advisory only: code-pact's own `task complete` / `task record-done` behavior
- * is unchanged. See design/decisions/lightweight-lane-rfc.md.
+ * is unchanged.
  *
  *   1. requires a decision (task or phase)            → "decision_loop"
  *   2. NOT a decision task, and a small strongly-      → "record_only"

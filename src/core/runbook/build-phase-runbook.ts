@@ -23,10 +23,10 @@ import {
 } from "./types.ts";
 
 // ---------------------------------------------------------------------------
-// Phase runbook builder — v1.3 P12-T2.
+// Phase runbook builder.
 //
 // Pure function. Given an already-loaded phase and progress events, returns
-// the deterministic runbook for that phase. The command layer (P12-T4)
+// the deterministic runbook for that phase. The command layer
 // handles I/O, phase resolution from roadmap, and JSON envelope assembly.
 // ---------------------------------------------------------------------------
 

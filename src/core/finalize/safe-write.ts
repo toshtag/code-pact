@@ -12,20 +12,20 @@ import {
 } from "./diff.ts";
 
 // ---------------------------------------------------------------------------
-// Safe-write contract for P11 Finalization & Reconciliation
+// Safe-write contract for Finalization & Reconciliation
 //
 // Owns the load → mutate → atomic-write pattern that both `task
-// finalize` (P11-T3) and `phase reconcile` (P11-T4) need. Returns
+// finalize` and `phase reconcile` need. Returns
 // structured refusals instead of throwing so the command layer can
 // map each refusal reason to its own public error code
 // (TASK_FINALIZE_WRITE_REFUSED / PHASE_RECONCILE_WRITE_REFUSED) and
 // its own JSON envelope shape.
 //
-// Safety constraints (per design/decisions/finalization-reconciliation-rfc.md):
+// Safety constraints:
 //   - The target path must pass `assertSafeRelativePath` (no `..`,
 //     leading `/`, etc.).
 //   - The target path must be under `design/phases/` and end with
-//     `.yaml`. design/roadmap.yaml is deliberately NOT writable in v1.2.
+//     `.yaml`. design/roadmap.yaml is deliberately NOT writable.
 //   - `resolveWithinProject` must succeed (catches symlink escape).
 //   - The file must be readable and parseable as a Phase.
 //   - The task id must exist in the parsed phase's tasks[].
@@ -84,7 +84,7 @@ export type ClassifyRequest = {
   /** Repo-root-relative POSIX path to the phase YAML. */
   file: string;
   taskId: string;
-  /** Target status to flip the task to. v1.2 only uses "done". */
+  /** Target status to flip the task to. Only "done" is used. */
   targetStatus: PhaseStatus;
 };
 
@@ -123,8 +123,8 @@ export async function classifyWriteRequest(
   }
 
   // 2. Confine writes to design/phases/*.yaml. design/roadmap.yaml is
-  //    deliberately NOT writable by P11; release prep continues to
-  //    handle it manually until P14 governance.
+  //    deliberately NOT writable here; release prep continues to
+  //    handle it manually.
   if (!file.startsWith("design/phases/")) {
     return {
       kind: "refused",
@@ -224,8 +224,8 @@ export async function classifyWriteRequest(
  *   - The task id no longer exists in `phase.tasks[]`.
  *
  * In practice, none of these should happen in a single-process workflow,
- * which matches the v1.0 single-process-owner contract preserved by
- * P11. Concurrent writers are out of scope.
+ * which matches the single-process-owner contract. Concurrent writers
+ * are out of scope.
  */
 export async function applyPlannedWrite(
   cwd: string,

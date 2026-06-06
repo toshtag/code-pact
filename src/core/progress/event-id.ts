@@ -2,18 +2,18 @@ import { createHash } from "node:crypto";
 import type { ProgressEvent } from "../schemas/progress-event.ts";
 
 /**
- * Collaboration-safe event identity (collaboration-safe-state RFC, B5).
+ * Collaboration-safe event identity.
  *
  * A progress event's identity is a content hash of its canonical payload, so
  * the same logical event always hashes to the same id. That makes legacy↔file
- * dedup (B3) and idempotent migration (B4) free. The per-event-file filename
+ * dedup and idempotent migration free. The per-event-file filename
  * embeds that content id as its suffix — `<at-compact>-<id>.yaml`, where the
  * `<at-compact>` prefix is also content-derived (the normalized `at`), so the id
  * is NOT the whole filename. The filename is thus deterministically derived from
  * the canonical event, and a filename collision happens iff two events are
  * *canonically identical* (same canonical payload), so a pre-existing final file
- * means the canonically identical event is already on disk (idempotent success,
- * B1) — never a distinct-event clash.
+ * means the canonically identical event is already on disk (idempotent
+ * success) — never a distinct-event clash.
  *
  * The canonical payload MUST be pinned exactly or the id is not reproducible:
  *  - every persisted event field EXCEPT `id`; `at` is included
@@ -49,7 +49,7 @@ function canonicalJson(value: unknown): string {
 }
 
 /**
- * The single canonical hash input for an event (RFC B5: `canonicalizeEvent` is
+ * The single canonical hash input for an event (`canonicalizeEvent` is
  * the only producer): its persisted fields with `at` normalized to UTC. `id` is
  * never part of the payload (it is the output).
  */

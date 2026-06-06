@@ -13,7 +13,7 @@ export type PlanPromptOptions = {
   locale: Locale;
   clipboard: boolean;
   /**
-   * Schema-only mode (P2). Emits just the YAML format example + output
+   * Schema-only mode. Emits just the YAML format example + output
    * rules, without reading design/brief.md or design/constitution.md.
    * For agents that already hold the project context and only need the
    * output shape fixed. `hasBrief` / `hasConstitution` are forced false.
@@ -23,18 +23,17 @@ export type PlanPromptOptions = {
 
 export type PlanPromptResult = {
   prompt: string;
-  /** True when the prompt was generated in schema-only mode (P2). */
+  /** True when the prompt was generated in schema-only mode. */
   schemaOnly: boolean;
   hasBrief: boolean;
   hasConstitution: boolean;
   clipboardCopied: boolean;
   /**
-   * Additive guidance (v1.4 P13-T4). Always present, even as []. Names
+   * Additive guidance. Always present, even as []. Names
    * the canonical "prompt → import → lint → runbook" sequence so the
    * AI-assisted planning loop is CLI-emitted, not docs-only.
    *
-   * Field-presence-fixed per the P12 RunbookStep convention extended in
-   * P13: JSON consumers can assume the schema is constant.
+   * Field-presence-fixed: JSON consumers can assume the schema is constant.
    */
   suggested_next_steps: string[];
 };
@@ -112,7 +111,7 @@ export function generatePlanningPrompt(
 }
 
 /**
- * Schema-only prompt (P2): the YAML format example plus terse output
+ * Schema-only prompt: the YAML format example plus terse output
  * rules, with no brief/constitution sections. The example is shown fenced
  * for readability; the rules tell the agent its OWN output must be raw
  * YAML (no fences) so `phase import` can read the saved file directly.
@@ -190,7 +189,7 @@ function buildSuggestedNextSteps(
 }
 
 /**
- * Schema-only next steps (P2). Skips the brief/constitution capture hint
+ * Schema-only next steps. Skips the brief/constitution capture hint
  * (schema-only deliberately bypasses them) and points straight at the
  * save → import → lint → runbook loop.
  */

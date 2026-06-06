@@ -56,7 +56,7 @@ function matchesTaskId(filename: string, taskId: string): boolean {
 /**
  * True when `entries` contains an ADR whose filename resolves `taskId`.
  *
- * Filename-only predicate, shared by `verify` and `plan lint` since v0.x.
+ * Filename-only predicate, shared by `verify` and `plan lint`.
  * Status-aware resolution ({@link resolveDecisionGate}) layers on top of this
  * same substring rule; this export is kept for the characterization tests
  * that pin the substring-collision compat.
@@ -71,7 +71,7 @@ export function hasDecisionAdrForTaskId(
 /**
  * Whether the decision gate applies to a task — true when the task OR its
  * phase declares `requires_decision`. The single source of truth for "is this
- * task gated", shared by `verify`'s `checkDecision` and the §3-D scaffolder so
+ * task gated", shared by `verify`'s `checkDecision` and the scaffolder so
  * scaffolding never diverges from what `verify` actually blocks.
  */
 export function isDecisionRequiredForTask(
@@ -82,7 +82,7 @@ export function isDecisionRequiredForTask(
 }
 
 // ---------------------------------------------------------------------------
-// Status-aware resolution (RFC §3-C)
+// Status-aware resolution
 // ---------------------------------------------------------------------------
 
 /** Status words that explicitly do NOT resolve the gate. */
@@ -144,7 +144,7 @@ function firstToken(raw: string): string {
 }
 
 /**
- * Classify one ADR's content. Resolve order (RFC §3-C):
+ * Classify one ADR's content. Resolve order:
  *   empty file              → "empty"        (never resolves; "空 ADR は不通過")
  *   no status line          → "accepted"     (lenient backward-compat — the ONLY lenient case)
  *   status == accepted      → "accepted"
@@ -166,7 +166,7 @@ export function classifyAdr(content: string): {
 }
 
 // ---------------------------------------------------------------------------
-// Implementation commitments (P43)
+// Implementation commitments
 // ---------------------------------------------------------------------------
 
 /** One GFM task-list item under an ADR's `## Implementation commitments`. */

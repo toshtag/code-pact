@@ -6,7 +6,7 @@ import { ProgressEvent } from "../schemas/progress-event.ts";
 import { atCompact, computeEventId, eventFileName, normalizeAt } from "./event-id.ts";
 
 /**
- * Per-event progress ledger (collaboration-safe-state RFC, B1).
+ * Per-event progress ledger.
  *
  * Each progress event is its own file under `.code-pact/state/events/`,
  * published atomically (write a temp file, then `link` it onto the final path —

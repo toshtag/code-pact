@@ -7,8 +7,8 @@ import { computeEventId } from "./event-id.ts";
 import { deriveTaskState } from "./task-state.ts";
 
 /**
- * Migrate a legacy monolithic `progress.yaml` to the per-event ledger
- * (collaboration-safe-state RFC, B4). Each legacy event becomes its own file
+ * Migrate a legacy monolithic `progress.yaml` to the per-event ledger.
+ * Each legacy event becomes its own file
  * under `.code-pact/state/events/` via {@link writeEventFile}, so the migration
  * is idempotent by construction (re-running writes nothing new — the content id
  * makes a re-migrated event collide with itself).

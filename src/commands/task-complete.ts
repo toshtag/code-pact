@@ -87,7 +87,7 @@ export async function runTaskComplete(
     throw err;
   }
   // planned / started / resumed / failed: proceed to verify.
-  // planned→done is permitted at the command layer for v0.5 compatibility;
+  // planned→done is permitted at the command layer for compatibility;
   // assertTransition rejects it, so we intentionally do not call that here.
 
   // ---- Step 3: run verify in preflight mode ----

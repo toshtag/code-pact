@@ -1,5 +1,5 @@
 // Shared, authoritative check for "is the shared control plane git-ignored?"
-// (collaboration-safe-state RFC A1 follow-up). Used by both `doctor`
+// Used by both `doctor`
 // (CONTROL_PLANE_GITIGNORED) and `init` (the blanket-ignore advisory) so the two
 // surfaces apply the IDENTICAL judgement and can never drift on the probe set or
 // the git semantics.

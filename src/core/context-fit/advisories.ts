@@ -1,17 +1,17 @@
-// P50 (Context Fit, layer d). Four opt-in, non-exit-affecting `plan lint
+// Context Fit advisories. Four opt-in, non-exit-affecting `plan lint
 // --include-quality` advisories that flag likely context-size risk before a
-// task runs (design/decisions/context-fit-rfc.md § Layer (d)):
+// task runs:
 //
 //   TASK_CONTEXT_PACK_LARGE          natural (pre-elision) pack > balanced budget
 //   TASK_CONTEXT_BUDGET_UNACHIEVABLE recommended budget < minimum achievable floor
 //   TASK_DECLARED_DECISION_LARGE     a decision_refs body larger than the tight budget
 //   TASK_READS_MATCH_TOO_MANY        a reads glob matches more files than the cap
 //
-// Every advisory is `affects_exit: false` (severity "warning"), mirroring the
-// P36 advisory pattern: it never changes the exit code, even under `--strict`.
+// Every advisory is `affects_exit: false` (severity "warning"): it never
+// changes the exit code, even under `--strict`.
 // All thresholds are deterministic byte/count values (this module is their one
 // runtime source of truth). The pass is local and offline — it reads existing
-// project/task data, builds each task's pack once via the unchanged P49 explain
+// project/task data, builds each task's pack once via the unchanged explain
 // path, and caches per-run reads. No network, model, tokenizer, summarization,
 // compression, semantic ranking, or embeddings is involved, and no writes occur.
 //
@@ -30,8 +30,8 @@ import type { PhaseEntry } from "../plan/state.ts";
 import type { PlanIssue } from "../plan/shared.ts";
 
 /**
- * The single runtime source of truth for the P50 advisory thresholds. The byte
- * thresholds derive from the standard profile vocabulary (P47) so they stay in
+ * The single runtime source of truth for the advisory thresholds. The byte
+ * thresholds derive from the standard profile vocabulary so they stay in
  * lockstep with the budget contract; the reads cap is a fixed file count. Docs
  * and tests MAY repeat these values as public contract assertions — that locks
  * the contract, it does not create a second runtime source.
@@ -70,10 +70,10 @@ export type ContextFitAdvisoryOptions = {
   agentName: string | undefined;
   /**
    * The default agent profile's `context_budget.profiles` block, best-effort
-   * resolved at the lint boundary. Passed through to the P48 recommendation so
+   * resolved at the lint boundary. Passed through to the recommendation so
    * `TASK_CONTEXT_BUDGET_UNACHIEVABLE` judges against the SAME recommended byte
    * value `recommend` / `task prepare` surface — a same-named standard profile
-   * override wins over the built-in fallback, exactly as P48 resolves it. Omit
+   * override wins over the built-in fallback, exactly as the recommendation resolves it. Omit
    * (undefined) to use built-in fallback bytes (no override, or none readable).
    */
   agentContextBudgetProfiles?: Record<string, { max_bytes: number }>;
@@ -90,7 +90,7 @@ function isSafePath(path: string): boolean {
 }
 
 /**
- * Compute the four P50 context-fit advisories. Pure-ish: reads files and
+ * Compute the four context-fit advisories. Pure-ish: reads files and
  * expands globs (with per-run caches) but performs no writes and no network.
  * Any per-task error (e.g. a phase missing from the roadmap, an unreadable
  * file) is swallowed so the advisory pass never masks or duplicates a real
@@ -185,7 +185,7 @@ export async function detectContextFitAdvisories(
 
       // --- pack-size advisories (need a built pack) -----------------------
       // TASK_CONTEXT_PACK_LARGE + TASK_CONTEXT_BUDGET_UNACHIEVABLE both derive
-      // from one context-pack build (P49 explain metrics: natural_bytes and
+      // from one context-pack build (explain metrics: natural_bytes and
       // the shared minimum_achievable_bytes floor). Skip when no agent could
       // be resolved — a pack build needs an agent name.
       if (agentName === undefined) continue;
@@ -235,7 +235,7 @@ export async function detectContextFitAdvisories(
       }
 
       // TASK_CONTEXT_BUDGET_UNACHIEVABLE: compare the deterministically
-      // recommended budget (P48 mapping; the default-agent same-name
+      // recommended budget (the default-agent same-name
       // context_budget override when available, else the built-in fallback —
       // the same byte value recommend / task prepare surface) against the
       // shared minimum-achievable floor. Fires only when even maximal eligible

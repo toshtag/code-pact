@@ -43,7 +43,7 @@ export type ReadManifestOptions = {
  * `.code-pact/adapters/<agent>.manifest.yaml`. Returns `null` when the file
  * does not exist (fresh project / first install). Throws on any other I/O
  * failure or on YAML / schema parse errors so callers can map malformed
- * manifests to `ADAPTER_MANIFEST_INVALID` in P7-T4.
+ * manifests to `ADAPTER_MANIFEST_INVALID`.
  */
 export async function readManifest(
   cwd: string,

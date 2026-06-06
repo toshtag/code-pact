@@ -3,20 +3,19 @@ import type { PreflightEntry } from "../schemas/recommend-result.ts";
 import { isPlanningRequired } from "./planning.ts";
 
 // ---------------------------------------------------------------------------
-// v0.8 preflight — Task-derivable triggers only
+// Preflight — Task-derivable triggers only
 //
 // | Trigger                              | Entry              |
 // | planningRequired == true             | plan lint          |
 // | planningRequired == true             | plan analyze       |
 // | task.status == "in_progress"         | task status <id>   |
 //
-// Capped at 3 entries. v0.8 has exactly 3 deterministic triggers, so the
-// cap is a no-op safety guard today; it documents the invariant for v0.9+.
+// Capped at 3 entries. There are exactly 3 deterministic triggers, so the
+// cap is a no-op safety guard today; it documents the invariant.
 //
-// Phase-level rollups (sibling in-progress tasks, normalize drift) and
-// derived-state-aware preflight (blocked/resumed) are deferred to v0.9
-// once `derivedTaskState` is added to RecommendContext. v0.8 stays pure
-// and Task-only to preserve the no-I/O boundary.
+// This stays pure and Task-only to preserve the no-I/O boundary;
+// phase-level rollups and derived-state-aware preflight would need
+// `derivedTaskState` on RecommendContext.
 // ---------------------------------------------------------------------------
 
 const PREFLIGHT_CAP = 3;

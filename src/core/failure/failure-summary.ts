@@ -1,5 +1,5 @@
 /**
- * Failure clarity (P32): turn a verify/finalize failure into a compact,
+ * Failure clarity: turn a verify/finalize failure into a compact,
  * agent-readable summary — which check failed, why, and the command to rerun
  * *after fixing* it.
  *

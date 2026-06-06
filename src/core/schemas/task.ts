@@ -32,12 +32,10 @@ export const Task = z.object({
   status: TaskStatus,
   description: z.string().optional(),
   requires_decision: z.boolean().optional(),
-  // P10 — Task Readiness Schema (additive, optional). Field semantics
-  // and lint validation rules live in
-  // design/decisions/task-readiness-schema-rfc.md; this file declares
-  // the shape only. Plan-lint detectors (TASK_DEPENDS_ON_*,
-  // TASK_READS_*, TASK_WRITES_*, TASK_DECISION_REF_*,
-  // TASK_ACCEPTANCE_REF_*) land in P10-T3, not here.
+  // Task Readiness Schema (additive, optional). This file declares
+  // the shape only; the lint validation rules live in the plan-lint
+  // detectors (TASK_DEPENDS_ON_*, TASK_READS_*, TASK_WRITES_*,
+  // TASK_DECISION_REF_*, TASK_ACCEPTANCE_REF_*), not here.
   depends_on: z.array(z.string().min(1)).optional(),
   decision_refs: z.array(z.string().min(1)).optional(),
   reads: z.array(z.string().min(1)).optional(),

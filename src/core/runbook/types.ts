@@ -3,7 +3,7 @@ import type { PhaseStatus } from "../schemas/phase.ts";
 import type { DriftKind } from "../plan/analyze.ts";
 
 // ---------------------------------------------------------------------------
-// Runbook types — v1.3 P12.
+// Runbook types.
 //
 // Shared shape for `task runbook` and `phase runbook`. Every field is present
 // in JSON output regardless of value; null is used where a field does not
@@ -36,9 +36,9 @@ export type DependsOnEntry = {
   satisfied: boolean;
   /**
    * Phase id of the dependency, populated only when the dependency
-   * resolves to a task in a different phase from the depending task
-   * (v1.9 P19 cross-phase resolution). Omitted for same-phase
-   * dependencies so existing JSON consumers see no shape change.
+   * resolves to a task in a different phase from the depending task.
+   * Omitted for same-phase dependencies so existing JSON consumers
+   * see no shape change.
    */
   phase_id?: string;
 };
@@ -96,7 +96,7 @@ export type PhaseRunbookResult = {
 };
 
 /**
- * v1.9 P19-T3 aggregated runbook. Surfaces one entry per
+ * Aggregated runbook. Surfaces one entry per
  * phase in scope (`in_progress` + dep-driven inclusions).
  * The shape intentionally re-uses PhaseRunbookResult so
  * downstream consumers (e.g. CI dashboards) can treat each

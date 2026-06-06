@@ -48,9 +48,9 @@ async function loadAgentProfile(cwd: string, agentName: string): Promise<AgentPr
     (err as NodeJS.ErrnoException).code = "AGENT_NOT_FOUND";
     throw err;
   }
-  // A malformed profile — including an explicitly-configured but invalid P47
-  // `context_budget` block, which P48 now reads to resolve the contextFit byte
-  // override — surfaces as CONFIG_ERROR rather than an unclassified YAML/Zod
+  // A malformed profile — including an explicitly-configured but invalid
+  // `context_budget` block, which the recommendation reads to resolve the
+  // contextFit byte override — surfaces as CONFIG_ERROR rather than an unclassified YAML/Zod
   // throw, mirroring task-prepare.ts so `recommend` renders a clean envelope.
   try {
     return AgentProfile.parse(parseYaml(raw) as unknown);
@@ -155,7 +155,7 @@ export function formatRecommend(r: RecommendResult): string {
     ].join("\n"),
   );
 
-  // P48 — recommended (not applied) context budget. Worded to make clear this is
+  // Recommended (not applied) context budget. Worded to make clear this is
   // a suggestion; applying it stays explicit via `--context-budget <profile>`.
   if (r.contextFit) {
     sections.push(

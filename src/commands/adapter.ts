@@ -37,12 +37,11 @@ export type {
 } from "./adapter-upgrade.ts";
 
 // ---------------------------------------------------------------------------
-// Back-compat aliases — the v0.8 surface used `runGenerateAdapter` and
-// `AdapterOptions` / `AdapterResult`. v0.9 keeps these names working so
+// Back-compat aliases for the old `runGenerateAdapter` /
+// `AdapterOptions` / `AdapterResult` names, kept working so
 // the bare-form shim, the existing test suite, and any third-party code
-// that imported the v0.8 names continue to compile. The aliases point at
-// the v0.9 install implementation; the only user-visible behavior change
-// is the `--force` narrowing documented in CHANGELOG.
+// that imported them continue to compile. The aliases point at
+// the install implementation.
 // ---------------------------------------------------------------------------
 
 import { runAdapterInstall } from "./adapter-install.ts";

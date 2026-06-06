@@ -5,7 +5,7 @@
 // apart when the agent contract changes across adapters.
 //
 // CONTRACT: the `## Agent contract` heading and its three `###` axis headings
-// are English-locked (design/decisions/agent-contract-rfc.md) and matched by
+// are English-locked and matched by
 // the adapter-conformance / adapter-doctor drift checks — they must not be
 // translated or reworded here.
 

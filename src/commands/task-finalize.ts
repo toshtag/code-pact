@@ -17,19 +17,18 @@ import { auditWrites, type WriteAuditResult } from "../core/audit/index.ts";
 import { assertSafeRelativePath } from "../core/path-safety.ts";
 
 // ---------------------------------------------------------------------------
-// `task finalize <task-id>` — v1.2 P11
+// `task finalize <task-id>`
 //
 // Flips a single task's design YAML `status` field to `done`, but only
 // when the task already has a `done` event in the progress ledger. Default
 // mode is dry-run; `--write` is the explicit opt-in to mutate disk.
 //
-// The v1.0 contract that `task complete` records progress only and
+// The contract that `task complete` records progress only and
 // never mutates design YAML is preserved — this command is the
 // explicit, separate opposite-direction operation that drains
 // `STATUS_DRIFT done-but-design-not-done` warnings.
 //
-// Per the accepted RFC (design/decisions/finalization-reconciliation-
-// rfc.md), this command does NOT take an --agent flag. It is a
+// This command does NOT take an --agent flag. It is a
 // design/progress reconciliation command that never calls an adapter.
 // ---------------------------------------------------------------------------
 
@@ -41,14 +40,13 @@ export type TaskFinalizeOptions = {
   /**
    * Optional base ref for branch-level declared-writes audit. When
    * undefined, the audit (if requested) operates in working-tree mode.
-   * v1.6 P15-T1.
    */
   baseRef?: string;
   /**
    * When true, populate `write_audit` on the result. Default (false)
    * skips the audit entirely — no git spawn, no envelope field. The CLI
    * sets this to `true` only when `--json` is in effect, so human mode
-   * `task finalize` remains identical to v1.5.1. v1.6 P15-T1.
+   * `task finalize` runs no audit.
    */
   includeWriteAudit?: boolean;
   /**
@@ -57,7 +55,7 @@ export type TaskFinalizeOptions = {
    * caller sees `TaskFinalizeAuditStrictError`. The CLI surfaces the
    * error as `WRITES_AUDIT_STRICT_FAILED` (exit 1). Requires
    * `includeWriteAudit: true`; supplying `auditStrict: true` with the
-   * audit disabled is a programmer error and is rejected. v1.6 P15-T6.
+   * audit disabled is a programmer error and is rejected.
    */
   auditStrict?: boolean;
 };
@@ -67,7 +65,7 @@ export type TaskFinalizeOptions = {
  * emitted at least one warning. The exception carries the full audit
  * envelope so the CLI can return the same `write_audit` shape callers
  * already expect, just under an error envelope instead of a success
- * envelope. v1.6 P15-T6.
+ * envelope.
  */
 export class TaskFinalizeAuditStrictError extends Error {
   readonly code = "WRITES_AUDIT_STRICT_FAILED";
@@ -118,7 +116,7 @@ type FinalizeContext = {
   /**
    * Populated only when `TaskFinalizeOptions.includeWriteAudit === true`.
    * The CLI sets this whenever `--json` is in effect, so all three
-   * success kinds carry the audit in the JSON envelope. v1.6 P15-T1.
+   * success kinds carry the audit in the JSON envelope.
    */
   write_audit?: WriteAuditResult;
 };
@@ -155,7 +153,7 @@ export async function runTaskFinalize(
   // 1. Resolve task → phase + file. The shared resolver returns
   // `phasePath`; alias to the local `file` to keep the rest of this
   // function (which feeds `file` into the safe-write classifier and
-  // the public FinalizeContext) byte-identical.
+  // the public FinalizeContext) unchanged.
   const { phaseId, phasePath: file } = await resolveTaskInRoadmap(
     cwd,
     taskId,
@@ -216,8 +214,8 @@ export async function runTaskFinalize(
     throw err;
   }
 
-  // 5. The phase parsed cleanly and the task exists. Pull P10 fields
-  //    off the task for the report sections that appear under every
+  // 5. The phase parsed cleanly and the task exists. Pull the readiness
+  //    fields off the task for the report sections that appear under every
   //    kind.
   const task = (classified.phase.tasks ?? []).find((t) => t.id === taskId);
   // task is guaranteed present because classifyWriteRequest validated it.
@@ -278,7 +276,7 @@ export async function runTaskFinalize(
     );
   }
 
-  // v1.6 P15-T6: --audit-strict gate. Runs AFTER the audit but BEFORE
+  // --audit-strict gate. Runs AFTER the audit but BEFORE
   // any design YAML mutation (`applyPlannedWrite`), so the strict
   // failure path never leaves a half-applied flip behind.
   if (

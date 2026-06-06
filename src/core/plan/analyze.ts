@@ -145,7 +145,7 @@ export async function runAnalyze(
           kind: cls.kind,
           design_status: task.status,
           derived_state: derived.current,
-          // v1.2 P11-T5: additive remediation hint pointing at `task finalize`.
+          // Remediation hint pointing at `task finalize`.
           // Only emitted for `done-but-design-not-done` — the drift kind that
           // `task finalize` / `phase reconcile` can mechanically resolve. The
           // other four kinds need human judgement and don't get a hint.
@@ -161,7 +161,7 @@ export async function runAnalyze(
 
   for (const entry of state.phases) {
     if (entry.phase.status !== "done") continue;
-    // v1.10 P15-T5: cancelled tasks count as "closed" for the
+    // Cancelled tasks count as "closed" for the
     // phase-done check. A cancelled task is an intentional decision
     // to not ship the work; treating it as "not done" would force a
     // phase to stay in_progress forever even when its open work is

@@ -54,13 +54,13 @@ export type BuildContextPackOptions = {
    */
   explain?: boolean;
   /**
-   * Optional P24 budget enforcement. When set, sections elide in the
+   * Optional budget enforcement. When set, sections elide in the
    * priority order locked in `src/core/pack/formatters/markdown.ts`
    * (`ELISION_ORDER`) until the pack's UTF-8 byte length falls at or
    * below `budgetBytes`. When the bound cannot be met after maximal
    * elision, `buildContextPack` throws `ContextOverBudgetError`.
    *
-   * The no-flag default path is byte-identical to v1.12 (locked by
+   * The no-flag default path is byte-identical (locked by
    * `tests/integration/pack-byte-identical.test.ts`).
    */
   budgetBytes?: number;
@@ -87,7 +87,7 @@ export type ContextPackResult = {
   /** Present only when `explain: true` was passed to `buildContextPack`. */
   excluded?: ContextExplainExcluded[];
   /**
-   * P49 explain metrics. Present only when `explain: true`. Byte-based and
+   * Explain metrics. Present only when `explain: true`. Byte-based and
    * deterministic; computing them does not change `content`.
    */
   explainMetrics?: ContextExplainMetrics;
@@ -141,10 +141,10 @@ export async function buildContextPack(
   const allDecisions = isLarge;
   const allRules = isLargeWriteSurface;
 
-  // P10 — Task Readiness Schema declared sections. Each branch is a
+  // Task Readiness Schema declared sections. Each branch is a
   // no-op when the corresponding field is absent or empty, so the pack
-  // output for a v1.0.2-shaped task (no new fields declared) is
-  // byte-identical to v1.0.2 (locked by tests/integration/pack-byte-identical.test.ts).
+  // output for a task that declares no new fields is byte-identical
+  // (locked by tests/integration/pack-byte-identical.test.ts).
   const dependsOnIds = task.depends_on ?? [];
   const readGlobs = task.reads ?? [];
   const writeGlobsList = task.writes ?? [];
@@ -175,10 +175,10 @@ export async function buildContextPack(
     decisions,
     constitution,
     doneEvents,
-    // P10 — only attach the field on the render context when the task
+    // Only attach the field on the render context when the task
     // actually declared the corresponding optional. Passing undefined
-    // (vs an empty array) preserves byte-identical output for v1.0.2-
-    // shaped tasks.
+    // (vs an empty array) preserves byte-identical output for tasks
+    // that declare none.
     ...(dependsOn !== undefined ? { dependsOn } : {}),
     ...(readMatches.length > 0 ? { readMatches } : {}),
     ...(writeGlobsList.length > 0 ? { writeGlobs: writeGlobsList } : {}),
@@ -186,10 +186,10 @@ export async function buildContextPack(
     ...(acceptanceRefsList.length > 0 ? { acceptanceRefs: acceptanceRefsList } : {}),
   });
 
-  // P24: budget enforcement. When `budgetBytes` is set, elide sections
+  // Budget enforcement. When `budgetBytes` is set, elide sections
   // in `ELISION_ORDER` until the pack falls within budget; throw
   // `ContextOverBudgetError` if maximal elision still cannot meet it.
-  // The no-budget path is byte-identical to v1.12.
+  // The no-budget path is byte-identical.
   const budgetResult = applyBudgetElision(allRendered, opts.budgetBytes, {
     isLarge,
     isLargeWriteSurface,
@@ -234,9 +234,9 @@ export async function buildContextPack(
     );
     result.excluded = computeExplainExcluded(flags, declared);
 
-    // P49 — additive byte metrics. `saved_*` are the trivial projection of the
+    // Additive byte metrics. `saved_*` are the trivial projection of the
     // shared budget facts; `budgetBytes` is attached only when a budget was
-    // actually applied (per-invocation, like the P24/P47 elision itself).
+    // actually applied (per-invocation, like the elision itself).
     const bm = budgetResult.metrics;
     const savedBytes = bm.naturalBytes - bm.finalBytes;
     result.explainMetrics = {
@@ -249,10 +249,9 @@ export async function buildContextPack(
       elidedSections: bm.elidedSections,
     };
 
-    // P24: any section elided by --budget-bytes appears in excluded[]
-    // with `reason_code: budget_reserved_for_later`. This activates
-    // the value P21 reserved for this work. The new entries are
-    // appended after the v1.11 policy-driven exclusions; a single
+    // Any section elided by --budget-bytes appears in excluded[]
+    // with `reason_code: budget_reserved_for_later`. The new entries are
+    // appended after the policy-driven exclusions; a single
     // section can only be in one place (elision drops happen on
     // sections that would otherwise have been included, so there is
     // no double-counting).
@@ -300,8 +299,7 @@ export async function writeContextPack(
     outputDir ?? (await resolveWithinProject(cwd, profile?.context_dir ?? `.context/${agentName}`));
   const outputPath = join(outDir, `${pack.taskId}.md`);
   // atomicWriteText recursively creates the parent dir before writing, so no
-  // separate mkdir(outDir) is needed — the output path is byte-identical to
-  // the previous raw-writeFile path.
+  // separate mkdir(outDir) is needed.
   await atomicWriteText(outputPath, pack.content);
   return { outputPath };
 }

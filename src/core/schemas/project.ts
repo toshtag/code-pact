@@ -15,7 +15,7 @@ export const AgentRef = z.object({
 });
 export type AgentRef = z.infer<typeof AgentRef>;
 
-// Team-collaboration settings (Collaboration UX RFC). Additive and optional;
+// Team-collaboration settings. Additive and optional;
 // absence means defaults.
 export const CollaborationConfig = z.object({
   // Whether to capture the `author` (git user.name) on progress events.

@@ -1,8 +1,7 @@
-// P48 (Context Fit, layer b). Pure, deterministic recommendation of a standard
-// context budget profile from existing task readiness fields. No I/O, no
-// tokenizer, no network, no model/provider knowledge, no file inspection — a
-// total function over a handful of categorical inputs, mirrored exactly by the
-// RFC mapping (design/decisions/context-fit-rfc.md § Layer (b)).
+// Pure, deterministic recommendation of a standard context budget profile
+// from existing task readiness fields. No I/O, no tokenizer, no network,
+// no model/provider knowledge, no file inspection — a total function over
+// a handful of categorical inputs.
 //
 // The recommendation is a SUGGESTION only. It is surfaced additively on
 // `recommend` / `task prepare` and is never auto-applied: applying a profile
@@ -32,7 +31,7 @@ export type { ContextFitRecommendation };
  *
  * `requiresDecision` is accepted for completeness but DELIBERATELY does not
  * shrink the recommendation — a gated task usually needs *more* context, not
- * less (RFC § Layer (b)).
+ * less.
  */
 export type RecommendContextFitInput = {
   contextSize: "small" | "medium" | "large";
@@ -48,7 +47,7 @@ export type RecommendContextFitInput = {
 };
 
 // ---------------------------------------------------------------------------
-// Decision table — recommendedProfile (RFC § Layer (b), verbatim)
+// Decision table — recommendedProfile
 //
 // | condition                                                   | profile  |
 // | context_size=large OR ambiguity=high OR write_surface=high  | wide     |

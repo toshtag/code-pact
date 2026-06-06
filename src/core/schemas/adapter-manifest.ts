@@ -4,7 +4,7 @@ import { RelativePosixPath } from "./relative-path.ts";
 export { RelativePosixPath } from "./relative-path.ts";
 
 // ---------------------------------------------------------------------------
-// v0.9 Adapter Platform — per-agent manifest contract
+// Adapter Platform — per-agent manifest contract
 //
 // One file per agent at `.code-pact/adapters/<agent>.manifest.yaml`. Records
 // which files code-pact wrote, their LF-normalized UTF-8 sha256 hashes, the
@@ -54,7 +54,7 @@ export type ProfileFingerprint = z.infer<typeof ProfileFingerprint>;
 // it can regenerate a clean, unique manifest.
 const AdapterManifestObject = z
   .object({
-    // Bump on breaking manifest layout changes only. v0.9 ships schema_version 1.
+    // Bump on breaking manifest layout changes only.
     schema_version: z.literal(1),
     agent_name: z.string().min(1),
     // Equal to the code-pact package.json version at install/upgrade time.

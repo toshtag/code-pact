@@ -1,4 +1,4 @@
-// Author attribution for progress events (Collaboration UX RFC, D1).
+// Author attribution for progress events.
 //
 // The ledger is otherwise actor-anonymous (`actor: human|agent` + agent profile
 // name, no human identity). `resolveEventAuthor` captures *who ran the verb* at

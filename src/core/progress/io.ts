@@ -24,14 +24,14 @@ export type LoadedProgress = {
 /**
  * Load the merged progress log: the legacy monolithic `progress.yaml` (if
  * present) plus every per-event file under `.code-pact/state/events/`
- * (collaboration-safe-state RFC, B2/B3). The in-memory `{ events }` shape is
+ * The in-memory `{ events }` shape is
  * unchanged, so every consumer (`deriveTaskState`, analyze, pack, verify,
  * doctor) is untouched — only how the array is assembled changes.
  *
  * Determinism, glob-order-independent:
  *  - Legacy-only fast path: when there are NO event files, the legacy events
  *    are returned in their original array order, unsorted — byte-for-byte the
- *    same reducer input as before this RFC (the backward-compat guarantee).
+ *    same reducer input (the backward-compat guarantee).
  *  - Otherwise the union is deduped by full content id (a legacy event also
  *    migrated to a file collapses to one) and sorted by `at`, then `id`, then
  *    the legacy array index as a final tiebreaker.
@@ -42,11 +42,11 @@ export type LoadedProgress = {
  */
 /**
  * Deterministically merge a legacy `progress.yaml` event array with the
- * per-event files (B2/B3). Glob-order-independent — shared by every progress
+ * per-event files. Glob-order-independent — shared by every progress
  * source (workspace and git-tree) so the ordering is identical everywhere:
  *  - Legacy-only fast path: with NO event files, the legacy events are returned
  *    in their original array order, unsorted — byte-for-byte the same reducer
- *    input as before this RFC (the backward-compat guarantee).
+ *    input (the backward-compat guarantee).
  *  - Otherwise the union is deduped by full content id (a legacy event also
  *    migrated to a file collapses to one) and sorted by `at`, then `id`, then
  *    the legacy array index as a final tiebreaker.

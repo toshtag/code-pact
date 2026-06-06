@@ -9,18 +9,18 @@ import {
 import { assertSafeRelativePath } from "../path-safety.ts";
 
 // ---------------------------------------------------------------------------
-// Configurable protected paths — v1.6 P15-T3.
+// Configurable protected paths.
 //
 // Loads `design/rules/protected-paths.md` and returns the list of
 // `ProtectedPathEntry` records that `findProtectedPathOverlaps` should
 // consult. When the file is absent, returns the hardcoded
-// `PROTECTED_PATHS` constant from `src/core/glob.ts` — preserving v1.5
-// behaviour for projects that have not opted into the override.
+// `PROTECTED_PATHS` constant from `src/core/glob.ts` for projects that
+// have not opted into the override.
 //
 // File format (one entry per line):
 //   - Lines starting with `#` are comments.
 //   - Blank lines are ignored.
-//   - Everything else is treated as a glob pattern in the P10 supported
+//   - Everything else is treated as a glob pattern in the supported
 //     subset (literal segments, `*`, `**`).
 //
 // A file that exists but contains zero valid entries is interpreted as
@@ -28,7 +28,7 @@ import { assertSafeRelativePath } from "../path-safety.ts";
 // "fall back to defaults". This is the principle of least surprise: a
 // hand-edited file is the source of truth for whoever edited it.
 //
-// Malformed entries (unsafe paths, glob syntax outside the P10 subset)
+// Malformed entries (unsafe paths, glob syntax outside the supported subset)
 // are silently skipped. The lint surface does not currently emit a
 // diagnostic for malformed rule-file entries — that could ship as a
 // future doctor / validate diagnostic if it proves useful in practice.
