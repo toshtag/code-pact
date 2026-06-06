@@ -1,7 +1,4 @@
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
-import { parse as parseYaml } from "yaml";
-import { Project } from "../core/schemas/project.ts";
+import { loadProject, resolveEnabledAgent } from "../core/project.ts";
 import type { ProgressEvent } from "../core/schemas/progress-event.ts";
 import { loadProgressLog } from "../core/progress/io.ts";
 import { writeEventFile } from "../core/progress/events-io.ts";
@@ -73,11 +70,6 @@ export type DecisionRequiredData = {
   expected_pattern?: string;
 };
 
-async function loadProject(cwd: string): Promise<Project> {
-  const raw = await readFile(join(cwd, ".code-pact", "project.yaml"), "utf8");
-  return Project.parse(parseYaml(raw) as unknown);
-}
-
 /**
  * Record a task as done without running `task complete`'s verification —
  * the proof is delegated to `evidence`. Two intended uses: work completed
@@ -119,20 +111,7 @@ export async function runTaskRecordDone(
 
   // ---- Step 2: agent validation (reads project.yaml; before progress mutation) ----
   const project = await loadProject(cwd);
-  const agentName = opts.agent ?? project.default_agent;
-  const ref = project.agents.find((a) => a.name === agentName);
-  if (!ref) {
-    const err = new Error(`Agent "${agentName}" is not configured in project.yaml.`);
-    (err as NodeJS.ErrnoException).code = "AGENT_NOT_FOUND";
-    throw err;
-  }
-  if (ref.enabled === false) {
-    const err = new Error(
-      `Agent "${agentName}" is disabled in project.yaml (enabled: false).`,
-    );
-    (err as NodeJS.ErrnoException).code = "AGENT_NOT_ENABLED";
-    throw err;
-  }
+  const agentName = resolveEnabledAgent(project, opts.agent);
 
   // ---- Step 3: resolve phase from task id ----
   const { phaseId, phasePath } = await resolveTaskInRoadmap(cwd, taskId);
