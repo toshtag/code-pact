@@ -2,9 +2,9 @@ import type { PhaseStatus } from "../schemas/phase.ts";
 import type { TaskCurrentState } from "../progress/task-state.ts";
 
 // ---------------------------------------------------------------------------
-// Reconcile classifier — v1.2 P11 (extracted from src/commands/phase-reconcile.ts
-// in v1.3 P12-T2 so `src/core/runbook/` can reuse it without inverting the
-// dependency direction).
+// Reconcile classifier — lives under `src/core/` so `src/core/runbook/` can
+// reuse it without inverting the dependency direction (core must not import
+// from the command layer).
 //
 // Pure function: given a task's design status and derived progress state,
 // returns the reconcile action and a reason string. No I/O, no schema

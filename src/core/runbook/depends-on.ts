@@ -4,19 +4,19 @@ import type { Task } from "../schemas/task.ts";
 import type { DependsOnEntry } from "./types.ts";
 
 // ---------------------------------------------------------------------------
-// depends-on resolver — v1.3 P12-T2; v1.9 P19-T2 cross-phase extension.
+// depends-on resolver.
 //
-// Extracted from src/commands/task-finalize.ts's inline pattern so both
-// `task runbook` and any future consumer can build a per-dependency state
-// snapshot from already-loaded progress events. Pure function; no I/O.
+// Builds a per-dependency state snapshot from already-loaded progress
+// events so `task runbook` and any other consumer share one resolver
+// instead of inlining the pattern. Pure function; no I/O.
 //
-// v1.9 (P19): an optional `taskPhaseIndex` lets the resolver mark cross-
-// phase dependencies. The map shape is `Map<task_id, phase_id>` (where
+// An optional `taskPhaseIndex` lets the resolver mark cross-phase
+// dependencies. The map shape is `Map<task_id, phase_id>` (where
 // phase_id is the phase that DECLARES the task). When a dep id is found
 // in the map and the declaring phase differs from `ownPhaseId`, the
 // resulting DependsOnEntry carries `phase_id: <declaring-phase-id>`.
-// Same-phase deps and unresolved deps omit the field — additive surface
-// per the v1.0 contract.
+// Same-phase deps and unresolved deps omit the field to preserve the
+// stable additive surface.
 // ---------------------------------------------------------------------------
 
 export interface ResolveDependsOnOptions {

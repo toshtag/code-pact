@@ -1,6 +1,6 @@
 // Shared CLI helpers used across the cli.ts main file and the per-
-// cluster modules under `src/cli/commands/`. Extracted in P27-T1 so
-// the cluster modules do not need to import back from `src/cli.ts`.
+// cluster modules under `src/cli/commands/`. Living here lets the cluster
+// modules avoid importing back from `src/cli.ts`.
 //
 // Current contents:
 //   - `emitOk` / `emitError`: the canonical JSON-envelope writers. cli.ts
@@ -8,7 +8,7 @@
 //     modules under `src/cli/commands/` migrate onto them incrementally, so
 //     the `{ok,error,data}` shape, key order, and exit-stream split live in
 //     one place instead of being hand-rolled at each call site.
-//   - `withWriteLock`: P14 advisory-write-lock wrapper used by every
+//   - `withWriteLock`: advisory-write-lock wrapper used by every
 //     CLI command that mutates `design/` (roadmap and phase YAML). The
 //     per-event progress ledger is lock-free and does not use this wrapper.
 

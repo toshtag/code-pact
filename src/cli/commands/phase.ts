@@ -1,7 +1,7 @@
-// Extracted from src/cli.ts (v1.17.1). The CLI wrapper layer for the
-// `phase` subcommand cluster. Routes `phase <subcommand>` to the
-// per-subcommand handlers defined below. JSON envelopes, exit codes,
-// error codes, and flag surfaces are byte-identical to v1.17.
+// The CLI wrapper layer for the `phase` subcommand cluster. Routes
+// `phase <subcommand>` to the per-subcommand handlers defined below.
+// JSON envelopes, exit codes, error codes, and flag surfaces are part
+// of the stable CLI contract.
 //
 // `cmdPhase` is the cluster-entry dispatch and is the only export.
 // The `reconcile` / `runbook` handlers are private to this module.

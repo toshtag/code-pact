@@ -1,7 +1,7 @@
-// P27-T2: extracted from src/cli.ts. The CLI wrapper layer for the
-// `adapter` subcommand cluster. Routes `adapter <subcommand>` to the
-// per-subcommand handlers defined below. JSON envelopes, exit codes,
-// error codes, and flag surfaces are byte-identical to v1.13.
+// The CLI wrapper layer for the `adapter` subcommand cluster. Routes
+// `adapter <subcommand>` to the per-subcommand handlers defined below.
+// JSON envelopes, exit codes, error codes, and flag surfaces are part
+// of the stable CLI contract.
 //
 // `cmdAdapter` is the cluster-entry dispatch and is the only export.
 // The per-subcommand handlers (cmdAdapterList, cmdAdapterInstall,
