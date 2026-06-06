@@ -1,9 +1,7 @@
-// Shared loader + agent resolution for `.code-pact/project.yaml`. The task
-// runners (`task start` / `block` / `resume` / `context` / `complete` /
-// `record-done` / `prepare`) all begin by loading the project manifest and
-// resolving the effective agent; centralizing that here keeps the
-// `AGENT_NOT_FOUND` / `AGENT_NOT_ENABLED` contract — error codes, messages,
-// and the explicit-then-default precedence — defined in exactly one place.
+// Shared loader + agent resolution for `.code-pact/project.yaml`, used by the
+// task runners and the context-budget loader. Centralizing it keeps the
+// agent-resolution contract (codes, messages, precedence) defined in one place;
+// the per-function doc below is the contract of record.
 
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";

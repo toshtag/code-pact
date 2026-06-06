@@ -369,4 +369,36 @@ describe("adapter unknown subcommand — CLI", () => {
     expect(parsed.error.code).toBe("CONFIG_ERROR");
     expect(parsed.error.message).toContain("foobar");
   });
+
+  // The cluster-dispatch errors compute `effectiveJson = globalJson ||
+  // argv.includes("--json")`, so a GLOBAL `--json` placed before the
+  // subcommand must route the envelope to stdout exactly like a local one.
+  it("honors a global --json before the subcommand (stdout JSON, stderr empty)", () => {
+    const res = runCli(["--json", "adapter", "foobar"]);
+    expect(res.status).toBe(2);
+    expect(res.stderr).toBe("");
+    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string; message: string } };
+    expect(parsed.ok).toBe(false);
+    expect(parsed.error.code).toBe("CONFIG_ERROR");
+    expect(parsed.error.message).toContain("foobar");
+  });
+});
+
+describe("adapter bare form (no subcommand) — CLI", () => {
+  it("--json: CONFIG_ERROR envelope on stdout, stderr empty, exit 2", () => {
+    const res = runCli(["adapter", "--json"]);
+    expect(res.status).toBe(2);
+    expect(res.stderr).toBe("");
+    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string; message: string } };
+    expect(parsed.ok).toBe(false);
+    expect(parsed.error.code).toBe("CONFIG_ERROR");
+    expect(parsed.error.message).toContain("requires a subcommand");
+  });
+
+  it("human: message on stderr, stdout empty, exit 2", () => {
+    const res = runCli(["adapter"]);
+    expect(res.status).toBe(2);
+    expect(res.stdout).toBe("");
+    expect(res.stderr).toContain("requires a subcommand");
+  });
 });
