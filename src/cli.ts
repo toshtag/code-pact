@@ -165,7 +165,7 @@ async function cmdInit(
         throw err;
       }
     };
-    // P14 advisory write lock: only when `.code-pact/` already exists.
+    // Advisory write lock: only when `.code-pact/` already exists.
     // Fresh init bootstraps the project; acquiring the lock would
     // create `.code-pact/` as a side effect and trip `ALREADY_INITIALIZED`.
     // See codePactDirExists() doc-comment.
@@ -254,7 +254,7 @@ async function cmdInit(
     }
   };
 
-  // P14 advisory write lock: only when sample-phase will be created
+  // Advisory write lock: only when sample-phase will be created
   // (the only path that mutates roadmap.yaml / design/phases). Plain
   // init without --sample-phase writes only `.code-pact/` bootstrap
   // artifacts, which fall outside the design-mutation lock contract.
@@ -392,7 +392,7 @@ async function cmdValidate(argv: string[], globalJson: boolean): Promise<number>
 }
 
 // ---------------------------------------------------------------------------
-// Command: status — read-only team activity overview (Collaboration UX D2)
+// Command: status — read-only team activity overview
 // ---------------------------------------------------------------------------
 
 async function cmdStatus(argv: string[], globalJson: boolean): Promise<number> {
@@ -578,10 +578,10 @@ async function cmdRecommend(argv: string[], locale: Locale, globalJson: boolean)
       emitError(json, "AGENT_NOT_FOUND", msg);
       return 2;
     }
-    // A malformed agent profile / invalid P47 context_budget block surfaces as a
-    // clean CONFIG_ERROR (exit 2) rather than leaking a raw Zod/YAML throw — this
-    // matters in P48 because `recommend` now reads context_budget to resolve the
-    // contextFit byte override. Mirrors task prepare's CONFIG_ERROR envelope.
+    // A malformed agent profile / invalid context_budget block surfaces as a
+    // clean CONFIG_ERROR (exit 2) rather than leaking a raw Zod/YAML throw —
+    // `recommend` reads context_budget to resolve the contextFit byte override.
+    // Mirrors task prepare's CONFIG_ERROR envelope.
     if (code === "CONFIG_ERROR") {
       const msg = err instanceof Error ? err.message : "Invalid configuration.";
       emitError(json, "CONFIG_ERROR", msg);

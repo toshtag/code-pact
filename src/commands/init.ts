@@ -29,7 +29,7 @@ export type InitOptions = {
   /** Emit JSON result to stdout instead of human messages */
   json: boolean;
   /**
-   * When true, write the tutorial sample phase artifact (P13+).
+   * When true, write the tutorial sample phase artifact.
    * Honoured by both the flag-based `init` path (via CLI `--sample-phase`)
    * and the wizard path (forces creation, skipping the wizard's prompt).
    */
@@ -46,7 +46,7 @@ export type InitCoreOptions = InitOptions & {
   defaultAgent?: SupportedAgent;
   /** Verification command stored in the sample phase. Default "pnpm test". */
   verifyCommand?: string;
-  /** When true, runInitCore also writes a minimal sample phase (P1). */
+  /** When true, runInitCore also writes a minimal sample phase. */
   createSamplePhase?: boolean;
 };
 
@@ -60,7 +60,7 @@ export type InitResult = {
    */
   suggested_next_steps: string[];
   /**
-   * Non-fatal advisories raised during init (additive, v1.32+). Currently: a
+   * Non-fatal advisories raised during init (additive). Currently: a
    * pre-existing blanket `/.code-pact/` .gitignore rule that defeats the narrow
    * shared-vs-local policy `init` just wrote (collaboration state would never
    * reach git). `init` never edits a user's existing .gitignore lines, so this
@@ -290,11 +290,10 @@ export async function runInitCore(opts: InitCoreOptions): Promise<InitResult> {
   }
 
   // progress.yaml — an empty legacy compatibility artifact. The per-event ledger
-  // (collaboration-safe-state RFC, B1) is where the task verbs now write
-  // (.code-pact/state/events/); this file is never written by them. It is created
-  // empty so a fresh project has the legacy read-merge target present (harmless,
-  // and a committed sentinel that keeps the CI branch-drift gate from skipping on
-  // an untracked ledger). See docs/upgrading.md § event-file progress ledger.
+  // is where the task verbs now write (.code-pact/state/events/); this file is
+  // never written by them. It is created empty so a fresh project has the legacy
+  // read-merge target present (harmless, and a committed sentinel that keeps the
+  // CI branch-drift gate from skipping on an untracked ledger).
   const emptyLog: ProgressLog = { events: [] };
   await writeIfAbsent(
     join(cwd, ".code-pact", "state", "progress.yaml"),
@@ -329,8 +328,7 @@ export async function runInitCore(opts: InitCoreOptions): Promise<InitResult> {
   // Ignored: `.code-pact/locks/` (machine-local advisory locks — pid/hostname),
   // `.code-pact/cache/` (reserved, derived), `/.local/` (per-developer
   // overrides), `/.context/` (regenerated context packs). Merged into any
-  // existing .gitignore (idempotent). See the collaboration-safe-state RFC for
-  // the shared-vs-local policy.
+  // existing .gitignore (idempotent).
   await ensureGitignoreEntries(cwd, LOCAL_ONLY_IGNORE_ENTRIES, created);
 
   // A pre-existing blanket (or file-scoped) ignore overrides the narrow entries
@@ -432,20 +430,19 @@ export async function runInit(opts: InitOptions): Promise<InitResult> {
 }
 
 /**
- * Writes the tutorial sample phase artifact introduced in P13 (v1.4+).
+ * Writes the tutorial sample phase artifact.
  *
- * Phase id is `TUTORIAL` (was `P1` pre-v1.4) so it does not collide with
- * the natural first user phase. Includes two tutorial tasks — TUTORIAL-T1
- * and TUTORIAL-T2 with `depends_on: [TUTORIAL-T1]` — so the per-task loop
- * + P10 depends_on + P12 task runbook blocking-step output can be demoed
- * end-to-end from a single bootstrap artifact.
+ * Phase id is `TUTORIAL` so it does not collide with the natural first user
+ * phase. Includes two tutorial tasks — TUTORIAL-T1 and TUTORIAL-T2 with
+ * `depends_on: [TUTORIAL-T1]` — so the per-task loop, depends_on, and the
+ * task-runbook blocking-step output can be demoed end-to-end from a single
+ * bootstrap artifact.
  *
  * Calls the `createPhase` domain service directly because `runPhaseAdd`
  * does not forward the `tasks` field.
  *
  * Returns the relative path of the created phase, or `undefined` when
- * the phase already exists (DUPLICATE_PHASE_ID is swallowed silently,
- * matching the pre-P13 behaviour).
+ * the phase already exists (DUPLICATE_PHASE_ID is swallowed silently).
  */
 async function writeSamplePhase(
   cwd: string,
@@ -453,14 +450,13 @@ async function writeSamplePhase(
 ): Promise<string | undefined> {
   const { createPhase } = await import("../core/services/createPhase.ts");
   try {
-    // The phase `name` becomes the file slug via createPhase's
-    // slugify(). Using just "Walkthrough" yields the file path
-    // `design/phases/TUTORIAL-walkthrough.yaml` promised by the
-    // P13 RFC. The `id: "TUTORIAL"` plus the explicit objective
-    // text below carries the tutorial-only framing.
+    // The phase `name` becomes the file slug via createPhase's slugify().
+    // Using just "Walkthrough" yields the file path
+    // `design/phases/TUTORIAL-walkthrough.yaml`. The `id: "TUTORIAL"` plus the
+    // explicit objective text below carries the tutorial-only framing.
     const result = await createPhase({
       cwd,
-      // Internal-only bypass for the P14 reserved-id (TUTORIAL) block. This
+      // Internal-only bypass for the reserved-id (TUTORIAL) block. This
       // is the single sanctioned call site that may set this flag — no other
       // caller (`phase add`, `phase new`, `phase import`) is allowed to.
       _isSampleCreation: true,

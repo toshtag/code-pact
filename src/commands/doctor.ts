@@ -54,7 +54,7 @@ import type { Locale } from "../i18n/index.ts";
 // ---------------------------------------------------------------------------
 
 /**
- * Machine-readable recovery guidance for a diagnostic (v1.28+, additive).
+ * Machine-readable recovery guidance for a diagnostic (additive).
  *
  * The `message` already names the recommended command, alternatives, and how
  * to silence the check — but only as prose an agent has to parse. `recovery`
@@ -90,13 +90,13 @@ export type DoctorIssue = {
   code: string;
   severity: "error" | "warning";
   message: string;
-  /** Structured recovery guidance (v1.28+, additive). Present on selected
+  /** Structured recovery guidance (additive). Present on selected
    * actionable diagnostics (the `CONTROL_PLANE_*` advisories and the id-conflict
    * diagnostics DUPLICATE_PHASE_ID / DUPLICATE_TASK_ID / PHASE_ID_MISMATCH). */
   recovery?: DoctorIssueRecovery;
   /** Structured extras threaded from a shared plan detector (additive). e.g. the
    * id-conflict diagnostics carry `colliding_files` / `colliding_phases`, and
-   * `PROGRESS_EVENT_CONFLICT` carries `details.events[]` (D3 attribution). */
+   * `PROGRESS_EVENT_CONFLICT` carries `details.events[]` (conflict attribution). */
   details?: Record<string, unknown>;
 };
 
@@ -522,11 +522,9 @@ async function checkLocalGitignored(cwd: string, issues: DoctorIssue[]): Promise
 
 // Check 11: enabled agents have their adapter instruction file on disk.
 //
-// v0.9: legacy check ONLY fires when no manifest exists. With a manifest,
+// This legacy check ONLY fires when no manifest exists. With a manifest,
 // the manifest-aware checkAdapterManifestAware emits the more precise
-// ADAPTER_FILE_MISSING (error) per managed file. The byte-identical
-// commitment to v0.8 holds for any project that has not yet run
-// `adapter install`.
+// ADAPTER_FILE_MISSING (error) per managed file.
 async function checkAdapterMissing(
   cwd: string,
   project: Project,
@@ -562,14 +560,14 @@ async function checkAdapterMissing(
   }
 }
 
-// Check 11b (v0.9): manifest-aware adapter health.
+// Check 11b: manifest-aware adapter health.
 //
 // Runs only for enabled agents whose manifest file exists on disk. The
 // per-agent findings come from inspectAgent (the same code path
 // `adapter doctor` uses), so error codes and semantics stay aligned.
 // ADAPTER_MANIFEST_MISSING is intentionally dropped — it's an
-// `adapter doctor`-only signal so we don't make existing projects
-// suddenly noisy after upgrading to v0.9.
+// `adapter doctor`-only signal, so we don't make existing projects
+// suddenly noisy.
 async function checkAdapterManifestAware(
   cwd: string,
   project: Project,
@@ -750,7 +748,7 @@ async function checkStaleContext(
   }
 }
 
-// Check 16: the control plane is scaffolded but not being driven (RFC §2).
+// Check 16: the control plane is scaffolded but not being driven.
 // Advisory (warning): fires only when a real (non-TUTORIAL) task exists, the
 // loop has never been driven for a non-TUTORIAL task, AND git shows
 // uncommitted working changes — i.e. real code is happening outside the loop.
@@ -805,7 +803,7 @@ async function checkControlPlaneNotDriven(
   });
 }
 
-// Check 18 (collaboration-safe-state RFC A1 follow-up): the shared control
+// Check 18: the shared control
 // plane is git-ignored. A blanket `/.code-pact/` .gitignore (or any rule that
 // matches a shared area) means that state never reaches git, and the
 // collaboration model silently no-ops for whatever is ignored: a clean checkout
@@ -929,20 +927,20 @@ async function readMergedEventsAtRev(
 }
 
 // A stable identity key for a progress event — the same content id the ledger
-// uses everywhere (B5), so two events that differ in any persisted field
+// uses everywhere, so two events that differ in any persisted field
 // (evidence, reason, agent, …) are distinct. The ledger is append-only, so
 // "added on the branch" = HEAD events whose id is absent at the base.
 function eventKey(e: ProgressEvent): string {
   return computeEventId(e);
 }
 
-// Check 17 (P34): branch-diff control-plane drift, for PR CI. Advisory
+// Check 17: branch-diff control-plane drift, for PR CI. Advisory
 // (warning). Runs ONLY when `--base-ref` is supplied. Fires when real,
 // non-excluded files changed on the branch (merge-base..HEAD) but the branch
 // added NO event that is a started/done for a KNOWN non-TUTORIAL task — i.e.
 // code changed without driving the loop. Conservative skips: no git /
 // unresolved merge-base / untracked progress.yaml / unparseable HEAD
-// progress.yaml / only excluded paths changed. See ci-branch-drift-rfc.md.
+// progress.yaml / only excluded paths changed.
 async function checkControlPlaneBranchNotDriven(
   cwd: string,
   phases: Phase[],
@@ -1029,7 +1027,7 @@ async function checkControlPlaneBranchNotDriven(
 // ---------------------------------------------------------------------------
 
 export type RunDoctorOptions = {
-  /** Branch base ref for the CI branch-drift check (P34). When omitted,
+  /** Branch base ref for the CI branch-drift check. When omitted,
    * CONTROL_PLANE_BRANCH_NOT_DRIVEN does not run. */
   baseRef?: string;
 };
@@ -1083,7 +1081,7 @@ export async function runDoctor(
     await checkAdapterMissing(cwd, project, allIssues);
   }
 
-  // 11b. manifest-aware adapter health (v0.9, only when manifest exists)
+  // 11b. manifest-aware adapter health (only when manifest exists)
   if (project) {
     await checkAdapterManifestAware(cwd, project, allIssues);
   }
@@ -1102,13 +1100,13 @@ export async function runDoctor(
     await checkAdapterStale(cwd, project, allIssues);
   }
 
-  // 16. control plane scaffolded but not driven (RFC §2). Guarded so a
+  // 16. control plane scaffolded but not driven. Guarded so a
   // disabled advisory never spawns git; the trailing filter still covers it.
   if (!disabled.has("CONTROL_PLANE_NOT_DRIVEN")) {
     await checkControlPlaneNotDriven(cwd, phases, allIssues);
   }
 
-  // 17. branch-diff control-plane drift (P34). Runs only when --base-ref is
+  // 17. branch-diff control-plane drift. Runs only when --base-ref is
   // given (CI). Guarded so a disabled advisory never spawns git.
   if (
     opts.baseRef !== undefined &&
@@ -1123,8 +1121,8 @@ export async function runDoctor(
     );
   }
 
-  // 18. shared control plane git-ignored (collaboration-safe-state RFC A1
-  // follow-up). Guarded so a disabled advisory never spawns git.
+  // 18. shared control plane git-ignored. Guarded so a disabled advisory
+  // never spawns git.
   if (!disabled.has("CONTROL_PLANE_GITIGNORED")) {
     await checkControlPlaneGitignored(cwd, allIssues);
   }
