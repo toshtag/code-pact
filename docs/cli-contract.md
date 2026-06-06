@@ -940,7 +940,7 @@ Applies explicit `old=new` path mappings to **exact** entries in `tasks[].reads`
 **Exit code:**
 - `0` — check completed, or write completed (even when files were rewritten).
 - `2` — `CONFIG_ERROR`: missing `--rename`, malformed mapping (no `=`, empty side), identical `old`/`new`, conflicting mappings for one `from`, an unknown flag, or a stray positional.
-- `3` — unexpected runtime failure during a write.
+- `3` — unexpected runtime failure while scanning phase files or writing (e.g. a `readdir` failure), surfaced even in the dry-run check.
 
 **JSON success shape:**
 ```json
