@@ -2889,7 +2889,7 @@ coverage. Agents and CI may rely on these.
 | `doctor` | |
 | `validate` | |
 | `recommend` | |
-| `plan lint` / `plan normalize` / `plan analyze` / `plan prompt` | |
+| `plan lint` / `plan normalize` / `plan analyze` / `plan prompt` / `plan sync-paths` | |
 | `phase add` | Flag-only path (`--id`/`--name`/`--objective`/`--weight`/`--verify-command`) is the Stable surface |
 | `phase ls` / `phase show` / `phase import` | |
 | `task context` / `task status` / `task start` / `task block` / `task resume` / `task complete` | |

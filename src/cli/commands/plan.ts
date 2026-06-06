@@ -47,6 +47,12 @@ import {
   runPlanAnalyze,
   serializePlanAnalyzeData,
 } from "../../commands/plan-analyze.ts";
+import {
+  formatPlanSyncPathsHuman,
+  runPlanSyncPaths,
+  serializePlanSyncPathsData,
+  type RenamePair,
+} from "../../commands/plan-sync-paths.ts";
 import { migrateProgressToEvents } from "../../core/progress/migrate.ts";
 
 export async function cmdPlan(argv: string[], locale: Locale, globalJson: boolean): Promise<number> {
@@ -93,6 +99,10 @@ export async function cmdPlan(argv: string[], locale: Locale, globalJson: boolea
     return cmdPlanAnalyze(rest, locale, globalJson);
   }
 
+  if (subcommand === "sync-paths") {
+    return cmdPlanSyncPaths(rest, locale, globalJson);
+  }
+
   if (subcommand === "migrate") {
     return cmdPlanMigrate(rest, locale, globalJson);
   }
@@ -105,7 +115,7 @@ export async function cmdPlan(argv: string[], locale: Locale, globalJson: boolea
     return cmdPhaseImport(rest, locale, globalJson, "plan import");
   }
 
-  const msg = `plan: unknown subcommand "${subcommand ?? ""}". Use: brief | prompt | adopt | constitution | lint | normalize | analyze | migrate | import (alias for "phase import")`;
+  const msg = `plan: unknown subcommand "${subcommand ?? ""}". Use: brief | prompt | adopt | constitution | lint | normalize | analyze | sync-paths | migrate | import (alias for "phase import")`;
   emitError(globalJson, "CONFIG_ERROR", msg);
   return 2;
 }
@@ -742,4 +752,80 @@ async function cmdPlanMigrate(
     }
     return 1;
   }
+}
+
+// `plan sync-paths` — apply an explicit old=new rename map to the reads/writes
+// of every phase task, so renaming/merging a src file referenced by a phase
+// does not leave the plan-lint reads-match invariant to be fixed by hand.
+// Dry-run by default; `--write` mutates design/phases (under the write lock).
+async function cmdPlanSyncPaths(
+  argv: string[],
+  locale: Locale,
+  globalJson: boolean,
+): Promise<number> {
+  void locale;
+  const { values } = parseArgs({
+    args: argv,
+    options: {
+      json: { type: "boolean" },
+      write: { type: "boolean" },
+      rename: { type: "string", multiple: true },
+    },
+    strict: false,
+  });
+  const json = globalJson || values.json === true;
+  const writeFlag = values.write === true;
+  const cwd = process.cwd();
+
+  const rawRenames = Array.isArray(values.rename)
+    ? (values.rename as unknown[]).filter((v): v is string => typeof v === "string")
+    : [];
+  if (rawRenames.length === 0) {
+    emitError(
+      json,
+      "CONFIG_ERROR",
+      "plan sync-paths requires at least one --rename <old>=<new>.",
+    );
+    return 2;
+  }
+  const renames: RenamePair[] = [];
+  for (const r of rawRenames) {
+    const eq = r.indexOf("=");
+    if (eq <= 0 || eq === r.length - 1) {
+      emitError(
+        json,
+        "CONFIG_ERROR",
+        `plan sync-paths: invalid --rename "${r}" (expected <old>=<new>).`,
+      );
+      return 2;
+    }
+    const from = r.slice(0, eq);
+    const to = r.slice(eq + 1);
+    if (from === to) {
+      emitError(
+        json,
+        "CONFIG_ERROR",
+        `plan sync-paths: --rename "${r}" has identical old and new paths.`,
+      );
+      return 2;
+    }
+    renames.push({ from, to });
+  }
+
+  const mode = writeFlag ? "write" : "check";
+
+  const run = async (): Promise<number> => {
+    const result = await runPlanSyncPaths({ cwd, renames, mode });
+    if (json) {
+      emitOk(serializePlanSyncPathsData(result));
+    } else {
+      process.stderr.write(`${formatPlanSyncPathsHuman(result)}\n`);
+    }
+    return 0;
+  };
+
+  // Only --write mutates design YAML; the dry-run check is lock-free.
+  return writeFlag
+    ? withWriteLock(cwd, "plan sync-paths --write", json, run)
+    : run();
 }
