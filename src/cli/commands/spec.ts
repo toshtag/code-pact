@@ -12,6 +12,7 @@ import {
   runSpecSuggest,
   SpecImportError,
 } from "../../commands/spec-import.ts";
+import { emitOk, emitError } from "../util.ts";
 
 export async function cmdSpec(argv: string[], _locale: Locale, globalJson: boolean): Promise<number> {
   const subcommand = argv[0];
@@ -36,13 +37,7 @@ export async function cmdSpec(argv: string[], _locale: Locale, globalJson: boole
     } catch (err) {
       if (!(err instanceof ConfigError)) throw err;
       const json = globalJson || rest.includes("--json");
-      if (json) {
-        process.stdout.write(
-          `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: err.message } })}\n`,
-        );
-      } else {
-        process.stderr.write(`${err.message}\n`);
-      }
+      emitError(json, "CONFIG_ERROR", err.message);
       return 2;
     }
 
@@ -56,17 +51,9 @@ export async function cmdSpec(argv: string[], _locale: Locale, globalJson: boole
 
     if (fromPath && suggestFromPath) {
       const msg = "spec import: --from and --suggest-from are mutually exclusive";
-      if (json) {
-        process.stdout.write(
-          `${JSON.stringify({
-            ok: false,
-            error: { code: "CONFIG_ERROR", message: msg },
-            data: { detail: "mutex_violation", source_path: null, phase_id: null },
-          })}\n`,
-        );
-      } else {
-        process.stderr.write(`${msg}\n`);
-      }
+      emitError(json, "CONFIG_ERROR", msg, {
+        data: { detail: "mutex_violation", source_path: null, phase_id: null },
+      });
       return 2;
     }
 
@@ -74,7 +61,7 @@ export async function cmdSpec(argv: string[], _locale: Locale, globalJson: boole
       try {
         const result = await runSpecSuggest({ cwd, suggestFromPath });
         if (json) {
-          process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
+          emitOk(result);
         } else {
           const briefKeys = Object.keys(result.brief_candidates);
           const constKeys = Object.keys(result.constitution_candidates);
@@ -86,21 +73,13 @@ export async function cmdSpec(argv: string[], _locale: Locale, globalJson: boole
         return 0;
       } catch (err) {
         if (err instanceof SpecImportError) {
-          if (json) {
-            process.stdout.write(
-              `${JSON.stringify({
-                ok: false,
-                error: { code: "CONFIG_ERROR", message: err.message },
-                data: {
-                  detail: err.detail,
-                  source_path: err.sourcePath ?? null,
-                  phase_id: null,
-                },
-              })}\n`,
-            );
-          } else {
-            process.stderr.write(`${err.message}\n`);
-          }
+          emitError(json, "CONFIG_ERROR", err.message, {
+            data: {
+              detail: err.detail,
+              source_path: err.sourcePath ?? null,
+              phase_id: null,
+            },
+          });
           return 2;
         }
         throw err;
@@ -109,35 +88,21 @@ export async function cmdSpec(argv: string[], _locale: Locale, globalJson: boole
 
     if (!fromPath) {
       const msg = "spec import requires --from <path> or --suggest-from <path>";
-      if (json) {
-        process.stdout.write(
-          `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
-        );
-      } else {
-        process.stderr.write(`${msg}\n`);
-      }
+      emitError(json, "CONFIG_ERROR", msg);
       return 2;
     }
     if (!phaseId) {
       const msg = "spec import requires --phase-id <id> for the generated phase";
-      if (json) {
-        process.stdout.write(
-          `${JSON.stringify({
-            ok: false,
-            error: { code: "CONFIG_ERROR", message: msg },
-            data: { detail: "missing_phase_id", source_path: fromPath, phase_id: null },
-          })}\n`,
-        );
-      } else {
-        process.stderr.write(`${msg}\n`);
-      }
+      emitError(json, "CONFIG_ERROR", msg, {
+        data: { detail: "missing_phase_id", source_path: fromPath, phase_id: null },
+      });
       return 2;
     }
 
     try {
       const result = await runSpecImport({ cwd, fromPath, phaseId, write, force });
       if (json) {
-        process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
+        emitOk(result);
       } else {
         if (result.kind === "imported") {
           process.stderr.write(
@@ -158,21 +123,13 @@ export async function cmdSpec(argv: string[], _locale: Locale, globalJson: boole
       return 0;
     } catch (err) {
       if (err instanceof SpecImportError) {
-        if (json) {
-          process.stdout.write(
-            `${JSON.stringify({
-              ok: false,
-              error: { code: "CONFIG_ERROR", message: err.message },
-              data: {
-                detail: err.detail,
-                source_path: err.sourcePath ?? null,
-                phase_id: err.phaseId ?? null,
-              },
-            })}\n`,
-          );
-        } else {
-          process.stderr.write(`${err.message}\n`);
-        }
+        emitError(json, "CONFIG_ERROR", err.message, {
+          data: {
+            detail: err.detail,
+            source_path: err.sourcePath ?? null,
+            phase_id: err.phaseId ?? null,
+          },
+        });
         return 2;
       }
       throw err;
@@ -180,12 +137,6 @@ export async function cmdSpec(argv: string[], _locale: Locale, globalJson: boole
   }
 
   const msg = `spec: unknown subcommand "${subcommand ?? ""}". Use: import`;
-  if (globalJson) {
-    process.stdout.write(
-      `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
-    );
-  } else {
-    process.stderr.write(`${msg}\n`);
-  }
+  emitError(globalJson, "CONFIG_ERROR", msg);
   return 2;
 }

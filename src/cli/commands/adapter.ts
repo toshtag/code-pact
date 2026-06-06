@@ -12,6 +12,7 @@
 import { parseArgs } from "node:util";
 import { messages, type Locale } from "../../i18n/index.ts";
 import { clusterUsage, emitUsage, hasHelpFlag, isHelpToken, subcommandUsage } from "../usage.ts";
+import { emitOk, emitError } from "../util.ts";
 import { isSupportedAgent } from "../../core/agents.ts";
 import {
   runAdapterInstall,
@@ -56,13 +57,7 @@ export async function cmdAdapter(argv: string[], locale: Locale, globalJson: boo
   // Reject unknown sub-words (anything that doesn't start with `-`).
   if (sub !== undefined && !sub.startsWith("-")) {
     const msg = `adapter: unknown subcommand "${sub}". Use: list | install | upgrade | doctor | conformance`;
-    if (effectiveJson) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
-      );
-    } else {
-      process.stderr.write(`${msg}\n`);
-    }
+    emitError(effectiveJson, "CONFIG_ERROR", msg);
     return 2;
   }
 
@@ -72,13 +67,7 @@ export async function cmdAdapter(argv: string[], locale: Locale, globalJson: boo
   // hardening pass is closing. Require the explicit subcommand. No side effects.
   const msg =
     "adapter requires a subcommand — the bare form is removed. Use: code-pact adapter install <agent> (or list | upgrade | doctor | conformance). Run \"code-pact adapter --help\".";
-  if (effectiveJson) {
-    process.stdout.write(
-      `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
-    );
-  } else {
-    process.stderr.write(`${msg}\n`);
-  }
+  emitError(effectiveJson, "CONFIG_ERROR", msg);
   return 2;
 }
 
@@ -93,7 +82,7 @@ async function cmdAdapterList(argv: string[], globalJson: boolean): Promise<numb
   const result = await runAdapterList({ cwd: process.cwd() });
 
   if (json) {
-    process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
+    emitOk(result);
     return 0;
   }
 
@@ -137,13 +126,7 @@ async function cmdAdapterInstall(
 
   if (!agentName) {
     const msg = "adapter install requires an <agent> argument (e.g. claude-code).";
-    if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
-      );
-    } else {
-      process.stderr.write(`${msg}\n`);
-    }
+    emitError(json, "CONFIG_ERROR", msg);
     return 2;
   }
 
@@ -181,7 +164,7 @@ async function cmdAdapterDoctor(
     const result = await runAdapterDoctor({ cwd, agentName, locale });
 
     if (json) {
-      process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
+      emitOk(result);
     } else {
       if (result.issues.length === 0) {
         process.stderr.write("No adapter issues found.\n");
@@ -199,13 +182,7 @@ async function cmdAdapterDoctor(
   } catch (err: unknown) {
     if (err instanceof Error && (err as NodeJS.ErrnoException).code === "AGENT_NOT_FOUND") {
       const msg = messages[locale].adapter.agentNotFound(agentName ?? "");
-      if (json) {
-        process.stdout.write(
-          `${JSON.stringify({ ok: false, error: { code: "AGENT_NOT_FOUND", message: msg } })}\n`,
-        );
-      } else {
-        process.stderr.write(`${msg}\n`);
-      }
+      emitError(json, "AGENT_NOT_FOUND", msg);
       return 2;
     }
     throw err;
@@ -231,25 +208,13 @@ async function cmdAdapterConformance(
   if (!agentName) {
     const msg =
       "adapter conformance requires an <agent> argument (e.g. claude-code).";
-    if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
-      );
-    } else {
-      process.stderr.write(`${msg}\n`);
-    }
+    emitError(json, "CONFIG_ERROR", msg);
     return 2;
   }
 
   if (!isSupportedAgent(agentName)) {
     const msg = `Agent "${agentName}" is not a supported adapter.`;
-    if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: "AGENT_NOT_FOUND", message: msg } })}\n`,
-      );
-    } else {
-      process.stderr.write(`${msg}\n`);
-    }
+    emitError(json, "AGENT_NOT_FOUND", msg);
     return 2;
   }
 
@@ -257,7 +222,7 @@ async function cmdAdapterConformance(
   const result = await runAdapterConformance({ cwd, agentName });
 
   if (json) {
-    process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
+    emitOk(result);
   } else {
     process.stdout.write(`Agent:     ${result.agent}\n`);
     process.stdout.write(
@@ -318,13 +283,7 @@ async function cmdAdapterUpgrade(
 
   if (!agentName) {
     const msg = "adapter upgrade requires an <agent> argument (e.g. claude-code).";
-    if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
-      );
-    } else {
-      process.stderr.write(`${msg}\n`);
-    }
+    emitError(json, "CONFIG_ERROR", msg);
     return 2;
   }
 
@@ -333,13 +292,7 @@ async function cmdAdapterUpgrade(
     const msg = check
       ? "adapter upgrade: --check and --write are mutually exclusive."
       : "adapter upgrade requires either --check or --write.";
-    if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
-      );
-    } else {
-      process.stderr.write(`${msg}\n`);
-    }
+    emitError(json, "CONFIG_ERROR", msg);
     return 2;
   }
 
@@ -349,13 +302,7 @@ async function cmdAdapterUpgrade(
   if (check && modelVersion !== undefined) {
     const msg =
       "adapter upgrade: --model cannot be combined with --check (--model pins the profile, which --check must not do). Use --write to pin a model.";
-    if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
-      );
-    } else {
-      process.stderr.write(`${msg}\n`);
-    }
+    emitError(json, "CONFIG_ERROR", msg);
     return 2;
   }
 
@@ -374,7 +321,7 @@ async function cmdAdapterUpgrade(
     });
 
     if (json) {
-      process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
+      emitOk(result);
     } else {
       for (const entry of result.plan) {
         if (entry.action === "skip") continue;
@@ -452,33 +399,15 @@ async function cmdAdapterUpgrade(
       const code = (err as NodeJS.ErrnoException).code;
       if (code === "AGENT_NOT_FOUND") {
         const msg = m.adapter.agentNotFound(agentName);
-        if (json) {
-          process.stdout.write(
-            `${JSON.stringify({ ok: false, error: { code: "AGENT_NOT_FOUND", message: msg } })}\n`,
-          );
-        } else {
-          process.stderr.write(`${msg}\n`);
-        }
+        emitError(json, "AGENT_NOT_FOUND", msg);
         return 2;
       }
       if (code === "MANIFEST_NOT_FOUND") {
-        if (json) {
-          process.stdout.write(
-            `${JSON.stringify({ ok: false, error: { code: "MANIFEST_NOT_FOUND", message: err.message } })}\n`,
-          );
-        } else {
-          process.stderr.write(`${err.message}\n`);
-        }
+        emitError(json, "MANIFEST_NOT_FOUND", err.message);
         return 2;
       }
       if (code === "CONFIG_ERROR") {
-        if (json) {
-          process.stdout.write(
-            `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: err.message } })}\n`,
-          );
-        } else {
-          process.stderr.write(`${err.message}\n`);
-        }
+        emitError(json, "CONFIG_ERROR", err.message);
         return 2;
       }
     }
@@ -509,7 +438,7 @@ async function runAdapterInstallAndEmit(args: {
     });
 
     if (json) {
-      process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
+      emitOk(result);
     } else {
       for (const f of result.created) process.stderr.write(`  created   ${f}\n`);
       for (const f of result.adopted) process.stderr.write(`  adopted   ${f}\n`);
@@ -524,23 +453,11 @@ async function runAdapterInstallAndEmit(args: {
       const code = (err as NodeJS.ErrnoException).code;
       if (code === "AGENT_NOT_FOUND") {
         const msg = m.adapter.agentNotFound(agentName);
-        if (json) {
-          process.stdout.write(
-            `${JSON.stringify({ ok: false, error: { code: "AGENT_NOT_FOUND", message: msg } })}\n`,
-          );
-        } else {
-          process.stderr.write(`${msg}\n`);
-        }
+        emitError(json, "AGENT_NOT_FOUND", msg);
         return 2;
       }
       if (code === "CONFIG_ERROR") {
-        if (json) {
-          process.stdout.write(
-            `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: err.message } })}\n`,
-          );
-        } else {
-          process.stderr.write(`${err.message}\n`);
-        }
+        emitError(json, "CONFIG_ERROR", err.message);
         return 2;
       }
     }
