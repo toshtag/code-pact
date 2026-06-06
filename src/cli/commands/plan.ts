@@ -109,8 +109,7 @@ export async function cmdPlan(argv: string[], locale: Locale, globalJson: boolea
 
   // `plan import` is a beginner-friendly alias for `phase import` (it ingests a
   // whole multi-phase roadmap, which "phase import" undersells). Shares the
-  // same handler; the invoked name labels its error messages. See
-  // design/decisions/cli-alias-ux-rfc.md.
+  // same handler; the invoked name labels its error messages.
   if (subcommand === "import") {
     return cmdPhaseImport(rest, locale, globalJson, "plan import");
   }
@@ -154,11 +153,10 @@ async function cmdPlanBrief(
     what !== undefined || who !== undefined || differentiator !== undefined;
   const cwd = process.cwd();
 
-  // v1.6 P17-T2/T3: the three non-interactive input modes (`--from-file`,
-  // `--stdin`, flag-driven `--what`/`--who`/`--differentiator`) are
-  // pairwise mutually exclusive. Allowing combinations would create
-  // ambiguous precedence; reject early so the user is forced to pick
-  // a single source of truth.
+  // The three non-interactive input modes (`--from-file`, `--stdin`,
+  // flag-driven `--what`/`--who`/`--differentiator`) are pairwise mutually
+  // exclusive. Allowing combinations would create ambiguous precedence;
+  // reject early so the user is forced to pick a single source of truth.
   const inputModes: string[] = [];
   if (fromFile !== undefined) inputModes.push("--from-file");
   if (fromStdin) inputModes.push("--stdin");
@@ -169,11 +167,10 @@ async function cmdPlanBrief(
     return 2;
   }
 
-  // v1.6 P17-T3: if any flag-driven option was supplied, both `--what`
-  // and `--who` are required (matches `BriefFileSchema`). Missing them
-  // is CONFIG_ERROR — we deliberately do NOT fall back to the wizard
-  // (would silently lose user intent) or to defaults (would write a
-  // misleading brief.md).
+  // If any flag-driven option was supplied, both `--what` and `--who` are
+  // required (matches `BriefFileSchema`). Missing them is CONFIG_ERROR — we
+  // deliberately do NOT fall back to the wizard (would silently lose user
+  // intent) or to defaults (would write a misleading brief.md).
   if (flagDriven) {
     const missing: string[] = [];
     if (what === undefined || what.length === 0) missing.push("--what");
@@ -185,9 +182,8 @@ async function cmdPlanBrief(
     }
   }
 
-  // v1.6 P17-T1: `--from-file` bypasses the TTY requirement. Without
-  // it, the wizard path still requires a TTY (v1.5.1 behaviour
-  // preserved). v1.6 P17-T2 extends the bypass to `--stdin`.
+  // `--from-file` and `--stdin` bypass the TTY requirement. Without them,
+  // the wizard path still requires a TTY.
   let preCollectedAnswers: BriefAnswers | undefined;
   if (fromFile !== undefined) {
     try {
@@ -214,10 +210,9 @@ async function cmdPlanBrief(
       throw err;
     }
   } else if (flagDriven) {
-    // v1.6 P17-T3: flag-driven mode. We've already validated that
-    // `--what` and `--who` are present and non-empty above. The
-    // schema's empty-input behaviour for `differentiator` (defaults
-    // to "" → locale placeholder fills in) is preserved.
+    // Flag-driven mode. `--what` and `--who` are already validated present
+    // and non-empty above. An empty `differentiator` defaults to "" → the
+    // locale placeholder fills in.
     preCollectedAnswers = {
       what: what!,
       who: who!,
@@ -434,8 +429,8 @@ async function cmdPlanConstitution(
   const flagDriven = description !== undefined || principles !== undefined;
   const cwd = process.cwd();
 
-  // v1.6 P17-T4: three pairwise-mutually-exclusive non-interactive
-  // input modes, mirroring `plan brief` (P17-T1 / T2 / T3).
+  // Three pairwise-mutually-exclusive non-interactive input modes,
+  // mirroring `plan brief`.
   const inputModes: string[] = [];
   if (fromFile !== undefined) inputModes.push("--from-file");
   if (fromStdin) inputModes.push("--stdin");
@@ -446,13 +441,11 @@ async function cmdPlanConstitution(
     return 2;
   }
 
-  // v1.6 P17-T4: load pre-collected answers from whichever
-  // non-interactive mode was selected. `ConstitutionFileSchema`
-  // defaults both fields to empty, so an empty-but-present input
-  // (e.g. `plan constitution --stdin` with `{}` on stdin) is
-  // accepted and falls back to the locale defaults via
-  // `generateConstitutionMd` — same as the wizard with empty
-  // input.
+  // Load pre-collected answers from whichever non-interactive mode was
+  // selected. `ConstitutionFileSchema` defaults both fields to empty, so an
+  // empty-but-present input (e.g. `plan constitution --stdin` with `{}` on
+  // stdin) is accepted and falls back to the locale defaults via
+  // `generateConstitutionMd` — same as the wizard with empty input.
   let preCollectedAnswers: ConstitutionAnswers | undefined;
   if (fromFile !== undefined) {
     try {
@@ -479,10 +472,10 @@ async function cmdPlanConstitution(
       throw err;
     }
   } else if (flagDriven) {
-    // v1.6 P17-T4: flag-driven mode. Both fields are optional in the
-    // schema; we pass through whatever was supplied and let
-    // generateConstitutionMd fall back to locale defaults for empty
-    // values — same behaviour as the wizard's empty-input path.
+    // Flag-driven mode. Both fields are optional in the schema; we pass
+    // through whatever was supplied and let generateConstitutionMd fall back
+    // to locale defaults for empty values — same behaviour as the wizard's
+    // empty-input path.
     preCollectedAnswers = {
       description: description ?? "",
       principles: principles ?? [],
@@ -630,12 +623,12 @@ async function cmdPlanNormalize(
   }
 }
 
-// Ledger-read failures (collaboration-safe-state RFC, B1/B5) are integrity
-// DIAGNOSTICS, not public command errors — the lenient loaders (`doctor`,
-// `plan lint`) surface them as structured `data.issues[]` entries. When a
-// strict-loader plan command catches one, wrap it in the command's own failure
-// code so `EVENT_FILE_ID_MISMATCH` / `INVALID_YAML` / `SCHEMA_ERROR` never leak as
-// a top-level `error.code`; the original cause stays in `error.message`. See
+// Ledger-read failures are integrity DIAGNOSTICS, not public command errors —
+// the lenient loaders (`doctor`, `plan lint`) surface them as structured
+// `data.issues[]` entries. When a strict-loader plan command catches one, wrap
+// it in the command's own failure code so `EVENT_FILE_ID_MISMATCH` /
+// `INVALID_YAML` / `SCHEMA_ERROR` never leak as a top-level `error.code`; the
+// original cause stays in `error.message`. See
 // docs/cli-contract.md § Plan diagnostic codes.
 const LEDGER_READ_INTEGRITY_CODES = new Set<string>([
   "EVENT_FILE_ID_MISMATCH",
@@ -701,7 +694,7 @@ async function cmdPlanAnalyze(
 }
 
 // `plan migrate` — convert a legacy monolithic progress.yaml into the per-event
-// ledger (collaboration-safe-state RFC, B4). Idempotent; dry-run by default.
+// ledger. Idempotent; dry-run by default.
 async function cmdPlanMigrate(
   argv: string[],
   locale: Locale,

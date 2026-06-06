@@ -106,8 +106,8 @@ export async function cmdTask(argv: string[], locale: Locale, globalJson: boolea
     return cmdTaskResume(rest, locale, globalJson);
   }
   // `reconcile` is a beginner-friendly alias for `finalize` (verb-consistent
-  // with `phase reconcile`). See design/decisions/cli-alias-ux-rfc.md. The
-  // invoked name is threaded through so error messages name the alias.
+  // with `phase reconcile`). The invoked name is threaded through so error
+  // messages name the alias.
   if (subcommand === "finalize" || subcommand === "reconcile") {
     return cmdTaskFinalize(rest, locale, globalJson, `task ${subcommand}`);
   }
@@ -121,10 +121,9 @@ export async function cmdTask(argv: string[], locale: Locale, globalJson: boolea
   return 2;
 }
 
-// Non-interactive-only flags for `task add` (v1.4 P13-T3). Presence of
-// any of these flags without `--description` triggers CONFIG_ERROR — the
-// runbook never silently falls through to the wizard or silently ignores
-// flags, per the P13 RFC § Task creation non-TTY model.
+// Non-interactive-only flags for `task add`. Presence of any of these flags
+// without `--description` triggers CONFIG_ERROR — the runbook never silently
+// falls through to the wizard or silently ignores flags.
 //
 // `--id` and `--json` are NOT in this set — they are valid in both wizard
 // and non-interactive paths.
@@ -168,11 +167,10 @@ function emitParseConfigError(
 }
 
 /**
- * Shared error-to-envelope mapping for `task context` and `task prepare` —
- * their catch blocks were byte-identical (same codes, same `m.task.context.*`
- * messages, same top-level `data` for AMBIGUOUS_PHASE_ID / CONTEXT_OVER_BUDGET).
- * Unrecognized codes re-throw (default) so a genuine bug surfaces as exit 3.
- * Returns 2 after emitting.
+ * Shared error-to-envelope mapping for `task context` and `task prepare`
+ * (same codes, same `m.task.context.*` messages, same top-level `data` for
+ * AMBIGUOUS_PHASE_ID / CONTEXT_OVER_BUDGET). Unrecognized codes re-throw
+ * (default) so a genuine bug surfaces as exit 3. Returns 2 after emitting.
  */
 function emitContextLikeError(
   err: Error,
@@ -214,7 +212,7 @@ function emitContextLikeError(
       msg = m.task.context.agentNotFound(agent ?? "");
       outCode = "AGENT_NOT_FOUND";
       break;
-    // P47 — a malformed, explicitly-configured context_budget (surfaced while
+    // A malformed, explicitly-configured context_budget (surfaced while
     // resolving --context-budget) is a config problem, not an internal error.
     case "CONFIG_ERROR":
       msg = err.message;
@@ -245,13 +243,13 @@ function emitContextLikeError(
   return 2;
 }
 
-// P47 (Context Fit, layer a). Resolve a context byte budget from the two
-// mutually-exclusive flags `--budget-bytes` and `--context-budget`, shared by
-// `task context` and `task prepare`. Returns:
+// Resolve a context byte budget from the two mutually-exclusive flags
+// `--budget-bytes` and `--context-budget`, shared by `task context` and
+// `task prepare`. Returns:
 //   { kind: "ok", budgetBytes }   — at most one source provided & valid
 //   { kind: "error", exitCode }   — a CONFIG_ERROR envelope was already emitted
 //
-// P47 budget-flag handling is two-phase so `task prepare`'s early-return
+// Budget-flag handling is two-phase so `task prepare`'s early-return
 // states (done / blocked / unmet-deps, which skip the pack build) never pay
 // for profile resolution or an agent-profile read:
 //
@@ -260,7 +258,7 @@ function emitContextLikeError(
 //      Returns the immediate byte budget (--budget-bytes), a pending profile
 //      name (--context-budget, not yet resolved), or neither.
 //   2. resolveContextBudgetFlag() — ASYNC, reads the agent profile. Turns a
-//      pending profile name into a byte budget per the RFC's agent-less
+//      pending profile name into a byte budget per the agent-less
 //      contract. `task context` (always builds) calls it immediately; `task
 //      prepare` defers it behind the early-return decision.
 
@@ -289,7 +287,7 @@ function validateBudgetFlags(
     return { kind: "error", exitCode: 2 };
   }
 
-  // --budget-bytes: unchanged P24 positive-integer validation.
+  // --budget-bytes: positive-integer validation.
   if (hasBudgetBytes) {
     const n = Number.parseInt(budgetRaw, 10);
     if (!Number.isInteger(n) || n <= 0 || String(n) !== budgetRaw.trim()) {
@@ -309,7 +307,7 @@ function validateBudgetFlags(
 }
 
 /**
- * Resolve a `--context-budget` profile name to a byte budget per the RFC's
+ * Resolve a `--context-budget` profile name to a byte budget per the
  * agent-less-resolution contract. Throws `ContextBudgetProfileError`
  * (`CONFIG_ERROR`) on an unknown profile and `code`-tagged errors on a strict
  * agent-profile load failure (custom-name path only).
@@ -345,7 +343,7 @@ async function cmdTaskAdd(
   const m = messages[locale];
   const cwd = process.cwd();
 
-  // Parse all flags via the stdlib parser. P10 fields accept multiple
+  // Parse all flags via the stdlib parser. Multi-value fields accept multiple
   // occurrences (e.g. `--depends-on a --depends-on b`); comma-separated
   // values are intentionally not parsed (path-with-comma ambiguity).
   let values: Record<string, unknown>;
@@ -393,7 +391,7 @@ async function cmdTaskAdd(
     },
   );
 
-  // 3-branch resolution per RFC § Task creation non-TTY model:
+  // Resolution branches:
   //   (a) --description present → non-interactive
   //   (b) --description absent, no other non-interactive flags, TTY → wizard
   //   (c) --description absent, no other non-interactive flags, no TTY →
@@ -419,7 +417,7 @@ async function cmdTaskAdd(
   }
 
   // Build non-interactive spec when --description is present. --type is
-  // required in this mode; other readiness/P10 flags are optional.
+  // required in this mode; other readiness flags are optional.
   let nonInteractiveSpec: TaskAddNonInteractiveSpec | undefined;
   if (description !== undefined) {
     const typeRaw =
@@ -505,10 +503,9 @@ async function cmdTaskAdd(
     };
   }
 
-  // P14 advisory write lock: serialize task-add (phase YAML write)
+  // Advisory write lock: serialize task-add (phase YAML write)
   // against concurrent design mutations. Wizard prompts (when no
-  // --description is supplied) ALSO run under the lock — see RFC
-  // § Open question 1 for the prompt-hold trade-off.
+  // --description is supplied) ALSO run under the lock.
   return withWriteLock(
     cwd,
     nonInteractiveSpec !== undefined
@@ -592,7 +589,7 @@ async function cmdTaskContext(
   const agent = values.agent as string | undefined;
   const cwd = process.cwd();
 
-  // P24 --budget-bytes / P47 --context-budget mutual exclusion + integer form.
+  // --budget-bytes / --context-budget mutual exclusion + integer form.
   // Pure, no I/O; a bad combination emits CONFIG_ERROR and returns.
   const budget = validateBudgetFlags("task context", values, json);
   if (budget.kind === "error") return budget.exitCode;
@@ -636,11 +633,11 @@ async function cmdTaskContext(
         data.context_pack_bytes = pack.totalBytes;
         data.sections = pack.sections;
         data.excluded = pack.excluded;
-        // P49 (Context Fit, layer c) — additive byte metrics. `final_bytes`
-        // equals total_bytes == context_pack_bytes; `budget_bytes` is emitted
-        // only when a budget was applied (--budget-bytes / --context-budget);
-        // `minimum_achievable_bytes` is the same floor CONTEXT_OVER_BUDGET
-        // reports. Byte-based and deterministic — no tokenizer / model / network.
+        // Additive byte metrics. `final_bytes` equals total_bytes ==
+        // context_pack_bytes; `budget_bytes` is emitted only when a budget was
+        // applied (--budget-bytes / --context-budget); `minimum_achievable_bytes`
+        // is the same floor CONTEXT_OVER_BUDGET reports. Byte-based and
+        // deterministic — no tokenizer / model / network.
         const em = pack.explainMetrics;
         if (em) {
           data.natural_bytes = em.naturalBytes;
@@ -720,7 +717,7 @@ async function cmdTaskPrepare(
 
   const cwd = process.cwd();
 
-  // P24 --budget-bytes / P47 --context-budget mutual exclusion + integer form.
+  // --budget-bytes / --context-budget mutual exclusion + integer form.
   // Pure, no I/O; a bad combination emits CONFIG_ERROR and returns.
   const budget = validateBudgetFlags("task prepare", values, json);
   if (budget.kind === "error") return budget.exitCode;
@@ -732,7 +729,7 @@ async function cmdTaskPrepare(
     // a ContextBudgetProfileError (code CONFIG_ERROR) or `code`-tagged agent
     // error it throws there routes through this command's catch below.
     // --context-budget stays per-invocation policy and is NOT echoed into the
-    // returned `commands` dictionary (buildCommands is unchanged).
+    // returned `commands` dictionary.
     const result = await runTaskPrepare({
       cwd,
       taskId,
@@ -870,15 +867,12 @@ async function cmdTaskComplete(
       const checks =
         (err as NodeJS.ErrnoException & { checks?: FailureCheckLike[] }).checks ?? [];
       const summary = buildFailureSummaryFromChecks(checks, taskId);
-      // P39: name the real cause on the primary error face. error.code stays
-      // VERIFICATION_FAILED (v1-stable, exit 1); add an additive cause_code +
-      // an actionable message derived from the first failing check. The
+      // Name the real cause on the primary error face. error.code stays
+      // VERIFICATION_FAILED (exit 1); add an additive cause_code + an
+      // actionable message derived from the first failing check. The
       // cause_code literals live here (as `cause_code: "..."`) so the
       // error-code-surface scan pins them. task complete runs only the
-      // `commands` + `decision` checks, so those are the only two causes. The
-      // P32 data fields are left exactly where they are — not copied into
-      // error, and no structured decision block is added. See
-      // design/decisions/root-cause-completion-errors-rfc.md.
+      // `commands` + `decision` checks, so those are the only two causes.
       let errorObj: { code: string; cause_code?: string; message: string };
       switch (summary.first_failure?.name) {
         case "decision":
@@ -909,9 +903,8 @@ async function cmdTaskComplete(
       }
       const msg = errorObj.message;
       // Emitted raw (not via emitError): this is the only task envelope whose
-      // `error` object carries a P39 `cause_code`, which emitError's
-      // {code,message} shape does not model. Preserving cause_code is a hard
-      // contract requirement (root-cause-completion-errors-rfc.md).
+      // `error` object carries a `cause_code`, which emitError's {code,message}
+      // shape does not model. Preserving cause_code is a hard contract requirement.
       if (json) {
         process.stdout.write(
           `${JSON.stringify({
@@ -972,7 +965,7 @@ async function cmdTaskComplete(
 }
 
 // ---------------------------------------------------------------------------
-// Command: task record-done (v1.21)
+// Command: task record-done
 // ---------------------------------------------------------------------------
 
 async function cmdTaskRecordDone(
@@ -1120,7 +1113,7 @@ async function cmdTaskRecordDone(
 }
 
 // ---------------------------------------------------------------------------
-// Command: task finalize (v1.2 P11)
+// Command: task finalize
 // ---------------------------------------------------------------------------
 
 async function cmdTaskFinalize(
@@ -1157,19 +1150,18 @@ async function cmdTaskFinalize(
     return 2;
   }
 
-  // v1.6 P15-T1: `--base-ref` requires `--json` so human mode never
-  // spawns git and the audit field always lands in a machine-readable
-  // envelope. Silent ignore would mislead users into thinking the
-  // branch-level audit ran when it did not.
+  // `--base-ref` requires `--json` so human mode never spawns git and the
+  // audit field always lands in a machine-readable envelope. Silent ignore
+  // would mislead users into thinking the branch-level audit ran when it did not.
   if (baseRef !== undefined && !json) {
     const msg = "task finalize --base-ref requires --json (write_audit is JSON-only in v1.6).";
     process.stderr.write(`CONFIG_ERROR: ${msg}\n`);
     return 2;
   }
 
-  // v1.6 P15-T6: `--audit-strict` requires `--json` for the same
-  // reason — the audit only runs in JSON mode, so a strict gate
-  // without --json would silently degrade to a no-op.
+  // `--audit-strict` requires `--json` for the same reason — the audit only
+  // runs in JSON mode, so a strict gate without --json would silently degrade
+  // to a no-op.
   if (auditStrict && !json) {
     const msg = "task finalize --audit-strict requires --json (the audit it gates is JSON-only in v1.6).";
     process.stderr.write(`CONFIG_ERROR: ${msg}\n`);
@@ -1256,13 +1248,12 @@ async function cmdTaskFinalize(
   } catch (err: unknown) {
     if (!(err instanceof Error)) throw err;
 
-    // v1.6 P15-T6: strict-audit failure surfaces as
-    // WRITES_AUDIT_STRICT_FAILED with exit 1 (NOT 2 — this is not
-    // a CONFIG_ERROR; the invocation was well-formed but the audit
-    // gate refused to proceed). The envelope carries the full audit
-    // result so consumers see the same `write_audit` shape they
-    // would on the success path, plus `applied: false` to make the
-    // no-mutation guarantee machine-readable.
+    // Strict-audit failure surfaces as WRITES_AUDIT_STRICT_FAILED with
+    // exit 1 (NOT 2 — this is not a CONFIG_ERROR; the invocation was
+    // well-formed but the audit gate refused to proceed). The envelope
+    // carries the full audit result so consumers see the same `write_audit`
+    // shape they would on the success path, plus `applied: false` to make
+    // the no-mutation guarantee machine-readable.
     if (err instanceof TaskFinalizeAuditStrictError) {
       const summary = buildFailureSummaryFromFinalizeCode(
         "WRITES_AUDIT_STRICT_FAILED",
@@ -1371,7 +1362,7 @@ async function cmdTaskFinalize(
   }
   };
 
-  // P14: only --write mutates phase YAML; dry-run is lock-free.
+  // Only --write mutates phase YAML; dry-run is lock-free.
   if (write) {
     return withWriteLock(
       cwd,
@@ -1384,7 +1375,7 @@ async function cmdTaskFinalize(
 }
 
 // ---------------------------------------------------------------------------
-// Command: task runbook (v1.3 P12)
+// Command: task runbook
 // ---------------------------------------------------------------------------
 
 async function cmdTaskRunbook(
@@ -1469,11 +1460,7 @@ async function cmdTaskRunbook(
 }
 
 // ---------------------------------------------------------------------------
-// Command: phase reconcile (v1.2 P11)
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// Command: task start / block / resume / status (v0.6)
+// Command: task start / block / resume / status
 // ---------------------------------------------------------------------------
 
 type TaskStateErrorKey = "start" | "block" | "resume";

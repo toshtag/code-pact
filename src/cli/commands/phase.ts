@@ -88,7 +88,7 @@ export async function cmdPhase(argv: string[], locale: Locale, globalJson: boole
         prompter.close();
         throw err;
       }
-      // Wizard prompts complete — acquire the P14 write lock before
+      // Wizard prompts complete — acquire the write lock before
       // the phase YAML / roadmap.yaml mutation. Release in finally.
       return withWriteLock(
         cwd,
@@ -115,7 +115,7 @@ export async function cmdPhase(argv: string[], locale: Locale, globalJson: boole
               process.stderr.write(`${m.phase.duplicateId(phaseId)}\n`);
               return 1;
             }
-            // P14 reserved-id (TUTORIAL) block surfaces as CONFIG_ERROR.
+            // Reserved-id (TUTORIAL) block surfaces as CONFIG_ERROR.
             if (err instanceof Error && (err as NodeJS.ErrnoException).code === "CONFIG_ERROR") {
               process.stderr.write(`${err.message}\n`);
               return 2;
@@ -150,7 +150,7 @@ export async function cmdPhase(argv: string[], locale: Locale, globalJson: boole
       "All tasks are done",
     ];
 
-    // P14 advisory write lock: serializes the phase YAML + roadmap
+    // Advisory write lock: serializes the phase YAML + roadmap
     // mutation against concurrent design mutations.
     return withWriteLock(cwd, `phase add ${id}`, json, async (): Promise<number> => {
       try {
@@ -177,7 +177,7 @@ export async function cmdPhase(argv: string[], locale: Locale, globalJson: boole
           emitError(json, "DUPLICATE_PHASE_ID", msg);
           return 2;
         }
-        // P14 reserved-id (TUTORIAL) block surfaces as CONFIG_ERROR from
+        // Reserved-id (TUTORIAL) block surfaces as CONFIG_ERROR from
         // createPhase. Propagate the message verbatim — it already names
         // the reserved id and points at `init --sample-phase`.
         if (err instanceof Error && (err as NodeJS.ErrnoException).code === "CONFIG_ERROR") {
@@ -198,9 +198,8 @@ export async function cmdPhase(argv: string[], locale: Locale, globalJson: boole
       return 2;
     }
     const initialName = rest[0]?.startsWith("-") ? undefined : rest[0];
-    // P14 advisory write lock: serialize the wizard's createPhase
-    // write. The lock IS held through the wizard prompts — see
-    // RFC § Open question 1 for the prompt-hold trade-off.
+    // Advisory write lock: serialize the wizard's createPhase write.
+    // The lock IS held through the wizard prompts.
     return withWriteLock(
       cwd,
       `phase new${initialName ? ` ${initialName}` : ""}`,
@@ -222,7 +221,7 @@ export async function cmdPhase(argv: string[], locale: Locale, globalJson: boole
             emitError(globalJson, "DUPLICATE_PHASE_ID", msg);
             return 2;
           }
-          // P14 reserved-id (TUTORIAL) block surfaces as CONFIG_ERROR from
+          // Reserved-id (TUTORIAL) block surfaces as CONFIG_ERROR from
           // createPhase (the wizard never asks for the bypass flag).
           if (err instanceof Error && (err as NodeJS.ErrnoException).code === "CONFIG_ERROR") {
             emitError(globalJson, "CONFIG_ERROR", err.message);
@@ -313,8 +312,7 @@ export async function cmdPhase(argv: string[], locale: Locale, globalJson: boole
     return cmdPhaseReconcile(rest, locale, globalJson);
   }
 
-  // `next` is a beginner-friendly alias for `runbook` ("what should I do
-  // next?"). See design/decisions/cli-alias-ux-rfc.md.
+  // `next` is a beginner-friendly alias for `runbook` ("what should I do next?").
   if (subcommand === "runbook" || subcommand === "next") {
     return cmdPhaseRunbook(rest, locale, globalJson, `phase ${subcommand}`);
   }
@@ -324,13 +322,11 @@ export async function cmdPhase(argv: string[], locale: Locale, globalJson: boole
     return cmdPhaseImport(rest, locale, globalJson);
   }
 
-  // Unknown subcommand
   const msg = `phase: unknown subcommand "${subcommand ?? ""}". Use: add | new | ls | show | import | reconcile | runbook (alias: next = runbook)`;
   emitError(globalJson, "CONFIG_ERROR", msg);
   return 2;
 }
 
-// phase reconcile (v1.2 P11)
 async function cmdPhaseReconcile(
   argv: string[],
   locale: Locale,
@@ -468,7 +464,7 @@ async function cmdPhaseReconcile(
   }
   };
 
-  // P14: only --write mutates phase YAML; dry-run is lock-free.
+  // Only --write mutates phase YAML; dry-run is lock-free.
   if (write) {
     return withWriteLock(
       cwd,
@@ -480,7 +476,6 @@ async function cmdPhaseReconcile(
   return runImpl();
 }
 
-// phase runbook (v1.3 P12)
 // Shared by `phase import` and the `plan import` alias. `invokedAs` labels the
 // user-facing CONFIG_ERROR messages so an alias names itself; the write-lock
 // identity stays canonical.
@@ -527,7 +522,7 @@ export async function cmdPhaseImport(
     return 2;
   }
 
-  // P14 advisory write lock: a single acquisition covers runPhaseImport's
+  // Advisory write lock: a single acquisition covers runPhaseImport's
   // multi-phase apply loop (every inner createPhase runs under the same lock).
   return withWriteLock(cwd, "phase import", json, async (): Promise<number> => {
     try {
