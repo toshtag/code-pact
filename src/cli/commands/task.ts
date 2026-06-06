@@ -14,7 +14,7 @@ import { toParseOptions } from "../spec/render.ts";
 import { TASK_SPECS } from "../spec/task.ts";
 import { isInteractive } from "../../lib/tty.ts";
 import { messages, type Locale } from "../../i18n/index.ts";
-import { withWriteLock } from "../util.ts";
+import { withWriteLock, emitOk, emitError } from "../util.ts";
 import { runTaskContext } from "../../commands/task-context.ts";
 import {
   resolveContextBudgetProfile,
@@ -115,13 +115,7 @@ export async function cmdTask(argv: string[], locale: Locale, globalJson: boolea
   }
 
   const msg = `task: unknown subcommand "${subcommand ?? ""}". Use: add | context | prepare | start | status | block | resume | complete | record-done | finalize | runbook (aliases: reconcile = finalize, next = runbook)`;
-  if (globalJson) {
-    process.stdout.write(
-      `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
-    );
-  } else {
-    process.stderr.write(`${msg}\n`);
-  }
+  emitError(globalJson, "CONFIG_ERROR", msg);
   return 2;
 }
 
@@ -148,17 +142,105 @@ const TASK_ADD_NON_INTERACTIVE_ONLY_FLAGS = [
   "acceptance-ref",
 ] as const;
 
-function emitConfigError(
-  message: string,
+type LocaleMessages = (typeof messages)[Locale];
+
+function emitConfigError(message: string, json: boolean): void {
+  emitError(json, "CONFIG_ERROR", message);
+}
+
+/**
+ * Shared `ConfigError → CONFIG_ERROR` envelope for the strict-parse catch at
+ * the top of every `task` subcommand. Re-throws a non-ConfigError (a real bug)
+ * so it still surfaces as an unhandled exception (exit 3). `--json` is read
+ * from argv because parsing failed before `values.json` was available. Returns
+ * 2 after emitting.
+ */
+function emitParseConfigError(
+  err: unknown,
+  argv: string[],
+  globalJson: boolean,
+): number {
+  if (!(err instanceof ConfigError)) throw err;
+  emitError(globalJson || argv.includes("--json"), "CONFIG_ERROR", err.message);
+  return 2;
+}
+
+/**
+ * Shared error-to-envelope mapping for `task context` and `task prepare` —
+ * their catch blocks were byte-identical (same codes, same `m.task.context.*`
+ * messages, same top-level `data` for AMBIGUOUS_PHASE_ID / CONTEXT_OVER_BUDGET).
+ * Unrecognized codes re-throw (default) so a genuine bug surfaces as exit 3.
+ * Returns 2 after emitting.
+ */
+function emitContextLikeError(
+  err: Error,
+  taskId: string,
+  agent: string | undefined,
+  m: LocaleMessages,
   json: boolean,
-): void {
-  if (json) {
-    process.stdout.write(
-      `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message } })}\n`,
-    );
-  } else {
-    process.stderr.write(`${message}\n`);
+): number {
+  const code = (err as NodeJS.ErrnoException).code;
+  let msg: string;
+  let outCode: string;
+  let envelopeData: Record<string, unknown> | undefined;
+  switch (code) {
+    case "TASK_NOT_FOUND":
+      msg = m.task.context.taskNotFound(taskId);
+      outCode = "TASK_NOT_FOUND";
+      break;
+    case "AMBIGUOUS_TASK_ID": {
+      const phases =
+        (err as NodeJS.ErrnoException & { phases?: string[] }).phases ?? [];
+      msg = m.task.context.ambiguous(taskId, phases);
+      outCode = "AMBIGUOUS_TASK_ID";
+      break;
+    }
+    case "AMBIGUOUS_PHASE_ID": {
+      msg = err.message;
+      outCode = "AMBIGUOUS_PHASE_ID";
+      envelopeData = {
+        phases:
+          (err as NodeJS.ErrnoException & { phases?: string[] }).phases ?? [],
+      };
+      break;
+    }
+    case "AGENT_NOT_ENABLED":
+      msg = m.task.context.agentNotEnabled(agent ?? "");
+      outCode = "AGENT_NOT_ENABLED";
+      break;
+    case "AGENT_NOT_FOUND":
+      msg = m.task.context.agentNotFound(agent ?? "");
+      outCode = "AGENT_NOT_FOUND";
+      break;
+    // P47 — a malformed, explicitly-configured context_budget (surfaced while
+    // resolving --context-budget) is a config problem, not an internal error.
+    case "CONFIG_ERROR":
+      msg = err.message;
+      outCode = "CONFIG_ERROR";
+      break;
+    case "CONTEXT_OVER_BUDGET": {
+      const overBudget = err as Error & {
+        budget_bytes?: number;
+        minimum_achievable_bytes?: number;
+        unelidable_sections?: ReadonlyArray<string>;
+      };
+      msg = err.message;
+      outCode = "CONTEXT_OVER_BUDGET";
+      envelopeData = {
+        budget_bytes: overBudget.budget_bytes,
+        minimum_achievable_bytes: overBudget.minimum_achievable_bytes,
+        unelidable_sections: overBudget.unelidable_sections,
+      };
+      break;
+    }
+    default:
+      throw err;
   }
+  // Failure detail goes in a TOP-LEVEL `data` (the documented envelope
+  // convention, matching doctor / validate and the cli-contract recovery prose
+  // `data.minimum_achievable_bytes`), not under `error.data`.
+  emitError(json, outCode, msg, envelopeData !== undefined ? { data: envelopeData } : {});
+  return 2;
 }
 
 // P47 (Context Fit, layer a). Resolve a context byte budget from the two
@@ -441,7 +523,7 @@ async function cmdTaskAdd(
           ...(nonInteractiveSpec ? { nonInteractive: nonInteractiveSpec } : {}),
         });
         if (json) {
-          process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
+          emitOk(result);
         } else {
           process.stderr.write(`${m.task.added(result.taskId, result.phaseId, result.phasePath)}\n`);
         }
@@ -454,22 +536,20 @@ async function cmdTaskAdd(
           code === "AMBIGUOUS_PHASE_ID" ||
           code === "DUPLICATE_TASK_ID"
         ) {
-          if (json) {
-            const envelope: Record<string, unknown> = {
-              ok: false,
-              error: { code, message },
-            };
-            if (code === "AMBIGUOUS_PHASE_ID") {
-              envelope.data = {
-                phases:
-                  (err as NodeJS.ErrnoException & { phases?: string[] }).phases ??
-                  [],
-              };
-            }
-            process.stdout.write(`${JSON.stringify(envelope)}\n`);
-          } else {
-            process.stderr.write(`${message}\n`);
-          }
+          emitError(
+            json,
+            code,
+            message,
+            code === "AMBIGUOUS_PHASE_ID"
+              ? {
+                  data: {
+                    phases:
+                      (err as NodeJS.ErrnoException & { phases?: string[] })
+                        .phases ?? [],
+                  },
+                }
+              : {},
+          );
           return code === "DUPLICATE_TASK_ID" ? 1 : 2;
         }
         throw err;
@@ -495,16 +575,7 @@ async function cmdTaskContext(
       { allowPositionals: true },
     ));
   } catch (err) {
-    if (!(err instanceof ConfigError)) throw err;
-    const json = globalJson || argv.includes("--json");
-    if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: err.message } })}\n`,
-      );
-    } else {
-      process.stderr.write(`${err.message}\n`);
-    }
-    return 2;
+    return emitParseConfigError(err, argv, globalJson);
   }
 
   const json = globalJson || values.json === true;
@@ -512,13 +583,7 @@ async function cmdTaskContext(
   const taskId = positionals[0];
   if (!taskId) {
     const msg = "task context requires a task id (e.g. `task context P1-T1`).";
-    if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
-      );
-    } else {
-      process.stderr.write(`${msg}\n`);
-    }
+    emitError(json, "CONFIG_ERROR", msg);
     return 2;
   }
 
@@ -588,7 +653,7 @@ async function cmdTaskContext(
           }));
         }
       }
-      process.stdout.write(`${JSON.stringify({ ok: true, data })}\n`);
+      emitOk(data);
     } else if (explain) {
       // --explain without --json prints the section breakdown table
       // instead of the pack body.
@@ -617,78 +682,7 @@ async function cmdTaskContext(
     return 0;
   } catch (err: unknown) {
     if (!(err instanceof Error)) throw err;
-    const code = (err as NodeJS.ErrnoException).code;
-    let msg: string;
-    let outCode: string;
-    let envelopeData: Record<string, unknown> | undefined;
-    switch (code) {
-      case "TASK_NOT_FOUND":
-        msg = m.task.context.taskNotFound(taskId);
-        outCode = "TASK_NOT_FOUND";
-        break;
-      case "AMBIGUOUS_TASK_ID": {
-        const phases =
-          (err as NodeJS.ErrnoException & { phases?: string[] }).phases ?? [];
-        msg = m.task.context.ambiguous(taskId, phases);
-        outCode = "AMBIGUOUS_TASK_ID";
-        break;
-      }
-      case "AMBIGUOUS_PHASE_ID": {
-        msg = err.message;
-        outCode = "AMBIGUOUS_PHASE_ID";
-        envelopeData = {
-          phases:
-            (err as NodeJS.ErrnoException & { phases?: string[] }).phases ?? [],
-        };
-        break;
-      }
-      case "AGENT_NOT_ENABLED":
-        msg = m.task.context.agentNotEnabled(agent ?? "");
-        outCode = "AGENT_NOT_ENABLED";
-        break;
-      case "AGENT_NOT_FOUND":
-        msg = m.task.context.agentNotFound(agent ?? "");
-        outCode = "AGENT_NOT_FOUND";
-        break;
-      // P47 — a malformed, explicitly-configured context_budget (surfaced by
-      // loadAgentContextBudget while resolving --context-budget) is a config
-      // problem, not an internal error.
-      case "CONFIG_ERROR":
-        msg = err.message;
-        outCode = "CONFIG_ERROR";
-        break;
-      case "CONTEXT_OVER_BUDGET": {
-        const overBudget = err as Error & {
-          budget_bytes?: number;
-          minimum_achievable_bytes?: number;
-          unelidable_sections?: ReadonlyArray<string>;
-        };
-        msg = err.message;
-        outCode = "CONTEXT_OVER_BUDGET";
-        envelopeData = {
-          budget_bytes: overBudget.budget_bytes,
-          minimum_achievable_bytes: overBudget.minimum_achievable_bytes,
-          unelidable_sections: overBudget.unelidable_sections,
-        };
-        break;
-      }
-      default:
-        throw err;
-    }
-    if (json) {
-      // Failure detail goes in a TOP-LEVEL `data` (the documented envelope
-      // convention, matching doctor / validate and the cli-contract recovery
-      // prose `data.minimum_achievable_bytes`), not under `error.data`.
-      const envelope: Record<string, unknown> = {
-        ok: false,
-        error: { code: outCode, message: msg },
-      };
-      if (envelopeData !== undefined) envelope.data = envelopeData;
-      process.stdout.write(`${JSON.stringify(envelope)}\n`);
-    } else {
-      process.stderr.write(`${msg}\n`);
-    }
-    return 2;
+    return emitContextLikeError(err, taskId, agent, m, json);
   }
 }
 
@@ -709,29 +703,14 @@ async function cmdTaskPrepare(
       { allowPositionals: true },
     ));
   } catch (err) {
-    if (!(err instanceof ConfigError)) throw err;
-    const json = globalJson || argv.includes("--json");
-    if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: err.message } })}\n`,
-      );
-    } else {
-      process.stderr.write(`${err.message}\n`);
-    }
-    return 2;
+    return emitParseConfigError(err, argv, globalJson);
   }
 
   const json = globalJson || values.json === true;
   const taskId = positionals[0];
   if (!taskId) {
     const msg = "task prepare requires a task id (e.g. `task prepare P1-T1`).";
-    if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
-      );
-    } else {
-      process.stderr.write(`${msg}\n`);
-    }
+    emitError(json, "CONFIG_ERROR", msg);
     return 2;
   }
   const agent = values.agent as string | undefined;
@@ -763,7 +742,7 @@ async function cmdTaskPrepare(
         : {}),
     });
     if (json) {
-      process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
+      emitOk(result);
     } else {
       const lines: string[] = [];
       lines.push(`Task:           ${result.phase_id} / ${result.task_id}`);
@@ -801,77 +780,7 @@ async function cmdTaskPrepare(
     return 0;
   } catch (err: unknown) {
     if (!(err instanceof Error)) throw err;
-    const code = (err as NodeJS.ErrnoException).code;
-    let msg: string;
-    let outCode: string;
-    let envelopeData: Record<string, unknown> | undefined;
-    switch (code) {
-      case "TASK_NOT_FOUND":
-        msg = m.task.context.taskNotFound(taskId);
-        outCode = "TASK_NOT_FOUND";
-        break;
-      case "AMBIGUOUS_TASK_ID": {
-        const phases =
-          (err as NodeJS.ErrnoException & { phases?: string[] }).phases ?? [];
-        msg = m.task.context.ambiguous(taskId, phases);
-        outCode = "AMBIGUOUS_TASK_ID";
-        break;
-      }
-      case "AMBIGUOUS_PHASE_ID": {
-        msg = err.message;
-        outCode = "AMBIGUOUS_PHASE_ID";
-        envelopeData = {
-          phases:
-            (err as NodeJS.ErrnoException & { phases?: string[] }).phases ?? [],
-        };
-        break;
-      }
-      case "AGENT_NOT_ENABLED":
-        msg = m.task.context.agentNotEnabled(agent ?? "");
-        outCode = "AGENT_NOT_ENABLED";
-        break;
-      case "AGENT_NOT_FOUND":
-        msg = m.task.context.agentNotFound(agent ?? "");
-        outCode = "AGENT_NOT_FOUND";
-        break;
-      // P47 — malformed, explicitly-configured context_budget while resolving
-      // --context-budget. A config problem, not an internal error.
-      case "CONFIG_ERROR":
-        msg = err.message;
-        outCode = "CONFIG_ERROR";
-        break;
-      case "CONTEXT_OVER_BUDGET": {
-        const overBudget = err as Error & {
-          budget_bytes?: number;
-          minimum_achievable_bytes?: number;
-          unelidable_sections?: ReadonlyArray<string>;
-        };
-        msg = err.message;
-        outCode = "CONTEXT_OVER_BUDGET";
-        envelopeData = {
-          budget_bytes: overBudget.budget_bytes,
-          minimum_achievable_bytes: overBudget.minimum_achievable_bytes,
-          unelidable_sections: overBudget.unelidable_sections,
-        };
-        break;
-      }
-      default:
-        throw err;
-    }
-    if (json) {
-      // Failure detail goes in a TOP-LEVEL `data` (the documented envelope
-      // convention, matching doctor / validate and the cli-contract recovery
-      // prose `data.minimum_achievable_bytes`), not under `error.data`.
-      const envelope: Record<string, unknown> = {
-        ok: false,
-        error: { code: outCode, message: msg },
-      };
-      if (envelopeData !== undefined) envelope.data = envelopeData;
-      process.stdout.write(`${JSON.stringify(envelope)}\n`);
-    } else {
-      process.stderr.write(`${msg}\n`);
-    }
-    return 2;
+    return emitContextLikeError(err, taskId, agent, m, json);
   }
 }
 
@@ -892,16 +801,7 @@ async function cmdTaskComplete(
       { allowPositionals: true },
     ));
   } catch (err) {
-    if (!(err instanceof ConfigError)) throw err;
-    const json = globalJson || argv.includes("--json");
-    if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: err.message } })}\n`,
-      );
-    } else {
-      process.stderr.write(`${err.message}\n`);
-    }
-    return 2;
+    return emitParseConfigError(err, argv, globalJson);
   }
 
   const json = globalJson || values.json === true;
@@ -909,13 +809,7 @@ async function cmdTaskComplete(
   const taskId = positionals[0];
   if (!taskId) {
     const msg = "task complete requires a task id (e.g. `task complete P1-T1`).";
-    if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
-      );
-    } else {
-      process.stderr.write(`${msg}\n`);
-    }
+    emitError(json, "CONFIG_ERROR", msg);
     return 2;
   }
   const agent = values.agent as string | undefined;
@@ -926,17 +820,12 @@ async function cmdTaskComplete(
 
     if (result.kind === "already_done") {
       if (json) {
-        process.stdout.write(
-          `${JSON.stringify({
-            ok: true,
-            data: {
-              already_done: true,
-              task_id: result.task_id,
-              phase_id: result.phase_id,
-              agent: result.agent,
-            },
-          })}\n`,
-        );
+        emitOk({
+          already_done: true,
+          task_id: result.task_id,
+          phase_id: result.phase_id,
+          agent: result.agent,
+        });
       } else {
         process.stdout.write(`${m.task.complete.alreadyDone(taskId)}\n`);
       }
@@ -945,18 +834,13 @@ async function cmdTaskComplete(
 
     if (result.kind === "dry_run") {
       if (json) {
-        process.stdout.write(
-          `${JSON.stringify({
-            ok: true,
-            data: {
-              dry_run: true,
-              task_id: result.task_id,
-              phase_id: result.phase_id,
-              agent: result.agent,
-              would_append: result.would_append,
-            },
-          })}\n`,
-        );
+        emitOk({
+          dry_run: true,
+          task_id: result.task_id,
+          phase_id: result.phase_id,
+          agent: result.agent,
+          would_append: result.would_append,
+        });
       } else {
         process.stdout.write(`${m.task.complete.dryRun(taskId)}\n`);
       }
@@ -965,18 +849,13 @@ async function cmdTaskComplete(
 
     // result.kind === "done"
     if (json) {
-      process.stdout.write(
-        `${JSON.stringify({
-          ok: true,
-          data: {
-            task_id: result.task_id,
-            phase_id: result.phase_id,
-            agent: result.agent,
-            event: result.event,
-            verify: { ok: true, checks: result.verify.checks },
-          },
-        })}\n`,
-      );
+      emitOk({
+        task_id: result.task_id,
+        phase_id: result.phase_id,
+        agent: result.agent,
+        event: result.event,
+        verify: { ok: true, checks: result.verify.checks },
+      });
     } else {
       process.stdout.write(`${m.task.complete.success(taskId, result.agent)}\n`);
     }
@@ -1027,6 +906,10 @@ async function cmdTaskComplete(
           };
       }
       const msg = errorObj.message;
+      // Emitted raw (not via emitError): this is the only task envelope whose
+      // `error` object carries a P39 `cause_code`, which emitError's
+      // {code,message} shape does not model. Preserving cause_code is a hard
+      // contract requirement (root-cause-completion-errors-rfc.md).
       if (json) {
         process.stdout.write(
           `${JSON.stringify({
@@ -1081,13 +964,7 @@ async function cmdTaskComplete(
       default:
         throw err;
     }
-    if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: outCode, message: msg } })}\n`,
-      );
-    } else {
-      process.stderr.write(`${msg}\n`);
-    }
+    emitError(json, outCode, msg);
     return 2;
   }
 }
@@ -1113,16 +990,7 @@ async function cmdTaskRecordDone(
       { allowPositionals: true },
     ));
   } catch (err) {
-    if (!(err instanceof ConfigError)) throw err;
-    const json = globalJson || argv.includes("--json");
-    if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: err.message } })}\n`,
-      );
-    } else {
-      process.stderr.write(`${err.message}\n`);
-    }
-    return 2;
+    return emitParseConfigError(err, argv, globalJson);
   }
 
   const json = globalJson || values.json === true;
@@ -1130,13 +998,7 @@ async function cmdTaskRecordDone(
   const taskId = positionals[0];
   if (!taskId) {
     const msg = "task record-done requires a task id (e.g. `task record-done P1-T1`).";
-    if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
-      );
-    } else {
-      process.stderr.write(`${msg}\n`);
-    }
+    emitError(json, "CONFIG_ERROR", msg);
     return 2;
   }
   const agent = values.agent as string | undefined;
@@ -1146,13 +1008,7 @@ async function cmdTaskRecordDone(
   // as the final defense for direct/internal callers.
   if (evidence === undefined || evidence.trim().length === 0) {
     const msg = m.task.recordDone.evidenceRequired;
-    if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
-      );
-    } else {
-      process.stderr.write(`${msg}\n`);
-    }
+    emitError(json, "CONFIG_ERROR", msg);
     return 2;
   }
   const cwd = process.cwd();
@@ -1169,17 +1025,12 @@ async function cmdTaskRecordDone(
 
     if (result.kind === "already_done") {
       if (json) {
-        process.stdout.write(
-          `${JSON.stringify({
-            ok: true,
-            data: {
-              already_done: true,
-              task_id: result.task_id,
-              phase_id: result.phase_id,
-              agent: result.agent,
-            },
-          })}\n`,
-        );
+        emitOk({
+          already_done: true,
+          task_id: result.task_id,
+          phase_id: result.phase_id,
+          agent: result.agent,
+        });
       } else {
         process.stdout.write(`${m.task.recordDone.alreadyDone(taskId)}\n`);
       }
@@ -1188,18 +1039,13 @@ async function cmdTaskRecordDone(
 
     if (result.kind === "dry_run") {
       if (json) {
-        process.stdout.write(
-          `${JSON.stringify({
-            ok: true,
-            data: {
-              dry_run: true,
-              task_id: result.task_id,
-              phase_id: result.phase_id,
-              agent: result.agent,
-              would_append: result.would_append,
-            },
-          })}\n`,
-        );
+        emitOk({
+          dry_run: true,
+          task_id: result.task_id,
+          phase_id: result.phase_id,
+          agent: result.agent,
+          would_append: result.would_append,
+        });
       } else {
         process.stdout.write(`${m.task.recordDone.dryRun(taskId)}\n`);
       }
@@ -1208,17 +1054,12 @@ async function cmdTaskRecordDone(
 
     // result.kind === "done"
     if (json) {
-      process.stdout.write(
-        `${JSON.stringify({
-          ok: true,
-          data: {
-            task_id: result.task_id,
-            phase_id: result.phase_id,
-            agent: result.agent,
-            event: result.event,
-          },
-        })}\n`,
-      );
+      emitOk({
+        task_id: result.task_id,
+        phase_id: result.phase_id,
+        agent: result.agent,
+        event: result.event,
+      });
     } else {
       process.stdout.write(`${m.task.recordDone.success(taskId, result.agent)}\n`);
     }
@@ -1230,28 +1071,12 @@ async function cmdTaskRecordDone(
     if (code === "DECISION_REQUIRED") {
       const data = (err as NodeJS.ErrnoException & { data?: DecisionRequiredData }).data;
       const msg = m.task.recordDone.decisionRequired(taskId);
-      if (json) {
-        process.stdout.write(
-          `${JSON.stringify({
-            ok: false,
-            error: { code: "DECISION_REQUIRED", message: msg },
-            ...(data !== undefined ? { data } : {}),
-          })}\n`,
-        );
-      } else {
-        process.stderr.write(`${msg}\n`);
-      }
+      emitError(json, "DECISION_REQUIRED", msg, data !== undefined ? { data } : {});
       return 2;
     }
 
     if (code === "CONFIG_ERROR") {
-      if (json) {
-        process.stdout.write(
-          `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: err.message } })}\n`,
-        );
-      } else {
-        process.stderr.write(`${err.message}\n`);
-      }
+      emitError(json, "CONFIG_ERROR", err.message);
       return 2;
     }
 
@@ -1287,13 +1112,7 @@ async function cmdTaskRecordDone(
       default:
         throw err;
     }
-    if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: outCode, message: msg } })}\n`,
-      );
-    } else {
-      process.stderr.write(`${msg}\n`);
-    }
+    emitError(json, outCode, msg);
     return 2;
   }
 }
@@ -1321,16 +1140,7 @@ async function cmdTaskFinalize(
       { allowPositionals: true },
     ));
   } catch (err) {
-    if (!(err instanceof ConfigError)) throw err;
-    const json = globalJson || argv.includes("--json");
-    if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: err.message } })}\n`,
-      );
-    } else {
-      process.stderr.write(`${err.message}\n`);
-    }
-    return 2;
+    return emitParseConfigError(err, argv, globalJson);
   }
 
   const json = globalJson || values.json === true;
@@ -1341,13 +1151,7 @@ async function cmdTaskFinalize(
   if (!taskId) {
     const aliasNote = invokedAs === "task finalize" ? "" : " (alias for `task finalize`)";
     const msg = `${invokedAs} requires a task id (e.g. \`${invokedAs} P1-T1\`)${aliasNote}.`;
-    if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
-      );
-    } else {
-      process.stderr.write(`${msg}\n`);
-    }
+    emitError(json, "CONFIG_ERROR", msg);
     return 2;
   }
 
@@ -1386,23 +1190,18 @@ async function cmdTaskFinalize(
 
     if (result.kind === "already_finalized") {
       if (json) {
-        process.stdout.write(
-          `${JSON.stringify({
-            ok: true,
-            data: {
-              kind: "already_finalized",
-              task_id: result.task_id,
-              phase_id: result.phase_id,
-              file: result.file,
-              current_status: result.current_status,
-              target_status: result.target_status,
-              acceptance_refs_check: result.acceptance_refs_check,
-              declared_writes: result.declared_writes,
-              depends_on_check: result.depends_on_check,
-              write_audit: result.write_audit,
-            },
-          })}\n`,
-        );
+        emitOk({
+          kind: "already_finalized",
+          task_id: result.task_id,
+          phase_id: result.phase_id,
+          file: result.file,
+          current_status: result.current_status,
+          target_status: result.target_status,
+          acceptance_refs_check: result.acceptance_refs_check,
+          declared_writes: result.declared_writes,
+          depends_on_check: result.depends_on_check,
+          write_audit: result.write_audit,
+        });
       } else {
         process.stdout.write(`${m.task.finalize.alreadyFinalized(taskId)}\n`);
       }
@@ -1411,24 +1210,19 @@ async function cmdTaskFinalize(
 
     if (result.kind === "would_finalize") {
       if (json) {
-        process.stdout.write(
-          `${JSON.stringify({
-            ok: true,
-            data: {
-              kind: "would_finalize",
-              task_id: result.task_id,
-              phase_id: result.phase_id,
-              file: result.file,
-              current_status: result.current_status,
-              target_status: result.target_status,
-              planned_writes: result.planned_writes,
-              acceptance_refs_check: result.acceptance_refs_check,
-              declared_writes: result.declared_writes,
-              depends_on_check: result.depends_on_check,
-              write_audit: result.write_audit,
-            },
-          })}\n`,
-        );
+        emitOk({
+          kind: "would_finalize",
+          task_id: result.task_id,
+          phase_id: result.phase_id,
+          file: result.file,
+          current_status: result.current_status,
+          target_status: result.target_status,
+          planned_writes: result.planned_writes,
+          acceptance_refs_check: result.acceptance_refs_check,
+          declared_writes: result.declared_writes,
+          depends_on_check: result.depends_on_check,
+          write_audit: result.write_audit,
+        });
       } else {
         process.stdout.write(
           `${m.task.finalize.wouldFinalize(taskId, result.file)}\n`,
@@ -1439,25 +1233,20 @@ async function cmdTaskFinalize(
 
     // result.kind === "finalized"
     if (json) {
-      process.stdout.write(
-        `${JSON.stringify({
-          ok: true,
-          data: {
-            kind: "finalized",
-            task_id: result.task_id,
-            phase_id: result.phase_id,
-            file: result.file,
-            current_status: result.current_status,
-            target_status: result.target_status,
-            applied_writes: result.applied_writes,
-            skipped_writes: result.skipped_writes,
-            acceptance_refs_check: result.acceptance_refs_check,
-            declared_writes: result.declared_writes,
-            depends_on_check: result.depends_on_check,
-            write_audit: result.write_audit,
-          },
-        })}\n`,
-      );
+      emitOk({
+        kind: "finalized",
+        task_id: result.task_id,
+        phase_id: result.phase_id,
+        file: result.file,
+        current_status: result.current_status,
+        target_status: result.target_status,
+        applied_writes: result.applied_writes,
+        skipped_writes: result.skipped_writes,
+        acceptance_refs_check: result.acceptance_refs_check,
+        declared_writes: result.declared_writes,
+        depends_on_check: result.depends_on_check,
+        write_audit: result.write_audit,
+      });
     } else {
       process.stdout.write(`${m.task.finalize.success(taskId, result.file)}\n`);
     }
@@ -1479,24 +1268,17 @@ async function cmdTaskFinalize(
         err.message,
       );
       if (json) {
-        process.stdout.write(
-          `${JSON.stringify({
-            ok: false,
-            error: {
-              code: "WRITES_AUDIT_STRICT_FAILED",
-              message: err.message,
-            },
-            data: {
-              task_id: err.task_id,
-              phase_id: err.phase_id,
-              applied: err.applied,
-              write_audit: err.write_audit,
-              failed_checks: summary.failed_checks,
-              first_failure: summary.first_failure,
-              suggested_next_command: summary.suggested_next_command,
-            },
-          })}\n`,
-        );
+        emitError(json, "WRITES_AUDIT_STRICT_FAILED", err.message, {
+          data: {
+            task_id: err.task_id,
+            phase_id: err.phase_id,
+            applied: err.applied,
+            write_audit: err.write_audit,
+            failed_checks: summary.failed_checks,
+            first_failure: summary.first_failure,
+            suggested_next_command: summary.suggested_next_command,
+          },
+        });
       } else {
         process.stderr.write(`${err.message}\n`);
         const lines = renderFailureSummaryLines(m.task.failure, summary);
@@ -1575,12 +1357,7 @@ async function cmdTaskFinalize(
         throw err;
     }
     if (json) {
-      const envelope: Record<string, unknown> = {
-        ok: false,
-        error: { code: outCode, message: msg },
-      };
-      if (extraData) envelope.data = extraData;
-      process.stdout.write(`${JSON.stringify(envelope)}\n`);
+      emitError(json, outCode, msg, extraData ? { data: extraData } : {});
     } else {
       process.stderr.write(`${msg}\n`);
       if (summary) {
@@ -1627,16 +1404,7 @@ async function cmdTaskRunbook(
       { allowPositionals: true },
     ));
   } catch (err) {
-    if (!(err instanceof ConfigError)) throw err;
-    const json = globalJson || argv.includes("--json");
-    if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: err.message } })}\n`,
-      );
-    } else {
-      process.stderr.write(`${err.message}\n`);
-    }
-    return 2;
+    return emitParseConfigError(err, argv, globalJson);
   }
 
   const json = globalJson || values.json === true;
@@ -1644,13 +1412,7 @@ async function cmdTaskRunbook(
   if (!taskId) {
     const aliasNote = invokedAs === "task runbook" ? "" : " (alias for `task runbook`)";
     const msg = `${invokedAs} requires a task id (e.g. \`${invokedAs} P1-T1\`)${aliasNote}.`;
-    if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
-      );
-    } else {
-      process.stderr.write(`${msg}\n`);
-    }
+    emitError(json, "CONFIG_ERROR", msg);
     return 2;
   }
   const cwd = process.cwd();
@@ -1659,7 +1421,7 @@ async function cmdTaskRunbook(
     const result = await runTaskRunbook({ cwd, taskId });
 
     if (json) {
-      process.stdout.write(`${JSON.stringify({ ok: true, data: result })}\n`);
+      emitOk(result);
     } else {
       process.stdout.write(`${m.task.runbook.header(taskId, result.phase_id)}\n`);
       process.stdout.write(`${m.task.runbook.stateSummary(result.state_summary)}\n`);
@@ -1699,16 +1461,7 @@ async function cmdTaskRunbook(
     } else if (code === "CONFIG_ERROR") {
       outCode = "CONFIG_ERROR";
     }
-    if (json) {
-      const envelope: Record<string, unknown> = {
-        ok: false,
-        error: { code: outCode, message: msg },
-      };
-      if (extraData) envelope.data = extraData;
-      process.stdout.write(`${JSON.stringify(envelope)}\n`);
-    } else {
-      process.stderr.write(`${msg}\n`);
-    }
+    emitError(json, outCode, msg, extraData ? { data: extraData } : {});
     return 2;
   }
 }
@@ -1722,7 +1475,6 @@ async function cmdTaskRunbook(
 // ---------------------------------------------------------------------------
 
 type TaskStateErrorKey = "start" | "block" | "resume";
-type LocaleMessages = (typeof messages)[Locale];
 
 function emitTaskCommonError(
   err: NodeJS.ErrnoException,
@@ -1765,13 +1517,7 @@ function emitTaskCommonError(
     default:
       return null;
   }
-  if (json) {
-    process.stdout.write(
-      `${JSON.stringify({ ok: false, error: { code: outCode, message: msg } })}\n`,
-    );
-  } else {
-    process.stderr.write(`${msg}\n`);
-  }
+  emitError(json, outCode, msg);
   return 2;
 }
 
@@ -1792,29 +1538,14 @@ async function cmdTaskStart(
       { allowPositionals: true },
     ));
   } catch (err) {
-    if (!(err instanceof ConfigError)) throw err;
-    const json = globalJson || argv.includes("--json");
-    if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: err.message } })}\n`,
-      );
-    } else {
-      process.stderr.write(`${err.message}\n`);
-    }
-    return 2;
+    return emitParseConfigError(err, argv, globalJson);
   }
 
   const json = globalJson || values.json === true;
   const taskId = positionals[0];
   if (!taskId) {
     const msg = "task start requires a task id (e.g. `task start P1-T1`).";
-    if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
-      );
-    } else {
-      process.stderr.write(`${msg}\n`);
-    }
+    emitError(json, "CONFIG_ERROR", msg);
     return 2;
   }
   const agent = values.agent as string | undefined;
@@ -1824,17 +1555,12 @@ async function cmdTaskStart(
     const result = await runTaskStart({ cwd, taskId, agent });
     if (result.kind === "already_started") {
       if (json) {
-        process.stdout.write(
-          `${JSON.stringify({
-            ok: true,
-            data: {
-              already_started: true,
-              task_id: result.task_id,
-              phase_id: result.phase_id,
-              agent: result.agent,
-            },
-          })}\n`,
-        );
+        emitOk({
+          already_started: true,
+          task_id: result.task_id,
+          phase_id: result.phase_id,
+          agent: result.agent,
+        });
       } else {
         process.stdout.write(`${m.task.start.alreadyStarted(taskId)}\n`);
       }
@@ -1842,17 +1568,12 @@ async function cmdTaskStart(
     }
 
     if (json) {
-      process.stdout.write(
-        `${JSON.stringify({
-          ok: true,
-          data: {
-            task_id: result.task_id,
-            phase_id: result.phase_id,
-            agent: result.agent,
-            event: result.event,
-          },
-        })}\n`,
-      );
+      emitOk({
+        task_id: result.task_id,
+        phase_id: result.phase_id,
+        agent: result.agent,
+        event: result.event,
+      });
     } else {
       process.stdout.write(`${m.task.start.success(taskId, result.agent)}\n`);
     }
@@ -1889,41 +1610,20 @@ async function cmdTaskBlock(
       { allowPositionals: true },
     ));
   } catch (err) {
-    if (!(err instanceof ConfigError)) throw err;
-    const json = globalJson || argv.includes("--json");
-    if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: err.message } })}\n`,
-      );
-    } else {
-      process.stderr.write(`${err.message}\n`);
-    }
-    return 2;
+    return emitParseConfigError(err, argv, globalJson);
   }
 
   const json = globalJson || values.json === true;
   const taskId = positionals[0];
   if (!taskId) {
     const msg = "task block requires a task id (e.g. `task block P1-T1 --reason ...`).";
-    if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
-      );
-    } else {
-      process.stderr.write(`${msg}\n`);
-    }
+    emitError(json, "CONFIG_ERROR", msg);
     return 2;
   }
   const reason = (values.reason as string | undefined) ?? "";
   if (!reason || reason.trim().length === 0) {
     const msg = m.task.block.reasonRequired;
-    if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
-      );
-    } else {
-      process.stderr.write(`${msg}\n`);
-    }
+    emitError(json, "CONFIG_ERROR", msg);
     return 2;
   }
   const agent = values.agent as string | undefined;
@@ -1932,17 +1632,12 @@ async function cmdTaskBlock(
   try {
     const result = await runTaskBlock({ cwd, taskId, reason, agent });
     if (json) {
-      process.stdout.write(
-        `${JSON.stringify({
-          ok: true,
-          data: {
-            task_id: result.task_id,
-            phase_id: result.phase_id,
-            agent: result.agent,
-            event: result.event,
-          },
-        })}\n`,
-      );
+      emitOk({
+        task_id: result.task_id,
+        phase_id: result.phase_id,
+        agent: result.agent,
+        event: result.event,
+      });
     } else {
       process.stdout.write(`${m.task.block.success(taskId, reason)}\n`);
     }
@@ -1979,29 +1674,14 @@ async function cmdTaskResume(
       { allowPositionals: true },
     ));
   } catch (err) {
-    if (!(err instanceof ConfigError)) throw err;
-    const json = globalJson || argv.includes("--json");
-    if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: err.message } })}\n`,
-      );
-    } else {
-      process.stderr.write(`${err.message}\n`);
-    }
-    return 2;
+    return emitParseConfigError(err, argv, globalJson);
   }
 
   const json = globalJson || values.json === true;
   const taskId = positionals[0];
   if (!taskId) {
     const msg = "task resume requires a task id (e.g. `task resume P1-T1`).";
-    if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
-      );
-    } else {
-      process.stderr.write(`${msg}\n`);
-    }
+    emitError(json, "CONFIG_ERROR", msg);
     return 2;
   }
   const agent = values.agent as string | undefined;
@@ -2010,17 +1690,12 @@ async function cmdTaskResume(
   try {
     const result = await runTaskResume({ cwd, taskId, agent });
     if (json) {
-      process.stdout.write(
-        `${JSON.stringify({
-          ok: true,
-          data: {
-            task_id: result.task_id,
-            phase_id: result.phase_id,
-            agent: result.agent,
-            event: result.event,
-          },
-        })}\n`,
-      );
+      emitOk({
+        task_id: result.task_id,
+        phase_id: result.phase_id,
+        agent: result.agent,
+        event: result.event,
+      });
     } else {
       process.stdout.write(`${m.task.resume.success(taskId)}\n`);
     }
@@ -2057,29 +1732,14 @@ async function cmdTaskStatus(
       { allowPositionals: true },
     ));
   } catch (err) {
-    if (!(err instanceof ConfigError)) throw err;
-    const json = globalJson || argv.includes("--json");
-    if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: err.message } })}\n`,
-      );
-    } else {
-      process.stderr.write(`${err.message}\n`);
-    }
-    return 2;
+    return emitParseConfigError(err, argv, globalJson);
   }
 
   const json = globalJson || values.json === true;
   const taskId = positionals[0];
   if (!taskId) {
     const msg = "task status requires a task id (e.g. `task status P1-T1`).";
-    if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: "CONFIG_ERROR", message: msg } })}\n`,
-      );
-    } else {
-      process.stderr.write(`${msg}\n`);
-    }
+    emitError(json, "CONFIG_ERROR", msg);
     return 2;
   }
   const cwd = process.cwd();
@@ -2087,18 +1747,13 @@ async function cmdTaskStatus(
   try {
     const result = await runTaskStatus({ cwd, taskId });
     if (json) {
-      process.stdout.write(
-        `${JSON.stringify({
-          ok: true,
-          data: {
-            task_id: result.task_id,
-            phase_id: result.phase_id,
-            current: result.current,
-            last_event: result.last_event,
-            history: result.history,
-          },
-        })}\n`,
-      );
+      emitOk({
+        task_id: result.task_id,
+        phase_id: result.phase_id,
+        current: result.current,
+        last_event: result.last_event,
+        history: result.history,
+      });
     } else {
       process.stdout.write(`${m.task.status.headline(taskId, result.current)}\n`);
       if (result.history.length === 0) {
@@ -2136,13 +1791,7 @@ async function cmdTaskStatus(
       default:
         throw err;
     }
-    if (json) {
-      process.stdout.write(
-        `${JSON.stringify({ ok: false, error: { code: outCode, message: msg } })}\n`,
-      );
-    } else {
-      process.stderr.write(`${msg}\n`);
-    }
+    emitError(json, outCode, msg);
     return 2;
   }
 }
