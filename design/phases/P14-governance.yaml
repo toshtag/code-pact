@@ -370,9 +370,7 @@ tasks:
       - design/decisions/governance-rfc.md
     reads:
       - src/commands/task-context.ts
-      - src/commands/task-start.ts
-      - src/commands/task-block.ts
-      - src/commands/task-resume.ts
+      - src/commands/task-progress.ts
       - src/commands/task-complete.ts
       - src/commands/task-status.ts
       - src/commands/task-finalize.ts
@@ -381,9 +379,7 @@ tasks:
     writes:
       - src/core/plan/resolve-task.ts
       - src/commands/task-context.ts
-      - src/commands/task-start.ts
-      - src/commands/task-block.ts
-      - src/commands/task-resume.ts
+      - src/commands/task-progress.ts
       - src/commands/task-complete.ts
       - src/commands/task-status.ts
       - src/commands/task-finalize.ts

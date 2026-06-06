@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { runTaskStart } from "../../../src/commands/task-start.ts";
+import { runTaskStart } from "../../../src/commands/task-progress.ts";
 import { loadMergedProgress } from "../../../src/core/progress/io.ts";
 
 const ROADMAP_YAML = `phases:

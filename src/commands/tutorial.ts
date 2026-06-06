@@ -5,7 +5,7 @@ import type { LocaleCode } from "../core/schemas/locale.ts";
 import { messages as messageCatalog } from "../i18n/index.ts";
 import { runInitCore } from "./init.ts";
 import { runTaskPrepare } from "./task-prepare.ts";
-import { runTaskStart } from "./task-start.ts";
+import { runTaskStart } from "./task-progress.ts";
 import { runTaskComplete } from "./task-complete.ts";
 import { runTaskFinalize } from "./task-finalize.ts";
 
