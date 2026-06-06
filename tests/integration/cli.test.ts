@@ -2,29 +2,17 @@
 // `spawnSync`. The integration test script builds dist once before Vitest
 // starts so files can run in parallel without racing tsup cleanup.
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
-import { spawnSync } from "node:child_process";
 import { mkdtemp, mkdir, rm, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-import { cliPath, ensureCliBuilt } from "../helpers/cli.ts";
+import { run as cliRun, ensureCliBuilt, type RunResult } from "../helpers/cli.ts";
 import { loadMergedProgress } from "../../src/core/progress/io.ts";
 
 let tmpDir: string;
 
-type RunResult = { code: number; stdout: string; stderr: string };
-
 function run(args: string[], env?: NodeJS.ProcessEnv): RunResult {
-  const res = spawnSync(process.execPath, [cliPath, ...args], {
-    cwd: tmpDir,
-    encoding: "utf8",
-    env: env ? { ...process.env, ...env } : process.env,
-  });
-  return {
-    code: res.status ?? -1,
-    stdout: res.stdout ?? "",
-    stderr: res.stderr ?? "",
-  };
+  return cliRun(tmpDir, args, env);
 }
 
 beforeAll(() => {
