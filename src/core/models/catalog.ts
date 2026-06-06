@@ -1,7 +1,7 @@
 // Single source of truth for Claude model facts.
 //
-// These values feed four otherwise-independent places that previously each
-// hardcoded their own copy and drifted apart: the `--model` validator
+// These values feed four otherwise-independent places that would otherwise
+// each hardcode their own copy and drift apart: the `--model` validator
 // (schemas/agent-profile.ts), the default agent profile (core/agents.ts), the
 // default model profiles (commands/init.ts), and the generated CLAUDE.md model
 // guidance (adapters/claude.ts). Bumping a Claude model is now a one-file edit.

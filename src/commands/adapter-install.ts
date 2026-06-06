@@ -142,18 +142,18 @@ function buildFingerprint(
 // ---------------------------------------------------------------------------
 
 /**
- * Generates the adapter for `agentName` and writes a manifest. v0.9
- * semantics: `--force` only adopts / replaces UNMANAGED files. It never
+ * Generates the adapter for `agentName` and writes a manifest.
+ * `--force` only adopts / replaces UNMANAGED files. It never
  * overwrites a file that is recorded in the existing manifest. To force-
  * overwrite a managed-modified file, callers must use
- * `adapter upgrade --write --accept-modified` (P7-T5).
+ * `adapter upgrade --write --accept-modified`.
  *
  * On every invocation, regardless of whether the manifest existed before,
  * a fresh manifest is written reflecting the current desired file set and
  * the recorded sha256 hashes. Files that were in the previous manifest
  * but are no longer emitted by the generator (e.g. a verification command
  * was removed from the roadmap) drop out of the new manifest — they
- * remain on disk for the user to remove and `adapter doctor` (P7-T4) will
+ * remain on disk for the user to remove and `adapter doctor` will
  * surface them as unmanaged.
  */
 export async function runAdapterInstall(
@@ -210,7 +210,7 @@ export async function runAdapterInstall(
     (existingManifest?.files ?? []).map((f) => [f.path, f]),
   );
 
-  // Directory placeholders. Preserved from v0.8: every adapter gets its
+  // Directory placeholders: every adapter gets its
   // context_dir, Claude additionally gets its hook_dir.
   await mkdir(join(cwd, profile.context_dir), { recursive: true });
   if (profile.hook_dir) {

@@ -34,7 +34,7 @@ export type PhaseImportOptions = {
   strict?: boolean;
   /**
    * When true, scaffold a `proposed` ADR stub for every requires_decision
-   * task that has no resolving ADR yet (RFC §3-D). Opt-in; default off.
+   * task that has no resolving ADR yet. Opt-in; default off.
    */
   scaffoldDecisions?: boolean;
 };
@@ -45,8 +45,8 @@ export type CompletedField = {
 };
 
 /**
- * Advisory surfaced by the import (never fails the command). The first
- * use (PR1) is `PHASE_VERIFY_COMMANDS_MISSHAPED`: the input used the full
+ * Advisory surfaced by the import (never fails the command).
+ * `PHASE_VERIFY_COMMANDS_MISSHAPED`: the input used the full
  * Phase shape `verification: { commands: [...] }` instead of the import
  * shape `verify_commands: [...]`. Because `PhaseImportEntry` is not
  * `.strict()`, zod silently drops the unknown `verification` key — so the
@@ -73,17 +73,16 @@ export type PhaseImportResult = {
    */
   warnings: ImportWarning[];
   /**
-   * Additive guidance (v1.4 P13-T4). Always present, even as []. Names
+   * Additive guidance. Always present, even as []. Names
    * the canonical post-import sequence (plan lint → phase runbook → task
    * runbook) so the dogfood loop is CLI-emitted, not docs-only.
    *
-   * Field-presence-fixed per the P12 RunbookStep convention extended in
-   * P13: JSON consumers can assume the schema is constant.
+   * Field-presence-fixed: JSON consumers can assume the schema is constant.
    */
   suggested_next_steps: string[];
   /**
    * Repo-relative POSIX paths of `proposed` ADR stubs created by
-   * `--scaffold-decisions` (RFC §3-D). Always present, `[]` when the flag is
+   * `--scaffold-decisions`. Always present, `[]` when the flag is
    * off or nothing was scaffolded.
    */
   scaffolded_decisions: string[];
@@ -200,9 +199,9 @@ function applyTaskDefaults(raw: TaskImport): { task: Task; completedFields: stri
     status: d(raw.status, "planned", "status"),
     ...(raw.description !== undefined ? { description: raw.description } : {}),
     ...(raw.requires_decision === true ? { requires_decision: true } : {}),
-    // P10 — Task Readiness Schema. Forward verbatim when present; do
+    // Task Readiness Schema. Forward verbatim when present; do
     // not invent synthetic defaults. Absent stays undefined so old
-    // YAML behaves exactly as in v1.0.2.
+    // YAML behaves unchanged.
     ...(raw.depends_on !== undefined ? { depends_on: raw.depends_on } : {}),
     ...(raw.decision_refs !== undefined ? { decision_refs: raw.decision_refs } : {}),
     ...(raw.reads !== undefined ? { reads: raw.reads } : {}),
@@ -276,7 +275,7 @@ export type ApplyParsedPhaseImportOptions = {
   warnings: ImportWarning[];
   force?: boolean;
   strict?: boolean;
-  /** Scaffold `proposed` ADR stubs for requires_decision tasks (RFC §3-D). */
+  /** Scaffold `proposed` ADR stubs for requires_decision tasks. */
   scaffoldDecisions?: boolean;
 };
 
@@ -293,10 +292,10 @@ export async function applyParsedPhaseImport(
   const strict = opts.strict === true;
   const scaffoldDecisions = opts.scaffoldDecisions === true;
 
-  // ---- Reserved-id preflight (P14 governance) -------------------------
+  // ---- Reserved-id preflight -------------------------
   // Reject the entire import if ANY phase entry uses a reserved id (e.g.
-  // TUTORIAL). Runs BEFORE any createPhase call, so the roadmap stays
-  // byte-identical on failure — no partial-import state where earlier
+  // TUTORIAL). Runs BEFORE any createPhase call, so the roadmap is left
+  // unchanged on failure — no partial-import state where earlier
   // phases are written and a later reserved-id entry is rejected.
   // `--force` does NOT bypass this; reserved ids are reserved at the
   // governance layer, not the collision-handling layer.
@@ -418,9 +417,9 @@ export async function applyParsedPhaseImport(
     return { entry, tasks };
   });
 
-  // ---- Scaffold preflight (RFC §3-D, atomic) --------------------------
+  // ---- Scaffold preflight (atomic) --------------------------
   // Validate every scaffold target BEFORE any write, so an unsafe task id or
-  // decision_ref fails the whole import with the roadmap byte-identical — no
+  // decision_ref fails the whole import with the roadmap unchanged — no
   // partial-write state. Unsafe → CONFIG_ERROR here; a safe path that simply
   // lives outside design/decisions/ is NOT an error (reported as
   // scaffold_skipped at write time).
@@ -456,7 +455,7 @@ export async function applyParsedPhaseImport(
     for (const t of tasks) importedTaskIds.push(t.id);
   }
 
-  // ---- Scaffold proposed ADR stubs (RFC §3-D) -------------------------
+  // ---- Scaffold proposed ADR stubs -------------------------
   // Lock still held. Targets were path-validated in the preflight above.
   const scaffoldedDecisions: string[] = [];
   const scaffoldSkipped: { ref: string; reason: string }[] = [];
@@ -504,7 +503,7 @@ export async function applyParsedPhaseImport(
 }
 
 /**
- * Builds the additive `suggested_next_steps` array (v1.4 P13-T4). Returns
+ * Builds the additive `suggested_next_steps` array. Returns
  * an empty array when nothing was imported. Otherwise emits the canonical
  * post-import sequence and prepends a defaults-review hint when lenient
  * mode filled fields.

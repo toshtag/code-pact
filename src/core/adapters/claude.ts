@@ -130,7 +130,7 @@ const PACKAGE_MANAGERS = ["pnpm", "npm", "yarn", "bun"] as const;
  * the FIRST flag token as the boundary: every bare token after it (a flag's
  * value such as `claude-code` in `--agent claude-code`, or a positional that
  * follows flags) is NOT a naming word. This is what keeps a flag VALUE from
- * leaking into the name — the v1.19 `--agent claude-code` → `claude-code`
+ * leaking into the name — the `--agent claude-code` → `claude-code`
  * collision bug — without needing to know which flags take values (a boolean
  * flag before a word would otherwise wrongly eat that word). `--flag=value`
  * forms are self-contained and never produce a stray word either way.

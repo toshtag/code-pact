@@ -184,7 +184,7 @@ export function decisionResolutionToCheck(res: DecisionResolution): CheckResult 
 
 /**
  * The single decision gate. Routes through the shared status-aware resolver
- * (RFC §3-C) so verify, task complete, task record-done, and plan lint cannot
+ * so verify, task complete, task record-done, and plan lint cannot
  * diverge on what "resolved" means. Returns both the CheckResult (for
  * runVerify) and the full resolution (so record-done can surface `considered`
  * / `via` without re-resolving).

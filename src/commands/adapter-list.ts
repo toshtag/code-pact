@@ -71,8 +71,8 @@ async function loadEnabledAgentNames(cwd: string): Promise<Set<string>> {
  * state, enabled flag (from project.yaml), and experimental flag. Does
  * NOT throw on missing project.yaml or malformed manifest — it surfaces
  * the situation in the result so the caller (agent or human) can see
- * what's there. Manifest validation details belong to `adapter doctor`
- * (P7-T4); list just answers "does it exist and how many files".
+ * what's there. Manifest validation details belong to `adapter doctor`;
+ * list just answers "does it exist and how many files".
  */
 export async function runAdapterList(opts: {
   cwd: string;

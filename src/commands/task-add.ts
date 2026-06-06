@@ -10,7 +10,7 @@ import { Prompter } from "../lib/prompt.ts";
 import { messages as messageCatalog, type Locale } from "../i18n/index.ts";
 
 /**
- * Non-interactive task spec (v1.4 P13-T3). When `TaskAddOptions.nonInteractive`
+ * Non-interactive task spec. When `TaskAddOptions.nonInteractive`
  * is provided, `runTaskAdd` bypasses the prompter entirely and uses the
  * supplied values. `--status` is intentionally NOT part of this spec —
  * newly added tasks are always `status: planned`; historical state must
@@ -39,7 +39,7 @@ export type TaskAddOptions = {
   /** Explicit task id. Auto-generated as <phaseId>-T<n> when omitted. */
   id?: string;
   /**
-   * Non-interactive flag-driven path (v1.4 P13-T3). When set, the
+   * Non-interactive flag-driven path. When set, the
    * wizard prompter is bypassed and the spec is applied directly.
    */
   nonInteractive?: TaskAddNonInteractiveSpec;
@@ -97,10 +97,10 @@ function buildNonInteractiveTask(
     expected_duration: spec.expected_duration ?? "medium",
     status: "planned",
     description: spec.description,
-    // P10 optional fields. Stored as provided (basic string validation
+    // Optional fields. Stored as provided (basic string validation
     // happened at the CLI boundary); existence checks / glob validity /
     // unsafe-path detection / protected-path advisories remain the
-    // responsibility of `plan lint` per the P13 RFC.
+    // responsibility of `plan lint`.
     ...(spec.depends_on && spec.depends_on.length > 0
       ? { depends_on: spec.depends_on }
       : {}),

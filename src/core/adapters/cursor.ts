@@ -12,9 +12,9 @@ import {
   renderProjectConventionsSection,
 } from "./template-sections.ts";
 
-// Cursor adapter (experimental, v0.2).
+// Cursor adapter (experimental).
 //
-// Format source (verified for the v0.2 PR):
+// Format source:
 //   https://cursor.com/docs/context/rules
 //
 // - Canonical placement: `.cursor/rules/*.mdc` (`.cursorrules` was

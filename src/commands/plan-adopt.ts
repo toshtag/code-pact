@@ -77,7 +77,7 @@ export type PlanAdoptOptions = {
   cwd: string;
   fromPath: string;
   write: boolean;
-  /** Scaffold `proposed` ADR stubs for requires_decision tasks (RFC §3-D). */
+  /** Scaffold `proposed` ADR stubs for requires_decision tasks. */
   scaffoldDecisions?: boolean;
 };
 

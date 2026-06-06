@@ -3,10 +3,9 @@ import { readdir } from "node:fs/promises";
 import { join, relative } from "node:path";
 
 // ---------------------------------------------------------------------------
-// Minimal glob support for P10 Task Readiness Schema.
+// Minimal glob support for the Task Readiness Schema.
 //
-// Supported subset (also documented in
-// design/decisions/task-readiness-schema-rfc.md § "Supported glob subset"):
+// Supported subset:
 //   - literal path segments
 //   - `*` within a single segment (does not match `/`)
 //   - `**` as a full path segment only (matches zero or more segments)
@@ -40,7 +39,7 @@ const WALK_IGNORE_DIRS = new Set<string>([
 ]);
 
 /**
- * Returns null if `pattern` uses only the P10 supported glob subset.
+ * Returns null if `pattern` uses only the supported glob subset.
  * Returns a human-readable reason string when the pattern uses syntax
  * outside the subset.
  *
@@ -63,7 +62,7 @@ export function validateGlobSyntax(pattern: string): string | null {
 }
 
 /**
- * Compiles a P10-subset glob to an anchored RegExp. The caller is
+ * Compiles a subset glob to an anchored RegExp. The caller is
  * expected to have validated the pattern first via `validateGlobSyntax`;
  * calling this with an out-of-subset pattern is undefined behaviour
  * (the regex may still compile but its semantics are not specified).
@@ -169,10 +168,7 @@ export type ProtectedPathEntry = {
 };
 
 /**
- * P10 protected-path seed set. Intentionally narrow and advisory. See
- * design/decisions/task-readiness-schema-rfc.md § `writes`
- * "Protected path seed set" for the rationale and the v1.0 / v1.x /
- * P14 promotion path.
+ * Protected-path seed set. Intentionally narrow and advisory.
  */
 export const PROTECTED_PATHS: readonly ProtectedPathEntry[] = [
   { pattern: ".git/**", sample: ".git/HEAD" },
@@ -199,10 +195,8 @@ export const PROTECTED_PATHS: readonly ProtectedPathEntry[] = [
  *      `design/phases/*.yaml` pattern.
  *
  * Either match returning true is treated as overlap. This is a coarse
- * but predictable heuristic suitable for P10's advisory warning
- * surface. False negatives are possible for unusual patterns; P14
- * governance is expected to replace this with a configurable policy
- * and a stricter intersection check.
+ * but predictable heuristic suitable for an advisory warning
+ * surface. False negatives are possible for unusual patterns.
  *
  * Returns an empty array when no overlap is detected, or when the
  * declared pattern's syntax is invalid (the latter is the
@@ -226,7 +220,7 @@ export function findProtectedPathOverlaps(
  * Replaces wildcards in a glob with non-empty placeholder tokens to
  * produce one concrete representative path. `*` becomes a single-segment
  * filler, `**` becomes a multi-segment filler. Used by the
- * protected-path overlap heuristic (here and in the v1.6 P15-T3 loader
+ * protected-path overlap heuristic (here and in the loader
  * for `design/rules/protected-paths.md`); the placeholders are
  * deliberately recognizable so test failures point back at this
  * synthesis routine.

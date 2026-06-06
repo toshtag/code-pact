@@ -154,7 +154,7 @@ export async function loadDoneEventsInPhase(
 // Loads every event from the progress ledger (per-event files under
 // .code-pact/state/events/ merged with the legacy .code-pact/state/progress.yaml)
 // or returns [] when the ledger is missing / unparseable. The pack uses this to
-// derive the current state of each id listed in task.depends_on (P10).
+// derive the current state of each id listed in task.depends_on.
 export async function loadAllProgressEvents(cwd: string): Promise<ProgressEvent[]> {
   try {
     const { log } = await loadMergedProgress(cwd);
@@ -164,7 +164,7 @@ export async function loadAllProgressEvents(cwd: string): Promise<ProgressEvent[
   }
 }
 
-// Loads the decision files referenced by task.decision_refs (P10),
+// Loads the decision files referenced by task.decision_refs,
 // regardless of context_size. Skips entries that do not exist on disk
 // — the plan-lint surface (TASK_DECISION_REF_NOT_FOUND) is responsible
 // for warning the user about misconfigured refs at lint time; the pack

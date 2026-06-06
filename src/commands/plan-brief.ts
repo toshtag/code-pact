@@ -24,7 +24,7 @@ export type PlanBriefOptions = {
   force: boolean;
   prompter?: Prompter;
   /**
-   * Pre-collected answers (e.g. from `--from-file` in v1.6 P17-T1).
+   * Pre-collected answers (e.g. from `--from-file`).
    * When provided, the wizard is bypassed entirely. Mutually
    * exclusive with `prompter`-driven flows: if both are present,
    * `answers` wins and the wizard never runs.
@@ -38,7 +38,7 @@ export type PlanBriefResult = {
 };
 
 // ---------------------------------------------------------------------------
-// File-driven input schema — v1.6 P17-T1
+// File-driven input schema
 // ---------------------------------------------------------------------------
 
 /**
@@ -122,7 +122,7 @@ export async function loadBriefFromFile(
 }
 
 // ---------------------------------------------------------------------------
-// Stdin-driven input — v1.6 P17-T2
+// Stdin-driven input
 // ---------------------------------------------------------------------------
 
 export class PlanBriefFromStdinError extends Error {
@@ -302,7 +302,7 @@ export async function runPlanBrief(opts: PlanBriefOptions): Promise<PlanBriefRes
   let answers: BriefAnswers;
   let cleanupPrompter: (() => void) | undefined;
   if (opts.answers !== undefined) {
-    // v1.6 P17-T1: pre-collected answers bypass the wizard entirely.
+    // Pre-collected answers bypass the wizard entirely.
     // Caller (e.g. `--from-file`) owns input validation.
     answers = opts.answers;
   } else {

@@ -34,10 +34,10 @@ export type AdapterConformanceOptions = {
 export type ConformanceCheckStatus = "pass" | "fail";
 
 /**
- * P30: a check is either `required` (a failure makes the adapter
+ * A check is either `required` (a failure makes the adapter
  * non-compliant) or `advisory` (a failure is surfaced as a warning but
- * keeps `compliant: true`). Existing v1.11+ checks are `required`; the
- * P30 hardening checks resolve their severity from the manifest
+ * keeps `compliant: true`). Baseline checks are `required`; the
+ * hardening checks resolve their severity from the manifest
  * `generator_version` (see `resolveHardeningSeverity`).
  */
 export type ConformanceSeverity = "required" | "advisory";
@@ -101,7 +101,7 @@ function fail(
 }
 
 // ---------------------------------------------------------------------------
-// P30 — hardening checks (pure, exported for unit testing)
+// Hardening checks (pure, exported for unit testing)
 // ---------------------------------------------------------------------------
 
 /** Parse the `major.minor.patch` core of a version, ignoring build/prerelease. */
@@ -132,7 +132,7 @@ export function gteVersion(a: string, b: string): boolean {
 }
 
 /**
- * Resolve the severity of the P30 checks from the manifest
+ * Resolve the severity of the hardening checks from the manifest
  * `generator_version`: required when it is semver >= the hardening
  * threshold, advisory otherwise (missing / unparseable / below).
  */
@@ -146,8 +146,8 @@ export function resolveHardeningSeverity(
 }
 
 /**
- * Severity of the P33 consumption-guidance checks, gated on their own release
- * threshold (not the P30 threshold) so existing 1.14–1.25 adapters stay
+ * Severity of the consumption-guidance checks, gated on their own release
+ * threshold (not the hardening threshold) so existing 1.14–1.25 adapters stay
  * advisory rather than failing en masse.
  */
 export function resolveConsumptionSeverity(
@@ -209,7 +209,7 @@ export function checkTaskPrepareIsPrimary(content: string): HardeningCheckResult
   };
 }
 
-/** No P29 anti-pattern (e.g. `task finalize ... --agent`) in the guidance. */
+/** No anti-pattern (e.g. `task finalize ... --agent`) in the guidance. */
 export function checkNoContractAntipatterns(content: string): HardeningCheckResult {
   const found = CONTRACT_ANTIPATTERNS.filter((a) => a.pattern.test(content)).map(
     (a) => a.id,
@@ -224,7 +224,7 @@ export function checkNoContractAntipatterns(content: string): HardeningCheckResu
 }
 
 /**
- * The P29-T3 activation rules are DOCUMENTED, detected by
+ * The activation rules are DOCUMENTED, detected by
  * locale-independent anchor tokens. Verifies documentation PRESENCE,
  * never runtime obedience (a static file check cannot observe behaviour).
  */
@@ -248,7 +248,7 @@ export function checkActivationRulesDocumented(content: string): HardeningCheckR
 
 /**
  * `code-pact adapter conformance <agent>` — focused read-only check
- * that the installed adapter satisfies the v1.11+ agent contract:
+ * that the installed adapter satisfies the agent contract:
  * the `## Agent contract` section is present, the three axis sub-
  * headings exist, every required CLI surface (lifecycle + diagnostic)
  * is mentioned in the instruction file, every required failure-mode
@@ -397,9 +397,9 @@ export async function runAdapterConformance(
     );
   }
 
-  // ----- P30: post-P29 `task prepare` primary contract -----
+  // ----- `task prepare` primary contract -----
   // Severity is hybrid/version-gated: required for adapters whose
-  // templates carry the P29-aligned guidance (generator_version >=
+  // templates carry the hardened guidance (generator_version >=
   // threshold), advisory below so pre-hardening installs warn rather
   // than hard-fail. A failure's details carry the upgrade remediation.
   const hardeningSeverity = resolveHardeningSeverity(manifest.generator_version);
@@ -428,7 +428,7 @@ export async function runAdapterConformance(
     }
   }
 
-  // ----- P33: recommendation consumption guidance -----
+  // ----- recommendation consumption guidance -----
   // Verifies the guidance is PRESENT (anchored on short stable tokens), not
   // that an agent obeys it. Gated on its own release threshold so existing
   // 1.14–1.25 adapters stay advisory rather than failing en masse.

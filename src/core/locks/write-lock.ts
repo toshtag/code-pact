@@ -1,4 +1,4 @@
-// Advisory write lock (v1.5+ / P14 governance).
+// Advisory write lock.
 //
 // Serializes design-YAML mutations against concurrent code-pact
 // invocations on the same project. Single-process users see no
@@ -6,7 +6,7 @@
 // fast with `LOCK_HELD` (exit 2) instead of racing on the phase
 // YAML or roadmap writes.
 //
-// Design (per design/decisions/governance-rfc.md § Advisory lock model):
+// Design:
 //
 //   - Lock path: `<cwd>/.code-pact/locks/write.lock`. In this repo
 //     `.code-pact/` is gitignored, so the lock is never committed.
@@ -17,7 +17,7 @@
 //   - Lock content is JSON `{ pid, hostname, cmd, created_at }` for
 //     diagnostic display when a contender fails.
 //   - Release is best-effort `unlink`; on uncaught SIGKILL the lock
-//     persists as stale (manual recovery — auto-detection is P15+).
+//     persists as stale (manual recovery).
 //   - Read-only commands NEVER acquire the lock. The 7 design-
 //     mutating CLI handlers do; createPhase itself stays lock-agnostic
 //     so phase-import can hold a single outer lock across its

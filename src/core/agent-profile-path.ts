@@ -7,8 +7,8 @@ import { assertSafePlanId } from "./schemas/plan-id.ts";
 // Single source of truth for where an agent's profile lives.
 //
 // `doctor` resolves the profile via the project's `agents[].profile` (a
-// schema-validated project-relative path), but every other command historically
-// hardcoded `agent-profiles/<name>.yaml`. For a project whose `agents[].profile`
+// schema-validated project-relative path), but every other command
+// hardcodes `agent-profiles/<name>.yaml`. For a project whose `agents[].profile`
 // is non-default, that made doctor point at one file while `adapter upgrade`
 // (and recommend / task prepare / pack / the model_version pin) read another.
 // These helpers make all of them agree with doctor.

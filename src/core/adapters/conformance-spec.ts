@@ -1,13 +1,13 @@
-// Single source of truth for the v1.11+ agent contract surface that
-// adapter conformance checks (`adapter conformance` command, P21-T5)
-// and the v1.7 contract drift check in `adapter doctor` both consume.
+// Single source of truth for the agent contract surface that
+// adapter conformance checks (`adapter conformance` command) and the
+// contract drift check in `adapter doctor` both consume.
 //
 // The constants below are imported by:
 //
 //   - `src/commands/adapter-doctor.ts` — its `detectContractDrift`
 //     helper anchors on `AGENT_CONTRACT_SECTION_HEADING` and
 //     `AGENT_CONTRACT_AXIS_HEADINGS`.
-//   - `src/commands/adapter-conformance.ts` — the new P21-T5 read-only
+//   - `src/commands/adapter-conformance.ts` — the read-only
 //     conformance command consumes every list here.
 //   - `src/core/adapters/{claude,codex,generic}.ts` — adapter
 //     templates do not import the constants directly (templates carry
@@ -42,10 +42,6 @@ export const AGENT_CONTRACT_AXIS_HEADINGS: ReadonlyArray<string> = [
  * lifecycle. Every entry must be substring-matched in the instruction
  * file for conformance to pass; a single missing entry fails the
  * `required_cli_surface_mentions` check.
- *
- * v1.11+ P21 elevates `task prepare` to the primary per-task entry
- * point — adapters that pre-date this surface will report missing
- * `task prepare` and need to be re-installed.
  */
 export const LIFECYCLE_REQUIRED_SURFACES: ReadonlyArray<string> = [
   "code-pact task prepare",
@@ -79,25 +75,24 @@ export const REQUIRED_FAILURE_GUIDANCE: ReadonlyArray<string> = [
 ];
 
 // ---------------------------------------------------------------------------
-// P30 — Adapter contract hardening
+// Adapter contract hardening
 //
-// These constants back the v1.x P30 checks that enforce the post-P29
-// `task prepare` primary contract in adapter guidance. See
+// These constants back the checks that enforce the `task prepare`
+// primary contract in adapter guidance. See
 // design/decisions/adapter-contract-hardening-rfc.md.
 // ---------------------------------------------------------------------------
 
 /**
- * Release that first ships the P29-aligned templates (the ones that
- * satisfy the P30 checks). The P30 checks run at `required` severity for
+ * Release that first ships the hardened templates (the ones that
+ * satisfy these checks). The checks run at `required` severity for
  * adapters whose manifest `generator_version` is semver >= this, and
  * `advisory` below — so installs that predate the hardened templates
  * warn rather than hard-fail.
  *
- * Confirmed at the 1.14.0 release prep: P30 ships in 1.14.0, so adapters
- * generated at or after 1.14.0 carry the hardened templates and are held
- * to the `required` tier. The released 1.13.x line (whose templates still
- * lead with `recommend`) stays `advisory` until re-upgraded — which is
- * why the threshold is strictly greater than 1.13.3.
+ * Adapters generated at or after 1.14.0 carry the hardened templates and
+ * are held to the `required` tier. The released 1.13.x line (whose
+ * templates still lead with `recommend`) stays `advisory` until
+ * re-upgraded — which is why the threshold is strictly greater than 1.13.3.
  */
 export const ADAPTER_CONTRACT_HARDENING_FROM_VERSION = "1.14.0";
 
@@ -109,7 +104,7 @@ export const PRIMARY_ENTRYPOINT_SURFACE = "code-pact task prepare";
 /**
  * Surfaces that `task prepare` must appear ahead of — they are
  * diagnostics, not the primary loop. If any of these is introduced
- * before `task prepare`, the guidance is teaching the pre-P29 loop.
+ * before `task prepare`, the guidance is teaching the superseded loop.
  */
 export const PRIMARY_PRECEDES_SURFACES: ReadonlyArray<string> = [
   "code-pact recommend",
@@ -119,8 +114,8 @@ export const PRIMARY_PRECEDES_SURFACES: ReadonlyArray<string> = [
 /**
  * Anti-patterns that must NOT appear in generated instructions or their
  * examples. Each `pattern` is matched against the instruction body.
- * `task finalize ... --agent` is the exact P29 bug class (finalize takes
- * no `--agent`); this is the conformance-layer analogue of P29's parser
+ * `task finalize ... --agent` is the exact bug class (finalize takes
+ * no `--agent`); this is the conformance-layer analogue of the parser
  * roundtrip test.
  */
 export const CONTRACT_ANTIPATTERNS: ReadonlyArray<{
@@ -151,7 +146,7 @@ export const ACTIVATION_RULE_ANCHORS: ReadonlyArray<{
 ];
 
 // ---------------------------------------------------------------------------
-// P33 — recommendation consumption guidance
+// Recommendation consumption guidance
 //
 // The agent contract must tell agents to CONSUME the recommendation
 // (data.recommendation → tier/effort/planning/lifecycleMode), to report a
@@ -166,10 +161,10 @@ export const ACTIVATION_RULE_ANCHORS: ReadonlyArray<{
 // ---------------------------------------------------------------------------
 
 /**
- * Release that first ships the P33 consumption-guidance templates. The P33
+ * Release that first ships the consumption-guidance templates. These
  * checks run at `required` for adapters whose manifest `generator_version` is
  * semver >= this, and `advisory` below. PLACEHOLDER — confirm at release prep
- * that this equals the version P33 actually ships in.
+ * that this equals the version the guidance actually ships in.
  */
 export const RECOMMENDATION_CONSUMPTION_FROM_VERSION = "1.26.0";
 

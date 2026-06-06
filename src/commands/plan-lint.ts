@@ -47,7 +47,7 @@ export async function runPlanLint(
   const exitRelevant = visible.filter(isExitRelevant);
   const errors = exitRelevant.filter((i) => i.severity === "error").length;
   const warnings = exitRelevant.filter((i) => i.severity === "warning").length;
-  // Visible but non-exit-relevant (e.g. P31 clarify advisories). Disjoint
+  // Visible but non-exit-relevant (e.g. clarify advisories). Disjoint
   // from errors/warnings, which only count exit-relevant issues.
   const advisories = visible.filter((i) => !isExitRelevant(i)).length;
 

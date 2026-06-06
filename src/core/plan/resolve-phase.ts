@@ -1,12 +1,12 @@
-// Phase-id → phase resolver core (control-plane v2 PR1a).
+// Phase-id → phase resolver core.
 //
-// Phase-id resolution previously used `roadmap.phases.find((p) => p.id === id)`
-// (or `state.phases.find(...)`) in eight places, which silently returns the
-// FIRST match when a roadmap contains a DUPLICATE phase id — e.g. two branches
+// A plain `roadmap.phases.find((p) => p.id === id)` (or
+// `state.phases.find(...)`) silently returns the FIRST match when a
+// roadmap contains a DUPLICATE phase id — e.g. two branches
 // that both mint `P51` and then merge (separate files, no git conflict). The
 // agent then acts on whichever phase happened to be first.
 //
-// Mirroring `resolve-task.ts` (the P14 task resolver, which fixed the same
+// Mirroring `resolve-task.ts` (the task resolver, which fixed the same
 // silent-first-match for task ids via `AMBIGUOUS_TASK_ID`), this module is the
 // single source of truth for phase-id resolution. It throws `PHASE_NOT_FOUND`
 // on zero matches and `AMBIGUOUS_PHASE_ID` on more than one, so a duplicate id
@@ -21,8 +21,8 @@ import type { PhaseEntry, PlanState } from "./state.ts";
 import { loadRoadmap } from "./roadmap.ts";
 
 function phaseNotFoundError(phaseId: string): NodeJS.ErrnoException {
-  // Message is byte-identical to the eight call sites this replaces, so their
-  // existing PHASE_NOT_FOUND behaviour (and tests) are unchanged.
+  // Message is kept stable so existing PHASE_NOT_FOUND behaviour (and tests)
+  // are unchanged.
   const err = new Error(`Phase "${phaseId}" not found in roadmap.yaml.`);
   (err as NodeJS.ErrnoException).code = "PHASE_NOT_FOUND";
   return err as NodeJS.ErrnoException;

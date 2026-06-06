@@ -25,9 +25,9 @@ export const ProgressEvent = z
     at: z.iso.datetime({ offset: true }),
     actor: ActorType,
     // Agent name that produced the event. Optional for backward compatibility
-    // with v0.1 logs written before `task complete` existed.
+    // with older logs.
     agent: z.string().min(1).optional(),
-    // Human identity of whoever ran the verb (Collaboration UX RFC, D1) — the
+    // Human identity of whoever ran the verb — the
     // git `user.name` (or `CODE_PACT_AUTHOR`) captured at write time, regardless
     // of `actor`. Optional and additive: legacy events omit it (and hash
     // identically to before — `canonicalizeEvent` omits absent fields), and

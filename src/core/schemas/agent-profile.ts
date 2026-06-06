@@ -33,7 +33,7 @@ export function normalizeModelVersion(input: string): ClaudeModelVersion | null 
   return MODEL_VERSION_ALIASES[trimmed.toLowerCase()] ?? null;
 }
 
-// P47 (Context Fit, layer a). A context budget profile name is used as a
+// A context budget profile name is used as a
 // `--context-budget <profile>` CLI token, so it is constrained to a safe
 // identifier charset (letters, digits, `-`, `_`; non-empty) — no spaces, no
 // path/flag-ambiguous characters. The three standard names (tight/balanced/
@@ -47,19 +47,18 @@ const ContextBudgetProfileName = z
   );
 
 /**
- * P47 — optional `context_budget` block. Names a small set of byte budgets the
+ * Optional `context_budget` block. Names a small set of byte budgets the
  * agent can refer to by name via `--context-budget <profile>`. Validated when
  * present; a missing block is valid (backward compatible) and is NOT applied
- * automatically to any command — there is no implicit default-budget behavior
- * in P47. `default_profile` is validated for future ergonomics only.
- * See design/decisions/context-fit-rfc.md § Layer (a).
+ * automatically to any command — there is no implicit default-budget behavior.
+ * `default_profile` is validated for future ergonomics only.
  */
 export const ContextBudgetProfiles = z
   .object({
     // Optional convenience pointer. Validated to reference an existing profile,
-    // but P47 does NOT auto-apply it anywhere.
+    // but it is NOT auto-applied anywhere.
     default_profile: ContextBudgetProfileName.optional(),
-    // A `max_bytes` is a positive integer byte cap (the unit the P24 enforcement
+    // A `max_bytes` is a positive integer byte cap (the unit the budget enforcement
     // path already speaks). Non-empty: an empty block carries no information and
     // is almost certainly a mistake.
     profiles: z
@@ -111,7 +110,7 @@ export const AgentProfile = z.object({
   // (e.g. "opus-4.8" | "opus-4.7" | "opus-4.6" | "sonnet-4.6").
   // Omit for the generic (version-agnostic) template.
   model_version: z.string().optional(),
-  // P47 — optional named context budget profiles. See ContextBudgetProfiles.
+  // Optional named context budget profiles. See ContextBudgetProfiles.
   context_budget: ContextBudgetProfiles.optional(),
 });
 export type AgentProfile = z.infer<typeof AgentProfile>;

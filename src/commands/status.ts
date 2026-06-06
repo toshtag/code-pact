@@ -1,5 +1,5 @@
-// `code-pact status` — read-only team activity overview (Collaboration UX RFC,
-// D2). Aggregates derived task state across the plan and answers the sit-down
+// `code-pact status` — read-only team activity overview.
+// Aggregates derived task state across the plan and answers the sit-down
 // questions: what is in flight (by whom), what is blocked (why/by whom), what is
 // free to pick up — and, for what isn't, why.
 //
@@ -61,8 +61,8 @@ export type WaitingEntry = {
   reasons: WaitingReason[];
 };
 /**
- * A detected `PROGRESS_EVENT_CONFLICT` for a task in scope (Collaboration UX
- * RFC, D3). `details.events[]` names the conflicting side(s) — usually two (the
+ * A detected `PROGRESS_EVENT_CONFLICT` for a task in scope.
+ * `details.events[]` names the conflicting side(s) — usually two (the
  * establishing event and the offender), one when the first event is itself
  * invalid — the same structured shape the `plan analyze` / `doctor` surfaces
  * carry, so an agent reads *who* collided without parsing prose. Structural id
@@ -209,7 +209,7 @@ export async function runStatus(opts: StatusOptions): Promise<StatusResult> {
     }
   }
 
-  // conflicts[] (D3): PROGRESS_EVENT_CONFLICT only, scoped to the tasks in view
+  // conflicts[]: PROGRESS_EVENT_CONFLICT only, scoped to the tasks in view
   // (the whole plan, or just the --phase one). Reported at scope level like
   // `totals` and NOT narrowed by `--mine`: a conflict is inherently multi-author
   // and is a safety signal, so hiding one you are a party to would be unsafe —

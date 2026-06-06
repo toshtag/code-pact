@@ -23,11 +23,11 @@ import {
 import { assertSafeRelativePath } from "../path-safety.ts";
 
 // ---------------------------------------------------------------------------
-// Task runbook builder — v1.3 P12-T2.
+// Task runbook builder.
 //
 // Pure function. Given an already-loaded plan state (phase reference + task)
 // and progress events, returns the deterministic runbook for that task.
-// The command layer (P12-T3) handles I/O and JSON envelope assembly.
+// The command layer handles I/O and JSON envelope assembly.
 // ---------------------------------------------------------------------------
 
 export type BuildTaskRunbookInput = {
@@ -38,7 +38,7 @@ export type BuildTaskRunbookInput = {
   /**
    * Optional task_id → phase_id index covering every phase in the project.
    * When supplied, the dependency resolver annotates cross-phase entries
-   * with the foreign phase id (v1.9 P19 additive surface).
+   * with the foreign phase id.
    */
   taskPhaseIndex?: ReadonlyMap<string, string>;
 };

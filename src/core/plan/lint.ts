@@ -44,7 +44,7 @@ const WEAK_DOD_PATTERN = /\b(TODO|FIXME|tbd)\b/i;
 const WEAK_DOD_MIN_CHARS = 10;
 const PLACEHOLDER_VERIFICATION_PATTERN = /^\s*(echo|true|noop)\b/i;
 
-// P36: ADR_ACCEPTED_BODY_THIN fires only when an accepted ADR's substantive
+// ADR_ACCEPTED_BODY_THIN fires only when an accepted ADR's substantive
 // body is below this AND the body has zero h2 headings. Calibrated against the
 // real ADR corpus — the smallest legitimate ADR in this repo is ~3610 bytes
 // with 3 h2 headings, so 400 chars leaves a wide margin: only empty-to-a-few-
@@ -53,7 +53,7 @@ const PLACEHOLDER_VERIFICATION_PATTERN = /^\s*(echo|true|noop)\b/i;
 const ADR_THIN_BODY_CHARS = 400;
 // Lines that are status declarations or the h1 title — stripped before
 // measuring substantive body length so a stub that is *just* a status line
-// (the case P36 most wants to catch) measures as empty.
+// (the case this most wants to catch) measures as empty.
 const ADR_STATUS_LINE_PATTERN = /^\s*(?:[-*]\s*)?(?:\*\*Status:\*\*|Status:)/i;
 const ADR_H1_PATTERN = /^\s*#\s/;
 const ADR_H2_PATTERN = /^\s*##\s/;
@@ -63,7 +63,7 @@ export type LintOptions = {
   /**
    * When true, runs opt-in quality/readiness advisories (WEAK_DOD,
    * PLACEHOLDER_VERIFICATION, TASK_DECISION_UNRESOLVED, PHASE_CONFIDENCE_LOW,
-   * TASK_DESCRIPTION_MISSING, and the P50 Context Fit advisories
+   * TASK_DESCRIPTION_MISSING, and the Context Fit advisories
    * TASK_CONTEXT_PACK_LARGE, TASK_CONTEXT_BUDGET_UNACHIEVABLE,
    * TASK_DECLARED_DECISION_LARGE, TASK_READS_MATCH_TOO_MANY). Off by default so
    * the base lint stays lean; all of these advisories are `affects_exit:
@@ -87,7 +87,7 @@ export type LintResult = {
  * verbatim so the CLI surface can advertise them in `--json`.
  *
  * `ORPHAN_PROGRESS_EVENT` is intentionally NOT reported here. That
- * cross-artifact comparison belongs to `plan analyze` (T4). Reporting
+ * cross-artifact comparison belongs to `plan analyze`. Reporting
  * it from both commands would produce duplicate output for the same
  * underlying issue.
  */
@@ -105,7 +105,7 @@ export async function runLint(opts: LintOptions): Promise<LintResult> {
   issues.push(...detectPhaseIdNaming(phases));
   issues.push(...detectTaskIdPhasePrefix(phases));
 
-  // P10 — Task Readiness Schema. All twelve detectors are no-ops for
+  // Task Readiness Schema. All twelve detectors are no-ops for
   // tasks that declare none of the optional fields. Sync detectors run
   // first; async detectors that touch the filesystem run after so a
   // configuration error in the sync set is visible quickly.
@@ -118,10 +118,10 @@ export async function runLint(opts: LintOptions): Promise<LintResult> {
   issues.push(...detectTaskWritesUnsafePath(phases));
   issues.push(...detectTaskWritesGlobInvalid(phases));
   issues.push(...detectTaskWritesOverBroad(phases));
-  // v1.6 P15-T3: protected-paths list is configurable. Load once per
+  // protected-paths list is configurable. Load once per
   // lint run, then inject into the detector. Falls back to the
   // hardcoded constant when `design/rules/protected-paths.md` is
-  // absent — v1.5 behaviour is preserved by default.
+  // absent.
   const { paths: protectedPaths } = await loadProtectedPaths(opts.cwd);
   issues.push(...detectTaskWritesProtectedPath(phases, protectedPaths));
   issues.push(...detectTaskAcceptanceRefUnsafePath(phases));
@@ -142,7 +142,7 @@ export async function runLint(opts: LintOptions): Promise<LintResult> {
     issues.push(...detectWeakDoD(phases));
     issues.push(...detectPlaceholderVerification(phases));
     issues.push(...detectPhaseDocsWriteNoDocCheck(phases));
-    // P31 clarify advisories. All `affects_exit: false` — they surface
+    // Clarify advisories. All `affects_exit: false` — they surface
     // uncertainty for human review and never fail `--strict`.
     issues.push(...(await detectUnresolvedDecision(opts.cwd, phases)));
     issues.push(...(await detectAdrStatusUnrecognized(opts.cwd)));
@@ -150,9 +150,9 @@ export async function runLint(opts: LintOptions): Promise<LintResult> {
     issues.push(...(await detectAdrCommitmentsEmpty(opts.cwd, phases)));
     issues.push(...detectLowConfidencePhase(phases));
     issues.push(...detectMissingTaskDescription(phases));
-    // P50 — Context Fit advisories (layer d). All `affects_exit: false`; they
-    // reuse the P49 explain metrics (natural / minimum-achievable floor) and
-    // the P48 budget mapping, read decision files, and expand reads globs —
+    // Context Fit advisories. All `affects_exit: false`; they
+    // reuse the explain metrics (natural / minimum-achievable floor) and
+    // the budget mapping, read decision files, and expand reads globs —
     // local and deterministic, no network/model/tokenizer. The pack-size
     // advisories need an agent name for the build, resolved best-effort from
     // project.yaml's default_agent; the default agent's `context_budget`
@@ -187,7 +187,7 @@ export async function runLint(opts: LintOptions): Promise<LintResult> {
 
 /**
  * Best-effort resolution of the project's default agent name, used only by the
- * P50 pack-size advisories to build a task's context pack. Returns undefined
+ * pack-size advisories to build a task's context pack. Returns undefined
  * when project.yaml is absent or unparseable — the advisory pass then skips the
  * pack-size advisories rather than failing the lint.
  */
@@ -241,7 +241,7 @@ function isPublicDocWrite(path: string): boolean {
  * root-level public `.md`, excluding CHANGELOG.md), the phase's
  * `verification.commands` must include a doc check (`check:docs` /
  * `check:doc-links` / `check:doc-invariants`). Otherwise the phase will edit
- * public docs without verifying them — the docs-drift class P43 was meant to
+ * public docs without verifying them — the docs-drift class this was meant to
  * stop recurring. Scoped to phases that are not yet `done`: this is a
  * forward-looking guard for work still to be done, so it never retroactively
  * scolds historical phases (which can't be changed and would be pure noise).
@@ -347,8 +347,8 @@ async function detectUnresolvedDecision(
 
 /**
  * Clarify advisory: an ADR in `design/decisions/` declares an explicit status
- * word that is not recognized (e.g. a typo `**Status:** acceptd`). Since v1.22
- * the gate treats an unrecognized status as `unknown_status` — it does NOT
+ * word that is not recognized (e.g. a typo `**Status:** acceptd`). The gate
+ * treats an unrecognized status as `unknown_status` — it does NOT
  * resolve — so a typo silently keeps a decision blocked with no obvious cause.
  * This surfaces the typo and which channel to fix (`details.status_source`).
  * Advisory (`affects_exit: false`); does not change gate behavior.
@@ -373,7 +373,7 @@ async function detectAdrStatusUnrecognized(cwd: string): Promise<PlanIssue[]> {
 }
 
 /**
- * Quality advisory (P36): an `accepted` ADR whose body is an empty stub — an
+ * Quality advisory: an `accepted` ADR whose body is an empty stub — an
  * accepted decision with no recorded reasoning. Structure-independent and
  * heading-name-agnostic by design: this repo's legitimate ADRs use a wide
  * variety of heading sets (decision/goals/rationale, never ## Consequences /
@@ -432,7 +432,7 @@ export async function detectAdrAcceptedBodyThin(cwd: string): Promise<PlanIssue[
 }
 
 /**
- * Quality advisory (P43): an ACCEPTED ADR that resolves a `requires_decision`
+ * Quality advisory: an ACCEPTED ADR that resolves a `requires_decision`
  * task's decision gate records no implementation commitments — no
  * `## Implementation commitments` section, or the section is present but has
  * zero checkbox items. Surfaces "you recorded a decision but committed to no
@@ -441,7 +441,7 @@ export async function detectAdrAcceptedBodyThin(cwd: string): Promise<PlanIssue[
  * Scope: accepted ADRs from a RESOLVED requires_decision gate (via the shared
  * resolver — the same one `detectUnresolvedDecision` / verify use; we skip the
  * task unless `res.resolved`). This is deliberately narrower than the
- * file-centric P31/P36 advisories: a pure file-centric scope would fire on every
+ * file-centric advisories: a pure file-centric scope would fire on every
  * historical accepted ADR (none carry the section yet). It is also narrower than
  * "referenced by a gated task": a historical/unreferenced ADR never fires, and
  * an accepted ref inside an UNRESOLVED explicit decision_refs set (one proposed

@@ -12,11 +12,11 @@ import type {
 } from "../core/runbook/types.ts";
 
 // ---------------------------------------------------------------------------
-// `phase runbook <phase-id>` — v1.3 P12-T4
+// `phase runbook <phase-id>`
 //
 // Read-only guidance command. Returns a deterministic list of next
-// recommended steps for the given phase. Per the accepted P12 RFC, the
-// command does NOT take an --agent flag and does NOT mutate anything.
+// recommended steps for the given phase. The command does NOT take an
+// --agent flag and does NOT mutate anything.
 // Every recommended step is a command string the user runs separately,
 // or a manual_action describing a human checkpoint.
 //
@@ -46,7 +46,7 @@ export async function runPhaseRunbook(
 }
 
 /**
- * v1.9 P19-T3: aggregated cross-phase runbook. Emits one
+ * Aggregated cross-phase runbook. Emits one
  * per-phase runbook for every phase in scope:
  *
  *   - phase.status === "in_progress" (always included), and

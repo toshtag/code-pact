@@ -4,7 +4,7 @@ export type ValidateOptions = {
   cwd: string;
   /** When true, warnings also count as failures (exit 1). */
   strict?: boolean;
-  /** Branch base ref for the CI branch-drift check (P34). */
+  /** Branch base ref for the CI branch-drift check. */
   baseRef?: string;
 };
 

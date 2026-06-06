@@ -13,7 +13,7 @@ import { z } from "zod";
 // which even points the user back at the silence path they already used.
 export const DoctorConfig = z.object({
   disabled_checks: z.array(z.string()).optional().default([]),
-  // P34: team-declared escape hatch for CONTROL_PLANE_BRANCH_NOT_DRIVEN.
+  // Team-declared escape hatch for CONTROL_PLANE_BRANCH_NOT_DRIVEN.
   // Default empty — no built-in docs/config exemption (a repo decides which
   // paths legitimately change without driving the loop).
   control_plane_branch_not_driven: z

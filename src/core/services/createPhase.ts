@@ -12,7 +12,7 @@ export type Confidence = "low" | "medium" | "high";
 export type Risk = "low" | "medium" | "high";
 
 /**
- * Reserved phase ids (P14 governance). Only the sample-phase generator
+ * Reserved phase ids. Only the sample-phase generator
  * (`writeSamplePhase` in `src/commands/init.ts`) may create a phase with
  * one of these ids, via the internal `_isSampleCreation: true` bypass.
  * Every other call site (flag-based `phase add`, interactive `phase new`
@@ -20,7 +20,7 @@ export type Risk = "low" | "medium" | "high";
  *
  * Kept as a small constant array rather than a config field so adding to
  * the list requires an RFC update — that intentional friction matches the
- * P14 "scope discipline" decision.
+ * "scope discipline" decision.
  */
 export const RESERVED_PHASE_IDS: readonly string[] = ["TUTORIAL"];
 
@@ -43,7 +43,7 @@ export type CreatePhaseInput = {
   nonGoals?: string[];
   requiresDecision?: boolean;
   /**
-   * Internal-only escape hatch (P14 governance). The sample-phase
+   * Internal-only escape hatch. The sample-phase
    * generator in `src/commands/init.ts` sets this to `true` so it can
    * create the reserved-id `TUTORIAL` phase. Public callers MUST omit
    * the field — passing it from a non-bootstrap path is a contract
@@ -97,7 +97,7 @@ export async function createPhase(opts: CreatePhaseInput): Promise<CreatePhaseRe
   // existing files; this closes the create path.)
   assertSafePlanId(id, "Phase id");
 
-  // Reserved-id check (P14 governance). Block creation of phases with a
+  // Reserved-id check. Block creation of phases with a
   // reserved id unless the internal `_isSampleCreation: true` bypass is
   // set — only `writeSamplePhase` (init's sample-phase generator) does so.
   if (RESERVED_PHASE_IDS.includes(id) && opts._isSampleCreation !== true) {

@@ -20,8 +20,7 @@ export type ReconcileClassification = {
 };
 
 /**
- * Classifies a single task's reconciliation action. Per the P11 RFC
- * § Reconciliation model:
+ * Classifies a single task's reconciliation action. Reconciliation model:
  *
  *   - flip:          derived === "done" AND design ≠ "done"
  *   - skip:          design === "done" already, OR derived === "planned"

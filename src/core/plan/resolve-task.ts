@@ -1,11 +1,11 @@
-// Task → phase resolver core (P14 governance / P14-T6).
+// Task → phase resolver core.
 //
-// Before P14 every `task-*` command rolled its own private
+// Without it, every `task-*` command would roll its own private
 // `resolveTaskPhase` scanning roadmap.yaml + each referenced phase
-// YAML. Eight sites duplicated the same logic with identical error
-// codes (TASK_NOT_FOUND / AMBIGUOUS_TASK_ID) and message shape, and
-// `task-runbook` additionally re-scanned PlanState by hand because
-// `PlanState.taskIndex` silently keeps the first match on collision.
+// YAML, duplicating the same logic and error codes
+// (TASK_NOT_FOUND / AMBIGUOUS_TASK_ID); and a by-hand PlanState scan
+// is needed because `PlanState.taskIndex` silently keeps the first
+// match on collision.
 //
 // This module is the single source of truth. Two variants are
 // exposed:

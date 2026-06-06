@@ -3,9 +3,9 @@ import { ModelTier, EffortLevel } from "./model-profile.ts";
 import { STANDARD_CONTEXT_BUDGET_PROFILE_NAMES } from "../context-fit/budget-profiles.ts";
 
 // ---------------------------------------------------------------------------
-// v0.8 Budgeted Execution / Context Budgeting — recommend output contract
+// Budgeted Execution / Context Budgeting — recommend output contract
 //
-// Strictly additive over v0.7. Existing fields (phaseId / taskId / agentName /
+// Strictly additive. Existing fields (phaseId / taskId / agentName /
 // tier / effort / modelId / reasons) are unchanged; new fields use camelCase to
 // match existing JSON conventions. Enum *values* stay snake_case where they
 // are identifiers (clarify_before_implementation, increase_context, ...).
@@ -76,12 +76,12 @@ export const StructuredReason = z
   .strict();
 export type StructuredReason = z.infer<typeof StructuredReason>;
 
-// P33: the recommended lifecycle for this task — which loop an agent should run.
+// The recommended lifecycle for this task — which loop an agent should run.
 // Advisory only; code-pact's own loop behavior is unchanged.
 export const LifecycleMode = z.enum(["full_loop", "record_only", "decision_loop"]);
 export type LifecycleMode = z.infer<typeof LifecycleMode>;
 
-// P48 (Context Fit, layer b): an optional, recommended standard context budget
+// An optional, recommended standard context budget
 // profile, derived deterministically from existing task readiness fields. This
 // is a SUGGESTION the agent/user may apply via `--context-budget <profile>`; it
 // is NOT auto-applied and does NOT change the default no-flag context pack.
@@ -92,7 +92,7 @@ export type LifecycleMode = z.infer<typeof LifecycleMode>;
 // never emitted here. `recommendedBudgetBytes` resolves agent-profile same-name
 // override first, then the built-in fallback. It is unrelated to the categorical
 // `budgetProfile` (tool-call / context-file / verification estimate) and does
-// not overload it. See design/decisions/context-fit-rfc.md § Layer (b).
+// not overload it.
 //
 // The enum is derived from the SINGLE source of truth for the standard profile
 // names (budget-profiles.ts), so the schema and the pure mapping helper
@@ -111,7 +111,7 @@ export type ContextFitRecommendation = z.infer<typeof ContextFitRecommendation>;
 
 export const RecommendResultV2 = z
   .object({
-    // existing v0.7 fields — UNCHANGED
+    // base fields — UNCHANGED
     phaseId: z.string().min(1),
     taskId: z.string().min(1),
     agentName: z.string().min(1),
@@ -120,7 +120,7 @@ export const RecommendResultV2 = z
     modelId: z.string().min(1),
     reasons: z.array(z.string().min(1)).min(1),
 
-    // new in v0.8 — strictly additive
+    // strictly additive
     contextProfile: ContextProfile,
     verificationProfile: VerificationProfile,
     planningRequired: z.boolean(),
@@ -130,10 +130,10 @@ export const RecommendResultV2 = z
     budgetProfile: BudgetProfile,
     structuredReasons: z.array(StructuredReason).min(1),
 
-    // new in P33 — strictly additive
+    // strictly additive
     lifecycleMode: LifecycleMode,
 
-    // new in P48 — OPTIONAL strictly-additive. Absent on `recommendation: null`
+    // OPTIONAL strictly-additive. Absent on `recommendation: null`
     // early-return states and unaffected on existing V2 fixtures/consumers.
     contextFit: ContextFitRecommendation.optional(),
   })

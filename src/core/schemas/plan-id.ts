@@ -5,7 +5,7 @@ import { z } from "zod";
 //
 // These identifiers flow into TWO untrusted-output surfaces at once:
 //   1. Agent-facing command strings (e.g. `task prepare`'s `commands.*`,
-//      `task/phase runbook` `next_steps[].command`, the P32 failure
+//      `task/phase runbook` `next_steps[].command`, the failure
 //      `suggested_next_command`) that an agent may execute verbatim.
 //   2. Filesystem path segments (`.context/<agent>/<task-id>.md`,
 //      `design/decisions/<task-id>.md`, `agent-profiles/<agent>.yaml`).

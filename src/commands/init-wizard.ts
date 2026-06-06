@@ -12,7 +12,6 @@ export type InitWizardOptions = {
   /**
    * When true, the wizard skips the "create sample phase?" prompt and
    * forces creation. Passed from the CLI when `--sample-phase` was set.
-   * P13+.
    */
   samplePhaseOverride?: boolean;
   /** Optional pre-built prompter (for tests). Defaults to stdin/stderr. */
@@ -78,7 +77,7 @@ export async function runInitWizard(opts: InitWizardOptions): Promise<InitResult
       verifyCommand = verifyRaw.length > 0 ? verifyRaw : defaultVerify;
     }
 
-    // 6. Sample phase — no longer prompted (v1.15+). The TUTORIAL sample
+    // 6. Sample phase — no longer prompted. The TUTORIAL sample
     //    phase is opt-in only via `--sample-phase`; learning the loop is
     //    handled by the no-cleanup `code-pact tutorial` command, surfaced
     //    in the footer hints below. This removes a jargon-heavy yes/no

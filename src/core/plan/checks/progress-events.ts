@@ -37,7 +37,7 @@ export function detectOrphanProgressEvents(
   return issues;
 }
 
-// `planned -> done` is the v0.5 legacy command-layer shortcut (task complete on
+// `planned -> done` is the command-layer shortcut (task complete on
 // a never-started task), so it is acceptable, not a conflict.
 function isAcceptableTransition(
   current: TaskCurrentState,
@@ -54,7 +54,7 @@ function isAcceptableTransition(
 
 /**
  * One side of a `PROGRESS_EVENT_CONFLICT` — the structured `details.events[]`
- * shape (Collaboration UX RFC, D3). Lets an agent read *who* produced each side
+ * shape. Lets an agent read *who* produced each side
  * of a conflict without parsing the human `message`. `author` is omitted for
  * legacy / capture-off (anonymous) events, exactly as on the event itself.
  * `event_id` is the content id (`computeEventId`) — the *suffix* of a per-event
@@ -70,8 +70,8 @@ export type ConflictEventEntry = {
   at: string;
 };
 
-/** Project an event onto its `details.events[]` entry (D3). Key order matches the
- *  RFC-pinned shape (`event_id, status, author?, at`); `author` omitted when absent. */
+/** Project an event onto its `details.events[]` entry. Key order matches the
+ *  pinned shape (`event_id, status, author?, at`); `author` omitted when absent. */
 function toConflictEventEntry(e: ProgressEvent): ConflictEventEntry {
   return {
     event_id: computeEventId(e),
@@ -81,14 +81,14 @@ function toConflictEventEntry(e: ProgressEvent): ConflictEventEntry {
   };
 }
 
-/** Human rendering of one side, naming the author when present (D3). */
+/** Human rendering of one side, naming the author when present. */
 function describeSide(e: ProgressEvent): string {
   return e.author !== undefined ? `"${e.status}" (by ${e.author})` : `"${e.status}"`;
 }
 
 /**
- * Detect conflicting progress events for a task (collaboration-safe-state RFC,
- * B6). With the per-event ledger, two contributors/branches can produce events
+ * Detect conflicting progress events for a task. With the per-event
+ * ledger, two contributors/branches can produce events
  * that, once merged, form a sequence no single writer would: a second `started`
  * while already started, a `done` after `done`, a `blocked`/`started` after a
  * terminal `done`, etc. Folding each task's merged events through the lifecycle
@@ -99,7 +99,7 @@ function describeSide(e: ProgressEvent): string {
  * this is the detection surface. One conflict is reported per task (the first),
  * to avoid cascading noise from a single divergence.
  *
- * D3 (Collaboration UX RFC) enriches each issue with a structured
+ * Each issue is enriched with a structured
  * `details.events[]` naming the conflicting side(s) — the event that established
  * the current state (when present) and the offending event; usually two, but one
  * when the very first event for a task is itself an invalid transition — so an

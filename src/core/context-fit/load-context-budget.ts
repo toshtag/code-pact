@@ -1,9 +1,9 @@
-// P47 (Context Fit, layer a). Loads an agent profile's optional
-// `context_budget` block at the CLI boundary so `--context-budget <profile>`
-// can resolve a profile name. Mirrors the agent-resolution order the task
-// runners use: explicit --agent, else project.yaml's default_agent.
+// Loads an agent profile's optional `context_budget` block at the CLI
+// boundary so `--context-budget <profile>` can resolve a profile name.
+// Mirrors the agent-resolution order the task runners use: explicit
+// --agent, else project.yaml's default_agent.
 //
-// Two modes, matching the RFC's agent-less-resolution contract for STANDARD
+// Two modes, matching the agent-less-resolution contract for STANDARD
 // names (tight/balanced/wide) versus CUSTOM names:
 //
 //   bestEffort: false (custom name) — the agent profile MUST be loadable. A

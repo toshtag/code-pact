@@ -12,9 +12,7 @@ import { Roadmap } from "../schemas/roadmap.ts";
  * loader, which falls back to scanning `design/phases/` when the roadmap is
  * unreadable — the two are intentionally separate; do not conflate them.
  *
- * Extracted verbatim from eight identical per-command copies (no behaviour
- * change). See `design/decisions/control-plane-v2-rfc.md` (PR0): consolidating
- * the discovery seam is the prerequisite for later glob-based phase discovery.
+ * This is the single roadmap-discovery seam shared by every command.
  */
 export async function loadRoadmap(cwd: string): Promise<Roadmap> {
   const raw = await readFile(join(cwd, "design", "roadmap.yaml"), "utf8");

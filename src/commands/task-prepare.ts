@@ -35,14 +35,14 @@ export type TaskPrepareOptions = {
   /** When true, build the context pack but do not write it to disk. */
   dryRun?: boolean;
   /**
-   * P24: upper bound on the rendered pack size in UTF-8 bytes. When
+   * Upper bound on the rendered pack size in UTF-8 bytes. When
    * set, sections elide in the locked priority order until the bound
    * is met; throws `ContextOverBudgetError` when unachievable.
    * Progress-read-only invariant is preserved on the new failure path.
    */
   budgetBytes?: number;
   /**
-   * P47: lazy budget resolver, invoked ONLY on the pack-build path (after the
+   * Lazy budget resolver, invoked ONLY on the pack-build path (after the
    * done / blocked / unmet-deps early returns). This lets `task prepare
    * --context-budget <profile>` defer profile resolution — and the agent-
    * profile read it entails — so an early-return state never pays for it.
@@ -66,7 +66,7 @@ export type TaskPrepareCommands = {
   complete: string;
   finalize: string;
   /**
-   * P40 — additive, always present in every lifecycle mode. The ONE non-runnable
+   * Additive, always present in every lifecycle mode. The ONE non-runnable
    * entry: `--evidence` is agent-supplied, so it is a template with an
    * angle-bracket token, not a ready-to-run string like the others. The key is
    * exactly `record-done` (hyphen), accessed `commands["record-done"]`.
@@ -94,13 +94,13 @@ export type TaskPrepareResult = {
   /** Present (true) only when current_state is "done". */
   already_done?: boolean;
   /**
-   * P43 — parsed `## Implementation commitments` of each ACCEPTED ADR the
+   * Parsed `## Implementation commitments` of each ACCEPTED ADR the
    * decision gate considered for this task. Present (possibly `[]`) only for a
    * `requires_decision` task; omitted entirely otherwise. It is `[]` only when
    * the resolver found no accepted ADR entries — note an unresolved explicit
    * `decision_refs` gate may still surface its accepted refs (this surface is
    * advisory context, NOT gate enforcement; unlike the `ADR_COMMITMENTS_EMPTY`
-   * lint advisory it does not require the gate to resolve). Additive (P39).
+   * lint advisory it does not require the gate to resolve). Additive.
    * Entries follow the resolver's `considered[]` order — no
    * chronological/priority/dependency meaning.
    */
@@ -134,7 +134,7 @@ async function loadAgentProfile(
     throw err;
   }
   // A malformed profile (e.g. an explicitly-configured but invalid
-  // context_budget block — P47) surfaces as CONFIG_ERROR rather than an
+  // context_budget block) surfaces as CONFIG_ERROR rather than an
   // unclassified YAML/Zod throw, so `task prepare --context-budget …` matches
   // the documented error contract and the CLI renders a clean envelope.
   try {
@@ -167,7 +167,7 @@ function buildCommands(agent: string, phaseId: string, taskId: string): TaskPrep
 }
 
 /**
- * P40 — the one mode-aware guidance surface. `mode` is consulted ONLY for the two
+ * The one mode-aware guidance surface. `mode` is consulted ONLY for the two
  * workable, pre-completion states (`start_task` / `continue_implementation`); the
  * early-return states pass no mode (recommendation is null there by construction)
  * and keep their static, mode-agnostic messages. The mode→message wording restates
@@ -332,7 +332,7 @@ export async function runTaskPrepare(
     };
   }
 
-  // 8. Recommendation (pure function from P21-T2).
+  // 8. Recommendation (pure function).
   const agentProfile = await loadAgentProfile(cwd, agentName);
   const recommendation = resolveRecommendation({
     phaseId,
@@ -343,7 +343,7 @@ export async function runTaskPrepare(
     decisionContext: { phaseRequiresDecision: phase.requires_decision === true },
   });
 
-  // 8b. P43 — decision commitments. For a requires_decision task, resolve the
+  // 8b. Decision commitments. For a requires_decision task, resolve the
   // gate (read-only — preserves the progress-read-only invariant) and surface
   // the parsed `## Implementation commitments` of each ACCEPTED ADR in
   // resolution.considered[], in considered[] order. Present (possibly []) only
@@ -377,7 +377,7 @@ export async function runTaskPrepare(
     }
   }
 
-  // 9. Context pack — build always, write unless dry-run. The P47 budget is
+  // 9. Context pack — build always, write unless dry-run. The budget is
   // resolved here, on the build path, so the done / blocked / unmet-deps early
   // returns above never trigger profile resolution or an agent-profile read.
   const budgetBytes =

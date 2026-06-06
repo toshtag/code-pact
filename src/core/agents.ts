@@ -17,8 +17,8 @@ export const SUPPORTED_AGENTS: readonly SupportedAgent[] = [
 ] as const;
 
 /**
- * Adapters whose generated instructions or rule format may shift across
- * v0.2.x. We surface this both in README and in a comment at the top of
+ * Adapters whose generated instructions or rule format may still shift.
+ * We surface this both in README and in a comment at the top of
  * the generated file so contributors know to expect churn.
  */
 export const EXPERIMENTAL_AGENTS: ReadonlySet<SupportedAgent> = new Set([
@@ -73,7 +73,7 @@ const GENERIC_PROFILE: AgentProfile = {
   model_map: {},
 };
 
-// Cursor adapter (experimental, v0.2).
+// Cursor adapter (experimental).
 // Source: https://cursor.com/docs/context/rules — `.cursor/rules/*.mdc`
 // is the canonical placement (`.cursorrules` was deprecated in 0.43).
 // Each rule is markdown with frontmatter (description / globs /
@@ -89,7 +89,7 @@ const CURSOR_PROFILE: AgentProfile = {
   model_map: {},
 };
 
-// Gemini CLI adapter (experimental, v0.2).
+// Gemini CLI adapter (experimental).
 // Source: https://github.com/google-gemini/gemini-cli (Google's
 // official org). The CLI discovers `GEMINI.md` hierarchically starting
 // from the current working directory and walking up to the project

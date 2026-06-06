@@ -18,15 +18,15 @@ import type { TaskStatusDiff } from "../core/finalize/diff.ts";
 import { classifyReconcile } from "../core/finalize/reconcile-classifier.ts";
 
 // ---------------------------------------------------------------------------
-// `phase reconcile <phase-id>` — v1.2 P11
+// `phase reconcile <phase-id>`
 //
 // Bulk version of `task finalize`: walks `phase.tasks[]` once and flips
 // every task whose derived state is `done` but whose design status is
 // still `planned` / `in_progress`. Default is dry-run; `--write` is
 // the explicit opt-in.
 //
-// `phase reconcile` never auto-flips the phase's own `status` field in
-// v1.2 — it reports a `phase_status_candidate` as advisory only.
+// `phase reconcile` never auto-flips the phase's own `status` field —
+// it reports a `phase_status_candidate` as advisory only.
 // Per-task flip / skip / manual_review classification is exposed in
 // `data.tasks[]` so the user can audit the verdict before --write.
 //
@@ -99,7 +99,7 @@ async function resolvePhase(
 /**
  * Computes the candidate phase status by simulating each task's
  * post-reconcile effective status and aggregating. Never writes
- * anything — this is advisory only per the v1.2 contract.
+ * anything — this is advisory only.
  */
 function computePhaseStatusCandidate(
   verdicts: TaskReconcileVerdict[],
@@ -234,7 +234,7 @@ export async function runPhaseReconcile(
     }
   }
 
-  // 8. If every eligible write was refused, raise the error code per RFC.
+  // 8. If every eligible write was refused, raise the error code.
   if (
     appliedWrites.length === 0 &&
     skippedWrites.length > 0 &&

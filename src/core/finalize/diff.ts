@@ -3,8 +3,8 @@ import type { Phase, PhaseStatus } from "../schemas/phase.ts";
 // ---------------------------------------------------------------------------
 // Task status diff
 //
-// The minimum data the v1.2 P11 commands need to describe a planned or
-// applied write to a single task's `status` field inside a phase YAML.
+// The minimum data the finalize/reconcile commands need to describe a
+// planned or applied write to a single task's `status` field inside a phase YAML.
 // `task finalize` emits one diff (or zero, when already at target);
 // `phase reconcile` emits zero or more, one per task it wants to flip.
 //

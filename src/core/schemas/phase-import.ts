@@ -29,7 +29,7 @@ export const TaskImport = z.object({
   expected_duration: ExpectedDuration.optional(),
   status: TaskStatus.optional(),
   requires_decision: z.boolean().optional(),
-  // P10 — Task Readiness Schema additions. All optional; forwarded
+  // Task Readiness Schema additions. All optional; forwarded
   // verbatim by applyTaskDefaults() without synthetic defaults so
   // absent == undefined == old behaviour.
   depends_on: z.array(z.string().min(1)).optional(),

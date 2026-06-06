@@ -31,7 +31,7 @@ export type PlanConstitutionOptions = {
   force: boolean;
   prompter?: Prompter;
   /**
-   * Pre-collected answers (v1.6 P17-T4: `--from-file`, `--stdin`, or
+   * Pre-collected answers (`--from-file`, `--stdin`, or
    * `--description` / `--principle` flag-driven). When provided, the
    * wizard is bypassed entirely. Mirrors the
    * `runPlanBrief({ answers })` contract.
@@ -45,7 +45,7 @@ export type PlanConstitutionResult = {
 };
 
 // ---------------------------------------------------------------------------
-// File / stdin input schema — v1.6 P17-T4
+// File / stdin input schema
 // ---------------------------------------------------------------------------
 
 /**
@@ -308,7 +308,7 @@ export async function runPlanConstitution(
   let answers: ConstitutionAnswers;
   let cleanupPrompter: (() => void) | undefined;
   if (opts.answers !== undefined) {
-    // v1.6 P17-T4: pre-collected answers bypass the wizard entirely.
+    // Pre-collected answers bypass the wizard entirely.
     answers = opts.answers;
   } else {
     const prompter = opts.prompter ?? Prompter.fromIO();

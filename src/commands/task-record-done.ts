@@ -53,7 +53,7 @@ export type TaskRecordDoneResult =
 export type DecisionRequiredData = {
   task_id: string;
   decision_check: CheckResult;
-  /** How the gate resolves an ADR. Status-aware since v1.22 (RFC §3-C). */
+  /** How the gate resolves an ADR. Status-aware. */
   current_resolution: "status-aware";
   /** Which source drove resolution: explicit `decision_refs` or the filename scan. */
   via: "decision_refs" | "filename-scan";

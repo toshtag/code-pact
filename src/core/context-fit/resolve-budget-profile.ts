@@ -1,9 +1,9 @@
-// P47 (Context Fit, layer a). Resolves a named context budget profile to a
-// byte cap, which the CLI then feeds into the unchanged P24 --budget-bytes
-// enforcement path. This module never touches the pack builder or the elision
-// order — it only turns a NAME into a NUMBER.
+// Resolves a named context budget profile to a byte cap, which the CLI
+// then feeds into the --budget-bytes enforcement path. This module never
+// touches the pack builder or the elision order — it only turns a NAME
+// into a NUMBER.
 //
-// Resolution order (RFC § Layer (a)):
+// Resolution order:
 //   1. An agent profile's `context_budget.profiles[name]` wins when present —
 //      this is how a project OVERRIDES a standard byte value or declares a
 //      custom profile.

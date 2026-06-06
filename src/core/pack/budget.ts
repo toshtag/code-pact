@@ -1,7 +1,7 @@
-// P24 budget enforcement for the context pack. Given the structured
+// Budget enforcement for the context pack. Given the structured
 // intermediate form from `renderSections` and an optional byte budget,
 // `applyBudgetElision` returns the surviving sections, the names of any elided
-// sections (in elision order), a name → byte-size map for them, and the P49
+// sections (in elision order), a name → byte-size map for them, and the
 // byte metrics. Throws `ContextOverBudgetError` when maximal elision still
 // leaves the pack above the requested bound.
 
@@ -36,7 +36,7 @@ export class ContextOverBudgetError extends Error {
   }
 }
 
-// P49: byte facts derived from one application of the budget path. Pure
+// Byte facts derived from one application of the budget path. Pure
 // (UTF-8 byte counts only) and unit-testable. `saved_bytes` / `saved_ratio`
 // are NOT stored here — they are a trivial projection the explain layer
 // derives (see buildContextPack), keeping this struct to raw measured bytes.
@@ -54,7 +54,7 @@ export type BudgetElisionResult = {
   metrics: BudgetElisionMetrics;
 };
 
-// P28: the readiness signals that gate conditional elision eligibility.
+// The readiness signals that gate conditional elision eligibility.
 // `related_decisions` / `rules` are only elidable when they are the
 // large-context / high-write-surface expansions — see applyBudgetElision.
 export type BudgetElisionEligibility = {
@@ -74,7 +74,7 @@ function sectionBytes(section: RenderedSection): number {
   return Buffer.byteLength(section.lines.join("\n"), "utf8");
 }
 
-// P28: elision ELIGIBILITY is conditional, per context-budget-rfc.md.
+// Elision ELIGIBILITY is conditional, per context-budget-rfc.md.
 // `related_decisions` is elidable only when it is the `context_size: large`
 // "all decisions" expansion; `rules` only when it is the `write_surface: high`
 // "all rules" expansion. Outside those expansions the section holds task-id-
@@ -91,7 +91,7 @@ function eligibleElisionOrder(eligibility: BudgetElisionEligibility): string[] {
   });
 }
 
-// P49: the floor below which no budget can drive this task — the rendered byte
+// The floor below which no budget can drive this task — the rendered byte
 // size after every budget-ELIGIBLE section is removed. This is the SINGLE
 // helper behind both the successful `--explain` `minimum_achievable_bytes` and
 // the `CONTEXT_OVER_BUDGET` error's `minimum_achievable_bytes`; the two can
