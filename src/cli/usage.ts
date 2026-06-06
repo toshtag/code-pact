@@ -8,7 +8,7 @@ import { TASK_SPECS } from "./spec/task.ts";
 
 /** The subcommand list shown for each cluster, mirroring the unknown-subcommand hints. */
 const CLUSTER_SUBCOMMANDS: Record<string, string> = {
-  plan: "brief | prompt | adopt | constitution | lint | normalize | analyze | migrate | import (alias for \"phase import\")",
+  plan: "brief | prompt | adopt | constitution | lint | normalize | analyze | sync-paths | migrate | import (alias for \"phase import\")",
   task: "add | context | prepare | start | status | block | resume | complete | record-done | finalize | runbook (aliases: reconcile = finalize, next = runbook)",
   phase: "add | new | ls | show | import | reconcile | runbook (alias: next = runbook)",
   adapter: "list | install | upgrade | doctor | conformance",
@@ -162,6 +162,27 @@ const LEAF_USAGE: Record<string, () => string> = {
       "Examples:",
       "  code-pact plan normalize --json          # check mode (default)",
       "  code-pact plan normalize --write --json  # apply",
+    ].join("\n"),
+
+  "plan sync-paths": () =>
+    [
+      "Usage: code-pact plan sync-paths --rename <old>=<new> [options]",
+      "",
+      "Apply an explicit old=new path rename to the reads/writes of every phase",
+      "task, so renaming or merging a source file referenced by a (often",
+      "historical) phase does not leave plan lint's reads-match invariant to be",
+      "fixed by hand. Dry-run by default; pass --write to apply (under the write",
+      "lock). Repeat --rename for multiple renames; duplicate entries a rename",
+      "introduces are collapsed.",
+      "",
+      "Options:",
+      "  --rename <old>=<new>  Map an exact reads/writes entry to a new path (repeatable).",
+      "  --write               Apply the changes (default is a non-destructive preview).",
+      "  --json                Emit JSON.",
+      "",
+      "Examples:",
+      "  code-pact plan sync-paths --rename src/a.ts=src/b.ts --json          # preview",
+      "  code-pact plan sync-paths --rename src/a.ts=src/b.ts --write --json  # apply",
     ].join("\n"),
 
   "plan migrate": () =>

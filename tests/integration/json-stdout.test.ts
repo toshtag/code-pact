@@ -162,6 +162,14 @@ describe("json-stdout contract: read-only Stable (v1.0) commands", () => {
     expectStdoutIsJson(p.run(["plan", "prompt", "--json"]), "plan prompt");
   });
 
+  it("plan sync-paths --json", async () => {
+    const p = await freshProject("plan-sync-paths");
+    expectStdoutIsJson(
+      p.run(["plan", "sync-paths", "--rename", "src/a.ts=src/b.ts", "--json"]),
+      "plan sync-paths",
+    );
+  });
+
   it("phase ls --json (uninitialized phases)", async () => {
     const p = await freshProject("phase-ls");
     expectStdoutIsJson(p.run(["phase", "ls", "--json"]), "phase ls");

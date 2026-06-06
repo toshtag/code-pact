@@ -751,7 +751,7 @@ export async function detectTaskReadsNoMatch(
           issues.push({
             code: "TASK_READS_NO_MATCH",
             severity: "warning",
-            message: `Task "${task.id}" reads glob "${g}" matches zero files on disk`,
+            message: `Task "${task.id}" reads glob "${g}" matches zero files on disk — if the file moved, redirect it with \`code-pact plan sync-paths --rename "${g}=<new-path>" --write\`; if it is gone, drop the entry`,
             file: ref.path,
             phase_id: phase.id,
             task_id: task.id,

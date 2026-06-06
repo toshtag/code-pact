@@ -27,6 +27,7 @@ When a command surfaces one of the diagnostic codes below, this page maps it to 
 | [`TASK_CONTEXT_BUDGET_UNACHIEVABLE`](#context-fit-advisories-from-plan-lint---include-quality-v130) | Recommended budget below the achievable floor | Use a wider profile or split the task (advisory only) |
 | [`TASK_DECLARED_DECISION_LARGE`](#context-fit-advisories-from-plan-lint---include-quality-v130) | A `decision_refs` body > tight budget (30000 bytes) | Split follow-up tasks or confirm scope (advisory only) |
 | [`TASK_READS_MATCH_TOO_MANY`](#context-fit-advisories-from-plan-lint---include-quality-v130) | A `reads` glob matches > 100 files | Narrow the glob if the task can be scoped (advisory only) |
+| [`TASK_READS_NO_MATCH`](#task_reads_no_match-from-plan-lint-v133) | A task `reads` glob matches no live file (often after renaming/merging a referenced source file) | If the file moved, `plan sync-paths --rename "<old>=<new>" --write`; if it's gone, drop the entry |
 | [`EVENT_FILE_ID_MISMATCH`](#event_file_id_mismatch-from-doctor--plan-lint-v131) | A per-event ledger file's content doesn't match its content-addressed name (corrupt / hand-edited) | Restore from git or remove the file named in the message, then re-run |
 | [`PROGRESS_EVENT_CONFLICT`](#progress_event_conflict-from-doctor--plan-analyze-v131) | Incompatible same-task lifecycle events (e.g. two branches both `done` a task) | Reconcile the conflicting event(s) for the named task |
 | [`CONTROL_PLANE_GITIGNORED`](#control_plane_gitignored-from-doctor-v132) | A `.gitignore` rule keeps part of the shared control plane off git, so collaboration silently breaks | Narrow the `.gitignore` to the local-only subset and commit the shared control plane (project.yaml, profiles, baselines, state/events/) |
@@ -70,6 +71,20 @@ code-pact plan normalize --write
 ```
 
 `plan normalize --write` is the apply-mode counterpart to `--check`. Passing both at once is a `PLAN_NORMALIZE_CONFLICT` (exit 2) so the intent is unambiguous in CI scripts.
+
+## `TASK_READS_NO_MATCH` from `plan lint` (v1.33)
+
+A task's `reads` glob matches no file on disk. `plan lint --include-quality --strict` (a CI gate) promotes this warning to a failure. It fires after you rename, merge, or delete a source file that a phase — often a **done, historical** one — still lists in its `reads` (or `writes`): the phase's recorded file surface and the live tree have diverged.
+
+If the file **moved or was merged**, redirect the stale entries with an explicit old=new rename map. Repeat `--rename` per move; entries that collapse to the same path are de-duplicated. Dry-run first, then apply:
+
+```sh
+code-pact plan sync-paths --rename src/old.ts=src/new.ts --json          # preview (writes nothing)
+code-pact plan sync-paths --rename src/old.ts=src/new.ts --write --json  # apply
+code-pact plan lint --include-quality --strict --json                    # confirm green
+```
+
+The map is explicit by design: a moved file can be a rename, a merge, or a split, none of which is recoverable from git heuristics, so you state the intent. `plan sync-paths` only rewrites `reads` / `writes` of tasks under `design/phases/`; it never touches CHANGELOG or RFC prose. If the file is **gone for good**, remove the entry from the phase YAML by hand.
 
 ## `VERIFICATION_FAILED` from `task complete` (or standalone `verify`)
 

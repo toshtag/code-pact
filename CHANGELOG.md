@@ -13,6 +13,20 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
+### Added
+
+- **`plan sync-paths --rename <old>=<new>`** — apply an explicit old→new path
+  rename to the `reads` / `writes` of every phase task. Renaming or merging a
+  source file that a (often historical, done) phase still lists in its `reads`
+  previously left `plan lint --strict`'s reads-match invariant to be fixed by
+  hand; this command does it deterministically. (A file that is gone for good is
+  handled by removing the stale entry by hand — sync-paths only maps old→new.) Dry-run by default;
+  `--write` applies under the write lock. Repeat `--rename` for multiple moves;
+  entries that collapse to one path are de-duplicated. It only rewrites
+  `reads` / `writes` of tasks under `design/phases/` — never CHANGELOG or RFC
+  prose. The `TASK_READS_NO_MATCH` lint message now names this command as the
+  fix. See [docs/troubleshooting.md](docs/troubleshooting.md).
+
 ## [1.32.0] — 2026-06-05
 
 Collaboration: a team can now see *who did what, who is on what, and where two
