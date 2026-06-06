@@ -7,28 +7,16 @@
 // built CLI and exercise the decision-gate path (no ADR / proposed ADR) and the
 // command-failure path. See design/decisions/root-cause-completion-errors-rfc.md.
 import { describe, it, expect, beforeAll, beforeEach, afterEach } from "vitest";
-import { spawnSync } from "node:child_process";
 import { mkdtemp, rm, readFile, writeFile, mkdir, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-import { cliPath, ensureCliBuilt } from "../helpers/cli.ts";
+import { run as cliRun, ensureCliBuilt, type RunResult } from "../helpers/cli.ts";
 
 let tmpDir: string;
 
-type RunResult = { code: number; stdout: string; stderr: string };
-
 function run(args: string[]): RunResult {
-  const res = spawnSync(process.execPath, [cliPath, ...args], {
-    cwd: tmpDir,
-    encoding: "utf8",
-    env: process.env,
-  });
-  return {
-    code: res.status ?? -1,
-    stdout: res.stdout ?? "",
-    stderr: res.stderr ?? "",
-  };
+  return cliRun(tmpDir, args);
 }
 
 type Envelope = {

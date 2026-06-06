@@ -1,19 +1,13 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { cliPath, ensureCliBuilt } from "../helpers/cli.ts";
+import { run as cliRun, ensureCliBuilt, type RunResult } from "../helpers/cli.ts";
 
 let tmpDir: string;
 
-function run(args: string[]): { code: number; stdout: string; stderr: string } {
-  const res = spawnSync(process.execPath, [cliPath, ...args], {
-    cwd: tmpDir,
-    encoding: "utf8",
-    env: process.env,
-  });
-  return { code: res.status ?? -1, stdout: res.stdout ?? "", stderr: res.stderr ?? "" };
+function run(args: string[]): RunResult {
+  return cliRun(tmpDir, args);
 }
 
 async function writeProgress(yaml: string): Promise<void> {
