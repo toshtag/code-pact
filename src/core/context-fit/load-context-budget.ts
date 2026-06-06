@@ -27,6 +27,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { Project } from "../schemas/project.ts";
+import { loadProject, resolveEnabledAgent } from "../project.ts";
 import {
   AgentProfile,
   ContextBudgetProfiles,
@@ -57,23 +58,8 @@ export async function loadAgentContextBudget(
   cwd: string,
   agent: string | undefined,
 ): Promise<LoadAgentContextBudgetResult> {
-  const raw = await readFile(join(cwd, ".code-pact", "project.yaml"), "utf8");
-  const project = Project.parse(parseYaml(raw) as unknown);
-  const agentName = agent ?? project.default_agent;
-
-  const ref = project.agents.find((a) => a.name === agentName);
-  if (!ref) {
-    const err = new Error(`Agent "${agentName}" is not configured in project.yaml.`);
-    (err as NodeJS.ErrnoException).code = "AGENT_NOT_FOUND";
-    throw err;
-  }
-  if (ref.enabled === false) {
-    const err = new Error(
-      `Agent "${agentName}" is disabled in project.yaml (enabled: false).`,
-    );
-    (err as NodeJS.ErrnoException).code = "AGENT_NOT_ENABLED";
-    throw err;
-  }
+  const project = await loadProject(cwd);
+  const agentName = resolveEnabledAgent(project, agent);
 
   const path = await resolveAgentProfilePath(cwd, agentName);
   let profileRaw: string;
