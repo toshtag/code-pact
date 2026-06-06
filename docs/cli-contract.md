@@ -924,6 +924,49 @@ Markdown trailing whitespace is preserved because two trailing spaces are a mean
 
 **JSON shape (under `--write`):** identical to the dirty `--check` payload but with `mode: "write"`, `ok: true`, no `error` field, and `written` listing every file that was rewritten.
 
+### `plan sync-paths --rename <old>=<new> [--rename ...] [--write] [--json]` (v1.33)
+
+Applies explicit `old=new` path mappings to **exact** entries in `tasks[].reads` / `tasks[].writes` under `design/phases/*.yaml`. The remediation for `TASK_READS_NO_MATCH` after a referenced source file is **renamed or merged**: it keeps the plan-lint reads-match invariant satisfied without hand-editing phase YAML. (A file that is **gone for good** is not a rename — remove the stale entry by hand; sync-paths only maps `old`→`new`.) The map is explicit because a moved file may be a rename, a merge, or a split — none recoverable from git heuristics.
+
+**Scope:** only `tasks[].reads` and `tasks[].writes` under `design/phases/*.yaml`. Never touches other phase fields, the roadmap, CHANGELOG, RFC prose, or any non-phase file. Re-serializes a changed phase in the same canonical form as `task finalize` / `phase reconcile`; for canonical phase YAML this keeps the diff to the touched `reads` / `writes` lines. Hand-written comments or non-canonical formatting in a phase file are not preserved.
+
+**Modes:**
+- No flag → check (dry-run): report the changes, write nothing.
+- `--write` → apply the changes via the atomic-text helper, under the write lock.
+- `--rename` is repeatable. Many `from` → one `to` is a merge (the collapsed duplicates are de-duplicated, first-occurrence order preserved). One `from` → two different `to` is `CONFIG_ERROR`.
+- A list with no matching entry is left verbatim — the file is not rewritten (a pre-existing duplicate is never silently removed).
+- An unparseable phase file is skipped and surfaced in `data.skipped`, never blocking the rest.
+
+**Exit code:**
+- `0` — check completed, or write completed (even when files were rewritten).
+- `2` — `CONFIG_ERROR`: missing `--rename`, malformed mapping (no `=`, empty side), identical `old`/`new`, conflicting mappings for one `from`, an unknown flag, or a stray positional.
+- `3` — unexpected runtime failure during a write.
+
+**JSON success shape:**
+```json
+{
+  "ok": true,
+  "data": {
+    "mode": "check",
+    "renames": [{ "from": "src/old.ts", "to": "src/new.ts" }],
+    "changes": [
+      {
+        "file": "design/phases/P1.yaml",
+        "task_id": "P1-T1",
+        "field": "reads",
+        "from": "src/old.ts",
+        "to": "src/new.ts"
+      }
+    ],
+    "files_changed": ["design/phases/P1.yaml"],
+    "written": [],
+    "skipped": []
+  }
+}
+```
+
+Under `--write`, `mode` is `"write"` and `written` lists every rewritten file. `skipped` carries `{ file, reason }` for any phase that failed to parse.
+
 ### `plan analyze [--strict] [--include-historical] [--json]` (v0.7)
 
 Cross-artifact integrity check. Compares design intent (task and phase `status`) against derived progress state (`deriveTaskState` over the progress ledger). Read-only.

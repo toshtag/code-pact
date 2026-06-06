@@ -15,7 +15,10 @@ import { Phase } from "../schemas/phase.ts";
 // Phase YAMLs are kept in `yaml.stringify` canonical form (the same form
 // `core/finalize/safe-write.ts` writes), so re-serializing a changed phase
 // produces a minimal diff — only the touched `reads` / `writes` lines move.
-// Files with no matching entry are never rewritten.
+// (As with safe-write, a hand-edited phase file carrying comments or
+// non-canonical formatting would lose them on rewrite; phases are kept
+// canonical, so this does not arise in practice.) Files with no matching entry
+// are never rewritten.
 
 export type SyncMode = "check" | "write";
 

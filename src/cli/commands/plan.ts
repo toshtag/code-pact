@@ -764,15 +764,22 @@ async function cmdPlanSyncPaths(
   globalJson: boolean,
 ): Promise<number> {
   void locale;
-  const { values } = parseArgs({
-    args: argv,
-    options: {
+  let values: Record<string, unknown>;
+  try {
+    // Strict parse: an unknown flag (e.g. the typo `--wriet`) or a stray
+    // positional must fail loudly. Silently degrading to dry-run would defeat a
+    // command whose whole job is to fix a CI failure — the user would think
+    // they wrote and see exit 0.
+    ({ values } = strictParse("plan sync-paths", argv, {
       json: { type: "boolean" },
       write: { type: "boolean" },
       rename: { type: "string", multiple: true },
-    },
-    strict: false,
-  });
+    }));
+  } catch (err) {
+    if (!(err instanceof ConfigError)) throw err;
+    emitError(globalJson || argv.includes("--json"), "CONFIG_ERROR", err.message);
+    return 2;
+  }
   const json = globalJson || values.json === true;
   const writeFlag = values.write === true;
   const cwd = process.cwd();
@@ -788,7 +795,7 @@ async function cmdPlanSyncPaths(
     );
     return 2;
   }
-  const renames: RenamePair[] = [];
+  const renameMap = new Map<string, string>();
   for (const r of rawRenames) {
     const eq = r.indexOf("=");
     if (eq <= 0 || eq === r.length - 1) {
@@ -809,8 +816,20 @@ async function cmdPlanSyncPaths(
       );
       return 2;
     }
-    renames.push({ from, to });
+    // Many from → one to is a legit merge; one from → two different to is
+    // ambiguous, so reject it rather than silently letting the last one win.
+    const existing = renameMap.get(from);
+    if (existing !== undefined && existing !== to) {
+      emitError(
+        json,
+        "CONFIG_ERROR",
+        `plan sync-paths: conflicting --rename for "${from}" ("${existing}" and "${to}").`,
+      );
+      return 2;
+    }
+    renameMap.set(from, to);
   }
+  const renames: RenamePair[] = [...renameMap].map(([from, to]) => ({ from, to }));
 
   const mode = writeFlag ? "write" : "check";
 

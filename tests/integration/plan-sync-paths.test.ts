@@ -143,6 +143,56 @@ describe("plan sync-paths", () => {
     expect(parsed.error?.code).toBe("CONFIG_ERROR");
   });
 
+  it("unknown flag (e.g. --wriet typo) → CONFIG_ERROR, exit 2 (never a silent dry-run)", () => {
+    const res = run([
+      "plan",
+      "sync-paths",
+      "--rename",
+      "src/old.ts=src/new.ts",
+      "--wriet",
+      "--json",
+    ]);
+    expect(res.code).toBe(2);
+    const parsed = JSON.parse(res.stdout) as SyncJson;
+    expect(parsed.error?.code).toBe("CONFIG_ERROR");
+  });
+
+  it("stray positional → CONFIG_ERROR, exit 2", () => {
+    const res = run([
+      "plan",
+      "sync-paths",
+      "--rename",
+      "src/old.ts=src/new.ts",
+      "unexpected",
+      "--json",
+    ]);
+    expect(res.code).toBe(2);
+    const parsed = JSON.parse(res.stdout) as SyncJson;
+    expect(parsed.error?.code).toBe("CONFIG_ERROR");
+  });
+
+  it("conflicting --rename for one source → CONFIG_ERROR, exit 2", () => {
+    const res = run([
+      "plan",
+      "sync-paths",
+      "--rename",
+      "src/a.ts=src/b.ts",
+      "--rename",
+      "src/a.ts=src/c.ts",
+      "--json",
+    ]);
+    expect(res.code).toBe(2);
+    const parsed = JSON.parse(res.stdout) as SyncJson;
+    expect(parsed.error?.code).toBe("CONFIG_ERROR");
+  });
+
+  it("bare --rename (no value) → CONFIG_ERROR, exit 2", () => {
+    const res = run(["plan", "sync-paths", "--rename", "--json"]);
+    expect(res.code).toBe(2);
+    const parsed = JSON.parse(res.stdout) as SyncJson;
+    expect(parsed.error?.code).toBe("CONFIG_ERROR");
+  });
+
   it("human mode dry-run: summary on stderr, stdout empty, exit 0", async () => {
     const res = run([
       "plan",
