@@ -1,10 +1,10 @@
-# Lightweight Runbook (v1.3+)
+# Lightweight Runbook
 
-This document is the agent- and reviewer-facing walkthrough of `task runbook` and `phase runbook`, the two commands introduced in v1.3.0 to answer the user-facing question "what should I run next?" deterministically. For the full design rationale, read [`design/decisions/lightweight-runbook-rfc.md`](../../design/decisions/lightweight-runbook-rfc.md). For the migration story from v1.2.x, read [`docs/migration.md` § v1.2.x → v1.3.0](../migration.md#v12x--v130).
+This document is the agent- and reviewer-facing walkthrough of `task runbook` and `phase runbook` — the two commands that answer "what should I run next?" deterministically. For the full per-command reference (flags, envelope), see [`docs/cli-contract.md` § `task runbook`](../cli-contract.md#task-runbook--read-only-guidance-for-a-single-task-v13-p12) and [§ `phase runbook`](../cli-contract.md#phase-runbook--read-only-guidance-for-an-entire-phase-v13-p12); for the design rationale, [`design/decisions/lightweight-runbook-rfc.md`](../../design/decisions/lightweight-runbook-rfc.md).
 
 ## Why the runbook exists
 
-After P10 (task readiness fields) and P11 (`task finalize` / `phase reconcile`), `code-pact` has the mechanical tools to keep design intent and operational fact in sync. But the per-task and per-phase command sequence was implicit — historically it lived in the dogfood walkthrough and in the maintainer's muscle memory, not in a CLI-emitted form. (The human-facing canonical loop is now [`docs/per-task-loop.md`](../per-task-loop.md); `runbook` is the machine-readable sequencing surface.)
+The per-task and per-phase command sequence needs a CLI-emitted form that agents and reviewers can consume without re-implementing the lifecycle state machine + drift classifier + reconcile classifier. (The human-facing canonical loop is [`docs/per-task-loop.md`](../per-task-loop.md); `runbook` is the machine-readable sequencing surface.)
 
 The cost of an implicit sequence:
 
@@ -42,7 +42,7 @@ The command resolves the task id by scanning every phase referenced by `design/r
 
 ### State → steps mapping
 
-> **Relationship to the canonical loop.** For starting work directly, the recommended entry point is `task prepare` (see [per-task-loop.md](../per-task-loop.md)), which bundles `task context`. The runbook predates `task prepare` and emits `task context` in its ready-task sequence below; this is **Stable (v1.3+)** output, so the command strings are kept as-is for contract stability. `task context` remains a supported diagnostic. Modernizing the runbook's emitted commands to `task prepare` would be a separate, compatibility-gated change.
+> **Relationship to the canonical loop.** For starting work directly, the recommended entry point is `task prepare` (see [per-task-loop.md](../per-task-loop.md)), which bundles `task context`. The runbook emits `task context` in its ready-task sequence below; that command string is kept as-is for contract stability, and `task context` remains a supported diagnostic.
 
 The runbook maps `(derived state, design status, drift kind)` → recommended steps. `task start` is the first step of the ready-task sequence for `planned + no events` tasks because it records the `planned → started` state-machine transition; downstream tools and handoff scripts depend on that event existing.
 
@@ -106,67 +106,41 @@ type RunbookStep = {
 };
 ```
 
-Two invariants:
+Two invariants: **every field is present in JSON output** (`null` where it does not apply, so consumers can assume a constant schema), and **exactly one of `command` / `manual_action` is non-null** (never both, never neither — a builder violation throws). The fixed shape lets agents and CI tools consume the output without field-absence branching.
 
-1. **Every field is present in JSON output.** `null` is used where a field does not apply to the particular step. JSON consumers can assume the schema is constant across step kinds.
-2. **Exactly one of `command` / `manual_action` is non-null.** Never both, never neither. Tests assert this; a builder violation throws.
+## Integration with readiness fields and finalization
 
-The fixed-shape invariant matters because runbook output is intended to be consumed by agents and CI tools, not just humans. Constant schema eliminates field-absence branching at the consumer.
-
-## Integration with P10 / P11
-
-Runbook reads — but never enforces — the optional fields introduced in P10:
+Runbook reads — but never enforces — the optional readiness fields:
 
 - **`depends_on`** — emits a blocking dependency-check step at the head when any dep is unsatisfied.
 - **`acceptance_refs`** — surfaced in `state_summary.acceptance_refs_check[]` with a per-path filesystem existence flag. Semantic validation of content is intentionally out of scope.
-- **`writes`** — surfaced in `state_summary.declared_writes[]`. No git-diff validation.
+- **`writes`** — surfaced in `state_summary.declared_writes[]` (see below).
 - **`decision_refs`** — surfaced in `state_summary.decision_refs[]`.
 
-Runbook proposes — but never executes — the v1.2 commands from P11:
+Runbook proposes — but never executes — the finalization commands: `task finalize <id> --write` is the single step recommended on `done-but-design-not-done` drift, and `phase reconcile <id> --write` is the single batch step recommended when at least one task in the phase is a `flip` candidate (per-task finalize enumeration is intentionally avoided).
 
-- **`task finalize <id> --write`** is the single step recommended when derived state is `done` and design status disagrees (`done-but-design-not-done` drift).
-- **`phase reconcile <id> --write`** is the single batch step recommended when at least one task in the phase is a `flip` candidate. Per-task finalize enumeration is intentionally avoided.
+## Declared writes as a governance review surface
 
-## Declared writes as a governance review surface (v1.4+ / P14)
-
-`state_summary.declared_writes[]` in `task runbook --json` output is the per-task view of the same review-surface contract documented in [`docs/concepts/finalization-reconciliation.md`](finalization-reconciliation.md#declared-writes-as-a-governance-review-surface). In summary:
-
-- **The field IS a reviewable declaration of intent.** A human or agent reviewing a PR can compare `declared_writes` against actual `git diff` changes to spot mismatches.
-- **`task runbook` itself does not audit writes.** It is a read-only declaration surface. The post-hoc git-diff audit lives on `task finalize --json` (working-tree by default, branch-level with `--base-ref <ref>`), and `--audit-strict` makes its warnings exit-relevant for CI.
-- **Nothing blocks a write as it happens.** code-pact does not run the agent's implementation, so there is no pre-write enforcement — the audit is post-hoc, and PR review is the human gate.
-- **`plan lint --strict` does promote `TASK_WRITES_PROTECTED_PATH` to exit-relevant** (existing binary `--strict` behaviour). See [`docs/cli-contract.md` § `plan lint`](../cli-contract.md#plan-lint---strict---include-quality---json-v07) for the strict-clean dogfood posture.
-
-Read the finalization-reconciliation walkthrough's review-surface section for the canonical `git diff` comparison workflow — both surfaces (`task finalize` and `task runbook`) emit the same `declared_writes` data, so either fits a reviewer's workflow.
+`state_summary.declared_writes[]` in `task runbook --json` is the per-task view of the **declared-writes review surface** — a read-only declaration of intent. `task runbook` itself runs no git audit. The canonical contract — the post-hoc `task finalize` audit (`--base-ref` / `--audit-strict`), the protected-path lint, and the PR-review workflow — lives in [`docs/concepts/finalization-reconciliation.md` § Declared writes as a governance review surface](finalization-reconciliation.md#declared-writes-as-a-governance-review-surface). Both surfaces emit the same `declared_writes` data.
 
 ## Error codes
 
-Both commands introduce **zero new error codes**. They reuse:
+Both commands add **no new error codes**. They reuse `TASK_NOT_FOUND` / `AMBIGUOUS_TASK_ID` (`task runbook`), `PHASE_NOT_FOUND` (`phase runbook`), and `CONFIG_ERROR` (missing positional id, or unknown flag) — exit 2 each. Full reference: [`docs/cli-contract.md` § Error codes](../cli-contract.md#error-codes).
 
-| Code | Exit | When |
-| --- | --- | --- |
-| `TASK_NOT_FOUND` | 2 | `task runbook` — task id is not present in any phase |
-| `AMBIGUOUS_TASK_ID` | 2 | `task runbook` — task id appears in more than one phase |
-| `PHASE_NOT_FOUND` | 2 | `phase runbook` — phase id is not present in `design/roadmap.yaml` |
-| `CONFIG_ERROR` | 2 | Missing positional id, or unknown flag |
+## Canonical command names and aliases
 
-`KNOWN_CODES.public` in `tests/unit/error-code-surface.test.ts` is unchanged in v1.3.
+`task next` and `phase next` are Stable public aliases for `task runbook` and `phase runbook`. `runbook` remains the canonical contract name, and machine-readable output continues to emit `task runbook` / `phase runbook` in `next_steps[].command`. See [`docs/cli-contract.md` § Command aliases](../cli-contract.md#command-aliases).
 
-## What's intentionally NOT in v1.3
+## Intentionally out of scope
 
-The RFC § Open questions enumerates deferrals. The headline items:
-
-- **`task runbook --execute`** — a flag that would run each recommended step automatically. The runbook's value is judgement, not orchestration; revisit only if usage signal warrants.
-- **`task next` / `phase next` aliases** — not part of the original v1.3 runbook scope, but have since shipped as secondary Stable public aliases for `task runbook` / `phase runbook`. `runbook` remains the canonical contract name and the command emitted in machine-readable runbook output (`next_steps[].command`). See [`docs/cli-contract.md` § Command aliases](../cli-contract.md#command-aliases).
-- **Schema-level `human_gate` field** — manual checkpoints are expressed as `RunbookStep` content (`command: null` + `manual_action: "..."`) without a task-schema field. Promotion to a schema field requires more usage signal.
-- **Multi-phase `phase runbook --all`** — per-phase only in v1.3.
-- **Bundling `recommend` output into `task runbook`** — separate commands, intentionally. Bundling is a P13 candidate.
-- **Init / wizard / task-add UX polish** — P13 scope per the RFC § Planning UX / init UX boundary.
+- **`task runbook --execute`** — a flag that would run each recommended step automatically. The runbook's value is judgement, not orchestration.
+- **Schema-level `human_gate` field** — manual checkpoints are expressed as `RunbookStep` content (`command: null` + `manual_action: "..."`), not a task-schema field.
+- **Multi-phase `phase runbook --all`** — per-phase only.
+- **Bundling `recommend` output into `task runbook`** — separate commands by design; `task prepare` is the surface that bundles them.
 
 ## See also
 
 - [`design/decisions/lightweight-runbook-rfc.md`](../../design/decisions/lightweight-runbook-rfc.md) — the accepted RFC with full alternatives and open questions.
-- [`docs/cli-contract.md` § `task runbook`](../cli-contract.md#task-runbook--read-only-guidance-for-a-single-task-v13-p12)
-- [`docs/cli-contract.md` § `phase runbook`](../cli-contract.md#phase-runbook--read-only-guidance-for-an-entire-phase-v13-p12)
-- [`docs/migration.md` § v1.2.x → v1.3.0](../migration.md#v12x--v130) — adoption pattern and CI implications.
-- [`docs/concepts/finalization-reconciliation.md`](finalization-reconciliation.md) — P11 sibling. The commands runbook proposes (`task finalize`, `phase reconcile`) live in detail here.
-- [`docs/concepts/task-readiness-fields.md`](task-readiness-fields.md) — P10 sibling. The fields runbook reads (`depends_on`, `acceptance_refs`, `writes`, `decision_refs`) are documented here.
+- [`docs/cli-contract.md` § `task runbook`](../cli-contract.md#task-runbook--read-only-guidance-for-a-single-task-v13-p12) / [§ `phase runbook`](../cli-contract.md#phase-runbook--read-only-guidance-for-an-entire-phase-v13-p12) — the full per-command reference.
+- [`docs/concepts/finalization-reconciliation.md`](finalization-reconciliation.md) — `task finalize` / `phase reconcile`, the commands runbook proposes.
+- [`docs/concepts/task-readiness-fields.md`](task-readiness-fields.md) — the readiness fields runbook reads (`depends_on`, `acceptance_refs`, `writes`, `decision_refs`).
