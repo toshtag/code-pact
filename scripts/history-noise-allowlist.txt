@@ -21,5 +21,6 @@ docs/migration.md
 # version annotations.
 docs/cli-contract.md
 
-# --- Temporary: known-dirty docs, to be cleaned/collapsed and de-listed ---
-docs/spec-kit-bridge.md
+# --- Temporary: none. Every concept/bridge doc has been cleaned and de-listed.
+#     Do not re-open this section to silence a fresh violation — clean the doc
+#     instead (the ratchet also rejects a stale entry once it has no version tags).
