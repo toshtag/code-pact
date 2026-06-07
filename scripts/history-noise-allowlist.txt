@@ -1,0 +1,25 @@
+# History-noise gate allowlist — scripts/check-history-noise.mjs
+#
+# Each non-comment line is a repo-relative path EXEMPT from the version-tag
+# (vX.Y) gate.
+#
+# RATCHET RULE: this list may only SHRINK. Never add a path to silence a fresh
+# violation — clean the violation in the file instead. Remove a path once its
+# file is cleaned. docs/maintainers/** is exempt in the checker itself (the
+# sanctioned home for version history) and is intentionally not listed here.
+
+# --- Permanent: version numbers are load-bearing to the doc's purpose ---
+docs/upgrading.md
+docs/migration.md
+
+# --- Temporary: known-dirty heavy docs, to be cleaned and de-listed ---
+docs/cli-contract.md
+docs/troubleshooting.md
+docs/agent-contract.md
+docs/concepts/governance.md
+docs/concepts/finalization-reconciliation.md
+docs/concepts/task-readiness-fields.md
+docs/concepts/runbook.md
+docs/concepts/evidence-harness.md
+docs/concepts/decision-gate.md
+docs/spec-kit-bridge.md
