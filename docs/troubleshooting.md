@@ -210,7 +210,7 @@ code-pact init --sample-phase
 # → creates design/phases/TUTORIAL-walkthrough.yaml + the roadmap entry.
 ```
 
-If you genuinely want a phase named `TUTORIAL` for a non-tutorial purpose, **pick a different id**. The block uses the existing `CONFIG_ERROR` envelope — no new error code ships for this. The error message names the reserved id and points back at `init --sample-phase` as the sanctioned path. Existing v1.4.x projects with a TUTORIAL phase are untouched; the block only fires on new creation. See [`docs/concepts/sample-phase.md`](concepts/sample-phase.md#tutorial-is-a-reserved-phase-id-v15--p14) for the user-facing rules.
+If you genuinely want a phase named `TUTORIAL` for a non-tutorial purpose, **pick a different id**. The block uses the existing `CONFIG_ERROR` envelope — no new error code ships for this. The error message names the reserved id and points back at `init --sample-phase` as the sanctioned path. Existing projects with a TUTORIAL phase are untouched; the block only fires on new creation. See [`docs/concepts/sample-phase.md`](concepts/sample-phase.md#tutorial-is-a-reserved-phase-id) for the user-facing rules.
 
 ## `ADAPTER_GENERATOR_STALE` from `adapter doctor` / global `doctor`
 

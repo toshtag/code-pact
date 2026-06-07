@@ -39,7 +39,7 @@ Design-mutating commands acquire `.code-pact/locks/write.lock` at the CLI comman
 
 | Command | Lock acquired? |
 | --- | --- |
-| `init --sample-phase` / `init` (wizard, may create sample phase) | Yes |
+| `init --sample-phase` / `init` | Yes |
 | `phase add` (flag-based + wizard) | Yes |
 | `phase new` (wizard) | Yes (held through prompts) |
 | `phase import` | Yes (single outer acquisition covers the multi-phase apply loop) |
@@ -61,7 +61,7 @@ The id `TUTORIAL` is reserved at the governance layer for the sample-phase artif
 
 | Path | Outcome |
 | --- | --- |
-| `init --sample-phase` (or `init` wizard → yes) | **Allowed** — internal `_isSampleCreation: true` bypass on `createPhase` |
+| `init --sample-phase` (interactive or non-interactive) | **Allowed** — internal `_isSampleCreation: true` bypass on `createPhase` |
 | `phase add --id TUTORIAL ...` | `CONFIG_ERROR` (exit 2). Roadmap byte-identical |
 | `phase new` wizard → typing `TUTORIAL` | `CONFIG_ERROR` (exit 2) |
 | `phase import` containing `id: TUTORIAL` (any position) | `CONFIG_ERROR` (exit 2) from a **preflight scan** — the entire import is rejected before any phase YAML is written |
@@ -69,7 +69,7 @@ The id `TUTORIAL` is reserved at the governance layer for the sample-phase artif
 
 The block reuses the existing `CONFIG_ERROR` envelope — **no new error code** ships for this. The error message names the reserved id and points at `init --sample-phase` as the sanctioned path. Configurable reserved-id lists and an advisory `RESERVED_ID_USAGE` plan-lint warning for existing TUTORIAL phases are deferred to a future RFC.
 
-See [`docs/concepts/sample-phase.md` § TUTORIAL is a reserved phase id](sample-phase.md#tutorial-is-a-reserved-phase-id-v15--p14) for the user-facing usage.
+See [`docs/concepts/sample-phase.md` § TUTORIAL is a reserved phase id](sample-phase.md#tutorial-is-a-reserved-phase-id) for the user-facing usage.
 
 ### 3. Roadmap mutation policy
 

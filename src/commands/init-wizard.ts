@@ -10,8 +10,9 @@ export type InitWizardOptions = {
   force: boolean;
   json: boolean;
   /**
-   * When true, the wizard skips the "create sample phase?" prompt and
-   * forces creation. Passed from the CLI when `--sample-phase` was set.
+   * When true, the wizard creates the sample phase after collecting the
+   * normal init answers. Passed from the CLI when `--sample-phase` was set;
+   * the wizard no longer prompts for the sample phase.
    */
   samplePhaseOverride?: boolean;
   /** Optional pre-built prompter (for tests). Defaults to stdin/stderr. */

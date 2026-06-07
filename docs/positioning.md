@@ -70,7 +70,7 @@ a fixed flag surface across the v1.x line.
   given task: model tier, effort, planning posture, context
   budget profile, preflight steps, and `lifecycleMode`
   (`full_loop` / `record_only` / `decision_loop`).
-- **`code-pact task prepare`** *(v1.11+)* — single
+- **`code-pact task prepare`** — single
   progress-read-only entry point per task. Returns current
   state, recommendation, context pack metadata, a structured
   `next_action`, and a `commands` dictionary listing every
@@ -84,7 +84,7 @@ a fixed flag surface across the v1.x line.
   Markdown context pack for a task and returns/prints it; it is
   a read-only diagnostic and does not write the pack file
   (`task prepare` and the low-level `pack` are the writers).
-  With `--explain` *(v1.11+)* the JSON envelope adds a
+  With `--explain` the JSON envelope adds a
   per-section `bytes` + `reason_code` breakdown so the
   inclusion decisions become auditable.
 - **`code-pact task start` / `task complete` / `task
@@ -106,7 +106,7 @@ a fixed flag surface across the v1.x line.
   per-agent instruction files and registers a manifest;
   `doctor` detects drift across manifest, generator, and
   contract surfaces.
-- **`code-pact adapter conformance`** *(v1.11+)* — focused
+- **`code-pact adapter conformance`** — focused
   read-only check that the installed adapter satisfies the
   agent contract: required CLI surface mentions, three
   contract axes, failure guidance, per-file checksum.
@@ -120,7 +120,7 @@ a fixed flag surface across the v1.x line.
 
 These are the project's own measures of whether `code-pact` is
 delivering on its premise. Baseline values were measured by
-the Evidence Harness v2 (P26) against the dogfood corpus and
+the Evidence Harness v2 against the dogfood corpus and
 are recomputed on every harness run.
 
 - **Context pack p50 / p90 / max bytes.** The cost of being
@@ -140,7 +140,7 @@ are recomputed on every harness run.
   proxy for whether the contract is legible enough to act on.
   The v2 operational definition counts a task as adherent when
   it has at least one `started` event before its first `done`
-  event AND does not exhibit the legacy v0.6 `planned → done`
+  event AND does not exhibit the legacy `planned → done`
   shortcut. `task prepare` invocations are not currently
   observable in the progress ledger (it is a read-only command and
   emits no event), so the metric measures state-machine
@@ -174,8 +174,7 @@ metric values, the dogfood-corpus git SHA, the denominators
 Two standing caveats on that snapshot:
 
 - **Lifecycle adherence sits below 100%** — the gap is historical tasks
-  (mostly pre-v0.7) that used the legacy `planned → done` shortcut, not
-  current behaviour.
+  that used the legacy `planned → done` shortcut, not current behaviour.
 - **Undeclared-write rate is `deferred`** ([rationale](../design/decisions/evidence-harness-v2-rfc.md#non-goals-out-of-scope-for-p26))
   — it awaits a future phase that attributes git commits to tasks via
   lifecycle instrumentation.

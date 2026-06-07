@@ -51,7 +51,7 @@ Weights are an annotated estimate, not a budget. 5–30 is the typical band per 
 
 ## When to keep the sample phase
 
-`code-pact init --sample-phase` writes an opt-in **sample phase** (`TUTORIAL`, v1.4+). Its id is reserved, so it never collides with your real `P1` — importing your generated roadmap is safe even if the sample phase is still present. Still, **delete it once `plan prompt` + `phase import` have produced your real phases**: it is tutorial-only scaffolding, not part of your roadmap. See [`docs/concepts/sample-phase.md`](../concepts/sample-phase.md) for the keep/rename/delete decision in full. If you only wanted to watch the loop run, prefer `code-pact tutorial` — it leaves nothing to delete.
+`code-pact init --sample-phase` writes an opt-in **sample phase** (`TUTORIAL`). Its id is reserved, so it never collides with your real `P1` — importing your generated roadmap is safe even if the sample phase is still present. Still, **delete it once `plan prompt` + `phase import` have produced your real phases**: it is tutorial-only scaffolding, not part of your roadmap. See [`docs/concepts/sample-phase.md`](../concepts/sample-phase.md) for the keep/rename/delete decision in full. If you only wanted to watch the loop run, prefer `code-pact tutorial` — it leaves nothing to delete.
 
 ## Recommended first PR
 
@@ -66,5 +66,5 @@ After that single round trip, the rest of the roadmap is mechanical.
 ## Next reading
 
 - [`docs/getting-started.md`](../getting-started.md) — command sequences for every onboarding approach.
-- [`docs/concepts/sample-phase.md`](../concepts/sample-phase.md) — keep / rename / delete decision for the wizard's sample phase.
+- [`docs/concepts/sample-phase.md`](../concepts/sample-phase.md) — keep / rename / delete decision for the `init --sample-phase` artifact.
 - [`docs/cli-contract.md`](../cli-contract.md) — full flag and JSON envelope reference.

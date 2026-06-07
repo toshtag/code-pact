@@ -58,7 +58,7 @@ async function readProjectYaml(): Promise<{
   return parseYaml(raw) as ReturnType<typeof readProjectYaml> extends Promise<infer T> ? T : never;
 }
 
-// v1.15: the wizard no longer prompts for the sample phase. The prompt
+// Invariant: the wizard does not prompt for the sample phase. The prompt
 // sequence is: locale, agents, [default_agent], adapters, verify.
 // Sample-phase creation is opt-in only via `samplePhaseOverride` (the
 // `--sample-phase` CLI flag).
@@ -203,6 +203,32 @@ describe("runInitWizard — sample phase", () => {
     });
     const phaseCreated = result.created.some((p) => p.includes("TUTORIAL-walkthrough.yaml"));
     expect(phaseCreated).toBe(true);
+  });
+
+  it("bakes no version/phase-provenance history noise into the generated YAML", async () => {
+    const { prompter } = makePrompter([
+      "1", // locale
+      "1", // agents
+      "n", // adapters
+      "1", // verify: preset pnpm test
+    ]);
+    await runInitWizard({
+      cwd: tmpDir,
+      force: false,
+      json: false,
+      samplePhaseOverride: true,
+      prompter,
+    });
+    const phase = await readFile(
+      join(tmpDir, "design", "phases", "TUTORIAL-walkthrough.yaml"),
+      "utf8",
+    );
+    // The sample phase is user-facing output written into the user's design/
+    // tree. It must not leak internal phase-provenance ids or version tags.
+    // Guarding the generator keeps the docs example and the real output from
+    // drifting apart.
+    expect(phase).not.toMatch(/\bP\d+(?:-T\d+)?\b/);
+    expect(phase).not.toMatch(/\bv\d+\.\d+(?:\.\d+)?\b/);
   });
 
   it("does not create the sample phase by default (no prompt, no override)", async () => {
