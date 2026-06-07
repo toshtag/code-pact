@@ -195,7 +195,7 @@ If you do not already have spec-driven planning artifacts from another tool, you
 - **Bidirectional sync** (code-pact phase YAML → Spec Kit tasks.md): out of charter. code-pact stays a control plane that other tools' outputs flow into.
 - **Live watch / auto-sync** on `tasks.md` file change: importer is explicitly invoked.
 - **Auto-apply `--suggest-from` to `design/brief.md` / `design/constitution.md`**: out of scope; this mode ships suggestion-only.
-- **Importers for non-Spec-Kit formats** (Cursor rules, Linear specs, Notion exports): each would warrant its own phase + RFC with its own supported-subset analysis.
+- **Importers for non-Spec-Kit formats** (Cursor rules, Linear specs, Notion exports): out of scope; each format needs its own supported-subset analysis and import contract.
 - **A full Spec Kit-compatible spec generator**: out of charter. Re-implementing Spec Kit would invite the "code-pact replaces Spec Kit" misframing and dilute the control-plane positioning.
 
 See [design/decisions/spec-kit-bridge-rfc.md](../design/decisions/spec-kit-bridge-rfc.md) for the full design rationale and alternatives considered.
