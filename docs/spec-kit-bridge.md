@@ -81,7 +81,7 @@ code-pact spec import --from tasks.md --phase-id P-feature --write --force
 
 ### What the importer does NOT do
 
-- **It does not add the new phase to `design/roadmap.yaml`.** code-pact treats `design/roadmap.yaml` as a chokepoint; coupling import to roadmap mutation would silently bypass that contract. Run `phase add --id <id>` (or hand-edit `design/roadmap.yaml`) as the explicit follow-up.
+- **It does not add the new phase to `design/roadmap.yaml`.** `spec import --write` writes an *unregistered* draft at `design/phases/<id>-imported.yaml`; code-pact treats `design/roadmap.yaml` as a chokepoint, so coupling import to roadmap mutation would silently bypass that contract. To adopt the draft, review it and then add a `design/roadmap.yaml` entry that points at that file. (`phase add` is **not** that step — it creates a *fresh* phase from flags, so it would not register the imported draft.)
 - **It does not call any LLM API.** The importer is a pure parser + transform.
 - **It does not watch the source file.** You re-run `spec import` explicitly when `tasks.md` changes.
 - **It does not support every Spec Kit construct.** Only the documented subset above. Constructs outside the subset are dropped, not silently mis-mapped.
@@ -92,8 +92,10 @@ code-pact spec import --from tasks.md --phase-id P-feature --write --force
 # 1. Review the generated phase
 $EDITOR design/phases/P-feature-imported.yaml
 
-# 2. Add the phase to design/roadmap.yaml (explicit step)
-# (hand-edit or `phase add --id P-feature` once that command lands)
+# 2. Adopt the reviewed draft explicitly: add a design/roadmap.yaml entry
+#    that points at design/phases/P-feature-imported.yaml.
+#    (Do NOT use `phase add` for this — it creates a fresh phase from flags,
+#     not a registration of the imported draft.)
 
 # 3. Validate
 code-pact plan lint --json
@@ -182,7 +184,8 @@ All `spec import` failures reuse the existing `CONFIG_ERROR` code (no new public
 | Command | What it gives you |
 | --- | --- |
 | `phase import` | Bulk YAML roadmap import (you already have a `roadmap.yaml`) |
-| `plan brief --from-file` / `--stdin` / flag-driven | Non-interactive brief / constitution authoring |
+| `plan brief --from-file` / `--stdin` / flag-driven | Non-interactive brief authoring |
+| `plan constitution --from-file` / `--stdin` / flag-driven | Non-interactive constitution authoring |
 | **`spec import`** | **Ingest external spec-driven planning artifacts (Spec Kit tasks.md / spec.md / plan.md)** |
 
 If you do not already have spec-driven planning artifacts from another tool, you do not need this command — use `init` + `plan brief` + `plan constitution` as the bootstrap path.
