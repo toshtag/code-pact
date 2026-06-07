@@ -518,7 +518,7 @@ Parses a Spec Kit-style `tasks.md` (or any Markdown that follows the supported s
 
 **Generated phase shape:** tasks carry minimal P10 defaults — `type=feature`, all judgement axes (`ambiguity`, `risk`, `context_size`, `write_surface`, `verification_strength`, `expected_duration`) = `medium`, `status=planned`. Descriptions are the verbatim `- [ ]` text prefixed with the section title (`[Section Name] task text`). The user adds `reads` / `writes` / `acceptance_refs` after import.
 
-**The importer does NOT add the generated phase to `design/roadmap.yaml`** — that stays an explicit follow-up governed by P14 (`phase add --id <id>` or hand-edit). Coupling the two operations would silently bypass the P14 chokepoint contract.
+**The importer does NOT add the generated phase to `design/roadmap.yaml`** — `--write` persists an *unregistered* draft, and adopting it (adding a `roadmap.yaml` entry that points at the imported file) stays an explicit, hand-edited follow-up. Coupling the two operations would silently bypass the roadmap chokepoint contract. Note `phase add` does **not** register the imported draft: it creates a *fresh* phase from flags.
 
 **Success envelope:**
 
