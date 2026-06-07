@@ -30,7 +30,7 @@ The status word governs the gate:
 | `accepted` | resolves — the task can complete |
 | `proposed` / `draft` / `rejected` / `superseded` | does **not** resolve |
 | empty file | does **not** resolve |
-| explicit unknown word (e.g. a typo `acceptd`) | does **not** resolve (surfaced as [`ADR_STATUS_UNRECOGNIZED`](../troubleshooting.md#adr_status_unrecognized-from-plan-lint---include-quality-v124)) |
+| explicit unknown word (e.g. a typo `acceptd`) | does **not** resolve (surfaced as [`ADR_STATUS_UNRECOGNIZED`](../troubleshooting.md#adr_status_unrecognized-from-plan-lint---include-quality)) |
 | **no status line** (non-empty body) | resolves as accepted — the only lenient case, kept so projects that predate status-aware parsing (v1.22) are not broken on upgrade |
 
 ### Implementation commitments (v1.27+, P43)
@@ -44,7 +44,7 @@ An accepted ADR may carry an optional `## Implementation commitments` section: a
 - [x] Update docs/cli-contract.md
 ```
 
-`done` semantics: an **unchecked** item (`- [ ]`) is downstream work still to implement; a **checked** item (`- [x]`) is work already satisfied, or an explicit non-work statement (`- [x] No downstream implementation work.`). Use the no-work item **only when the ADR genuinely has no implementation consequences — not merely to silence the [`ADR_COMMITMENTS_EMPTY`](../troubleshooting.md#adr_commitments_empty-from-plan-lint---include-quality-v127) advisory** (the point of recording commitments is to make the downstream consequences deliberate).
+`done` semantics: an **unchecked** item (`- [ ]`) is downstream work still to implement; a **checked** item (`- [x]`) is work already satisfied, or an explicit non-work statement (`- [x] No downstream implementation work.`). Use the no-work item **only when the ADR genuinely has no implementation consequences — not merely to silence the [`ADR_COMMITMENTS_EMPTY`](../troubleshooting.md#adr_commitments_empty-from-plan-lint---include-quality) advisory** (the point of recording commitments is to make the downstream consequences deliberate).
 
 `task prepare` echoes these for a gated task as `decision_commitments` (parsed deterministically — checkbox extraction under the fixed heading, no summarization). It is advisory context, not a gate.
 
@@ -78,7 +78,7 @@ surfaces it earlier as advisories.
 | `verify` (standalone) | a failed `decision` check in `data.checks` (note: NOT `data.verify.checks`, which is the `task complete` path) | At completion time, when the gate can't resolve an accepted ADR | **Yes** (exit non-zero) |
 | `plan lint --include-quality` | `TASK_DECISION_UNRESOLVED` | A `requires_decision` task whose gate doesn't resolve (no ADR, or one that is proposed/empty/etc.) | No (advisory) |
 | `plan lint --include-quality` | `ADR_STATUS_UNRECOGNIZED` | An ADR whose explicit status word is a typo | No (advisory) — surfaces *why* the gate won't resolve |
-| `plan lint --include-quality` | [`ADR_COMMITMENTS_EMPTY`](../troubleshooting.md#adr_commitments_empty-from-plan-lint---include-quality-v127) (v1.27+, P43) | An accepted ADR that **resolves** a gated task's gate, with no/empty `## Implementation commitments` | No (advisory) — unreferenced ADRs and unresolved (partially-accepted) gates never fire |
+| `plan lint --include-quality` | [`ADR_COMMITMENTS_EMPTY`](../troubleshooting.md#adr_commitments_empty-from-plan-lint---include-quality) (v1.27+, P43) | An accepted ADR that **resolves** a gated task's gate, with no/empty `## Implementation commitments` | No (advisory) — unreferenced ADRs and unresolved (partially-accepted) gates never fire |
 | `task prepare` | `decision_commitments` (v1.27+, P43) | A `requires_decision` task — echoes each accepted **considered** ADR's parsed `## Implementation commitments` (resolved-agnostic) | No (advisory context, not a gate) |
 
 ## Recommended flow
@@ -92,5 +92,5 @@ surfaces it earlier as advisories.
 
 - [`design/decisions/README.md` § ADR status convention](../../design/decisions/README.md) — the canonical status-line format and the `proposed → accepted` lifecycle.
 - [`design/decisions/dogfood-trust-hardening-rfc.md`](../../design/decisions/dogfood-trust-hardening-rfc.md) — the RFC (§3 status-aware gate, §3-D scaffolding) behind this feature.
-- [`docs/troubleshooting.md`](../troubleshooting.md#decision_required-from-task-record-done-v121) — recovery for `DECISION_REQUIRED` / `ADR_STATUS_UNRECOGNIZED`.
+- [`docs/troubleshooting.md`](../troubleshooting.md#decision_required-from-task-record-done) — recovery for `DECISION_REQUIRED` / `ADR_STATUS_UNRECOGNIZED`.
 - [`docs/cli-contract.md` § Error codes](../cli-contract.md#error-codes) — the exact `DECISION_REQUIRED` envelope (`via` / `considered` / `current_resolution`).

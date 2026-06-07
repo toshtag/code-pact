@@ -164,4 +164,4 @@ The block uses the existing `CONFIG_ERROR` envelope; no new error code ships for
 - [`docs/concepts/runbook.md`](runbook.md) — the per-task / per-phase guidance the TUTORIAL artifact lets you demo end-to-end.
 - [`docs/concepts/task-readiness-fields.md`](task-readiness-fields.md) — the readiness fields TUTORIAL-T2 declares (`depends_on`).
 - [`docs/concepts/finalization-reconciliation.md`](finalization-reconciliation.md) — the commands the tutorial walks through (`task finalize` / `phase reconcile`).
-- [`docs/concepts/governance.md`](governance.md) — the governance layer that hardens the TUTORIAL reservation and serializes design-mutating commands behind the advisory write lock.
+- [`docs/concepts/governance.md`](governance.md) — the governance layer that hardens the TUTORIAL reservation and serializes governance lifecycle mutations behind the advisory write lock.

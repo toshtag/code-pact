@@ -16,7 +16,6 @@ docs/migration.md
 
 # --- Temporary: known-dirty heavy docs, to be cleaned and de-listed ---
 docs/cli-contract.md
-docs/troubleshooting.md
 docs/concepts/runbook.md
 docs/concepts/evidence-harness.md
 docs/concepts/decision-gate.md

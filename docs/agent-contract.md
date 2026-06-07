@@ -100,8 +100,8 @@ corruption is invisible until a check runs. An agent must treat these as
   where. Apply `manual_action` (renumber one side + update the things that
   reference it), then run `confirm`.
 - `AMBIGUOUS_PHASE_ID` / `AMBIGUOUS_TASK_ID` (top-level `error.code`, **exit 2**)
-  — a resolver **failed closed** rather than guessing which duplicate you meant
-  (control-plane v2 PR1a). `data.phases[]` lists the colliding locations
+  — a resolver **failed closed** rather than guessing which duplicate you meant.
+  `data.phases[]` lists the colliding locations
   (`AMBIGUOUS_PHASE_ID`: the phase **file paths**; `AMBIGUOUS_TASK_ID`: the **phase
   ids** that both define the task). Do **not** retry the same id; resolve the
   underlying duplicate first (the `plan lint` errors above), then re-run the
@@ -125,7 +125,7 @@ corruption is invisible until a check runs. An agent must treat these as
 The tool deliberately surfaces these rather than auto-resolving them — picking a
 winner silently is how a teammate's work gets overwritten. Full per-code recovery
 steps: [`docs/troubleshooting.md` § Id collisions & mismatches](troubleshooting.md#id-collisions--mismatches-collaboration)
-and [§ `PROGRESS_EVENT_CONFLICT`](troubleshooting.md#progress_event_conflict-from-doctor--plan-analyze-v131).
+and [§ `PROGRESS_EVENT_CONFLICT`](troubleshooting.md#progress_event_conflict-from-doctor--plan-analyze).
 
 ### Determinism
 
