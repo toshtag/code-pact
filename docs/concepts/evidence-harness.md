@@ -1,12 +1,12 @@
 # Evidence harness
 
-> code-pact v1.10+ (v2 outputs added in v1.12 / P26). **Maintainer tooling, not a product feature.** The harness lives at `scripts/harness/` and is invoked via `pnpm harness`. It is never registered in `package.json` `bin`, never surfaces in JSON envelopes, and never appears in `code-pact --help`.
+> **Maintainer tooling, not a product feature.** The harness lives at `scripts/harness/` and is invoked via `pnpm harness`. It is never registered in `package.json` `bin`, never surfaces in JSON envelopes, and never appears in `code-pact --help`.
 
 ## Why this exists
 
-Every design decision in code-pact through v1.9 was made on qualitative judgement: "this feels safer", "this feels noisier", "this is the natural break-point". The qualitative posture carried the project through P1–P19 without major regressions, but two recent calls hit its limits — the cycle severity in P19-T2 and the strict-clean dogfood scope in P15-T3 both turned on questions that quantitative evidence could have settled deterministically.
+Many design decisions in code-pact are made on qualitative judgement: "this feels safer", "this feels noisier", "this is the natural break-point". That posture carries the project a long way, but some calls hit its limits — questions (a dependency cycle's severity, the strict-clean dogfood scope) that turn on quantities quantitative evidence could settle deterministically.
 
-The harness is the path out. It captures a small set of deterministic metrics from the corpus and emits CSV that future RFCs can cite as "the v1.10 baseline shows X". Move design judgement from "感覚" to "measurement", one row at a time.
+The harness is the path out. It captures a small set of deterministic metrics from the corpus and emits CSV that an RFC can cite as "the baseline shows X". Move design judgement from "感覚" to "measurement", one row at a time.
 
 See [`design/decisions/evidence-harness-rfc.md`](../../design/decisions/evidence-harness-rfc.md) for the full rationale and alternatives considered.
 
@@ -20,12 +20,12 @@ Six CSV files plus a manifest and an aggregate summary, under `docs/maintainers/
 | `verify-success-rate.csv` | task with a `done` event | First-pass vs retry counts. Quantifies how strong verification commands are at catching real failures vs how often agents have to retry. |
 | `task-event-density.csv` | task with ≥ 1 event | Progress event histogram (started / blocked / resumed / done / failed) + `event_span_days`. Quantifies how often tasks bounce vs flow linearly. |
 | `lint-issue-histogram.csv` | (phase, code) pair | Count of each `plan lint --include-quality` diagnostic across the corpus. Quantifies the "noise floor" of the lint surface — a row count of 0 means the strict-clean dogfood regime is holding. |
-| `lifecycle-adherence-by-task.csv` *(v1.12+ / P26)* | task with ≥ 1 event | Per-task booleans: `started_before_done` (earliest started precedes earliest done), `had_retry`, `had_block`, `legacy_planned_to_done_shortcut`. Quantifies how often the recommended lifecycle is followed. |
-| `adapter-drift-by-agent.csv` *(v1.12+ / P26)* | agent referenced in any issue or progress event | `doctor_ok` + per-`ADAPTER_*`-code counts. Quantifies how often `adapter doctor` surfaces real drift. |
+| `lifecycle-adherence-by-task.csv` | task with ≥ 1 event | Per-task booleans: `started_before_done` (earliest started precedes earliest done), `had_retry`, `had_block`, `legacy_planned_to_done_shortcut`. Quantifies how often the recommended lifecycle is followed. |
+| `adapter-drift-by-agent.csv` | agent referenced in any issue or progress event | `doctor_ok` + per-`ADAPTER_*`-code counts. Quantifies how often `adapter doctor` surfaces real drift. |
 
 The sibling `measurements.manifest.json` records the harness version, the corpus git SHA, the cli version, the generation date (date only, no clock time), and the CSV file list.
 
-`summary.json` *(v1.12+ / P26)* is an aggregate sidecar with `summary_schema_version: 1`. It computes the five success metrics the v1.11 [`docs/positioning.md`](../positioning.md) and [`docs/agent-contract.md`](../agent-contract.md) cite from the rows of the CSVs above. Shape:
+`summary.json` is an aggregate sidecar with `summary_schema_version: 1`. It computes the five success metrics [`docs/positioning.md`](../positioning.md) and [`docs/agent-contract.md`](../agent-contract.md) cite from the rows of the CSVs above. Shape:
 
 ```json
 {
@@ -61,7 +61,7 @@ The sibling `measurements.manifest.json` records the harness version, the corpus
 
 ### Undeclared-write-rate deferral
 
-`summary.json` carries `undeclared_write_rate_status: "deferred"` (never `"computed"` in v1.12). The metric is defined in `docs/positioning.md` but is intentionally not computed because the project does not enforce a formal commit → task link — commits often touch multiple tasks; many tasks have no clean git boundary. A historical retrofit would either over-claim or require new lifecycle instrumentation.
+`summary.json` carries `undeclared_write_rate_status: "deferred"` (never `"computed"`). The metric is defined in `docs/positioning.md` but is intentionally not computed because the project does not enforce a formal commit → task link — commits often touch multiple tasks; many tasks have no clean git boundary. A historical retrofit would either over-claim or require new lifecycle instrumentation.
 
 A future phase may add an event-on-finalize that records the `task finalize --audit-strict` audit result to the progress ledger, making the metric observable historically without git attribution. The deferral is documented in [`design/decisions/evidence-harness-v2-rfc.md` Non-goals](../../design/decisions/evidence-harness-v2-rfc.md#non-goals-out-of-scope-for-p26).
 
@@ -80,7 +80,7 @@ pnpm harness --corpus . --json
 pnpm harness --corpus . --write --json
 ```
 
-The harness operates on any path that has a `design/` directory and (optionally) a progress ledger under `.code-pact/state/`. v1.10 / v1.12 ships baseline measurements for the dogfood corpus only.
+The harness operates on any path that has a `design/` directory and (optionally) a progress ledger under `.code-pact/state/`. It ships baseline measurements for the dogfood corpus only.
 
 ## Byte-determinism
 
@@ -98,7 +98,7 @@ This determinism is asserted by an integration test (`tests/integration/harness.
 Once the CSVs are committed under `docs/maintainers/measurements/`, future `design/decisions/*.md` can reference specific rows verbatim:
 
 ```markdown
-> The v1.10 baseline shows P14-T5 has the largest context pack
+> The baseline shows P14-T5 has the largest context pack
 > in the corpus at 59,346 bytes
 > ([`docs/maintainers/measurements/pack-size-by-task.csv`](../../docs/maintainers/measurements/pack-size-by-task.csv)).
 > A task whose pack exceeds 80KB would be an outlier worth
@@ -122,6 +122,6 @@ Adding a new CSV requires a follow-up RFC amendment because the column shapes ar
 - **Not a public CLI command.** `code-pact harness` does not exist and will not. The harness is invoked via `pnpm harness` (a `package.json` `scripts` entry, not a `bin`).
 - **Not telemetry.** Nothing is sent over the network. Nothing is collected from end users.
 - **Not an OpenTelemetry / Prometheus / Grafana adapter.** Output is CSV files on disk. Period.
-- **Not a trend tracker.** v1.10 ships single-snapshot CSVs only. Diffing two manifests by SHA is a manual exercise; an automated trend tool is deferred to a future RFC.
+- **Not a trend tracker.** The harness ships single-snapshot CSVs only. Diffing two manifests by SHA is a manual exercise; an automated trend tool is out of scope.
 - **Not an LLM cost / latency tracker.** Out of charter — requires a model API and breaks the deterministic-input rule.
 - **Not promotion-ready as a product.** If a future maintainer / fork wants to promote the harness to a public command, that requires its own RFC and a stability commitment we are deliberately not making today.
