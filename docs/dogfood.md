@@ -31,7 +31,7 @@ code-pact validate       # exits 1 if any errors exist
 ```
 
 For an *activity* (not structural) view — read-only, no lock — what is in flight,
-blocked, free to pick up, and any attributed progress-event conflicts (v1.32+):
+blocked, free to pick up, and any attributed progress-event conflicts:
 
 ```sh
 code-pact status          # human overview; add --json for the structured envelope

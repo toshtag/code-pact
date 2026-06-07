@@ -10,7 +10,7 @@ Claude Code writes `CLAUDE.md`. Codex writes `AGENTS.md`. Cursor writes `.cursor
 
 `code-pact` gives any supported agent the same deterministic CLI for fetching task context, recording progress, and verifying completion criteria. The agent calls a small set of commands; `code-pact` keeps `design/` as the structured source of truth and the progress ledger (per-event files under `.code-pact/state/events/`) as the operational log. Adapters generate the per-agent instruction files so each agent sees its own world without the project state diverging.
 
-v1.0 ships **stable** adapters for `claude-code`, `codex`, and `generic`. The `cursor` and `gemini-cli` adapters are **experimental** — they ship, they work, but their generated file formats may shift in minor releases to track upstream tooling changes.
+code-pact ships **stable** adapters for `claude-code`, `codex`, and `generic`. The `cursor` and `gemini-cli` adapters are **experimental** — they ship, they work, but their generated file formats may shift in minor releases to track upstream tooling changes.
 
 ```sh
 # 30-second tour — runs the whole loop in a throwaway sandbox, writes nothing to your repo:
@@ -36,9 +36,9 @@ code-pact validate                                            # CI-friendly heal
 
 ## Status
 
-v1.0 freezes the public CLI surface — flags, exit codes, JSON envelope shapes, and error codes are stable across the v1.x line. The full stability taxonomy (`Stable (v1.0)` / `Stable (human-output)` / `Experimental` / `Deprecated`) lives in [`docs/cli-contract.md`](docs/cli-contract.md#stability-taxonomy-v10).
+The v1.x line freezes the public CLI surface — flags, exit codes, JSON envelope shapes, and error codes are stable across it. The full stability taxonomy (`Stable (v1.0)` / `Stable (human-output)` / `Experimental` / `Deprecated`) lives in [`docs/cli-contract.md`](docs/cli-contract.md#stability-taxonomy-v10).
 
-Release notes live in [`CHANGELOG.md`](CHANGELOG.md). Upgrade guidance lives in [`docs/upgrading.md`](docs/upgrading.md) (within v1.x it is just a version bump; pre-v1.0 alpha notes are archived in [`docs/migration.md`](docs/migration.md)).
+Release notes live in [`CHANGELOG.md`](CHANGELOG.md). Upgrade guidance lives in [`docs/upgrading.md`](docs/upgrading.md) (within v1.x it is just a version bump; the earlier alpha notes are archived in [`docs/migration.md`](docs/migration.md)).
 
 ## Install
 
@@ -51,7 +51,7 @@ npm install -g code-pact
 code-pact --version
 ```
 
-Past alpha releases remain available under the `alpha` dist-tag (`npm install code-pact@alpha`) for users who pinned to pre-v1.0 behaviour. New projects should use the default (`latest`) tag.
+Past alpha releases remain available under the `alpha` dist-tag (`npm install code-pact@alpha`) for users who pinned to the earlier alpha behaviour. New projects should use the default (`latest`) tag.
 
 Contributors can also run from a clone with `pnpm link --global`, or install a local tarball produced by `npm pack` — see [Development](#development).
 
@@ -78,10 +78,10 @@ New to the terms used here (context pack, envelope, derived state, …)? The [`d
 | [`docs/per-task-loop.md`](docs/per-task-loop.md) | The canonical per-task lifecycle — state diagram, the verbs, and a worked example. |
 | [`docs/glossary.md`](docs/glossary.md) | Plain-language definitions for every `code-pact` term used in the docs. |
 | [`docs/positioning.md`](docs/positioning.md) | What `code-pact` is, what it deliberately is not, the core CLI surfaces, and the success metrics the project measures itself against. |
-| [`docs/agent-contract.md`](docs/agent-contract.md) | The v1.11+ agent contract: what `code-pact` guarantees, what `adapter conformance` requires of each agent integration, and the recommended per-task lifecycle. |
+| [`docs/agent-contract.md`](docs/agent-contract.md) | The agent contract: what `code-pact` guarantees, what `adapter conformance` requires of each agent integration, and the recommended per-task lifecycle. |
 | [`docs/getting-started.md`](docs/getting-started.md) | First-thirty-minutes guide (onboarding approaches + the per-task loop). |
 | [`docs/cli-contract.md`](docs/cli-contract.md) | Full flag / exit code / JSON envelope / error code reference and the Stability taxonomy. |
-| [`docs/upgrading.md`](docs/upgrading.md) | How to upgrade — additive within v1.x; pointers for coming from a pre-v1.0 alpha. |
+| [`docs/upgrading.md`](docs/upgrading.md) | How to upgrade — additive within v1.x; pointers for coming from an earlier alpha. |
 | [`docs/troubleshooting.md`](docs/troubleshooting.md) | Diagnostic code → recovery action for the most common error codes. |
 | [`docs/community.md`](docs/community.md) | Where to file issues / discussions / PRs, the GitHub Discussions intent, and the scope-discipline rule for the Non-goals list. |
 

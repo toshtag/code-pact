@@ -65,7 +65,7 @@ honest path for two cases:
 
 1. **External completion** — work already merged, or not verifiable from the
    current working tree.
-2. **The `record_only` lightweight lane (v1.26+)** — when `task prepare`
+2. **The `record_only` lightweight lane** — when `task prepare`
    recommends `lifecycleMode: record_only` (a small, low-risk, strongly-verified
    docs/test task), you run the project's verification **yourself**, then record
    the result here. `record_only` is a lighter *loop*, **not** lighter

@@ -29,7 +29,7 @@ For teams and CI, pin code-pact to an **exact** version in your `devDependencies
 
 > The command examples in the rest of this guide are written as bare `code-pact …` for brevity. If you used the pinned `devDependency` path above, run them through your package runner — `npm exec -- code-pact …` (or via an `npm` script) — so they resolve the project-local pinned binary.
 
-`code-pact@alpha` remains available for projects intentionally pinned to pre-v1.0 behaviour. New projects should pin an exact version from the current stable release line rather than the legacy `alpha` tag.
+`code-pact@alpha` remains available for projects intentionally pinned to the earlier alpha behaviour. New projects should pin an exact version from the current stable release line rather than the legacy `alpha` tag.
 
 ## Choose your path
 
