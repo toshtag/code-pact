@@ -71,9 +71,10 @@ scope here; add them per your project's own conventions.
   unless your project policy says so.
 - **`plan analyze --strict`** — promotes plan-analysis warnings to exit 1 (status
   drift, dependency issues).
-- **`task finalize <id> --audit-strict --base-ref <default-branch>`** *(optional,
+- **`task finalize <id> --audit-strict --base-ref <default-branch> --json`** *(optional,
   per advanced task)* — the declared-writes audit. Pair `--audit-strict` with
-  `--base-ref` so a clean working tree does not fire `DECLARED_UNUSED`. See
+  `--base-ref` so a clean working tree does not fire `DECLARED_UNUSED`; both
+  audit flags require `--json`. See
   [`task-readiness-fields.md`](../concepts/task-readiness-fields.md).
 
 ## Preconditions checklist
@@ -100,8 +101,10 @@ the workflow above will do anything useful:
 - [ ] **Pin an exact version** — pin code-pact as a `devDependency`
       (`--save-exact`) and commit the lockfile, so every run resolves the same
       CLI. See [`getting-started.md`](../getting-started.md).
-- [ ] **Pair `--audit-strict` with `--base-ref`** — without it, a clean CI
-      checkout reports `DECLARED_UNUSED` for every task that declared writes.
+- [ ] **Use `--json` and pair `--audit-strict` with `--base-ref`** — both audit
+      gating flags require JSON output; `--base-ref` makes the audit compare
+      against the merge-base, so a clean CI checkout does not report
+      `DECLARED_UNUSED` for every task that declared writes.
 - [ ] **If you intentionally ignore adapter-generated output *and* its manifest**,
       a clean CI checkout can report `ADAPTER_MISSING` (an agent is enabled but its
       instruction file is absent). Because `validate --strict` promotes warnings to

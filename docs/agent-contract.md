@@ -20,7 +20,7 @@ The contract has three sides:
 3. The recommended per-task lifecycle the contract is shaped around.
 
 A short section on measurement follows; numbers there are populated by
-the Evidence Harness v2 work (P26).
+the Evidence Harness v2.
 
 ## 1. What `code-pact` guarantees
 
@@ -29,16 +29,15 @@ requires a major-version bump.
 
 ### CLI surface stability
 
-Every command listed under the **Stable (v1.0)** entry of the
+Every command listed under the `Stable (v1.0)` entry of the
 [Stability taxonomy](cli-contract.md#stability-taxonomy-v10) has a
 frozen flag surface, JSON envelope shape, exit code contract, and
 error code set. New optional flags and new envelope fields are
 additive; existing flags, fields, and codes do not change meaning
 within v1.x.
 
-The v1.11+ surfaces added by P21 (`task prepare`, `task context
---explain`, `adapter conformance`) join the stable set and carry the
-same guarantee from v1.11 onwards.
+`task prepare`, `task context --explain`, and `adapter conformance`
+join the stable set and carry the same guarantee.
 
 ### JSON envelope shape
 
@@ -78,8 +77,8 @@ codes are additive within v1.x; existing codes do not change meaning.
 The `code` field of an error envelope is the contract — agents may
 branch on the value.
 
-The P21 commands (`task prepare`, `task context --explain`, `adapter
-conformance`) deliberately ship **no new public error codes**. Every
+`task prepare`, `task context --explain`, and `adapter conformance`
+deliberately ship **no new public error codes**. Every
 failure mode reuses an existing code (`TASK_NOT_FOUND`,
 `AMBIGUOUS_TASK_ID`, `AMBIGUOUS_PHASE_ID`, `PHASE_NOT_FOUND`, `AGENT_NOT_FOUND`,
 `AGENT_NOT_ENABLED`, `CONFIG_ERROR`, the existing `ADAPTER_*`
@@ -135,14 +134,14 @@ For the same git SHA and the same inputs:
 - `task context` produces byte-identical pack content (locked by
   `tests/integration/pack-byte-identical.test.ts`).
 - `recommend` produces a byte-identical JSON envelope.
-- `task context --explain --json` (v1.11+) attaches metadata but the
-  `content` string is byte-identical to non-explain mode. The v1.30+ (P49)
+- `task context --explain --json` attaches metadata but the
+  `content` string is byte-identical to non-explain mode. The
   Context Fit explain metrics it adds — `natural_bytes`, `final_bytes`,
   `saved_bytes`, `saved_ratio`, `minimum_achievable_bytes`, `elided_sections`,
   and `budget_bytes` (only when a budget was applied) — are byte-based and
   deterministic (no tokenizer, summarization, model, or network), and
   `minimum_achievable_bytes` is the same floor `CONTEXT_OVER_BUDGET` reports.
-- `task prepare` (v1.11+) writes the same context pack bytes that
+- `task prepare` writes the same context pack bytes that
   `task context` produces for the same task (`task context` builds and
   returns the content; `task prepare` and the low-level `pack` are the
   commands that write it to disk).
@@ -156,11 +155,11 @@ The progress ledger is an append-only event log — code-pact never edits a past
 event. Each event is its own file under `.code-pact/state/events/` (a legacy
 monolithic `.code-pact/state/progress.yaml`, if present, is still read and
 merged). The only verbs that record an event are `task start`, `task block`,
-`task resume`, `task complete`, and `task record-done` (v1.21+, which records
+`task resume`, `task complete`, and `task record-done` (which records
 a `done` event with `source: external` — either for work completed
 outside the loop or for the `record_only` lane after you ran the
 project's verification by hand). Read-only verbs — including `task
-prepare` (v1.11+) — never touch
+prepare` — never touch
 it, and `task finalize` writes only the design YAML status, never
 the progress ledger. The progress-read-only invariant is locked by unit tests.
 
@@ -240,31 +239,31 @@ ids require an RFC and an entry in `src/core/adapters/conformance-spec.ts`.
 | `axis_how_to_handle` | `### How to handle failures` present |
 | `required_cli_surface_mentions` | Every lifecycle and diagnostic surface mentioned |
 | `required_failure_guidance` | Every failure keyword mentioned |
-| `task_prepare_is_primary` | `code-pact task prepare` appears and precedes the first `recommend` / `task context` mention (it is the primary per-task entrypoint, not the pre-P29 loop) |
-| `no_contract_antipatterns` | The guidance is free of P29 anti-patterns (e.g. `task finalize ... --agent`, which takes no `--agent`) |
+| `task_prepare_is_primary` | `code-pact task prepare` appears and precedes the first `recommend` / `task context` mention (it is the primary per-task entrypoint, not the older diagnostic-first loop) |
+| `no_contract_antipatterns` | The guidance is free of contract anti-patterns (e.g. `task finalize ... --agent`, which takes no `--agent`) |
 | `activation_rules_documented` | The activation rules are documented — `task finalize --write` only after `task complete`, `wait_for_dependencies`, `CONTEXT_OVER_BUDGET`. Verifies **documentation presence, not runtime obedience** |
 | `recommendation_consumption_guidance_present` | The guidance tells the agent to consume the recommendation (anchored on `data.recommendation`). Verifies **documentation presence, not runtime obedience** |
 | `lifecycle_mode_guidance_present` | The guidance documents `lifecycleMode` and the `record_only` lane (anchored on `lifecycleMode` + `record_only`) |
 | `cannot_switch_model_fallback_present` | The guidance tells the agent to report a limitation when it `cannot switch model` rather than ignore the recommendation |
 | `file_checksum_match` | Per-file: on-disk sha256 equals manifest |
 
-**Severity (v1.x, P30).** Each check carries a `severity` of `required`
+**Severity.** Each check carries a `severity` of `required`
 or `advisory`. `compliant` is `true` unless a **required** check fails;
 a failing `advisory` check is surfaced (with an `adapter upgrade`
 remediation) but does not break compliance. The three hardening checks
 above (`task_prepare_is_primary`, `no_contract_antipatterns`,
 `activation_rules_documented`) are `required` for adapters whose manifest
 `generator_version` is semver >= the hardening threshold
-(`ADAPTER_CONTRACT_HARDENING_FROM_VERSION`) and `advisory` below, so
-installs that predate the P29-aligned templates warn rather than
-hard-fail until re-upgraded. The three P33 consumption-guidance checks
+(`ADAPTER_CONTRACT_HARDENING_FROM_VERSION`) and `advisory` below, so an
+adapter generated before the hardened templates warns rather than
+hard-fails until it is re-upgraded. The three consumption-guidance checks
 (`recommendation_consumption_guidance_present`,
 `lifecycle_mode_guidance_present`, `cannot_switch_model_fallback_present`)
 are gated the same way but on their **own** threshold
-(`RECOMMENDATION_CONSUMPTION_FROM_VERSION`, not the P30 one) so adapters
-generated between the P30 and P33 releases stay advisory rather than
-failing en masse. All other checks are `required`. Exit is 0
-when `compliant`, 1 otherwise.
+(`RECOMMENDATION_CONSUMPTION_FROM_VERSION`), so an adapter generated after
+the hardening threshold but before the consumption templates stays
+advisory rather than failing all at once. All other checks are `required`.
+Exit is 0 when `compliant`, 1 otherwise.
 
 ## 3. Recommended lifecycle
 
@@ -292,18 +291,18 @@ The verbs in detail:
   per-task verb pre-formatted (including `commands["record-done"]`, a
   template whose `--evidence` you supply). Progress-read-only. Optional
   `--dry-run` skips the context pack write. `next_action.message` is
-  **lifecycle-aware** (v1.27+, P40): on a `record_only` task it points at
+  **lifecycle-aware**: on a `record_only` task it points at
   `task record-done`; on a `decision_loop` task it says to resolve the
   gating ADR first; `commands` itself stays a complete mode-agnostic table.
-  For a `requires_decision` task it also returns `decision_commitments`
-  (v1.27+, P43): the parsed `## Implementation commitments` of each
+  For a `requires_decision` task it also returns `decision_commitments`:
+  the parsed `## Implementation commitments` of each
   **accepted considered** ADR. Read it as **advisory implementation
   context** — the concrete downstream work the decision implies — not as
   a gate; it never blocks completion. It is `[]` only when the resolver
   found no accepted ADR entries; an unresolved explicit `decision_refs`
   gate may still surface commitments for its accepted refs (enforcement
   stays with `verify` / `task complete`).
-  The embedded `recommendation` carries (additively, P48) an optional
+  The embedded `recommendation` carries (additively) an optional
   `contextFit` — a recommended standard context budget profile (`tight` /
   `balanced` / `wide`), its byte value, and a reason. It is a **suggestion**:
   it is **not** auto-applied and never re-sizes the context pack on its own.
@@ -331,17 +330,17 @@ The verbs in detail:
   appends a `done` event (`source: loop`). Idempotent — a second call
   from `done` state returns success without appending a duplicate event.
   On failure it exits 1 with `error.code: VERIFICATION_FAILED`; read
-  `error.cause_code` (v1.27+) **first** to know what to fix:
+  `error.cause_code` **first** to know what to fix:
   `COMMANDS_FAILED` → fix the failing verification command;
   `DECISION_REQUIRED` → write or accept the required ADR. `error.message`
   is actionable (and embeds the failing-check reason). Do **not** blindly
   re-run `verify` — fix the reported cause first.
 
-- **`task record-done <task-id> --evidence "<text>"`** (v1.21+) —
+- **`task record-done <task-id> --evidence "<text>"`** —
   records a `done` event with `source: external` **without** running
   verification commands; the proof is `--evidence`. Two uses: work
   completed **outside** the loop (already merged / not verifiable from
-  the tree), and the `record_only` lane (v1.26+). The decision gate
+  the tree), and the `record_only` lane. The decision gate
   still applies — a `requires_decision` task with no resolvable ADR
   returns `DECISION_REQUIRED` (exit 2) and records no progress event
   (the ledger is unchanged). It is a distinct path from `task complete`, not a way to
@@ -349,12 +348,16 @@ The verbs in detail:
   [`per-task-loop.md` § Recording a done without task complete](per-task-loop.md#recording-a-done-without-task-complete)
   for the lifecycle explanation (a lighter loop, not lighter verification).
 
-- **`task finalize <task-id> [--write] [--audit-strict] [--base-ref
-  <ref>]`** — flips the task's design YAML status to `done` and
-  performs the declared-writes audit. Without `--write`, the command
-  is a dry-run that reports what would change. In CI, pair
-  `--audit-strict` with `--base-ref <default-branch>` so the audit
-  compares against the merge-base of the working branch.
+- **`task finalize <task-id> --json [--write] [--audit-strict] [--base-ref
+  <ref>]`** — reports the task's design-YAML finalization candidate and
+  emits the declared-writes audit. Without `--write` it is a dry-run that
+  reports what would change; add `--write` to flip the task's design YAML
+  status to `done` on the clean path. `--audit-strict` makes audit
+  warnings exit-relevant, and `--base-ref <ref>` switches the audit from
+  working-tree mode to merge-base branch mode. Both `--audit-strict` and
+  `--base-ref` require `--json`. In CI, use `--audit-strict --base-ref
+  <default-branch> --write --json` when the audit should gate the
+  mutation.
 
 The early-return states in the diagram correspond to `task prepare`
 short-circuits — the command does not build a context pack, returns
@@ -366,7 +369,7 @@ short-circuits — the command does not build a context pack, returns
 The success metrics defined in
 [`docs/positioning.md`](positioning.md) are how the project measures
 whether the contract is working. The metric set is locked here; the
-Evidence Harness v2 (P26) computes these and recomputes them on every
+Evidence Harness v2 computes these and recomputes them on every
 harness run. The metric set is fixed here; the **values** live only in
 [`docs/maintainers/measurements/summary.json`](maintainers/measurements/summary.json)
 (plus the per-task CSVs beside it) so the numbers can never drift between
@@ -378,7 +381,7 @@ this prose and the source of truth — reproduce with `pnpm harness --corpus . -
 | Context pack p90 bytes | Per-task pack size, lower 90th percentile |
 | Context pack max bytes | Largest single task's pack size |
 | First-pass verification rate | Percentage of `task complete` invocations whose declared verification passes on the first attempt |
-| Task lifecycle adherence rate | State-machine adherence: among tasks that have any progress events, the percentage with at least one `started` event before the first `done` event AND no legacy `planned → done` shortcut. `task prepare` emits no progress event, so prepare-adherence is **not** measured. Sits below 100% because of historical (mostly pre-v0.7) tasks that used the legacy `planned → done` shortcut, not current behaviour |
+| Task lifecycle adherence rate | State-machine adherence: among tasks that have any progress events, the percentage with at least one `started` event before the first `done` event AND no legacy `planned → done` shortcut. `task prepare` emits no progress event, so prepare-adherence is **not** measured. Sits below 100% because of historical tasks that used the legacy `planned → done` shortcut, not current behaviour |
 | Undeclared write rate | Files changed by a task whose paths are not covered by the task's declared `writes` globs. Currently `deferred` ([rationale](../design/decisions/evidence-harness-v2-rfc.md#non-goals-out-of-scope-for-p26)) |
 | Adapter drift detection rate | Percentage of enabled agents where `adapter doctor` returns at least one error-severity issue |
 
@@ -399,4 +402,4 @@ is not itself a contract violation.
   imported by `adapter doctor`, `adapter conformance`, and the
   integration test suite.
 - [`design/decisions/agent-contract-v2-rfc.md`](../design/decisions/agent-contract-v2-rfc.md)
-  — the RFC that locks the P21 contract decisions.
+  — the RFC that locks the agent-contract decisions.

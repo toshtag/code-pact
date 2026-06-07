@@ -1154,7 +1154,7 @@ async function cmdTaskFinalize(
   // audit field always lands in a machine-readable envelope. Silent ignore
   // would mislead users into thinking the branch-level audit ran when it did not.
   if (baseRef !== undefined && !json) {
-    const msg = "task finalize --base-ref requires --json (write_audit is JSON-only in v1.6).";
+    const msg = "task finalize --base-ref requires --json because write_audit is emitted only in JSON output.";
     process.stderr.write(`CONFIG_ERROR: ${msg}\n`);
     return 2;
   }
@@ -1163,7 +1163,7 @@ async function cmdTaskFinalize(
   // runs in JSON mode, so a strict gate without --json would silently degrade
   // to a no-op.
   if (auditStrict && !json) {
-    const msg = "task finalize --audit-strict requires --json (the audit it gates is JSON-only in v1.6).";
+    const msg = "task finalize --audit-strict requires --json because it gates the JSON write_audit.";
     process.stderr.write(`CONFIG_ERROR: ${msg}\n`);
     return 2;
   }
