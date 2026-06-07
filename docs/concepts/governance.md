@@ -39,7 +39,7 @@ Design-mutating commands acquire `.code-pact/locks/write.lock` at the CLI comman
 
 | Command | Lock acquired? |
 | --- | --- |
-| `init --sample-phase` / `init` (wizard, may create sample phase) | Yes |
+| `init --sample-phase` / `init` | Yes |
 | `phase add` (flag-based + wizard) | Yes |
 | `phase new` (wizard) | Yes (held through prompts) |
 | `phase import` | Yes (single outer acquisition covers the multi-phase apply loop) |
@@ -61,7 +61,7 @@ The id `TUTORIAL` is reserved at the governance layer for the sample-phase artif
 
 | Path | Outcome |
 | --- | --- |
-| `init --sample-phase` (or `init` wizard → yes) | **Allowed** — internal `_isSampleCreation: true` bypass on `createPhase` |
+| `init --sample-phase` (interactive or non-interactive) | **Allowed** — internal `_isSampleCreation: true` bypass on `createPhase` |
 | `phase add --id TUTORIAL ...` | `CONFIG_ERROR` (exit 2). Roadmap byte-identical |
 | `phase new` wizard → typing `TUTORIAL` | `CONFIG_ERROR` (exit 2) |
 | `phase import` containing `id: TUTORIAL` (any position) | `CONFIG_ERROR` (exit 2) from a **preflight scan** — the entire import is rejected before any phase YAML is written |

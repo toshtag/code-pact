@@ -91,7 +91,7 @@ The tutorial artifact exists to do three things:
 | You're running the tutorial path to verify the install works. | **Keep** until `task complete TUTORIAL-T1` and `task complete TUTORIAL-T2` are both green. Delete afterward. |
 | You're starting a greenfield project and will draft a real `P1` with `plan prompt` + `phase import`. | **Delete** the TUTORIAL phase whenever you like — there is no collision with `P1` (TUTORIAL's id and filename are deliberately separate). You can also leave it in place during early development and remove it before your first release. |
 | You're adopting `code-pact` on a brownfield repo to drive one new feature. | **Delete** the TUTORIAL phase once you've confirmed `validate` / `doctor` are green. Then write `phase add --id P1 --name <feature> ...` (or use `phase import`) directly. |
-| You answered **no** to the wizard prompt by mistake. | Re-run `code-pact init --sample-phase` to recreate it — that is the only sanctioned creation path (`phase add --id TUTORIAL ...` is rejected with `CONFIG_ERROR`; see [§ `TUTORIAL` is a reserved phase id](#tutorial-is-a-reserved-phase-id)). **OR** skip the sample artifact entirely and start with your own phase — it is not load-bearing. |
+| You ran `init` without `--sample-phase` but want the sample now. | Re-run `code-pact init --sample-phase` to recreate it — that is the only sanctioned creation path (`phase add --id TUTORIAL ...` is rejected with `CONFIG_ERROR`; see [§ `TUTORIAL` is a reserved phase id](#tutorial-is-a-reserved-phase-id)). **OR** skip the sample artifact entirely and start with your own phase — it is not load-bearing. |
 
 ## How to delete it
 
@@ -141,7 +141,7 @@ The id `TUTORIAL` is **reserved at the governance layer** for the sample-phase a
 
 | Path | Outcome |
 | --- | --- |
-| `init --sample-phase` (or `init` wizard → yes) | **Allowed.** The bootstrap path passes an internal `_isSampleCreation: true` bypass to `createPhase` |
+| `init --sample-phase` (interactive or non-interactive) | **Allowed.** The bootstrap path passes an internal `_isSampleCreation: true` bypass to `createPhase` |
 | `phase add --id TUTORIAL ...` | `CONFIG_ERROR` (exit 2). Roadmap byte-identical (no write) |
 | `phase new` wizard → typing `TUTORIAL` as the id | `CONFIG_ERROR` (exit 2) |
 | `phase import` containing any entry with `id: TUTORIAL` | `CONFIG_ERROR` (exit 2) from a preflight scan — the entire import is rejected before any phase YAML is written |
@@ -154,8 +154,8 @@ The block uses the existing `CONFIG_ERROR` envelope; no new error code ships for
 ## What the sample phase is not
 
 - It is **not a tutorial in the educational sense.** It does not walk you through `code-pact`'s concepts. [`docs/getting-started.md`](../getting-started.md) is the tutorial; the TUTORIAL artifact is the *fixture* the tutorial uses.
-- It is **not protected from your edits.** The wizard / flag offers it, the rest of `code-pact` treats it like any other phase. There is no special handling, no warning if you modify the phase contents, and no migration path for it. The reserved-id block protects only the **id**; the phase data itself is yours to edit, delete, or rename.
-- It is **not required.** You can answer **no** to the wizard prompt (or omit `--sample-phase` in non-interactive mode) and `init` succeeds; the resulting project simply has zero phases until you add one.
+- It is **not protected from your edits.** The `--sample-phase` flag creates it; the rest of `code-pact` treats it like any other phase. There is no special handling, no warning if you modify the phase contents, and no migration path for it. The reserved-id block protects only the **id**; the phase data itself is yours to edit, delete, or rename.
+- It is **not required.** Omit `--sample-phase` and `init` succeeds; the resulting project simply has zero phases until you add one.
 - It is **not source-of-truth.** The tutorial-only framing is embedded in the phase's `objective` text, the task descriptions, and the console output after creation. Delete it before you treat `design/` as your project's design source-of-truth.
 
 ## Next reading
