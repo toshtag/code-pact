@@ -272,6 +272,42 @@ for (const rel of ["docs/getting-started.md"]) {
   }
 }
 
+// 12. `check:docs` ↔ docs-maintenance.md "Checks" section, both directions. The
+//     aggregate `check:docs` chains a set of `check:*` sub-commands; the guide's
+//     Checks section documents one bullet per sub-command. The two sets must be
+//     equal, so adding a sub-check (it must be documented) or removing one (its
+//     bullet must go) can't leave the guide stale. Derived from package.json, so
+//     the rule can't go stale relative to the script. `check:docs` itself is the
+//     aggregate and is excluded from both sides.
+{
+  const GUIDE = "docs/maintainers/docs-maintenance.md";
+  const sectionBody = (text, heading) => {
+    const h = text.match(new RegExp(`^##\\s+${heading}\\s*$`, "m"));
+    if (!h) return "";
+    const rest = text.slice(h.index + h[0].length);
+    const next = rest.search(/\n##\s+/);
+    return next === -1 ? rest : rest.slice(0, next);
+  };
+  const checksIn = (s) =>
+    new Set(
+      [...s.matchAll(/\bcheck:[A-Za-z0-9:_-]+\b/g)]
+        .map((m) => m[0])
+        .filter((name) => name !== "check:docs"),
+    );
+  const expected = checksIn(JSON.parse(read("package.json")).scripts?.["check:docs"] ?? "");
+  const documented = checksIn(sectionBody(read(GUIDE), "Checks"));
+  for (const sub of expected) {
+    if (!documented.has(sub)) {
+      fail(GUIDE, `\`check:docs\` runs \`${sub}\` but the "Checks" section never names it — add a bullet for it`);
+    }
+  }
+  for (const sub of documented) {
+    if (!expected.has(sub)) {
+      fail(GUIDE, `the "Checks" section documents \`${sub}\` but \`check:docs\` does not run it — drop the bullet or add it to the check:docs script`);
+    }
+  }
+}
+
 if (problems.length > 0) {
   console.error(`check-doc-invariants: ${problems.length} issue(s):`);
   for (const p of problems) console.error(`  - ${p}`);
