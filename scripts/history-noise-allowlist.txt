@@ -18,7 +18,6 @@ docs/migration.md
 docs/cli-contract.md
 docs/troubleshooting.md
 docs/agent-contract.md
-docs/concepts/finalization-reconciliation.md
 docs/concepts/task-readiness-fields.md
 docs/concepts/runbook.md
 docs/concepts/evidence-harness.md
