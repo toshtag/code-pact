@@ -98,7 +98,7 @@ The `writes` field on a task and the `declared_writes[]` field on `task finalize
 - `task finalize` **audits** it: with `--base-ref <ref>` it compares the declared `writes` against the files the branch actually changed and reports `TASK_WRITES_AUDIT_OUTSIDE_DECLARED` (a changed file no glob covers) and `TASK_WRITES_AUDIT_DECLARED_UNUSED` (a glob that matched nothing). The audit is advisory by default; `--audit-strict` promotes it to exit-relevant (`WRITES_AUDIT_STRICT_FAILED`, exit 1, with `applied: false`).
 - What is NOT done is blocking a write *as it happens*: the audit runs at finalize time against git, not as a pre-write runner, and `task complete` / `phase reconcile` do not check writes.
 
-See [`docs/concepts/finalization-reconciliation.md` § Declared writes as a governance review surface](finalization-reconciliation.md#declared-writes-as-a-governance-review-surface) and [`docs/concepts/runbook.md` § Declared writes as a governance review surface](runbook.md#declared-writes-as-a-governance-review-surface-v14--p14) for the canonical workflow.
+See [`docs/concepts/finalization-reconciliation.md` § Declared writes as a governance review surface](finalization-reconciliation.md#declared-writes-as-a-governance-review-surface) and [`docs/concepts/runbook.md` § Declared writes as a governance review surface](runbook.md#declared-writes-as-a-governance-review-surface) for the canonical workflow.
 
 ## Intentionally out of scope
 
