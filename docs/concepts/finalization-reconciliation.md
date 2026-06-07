@@ -37,7 +37,7 @@ What it does **not** do:
 
 JSON envelope kinds: `would_finalize` (dry-run), `finalized` (`--write` applied), `already_finalized` (no-op).
 
-`task finalize` also runs the declared-writes audit when given `--base-ref` — see [Declared writes as a governance review surface](#declared-writes-as-a-governance-review-surface).
+`task finalize --json` also emits the declared-writes audit — see [Declared writes as a governance review surface](#declared-writes-as-a-governance-review-surface).
 
 ## `phase reconcile <phase-id>`
 
@@ -131,7 +131,7 @@ What the surface IS:
 - A declaration of intent: the task author says "this task is expected to write these globs."
 - A reviewable signal in `task finalize --json` / `task runbook --json` output: a human (or agent) can compare declared intent against actual file-system changes when reviewing a PR or commit.
 - A lint surface via `TASK_WRITES_PROTECTED_PATH` (warning severity): the lint flags when declared `writes` cover a protected path. The list is configurable via `design/rules/protected-paths.md`, falling back to the hardcoded defaults (`.git/**`, `node_modules/**`, `.code-pact/**`, `design/roadmap.yaml`, `design/phases/*.yaml`) when that file is absent. Under `plan lint --strict` the advisory becomes exit-relevant.
-- A git-diff audit at finalize time: `task finalize --base-ref <ref>` compares the declared `writes` against the files the branch actually changed and reports `TASK_WRITES_AUDIT_OUTSIDE_DECLARED` (a changed file no glob covers) and `TASK_WRITES_AUDIT_DECLARED_UNUSED` (a glob that matched nothing) in `data.write_audit`. The audit is advisory by default; `--audit-strict` promotes it to exit-relevant (`WRITES_AUDIT_STRICT_FAILED`, exit 1, with `applied: false` so the no-mutation guarantee is machine-readable).
+- A git-diff audit at finalize time: `task finalize --json` compares the declared `writes` against the files git reports as changed and surfaces `TASK_WRITES_AUDIT_OUTSIDE_DECLARED` (a changed file no glob covers) and `TASK_WRITES_AUDIT_DECLARED_UNUSED` (a glob that matched nothing) in `data.write_audit`. Without `--base-ref` it audits the working tree; with `--base-ref <ref>` it audits the branch against the merge base (`--base-ref` requires `--json`). The audit is advisory by default; `--audit-strict` promotes it to exit-relevant (`WRITES_AUDIT_STRICT_FAILED`, exit 1, with `applied: false` so the no-mutation guarantee is machine-readable).
 
 What the surface is NOT:
 
@@ -139,7 +139,7 @@ What the surface is NOT:
 
 How to use the surface in a PR review (human or agent-assisted):
 
-1. Run `code-pact task finalize <task-id> --base-ref main --json` to get the `write_audit` (or `--json` without `--base-ref` to read `declared_writes` and compare by hand against `git diff --name-only main...HEAD`).
+1. Run `code-pact task finalize <task-id> --json` for a working-tree audit (or add `--base-ref main` for a branch-level audit against the merge base); read `data.write_audit`.
 2. Flag any mismatch — declared paths not touched, or untouched paths beyond the declaration — as a review concern, or gate it in CI with `--audit-strict`.
 
 The same declaration is available per-task via `task runbook <task-id> --json` (`data.state_summary.declared_writes`); pick whichever surface fits the reviewer's workflow.

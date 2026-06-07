@@ -189,7 +189,7 @@ function phaseStatusAdvisoryStep(
 ): RunbookStep {
   return step({
     manual_action: `Flip the phase \`status\` field for ${phaseId} from its current value to \`${candidate}\` by hand in design/phases/${phaseId}-*.yaml.`,
-    reason: `Every task in ${phaseId} would be \`done\` post-reconcile. Phase reconcile reports the candidate \`${candidate}\` but never writes the phase's own status (advisory only until P14 governance).`,
+    reason: `Every task in ${phaseId} would be \`done\` post-reconcile. Phase reconcile reports the candidate \`${candidate}\` but never writes the phase's own status; flip it by hand in release prep.`,
   });
 }
 
