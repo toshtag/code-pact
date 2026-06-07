@@ -70,7 +70,7 @@ tasks:
 ### `depends_on`
 
 - **In `plan lint`:** flags references to ids not present in any phase (`TASK_DEPENDS_ON_UNRESOLVED`), direct self-cycles (`TASK_DEPENDS_ON_SELF_REFERENCE`), and multi-node `depends_on` cycles of length ≥ 2 (`TASK_DEPENDS_ON_CYCLE`, an iterative Tarjan SCC over the whole roadmap dep graph).
-- **Cross-phase references:** `depends_on` can name a task declared in any phase, not just the current one. `task runbook`'s `depends_on_check[i].phase_id` field is populated (additively) when a dep is cross-phase. `phase runbook --across-phases` aggregates runbooks for every `in_progress` phase plus any phase pulled in via one level of transitive dep-driven inclusion.
+- **Cross-phase references:** `depends_on` can name a task declared in any phase, not just the current one. `task runbook`'s `state_summary.depends_on[i].phase_id` field is populated (additively) when a dep is cross-phase. `phase runbook --across-phases` aggregates runbooks for every `in_progress` phase plus the declaring phase of any unsatisfied (non-`done`) cross-phase dependency referenced by those in-progress tasks.
 - **In `task context`:** the pack gains a `## Depends on` section. Each dependency is shown with its current derived state from the progress ledger (`planned` / `started` / `blocked` / `resumed` / `done` / `failed`). The agent can decide whether the dependency is ready before starting.
 - **No runtime enforcement:** `task start` does not refuse to begin a task whose dependencies are incomplete. The declaration is for context, documentation, and lint validation; there is no runtime gate.
 
@@ -88,7 +88,7 @@ tasks:
 ### `writes`
 
 - **In `plan lint`:** path-safety (`TASK_WRITES_UNSAFE_PATH`), glob syntax (`TASK_WRITES_GLOB_INVALID`), over-broad declared globs (`TASK_WRITES_OVER_BROAD`, which flags patterns whose root segment is `**` such as `**`, `**/*`, `**/*.ts`), and an advisory warning when the declared glob overlaps a protected path (`TASK_WRITES_PROTECTED_PATH`). The protected-path list is configurable via [`design/rules/protected-paths.md`](../../design/rules/protected-paths.md), falling back to the hardcoded defaults (`.git/**`, `node_modules/**`, `.code-pact/**`, `design/roadmap.yaml`, `design/phases/*.yaml`) when that file is absent. The diagnostic stays a warning by default.
-- **`write_audit`** (`task finalize --json`): an advisory layer that compares declared `writes` globs against the actual working-tree diff (default) or the merge-base branch view (`--base-ref`). Emits `TASK_WRITES_AUDIT_OUTSIDE_DECLARED` when a touched file matches no declared glob, and `TASK_WRITES_AUDIT_DECLARED_UNUSED` when a declared glob matches zero touched files. Promote to exit-relevant with `task finalize --audit-strict --write --json`; in CI pair with `--base-ref <default-branch>` so the audit compares against the merge-base (otherwise a clean working tree fires `DECLARED_UNUSED` for every task that declared writes).
+- **`write_audit`** (`task finalize --json`): an advisory layer that compares declared `writes` globs against the actual working-tree diff (default) or the merge-base branch view (`--base-ref`). Emits `TASK_WRITES_AUDIT_OUTSIDE_DECLARED` when a touched file matches no declared glob, and `TASK_WRITES_AUDIT_DECLARED_UNUSED` when a declared glob matches zero touched files. Promote to exit-relevant with `task finalize --audit-strict --json` (add `--write` to also finalize the design YAML on the clean path); in CI pair with `--base-ref <default-branch>` so the audit compares against the merge-base (otherwise a clean working tree fires `DECLARED_UNUSED` for every task that declared writes).
 - **In `task context`:** the pack gains a `## Declared write surface` section listing each declared glob. **No filesystem lookup** because writes are by definition future-tense.
 
 ### `acceptance_refs`
@@ -111,7 +111,7 @@ Not supported: brace expansion (`{a,b}`), extglob (`@(...)` / `+(...)` / `*(...)
 
 - **Declare on new tasks first.** Don't retroactively add the fields to every existing task — the lint surface tolerates absence, and exhaustive backfill is explicitly discouraged.
 - **Start with `depends_on` and `decision_refs`.** These produce the most immediately useful effect on `task context`: a "Depends on" section with derived state and a "Declared decisions" section that pulls referenced decisions into the pack regardless of `context_size`.
-- **Use `reads` / `writes` only when they are load-bearing.** They are surfaced in the context pack and lint-validated; `writes` is additionally audited against git by `task finalize` (advisory), but nothing hard-blocks on them. Value comes from documenting the surface.
+- **Use `reads` / `writes` only when they are load-bearing.** They are surfaced in the context pack and lint-validated. `writes` is additionally audited by `task finalize --json`; the audit is advisory by default and becomes exit-relevant only with `--audit-strict`. There is still no pre-write enforcement — the value comes from documenting and reviewing the intended surface.
 - **Skip `acceptance_refs` until you have a real acceptance criteria layout.** They are path references with an existence check at `task finalize` time — nothing more.
 
 ## Intentionally out of scope
