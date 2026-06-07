@@ -33,7 +33,8 @@ On a `chore/release-<version>` branch:
    format: Added / Changed / Fixed). Lead with the user-facing shipped change.
 4. **Docs-sync audit** — confirm everything shipped since the last tag followed
    the [docs ownership map](docs-maintenance.md#ownership-map--what-to-update-for-which-change).
-   `check:docs` covers links + the error-code contract, but one rule is
+   `check:docs` covers links, invariants, history-noise, and generated-reference
+   drift, but one rule is
    [deliberately manual](docs-maintenance.md#deliberately-not-auto-enforced-verify-by-hand-at-release-prep) — confirm it now:
    - every new **user-recoverable** error/diagnostic code has a
      `troubleshooting.md` recovery entry.
@@ -49,7 +50,7 @@ On a `chore/release-<version>` branch:
    pnpm release:check
    ```
    `release:check` (in `package.json`) runs typecheck, the full test suite,
-   build, `check:docs` (links + invariants + generated-reference drift),
+   build, `check:docs` (links + invariants + history-noise + generated-reference drift),
    `check:release-version` (package.json ↔ CHANGELOG ↔ measurements agree),
    then `validate --json`, `plan lint --include-quality --strict --json`, and
    `plan analyze --strict --json`. This is the single source of the release

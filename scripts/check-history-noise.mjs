@@ -6,16 +6,21 @@
 // version provenance baked into prose or comments is a hand-synced surface that
 // drifts every release: it must be re-touched each time a feature ships, and
 // when it isn't, the docs contradict the product. This is the mechanized form
-// of the P1-16 docs cleanup — it stops NEW version noise from entering the
-// protected surfaces, while an explicit allowlist grandfathers the heavy docs
-// that are still being cleaned by hand.
+// of the docs history-noise cleanup — it stops NEW version noise from entering
+// the protected surfaces, while an explicit allowlist grandfathers the heavy
+// docs that are still being cleaned by hand.
 //
-// THE RATCHET. scripts/history-noise-allowlist.txt may only SHRINK:
-//   - You may not add a path to silence a fresh violation — clean the file.
-//   - When you clean an allowlisted file, you MUST remove it from the list:
-//     this checker FAILS on a "stale" allowlist entry (one that no longer has
-//     any version tag), so a cleaned-but-still-listed file cannot slip by. The
-//     allowlist therefore can only get smaller over time.
+// THE RATCHET — scripts/history-noise-allowlist.txt. What this checker
+// MECHANICALLY enforces:
+//   - A "stale" entry FAILS: an allowlisted file that no longer contains any
+//     version tag must be removed, so cleaning a doc forces its de-listing — a
+//     cleaned file can never stay exempt.
+// What is a RULE the checker does NOT enforce (so review must):
+//   - Do not add a new entry to silence a fresh violation — clean the file
+//     instead. (An already-dirty file added to the list would pass the stale
+//     check, so this last step is on the reviewer.)
+// Net effect: cleaning forces shrink, additions are caught in review — so in
+// practice the list only gets smaller.
 //
 // Scope is deliberately narrow to stay false-positive-free:
 //   - Hard pattern: version tags only (\bv\d+\.\d+(?:\.\d+)?\b). Phase ids

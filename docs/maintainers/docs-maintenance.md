@@ -63,7 +63,8 @@ Rules:
 
 - [`scripts/check-doc-links.mjs`](../../scripts/check-doc-links.mjs) (`pnpm check:doc-links`) verifies relative `.md` links and `.md#anchor` targets resolve.
 - [`scripts/check-doc-invariants.mjs`](../../scripts/check-doc-invariants.mjs) (`pnpm check:doc-invariants`) enforces semantic invariants the link checker can't see — e.g. the README tour stays runnable, beginner docs carry no version/RFC noise, and `dogfood.md` stays a quick guide.
-- `pnpm check:docs` runs both, and CI runs it on every matrix entry.
+- [`scripts/check-history-noise.mjs`](../../scripts/check-history-noise.mjs) (`pnpm check:history-noise`) rejects version tags (`vX.Y`) in protected public-doc prose and `src` comments. Heavy historical docs are grandfathered through [`scripts/history-noise-allowlist.txt`](../../scripts/history-noise-allowlist.txt); the checker also fails on a *stale* entry — an allowlisted file that no longer has any version tag — so cleaning a doc forces its removal from the list.
+- `pnpm check:docs` runs all of the above plus the generated CLI-reference drift check (doc links, doc invariants, history-noise, generated reference); CI runs it on every matrix entry.
 - It **cannot** catch *semantically* stale links — a link whose target file still exists but whose section has moved (e.g. a "see dogfood § Release prep" pointer after Release prep moved to `operations.md`). When you move a section, grep for prose that points at its old home, not just the anchor.
 - `tests/unit/error-code-surface.test.ts` hard-fails when a `code:` in `src/` is missing from `KNOWN_CODES` / `cli-contract.md` — so **every error code is always in the contract**. Its failure message also reminds you to add a `troubleshooting.md` recovery entry when the code is user-recoverable.
 

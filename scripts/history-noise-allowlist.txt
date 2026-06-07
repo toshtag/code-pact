@@ -3,10 +3,12 @@
 # Each non-comment line is a repo-relative path EXEMPT from the version-tag
 # (vX.Y) gate.
 #
-# RATCHET RULE: this list may only SHRINK. Never add a path to silence a fresh
-# violation — clean the violation in the file instead. Remove a path once its
-# file is cleaned. docs/maintainers/** is exempt in the checker itself (the
-# sanctioned home for version history) and is intentionally not listed here.
+# RATCHET. The checker MECHANICALLY rejects a "stale" entry — an allowlisted
+# file that no longer contains any version tag — so cleaning a file forces its
+# removal from this list. Adding a new entry to silence a fresh violation is
+# NOT blocked by the checker; it is forbidden by review — clean the file
+# instead. In practice the list only shrinks. docs/maintainers/** is exempt in
+# the checker itself (the sanctioned home for version history) and is not listed.
 
 # --- Permanent: version numbers are load-bearing to the doc's purpose ---
 docs/upgrading.md
