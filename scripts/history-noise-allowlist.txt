@@ -22,5 +22,4 @@ docs/migration.md
 docs/cli-contract.md
 
 # --- Temporary: known-dirty docs, to be cleaned/collapsed and de-listed ---
-docs/concepts/decision-gate.md
 docs/spec-kit-bridge.md
