@@ -193,7 +193,7 @@ CI. (For `error.cause_code` values, see [Public cause codes](#public-cause-codes
 | `TASK_FINALIZE_NOT_ELIGIBLE` | `task finalize` | Task's derived state from the progress ledger is not `done` (raised in **both** dry-run and `--write`) |
 | `TASK_FINALIZE_WRITE_REFUSED` | `task finalize --write` | Safety check refused the phase YAML write (unsafe path, outside `design/phases/`, symlink escape, unparseable, etc.) |
 | `PHASE_RECONCILE_WRITE_REFUSED` | `phase reconcile --write` | Every eligible task write in the phase was refused for safety reasons. Partial successes return exit 0; this fires only when **all** writes refused |
-| `LOCK_HELD` (v1.5+ / P14) | `init --sample-phase`, `init` wizard, `phase add`, `phase new`, `phase import`, `task add`, `task finalize --write`, `phase reconcile --write` | Another code-pact mutation is in progress on the same project. The envelope's `data.lock_holder` carries `{pid, hostname, cmd, created_at}` for diagnostic display; `data.lock_path` is the lock file path. Transient + retryable — wait for the holder to release, or manually delete the lock file if you are certain no process holds it |
+| `LOCK_HELD` (v1.5+ / P14) | `init --sample-phase`, `init` wizard, `phase add`, `phase new`, `phase import`, `task add`, `task finalize --write`, `phase reconcile --write`, `plan adopt --write`, `plan sync-paths --write` | Another code-pact mutation is in progress on the same project. The envelope's `data.lock_holder` carries `{pid, hostname, cmd, created_at}` for diagnostic display; `data.lock_path` is the lock file path. Transient + retryable — wait for the holder to release, or manually delete the lock file if you are certain no process holds it |
 | `WRITES_AUDIT_STRICT_FAILED` (v1.6+ / P15-T6) | `task finalize --audit-strict` | The audit emitted at least one `TASK_WRITES_AUDIT_*` warning and `--audit-strict` was supplied. Exit code is **1** (not 2 — the invocation was well-formed; only the strict gate refused). The envelope carries the full `write_audit` plus `applied: false` to make the no-mutation guarantee machine-readable |
 | `CONTEXT_OVER_BUDGET` (v1.13+ / P24) | `task context --budget-bytes`, `task prepare --budget-bytes` | Even maximal section elision could not bring the rendered pack at or below the requested byte budget. Exit code 2. The envelope carries `data.budget_bytes`, `data.minimum_achievable_bytes` (the post-maximal-elision size — re-running with this value as the budget succeeds), and `data.unelidable_sections` (the structural floor) |
 | `INTERNAL_ERROR` | any command | Reserved for unhandled exceptions |
@@ -2709,8 +2709,10 @@ This means that once a project is initialized with `ja-JP`, all subsequent comma
 | `.code-pact/state/baselines/*.json` | `init`, future baseline commands | Once at bootstrap (`initial.json`) |
 | `.code-pact/adapters/<agent>.manifest.yaml` | `adapter install`, `adapter upgrade --write` | Each install or write-mode upgrade |
 | `design/brief.md`, `design/constitution.md` | `plan brief`, `plan constitution` | Once per wizard run |
-| `design/roadmap.yaml` | `init --sample-phase`, `phase add`, `phase new`, `phase import` (all via `createPhase`) | One append per phase added |
-| `design/phases/<phase>.yaml` | `init --sample-phase`, `phase add`, `phase new`, `phase import`, `task add`, `task finalize --write`, `phase reconcile --write` | Phase creation: one write per phase. Task lifecycle: one write per `task add` / status flip |
+| `design/roadmap.yaml` | `init` creates it empty at bootstrap; then `init --sample-phase`, `phase add`, `phase new`, `phase import`, `plan adopt --write` append (all via `createPhase`) | Initial create, then one append per phase added |
+| `design/phases/<phase>.yaml` | `init --sample-phase`, `phase add`, `phase new`, `phase import`, `plan adopt --write`, `task add`, `task finalize --write`, `phase reconcile --write`, `plan sync-paths --write` | Phase creation: one write per phase. Task lifecycle: one write per `task add` / status flip. `plan sync-paths --write` rewrites `reads`/`writes` path fields |
+| `design/**/*.yaml`, `design/**/*.md` | `plan normalize --write` | Byte-level normalization only (CRLF→LF, trailing-whitespace for YAML, final newline); never parses/re-stringifies YAML or changes roadmap/phase semantics |
+| `.code-pact/state/progress.yaml` (legacy) | `plan normalize --write` | Byte-level normalization when the legacy compatibility file exists; the per-event files under `state/events/` are not normalized |
 | `<agent-profile>.context_dir/<task-id>.md` (context pack; default `.context/<agent>/<task-id>.md`) | `task prepare` (unless `--dry-run`), `pack` | One write per `task prepare` / `pack` invocation. `task context` does **not** write — it builds and returns/prints the same bytes. The file is regenerable; the default context dir is gitignored (`/.context/`), and a custom `context_dir` should likewise be treated as ignorable agent output. Not tracked in the adapter manifest |
 | `<adapter-owned files>` (e.g. `CLAUDE.md`, `.claude/skills/*.md`) | `adapter install`, `adapter upgrade --write` | Generated from the agent's `AdapterDescriptor`; manifest tracks every file. `adapter install` / `upgrade` may also create the agent profile's `context_dir` directory (a `mkdir`, not a file-content write), but the per-task packs inside it are written by `task prepare` / `pack` (row above), not the adapter |
 
@@ -2750,7 +2752,7 @@ The one exception is the **per-event progress ledger** (`.code-pact/state/events
 **What `code-pact` does NOT do** (intentional, documented limits):
 
 - **No `fsync`.** A power loss between the rename and the OS flushing the dirty buffers can lose the most recent write. This is acceptable for a local dev tool — the next run will recover from the prior state.
-- **No progress-log write lock — and none is needed.** `task start` / `task complete` etc. write **one file per event** under `.code-pact/state/events/` (collaboration-safe-state RFC, B1): each event is published as a distinct no-overwrite file (temp + `link` onto a content-addressed name), so two concurrent invocations against the same project produce two different files and neither is lost, and two branches that each add events merge cleanly. The legacy monolithic `progress.yaml` (read-the-whole-file-append-rewrite, where a concurrent writer could lose an event) is **no longer written** — it is still read and merged for back-compat. Design mutations are different: v1.5+ serializes roadmap and phase YAML writes with the advisory lock documented below.
+- **No progress-log write lock — and none is needed.** `task start` / `task complete` etc. write **one file per event** under `.code-pact/state/events/` (collaboration-safe-state RFC, B1): each event is published as a distinct no-overwrite file (temp + `link` onto a content-addressed name), so two concurrent invocations against the same project produce two different files and neither is lost, and two branches that each add events merge cleanly. The legacy monolithic `progress.yaml` (read-the-whole-file-append-rewrite, where a concurrent writer could lose an event) is **no longer written** — it is still read and merged for back-compat. Governance lifecycle mutations are different: v1.5+ serializes the phase/roadmap-creation and phase-YAML-mutation paths (the lock-covered commands below) with the advisory lock.
 - **No backup file** (`.bak`). The doctor `BAK_FILE` warning fires if a `.bak` file appears next to a tracked file — it's expected to be a leftover from manual edits, not code-pact output.
 
 ### Path safety
@@ -2766,24 +2768,26 @@ Extending the adapter-style helpers to other state-file writes is **deferred unl
 
 ### Concurrent writers
 
-Running two design-mutating `code-pact` commands against the same project in parallel is **detected** in v1.5+ via the advisory write lock (P14 governance — see § Advisory write lock below). The second invocation fails fast with `LOCK_HELD` (exit 2) and a diagnostic envelope. Read-only commands (`status`, `plan lint`, `plan analyze`, `task runbook`, `phase runbook`, `validate`, `doctor`, `recommend`, `task context`, `task status`) do not acquire the lock and can run concurrently with mutations (observing the project at whatever transitional state is on disk when they read).
+Running two lock-covered governance lifecycle mutations against the same project in parallel is **detected** in v1.5+ via the advisory write lock (P14 governance — see § Advisory write lock below); the second invocation fails fast with `LOCK_HELD` (exit 2) and a diagnostic envelope. This is **not** a blanket lock over every command that can write under `design/`: bootstrap (`init`) and normalization-style writers (`plan normalize --write`, `plan brief`, `plan constitution`) have their own contracts and take no lock. Read-only commands (`status`, `plan lint`, `plan analyze`, `task runbook`, `phase runbook`, `validate`, `doctor`, `recommend`, `task context`, `task status`) likewise do not acquire the lock and can run concurrently with mutations (observing the project at whatever transitional state is on disk when they read).
 
 ### Advisory write lock (v1.5+ / P14)
 
-`.code-pact/locks/write.lock` is created by the design-mutating commands listed in the `LOCK_HELD` row of [§ Public codes](#public-codes-top-level-error-envelopes) above. Acquisition is atomic via `fs.writeFile(..., { flag: "wx" })` (cross-platform exclusive create); release is `unlink`. The lock file content is JSON `{pid, hostname, cmd, created_at}` for diagnostic display.
+`.code-pact/locks/write.lock` is created by the lock-covered commands listed in the `LOCK_HELD` row of [§ Public codes](#public-codes-top-level-error-envelopes) above. Acquisition is atomic via `fs.writeFile(..., { flag: "wx" })` (cross-platform exclusive create); release is `unlink`. The lock file content is JSON `{pid, hostname, cmd, created_at}` for diagnostic display.
 
 **Lock acquisition points.** The lock is acquired at the **CLI command-handler level**, not inside `createPhase` or other core services. This lets `phase import` hold a single outer acquisition across its multi-phase apply loop (batch transactionality — every `createPhase` call inside runs under the same lock without re-acquiring). The acquisition points are:
 
 | Command | Acquired when | Coverage |
 |---------|---------------|----------|
-| `init --sample-phase` | The `--sample-phase` flag is set in non-interactive mode | The whole `runInit` (which calls `writeSamplePhase` → `createPhase`) |
-| `init` (wizard) | Whenever `.code-pact/` already exists (defensive) | The whole wizard + an optional `writeSamplePhase` call when `--sample-phase` is passed |
+| `init --sample-phase` | The `--sample-phase` flag is set **and** `.code-pact/` already exists | The whole `runInit` (which calls `writeSamplePhase` → `createPhase`). Fresh bootstrap acquires no lock — the helper would create `.code-pact/` and trip `ALREADY_INITIALIZED` |
+| `init` (wizard) | Whenever `.code-pact/` already exists (defensive); fresh bootstrap takes no lock | The whole wizard + an optional `writeSamplePhase` call when `--sample-phase` is passed |
 | `phase add` (flag-based or wizard) | After parsing / wizard prompts finish, before `runPhaseAdd` | The single `createPhase` call |
 | `phase new` (wizard) | At command entry — held through wizard prompts and write | The single `createPhase` call |
-| `phase import` | At command entry, before `runPhaseImport` is called | The entire multi-phase apply loop (every `createPhase` inside) |
+| `phase import` / `plan import` (alias) | At command entry, before `runPhaseImport` is called | The entire multi-phase apply loop (every `createPhase` inside) |
 | `task add` (wizard or non-interactive) | At command entry | Wizard prompts (if any) + phase YAML write |
 | `task finalize` | Only when `--write` | The single phase YAML status flip |
 | `phase reconcile` | Only when `--write` | The entire reconcile batch (all flips under one acquisition) |
+| `plan adopt` | Only when `--write` | The generated import applied through `applyParsedPhaseImport` → `createPhase` (one acquisition over the whole apply) |
+| `plan sync-paths` | Only when `--write` | The phase-YAML `reads`/`writes` path rewrites |
 
 `task finalize` and `phase reconcile` **dry-runs do NOT acquire the lock** (they don't write).
 
@@ -2826,12 +2830,14 @@ Automation (PID liveness check, age-based stale detection, a `--force-lock` flag
 
 ### Roadmap mutation policy (v1.5+ / P14)
 
-`design/roadmap.yaml` is the project's phase index. Every code path that mutates it routes through the `createPhase` domain service (`src/core/services/createPhase.ts`), so the id-collision check, slug derivation, file layout, reserved-id block, and roadmap append all live in one place.
+`design/roadmap.yaml` is the project's phase index. `init` creates it (initially empty, `{ phases: [] }`) at bootstrap. After that, every command that **appends a phase** routes through the `createPhase` domain service (`src/core/services/createPhase.ts`), so the id-collision check, slug derivation, file layout, reserved-id block, and roadmap append all live in one place.
 
 | Command | Writes `design/roadmap.yaml`? | Mechanism |
 |---------|-------------------------------|-----------|
+| `init` (fresh bootstrap) | yes | Creates the initial empty `roadmap.yaml` (`{ phases: [] }`) |
 | `init --sample-phase` (interactive or non-interactive) | yes | `writeSamplePhase()` → `createPhase` (with internal `_isSampleCreation: true` bypass for the reserved `TUTORIAL` id) |
 | `phase add` (flag-based) | yes | `runPhaseAdd` → `createPhase` |
+| `plan adopt --write` | yes | `applyParsedPhaseImport` → `createPhase` (per adopted phase) |
 | `phase new` (TTY wizard) | yes | `runPhaseNew` → `createPhase` |
 | `phase import` | yes (per imported phase, after reserved-id preflight) | `runPhaseImport` → `createPhase` |
 | `task add` | no | Writes phase YAML only (`design/phases/<phase>.yaml`) |
@@ -2839,9 +2845,10 @@ Automation (PID liveness check, age-based stale detection, a `--force-lock` flag
 | `task finalize --write` | no | Writes phase YAML only (flips `tasks[].status`) |
 | `phase reconcile --write` | no | Writes phase YAML only (batch flip of `tasks[].status`) |
 | `task start` / `task block` / `task resume` / `task status` | no | Writes one event file under `state/events/` only, or read-only (`task status`) |
-| `status` / `plan lint` / `plan normalize` / `plan analyze` / `validate` / `doctor` / `recommend` / `task runbook` / `phase runbook` / `task context` | no | Read-only |
+| `plan normalize` | no phase append | `--check` is read-only; `--write` may byte-normalize existing `design/roadmap.yaml` (CRLF→LF, trailing whitespace, final newline) but never adds, removes, or reorders phases |
+| `status` / `plan lint` / `plan analyze` / `validate` / `doctor` / `recommend` / `task runbook` / `phase runbook` / `task context` | no | Read-only |
 
-The four `createPhase` callers are the **only** code paths that mutate `roadmap.yaml`. This is enforced structurally — no other module calls into the roadmap saver. Future commands that need to mutate the roadmap MUST go through `createPhase` (or land an RFC-update that extends this writer list).
+Apart from `init`'s initial bootstrap creation, the `createPhase` callers are the **only** code paths that append to `roadmap.yaml`. This is enforced structurally — no other module calls into the roadmap saver. Future commands that need to append to the roadmap MUST go through `createPhase` (or land an RFC-update that extends this writer list).
 
 ### Reserved phase ids (v1.5+ / P14)
 
