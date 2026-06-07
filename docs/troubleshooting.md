@@ -11,7 +11,7 @@ When a command surfaces one of the diagnostic codes below, this page maps it to 
 | [`TASK_FINALIZE_NOT_ELIGIBLE`](#task_finalize_not_eligible-from-task-finalize) | Task isn't `done` yet | Run `task complete` first |
 | [`TASK_FINALIZE_WRITE_REFUSED`](#task_finalize_write_refused-from-task-finalize---write) | Phase-YAML write blocked by the safety check | Read `data.reason`; usually fix the phase file |
 | [`PHASE_RECONCILE_WRITE_REFUSED`](#phase_reconcile_write_refused-from-phase-reconcile---write) | Every reconcile write was refused | Re-run dry-run; fix the phase file |
-| [`LOCK_HELD`](#lock_held-from-a-design-mutating-command) | Another mutation is running | Wait, then retry (transient) |
+| [`LOCK_HELD`](#lock_held-from-a-lock-covered-mutation) | Another mutation is running | Wait, then retry (transient) |
 | [`MANIFEST_NOT_FOUND`](#manifest_not_found-from-adapter-upgrade---check----write) | Adapter not installed yet | Run `adapter install <agent>` |
 | [`ADAPTER_GENERATOR_STALE`](#adapter_generator_stale-from-adapter-doctor--global-doctor) | Older CLI stamp **and** generated output drifted (stamp-only lag is silent) | Run `adapter upgrade --check`, then `--write` |
 | [`PLAN_NORMALIZE_REQUIRED`](#plan_normalize_required-from-plan-normalize---check) | Whitespace / newline drift | Run `plan normalize --write` |
@@ -157,7 +157,7 @@ code-pact phase runbook <phase-id> --json
 
 If `data.tasks[]` shows every flip candidate has the same refusal reason, the issue is the phase file itself, not individual tasks — fix it once and reconcile will proceed for all of them.
 
-## `LOCK_HELD` from a design-mutating command
+## `LOCK_HELD` from a lock-covered mutation
 Another `code-pact` mutation is in progress on the same project. The advisory write lock (`.code-pact/locks/write.lock`) is held by the process whose details appear in the envelope:
 
 ```json
@@ -551,7 +551,7 @@ that file's entry id in `design/roadmap.yaml` to `<actual>`. Then re-run
 
 A command tried to **resolve** an id that two files (phase) or two phases (task)
 claim, and **failed closed** (exit 2) rather than silently acting on the first
-match (control-plane v2 PR1a). The colliding locations are in **`data.phases[]`**
+match. The colliding locations are in **`data.phases[]`**
 (`AMBIGUOUS_TASK_ID`: the phase ids that both define the task; `AMBIGUOUS_PHASE_ID`:
 the phase file paths).
 
