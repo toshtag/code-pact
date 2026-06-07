@@ -69,7 +69,7 @@ The id `TUTORIAL` is reserved at the governance layer for the sample-phase artif
 
 The block reuses the existing `CONFIG_ERROR` envelope — **no new error code** ships for this. The error message names the reserved id and points at `init --sample-phase` as the sanctioned path. Configurable reserved-id lists and an advisory `RESERVED_ID_USAGE` plan-lint warning for existing TUTORIAL phases are deferred to a future RFC.
 
-See [`docs/concepts/sample-phase.md` § TUTORIAL is a reserved phase id](sample-phase.md#tutorial-is-a-reserved-phase-id-v15--p14) for the user-facing usage.
+See [`docs/concepts/sample-phase.md` § TUTORIAL is a reserved phase id](sample-phase.md#tutorial-is-a-reserved-phase-id) for the user-facing usage.
 
 ### 3. Roadmap mutation policy
 

@@ -33,7 +33,7 @@ If the repo already has a hand-written `CLAUDE.md` (or `AGENTS.md`, `.cursor/rul
 
 ### Option A — adopt the existing file into the manifest
 
-If your existing instruction file is fine as-is and you only want `code-pact` to *track* it (so future upgrades know about it), use the v0.9 `--force` semantics. `--force` is **unmanaged-adoption only**: it never overwrites a managed-modified file, it only brings an existing on-disk file into the manifest.
+If your existing instruction file is fine as-is and you only want `code-pact` to *track* it (so future upgrades know about it), use `--force`. `--force` is **unmanaged-adoption only**: it never overwrites a managed-modified file, it only brings an existing on-disk file into the manifest.
 
 ```sh
 code-pact adapter install claude-code --force --json
@@ -72,9 +72,9 @@ You can always switch the verify command later by editing `design/phases/<phase>
 ## What not to do
 
 - **Don't retro-fill old phases.** P1 is your *new* feature, not a historical reconstruction.
-- **Don't `--force` an `adapter install` to overwrite a hand-edited `CLAUDE.md` you wrote five minutes ago.** v0.9 `--force` is unmanaged-adoption only and will not actually overwrite, but the intent itself is wrong — pick Option B or C above.
+- **Don't `--force` an `adapter install` to overwrite a hand-edited `CLAUDE.md` you wrote five minutes ago.** `--force` is unmanaged-adoption only and will not actually overwrite, but the intent itself is wrong — pick Option B or C above.
 - **Most of `.code-pact/` is shared state — commit it; only a small local subset is ignored.** `init` ignores the machine-local / derived paths: `/.code-pact/locks/` and `/.code-pact/cache/`, plus `/.local/` (private planning notes — *this* is what the `LOCAL_NOT_GITIGNORED` warning checks) and `/.context/` (regenerable context packs). **Commit the rest**: `.code-pact/project.yaml`, `agent-profiles/`, `model-profiles/`, `state/baselines/`, and the progress ledger — `state/events/**` (one file per event; where the task verbs now write) plus the legacy `state/progress.yaml` while it contains legacy events or as the empty tracking sentinel `init` creates (task commands no longer write it). The adapter manifest (`.code-pact/adapters/*.manifest.yaml`) is committed **only together with** the adapter files it lists (e.g. `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `.claude/skills/*`, `.cursor/**`); if you ignore that generated output (as code-pact's own repo does), ignore the manifest too — a committed manifest whose files are absent fails `adapter doctor`. `design/` is always the committed source of truth. See [`docs/cli-contract.md`](../cli-contract.md) for the full state-file write contract.
-  - **CI note (v1.26+).** `validate` / `recommend` / `task prepare` read the project config above, so it must be in the CI checkout. If you also use the P34 `CONTROL_PLANE_BRANCH_NOT_DRIVEN` gate (`validate --strict --base-ref`), the **committed** ledger — `.code-pact/state/events/**` plus the legacy `.code-pact/state/progress.yaml` — is what it reads; commit it (it isn't auto-ignored), or `git add -f .code-pact/state/events/ .code-pact/state/progress.yaml` if your repo deliberately ignores `.code-pact/`. Force-adding only the ledger is not enough if the config is ignored too.
+  - **CI note.** `validate` / `recommend` / `task prepare` read the project config above, so it must be in the CI checkout. If you also use the `CONTROL_PLANE_BRANCH_NOT_DRIVEN` gate (`validate --strict --base-ref`), the **committed** ledger — `.code-pact/state/events/**` plus the legacy `.code-pact/state/progress.yaml` — is what it reads; commit it (it isn't auto-ignored), or `git add -f .code-pact/state/events/ .code-pact/state/progress.yaml` if your repo deliberately ignores `.code-pact/`. Force-adding only the ledger is not enough if the config is ignored too.
 
 ## Next reading
 
