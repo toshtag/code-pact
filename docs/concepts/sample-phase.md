@@ -91,7 +91,7 @@ The tutorial artifact exists to do three things:
 | You're running the tutorial path to verify the install works. | **Keep** until `task complete TUTORIAL-T1` and `task complete TUTORIAL-T2` are both green. Delete afterward. |
 | You're starting a greenfield project and will draft a real `P1` with `plan prompt` + `phase import`. | **Delete** the TUTORIAL phase whenever you like — there is no collision with `P1` (TUTORIAL's id and filename are deliberately separate). You can also leave it in place during early development and remove it before your first release. |
 | You're adopting `code-pact` on a brownfield repo to drive one new feature. | **Delete** the TUTORIAL phase once you've confirmed `validate` / `doctor` are green. Then write `phase add --id P1 --name <feature> ...` (or use `phase import`) directly. |
-| You answered **no** to the wizard prompt by mistake. | Just write `phase add --id TUTORIAL ...` to recreate it, **OR** skip the sample artifact entirely and start with your own phase. The TUTORIAL phase is not load-bearing; the wizard prompt has no special effect beyond running `phase add` for you with tutorial-shaped values. |
+| You answered **no** to the wizard prompt by mistake. | Re-run `code-pact init --sample-phase` to recreate it — that is the only sanctioned creation path (`phase add --id TUTORIAL ...` is rejected with `CONFIG_ERROR`; see [§ `TUTORIAL` is a reserved phase id](#tutorial-is-a-reserved-phase-id)). **OR** skip the sample artifact entirely and start with your own phase — it is not load-bearing. |
 
 ## How to delete it
 
