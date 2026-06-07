@@ -129,7 +129,7 @@ Runbook proposes — but never executes — the v1.2 commands from P11:
 
 ## Declared writes as a governance review surface (v1.4+ / P14)
 
-`state_summary.declared_writes[]` in `task runbook --json` output is the per-task view of the same review-surface contract documented in [`docs/concepts/finalization-reconciliation.md`](finalization-reconciliation.md#declared-writes-as-a-governance-review-surface-v14--p14). In summary:
+`state_summary.declared_writes[]` in `task runbook --json` output is the per-task view of the same review-surface contract documented in [`docs/concepts/finalization-reconciliation.md`](finalization-reconciliation.md#declared-writes-as-a-governance-review-surface). In summary:
 
 - **The field IS a reviewable declaration of intent.** A human or agent reviewing a PR can compare `declared_writes` against actual `git diff` changes to spot mismatches.
 - **The field is NOT runtime-enforced.** `task complete` / `task finalize` / `phase reconcile` do not verify the agent's actual writes match the declaration.

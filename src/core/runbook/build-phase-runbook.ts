@@ -36,7 +36,7 @@ export type BuildPhaseRunbookInput = {
 };
 
 const PHASE_STATUS_ADVISORY_NOTE =
-  "advisory — phase status is never written by phase runbook (or by phase reconcile in v1.2)";
+  "advisory — phase status is never written by phase runbook (or by phase reconcile)";
 
 type ClassifiedTask = {
   task: Task;

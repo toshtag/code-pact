@@ -82,7 +82,7 @@ export type PhaseReconcileResult =
     });
 
 const PHASE_STATUS_ADVISORY_NOTE =
-  "advisory — phase status is never written by phase reconcile in v1.2; flip by hand in release prep until P14";
+  "advisory — phase status is never written by phase reconcile; flip it by hand in release prep";
 
 async function resolvePhase(
   cwd: string,

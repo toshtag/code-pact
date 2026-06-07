@@ -2124,7 +2124,7 @@ See the generated [CLI reference § `task finalize`](cli-reference.generated.md)
 
 Default mode is dry-run. Pass `--write` to apply the mutations. No `--agent` flag — like `task finalize`, this is a design/progress reconciliation command that never calls an adapter.
 
-`phase reconcile` **never** auto-flips the phase's own `status` field in v1.2. It computes a `phase_status_candidate` and surfaces it as advisory only. The phase status itself continues to be flipped by hand in release prep until P14 governance owns the policy. `phase reconcile` also **never** writes to the progress ledger and **never** writes to `design/roadmap.yaml`.
+`phase reconcile` **never** auto-flips the phase's own `status` field. It computes a `phase_status_candidate` and surfaces it as advisory only; the phase status itself is flipped by hand in release prep (manual by convention — see [`docs/concepts/governance.md` § Phase status manual-flip convention](concepts/governance.md#4-phase-status-manual-flip-convention)). `phase reconcile` also **never** writes to the progress ledger and **never** writes to `design/roadmap.yaml`.
 
 ### Per-task classification
 
@@ -2171,7 +2171,7 @@ Each task in the phase is classified into one of three actions:
     "applied_writes": [],
     "skipped_writes": [{ "file": "...", "task_id": "...", "reason": "outside_design_phases", "detail": "..." }],
     "phase_status_candidate": "done",
-    "phase_status_note": "advisory — phase status is never written by phase reconcile in v1.2; flip by hand in release prep until P14"
+    "phase_status_note": "advisory — phase status is never written by phase reconcile; flip it by hand in release prep"
   }
 }
 ```
@@ -2356,7 +2356,7 @@ For each phase, runbook iterates `phase.tasks[]` and emits steps in this priorit
         "consistent": 4
       },
       "phase_status_candidate": "in_progress",
-      "phase_status_note": "advisory — phase status is never written by phase runbook (or by phase reconcile in v1.2)"
+      "phase_status_note": "advisory — phase status is never written by phase runbook (or by phase reconcile)"
     },
     "next_steps": [
       {
