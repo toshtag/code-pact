@@ -26,6 +26,17 @@ identifiers. Starting with v1.0.0, stable releases use plain
   `reads` / `writes` of tasks under `design/phases/` — never CHANGELOG or RFC
   prose. The `TASK_READS_NO_MATCH` lint message now names this command as the
   fix. See [docs/troubleshooting.md](docs/troubleshooting.md).
+- **`pnpm gen:doc-blocks` / `check:doc-blocks` — generate enumerable contract
+  facts from code instead of hand-writing them.** The first such block is the
+  `spec import` `data.detail` table in `cli-contract.md`, now rendered from the
+  typed `SPEC_IMPORT_DETAILS` catalog in source (the duplicated enum list in
+  `spec-kit-bridge.md` is replaced by a link). No CLI behavior change. The new
+  `check:doc-blocks` (in `check:docs`) checks only generated-block **drift** — it
+  never lints prose, style, or concept docs, so the only PR it can fail is one
+  that changed a generated value; the fix is `pnpm gen:doc-blocks`. The decision,
+  rollout, and the CI-burden contract every future doc check must satisfy are in
+  [doc-truth-from-code-rfc.md](design/decisions/doc-truth-from-code-rfc.md) /
+  [design/rules/doc-authoring.md](design/rules/doc-authoring.md).
 
 ## [1.32.0] — 2026-06-05
 

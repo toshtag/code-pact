@@ -177,7 +177,7 @@ Auto-apply is intentionally out of scope; this mode ships extraction only.
 - `--from` without `--phase-id` returns `CONFIG_ERROR` with `data.detail: "missing_phase_id"`.
 - `--suggest-from` ignores `--phase-id` silently.
 
-All `spec import` failures reuse the existing `CONFIG_ERROR` code (no new public error codes). The structured `data.detail` enum is documented in [cli-contract.md](./cli-contract.md#spec-import-v18) — `unsafe_path`, `file_not_found`, `unreadable`, `phase_id_invalid`, `phase_yaml_exists`, `no_sections_parsed`, `mutex_violation`, `missing_phase_id`.
+All `spec import` failures reuse the existing `CONFIG_ERROR` code (no new public error codes). For the full `data.detail` enum and when each value fires, see the [`spec import` failure envelope in cli-contract.md](./cli-contract.md#spec-import-v18) — that table is generated from the catalog in source, so it cannot drift from the runtime.
 
 ## Related planning-input commands
 
