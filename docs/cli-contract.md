@@ -1914,7 +1914,7 @@ Same shape in both modes:
 ### Errors
 
 Reuses existing public codes; phase-id resolution additionally surfaces
-`AMBIGUOUS_PHASE_ID` since control-plane v2 PR1a:
+`AMBIGUOUS_PHASE_ID`:
 
 | Code | Exit | When |
 | --- | --- | --- |
@@ -2377,7 +2377,7 @@ For each phase, runbook iterates `phase.tasks[]` and emits steps in this priorit
 ### Errors
 
 Reuses existing codes; phase-id resolution additionally surfaces
-`AMBIGUOUS_PHASE_ID` (control-plane v2 PR1a). For `phase runbook <id>` it fires
+`AMBIGUOUS_PHASE_ID`. For `phase runbook <id>` it fires
 when the requested id is duplicated; for `--across-phases`, when an *included*
 phase id is duplicated during aggregation:
 
@@ -2433,7 +2433,7 @@ Default `phase runbook <phase-id>` invocation is **unchanged** — `--across-pha
 
 A task's `depends_on` may reference a task in a different phase (e.g. `["P15-T5"]` from inside `P19-T1`). The resolver looks same-phase first, cross-phase fallback. Ids that do not appear in any phase still fire `TASK_DEPENDS_ON_UNRESOLVED`.
 
-When a dep resolves to a foreign phase, the runbook's `depends_on_check[i]` JSON envelope entry gains an additive `phase_id` field; same-phase deps omit it. Human-mode output names the foreign phase inline.
+When a dep resolves to a foreign phase, the runbook's `state_summary.depends_on[i]` JSON envelope entry gains an additive `phase_id` field; same-phase deps omit it. Human-mode output names the foreign phase inline.
 
 Multi-node cycles (length ≥ 2) surface as `TASK_DEPENDS_ON_CYCLE` (error). Self-cycles keep the narrower `TASK_DEPENDS_ON_SELF_REFERENCE`. See [Plan diagnostic codes](#plan-diagnostic-codes).
 
@@ -2526,7 +2526,7 @@ JSON envelope:
 - **`totals.by_state`** counts every derived `TaskCurrentState` (`done` / `failed` are counted but not bucketed). `totals` always reflects the **selected scope** (the whole project, or the single phase under `--phase`), **not** the `--mine`-filtered subset.
 - **`filter`** — always present. `--mine` narrows only the four **activity** buckets: it filters `in_flight` + `blocked` to your resolved author identity (D1 — `CODE_PACT_AUTHOR`, else `git config user.name`) and empties `available` / `waiting` (unauthored suggestions). `conflicts` and `totals` are **scope-level** and are **never** narrowed by `--mine` (a conflict is a multi-author safety signal — see the `conflicts` bullet). Shapes: `{ "mine": false }`; `{ "mine": true, "supported": true, "author": "Ada" }`; or, when identity can't drive the filter, `{ "mine": true, "supported": false, "reason": "AUTHOR_CAPTURE_DISABLED" | "AUTHOR_UNAVAILABLE" }` with the **four activity buckets empty** (can't-filter ≠ no-work) — `conflicts` still reflects the selected scope. `AUTHOR_CAPTURE_DISABLED` = `collaboration.author: off`; `AUTHOR_UNAVAILABLE` = no identity resolved.
 
-`--phase <id>` restricts to one phase, resolved through the shared phase resolver: an unknown id → `PHASE_NOT_FOUND` (exit 2); a **duplicate** phase id **fails closed** with `AMBIGUOUS_PHASE_ID` (exit 2) and `data.phases[]` listing the colliding files (PR1a parity — never a silent union). `--help` / `-h` / `help` print usage and exit 0. Argument errors are **fail-closed** as `CONFIG_ERROR` (exit 2): an unknown flag, a stray positional, or a value-less `--phase` does **not** silently degrade to a whole-project run. Otherwise the command exits 0 on success and has no failure/exit semantics of its own (a corrupt roadmap / phase / ledger follows the existing strict-reader behavior — exit 3).
+`--phase <id>` restricts to one phase, resolved through the shared phase resolver: an unknown id → `PHASE_NOT_FOUND` (exit 2); a **duplicate** phase id **fails closed** with `AMBIGUOUS_PHASE_ID` (exit 2) and `data.phases[]` listing the colliding files (never a silent union). `--help` / `-h` / `help` print usage and exit 0. Argument errors are **fail-closed** as `CONFIG_ERROR` (exit 2): an unknown flag, a stray positional, or a value-less `--phase` does **not** silently degrade to a whole-project run. Otherwise the command exits 0 on success and has no failure/exit semantics of its own (a corrupt roadmap / phase / ledger follows the existing strict-reader behavior — exit 3).
 
 > **`conflicts[]` and the activity buckets ship together in v1.32.0.** The Collaboration UX RFC decomposed the work into phases — D2 (the four activity buckets) and D3 (`data.conflicts[]`, added once D1 attribution could populate the "who") — but `code-pact status` is new in v1.32.0, so both land in the same release. `conflicts` is additive: a consumer that ignores unknown keys is unaffected. The `details.events[]` shape is shared with the `plan analyze` / `doctor` `PROGRESS_EVENT_CONFLICT` surfaces — see § Plan diagnostic codes.
 
@@ -2942,11 +2942,12 @@ coverage. Agents and CI may rely on these.
 | `plan lint` / `plan normalize` / `plan analyze` / `plan prompt` / `plan sync-paths` | |
 | `phase add` | Flag-only path (`--id`/`--name`/`--objective`/`--weight`/`--verify-command`) is the Stable surface |
 | `phase ls` / `phase show` / `phase import` | |
-| `task context` / `task status` / `task start` / `task block` / `task resume` / `task complete` | |
+| `task context` / `task status` / `task start` / `task block` / `task resume` / `task complete` / `task record-done` | |
+| `task prepare` / `task finalize` / `task runbook` / `phase reconcile` / `phase runbook` | `task prepare` is the recommended per-task entry point (it bundles `task context`) |
 | `pack` | Low-level stable command — `task context` is the preferred agent-facing entry |
 | `verify` | |
 | `progress` | |
-| `adapter list` / `adapter install` / `adapter doctor` / `adapter upgrade --check` / `adapter upgrade --write` | |
+| `adapter list` / `adapter install` / `adapter doctor` / `adapter conformance` / `adapter upgrade --check` / `adapter upgrade --write` | |
 
 ### Stable (human-output)
 

@@ -13,9 +13,15 @@
 # --- Permanent: version numbers are load-bearing to the doc's purpose ---
 docs/upgrading.md
 docs/migration.md
-
-# --- Temporary: known-dirty heavy docs, to be cleaned and de-listed ---
+# cli-contract.md is the versioned CLI *contract* reference: its "Stable (v1.0)"
+# / "(v1.6+)" annotations are availability/compatibility information (which
+# version a command, flag, or guarantee is available from) — like a published API
+# reference, not drift-prone history. Same rationale as upgrading/migration.
+# Permanently exempt; correctness bugs are fixed in place, never by stripping the
+# version annotations.
 docs/cli-contract.md
+
+# --- Temporary: known-dirty docs, to be cleaned/collapsed and de-listed ---
 docs/concepts/runbook.md
 docs/concepts/evidence-harness.md
 docs/concepts/decision-gate.md
