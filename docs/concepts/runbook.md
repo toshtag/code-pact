@@ -4,7 +4,7 @@ This document is the agent- and reviewer-facing walkthrough of `task runbook` an
 
 ## Why the runbook exists
 
-On top of the readiness fields and the `task finalize` / `phase reconcile` mutations, the per-task and per-phase command sequence still needed a CLI-emitted form — it used to live only in the dogfood walkthrough and the maintainer's muscle memory. (The human-facing canonical loop is now [`docs/per-task-loop.md`](../per-task-loop.md); `runbook` is the machine-readable sequencing surface.)
+The per-task and per-phase command sequence needs a CLI-emitted form that agents and reviewers can consume without re-implementing the lifecycle state machine + drift classifier + reconcile classifier. (The human-facing canonical loop is [`docs/per-task-loop.md`](../per-task-loop.md); `runbook` is the machine-readable sequencing surface.)
 
 The cost of an implicit sequence:
 
@@ -127,10 +127,13 @@ Runbook proposes — but never executes — the finalization commands: `task fin
 
 Both commands add **no new error codes**. They reuse `TASK_NOT_FOUND` / `AMBIGUOUS_TASK_ID` (`task runbook`), `PHASE_NOT_FOUND` (`phase runbook`), and `CONFIG_ERROR` (missing positional id, or unknown flag) — exit 2 each. Full reference: [`docs/cli-contract.md` § Error codes](../cli-contract.md#error-codes).
 
+## Canonical command names and aliases
+
+`task next` and `phase next` are Stable public aliases for `task runbook` and `phase runbook`. `runbook` remains the canonical contract name, and machine-readable output continues to emit `task runbook` / `phase runbook` in `next_steps[].command`. See [`docs/cli-contract.md` § Command aliases](../cli-contract.md#command-aliases).
+
 ## Intentionally out of scope
 
 - **`task runbook --execute`** — a flag that would run each recommended step automatically. The runbook's value is judgement, not orchestration.
-- **`task next` / `phase next` aliases** — these ship as secondary Stable public aliases for `task runbook` / `phase runbook`; `runbook` remains the canonical contract name and the command emitted in machine-readable output (`next_steps[].command`). See [`docs/cli-contract.md` § Command aliases](../cli-contract.md#command-aliases).
 - **Schema-level `human_gate` field** — manual checkpoints are expressed as `RunbookStep` content (`command: null` + `manual_action: "..."`), not a task-schema field.
 - **Multi-phase `phase runbook --all`** — per-phase only.
 - **Bundling `recommend` output into `task runbook`** — separate commands by design; `task prepare` is the surface that bundles them.
