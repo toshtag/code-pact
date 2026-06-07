@@ -348,12 +348,16 @@ The verbs in detail:
   [`per-task-loop.md` § Recording a done without task complete](per-task-loop.md#recording-a-done-without-task-complete)
   for the lifecycle explanation (a lighter loop, not lighter verification).
 
-- **`task finalize <task-id> [--write] [--audit-strict] [--base-ref
-  <ref>]`** — flips the task's design YAML status to `done` and
-  performs the declared-writes audit. Without `--write`, the command
-  is a dry-run that reports what would change. In CI, pair
-  `--audit-strict` with `--base-ref <default-branch>` so the audit
-  compares against the merge-base of the working branch.
+- **`task finalize <task-id> --json [--write] [--audit-strict] [--base-ref
+  <ref>]`** — reports the task's design-YAML finalization candidate and
+  emits the declared-writes audit. Without `--write` it is a dry-run that
+  reports what would change; add `--write` to flip the task's design YAML
+  status to `done` on the clean path. `--audit-strict` makes audit
+  warnings exit-relevant, and `--base-ref <ref>` switches the audit from
+  working-tree mode to merge-base branch mode. Both `--audit-strict` and
+  `--base-ref` require `--json`. In CI, use `--audit-strict --base-ref
+  <default-branch> --write --json` when the audit should gate the
+  mutation.
 
 The early-return states in the diagram correspond to `task prepare`
 short-circuits — the command does not build a context pack, returns
