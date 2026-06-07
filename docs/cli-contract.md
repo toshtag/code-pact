@@ -1914,7 +1914,7 @@ Same shape in both modes:
 ### Errors
 
 Reuses existing public codes; phase-id resolution additionally surfaces
-`AMBIGUOUS_PHASE_ID` since control-plane v2 PR1a:
+`AMBIGUOUS_PHASE_ID`:
 
 | Code | Exit | When |
 | --- | --- | --- |
@@ -2377,7 +2377,7 @@ For each phase, runbook iterates `phase.tasks[]` and emits steps in this priorit
 ### Errors
 
 Reuses existing codes; phase-id resolution additionally surfaces
-`AMBIGUOUS_PHASE_ID` (control-plane v2 PR1a). For `phase runbook <id>` it fires
+`AMBIGUOUS_PHASE_ID`. For `phase runbook <id>` it fires
 when the requested id is duplicated; for `--across-phases`, when an *included*
 phase id is duplicated during aggregation:
 
@@ -2433,7 +2433,7 @@ Default `phase runbook <phase-id>` invocation is **unchanged** — `--across-pha
 
 A task's `depends_on` may reference a task in a different phase (e.g. `["P15-T5"]` from inside `P19-T1`). The resolver looks same-phase first, cross-phase fallback. Ids that do not appear in any phase still fire `TASK_DEPENDS_ON_UNRESOLVED`.
 
-When a dep resolves to a foreign phase, the runbook's `depends_on_check[i]` JSON envelope entry gains an additive `phase_id` field; same-phase deps omit it. Human-mode output names the foreign phase inline.
+When a dep resolves to a foreign phase, the runbook's `state_summary.depends_on[i]` JSON envelope entry gains an additive `phase_id` field; same-phase deps omit it. Human-mode output names the foreign phase inline.
 
 Multi-node cycles (length ≥ 2) surface as `TASK_DEPENDS_ON_CYCLE` (error). Self-cycles keep the narrower `TASK_DEPENDS_ON_SELF_REFERENCE`. See [Plan diagnostic codes](#plan-diagnostic-codes).
 
@@ -2943,10 +2943,11 @@ coverage. Agents and CI may rely on these.
 | `phase add` | Flag-only path (`--id`/`--name`/`--objective`/`--weight`/`--verify-command`) is the Stable surface |
 | `phase ls` / `phase show` / `phase import` | |
 | `task context` / `task status` / `task start` / `task block` / `task resume` / `task complete` | |
+| `task prepare` / `task finalize` / `task runbook` / `phase reconcile` / `phase runbook` | `task prepare` is the recommended per-task entry point (it bundles `task context`) |
 | `pack` | Low-level stable command — `task context` is the preferred agent-facing entry |
 | `verify` | |
 | `progress` | |
-| `adapter list` / `adapter install` / `adapter doctor` / `adapter upgrade --check` / `adapter upgrade --write` | |
+| `adapter list` / `adapter install` / `adapter doctor` / `adapter conformance` / `adapter upgrade --check` / `adapter upgrade --write` | |
 
 ### Stable (human-output)
 
