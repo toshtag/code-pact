@@ -125,7 +125,7 @@ corruption is invisible until a check runs. An agent must treat these as
 The tool deliberately surfaces these rather than auto-resolving them — picking a
 winner silently is how a teammate's work gets overwritten. Full per-code recovery
 steps: [`docs/troubleshooting.md` § Id collisions & mismatches](troubleshooting.md#id-collisions--mismatches-collaboration)
-and [§ `PROGRESS_EVENT_CONFLICT`](troubleshooting.md#progress_event_conflict-from-doctor--plan-analyze-v131).
+and [§ `PROGRESS_EVENT_CONFLICT`](troubleshooting.md#progress_event_conflict-from-doctor--plan-analyze).
 
 ### Determinism
 
