@@ -58,7 +58,7 @@ async function readProjectYaml(): Promise<{
   return parseYaml(raw) as ReturnType<typeof readProjectYaml> extends Promise<infer T> ? T : never;
 }
 
-// v1.15: the wizard no longer prompts for the sample phase. The prompt
+// Invariant: the wizard does not prompt for the sample phase. The prompt
 // sequence is: locale, agents, [default_agent], adapters, verify.
 // Sample-phase creation is opt-in only via `samplePhaseOverride` (the
 // `--sample-phase` CLI flag).
@@ -224,12 +224,11 @@ describe("runInitWizard — sample phase", () => {
       "utf8",
     );
     // The sample phase is user-facing output written into the user's design/
-    // tree. It must not leak internal phase-provenance ids (e.g. P10/P12/P14)
-    // or version tags (e.g. v1.5) — that is exactly the history noise the
-    // P1-16 cleanup stripped from this artifact's prose. Guarding the
-    // generator stops the doc example and the real output drifting back apart.
-    expect(phase).not.toMatch(/\bP\d{1,2}\b/);
-    expect(phase).not.toMatch(/\bv\d+\.\d+/);
+    // tree. It must not leak internal phase-provenance ids or version tags.
+    // Guarding the generator keeps the docs example and the real output from
+    // drifting apart.
+    expect(phase).not.toMatch(/\bP\d+(?:-T\d+)?\b/);
+    expect(phase).not.toMatch(/\bv\d+\.\d+(?:\.\d+)?\b/);
   });
 
   it("does not create the sample phase by default (no prompt, no override)", async () => {
