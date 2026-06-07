@@ -205,6 +205,33 @@ describe("runInitWizard — sample phase", () => {
     expect(phaseCreated).toBe(true);
   });
 
+  it("bakes no version/phase-provenance history noise into the generated YAML", async () => {
+    const { prompter } = makePrompter([
+      "1", // locale
+      "1", // agents
+      "n", // adapters
+      "1", // verify: preset pnpm test
+    ]);
+    await runInitWizard({
+      cwd: tmpDir,
+      force: false,
+      json: false,
+      samplePhaseOverride: true,
+      prompter,
+    });
+    const phase = await readFile(
+      join(tmpDir, "design", "phases", "TUTORIAL-walkthrough.yaml"),
+      "utf8",
+    );
+    // The sample phase is user-facing output written into the user's design/
+    // tree. It must not leak internal phase-provenance ids (e.g. P10/P12/P14)
+    // or version tags (e.g. v1.5) — that is exactly the history noise the
+    // P1-16 cleanup stripped from this artifact's prose. Guarding the
+    // generator stops the doc example and the real output drifting back apart.
+    expect(phase).not.toMatch(/\bP\d{1,2}\b/);
+    expect(phase).not.toMatch(/\bv\d+\.\d+/);
+  });
+
   it("does not create the sample phase by default (no prompt, no override)", async () => {
     const { prompter, reader } = makePrompter([
       "1", // locale

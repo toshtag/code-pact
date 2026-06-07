@@ -30,8 +30,9 @@ export type InitOptions = {
   json: boolean;
   /**
    * When true, write the tutorial sample phase artifact.
-   * Honoured by both the flag-based `init` path (via CLI `--sample-phase`)
-   * and the wizard path (forces creation, skipping the wizard's prompt).
+   * Honoured by the flag-based `init` path via CLI `--sample-phase`; the
+   * interactive wizard forwards the same flag-derived override (it no longer
+   * prompts for the sample phase).
    */
   createSamplePhase?: boolean;
 };

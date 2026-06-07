@@ -66,5 +66,5 @@ After that single round trip, the rest of the roadmap is mechanical.
 ## Next reading
 
 - [`docs/getting-started.md`](../getting-started.md) — command sequences for every onboarding approach.
-- [`docs/concepts/sample-phase.md`](../concepts/sample-phase.md) — keep / rename / delete decision for the wizard's sample phase.
+- [`docs/concepts/sample-phase.md`](../concepts/sample-phase.md) — keep / rename / delete decision for the `init --sample-phase` artifact.
 - [`docs/cli-contract.md`](../cli-contract.md) — full flag and JSON envelope reference.
