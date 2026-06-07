@@ -4,7 +4,7 @@
 
 ## Why this exists
 
-Many design decisions in code-pact are made on qualitative judgement: "this feels safer", "this feels noisier", "this is the natural break-point". That posture carries the project a long way, but some calls hit its limits — questions (a dependency cycle's severity, the strict-clean dogfood scope) that turn on quantities quantitative evidence could settle deterministically.
+Many design decisions in code-pact are made on qualitative judgement: "this feels safer", "this feels noisier", "this is the natural break-point". That posture carries the project a long way, but some calls hit its limits — questions (a dependency cycle's severity, the strict-clean dogfood scope) where quantitative evidence can settle the answer deterministically.
 
 The harness is the path out. It captures a small set of deterministic metrics from the corpus and emits CSV that an RFC can cite as "the baseline shows X". Move design judgement from "感覚" to "measurement", one row at a time.
 
