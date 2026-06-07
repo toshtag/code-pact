@@ -1,4 +1,4 @@
-# The decision gate (v1.22+)
+# The decision gate
 
 The decision gate is the one thing code-pact **enforces** for design-sensitive tasks: a task marked `requires_decision: true` cannot be completed until an accepted Architecture Decision Record (ADR) exists for it. This page is the user-facing walkthrough. The exact contract (error codes, JSON envelopes) lives in [`cli-contract.md`](../cli-contract.md#error-codes); the rationale and ordering constraints are in [`design/decisions/dogfood-trust-hardening-rfc.md`](../../design/decisions/dogfood-trust-hardening-rfc.md).
 
@@ -31,9 +31,9 @@ The status word governs the gate:
 | `proposed` / `draft` / `rejected` / `superseded` | does **not** resolve |
 | empty file | does **not** resolve |
 | explicit unknown word (e.g. a typo `acceptd`) | does **not** resolve (surfaced as [`ADR_STATUS_UNRECOGNIZED`](../troubleshooting.md#adr_status_unrecognized-from-plan-lint---include-quality)) |
-| **no status line** (non-empty body) | resolves as accepted — the only lenient case, kept so projects that predate status-aware parsing (v1.22) are not broken on upgrade |
+| **no status line** (non-empty body) | resolves as accepted — the only lenient case, kept so projects that predate status-aware parsing are not broken on upgrade |
 
-### Implementation commitments (v1.27+, P43)
+### Implementation commitments
 
 An accepted ADR may carry an optional `## Implementation commitments` section: a GitHub-flavored checkbox list of the concrete downstream work the decision implies.
 
@@ -73,13 +73,13 @@ surfaces it earlier as advisories.
 
 | Surface | Code | When | Blocks? |
 | --- | --- | --- | --- |
-| `task complete` | `error.code: VERIFICATION_FAILED` + `error.cause_code: DECISION_REQUIRED` (v1.27+, exit 1) | At completion time, when the gate can't resolve an accepted ADR | **Yes** (no progress event recorded) |
+| `task complete` | `error.code: VERIFICATION_FAILED` + `error.cause_code: DECISION_REQUIRED` (exit 1) | At completion time, when the gate can't resolve an accepted ADR | **Yes** (no progress event recorded) |
 | `task record-done` | `error.code: DECISION_REQUIRED` (exit 2) + full `DecisionRequiredData` | At completion time, when the gate can't resolve an accepted ADR | **Yes** (no progress event recorded) |
 | `verify` (standalone) | a failed `decision` check in `data.checks` (note: NOT `data.verify.checks`, which is the `task complete` path) | At completion time, when the gate can't resolve an accepted ADR | **Yes** (exit non-zero) |
 | `plan lint --include-quality` | `TASK_DECISION_UNRESOLVED` | A `requires_decision` task whose gate doesn't resolve (no ADR, or one that is proposed/empty/etc.) | No (advisory) |
 | `plan lint --include-quality` | `ADR_STATUS_UNRECOGNIZED` | An ADR whose explicit status word is a typo | No (advisory) — surfaces *why* the gate won't resolve |
-| `plan lint --include-quality` | [`ADR_COMMITMENTS_EMPTY`](../troubleshooting.md#adr_commitments_empty-from-plan-lint---include-quality) (v1.27+, P43) | An accepted ADR that **resolves** a gated task's gate, with no/empty `## Implementation commitments` | No (advisory) — unreferenced ADRs and unresolved (partially-accepted) gates never fire |
-| `task prepare` | `decision_commitments` (v1.27+, P43) | A `requires_decision` task — echoes each accepted **considered** ADR's parsed `## Implementation commitments` (resolved-agnostic) | No (advisory context, not a gate) |
+| `plan lint --include-quality` | [`ADR_COMMITMENTS_EMPTY`](../troubleshooting.md#adr_commitments_empty-from-plan-lint---include-quality) | An accepted ADR that **resolves** a gated task's gate, with no/empty `## Implementation commitments` | No (advisory) — unreferenced ADRs and unresolved (partially-accepted) gates never fire |
+| `task prepare` | `decision_commitments` | A `requires_decision` task — echoes each accepted **considered** ADR's parsed `## Implementation commitments` (resolved-agnostic) | No (advisory context, not a gate) |
 
 ## Recommended flow
 
