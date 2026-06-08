@@ -38,7 +38,7 @@ export async function readDecisionAdrFiles(cwd: string): Promise<string[]> {
  * "no status line → accepted" rule would misclassify the ledger as an accepted
  * ADR. See design/decisions/decision-lifecycle-rfc.md.
  */
-const NON_DECISION_FILES = new Set(["README.md", "PRUNED.md"]);
+export const NON_DECISION_FILES = new Set(["README.md", "PRUNED.md"]);
 
 /** Like {@link readDecisionAdrFiles} but also reports whether the dir exists. */
 async function readDecisionsDir(

@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import {
   readPrunedLedger,
   normalizeRelPath,
+  normalizePrunedDecisionPath,
 } from "../../../../src/core/decisions/pruned-ledger.ts";
 
 let cwd: string;
@@ -76,5 +77,43 @@ describe("readPrunedLedger", () => {
     const set = await readPrunedLedger(cwd);
     expect(set.size).toBe(1);
     expect(set.has("design/decisions/real-rfc.md")).toBe(true);
+  });
+
+  it("admits ONLY design/decisions/**.md entries — a ledger is a decision tombstone, not an arbitrary silencer", async () => {
+    await writeLedger(
+      `| Decision | Pruned |
+| --- | --- |
+| \`docs/cli-contract.md\` | x |
+| \`design/phases/P1.yaml\` | x |
+| \`design/decisions/README.md\` | x |
+| \`design/decisions/PRUNED.md\` | x |
+| \`../outside.md\` | x |
+| \`design/decisions/../foo.md\` | x |
+| \`design/decisions/retired-rfc.md\` | x |
+`,
+    );
+    const set = await readPrunedLedger(cwd);
+    // Every non-decision / unsafe / non-md / self entry is dropped; only the
+    // genuine pruned decision survives.
+    expect([...set]).toEqual(["design/decisions/retired-rfc.md"]);
+  });
+});
+
+describe("normalizePrunedDecisionPath", () => {
+  it("returns the normalized path for a real pruned decision", () => {
+    expect(normalizePrunedDecisionPath("./design/decisions/foo-rfc.md")).toBe(
+      "design/decisions/foo-rfc.md",
+    );
+  });
+
+  it("rejects anything outside design/decisions/, non-.md, the ledger/index, or traversal", () => {
+    expect(normalizePrunedDecisionPath("docs/cli-contract.md")).toBeNull();
+    expect(normalizePrunedDecisionPath("design/phases/P1.yaml")).toBeNull();
+    expect(normalizePrunedDecisionPath("design/decisions/notes.txt")).toBeNull();
+    expect(normalizePrunedDecisionPath("design/decisions/README.md")).toBeNull();
+    expect(normalizePrunedDecisionPath("design/decisions/PRUNED.md")).toBeNull();
+    expect(normalizePrunedDecisionPath("../outside.md")).toBeNull();
+    expect(normalizePrunedDecisionPath("design/decisions/../foo.md")).toBeNull();
+    expect(normalizePrunedDecisionPath("/abs/design/decisions/x.md")).toBeNull();
   });
 });

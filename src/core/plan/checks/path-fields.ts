@@ -382,8 +382,11 @@ export async function detectTaskAcceptanceRefNotFound(
   cwd: string,
   phases: PhaseEntry[],
 ): Promise<PlanIssue[]> {
+  // NOT ledger-aware: PRUNED.md is the tombstone for *decision* records, and
+  // acceptance_refs routinely point at docs / phase YAML, not decisions. A done
+  // task's missing acceptance_ref stays a PR-A advisory `warning`; it is never
+  // silenced by the decision ledger.
   const issues: PlanIssue[] = [];
-  const pruned = await readPrunedLedger(cwd);
   for (const { phase, ref } of phases) {
     for (const task of phase.tasks ?? []) {
       const refs = task.acceptance_refs ?? [];
@@ -392,7 +395,6 @@ export async function detectTaskAcceptanceRefNotFound(
         if (safePathReason(p) !== "") continue;
         if (!(await fileExists(join(cwd, p)))) {
           const historical = refIsHistorical(task);
-          if (historical && pruned.has(normalizeRelPath(p))) continue;
           issues.push({
             code: "TASK_ACCEPTANCE_REF_NOT_FOUND",
             severity: historical ? "warning" : "error",

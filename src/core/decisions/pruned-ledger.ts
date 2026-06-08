@@ -1,15 +1,46 @@
 import { readFile } from "node:fs/promises";
 import { join, posix } from "node:path";
+import { assertSafeRelativePath } from "../path-safety.ts";
 
 /**
- * Normalize a repo-relative path so a ledger entry and a `decision_refs` /
- * `acceptance_refs` value compare equal regardless of `./` prefixes or slash
- * style. Refs are already safety-checked for traversal before this is reached,
- * so this only canonicalizes shape — it does not re-validate safety.
+ * Normalize a repo-relative path so a ledger entry and a `decision_refs` value
+ * compare equal regardless of `./` prefixes or slash style. Used on the REF
+ * side, which is already safety-checked upstream — this only canonicalizes
+ * shape. (The ledger side goes through {@link normalizePrunedDecisionPath},
+ * which additionally re-validates and constrains.)
  */
 export function normalizeRelPath(p: string): string {
-  const fwd = p.replace(/\\/g, "/").replace(/^\.\//, "");
-  return posix.normalize(fwd).replace(/^\.\//, "");
+  const fwd = p.replace(/\\/g, "/").replace(/^(?:\.\/)+/, "");
+  return posix.normalize(fwd).replace(/^(?:\.\/)+/, "");
+}
+
+/** README / the ledger itself are never decisions, so never pruned-decision entries. */
+const NON_DECISION_LEDGER_PATHS = new Set([
+  "design/decisions/README.md",
+  "design/decisions/PRUNED.md",
+]);
+
+/**
+ * Constrain a raw `PRUNED.md` entry to a *pruned decision path*, returning its
+ * normalized form or `null` to reject it. `PRUNED.md` is user-editable, so —
+ * unlike a `decision_refs` value, which is validated upstream — a ledger entry
+ * is re-validated here and confined to `design/decisions/**.md`. This is what
+ * stops the ledger from being a licence to silence an arbitrary missing file
+ * (a `docs/` page, a `design/phases/*.yaml`, a `../` traversal): only a real
+ * decision record can be tombstoned, never `README.md` / `PRUNED.md` itself.
+ */
+export function normalizePrunedDecisionPath(raw: string): string | null {
+  const fwd = raw.replace(/\\/g, "/").replace(/^(?:\.\/)+/, "");
+  try {
+    assertSafeRelativePath(fwd); // reject traversal / absolute / drive paths
+  } catch {
+    return null;
+  }
+  const normalized = posix.normalize(fwd).replace(/^(?:\.\/)+/, "");
+  if (!normalized.startsWith("design/decisions/")) return null;
+  if (!normalized.endsWith(".md")) return null;
+  if (NON_DECISION_LEDGER_PATHS.has(normalized)) return null;
+  return normalized;
 }
 
 const TABLE_ROW = /^\s*\|(.+)\|\s*$/;
@@ -52,8 +83,10 @@ export async function readPrunedLedger(cwd: string): Promise<Set<string>> {
     if (first === "" || /^:?-{2,}:?$/.test(first) || first.toLowerCase() === "decision") {
       continue;
     }
-    const path = extractPath(first);
-    if (path) out.add(normalizeRelPath(path));
+    const raw = extractPath(first);
+    if (!raw) continue;
+    const path = normalizePrunedDecisionPath(raw);
+    if (path) out.add(path); // entries outside design/decisions/**.md are ignored
   }
   return out;
 }

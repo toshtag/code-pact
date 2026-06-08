@@ -15,6 +15,7 @@ import { Phase } from "../schemas/phase.ts";
 import { AgentProfile } from "../schemas/agent-profile.ts";
 import { type ProgressEvent } from "../schemas/progress-event.ts";
 import { parseFrontMatter } from "./front-matter.ts";
+import { NON_DECISION_FILES } from "../decisions/adr.ts";
 import {
   type DecisionDoc,
   type ReadGlobMatches,
@@ -123,6 +124,7 @@ export async function loadDecisions(
   const docs: DecisionDoc[] = [];
   for (const entry of entries.sort()) {
     if (!entry.endsWith(".md")) continue;
+    if (NON_DECISION_FILES.has(entry)) continue; // index + prune ledger are not decisions
     if (!allDecisions && !entry.includes(taskId)) continue;
 
     const raw = await readWithinProject(cwd, `design/decisions/${entry}`);

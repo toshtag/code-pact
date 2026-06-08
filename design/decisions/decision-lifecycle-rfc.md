@@ -102,7 +102,7 @@ Direct answer to "should release notes be the source of truth?" — **No.** `CHA
 ## Implementation commitments
 
 - [x] PR-A — status-aware `TASK_DECISION_REF_NOT_FOUND` / `TASK_ACCEPTANCE_REF_NOT_FOUND` (loosening, keyed on `task.status === "done"`) + unit tests + `cli-contract.md` note. **Merged (#395).** Shipped decisions are now deletable-without-breakage.
-- [ ] PR-B — `design/decisions/PRUNED.md` ledger + reader + the ledger-aware branch of the status-aware check (a `done`-task ref recorded in the ledger is silent; one not recorded still warns). The ledger is excluded from the decision-candidate scan.
+- [ ] PR-B — `design/decisions/PRUNED.md` ledger + reader + the ledger-aware branch of the status-aware check (a `done`-task **`decision_refs`** recorded in the ledger is silent; one not recorded still warns). The ledger silences **`decision_refs` only** (not `acceptance_refs`, which routinely point at non-decisions), entries are confined to `design/decisions/**.md` (re-validated — `PRUNED.md` is user-editable), and the ledger is excluded from both the decision-candidate scan and the context-pack decision loader.
 - [ ] PR-C — `decision prune` command: eligibility gates, inbound-link rewrite, ledger append, JSON envelope, `DECISION_PRUNE_NOT_ELIGIBLE`.
 - [ ] PR-D — `project.yaml: decision_retention` + the `compress-on-ship` form.
 - [ ] PR-E — `CHANGELOG.md` rolling-archive tooling + release-notes generation from the CHANGELOG.
