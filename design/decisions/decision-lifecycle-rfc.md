@@ -82,7 +82,9 @@ Direct answer to "should release notes be the source of truth?" — **No.** `CHA
 
 ## Contract surface
 
-- **New command** `decision prune <ref…> [--write] [--policy <v>] [--json]` — dry-run default; success envelope reports `{ pruned, rewrote_links, ledger_appended }`.
+- **New command** `decision prune`.
+  - **Staged surface (PR-C1b, shipped):** `decision prune <path> [--json]` — **dry-run only**, no `--write` / `--policy` yet (passing `--write` is a `CONFIG_ERROR`). Success envelope: `{ mode, decision, eligible, blocks, referencing_tasks, plan, warnings }`, where `plan.link_rewrite` is `{ status: "pending" | "ready", items: [] }` (`pending` until PR-C1c fills `items`). Documented in `cli-contract.md` § `decision prune`.
+  - **Final intended surface:** `--write` (PR-C2) executes the plan and reports the applied result (removed file, rewritten links, ledger row); `--policy <v>` follows once `decision_retention` lands (PR-D).
 - **New public error code** `DECISION_PRUNE_NOT_ELIGIBLE` (exit 2); `KNOWN_CODES.public` += 1; `cli-contract.md` + `troubleshooting.md` entries.
 - **`TASK_DECISION_REF_NOT_FOUND` / `TASK_ACCEPTANCE_REF_NOT_FOUND`** gain status-awareness — a `done`-task severity *loosening* only; never tightens an existing plan. Documented in `cli-contract.md`.
 - **New optional `project.yaml` field** `decision_retention` (default `keep-full` → fully backward-compatible).

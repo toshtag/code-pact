@@ -33,9 +33,11 @@ function planArtifactsUnreadable(
   fileIssues: { file?: string }[],
   skippedChecks: string[],
 ): string | null {
-  const graphIssue = fileIssues.find(
-    (i) => i.file?.includes("roadmap.yaml") || i.file?.includes("design/phases/"),
-  );
+  // Match on a path-segment boundary (handles both cwd-relative and absolute
+  // issue paths) rather than a loose substring.
+  const isGraphFile = (f?: string): boolean =>
+    f !== undefined && /(^|\/)design\/(roadmap\.yaml|phases\/)/.test(f);
+  const graphIssue = fileIssues.find((i) => isGraphFile(i.file));
   if (graphIssue) return `cannot read the plan graph: ${graphIssue.file}`;
   if (skippedChecks.length > 0) {
     return "roadmap is missing or unparseable, so referencing tasks cannot be fully verified";

@@ -2,7 +2,7 @@
 // PR-C1b: public command, JSON envelopes, exit codes. No --write yet.
 
 import { describe, it, expect, beforeAll, afterEach } from "vitest";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, writeFile, readFile, readdir, access } from "node:fs/promises";
 import { join } from "node:path";
 import {
   createTempProject,
@@ -65,13 +65,49 @@ async function project(decisionContent: string, taskStatus = "done") {
 }
 
 describe("decision prune — CLI (dry-run)", () => {
-  it("eligible accepted target → exit 0, ok:true, data.eligible:true (JSON)", async () => {
+  it("eligible accepted target → exit 0, full success envelope shape (JSON)", async () => {
     const p = await project(ACCEPTED, "done");
     const res = p.run(["decision", "prune", "design/decisions/foo-rfc.md", "--json"]);
-    const env = expectJsonOk<{ eligible: boolean; mode: string }>(res);
-    expect(env.data.eligible).toBe(true);
-    expect(env.data.mode).toBe("dry-run");
+    const env = expectJsonOk<{
+      mode: string;
+      decision: string;
+      eligible: boolean;
+      blocks: unknown[];
+      referencing_tasks: { task_id: string; phase_id: string; status: string; via: string }[];
+      plan: {
+        remove_file: string;
+        append_ledger: boolean;
+        link_rewrite: { status: string; items: unknown[] };
+      };
+      warnings: unknown[];
+    }>(res);
     expect(res.code).toBe(0);
+    expect(env.data.mode).toBe("dry-run");
+    expect(env.data.decision).toBe("design/decisions/foo-rfc.md");
+    expect(env.data.eligible).toBe(true);
+    expect(env.data.blocks).toEqual([]);
+    expect(env.data.plan).toEqual({
+      remove_file: "design/decisions/foo-rfc.md",
+      append_ledger: true,
+      link_rewrite: { status: "pending", items: [] },
+    });
+    expect(Array.isArray(env.data.warnings)).toBe(true);
+    expect(env.data.referencing_tasks[0]).toMatchObject({
+      task_id: "P1-T1",
+      phase_id: "P1",
+      status: "done",
+      via: "decision_refs",
+    });
+  });
+
+  it("ineligible → data.plan is null and data.blocks[].gate is populated (JSON)", async () => {
+    const p = await project("# RFC\n\n**Status:** proposed\n\nx", "done");
+    const res = p.run(["decision", "prune", "design/decisions/foo-rfc.md", "--json"]);
+    const env = expectJsonErr(res);
+    const data = env.data as { eligible: boolean; plan: unknown; blocks: { gate: string }[] };
+    expect(data.eligible).toBe(false);
+    expect(data.plan).toBeNull();
+    expect(data.blocks.map((b) => b.gate)).toContain("target_not_accepted");
   });
 
   it("proposed target → exit 2, DECISION_PRUNE_NOT_ELIGIBLE with data.blocks", async () => {
@@ -160,5 +196,28 @@ describe("decision prune — CLI (dry-run)", () => {
     const res = p.run(["decision", "prune", "design/decisions/foo-rfc.md"]);
     expect(res.code).toBe(2);
     expect(res.stderr).toContain("NOT ELIGIBLE");
+  });
+
+  it("is ZERO-WRITE in every mode (eligible / human / --write) — the dry-run guarantee", async () => {
+    const p = await project(ACCEPTED, "done");
+    const decPath = join(p.dir, "design", "decisions", "foo-rfc.md");
+    const prunedPath = join(p.dir, "design", "decisions", "PRUNED.md");
+
+    const snapshot = async () => ({
+      entries: (await readdir(join(p.dir, "design", "decisions"))).sort(),
+      content: await readFile(decPath, "utf8"),
+    });
+    const before = await snapshot();
+
+    for (const args of [
+      ["decision", "prune", "design/decisions/foo-rfc.md", "--json"], // eligible
+      ["decision", "prune", "design/decisions/foo-rfc.md"], // eligible, human
+      ["decision", "prune", "design/decisions/foo-rfc.md", "--write", "--json"], // CONFIG_ERROR
+    ]) {
+      p.run(args);
+    }
+
+    expect(await snapshot()).toEqual(before); // target unchanged; no new files
+    await expect(access(prunedPath)).rejects.toThrow(); // PRUNED.md never created
   });
 });
