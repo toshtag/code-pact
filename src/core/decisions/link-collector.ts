@@ -1,5 +1,9 @@
 import { readFile, readdir } from "node:fs/promises";
-import { join, posix } from "node:path";
+import { posix } from "node:path";
+import { resolveWithinProject } from "../path-safety.ts";
+
+/** Skipped during the walk — matches scripts/check-doc-links.mjs. */
+const SKIP_DIRS = new Set(["node_modules", ".git", "dist"]);
 
 /**
  * One inbound reference to a pruned decision that `--write` (PR-C2) will rewrite,
@@ -83,9 +87,22 @@ async function discoverSources(cwd: string): Promise<{ files: string[]; issues: 
   const issues: LinkScanIssue[] = [];
 
   async function walk(rel: string, recursive: boolean, exts: string[]): Promise<void> {
+    let abs: string;
+    if (rel === ".") {
+      abs = cwd; // the project root itself is trusted
+    } else {
+      try {
+        // Guard symlink escape: a `docs` symlinked outside the repo must not let
+        // the collector plan rewrites against external files.
+        abs = await resolveWithinProject(cwd, rel);
+      } catch {
+        issues.push({ source_file: rel, line: null, reason: "unreadable" });
+        return;
+      }
+    }
     let entries;
     try {
-      entries = await readdir(join(cwd, rel), { withFileTypes: true });
+      entries = await readdir(abs, { withFileTypes: true });
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") return; // absent root/subdir is fine
       issues.push({ source_file: rel === "." ? "." : rel, line: null, reason: "unreadable" });
@@ -94,6 +111,7 @@ async function discoverSources(cwd: string): Promise<{ files: string[]; issues: 
     for (const e of entries) {
       const childRel = rel === "." ? e.name : `${rel}/${e.name}`;
       if (e.isDirectory()) {
+        if (SKIP_DIRS.has(e.name)) continue; // node_modules / .git / dist — as check-doc-links
         if (recursive) await walk(childRel, true, exts);
       } else if (e.isFile()) {
         if (childRel === "CHANGELOG.md") continue; // durable record, never rewritten
@@ -126,7 +144,8 @@ export async function collectInboundLinks(
     if (rel === target) continue; // the file being pruned itself
     let content: string;
     try {
-      content = await readFile(join(cwd, rel), "utf8");
+      const abs = await resolveWithinProject(cwd, rel); // symlink-escape guard
+      content = await readFile(abs, "utf8");
     } catch {
       issues.push({ source_file: rel, line: null, reason: "unreadable" });
       continue;
@@ -135,16 +154,20 @@ export async function collectInboundLinks(
     const lines = content.split(/\r?\n/);
     let inFence = false;
     let fenceChar = "";
+    let fenceLen = 0;
 
     for (let i = 0; i < lines.length; i++) {
       const original = lines[i]!;
       const fence = FENCE.exec(original);
       if (fence) {
-        const ch = fence[1]![0]!;
+        const run = fence[1]!;
+        const ch = run[0]!;
         if (!inFence) {
           inFence = true;
           fenceChar = ch;
-        } else if (ch === fenceChar) {
+          fenceLen = run.length;
+        } else if (ch === fenceChar && run.length >= fenceLen) {
+          // CommonMark: a closing fence is the same char and at least as long.
           inFence = false;
         }
         continue;
@@ -172,7 +195,9 @@ export async function collectInboundLinks(
           column: start + 1,
           raw_link: original.slice(start, start + m[0].length),
           raw_href: m[2]!,
-          link_text: m[1]!,
+          // From the ORIGINAL line (same length as the blanked label), so an
+          // inline-code label like `use ` + "`foo`" is preserved, not blanked.
+          link_text: original.slice(start + 1, start + 1 + m[1]!.length),
           normalized_target: target,
           link_kind: isIndexRow ? "index_row" : "inline",
           rewrite_action: inFence ? "leave_as_is" : isIndexRow ? "tombstone" : "delink",

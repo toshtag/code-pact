@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile, symlink } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { collectInboundLinks } from "../../../../src/core/decisions/link-collector.ts";
@@ -75,6 +75,24 @@ describe("collectInboundLinks — items", () => {
     expect(items[0]?.raw_link).toBe(`[a](<../design/decisions/foo-rfc.md> "the title")`);
     expect(items[0]?.normalized_target).toBe(TARGET);
   });
+
+  it("link_text preserves an inline-code label (recovered from the original, not the blanked line)", async () => {
+    await write("docs/c.md", "See [use `foo`](../design/decisions/foo-rfc.md).\n");
+    const { items } = await collectInboundLinks(cwd, TARGET);
+    expect(items).toHaveLength(1);
+    expect(items[0]?.link_text).toBe("use `foo`");
+    expect(items[0]?.raw_link).toBe("[use `foo`](../design/decisions/foo-rfc.md)");
+  });
+
+  it("a longer (4-backtick) fence is not closed by a shorter (3-backtick) line", async () => {
+    await write(
+      "docs/nested.md",
+      "# N\n\n````md\n```md\n[x](../design/decisions/foo-rfc.md)\n```\n````\n",
+    );
+    const { items } = await collectInboundLinks(cwd, TARGET);
+    expect(items).toHaveLength(1);
+    expect(items[0]?.rewrite_action).toBe("leave_as_is"); // still inside the 4-backtick fence
+  });
 });
 
 describe("collectInboundLinks — exclusions (match check:doc-links)", () => {
@@ -108,6 +126,13 @@ describe("collectInboundLinks — exclusions (match check:doc-links)", () => {
     expect(sources).toContain(".github/x.yml");
     expect(sources).not.toContain(".github/y.yaml"); // .yaml is not in the check:doc-links surface
   });
+
+  it("skips node_modules / dist / .git subtrees (as check:doc-links does)", async () => {
+    await write("docs/node_modules/x.md", "[d](../../design/decisions/foo-rfc.md)\n");
+    await write("design/dist/y.md", "[d](../../design/decisions/foo-rfc.md)\n");
+    await write("docs/.git/z.md", "[d](../../design/decisions/foo-rfc.md)\n");
+    expect((await collectInboundLinks(cwd, TARGET)).items).toEqual([]);
+  });
 });
 
 describe("collectInboundLinks — fail-closed issues", () => {
@@ -130,5 +155,15 @@ describe("collectInboundLinks — fail-closed issues", () => {
     await write("docs", "not a directory");
     const { issues } = await collectInboundLinks(cwd, TARGET);
     expect(issues).toContainEqual({ source_file: "docs", line: null, reason: "unreadable" });
+  });
+
+  it("a source root that symlink-escapes the repo → unreadable issue (no external read)", async () => {
+    const outside = await mkdtemp(join(tmpdir(), "code-pact-outside-"));
+    await writeFile(join(outside, "x.md"), "[d](../design/decisions/foo-rfc.md)\n");
+    await symlink(outside, join(cwd, "docs")); // docs -> /outside
+    const { items, issues } = await collectInboundLinks(cwd, TARGET);
+    expect(items).toEqual([]); // never read the external file
+    expect(issues).toContainEqual({ source_file: "docs", line: null, reason: "unreadable" });
+    await rm(outside, { recursive: true, force: true });
   });
 });
