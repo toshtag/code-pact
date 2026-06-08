@@ -26,6 +26,9 @@ To add one:
    transitive deps (parsers, file I/O, `yaml`) get dragged into `check:docs`.
 2. Wrap the doc region in `<!-- @generated:<id> … -->` / `<!-- @generated:<id>:end -->`
    and add a `BLOCKS` entry + `render()` in [`scripts/gen-doc-blocks.ts`](../../scripts/gen-doc-blocks.ts).
+   `render()` returns a block-level table (`renderDetailTable`, cells `|`-escaped)
+   or, for an enum that sits mid-sentence, an inline list (`renderDetailList` +
+   `inline: true` — the marker comments are invisible when rendered).
 3. `pnpm gen:doc-blocks` to write; `pnpm check:doc-blocks` runs in `check:docs`.
 
 Prefer this over restating the fact in prose. For a one-off *relationship*

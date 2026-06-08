@@ -645,11 +645,13 @@ Unknown keys are rejected (strict schema). All four failure modes return `CONFIG
   "ok": false,
   "error": { "code": "CONFIG_ERROR", "message": "..." },
   "data": {
-    "detail": "unsafe_path" | "unreadable" | "invalid_yaml" | "schema_invalid",
+    "detail": "<one of the detail values below>",
     "path": "<the --from-file value, verbatim>"
   }
 }
 ```
+
+Detail enum: <!-- @generated:plan-brief-from-file-detail — DO NOT EDIT by hand; regenerate with `pnpm gen:doc-blocks`. Source: PLAN_INPUT_*_DETAILS in src/contracts/plan-input-details.ts. -->`unsafe_path | unreadable | invalid_yaml | schema_invalid`<!-- @generated:plan-brief-from-file-detail:end -->.
 
 On success, `--json` emits `{ ok: true, data: { path: "..." } }` (same envelope as the wizard path). `design/brief.md` produced via `--from-file` is byte-identical to one produced by the wizard for equivalent input.
 
@@ -662,11 +664,13 @@ On success, `--json` emits `{ ok: true, data: { path: "..." } }` (same envelope 
   "ok": false,
   "error": { "code": "CONFIG_ERROR", "message": "..." },
   "data": {
-    "detail": "stdin_read_failed" | "invalid_yaml" | "schema_invalid",
+    "detail": "<one of the detail values below>",
     "source": "stdin"
   }
 }
 ```
+
+Detail enum: <!-- @generated:plan-brief-from-stdin-detail — DO NOT EDIT by hand; regenerate with `pnpm gen:doc-blocks`. Source: PLAN_INPUT_*_DETAILS in src/contracts/plan-input-details.ts. -->`stdin_read_failed | invalid_yaml | schema_invalid`<!-- @generated:plan-brief-from-stdin-detail:end -->.
 
 `source: "stdin"` replaces `--from-file`'s `path` field, so consumers can disambiguate the two input modes from the envelope alone. The `unsafe_path` and `unreadable` details do not apply (stdin has no path). `--stdin` is partial-write-safe: any failure yields no write to `design/brief.md`.
 
@@ -743,9 +747,9 @@ principles:
 
 Both fields are optional. Empty fields fall through to the locale-specific template defaults — same behaviour as the wizard's empty-input path. Unknown keys are rejected (strict schema).
 
-**`--from-file <yaml>` (v1.6+, P17-T4).** Reads the file at `<yaml>` (repo-root-relative; `assertSafeRelativePath` enforced). Failures return `CONFIG_ERROR` (exit 2) with the structured envelope `{ ok: false, error: { code: "CONFIG_ERROR", message }, data: { detail, path } }`. Detail enum: `unsafe_path | unreadable | invalid_yaml | schema_invalid`.
+**`--from-file <yaml>` (v1.6+, P17-T4).** Reads the file at `<yaml>` (repo-root-relative; `assertSafeRelativePath` enforced). Failures return `CONFIG_ERROR` (exit 2) with the structured envelope `{ ok: false, error: { code: "CONFIG_ERROR", message }, data: { detail, path } }`. Detail enum: <!-- @generated:plan-constitution-from-file-detail — DO NOT EDIT by hand; regenerate with `pnpm gen:doc-blocks`. Source: PLAN_INPUT_*_DETAILS in src/contracts/plan-input-details.ts. -->`unsafe_path | unreadable | invalid_yaml | schema_invalid`<!-- @generated:plan-constitution-from-file-detail:end -->.
 
-**`--stdin` (v1.6+, P17-T4).** Reads the same YAML schema from `process.stdin`. Failure envelope mirrors `--from-file` with `source: "stdin"` replacing `path`; detail enum is `stdin_read_failed | invalid_yaml | schema_invalid` (the `unsafe_path` / `unreadable` details do not apply to stdin).
+**`--stdin` (v1.6+, P17-T4).** Reads the same YAML schema from `process.stdin`. Failure envelope mirrors `--from-file` with `source: "stdin"` replacing `path`; detail enum is <!-- @generated:plan-constitution-from-stdin-detail — DO NOT EDIT by hand; regenerate with `pnpm gen:doc-blocks`. Source: PLAN_INPUT_*_DETAILS in src/contracts/plan-input-details.ts. -->`stdin_read_failed | invalid_yaml | schema_invalid`<!-- @generated:plan-constitution-from-stdin-detail:end --> (the `unsafe_path` / `unreadable` details do not apply to stdin).
 
 **`--description <text>` / `--principle <text>` (v1.6+, P17-T4).** Supplies the constitution fields directly as command-line strings. Presence of ANY of the two flags triggers flag-driven mode. Both flags are optional — passing only `--description` uses locale-default principles; passing only `--principle` (one or more occurrences) uses the locale-default description. `--principle` is repeatable (`--principle "First" --principle "Second"`). Empty / absent fields fall back to locale defaults, identical to the wizard's empty-input behaviour.
 

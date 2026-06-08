@@ -7,6 +7,10 @@ import { Prompter } from "../lib/prompt.ts";
 import { assertSafeRelativePath } from "../core/path-safety.ts";
 import type { Locale } from "../i18n/index.ts";
 import { messages as messageCatalog } from "../i18n/index.ts";
+import type {
+  PlanInputFileDetail,
+  PlanInputStdinDetail,
+} from "../contracts/plan-input-details.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -61,11 +65,7 @@ export const BriefFileSchema = z
 
 export class PlanBriefFromFileError extends Error {
   readonly code = "CONFIG_ERROR";
-  readonly detail:
-    | "unsafe_path"
-    | "unreadable"
-    | "invalid_yaml"
-    | "schema_invalid";
+  readonly detail: PlanInputFileDetail;
   readonly path: string;
 
   constructor(
@@ -127,10 +127,7 @@ export async function loadBriefFromFile(
 
 export class PlanBriefFromStdinError extends Error {
   readonly code = "CONFIG_ERROR";
-  readonly detail:
-    | "stdin_read_failed"
-    | "invalid_yaml"
-    | "schema_invalid";
+  readonly detail: PlanInputStdinDetail;
 
   constructor(
     detail: PlanBriefFromStdinError["detail"],
@@ -196,7 +193,8 @@ export async function loadBriefFromStdin(
 // Shared YAML + schema parser used by file and stdin paths
 // ---------------------------------------------------------------------------
 
-type ParserDetail = "invalid_yaml" | "schema_invalid";
+// The two details shared by both modes (the parse/validate failures).
+type ParserDetail = PlanInputFileDetail & PlanInputStdinDetail;
 
 function parseBriefSource(
   raw: string,
