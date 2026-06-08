@@ -1,439 +1,99 @@
 # RFC: Planning UX and init hardening
 
 **Status:** accepted (P13, 2026-05)
-**Scope:** new flag `init --sample-phase`; new non-interactive flag set for `task add`; additive `data.suggested_next_steps: string[]` field on `plan prompt` and `phase import`; sample-phase artifact rename from `P1` to `TUTORIAL` with 1–2 tutorial tasks added.
+**Scope:** new flag `init --sample-phase`; non-interactive flag set for `task add`; additive `data.suggested_next_steps: string[]` on `plan prompt` and `phase import`; sample-phase artifact rename `P1` → `TUTORIAL` with 1–2 tutorial tasks. v1.4.0 is a **minor** release — every change is additive on existing envelopes/exit codes except the new-init artifact rename.
 **Owners:** maintainer
-**Related:** [design/decisions/lightweight-runbook-rfc.md](lightweight-runbook-rfc.md) (P12 — explicitly deferred init/UX polish to P13). [design/decisions/task-readiness-schema-rfc.md](task-readiness-schema-rfc.md) (P10 — provides the optional task fields P13's new `task add` flags can declare).
+**Related:** [lightweight-runbook](lightweight-runbook-rfc.md) (P12 — deferred init/UX polish here) · [task-readiness-schema](task-readiness-schema-rfc.md) (P10 — the optional task fields the new `task add` flags declare).
 
 ## Summary
 
-The first-run experience had sharp edges: `init` always scaffolded a `P1` sample phase, `task add` was TTY-only, and planning commands gave no "what next" hint. This RFC makes the sample phase **opt-in** via `init --sample-phase` (renamed `P1` → `TUTORIAL` with real tutorial tasks), adds a **non-interactive flag set for `task add`**, and adds an additive **`suggested_next_steps`** field to `plan prompt` / `phase import`.
+The first-run experience had sharp edges: `init` always scaffolded a `P1` sample phase, `task add` was TTY-only, and planning commands gave no "what next" hint. This RFC makes the sample phase **opt-in** via `init --sample-phase` (renamed `P1` → `TUTORIAL` with real tutorial tasks), adds a **non-interactive flag set for `task add`** (mode-switched on `--description` presence), and adds an additive **`suggested_next_steps`** field to `plan prompt` / `phase import`. Walkthrough: [docs/concepts/sample-phase.md](../../docs/concepts/sample-phase.md).
 
-## Status lifecycle
+## Decisions
 
-- This document opens at status **proposed** in PR1.
-- After review approval, and **before** PR1 merges, the maintainer flips the status line at the top of this file to **accepted**.
-- P13-T1 (RFC acceptance) is considered done only after PR1 — with the status line reading `accepted` — has landed on main.
-- Subsequent implementation PRs (P13-T2..T6) treat the accepted document as load-bearing. They may not change RFC decisions without a separate RFC-update PR.
+1. **`init --sample-phase`** (Stable v1.4+ boolean) — in **non-interactive** mode it enables sample-phase creation at all (otherwise none is created); in **TTY wizard** mode it skips the prompt and forces creation. The wizard's existing default-yes is unchanged — P13 does not touch interactive onboarding. The flag never changes the artifact's shape, only whether it is created. `init --non-interactive --locale <l> --agent <a> --sample-phase` is the complete scripted bootstrap. No `--no-sample-phase` (the wizard already answers "no"; omit the flag to script "none"). The flag does not influence mode selection.
 
-## Background
+   - RATIONALE: closes "scripted bootstrap impossible without a hand-built `phase import` YAML." Explicit opt-in (rather than default-on in non-interactive) keeps CI runs from silently emitting a tutorial artifact.
 
-P9 (post-v1 dogfood / onboarding) and P12 (lightweight runbook) both surfaced — but explicitly deferred — a set of small UX frictions in the init / planning / task creation surface:
+2. **Sample-phase artifact: `TUTORIAL` rename + tutorial tasks.** `writeSamplePhase()` produces `design/phases/TUTORIAL-walkthrough.yaml` (`id: TUTORIAL`, `weight: 1`, `status: planned`) instead of `P1-welcome.yaml` (`id: P1`, no tasks). It carries `TUTORIAL-T1` (`type: feature`) and `TUTORIAL-T2` (`type: docs`, `depends_on: [TUTORIAL-T1]`). Both wizard and `--sample-phase` produce this identical artifact. The roadmap entry becomes `id: TUTORIAL`, `path: design/phases/TUTORIAL-walkthrough.yaml`, `weight: 1`.
 
-1. `init --non-interactive` cannot create a sample tutorial artifact. The wizard's `createSamplePhase` choice is gated behind `isInteractive() && !nonInteractive`.
-2. `task add` is interactive-only. CI / scripted planning paths must use `phase import` with a pre-assembled YAML, which is heavier than the per-task incremental flow.
-3. `plan prompt` and `phase import` emit a string prompt and a JSON envelope respectively, but neither command tells the user what to run next. The recommended sequence (run prompt → phase import → plan lint → phase runbook) lives in docs and in maintainer muscle memory.
-4. The sample phase generated by the wizard uses `id: P1` and has no tasks. Two problems: (a) `P1` collides with the natural first user phase, forcing the "delete the sample first" workaround documented in `docs/concepts/sample-phase.md`; (b) without tasks, the tutorial cannot demo the per-task loop (`task context` → implementation → `task complete` → `task finalize`) without the user manually adding one first.
+   - RATIONALE: `id: P1` collides with the user's natural first phase, forcing the documented "delete the sample first" workaround (the `DUPLICATE_PHASE_ID` pain in `docs/concepts/sample-phase.md`). `TUTORIAL` signals "not your real phase." The two tasks (with the `depends_on` chain) let the tutorial demo the full per-task loop and the P10 `depends_on` field + P12 `task runbook` blocking step in one artifact — `task runbook TUTORIAL-T2 --json` returns a blocking `manual_action` step until `task complete TUTORIAL-T1` runs. The "delete before treating design/ as source-of-truth" warning lives in the phase `objective` text because YAML forbids comments inside zod-parsed values, so that is the only schema-compatible boundary statement; console output reinforces it after creation.
 
-Each gap is small. None blocks an existing user. But together they create a steeper-than-necessary onboarding curve for anyone who arrives via CI, a scripted bootstrap, or an AI-assisted planning flow.
+3. **`task add` non-interactive flag set** (Stable v1.4+). Mode switch is **presence of `--description`**: present → flag-driven path (wizard skipped); absent + TTY → wizard (unchanged); absent + no TTY → `CONFIG_ERROR`. Newly added tasks are **always `status: planned`**; `--status` is intentionally not exposed.
 
-## Problem statement
+   - RATIONALE: gives CI/scripted planning a per-task incremental path without a pre-assembled `phase import` YAML. `--description` is the natural mode switch (the wizard exists only to ask description + type), so no redundant `--non-interactive` flag is added. No `--status`: P11/P12 established design `done` is the *result* of `task finalize` / `phase reconcile` after `task complete`, not a creation-time declaration — a "born done" task with no progress event is exactly the drift the P12 runbook surfaces. Historical/migrated tasks use `phase import`.
 
-The four gaps above lead to three concrete failure modes:
+4. **`plan prompt` / `phase import` `suggested_next_steps`** (Stable v1.4+) — an additive `string[]` of the deterministic CLI sequence the docs already recommend. Always present (may be `[]`).
 
-1. **Scripted bootstrap impossible without `phase import`.** A user running `init --non-interactive` in CI cannot produce a usable smoke-test artifact in a single command. They must either add a `phase import` step (which requires a pre-built YAML) or fall through to a TTY-only manual path on a real terminal.
-2. **AI-assisted flow loses determinism at the seams.** `plan prompt` produces a prompt, the user pastes the response into a file, `phase import` ingests it — but the CLI itself doesn't surface "now run `plan lint --json` and `phase runbook <id>` to validate." Without that, the loop is held together by docs.
-3. **`P1` collision pain.** `docs/concepts/sample-phase.md` already documents that `phase import` raises `DUPLICATE_PHASE_ID` when the AI-generated YAML names its first phase `P1`. The recommended workaround is "delete the sample phase first" — a manual step that exists only because the sample's id collides with the natural first user phase.
+   - RATIONALE: the recommended "prompt → import → lint → runbook" sequence lived only in docs and maintainer muscle memory; surfacing it on the JSON envelope lets a runner or agent chain it. The field surfaces the **existing** CLI sequence only — it does not invoke an LLM, pre-render a prompt response, or add automation. `suggested_next_steps` (not `warnings`) is the right semantic: it is advisory, nothing is wrong.
 
-## Goals
+## Flag contract — `task add`
 
-- Add `init --sample-phase` as a Stable (v1.4+) boolean flag that explicitly opts into sample-phase creation in non-interactive mode and acts as a prompt-skipping override in wizard mode. Makes `init --non-interactive --sample-phase --locale <l> --agent <a>` a complete scripted bootstrap. The existing TTY-wizard default-yes behaviour is preserved.
-- Add a non-interactive flag set to `task add` (Stable v1.4+) — `--description`, `--type`, and six readiness fields plus five P10 repeatable fields — so a single `task add <phase-id> --description "..." --type <type>` invocation produces a valid task without a TTY. JSON envelope identical to the wizard path; existing error codes reused. Newly added tasks are always `status: planned`; `--status` is intentionally not exposed.
-- Add `data.suggested_next_steps: string[]` to `plan prompt --json` and `phase import --json` (Stable v1.4+) as an additive sibling/top-level field. Contents: the deterministic CLI sequence the docs already recommend (`plan lint`, `phase runbook`, `task runbook`).
-- Rename the sample-phase artifact from `P1-welcome.yaml` (`id: P1`, no tasks) to `TUTORIAL-walkthrough.yaml` (`id: TUTORIAL`, 1–2 tutorial tasks; `TUTORIAL-T2 depends_on: [TUTORIAL-T1]` to demo P10 + P12 in a single artifact). Both wizard mode and `--sample-phase` produce this same artifact. Resolves the `DUPLICATE_PHASE_ID` collision documented in `docs/concepts/sample-phase.md` and makes the per-task loop demoable end-to-end without a manual `task add`.
-- Preserve every existing Stable contract — `init` flags, `task add` JSON envelope, `plan prompt` output type (the new field is additive), `phase import` output type (the new field is additive), every error code, every exit code.
+Mode trigger is `--description`. Required when non-interactive: `--description`, `--type` (enum: architecture / feature / bugfix / refactor / docs / test / mechanical_refactor / other). Optional with wizard defaults: `--id` (default `<phaseId>-T<n>`), `--ambiguity` / `--risk` / `--context-size` / `--write-surface` (default `medium`), `--verification-strength` (default `medium`), `--expected-duration` (default `medium`). P10 repeatable fields (multiple flag instances, **not** comma-separated, so paths-with-commas stay unambiguous): `--depends-on`, `--decision-ref`, `--read`, `--write`, `--acceptance-ref`.
 
-## Non-goals
-
-- Adding a `--non-interactive` flag to `task add` (the `--description` presence is the implicit mode switch — minimal flag surface).
-- Adding `--status` to `task add`. P13's `task add` always writes `status: planned`. Historical or already-done tasks must use `phase import`. Rationale: keeps the P11/P12 contract clear — design `done` is the result of `task finalize` / `phase reconcile`, not the starting point of a task.
-- Adding new error codes. Every error path in this RFC reuses an existing public code (`PHASE_NOT_FOUND` / `DUPLICATE_TASK_ID` / `CONFIG_ERROR` / `ALREADY_EXISTS` / `ALREADY_INITIALIZED`).
-- Adding new task or phase schema fields.
-- Adding new commands. P13 is entirely additive on existing command surfaces.
-- `plan brief` / `plan constitution` non-TTY alternatives. These are intentionally interactive, and the existing docs note non-TTY users can edit `design/brief.md` / `design/constitution.md` by hand. Code-level alternatives are P14 or later.
-- `task add --dry-run`. Existing `task add` does not have dry-run mode; adding one would be scope creep, and the cost of an incorrect task is small (one delete + re-run). Revisit in P14 if usage signal warrants.
-- Reserved-id (`TUTORIAL`) hard enforcement. P13 only changes the sample-phase default; it does NOT block users from naming their own phase `TUTORIAL` (e.g. in a hand-edited roadmap or via `phase add`). Reserved-id policy is P14 governance scope.
-- Protected-path hard enforcement, advisory locks, roadmap-mutation policy. All P14.
-- `task next` / `phase next` sugar aliases (deferred per P12 RFC).
-- Bundling `recommend` into `task runbook` (deferred per P12 RFC).
-- LLM / RAG / MCP / multi-agent orchestration / scheduler / issue-tracker integration.
-- Dropping the existing `P1-welcome.yaml` artifact from old projects. Only NEW init runs produce TUTORIAL; existing projects keep their P1-welcome.yaml unchanged.
-
-## UX gap inventory
-
-The four gaps this RFC closes:
-
-| # | Gap | Source | Resolution |
-| --- | --- | --- | --- |
-| 1 | `init --non-interactive` cannot create sample phase | `src/cli.ts:165-220` + `src/commands/init.ts:289-329` | `--sample-phase` flag (P13-T2) |
-| 2 | `task add` is wizard-only, fails with CONFIG_ERROR on no-TTY | `src/cli.ts:1909-1918` | non-interactive flag set (P13-T3) |
-| 3 | `plan prompt` / `phase import` emit no next-step guidance | `src/commands/plan-prompt.ts` + `src/commands/phase-import.ts` | additive `suggested_next_steps` field (P13-T4) |
-| 4 | Sample phase id `P1` collides with user's first phase; no tasks → can't demo per-task loop | `src/commands/init.ts:308-329` + `docs/concepts/sample-phase.md` | TUTORIAL rename + tutorial tasks with `depends_on` (P13-T2) |
-
-Out of scope (deferred to P14 or later):
-
-| Gap | Why deferred |
-| --- | --- |
-| `plan brief` / `plan constitution` non-TTY paths | Designed as interactive by intent; docs already note non-TTY users can hand-edit. Code-level alternatives are P14. |
-| Reserved-id hard enforcement (`TUTORIAL` is just a default, not a reservation) | Hard enforcement is governance — P14 |
-| Protected-path hard enforcement | P14 governance |
-| Advisory locks for concurrent safety | P14 |
-| Roadmap-mutation policy beyond explicit tutorial bootstrap | P14 |
-| `task add --dry-run` | Not enough signal yet; revisit if needed |
-| `task add --status` | P11/P12 contract: design `done` is the result of `task finalize`, not a starting point. Historical state via `phase import`. |
-| `task next` / `phase next` aliases | P12 RFC open question; still deferred |
-| Bundling `recommend` into `task runbook` | P12 RFC open question; still deferred |
-
-## Proposed changes
-
-### `init --sample-phase`
-
-Adds a boolean flag to `init`. The flag's role differs by mode but the artifact produced is identical:
-
-**Generation policy (mode × flag):**
-
-| Mode | `--sample-phase` | Sample phase created? |
-| --- | --- | --- |
-| TTY wizard | unset | wizard prompts (**default yes**, unchanged from v1.3.x) |
-| TTY wizard | set | wizard skips the prompt and forces creation (new in v1.4.0) |
-| Non-interactive | unset | not created (unchanged from v1.3.x) |
-| Non-interactive | set | created (new in v1.4.0) |
-
-**Explicit opt-in applies to non-interactive mode only.** The TTY wizard's existing default-yes behaviour is preserved — P13 does NOT change interactive onboarding. The flag's role in wizard mode is to skip the prompt; the flag's role in non-interactive mode is to enable creation at all.
-
-No `--no-sample-phase` flag is added; the wizard already lets the user answer "no" interactively, and adding a negation flag doubles the surface for no usage signal. Users who want to script "definitely no sample phase" simply omit the flag from a `--non-interactive` invocation.
-
-`--sample-phase` does not influence which mode is selected — TTY detection + `--non-interactive` + JSON / force flags still determine mode independently.
-
-### Sample phase artifact: TUTORIAL rename + tasks
-
-Today `writeSamplePhase()` creates `design/phases/P1-welcome.yaml` with `id: P1`, `name: Welcome`, and no tasks.
-
-After P13-T2:
-
-```yaml
-id: TUTORIAL
-name: Tutorial walkthrough
-weight: 1
-confidence: high
-risk: low
-status: planned
-objective: |
-  Confirm the project structure and verification pipeline by walking
-  through the per-task loop end-to-end. Tutorial-only — delete this
-  phase (and its roadmap entry) before treating design/ as your
-  project's source-of-truth.
-definition_of_done:
-  - The verification command exits with status 0.
-  - Every TUTORIAL-T* task has been completed and finalized.
-verification:
-  commands:
-    - <user-chosen verify command>
-tasks:
-  - id: TUTORIAL-T1
-    type: feature
-    ambiguity: low
-    risk: low
-    context_size: small
-    write_surface: low
-    verification_strength: medium
-    expected_duration: short
-    status: planned
-    description: |
-      Tutorial-only task. Run `code-pact task context TUTORIAL-T1`
-      to see the context pack, then `code-pact task complete
-      TUTORIAL-T1` to mark it done. Delete this entire TUTORIAL
-      phase (and its roadmap entry) before treating design/ as
-      your project's source-of-truth.
-  - id: TUTORIAL-T2
-    type: docs
-    ambiguity: low
-    risk: low
-    context_size: small
-    write_surface: low
-    verification_strength: medium
-    expected_duration: short
-    status: planned
-    depends_on:
-      - TUTORIAL-T1
-    description: |
-      Tutorial-only task. Demonstrates `code-pact task finalize
-      TUTORIAL-T2 --write` after `task complete`. The `depends_on:
-      [TUTORIAL-T1]` lets the tutorial demo the P10 dependency
-      field + the P12 `task runbook` blocking-step output:
-      `task runbook TUTORIAL-T2 --json` returns a blocking
-      `manual_action` step at the head of `next_steps[]` until
-      `task complete TUTORIAL-T1` runs. Safe to delete with the
-      rest of TUTORIAL.
-```
-
-Both wizard mode and `--sample-phase` produce this exact artifact. The roadmap entry becomes `id: TUTORIAL`, `path: design/phases/TUTORIAL-walkthrough.yaml`, `weight: 1`.
-
-The `objective` text carries the "delete before using as source-of-truth" warning because YAML's lack of comments inside zod-parsed values means this is the only schema-compatible place to embed the boundary statement. Console output after `--sample-phase` reinforces with: "Created tutorial artifact at design/phases/TUTORIAL-walkthrough.yaml. See docs/concepts/sample-phase.md for keep / rename / delete guidance."
-
-### `task add` non-interactive flag set
-
-Mode switch: **presence of `--description`**. When `--description` is provided, the wizard branch is skipped and the command runs entirely from flags. When absent and a TTY is available, the wizard runs (unchanged). When absent and no TTY is available, the existing CONFIG_ERROR fires — now with an updated message naming the non-interactive alternative.
-
-Flag table:
-
-| Flag | Type | Required (non-interactive)? | Default | Notes |
-| --- | --- | --- | --- | --- |
-| `--description` | string | yes (also: this is the mode trigger) | — | Required when running without a TTY |
-| `--type` | enum (architecture / feature / bugfix / refactor / docs / test / mechanical_refactor / other) | yes | — | Wizard prompts; non-interactive requires it |
-| `--id` | string | no | auto-generated (`<phaseId>-T<n>`) | Explicit id allowed |
-| `--ambiguity` | enum (low / medium / high) | no | `medium` | Wizard default |
-| `--risk` | enum (low / medium / high) | no | `medium` | Wizard default |
-| `--context-size` | enum (small / medium / large) | no | `medium` | Wizard default |
-| `--write-surface` | enum (low / medium / high) | no | `medium` | Wizard default |
-| `--verification-strength` | enum (weak / medium / strong) | no | `medium` | Wizard default |
-| `--expected-duration` | enum (short / medium / long) | no | `medium` | Wizard default |
-| `--depends-on <id>` | string, repeatable | no | (none) | P10 field |
-| `--decision-ref <path>` | string, repeatable | no | (none) | P10 field |
-| `--read <glob>` | string, repeatable | no | (none) | P10 field |
-| `--write <glob>` | string, repeatable | no | (none) | P10 field |
-| `--acceptance-ref <path>` | string, repeatable | no | (none) | P10 field |
-
-**`--status` is intentionally NOT exposed.** Newly added tasks are always written with `status: planned`. Historical or already-done tasks must use `phase import`. Rationale: P11/P12 established that design status `done` is the result of `task finalize` / `phase reconcile` after `task complete` records the operational fact, not a starting point declared at creation time. Allowing `task add --status done` would let a task be "born done" in design without any progress event — exactly the kind of progress/design divergence the P12 runbook surfaces as drift. Keeping `task add` strictly creation-time + `status: planned` preserves the contract.
-
-P10 fields are repeatable (multiple flag instances), not comma-separated — keeps the parser simple and avoids ambiguity over paths containing commas.
-
-**Partial-flags resolution.** The 3-branch decision matrix is explicit:
+**Partial-flags resolution** (explicit, never silent):
 
 | Input | Result |
 | --- | --- |
-| `--description` provided | non-interactive path; `--type` required (else CONFIG_ERROR) |
-| `--description` absent, no other non-interactive flags, TTY available | wizard runs (unchanged) |
-| `--description` absent, no other non-interactive flags, no TTY | CONFIG_ERROR with non-interactive guidance |
-| `--description` absent, but one or more non-interactive-only flags present (e.g. `--type`, `--depends-on`, `--read`, etc.) | **CONFIG_ERROR** ("non-interactive flags provided without `--description`") — never silently enters the wizard, never silently ignores the flags |
+| `--description` provided | non-interactive path; `--type` required (else `CONFIG_ERROR`) |
+| `--description` absent, no non-interactive flags, TTY | wizard (unchanged) |
+| `--description` absent, no non-interactive flags, no TTY | `CONFIG_ERROR` with non-interactive guidance |
+| `--description` absent, but ≥1 non-interactive-only flag present | `CONFIG_ERROR` ("non-interactive flags provided without `--description`") |
 
-Silent mode-switching based on TTY availability alone (or silent flag-ignoring) is a footgun for scripts that lose terminal capability mid-pipeline. The explicit CONFIG_ERROR keeps the behaviour predictable.
+Silent mode-switching on TTY availability alone (or silently ignoring flags) is a footgun for scripts that lose terminal capability mid-pipeline; the explicit `CONFIG_ERROR` keeps behaviour predictable.
 
-Error codes (all reused):
+**P10 field validation** is `plan lint`'s job, not `task add`'s. `task add` stores P10 flags after basic string validation only; existence checks, glob validity, unsafe-path detection (`assertSafeRelativePath`), and protected-path advisories stay in `plan lint`. Duplicating them would create a second source of truth, and the `task add` → `plan lint --json` dogfood loop already gives immediate feedback.
 
-- `PHASE_NOT_FOUND` — phase id is not in roadmap
-- `DUPLICATE_TASK_ID` — task id already exists in the phase
-- `CONFIG_ERROR` — missing `--description` AND no TTY; missing `--type` when `--description` provided; non-interactive flag present without `--description`; unknown flag; invalid enum value
+## CLI contract / error taxonomy
 
-JSON envelope unchanged from the wizard path: `{ ok: true, data: { phaseId, taskId, phasePath } }`. Same JSON for both modes — clean for tooling consumers.
+All four changes are additive on existing JSON envelopes; exit codes unchanged (0 success, 2 for argument/config errors). **No new error codes** — every path reuses an existing public code, and `KNOWN_CODES.public` is unchanged.
 
-**P10 field validation responsibility.** `task add` stores P10 field flags after basic string validation only. Existence checks (file presence on disk), glob validity (P10 supported subset), unsafe-path detection (`assertSafeRelativePath`), and protected-path advisories remain `plan lint`'s responsibility. Rationale: duplicating lint logic inside `task add` would create a second source of truth for P10 field semantics, and the dogfood loop (`task add` → `plan lint --json`) already provides immediate feedback if a declared field is invalid.
-
-### `plan prompt` `suggested_next_steps`
-
-Adds a sibling field to `PlanPromptResult`:
-
-```typescript
-type PlanPromptResult = {
-  prompt: string;
-  hasBrief: boolean;
-  hasConstitution: boolean;
-  clipboardCopied: boolean;
-  suggested_next_steps: string[];  // NEW
-};
-```
-
-Contents (always present, may be empty in degenerate cases):
-
-1. Run the planning prompt through your AI agent of choice (Claude, ChatGPT, etc.) and capture its YAML response into a file (e.g. `design/imports/p1.yaml`).
-2. Run `code-pact phase import design/imports/p1.yaml --json` to ingest the AI-generated YAML.
-3. Run `code-pact plan lint --json` to validate the imported phase.
-4. Run `code-pact phase runbook <imported-phase-id> --json` to see the recommended per-phase next steps.
-
-When `hasBrief === false` or `hasConstitution === false`, the suggestions also include "Consider running `code-pact plan brief` and `code-pact plan constitution` first to capture intent and principles."
-
-### `phase import` `suggested_next_steps`
-
-Adds a top-level field to `PhaseImportResult`:
-
-```typescript
-type PhaseImportResult = {
-  imported_phases: PhaseRef[];
-  imported_tasks: string[];
-  skipped_phases: string[];
-  completed_fields: CompletedField[];
-  suggested_next_steps: string[];  // NEW
-};
-```
-
-Contents (always present, may be empty in degenerate cases):
-
-1. Run `code-pact plan lint --json` to validate the imported phase(s).
-2. Run `code-pact phase runbook <id> --json` for each imported phase to see the recommended next steps. The runbook's reconcile-batch step is the natural follow-up after the per-task loop starts.
-3. Run `code-pact task runbook <first-imported-task-id> --json` to see the per-task lifecycle starting from a fresh task.
-
-When `completed_fields.length > 0` (lenient mode filled defaults), the suggestions also include "Review the `completed_fields` array — every entry is a field code-pact filled with a default. Confirm each is appropriate before treating the imported tasks as source-of-truth."
-
-## Init / tutorial bootstrap model
-
-**Generation policy (mode × flag):**
-
-| Mode | `--sample-phase` | Sample phase created? |
-| --- | --- | --- |
-| TTY wizard | unset | wizard prompts (**default yes**, unchanged from v1.3.x) |
-| TTY wizard | set | wizard skips the prompt and forces creation (new in v1.4.0) |
-| Non-interactive | unset | not created (unchanged from v1.3.x) |
-| Non-interactive | set | created (new in v1.4.0) |
-
-**Explicit opt-in applies to non-interactive mode only.** The TTY wizard's existing default-yes behaviour is preserved — P13 does NOT change interactive onboarding. The flag's role in wizard mode is to skip the prompt; the flag's role in non-interactive mode is to enable creation at all.
-
-Worked examples:
-
-- **`init`** (TTY, no flags) — runs the wizard. Wizard asks about sample phase (default yes); on yes, generates the TUTORIAL artifact.
-- **`init --sample-phase`** (TTY) — wizard runs, skips the prompt, forces creation.
-- **`init --non-interactive --locale en-US --agent claude-code`** — non-interactive, NO sample phase. Unchanged from v1.3.x.
-- **`init --non-interactive --locale en-US --agent claude-code --sample-phase`** — non-interactive, creates sample phase. New in v1.4.0. The complete scripted bootstrap.
-
-In all four cases, the generated sample phase (when created) has the same content (TUTORIAL + 2 tasks with the `depends_on` chain). The flag's role is purely to decide whether to create it — never to change the artifact's shape.
-
-## Task creation non-TTY model
-
-- **`task add P1`** (TTY, no `--description`, no non-interactive flags) — wizard runs (unchanged from v1.3.x).
-- **`task add P1 --description "..." --type feature`** (TTY or no TTY) — non-interactive path runs. New in v1.4.0.
-- **`task add P1` (no TTY, no `--description`, no non-interactive flags)** — CONFIG_ERROR with updated message naming the non-interactive alternative.
-- **`task add P1 --description "..."` without `--type`** — CONFIG_ERROR ("--type is required when --description is provided").
-- **`task add P1 --type feature`** (no `--description` but `--type` provided) — CONFIG_ERROR ("non-interactive flags provided without `--description`; pass `--description "..."` to use the non-interactive path"). Same rule for any other non-interactive-only flag (`--depends-on`, `--decision-ref`, `--read`, `--write`, `--acceptance-ref`, plus the readiness-field flags). Never silently enters the wizard or silently ignores flags.
-- **`task add P99 --description "..." --type feature`** (phase id absent from roadmap) — PHASE_NOT_FOUND.
-- **`task add P1 --description "..." --type feature --id P1-T1`** when `P1-T1` already exists — DUPLICATE_TASK_ID.
-- **`task add P1 --description "..." --type feature` produces `status: planned`** regardless of what's in the phase YAML elsewhere. P13 does not expose `--status`; historical / migrated tasks must use `phase import`.
-
-The three-branch resolution for the (TTY × `--description` × other-non-interactive-flag) matrix is intentional: silent mode-switching based on TTY alone (or silent flag-ignoring) is a footgun for scripts that lose terminal capability mid-pipeline.
-
-JSON envelope is identical between modes. Tests assert envelope parity.
-
-### P10 field validation responsibility
-
-`task add`'s non-interactive flags (`--depends-on`, `--decision-ref`, `--read`, `--write`, `--acceptance-ref`) are stored after basic string validation only. Existence checks, glob validity, unsafe-path detection, and protected-path advisories remain the responsibility of `plan lint`. Rationale: duplicating lint logic inside `task add` would create a second source of truth for P10 field semantics, and the dogfood loop (`task add` → `plan lint --json`) already provides immediate feedback if a declared field is invalid.
-
-## Planning command UX model
-
-`plan prompt`, `phase import`, and (in docs only) `plan brief` / `plan constitution` form the AI-assisted planning surface. After P13:
-
-- `plan prompt --json` emits the prompt plus an explicit `suggested_next_steps` array describing the canonical "prompt → import → lint → runbook" sequence.
-- `phase import --json` emits the existing import result plus an explicit `suggested_next_steps` array describing the canonical "lint → phase runbook → task runbook" sequence.
-- `plan brief --json` / `plan constitution --json` are unchanged. Docs mention the manual-edit alternative (hand-edit `design/brief.md` / `design/constitution.md`) for non-TTY users.
-
-The new suggestions are CLI-emitted strings, not links to docs. Consumers can pipe them straight into a runner or display them verbatim.
-
-## AI-assisted planning boundary
-
-The new `suggested_next_steps` fields surface the EXISTING CLI sequence — they do NOT invoke an LLM, do NOT pre-render an AI prompt response, and do NOT introduce an opinionated automation step. They are CLI-emitted documentation, nothing more.
-
-`plan prompt` continues to emit the planning prompt as a string. `phase import` continues to ingest user-provided YAML (which is typically AI-generated). Neither command changes its core behaviour; both gain an additive field describing what to run next.
-
-## Sample phase source-of-truth boundary
-
-P13 reinforces the boundary three ways:
-
-1. **Naming.** `TUTORIAL` (not `P1`) signals "not your real phase." `TUTORIAL-T1` / `TUTORIAL-T2` follow the same pattern.
-2. **Embedded warning.** The phase's `objective` text says "Tutorial-only — delete this phase (and its roadmap entry) before treating design/ as your project's source-of-truth." YAML schema forbids comments inside zod-parsed values, so this is the only schema-compatible boundary statement.
-3. **Console output + docs.** After creation, the CLI prints "Created tutorial artifact at design/phases/TUTORIAL-walkthrough.yaml. See docs/concepts/sample-phase.md for keep / rename / delete guidance." `docs/concepts/sample-phase.md` is updated to TUTORIAL terms in P13-T5.
-
-Hard enforcement (block writes to `TUTORIAL*` from non-tutorial code paths, refuse `phase add --id TUTORIAL`) is **P14 governance scope**, not P13. P13 only changes the default; users can still hand-edit roadmap.yaml to add their own `TUTORIAL`-named phase, or run `phase add --id TUTORIAL --name "My real phase"` — these collide with the sample phase exactly as `P1` collides today, and the existing `DUPLICATE_PHASE_ID` mechanic catches them.
-
-## JSON envelope / CLI contract
-
-All four changes are additive on existing JSON envelopes:
-
-- `init --sample-phase` — `init`'s JSON envelope is unchanged. The flag affects which files are written, not the envelope shape.
-- `task add --description --type [...]` — JSON envelope identical to the wizard path: `{ ok: true, data: { phaseId, taskId, phasePath } }`.
-- `plan prompt --json` — `data` gains `suggested_next_steps: string[]`. Existing fields (`prompt`, `hasBrief`, `hasConstitution`, `clipboardCopied`) unchanged.
-- `phase import --json` — `data` gains `suggested_next_steps: string[]`. Existing fields (`imported_phases`, `imported_tasks`, `skipped_phases`, `completed_fields`) unchanged.
-
-Exit codes unchanged (0 success, 2 for argument/configuration errors).
-
-## Error / diagnostic taxonomy
-
-No new error codes. The full error path:
+- `init --sample-phase` — envelope unchanged; the flag affects which files are written, not the shape.
+- `task add` (non-interactive) — envelope **identical to the wizard path**: `{ ok: true, data: { phaseId, taskId, phasePath } }`. Tests assert envelope parity across modes.
+- `plan prompt --json` — `data` gains `suggested_next_steps: string[]`; existing `prompt` / `hasBrief` / `hasConstitution` / `clipboardCopied` unchanged.
+- `phase import --json` — `data` gains `suggested_next_steps: string[]`; existing `imported_phases` / `imported_tasks` / `skipped_phases` / `completed_fields` unchanged.
 
 | Code | Exit | Command | When |
 | --- | --- | --- | --- |
-| `CONFIG_ERROR` | 2 | `init` | Missing `--locale` / `--agent` in non-interactive mode (unchanged) |
-| `ALREADY_INITIALIZED` | 2 | `init` | `.code-pact/` already exists without `--force` (unchanged) |
-| `PHASE_NOT_FOUND` | 2 | `task add` | Phase id not in roadmap (unchanged) |
-| `DUPLICATE_TASK_ID` | 2 | `task add` | Task id already exists (unchanged) |
-| `CONFIG_ERROR` | 2 | `task add` | Missing `--description` AND no TTY; missing `--type` when `--description` given; non-interactive flag without `--description`; unknown flag |
+| `CONFIG_ERROR` | 2 | `init` | missing `--locale` / `--agent` in non-interactive mode (unchanged) |
+| `ALREADY_INITIALIZED` | 2 | `init` | `.code-pact/` exists without `--force` (unchanged) |
+| `PHASE_NOT_FOUND` | 2 | `task add` | phase id not in roadmap |
+| `DUPLICATE_TASK_ID` | 2 | `task add` | task id already exists in phase |
+| `CONFIG_ERROR` | 2 | `task add` | missing `--description` AND no TTY; missing `--type` when `--description` given; non-interactive flag without `--description`; unknown flag; invalid enum |
 | `DUPLICATE_PHASE_ID` | 2 | `phase import` | (unchanged) |
 | `AMBIGUOUS_TASK_ID` | 2 | `phase import` | (unchanged) |
 
-`KNOWN_CODES.public` in `tests/unit/error-code-surface.test.ts` is unchanged.
+`task context` pack output and the byte-identical pack regression test are unchanged; no new task/phase schema field.
 
-## Backward compatibility
+## Reserved-id boundary (P13 scope)
 
-- `init` flag surface gains `--sample-phase` (additive); all existing flags unchanged.
-- `init` JSON envelope unchanged.
-- `init` wizard generates a different artifact (TUTORIAL vs P1) — **this is a behavioural change for new init runs only**. Existing projects with a `P1-welcome.yaml` are untouched. Documented in `docs/migration.md` § v1.3.x → v1.4.0 as the sole non-additive change.
-- `task add` flag surface gains the non-interactive flag set (additive); existing positional + `--id` behaviour unchanged.
-- `task add` JSON envelope unchanged.
-- `plan prompt` output gains `data.suggested_next_steps` (additive); existing fields unchanged.
-- `phase import` output gains `data.suggested_next_steps` (additive); existing fields unchanged.
-- `task context` pack output is unchanged. Byte-identical pack regression test passes without modification.
-- `tests/integration/json-stdout.test.ts` continues to pass for every Stable command. New flag invocations are added.
-- `KNOWN_CODES.public` unchanged.
-- No new task or phase schema field.
-
-In semver terms, v1.4.0 is a minor release.
-
-## Migration story
-
-Target: existing projects upgrading from v1.3.x to v1.4.0.
-
-- **No required action.** Existing projects continue to work unchanged. The TUTORIAL rename only affects NEW init runs; existing `P1-welcome.yaml` artifacts are untouched.
-- **Recommended adoption (CI / scripted bootstrap).** Replace `init --non-interactive --locale en-US --agent claude-code` followed by `phase import` of a hand-built tutorial YAML with the single command `init --non-interactive --locale en-US --agent claude-code --sample-phase`. The output is a self-contained tutorial artifact ready to demo the per-task loop (including `task runbook TUTORIAL-T2 --json` showing the `depends_on` blocking step).
-- **Recommended adoption (per-task scripting).** Replace `phase import` of a single-task delta YAML with `task add <phase-id> --description "..." --type <type>` to incrementally declare tasks from CI.
-- **CI under `--strict`.** No new errors, no new warnings. The two new `suggested_next_steps` fields are additive on existing JSON shapes.
-- **Docs.** `docs/migration.md` gains a `v1.3.x → v1.4.0` section. `docs/concepts/sample-phase.md` is rewritten to TUTORIAL terms.
+P13 changes only the sample-phase **default**; it does **not** reserve `TUTORIAL`. Users can still hand-edit the roadmap or run `phase add --id TUTORIAL` — these collide with the sample exactly as `P1` does today, caught by the existing `DUPLICATE_PHASE_ID`. Hard enforcement (block writes to `TUTORIAL*` from non-tutorial paths, refuse `phase add --id TUTORIAL`) is **P14 governance scope** — see [governance-rfc.md](governance-rfc.md).
 
 ## Alternatives considered
 
-- **Add an explicit `--non-interactive` flag to `task add`.** Rejected. `--description` presence is the natural mode switch (the wizard exists only to ask for description + type); adding a redundant mode flag would double the flag surface for no behavioural gain. The error message for "no TTY and no `--description`" already names the alternative, so the discoverability cost is bounded.
-- **Add `task add --status`.** Rejected. P11/P12 established that design status `done` is the result of `task finalize` / `phase reconcile` after `task complete` records the operational fact. Allowing `task add --status done` would let a task be "born done" in design without any progress event — the exact kind of progress/design divergence the P12 runbook surfaces as drift. Historical / migrated tasks should use `phase import`, which has the full schema surface and is the right home for bulk historical data.
-- **Keep the sample phase as `P1` and only add the flag.** Rejected. The `P1` / `DUPLICATE_PHASE_ID` pain documented in `docs/concepts/sample-phase.md` would persist. Renaming is a small additional change in P13-T2 with much higher onboarding payoff. Backward compat is preserved (existing projects keep their P1).
-- **Generate the sample phase with NO tasks (status quo content, only id change).** Rejected. Without tasks, the tutorial cannot demo the per-task loop (`task context` → implement → `task complete` → `task finalize`) without the user doing `task add` first. Adding two minimal tutorial tasks (with `TUTORIAL-T2 depends_on: [TUTORIAL-T1]`) makes the artifact a complete end-to-end walkthrough of P10 + P12 + P11 in a single bootstrap.
-- **Add a separate `--no-sample-phase` flag for explicit opt-out in wizard mode.** Rejected. The wizard already lets the user answer "no" interactively. Adding a negation flag for a no-usage-signal case doubles the surface.
-- **Allow `task add` partial flags to silently fall through to the wizard.** Rejected. Silent mode-switching based on TTY availability alone is a footgun for scripts that lose terminal capability mid-pipeline. The explicit CONFIG_ERROR on partial flags + clear remediation message in the error string keeps the behaviour predictable.
-- **Promote `DUPLICATE_TASK_ID` from `plan` category to `public` in KNOWN_CODES.** Rejected for P13. The code is already emitted at command level by `task add` (and was even before P13); the KNOWN_CODES category mismatch is a documentation inconsistency, not a runtime issue. Recategorizing requires updating the KNOWN_CODES surface contract and docs/cli-contract.md — a separate concern. P13 just reuses the existing code where it's already fired.
-- **Add a `data.warnings` array to `phase import` instead of `suggested_next_steps`.** Rejected. Warnings imply something is wrong; the new field is purely advisory ("here's what to run next"). `suggested_next_steps` is the right semantic.
-- **Bundle the `plan prompt` and `phase import` guidance into `task runbook` / `phase runbook` output.** Rejected. Runbook's domain is the per-task / per-phase lifecycle (what to do next given current state). `plan prompt` and `phase import` are pre-roadmap planning surfaces; their guidance is about getting into the lifecycle, not progressing within it. Keeping the surfaces separate avoids overloading runbook's semantics.
-- **Add `task add` dry-run mode.** Rejected. The existing wizard doesn't have dry-run; adding one to only the non-interactive path is asymmetric. The cost of a bad task is small (one `task add` followed by a manual delete or `phase import --force`). Revisit in P14 if usage signal warrants.
-- **Add `init --mode tutorial` as a sugar alias.** Rejected for P13 — `--sample-phase` is the primary explicit flag; aliases proliferate the surface. Future P14 / P15 may revisit if more "modes" emerge.
+- **Explicit `--non-interactive` flag on `task add`** — rejected; `--description` presence is the natural switch, a mode flag doubles the surface for no gain, and the no-TTY error already names the alternative.
+- **`task add --status`** — rejected; design `done` is the result of `task finalize` / `phase reconcile`, not a creation-time field. A "born done" task with no progress event is the drift P12 surfaces. Historical state goes through `phase import`.
+- **Keep the sample phase as `P1`, only add the flag** — rejected; the `P1` / `DUPLICATE_PHASE_ID` pain persists. Renaming is a small change with high onboarding payoff; existing projects keep their `P1`.
+- **Sample phase with NO tasks (only the id change)** — rejected; without tasks the tutorial can't demo the per-task loop without the user doing `task add` first. Two minimal tasks (with `TUTORIAL-T2 depends_on: [TUTORIAL-T1]`) make it an end-to-end walkthrough.
+- **Separate `--no-sample-phase` opt-out flag** — rejected; the wizard already answers "no" interactively; a negation flag doubles the surface for no usage signal.
+- **`task add` partial flags silently fall through to the wizard** — rejected; silent mode-switching on TTY alone is a footgun for pipelines that lose terminal capability. Explicit `CONFIG_ERROR` + remediation message stays predictable.
+- **Promote `DUPLICATE_TASK_ID` from `plan` to `public` in KNOWN_CODES** — rejected for P13; the code already fires at command level. The category mismatch is a doc inconsistency to fix separately, not a runtime issue.
+- **`data.warnings` instead of `suggested_next_steps` on `phase import`** — rejected; warnings imply something is wrong; the field is purely advisory.
+- **Bundle the `plan prompt` / `phase import` guidance into `task runbook` / `phase runbook`** — rejected; runbook's domain is the per-task/phase lifecycle. These are pre-roadmap planning surfaces (getting *into* the lifecycle, not progressing within it); keeping them separate avoids overloading runbook semantics.
+- **`task add` dry-run** — rejected; the wizard has none, adding it only to the non-interactive path is asymmetric, and a bad task costs one delete + re-run. Revisit in P14 if signal warrants.
+- **`init --mode tutorial` sugar alias** — rejected; `--sample-phase` is the primary explicit flag; aliases proliferate the surface.
 
 ## Open questions
 
-1. **Should `--sample-phase` work standalone (without `--non-interactive`)?** P13 says yes — it forces the wizard to skip the prompt. Confirmed by the generation-policy table in § Init / tutorial bootstrap model.
-2. **Should `task add` accept `--depends-on a,b,c` (comma-separated) in addition to repeated `--depends-on a --depends-on b`?** P13 says no (repeatable only). Revisit if usage signal warrants.
-3. **Should we hard-enforce that no project phase can use the id `TUTORIAL` (e.g. block `phase add --id TUTORIAL`)?** P13 says no — defer to P14 governance. Existing `DUPLICATE_PHASE_ID` catches the practical case.
-4. **Should the new `suggested_next_steps` fields be omitted from JSON when empty, or always present as `[]`?** P13 says always present as `[]`. Field-presence-fixed is the P12 RunbookStep convention; we extend it here.
-5. **Should `init --sample-phase` regenerate the TUTORIAL artifact if it already exists?** P13 says no — `DUPLICATE_PHASE_ID` is swallowed silently (matching the existing `writeSamplePhase()` behaviour). Users who want to recreate run `phase add --force` or delete + re-init.
-6. **What about wizard-mode behaviour when the user runs `init --sample-phase` AND answers "no" to the wizard prompt?** P13 says the flag wins (sample phase is created). The flag is explicit intent; the prompt is the default. Documented in console output. Implementation should skip the prompt entirely when `--sample-phase` is set.
-7. **`task add --status` flag?** Resolved as NO. P13 does not expose `--status`. Newly added tasks are always `status: planned`, matching the wizard default. Historical or already-done tasks must be represented via `phase import`. Rationale: keeps the P11/P12 contract clear (progress = operational fact; design status `done` is the result of `task finalize` / `phase reconcile`, not the starting point of a task). Open for future revisit only if a clear use case emerges that `phase import` cannot serve.
-
-## Implementation slicing
-
-This RFC, once accepted, is followed by six implementation PRs:
-
-| PR | Task | Scope |
-| --- | --- | --- |
-| **PR1 (this RFC PR)** | P13-T1 | RFC + phase YAML + roadmap entry. No src/ changes. |
-| **PR2** | P13-T2 | `init --sample-phase` flag + TUTORIAL rename + tutorial tasks. CLI parseArgs update, `writeSamplePhase()` rewrite, i18n strings, unit tests, integration test entries. |
-| **PR3** | P13-T3 | `task add` non-interactive flag set (no `--status`; partial-flags → CONFIG_ERROR). strictParse extension, command-level switch on `--description` presence, new test cases, integration test entry. |
-| **PR4** | P13-T4 | `plan prompt` / `phase import` `suggested_next_steps` additive fields. Plus unit tests + json-stdout tests + docs/cli-contract.md updates. |
-| **PR5** | P13-T5 | docs/migration v1.3.x → v1.4.0 + Deferred beyond v1.4 update; docs/getting-started non-interactive walkthrough; docs/dogfood Per-task flow non-interactive variant; docs/concepts/sample-phase.md TUTORIAL rewrite. |
-| **PR6** | P13-T6 | v1.4.0 release prep + dogfood validation. Bump package.json, prepend CHANGELOG, run `phase reconcile P13 --write`, hand-edit phase status. PR description includes a dogfood log exercising every new flag in a tmp project. |
+1. **`--sample-phase` standalone (no `--non-interactive`)** — yes; it forces the wizard to skip the prompt.
+2. **`task add --depends-on a,b,c` comma-separated** — no; repeatable only. Revisit on signal.
+3. **Hard-enforce no project phase uses `TUTORIAL`** — no; deferred to P14 governance; `DUPLICATE_PHASE_ID` catches the practical case.
+4. **Omit `suggested_next_steps` when empty vs always `[]`** — always `[]` (field-presence-fixed, the P12 RunbookStep convention).
+5. **`init --sample-phase` when the artifact already exists** — no regeneration; `DUPLICATE_PHASE_ID` is swallowed silently (matching existing `writeSamplePhase()`). Recreate via `phase add --force` or delete + re-init.
+6. **`init --sample-phase` AND wizard answered "no"** — the flag wins (sample created); explicit intent beats the default prompt. Implementation skips the prompt entirely when the flag is set.
+7. **`task add --status`** — resolved NO (see decision 3 / alternatives). Open only if a use case emerges that `phase import` cannot serve.
 
 ## References
 
-- [design/decisions/lightweight-runbook-rfc.md](lightweight-runbook-rfc.md) — P12 RFC, which explicitly deferred init / UX polish to P13.
-- [design/decisions/task-readiness-schema-rfc.md](task-readiness-schema-rfc.md) — P10 RFC. Provides the optional task fields P13's new `task add` flags can declare.
-- [design/decisions/finalization-reconciliation-rfc.md](finalization-reconciliation-rfc.md) — P11 RFC. P13-T6 uses `phase reconcile --write` to mechanize the release-prep status flip.
-- [design/decisions/stability-taxonomy.md](stability-taxonomy.md) — Stability bands the new flags ship under.
-- [docs/concepts/sample-phase.md](../../docs/concepts/sample-phase.md) — Existing keep/rename/delete guidance; P13-T5 rewrites in TUTORIAL terms.
-- [src/commands/init.ts](../../src/commands/init.ts) — `writeSamplePhase()` lives here; rewritten in P13-T2.
-- [src/commands/init-wizard.ts](../../src/commands/init-wizard.ts) — wizard prompt for sample-phase choice.
-- [src/commands/task-add.ts](../../src/commands/task-add.ts) — extended with non-interactive flag handling in P13-T3.
-- [src/commands/plan-prompt.ts](../../src/commands/plan-prompt.ts) — gains `suggested_next_steps` in P13-T4.
-- [src/commands/phase-import.ts](../../src/commands/phase-import.ts) — gains `suggested_next_steps` in P13-T4.
-- [tests/unit/error-code-surface.test.ts](../../tests/unit/error-code-surface.test.ts) — `KNOWN_CODES.public` (unchanged in P13).
-- [tests/integration/json-stdout.test.ts](../../tests/integration/json-stdout.test.ts) — Stable JSON-only-stdout regression net (extended by P13-T2 / T3 / T4).
-- [docs/cli-contract.md](../../docs/cli-contract.md) — destination for the new flag sections.
-- [docs/migration.md](../../docs/migration.md) — destination for the v1.3.x → v1.4.0 section.
+- RFCs: [lightweight-runbook](lightweight-runbook-rfc.md) (P12) · [task-readiness-schema](task-readiness-schema-rfc.md) (P10) · [finalization-reconciliation](finalization-reconciliation-rfc.md) (P11 — `phase reconcile --write` mechanizes the release-prep status flip) · [governance](governance-rfc.md) (P14 — reserved-id hard enforcement) · [stability-taxonomy](stability-taxonomy.md) (bands the new flags ship under).
+- Docs: [docs/concepts/sample-phase.md](../../docs/concepts/sample-phase.md) (rewritten to TUTORIAL terms) · [docs/cli-contract.md](../../docs/cli-contract.md) · [docs/migration.md](../../docs/migration.md) (v1.3.x → v1.4.0).
