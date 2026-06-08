@@ -220,4 +220,38 @@ describe("decision prune — CLI (dry-run)", () => {
     expect(await snapshot()).toEqual(before); // target unchanged; no new files
     await expect(access(prunedPath)).rejects.toThrow(); // PRUNED.md never created
   });
+
+  it("ineligible runs are also ZERO-WRITE", async () => {
+    const p = await project("# RFC\n\n**Status:** proposed\n\nx", "done");
+    const decPath = join(p.dir, "design", "decisions", "foo-rfc.md");
+    const prunedPath = join(p.dir, "design", "decisions", "PRUNED.md");
+    const snapshot = async () => ({
+      entries: (await readdir(join(p.dir, "design", "decisions"))).sort(),
+      content: await readFile(decPath, "utf8"),
+    });
+    const before = await snapshot();
+    p.run(["decision", "prune", "design/decisions/foo-rfc.md", "--json"]);
+    p.run(["decision", "prune", "design/decisions/foo-rfc.md"]);
+    expect(await snapshot()).toEqual(before);
+    await expect(access(prunedPath)).rejects.toThrow();
+  });
+
+  it("cluster-level errors honor --json (unknown subcommand)", async () => {
+    const p = await project(ACCEPTED, "done");
+    for (const args of [
+      ["decision", "nope", "--json"],
+      ["decision", "--json"],
+    ]) {
+      const res = p.run(args);
+      expect(res.code).toBe(2);
+      expect(expectJsonErr(res).error.code).toBe("CONFIG_ERROR");
+    }
+  });
+
+  it("top-level `--help` lists the decision command (discoverability)", async () => {
+    const p = await project(ACCEPTED, "done");
+    const res = p.run(["--help"]);
+    expect(res.code).toBe(0);
+    expect(res.stdout).toContain("decision");
+  });
 });

@@ -2254,7 +2254,16 @@ Success envelope (`--json`):
 }
 ```
 
-`plan.link_rewrite.status` is **`"pending"`** with `items: []` in this release; the shared inbound-`.md`-link collector that fills `items` (each `{ source_file, line, raw_href, normalized_target, link_kind, rewrite_action }`) and flips `status` to `"ready"` lands in a follow-up — an **additive** change, not a shape change. `warnings[]` carries advisories (e.g. an eligible target that no task references — prune cannot prove it shipped). `--write` (file delete + link rewrite + ledger append) is not yet a flag; passing it is a `CONFIG_ERROR`.
+`plan.link_rewrite.status` is **`"pending"`** with `items: []` in this release; the shared inbound-`.md`-link collector that fills `items` and flips `status` to `"ready"` lands in a follow-up — an **additive** change, not a shape change. Each `items[]` entry is pinned now as:
+
+| Field | Meaning |
+| --- | --- |
+| `source_file` | repo-relative POSIX path of the file that links to the pruned decision |
+| `line` | 1-based line number of the link within `source_file` |
+| `raw_href` | the markdown link destination exactly as found, before normalization (may include `<…>` / a title) |
+| `normalized_target` | the link's normalized repo-relative target path (equals the pruned decision path) |
+| `link_kind` | `inline` (`[t](url)`) \| `reference_definition` (`[label]: url`) \| `index_row` (the `README.md` decision-index row) |
+| `rewrite_action` | `tombstone` (index row → "(pruned …)" line) \| `delink` (keep the text, drop the link) \| `leave_as_is` | `warnings[]` carries advisories (e.g. an eligible target that no task references — prune cannot prove it shipped). `--write` (file delete + link rewrite + ledger append) is not yet a flag; passing it is a `CONFIG_ERROR`.
 
 ## `task runbook` — read-only guidance for a single task (v1.3+, P12)
 

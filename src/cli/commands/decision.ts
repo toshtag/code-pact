@@ -49,6 +49,9 @@ export async function cmdDecision(
 ): Promise<number> {
   const subcommand = argv[0];
   const rest = argv.slice(1);
+  // Honor --json anywhere for cluster-level errors, like the other public
+  // clusters — an agent that passed --json must still get a JSON envelope.
+  const effectiveJson = globalJson || argv.includes("--json");
 
   if (!subcommand || subcommand === "help" || subcommand === "--help" || subcommand === "-h") {
     process.stdout.write(`${GROUP_HELP}\n`);
@@ -103,6 +106,6 @@ export async function cmdDecision(
     return 2;
   }
 
-  emitError(globalJson, "CONFIG_ERROR", `unknown decision subcommand: ${subcommand}`);
+  emitError(effectiveJson, "CONFIG_ERROR", `unknown decision subcommand: ${subcommand}`);
   return 2;
 }

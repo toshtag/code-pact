@@ -36,7 +36,8 @@ function planArtifactsUnreadable(
   // Match on a path-segment boundary (handles both cwd-relative and absolute
   // issue paths) rather than a loose substring.
   const isGraphFile = (f?: string): boolean =>
-    f !== undefined && /(^|\/)design\/(roadmap\.yaml|phases\/)/.test(f);
+    f !== undefined &&
+    /(^|\/)design\/(roadmap\.yaml|phases\/)/.test(f.replace(/\\/g, "/"));
   const graphIssue = fileIssues.find((i) => isGraphFile(i.file));
   if (graphIssue) return `cannot read the plan graph: ${graphIssue.file}`;
   if (skippedChecks.length > 0) {
