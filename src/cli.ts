@@ -29,6 +29,7 @@ import { cmdTask } from "./cli/commands/task.ts";
 import { cmdPlan } from "./cli/commands/plan.ts";
 import { cmdPhase } from "./cli/commands/phase.ts";
 import { cmdSpec } from "./cli/commands/spec.ts";
+import { cmdDecision } from "./cli/commands/decision.ts";
 import type { LocaleCode } from "./core/schemas/locale.ts";
 import { LocaleConfig } from "./core/schemas/locale.ts";
 
@@ -839,6 +840,9 @@ async function main(): Promise<number> {
 
     case "spec":
       return cmdSpec(rest, locale, json);
+
+    case "decision":
+      return cmdDecision(rest, locale, json);
 
     default: {
       emitError(json, "UNKNOWN_COMMAND", m.unknownCommand(command ?? ""));

@@ -82,7 +82,9 @@ Direct answer to "should release notes be the source of truth?" — **No.** `CHA
 
 ## Contract surface
 
-- **New command** `decision prune <ref…> [--write] [--policy <v>] [--json]` — dry-run default; success envelope reports `{ pruned, rewrote_links, ledger_appended }`.
+- **New command** `decision prune`.
+  - **Staged surface (PR-C1b, shipped):** `decision prune <path> [--json]` — **dry-run only**, no `--write` / `--policy` yet (passing `--write` is a `CONFIG_ERROR`). Success envelope: `{ mode, decision, eligible, blocks, referencing_tasks, plan, warnings }`, where `plan.link_rewrite` is `{ status: "pending" | "ready", items: LinkRewriteItem[] }` (empty + `pending` until PR-C1c fills `items`). Documented in `cli-contract.md` § `decision prune`.
+  - **Final intended surface:** `--write` (PR-C2) executes the plan and reports the applied result (removed file, rewritten links, ledger row); `--policy <v>` follows once `decision_retention` lands (PR-D).
 - **New public error code** `DECISION_PRUNE_NOT_ELIGIBLE` (exit 2); `KNOWN_CODES.public` += 1; `cli-contract.md` + `troubleshooting.md` entries.
 - **`TASK_DECISION_REF_NOT_FOUND` / `TASK_ACCEPTANCE_REF_NOT_FOUND`** gain status-awareness — a `done`-task severity *loosening* only; never tightens an existing plan. Documented in `cli-contract.md`.
 - **New optional `project.yaml` field** `decision_retention` (default `keep-full` → fully backward-compatible).
@@ -106,8 +108,12 @@ Direct answer to "should release notes be the source of truth?" — **No.** `CHA
 ## Implementation commitments
 
 - [x] PR-A — status-aware `TASK_DECISION_REF_NOT_FOUND` / `TASK_ACCEPTANCE_REF_NOT_FOUND` (loosening, keyed on `task.status === "done"`) + unit tests + `cli-contract.md` note. **Merged (#395).** Shipped decisions are now deletable-without-breakage.
-- [ ] PR-B — `design/decisions/PRUNED.md` ledger + reader + the ledger-aware branch of the status-aware check (a `done`-task **`decision_refs`** recorded in the ledger is silent; one not recorded still warns). The ledger silences **`decision_refs` only** (not `acceptance_refs`, which routinely point at non-decisions), entries are confined to top-level `design/decisions/*.md` (re-validated — `PRUNED.md` is user-editable), and the ledger is excluded from both the decision-candidate scan and the context-pack decision loader.
-- [ ] PR-C — `decision prune` command: eligibility gates, inbound-link rewrite, ledger append, JSON envelope, `DECISION_PRUNE_NOT_ELIGIBLE`.
+- [x] PR-B — `design/decisions/PRUNED.md` ledger + reader + the ledger-aware branch of the status-aware check (a `done`-task **`decision_refs`** recorded in the ledger is silent; one not recorded still warns). The ledger silences **`decision_refs` only** (not `acceptance_refs`, which routinely point at non-decisions), entries are confined to top-level `design/decisions/*.md` (re-validated — `PRUNED.md` is user-editable), and the ledger is excluded from both the decision-candidate scan and the context-pack decision loader. **Merged (#396).**
+- PR-C — `decision prune`, split (destructive work ships as small, separately-reviewable layers):
+  - [x] **PR-C1a** — the `evaluatePrune` eligibility verdict (target-accepted/readable/top-level + the three gates), fail-closed and total. **Merged (#397).**
+  - [ ] **PR-C1b** — the `decision prune <path>` command: dry-run report of the verdict + a minimal plan, JSON envelope, `DECISION_PRUNE_NOT_ELIGIBLE`, CLI wiring. No `--write`.
+  - [ ] **PR-C1c** — the inbound-`.md`-link collector (source/line/href/target/kind/action), shared by the dry-run plan and `--write`. Distinct from the conservative eligibility parser.
+  - [ ] **PR-C2** — `--write`: file deletion + inbound link rewrite + ledger append, executing the C1c plan.
 - [ ] PR-D — `project.yaml: decision_retention` + the `compress-on-ship` form.
 - [ ] PR-E — `CHANGELOG.md` rolling-archive tooling + release-notes generation from the CHANGELOG.
 

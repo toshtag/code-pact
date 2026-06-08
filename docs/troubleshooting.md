@@ -11,6 +11,7 @@ When a command surfaces one of the diagnostic codes below, this page maps it to 
 | [`TASK_FINALIZE_NOT_ELIGIBLE`](#task_finalize_not_eligible-from-task-finalize) | Task isn't `done` yet | Run `task complete` first |
 | [`TASK_FINALIZE_WRITE_REFUSED`](#task_finalize_write_refused-from-task-finalize---write) | Phase-YAML write blocked by the safety check | Read `data.reason`; usually fix the phase file |
 | [`PHASE_RECONCILE_WRITE_REFUSED`](#phase_reconcile_write_refused-from-phase-reconcile---write) | Every reconcile write was refused | Re-run dry-run; fix the phase file |
+| [`DECISION_PRUNE_NOT_ELIGIBLE`](#decision_prune_not_eligible-from-decision-prune) | A decision record cannot be retired yet | Read `data.blocks[]`; resolve each gate (or pick a different target) |
 | [`LOCK_HELD`](#lock_held-from-a-lock-covered-mutation) | Another mutation is running | Wait, then retry (transient) |
 | [`MANIFEST_NOT_FOUND`](#manifest_not_found-from-adapter-upgrade---check----write) | Adapter not installed yet | Run `adapter install <agent>` |
 | [`ADAPTER_GENERATOR_STALE`](#adapter_generator_stale-from-adapter-doctor--global-doctor) | Older CLI stamp **and** generated output drifted (stamp-only lag is silent) | Run `adapter upgrade --check`, then `--write` |
@@ -156,6 +157,34 @@ code-pact phase runbook <phase-id> --json
 ```
 
 If `data.tasks[]` shows every flip candidate has the same refusal reason, the issue is the phase file itself, not individual tasks — fix it once and reconcile will proceed for all of them.
+
+## `DECISION_PRUNE_NOT_ELIGIBLE` from `decision prune`
+The target decision record cannot be retired. `decision prune` is dry-run today, so this is always advisory — nothing is deleted. `data.blocks[]` lists **every** failing gate so you can resolve them together:
+
+```sh
+code-pact decision prune design/decisions/<name>.md --json
+# data.blocks[].gate is one of:
+#   target_invalid / target_missing / target_unreadable
+#     → the target is not a readable, top-level, real design/decisions/*.md file
+#   plan_artifacts_unreadable
+#     → design/roadmap.yaml or a referenced design/phases/*.yaml could not be read,
+#       so prune cannot prove every referencing task is done; fix the plan graph first
+#   target_not_accepted
+#     → only an accepted decision is prunable; a proposed/draft/rejected/
+#       superseded/empty/unknown one is not (data.blocks[].status names it)
+#   referencing_task_not_done
+#     → a not-`done` task still references it (finish or re-scope that task)
+#   open_commitments
+#     → check off (or remove) the `## Implementation commitments` items
+#   live_decision_depends / dependency_status_unknown
+#     → a proposed/draft (or typo'd-status) decision links to it; settle that
+#       decision first, or fix its status line
+#   decision_scan_unreadable / dependency_unreadable
+#     → a file under design/decisions/ could not be read (e.g. a directory
+#       named *.md); fix the tree so the scan can complete
+```
+
+When `data.eligible` is `true` but `data.referencing_tasks` is empty, prune cannot prove the decision was shipped through a task reference — confirm it is genuinely retired, not an unconnected record, before relying on it.
 
 ## `LOCK_HELD` from a lock-covered mutation
 Another `code-pact` mutation is in progress on the same project. The advisory write lock (`.code-pact/locks/write.lock`) is held by the process whose details appear in the envelope:

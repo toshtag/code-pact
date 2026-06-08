@@ -20,6 +20,7 @@ export const messages = {
     "  doctor     report project structure issues (human-friendly)",
     "  validate   check project validity for CI (exit 1 on errors, --strict for warnings)",
     "  status     team activity overview: in flight / blocked / available / waiting",
+    "  decision   decision-record lifecycle (prune — dry-run preview of retiring a shipped decision)",
     "",
     "Global options:",
     "  -v, --version    print version",
