@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
-import { join, posix } from "node:path";
+import { posix } from "node:path";
 import type { PhaseEntry } from "../plan/state.ts";
+import { resolveWithinProject } from "../path-safety.ts";
 import { normalizePrunedDecisionPath } from "./pruned-ledger.ts";
 import {
   type AdrAcceptance,
@@ -31,6 +32,7 @@ export type PruneBlock =
     }
   | { gate: "open_commitments"; open_items: number }
   | { gate: "live_decision_depends"; decision: string; status: string }
+  | { gate: "dependency_status_unknown"; decision: string; status: string | null }
   | { gate: "dependency_unreadable"; decision: string };
 
 export type PruneReferencingTask = {
@@ -54,12 +56,22 @@ function isLiveDecisionStatus(word: string | null): boolean {
   return word === "proposed" || word === "draft";
 }
 
-/** Does `content` contain a markdown link that resolves to `target` (relative to design/decisions/)? */
+/**
+ * Does `content` contain a markdown link that resolves to `target` (relative to
+ * design/decisions/)? Covers both **inline** links — `[t](url)` and
+ * `[t](url "title")` — and **reference-style** definitions — `[label]: url`. A
+ * narrower regex would be fail-open for this safety gate; this matches the link
+ * forms `scripts/check-doc-links.mjs` understands.
+ */
 function decisionLinksTo(content: string, target: string): boolean {
-  const re = /\]\(([^)]+)\)/g;
+  const urls: string[] = [];
+  const inline = /\[(?:[^\]]*)\]\(([^)\s]+)(?:[ \t]+"[^"]*")?\)/g;
+  const refDef = /^[ \t]*\[[^\]]+\]:[ \t]*(\S+)/gm;
   let m: RegExpExecArray | null;
-  while ((m = re.exec(content)) !== null) {
-    const link = m[1]!.split("#")[0]!.trim();
+  while ((m = inline.exec(content)) !== null) urls.push(m[1]!);
+  while ((m = refDef.exec(content)) !== null) urls.push(m[1]!);
+  for (const raw of urls) {
+    const link = raw.split("#")[0]!.trim();
     if (link === "" || /^[a-z]+:\/\//i.test(link)) continue; // skip empty / absolute URLs
     const resolved = posix
       .normalize(posix.join("design/decisions", link))
@@ -112,22 +124,34 @@ export async function evaluatePrune(
   const blocks: PruneBlock[] = [];
   const referencing: PruneReferencingTask[] = [];
 
-  // The target must be a readable regular file — read it ONCE and key both the
-  // "is it accepted" and "open commitments" checks off the same content. A
-  // missing file (ENOENT) and an unreadable one (a directory named `*.md`,
-  // EACCES, EISDIR) are distinct fail-CLOSED blocks; we never proceed as if a
-  // file we could not read had no commitments.
+  // The target must be a readable regular file INSIDE the project — read it ONCE
+  // through the symlink-escape guard and key both the "is it accepted" and "open
+  // commitments" checks off the same content. `normalizePrunedDecisionPath` only
+  // rejects syntactic `..`/absolute paths; `resolveWithinProject` additionally
+  // rejects an existing ancestor symlink that resolves outside `cwd` — so a
+  // `design/decisions` symlinked out of the repo can never become a prune (and
+  // therefore a PR-C2 `unlink`) target. A missing file (ENOENT), an unreadable
+  // one (a directory named `*.md`, EACCES, EISDIR), and a path-escape are all
+  // fail-CLOSED blocks; we never proceed as if a file we could not read was
+  // accepted or commitment-free.
   let content: string | null = null;
   try {
-    content = await readFile(join(cwd, decision), "utf8");
+    const absTarget = await resolveWithinProject(cwd, decision);
+    content = await readFile(absTarget, "utf8");
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "ENOENT") {
       blocks.push({ gate: "target_missing", detail: `${decision} does not exist on disk` });
+    } else if (code === undefined) {
+      // resolveWithinProject throws a plain Error (no errno) on a path escape.
+      blocks.push({
+        gate: "target_invalid",
+        detail: `${decision} escapes the project root (symlink or unsafe path)`,
+      });
     } else {
       blocks.push({
         gate: "target_unreadable",
-        detail: `${decision} is not a readable file (${code ?? "read error"})`,
+        detail: `${decision} is not a readable file (${code})`,
       });
     }
   }
@@ -182,29 +206,40 @@ export async function evaluatePrune(
     if (hasSection && open > 0) blocks.push({ gate: "open_commitments", open_items: open });
   }
 
-  // Gate 3 — a live (proposed/draft) decision links to the target.
+  // Gate 3 — no decision that LINKS to the target can be a live (or unverifiable)
+  // dependant. Check the link first, then the linker's status: a `proposed`/
+  // `draft` linker is a live dependant; an `unknown_status` (e.g. a typo'd
+  // status) linker cannot be confirmed non-live, so it fails closed too —
+  // symmetric with the target itself, which `unknown_status` cannot be pruned.
+  // Settled linkers (accepted / rejected / superseded) are historical and fine.
   for (const name of await readDecisionAdrFiles(cwd)) {
     if (!name.endsWith(".md")) continue;
     const otherPath = `design/decisions/${name}`;
     if (otherPath === decision) continue;
     let other: string;
     try {
-      other = await readFile(join(cwd, "design", "decisions", name), "utf8");
+      const absOther = await resolveWithinProject(cwd, otherPath);
+      other = await readFile(absOther, "utf8");
     } catch (err) {
-      // ENOENT = the file raced away between readdir and read → genuinely gone,
-      // so it cannot be a live dependant; skip. Any other error means we could
-      // NOT verify it is not a dependant → fail closed with a block.
+      // ENOENT = raced away between readdir and read → cannot be a dependant; skip.
+      // Anything else (escape, EACCES, EISDIR) → cannot verify → fail closed.
       if ((err as NodeJS.ErrnoException).code === "ENOENT") continue;
       blocks.push({ gate: "dependency_unreadable", decision: otherPath });
       continue;
     }
+    if (!decisionLinksTo(other, decision)) continue;
     const cls = classifyAdr(other);
-    if (!isLiveDecisionStatus(cls.status.word)) continue;
-    if (decisionLinksTo(other, decision)) {
+    if (isLiveDecisionStatus(cls.status.word)) {
       blocks.push({
         gate: "live_decision_depends",
         decision: otherPath,
         status: cls.status.word ?? "proposed",
+      });
+    } else if (cls.acceptance === "unknown_status") {
+      blocks.push({
+        gate: "dependency_status_unknown",
+        decision: otherPath,
+        status: cls.status.word,
       });
     }
   }

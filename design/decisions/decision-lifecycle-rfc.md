@@ -45,7 +45,7 @@ Retires a shipped decision from the live plane. Reuses the existing **prune-if-c
 0. the target is a **readable, top-level `design/decisions/<name>.md`** record (not README/PRUNED, not an outside/traversing/nested path) that is an **accepted** decision — prune retires *settled* records only; a `proposed`/`draft`/`rejected`/`superseded`/empty/unknown target is rejected (a status-less ADR counts as accepted per the lenient classifier);
 1. every task/phase that references the decision is `done` — no live gate still needs it;
 2. it has no **open** (unchecked) `## Implementation commitments` — pruning would orphan declared downstream work;
-3. no **live** (`proposed`/`draft`) decision references it — a future decision still depends on this rationale.
+3. no **live** (`proposed`/`draft`) — or **unverifiable** (`unknown_status`) — decision links to it (inline or reference-style), and no other decision is unreadable; a future decision may still build on this rationale, and an unreadable/typo'd-status one cannot be cleared.
 
 These gates are exactly the "integrity + no future conflict" guarantee: you can only retire a settled decision whose every obligation is discharged. The verdict is one pure function (`evaluatePrune`) that `--dry-run` and `--write` share — dry-run never relaxes a gate.
 

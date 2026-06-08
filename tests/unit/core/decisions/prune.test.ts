@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { evaluatePrune } from "../../../../src/core/decisions/prune.ts";
@@ -126,6 +126,16 @@ describe("evaluatePrune — target must be an accepted, readable, top-level reco
     expect(res.decision).toBeNull();
     expect(res.blocks[0]?.gate).toBe("target_invalid");
   });
+
+  it("blocks a target that symlink-escapes the project root", async () => {
+    const outside = await mkdtemp(join(tmpdir(), "code-pact-outside-"));
+    await writeFile(join(outside, "real-rfc.md"), ACCEPTED, "utf8");
+    await symlink(join(outside, "real-rfc.md"), join(cwd, "design", "decisions", "escape-rfc.md"));
+    const res = await evaluatePrune(cwd, "design/decisions/escape-rfc.md", []);
+    expect(res.eligible).toBe(false);
+    expect(res.blocks[0]?.gate).toBe("target_invalid");
+    await rm(outside, { recursive: true, force: true });
+  });
 });
 
 describe("evaluatePrune — eligible", () => {
@@ -213,6 +223,45 @@ describe("evaluatePrune — gate 3: live decision depends", () => {
     );
     const res = await evaluatePrune(cwd, "design/decisions/foo-rfc.md", []);
     expect(res.blocks.some((b) => b.gate === "live_decision_depends")).toBe(false);
+    expect(res.eligible).toBe(true);
+  });
+
+  it("detects an inline link WITH a title (not fail-open on `[t](url \"title\")`)", async () => {
+    await writeDecision("foo-rfc.md", ACCEPTED);
+    await writeDecision(
+      "bar-rfc.md",
+      `# RFC\n\n**Status:** proposed\n\n## Decision\n\nBuilds on [foo](foo-rfc.md "the rationale").`,
+    );
+    const res = await evaluatePrune(cwd, "design/decisions/foo-rfc.md", []);
+    expect(res.blocks.some((b) => b.gate === "live_decision_depends")).toBe(true);
+  });
+
+  it("detects a REFERENCE-STYLE link to the target", async () => {
+    await writeDecision("foo-rfc.md", ACCEPTED);
+    await writeDecision(
+      "bar-rfc.md",
+      `# RFC\n\n**Status:** draft\n\n## Decision\n\nBuilds on [foo][f].\n\n[f]: foo-rfc.md\n`,
+    );
+    const res = await evaluatePrune(cwd, "design/decisions/foo-rfc.md", []);
+    expect(res.blocks.some((b) => b.gate === "live_decision_depends")).toBe(true);
+  });
+
+  it("blocks when an UNKNOWN-status decision links to the target (cannot confirm non-live)", async () => {
+    await writeDecision("foo-rfc.md", ACCEPTED);
+    await writeDecision(
+      "bar-rfc.md",
+      `# RFC\n\n**Status:** proposd\n\n## Decision\n\nRelated: [foo](foo-rfc.md).`, // typo'd status
+    );
+    const res = await evaluatePrune(cwd, "design/decisions/foo-rfc.md", []);
+    expect(res.eligible).toBe(false);
+    expect(res.blocks.some((b) => b.gate === "dependency_status_unknown")).toBe(true);
+  });
+
+  it("does NOT block an unknown-status decision that does not link to the target", async () => {
+    await writeDecision("foo-rfc.md", ACCEPTED);
+    await writeDecision("bar-rfc.md", `# RFC\n\n**Status:** proposd\n\n## Decision\n\nunrelated.`);
+    const res = await evaluatePrune(cwd, "design/decisions/foo-rfc.md", []);
+    expect(res.blocks.some((b) => b.gate === "dependency_status_unknown")).toBe(false);
     expect(res.eligible).toBe(true);
   });
 });
