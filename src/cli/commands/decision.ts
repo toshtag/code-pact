@@ -18,9 +18,9 @@ const PRUNE_HELP = `Usage: code-pact decision prune <path> [--json]
 
 Preview whether a shipped, accepted decision record can be retired from the live
 plane. DRY-RUN ONLY in this release: nothing is deleted, no links are rewritten,
-and no PRUNED.md row is appended — the dry-run reports the eligibility verdict
-and the (currently partial) write plan. The target must be a readable, top-level,
-accepted design/decisions/<name>.md record.
+and no PRUNED.md row is appended — the dry-run reports the eligibility verdict and
+the COMPLETE inbound-link rewrite plan that --write will later execute. The target
+must be a readable, top-level, accepted design/decisions/<name>.md record.
 
 Eligible → exit 0. Ineligible → exit 2 with error code DECISION_PRUNE_NOT_ELIGIBLE
 and every failing gate under data.blocks[].

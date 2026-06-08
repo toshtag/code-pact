@@ -70,6 +70,33 @@ export async function runDecisionPrune(
     evaluation.eligible = false;
   }
 
+  // Build the rewrite plan from the shared collector. Fail CLOSED on any scan
+  // issue (an unreadable doc source, or a reference-style inbound link the
+  // span-local executor can't rewrite without touching its usages) — a
+  // "complete plan" we can't actually complete must not read as eligible.
+  let planItems: PrunePlan["link_rewrite"]["items"] | null = null;
+  if (evaluation.eligible && evaluation.decision !== null) {
+    const { items, issues } = await collectInboundLinks(cwd, evaluation.decision);
+    if (issues.length > 0) {
+      for (const iss of issues) {
+        evaluation.blocks.push(
+          iss.reason === "unreadable"
+            ? {
+                gate: "link_rewrite_scan_unreadable",
+                detail: `cannot read ${iss.source_file} to plan its inbound-link rewrites`,
+              }
+            : {
+                gate: "link_rewrite_unsupported",
+                detail: `${iss.source_file}:${iss.line ?? "?"} links to the decision with a reference-style link, which prune cannot yet rewrite — convert it to an inline link first`,
+              },
+        );
+      }
+      evaluation.eligible = false;
+    } else {
+      planItems = items;
+    }
+  }
+
   const warnings: string[] = [];
   if (evaluation.eligible && evaluation.referencing_tasks.length === 0) {
     warnings.push(
@@ -77,15 +104,14 @@ export async function runDecisionPrune(
     );
   }
 
-  let plan: PrunePlan | null = null;
-  if (evaluation.eligible && evaluation.decision !== null) {
-    const items = await collectInboundLinks(cwd, evaluation.decision);
-    plan = {
-      remove_file: evaluation.decision,
-      append_ledger: true,
-      link_rewrite: { status: "ready", items },
-    };
-  }
+  const plan: PrunePlan | null =
+    evaluation.eligible && evaluation.decision !== null
+      ? {
+          remove_file: evaluation.decision,
+          append_ledger: true,
+          link_rewrite: { status: "ready", items: planItems ?? [] },
+        }
+      : null;
 
   return {
     mode: "dry-run",
@@ -105,6 +131,8 @@ export function describeBlock(block: PruneEvaluation["blocks"][number]): string 
     case "target_unreadable":
     case "decision_scan_unreadable":
     case "plan_artifacts_unreadable":
+    case "link_rewrite_scan_unreadable":
+    case "link_rewrite_unsupported":
       return block.detail;
     case "target_not_accepted":
       return `target is not an accepted decision (status: ${block.status ?? "none"}, ${block.acceptance})`;

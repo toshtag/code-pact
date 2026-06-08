@@ -169,6 +169,12 @@ code-pact decision prune design/decisions/<name>.md --json
 #   plan_artifacts_unreadable
 #     → design/roadmap.yaml or a referenced design/phases/*.yaml could not be read,
 #       so prune cannot prove every referencing task is done; fix the plan graph first
+#   link_rewrite_unsupported
+#     → a doc links to the decision with a reference-style link ([t][label] + [label]: …);
+#       convert it to an inline link [t](…) so --write can rewrite it
+#   link_rewrite_scan_unreadable
+#     → a doc source under the scanned surface could not be read, so the rewrite
+#       plan would be incomplete; fix/remove the unreadable file
 #   target_not_accepted
 #     → only an accepted decision is prunable; a proposed/draft/rejected/
 #       superseded/empty/unknown one is not (data.blocks[].status names it)

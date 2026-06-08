@@ -35,7 +35,9 @@ export type PruneBlock =
   | { gate: "dependency_status_unknown"; decision: string; status: string | null }
   | { gate: "dependency_unreadable"; decision: string }
   | { gate: "decision_scan_unreadable"; detail: string }
-  | { gate: "plan_artifacts_unreadable"; detail: string };
+  | { gate: "plan_artifacts_unreadable"; detail: string }
+  | { gate: "link_rewrite_scan_unreadable"; detail: string }
+  | { gate: "link_rewrite_unsupported"; detail: string };
 
 export type PruneReferencingTask = {
   task_id: string;

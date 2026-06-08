@@ -197,6 +197,21 @@ describe("runDecisionPrune", () => {
     expect(res.eligible).toBe(false);
     expect(res.evaluation.blocks.some((b) => b.gate === "plan_artifacts_unreadable")).toBe(true);
   });
+
+  it("fail-closed: a reference-style inbound link makes prune ineligible (no plan)", async () => {
+    await writeDecision("foo-rfc.md");
+    await writeDoneTaskPhase("design/decisions/foo-rfc.md");
+    await mkdir(join(cwd, "docs"), { recursive: true });
+    await writeFile(
+      join(cwd, "docs", "r.md"),
+      "Uses [foo][f].\n\n[f]: ../design/decisions/foo-rfc.md\n",
+    );
+    const res = await runDecisionPrune(cwd, "design/decisions/foo-rfc.md");
+    expect(res.eligible).toBe(false);
+    expect(res.plan).toBeNull();
+    expect(res.evaluation.blocks.some((b) => b.gate === "link_rewrite_unsupported")).toBe(true);
+  });
+
 });
 
 describe("decision-prune renderers", () => {
