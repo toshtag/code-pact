@@ -61,6 +61,8 @@ Append-only table: `decision path | phase/task | pruned date | rationale home (C
 
 `decision prune` *enacts* the project's policy; `--policy <v>` overrides per-invocation. The core fix is that the **spec stops dictating retention** — it becomes the maintainer's preference, which is what it always was.
 
+**Locked choices** (this RFC): the shipped default is **`keep-full`** — non-surprising and backward-compatible for the ecosystem; no project's records vanish on upgrade. The code-pact repo itself dogfoods **`prune-on-ship`** via its own `project.yaml`. The command is **`decision prune`**, reusing the existing prune vocabulary.
+
 ## Long-term record-of-truth model
 
 One job per surface (the anti-duplication principle):
