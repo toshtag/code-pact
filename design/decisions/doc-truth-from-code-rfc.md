@@ -102,8 +102,8 @@ and an unrelated PR can never drift a block it didn't touch.
 - **B** — same pattern for `plan brief` / `constitution` / `adopt`, `phase
   reconcile`, and the public error-code catalog. **Shipped so far:** the `plan
   brief` / `plan constitution` `--from-file` / `--stdin` detail enums
-  (`src/contracts/plan-input-details.ts` → generated `cli-contract` lists; the
-  generator now also renders **inline** lists and escapes `|` in table cells).
+  (`src/contracts/plan-capture-details.ts` → **one** generated `cli-contract`
+  table both command sections link to; the generator escapes `|` in table cells).
   Remaining: `plan adopt`, `phase reconcile`, the public error-code catalog.
 - **C** — command / alias / stable-surface registry as a generated stable table
   (extends [cli-command-spec-rfc.md](cli-command-spec-rfc.md)); kills the

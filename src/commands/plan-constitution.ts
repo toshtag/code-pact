@@ -11,9 +11,10 @@ import { isPristineInitConstitution } from "../core/constitution.ts";
 import type { Locale } from "../i18n/index.ts";
 import { messages as messageCatalog } from "../i18n/index.ts";
 import type {
-  PlanInputFileDetail,
-  PlanInputStdinDetail,
-} from "../contracts/plan-input-details.ts";
+  PlanCaptureFileDetail,
+  PlanCaptureStdinDetail,
+  PlanCaptureParseDetail,
+} from "../contracts/plan-capture-details.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -71,7 +72,7 @@ export const ConstitutionFileSchema = z
 
 export class PlanConstitutionFromFileError extends Error {
   readonly code = "CONFIG_ERROR";
-  readonly detail: PlanInputFileDetail;
+  readonly detail: PlanCaptureFileDetail;
   readonly path: string;
 
   constructor(
@@ -88,7 +89,7 @@ export class PlanConstitutionFromFileError extends Error {
 
 export class PlanConstitutionFromStdinError extends Error {
   readonly code = "CONFIG_ERROR";
-  readonly detail: PlanInputStdinDetail;
+  readonly detail: PlanCaptureStdinDetail;
 
   constructor(
     detail: PlanConstitutionFromStdinError["detail"],
@@ -178,7 +179,7 @@ export async function loadConstitutionFromStdin(
 }
 
 // The two details shared by both modes (the parse/validate failures).
-type ParserDetail = PlanInputFileDetail & PlanInputStdinDetail;
+type ParserDetail = PlanCaptureParseDetail;
 
 function parseConstitutionSource(
   raw: string,

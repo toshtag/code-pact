@@ -26,9 +26,9 @@ import { dirname, resolve } from "node:path";
 
 import { SPEC_IMPORT_DETAILS } from "../src/contracts/spec-import-details.ts";
 import {
-  PLAN_INPUT_FILE_DETAILS,
-  PLAN_INPUT_STDIN_DETAILS,
-} from "../src/contracts/plan-input-details.ts";
+  PLAN_CAPTURE_FILE_DETAILS,
+  PLAN_CAPTURE_STDIN_DETAILS,
+} from "../src/contracts/plan-capture-details.ts";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -50,14 +50,13 @@ export function endMarker(id: string): string {
 }
 
 /**
- * The full marker-wrapped block text. Block-level (default) puts the markers on
- * their own lines around a multi-line body (a table); `inline` keeps everything
- * on one line so a generated value can sit mid-sentence — the marker comments are
- * invisible when rendered, so the prose reads unchanged.
+ * The full marker-wrapped block text: the markers go on their own lines around a
+ * block-level body (a table). Generated blocks are always block-level — never
+ * inline mid-sentence markers, which clutter the Markdown source (see
+ * design/rules/doc-authoring.md).
  */
-export function renderBlock(id: string, source: string, body: string, inline = false): string {
-  const sep = inline ? "" : "\n";
-  return `${startMarker(id, source)}${sep}${body}${sep}${endMarker(id)}`;
+export function renderBlock(id: string, source: string, body: string): string {
+  return `${startMarker(id, source)}\n${body}\n${endMarker(id)}`;
 }
 
 /** Matches the whole start…end region for `id` (start marker text is flexible). */
@@ -84,20 +83,14 @@ export function extractBlock(docText: string, id: string): string | null {
  * Idempotent (splicing the same body twice yields the same text). Throws if the
  * markers are absent, so a generator entry can never silently no-op.
  */
-export function spliceBlock(
-  docText: string,
-  id: string,
-  source: string,
-  body: string,
-  inline = false,
-): string {
+export function spliceBlock(docText: string, id: string, source: string, body: string): string {
   const re = blockRegExp(id);
   if (!re.test(docText)) {
     throw new Error(
       `gen-doc-blocks: markers for "${id}" not found — add ${startMarker(id, source)} … ${endMarker(id)} around the target region`,
     );
   }
-  return docText.replace(re, renderBlock(id, source, body, inline));
+  return docText.replace(re, renderBlock(id, source, body));
 }
 
 /** Escape a value so it is safe inside a Markdown table cell (`|` breaks the row). */
@@ -113,12 +106,25 @@ export function renderDetailTable(catalog: Record<string, { when: string }>): st
   return ["| `detail` | When |", "| --- | --- |", ...rows].join("\n");
 }
 
+/** Backtick + comma-join a catalog's keys (insertion order). */
+function backtickedKeys(catalog: Record<string, unknown>): string {
+  return Object.keys(catalog)
+    .map((k) => `\`${k}\``)
+    .join(", ");
+}
+
 /**
- * Render an inline `` `a | b | c` `` enum list from a catalog (keys only, in
- * insertion order) — the form already used in prose for the plan input details.
+ * Render the single shared `plan brief` / `plan constitution` non-interactive
+ * input detail table (one block-level table both command sections link to,
+ * instead of restating the enum inline in four places).
  */
-export function renderDetailList(catalog: Record<string, unknown>): string {
-  return `\`${Object.keys(catalog).join(" | ")}\``;
+export function renderPlanCaptureDetailTable(): string {
+  return [
+    "| Surface | `detail` values |",
+    "| --- | --- |",
+    `| \`plan brief --from-file\`, \`plan constitution --from-file\` | ${escapeTableCell(backtickedKeys(PLAN_CAPTURE_FILE_DETAILS))} |`,
+    `| \`plan brief --stdin\`, \`plan constitution --stdin\` | ${escapeTableCell(backtickedKeys(PLAN_CAPTURE_STDIN_DETAILS))} |`,
+  ].join("\n");
 }
 
 // --- registry -------------------------------------------------------------
@@ -128,12 +134,7 @@ interface BlockSpec {
   file: string;
   source: string;
   render: () => string;
-  /** Inline blocks sit mid-sentence (no surrounding newlines). */
-  inline?: boolean;
 }
-
-const PLAN_INPUT_SOURCE =
-  "PLAN_INPUT_*_DETAILS in src/contracts/plan-input-details.ts";
 
 export const BLOCKS: BlockSpec[] = [
   {
@@ -142,36 +143,13 @@ export const BLOCKS: BlockSpec[] = [
     source: "SPEC_IMPORT_DETAILS in src/contracts/spec-import-details.ts",
     render: () => renderDetailTable(SPEC_IMPORT_DETAILS),
   },
-  // plan brief / plan constitution share the same --from-file / --stdin detail
-  // sets; the inline list mirrors the existing prose form. Four ids (one per
-  // command×mode) keep each doc location self-contained.
+  // One shared table for the plan brief / plan constitution capture details —
+  // both command sections link to it, rather than restating the enum inline.
   {
-    id: "plan-brief-from-file-detail",
+    id: "plan-capture-details",
     file: "docs/cli-contract.md",
-    source: PLAN_INPUT_SOURCE,
-    render: () => renderDetailList(PLAN_INPUT_FILE_DETAILS),
-    inline: true,
-  },
-  {
-    id: "plan-brief-from-stdin-detail",
-    file: "docs/cli-contract.md",
-    source: PLAN_INPUT_SOURCE,
-    render: () => renderDetailList(PLAN_INPUT_STDIN_DETAILS),
-    inline: true,
-  },
-  {
-    id: "plan-constitution-from-file-detail",
-    file: "docs/cli-contract.md",
-    source: PLAN_INPUT_SOURCE,
-    render: () => renderDetailList(PLAN_INPUT_FILE_DETAILS),
-    inline: true,
-  },
-  {
-    id: "plan-constitution-from-stdin-detail",
-    file: "docs/cli-contract.md",
-    source: PLAN_INPUT_SOURCE,
-    render: () => renderDetailList(PLAN_INPUT_STDIN_DETAILS),
-    inline: true,
+    source: "PLAN_CAPTURE_*_DETAILS in src/contracts/plan-capture-details.ts",
+    render: renderPlanCaptureDetailTable,
   },
 ];
 
@@ -193,7 +171,7 @@ function runGenerate(): void {
     const abs = resolve(repoRoot, file);
     let text = readFileSync(abs, "utf8");
     for (const block of blocks) {
-      text = spliceBlock(text, block.id, block.source, block.render(), block.inline);
+      text = spliceBlock(text, block.id, block.source, block.render());
     }
     writeFileSync(abs, text);
     process.stdout.write(`Wrote ${blocks.length} block(s) to ${file}\n`);
@@ -205,7 +183,7 @@ function runCheck(): void {
   for (const [file, blocks] of blocksByFile()) {
     const text = readFileSync(resolve(repoRoot, file), "utf8");
     for (const block of blocks) {
-      const expected = renderBlock(block.id, block.source, block.render(), block.inline);
+      const expected = renderBlock(block.id, block.source, block.render());
       const actual = extractBlock(text, block.id);
       if (actual === null) {
         problems.push(`${file}: markers for "${block.id}" not found`);

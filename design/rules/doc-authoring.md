@@ -26,9 +26,11 @@ To add one:
    transitive deps (parsers, file I/O, `yaml`) get dragged into `check:docs`.
 2. Wrap the doc region in `<!-- @generated:<id> … -->` / `<!-- @generated:<id>:end -->`
    and add a `BLOCKS` entry + `render()` in [`scripts/gen-doc-blocks.ts`](../../scripts/gen-doc-blocks.ts).
-   `render()` returns a block-level table (`renderDetailTable`, cells `|`-escaped)
-   or, for an enum that sits mid-sentence, an inline list (`renderDetailList` +
-   `inline: true` — the marker comments are invisible when rendered).
+   A generated block is **block-level** — markers on their own lines around a
+   table (cells `|`-escaped via `escapeTableCell`). Do **not** embed inline,
+   mid-sentence markers (they clutter the Markdown source), and put the block in
+   **one** place — other sections **link** to it rather than embedding a second
+   copy (that link-don't-restate move is the dedup, not four generated copies).
 3. `pnpm gen:doc-blocks` to write; `pnpm check:doc-blocks` runs in `check:docs`.
 
 Prefer this over restating the fact in prose. For a one-off *relationship*
