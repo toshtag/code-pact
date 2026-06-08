@@ -1,128 +1,69 @@
 # RFC: Dogfood Trust Hardening — External Completion, Drift Detection, ADR Status
 
 **Status:** accepted (§1 · §2 · §3-A/B/C/D all implemented, 2026-05)
-**Scope:** design-only. Records constraints and a phased plan for three deferred capabilities — loop-external completion recording, "scaffold not driven" detection, and status-aware ADR resolution + proposed-stub generation. No code lands with this document.
+**Scope:** design-only constraints for three capabilities — loop-external completion recording, "scaffold not driven" detection, and status-aware ADR resolution + proposed-stub generation. The binding constraints below hold for whoever implements; an implementation PR may not weaken a **MUST** (especially the §1 ADR-gate constraint) without a separate RFC-update PR.
 **Owners:** maintainer
-**Related:** the implemented hardening PRs this RFC is the design-only tail of — adapter convergence + `--model` pin (#233), recommendation cost correction (#234), init self-consistency (#235), subcommand `--help` + bare-adapter removal (#236). Touch points named below: [src/core/decisions/adr.ts](../../src/core/decisions/adr.ts), [src/core/schemas/progress-event.ts](../../src/core/schemas/progress-event.ts), [src/core/progress/task-state.ts](../../src/core/progress/task-state.ts), [src/commands/verify.ts](../../src/commands/verify.ts), [src/commands/doctor.ts](../../src/commands/doctor.ts).
+**Related:** the implemented hardening PRs this is the design tail of — adapter convergence + `--model` pin (#233), recommendation cost correction (#234), init self-consistency (#235), subcommand `--help` + bare-adapter removal (#236). User-facing walkthrough: [docs/concepts/decision-gate.md](../../docs/concepts/decision-gate.md). Touch points: [adr.ts](../../src/core/decisions/adr.ts), [progress-event.ts](../../src/core/schemas/progress-event.ts), [task-state.ts](../../src/core/progress/task-state.ts), [verify.ts](../../src/commands/verify.ts), [doctor.ts](../../src/commands/doctor.ts).
 
-## Status lifecycle
+## Summary
 
-- This document opens at status **proposed**.
-- It is **design-only**: nothing here is implemented yet, and the implemented hardening PRs (#233–#236) did not touch these surfaces.
-- Each capability below becomes load-bearing only when a future implementation PR cites this RFC. An implementation PR may not weaken the **MUST** constraints (especially the ADR-gate constraint in §1) without a separate RFC-update PR.
-- The maintainer flips this to **accepted** once the constraints are agreed, even though implementation is deferred — so the constraints are binding on whoever implements later.
+Dogfooding `code-pact` exposed trust bugs where a determinism tool wobbles on its own output. PRs #233–#236 fixed the live ones. This RFC captures the three follow-ons deliberately *not* hotfixed — each bigger than a hotfix or carrying a sharp failure mode if done naively — and pins the constraints so the one that can quietly destroy the product's core value (external completion bypassing the decision gate) cannot be implemented incorrectly later.
 
-## Background
+## §1 — Loop-external completion recording
 
-Dogfooding `code-pact` in another project exposed a class of trust bugs: a tool that sells determinism wobbling on its own generated output. PRs #233–#236 fixed the live ones (adapter non-convergence, `--model` no-op, init self-contradiction, weak-verification cost inversion, missing `--help`, a deprecated-but-side-effecting bare `adapter`).
+**Decision:** add a lightweight `record-done` so a `code-pact`-tracked task completed outside the full loop can be recorded honestly, instead of `progress.yaml` either lying (a fabricated `done`) or silently diverging.
 
-Three further ideas surfaced during that review but were **deliberately not implemented**, because each is either bigger than a hotfix or carries a sharp failure mode if done naively. This RFC captures them so they are not lost and — more importantly — so the one that can quietly destroy `code-pact`'s core value (external completion bypassing decision gates) cannot be implemented incorrectly later.
+**The hazard / rationale:** a naive `record-done` that skips `verify` also skips `verify`'s **decision gate**. For `requires_decision: true`, `record-done` writing `done` with no ADR makes the gate bypassable. The decision gate is the single most valuable thing `code-pact` enforces for design tasks — `record-done` is a feature for not fabricating progress, **not** a back door around ADR enforcement.
 
-## §1 — Loop-external completion recording (the load-bearing constraint)
+**Constraints (MUST):**
 
-### Motivation
-
-Not every task is worth driving through the full `task prepare → start → verify → complete → finalize` loop. Small fixes often ship via an ordinary PR. Today there is no honest way to record that a `code-pact`-tracked task was completed outside the loop, so `progress.yaml` either lies (a fabricated `done`) or silently diverges from reality. A lightweight `record-done` would let the control plane stay truthful without ceremony.
-
-### The hazard
-
-A naive `record-done` that skips `verify` also skips `verify`'s **decision gate**. For a task with `requires_decision: true`, that means:
-
-```
-requires_decision: true  →  no ADR  →  verify never runs  →  record-done writes `done`  →  ADR gate is now bypassable
-```
-
-This is unacceptable. The decision gate is the single most valuable thing `code-pact` enforces for design tasks. A "convenience" that removes it would trade away the product's reason to exist. **record-done is a feature for not fabricating progress, not a back door around ADR enforcement.**
-
-### Constraints (MUST)
-
-1. External completion MUST reuse the **exact** decision gate `verify` uses. Today that is the shared predicate [`hasDecisionAdrForTaskId`](../../src/core/decisions/adr.ts) (already shared by `verify` and `plan lint`). The implementation MUST route through the same resolution, not a parallel copy.
-2. For a task with `requires_decision: true` (or whose phase sets it), if the decision is **unresolved**, `record-done` MUST NOT append a `done` event. It MUST fail with `CONFIG_ERROR`, and the message MUST point at the expected `decision_refs` or `design/decisions/<task-id>.md`.
-3. A non-completing record MAY be allowed for "work happened outside the loop but the decision is still open" — e.g. an `external_reported` event. Such an event MUST NOT count as `done` in `phase status`, `validate`, `phase reconcile`, or `doctor`. The task MUST remain blocked/incomplete until the decision gate is satisfied.
+1. External completion MUST reuse the **exact** decision gate `verify` uses (the shared predicate [`hasDecisionAdrForTaskId`](../../src/core/decisions/adr.ts), also used by `verify` and `plan lint`) — the same resolution, not a parallel copy.
+2. For a task with `requires_decision: true` and an **unresolved** decision, `record-done` MUST NOT append `done`. It MUST fail with `CONFIG_ERROR`, with a message pointing at the expected `decision_refs` or `design/decisions/<task-id>.md`.
+3. A non-completing record MAY be allowed for "work happened outside the loop but the decision is still open" — e.g. an `external_reported` event. It MUST NOT count as `done` in `phase status`, `validate`, `phase reconcile`, or `doctor`; the task stays blocked/incomplete until the gate is satisfied.
 4. Evidence is mandatory for any external record (`--evidence`, e.g. a PR URL) so the entry is auditable.
 
-### Proposed shape (non-binding sketch)
-
-```sh
-code-pact task record-done <task-id> --evidence "PR #123" --notes "completed outside the loop"
-```
-
-- Add an optional `source: "loop" | "external"` to [`ProgressEvent`](../../src/core/schemas/progress-event.ts). `task complete` writes `source: "loop"`; `record-done` writes `source: "external"`. Absent ⇒ `"loop"` (back-compat).
-- For the non-completing path, prefer a new `EventStatus` value (e.g. `external_reported`) over overloading `blocked`. Adding a status is **not free**: [`task-state.ts`](../../src/core/progress/task-state.ts) `deriveTaskState` takes the latest event as current state, and `ALLOWED_TRANSITIONS` plus the reconcile classifier interpret each status. Any new value MUST be threaded through all three, and MUST NOT be treated as terminal-done anywhere.
-
-### Acceptance (when implemented)
-
-- A docs task with no `requires_decision` can be recorded done externally.
-- A `requires_decision` task with **no** accepted decision CANNOT be recorded done externally (CONFIG_ERROR).
-- A `requires_decision` task **with** a resolved decision can be recorded done externally.
-- An unresolved `external_reported` event does not make `phase status` / `validate` / `reconcile` / `doctor` report the task as done.
+**Contract shape:** an optional `source: "loop" | "external"` on [`ProgressEvent`](../../src/core/schemas/progress-event.ts) — `task complete` writes `"loop"`, `record-done` writes `"external"`, absent ⇒ `"loop"` (back-compat). For the non-completing path, a new `EventStatus` (e.g. `external_reported`) rather than overloading `blocked`. Any new status MUST be threaded through all three of [`task-state.ts`](../../src/core/progress/task-state.ts) `deriveTaskState`, `ALLOWED_TRANSITIONS`, and the reconcile classifier, and MUST NOT be treated as terminal-done anywhere.
 
 ## §2 — "Scaffold not driven" detection (`CONTROL_PLANE_NOT_DRIVEN`)
 
-### Motivation
+**Decision:** an advisory detector for projects that adopt `code-pact` scaffolding then stop driving it — real code lands in git while `progress.yaml` never advances and the control plane silently describes a fiction.
 
-A project can adopt `code-pact` scaffolding, then quietly stop driving it: real code changes land in git while `progress.yaml` never advances. The scaffold becomes decoration, and the control plane silently describes a fiction. A detector turns that into a visible, advisory signal.
+**Behavior:** in `doctor` / `analyze`, warn `CONTROL_PLANE_NOT_DRIVEN` (severity `warning`, advisory, `affects_exit: false`) when **all** hold: the roadmap has ≥1 non-`TUTORIAL` task; `progress.yaml` shows no recent forward motion (empty, or no `started`/`done` within a window); and git shows ordinary working changes accumulating. **Git-unavailable MUST be a silent skip, never an error** — no repo, no `git` binary, or a git failure ⇒ the check does nothing, so non-git/sandboxed checkouts are not punished.
 
-### Proposed behavior
-
-- In `doctor` / `analyze`: warn (`CONTROL_PLANE_NOT_DRIVEN`, severity `warning`, advisory) when **all** hold:
-  - the roadmap has at least one non-tutorial task (reuse the `id !== "TUTORIAL"` notion already used by the placeholder gate in [doctor.ts](../../src/commands/doctor.ts)),
-  - `progress.yaml` has no recent forward motion (empty, or no `started`/`done` within a window), and
-  - git shows ordinary working changes accumulating.
-- **Git-unavailable MUST be a silent skip, never an error.** No git repo, no `git` binary, or a git failure ⇒ the check does nothing. The control plane must not punish non-git or sandboxed checkouts.
-- Advisory only (`affects_exit: false`): it surfaces drift; it does not fail CI.
-
-### Open questions
-
-- The "recent forward motion" window is a heuristic; define it conservatively to avoid false positives on legitimately paused projects.
-- Whether the git probe compares against a merge-base or just dirties — start with "uncommitted working changes exist" and refine.
+**Open questions:** the "recent forward motion" window is a heuristic — define it conservatively to avoid false positives on legitimately paused projects. Start the git probe at "uncommitted working changes exist" and refine toward a merge-base comparison.
 
 ## §3 — Status-aware ADR resolution → proposed-stub generation
 
-### The current weakness
+**Current weakness:** `verify` / `plan lint` resolve a decision purely by **filename match** — [`hasDecisionAdrForTaskId`](../../src/core/decisions/adr.ts) returns true if any `design/decisions/*.md` filename contains the task id, without reading the file. ADRs carry a `**Status:**` line, but nothing parses it.
 
-`verify` / `plan lint` resolve a decision purely by **filename match**: [`hasDecisionAdrForTaskId`](../../src/core/decisions/adr.ts) returns true if any `design/decisions/*.md` filename contains the task id. It does not read the file. Observed ADRs carry a human metadata line, e.g. `**Status:** accepted (P10, 2026-05)`, but nothing parses it.
+**Irreversible ordering constraint:** auto-generating a `design/decisions/<task-id>.md` stub for a `requires_decision: true` task is tempting, but **while resolution is filename-match-only, the stub immediately satisfies the gate** — every such task auto-passes with an empty, unreviewed stub, silently nullifying the gate. So the work MUST proceed in order, and **D must never precede C**:
 
-### Why ordering is an irreversible constraint
+- **A.** Extract `verify`'s decision resolution into one shared function (`checkDecisionGate(cwd, phase, task)`, formalizing today's `hasDecisionAdrForTaskId`).
+- **B.** `record-done` (§1) reuses that exact function — no parallel gate. (A→B may land together.)
+- **C.** Make resolution **status-aware**: parse `**Status:**` (and/or frontmatter `status:`); only an `accepted` decision resolves the gate, `proposed` stays unresolved. (C is a prerequisite for D.)
+- **D.** *Only then* auto-generate `proposed` stubs (e.g. on `phase import` when `requires_decision: true` and `decision_refs` is empty). A `proposed` stub is surfaced by lint as unresolved and does NOT pass `verify`; flipping it to `accepted` is the human act that releases the gate.
 
-It is tempting to auto-generate a `design/decisions/<task-id>.md` stub when a task declares `requires_decision: true`. **If done while resolution is still filename-match-only, that stub immediately satisfies the gate** — every `requires_decision` task would auto-pass with an empty, unreviewed stub. That silently nullifies the gate. So the work MUST proceed in this order:
+**Constraints (MUST):**
 
-```
-A. Extract verify's decision resolution into a single shared function
-   (formalize today's hasDecisionAdrForTaskId into checkDecisionGate(cwd, phase, task)).
-B. record-done (§1) reuses that exact function — no parallel gate.
-C. Make resolution STATUS-AWARE: parse `**Status:**` (and/or frontmatter `status:`);
-   only an `accepted` decision resolves the gate. `proposed` stays unresolved.
-D. ONLY THEN auto-generate proposed stubs (e.g. on `phase import` when
-   requires_decision: true and decision_refs is empty). A `proposed` stub is
-   surfaced by lint as unresolved and does NOT pass verify; flipping it to
-   `accepted` is the human act that releases the gate.
-```
-
-A→B may land together; C is a prerequisite for D; D must never precede C.
-
-### Constraints (MUST)
-
-- Status-aware parsing MUST be backward compatible: existing accepted ADRs (and projects relying on filename-match today) MUST keep resolving. Consider treating a missing status line as `accepted` for pre-existing files, or gating the stricter behavior behind a project opt-in, to avoid breaking live projects on upgrade.
+- Status-aware parsing MUST be backward compatible: existing accepted ADRs (and projects relying on filename-match today) MUST keep resolving — e.g. treat a missing status line as `accepted` for pre-existing files, or gate the stricter behavior behind a project opt-in.
 - A generated stub MUST default to `proposed` and MUST NOT resolve any gate until a human flips it to `accepted`.
-
-## Sequencing summary
-
-1. **§3-A/B first**: extract the shared `checkDecisionGate`. This unblocks §1 cleanly (record-done reuses it) and is a safe refactor with no behavior change.
-2. **§1**: implement `record-done` + `external_reported` on top of the shared gate. Highest user value; gated by the §1 MUST constraints.
-3. **§2**: `CONTROL_PLANE_NOT_DRIVEN` detection. Independent; can land anytime.
-4. **§3-C then §3-D**: status-aware resolution, then proposed-stub generation. Strictly ordered; D never before C.
 
 ## Non-goals
 
 - No orchestration: `record-done` records, it does not run anyone's CI or PR.
-- No change to the implemented PRs (#233–#236); this RFC neither revisits nor depends on their internals beyond the named shared predicate.
-- No new roadmap phase is created by this document; it is a design record. Implementation, when scheduled, will add its own phase(s).
+- No change to PRs #233–#236; this RFC neither revisits nor depends on their internals beyond the named shared predicate.
+- No new roadmap phase is created by this document; implementation, when scheduled, adds its own phase(s).
 
 ## Post-implementation follow-ups (not blockers)
 
-Surfaced during the pre-1.25 hardening review of the §3 implementation. None block 1.25.0; recorded here so they are not lost.
+Surfaced in the pre-1.25 review of the §3 implementation; none block 1.25.0.
 
-1. **`ADR_STATUS_UNRECOGNIZED` does not recurse into nested ADR directories.** [`classifyDecisionAdrs`](../../src/core/decisions/adr.ts) is a flat scan of `design/decisions/`. The **gate** ([`resolveDecisionGate`](../../src/core/decisions/adr.ts)) correctly reads a nested `decision_refs` path (e.g. `design/decisions/p3/adr.md`), so a nested ADR with a typo'd status still *blocks* the gate — only the advisory that would *warn* about the typo before you hit the block does not see nested files. A recursive walk is the refinement; left out to avoid a behavior change at release time.
-2. **`classifyDecisionAdrs` reads top-level entries with a plain `readFile`**, not via `resolveWithinProject`. It is a read-only classifier feeding an advisory (not the gate), so this is a consistency nit rather than a hole, but routing it through the same path-safety primitive as the gate would make the boundary uniform.
-3. **`decision_refs` is not restricted to `design/decisions/`.** The gate now rejects *unsafe* paths (escaping the repo → `unsafe_path`, fail-closed), but a *safe* repo-relative path outside `design/decisions/` (e.g. `docs/foo.md` with `**Status:** accepted`) still resolves the gate. This is the current, documented behavior ([decision-gate concept](../../docs/concepts/decision-gate.md)). Whether to constrain ADRs to `design/decisions/**` — e.g. a `TASK_DECISION_REF_OUTSIDE_DECISIONS` advisory — is an open policy question for a later minor, deliberately not changed pre-1.25.
+1. **`ADR_STATUS_UNRECOGNIZED` does not recurse into nested ADR dirs.** [`classifyDecisionAdrs`](../../src/core/decisions/adr.ts) is a flat scan of `design/decisions/`. The **gate** ([`resolveDecisionGate`](../../src/core/decisions/adr.ts)) correctly reads a nested `decision_refs` path (e.g. `design/decisions/p3/adr.md`), so a nested ADR with a typo'd status still *blocks* the gate — only the advisory that would *warn* before the block does not see nested files. A recursive walk is the refinement, left out to avoid a behavior change at release time.
+2. **`classifyDecisionAdrs` reads top-level entries with a plain `readFile`**, not via `resolveWithinProject`. It is a read-only classifier feeding an advisory (not the gate), so it is a consistency nit rather than a hole; routing it through the same path-safety primitive would make the boundary uniform.
+3. **`decision_refs` is not restricted to `design/decisions/`.** The gate rejects *unsafe* paths (escaping the repo → `unsafe_path`, fail-closed), but a *safe* repo-relative path outside `design/decisions/` (e.g. `docs/foo.md` with `**Status:** accepted`) still resolves the gate — the current, documented behavior ([decision-gate concept](../../docs/concepts/decision-gate.md)). Whether to constrain ADRs to `design/decisions/**` (e.g. a `TASK_DECISION_REF_OUTSIDE_DECISIONS` advisory) is an open policy question for a later minor.
+
+## References
+
+- RFCs / PRs: #233–#236 (the implemented hardening this is the tail of).
+- Code: [adr.ts](../../src/core/decisions/adr.ts) (`hasDecisionAdrForTaskId`, `classifyDecisionAdrs`, `resolveDecisionGate`) · [progress-event.ts](../../src/core/schemas/progress-event.ts) (`source`) · [task-state.ts](../../src/core/progress/task-state.ts) (`deriveTaskState`, `ALLOWED_TRANSITIONS`).
+- Docs: [docs/concepts/decision-gate.md](../../docs/concepts/decision-gate.md).

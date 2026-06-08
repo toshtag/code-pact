@@ -1,94 +1,48 @@
 # Adapter Contract Hardening (P30)
 
-Status: accepted
+**Status:** accepted (P30)
+**Scope:** three new `adapter conformance` checks that enforce the post-P29 contract in adapter guidance / generated instructions, gated by a version-resolved severity.
+**Owners:** maintainer
+**Related:** P29 (fixed the broken `commands.finalize` = `task finalize --agent` that `task prepare` emitted, and added the parser-roundtrip test these checks mirror at the conformance layer).
 
-## Context
+## Summary
 
-P29 fixed a broken `commands.finalize` (`task finalize --agent`) that
-`task prepare` emitted, and added a parser roundtrip test so an
-unsupported flag in the commands dictionary can no longer pass review.
-The root cause was broader than the typo: **the contract surface handed
-to agents was not mechanically checked.** `adapter conformance` today
-verifies only that required CLI surfaces are *mentioned*
-(substring match in `conformance-spec.ts`), not that the guidance
-presents `task prepare` as primary or that it is free of the
-anti-patterns P29 removed.
+Before P30, `adapter conformance` verified only that required CLI surfaces are *mentioned* (substring match in `conformance-spec.ts`) — not that the guidance presents `task prepare` as primary or is free of the anti-patterns P29 removed. P30 adds three structural checks and resolves their severity per install from the manifest `generator_version`, so they enforce on adapters that carry the hardened (P29-aligned) templates and only warn on older ones.
 
-P30 extends conformance to enforce the post-P29 contract in adapter
-guidance / generated instructions.
+## Conformance checks
 
-## Proposal
+Three checks (pinned by tests; the P29-aligned claude/codex/generic templates pass by construction):
 
-Add three conformance checks (pinned by tests; the P29-aligned
-claude/codex/generic templates pass by construction):
+1. **`task prepare` is primary** — it appears in the per-task workflow section AND ahead of the first `recommend` / `task context` mention. Structural position check, not NLP.
+2. **Anti-pattern rejection** — fail when the generated instruction or its examples contain `task finalize ... --agent`, or present `recommend` as the primary per-task entrypoint. The conformance-layer analogue of P29's parser-roundtrip test.
+3. **Activation rules documented** — the P29-T3 rules are present in the guidance: `task finalize --write` only after `task complete`; `wait_for_dependencies` → do not implement; `CONTEXT_OVER_BUDGET` → report, do not widen.
 
-1. **`task prepare` is primary** — it appears in the per-task workflow
-   section AND ahead of the first `recommend` / `task context` mention.
-   Structural position check, not NLP.
-2. **Anti-pattern rejection** — fail when the generated instruction or
-   its examples contain `task finalize ... --agent`, or present
-   `recommend` as the primary per-task entrypoint. This is the
-   conformance-layer analogue of P29's parser roundtrip test.
-3. **Activation rules documented** — the P29-T3 rules
-   (`task finalize --write` only after `task complete`;
-   `wait_for_dependencies` → do not implement; `CONTEXT_OVER_BUDGET` →
-   report, do not widen) are present in the guidance.
+**Precision (load-bearing):** check 3 verifies the rules are **documented**, never that an agent **obeys** them at runtime — a static instruction-file check cannot observe runtime behaviour. The conformance output and docs must say so; overstating it would re-introduce the doctor/conformance contract-overstatement that P28/P29 corrected.
 
-### Precision (load-bearing)
+## Decision: hybrid, version-gated severity
 
-Check 3 verifies the rules are **documented**, never that an agent
-**obeys** them at runtime. A static instruction-file check cannot
-observe runtime behaviour. The conformance output and docs must say so —
-overstating this would re-introduce exactly the doctor/conformance
-contract-overstatement that P28/P29 corrected.
+Each check carries a `severity` resolved per install from `generator_version`:
 
-## Decision: hybrid, version-gated severity (accepted)
+- present and semver `>= FROM_VERSION` → **required** (a failure makes the adapter non-compliant).
+- missing, unparseable, or `< FROM_VERSION` → **advisory** (a failure is a warning but does NOT make the adapter non-compliant).
 
-The new checks carry a **severity** resolved per install from the
-manifest `generator_version`:
+`FROM_VERSION` is the release that first ships the P29-aligned templates:
 
-- `generator_version` present and semver >= `FROM_VERSION` → **required**
-  (a failure makes the adapter non-compliant).
-- `generator_version` missing, unparseable, or < `FROM_VERSION` →
-  **advisory** (a failure is surfaced as a warning but does NOT make the
-  adapter non-compliant).
+> **`ADAPTER_CONTRACT_HARDENING_FROM_VERSION = "1.14.0"`** — the anticipated next release. **Release-coupled:** release prep MUST confirm the actual P30 release version and bump this constant if it differs, so "required" only ever applies to installs that actually carry the hardened templates.
 
-`FROM_VERSION` is the release that first ships the P29-aligned templates
-(the ones that satisfy these checks). P29 + P30 are unreleased; the
-current released line is `1.13.3`, whose templates still lead with
-`recommend`. Setting `FROM_VERSION` to anything <= `1.13.3` would
-hard-fail real `1.13.3` installs that legitimately have the old
-templates — the breaking change this hybrid exists to avoid. So:
-
-> **`ADAPTER_CONTRACT_HARDENING_FROM_VERSION = "1.14.0"`** — the
-> anticipated next release. This is **release-coupled**: release prep
-> MUST confirm the actual P30 release version and bump this constant if
-> it differs, so "required" only ever applies to installs that actually
-> carry the hardened templates.
-
-The package version is **not** bumped inside the P30 feature work
-(version bumps belong to release prep). Consequently, in-tree and CI
-installs report `generator_version` `1.13.3` (< `FROM_VERSION`) and the
-new checks run at **advisory** there; the templates' *content*
-conformance is asserted directly in tests, independent of severity.
+The released line at decision time is `1.13.3`, whose templates still lead with `recommend`. Setting `FROM_VERSION <= 1.13.3` would hard-fail real `1.13.3` installs that legitimately have the old templates — the breaking change this hybrid exists to avoid. The package version is **not** bumped in the P30 feature work (version bumps belong to release prep), so in-tree and CI installs report `1.13.3` (`< FROM_VERSION`) and the new checks run at **advisory** there; the templates' *content* conformance is asserted directly in tests, independent of severity.
 
 ### Rationale
 
-- **Required** alone is too strong: pre-P30 installs (old `recommend`-led
-  templates) would hard-fail on upgrade — destructive, not safety.
-- **Advisory** alone is too weak: freshly generated adapters would only
-  warn, so P30 would not actually enforce the post-P29 contract.
-- **Hybrid** enforces on adapters that carry the hardened templates and
-  warns (with a concrete `adapter upgrade` action) on older ones.
+- **Required alone** is too strong: pre-P30 installs (old `recommend`-led templates) would hard-fail on upgrade — destructive, not safety.
+- **Advisory alone** is too weak: freshly generated adapters would only warn, so P30 would not actually enforce the post-P29 contract.
+- **Hybrid** enforces on adapters that carry the hardened templates and warns (with a concrete `adapter upgrade` action) on older ones.
 
 ### Output requirements
 
-- Each conformance check result carries an explicit `severity`
-  (`required` | `advisory`).
-- An advisory failure names the violated rule and the remediation
-  (`adapter upgrade <agent> --write`) so the warning is actionable.
-- `compliant` is `false` only when a **required** check fails; advisory
-  failures are surfaced but keep `compliant: true`.
+- Each check result carries an explicit `severity` (`required` | `advisory`).
+- An advisory failure names the violated rule and the remediation (`adapter upgrade <agent> --write`) so the warning is actionable.
+- `compliant` is `false` only when a **required** check fails; advisory failures are surfaced but keep `compliant: true`.
 
 ## Non-goals
 
@@ -96,12 +50,8 @@ conformance is asserted directly in tests, independent of severity.
 - New agent support.
 - Asserting runtime obedience of behavioural rules.
 - `task prepare --record` / making `task prepare` write progress.
-- Evidence-harness reproducibility and read_refs (unnumbered future
-  capabilities, not part of P30).
+- Evidence-harness reproducibility and read_refs (unnumbered future capabilities, not part of P30).
 
 ## Backward compatibility
 
-Templates were refreshed in P29, so a fresh `adapter install` / `adapter
-upgrade` produces conformant output. The only compatibility surface is
-the severity decision above: under "required", pre-P30 installs must
-re-upgrade; under the hybrid, they warn until they do.
+Templates were refreshed in P29, so a fresh `adapter install` / `adapter upgrade` produces conformant output. The only compatibility surface is the severity decision: under "required", pre-P30 installs must re-upgrade; under the hybrid, they warn until they do.

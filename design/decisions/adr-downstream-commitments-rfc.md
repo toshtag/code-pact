@@ -1,228 +1,82 @@
 # RFC: ADR downstream commitments
 
-- Status: accepted
-- Phase: P43
-- Date: 2026-05-31
+**Status:** accepted (P43, 2026-05)
+**Scope:** an optional `## Implementation commitments` checkbox section in ADRs; an additive `decision_commitments` field on `task prepare`; two advisory `plan lint` diagnostics — `ADR_COMMITMENTS_EMPTY` and `PHASE_DOCS_WRITE_NO_DOC_CHECK`.
+**Owners:** maintainer
+**Related:** decision gate (P21/P39 — `requires_decision` task gated on an accepted ADR) · [docs/concepts/decision-gate.md](../../docs/concepts/decision-gate.md) (the concept page commitments fold into; no new page) · [docs/cli-contract.md](../../docs/cli-contract.md) · [docs/agent-contract.md](../../docs/agent-contract.md) · [docs/troubleshooting.md](../../docs/troubleshooting.md).
 
-## Problem
+## Summary
 
-code-pact's proven, differentiating effect in 1.26.0 use is the
-ADR→downstream link: a `requires_decision` task cannot be completed until an
-**accepted** ADR resolves its decision gate (P21/P39). That makes the *decision*
-first-class. But the ADR's **downstream consequences** — "given this decision,
-these concrete things must be done" — live only as free prose in the ADR body.
-Nothing surfaces them to the agent at work time, and nothing flags an accepted
-ADR that records a decision but commits to no follow-through.
+The decision gate is enforced (a `requires_decision` task can't complete until an **accepted** ADR resolves it), but the ADR's *downstream consequences* — the migrations, call-site updates, and doc changes the decision implies — live only as free prose the agent never re-reads. This RFC makes those consequences first-class, **deterministically surfaced, advisory-only** — never an LLM free-summary (rejected: non-deterministic, un-pinnable, contrary to the enforcement philosophy). Three pieces: author them in the ADR, surface them on `task prepare`, advise on the empty case in `plan lint`.
 
-The observed gap: an agent runs `task prepare`, sees the task is gated on an
-ADR, writes/accepts the ADR, and proceeds — but the ADR's implementation
-consequences (migrations, call-site updates, doc changes the decision implies)
-are buried in prose the agent never re-reads. The decision is enforced; its
-commitments are not even surfaced.
+## Decisions
 
-## Goal
+### 1. Authoring — `## Implementation commitments`
 
-Make the ADR's downstream commitments first-class, **deterministically surfaced,
-advisory-only** — never an LLM free-summary (that would be non-deterministic and
-is explicitly rejected, per the enforcement philosophy: scripts supply
-information and encode the AI-free logic; human-judgement areas stay advisory and
-are surfaced, not hard-blocked).
+An ADR may carry a `## Implementation commitments` section: a GitHub-flavored checkbox list (`- [ ]` / `- [x]`) under that exact h2 heading. Optional, human-authored. An unchecked item is downstream work still to implement; a checked item is work already satisfied, or an explicit non-work statement (`- [x] No downstream implementation work.`). The no-work item is for ADRs with genuinely no consequences — not a way to silence the advisory.
 
-Three pieces:
+**Rationale:** the commitment is a *consequence of the decision*, so it belongs with the decision (one source of truth), reusing the existing ADR resolution — not duplicated onto every gated task's YAML.
 
-1. **Authoring.** An ADR may carry a `## Implementation commitments` section: a
-   GitHub-flavored checkbox list (`- [ ]` / `- [x]`) under that exact h2 heading.
-   Free, optional, human-authored. `done` semantics: an unchecked item is
-   downstream work still to implement; a checked item is work already satisfied
-   by the ADR/task, or an explicit non-work statement
-   (`- [x] No downstream implementation work.`). The no-work item is for ADRs that
-   genuinely have no implementation consequences — not a way to silence the
-   advisory.
+### 2. Surfacing — `decision_commitments` on `task prepare`
 
-2. **Surfacing.** `task prepare` adds an additive `decision_commitments` field:
-   for each **accepted considered** ADR (every accepted ADR the gate considered,
-   whether or not the gate as a whole resolves — `task prepare` is advisory
-   context, not enforcement), the parsed commitment items (text + done state + a
-   `has_section` flag, per source ADR). It is `[]` only when no accepted ADR was
-   considered. Deterministic parse, no summarization. The array preserves the
-   decision resolver's `considered[]` order — it carries no chronological /
-   priority / dependency meaning.
+`task prepare` gains an additive `decision_commitments` field. For a gated task (`isDecisionRequiredForTask` — the same predicate `verify` uses, honoring task- and phase-level `requires_decision`), it resolves the gate and, for each **accepted considered** ADR (every accepted ADR the resolver considered, whether or not the gate as a whole resolves — prepare is advisory context, not a gate), re-reads the file and parses its commitments.
 
-3. **Advisory.** `plan lint` gains `ADR_COMMITMENTS_EMPTY` (`affects_exit: false`,
-   even under `--strict`): an **accepted** ADR that **resolves** a
-   `requires_decision` task's gate (the advisory, unlike the prepare surface, is
-   gate-resolved-only) has no `## Implementation commitments` section, or the
-   section is present with zero checkbox items. Surfaces "you recorded a decision
-   but committed to nothing"; never fails the build.
+Envelope addition (additive; existing fields unchanged):
+
+- `decision_commitments`: array of `{ adr: "<path>", has_section: bool, items: [{ text, done }] }`, one entry per accepted considered ADR, in the resolver's `considered[]` order.
+- Order carries **no** chronological / priority / dependency meaning; consumers must not read priority into it.
+- Present (possibly `[]`) **only for gated tasks**; omitted for non-gated tasks (field-presence parity with existing optional fields / the P39 additive-field discipline). `[]` when no accepted ADR was considered.
+- `has_section` distinguishes "no section" from "section present, zero items".
+- The early-return states (done / blocked / unmet-deps) are untouched and do no new I/O; gate resolution is read-only, so the progress-read-only invariant holds.
+
+**Rationale:** prepare is the one per-task entry point an agent always calls, so the surface goes there. It is **not** a gate: a gated task with no accepted ADR returns `[]` and does not fail or add a decision-error field — it never duplicates the `verify` / `task complete` gate enforcement.
+
+### 3. Advisory — `ADR_COMMITMENTS_EMPTY`
+
+`plan lint --include-quality` emits `ADR_COMMITMENTS_EMPTY` (`severity: warning`, `affects_exit: false` **even under `--strict`**): an **accepted** ADR that **resolves** a `requires_decision` task's gate has no `## Implementation commitments` section, or the section is present with zero checkbox items. `file: <adr path>`, plus `task_id` / `phase_id`; `path` is **omitted** (its subject is ADR content, not a plan-YAML field — matching the two existing ADR-centric advisories); `details: { has_section, item_count }`. First task wins → one issue per ADR.
+
+The advisory is **gate-resolved-only** (narrower than the prepare surface): a proposed/draft/empty/unknown ADR never fires; an accepted ADR no gated task references never fires (historical ADRs stay silent); and an accepted ref inside an **unresolved** explicit `decision_refs` set (all-must-be-accepted) never fires — the message says the ADR "resolves the gate", so it must actually resolve. The unresolved case is `TASK_DECISION_UNRESOLVED`'s job.
+
+**Rationale:** surfaces "you recorded a decision but committed to nothing" without ever failing the build. The resolved-gate scope keeps it signal, not noise.
+
+### 4. `PHASE_DOCS_WRITE_NO_DOC_CHECK` (docs-drift guard)
+
+P43's dominant risk is docs drift (the P39 lesson). `plan lint --include-quality` also emits `PHASE_DOCS_WRITE_NO_DOC_CHECK` (`severity: warning`, `affects_exit: false`): a **not-yet-`done`** phase whose task `writes` a public doc that `check:docs` guards, but whose `verification.commands` run no doc check. `file` is the phase YAML, `path` is `verification.commands`, `details.doc_write`.
+
+Scoped to avoid false positives: **CHANGELOG.md is excluded** (it is in `check:docs`'s `ROOT_SOURCE_SKIP`); **`design/**` is excluded** (validated by `validate` / `plan lint`, not the public-docs checker); **`done` phases are excluded** (frozen history — flagging them is pure noise). Structural (phase-YAML only, no free-text parsing).
+
+**Rationale:** the generalized, mechanical form of the P39/P43 docs-drift lesson — catch a phase editing public docs without a doc check, instead of leaving it to manual review.
 
 ## Non-goals
 
-- **No new gate.** Commitments never block `task complete` / `verify` /
-  `record-done`. The decision gate stays exactly as it is (an accepted ADR
-  resolves it); commitments are surfaced and advised, not enforced.
-- **No decision-error surface on `task prepare`.** `task prepare` is an
-  implementation-support surface, not a gate. For a gated task with no accepted
-  ADR it returns `decision_commitments: []` and does **not** fail, does **not**
-  add a decision-error field, and does **not** duplicate the verify / task
-  complete gate enforcement.
-- **No `task context` echo (this phase).** Commitments surface on `task prepare`
-  only — the one per-task entry point an agent always calls. Echoing them in
-  `task context` too would duplicate the surface for no decided benefit;
-  deferred.
-- **No completion tracking / checkbox mutation.** code-pact parses the checkbox
-  state for surfacing; it never edits the ADR to tick boxes. Done-state is the
-  author's record, not a code-pact-managed state.
-- **No LLM summarization.** The parse is a literal checkbox extraction under a
-  fixed heading. No paraphrase, no inference, no Markdown AST — a small regex.
-- **No new concept page.** The commitments concept folds into the existing
-  `docs/concepts/decision-gate.md` (it already documents the ADR shape and where
-  the gate surfaces); we do not scatter docs into a new file.
+- **No new gate.** Commitments never block `task complete` / `verify` / `record-done`. The decision gate is unchanged.
+- **No completion tracking / checkbox mutation.** code-pact parses checkbox state for surfacing; it never edits the ADR to tick boxes. Done-state is the author's record.
+- **No `task context` echo (this phase).** Commitments surface on `task prepare` only; echoing them in `task context` would duplicate the surface for no decided benefit — deferred.
+- **No LLM summarization.** The parse is a literal checkbox extraction under a fixed heading (a small regex) — no paraphrase, no inference, no Markdown AST.
+- **No new concept page.** The concept folds into `docs/concepts/decision-gate.md`.
 
-## Design
+## Parse contract
 
-### Parse (`src/core/decisions/adr.ts`)
+`parseAdrCommitments(content) → { hasSection, items: [{ text, done }] }` — pure, deterministic, no I/O, mirroring `parseAdrStatus`:
 
-Add `parseAdrCommitments(content: string): AdrCommitments` alongside the existing
-`parseAdrStatus` / `classifyAdr`. Pure, deterministic, no I/O, mirroring
-`parseAdrStatus`:
-
-```ts
-export type AdrCommitment = { text: string; done: boolean };
-export type AdrCommitments = { hasSection: boolean; items: AdrCommitment[] };
-```
-
-- `normalizeNewlines`, then `parseFrontMatter` to strip frontmatter so a `status:`
-  key cannot be mistaken for body (the `detectAdrAcceptedBodyThin` pattern).
-- Locate the first heading matching `/^\s*##\s+implementation commitments\s*$/i`
-  (exact `##` level, case-insensitive title; `###` does not match). None →
-  `{ hasSection: false, items: [] }`.
-- Section bounds: from after the heading to the next `/^\s*##\s/` (any h2) or EOF.
-- Items: per line `/^\s*[-*]\s+\[([ xX])\]\s+(.+?)\s*$/` → `{ text, done }` where
-  `done = group[1].toLowerCase() === "x"`. Non-checkbox lines (prose, blanks) are
-  ignored.
-- `hasSection` distinguishes "no section" from "section present, zero items" — the
-  lint needs both. `classifyAdr` is left untouched (avoids perturbing its tests).
-
-### Surface (`src/commands/task-prepare.ts`)
-
-`task prepare` does **not** currently resolve the decision gate — it passes only a
-`phaseRequiresDecision` boolean to `resolveRecommendation`. So T1 adds the
-resolution. For a gated task (`isDecisionRequiredForTask(phase, task)` — the same
-predicate `verify` uses, honoring task- and phase-level `requires_decision`), call
-`resolveDecisionGate(cwd, taskId, task.decision_refs)`. `DecisionResolution.considered[]`
-carries only `{ path, status, accepted, acceptance }` — **no content** — so for
-each `accepted` entry, re-read the file by its `path` and `parseAdrCommitments` it.
-
-Envelope addition (additive — existing fields unchanged):
-
-```json
-"decision_commitments": [
-  { "adr": "design/decisions/<file>.md", "has_section": true, "items": [
-    { "text": "Migrate call sites of foo() to bar()", "done": false },
-    { "text": "Update docs/cli-contract.md", "done": true }
-  ] }
-]
-```
-
-`decision_commitments` is present (possibly `[]`) only for gated tasks; omitted
-for non-gated tasks (field-presence parity with existing optional fields and the
-P39 additive-error-field discipline). The early-return states
-(done/blocked/unmet-deps) are untouched, so they do no new I/O; the
-progress-read-only invariant holds (`resolveDecisionGate` is read-only). Entries
-follow `considered[]` order; consumers must not read priority into the order.
-
-### Advisory (`src/core/plan/lint.ts`)
-
-Add `detectAdrCommitmentsEmpty(cwd, phases)` beside `ADR_STATUS_UNRECOGNIZED` and
-the P36 empty-stub advisory, wired into the quality block under `includeQuality`.
-Using `makeDecisionResolver(cwd)` (the memoized resolver `detectUnresolvedDecision`
-already uses): for each `requires_decision` task (task- or phase-level), resolve
-the gate and **skip the task unless the gate actually resolves** (`if (!res.resolved)
-continue`). For a resolved gate, collect `considered[].path where accepted` into a
-map keyed by ADR path (first task wins → one issue per ADR). For each such ADR,
-read it, `parseAdrCommitments`, and if `!hasSection || items.length === 0` emit
-`ADR_COMMITMENTS_EMPTY` (`severity: warning`, `affects_exit: false`,
-`file: <adr path>`, `task_id`, `phase_id`, `details: { has_section, item_count }`).
-
-The advisory targets **accepted ADRs that resolve a gated task's decision gate**.
-A proposed/draft/empty/unknown ADR never fires; an accepted ADR that no gated task
-references never fires (historical ADRs stay silent — the noise-control guard);
-and an accepted ref inside an **unresolved** explicit `decision_refs` set
-(all-must-be-accepted, so one proposed ref leaves the gate unresolved) never fires
-either — the message says the ADR "resolves the gate", so it must actually
-resolve. The unresolved case is `TASK_DECISION_UNRESOLVED`'s job.
-
-`PlanIssue.path` is, in every existing use, a field position inside a plan YAML
-(`definition_of_done[i]`, `requires_decision`, `confidence`, …). The two existing
-ADR-centric advisories set `file: <adr path>` and **omit `path`**. This advisory
-does the same: its subject is ADR content, not a plan-YAML field, so `path` is
-omitted; `file` is the ADR and `task_id`/`phase_id` name the referencing task.
-
-### Docs-drift guard: `PHASE_DOCS_WRITE_NO_DOC_CHECK` (added in T2)
-
-P43's stated dominant risk is docs drift, and the review of T1/T2 surfaced the
-same class again (a phase editing public docs without a doc check in its
-verification). Rather than leave that to manual review, T2 also adds a small,
-deterministic plan-lint advisory that catches it mechanically —
-`PHASE_DOCS_WRITE_NO_DOC_CHECK` (warning, `affects_exit: false`,
-`--include-quality`): a **not-yet-`done`** phase whose task `writes` a public doc
-that `check:docs` guards, but whose `verification.commands` run no doc check.
-
-Scoped to avoid false positives / DX loss (the maintainer's explicit
-constraint): **CHANGELOG.md is excluded** (it is in `check:docs`'s
-`ROOT_SOURCE_SKIP`, so a CHANGELOG write is not something `check:docs` verifies);
-**`design/**` is excluded** (validated by `validate`/`plan lint`, not the
-public-docs checker); and **`done` phases are excluded** (a frozen historical
-phase can't be changed, so flagging it is pure noise — this is a forward-looking
-guard). Structural (phase-YAML only, no free-text parsing). It is the generalized,
-mechanical form of the P39/P43 docs-drift lesson; it is a public diagnostic code
-and is documented and pinned like every other.
-
-### Contract docs (and the P39 anti-drift guard)
-
-`decision_commitments` and `ADR_COMMITMENTS_EMPTY` are additive surface. The
-JSON-output-shape section already states envelopes may carry additive fields
-(P39 / the `check-doc-invariants` rule #8), so only per-command/per-code docs
-change.
-
-## Documentation contract checklist
-
-P43's dominant risk is contract/agent-doc drift, not code (the P39 lesson). Each
-task MUST update these docs (verified to exist; a new `adr-commitments.md` is
-deliberately NOT created — the concept folds into `decision-gate.md`):
-
-- **T1** must update: `docs/cli-contract.md` (the `task prepare` envelope +
-  `decision_commitments` shape, gated-only presence, the `[]`-when-no-accepted-
-  entries case, `done` semantics, order note), `docs/agent-contract.md` (the
-  `task prepare` entry reads `decision_commitments` as advisory context, not a gate),
-  `docs/concepts/decision-gate.md` (the `## Implementation commitments` section in
-  the ADR shape + `done` semantics + no-work anti-abuse note), `CHANGELOG.md`.
-- **T2** must update, for **both** `ADR_COMMITMENTS_EMPTY` and
-  `PHASE_DOCS_WRITE_NO_DOC_CHECK`: `docs/cli-contract.md` (the diagnostic-table
-  rows — `ADR_COMMITMENTS_EMPTY`: advisory-only incl. under `--strict`, `file` is
-  the ADR, no `path`, `details.has_section`/`item_count`, scope = accepted ADRs
-  that resolve a gated task's gate; `PHASE_DOCS_WRITE_NO_DOC_CHECK`: not-done
-  scope, CHANGELOG/`design/**` excluded, `file` is the phase YAML, `path` is
-  `verification.commands`, `details.doc_write` — and the `--include-quality`
-  bullet list), `docs/troubleshooting.md` (both: warning not blocker + recovery;
-  for `ADR_COMMITMENTS_EMPTY` the no-work anti-abuse note), `docs/concepts/decision-gate.md`
-  (the `ADR_COMMITMENTS_EMPTY` scope: accepted ADRs that **resolve** a gated
-  task's gate), `CHANGELOG.md`.
+- Strip frontmatter first so a `status:` key can't be mistaken for body.
+- Match the first heading `/^\s*##\s+implementation commitments\s*$/i` — exact `##` level, case-insensitive title (`###` does not match). None → `{ hasSection: false, items: [] }`.
+- Section bounds: from after the heading to the next h2 (`/^\s*##\s/`) or EOF.
+- Items: per line `/^\s*[-*]\s+\[([ xX])\]\s+(.+?)\s*$/` → `{ text, done }`, `done = group[1].toLowerCase() === "x"`. Non-checkbox lines (prose, blanks) ignored.
 
 ## Alternatives considered
 
-- **A `commitments` field on the task schema (YAML), not the ADR.** Rejected: the
-  commitment is a *consequence of the decision*, so it belongs with the decision
-  (the ADR), not duplicated onto every gated task. Keeping it in the ADR keeps one
-  source of truth and reuses the existing ADR resolution.
-- **Hard-gating completion on un-done commitments.** Rejected: commitment
-  done-state is a human record code-pact does not own; gating on it would force
-  agents to tick boxes to proceed, inverting the advisory philosophy and creating
-  a checkbox-theater incentive.
-- **LLM-summarized "what this decision implies".** Rejected outright:
-  non-deterministic, un-pinnable, contrary to the enforcement philosophy.
-- **Pure file-centric advisory (every accepted ADR, like P36).** Rejected:
-  no existing ADR carries the section, so it would warn on the entire
-  `design/decisions/` corpus the moment `--include-quality` runs. The
-  resolved-gate scope (accepted ADRs that resolve a gated task's gate) keeps it
-  signal, not noise.
+- **A `commitments` field on the task schema (YAML), not the ADR** — rejected; duplicates the consequence onto every gated task instead of keeping one source of truth in the ADR.
+- **Hard-gating completion on un-done commitments** — rejected; done-state is a human record code-pact does not own. Gating would force agents to tick boxes to proceed (checkbox theater), inverting the advisory philosophy.
+- **LLM-summarized "what this decision implies"** — rejected outright; non-deterministic, un-pinnable, contrary to the enforcement philosophy.
+- **Pure file-centric advisory (every accepted ADR, like P36)** — rejected; no existing ADR carries the section, so it would warn on the whole `design/decisions/` corpus the moment `--include-quality` runs. The resolved-gate scope keeps it signal.
+
+## Open questions (resolved at acceptance)
+
+- **Commitment syntax** — a checkbox list under the fixed `## Implementation commitments` heading (no richer schema).
+- **`task context` echo** — no; commitments are prepare-only this phase.
+
+## References
+
+- Concept: [docs/concepts/decision-gate.md](../../docs/concepts/decision-gate.md) (ADR shape, `## Implementation commitments`, `done` semantics, no-work anti-abuse note, `ADR_COMMITMENTS_EMPTY` scope).
+- Contract: [docs/cli-contract.md](../../docs/cli-contract.md) (the `task prepare` envelope + both diagnostic-table rows) · [docs/agent-contract.md](../../docs/agent-contract.md) (`decision_commitments` is advisory context, not a gate) · [docs/troubleshooting.md](../../docs/troubleshooting.md) (both diagnostics: warning not blocker + recovery).
