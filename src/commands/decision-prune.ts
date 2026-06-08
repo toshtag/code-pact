@@ -2,18 +2,30 @@ import { collectPlanArtifacts } from "../core/plan/state.ts";
 import { evaluatePrune, type PruneEvaluation } from "../core/decisions/prune.ts";
 
 /**
- * The deterministic part of the dry-run plan PR-C2 will execute: remove the
- * decision file and append a `PRUNED.md` row. The inbound-`.md`-link rewrite
- * list is NOT here yet — it is collected by a separate, shared collector
- * (PR-C1c) and added to this object as an additive field, so callers must treat
- * the plan as **partial** until then. (The collector is intentionally distinct
- * from the conservative eligibility parser `decisionLinksTo`.)
+ * One inbound `.md` reference to the pruned decision that `--write` will rewrite.
+ * Populated by the shared collector in PR-C1c (the dry-run preview and `--write`
+ * consume the same items); empty with `status: "pending"` until then. The shape
+ * is pinned NOW so C1c is purely additive — it flips `status` to `"ready"` and
+ * fills `items`, never changing the contract.
+ */
+export type LinkRewriteItem = {
+  source_file: string;
+  line: number;
+  raw_href: string;
+  normalized_target: string;
+  link_kind: "inline" | "reference_definition" | "index_row";
+  rewrite_action: "tombstone" | "delink" | "leave_as_is";
+};
+
+/**
+ * The plan `--write` (PR-C2) will execute: remove the decision file, append a
+ * `PRUNED.md` row, and rewrite each inbound link. `link_rewrite.status` is
+ * `"pending"` (items `[]`) until PR-C1c's collector lands, then `"ready"`.
  */
 export type PrunePlan = {
   remove_file: string;
   append_ledger: boolean;
-  /** True until PR-C1c lands the inbound-link collector; the plan is not yet complete. */
-  link_rewrite_pending: true;
+  link_rewrite: { status: "pending" | "ready"; items: LinkRewriteItem[] };
 };
 
 /** Roadmap / phase-file load issues mean the task graph is only partially known. */
@@ -73,7 +85,11 @@ export async function runDecisionPrune(
 
   const plan: PrunePlan | null =
     evaluation.eligible && evaluation.decision !== null
-      ? { remove_file: evaluation.decision, append_ledger: true, link_rewrite_pending: true }
+      ? {
+          remove_file: evaluation.decision,
+          append_ledger: true,
+          link_rewrite: { status: "pending", items: [] },
+        }
       : null;
 
   return {

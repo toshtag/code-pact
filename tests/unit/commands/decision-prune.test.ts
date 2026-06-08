@@ -101,7 +101,7 @@ describe("runDecisionPrune", () => {
     expect(res.plan).toEqual({
       remove_file: "design/decisions/foo-rfc.md",
       append_ledger: true,
-      link_rewrite_pending: true,
+      link_rewrite: { status: "pending", items: [] },
     });
     expect(res.warnings).toEqual([]);
     expect(res.evaluation.referencing_tasks).toHaveLength(1);

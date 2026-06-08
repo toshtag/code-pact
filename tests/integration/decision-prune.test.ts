@@ -111,6 +111,42 @@ describe("decision prune — CLI (dry-run)", () => {
     expect(res.code).toBe(2);
   });
 
+  it("multiple paths → exit 2, CONFIG_ERROR", async () => {
+    const p = await project(ACCEPTED, "done");
+    const res = p.run(["decision", "prune", "a.md", "b.md", "--json"]);
+    expect(expectJsonErr(res).error.code).toBe("CONFIG_ERROR");
+    expect(res.code).toBe(2);
+  });
+
+  it("unreadable plan graph (invalid roadmap) → exit 2, plan_artifacts_unreadable", async () => {
+    const p = await project(ACCEPTED, "done");
+    await writeFile(join(p.dir, "design", "roadmap.yaml"), ":\n  not: [valid");
+    const res = p.run(["decision", "prune", "design/decisions/foo-rfc.md", "--json"]);
+    const env = expectJsonErr(res);
+    expect(env.error.code).toBe("DECISION_PRUNE_NOT_ELIGIBLE");
+    const gates = ((env.data as { blocks?: { gate: string }[] }).blocks ?? []).map((b) => b.gate);
+    expect(gates).toContain("plan_artifacts_unreadable");
+    expect(res.code).toBe(2);
+  });
+
+  it("`decision --help` → Usage + Subcommands, exit 0", async () => {
+    const p = await project(ACCEPTED, "done");
+    const res = p.run(["decision", "--help"]);
+    expect(res.code).toBe(0);
+    expect(res.stdout).toContain("Usage:");
+    expect(res.stdout).toContain("prune");
+  });
+
+  it("`decision prune --help` → Usage / Options / Examples / --json, exit 0", async () => {
+    const p = await project(ACCEPTED, "done");
+    const res = p.run(["decision", "prune", "--help"]);
+    expect(res.code).toBe(0);
+    expect(res.stdout).toContain("Usage:");
+    expect(res.stdout).toContain("Options:");
+    expect(res.stdout).toContain("Examples:");
+    expect(res.stdout).toContain("--json");
+  });
+
   it("human eligible → dry-run summary on stdout, exit 0", async () => {
     const p = await project(ACCEPTED, "done");
     const res = p.run(["decision", "prune", "design/decisions/foo-rfc.md"]);

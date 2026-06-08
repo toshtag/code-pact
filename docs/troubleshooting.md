@@ -166,6 +166,9 @@ code-pact decision prune design/decisions/<name>.md --json
 # data.blocks[].gate is one of:
 #   target_invalid / target_missing / target_unreadable
 #     → the target is not a readable, top-level, real design/decisions/*.md file
+#   plan_artifacts_unreadable
+#     → design/roadmap.yaml or a referenced design/phases/*.yaml could not be read,
+#       so prune cannot prove every referencing task is done; fix the plan graph first
 #   target_not_accepted
 #     → only an accepted decision is prunable; a proposed/draft/rejected/
 #       superseded/empty/unknown one is not (data.blocks[].status names it)

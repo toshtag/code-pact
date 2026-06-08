@@ -14,21 +14,28 @@ import {
   notEligibleMessage,
 } from "../../commands/decision-prune.ts";
 
-const PRUNE_HELP = `code-pact decision prune <path> [--json]
+const PRUNE_HELP = `Usage: code-pact decision prune <path> [--json]
 
-Preview retiring a shipped (accepted) decision record from the live plane
-(DRY-RUN ONLY — never deletes or rewrites anything yet).
+Preview whether a shipped, accepted decision record can be retired from the live
+plane. DRY-RUN ONLY in this release: nothing is deleted, no links are rewritten,
+and no PRUNED.md row is appended — the dry-run reports the eligibility verdict
+and the (currently partial) write plan. The target must be a readable, top-level,
+accepted design/decisions/<name>.md record.
 
-Runs the prune eligibility verdict and prints what \`--write\` would do. The
-target must be a readable, top-level, accepted design/decisions/<name>.md record.
-Eligible exits 0; ineligible exits 2 with DECISION_PRUNE_NOT_ELIGIBLE and the
-full block list under data.blocks (--json).
+Eligible → exit 0. Ineligible → exit 2 with error code DECISION_PRUNE_NOT_ELIGIBLE
+and every failing gate under data.blocks[].
 
-  --json    Emit the {ok,data} envelope (data: decision, eligible, blocks,
-            referencing_tasks, plan, warnings).`;
+Options:
+  --json    Emit the {ok,data} envelope (data: mode, decision, eligible, blocks,
+            referencing_tasks, plan, warnings).
 
-const GROUP_HELP = `code-pact decision <subcommand>
+Examples:
+  code-pact decision prune design/decisions/foo-rfc.md
+  code-pact decision prune design/decisions/foo-rfc.md --json`;
 
+const GROUP_HELP = `Usage: code-pact decision <subcommand>
+
+Subcommands:
   prune <path>   Preview retiring an accepted decision record (dry-run).`;
 
 function isHelp(argv: string[]): boolean {
