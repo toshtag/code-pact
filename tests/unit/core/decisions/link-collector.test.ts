@@ -61,11 +61,9 @@ describe("collectInboundLinks — items", () => {
     ]);
   });
 
-  it("a link in a fenced code block → leave_as_is", async () => {
+  it("a link in a fenced code block is NOT collected (blanked, exactly as check-doc-links ignores it)", async () => {
     await write("docs/ex.md", "# E\n\n```md\n[d](../design/decisions/foo-rfc.md)\n```\n");
-    const { items } = await collectInboundLinks(cwd, TARGET);
-    expect(items).toHaveLength(1);
-    expect(items[0]?.rewrite_action).toBe("leave_as_is");
+    expect((await collectInboundLinks(cwd, TARGET)).items).toEqual([]);
   });
 
   it("raw_href is the destination token (preserves <…>, excludes title); raw_link keeps the title", async () => {
@@ -84,21 +82,29 @@ describe("collectInboundLinks — items", () => {
     expect(items[0]?.raw_link).toBe("[use `foo`](../design/decisions/foo-rfc.md)");
   });
 
-  it("a longer (4-backtick) fence is not closed by a shorter (3-backtick) line", async () => {
+  it("a 4-backtick fence enclosing a nested 3-backtick block — inner link not collected", async () => {
     await write(
       "docs/nested.md",
       "# N\n\n````md\n```md\n[x](../design/decisions/foo-rfc.md)\n```\n````\n",
     );
-    const { items } = await collectInboundLinks(cwd, TARGET);
-    expect(items).toHaveLength(1);
-    expect(items[0]?.rewrite_action).toBe("leave_as_is"); // still inside the 4-backtick fence
+    expect((await collectInboundLinks(cwd, TARGET)).items).toEqual([]);
   });
 
-  it("a 4-backtick fence closed by a 5-backtick line — the link inside is leave_as_is (CommonMark: close >= open)", async () => {
-    await write("docs/wide.md", "# W\n\n````\n[x](../design/decisions/foo-rfc.md)\n`````\n");
-    const { items } = await collectInboundLinks(cwd, TARGET);
-    expect(items).toHaveLength(1);
-    expect(items[0]?.rewrite_action).toBe("leave_as_is");
+  it("an indented fence (matching open/close indent) blanks its link, like check-doc-links", async () => {
+    await write("docs/ind.md", "# I\n\n  ```\n  [x](../design/decisions/foo-rfc.md)\n  ```\n");
+    expect((await collectInboundLinks(cwd, TARGET)).items).toEqual([]);
+  });
+
+  it("skips external / protocol-relative destinations (same test as check-doc-links)", async () => {
+    await write(
+      "docs/ext.md",
+      [
+        "[a](//design/decisions/foo-rfc.md)",
+        "[b](mailto:design/decisions/foo-rfc.md)",
+        "[c](https://example.com/design/decisions/foo-rfc.md)",
+      ].join("\n") + "\n",
+    );
+    expect((await collectInboundLinks(cwd, TARGET)).items).toEqual([]);
   });
 });
 

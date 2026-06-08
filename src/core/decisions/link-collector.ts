@@ -2,17 +2,14 @@ import { readFile, readdir } from "node:fs/promises";
 import { posix } from "node:path";
 import { resolveWithinProject } from "../path-safety.ts";
 
-/** Skipped during the walk — matches scripts/check-doc-links.mjs. */
-const SKIP_DIRS = new Set(["node_modules", ".git", "dist"]);
-
 /**
  * One inbound reference considered by the prune write plan. `rewrite_action`
- * decides what `--write` (PR-C2) does with it — `tombstone`, `delink`, or
- * `leave_as_is` (NOT every item is rewritten). Carries everything the executor
- * needs to act on the exact span WITHOUT re-parsing: `column` + `raw_link`
- * disambiguate two links on one line, and `link_text` is what `delink` keeps.
- * The dry-run preview and `--write` consume the same items. Deliberately NOT the
- * conservative eligibility parser (`decisionLinksTo`).
+ * decides what `--write` (PR-C2) does — `tombstone` (a README decision-index
+ * row) or `delink` (a body link). Carries everything the executor needs to act
+ * on the exact span WITHOUT re-parsing: `column` + `raw_link` disambiguate two
+ * links on one line, and `link_text` is what `delink` keeps. The dry-run preview
+ * and `--write` consume the same items. Deliberately NOT the conservative
+ * eligibility parser (`decisionLinksTo`).
  */
 export type LinkRewriteItem = {
   source_file: string;
@@ -28,7 +25,7 @@ export type LinkRewriteItem = {
   link_text: string;
   normalized_target: string;
   link_kind: "inline" | "index_row";
-  rewrite_action: "tombstone" | "delink" | "leave_as_is";
+  rewrite_action: "tombstone" | "delink";
 };
 
 /** An inbound reference (or a discovery failure) prune cannot safely plan — fail-closed. */
@@ -38,23 +35,48 @@ export type LinkScanIssue = {
   reason: "unreadable" | "unsupported_reference_style" | "protected_ledger";
 };
 
-/** The append-only prune ledger — `--write` may only APPEND to it, never rewrite its rows. */
-const LEDGER = "design/decisions/PRUNED.md";
-
 export type InboundLinkScan = { items: LinkRewriteItem[]; issues: LinkScanIssue[] };
 
-// Capture: 1 = visible text, 2 = destination token. Mirrors check-doc-links'
-// inline grammar; an optional "title" / 'title' / (title) is matched but NOT
-// captured into the href.
+// EXTERNAL_RE / FENCE_RE / INLINE_CODE_RE MUST stay byte-identical to
+// scripts/check-doc-links.mjs: the rewrite plan is only safe if the collector
+// classifies links EXACTLY as the link checker does — so a link we leave alone
+// is one check-doc-links also ignores, and one we plan to rewrite is one it
+// would otherwise flag broken after C2 deletes the target. Parity is locked by
+// the representative tests in link-collector.test.ts. (A shared module is the
+// eventual home; the checker runs under plain `node` today and can't import a
+// `.ts`.)
+const EXTERNAL_RE = /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i;
+const FENCE_RE = /^([ \t]*)(`{3,}|~{3,})[^\n]*\n[\s\S]*?\n\1\2[^\n]*$/gm;
+const INLINE_CODE_RE = /`[^`\n]*`/g;
 const INLINE =
   /\[([^\]]*)\]\(\s*(<[^>]+>|[^)\s]+)(?:[ \t]+(?:"[^"]*"|'[^']*'|\([^)]*\)))?\s*\)/g;
 const REF_DEF = /^[ \t]{0,3}\[[^\]]+\]:[ \t]*(<[^>]+>|\S+)(?:[ \t]+(?:"[^"]*"|'[^']*'|\([^)]*\)))?[ \t]*$/;
-const FENCE = /^\s*(```+|~~~+)/;
 
-// The exact source surface check:doc-links validates (scripts/check-doc-links.mjs):
-// root .md (CHANGELOG.md excluded there too), docs/** .md, design/** .md,
-// .github/** .md + .yml. Kept in lock-step on purpose — these are the files a
-// post-prune broken link would be flagged in.
+/** The append-only prune ledger — `--write` may only APPEND to it, never rewrite its rows. */
+const LEDGER = "design/decisions/PRUNED.md";
+
+/** Skipped during the walk — matches scripts/check-doc-links.mjs. */
+const SKIP_DIRS = new Set(["node_modules", ".git", "dist"]);
+
+// Blank a span to spaces, preserving newlines so line/column offsets are exact.
+const blank = (m: string): string => m.replace(/[^\n]/g, " ");
+/** Blank fenced code blocks AND inline code spans (identical to check-doc-links). */
+function stripCode(text: string): string {
+  return text.replace(FENCE_RE, blank).replace(INLINE_CODE_RE, blank);
+}
+
+function stripAngleBrackets(raw: string): string {
+  const s = raw.trim();
+  return s.startsWith("<") && s.endsWith(">") ? s.slice(1, -1) : s;
+}
+
+/** Resolve a link destination relative to its source file's directory. */
+function resolveFrom(sourceFile: string, href: string): string {
+  const dest = stripAngleBrackets(href).split("#")[0]!.trim();
+  if (dest === "" || EXTERNAL_RE.test(dest)) return ""; // empty / external / protocol-relative
+  return posix.normalize(posix.join(posix.dirname(sourceFile), dest)).replace(/^(?:\.\/)+/, "");
+}
+
 const ROOTS: { rel: string; recursive: boolean; exts: string[] }[] = [
   { rel: ".", recursive: false, exts: [".md"] },
   { rel: "docs", recursive: true, exts: [".md"] },
@@ -62,29 +84,11 @@ const ROOTS: { rel: string; recursive: boolean; exts: string[] }[] = [
   { rel: ".github", recursive: true, exts: [".md", ".yml"] },
 ];
 
-function stripAngleBrackets(raw: string): string {
-  const s = raw.trim();
-  return s.startsWith("<") && s.endsWith(">") ? s.slice(1, -1) : s;
-}
-
-/** Blank `…` inline-code spans with same-length spaces so links inside code are
- *  not matched, while columns of links OUTSIDE code stay exact. */
-function blankInlineCode(line: string): string {
-  return line.replace(/`[^`]*`/g, (m) => " ".repeat(m.length));
-}
-
-/** Resolve a link destination relative to its source file's directory. */
-function resolveFrom(sourceFile: string, href: string): string {
-  const dest = stripAngleBrackets(href).split("#")[0]!.trim();
-  if (dest === "" || /^[a-z]+:\/\//i.test(dest)) return ""; // empty / absolute URL
-  return posix.normalize(posix.join(posix.dirname(sourceFile), dest)).replace(/^(?:\.\/)+/, "");
-}
-
 /**
  * STRICT walk of the source surface. Unlike the best-effort `walkAndMatch`, an
- * unreadable EXISTING directory is not silently skipped — it becomes an
- * `unreadable` issue so the plan can fail closed (a directory we couldn't read
- * might hide an inbound link). A genuinely absent root (ENOENT) is fine.
+ * unreadable EXISTING directory (or one that symlink-escapes the repo) is not
+ * silently skipped — it becomes an `unreadable` issue so the plan can fail
+ * closed. A genuinely absent root (ENOENT) is fine.
  */
 async function discoverSources(cwd: string): Promise<{ files: string[]; issues: LinkScanIssue[] }> {
   const files = new Set<string>();
@@ -96,9 +100,7 @@ async function discoverSources(cwd: string): Promise<{ files: string[]; issues: 
       abs = cwd; // the project root itself is trusted
     } else {
       try {
-        // Guard symlink escape: a `docs` symlinked outside the repo must not let
-        // the collector plan rewrites against external files.
-        abs = await resolveWithinProject(cwd, rel);
+        abs = await resolveWithinProject(cwd, rel); // symlink-escape guard
       } catch {
         issues.push({ source_file: rel, line: null, reason: "unreadable" });
         return;
@@ -131,11 +133,15 @@ async function discoverSources(cwd: string): Promise<{ files: string[]; issues: 
 /**
  * Collect every inbound reference to `target` across the doc surface, with the
  * action `--write` would take: a `README.md` decision-index row → `tombstone`;
- * an inline body link → `delink`; a link inside a fenced code block →
- * `leave_as_is`. **Excludes** image embeds (`![]()`) and inline-code links.
- * A reference-style link **outside** code is unsupported (a fail-closed issue);
- * inside a code block it is an example and ignored. An unreadable source file or
- * directory is a fail-closed issue too.
+ * an inline body link → `delink`. Links inside fenced code blocks, inline code,
+ * and image embeds (`![]()`) are EXCLUDED (blanked by the shared `stripCode`,
+ * exactly as check-doc-links ignores them) — they are examples, not live
+ * references, and rewriting them would corrupt rather than fix. A reference-style
+ * link outside code is unsupported (a fail-closed issue, since check-doc-links
+ * does not resolve it either but the executor can't safely delink it); a real
+ * markdown link to the target inside the append-only `PRUNED.md` ledger is a
+ * fail-closed `protected_ledger` issue; an unreadable source file/dir is an
+ * issue too.
  */
 export async function collectInboundLinks(
   cwd: string,
@@ -156,35 +162,17 @@ export async function collectInboundLinks(
     }
 
     const isLedger = rel === LEDGER;
-    const lines = content.split(/\r?\n/);
-    let inFence = false;
-    let fenceChar = "";
-    let fenceLen = 0;
+    const origLines = content.split(/\r?\n/);
+    const strippedLines = stripCode(content).split(/\r?\n/); // fences + inline code → spaces (length preserved)
 
-    for (let i = 0; i < lines.length; i++) {
-      const original = lines[i]!;
-      const fence = FENCE.exec(original);
-      if (fence) {
-        const run = fence[1]!;
-        const ch = run[0]!;
-        if (!inFence) {
-          inFence = true;
-          fenceChar = ch;
-          fenceLen = run.length;
-        } else if (ch === fenceChar && run.length >= fenceLen) {
-          // CommonMark: a closing fence is the same char and at least as long.
-          inFence = false;
-        }
-        continue;
-      }
+    for (let i = 0; i < strippedLines.length; i++) {
+      const sLine = strippedLines[i]!;
+      const oLine = origLines[i] ?? "";
 
-      // A reference-style definition pointing at the target is unsupported — but
-      // ONLY when it is a real definition, not an example inside a code block.
-      // In the append-only ledger, ANY real markdown link to the target is
-      // protected (the ledger's tombstone rows are code spans / bare text, which
-      // never match the link regexes, so this fires only on a true link).
-      const ref = REF_DEF.exec(original);
-      if (ref && !inFence && resolveFrom(rel, ref[1]!) === target) {
+      // Reference-style definition (on the code-stripped line, so a fenced
+      // example def never matches).
+      const ref = REF_DEF.exec(sLine);
+      if (ref && resolveFrom(rel, ref[1]!) === target) {
         issues.push({
           source_file: rel,
           line: i + 1,
@@ -193,45 +181,44 @@ export async function collectInboundLinks(
         continue;
       }
 
-      const blanked = blankInlineCode(original);
       INLINE.lastIndex = 0;
       let m: RegExpExecArray | null;
-      while ((m = INLINE.exec(blanked)) !== null) {
+      while ((m = INLINE.exec(sLine)) !== null) {
         const start = m.index;
-        if (start > 0 && blanked[start - 1] === "!") continue; // image embed — never rewritten
+        if (start > 0 && sLine[start - 1] === "!") continue; // image embed — never rewritten
         if (resolveFrom(rel, m[2]!) !== target) continue;
         if (isLedger) {
           // The ledger is append-only — never delink/rewrite an existing row.
           issues.push({ source_file: rel, line: i + 1, reason: "protected_ledger" });
           continue;
         }
-        const isIndexRow = rel === "design/decisions/README.md" && /^\s*\|/.test(original);
+        const isIndexRow = rel === "design/decisions/README.md" && /^\s*\|/.test(oLine);
         items.push({
           source_file: rel,
           line: i + 1,
           column: start + 1,
-          raw_link: original.slice(start, start + m[0].length),
+          // From the ORIGINAL line (same length as the blanked one), so an
+          // inline-code label like "use `foo`" is preserved, not blanked.
+          raw_link: oLine.slice(start, start + m[0].length),
           raw_href: m[2]!,
-          // From the ORIGINAL line (same length as the blanked label), so an
-          // inline-code label like `use ` + "`foo`" is preserved, not blanked.
-          link_text: original.slice(start + 1, start + 1 + m[1]!.length),
+          link_text: oLine.slice(start + 1, start + 1 + m[1]!.length),
           normalized_target: target,
           link_kind: isIndexRow ? "index_row" : "inline",
-          rewrite_action: inFence ? "leave_as_is" : isIndexRow ? "tombstone" : "delink",
+          rewrite_action: isIndexRow ? "tombstone" : "delink",
         });
       }
     }
   }
 
-  const byPos = (a: LinkRewriteItem, b: LinkRewriteItem) =>
+  items.sort((a, b) =>
     a.source_file !== b.source_file
       ? a.source_file < b.source_file
         ? -1
         : 1
       : a.line !== b.line
         ? a.line - b.line
-        : a.column - b.column;
-  items.sort(byPos);
+        : a.column - b.column,
+  );
   issues.sort((a, b) =>
     a.source_file !== b.source_file ? (a.source_file < b.source_file ? -1 : 1) : (a.line ?? 0) - (b.line ?? 0),
   );

@@ -10,9 +10,9 @@ export type { LinkRewriteItem };
 /**
  * The plan `--write` (PR-C2) will execute: remove the decision file, append a
  * `PRUNED.md` row, and apply each collected inbound reference's `rewrite_action`
- * (`tombstone` / `delink` / `leave_as_is` — not every item is rewritten).
- * `link_rewrite.status` is `"ready"` with the collected `items` (the dry-run
- * preview and `--write` share this collector output).
+ * (`tombstone` or `delink`). `link_rewrite.status` is `"ready"` with the
+ * collected `items` (the dry-run preview and `--write` share this collector
+ * output). Links inside code or image embeds never enter the plan.
  */
 export type PrunePlan = {
   remove_file: string;

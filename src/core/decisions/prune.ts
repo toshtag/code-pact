@@ -91,7 +91,8 @@ function decisionLinksTo(content: string, target: string): boolean {
   while ((m = refDef.exec(content)) !== null) urls.push(m[1]!);
   for (const raw of urls) {
     const link = stripAngleBrackets(raw).split("#")[0]!.trim();
-    if (link === "" || /^[a-z]+:\/\//i.test(link)) continue; // skip empty / absolute URLs
+    // Same external/protocol-relative test as check-doc-links / the link collector.
+    if (link === "" || /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(link)) continue;
     const resolved = posix
       .normalize(posix.join("design/decisions", link))
       .replace(/^(?:\.\/)+/, "");

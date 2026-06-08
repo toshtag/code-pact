@@ -258,19 +258,19 @@ describe("decision-prune renderers", () => {
     expect(data).toHaveProperty("warnings");
   });
 
-  it("human output calls items 'considered by the write plan', not 'to rewrite' (leave_as_is)", async () => {
+  it("human output calls items 'considered by the write plan', not 'to rewrite'", async () => {
     await writeDecision("foo-rfc.md");
     await writeDoneTaskPhase("design/decisions/foo-rfc.md");
     await mkdir(join(cwd, "docs"), { recursive: true });
     await writeFile(
-      join(cwd, "docs", "ex.md"),
-      "# E\n\n```md\n[d](../design/decisions/foo-rfc.md)\n```\n",
+      join(cwd, "docs", "x.md"),
+      "# X\n\nSee [d](../design/decisions/foo-rfc.md).\n",
     );
     const res = await runDecisionPrune(cwd, "design/decisions/foo-rfc.md");
     const human = formatDecisionPruneHuman(res);
     expect(human).toContain("considered by the write plan");
     expect(human).not.toContain("to rewrite");
-    expect(human).toContain("leave_as_is");
+    expect(human).toContain("docs/x.md"); // the delink item is listed
   });
 
   it("human output names blocks when ineligible", async () => {

@@ -2254,7 +2254,7 @@ Success envelope (`--json`):
 }
 ```
 
-`plan.link_rewrite.status` is **`"ready"`** — `items[]` is the complete set of inbound references the write plan **considers** (collected once, shared by the dry-run preview and `--write`); each carries a `rewrite_action`, and `leave_as_is` items are intentionally **not** modified. The collector scans **exactly** the source surface `check:doc-links` validates: root-level `.md` **except `CHANGELOG.md`** (a durable authored record, never rewritten), `docs/**`, `design/**`, and `.github/**` (`.md` + `.yml`). It is line- and column-accurate and resolves each link relative to its **own source file's directory**. Image embeds (`![]()`) and links inside inline code are **skipped** (matching `check:doc-links`); an inline link inside a fenced code block is reported as `leave_as_is` so the dry-run stays transparent, but `--write` will not modify it. Each `items[]` entry carries everything `--write` needs to act on the exact span without re-parsing:
+`plan.link_rewrite.status` is **`"ready"`** — `items[]` is the complete set of inbound references the write plan **considers** (collected once, shared by the dry-run preview and `--write`); each carries a `rewrite_action`. The collector scans **exactly** the source surface `check:doc-links` validates, using the **same** code-stripping and external-URL rules, so its set of "real" links matches the checker's: root-level `.md` **except `CHANGELOG.md`** (a durable authored record, never rewritten), `docs/**`, `design/**`, and `.github/**` (`.md` + `.yml`). It is line- and column-accurate and resolves each link relative to its **own source file's directory**. Links inside fenced code blocks, inline code, and image embeds (`![]()`), and external / protocol-relative URLs, are **excluded entirely** (blanked exactly as `check:doc-links` ignores them) — they are not live references, so they never enter the plan. Each `items[]` entry carries everything `--write` needs to act on the exact span without re-parsing:
 
 | Field | Meaning |
 | --- | --- |
@@ -2266,7 +2266,7 @@ Success envelope (`--json`):
 | `link_text` | the visible text — what `delink` keeps |
 | `normalized_target` | the link's normalized repo-relative target (equals the pruned decision path) |
 | `link_kind` | `inline` (`[t](url)`) \| `index_row` (the `README.md` decision-index row) |
-| `rewrite_action` | `tombstone` (index row → "(pruned …)" line) \| `delink` (keep the text, drop the link) \| `leave_as_is` (a code-block example) |
+| `rewrite_action` | `tombstone` (index row → "(pruned …)" line) \| `delink` (keep the text, drop the link) |
 
 A **reference-style** inbound link (`[t][label]` + `[label]: url`) cannot be rewritten span-locally without touching its usages, and an **unreadable** doc source means the plan would be incomplete — both fail closed as `DECISION_PRUNE_NOT_ELIGIBLE` (`link_rewrite_unsupported` / `link_rewrite_scan_unreadable`), not as silently-dropped items.
 
