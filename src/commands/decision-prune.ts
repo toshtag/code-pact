@@ -84,17 +84,23 @@ export async function runDecisionPrune(
   if (targetOk && evaluation.decision !== null) {
     const { items, issues } = await collectInboundLinks(cwd, evaluation.decision);
     for (const iss of issues) {
-      evaluation.blocks.push(
-        iss.reason === "unreadable"
-          ? {
-              gate: "link_rewrite_scan_unreadable",
-              detail: `cannot read ${iss.source_file} to plan its inbound-link rewrites`,
-            }
-          : {
-              gate: "link_rewrite_unsupported",
-              detail: `${iss.source_file}:${iss.line ?? "?"} links to the decision with a reference-style link, which prune cannot yet rewrite — convert it to an inline link first`,
-            },
-      );
+      const at = `${iss.source_file}:${iss.line ?? "?"}`;
+      if (iss.reason === "unreadable") {
+        evaluation.blocks.push({
+          gate: "link_rewrite_scan_unreadable",
+          detail: `cannot read ${iss.source_file} to plan its inbound-link rewrites`,
+        });
+      } else if (iss.reason === "protected_ledger") {
+        evaluation.blocks.push({
+          gate: "link_rewrite_unsupported",
+          detail: `${at} is a markdown link to the decision inside the append-only ledger (PRUNED.md), which prune must not rewrite — remove that link by hand first`,
+        });
+      } else {
+        evaluation.blocks.push({
+          gate: "link_rewrite_unsupported",
+          detail: `${at} links to the decision with a reference-style link, which prune cannot yet rewrite — convert it to an inline link first`,
+        });
+      }
     }
     planItems = items;
   }
@@ -164,9 +170,9 @@ export function formatDecisionPruneHuman(result: DecisionPruneResult): string {
     lines.push(`  would append a row to design/decisions/PRUNED.md`);
     const items = result.plan?.link_rewrite.items ?? [];
     if (items.length === 0) {
-      lines.push(`  inbound links to rewrite: none`);
+      lines.push(`  inbound references in the write plan: none`);
     } else {
-      lines.push(`  inbound links to rewrite (${items.length}):`);
+      lines.push(`  inbound references considered by the write plan (${items.length}):`);
       for (const it of items) {
         lines.push(`    ${it.source_file}:${it.line} — ${it.rewrite_action} (${it.link_kind})`);
       }

@@ -258,6 +258,21 @@ describe("decision-prune renderers", () => {
     expect(data).toHaveProperty("warnings");
   });
 
+  it("human output calls items 'considered by the write plan', not 'to rewrite' (leave_as_is)", async () => {
+    await writeDecision("foo-rfc.md");
+    await writeDoneTaskPhase("design/decisions/foo-rfc.md");
+    await mkdir(join(cwd, "docs"), { recursive: true });
+    await writeFile(
+      join(cwd, "docs", "ex.md"),
+      "# E\n\n```md\n[d](../design/decisions/foo-rfc.md)\n```\n",
+    );
+    const res = await runDecisionPrune(cwd, "design/decisions/foo-rfc.md");
+    const human = formatDecisionPruneHuman(res);
+    expect(human).toContain("considered by the write plan");
+    expect(human).not.toContain("to rewrite");
+    expect(human).toContain("leave_as_is");
+  });
+
   it("human output names blocks when ineligible", async () => {
     await writeDecision("foo-rfc.md", "# RFC\n\n**Status:** proposed\n\nx");
     const res = await runDecisionPrune(cwd, "design/decisions/foo-rfc.md");

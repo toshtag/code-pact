@@ -145,6 +145,25 @@ describe("collectInboundLinks — fail-closed issues", () => {
     ]);
   });
 
+  it("a markdown link to the target INSIDE PRUNED.md is protected (issue, never a delink item)", async () => {
+    await write("design/decisions/PRUNED.md", "# Ledger\n\n| Decision |\n| --- |\n| [foo](foo-rfc.md) |\n");
+    const { items, issues } = await collectInboundLinks(cwd, TARGET);
+    expect(items).toEqual([]); // the append-only ledger is never rewritten
+    expect(issues).toContainEqual({
+      source_file: "design/decisions/PRUNED.md",
+      line: 5,
+      reason: "protected_ledger",
+    });
+  });
+
+  it("a code-span / bare path in PRUNED.md is NOT a link → no issue", async () => {
+    await write(
+      "design/decisions/PRUNED.md",
+      "# Ledger\n\n| Decision | Pruned |\n| --- | --- |\n| `design/decisions/foo-rfc.md` | 2026-06-08 |\n",
+    );
+    expect(await collectInboundLinks(cwd, TARGET)).toEqual({ items: [], issues: [] });
+  });
+
   it("a reference-style definition INSIDE a fenced code block is an example — not an issue", async () => {
     await write("docs/ex.md", "# E\n\n```md\n[f]: ../design/decisions/foo-rfc.md\n```\n");
     expect(await collectInboundLinks(cwd, TARGET)).toEqual({ items: [], issues: [] });

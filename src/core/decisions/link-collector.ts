@@ -34,8 +34,11 @@ export type LinkRewriteItem = {
 export type LinkScanIssue = {
   source_file: string;
   line: number | null;
-  reason: "unreadable" | "unsupported_reference_style";
+  reason: "unreadable" | "unsupported_reference_style" | "protected_ledger";
 };
+
+/** The append-only prune ledger — `--write` may only APPEND to it, never rewrite its rows. */
+const LEDGER = "design/decisions/PRUNED.md";
 
 export type InboundLinkScan = { items: LinkRewriteItem[]; issues: LinkScanIssue[] };
 
@@ -151,6 +154,7 @@ export async function collectInboundLinks(
       continue;
     }
 
+    const isLedger = rel === LEDGER;
     const lines = content.split(/\r?\n/);
     let inFence = false;
     let fenceChar = "";
@@ -175,9 +179,16 @@ export async function collectInboundLinks(
 
       // A reference-style definition pointing at the target is unsupported — but
       // ONLY when it is a real definition, not an example inside a code block.
+      // In the append-only ledger, ANY real markdown link to the target is
+      // protected (the ledger's tombstone rows are code spans / bare text, which
+      // never match the link regexes, so this fires only on a true link).
       const ref = REF_DEF.exec(original);
       if (ref && !inFence && resolveFrom(rel, ref[1]!) === target) {
-        issues.push({ source_file: rel, line: i + 1, reason: "unsupported_reference_style" });
+        issues.push({
+          source_file: rel,
+          line: i + 1,
+          reason: isLedger ? "protected_ledger" : "unsupported_reference_style",
+        });
         continue;
       }
 
@@ -188,6 +199,11 @@ export async function collectInboundLinks(
         const start = m.index;
         if (start > 0 && blanked[start - 1] === "!") continue; // image embed — never rewritten
         if (resolveFrom(rel, m[2]!) !== target) continue;
+        if (isLedger) {
+          // The ledger is append-only — never delink/rewrite an existing row.
+          issues.push({ source_file: rel, line: i + 1, reason: "protected_ledger" });
+          continue;
+        }
         const isIndexRow = rel === "design/decisions/README.md" && /^\s*\|/.test(original);
         items.push({
           source_file: rel,

@@ -159,7 +159,7 @@ code-pact phase runbook <phase-id> --json
 If `data.tasks[]` shows every flip candidate has the same refusal reason, the issue is the phase file itself, not individual tasks — fix it once and reconcile will proceed for all of them.
 
 ## `DECISION_PRUNE_NOT_ELIGIBLE` from `decision prune`
-The target decision record cannot be retired. `decision prune` is dry-run today, so this is always advisory — nothing is deleted. `data.blocks[]` lists **every** failing gate so you can resolve them together:
+The target decision record cannot be retired. `decision prune` is dry-run today, so this is always advisory — nothing is deleted. `data.blocks[]` lists **every applicable** failing gate so you can resolve them together (the link-rewrite gates below are only evaluated once the target itself is a readable, accepted, top-level record — a `target_*` failure short-circuits them):
 
 ```sh
 code-pact decision prune design/decisions/<name>.md --json
@@ -170,8 +170,10 @@ code-pact decision prune design/decisions/<name>.md --json
 #     → design/roadmap.yaml or a referenced design/phases/*.yaml could not be read,
 #       so prune cannot prove every referencing task is done; fix the plan graph first
 #   link_rewrite_unsupported
-#     → a doc links to the decision with a reference-style link ([t][label] + [label]: …);
-#       convert it to an inline link [t](…) so --write can rewrite it
+#     → a doc links to the decision with a reference-style link ([t][label] + [label]: …)
+#       — convert it to an inline link [t](…); OR a markdown link to the decision sits
+#       inside the append-only PRUNED.md ledger — remove that link by hand (the ledger
+#       is never rewritten)
 #   link_rewrite_scan_unreadable
 #     → a doc source under the scanned surface could not be read, so the rewrite
 #       plan would be incomplete; fix/remove the unreadable file
