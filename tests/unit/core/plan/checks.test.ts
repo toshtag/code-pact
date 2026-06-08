@@ -635,6 +635,39 @@ describe("detectTaskDecisionRefNotFound (fs-backed)", () => {
     const issues = await detectTaskDecisionRefNotFound(cwd, entries);
     expect(issues).toEqual([]);
   });
+
+  it("soft (warning, affects_exit:false) when a DONE task's decision_refs is gone", async () => {
+    const entries = [
+      entry(
+        phase("P1", [
+          task("P1-T1", {
+            decision_refs: ["design/decisions/retired.md"],
+            status: "done",
+          }),
+        ]),
+      ),
+    ];
+    const issues = await detectTaskDecisionRefNotFound(cwd, entries);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.code).toBe("TASK_DECISION_REF_NOT_FOUND");
+    expect(issues[0]?.severity).toBe("warning");
+    expect(issues[0]?.affects_exit).toBe(false);
+    expect(issues[0]?.details?.historical).toBe(true);
+  });
+
+  it("soft when the PHASE is done even if the task status is not", async () => {
+    const entries = [
+      entry(
+        phase(
+          "P1",
+          [task("P1-T1", { decision_refs: ["design/decisions/retired.md"] })],
+          { status: "done" },
+        ),
+      ),
+    ];
+    const issues = await detectTaskDecisionRefNotFound(cwd, entries);
+    expect(issues[0]?.severity).toBe("warning");
+  });
 });
 
 describe("detectTaskReadsNoMatch (fs-backed)", () => {
@@ -678,6 +711,24 @@ describe("detectTaskAcceptanceRefNotFound (fs-backed)", () => {
     expect(issues).toHaveLength(1);
     expect(issues[0]?.code).toBe("TASK_ACCEPTANCE_REF_NOT_FOUND");
     expect(issues[0]?.severity).toBe("error");
+  });
+
+  it("soft (warning, affects_exit:false) when a DONE task's acceptance_refs is gone", async () => {
+    const entries = [
+      entry(
+        phase("P1", [
+          task("P1-T1", {
+            acceptance_refs: ["docs/retired.md"],
+            status: "done",
+          }),
+        ]),
+      ),
+    ];
+    const issues = await detectTaskAcceptanceRefNotFound(cwd, entries);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.severity).toBe("warning");
+    expect(issues[0]?.affects_exit).toBe(false);
+    expect(issues[0]?.details?.historical).toBe(true);
   });
 });
 
