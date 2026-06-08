@@ -101,10 +101,44 @@ describe("runDecisionPrune", () => {
     expect(res.plan).toEqual({
       remove_file: "design/decisions/foo-rfc.md",
       append_ledger: true,
-      link_rewrite: { status: "pending", items: [] },
+      link_rewrite: { status: "ready", items: [] }, // no inbound .md links in this fixture
     });
     expect(res.warnings).toEqual([]);
     expect(res.evaluation.referencing_tasks).toHaveLength(1);
+  });
+
+  it("collects inbound .md links into the plan (index row → tombstone, body → delink)", async () => {
+    await writeDecision("foo-rfc.md");
+    await writeDoneTaskPhase("design/decisions/foo-rfc.md");
+    // an index row in the decisions README + a body link from a concept doc
+    await writeFile(
+      join(cwd, "design", "decisions", "README.md"),
+      `# Index\n\n| Decision | What |\n| --- | --- |\n| [Foo](foo-rfc.md) | did foo |\n`,
+    );
+    await mkdir(join(cwd, "docs", "concepts"), { recursive: true });
+    await writeFile(
+      join(cwd, "docs", "concepts", "foo.md"),
+      `# Foo\n\nSee [the decision](../../design/decisions/foo-rfc.md).\n`,
+    );
+    const res = await runDecisionPrune(cwd, "design/decisions/foo-rfc.md");
+    expect(res.eligible).toBe(true);
+    const items = res.plan?.link_rewrite.items ?? [];
+    expect(res.plan?.link_rewrite.status).toBe("ready");
+    expect(items).toContainEqual(
+      expect.objectContaining({
+        source_file: "design/decisions/README.md",
+        link_kind: "index_row",
+        rewrite_action: "tombstone",
+      }),
+    );
+    expect(items).toContainEqual(
+      expect.objectContaining({
+        source_file: "docs/concepts/foo.md",
+        link_kind: "inline",
+        rewrite_action: "delink",
+        normalized_target: "design/decisions/foo-rfc.md",
+      }),
+    );
   });
 
   it("warns when eligible but no task references it (cannot prove it shipped)", async () => {

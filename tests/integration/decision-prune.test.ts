@@ -2,8 +2,8 @@
 // PR-C1b: public command, JSON envelopes, exit codes. No --write yet.
 
 import { describe, it, expect, beforeAll, afterEach } from "vitest";
-import { mkdir, writeFile, readFile, readdir, access } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, writeFile, readFile, readdir } from "node:fs/promises";
+import { join, relative } from "node:path";
 import {
   createTempProject,
   ensureCliBuilt,
@@ -64,6 +64,20 @@ async function project(decisionContent: string, taskStatus = "done") {
   return p;
 }
 
+/** Recursively snapshot every file under `root` as { relPath → content }. */
+async function snapshotTree(root: string): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  async function walk(dir: string): Promise<void> {
+    for (const e of await readdir(dir, { withFileTypes: true })) {
+      const abs = join(dir, e.name);
+      if (e.isDirectory()) await walk(abs);
+      else if (e.isFile()) out[relative(root, abs)] = await readFile(abs, "utf8");
+    }
+  }
+  await walk(root);
+  return out;
+}
+
 describe("decision prune — CLI (dry-run)", () => {
   it("eligible accepted target → exit 0, full success envelope shape (JSON)", async () => {
     const p = await project(ACCEPTED, "done");
@@ -89,7 +103,7 @@ describe("decision prune — CLI (dry-run)", () => {
     expect(env.data.plan).toEqual({
       remove_file: "design/decisions/foo-rfc.md",
       append_ledger: true,
-      link_rewrite: { status: "pending", items: [] },
+      link_rewrite: { status: "ready", items: [] },
     });
     expect(Array.isArray(env.data.warnings)).toBe(true);
     expect(env.data.referencing_tasks[0]).toMatchObject({
@@ -198,16 +212,16 @@ describe("decision prune — CLI (dry-run)", () => {
     expect(res.stderr).toContain("NOT ELIGIBLE");
   });
 
-  it("is ZERO-WRITE in every mode (eligible / human / --write) — the dry-run guarantee", async () => {
+  it("is ZERO-WRITE in every mode (eligible / human / --write) — whole-project snapshot", async () => {
     const p = await project(ACCEPTED, "done");
-    const decPath = join(p.dir, "design", "decisions", "foo-rfc.md");
-    const prunedPath = join(p.dir, "design", "decisions", "PRUNED.md");
-
-    const snapshot = async () => ({
-      entries: (await readdir(join(p.dir, "design", "decisions"))).sort(),
-      content: await readFile(decPath, "utf8"),
-    });
-    const before = await snapshot();
+    // Add an inbound link so the plan is non-trivial (items populated) — the
+    // dry-run must STILL not touch it.
+    await mkdir(join(p.dir, "docs"), { recursive: true });
+    await writeFile(
+      join(p.dir, "docs", "x.md"),
+      "# X\n\nSee [d](../design/decisions/foo-rfc.md).\n",
+    );
+    const before = await snapshotTree(p.dir);
 
     for (const args of [
       ["decision", "prune", "design/decisions/foo-rfc.md", "--json"], // eligible
@@ -217,23 +231,15 @@ describe("decision prune — CLI (dry-run)", () => {
       p.run(args);
     }
 
-    expect(await snapshot()).toEqual(before); // target unchanged; no new files
-    await expect(access(prunedPath)).rejects.toThrow(); // PRUNED.md never created
+    expect(await snapshotTree(p.dir)).toEqual(before); // entire tree byte-identical
   });
 
-  it("ineligible runs are also ZERO-WRITE", async () => {
+  it("ineligible runs are also ZERO-WRITE (whole-project snapshot)", async () => {
     const p = await project("# RFC\n\n**Status:** proposed\n\nx", "done");
-    const decPath = join(p.dir, "design", "decisions", "foo-rfc.md");
-    const prunedPath = join(p.dir, "design", "decisions", "PRUNED.md");
-    const snapshot = async () => ({
-      entries: (await readdir(join(p.dir, "design", "decisions"))).sort(),
-      content: await readFile(decPath, "utf8"),
-    });
-    const before = await snapshot();
+    const before = await snapshotTree(p.dir);
     p.run(["decision", "prune", "design/decisions/foo-rfc.md", "--json"]);
     p.run(["decision", "prune", "design/decisions/foo-rfc.md"]);
-    expect(await snapshot()).toEqual(before);
-    await expect(access(prunedPath)).rejects.toThrow();
+    expect(await snapshotTree(p.dir)).toEqual(before);
   });
 
   it("cluster-level errors honor --json (unknown subcommand)", async () => {

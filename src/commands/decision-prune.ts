@@ -1,26 +1,17 @@
 import { collectPlanArtifacts } from "../core/plan/state.ts";
 import { evaluatePrune, type PruneEvaluation } from "../core/decisions/prune.ts";
+import {
+  collectInboundLinks,
+  type LinkRewriteItem,
+} from "../core/decisions/link-collector.ts";
 
-/**
- * One inbound `.md` reference to the pruned decision that `--write` will rewrite.
- * Populated by the shared collector in PR-C1c (the dry-run preview and `--write`
- * consume the same items); empty with `status: "pending"` until then. The shape
- * is pinned NOW so C1c is purely additive — it flips `status` to `"ready"` and
- * fills `items`, never changing the contract.
- */
-export type LinkRewriteItem = {
-  source_file: string;
-  line: number;
-  raw_href: string;
-  normalized_target: string;
-  link_kind: "inline" | "reference_definition" | "index_row";
-  rewrite_action: "tombstone" | "delink" | "leave_as_is";
-};
+export type { LinkRewriteItem };
 
 /**
  * The plan `--write` (PR-C2) will execute: remove the decision file, append a
  * `PRUNED.md` row, and rewrite each inbound link. `link_rewrite.status` is
- * `"pending"` (items `[]`) until PR-C1c's collector lands, then `"ready"`.
+ * `"ready"` with the collected `items` (the dry-run preview and `--write` share
+ * this collector output).
  */
 export type PrunePlan = {
   remove_file: string;
@@ -86,14 +77,15 @@ export async function runDecisionPrune(
     );
   }
 
-  const plan: PrunePlan | null =
-    evaluation.eligible && evaluation.decision !== null
-      ? {
-          remove_file: evaluation.decision,
-          append_ledger: true,
-          link_rewrite: { status: "pending", items: [] },
-        }
-      : null;
+  let plan: PrunePlan | null = null;
+  if (evaluation.eligible && evaluation.decision !== null) {
+    const items = await collectInboundLinks(cwd, evaluation.decision);
+    plan = {
+      remove_file: evaluation.decision,
+      append_ledger: true,
+      link_rewrite: { status: "ready", items },
+    };
+  }
 
   return {
     mode: "dry-run",
@@ -137,7 +129,15 @@ export function formatDecisionPruneHuman(result: DecisionPruneResult): string {
     lines.push(`decision prune (dry-run): ${target} — ELIGIBLE`);
     lines.push(`  would remove: ${target}`);
     lines.push(`  would append a row to design/decisions/PRUNED.md`);
-    lines.push(`  (partial plan — the inbound-link rewrite list is added in a later release)`);
+    const items = result.plan?.link_rewrite.items ?? [];
+    if (items.length === 0) {
+      lines.push(`  inbound links to rewrite: none`);
+    } else {
+      lines.push(`  inbound links to rewrite (${items.length}):`);
+      for (const it of items) {
+        lines.push(`    ${it.source_file}:${it.line} — ${it.rewrite_action} (${it.link_kind})`);
+      }
+    }
     const refs = result.evaluation.referencing_tasks;
     lines.push(
       refs.length === 0

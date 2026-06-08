@@ -2247,14 +2247,14 @@ Success envelope (`--json`):
     "plan": {
       "remove_file": "design/decisions/foo-rfc.md",
       "append_ledger": true,
-      "link_rewrite": { "status": "pending", "items": [] }
+      "link_rewrite": { "status": "ready", "items": [] }
     },
     "warnings": []
   }
 }
 ```
 
-`plan.link_rewrite.status` is **`"pending"`** with `items: []` in this release; the shared inbound-`.md`-link collector that fills `items` and flips `status` to `"ready"` lands in a follow-up — an **additive** change, not a shape change. Each `items[]` entry is pinned now as:
+`plan.link_rewrite.status` is **`"ready"`** — `items[]` is the complete set of inbound `.md` references that `--write` (PR-C2) will rewrite, collected once and shared by the dry-run preview and `--write`. The collector scans the doc surface `check:doc-links` validates (root + `docs/` + `design/` + `.github/` `.md`), is line-accurate, and resolves each link relative to its **own source file's directory**; a link inside a fenced code block is recorded as `leave_as_is` (an example, not a live reference). Each `items[]` entry:
 
 | Field | Meaning |
 | --- | --- |
