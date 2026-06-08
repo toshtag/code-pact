@@ -19,21 +19,7 @@ It does this with a deliberately small surface: **one public error code (`LOCK_H
 
 ### 1. Advisory write lock (`LOCK_HELD`)
 
-The governance lifecycle mutations — phase creation and import, `task add`, the `--write` forms of `task finalize` / `phase reconcile`, and the `plan adopt` / `plan sync-paths` write paths — acquire `.code-pact/locks/write.lock` at the CLI command-handler level, hold it through any nested writes (notably `phase import`'s multi-phase apply loop), and release on every exit path. A concurrent invocation against the same project fails fast with `LOCK_HELD` (exit 2) and a diagnostic JSON envelope.
-
-```json
-{
-  "ok": false,
-  "error": {
-    "code": "LOCK_HELD",
-    "message": "Another code-pact mutation is in progress: phase reconcile P3 --write (pid: 12345, host: laptop.local, started: 2026-05-21T10:15:00.000Z). If you are certain no command is running, remove /path/to/.code-pact/locks/write.lock and retry."
-  },
-  "data": {
-    "lock_holder": { "pid": 12345, "hostname": "laptop.local", "cmd": "phase reconcile P3 --write", "created_at": "2026-05-21T10:15:00.000Z" },
-    "lock_path": "/path/to/.code-pact/locks/write.lock"
-  }
-}
-```
+The governance lifecycle mutations — phase creation and import, `task add`, the `--write` forms of `task finalize` / `phase reconcile`, and the `plan adopt` / `plan sync-paths` write paths — acquire `.code-pact/locks/write.lock` at the CLI command-handler level, hold it through any nested writes (notably `phase import`'s multi-phase apply loop), and release on every exit path. A concurrent invocation against the same project fails fast with `LOCK_HELD` (exit 2); the diagnostic carries `data.lock_holder` and `data.lock_path` so the operator can inspect the holder.
 
 The lock is scoped to those governance lifecycle mutations — it is **not** a blanket lock over everything that can write under `design/` (normalization and bootstrap-style writers such as `init` have their own contracts). Read-only commands and dry-run `task finalize` / `phase reconcile` take no lock, and the progress ledger is lock-free by construction (a separate no-overwrite file per event under `state/events/`, so concurrent writers cannot lose an event). The authoritative, per-command acquisition matrix lives in `docs/cli-contract.md` (linked below) — this doc states the policy, not a second copy of the table.
 
@@ -115,7 +101,7 @@ The governance RFC enumerates the non-goals. The headline items:
 
 ## Error / diagnostic taxonomy
 
-The governance layer adds one public code, `LOCK_HELD` — exit 2, transient and retryable, carrying `data.lock_holder` / `data.lock_path`. In governance contexts it also surfaces existing codes: `CONFIG_ERROR` (reserved-id `TUTORIAL`), `TASK_NOT_FOUND` / `AMBIGUOUS_TASK_ID` (the shared task resolver), and the warning-level `TASK_WRITES_PROTECTED_PATH`. Exit codes, triggers, and envelopes are in [`docs/cli-contract.md` § Error codes](../cli-contract.md#error-codes). `LOCK_HELD` is part of `KNOWN_CODES.public` in `tests/unit/error-code-surface.test.ts`.
+The governance layer adds one public code, `LOCK_HELD` — exit 2, transient and retryable, carrying `data.lock_holder` / `data.lock_path`. In governance contexts it also surfaces existing codes: `CONFIG_ERROR` (reserved-id `TUTORIAL`), `TASK_NOT_FOUND` / `AMBIGUOUS_TASK_ID` (the shared task resolver), and the warning-level `TASK_WRITES_PROTECTED_PATH`. Exit codes, triggers, and envelopes are in [`docs/cli-contract.md` § Error codes](../cli-contract.md#error-codes).
 
 ## See also
 

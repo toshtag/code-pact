@@ -146,14 +146,14 @@ The same declaration is available per-task via `task runbook <task-id> --json` (
 
 ## Error codes
 
-These commands' public codes (`TASK_FINALIZE_NOT_ELIGIBLE`, `TASK_FINALIZE_WRITE_REFUSED`, `WRITES_AUDIT_STRICT_FAILED`, `PHASE_RECONCILE_WRITE_REFUSED`) are additive in `KNOWN_CODES.public`; exit codes, triggers, and envelopes are in [`docs/cli-contract.md` § Error codes](../cli-contract.md#error-codes). `no_eligible_tasks` is intentionally **not** an error code — it is `data.kind: "no_eligible_tasks"` with exit 0; nothing to flip is a normal outcome.
+These commands' public codes (`TASK_FINALIZE_NOT_ELIGIBLE`, `TASK_FINALIZE_WRITE_REFUSED`, `WRITES_AUDIT_STRICT_FAILED`, `PHASE_RECONCILE_WRITE_REFUSED`) — exit codes, triggers, and envelopes — live in [`docs/cli-contract.md` § Error codes](../cli-contract.md#error-codes). `no_eligible_tasks` is intentionally **not** an error code — it is `data.kind: "no_eligible_tasks"` with exit 0; nothing to flip is a normal outcome.
 
 ## What stays the same
 
 - `task complete` is unchanged: it records progress only and never mutates design YAML.
 - The progress ledger is read-only for `task finalize` / `phase reconcile`. The append-only operational-log contract is preserved.
 - The `details.remediation` field on `STATUS_DRIFT` is purely additive; no STATUS_DRIFT kind changes severity or default visibility.
-- The `KNOWN_CODES.public` surface lock is extended additively — no existing entry is renamed or recategorized.
+- The public error-code surface is extended additively — no existing code is renamed or recategorized.
 
 ## See also
 
