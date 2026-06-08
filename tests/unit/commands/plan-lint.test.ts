@@ -122,6 +122,75 @@ describe("runPlanLint — conflict recovery (control-plane v2 PR1b re-scope)", (
   });
 });
 
+// A phase with a single task referencing a decision file that does NOT exist
+// on disk. `taskStatus` controls whether the missing ref is a live-gate error
+// or a historical-annotation advisory (decision-lifecycle PR-A).
+async function writeMissingDecisionRefProject(taskStatus: string): Promise<void> {
+  await writeFile(
+    join(cwd, "design", "roadmap.yaml"),
+    `phases:\n  - id: P1\n    path: design/phases/P1.yaml\n    weight: 10\n`,
+    "utf8",
+  );
+  await writeFile(
+    join(cwd, "design", "phases", "P1.yaml"),
+    `id: P1
+name: P1
+weight: 10
+confidence: high
+risk: low
+status: planned
+objective: An objective long enough
+definition_of_done:
+  - DoD that is clearly long enough to read
+verification:
+  commands:
+    - pnpm test
+tasks:
+  - id: P1-T1
+    type: feature
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: medium
+    expected_duration: short
+    status: ${taskStatus}
+    description: Implements the thing
+    decision_refs:
+      - design/decisions/retired.md
+`,
+    "utf8",
+  );
+}
+
+describe("runPlanLint — status-aware decision ref (decision-lifecycle PR-A)", () => {
+  it("a DONE task's missing decision_ref is advisory: ok stays true even under --strict", async () => {
+    await writeMissingDecisionRefProject("done");
+    const result = await runPlanLint({ cwd, strict: true });
+    // Lands in advisories (affects_exit:false), NOT warnings — so strict passes.
+    expect(result.errors).toBe(0);
+    expect(result.warnings).toBe(0);
+    expect(result.advisories).toBeGreaterThanOrEqual(1);
+    expect(result.ok).toBe(true);
+    const data = serializePlanLintData(result);
+    const issues = data.issues as Array<Record<string, unknown>>;
+    const issue = issues.find((i) => i.code === "TASK_DECISION_REF_NOT_FOUND");
+    expect(issue?.severity).toBe("warning");
+    expect(issue?.affects_exit).toBe(false);
+  });
+
+  it("a LIVE (planned) task's missing decision_ref is a hard error: ok is false by default", async () => {
+    await writeMissingDecisionRefProject("planned");
+    const result = await runPlanLint({ cwd });
+    expect(result.errors).toBeGreaterThanOrEqual(1);
+    expect(result.ok).toBe(false);
+    const data = serializePlanLintData(result);
+    const issues = data.issues as Array<Record<string, unknown>>;
+    const issue = issues.find((i) => i.code === "TASK_DECISION_REF_NOT_FOUND");
+    expect(issue?.severity).toBe("error");
+  });
+});
+
 describe("runPlanLint — advisory contract", () => {
   it("counts advisories separately and stays ok even under --strict", async () => {
     await writeLowConfidenceProject();

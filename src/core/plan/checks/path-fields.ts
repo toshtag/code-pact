@@ -30,6 +30,26 @@ function safePathReason(path: string): string {
   }
 }
 
+/**
+ * A decision whose gate is no longer live: the referencing *task* is `done`.
+ * The gate passed at `task complete`, so the `decision_refs` / `acceptance_refs`
+ * target is now a *historical annotation*, not a live requirement — a missing
+ * target downgrades from `error` to an advisory `warning` rather than failing
+ * the plan. Mirrors the soft `reads` no-match story; lets a shipped decision
+ * record be retired without breaking integrity.
+ *
+ * Keyed on the TASK's own status ONLY — never the phase's. A `done` phase that
+ * still holds a `planned` / `in_progress` task is an inconsistent state
+ * (`PHASE_DONE_WITH_OPEN_TASKS`), and that open task's gate is still live; the
+ * phase status must not loosen it. `cancelled` is intentionally NOT treated as
+ * terminal here — whether an abandoned task's ref is historical is a separate
+ * decision the RFC has not yet made.
+ * See design/decisions/decision-lifecycle-rfc.md.
+ */
+function refIsHistorical(task: { status?: string }): boolean {
+  return task.status === "done";
+}
+
 /** `decision_refs` path is not a safe repo-root-relative POSIX path. */
 export function detectTaskDecisionRefUnsafePath(phases: PhaseEntry[]): PlanIssue[] {
   const issues: PlanIssue[] = [];
@@ -72,15 +92,19 @@ export async function detectTaskDecisionRefNotFound(
         // the wrong reason.
         if (safePathReason(p) !== "") continue;
         if (!(await fileExists(join(cwd, p)))) {
+          const historical = refIsHistorical(task);
           issues.push({
             code: "TASK_DECISION_REF_NOT_FOUND",
-            severity: "error",
-            message: `Task "${task.id}" decision_refs path "${p}" does not exist on disk`,
+            severity: historical ? "warning" : "error",
+            ...(historical ? { affects_exit: false } : {}),
+            message: historical
+              ? `Task "${task.id}" is done; its decision_refs path "${p}" is no longer on disk — advisory only. The task has already completed, so the ref is now a historical annotation, not a live file requirement. Restore the file if this was accidental, or drop the ref if the decision was intentionally retired and you no longer need it.`
+              : `Task "${task.id}" decision_refs path "${p}" does not exist on disk`,
             file: ref.path,
             phase_id: phase.id,
             task_id: task.id,
             path: `decision_refs[${index}]`,
-            details: { value: p },
+            details: { value: p, ...(historical ? { historical: true } : {}) },
           });
         }
       }
@@ -360,15 +384,19 @@ export async function detectTaskAcceptanceRefNotFound(
         const p = refs[index]!;
         if (safePathReason(p) !== "") continue;
         if (!(await fileExists(join(cwd, p)))) {
+          const historical = refIsHistorical(task);
           issues.push({
             code: "TASK_ACCEPTANCE_REF_NOT_FOUND",
-            severity: "error",
-            message: `Task "${task.id}" acceptance_refs path "${p}" does not exist on disk`,
+            severity: historical ? "warning" : "error",
+            ...(historical ? { affects_exit: false } : {}),
+            message: historical
+              ? `Task "${task.id}" is done; its acceptance_refs path "${p}" is no longer on disk — advisory only. The task has already completed, so the ref is now a historical annotation, not a live file requirement. Restore the file if this was accidental, or drop the ref if it was intentionally removed.`
+              : `Task "${task.id}" acceptance_refs path "${p}" does not exist on disk`,
             file: ref.path,
             phase_id: phase.id,
             task_id: task.id,
             path: `acceptance_refs[${index}]`,
-            details: { value: p },
+            details: { value: p, ...(historical ? { historical: true } : {}) },
           });
         }
       }

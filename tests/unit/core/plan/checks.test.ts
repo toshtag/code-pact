@@ -635,6 +635,71 @@ describe("detectTaskDecisionRefNotFound (fs-backed)", () => {
     const issues = await detectTaskDecisionRefNotFound(cwd, entries);
     expect(issues).toEqual([]);
   });
+
+  it("soft (warning, affects_exit:false) when a DONE task's decision_refs is gone", async () => {
+    const entries = [
+      entry(
+        phase("P1", [
+          task("P1-T1", {
+            decision_refs: ["design/decisions/retired.md"],
+            status: "done",
+          }),
+        ]),
+      ),
+    ];
+    const issues = await detectTaskDecisionRefNotFound(cwd, entries);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.code).toBe("TASK_DECISION_REF_NOT_FOUND");
+    expect(issues[0]?.severity).toBe("warning");
+    expect(issues[0]?.affects_exit).toBe(false);
+    expect(issues[0]?.details?.historical).toBe(true);
+  });
+
+  it("still ERROR when the PHASE is done but the task itself is live (phase status must not loosen a live task's gate)", async () => {
+    const entries = [
+      entry(
+        phase(
+          "P1",
+          [task("P1-T1", { decision_refs: ["design/decisions/retired.md"] })],
+          { status: "done" },
+        ),
+      ),
+    ];
+    const issues = await detectTaskDecisionRefNotFound(cwd, entries);
+    expect(issues[0]?.severity).toBe("error");
+    expect(issues[0]?.affects_exit).toBeUndefined();
+  });
+
+  it("still ERROR for a CANCELLED task (cancelled is deliberately NOT terminal in PR-A — pending an explicit RFC decision)", async () => {
+    const entries = [
+      entry(
+        phase("P1", [
+          task("P1-T1", {
+            decision_refs: ["design/decisions/retired.md"],
+            status: "cancelled",
+          }),
+        ]),
+      ),
+    ];
+    const issues = await detectTaskDecisionRefNotFound(cwd, entries);
+    expect(issues[0]?.severity).toBe("error");
+  });
+
+  it("still ERROR for a live (in_progress) task with a missing ref", async () => {
+    const entries = [
+      entry(
+        phase("P1", [
+          task("P1-T1", {
+            decision_refs: ["design/decisions/retired.md"],
+            status: "in_progress",
+          }),
+        ]),
+      ),
+    ];
+    const issues = await detectTaskDecisionRefNotFound(cwd, entries);
+    expect(issues[0]?.severity).toBe("error");
+    expect(issues[0]?.affects_exit).toBeUndefined();
+  });
 });
 
 describe("detectTaskReadsNoMatch (fs-backed)", () => {
@@ -678,6 +743,24 @@ describe("detectTaskAcceptanceRefNotFound (fs-backed)", () => {
     expect(issues).toHaveLength(1);
     expect(issues[0]?.code).toBe("TASK_ACCEPTANCE_REF_NOT_FOUND");
     expect(issues[0]?.severity).toBe("error");
+  });
+
+  it("soft (warning, affects_exit:false) when a DONE task's acceptance_refs is gone", async () => {
+    const entries = [
+      entry(
+        phase("P1", [
+          task("P1-T1", {
+            acceptance_refs: ["docs/retired.md"],
+            status: "done",
+          }),
+        ]),
+      ),
+    ];
+    const issues = await detectTaskAcceptanceRefNotFound(cwd, entries);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.severity).toBe("warning");
+    expect(issues[0]?.affects_exit).toBe(false);
+    expect(issues[0]?.details?.historical).toBe(true);
   });
 });
 
