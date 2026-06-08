@@ -7,17 +7,23 @@ import {
   renderBlock,
   extractBlock,
   spliceBlock,
-  renderSpecImportDetailsTable,
+  renderDetailTable,
+  renderDetailList,
+  escapeTableCell,
   BLOCKS,
 } from "../../../scripts/gen-doc-blocks.ts";
 import { SPEC_IMPORT_DETAILS } from "../../../src/contracts/spec-import-details.ts";
+import {
+  PLAN_INPUT_FILE_DETAILS,
+  PLAN_INPUT_STDIN_DETAILS,
+} from "../../../src/contracts/plan-input-details.ts";
 
 const ID = "demo-block";
 const SRC = "DEMO in src/x.ts";
 
-describe("renderSpecImportDetailsTable", () => {
+describe("renderDetailTable", () => {
   it("renders a markdown table from a catalog", () => {
-    const table = renderSpecImportDetailsTable({
+    const table = renderDetailTable({
       alpha: { when: "first" },
       beta: { when: "second `x`" },
     });
@@ -29,9 +35,69 @@ describe("renderSpecImportDetailsTable", () => {
   });
 
   it("preserves catalog insertion order", () => {
-    const table = renderSpecImportDetailsTable(SPEC_IMPORT_DETAILS);
+    const table = renderDetailTable(SPEC_IMPORT_DETAILS);
     const rows = table.split("\n").slice(2).map((r) => r.split("`")[1]);
     expect(rows).toEqual(Object.keys(SPEC_IMPORT_DETAILS));
+  });
+});
+
+describe("escapeTableCell", () => {
+  it("escapes `|` so a cell value can't break the table row", () => {
+    expect(escapeTableCell("a|b")).toBe("a\\|b");
+    expect(escapeTableCell("plain")).toBe("plain");
+  });
+});
+
+describe("renderDetailTable escaping", () => {
+  it("escapes `|` in both the detail key and the When text", () => {
+    const table = renderDetailTable({ "a|b": { when: "x | y" } });
+    expect(table).toContain("| `a\\|b` | x \\| y |");
+  });
+});
+
+describe("renderDetailList", () => {
+  it("renders an inline `a | b | c` span from catalog keys, in order", () => {
+    expect(renderDetailList({ alpha: {}, beta: {}, gamma: {} })).toBe("`alpha | beta | gamma`");
+  });
+
+  it("reproduces the committed plan input enum lists", () => {
+    expect(renderDetailList(PLAN_INPUT_FILE_DETAILS)).toBe(
+      "`unsafe_path | unreadable | invalid_yaml | schema_invalid`",
+    );
+    expect(renderDetailList(PLAN_INPUT_STDIN_DETAILS)).toBe(
+      "`stdin_read_failed | invalid_yaml | schema_invalid`",
+    );
+  });
+});
+
+describe("renderBlock inline", () => {
+  it("keeps markers and body on one line (no surrounding newlines)", () => {
+    const block = renderBlock(ID, SRC, "BODY", true);
+    expect(block).toBe(`${startMarker(ID, SRC)}BODY${endMarker(ID)}`);
+    expect(block).not.toContain("\n");
+  });
+
+  it("round-trips an inline block spliced mid-sentence", () => {
+    const doc = `Detail enum: ${renderBlock(ID, SRC, "OLD", true)}.`;
+    const out = spliceBlock(doc, ID, SRC, "`a | b`", true);
+    expect(out).toBe(`Detail enum: ${renderBlock(ID, SRC, "`a | b`", true)}.`);
+    expect(out).toContain("Detail enum: <!--");
+    expect(out.endsWith("-->.")).toBe(true);
+  });
+
+  it("two adjacent inline blocks (the brief/constitution pattern) don't cross-match", () => {
+    // file-detail on one line, stdin-detail two lines below — mirrors cli-contract.
+    const fileB = renderBlock("plan-x-from-file-detail", SRC, "`a | b`", true);
+    const stdinB = renderBlock("plan-x-from-stdin-detail", SRC, "`c | d`", true);
+    const doc = `From file: ${fileB}.\n\nFrom stdin: ${stdinB}.`;
+    expect(extractBlock(doc, "plan-x-from-file-detail")).toBe(fileB);
+    expect(extractBlock(doc, "plan-x-from-stdin-detail")).toBe(stdinB);
+    // Regenerating one leaves the other byte-for-byte intact.
+    const out = spliceBlock(doc, "plan-x-from-file-detail", SRC, "`NEW`", true);
+    expect(out).toContain(stdinB);
+    expect(extractBlock(out, "plan-x-from-file-detail")).toBe(
+      renderBlock("plan-x-from-file-detail", SRC, "`NEW`", true),
+    );
   });
 });
 
