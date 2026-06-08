@@ -586,6 +586,7 @@ First match wins. Each candidate field is independently optional.
 
 All `spec import` failures reuse `CONFIG_ERROR` (exit 2). No new public error codes were added in v1.8. The structured `data.detail` enum is:
 
+<!-- @generated:spec-import-details — DO NOT EDIT by hand; regenerate with `pnpm gen:doc-blocks`. Source: SPEC_IMPORT_DETAILS in src/contracts/spec-import-details.ts. -->
 | `detail` | When |
 | --- | --- |
 | `unsafe_path` | `--from` / `--suggest-from` failed `assertSafeRelativePath` |
@@ -596,6 +597,7 @@ All `spec import` failures reuse `CONFIG_ERROR` (exit 2). No new public error co
 | `no_sections_parsed` | input has no Heading 3 sections (importer mode only) |
 | `mutex_violation` | `--from` + `--suggest-from` both passed |
 | `missing_phase_id` | `--from` passed without `--phase-id` |
+<!-- @generated:spec-import-details:end -->
 
 ### Post-import advisories
 

@@ -12,6 +12,7 @@ import {
   runSpecSuggest,
   SpecImportError,
 } from "../../commands/spec-import.ts";
+import { type SpecImportDetail } from "../../contracts/spec-import-details.ts";
 import { emitOk, emitError } from "../util.ts";
 
 export async function cmdSpec(argv: string[], _locale: Locale, globalJson: boolean): Promise<number> {
@@ -52,7 +53,7 @@ export async function cmdSpec(argv: string[], _locale: Locale, globalJson: boole
     if (fromPath && suggestFromPath) {
       const msg = "spec import: --from and --suggest-from are mutually exclusive";
       emitError(json, "CONFIG_ERROR", msg, {
-        data: { detail: "mutex_violation", source_path: null, phase_id: null },
+        data: { detail: "mutex_violation" satisfies SpecImportDetail, source_path: null, phase_id: null },
       });
       return 2;
     }
@@ -94,7 +95,7 @@ export async function cmdSpec(argv: string[], _locale: Locale, globalJson: boole
     if (!phaseId) {
       const msg = "spec import requires --phase-id <id> for the generated phase";
       emitError(json, "CONFIG_ERROR", msg, {
-        data: { detail: "missing_phase_id", source_path: fromPath, phase_id: null },
+        data: { detail: "missing_phase_id" satisfies SpecImportDetail, source_path: fromPath, phase_id: null },
       });
       return 2;
     }

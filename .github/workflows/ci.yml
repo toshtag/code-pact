@@ -29,7 +29,10 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # Doc checks are Node-version-independent (markdown + tsx codegen), so run
+      # them once in the full profile — not duplicated across the Node matrix.
       - run: pnpm check:docs
+        if: matrix.profile == 'full'
 
       - run: pnpm typecheck
 

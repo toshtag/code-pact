@@ -5,6 +5,7 @@ import { stringify as stringifyYaml } from "yaml";
 
 import { atomicWriteText } from "../io/atomic-text.ts";
 import { assertSafeRelativePath } from "../core/path-safety.ts";
+import { type SpecImportDetail } from "../contracts/spec-import-details.ts";
 import { parseTasksMd, type ParserWarning } from "../core/spec-import/tasks-md-parser.ts";
 import {
   extractSpecMd,
@@ -12,16 +13,11 @@ import {
   type ConstitutionCandidates,
 } from "../core/spec-import/spec-md-extractor.ts";
 
-export type SpecImportDetail =
-  | "unsafe_path"
-  | "file_not_found"
-  | "unreadable"
-  | "phase_id_invalid"
-  | "phase_yaml_exists"
-  | "no_sections_parsed"
-  | "mutex_violation"
-  | "missing_phase_id";
-
+// The `data.detail` enum is the typed catalog in src/contracts/spec-import-details.ts
+// (kept side-effect-free so the doc generator can read it without dragging this
+// handler's deps into check:docs). The runtime consumes it here and in
+// src/cli/commands/spec.ts (the two config-layer literals are tied back via
+// `satisfies SpecImportDetail`).
 export class SpecImportError extends Error {
   readonly detail: SpecImportDetail;
   readonly sourcePath?: string;
