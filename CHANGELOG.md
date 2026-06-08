@@ -39,6 +39,12 @@ identifiers. Starting with v1.0.0, stable releases use plain
   rollout, and the CI-burden contract every future doc check must satisfy are in
   [doc-truth-from-code-rfc.md](design/decisions/doc-truth-from-code-rfc.md) /
   [design/rules/doc-authoring.md](design/rules/doc-authoring.md).
+- **Generated detail enums for `plan brief` / `plan constitution`.** The
+  `--from-file` / `--stdin` `data.detail` enums now derive from a shared
+  side-effect-free catalog (`src/contracts/plan-capture-details.ts`) consumed by
+  both command runtimes, and a single `cli-contract.md` table is generated from it
+  (both command sections link to it; drift-checked by `check:doc-blocks`). The
+  generator gained `|`-escaping for table cells. No CLI behavior change.
 
 ## [1.32.0] — 2026-06-05
 

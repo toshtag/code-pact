@@ -25,6 +25,10 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
 import { SPEC_IMPORT_DETAILS } from "../src/contracts/spec-import-details.ts";
+import {
+  PLAN_CAPTURE_FILE_DETAILS,
+  PLAN_CAPTURE_STDIN_DETAILS,
+} from "../src/contracts/plan-capture-details.ts";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -45,7 +49,12 @@ export function endMarker(id: string): string {
   return `<!-- @generated:${id}:end -->`;
 }
 
-/** The full marker-wrapped block text (start comment + body + end comment). */
+/**
+ * The full marker-wrapped block text: the markers go on their own lines around a
+ * block-level body (a table). Generated blocks are always block-level — never
+ * inline mid-sentence markers, which clutter the Markdown source (see
+ * design/rules/doc-authoring.md).
+ */
 export function renderBlock(id: string, source: string, body: string): string {
   return `${startMarker(id, source)}\n${body}\n${endMarker(id)}`;
 }
@@ -84,12 +93,36 @@ export function spliceBlock(docText: string, id: string, source: string, body: s
   return docText.replace(re, renderBlock(id, source, body));
 }
 
-/** Render the `spec import` `data.detail` table from the catalog. */
-export function renderSpecImportDetailsTable(
-  catalog: Record<string, { when: string }>,
-): string {
-  const rows = Object.entries(catalog).map(([detail, { when }]) => `| \`${detail}\` | ${when} |`);
+/** Escape a value so it is safe inside a Markdown table cell (`|` breaks the row). */
+export function escapeTableCell(s: string): string {
+  return s.replace(/\|/g, "\\|");
+}
+
+/** Render a `| detail | When |` table from a `{ key: { when } }` catalog. */
+export function renderDetailTable(catalog: Record<string, { when: string }>): string {
+  const rows = Object.entries(catalog).map(
+    ([detail, { when }]) => `| \`${escapeTableCell(detail)}\` | ${escapeTableCell(when)} |`,
+  );
   return ["| `detail` | When |", "| --- | --- |", ...rows].join("\n");
+}
+
+/** Backtick + comma-join a list of values (in order). */
+function backtickedValues(values: readonly string[]): string {
+  return values.map((v) => `\`${v}\``).join(", ");
+}
+
+/**
+ * Render the single shared `plan brief` / `plan constitution` non-interactive
+ * input detail table (one block-level table both command sections link to,
+ * instead of restating the enum inline in four places).
+ */
+export function renderPlanCaptureDetailTable(): string {
+  return [
+    "| Surface | `detail` values |",
+    "| --- | --- |",
+    `| \`plan brief --from-file\`, \`plan constitution --from-file\` | ${escapeTableCell(backtickedValues(PLAN_CAPTURE_FILE_DETAILS))} |`,
+    `| \`plan brief --stdin\`, \`plan constitution --stdin\` | ${escapeTableCell(backtickedValues(PLAN_CAPTURE_STDIN_DETAILS))} |`,
+  ].join("\n");
 }
 
 // --- registry -------------------------------------------------------------
@@ -106,7 +139,15 @@ export const BLOCKS: BlockSpec[] = [
     id: "spec-import-details",
     file: "docs/cli-contract.md",
     source: "SPEC_IMPORT_DETAILS in src/contracts/spec-import-details.ts",
-    render: () => renderSpecImportDetailsTable(SPEC_IMPORT_DETAILS),
+    render: () => renderDetailTable(SPEC_IMPORT_DETAILS),
+  },
+  // One shared table for the plan brief / plan constitution capture details —
+  // both command sections link to it, rather than restating the enum inline.
+  {
+    id: "plan-capture-details",
+    file: "docs/cli-contract.md",
+    source: "PLAN_CAPTURE_*_DETAILS in src/contracts/plan-capture-details.ts",
+    render: renderPlanCaptureDetailTable,
   },
 ];
 

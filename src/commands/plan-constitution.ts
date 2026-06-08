@@ -10,6 +10,11 @@ import type { LocaleCode } from "../core/schemas/locale.ts";
 import { isPristineInitConstitution } from "../core/constitution.ts";
 import type { Locale } from "../i18n/index.ts";
 import { messages as messageCatalog } from "../i18n/index.ts";
+import type {
+  PlanCaptureFileDetail,
+  PlanCaptureStdinDetail,
+  PlanCaptureParseDetail,
+} from "../contracts/plan-capture-details.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -67,11 +72,7 @@ export const ConstitutionFileSchema = z
 
 export class PlanConstitutionFromFileError extends Error {
   readonly code = "CONFIG_ERROR";
-  readonly detail:
-    | "unsafe_path"
-    | "unreadable"
-    | "invalid_yaml"
-    | "schema_invalid";
+  readonly detail: PlanCaptureFileDetail;
   readonly path: string;
 
   constructor(
@@ -88,10 +89,7 @@ export class PlanConstitutionFromFileError extends Error {
 
 export class PlanConstitutionFromStdinError extends Error {
   readonly code = "CONFIG_ERROR";
-  readonly detail:
-    | "stdin_read_failed"
-    | "invalid_yaml"
-    | "schema_invalid";
+  readonly detail: PlanCaptureStdinDetail;
 
   constructor(
     detail: PlanConstitutionFromStdinError["detail"],
@@ -180,7 +178,8 @@ export async function loadConstitutionFromStdin(
   });
 }
 
-type ParserDetail = "invalid_yaml" | "schema_invalid";
+// The two details shared by both modes (the parse/validate failures).
+type ParserDetail = PlanCaptureParseDetail;
 
 function parseConstitutionSource(
   raw: string,

@@ -18,14 +18,22 @@ list — it must not be retyped in a doc. It lives once as a typed catalog in
 
 To add one:
 
-1. Make the catalog the single source: `const X = { key: { … } } as const` and
-   `type T = keyof typeof X`. Have the runtime consume it (carry the type; tie any
-   stray string literal back with `satisfies T`). Keep the catalog in a
+1. Make the catalog the single source and have the runtime consume it (carry the
+   type; tie any stray string literal back with `satisfies T`). Carry **only what
+   the block renders** — a values-only table → a `[...] as const` tuple (`type T =
+   typeof X[number]`); a table with a description column → `{ key: { when } } as
+   const` (`type T = keyof typeof X`). Don't keep metadata the block never shows;
+   it just becomes an unrendered surface that drifts. Keep the catalog in a
    **side-effect-free, import-light module** (e.g. `src/contracts/`) — a generator
    must never import a full command handler to read it, or that handler's
    transitive deps (parsers, file I/O, `yaml`) get dragged into `check:docs`.
 2. Wrap the doc region in `<!-- @generated:<id> … -->` / `<!-- @generated:<id>:end -->`
    and add a `BLOCKS` entry + `render()` in [`scripts/gen-doc-blocks.ts`](../../scripts/gen-doc-blocks.ts).
+   A generated block is **block-level** — markers on their own lines around a
+   table (cells `|`-escaped via `escapeTableCell`). Do **not** embed inline,
+   mid-sentence markers (they clutter the Markdown source), and put the block in
+   **one** place — other sections **link** to it rather than embedding a second
+   copy (that link-don't-restate move is the dedup, not four generated copies).
 3. `pnpm gen:doc-blocks` to write; `pnpm check:doc-blocks` runs in `check:docs`.
 
 Prefer this over restating the fact in prose. For a one-off *relationship*

@@ -7,17 +7,23 @@ import {
   renderBlock,
   extractBlock,
   spliceBlock,
-  renderSpecImportDetailsTable,
+  renderDetailTable,
+  escapeTableCell,
+  renderPlanCaptureDetailTable,
   BLOCKS,
 } from "../../../scripts/gen-doc-blocks.ts";
 import { SPEC_IMPORT_DETAILS } from "../../../src/contracts/spec-import-details.ts";
+import {
+  PLAN_CAPTURE_FILE_DETAILS,
+  PLAN_CAPTURE_STDIN_DETAILS,
+} from "../../../src/contracts/plan-capture-details.ts";
 
 const ID = "demo-block";
 const SRC = "DEMO in src/x.ts";
 
-describe("renderSpecImportDetailsTable", () => {
+describe("renderDetailTable", () => {
   it("renders a markdown table from a catalog", () => {
-    const table = renderSpecImportDetailsTable({
+    const table = renderDetailTable({
       alpha: { when: "first" },
       beta: { when: "second `x`" },
     });
@@ -29,9 +35,40 @@ describe("renderSpecImportDetailsTable", () => {
   });
 
   it("preserves catalog insertion order", () => {
-    const table = renderSpecImportDetailsTable(SPEC_IMPORT_DETAILS);
+    const table = renderDetailTable(SPEC_IMPORT_DETAILS);
     const rows = table.split("\n").slice(2).map((r) => r.split("`")[1]);
     expect(rows).toEqual(Object.keys(SPEC_IMPORT_DETAILS));
+  });
+
+  it("escapes `|` in both the detail key and the When text", () => {
+    const table = renderDetailTable({ "a|b": { when: "x | y" } });
+    expect(table).toContain("| `a\\|b` | x \\| y |");
+  });
+});
+
+describe("escapeTableCell", () => {
+  it("escapes `|` so a cell value can't break the table row", () => {
+    expect(escapeTableCell("a|b")).toBe("a\\|b");
+    expect(escapeTableCell("plain")).toBe("plain");
+  });
+});
+
+describe("renderPlanCaptureDetailTable", () => {
+  it("renders the shared file/stdin surface table from the catalogs", () => {
+    expect(renderPlanCaptureDetailTable()).toBe(
+      [
+        "| Surface | `detail` values |",
+        "| --- | --- |",
+        "| `plan brief --from-file`, `plan constitution --from-file` | `unsafe_path`, `unreadable`, `invalid_yaml`, `schema_invalid` |",
+        "| `plan brief --stdin`, `plan constitution --stdin` | `stdin_read_failed`, `invalid_yaml`, `schema_invalid` |",
+      ].join("\n"),
+    );
+  });
+
+  it("derives the value lists from the catalogs (drift would change the table)", () => {
+    const table = renderPlanCaptureDetailTable();
+    for (const v of PLAN_CAPTURE_FILE_DETAILS) expect(table).toContain(`\`${v}\``);
+    for (const v of PLAN_CAPTURE_STDIN_DETAILS) expect(table).toContain(`\`${v}\``);
   });
 });
 
@@ -108,7 +145,7 @@ describe("escapeRegExp", () => {
 });
 
 describe("BLOCKS registry", () => {
-  it("every registered block renders non-empty content for a real catalog", () => {
+  it("every registered block renders non-empty content and has a slug id", () => {
     for (const block of BLOCKS) {
       expect(block.render().length).toBeGreaterThan(0);
       expect(block.id).toMatch(/^[a-z0-9-]+$/);

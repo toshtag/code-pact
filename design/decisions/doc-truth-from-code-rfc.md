@@ -99,8 +99,11 @@ and an unrelated PR can never drift a block it didn't touch.
 
 ## Rollout (each obeys the CI-burden contract: drift-only, no concept-doc policing)
 
-- **B** — same catalog+block for `plan brief` / `constitution` / `adopt`, `phase
-  reconcile`, and the public error-code catalog.
+- **B** — apply the same pattern to other command detail enums where the enum is
+  code-owned and a generated block can replace hand-written reference text (e.g.
+  the remaining `plan` capture/adopt details, `phase reconcile`, the public
+  error-code catalog). (Per-PR progress lives in the CHANGELOG / PRs, not here —
+  this RFC fixes the decision, it is not a rollout checklist.)
 - **C** — command / alias / stable-surface registry as a generated stable table
   (extends [cli-command-spec-rfc.md](cli-command-spec-rfc.md)); kills the
   `task record-done`-missing-from-the-table class.
