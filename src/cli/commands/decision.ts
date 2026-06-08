@@ -23,7 +23,8 @@ the COMPLETE inbound-link rewrite plan that --write will later execute. The targ
 must be a readable, top-level, accepted design/decisions/<name>.md record.
 
 Eligible → exit 0. Ineligible → exit 2 with error code DECISION_PRUNE_NOT_ELIGIBLE
-and every failing gate under data.blocks[].
+and every applicable failing gate under data.blocks[] (the link-rewrite gates are
+evaluated once the target itself is a readable, accepted, top-level record).
 
 Options:
   --json    Emit the {ok,data} envelope (data: mode, decision, eligible, blocks,

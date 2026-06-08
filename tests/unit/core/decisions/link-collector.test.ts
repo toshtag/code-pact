@@ -93,6 +93,13 @@ describe("collectInboundLinks — items", () => {
     expect(items).toHaveLength(1);
     expect(items[0]?.rewrite_action).toBe("leave_as_is"); // still inside the 4-backtick fence
   });
+
+  it("a 4-backtick fence closed by a 5-backtick line — the link inside is leave_as_is (CommonMark: close >= open)", async () => {
+    await write("docs/wide.md", "# W\n\n````\n[x](../design/decisions/foo-rfc.md)\n`````\n");
+    const { items } = await collectInboundLinks(cwd, TARGET);
+    expect(items).toHaveLength(1);
+    expect(items[0]?.rewrite_action).toBe("leave_as_is");
+  });
 });
 
 describe("collectInboundLinks — exclusions (match check:doc-links)", () => {

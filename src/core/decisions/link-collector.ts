@@ -6,11 +6,12 @@ import { resolveWithinProject } from "../path-safety.ts";
 const SKIP_DIRS = new Set(["node_modules", ".git", "dist"]);
 
 /**
- * One inbound reference to a pruned decision that `--write` (PR-C2) will rewrite,
- * carrying everything the executor needs to act on the exact span WITHOUT
- * re-parsing: `column` + `raw_link` disambiguate two links on one line, and
- * `link_text` is what `delink` keeps. This is the shared rewrite plan — the
- * dry-run preview and `--write` consume the same items. Deliberately NOT the
+ * One inbound reference considered by the prune write plan. `rewrite_action`
+ * decides what `--write` (PR-C2) does with it — `tombstone`, `delink`, or
+ * `leave_as_is` (NOT every item is rewritten). Carries everything the executor
+ * needs to act on the exact span WITHOUT re-parsing: `column` + `raw_link`
+ * disambiguate two links on one line, and `link_text` is what `delink` keeps.
+ * The dry-run preview and `--write` consume the same items. Deliberately NOT the
  * conservative eligibility parser (`decisionLinksTo`).
  */
 export type LinkRewriteItem = {

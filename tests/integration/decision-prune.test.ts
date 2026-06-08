@@ -226,6 +226,9 @@ describe("decision prune — CLI (dry-run)", () => {
     expect(res.stdout).toContain("Options:");
     expect(res.stdout).toContain("Examples:");
     expect(res.stdout).toContain("--json");
+    // matches cli-contract: applicable gates, not "every failing gate"
+    expect(res.stdout).toContain("every applicable failing gate");
+    expect(res.stdout).not.toContain("every failing gate under");
   });
 
   it("human eligible → dry-run summary on stdout, exit 0", async () => {
