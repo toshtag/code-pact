@@ -33,7 +33,8 @@ export type PruneBlock =
   | { gate: "open_commitments"; open_items: number }
   | { gate: "live_decision_depends"; decision: string; status: string }
   | { gate: "dependency_status_unknown"; decision: string; status: string | null }
-  | { gate: "dependency_unreadable"; decision: string };
+  | { gate: "dependency_unreadable"; decision: string }
+  | { gate: "decision_scan_unreadable"; detail: string };
 
 export type PruneReferencingTask = {
   task_id: string;
@@ -56,6 +57,12 @@ function isLiveDecisionStatus(word: string | null): boolean {
   return word === "proposed" || word === "draft";
 }
 
+function errText(err: unknown): string {
+  const code = (err as NodeJS.ErrnoException).code;
+  if (code) return code;
+  return err instanceof Error ? err.message : String(err);
+}
+
 /**
  * Does `content` contain a markdown link that resolves to `target` (relative to
  * design/decisions/)? Covers both **inline** links — `[t](url)` and
@@ -63,15 +70,24 @@ function isLiveDecisionStatus(word: string | null): boolean {
  * narrower regex would be fail-open for this safety gate; this matches the link
  * forms `scripts/check-doc-links.mjs` understands.
  */
+function stripAngleBrackets(raw: string): string {
+  const s = raw.trim();
+  return s.startsWith("<") && s.endsWith(">") ? s.slice(1, -1) : s;
+}
+
 function decisionLinksTo(content: string, target: string): boolean {
   const urls: string[] = [];
-  const inline = /\[(?:[^\]]*)\]\(([^)\s]+)(?:[ \t]+"[^"]*")?\)/g;
-  const refDef = /^[ \t]*\[[^\]]+\]:[ \t]*(\S+)/gm;
+  // inline: [t](<url> | url) with an optional "title" / 'title' / (title)
+  const inline =
+    /\[(?:[^\]]*)\]\(\s*(<[^>]+>|[^)\s]+)(?:[ \t]+(?:"[^"]*"|'[^']*'|\([^)]*\)))?\s*\)/g;
+  // reference definition: [label]: <url> | url with an optional title
+  const refDef =
+    /^[ \t]{0,3}\[[^\]]+\]:[ \t]*(<[^>]+>|\S+)(?:[ \t]+(?:"[^"]*"|'[^']*'|\([^)]*\)))?[ \t]*$/gm;
   let m: RegExpExecArray | null;
   while ((m = inline.exec(content)) !== null) urls.push(m[1]!);
   while ((m = refDef.exec(content)) !== null) urls.push(m[1]!);
   for (const raw of urls) {
-    const link = raw.split("#")[0]!.trim();
+    const link = stripAngleBrackets(raw).split("#")[0]!.trim();
     if (link === "" || /^[a-z]+:\/\//i.test(link)) continue; // skip empty / absolute URLs
     const resolved = posix
       .normalize(posix.join("design/decisions", link))
@@ -168,19 +184,37 @@ export async function evaluatePrune(
     }
   }
 
-  // Gate 1 — referencing tasks (collect all; block on any not-done).
-  const resolver = await makeDecisionResolver(cwd);
+  // Gate 1 — referencing tasks (collect all; block on any not-done). A pure
+  // verdict never throws: if the decision scan itself is unreadable (e.g. a
+  // filename-scan candidate is a directory named `*.md`), record it as a
+  // fail-CLOSED block rather than letting `evaluatePrune` reject.
+  let resolver: Awaited<ReturnType<typeof makeDecisionResolver>> | null = null;
+  try {
+    resolver = await makeDecisionResolver(cwd);
+  } catch (err) {
+    blocks.push({
+      gate: "decision_scan_unreadable",
+      detail: `cannot scan design/decisions to verify referencing gates: ${errText(err)}`,
+    });
+  }
   for (const { phase } of phases) {
     for (const task of phase.tasks ?? []) {
       const explicit = (task.decision_refs ?? []).some(
         (r) => normalizePrunedDecisionPath(r) === decision,
       );
       let viaGate = false;
-      if (!explicit && isDecisionRequiredForTask(phase, task)) {
-        const res = await resolver.resolve(task.id, task.decision_refs);
-        viaGate = res.considered.some(
-          (c) => normalizePrunedDecisionPath(c.path) === decision,
-        );
+      if (!explicit && resolver !== null && isDecisionRequiredForTask(phase, task)) {
+        try {
+          const res = await resolver.resolve(task.id, task.decision_refs);
+          viaGate = res.considered.some(
+            (c) => normalizePrunedDecisionPath(c.path) === decision,
+          );
+        } catch (err) {
+          blocks.push({
+            gate: "decision_scan_unreadable",
+            detail: `cannot resolve the decision gate for "${task.id}": ${errText(err)}`,
+          });
+        }
       }
       if (!explicit && !viaGate) continue;
       const via = explicit ? "decision_refs" : "decision_gate";
@@ -212,7 +246,16 @@ export async function evaluatePrune(
   // status) linker cannot be confirmed non-live, so it fails closed too —
   // symmetric with the target itself, which `unknown_status` cannot be pruned.
   // Settled linkers (accepted / rejected / superseded) are historical and fine.
-  for (const name of await readDecisionAdrFiles(cwd)) {
+  let decisionNames: string[] = [];
+  try {
+    decisionNames = await readDecisionAdrFiles(cwd);
+  } catch (err) {
+    blocks.push({
+      gate: "decision_scan_unreadable",
+      detail: `cannot list design/decisions to verify dependants: ${errText(err)}`,
+    });
+  }
+  for (const name of decisionNames) {
     if (!name.endsWith(".md")) continue;
     const otherPath = `design/decisions/${name}`;
     if (otherPath === decision) continue;

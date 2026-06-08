@@ -127,7 +127,7 @@ describe("evaluatePrune — target must be an accepted, readable, top-level reco
     expect(res.blocks[0]?.gate).toBe("target_invalid");
   });
 
-  it("blocks a target that symlink-escapes the project root", async () => {
+  it("blocks a target file that symlink-escapes the project root", async () => {
     const outside = await mkdtemp(join(tmpdir(), "code-pact-outside-"));
     await writeFile(join(outside, "real-rfc.md"), ACCEPTED, "utf8");
     await symlink(join(outside, "real-rfc.md"), join(cwd, "design", "decisions", "escape-rfc.md"));
@@ -135,6 +135,30 @@ describe("evaluatePrune — target must be an accepted, readable, top-level reco
     expect(res.eligible).toBe(false);
     expect(res.blocks[0]?.gate).toBe("target_invalid");
     await rm(outside, { recursive: true, force: true });
+  });
+
+  it("blocks when design/decisions ITSELF is a symlink escaping the repo (ancestor symlink)", async () => {
+    const root = await mkdtemp(join(tmpdir(), "code-pact-anc-"));
+    const outside = await mkdtemp(join(tmpdir(), "code-pact-outside-"));
+    await writeFile(join(outside, "foo-rfc.md"), ACCEPTED, "utf8");
+    await mkdir(join(root, "design"), { recursive: true });
+    await symlink(outside, join(root, "design", "decisions")); // design/decisions -> /outside
+    const res = await evaluatePrune(root, "design/decisions/foo-rfc.md", []);
+    expect(res.eligible).toBe(false);
+    expect(res.blocks[0]?.gate).toBe("target_invalid");
+    await rm(root, { recursive: true, force: true });
+    await rm(outside, { recursive: true, force: true });
+  });
+});
+
+describe("evaluatePrune — pure verdict never throws (fail-closed scan)", () => {
+  it("returns eligible:false (not a throw) when a filename-scan candidate is a directory named *.md", async () => {
+    await writeDecision("foo-rfc.md", ACCEPTED);
+    await mkdir(join(cwd, "design", "decisions", "P1-T1.md"), { recursive: true }); // candidate is a dir
+    const phases = [entry("P1", [task("P1-T1", { status: "planned", requires_decision: true })])];
+    const res = await evaluatePrune(cwd, "design/decisions/foo-rfc.md", phases);
+    expect(res.eligible).toBe(false);
+    expect(res.blocks.some((b) => b.gate === "decision_scan_unreadable")).toBe(true);
   });
 });
 
@@ -245,6 +269,20 @@ describe("evaluatePrune — gate 3: live decision depends", () => {
     const res = await evaluatePrune(cwd, "design/decisions/foo-rfc.md", []);
     expect(res.blocks.some((b) => b.gate === "live_decision_depends")).toBe(true);
   });
+
+  for (const [label, body] of [
+    ["angle-bracket destination", "Builds on [foo](<foo-rfc.md>)."],
+    ["single-quoted title", "Builds on [foo](foo-rfc.md 'the rationale')."],
+    ["parenthesized title", "Builds on [foo](foo-rfc.md (the rationale))."],
+    ["reference-style angle bracket", "Builds on [foo][f].\n\n[f]: <foo-rfc.md>\n"],
+  ] as const) {
+    it(`detects a ${label} link (not fail-open)`, async () => {
+      await writeDecision("foo-rfc.md", ACCEPTED);
+      await writeDecision("bar-rfc.md", `# RFC\n\n**Status:** proposed\n\n## Decision\n\n${body}`);
+      const res = await evaluatePrune(cwd, "design/decisions/foo-rfc.md", []);
+      expect(res.blocks.some((b) => b.gate === "live_decision_depends")).toBe(true);
+    });
+  }
 
   it("blocks when an UNKNOWN-status decision links to the target (cannot confirm non-live)", async () => {
     await writeDecision("foo-rfc.md", ACCEPTED);
