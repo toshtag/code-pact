@@ -655,7 +655,7 @@ describe("detectTaskDecisionRefNotFound (fs-backed)", () => {
     expect(issues[0]?.details?.historical).toBe(true);
   });
 
-  it("soft when the PHASE is done even if the task status is not", async () => {
+  it("still ERROR when the PHASE is done but the task itself is live (phase status must not loosen a live task's gate)", async () => {
     const entries = [
       entry(
         phase(
@@ -666,10 +666,11 @@ describe("detectTaskDecisionRefNotFound (fs-backed)", () => {
       ),
     ];
     const issues = await detectTaskDecisionRefNotFound(cwd, entries);
-    expect(issues[0]?.severity).toBe("warning");
+    expect(issues[0]?.severity).toBe("error");
+    expect(issues[0]?.affects_exit).toBeUndefined();
   });
 
-  it("soft when the task is CANCELLED (terminal — gate is moot)", async () => {
+  it("still ERROR for a CANCELLED task (cancelled is deliberately NOT terminal in PR-A — pending an explicit RFC decision)", async () => {
     const entries = [
       entry(
         phase("P1", [
@@ -681,8 +682,7 @@ describe("detectTaskDecisionRefNotFound (fs-backed)", () => {
       ),
     ];
     const issues = await detectTaskDecisionRefNotFound(cwd, entries);
-    expect(issues[0]?.severity).toBe("warning");
-    expect(issues[0]?.affects_exit).toBe(false);
+    expect(issues[0]?.severity).toBe("error");
   });
 
   it("still ERROR for a live (in_progress) task with a missing ref", async () => {

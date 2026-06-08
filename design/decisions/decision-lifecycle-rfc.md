@@ -22,7 +22,7 @@ The asymmetry that proves this is a gap, not a guard: the **`reads`** field in t
 
 ### 1. Status-aware ref integrity (the loosening)
 
-`detectTaskDecisionRefNotFound` / `detectTaskAcceptanceRefNotFound` consult task/phase status:
+`detectTaskDecisionRefNotFound` / `detectTaskAcceptanceRefNotFound` consult the **referencing task's own status** (not the phase's — a `done` phase holding an open task must not loosen that task's live gate):
 
 | Referencing task | ref target on disk | Result |
 | --- | --- | --- |
@@ -61,7 +61,7 @@ Append-only table: `decision path | phase/task | pruned date | rationale home (C
 
 `decision prune` *enacts* the project's policy; `--policy <v>` overrides per-invocation. The core fix is that the **spec stops dictating retention** — it becomes the maintainer's preference, which is what it always was.
 
-**Locked choices** (this RFC): the shipped default is **`keep-full`** — non-surprising and backward-compatible for the ecosystem; no project's records vanish on upgrade. The code-pact repo itself dogfoods **`prune-on-ship`** via its own `project.yaml`. The command is **`decision prune`**, reusing the existing prune vocabulary.
+**Locked choices** (this RFC): the shipped default is **`keep-full`** — non-surprising and backward-compatible for the ecosystem; no project's records vanish on upgrade. The locked dogfood choice for this repository is **`prune-on-ship`**; the `project.yaml` `decision_retention` field itself is introduced in PR-D (it does not exist yet). The command is **`decision prune`**, reusing the existing prune vocabulary.
 
 ## Long-term record-of-truth model
 
