@@ -106,11 +106,9 @@ export function renderDetailTable(catalog: Record<string, { when: string }>): st
   return ["| `detail` | When |", "| --- | --- |", ...rows].join("\n");
 }
 
-/** Backtick + comma-join a catalog's keys (insertion order). */
-function backtickedKeys(catalog: Record<string, unknown>): string {
-  return Object.keys(catalog)
-    .map((k) => `\`${k}\``)
-    .join(", ");
+/** Backtick + comma-join a list of values (in order). */
+function backtickedValues(values: readonly string[]): string {
+  return values.map((v) => `\`${v}\``).join(", ");
 }
 
 /**
@@ -122,8 +120,8 @@ export function renderPlanCaptureDetailTable(): string {
   return [
     "| Surface | `detail` values |",
     "| --- | --- |",
-    `| \`plan brief --from-file\`, \`plan constitution --from-file\` | ${escapeTableCell(backtickedKeys(PLAN_CAPTURE_FILE_DETAILS))} |`,
-    `| \`plan brief --stdin\`, \`plan constitution --stdin\` | ${escapeTableCell(backtickedKeys(PLAN_CAPTURE_STDIN_DETAILS))} |`,
+    `| \`plan brief --from-file\`, \`plan constitution --from-file\` | ${escapeTableCell(backtickedValues(PLAN_CAPTURE_FILE_DETAILS))} |`,
+    `| \`plan brief --stdin\`, \`plan constitution --stdin\` | ${escapeTableCell(backtickedValues(PLAN_CAPTURE_STDIN_DETAILS))} |`,
   ].join("\n");
 }
 

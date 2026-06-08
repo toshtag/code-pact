@@ -67,8 +67,8 @@ describe("renderPlanCaptureDetailTable", () => {
 
   it("derives the value lists from the catalogs (drift would change the table)", () => {
     const table = renderPlanCaptureDetailTable();
-    for (const k of Object.keys(PLAN_CAPTURE_FILE_DETAILS)) expect(table).toContain(`\`${k}\``);
-    for (const k of Object.keys(PLAN_CAPTURE_STDIN_DETAILS)) expect(table).toContain(`\`${k}\``);
+    for (const v of PLAN_CAPTURE_FILE_DETAILS) expect(table).toContain(`\`${v}\``);
+    for (const v of PLAN_CAPTURE_STDIN_DETAILS) expect(table).toContain(`\`${v}\``);
   });
 });
 

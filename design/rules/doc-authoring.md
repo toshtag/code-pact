@@ -18,9 +18,12 @@ list — it must not be retyped in a doc. It lives once as a typed catalog in
 
 To add one:
 
-1. Make the catalog the single source: `const X = { key: { … } } as const` and
-   `type T = keyof typeof X`. Have the runtime consume it (carry the type; tie any
-   stray string literal back with `satisfies T`). Keep the catalog in a
+1. Make the catalog the single source and have the runtime consume it (carry the
+   type; tie any stray string literal back with `satisfies T`). Carry **only what
+   the block renders** — a values-only table → a `[...] as const` tuple (`type T =
+   typeof X[number]`); a table with a description column → `{ key: { when } } as
+   const` (`type T = keyof typeof X`). Don't keep metadata the block never shows;
+   it just becomes an unrendered surface that drifts. Keep the catalog in a
    **side-effect-free, import-light module** (e.g. `src/contracts/`) — a generator
    must never import a full command handler to read it, or that handler's
    transitive deps (parsers, file I/O, `yaml`) get dragged into `check:docs`.
