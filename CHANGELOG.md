@@ -29,11 +29,13 @@ identifiers. Starting with v1.0.0, stable releases use plain
 - **`pnpm gen:doc-blocks` / `check:doc-blocks` — generate enumerable contract
   facts from code instead of hand-writing them.** The first such block is the
   `spec import` `data.detail` table in `cli-contract.md`, now rendered from the
-  typed `SPEC_IMPORT_DETAILS` catalog in source (the duplicated enum list in
-  `spec-kit-bridge.md` is replaced by a link). No CLI behavior change. The new
-  `check:doc-blocks` (in `check:docs`) checks only generated-block **drift** — it
-  never lints prose, style, or concept docs, so the only PR it can fail is one
-  that changed a generated value; the fix is `pnpm gen:doc-blocks`. The decision,
+  typed `SPEC_IMPORT_DETAILS` catalog in `src/contracts/spec-import-details.ts` (a
+  side-effect-free module the generator reads without pulling in command-handler
+  deps; the duplicated enum list in `spec-kit-bridge.md` is replaced by a link).
+  No CLI behavior change. The new `check:doc-blocks` (in `check:docs`) checks only
+  generated-block **drift** — it never lints prose, style, or concept docs, so it
+  can fail only a PR that touches the generated contract surface (the catalog, the
+  generator, or the block itself); the fix is `pnpm gen:doc-blocks`. The decision,
   rollout, and the CI-burden contract every future doc check must satisfy are in
   [doc-truth-from-code-rfc.md](design/decisions/doc-truth-from-code-rfc.md) /
   [design/rules/doc-authoring.md](design/rules/doc-authoring.md).

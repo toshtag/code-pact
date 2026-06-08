@@ -5,6 +5,7 @@ import { stringify as stringifyYaml } from "yaml";
 
 import { atomicWriteText } from "../io/atomic-text.ts";
 import { assertSafeRelativePath } from "../core/path-safety.ts";
+import { type SpecImportDetail } from "../contracts/spec-import-details.ts";
 import { parseTasksMd, type ParserWarning } from "../core/spec-import/tasks-md-parser.ts";
 import {
   extractSpecMd,
@@ -12,26 +13,11 @@ import {
   type ConstitutionCandidates,
 } from "../core/spec-import/spec-md-extractor.ts";
 
-// Single source of truth for the `spec import` `data.detail` enum. The runtime
-// throws/emits these (SpecImportError here; the two CLI-layer config details in
-// src/cli/commands/spec.ts are tied back via `satisfies SpecImportDetail`), and
-// the `cli-contract.md` detail table is GENERATED from the `when` strings by
-// scripts/gen-doc-blocks.ts. Edit a detail here and nowhere else: `check:docs`
-// (drift) and `tsc` (renamed key) fail until every surface follows.
-// Order is the published table order — keep it stable.
-export const SPEC_IMPORT_DETAILS = {
-  unsafe_path: { when: "`--from` / `--suggest-from` failed `assertSafeRelativePath`" },
-  file_not_found: { when: "source file does not exist" },
-  unreadable: { when: "source file exists but cannot be read" },
-  phase_id_invalid: { when: "`--phase-id` does not match `/^[A-Za-z][A-Za-z0-9_-]*$/`" },
-  phase_yaml_exists: { when: "`--write` would clobber an existing imported YAML (use `--force`)" },
-  no_sections_parsed: { when: "input has no Heading 3 sections (importer mode only)" },
-  mutex_violation: { when: "`--from` + `--suggest-from` both passed" },
-  missing_phase_id: { when: "`--from` passed without `--phase-id`" },
-} as const;
-
-export type SpecImportDetail = keyof typeof SPEC_IMPORT_DETAILS;
-
+// The `data.detail` enum is the typed catalog in src/contracts/spec-import-details.ts
+// (kept side-effect-free so the doc generator can read it without dragging this
+// handler's deps into check:docs). The runtime consumes it here and in
+// src/cli/commands/spec.ts (the two config-layer literals are tied back via
+// `satisfies SpecImportDetail`).
 export class SpecImportError extends Error {
   readonly detail: SpecImportDetail;
   readonly sourcePath?: string;

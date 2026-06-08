@@ -24,7 +24,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
-import { SPEC_IMPORT_DETAILS } from "../src/commands/spec-import.ts";
+import { SPEC_IMPORT_DETAILS } from "../src/contracts/spec-import-details.ts";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -105,7 +105,7 @@ export const BLOCKS: BlockSpec[] = [
   {
     id: "spec-import-details",
     file: "docs/cli-contract.md",
-    source: "SPEC_IMPORT_DETAILS in src/commands/spec-import.ts",
+    source: "SPEC_IMPORT_DETAILS in src/contracts/spec-import-details.ts",
     render: () => renderSpecImportDetailsTable(SPEC_IMPORT_DETAILS),
   },
 ];

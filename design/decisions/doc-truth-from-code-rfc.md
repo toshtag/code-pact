@@ -56,9 +56,11 @@ Two complementary checks already coexist; pick by fact shape:
 
 Generate-from-source shape:
 
-- Typed catalog in `src/` (`SPEC_IMPORT_DETAILS = { detail: { when } } as const`;
-  `type SpecImportDetail = keyof typeof …`). The runtime uses it (the error class
-  carries the type; CLI-layer literals are tied back with `satisfies`).
+- Typed catalog in a **side-effect-free** `src/contracts/` module
+  (`SPEC_IMPORT_DETAILS = { detail: { when } } as const`; `type SpecImportDetail =
+  keyof typeof …`). The runtime uses it (the error class carries the type;
+  CLI-layer literals are tied back with `satisfies`). The generator reads only
+  these light modules — never a full command handler (see the rule).
 - `<!-- @generated:<id> … --> … <!-- @generated:<id>:end -->` markers wrap the
   rendered block in the doc.
 - `pnpm gen:doc-blocks` writes; `pnpm check:doc-blocks` (in `check:docs`) fails on
@@ -73,9 +75,10 @@ impact** in the PR (and the rule doc):
   there an auto-fix command? · Can an *unrelated* PR fail because of existing debt?
 
 If any answer is vague — or "yes, unrelated PRs can fail on debt" — the check is
-**not** added. `check:doc-blocks` is the worked example (see the rule doc): it
-fires only for a PR that changed a generated catalog value, the fix is one
-command, and an unrelated PR can never drift a block it didn't touch.
+**not** added. `check:doc-blocks` is the worked example (see the rule doc): it can
+fail only a PR that touches the generated contract surface (the typed catalog, the
+generator, or the block itself), the fix is one command (`pnpm gen:doc-blocks`),
+and an unrelated PR can never drift a block it didn't touch.
 
 ## This increment (the vertical slice)
 

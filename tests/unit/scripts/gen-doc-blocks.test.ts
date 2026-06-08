@@ -10,7 +10,7 @@ import {
   renderSpecImportDetailsTable,
   BLOCKS,
 } from "../../../scripts/gen-doc-blocks.ts";
-import { SPEC_IMPORT_DETAILS } from "../../../src/commands/spec-import.ts";
+import { SPEC_IMPORT_DETAILS } from "../../../src/contracts/spec-import-details.ts";
 
 const ID = "demo-block";
 const SRC = "DEMO in src/x.ts";

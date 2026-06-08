@@ -20,7 +20,10 @@ To add one:
 
 1. Make the catalog the single source: `const X = { key: { … } } as const` and
    `type T = keyof typeof X`. Have the runtime consume it (carry the type; tie any
-   stray string literal back with `satisfies T`).
+   stray string literal back with `satisfies T`). Keep the catalog in a
+   **side-effect-free, import-light module** (e.g. `src/contracts/`) — a generator
+   must never import a full command handler to read it, or that handler's
+   transitive deps (parsers, file I/O, `yaml`) get dragged into `check:docs`.
 2. Wrap the doc region in `<!-- @generated:<id> … -->` / `<!-- @generated:<id>:end -->`
    and add a `BLOCKS` entry + `render()` in [`scripts/gen-doc-blocks.ts`](../../scripts/gen-doc-blocks.ts).
 3. `pnpm gen:doc-blocks` to write; `pnpm check:doc-blocks` runs in `check:docs`.
@@ -46,11 +49,11 @@ instead.
 
 | Question | Answer |
 | --- | --- |
-| Who can hit it? | Only someone who edits a generated catalog (e.g. `SPEC_IMPORT_DETAILS`) or hand-edits a `@generated` block. |
-| What PR triggers it? | One that changes a generated public-contract value. |
+| Who can hit it? | Someone who edits a generated catalog (e.g. `SPEC_IMPORT_DETAILS`), the generator, or hand-edits a `@generated` block. |
+| What PR triggers it? | One that touches the generated contract surface: the typed catalog, the generator, or the `@generated` block itself. |
 | Mechanical fix? | Yes. |
 | Auto-fix command? | `pnpm gen:doc-blocks` (named in the failure message). |
-| Unrelated PR fails on debt? | No — a block already in sync can't drift from a PR that doesn't touch its catalog. |
+| Unrelated PR fails on debt? | No — a block already in sync can't drift from a PR that doesn't touch that surface. |
 
 ## 3. Never (these shift our doc burden onto contributors)
 

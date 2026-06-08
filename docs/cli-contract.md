@@ -586,7 +586,7 @@ First match wins. Each candidate field is independently optional.
 
 All `spec import` failures reuse `CONFIG_ERROR` (exit 2). No new public error codes were added in v1.8. The structured `data.detail` enum is:
 
-<!-- @generated:spec-import-details — DO NOT EDIT by hand; regenerate with `pnpm gen:doc-blocks`. Source: SPEC_IMPORT_DETAILS in src/commands/spec-import.ts. -->
+<!-- @generated:spec-import-details — DO NOT EDIT by hand; regenerate with `pnpm gen:doc-blocks`. Source: SPEC_IMPORT_DETAILS in src/contracts/spec-import-details.ts. -->
 | `detail` | When |
 | --- | --- |
 | `unsafe_path` | `--from` / `--suggest-from` failed `assertSafeRelativePath` |

@@ -11,8 +11,8 @@ import {
   runSpecImport,
   runSpecSuggest,
   SpecImportError,
-  type SpecImportDetail,
 } from "../../commands/spec-import.ts";
+import { type SpecImportDetail } from "../../contracts/spec-import-details.ts";
 import { emitOk, emitError } from "../util.ts";
 
 export async function cmdSpec(argv: string[], _locale: Locale, globalJson: boolean): Promise<number> {
