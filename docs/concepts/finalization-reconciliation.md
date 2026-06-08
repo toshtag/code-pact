@@ -144,25 +144,16 @@ How to use the surface in a PR review (human or agent-assisted):
 
 The same declaration is available per-task via `task runbook <task-id> --json` (`data.state_summary.declared_writes`); pick whichever surface fits the reviewer's workflow.
 
-## Error code reference
+## Error codes
 
-Public error codes raised by these commands (all additive in `KNOWN_CODES.public`):
-
-| Code | Exit | Raised by | Trigger |
-| --- | --- | --- | --- |
-| `TASK_FINALIZE_NOT_ELIGIBLE` | 2 | `task finalize` (both modes) | Derived state from the progress ledger is not `done` |
-| `TASK_FINALIZE_WRITE_REFUSED` | 2 | `task finalize --write` | Safety check refused the phase YAML write (unsafe path, outside `design/phases/`, symlink escape, unparseable phase, etc.) |
-| `WRITES_AUDIT_STRICT_FAILED` | 1 | `task finalize --audit-strict` | The declared-writes audit emitted a warning and `--audit-strict` was supplied. The envelope carries the full `write_audit` plus `applied: false` |
-| `PHASE_RECONCILE_WRITE_REFUSED` | 2 | `phase reconcile --write` | Every eligible task write was refused for safety reasons (partial successes return exit 0) |
-
-`no_eligible_tasks` is intentionally **not** an error code — it is represented as `data.kind: "no_eligible_tasks"` with exit 0. Nothing to flip is a normal outcome.
+These commands' public codes (`TASK_FINALIZE_NOT_ELIGIBLE`, `TASK_FINALIZE_WRITE_REFUSED`, `WRITES_AUDIT_STRICT_FAILED`, `PHASE_RECONCILE_WRITE_REFUSED`) — exit codes, triggers, and envelopes — live in [`docs/cli-contract.md` § Error codes](../cli-contract.md#error-codes). `no_eligible_tasks` is intentionally **not** an error code — it is `data.kind: "no_eligible_tasks"` with exit 0; nothing to flip is a normal outcome.
 
 ## What stays the same
 
 - `task complete` is unchanged: it records progress only and never mutates design YAML.
 - The progress ledger is read-only for `task finalize` / `phase reconcile`. The append-only operational-log contract is preserved.
 - The `details.remediation` field on `STATUS_DRIFT` is purely additive; no STATUS_DRIFT kind changes severity or default visibility.
-- The `KNOWN_CODES.public` surface lock is extended additively — no existing entry is renamed or recategorized.
+- The public error-code surface is extended additively — no existing code is renamed or recategorized.
 
 ## See also
 
