@@ -144,18 +144,9 @@ How to use the surface in a PR review (human or agent-assisted):
 
 The same declaration is available per-task via `task runbook <task-id> --json` (`data.state_summary.declared_writes`); pick whichever surface fits the reviewer's workflow.
 
-## Error code reference
+## Error codes
 
-Public error codes raised by these commands (all additive in `KNOWN_CODES.public`):
-
-| Code | Exit | Raised by | Trigger |
-| --- | --- | --- | --- |
-| `TASK_FINALIZE_NOT_ELIGIBLE` | 2 | `task finalize` (both modes) | Derived state from the progress ledger is not `done` |
-| `TASK_FINALIZE_WRITE_REFUSED` | 2 | `task finalize --write` | Safety check refused the phase YAML write (unsafe path, outside `design/phases/`, symlink escape, unparseable phase, etc.) |
-| `WRITES_AUDIT_STRICT_FAILED` | 1 | `task finalize --audit-strict` | The declared-writes audit emitted a warning and `--audit-strict` was supplied. The envelope carries the full `write_audit` plus `applied: false` |
-| `PHASE_RECONCILE_WRITE_REFUSED` | 2 | `phase reconcile --write` | Every eligible task write was refused for safety reasons (partial successes return exit 0) |
-
-`no_eligible_tasks` is intentionally **not** an error code — it is represented as `data.kind: "no_eligible_tasks"` with exit 0. Nothing to flip is a normal outcome.
+These commands' public codes (`TASK_FINALIZE_NOT_ELIGIBLE`, `TASK_FINALIZE_WRITE_REFUSED`, `WRITES_AUDIT_STRICT_FAILED`, `PHASE_RECONCILE_WRITE_REFUSED`) are additive in `KNOWN_CODES.public`; exit codes, triggers, and envelopes are in [`docs/cli-contract.md` § Error codes](../cli-contract.md#error-codes). `no_eligible_tasks` is intentionally **not** an error code — it is `data.kind: "no_eligible_tasks"` with exit 0; nothing to flip is a normal outcome.
 
 ## What stays the same
 

@@ -115,21 +115,7 @@ The governance RFC enumerates the non-goals. The headline items:
 
 ## Error / diagnostic taxonomy
 
-Public error code for the governance layer:
-
-| Code | Exit | Category | Trigger |
-| --- | --- | --- | --- |
-| `LOCK_HELD` | 2 | **public** | Another `code-pact` mutation is in progress on the same project. `data.lock_holder` carries `{pid, hostname, cmd, created_at}`; `data.lock_path` is the lock file path. Transient + retryable |
-
-Reused codes in governance contexts:
-
-| Code | Trigger |
-| --- | --- |
-| `CONFIG_ERROR` | `phase add --id TUTORIAL` / `phase import` containing TUTORIAL / `phase new` wizard typing TUTORIAL |
-| `TASK_NOT_FOUND` / `AMBIGUOUS_TASK_ID` | Emitted from the shared `src/core/plan/resolve-task.ts` |
-| `TASK_WRITES_PROTECTED_PATH` | Warning-level; exit-relevant under `plan lint --strict` |
-
-`LOCK_HELD` is part of `KNOWN_CODES.public` in `tests/unit/error-code-surface.test.ts`; the full public surface remains additive.
+The governance layer adds one public code, `LOCK_HELD` — exit 2, transient and retryable, carrying `data.lock_holder` / `data.lock_path`. In governance contexts it also surfaces existing codes: `CONFIG_ERROR` (reserved-id `TUTORIAL`), `TASK_NOT_FOUND` / `AMBIGUOUS_TASK_ID` (the shared task resolver), and the warning-level `TASK_WRITES_PROTECTED_PATH`. Exit codes, triggers, and envelopes are in [`docs/cli-contract.md` § Error codes](../cli-contract.md#error-codes). `LOCK_HELD` is part of `KNOWN_CODES.public` in `tests/unit/error-code-surface.test.ts`.
 
 ## See also
 
