@@ -76,7 +76,7 @@ tasks:
 
 ### `decision_refs`
 
-- **In `plan lint`:** path-safety check (`TASK_DECISION_REF_UNSAFE_PATH`) and a **status-aware** existence check (`TASK_DECISION_REF_NOT_FOUND`): while the referencing task is live a missing target is an `error`; once that task is `done` it downgrades to an advisory `warning` (`affects_exit: false`) — the gate already passed, so the ref is a historical annotation, and a shipped decision record can be retired without breaking the plan. Keyed on the task's own status, not its phase's.
+- **In `plan lint`:** path-safety check (`TASK_DECISION_REF_UNSAFE_PATH`) and a **status-aware** existence check (`TASK_DECISION_REF_NOT_FOUND`): a missing target is an `error` for any not-`done` task; once that task is `done` it downgrades to an advisory `warning` (`affects_exit: false`) — the task has completed, so the ref is a historical annotation, and a shipped decision record can be retired without breaking the plan. Keyed on the task's own status, not its phase's (`cancelled` stays an `error`).
 - **In `task context`:** the pack gains a `## Declared decisions` section with the full body of each referenced file, **inserted regardless of `context_size`**. This is additive to the existing `context_size: large` allDecisions path; files appearing in both are surfaced once under "Declared decisions" and filtered out of the existing "Related Decisions" section.
 - **In the decision gate:** when a task (or its phase) is `requires_decision: true`, `decision_refs` feed the [decision gate](decision-gate.md) with **all-must-be-accepted** semantics — `verify` / `task complete` / `task record-done` stay blocked until **every** referenced ADR is `**Status:** accepted`. With no `decision_refs`, the gate falls back to a filename scan of `design/decisions/` (any-accepted-wins). `phase import --scaffold-decisions` auto-generates `proposed` ADR stubs for the referenced paths (or the default `design/decisions/<task-id>.md`) so there is something to fill in and accept. See the [decision-gate concept](decision-gate.md) for the full model.
 
@@ -93,7 +93,7 @@ tasks:
 
 ### `acceptance_refs`
 
-- **In `plan lint`:** path-safety (`TASK_ACCEPTANCE_REF_UNSAFE_PATH`) and a **status-aware** existence check (`TASK_ACCEPTANCE_REF_NOT_FOUND`) — `error` while the task is live, advisory `warning` (`affects_exit: false`) once the task is `done`, like `decision_refs`.
+- **In `plan lint`:** path-safety (`TASK_ACCEPTANCE_REF_UNSAFE_PATH`) and a **status-aware** existence check (`TASK_ACCEPTANCE_REF_NOT_FOUND`) — `error` for any not-`done` task, advisory `warning` (`affects_exit: false`) once the task is `done`, like `decision_refs`.
 - **In `task context`:** the pack gains a `## Acceptance references` section with the path list only — no content excerpt.
 - **In `task finalize`:** each declared path is surfaced in `acceptance_refs_check[]` with whether it exists on disk (existence only; semantic validation of the file content is out of scope).
 

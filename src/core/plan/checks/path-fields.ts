@@ -98,7 +98,7 @@ export async function detectTaskDecisionRefNotFound(
             severity: historical ? "warning" : "error",
             ...(historical ? { affects_exit: false } : {}),
             message: historical
-              ? `Task "${task.id}" is done; its decision_refs path "${p}" is no longer on disk — advisory only (the decision gate already passed). Restore the file if this was accidental; if the decision was intentionally retired, leave the ref as a historical annotation or drop it if you no longer need it.`
+              ? `Task "${task.id}" is done; its decision_refs path "${p}" is no longer on disk — advisory only. The task has already completed, so the ref is now a historical annotation, not a live file requirement. Restore the file if this was accidental, or drop the ref if the decision was intentionally retired and you no longer need it.`
               : `Task "${task.id}" decision_refs path "${p}" does not exist on disk`,
             file: ref.path,
             phase_id: phase.id,
@@ -390,7 +390,7 @@ export async function detectTaskAcceptanceRefNotFound(
             severity: historical ? "warning" : "error",
             ...(historical ? { affects_exit: false } : {}),
             message: historical
-              ? `Task "${task.id}" is done; its acceptance_refs path "${p}" is no longer on disk — advisory only. Restore the file if this was accidental; if it was intentionally removed, leave or drop the stale ref as you prefer.`
+              ? `Task "${task.id}" is done; its acceptance_refs path "${p}" is no longer on disk — advisory only. The task has already completed, so the ref is now a historical annotation, not a live file requirement. Restore the file if this was accidental, or drop the ref if it was intentionally removed.`
               : `Task "${task.id}" acceptance_refs path "${p}" does not exist on disk`,
             file: ref.path,
             phase_id: phase.id,
