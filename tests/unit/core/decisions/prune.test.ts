@@ -85,6 +85,49 @@ describe("evaluatePrune — target validation", () => {
   });
 });
 
+describe("evaluatePrune — target must be an accepted, readable, top-level record", () => {
+  for (const status of ["proposed", "draft", "rejected", "superseded"]) {
+    it(`blocks a ${status} target (prune retires settled decisions only)`, async () => {
+      await writeDecision("foo-rfc.md", `# RFC\n\n**Status:** ${status}\n\n## Decision\n\nx`);
+      const res = await evaluatePrune(cwd, "design/decisions/foo-rfc.md", []);
+      expect(res.eligible).toBe(false);
+      expect(res.blocks.find((b) => b.gate === "target_not_accepted")).toMatchObject({ status });
+    });
+  }
+
+  it("blocks an unknown-status target", async () => {
+    await writeDecision("foo-rfc.md", `# RFC\n\n**Status:** acceptd\n\nx`); // typo
+    const res = await evaluatePrune(cwd, "design/decisions/foo-rfc.md", []);
+    expect(res.blocks.some((b) => b.gate === "target_not_accepted")).toBe(true);
+  });
+
+  it("blocks an empty target", async () => {
+    await writeDecision("foo-rfc.md", "");
+    const res = await evaluatePrune(cwd, "design/decisions/foo-rfc.md", []);
+    expect(res.blocks.some((b) => b.gate === "target_not_accepted")).toBe(true);
+  });
+
+  it("treats a status-less ADR as accepted (existing lenient classifier)", async () => {
+    await writeDecision("foo-rfc.md", "# RFC\n\nA decision with no status line.");
+    const res = await evaluatePrune(cwd, "design/decisions/foo-rfc.md", []);
+    expect(res.blocks.some((b) => b.gate === "target_not_accepted")).toBe(false);
+    expect(res.eligible).toBe(true);
+  });
+
+  it("blocks target_unreadable when the path is a directory named *.md", async () => {
+    await mkdir(join(cwd, "design", "decisions", "dir-rfc.md"), { recursive: true });
+    const res = await evaluatePrune(cwd, "design/decisions/dir-rfc.md", []);
+    expect(res.eligible).toBe(false);
+    expect(res.blocks.some((b) => b.gate === "target_unreadable")).toBe(true);
+  });
+
+  it("rejects a nested decision path as target_invalid (top-level only in PR-C1a)", async () => {
+    const res = await evaluatePrune(cwd, "design/decisions/archive/foo-rfc.md", []);
+    expect(res.decision).toBeNull();
+    expect(res.blocks[0]?.gate).toBe("target_invalid");
+  });
+});
+
 describe("evaluatePrune — eligible", () => {
   it("is eligible when referenced only by a DONE task, no commitments, no live dependants", async () => {
     await writeDecision("foo-rfc.md", ACCEPTED);

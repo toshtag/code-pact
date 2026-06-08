@@ -1,9 +1,9 @@
 import { readFile } from "node:fs/promises";
 import { join, posix } from "node:path";
 import type { PhaseEntry } from "../plan/state.ts";
-import { fileExists } from "../plan/checks/fs.ts";
 import { normalizePrunedDecisionPath } from "./pruned-ledger.ts";
 import {
+  type AdrAcceptance,
   classifyAdr,
   isDecisionRequiredForTask,
   makeDecisionResolver,
@@ -20,6 +20,8 @@ import {
 export type PruneBlock =
   | { gate: "target_invalid"; detail: string }
   | { gate: "target_missing"; detail: string }
+  | { gate: "target_unreadable"; detail: string }
+  | { gate: "target_not_accepted"; acceptance: AdrAcceptance; status: string | null }
   | {
       gate: "referencing_task_not_done";
       task_id: string;
@@ -28,7 +30,8 @@ export type PruneBlock =
       status: string;
     }
   | { gate: "open_commitments"; open_items: number }
-  | { gate: "live_decision_depends"; decision: string; status: string };
+  | { gate: "live_decision_depends"; decision: string; status: string }
+  | { gate: "dependency_unreadable"; decision: string };
 
 export type PruneReferencingTask = {
   task_id: string;
@@ -80,8 +83,11 @@ function decisionLinksTo(content: string, target: string): boolean {
  *  3. **No live decision depends on it** — no `proposed`/`draft` decision links
  *     to it (a decision still being made may build on this rationale).
  *
- * The target itself must be a real `design/decisions/**.md` record (not
- * README/PRUNED, not an outside path) that exists on disk.
+ * The target must be a **readable, top-level `design/decisions/<name>.md`**
+ * record (not README/PRUNED, not an outside/traversing/nested path) that is an
+ * **accepted** decision — `decision prune` retires *settled* records, never a
+ * `proposed`/`draft`/`rejected`/`superseded`/empty/unknown one. A status-less
+ * ADR is treated as accepted, per the existing lenient classifier.
  */
 export async function evaluatePrune(
   cwd: string,
@@ -106,8 +112,36 @@ export async function evaluatePrune(
   const blocks: PruneBlock[] = [];
   const referencing: PruneReferencingTask[] = [];
 
-  if (!(await fileExists(join(cwd, decision)))) {
-    blocks.push({ gate: "target_missing", detail: `${decision} does not exist on disk` });
+  // The target must be a readable regular file — read it ONCE and key both the
+  // "is it accepted" and "open commitments" checks off the same content. A
+  // missing file (ENOENT) and an unreadable one (a directory named `*.md`,
+  // EACCES, EISDIR) are distinct fail-CLOSED blocks; we never proceed as if a
+  // file we could not read had no commitments.
+  let content: string | null = null;
+  try {
+    content = await readFile(join(cwd, decision), "utf8");
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") {
+      blocks.push({ gate: "target_missing", detail: `${decision} does not exist on disk` });
+    } else {
+      blocks.push({
+        gate: "target_unreadable",
+        detail: `${decision} is not a readable file (${code ?? "read error"})`,
+      });
+    }
+  }
+
+  // Target gate — only an ACCEPTED decision is prunable (settled record).
+  if (content !== null) {
+    const cls = classifyAdr(content);
+    if (cls.acceptance !== "accepted") {
+      blocks.push({
+        gate: "target_not_accepted",
+        acceptance: cls.acceptance,
+        status: cls.status.word,
+      });
+    }
   }
 
   // Gate 1 — referencing tasks (collect all; block on any not-done).
@@ -139,13 +173,9 @@ export async function evaluatePrune(
     }
   }
 
-  // Gate 2 — open implementation commitments on the target.
-  let content: string | null = null;
-  try {
-    content = await readFile(join(cwd, decision), "utf8");
-  } catch {
-    content = null;
-  }
+  // Gate 2 — open implementation commitments on the target (uses the content
+  // already read above; skipped when the target was missing/unreadable, which is
+  // already a block).
   if (content !== null) {
     const { hasSection, items } = parseAdrCommitments(content);
     const open = items.filter((i) => !i.done).length;
@@ -160,7 +190,12 @@ export async function evaluatePrune(
     let other: string;
     try {
       other = await readFile(join(cwd, "design", "decisions", name), "utf8");
-    } catch {
+    } catch (err) {
+      // ENOENT = the file raced away between readdir and read → genuinely gone,
+      // so it cannot be a live dependant; skip. Any other error means we could
+      // NOT verify it is not a dependant → fail closed with a block.
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") continue;
+      blocks.push({ gate: "dependency_unreadable", decision: otherPath });
       continue;
     }
     const cls = classifyAdr(other);

@@ -42,11 +42,12 @@ Retires a shipped decision from the live plane. Reuses the existing **prune-if-c
 
 **Eligibility (all required; else `DECISION_PRUNE_NOT_ELIGIBLE`, exit 2, zero writes):**
 
+0. the target is a **readable, top-level `design/decisions/<name>.md`** record (not README/PRUNED, not an outside/traversing/nested path) that is an **accepted** decision — prune retires *settled* records only; a `proposed`/`draft`/`rejected`/`superseded`/empty/unknown target is rejected (a status-less ADR counts as accepted per the lenient classifier);
 1. every task/phase that references the decision is `done` — no live gate still needs it;
 2. it has no **open** (unchecked) `## Implementation commitments` — pruning would orphan declared downstream work;
-3. no **live** (non-`done`) decision references it — a future decision still depends on this rationale.
+3. no **live** (`proposed`/`draft`) decision references it — a future decision still depends on this rationale.
 
-These three gates are exactly the "integrity + no future conflict" guarantee: you can only retire a decision whose every obligation is discharged.
+These gates are exactly the "integrity + no future conflict" guarantee: you can only retire a settled decision whose every obligation is discharged. The verdict is one pure function (`evaluatePrune`) that `--dry-run` and `--write` share — dry-run never relaxes a gate.
 
 **On `--write`:** remove the decision file; rewrite inbound `.md` references (the README index row → a tombstone line; other doc/RFC links → delink, or repoint at the CHANGELOG entry); append a ledger row. The `decision_refs` check (1) then tolerates the absent pruned decision silently.
 
@@ -105,7 +106,7 @@ Direct answer to "should release notes be the source of truth?" — **No.** `CHA
 ## Implementation commitments
 
 - [x] PR-A — status-aware `TASK_DECISION_REF_NOT_FOUND` / `TASK_ACCEPTANCE_REF_NOT_FOUND` (loosening, keyed on `task.status === "done"`) + unit tests + `cli-contract.md` note. **Merged (#395).** Shipped decisions are now deletable-without-breakage.
-- [ ] PR-B — `design/decisions/PRUNED.md` ledger + reader + the ledger-aware branch of the status-aware check (a `done`-task **`decision_refs`** recorded in the ledger is silent; one not recorded still warns). The ledger silences **`decision_refs` only** (not `acceptance_refs`, which routinely point at non-decisions), entries are confined to `design/decisions/**.md` (re-validated — `PRUNED.md` is user-editable), and the ledger is excluded from both the decision-candidate scan and the context-pack decision loader.
+- [ ] PR-B — `design/decisions/PRUNED.md` ledger + reader + the ledger-aware branch of the status-aware check (a `done`-task **`decision_refs`** recorded in the ledger is silent; one not recorded still warns). The ledger silences **`decision_refs` only** (not `acceptance_refs`, which routinely point at non-decisions), entries are confined to top-level `design/decisions/*.md` (re-validated — `PRUNED.md` is user-editable), and the ledger is excluded from both the decision-candidate scan and the context-pack decision loader.
 - [ ] PR-C — `decision prune` command: eligibility gates, inbound-link rewrite, ledger append, JSON envelope, `DECISION_PRUNE_NOT_ELIGIBLE`.
 - [ ] PR-D — `project.yaml: decision_retention` + the `compress-on-ship` form.
 - [ ] PR-E — `CHANGELOG.md` rolling-archive tooling + release-notes generation from the CHANGELOG.
