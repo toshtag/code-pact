@@ -212,6 +212,33 @@ describe("runDecisionPrune", () => {
     expect(res.evaluation.blocks.some((b) => b.gate === "link_rewrite_unsupported")).toBe(true);
   });
 
+  it("fail-closed: an unreadable doc source directory blocks", async () => {
+    await writeDecision("foo-rfc.md");
+    await writeDoneTaskPhase("design/decisions/foo-rfc.md");
+    await writeFile(join(cwd, "docs"), "not a directory"); // readdir(docs) → ENOTDIR
+    const res = await runDecisionPrune(cwd, "design/decisions/foo-rfc.md");
+    expect(res.eligible).toBe(false);
+    expect(res.evaluation.blocks.some((b) => b.gate === "link_rewrite_scan_unreadable")).toBe(true);
+  });
+
+  it("surfaces EVERY failing gate together — core ineligibility AND a link-rewrite issue", async () => {
+    // open commitments (core ineligible) + a reference-style inbound link.
+    await writeDecision(
+      "foo-rfc.md",
+      "# RFC\n\n**Status:** accepted\n\n## Implementation commitments\n\n- [ ] still open\n",
+    );
+    await writeDoneTaskPhase("design/decisions/foo-rfc.md");
+    await mkdir(join(cwd, "docs"), { recursive: true });
+    await writeFile(
+      join(cwd, "docs", "r.md"),
+      "Uses [foo][f].\n\n[f]: ../design/decisions/foo-rfc.md\n",
+    );
+    const res = await runDecisionPrune(cwd, "design/decisions/foo-rfc.md");
+    const gates = res.evaluation.blocks.map((b) => b.gate);
+    expect(gates).toContain("open_commitments");
+    expect(gates).toContain("link_rewrite_unsupported"); // not hidden behind core ineligibility
+  });
+
 });
 
 describe("decision-prune renderers", () => {

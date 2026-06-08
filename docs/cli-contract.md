@@ -2231,7 +2231,7 @@ code-pact phase reconcile P11 --write --json
 
 ## `decision prune`
 
-`decision prune <path> [--json]` previews retiring a shipped, **accepted** decision record from the live plane. **Dry-run only in this release** — it deletes nothing, rewrites no links, and appends no `PRUNED.md` row; it reports the eligibility verdict and a (currently partial) write plan. The eligibility verdict is one pure function shared by dry-run and the future `--write` — dry-run never relaxes a gate. Eligible exits 0; ineligible exits 2 with [`DECISION_PRUNE_NOT_ELIGIBLE`](#public-codes-top-level-error-envelopes).
+`decision prune <path> [--json]` previews retiring a shipped, **accepted** decision record from the live plane. **Dry-run only in this release** — it deletes nothing, rewrites no links, and appends no `PRUNED.md` row; it reports the eligibility verdict and the complete inbound-link rewrite plan the future `--write` path will execute. The verdict and the plan are produced by code shared with `--write` — dry-run never relaxes a gate or shortens the plan. Eligible exits 0; ineligible exits 2 with [`DECISION_PRUNE_NOT_ELIGIBLE`](#public-codes-top-level-error-envelopes).
 
 Success envelope (`--json`):
 
@@ -2254,7 +2254,7 @@ Success envelope (`--json`):
 }
 ```
 
-`plan.link_rewrite.status` is **`"ready"`** — `items[]` is the complete set of inbound references that `--write` (PR-C2) will rewrite, collected once and shared by the dry-run preview and `--write`. The collector scans **exactly** the source surface `check:doc-links` validates: root-level `.md` **except `CHANGELOG.md`** (a durable authored record, never rewritten), `docs/**`, `design/**`, and `.github/**` (`.md` + `.yml` / `.yaml`). It is line- and column-accurate, resolves each link relative to its **own source file's directory**, and — like `check:doc-links` — **ignores image embeds (`![]()`) and links inside inline code or fenced code blocks** (a fenced-block link is recorded as `leave_as_is`; images / inline-code are skipped). Each `items[]` entry carries everything `--write` needs to act on the exact span without re-parsing:
+`plan.link_rewrite.status` is **`"ready"`** — `items[]` is the complete set of inbound references that `--write` (PR-C2) will rewrite, collected once and shared by the dry-run preview and `--write`. The collector scans **exactly** the source surface `check:doc-links` validates: root-level `.md` **except `CHANGELOG.md`** (a durable authored record, never rewritten), `docs/**`, `design/**`, and `.github/**` (`.md` + `.yml`). It is line- and column-accurate and resolves each link relative to its **own source file's directory**. Image embeds (`![]()`) and links inside inline code are **skipped** (matching `check:doc-links`); an inline link inside a fenced code block is reported as `leave_as_is` so the dry-run stays transparent, but `--write` will not modify it. Each `items[]` entry carries everything `--write` needs to act on the exact span without re-parsing:
 
 | Field | Meaning |
 | --- | --- |

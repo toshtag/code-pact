@@ -112,7 +112,7 @@ Direct answer to "should release notes be the source of truth?" — **No.** `CHA
 - PR-C — `decision prune`, split (destructive work ships as small, separately-reviewable layers):
   - [x] **PR-C1a** — the `evaluatePrune` eligibility verdict (target-accepted/readable/top-level + the three gates), fail-closed and total. **Merged (#397).**
   - [x] **PR-C1b** — the `decision prune <path>` command: dry-run report of the verdict + plan, JSON envelope, `DECISION_PRUNE_NOT_ELIGIBLE`, CLI wiring. No `--write`. **Merged (#398).**
-  - [x] **PR-C1c** — the inbound-`.md`-link collector (`source_file`/`line`/`raw_href`/`normalized_target`/`link_kind`/`rewrite_action`), line-accurate, code-fence-aware, resolving each link from its own source dir; shared by the dry-run plan and `--write`. Distinct from the conservative eligibility parser. Fills `plan.link_rewrite` (`status: "ready"`).
+  - [x] **PR-C1c** — the inbound doc-link collector (scans the `check:doc-links` surface incl. `.github/*.yml`; items carry `source_file`/`line`/`column`/`raw_link`/`raw_href`/`link_text`/`normalized_target`/`link_kind`/`rewrite_action`), line/column-accurate, code-fence-aware, resolving each link from its own source dir; shared by the dry-run plan and `--write`. Distinct from the conservative eligibility parser. Reference-style and unreadable sources fail closed as blocks; fills `plan.link_rewrite` (`status: "ready"`).
   - [ ] **PR-C2** — `--write`: file deletion + inbound link rewrite + ledger append, executing the C1c plan.
 - [ ] PR-D — `project.yaml: decision_retention` + the `compress-on-ship` form.
 - [ ] PR-E — `CHANGELOG.md` rolling-archive tooling + release-notes generation from the CHANGELOG.

@@ -1,6 +1,5 @@
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { join, posix } from "node:path";
-import { walkAndMatch } from "../glob.ts";
 
 /**
  * One inbound reference to a pruned decision that `--write` (PR-C2) will rewrite,
@@ -27,7 +26,7 @@ export type LinkRewriteItem = {
   rewrite_action: "tombstone" | "delink" | "leave_as_is";
 };
 
-/** An inbound reference prune cannot safely plan a rewrite for — fail-closed. */
+/** An inbound reference (or a discovery failure) prune cannot safely plan — fail-closed. */
 export type LinkScanIssue = {
   source_file: string;
   line: number | null;
@@ -43,6 +42,17 @@ const INLINE =
   /\[([^\]]*)\]\(\s*(<[^>]+>|[^)\s]+)(?:[ \t]+(?:"[^"]*"|'[^']*'|\([^)]*\)))?\s*\)/g;
 const REF_DEF = /^[ \t]{0,3}\[[^\]]+\]:[ \t]*(<[^>]+>|\S+)(?:[ \t]+(?:"[^"]*"|'[^']*'|\([^)]*\)))?[ \t]*$/;
 const FENCE = /^\s*(```+|~~~+)/;
+
+// The exact source surface check:doc-links validates (scripts/check-doc-links.mjs):
+// root .md (CHANGELOG.md excluded there too), docs/** .md, design/** .md,
+// .github/** .md + .yml. Kept in lock-step on purpose — these are the files a
+// post-prune broken link would be flagged in.
+const ROOTS: { rel: string; recursive: boolean; exts: string[] }[] = [
+  { rel: ".", recursive: false, exts: [".md"] },
+  { rel: "docs", recursive: true, exts: [".md"] },
+  { rel: "design", recursive: true, exts: [".md"] },
+  { rel: ".github", recursive: true, exts: [".md", ".yml"] },
+];
 
 function stripAngleBrackets(raw: string): string {
   const s = raw.trim();
@@ -62,43 +72,57 @@ function resolveFrom(sourceFile: string, href: string): string {
   return posix.normalize(posix.join(posix.dirname(sourceFile), dest)).replace(/^(?:\.\/)+/, "");
 }
 
-/** The exact source surface `check:doc-links` validates. */
-async function linkSurfaceFiles(cwd: string): Promise<string[]> {
-  const md = await walkAndMatch(cwd, "**/*.md");
-  const yml = [
-    ...(await walkAndMatch(cwd, "**/*.yml")),
-    ...(await walkAndMatch(cwd, "**/*.yaml")),
-  ];
-  const out: string[] = [];
-  for (const rel of md) {
-    if (rel === "CHANGELOG.md") continue; // durable authored record — never rewritten (excluded by check-doc-links too)
-    if (!rel.includes("/") || rel.startsWith("docs/") || rel.startsWith("design/") || rel.startsWith(".github/")) {
-      out.push(rel);
+/**
+ * STRICT walk of the source surface. Unlike the best-effort `walkAndMatch`, an
+ * unreadable EXISTING directory is not silently skipped — it becomes an
+ * `unreadable` issue so the plan can fail closed (a directory we couldn't read
+ * might hide an inbound link). A genuinely absent root (ENOENT) is fine.
+ */
+async function discoverSources(cwd: string): Promise<{ files: string[]; issues: LinkScanIssue[] }> {
+  const files = new Set<string>();
+  const issues: LinkScanIssue[] = [];
+
+  async function walk(rel: string, recursive: boolean, exts: string[]): Promise<void> {
+    let entries;
+    try {
+      entries = await readdir(join(cwd, rel), { withFileTypes: true });
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return; // absent root/subdir is fine
+      issues.push({ source_file: rel === "." ? "." : rel, line: null, reason: "unreadable" });
+      return;
+    }
+    for (const e of entries) {
+      const childRel = rel === "." ? e.name : `${rel}/${e.name}`;
+      if (e.isDirectory()) {
+        if (recursive) await walk(childRel, true, exts);
+      } else if (e.isFile()) {
+        if (childRel === "CHANGELOG.md") continue; // durable record, never rewritten
+        if (exts.some((x) => childRel.endsWith(x))) files.add(childRel);
+      }
     }
   }
-  for (const rel of yml) if (rel.startsWith(".github/")) out.push(rel);
-  return out.sort();
+
+  for (const r of ROOTS) await walk(r.rel, r.recursive, r.exts);
+  return { files: [...files], issues };
 }
 
 /**
  * Collect every inbound reference to `target` across the doc surface, with the
  * action `--write` would take: a `README.md` decision-index row → `tombstone`;
  * an inline body link → `delink`; a link inside a fenced code block →
- * `leave_as_is`. **Excludes** image embeds (`![]()`) and inline-code links (both
- * excluded by check-doc-links — rewriting them would corrupt, not fix). A
- * reference-style link (`[t][label]` + `[label]: …`) cannot be rewritten by the
- * span-local executor without also touching its usages, so it is returned as an
- * `issue`, not an item; an unreadable source file is likewise an `issue`. The
- * caller fails CLOSED on any issue.
+ * `leave_as_is`. **Excludes** image embeds (`![]()`) and inline-code links.
+ * A reference-style link **outside** code is unsupported (a fail-closed issue);
+ * inside a code block it is an example and ignored. An unreadable source file or
+ * directory is a fail-closed issue too.
  */
 export async function collectInboundLinks(
   cwd: string,
   target: string,
 ): Promise<InboundLinkScan> {
+  const { files, issues } = await discoverSources(cwd);
   const items: LinkRewriteItem[] = [];
-  const issues: LinkScanIssue[] = [];
 
-  for (const rel of await linkSurfaceFiles(cwd)) {
+  for (const rel of files.sort()) {
     if (rel === target) continue; // the file being pruned itself
     let content: string;
     try {
@@ -126,9 +150,10 @@ export async function collectInboundLinks(
         continue;
       }
 
-      // reference-style definition pointing at the target → unsupported (fail-closed).
+      // A reference-style definition pointing at the target is unsupported — but
+      // ONLY when it is a real definition, not an example inside a code block.
       const ref = REF_DEF.exec(original);
-      if (ref && resolveFrom(rel, ref[1]!) === target) {
+      if (ref && !inFence && resolveFrom(rel, ref[1]!) === target) {
         issues.push({ source_file: rel, line: i + 1, reason: "unsupported_reference_style" });
         continue;
       }

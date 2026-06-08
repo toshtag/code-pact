@@ -99,12 +99,14 @@ describe("collectInboundLinks — exclusions (match check:doc-links)", () => {
     expect((await collectInboundLinks(cwd, TARGET)).items).toEqual([]);
   });
 
-  it("DOES scan .github .md and .yml sources", async () => {
+  it("scans .github .md and .yml (the check:doc-links surface) but NOT .yaml", async () => {
     await write(".github/PULL_REQUEST_TEMPLATE.md", "[d](../design/decisions/foo-rfc.md)\n");
     await write(".github/x.yml", "body: see [d](../design/decisions/foo-rfc.md)\n");
+    await write(".github/y.yaml", "body: see [d](../design/decisions/foo-rfc.md)\n");
     const sources = (await collectInboundLinks(cwd, TARGET)).items.map((i) => i.source_file);
     expect(sources).toContain(".github/PULL_REQUEST_TEMPLATE.md");
     expect(sources).toContain(".github/x.yml");
+    expect(sources).not.toContain(".github/y.yaml"); // .yaml is not in the check:doc-links surface
   });
 });
 
@@ -116,5 +118,17 @@ describe("collectInboundLinks — fail-closed issues", () => {
     expect(issues).toEqual([
       { source_file: "docs/r.md", line: 3, reason: "unsupported_reference_style" },
     ]);
+  });
+
+  it("a reference-style definition INSIDE a fenced code block is an example — not an issue", async () => {
+    await write("docs/ex.md", "# E\n\n```md\n[f]: ../design/decisions/foo-rfc.md\n```\n");
+    expect(await collectInboundLinks(cwd, TARGET)).toEqual({ items: [], issues: [] });
+  });
+
+  it("an unreadable source directory → unreadable issue (strict walk, not a silent skip)", async () => {
+    // `docs` exists but is a FILE, so readdir fails with ENOTDIR (≠ ENOENT).
+    await write("docs", "not a directory");
+    const { issues } = await collectInboundLinks(cwd, TARGET);
+    expect(issues).toContainEqual({ source_file: "docs", line: null, reason: "unreadable" });
   });
 });

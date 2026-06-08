@@ -114,6 +114,37 @@ describe("decision prune — CLI (dry-run)", () => {
     });
   });
 
+  it("eligible with a real inbound link → non-empty link_rewrite.items[] with the full field shape (JSON)", async () => {
+    const p = await project(ACCEPTED, "done");
+    await mkdir(join(p.dir, "docs"), { recursive: true });
+    await writeFile(join(p.dir, "docs", "x.md"), "# X\n\nSee [d](../design/decisions/foo-rfc.md).\n");
+    const res = p.run(["decision", "prune", "design/decisions/foo-rfc.md", "--json"]);
+    const env = expectJsonOk<{
+      plan: { link_rewrite: { status: string; items: Record<string, unknown>[] } };
+    }>(res);
+    expect(env.data.plan.link_rewrite.status).toBe("ready");
+    const item = env.data.plan.link_rewrite.items.find((i) => i.source_file === "docs/x.md");
+    expect(item).toBeDefined();
+    expect(Object.keys(item!).sort()).toEqual(
+      [
+        "column",
+        "line",
+        "link_kind",
+        "link_text",
+        "normalized_target",
+        "raw_href",
+        "raw_link",
+        "rewrite_action",
+        "source_file",
+      ].sort(),
+    );
+    expect(item).toMatchObject({
+      link_kind: "inline",
+      rewrite_action: "delink",
+      normalized_target: "design/decisions/foo-rfc.md",
+    });
+  });
+
   it("ineligible → data.plan is null and data.blocks[].gate is populated (JSON)", async () => {
     const p = await project("# RFC\n\n**Status:** proposed\n\nx", "done");
     const res = p.run(["decision", "prune", "design/decisions/foo-rfc.md", "--json"]);
