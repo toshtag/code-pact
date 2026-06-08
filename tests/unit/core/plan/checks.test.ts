@@ -700,6 +700,81 @@ describe("detectTaskDecisionRefNotFound (fs-backed)", () => {
     expect(issues[0]?.severity).toBe("error");
     expect(issues[0]?.affects_exit).toBeUndefined();
   });
+
+  it("SILENT (no issue) when a DONE task's missing ref is recorded in PRUNED.md", async () => {
+    await makeFile(
+      "design/decisions/PRUNED.md",
+      `| Decision | Pruned |\n| --- | --- |\n| \`design/decisions/retired.md\` | 2026-06-08 |\n`,
+    );
+    const entries = [
+      entry(
+        phase("P1", [
+          task("P1-T1", {
+            decision_refs: ["design/decisions/retired.md"],
+            status: "done",
+          }),
+        ]),
+      ),
+    ];
+    expect(await detectTaskDecisionRefNotFound(cwd, entries)).toEqual([]);
+  });
+
+  it("still WARNING for a DONE task's missing ref NOT in the ledger (accidental delete is not silenced)", async () => {
+    await makeFile(
+      "design/decisions/PRUNED.md",
+      `| Decision | Pruned |\n| --- | --- |\n| \`design/decisions/something-else.md\` | 2026-06-08 |\n`,
+    );
+    const entries = [
+      entry(
+        phase("P1", [
+          task("P1-T1", {
+            decision_refs: ["design/decisions/retired.md"],
+            status: "done",
+          }),
+        ]),
+      ),
+    ];
+    const issues = await detectTaskDecisionRefNotFound(cwd, entries);
+    expect(issues[0]?.severity).toBe("warning");
+  });
+
+  it("still ERROR for a LIVE task even if the missing ref is in the ledger (ledger never silences a live gate)", async () => {
+    await makeFile(
+      "design/decisions/PRUNED.md",
+      `| Decision | Pruned |\n| --- | --- |\n| \`design/decisions/retired.md\` | 2026-06-08 |\n`,
+    );
+    const entries = [
+      entry(
+        phase("P1", [
+          task("P1-T1", {
+            decision_refs: ["design/decisions/retired.md"],
+            status: "planned",
+          }),
+        ]),
+      ),
+    ];
+    const issues = await detectTaskDecisionRefNotFound(cwd, entries);
+    expect(issues[0]?.severity).toBe("error");
+  });
+
+  it("still WARNING when a non-decision path (docs/) is listed in the ledger — the ledger only tombstones design/decisions/**.md", async () => {
+    await makeFile(
+      "design/decisions/PRUNED.md",
+      `| Decision | Pruned |\n| --- | --- |\n| \`docs/cli-contract.md\` | 2026-06-08 |\n`,
+    );
+    const entries = [
+      entry(
+        phase("P1", [
+          task("P1-T1", {
+            decision_refs: ["docs/cli-contract.md"],
+            status: "done",
+          }),
+        ]),
+      ),
+    ];
+    const issues = await detectTaskDecisionRefNotFound(cwd, entries);
+    expect(issues[0]?.severity).toBe("warning"); // NOT silenced
+  });
 });
 
 describe("detectTaskReadsNoMatch (fs-backed)", () => {
@@ -761,6 +836,27 @@ describe("detectTaskAcceptanceRefNotFound (fs-backed)", () => {
     expect(issues[0]?.severity).toBe("warning");
     expect(issues[0]?.affects_exit).toBe(false);
     expect(issues[0]?.details?.historical).toBe(true);
+  });
+
+  it("PRUNED.md never silences an acceptance_ref (the ledger is a decision tombstone, not a retired-ref table)", async () => {
+    await makeFile(
+      "design/decisions/PRUNED.md",
+      `| Decision | Pruned |\n| --- | --- |\n| \`design/decisions/retired.md\` | 2026-06-08 |\n`,
+    );
+    const entries = [
+      entry(
+        phase("P1", [
+          task("P1-T1", {
+            // even an acceptance_ref pointing at the ledgered decision path
+            acceptance_refs: ["design/decisions/retired.md"],
+            status: "done",
+          }),
+        ]),
+      ),
+    ];
+    const issues = await detectTaskAcceptanceRefNotFound(cwd, entries);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.severity).toBe("warning"); // advisory, but NOT silent
   });
 });
 

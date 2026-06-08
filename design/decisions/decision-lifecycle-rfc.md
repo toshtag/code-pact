@@ -7,11 +7,11 @@
 
 ## Summary
 
-A `decision_ref` has a **dual nature** the integrity checker currently conflates: while its task is live it is a **gate requirement** (an accepted ADR must exist); once the task is `done` it is a **historical annotation** (the decision *was* recorded here). Today the checker enforces "must exist" forever, so a shipped RFC is **undeletable** — and whether to keep a shipped design record is a matter of taste, not something the spec should force. This RFC makes retention a **policy**, gives `done`-task refs a soft integrity story, and adds an eligibility-gated `decision prune` command so a shipped decision can be retired cleanly, auditable, without future-conflict.
+A `decision_ref` has a **dual nature** the integrity checker conflated (before PR-A): while its task is live it is a **gate requirement** (an accepted ADR must exist); once the task is `done` it is a **historical annotation** (the decision *was* recorded here). The checker enforced "must exist" forever, so a shipped RFC was **undeletable** — and whether to keep a shipped design record is a matter of taste, not something the spec should force. (PR-A, merged, gives `done`-task refs the soft integrity story; this RFC's remaining layers build the command + policy on top.) This RFC makes retention a **policy**, gives `done`-task refs a soft integrity story, and adds an eligibility-gated `decision prune` command so a shipped decision can be retired cleanly, auditable, without future-conflict.
 
-## Problem — a shipped decision record is undeletable today
+## Problem — a shipped decision record was undeletable
 
-Verified in [`src/core/plan/checks/path-fields.ts`](../../src/core/plan/checks/path-fields.ts): `detectTaskDecisionRefNotFound` (and the acceptance-ref twin) emit `TASK_DECISION_REF_NOT_FOUND` at **`severity: "error"`**, iterating every task **without consulting its status**. So deleting an RFC that any `done` task references:
+Before PR-A, in [`src/core/plan/checks/path-fields.ts`](../../src/core/plan/checks/path-fields.ts), `detectTaskDecisionRefNotFound` (and the acceptance-ref twin) emitted `TASK_DECISION_REF_NOT_FOUND` at **`severity: "error"`**, iterating every task **without consulting its status**. So deleting an RFC that any `done` task referenced:
 
 1. fails `plan lint` / `validate` **by default** (an `error` fails exit even without `--strict`);
 2. breaks `check:doc-links` on every inbound `.md` link (the `design/decisions/README.md` index row, other RFCs' `Related:` / `References`, concept docs).
@@ -22,14 +22,17 @@ The asymmetry that proves this is a gap, not a guard: the **`reads`** field in t
 
 ### 1. Status-aware ref integrity (the loosening)
 
-`detectTaskDecisionRefNotFound` / `detectTaskAcceptanceRefNotFound` consult the **referencing task's own status** (not the phase's — a `done` phase holding an open task must not loosen that task's live gate):
+`detectTaskDecisionRefNotFound` / `detectTaskAcceptanceRefNotFound` consult the **referencing task's own status** (not the phase's — a `done` phase holding an open task must not loosen that task's live gate). **Only `decision_refs` are silenced by the ledger** — `acceptance_refs` routinely point at non-decisions (`docs/`, phase YAML), so the decision tombstone never silences them:
 
-| Referencing task | ref target on disk | Result |
-| --- | --- | --- |
-| not `done` | missing | `TASK_DECISION_REF_NOT_FOUND` — `error` (unchanged; the gate is live) |
-| `done` | present | OK (unchanged) |
-| `done` | missing **and** in the prune ledger | silent — intentional retirement |
-| `done` | missing **and** not in the ledger | `warning`, `affects_exit: false` — message offers `decision prune` (retire properly) or restore (possible accidental delete) |
+| Field | Referencing task | target on disk | Result |
+| --- | --- | --- | --- |
+| `decision_refs` | not `done` | missing | `TASK_DECISION_REF_NOT_FOUND` — `error` (the gate is live) |
+| `decision_refs` | `done` | present | OK |
+| `decision_refs` | `done` | missing **and** recorded in `PRUNED.md` | **silent** — intentional decision retirement |
+| `decision_refs` | `done` | missing **and** not recorded | `warning`, `affects_exit: false` — restore (accidental) or `decision prune` (retire properly) |
+| `acceptance_refs` | not `done` | missing | `TASK_ACCEPTANCE_REF_NOT_FOUND` — `error` |
+| `acceptance_refs` | `done` | present | OK |
+| `acceptance_refs` | `done` | missing | `warning`, `affects_exit: false` — **`PRUNED.md` never silences `acceptance_refs`** |
 
 This is a strict **loosening** — it never makes a previously-passing plan fail. A `done` task's gate was satisfied at completion; its ref is now annotation, mirroring the soft `reads` story.
 
@@ -45,7 +48,7 @@ Retires a shipped decision from the live plane. Reuses the existing **prune-if-c
 
 These three gates are exactly the "integrity + no future conflict" guarantee: you can only retire a decision whose every obligation is discharged.
 
-**On `--write`:** remove the decision file; rewrite inbound `.md` references (the README index row → a tombstone line; other doc/RFC links → delink, or repoint at the CHANGELOG entry); append a ledger row. The status-aware check (1) then tolerates the absent ref silently.
+**On `--write`:** remove the decision file; rewrite inbound `.md` references (the README index row → a tombstone line; other doc/RFC links → delink, or repoint at the CHANGELOG entry); append a ledger row. The `decision_refs` check (1) then tolerates the absent pruned decision silently.
 
 ### 3. Tombstone ledger — `design/decisions/PRUNED.md`
 
@@ -101,8 +104,8 @@ Direct answer to "should release notes be the source of truth?" — **No.** `CHA
 
 ## Implementation commitments
 
-- [ ] PR-A — status-aware `TASK_DECISION_REF_NOT_FOUND` / `TASK_ACCEPTANCE_REF_NOT_FOUND` (loosening) + unit tests + `cli-contract.md` note. Smallest, highest-value: shipped decisions become deletable-without-breakage immediately.
-- [ ] PR-B — `design/decisions/PRUNED.md` ledger + the ledger-aware branch of the status-aware check.
+- [x] PR-A — status-aware `TASK_DECISION_REF_NOT_FOUND` / `TASK_ACCEPTANCE_REF_NOT_FOUND` (loosening, keyed on `task.status === "done"`) + unit tests + `cli-contract.md` note. **Merged (#395).** Shipped decisions are now deletable-without-breakage.
+- [ ] PR-B — `design/decisions/PRUNED.md` ledger + reader + the ledger-aware branch of the status-aware check (a `done`-task **`decision_refs`** recorded in the ledger is silent; one not recorded still warns). The ledger silences **`decision_refs` only** (not `acceptance_refs`, which routinely point at non-decisions), entries are confined to `design/decisions/**.md` (re-validated — `PRUNED.md` is user-editable), and the ledger is excluded from both the decision-candidate scan and the context-pack decision loader.
 - [ ] PR-C — `decision prune` command: eligibility gates, inbound-link rewrite, ledger append, JSON envelope, `DECISION_PRUNE_NOT_ELIGIBLE`.
 - [ ] PR-D — `project.yaml: decision_retention` + the `compress-on-ship` form.
 - [ ] PR-E — `CHANGELOG.md` rolling-archive tooling + release-notes generation from the CHANGELOG.

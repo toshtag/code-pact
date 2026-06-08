@@ -53,7 +53,9 @@ the *why* behind the code — the user-facing *how* lives in [`docs/`](../../doc
 `design/decisions/` is the **decision layer**, not a general archive. The
 filename scan and `decision_refs` resolution treat every `.md` here as a
 candidate gate-resolving ADR, so the directory should hold decisions and only
-decisions.
+decisions. Two files are sanctioned exceptions, excluded from that scan by name:
+this `README.md` index and [`PRUNED.md`](PRUNED.md) — the append-only ledger of
+decisions retired by `decision prune` (see [decision-lifecycle-rfc.md](decision-lifecycle-rfc.md)).
 
 **Put here:**
 

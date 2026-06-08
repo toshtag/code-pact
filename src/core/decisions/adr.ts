@@ -31,12 +31,22 @@ export async function readDecisionAdrFiles(cwd: string): Promise<string[]> {
   return (await readDecisionsDir(cwd)).entries;
 }
 
+/**
+ * Files under `design/decisions/` that are NOT decisions and must be skipped by
+ * every candidate scan (gate filename resolution + ADR quality checks): the
+ * index, and the `decision prune` tombstone ledger. Without this, the lenient
+ * "no status line → accepted" rule would misclassify the ledger as an accepted
+ * ADR. See design/decisions/decision-lifecycle-rfc.md.
+ */
+export const NON_DECISION_FILES = new Set(["README.md", "PRUNED.md"]);
+
 /** Like {@link readDecisionAdrFiles} but also reports whether the dir exists. */
 async function readDecisionsDir(
   cwd: string,
 ): Promise<{ present: boolean; entries: string[] }> {
   try {
-    return { present: true, entries: await readdir(join(cwd, "design", "decisions")) };
+    const entries = await readdir(join(cwd, "design", "decisions"));
+    return { present: true, entries: entries.filter((e) => !NON_DECISION_FILES.has(e)) };
   } catch (error) {
     if (isAbsentDecisionsDirError(error)) return { present: false, entries: [] };
     throw error;

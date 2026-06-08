@@ -9,6 +9,7 @@ import {
   walkAndMatch,
 } from "../../glob.ts";
 import { fileExists } from "./fs.ts";
+import { readPrunedLedger, normalizeRelPath } from "../../decisions/pruned-ledger.ts";
 
 // ---------------------------------------------------------------------------
 // Task Readiness Schema detectors
@@ -82,6 +83,7 @@ export async function detectTaskDecisionRefNotFound(
   phases: PhaseEntry[],
 ): Promise<PlanIssue[]> {
   const issues: PlanIssue[] = [];
+  const pruned = await readPrunedLedger(cwd);
   for (const { phase, ref } of phases) {
     for (const task of phase.tasks ?? []) {
       const refs = task.decision_refs ?? [];
@@ -93,6 +95,10 @@ export async function detectTaskDecisionRefNotFound(
         if (safePathReason(p) !== "") continue;
         if (!(await fileExists(join(cwd, p)))) {
           const historical = refIsHistorical(task);
+          // A done task's ref recorded in PRUNED.md is an intentional
+          // retirement — silent. A live task is never silenced (its gate is
+          // still live, even if someone wrongly listed the path).
+          if (historical && pruned.has(normalizeRelPath(p))) continue;
           issues.push({
             code: "TASK_DECISION_REF_NOT_FOUND",
             severity: historical ? "warning" : "error",
@@ -376,6 +382,10 @@ export async function detectTaskAcceptanceRefNotFound(
   cwd: string,
   phases: PhaseEntry[],
 ): Promise<PlanIssue[]> {
+  // NOT ledger-aware: PRUNED.md is the tombstone for *decision* records, and
+  // acceptance_refs routinely point at docs / phase YAML, not decisions. A done
+  // task's missing acceptance_ref stays a PR-A advisory `warning`; it is never
+  // silenced by the decision ledger.
   const issues: PlanIssue[] = [];
   for (const { phase, ref } of phases) {
     for (const task of phase.tasks ?? []) {
