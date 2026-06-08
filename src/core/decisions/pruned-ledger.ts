@@ -72,6 +72,10 @@ export async function readPrunedLedger(cwd: string): Promise<Set<string>> {
   try {
     text = await readFile(join(cwd, "design", "decisions", "PRUNED.md"), "utf8");
   } catch {
+    // Any read failure (absent ENOENT, EACCES, EISDIR) → empty set. This is the
+    // fail-CLOSED direction: an unreadable ledger silences nothing, so a genuinely
+    // pruned ref simply warns again rather than a broken ledger silencing refs it
+    // never listed. Swallowing is therefore safe here, not a hidden hazard.
     return new Set();
   }
   const out = new Set<string>();

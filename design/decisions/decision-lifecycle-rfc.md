@@ -22,14 +22,17 @@ The asymmetry that proves this is a gap, not a guard: the **`reads`** field in t
 
 ### 1. Status-aware ref integrity (the loosening)
 
-`detectTaskDecisionRefNotFound` / `detectTaskAcceptanceRefNotFound` consult the **referencing task's own status** (not the phase's — a `done` phase holding an open task must not loosen that task's live gate):
+`detectTaskDecisionRefNotFound` / `detectTaskAcceptanceRefNotFound` consult the **referencing task's own status** (not the phase's — a `done` phase holding an open task must not loosen that task's live gate). **Only `decision_refs` are silenced by the ledger** — `acceptance_refs` routinely point at non-decisions (`docs/`, phase YAML), so the decision tombstone never silences them:
 
-| Referencing task | ref target on disk | Result |
-| --- | --- | --- |
-| not `done` | missing | `TASK_DECISION_REF_NOT_FOUND` — `error` (unchanged; the gate is live) |
-| `done` | present | OK (unchanged) |
-| `done` | missing **and** in the prune ledger | silent — intentional retirement |
-| `done` | missing **and** not in the ledger | `warning`, `affects_exit: false` — message offers `decision prune` (retire properly) or restore (possible accidental delete) |
+| Field | Referencing task | target on disk | Result |
+| --- | --- | --- | --- |
+| `decision_refs` | not `done` | missing | `TASK_DECISION_REF_NOT_FOUND` — `error` (the gate is live) |
+| `decision_refs` | `done` | present | OK |
+| `decision_refs` | `done` | missing **and** recorded in `PRUNED.md` | **silent** — intentional decision retirement |
+| `decision_refs` | `done` | missing **and** not recorded | `warning`, `affects_exit: false` — restore (accidental) or `decision prune` (retire properly) |
+| `acceptance_refs` | not `done` | missing | `TASK_ACCEPTANCE_REF_NOT_FOUND` — `error` |
+| `acceptance_refs` | `done` | present | OK |
+| `acceptance_refs` | `done` | missing | `warning`, `affects_exit: false` — **`PRUNED.md` never silences `acceptance_refs`** |
 
 This is a strict **loosening** — it never makes a previously-passing plan fail. A `done` task's gate was satisfied at completion; its ref is now annotation, mirroring the soft `reads` story.
 
@@ -45,7 +48,7 @@ Retires a shipped decision from the live plane. Reuses the existing **prune-if-c
 
 These three gates are exactly the "integrity + no future conflict" guarantee: you can only retire a decision whose every obligation is discharged.
 
-**On `--write`:** remove the decision file; rewrite inbound `.md` references (the README index row → a tombstone line; other doc/RFC links → delink, or repoint at the CHANGELOG entry); append a ledger row. The status-aware check (1) then tolerates the absent ref silently.
+**On `--write`:** remove the decision file; rewrite inbound `.md` references (the README index row → a tombstone line; other doc/RFC links → delink, or repoint at the CHANGELOG entry); append a ledger row. The `decision_refs` check (1) then tolerates the absent pruned decision silently.
 
 ### 3. Tombstone ledger — `design/decisions/PRUNED.md`
 
