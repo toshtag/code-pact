@@ -31,19 +31,23 @@ function safePathReason(path: string): string {
 }
 
 /**
- * A decision whose gate is already discharged: the task is `done`, or its phase
- * is. For such a task a `decision_refs` / `acceptance_refs` target is a
- * *historical annotation* (the gate passed at `task complete`), not a live
- * requirement — so a missing target downgrades from `error` to an advisory
- * `warning` rather than failing the plan. Mirrors the soft `reads` no-match
- * story; lets a shipped decision record be retired without breaking integrity.
+ * A decision whose gate is no longer live: the task (or its phase) is in a
+ * *terminal* state — `done` or `cancelled`. For such a task a `decision_refs` /
+ * `acceptance_refs` target is a *historical annotation* (the gate passed at
+ * `task complete`, or the work was dropped), not a live requirement — so a
+ * missing target downgrades from `error` to an advisory `warning` rather than
+ * failing the plan. Mirrors the soft `reads` no-match story; lets a shipped
+ * decision record be retired without breaking integrity. `cancelled` counts as
+ * terminal for the same reason `analyze.ts` treats it as closed — a cancelled
+ * task's gate will never run, so its ref cannot be a live requirement.
  * See design/decisions/decision-lifecycle-rfc.md.
  */
 function refIsHistorical(
   phase: { status?: string },
   task: { status?: string },
 ): boolean {
-  return phase.status === "done" || task.status === "done";
+  const terminal = (s?: string): boolean => s === "done" || s === "cancelled";
+  return terminal(phase.status) || terminal(task.status);
 }
 
 /** `decision_refs` path is not a safe repo-root-relative POSIX path. */
@@ -94,7 +98,7 @@ export async function detectTaskDecisionRefNotFound(
             severity: historical ? "warning" : "error",
             ...(historical ? { affects_exit: false } : {}),
             message: historical
-              ? `Task "${task.id}" is done; its decision_refs path "${p}" is no longer on disk. Advisory for a shipped task (the decision gate already passed) — drop the stale ref from the phase YAML, or restore the file if it was removed by accident.`
+              ? `Task "${task.id}" is done or cancelled; its decision_refs path "${p}" is no longer on disk — advisory only (the decision gate is no longer live). Drop the stale ref from the phase YAML, or restore the file if it was removed by accident.`
               : `Task "${task.id}" decision_refs path "${p}" does not exist on disk`,
             file: ref.path,
             phase_id: phase.id,
@@ -386,7 +390,7 @@ export async function detectTaskAcceptanceRefNotFound(
             severity: historical ? "warning" : "error",
             ...(historical ? { affects_exit: false } : {}),
             message: historical
-              ? `Task "${task.id}" is done; its acceptance_refs path "${p}" is no longer on disk. Advisory for a shipped task — drop the stale ref from the phase YAML, or restore the file if it was removed by accident.`
+              ? `Task "${task.id}" is done or cancelled; its acceptance_refs path "${p}" is no longer on disk — advisory only (the decision gate is no longer live). Drop the stale ref from the phase YAML, or restore the file if it was removed by accident.`
               : `Task "${task.id}" acceptance_refs path "${p}" does not exist on disk`,
             file: ref.path,
             phase_id: phase.id,

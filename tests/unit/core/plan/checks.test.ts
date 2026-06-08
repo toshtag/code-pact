@@ -668,6 +668,38 @@ describe("detectTaskDecisionRefNotFound (fs-backed)", () => {
     const issues = await detectTaskDecisionRefNotFound(cwd, entries);
     expect(issues[0]?.severity).toBe("warning");
   });
+
+  it("soft when the task is CANCELLED (terminal — gate is moot)", async () => {
+    const entries = [
+      entry(
+        phase("P1", [
+          task("P1-T1", {
+            decision_refs: ["design/decisions/retired.md"],
+            status: "cancelled",
+          }),
+        ]),
+      ),
+    ];
+    const issues = await detectTaskDecisionRefNotFound(cwd, entries);
+    expect(issues[0]?.severity).toBe("warning");
+    expect(issues[0]?.affects_exit).toBe(false);
+  });
+
+  it("still ERROR for a live (in_progress) task with a missing ref", async () => {
+    const entries = [
+      entry(
+        phase("P1", [
+          task("P1-T1", {
+            decision_refs: ["design/decisions/retired.md"],
+            status: "in_progress",
+          }),
+        ]),
+      ),
+    ];
+    const issues = await detectTaskDecisionRefNotFound(cwd, entries);
+    expect(issues[0]?.severity).toBe("error");
+    expect(issues[0]?.affects_exit).toBeUndefined();
+  });
 });
 
 describe("detectTaskReadsNoMatch (fs-backed)", () => {
