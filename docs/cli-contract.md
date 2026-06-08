@@ -2260,10 +2260,12 @@ Success envelope (`--json`):
 | --- | --- |
 | `source_file` | repo-relative POSIX path of the file that links to the pruned decision |
 | `line` | 1-based line number of the link within `source_file` |
-| `raw_href` | the markdown link destination exactly as found, before normalization (may include `<…>` / a title) |
+| `raw_href` | the markdown link **destination token** exactly as found, before normalization — preserves forms such as `<foo.md>`, but **excludes** any optional Markdown title (a `raw_title` / `raw_link` field would be added separately if a title is ever needed) |
 | `normalized_target` | the link's normalized repo-relative target path (equals the pruned decision path) |
 | `link_kind` | `inline` (`[t](url)`) \| `reference_definition` (`[label]: url`) \| `index_row` (the `README.md` decision-index row) |
-| `rewrite_action` | `tombstone` (index row → "(pruned …)" line) \| `delink` (keep the text, drop the link) \| `leave_as_is` | `warnings[]` carries advisories (e.g. an eligible target that no task references — prune cannot prove it shipped). `--write` (file delete + link rewrite + ledger append) is not yet a flag; passing it is a `CONFIG_ERROR`.
+| `rewrite_action` | `tombstone` (index row → "(pruned …)" line) \| `delink` (keep the text, drop the link) \| `leave_as_is` |
+
+`warnings[]` carries advisories (e.g. an eligible target that no task references — prune cannot prove it shipped). `--write` (file delete + link rewrite + ledger append) is not yet a flag; passing it is a `CONFIG_ERROR`.
 
 ## `task runbook` — read-only guidance for a single task (v1.3+, P12)
 
