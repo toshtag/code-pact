@@ -27,6 +27,32 @@ async function writeDecision(name: string, content = ACCEPTED): Promise<void> {
   await writeFile(join(cwd, "design", "decisions", name), content, "utf8");
 }
 
+/** A valid, taskless plan so the artifact guard passes but nothing references the target. */
+async function writeValidEmptyPlan(): Promise<void> {
+  await writeFile(
+    join(cwd, "design", "roadmap.yaml"),
+    `phases:\n  - id: P1\n    path: design/phases/P1.yaml\n    weight: 10\n`,
+    "utf8",
+  );
+  await writeFile(
+    join(cwd, "design", "phases", "P1.yaml"),
+    `id: P1
+name: P1
+weight: 10
+confidence: high
+risk: low
+status: done
+objective: An objective long enough
+definition_of_done:
+  - DoD that is clearly long enough
+verification:
+  commands:
+    - pnpm test
+`,
+    "utf8",
+  );
+}
+
 async function writeDoneTaskPhase(decisionRef: string): Promise<void> {
   await writeFile(
     join(cwd, "design", "roadmap.yaml"),
@@ -75,14 +101,15 @@ describe("runDecisionPrune", () => {
     expect(res.plan).toEqual({
       remove_file: "design/decisions/foo-rfc.md",
       append_ledger: true,
-      rewrite_links: null,
+      link_rewrite_pending: true,
     });
     expect(res.warnings).toEqual([]);
     expect(res.evaluation.referencing_tasks).toHaveLength(1);
   });
 
   it("warns when eligible but no task references it (cannot prove it shipped)", async () => {
-    await writeDecision("foo-rfc.md"); // accepted, no phases reference it
+    await writeDecision("foo-rfc.md"); // accepted, no task references it
+    await writeValidEmptyPlan();
     const res = await runDecisionPrune(cwd, "design/decisions/foo-rfc.md");
     expect(res.eligible).toBe(true);
     expect(res.warnings).toHaveLength(1);
@@ -102,11 +129,46 @@ describe("runDecisionPrune", () => {
     expect(res.decision).toBeNull();
     expect(res.eligible).toBe(false);
   });
+
+  it("fail-closed: an unparseable roadmap blocks even an accepted, unreferenced target", async () => {
+    await writeDecision("foo-rfc.md");
+    await writeFile(join(cwd, "design", "roadmap.yaml"), ":\n  not: [valid", "utf8");
+    const res = await runDecisionPrune(cwd, "design/decisions/foo-rfc.md");
+    expect(res.eligible).toBe(false);
+    expect(res.evaluation.blocks.some((b) => b.gate === "plan_artifacts_unreadable")).toBe(true);
+  });
+
+  it("fail-closed: a referenced phase YAML that is unparseable blocks (hidden not-done ref)", async () => {
+    await writeDecision("foo-rfc.md");
+    await writeFile(
+      join(cwd, "design", "roadmap.yaml"),
+      `phases:\n  - id: P1\n    path: design/phases/P1.yaml\n    weight: 10\n  - id: P2\n    path: design/phases/P2.yaml\n    weight: 10\n`,
+      "utf8",
+    );
+    // P1 valid; P2 unparseable — it could hide a not-done task referencing the target.
+    await writeFile(
+      join(cwd, "design", "phases", "P1.yaml"),
+      `id: P1\nname: P1\nweight: 10\nconfidence: high\nrisk: low\nstatus: done\nobjective: An objective long enough\ndefinition_of_done:\n  - DoD that is clearly long enough\nverification:\n  commands:\n    - pnpm test\n`,
+      "utf8",
+    );
+    await writeFile(join(cwd, "design", "phases", "P2.yaml"), "id: [broken", "utf8");
+    const res = await runDecisionPrune(cwd, "design/decisions/foo-rfc.md");
+    expect(res.eligible).toBe(false);
+    expect(res.evaluation.blocks.some((b) => b.gate === "plan_artifacts_unreadable")).toBe(true);
+  });
+
+  it("fail-closed: a missing roadmap blocks", async () => {
+    await writeDecision("foo-rfc.md");
+    const res = await runDecisionPrune(cwd, "design/decisions/foo-rfc.md");
+    expect(res.eligible).toBe(false);
+    expect(res.evaluation.blocks.some((b) => b.gate === "plan_artifacts_unreadable")).toBe(true);
+  });
 });
 
 describe("decision-prune renderers", () => {
   it("serialize exposes the contract fields", async () => {
     await writeDecision("foo-rfc.md");
+    await writeValidEmptyPlan();
     const res = await runDecisionPrune(cwd, "design/decisions/foo-rfc.md");
     const data = serializeDecisionPrune(res);
     expect(data).toMatchObject({

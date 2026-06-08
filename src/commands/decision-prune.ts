@@ -2,18 +2,34 @@ import { collectPlanArtifacts } from "../core/plan/state.ts";
 import { evaluatePrune, type PruneEvaluation } from "../core/decisions/prune.ts";
 
 /**
- * The dry-run plan: what `--write` (PR-C2) WOULD do. PR-C1b carries only the
- * deterministic parts — remove the decision file and append a `PRUNED.md` row.
- * The inbound-`.md`-link rewrite list is a separate collector (PR-C1c) that the
- * dry-run report and `--write` will share; it is intentionally NOT the
- * eligibility parser (`decisionLinksTo`), which is conservative on purpose.
+ * The deterministic part of the dry-run plan PR-C2 will execute: remove the
+ * decision file and append a `PRUNED.md` row. The inbound-`.md`-link rewrite
+ * list is NOT here yet — it is collected by a separate, shared collector
+ * (PR-C1c) and added to this object as an additive field, so callers must treat
+ * the plan as **partial** until then. (The collector is intentionally distinct
+ * from the conservative eligibility parser `decisionLinksTo`.)
  */
 export type PrunePlan = {
   remove_file: string;
   append_ledger: boolean;
-  /** Filled by PR-C1c. */
-  rewrite_links: null;
+  /** True until PR-C1c lands the inbound-link collector; the plan is not yet complete. */
+  link_rewrite_pending: true;
 };
+
+/** Roadmap / phase-file load issues mean the task graph is only partially known. */
+function planArtifactsUnreadable(
+  fileIssues: { file?: string }[],
+  skippedChecks: string[],
+): string | null {
+  const graphIssue = fileIssues.find(
+    (i) => i.file?.includes("roadmap.yaml") || i.file?.includes("design/phases/"),
+  );
+  if (graphIssue) return `cannot read the plan graph: ${graphIssue.file}`;
+  if (skippedChecks.length > 0) {
+    return "roadmap is missing or unparseable, so referencing tasks cannot be fully verified";
+  }
+  return null;
+}
 
 export type DecisionPruneResult = {
   mode: "dry-run";
@@ -30,9 +46,23 @@ export async function runDecisionPrune(
   cwd: string,
   target: string,
 ): Promise<DecisionPruneResult> {
-  const { state, fallbackPhases } = await collectPlanArtifacts(cwd);
+  const { state, fallbackPhases, fileIssues, skippedChecks } =
+    await collectPlanArtifacts(cwd);
   const phases = state?.phases ?? fallbackPhases;
   const evaluation = await evaluatePrune(cwd, target, phases);
+
+  // Fail CLOSED if the plan graph could not be fully loaded: an unreadable
+  // roadmap/phase could hide a not-done task that references the target, so
+  // "all referencing tasks are done" is unprovable. (progress/event-ledger
+  // issues are out of scope — prune only needs the task/phase graph.)
+  const artifactDetail = planArtifactsUnreadable(fileIssues, skippedChecks);
+  if (artifactDetail !== null) {
+    evaluation.blocks = [
+      { gate: "plan_artifacts_unreadable", detail: artifactDetail },
+      ...evaluation.blocks,
+    ];
+    evaluation.eligible = false;
+  }
 
   const warnings: string[] = [];
   if (evaluation.eligible && evaluation.referencing_tasks.length === 0) {
@@ -43,7 +73,7 @@ export async function runDecisionPrune(
 
   const plan: PrunePlan | null =
     evaluation.eligible && evaluation.decision !== null
-      ? { remove_file: evaluation.decision, append_ledger: true, rewrite_links: null }
+      ? { remove_file: evaluation.decision, append_ledger: true, link_rewrite_pending: true }
       : null;
 
   return {
@@ -63,6 +93,7 @@ export function describeBlock(block: PruneEvaluation["blocks"][number]): string 
     case "target_missing":
     case "target_unreadable":
     case "decision_scan_unreadable":
+    case "plan_artifacts_unreadable":
       return block.detail;
     case "target_not_accepted":
       return `target is not an accepted decision (status: ${block.status ?? "none"}, ${block.acceptance})`;
@@ -87,7 +118,7 @@ export function formatDecisionPruneHuman(result: DecisionPruneResult): string {
     lines.push(`decision prune (dry-run): ${target} — ELIGIBLE`);
     lines.push(`  would remove: ${target}`);
     lines.push(`  would append a row to design/decisions/PRUNED.md`);
-    lines.push(`  inbound-link rewrite: computed by \`--write\` (not shown in this dry-run)`);
+    lines.push(`  (partial plan — the inbound-link rewrite list is added in a later release)`);
     const refs = result.evaluation.referencing_tasks;
     lines.push(
       refs.length === 0
@@ -115,13 +146,19 @@ export function serializeDecisionPrune(result: DecisionPruneResult): Record<stri
   };
 }
 
-/** A short, stable message for the `DECISION_PRUNE_NOT_ELIGIBLE` error envelope. */
-export function notEligibleMessage(result: DecisionPruneResult): string {
+/**
+ * A short, stable message for the `DECISION_PRUNE_NOT_ELIGIBLE` error envelope.
+ * In JSON mode the full block list is already in `data.blocks`, so the
+ * "run with --json" hint is dropped.
+ */
+export function notEligibleMessage(result: DecisionPruneResult, json = false): string {
   const target = result.decision ?? "(invalid target)";
   const first = result.evaluation.blocks[0];
   const n = result.evaluation.blocks.length;
   const reason = first ? describeBlock(first) : "ineligible";
-  return n > 1
-    ? `${target} cannot be pruned: ${reason} (and ${n - 1} more) — run with --json for the full block list`
-    : `${target} cannot be pruned: ${reason}`;
+  if (n > 1) {
+    const more = `${target} cannot be pruned: ${reason} (and ${n - 1} more)`;
+    return json ? more : `${more} — run with --json for the full block list`;
+  }
+  return `${target} cannot be pruned: ${reason}`;
 }

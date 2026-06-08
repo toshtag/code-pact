@@ -89,7 +89,7 @@ export async function cmdDecision(
       return 0;
     }
 
-    emitError(json, "DECISION_PRUNE_NOT_ELIGIBLE", notEligibleMessage(result), {
+    emitError(json, "DECISION_PRUNE_NOT_ELIGIBLE", notEligibleMessage(result, json), {
       data: serializeDecisionPrune(result),
       human: formatDecisionPruneHuman(result),
     });
