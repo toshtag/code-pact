@@ -191,7 +191,7 @@ CI. (For `error.cause_code` values, see [Public cause codes](#public-cause-codes
 | `PLAN_ANALYZE_FAILED` | `plan analyze` | One or more exit-relevant drift issues found, **or** a ledger-read integrity failure caught while reading the merged ledger (the diagnostic `EVENT_FILE_ID_MISMATCH` / `INVALID_YAML` / `SCHEMA_ERROR` is wrapped here, original cause in `error.message`, never leaked as a top-level code) |
 | `PLAN_MIGRATE_FAILED` (collaboration-safe-state RFC, B4) | `plan migrate` | The migration could not complete — e.g. an existing per-event ledger file is corrupt. Like `plan analyze`, a ledger-read integrity failure (`EVENT_FILE_ID_MISMATCH` / `INVALID_YAML` / `SCHEMA_ERROR`) is wrapped into this command-level code with the original cause in `error.message`, never leaked as a top-level `EVENT_FILE_ID_MISMATCH`. Exit 1 |
 | `TASK_FINALIZE_NOT_ELIGIBLE` | `task finalize` | Task's derived state from the progress ledger is not `done` (raised in **both** dry-run and `--write`) |
-| `DECISION_PRUNE_NOT_ELIGIBLE` | `decision prune` | The target decision record cannot be retired. `data.blocks[].gate` lists every failing gate: `target_invalid` / `target_missing` / `target_unreadable` / `target_not_accepted` (not a readable, top-level, accepted `design/decisions/*.md`); `referencing_task_not_done`; `open_commitments`; `live_decision_depends` / `dependency_status_unknown`; `decision_scan_unreadable` / `dependency_unreadable`; `plan_artifacts_unreadable` (an unreadable `roadmap.yaml` / `design/phases/*.yaml`, so referencing tasks can't be fully verified — fail-closed). Exit 2; raised in dry-run (and, in PR-C2, `--write`) — the verdict is identical. See [`decision prune`](#decision-prune) for the success envelope |
+| `DECISION_PRUNE_NOT_ELIGIBLE` | `decision prune` | The target decision record cannot be retired. `data.blocks[].gate` lists every **applicable** failing gate: `target_invalid` / `target_missing` / `target_unreadable` / `target_not_accepted` (not a readable, top-level, accepted `design/decisions/*.md`); `referencing_task_not_done`; `open_commitments`; `live_decision_depends` / `dependency_status_unknown`; `decision_scan_unreadable` / `dependency_unreadable`; `plan_artifacts_unreadable` (an unreadable `roadmap.yaml` / `design/phases/*.yaml`, so referencing tasks can't be fully verified); `link_rewrite_unsupported` (a reference-style inbound link, or a markdown link to the decision inside the append-only `PRUNED.md` ledger) / `link_rewrite_scan_unreadable` (an unreadable doc source — the rewrite plan would be incomplete) — all fail-closed. The **link-rewrite** gates are only evaluated once the target itself is a readable, accepted, top-level record (a `target_*` failure short-circuits them). Exit 2; raised in dry-run (and, in PR-C2, `--write`) — the verdict is identical. See [`decision prune`](#decision-prune) for the success envelope |
 | `TASK_FINALIZE_WRITE_REFUSED` | `task finalize --write` | Safety check refused the phase YAML write (unsafe path, outside `design/phases/`, symlink escape, unparseable, etc.) |
 | `PHASE_RECONCILE_WRITE_REFUSED` | `phase reconcile --write` | Every eligible task write in the phase was refused for safety reasons. Partial successes return exit 0; this fires only when **all** writes refused |
 | `LOCK_HELD` (v1.5+ / P14) | `init --sample-phase`, `init` wizard, `phase add`, `phase new`, `phase import`, `task add`, `task finalize --write`, `phase reconcile --write`, `plan adopt --write`, `plan sync-paths --write` | Another code-pact mutation is in progress on the same project. The envelope's `data.lock_holder` carries `{pid, hostname, cmd, created_at}` for diagnostic display; `data.lock_path` is the lock file path. Transient + retryable — wait for the holder to release, or manually delete the lock file if you are certain no process holds it |
@@ -2231,7 +2231,7 @@ code-pact phase reconcile P11 --write --json
 
 ## `decision prune`
 
-`decision prune <path> [--json]` previews retiring a shipped, **accepted** decision record from the live plane. **Dry-run only in this release** — it deletes nothing, rewrites no links, and appends no `PRUNED.md` row; it reports the eligibility verdict and a (currently partial) write plan. The eligibility verdict is one pure function shared by dry-run and the future `--write` — dry-run never relaxes a gate. Eligible exits 0; ineligible exits 2 with [`DECISION_PRUNE_NOT_ELIGIBLE`](#public-codes-top-level-error-envelopes).
+`decision prune <path> [--json]` previews retiring a shipped, **accepted** decision record from the live plane. **Dry-run only in this release** — it deletes nothing, rewrites no links, and appends no `PRUNED.md` row; it reports the eligibility verdict and the complete inbound-link rewrite plan the future `--write` path will execute. The verdict and the plan are produced by code shared with `--write` — dry-run never relaxes a gate or shortens the plan. Eligible exits 0; ineligible exits 2 with [`DECISION_PRUNE_NOT_ELIGIBLE`](#public-codes-top-level-error-envelopes).
 
 Success envelope (`--json`):
 
@@ -2247,23 +2247,28 @@ Success envelope (`--json`):
     "plan": {
       "remove_file": "design/decisions/foo-rfc.md",
       "append_ledger": true,
-      "link_rewrite": { "status": "pending", "items": [] }
+      "link_rewrite": { "status": "ready", "items": [] }
     },
     "warnings": []
   }
 }
 ```
 
-`plan.link_rewrite.status` is **`"pending"`** with `items: []` in this release; the shared inbound-`.md`-link collector that fills `items` and flips `status` to `"ready"` lands in a follow-up — an **additive** change, not a shape change. Each `items[]` entry is pinned now as:
+`plan.link_rewrite.status` is **`"ready"`** — `items[]` is the complete set of inbound references the write plan **considers** (collected once, shared by the dry-run preview and `--write`); each carries a `rewrite_action`. The collector scans the **same** source surface as `check:doc-links` and uses its **same** code-stripping and external-URL rules: root-level `.md` **except `CHANGELOG.md`** (a durable authored record, never rewritten), `docs/**`, `design/**`, and `.github/**` (`.md` + `.yml`). It is line- and column-accurate and resolves each link relative to its **own source file's directory**. Links inside fenced code blocks, inline code, and image embeds (`![]()`), and external / protocol-relative URLs, are **excluded entirely** (blanked exactly as `check:doc-links` ignores them) — they are not live references, so they never enter the plan. The inline-destination grammar is intentionally a **superset** of the checker's (it also matches `<href>`, single-quoted, and parenthesized-title links), so every link the checker would flag broken after the target is deleted is guaranteed to be in the plan; the extra forms only mean valid links the checker happens to miss are cleaned up too. Each `items[]` entry carries everything `--write` needs to act on the exact span without re-parsing:
 
 | Field | Meaning |
 | --- | --- |
 | `source_file` | repo-relative POSIX path of the file that links to the pruned decision |
-| `line` | 1-based line number of the link within `source_file` |
-| `raw_href` | the markdown link **destination token** exactly as found, before normalization — preserves forms such as `<foo.md>`, but **excludes** any optional Markdown title (a `raw_title` / `raw_link` field would be added separately if a title is ever needed) |
-| `normalized_target` | the link's normalized repo-relative target path (equals the pruned decision path) |
-| `link_kind` | `inline` (`[t](url)`) \| `reference_definition` (`[label]: url`) \| `index_row` (the `README.md` decision-index row) |
-| `rewrite_action` | `tombstone` (index row → "(pruned …)" line) \| `delink` (keep the text, drop the link) \| `leave_as_is` |
+| `line` | 1-based line number |
+| `column` | 1-based column where the link starts (disambiguates two links on one line) |
+| `raw_link` | the full matched link exactly as found, e.g. `[A](../x.md "t")` |
+| `raw_href` | the **destination token** only — preserves `<foo.md>`, excludes any title |
+| `link_text` | the visible text — what `delink` keeps |
+| `normalized_target` | the link's normalized repo-relative target (equals the pruned decision path) |
+| `link_kind` | `inline` (`[t](url)`) \| `index_row` (the `README.md` decision-index row) |
+| `rewrite_action` | `tombstone` (index row → "(pruned …)" line) \| `delink` (keep the text, drop the link) |
+
+A **reference-style** inbound link (`[t][label]` + `[label]: url`) cannot be rewritten span-locally without touching its usages, and an **unreadable** doc source means the plan would be incomplete — both fail closed as `DECISION_PRUNE_NOT_ELIGIBLE` (`link_rewrite_unsupported` / `link_rewrite_scan_unreadable`), not as silently-dropped items.
 
 `warnings[]` carries advisories (e.g. an eligible target that no task references — prune cannot prove it shipped). `--write` (file delete + link rewrite + ledger append) is not yet a flag; passing it is a `CONFIG_ERROR`.
 

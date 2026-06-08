@@ -101,10 +101,44 @@ describe("runDecisionPrune", () => {
     expect(res.plan).toEqual({
       remove_file: "design/decisions/foo-rfc.md",
       append_ledger: true,
-      link_rewrite: { status: "pending", items: [] },
+      link_rewrite: { status: "ready", items: [] }, // no inbound .md links in this fixture
     });
     expect(res.warnings).toEqual([]);
     expect(res.evaluation.referencing_tasks).toHaveLength(1);
+  });
+
+  it("collects inbound .md links into the plan (index row → tombstone, body → delink)", async () => {
+    await writeDecision("foo-rfc.md");
+    await writeDoneTaskPhase("design/decisions/foo-rfc.md");
+    // an index row in the decisions README + a body link from a concept doc
+    await writeFile(
+      join(cwd, "design", "decisions", "README.md"),
+      `# Index\n\n| Decision | What |\n| --- | --- |\n| [Foo](foo-rfc.md) | did foo |\n`,
+    );
+    await mkdir(join(cwd, "docs", "concepts"), { recursive: true });
+    await writeFile(
+      join(cwd, "docs", "concepts", "foo.md"),
+      `# Foo\n\nSee [the decision](../../design/decisions/foo-rfc.md).\n`,
+    );
+    const res = await runDecisionPrune(cwd, "design/decisions/foo-rfc.md");
+    expect(res.eligible).toBe(true);
+    const items = res.plan?.link_rewrite.items ?? [];
+    expect(res.plan?.link_rewrite.status).toBe("ready");
+    expect(items).toContainEqual(
+      expect.objectContaining({
+        source_file: "design/decisions/README.md",
+        link_kind: "index_row",
+        rewrite_action: "tombstone",
+      }),
+    );
+    expect(items).toContainEqual(
+      expect.objectContaining({
+        source_file: "docs/concepts/foo.md",
+        link_kind: "inline",
+        rewrite_action: "delink",
+        normalized_target: "design/decisions/foo-rfc.md",
+      }),
+    );
   });
 
   it("warns when eligible but no task references it (cannot prove it shipped)", async () => {
@@ -163,6 +197,48 @@ describe("runDecisionPrune", () => {
     expect(res.eligible).toBe(false);
     expect(res.evaluation.blocks.some((b) => b.gate === "plan_artifacts_unreadable")).toBe(true);
   });
+
+  it("fail-closed: a reference-style inbound link makes prune ineligible (no plan)", async () => {
+    await writeDecision("foo-rfc.md");
+    await writeDoneTaskPhase("design/decisions/foo-rfc.md");
+    await mkdir(join(cwd, "docs"), { recursive: true });
+    await writeFile(
+      join(cwd, "docs", "r.md"),
+      "Uses [foo][f].\n\n[f]: ../design/decisions/foo-rfc.md\n",
+    );
+    const res = await runDecisionPrune(cwd, "design/decisions/foo-rfc.md");
+    expect(res.eligible).toBe(false);
+    expect(res.plan).toBeNull();
+    expect(res.evaluation.blocks.some((b) => b.gate === "link_rewrite_unsupported")).toBe(true);
+  });
+
+  it("fail-closed: an unreadable doc source directory blocks", async () => {
+    await writeDecision("foo-rfc.md");
+    await writeDoneTaskPhase("design/decisions/foo-rfc.md");
+    await writeFile(join(cwd, "docs"), "not a directory"); // readdir(docs) → ENOTDIR
+    const res = await runDecisionPrune(cwd, "design/decisions/foo-rfc.md");
+    expect(res.eligible).toBe(false);
+    expect(res.evaluation.blocks.some((b) => b.gate === "link_rewrite_scan_unreadable")).toBe(true);
+  });
+
+  it("surfaces EVERY failing gate together — core ineligibility AND a link-rewrite issue", async () => {
+    // open commitments (core ineligible) + a reference-style inbound link.
+    await writeDecision(
+      "foo-rfc.md",
+      "# RFC\n\n**Status:** accepted\n\n## Implementation commitments\n\n- [ ] still open\n",
+    );
+    await writeDoneTaskPhase("design/decisions/foo-rfc.md");
+    await mkdir(join(cwd, "docs"), { recursive: true });
+    await writeFile(
+      join(cwd, "docs", "r.md"),
+      "Uses [foo][f].\n\n[f]: ../design/decisions/foo-rfc.md\n",
+    );
+    const res = await runDecisionPrune(cwd, "design/decisions/foo-rfc.md");
+    const gates = res.evaluation.blocks.map((b) => b.gate);
+    expect(gates).toContain("open_commitments");
+    expect(gates).toContain("link_rewrite_unsupported"); // not hidden behind core ineligibility
+  });
+
 });
 
 describe("decision-prune renderers", () => {
@@ -180,6 +256,21 @@ describe("decision-prune renderers", () => {
     expect(data).toHaveProperty("referencing_tasks");
     expect(data).toHaveProperty("plan");
     expect(data).toHaveProperty("warnings");
+  });
+
+  it("human output calls items 'considered by the write plan', not 'to rewrite'", async () => {
+    await writeDecision("foo-rfc.md");
+    await writeDoneTaskPhase("design/decisions/foo-rfc.md");
+    await mkdir(join(cwd, "docs"), { recursive: true });
+    await writeFile(
+      join(cwd, "docs", "x.md"),
+      "# X\n\nSee [d](../design/decisions/foo-rfc.md).\n",
+    );
+    const res = await runDecisionPrune(cwd, "design/decisions/foo-rfc.md");
+    const human = formatDecisionPruneHuman(res);
+    expect(human).toContain("considered by the write plan");
+    expect(human).not.toContain("to rewrite");
+    expect(human).toContain("docs/x.md"); // the delink item is listed
   });
 
   it("human output names blocks when ineligible", async () => {

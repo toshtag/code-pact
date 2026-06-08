@@ -35,7 +35,9 @@ export type PruneBlock =
   | { gate: "dependency_status_unknown"; decision: string; status: string | null }
   | { gate: "dependency_unreadable"; decision: string }
   | { gate: "decision_scan_unreadable"; detail: string }
-  | { gate: "plan_artifacts_unreadable"; detail: string };
+  | { gate: "plan_artifacts_unreadable"; detail: string }
+  | { gate: "link_rewrite_scan_unreadable"; detail: string }
+  | { gate: "link_rewrite_unsupported"; detail: string };
 
 export type PruneReferencingTask = {
   task_id: string;
@@ -66,10 +68,12 @@ function errText(err: unknown): string {
 
 /**
  * Does `content` contain a markdown link that resolves to `target` (relative to
- * design/decisions/)? Covers both **inline** links — `[t](url)` and
- * `[t](url "title")` — and **reference-style** definitions — `[label]: url`. A
- * narrower regex would be fail-open for this safety gate; this matches the link
- * forms `scripts/check-doc-links.mjs` understands.
+ * design/decisions/)? Covers both **inline** links — `[t](url)` / `[t](url
+ * "title")` — and **reference-style** definitions — `[label]: url`. This is the
+ * **conservative eligibility gate** (a missed link would be fail-open), NOT the
+ * rewrite collector: it deliberately over-counts (e.g. reference-style links the
+ * collector can't rewrite) so a live decision that mentions the target blocks
+ * the prune. The rewrite plan is `link-collector.ts`, a separate, precise pass.
  */
 function stripAngleBrackets(raw: string): string {
   const s = raw.trim();
@@ -89,7 +93,8 @@ function decisionLinksTo(content: string, target: string): boolean {
   while ((m = refDef.exec(content)) !== null) urls.push(m[1]!);
   for (const raw of urls) {
     const link = stripAngleBrackets(raw).split("#")[0]!.trim();
-    if (link === "" || /^[a-z]+:\/\//i.test(link)) continue; // skip empty / absolute URLs
+    // Same external/protocol-relative test as check-doc-links / the link collector.
+    if (link === "" || /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(link)) continue;
     const resolved = posix
       .normalize(posix.join("design/decisions", link))
       .replace(/^(?:\.\/)+/, "");
