@@ -37,14 +37,17 @@ export type LinkScanIssue = {
 
 export type InboundLinkScan = { items: LinkRewriteItem[]; issues: LinkScanIssue[] };
 
-// EXTERNAL_RE / FENCE_RE / INLINE_CODE_RE MUST stay byte-identical to
-// scripts/check-doc-links.mjs: the rewrite plan is only safe if the collector
-// classifies links EXACTLY as the link checker does — so a link we leave alone
-// is one check-doc-links also ignores, and one we plan to rewrite is one it
-// would otherwise flag broken after C2 deletes the target. Parity is locked by
-// the representative tests in link-collector.test.ts. (A shared module is the
-// eventual home; the checker runs under plain `node` today and can't import a
-// `.ts`.)
+// EXTERNAL_RE / FENCE_RE / INLINE_CODE_RE are byte-identical to
+// scripts/check-doc-links.mjs so the collector strips code and rejects external
+// URLs the same way the checker does. The inline link grammar (`INLINE` below)
+// is deliberately a SUPERSET of the checker's `LINK_RE`: it also matches
+// `<href>`, single-quoted, and parenthesized-title links. That is safe — every
+// link the checker treats as real is also found here, so each one the checker
+// would flag broken after C2 deletes the target is already in the plan; the
+// extra forms just mean we also clean up valid links the checker happens to
+// miss. Parity of the shared rules is locked by the tests in
+// link-collector.test.ts. (A shared module is the eventual home; the checker
+// runs under plain `node` today and can't import a `.ts`.)
 const EXTERNAL_RE = /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i;
 const FENCE_RE = /^([ \t]*)(`{3,}|~{3,})[^\n]*\n[\s\S]*?\n\1\2[^\n]*$/gm;
 const INLINE_CODE_RE = /`[^`\n]*`/g;

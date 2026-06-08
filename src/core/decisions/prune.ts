@@ -68,10 +68,12 @@ function errText(err: unknown): string {
 
 /**
  * Does `content` contain a markdown link that resolves to `target` (relative to
- * design/decisions/)? Covers both **inline** links — `[t](url)` and
- * `[t](url "title")` — and **reference-style** definitions — `[label]: url`. A
- * narrower regex would be fail-open for this safety gate; this matches the link
- * forms `scripts/check-doc-links.mjs` understands.
+ * design/decisions/)? Covers both **inline** links — `[t](url)` / `[t](url
+ * "title")` — and **reference-style** definitions — `[label]: url`. This is the
+ * **conservative eligibility gate** (a missed link would be fail-open), NOT the
+ * rewrite collector: it deliberately over-counts (e.g. reference-style links the
+ * collector can't rewrite) so a live decision that mentions the target blocks
+ * the prune. The rewrite plan is `link-collector.ts`, a separate, precise pass.
  */
 function stripAngleBrackets(raw: string): string {
   const s = raw.trim();

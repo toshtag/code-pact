@@ -74,6 +74,18 @@ describe("collectInboundLinks — items", () => {
     expect(items[0]?.normalized_target).toBe(TARGET);
   });
 
+  it("collects link forms broader than check-doc-links' LINK_RE (superset: single / parenthesized titles)", async () => {
+    await write(
+      "docs/forms.md",
+      [
+        "[a](../design/decisions/foo-rfc.md 'single')",
+        "[b](../design/decisions/foo-rfc.md (paren))",
+      ].join("\n") + "\n",
+    );
+    const texts = (await collectInboundLinks(cwd, TARGET)).items.map((i) => i.link_text);
+    expect(texts).toEqual(["a", "b"]);
+  });
+
   it("link_text preserves an inline-code label (recovered from the original, not the blanked line)", async () => {
     await write("docs/c.md", "See [use `foo`](../design/decisions/foo-rfc.md).\n");
     const { items } = await collectInboundLinks(cwd, TARGET);
