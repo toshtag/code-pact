@@ -24,10 +24,11 @@ const NON_DECISION_LEDGER_PATHS = new Set([
  * Constrain a raw `PRUNED.md` entry to a *pruned decision path*, returning its
  * normalized form or `null` to reject it. `PRUNED.md` is user-editable, so —
  * unlike a `decision_refs` value, which is validated upstream — a ledger entry
- * is re-validated here and confined to `design/decisions/**.md`. This is what
- * stops the ledger from being a licence to silence an arbitrary missing file
- * (a `docs/` page, a `design/phases/*.yaml`, a `../` traversal): only a real
- * decision record can be tombstoned, never `README.md` / `PRUNED.md` itself.
+ * is re-validated here and confined to a **top-level** `design/decisions/*.md`
+ * record. This is what stops the ledger from being a licence to silence an
+ * arbitrary missing file (a `docs/` page, a `design/phases/*.yaml`, a `../`
+ * traversal, a nested ADR): only a real top-level decision record can be
+ * tombstoned, never `README.md` / `PRUNED.md` itself.
  */
 export function normalizePrunedDecisionPath(raw: string): string | null {
   const fwd = raw.replace(/\\/g, "/").replace(/^(?:\.\/)+/, "");
@@ -40,6 +41,11 @@ export function normalizePrunedDecisionPath(raw: string): string | null {
   if (!normalized.startsWith("design/decisions/")) return null;
   if (!normalized.endsWith(".md")) return null;
   if (NON_DECISION_LEDGER_PATHS.has(normalized)) return null;
+  // Top-level records only. A nested ADR (`design/decisions/x/y.md`) is not a
+  // prune target: the gate scan that protects pruning is a flat top-level scan,
+  // so allowing nested here would let a nested dependant slip past it. Nested
+  // support is a deliberate future extension, not a silent gap.
+  if (normalized.slice("design/decisions/".length).includes("/")) return null;
   return normalized;
 }
 
