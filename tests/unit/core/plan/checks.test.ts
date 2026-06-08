@@ -700,6 +700,62 @@ describe("detectTaskDecisionRefNotFound (fs-backed)", () => {
     expect(issues[0]?.severity).toBe("error");
     expect(issues[0]?.affects_exit).toBeUndefined();
   });
+
+  it("SILENT (no issue) when a DONE task's missing ref is recorded in PRUNED.md", async () => {
+    await makeFile(
+      "design/decisions/PRUNED.md",
+      `| Decision | Pruned |\n| --- | --- |\n| \`design/decisions/retired.md\` | 2026-06-08 |\n`,
+    );
+    const entries = [
+      entry(
+        phase("P1", [
+          task("P1-T1", {
+            decision_refs: ["design/decisions/retired.md"],
+            status: "done",
+          }),
+        ]),
+      ),
+    ];
+    expect(await detectTaskDecisionRefNotFound(cwd, entries)).toEqual([]);
+  });
+
+  it("still WARNING for a DONE task's missing ref NOT in the ledger (accidental delete is not silenced)", async () => {
+    await makeFile(
+      "design/decisions/PRUNED.md",
+      `| Decision | Pruned |\n| --- | --- |\n| \`design/decisions/something-else.md\` | 2026-06-08 |\n`,
+    );
+    const entries = [
+      entry(
+        phase("P1", [
+          task("P1-T1", {
+            decision_refs: ["design/decisions/retired.md"],
+            status: "done",
+          }),
+        ]),
+      ),
+    ];
+    const issues = await detectTaskDecisionRefNotFound(cwd, entries);
+    expect(issues[0]?.severity).toBe("warning");
+  });
+
+  it("still ERROR for a LIVE task even if the missing ref is in the ledger (ledger never silences a live gate)", async () => {
+    await makeFile(
+      "design/decisions/PRUNED.md",
+      `| Decision | Pruned |\n| --- | --- |\n| \`design/decisions/retired.md\` | 2026-06-08 |\n`,
+    );
+    const entries = [
+      entry(
+        phase("P1", [
+          task("P1-T1", {
+            decision_refs: ["design/decisions/retired.md"],
+            status: "planned",
+          }),
+        ]),
+      ),
+    ];
+    const issues = await detectTaskDecisionRefNotFound(cwd, entries);
+    expect(issues[0]?.severity).toBe("error");
+  });
 });
 
 describe("detectTaskReadsNoMatch (fs-backed)", () => {

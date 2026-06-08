@@ -64,6 +64,17 @@ describe("readDecisionAdrFiles", () => {
     expect(await readDecisionAdrFiles(cwd)).toContain("P1-T1-rfc.md");
   });
 
+  it("excludes non-decision files (README.md, PRUNED.md ledger) from the candidate scan", async () => {
+    await mkdir(join(cwd, "design", "decisions"), { recursive: true });
+    await writeFile(join(cwd, "design", "decisions", "P1-T1-rfc.md"), "x");
+    await writeFile(join(cwd, "design", "decisions", "README.md"), "index");
+    await writeFile(join(cwd, "design", "decisions", "PRUNED.md"), "ledger");
+    const files = await readDecisionAdrFiles(cwd);
+    expect(files).toContain("P1-T1-rfc.md");
+    expect(files).not.toContain("README.md");
+    expect(files).not.toContain("PRUNED.md");
+  });
+
 });
 
 describe("isAbsentDecisionsDirError", () => {
