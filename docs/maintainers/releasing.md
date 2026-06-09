@@ -31,6 +31,11 @@ On a `chore/release-<version>` branch:
    snapshot rather than copying numbers, so it needs no edit.
 3. **CHANGELOG:** add a `## [<version>] — <date>` section (Keep a Changelog
    format: Added / Changed / Fixed). Lead with the user-facing shipped change.
+   On a **major bump**, roll older majors out of `CHANGELOG.md` into
+   `docs/maintainers/history/CHANGELOG-<major>.md` with `pnpm changelog:archive`
+   (verbatim move, not a delete; leaves a pointer). `check:changelog-archive`
+   (part of `check:docs`) fails if an older major is still inline, so this is
+   not silently skipped.
 4. **Docs-sync audit** — confirm everything shipped since the last tag followed
    the [docs ownership map](docs-maintenance.md#ownership-map--what-to-update-for-which-change).
    `check:docs` covers links, invariants, history-noise, and generated-reference
@@ -80,7 +85,9 @@ After the release-prep PR merges to `main`:
    pnpm build            # or `pnpm release:check` for the full pre-publish gate
    npm publish
    ```
-9. **GitHub Release** from the tag, using the CHANGELOG section as the body,
+9. **GitHub Release** from the tag, using the CHANGELOG section as the body —
+   generate it verbatim with `node scripts/release-notes.mjs <version>` (or
+   `pnpm release-notes <version>`) so the notes are never authored twice —
    **plus an `## Integrity` section** recording the published tarball's
    `shasum` and `integrity`. This is a documented supply-chain policy
    ([SECURITY.md](../../SECURITY.md): "the published tarball shasum is recorded
