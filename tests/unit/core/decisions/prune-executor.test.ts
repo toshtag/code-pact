@@ -266,7 +266,7 @@ describe("applyPrune — concurrent edit / removal during commit (ChatGPT round 
     expect(err).toBeInstanceOf(PruneWriteError);
     expect((err as PruneWriteError).phase).toBe("delete_record");
     expect((err as PruneWriteError).partial_applied).toBe(true);
-    expect((err as PruneWriteError).detail).toContain("disappeared before unlink");
+    expect((err as PruneWriteError).detail).toMatch(/missing|disappeared/); // record gone before the delete
     // ledger + link rewrites were committed before the (failed) delete.
     expect(await readPrunedLedger(cwd)).toEqual(new Set([TARGET]));
     expect(await read("docs/x.md")).toBe("See d.\n");
@@ -480,5 +480,24 @@ describe("applyPrune — target content drift (ChatGPT round 7, data-safety)", (
     expect((err as PruneWriteError).partial_applied).toBe(true); // ledger + docs landed this run
     expect(await exists(TARGET)).toBe(true); // not deleted
     expect(await read(TARGET)).toContain("proposed"); // the in-place edit survives
+  });
+
+  it("target edited AFTER preflight but BEFORE the first write → PLAN_STALE, ZERO writes (round 8)", async () => {
+    await write("docs/x.md", "See [d](../design/decisions/foo-rfc.md).\n");
+    const { items } = await collectInboundLinks(cwd, TARGET);
+    const docBefore = await read("docs/x.md");
+
+    // The hook fires at the start of the commit phase, before the first write —
+    // simulating a target edited during the (multi-read) preflight window.
+    await expect(
+      applyPrune(cwd, input(items), {
+        beforeLedgerWrite: async () => { await write(TARGET, "# Foo\n\n**Status:** proposed\n"); },
+      }),
+    ).rejects.toBeInstanceOf(PrunePlanStaleError);
+
+    // Nothing written: no ledger, docs byte-identical, the (now-ineligible) record survives.
+    expect(await exists("design/decisions/PRUNED.md")).toBe(false);
+    expect(await read("docs/x.md")).toBe(docBefore);
+    expect(await read(TARGET)).toContain("proposed");
   });
 });

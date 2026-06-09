@@ -34,9 +34,10 @@ Eligible → exit 0 (dry-run reports the plan; --write applies it). Ineligible �
 exit 2 with error code DECISION_PRUNE_NOT_ELIGIBLE and
 every applicable failing gate under data.blocks[] (the link-rewrite gates are
 evaluated once the target itself is a readable, accepted, top-level record). The
-verdict is identical for dry-run and --write. If the working tree changes under
-the plan, --write aborts with DECISION_PRUNE_PLAN_STALE (exit 2) and writes
-nothing — re-run to rebuild.
+verdict is identical for dry-run and --write. If the tree no longer matches the
+plan BEFORE the commit starts, --write aborts with DECISION_PRUNE_PLAN_STALE
+(exit 2) and writes nothing. Drift or an I/O failure DURING the commit returns
+DECISION_PRUNE_WRITE_FAILED (exit 2) with data.phase and data.partial_applied.
 
 Options:
   --write   Execute the plan under the advisory write lock, in least-harmful order:

@@ -202,6 +202,43 @@ function errDetail(err: unknown): string {
   return code ?? (err instanceof Error ? err.message : String(err));
 }
 
+type TargetCheck = { ok: true; ino: number; dev: number } | { ok: false; found: string };
+
+/**
+ * Verify the target record is STILL the same readable regular file with the same
+ * bytes the verdict was computed from. Used identically at preflight, just before
+ * the first write, and just before the delete — one helper so the invariant can't
+ * drift between copies. Reads CONTENT FIRST, then `stat`s, so a path swapped for a
+ * coincidentally-matching file cannot slip past the inode check (the inode/dev
+ * comparison is the last filesystem read before the caller acts). `expectedIno`/
+ * `expectedDev` are omitted on the first (preflight) call, which establishes them.
+ */
+async function inspectTarget(
+  absTarget: string,
+  expectedContent: string,
+  expectedIno?: number,
+  expectedDev?: number,
+): Promise<TargetCheck> {
+  let content: string;
+  try {
+    content = await readFile(absTarget, "utf8");
+  } catch (err) {
+    return { ok: false, found: errDetail(err) === "ENOENT" ? "<missing>" : `<unreadable: ${errDetail(err)}>` };
+  }
+  if (content !== expectedContent) return { ok: false, found: "<record content changed since the verdict>" };
+  let st;
+  try {
+    st = await stat(absTarget);
+  } catch (err) {
+    return { ok: false, found: errDetail(err) === "ENOENT" ? "<missing>" : `<unreadable: ${errDetail(err)}>` };
+  }
+  if (!st.isFile()) return { ok: false, found: st.isDirectory() ? "<directory>" : "<not a regular file>" };
+  if (expectedIno !== undefined && (st.ino !== expectedIno || st.dev !== expectedDev)) {
+    return { ok: false, found: "<record replaced since the verdict (inode changed)>" };
+  }
+  return { ok: true, ino: st.ino, dev: st.dev };
+}
+
 type PendingRewrite = {
   rel: string;
   abs: string;
@@ -269,40 +306,18 @@ export async function applyPrune(
       { source_file: input.remove_file, line: 0, column: 0, expected: "<the decision record>", found: "<path now escapes the project root>" },
     ]);
   }
-  let targetOk = false;
-  let targetFound = "<missing>";
-  let targetIno = -1;
-  let targetDev = -1;
-  try {
-    const st = await stat(absTarget);
-    targetOk = st.isFile();
-    targetIno = st.ino;
-    targetDev = st.dev;
-    if (!targetOk) targetFound = st.isDirectory() ? "<directory>" : "<not a regular file>";
-  } catch (err) {
-    targetFound = errDetail(err) === "ENOENT" ? "<missing>" : `<unreadable: ${errDetail(err)}>`;
-  }
-  if (!targetOk) {
+  // The target must still be a readable regular file whose CONTENT matches the
+  // verdict bytes — an in-place edit (accepted → proposed, a new open commitment,
+  // a rewritten body) keeps the inode but invalidates the eligibility. This
+  // establishes the inode/dev re-checked before the first write and the delete.
+  const t0 = await inspectTarget(absTarget, input.expected_target_content);
+  if (!t0.ok) {
     throw new PrunePlanStaleError([
-      { source_file: input.remove_file, line: 0, column: 0, expected: "<a readable decision record>", found: targetFound },
+      { source_file: input.remove_file, line: 0, column: 0, expected: "<the decision record unchanged since the verdict>", found: t0.found },
     ]);
   }
-  // The target's CONTENT must still match what the verdict was computed from — an
-  // in-place edit (accepted → proposed, a new open commitment, a rewritten body)
-  // keeps the inode but invalidates the eligibility we are about to act on.
-  let targetContent: string;
-  try {
-    targetContent = await readFile(absTarget, "utf8");
-  } catch (err) {
-    throw new PrunePlanStaleError([
-      { source_file: input.remove_file, line: 0, column: 0, expected: "<a readable decision record>", found: `<unreadable: ${errDetail(err)}>` },
-    ]);
-  }
-  if (targetContent !== input.expected_target_content) {
-    throw new PrunePlanStaleError([
-      { source_file: input.remove_file, line: 0, column: 0, expected: "<the decision record unchanged since the verdict>", found: "<record content edited since preflight>" },
-    ]);
-  }
+  const targetIno = t0.ino;
+  const targetDev = t0.dev;
 
   // 1b. Re-collect inbound links; the plan must describe the live tree exactly.
   const live = await collectInboundLinks(cwd, input.remove_file);
@@ -374,6 +389,24 @@ export async function applyPrune(
 
   // ── Phase 2: commit, ordered so a failure is least harmful ──
 
+  try {
+    if (hooks.beforeLedgerWrite) await hooks.beforeLedgerWrite();
+  } catch (err) {
+    throw new PruneWriteError("append_ledger", false, errDetail(err));
+  }
+
+  // Re-verify the target IMMEDIATELY before the first write — the verdict's
+  // preflight may have taken many reads, during which the record could have been
+  // edited (accepted → proposed) or replaced. Catching it here means a target that
+  // drifted before any mutation is a zero-write PLAN_STALE, not a late delete-phase
+  // failure after the ledger + docs were already changed.
+  const tPre = await inspectTarget(absTarget, input.expected_target_content, targetIno, targetDev);
+  if (!tPre.ok) {
+    throw new PrunePlanStaleError([
+      { source_file: input.remove_file, line: 0, column: 0, expected: "<the decision record unchanged since the verdict>", found: tPre.found },
+    ]);
+  }
+
   // 2a. Ledger FIRST. A row for a still-present record is benign, so a ledger
   // failure here leaves inbound docs byte-identical. Re-read PRUNED.md at commit
   // time in BOTH branches (the advisory lock does not guard editors / other tools):
@@ -385,7 +418,6 @@ export async function applyPrune(
   // The row reported in the result — reflects the ledger as it is at COMMIT time.
   let committedLedgerRow = prepared.row;
   try {
-    if (hooks.beforeLedgerWrite) await hooks.beforeLedgerWrite();
     // Read the ledger as it stands now, tracking existence precisely so "absent"
     // is distinguishable from "present but empty".
     let currentLedger = "";
@@ -458,24 +490,18 @@ export async function applyPrune(
     applied.push(...r.applied);
   }
 
-  // 2c. Delete the record LAST (the only irreversible step). Re-stat immediately
-  // before unlink and refuse if the path is no longer the SAME regular file we
-  // validated in phase 1a (inode+device) — so a concurrent swap of the path for
-  // a different file / symlink / special file cannot make us unlink the wrong
-  // object. (This narrows the 1a→2c TOCTOU window to one syscall; POSIX has no
-  // portable atomic unlink-if-inode, so it is not fully closed.) An ENOENT here
-  // means the record disappeared before WE deleted it — code-pact did not complete
-  // the delete, so it is reported honestly, never claimed as a removal.
+  // 2c. Delete the record LAST (the only irreversible step). `inspectTarget` reads
+  // the CONTENT first then `stat`s, so the inode/dev check is the last filesystem
+  // read before `unlink` — a path swapped for a coincidentally-matching file cannot
+  // bypass it (reading content first would otherwise let a same-content swap through).
+  // The remaining stat→unlink gap is one syscall; POSIX has no portable
+  // atomic-unlink-if-inode. A drift here (the record edited / replaced / removed
+  // before we deleted it) is reported honestly, never claimed as a removal.
   try {
     if (hooks.beforeDelete) await hooks.beforeDelete();
-    const cur = await stat(absTarget);
-    if (cur.ino !== targetIno || cur.dev !== targetDev || !cur.isFile()) {
-      throw new PruneWriteError("delete_record", mutationLanded(), "target changed under prune (refusing to unlink a replaced path)");
-    }
-    // Re-read the content too: refuse to delete a record that was edited in place
-    // since the verdict (same inode, different bytes — e.g. status flipped back).
-    if ((await readFile(absTarget, "utf8")) !== input.expected_target_content) {
-      throw new PruneWriteError("delete_record", mutationLanded(), "target content changed under prune (refusing to delete an edited record)");
+    const tDel = await inspectTarget(absTarget, input.expected_target_content, targetIno, targetDev);
+    if (!tDel.ok) {
+      throw new PruneWriteError("delete_record", mutationLanded(), `target changed under prune (${tDel.found}) — refusing to delete`);
     }
     await unlink(absTarget);
   } catch (err) {
