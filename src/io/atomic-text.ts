@@ -1,13 +1,28 @@
 import { mkdir, rename, writeFile, unlink, readFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
-/** Re-read `path` mapping a missing file to `""` (so "expected absent" is `""`). */
-async function readOrEmpty(path: string): Promise<string> {
-  try {
-    return await readFile(path, "utf8");
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return "";
-    throw err;
+/**
+ * The expected on-disk state of a destination just before an atomic write — used
+ * for the pre-rename drift re-check. `absent` and `present` are DISTINCT: an empty
+ * file appearing where absence was expected is a drift, not a match (which a bare
+ * `""` content compare would miss).
+ */
+export type ExpectedState = { kind: "absent" } | { kind: "present"; content: string };
+
+async function verifyExpected(path: string, expected: ExpectedState): Promise<void> {
+  if (expected.kind === "absent") {
+    let exists = true;
+    try {
+      await readFile(path, "utf8");
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") exists = false;
+      else throw err;
+    }
+    if (exists) throw new Error("destination appeared before write (expected absent)");
+  } else {
+    // A `present`-expected destination that vanished (ENOENT) throws here too — a drift.
+    const current = await readFile(path, "utf8");
+    if (current !== expected.content) throw new Error("destination changed before write");
   }
 }
 
@@ -15,16 +30,13 @@ async function writeThenRename(
   tmp: string,
   path: string,
   content: string,
-  expectedCurrent?: string,
+  expected?: ExpectedState,
 ): Promise<void> {
   try {
     await writeFile(tmp, content, "utf8");
-    if (expectedCurrent !== undefined) {
-      // Re-check just before rename: refuse if the destination drifted since the
-      // caller's read (narrows, does not close, the window). `""` means "expected absent".
-      const current = await readOrEmpty(path);
-      if (current !== expectedCurrent) throw new Error("destination changed before write");
-    }
+    // Re-check just before rename: refuse if the destination drifted since the
+    // caller's read (narrows, does not close, the window).
+    if (expected !== undefined) await verifyExpected(path, expected);
     await rename(tmp, path);
   } catch (err) {
     // Best-effort: never leave a stray temp file behind, whether the failure was
@@ -41,15 +53,21 @@ async function writeThenRename(
  * the target half-written; a rename failure cleans up the temp file. Does NOT
  * protect against concurrent writers — that is a known limitation noted in
  * docs/cli-contract.md.
+ *
+ * When `expected` is given, the destination's existence + content are re-checked
+ * after the temp write and just before the rename (narrowing, not closing, the
+ * drift window). `{kind:"absent"}` requires the destination to still not exist
+ * (an empty file appearing is refused); `{kind:"present", content}` requires it
+ * to still hold exactly `content`.
  */
 export async function atomicWriteText(
   path: string,
   content: string,
-  expectedCurrent?: string,
+  expected?: ExpectedState,
 ): Promise<void> {
   const tmp = `${path}.tmp-${process.pid}-${Date.now()}`;
   await mkdir(dirname(path), { recursive: true });
-  await writeThenRename(tmp, path, content, expectedCurrent);
+  await writeThenRename(tmp, path, content, expected);
 }
 
 /**
@@ -73,5 +91,7 @@ export async function atomicReplaceExistingText(
   expectedCurrent?: string,
 ): Promise<void> {
   const tmp = `${path}.tmp-${process.pid}-${Date.now()}`;
-  await writeThenRename(tmp, path, content, expectedCurrent);
+  const expected: ExpectedState | undefined =
+    expectedCurrent !== undefined ? { kind: "present", content: expectedCurrent } : undefined;
+  await writeThenRename(tmp, path, content, expected);
 }

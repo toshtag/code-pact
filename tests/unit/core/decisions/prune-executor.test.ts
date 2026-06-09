@@ -9,7 +9,7 @@ import {
   PruneWriteError,
 } from "../../../../src/core/decisions/prune-executor.ts";
 import { readPrunedLedger } from "../../../../src/core/decisions/pruned-ledger.ts";
-import { unlink } from "node:fs/promises";
+import { unlink, symlink } from "node:fs/promises";
 
 let cwd: string;
 
@@ -499,5 +499,72 @@ describe("applyPrune — target content drift (ChatGPT round 7, data-safety)", (
     expect(await exists("design/decisions/PRUNED.md")).toBe(false);
     expect(await read("docs/x.md")).toBe(docBefore);
     expect(await read(TARGET)).toContain("proposed");
+  });
+});
+
+describe("applyPrune — repo-boundary drift at commit (ChatGPT round 9, path-safety)", () => {
+  it("a source ancestor symlinked OUT of the repo before its write → WRITE_FAILED rewrite_links, external file untouched", async () => {
+    await write("docs/x.md", "See [d](../design/decisions/foo-rfc.md).\n");
+    const { items } = await collectInboundLinks(cwd, TARGET);
+    const outside = await mkdtemp(join(tmpdir(), "code-pact-outside-"));
+    // an external file with the SAME content (so only the boundary check, not content, catches it)
+    await writeFile(join(outside, "x.md"), "See [d](../design/decisions/foo-rfc.md).\n", "utf8");
+    const externalBefore = await readFile(join(outside, "x.md"), "utf8");
+
+    const err = await applyPrune(cwd, input(items), {
+      beforeSourceWrite: async () => {
+        await rm(join(cwd, "docs"), { recursive: true, force: true });
+        await symlink(outside, join(cwd, "docs")); // docs -> /outside (escapes the repo)
+      },
+    }).catch((e) => e);
+
+    expect(err).toBeInstanceOf(PruneWriteError);
+    expect((err as PruneWriteError).phase).toBe("rewrite_links");
+    expect(await readFile(join(outside, "x.md"), "utf8")).toBe(externalBefore); // external NEVER touched
+    await rm(outside, { recursive: true, force: true });
+  });
+
+  it("the target ancestor symlinked OUT of the repo before the first write → PLAN_STALE, ZERO writes", async () => {
+    await write("docs/x.md", "See [d](../design/decisions/foo-rfc.md).\n");
+    const { items } = await collectInboundLinks(cwd, TARGET);
+    const outside = await mkdtemp(join(tmpdir(), "code-pact-outside-"));
+    await mkdir(join(outside, "decisions"), { recursive: true });
+    await writeFile(join(outside, "decisions", "foo-rfc.md"), TARGET_CONTENT, "utf8");
+    const docBefore = await read("docs/x.md");
+
+    await expect(
+      applyPrune(cwd, input(items), {
+        beforeLedgerWrite: async () => {
+          await rm(join(cwd, "design", "decisions"), { recursive: true, force: true });
+          await symlink(join(outside, "decisions"), join(cwd, "design", "decisions"));
+        },
+      }),
+    ).rejects.toBeInstanceOf(PrunePlanStaleError);
+
+    expect(await exists("design/decisions/PRUNED.md")).toBe(false); // zero writes
+    expect(await read("docs/x.md")).toBe(docBefore);
+    expect(await readFile(join(outside, "decisions", "foo-rfc.md"), "utf8")).toBe(TARGET_CONTENT); // external untouched
+    await rm(outside, { recursive: true, force: true });
+  });
+
+  it("the target ancestor symlinked OUT of the repo before the delete → WRITE_FAILED delete_record, external target not unlinked", async () => {
+    await write("docs/x.md", "See [d](../design/decisions/foo-rfc.md).\n");
+    const { items } = await collectInboundLinks(cwd, TARGET);
+    const outside = await mkdtemp(join(tmpdir(), "code-pact-outside-"));
+    await mkdir(join(outside, "decisions"), { recursive: true });
+    await writeFile(join(outside, "decisions", "foo-rfc.md"), TARGET_CONTENT, "utf8");
+
+    const err = await applyPrune(cwd, input(items), {
+      beforeDelete: async () => {
+        await rm(join(cwd, "design", "decisions"), { recursive: true, force: true });
+        await symlink(join(outside, "decisions"), join(cwd, "design", "decisions"));
+      },
+    }).catch((e) => e);
+
+    expect(err).toBeInstanceOf(PruneWriteError);
+    expect((err as PruneWriteError).phase).toBe("delete_record");
+    // the external target was NOT unlinked (the boundary check refused the escaped path)
+    expect(await readFile(join(outside, "decisions", "foo-rfc.md"), "utf8")).toBe(TARGET_CONTENT);
+    await rm(outside, { recursive: true, force: true });
   });
 });

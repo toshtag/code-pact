@@ -1,6 +1,6 @@
 import { readFile, stat, unlink } from "node:fs/promises";
 import { resolveWithinProject } from "../path-safety.ts";
-import { atomicWriteText, atomicReplaceExistingText } from "../../io/atomic-text.ts";
+import { atomicWriteText, atomicReplaceExistingText, type ExpectedState } from "../../io/atomic-text.ts";
 import {
   collectInboundLinks,
   type InboundLinkScan,
@@ -197,38 +197,55 @@ function groupBySource(items: LinkRewriteItem[]): Map<string, LinkRewriteItem[]>
   return byFile;
 }
 
+/** The append-only ledger, re-resolved at commit time (not a cached preflight path). */
+const LEDGER_REL = "design/decisions/PRUNED.md";
+
 function errDetail(err: unknown): string {
   const code = (err as NodeJS.ErrnoException).code;
   return code ?? (err instanceof Error ? err.message : String(err));
 }
 
-type TargetCheck = { ok: true; ino: number; dev: number } | { ok: false; found: string };
+type TargetCheck = { ok: true; abs: string; ino: number; dev: number } | { ok: false; found: string };
 
 /**
  * Verify the target record is STILL the same readable regular file with the same
- * bytes the verdict was computed from. Used identically at preflight, just before
- * the first write, and just before the delete — one helper so the invariant can't
- * drift between copies. Reads CONTENT FIRST, then `stat`s, so a path swapped for a
- * coincidentally-matching file cannot slip past the inode check (the inode/dev
- * comparison is the last filesystem read before the caller acts). `expectedIno`/
- * `expectedDev` are omitted on the first (preflight) call, which establishes them.
+ * bytes the verdict was computed from, and is STILL inside the project. Used
+ * identically at preflight, just before the first write, and just before the
+ * delete — one helper so the invariant can't drift between copies.
+ *
+ *  - **`resolveWithinProject` is re-run every call** (not a cached abs path), so an
+ *    ancestor directory swapped for a symlink that escapes the repo after preflight
+ *    is caught at commit time — `--write` only ever touches repo-internal files.
+ *  - Reads CONTENT FIRST, then `stat`s, so a path swapped for a coincidentally-
+ *    matching file cannot slip past the inode check (the inode/dev comparison is
+ *    the last filesystem read before the caller acts).
+ *
+ * `expectedIno`/`expectedDev` are omitted on the first (preflight) call, which
+ * establishes them.
  */
 async function inspectTarget(
-  absTarget: string,
+  cwd: string,
+  relPath: string,
   expectedContent: string,
   expectedIno?: number,
   expectedDev?: number,
 ): Promise<TargetCheck> {
+  let abs: string;
+  try {
+    abs = await resolveWithinProject(cwd, relPath);
+  } catch {
+    return { ok: false, found: "<path now escapes the project root>" };
+  }
   let content: string;
   try {
-    content = await readFile(absTarget, "utf8");
+    content = await readFile(abs, "utf8");
   } catch (err) {
     return { ok: false, found: errDetail(err) === "ENOENT" ? "<missing>" : `<unreadable: ${errDetail(err)}>` };
   }
   if (content !== expectedContent) return { ok: false, found: "<record content changed since the verdict>" };
   let st;
   try {
-    st = await stat(absTarget);
+    st = await stat(abs);
   } catch (err) {
     return { ok: false, found: errDetail(err) === "ENOENT" ? "<missing>" : `<unreadable: ${errDetail(err)}>` };
   }
@@ -236,12 +253,11 @@ async function inspectTarget(
   if (expectedIno !== undefined && (st.ino !== expectedIno || st.dev !== expectedDev)) {
     return { ok: false, found: "<record replaced since the verdict (inode changed)>" };
   }
-  return { ok: true, ino: st.ino, dev: st.dev };
+  return { ok: true, abs, ino: st.ino, dev: st.dev };
 }
 
 type PendingRewrite = {
   rel: string;
-  abs: string;
   /** The exact bytes read in preflight (1c) — the source is refused if it no longer matches at write time. */
   original: string;
   /** The rewritten bytes to commit. */
@@ -295,22 +311,12 @@ export async function applyPrune(
 ): Promise<PruneApplyResult> {
   // ── Phase 1: preflight — NO writes ──
 
-  // 1a. The target must still be a readable, regular file. A target that
-  // vanished / became a directory / escapes the root is plan drift, not a
-  // success to absorb: refuse with zero writes.
-  let absTarget: string;
-  try {
-    absTarget = await resolveWithinProject(cwd, input.remove_file);
-  } catch {
-    throw new PrunePlanStaleError([
-      { source_file: input.remove_file, line: 0, column: 0, expected: "<the decision record>", found: "<path now escapes the project root>" },
-    ]);
-  }
-  // The target must still be a readable regular file whose CONTENT matches the
-  // verdict bytes — an in-place edit (accepted → proposed, a new open commitment,
-  // a rewritten body) keeps the inode but invalidates the eligibility. This
-  // establishes the inode/dev re-checked before the first write and the delete.
-  const t0 = await inspectTarget(absTarget, input.expected_target_content);
+  // 1a. The target must still be an in-project, readable, regular file whose
+  // CONTENT matches the verdict bytes — an in-place edit (accepted → proposed, a
+  // new open commitment, a rewritten body) keeps the inode but invalidates the
+  // eligibility; an ancestor symlinked out of the repo would escape the boundary.
+  // This establishes the inode/dev re-checked before the first write and the delete.
+  const t0 = await inspectTarget(cwd, input.remove_file, input.expected_target_content);
   if (!t0.ok) {
     throw new PrunePlanStaleError([
       { source_file: input.remove_file, line: 0, column: 0, expected: "<the decision record unchanged since the verdict>", found: t0.found },
@@ -374,7 +380,7 @@ export async function applyPrune(
         after: e.after,
       });
     }
-    pending.push({ rel: file, abs, original: content, content: out, applied: appliedHere });
+    pending.push({ rel: file, original: content, content: out, applied: appliedHere });
   }
   if (stale.length > 0) throw new PrunePlanStaleError(stale);
 
@@ -397,10 +403,10 @@ export async function applyPrune(
 
   // Re-verify the target IMMEDIATELY before the first write — the verdict's
   // preflight may have taken many reads, during which the record could have been
-  // edited (accepted → proposed) or replaced. Catching it here means a target that
-  // drifted before any mutation is a zero-write PLAN_STALE, not a late delete-phase
-  // failure after the ledger + docs were already changed.
-  const tPre = await inspectTarget(absTarget, input.expected_target_content, targetIno, targetDev);
+  // edited (accepted → proposed), replaced, or symlinked out of the repo. Catching
+  // it here means a target that drifted before any mutation is a zero-write
+  // PLAN_STALE, not a late delete-phase failure after ledger + docs were changed.
+  const tPre = await inspectTarget(cwd, input.remove_file, input.expected_target_content, targetIno, targetDev);
   if (!tPre.ok) {
     throw new PrunePlanStaleError([
       { source_file: input.remove_file, line: 0, column: 0, expected: "<the decision record unchanged since the verdict>", found: tPre.found },
@@ -418,12 +424,16 @@ export async function applyPrune(
   // The row reported in the result — reflects the ledger as it is at COMMIT time.
   let committedLedgerRow = prepared.row;
   try {
+    // Re-resolve the ledger path at COMMIT time (not the cached preflight one), so
+    // a design/decisions ancestor symlinked out of the repo since preflight is
+    // caught here — never read/write an external PRUNED.md.
+    const ledgerPath = await resolveWithinProject(cwd, LEDGER_REL);
     // Read the ledger as it stands now, tracking existence precisely so "absent"
     // is distinguishable from "present but empty".
     let currentLedger = "";
     let currentExists = true;
     try {
-      currentLedger = await readFile(prepared.ledger_path, "utf8");
+      currentLedger = await readFile(ledgerPath, "utf8");
     } catch (err) {
       if (errDetail(err) !== "ENOENT") throw err;
       currentExists = false;
@@ -441,13 +451,15 @@ export async function applyPrune(
     } else {
       // The ledger must be exactly as preflight saw it — same EXISTENCE (so an
       // empty file appearing where we expected none is refused, not silently
-      // overwritten) and same bytes.
+      // overwritten) and same bytes. The existence-aware `ExpectedState` re-checks
+      // again just before the rename.
       if (currentExists !== prepared.existed || currentLedger !== prepared.existing_content) {
         throw new PruneWriteError("append_ledger", false, "ledger (PRUNED.md) changed after preflight");
       }
-      // Pass the preflight content as `expectedCurrent` so the write also re-checks
-      // just before rename — symmetric with the source rewrites.
-      await atomicWriteText(prepared.ledger_path, prepared.content, prepared.existing_content);
+      const expected: ExpectedState = prepared.existed
+        ? { kind: "present", content: prepared.existing_content }
+        : { kind: "absent" };
+      await atomicWriteText(ledgerPath, prepared.content, expected);
       ledger_action = "appended";
     }
   } catch (err) {
@@ -455,11 +467,12 @@ export async function applyPrune(
     throw new PruneWriteError("append_ledger", false, errDetail(err));
   }
 
-  // 2b. Rewrite inbound links. Re-read each source IMMEDIATELY before writing and
-  // refuse if it changed since the preflight read (a concurrent edit by an editor
-  // / git / another tool — which the advisory lock does NOT guard). We never
-  // clobber a concurrent edit with stale rewritten content; we use an EXISTING-file
-  // replace (no parent re-creation) so a vanished source / parent fails too.
+  // 2b. Rewrite inbound links. RE-RESOLVE each source path (catching an ancestor
+  // symlinked out of the repo since preflight) and re-read it IMMEDIATELY before
+  // writing, refusing if it changed since the preflight read (a concurrent edit by
+  // an editor / git / another tool — which the advisory lock does NOT guard). We
+  // never clobber a concurrent edit with stale rewritten content; we use an
+  // EXISTING-file replace (no parent re-creation) so a vanished source / parent fails.
   const applied: AppliedRewrite[] = [];
   // Has THIS invocation already mutated the tree? The ledger row counts only when
   // it was appended this run (not an idempotent already-recorded retry), plus any
@@ -471,9 +484,15 @@ export async function applyPrune(
     } catch (err) {
       throw new PruneWriteError("rewrite_links", mutationLanded(), errDetail(err));
     }
+    let abs: string;
+    try {
+      abs = await resolveWithinProject(cwd, r.rel);
+    } catch {
+      throw new PruneWriteError("rewrite_links", mutationLanded(), `source path escapes the project root: ${r.rel}`);
+    }
     let current: string | null = null;
     try {
-      current = await readFile(r.abs, "utf8");
+      current = await readFile(abs, "utf8");
     } catch {
       current = null;
     }
@@ -483,7 +502,7 @@ export async function applyPrune(
     try {
       // Pass the expected content so the helper re-checks just before rename,
       // narrowing the drift window to the temp-write gap.
-      await atomicReplaceExistingText(r.abs, r.content, r.original);
+      await atomicReplaceExistingText(abs, r.content, r.original);
     } catch (err) {
       throw new PruneWriteError("rewrite_links", mutationLanded(), errDetail(err));
     }
@@ -499,11 +518,13 @@ export async function applyPrune(
   // before we deleted it) is reported honestly, never claimed as a removal.
   try {
     if (hooks.beforeDelete) await hooks.beforeDelete();
-    const tDel = await inspectTarget(absTarget, input.expected_target_content, targetIno, targetDev);
+    // Re-resolve + re-verify (content then inode/dev); unlink the FRESHLY resolved
+    // path, so an ancestor symlinked out of the repo can never redirect the unlink.
+    const tDel = await inspectTarget(cwd, input.remove_file, input.expected_target_content, targetIno, targetDev);
     if (!tDel.ok) {
       throw new PruneWriteError("delete_record", mutationLanded(), `target changed under prune (${tDel.found}) — refusing to delete`);
     }
-    await unlink(absTarget);
+    await unlink(tDel.abs);
   } catch (err) {
     if (err instanceof PruneWriteError) throw err;
     throw new PruneWriteError(
