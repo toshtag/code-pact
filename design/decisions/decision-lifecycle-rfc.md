@@ -1,7 +1,7 @@
 # RFC: Decision record lifecycle — prunable shipped decisions
 
-**Status:** proposed
-**Scope:** make a *shipped* decision record safely removable without breaking control-plane integrity. Three additive layers: (1) **status-aware ref integrity** — a `done` task no longer hard-requires its `decision_refs` / `acceptance_refs` file to exist on disk; (2) a **`code-pact decision prune`** command with eligibility gates + an append-only tombstone ledger; (3) a per-project **`decision_retention`** policy (`keep-full` | `compress-on-ship` | `prune-on-ship`). Plus the long-term record-of-truth model (CHANGELOG authored + rolling-archived; release notes generated; the RFC is a prunable working doc; git is the backstop).
+**Status:** accepted (C2/D1/E/E2 shipped; compress-on-ship deferred, 2026-06)
+**Scope:** make a *shipped* decision record safely removable without breaking control-plane integrity. Three additive layers: (1) **status-aware ref integrity** — a `done` task no longer hard-requires its `decision_refs` / `acceptance_refs` file to exist on disk; (2) a **`code-pact decision prune`** command with eligibility gates + an append-only tombstone ledger; (3) a per-project **`decision_retention`** policy (`keep-full` | `compress-on-ship` | `prune-on-ship`). Plus the long-term record-of-truth model (CHANGELOG authored + rolling-archived; release notes generated; the RFC is a policy-governed working doc — kept by default, pruned only when standalone/decoupled; git is the backstop).
 **Owners:** maintainer
 **Related:** [task-readiness-schema](task-readiness-schema-rfc.md) (defines `decision_refs` / `acceptance_refs`) · [finalization-reconciliation](finalization-reconciliation-rfc.md) (`task finalize` flips design status to `done` — the signal this RFC keys off) · [adr-downstream-commitments](adr-downstream-commitments-rfc.md) + [adr-quality-advisory](adr-quality-advisory-rfc.md) (the `## Implementation commitments` surface an eligibility gate must honor) · [doc-truth-from-code](doc-truth-from-code-rfc.md) (the lean compress form the `compress-on-ship` policy reuses).
 
@@ -78,7 +78,7 @@ One job per surface (the anti-duplication principle):
 | **git history** | complete, immutable record of everything (incl. pruned RFC full text) | not in working context — never bloats "in your face"; the ultimate backstop |
 | **`CHANGELOG.md`** | human-curated "**what changed**" — the authored source of truth | **rolling-archive**: keep the current major in-repo, move older to `docs/maintainers/history/CHANGELOG-<major>.md` |
 | **Release notes** (forge Releases) | user-facing announcement | **generated from `CHANGELOG.md`**, never authored twice |
-| **RFC** (`design/decisions/`) | the only home for *why-this-way + rejected alternatives* | a **prunable working doc** — not the durable record |
+| **RFC** (`design/decisions/`) | the only home for *why-this-way + rejected alternatives* | **policy-governed**: kept by default; prune only when the record is standalone/decoupled and the eligibility checks pass (this repo's RFCs are phase-coupled and load-bearing → `keep-full`) |
 
 Direct answer to "should release notes be the source of truth?" — **No.** `CHANGELOG.md` is the one *authored* record; release notes are *derived* from it; git is the complete backstop; the RFC is a working doc, not a record of truth.
 
