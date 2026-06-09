@@ -1,9 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile, readFile, access } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   runDecisionPrune,
+  runDecisionPruneWrite,
+  serializeDecisionPruneWrite,
+  serializeDecisionPruneWriteFailed,
+  formatDecisionPruneWriteHuman,
+  writeFailedMessage,
   serializeDecisionPrune,
   formatDecisionPruneHuman,
   notEligibleMessage,
@@ -239,6 +244,170 @@ describe("runDecisionPrune", () => {
     expect(gates).toContain("link_rewrite_unsupported"); // not hidden behind core ineligibility
   });
 
+});
+
+describe("runDecisionPruneWrite (--write execution)", () => {
+  const NOW = new Date("2026-06-09T12:00:00Z");
+
+  it("applies the plan: removes the file, rewrites a body link, appends a dated ledger row", async () => {
+    await writeDecision("foo-rfc.md");
+    await writeDoneTaskPhase("design/decisions/foo-rfc.md");
+    await mkdir(join(cwd, "docs"), { recursive: true });
+    await writeFile(
+      join(cwd, "docs", "x.md"),
+      "# X\n\nSee [the decision](../design/decisions/foo-rfc.md).\n",
+    );
+
+    const outcome = await runDecisionPruneWrite(cwd, "design/decisions/foo-rfc.md", { now: NOW });
+    expect(outcome.kind).toBe("applied");
+    if (outcome.kind !== "applied") return;
+
+    expect(outcome.removed_file).toBe("design/decisions/foo-rfc.md");
+    expect(outcome.link_rewrites_applied).toHaveLength(1);
+    expect(outcome.ledger_row).toContain("`design/decisions/foo-rfc.md`");
+    expect(outcome.ledger_row).toContain("2026-06-09"); // date from the injected clock
+    expect(outcome.ledger_row).toContain("P1-T1"); // referencing task recorded
+
+    // disk effects
+    await expect(access(join(cwd, "design", "decisions", "foo-rfc.md"))).rejects.toThrow();
+    expect(await readFile(join(cwd, "docs", "x.md"), "utf8")).toBe("# X\n\nSee the decision.\n");
+    expect(await readFile(join(cwd, "design", "decisions", "PRUNED.md"), "utf8")).toContain(
+      "P1-T1",
+    );
+
+    expect(outcome.ledger_action).toBe("appended");
+    // serializer exposes the write contract
+    const data = serializeDecisionPruneWrite(outcome);
+    expect(data).toMatchObject({ mode: "write", decision: "design/decisions/foo-rfc.md", ledger_action: "appended" });
+    expect(data).toHaveProperty("removed_file");
+    expect(data).toHaveProperty("link_rewrites_applied");
+    expect(data).toHaveProperty("ledger_row");
+    // human output names the removal + ledger
+    const human = formatDecisionPruneWriteHuman(outcome);
+    expect(human).toContain("PRUNED");
+    expect(human).toContain("docs/x.md");
+    expect(human).toContain("appended to design/decisions/PRUNED.md");
+  });
+
+  it("idempotent retry: an already-recorded decision reports ledger_action 'already_recorded', human is honest", async () => {
+    await writeDecision("foo-rfc.md");
+    await writeDoneTaskPhase("design/decisions/foo-rfc.md");
+    await mkdir(join(cwd, "docs"), { recursive: true });
+    await writeFile(join(cwd, "docs", "x.md"), "See [d](../design/decisions/foo-rfc.md).\n");
+    // foo already in the ledger (a prior partial-failure prune), with a DIFFERENT date/phase
+    await writeFile(
+      join(cwd, "design", "decisions", "PRUNED.md"),
+      "# Pruned decisions\n\n| Decision | x |\n| --- | --- |\n| `design/decisions/foo-rfc.md` | P0-T9 | 2026-01-01 | manual |\n",
+    );
+
+    const outcome = await runDecisionPruneWrite(cwd, "design/decisions/foo-rfc.md", { now: NOW });
+    expect(outcome.kind).toBe("applied");
+    if (outcome.kind !== "applied") return;
+    expect(outcome.ledger_action).toBe("already_recorded");
+    expect(outcome.ledger_row).toContain("2026-01-01"); // the EXISTING row, not today's
+    expect(outcome.ledger_row).not.toContain("2026-06-09");
+    expect(serializeDecisionPruneWrite(outcome)).toMatchObject({ ledger_action: "already_recorded" });
+    const human = formatDecisionPruneWriteHuman(outcome);
+    expect(human).toContain("already recorded");
+    expect(human).not.toContain("appended to design/decisions/PRUNED.md");
+    // no duplicate row, and the prune still completed
+    const ledger = await readFile(join(cwd, "design", "decisions", "PRUNED.md"), "utf8");
+    expect(ledger.match(/foo-rfc\.md/g)).toHaveLength(1);
+    await expect(access(join(cwd, "design", "decisions", "foo-rfc.md"))).rejects.toThrow();
+  });
+
+  it("records '—' for phase/task when no task references the (still-eligible) decision", async () => {
+    await writeDecision("foo-rfc.md");
+    await writeValidEmptyPlan();
+    const outcome = await runDecisionPruneWrite(cwd, "design/decisions/foo-rfc.md", { now: NOW });
+    expect(outcome.kind).toBe("applied");
+    if (outcome.kind !== "applied") return;
+    expect(outcome.ledger_row).toContain("| — |"); // no referencing task
+    expect(outcome.warnings.length).toBeGreaterThan(0); // still warns it can't prove shipment
+  });
+
+  it("ineligible target → kind 'ineligible', NOTHING written", async () => {
+    await writeDecision("foo-rfc.md", "# RFC\n\n**Status:** proposed\n\nx");
+    const outcome = await runDecisionPruneWrite(cwd, "design/decisions/foo-rfc.md", { now: NOW });
+    expect(outcome.kind).toBe("ineligible");
+    if (outcome.kind !== "ineligible") return;
+    expect(outcome.dryRun.eligible).toBe(false);
+    // the record is untouched and no ledger was created
+    expect(await readFile(join(cwd, "design", "decisions", "foo-rfc.md"), "utf8")).toContain(
+      "proposed",
+    );
+    await expect(access(join(cwd, "design", "decisions", "PRUNED.md"))).rejects.toThrow();
+  });
+
+  it("a commit-time write failure → kind 'write_failed' with phase + partial_applied (not an internal throw)", async () => {
+    await writeDecision("foo-rfc.md");
+    await writeDoneTaskPhase("design/decisions/foo-rfc.md");
+    await mkdir(join(cwd, "docs"), { recursive: true });
+    await writeFile(join(cwd, "docs", "x.md"), "See [d](../design/decisions/foo-rfc.md).\n");
+    // PRUNED.md as a directory makes the ledger step fail (EISDIR).
+    await mkdir(join(cwd, "design", "decisions", "PRUNED.md"), { recursive: true });
+
+    const outcome = await runDecisionPruneWrite(cwd, "design/decisions/foo-rfc.md", { now: NOW });
+    expect(outcome.kind).toBe("write_failed");
+    if (outcome.kind !== "write_failed") return;
+    expect(outcome.phase).toBe("append_ledger");
+    expect(outcome.partial_applied).toBe(false);
+    // docs untouched, record survives
+    expect(await readFile(join(cwd, "docs", "x.md"), "utf8")).toBe(
+      "See [d](../design/decisions/foo-rfc.md).\n",
+    );
+    expect(await readFile(join(cwd, "design", "decisions", "foo-rfc.md"), "utf8")).toContain("accepted");
+    // serializer + message expose the contract
+    expect(serializeDecisionPruneWriteFailed(outcome)).toMatchObject({
+      mode: "write",
+      decision: "design/decisions/foo-rfc.md",
+      phase: "append_ledger",
+      partial_applied: false,
+    });
+    expect(writeFailedMessage(outcome)).toContain("nothing was written");
+  });
+
+  it("rewrite_links failure (concurrent source edit) → write_failed contract at the command boundary", async () => {
+    await writeDecision("foo-rfc.md");
+    await writeDoneTaskPhase("design/decisions/foo-rfc.md");
+    await mkdir(join(cwd, "docs"), { recursive: true });
+    await writeFile(join(cwd, "docs", "x.md"), "See [d](../design/decisions/foo-rfc.md).\n");
+
+    const outcome = await runDecisionPruneWrite(cwd, "design/decisions/foo-rfc.md", {
+      now: NOW,
+      hooks: { beforeSourceWrite: async () => { await writeFile(join(cwd, "docs", "x.md"), "EDITED.\n"); } },
+    });
+    expect(outcome.kind).toBe("write_failed");
+    if (outcome.kind !== "write_failed") return;
+    expect(outcome.phase).toBe("rewrite_links");
+    expect(outcome.partial_applied).toBe(true);
+    expect(serializeDecisionPruneWriteFailed(outcome)).toMatchObject({
+      phase: "rewrite_links",
+      partial_applied: true,
+    });
+    expect(writeFailedMessage(outcome)).toContain("inspect the working tree");
+  });
+
+  it("delete_record failure (record vanished) → write_failed contract at the command boundary", async () => {
+    await writeDecision("foo-rfc.md");
+    await writeDoneTaskPhase("design/decisions/foo-rfc.md");
+    await mkdir(join(cwd, "docs"), { recursive: true });
+    await writeFile(join(cwd, "docs", "x.md"), "See [d](../design/decisions/foo-rfc.md).\n");
+
+    const outcome = await runDecisionPruneWrite(cwd, "design/decisions/foo-rfc.md", {
+      now: NOW,
+      hooks: { beforeDelete: async () => { await rm(join(cwd, "design", "decisions", "foo-rfc.md")); } },
+    });
+    expect(outcome.kind).toBe("write_failed");
+    if (outcome.kind !== "write_failed") return;
+    expect(outcome.phase).toBe("delete_record");
+    expect(outcome.partial_applied).toBe(true);
+    expect(serializeDecisionPruneWriteFailed(outcome)).toMatchObject({
+      phase: "delete_record",
+      partial_applied: true,
+    });
+    expect(writeFailedMessage(outcome)).toContain("inspect the working tree");
+  });
 });
 
 describe("decision-prune renderers", () => {

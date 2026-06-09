@@ -4,8 +4,17 @@ import {
   collectInboundLinks,
   type LinkRewriteItem,
 } from "../core/decisions/link-collector.ts";
+import {
+  applyPrune,
+  PrunePlanStaleError,
+  PruneWriteError,
+  type AppliedRewrite,
+  type ApplyPruneHooks,
+  type PruneStaleSpan,
+  type PruneWritePhase,
+} from "../core/decisions/prune-executor.ts";
 
-export type { LinkRewriteItem };
+export type { LinkRewriteItem, AppliedRewrite, PruneStaleSpan, PruneWritePhase };
 
 /**
  * The plan `--write` (PR-C2) will execute: remove the decision file, append a
@@ -220,4 +229,173 @@ export function notEligibleMessage(result: DecisionPruneResult, json = false): s
     return json ? more : `${more} — run with --json for the full block list`;
   }
   return `${target} cannot be pruned: ${reason}`;
+}
+
+// ── --write (PR-C2): execute the dry-run plan ──────────────────────────────
+
+/**
+ * The outcome of `decision prune --write`. The dry-run verdict + plan is built
+ * by the SAME {@link runDecisionPrune} call the preview uses, then executed:
+ *
+ *  - `ineligible` — a gate blocks the prune; nothing is written (the CLI emits
+ *    `DECISION_PRUNE_NOT_ELIGIBLE`, identical to dry-run).
+ *  - `stale` — the working tree changed under the plan (a span no longer
+ *    matches); the executor wrote nothing (the CLI emits `DECISION_PRUNE_PLAN_STALE`).
+ *  - `applied` — inbound links rewritten and the record removed; the ledger was
+ *    either appended or already recorded (`ledger_action`).
+ */
+export type DecisionPruneWriteOutcome =
+  | { kind: "ineligible"; dryRun: DecisionPruneResult }
+  | { kind: "stale"; decision: string; stale: PruneStaleSpan[] }
+  | {
+      kind: "write_failed";
+      decision: string;
+      phase: PruneWritePhase;
+      partial_applied: boolean;
+      message: string;
+    }
+  | {
+      kind: "applied";
+      decision: string;
+      removed_file: string;
+      link_rewrites_applied: AppliedRewrite[];
+      ledger_row: string;
+      ledger_action: "appended" | "already_recorded";
+      warnings: string[];
+    };
+
+/** YYYY-MM-DD (UTC) from an injected clock — keeps the ledger date testable. */
+function formatPrunedDate(now: Date): string {
+  return now.toISOString().slice(0, 10);
+}
+
+/**
+ * Run the prune verdict and, when eligible, EXECUTE it in least-harmful order:
+ * append/verify the ledger row, rewrite inbound links, then delete the record
+ * last. Re-validates the target, every link span, and the ledger before touching
+ * disk — a stale plan aborts with zero writes. `now` is injected so the ledger
+ * date is deterministic under test.
+ */
+export async function runDecisionPruneWrite(
+  cwd: string,
+  target: string,
+  opts: { now: Date; hooks?: ApplyPruneHooks },
+): Promise<DecisionPruneWriteOutcome> {
+  const dryRun = await runDecisionPrune(cwd, target);
+  if (!dryRun.eligible || dryRun.plan === null || dryRun.decision === null) {
+    return { kind: "ineligible", dryRun };
+  }
+  const refs = dryRun.evaluation.referencing_tasks.map((t) => t.task_id);
+  try {
+    const applied = await applyPrune(
+      cwd,
+      {
+        remove_file: dryRun.plan.remove_file,
+        items: dryRun.plan.link_rewrite.items,
+        ledger: {
+          decision: dryRun.decision,
+          phase_task: refs.length > 0 ? refs.join(", ") : "—",
+          pruned_date: formatPrunedDate(opts.now),
+          rationale_home: "git history",
+        },
+        // The verdict was computed from these exact bytes; the executor refuses to
+        // delete the record if it has been edited in place since.
+        expected_target_content: dryRun.evaluation.target_content ?? "",
+      },
+      opts.hooks ?? {},
+    );
+    return {
+      kind: "applied",
+      decision: dryRun.decision,
+      removed_file: applied.removed_file,
+      link_rewrites_applied: applied.link_rewrites_applied,
+      ledger_row: applied.ledger_row,
+      ledger_action: applied.ledger_action,
+      warnings: dryRun.warnings,
+    };
+  } catch (err) {
+    if (err instanceof PrunePlanStaleError) {
+      return { kind: "stale", decision: dryRun.decision, stale: err.stale };
+    }
+    if (err instanceof PruneWriteError) {
+      return {
+        kind: "write_failed",
+        decision: dryRun.decision,
+        phase: err.phase,
+        partial_applied: err.partial_applied,
+        message: err.detail,
+      };
+    }
+    throw err;
+  }
+}
+
+/** JSON `data` payload for an APPLIED `--write` (the contract surface). */
+export function serializeDecisionPruneWrite(
+  outcome: Extract<DecisionPruneWriteOutcome, { kind: "applied" }>,
+): Record<string, unknown> {
+  return {
+    mode: "write",
+    decision: outcome.decision,
+    removed_file: outcome.removed_file,
+    link_rewrites_applied: outcome.link_rewrites_applied,
+    ledger_row: outcome.ledger_row,
+    ledger_action: outcome.ledger_action,
+    warnings: outcome.warnings,
+  };
+}
+
+/** Human summary for an applied `--write`. */
+export function formatDecisionPruneWriteHuman(
+  outcome: Extract<DecisionPruneWriteOutcome, { kind: "applied" }>,
+): string {
+  const lines: string[] = [];
+  lines.push(`decision prune (write): ${outcome.decision} — PRUNED`);
+  lines.push(`  removed: ${outcome.removed_file}`);
+  const n = outcome.link_rewrites_applied.length;
+  if (n === 0) {
+    lines.push(`  inbound references rewritten: none`);
+  } else {
+    lines.push(`  inbound references rewritten (${n}):`);
+    for (const r of outcome.link_rewrites_applied) {
+      lines.push(`    ${r.source_file}:${r.line} — ${r.rewrite_action}`);
+    }
+  }
+  lines.push(
+    outcome.ledger_action === "appended"
+      ? `  ledger: appended to design/decisions/PRUNED.md`
+      : `  ledger: already recorded in design/decisions/PRUNED.md (not re-appended)`,
+  );
+  for (const w of outcome.warnings) lines.push(`  ⚠ ${w}`);
+  return lines.join("\n");
+}
+
+/** Message for the `DECISION_PRUNE_PLAN_STALE` error envelope. */
+export function planStaleMessage(stale: PruneStaleSpan[]): string {
+  const first = stale[0];
+  const at = first ? `${first.source_file}:${first.line}:${first.column}` : "an inbound link";
+  const more = stale.length > 1 ? ` (and ${stale.length - 1} more)` : "";
+  return `prune aborted — the working tree changed under the plan at ${at}${more}; nothing was written. Re-run decision prune to rebuild the plan`;
+}
+
+/** `data` payload + message for the `DECISION_PRUNE_WRITE_FAILED` error envelope. */
+export function serializeDecisionPruneWriteFailed(
+  outcome: Extract<DecisionPruneWriteOutcome, { kind: "write_failed" }>,
+): Record<string, unknown> {
+  return {
+    mode: "write",
+    decision: outcome.decision,
+    phase: outcome.phase,
+    partial_applied: outcome.partial_applied,
+    message: outcome.message,
+  };
+}
+
+export function writeFailedMessage(
+  outcome: Extract<DecisionPruneWriteOutcome, { kind: "write_failed" }>,
+): string {
+  const state = outcome.partial_applied
+    ? "some changes were already applied — inspect the working tree before retrying"
+    : "nothing was written";
+  return `${outcome.decision}: prune --write failed during ${outcome.phase} (${outcome.message}); ${state}`;
 }

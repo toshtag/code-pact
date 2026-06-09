@@ -1,11 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile, symlink } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   readPrunedLedger,
+  parsePrunedLedger,
   normalizeRelPath,
   normalizePrunedDecisionPath,
+  serializePrunedRow,
+  buildAppendedLedger,
 } from "../../../../src/core/decisions/pruned-ledger.ts";
 
 let cwd: string;
@@ -40,6 +43,19 @@ describe("normalizeRelPath", () => {
 describe("readPrunedLedger", () => {
   it("returns an empty set when PRUNED.md is absent", async () => {
     expect((await readPrunedLedger(cwd)).size).toBe(0);
+  });
+
+  it("a PRUNED.md symlinked OUT of the repo is NOT trusted → empty set (fail-closed silencing oracle)", async () => {
+    const outside = await mkdtemp(join(tmpdir(), "code-pact-outside-"));
+    await writeFile(
+      join(outside, "PRUNED.md"),
+      "| Decision | x |\n| --- | --- |\n| `design/decisions/foo-rfc.md` | P1 | 2026-01-01 | x |\n",
+      "utf8",
+    );
+    await symlink(join(outside, "PRUNED.md"), join(cwd, "design", "decisions", "PRUNED.md"));
+    // an external ledger must never silence a missing decision_ref
+    expect((await readPrunedLedger(cwd)).size).toBe(0);
+    await rm(outside, { recursive: true, force: true });
   });
 
   it("returns an empty set for a header-only ledger (no data rows)", async () => {
@@ -117,5 +133,88 @@ describe("normalizePrunedDecisionPath", () => {
     expect(normalizePrunedDecisionPath("design/decisions/../foo.md")).toBeNull();
     expect(normalizePrunedDecisionPath("/abs/design/decisions/x.md")).toBeNull();
     expect(normalizePrunedDecisionPath("design/decisions/nested/foo.md")).toBeNull(); // top-level only
+  });
+
+  it("rejects a path with table/code-span-breaking chars (pipe, backtick, CR/LF)", () => {
+    // such a name could never round-trip through the ledger's `path` code span
+    expect(normalizePrunedDecisionPath("design/decisions/a|b.md")).toBeNull();
+    expect(normalizePrunedDecisionPath("design/decisions/a`b.md")).toBeNull();
+    expect(normalizePrunedDecisionPath("design/decisions/a\nb.md")).toBeNull();
+  });
+});
+
+describe("serializePrunedRow", () => {
+  it("renders the path as a code span (never a link) and escapes pipes in cells", () => {
+    const row = serializePrunedRow({
+      decision: "design/decisions/foo-rfc.md",
+      phase_task: "P1-T1 | P1-T2",
+      pruned_date: "2026-06-09",
+      rationale_home: "git history",
+    });
+    expect(row).toBe("| `design/decisions/foo-rfc.md` | P1-T1 \\| P1-T2 | 2026-06-09 | git history |");
+    expect(row).not.toContain("](design"); // not a markdown link
+  });
+
+  it("round-trips through readPrunedLedger", async () => {
+    const row = serializePrunedRow({
+      decision: "design/decisions/foo-rfc.md",
+      phase_task: "—",
+      pruned_date: "2026-06-09",
+      rationale_home: "git history",
+    });
+    await writeFile(
+      join(cwd, "design", "decisions", "PRUNED.md"),
+      `| Decision | x |\n| --- | --- |\n${row}\n`,
+      "utf8",
+    );
+    expect([...(await readPrunedLedger(cwd))]).toEqual(["design/decisions/foo-rfc.md"]);
+  });
+});
+
+describe("buildAppendedLedger (compute the next ledger content — no write)", () => {
+  const ROW = {
+    decision: "design/decisions/foo-rfc.md",
+    phase_task: "P1-T1",
+    pruned_date: "2026-06-09",
+    rationale_home: "git history",
+  };
+
+  it("absent ledger → content carries the header + row; existing_content empty; not already recorded", async () => {
+    const p = await buildAppendedLedger(cwd, ROW);
+    expect(p.content).toContain("# Pruned decisions");
+    expect(p.content).toContain("`design/decisions/foo-rfc.md`");
+    expect(p.existing_content).toBe("");
+    expect(p.existed).toBe(false); // PRUNED.md absent at prepare time
+    expect(p.already_recorded).toBe(false);
+    expect(p.normalized_decision).toBe("design/decisions/foo-rfc.md");
+  });
+
+  it("existing ledger for a different decision → appends without duplicating the header", async () => {
+    await writeFile(
+      join(cwd, "design", "decisions", "PRUNED.md"),
+      "# Pruned decisions\n\n| Decision | x |\n| --- | --- |\n| `design/decisions/bar-rfc.md` | P0 | 2026-01-01 | git |\n",
+      "utf8",
+    );
+    const p = await buildAppendedLedger(cwd, ROW);
+    expect(p.content.match(/# Pruned decisions/g)).toHaveLength(1);
+    expect(parsePrunedLedger(p.content)).toEqual(
+      new Set(["design/decisions/bar-rfc.md", "design/decisions/foo-rfc.md"]),
+    );
+    expect(p.already_recorded).toBe(false);
+  });
+
+  it("decision already recorded → already_recorded, content left byte-identical (idempotent)", async () => {
+    const existing =
+      "# Pruned decisions\n\n| Decision | x |\n| --- | --- |\n| `design/decisions/foo-rfc.md` | P1-T1 | 2026-06-09 | git history |\n";
+    await writeFile(join(cwd, "design", "decisions", "PRUNED.md"), existing, "utf8");
+    const p = await buildAppendedLedger(cwd, ROW);
+    expect(p.already_recorded).toBe(true);
+    expect(p.content).toBe(existing); // no duplicate row
+  });
+
+  it("fail-closed: an unreadable (non-ENOENT) ledger throws rather than being treated as empty", async () => {
+    // PRUNED.md exists but as a DIRECTORY → readFile throws EISDIR (not ENOENT).
+    await mkdir(join(cwd, "design", "decisions", "PRUNED.md"), { recursive: true });
+    await expect(buildAppendedLedger(cwd, ROW)).rejects.toThrow();
   });
 });

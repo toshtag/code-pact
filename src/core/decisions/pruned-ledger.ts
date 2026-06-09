@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
-import { join, posix } from "node:path";
-import { assertSafeRelativePath } from "../path-safety.ts";
+import { posix } from "node:path";
+import { assertSafeRelativePath, resolveWithinProject } from "../path-safety.ts";
 
 /**
  * Normalize a repo-relative path so a ledger entry and a `decision_refs` value
@@ -40,6 +40,11 @@ export function normalizePrunedDecisionPath(raw: string): string | null {
   const normalized = posix.normalize(fwd).replace(/^(?:\.\/)+/, "");
   if (!normalized.startsWith("design/decisions/")) return null;
   if (!normalized.endsWith(".md")) return null;
+  // Reject characters that cannot survive the ledger's markdown-table / code-span
+  // round-trip: a pipe ends a cell, a backtick ends the path code span, and a
+  // CR/LF ends the row. Such a path could never be parsed back by
+  // `readPrunedLedger`, so it is not a valid ledger entry (nor a prune target).
+  if (/[\r\n|`]/.test(normalized)) return null;
   if (NON_DECISION_LEDGER_PATHS.has(normalized)) return null;
   // Top-level records only. A nested ADR (`design/decisions/x/y.md`) is not a
   // prune target: the gate scan that protects pruning is a flat top-level scan,
@@ -73,30 +78,168 @@ function extractPath(cell: string): string | null {
  * actually missing AND the referencing task is `done` before silencing — a
  * present file, or a live task, is never silenced by a ledger entry alone.
  */
+/** Is `line` a data row of the ledger table? Returns its normalized decision path, or null. */
+function rowDecisionPath(line: string): string | null {
+  const m = TABLE_ROW.exec(line);
+  if (!m) return null;
+  const first = m[1]!.split("|")[0]!.trim();
+  // Skip the header ("Decision") and the `---` separator row.
+  if (first === "" || /^:?-{2,}:?$/.test(first) || first.toLowerCase() === "decision") return null;
+  const raw = extractPath(first);
+  if (!raw) return null;
+  return normalizePrunedDecisionPath(raw); // null for entries outside design/decisions/**.md
+}
+
+/** Parse the SET of normalized pruned-decision paths from ledger text. */
+export function parsePrunedLedger(text: string): Set<string> {
+  const out = new Set<string>();
+  for (const line of text.split(/\r?\n/)) {
+    const path = rowDecisionPath(line);
+    if (path) out.add(path);
+  }
+  return out;
+}
+
+/** The FIRST raw ledger row line that records `normalizedDecision`, or null. */
+export function findPrunedRow(text: string, normalizedDecision: string): string | null {
+  for (const line of text.split(/\r?\n/)) {
+    if (rowDecisionPath(line) === normalizedDecision) return line;
+  }
+  return null;
+}
+
 export async function readPrunedLedger(cwd: string): Promise<Set<string>> {
   let text: string;
   try {
-    text = await readFile(join(cwd, "design", "decisions", "PRUNED.md"), "utf8");
+    // Route through the symlink-escape guard: this set SILENCES missing-decision_ref
+    // integrity warnings, so it must never trust a PRUNED.md that resolves outside
+    // the repo. A resolve escape throws and lands in the fail-closed branch below.
+    const path = await resolveWithinProject(cwd, "design/decisions/PRUNED.md");
+    text = await readFile(path, "utf8");
   } catch {
-    // Any read failure (absent ENOENT, EACCES, EISDIR) → empty set. This is the
-    // fail-CLOSED direction: an unreadable ledger silences nothing, so a genuinely
-    // pruned ref simply warns again rather than a broken ledger silencing refs it
-    // never listed. Swallowing is therefore safe here, not a hidden hazard.
+    // Any failure (escape, absent ENOENT, EACCES, EISDIR) → empty set. This is the
+    // fail-CLOSED direction: an unreadable/untrusted ledger silences nothing, so a
+    // genuinely pruned ref simply warns again rather than a broken ledger silencing
+    // refs it never listed. Swallowing is therefore safe here, not a hidden hazard.
     return new Set();
   }
-  const out = new Set<string>();
-  for (const line of text.split(/\r?\n/)) {
-    const m = TABLE_ROW.exec(line);
-    if (!m) continue;
-    const first = m[1]!.split("|")[0]!.trim();
-    // Skip the header ("Decision") and the `---` separator row.
-    if (first === "" || /^:?-{2,}:?$/.test(first) || first.toLowerCase() === "decision") {
-      continue;
-    }
-    const raw = extractPath(first);
-    if (!raw) continue;
-    const path = normalizePrunedDecisionPath(raw);
-    if (path) out.add(path); // entries outside design/decisions/**.md are ignored
-  }
+  const out = parsePrunedLedger(text);
   return out;
+}
+
+/** A pruned-decision ledger row, as `decision prune --write` records it. */
+export type PrunedLedgerRow = {
+  /** The retired decision path — written as a CODE SPAN, never a link. */
+  decision: string;
+  /** The task(s) that referenced it (joined ids), or a dash when none. */
+  phase_task: string;
+  /** YYYY-MM-DD (the executor formats this from an injected clock). */
+  pruned_date: string;
+  /** Where the rationale now lives — e.g. "git history" / "CHANGELOG vX.Y". */
+  rationale_home: string;
+};
+
+/**
+ * The header written when `PRUNED.md` is first created. The path column is the
+ * one {@link readPrunedLedger} parses; the "Decision" header cell and the `---`
+ * separator are both skipped by it, and the intro prose carries no leading
+ * pipe so it is not mistaken for a row.
+ */
+const LEDGER_HEADER = `# Pruned decisions
+
+Append-only ledger of decision records retired by \`code-pact decision prune\`.
+The full text of each pruned record remains in git history.
+
+| Decision | Phase / Task | Pruned | Rationale home |
+| --- | --- | --- | --- |
+`;
+
+/** Escape a value so it cannot break out of its markdown table cell. */
+function cell(value: string): string {
+  return value.replace(/\r?\n/g, " ").replace(/\|/g, "\\|").trim();
+}
+
+/**
+ * Render one ledger row. The decision path is a **code span** (`` `path` ``),
+ * NOT a markdown link: the record is being deleted, so a link would be a broken
+ * reference the moment the row is written. {@link readPrunedLedger} reads the
+ * code-span form back as the pruned path.
+ */
+export function serializePrunedRow(row: PrunedLedgerRow): string {
+  const path = normalizePrunedDecisionPath(row.decision) ?? row.decision;
+  return `| \`${path}\` | ${cell(row.phase_task)} | ${cell(row.pruned_date)} | ${cell(row.rationale_home)} |`;
+}
+
+/** The next full content of the ledger after appending `row` — computed, not written. */
+export type PreparedLedger = {
+  /** Absolute, symlink-escape-guarded path of `design/decisions/PRUNED.md`. */
+  ledger_path: string;
+  /** The complete file content to write (header + existing rows + the new row). */
+  content: string;
+  /** The serialized new row (for the result envelope). */
+  row: string;
+  /** The normalized decision path this row records (for a commit-time presence check), or null if unprunable. */
+  normalized_decision: string | null;
+  /** Did `PRUNED.md` exist at prepare time? Distinguishes "absent" from "present but empty". */
+  existed: boolean;
+  /** The exact bytes read at prepare time — for a write-time drift check (`""` when absent). */
+  existing_content: string;
+  /**
+   * `true` when the decision is ALREADY recorded in the ledger — appending again
+   * would duplicate the tombstone, so the caller should skip the append (but must
+   * still verify the row is present at commit time). Makes a retry after a
+   * partial-failure prune idempotent on the ledger.
+   */
+  already_recorded: boolean;
+};
+
+/**
+ * Read the existing ledger and compute the content it would have after
+ * appending `row` — **without writing anything**. This is the fallible read
+ * step (it can surface an unreadable/EISDIR ledger) factored out so a caller
+ * can run it as a preflight, before any irreversible mutation, and only commit
+ * the write once the rest of the operation is known to be safe.
+ *
+ * Only a genuinely ABSENT ledger (ENOENT) is created fresh; any other read
+ * error is rethrown — treating an unreadable-but-present ledger as empty would
+ * overwrite every prior append-only row.
+ */
+export async function buildAppendedLedger(
+  cwd: string,
+  row: PrunedLedgerRow,
+): Promise<PreparedLedger> {
+  const ledger_path = await resolveWithinProject(cwd, "design/decisions/PRUNED.md");
+  let existing = "";
+  let existed = true;
+  try {
+    existing = await readFile(ledger_path, "utf8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    existing = "";
+    existed = false;
+  }
+  const newLine = serializePrunedRow(row);
+  const normalized = normalizePrunedDecisionPath(row.decision);
+  const existingRow = normalized !== null ? findPrunedRow(existing, normalized) : null;
+  const already_recorded = existingRow !== null;
+  // Idempotent on retry: if this decision is already recorded, do not append a
+  // duplicate tombstone — leave the ledger byte-identical.
+  const content = already_recorded
+    ? existing
+    : existing.trim() === ""
+      ? `${LEDGER_HEADER}${newLine}\n`
+      : existing.endsWith("\n")
+        ? `${existing}${newLine}\n`
+        : `${existing}\n${newLine}\n`;
+  return {
+    ledger_path,
+    content,
+    // Report the row that reflects reality: the EXISTING row on an idempotent
+    // retry (not the freshly-generated one), else the row just appended.
+    row: already_recorded ? existingRow!.trim() : newLine,
+    normalized_decision: normalized,
+    existed,
+    existing_content: existing,
+    already_recorded,
+  };
 }
