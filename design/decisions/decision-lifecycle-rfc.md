@@ -117,7 +117,7 @@ Direct answer to "should release notes be the source of truth?" — **No.** `CHA
 - PR-D — `project.yaml: decision_retention` policy (split — foundation before the destructive transform):
   - [x] **PR-D1** — the `decision_retention` field (`keep-full` default | `compress-on-ship` | `prune-on-ship`), schema-validated (so `validate` / `doctor` flag a typo); `decision prune --policy <v>` per-invocation override; the effective policy + source surfaced as `data.policy` / `data.policy_source` (non-destructive — pruning is unchanged, the policy is reported, not yet enacted). This repo set to `prune-on-ship`. Reader: `src/core/decisions/retention.ts`.
   - [ ] **PR-D2** — the `compress-on-ship` form: a `decision compress <path>` command that rewrites a shipped ADR to the lean decision + rationale + contract stub (destructive transform — its own reviewed layer, like PR-C2).
-- [ ] PR-E — `CHANGELOG.md` rolling-archive tooling + release-notes generation from the CHANGELOG.
+- [x] **PR-E** — maintainer tooling for the long-term record model: `scripts/changelog-archive.mjs` (`--check` / `--write`) rolls older majors out of `CHANGELOG.md` into `docs/maintainers/history/CHANGELOG-<major>.md` (verbatim move + pointer; `check:changelog-archive` guards it in CI), and `scripts/release-notes.mjs <version>` extracts the `## [version]` section for the GitHub Release body (generated, never authored twice — wired into `releasing.md`). v0.x-alpha history archived to `CHANGELOG-0.md`. Maintainer scripts, not a `code-pact` command (CHANGELOG is this repo's release artifact, not code-pact's managed surface).
 
 ## References
 
