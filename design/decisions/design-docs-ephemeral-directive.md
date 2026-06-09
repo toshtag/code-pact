@@ -73,13 +73,21 @@ so "events exist" is never by itself a license to delete the YAML.
 ## Acceptance criteria (v2.0 — locked)
 
 - **A1.** An active task that **references or depends on an archived phase / a
-  retired decision** resolves it from `.code-pact/state` (snapshot/tombstone)
-  **alone**. The active task's own *not-yet-archived* phase YAML stays required
-  (rule 5) — relocating **active** control docs into `.code-pact/state` is
-  explicitly **out of v2.0 scope** (it would contradict rule 5 / the
-  active-fail-closed stance). A1 is implemented by steps 3–6 (the snapshot/tombstone
-  writers + the archived-only resolution readers), **not** by a separate
-  active-control-snapshot writer.
+  retired decision** resolves it from `.code-pact/state` (snapshot / decision-state
+  record) **alone**. The active task's own *not-yet-archived* phase YAML stays
+  required (rule 5).
+  **Scope split (load-bearing — do not blur):**
+  - Relocating **active phase / task definitions** into `.code-pact/state` is
+    **out of v2.0 scope** (it would contradict rule 5 / the active-fail-closed
+    stance). The active task's body still comes from its `design/phases/*.yaml`.
+  - A **decision-state record that may satisfy an active decision gate** is
+    explicitly **in v2.0 scope** — A3 requires it (that is how the live gate
+    survives `rm -rf design/decisions`). This is *not* "relocating active control
+    docs"; it is recording the *settled outcome* a gate needs, not the active
+    phase/task definition.
+  A1 is implemented by steps 3–6 (the snapshot / decision-state writers + the
+  archived-only resolution readers), **not** by a separate active-phase-snapshot
+  writer.
 - **A2.** After snapshotting, **`rm design/phases/<completed>.yaml` by hand** keeps
   `validate` / `doctor` / `plan lint` / `task context` / `task prepare` green.
 - **A3.** **`rm -rf design/decisions` by hand** is tolerated **only when every
@@ -129,14 +137,16 @@ so "events exist" is never by itself a license to delete the YAML.
    `sync-paths`, `safe-write`, doctor's validating reader) an explicit
    archive-awareness contract of their own. Only after **2b + 2c** does "insert
    archive-fallback at the seam" become true. **NOT done.**
-3. **Snapshot + decision-state writers** —
+3. **Snapshot + decision-state writers (pure `.code-pact/state` writes — touch
+   nothing in `design/` or `docs/`).** Write
    `.code-pact/state/archive/phases/<phase-id>.json` (one-phase-one-file) + a Zod
-   schema, and the **decision-state record** under `.code-pact/state/`
-   (non-destructive; nothing is deleted yet). A decision-state record carries at
-   minimum: **identity / original path**, **ADR status at retirement** (accepted /
-   superseded / …), **whether it may satisfy an active gate**, and a **source hash
-   / provenance** (git ref). A plain "it was pruned" tombstone is the degenerate
-   case for records no active gate needs.
+   schema, and the **decision-state record** under `.code-pact/state/`. This layer
+   only *adds* state files: it does **not** delete any design doc and does **not**
+   rewrite any inbound doc-link (that is the later destructive command, step 7). A
+   decision-state record carries at minimum: **identity / original path**, **ADR
+   status at retirement** (accepted / superseded / …), **whether it may satisfy an
+   active gate**, and a **source hash / provenance** (git ref). A plain "it was
+   pruned" tombstone is the degenerate case for records no active gate needs.
 4. **Resolve completed-phase missing** via the snapshot (loaders / deps / lint),
    scoped to archived-only; active-missing stays fail-closed.
 5. **Resolve retired-decision missing** via the `.code-pact/state` decision-state
@@ -148,6 +158,12 @@ so "events exist" is never by itself a license to delete the YAML.
    **`task prepare` / `task record-done`** (gate + commitments echo),
    **`status`**, and the **doc-link checker** (interim rule below; full
    tombstone-awareness is step 7 half (ii)).
+   **`acceptance_refs` stays strict by default:** it may point at ordinary docs
+   (e.g. `docs/cli-contract.md`), not just decisions. Soften a missing
+   `acceptance_ref` **only** when its target is a **retired design decision /
+   archived historical artifact represented by a validated `.code-pact/state`
+   record** — a generic missing acceptance doc must still fail (never blanket-
+   silence `acceptance_refs` via the decision record).
 6. **Tolerance, scoped** — `validate` / `doctor` / `plan lint` / `task context` /
    `task prepare`: *missing archived historical docs tolerant; missing active
    control docs fail-closed.*
@@ -155,16 +171,22 @@ so "events exist" is never by itself a license to delete the YAML.
    stale-plan guard + write lock, least-harmful ordering) **and** the A2 / A3 / A7
    integration fixture that `rm`s the files manually.
    **Doc-link strategy (decided, two halves):**
-   (i) the **retire/snapshot step** (step 3's writers — the `decision prune`
+   (i) the **destructive retire command** — `decision retire --write` /
+   `phase archive --write` (NOT step 3's pure writers — the `decision prune`
    link-collector precedent) rewrites or clears **inbound doc-links at retire
    time**, so a *later* hand-`rm` leaves nothing dangling; **and**
-   (ii) **`check-doc-links` learns the tombstone** — a link whose target is
-   recorded in the `.code-pact/state` tombstone resolves as *retired*, not
-   *broken* (the safety net when files are hand-deleted before a link sweep).
+   (ii) **`check-doc-links` learns the decision-state record** — a link whose
+   target is recorded in `.code-pact/state` resolves as *retired*, not *broken*
+   (the safety net when files are hand-deleted before a link sweep).
    **This is a substantial work item, not a footnote:** this repo's own `docs/` +
    RFC cross-references deep-link `design/decisions/*.md` heavily (the checker
    resolves 800+ relative links today), and A3/A7 cannot pass without both
    halves. Budget it as its own reviewed layer inside step 7.
+   **This PR's own footprint:** it adds public links (root `README.md`,
+   `docs/positioning.md`) to *this transitional directive*. Retiring the directive
+   (or `rm -rf design/decisions`) must therefore **also remove or redirect those
+   public links** before A7 can pass — they are part of the inbound set half (i)
+   must clear.
 
 ## Quarantined (do not accrete v2.0 direction from these)
 
