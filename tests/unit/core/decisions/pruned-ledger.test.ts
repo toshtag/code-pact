@@ -1,13 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdir, mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   readPrunedLedger,
+  parsePrunedLedger,
   normalizeRelPath,
   normalizePrunedDecisionPath,
   serializePrunedRow,
-  appendPrunedLedger,
+  buildAppendedLedger,
 } from "../../../../src/core/decisions/pruned-ledger.ts";
 
 let cwd: string;
@@ -157,7 +158,7 @@ describe("serializePrunedRow", () => {
   });
 });
 
-describe("appendPrunedLedger", () => {
+describe("buildAppendedLedger (compute the next ledger content — no write)", () => {
   const ROW = {
     decision: "design/decisions/foo-rfc.md",
     phase_task: "P1-T1",
@@ -165,27 +166,41 @@ describe("appendPrunedLedger", () => {
     rationale_home: "git history",
   };
 
-  it("creates PRUNED.md with a header when absent", async () => {
-    await appendPrunedLedger(cwd, ROW);
-    const text = await readFile(join(cwd, "design", "decisions", "PRUNED.md"), "utf8");
-    expect(text).toContain("# Pruned decisions");
-    expect([...(await readPrunedLedger(cwd))]).toEqual(["design/decisions/foo-rfc.md"]);
+  it("absent ledger → content carries the header + row; existing_content empty; not already recorded", async () => {
+    const p = await buildAppendedLedger(cwd, ROW);
+    expect(p.content).toContain("# Pruned decisions");
+    expect(p.content).toContain("`design/decisions/foo-rfc.md`");
+    expect(p.existing_content).toBe("");
+    expect(p.already_recorded).toBe(false);
+    expect(p.normalized_decision).toBe("design/decisions/foo-rfc.md");
   });
 
-  it("appends to an existing ledger without duplicating the header", async () => {
-    await appendPrunedLedger(cwd, ROW);
-    await appendPrunedLedger(cwd, { ...ROW, decision: "design/decisions/bar-rfc.md" });
-    const text = await readFile(join(cwd, "design", "decisions", "PRUNED.md"), "utf8");
-    expect(text.match(/# Pruned decisions/g)).toHaveLength(1);
-    expect(await readPrunedLedger(cwd)).toEqual(
-      new Set(["design/decisions/foo-rfc.md", "design/decisions/bar-rfc.md"]),
+  it("existing ledger for a different decision → appends without duplicating the header", async () => {
+    await writeFile(
+      join(cwd, "design", "decisions", "PRUNED.md"),
+      "# Pruned decisions\n\n| Decision | x |\n| --- | --- |\n| `design/decisions/bar-rfc.md` | P0 | 2026-01-01 | git |\n",
+      "utf8",
     );
+    const p = await buildAppendedLedger(cwd, ROW);
+    expect(p.content.match(/# Pruned decisions/g)).toHaveLength(1);
+    expect(parsePrunedLedger(p.content)).toEqual(
+      new Set(["design/decisions/bar-rfc.md", "design/decisions/foo-rfc.md"]),
+    );
+    expect(p.already_recorded).toBe(false);
   });
 
-  it("fail-closed: an unreadable (non-ENOENT) ledger is NOT clobbered — throws instead", async () => {
+  it("decision already recorded → already_recorded, content left byte-identical (idempotent)", async () => {
+    const existing =
+      "# Pruned decisions\n\n| Decision | x |\n| --- | --- |\n| `design/decisions/foo-rfc.md` | P1-T1 | 2026-06-09 | git history |\n";
+    await writeFile(join(cwd, "design", "decisions", "PRUNED.md"), existing, "utf8");
+    const p = await buildAppendedLedger(cwd, ROW);
+    expect(p.already_recorded).toBe(true);
+    expect(p.content).toBe(existing); // no duplicate row
+  });
+
+  it("fail-closed: an unreadable (non-ENOENT) ledger throws rather than being treated as empty", async () => {
     // PRUNED.md exists but as a DIRECTORY → readFile throws EISDIR (not ENOENT).
-    // Must throw rather than overwrite it with a fresh header (data loss).
     await mkdir(join(cwd, "design", "decisions", "PRUNED.md"), { recursive: true });
-    await expect(appendPrunedLedger(cwd, ROW)).rejects.toThrow();
+    await expect(buildAppendedLedger(cwd, ROW)).rejects.toThrow();
   });
 });

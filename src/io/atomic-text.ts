@@ -1,4 +1,4 @@
-import { mkdir, rename, writeFile, unlink } from "node:fs/promises";
+import { mkdir, rename, writeFile, unlink, readFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
 async function writeThenRename(tmp: string, path: string, content: string): Promise<void> {
@@ -38,15 +38,28 @@ export async function atomicWriteText(
  * content. For destructive in-place rewrites (e.g. `decision prune --write`
  * delinking inbound references) where re-creating a vanished file would be wrong.
  *
- * NOTE: this is **not** a compare-and-swap. It does not stat the destination, and
- * `rename` still creates the destination if it vanished after the temp write. The
- * caller is responsible for re-reading / re-stat-ing the destination immediately
- * before calling (as `decision prune --write` does, refusing on any drift).
+ * When `expectedCurrent` is given, the destination is re-read AFTER the temp
+ * write and just BEFORE the rename and the replace is refused if it no longer
+ * matches — narrowing (not eliminating) the drift window down to the gap between
+ * that read and the rename. This is **not** a filesystem compare-and-swap: a
+ * destination that disappears or is rewritten in that final gap cannot be
+ * distinguished portably. The caller should still re-read before calling.
  */
 export async function atomicReplaceExistingText(
   path: string,
   content: string,
+  expectedCurrent?: string,
 ): Promise<void> {
   const tmp = `${path}.tmp-${process.pid}-${Date.now()}`;
-  await writeThenRename(tmp, path, content);
+  try {
+    await writeFile(tmp, content, "utf8");
+    if (expectedCurrent !== undefined) {
+      const current = await readFile(path, "utf8");
+      if (current !== expectedCurrent) throw new Error("destination changed before replace");
+    }
+    await rename(tmp, path);
+  } catch (err) {
+    await unlink(tmp).catch(() => {});
+    throw err;
+  }
 }

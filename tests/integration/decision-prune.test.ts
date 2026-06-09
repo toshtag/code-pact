@@ -276,11 +276,13 @@ describe("decision prune — CLI (dry-run)", () => {
       removed_file: string;
       link_rewrites_applied: { source_file: string; rewrite_action: string }[];
       ledger_row: string;
+      ledger_action: string;
       warnings: unknown[];
     }>(res);
     expect(res.code).toBe(0);
     expect(env.data.mode).toBe("write");
     expect(env.data.removed_file).toBe("design/decisions/foo-rfc.md");
+    expect(env.data.ledger_action).toBe("appended");
     expect(env.data.link_rewrites_applied.map((r) => r.source_file)).toContain("docs/x.md");
 
     // disk effects: record gone, link delinked, ledger row present + readable

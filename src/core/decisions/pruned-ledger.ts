@@ -1,7 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { join, posix } from "node:path";
 import { assertSafeRelativePath, resolveWithinProject } from "../path-safety.ts";
-import { atomicWriteText } from "../../io/atomic-text.ts";
 
 /**
  * Normalize a repo-relative path so a ledger entry and a `decision_refs` value
@@ -164,12 +163,15 @@ export type PreparedLedger = {
   content: string;
   /** The serialized new row (for the result envelope). */
   row: string;
+  /** The normalized decision path this row records (for a commit-time presence check), or null if unprunable. */
+  normalized_decision: string | null;
   /** The exact bytes read at prepare time — for a write-time drift check (`""` when absent). */
   existing_content: string;
   /**
    * `true` when the decision is ALREADY recorded in the ledger — appending again
-   * would duplicate the tombstone, so the caller should skip the write. Makes a
-   * retry after a partial-failure prune idempotent on the ledger.
+   * would duplicate the tombstone, so the caller should skip the append (but must
+   * still verify the row is present at commit time). Makes a retry after a
+   * partial-failure prune idempotent on the ledger.
    */
   already_recorded: boolean;
 };
@@ -209,17 +211,12 @@ export async function buildAppendedLedger(
       : existing.endsWith("\n")
         ? `${existing}${line}\n`
         : `${existing}\n${line}\n`;
-  return { ledger_path, content, row: line, existing_content: existing, already_recorded };
-}
-
-/**
- * Append a row to `design/decisions/PRUNED.md`, creating the file with its
- * header when absent. Append-only and idempotent: an existing ledger is only
- * extended, and a decision already recorded is not duplicated. Goes through the
- * shared {@link atomicWriteText} primitive (temp + rename), symlink-escape guarded.
- */
-export async function appendPrunedLedger(cwd: string, row: PrunedLedgerRow): Promise<void> {
-  const prepared = await buildAppendedLedger(cwd, row);
-  if (prepared.already_recorded) return; // no duplicate tombstone
-  await atomicWriteText(prepared.ledger_path, prepared.content);
+  return {
+    ledger_path,
+    content,
+    row: line,
+    normalized_decision: normalized,
+    existing_content: existing,
+    already_recorded,
+  };
 }

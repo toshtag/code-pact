@@ -6,7 +6,7 @@ import {
   type InboundLinkScan,
   type LinkRewriteItem,
 } from "./link-collector.ts";
-import { buildAppendedLedger, type PrunedLedgerRow } from "./pruned-ledger.ts";
+import { buildAppendedLedger, parsePrunedLedger, type PrunedLedgerRow } from "./pruned-ledger.ts";
 
 /**
  * One inbound link whose live state no longer matches the plan at write time —
@@ -78,6 +78,8 @@ export type PruneApplyResult = {
   removed_file: string;
   link_rewrites_applied: AppliedRewrite[];
   ledger_row: string;
+  /** `appended` — a new tombstone row was written; `already_recorded` — the decision was already in the ledger (idempotent retry), nothing appended. */
+  ledger_action: "appended" | "already_recorded";
 };
 
 export type PruneApplyInput = {
@@ -349,31 +351,41 @@ export async function applyPrune(
 
   // ── Phase 2: commit, ordered so a failure is least harmful ──
 
-  // 2a. Ledger FIRST. A row for a still-present record is benign, so if this
-  // fails NO doc has been touched yet → inbound docs stay byte-identical. When
-  // the decision is already recorded (an idempotent retry after a partial
-  // failure), skip the write so the tombstone is not duplicated. Otherwise
-  // re-read the ledger immediately before writing and refuse if it changed since
-  // preflight — symmetric with the source drift guard, so a concurrent/manual
-  // edit to PRUNED.md is never clobbered.
-  if (!prepared.already_recorded) {
+  // 2a. Ledger FIRST. A row for a still-present record is benign, so a ledger
+  // failure here leaves inbound docs byte-identical. Re-read PRUNED.md at commit
+  // time in BOTH branches (the advisory lock does not guard editors / other tools):
+  //   - already recorded → do NOT append (no duplicate tombstone), but VERIFY the
+  //     row is still present; if it was removed since preflight, refuse rather than
+  //     delete the record with no tombstone behind it.
+  //   - not recorded → refuse if PRUNED.md changed since preflight, else append.
+  let ledger_action: "appended" | "already_recorded";
+  try {
+    if (hooks.beforeLedgerWrite) await hooks.beforeLedgerWrite();
+    let currentLedger = "";
     try {
-      if (hooks.beforeLedgerWrite) await hooks.beforeLedgerWrite();
-      let currentLedger = "";
-      try {
-        currentLedger = await readFile(prepared.ledger_path, "utf8");
-      } catch (err) {
-        if (errDetail(err) !== "ENOENT") throw err;
-        currentLedger = "";
+      currentLedger = await readFile(prepared.ledger_path, "utf8");
+    } catch (err) {
+      if (errDetail(err) !== "ENOENT") throw err;
+      currentLedger = "";
+    }
+    if (prepared.already_recorded) {
+      const stillRecorded =
+        prepared.normalized_decision !== null &&
+        parsePrunedLedger(currentLedger).has(prepared.normalized_decision);
+      if (!stillRecorded) {
+        throw new PruneWriteError("append_ledger", false, "ledger no longer records this decision (PRUNED.md changed after preflight)");
       }
+      ledger_action = "already_recorded";
+    } else {
       if (currentLedger !== prepared.existing_content) {
         throw new PruneWriteError("append_ledger", false, "ledger (PRUNED.md) changed after preflight");
       }
       await atomicWriteText(prepared.ledger_path, prepared.content);
-    } catch (err) {
-      if (err instanceof PruneWriteError) throw err;
-      throw new PruneWriteError("append_ledger", false, errDetail(err));
+      ledger_action = "appended";
     }
+  } catch (err) {
+    if (err instanceof PruneWriteError) throw err;
+    throw new PruneWriteError("append_ledger", false, errDetail(err));
   }
 
   // 2b. Rewrite inbound links. Re-read each source IMMEDIATELY before writing and
@@ -398,7 +410,9 @@ export async function applyPrune(
       throw new PruneWriteError("rewrite_links", true, `source changed after preflight: ${r.rel}`);
     }
     try {
-      await atomicReplaceExistingText(r.abs, r.content);
+      // Pass the expected content so the helper re-checks just before rename,
+      // narrowing the drift window to the temp-write gap.
+      await atomicReplaceExistingText(r.abs, r.content, r.original);
     } catch (err) {
       throw new PruneWriteError("rewrite_links", true, errDetail(err));
     }
@@ -438,5 +452,5 @@ export async function applyPrune(
         ? a.line - b.line
         : a.column - b.column,
   );
-  return { removed_file: input.remove_file, link_rewrites_applied: applied, ledger_row: prepared.row };
+  return { removed_file: input.remove_file, link_rewrites_applied: applied, ledger_row: prepared.row, ledger_action };
 }

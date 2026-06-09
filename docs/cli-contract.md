@@ -2283,7 +2283,7 @@ A **reference-style** inbound link (`[t][label]` + `[label]: url`) cannot be rew
 3. **Rewrite inbound links.** Each source is **re-read immediately before its write** and refused if it changed since preflight — a concurrent edit (an editor, `git checkout`, another tool; the advisory lock does **not** guard these) is never clobbered with stale rewritten content; it raises `DECISION_PRUNE_WRITE_FAILED` (`rewrite_links`) and the edit survives. Writes use an **existing-file replace** (`atomicReplaceExistingText`) that does not re-create a vanished file/parent.
 4. **Delete the record** — the only irreversible step, done last. The path is re-`stat`ed against the preflight inode/device immediately before `unlink` (a swapped path is refused); if the record **disappeared** before this step, code-pact did not complete the delete, so it reports `DECISION_PRUNE_WRITE_FAILED` (`delete_record`) rather than claiming a removal.
 
-Cross-file atomicity is not claimed (a POSIX filesystem cannot transact across files without a journal). The guarantees are: (a) a failure never leaves a **broken-link or `validate`-breaking** intermediate state (the record is deleted last, so a partial rewrite still resolves to a present target); and (b) a **concurrent edit to a source is never overwritten** — it is detected and refused. A commit-time I/O failure raises [`DECISION_PRUNE_WRITE_FAILED`](#public-codes-top-level-error-envelopes) with `data.phase` (`append_ledger` / `rewrite_links` / `delete_record`) and `data.partial_applied` (the ledger is written first and the record deleted last, so `append_ledger` is always `partial_applied: false`; `rewrite_links` / `delete_record` are `true`).
+Cross-file atomicity is not claimed (a POSIX filesystem cannot transact across files without a journal). The guarantees are: (a) a failure never leaves a **broken-link or `validate`-breaking** intermediate state (the record is deleted last, so a partial rewrite still resolves to a present target); and (b) a **concurrent edit detected before commit is refused, not overwritten** — each source and the ledger are re-read immediately before their write and a change since preflight aborts with `DECISION_PRUNE_WRITE_FAILED`. (b) is **not** a filesystem-level compare-and-swap: a write that lands in the final read→`rename` gap cannot be caught portably, so it is a narrow-window guard, not an absolute guarantee. A commit-time I/O failure raises [`DECISION_PRUNE_WRITE_FAILED`](#public-codes-top-level-error-envelopes) with `data.phase` (`append_ledger` / `rewrite_links` / `delete_record`) and `data.partial_applied` (the ledger is written first and the record deleted last, so `append_ledger` is always `partial_applied: false`; `rewrite_links` / `delete_record` are `true`).
 
 `--write` success envelope (`--json`):
 
@@ -2298,10 +2298,13 @@ Cross-file atomicity is not claimed (a POSIX filesystem cannot transact across f
       { "source_file": "docs/x.md", "line": 3, "column": 5, "rewrite_action": "delink", "before": "[d](../design/decisions/foo-rfc.md)", "after": "d" }
     ],
     "ledger_row": "| `design/decisions/foo-rfc.md` | P1-T1 | 2026-06-09 | git history |",
+    "ledger_action": "appended",
     "warnings": []
   }
 }
 ```
+
+`ledger_action` is `"appended"` when a new tombstone row was written, or `"already_recorded"` when the decision was already in `PRUNED.md` (an idempotent re-run after a partial-failure prune) — in that case `ledger_row` reports the row that represents the prune, but nothing was appended. The rest of the prune (link rewrites + record deletion) still runs.
 
 Pruning a record that is **already gone** (a second `--write`) exits 2 with `DECISION_PRUNE_NOT_ELIGIBLE` / `target_missing` — fail-closed, not a convergent no-op.
 

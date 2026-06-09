@@ -259,6 +259,7 @@ export type DecisionPruneWriteOutcome =
       removed_file: string;
       link_rewrites_applied: AppliedRewrite[];
       ledger_row: string;
+      ledger_action: "appended" | "already_recorded";
       warnings: string[];
     };
 
@@ -304,6 +305,7 @@ export async function runDecisionPruneWrite(
       removed_file: applied.removed_file,
       link_rewrites_applied: applied.link_rewrites_applied,
       ledger_row: applied.ledger_row,
+      ledger_action: applied.ledger_action,
       warnings: dryRun.warnings,
     };
   } catch (err) {
@@ -333,6 +335,7 @@ export function serializeDecisionPruneWrite(
     removed_file: outcome.removed_file,
     link_rewrites_applied: outcome.link_rewrites_applied,
     ledger_row: outcome.ledger_row,
+    ledger_action: outcome.ledger_action,
     warnings: outcome.warnings,
   };
 }
@@ -353,7 +356,11 @@ export function formatDecisionPruneWriteHuman(
       lines.push(`    ${r.source_file}:${r.line} — ${r.rewrite_action}`);
     }
   }
-  lines.push(`  appended to design/decisions/PRUNED.md`);
+  lines.push(
+    outcome.ledger_action === "appended"
+      ? `  ledger: appended to design/decisions/PRUNED.md`
+      : `  ledger: already recorded in design/decisions/PRUNED.md (not re-appended)`,
+  );
   for (const w of outcome.warnings) lines.push(`  ⚠ ${w}`);
   return lines.join("\n");
 }

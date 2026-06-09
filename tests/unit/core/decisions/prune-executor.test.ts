@@ -295,7 +295,7 @@ describe("applyPrune — ledger drift & retry idempotency (ChatGPT round 4)", ()
     expect(await exists(TARGET)).toBe(true);
   });
 
-  it("re-running on a decision already in the ledger does NOT duplicate the tombstone", async () => {
+  it("re-running on a decision already in the ledger does NOT duplicate the tombstone (ledger_action: already_recorded)", async () => {
     await write("docs/x.md", "See [d](../design/decisions/foo-rfc.md).\n");
     const { items } = await collectInboundLinks(cwd, TARGET);
     // foo is ALREADY recorded (a prior partial-failure prune wrote the row)
@@ -304,7 +304,8 @@ describe("applyPrune — ledger drift & retry idempotency (ChatGPT round 4)", ()
       "# Pruned decisions\n\n| Decision | x |\n| --- | --- |\n| `design/decisions/foo-rfc.md` | P1-T1 | 2026-06-09 | git history |\n",
     );
 
-    await applyPrune(cwd, { remove_file: TARGET, items, ledger: LEDGER });
+    const res = await applyPrune(cwd, { remove_file: TARGET, items, ledger: LEDGER });
+    expect(res.ledger_action).toBe("already_recorded"); // honest: nothing appended
 
     const ledger = await read("design/decisions/PRUNED.md");
     expect(ledger.match(/foo-rfc\.md/g)).toHaveLength(1); // not duplicated
@@ -312,5 +313,31 @@ describe("applyPrune — ledger drift & retry idempotency (ChatGPT round 4)", ()
     // the rest of the prune still ran
     expect(await read("docs/x.md")).toBe("See d.\n");
     expect(await exists(TARGET)).toBe(false);
+  });
+
+  it("already-recorded, but the tombstone row REMOVED before commit → write_failed(append_ledger), zero further writes", async () => {
+    await write("docs/x.md", "See [d](../design/decisions/foo-rfc.md).\n");
+    const { items } = await collectInboundLinks(cwd, TARGET);
+    await write(
+      "design/decisions/PRUNED.md",
+      "# Pruned decisions\n\n| Decision | x |\n| --- | --- |\n| `design/decisions/foo-rfc.md` | P1-T1 | 2026-06-09 | git history |\n",
+    );
+    const docBefore = await read("docs/x.md");
+    const wiped = "# Pruned decisions\n\n(no rows)\n";
+
+    // The hook fires before the commit-time ledger re-read — even on the
+    // already_recorded path — so a row deleted now is detected.
+    const err = await applyPrune(
+      cwd,
+      { remove_file: TARGET, items, ledger: LEDGER },
+      { beforeLedgerWrite: async () => { await write("design/decisions/PRUNED.md", wiped); } },
+    ).catch((e) => e);
+
+    expect(err).toBeInstanceOf(PruneWriteError);
+    expect((err as PruneWriteError).phase).toBe("append_ledger");
+    expect((err as PruneWriteError).partial_applied).toBe(false);
+    // no tombstone-less delete: record survives, docs byte-identical
+    expect(await exists(TARGET)).toBe(true);
+    expect(await read("docs/x.md")).toBe(docBefore);
   });
 });

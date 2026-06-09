@@ -275,9 +275,10 @@ describe("runDecisionPruneWrite (--write execution)", () => {
       "P1-T1",
     );
 
+    expect(outcome.ledger_action).toBe("appended");
     // serializer exposes the write contract
     const data = serializeDecisionPruneWrite(outcome);
-    expect(data).toMatchObject({ mode: "write", decision: "design/decisions/foo-rfc.md" });
+    expect(data).toMatchObject({ mode: "write", decision: "design/decisions/foo-rfc.md", ledger_action: "appended" });
     expect(data).toHaveProperty("removed_file");
     expect(data).toHaveProperty("link_rewrites_applied");
     expect(data).toHaveProperty("ledger_row");
@@ -285,6 +286,32 @@ describe("runDecisionPruneWrite (--write execution)", () => {
     const human = formatDecisionPruneWriteHuman(outcome);
     expect(human).toContain("PRUNED");
     expect(human).toContain("docs/x.md");
+    expect(human).toContain("appended to design/decisions/PRUNED.md");
+  });
+
+  it("idempotent retry: an already-recorded decision reports ledger_action 'already_recorded', human is honest", async () => {
+    await writeDecision("foo-rfc.md");
+    await writeDoneTaskPhase("design/decisions/foo-rfc.md");
+    await mkdir(join(cwd, "docs"), { recursive: true });
+    await writeFile(join(cwd, "docs", "x.md"), "See [d](../design/decisions/foo-rfc.md).\n");
+    // foo already in the ledger (a prior partial-failure prune)
+    await writeFile(
+      join(cwd, "design", "decisions", "PRUNED.md"),
+      "# Pruned decisions\n\n| Decision | x |\n| --- | --- |\n| `design/decisions/foo-rfc.md` | P1-T1 | 2026-06-09 | git history |\n",
+    );
+
+    const outcome = await runDecisionPruneWrite(cwd, "design/decisions/foo-rfc.md", { now: NOW });
+    expect(outcome.kind).toBe("applied");
+    if (outcome.kind !== "applied") return;
+    expect(outcome.ledger_action).toBe("already_recorded");
+    expect(serializeDecisionPruneWrite(outcome)).toMatchObject({ ledger_action: "already_recorded" });
+    const human = formatDecisionPruneWriteHuman(outcome);
+    expect(human).toContain("already recorded");
+    expect(human).not.toContain("appended to design/decisions/PRUNED.md");
+    // no duplicate row, and the prune still completed
+    const ledger = await readFile(join(cwd, "design", "decisions", "PRUNED.md"), "utf8");
+    expect(ledger.match(/foo-rfc\.md/g)).toHaveLength(1);
+    await expect(access(join(cwd, "design", "decisions", "foo-rfc.md"))).rejects.toThrow();
   });
 
   it("records '—' for phase/task when no task references the (still-eligible) decision", async () => {
