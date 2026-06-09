@@ -44,9 +44,11 @@ do not accrete future direction from it after v2.0 ships.
      whose state is **not yet snapshotted** → **fail closed.** Never silently
      swallowed.
 5. **No `design/decisions/` retention dependency.** `PRUNED.md` is demoted to a
-   **read-only backward-compat input**; the v2.0 retired-decision tombstone lives
-   under `.code-pact/state/` so the **entire `design/decisions/` directory can be
-   removed** without breaking the live decision gate.
+   **read-only backward-compat input**; the v2.0 **decision-state record** (the
+   tombstone is its degenerate form, for records no active gate needs) lives under
+   `.code-pact/state/` so the **entire `design/decisions/` directory can be
+   removed** — provided every decision an active gate needs is represented as a
+   record that may satisfy that gate (A3). Otherwise the gate **fails closed**.
 
 ## "completed phase" — defined by state, not by YAML
 
@@ -80,8 +82,14 @@ so "events exist" is never by itself a license to delete the YAML.
   active-control-snapshot writer.
 - **A2.** After snapshotting, **`rm design/phases/<completed>.yaml` by hand** keeps
   `validate` / `doctor` / `plan lint` / `task context` / `task prepare` green.
-- **A3.** After snapshotting, **`rm -rf design/decisions` by hand** keeps the **live
-  decision gate** and all of A2's commands green.
+- **A3.** **`rm -rf design/decisions` by hand** is tolerated **only when every
+  decision required by an active gate** (any not-done task's `requires_decision` /
+  `decision_refs`) **is already represented in `.code-pact/state` as a
+  decision-state record** (see step 3 for its minimum fields, including whether it
+  may satisfy an active gate). Then the live decision gate and all of A2's
+  commands stay green. If **any** active gate depends on an **unsnapshotted**
+  decision, the gate **fails closed** — it never resolves from absence, and the
+  retired-decision tombstone alone is NOT sufficient to release a live gate.
 - **A4.** The `.code-pact/state` snapshot/tombstone **alone** resolves a completed
   phase / retired decision — with **no** `design/decisions/` and **no** completed
   `design/phases/*.yaml` on disk.
@@ -121,14 +129,25 @@ so "events exist" is never by itself a license to delete the YAML.
    `sync-paths`, `safe-write`, doctor's validating reader) an explicit
    archive-awareness contract of their own. Only after **2b + 2c** does "insert
    archive-fallback at the seam" become true. **NOT done.**
-3. **Snapshot + tombstone writers** —
+3. **Snapshot + decision-state writers** —
    `.code-pact/state/archive/phases/<phase-id>.json` (one-phase-one-file) + a Zod
-   schema, and the retired-decision tombstone under `.code-pact/state/`
-   (non-destructive; nothing is deleted yet).
+   schema, and the **decision-state record** under `.code-pact/state/`
+   (non-destructive; nothing is deleted yet). A decision-state record carries at
+   minimum: **identity / original path**, **ADR status at retirement** (accepted /
+   superseded / …), **whether it may satisfy an active gate**, and a **source hash
+   / provenance** (git ref). A plain "it was pruned" tombstone is the degenerate
+   case for records no active gate needs.
 4. **Resolve completed-phase missing** via the snapshot (loaders / deps / lint),
    scoped to archived-only; active-missing stays fail-closed.
-5. **Resolve retired-decision missing** via the `.code-pact/state` tombstone
-   (`PRUNED.md` read-only backcompat).
+5. **Resolve retired-decision missing** via the `.code-pact/state` decision-state
+   record (`PRUNED.md` read-only backcompat). This layer must cover, explicitly:
+   **`resolveDecisionGate`** (the live gate — resolves only from a record that
+   says it may satisfy an active gate, never from absence), **`plan lint`'s
+   `decision_refs` AND `acceptance_refs`** not-found detectors (`acceptance_refs`
+   is NOT covered by the decision tombstone today — do not drop it),
+   **`task prepare` / `task record-done`** (gate + commitments echo),
+   **`status`**, and the **doc-link checker** (interim rule below; full
+   tombstone-awareness is step 7 half (ii)).
 6. **Tolerance, scoped** — `validate` / `doctor` / `plan lint` / `task context` /
    `task prepare`: *missing archived historical docs tolerant; missing active
    control docs fail-closed.*
@@ -158,6 +177,10 @@ so "events exist" is never by itself a license to delete the YAML.
 
 ## Non-negotiables
 
+- **No interim broken-docs state.** No PR may introduce a state where runtime
+  retired-decision / archived-phase resolution succeeds but `check:docs` is
+  knowingly broken. Tombstone-aware doc-link behavior may land later (step 7
+  half (ii)), but **every interim PR must keep `check:docs` green**.
 - Deterministic, **non-AI** logic only on control-plane paths.
 - Every destructive command: dry-run preview + `--write` + stale-plan guard + lock.
 - Prefer **fail-closed over silent success**. Snapshots small, deterministic,
