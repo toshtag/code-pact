@@ -26,9 +26,13 @@ do not accrete future direction from it after v2.0 ships.
 
 ## Canonical rule (the new source of truth)
 
-1. From v2.0, **runtime truth = `.code-pact/state` + generated control snapshots.**
-   `design/` is the human authoring surface and historical working docs — not the
-   control plane.
+1. For the v2.0 **removable-doc scope**, runtime truth for **archived / completed
+   phase references** and **retired / settled decision outcomes** moves to
+   `.code-pact/state` + generated control snapshots. **`design/` remains the
+   active authoring/control surface** for the roadmap and not-yet-archived
+   phase/task definitions **until a separate future relocation** (out of v2.0
+   scope — see A1's scope split). What `design/` stops being is the *permanent
+   home of historical docs*: completed/retired material becomes removable.
 2. `design/decisions/*.md` and **completed** `design/phases/*.yaml` are
    **ephemeral**: deletable, retire-able, eventually `.gitignore`-able — **by hand**,
    not only via a CLI verb.
