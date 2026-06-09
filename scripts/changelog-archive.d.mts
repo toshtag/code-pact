@@ -24,6 +24,7 @@ export function partitionByMajor(
 export function renderArchiveFile(major: number, blocks: ChangelogBlock[]): string;
 export function renderPointer(majors: number[]): string;
 export function majorsFromPointer(pointerText: string): number[];
+export function archiveMajorsOnDisk(filenames: string[]): number[];
 export function archiveConflicts(
   archive: ArchiveEntry[],
   readOrNull: (path: string) => string | null,
@@ -31,9 +32,10 @@ export function archiveConflicts(
 export function renderChangelog(
   preamble: string,
   keptBlocks: ChangelogBlock[],
-  archivedMajors: number[],
+  pointerMajors: number[],
 ): string;
 export function planArchive(
   changelogText: string,
   currentMajor: number,
-): { archive: ArchiveEntry[]; newChangelog: string; changed: boolean };
+  existingArchiveMajors?: number[],
+): { archive: ArchiveEntry[]; newChangelog: string; changed: boolean; pointerMajors: number[] };

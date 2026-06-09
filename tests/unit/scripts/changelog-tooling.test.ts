@@ -6,6 +6,7 @@ import {
   planArchive,
   renderChangelog,
   majorsFromPointer,
+  archiveMajorsOnDisk,
   archiveConflicts,
 } from "../../../scripts/changelog-archive.mjs";
 import { extractReleaseNotes } from "../../../scripts/release-notes.mjs";
@@ -156,6 +157,27 @@ Releases before the current major are archived (moved verbatim, not deleted):
     expect(plan.newChangelog).not.toContain("## [1.5.0]"); // v1 moved out
     // a single pointer block, listing both majors descending
     expect(plan.newChangelog.match(/## Older versions/g)).toHaveLength(1);
+  });
+});
+
+describe("archive discovery invariant (no orphaned archive files)", () => {
+  it("archiveMajorsOnDisk parses CHANGELOG-<n>.md filenames (ignoring others)", () => {
+    expect(archiveMajorsOnDisk(["CHANGELOG-0.md", "CHANGELOG-1.md", "README.md", "post-1.26-x.md"])).toEqual([0, 1]);
+  });
+
+  it("re-links an orphaned archive: a file on disk not in the pointer is added (pointer-only write, no section move)", () => {
+    // CHANGELOG with only the current major + Unreleased, NO pointer — but CHANGELOG-0.md exists on disk (orphan).
+    const noPointer = `# Changelog\n\n## [Unreleased]\n\n- wip\n\n## [1.0.0] — 2026-05-01\n\n- ga\n`;
+    const plan = planArchive(noPointer, 1, [0]);
+    expect(plan.changed).toBe(true); // the pointer is missing → out of date
+    expect(plan.archive).toHaveLength(0); // nothing inline to move — pointer-only fix
+    expect(plan.newChangelog).toContain("## Older versions");
+    expect(plan.newChangelog).toContain("CHANGELOG-0.md");
+  });
+
+  it("is a no-op when every on-disk archive is already linked", () => {
+    const linked = planArchive(`# Changelog\n\n## [1.0.0] — 2026-05-01\n\n- ga\n`, 1, [0]).newChangelog;
+    expect(planArchive(linked, 1, [0]).changed).toBe(false);
   });
 });
 

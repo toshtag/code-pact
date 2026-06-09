@@ -18,7 +18,7 @@
 // WITH ITS DEFINITION WHEN ONE EXISTS — the move neither creates nor repairs a
 // ref that was already undefined in the source CHANGELOG.
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve, join } from "node:path";
 
@@ -107,20 +107,26 @@ export function majorsFromPointer(pointerText) {
   return out;
 }
 
+/** Major numbers of the archive files present on disk, parsed from `CHANGELOG-<n>.md` filenames. */
+export function archiveMajorsOnDisk(filenames) {
+  const out = [];
+  for (const f of filenames) {
+    const m = /^CHANGELOG-(\d+)\.md$/.exec(f);
+    if (m) out.push(Number(m[1]));
+  }
+  return out;
+}
+
 /**
- * Rebuild CHANGELOG.md content from the preamble + kept blocks + the pointer.
- * The pointer is regenerated over the UNION of majors it already listed and the
- * ones archived this run — so a later major rollover (e.g. v2 archiving v1.x)
- * never drops the discovery link to an earlier archive (CHANGELOG-0.md).
+ * Rebuild CHANGELOG.md from the preamble + kept blocks + the pointer. `pointerMajors`
+ * is the FINAL set to list (the caller computes the union); the existing pointer
+ * block is dropped and regenerated, so the rebuild is idempotent.
  */
-export function renderChangelog(preamble, keptBlocks, archivedMajors) {
+export function renderChangelog(preamble, keptBlocks, pointerMajors) {
   const parts = [preamble.trimEnd()];
-  const existingPointer = keptBlocks.find((b) => b.heading.trim() === POINTER_HEADING);
-  const priorMajors = existingPointer ? majorsFromPointer(existingPointer.text) : [];
   const kept = keptBlocks.filter((b) => b.heading.trim() !== POINTER_HEADING);
   for (const b of kept) parts.push(b.text.trimEnd());
-  const allMajors = [...new Set([...priorMajors, ...archivedMajors])];
-  if (allMajors.length > 0) parts.push(renderPointer(allMajors).trimEnd());
+  if (pointerMajors.length > 0) parts.push(renderPointer(pointerMajors).trimEnd());
   return `${parts.join("\n\n")}\n`;
 }
 
@@ -141,8 +147,14 @@ export function archiveConflicts(archive, readOrNull) {
   return conflicts;
 }
 
-/** Compute the full plan (pure). `archive` is [{major, path, content}], `changelog` the new CHANGELOG.md. */
-export function planArchive(changelogText, currentMajor) {
+/**
+ * Compute the full plan (pure). `existingArchiveMajors` are the majors whose
+ * archive files already exist on disk — included in the pointer union so the
+ * pointer ALSO re-links an archive that was orphaned by a manual edit (not just
+ * the sections moved this run). `changed` is byte-equality against the input, so
+ * it covers both "older sections still inline" and "pointer missing an archive".
+ */
+export function planArchive(changelogText, currentMajor, existingArchiveMajors = []) {
   const { preamble, blocks } = parseChangelog(changelogText);
   const { kept, archivedByMajor } = partitionByMajor(blocks, currentMajor);
   const archive = [...archivedByMajor.entries()].map(([major, blks]) => ({
@@ -151,9 +163,16 @@ export function planArchive(changelogText, currentMajor) {
     content: renderArchiveFile(major, blks),
     versions: blks.map((b) => b.version),
   }));
-  const majors = [...archivedByMajor.keys()];
-  const newChangelog = majors.length > 0 ? renderChangelog(preamble, kept, majors) : changelogText;
-  return { archive, newChangelog, changed: majors.length > 0 };
+  const existingPointer = blocks.find((b) => b.heading.trim() === POINTER_HEADING);
+  const priorMajors = existingPointer ? majorsFromPointer(existingPointer.text) : [];
+  const pointerMajors = [
+    ...new Set([...priorMajors, ...archivedByMajor.keys(), ...existingArchiveMajors]),
+  ];
+  const newChangelog =
+    pointerMajors.length > 0 || archivedByMajor.size > 0
+      ? renderChangelog(preamble, kept, pointerMajors)
+      : changelogText;
+  return { archive, newChangelog, changed: newChangelog !== changelogText, pointerMajors };
 }
 
 function readCurrentMajor(repoRoot) {
@@ -163,31 +182,44 @@ function readCurrentMajor(repoRoot) {
   return major;
 }
 
+/** Major numbers of `CHANGELOG-<n>.md` files present in the history dir (absent dir → []). */
+function readArchiveMajorsOnDisk(repoRoot) {
+  const dir = join(repoRoot, ARCHIVE_DIR);
+  return existsSync(dir) ? archiveMajorsOnDisk(readdirSync(dir)) : [];
+}
+
 function main(argv) {
   const mode = argv.includes("--write") ? "write" : argv.includes("--check") ? "check" : "dry-run";
   const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
   const currentMajor = readCurrentMajor(repoRoot);
   const changelogPath = join(repoRoot, "CHANGELOG.md");
-  const plan = planArchive(readFileSync(changelogPath, "utf8"), currentMajor);
+  const changelogText = readFileSync(changelogPath, "utf8");
+  const onDisk = readArchiveMajorsOnDisk(repoRoot);
+  const plan = planArchive(changelogText, currentMajor, onDisk);
 
   if (!plan.changed) {
-    process.stdout.write(`changelog-archive: CHANGELOG.md holds only the current major (v${currentMajor}.x) + Unreleased — nothing to archive.\n`);
+    process.stdout.write(`changelog-archive: CHANGELOG.md is current (only v${currentMajor}.x + Unreleased inline; every archive is linked).\n`);
     return 0;
   }
 
-  const summary = plan.archive
-    .map((a) => `  v${a.major}.x → ${a.path} (${a.versions.length} release${a.versions.length === 1 ? "" : "s"})`)
-    .join("\n");
+  // What's out of date: older sections still inline, and/or archive files not yet linked.
+  const moveSummary = plan.archive
+    .map((a) => `  move v${a.major}.x → ${a.path} (${a.versions.length} release${a.versions.length === 1 ? "" : "s"})`);
+  const currentPointer = parseChangelog(changelogText).blocks.find((b) => b.heading.trim() === POINTER_HEADING);
+  const linkedMajors = currentPointer ? majorsFromPointer(currentPointer.text) : [];
+  const orphans = onDisk.filter((m) => !linkedMajors.includes(m)).sort((a, b) => b - a);
+  const orphanSummary = orphans.map((m) => `  link v${m}.x → ${ARCHIVE_DIR}/CHANGELOG-${m}.md (archive exists but is not in the pointer)`);
+  const summary = [...moveSummary, ...orphanSummary].join("\n");
 
   if (mode === "check") {
     process.stderr.write(
-      `changelog-archive: CHANGELOG.md still contains older majors:\n${summary}\n` +
-        `Run \`node scripts/changelog-archive.mjs --write\` to move them to ${ARCHIVE_DIR}/.\n`,
+      `changelog-archive: CHANGELOG.md is out of date with its archive:\n${summary}\n` +
+        `Run \`node scripts/changelog-archive.mjs --write\` (or \`pnpm changelog:archive\`) to fix it.\n`,
     );
     return 1;
   }
   if (mode === "dry-run") {
-    process.stdout.write(`changelog-archive (dry-run): would archive\n${summary}\nand leave a pointer in CHANGELOG.md. Re-run with --write to apply.\n`);
+    process.stdout.write(`changelog-archive (dry-run): would update CHANGELOG.md:\n${summary}\nRe-run with --write to apply.\n`);
     return 0;
   }
   // write. Preflight first: refuse to overwrite an existing archive file whose
@@ -206,13 +238,14 @@ function main(argv) {
     return 1;
   }
   // Each major is archived exactly once: once its sections leave CHANGELOG.md a
-  // re-run finds nothing to move (changed:false short-circuits above).
-  mkdirSync(join(repoRoot, ARCHIVE_DIR), { recursive: true });
+  // re-run finds nothing to move (changed:false short-circuits above). An orphan
+  // re-link writes only CHANGELOG.md (plan.archive is empty for it).
+  if (plan.archive.length > 0) mkdirSync(join(repoRoot, ARCHIVE_DIR), { recursive: true });
   for (const a of plan.archive) {
     writeFileSync(join(repoRoot, a.path), a.content);
   }
   writeFileSync(changelogPath, plan.newChangelog);
-  process.stdout.write(`changelog-archive: archived\n${summary}\nand left a pointer in CHANGELOG.md.\n`);
+  process.stdout.write(`changelog-archive: updated CHANGELOG.md:\n${summary}\n`);
   return 0;
 }
 
