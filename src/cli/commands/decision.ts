@@ -12,20 +12,23 @@ import {
   runDecisionPruneWrite,
   serializeDecisionPrune,
   serializeDecisionPruneWrite,
+  serializeDecisionPruneWriteFailed,
   formatDecisionPruneHuman,
   formatDecisionPruneWriteHuman,
   notEligibleMessage,
   planStaleMessage,
+  writeFailedMessage,
 } from "../../commands/decision-prune.ts";
 
 const PRUNE_HELP = `Usage: code-pact decision prune <path> [--write] [--json]
 
 Retire a shipped, accepted decision record from the live plane. DRY-RUN BY
 DEFAULT: it reports the eligibility verdict and the COMPLETE inbound-link rewrite
-plan, and writes nothing. Pass --write to execute that plan — delete the record,
-rewrite each inbound link (README index row → tombstone, body link → delink), and
-append a row to design/decisions/PRUNED.md. The target must be a readable,
-top-level, accepted design/decisions/<name>.md record.
+plan, and writes nothing. Pass --write to execute that plan: after a preflight
+that writes nothing, append the design/decisions/PRUNED.md tombstone row, rewrite
+each inbound link (README index row → tombstone, body link → delink), then delete
+the record last. The target must be a readable, top-level, accepted
+design/decisions/<name>.md record.
 
 Eligible → exit 0 (dry-run reports the plan; --write applies it). Ineligible →
 exit 2 with error code DECISION_PRUNE_NOT_ELIGIBLE and
@@ -124,6 +127,12 @@ export async function cmdDecision(
         if (outcome.kind === "stale") {
           emitError(json, "DECISION_PRUNE_PLAN_STALE", planStaleMessage(outcome.stale), {
             data: { mode: "write", decision: outcome.decision, stale: outcome.stale },
+          });
+          return 2;
+        }
+        if (outcome.kind === "write_failed") {
+          emitError(json, "DECISION_PRUNE_WRITE_FAILED", writeFailedMessage(outcome), {
+            data: serializeDecisionPruneWriteFailed(outcome),
           });
           return 2;
         }

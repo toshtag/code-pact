@@ -290,9 +290,28 @@ describe("decision prune — CLI (dry-run)", () => {
     expect(await readFile(join(p.dir, "docs", "x.md"), "utf8")).toBe("# X\n\nSee d.\n");
     const ledger = await readFile(join(p.dir, "design", "decisions", "PRUNED.md"), "utf8");
     expect(ledger).toContain("`design/decisions/foo-rfc.md`");
-    // NO leftover lock or temp file from the write
+    // NO leftover temp file from the atomic writes
     const tree = await snapshotTree(p.dir);
-    expect(Object.keys(tree).some((f) => f.includes(".prune-tmp"))).toBe(false);
+    expect(Object.keys(tree).some((f) => /\.tmp-|\.prune-tmp/.test(f))).toBe(false);
+  });
+
+  it("a commit-time write failure → DECISION_PRUNE_WRITE_FAILED JSON (exit 2, not an internal exit 3)", async () => {
+    const p = await project(ACCEPTED, "done");
+    await mkdir(join(p.dir, "docs"), { recursive: true });
+    await writeFile(join(p.dir, "docs", "x.md"), "See [d](../design/decisions/foo-rfc.md).\n");
+    // PRUNED.md as a directory makes the ledger step fail (EISDIR).
+    await mkdir(join(p.dir, "design", "decisions", "PRUNED.md"), { recursive: true });
+
+    const res = p.run(["decision", "prune", "design/decisions/foo-rfc.md", "--write", "--json"]);
+    const env = expectJsonErr(res);
+    expect(res.code).toBe(2);
+    expect(env.error.code).toBe("DECISION_PRUNE_WRITE_FAILED");
+    expect(env.data).toMatchObject({ mode: "write", phase: "append_ledger", partial_applied: false });
+    // ledger-first ordering → the inbound doc was never touched
+    expect(await readFile(join(p.dir, "docs", "x.md"), "utf8")).toBe(
+      "See [d](../design/decisions/foo-rfc.md).\n",
+    );
+    expect(await readFile(join(p.dir, "design", "decisions", "foo-rfc.md"), "utf8")).toContain("accepted");
   });
 
   it("a second --write after the record is gone → DECISION_PRUNE_NOT_ELIGIBLE (target_missing)", async () => {

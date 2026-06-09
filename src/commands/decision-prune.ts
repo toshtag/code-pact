@@ -7,11 +7,13 @@ import {
 import {
   applyPrune,
   PrunePlanStaleError,
+  PruneWriteError,
   type AppliedRewrite,
   type PruneStaleSpan,
+  type PruneWritePhase,
 } from "../core/decisions/prune-executor.ts";
 
-export type { LinkRewriteItem, AppliedRewrite, PruneStaleSpan };
+export type { LinkRewriteItem, AppliedRewrite, PruneStaleSpan, PruneWritePhase };
 
 /**
  * The plan `--write` (PR-C2) will execute: remove the decision file, append a
@@ -244,6 +246,13 @@ export type DecisionPruneWriteOutcome =
   | { kind: "ineligible"; dryRun: DecisionPruneResult }
   | { kind: "stale"; decision: string; stale: PruneStaleSpan[] }
   | {
+      kind: "write_failed";
+      decision: string;
+      phase: PruneWritePhase;
+      partial_applied: boolean;
+      message: string;
+    }
+  | {
       kind: "applied";
       decision: string;
       removed_file: string;
@@ -296,6 +305,15 @@ export async function runDecisionPruneWrite(
     if (err instanceof PrunePlanStaleError) {
       return { kind: "stale", decision: dryRun.decision, stale: err.stale };
     }
+    if (err instanceof PruneWriteError) {
+      return {
+        kind: "write_failed",
+        decision: dryRun.decision,
+        phase: err.phase,
+        partial_applied: err.partial_applied,
+        message: err.detail,
+      };
+    }
     throw err;
   }
 }
@@ -341,4 +359,26 @@ export function planStaleMessage(stale: PruneStaleSpan[]): string {
   const at = first ? `${first.source_file}:${first.line}:${first.column}` : "an inbound link";
   const more = stale.length > 1 ? ` (and ${stale.length - 1} more)` : "";
   return `prune aborted — the working tree changed under the plan at ${at}${more}; nothing was written. Re-run decision prune to rebuild the plan`;
+}
+
+/** `data` payload + message for the `DECISION_PRUNE_WRITE_FAILED` error envelope. */
+export function serializeDecisionPruneWriteFailed(
+  outcome: Extract<DecisionPruneWriteOutcome, { kind: "write_failed" }>,
+): Record<string, unknown> {
+  return {
+    mode: "write",
+    decision: outcome.decision,
+    phase: outcome.phase,
+    partial_applied: outcome.partial_applied,
+    message: outcome.message,
+  };
+}
+
+export function writeFailedMessage(
+  outcome: Extract<DecisionPruneWriteOutcome, { kind: "write_failed" }>,
+): string {
+  const state = outcome.partial_applied
+    ? "some changes were already applied — inspect the working tree before retrying"
+    : "nothing was written";
+  return `${outcome.decision}: prune --write failed during ${outcome.phase} (${outcome.message}); ${state}`;
 }

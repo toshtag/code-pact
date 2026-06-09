@@ -13,6 +13,7 @@ When a command surfaces one of the diagnostic codes below, this page maps it to 
 | [`PHASE_RECONCILE_WRITE_REFUSED`](#phase_reconcile_write_refused-from-phase-reconcile---write) | Every reconcile write was refused | Re-run dry-run; fix the phase file |
 | [`DECISION_PRUNE_NOT_ELIGIBLE`](#decision_prune_not_eligible-from-decision-prune) | A decision record cannot be retired yet | Read `data.blocks[]`; resolve each gate (or pick a different target) |
 | [`DECISION_PRUNE_PLAN_STALE`](#decision_prune_plan_stale-from-decision-prune---write) | The tree changed under a `--write` plan (zero writes) | Re-run `decision prune` to rebuild the plan |
+| [`DECISION_PRUNE_WRITE_FAILED`](#decision_prune_write_failed-from-decision-prune---write) | A disk write failed during `--write` | Read `data.phase` / `data.partial_applied`; fix the cause and re-run |
 | [`LOCK_HELD`](#lock_held-from-a-lock-covered-mutation) | Another mutation is running | Wait, then retry (transient) |
 | [`MANIFEST_NOT_FOUND`](#manifest_not_found-from-adapter-upgrade---check----write) | Adapter not installed yet | Run `adapter install <agent>` |
 | [`ADAPTER_GENERATOR_STALE`](#adapter_generator_stale-from-adapter-doctor--global-doctor) | Older CLI stamp **and** generated output drifted (stamp-only lag is silent) | Run `adapter upgrade --check`, then `--write` |
@@ -207,7 +208,20 @@ code-pact decision prune design/decisions/<name>.md --write --json
 #   found    → what is on disk there now (or a marker: <reclassified>, <reference-style>, …)
 ```
 
-Recovery: re-run `decision prune` (dry-run first if you want to inspect the rebuilt plan). The collector re-reads the current tree, so a fresh `--write` reflects the edit. This is a safety abort, not a failure — nothing was left half-applied.
+Recovery: re-run `decision prune` (dry-run first if you want to inspect the rebuilt plan). The collector re-reads the current tree, so a fresh `--write` reflects the edit. This is a safety abort, not a failure — nothing was left half-applied. The target record itself disappearing or becoming a directory between plan and apply is the same kind of drift and also lands here.
+
+## `DECISION_PRUNE_WRITE_FAILED` from `decision prune --write`
+A disk write failed **after** preflight passed — distinct from `PLAN_STALE` (a plan/tree mismatch caught before any write). This is an actual I/O failure: an unreadable ledger caught in preflight (zero writes), or a commit-time `rename`/`unlink` error (disk full, permissions, a path that became a directory).
+
+```sh
+code-pact decision prune design/decisions/<name>.md --write --json
+# data → { mode: "write", decision, phase, partial_applied, message }
+#   phase           → append_ledger | rewrite_links | delete_record
+#   partial_applied → false = nothing landed; true = some changes already applied
+#   message         → the underlying error (e.g. ENOSPC, EACCES, EISDIR)
+```
+
+Because `--write` writes the ledger first and deletes the record last, a ledger failure is always `partial_applied: false` (inbound docs untouched). If `partial_applied` is `true`, inspect the working tree (`git status` / `git diff`) before retrying — some link rewrites and/or the ledger row may already be committed; a re-run is idempotent (a duplicate ledger row collapses on read).
 
 ## `LOCK_HELD` from a lock-covered mutation
 Another `code-pact` mutation is in progress on the same project. The advisory write lock (`.code-pact/locks/write.lock`) is held by the process whose details appear in the envelope:

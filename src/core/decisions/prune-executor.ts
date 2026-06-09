@@ -1,17 +1,19 @@
-import { readFile, writeFile, rename, unlink } from "node:fs/promises";
+import { readFile, stat, unlink } from "node:fs/promises";
 import { resolveWithinProject } from "../path-safety.ts";
+import { atomicWriteText } from "../../io/atomic-text.ts";
 import {
   collectInboundLinks,
   type InboundLinkScan,
   type LinkRewriteItem,
 } from "./link-collector.ts";
-import { appendPrunedLedger, serializePrunedRow, type PrunedLedgerRow } from "./pruned-ledger.ts";
+import { buildAppendedLedger, type PrunedLedgerRow } from "./pruned-ledger.ts";
 
 /**
  * One inbound link whose live state no longer matches the plan at write time —
  * the working tree changed between the collector's read and the executor's
  * re-read (a concurrent edit, or a plan from a stale invocation). Any one of
- * these aborts the whole prune with zero writes (fail-closed).
+ * these aborts the whole prune with zero writes (fail-closed). The target
+ * record disappearing/becoming unreadable is recorded the same way.
  */
 export type PruneStaleSpan = {
   source_file: string;
@@ -28,10 +30,35 @@ export class PrunePlanStaleError extends Error {
   readonly stale: PruneStaleSpan[];
   constructor(stale: PruneStaleSpan[]) {
     super(
-      `prune plan is stale: ${stale.length} inbound link(s) no longer match the working tree — re-run decision prune`,
+      `prune plan is stale: ${stale.length} item(s) no longer match the working tree — re-run decision prune`,
     );
     this.name = "PrunePlanStaleError";
     this.stale = stale;
+  }
+}
+
+/** Which commit step failed — for the `DECISION_PRUNE_WRITE_FAILED` envelope. */
+export type PruneWritePhase = "append_ledger" | "rewrite_links" | "delete_record";
+
+/**
+ * Thrown when a disk write fails AFTER preflight passed (rename/unlink I/O
+ * error — disk full, permissions, a path that became a directory). Distinct
+ * from {@link PrunePlanStaleError} (a plan/tree mismatch caught before any
+ * write): this is an I/O failure during the commit. `partial_applied` is the
+ * honest signal of whether any mutation already landed.
+ */
+export class PruneWriteError extends Error {
+  readonly phase: PruneWritePhase;
+  readonly partial_applied: boolean;
+  readonly detail: string;
+  constructor(phase: PruneWritePhase, partial_applied: boolean, detail: string) {
+    super(
+      `decision prune --write failed during ${phase} (partial_applied=${partial_applied}): ${detail}`,
+    );
+    this.name = "PruneWriteError";
+    this.phase = phase;
+    this.partial_applied = partial_applied;
+    this.detail = detail;
   }
 }
 
@@ -58,7 +85,7 @@ export type PruneApplyInput = {
   remove_file: string;
   /** The collected inbound links to rewrite (the plan's `link_rewrite.items`). */
   items: LinkRewriteItem[];
-  /** The ledger row to append once the rewrites succeed and before the record is deleted. */
+  /** The ledger row to append once preflight passes and before the record is deleted. */
   ledger: PrunedLedgerRow;
 };
 
@@ -161,115 +188,121 @@ function groupBySource(items: LinkRewriteItem[]): Map<string, LinkRewriteItem[]>
   return byFile;
 }
 
-// Per-call-unique temp suffix so two writers to the same path never collide on
-// the temp file (the CLI serializes via the write lock, but the helper must be
-// safe if ever called without it). pid + a monotonic counter suffices in-process.
-let tmpSeq = 0;
-function tmpPathFor(abs: string): string {
-  return `${abs}.${process.pid}.${tmpSeq++}.prune-tmp`;
+function errDetail(err: unknown): string {
+  const code = (err as NodeJS.ErrnoException).code;
+  return code ?? (err instanceof Error ? err.message : String(err));
 }
 
-async function atomicWrite(abs: string, content: string): Promise<void> {
-  const tmp = tmpPathFor(abs);
-  await writeFile(tmp, content, "utf8");
-  try {
-    await rename(tmp, abs);
-  } catch (err) {
-    await unlink(tmp).catch(() => {}); // don't leave a stray temp file behind
-    throw err;
-  }
-}
+type PendingRewrite = { abs: string; content: string; applied: AppliedRewrite[] };
 
 /**
- * Execute a `decision prune` plan: rewrite every inbound link, append the
- * ledger row, then delete the decision record. The plan MUST come from the same
- * collector run as the dry-run; this re-collects on the live tree and refuses to
- * act on a plan that no longer matches it (no markdown is re-parsed for the
- * rewrite — the collected spans are applied verbatim).
+ * Execute a `decision prune` plan. The plan MUST come from the same collector
+ * run as the dry-run; this re-validates against the live tree and refuses a
+ * plan that no longer matches (no markdown is re-parsed — the collected spans
+ * are applied verbatim).
  *
- * Cross-file atomicity is impossible on a POSIX filesystem without a journal,
- * so this guarantees the next-best thing: it never leaves a broken-link or
- * validate-breaking intermediate state.
+ * Cross-file atomicity is impossible on POSIX without a journal, so the design
+ * goal is "**a failure never leaves a broken-link or `validate`-breaking
+ * state**", achieved by doing all fallible reads/computes first and committing
+ * in the least-harmful order:
  *
- *  - **Phase 1 — re-validate.** Re-collect inbound links on the live tree; the
- *    plan must describe it exactly. Then re-read each source and confirm every
- *    span still byte-equals its `raw_link`. Any divergence throws
- *    {@link PrunePlanStaleError} BEFORE a single byte is written.
- *  - **Phase 2 — rewrite links.** Per file, edits apply back-to-front (highest
- *    offset first) so an earlier rewrite never shifts a later span. Each file is
- *    written atomically (temp + rename).
- *  - **Phase 3 — append the ledger.** The durable tombstone is recorded BEFORE
- *    the irreversible deletion, so the record's removal never outruns its audit
- *    row. A row for a still-present file is benign (the status-aware check only
- *    consults the ledger once the file is absent; the path is a code span, not a link).
- *  - **Phase 4 — delete the record.** The only irreversible step, done last,
- *    after links point nowhere and the ledger row exists.
+ *  - **Phase 1 — preflight (NO writes).** The target must still be a readable
+ *    regular file; the plan must still describe the live tree exactly; every
+ *    span must still byte-match; the ledger's next content is read+computed.
+ *    Any plan/tree divergence → {@link PrunePlanStaleError}; an unreadable
+ *    ledger → {@link PruneWriteError} (`append_ledger`, `partial_applied:false`).
+ *    Nothing is written.
+ *  - **Phase 2 — commit, least-harmful order.** (a) write the ledger FIRST — a
+ *    row for a still-present record is benign (the status-aware check only
+ *    consults the ledger once the file is absent), so a ledger failure here
+ *    leaves docs byte-identical; (b) rewrite inbound links (atomic per file,
+ *    back-to-front); (c) delete the record LAST (the only irreversible step).
+ *    A commit-time I/O failure throws {@link PruneWriteError} carrying the phase
+ *    and whether anything already landed.
  */
 export async function applyPrune(
   cwd: string,
   input: PruneApplyInput,
 ): Promise<PruneApplyResult> {
-  // Phase 1a — the plan must still describe the live tree exactly.
+  // ── Phase 1: preflight — NO writes ──
+
+  // 1a. The target must still be a readable, regular file. A target that
+  // vanished / became a directory / escapes the root is plan drift, not a
+  // success to absorb: refuse with zero writes.
+  let absTarget: string;
+  try {
+    absTarget = await resolveWithinProject(cwd, input.remove_file);
+  } catch {
+    throw new PrunePlanStaleError([
+      { source_file: input.remove_file, line: 0, column: 0, expected: "<the decision record>", found: "<path now escapes the project root>" },
+    ]);
+  }
+  let targetOk = false;
+  let targetFound = "<missing>";
+  let targetIno = -1;
+  let targetDev = -1;
+  try {
+    const st = await stat(absTarget);
+    targetOk = st.isFile();
+    targetIno = st.ino;
+    targetDev = st.dev;
+    if (!targetOk) targetFound = st.isDirectory() ? "<directory>" : "<not a regular file>";
+  } catch (err) {
+    targetFound = errDetail(err) === "ENOENT" ? "<missing>" : `<unreadable: ${errDetail(err)}>`;
+  }
+  if (!targetOk) {
+    throw new PrunePlanStaleError([
+      { source_file: input.remove_file, line: 0, column: 0, expected: "<a readable decision record>", found: targetFound },
+    ]);
+  }
+
+  // 1b. Re-collect inbound links; the plan must describe the live tree exactly.
   const live = await collectInboundLinks(cwd, input.remove_file);
   const drift = diffPlanAgainstLive(input.items, live);
   if (drift.length > 0) throw new PrunePlanStaleError(drift);
 
-  // Phase 1b — re-read each source and confirm every span still matches (closes
-  // the residual window between the re-collect above and the writes below).
+  // 1c. Re-read each source, confirm every span still byte-matches, and compute
+  // the rewritten content (closes the residual window after the re-collect).
   const byFile = groupBySource(input.items);
-  const contents = new Map<string, string>();
   const stale: PruneStaleSpan[] = [];
+  const pending: PendingRewrite[] = [];
   for (const [file, its] of byFile) {
+    let abs: string;
     let content: string;
     try {
-      const abs = await resolveWithinProject(cwd, file);
+      abs = await resolveWithinProject(cwd, file);
       content = await readFile(abs, "utf8");
     } catch {
       for (const it of its) {
-        stale.push({
-          source_file: file,
-          line: it.line,
-          column: it.column,
-          expected: it.raw_link,
-          found: "<source no longer readable>",
-        });
+        stale.push({ source_file: file, line: it.line, column: it.column, expected: it.raw_link, found: "<source no longer readable>" });
       }
       continue;
     }
-    contents.set(file, content);
     const starts = lineStartOffsets(content);
+    let fileOk = true;
     for (const it of its) {
       const lineStart = starts[it.line - 1];
       if (lineStart === undefined) {
         stale.push({ source_file: file, line: it.line, column: it.column, expected: it.raw_link, found: "<line no longer exists>" });
+        fileOk = false;
         continue;
       }
       const off = lineStart + (it.column - 1);
       const found = content.slice(off, off + it.raw_link.length);
       if (found !== it.raw_link) {
         stale.push({ source_file: file, line: it.line, column: it.column, expected: it.raw_link, found });
+        fileOk = false;
       }
     }
-  }
-  if (stale.length > 0) throw new PrunePlanStaleError(stale);
-
-  // Phase 2 — rewrite inbound links (back-to-front per file, atomic per file).
-  const applied: AppliedRewrite[] = [];
-  for (const [file, its] of byFile) {
-    const content = contents.get(file)!;
-    const starts = lineStartOffsets(content);
+    if (!fileOk) continue;
     const edits = its
-      .map((it) => ({
-        off: starts[it.line - 1]! + (it.column - 1),
-        len: it.raw_link.length,
-        after: replacementFor(it),
-        it,
-      }))
+      .map((it) => ({ off: starts[it.line - 1]! + (it.column - 1), len: it.raw_link.length, after: replacementFor(it), it }))
       .sort((a, b) => b.off - a.off); // highest offset first → earlier edits never shift later spans
     let out = content;
+    const appliedHere: AppliedRewrite[] = [];
     for (const e of edits) {
       out = out.slice(0, e.off) + e.after + out.slice(e.off + e.len);
-      applied.push({
+      appliedHere.push({
         source_file: file,
         line: e.it.line,
         column: e.it.column,
@@ -278,22 +311,57 @@ export async function applyPrune(
         after: e.after,
       });
     }
-    const abs = await resolveWithinProject(cwd, file);
-    await atomicWrite(abs, out);
+    pending.push({ abs, content: out, applied: appliedHere });
+  }
+  if (stale.length > 0) throw new PrunePlanStaleError(stale);
+
+  // 1d. Read+compute the ledger's next content (the fallible ledger READ done
+  // before any write). A non-ENOENT read error is a write-capability failure.
+  let prepared;
+  try {
+    prepared = await buildAppendedLedger(cwd, input.ledger);
+  } catch (err) {
+    throw new PruneWriteError("append_ledger", false, errDetail(err));
   }
 
-  // Phase 3 — append the append-only ledger row (the tombstone) BEFORE deletion.
-  const ledger_row = serializePrunedRow(input.ledger);
-  await appendPrunedLedger(cwd, input.ledger);
+  // ── Phase 2: commit, ordered so a failure is least harmful ──
 
-  // Phase 4 — delete the decision record (the only irreversible step, done last).
-  // ENOENT (the record vanished under us after the verdict) is tolerated: the
-  // desired end state — record absent — already holds.
-  const absTarget = await resolveWithinProject(cwd, input.remove_file);
+  // 2a. Ledger FIRST. A row for a still-present record is benign, so if this
+  // fails NO doc has been touched yet → inbound docs stay byte-identical.
   try {
+    await atomicWriteText(prepared.ledger_path, prepared.content);
+  } catch (err) {
+    throw new PruneWriteError("append_ledger", false, errDetail(err));
+  }
+
+  // 2b. Rewrite inbound links (atomic per file; content was computed in 1c).
+  const applied: AppliedRewrite[] = [];
+  for (const r of pending) {
+    try {
+      await atomicWriteText(r.abs, r.content);
+    } catch (err) {
+      throw new PruneWriteError("rewrite_links", true, errDetail(err));
+    }
+    applied.push(...r.applied);
+  }
+
+  // 2c. Delete the record LAST (the only irreversible step). Re-stat immediately
+  // before unlink and refuse if the path is no longer the SAME regular file we
+  // validated in phase 1a (inode+device) — so a concurrent swap of the path for
+  // a different file / symlink / special file cannot make us unlink the wrong
+  // object. (This narrows the 1a→2c TOCTOU window to one syscall; POSIX has no
+  // portable atomic unlink-if-inode, so it is not fully closed.) ENOENT means the
+  // record is already gone (the goal), with ledger + links committed — consistent,
+  // not a failure.
+  try {
+    const cur = await stat(absTarget);
+    if (cur.ino !== targetIno || cur.dev !== targetDev || !cur.isFile()) {
+      throw new PruneWriteError("delete_record", true, "target changed under prune (refusing to unlink a replaced path)");
+    }
     await unlink(absTarget);
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    if (err instanceof PruneWriteError) throw err;
+    if (errDetail(err) !== "ENOENT") throw new PruneWriteError("delete_record", true, errDetail(err));
   }
 
   applied.sort((a, b) =>
@@ -305,5 +373,5 @@ export async function applyPrune(
         ? a.line - b.line
         : a.column - b.column,
   );
-  return { removed_file: input.remove_file, link_rewrites_applied: applied, ledger_row };
+  return { removed_file: input.remove_file, link_rewrites_applied: applied, ledger_row: prepared.row };
 }

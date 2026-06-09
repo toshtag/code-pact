@@ -1,6 +1,7 @@
-import { readFile, writeFile, rename, unlink } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { join, posix } from "node:path";
 import { assertSafeRelativePath, resolveWithinProject } from "../path-safety.ts";
+import { atomicWriteText } from "../../io/atomic-text.ts";
 
 /**
  * Normalize a repo-relative path so a ledger entry and a `decision_refs` value
@@ -149,41 +150,56 @@ export function serializePrunedRow(row: PrunedLedgerRow): string {
   return `| \`${path}\` | ${cell(row.phase_task)} | ${cell(row.pruned_date)} | ${cell(row.rationale_home)} |`;
 }
 
-let ledgerTmpSeq = 0;
+/** The next full content of the ledger after appending `row` — computed, not written. */
+export type PreparedLedger = {
+  /** Absolute, symlink-escape-guarded path of `design/decisions/PRUNED.md`. */
+  ledger_path: string;
+  /** The complete file content to write (header + existing rows + the new row). */
+  content: string;
+  /** The serialized new row (for the result envelope). */
+  row: string;
+};
 
 /**
- * Append a row to `design/decisions/PRUNED.md`, creating the file with its
- * header when absent. Append-only: an existing ledger is never rewritten, only
- * extended. The write is atomic (temp + rename) and symlink-escape guarded.
+ * Read the existing ledger and compute the content it would have after
+ * appending `row` — **without writing anything**. This is the fallible read
+ * step (it can surface an unreadable/EISDIR ledger) factored out so a caller
+ * can run it as a preflight, before any irreversible mutation, and only commit
+ * the write once the rest of the operation is known to be safe.
+ *
+ * Only a genuinely ABSENT ledger (ENOENT) is created fresh; any other read
+ * error is rethrown — treating an unreadable-but-present ledger as empty would
+ * overwrite every prior append-only row.
  */
-export async function appendPrunedLedger(cwd: string, row: PrunedLedgerRow): Promise<void> {
-  const abs = await resolveWithinProject(cwd, "design/decisions/PRUNED.md");
+export async function buildAppendedLedger(
+  cwd: string,
+  row: PrunedLedgerRow,
+): Promise<PreparedLedger> {
+  const ledger_path = await resolveWithinProject(cwd, "design/decisions/PRUNED.md");
   let existing = "";
   try {
-    existing = await readFile(abs, "utf8");
+    existing = await readFile(ledger_path, "utf8");
   } catch (err) {
-    // Only a genuinely ABSENT ledger (ENOENT) is created fresh. Any other read
-    // error (EACCES, EISDIR, …) must NOT be swallowed: treating an unreadable but
-    // present ledger as empty would overwrite every prior append-only row. Fail
-    // closed so the caller aborts before the irreversible record deletion.
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
     existing = "";
   }
   const line = serializePrunedRow(row);
-  let next: string;
-  if (existing.trim() === "") {
-    next = `${LEDGER_HEADER}${line}\n`;
-  } else {
-    next = existing.endsWith("\n") ? `${existing}${line}\n` : `${existing}\n${line}\n`;
-  }
-  // Per-call-unique temp name (pid + counter) so concurrent appenders never
-  // collide on the temp file even if called outside the advisory write lock.
-  const tmp = `${abs}.${process.pid}.${ledgerTmpSeq++}.prune-tmp`;
-  await writeFile(tmp, next, "utf8");
-  try {
-    await rename(tmp, abs);
-  } catch (err) {
-    await unlink(tmp).catch(() => {}); // don't leave a stray temp file behind
-    throw err;
-  }
+  const content =
+    existing.trim() === ""
+      ? `${LEDGER_HEADER}${line}\n`
+      : existing.endsWith("\n")
+        ? `${existing}${line}\n`
+        : `${existing}\n${line}\n`;
+  return { ledger_path, content, row: line };
+}
+
+/**
+ * Append a row to `design/decisions/PRUNED.md`, creating the file with its
+ * header when absent. Append-only: an existing ledger is never rewritten, only
+ * extended. Goes through the shared {@link atomicWriteText} primitive (temp +
+ * rename) and is symlink-escape guarded.
+ */
+export async function appendPrunedLedger(cwd: string, row: PrunedLedgerRow): Promise<void> {
+  const prepared = await buildAppendedLedger(cwd, row);
+  await atomicWriteText(prepared.ledger_path, prepared.content);
 }

@@ -39,6 +39,7 @@ import { createPhase } from "../../../src/core/services/createPhase.ts";
 import { runTaskAdd } from "../../../src/commands/task-add.ts";
 import { runRecommend } from "../../../src/commands/recommend.ts";
 import { runPack } from "../../../src/commands/pack.ts";
+import { runDecisionPruneWrite } from "../../../src/commands/decision-prune.ts";
 
 // --- valid fixtures so safeParse only fails on the field under test ---------
 
@@ -163,6 +164,7 @@ const RUNTIME_ENTRYPOINTS = [
   "task add --id",
   "recommend --agent",
   "pack --agent",
+  "decision prune --write target",
 ] as const;
 
 describe("write-entrypoint coverage — runtime commands reject unsafe input", () => {
@@ -215,6 +217,15 @@ describe("write-entrypoint coverage — runtime commands reject unsafe input", (
       runPack({ cwd, phaseId: "P1", taskId: "P1-T1", agentName: bad }),
     ).rejects.toThrow();
   });
+
+  // `decision prune --write` builds a delete + rewrite target path from a raw
+  // positional. An unsafe path must be refused at the eligibility verdict
+  // (target_invalid via normalizePrunedDecisionPath) and NEVER reach the
+  // executor — so the corpus must produce an `ineligible` outcome with no write.
+  it.each(BAD_RELATIVE_PATHS)("decision prune --write rejects unsafe target %j", async (bad) => {
+    const outcome = await runDecisionPruneWrite(cwd, bad, { now: new Date(0) });
+    expect(outcome.kind).toBe("ineligible");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -254,7 +265,13 @@ describe("write-entrypoint inventory is pinned", () => {
 
   it("runtime command entrypoints match the documented inventory", () => {
     expect([...RUNTIME_ENTRYPOINTS].sort()).toEqual(
-      ["createPhase(id)", "pack --agent", "recommend --agent", "task add --id"].sort(),
+      [
+        "createPhase(id)",
+        "decision prune --write target",
+        "pack --agent",
+        "recommend --agent",
+        "task add --id",
+      ].sort(),
     );
   });
 });

@@ -6,7 +6,9 @@ import {
   runDecisionPrune,
   runDecisionPruneWrite,
   serializeDecisionPruneWrite,
+  serializeDecisionPruneWriteFailed,
   formatDecisionPruneWriteHuman,
+  writeFailedMessage,
   serializeDecisionPrune,
   formatDecisionPruneHuman,
   notEligibleMessage,
@@ -306,6 +308,34 @@ describe("runDecisionPruneWrite (--write execution)", () => {
       "proposed",
     );
     await expect(access(join(cwd, "design", "decisions", "PRUNED.md"))).rejects.toThrow();
+  });
+
+  it("a commit-time write failure → kind 'write_failed' with phase + partial_applied (not an internal throw)", async () => {
+    await writeDecision("foo-rfc.md");
+    await writeDoneTaskPhase("design/decisions/foo-rfc.md");
+    await mkdir(join(cwd, "docs"), { recursive: true });
+    await writeFile(join(cwd, "docs", "x.md"), "See [d](../design/decisions/foo-rfc.md).\n");
+    // PRUNED.md as a directory makes the ledger step fail (EISDIR).
+    await mkdir(join(cwd, "design", "decisions", "PRUNED.md"), { recursive: true });
+
+    const outcome = await runDecisionPruneWrite(cwd, "design/decisions/foo-rfc.md", { now: NOW });
+    expect(outcome.kind).toBe("write_failed");
+    if (outcome.kind !== "write_failed") return;
+    expect(outcome.phase).toBe("append_ledger");
+    expect(outcome.partial_applied).toBe(false);
+    // docs untouched, record survives
+    expect(await readFile(join(cwd, "docs", "x.md"), "utf8")).toBe(
+      "See [d](../design/decisions/foo-rfc.md).\n",
+    );
+    expect(await readFile(join(cwd, "design", "decisions", "foo-rfc.md"), "utf8")).toContain("accepted");
+    // serializer + message expose the contract
+    expect(serializeDecisionPruneWriteFailed(outcome)).toMatchObject({
+      mode: "write",
+      decision: "design/decisions/foo-rfc.md",
+      phase: "append_ledger",
+      partial_applied: false,
+    });
+    expect(writeFailedMessage(outcome)).toContain("nothing was written");
   });
 });
 

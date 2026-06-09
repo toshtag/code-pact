@@ -3,8 +3,13 @@ import { mkdir, mkdtemp, rm, writeFile, readFile, access } from "node:fs/promise
 import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { collectInboundLinks } from "../../../../src/core/decisions/link-collector.ts";
-import { applyPrune, PrunePlanStaleError } from "../../../../src/core/decisions/prune-executor.ts";
+import {
+  applyPrune,
+  PrunePlanStaleError,
+  PruneWriteError,
+} from "../../../../src/core/decisions/prune-executor.ts";
 import { readPrunedLedger } from "../../../../src/core/decisions/pruned-ledger.ts";
+import { unlink } from "node:fs/promises";
 
 let cwd: string;
 
@@ -173,15 +178,48 @@ describe("applyPrune — fail-closed on a stale plan", () => {
   });
 });
 
-describe("applyPrune — ordering: ledger before the irreversible delete", () => {
-  it("if the ledger append fails, the record is NOT deleted (no destroy-before-tombstone)", async () => {
+describe("applyPrune — the target itself going stale (ChatGPT blocker 1)", () => {
+  it("the target deleted after the plan was built → PrunePlanStaleError, ZERO writes", async () => {
     await write("docs/x.md", "See [d](../design/decisions/foo-rfc.md).\n");
     const { items } = await collectInboundLinks(cwd, TARGET);
-    // Make the ledger append fail: PRUNED.md is a directory (EISDIR, not ENOENT).
+    const docBefore = await read("docs/x.md");
+    // The decision record vanishes under us (external op) after the plan is built.
+    await unlink(join(cwd, TARGET));
+
+    await expect(applyPrune(cwd, { remove_file: TARGET, items, ledger: LEDGER })).rejects.toBeInstanceOf(
+      PrunePlanStaleError,
+    );
+    // prune adds NO changes: docs byte-identical, no ledger created.
+    expect(await read("docs/x.md")).toBe(docBefore);
+    expect(await exists("design/decisions/PRUNED.md")).toBe(false);
+  });
+
+  it("the target turned into a directory → PrunePlanStaleError, ZERO writes", async () => {
+    await write("docs/x.md", "See [d](../design/decisions/foo-rfc.md).\n");
+    const { items } = await collectInboundLinks(cwd, TARGET);
+    await unlink(join(cwd, TARGET));
+    await mkdir(join(cwd, TARGET), { recursive: true });
+    await expect(applyPrune(cwd, { remove_file: TARGET, items, ledger: LEDGER })).rejects.toBeInstanceOf(
+      PrunePlanStaleError,
+    );
+    expect(await exists("design/decisions/PRUNED.md")).toBe(false);
+  });
+});
+
+describe("applyPrune — ledger-first ordering & write failures (ChatGPT blockers 2 & 3)", () => {
+  it("ledger write-capability failure → PruneWriteError, inbound docs BYTE-IDENTICAL, target survives", async () => {
+    await write("docs/x.md", "See [d](../design/decisions/foo-rfc.md).\n");
+    const { items } = await collectInboundLinks(cwd, TARGET);
+    const docBefore = await read("docs/x.md");
+    // PRUNED.md is a directory (EISDIR, not ENOENT) → the ledger read in preflight fails.
     await mkdir(join(cwd, "design", "decisions", "PRUNED.md"), { recursive: true });
 
-    await expect(applyPrune(cwd, { remove_file: TARGET, items, ledger: LEDGER })).rejects.toThrow();
-    // The record survives — deletion never ran because the tombstone failed first.
+    const err = await applyPrune(cwd, { remove_file: TARGET, items, ledger: LEDGER }).catch((e) => e);
+    expect(err).toBeInstanceOf(PruneWriteError);
+    expect((err as PruneWriteError).phase).toBe("append_ledger");
+    expect((err as PruneWriteError).partial_applied).toBe(false);
+    // docs untouched (ledger is attempted before any doc rewrite), record survives.
+    expect(await read("docs/x.md")).toBe(docBefore);
     expect(await exists(TARGET)).toBe(true);
   });
 });
