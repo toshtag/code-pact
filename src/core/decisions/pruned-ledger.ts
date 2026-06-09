@@ -78,23 +78,34 @@ function extractPath(cell: string): string | null {
  * actually missing AND the referencing task is `done` before silencing — a
  * present file, or a live task, is never silenced by a ledger entry alone.
  */
+/** Is `line` a data row of the ledger table? Returns its normalized decision path, or null. */
+function rowDecisionPath(line: string): string | null {
+  const m = TABLE_ROW.exec(line);
+  if (!m) return null;
+  const first = m[1]!.split("|")[0]!.trim();
+  // Skip the header ("Decision") and the `---` separator row.
+  if (first === "" || /^:?-{2,}:?$/.test(first) || first.toLowerCase() === "decision") return null;
+  const raw = extractPath(first);
+  if (!raw) return null;
+  return normalizePrunedDecisionPath(raw); // null for entries outside design/decisions/**.md
+}
+
 /** Parse the SET of normalized pruned-decision paths from ledger text. */
 export function parsePrunedLedger(text: string): Set<string> {
   const out = new Set<string>();
   for (const line of text.split(/\r?\n/)) {
-    const m = TABLE_ROW.exec(line);
-    if (!m) continue;
-    const first = m[1]!.split("|")[0]!.trim();
-    // Skip the header ("Decision") and the `---` separator row.
-    if (first === "" || /^:?-{2,}:?$/.test(first) || first.toLowerCase() === "decision") {
-      continue;
-    }
-    const raw = extractPath(first);
-    if (!raw) continue;
-    const path = normalizePrunedDecisionPath(raw);
-    if (path) out.add(path); // entries outside design/decisions/**.md are ignored
+    const path = rowDecisionPath(line);
+    if (path) out.add(path);
   }
   return out;
+}
+
+/** The FIRST raw ledger row line that records `normalizedDecision`, or null. */
+export function findPrunedRow(text: string, normalizedDecision: string): string | null {
+  for (const line of text.split(/\r?\n/)) {
+    if (rowDecisionPath(line) === normalizedDecision) return line;
+  }
+  return null;
 }
 
 export async function readPrunedLedger(cwd: string): Promise<Set<string>> {
@@ -199,22 +210,25 @@ export async function buildAppendedLedger(
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
     existing = "";
   }
-  const line = serializePrunedRow(row);
+  const newLine = serializePrunedRow(row);
   const normalized = normalizePrunedDecisionPath(row.decision);
-  const already_recorded = normalized !== null && parsePrunedLedger(existing).has(normalized);
+  const existingRow = normalized !== null ? findPrunedRow(existing, normalized) : null;
+  const already_recorded = existingRow !== null;
   // Idempotent on retry: if this decision is already recorded, do not append a
   // duplicate tombstone — leave the ledger byte-identical.
   const content = already_recorded
     ? existing
     : existing.trim() === ""
-      ? `${LEDGER_HEADER}${line}\n`
+      ? `${LEDGER_HEADER}${newLine}\n`
       : existing.endsWith("\n")
-        ? `${existing}${line}\n`
-        : `${existing}\n${line}\n`;
+        ? `${existing}${newLine}\n`
+        : `${existing}\n${newLine}\n`;
   return {
     ledger_path,
     content,
-    row: line,
+    // Report the row that reflects reality: the EXISTING row on an idempotent
+    // retry (not the freshly-generated one), else the row just appended.
+    row: already_recorded ? existingRow!.trim() : newLine,
     normalized_decision: normalized,
     existing_content: existing,
     already_recorded,

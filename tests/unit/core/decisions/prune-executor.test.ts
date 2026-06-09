@@ -341,3 +341,72 @@ describe("applyPrune — ledger drift & retry idempotency (ChatGPT round 4)", ()
     expect(await read("docs/x.md")).toBe(docBefore);
   });
 });
+
+describe("applyPrune — honest partial_applied & ledger_row (ChatGPT round 6)", () => {
+  const RECORDED =
+    "# Pruned decisions\n\n| Decision | Phase | Pruned | Rationale |\n| --- | --- | --- | --- |\n| `design/decisions/foo-rfc.md` | P0-T9 | 2026-01-01 | manual |\n";
+
+  it("already-recorded + a source edited before its write → rewrite_links, partial_applied FALSE", async () => {
+    await write("docs/x.md", "See [d](../design/decisions/foo-rfc.md).\n");
+    const { items } = await collectInboundLinks(cwd, TARGET);
+    await write("design/decisions/PRUNED.md", RECORDED); // ledger already has foo
+    const userEdit = "USER EDIT.\n";
+
+    const err = await applyPrune(
+      cwd,
+      { remove_file: TARGET, items, ledger: LEDGER },
+      { beforeSourceWrite: async () => { await write("docs/x.md", userEdit); } },
+    ).catch((e) => e);
+
+    expect(err).toBeInstanceOf(PruneWriteError);
+    expect((err as PruneWriteError).phase).toBe("rewrite_links");
+    // ledger was already recorded (no append) AND no source rewritten yet → nothing mutated this run
+    expect((err as PruneWriteError).partial_applied).toBe(false);
+    expect(await read("docs/x.md")).toBe(userEdit);
+    expect(await exists(TARGET)).toBe(true);
+  });
+
+  it("appended + a source edited before its write → rewrite_links, partial_applied TRUE (ledger landed this run)", async () => {
+    await write("docs/x.md", "See [d](../design/decisions/foo-rfc.md).\n");
+    const { items } = await collectInboundLinks(cwd, TARGET); // no pre-existing ledger → appended
+
+    const err = await applyPrune(
+      cwd,
+      { remove_file: TARGET, items, ledger: LEDGER },
+      { beforeSourceWrite: async () => { await write("docs/x.md", "EDIT.\n"); } },
+    ).catch((e) => e);
+
+    expect(err).toBeInstanceOf(PruneWriteError);
+    expect((err as PruneWriteError).phase).toBe("rewrite_links");
+    expect((err as PruneWriteError).partial_applied).toBe(true); // the ledger row was appended this run
+    expect(await readPrunedLedger(cwd)).toEqual(new Set([TARGET]));
+  });
+
+  it("already-recorded + no inbound links + record vanishes before delete → delete_record, partial_applied FALSE", async () => {
+    const { items } = await collectInboundLinks(cwd, TARGET); // no docs link
+    expect(items).toEqual([]);
+    await write("design/decisions/PRUNED.md", RECORDED);
+
+    const err = await applyPrune(
+      cwd,
+      { remove_file: TARGET, items, ledger: LEDGER },
+      { beforeDelete: async () => { await unlink(join(cwd, TARGET)); } },
+    ).catch((e) => e);
+
+    expect(err).toBeInstanceOf(PruneWriteError);
+    expect((err as PruneWriteError).phase).toBe("delete_record");
+    expect((err as PruneWriteError).partial_applied).toBe(false); // nothing mutated this run
+  });
+
+  it("already_recorded → ledger_row is the EXISTING row, not the freshly-generated one", async () => {
+    await write("docs/x.md", "See [d](../design/decisions/foo-rfc.md).\n");
+    const { items } = await collectInboundLinks(cwd, TARGET);
+    await write("design/decisions/PRUNED.md", RECORDED);
+
+    const res = await applyPrune(cwd, { remove_file: TARGET, items, ledger: LEDGER });
+    expect(res.ledger_action).toBe("already_recorded");
+    expect(res.ledger_row).toContain("P0-T9"); // the existing row's phase
+    expect(res.ledger_row).toContain("2026-01-01"); // the existing row's date
+    expect(res.ledger_row).not.toContain("P1-T1"); // NOT the freshly-generated row
+  });
+});

@@ -227,7 +227,7 @@ code-pact decision prune design/decisions/<name>.md --write --json
 #                     "target disappeared before unlink", ENOSPC, EACCES, EISDIR
 ```
 
-Because `--write` writes the ledger first and deletes the record last, `append_ledger` is always `partial_applied: false` (inbound docs untouched). When `partial_applied` is `true`, inspect the working tree (`git status` / `git diff`) before retrying — the ledger row and some link rewrites may already be committed; a re-run is **idempotent** (a decision already in `PRUNED.md` is not re-appended, so no duplicate tombstone). A `rewrite_links` failure from a concurrent edit means your edit is intact — re-run `decision prune` to rebuild the plan against it.
+`partial_applied` reports whether **this invocation** already changed the tree: the ledger was appended **this run** (not an idempotent already-recorded retry), or ≥1 source was rewritten. `append_ledger` is therefore always `false`; `rewrite_links` / `delete_record` are `true` **except** on an already-recorded retry that fails before any rewrite lands (then `false` — nothing was mutated this run, so there is nothing to inspect). When `partial_applied` is `true`, inspect the working tree (`git status` / `git diff`) before retrying — the ledger row and/or some link rewrites are already committed; a re-run is **idempotent** (a decision already in `PRUNED.md` is not re-appended). A `rewrite_links` failure from a concurrent edit means your edit is intact — re-run `decision prune` to rebuild the plan against it.
 
 ## `LOCK_HELD` from a lock-covered mutation
 Another `code-pact` mutation is in progress on the same project. The advisory write lock (`.code-pact/locks/write.lock`) is held by the process whose details appear in the envelope:

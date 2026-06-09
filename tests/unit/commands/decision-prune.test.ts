@@ -294,16 +294,18 @@ describe("runDecisionPruneWrite (--write execution)", () => {
     await writeDoneTaskPhase("design/decisions/foo-rfc.md");
     await mkdir(join(cwd, "docs"), { recursive: true });
     await writeFile(join(cwd, "docs", "x.md"), "See [d](../design/decisions/foo-rfc.md).\n");
-    // foo already in the ledger (a prior partial-failure prune)
+    // foo already in the ledger (a prior partial-failure prune), with a DIFFERENT date/phase
     await writeFile(
       join(cwd, "design", "decisions", "PRUNED.md"),
-      "# Pruned decisions\n\n| Decision | x |\n| --- | --- |\n| `design/decisions/foo-rfc.md` | P1-T1 | 2026-06-09 | git history |\n",
+      "# Pruned decisions\n\n| Decision | x |\n| --- | --- |\n| `design/decisions/foo-rfc.md` | P0-T9 | 2026-01-01 | manual |\n",
     );
 
     const outcome = await runDecisionPruneWrite(cwd, "design/decisions/foo-rfc.md", { now: NOW });
     expect(outcome.kind).toBe("applied");
     if (outcome.kind !== "applied") return;
     expect(outcome.ledger_action).toBe("already_recorded");
+    expect(outcome.ledger_row).toContain("2026-01-01"); // the EXISTING row, not today's
+    expect(outcome.ledger_row).not.toContain("2026-06-09");
     expect(serializeDecisionPruneWrite(outcome)).toMatchObject({ ledger_action: "already_recorded" });
     const human = formatDecisionPruneWriteHuman(outcome);
     expect(human).toContain("already recorded");

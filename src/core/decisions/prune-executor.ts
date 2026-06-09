@@ -394,11 +394,15 @@ export async function applyPrune(
   // clobber a concurrent edit with stale rewritten content; we use an EXISTING-file
   // replace (no parent re-creation) so a vanished source / parent fails too.
   const applied: AppliedRewrite[] = [];
+  // Has THIS invocation already mutated the tree? The ledger row counts only when
+  // it was appended this run (not an idempotent already-recorded retry), plus any
+  // source already rewritten. Drives the honest `partial_applied` on a later failure.
+  const mutationLanded = (): boolean => ledger_action === "appended" || applied.length > 0;
   for (const r of pending) {
     try {
       if (hooks.beforeSourceWrite) await hooks.beforeSourceWrite(r.rel);
     } catch (err) {
-      throw new PruneWriteError("rewrite_links", true, errDetail(err));
+      throw new PruneWriteError("rewrite_links", mutationLanded(), errDetail(err));
     }
     let current: string | null = null;
     try {
@@ -407,14 +411,14 @@ export async function applyPrune(
       current = null;
     }
     if (current !== r.original) {
-      throw new PruneWriteError("rewrite_links", true, `source changed after preflight: ${r.rel}`);
+      throw new PruneWriteError("rewrite_links", mutationLanded(), `source changed after preflight: ${r.rel}`);
     }
     try {
       // Pass the expected content so the helper re-checks just before rename,
       // narrowing the drift window to the temp-write gap.
       await atomicReplaceExistingText(r.abs, r.content, r.original);
     } catch (err) {
-      throw new PruneWriteError("rewrite_links", true, errDetail(err));
+      throw new PruneWriteError("rewrite_links", mutationLanded(), errDetail(err));
     }
     applied.push(...r.applied);
   }
@@ -431,14 +435,14 @@ export async function applyPrune(
     if (hooks.beforeDelete) await hooks.beforeDelete();
     const cur = await stat(absTarget);
     if (cur.ino !== targetIno || cur.dev !== targetDev || !cur.isFile()) {
-      throw new PruneWriteError("delete_record", true, "target changed under prune (refusing to unlink a replaced path)");
+      throw new PruneWriteError("delete_record", mutationLanded(), "target changed under prune (refusing to unlink a replaced path)");
     }
     await unlink(absTarget);
   } catch (err) {
     if (err instanceof PruneWriteError) throw err;
     throw new PruneWriteError(
       "delete_record",
-      true,
+      mutationLanded(),
       errDetail(err) === "ENOENT" ? "target disappeared before unlink" : errDetail(err),
     );
   }

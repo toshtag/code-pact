@@ -39,11 +39,13 @@ the plan, --write aborts with DECISION_PRUNE_PLAN_STALE (exit 2) and writes
 nothing — re-run to rebuild.
 
 Options:
-  --write   Execute the plan (delete + rewrite links + append ledger), under the
-            advisory write lock. Default is dry-run.
+  --write   Execute the plan under the advisory write lock, in least-harmful order:
+            append/verify the PRUNED.md ledger first, rewrite inbound links, then
+            delete the record last. Default is dry-run.
   --json    Emit the {ok,data} envelope. Dry-run data: mode, decision, eligible,
             blocks, referencing_tasks, plan, warnings. --write data: mode("write"),
-            decision, removed_file, link_rewrites_applied, ledger_row, warnings.
+            decision, removed_file, link_rewrites_applied, ledger_row, ledger_action,
+            warnings.
 
 Examples:
   code-pact decision prune design/decisions/foo-rfc.md

@@ -241,7 +241,8 @@ export function notEligibleMessage(result: DecisionPruneResult, json = false): s
  *    `DECISION_PRUNE_NOT_ELIGIBLE`, identical to dry-run).
  *  - `stale` — the working tree changed under the plan (a span no longer
  *    matches); the executor wrote nothing (the CLI emits `DECISION_PRUNE_PLAN_STALE`).
- *  - `applied` — the record was removed, inbound links rewritten, a ledger row appended.
+ *  - `applied` — inbound links rewritten and the record removed; the ledger was
+ *    either appended or already recorded (`ledger_action`).
  */
 export type DecisionPruneWriteOutcome =
   | { kind: "ineligible"; dryRun: DecisionPruneResult }
