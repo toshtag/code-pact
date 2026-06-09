@@ -21,17 +21,19 @@ decision in this project.
 - **Fail loudly, recover cleanly.** Validation errors block all writes.
   Partial state must never be silently created. Idempotent operations are preferred.
 
-- **Runtime truth lives in `.code-pact/state` (v2.0).** The control plane that
-  active tasks resolve against is `.code-pact/state` plus generated, deterministic
-  control snapshots. `design/` is the human authoring surface and *historical
-  working docs*: the roadmap and **active** phase YAML stay required, but
-  **completed** `design/phases/*.yaml` and **retired** `design/decisions/*.md` are
-  **ephemeral** — removable / `.gitignore`-able once their active-task-needed state
-  is snapshotted into `.code-pact/state` (otherwise the read paths fail closed).
-  Missing *archived/historical* docs are tolerated and resolved from the snapshot;
-  missing *active* control docs that are not yet snapshotted fail closed. This
-  **supersedes** the pre-v2.0 rule that "`design/` is the source of truth. Always."
-  Transition is governed by
+- **Runtime truth is moving to `.code-pact/state` (v2.0 target model — in
+  transition, not yet implemented).** The v2.0 target: active tasks resolve
+  against `.code-pact/state` plus generated, deterministic control snapshots;
+  `design/` becomes the human authoring surface and *historical working docs* —
+  **completed** `design/phases/*.yaml` and **retired** `design/decisions/*.md`
+  become **ephemeral** (removable / `.gitignore`-able once their
+  active-task-needed state is snapshotted; missing *archived/historical* docs
+  tolerated, missing *active* control docs fail closed). **Until the
+  snapshot/tombstone writers and readers land, current readers still require the
+  existing design files**: the roadmap, every roadmap-referenced phase YAML, and
+  live decision gates behave exactly as before — do not delete them yet. This
+  *direction* **supersedes** the pre-v2.0 rule that "`design/` is the source of
+  truth. Always."; the transition is governed by
   [`design/decisions/design-docs-ephemeral-directive.md`](decisions/design-docs-ephemeral-directive.md)
   (transitional — retire after v2.0 lands).
 

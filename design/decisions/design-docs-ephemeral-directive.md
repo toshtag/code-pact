@@ -61,6 +61,13 @@ A phase's YAML is **removable** only when its terminal state is established
 
 YAML `status: done` **alone is not sufficient** — it disappears with the file.
 
+**Authority order across deletion:** *before* deletion, `.code-pact/state/events/`
+may prove terminal state while the phase YAML still supplies the task set; *after*
+deletion, the **validated archive snapshot is authoritative** for phase membership,
+task ids, and terminal status — progress events alone **cannot reconstruct the full
+task set** of a deleted phase (a task with zero events is invisible to the ledger),
+so "events exist" is never by itself a license to delete the YAML.
+
 ## Acceptance criteria (v2.0 — locked)
 
 - **A1.** An active task that **references or depends on an archived phase / a
@@ -91,15 +98,29 @@ YAML `status: done` **alone is not sufficient** — it disappears with the file.
 
 0. This directive (foundation, reviewed first) + the `constitution` update.
 1. Recovery report / inventory (continue / discard / quarantine). ✅ done.
-2a. **Phase read seam** — route every `loadPhase` site through one seam
-   (`src/core/plan/load-phase.ts`). Pure, non-destructive, behavior-identical.
-   **✅ done.** The single place layers 4 + 6 hook phase archive-fallback into.
+2a. **`loadPhase` dedupe** — the 8 byte-identical `loadPhase` copies (+ 2
+   re-export importers) now route through `src/core/plan/load-phase.ts`. Pure,
+   behavior-identical. **✅ done — but this is NOT the complete phase read seam.**
+   Phase YAML is still read *outside* the seam by: `core/plan/resolve-task.ts`
+   (the eager all-phases loop — the very path that breaks on a hand-`rm` today),
+   `core/plan/state.ts` (`loadPlanState` strict / `collectPlanArtifacts`
+   lenient), `commands/phase-reconcile.ts`, `core/adapters/claude.ts`, and the
+   read-modify-write sites (`core/plan/sync-paths.ts`,
+   `core/finalize/safe-write.ts`) which read raw text under their own contract.
+   **Archive-fallback can NOT yet be inserted in one place.**
 2b. **Decision read seam** — consolidate the decision-read entry points
    (`loadDecisions` / `loadDeclaredDecisions` in `core/pack/loaders.ts`, the
    `decision_refs` + `PRUNED.md` resolution in `core/plan/checks/path-fields.ts`)
    on top of the already-shared `resolveDecisionGate` / `classifyAdr` in
    `core/decisions/adr.ts`, so layer 5 has ONE place to add `.code-pact/state`
-   tombstone-fallback. **NOT done** (this PR ships 2a only).
+   tombstone-fallback. **NOT done.**
+2c. **Task/plan-state phase read seam** — move the remaining strict
+   read-and-validate sites (`resolve-task.ts`, `loadPlanState`,
+   `phase-reconcile.ts`, `adapters/claude.ts`) onto the shared seam, and give
+   the lenient / read-modify-write readers (`collectPlanArtifacts`,
+   `sync-paths`, `safe-write`, doctor's validating reader) an explicit
+   archive-awareness contract of their own. Only after **2b + 2c** does "insert
+   archive-fallback at the seam" become true. **NOT done.**
 3. **Snapshot + tombstone writers** —
    `.code-pact/state/archive/phases/<phase-id>.json` (one-phase-one-file) + a Zod
    schema, and the retired-decision tombstone under `.code-pact/state/`
@@ -113,9 +134,18 @@ YAML `status: done` **alone is not sufficient** — it disappears with the file.
    control docs fail-closed.*
 7. **`phase archive` + hand-delete** — the destructive verb (dry-run + `--write` +
    stale-plan guard + write lock, least-harmful ordering) **and** the A2 / A3 / A7
-   integration fixture that `rm`s the files manually. Like `decision prune`'s
-   link-collector, the delete path must clear/rewrite **inbound doc-links** to the
-   removed decisions/phases so `check:docs` stays green (A7).
+   integration fixture that `rm`s the files manually.
+   **Doc-link strategy (decided, two halves):**
+   (i) the **retire/snapshot step** (step 3's writers — the `decision prune`
+   link-collector precedent) rewrites or clears **inbound doc-links at retire
+   time**, so a *later* hand-`rm` leaves nothing dangling; **and**
+   (ii) **`check-doc-links` learns the tombstone** — a link whose target is
+   recorded in the `.code-pact/state` tombstone resolves as *retired*, not
+   *broken* (the safety net when files are hand-deleted before a link sweep).
+   **This is a substantial work item, not a footnote:** this repo's own `docs/` +
+   RFC cross-references deep-link `design/decisions/*.md` heavily (the checker
+   resolves 800+ relative links today), and A3/A7 cannot pass without both
+   halves. Budget it as its own reviewed layer inside step 7.
 
 ## Quarantined (do not accrete v2.0 direction from these)
 

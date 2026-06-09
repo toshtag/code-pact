@@ -8,9 +8,13 @@ import { Phase } from "../schemas/phase.ts";
 // This exact body used to be byte-duplicated in ~8 command/core files (pack,
 // verify, progress, recommend, task-prepare, task-add, phase-import, phase).
 // Consolidating it here mirrors the PR0 `loadRoadmap` consolidation
-// (control-plane-v2-rfc) one level down, and gives the design-docs-ephemeral
-// directive ONE place to teach archive-fallback (resolve a removed *completed*
-// phase from its `.code-pact/state` snapshot) instead of ~10 independent reads.
+// (control-plane-v2-rfc) one level down — the FIRST step (2a) toward the
+// design-docs-ephemeral directive's single phase-read seam. NOT the whole seam
+// yet: resolve-task.ts, plan/state.ts (loadPlanState / collectPlanArtifacts),
+// phase-reconcile.ts, adapters/claude.ts, and the read-modify-write sites
+// (sync-paths.ts, finalize/safe-write.ts) still read phase YAML on their own
+// (directive build-step 2c). Archive-fallback lands here only after 2c unifies
+// the strict readers.
 //
 // Fail-closed by construction: a missing or invalid phase file throws (ENOENT /
 // ZodError). A roadmap-referenced phase is a control-plane input, not optional
