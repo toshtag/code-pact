@@ -21,8 +21,19 @@ decision in this project.
 - **Fail loudly, recover cleanly.** Validation errors block all writes.
   Partial state must never be silently created. Idempotent operations are preferred.
 
-- **`design/` is the source of truth.** Always. `.code-pact/` is internal state
-  that agents read but humans can audit. Nothing critical lives only in `.code-pact/`.
+- **Runtime truth lives in `.code-pact/state` (v2.0).** The control plane that
+  active tasks resolve against is `.code-pact/state` plus generated, deterministic
+  control snapshots. `design/` is the human authoring surface and *historical
+  working docs*: the roadmap and **active** phase YAML stay required, but
+  **completed** `design/phases/*.yaml` and **retired** `design/decisions/*.md` are
+  **ephemeral** — removable / `.gitignore`-able once their active-task-needed state
+  is snapshotted into `.code-pact/state` (otherwise the read paths fail closed).
+  Missing *archived/historical* docs are tolerated and resolved from the snapshot;
+  missing *active* control docs that are not yet snapshotted fail closed. This
+  **supersedes** the pre-v2.0 rule that "`design/` is the source of truth. Always."
+  Transition is governed by
+  [`design/decisions/design-docs-ephemeral-directive.md`](decisions/design-docs-ephemeral-directive.md)
+  (transitional — retire after v2.0 lands).
 
 - **Small surfaces, clear contracts.** Each command does one thing.
   Options that modify behavior must be explicit flags — no ambient magic.
