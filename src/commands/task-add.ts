@@ -1,6 +1,6 @@
-import { readFile } from "node:fs/promises";
+import { loadPhase } from "../core/plan/load-phase.ts";
 import { join } from "node:path";
-import { parse as parseYaml, stringify as toYaml } from "yaml";
+import { stringify as toYaml } from "yaml";
 import { atomicWriteText } from "../io/atomic-text.ts";
 import { resolvePhaseInRoadmap } from "../core/plan/resolve-phase.ts";
 import { Phase } from "../core/schemas/phase.ts";
@@ -64,11 +64,6 @@ const TASK_TYPE_LABELS: Record<string, string> = {
 };
 
 const TASK_TYPE_VALUES = TaskType.options;
-
-async function loadPhase(cwd: string, relPath: string): Promise<Phase> {
-  const raw = await readFile(join(cwd, relPath), "utf8");
-  return Phase.parse(parseYaml(raw) as unknown);
-}
 
 function nextTaskId(phaseId: string, existing: Task[]): string {
   const n = existing.length + 1;

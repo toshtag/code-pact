@@ -5,7 +5,8 @@ import { writeEventFile } from "../core/progress/events-io.ts";
 import { resolveEventAuthor } from "../core/progress/author.ts";
 import { deriveTaskState } from "../core/progress/task-state.ts";
 import { resolveTaskInRoadmap } from "../core/plan/resolve-task.ts";
-import { checkDecision, loadPhase, type CheckResult } from "./verify.ts";
+import { loadPhase } from "../core/plan/load-phase.ts";
+import { checkDecision, type CheckResult } from "./verify.ts";
 import type { ConsideredAcceptance } from "../core/decisions/adr.ts";
 
 export type TaskRecordDoneOptions = {

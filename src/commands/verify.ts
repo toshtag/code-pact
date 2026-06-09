@@ -1,7 +1,5 @@
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { loadPhase } from "../core/plan/load-phase.ts";
 import { spawn } from "node:child_process";
-import { parse as parseYaml } from "yaml";
 import { resolvePhaseInRoadmap } from "../core/plan/resolve-phase.ts";
 import { Phase } from "../core/schemas/phase.ts";
 import { Task } from "../core/schemas/task.ts";
@@ -47,11 +45,6 @@ export type VerifyResult = {
 // ---------------------------------------------------------------------------
 // Loaders
 // ---------------------------------------------------------------------------
-
-export async function loadPhase(cwd: string, path: string): Promise<Phase> {
-  const raw = await readFile(join(cwd, path), "utf8");
-  return Phase.parse(parseYaml(raw) as unknown);
-}
 
 async function loadProgressLog(cwd: string): Promise<ProgressLog> {
   return (await loadMergedProgress(cwd)).log;
