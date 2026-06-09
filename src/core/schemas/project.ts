@@ -25,6 +25,16 @@ export const CollaborationConfig = z.object({
 });
 export type CollaborationConfig = z.infer<typeof CollaborationConfig>;
 
+// What a shipped (`done`) decision record becomes — the maintainer's retention
+// preference (decision-lifecycle RFC § 4). `keep-full` is the backward-compatible
+// default (today's ADR-forever behavior); `prune-on-ship` retires eligible records
+// via `decision prune`; `compress-on-ship` compresses them (the transform lands in
+// a later layer). The policy is surfaced/overridable on `decision prune --policy`;
+// it never auto-deletes (deletion stays an explicit `decision prune` action).
+export const DECISION_RETENTION_VALUES = ["keep-full", "compress-on-ship", "prune-on-ship"] as const;
+export const DecisionRetention = z.enum(DECISION_RETENTION_VALUES);
+export type DecisionRetention = z.infer<typeof DecisionRetention>;
+
 export const Project = z.object({
   name: z.string().min(1),
   version: z.string().min(1),
@@ -32,5 +42,10 @@ export const Project = z.object({
   default_agent: PlanId,
   agents: z.array(AgentRef).min(1),
   collaboration: CollaborationConfig.optional(),
+  // Optional + no schema default: absence is backward-compatible (new project.yaml
+  // need not carry it), and the effective default (`keep-full`) is owned by the
+  // runtime reader. The schema's job here is to REJECT an out-of-enum value so
+  // `validate` / `doctor` flag a typo'd policy.
+  decision_retention: DecisionRetention.optional(),
 });
 export type Project = z.infer<typeof Project>;

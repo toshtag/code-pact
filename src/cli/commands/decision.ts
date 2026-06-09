@@ -7,6 +7,7 @@
 import { strictParse, ConfigError } from "../../lib/argv.ts";
 import { type Locale } from "../../i18n/index.ts";
 import { emitOk, emitError, withWriteLock } from "../util.ts";
+import { DECISION_RETENTION_VALUES, type DecisionRetention } from "../../core/schemas/project.ts";
 import {
   runDecisionPrune,
   runDecisionPruneWrite,
@@ -43,9 +44,13 @@ Options:
   --write   Execute the plan under the advisory write lock, in least-harmful order:
             append/verify the PRUNED.md ledger first, rewrite inbound links, then
             delete the record last. Default is dry-run.
+  --policy <v>  Override the project's decision_retention for this invocation:
+            keep-full | compress-on-ship | prune-on-ship. Surfaced in the envelope
+            as data.policy / data.policy_source; does not change what is pruned.
   --json    Emit the {ok,data} envelope. Dry-run data: mode, decision, eligible,
-            blocks, referencing_tasks, plan, warnings. --write data: mode("write"),
-            decision, removed_file, link_rewrites_applied, ledger_row, ledger_action,
+            blocks, referencing_tasks, plan, policy, policy_source, warnings.
+            --write data: mode("write"), decision, removed_file,
+            link_rewrites_applied, ledger_row, ledger_action, policy, policy_source,
             warnings.
 
 Examples:
@@ -90,7 +95,7 @@ export async function cmdDecision(
       ({ values, positionals } = strictParse(
         "decision prune",
         rest,
-        { json: { type: "boolean" }, write: { type: "boolean" } },
+        { json: { type: "boolean" }, write: { type: "boolean" }, policy: { type: "string" } },
         { allowPositionals: true },
       ));
     } catch (err) {
@@ -111,6 +116,14 @@ export async function cmdDecision(
       emitError(json, "CONFIG_ERROR", "decision prune takes exactly one decision path");
       return 2;
     }
+    let policyOverride: DecisionRetention | undefined;
+    if (values.policy !== undefined) {
+      if (!(DECISION_RETENTION_VALUES as readonly string[]).includes(values.policy as string)) {
+        emitError(json, "CONFIG_ERROR", `--policy must be one of: ${DECISION_RETENTION_VALUES.join(" | ")}`);
+        return 2;
+      }
+      policyOverride = values.policy as DecisionRetention;
+    }
 
     const cwd = process.cwd();
 
@@ -119,7 +132,7 @@ export async function cmdDecision(
       // every other destructive command. The verdict is rebuilt INSIDE the lock
       // so the plan reflects the tree at apply time.
       return withWriteLock(cwd, `decision prune ${target} --write`, json, async () => {
-        const outcome = await runDecisionPruneWrite(cwd, target, { now: new Date() });
+        const outcome = await runDecisionPruneWrite(cwd, target, { now: new Date(), policyOverride });
         if (outcome.kind === "ineligible") {
           emitError(json, "DECISION_PRUNE_NOT_ELIGIBLE", notEligibleMessage(outcome.dryRun, json), {
             data: serializeDecisionPrune(outcome.dryRun),
@@ -145,7 +158,7 @@ export async function cmdDecision(
       });
     }
 
-    const result = await runDecisionPrune(cwd, target);
+    const result = await runDecisionPrune(cwd, target, { policyOverride });
 
     if (result.eligible) {
       if (json) emitOk(serializeDecisionPrune(result));

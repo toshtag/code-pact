@@ -13,6 +13,11 @@ import {
   type PruneStaleSpan,
   type PruneWritePhase,
 } from "../core/decisions/prune-executor.ts";
+import {
+  resolveRetention,
+  type DecisionRetention,
+  type RetentionSource,
+} from "../core/decisions/retention.ts";
 
 export type { LinkRewriteItem, AppliedRewrite, PruneStaleSpan, PruneWritePhase };
 
@@ -54,6 +59,9 @@ export type DecisionPruneResult = {
   evaluation: PruneEvaluation;
   /** Present only when eligible (there is something to plan). */
   plan: PrunePlan | null;
+  /** The effective retention policy in force, and where it came from. */
+  policy: DecisionRetention;
+  policy_source: RetentionSource;
   warnings: string[];
 };
 
@@ -61,7 +69,9 @@ export type DecisionPruneResult = {
 export async function runDecisionPrune(
   cwd: string,
   target: string,
+  opts: { policyOverride?: DecisionRetention } = {},
 ): Promise<DecisionPruneResult> {
+  const { policy, source: policy_source } = await resolveRetention(cwd, opts.policyOverride);
   const { state, fallbackPhases, fileIssues, skippedChecks } =
     await collectPlanArtifacts(cwd);
   const phases = state?.phases ?? fallbackPhases;
@@ -119,6 +129,11 @@ export async function runDecisionPrune(
   evaluation.eligible = evaluation.blocks.length === 0;
 
   const warnings: string[] = [];
+  if (policy_source === "invalid_project") {
+    warnings.push(
+      "project.yaml decision_retention is set but not one of keep-full | compress-on-ship | prune-on-ship — using keep-full for this invocation. Fix it (validate / doctor report it as a SCHEMA_ERROR).",
+    );
+  }
   if (evaluation.eligible && evaluation.referencing_tasks.length === 0) {
     warnings.push(
       "No task references this decision. Pruning may be safe, but prune cannot prove the decision was shipped through a task reference — confirm it is genuinely retired, not an unconnected record.",
@@ -140,6 +155,8 @@ export async function runDecisionPrune(
     eligible: evaluation.eligible,
     evaluation,
     plan,
+    policy,
+    policy_source,
     warnings,
   };
 }
@@ -197,6 +214,7 @@ export function formatDecisionPruneHuman(result: DecisionPruneResult): string {
     lines.push(`decision prune (dry-run): ${target} — NOT ELIGIBLE`);
     for (const b of result.evaluation.blocks) lines.push(`  ✗ ${describeBlock(b)}`);
   }
+  lines.push(`  retention policy: ${result.policy} (${result.policy_source})`);
   for (const w of result.warnings) lines.push(`  ⚠ ${w}`);
   return lines.join("\n");
 }
@@ -210,6 +228,8 @@ export function serializeDecisionPrune(result: DecisionPruneResult): Record<stri
     blocks: result.evaluation.blocks,
     referencing_tasks: result.evaluation.referencing_tasks,
     plan: result.plan,
+    policy: result.policy,
+    policy_source: result.policy_source,
     warnings: result.warnings,
   };
 }
@@ -261,6 +281,8 @@ export type DecisionPruneWriteOutcome =
       link_rewrites_applied: AppliedRewrite[];
       ledger_row: string;
       ledger_action: "appended" | "already_recorded";
+      policy: DecisionRetention;
+      policy_source: RetentionSource;
       warnings: string[];
     };
 
@@ -279,9 +301,9 @@ function formatPrunedDate(now: Date): string {
 export async function runDecisionPruneWrite(
   cwd: string,
   target: string,
-  opts: { now: Date; hooks?: ApplyPruneHooks },
+  opts: { now: Date; hooks?: ApplyPruneHooks; policyOverride?: DecisionRetention },
 ): Promise<DecisionPruneWriteOutcome> {
-  const dryRun = await runDecisionPrune(cwd, target);
+  const dryRun = await runDecisionPrune(cwd, target, { policyOverride: opts.policyOverride });
   if (!dryRun.eligible || dryRun.plan === null || dryRun.decision === null) {
     return { kind: "ineligible", dryRun };
   }
@@ -311,6 +333,8 @@ export async function runDecisionPruneWrite(
       link_rewrites_applied: applied.link_rewrites_applied,
       ledger_row: applied.ledger_row,
       ledger_action: applied.ledger_action,
+      policy: dryRun.policy,
+      policy_source: dryRun.policy_source,
       warnings: dryRun.warnings,
     };
   } catch (err) {
@@ -341,6 +365,8 @@ export function serializeDecisionPruneWrite(
     link_rewrites_applied: outcome.link_rewrites_applied,
     ledger_row: outcome.ledger_row,
     ledger_action: outcome.ledger_action,
+    policy: outcome.policy,
+    policy_source: outcome.policy_source,
     warnings: outcome.warnings,
   };
 }
@@ -366,6 +392,7 @@ export function formatDecisionPruneWriteHuman(
       ? `  ledger: appended to design/decisions/PRUNED.md`
       : `  ledger: already recorded in design/decisions/PRUNED.md (not re-appended)`,
   );
+  lines.push(`  retention policy: ${outcome.policy} (${outcome.policy_source})`);
   for (const w of outcome.warnings) lines.push(`  ⚠ ${w}`);
   return lines.join("\n");
 }

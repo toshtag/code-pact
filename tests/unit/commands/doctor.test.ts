@@ -43,6 +43,17 @@ describe("runDoctor — healthy project (fresh init)", () => {
     const issue = result.issues.find((i) => i.code === "LOCAL_NOT_GITIGNORED");
     expect(issue).toBeUndefined();
   });
+
+  it("flags an out-of-enum decision_retention as a SCHEMA_ERROR (validate/doctor recognize the policy field)", async () => {
+    const projectPath = join(dir, ".code-pact", "project.yaml");
+    const current = await readFile(projectPath, "utf8");
+    await writeFile(projectPath, `${current.trimEnd()}\ndecision_retention: prun-on-ship\n`); // typo
+    const result = await runDoctor(dir);
+    expect(result.ok).toBe(false);
+    const schemaErr = result.issues.find((i) => i.code === "SCHEMA_ERROR" && i.severity === "error");
+    expect(schemaErr).toBeDefined();
+    expect(schemaErr?.message).toContain("project.yaml failed schema validation");
+  });
 });
 
 describe("runDoctor — project-a fixture", () => {

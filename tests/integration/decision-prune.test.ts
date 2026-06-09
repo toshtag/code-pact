@@ -1,6 +1,7 @@
 // `decision prune` CLI contract — built-CLI integration.
 // PR-C1b: dry-run public command, JSON envelopes, exit codes.
-// PR-C2: --write executes the plan (delete + rewrite links + append ledger).
+// PR-C2: --write executes the plan (append ledger → rewrite links → delete record last).
+// PR-D1: decision_retention policy surfaced as data.policy / data.policy_source; --policy override.
 
 import { describe, it, expect, beforeAll, afterEach } from "vitest";
 import { mkdir, writeFile, readFile, readdir } from "node:fs/promises";
@@ -210,6 +211,30 @@ describe("decision prune — CLI (dry-run)", () => {
     expect(res.code).toBe(0);
     expect(res.stdout).toContain("Usage:");
     expect(res.stdout).toContain("prune");
+  });
+
+  it("dry-run surfaces the retention policy (default keep-full / default) in the envelope", async () => {
+    const p = await project(ACCEPTED, "done");
+    const res = p.run(["decision", "prune", "design/decisions/foo-rfc.md", "--json"]);
+    const env = expectJsonOk<{ policy: string; policy_source: string }>(res);
+    expect(env.data.policy).toBe("keep-full");
+    expect(env.data.policy_source).toBe("default");
+  });
+
+  it("--policy overrides the policy for the invocation (source 'override')", async () => {
+    const p = await project(ACCEPTED, "done");
+    const res = p.run(["decision", "prune", "design/decisions/foo-rfc.md", "--policy", "prune-on-ship", "--json"]);
+    const env = expectJsonOk<{ policy: string; policy_source: string }>(res);
+    expect(res.code).toBe(0);
+    expect(env.data.policy).toBe("prune-on-ship");
+    expect(env.data.policy_source).toBe("override");
+  });
+
+  it("an out-of-enum --policy → exit 2, CONFIG_ERROR", async () => {
+    const p = await project(ACCEPTED, "done");
+    const res = p.run(["decision", "prune", "design/decisions/foo-rfc.md", "--policy", "bogus", "--json"]);
+    expect(expectJsonErr(res).error.code).toBe("CONFIG_ERROR");
+    expect(res.code).toBe(2);
   });
 
   it("`decision prune --help` → Usage / Options / Examples / --json, exit 0", async () => {
