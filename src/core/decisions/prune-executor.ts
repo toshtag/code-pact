@@ -1,6 +1,6 @@
 import { readFile, stat, unlink } from "node:fs/promises";
 import { resolveWithinProject } from "../path-safety.ts";
-import { atomicWriteText } from "../../io/atomic-text.ts";
+import { atomicWriteText, atomicReplaceExistingText } from "../../io/atomic-text.ts";
 import {
   collectInboundLinks,
   type InboundLinkScan,
@@ -193,7 +193,27 @@ function errDetail(err: unknown): string {
   return code ?? (err instanceof Error ? err.message : String(err));
 }
 
-type PendingRewrite = { abs: string; content: string; applied: AppliedRewrite[] };
+type PendingRewrite = {
+  rel: string;
+  abs: string;
+  /** The exact bytes read in preflight (1c) — the source is refused if it no longer matches at write time. */
+  original: string;
+  /** The rewritten bytes to commit. */
+  content: string;
+  applied: AppliedRewrite[];
+};
+
+/**
+ * Test-only seams to drive the commit-phase failure paths deterministically
+ * (a concurrent edit, a vanished record) without depending on OS permissions.
+ * Never set in production — `runDecisionPruneWrite` passes none.
+ */
+export type ApplyPruneHooks = {
+  /** Invoked just before a source file's write-time re-read (e.g. mutate it to simulate a concurrent edit). */
+  beforeSourceWrite?: (rel: string) => Promise<void>;
+  /** Invoked just before the record's delete (e.g. remove it to simulate a concurrent unlink). */
+  beforeDelete?: () => Promise<void>;
+};
 
 /**
  * Execute a `decision prune` plan. The plan MUST come from the same collector
@@ -223,6 +243,7 @@ type PendingRewrite = { abs: string; content: string; applied: AppliedRewrite[] 
 export async function applyPrune(
   cwd: string,
   input: PruneApplyInput,
+  hooks: ApplyPruneHooks = {},
 ): Promise<PruneApplyResult> {
   // ── Phase 1: preflight — NO writes ──
 
@@ -311,7 +332,7 @@ export async function applyPrune(
         after: e.after,
       });
     }
-    pending.push({ abs, content: out, applied: appliedHere });
+    pending.push({ rel: file, abs, original: content, content: out, applied: appliedHere });
   }
   if (stale.length > 0) throw new PrunePlanStaleError(stale);
 
@@ -334,11 +355,29 @@ export async function applyPrune(
     throw new PruneWriteError("append_ledger", false, errDetail(err));
   }
 
-  // 2b. Rewrite inbound links (atomic per file; content was computed in 1c).
+  // 2b. Rewrite inbound links. Re-read each source IMMEDIATELY before writing and
+  // refuse if it changed since the preflight read (a concurrent edit by an editor
+  // / git / another tool — which the advisory lock does NOT guard). We never
+  // clobber a concurrent edit with stale rewritten content; we use an EXISTING-file
+  // replace (no parent re-creation) so a vanished source / parent fails too.
   const applied: AppliedRewrite[] = [];
   for (const r of pending) {
     try {
-      await atomicWriteText(r.abs, r.content);
+      if (hooks.beforeSourceWrite) await hooks.beforeSourceWrite(r.rel);
+    } catch (err) {
+      throw new PruneWriteError("rewrite_links", true, errDetail(err));
+    }
+    let current: string | null = null;
+    try {
+      current = await readFile(r.abs, "utf8");
+    } catch {
+      current = null;
+    }
+    if (current !== r.original) {
+      throw new PruneWriteError("rewrite_links", true, `source changed after preflight: ${r.rel}`);
+    }
+    try {
+      await atomicReplaceExistingText(r.abs, r.content);
     } catch (err) {
       throw new PruneWriteError("rewrite_links", true, errDetail(err));
     }
@@ -350,10 +389,11 @@ export async function applyPrune(
   // validated in phase 1a (inode+device) — so a concurrent swap of the path for
   // a different file / symlink / special file cannot make us unlink the wrong
   // object. (This narrows the 1a→2c TOCTOU window to one syscall; POSIX has no
-  // portable atomic unlink-if-inode, so it is not fully closed.) ENOENT means the
-  // record is already gone (the goal), with ledger + links committed — consistent,
-  // not a failure.
+  // portable atomic unlink-if-inode, so it is not fully closed.) An ENOENT here
+  // means the record disappeared before WE deleted it — code-pact did not complete
+  // the delete, so it is reported honestly, never claimed as a removal.
   try {
+    if (hooks.beforeDelete) await hooks.beforeDelete();
     const cur = await stat(absTarget);
     if (cur.ino !== targetIno || cur.dev !== targetDev || !cur.isFile()) {
       throw new PruneWriteError("delete_record", true, "target changed under prune (refusing to unlink a replaced path)");
@@ -361,7 +401,11 @@ export async function applyPrune(
     await unlink(absTarget);
   } catch (err) {
     if (err instanceof PruneWriteError) throw err;
-    if (errDetail(err) !== "ENOENT") throw new PruneWriteError("delete_record", true, errDetail(err));
+    throw new PruneWriteError(
+      "delete_record",
+      true,
+      errDetail(err) === "ENOENT" ? "target disappeared before unlink" : errDetail(err),
+    );
   }
 
   applied.sort((a, b) =>

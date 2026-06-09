@@ -223,3 +223,47 @@ describe("applyPrune — ledger-first ordering & write failures (ChatGPT blocker
     expect(await exists(TARGET)).toBe(true);
   });
 });
+
+describe("applyPrune — concurrent edit / removal during commit (ChatGPT round 3)", () => {
+  it("a source edited AFTER preflight is NOT clobbered → write_failed(rewrite_links), edit survives", async () => {
+    await write("docs/x.md", "See [d](../design/decisions/foo-rfc.md).\n");
+    const { items } = await collectInboundLinks(cwd, TARGET);
+    const userEdit = "USER EDIT after preflight — must not be clobbered.\n";
+
+    // The hook fires just before the write-time re-read, simulating an editor /
+    // git checkout touching the same doc between preflight and the rewrite.
+    const err = await applyPrune(
+      cwd,
+      { remove_file: TARGET, items, ledger: LEDGER },
+      { beforeSourceWrite: async () => { await write("docs/x.md", userEdit); } },
+    ).catch((e) => e);
+
+    expect(err).toBeInstanceOf(PruneWriteError);
+    expect((err as PruneWriteError).phase).toBe("rewrite_links");
+    expect((err as PruneWriteError).partial_applied).toBe(true);
+    expect((err as PruneWriteError).detail).toContain("source changed after preflight");
+    // The concurrent edit survived — stale rewritten content never overwrote it.
+    expect(await read("docs/x.md")).toBe(userEdit);
+    expect(await exists(TARGET)).toBe(true); // record not deleted
+    expect(await readPrunedLedger(cwd)).toEqual(new Set([TARGET])); // ledger committed first
+  });
+
+  it("the record removed before the delete step → write_failed(delete_record), reported honestly", async () => {
+    await write("docs/x.md", "See [d](../design/decisions/foo-rfc.md).\n");
+    const { items } = await collectInboundLinks(cwd, TARGET);
+
+    const err = await applyPrune(
+      cwd,
+      { remove_file: TARGET, items, ledger: LEDGER },
+      { beforeDelete: async () => { await unlink(join(cwd, TARGET)); } },
+    ).catch((e) => e);
+
+    expect(err).toBeInstanceOf(PruneWriteError);
+    expect((err as PruneWriteError).phase).toBe("delete_record");
+    expect((err as PruneWriteError).partial_applied).toBe(true);
+    expect((err as PruneWriteError).detail).toContain("disappeared before unlink");
+    // ledger + link rewrites were committed before the (failed) delete.
+    expect(await readPrunedLedger(cwd)).toEqual(new Set([TARGET]));
+    expect(await read("docs/x.md")).toBe("See d.\n");
+  });
+});

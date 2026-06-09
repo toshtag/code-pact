@@ -211,17 +211,23 @@ code-pact decision prune design/decisions/<name>.md --write --json
 Recovery: re-run `decision prune` (dry-run first if you want to inspect the rebuilt plan). The collector re-reads the current tree, so a fresh `--write` reflects the edit. This is a safety abort, not a failure — nothing was left half-applied. The target record itself disappearing or becoming a directory between plan and apply is the same kind of drift and also lands here.
 
 ## `DECISION_PRUNE_WRITE_FAILED` from `decision prune --write`
-A disk write failed **after** preflight passed — distinct from `PLAN_STALE` (a plan/tree mismatch caught before any write). This is an actual I/O failure: an unreadable ledger caught in preflight (zero writes), or a commit-time `rename`/`unlink` error (disk full, permissions, a path that became a directory).
+A write could not complete **after** preflight passed — distinct from `PLAN_STALE` (a plan/tree mismatch caught before any write). Causes:
+
+- an unreadable ledger caught in preflight (zero writes);
+- a **source edited since preflight** — the rewrite is refused so your edit is never clobbered (`phase: rewrite_links`);
+- the **record disappearing** before the delete step — code-pact did not remove it, so it says so instead of claiming a removal (`phase: delete_record`);
+- a commit-time `rename`/`unlink` I/O error (disk full, permissions, a path that became a directory).
 
 ```sh
 code-pact decision prune design/decisions/<name>.md --write --json
 # data → { mode: "write", decision, phase, partial_applied, message }
 #   phase           → append_ledger | rewrite_links | delete_record
 #   partial_applied → false = nothing landed; true = some changes already applied
-#   message         → the underlying error (e.g. ENOSPC, EACCES, EISDIR)
+#   message         → e.g. "source changed after preflight: docs/x.md",
+#                     "target disappeared before unlink", ENOSPC, EACCES, EISDIR
 ```
 
-Because `--write` writes the ledger first and deletes the record last, a ledger failure is always `partial_applied: false` (inbound docs untouched). If `partial_applied` is `true`, inspect the working tree (`git status` / `git diff`) before retrying — some link rewrites and/or the ledger row may already be committed; a re-run is idempotent (a duplicate ledger row collapses on read).
+Because `--write` writes the ledger first and deletes the record last, `append_ledger` is always `partial_applied: false` (inbound docs untouched). When `partial_applied` is `true`, inspect the working tree (`git status` / `git diff`) before retrying — the ledger row and some link rewrites may already be committed; a re-run is idempotent (a duplicate ledger row collapses on read). A `rewrite_links` failure from a concurrent edit means your edit is intact — re-run `decision prune` to rebuild the plan against it.
 
 ## `LOCK_HELD` from a lock-covered mutation
 Another `code-pact` mutation is in progress on the same project. The advisory write lock (`.code-pact/locks/write.lock`) is held by the process whose details appear in the envelope:
