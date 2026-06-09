@@ -129,6 +129,11 @@ export async function runDecisionPrune(
   evaluation.eligible = evaluation.blocks.length === 0;
 
   const warnings: string[] = [];
+  if (policy_source === "invalid_project") {
+    warnings.push(
+      "project.yaml decision_retention is set but not one of keep-full | compress-on-ship | prune-on-ship — using keep-full for this invocation. Fix it (validate / doctor report it as a SCHEMA_ERROR).",
+    );
+  }
   if (evaluation.eligible && evaluation.referencing_tasks.length === 0) {
     warnings.push(
       "No task references this decision. Pruning may be safe, but prune cannot prove the decision was shipped through a task reference — confirm it is genuinely retired, not an unconnected record.",

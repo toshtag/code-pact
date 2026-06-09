@@ -35,9 +35,9 @@ describe("readDecisionRetention", () => {
     expect(await readDecisionRetention(cwd)).toEqual({ policy: "keep-full", source: "default" });
   });
 
-  it("is tolerant: an out-of-enum value → keep-full / 'default' (validate/doctor flag it separately)", async () => {
-    await writeProject(`${BASE}decision_retention: bogus\n`);
-    expect(await readDecisionRetention(cwd)).toEqual({ policy: "keep-full", source: "default" });
+  it("a PRESENT but out-of-enum value → keep-full / 'invalid_project' (honest, not silent default)", async () => {
+    await writeProject(`${BASE}decision_retention: prun-on-ship\n`); // typo
+    expect(await readDecisionRetention(cwd)).toEqual({ policy: "keep-full", source: "invalid_project" });
   });
 
   it("is tolerant: unparseable YAML → keep-full / 'default'", async () => {

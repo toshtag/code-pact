@@ -440,6 +440,16 @@ describe("decision prune — retention policy surfacing (PR-D1)", () => {
     expect(res.policy_source).toBe("default");
   });
 
+  it("a typo'd project policy → keep-full / invalid_project + a warning (honest reporting)", async () => {
+    await writeDecision("foo-rfc.md");
+    await writeValidEmptyPlan();
+    await writeProjectRetention("prun-on-ship"); // typo
+    const res = await runDecisionPrune(cwd, "design/decisions/foo-rfc.md");
+    expect(res.policy).toBe("keep-full");
+    expect(res.policy_source).toBe("invalid_project");
+    expect(res.warnings.some((w) => w.includes("decision_retention is set but not one of"))).toBe(true);
+  });
+
   it("--policy override wins and is sourced 'override' (dry-run + write)", async () => {
     await writeDecision("foo-rfc.md");
     await writeDoneTaskPhase("design/decisions/foo-rfc.md");

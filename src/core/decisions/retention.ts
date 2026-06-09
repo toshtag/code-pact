@@ -11,12 +11,17 @@ export { DECISION_RETENTION_VALUES, type DecisionRetention };
 /** The shipped default — backward-compatible "keep ADRs forever". */
 export const DEFAULT_DECISION_RETENTION: DecisionRetention = "keep-full";
 
-export type RetentionSource = "override" | "project" | "default";
+export type RetentionSource = "override" | "project" | "default" | "invalid_project";
 
 export type ResolvedRetention = {
   /** The effective policy in force for this invocation. */
   policy: DecisionRetention;
-  /** Where it came from: a `--policy` override, the project's `project.yaml`, or the built-in default. */
+  /**
+   * Where it came from: a `--policy` override, the project's `project.yaml`, the
+   * built-in default (field absent), or `invalid_project` — the field is PRESENT
+   * but out of enum (a typo). The last keeps `decision prune` honest: it reports
+   * the broken config rather than masquerading as `default`.
+   */
   source: RetentionSource;
 };
 
@@ -27,10 +32,11 @@ function isRetention(v: unknown): v is DecisionRetention {
 /**
  * Tolerantly read `project.yaml`'s `decision_retention`. `decision prune` operates
  * on `design/decisions/`, so it must not hard-fail just because `project.yaml` is
- * absent, unparseable, or carries an out-of-enum value — those default to
- * `keep-full` here (and are surfaced separately by `validate` / `doctor`, which
- * parse the project through the strict schema). The same tolerance the author
- * reader uses for `collaboration.author`.
+ * absent, unparseable, or carries an out-of-enum value — those fall back to
+ * `keep-full` here (and the out-of-enum value is surfaced separately by `validate`
+ * / `doctor`, which parse the project through the strict schema, AND reported here
+ * via `source: "invalid_project"`). The same tolerance the author reader uses for
+ * `collaboration.author`.
  */
 export async function readDecisionRetention(cwd: string): Promise<ResolvedRetention> {
   try {
@@ -38,8 +44,12 @@ export async function readDecisionRetention(cwd: string): Promise<ResolvedRetent
     const doc = parseYaml(raw) as { decision_retention?: unknown } | null;
     const v = doc?.decision_retention;
     if (isRetention(v)) return { policy: v, source: "project" };
+    // PRESENT but out of enum (a typo) → honest "invalid_project", not silent default.
+    if (v !== undefined && v !== null) {
+      return { policy: DEFAULT_DECISION_RETENTION, source: "invalid_project" };
+    }
   } catch {
-    // fall through to the default
+    // unreadable / unparseable → the built-in default
   }
   return { policy: DEFAULT_DECISION_RETENTION, source: "default" };
 }
