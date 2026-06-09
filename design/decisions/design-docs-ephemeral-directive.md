@@ -1,8 +1,8 @@
 # Product Directive: Design docs are ephemeral (v2.0 control-plane relocation)
 
-**Status:** proposed — **transitional directive** (retire after v2.0 lands; the
-durable form of this rule is the schema + tests + `.code-pact/state` behavior, not
-this file).
+**Status:** accepted (v2.0 product direction, 2026-06) — **transitional
+directive** (retire after v2.0 lands; the durable form of this rule is the
+schema + tests + `.code-pact/state` behavior, not this file).
 **Type:** superseding product directive — overrides conflicting prior RFCs /
 `constitution` *where and only where* they would block removable design docs.
 **Owners:** maintainer.
