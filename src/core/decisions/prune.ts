@@ -53,6 +53,14 @@ export type PruneEvaluation = {
   blocks: PruneBlock[];
   /** Every task that references the decision (any status) — for the report. */
   referencing_tasks: PruneReferencingTask[];
+  /**
+   * The exact target bytes this verdict was computed from (status + commitments),
+   * or null if the target was missing/unreadable. `--write` requires the target to
+   * still be byte-identical at apply time, so an in-place edit (e.g. accepted →
+   * proposed, or a new open commitment) cannot slip a now-ineligible record past
+   * the gate and get it deleted.
+   */
+  target_content: string | null;
 };
 
 /** A decision still being decided — its rationale may still be built upon. */
@@ -140,6 +148,7 @@ export async function evaluatePrune(
         },
       ],
       referencing_tasks: [],
+      target_content: null,
     };
   }
 
@@ -293,5 +302,11 @@ export async function evaluatePrune(
     }
   }
 
-  return { decision, eligible: blocks.length === 0, blocks, referencing_tasks: referencing };
+  return {
+    decision,
+    eligible: blocks.length === 0,
+    blocks,
+    referencing_tasks: referencing,
+    target_content: content,
+  };
 }

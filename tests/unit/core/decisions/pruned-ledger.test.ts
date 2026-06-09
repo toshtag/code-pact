@@ -171,6 +171,7 @@ describe("buildAppendedLedger (compute the next ledger content — no write)", (
     expect(p.content).toContain("# Pruned decisions");
     expect(p.content).toContain("`design/decisions/foo-rfc.md`");
     expect(p.existing_content).toBe("");
+    expect(p.existed).toBe(false); // PRUNED.md absent at prepare time
     expect(p.already_recorded).toBe(false);
     expect(p.normalized_decision).toBe("design/decisions/foo-rfc.md");
   });

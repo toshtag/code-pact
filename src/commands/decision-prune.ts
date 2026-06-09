@@ -270,10 +270,11 @@ function formatPrunedDate(now: Date): string {
 }
 
 /**
- * Run the prune verdict and, when eligible, EXECUTE it: rewrite inbound links,
- * delete the record, append the ledger row. Re-validates every link span before
- * touching disk — a stale plan aborts with zero writes. `now` is injected so the
- * ledger date is deterministic under test.
+ * Run the prune verdict and, when eligible, EXECUTE it in least-harmful order:
+ * append/verify the ledger row, rewrite inbound links, then delete the record
+ * last. Re-validates the target, every link span, and the ledger before touching
+ * disk — a stale plan aborts with zero writes. `now` is injected so the ledger
+ * date is deterministic under test.
  */
 export async function runDecisionPruneWrite(
   cwd: string,
@@ -297,6 +298,9 @@ export async function runDecisionPruneWrite(
           pruned_date: formatPrunedDate(opts.now),
           rationale_home: "git history",
         },
+        // The verdict was computed from these exact bytes; the executor refuses to
+        // delete the record if it has been edited in place since.
+        expected_target_content: dryRun.evaluation.target_content ?? "",
       },
       opts.hooks ?? {},
     );

@@ -1,13 +1,34 @@
 import { mkdir, rename, writeFile, unlink, readFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
-async function writeThenRename(tmp: string, path: string, content: string): Promise<void> {
+/** Re-read `path` mapping a missing file to `""` (so "expected absent" is `""`). */
+async function readOrEmpty(path: string): Promise<string> {
+  try {
+    return await readFile(path, "utf8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return "";
+    throw err;
+  }
+}
+
+async function writeThenRename(
+  tmp: string,
+  path: string,
+  content: string,
+  expectedCurrent?: string,
+): Promise<void> {
   try {
     await writeFile(tmp, content, "utf8");
+    if (expectedCurrent !== undefined) {
+      // Re-check just before rename: refuse if the destination drifted since the
+      // caller's read (narrows, does not close, the window). `""` means "expected absent".
+      const current = await readOrEmpty(path);
+      if (current !== expectedCurrent) throw new Error("destination changed before write");
+    }
     await rename(tmp, path);
   } catch (err) {
     // Best-effort: never leave a stray temp file behind, whether the failure was
-    // the temp write (e.g. ENOSPC mid-write) or the rename.
+    // the temp write (e.g. ENOSPC mid-write), the drift re-check, or the rename.
     await unlink(tmp).catch(() => {});
     throw err;
   }
@@ -24,10 +45,11 @@ async function writeThenRename(tmp: string, path: string, content: string): Prom
 export async function atomicWriteText(
   path: string,
   content: string,
+  expectedCurrent?: string,
 ): Promise<void> {
   const tmp = `${path}.tmp-${process.pid}-${Date.now()}`;
   await mkdir(dirname(path), { recursive: true });
-  await writeThenRename(tmp, path, content);
+  await writeThenRename(tmp, path, content, expectedCurrent);
 }
 
 /**
@@ -51,15 +73,5 @@ export async function atomicReplaceExistingText(
   expectedCurrent?: string,
 ): Promise<void> {
   const tmp = `${path}.tmp-${process.pid}-${Date.now()}`;
-  try {
-    await writeFile(tmp, content, "utf8");
-    if (expectedCurrent !== undefined) {
-      const current = await readFile(path, "utf8");
-      if (current !== expectedCurrent) throw new Error("destination changed before replace");
-    }
-    await rename(tmp, path);
-  } catch (err) {
-    await unlink(tmp).catch(() => {});
-    throw err;
-  }
+  await writeThenRename(tmp, path, content, expectedCurrent);
 }

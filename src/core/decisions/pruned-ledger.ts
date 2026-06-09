@@ -176,6 +176,8 @@ export type PreparedLedger = {
   row: string;
   /** The normalized decision path this row records (for a commit-time presence check), or null if unprunable. */
   normalized_decision: string | null;
+  /** Did `PRUNED.md` exist at prepare time? Distinguishes "absent" from "present but empty". */
+  existed: boolean;
   /** The exact bytes read at prepare time — for a write-time drift check (`""` when absent). */
   existing_content: string;
   /**
@@ -204,11 +206,13 @@ export async function buildAppendedLedger(
 ): Promise<PreparedLedger> {
   const ledger_path = await resolveWithinProject(cwd, "design/decisions/PRUNED.md");
   let existing = "";
+  let existed = true;
   try {
     existing = await readFile(ledger_path, "utf8");
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
     existing = "";
+    existed = false;
   }
   const newLine = serializePrunedRow(row);
   const normalized = normalizePrunedDecisionPath(row.decision);
@@ -230,6 +234,7 @@ export async function buildAppendedLedger(
     // retry (not the freshly-generated one), else the row just appended.
     row: already_recorded ? existingRow!.trim() : newLine,
     normalized_decision: normalized,
+    existed,
     existing_content: existing,
     already_recorded,
   };

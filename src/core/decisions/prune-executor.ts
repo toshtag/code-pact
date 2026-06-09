@@ -6,7 +6,7 @@ import {
   type InboundLinkScan,
   type LinkRewriteItem,
 } from "./link-collector.ts";
-import { buildAppendedLedger, parsePrunedLedger, type PrunedLedgerRow } from "./pruned-ledger.ts";
+import { buildAppendedLedger, findPrunedRow, type PrunedLedgerRow } from "./pruned-ledger.ts";
 
 /**
  * One inbound link whose live state no longer matches the plan at write time —
@@ -89,6 +89,13 @@ export type PruneApplyInput = {
   items: LinkRewriteItem[];
   /** The ledger row to append once preflight passes and before the record is deleted. */
   ledger: PrunedLedgerRow;
+  /**
+   * The exact target bytes the eligibility verdict was computed from. The target
+   * must still be byte-identical at apply time and again just before deletion —
+   * so an in-place edit (accepted → proposed, a new open commitment, a rewritten
+   * body) at the same inode cannot get a now-ineligible record deleted.
+   */
+  expected_target_content: string;
 };
 
 /** `delink` keeps the visible label; an empty label collapses to nothing. */
@@ -280,6 +287,22 @@ export async function applyPrune(
       { source_file: input.remove_file, line: 0, column: 0, expected: "<a readable decision record>", found: targetFound },
     ]);
   }
+  // The target's CONTENT must still match what the verdict was computed from — an
+  // in-place edit (accepted → proposed, a new open commitment, a rewritten body)
+  // keeps the inode but invalidates the eligibility we are about to act on.
+  let targetContent: string;
+  try {
+    targetContent = await readFile(absTarget, "utf8");
+  } catch (err) {
+    throw new PrunePlanStaleError([
+      { source_file: input.remove_file, line: 0, column: 0, expected: "<a readable decision record>", found: `<unreadable: ${errDetail(err)}>` },
+    ]);
+  }
+  if (targetContent !== input.expected_target_content) {
+    throw new PrunePlanStaleError([
+      { source_file: input.remove_file, line: 0, column: 0, expected: "<the decision record unchanged since the verdict>", found: "<record content edited since preflight>" },
+    ]);
+  }
 
   // 1b. Re-collect inbound links; the plan must describe the live tree exactly.
   const live = await collectInboundLinks(cwd, input.remove_file);
@@ -359,28 +382,40 @@ export async function applyPrune(
   //     delete the record with no tombstone behind it.
   //   - not recorded → refuse if PRUNED.md changed since preflight, else append.
   let ledger_action: "appended" | "already_recorded";
+  // The row reported in the result — reflects the ledger as it is at COMMIT time.
+  let committedLedgerRow = prepared.row;
   try {
     if (hooks.beforeLedgerWrite) await hooks.beforeLedgerWrite();
+    // Read the ledger as it stands now, tracking existence precisely so "absent"
+    // is distinguishable from "present but empty".
     let currentLedger = "";
+    let currentExists = true;
     try {
       currentLedger = await readFile(prepared.ledger_path, "utf8");
     } catch (err) {
       if (errDetail(err) !== "ENOENT") throw err;
-      currentLedger = "";
+      currentExists = false;
     }
     if (prepared.already_recorded) {
-      const stillRecorded =
-        prepared.normalized_decision !== null &&
-        parsePrunedLedger(currentLedger).has(prepared.normalized_decision);
-      if (!stillRecorded) {
+      const currentRow =
+        prepared.normalized_decision !== null ? findPrunedRow(currentLedger, prepared.normalized_decision) : null;
+      if (currentRow === null) {
         throw new PruneWriteError("append_ledger", false, "ledger no longer records this decision (PRUNED.md changed after preflight)");
       }
+      // Report the row as it actually stands now (the user may have hand-edited
+      // its phase/date/rationale) — not the stale preflight copy.
+      committedLedgerRow = currentRow.trim();
       ledger_action = "already_recorded";
     } else {
-      if (currentLedger !== prepared.existing_content) {
+      // The ledger must be exactly as preflight saw it — same EXISTENCE (so an
+      // empty file appearing where we expected none is refused, not silently
+      // overwritten) and same bytes.
+      if (currentExists !== prepared.existed || currentLedger !== prepared.existing_content) {
         throw new PruneWriteError("append_ledger", false, "ledger (PRUNED.md) changed after preflight");
       }
-      await atomicWriteText(prepared.ledger_path, prepared.content);
+      // Pass the preflight content as `expectedCurrent` so the write also re-checks
+      // just before rename — symmetric with the source rewrites.
+      await atomicWriteText(prepared.ledger_path, prepared.content, prepared.existing_content);
       ledger_action = "appended";
     }
   } catch (err) {
@@ -437,6 +472,11 @@ export async function applyPrune(
     if (cur.ino !== targetIno || cur.dev !== targetDev || !cur.isFile()) {
       throw new PruneWriteError("delete_record", mutationLanded(), "target changed under prune (refusing to unlink a replaced path)");
     }
+    // Re-read the content too: refuse to delete a record that was edited in place
+    // since the verdict (same inode, different bytes — e.g. status flipped back).
+    if ((await readFile(absTarget, "utf8")) !== input.expected_target_content) {
+      throw new PruneWriteError("delete_record", mutationLanded(), "target content changed under prune (refusing to delete an edited record)");
+    }
     await unlink(absTarget);
   } catch (err) {
     if (err instanceof PruneWriteError) throw err;
@@ -456,5 +496,5 @@ export async function applyPrune(
         ? a.line - b.line
         : a.column - b.column,
   );
-  return { removed_file: input.remove_file, link_rewrites_applied: applied, ledger_row: prepared.row, ledger_action };
+  return { removed_file: input.remove_file, link_rewrites_applied: applied, ledger_row: committedLedgerRow, ledger_action };
 }

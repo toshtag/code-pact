@@ -208,7 +208,7 @@ code-pact decision prune design/decisions/<name>.md --write --json
 #   found    → what is on disk there now (or a marker: <reclassified>, <reference-style>, …)
 ```
 
-Recovery: re-run `decision prune` (dry-run first if you want to inspect the rebuilt plan). The collector re-reads the current tree, so a fresh `--write` reflects the edit. This is a safety abort, not a failure — nothing was left half-applied. The target record itself disappearing or becoming a directory between plan and apply is the same kind of drift and also lands here.
+Recovery: re-run `decision prune` (dry-run first if you want to inspect the rebuilt plan). The collector re-reads the current tree, so a fresh `--write` reflects the edit. This is a safety abort, not a failure — nothing was left half-applied. The **target record** disappearing, becoming a directory, or being **edited in place** (same inode, different bytes — e.g. status flipped back to `proposed`) between the verdict and apply is the same kind of drift and also lands here — the record is never deleted on a verdict that no longer holds.
 
 ## `DECISION_PRUNE_WRITE_FAILED` from `decision prune --write`
 A write could not complete **after** preflight passed — distinct from `PLAN_STALE` (a plan/tree mismatch caught **before** any write). Causes:
