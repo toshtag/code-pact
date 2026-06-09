@@ -567,4 +567,21 @@ describe("applyPrune — repo-boundary drift at commit (ChatGPT round 9, path-sa
     expect(await readFile(join(outside, "decisions", "foo-rfc.md"), "utf8")).toBe(TARGET_CONTENT);
     await rm(outside, { recursive: true, force: true });
   });
+
+  it("the ledger parent design/decisions/ removed before the ledger write → WRITE_FAILED append_ledger, parent NOT re-created", async () => {
+    await write("docs/x.md", "See [d](../design/decisions/foo-rfc.md).\n");
+    const { items } = await collectInboundLinks(cwd, TARGET);
+    const docBefore = await read("docs/x.md");
+
+    const err = await applyPrune(cwd, input(items), {
+      // fires after the pre-write target check, just before the ledger commit
+      beforeLedgerCommit: async () => { await rm(join(cwd, "design", "decisions"), { recursive: true, force: true }); },
+    }).catch((e) => e);
+
+    expect(err).toBeInstanceOf(PruneWriteError);
+    expect((err as PruneWriteError).phase).toBe("append_ledger");
+    expect((err as PruneWriteError).partial_applied).toBe(false);
+    expect(await exists("design/decisions")).toBe(false); // NOT re-created (no mkdir)
+    expect(await read("docs/x.md")).toBe(docBefore); // docs byte-identical
+  });
 });

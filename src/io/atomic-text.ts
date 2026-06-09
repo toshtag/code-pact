@@ -47,12 +47,17 @@ async function writeThenRename(
 }
 
 /**
- * Best-effort atomic write for raw text content, **creating** the file (and any
- * missing parent directories) when absent. Writes to a temp file in the same
- * directory then renames to the destination, so a crash mid-write cannot leave
- * the target half-written; a rename failure cleans up the temp file. Does NOT
- * protect against concurrent writers — that is a known limitation noted in
- * docs/cli-contract.md.
+ * Best-effort atomic write for raw text content, **creating** the file when
+ * absent. Writes to a temp file in the same directory then renames to the
+ * destination, so a crash mid-write cannot leave the target half-written; a
+ * rename failure cleans up the temp file. Does NOT protect against concurrent
+ * writers — that is a known limitation noted in docs/cli-contract.md.
+ *
+ * By default it also creates any missing **parent directories** (`mkdir`).
+ * Pass `{ mkdir: false }` for a destructive in-place context where re-creating a
+ * vanished parent would be wrong (e.g. `decision prune --write`'s ledger append:
+ * the parent `design/decisions/` must already exist; if it was removed since the
+ * verdict, the write fails rather than resurrecting the tree).
  *
  * When `expected` is given, the destination's existence + content are re-checked
  * after the temp write and just before the rename (narrowing, not closing, the
@@ -64,9 +69,10 @@ export async function atomicWriteText(
   path: string,
   content: string,
   expected?: ExpectedState,
+  opts: { mkdir?: boolean } = {},
 ): Promise<void> {
   const tmp = `${path}.tmp-${process.pid}-${Date.now()}`;
-  await mkdir(dirname(path), { recursive: true });
+  if (opts.mkdir !== false) await mkdir(dirname(path), { recursive: true });
   await writeThenRename(tmp, path, content, expected);
 }
 

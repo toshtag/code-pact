@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { join, posix } from "node:path";
+import { posix } from "node:path";
 import { assertSafeRelativePath, resolveWithinProject } from "../path-safety.ts";
 
 /**
@@ -111,12 +111,16 @@ export function findPrunedRow(text: string, normalizedDecision: string): string 
 export async function readPrunedLedger(cwd: string): Promise<Set<string>> {
   let text: string;
   try {
-    text = await readFile(join(cwd, "design", "decisions", "PRUNED.md"), "utf8");
+    // Route through the symlink-escape guard: this set SILENCES missing-decision_ref
+    // integrity warnings, so it must never trust a PRUNED.md that resolves outside
+    // the repo. A resolve escape throws and lands in the fail-closed branch below.
+    const path = await resolveWithinProject(cwd, "design/decisions/PRUNED.md");
+    text = await readFile(path, "utf8");
   } catch {
-    // Any read failure (absent ENOENT, EACCES, EISDIR) → empty set. This is the
-    // fail-CLOSED direction: an unreadable ledger silences nothing, so a genuinely
-    // pruned ref simply warns again rather than a broken ledger silencing refs it
-    // never listed. Swallowing is therefore safe here, not a hidden hazard.
+    // Any failure (escape, absent ENOENT, EACCES, EISDIR) → empty set. This is the
+    // fail-CLOSED direction: an unreadable/untrusted ledger silences nothing, so a
+    // genuinely pruned ref simply warns again rather than a broken ledger silencing
+    // refs it never listed. Swallowing is therefore safe here, not a hidden hazard.
     return new Set();
   }
   const out = parsePrunedLedger(text);

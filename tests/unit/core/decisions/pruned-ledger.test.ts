@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile, symlink } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -43,6 +43,19 @@ describe("normalizeRelPath", () => {
 describe("readPrunedLedger", () => {
   it("returns an empty set when PRUNED.md is absent", async () => {
     expect((await readPrunedLedger(cwd)).size).toBe(0);
+  });
+
+  it("a PRUNED.md symlinked OUT of the repo is NOT trusted → empty set (fail-closed silencing oracle)", async () => {
+    const outside = await mkdtemp(join(tmpdir(), "code-pact-outside-"));
+    await writeFile(
+      join(outside, "PRUNED.md"),
+      "| Decision | x |\n| --- | --- |\n| `design/decisions/foo-rfc.md` | P1 | 2026-01-01 | x |\n",
+      "utf8",
+    );
+    await symlink(join(outside, "PRUNED.md"), join(cwd, "design", "decisions", "PRUNED.md"));
+    // an external ledger must never silence a missing decision_ref
+    expect((await readPrunedLedger(cwd)).size).toBe(0);
+    await rm(outside, { recursive: true, force: true });
   });
 
   it("returns an empty set for a header-only ledger (no data rows)", async () => {

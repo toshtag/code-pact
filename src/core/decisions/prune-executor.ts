@@ -271,8 +271,10 @@ type PendingRewrite = {
  * Never set in production — `runDecisionPruneWrite` passes none.
  */
 export type ApplyPruneHooks = {
-  /** Invoked just before the ledger's write-time re-read (e.g. mutate PRUNED.md to simulate a concurrent edit). */
+  /** Invoked at the start of the commit phase, before the pre-write target re-check. */
   beforeLedgerWrite?: () => Promise<void>;
+  /** Invoked just before the ledger commit (after the target re-check; e.g. remove design/decisions/ to test a vanished parent). */
+  beforeLedgerCommit?: () => Promise<void>;
   /** Invoked just before a source file's write-time re-read (e.g. mutate it to simulate a concurrent edit). */
   beforeSourceWrite?: (rel: string) => Promise<void>;
   /** Invoked just before the record's delete (e.g. remove it to simulate a concurrent unlink). */
@@ -424,6 +426,7 @@ export async function applyPrune(
   // The row reported in the result — reflects the ledger as it is at COMMIT time.
   let committedLedgerRow = prepared.row;
   try {
+    if (hooks.beforeLedgerCommit) await hooks.beforeLedgerCommit();
     // Re-resolve the ledger path at COMMIT time (not the cached preflight one), so
     // a design/decisions ancestor symlinked out of the repo since preflight is
     // caught here — never read/write an external PRUNED.md.
@@ -459,7 +462,10 @@ export async function applyPrune(
       const expected: ExpectedState = prepared.existed
         ? { kind: "present", content: prepared.existing_content }
         : { kind: "absent" };
-      await atomicWriteText(ledgerPath, prepared.content, expected);
+      // `mkdir: false` — the ledger may CREATE PRUNED.md, but must NOT re-create a
+      // vanished design/decisions/ parent (symmetric with the source rewrites'
+      // replace-only helper); a removed parent → WRITE_FAILED, not a resurrected tree.
+      await atomicWriteText(ledgerPath, prepared.content, expected, { mkdir: false });
       ledger_action = "appended";
     }
   } catch (err) {

@@ -71,6 +71,16 @@ describe("atomicWriteText", () => {
     await expect(atomicWriteText(q, "v", { kind: "present", content: "" })).rejects.toThrow();
     expect(await noTempLeftBehind()).toBe(true);
   });
+
+  it("opts.mkdir=false: creates the FILE but does NOT create a missing parent directory", async () => {
+    const ok = join(dir, "in-existing-dir.txt"); // parent (dir) exists → creates the file
+    await atomicWriteText(ok, "v", undefined, { mkdir: false });
+    expect(await readFile(ok, "utf8")).toBe("v");
+
+    const p = join(dir, "gone", "a.txt"); // parent missing → must fail, not mkdir
+    await expect(atomicWriteText(p, "v", undefined, { mkdir: false })).rejects.toThrow();
+    expect(await noTempLeftBehind()).toBe(true);
+  });
 });
 
 describe("atomicReplaceExistingText", () => {
