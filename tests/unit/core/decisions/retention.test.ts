@@ -40,6 +40,16 @@ describe("readDecisionRetention", () => {
     expect(await readDecisionRetention(cwd)).toEqual({ policy: "keep-full", source: "invalid_project" });
   });
 
+  it("a PRESENT but EMPTY field (`decision_retention:` → null) is 'invalid_project', not 'default'", async () => {
+    await writeProject(`${BASE}decision_retention:\n`);
+    expect(await readDecisionRetention(cwd)).toEqual({ policy: "keep-full", source: "invalid_project" });
+  });
+
+  it("an explicit `decision_retention: null` is 'invalid_project' (present, not absent)", async () => {
+    await writeProject(`${BASE}decision_retention: null\n`);
+    expect(await readDecisionRetention(cwd)).toEqual({ policy: "keep-full", source: "invalid_project" });
+  });
+
   it("is tolerant: unparseable YAML → keep-full / 'default'", async () => {
     await writeProject(":\n  not: [valid");
     expect(await readDecisionRetention(cwd)).toEqual({ policy: "keep-full", source: "default" });
@@ -79,5 +89,9 @@ describe("Project schema — decision_retention (what validate / doctor enforce)
 
   it("REJECTS an out-of-enum value (so validate/doctor flag a typo)", () => {
     expect(Project.safeParse({ ...valid, decision_retention: "prune" }).success).toBe(false);
+  });
+
+  it("REJECTS null (a present-but-empty `decision_retention:` is a SCHEMA_ERROR, not absence)", () => {
+    expect(Project.safeParse({ ...valid, decision_retention: null }).success).toBe(false);
   });
 });

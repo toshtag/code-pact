@@ -41,12 +41,17 @@ function isRetention(v: unknown): v is DecisionRetention {
 export async function readDecisionRetention(cwd: string): Promise<ResolvedRetention> {
   try {
     const raw = await readFile(join(cwd, ".code-pact", "project.yaml"), "utf8");
-    const doc = parseYaml(raw) as { decision_retention?: unknown } | null;
-    const v = doc?.decision_retention;
-    if (isRetention(v)) return { policy: v, source: "project" };
-    // PRESENT but out of enum (a typo) → honest "invalid_project", not silent default.
-    if (v !== undefined && v !== null) {
-      return { policy: DEFAULT_DECISION_RETENTION, source: "invalid_project" };
+    const doc = parseYaml(raw) as unknown;
+    if (doc && typeof doc === "object" && !Array.isArray(doc)) {
+      // Key the decision on PRESENCE, not on the value: a present-but-empty field
+      // (`decision_retention:` → YAML null) is a typo, NOT an absent field. The
+      // strict schema rejects it (SCHEMA_ERROR), so reporting it as `default` here
+      // would diverge from validate/doctor — surface it as `invalid_project` too.
+      if (Object.prototype.hasOwnProperty.call(doc, "decision_retention")) {
+        const v = (doc as Record<string, unknown>).decision_retention;
+        if (isRetention(v)) return { policy: v, source: "project" };
+        return { policy: DEFAULT_DECISION_RETENTION, source: "invalid_project" };
+      }
     }
   } catch {
     // unreadable / unparseable → the built-in default
