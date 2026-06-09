@@ -410,6 +410,57 @@ describe("runDecisionPruneWrite (--write execution)", () => {
   });
 });
 
+describe("decision prune — retention policy surfacing (PR-D1)", () => {
+  async function writeProjectRetention(value?: string): Promise<void> {
+    await mkdir(join(cwd, ".code-pact"), { recursive: true });
+    const base =
+      "name: x\nversion: 0.1.0\nlocale: en-US\ndefault_agent: claude-code\nagents:\n  - name: claude-code\n    profile: agent-profiles/claude-code.yaml\n";
+    await writeFile(
+      join(cwd, ".code-pact", "project.yaml"),
+      value ? `${base}decision_retention: ${value}\n` : base,
+    );
+  }
+
+  it("dry-run surfaces the project policy + source", async () => {
+    await writeDecision("foo-rfc.md");
+    await writeValidEmptyPlan();
+    await writeProjectRetention("prune-on-ship");
+    const res = await runDecisionPrune(cwd, "design/decisions/foo-rfc.md");
+    expect(res.policy).toBe("prune-on-ship");
+    expect(res.policy_source).toBe("project");
+    expect(serializeDecisionPrune(res)).toMatchObject({ policy: "prune-on-ship", policy_source: "project" });
+  });
+
+  it("no project field → keep-full / default", async () => {
+    await writeDecision("foo-rfc.md");
+    await writeValidEmptyPlan();
+    await writeProjectRetention(); // no decision_retention
+    const res = await runDecisionPrune(cwd, "design/decisions/foo-rfc.md");
+    expect(res.policy).toBe("keep-full");
+    expect(res.policy_source).toBe("default");
+  });
+
+  it("--policy override wins and is sourced 'override' (dry-run + write)", async () => {
+    await writeDecision("foo-rfc.md");
+    await writeDoneTaskPhase("design/decisions/foo-rfc.md");
+    await writeProjectRetention("keep-full");
+
+    const dry = await runDecisionPrune(cwd, "design/decisions/foo-rfc.md", { policyOverride: "prune-on-ship" });
+    expect(dry.policy).toBe("prune-on-ship");
+    expect(dry.policy_source).toBe("override");
+
+    const outcome = await runDecisionPruneWrite(cwd, "design/decisions/foo-rfc.md", {
+      now: new Date("2026-06-09T12:00:00Z"),
+      policyOverride: "prune-on-ship",
+    });
+    expect(outcome.kind).toBe("applied");
+    if (outcome.kind !== "applied") return;
+    expect(outcome.policy).toBe("prune-on-ship");
+    expect(outcome.policy_source).toBe("override");
+    expect(serializeDecisionPruneWrite(outcome)).toMatchObject({ policy: "prune-on-ship", policy_source: "override" });
+  });
+});
+
 describe("decision-prune renderers", () => {
   it("serialize exposes the contract fields", async () => {
     await writeDecision("foo-rfc.md");
@@ -424,6 +475,8 @@ describe("decision-prune renderers", () => {
     expect(data).toHaveProperty("blocks");
     expect(data).toHaveProperty("referencing_tasks");
     expect(data).toHaveProperty("plan");
+    expect(data).toHaveProperty("policy");
+    expect(data).toHaveProperty("policy_source");
     expect(data).toHaveProperty("warnings");
   });
 

@@ -2,6 +2,7 @@ name: code-pact
 version: 0.1.0
 locale: en-US
 default_agent: claude-code
+decision_retention: prune-on-ship
 agents:
   - name: claude-code
     profile: agent-profiles/claude-code.yaml

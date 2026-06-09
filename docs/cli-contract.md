@@ -2233,7 +2233,9 @@ code-pact phase reconcile P11 --write --json
 
 ## `decision prune`
 
-`decision prune <path> [--write] [--json]` retires a shipped, **accepted** decision record from the live plane. **Dry-run by default** — it deletes nothing, rewrites no links, and appends no `PRUNED.md` row; it reports the eligibility verdict and the complete inbound-link rewrite plan. `--write` **executes** that plan in least-harmful order: it appends the `PRUNED.md` row, rewrites each inbound link, then deletes the record last. The verdict and the plan are produced by code shared between dry-run and `--write` — dry-run never relaxes a gate or shortens the plan, and `--write` re-runs the same collector at apply time (it never re-parses or re-interprets a stored plan). Eligible exits 0; ineligible exits 2 with [`DECISION_PRUNE_NOT_ELIGIBLE`](#public-codes-top-level-error-envelopes) (the verdict is identical for dry-run and `--write`).
+`decision prune <path> [--write] [--policy <v>] [--json]` retires a shipped, **accepted** decision record from the live plane. **Dry-run by default** — it deletes nothing, rewrites no links, and appends no `PRUNED.md` row; it reports the eligibility verdict and the complete inbound-link rewrite plan. `--write` **executes** that plan in least-harmful order: it appends the `PRUNED.md` row, rewrites each inbound link, then deletes the record last. The verdict and the plan are produced by code shared between dry-run and `--write` — dry-run never relaxes a gate or shortens the plan, and `--write` re-runs the same collector at apply time (it never re-parses or re-interprets a stored plan). Eligible exits 0; ineligible exits 2 with [`DECISION_PRUNE_NOT_ELIGIBLE`](#public-codes-top-level-error-envelopes) (the verdict is identical for dry-run and `--write`).
+
+The active **retention policy** (`project.yaml: decision_retention` — `keep-full` default \| `compress-on-ship` \| `prune-on-ship`) is surfaced in the envelope as `data.policy` + `data.policy_source` (`"project"` \| `"default"` \| `"override"`). `--policy <v>` overrides it for the invocation (an out-of-enum value is a `CONFIG_ERROR`). The policy is **reported, not enacted** — it does not change what is prunable or what gets deleted (deletion stays an explicit `decision prune` action); it gives a project its declared default and lets tooling read the intent. The destructive `compress-on-ship` transform is a later layer (`decision compress`, not yet shipped).
 
 Dry-run success envelope (`--json`):
 
@@ -2251,6 +2253,8 @@ Dry-run success envelope (`--json`):
       "append_ledger": true,
       "link_rewrite": { "status": "ready", "items": [] }
     },
+    "policy": "keep-full",
+    "policy_source": "default",
     "warnings": []
   }
 }
@@ -2299,6 +2303,8 @@ Cross-file atomicity is not claimed (a POSIX filesystem cannot transact across f
     ],
     "ledger_row": "| `design/decisions/foo-rfc.md` | P1-T1 | 2026-06-09 | git history |",
     "ledger_action": "appended",
+    "policy": "prune-on-ship",
+    "policy_source": "project",
     "warnings": []
   }
 }
