@@ -12,6 +12,7 @@ When a command surfaces one of the diagnostic codes below, this page maps it to 
 | [`TASK_FINALIZE_WRITE_REFUSED`](#task_finalize_write_refused-from-task-finalize---write) | Phase-YAML write blocked by the safety check | Read `data.reason`; usually fix the phase file |
 | [`PHASE_RECONCILE_WRITE_REFUSED`](#phase_reconcile_write_refused-from-phase-reconcile---write) | Every reconcile write was refused | Re-run dry-run; fix the phase file |
 | [`DECISION_PRUNE_NOT_ELIGIBLE`](#decision_prune_not_eligible-from-decision-prune) | A decision record cannot be retired yet | Read `data.blocks[]`; resolve each gate (or pick a different target) |
+| [`DECISION_PRUNE_PLAN_STALE`](#decision_prune_plan_stale-from-decision-prune---write) | The tree changed under a `--write` plan (zero writes) | Re-run `decision prune` to rebuild the plan |
 | [`LOCK_HELD`](#lock_held-from-a-lock-covered-mutation) | Another mutation is running | Wait, then retry (transient) |
 | [`MANIFEST_NOT_FOUND`](#manifest_not_found-from-adapter-upgrade---check----write) | Adapter not installed yet | Run `adapter install <agent>` |
 | [`ADAPTER_GENERATOR_STALE`](#adapter_generator_stale-from-adapter-doctor--global-doctor) | Older CLI stamp **and** generated output drifted (stamp-only lag is silent) | Run `adapter upgrade --check`, then `--write` |
@@ -159,7 +160,7 @@ code-pact phase runbook <phase-id> --json
 If `data.tasks[]` shows every flip candidate has the same refusal reason, the issue is the phase file itself, not individual tasks — fix it once and reconcile will proceed for all of them.
 
 ## `DECISION_PRUNE_NOT_ELIGIBLE` from `decision prune`
-The target decision record cannot be retired. `decision prune` is dry-run today, so this is always advisory — nothing is deleted. `data.blocks[]` lists **every applicable** failing gate so you can resolve them together (the link-rewrite gates below are only evaluated once the target itself is a readable, accepted, top-level record — a `target_*` failure short-circuits them):
+The target decision record cannot be retired. The verdict is identical for the dry-run preview and `--write`, so an ineligible target is **never** written either way — nothing is deleted. `data.blocks[]` lists **every applicable** failing gate so you can resolve them together (the link-rewrite gates below are only evaluated once the target itself is a readable, accepted, top-level record — a `target_*` failure short-circuits them):
 
 ```sh
 code-pact decision prune design/decisions/<name>.md --json
@@ -193,6 +194,20 @@ code-pact decision prune design/decisions/<name>.md --json
 ```
 
 When `data.eligible` is `true` but `data.referencing_tasks` is empty, prune cannot prove the decision was shipped through a task reference — confirm it is genuinely retired, not an unconnected record, before relying on it.
+
+## `DECISION_PRUNE_PLAN_STALE` from `decision prune --write`
+The working tree changed between building the plan and applying it (a concurrent edit to a doc, or a plan applied against a tree that has since moved). `--write` re-collects inbound links and requires the plan to still describe the tree exactly, then re-checks every span byte-for-byte — so this aborts with **zero writes**: the record is not deleted, no link is rewritten, no ledger row is appended.
+
+```sh
+code-pact decision prune design/decisions/<name>.md --write --json
+# data → { mode: "write", decision, stale[] }
+# each stale[] entry describes one divergence:
+#   { source_file, line, column, expected, found }
+#   expected → the raw_link the plan recorded (or a marker for a new/unsupported link)
+#   found    → what is on disk there now (or a marker: <reclassified>, <reference-style>, …)
+```
+
+Recovery: re-run `decision prune` (dry-run first if you want to inspect the rebuilt plan). The collector re-reads the current tree, so a fresh `--write` reflects the edit. This is a safety abort, not a failure — nothing was left half-applied.
 
 ## `LOCK_HELD` from a lock-covered mutation
 Another `code-pact` mutation is in progress on the same project. The advisory write lock (`.code-pact/locks/write.lock`) is held by the process whose details appear in the envelope:

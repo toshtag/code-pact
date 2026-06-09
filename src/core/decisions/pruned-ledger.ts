@@ -1,6 +1,6 @@
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile, rename, unlink } from "node:fs/promises";
 import { join, posix } from "node:path";
-import { assertSafeRelativePath } from "../path-safety.ts";
+import { assertSafeRelativePath, resolveWithinProject } from "../path-safety.ts";
 
 /**
  * Normalize a repo-relative path so a ledger entry and a `decision_refs` value
@@ -40,6 +40,11 @@ export function normalizePrunedDecisionPath(raw: string): string | null {
   const normalized = posix.normalize(fwd).replace(/^(?:\.\/)+/, "");
   if (!normalized.startsWith("design/decisions/")) return null;
   if (!normalized.endsWith(".md")) return null;
+  // Reject characters that cannot survive the ledger's markdown-table / code-span
+  // round-trip: a pipe ends a cell, a backtick ends the path code span, and a
+  // CR/LF ends the row. Such a path could never be parsed back by
+  // `readPrunedLedger`, so it is not a valid ledger entry (nor a prune target).
+  if (/[\r\n|`]/.test(normalized)) return null;
   if (NON_DECISION_LEDGER_PATHS.has(normalized)) return null;
   // Top-level records only. A nested ADR (`design/decisions/x/y.md`) is not a
   // prune target: the gate scan that protects pruning is a flat top-level scan,
@@ -99,4 +104,86 @@ export async function readPrunedLedger(cwd: string): Promise<Set<string>> {
     if (path) out.add(path); // entries outside design/decisions/**.md are ignored
   }
   return out;
+}
+
+/** A pruned-decision ledger row, as `decision prune --write` records it. */
+export type PrunedLedgerRow = {
+  /** The retired decision path — written as a CODE SPAN, never a link. */
+  decision: string;
+  /** The task(s) that referenced it (joined ids), or a dash when none. */
+  phase_task: string;
+  /** YYYY-MM-DD (the executor formats this from an injected clock). */
+  pruned_date: string;
+  /** Where the rationale now lives — e.g. "git history" / "CHANGELOG vX.Y". */
+  rationale_home: string;
+};
+
+/**
+ * The header written when `PRUNED.md` is first created. The path column is the
+ * one {@link readPrunedLedger} parses; the "Decision" header cell and the `---`
+ * separator are both skipped by it, and the intro prose carries no leading
+ * pipe so it is not mistaken for a row.
+ */
+const LEDGER_HEADER = `# Pruned decisions
+
+Append-only ledger of decision records retired by \`code-pact decision prune\`.
+The full text of each pruned record remains in git history.
+
+| Decision | Phase / Task | Pruned | Rationale home |
+| --- | --- | --- | --- |
+`;
+
+/** Escape a value so it cannot break out of its markdown table cell. */
+function cell(value: string): string {
+  return value.replace(/\r?\n/g, " ").replace(/\|/g, "\\|").trim();
+}
+
+/**
+ * Render one ledger row. The decision path is a **code span** (`` `path` ``),
+ * NOT a markdown link: the record is being deleted, so a link would be a broken
+ * reference the moment the row is written. {@link readPrunedLedger} reads the
+ * code-span form back as the pruned path.
+ */
+export function serializePrunedRow(row: PrunedLedgerRow): string {
+  const path = normalizePrunedDecisionPath(row.decision) ?? row.decision;
+  return `| \`${path}\` | ${cell(row.phase_task)} | ${cell(row.pruned_date)} | ${cell(row.rationale_home)} |`;
+}
+
+let ledgerTmpSeq = 0;
+
+/**
+ * Append a row to `design/decisions/PRUNED.md`, creating the file with its
+ * header when absent. Append-only: an existing ledger is never rewritten, only
+ * extended. The write is atomic (temp + rename) and symlink-escape guarded.
+ */
+export async function appendPrunedLedger(cwd: string, row: PrunedLedgerRow): Promise<void> {
+  const abs = await resolveWithinProject(cwd, "design/decisions/PRUNED.md");
+  let existing = "";
+  try {
+    existing = await readFile(abs, "utf8");
+  } catch (err) {
+    // Only a genuinely ABSENT ledger (ENOENT) is created fresh. Any other read
+    // error (EACCES, EISDIR, …) must NOT be swallowed: treating an unreadable but
+    // present ledger as empty would overwrite every prior append-only row. Fail
+    // closed so the caller aborts before the irreversible record deletion.
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    existing = "";
+  }
+  const line = serializePrunedRow(row);
+  let next: string;
+  if (existing.trim() === "") {
+    next = `${LEDGER_HEADER}${line}\n`;
+  } else {
+    next = existing.endsWith("\n") ? `${existing}${line}\n` : `${existing}\n${line}\n`;
+  }
+  // Per-call-unique temp name (pid + counter) so concurrent appenders never
+  // collide on the temp file even if called outside the advisory write lock.
+  const tmp = `${abs}.${process.pid}.${ledgerTmpSeq++}.prune-tmp`;
+  await writeFile(tmp, next, "utf8");
+  try {
+    await rename(tmp, abs);
+  } catch (err) {
+    await unlink(tmp).catch(() => {}); // don't leave a stray temp file behind
+    throw err;
+  }
 }

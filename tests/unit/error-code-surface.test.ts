@@ -60,6 +60,7 @@ const KNOWN_CODES: Record<string, "public" | "plan" | "doctor" | "adapter" | "in
   CONFIG_ERROR: "public",
   CONTEXT_OVER_BUDGET: "public",
   DECISION_PRUNE_NOT_ELIGIBLE: "public",
+  DECISION_PRUNE_PLAN_STALE: "public",
   DECISION_REQUIRED: "public",
   DUPLICATE_PHASE_ID: "public",
   INVALID_TASK_TRANSITION: "public",

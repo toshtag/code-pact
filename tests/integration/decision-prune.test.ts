@@ -1,5 +1,6 @@
-// `decision prune` (dry-run) CLI contract — built-CLI integration.
-// PR-C1b: public command, JSON envelopes, exit codes. No --write yet.
+// `decision prune` CLI contract — built-CLI integration.
+// PR-C1b: dry-run public command, JSON envelopes, exit codes.
+// PR-C2: --write executes the plan (delete + rewrite links + append ledger).
 
 import { describe, it, expect, beforeAll, afterEach } from "vitest";
 import { mkdir, writeFile, readFile, readdir } from "node:fs/promises";
@@ -178,13 +179,6 @@ describe("decision prune — CLI (dry-run)", () => {
     expect(res.code).toBe(2);
   });
 
-  it("--write is not a flag yet → exit 2, CONFIG_ERROR", async () => {
-    const p = await project(ACCEPTED, "done");
-    const res = p.run(["decision", "prune", "design/decisions/foo-rfc.md", "--write", "--json"]);
-    expect(expectJsonErr(res).error.code).toBe("CONFIG_ERROR");
-    expect(res.code).toBe(2);
-  });
-
   it("missing path → exit 2, CONFIG_ERROR", async () => {
     const p = await project(ACCEPTED, "done");
     const res = p.run(["decision", "prune", "--json"]);
@@ -246,7 +240,7 @@ describe("decision prune — CLI (dry-run)", () => {
     expect(res.stderr).toContain("NOT ELIGIBLE");
   });
 
-  it("is ZERO-WRITE in every mode (eligible / human / --write) — whole-project snapshot", async () => {
+  it("dry-run is ZERO-WRITE (eligible / human) — whole-project snapshot", async () => {
     const p = await project(ACCEPTED, "done");
     // Add an inbound link so the plan is non-trivial (items populated) — the
     // dry-run must STILL not touch it.
@@ -260,12 +254,65 @@ describe("decision prune — CLI (dry-run)", () => {
     for (const args of [
       ["decision", "prune", "design/decisions/foo-rfc.md", "--json"], // eligible
       ["decision", "prune", "design/decisions/foo-rfc.md"], // eligible, human
-      ["decision", "prune", "design/decisions/foo-rfc.md", "--write", "--json"], // CONFIG_ERROR
     ]) {
       p.run(args);
     }
 
     expect(await snapshotTree(p.dir)).toEqual(before); // entire tree byte-identical
+  });
+
+  it("--write applies the plan: removes the record, delinks the body link, appends the ledger (JSON)", async () => {
+    const p = await project(ACCEPTED, "done");
+    await mkdir(join(p.dir, "docs"), { recursive: true });
+    await writeFile(
+      join(p.dir, "docs", "x.md"),
+      "# X\n\nSee [d](../design/decisions/foo-rfc.md).\n",
+    );
+
+    const res = p.run(["decision", "prune", "design/decisions/foo-rfc.md", "--write", "--json"]);
+    const env = expectJsonOk<{
+      mode: string;
+      decision: string;
+      removed_file: string;
+      link_rewrites_applied: { source_file: string; rewrite_action: string }[];
+      ledger_row: string;
+      warnings: unknown[];
+    }>(res);
+    expect(res.code).toBe(0);
+    expect(env.data.mode).toBe("write");
+    expect(env.data.removed_file).toBe("design/decisions/foo-rfc.md");
+    expect(env.data.link_rewrites_applied.map((r) => r.source_file)).toContain("docs/x.md");
+
+    // disk effects: record gone, link delinked, ledger row present + readable
+    await expect(
+      readFile(join(p.dir, "design", "decisions", "foo-rfc.md"), "utf8"),
+    ).rejects.toThrow();
+    expect(await readFile(join(p.dir, "docs", "x.md"), "utf8")).toBe("# X\n\nSee d.\n");
+    const ledger = await readFile(join(p.dir, "design", "decisions", "PRUNED.md"), "utf8");
+    expect(ledger).toContain("`design/decisions/foo-rfc.md`");
+    // NO leftover lock or temp file from the write
+    const tree = await snapshotTree(p.dir);
+    expect(Object.keys(tree).some((f) => f.includes(".prune-tmp"))).toBe(false);
+  });
+
+  it("a second --write after the record is gone → DECISION_PRUNE_NOT_ELIGIBLE (target_missing)", async () => {
+    const p = await project(ACCEPTED, "done");
+    p.run(["decision", "prune", "design/decisions/foo-rfc.md", "--write", "--json"]); // first prune
+    const res = p.run(["decision", "prune", "design/decisions/foo-rfc.md", "--write", "--json"]);
+    const env = expectJsonErr(res);
+    expect(env.error.code).toBe("DECISION_PRUNE_NOT_ELIGIBLE");
+    const gates = ((env.data as { blocks?: { gate: string }[] }).blocks ?? []).map((b) => b.gate);
+    expect(gates).toContain("target_missing");
+    expect(res.code).toBe(2);
+  });
+
+  it("--write on an ineligible target writes nothing (whole-project snapshot)", async () => {
+    const p = await project("# RFC\n\n**Status:** proposed\n\nx", "done");
+    const before = await snapshotTree(p.dir);
+    const res = p.run(["decision", "prune", "design/decisions/foo-rfc.md", "--write", "--json"]);
+    expect(expectJsonErr(res).error.code).toBe("DECISION_PRUNE_NOT_ELIGIBLE");
+    expect(res.code).toBe(2);
+    expect(await snapshotTree(p.dir)).toEqual(before);
   });
 
   it("ineligible runs are also ZERO-WRITE (whole-project snapshot)", async () => {

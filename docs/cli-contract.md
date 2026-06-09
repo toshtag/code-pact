@@ -191,10 +191,11 @@ CI. (For `error.cause_code` values, see [Public cause codes](#public-cause-codes
 | `PLAN_ANALYZE_FAILED` | `plan analyze` | One or more exit-relevant drift issues found, **or** a ledger-read integrity failure caught while reading the merged ledger (the diagnostic `EVENT_FILE_ID_MISMATCH` / `INVALID_YAML` / `SCHEMA_ERROR` is wrapped here, original cause in `error.message`, never leaked as a top-level code) |
 | `PLAN_MIGRATE_FAILED` (collaboration-safe-state RFC, B4) | `plan migrate` | The migration could not complete — e.g. an existing per-event ledger file is corrupt. Like `plan analyze`, a ledger-read integrity failure (`EVENT_FILE_ID_MISMATCH` / `INVALID_YAML` / `SCHEMA_ERROR`) is wrapped into this command-level code with the original cause in `error.message`, never leaked as a top-level `EVENT_FILE_ID_MISMATCH`. Exit 1 |
 | `TASK_FINALIZE_NOT_ELIGIBLE` | `task finalize` | Task's derived state from the progress ledger is not `done` (raised in **both** dry-run and `--write`) |
-| `DECISION_PRUNE_NOT_ELIGIBLE` | `decision prune` | The target decision record cannot be retired. `data.blocks[].gate` lists every **applicable** failing gate: `target_invalid` / `target_missing` / `target_unreadable` / `target_not_accepted` (not a readable, top-level, accepted `design/decisions/*.md`); `referencing_task_not_done`; `open_commitments`; `live_decision_depends` / `dependency_status_unknown`; `decision_scan_unreadable` / `dependency_unreadable`; `plan_artifacts_unreadable` (an unreadable `roadmap.yaml` / `design/phases/*.yaml`, so referencing tasks can't be fully verified); `link_rewrite_unsupported` (a reference-style inbound link, or a markdown link to the decision inside the append-only `PRUNED.md` ledger) / `link_rewrite_scan_unreadable` (an unreadable doc source — the rewrite plan would be incomplete) — all fail-closed. The **link-rewrite** gates are only evaluated once the target itself is a readable, accepted, top-level record (a `target_*` failure short-circuits them). Exit 2; raised in dry-run (and, in PR-C2, `--write`) — the verdict is identical. See [`decision prune`](#decision-prune) for the success envelope |
+| `DECISION_PRUNE_NOT_ELIGIBLE` | `decision prune` | The target decision record cannot be retired. `data.blocks[].gate` lists every **applicable** failing gate: `target_invalid` / `target_missing` / `target_unreadable` / `target_not_accepted` (not a readable, top-level, accepted `design/decisions/*.md`); `referencing_task_not_done`; `open_commitments`; `live_decision_depends` / `dependency_status_unknown`; `decision_scan_unreadable` / `dependency_unreadable`; `plan_artifacts_unreadable` (an unreadable `roadmap.yaml` / `design/phases/*.yaml`, so referencing tasks can't be fully verified); `link_rewrite_unsupported` (a reference-style inbound link, or a markdown link to the decision inside the append-only `PRUNED.md` ledger) / `link_rewrite_scan_unreadable` (an unreadable doc source — the rewrite plan would be incomplete) — all fail-closed. The **link-rewrite** gates are only evaluated once the target itself is a readable, accepted, top-level record (a `target_*` failure short-circuits them). Exit 2; raised in **both** dry-run and `--write` — the verdict is identical. See [`decision prune`](#decision-prune) for the success envelope |
+| `DECISION_PRUNE_PLAN_STALE` | `decision prune --write` | The working tree changed under the plan: re-collecting inbound links no longer reproduces the plan exactly, or a span no longer byte-matches its collected `raw_link` at apply time (a concurrent edit, or a tree that moved since the plan was built). `--write` re-validates before touching disk, so this aborts with **zero writes**. `data` is `{ mode: "write", decision, stale[] }` where each `stale[]` entry is `{source_file, line, column, expected, found}`. Exit 2; re-run `decision prune` to rebuild the plan |
 | `TASK_FINALIZE_WRITE_REFUSED` | `task finalize --write` | Safety check refused the phase YAML write (unsafe path, outside `design/phases/`, symlink escape, unparseable, etc.) |
 | `PHASE_RECONCILE_WRITE_REFUSED` | `phase reconcile --write` | Every eligible task write in the phase was refused for safety reasons. Partial successes return exit 0; this fires only when **all** writes refused |
-| `LOCK_HELD` (v1.5+ / P14) | `init --sample-phase`, `init` wizard, `phase add`, `phase new`, `phase import`, `task add`, `task finalize --write`, `phase reconcile --write`, `plan adopt --write`, `plan sync-paths --write` | Another code-pact mutation is in progress on the same project. The envelope's `data.lock_holder` carries `{pid, hostname, cmd, created_at}` for diagnostic display; `data.lock_path` is the lock file path. Transient + retryable — wait for the holder to release, or manually delete the lock file if you are certain no process holds it |
+| `LOCK_HELD` (v1.5+ / P14) | `init --sample-phase`, `init` wizard, `phase add`, `phase new`, `phase import`, `task add`, `task finalize --write`, `phase reconcile --write`, `plan adopt --write`, `plan sync-paths --write`, `decision prune --write` | Another code-pact mutation is in progress on the same project. The envelope's `data.lock_holder` carries `{pid, hostname, cmd, created_at}` for diagnostic display; `data.lock_path` is the lock file path. Transient + retryable — wait for the holder to release, or manually delete the lock file if you are certain no process holds it |
 | `WRITES_AUDIT_STRICT_FAILED` (v1.6+ / P15-T6) | `task finalize --audit-strict` | The audit emitted at least one `TASK_WRITES_AUDIT_*` warning and `--audit-strict` was supplied. Exit code is **1** (not 2 — the invocation was well-formed; only the strict gate refused). The envelope carries the full `write_audit` plus `applied: false` to make the no-mutation guarantee machine-readable |
 | `CONTEXT_OVER_BUDGET` (v1.13+ / P24) | `task context --budget-bytes`, `task prepare --budget-bytes` | Even maximal section elision could not bring the rendered pack at or below the requested byte budget. Exit code 2. The envelope carries `data.budget_bytes`, `data.minimum_achievable_bytes` (the post-maximal-elision size — re-running with this value as the budget succeeds), and `data.unelidable_sections` (the structural floor) |
 | `INTERNAL_ERROR` | any command | Reserved for unhandled exceptions |
@@ -2231,9 +2232,9 @@ code-pact phase reconcile P11 --write --json
 
 ## `decision prune`
 
-`decision prune <path> [--json]` previews retiring a shipped, **accepted** decision record from the live plane. **Dry-run only in this release** — it deletes nothing, rewrites no links, and appends no `PRUNED.md` row; it reports the eligibility verdict and the complete inbound-link rewrite plan the future `--write` path will execute. The verdict and the plan are produced by code shared with `--write` — dry-run never relaxes a gate or shortens the plan. Eligible exits 0; ineligible exits 2 with [`DECISION_PRUNE_NOT_ELIGIBLE`](#public-codes-top-level-error-envelopes).
+`decision prune <path> [--write] [--json]` retires a shipped, **accepted** decision record from the live plane. **Dry-run by default** — it deletes nothing, rewrites no links, and appends no `PRUNED.md` row; it reports the eligibility verdict and the complete inbound-link rewrite plan. `--write` **executes** that plan: it removes the record, rewrites each inbound link, and appends a `PRUNED.md` row. The verdict and the plan are produced by code shared between dry-run and `--write` — dry-run never relaxes a gate or shortens the plan, and `--write` re-runs the same collector at apply time (it never re-parses or re-interprets a stored plan). Eligible exits 0; ineligible exits 2 with [`DECISION_PRUNE_NOT_ELIGIBLE`](#public-codes-top-level-error-envelopes) (the verdict is identical for dry-run and `--write`).
 
-Success envelope (`--json`):
+Dry-run success envelope (`--json`):
 
 ```json
 {
@@ -2270,7 +2271,38 @@ Success envelope (`--json`):
 
 A **reference-style** inbound link (`[t][label]` + `[label]: url`) cannot be rewritten span-locally without touching its usages, and an **unreadable** doc source means the plan would be incomplete — both fail closed as `DECISION_PRUNE_NOT_ELIGIBLE` (`link_rewrite_unsupported` / `link_rewrite_scan_unreadable`), not as silently-dropped items.
 
-`warnings[]` carries advisories (e.g. an eligible target that no task references — prune cannot prove it shipped). `--write` (file delete + link rewrite + ledger append) is not yet a flag; passing it is a `CONFIG_ERROR`.
+`warnings[]` carries advisories (e.g. an eligible target that no task references — prune cannot prove it shipped).
+
+### `decision prune --write`
+
+`--write` executes the plan under the project's [advisory write lock](#public-codes-top-level-error-envelopes) (`LOCK_HELD` on contention). It runs in crash-safe order:
+
+1. **Re-validate.** The plan must still describe the live tree exactly — `--write` re-collects inbound links and refuses if anything moved (a shifted span, a link reclassified into code/image, a removed link, a **new** inbound link the plan would not rewrite, or a source that became unreadable / reference-style), then re-reads each source and confirms every span still byte-equals its `raw_link`. Any divergence aborts with [`DECISION_PRUNE_PLAN_STALE`](#public-codes-top-level-error-envelopes) (exit 2) **before a single byte is written**.
+2. **Rewrite inbound links** (per file, back-to-front, each file written atomically via temp + rename), so even a later failure leaves no dangling link.
+3. **Append the `PRUNED.md` ledger row** (created with its header when absent; existing ledgers are only appended to). The decision path is recorded as a **code span**, never a link, so the ledger never references the file it removes.
+4. **Delete the record** — the only irreversible step, done last, after links point nowhere and the durable tombstone row exists.
+
+Cross-file atomicity is not claimed (a POSIX filesystem cannot transact across files without a journal); the guarantee is that `--write` never leaves a **broken-link or `validate`-breaking** intermediate state. Because the ledger row is written before the deletion, the record's removal never outruns its audit row (a ledger row for a still-present file is benign — the status-aware ref check only consults the ledger once the file is absent).
+
+`--write` success envelope (`--json`):
+
+```json
+{
+  "ok": true,
+  "data": {
+    "mode": "write",
+    "decision": "design/decisions/foo-rfc.md",
+    "removed_file": "design/decisions/foo-rfc.md",
+    "link_rewrites_applied": [
+      { "source_file": "docs/x.md", "line": 3, "column": 5, "rewrite_action": "delink", "before": "[d](../design/decisions/foo-rfc.md)", "after": "d" }
+    ],
+    "ledger_row": "| `design/decisions/foo-rfc.md` | P1-T1 | 2026-06-09 | git history |",
+    "warnings": []
+  }
+}
+```
+
+Pruning a record that is **already gone** (a second `--write`) exits 2 with `DECISION_PRUNE_NOT_ELIGIBLE` / `target_missing` — fail-closed, not a convergent no-op.
 
 ## `task runbook` — read-only guidance for a single task (v1.3+, P12)
 

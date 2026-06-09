@@ -1,9 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile, readFile, access } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   runDecisionPrune,
+  runDecisionPruneWrite,
+  serializeDecisionPruneWrite,
+  formatDecisionPruneWriteHuman,
   serializeDecisionPrune,
   formatDecisionPruneHuman,
   notEligibleMessage,
@@ -239,6 +242,71 @@ describe("runDecisionPrune", () => {
     expect(gates).toContain("link_rewrite_unsupported"); // not hidden behind core ineligibility
   });
 
+});
+
+describe("runDecisionPruneWrite (--write execution)", () => {
+  const NOW = new Date("2026-06-09T12:00:00Z");
+
+  it("applies the plan: removes the file, rewrites a body link, appends a dated ledger row", async () => {
+    await writeDecision("foo-rfc.md");
+    await writeDoneTaskPhase("design/decisions/foo-rfc.md");
+    await mkdir(join(cwd, "docs"), { recursive: true });
+    await writeFile(
+      join(cwd, "docs", "x.md"),
+      "# X\n\nSee [the decision](../design/decisions/foo-rfc.md).\n",
+    );
+
+    const outcome = await runDecisionPruneWrite(cwd, "design/decisions/foo-rfc.md", { now: NOW });
+    expect(outcome.kind).toBe("applied");
+    if (outcome.kind !== "applied") return;
+
+    expect(outcome.removed_file).toBe("design/decisions/foo-rfc.md");
+    expect(outcome.link_rewrites_applied).toHaveLength(1);
+    expect(outcome.ledger_row).toContain("`design/decisions/foo-rfc.md`");
+    expect(outcome.ledger_row).toContain("2026-06-09"); // date from the injected clock
+    expect(outcome.ledger_row).toContain("P1-T1"); // referencing task recorded
+
+    // disk effects
+    await expect(access(join(cwd, "design", "decisions", "foo-rfc.md"))).rejects.toThrow();
+    expect(await readFile(join(cwd, "docs", "x.md"), "utf8")).toBe("# X\n\nSee the decision.\n");
+    expect(await readFile(join(cwd, "design", "decisions", "PRUNED.md"), "utf8")).toContain(
+      "P1-T1",
+    );
+
+    // serializer exposes the write contract
+    const data = serializeDecisionPruneWrite(outcome);
+    expect(data).toMatchObject({ mode: "write", decision: "design/decisions/foo-rfc.md" });
+    expect(data).toHaveProperty("removed_file");
+    expect(data).toHaveProperty("link_rewrites_applied");
+    expect(data).toHaveProperty("ledger_row");
+    // human output names the removal + ledger
+    const human = formatDecisionPruneWriteHuman(outcome);
+    expect(human).toContain("PRUNED");
+    expect(human).toContain("docs/x.md");
+  });
+
+  it("records '—' for phase/task when no task references the (still-eligible) decision", async () => {
+    await writeDecision("foo-rfc.md");
+    await writeValidEmptyPlan();
+    const outcome = await runDecisionPruneWrite(cwd, "design/decisions/foo-rfc.md", { now: NOW });
+    expect(outcome.kind).toBe("applied");
+    if (outcome.kind !== "applied") return;
+    expect(outcome.ledger_row).toContain("| — |"); // no referencing task
+    expect(outcome.warnings.length).toBeGreaterThan(0); // still warns it can't prove shipment
+  });
+
+  it("ineligible target → kind 'ineligible', NOTHING written", async () => {
+    await writeDecision("foo-rfc.md", "# RFC\n\n**Status:** proposed\n\nx");
+    const outcome = await runDecisionPruneWrite(cwd, "design/decisions/foo-rfc.md", { now: NOW });
+    expect(outcome.kind).toBe("ineligible");
+    if (outcome.kind !== "ineligible") return;
+    expect(outcome.dryRun.eligible).toBe(false);
+    // the record is untouched and no ledger was created
+    expect(await readFile(join(cwd, "design", "decisions", "foo-rfc.md"), "utf8")).toContain(
+      "proposed",
+    );
+    await expect(access(join(cwd, "design", "decisions", "PRUNED.md"))).rejects.toThrow();
+  });
 });
 
 describe("decision-prune renderers", () => {
