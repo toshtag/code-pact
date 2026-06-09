@@ -5,6 +5,8 @@ import {
   partitionByMajor,
   planArchive,
   renderChangelog,
+  majorsFromPointer,
+  archiveConflicts,
 } from "../../../scripts/changelog-archive.mjs";
 import { extractReleaseNotes } from "../../../scripts/release-notes.mjs";
 
@@ -114,6 +116,60 @@ describe("renderChangelog", () => {
     const { kept } = partitionByMajor(blocks, 1);
     const rendered = renderChangelog(preamble, kept, [0]);
     expect(rendered.match(/## Older versions/g)).toHaveLength(1);
+  });
+});
+
+describe("rolling archive across majors (no dropped pointers)", () => {
+  // A CHANGELOG already on v2 work, with v1.x still inline and an EXISTING pointer to the v0 archive.
+  const V2 = `# Changelog
+
+## [Unreleased]
+
+- wip
+
+## [2.0.0] — 2026-08-01
+
+- v2 ga
+
+## [1.5.0] — 2026-07-01
+
+- a v1 thing
+
+## Older versions
+
+Releases before the current major are archived (moved verbatim, not deleted):
+
+- v0.x — [docs/maintainers/history/CHANGELOG-0.md](docs/maintainers/history/CHANGELOG-0.md)
+`;
+
+  it("majorsFromPointer reads majors from an existing pointer block", () => {
+    expect(majorsFromPointer("- v0.x — [x](docs/maintainers/history/CHANGELOG-0.md)\n- v1.x — [y](docs/maintainers/history/CHANGELOG-1.md)")).toEqual([0, 1]);
+  });
+
+  it("archiving v1.x at currentMajor=2 KEEPS the existing v0.x pointer (union, not replace)", () => {
+    const plan = planArchive(V2, 2);
+    expect(plan.changed).toBe(true);
+    expect(plan.archive.map((a: { major: number }) => a.major)).toEqual([1]);
+    // both archives are discoverable from the main CHANGELOG
+    expect(plan.newChangelog).toContain("CHANGELOG-1.md");
+    expect(plan.newChangelog).toContain("CHANGELOG-0.md"); // <- not dropped
+    expect(plan.newChangelog).not.toContain("## [1.5.0]"); // v1 moved out
+    // a single pointer block, listing both majors descending
+    expect(plan.newChangelog.match(/## Older versions/g)).toHaveLength(1);
+  });
+});
+
+describe("archiveConflicts (refuse to overwrite a different existing archive)", () => {
+  const archive = [{ major: 0, path: "history/CHANGELOG-0.md", content: "FULL", versions: [] }];
+
+  it("absent target → no conflict (fresh create)", () => {
+    expect(archiveConflicts(archive, () => null)).toEqual([]);
+  });
+  it("identical existing target → no conflict (re-applying a partial run)", () => {
+    expect(archiveConflicts(archive, () => "FULL")).toEqual([]);
+  });
+  it("different existing target → conflict (would lose history)", () => {
+    expect(archiveConflicts(archive, () => "only a leaked fragment")).toEqual(["history/CHANGELOG-0.md"]);
   });
 });
 

@@ -23,6 +23,11 @@ export function partitionByMajor(
 ): { kept: ChangelogBlock[]; archivedByMajor: Map<number, ChangelogBlock[]> };
 export function renderArchiveFile(major: number, blocks: ChangelogBlock[]): string;
 export function renderPointer(majors: number[]): string;
+export function majorsFromPointer(pointerText: string): number[];
+export function archiveConflicts(
+  archive: ArchiveEntry[],
+  readOrNull: (path: string) => string | null,
+): string[];
 export function renderChangelog(
   preamble: string,
   keptBlocks: ChangelogBlock[],
