@@ -2,11 +2,12 @@ import { mkdir, rename, writeFile, unlink } from "node:fs/promises";
 import { dirname } from "node:path";
 
 async function writeThenRename(tmp: string, path: string, content: string): Promise<void> {
-  await writeFile(tmp, content, "utf8");
   try {
+    await writeFile(tmp, content, "utf8");
     await rename(tmp, path);
   } catch (err) {
-    // Best-effort: never leave a stray temp file behind on a rename failure.
+    // Best-effort: never leave a stray temp file behind, whether the failure was
+    // the temp write (e.g. ENOSPC mid-write) or the rename.
     await unlink(tmp).catch(() => {});
     throw err;
   }
@@ -36,6 +37,11 @@ export async function atomicWriteText(
  * write fails rather than silently re-creating the deleted tree with stale
  * content. For destructive in-place rewrites (e.g. `decision prune --write`
  * delinking inbound references) where re-creating a vanished file would be wrong.
+ *
+ * NOTE: this is **not** a compare-and-swap. It does not stat the destination, and
+ * `rename` still creates the destination if it vanished after the temp write. The
+ * caller is responsible for re-reading / re-stat-ing the destination immediately
+ * before calling (as `decision prune --write` does, refusing on any drift).
  */
 export async function atomicReplaceExistingText(
   path: string,

@@ -49,7 +49,7 @@ Retires a shipped decision from the live plane. Reuses the existing **prune-if-c
 
 These gates are exactly the "integrity + no future conflict" guarantee: you can only retire a settled decision whose every obligation is discharged. The verdict is one pure function (`evaluatePrune`) that `--dry-run` and `--write` share — dry-run never relaxes a gate.
 
-**On `--write`:** remove the decision file; rewrite inbound `.md` references (the README index row → a tombstone line; other doc/RFC links → delink, or repoint at the CHANGELOG entry); append a ledger row. The `decision_refs` check (1) then tolerates the absent pruned decision silently.
+**On `--write`** (least-harmful order): append the `PRUNED.md` ledger row **first**, then rewrite inbound `.md` references (the README index row → a tombstone line; other doc/RFC links → delink), then remove the decision file **last**. The `decision_refs` check (1) then tolerates the absent pruned decision silently.
 
 ### 3. Tombstone ledger — `design/decisions/PRUNED.md`
 
@@ -84,7 +84,7 @@ Direct answer to "should release notes be the source of truth?" — **No.** `CHA
 
 - **New command** `decision prune`.
   - **Dry-run surface (PR-C1b/C1c):** `decision prune <path> [--json]` — reports the verdict + plan, writes nothing. Success envelope: `{ mode, decision, eligible, blocks, referencing_tasks, plan, warnings }`, where `plan.link_rewrite` is `{ status: "ready", items: LinkRewriteItem[] }` — the **complete** inbound-link rewrite plan the shared collector produces; a reference-style or unreadable inbound source fails closed as a block, never a silently-dropped item.
-  - **Write surface (PR-C2):** `--write` executes that same plan under the advisory write lock — re-validates every link span (fail-closed `DECISION_PRUNE_PLAN_STALE` with zero writes on any mismatch), rewrites inbound links then deletes the record (crash-safe order — no dangling-link intermediate state), and appends a `PRUNED.md` row (path recorded as a code span, never a link). Success envelope: `{ mode: "write", decision, removed_file, link_rewrites_applied, ledger_row, warnings }`. `--policy <v>` still follows once `decision_retention` lands (PR-D). Documented in `cli-contract.md` § `decision prune`.
+  - **Write surface (PR-C2):** `--write` executes that same plan under the advisory write lock — a no-write preflight re-validates (target + every link span + ledger read; fail-closed `DECISION_PRUNE_PLAN_STALE` / `DECISION_PRUNE_WRITE_FAILED` with zero writes), then commits in crash-safe order: **append the `PRUNED.md` row first** (path recorded as a code span, never a link; idempotent — a decision already recorded is not duplicated), **rewrite inbound links** (each re-read just before its write so a concurrent edit is never clobbered), **delete the record last**. Success envelope: `{ mode: "write", decision, removed_file, link_rewrites_applied, ledger_row, warnings }`. `--policy <v>` still follows once `decision_retention` lands (PR-D). Documented in `cli-contract.md` § `decision prune`.
 - **New public error code** `DECISION_PRUNE_NOT_ELIGIBLE` (exit 2); `KNOWN_CODES.public` += 1; `cli-contract.md` + `troubleshooting.md` entries.
 - **`TASK_DECISION_REF_NOT_FOUND` / `TASK_ACCEPTANCE_REF_NOT_FOUND`** gain status-awareness — a `done`-task severity *loosening* only; never tightens an existing plan. Documented in `cli-contract.md`.
 - **New optional `project.yaml` field** `decision_retention` (default `keep-full` → fully backward-compatible).

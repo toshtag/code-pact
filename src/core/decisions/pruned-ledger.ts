@@ -79,17 +79,8 @@ function extractPath(cell: string): string | null {
  * actually missing AND the referencing task is `done` before silencing — a
  * present file, or a live task, is never silenced by a ledger entry alone.
  */
-export async function readPrunedLedger(cwd: string): Promise<Set<string>> {
-  let text: string;
-  try {
-    text = await readFile(join(cwd, "design", "decisions", "PRUNED.md"), "utf8");
-  } catch {
-    // Any read failure (absent ENOENT, EACCES, EISDIR) → empty set. This is the
-    // fail-CLOSED direction: an unreadable ledger silences nothing, so a genuinely
-    // pruned ref simply warns again rather than a broken ledger silencing refs it
-    // never listed. Swallowing is therefore safe here, not a hidden hazard.
-    return new Set();
-  }
+/** Parse the SET of normalized pruned-decision paths from ledger text. */
+export function parsePrunedLedger(text: string): Set<string> {
   const out = new Set<string>();
   for (const line of text.split(/\r?\n/)) {
     const m = TABLE_ROW.exec(line);
@@ -104,6 +95,21 @@ export async function readPrunedLedger(cwd: string): Promise<Set<string>> {
     const path = normalizePrunedDecisionPath(raw);
     if (path) out.add(path); // entries outside design/decisions/**.md are ignored
   }
+  return out;
+}
+
+export async function readPrunedLedger(cwd: string): Promise<Set<string>> {
+  let text: string;
+  try {
+    text = await readFile(join(cwd, "design", "decisions", "PRUNED.md"), "utf8");
+  } catch {
+    // Any read failure (absent ENOENT, EACCES, EISDIR) → empty set. This is the
+    // fail-CLOSED direction: an unreadable ledger silences nothing, so a genuinely
+    // pruned ref simply warns again rather than a broken ledger silencing refs it
+    // never listed. Swallowing is therefore safe here, not a hidden hazard.
+    return new Set();
+  }
+  const out = parsePrunedLedger(text);
   return out;
 }
 
@@ -158,6 +164,14 @@ export type PreparedLedger = {
   content: string;
   /** The serialized new row (for the result envelope). */
   row: string;
+  /** The exact bytes read at prepare time — for a write-time drift check (`""` when absent). */
+  existing_content: string;
+  /**
+   * `true` when the decision is ALREADY recorded in the ledger — appending again
+   * would duplicate the tombstone, so the caller should skip the write. Makes a
+   * retry after a partial-failure prune idempotent on the ledger.
+   */
+  already_recorded: boolean;
 };
 
 /**
@@ -184,22 +198,28 @@ export async function buildAppendedLedger(
     existing = "";
   }
   const line = serializePrunedRow(row);
-  const content =
-    existing.trim() === ""
+  const normalized = normalizePrunedDecisionPath(row.decision);
+  const already_recorded = normalized !== null && parsePrunedLedger(existing).has(normalized);
+  // Idempotent on retry: if this decision is already recorded, do not append a
+  // duplicate tombstone — leave the ledger byte-identical.
+  const content = already_recorded
+    ? existing
+    : existing.trim() === ""
       ? `${LEDGER_HEADER}${line}\n`
       : existing.endsWith("\n")
         ? `${existing}${line}\n`
         : `${existing}\n${line}\n`;
-  return { ledger_path, content, row: line };
+  return { ledger_path, content, row: line, existing_content: existing, already_recorded };
 }
 
 /**
  * Append a row to `design/decisions/PRUNED.md`, creating the file with its
- * header when absent. Append-only: an existing ledger is never rewritten, only
- * extended. Goes through the shared {@link atomicWriteText} primitive (temp +
- * rename) and is symlink-escape guarded.
+ * header when absent. Append-only and idempotent: an existing ledger is only
+ * extended, and a decision already recorded is not duplicated. Goes through the
+ * shared {@link atomicWriteText} primitive (temp + rename), symlink-escape guarded.
  */
 export async function appendPrunedLedger(cwd: string, row: PrunedLedgerRow): Promise<void> {
   const prepared = await buildAppendedLedger(cwd, row);
+  if (prepared.already_recorded) return; // no duplicate tombstone
   await atomicWriteText(prepared.ledger_path, prepared.content);
 }

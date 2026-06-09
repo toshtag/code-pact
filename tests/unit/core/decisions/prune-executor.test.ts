@@ -267,3 +267,50 @@ describe("applyPrune — concurrent edit / removal during commit (ChatGPT round 
     expect(await read("docs/x.md")).toBe("See d.\n");
   });
 });
+
+describe("applyPrune — ledger drift & retry idempotency (ChatGPT round 4)", () => {
+  it("PRUNED.md edited between preflight and the ledger write is NOT clobbered → write_failed(append_ledger)", async () => {
+    await write("docs/x.md", "See [d](../design/decisions/foo-rfc.md).\n");
+    const { items } = await collectInboundLinks(cwd, TARGET);
+    // an existing ledger (for an unrelated decision) the prune would append to
+    await write(
+      "design/decisions/PRUNED.md",
+      "# Pruned decisions\n\n| Decision | x |\n| --- | --- |\n| `design/decisions/bar-rfc.md` | P0 | 2026-01-01 | git |\n",
+    );
+    const docBefore = await read("docs/x.md");
+    const edited = "# Pruned decisions\n\nMANUAL EDIT — keep me.\n";
+
+    const err = await applyPrune(
+      cwd,
+      { remove_file: TARGET, items, ledger: LEDGER },
+      { beforeLedgerWrite: async () => { await write("design/decisions/PRUNED.md", edited); } },
+    ).catch((e) => e);
+
+    expect(err).toBeInstanceOf(PruneWriteError);
+    expect((err as PruneWriteError).phase).toBe("append_ledger");
+    expect((err as PruneWriteError).partial_applied).toBe(false);
+    // the manual ledger edit survived; docs + record untouched (ledger is first).
+    expect(await read("design/decisions/PRUNED.md")).toBe(edited);
+    expect(await read("docs/x.md")).toBe(docBefore);
+    expect(await exists(TARGET)).toBe(true);
+  });
+
+  it("re-running on a decision already in the ledger does NOT duplicate the tombstone", async () => {
+    await write("docs/x.md", "See [d](../design/decisions/foo-rfc.md).\n");
+    const { items } = await collectInboundLinks(cwd, TARGET);
+    // foo is ALREADY recorded (a prior partial-failure prune wrote the row)
+    await write(
+      "design/decisions/PRUNED.md",
+      "# Pruned decisions\n\n| Decision | x |\n| --- | --- |\n| `design/decisions/foo-rfc.md` | P1-T1 | 2026-06-09 | git history |\n",
+    );
+
+    await applyPrune(cwd, { remove_file: TARGET, items, ledger: LEDGER });
+
+    const ledger = await read("design/decisions/PRUNED.md");
+    expect(ledger.match(/foo-rfc\.md/g)).toHaveLength(1); // not duplicated
+    expect(await readPrunedLedger(cwd)).toEqual(new Set([TARGET]));
+    // the rest of the prune still ran
+    expect(await read("docs/x.md")).toBe("See d.\n");
+    expect(await exists(TARGET)).toBe(false);
+  });
+});

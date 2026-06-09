@@ -209,6 +209,8 @@ type PendingRewrite = {
  * Never set in production — `runDecisionPruneWrite` passes none.
  */
 export type ApplyPruneHooks = {
+  /** Invoked just before the ledger's write-time re-read (e.g. mutate PRUNED.md to simulate a concurrent edit). */
+  beforeLedgerWrite?: () => Promise<void>;
   /** Invoked just before a source file's write-time re-read (e.g. mutate it to simulate a concurrent edit). */
   beforeSourceWrite?: (rel: string) => Promise<void>;
   /** Invoked just before the record's delete (e.g. remove it to simulate a concurrent unlink). */
@@ -348,11 +350,30 @@ export async function applyPrune(
   // ── Phase 2: commit, ordered so a failure is least harmful ──
 
   // 2a. Ledger FIRST. A row for a still-present record is benign, so if this
-  // fails NO doc has been touched yet → inbound docs stay byte-identical.
-  try {
-    await atomicWriteText(prepared.ledger_path, prepared.content);
-  } catch (err) {
-    throw new PruneWriteError("append_ledger", false, errDetail(err));
+  // fails NO doc has been touched yet → inbound docs stay byte-identical. When
+  // the decision is already recorded (an idempotent retry after a partial
+  // failure), skip the write so the tombstone is not duplicated. Otherwise
+  // re-read the ledger immediately before writing and refuse if it changed since
+  // preflight — symmetric with the source drift guard, so a concurrent/manual
+  // edit to PRUNED.md is never clobbered.
+  if (!prepared.already_recorded) {
+    try {
+      if (hooks.beforeLedgerWrite) await hooks.beforeLedgerWrite();
+      let currentLedger = "";
+      try {
+        currentLedger = await readFile(prepared.ledger_path, "utf8");
+      } catch (err) {
+        if (errDetail(err) !== "ENOENT") throw err;
+        currentLedger = "";
+      }
+      if (currentLedger !== prepared.existing_content) {
+        throw new PruneWriteError("append_ledger", false, "ledger (PRUNED.md) changed after preflight");
+      }
+      await atomicWriteText(prepared.ledger_path, prepared.content);
+    } catch (err) {
+      if (err instanceof PruneWriteError) throw err;
+      throw new PruneWriteError("append_ledger", false, errDetail(err));
+    }
   }
 
   // 2b. Rewrite inbound links. Re-read each source IMMEDIATELY before writing and

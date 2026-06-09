@@ -337,6 +337,48 @@ describe("runDecisionPruneWrite (--write execution)", () => {
     });
     expect(writeFailedMessage(outcome)).toContain("nothing was written");
   });
+
+  it("rewrite_links failure (concurrent source edit) → write_failed contract at the command boundary", async () => {
+    await writeDecision("foo-rfc.md");
+    await writeDoneTaskPhase("design/decisions/foo-rfc.md");
+    await mkdir(join(cwd, "docs"), { recursive: true });
+    await writeFile(join(cwd, "docs", "x.md"), "See [d](../design/decisions/foo-rfc.md).\n");
+
+    const outcome = await runDecisionPruneWrite(cwd, "design/decisions/foo-rfc.md", {
+      now: NOW,
+      hooks: { beforeSourceWrite: async () => { await writeFile(join(cwd, "docs", "x.md"), "EDITED.\n"); } },
+    });
+    expect(outcome.kind).toBe("write_failed");
+    if (outcome.kind !== "write_failed") return;
+    expect(outcome.phase).toBe("rewrite_links");
+    expect(outcome.partial_applied).toBe(true);
+    expect(serializeDecisionPruneWriteFailed(outcome)).toMatchObject({
+      phase: "rewrite_links",
+      partial_applied: true,
+    });
+    expect(writeFailedMessage(outcome)).toContain("inspect the working tree");
+  });
+
+  it("delete_record failure (record vanished) → write_failed contract at the command boundary", async () => {
+    await writeDecision("foo-rfc.md");
+    await writeDoneTaskPhase("design/decisions/foo-rfc.md");
+    await mkdir(join(cwd, "docs"), { recursive: true });
+    await writeFile(join(cwd, "docs", "x.md"), "See [d](../design/decisions/foo-rfc.md).\n");
+
+    const outcome = await runDecisionPruneWrite(cwd, "design/decisions/foo-rfc.md", {
+      now: NOW,
+      hooks: { beforeDelete: async () => { await rm(join(cwd, "design", "decisions", "foo-rfc.md")); } },
+    });
+    expect(outcome.kind).toBe("write_failed");
+    if (outcome.kind !== "write_failed") return;
+    expect(outcome.phase).toBe("delete_record");
+    expect(outcome.partial_applied).toBe(true);
+    expect(serializeDecisionPruneWriteFailed(outcome)).toMatchObject({
+      phase: "delete_record",
+      partial_applied: true,
+    });
+    expect(writeFailedMessage(outcome)).toContain("inspect the working tree");
+  });
 });
 
 describe("decision-prune renderers", () => {

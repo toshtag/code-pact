@@ -9,6 +9,7 @@ import {
   PrunePlanStaleError,
   PruneWriteError,
   type AppliedRewrite,
+  type ApplyPruneHooks,
   type PruneStaleSpan,
   type PruneWritePhase,
 } from "../core/decisions/prune-executor.ts";
@@ -275,7 +276,7 @@ function formatPrunedDate(now: Date): string {
 export async function runDecisionPruneWrite(
   cwd: string,
   target: string,
-  opts: { now: Date },
+  opts: { now: Date; hooks?: ApplyPruneHooks },
 ): Promise<DecisionPruneWriteOutcome> {
   const dryRun = await runDecisionPrune(cwd, target);
   if (!dryRun.eligible || dryRun.plan === null || dryRun.decision === null) {
@@ -283,16 +284,20 @@ export async function runDecisionPruneWrite(
   }
   const refs = dryRun.evaluation.referencing_tasks.map((t) => t.task_id);
   try {
-    const applied = await applyPrune(cwd, {
-      remove_file: dryRun.plan.remove_file,
-      items: dryRun.plan.link_rewrite.items,
-      ledger: {
-        decision: dryRun.decision,
-        phase_task: refs.length > 0 ? refs.join(", ") : "—",
-        pruned_date: formatPrunedDate(opts.now),
-        rationale_home: "git history",
+    const applied = await applyPrune(
+      cwd,
+      {
+        remove_file: dryRun.plan.remove_file,
+        items: dryRun.plan.link_rewrite.items,
+        ledger: {
+          decision: dryRun.decision,
+          phase_task: refs.length > 0 ? refs.join(", ") : "—",
+          pruned_date: formatPrunedDate(opts.now),
+          rationale_home: "git history",
+        },
       },
-    });
+      opts.hooks ?? {},
+    );
     return {
       kind: "applied",
       decision: dryRun.decision,
