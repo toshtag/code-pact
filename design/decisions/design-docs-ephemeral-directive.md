@@ -182,11 +182,12 @@ so "events exist" is never by itself a license to delete the YAML.
    RFC cross-references deep-link `design/decisions/*.md` heavily (the checker
    resolves 800+ relative links today), and A3/A7 cannot pass without both
    halves. Budget it as its own reviewed layer inside step 7.
-   **This PR's own footprint:** it adds public links (root `README.md`,
-   `docs/positioning.md`) to *this transitional directive*. Retiring the directive
-   (or `rm -rf design/decisions`) must therefore **also remove or redirect those
-   public links** before A7 can pass — they are part of the inbound set half (i)
-   must clear.
+   **This PR's own footprint:** it adds a public **link** from root `README.md` and
+   a public **textual reference** from `docs/positioning.md` to *this transitional
+   directive*. Retiring the directive (or `rm -rf design/decisions`) must therefore
+   **also remove or redirect that public link / reference** before A7 can pass —
+   the link is part of the inbound set half (i) must clear; the plain reference
+   must be reworded.
 
 ## Quarantined (do not accrete v2.0 direction from these)
 

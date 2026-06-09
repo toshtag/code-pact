@@ -5,11 +5,18 @@ ships. Each file states a **Status**, **Scope**, **Owners**, and **Related**
 decisions; the longer ones open with a plain-language **Summary**. These are
 the *why* behind the code — the user-facing *how* lives in [`docs/`](../../docs/README.md).
 
-> **Do not rename or move a gate-referenced RFC** unless you update every
-> `acceptance_refs` / `decision_refs` that names it in `design/phases/*.yaml`
-> (and the index below). A non-gate history record — one no `decision_refs` /
-> `acceptance_refs` points at — may be moved out after you confirm that; see
-> [What belongs here](#what-belongs-here-and-what-does-not) for where it goes.
+> **Current (pre-v2.0) rule: do not rename or move a gate-referenced RFC** unless
+> you update every `acceptance_refs` / `decision_refs` that names it in
+> `design/phases/*.yaml` (and the index below). A non-gate history record — one no
+> `decision_refs` / `acceptance_refs` points at — may be moved out after you
+> confirm that; see [What belongs here](#what-belongs-here-and-what-does-not) for
+> where it goes.
+>
+> The [design-docs-ephemeral directive](design-docs-ephemeral-directive.md)
+> **supersedes this rule only for retired / settled decisions represented by a
+> validated `.code-pact/state` decision-state record** — those become removable
+> even when a gate referenced them. **Until those records and readers land, this
+> warning stays enforceable** for every decision still resolved from `design/`.
 
 | Phase | Decision | What it decided |
 | --- | --- | --- |

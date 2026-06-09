@@ -22,9 +22,13 @@ decision in this project.
   Partial state must never be silently created. Idempotent operations are preferred.
 
 - **Runtime truth is moving to `.code-pact/state` (v2.0 target model — in
-  transition, not yet implemented).** The v2.0 target: active tasks resolve
-  against `.code-pact/state` plus generated, deterministic control snapshots;
-  `design/` becomes the human authoring surface and *historical working docs* —
+  transition, not yet implemented).** The v2.0 target: **archived / completed
+  phase references and retired / settled decision outcomes** resolve from
+  `.code-pact/state` plus generated, deterministic control snapshots. The
+  **active roadmap and not-yet-archived phase / task definitions remain `design/`
+  inputs** — relocating *those* into `.code-pact/state` is a separate future step,
+  explicitly out of v2.0 scope. `design/` becomes the human authoring surface and
+  *historical working docs* —
   **completed** `design/phases/*.yaml` and **retired** `design/decisions/*.md`
   become **ephemeral** (removable / `.gitignore`-able once their
   active-task-needed state is snapshotted; missing *archived/historical* docs
