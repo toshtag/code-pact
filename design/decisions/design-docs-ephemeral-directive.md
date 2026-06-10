@@ -116,44 +116,65 @@ so "events exist" is never by itself a license to delete the YAML.
 
 ## Build order (staged PRs — reader-side backward compatibility throughout)
 
+> **Status at a glance (for the next session):** ✅ done = 0, 1, 2a (#405), 3
+> (#406), 2c (#407). ⬜ not started = **2b** (decision read seam — the next
+> candidate), 4, 5, 6, 7. Nothing destructive has shipped yet; no reader consumes
+> the `.code-pact/state` archive records yet. The writers from step 3 exist
+> (`src/core/archive/`), fully validated, but unused by any reader. The locked
+> contract to honor going forward: the live phase/decision loaders return full
+> `Phase` / resolve from the live `.md` ONLY — archived resolution (steps 4–6) is
+> a SEPARATE archived-aware path, never a snapshot coerced into `Phase` or a gate
+> released from absence.
+
 0. This directive (foundation, reviewed first) + the `constitution` update.
 1. Recovery report / inventory (continue / discard / quarantine). ✅ done.
 2a. **`loadPhase` dedupe** — the 8 byte-identical `loadPhase` copies (+ 2
-   re-export importers) now route through `src/core/plan/load-phase.ts`. Pure,
-   behavior-identical. **✅ done — but this is NOT the complete phase read seam.**
-   Phase YAML is still read *outside* the seam by: `core/plan/resolve-task.ts`
-   (the eager all-phases loop — the very path that breaks on a hand-`rm` today),
-   `core/plan/state.ts` (`loadPlanState` strict / `collectPlanArtifacts`
-   lenient), `commands/phase-reconcile.ts`, `core/adapters/claude.ts`, and the
-   read-modify-write sites (`core/plan/sync-paths.ts`,
-   `core/finalize/safe-write.ts`) which read raw text under their own contract.
-   **Archive-fallback can NOT yet be inserted in one place.**
+   re-export importers) route through `src/core/plan/load-phase.ts`. Pure,
+   behavior-identical. **✅ done (PR #405).**
 2b. **Decision read seam** — consolidate the decision-read entry points
    (`loadDecisions` / `loadDeclaredDecisions` in `core/pack/loaders.ts`, the
    `decision_refs` + `PRUNED.md` resolution in `core/plan/checks/path-fields.ts`)
    on top of the already-shared `resolveDecisionGate` / `classifyAdr` in
    `core/decisions/adr.ts`, so layer 5 has ONE place to add `.code-pact/state`
-   tombstone-fallback. **NOT done.**
-2c. **Task/plan-state phase read seam** — move the remaining strict
-   read-and-validate sites (`resolve-task.ts`, `loadPlanState`,
-   `phase-reconcile.ts`, `adapters/claude.ts`) onto the shared seam, and give
-   the lenient / read-modify-write readers (`collectPlanArtifacts`,
-   `sync-paths`, `safe-write`, doctor's validating reader) an explicit
-   archive-awareness contract of their own. Only after **2b + 2c** does "insert
-   archive-fallback at the seam" become true. **NOT done.**
-3. **Snapshot + decision-state writers (pure `.code-pact/state` writes — touch
-   nothing in `design/` or `docs/`).** Write
-   `.code-pact/state/archive/phases/<phase-id>.json` (one-phase-one-file) + a Zod
-   schema, and the **decision-state record** under `.code-pact/state/`. This layer
-   only *adds* state files: it does **not** delete any design doc and does **not**
-   rewrite any inbound doc-link (that is the later destructive command, step 7). A
-   decision-state record carries at minimum: **identity / original path**, **ADR
-   status at retirement** (accepted / superseded / …), **whether it may satisfy an
-   active gate**, and a **source hash / provenance** (git ref). A plain "it was
-   pruned" tombstone is the degenerate case for records no active gate needs.
-4. **Resolve completed-phase missing** via the snapshot (loaders / deps / lint),
-   scoped to archived-only; active-missing stays fail-closed.
-5. **Resolve retired-decision missing** via the `.code-pact/state` decision-state
+   decision-state-record fallback. **⬜ NOT done — next candidate.**
+2c. **Task/plan-state phase read seam — ✅ done (PR #407).** The strict
+   raw-throwing readers (`resolve-task.ts`, `phase-reconcile.ts`,
+   `adapters/claude.ts`) now go through the live-only `load-phase.ts` seam; the
+   PlanState family (`loadPlanState` / `collectPlanArtifacts` /
+   `scanPhasesDirBestEffort`) shares one `loadPlanStatePhase(absPath)` helper
+   (keeps `loadYaml`'s `ParseError` contract); the read-modify-write readers
+   (`sync-paths`, `finalize/safe-write`) are documented **never-archive-fallback**.
+   **Important contract (locked in the seam comments):** `load-phase.ts` /
+   `loadPlanStatePhase` are **live-phase-YAML / full-`Phase` ONLY** — a snapshot
+   is intentionally smaller than `Phase`, so step 4 must add archived resolution
+   in a **separate archived-aware resolver or a `live | archived` union**, never
+   by coercing a snapshot into `Phase` from these loaders. `phase-reconcile`
+   (live rewrite) and `adapters/claude` (reads `verification.commands`, absent
+   from snapshots) must **never** be fed a snapshot.
+3. **Snapshot + decision-state writers — ✅ done (PR #406; library only, no CLI).**
+   `src/core/archive/phase-snapshot.ts` + `src/core/archive/decision-record.ts`
+   write `.code-pact/state/archive/phases/<id>.json` and
+   `.code-pact/state/archive/decisions/<stem>-<hash8>.json` via pure
+   `.code-pact/state` writes (schemas in `src/core/schemas/phase-snapshot.ts` /
+   `decision-state-record.ts`). Fail-closed throughout: ExpectedState write
+   guard, record-identity + phase-id + graph-wide duplicate-task-id checks,
+   progress-drift detection, attestation-can't-overrule-events, live-file-wins
+   semantic comparison (no-op vs `record_inputs_changed`/`record_state_mismatch`),
+   bidirectional `may_satisfy_active_gate` schema invariant. **No reader consumes
+   these records yet** — that is steps 4–6. Original spec note: a decision-state
+   record carries identity / original path / ADR status / may-satisfy-active-gate
+   / source hash + provenance; a plain tombstone is the degenerate case.
+
+   _Below: NOT done. Steps 4–7 are where readers start consuming the records and,
+   finally, where deletion happens._
+4. **⬜ Resolve completed-phase missing** via the snapshot (loaders / deps / lint),
+   scoped to archived-only; active-missing stays fail-closed. (Per step 2c's
+   locked contract: NOT by coercing a snapshot into `Phase` — add an
+   archived-aware resolver / `live | archived` representation. Only the readers
+   that legitimately resolve archived references — e.g. dependency existence /
+   `task context`'s `depends_on` status line — consume the snapshot; the live
+   `load-phase.ts` seam stays `Phase`-only.)
+5. **⬜ Resolve retired-decision missing** via the `.code-pact/state` decision-state
    record (`PRUNED.md` read-only backcompat). This layer must cover, explicitly:
    **`resolveDecisionGate`** (the live gate — resolves only from a record that
    says it may satisfy an active gate, never from absence), **`plan lint`'s
@@ -168,10 +189,10 @@ so "events exist" is never by itself a license to delete the YAML.
    archived historical artifact represented by a validated `.code-pact/state`
    record** — a generic missing acceptance doc must still fail (never blanket-
    silence `acceptance_refs` via the decision record).
-6. **Tolerance, scoped** — `validate` / `doctor` / `plan lint` / `task context` /
+6. **⬜ Tolerance, scoped** — `validate` / `doctor` / `plan lint` / `task context` /
    `task prepare`: *missing archived historical docs tolerant; missing active
    control docs fail-closed.*
-7. **`phase archive` + hand-delete** — the destructive verb (dry-run + `--write` +
+7. **⬜ `phase archive` + hand-delete** — the destructive verb (dry-run + `--write` +
    stale-plan guard + write lock, least-harmful ordering) **and** the A2 / A3 / A7
    integration fixture that `rm`s the files manually.
    **Doc-link strategy (decided, two halves):**
