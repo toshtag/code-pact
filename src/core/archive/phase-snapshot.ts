@@ -90,6 +90,7 @@ export type PhaseSnapshotBlock =
       depends_on_task_id: string;
     }
   | { kind: "record_stale"; existing_source_sha256: string; current_source_sha256: string }
+  | { kind: "record_inputs_changed"; detail: string }
   | {
       kind: "refresh_expectation_mismatch";
       expected_old_source_sha256: string;
@@ -189,6 +190,40 @@ function recordIdentityMismatch(record: PhaseSnapshot, phaseId: string): string 
   return null;
 }
 
+/**
+ * State equality between two records, ignoring provenance-only stamps:
+ * `snapshotted_at`, `git_ref`, and (inside a `maintainer_attestation`) its
+ * `recorded_at` — all of which are when-this-was-recorded, not what-the-state-is
+ * (the attestation `reason` IS state and is kept). Everything else — phase_id,
+ * phase_name, original_path, phase_status, weight, source_sha256, path_sha256,
+ * and the full task list incl. terminal_evidence kind + depends_on — is
+ * compared. Canonical JSON of the schema-validated objects is sufficient: the
+ * strict schema fixes the key set and `parse()` emits keys in schema order, and
+ * the writer always builds tasks in YAML order.
+ */
+function semanticProjection(r: PhaseSnapshot): unknown {
+  const { snapshotted_at: _at, git_ref: _ref, tasks, ...rest } = r;
+  return {
+    ...rest,
+    tasks: tasks.map((t) => {
+      const ev =
+        t.terminal_evidence.kind === "maintainer_attestation"
+          ? { kind: t.terminal_evidence.kind, reason: t.terminal_evidence.reason }
+          : t.terminal_evidence;
+      return {
+        id: t.id,
+        status: t.status,
+        depends_on: t.depends_on ?? null,
+        terminal_evidence: ev,
+      };
+    }),
+  };
+}
+
+function semanticEqual(a: PhaseSnapshot, b: PhaseSnapshot): boolean {
+  return JSON.stringify(semanticProjection(a)) === JSON.stringify(semanticProjection(b));
+}
+
 export async function planPhaseSnapshot(
   cwd: string,
   phaseId: string,
@@ -255,10 +290,13 @@ export async function planPhaseSnapshot(
     return { kind: "ineligible", path, blocks: [{ kind: "unsafe_path", original_path: ref.path }] };
   }
   const currentSha = sha256Hex(rawPhase);
-
-  if (existing.state === "present" && existing.record.source_sha256 === currentSha) {
-    return { kind: "noop_same_source", path };
-  }
+  // NOTE: a matching source_sha256 is NOT an early exit. source_sha256 hashes
+  // the phase YAML ALONE; the record also derives from progress events, the
+  // other active phases (duplicate-id / dependant scans), and roadmap metadata
+  // (weight). Those can drift while the YAML is byte-identical, so every check
+  // below runs unconditionally; the no-op verdict is decided last, by a
+  // semantic comparison of the freshly-built candidate record against the
+  // existing one (snapshotted_at / git_ref excluded).
 
   const phase = Phase.parse(parseYaml(rawPhase) as unknown);
   const blocks: PhaseSnapshotBlock[] = [];
@@ -459,9 +497,10 @@ export async function planPhaseSnapshot(
     }
   }
 
-  if (existing.state === "present") {
-    // Stale record: default fail; rewrite only under explicit refresh with both
-    // hashes matching reality.
+  // The phase YAML body changed under an existing record: that is a stale
+  // record (default fail; explicit refresh with both source hashes only). This
+  // is distinct from the body-identical / inputs-changed case decided below.
+  if (existing.state === "present" && existing.record.source_sha256 !== currentSha) {
     if (!opts.refresh) {
       blocks.push({
         kind: "record_stale",
@@ -499,6 +538,50 @@ export async function planPhaseSnapshot(
   } satisfies PhaseSnapshot);
 
   if (existing.state === "present") {
+    // Body-identical (source_sha256 matched) AND every eligibility check above
+    // passed. Decide no-op vs inputs-changed by SEMANTIC comparison of the
+    // freshly-built candidate against the existing record — source_sha256 alone
+    // would miss a drift in weight / tasks / terminal_evidence / depends_on
+    // (the inputs outside the YAML hash). snapshotted_at / git_ref are excluded
+    // (provenance, not state).
+    if (existing.record.source_sha256 === currentSha) {
+      if (semanticEqual(existing.record, record)) {
+        return { kind: "noop_same_source", path };
+      }
+      if (!opts.refresh) {
+        return {
+          kind: "ineligible",
+          path,
+          blocks: [
+            {
+              kind: "record_inputs_changed",
+              detail:
+                "the phase YAML is unchanged but an out-of-YAML input drifted (weight / tasks / terminal_evidence / depends_on) — refresh explicitly to re-record",
+            },
+          ],
+        };
+      }
+      // Explicit refresh of an inputs-changed record: the YAML hash is the same
+      // old==new, so require the refresh to name it for both.
+      if (
+        opts.refresh.expected_old_source_sha256 !== existing.record.source_sha256 ||
+        opts.refresh.expected_new_source_sha256 !== currentSha
+      ) {
+        return {
+          kind: "ineligible",
+          path,
+          blocks: [
+            {
+              kind: "refresh_expectation_mismatch",
+              expected_old_source_sha256: opts.refresh.expected_old_source_sha256,
+              existing_source_sha256: existing.record.source_sha256,
+              expected_new_source_sha256: opts.refresh.expected_new_source_sha256,
+              current_source_sha256: currentSha,
+            },
+          ],
+        };
+      }
+    }
     return {
       kind: "refresh",
       path,

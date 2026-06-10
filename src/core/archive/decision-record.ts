@@ -177,6 +177,13 @@ export async function planDecisionRecord(
   }
   const currentSha = sha256Hex(content);
 
+  // Unlike the phase snapshot, a matching source_sha256 IS a safe early no-op
+  // here: the whole record (adr_status via classifyAdr, title, may_satisfy_gate)
+  // derives ONLY from the .md content that source_sha256 hashes — there are no
+  // out-of-file inputs (no roadmap, no progress events, no weight) that could
+  // drift while the content is byte-identical. Identity was already verified
+  // above, so same content ⇒ same record. (Contrast phase-snapshot.ts, whose
+  // record also depends on the event ledger / other phases / roadmap weight.)
   if (existing.state === "present" && existing.record.source_sha256 === currentSha) {
     return { kind: "noop_same_source", path };
   }

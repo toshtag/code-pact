@@ -146,6 +146,100 @@ describe("planPhaseSnapshot / writePhaseSnapshot — happy path", () => {
   });
 });
 
+describe("re-validation with an EXISTING record + unchanged phase YAML (no early no-op)", () => {
+  // The phase YAML body (hence source_sha256) is identical across both runs in
+  // every case here; the drift is in an OUT-OF-YAML input. A matching
+  // source_sha256 must NOT short-circuit these checks.
+
+  it("progress events turn `failed` after the snapshot → drift, not noop", async () => {
+    await scaffold();
+    expect((await writePhaseSnapshot(cwd, "P1", { now: NOW })).kind).toBe("written");
+    // Same YAML; add a contradicting event for the done task.
+    await writeFile(
+      join(cwd, ".code-pact", "state", "progress.yaml"),
+      `events:
+  - task_id: P1-T1
+    status: done
+    at: 2026-06-01T00:00:00.000Z
+    actor: agent
+  - task_id: P1-T1
+    status: failed
+    at: 2026-06-03T00:00:00.000Z
+    actor: agent
+`,
+      "utf8",
+    );
+    const outcome = await writePhaseSnapshot(cwd, "P1", { now: NOW });
+    expect(outcome.kind).toBe("ineligible");
+    if (outcome.kind !== "ineligible") return;
+    expect(outcome.blocks.some((b) => b.kind === "task_done_progress_state_drift")).toBe(true);
+  });
+
+  it("a duplicate task id appears in another active phase after the snapshot → duplicate_task_id, not noop", async () => {
+    await scaffold();
+    expect((await writePhaseSnapshot(cwd, "P1", { now: NOW })).kind).toBe("written");
+    const p2 = await readFile(join(cwd, "design", "phases", "P2-y.yaml"), "utf8");
+    await writeFile(
+      join(cwd, "design", "phases", "P2-y.yaml"),
+      p2.replace("  - id: P2-T1\n", "  - id: P1-T1\n"),
+      "utf8",
+    );
+    const outcome = await writePhaseSnapshot(cwd, "P1", { now: NOW });
+    expect(outcome.kind).toBe("ineligible");
+    if (outcome.kind !== "ineligible") return;
+    expect(outcome.blocks.some((b) => b.kind === "duplicate_task_id")).toBe(true);
+  });
+
+  it("an active task starts depending on this phase's cancelled task after the snapshot → active_dependant, not noop", async () => {
+    await scaffold(); // P2-T1 depends on P1-T1 (done) initially
+    expect((await writePhaseSnapshot(cwd, "P1", { now: NOW })).kind).toBe("written");
+    const p2 = await readFile(join(cwd, "design", "phases", "P2-y.yaml"), "utf8");
+    await writeFile(
+      join(cwd, "design", "phases", "P2-y.yaml"),
+      p2.replace("      - P1-T1\n", "      - P1-T2\n"), // now depends on the cancelled task
+      "utf8",
+    );
+    const outcome = await writePhaseSnapshot(cwd, "P1", { now: NOW });
+    expect(outcome.kind).toBe("ineligible");
+    if (outcome.kind !== "ineligible") return;
+    expect(outcome.blocks.some((b) => b.kind === "active_dependant_on_non_done_task")).toBe(true);
+  });
+
+  it("roadmap weight changes after the snapshot (YAML unchanged) → record_inputs_changed, not silent noop", async () => {
+    await scaffold();
+    expect((await writePhaseSnapshot(cwd, "P1", { now: NOW })).kind).toBe("written");
+    const rm = await readFile(join(cwd, "design", "roadmap.yaml"), "utf8");
+    await writeFile(
+      join(cwd, "design", "roadmap.yaml"),
+      rm.replace("    path: design/phases/P1-x.yaml\n    weight: 2", "    path: design/phases/P1-x.yaml\n    weight: 5"),
+      "utf8",
+    );
+    const outcome = await writePhaseSnapshot(cwd, "P1", { now: NOW });
+    expect(outcome.kind).toBe("ineligible");
+    if (outcome.kind !== "ineligible") return;
+    expect(outcome.blocks.some((b) => b.kind === "record_inputs_changed")).toBe(true);
+
+    // ...and an explicit refresh (naming the same source sha for old+new) re-records it.
+    const sha = sha256Hex(await readFile(join(cwd, "design", "phases", "P1-x.yaml"), "utf8"));
+    const refreshed = await writePhaseSnapshot(cwd, "P1", {
+      now: NOW,
+      refresh: { expected_old_source_sha256: sha, expected_new_source_sha256: sha },
+    });
+    expect(refreshed.kind).toBe("written");
+    if (refreshed.kind !== "written") return;
+    expect(refreshed.record.weight).toBe(5);
+  });
+
+  it("nothing drifted → still a clean noop_same_source (semantic equality), byte-identical record", async () => {
+    await scaffold();
+    const first = await writePhaseSnapshot(cwd, "P1", { now: NOW });
+    const bytes = await readFile((first as { path: string }).path, "utf8");
+    const second = await writePhaseSnapshot(cwd, "P1", { now: new Date("2027-03-03T00:00:00Z") });
+    expect(second.kind).toBe("noop_same_source");
+    expect(await readFile((first as { path: string }).path, "utf8")).toBe(bytes);
+  });
+});
+
 describe("staleness — live design file wins, default fail, explicit refresh only", () => {
   it("table case 3: existing record + different source_sha256 → ineligible (record_stale), nothing rewritten", async () => {
     await scaffold();
