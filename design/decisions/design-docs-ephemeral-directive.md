@@ -117,14 +117,19 @@ so "events exist" is never by itself a license to delete the YAML.
 ## Build order (staged PRs — reader-side backward compatibility throughout)
 
 > **Status at a glance (for the next session):** ✅ done = 0, 1, 2a (#405), 3
-> (#406), 2c (#407). ⬜ not started = **2b** (decision read seam — the next
-> candidate), 4, 5, 6, 7. Nothing destructive has shipped yet; no reader consumes
-> the `.code-pact/state` archive records yet. The writers from step 3 exist
-> (`src/core/archive/`), fully validated, but unused by any reader. The locked
-> contract to honor going forward: the live phase/decision loaders return full
-> `Phase` / resolve from the live `.md` ONLY — archived resolution (steps 4–6) is
-> a SEPARATE archived-aware path, never a snapshot coerced into `Phase` or a gate
-> released from absence.
+> (#406), 2c (#407), 2b (#409), **4a** (phase-side archived resolution — the FIRST
+> reader of the step-3 snapshots; `rm design/phases/<completed>.yaml` with the
+> roadmap ref kept stays green via a validated snapshot, existence-only archived
+> task index, all collision-checked + fail-closed). ⬜ not started = **4b**
+> (roadmap-ref-REMOVED + unreferenced-archived-phase cross-phase `depends_on`),
+> 5 (retired-decision resolution), 6, 7. Nothing destructive has shipped yet
+> (4a writes/deletes nothing — it only READS the snapshots). The locked contract to
+> honor going forward: the live phase/decision loaders return full `Phase` / resolve
+> from the live `.md` ONLY — archived resolution (4a, steps 5–6) is a SEPARATE
+> archived-aware path, never a snapshot coerced into `Phase`, a gate released from
+> absence, or a task-id collision used as a silencer. See
+> `~/.claude/.../memory/step4-archive-reader-invariants.md` for the locked reader
+> rules that bind 4b/5/6/7.
 
 0. This directive (foundation, reviewed first) + the `constitution` update.
 1. Recovery report / inventory (continue / discard / quarantine). ✅ done.
