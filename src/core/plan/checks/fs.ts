@@ -15,3 +15,22 @@ export async function fileExists(p: string): Promise<boolean> {
     return false;
   }
 }
+
+/**
+ * Three-way presence used by the design-docs-ephemeral archive readers (step 4a),
+ * which must NOT treat "present but inaccessible" as "missing": a non-searchable
+ * parent dir makes `access()` reject with EACCES, and collapsing that to "absent"
+ * would let the snapshot RELEASE a live file that is actually there — a live-wins
+ * violation. So `inaccessible` is a distinct, fail-closed outcome: archive
+ * toleration applies ONLY to a genuine `absent` (ENOENT).
+ */
+export async function phaseFilePresence(
+  p: string,
+): Promise<"present" | "absent" | "inaccessible"> {
+  try {
+    await access(p);
+    return "present";
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === "ENOENT" ? "absent" : "inaccessible";
+  }
+}

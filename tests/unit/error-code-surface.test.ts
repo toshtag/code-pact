@@ -90,6 +90,16 @@ const KNOWN_CODES: Record<string, "public" | "plan" | "doctor" | "adapter" | "in
   MISSING_PHASE_FILE: "plan",
   ORPHAN_PHASE_FILE: "plan",
   ORPHAN_PROGRESS_EVENT: "plan",
+  // design-docs-ephemeral step 4a: a hand-deleted phase's roadmap ref whose
+  // archive snapshot exists but is corrupt / identity-mismatched / non-terminal /
+  // task-id-colliding cannot release the missing phase → fail-closed.
+  // DUAL-SURFACE (like DUPLICATE_PHASE_ID): an issue-level diagnostic in plan lint /
+  // doctor AND a top-level `error.code` (exit 2) on every `task *` command that
+  // resolves a task (via the shared resolveTaskInRoadmap / the plan-state loaders).
+  // Categorized "plan" because its primary home is the plan-integrity diagnostic
+  // surface; docs/cli-contract.md lists it in BOTH the Public codes and Plan
+  // diagnostic codes tables.
+  PHASE_SNAPSHOT_INVALID: "plan",
   PROGRESS_EVENT_CONFLICT: "plan",
   // Ledger-integrity diagnostic (collaboration-safe-state RFC, B1/B5): an event
   // file's content (or its stored id) does not match its filename, which IS the

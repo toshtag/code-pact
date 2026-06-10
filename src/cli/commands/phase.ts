@@ -627,6 +627,10 @@ async function cmdPhaseRunbook(
         outCode = "CONFIG_ERROR";
       } else if (code === "AMBIGUOUS_PHASE_ID") {
         outCode = "AMBIGUOUS_PHASE_ID";
+      } else if (code === "PHASE_SNAPSHOT_INVALID") {
+        // design-docs-ephemeral step 4a: thrown by loadPlanState — a control-plane
+        // integrity error, not an internal bug.
+        outCode = "PHASE_SNAPSHOT_INVALID";
       }
       emitError(
         json,
@@ -682,6 +686,10 @@ async function cmdPhaseRunbook(
       outCode = "AMBIGUOUS_PHASE_ID";
     } else if (code === "CONFIG_ERROR") {
       outCode = "CONFIG_ERROR";
+    } else if (code === "PHASE_SNAPSHOT_INVALID") {
+      // design-docs-ephemeral step 4a: thrown by loadPlanState — a control-plane
+      // integrity error, not an internal bug.
+      outCode = "PHASE_SNAPSHOT_INVALID";
     }
     emitError(
       json,

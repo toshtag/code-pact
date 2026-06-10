@@ -93,11 +93,15 @@ export type LintResult = {
  */
 export async function runLint(opts: LintOptions): Promise<LintResult> {
   const includeQuality = opts.includeQuality === true;
-  const { state, fallbackPhases, fileIssues, skippedChecks } =
+  const { state, archivedTaskIndex, fallbackPhases, fileIssues, skippedChecks } =
     await collectPlanArtifacts(opts.cwd);
 
   const issues: PlanIssue[] = [...fileIssues];
   const phases: PhaseEntry[] = state?.phases ?? fallbackPhases;
+  // Archived task ids (step 4a) — existence-only, collision-checked. Empty in the
+  // no-roadmap fallback. Lets a cross-phase depends_on into a hand-deleted
+  // COMPLETED phase resolve instead of falsely firing TASK_DEPENDS_ON_UNRESOLVED.
+  const archivedKnownTaskIds = new Set(archivedTaskIndex.keys());
 
   // Structural integrity that works on whatever phases parsed cleanly.
   issues.push(...detectDuplicateTaskIds(phases));
@@ -109,7 +113,7 @@ export async function runLint(opts: LintOptions): Promise<LintResult> {
   // tasks that declare none of the optional fields. Sync detectors run
   // first; async detectors that touch the filesystem run after so a
   // configuration error in the sync set is visible quickly.
-  issues.push(...detectTaskDependsOnUnresolved(phases));
+  issues.push(...detectTaskDependsOnUnresolved(phases, archivedKnownTaskIds));
   issues.push(...detectTaskDependsOnSelfReference(phases));
   issues.push(...detectTaskDependsOnCycle(phases));
   issues.push(...detectTaskDecisionRefUnsafePath(phases));

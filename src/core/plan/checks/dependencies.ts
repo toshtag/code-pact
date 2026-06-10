@@ -8,9 +8,16 @@ import type { PlanIssue } from "../shared.ts";
  * present in another phase is a valid cross-phase dependency and is
  * NOT reported here.
  */
-export function detectTaskDependsOnUnresolved(phases: PhaseEntry[]): PlanIssue[] {
+export function detectTaskDependsOnUnresolved(
+  phases: PhaseEntry[],
+  archivedKnownTaskIds: ReadonlySet<string> = new Set(),
+): PlanIssue[] {
   const issues: PlanIssue[] = [];
-  const globalTaskIds = new Set<string>();
+  // Known ids = live ∪ archived (existence-only). The archived set (step 4a) lets
+  // a cross-phase depends_on into a hand-deleted COMPLETED phase resolve instead
+  // of falsely firing TASK_DEPENDS_ON_UNRESOLVED. It is collision-checked upstream
+  // (a colliding id is excluded), so it can never silence a real unresolved dep.
+  const globalTaskIds = new Set<string>(archivedKnownTaskIds);
   for (const { phase } of phases) {
     for (const task of phase.tasks ?? []) {
       globalTaskIds.add(task.id);

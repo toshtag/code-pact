@@ -451,14 +451,19 @@ async function cmdStatus(argv: string[], globalJson: boolean): Promise<number> {
     const message = err instanceof Error ? err.message : String(err);
     // PHASE_NOT_FOUND / AMBIGUOUS_PHASE_ID are argument-resolution errors → exit 2
     // (AMBIGUOUS surfaces the colliding paths in data.phases, like other handlers).
-    const argError = code === "PHASE_NOT_FOUND" || code === "AMBIGUOUS_PHASE_ID";
+    // PHASE_SNAPSHOT_INVALID (design-docs-ephemeral step 4a, thrown by loadPlanState)
+    // is a control-plane integrity error, NOT an internal bug → exit 2 clean envelope.
+    const cleanExit2 =
+      code === "PHASE_NOT_FOUND" ||
+      code === "AMBIGUOUS_PHASE_ID" ||
+      code === "PHASE_SNAPSHOT_INVALID";
     emitError(
       json,
       code,
       message,
       code === "AMBIGUOUS_PHASE_ID" ? { data: { phases: e.phases ?? [] } } : {},
     );
-    return argError ? 2 : 3;
+    return cleanExit2 ? 2 : 3;
   }
 }
 

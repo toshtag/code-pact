@@ -16,6 +16,12 @@ import {
   readEventFiles,
 } from "../progress/events-io.ts";
 import type { FileIssue } from "./shared.ts";
+import {
+  archivedEntriesFromSnapshot,
+  mergeArchivedTaskIndex,
+  resolveMissingPhaseRef,
+  type ArchivedTaskEntry,
+} from "../archive/load-phase-snapshot.ts";
 
 export type PhaseEntry = {
   ref: PhaseRef;
@@ -30,11 +36,34 @@ export type PlanState = {
   phases: PhaseEntry[];
   progress: { path: string; events: ProgressEvent[] } | null;
   taskIndex: Map<string, { phaseId: string; task: TaskT }>;
+  /**
+   * design-docs-ephemeral (step 4a): task ids recovered from the archive
+   * snapshots of hand-deleted COMPLETED phases whose roadmap ref still points at
+   * them. EXISTENCE-ONLY — consulted by `detectTaskDependsOnUnresolved` and the
+   * orphan-progress-event detector so a cross-phase `depends_on` into / a ledger
+   * event for a deleted phase's task is not falsely flagged. NEVER a satisfaction
+   * source (dependency satisfaction stays event-based) and NEVER merged into
+   * `phases` (which is live-only). Collision-checked: an id that collides with a
+   * live id or another snapshot is EXCLUDED here and surfaced as
+   * `PHASE_SNAPSHOT_INVALID`, so it can never silence a real diagnostic.
+   */
+  archivedTaskIndex: Map<string, ArchivedTaskEntry>;
 };
+
+/** The live-task-id set (existence side) consulted alongside the live taskIndex. */
+export function archivedKnownTaskIds(state: PlanState): Set<string> {
+  return new Set(state.archivedTaskIndex.keys());
+}
 
 export type LenientLoadResult = {
   /** Populated when the roadmap parsed successfully; null otherwise. */
   state: PlanState | null;
+  /**
+   * Archived task ids (step 4a) — same as `state.archivedTaskIndex` when `state`
+   * is set, so the lenient lint path can consult it even though it also exposes
+   * `state`. Empty in the no-roadmap fallback (no ref to tolerate against).
+   */
+  archivedTaskIndex: Map<string, ArchivedTaskEntry>;
   /** Best-effort phase entries when the roadmap failed; empty when state is set. */
   fallbackPhases: PhaseEntry[];
   /** File-level issues collected during loading (parse/schema errors). */
@@ -81,6 +110,44 @@ function loadPlanStatePhase(absPath: string): Promise<PhaseT> {
   return loadYaml(absPath, Phase);
 }
 
+/**
+ * Thrown by the strict loader when a tolerated archive snapshot is corrupt /
+ * identity-mismatched / collides — fail-closed, distinct from a plain missing file.
+ */
+export class PhaseSnapshotInvalidError extends Error {
+  readonly code = "PHASE_SNAPSHOT_INVALID";
+  constructor(message: string) {
+    super(message);
+    this.name = "PhaseSnapshotInvalidError";
+  }
+}
+
+/**
+ * design-docs-ephemeral (step 4a) — handle a roadmap ref whose live phase file is
+ * MISSING (ENOENT). Returns one of:
+ *   - `{ tolerated: true, entries }`  — a valid archive snapshot proves a completed
+ *     phase; `entries` are its archived task candidates (collision-checked later).
+ *   - `{ tolerated: false, invalid: <reason> }` — a snapshot exists but cannot
+ *     release the phase (PHASE_SNAPSHOT_INVALID, fail-closed).
+ *   - `{ tolerated: false }` — no snapshot at all; the caller keeps its original
+ *     missing-file behavior (re-throw ENOENT / push a parse issue).
+ * Never reads or coerces a snapshot into `Phase`; entries are existence-only.
+ */
+async function resolveDeletedPhaseRef(
+  cwd: string,
+  ref: PhaseRef,
+): Promise<
+  | { tolerated: true; entries: ArchivedTaskEntry[] }
+  | { tolerated: false; invalid?: string }
+> {
+  const res = await resolveMissingPhaseRef(cwd, ref);
+  if (res.kind === "tolerated") {
+    return { tolerated: true, entries: archivedEntriesFromSnapshot(res.snapshot) };
+  }
+  if (res.kind === "fail_invalid") return { tolerated: false, invalid: res.reason };
+  return { tolerated: false };
+}
+
 function buildTaskIndex(
   phases: PhaseEntry[],
 ): Map<string, { phaseId: string; task: TaskT }> {
@@ -106,10 +173,40 @@ export async function loadPlanState(cwd: string): Promise<PlanState> {
   const roadmap = await loadYaml(rmPath, Roadmap);
 
   const phases: PhaseEntry[] = [];
+  const archivedCandidates: ArchivedTaskEntry[] = [];
   for (const ref of roadmap.phases) {
     const absPath = join(cwd, ref.path);
-    const phase = await loadPlanStatePhase(absPath);
-    phases.push({ ref, absPath, phase });
+    try {
+      phases.push({ ref, absPath, phase: await loadPlanStatePhase(absPath) });
+    } catch (err) {
+      // design-docs-ephemeral (step 4a): ONLY a missing file (ENOENT) is a
+      // candidate for archive toleration; a ParseError (schema-invalid live file)
+      // keeps propagating unchanged.
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+      const r = await resolveDeletedPhaseRef(cwd, ref);
+      if (r.tolerated) {
+        archivedCandidates.push(...r.entries);
+        continue; // skip the entry — the phase is gone and terminal
+      }
+      if (r.invalid !== undefined) {
+        throw new PhaseSnapshotInvalidError(
+          `${ref.path} is missing and its archive snapshot cannot release it: ${r.invalid}`,
+        );
+      }
+      throw err; // no snapshot — fail closed exactly as before
+    }
+  }
+
+  const taskIndex = buildTaskIndex(phases);
+  // Collision-checked merge: an archived id that collides with a live id or
+  // another snapshot is excluded AND fail-closed (never a silencer).
+  const merge = mergeArchivedTaskIndex(new Set(taskIndex.keys()), archivedCandidates);
+  if (merge.collisions.length > 0) {
+    throw new PhaseSnapshotInvalidError(
+      `archive snapshot task ids collide with the live plan: ${merge.collisions
+        .map((c) => c.reason)
+        .join("; ")}`,
+    );
   }
 
   let progress: PlanState["progress"] = null;
@@ -140,7 +237,8 @@ export async function loadPlanState(cwd: string): Promise<PlanState> {
     roadmap,
     phases,
     progress,
-    taskIndex: buildTaskIndex(phases),
+    taskIndex,
+    archivedTaskIndex: merge.index,
   };
 }
 
@@ -210,18 +308,43 @@ export async function collectPlanArtifacts(
 
   if (!roadmap) {
     // Roadmap is unparseable. Scan design/phases/ directly so we can
-    // still report duplicate-id / naming issues on parseable files.
+    // still report duplicate-id / naming issues on parseable files. No roadmap
+    // ref ⇒ nothing to tolerate against ⇒ empty archived index.
     const fallback = await scanPhasesDirBestEffort(cwd, fileIssues);
-    return { state: null, fallbackPhases: fallback, fileIssues, skippedChecks };
+    return {
+      state: null,
+      archivedTaskIndex: new Map(),
+      fallbackPhases: fallback,
+      fileIssues,
+      skippedChecks,
+    };
   }
 
   const phases: PhaseEntry[] = [];
+  const archivedCandidates: ArchivedTaskEntry[] = [];
   for (const ref of roadmap.phases) {
     const absPath = join(cwd, ref.path);
     try {
       const phase = await loadPlanStatePhase(absPath);
       phases.push({ ref, absPath, phase });
     } catch (err) {
+      // design-docs-ephemeral (step 4a): only a missing file (ENOENT) is a
+      // toleration candidate; a ParseError keeps its existing FileIssue.
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+        const r = await resolveDeletedPhaseRef(cwd, ref);
+        if (r.tolerated) {
+          archivedCandidates.push(...r.entries);
+          continue; // skip the entry; detectMissingPhaseFiles reports nothing either
+        }
+        if (r.invalid !== undefined) {
+          // Skip the entry but do NOT push a PHASE_SNAPSHOT_INVALID FileIssue here:
+          // `detectMissingPhaseFiles` runs over the same roadmap refs in the lint
+          // orchestrator and emits the single PHASE_SNAPSHOT_INVALID for this ref.
+          // Pushing it here too would double-report the same code for one phase.
+          continue;
+        }
+        // no snapshot — fall through to the original missing-file FileIssue.
+      }
       pushParseIssue(fileIssues, err, ref.path);
     }
   }
@@ -261,16 +384,30 @@ export async function collectPlanArtifacts(
     progress = { path: progPath, events: mergeProgressStreams(legacyEvents, eventFiles) };
   }
 
+  const taskIndex = buildTaskIndex(phases);
+  // Collision-checked merge (lenient: collision → FileIssue, colliding ids
+  // excluded; never thrown, never a silencer).
+  const merge = mergeArchivedTaskIndex(new Set(taskIndex.keys()), archivedCandidates);
+  for (const c of merge.collisions) {
+    fileIssues.push({
+      code: "PHASE_SNAPSHOT_INVALID",
+      severity: "error",
+      message: `archive snapshot task id collides with the live plan: ${c.reason}`,
+      file: c.phase_ids.map((id) => `design/phases (archived ${id})`).join(", "),
+    });
+  }
+
   const state: PlanState = {
     cwd,
     roadmapPath: rmPath,
     roadmap,
     phases,
     progress,
-    taskIndex: buildTaskIndex(phases),
+    taskIndex,
+    archivedTaskIndex: merge.index,
   };
 
-  return { state, fallbackPhases: [], fileIssues, skippedChecks };
+  return { state, archivedTaskIndex: merge.index, fallbackPhases: [], fileIssues, skippedChecks };
 }
 
 async function scanPhasesDirBestEffort(

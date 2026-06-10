@@ -17,14 +17,22 @@ import { computeEventId } from "../../progress/event-id.ts";
  * `plan analyze`. `doctor` keeps calling it to preserve historical
  * behavior for users who run `doctor` as their single health gate.
  */
+/**
+ * Membership probe for "is this task id known?". A `Map`/`Set` satisfies it
+ * directly; step 4a passes an adapter that unions the live task index with the
+ * collision-checked archived task ids so an event for a hand-deleted COMPLETED
+ * phase's task is not falsely flagged orphan.
+ */
+export type TaskIdKnown = { has(taskId: string): boolean };
+
 export function detectOrphanProgressEvents(
   events: ProgressEvent[],
-  taskIndex: Map<string, unknown>,
+  known: TaskIdKnown,
 ): PlanIssue[] {
   const issues: PlanIssue[] = [];
   const seen = new Set<string>();
   for (const event of events) {
-    if (taskIndex.has(event.task_id)) continue;
+    if (known.has(event.task_id)) continue;
     if (seen.has(event.task_id)) continue;
     seen.add(event.task_id);
     issues.push({
