@@ -3,23 +3,31 @@ import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { Phase } from "../schemas/phase.ts";
 
-// The single seam that reads one phase YAML file off disk and validates it.
+// The single seam that reads one LIVE phase YAML file off disk and validates it
+// as a full `Phase`. This exact body used to be byte-duplicated across ~8
+// command/core files; consolidating it (2a) and routing the raw-throwing strict
+// readers onto it (2c: resolve-task.ts, phase-reconcile.ts, adapters/claude.ts;
+// pack/verify/progress/recommend/task-prepare/task-add/phase-import/phase
+// already use it) mirrors the PR0 `loadRoadmap` consolidation one level down.
 //
-// This exact body used to be byte-duplicated in ~8 command/core files (pack,
-// verify, progress, recommend, task-prepare, task-add, phase-import, phase).
-// Consolidating it here mirrors the PR0 `loadRoadmap` consolidation
-// (control-plane-v2-rfc) one level down — the FIRST step (2a) toward the
-// design-docs-ephemeral directive's single phase-read seam. NOT the whole seam
-// yet: resolve-task.ts, plan/state.ts (loadPlanState / collectPlanArtifacts),
-// phase-reconcile.ts, adapters/claude.ts, and the read-modify-write sites
-// (sync-paths.ts, finalize/safe-write.ts) still read phase YAML on their own
-// (directive build-step 2c). Archive-fallback lands here only after 2c unifies
-// the strict readers.
+// SCOPE — live phase YAML ONLY; full `Phase` ONLY. This loader must NOT
+// synthesize an archived phase. A phase snapshot
+// (`.code-pact/state/archive/phases/<id>.json`) is INTENTIONALLY smaller than
+// `Phase` — it has no `objective` / `definition_of_done` / `verification` /
+// task `description` / prose — so it is NOT a `Phase` and must never be coerced
+// into one to be returned from here. The design-docs-ephemeral archived-phase
+// support (step 4) belongs in a SEPARATE archived-aware resolver (or a
+// `live | archived` discriminated union), designed per caller — never by
+// teaching this function to fall back to a snapshot. Callers that legitimately
+// resolve archived references differ: `resolve-task.ts` may eventually need
+// archived task-id lookup, but `phase-reconcile.ts` rewrites the LIVE file and
+// `adapters/claude.ts` reads `verification.commands` (absent from snapshots) —
+// neither may ever be fed a snapshot.
 //
 // Fail-closed by construction: a missing or invalid phase file throws (ENOENT /
 // ZodError). A roadmap-referenced phase is a control-plane input, not optional
-// context — callers that want missing-tolerance must add it explicitly here (and
-// scope it to *archived* phases), never by swallowing the throw at the call site.
+// context — missing-tolerance, where wanted, is a SEPARATE archived-aware path,
+// never a swallowed throw here.
 export async function loadPhase(cwd: string, path: string): Promise<Phase> {
   const raw = await readFile(join(cwd, path), "utf8");
   return Phase.parse(parseYaml(raw) as unknown);

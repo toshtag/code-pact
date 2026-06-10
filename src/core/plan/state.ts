@@ -63,13 +63,19 @@ function phasesDirPath(cwd: string): string {
  * (strict), `collectPlanArtifacts` (lenient), and `scanPhasesDirBestEffort`.
  * Distinct from the raw-throwing `core/plan/load-phase.ts` seam ON PURPOSE: it
  * throws a file-tagged `ParseError` on a schema-invalid phase so the lenient
- * loader can collect a `FileIssue` pointing at the offending file. A MISSING
- * file still surfaces as a raw ENOENT (loadYaml propagates it before parsing) —
- * identical to the other seam. So the design-docs-ephemeral step 4 archived-
- * phase fallback (catch ENOENT on an active-roadmap-referenced phase → resolve
- * from its `.code-pact/state` snapshot) hooks in HERE for the whole PlanState
- * family, in one place, exactly as it hooks into `load-phase.ts` for the
- * raw-throwing readers (pack / resolve-task / phase-reconcile / adapters).
+ * loader can collect a `FileIssue` pointing at the offending file.
+ *
+ * SCOPE — live phase YAML ONLY; returns a full `Phase`. It must NOT coerce an
+ * archived snapshot into `Phase` (a snapshot is intentionally smaller — no
+ * objective / definition_of_done / verification / prose — so it is not a
+ * `Phase`). This helper takes only `absPath`; archived-phase support needs at
+ * least the roadmap ref (`id` / `path`), and `PlanState.phases` is typed
+ * `PhaseEntry { phase: Phase }`. So the design-docs-ephemeral archived support
+ * (step 4) must EITHER wrap this read with roadmap-ref-aware archived-resolution
+ * logic OR widen the PlanState representation to a `live | archived`
+ * discriminated union — never by silently returning a snapshot from here. (A
+ * missing file still surfaces as raw ENOENT here, same as the other seam, which
+ * is the natural place such a wrapper would intercept.)
  */
 function loadPlanStatePhase(absPath: string): Promise<PhaseT> {
   return loadYaml(absPath, Phase);
