@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   readDecisionAdrFiles,
+  readLiveDecisionDir,
+  readLiveDecisionFile,
   hasDecisionAdrForTaskId,
   isAbsentDecisionsDirError,
   isDecisionRequiredForTask,
@@ -75,6 +77,82 @@ describe("readDecisionAdrFiles", () => {
     expect(files).not.toContain("PRUNED.md");
   });
 
+});
+
+// Step 2b characterization: the two LIVE decision-read primitives that the pack
+// loaders now share. These pin "live-only, fail-closed" — the contract step 5's
+// gate-aware / lint-aware wrappers will compose ON TOP of (never inside).
+describe("readLiveDecisionDir / readLiveDecisionFile (live decision-read seam)", () => {
+  let cwd: string;
+
+  beforeEach(async () => {
+    cwd = await mkdtemp(join(tmpdir(), "adr-seam-"));
+  });
+  afterEach(async () => {
+    await rm(cwd, { recursive: true, force: true });
+  });
+
+  it("readLiveDecisionDir reports present=false / [] for an absent dir (ENOENT)", async () => {
+    expect(await readLiveDecisionDir(cwd)).toEqual({ present: false, entries: [] });
+  });
+
+  it("readLiveDecisionDir reports present=true with NON_DECISION_FILES filtered out", async () => {
+    await mkdir(join(cwd, "design", "decisions"), { recursive: true });
+    await writeFile(join(cwd, "design", "decisions", "P1-T1-rfc.md"), "x");
+    await writeFile(join(cwd, "design", "decisions", "README.md"), "index");
+    await writeFile(join(cwd, "design", "decisions", "PRUNED.md"), "ledger");
+    const dir = await readLiveDecisionDir(cwd);
+    expect(dir.present).toBe(true);
+    expect(dir.entries).toContain("P1-T1-rfc.md");
+    expect(dir.entries).not.toContain("README.md");
+    expect(dir.entries).not.toContain("PRUNED.md");
+  });
+
+  it("readLiveDecisionFile returns ok for a safe in-project decision file", async () => {
+    await mkdir(join(cwd, "design", "decisions"), { recursive: true });
+    await writeFile(join(cwd, "design", "decisions", "a.md"), "**Status:** accepted\n");
+    const r = await readLiveDecisionFile(cwd, "design/decisions/a.md");
+    expect(r.kind).toBe("ok");
+    expect(r.kind === "ok" && r.content).toContain("accepted");
+  });
+
+  it("readLiveDecisionFile returns missing for a non-existent file (no throw)", async () => {
+    await mkdir(join(cwd, "design", "decisions"), { recursive: true });
+    const r = await readLiveDecisionFile(cwd, "design/decisions/nope.md");
+    expect(r.kind).toBe("missing");
+  });
+
+  it("readLiveDecisionFile returns unsafe for a traversal path (escapes project root)", async () => {
+    const r = await readLiveDecisionFile(cwd, "../outside.md");
+    expect(r.kind).toBe("unsafe");
+  });
+
+  it("readLiveDecisionFile reads a NESTED in-project ADR (live nested refs are in scope; state-record fallback is NOT)", async () => {
+    await mkdir(join(cwd, "design", "decisions", "p3"), { recursive: true });
+    await writeFile(join(cwd, "design", "decisions", "p3", "adr.md"), "nested body");
+    const r = await readLiveDecisionFile(cwd, "design/decisions/p3/adr.md");
+    expect(r.kind).toBe("ok");
+    expect(r.kind === "ok" && r.content).toBe("nested body");
+  });
+});
+
+// Step 2b characterization: the live gate stays fail-closed on an ABSENT
+// design/decisions, with the unchanged reason. Pins that exporting/renaming the
+// dir-listing seam did not loosen the gate (it must never resolve from absence).
+describe("resolveDecisionGate — absent design/decisions fail-closed", () => {
+  it("does not resolve and reports the dir-missing reason when requires_decision is true", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "adr-fc-"));
+    try {
+      const res = await resolveDecisionGate(cwd, "P1-T1");
+      expect(res.resolved).toBe(false);
+      expect(res.dirPresent).toBe(false);
+      expect(res.reason).toContain(
+        "design/decisions/ does not exist but requires_decision is true",
+      );
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("isAbsentDecisionsDirError", () => {
