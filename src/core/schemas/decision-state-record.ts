@@ -77,12 +77,17 @@ export const DecisionStateRecord = z
     git_ref: z.string().min(1).optional(),
   })
   .superRefine((r, ctx) => {
-    if (r.may_satisfy_active_gate && r.adr_status_at_snapshot !== "accepted") {
+    // Bidirectional: may_satisfy_active_gate is exactly (status === accepted).
+    // The writer only ever emits this equivalence; making it a two-way schema
+    // invariant means a hand-edited "accepted but not gate-usable" or
+    // "non-accepted but gate-usable" record fails to parse, rather than slipping
+    // past as a shape the writer would never produce.
+    if (r.may_satisfy_active_gate !== (r.adr_status_at_snapshot === "accepted")) {
       ctx.addIssue({
         code: "custom",
         path: ["may_satisfy_active_gate"],
         message:
-          "may_satisfy_active_gate requires adr_status_at_snapshot to be accepted — a non-accepted record can never release a live gate",
+          "may_satisfy_active_gate must equal (adr_status_at_snapshot === 'accepted') — accepted records release a live gate, non-accepted ones never do",
       });
     }
     // v1 invariant: the record's identity IS the canonical ref. A diverging

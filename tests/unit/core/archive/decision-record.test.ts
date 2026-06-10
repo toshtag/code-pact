@@ -155,6 +155,107 @@ describe("idempotency / staleness table", () => {
   });
 });
 
+describe("same-source re-validation — the on-disk record must still match the live .md", () => {
+  // In every case the .md content (hence source_sha256) is identical to what the
+  // record claims; the drift is in the record BODY. A matching source_sha256
+  // must NOT short-circuit the comparison.
+
+  async function plantRecord(ref: string, overrides: Record<string, unknown>) {
+    const content = await readFile(join(cwd, ref), "utf8");
+    const base = {
+      schema_version: 1,
+      canonical_ref: ref,
+      original_path: ref,
+      path_sha256: sha256Hex(ref),
+      adr_status_at_snapshot: "accepted",
+      may_satisfy_active_gate: true,
+      snapshotted_at: NOW.toISOString(),
+      source_sha256: sha256Hex(content),
+    };
+    const p = decisionRecordPath(cwd, ref);
+    await mkdir(join(cwd, ".code-pact", "state", "archive", "decisions"), { recursive: true });
+    await writeFile(p, JSON.stringify({ ...base, ...overrides }, null, 2) + "\n", "utf8");
+    return p;
+  }
+
+  it("proposed ADR but the on-disk record claims accepted/may_satisfy=true → record_state_mismatch (no noop), nothing rewritten", async () => {
+    await writeAdr(ACCEPTED_ADR.replace("accepted (P99, 2026-06)", "proposed")); // live = blocked
+    const p = await plantRecord(REF, { adr_status_at_snapshot: "accepted", may_satisfy_active_gate: true });
+    const before = await readFile(p, "utf8");
+
+    const outcome = await writeDecisionRecord(cwd, REF, { now: NOW });
+    expect(outcome.kind).toBe("ineligible");
+    if (outcome.kind !== "ineligible") return;
+    expect(outcome.blocks[0]?.kind).toBe("record_state_mismatch");
+    expect(await readFile(p, "utf8")).toBe(before); // untouched
+  });
+
+  it("explicit refresh (same source sha old==new) re-records the corrected state", async () => {
+    await writeAdr(ACCEPTED_ADR.replace("accepted (P99, 2026-06)", "proposed"));
+    await plantRecord(REF, { adr_status_at_snapshot: "accepted", may_satisfy_active_gate: true });
+    const sha = sha256Hex(await readFile(join(cwd, REF), "utf8"));
+    const outcome = await writeDecisionRecord(cwd, REF, {
+      now: NOW,
+      refresh: { expected_old_source_sha256: sha, expected_new_source_sha256: sha },
+    });
+    expect(outcome.kind).toBe("written");
+    if (outcome.kind !== "written") return;
+    expect(outcome.record.adr_status_at_snapshot).toBe("blocked");
+    expect(outcome.record.may_satisfy_active_gate).toBe(false);
+  });
+
+  it("title-only drift in the on-disk record → record_state_mismatch (record is deterministic from the live .md)", async () => {
+    await writeAdr(ACCEPTED_ADR); // live title "RFC: Foo"
+    const p = await plantRecord(REF, { title: "Stale Title" });
+    const before = await readFile(p, "utf8");
+
+    const outcome = await writeDecisionRecord(cwd, REF, { now: NOW });
+    expect(outcome.kind).toBe("ineligible");
+    if (outcome.kind !== "ineligible") return;
+    expect(outcome.blocks[0]?.kind).toBe("record_state_mismatch");
+    expect(await readFile(p, "utf8")).toBe(before);
+  });
+
+  it("an accepted+may_satisfy=false record on disk cannot even parse (bidirectional schema) → record_invalid, not noop", async () => {
+    await writeAdr(ACCEPTED_ADR);
+    // Bypass plantRecord's schema-shaped base: write a record the schema rejects.
+    const content = await readFile(join(cwd, REF), "utf8");
+    const p = decisionRecordPath(cwd, REF);
+    await mkdir(join(cwd, ".code-pact", "state", "archive", "decisions"), { recursive: true });
+    await writeFile(
+      p,
+      JSON.stringify(
+        {
+          schema_version: 1,
+          canonical_ref: REF,
+          original_path: REF,
+          path_sha256: sha256Hex(REF),
+          adr_status_at_snapshot: "accepted",
+          may_satisfy_active_gate: false, // contradicts accepted — schema-invalid
+          snapshotted_at: NOW.toISOString(),
+          source_sha256: sha256Hex(content),
+        },
+        null,
+        2,
+      ) + "\n",
+      "utf8",
+    );
+    const outcome = await writeDecisionRecord(cwd, REF, { now: NOW });
+    expect(outcome.kind).toBe("ineligible");
+    if (outcome.kind !== "ineligible") return;
+    expect(outcome.blocks[0]?.kind).toBe("record_invalid");
+  });
+
+  it("nothing drifted → still a clean noop_same_source", async () => {
+    await writeAdr(ACCEPTED_ADR);
+    const first = await writeDecisionRecord(cwd, REF, { now: NOW });
+    const bytes = await readFile((first as { path: string }).path, "utf8");
+    const second = await writeDecisionRecord(cwd, REF, { now: new Date("2027-05-05T00:00:00Z") });
+    expect(second.kind).toBe("noop_same_source");
+    expect(await readFile((first as { path: string }).path, "utf8")).toBe(bytes);
+  });
+});
+
 describe("confinement + fail-closed reads", () => {
   it("rejects refs outside top-level design/decisions/*.md", async () => {
     for (const bad of [
