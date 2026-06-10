@@ -136,12 +136,19 @@ so "events exist" is never by itself a license to delete the YAML.
 2a. **`loadPhase` dedupe** — the 8 byte-identical `loadPhase` copies (+ 2
    re-export importers) route through `src/core/plan/load-phase.ts`. Pure,
    behavior-identical. **✅ done (PR #405).**
-2b. **Decision read seam** — consolidate the decision-read entry points
-   (`loadDecisions` / `loadDeclaredDecisions` in `core/pack/loaders.ts`, the
-   `decision_refs` + `PRUNED.md` resolution in `core/plan/checks/path-fields.ts`)
-   on top of the already-shared `resolveDecisionGate` / `classifyAdr` in
-   `core/decisions/adr.ts`, so layer 5 has ONE place to add `.code-pact/state`
-   decision-state-record fallback. **⬜ NOT done — next candidate.**
+2b. **Decision read seam — ✅ done (PR #409).** The two pack decision-read entry
+   points (`loadDecisions` / `loadDeclaredDecisions` in `core/pack/loaders.ts`)
+   route onto live-only seams `readLiveDecisionDir` / `readLiveDecisionFile` in
+   `core/decisions/adr.ts`. **Locked contract:** the live decision reader is
+   **live `design/decisions/` ONLY**; the step-5 `.code-pact/state` decision-state
+   fallback is **caller-scoped** — added in gate-aware / lint-aware *wrappers* that
+   compose these seams, **never inside the primitive** (so the pack render /
+   ADR-quality scans never start treating a retired record as a live decision).
+   `path-fields.ts` (the lint `decision_refs` not-found detector) was
+   **intentionally NOT changed** in 2b — its `fileExists` does not detect symlink
+   escape, so routing it onto the seam would be a behavior change; step 5 revisits
+   it via a lint-aware wrapper. Pack loaders keep their optional `catch → []`/skip
+   at the call site (the seams are fail-closed).
 2c. **Task/plan-state phase read seam — ✅ done (PR #407).** The strict
    raw-throwing readers (`resolve-task.ts`, `phase-reconcile.ts`,
    `adapters/claude.ts`) now go through the live-only `load-phase.ts` seam; the
@@ -165,20 +172,44 @@ so "events exist" is never by itself a license to delete the YAML.
    guard, record-identity + phase-id + graph-wide duplicate-task-id checks,
    progress-drift detection, attestation-can't-overrule-events, live-file-wins
    semantic comparison (no-op vs `record_inputs_changed`/`record_state_mismatch`),
-   bidirectional `may_satisfy_active_gate` schema invariant. **No reader consumes
-   these records yet** — that is steps 4–6. Original spec note: a decision-state
+   bidirectional `may_satisfy_active_gate` schema invariant. **Reader status:** the
+   PHASE snapshots are now consumed by step 4a (PR #410); the DECISION-state records
+   are still unconsumed — that is step 5. Original spec note: a decision-state
    record carries identity / original path / ADR status / may-satisfy-active-gate
    / source hash + provenance; a plain tombstone is the degenerate case.
 
-   _Below: NOT done. Steps 4–7 are where readers start consuming the records and,
+   _Below: 4a done; 4b/5–7 are where readers keep consuming the records and,
    finally, where deletion happens._
-4. **⬜ Resolve completed-phase missing** via the snapshot (loaders / deps / lint),
-   scoped to archived-only; active-missing stays fail-closed. (Per step 2c's
-   locked contract: NOT by coercing a snapshot into `Phase` — add an
-   archived-aware resolver / `live | archived` representation. Only the readers
-   that legitimately resolve archived references — e.g. dependency existence /
-   `task context`'s `depends_on` status line — consume the snapshot; the live
-   `load-phase.ts` seam stays `Phase`-only.)
+4a. **Resolve completed-phase missing (roadmap-ref-STAYS) — ✅ done (PR #410).**
+   The FIRST reader of the step-3 snapshots. `rm design/phases/<completed>.yaml`
+   with the **roadmap ref kept** + a valid snapshot keeps `validate` / `plan lint`
+   / `plan analyze` (`--strict`) / `task context` / `task prepare` green —
+   including an active task in another phase that `depends_on` a task of the deleted
+   phase (A2). Implemented exactly per the 2c contract — **NOT** by coercing a
+   snapshot into `Phase`:
+   - `src/core/archive/load-phase-snapshot.ts` — `loadPhaseSnapshot` (invalid is
+     never collapsed to absent), `resolveMissingPhaseRef` (re-checks
+     id/original_path/path_sha256/terminal — does not trust the writer),
+     `mergeArchivedTaskIndex` (collision fail-closed, never picks a winner).
+   - `PlanState.phases` stays **live-only** (the deleted phase is skipped); the
+     archive data lives in a **separate `PlanState.archivedTaskIndex`** consumed
+     ONLY by the existence checks (`detectTaskDependsOnUnresolved` +
+     `detectOrphanProgressEvents`), never by the ~20 quality detectors, never
+     coerced to `Phase`.
+   - **EXISTENCE ≠ SATISFACTION (locked):** the archived index proves a task id
+     *existed*; dependency *satisfaction* stays purely event-based
+     (`deriveTaskState`). A `cancelled` archived dep is KNOWN but NOT satisfied.
+   - **Fail-closed everywhere:** an active / non-terminal / unsnapshotted missing
+     phase still errors; a corrupt/mismatched/colliding snapshot is
+     `PHASE_SNAPSHOT_INVALID` (error). The collision check runs on **every** reader
+     path (strict + lenient loaders, doctor → `validate`, AND `resolveTaskInRoadmap`
+     so `task context`/`task prepare` cannot bypass it). Live file present (even
+     present-but-inaccessible) → the snapshot is never consulted (live-wins).
+4b. **⬜ Resolve completed-phase missing (roadmap-ref-REMOVED) + unreferenced-phase
+   deps** — NOT started. The destructive `phase archive --write` removes the roadmap
+   ref (and rewrites inbound doc-links, step 7); 4b resolves a cross-phase
+   `depends_on` into an archived phase that is **no longer in the roadmap** (4a only
+   covers a *referenced* missing phase). Same locked reader invariants as 4a.
 5. **⬜ Resolve retired-decision missing** via the `.code-pact/state` decision-state
    record (`PRUNED.md` read-only backcompat). This layer must cover, explicitly:
    **`resolveDecisionGate`** (the live gate — resolves only from a record that

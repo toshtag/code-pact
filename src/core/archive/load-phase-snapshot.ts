@@ -225,7 +225,7 @@ export function mergeArchivedTaskIndex(
     }
 
     // Case 1: intra-snapshot duplicate.
-    const phaseTaskKey = `${phase_id} ${task_id}`;
+    const phaseTaskKey = JSON.stringify([phase_id, task_id]);
     if (perPhaseSeen.has(phaseTaskKey)) {
       recordCollision(
         task_id,

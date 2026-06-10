@@ -91,15 +91,64 @@ const PROGRESS = `events:
 // `validate` (which delegates to doctor) has a complete project; then overlay our
 // roadmap + phases + progress. Without this, validate fails on missing project
 // scaffolding unrelated to the archive behavior under test.
-async function scaffold() {
+async function scaffold(
+  opts: { p1?: string; p2?: string; progress?: string } = {},
+) {
   const init = run(["init", "--non-interactive", "--locale", "en-US", "--agent", "claude-code", "--json"]);
   if (init.code !== 0) throw new Error(`init failed: ${init.stdout}${init.stderr}`);
   await writeFile(join(tmpDir, "design", "roadmap.yaml"), ROADMAP, "utf8");
-  await writeFile(join(tmpDir, "design", "phases", "P1-x.yaml"), P1_DONE, "utf8");
-  await writeFile(join(tmpDir, "design", "phases", "P2-y.yaml"), P2_DEP, "utf8");
+  await writeFile(join(tmpDir, "design", "phases", "P1-x.yaml"), opts.p1 ?? P1_DONE, "utf8");
+  await writeFile(join(tmpDir, "design", "phases", "P2-y.yaml"), opts.p2 ?? P2_DEP, "utf8");
   await mkdir(join(tmpDir, ".code-pact", "state"), { recursive: true });
-  await writeFile(join(tmpDir, ".code-pact", "state", "progress.yaml"), PROGRESS, "utf8");
+  await writeFile(join(tmpDir, ".code-pact", "state", "progress.yaml"), opts.progress ?? PROGRESS, "utf8");
 }
+
+// A P1 with a CANCELLED task (P1-T2). The writer records it via design_status
+// evidence (cancellation has no progress-event form).
+const P1_CANCELLED = `id: P1
+name: Foundations
+weight: 2
+confidence: high
+risk: low
+status: done
+objective: Build the base
+definition_of_done:
+  - it works
+verification:
+  commands:
+    - pnpm test
+tasks:
+  - id: P1-T1
+    type: feature
+${TASK_FIELDS}
+    status: done
+  - id: P1-T2
+    type: docs
+${TASK_FIELDS}
+    status: cancelled
+`;
+
+// P2-T1 (active, started) depends_on the CANCELLED P1-T2.
+const P2_DEP_CANCELLED = `id: P2
+name: Next
+weight: 1
+confidence: high
+risk: low
+status: in_progress
+objective: Build the next increment of work
+definition_of_done:
+  - The next increment is implemented and its tests pass
+verification:
+  commands:
+    - pnpm test
+tasks:
+  - id: P2-T1
+    type: feature
+${TASK_FIELDS}
+    status: in_progress
+    depends_on:
+      - P1-T2
+`;
 
 function jsonOk(r: RunResult): boolean {
   try {
@@ -145,6 +194,33 @@ describe("A2 bare-rm of a completed phase with a cross-phase depends_on", () => 
     expect(jsonOk(prep)).toBe(true);
     // depends_on P1-T1 is satisfied from the surviving event → not wait_for_dependencies.
     expect(prep.stdout).not.toContain("wait_for_dependencies");
+  });
+
+  it("archived CANCELLED dep → KNOWN (no false errors) but NOT satisfied (existence != satisfaction)", async () => {
+    // The writer refuses to snapshot a phase an ACTIVE task depends_on via a non-done
+    // task, so set it up the only way it can legitimately arise: snapshot P1 (which
+    // contains the cancelled P1-T2) while P2-T1 depends on the DONE P1-T1 (eligible),
+    // THEN re-point P2-T1's dep to the cancelled P1-T2 and delete P1. The tolerated
+    // snapshot now carries the cancelled P1-T2 as a known-but-unsatisfiable dep.
+    await scaffold({ p1: P1_CANCELLED, p2: P2_DEP });
+    await writePhaseSnapshot(tmpDir, "P1", { now: NOW });
+    await writeFile(join(tmpDir, "design", "phases", "P2-y.yaml"), P2_DEP_CANCELLED, "utf8");
+    await rm(join(tmpDir, "design", "phases", "P1-x.yaml"));
+
+    // EXISTENCE: the cancelled archived id is known → no unresolved-dep / orphan.
+    const lint = run(["plan", "lint", "--strict", "--json"]);
+    expect(lint.stdout).not.toContain("TASK_DEPENDS_ON_UNRESOLVED");
+    const analyze = run(["plan", "analyze", "--strict", "--json"]);
+    expect(analyze.stdout).not.toContain("ORPHAN_PROGRESS_EVENT");
+
+    // SATISFACTION: a cancelled dep has no done event → P2-T1 is BLOCKED, exactly
+    // as a cancelled LIVE dep would be. The archived index must NOT mark it satisfied.
+    const prep = run(["task", "prepare", "P2-T1", "--agent", "claude-code", "--json"]);
+    const parsed = JSON.parse(prep.stdout) as {
+      data?: { next_action?: { type?: string }; blocked_by?: string[] };
+    };
+    expect(parsed.data?.next_action?.type).toBe("wait_for_dependencies");
+    expect(parsed.data?.blocked_by ?? []).toContain("P1-T2");
   });
 
   it("WITHOUT a snapshot → validate / plan lint fail closed (MISSING/ORPHAN phase)", async () => {
