@@ -58,6 +58,23 @@ function phasesDirPath(cwd: string): string {
   return join(cwd, ...PHASES_DIR_SEGMENTS);
 }
 
+/**
+ * The single phase-read site for the PlanState family — `loadPlanState`
+ * (strict), `collectPlanArtifacts` (lenient), and `scanPhasesDirBestEffort`.
+ * Distinct from the raw-throwing `core/plan/load-phase.ts` seam ON PURPOSE: it
+ * throws a file-tagged `ParseError` on a schema-invalid phase so the lenient
+ * loader can collect a `FileIssue` pointing at the offending file. A MISSING
+ * file still surfaces as a raw ENOENT (loadYaml propagates it before parsing) —
+ * identical to the other seam. So the design-docs-ephemeral step 4 archived-
+ * phase fallback (catch ENOENT on an active-roadmap-referenced phase → resolve
+ * from its `.code-pact/state` snapshot) hooks in HERE for the whole PlanState
+ * family, in one place, exactly as it hooks into `load-phase.ts` for the
+ * raw-throwing readers (pack / resolve-task / phase-reconcile / adapters).
+ */
+function loadPlanStatePhase(absPath: string): Promise<PhaseT> {
+  return loadYaml(absPath, Phase);
+}
+
 function buildTaskIndex(
   phases: PhaseEntry[],
 ): Map<string, { phaseId: string; task: TaskT }> {
@@ -85,7 +102,7 @@ export async function loadPlanState(cwd: string): Promise<PlanState> {
   const phases: PhaseEntry[] = [];
   for (const ref of roadmap.phases) {
     const absPath = join(cwd, ref.path);
-    const phase = await loadYaml(absPath, Phase);
+    const phase = await loadPlanStatePhase(absPath);
     phases.push({ ref, absPath, phase });
   }
 
@@ -196,7 +213,7 @@ export async function collectPlanArtifacts(
   for (const ref of roadmap.phases) {
     const absPath = join(cwd, ref.path);
     try {
-      const phase = await loadYaml(absPath, Phase);
+      const phase = await loadPlanStatePhase(absPath);
       phases.push({ ref, absPath, phase });
     } catch (err) {
       pushParseIssue(fileIssues, err, ref.path);
@@ -268,7 +285,7 @@ async function scanPhasesDirBestEffort(
     const absPath = join(phasesDir, entry);
     const relPath = `design/phases/${entry}`;
     try {
-      const phase = await loadYaml(absPath, Phase);
+      const phase = await loadPlanStatePhase(absPath);
       // Without a roadmap, ref.id is unknown — fall back to the phase id
       // so downstream checks can still refer to the phase by id.
       phases.push({

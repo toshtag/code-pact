@@ -119,6 +119,12 @@ export async function runSyncPaths(opts: {
     const absPath = join(phasesDir, entry);
     const relPath = `design/phases/${entry}`;
 
+    // READ-MODIFY-WRITE site — deliberately NOT routed through the
+    // core/plan/load-phase.ts seam. It needs the raw bytes to rewrite them in
+    // place, and (per the design-docs-ephemeral directive) an RMW must NEVER
+    // archive-fallback: you cannot rewrite a phase file you have archived /
+    // deleted, so a missing/archived phase must surface here (skipped/failed),
+    // never be silently synthesized from a snapshot.
     const raw = await readFile(absPath, "utf8");
     let phase: Phase;
     try {

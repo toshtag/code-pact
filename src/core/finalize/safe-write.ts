@@ -18,6 +18,14 @@ import {
 // finalize` and `phase reconcile` need. Returns
 // structured refusals instead of throwing so the command layer can
 // map each refusal reason to its own public error code
+//
+// READ-MODIFY-WRITE — deliberately NOT routed through the
+// core/plan/load-phase.ts seam, and (per the design-docs-ephemeral directive)
+// it must NEVER archive-fallback: this module rewrites the phase file in place,
+// and you cannot rewrite a phase you have archived / deleted. A missing or
+// unreadable phase here is a structured refusal (`unreadable` /
+// `unparseable_phase`), never a value synthesized from a `.code-pact/state`
+// snapshot.
 // (TASK_FINALIZE_WRITE_REFUSED / PHASE_RECONCILE_WRITE_REFUSED) and
 // its own JSON envelope shape.
 //
