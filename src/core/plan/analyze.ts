@@ -181,7 +181,13 @@ export async function runAnalyze(
   }
 
   if (events.length > 0) {
-    issues.push(...detectOrphanProgressEvents(events, state.taskIndex));
+    // Known ids = live ∪ archived (step 4a): an event for a hand-deleted COMPLETED
+    // phase's task is not an orphan. The archived set is collision-checked, so it
+    // never silences a genuinely orphaned event.
+    const known = {
+      has: (id: string) => state.taskIndex.has(id) || state.archivedTaskIndex.has(id),
+    };
+    issues.push(...detectOrphanProgressEvents(events, known));
     issues.push(...detectProgressEventConflicts(events));
   }
 

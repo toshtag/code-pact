@@ -34,7 +34,12 @@ import {
 } from "../core/plan/checks.ts";
 import type { PhaseEntry } from "../core/plan/state.ts";
 import type { PlanIssue } from "../core/plan/shared.ts";
-import { resolveMissingPhaseRef } from "../core/archive/load-phase-snapshot.ts";
+import {
+  archivedEntriesFromSnapshot,
+  mergeArchivedTaskIndex,
+  resolveMissingPhaseRef,
+  type ArchivedTaskEntry,
+} from "../core/archive/load-phase-snapshot.ts";
 import { isSupportedAgent, type SupportedAgent } from "../core/agents.ts";
 import { CONSTITUTION_PLACEHOLDER_MARKERS } from "../core/constitution.ts";
 import { readManifest } from "../core/adapters/manifest.ts";
@@ -174,24 +179,34 @@ async function checkPhases(
   cwd: string,
   roadmap: Roadmap,
   issues: DoctorIssue[],
-): Promise<{ phases: Phase[]; phaseEntries: PhaseEntry[] }> {
+): Promise<{
+  phases: Phase[];
+  phaseEntries: PhaseEntry[];
+  archivedKnownTaskIds: Set<string>;
+}> {
   const phases: Phase[] = [];
   // PhaseEntry[] (with the REAL roadmap ref + path) so duplicate-id detection
   // can name the colliding files. Built here because this is the only place that
   // has both the ref and the parsed phase.
   const phaseEntries: PhaseEntry[] = [];
+  // design-docs-ephemeral (step 4a): archived task-id candidates from tolerated
+  // snapshots of hand-deleted COMPLETED phases. Collision-checked AFTER the loop
+  // (same merge as the lint loaders), then handed to checkProgressLog so the
+  // orphan-event detector treats a deleted phase's task ids as known.
+  const archivedCandidates: ArchivedTaskEntry[] = [];
 
   for (const ref of roadmap.phases) {
     const absPath = join(cwd, ref.path);
     if (!(await fileExists(absPath))) {
-      // design-docs-ephemeral (step 4a): a hand-deleted COMPLETED phase whose
-      // roadmap ref still points at it is tolerated when a valid archive snapshot
+      // A hand-deleted COMPLETED phase is tolerated when a valid archive snapshot
       // proves it; a corrupt/mismatched snapshot fails closed loudly; no snapshot
-      // keeps the original ORPHAN_PHASE_FILE error. (Cross-phase depends_on / orphan
-      // progress events for the deleted phase's tasks are handled in a later commit
-      // via the collision-checked archived task index.)
+      // keeps the original ORPHAN_PHASE_FILE error. Live-wins (above): a present
+      // file never consults the snapshot.
       const res = await resolveMissingPhaseRef(cwd, ref);
-      if (res.kind === "tolerated") continue;
+      if (res.kind === "tolerated") {
+        archivedCandidates.push(...archivedEntriesFromSnapshot(res.snapshot));
+        continue;
+      }
       if (res.kind === "fail_invalid") {
         issues.push({
           code: "PHASE_SNAPSHOT_INVALID",
@@ -259,12 +274,30 @@ async function checkPhases(
     }
   }
 
-  return { phases, phaseEntries };
+  // Collision-checked merge (same as the lint loaders): an archived id that
+  // collides with a live id / another snapshot / itself is EXCLUDED and surfaced
+  // as PHASE_SNAPSHOT_INVALID — never a silencer. `validate` delegates to doctor,
+  // so this is the path that keeps the ambiguity out of validate too.
+  const liveTaskIds = new Set<string>();
+  for (const phase of phases) {
+    for (const task of phase.tasks ?? []) liveTaskIds.add(task.id);
+  }
+  const merge = mergeArchivedTaskIndex(liveTaskIds, archivedCandidates);
+  for (const c of merge.collisions) {
+    issues.push({
+      code: "PHASE_SNAPSHOT_INVALID",
+      severity: "error",
+      message: `archive snapshot task id collides with the live plan: ${c.reason}`,
+    });
+  }
+
+  return { phases, phaseEntries, archivedKnownTaskIds: new Set(merge.index.keys()) };
 }
 
 async function checkProgressLog(
   cwd: string,
   phases: Phase[],
+  archivedKnownTaskIds: Set<string>,
   issues: DoctorIssue[],
 ): Promise<void> {
   const path = join(cwd, ".code-pact", "state", "progress.yaml");
@@ -316,12 +349,15 @@ async function checkProgressLog(
   }
   const events = mergeProgressStreams(legacyEvents, eventFiles);
 
-  // Build a task index for the shared orphan-event detector.
-  const taskIndex = new Map<string, true>();
+  // Known ids = live ∪ archived (step 4a): a ledger event for a hand-deleted
+  // COMPLETED phase's task is not an orphan. The archived set is collision-checked
+  // upstream, so it never silences a genuinely orphaned event.
+  const taskIndex = new Set<string>();
   for (const phase of phases) {
-    for (const task of phase.tasks ?? []) taskIndex.set(task.id, true);
+    for (const task of phase.tasks ?? []) taskIndex.add(task.id);
   }
-  for (const planIssue of detectOrphanProgressEvents(events, taskIndex)) {
+  const known = { has: (id: string) => taskIndex.has(id) || archivedKnownTaskIds.has(id) };
+  for (const planIssue of detectOrphanProgressEvents(events, known)) {
     issues.push(planIssueToDoctor(planIssue));
   }
   for (const planIssue of detectProgressEventConflicts(events)) {
@@ -1064,12 +1100,16 @@ export async function runDoctor(
   const roadmap = await checkRoadmap(cwd, allIssues);
 
   // 3. phase files (requires roadmap)
-  const { phases, phaseEntries } = roadmap
+  const { phases, phaseEntries, archivedKnownTaskIds } = roadmap
     ? await checkPhases(cwd, roadmap, allIssues)
-    : { phases: [] as Phase[], phaseEntries: [] as PhaseEntry[] };
+    : {
+        phases: [] as Phase[],
+        phaseEntries: [] as PhaseEntry[],
+        archivedKnownTaskIds: new Set<string>(),
+      };
 
-  // 4. progress.yaml (requires phases for orphan check)
-  await checkProgressLog(cwd, phases, allIssues);
+  // 4. progress.yaml (requires phases + archived ids for the orphan check)
+  await checkProgressLog(cwd, phases, archivedKnownTaskIds, allIssues);
 
   // 5. agent profiles + model_map completeness (requires project)
   if (project) {
