@@ -30,6 +30,16 @@ export { EventStatus, ActorType, ProgressEvent, ProgressLog } from "./progress-e
 export { BaselineSnapshot } from "./baseline-snapshot.ts";
 
 export {
+  Sha256Hex,
+  TerminalEvidence,
+  SnapshotTaskStatus,
+  SnapshotTask,
+  PhaseSnapshot,
+} from "./phase-snapshot.ts";
+
+export { DecisionStateRecord } from "./decision-state-record.ts";
+
+export {
   ContextProfile,
   VerificationProfile,
   AmbiguityAction,
