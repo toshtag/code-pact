@@ -55,6 +55,13 @@ import { phaseSnapshotPath, sha256Hex } from "./paths.ts";
 export type PhaseSnapshotBlock =
   | { kind: "record_invalid"; detail: string }
   | { kind: "record_identity_mismatch"; detail: string }
+  | {
+      kind: "phase_id_mismatch";
+      requested_phase_id: string;
+      roadmap_phase_id: string;
+      yaml_phase_id: string;
+      path: string;
+    }
   | { kind: "unsafe_path"; original_path: string }
   | { kind: "phase_not_terminal"; status: string }
   | { kind: "task_not_terminal"; task_id: string; status: string }
@@ -241,6 +248,27 @@ export async function planPhaseSnapshot(
   const phase = Phase.parse(parseYaml(rawPhase) as unknown);
   const blocks: PhaseSnapshotBlock[] = [];
 
+  // Identity at the source: the record path is keyed by the REQUESTED id, the
+  // record body by the YAML's id — they must be the same phase, ref included.
+  // A roadmap/YAML id divergence is a broken active control plane; this writer
+  // creates records future readers will trust, so it fails closed itself
+  // rather than relying on doctor/lint's PHASE_ID_MISMATCH having run.
+  if (phase.id !== ref.id || phase.id !== phaseId) {
+    return {
+      kind: "ineligible",
+      path,
+      blocks: [
+        {
+          kind: "phase_id_mismatch",
+          requested_phase_id: phaseId,
+          roadmap_phase_id: ref.id,
+          yaml_phase_id: phase.id,
+          path: ref.path,
+        },
+      ],
+    };
+  }
+
   const terminalStatus =
     phase.status === "done" || phase.status === "cancelled" ? phase.status : null;
   if (terminalStatus === null) {
@@ -337,6 +365,18 @@ export async function planPhaseSnapshot(
         otherRef.id === ref.id
           ? phase
           : Phase.parse(parseYaml(await readRawWithin(cwd, otherRef.path)) as unknown);
+      // Never scan an id-diverged active control doc — the scan's verdict
+      // ("no active dependant") would rest on a file we cannot trust.
+      if (otherPhase.id !== otherRef.id) {
+        blocks.push({
+          kind: "phase_id_mismatch",
+          requested_phase_id: phaseId,
+          roadmap_phase_id: otherRef.id,
+          yaml_phase_id: otherPhase.id,
+          path: otherRef.path,
+        });
+        continue;
+      }
       for (const otherTask of otherPhase.tasks ?? []) {
         if (otherTask.status === "done" || otherTask.status === "cancelled") continue;
         for (const dep of otherTask.depends_on ?? []) {

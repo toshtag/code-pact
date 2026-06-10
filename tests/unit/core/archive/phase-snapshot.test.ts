@@ -415,6 +415,46 @@ describe("record identity — a valid-looking record for the wrong target is fai
   });
 });
 
+describe("phase id mismatch — roadmap ref id vs YAML id (fresh-write identity)", () => {
+  it("roadmap says P1 but the YAML says id: P2 → ineligible phase_id_mismatch, NO record written", async () => {
+    await scaffold({ p1: P1_DONE.replace("id: P1\n", "id: P2\n") });
+    const outcome = await writePhaseSnapshot(cwd, "P1", { now: NOW });
+    expect(outcome.kind).toBe("ineligible");
+    if (outcome.kind !== "ineligible") return;
+    expect(outcome.blocks).toEqual([
+      {
+        kind: "phase_id_mismatch",
+        requested_phase_id: "P1",
+        roadmap_phase_id: "P1",
+        yaml_phase_id: "P2",
+        path: "design/phases/P1-x.yaml",
+      },
+    ]);
+    await expect(readFile(outcome.path, "utf8")).rejects.toThrow(); // nothing written
+  });
+
+  it("an id-diverged OTHER active phase blocks the dependant scan (never scan an untrusted control doc)", async () => {
+    await scaffold();
+    // P2's roadmap ref says P2 but its YAML claims P9.
+    const p2 = await readFile(join(cwd, "design", "phases", "P2-y.yaml"), "utf8");
+    await writeFile(
+      join(cwd, "design", "phases", "P2-y.yaml"),
+      p2.replace("id: P2\n", "id: P9\n"),
+      "utf8",
+    );
+    const outcome = await writePhaseSnapshot(cwd, "P1", { now: NOW });
+    expect(outcome.kind).toBe("ineligible");
+    if (outcome.kind !== "ineligible") return;
+    expect(outcome.blocks).toContainEqual({
+      kind: "phase_id_mismatch",
+      requested_phase_id: "P1",
+      roadmap_phase_id: "P2",
+      yaml_phase_id: "P9",
+      path: "design/phases/P2-y.yaml",
+    });
+  });
+});
+
 describe("status drift — cancelled task with a derived-done progress state", () => {
   it("refuses to freeze a snapshot that would contradict event-derived dependency satisfaction", async () => {
     await scaffold({
