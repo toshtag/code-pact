@@ -28,7 +28,7 @@ export function isAbsentDecisionsDirError(error: unknown): boolean {
  * `TASK_DECISION_UNRESOLVED` advisory.
  */
 export async function readDecisionAdrFiles(cwd: string): Promise<string[]> {
-  return (await readDecisionsDir(cwd)).entries;
+  return (await readLiveDecisionDir(cwd)).entries;
 }
 
 /**
@@ -40,8 +40,30 @@ export async function readDecisionAdrFiles(cwd: string): Promise<string[]> {
  */
 export const NON_DECISION_FILES = new Set(["README.md", "PRUNED.md"]);
 
-/** Like {@link readDecisionAdrFiles} but also reports whether the dir exists. */
-async function readDecisionsDir(
+/**
+ * The shared LIVE `design/decisions/` directory-listing seam: returns whether
+ * the dir is present and its decision filenames (with `NON_DECISION_FILES` —
+ * the index + `PRUNED.md` ledger — filtered out). Like
+ * {@link readDecisionAdrFiles} but also reports `present`. The gate
+ * ({@link resolveDecisionGate} / {@link makeDecisionResolver}) and the lint
+ * classify scans share this; the pack loader routes its listing onto it too
+ * (step 2b), so the live directory read stops being duplicated.
+ *
+ * SCOPE — live `design/decisions/` ONLY; it must NOT consult `.code-pact/state`.
+ * The design-docs-ephemeral retired-decision fallback (step 5) belongs in
+ * gate-aware / lint-aware WRAPPERS that compose this seam, NEVER inside it —
+ * otherwise the pack render and the ADR-quality scans (`loadDecisions` /
+ * `loadDeclaredDecisions` / `classifyDecisionAdrs`) would start treating a
+ * retired state record as a live decision body / quality target.
+ *
+ * Error contract (fail-closed): ENOENT/ENOTDIR → `{ present:false, entries:[] }`
+ * (a roadmap with no decisions is a normal "no ADR" state); ANY OTHER error
+ * THROWS — an unreadable decisions dir must never silently pass a gate. Optional
+ * context-source callers (the pack loaders) wrap this in their own `catch → []`
+ * to keep their degrade-on-any-error contract; that leniency stays at the call
+ * site, not pushed down here.
+ */
+export async function readLiveDecisionDir(
   cwd: string,
 ): Promise<{ present: boolean; entries: string[] }> {
   try {
@@ -258,7 +280,7 @@ export type DecisionResolution = {
  * that resolves outside `cwd`). This is the gate's fail-closed I/O primitive:
  * an unsafe `decision_refs` path is never read.
  */
-type ReadResult =
+export type ReadResult =
   | { kind: "ok"; content: string }
   | { kind: "missing" }
   | { kind: "unsafe" };
@@ -281,6 +303,38 @@ function diskReader(cwd: string): RelFileReader {
       throw error;
     }
   };
+}
+
+/**
+ * The shared LIVE per-file decision read seam. Reads one repo-relative path
+ * through the project-root boundary, returning `ok` / `missing` / `unsafe`
+ * (see {@link ReadResult}). This is the same primitive the gate uses; pack
+ * loaders route their `design/decisions/*` reads onto it (step 2b) so the live
+ * decision-read logic stops being duplicated.
+ *
+ * SCOPE — live files ONLY. This reads any SAFE project-root-relative path,
+ * INCLUDING a nested ADR (`design/decisions/p3/adr.md`) — the gate resolves
+ * nested `decision_refs` today. It must NOT consult `.code-pact/state`. The
+ * design-docs-ephemeral retired-decision fallback (step 5) is added in
+ * gate-aware / lint-aware WRAPPERS that compose this primitive — never inside
+ * it, so the pack/quality consumers never start rendering or classifying a
+ * retired `.code-pact/state` record. And note the SCOPE MISMATCH the step-5
+ * wrappers must honor: a `.code-pact/state` decision-state record is top-level
+ * `design/decisions/*.md` EXACT-MATCH only, so a nested `decision_refs` with no
+ * live file must stay fail-closed — never resolved from a state record.
+ *
+ * Error contract: ENOENT/ENOTDIR → `{ kind: "missing" }` (no file at that path
+ * — `isAbsentDecisionsDirError` covers both); ANY OTHER read error THROWS
+ * (matching the gate's fail-closed stance). Callers that are OPTIONAL context
+ * sources (the pack loaders) must wrap this in their own `catch → skip` to
+ * preserve their degrade-on-any-error contract; they must NOT push that leniency
+ * down here.
+ */
+export async function readLiveDecisionFile(
+  cwd: string,
+  relPath: string,
+): Promise<ReadResult> {
+  return diskReader(cwd)(relPath);
 }
 
 function whyNotAccepted(c: ConsideredAdr): string {
@@ -396,7 +450,7 @@ export async function resolveDecisionGate(
   taskId: string,
   decisionRefs?: string[],
 ): Promise<DecisionResolution> {
-  const dir = await readDecisionsDir(cwd);
+  const dir = await readLiveDecisionDir(cwd);
   return resolveWith(taskId, decisionRefs, dir, diskReader(cwd));
 }
 
@@ -409,7 +463,7 @@ export async function resolveDecisionGate(
 export async function makeDecisionResolver(
   cwd: string,
 ): Promise<{ resolve(taskId: string, decisionRefs?: string[]): Promise<DecisionResolution> }> {
-  const dir = await readDecisionsDir(cwd);
+  const dir = await readLiveDecisionDir(cwd);
   const cache = new Map<string, ReadResult>();
   const base = diskReader(cwd);
   const cachedRead: RelFileReader = async (relPath) => {
