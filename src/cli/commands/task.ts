@@ -964,6 +964,10 @@ async function cmdTaskComplete(
         outCode = "INVALID_TASK_TRANSITION";
         break;
       }
+      case "PHASE_SNAPSHOT_INVALID":
+        msg = err.message;
+        outCode = "PHASE_SNAPSHOT_INVALID";
+        break;
       default:
         throw err;
     }
@@ -1112,6 +1116,10 @@ async function cmdTaskRecordDone(
         outCode = "INVALID_TASK_TRANSITION";
         break;
       }
+      case "PHASE_SNAPSHOT_INVALID":
+        msg = err.message;
+        outCode = "PHASE_SNAPSHOT_INVALID";
+        break;
       default:
         throw err;
     }
@@ -1354,6 +1362,10 @@ async function cmdTaskFinalize(
         };
         break;
       }
+      case "PHASE_SNAPSHOT_INVALID":
+        msg = err.message;
+        outCode = "PHASE_SNAPSHOT_INVALID";
+        break;
       default:
         throw err;
     }
@@ -1461,11 +1473,22 @@ async function cmdTaskRunbook(
       if (phases) extraData = { phases };
     } else if (code === "CONFIG_ERROR") {
       outCode = "CONFIG_ERROR";
+    } else if (code === "PHASE_SNAPSHOT_INVALID") {
+      outCode = "PHASE_SNAPSHOT_INVALID";
     }
     emitError(json, outCode, msg, extraData ? { data: extraData } : {});
     return 2;
   }
 }
+
+// design-docs-ephemeral (step 4a): `PHASE_SNAPSHOT_INVALID` can be thrown by the
+// SHARED task resolver (`resolveTaskInRoadmap`) and the plan-state loaders, so it can
+// surface from ANY task command that resolves a task — not just `task context` /
+// `task prepare`. It is a control-plane integrity error, NOT an internal bug, so
+// every task command's error switch handles it as a clean envelope (exit 2) rather
+// than crashing (exit 3). See each `case "PHASE_SNAPSHOT_INVALID"` below and in
+// emitContextLikeError / emitTaskCommonError / cmdTaskComplete / cmdTaskRecordDone /
+// cmdTaskFinalize / cmdTaskStatus / cmdTaskRunbook.
 
 // ---------------------------------------------------------------------------
 // Command: task start / block / resume / status
@@ -1511,6 +1534,11 @@ function emitTaskCommonError(
       outCode = "INVALID_TASK_TRANSITION";
       break;
     }
+    // Control-plane integrity error from the shared resolver / plan-state loaders.
+    case "PHASE_SNAPSHOT_INVALID":
+      msg = err.message;
+      outCode = "PHASE_SNAPSHOT_INVALID";
+      break;
     default:
       return null;
   }
@@ -1785,6 +1813,10 @@ async function cmdTaskStatus(
         outCode = "AMBIGUOUS_TASK_ID";
         break;
       }
+      case "PHASE_SNAPSHOT_INVALID":
+        msg = err.message;
+        outCode = "PHASE_SNAPSHOT_INVALID";
+        break;
       default:
         throw err;
     }

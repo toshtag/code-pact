@@ -123,13 +123,16 @@ so "events exist" is never by itself a license to delete the YAML.
 > task index, all collision-checked + fail-closed). ⬜ not started = **4b**
 > (roadmap-ref-REMOVED + unreferenced-archived-phase cross-phase `depends_on`),
 > 5 (retired-decision resolution), 6, 7. Nothing destructive has shipped yet
-> (4a writes/deletes nothing — it only READS the snapshots). The locked contract to
-> honor going forward: the live phase/decision loaders return full `Phase` / resolve
-> from the live `.md` ONLY — archived resolution (4a, steps 5–6) is a SEPARATE
-> archived-aware path, never a snapshot coerced into `Phase`, a gate released from
-> absence, or a task-id collision used as a silencer. See
-> `~/.claude/.../memory/step4-archive-reader-invariants.md` for the locked reader
-> rules that bind 4b/5/6/7.
+> (4a writes/deletes nothing — it only READS the snapshots). **The locked reader
+> invariants that bind 4b/5/6/7** (stated in full in the 4a entry below and enforced
+> by `tests/unit/core/archive/`, `tests/unit/core/plan/state-archive.test.ts`,
+> `tests/unit/core/plan/resolve-task-archive.test.ts`, and
+> `tests/integration/archive-phase-tolerance.test.ts`): the live phase/decision
+> loaders return full `Phase` / resolve from the live `.md` ONLY; archived resolution
+> is a SEPARATE archived-aware path, never a snapshot coerced into `Phase`, never a
+> gate released from absence, never a present (or present-but-inaccessible) live file
+> overridden by a snapshot (live-wins), and never a task-id collision used as a
+> silencer (collision → `PHASE_SNAPSHOT_INVALID`, fail-closed, on every reader path).
 
 0. This directive (foundation, reviewed first) + the `constitution` update.
 1. Recovery report / inventory (continue / discard / quarantine). ✅ done.

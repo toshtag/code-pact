@@ -260,6 +260,36 @@ describe("A2 bare-rm of a completed phase with a cross-phase depends_on", () => 
     expect(jsonOk(run(["plan", "lint", "--strict", "--json"]))).toBe(true);
   });
 
+  it("collision → EVERY task command returns a clean PHASE_SNAPSHOT_INVALID envelope (exit 2), never INTERNAL_ERROR/crash", async () => {
+    // resolveTaskInRoadmap is shared by all task-* commands, so the new throw must
+    // surface as a clean control-plane error from each, not crash (exit 3).
+    await scaffold();
+    await writePhaseSnapshot(tmpDir, "P1", { now: NOW });
+    const P2_COLLIDE = P2_DEP.replace("id: P2-T1", "id: P1-T1");
+    await writeFile(join(tmpDir, "design", "phases", "P2-y.yaml"), P2_COLLIDE, "utf8");
+    await rm(join(tmpDir, "design", "phases", "P1-x.yaml"));
+
+    const cmds: string[][] = [
+      ["task", "status", "P1-T1", "--json"],
+      ["task", "complete", "P1-T1", "--agent", "claude-code", "--json"],
+      ["task", "record-done", "P1-T1", "--agent", "claude-code", "--evidence", "x", "--json"],
+      ["task", "finalize", "P1-T1", "--json"],
+      ["task", "runbook", "P1-T1", "--json"],
+      ["task", "start", "P1-T1", "--json"],
+      ["task", "context", "P1-T1", "--agent", "claude-code", "--json"],
+      ["task", "prepare", "P1-T1", "--agent", "claude-code", "--json"],
+    ];
+    for (const c of cmds) {
+      const r = run(c);
+      expect(r.code, `${c.join(" ")} should exit 2, not crash`).toBe(2);
+      const parsed = JSON.parse(r.stdout) as { ok?: boolean; error?: { code?: string } };
+      expect(parsed.ok, `${c.join(" ")} should be ok:false`).toBe(false);
+      expect(parsed.error?.code, `${c.join(" ")} should map to PHASE_SNAPSHOT_INVALID`).toBe(
+        "PHASE_SNAPSHOT_INVALID",
+      );
+    }
+  });
+
   it("collision (archived id == live id) → ALL FIVE commands fail closed, none green (blocker-2 + E)", async () => {
     // Snapshot P1 while non-colliding, then drift: make P2's live task ALSO own
     // P1-T1, delete P1. The archived P1-T1 now collides with the live P1-T1.
