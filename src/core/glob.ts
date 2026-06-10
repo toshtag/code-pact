@@ -83,7 +83,7 @@ export function validateGlobSyntax(pattern: string): string | null {
  * this block comment. The actual implementation handles them directly.
  */
 export function globToRegex(pattern: string): RegExp {
-  const DOUBLE = ""; // sentinel for `**` segments
+  const DOUBLE = "\u0001"; // sentinel for `**` segments
   const segments = pattern.split("/").map((seg) => {
     if (seg === "**") return DOUBLE;
     // Escape regex metachars (excluding `*`), then expand `*` to `[^/]*`.
