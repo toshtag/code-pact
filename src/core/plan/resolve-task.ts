@@ -25,8 +25,9 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { Phase, type Phase as PhaseT } from "../schemas/phase.ts";
+import { type Phase as PhaseT } from "../schemas/phase.ts";
 import { Roadmap } from "../schemas/roadmap.ts";
+import { loadPhase } from "./load-phase.ts";
 import type { Task as TaskT } from "../schemas/task.ts";
 import type { PlanState } from "./state.ts";
 
@@ -84,8 +85,7 @@ export async function resolveTaskInRoadmap(
 
   const hits: ResolvedTask[] = [];
   for (const ref of roadmap.phases) {
-    const phaseRaw = await readFile(join(cwd, ref.path), "utf8");
-    const phase = Phase.parse(parseYaml(phaseRaw) as unknown);
+    const phase = await loadPhase(cwd, ref.path);
     if (phase.tasks?.some((t) => t.id === taskId)) {
       hits.push({ phaseId: phase.id, phasePath: ref.path });
     }

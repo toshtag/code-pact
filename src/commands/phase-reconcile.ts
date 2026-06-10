@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { Roadmap } from "../core/schemas/roadmap.ts";
 import { resolvePhaseRef } from "../core/plan/resolve-phase.ts";
+import { loadPhase } from "../core/plan/load-phase.ts";
 import { Phase, type PhaseStatus } from "../core/schemas/phase.ts";
 import { loadProgressLog } from "../core/progress/io.ts";
 import {
@@ -91,8 +92,7 @@ async function resolvePhase(
   const roadmapRaw = await readFile(join(cwd, "design", "roadmap.yaml"), "utf8");
   const roadmap = Roadmap.parse(parseYaml(roadmapRaw) as unknown);
   const ref = resolvePhaseRef(roadmap, phaseId);
-  const phaseRaw = await readFile(join(cwd, ref.path), "utf8");
-  const phase = Phase.parse(parseYaml(phaseRaw) as unknown);
+  const phase = await loadPhase(cwd, ref.path);
   return { phase, file: ref.path };
 }
 

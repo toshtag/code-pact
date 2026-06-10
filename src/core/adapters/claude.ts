@@ -10,7 +10,7 @@ import {
 } from "../models/catalog.ts";
 import type { ModelProfile } from "../schemas/model-profile.ts";
 import { Roadmap } from "../schemas/roadmap.ts";
-import { Phase } from "../schemas/phase.ts";
+import { loadPhase } from "../plan/load-phase.ts";
 import type { Locale } from "../../i18n/index.ts";
 import type {
   AdapterDescriptor,
@@ -253,8 +253,7 @@ async function readVerificationCommands(cwd: string): Promise<string[]> {
   const seen = new Set<string>();
   for (const ref of roadmap.phases) {
     try {
-      const phaseRaw = await readFile(join(cwd, ref.path), "utf8");
-      const phase = Phase.parse(parseYaml(phaseRaw) as unknown);
+      const phase = await loadPhase(cwd, ref.path);
       for (const cmd of phase.verification.commands) seen.add(cmd);
     } catch {
       // skip unreadable phases

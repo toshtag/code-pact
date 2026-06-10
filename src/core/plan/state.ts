@@ -58,6 +58,29 @@ function phasesDirPath(cwd: string): string {
   return join(cwd, ...PHASES_DIR_SEGMENTS);
 }
 
+/**
+ * The single phase-read site for the PlanState family — `loadPlanState`
+ * (strict), `collectPlanArtifacts` (lenient), and `scanPhasesDirBestEffort`.
+ * Distinct from the raw-throwing `core/plan/load-phase.ts` seam ON PURPOSE: it
+ * throws a file-tagged `ParseError` on a schema-invalid phase so the lenient
+ * loader can collect a `FileIssue` pointing at the offending file.
+ *
+ * SCOPE — live phase YAML ONLY; returns a full `Phase`. It must NOT coerce an
+ * archived snapshot into `Phase` (a snapshot is intentionally smaller — no
+ * objective / definition_of_done / verification / prose — so it is not a
+ * `Phase`). This helper takes only `absPath`; archived-phase support needs at
+ * least the roadmap ref (`id` / `path`), and `PlanState.phases` is typed
+ * `PhaseEntry { phase: Phase }`. So the design-docs-ephemeral archived support
+ * (step 4) must EITHER wrap this read with roadmap-ref-aware archived-resolution
+ * logic OR widen the PlanState representation to a `live | archived`
+ * discriminated union — never by silently returning a snapshot from here. (A
+ * missing file still surfaces as raw ENOENT here, same as the other seam, which
+ * is the natural place such a wrapper would intercept.)
+ */
+function loadPlanStatePhase(absPath: string): Promise<PhaseT> {
+  return loadYaml(absPath, Phase);
+}
+
 function buildTaskIndex(
   phases: PhaseEntry[],
 ): Map<string, { phaseId: string; task: TaskT }> {
@@ -85,7 +108,7 @@ export async function loadPlanState(cwd: string): Promise<PlanState> {
   const phases: PhaseEntry[] = [];
   for (const ref of roadmap.phases) {
     const absPath = join(cwd, ref.path);
-    const phase = await loadYaml(absPath, Phase);
+    const phase = await loadPlanStatePhase(absPath);
     phases.push({ ref, absPath, phase });
   }
 
@@ -196,7 +219,7 @@ export async function collectPlanArtifacts(
   for (const ref of roadmap.phases) {
     const absPath = join(cwd, ref.path);
     try {
-      const phase = await loadYaml(absPath, Phase);
+      const phase = await loadPlanStatePhase(absPath);
       phases.push({ ref, absPath, phase });
     } catch (err) {
       pushParseIssue(fileIssues, err, ref.path);
@@ -268,7 +291,7 @@ async function scanPhasesDirBestEffort(
     const absPath = join(phasesDir, entry);
     const relPath = `design/phases/${entry}`;
     try {
-      const phase = await loadYaml(absPath, Phase);
+      const phase = await loadPlanStatePhase(absPath);
       // Without a roadmap, ref.id is unknown — fall back to the phase id
       // so downstream checks can still refer to the phase by id.
       phases.push({
