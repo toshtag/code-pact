@@ -455,6 +455,82 @@ describe("phase id mismatch — roadmap ref id vs YAML id (fresh-write identity)
   });
 });
 
+describe("duplicate task ids — event evidence must never be ambiguous", () => {
+  it("two tasks with the same id INSIDE the target phase → ineligible duplicate_task_id, no record written", async () => {
+    const dupInP1 = P1_DONE.replace(
+      `  - id: P1-T2
+    type: docs`,
+      `  - id: P1-T1
+    type: docs`,
+    ).replace("    status: cancelled", "    status: done");
+    await scaffold({ p1: dupInP1 });
+    const outcome = await writePhaseSnapshot(cwd, "P1", { now: NOW });
+    expect(outcome.kind).toBe("ineligible");
+    if (outcome.kind !== "ineligible") return;
+    expect(outcome.blocks).toContainEqual({
+      kind: "duplicate_task_id",
+      task_id: "P1-T1",
+      first_phase_id: "P1",
+      first_path: "design/phases/P1-x.yaml",
+      second_phase_id: "P1",
+      second_path: "design/phases/P1-x.yaml",
+    });
+    await expect(readFile(outcome.path, "utf8")).rejects.toThrow();
+  });
+
+  it("a target-phase task id duplicated in another active phase → ineligible, no record written", async () => {
+    await scaffold();
+    const p2 = await readFile(join(cwd, "design", "phases", "P2-y.yaml"), "utf8");
+    await writeFile(
+      join(cwd, "design", "phases", "P2-y.yaml"),
+      p2.replace("  - id: P2-T1\n", "  - id: P1-T1\n"),
+      "utf8",
+    );
+    const outcome = await writePhaseSnapshot(cwd, "P1", { now: NOW });
+    expect(outcome.kind).toBe("ineligible");
+    if (outcome.kind !== "ineligible") return;
+    expect(outcome.blocks).toContainEqual({
+      kind: "duplicate_task_id",
+      task_id: "P1-T1",
+      first_phase_id: "P1",
+      first_path: "design/phases/P1-x.yaml",
+      second_phase_id: "P2",
+      second_path: "design/phases/P2-y.yaml",
+    });
+    await expect(readFile(outcome.path, "utf8")).rejects.toThrow();
+  });
+
+  it("a duplicate between two OTHER active phases (target untouched) still fails closed — the whole graph must be unambiguous", async () => {
+    await scaffold();
+    // Add P3 whose task id collides with P2's, far away from target P1.
+    await writeFile(
+      join(cwd, "design", "roadmap.yaml"),
+      ROADMAP + `  - id: P3
+    path: design/phases/P3-z.yaml
+    weight: 1
+`,
+      "utf8",
+    );
+    const p2 = await readFile(join(cwd, "design", "phases", "P2-y.yaml"), "utf8");
+    await writeFile(
+      join(cwd, "design", "phases", "P3-z.yaml"),
+      p2.replace("id: P2\n", "id: P3\n").replace("name: Next", "name: Third"),
+      "utf8",
+    ); // P3 keeps P2's task id P2-T1 → cross-phase duplicate not involving P1
+    const outcome = await writePhaseSnapshot(cwd, "P1", { now: NOW });
+    expect(outcome.kind).toBe("ineligible");
+    if (outcome.kind !== "ineligible") return;
+    expect(outcome.blocks).toContainEqual({
+      kind: "duplicate_task_id",
+      task_id: "P2-T1",
+      first_phase_id: "P2",
+      first_path: "design/phases/P2-y.yaml",
+      second_phase_id: "P3",
+      second_path: "design/phases/P3-z.yaml",
+    });
+  });
+});
+
 describe("status drift — done task whose progress history contradicts the YAML", () => {
   const drift = (eventsYaml: string) =>
     scaffold({

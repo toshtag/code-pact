@@ -62,6 +62,14 @@ export type PhaseSnapshotBlock =
       yaml_phase_id: string;
       path: string;
     }
+  | {
+      kind: "duplicate_task_id";
+      task_id: string;
+      first_phase_id: string;
+      first_path: string;
+      second_phase_id: string;
+      second_path: string;
+    }
   | { kind: "unsafe_path"; original_path: string }
   | { kind: "phase_not_terminal"; status: string }
   | { kind: "task_not_terminal"; task_id: string; status: string }
@@ -282,6 +290,57 @@ export async function planPhaseSnapshot(
     blocks.push({ kind: "phase_not_terminal", status: phase.status });
   }
 
+  // Load every active phase once (id-verified), in roadmap order — shared by
+  // the duplicate-task-id scan and the active-dependant scan below. An
+  // id-diverged active control doc is never scanned (its verdicts could not be
+  // trusted).
+  const activePhases: { refId: string; refPath: string; phase: Phase }[] = [];
+  for (const otherRef of roadmap.phases) {
+    const otherPhase =
+      otherRef.id === ref.id
+        ? phase
+        : Phase.parse(parseYaml(await readRawWithin(cwd, otherRef.path)) as unknown);
+    if (otherPhase.id !== otherRef.id) {
+      blocks.push({
+        kind: "phase_id_mismatch",
+        requested_phase_id: phaseId,
+        roadmap_phase_id: otherRef.id,
+        yaml_phase_id: otherPhase.id,
+        path: otherRef.path,
+      });
+      continue;
+    }
+    activePhases.push({ refId: otherRef.id, refPath: otherRef.path, phase: otherPhase });
+  }
+
+  // Task-id uniqueness across the WHOLE active graph. Progress events bind by
+  // task_id alone, so a duplicate makes every event-derived evidence ambiguous
+  // — which task does that done event prove? A snapshot is a future authority;
+  // it must not be minted from a graph where evidence is ambiguous, whether or
+  // not the duplicate touches this phase. The writer fails closed itself (the
+  // phase_id_mismatch rationale): never assume lint/doctor's DUPLICATE_TASK_ID
+  // ran first.
+  {
+    const seen = new Map<string, { phase_id: string; path: string }>();
+    for (const entry of activePhases) {
+      for (const t of entry.phase.tasks ?? []) {
+        const first = seen.get(t.id);
+        if (first) {
+          blocks.push({
+            kind: "duplicate_task_id",
+            task_id: t.id,
+            first_phase_id: first.phase_id,
+            first_path: first.path,
+            second_phase_id: entry.refId,
+            second_path: entry.refPath,
+          });
+        } else {
+          seen.set(t.id, { phase_id: entry.refId, path: entry.refPath });
+        }
+      }
+    }
+  }
+
   const progress = await loadMergedProgress(cwd);
   const attestations = opts.attestations ?? {};
   const claimedAttestations = new Set(Object.keys(attestations));
@@ -380,33 +439,18 @@ export async function planPhaseSnapshot(
 
   // No active, unresolved task anywhere in the plan may depend on a task of
   // this phase whose terminal status is not done — archiving would bury a
-  // permanently-unsatisfiable dependency instead of surfacing it.
+  // permanently-unsatisfiable dependency instead of surfacing it. Reuses the
+  // id-verified activePhases set loaded above.
   if (cancelledTaskIds.size > 0) {
-    for (const otherRef of roadmap.phases) {
-      const otherPhase =
-        otherRef.id === ref.id
-          ? phase
-          : Phase.parse(parseYaml(await readRawWithin(cwd, otherRef.path)) as unknown);
-      // Never scan an id-diverged active control doc — the scan's verdict
-      // ("no active dependant") would rest on a file we cannot trust.
-      if (otherPhase.id !== otherRef.id) {
-        blocks.push({
-          kind: "phase_id_mismatch",
-          requested_phase_id: phaseId,
-          roadmap_phase_id: otherRef.id,
-          yaml_phase_id: otherPhase.id,
-          path: otherRef.path,
-        });
-        continue;
-      }
-      for (const otherTask of otherPhase.tasks ?? []) {
+    for (const entry of activePhases) {
+      for (const otherTask of entry.phase.tasks ?? []) {
         if (otherTask.status === "done" || otherTask.status === "cancelled") continue;
         for (const dep of otherTask.depends_on ?? []) {
           if (cancelledTaskIds.has(dep)) {
             blocks.push({
               kind: "active_dependant_on_non_done_task",
               dependant_task_id: otherTask.id,
-              dependant_phase_id: otherPhase.id,
+              dependant_phase_id: entry.phase.id,
               depends_on_task_id: dep,
             });
           }
