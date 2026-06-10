@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
+  applyPhaseSnapshotPlan,
   planPhaseSnapshot,
   writePhaseSnapshot,
 } from "../../../../src/core/archive/phase-snapshot.ts";
@@ -345,6 +346,125 @@ describe("eligibility — fail closed", () => {
   });
 });
 
+describe("concurrent-writer guard (plan-observed ExpectedState at apply time)", () => {
+  it("a record created between plan and apply makes the fresh write THROW, not overwrite", async () => {
+    await scaffold();
+    const plan = await planPhaseSnapshot(cwd, "P1", { now: NOW });
+    expect(plan.kind).toBe("write");
+    if (plan.kind !== "write") return;
+
+    // Concurrent writer lands first.
+    await mkdir(join(cwd, ".code-pact", "state", "archive", "phases"), { recursive: true });
+    await writeFile(plan.path, '{"winner":"other"}\n', "utf8");
+
+    await expect(applyPhaseSnapshotPlan(plan)).rejects.toThrow(/expected absent/);
+    expect(await readFile(plan.path, "utf8")).toBe('{"winner":"other"}\n'); // untouched
+  });
+
+  it("a record changed between refresh-plan and apply makes the refresh THROW, not overwrite", async () => {
+    await scaffold();
+    await writePhaseSnapshot(cwd, "P1", { now: NOW });
+    const edited = P1_DONE.replace("Build the base", "Build the base (edited)");
+    await writeFile(join(cwd, "design", "phases", "P1-x.yaml"), edited, "utf8");
+
+    const plan = await planPhaseSnapshot(cwd, "P1", {
+      now: NOW,
+      refresh: {
+        expected_old_source_sha256: sha256Hex(P1_DONE),
+        expected_new_source_sha256: sha256Hex(edited),
+      },
+    });
+    expect(plan.kind).toBe("refresh");
+    if (plan.kind !== "refresh") return;
+
+    await writeFile(plan.path, plan.existing_raw + "\n", "utf8"); // concurrent change
+    await expect(applyPhaseSnapshotPlan(plan)).rejects.toThrow(/changed before write/);
+  });
+});
+
+describe("record identity — a valid-looking record for the wrong target is fail-closed", () => {
+  it("a record whose phase_id is not the requested id → record_identity_mismatch (no noop, no overwrite)", async () => {
+    await scaffold();
+    const first = await writePhaseSnapshot(cwd, "P1", { now: NOW });
+    expect(first.kind).toBe("written");
+    const recordPath = (first as { path: string }).path;
+
+    const tampered = JSON.parse(await readFile(recordPath, "utf8"));
+    tampered.phase_id = "P2"; // still schema-valid, but not OUR record
+    await writeFile(recordPath, JSON.stringify(tampered, null, 2) + "\n", "utf8");
+
+    const outcome = await writePhaseSnapshot(cwd, "P1", { now: NOW });
+    expect(outcome.kind).toBe("ineligible");
+    if (outcome.kind !== "ineligible") return;
+    expect(outcome.blocks[0]?.kind).toBe("record_identity_mismatch");
+  });
+
+  it("a record whose path_sha256 does not cover its own original_path → record_identity_mismatch", async () => {
+    await scaffold();
+    const first = await writePhaseSnapshot(cwd, "P1", { now: NOW });
+    const recordPath = (first as { path: string }).path;
+
+    const tampered = JSON.parse(await readFile(recordPath, "utf8"));
+    tampered.original_path = "design/phases/P1-renamed.yaml"; // hash no longer covers it
+    await writeFile(recordPath, JSON.stringify(tampered, null, 2) + "\n", "utf8");
+
+    const outcome = await writePhaseSnapshot(cwd, "P1", { now: NOW });
+    expect(outcome.kind).toBe("ineligible");
+    if (outcome.kind !== "ineligible") return;
+    expect(outcome.blocks[0]?.kind).toBe("record_identity_mismatch");
+  });
+});
+
+describe("status drift — cancelled task with a derived-done progress state", () => {
+  it("refuses to freeze a snapshot that would contradict event-derived dependency satisfaction", async () => {
+    await scaffold({
+      progress: `events:
+  - task_id: P1-T1
+    status: done
+    at: 2026-06-01T00:00:00.000Z
+    actor: agent
+  - task_id: P1-T2
+    status: done
+    at: 2026-06-02T00:00:00.000Z
+    actor: agent
+`,
+    });
+    const outcome = await writePhaseSnapshot(cwd, "P1", { now: NOW });
+    expect(outcome.kind).toBe("ineligible");
+    if (outcome.kind !== "ineligible") return;
+    expect(outcome.blocks).toContainEqual({
+      kind: "cancelled_task_with_done_event",
+      task_id: "P1-T2",
+    });
+  });
+});
+
+describe("active control docs stay fail-closed", () => {
+  it("a missing roadmap.yaml THROWS even when a record exists — it is never 'already archived'", async () => {
+    await scaffold();
+    await writePhaseSnapshot(cwd, "P1", { now: NOW });
+    await rm(join(cwd, "design", "roadmap.yaml"));
+    await expect(writePhaseSnapshot(cwd, "P1", { now: NOW })).rejects.toThrow();
+  });
+
+  it("a phase YAML that is a symlink escaping the project → unsafe_path (never snapshotted)", async () => {
+    await scaffold();
+    const outside = await mkdtemp(join(tmpdir(), "code-pact-outside-"));
+    try {
+      await writeFile(join(outside, "evil.yaml"), P1_DONE, "utf8");
+      await rm(join(cwd, "design", "phases", "P1-x.yaml"));
+      await symlink(join(outside, "evil.yaml"), join(cwd, "design", "phases", "P1-x.yaml"));
+
+      const outcome = await writePhaseSnapshot(cwd, "P1", { now: NOW });
+      expect(outcome.kind).toBe("ineligible");
+      if (outcome.kind !== "ineligible") return;
+      expect(outcome.blocks[0]?.kind).toBe("unsafe_path");
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("schema invariants", () => {
   it("design_status evidence on a done task is schema-invalid", () => {
     const parsed = SnapshotTask.safeParse({
@@ -363,6 +483,29 @@ describe("schema invariants", () => {
     const parsed = SnapshotTask.safeParse({
       id: "P1-T2",
       status: "cancelled",
+      terminal_evidence: { kind: "progress_events", event_ids: [sha256Hex("x")] },
+    });
+    expect(parsed.success).toBe(false);
+  });
+
+  it("a whitespace-only attestation reason is schema-invalid (an audit trail needs a real reason)", () => {
+    const parsed = SnapshotTask.safeParse({
+      id: "P1-T1",
+      status: "done",
+      terminal_evidence: {
+        kind: "maintainer_attestation",
+        recorded_at: NOW.toISOString(),
+        reason: "   ",
+      },
+    });
+    expect(parsed.success).toBe(false);
+  });
+
+  it("unknown keys are rejected (strict control record — future fields come via a schema_version bump)", () => {
+    const parsed = SnapshotTask.safeParse({
+      id: "P1-T1",
+      status: "done",
+      archived_at: NOW.toISOString(), // reserved for step 7, schema v2 — not silently stripped
       terminal_evidence: { kind: "progress_events", event_ids: [sha256Hex("x")] },
     });
     expect(parsed.success).toBe(false);

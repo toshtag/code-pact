@@ -1,5 +1,4 @@
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { Phase } from "../schemas/phase.ts";
 import {
@@ -10,11 +9,11 @@ import {
 } from "../schemas/phase-snapshot.ts";
 import { loadRoadmap } from "../plan/roadmap.ts";
 import { resolvePhaseRef } from "../plan/resolve-phase.ts";
-import { loadPhase } from "../plan/load-phase.ts";
 import { loadMergedProgress } from "../progress/io.ts";
 import { deriveTaskState } from "../progress/task-state.ts";
 import { computeEventId } from "../progress/event-id.ts";
-import { atomicWriteText } from "../../io/atomic-text.ts";
+import { resolveWithinProject } from "../path-safety.ts";
+import { atomicWriteText, type ExpectedState } from "../../io/atomic-text.ts";
 import { phaseSnapshotPath, sha256Hex } from "./paths.ts";
 
 // ---------------------------------------------------------------------------
@@ -34,16 +33,33 @@ import { phaseSnapshotPath, sha256Hex } from "./paths.ts";
 //   record    + different sha + explicit refresh
 //     (expected old AND new hashes both match)  → refresh (rewrite from live)
 //   live file missing + record exists           → noop_record_authoritative
-//                                                  (read-only; NEVER regenerate)
+//                                                  (read-only; NEVER regenerated)
 //   live file missing + record missing          → ineligible (live_file_missing)
-// There is no generic --force.
+// There is no generic --force. A missing roadmap.yaml is NOT an archived state
+// — it is a missing ACTIVE control doc and fails closed (the load throws).
+//
+// Trust boundaries:
+//   - An existing record must match the requested identity (phase_id, its own
+//     path_sha256, and — when the live roadmap ref exists — the ref's path)
+//     before it is trusted for ANY verdict, including the no-ops. Mismatch
+//     fails closed (`record_identity_mismatch`), never silently overwrites.
+//   - Every phase YAML read (target AND the dependant scan) goes through
+//     `resolveWithinProject`, so a symlink escaping the project can never feed
+//     a control record.
+//   - The apply step passes the plan's observed destination state to
+//     `atomicWriteText` as `ExpectedState` (absent for write, the exact raw
+//     bytes for refresh) — a record created/changed by a concurrent writer
+//     between plan and rename is refused, not overwritten.
 // ---------------------------------------------------------------------------
 
 export type PhaseSnapshotBlock =
   | { kind: "record_invalid"; detail: string }
+  | { kind: "record_identity_mismatch"; detail: string }
+  | { kind: "unsafe_path"; original_path: string }
   | { kind: "phase_not_terminal"; status: string }
   | { kind: "task_not_terminal"; task_id: string; status: string }
   | { kind: "task_done_without_done_event"; task_id: string }
+  | { kind: "cancelled_task_with_done_event"; task_id: string }
   | { kind: "attestation_not_applicable"; task_id: string; detail: string }
   | {
       kind: "active_dependant_on_non_done_task";
@@ -69,6 +85,8 @@ export type PhaseSnapshotPlan =
       record: PhaseSnapshot;
       existing_source_sha256: string;
       current_source_sha256: string;
+      /** Exact raw bytes of the record being replaced — the apply-time ExpectedState. */
+      existing_raw: string;
     }
   | { kind: "noop_same_source"; path: string }
   | { kind: "noop_record_authoritative"; path: string }
@@ -105,9 +123,19 @@ function isPhaseNotFound(err: unknown): boolean {
   return (err as NodeJS.ErrnoException)?.code === "PHASE_NOT_FOUND";
 }
 
+/** Symlink-escape-guarded raw read of a project-relative path. */
+async function readRawWithin(cwd: string, relPath: string): Promise<string> {
+  const abs = await resolveWithinProject(cwd, relPath);
+  return readFile(abs, "utf8");
+}
+
 async function readExistingRecord(
   path: string,
-): Promise<{ state: "missing" } | { state: "invalid"; detail: string } | { state: "present"; record: PhaseSnapshot }> {
+): Promise<
+  | { state: "missing" }
+  | { state: "invalid"; detail: string }
+  | { state: "present"; record: PhaseSnapshot; raw: string }
+> {
   let raw: string;
   try {
     raw = await readFile(path, "utf8");
@@ -116,12 +144,27 @@ async function readExistingRecord(
     throw err;
   }
   try {
-    return { state: "present", record: PhaseSnapshot.parse(JSON.parse(raw)) };
+    return { state: "present", record: PhaseSnapshot.parse(JSON.parse(raw)), raw };
   } catch (err) {
     // Fail closed: an unreadable/invalid record silences nothing and is never
     // silently overwritten — surface it instead.
     return { state: "invalid", detail: err instanceof Error ? err.message : String(err) };
   }
+}
+
+/**
+ * An existing record is trusted for NO verdict (not even a no-op) until it
+ * matches the requested identity: it must be the record FOR this phase id, and
+ * its own path_sha256 must cover its own original_path.
+ */
+function recordIdentityMismatch(record: PhaseSnapshot, phaseId: string): string | null {
+  if (record.phase_id !== phaseId) {
+    return `record at the ${phaseId} path is for phase "${record.phase_id}"`;
+  }
+  if (record.path_sha256 !== sha256Hex(record.original_path)) {
+    return `record path_sha256 does not cover its own original_path "${record.original_path}"`;
+  }
+  return null;
 }
 
 export async function planPhaseSnapshot(
@@ -134,40 +177,60 @@ export async function planPhaseSnapshot(
   if (existing.state === "invalid") {
     return { kind: "ineligible", path, blocks: [{ kind: "record_invalid", detail: existing.detail }] };
   }
-
-  // Resolve the live phase. A phase absent from the roadmap with a valid record
-  // is already-archived state: read-only, never regenerated.
-  const roadmap = await (async () => {
-    try {
-      return await loadRoadmap(cwd);
-    } catch (err) {
-      if (isEnoent(err) && existing.state === "present") return null;
-      throw err;
+  if (existing.state === "present") {
+    const mismatch = recordIdentityMismatch(existing.record, phaseId);
+    if (mismatch !== null) {
+      return {
+        kind: "ineligible",
+        path,
+        blocks: [{ kind: "record_identity_mismatch", detail: mismatch }],
+      };
     }
-  })();
-  if (roadmap === null) return { kind: "noop_record_authoritative", path };
+  }
+
+  // A missing roadmap.yaml is a missing ACTIVE control doc — fail closed (this
+  // throws), never "already archived".
+  const roadmap = await loadRoadmap(cwd);
 
   let ref;
   try {
     ref = resolvePhaseRef(roadmap, phaseId);
   } catch (err) {
     if (isPhaseNotFound(err) && existing.state === "present") {
+      // Phase no longer in the roadmap + an identity-verified record: archived
+      // state, read-only.
       return { kind: "noop_record_authoritative", path };
     }
     throw err; // PHASE_NOT_FOUND without a record, or AMBIGUOUS_PHASE_ID: fail closed.
   }
 
-  let rawPhase: string;
-  try {
-    rawPhase = await readFile(join(cwd, ref.path), "utf8");
-  } catch (err) {
-    if (!isEnoent(err)) throw err;
-    if (existing.state === "present") return { kind: "noop_record_authoritative", path };
+  if (existing.state === "present" && existing.record.original_path !== ref.path) {
     return {
       kind: "ineligible",
       path,
-      blocks: [{ kind: "live_file_missing", original_path: ref.path }],
+      blocks: [
+        {
+          kind: "record_identity_mismatch",
+          detail: `record original_path "${existing.record.original_path}" does not match the roadmap ref path "${ref.path}"`,
+        },
+      ],
     };
+  }
+
+  let rawPhase: string;
+  try {
+    rawPhase = await readRawWithin(cwd, ref.path);
+  } catch (err) {
+    if (isEnoent(err)) {
+      if (existing.state === "present") return { kind: "noop_record_authoritative", path };
+      return {
+        kind: "ineligible",
+        path,
+        blocks: [{ kind: "live_file_missing", original_path: ref.path }],
+      };
+    }
+    // Structural failure or symlink escape: never snapshot through it.
+    return { kind: "ineligible", path, blocks: [{ kind: "unsafe_path", original_path: ref.path }] };
   }
   const currentSha = sha256Hex(rawPhase);
 
@@ -193,6 +256,12 @@ export async function planPhaseSnapshot(
   for (const task of phase.tasks ?? []) {
     if (task.status === "cancelled") {
       cancelledTaskIds.add(task.id);
+      // Status drift: a cancelled task whose derived progress state is `done`
+      // would make the snapshot contradict the event-derived dependency
+      // satisfaction readers rely on. Refuse to freeze a contradiction.
+      if (deriveTaskState(progress.log.events, task.id).current === "done") {
+        blocks.push({ kind: "cancelled_task_with_done_event", task_id: task.id });
+      }
       if (claimedAttestations.has(task.id)) {
         blocks.push({
           kind: "attestation_not_applicable",
@@ -265,7 +334,9 @@ export async function planPhaseSnapshot(
   if (cancelledTaskIds.size > 0) {
     for (const otherRef of roadmap.phases) {
       const otherPhase =
-        otherRef.id === ref.id ? phase : await loadPhase(cwd, otherRef.path);
+        otherRef.id === ref.id
+          ? phase
+          : Phase.parse(parseYaml(await readRawWithin(cwd, otherRef.path)) as unknown);
       for (const otherTask of otherPhase.tasks ?? []) {
         if (otherTask.status === "done" || otherTask.status === "cancelled") continue;
         for (const dep of otherTask.depends_on ?? []) {
@@ -328,6 +399,7 @@ export async function planPhaseSnapshot(
       record,
       existing_source_sha256: existing.record.source_sha256,
       current_source_sha256: currentSha,
+      existing_raw: existing.raw,
     };
   }
   return { kind: "write", path, record };
@@ -344,19 +416,35 @@ export function serializePhaseSnapshot(record: PhaseSnapshot): string {
 }
 
 /**
+ * Apply a `write` / `refresh` plan. The destination state the plan observed is
+ * handed to `atomicWriteText` as its pre-rename ExpectedState: `absent` for a
+ * fresh write, the exact existing raw bytes for a refresh — so a concurrent
+ * writer that created or changed the record after the plan makes this THROW
+ * instead of overwriting. Non-mutating plans pass through unchanged.
+ */
+export async function applyPhaseSnapshotPlan(
+  plan: PhaseSnapshotPlan,
+): Promise<PhaseSnapshotWriteOutcome> {
+  if (plan.kind === "write" || plan.kind === "refresh") {
+    const expected: ExpectedState =
+      plan.kind === "write"
+        ? { kind: "absent" }
+        : { kind: "present", content: plan.existing_raw };
+    await atomicWriteText(plan.path, serializePhaseSnapshot(plan.record), expected);
+    return { kind: "written", path: plan.path, record: plan.record };
+  }
+  return plan;
+}
+
+/**
  * Re-plans internally (the verdict is rebuilt at write time, decision-prune
- * style — a stale earlier plan can never authorize a write) and applies only
- * `write` / `refresh` plans via an atomic write.
+ * style — a stale earlier plan can never authorize a write) and applies under
+ * the plan's ExpectedState guard.
  */
 export async function writePhaseSnapshot(
   cwd: string,
   phaseId: string,
   opts: PhaseSnapshotOptions,
 ): Promise<PhaseSnapshotWriteOutcome> {
-  const plan = await planPhaseSnapshot(cwd, phaseId, opts);
-  if (plan.kind === "write" || plan.kind === "refresh") {
-    await atomicWriteText(plan.path, serializePhaseSnapshot(plan.record));
-    return { kind: "written", path: plan.path, record: plan.record };
-  }
-  return plan;
+  return applyPhaseSnapshotPlan(await planPhaseSnapshot(cwd, phaseId, opts));
 }

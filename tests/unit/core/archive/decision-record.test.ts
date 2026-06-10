@@ -3,11 +3,12 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
+  applyDecisionRecordPlan,
   planDecisionRecord,
   writeDecisionRecord,
 } from "../../../../src/core/archive/decision-record.ts";
 import { DecisionStateRecord } from "../../../../src/core/schemas/decision-state-record.ts";
-import { sha256Hex } from "../../../../src/core/archive/paths.ts";
+import { decisionRecordPath, sha256Hex } from "../../../../src/core/archive/paths.ts";
 
 const NOW = new Date("2026-06-10T00:00:00.000Z");
 const REF = "design/decisions/foo-rfc.md";
@@ -181,6 +182,86 @@ describe("confinement + fail-closed reads", () => {
     expect(outcome.kind).toBe("ineligible");
     if (outcome.kind !== "ineligible") return;
     expect(outcome.blocks[0]?.kind).toBe("record_invalid");
+  });
+
+  it("a valid record for a DIFFERENT decision at this filename → record_identity_mismatch (no noop, no overwrite)", async () => {
+    await writeAdr(ACCEPTED_ADR);
+    const first = await writeDecisionRecord(cwd, REF, { now: NOW });
+    expect(first.kind).toBe("written");
+
+    // Plant foo's (schema-valid) record at bar's record path.
+    const barRef = "design/decisions/bar-rfc.md";
+    await writeAdr(ACCEPTED_ADR.replace("RFC: Foo", "RFC: Bar"), barRef);
+    const fooBytes = await readFile((first as { path: string }).path, "utf8");
+    await writeFile(decisionRecordPath(cwd, barRef), fooBytes, "utf8");
+
+    const outcome = await writeDecisionRecord(cwd, barRef, { now: NOW });
+    expect(outcome.kind).toBe("ineligible");
+    if (outcome.kind !== "ineligible") return;
+    expect(outcome.blocks[0]?.kind).toBe("record_identity_mismatch");
+    expect(await readFile(decisionRecordPath(cwd, barRef), "utf8")).toBe(fooBytes); // untouched
+  });
+
+  it("a record created between plan and apply makes the fresh write THROW, not overwrite", async () => {
+    await writeAdr(ACCEPTED_ADR);
+    const plan = await planDecisionRecord(cwd, REF, { now: NOW });
+    expect(plan.kind).toBe("write");
+    if (plan.kind !== "write") return;
+
+    // Concurrent writer lands first.
+    await mkdir(join(cwd, ".code-pact", "state", "archive", "decisions"), { recursive: true });
+    await writeFile(plan.path, '{"winner":"other"}\n', "utf8");
+    await expect(applyDecisionRecordPlan(plan)).rejects.toThrow(/expected absent/);
+    expect(await readFile(plan.path, "utf8")).toBe('{"winner":"other"}\n');
+  });
+
+  it("a record changed between refresh-plan and apply makes the refresh THROW, not overwrite", async () => {
+    await writeAdr(ACCEPTED_ADR);
+    await writeDecisionRecord(cwd, REF, { now: NOW });
+    const edited = ACCEPTED_ADR + "\nPostscript.\n";
+    await writeAdr(edited);
+
+    const plan = await planDecisionRecord(cwd, REF, {
+      now: NOW,
+      refresh: {
+        expected_old_source_sha256: sha256Hex(ACCEPTED_ADR),
+        expected_new_source_sha256: sha256Hex(edited),
+      },
+    });
+    expect(plan.kind).toBe("refresh");
+    if (plan.kind !== "refresh") return;
+
+    await writeFile(plan.path, plan.existing_raw + "\n", "utf8"); // concurrent change
+    await expect(applyDecisionRecordPlan(plan)).rejects.toThrow(/changed before write/);
+  });
+
+  it("schema invariant: original_path must equal canonical_ref in v1", () => {
+    const parsed = DecisionStateRecord.safeParse({
+      schema_version: 1,
+      canonical_ref: REF,
+      original_path: "design/decisions/other.md",
+      path_sha256: sha256Hex(REF),
+      adr_status_at_snapshot: "accepted",
+      may_satisfy_active_gate: true,
+      snapshotted_at: NOW.toISOString(),
+      source_sha256: sha256Hex("x"),
+    });
+    expect(parsed.success).toBe(false);
+  });
+
+  it("schema invariant: unknown keys are rejected (strict control record)", () => {
+    const parsed = DecisionStateRecord.safeParse({
+      schema_version: 1,
+      canonical_ref: REF,
+      original_path: REF,
+      path_sha256: sha256Hex(REF),
+      adr_status_at_snapshot: "accepted",
+      may_satisfy_active_gate: true,
+      snapshotted_at: NOW.toISOString(),
+      source_sha256: sha256Hex("x"),
+      retired_at: NOW.toISOString(), // reserved for step 7, schema v2
+    });
+    expect(parsed.success).toBe(false);
   });
 
   it("schema invariant: may_satisfy_active_gate=true with a non-accepted status is invalid", () => {

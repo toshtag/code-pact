@@ -5,7 +5,7 @@ import {
 } from "../schemas/decision-state-record.ts";
 import { classifyAdr } from "../decisions/adr.ts";
 import { resolveWithinProject } from "../path-safety.ts";
-import { atomicWriteText } from "../../io/atomic-text.ts";
+import { atomicWriteText, type ExpectedState } from "../../io/atomic-text.ts";
 import { decisionRecordPath, normalizeDecisionRef, sha256Hex } from "./paths.ts";
 
 // ---------------------------------------------------------------------------
@@ -26,12 +26,26 @@ import { decisionRecordPath, normalizeDecisionRef, sha256Hex } from "./paths.ts"
 //   live file missing + record exists           → noop_record_authoritative
 //   live file missing + record missing          → ineligible (live_file_missing)
 // No generic --force.
+//
+// Trust boundaries:
+//   - An existing record is trusted for NO verdict until its identity matches
+//     the requested canonical ref exactly (canonical_ref, original_path, and
+//     path_sha256 over that ref). Mismatch fails closed
+//     (`record_identity_mismatch`) — a valid-looking record for a DIFFERENT
+//     decision sitting at this filename must never produce a no-op or be
+//     silently replaced.
+//   - The live .md is read through `resolveWithinProject` (symlink-escape
+//     guard); a record is never built from content outside the project.
+//   - The apply step hands the plan's observed destination state to
+//     `atomicWriteText` as ExpectedState (absent / exact raw bytes), so a
+//     concurrent writer is refused, not overwritten.
 // ---------------------------------------------------------------------------
 
 export type DecisionRecordBlock =
   | { kind: "invalid_ref"; raw: string }
   | { kind: "unsafe_path"; canonical_ref: string }
   | { kind: "record_invalid"; detail: string }
+  | { kind: "record_identity_mismatch"; detail: string }
   | { kind: "record_stale"; existing_source_sha256: string; current_source_sha256: string }
   | {
       kind: "refresh_expectation_mismatch";
@@ -50,6 +64,8 @@ export type DecisionRecordPlan =
       record: DecisionStateRecord;
       existing_source_sha256: string;
       current_source_sha256: string;
+      /** Exact raw bytes of the record being replaced — the apply-time ExpectedState. */
+      existing_raw: string;
     }
   | { kind: "noop_same_source"; path: string }
   | { kind: "noop_record_authoritative"; path: string }
@@ -83,7 +99,7 @@ async function readExistingRecord(
 ): Promise<
   | { state: "missing" }
   | { state: "invalid"; detail: string }
-  | { state: "present"; record: DecisionStateRecord }
+  | { state: "present"; record: DecisionStateRecord; raw: string }
 > {
   let raw: string;
   try {
@@ -93,10 +109,27 @@ async function readExistingRecord(
     throw err;
   }
   try {
-    return { state: "present", record: DecisionStateRecord.parse(JSON.parse(raw)) };
+    return { state: "present", record: DecisionStateRecord.parse(JSON.parse(raw)), raw };
   } catch (err) {
     return { state: "invalid", detail: err instanceof Error ? err.message : String(err) };
   }
+}
+
+/** Exact-identity check: the record must be FOR the requested canonical ref. */
+function recordIdentityMismatch(
+  record: DecisionStateRecord,
+  canonical: string,
+): string | null {
+  if (record.canonical_ref !== canonical) {
+    return `record canonical_ref "${record.canonical_ref}" is not the requested "${canonical}"`;
+  }
+  if (record.original_path !== canonical) {
+    return `record original_path "${record.original_path}" is not the requested "${canonical}"`;
+  }
+  if (record.path_sha256 !== sha256Hex(canonical)) {
+    return `record path_sha256 does not cover the requested canonical ref`;
+  }
+  return null;
 }
 
 export async function planDecisionRecord(
@@ -113,6 +146,16 @@ export async function planDecisionRecord(
   const existing = await readExistingRecord(path);
   if (existing.state === "invalid") {
     return { kind: "ineligible", path, blocks: [{ kind: "record_invalid", detail: existing.detail }] };
+  }
+  if (existing.state === "present") {
+    const mismatch = recordIdentityMismatch(existing.record, canonical);
+    if (mismatch !== null) {
+      return {
+        kind: "ineligible",
+        path,
+        blocks: [{ kind: "record_identity_mismatch", detail: mismatch }],
+      };
+    }
   }
 
   // Read the live .md through the symlink-escape guard; the record is built
@@ -184,6 +227,7 @@ export async function planDecisionRecord(
       record,
       existing_source_sha256: existing.record.source_sha256,
       current_source_sha256: currentSha,
+      existing_raw: existing.raw,
     };
   }
   return { kind: "write", path, record };
@@ -199,16 +243,30 @@ export function serializeDecisionRecord(record: DecisionStateRecord): string {
   return JSON.stringify(record, null, 2) + "\n";
 }
 
-/** Re-plans at write time (decision-prune style) and applies write/refresh atomically. */
+/**
+ * Apply a `write` / `refresh` plan under the plan's ExpectedState guard
+ * (absent for write, exact raw bytes for refresh) — a concurrent writer is
+ * refused, not overwritten. Non-mutating plans pass through unchanged.
+ */
+export async function applyDecisionRecordPlan(
+  plan: DecisionRecordPlan,
+): Promise<DecisionRecordWriteOutcome> {
+  if (plan.kind === "write" || plan.kind === "refresh") {
+    const expected: ExpectedState =
+      plan.kind === "write"
+        ? { kind: "absent" }
+        : { kind: "present", content: plan.existing_raw };
+    await atomicWriteText(plan.path, serializeDecisionRecord(plan.record), expected);
+    return { kind: "written", path: plan.path, record: plan.record };
+  }
+  return plan;
+}
+
+/** Re-plans at write time (decision-prune style) and applies under the ExpectedState guard. */
 export async function writeDecisionRecord(
   cwd: string,
   rawRef: string,
   opts: DecisionRecordOptions,
 ): Promise<DecisionRecordWriteOutcome> {
-  const plan = await planDecisionRecord(cwd, rawRef, opts);
-  if (plan.kind === "write" || plan.kind === "refresh") {
-    await atomicWriteText(plan.path, serializeDecisionRecord(plan.record));
-    return { kind: "written", path: plan.path, record: plan.record };
-  }
-  return plan;
+  return applyDecisionRecordPlan(await planDecisionRecord(cwd, rawRef, opts));
 }

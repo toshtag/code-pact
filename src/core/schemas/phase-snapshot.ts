@@ -37,17 +37,23 @@ export const Sha256Hex = z
   .string()
   .regex(/^[0-9a-f]{64}$/, "must be a lowercase sha256 hex digest");
 
+// Unknown-keys policy: STRICT. These are control records future readers will
+// trust; an unrecognized field is a drifted/foreign record, not forward-compat
+// data to silently strip. Future fields (e.g. step 7's `archived_at` /
+// `retired_at`) arrive via an explicit schema_version bump, never via implicit
+// passthrough.
 export const TerminalEvidence = z.discriminatedUnion("kind", [
-  z.object({
+  z.strictObject({
     kind: z.literal("progress_events"),
     event_ids: z.array(Sha256Hex).min(1),
   }),
-  z.object({
+  z.strictObject({
     kind: z.literal("maintainer_attestation"),
     recorded_at: z.iso.datetime({ offset: true }),
-    reason: z.string().min(1),
+    // Audit trail: a whitespace-only "reason" is no reason.
+    reason: z.string().trim().min(1),
   }),
-  z.object({
+  z.strictObject({
     kind: z.literal("design_status"),
     observed_status: z.literal("cancelled"),
     source_field: z.literal("tasks[].status"),
@@ -59,7 +65,7 @@ export const SnapshotTaskStatus = z.enum(["done", "cancelled"]);
 export type SnapshotTaskStatus = z.infer<typeof SnapshotTaskStatus>;
 
 export const SnapshotTask = z
-  .object({
+  .strictObject({
     id: PlanId,
     status: SnapshotTaskStatus,
     depends_on: z.array(z.string().min(1)).optional(),
@@ -87,7 +93,7 @@ export type SnapshotTask = z.infer<typeof SnapshotTask>;
 
 export const PHASE_SNAPSHOT_SCHEMA_VERSION = 1 as const;
 
-export const PhaseSnapshot = z.object({
+export const PhaseSnapshot = z.strictObject({
   schema_version: z.literal(PHASE_SNAPSHOT_SCHEMA_VERSION),
   phase_id: PlanId,
   phase_name: z.string().min(1),

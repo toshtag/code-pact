@@ -58,8 +58,10 @@ export const ADR_STATUS_AT_SNAPSHOT_VALUES = [
 
 export const DECISION_STATE_RECORD_SCHEMA_VERSION = 1 as const;
 
+// Unknown-keys policy: STRICT (see phase-snapshot.ts — same rationale; future
+// retirement-time fields arrive via a schema_version bump, never passthrough).
 export const DecisionStateRecord = z
-  .object({
+  .strictObject({
     schema_version: z.literal(DECISION_STATE_RECORD_SCHEMA_VERSION),
     canonical_ref: DecisionRefPath,
     original_path: DecisionRefPath,
@@ -81,6 +83,16 @@ export const DecisionStateRecord = z
         path: ["may_satisfy_active_gate"],
         message:
           "may_satisfy_active_gate requires adr_status_at_snapshot to be accepted — a non-accepted record can never release a live gate",
+      });
+    }
+    // v1 invariant: the record's identity IS the canonical ref. A diverging
+    // original_path would be a rename-tracking feature this version does not
+    // have; allowing it silently would weaken exact-match resolution.
+    if (r.canonical_ref !== r.original_path) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["original_path"],
+        message: "original_path must equal canonical_ref in schema_version 1",
       });
     }
   });
