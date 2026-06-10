@@ -123,7 +123,7 @@ afterAll(async () => {
 });
 
 describe("A2 bare-rm of a completed phase with a cross-phase depends_on", () => {
-  it("with a valid snapshot → validate / plan lint --strict / plan analyze --strict all GREEN", async () => {
+  it("with a valid snapshot → validate / plan lint / analyze --strict + task context/prepare all GREEN", async () => {
     await scaffold();
     await writePhaseSnapshot(tmpDir, "P1", { now: NOW });
     await rm(join(tmpDir, "design", "phases", "P1-x.yaml"));
@@ -136,6 +136,15 @@ describe("A2 bare-rm of a completed phase with a cross-phase depends_on", () => 
     const analyze = run(["plan", "analyze", "--strict", "--json"]);
     expect(jsonOk(analyze)).toBe(true);
     expect(analyze.stdout).not.toContain("ORPHAN_PROGRESS_EVENT");
+
+    // task context / task prepare on the LIVE active task (P2-T1, depends_on the
+    // deleted P1-T1): resolution skips the deleted P1, dep satisfaction reads the
+    // surviving done event → not blocked. (touch point E)
+    expect(jsonOk(run(["task", "context", "P2-T1", "--agent", "claude-code", "--json"]))).toBe(true);
+    const prep = run(["task", "prepare", "P2-T1", "--agent", "claude-code", "--json"]);
+    expect(jsonOk(prep)).toBe(true);
+    // depends_on P1-T1 is satisfied from the surviving event → not wait_for_dependencies.
+    expect(prep.stdout).not.toContain("wait_for_dependencies");
   });
 
   it("WITHOUT a snapshot → validate / plan lint fail closed (MISSING/ORPHAN phase)", async () => {
@@ -157,5 +166,29 @@ describe("A2 bare-rm of a completed phase with a cross-phase depends_on", () => 
     );
     expect(jsonOk(run(["validate", "--json"]))).toBe(true);
     expect(jsonOk(run(["plan", "lint", "--strict", "--json"]))).toBe(true);
+  });
+
+  it("collision (archived id == live id) → ALL FIVE commands fail closed, none green (blocker-2 + E)", async () => {
+    // Snapshot P1 while non-colliding, then drift: make P2's live task ALSO own
+    // P1-T1, delete P1. The archived P1-T1 now collides with the live P1-T1.
+    await scaffold();
+    await writePhaseSnapshot(tmpDir, "P1", { now: NOW });
+    const P2_COLLIDE = P2_DEP.replace("id: P2-T1", "id: P1-T1");
+    await writeFile(join(tmpDir, "design", "phases", "P2-y.yaml"), P2_COLLIDE, "utf8");
+    await rm(join(tmpDir, "design", "phases", "P1-x.yaml"));
+
+    // validate (via doctor) + plan lint + plan analyze surface PHASE_SNAPSHOT_INVALID.
+    const validate = run(["validate", "--json"]);
+    expect(jsonOk(validate)).toBe(false);
+    expect(validate.stdout).toContain("PHASE_SNAPSHOT_INVALID");
+    expect(jsonOk(run(["plan", "lint", "--strict", "--json"]))).toBe(false);
+    expect(jsonOk(run(["plan", "analyze", "--strict", "--json"]))).toBe(false);
+    // task context / task prepare must NOT return a green target (E does not bypass).
+    const ctx = run(["task", "context", "P1-T1", "--agent", "claude-code", "--json"]);
+    expect(jsonOk(ctx)).toBe(false);
+    expect(ctx.stdout).toContain("PHASE_SNAPSHOT_INVALID");
+    const prep = run(["task", "prepare", "P1-T1", "--agent", "claude-code", "--json"]);
+    expect(jsonOk(prep)).toBe(false);
+    expect(prep.stdout).toContain("PHASE_SNAPSHOT_INVALID");
   });
 });

@@ -30,6 +30,13 @@ import { Roadmap } from "../schemas/roadmap.ts";
 import { loadPhase } from "./load-phase.ts";
 import type { Task as TaskT } from "../schemas/task.ts";
 import type { PlanState } from "./state.ts";
+import { PhaseSnapshotInvalidError } from "./state.ts";
+import {
+  archivedEntriesFromSnapshot,
+  mergeArchivedTaskIndex,
+  resolveMissingPhaseRef,
+  type ArchivedTaskEntry,
+} from "../archive/load-phase-snapshot.ts";
 
 /** I/O variant return shape. `phasePath` is roadmap-relative. */
 export type ResolvedTask = {
@@ -84,11 +91,49 @@ export async function resolveTaskInRoadmap(
   const roadmap = Roadmap.parse(parseYaml(roadmapRaw) as unknown);
 
   const hits: ResolvedTask[] = [];
+  // design-docs-ephemeral (step 4a): collect ALL live task ids + the archived
+  // candidates of any tolerated (hand-deleted, snapshotted) COMPLETED phase, so we
+  // can run the SAME collision check the loaders/doctor run BEFORE returning a
+  // target — `task context` / `task prepare` must not bypass it. The target itself
+  // is always a LIVE task (the active task's own phase is never archived); the
+  // archived index is consulted here ONLY for collision validation, never to
+  // resolve the target and never coerced into a `Phase`.
+  const liveTaskIds = new Set<string>();
+  const archivedCandidates: ArchivedTaskEntry[] = [];
   for (const ref of roadmap.phases) {
-    const phase = await loadPhase(cwd, ref.path);
+    let phase: PhaseT;
+    try {
+      phase = await loadPhase(cwd, ref.path);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+      const res = await resolveMissingPhaseRef(cwd, ref);
+      if (res.kind === "tolerated") {
+        archivedCandidates.push(...archivedEntriesFromSnapshot(res.snapshot));
+        continue; // deleted completed phase — never holds the active target
+      }
+      if (res.kind === "fail_invalid") {
+        throw new PhaseSnapshotInvalidError(
+          `${ref.path} is missing and its archive snapshot cannot release it: ${res.reason}`,
+        );
+      }
+      throw err; // no snapshot — fail closed exactly as before
+    }
+    for (const t of phase.tasks ?? []) liveTaskIds.add(t.id);
     if (phase.tasks?.some((t) => t.id === taskId)) {
       hits.push({ phaseId: phase.id, phasePath: ref.path });
     }
+  }
+
+  // Collision check (same as the loaders): a drifted snapshot whose archived id
+  // collides with a live id makes `depends_on` ambiguous — fail closed, even when
+  // the target was found in a live phase.
+  const merge = mergeArchivedTaskIndex(liveTaskIds, archivedCandidates);
+  if (merge.collisions.length > 0) {
+    throw new PhaseSnapshotInvalidError(
+      `archive snapshot task ids collide with the live plan: ${merge.collisions
+        .map((c) => c.reason)
+        .join("; ")}`,
+    );
   }
 
   if (hits.length === 0) throw taskNotFoundError(taskId);

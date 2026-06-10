@@ -204,6 +204,14 @@ function emitContextLikeError(
       };
       break;
     }
+    // design-docs-ephemeral (step 4a): a hand-deleted phase whose archive
+    // snapshot is corrupt / identity-mismatched / task-id-colliding cannot release
+    // the missing phase — fail-closed, even though the target task is live. Surface
+    // it cleanly instead of crashing (so the collision check is not a silent bypass).
+    case "PHASE_SNAPSHOT_INVALID":
+      msg = err.message;
+      outCode = "PHASE_SNAPSHOT_INVALID";
+      break;
     case "AGENT_NOT_ENABLED":
       msg = m.task.context.agentNotEnabled(agent ?? "");
       outCode = "AGENT_NOT_ENABLED";
