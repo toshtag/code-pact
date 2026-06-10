@@ -4,9 +4,13 @@
 // them with Promise.all and render whatever is actually present. The contract
 // inputs still fail closed: `loadPhase` (the shared core/plan/load-phase.ts) throws when the phase file is missing,
 // and `loadAgentProfile` rejects an unsafe agent name (its catch only swallows
-// a missing-but-safe profile). Path-derived reads (decision_refs, readdir
-// entries) go through `readWithinProject`, which rejects `..`/absolute and
-// symlink escape.
+// a missing-but-safe profile). Path-derived DECISION reads (the design/decisions
+// listing + decision_refs / per-file reads) route through the shared live seams
+// `readLiveDecisionDir` / `readLiveDecisionFile` (core/decisions/adr.ts), which
+// reject `..`/absolute and symlink escape via resolveWithinProject; rule reads
+// still go through the local `readWithinProject` with the same guarantee. The
+// decision seams are FAIL-CLOSED (throw on a non-ENOENT error), so the loaders
+// wrap them in a call-site catch to keep their optional degrade-to-[]/skip.
 
 import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
@@ -15,7 +19,7 @@ import { Phase } from "../schemas/phase.ts";
 import { AgentProfile } from "../schemas/agent-profile.ts";
 import { type ProgressEvent } from "../schemas/progress-event.ts";
 import { parseFrontMatter } from "./front-matter.ts";
-import { NON_DECISION_FILES } from "../decisions/adr.ts";
+import { readLiveDecisionDir, readLiveDecisionFile } from "../decisions/adr.ts";
 import {
   type DecisionDoc,
   type ReadGlobMatches,
@@ -108,10 +112,14 @@ export async function loadDecisions(
   taskId: string,
   allDecisions = false,
 ): Promise<DecisionDoc[]> {
-  const decisionsDir = join(cwd, "design", "decisions");
+  // OPTIONAL context source: degrade to [] on ANY listing error. The shared
+  // live-listing seam (readLiveDecisionDir) is fail-closed (throws on non-ENOENT),
+  // so wrap it here to keep this loader's degrade-on-any-error contract — the
+  // leniency stays at the call site, never pushed into the seam. NON_DECISION_FILES
+  // (index + PRUNED.md) are already filtered out by the seam.
   let entries: string[];
   try {
-    entries = await readdir(decisionsDir);
+    entries = (await readLiveDecisionDir(cwd)).entries;
   } catch {
     return [];
   }
@@ -119,11 +127,19 @@ export async function loadDecisions(
   const docs: DecisionDoc[] = [];
   for (const entry of entries.sort()) {
     if (!entry.endsWith(".md")) continue;
-    if (NON_DECISION_FILES.has(entry)) continue; // index + prune ledger are not decisions
     if (!allDecisions && !entry.includes(taskId)) continue;
 
-    const raw = await readWithinProject(cwd, `design/decisions/${entry}`);
-    if (raw === null) continue; // unsafe (e.g. symlink escape) or unreadable
+    // Live per-file read seam; missing/unsafe → skip (identical to the prior
+    // readWithinProject → null → skip). A non-ENOENT read error throws from the
+    // seam; catch it to preserve the optional-source skip contract.
+    let raw: string;
+    try {
+      const r = await readLiveDecisionFile(cwd, `design/decisions/${entry}`);
+      if (r.kind !== "ok") continue; // unsafe (e.g. symlink escape) or missing
+      raw = r.content;
+    } catch {
+      continue; // unexpected read error — skip, same as before (optional source)
+    }
     const { body } = parseFrontMatter(raw);
     docs.push({ filename: entry, body });
   }
@@ -175,11 +191,20 @@ export async function loadDeclaredDecisions(
     // `ref` comes from task.decision_refs (loaded YAML) and is read into the
     // pack body, so it must be confined to the project root — a value like
     // `../../.ssh/id_rsa` would otherwise exfiltrate an arbitrary file into
-    // the context pack. resolveWithinProject also rejects symlink escape. The
-    // decision gate (adr.ts) already fail-closes unsafe refs; this is the
-    // matching guard on the pack-render path.
-    const raw = await readWithinProject(cwd, ref);
-    if (raw === null) continue; // unsafe path or not loadable — see comment above
+    // the context pack. The shared live read seam rejects symlink escape
+    // (resolveWithinProject). The decision gate (adr.ts) already fail-closes
+    // unsafe refs; routing onto the same seam keeps the pack-render path's
+    // path-safety identical to the gate's. OPTIONAL source: missing/unsafe →
+    // skip, and a non-ENOENT read error is caught → skip (preserves the prior
+    // readWithinProject degrade-on-any-error contract).
+    let raw: string;
+    try {
+      const r = await readLiveDecisionFile(cwd, ref);
+      if (r.kind !== "ok") continue; // unsafe path or not loadable — see comment above
+      raw = r.content;
+    } catch {
+      continue; // unexpected read error — skip (optional source)
+    }
     const { body } = parseFrontMatter(raw);
     // Use just the basename for the section header so the rendered
     // pack matches the existing "Related Decisions" presentation
