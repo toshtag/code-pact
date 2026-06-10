@@ -455,6 +455,78 @@ describe("phase id mismatch — roadmap ref id vs YAML id (fresh-write identity)
   });
 });
 
+describe("status drift — done task whose progress history contradicts the YAML", () => {
+  const drift = (eventsYaml: string) =>
+    scaffold({
+      progress: eventsYaml,
+    });
+
+  it("YAML done + derived failed + attestation → ineligible (attestation never overrules recorded events)", async () => {
+    await drift(`events:
+  - task_id: P1-T1
+    status: failed
+    at: 2026-06-01T00:00:00.000Z
+    actor: agent
+`);
+    const outcome = await writePhaseSnapshot(cwd, "P1", {
+      now: NOW,
+      attestations: { "P1-T1": { reason: "trust me" } },
+    });
+    expect(outcome.kind).toBe("ineligible");
+    if (outcome.kind !== "ineligible") return;
+    expect(outcome.blocks).toContainEqual({
+      kind: "task_done_progress_state_drift",
+      task_id: "P1-T1",
+      yaml_status: "done",
+      derived_status: "failed",
+      last_event_status: "failed",
+    });
+  });
+
+  it("YAML done + derived started (in_progress) + attestation → ineligible", async () => {
+    await drift(`events:
+  - task_id: P1-T1
+    status: started
+    at: 2026-06-01T00:00:00.000Z
+    actor: agent
+`);
+    const outcome = await writePhaseSnapshot(cwd, "P1", {
+      now: NOW,
+      attestations: { "P1-T1": { reason: "trust me" } },
+    });
+    expect(outcome.kind).toBe("ineligible");
+    if (outcome.kind !== "ineligible") return;
+    expect(
+      outcome.blocks.some(
+        (b) => b.kind === "task_done_progress_state_drift" && b.task_id === "P1-T1",
+      ),
+    ).toBe(true);
+  });
+
+  it("YAML done + done-then-failed history → ineligible (the last word is not done)", async () => {
+    await drift(`events:
+  - task_id: P1-T1
+    status: done
+    at: 2026-06-01T00:00:00.000Z
+    actor: agent
+  - task_id: P1-T1
+    status: failed
+    at: 2026-06-02T00:00:00.000Z
+    actor: agent
+`);
+    const outcome = await writePhaseSnapshot(cwd, "P1", { now: NOW });
+    expect(outcome.kind).toBe("ineligible");
+    if (outcome.kind !== "ineligible") return;
+    expect(outcome.blocks).toContainEqual({
+      kind: "task_done_progress_state_drift",
+      task_id: "P1-T1",
+      yaml_status: "done",
+      derived_status: "failed",
+      last_event_status: "failed",
+    });
+  });
+});
+
 describe("status drift — cancelled task with a derived-done progress state", () => {
   it("refuses to freeze a snapshot that would contradict event-derived dependency satisfaction", async () => {
     await scaffold({

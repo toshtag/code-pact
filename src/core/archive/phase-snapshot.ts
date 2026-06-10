@@ -66,6 +66,13 @@ export type PhaseSnapshotBlock =
   | { kind: "phase_not_terminal"; status: string }
   | { kind: "task_not_terminal"; task_id: string; status: string }
   | { kind: "task_done_without_done_event"; task_id: string }
+  | {
+      kind: "task_done_progress_state_drift";
+      task_id: string;
+      yaml_status: "done";
+      derived_status: string;
+      last_event_status: string;
+    }
   | { kind: "cancelled_task_with_done_event"; task_id: string }
   | { kind: "attestation_not_applicable"; task_id: string; detail: string }
   | {
@@ -314,6 +321,7 @@ export async function planPhaseSnapshot(
       blocks.push({ kind: "task_not_terminal", task_id: task.id, status: task.status });
       continue;
     }
+    const taskEvents = progress.log.events.filter((e) => e.task_id === task.id);
     const derived = deriveTaskState(progress.log.events, task.id).current;
     let evidence: TerminalEvidence;
     if (derived === "done") {
@@ -325,10 +333,24 @@ export async function planPhaseSnapshot(
         });
       }
       claimedAttestations.delete(task.id);
-      const eventIds = progress.log.events
-        .filter((e) => e.task_id === task.id && e.status === "done")
+      const eventIds = taskEvents
+        .filter((e) => e.status === "done")
         .map((e) => computeEventId(e));
       evidence = { kind: "progress_events", event_ids: eventIds };
+    } else if (taskEvents.length > 0) {
+      // Progress history exists and it does NOT say done: that is a drift
+      // between the design YAML and the event-derived truth. An attestation is
+      // the legacy rescue for ABSENT history — never a license to overrule
+      // recorded events with a human reason. Refuse to freeze the contradiction.
+      claimedAttestations.delete(task.id);
+      blocks.push({
+        kind: "task_done_progress_state_drift",
+        task_id: task.id,
+        yaml_status: "done",
+        derived_status: derived,
+        last_event_status: taskEvents[taskEvents.length - 1]!.status,
+      });
+      continue;
     } else if (attestations[task.id]) {
       claimedAttestations.delete(task.id);
       evidence = {
