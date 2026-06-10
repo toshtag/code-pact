@@ -90,6 +90,11 @@ const KNOWN_CODES: Record<string, "public" | "plan" | "doctor" | "adapter" | "in
   MISSING_PHASE_FILE: "plan",
   ORPHAN_PHASE_FILE: "plan",
   ORPHAN_PROGRESS_EVENT: "plan",
+  // design-docs-ephemeral step 4a: a hand-deleted phase's roadmap ref whose
+  // archive snapshot exists but is corrupt / identity-mismatched / non-terminal /
+  // task-id-colliding cannot release the missing phase → fail-closed. Surfaced by
+  // the lenient loaders (plan lint) + doctor, like MISSING_PHASE_FILE.
+  PHASE_SNAPSHOT_INVALID: "plan",
   PROGRESS_EVENT_CONFLICT: "plan",
   // Ledger-integrity diagnostic (collaboration-safe-state RFC, B1/B5): an event
   // file's content (or its stored id) does not match its filename, which IS the

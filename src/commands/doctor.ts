@@ -34,6 +34,7 @@ import {
 } from "../core/plan/checks.ts";
 import type { PhaseEntry } from "../core/plan/state.ts";
 import type { PlanIssue } from "../core/plan/shared.ts";
+import { resolveMissingPhaseRef } from "../core/archive/load-phase-snapshot.ts";
 import { isSupportedAgent, type SupportedAgent } from "../core/agents.ts";
 import { CONSTITUTION_PLACEHOLDER_MARKERS } from "../core/constitution.ts";
 import { readManifest } from "../core/adapters/manifest.ts";
@@ -183,6 +184,22 @@ async function checkPhases(
   for (const ref of roadmap.phases) {
     const absPath = join(cwd, ref.path);
     if (!(await fileExists(absPath))) {
+      // design-docs-ephemeral (step 4a): a hand-deleted COMPLETED phase whose
+      // roadmap ref still points at it is tolerated when a valid archive snapshot
+      // proves it; a corrupt/mismatched snapshot fails closed loudly; no snapshot
+      // keeps the original ORPHAN_PHASE_FILE error. (Cross-phase depends_on / orphan
+      // progress events for the deleted phase's tasks are handled in a later commit
+      // via the collision-checked archived task index.)
+      const res = await resolveMissingPhaseRef(cwd, ref);
+      if (res.kind === "tolerated") continue;
+      if (res.kind === "fail_invalid") {
+        issues.push({
+          code: "PHASE_SNAPSHOT_INVALID",
+          severity: "error",
+          message: `roadmap.yaml references "${ref.path}" but the file does not exist and its archive snapshot cannot release it: ${res.reason}`,
+        });
+        continue;
+      }
       issues.push({
         code: "ORPHAN_PHASE_FILE",
         severity: "error",

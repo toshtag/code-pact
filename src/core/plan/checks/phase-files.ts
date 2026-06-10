@@ -3,6 +3,7 @@ import { join } from "node:path";
 import type { PlanIssue } from "../shared.ts";
 import type { Roadmap } from "../../schemas/roadmap.ts";
 import { fileExists } from "./fs.ts";
+import { resolveMissingPhaseRef } from "../../archive/load-phase-snapshot.ts";
 
 /**
  * Roadmap references a phase file that does not exist on disk. doctor
@@ -10,6 +11,13 @@ import { fileExists } from "./fs.ts";
  * lint uses the clearer `MISSING_PHASE_FILE` code via
  * `detectMissingPhaseFiles`. Both call sites should treat this as an
  * error.
+ *
+ * design-docs-ephemeral (step 4a): a COMPLETED phase whose YAML was hand-deleted
+ * but whose roadmap ref still points at it is TOLERATED when a valid archive
+ * snapshot proves it (no issue). A missing file with NO valid snapshot stays a
+ * `MISSING_PHASE_FILE` error; a present-but-corrupt/mismatched snapshot is a
+ * `PHASE_SNAPSHOT_INVALID` error (loud fail-closed — never a silent pass). Live
+ * file present → never consults the snapshot (live-wins).
  */
 export async function detectMissingPhaseFiles(
   cwd: string,
@@ -18,15 +26,27 @@ export async function detectMissingPhaseFiles(
   const issues: PlanIssue[] = [];
   for (const ref of roadmap.phases) {
     const absPath = join(cwd, ref.path);
-    if (!(await fileExists(absPath))) {
+    if (await fileExists(absPath)) continue; // live-wins
+    const res = await resolveMissingPhaseRef(cwd, ref);
+    if (res.kind === "tolerated") continue; // archived completed phase — fine
+    if (res.kind === "fail_invalid") {
       issues.push({
-        code: "MISSING_PHASE_FILE",
+        code: "PHASE_SNAPSHOT_INVALID",
         severity: "error",
-        message: `roadmap.yaml references "${ref.path}" but the file does not exist`,
+        message: `roadmap.yaml references "${ref.path}" but the file does not exist and its archive snapshot cannot release it: ${res.reason}`,
         file: ref.path,
         phase_id: ref.id,
       });
+      continue;
     }
+    // fail_missing — no snapshot at all: the original behavior, unchanged.
+    issues.push({
+      code: "MISSING_PHASE_FILE",
+      severity: "error",
+      message: `roadmap.yaml references "${ref.path}" but the file does not exist`,
+      file: ref.path,
+      phase_id: ref.id,
+    });
   }
   return issues;
 }
