@@ -1,8 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { parse as parseYaml } from "yaml";
 import { loadRoadmap } from "../core/plan/roadmap.ts";
-import { Phase } from "../core/schemas/phase.ts";
+import { loadPhase } from "../core/plan/load-phase.ts";
 import { BaselineSnapshot } from "../core/schemas/baseline-snapshot.ts";
 import { assertSafePlanId } from "../core/schemas/plan-id.ts";
 
@@ -40,11 +39,6 @@ const STATUS_FACTOR: Record<string, number> = {
 // ---------------------------------------------------------------------------
 // Loaders
 // ---------------------------------------------------------------------------
-
-async function loadPhase(cwd: string, path: string): Promise<Phase> {
-  const raw = await readFile(join(cwd, path), "utf8");
-  return Phase.parse(parseYaml(raw) as unknown);
-}
 
 function throwBaselineNotFound(name: string): never {
   const err = new Error(`Baseline "${name}" not found.`);

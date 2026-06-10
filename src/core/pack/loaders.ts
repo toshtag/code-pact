@@ -2,7 +2,7 @@
 // (rules, decisions, constitution, done events, declared decisions, read globs)
 // degrade to null / [] when missing or unreadable, so the builder can compose
 // them with Promise.all and render whatever is actually present. The contract
-// inputs still fail closed: `loadPhase` throws when the phase file is missing,
+// inputs still fail closed: `loadPhase` (the shared core/plan/load-phase.ts) throws when the phase file is missing,
 // and `loadAgentProfile` rejects an unsafe agent name (its catch only swallows
 // a missing-but-safe profile). Path-derived reads (decision_refs, readdir
 // entries) go through `readWithinProject`, which rejects `..`/absolute and
@@ -40,11 +40,6 @@ async function readWithinProject(cwd: string, relPath: string): Promise<string |
   } catch {
     return null;
   }
-}
-
-export async function loadPhase(cwd: string, path: string): Promise<Phase> {
-  const raw = await readFile(join(cwd, path), "utf8");
-  return Phase.parse(parseYaml(raw) as unknown);
 }
 
 export async function loadAgentProfile(cwd: string, agentName: string): Promise<AgentProfile | null> {

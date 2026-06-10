@@ -1,8 +1,7 @@
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { AgentProfile } from "../core/schemas/agent-profile.ts";
-import { Phase } from "../core/schemas/phase.ts";
+import { loadPhase } from "../core/plan/load-phase.ts";
 import { resolvePhaseInRoadmap } from "../core/plan/resolve-phase.ts";
 import type { Task } from "../core/schemas/task.ts";
 import { assertSafePlanId } from "../core/schemas/plan-id.ts";
@@ -28,11 +27,6 @@ export type { RecommendResult };
 // ---------------------------------------------------------------------------
 // Loaders
 // ---------------------------------------------------------------------------
-
-async function loadPhase(cwd: string, path: string): Promise<Phase> {
-  const raw = await readFile(join(cwd, path), "utf8");
-  return Phase.parse(parseYaml(raw) as unknown);
-}
 
 async function loadAgentProfile(cwd: string, agentName: string): Promise<AgentProfile> {
   // `agentName` (raw `--agent`) can become a path segment; reject unsafe names

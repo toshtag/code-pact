@@ -5,7 +5,7 @@ import { PhaseImportInput, type PhaseImportEntry, type TaskImport } from "../cor
 import { Task } from "../core/schemas/task.ts";
 import { type PhaseRef } from "../core/schemas/roadmap.ts";
 import { loadRoadmap } from "../core/plan/roadmap.ts";
-import { Phase } from "../core/schemas/phase.ts";
+import { loadPhase } from "../core/plan/load-phase.ts";
 import { createPhase, RESERVED_PHASE_IDS } from "../core/services/createPhase.ts";
 import {
   isDecisionRequiredForTask,
@@ -93,11 +93,6 @@ export type PhaseImportResult = {
    */
   scaffold_skipped: { ref: string; reason: string }[];
 };
-
-async function loadPhase(cwd: string, relPath: string): Promise<Phase> {
-  const raw = await readFile(join(cwd, relPath), "utf8");
-  return Phase.parse(parseYaml(raw) as unknown);
-}
 
 /**
  * Collect every task id already present in the project (across all phases

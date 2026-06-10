@@ -1,6 +1,4 @@
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
-import { parse as parseYaml } from "yaml";
+import { loadPhase } from "../core/plan/load-phase.ts";
 import { Phase, type PhaseStatus } from "../core/schemas/phase.ts";
 import { PhaseRef } from "../core/schemas/roadmap.ts";
 import { loadRoadmap } from "../core/plan/roadmap.ts";
@@ -10,12 +8,6 @@ import { createPhase } from "../core/services/createPhase.ts";
 // ---------------------------------------------------------------------------
 // Shared helpers
 // ---------------------------------------------------------------------------
-
-async function loadPhase(cwd: string, ref: PhaseRef): Promise<Phase> {
-  const raw = await readFile(join(cwd, ref.path), "utf8");
-  const data: unknown = parseYaml(raw);
-  return Phase.parse(data);
-}
 
 // ---------------------------------------------------------------------------
 // phase add
@@ -78,7 +70,7 @@ export async function runPhaseLs(opts: PhaseLsOptions): Promise<PhaseLsItem[]> {
 
   const items: PhaseLsItem[] = [];
   for (const ref of roadmap.phases) {
-    const phase = await loadPhase(cwd, ref);
+    const phase = await loadPhase(cwd, ref.path);
     if (status !== undefined && phase.status !== status) continue;
     items.push({
       id: phase.id,
@@ -103,7 +95,7 @@ export type PhaseShowOptions = {
 export async function runPhaseShow(opts: PhaseShowOptions): Promise<Phase> {
   const { cwd, id } = opts;
   const ref = await resolvePhaseInRoadmap(cwd, id);
-  return loadPhase(cwd, ref);
+  return loadPhase(cwd, ref.path);
 }
 
 // ---------------------------------------------------------------------------

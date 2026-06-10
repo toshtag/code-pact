@@ -8,11 +8,11 @@
 import { join } from "node:path";
 import { atomicWriteText } from "../../io/atomic-text.ts";
 import { resolvePhaseInRoadmap } from "../plan/resolve-phase.ts";
+import { loadPhase } from "../plan/load-phase.ts";
 import { renderSections, type DependsOnEntry } from "./formatters/markdown.ts";
 import { deriveTaskState } from "../progress/task-state.ts";
 import { resolveWithinProject } from "../path-safety.ts";
 import {
-  loadPhase,
   loadAgentProfile,
   loadConstitution,
   loadRules,

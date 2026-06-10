@@ -19,7 +19,7 @@ import {
 } from "../core/progress/task-state.ts";
 import { AgentProfile } from "../core/schemas/agent-profile.ts";
 import { resolveAgentProfilePath } from "../core/agent-profile-path.ts";
-import { Phase, type Phase as PhaseT } from "../core/schemas/phase.ts";
+import { loadPhase } from "../core/plan/load-phase.ts";
 import { loadProject, resolveEnabledAgent } from "../core/project.ts";
 import type { Task as TaskT } from "../core/schemas/task.ts";
 
@@ -114,11 +114,6 @@ export type TaskPrepareResult = {
 // ---------------------------------------------------------------------------
 // Loaders
 // ---------------------------------------------------------------------------
-
-async function loadPhase(cwd: string, path: string): Promise<PhaseT> {
-  const raw = await readFile(join(cwd, path), "utf8");
-  return Phase.parse(parseYaml(raw) as unknown);
-}
 
 async function loadAgentProfile(
   cwd: string,
