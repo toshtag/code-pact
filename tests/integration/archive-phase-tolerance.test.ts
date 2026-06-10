@@ -269,17 +269,27 @@ describe("A2 bare-rm of a completed phase with a cross-phase depends_on", () => 
     await writeFile(join(tmpDir, "design", "phases", "P2-y.yaml"), P2_COLLIDE, "utf8");
     await rm(join(tmpDir, "design", "phases", "P1-x.yaml"));
 
-    const cmds: string[][] = [
+    // Every command that resolves a task / loads plan state shares the throwing
+    // path; each must map it to a clean envelope, exit 2 (analyze keeps its exit-1
+    // strict-loader convention — checked separately below).
+    const exit2: string[][] = [
       ["task", "status", "P1-T1", "--json"],
       ["task", "complete", "P1-T1", "--agent", "claude-code", "--json"],
       ["task", "record-done", "P1-T1", "--agent", "claude-code", "--evidence", "x", "--json"],
       ["task", "finalize", "P1-T1", "--json"],
       ["task", "runbook", "P1-T1", "--json"],
       ["task", "start", "P1-T1", "--json"],
+      ["task", "block", "P1-T1", "--reason", "x", "--json"],
+      ["task", "resume", "P1-T1", "--json"],
       ["task", "context", "P1-T1", "--agent", "claude-code", "--json"],
       ["task", "prepare", "P1-T1", "--agent", "claude-code", "--json"],
+      // loadPlanState consumers beyond the task family:
+      ["status", "--json"],
+      ["phase", "runbook", "P2", "--json"],
+      ["phase", "next", "P2", "--json"],
+      ["phase", "runbook", "--across-phases", "--json"],
     ];
-    for (const c of cmds) {
+    for (const c of exit2) {
       const r = run(c);
       expect(r.code, `${c.join(" ")} should exit 2, not crash`).toBe(2);
       const parsed = JSON.parse(r.stdout) as { ok?: boolean; error?: { code?: string } };
@@ -288,6 +298,13 @@ describe("A2 bare-rm of a completed phase with a cross-phase depends_on", () => 
         "PHASE_SNAPSHOT_INVALID",
       );
     }
+
+    // plan analyze surfaces it top-level too, but at its exit-1 failure convention.
+    const analyze = run(["plan", "analyze", "--strict", "--json"]);
+    expect(analyze.code).toBe(1);
+    expect((JSON.parse(analyze.stdout) as { error?: { code?: string } }).error?.code).toBe(
+      "PHASE_SNAPSHOT_INVALID",
+    );
   });
 
   it("collision (archived id == live id) → ALL FIVE commands fail closed, none green (blocker-2 + E)", async () => {
