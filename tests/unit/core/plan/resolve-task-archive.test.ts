@@ -109,15 +109,38 @@ describe("resolveTaskInRoadmap — archived tolerance (E)", () => {
     await expect(resolveTaskInRoadmap(cwd, "P2-T1")).rejects.toMatchObject({ code: "ENOENT" });
   });
 
-  it("a collision (archived id == live id) throws PhaseSnapshotInvalidError even though the target is found live", async () => {
-    // Snapshot P1 while P2 is non-colliding, THEN swap P2 to also own P1-T1, delete P1.
+  it("a collision throws PhaseSnapshotInvalidError even when an UNRELATED live target was found first", async () => {
+    // P2 gets two live tasks: P2-CLEAN (the resolve target, found early) and P1-T1
+    // (which collides with the archived P1-T1). Snapshot P1 while non-colliding,
+    // then introduce the collision, delete P1. Resolving the CLEAN target must still
+    // throw — the collision check runs after the full scan, not bypassed by an early hit.
+    const P2_TWO = `id: P2
+name: N
+weight: 1
+confidence: high
+risk: low
+status: in_progress
+objective: Build the next increment
+definition_of_done:
+  - done
+verification:
+  commands:
+    - pnpm test
+tasks:
+  - id: P2-CLEAN
+    type: feature
+${TF}
+    status: in_progress
+  - id: P1-T1
+    type: feature
+${TF}
+    status: in_progress
+`;
     await scaffold("P2-T1");
     await writePhaseSnapshot(cwd, "P1", { now: NOW });
-    await writeFile(join(cwd, "design", "phases", "P2-y.yaml"), P2("P1-T1"), "utf8");
+    await writeFile(join(cwd, "design", "phases", "P2-y.yaml"), P2_TWO, "utf8");
     await rm(join(cwd, "design", "phases", "P1-x.yaml"));
-    // Resolve a DIFFERENT live target (one that still exists) to prove the collision
-    // check fires regardless of whether the target was found.
-    await expect(resolveTaskInRoadmap(cwd, "P1-T1")).rejects.toBeInstanceOf(
+    await expect(resolveTaskInRoadmap(cwd, "P2-CLEAN")).rejects.toBeInstanceOf(
       PhaseSnapshotInvalidError,
     );
   });

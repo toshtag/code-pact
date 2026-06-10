@@ -245,4 +245,16 @@ describe("mergeArchivedTaskIndex — collision fail-closed (never pick a winner)
     expect(r.index.has("T-1")).toBe(false);
     expect(r.index.has("T-2")).toBe(true);
   });
+
+  it("a mixed intra + cross collision for the same id is still dropped from the index", () => {
+    // T-1 appears twice in P1 (intra) AND once in P2 (cross). Whatever the reported
+    // kind, the id must be absent from the index.
+    const r = mergeArchivedTaskIndex(new Set(), [
+      entry("P1", "T-1"),
+      entry("P1", "T-1"),
+      entry("P2", "T-1"),
+    ]);
+    expect(r.collisions.some((c) => c.task_id === "T-1")).toBe(true);
+    expect(r.index.has("T-1")).toBe(false);
+  });
 });

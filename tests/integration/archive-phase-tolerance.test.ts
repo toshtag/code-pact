@@ -155,6 +155,22 @@ describe("A2 bare-rm of a completed phase with a cross-phase depends_on", () => 
     expect(jsonOk(run(["plan", "lint", "--strict", "--json"]))).toBe(false);
   });
 
+  it("deleted phase + corrupt snapshot → exactly ONE PHASE_SNAPSHOT_INVALID in plan lint (no duplicate)", async () => {
+    await scaffold();
+    await writePhaseSnapshot(tmpDir, "P1", { now: NOW });
+    await writeFile(
+      join(tmpDir, ".code-pact", "state", "archive", "phases", "P1.json"),
+      "{ corrupt",
+      "utf8",
+    );
+    await rm(join(tmpDir, "design", "phases", "P1-x.yaml"));
+    const lint = run(["plan", "lint", "--strict", "--json"]);
+    expect(jsonOk(lint)).toBe(false);
+    const parsed = JSON.parse(lint.stdout) as { data: { issues: { code: string }[] } };
+    const invalids = parsed.data.issues.filter((i) => i.code === "PHASE_SNAPSHOT_INVALID");
+    expect(invalids).toHaveLength(1);
+  });
+
   it("live phase present + corrupt snapshot on disk → still GREEN (live-wins, snapshot ignored)", async () => {
     await scaffold();
     await writePhaseSnapshot(tmpDir, "P1", { now: NOW });

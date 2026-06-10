@@ -337,15 +337,13 @@ export async function collectPlanArtifacts(
           continue; // skip the entry; detectMissingPhaseFiles reports nothing either
         }
         if (r.invalid !== undefined) {
-          fileIssues.push({
-            code: "PHASE_SNAPSHOT_INVALID",
-            severity: "error",
-            message: `${ref.path} is missing and its archive snapshot cannot release it: ${r.invalid}`,
-            file: ref.path,
-          });
+          // Skip the entry but do NOT push a PHASE_SNAPSHOT_INVALID FileIssue here:
+          // `detectMissingPhaseFiles` runs over the same roadmap refs in the lint
+          // orchestrator and emits the single PHASE_SNAPSHOT_INVALID for this ref.
+          // Pushing it here too would double-report the same code for one phase.
           continue;
         }
-        // no snapshot — keep the original missing-file FileIssue.
+        // no snapshot — fall through to the original missing-file FileIssue.
       }
       pushParseIssue(fileIssues, err, ref.path);
     }

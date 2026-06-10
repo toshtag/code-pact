@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it } from "vitest";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { detectMissingPhaseFiles } from "../../../../../src/core/plan/checks/phase-files.ts";
@@ -138,3 +138,29 @@ it("live present + corrupt snapshot on disk → STILL no issue (live-wins, snaps
   // P1-x.yaml is still present → the snapshot must never be read.
   expect(await detectMissingPhaseFiles(cwd, roadmap)).toEqual([]);
 });
+
+// Present-but-INACCESSIBLE (non-searchable parent dir → access() EACCES) must
+// fail closed, NOT be tolerated as 'absent' by the snapshot (live-wins). This is a
+// permission-dependent path: chmod is a no-op for root, so the test self-skips
+// there (deterministic, never flaky-fails). The chmod-free guarantee is pinned by
+// the phaseFilePresence helper unit test in fs.test.ts.
+const isRoot = typeof process.getuid === "function" && process.getuid() === 0;
+it.skipIf(isRoot)(
+  "present-but-INACCESSIBLE live file + valid snapshot → fail-closed (snapshot must NOT release it)",
+  async () => {
+    await writePhaseSnapshot(cwd, "P1", { now: NOW });
+    const phasesDir = join(cwd, "design", "phases");
+    await chmod(phasesDir, 0o000);
+    try {
+      // Locking the dir makes BOTH refs inaccessible; the point is that P1 is NOT
+      // tolerated by its valid snapshot — it is a fail-closed "cannot be accessed".
+      const issues = await detectMissingPhaseFiles(cwd, roadmap);
+      const p1 = issues.find((i) => i.phase_id === "P1");
+      expect(p1?.code).toBe("MISSING_PHASE_FILE");
+      expect(p1?.message).toContain("cannot be accessed");
+      // No issue is silently absent / tolerated for the inaccessible P1.
+    } finally {
+      await chmod(phasesDir, 0o755); // restore so afterEach can clean up
+    }
+  },
+);

@@ -2,7 +2,7 @@ import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { PlanIssue } from "../shared.ts";
 import type { Roadmap } from "../../schemas/roadmap.ts";
-import { fileExists } from "./fs.ts";
+import { phaseFilePresence } from "./fs.ts";
 import { resolveMissingPhaseRef } from "../../archive/load-phase-snapshot.ts";
 
 /**
@@ -26,7 +26,20 @@ export async function detectMissingPhaseFiles(
   const issues: PlanIssue[] = [];
   for (const ref of roadmap.phases) {
     const absPath = join(cwd, ref.path);
-    if (await fileExists(absPath)) continue; // live-wins
+    const presence = await phaseFilePresence(absPath);
+    if (presence === "present") continue; // live-wins
+    if (presence === "inaccessible") {
+      // Present but unreadable (e.g. a non-searchable parent dir) — fail closed.
+      // The snapshot must NOT release a live file that is actually on disk.
+      issues.push({
+        code: "MISSING_PHASE_FILE",
+        severity: "error",
+        message: `roadmap.yaml references "${ref.path}" but it cannot be accessed (present but unreadable — check directory permissions)`,
+        file: ref.path,
+        phase_id: ref.id,
+      });
+      continue;
+    }
     const res = await resolveMissingPhaseRef(cwd, ref);
     if (res.kind === "tolerated") continue; // archived completed phase — fine
     if (res.kind === "fail_invalid") {
