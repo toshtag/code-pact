@@ -17,7 +17,7 @@ vi.mock("node:fs/promises", async (importActual) => {
   };
 });
 
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -115,6 +115,22 @@ describe("resolveRetiredDecisionGate (predicate A — gate release, self-guards 
     await writeFile(p, JSON.stringify(obj), "utf8");
     expect((await resolveRetiredDecisionGate(cwd, REF)).kind).toBe("not_released");
   });
+
+  it("SYMLINK ESCAPE: design/decisions -> outside dir (missing outside file) + accepted record → not_released", async () => {
+    // Build the record while design/decisions is a real dir, THEN replace the dir
+    // with a symlink that escapes the project root. access(canonical) would ENOENT
+    // (the outside file is absent), but resolveWithinProject must reject the escape →
+    // inaccessible → the record is NEVER consulted (live-wins, parity with the gate).
+    await setup(ACCEPTED); // record written; live REF deleted
+    const outside = await mkdtemp(join(tmpdir(), "code-pact-outside-dec-"));
+    try {
+      await rm(join(cwd, "design", "decisions"), { recursive: true, force: true });
+      await symlink(outside, join(cwd, "design", "decisions"));
+      expect((await resolveRetiredDecisionGate(cwd, REF)).kind).toBe("not_released");
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("decisionRecordSoftensMissingRef (predicate B — lint soften, any status)", () => {
@@ -151,6 +167,18 @@ describe("decisionRecordSoftensMissingRef (predicate B — lint soften, any stat
     await setup(BLOCKED);
     expect(await decisionRecordSoftensMissingRef(cwd, "docs/cli-contract.md")).toBe(false);
   });
+
+  it("SYMLINK ESCAPE: design/decisions -> outside dir + valid record → false", async () => {
+    await setup(BLOCKED);
+    const outside = await mkdtemp(join(tmpdir(), "code-pact-outside-dec-"));
+    try {
+      await rm(join(cwd, "design", "decisions"), { recursive: true, force: true });
+      await symlink(outside, join(cwd, "design", "decisions"));
+      expect(await decisionRecordSoftensMissingRef(cwd, REF)).toBe(false);
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("resolveDecisionGate wrapper — record fallback only on retired explicit refs", () => {
@@ -186,5 +214,18 @@ describe("resolveDecisionGate wrapper — record fallback only on retired explic
     // there is no canonical key to look up.
     const res = await resolveDecisionGate(cwd, "foo-rfc", undefined);
     expect(res.resolved).toBe(false);
+  });
+
+  it("decision_refs:[X] SYMLINK ESCAPE + accepted record → UNRESOLVED (gate fails closed, not record-released)", async () => {
+    await setup(ACCEPTED);
+    const outside = await mkdtemp(join(tmpdir(), "code-pact-outside-dec-"));
+    try {
+      await rm(join(cwd, "design", "decisions"), { recursive: true, force: true });
+      await symlink(outside, join(cwd, "design", "decisions"));
+      const res = await resolveDecisionGate(cwd, "P1-T1", [REF]);
+      expect(res.resolved).toBe(false);
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
   });
 });

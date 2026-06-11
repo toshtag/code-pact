@@ -256,10 +256,14 @@ so "events exist" is never by itself a license to delete the YAML.
      `decisionRecordSoftensMissingRef` (lint-SOFTEN) needs only a valid
      identity-checked record of ANY status — so a `blocked` record softens the lint
      advisory but NEVER releases a gate.
-   - **LIVE WINS, TRUE-ENOENT only:** both predicates self-check
-     `phaseFilePresence === "absent"` (never caller discipline, never the old
-     `fileExists` boolean); a present-but-inaccessible decision file
-     (EACCES/EPERM/EISDIR/ENOTDIR) NEVER consults a record and fails closed.
+   - **LIVE WINS, TRUE-ENOENT only:** both predicates self-check a
+     **symlink-escape-aware** presence (never caller discipline, never the old
+     `fileExists`/`access`-only boolean). "true ENOENT" = a canonical live path that
+     PASSED `resolveWithinProject` (the same `..`/absolute AND ancestor-symlink-escape
+     guard the live reader uses) and is then genuinely absent. A present-but-inaccessible
+     file (EACCES/EPERM/EISDIR/ENOTDIR) OR a `design/decisions -> /outside` symlink
+     escape → `inaccessible` → NEVER consults a record, fails closed (parity with the
+     live gate, which already rejects the escape).
    - **Identity re-checked (writer NOT trusted):** `canonical_ref === ref` AND
      `original_path === ref` AND `path_sha256 === sha256(ref)`; a non-normalizing ref
      (nested / `docs/` / traversal / README/PRUNED) is never record-backed.

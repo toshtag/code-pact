@@ -16,7 +16,7 @@ vi.mock("node:fs/promises", async (importActual) => {
   };
 });
 
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -182,5 +182,31 @@ describe("step 5 — Codex coverage gaps", () => {
     await writeFile(p, JSON.stringify(obj), "utf8");
     const i = only(await detectTaskDecisionRefNotFound(cwd, [entry([task("P1-T1", { decision_refs: [XREF] })])]));
     expect(i.severity).toBe("error");
+  });
+
+  it("ACTIVE task + SYMLINK ESCAPE decision_ref + accepted record → ERROR (record never consulted on a symlink escape)", async () => {
+    await retireWithRecord(ACCEPTED);
+    const outside = await mkdtemp(join(tmpdir(), "code-pact-outside-dec-"));
+    try {
+      await rm(join(cwd, "design", "decisions"), { recursive: true, force: true });
+      await symlink(outside, join(cwd, "design", "decisions"));
+      const i = only(await detectTaskDecisionRefNotFound(cwd, [entry([task("P1-T1", { decision_refs: [XREF] })])]));
+      expect(i.severity).toBe("error"); // not a retired_decision advisory
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("NOT-done task + SYMLINK ESCAPE acceptance_ref + valid record → ERROR (never softened on a symlink escape)", async () => {
+    await retireWithRecord(BLOCKED);
+    const outside = await mkdtemp(join(tmpdir(), "code-pact-outside-dec-"));
+    try {
+      await rm(join(cwd, "design", "decisions"), { recursive: true, force: true });
+      await symlink(outside, join(cwd, "design", "decisions"));
+      const i = only(await detectTaskAcceptanceRefNotFound(cwd, [entry([task("P1-T1", { acceptance_refs: [XREF] })])]));
+      expect(i.severity).toBe("error");
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
   });
 });

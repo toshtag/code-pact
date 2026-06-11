@@ -1,7 +1,7 @@
+import { access } from "node:fs/promises";
 import { loadDecisionRecord } from "../archive/load-decision-record.ts";
 import { normalizeDecisionRef, sha256Hex } from "../archive/paths.ts";
-import { join } from "node:path";
-import { phaseFilePresence } from "../plan/checks/fs.ts";
+import { resolveWithinProject } from "../path-safety.ts";
 import type { DecisionStateRecord } from "../schemas/decision-state-record.ts";
 
 // ---------------------------------------------------------------------------
@@ -49,13 +49,47 @@ function recordMatchingRef(
 }
 
 /**
- * True iff the canonical live decision path is GENUINELY absent (ENOENT) — the
- * ONLY state in which a record may be consulted. `present` short-circuits to
- * live-wins; `inaccessible` (any non-ENOENT failure) fails closed and never reads
- * a record.
+ * Three-way presence for the canonical live decision path, SYMLINK-ESCAPE-AWARE:
+ *   - first `resolveWithinProject` (structural `..`/absolute guard AND ancestor
+ *     symlink-escape guard — the SAME check the live decision reader uses); a path
+ *     that escapes the project root → `inaccessible` (NEVER `absent`);
+ *   - then `access` the realpath-confined target: ENOENT → `absent`; any other
+ *     access error → `inaccessible`.
+ *
+ * "true ENOENT" must mean "a canonical live path that passed project-root symlink
+ * safety and is then genuinely absent" — NOT a bare `access()` ENOENT (which a
+ * `design/decisions -> /outside` symlink would report for a missing outside file,
+ * even though the live reader correctly treats it as unsafe). Without this, the
+ * record fallback could RELEASE a gate / SOFTEN a lint for a path the live gate
+ * fails closed on — a live-wins-inaccessible hole.
+ */
+async function decisionFilePresence(
+  cwd: string,
+  canonical: string,
+): Promise<"present" | "absent" | "inaccessible"> {
+  let abs: string;
+  try {
+    abs = await resolveWithinProject(cwd, canonical);
+  } catch {
+    return "inaccessible"; // unsafe path / symlink escape — never a record-consult
+  }
+  try {
+    await access(abs);
+    return "present";
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === "ENOENT" ? "absent" : "inaccessible";
+  }
+}
+
+/**
+ * True iff the canonical live decision path is GENUINELY absent — the ONLY state
+ * in which a record may be consulted. Uses the symlink-escape-aware
+ * {@link decisionFilePresence}; `present` short-circuits to live-wins,
+ * `inaccessible` (any non-ENOENT failure, INCLUDING a symlink escape) fails closed
+ * and never reads a record.
  */
 async function liveDecisionAbsent(cwd: string, canonical: string): Promise<boolean> {
-  return (await phaseFilePresence(join(cwd, canonical))) === "absent";
+  return (await decisionFilePresence(cwd, canonical)) === "absent";
 }
 
 /**
