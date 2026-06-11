@@ -229,10 +229,10 @@ so "events exist" is never by itself a license to delete the YAML.
      does NOT suppress INDEPENDENT diagnostics.** A soft-invalid snapshot supplies
      no archived task ids, so the existing detectors still fire on the consequences:
      a live `depends_on` to an id only that snapshot would have supplied →
-     `TASK_DEPENDS_ON_UNRESOLVED` (`plan lint`/`plan analyze`); a leftover progress
-     event for such an id → `ORPHAN_PROGRESS_EVENT` (`doctor`/`plan analyze`). So
-     `validate --strict` is green only when NO independent strict-relevant issue
-     remains. Suppressing those would hide real progress-ledger / dependency drift
+     `TASK_DEPENDS_ON_UNRESOLVED` (`plan lint` only — `plan analyze` does not run the
+     depends-on detector); a leftover progress event for such an id →
+     `ORPHAN_PROGRESS_EVENT` (`doctor`/`plan analyze`). So `validate --strict` is green
+     only when NO independent strict-relevant issue remains. Suppressing those would hide real progress-ledger / dependency drift
      and is explicitly NOT done.
    - **Collision stays HARD (the A5 exception):** a *valid* unreferenced snapshot
      whose task ids collide with the live+archived graph is graph-ambiguous state

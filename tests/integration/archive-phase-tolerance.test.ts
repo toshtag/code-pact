@@ -455,7 +455,12 @@ describe("4b: cross-phase depends_on into an UNREFERENCED archived phase", () =>
     expect(jsonOk(run(["plan", "lint", "--strict", "--json"]))).toBe(true);
   });
 
-  it("corrupt unreferenced snapshot + a live dep on its would-be id → TASK_DEPENDS_ON_UNRESOLVED (not hard PHASE_SNAPSHOT_INVALID)", async () => {
+  type LintIssue = { code: string; severity: string; affects_exit?: boolean };
+  const lintIssues = (r: RunResult): LintIssue[] =>
+    (JSON.parse(r.stdout) as { data: { issues: LintIssue[] } }).data.issues;
+
+  // FILE-level soft failure + live dep.
+  it("(c) corrupt unreferenced snapshot + a live dep on its would-be id → TASK_DEPENDS_ON_UNRESOLVED error; PHASE_SNAPSHOT_INVALID only as the soft advisory", async () => {
     await makeUnreferencedP1(P2_DEP); // P2-T1 depends_on P1-T1
     await writeFile(
       join(tmpDir, ".code-pact", "state", "archive", "phases", "P1.json"),
@@ -464,7 +469,29 @@ describe("4b: cross-phase depends_on into an UNREFERENCED archived phase", () =>
     );
     const lint = run(["plan", "lint", "--strict", "--json"]);
     expect(jsonOk(lint)).toBe(false);
-    expect(lint.stdout).toContain("TASK_DEPENDS_ON_UNRESOLVED"); // live-scoped, correct
+    const issues = lintIssues(lint);
+    // The failure is the live-scoped depends-on ERROR, not the snapshot.
+    expect(issues.some((i) => i.code === "TASK_DEPENDS_ON_UNRESOLVED" && i.severity === "error")).toBe(true);
+    // PHASE_SNAPSHOT_INVALID appears ONLY as the affects_exit:false advisory — never as an error.
+    expect(issues.some((i) => i.code === "PHASE_SNAPSHOT_INVALID" && i.severity === "error")).toBe(false);
+  });
+
+  // DIRECTORY-level soft failure + live dep (the new 4b soft class the file-level case
+  // does not cover): an unreadable archive dir supplies no ids, so a live depends_on
+  // into it is a TASK_DEPENDS_ON_UNRESOLVED error (plan lint), NOT a hard
+  // PHASE_SNAPSHOT_INVALID. plan analyze does NOT run the depends-on detector.
+  it("(d) unreadable archive dir + a live dep → TASK_DEPENDS_ON_UNRESOLVED error (plan lint), no hard PHASE_SNAPSHOT_INVALID", async () => {
+    await makeUnreferencedP1(P2_DEP, PROGRESS_P2_ONLY); // P2-T1 depends_on P1-T1, no orphan event
+    await rm(join(tmpDir, ".code-pact", "state", "archive", "phases"), { recursive: true });
+    await writeFile(join(tmpDir, ".code-pact", "state", "archive", "phases"), "not a dir", "utf8");
+    const lint = run(["plan", "lint", "--strict", "--json"]);
+    expect(jsonOk(lint)).toBe(false);
+    const issues = lintIssues(lint);
+    expect(issues.some((i) => i.code === "TASK_DEPENDS_ON_UNRESOLVED" && i.severity === "error")).toBe(true);
+    expect(issues.some((i) => i.code === "PHASE_SNAPSHOT_INVALID" && i.severity === "error")).toBe(false);
+    // plan analyze does not run the depends-on detector → no TASK_DEPENDS_ON_UNRESOLVED there.
+    const analyze = run(["plan", "analyze", "--strict", "--json"]);
+    expect(analyze.stdout).not.toContain("TASK_DEPENDS_ON_UNRESOLVED");
   });
 
   it("collision (unreferenced task id == live id) → hard PHASE_SNAPSHOT_INVALID across reader commands", async () => {
