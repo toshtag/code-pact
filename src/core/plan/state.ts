@@ -18,9 +18,11 @@ import {
 import type { FileIssue } from "./shared.ts";
 import {
   archivedEntriesFromSnapshot,
+  discoverUnreferencedSnapshots,
   mergeArchivedTaskIndex,
   resolveMissingPhaseRef,
   type ArchivedTaskEntry,
+  type UnreferencedSnapshotInvalid,
 } from "../archive/load-phase-snapshot.ts";
 
 export type PhaseEntry = {
@@ -148,6 +150,30 @@ async function resolveDeletedPhaseRef(
   return { tolerated: false };
 }
 
+/**
+ * design-docs-ephemeral (step 4b): a soft discovery failure (an unreadable archive
+ * dir, or a corrupt / unsafe-stem unreferenced snapshot file) → an ADVISORY
+ * `PHASE_SNAPSHOT_INVALID` FileIssue at `warning` severity with `affects_exit:false`,
+ * so `plan lint --strict` never fails on it (A5: an unreferenced bad snapshot blocks
+ * nothing live). This surface (the lenient loader → `plan lint`) is the ONLY place
+ * these are reported; doctor/validate skip them silently.
+ */
+function unreferencedInvalidToFileIssue(inv: UnreferencedSnapshotInvalid): FileIssue {
+  return {
+    code: "PHASE_SNAPSHOT_INVALID",
+    severity: "warning",
+    affects_exit: false,
+    message:
+      inv.scope === "directory"
+        ? `archive snapshots could not be discovered (advisory): ${inv.reason}`
+        : `archive snapshot "${inv.fileStem}.json" is invalid and was skipped (advisory): ${inv.reason}`,
+    file:
+      inv.scope === "directory"
+        ? ".code-pact/state/archive/phases"
+        : `.code-pact/state/archive/phases/${inv.fileStem}.json`,
+  };
+}
+
 function buildTaskIndex(
   phases: PhaseEntry[],
 ): Map<string, { phaseId: string; task: TaskT }> {
@@ -196,6 +222,19 @@ export async function loadPlanState(cwd: string): Promise<PlanState> {
       throw err; // no snapshot — fail closed exactly as before
     }
   }
+
+  // design-docs-ephemeral (step 4b): also discover UNREFERENCED archived phases
+  // (roadmap ref gone) so a cross-phase depends_on into one still resolves. Strict
+  // loader IGNORES discovery's soft `invalid[]` (no throw — an unreadable dir / a
+  // corrupt unreferenced file supplies no ids; the plan-lint advisory surface is the
+  // only place it's reported). A live dep on a missing id still fails via
+  // TASK_DEPENDS_ON_UNRESOLVED. Only a VALID snapshot's collision is a hard error,
+  // caught by the merge below.
+  const discovered = await discoverUnreferencedSnapshots(
+    cwd,
+    new Set(roadmap.phases.map((r) => r.id)),
+  );
+  archivedCandidates.push(...discovered.entries);
 
   const taskIndex = buildTaskIndex(phases);
   // Collision-checked merge: an archived id that collides with a live id or
@@ -382,6 +421,20 @@ export async function collectPlanArtifacts(
   }
   if (hasLegacy || eventFiles.length > 0) {
     progress = { path: progPath, events: mergeProgressStreams(legacyEvents, eventFiles) };
+  }
+
+  // design-docs-ephemeral (step 4b): discover UNREFERENCED archived phases. This is
+  // the ONLY surface that reports discovery's soft `invalid[]` — as a WARNING with
+  // `affects_exit: false`, so `plan lint --strict` stays green (an unreadable archive
+  // dir / a corrupt unreferenced file blocks nothing live; doctor/validate skip it
+  // silently). A live dep on a missing id still fails via TASK_DEPENDS_ON_UNRESOLVED.
+  const discovered = await discoverUnreferencedSnapshots(
+    cwd,
+    new Set(roadmap.phases.map((r) => r.id)),
+  );
+  archivedCandidates.push(...discovered.entries);
+  for (const inv of discovered.invalid) {
+    fileIssues.push(unreferencedInvalidToFileIssue(inv));
   }
 
   const taskIndex = buildTaskIndex(phases);

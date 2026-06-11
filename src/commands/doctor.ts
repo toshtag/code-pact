@@ -36,6 +36,7 @@ import type { PhaseEntry } from "../core/plan/state.ts";
 import type { PlanIssue } from "../core/plan/shared.ts";
 import {
   archivedEntriesFromSnapshot,
+  discoverUnreferencedSnapshots,
   mergeArchivedTaskIndex,
   resolveMissingPhaseRef,
   type ArchivedTaskEntry,
@@ -285,6 +286,19 @@ async function checkPhases(
       });
     }
   }
+
+  // design-docs-ephemeral (step 4b): also discover UNREFERENCED archived phases so a
+  // cross-phase depends_on into one is not falsely flagged, AND so a VALID
+  // unreferenced snapshot whose ids collide is caught below. doctor SILENTLY DROPS
+  // discovery's soft `invalid[]` — emitting any doctor issue (even a warning) would
+  // fail `validate --strict` (issues.length === 0), breaking A5 for a project that
+  // merely has a corrupt/unreadable unreferenced snapshot. The `plan lint` advisory
+  // surface is where those are reported; doctor needs discovery ONLY for the collision.
+  const discovered = await discoverUnreferencedSnapshots(
+    cwd,
+    new Set(roadmap.phases.map((r) => r.id)),
+  );
+  archivedCandidates.push(...discovered.entries);
 
   // Collision-checked merge (same as the lint loaders): an archived id that
   // collides with a live id / another snapshot / itself is EXCLUDED and surfaced
