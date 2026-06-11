@@ -1,5 +1,22 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+// Gap-3 (Codex): the done-task-inaccessible case uses an fs mock (deterministic,
+// not chmod) scoped to the X.md path → access() rejects EACCES.
+const fail = { accessError: null as { code: string } | null };
+vi.mock("node:fs/promises", async (importActual) => {
+  const actual = await importActual<typeof import("node:fs/promises")>();
+  return {
+    ...actual,
+    access: vi.fn((...args: Parameters<typeof actual.access>) => {
+      if (fail.accessError && /design[\\/]decisions[\\/]x-rfc\.md/.test(String(args[0]))) {
+        return Promise.reject(Object.assign(new Error("x"), fail.accessError));
+      }
+      return (actual.access as (...a: unknown[]) => unknown)(...(args as unknown[]));
+    }),
+  };
+});
+
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -7,6 +24,7 @@ import {
   detectTaskDecisionRefNotFound,
 } from "../../../../../src/core/plan/checks/path-fields.ts";
 import { writeDecisionRecord } from "../../../../../src/core/archive/decision-record.ts";
+import { decisionRecordPath, sha256Hex } from "../../../../../src/core/archive/paths.ts";
 import type { PhaseEntry } from "../../../../../src/core/plan/state.ts";
 import type { Phase } from "../../../../../src/core/schemas/phase.ts";
 import type { Task } from "../../../../../src/core/schemas/task.ts";
@@ -25,6 +43,8 @@ beforeEach(async () => {
   await mkdir(join(cwd, ".code-pact", "state", "archive", "decisions"), { recursive: true });
 });
 afterEach(async () => {
+  fail.accessError = null;
+  vi.restoreAllMocks();
   if (cwd) await rm(cwd, { recursive: true, force: true });
 });
 
@@ -115,5 +135,52 @@ describe("detectTaskAcceptanceRefNotFound — record-aware (step 5)", () => {
     const i = only(await detectTaskAcceptanceRefNotFound(cwd, [entry([task("P1-T1", { acceptance_refs: ["docs/cli-contract.md"], status: "done" })])]));
     expect(i.severity).toBe("warning");
     expect(i.affects_exit).toBe(false);
+  });
+
+  it("NOT-done task + acceptance_refs:[nested decision] missing → ERROR (nested never normalizes, never softened)", async () => {
+    await retireWithRecord(BLOCKED);
+    const i = only(await detectTaskAcceptanceRefNotFound(cwd, [entry([task("P1-T1", { acceptance_refs: ["design/decisions/p3/nested.md"] })])]));
+    expect(i.severity).toBe("error");
+  });
+});
+
+// Codex coverage-gap closers (review round 1).
+describe("step 5 — Codex coverage gaps", () => {
+  it("DONE task + INACCESSIBLE decision_ref (EACCES) → advisory, severity UNCHANGED (no record consulted)", async () => {
+    await writeFile(join(cwd, XREF), ACCEPTED, "utf8");
+    expect((await writeDecisionRecord(cwd, XREF, { now: NOW })).kind).toBe("written");
+    // File is present on disk, but access() reports EACCES (inaccessible, not absent).
+    fail.accessError = { code: "EACCES" };
+    const i = only(await detectTaskDecisionRefNotFound(cwd, [entry([task("P1-T1", { decision_refs: [XREF], status: "done" })])]));
+    expect(i.severity).toBe("warning"); // done baseline preserved on inaccessible, NOT error
+    expect(i.affects_exit).toBe(false);
+  });
+
+  it("ACTIVE task + INACCESSIBLE decision_ref (EACCES) + accepted record → ERROR (never record-softened on inaccessible)", async () => {
+    await writeFile(join(cwd, XREF), ACCEPTED, "utf8");
+    expect((await writeDecisionRecord(cwd, XREF, { now: NOW })).kind).toBe("written");
+    fail.accessError = { code: "EACCES" };
+    const i = only(await detectTaskDecisionRefNotFound(cwd, [entry([task("P1-T1", { decision_refs: [XREF] })])]));
+    expect(i.severity).toBe("error"); // inaccessible never consults the record
+  });
+
+  it("ACTIVE task + retired + record whose original_path is hand-edited to diverge → ERROR (reader re-checks identity)", async () => {
+    await retireWithRecord(ACCEPTED);
+    const p = decisionRecordPath(cwd, XREF);
+    const obj = JSON.parse(await readFile(p, "utf8"));
+    obj.original_path = "design/decisions/other.md"; // diverges from canonical_ref
+    await writeFile(p, JSON.stringify(obj), "utf8");
+    const i = only(await detectTaskDecisionRefNotFound(cwd, [entry([task("P1-T1", { decision_refs: [XREF] })])]));
+    expect(i.severity).toBe("error"); // identity mismatch → not released → not softened
+  });
+
+  it("ACTIVE task + retired + record whose path_sha256 is hand-edited to diverge → ERROR", async () => {
+    await retireWithRecord(ACCEPTED);
+    const p = decisionRecordPath(cwd, XREF);
+    const obj = JSON.parse(await readFile(p, "utf8"));
+    obj.path_sha256 = sha256Hex("design/decisions/something-else.md");
+    await writeFile(p, JSON.stringify(obj), "utf8");
+    const i = only(await detectTaskDecisionRefNotFound(cwd, [entry([task("P1-T1", { decision_refs: [XREF] })])]));
+    expect(i.severity).toBe("error");
   });
 });
