@@ -172,6 +172,17 @@ function hasDecisionRefError(r: RunResult): boolean {
   return issues.some((i) => i.code === "TASK_DECISION_REF_NOT_FOUND" && i.severity === "error");
 }
 
+type LintIssue = {
+  code: string;
+  severity: string;
+  phase_id?: string;
+  task_id?: string;
+  details?: { value?: string };
+};
+function lintIssues(r: RunResult): LintIssue[] {
+  return (JSON.parse(r.stdout) as { data?: { issues?: LintIssue[] } }).data?.issues ?? [];
+}
+
 // `init` scaffolds a complete project so validate/doctor have no unrelated
 // failures; then overlay the roadmap + phases + progress + the live decision.
 async function scaffold(adr: string, p2: string = P2_DEP_DECISION): Promise<void> {
@@ -208,6 +219,19 @@ afterAll(async () => {
 describe("Step 6 — A2+A3 composite tolerance across the five surfaces", () => {
   it("POSITIVE: completed phase YAML + design/decisions both hand-deleted, ACCEPTED record → all five surfaces tolerant, gate released", async () => {
     await scaffold(ACCEPTED);
+
+    // PRE-DELETE CONTROL (the other half of the delta): while P1's YAML is LIVE, its
+    // done task's stale `reads` glob (STALE_READ, absent on disk) DOES fire
+    // TASK_READS_NO_MATCH. Without this control the post-delete `not.toContain` below
+    // would be vacuous (it could pass simply because nothing ever fired). Pin the full
+    // identity of the issue so it is unmistakably P1-T1's stale read.
+    const liveLint = run(["plan", "lint", "--strict", "--json"]);
+    const liveReadsIssue = lintIssues(liveLint).find((i) => i.code === "TASK_READS_NO_MATCH");
+    expect(liveReadsIssue, "P1-T1's stale read must fire TASK_READS_NO_MATCH while P1 is live").toBeDefined();
+    expect(liveReadsIssue?.phase_id).toBe("P1");
+    expect(liveReadsIssue?.task_id).toBe("P1-T1");
+    expect(liveReadsIssue?.details?.value).toBe(STALE_READ);
+
     await writePhaseSnapshot(tmpDir, "P1", { now: NOW });
     expect((await writeDecisionRecord(tmpDir, XREF, { now: NOW })).kind).toBe("written");
     await handDeleteComposite();
@@ -222,12 +246,12 @@ describe("Step 6 — A2+A3 composite tolerance across the five surfaces", () => 
     expect(jsonOk(lint)).toBe(true);
     expect(hasDecisionRefError(lint)).toBe(false);
     expect(lint.stdout).not.toContain("TASK_DEPENDS_ON_UNRESOLVED");
-    // AUDIT FALSE-POSITIVE PROOF: P1-T1's stale `reads` glob (STALE_READ) fired
-    // TASK_READS_NO_MATCH while P1 was live; now that P1's YAML is hand-deleted and
-    // tolerated by its snapshot, P1 is not in PlanState.phases, so the reads detector
-    // never reaches it. The warning is gone — plan-lint needs no archive-aware reads
-    // detector for the missing-archived-docs scope (it would for a LIVE phase, which
-    // is the separate `plan sync-paths` concern, out of this directive's scope).
+    // AUDIT FALSE-POSITIVE PROOF (post side of the delta): the SAME stale read that
+    // fired above (the pre-delete control) is now GONE. P1's YAML is hand-deleted and
+    // tolerated by its snapshot, so P1 is not in PlanState.phases and the reads detector
+    // never reaches it. live → fired / deleted+tolerated → gone, with no detector change:
+    // plan-lint needs no archive-aware reads detector for the missing-archived-docs
+    // scope (a LIVE phase's stale read is the separate `plan sync-paths` concern).
     expect(lint.stdout).not.toContain("TASK_READS_NO_MATCH");
 
     // task context / task prepare on the live active task: not blocked.
