@@ -389,25 +389,32 @@ describe("4b: cross-phase depends_on into an UNREFERENCED archived phase", () =>
     expect(jsonOk(run(["phase", "runbook", "P2", "--json"]))).toBe(true);
   });
 
-  it("corrupt unreferenced snapshot + no live dep → validate --strict GREEN, plan lint warning only", async () => {
+  it("corrupt unreferenced snapshot + no live dep → validate green & emits NO PHASE_SNAPSHOT_INVALID; plan lint advisory only", async () => {
     await makeUnreferencedP1(P2_NO_DEP);
     await writeFile(
       join(tmpDir, ".code-pact", "state", "archive", "phases", "P1.json"),
       "{ corrupt",
       "utf8",
     );
-    // A5: an unreferenced corrupt snapshot blocks nothing live.
-    expect(jsonOk(run(["validate", "--json"]))).toBe(true);
+    // A5: an unreferenced corrupt snapshot blocks nothing live. doctor (which drives
+    // validate) must emit NOTHING for it — otherwise `validate --strict` (issues===0)
+    // would fail for a project that merely has a bad unreferenced snapshot.
+    const validate = run(["validate", "--json"]);
+    expect(jsonOk(validate)).toBe(true);
+    expect(validate.stdout).not.toContain("PHASE_SNAPSHOT_INVALID"); // doctor stayed silent
+    // The advisory lives ONLY on plan lint, as affects_exit:false (never fails --strict).
     const lint = run(["plan", "lint", "--strict", "--json"]);
-    expect(jsonOk(lint)).toBe(true); // affects_exit:false advisory does not fail --strict
-    expect(lint.stdout).toContain("PHASE_SNAPSHOT_INVALID"); // but the advisory IS visible
+    expect(jsonOk(lint)).toBe(true);
+    expect(lint.stdout).toContain("PHASE_SNAPSHOT_INVALID");
   });
 
-  it("unreadable archive dir (a regular file at the path) → validate --strict GREEN, no crash", async () => {
+  it("unreadable archive dir (a regular file at the path) → validate green (no PHASE_SNAPSHOT_INVALID), no crash", async () => {
     await makeUnreferencedP1(P2_NO_DEP);
     await rm(join(tmpDir, ".code-pact", "state", "archive", "phases"), { recursive: true });
     await writeFile(join(tmpDir, ".code-pact", "state", "archive", "phases"), "not a dir", "utf8");
-    expect(jsonOk(run(["validate", "--json"]))).toBe(true);
+    const validate = run(["validate", "--json"]);
+    expect(jsonOk(validate)).toBe(true);
+    expect(validate.stdout).not.toContain("PHASE_SNAPSHOT_INVALID"); // doctor silent on dir-level too
     expect(jsonOk(run(["plan", "lint", "--strict", "--json"]))).toBe(true);
   });
 
