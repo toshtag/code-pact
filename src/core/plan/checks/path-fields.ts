@@ -8,8 +8,12 @@ import {
   validateGlobSyntax,
   walkAndMatch,
 } from "../../glob.ts";
-import { fileExists } from "./fs.ts";
+import { phaseFilePresence } from "./fs.ts";
 import { readPrunedLedger, normalizeRelPath } from "../../decisions/pruned-ledger.ts";
+import {
+  decisionRecordSoftensMissingRef,
+  resolveRetiredDecisionGate,
+} from "../../decisions/decision-gate-archive.ts";
 
 // ---------------------------------------------------------------------------
 // Task Readiness Schema detectors
@@ -49,6 +53,36 @@ function safePathReason(path: string): string {
  */
 function refIsHistorical(task: { status?: string }): boolean {
   return task.status === "done";
+}
+
+/**
+ * The advisory (`affects_exit:false`) variant of `TASK_DECISION_REF_NOT_FOUND`.
+ * `kind: "done"` — a completed task's ref is a historical annotation.
+ * `kind: "retired"` — an ACTIVE task whose missing ref is released by an accepted
+ * `.code-pact/state` decision-state record (step 5).
+ */
+function decisionRefAdvisory(
+  taskId: string,
+  p: string,
+  file: string,
+  phaseId: string,
+  index: number,
+  kind: "done" | "retired",
+): PlanIssue {
+  return {
+    code: "TASK_DECISION_REF_NOT_FOUND",
+    severity: "warning",
+    affects_exit: false,
+    message:
+      kind === "done"
+        ? `Task "${taskId}" is done; its decision_refs path "${p}" is no longer on disk — advisory only. The task has already completed, so the ref is now a historical annotation, not a live file requirement. Restore the file if this was accidental, or drop the ref if the decision was intentionally retired and you no longer need it.`
+        : `Task "${taskId}" decision_refs path "${p}" is no longer on disk, but a retired decision-state record in .code-pact/state releases its gate (accepted) — advisory only. Restore the decision file if this was accidental, or keep relying on the recorded outcome.`,
+    file,
+    phase_id: phaseId,
+    task_id: taskId,
+    path: `decision_refs[${index}]`,
+    details: { value: p, ...(kind === "done" ? { historical: true } : { retired_decision: true }) },
+  };
 }
 
 /** `decision_refs` path is not a safe repo-root-relative POSIX path. */
@@ -93,26 +127,48 @@ export async function detectTaskDecisionRefNotFound(
         // dedicated detector and would also fail this access check for
         // the wrong reason.
         if (safePathReason(p) !== "") continue;
-        if (!(await fileExists(join(cwd, p)))) {
-          const historical = refIsHistorical(task);
-          // A done task's ref recorded in PRUNED.md is an intentional
-          // retirement — silent. A live task is never silenced (its gate is
-          // still live, even if someone wrongly listed the path).
-          if (historical && pruned.has(normalizeRelPath(p))) continue;
-          issues.push({
-            code: "TASK_DECISION_REF_NOT_FOUND",
-            severity: historical ? "warning" : "error",
-            ...(historical ? { affects_exit: false } : {}),
-            message: historical
-              ? `Task "${task.id}" is done; its decision_refs path "${p}" is no longer on disk — advisory only. The task has already completed, so the ref is now a historical annotation, not a live file requirement. Restore the file if this was accidental, or drop the ref if the decision was intentionally retired and you no longer need it.`
-              : `Task "${task.id}" decision_refs path "${p}" does not exist on disk`,
-            file: ref.path,
-            phase_id: phase.id,
-            task_id: task.id,
-            path: `decision_refs[${index}]`,
-            details: { value: p, ...(historical ? { historical: true } : {}) },
-          });
+        // design-docs-ephemeral (step 5): use the THREE-WAY presence — record
+        // consultation is gated on a TRUE absence (ENOENT), never on the old
+        // `fileExists` boolean (which collapses any access failure to "missing"
+        // and would re-open the live-wins-inaccessible hole). `present` → no issue;
+        // `inaccessible` keeps the existing severity, never record-softened.
+        const presence = await phaseFilePresence(join(cwd, p));
+        if (presence === "present") continue;
+        const historical = refIsHistorical(task);
+        if (presence === "absent") {
+          // A done task's retired ref is silent when recorded (PRUNED row OR a valid
+          // decision-state record of ANY status — both prove intentional retirement);
+          // otherwise it is an advisory (the existing done baseline — never an error).
+          if (historical) {
+            if (pruned.has(normalizeRelPath(p))) continue;
+            if (await decisionRecordSoftensMissingRef(cwd, p)) continue;
+          } else {
+            // An ACTIVE task's gate is still live: it softens ONLY when the gate
+            // would RELEASE (a valid ACCEPTED record) — tracking the gate exactly,
+            // so A3-positive (rm -rf design/decisions + all gates recorded accepted)
+            // is green under `plan lint --strict`. A blocked / no / invalid record
+            // leaves it a hard error, matching the live gate's fail-closed verdict.
+            if ((await resolveRetiredDecisionGate(cwd, p)).kind === "released") {
+              issues.push(decisionRefAdvisory(task.id, p, ref.path, phase.id, index, "retired"));
+              continue;
+            }
+          }
         }
+        // `inaccessible`, or `absent` not softened above → the existing severity.
+        issues.push(
+          historical
+            ? decisionRefAdvisory(task.id, p, ref.path, phase.id, index, "done")
+            : {
+                code: "TASK_DECISION_REF_NOT_FOUND",
+                severity: "error",
+                message: `Task "${task.id}" decision_refs path "${p}" does not exist on disk`,
+                file: ref.path,
+                phase_id: phase.id,
+                task_id: task.id,
+                path: `decision_refs[${index}]`,
+                details: { value: p },
+              },
+        );
       }
     }
   }
@@ -382,10 +438,14 @@ export async function detectTaskAcceptanceRefNotFound(
   cwd: string,
   phases: PhaseEntry[],
 ): Promise<PlanIssue[]> {
-  // NOT ledger-aware: PRUNED.md is the tombstone for *decision* records, and
-  // acceptance_refs routinely point at docs / phase YAML, not decisions. A done
-  // task's missing acceptance_ref stays a PR-A advisory `warning`; it is never
-  // silenced by the decision ledger.
+  // PRUNED.md is the tombstone for *decision* records and does NOT soften
+  // acceptance_refs (which routinely point at docs / phase YAML). A DONE task's
+  // missing acceptance_ref stays a PR-A advisory for ANY target (unchanged).
+  // design-docs-ephemeral (step 5): a NOT-DONE task's missing acceptance_ref softens
+  // to advisory ONLY when the target is a top-level `design/decisions/*.md` backed by
+  // a VALID record of ANY status (predicate B) — acceptance_refs is a
+  // reference-integrity annotation, not a gate release, so a blocked record still
+  // proves intentional archival. A non-decision target (`docs/...`) never softens.
   const issues: PlanIssue[] = [];
   for (const { phase, ref } of phases) {
     for (const task of phase.tasks ?? []) {
@@ -393,22 +453,39 @@ export async function detectTaskAcceptanceRefNotFound(
       for (let index = 0; index < refs.length; index++) {
         const p = refs[index]!;
         if (safePathReason(p) !== "") continue;
-        if (!(await fileExists(join(cwd, p)))) {
-          const historical = refIsHistorical(task);
-          issues.push({
-            code: "TASK_ACCEPTANCE_REF_NOT_FOUND",
-            severity: historical ? "warning" : "error",
-            ...(historical ? { affects_exit: false } : {}),
-            message: historical
+        // Three-way presence (step 5): record consultation is gated on a TRUE absence
+        // (ENOENT). `present` → no issue; `inaccessible` keeps the existing severity
+        // and never consults a record (never the old `fileExists` boolean).
+        const presence = await phaseFilePresence(join(cwd, p));
+        if (presence === "present") continue;
+        const historical = refIsHistorical(task);
+        // Done task → advisory for ANY target (existing baseline, unchanged).
+        // Active task + absent + a valid decision-state record (predicate B) → advisory.
+        const softened =
+          historical ||
+          (presence === "absent" && (await decisionRecordSoftensMissingRef(cwd, p)));
+        issues.push({
+          code: "TASK_ACCEPTANCE_REF_NOT_FOUND",
+          severity: softened ? "warning" : "error",
+          ...(softened ? { affects_exit: false } : {}),
+          message: softened
+            ? historical
               ? `Task "${task.id}" is done; its acceptance_refs path "${p}" is no longer on disk — advisory only. The task has already completed, so the ref is now a historical annotation, not a live file requirement. Restore the file if this was accidental, or drop the ref if it was intentionally removed.`
-              : `Task "${task.id}" acceptance_refs path "${p}" does not exist on disk`,
-            file: ref.path,
-            phase_id: phase.id,
-            task_id: task.id,
-            path: `acceptance_refs[${index}]`,
-            details: { value: p, ...(historical ? { historical: true } : {}) },
-          });
-        }
+              : `Task "${task.id}" acceptance_refs path "${p}" is no longer on disk, but it is a retired design decision recorded in .code-pact/state — advisory only.`
+            : `Task "${task.id}" acceptance_refs path "${p}" does not exist on disk`,
+          file: ref.path,
+          phase_id: phase.id,
+          task_id: task.id,
+          path: `acceptance_refs[${index}]`,
+          details: {
+            value: p,
+            ...(historical
+              ? { historical: true }
+              : softened
+                ? { retired_decision: true }
+                : {}),
+          },
+        });
       }
     }
   }
