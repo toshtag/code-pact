@@ -38,6 +38,12 @@ export function phaseSnapshotPath(cwd: string, phaseId: string): string {
   return join(cwd, ...ARCHIVE_PHASES_DIR_SEGMENTS, `${phaseId}.json`);
 }
 
+/** The archive phases directory. Used by step-4b discovery to enumerate
+ *  `<id>.json` snapshots when no roadmap ref names them. */
+export function archivePhasesDir(cwd: string): string {
+  return join(cwd, ...ARCHIVE_PHASES_DIR_SEGMENTS);
+}
+
 /**
  * Normalize a raw decision ref to its canonical form, or null to reject it.
  * Reuses the PRUNED.md normalizer on purpose: identical confinement semantics
