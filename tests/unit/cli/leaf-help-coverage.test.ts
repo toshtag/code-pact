@@ -46,6 +46,7 @@ const COMMANDS: Cmd[] = [
   { cluster: "phase", sub: "show", mutating: false, json: true },
   { cluster: "phase", sub: "import", mutating: true, json: true },
   { cluster: "phase", sub: "reconcile", mutating: true, json: true },
+  { cluster: "phase", sub: "archive", mutating: true, json: true },
   { cluster: "phase", sub: "runbook", mutating: false, json: true },
   // adapter
   { cluster: "adapter", sub: "list", mutating: false, json: true },

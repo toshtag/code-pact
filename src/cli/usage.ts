@@ -10,7 +10,7 @@ import { TASK_SPECS } from "./spec/task.ts";
 const CLUSTER_SUBCOMMANDS: Record<string, string> = {
   plan: "brief | prompt | adopt | constitution | lint | normalize | analyze | sync-paths | migrate | import (alias for \"phase import\")",
   task: "add | context | prepare | start | status | block | resume | complete | record-done | finalize | runbook (aliases: reconcile = finalize, next = runbook)",
-  phase: "add | new | ls | show | import | reconcile | runbook (alias: next = runbook)",
+  phase: "add | new | ls | show | import | reconcile | archive | runbook (alias: next = runbook)",
   adapter: "list | install | upgrade | doctor | conformance",
 };
 
@@ -289,6 +289,27 @@ const LEAF_USAGE: Record<string, () => string> = {
       "Examples:",
       "  code-pact phase reconcile P9 --json",
       "  code-pact phase reconcile P9 --write --json",
+    ].join("\n"),
+
+  "phase archive": () =>
+    [
+      "Usage: code-pact phase archive <phase-id> [options]",
+      "",
+      "Archive a TERMINAL phase (status done/cancelled, all tasks terminal): write its",
+      "phase-snapshot record, then delete `design/phases/<id>.yaml`. The archived phase",
+      "still resolves from the snapshot (the roadmap ref is kept). Dry-run is the default",
+      "— pass --write to apply. Mutating only with --write. Never edits the roadmap,",
+      "rewrites a link, or appends a ledger.",
+      "",
+      "Options:",
+      "  --write                     Write the snapshot then delete the YAML (default is a dry-run preview).",
+      "  --attest <task-id>=<reason> Attest a legacy done-task that has no done event (repeatable).",
+      "  --json                      Emit JSON.",
+      "",
+      "Examples:",
+      "  code-pact phase archive P9 --json",
+      "  code-pact phase archive P9 --write --json",
+      "  code-pact phase archive P9 --write --attest P9-T2=\"verified by hand\" --json",
     ].join("\n"),
 
   "task add": () => renderLeafHelp(TASK_SPECS.add!),
