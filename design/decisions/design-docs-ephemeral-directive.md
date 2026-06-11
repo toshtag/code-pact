@@ -122,10 +122,12 @@ so "events exist" is never by itself a license to delete the YAML.
 > roadmap ref kept stays green via a validated snapshot, existence-only archived
 > task index, all collision-checked + fail-closed), **4b** (PR #412 —
 > unreferenced-archived-phase cross-phase `depends_on` via fail-soft enumeration;
-> the phase-snapshot reader arc is now complete). ⬜ not started =
-> 5 (retired-decision resolution — the DECISION-state records' first reader), 6, 7.
+> the phase-snapshot reader arc is now complete), **5** (PR #413 —
+> retired-decision resolution; the DECISION-state records' first reader: a retired
+> decision releases an active gate / softens a lint ONLY from a valid accepted
+> record, live-wins true-ENOENT-only, fail-closed). ⬜ not started = 6, 7.
 > Nothing destructive has shipped yet
-> (4a/4b write/delete nothing — they only READ the snapshots). **The locked reader
+> (4a/4b/5 write/delete nothing — they only READ the snapshots/records). **The locked reader
 > invariants that bind 4b/5/6/7** (stated in full in the 4a entry below and enforced
 > by `tests/unit/core/archive/`, `tests/unit/core/plan/state-archive.test.ts`,
 > `tests/unit/core/plan/resolve-task-archive.test.ts`, and
@@ -239,21 +241,45 @@ so "events exist" is never by itself a license to delete the YAML.
      → hard `PHASE_SNAPSHOT_INVALID` everywhere, even though unreferenced and even
      if no current `depends_on` names it. The soft rule is for a file's
      self-validation failure only, never for a graph-wide collision.
-5. **⬜ Resolve retired-decision missing** via the `.code-pact/state` decision-state
-   record (`PRUNED.md` read-only backcompat). This layer must cover, explicitly:
-   **`resolveDecisionGate`** (the live gate — resolves only from a record that
-   says it may satisfy an active gate, never from absence), **`plan lint`'s
-   `decision_refs` AND `acceptance_refs`** not-found detectors (`acceptance_refs`
-   is NOT covered by the decision tombstone today — do not drop it),
-   **`task prepare` / `task record-done`** (gate + commitments echo),
-   **`status`**, and the **doc-link checker** (interim rule below; full
-   tombstone-awareness is step 7 half (ii)).
-   **`acceptance_refs` stays strict by default:** it may point at ordinary docs
-   (e.g. `docs/cli-contract.md`), not just decisions. Soften a missing
-   `acceptance_ref` **only** when its target is a **retired design decision /
-   archived historical artifact represented by a validated `.code-pact/state`
-   record** — a generic missing acceptance doc must still fail (never blanket-
-   silence `acceptance_refs` via the decision record).
+5. **Resolve retired-decision missing — ✅ done (PR #413).** The FIRST reader of the
+   DECISION-state records (`PRUNED.md` read-only backcompat). Implemented as the
+   decision analogue of step 4, with the same locked reader contract:
+   - **Reader** `load-decision-record.ts` (`loadDecisionRecord` — absent | invalid |
+     valid; invalid never collapsed to absent) + **gate-aware wrapper**
+     `decision-gate-archive.ts` with TWO self-guarding predicates (the 2b contract:
+     the record fallback composes the live reader, never inside `readLiveDecisionFile`
+     /`readLiveDecisionDir`, so pack render / ADR-quality scans never see records).
+   - **TWO predicates, DIFFERENT eligibility:** `resolveRetiredDecisionGate`
+     (gate-RELEASE) needs `may_satisfy_active_gate` (== accepted) — this releases the
+     live gate (`resolveDecisionGate`/`makeDecisionResolver`, consumed by `verify` /
+     `task prepare` / `task record-done` / `status` / `plan lint`).
+     `decisionRecordSoftensMissingRef` (lint-SOFTEN) needs only a valid
+     identity-checked record of ANY status — so a `blocked` record softens the lint
+     advisory but NEVER releases a gate.
+   - **LIVE WINS, TRUE-ENOENT only:** both predicates self-check a
+     **symlink-escape-aware** presence (never caller discipline, never the old
+     `fileExists`/`access`-only boolean). "true ENOENT" = a canonical live path that
+     PASSED `resolveWithinProject` (the same `..`/absolute AND ancestor-symlink-escape
+     guard the live reader uses) and is then genuinely absent. A present-but-inaccessible
+     file (EACCES/EPERM/EISDIR/ENOTDIR) OR a `design/decisions -> /outside` symlink
+     escape → `inaccessible` → NEVER consults a record, fails closed (parity with the
+     live gate, which already rejects the escape).
+   - **Identity re-checked (writer NOT trusted):** `canonical_ref === ref` AND
+     `original_path === ref` AND `path_sha256 === sha256(ref)`; a non-normalizing ref
+     (nested / `docs/` / traversal / README/PRUNED) is never record-backed.
+   - **`acceptance_refs` stays strict** (it may point at ordinary docs like
+     `docs/cli-contract.md`): a done task's missing acceptance_ref keeps the existing
+     advisory baseline for ANY target; a not-done task's softens ONLY for a top-level
+     `design/decisions/*.md` backed by a valid record. PRUNED.md does not soften
+     acceptance_refs. **`decision_refs`** softens by tracking the gate (active task
+     needs accepted; done task softens via PRUNED OR any valid record).
+   - **Boundary (intentional):** the filename-scan gate path (a gated task with NO
+     explicit `decision_refs`) is NEVER record-backed — there is no canonical key to
+     look up. Such a task must migrate to explicit `decision_refs` (+ a record) to
+     survive `rm -rf design/decisions`; until then it fails closed. **`status`** is
+     covered transitively (shared resolver). The **doc-link checker** needs no
+     step-5 change (reader-only, deletes no `.md` → no dangling link; full
+     tombstone-awareness is step 7 half (ii)).
 6. **⬜ Tolerance, scoped** — `validate` / `doctor` / `plan lint` / `task context` /
    `task prepare`: *missing archived historical docs tolerant; missing active
    control docs fail-closed.*
