@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Semantic doc invariants (companion to check-doc-links.mjs).
+// Semantic doc invariants (companion to check-doc-links.ts).
 //
 // check-doc-links catches broken links. This catches a different class:
 // links/text that are still *valid* but semantically stale or unsafe — the

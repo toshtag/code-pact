@@ -228,7 +228,7 @@ function detectWeakDoD(phases: PhaseEntry[]): PlanIssue[] {
 /** A write target that `pnpm check:docs` (links + invariants) actually guards.
  *  Only `docs/**` and root-level public docs other than CHANGELOG.md qualify:
  *  CHANGELOG.md is explicitly EXCLUDED from check:docs's source scan
- *  (`ROOT_SOURCE_SKIP` in scripts/check-doc-links.mjs), so a CHANGELOG write is
+ *  (`ROOT_SOURCE_SKIP` in scripts/check-doc-links.ts), so a CHANGELOG write is
  *  not something check:docs verifies — requiring a doc check for it would be a
  *  false positive. `design/**` is also excluded — that tree is validated by
  *  `validate` / `plan lint`, not the public-docs checker. */
