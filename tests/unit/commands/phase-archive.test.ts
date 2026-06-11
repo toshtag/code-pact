@@ -1,19 +1,43 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 // Mock ONLY the reader-contract resolver so we can exercise the post-write
-// readback-verify branch (writer succeeds, reader refuses). writePhaseSnapshot
-// (a different module) stays real, so the snapshot is genuinely written.
-const readback = { override: null as null | { kind: "fail_invalid"; reason: string } | { kind: "fail_missing" } };
+// readback-verify branch (writer succeeds, reader refuses).
+const readback = {
+  override: null as null | { kind: "fail_invalid"; reason: string } | { kind: "fail_missing" },
+  // When set, the tolerated snapshot's source_sha256 is replaced — to drive the
+  // snapshot_unverified branch (readback ok but sha != the live YAML bytes).
+  forceSourceSha: null as string | null,
+};
 vi.mock("../../../src/core/archive/load-phase-snapshot.ts", async (importActual) => {
   const actual = await importActual<typeof import("../../../src/core/archive/load-phase-snapshot.ts")>();
   return {
     ...actual,
     resolveMissingPhaseRef: vi.fn(async (cwd: string, ref: { id: string; path: string }) => {
       if (readback.override) return readback.override;
-      return actual.resolveMissingPhaseRef(cwd, ref);
+      const res = await actual.resolveMissingPhaseRef(cwd, ref);
+      if (readback.forceSourceSha && res.kind === "tolerated") {
+        return { kind: "tolerated", snapshot: { ...res.snapshot, source_sha256: readback.forceSourceSha } };
+      }
+      return res;
+    }),
+  };
+});
+
+// Mock the WRITER module only to run an `afterWrite` hook between the real
+// snapshot write and the pre-delete stale guard — so a test can mutate the YAML
+// in that window (the race the guard exists to catch) deterministically.
+const writeHook = { afterWrite: null as null | (() => Promise<void>) };
+vi.mock("../../../src/core/archive/phase-snapshot.ts", async (importActual) => {
+  const actual = await importActual<typeof import("../../../src/core/archive/phase-snapshot.ts")>();
+  return {
+    ...actual,
+    writePhaseSnapshot: vi.fn(async (...args: Parameters<typeof actual.writePhaseSnapshot>) => {
+      const out = await actual.writePhaseSnapshot(...args);
+      if (writeHook.afterWrite) await writeHook.afterWrite();
+      return out;
     }),
   };
 });
@@ -85,9 +109,13 @@ async function scaffold(status: "done" | "cancelled" = "done", taskStatus: "done
 
 beforeEach(() => {
   readback.override = null;
+  readback.forceSourceSha = null;
+  writeHook.afterWrite = null;
 });
 afterEach(async () => {
   readback.override = null;
+  readback.forceSourceSha = null;
+  writeHook.afterWrite = null;
   vi.clearAllMocks();
   if (cwd) await rm(cwd, { recursive: true, force: true });
 });
@@ -107,6 +135,43 @@ describe("runPhaseArchive — readback verify (the writer is not trusted)", () =
     readback.override = { kind: "fail_missing" };
     const res = await runPhaseArchive({ cwd, phaseId: "P1", write: true, now: NOW });
     expect(res.kind).toBe("stale");
+    expect(await exists(P1_PATH())).toBe(true);
+  });
+});
+
+describe("runPhaseArchive — stale guard between snapshot write and delete", () => {
+  it("source_changed: YAML bytes edited after the write → STALE source_changed, YAML survives", async () => {
+    await scaffold();
+    writeHook.afterWrite = async () => {
+      // Edit the live YAML in the window between snapshot write and the guard.
+      await writeFile(P1_PATH(), phaseYaml("done", "done") + "\n# edited\n", "utf8");
+    };
+    const res = await runPhaseArchive({ cwd, phaseId: "P1", write: true, now: NOW });
+    expect(res.kind).toBe("stale");
+    if (res.kind === "stale") expect(res.reason).toBe("source_changed");
+    expect(await exists(P1_PATH())).toBe(true);
+  });
+
+  it("identity_changed: same bytes but a different inode (file swap) → STALE identity_changed, YAML survives", async () => {
+    await scaffold();
+    const original = await readFile(P1_PATH(), "utf8");
+    writeHook.afterWrite = async () => {
+      // Replace the YAML with a byte-identical file at a NEW inode.
+      await rm(P1_PATH());
+      await writeFile(P1_PATH(), original, "utf8");
+    };
+    const res = await runPhaseArchive({ cwd, phaseId: "P1", write: true, now: NOW });
+    expect(res.kind).toBe("stale");
+    if (res.kind === "stale") expect(res.reason).toBe("identity_changed");
+    expect(await exists(P1_PATH())).toBe(true);
+  });
+
+  it("snapshot_unverified: readback tolerated but source_sha256 != baseline → STALE snapshot_unverified, YAML survives", async () => {
+    await scaffold();
+    readback.forceSourceSha = "0".repeat(64); // a valid-shaped but wrong hash
+    const res = await runPhaseArchive({ cwd, phaseId: "P1", write: true, now: NOW });
+    expect(res.kind).toBe("stale");
+    if (res.kind === "stale") expect(res.reason).toBe("snapshot_unverified");
     expect(await exists(P1_PATH())).toBe(true);
   });
 });
@@ -148,6 +213,14 @@ describe("runPhaseArchive — live-absent branch (idempotency, fail-closed)", ()
   it("YAML gone + NO snapshot → not_archived (fail-closed)", async () => {
     await scaffold();
     await rm(P1_PATH()); // hand-deleted, never archived → no snapshot
+    const res = await runPhaseArchive({ cwd, phaseId: "P1", write: true, now: NOW });
+    expect(res.kind).toBe("not_archived");
+  });
+
+  it("YAML gone + INVALID snapshot → not_archived (fail-closed, NOT already_archived)", async () => {
+    await scaffold();
+    await rm(P1_PATH());
+    readback.override = { kind: "fail_invalid", reason: "corrupt / identity-mismatched record" };
     const res = await runPhaseArchive({ cwd, phaseId: "P1", write: true, now: NOW });
     expect(res.kind).toBe("not_archived");
   });

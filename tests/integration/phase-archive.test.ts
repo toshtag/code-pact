@@ -211,6 +211,24 @@ describe("phase archive --write", () => {
     expect(json(ok).data?.kind).toBe("already_archived");
   });
 
+  it("dangling FINAL symlink + NO snapshot → STALE (not NOT_ARCHIVED — it's an unsafe path, not a missing-archive)", async () => {
+    await scaffold();
+    await rm(P1_YAML()); // YAML gone, never archived → no snapshot
+    await symlink(join(tmpDir, "design", "phases", "does-not-exist.yaml"), P1_YAML());
+    const r = run(["phase", "archive", "P1", "--write", "--json"]);
+    expect(r.code).toBe(2);
+    expect(json(r).error?.code).toBe("PHASE_ARCHIVE_STALE");
+  });
+
+  it("DRY-RUN dangling final symlink + valid snapshot → STALE (not would_already_archived; lstat-first parity with --write)", async () => {
+    await scaffold();
+    expect(run(["phase", "archive", "P1", "--write", "--json"]).code).toBe(0); // valid snapshot now exists
+    await symlink(join(tmpDir, "design", "phases", "does-not-exist.yaml"), P1_YAML());
+    const r = run(["phase", "archive", "P1", "--json"]); // dry-run
+    expect(r.code).toBe(2);
+    expect(json(r).error?.code).toBe("PHASE_ARCHIVE_STALE");
+  });
+
   it("final-component symlink to a regular file → refuse before unlink; neither file deleted", async () => {
     await scaffold();
     const realTarget = join(tmpDir, "design", "phases", "real-P1.yaml");
