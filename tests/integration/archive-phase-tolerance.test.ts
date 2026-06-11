@@ -75,6 +75,27 @@ ${TASK_FIELDS}
       - P1-T1
 `;
 
+// Same as P2_DEP but with NO depends_on (for 4b cases that must not have a live dep
+// on the archived phase's task).
+const P2_NO_DEP = `id: P2
+name: Next
+weight: 1
+confidence: high
+risk: low
+status: in_progress
+objective: Build the next increment of work
+definition_of_done:
+  - The next increment is implemented and its tests pass
+verification:
+  commands:
+    - pnpm test
+tasks:
+  - id: P2-T1
+    type: feature
+${TASK_FIELDS}
+    status: in_progress
+`;
+
 // P1-T1 done; P2-T1 started (so analyze sees no STATUS_DRIFT on the active task).
 const PROGRESS = `events:
   - task_id: P1-T1
@@ -329,5 +350,104 @@ describe("A2 bare-rm of a completed phase with a cross-phase depends_on", () => 
     const prep = run(["task", "prepare", "P1-T1", "--agent", "claude-code", "--json"]);
     expect(jsonOk(prep)).toBe(false);
     expect(prep.stdout).toContain("PHASE_SNAPSHOT_INVALID");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Step 4b — UNREFERENCED archived phase (roadmap ref GONE).
+// ---------------------------------------------------------------------------
+
+const ROADMAP_P2_ONLY = `phases:
+  - id: P2
+    path: design/phases/P2-y.yaml
+    weight: 1
+`;
+
+/** Snapshot P1 while referenced, then archive-remove it: drop its roadmap ref AND
+ *  its live file, leaving an UNREFERENCED P1 snapshot on disk. `p2` lets a test set
+ *  P2's body (e.g. a depends_on into P1-T1, or a colliding id). */
+async function makeUnreferencedP1(p2: string) {
+  await scaffold({ p2 });
+  await writePhaseSnapshot(tmpDir, "P1", { now: NOW });
+  await writeFile(join(tmpDir, "design", "roadmap.yaml"), ROADMAP_P2_ONLY, "utf8");
+  await rm(join(tmpDir, "design", "phases", "P1-x.yaml"));
+}
+
+describe("4b: cross-phase depends_on into an UNREFERENCED archived phase", () => {
+  it("valid unreferenced snapshot whose task a live phase depends_on → all GREEN", async () => {
+    await makeUnreferencedP1(P2_DEP); // P2-T1 depends_on P1-T1
+    expect(jsonOk(run(["validate", "--json"]))).toBe(true);
+    const lint = run(["plan", "lint", "--include-quality", "--strict", "--json"]);
+    expect(jsonOk(lint)).toBe(true);
+    expect(lint.stdout).not.toContain("TASK_DEPENDS_ON_UNRESOLVED");
+    const analyze = run(["plan", "analyze", "--strict", "--json"]);
+    expect(jsonOk(analyze)).toBe(true);
+    expect(analyze.stdout).not.toContain("ORPHAN_PROGRESS_EVENT");
+    expect(jsonOk(run(["task", "context", "P2-T1", "--agent", "claude-code", "--json"]))).toBe(true);
+    expect(jsonOk(run(["task", "prepare", "P2-T1", "--agent", "claude-code", "--json"]))).toBe(true);
+    expect(jsonOk(run(["status", "--json"]))).toBe(true);
+    expect(jsonOk(run(["phase", "runbook", "P2", "--json"]))).toBe(true);
+  });
+
+  it("corrupt unreferenced snapshot + no live dep → validate --strict GREEN, plan lint warning only", async () => {
+    await makeUnreferencedP1(P2_NO_DEP);
+    await writeFile(
+      join(tmpDir, ".code-pact", "state", "archive", "phases", "P1.json"),
+      "{ corrupt",
+      "utf8",
+    );
+    // A5: an unreferenced corrupt snapshot blocks nothing live.
+    expect(jsonOk(run(["validate", "--json"]))).toBe(true);
+    const lint = run(["plan", "lint", "--strict", "--json"]);
+    expect(jsonOk(lint)).toBe(true); // affects_exit:false advisory does not fail --strict
+    expect(lint.stdout).toContain("PHASE_SNAPSHOT_INVALID"); // but the advisory IS visible
+  });
+
+  it("unreadable archive dir (a regular file at the path) → validate --strict GREEN, no crash", async () => {
+    await makeUnreferencedP1(P2_NO_DEP);
+    await rm(join(tmpDir, ".code-pact", "state", "archive", "phases"), { recursive: true });
+    await writeFile(join(tmpDir, ".code-pact", "state", "archive", "phases"), "not a dir", "utf8");
+    expect(jsonOk(run(["validate", "--json"]))).toBe(true);
+    expect(jsonOk(run(["plan", "lint", "--strict", "--json"]))).toBe(true);
+  });
+
+  it("corrupt unreferenced snapshot + a live dep on its would-be id → TASK_DEPENDS_ON_UNRESOLVED (not hard PHASE_SNAPSHOT_INVALID)", async () => {
+    await makeUnreferencedP1(P2_DEP); // P2-T1 depends_on P1-T1
+    await writeFile(
+      join(tmpDir, ".code-pact", "state", "archive", "phases", "P1.json"),
+      "{ corrupt",
+      "utf8",
+    );
+    const lint = run(["plan", "lint", "--strict", "--json"]);
+    expect(jsonOk(lint)).toBe(false);
+    expect(lint.stdout).toContain("TASK_DEPENDS_ON_UNRESOLVED"); // live-scoped, correct
+  });
+
+  it("collision (unreferenced task id == live id) → hard PHASE_SNAPSHOT_INVALID across reader commands", async () => {
+    // Snapshot P1 while P2 is non-colliding, then rename P2's task to P1-T1 (collides
+    // with archived P1-T1) and remove P1's ref/file.
+    await scaffold({ p2: P2_NO_DEP });
+    await writePhaseSnapshot(tmpDir, "P1", { now: NOW });
+    await writeFile(
+      join(tmpDir, "design", "phases", "P2-y.yaml"),
+      P2_NO_DEP.replace("id: P2-T1", "id: P1-T1"),
+      "utf8",
+    );
+    await writeFile(join(tmpDir, "design", "roadmap.yaml"), ROADMAP_P2_ONLY, "utf8");
+    await rm(join(tmpDir, "design", "phases", "P1-x.yaml"));
+
+    expect(jsonOk(run(["validate", "--json"]))).toBe(false);
+    expect(run(["validate", "--json"]).stdout).toContain("PHASE_SNAPSHOT_INVALID");
+    expect(jsonOk(run(["plan", "lint", "--strict", "--json"]))).toBe(false);
+    expect(jsonOk(run(["plan", "analyze", "--strict", "--json"]))).toBe(false);
+    const status = run(["status", "--json"]);
+    expect(jsonOk(status)).toBe(false);
+    expect(status.stdout).toContain("PHASE_SNAPSHOT_INVALID");
+  });
+
+  it("A5: a project with NO archive dir is unaffected", async () => {
+    await scaffold({ p2: P2_NO_DEP }); // no snapshot ever written
+    expect(jsonOk(run(["validate", "--json"]))).toBe(true);
+    expect(jsonOk(run(["plan", "lint", "--strict", "--json"]))).toBe(true);
   });
 });
