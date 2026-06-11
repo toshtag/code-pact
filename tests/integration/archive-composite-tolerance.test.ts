@@ -58,6 +58,14 @@ const ROADMAP = `phases:
     weight: 1
 `;
 
+// P1-T1 (done) carries a STALE `reads` glob that matches no file on disk. While
+// P1 is live this fires TASK_READS_NO_MATCH (a real lint warning); after P1's YAML
+// is hand-deleted + tolerated by its snapshot, P1 never enters PlanState.phases, so
+// detectTaskReadsNoMatch (which only walks live phases) cannot reach it. The
+// composite tests assert the warning is GONE post-delete — the direct proof of the
+// directive's "audit false-positive" claim (a stale read WAS firing pre-delete).
+const STALE_READ = "src/archived-phase-only-stale.ts";
+
 const P1_DONE = `id: P1
 name: Foundations
 weight: 2
@@ -75,6 +83,8 @@ tasks:
     type: feature
 ${TASK_FIELDS}
     status: done
+    reads:
+      - ${STALE_READ}
 `;
 
 // P2-T1 (active) BOTH depends_on the deleted P1-T1 (A2 path) AND gates on the
@@ -212,6 +222,13 @@ describe("Step 6 — A2+A3 composite tolerance across the five surfaces", () => 
     expect(jsonOk(lint)).toBe(true);
     expect(hasDecisionRefError(lint)).toBe(false);
     expect(lint.stdout).not.toContain("TASK_DEPENDS_ON_UNRESOLVED");
+    // AUDIT FALSE-POSITIVE PROOF: P1-T1's stale `reads` glob (STALE_READ) fired
+    // TASK_READS_NO_MATCH while P1 was live; now that P1's YAML is hand-deleted and
+    // tolerated by its snapshot, P1 is not in PlanState.phases, so the reads detector
+    // never reaches it. The warning is gone — plan-lint needs no archive-aware reads
+    // detector for the missing-archived-docs scope (it would for a LIVE phase, which
+    // is the separate `plan sync-paths` concern, out of this directive's scope).
+    expect(lint.stdout).not.toContain("TASK_READS_NO_MATCH");
 
     // task context / task prepare on the live active task: not blocked.
     expect(jsonOk(run(["task", "context", "P2-T1", "--agent", "claude-code", "--json"]))).toBe(true);
@@ -242,6 +259,10 @@ describe("Step 6 — A2+A3 composite tolerance across the five surfaces", () => 
     // A2 (phase) is still tolerated → no phase-side failure leaks in.
     expect(lint.stdout).not.toContain("PHASE_SNAPSHOT_INVALID");
     expect(lint.stdout).not.toContain("TASK_DEPENDS_ON_UNRESOLVED");
+    // The decision-ref ERROR is the only failure — the deleted phase's stale `reads`
+    // does NOT leak a TASK_READS_NO_MATCH warning into the (already-red) envelope.
+    // (exit is red regardless here, so assert the issue's absence directly.)
+    expect(lint.stdout).not.toContain("TASK_READS_NO_MATCH");
 
     // RESPONSIBILITY BOUNDARY: validate / doctor never inspect decision gates, so a
     // deleted design/decisions does NOT make them red. This is intended, not a gap.

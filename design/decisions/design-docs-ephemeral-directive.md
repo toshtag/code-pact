@@ -315,9 +315,13 @@ so "events exist" is never by itself a license to delete the YAML.
    as a plan-lint gap (a done task's `reads` glob firing after its phase YAML is
    deleted). It cannot fire: `loadPlanState` tolerates a deleted completed-phase YAML
    via `resolveDeletedPhaseRef → tolerated → continue`, so that phase never enters
-   `PlanState.phases`, and the detector only walks live `phases`. A live phase whose
-   *own* done task's `reads` source files were deleted is a **separate** read-path
-   maintenance concern (`plan sync-paths`), out of this directive's
+   `PlanState.phases`, and the detector only walks live `phases`. This is **directly
+   pinned** by `archive-composite-tolerance.test.ts`: the archived `P1-T1` carries a
+   stale `reads` glob that fires `TASK_READS_NO_MATCH` while P1 is live, and the
+   composite (post-delete) positive test asserts the warning is **gone** — so the test
+   proves the non-fire is the tolerated-phase exclusion, not an absent `reads`. A live
+   phase whose *own* done task's `reads` source files were deleted is a **separate**
+   read-path maintenance concern (`plan sync-paths`), out of this directive's
    *missing-archived-docs* scope. plan-lint was therefore **not** made
    "archive-aware" for reads/writes here, by design.
 7. **⬜ `phase archive` + hand-delete** — the destructive verb (dry-run + `--write` +
