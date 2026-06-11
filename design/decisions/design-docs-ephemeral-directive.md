@@ -125,7 +125,7 @@ so "events exist" is never by itself a license to delete the YAML.
 > the phase-snapshot reader arc is now complete). ⬜ not started =
 > 5 (retired-decision resolution — the DECISION-state records' first reader), 6, 7.
 > Nothing destructive has shipped yet
-> (4a writes/deletes nothing — it only READS the snapshots). **The locked reader
+> (4a/4b write/delete nothing — they only READ the snapshots). **The locked reader
 > invariants that bind 4b/5/6/7** (stated in full in the 4a entry below and enforced
 > by `tests/unit/core/archive/`, `tests/unit/core/plan/state-archive.test.ts`,
 > `tests/unit/core/plan/resolve-task-archive.test.ts`, and
@@ -183,8 +183,8 @@ so "events exist" is never by itself a license to delete the YAML.
    record carries identity / original path / ADR status / may-satisfy-active-gate
    / source hash + provenance; a plain tombstone is the degenerate case.
 
-   _Below: 4a done; 4b/5–7 are where readers keep consuming the records and,
-   finally, where deletion happens._
+   _Below: 4a/4b done; 5–7 are where the remaining decision-reader, tolerance, and
+   destructive archive flows ship._
 4a. **Resolve completed-phase missing (roadmap-ref-STAYS) — ✅ done (PR #410).**
    The FIRST reader of the step-3 snapshots. `rm design/phases/<completed>.yaml`
    with the **roadmap ref kept** + a valid snapshot keeps `validate` / `plan lint`
