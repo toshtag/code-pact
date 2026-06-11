@@ -38,7 +38,7 @@ export type LinkScanIssue = {
 export type InboundLinkScan = { items: LinkRewriteItem[]; issues: LinkScanIssue[] };
 
 // EXTERNAL_RE / FENCE_RE / INLINE_CODE_RE are byte-identical to
-// scripts/check-doc-links.mjs so the collector strips code and rejects external
+// scripts/check-doc-links.ts so the collector strips code and rejects external
 // URLs the same way the checker does. The inline link grammar (`INLINE` below)
 // is deliberately a SUPERSET of the checker's `LINK_RE`: it also matches
 // `<href>`, single-quoted, and parenthesized-title links. That is safe — every
@@ -58,7 +58,7 @@ const REF_DEF = /^[ \t]{0,3}\[[^\]]+\]:[ \t]*(<[^>]+>|\S+)(?:[ \t]+(?:"[^"]*"|'[
 /** The append-only prune ledger — `--write` may only APPEND to it, never rewrite its rows. */
 const LEDGER = "design/decisions/PRUNED.md";
 
-/** Skipped during the walk — matches scripts/check-doc-links.mjs. */
+/** Skipped during the walk — matches scripts/check-doc-links.ts. */
 const SKIP_DIRS = new Set(["node_modules", ".git", "dist"]);
 
 // Blank a span to spaces, preserving newlines so line/column offsets are exact.
