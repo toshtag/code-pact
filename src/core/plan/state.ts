@@ -154,9 +154,17 @@ async function resolveDeletedPhaseRef(
  * design-docs-ephemeral (step 4b): a soft discovery failure (an unreadable archive
  * dir, or a corrupt / unsafe-stem unreferenced snapshot file) → an ADVISORY
  * `PHASE_SNAPSHOT_INVALID` FileIssue at `warning` severity with `affects_exit:false`,
- * so `plan lint --strict` never fails on it (A5: an unreferenced bad snapshot blocks
- * nothing live). This surface (the lenient loader → `plan lint`) is the ONLY place
- * these are reported; doctor/validate skip them silently.
+ * so `plan lint --strict` never fails on the advisory itself (A5). This surface (the
+ * lenient loader → `plan lint`) is the ONLY place the `PHASE_SNAPSHOT_INVALID`
+ * advisory appears; doctor/validate do not emit it.
+ *
+ * SCOPE of "silent": only the `PHASE_SNAPSHOT_INVALID` advisory is suppressed
+ * outside `plan lint`. INDEPENDENT diagnostics still fire on the CONSEQUENCES of a
+ * soft-invalid snapshot supplying no ids — a live `depends_on` to a would-be id →
+ * `TASK_DEPENDS_ON_UNRESOLVED`; a leftover progress event for one →
+ * `ORPHAN_PROGRESS_EVENT`. Those are NOT silenced (silencing them would hide real
+ * dependency / progress-ledger drift), so `validate --strict` is green only when no
+ * such independent issue remains.
  */
 function unreferencedInvalidToFileIssue(inv: UnreferencedSnapshotInvalid): FileIssue {
   return {
@@ -425,9 +433,10 @@ export async function collectPlanArtifacts(
 
   // design-docs-ephemeral (step 4b): discover UNREFERENCED archived phases. This is
   // the ONLY surface that reports discovery's soft `invalid[]` — as a WARNING with
-  // `affects_exit: false`, so `plan lint --strict` stays green (an unreadable archive
-  // dir / a corrupt unreferenced file blocks nothing live; doctor/validate skip it
-  // silently). A live dep on a missing id still fails via TASK_DEPENDS_ON_UNRESOLVED.
+  // `affects_exit: false`, so the advisory itself never fails `plan lint --strict`.
+  // (doctor/validate do not emit the advisory.) Independent diagnostics still fire on
+  // the consequences of a soft-invalid snapshot supplying no ids: TASK_DEPENDS_ON_UNRESOLVED
+  // for a live dep, ORPHAN_PROGRESS_EVENT for a leftover event — those are NOT silenced.
   const discovered = await discoverUnreferencedSnapshots(
     cwd,
     new Set(roadmap.phases.map((r) => r.id)),

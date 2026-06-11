@@ -220,12 +220,20 @@ so "events exist" is never by itself a license to delete the YAML.
    - **Discovery is fully FAIL-SOFT (A5):** it NEVER throws. ENOENT (no archive
      dir) → empty, no advisory. ENOTDIR/EACCES/EPERM (unreadable dir) → a
      directory-scope soft invalid; a corrupt / unsafe-named unreferenced file → a
-     file-scope soft invalid. A soft invalid is a `plan lint` advisory
-     (`affects_exit:false`, never fails `--strict`); **doctor/validate skip it
-     silently** (any doctor issue fails `validate --strict` → would break A5 for a
-     project that merely has a bad unreferenced snapshot); strict loaders skip
-     without throwing. A live dep on a missing id still fails via the existing,
-     live-scoped `TASK_DEPENDS_ON_UNRESOLVED`.
+     file-scope soft invalid. The soft invalid itself surfaces ONLY as a `plan lint`
+     advisory (`affects_exit:false`, never fails `--strict`); **doctor/validate do
+     not emit `PHASE_SNAPSHOT_INVALID` for it** (any doctor issue fails
+     `validate --strict`, which would break A5 for a project that merely has a bad
+     unreferenced snapshot); strict loaders skip without throwing.
+     **But "silent" is scoped to the `PHASE_SNAPSHOT_INVALID` advisory only — it
+     does NOT suppress INDEPENDENT diagnostics.** A soft-invalid snapshot supplies
+     no archived task ids, so the existing detectors still fire on the consequences:
+     a live `depends_on` to an id only that snapshot would have supplied →
+     `TASK_DEPENDS_ON_UNRESOLVED` (`plan lint`/`plan analyze`); a leftover progress
+     event for such an id → `ORPHAN_PROGRESS_EVENT` (`doctor`/`plan analyze`). So
+     `validate --strict` is green only when NO independent strict-relevant issue
+     remains. Suppressing those would hide real progress-ledger / dependency drift
+     and is explicitly NOT done.
    - **Collision stays HARD (the A5 exception):** a *valid* unreferenced snapshot
      whose task ids collide with the live+archived graph is graph-ambiguous state
      → hard `PHASE_SNAPSHOT_INVALID` everywhere, even though unreferenced and even

@@ -363,12 +363,26 @@ const ROADMAP_P2_ONLY = `phases:
     weight: 1
 `;
 
+// Progress with ONLY P2-T1's started event — no P1-T1 done event left behind. Used
+// for the "no leftover event" case (the P1-T1 done event is written first so the
+// snapshot can capture its terminal evidence, then progress is rewritten to drop it).
+const PROGRESS_P2_ONLY = `events:
+  - task_id: P2-T1
+    status: started
+    at: 2026-06-02T00:00:00.000Z
+    actor: agent
+`;
+
 /** Snapshot P1 while referenced, then archive-remove it: drop its roadmap ref AND
  *  its live file, leaving an UNREFERENCED P1 snapshot on disk. `p2` lets a test set
- *  P2's body (e.g. a depends_on into P1-T1, or a colliding id). */
-async function makeUnreferencedP1(p2: string) {
+ *  P2's body; `progressAfter` (optional) replaces the ledger AFTER the snapshot is
+ *  taken, e.g. to remove the P1-T1 done event so no orphan event remains. */
+async function makeUnreferencedP1(p2: string, progressAfter?: string) {
   await scaffold({ p2 });
   await writePhaseSnapshot(tmpDir, "P1", { now: NOW });
+  if (progressAfter !== undefined) {
+    await writeFile(join(tmpDir, ".code-pact", "state", "progress.yaml"), progressAfter, "utf8");
+  }
   await writeFile(join(tmpDir, "design", "roadmap.yaml"), ROADMAP_P2_ONLY, "utf8");
   await rm(join(tmpDir, "design", "phases", "P1-x.yaml"));
 }
@@ -389,32 +403,55 @@ describe("4b: cross-phase depends_on into an UNREFERENCED archived phase", () =>
     expect(jsonOk(run(["phase", "runbook", "P2", "--json"]))).toBe(true);
   });
 
-  it("corrupt unreferenced snapshot + no live dep → validate green & emits NO PHASE_SNAPSHOT_INVALID; plan lint advisory only", async () => {
-    await makeUnreferencedP1(P2_NO_DEP);
+  // Q4 case (a): corrupt unreferenced snapshot + NO leftover event + NO live dep →
+  // the advisory is genuinely inert. The init'd fixture carries unrelated default
+  // warnings (ADAPTER_MISSING / BRIEF_MISSING …) so `validate --strict` is not green
+  // in the absolute — assert the precise delta: 4b introduces NEITHER
+  // PHASE_SNAPSHOT_INVALID NOR ORPHAN_PROGRESS_EVENT, and `plan lint --strict` (which
+  // only carries 4b-relevant issues here) stays green with the advisory visible.
+  it("(a) corrupt unreferenced snapshot, no event, no dep → no PHASE_SNAPSHOT_INVALID/ORPHAN from validate; plan lint advisory only", async () => {
+    // Remove the P1-T1 done event after the snapshot, so no orphan event remains.
+    await makeUnreferencedP1(P2_NO_DEP, PROGRESS_P2_ONLY);
     await writeFile(
       join(tmpDir, ".code-pact", "state", "archive", "phases", "P1.json"),
       "{ corrupt",
       "utf8",
     );
-    // A5: an unreferenced corrupt snapshot blocks nothing live. doctor (which drives
-    // validate) must emit NOTHING for it — otherwise `validate --strict` (issues===0)
-    // would fail for a project that merely has a bad unreferenced snapshot.
-    const validate = run(["validate", "--json"]);
-    expect(jsonOk(validate)).toBe(true);
-    expect(validate.stdout).not.toContain("PHASE_SNAPSHOT_INVALID"); // doctor stayed silent
-    // The advisory lives ONLY on plan lint, as affects_exit:false (never fails --strict).
+    const validate = run(["validate", "--strict", "--json"]);
+    // doctor emits neither the advisory nor an orphan event for this inert case.
+    expect(validate.stdout).not.toContain("PHASE_SNAPSHOT_INVALID");
+    expect(validate.stdout).not.toContain("ORPHAN_PROGRESS_EVENT");
     const lint = run(["plan", "lint", "--strict", "--json"]);
-    expect(jsonOk(lint)).toBe(true);
-    expect(lint.stdout).toContain("PHASE_SNAPSHOT_INVALID");
+    expect(jsonOk(lint)).toBe(true); // affects_exit:false advisory never fails --strict
+    expect(lint.stdout).toContain("PHASE_SNAPSHOT_INVALID"); // but the advisory IS visible
   });
 
-  it("unreadable archive dir (a regular file at the path) → validate green (no PHASE_SNAPSHOT_INVALID), no crash", async () => {
-    await makeUnreferencedP1(P2_NO_DEP);
+  // Q4 case (b): corrupt unreferenced snapshot + a LEFTOVER progress event for one of
+  // its ids → the snapshot supplies no ids, so that event is a real orphan.
+  // validate --strict fails on ORPHAN_PROGRESS_EVENT, NOT on PHASE_SNAPSHOT_INVALID.
+  it("(b) corrupt unreferenced snapshot + leftover event → validate --strict fails with ORPHAN_PROGRESS_EVENT (not PHASE_SNAPSHOT_INVALID)", async () => {
+    await makeUnreferencedP1(P2_NO_DEP); // keeps the P1-T1 done event
+    await writeFile(
+      join(tmpDir, ".code-pact", "state", "archive", "phases", "P1.json"),
+      "{ corrupt",
+      "utf8",
+    );
+    const validate = run(["validate", "--strict", "--json"]);
+    expect(jsonOk(validate)).toBe(false);
+    expect(validate.stdout).toContain("ORPHAN_PROGRESS_EVENT");
+    expect(validate.stdout).not.toContain("PHASE_SNAPSHOT_INVALID"); // doctor never emits it
+    // Non-strict validate stays green (the orphan is a warning).
+    expect(jsonOk(run(["validate", "--json"]))).toBe(true);
+  });
+
+  it("unreadable archive dir (a regular file at the path) → no PHASE_SNAPSHOT_INVALID/ORPHAN from validate, no crash; plan lint green", async () => {
+    await makeUnreferencedP1(P2_NO_DEP, PROGRESS_P2_ONLY); // no leftover orphan event
     await rm(join(tmpDir, ".code-pact", "state", "archive", "phases"), { recursive: true });
     await writeFile(join(tmpDir, ".code-pact", "state", "archive", "phases"), "not a dir", "utf8");
-    const validate = run(["validate", "--json"]);
-    expect(jsonOk(validate)).toBe(true);
-    expect(validate.stdout).not.toContain("PHASE_SNAPSHOT_INVALID"); // doctor silent on dir-level too
+    const validate = run(["validate", "--strict", "--json"]);
+    expect(validate.code).not.toBe(3); // no crash
+    expect(validate.stdout).not.toContain("PHASE_SNAPSHOT_INVALID"); // doctor silent on dir-level
+    expect(validate.stdout).not.toContain("ORPHAN_PROGRESS_EVENT");
     expect(jsonOk(run(["plan", "lint", "--strict", "--json"]))).toBe(true);
   });
 
@@ -443,13 +480,25 @@ describe("4b: cross-phase depends_on into an UNREFERENCED archived phase", () =>
     await writeFile(join(tmpDir, "design", "roadmap.yaml"), ROADMAP_P2_ONLY, "utf8");
     await rm(join(tmpDir, "design", "phases", "P1-x.yaml"));
 
-    expect(jsonOk(run(["validate", "--json"]))).toBe(false);
-    expect(run(["validate", "--json"]).stdout).toContain("PHASE_SNAPSHOT_INVALID");
-    expect(jsonOk(run(["plan", "lint", "--strict", "--json"]))).toBe(false);
-    expect(jsonOk(run(["plan", "analyze", "--strict", "--json"]))).toBe(false);
-    const status = run(["status", "--json"]);
-    expect(jsonOk(status)).toBe(false);
-    expect(status.stdout).toContain("PHASE_SNAPSHOT_INVALID");
+    // Every public reader path that runs discovery must hard-fail on the collision
+    // (4b's discovery path is new, so pin each — not just the 4a referenced path).
+    for (const cmd of [
+      ["validate", "--json"],
+      ["plan", "lint", "--strict", "--json"],
+      ["plan", "analyze", "--strict", "--json"],
+      ["status", "--json"],
+      // resolveTaskInRoadmap consumers — P1-T1 is the (now-live) colliding target.
+      ["task", "context", "P1-T1", "--agent", "claude-code", "--json"],
+      ["task", "prepare", "P1-T1", "--agent", "claude-code", "--json"],
+      // loadPlanState consumer over a live phase.
+      ["phase", "runbook", "P2", "--json"],
+    ]) {
+      const r = run(cmd);
+      expect(jsonOk(r), `${cmd.join(" ")} must not be ok`).toBe(false);
+      expect(r.stdout, `${cmd.join(" ")} must surface PHASE_SNAPSHOT_INVALID`).toContain(
+        "PHASE_SNAPSHOT_INVALID",
+      );
+    }
   });
 
   it("A5: a project with NO archive dir is unaffected", async () => {
