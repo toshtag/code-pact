@@ -125,9 +125,16 @@ so "events exist" is never by itself a license to delete the YAML.
 > the phase-snapshot reader arc is now complete), **5** (PR #413 —
 > retired-decision resolution; the DECISION-state records' first reader: a retired
 > decision releases an active gate / softens a lint ONLY from a valid accepted
-> record, live-wins true-ENOENT-only, fail-closed). ⬜ not started = 6, 7.
+> record, live-wins true-ENOENT-only, fail-closed), **6** (PR #414 — scoped
+> tolerance VERIFICATION: NO new runtime reader; locks the A2+A3 *composite*
+> hand-delete state — a completed phase YAML AND `rm -rf design/decisions` at once —
+> across the five surfaces, pinning the surface responsibility boundary: `verify`'s
+> `decision` check is the gate-enforcement point, `plan lint --strict` the lint one,
+> `task prepare` is advisory-`decision_loop` not enforcement, and `doctor`/`validate`
+> never inspect decision gates by design). ⬜ not started = 7.
 > Nothing destructive has shipped yet
-> (4a/4b/5 write/delete nothing — they only READ the snapshots/records). **The locked reader
+> (4a/4b/5/6 write/delete nothing — they only READ the snapshots/records, and 6 only
+> verifies). **The locked reader
 > invariants that bind 4b/5/6/7** (stated in full in the 4a entry below and enforced
 > by `tests/unit/core/archive/`, `tests/unit/core/plan/state-archive.test.ts`,
 > `tests/unit/core/plan/resolve-task-archive.test.ts`, and
@@ -280,12 +287,53 @@ so "events exist" is never by itself a license to delete the YAML.
      covered transitively (shared resolver). The **doc-link checker** needs no
      step-5 change (reader-only, deletes no `.md` → no dangling link; full
      tombstone-awareness is step 7 half (ii)).
-6. **⬜ Tolerance, scoped** — `validate` / `doctor` / `plan lint` / `task context` /
-   `task prepare`: *missing archived historical docs tolerant; missing active
-   control docs fail-closed.*
+6. **✅ Tolerance, scoped — done (PR #414).** `validate` / `doctor` / `plan lint` /
+   `task context` / `task prepare`: *missing archived historical docs tolerant;
+   missing active control docs fail-closed.* This step added **NO new runtime reader
+   behavior** — the tolerance is already landed by 4a/4b (phase snapshots) and 5
+   (decision-state records). It is a **verification + docs** step: a
+   `tests/integration/archive-composite-tolerance.test.ts` fixture that hand-`rm`s a
+   completed phase YAML **and** the whole `design/decisions/` directory *at once*, then
+   asserts all five surfaces behave correctly in that **A2+A3 composite** state
+   (single-axis A2 was already pinned by `archive-phase-tolerance.test.ts`; single-axis
+   A3 by `retired-decision-resolution.test.ts` — neither proved they don't regress each
+   other under a simultaneous delete).
+   **Surface responsibility boundary (locked here, asserted by the test names):**
+   - **`verify`'s `decision` check** is the gate **enforcement** point — a retired
+     decision releases the active gate iff its record is **accepted**; non-accepted /
+     missing / filename-scan-only → **closed**. (verify may still exit 1 for unrelated
+     checks; the `decision` check verdict is read, not the exit code.)
+   - **`plan lint --strict`** is the decision_ref lint enforcement point (step 5).
+   - **`task prepare`** is **advisory**: a `requires_decision` task always reports
+     `lifecycleMode: decision_loop` regardless of ADR acceptance, so its envelope stays
+     `ok:true` whether or not the gate is released. It is **not** a gate-enforcement
+     surface and is **not** asserted as one.
+   - **`doctor` / `validate`** never inspect decision gates; a deleted
+     `design/decisions/` is **outside their remit**, so they stay green on A3. This is
+     the intended split — **not** a gap to "fix" by teaching doctor about gates.
+   **Audit false-positive recorded:** a static audit flagged `detectTaskReadsNoMatch`
+   as a plan-lint gap (a done task's `reads` glob firing after its phase YAML is
+   deleted). It cannot fire: `loadPlanState` tolerates a deleted completed-phase YAML
+   via `resolveDeletedPhaseRef → tolerated → continue`, so that phase never enters
+   `PlanState.phases`, and the detector only walks live `phases`. This is **directly
+   pinned** by `archive-composite-tolerance.test.ts`: the archived `P1-T1` carries a
+   stale `reads` glob that fires `TASK_READS_NO_MATCH` while P1 is live, and the
+   composite (post-delete) positive test asserts the warning is **gone** — so the test
+   proves the non-fire is the tolerated-phase exclusion, not an absent `reads`. A live
+   phase whose *own* done task's `reads` source files were deleted is a **separate**
+   read-path maintenance concern (`plan sync-paths`), out of this directive's
+   *missing-archived-docs* scope. plan-lint was therefore **not** made
+   "archive-aware" for reads/writes here, by design.
 7. **⬜ `phase archive` + hand-delete** — the destructive verb (dry-run + `--write` +
    stale-plan guard + write lock, least-harmful ordering) **and** the A2 / A3 / A7
    integration fixture that `rm`s the files manually.
+   **Relation to step 6:** step 6 already pins the A2+A3 composite *runtime* behavior
+   (the five control-plane surfaces stay tolerant / fail-closed under a simultaneous
+   hand-delete) in `archive-composite-tolerance.test.ts`. What step 7 ADDS is **A7** —
+   the same hand-delete must also keep **`check:docs` (doc-link integrity)** green, via
+   the two doc-link halves below. Step 6's fixture deliberately uses a project with **no
+   inbound doc-links** into the deleted decisions, so it does not yet exercise A7; step
+   7 is where the dangling-link path is closed and tested.
    **Doc-link strategy (decided, two halves):**
    (i) the **destructive retire command** — `decision retire --write` /
    `phase archive --write` (NOT step 3's pure writers — the `decision prune`
