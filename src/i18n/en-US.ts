@@ -98,6 +98,16 @@ export const messages = {
       writeRefused: (id: string): string =>
         `Refused to reconcile phase "${id}": every eligible write was refused for safety reasons. Inspect data.skipped_writes for the per-task reason.`,
     },
+    archive: {
+      wouldArchive: (id: string): string =>
+        `Dry run: would archive phase "${id}" (write its snapshot, then delete its YAML). Run with --write to apply.`,
+      archived: (id: string): string =>
+        `Archived phase "${id}": snapshot written, design/phases YAML deleted.`,
+      wouldAlreadyArchived: (id: string): string =>
+        `Phase "${id}" is already archived (its YAML is gone and a valid snapshot resolves it). Nothing to do.`,
+      alreadyArchived: (id: string): string =>
+        `Phase "${id}" is already archived. Nothing to do.`,
+    },
     runbook: {
       header: (phaseId: string): string => `Runbook for phase ${phaseId}:`,
       phaseSummary: (summary: {
