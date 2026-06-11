@@ -33,6 +33,7 @@ import type { PlanState } from "./state.ts";
 import { PhaseSnapshotInvalidError } from "./state.ts";
 import {
   archivedEntriesFromSnapshot,
+  discoverUnreferencedSnapshots,
   mergeArchivedTaskIndex,
   resolveMissingPhaseRef,
   type ArchivedTaskEntry,
@@ -123,6 +124,18 @@ export async function resolveTaskInRoadmap(
       hits.push({ phaseId: phase.id, phasePath: ref.path });
     }
   }
+
+  // design-docs-ephemeral (step 4b): also include UNREFERENCED archived snapshots in
+  // the collision check, so `task context`/`task prepare` cannot bypass a graph
+  // ambiguity an unreferenced snapshot would create. Discovery's soft `invalid[]`
+  // (corrupt/unreadable) is ignored here (no throw — same as the strict loader; the
+  // advisory surface is `plan lint`). The target is always live; discovery is
+  // consulted ONLY for the collision below.
+  const discovered = await discoverUnreferencedSnapshots(
+    cwd,
+    new Set(roadmap.phases.map((r) => r.id)),
+  );
+  archivedCandidates.push(...discovered.entries);
 
   // Collision check (same as the loaders): a drifted snapshot whose archived id
   // collides with a live id makes `depends_on` ambiguous — fail closed, even when

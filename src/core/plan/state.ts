@@ -18,9 +18,11 @@ import {
 import type { FileIssue } from "./shared.ts";
 import {
   archivedEntriesFromSnapshot,
+  discoverUnreferencedSnapshots,
   mergeArchivedTaskIndex,
   resolveMissingPhaseRef,
   type ArchivedTaskEntry,
+  type UnreferencedSnapshotInvalid,
 } from "../archive/load-phase-snapshot.ts";
 
 export type PhaseEntry = {
@@ -148,6 +150,38 @@ async function resolveDeletedPhaseRef(
   return { tolerated: false };
 }
 
+/**
+ * design-docs-ephemeral (step 4b): a soft discovery failure (an unreadable archive
+ * dir, or a corrupt / unsafe-stem unreferenced snapshot file) → an ADVISORY
+ * `PHASE_SNAPSHOT_INVALID` FileIssue at `warning` severity with `affects_exit:false`,
+ * so `plan lint --strict` never fails on the advisory itself (A5). This surface (the
+ * lenient loader → `plan lint`) is the ONLY place the `PHASE_SNAPSHOT_INVALID`
+ * advisory appears; doctor/validate do not emit it.
+ *
+ * SCOPE of "silent": only the `PHASE_SNAPSHOT_INVALID` advisory is suppressed
+ * outside `plan lint`. INDEPENDENT diagnostics still fire on the CONSEQUENCES of a
+ * soft-invalid snapshot supplying no ids — a live `depends_on` to a would-be id →
+ * `TASK_DEPENDS_ON_UNRESOLVED`; a leftover progress event for one →
+ * `ORPHAN_PROGRESS_EVENT`. Those are NOT silenced (silencing them would hide real
+ * dependency / progress-ledger drift), so `validate --strict` is green only when no
+ * such independent issue remains.
+ */
+function unreferencedInvalidToFileIssue(inv: UnreferencedSnapshotInvalid): FileIssue {
+  return {
+    code: "PHASE_SNAPSHOT_INVALID",
+    severity: "warning",
+    affects_exit: false,
+    message:
+      inv.scope === "directory"
+        ? `archive snapshots could not be discovered (advisory): ${inv.reason}`
+        : `archive snapshot "${inv.fileStem}.json" is invalid and was skipped (advisory): ${inv.reason}`,
+    file:
+      inv.scope === "directory"
+        ? ".code-pact/state/archive/phases"
+        : `.code-pact/state/archive/phases/${inv.fileStem}.json`,
+  };
+}
+
 function buildTaskIndex(
   phases: PhaseEntry[],
 ): Map<string, { phaseId: string; task: TaskT }> {
@@ -196,6 +230,19 @@ export async function loadPlanState(cwd: string): Promise<PlanState> {
       throw err; // no snapshot — fail closed exactly as before
     }
   }
+
+  // design-docs-ephemeral (step 4b): also discover UNREFERENCED archived phases
+  // (roadmap ref gone) so a cross-phase depends_on into one still resolves. Strict
+  // loader IGNORES discovery's soft `invalid[]` (no throw — an unreadable dir / a
+  // corrupt unreferenced file supplies no ids; the plan-lint advisory surface is the
+  // only place it's reported). A live dep on a missing id still fails via
+  // TASK_DEPENDS_ON_UNRESOLVED. Only a VALID snapshot's collision is a hard error,
+  // caught by the merge below.
+  const discovered = await discoverUnreferencedSnapshots(
+    cwd,
+    new Set(roadmap.phases.map((r) => r.id)),
+  );
+  archivedCandidates.push(...discovered.entries);
 
   const taskIndex = buildTaskIndex(phases);
   // Collision-checked merge: an archived id that collides with a live id or
@@ -382,6 +429,21 @@ export async function collectPlanArtifacts(
   }
   if (hasLegacy || eventFiles.length > 0) {
     progress = { path: progPath, events: mergeProgressStreams(legacyEvents, eventFiles) };
+  }
+
+  // design-docs-ephemeral (step 4b): discover UNREFERENCED archived phases. This is
+  // the ONLY surface that reports discovery's soft `invalid[]` — as a WARNING with
+  // `affects_exit: false`, so the advisory itself never fails `plan lint --strict`.
+  // (doctor/validate do not emit the advisory.) Independent diagnostics still fire on
+  // the consequences of a soft-invalid snapshot supplying no ids: TASK_DEPENDS_ON_UNRESOLVED
+  // for a live dep, ORPHAN_PROGRESS_EVENT for a leftover event — those are NOT silenced.
+  const discovered = await discoverUnreferencedSnapshots(
+    cwd,
+    new Set(roadmap.phases.map((r) => r.id)),
+  );
+  archivedCandidates.push(...discovered.entries);
+  for (const inv of discovered.invalid) {
+    fileIssues.push(unreferencedInvalidToFileIssue(inv));
   }
 
   const taskIndex = buildTaskIndex(phases);

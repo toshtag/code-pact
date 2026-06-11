@@ -1,7 +1,9 @@
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
+import { basename } from "node:path";
 import { PhaseSnapshot } from "../schemas/phase-snapshot.ts";
 import type { TerminalEvidence } from "../schemas/phase-snapshot.ts";
-import { phaseSnapshotPath, sha256Hex } from "./paths.ts";
+import { isSafePlanId } from "../schemas/plan-id.ts";
+import { archivePhasesDir, phaseSnapshotPath, sha256Hex } from "./paths.ts";
 
 // ---------------------------------------------------------------------------
 // The FIRST reader of the `.code-pact/state/archive/phases/<id>.json` snapshots
@@ -258,4 +260,154 @@ export function mergeArchivedTaskIndex(
   }
 
   return { index, collisions: [...collidingIds.values()] };
+}
+
+// ---------------------------------------------------------------------------
+// Step 4b — UNREFERENCED archived-phase discovery.
+//
+// 4a resolves a hand-deleted COMPLETED phase whose roadmap ref STAYS, by
+// ref.id → <id>.json (pinpoint). 4b covers the phase whose roadmap ref is GONE:
+// there is no ref to name it, so the reader must ENUMERATE
+// `.code-pact/state/archive/phases/*.json`. READER-ONLY (the destructive
+// `phase archive --write` that removes a ref is step 7) — 4b adds the discovery
+// so a cross-phase `depends_on` into an unreferenced archived phase still
+// resolves (existence-only), under the SAME invariants as 4a.
+//
+// FAIL-SOFT BY CONSTRUCTION (the A5 contract): discovery NEVER throws. A
+// discovery failure — whether the whole directory is unreadable (ENOTDIR /
+// EACCES / EPERM) or one file is corrupt / has an unsafe stem — supplies no task
+// ids and introduces no graph ambiguity, so it is reported in `invalid[]`, never
+// thrown. The caller routes it per Q4: a `plan lint` `affects_exit:false`
+// advisory; doctor/validate skip it silently (a doctor issue would fail
+// `validate --strict` and break A5); strict loaders / resolveTaskInRoadmap skip
+// without throwing. A live `depends_on` on an id a failed discovery would have
+// supplied still fails — but via the existing, live-scoped
+// `TASK_DEPENDS_ON_UNRESOLVED`, never a hard PHASE_SNAPSHOT_INVALID.
+//
+// The one NON-soft case stays the COLLISION of a VALID snapshot's task ids (with
+// a live id / another snapshot / itself): that is graph-ambiguous state, a hard
+// PHASE_SNAPSHOT_INVALID everywhere even though the phase is unreferenced — see
+// mergeArchivedTaskIndex (unchanged; the caller runs it over 4a ∪ 4b ∪ live).
+// ---------------------------------------------------------------------------
+
+/** Resolution of a snapshot found by enumeration (no roadmap ref to match). */
+export type UnreferencedSnapshotResolution =
+  | { kind: "tolerated"; snapshot: PhaseSnapshot }
+  | { kind: "fail_invalid"; reason: string };
+
+/**
+ * Decide whether a snapshot found by ENUMERATION (no roadmap ref) may be trusted
+ * as an archived terminal phase. With no ref there is no `ref.id`/`ref.path` to
+ * compare against; identity rests on the snapshot's INTERNAL self-consistency
+ * plus the writer's filename invariant. The 4a checklist with the two
+ * ref-comparison lines replaced by the filename↔body check:
+ *   1. schema-valid (the caller passes a `loadPhaseSnapshot` result);
+ *   2. `phase_id === fileStem` — the writer names the file `<phase_id>.json`;
+ *   3. `path_sha256 === sha256Hex(original_path)` — internal self-consistency;
+ *   4. `phase_status` terminal (done | cancelled).
+ * Any failure → `fail_invalid` (a SOFT outcome for an unreferenced file — the
+ * caller does NOT hard-error on it; see the module header).
+ */
+export function resolveUnreferencedSnapshot(
+  fileStem: string,
+  res: LoadPhaseSnapshotResult,
+): UnreferencedSnapshotResolution {
+  if (res.kind === "absent") {
+    return { kind: "fail_invalid", reason: "archive snapshot file vanished during discovery" };
+  }
+  if (res.kind === "invalid") {
+    return { kind: "fail_invalid", reason: "archive snapshot is corrupt or unreadable" };
+  }
+  const s = res.snapshot;
+  if (s.phase_id !== fileStem) {
+    return {
+      kind: "fail_invalid",
+      reason: `archive snapshot phase_id "${s.phase_id}" does not match its filename "${fileStem}.json"`,
+    };
+  }
+  if (s.path_sha256 !== sha256Hex(s.original_path)) {
+    return {
+      kind: "fail_invalid",
+      reason: `archive snapshot path_sha256 does not cover its own original_path "${s.original_path}"`,
+    };
+  }
+  if (s.phase_status !== "done" && s.phase_status !== "cancelled") {
+    return {
+      kind: "fail_invalid",
+      reason: `archive snapshot phase_status "${s.phase_status}" is not terminal`,
+    };
+  }
+  return { kind: "tolerated", snapshot: s };
+}
+
+/** A soft discovery failure — directory-level (readdir failed) or file-level. */
+export type UnreferencedSnapshotInvalid =
+  | { scope: "directory"; reason: string }
+  | { scope: "file"; fileStem: string; reason: string };
+
+export type DiscoverUnreferencedResult = {
+  /** Existence-only candidates from valid unreferenced snapshots (NOT yet merged). */
+  entries: ArchivedTaskEntry[];
+  /** Soft failures (dir- or file-level) for the caller to surface per Q4. */
+  invalid: UnreferencedSnapshotInvalid[];
+};
+
+/**
+ * Enumerate `.code-pact/state/archive/phases/*.json`, EXCLUDE any whose phase_id
+ * is a LIVE roadmap phase id (those are 4a's referenced case / live-wins — loading
+ * them here would double-count and self-collide), and validate the rest via
+ * {@link resolveUnreferencedSnapshot}. Returns existence-only `entries` plus soft
+ * `invalid[]`. NEVER throws (see the module header): an unreadable directory, an
+ * unsafe filename stem, and a corrupt file are all soft `invalid[]` outcomes.
+ *
+ * `liveRoadmapPhaseIds` must be ALL `roadmap.phases[].id` — call ONLY after the
+ * roadmap parsed (never in a no-roadmap fallback; without the roadmap the
+ * exclusion set is unknown and discovery would mis-handle a still-live phase).
+ */
+export async function discoverUnreferencedSnapshots(
+  cwd: string,
+  liveRoadmapPhaseIds: ReadonlySet<string>,
+): Promise<DiscoverUnreferencedResult> {
+  const entries: ArchivedTaskEntry[] = [];
+  const invalid: UnreferencedSnapshotInvalid[] = [];
+
+  let names: string[];
+  try {
+    names = await readdir(archivePhasesDir(cwd));
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    // No archive dir is the normal untouched-project state — not even an advisory.
+    if (code === "ENOENT") return { entries, invalid };
+    // ENOTDIR / EACCES / EPERM / anything else: a directory we can't read supplies
+    // no ids → soft directory-level invalid, NEVER thrown (the A5 contract).
+    invalid.push({
+      scope: "directory",
+      reason: `archive phases directory could not be read (${code ?? "unknown error"})`,
+    });
+    return { entries, invalid };
+  }
+
+  // Deterministic order so advisory order / collision reporting / index build are
+  // environment-independent (control-plane reader).
+  const jsonFiles = names.filter((n) => n.endsWith(".json")).sort();
+
+  for (const name of jsonFiles) {
+    const fileStem = basename(name, ".json");
+    // 4a/4b boundary: a snapshot whose id IS a live roadmap phase is 4a's case.
+    if (liveRoadmapPhaseIds.has(fileStem)) continue;
+    // Unsafe stem: never let phaseSnapshotPath/assertSafePlanId throw out of here.
+    if (!isSafePlanId(fileStem)) {
+      invalid.push({ scope: "file", fileStem, reason: "unsafe archive snapshot filename" });
+      continue;
+    }
+    const res = await loadPhaseSnapshot(cwd, fileStem);
+    const resolved = resolveUnreferencedSnapshot(fileStem, res);
+    if (resolved.kind === "tolerated") {
+      entries.push(...archivedEntriesFromSnapshot(resolved.snapshot));
+    } else {
+      invalid.push({ scope: "file", fileStem, reason: resolved.reason });
+    }
+  }
+
+  return { entries, invalid };
 }

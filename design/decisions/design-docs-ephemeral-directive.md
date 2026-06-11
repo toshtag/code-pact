@@ -120,10 +120,12 @@ so "events exist" is never by itself a license to delete the YAML.
 > (#406), 2c (#407), 2b (#409), **4a** (phase-side archived resolution — the FIRST
 > reader of the step-3 snapshots; `rm design/phases/<completed>.yaml` with the
 > roadmap ref kept stays green via a validated snapshot, existence-only archived
-> task index, all collision-checked + fail-closed). ⬜ not started = **4b**
-> (roadmap-ref-REMOVED + unreferenced-archived-phase cross-phase `depends_on`),
-> 5 (retired-decision resolution), 6, 7. Nothing destructive has shipped yet
-> (4a writes/deletes nothing — it only READS the snapshots). **The locked reader
+> task index, all collision-checked + fail-closed), **4b** (PR #412 —
+> unreferenced-archived-phase cross-phase `depends_on` via fail-soft enumeration;
+> the phase-snapshot reader arc is now complete). ⬜ not started =
+> 5 (retired-decision resolution — the DECISION-state records' first reader), 6, 7.
+> Nothing destructive has shipped yet
+> (4a/4b write/delete nothing — they only READ the snapshots). **The locked reader
 > invariants that bind 4b/5/6/7** (stated in full in the 4a entry below and enforced
 > by `tests/unit/core/archive/`, `tests/unit/core/plan/state-archive.test.ts`,
 > `tests/unit/core/plan/resolve-task-archive.test.ts`, and
@@ -181,8 +183,8 @@ so "events exist" is never by itself a license to delete the YAML.
    record carries identity / original path / ADR status / may-satisfy-active-gate
    / source hash + provenance; a plain tombstone is the degenerate case.
 
-   _Below: 4a done; 4b/5–7 are where readers keep consuming the records and,
-   finally, where deletion happens._
+   _Below: 4a/4b done; 5–7 are where the remaining decision-reader, tolerance, and
+   destructive archive flows ship._
 4a. **Resolve completed-phase missing (roadmap-ref-STAYS) — ✅ done (PR #410).**
    The FIRST reader of the step-3 snapshots. `rm design/phases/<completed>.yaml`
    with the **roadmap ref kept** + a valid snapshot keeps `validate` / `plan lint`
@@ -208,11 +210,35 @@ so "events exist" is never by itself a license to delete the YAML.
      path (strict + lenient loaders, doctor → `validate`, AND `resolveTaskInRoadmap`
      so `task context`/`task prepare` cannot bypass it). Live file present (even
      present-but-inaccessible) → the snapshot is never consulted (live-wins).
-4b. **⬜ Resolve completed-phase missing (roadmap-ref-REMOVED) + unreferenced-phase
-   deps** — NOT started. The destructive `phase archive --write` removes the roadmap
-   ref (and rewrites inbound doc-links, step 7); 4b resolves a cross-phase
-   `depends_on` into an archived phase that is **no longer in the roadmap** (4a only
-   covers a *referenced* missing phase). Same locked reader invariants as 4a.
+4b. **Resolve completed-phase missing (roadmap-ref-REMOVED) + unreferenced-phase
+   deps — ✅ done (PR #412).** A cross-phase `depends_on` into an archived phase
+   **no longer in the roadmap** resolves existence-only, via enumeration of
+   `.code-pact/state/archive/phases/*.json` (`discoverUnreferencedSnapshots`).
+   READER-ONLY (the destructive `phase archive --write` that removes the ref is
+   step 7); tested by hand-constructing the post-archive state. Same locked reader
+   invariants as 4a, plus two 4b-specific contracts:
+   - **Discovery is fully FAIL-SOFT (A5):** it NEVER throws. ENOENT (no archive
+     dir) → empty, no advisory. ENOTDIR/EACCES/EPERM (unreadable dir) → a
+     directory-scope soft invalid; a corrupt / unsafe-named unreferenced file → a
+     file-scope soft invalid. The soft invalid itself surfaces ONLY as a `plan lint`
+     advisory (`affects_exit:false`, never fails `--strict`); **doctor/validate do
+     not emit `PHASE_SNAPSHOT_INVALID` for it** (any doctor issue fails
+     `validate --strict`, which would break A5 for a project that merely has a bad
+     unreferenced snapshot); strict loaders skip without throwing.
+     **But "silent" is scoped to the `PHASE_SNAPSHOT_INVALID` advisory only — it
+     does NOT suppress INDEPENDENT diagnostics.** A soft-invalid snapshot supplies
+     no archived task ids, so the existing detectors still fire on the consequences:
+     a live `depends_on` to an id only that snapshot would have supplied →
+     `TASK_DEPENDS_ON_UNRESOLVED` (`plan lint` only — `plan analyze` does not run the
+     depends-on detector); a leftover progress event for such an id →
+     `ORPHAN_PROGRESS_EVENT` (`doctor`/`plan analyze`). So `validate --strict` is green
+     only when NO independent strict-relevant issue remains. Suppressing those would hide real progress-ledger / dependency drift
+     and is explicitly NOT done.
+   - **Collision stays HARD (the A5 exception):** a *valid* unreferenced snapshot
+     whose task ids collide with the live+archived graph is graph-ambiguous state
+     → hard `PHASE_SNAPSHOT_INVALID` everywhere, even though unreferenced and even
+     if no current `depends_on` names it. The soft rule is for a file's
+     self-validation failure only, never for a graph-wide collision.
 5. **⬜ Resolve retired-decision missing** via the `.code-pact/state` decision-state
    record (`PRUNED.md` read-only backcompat). This layer must cover, explicitly:
    **`resolveDecisionGate`** (the live gate — resolves only from a record that
