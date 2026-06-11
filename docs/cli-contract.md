@@ -781,7 +781,7 @@ Read-only static integrity check over `design/roadmap.yaml` and every referenced
 - `INVALID_YAML` (error) — a file failed to parse
 - `SCHEMA_ERROR` (error) — a file failed Zod validation
 - `MISSING_PHASE_FILE` (error) — roadmap references a phase file that does not exist on disk (and no valid archive snapshot covers it)
-- `PHASE_SNAPSHOT_INVALID` (error) — roadmap references a missing phase file whose archive snapshot exists but cannot release it (corrupt / identity-mismatched / non-terminal / task-id-colliding); fail-closed. Dual-surface: an issue here, and a top-level `error.code` on the `task *` commands
+- `PHASE_SNAPSHOT_INVALID` (error) — roadmap references a missing phase file whose archive snapshot exists but cannot release it (corrupt / identity-mismatched / non-terminal / task-id-colliding); fail-closed. Dual-surface: an issue here, and a top-level `error.code` — see [Public codes](#public-codes-top-level-error-envelopes) for the full list of top-level emitters
 - `DUPLICATE_TASK_ID` (error) — the same task id appears in more than one phase
 - `DUPLICATE_PHASE_ID` (error) — the same phase id appears twice
 - `PHASE_ID_MISMATCH` (error) — `phase.id` inside the YAML does not match the id the roadmap uses to reference it
