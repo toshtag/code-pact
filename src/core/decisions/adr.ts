@@ -2,6 +2,7 @@ import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { parseFrontMatter } from "../pack/front-matter.ts";
 import { resolveWithinProject } from "../path-safety.ts";
+import { resolveRetiredDecisionGate } from "./decision-gate-archive.ts";
 
 /**
  * True when `error` means `design/decisions/` simply is not there
@@ -359,6 +360,12 @@ async function resolveWith(
   decisionRefs: string[] | undefined,
   dir: { present: boolean; entries: string[] },
   read: RelFileReader,
+  // design-docs-ephemeral (step 5): optional gate-aware record fallback. On a
+  // MISSING explicit decision_ref, this decides whether a retired decision's
+  // `.code-pact/state` record releases it (it self-checks true-ENOENT live-wins).
+  // ONLY the gate callers pass it; pack loaders pass nothing, so the live decision
+  // read primitives stay live-only.
+  releaseMissingRef?: (rawRef: string) => Promise<boolean>,
 ): Promise<DecisionResolution> {
   if (decisionRefs && decisionRefs.length > 0) {
     // Explicit references are a strong contract: ALL must be accepted.
@@ -372,7 +379,14 @@ async function resolveWith(
         continue;
       }
       if (r.kind === "missing") {
-        considered.push({ path, status: null, accepted: false, acceptance: "missing" });
+        // A retired decision whose live `.md` is gone may still resolve from an
+        // accepted decision-state record (step 5). The hook self-checks true-ENOENT,
+        // so a present-but-inaccessible file never reaches here as a record release.
+        if (releaseMissingRef && (await releaseMissingRef(ref))) {
+          considered.push({ path, status: null, accepted: true, acceptance: "accepted" });
+        } else {
+          considered.push({ path, status: null, accepted: false, acceptance: "missing" });
+        }
         continue;
       }
       const { acceptance, status } = classifyAdr(r.content);
@@ -451,7 +465,9 @@ export async function resolveDecisionGate(
   decisionRefs?: string[],
 ): Promise<DecisionResolution> {
   const dir = await readLiveDecisionDir(cwd);
-  return resolveWith(taskId, decisionRefs, dir, diskReader(cwd));
+  return resolveWith(taskId, decisionRefs, dir, diskReader(cwd), (ref) =>
+    resolveRetiredDecisionGate(cwd, ref).then((x) => x.kind === "released"),
+  );
 }
 
 /**
@@ -474,7 +490,9 @@ export async function makeDecisionResolver(
   };
   return {
     resolve: (taskId, decisionRefs) =>
-      resolveWith(taskId, decisionRefs, dir, cachedRead),
+      resolveWith(taskId, decisionRefs, dir, cachedRead, (ref) =>
+        resolveRetiredDecisionGate(cwd, ref).then((x) => x.kind === "released"),
+      ),
   };
 }
 
