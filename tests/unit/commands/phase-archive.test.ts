@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -156,9 +156,12 @@ describe("runPhaseArchive — stale guard between snapshot write and delete", ()
     await scaffold();
     const original = await readFile(P1_PATH(), "utf8");
     writeHook.afterWrite = async () => {
-      // Replace the YAML with a byte-identical file at a NEW inode.
-      await rm(P1_PATH());
-      await writeFile(P1_PATH(), original, "utf8");
+      // Replace the YAML with a byte-identical file at a DIFFERENT inode. Use a
+      // separate file + atomic rename (NOT rm+rewrite, which some filesystems —
+      // notably the CI's — satisfy by reusing the same inode number).
+      const swap = join(cwd, "design", "phases", "P1-x.swap.yaml");
+      await writeFile(swap, original, "utf8");
+      await rename(swap, P1_PATH());
     };
     const res = await runPhaseArchive({ cwd, phaseId: "P1", write: true, now: NOW });
     expect(res.kind).toBe("stale");
