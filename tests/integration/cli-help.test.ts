@@ -78,6 +78,7 @@ describe("cluster --help → usage, exit 0", () => {
     [["phase", "add", "--help"], /Usage: code-pact phase add/, /--objective/],
     [["phase", "new", "--help"], /Usage: code-pact phase new/, /[Ii]nteractive/],
     [["phase", "reconcile", "--help"], /Usage: code-pact phase reconcile/, /--write/],
+    [["phase", "archive", "--help"], /Usage: code-pact phase archive/, /--write/],
     [["adapter", "install", "--help"], /Usage: code-pact adapter install/, /--force/],
     [["adapter", "upgrade", "--help"], /Usage: code-pact adapter upgrade/, /--accept-modified/],
     // `plan import` is an alias for `phase import`; its --help routes to the
@@ -101,6 +102,20 @@ describe("cluster --help → usage, exit 0", () => {
     // --force skips colliding phases; it must not claim to overwrite them.
     expect(res.stdout).toMatch(/--force\s[\s\S]*Skip phases whose ids already exist/);
     expect(res.stdout).not.toMatch(/Overwrite phases whose ids already exist/);
+  });
+
+  it("`phase --help` lists the archive subcommand", () => {
+    const res = runCli(["phase", "--help"]);
+    expect(res.status).toBe(0);
+    expect(res.stdout).toMatch(/\barchive\b/);
+  });
+
+  it("`phase archive --help` documents --write, --attest, and the dry-run default", () => {
+    const res = runCli(["phase", "archive", "--help"]);
+    expect(res.status).toBe(0);
+    expect(res.stdout).toMatch(/--write/);
+    expect(res.stdout).toMatch(/--attest <task-id>=<reason>/);
+    expect(res.stdout).toMatch(/[Dd]ry-run is the default/);
   });
 
   it("an actual unknown subcommand is still CONFIG_ERROR exit 2", () => {

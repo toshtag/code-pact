@@ -104,6 +104,16 @@ export const messages = {
       writeRefused: (id: string): string =>
         `フェーズ "${id}" の reconcile を拒否しました: 適用候補すべてが安全上の理由で拒否されました。data.skipped_writes を確認してください。`,
     },
+    archive: {
+      wouldArchive: (id: string): string =>
+        `Dry run: フェーズ "${id}" を archive する想定です(snapshot を書き、YAML を削除)。--write で適用してください。`,
+      archived: (id: string): string =>
+        `フェーズ "${id}" を archive しました: snapshot を書き、design/phases の YAML を削除しました。`,
+      wouldAlreadyArchived: (id: string): string =>
+        `フェーズ "${id}" は既に archive 済みです(YAML が無く、有効な snapshot が解決します)。何もすることはありません。`,
+      alreadyArchived: (id: string): string =>
+        `フェーズ "${id}" は既に archive 済みです。何もすることはありません。`,
+    },
     runbook: {
       header: (phaseId: string): string => `フェーズ ${phaseId} の runbook:`,
       phaseSummary: (summary: {

@@ -21,6 +21,7 @@ import {
 } from "../../commands/phase.ts";
 import { runPhaseImport } from "../../commands/phase-import.ts";
 import { runPhaseReconcile } from "../../commands/phase-reconcile.ts";
+import { runPhaseArchive } from "../../commands/phase-archive.ts";
 import {
   runPhaseRunbook,
   runPhaseRunbookAcrossPhases,
@@ -312,6 +313,11 @@ export async function cmdPhase(argv: string[], locale: Locale, globalJson: boole
     return cmdPhaseReconcile(rest, locale, globalJson);
   }
 
+  // ---- phase archive ---- (destructive: snapshot + delete the YAML)
+  if (subcommand === "archive") {
+    return cmdPhaseArchive(rest, locale, globalJson);
+  }
+
   // `next` is a beginner-friendly alias for `runbook` ("what should I do next?").
   if (subcommand === "runbook" || subcommand === "next") {
     return cmdPhaseRunbook(rest, locale, globalJson, `phase ${subcommand}`);
@@ -322,7 +328,7 @@ export async function cmdPhase(argv: string[], locale: Locale, globalJson: boole
     return cmdPhaseImport(rest, locale, globalJson);
   }
 
-  const msg = `phase: unknown subcommand "${subcommand ?? ""}". Use: add | new | ls | show | import | reconcile | runbook (alias: next = runbook)`;
+  const msg = `phase: unknown subcommand "${subcommand ?? ""}". Use: add | new | ls | show | import | reconcile | archive | runbook (alias: next = runbook)`;
   emitError(globalJson, "CONFIG_ERROR", msg);
   return 2;
 }
@@ -472,6 +478,129 @@ async function cmdPhaseReconcile(
       json,
       runImpl,
     );
+  }
+  return runImpl();
+}
+
+// `phase archive <phase-id>` — the first destructive verb (design-docs-ephemeral
+// step 7 PR-B1). Dry-run is lock-free; `--write` writes the phase snapshot then
+// deletes the YAML under the write lock, in least-harmful order with a reader
+// readback verify + stale guard between. Mirrors `cmdPhaseReconcile`'s shape.
+async function cmdPhaseArchive(
+  argv: string[],
+  locale: Locale,
+  globalJson: boolean,
+): Promise<number> {
+  const m = messages[locale];
+  let values: Record<string, unknown>;
+  let positionals: string[];
+  try {
+    ({ values, positionals } = strictParse(
+      "phase archive",
+      argv,
+      {
+        json: { type: "boolean" },
+        write: { type: "boolean" },
+        attest: { type: "string", multiple: true },
+      },
+      { allowPositionals: true },
+    ));
+  } catch (err) {
+    if (!(err instanceof ConfigError)) throw err;
+    const json = globalJson || argv.includes("--json");
+    emitError(json, "CONFIG_ERROR", err.message);
+    return 2;
+  }
+
+  const json = globalJson || values.json === true;
+  const write = values.write === true;
+  const phaseId = positionals[0];
+  if (!phaseId) {
+    emitError(json, "CONFIG_ERROR", "phase archive requires a phase id (e.g. `phase archive P1`).");
+    return 2;
+  }
+
+  // --attest task=reason (repeatable) → { [task]: { reason } }.
+  const attestations: Record<string, { reason: string }> = {};
+  for (const raw of (values.attest as string[] | undefined) ?? []) {
+    const eq = raw.indexOf("=");
+    if (eq <= 0 || eq === raw.length - 1) {
+      emitError(json, "CONFIG_ERROR", `--attest expects "<task-id>=<reason>", got "${raw}".`);
+      return 2;
+    }
+    attestations[raw.slice(0, eq)] = { reason: raw.slice(eq + 1) };
+  }
+
+  const cwd = process.cwd();
+
+  const runImpl = async (): Promise<number> => {
+    try {
+      const result = await runPhaseArchive({
+        cwd,
+        phaseId,
+        write,
+        ...(Object.keys(attestations).length > 0 ? { attestations } : {}),
+        now: new Date(),
+      });
+
+      switch (result.kind) {
+        case "would_archive":
+        case "would_already_archived":
+        case "archived":
+        case "already_archived":
+          if (json) {
+            emitOk(result);
+          } else {
+            const line =
+              result.kind === "would_archive"
+                ? m.phase.archive.wouldArchive(phaseId)
+                : result.kind === "archived"
+                  ? m.phase.archive.archived(phaseId)
+                  : result.kind === "would_already_archived"
+                    ? m.phase.archive.wouldAlreadyArchived(phaseId)
+                    : m.phase.archive.alreadyArchived(phaseId);
+            process.stdout.write(`${line}\n`);
+          }
+          return 0;
+        case "ineligible":
+          emitError(json, "PHASE_ARCHIVE_INELIGIBLE", `phase "${phaseId}" cannot be archived yet`, {
+            data: { phase_id: result.phase_id, yaml_path: result.yaml_path, blocks: result.blocks },
+          });
+          return 2;
+        case "not_archived":
+          emitError(
+            json,
+            "PHASE_ARCHIVE_NOT_ARCHIVED",
+            `phase "${phaseId}" YAML is missing and no valid snapshot resolves it: ${result.reason}`,
+            { data: { phase_id: result.phase_id, yaml_path: result.yaml_path, reason: result.reason } },
+          );
+          return 2;
+        case "stale":
+          emitError(json, "PHASE_ARCHIVE_STALE", `phase "${phaseId}" archive refused: ${result.detail}`, {
+            data: { phase_id: result.phase_id, yaml_path: result.yaml_path, reason: result.reason, detail: result.detail },
+          });
+          return 2;
+      }
+    } catch (err: unknown) {
+      if (!(err instanceof Error)) throw err;
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === "PHASE_NOT_FOUND") {
+        emitError(json, "PHASE_NOT_FOUND", err.message);
+        return 2;
+      }
+      if (code === "AMBIGUOUS_PHASE_ID") {
+        emitError(json, "AMBIGUOUS_PHASE_ID", err.message, {
+          data: { phases: (err as NodeJS.ErrnoException & { phases?: string[] }).phases ?? [] },
+        });
+        return 2;
+      }
+      throw err;
+    }
+  };
+
+  // Only --write mutates; dry-run is lock-free.
+  if (write) {
+    return withWriteLock(cwd, `phase archive ${phaseId} --write`, json, runImpl);
   }
   return runImpl();
 }

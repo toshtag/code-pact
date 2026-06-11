@@ -68,6 +68,10 @@ const KNOWN_CODES: Record<string, "public" | "plan" | "doctor" | "adapter" | "in
   LOCK_HELD: "public",
   MANIFEST_NOT_FOUND: "public",
   PHASE_NOT_FOUND: "public",
+  // design-docs-ephemeral step 7 PR-B1: the `phase archive` destructive verb.
+  PHASE_ARCHIVE_INELIGIBLE: "public",
+  PHASE_ARCHIVE_NOT_ARCHIVED: "public",
+  PHASE_ARCHIVE_STALE: "public",
   PHASE_RECONCILE_WRITE_REFUSED: "public",
   TASK_FINALIZE_NOT_ELIGIBLE: "public",
   TASK_FINALIZE_WRITE_REFUSED: "public",
