@@ -46,7 +46,7 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "harness": "tsx scripts/harness/run.ts",
-    "check:doc-links": "node scripts/check-doc-links.mjs",
+    "check:doc-links": "tsx scripts/check-doc-links.ts",
     "check:doc-invariants": "node scripts/check-doc-invariants.mjs",
     "check:history-noise": "node scripts/check-history-noise.mjs",
     "check:changelog-archive": "node scripts/changelog-archive.mjs --check",
