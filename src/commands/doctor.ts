@@ -204,7 +204,7 @@ async function checkPhases(
       // Present but unreadable (e.g. a non-searchable parent dir) — fail closed.
       // The snapshot must NOT release a live file that is actually on disk.
       issues.push({
-        code: "ORPHAN_PHASE_FILE",
+        code: "MISSING_PHASE_FILE",
         severity: "error",
         message: `roadmap.yaml references "${ref.path}" but it cannot be accessed (present but unreadable — check directory permissions)`,
       });
@@ -213,8 +213,8 @@ async function checkPhases(
     if (presence === "absent") {
       // A hand-deleted COMPLETED phase is tolerated when a valid archive snapshot
       // proves it; a corrupt/mismatched snapshot fails closed loudly; no snapshot
-      // keeps the original ORPHAN_PHASE_FILE error. Live-wins: a present file never
-      // consults the snapshot.
+      // is a MISSING_PHASE_FILE error (the roadmap references a phase whose file is
+      // gone). Live-wins: a present file never consults the snapshot.
       const res = await resolveMissingPhaseRef(cwd, ref);
       if (res.kind === "tolerated") {
         archivedCandidates.push(...archivedEntriesFromSnapshot(res.snapshot));
@@ -229,7 +229,7 @@ async function checkPhases(
         continue;
       }
       issues.push({
-        code: "ORPHAN_PHASE_FILE",
+        code: "MISSING_PHASE_FILE",
         severity: "error",
         message: `roadmap.yaml references "${ref.path}" but the file does not exist`,
       });

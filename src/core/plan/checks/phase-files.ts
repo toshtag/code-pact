@@ -6,11 +6,11 @@ import { phaseFilePresence } from "./fs.ts";
 import { resolveMissingPhaseRef } from "../../archive/load-phase-snapshot.ts";
 
 /**
- * Roadmap references a phase file that does not exist on disk. doctor
- * reports this under the `ORPHAN_PHASE_FILE` code; plan
- * lint uses the clearer `MISSING_PHASE_FILE` code via
- * `detectMissingPhaseFiles`. Both call sites should treat this as an
- * error.
+ * Roadmap references a phase file that does not exist on disk. Both `plan lint`
+ * (here, via `detectMissingPhaseFiles`) and `doctor` / `validate` report this as a
+ * `MISSING_PHASE_FILE` error — the code name matches the condition (referenced but
+ * not present). `ORPHAN_PHASE_FILE` is the inverse (a file present but not
+ * roadmap-referenced) and is a warning.
  *
  * design-docs-ephemeral (step 4a): a COMPLETED phase whose YAML was hand-deleted
  * but whose roadmap ref still points at it is TOLERATED when a valid archive

@@ -246,12 +246,22 @@ describe("hand-deleted completed phase with a valid snapshot keeps cross-phase d
     expect(parsed.data?.blocked_by ?? []).toContain("P1-T2");
   });
 
-  it("WITHOUT a snapshot → validate / plan lint fail closed (MISSING/ORPHAN phase)", async () => {
+  it("WITHOUT a snapshot → validate / plan lint fail closed with MISSING_PHASE_FILE", async () => {
     await scaffold();
     await rm(join(tmpDir, "design", "phases", "P1-x.yaml")); // no snapshot written
 
-    expect(jsonOk(run(["validate", "--json"]))).toBe(false);
-    expect(jsonOk(run(["plan", "lint", "--strict", "--json"]))).toBe(false);
+    // A roadmap-referenced phase whose file is gone is MISSING_PHASE_FILE, NOT
+    // ORPHAN_PHASE_FILE — doctor/validate now agree with plan lint (the code name
+    // matches the condition: "referenced but not present").
+    const validate = run(["validate", "--json"]);
+    expect(jsonOk(validate)).toBe(false);
+    expect(validate.stdout).toContain("MISSING_PHASE_FILE");
+    expect(validate.stdout).not.toContain("ORPHAN_PHASE_FILE");
+
+    const lint = run(["plan", "lint", "--strict", "--json"]);
+    expect(jsonOk(lint)).toBe(false);
+    expect(lint.stdout).toContain("MISSING_PHASE_FILE");
+    expect(lint.stdout).not.toContain("ORPHAN_PHASE_FILE");
   });
 
   it("deleted phase + corrupt snapshot → exactly ONE PHASE_SNAPSHOT_INVALID in plan lint (no duplicate)", async () => {
