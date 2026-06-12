@@ -62,6 +62,10 @@ const KNOWN_CODES: Record<string, "public" | "plan" | "doctor" | "adapter" | "in
   DECISION_PRUNE_NOT_ELIGIBLE: "public",
   DECISION_PRUNE_PLAN_STALE: "public",
   DECISION_PRUNE_WRITE_FAILED: "public",
+  // design-docs-ephemeral step 7 PR-B2: the `decision retire` destructive verb.
+  DECISION_RETIRE_NOT_ELIGIBLE: "public",
+  DECISION_RETIRE_NOT_RETIRED: "public",
+  DECISION_RETIRE_STALE: "public",
   DECISION_REQUIRED: "public",
   DUPLICATE_PHASE_ID: "public",
   INVALID_TASK_TRANSITION: "public",
