@@ -67,20 +67,24 @@ describe("runDoctor — project-a fixture", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Orphan phase file (roadmap references non-existent YAML)
+// Missing phase file (roadmap references a phase whose YAML does not exist)
 // ---------------------------------------------------------------------------
 
-describe("runDoctor — orphan roadmap reference", () => {
-  it("reports ORPHAN_PHASE_FILE error when roadmap refs a missing file", async () => {
+describe("runDoctor — missing roadmap-referenced phase file", () => {
+  it("reports MISSING_PHASE_FILE error when roadmap refs a missing file (matches plan lint)", async () => {
     await writeFile(
       join(dir, "design", "roadmap.yaml"),
       "phases:\n  - id: P99\n    path: design/phases/P99-ghost.yaml\n    weight: 5\n",
       "utf8",
     );
     const result = await runDoctor(dir);
-    const issue = result.issues.find((i) => i.code === "ORPHAN_PHASE_FILE");
+    const issue = result.issues.find((i) => i.code === "MISSING_PHASE_FILE");
     expect(issue).toBeDefined();
     expect(issue?.severity).toBe("error");
+    // The roadmap-referenced-but-missing case is MISSING_PHASE_FILE, NOT
+    // ORPHAN_PHASE_FILE — doctor now agrees with plan lint (the code name matches
+    // the condition: "referenced but not present", not "present but unreferenced").
+    expect(result.issues.find((i) => i.code === "ORPHAN_PHASE_FILE")).toBeUndefined();
   });
 });
 

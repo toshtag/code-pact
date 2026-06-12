@@ -15,6 +15,7 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ### Changed
 
+- **Behavior fix (error-code contract): `doctor` / `validate` now report a roadmap-referenced missing phase file as `MISSING_PHASE_FILE`, matching `plan lint`.** Previously `doctor` (and `validate`, which delegates to it) emitted `ORPHAN_PHASE_FILE` (severity `error`) for a `roadmap.yaml` reference whose phase file is absent or present-but-inaccessible — the opposite of that code's documented meaning ("a phase file present but not referenced"), so a user looking the code up read a contradictory definition. The condition now uses the code whose name matches it (`MISSING_PHASE_FILE`, *referenced but not present*), with **severity unchanged (`error`)**. `ORPHAN_PHASE_FILE` (warning) is unchanged and now means **only** *present but unreferenced*. **Migration:** a consumer that string-matched `doctor` / `validate` JSON for `ORPHAN_PHASE_FILE` to detect a missing referenced phase must switch to `MISSING_PHASE_FILE`; one that keys on `severity` (error vs warning) needs no change. `plan lint` already used `MISSING_PHASE_FILE` and is unaffected.
 - **Docs: trimmed duplicated error-code tables from concept docs.** `concepts/finalization-reconciliation.md` and `concepts/governance.md` now link to `cli-contract.md` § Error codes for exit codes / triggers / envelopes instead of restating them in their own tables (matching the existing `concepts/runbook.md` pattern). Reference detail stays in its single owner; the concept docs keep only the mental model. No code change.
 
 ### Added
