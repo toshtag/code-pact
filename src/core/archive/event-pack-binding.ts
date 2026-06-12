@@ -40,6 +40,7 @@ export type EventPackBindingIssue = {
     | "snapshot_sha256_mismatch"
     | "snapshot_phase_id_mismatch"
     | "task_id_not_in_snapshot"
+    | "pack_missing_phase_event"
     | "evidence_unresolved"
     | "semantic_replay_conflict";
   message: string;
@@ -263,6 +264,25 @@ export function bindPackToSnapshot(
       mk(
         "task_id_not_in_snapshot",
         `packed event for task "${entry.event.task_id}" is not in snapshot "${phaseId}" task set`,
+      );
+    }
+  }
+
+  // COMPLETENESS: a pack stores ALL progress events (every status) for the
+  // phase's task_ids — it is the durable replacement for the loose files, not
+  // just the terminal/evidence ones. So every loose event for a snapshot task
+  // MUST also be present (by content id) in the pack. Otherwise a pack that
+  // dropped a non-terminal event (e.g. `started`) would still bind — replay
+  // resolves `loose ∪ ownPack`, so the loose file silently fills the gap — and
+  // then Layer-2 readback (which deletes the loose files) would lose that event:
+  // provenance loss. Checking against loose makes the writer's completeness
+  // verifiable BEFORE any unlink.
+  const packIds = new Set(loadedPack.entries.map((e) => e.id));
+  for (const loose of looseEventsById.values()) {
+    if (snapshotTaskIds.has(loose.event.task_id) && !packIds.has(loose.id)) {
+      mk(
+        "pack_missing_phase_event",
+        `loose event ${loose.id} for snapshot task "${loose.event.task_id}" is not in pack "${phaseId}" — a pack must capture EVERY progress event for the phase's tasks, not just terminal ones`,
       );
     }
   }

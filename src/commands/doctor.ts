@@ -1136,7 +1136,13 @@ async function readMergedEventsAtRev(
   const packs = await readEventPacksAtRev(cwd, rev, events);
   if (packs === null) return null;
   // Rev-level legacy-conflict exclusion, scoped to archived task_ids at the rev.
-  const archivedTaskIds = await readArchivedTaskIdsAtRev(cwd, rev);
+  const { ids: archivedTaskIds, complete } = await readArchivedTaskIdsAtRev(cwd, rev);
+  // FAIL CLOSED (the rev twin of the workspace gate): a corrupt snapshot at the
+  // rev shrinks the archived-task set, so a committed legacy event for a
+  // now-invisible archived task could slip through. With the set known-incomplete
+  // and legacy events present at the rev, the committed ledger cannot be trusted
+  // for the branch-drift comparison → skip (null), never accept it as valid.
+  if (!complete && legacy.length > 0) return null;
   const durableIds = new Set<string>();
   for (const f of events) durableIds.add(f.id);
   for (const f of packs) durableIds.add(f.id);
@@ -1148,8 +1154,12 @@ async function readMergedEventsAtRev(
 }
 
 // The archived task_ids committed at a revision (snapshot task ids in the git
-// tree at `rev`). A corrupt snapshot at the rev contributes no ids (soft).
-async function readArchivedTaskIdsAtRev(cwd: string, rev: string): Promise<Set<string>> {
+// tree at `rev`), plus `complete`: false when ANY committed snapshot was
+// unreadable, so callers can fail closed rather than trust a shrunk set.
+async function readArchivedTaskIdsAtRev(
+  cwd: string,
+  rev: string,
+): Promise<{ ids: Set<string>; complete: boolean }> {
   const ids = new Set<string>();
   const ls = await runGit(cwd, [
     "ls-tree",
@@ -1158,22 +1168,30 @@ async function readArchivedTaskIdsAtRev(cwd: string, rev: string): Promise<Set<s
     rev,
     ".code-pact/state/archive/phases/",
   ]);
-  if (!ls.ok) return ids;
+  // `ls-tree` non-zero = no archive/phases tree at this rev = zero archived
+  // tasks, which is COMPLETE (an empty-but-known set), the normal never-archived
+  // state. Incompleteness comes only from a snapshot file that EXISTS in the tree
+  // but cannot be read/parsed (below).
+  if (!ls.ok) return { ids, complete: true };
   const paths = ls.stdout
     .split("\n")
     .map((s) => s.trim())
     .filter((p) => p.length > 0 && p.endsWith(".json"));
+  let complete = true;
   for (const p of paths) {
     const show = await runGit(cwd, ["show", `${rev}:${p}`]);
-    if (!show.ok) continue;
+    if (!show.ok) {
+      complete = false; // a snapshot we cannot read shrinks the set
+      continue;
+    }
     try {
       const snapshot = PhaseSnapshot.parse(JSON.parse(show.stdout) as unknown);
       for (const t of snapshot.tasks) ids.add(t.id);
     } catch {
-      // corrupt snapshot at the rev contributes no ids (soft)
+      complete = false; // a corrupt committed snapshot shrinks the set
     }
   }
-  return ids;
+  return { ids, complete };
 }
 
 // A stable identity key for a progress event — the same content id the ledger

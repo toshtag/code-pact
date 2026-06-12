@@ -190,6 +190,36 @@ describe("event pack — Tier 2 binding (snapshot identity)", () => {
   });
 });
 
+describe("event pack — completeness (pack must capture ALL phase events)", () => {
+  it("loose has started+done but pack has done-only → binding fails (pack_missing_phase_event)", async () => {
+    // The pack dropped the non-terminal `started` event. Replay over loose∪pack
+    // would still derive done (loose fills the gap), but the pack is incomplete:
+    // Layer-2 readback deletes the loose files, so the started event would be lost.
+    const events = await scaffoldArchivedP1(); // started + done in loose
+    const doneOnly = events.filter((e) => e.status === "done");
+    const pack = await buildValidEventPack(cwd, "P1", doneOnly);
+    await writeEventPackFile(cwd, "P1", pack);
+    const loaded = (await readEventPackFiles(cwd))[0]!;
+    // looseEventsById carries the FULL loose set (started + done).
+    const looseBy = new Map<string, LoadedEventFile>();
+    const sources = await readAllProgressEventSources(cwd, { mode: "lenient" });
+    for (const f of sources.looseFiles) looseBy.set(f.id, f);
+    const issues = await validateEventPackBinding(cwd, loaded, looseBy, newSnapshotRawCache());
+    expect(issues.some((i) => i.kind === "pack_missing_phase_event")).toBe(true);
+  });
+
+  it("a complete pack (all loose events for the phase) binds clean", async () => {
+    const events = await scaffoldArchivedP1();
+    const pack = await buildValidEventPack(cwd, "P1", events); // started + done
+    await writeEventPackFile(cwd, "P1", pack);
+    const loaded = (await readEventPackFiles(cwd))[0]!;
+    const looseBy = new Map<string, LoadedEventFile>();
+    const sources = await readAllProgressEventSources(cwd, { mode: "lenient" });
+    for (const f of sources.looseFiles) looseBy.set(f.id, f);
+    expect(await validateEventPackBinding(cwd, loaded, looseBy, newSnapshotRawCache())).toEqual([]);
+  });
+});
+
 describe("event pack — B2 same-task injection (semantic replay)", () => {
   it("a later `failed` after the winning `done` → binding fails (semantic_replay_conflict)", async () => {
     const events = await scaffoldArchivedP1();
