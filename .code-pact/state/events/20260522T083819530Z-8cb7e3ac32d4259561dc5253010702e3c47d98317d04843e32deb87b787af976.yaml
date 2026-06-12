@@ -1,0 +1,9 @@
+task_id: P20-T3
+status: done
+at: 2026-05-22T08:38:19.530Z
+actor: agent
+agent: claude-code
+evidence:
+  - commands
+  - decision
+id: 8cb7e3ac32d4259561dc5253010702e3c47d98317d04843e32deb87b787af976

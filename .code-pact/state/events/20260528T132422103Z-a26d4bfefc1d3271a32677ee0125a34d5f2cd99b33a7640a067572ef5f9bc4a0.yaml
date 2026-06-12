@@ -1,0 +1,10 @@
+task_id: P33-T1
+status: done
+at: 2026-05-28T13:24:22.103Z
+actor: agent
+agent: claude-code
+evidence:
+  - commands
+  - decision
+source: loop
+id: a26d4bfefc1d3271a32677ee0125a34d5f2cd99b33a7640a067572ef5f9bc4a0

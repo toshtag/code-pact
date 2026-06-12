@@ -1,0 +1,9 @@
+task_id: P30-T2
+status: done
+at: 2026-05-24T07:16:41.411Z
+actor: agent
+agent: claude-code
+evidence:
+  - commands
+  - decision
+id: 09944d1d8a6539af7c25fa3120e1716a06c2bfebf637cfbb9f2844b9ebc9eb23

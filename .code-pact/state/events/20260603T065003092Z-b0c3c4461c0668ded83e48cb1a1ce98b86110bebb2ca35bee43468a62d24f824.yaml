@@ -1,0 +1,10 @@
+task_id: P50-T0
+status: done
+at: 2026-06-03T06:50:03.092Z
+actor: agent
+agent: claude-code
+evidence:
+  - commands
+  - decision
+source: loop
+id: b0c3c4461c0668ded83e48cb1a1ce98b86110bebb2ca35bee43468a62d24f824

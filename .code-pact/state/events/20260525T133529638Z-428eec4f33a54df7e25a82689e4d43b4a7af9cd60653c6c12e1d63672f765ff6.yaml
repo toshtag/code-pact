@@ -1,0 +1,9 @@
+task_id: P31-T4
+status: done
+at: 2026-05-25T13:35:29.638Z
+actor: agent
+agent: claude-code
+evidence:
+  - commands
+  - decision
+id: 428eec4f33a54df7e25a82689e4d43b4a7af9cd60653c6c12e1d63672f765ff6

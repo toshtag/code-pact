@@ -1,0 +1,9 @@
+task_id: P17-T1
+status: done
+at: 2026-05-21T13:18:31.928Z
+actor: agent
+agent: claude-code
+evidence:
+  - commands
+  - decision
+id: 18fa6ca6952e0b649c8fdb92f552f8e74a5b859650dc7abc122badc1f05b3918
