@@ -106,15 +106,16 @@ export async function collectRetireReferences(
       const viaAcceptanceRef = (task.acceptance_refs ?? []).some(
         (r) => normalizePrunedDecisionPath(r) === decision,
       );
-      // Filename-scan gate: a `requires_decision` task with no explicit ref that the
-      // resolver resolves via a filename match on this decision.
+      // Filename-scan gate: a `requires_decision` task whose gate the resolver
+      // resolves via a filename match on this decision. CRITICAL: this runs whenever
+      // the task has NO explicit `decision_refs` — having an `acceptance_refs` to the
+      // same target does NOT suppress it. `acceptance_refs` is a reference-integrity
+      // annotation, NOT a gate; a `requires_decision` task with no `decision_refs`
+      // still has a FILENAME-SCAN gate (verified against the live resolver). A record
+      // can never carry a filename-scan gate, so this case MUST block even when the
+      // same target is also an `acceptance_refs` (else retire would orphan the gate).
       let viaFilenameScan = false;
-      if (
-        !viaDecisionRef &&
-        !viaAcceptanceRef &&
-        resolver !== null &&
-        isDecisionRequiredForTask(phase, task)
-      ) {
+      if (!viaDecisionRef && resolver !== null && isDecisionRequiredForTask(phase, task)) {
         try {
           const res = await resolver.resolve(task.id, task.decision_refs);
           viaFilenameScan = res.considered.some(
@@ -129,12 +130,15 @@ export async function collectRetireReferences(
       }
 
       if (!viaDecisionRef && !viaAcceptanceRef && !viaFilenameScan) continue;
-      // decision_refs takes precedence (it is the strictest carry rule).
+      // Precedence: decision_refs (strictest carry rule) > filename_scan (NEVER
+      // carriable — outranks acceptance_refs so a target that is BOTH an
+      // acceptance_refs AND a filename-scan gate is treated as the un-carriable
+      // filename_scan) > acceptance_refs (any valid record softens).
       const via: RetireRefVia = viaDecisionRef
         ? "decision_refs"
-        : viaAcceptanceRef
-          ? "acceptance_refs"
-          : "filename_scan";
+        : viaFilenameScan
+          ? "filename_scan"
+          : "acceptance_refs";
       referencing.push({ task_id: task.id, phase_id: phase.id, status: task.status, via });
 
       if (task.status === "done") continue; // settled — never blocks

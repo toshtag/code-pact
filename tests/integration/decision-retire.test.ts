@@ -175,6 +175,50 @@ describe("decision retire — status-sensitive referencing gate", () => {
     expect(r.code).toBe(0);
     expect(json(r).data?.kind).toBe("retired");
   });
+
+  it("acceptance_refs to a target that is ALSO a filename-scan gate → NOT_ELIGIBLE (gate not record-carriable), .md survives", async () => {
+    // P1-T1 requires_decision:true, NO decision_refs, acceptance_refs → P1-T1-rfc.md
+    // (the filename contains the task id → a real filename-scan gate). A record can't
+    // carry a filename-scan gate, so retire must refuse — the acceptance_refs must not
+    // mask it. (The active gate is genuinely unresolved while the .md is present.)
+    const init = run(["init", "--non-interactive", "--locale", "en-US", "--agent", "claude-code", "--json"]);
+    expect(init.code).toBe(0);
+    await mkdir(join(tmpDir, "design", "decisions"), { recursive: true });
+    await mkdir(join(tmpDir, "design", "phases"), { recursive: true });
+    await writeFile(join(tmpDir, "design", "roadmap.yaml"), ROADMAP, "utf8");
+    const scanRef = "design/decisions/P1-T1-rfc.md";
+    await writeFile(
+      join(tmpDir, "design", "phases", "P1.yaml"),
+      `id: P1
+name: P1
+weight: 1
+confidence: high
+risk: low
+status: in_progress
+objective: An objective long enough here
+definition_of_done:
+  - DoD that is clearly long enough
+verification:
+  commands:
+    - "true"
+tasks:
+  - id: P1-T1
+    type: feature
+${TASK_FIELDS}
+    status: in_progress
+    description: Implements the thing
+    requires_decision: true
+    acceptance_refs:
+      - ${scanRef}
+`,
+      "utf8",
+    );
+    await writeFile(join(tmpDir, scanRef), ACCEPTED, "utf8");
+    const r = run(["decision", "retire", scanRef, "--write", "--json"]);
+    expect(r.code).toBe(2);
+    expect(json(r).error?.code).toBe("DECISION_RETIRE_NOT_ELIGIBLE");
+    expect(await fileExists(join(tmpDir, scanRef))).toBe(true);
+  });
 });
 
 describe("decision retire — NO link rewrite (Option A; PR-A resolves the link)", () => {

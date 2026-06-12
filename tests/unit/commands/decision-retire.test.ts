@@ -142,6 +142,33 @@ describe("evaluateRetire — status-sensitive referencing gate (verdict unit)", 
   it("unreferenced → eligible at any status", async () => {
     expect((await verdict(BLOCKED, TASK_NONE)).eligible).toBe(true);
   });
+
+  it("acceptance_refs to a target that is ALSO a filename-scan gate → BLOCKED (filename-scan outranks; never carriable)", async () => {
+    // P1-T1, requires_decision:true, NO decision_refs, acceptance_refs → P1-T1-notes.md
+    // (filename contains the task id → also a filename-scan gate). The acceptance_refs
+    // must NOT suppress the filename-scan gate (which a record can't carry).
+    cwd = await mkdtemp(join(tmpdir(), "decision-retire-unit-"));
+    await mkdir(join(cwd, "design", "decisions"), { recursive: true });
+    await mkdir(join(cwd, "design", "phases"), { recursive: true });
+    await writeFile(join(cwd, "design", "roadmap.yaml"), ROADMAP, "utf8");
+    const scanRef = "design/decisions/P1-T1-notes.md";
+    const body = `  - id: P1-T1
+    type: feature
+${TF}
+    status: in_progress
+    description: Implements the thing
+    requires_decision: true
+    acceptance_refs:
+      - ${scanRef}
+`;
+    await writeFile(P1(), phaseYaml(body), "utf8");
+    await writeFile(join(cwd, scanRef), ACCEPTED, "utf8");
+    const { state, fallbackPhases } = await collectPlanArtifacts(cwd);
+    const v = await evaluateRetire(cwd, scanRef, state?.phases ?? fallbackPhases);
+    expect(v.eligible).toBe(false);
+    expect(v.blocks.map((b) => b.gate)).toContain("referencing_task_not_done");
+    expect(v.referencing_tasks.find((t) => t.task_id === "P1-T1")?.via).toBe("filename_scan");
+  });
 });
 
 describe("evaluateRetire vs evaluatePrune — parity (extraction guard)", () => {
@@ -215,5 +242,46 @@ describe("runDecisionRetire — post-write recheck (TOCTOU) + readback", () => {
     const res = await runDecisionRetire({ cwd, path: XREF, write: true, now: NOW });
     expect(res.kind).toBe("retired");
     expect(await exists(X_MD())).toBe(false);
+  });
+
+  it("DRY-RUN: an unreadable existing record path (a directory) → STALE record_unverified, not an internal error", async () => {
+    const { decisionRecordPath } = await import("../../../src/core/archive/paths.ts");
+    await scaffold(ACCEPTED, TASK_DECISION_REFS);
+    // Put a DIRECTORY where the record file would be, so planDecisionRecord's read throws.
+    const recPath = decisionRecordPath(cwd, XREF);
+    await mkdir(recPath, { recursive: true });
+    const res = await runDecisionRetire({ cwd, path: XREF, write: false, now: NOW });
+    expect(res.kind).toBe("stale");
+    if (res.kind === "stale") expect(res.reason).toBe("record_unverified");
+    expect(await exists(X_MD())).toBe(true); // dry-run wrote nothing
+  });
+
+  it("POST-WRITE: a NEW acceptance_refs+filename-scan task appears → STALE gate_would_orphan, .md survives", async () => {
+    // Target is named to match filename-scan of P1-T1. Unreferenced at verdict time.
+    cwd = await mkdtemp(join(tmpdir(), "decision-retire-unit-"));
+    await mkdir(join(cwd, "design", "decisions"), { recursive: true });
+    await mkdir(join(cwd, "design", "phases"), { recursive: true });
+    await writeFile(join(cwd, "design", "roadmap.yaml"), ROADMAP, "utf8");
+    await writeFile(P1(), phaseYaml(TASK_NONE), "utf8");
+    const scanRef = "design/decisions/P1-T1-notes.md";
+    await writeFile(join(cwd, scanRef), ACCEPTED, "utf8");
+    writeHook.afterWrite = async () => {
+      // Swap in a requires_decision task with an acceptance_refs to the same target —
+      // the filename-scan gate must still be detected (acceptance_refs doesn't suppress it).
+      const body = `  - id: P1-T1
+    type: feature
+${TF}
+    status: in_progress
+    description: Implements the thing
+    requires_decision: true
+    acceptance_refs:
+      - ${scanRef}
+`;
+      await writeFile(P1(), phaseYaml(body), "utf8");
+    };
+    const res = await runDecisionRetire({ cwd, path: scanRef, write: true, now: NOW });
+    expect(res.kind).toBe("stale");
+    if (res.kind === "stale") expect(res.reason).toBe("gate_would_orphan");
+    expect(await exists(join(cwd, scanRef))).toBe(true);
   });
 });

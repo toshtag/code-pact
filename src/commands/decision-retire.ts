@@ -243,8 +243,15 @@ export async function runDecisionRetire(opts: DecisionRetireOptions): Promise<De
 
   if (!write) {
     // Dry-run: plan the record (it can refuse on a stale existing record, exactly as
-    // --write's writeDecisionRecord would — PR-B1 dry-run fidelity).
-    const plan = await planDecisionRecord(cwd, canonical, { now });
+    // --write's writeDecisionRecord would — PR-B1 dry-run fidelity). Both the
+    // `ineligible` refusal AND a read throw (unreadable / directory record path) map
+    // to DECISION_RETIRE_STALE(record_unverified), never an internal error.
+    let plan;
+    try {
+      plan = await planDecisionRecord(cwd, canonical, { now });
+    } catch (err) {
+      return { kind: "stale", decision: canonical, reason: "record_unverified", detail: `record plan failed: ${(err as Error).message}` };
+    }
     if (plan.kind === "ineligible") {
       return { kind: "stale", decision: canonical, reason: "record_unverified", detail: blockDetail(plan.blocks) };
     }
