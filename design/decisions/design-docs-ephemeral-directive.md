@@ -131,10 +131,21 @@ so "events exist" is never by itself a license to delete the YAML.
 > across the five surfaces, pinning the surface responsibility boundary: `verify`'s
 > `decision` check is the gate-enforcement point, `plan lint --strict` the lint one,
 > `task prepare` is advisory-`decision_loop` not enforcement, and `doctor`/`validate`
-> never inspect decision gates by design). ⬜ not started = 7.
-> Nothing destructive has shipped yet
-> (4a/4b/5/6 write/delete nothing — they only READ the snapshots/records, and 6 only
-> verifies). **The locked reader
+> never inspect decision gates by design), **7** — shipped as FOUR PRs: **7-A**
+> (PR #415 — `check-doc-links` learns the decision-state record: a link to a
+> hand-deleted `design/decisions/*.md` resolves as RETIRED, not broken),
+> **7-B1** (PR #416 — `phase archive --write`, the first destructive verb:
+> snapshot + delete with lstat-first presence, readback verify, stale guard,
+> lexical unlink), **7-B2** (PR #417 — `decision retire --write`, any-status
+> destructive retire: record write + delete, status-sensitive referencing gate,
+> post-write external-state recheck), and **7-C** (A7 integration fixture —
+> proves A2+A3 by `phase archive` + `decision retire` + a bare `rm -rf
+> design/decisions`, then runs the FULL gate INCLUDING `check:docs`: inbound
+> doc-links resolve as retired via the records, a negative control proves the
+> green is record-carried). **A1–A7 are now all proven.** ✅ done = all of
+> 0,1,2a,2b,2c,3,4a,4b,5,6,7.
+> The DESTRUCTIVE verbs (7-B1/7-B2) write a record THEN delete, in least-harmful
+> order; everything before (4a/4b/5/6) only READS. **The locked reader
 > invariants that bind 4b/5/6/7** (stated in full in the 4a entry below and enforced
 > by `tests/unit/core/archive/`, `tests/unit/core/plan/state-archive.test.ts`,
 > `tests/unit/core/plan/resolve-task-archive.test.ts`, and
@@ -324,7 +335,21 @@ so "events exist" is never by itself a license to delete the YAML.
    read-path maintenance concern (`plan sync-paths`), out of this directive's
    *missing-archived-docs* scope. plan-lint was therefore **not** made
    "archive-aware" for reads/writes here, by design.
-7. **⬜ `phase archive` + hand-delete** — the destructive verb (dry-run + `--write` +
+7. **✅ done (PRs #415 / #416 / #417 / PR-C)** — `phase archive` + `decision retire`
+   + hand-delete. 7-A (#415) the doc-link record-awareness; 7-B1 (#416) `phase
+   archive --write`; 7-B2 (#417) `decision retire --write`; 7-C the A7 fixture
+   (proves A2+A3 by `phase archive` + `decision retire` + a bare `rm -rf
+   design/decisions`, then the full gate INCLUDING `check:docs`, with a negative
+   control). **Doc-link half (i)** — rewriting inbound links at retire time — was
+   intentionally NOT built: ChatGPT/maintainer chose Option A (retire rewrites NO
+   links; the inbound links stay byte-identical and PR-A's record-aware checker
+   resolves them as *retired*). **This directive's own public footprint** (the
+   README.md link + the docs/positioning.md reference) is left BYTE-IDENTICAL —
+   removing/rewording it is a DEFERRED lifecycle action for when the directive is
+   actually retired at v2.0 completion (the directive is still live; the A7 temp
+   fixture makes the footprint irrelevant to whether A7 passes). The original
+   step-7 plan follows for the historical record:
+   **(original plan)** the destructive verb (dry-run + `--write` +
    stale-plan guard + write lock, least-harmful ordering) **and** the A2 / A3 / A7
    integration fixture that `rm`s the files manually.
    **Relation to step 6:** step 6 already pins the A2+A3 composite *runtime* behavior
