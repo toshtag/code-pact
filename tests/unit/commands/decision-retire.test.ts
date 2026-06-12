@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -244,6 +244,111 @@ describe("runDecisionRetire — post-write recheck (TOCTOU) + readback", () => {
     expect(await exists(X_MD())).toBe(false);
   });
 
+  // ---- command-level record / readback / stale-guard safety (the writer's own
+  //      refusal + the writer-not-trusted readback + the pre-delete identity guard
+  //      must all stop the unlink; the writer-unit test alone can't prove this) ----
+
+  it("writeDecisionRecord ineligible (a STALE existing record refuses overwrite) → STALE record_unverified, .md survives", async () => {
+    const { writeDecisionRecord } = await import("../../../src/core/archive/decision-record.ts");
+    await scaffold(ACCEPTED, TASK_DECISION_REFS);
+    // Pre-seed a record for the CURRENT bytes, then change the .md so the record is
+    // stale (source_sha256 mismatch) — writeDecisionRecord refuses to overwrite it.
+    expect((await writeDecisionRecord(cwd, XREF, { now: NOW })).kind).toBe("written");
+    await writeFile(X_MD(), ACCEPTED + "\n<!-- edited, record now stale -->\n", "utf8");
+    const res = await runDecisionRetire({ cwd, path: XREF, write: true, now: NOW });
+    expect(res.kind).toBe("stale");
+    if (res.kind === "stale") expect(res.reason).toBe("record_unverified");
+    expect(await exists(X_MD())).toBe(true);
+  });
+
+  it("writer succeeds but the written record's identity is corrupted before readback → STALE record_unverified, .md survives", async () => {
+    const { decisionRecordPath } = await import("../../../src/core/archive/paths.ts");
+    await scaffold(ACCEPTED, TASK_DECISION_REFS);
+    writeHook.afterWrite = async () => {
+      // Corrupt the just-written record's identity so recordMatchingRef rejects it.
+      const p = decisionRecordPath(cwd, XREF);
+      const obj = JSON.parse(await readFile(p, "utf8"));
+      obj.original_path = "design/decisions/other.md"; // diverges from canonical_ref
+      await writeFile(p, JSON.stringify(obj), "utf8");
+    };
+    const res = await runDecisionRetire({ cwd, path: XREF, write: true, now: NOW });
+    expect(res.kind).toBe("stale");
+    if (res.kind === "stale") expect(res.reason).toBe("record_unverified");
+    expect(await exists(X_MD())).toBe(true);
+  });
+
+  it("STALE GUARD: target bytes change after the record write → STALE source_changed, .md survives", async () => {
+    await scaffold(ACCEPTED, TASK_DECISION_REFS);
+    writeHook.afterWrite = async () => {
+      // Edit the .md AFTER the record was written (and matched the original bytes),
+      // so the pre-delete stale guard's sha check refuses.
+      await writeFile(X_MD(), ACCEPTED + "\n# edited\n", "utf8");
+    };
+    const res = await runDecisionRetire({ cwd, path: XREF, write: true, now: NOW });
+    expect(res.kind).toBe("stale");
+    if (res.kind === "stale") expect(res.reason).toBe("source_changed");
+    expect(await exists(X_MD())).toBe(true);
+  });
+
+  it("STALE GUARD: a same-content inode swap after the record write → STALE identity_changed, .md survives", async () => {
+    await scaffold(ACCEPTED, TASK_DECISION_REFS);
+    const original = await readFile(X_MD(), "utf8");
+    writeHook.afterWrite = async () => {
+      // Replace the .md with a byte-identical file at a DIFFERENT inode (rename a
+      // separate file over it — deterministic across filesystems, unlike rm+rewrite).
+      const swap = join(cwd, "design", "decisions", "x-rfc.swap.md");
+      await writeFile(swap, original, "utf8");
+      await rename(swap, X_MD());
+    };
+    const res = await runDecisionRetire({ cwd, path: XREF, write: true, now: NOW });
+    expect(res.kind).toBe("stale");
+    if (res.kind === "stale") expect(res.reason).toBe("identity_changed");
+    expect(await exists(X_MD())).toBe(true);
+  });
+
+  // ---- post-write EXTERNAL-dependency TOCTOU (not just task references) ----
+
+  it("a NEW live_decision_depends appears post-write (a proposed decision links to the target) → STALE gate_would_orphan, .md survives", async () => {
+    await scaffold(ACCEPTED, TASK_NONE); // no referencing task
+    writeHook.afterWrite = async () => {
+      // A proposed decision that LINKS to the target appears in the window.
+      await writeFile(
+        join(cwd, "design", "decisions", "dep-rfc.md"),
+        "# Dep\n\n**Status:** proposed\n\n## Decision\n\nBuilds on [X](x-rfc.md).\n",
+        "utf8",
+      );
+    };
+    const res = await runDecisionRetire({ cwd, path: XREF, write: true, now: NOW });
+    expect(res.kind).toBe("stale");
+    if (res.kind === "stale") expect(res.reason).toBe("gate_would_orphan");
+    expect(await exists(X_MD())).toBe(true);
+  });
+
+  it("plan artifacts become unreadable post-write (roadmap → a directory) → STALE path_inaccessible, .md survives", async () => {
+    await scaffold(ACCEPTED, TASK_NONE);
+    writeHook.afterWrite = async () => {
+      // Make the roadmap unreadable so the post-write recheck's plan-artifacts gate fires.
+      await rm(join(cwd, "design", "roadmap.yaml"));
+      await mkdir(join(cwd, "design", "roadmap.yaml"), { recursive: true });
+    };
+    const res = await runDecisionRetire({ cwd, path: XREF, write: true, now: NOW });
+    expect(res.kind).toBe("stale");
+    if (res.kind === "stale") expect(res.reason).toBe("path_inaccessible");
+    expect(await exists(X_MD())).toBe(true);
+  });
+
+  it("decisions scan becomes unreadable post-write (a directory named *.md) → STALE path_inaccessible, .md survives", async () => {
+    await scaffold(ACCEPTED, TASK_NONE);
+    writeHook.afterWrite = async () => {
+      // A directory named like a decision makes the dependant scan unreadable.
+      await mkdir(join(cwd, "design", "decisions", "bogus.md"), { recursive: true });
+    };
+    const res = await runDecisionRetire({ cwd, path: XREF, write: true, now: NOW });
+    expect(res.kind).toBe("stale");
+    if (res.kind === "stale") expect(res.reason).toBe("path_inaccessible");
+    expect(await exists(X_MD())).toBe(true);
+  });
+
   it("DRY-RUN: an unreadable existing record path (a directory) → STALE record_unverified, not an internal error", async () => {
     const { decisionRecordPath } = await import("../../../src/core/archive/paths.ts");
     await scaffold(ACCEPTED, TASK_DECISION_REFS);
@@ -283,5 +388,34 @@ ${TF}
     expect(res.kind).toBe("stale");
     if (res.kind === "stale") expect(res.reason).toBe("gate_would_orphan");
     expect(await exists(join(cwd, scanRef))).toBe(true);
+  });
+});
+
+describe("runDecisionRetire — lstat-first presence (PR-B1 regression class)", () => {
+  it("dangling ANCESTOR symlink (design/decisions -> /nonexistent) → STALE, NOT already_retired/NOT_RETIRED, no unlink", async () => {
+    await scaffold(ACCEPTED, TASK_DECISION_REFS);
+    // Write the record so a (wrong) live-absent branch could otherwise say already_retired.
+    const { writeDecisionRecord } = await import("../../../src/core/archive/decision-record.ts");
+    expect((await writeDecisionRecord(cwd, XREF, { now: NOW })).kind).toBe("written");
+    const outside = await mkdtemp(join(tmpdir(), "decision-retire-outside-"));
+    try {
+      await rm(join(cwd, "design", "decisions"), { recursive: true, force: true });
+      await symlink(join(outside, "no-such-dir"), join(cwd, "design", "decisions")); // dangling
+      const res = await runDecisionRetire({ cwd, path: XREF, write: true, now: NOW });
+      expect(res.kind).toBe("stale"); // never already_retired / not_retired
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("final-component symlink → STALE, never deletes through the symlink", async () => {
+    await scaffold(ACCEPTED, TASK_DECISION_REFS);
+    const real = join(cwd, "design", "decisions", "real.md");
+    await writeFile(real, ACCEPTED, "utf8");
+    await rm(X_MD());
+    await symlink(real, X_MD());
+    const res = await runDecisionRetire({ cwd, path: XREF, write: true, now: NOW });
+    expect(res.kind).toBe("stale");
+    expect(await exists(real)).toBe(true); // target untouched
   });
 });
