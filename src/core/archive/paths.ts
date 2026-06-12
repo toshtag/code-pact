@@ -19,6 +19,12 @@ export const ARCHIVE_DECISIONS_DIR_SEGMENTS = [
   "archive",
   "decisions",
 ] as const;
+export const ARCHIVE_EVENT_PACKS_DIR_SEGMENTS = [
+  ".code-pact",
+  "state",
+  "archive",
+  "event-packs",
+] as const;
 
 export function sha256Hex(content: string): string {
   return createHash("sha256").update(content, "utf8").digest("hex");
@@ -42,6 +48,22 @@ export function phaseSnapshotPath(cwd: string, phaseId: string): string {
  *  `<id>.json` snapshots when no roadmap ref names them. */
 export function archivePhasesDir(cwd: string): string {
   return join(cwd, ...ARCHIVE_PHASES_DIR_SEGMENTS);
+}
+
+/**
+ * Path of one event pack: `.code-pact/state/archive/event-packs/<phaseId>.json`.
+ * An event pack holds the compacted per-event ledger for an archived phase. One
+ * file per phase, mirroring `phaseSnapshotPath` (and the same `assertSafePlanId`
+ * guard so a malformed id can never escape the directory).
+ */
+export function eventPackPath(cwd: string, phaseId: string): string {
+  assertSafePlanId(phaseId, "Phase id");
+  return join(cwd, ...ARCHIVE_EVENT_PACKS_DIR_SEGMENTS, `${phaseId}.json`);
+}
+
+/** The archive event-packs directory, for enumeration by the pack reader. */
+export function archiveEventPacksDir(cwd: string): string {
+  return join(cwd, ...ARCHIVE_EVENT_PACKS_DIR_SEGMENTS);
 }
 
 /**

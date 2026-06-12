@@ -43,6 +43,7 @@ vi.mock("../../../src/core/archive/phase-snapshot.ts", async (importActual) => {
 });
 
 import { runPhaseArchive } from "../../../src/commands/phase-archive.ts";
+import { seedDurableEvents } from "../../helpers/seed-events.ts";
 
 const NOW = new Date("2026-06-10T00:00:00.000Z");
 
@@ -104,7 +105,7 @@ async function scaffold(status: "done" | "cancelled" = "done", taskStatus: "done
   // snapshot's design_status evidence, not the ledger); a done task with a done
   // event would otherwise trip the `cancelled_task_with_done_event` gate.
   const progress = taskStatus === "cancelled" ? "events: []\n" : PROGRESS;
-  await writeFile(join(cwd, ".code-pact", "state", "progress.yaml"), progress, "utf8");
+  await seedDurableEvents(cwd, progress);
 }
 
 beforeEach(() => {

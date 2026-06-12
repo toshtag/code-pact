@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { detectMissingPhaseFiles } from "../../../../../src/core/plan/checks/phase-files.ts";
 import { writePhaseSnapshot } from "../../../../../src/core/archive/phase-snapshot.ts";
 import { phaseSnapshotPath } from "../../../../../src/core/archive/paths.ts";
+import { seedDurableEvents } from "../../../../helpers/seed-events.ts";
 import { Roadmap } from "../../../../../src/core/schemas/roadmap.ts";
 
 // design-docs-ephemeral step 4a — detectMissingPhaseFiles tolerates a hand-deleted
@@ -88,7 +89,7 @@ beforeEach(async () => {
   await writeFile(join(cwd, "design", "roadmap.yaml"), ROADMAP_YAML, "utf8");
   await writeFile(join(cwd, "design", "phases", "P1-x.yaml"), P1_DONE, "utf8");
   await writeFile(join(cwd, "design", "phases", "P2-y.yaml"), P2_ACTIVE, "utf8");
-  await writeFile(join(cwd, ".code-pact", "state", "progress.yaml"), DONE_EVENT, "utf8");
+  await seedDurableEvents(cwd, DONE_EVENT);
 });
 afterEach(async () => {
   if (cwd) await rm(cwd, { recursive: true, force: true });

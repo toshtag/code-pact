@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { resolveTaskInRoadmap } from "../../../../src/core/plan/resolve-task.ts";
 import { PhaseSnapshotInvalidError } from "../../../../src/core/plan/state.ts";
 import { writePhaseSnapshot } from "../../../../src/core/archive/phase-snapshot.ts";
+import { seedDurableEvents } from "../../../helpers/seed-events.ts";
 
 // Step 4a (touch point E): resolveTaskInRoadmap tolerates a hand-deleted COMPLETED
 // phase (so `task context`/`task prepare` on a LIVE target still resolve) but runs
@@ -82,7 +83,7 @@ async function scaffold(p2FirstTask = "P2-T1") {
   await writeFile(join(cwd, "design", "roadmap.yaml"), ROADMAP, "utf8");
   await writeFile(join(cwd, "design", "phases", "P1-x.yaml"), P1_DONE, "utf8");
   await writeFile(join(cwd, "design", "phases", "P2-y.yaml"), P2(p2FirstTask), "utf8");
-  await writeFile(join(cwd, ".code-pact", "state", "progress.yaml"), PROGRESS, "utf8");
+  await seedDurableEvents(cwd, PROGRESS);
 }
 
 beforeEach(async () => {

@@ -11,6 +11,7 @@ import {
 } from "../../../../src/core/archive/load-phase-snapshot.ts";
 import { writePhaseSnapshot } from "../../../../src/core/archive/phase-snapshot.ts";
 import { phaseSnapshotPath, sha256Hex } from "../../../../src/core/archive/paths.ts";
+import { seedDurableEvents } from "../../../helpers/seed-events.ts";
 
 const NOW = new Date("2026-06-10T00:00:00.000Z");
 
@@ -96,7 +97,7 @@ async function scaffoldWithP1Snapshot(): Promise<string> {
   await writeFile(join(cwd, "design", "roadmap.yaml"), ROADMAP, "utf8");
   await writeFile(join(cwd, "design", "phases", "P1-x.yaml"), P1_DONE, "utf8");
   await writeFile(join(cwd, "design", "phases", "P2-y.yaml"), P2_ACTIVE, "utf8");
-  await writeFile(join(cwd, ".code-pact", "state", "progress.yaml"), DONE_EVENT_P1T1, "utf8");
+  await seedDurableEvents(cwd, DONE_EVENT_P1T1);
   const outcome = await writePhaseSnapshot(cwd, "P1", { now: NOW });
   expect(outcome.kind).toBe("written");
   return (outcome as { path: string }).path;

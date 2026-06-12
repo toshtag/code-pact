@@ -13,8 +13,13 @@ import { mergeProgressStreams, progressPath } from "../progress/io.ts";
 import {
   eventsDir,
   type LoadedEventFile,
-  readEventFiles,
 } from "../progress/events-io.ts";
+import {
+  readAllProgressEventSources,
+  readPackSources,
+  durableIdsAndArchivedTasks,
+  filterArchivedTaskLegacyConflicts,
+} from "../progress/all-sources.ts";
 import type { FileIssue } from "./shared.ts";
 import {
   archivedEntriesFromSnapshot,
@@ -258,24 +263,17 @@ export async function loadPlanState(cwd: string): Promise<PlanState> {
 
   let progress: PlanState["progress"] = null;
   const progPath = progressPath(cwd);
-  let legacyEvents: ProgressEvent[] = [];
-  let hasLegacy = false;
-  try {
-    const raw = await readFile(progPath, "utf8");
-    const parsed = ProgressLog.safeParse(parseYaml(raw) as unknown);
-    if (!parsed.success) {
-      throw new ParseError(progPath, parsed.error.issues);
-    }
-    legacyEvents = parsed.data.events;
-    hasLegacy = true;
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code !== "ENOENT") throw err;
-  }
-  // Merge the per-event ledger (strict: a corrupt event file propagates).
-  const eventFiles = await readEventFiles(cwd);
-  if (hasLegacy || eventFiles.length > 0) {
-    progress = { path: progPath, events: mergeProgressStreams(legacyEvents, eventFiles) };
+  // Shared reader (strict): legacy + loose + Tier-2-bound packs, with the
+  // LEGACY_EVENT_FOR_ARCHIVED_TASK gate. A corrupt event file / unbound pack /
+  // legacy conflict propagates (this is the strict artifact path behind validate).
+  const sources = await readAllProgressEventSources(cwd, { mode: "strict" });
+  const hasLegacy = sources.rawLegacyEvents.length > 0;
+  const allFiles = [...sources.looseFiles, ...sources.validatedPackFiles];
+  if (hasLegacy || allFiles.length > 0) {
+    progress = {
+      path: progPath,
+      events: mergeProgressStreams(sources.mergeableLegacyEvents, allFiles),
+    };
   }
 
   return {
@@ -398,6 +396,10 @@ export async function collectPlanArtifacts(
 
   let progress: PlanState["progress"] = null;
   const progPath = progressPath(cwd);
+  // Keep the lenient loader's OWN legacy parse so a corrupt legacy file surfaces
+  // as a SCHEMA_ERROR FileIssue (and lint keeps running) — the shared reader's
+  // strict legacy parse would throw. Packs + the legacy-conflict gate come from
+  // the shared pack reader in lenient mode.
   let legacyEvents: ProgressEvent[] = [];
   let hasLegacy = false;
   try {
@@ -419,16 +421,41 @@ export async function collectPlanArtifacts(
     const code = (err as NodeJS.ErrnoException).code;
     if (code !== "ENOENT") pushParseIssue(fileIssues, err, progPath);
   }
-  // Merge the per-event ledger (lenient: a corrupt event file is collected, not
-  // thrown, so the rest of plan lint still runs).
-  let eventFiles: LoadedEventFile[] = [];
+  // Loose + Tier-2-bound packs (lenient: a corrupt event file / unbound pack is
+  // collected as a FileIssue, not thrown, so the rest of plan lint still runs).
+  let packSources;
   try {
-    eventFiles = await readEventFiles(cwd);
+    packSources = await readPackSources(cwd, "lenient");
   } catch (err) {
     pushParseIssue(fileIssues, err, eventsDir(cwd));
+    packSources = { looseFiles: [], packs: [], validatedPackFiles: [], issues: [] };
   }
+  for (const issue of packSources.issues) {
+    fileIssues.push({ code: issue.code, severity: "error", message: issue.message });
+  }
+  // Archived-task legacy conflict gate (lenient: collect as FileIssue + exclude
+  // the offending legacy event from the merged stream so state stays reproducible).
+  const { durableIds, archivedTaskIds, archivedEnumerationComplete } =
+    await durableIdsAndArchivedTasks(cwd, packSources);
+  const { mergeableLegacyEvents, issues: legacyIssues } = filterArchivedTaskLegacyConflicts(
+    legacyEvents,
+    durableIds,
+    archivedTaskIds,
+    "lenient",
+    archivedEnumerationComplete,
+  );
+  for (const issue of legacyIssues) {
+    fileIssues.push({ code: issue.code, severity: "error", message: issue.message });
+  }
+  const eventFiles: LoadedEventFile[] = [
+    ...packSources.looseFiles,
+    ...packSources.validatedPackFiles,
+  ];
   if (hasLegacy || eventFiles.length > 0) {
-    progress = { path: progPath, events: mergeProgressStreams(legacyEvents, eventFiles) };
+    progress = {
+      path: progPath,
+      events: mergeProgressStreams(mergeableLegacyEvents, eventFiles),
+    };
   }
 
   // design-docs-ephemeral (step 4b): discover UNREFERENCED archived phases. This is

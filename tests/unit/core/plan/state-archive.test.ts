@@ -9,6 +9,7 @@ import {
 } from "../../../../src/core/plan/state.ts";
 import { writePhaseSnapshot } from "../../../../src/core/archive/phase-snapshot.ts";
 import { phaseSnapshotPath } from "../../../../src/core/archive/paths.ts";
+import { seedDurableEvents } from "../../../helpers/seed-events.ts";
 
 // Step 4a (rows C + D): the strict + lenient loaders tolerate a hand-deleted
 // COMPLETED phase via its snapshot, populate archivedTaskIndex, and fail-closed
@@ -90,7 +91,7 @@ async function scaffold(p2?: string) {
   await writeFile(join(cwd, "design", "roadmap.yaml"), ROADMAP, "utf8");
   await writeFile(join(cwd, "design", "phases", "P1-x.yaml"), P1_DONE, "utf8");
   await writeFile(join(cwd, "design", "phases", "P2-y.yaml"), p2 ?? P2(), "utf8");
-  await writeFile(join(cwd, ".code-pact", "state", "progress.yaml"), DONE_EVENT, "utf8");
+  await seedDurableEvents(cwd, DONE_EVENT);
 }
 
 beforeEach(async () => {

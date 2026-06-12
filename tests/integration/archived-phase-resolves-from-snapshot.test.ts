@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run as cliRun, ensureCliBuilt, type RunResult } from "../helpers/cli.ts";
+import { seedDurableEvents } from "../helpers/seed-events.ts";
 import { writePhaseSnapshot } from "../../src/core/archive/phase-snapshot.ts";
 
 // When a completed phase's YAML is hand-deleted but its roadmap ref stays AND a
@@ -123,7 +124,7 @@ async function scaffold(
   await writeFile(join(tmpDir, "design", "phases", "P1-x.yaml"), opts.p1 ?? P1_DONE, "utf8");
   await writeFile(join(tmpDir, "design", "phases", "P2-y.yaml"), opts.p2 ?? P2_DEP, "utf8");
   await mkdir(join(tmpDir, ".code-pact", "state"), { recursive: true });
-  await writeFile(join(tmpDir, ".code-pact", "state", "progress.yaml"), opts.progress ?? PROGRESS, "utf8");
+  await seedDurableEvents(tmpDir, opts.progress ?? PROGRESS);
 }
 
 // A P1 with a CANCELLED task (P1-T2). The writer records it via design_status
@@ -393,7 +394,14 @@ async function makeUnreferencedP1(p2: string, progressAfter?: string) {
   await scaffold({ p2 });
   await writePhaseSnapshot(tmpDir, "P1", { now: NOW });
   if (progressAfter !== undefined) {
-    await writeFile(join(tmpDir, ".code-pact", "state", "progress.yaml"), progressAfter, "utf8");
+    // Reset the DURABLE ledger to exactly `progressAfter`: clear the loose event
+    // files and re-seed (the durable model has no monolith to overwrite). Used
+    // to drop the P1-T1 done event so no orphan remains once the snapshot is
+    // also destroyed (a leftover archived-task event is only suppressed while a
+    // valid snapshot covers it).
+    await rm(join(tmpDir, ".code-pact", "state", "events"), { recursive: true, force: true });
+    await mkdir(join(tmpDir, ".code-pact", "state", "events"), { recursive: true });
+    await seedDurableEvents(tmpDir, progressAfter);
   }
   await writeFile(join(tmpDir, "design", "roadmap.yaml"), ROADMAP_P2_ONLY, "utf8");
   await rm(join(tmpDir, "design", "phases", "P1-x.yaml"));

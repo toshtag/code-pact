@@ -39,6 +39,9 @@ import { loadAgentContextBudgetBestEffort } from "../context-fit/load-context-bu
 import type { PhaseEntry, PlanState } from "./state.ts";
 import { collectPlanArtifacts } from "./state.ts";
 import type { PlanIssue } from "./shared.ts";
+import { readPackSources } from "../progress/all-sources.ts";
+import { validateSnapshotEventEvidence } from "../archive/snapshot-evidence.ts";
+import type { ProgressEvent } from "../schemas/progress-event.ts";
 
 const WEAK_DOD_PATTERN = /\b(TODO|FIXME|tbd)\b/i;
 const WEAK_DOD_MIN_CHARS = 10;
@@ -140,6 +143,12 @@ export async function runLint(opts: LintOptions): Promise<LintResult> {
     issues.push(...detectPhaseIdMismatches(state.phases));
     issues.push(...(await detectMissingPhaseFiles(opts.cwd, state.roadmap)));
     issues.push(...(await detectOrphanPhaseFiles(opts.cwd, state.roadmap)));
+    // Snapshot evidence: every archived snapshot's progress_events evidence must
+    // resolve from the durable ledger (loose ∪ validated packs) — NOT legacy.
+    // Closes the silent-provenance-loss gap. Snapshots unreadable during the scan
+    // become a skipped check, not a failure.
+    const evidenceSkips = await appendSnapshotEvidenceIssues(opts.cwd, issues);
+    for (const skip of evidenceSkips) skippedChecks.push(skip);
   }
 
   if (includeQuality) {
@@ -202,6 +211,45 @@ async function resolveDefaultAgent(cwd: string): Promise<string | undefined> {
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Validate archived-snapshot `progress_events` evidence against the DURABLE
+ * ledger (loose ∪ Tier-2-validated packs — never legacy). Pushes one
+ * `SNAPSHOT_EVENT_EVIDENCE_UNRESOLVABLE` error per unresolved/wrong evidence
+ * reference; returns the names of any skipped checks (snapshots that could not
+ * be read). Lenient pack read: a corrupt pack does not abort the lint.
+ */
+async function appendSnapshotEvidenceIssues(
+  cwd: string,
+  issues: PlanIssue[],
+): Promise<string[]> {
+  let packSources;
+  try {
+    packSources = await readPackSources(cwd, "lenient");
+  } catch {
+    // The pack read failing entirely is surfaced elsewhere (collectPlanArtifacts);
+    // skip the evidence check rather than double-reporting.
+    return ["SNAPSHOT_EVENT_EVIDENCE_UNRESOLVABLE"];
+  }
+  const resolved = new Map<string, ProgressEvent>();
+  for (const f of packSources.looseFiles) resolved.set(f.id, f.event);
+  for (const f of packSources.validatedPackFiles) resolved.set(f.id, f.event);
+
+  const { result, skipped } = await validateSnapshotEventEvidence(cwd, resolved);
+  if (!result.ok) {
+    for (const issue of result.issues) {
+      issues.push({
+        code: "SNAPSHOT_EVENT_EVIDENCE_UNRESOLVABLE",
+        severity: "error",
+        message: issue.message,
+        phase_id: issue.phase_id,
+        task_id: issue.task_id,
+        details: { event_id: issue.event_id, reason: issue.reason },
+      });
+    }
+  }
+  return skipped.length > 0 ? ["SNAPSHOT_EVENT_EVIDENCE_UNRESOLVABLE"] : [];
 }
 
 /** Quality heuristic: DoD bullets that look unfinished. */

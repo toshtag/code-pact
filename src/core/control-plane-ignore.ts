@@ -52,6 +52,13 @@ export const SHARED_CONTROL_PLANE_PROBES: ReadonlyArray<{
     path: ".code-pact/state/events/19700101T000000Z-codepact-probe.yaml",
     label: ".code-pact/state/events/ (the progress ledger)",
   },
+  {
+    // Event packs are committed provenance (compacted per-event ledger for an
+    // archived phase). Ignoring them would lose archived history on a clean
+    // checkout / CI exactly like ignoring the loose ledger.
+    path: ".code-pact/state/archive/event-packs/codepact-probe.json",
+    label: ".code-pact/state/archive/event-packs/ (event compaction packs)",
+  },
 ];
 
 /** True when `cwd` is inside a git work tree (and the `git` binary is available). */

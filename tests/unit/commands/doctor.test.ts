@@ -1100,6 +1100,31 @@ describe("runDoctor — CONTROL_PLANE_BRANCH_NOT_DRIVEN (P34)", () => {
     );
     expect(find(await runDoctor(dir, { baseRef: "main" }))).toBeUndefined();
   });
+
+  // Rev twin of Codex Finding B: a corrupt archived snapshot committed at a
+  // revision shrinks the rev archived-task set. A committed legacy event for that
+  // now-invisible archived task must NOT be admitted as valid rev progress — the
+  // rev reader fails closed (returns null) so the branch-drift comparison SKIPS
+  // rather than trusting a leaked legacy event.
+  it("fails closed (skips) when the rev has a corrupt archived snapshot + a legacy event for that archived task", async () => {
+    await setupBaseAndBranch({ trackProgress: true });
+    await commitBranchCode();
+    // Commit a corrupt archived snapshot for ARCH (so ARCH-T1 drops from the rev
+    // archived set) and a legacy progress event for ARCH-T1 not in loose/pack.
+    await mkdir(join(dir, ".code-pact", "state", "archive", "phases"), { recursive: true });
+    await writeFile(
+      join(dir, ".code-pact", "state", "archive", "phases", "ARCH.json"),
+      "{ corrupt json",
+      "utf8",
+    );
+    await commitProgress(`events:\n${ev("ARCH-T1", "started")}`);
+    await git(dir, ["add", "-f", ".code-pact/state/archive/phases/ARCH.json"]);
+    await git(dir, ["commit", "--quiet", "-m", "corrupt archived snapshot"]);
+    // The HEAD rev ledger cannot be trusted (incomplete archived set + legacy
+    // present) → readMergedEventsAtRev returns null → the gate skips, never fires
+    // a false verdict from the leaked legacy event.
+    expect(find(await runDoctor(dir, { baseRef: "main" }))).toBeUndefined();
+  });
 });
 
 // ---------------------------------------------------------------------------

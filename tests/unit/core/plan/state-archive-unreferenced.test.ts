@@ -9,6 +9,7 @@ import {
 } from "../../../../src/core/plan/state.ts";
 import { writePhaseSnapshot } from "../../../../src/core/archive/phase-snapshot.ts";
 import { archivePhasesDir, phaseSnapshotPath } from "../../../../src/core/archive/paths.ts";
+import { seedDurableEvents } from "../../../helpers/seed-events.ts";
 
 // Step 4b — UNREFERENCED archived phase (roadmap ref GONE). Snapshot P1 while it is
 // still a roadmap phase, THEN drop its ref from roadmap.yaml so P1 is unreferenced.
@@ -84,7 +85,7 @@ async function makeUnreferencedP1(p2 = P2(true)) {
   await writeFile(join(cwd, "design", "roadmap.yaml"), ROADMAP_BOTH, "utf8");
   await writeFile(join(cwd, "design", "phases", "P1-x.yaml"), P1_DONE, "utf8");
   await writeFile(join(cwd, "design", "phases", "P2-y.yaml"), p2, "utf8");
-  await writeFile(join(cwd, ".code-pact", "state", "progress.yaml"), PROGRESS, "utf8");
+  await seedDurableEvents(cwd, PROGRESS);
   const o = await writePhaseSnapshot(cwd, "P1", { now: NOW });
   expect(o.kind).toBe("written");
   // Now archive-remove P1: drop its roadmap ref AND its live file.
