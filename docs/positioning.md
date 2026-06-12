@@ -17,10 +17,13 @@ The project keeps two state surfaces:
 - **`design/`** — the structured source of truth for **active**
   plans. Roadmap, phase YAML, task readiness fields, decisions,
   acceptance references, and rules all live here,
-  version-controlled, schema-validated, lint-able. (The
-  design-docs-ephemeral directive is transitioning *completed*
-  phases and *retired* decisions toward `.code-pact/state`
-  snapshots so historical design docs can be retired.)
+  version-controlled, schema-validated, lint-able. **Completed**
+  phases and **retired** decisions are ephemeral: their runtime
+  truth lives in `.code-pact/state` archive snapshots / decision
+  records, so a completed `design/phases/*.yaml` or a retired
+  `design/decisions/*.md` may be hand-deleted once its
+  snapshot/record exists (the [design-docs-ephemeral
+  directive](../design/decisions/design-docs-ephemeral-directive.md)).
 - **the progress ledger (`.code-pact/state/events/`)** — the operational log.
   An append-only event stream of `started` / `done` / `failed` /
   `blocked` / `resumed` events that drives state-machine

@@ -5,16 +5,27 @@ import { join } from "node:path";
 import { run as cliRun, ensureCliBuilt, type RunResult } from "../helpers/cli.ts";
 import { checkDocLinks } from "../../scripts/check-doc-links.ts";
 
-// design-docs-ephemeral A7 (step 7 PR-C) — the capstone. Prove, end-to-end on a temp
-// project, that hand-deleting a completed phase YAML AND `rm -rf design/decisions`
-// (through the SHIPPED destructive verbs `phase archive --write` / `decision retire
-// --write`, then a bare directory rm) keeps EVERY gate green — INCLUDING `check:docs`
-// (doc-link integrity): inbound `.md` links into the removed decisions resolve as
-// *retired* via their records (PR-A), not broken. A negative control (same links, no
-// record) proves the green is record-carried, not checker-blind.
+// Hand-deleting design docs keeps every gate green.
 //
-// No `src/` change, no README/positioning footprint change — PR-A/B1/B2 already
-// shipped every reader/checker/verb; A7 only proves they compose under a real rm.
+// End-to-end on a temp project: archive a completed phase, retire two decisions,
+// then `rm -rf design/decisions` by hand. After that, every control-plane gate AND
+// the doc-link checker must still pass — because the deleted material's runtime
+// truth now lives in `.code-pact/state` (an archive snapshot for the phase, a
+// decision-state record for each decision), and the readers/checkers resolve from
+// those records instead of the gone files.
+//
+// The deletion goes through the shipped verbs (`phase archive --write` /
+// `decision retire --write`), then a bare directory `rm` on top — so the test
+// covers both the verb path and a raw hand-delete of the whole directory.
+//
+// The headline assertion is the doc-link checker: inbound `.md` links pointing at
+// the removed decisions must resolve as *retired* via their records, not report as
+// broken. A negative control (the same links, but a decision deleted WITHOUT a
+// record) proves that green is carried by the record, not by the checker ignoring
+// missing decision links.
+//
+// No `src/` change: every reader, checker, and verb already shipped; this test
+// only proves they compose correctly under a real hand-delete.
 
 let tmpDir: string;
 function run(args: string[]): RunResult {
@@ -52,7 +63,7 @@ const ROADMAP = `phases:
     path: design/phases/P2.yaml
     weight: 1
 `;
-// P1 done (archivable); P1-T1 done.
+// P1 is complete (archivable); its only task P1-T1 is done.
 const P1 = `id: P1
 name: Foundations
 weight: 1
@@ -71,8 +82,10 @@ tasks:
 ${TASK_FIELDS}
     status: done
 `;
-// P2 active; P2-T1 active, decision_refs the ACCEPTED decision AND depends_on the
-// archived P1-T1 — so BOTH A2 (phase) and A3 (decision) are load-bearing here.
+// P2 is still active. P2-T1 is active and exercises BOTH deletions at once: it
+// references the accepted decision (decision_refs) AND depends on the archived
+// phase's task (depends_on P1-T1) — so the test only passes if the decision record
+// AND the phase snapshot both resolve correctly.
 const P2 = `id: P2
 name: Next
 weight: 1
@@ -120,8 +133,9 @@ const PROGRESS = `events:
     at: 2026-06-02T00:00:00.000Z
     actor: agent
 `;
-// Inbound doc-links into BOTH decisions (+ a #fragment) — the A7 core. After the
-// decisions are gone, these must resolve as retired via the records, not broken.
+// Inbound doc-links into BOTH decisions (plus a #fragment) — the heart of this test.
+// After the decisions are gone, these must resolve as retired via the records, not
+// report as broken.
 const NOTES = `# Notes
 
 See [the accepted decision](../design/decisions/accepted-rfc.md) and
@@ -157,14 +171,14 @@ function decisionCheckOk(r: RunResult): boolean {
 
 beforeAll(() => ensureCliBuilt(), 60_000);
 beforeEach(async () => {
-  tmpDir = await mkdtemp(join(tmpdir(), "code-pact-a7-int-"));
+  tmpDir = await mkdtemp(join(tmpdir(), "code-pact-hand-delete-int-"));
 });
 afterEach(async () => {
   if (tmpDir) await rm(tmpDir, { recursive: true, force: true });
 });
 
-describe("A7 — hand-delete a completed phase + rm -rf design/decisions, all gates green", () => {
-  it("the SHIPPED verbs archive/retire, then a bare rm clears the dir; every gate (incl. check:docs) stays green", async () => {
+describe("hand-deleting a completed phase + rm -rf design/decisions keeps all gates green", () => {
+  it("archive + retire via the verbs, then a bare rm of the directory; every gate (incl. check:docs) stays green", async () => {
     await scaffold();
     const notesBefore = await readFile(join(tmpDir, "docs", "notes.md"), "utf8");
 
@@ -172,10 +186,10 @@ describe("A7 — hand-delete a completed phase + rm -rf design/decisions, all ga
     expect(run(["phase", "archive", "P1", "--write", "--json"]).code).toBe(0);
     expect(run(["decision", "retire", "design/decisions/accepted-rfc.md", "--write", "--json"]).code).toBe(0);
     expect(run(["decision", "retire", "design/decisions/blocked-rfc.md", "--write", "--json"]).code).toBe(0);
-    // --- then a bare hand-rm of the whole decisions directory (the A3 "rm -rf") ---
+    // --- then a bare hand-rm of the whole decisions directory (the `rm -rf` path) ---
     await rm(DECISIONS_DIR(), { recursive: true, force: true });
 
-    // ACTUALLY rm'd — the live files AND the directory are gone (A7's "actually rm").
+    // The files were really deleted — the live files AND the directory are gone.
     expect(await absent(P1_YAML())).toBe(true);
     expect(await absent(ACC_MD())).toBe(true);
     expect(await absent(BLK_MD())).toBe(true);
@@ -192,22 +206,42 @@ describe("A7 — hand-delete a completed phase + rm -rf design/decisions, all ga
     // affects_exit:false ADVISORIES (the record/snapshot resolves them); NONE is a
     // strict-failing error. (A retired-decision advisory IS the correct retired signal.)
     const issues =
-      (JSON.parse(lint.stdout) as { data?: { issues?: { code: string; severity: string }[] } }).data?.issues ?? [];
+      (JSON.parse(lint.stdout) as {
+        data?: {
+          issues?: {
+            code: string;
+            severity: string;
+            task_id?: string;
+            details?: { retired_decision?: boolean };
+          }[];
+        };
+      }).data?.issues ?? [];
     const errorCodes = issues.filter((i) => i.severity === "error").map((i) => i.code);
     expect(errorCodes).not.toContain("TASK_DECISION_REF_NOT_FOUND");
     expect(errorCodes).not.toContain("PHASE_SNAPSHOT_INVALID");
     expect(errorCodes).not.toContain("TASK_DEPENDS_ON_UNRESOLVED");
     expect(errorCodes).toEqual([]); // no strict-failing error at all
+    // The retired accepted decision is not merely error-free — it surfaces a positive
+    // signal: the active P2-T1 decision_ref downgrades to a `retired_decision` advisory
+    // (warning, affects_exit:false) because the accepted record RELEASES its gate.
+    // Asserting the advisory is present (not just that no error fired) proves the link
+    // was resolved as *retired*, not silently dropped.
+    const retiredAdvisory = issues.find(
+      (i) => i.code === "TASK_DECISION_REF_NOT_FOUND" && i.task_id === "P2-T1",
+    );
+    expect(retiredAdvisory?.severity).toBe("warning");
+    expect(retiredAdvisory?.details?.retired_decision).toBe(true);
     expect(json(run(["task", "context", "P2-T1", "--agent", "claude-code", "--json"])).ok).toBe(true);
     const prep = run(["task", "prepare", "P2-T1", "--agent", "claude-code", "--json"]);
     expect(json(prep).ok).toBe(true);
     expect(prep.stdout).not.toContain("wait_for_dependencies");
 
-    // verify's DECISION check is RELEASED — the accepted record carries the active
-    // decision_refs gate after the .md is gone (A3 end-to-end; read the check, not exit).
+    // verify's decision check is released — the accepted record carries the active
+    // decision_refs gate after the .md is gone. (Read the check verdict, not the exit
+    // code: verify may exit non-zero for unrelated checks.)
     expect(decisionCheckOk(run(["verify", "--phase", "P2", "--task", "P2-T1", "--json"]))).toBe(true);
 
-    // --- the A7 headline: check:docs stays green via PR-A's retired-resolution ---
+    // --- the headline: the doc-link checker stays green via the retired-decision records ---
     const code = await checkDocLinks({ repoRoot: tmpDir, stdout: silent, stderr: silent });
     expect(code).toBe(0); // inbound links + #fragment resolve as retired, NOT broken
 
@@ -216,8 +250,8 @@ describe("A7 — hand-delete a completed phase + rm -rf design/decisions, all ga
   });
 });
 
-describe("A7 — negative control (record-carried, not checker-blind)", () => {
-  it("the SAME inbound links with a hand-rm'd decision and NO record → check:docs BROKEN", async () => {
+describe("negative control: the green is carried by the record, not by a blind checker", () => {
+  it("the SAME inbound links with a hand-rm'd decision and NO record → the doc-link checker reports BROKEN", async () => {
     await scaffold();
     // Hand-delete the accepted decision WITHOUT retiring it (no record written).
     await rm(ACC_MD());
