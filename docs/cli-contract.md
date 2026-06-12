@@ -195,7 +195,7 @@ CI. (For `error.cause_code` values, see [Public cause codes](#public-cause-codes
 | `DECISION_PRUNE_NOT_ELIGIBLE` | `decision prune` | The target decision record cannot be retired. `data.blocks[].gate` lists every **applicable** failing gate: `target_invalid` / `target_missing` / `target_unreadable` / `target_not_accepted` (not a readable, top-level, accepted `design/decisions/*.md`); `referencing_task_not_done`; `open_commitments`; `live_decision_depends` / `dependency_status_unknown`; `decision_scan_unreadable` / `dependency_unreadable`; `plan_artifacts_unreadable` (an unreadable `roadmap.yaml` / `design/phases/*.yaml`, so referencing tasks can't be fully verified); `link_rewrite_unsupported` (a reference-style inbound link, or a markdown link to the decision inside the append-only `PRUNED.md` ledger) / `link_rewrite_scan_unreadable` (an unreadable doc source — the rewrite plan would be incomplete) — all fail-closed. The **link-rewrite** gates are only evaluated once the target itself is a readable, accepted, top-level record (a `target_*` failure short-circuits them). Exit 2; raised in **both** dry-run and `--write` — the verdict is identical. See [`decision prune`](#decision-prune) for the success envelope |
 | `DECISION_PRUNE_PLAN_STALE` | `decision prune --write` | Caught in the **preflight, before any write**: re-collecting inbound links no longer reproduces the plan exactly, a span no longer byte-matches its collected `raw_link`, the **target record** vanished / became a non-regular file, or its **content changed since the verdict** (an in-place edit — same inode, different bytes). `data` is `{ mode: "write", decision, stale[] }` where each `stale[]` entry is `{source_file, line, column, expected, found}`. **Zero writes**; exit 2; re-run `decision prune` to rebuild the plan. (Drift detected mid-commit — a source edited after preflight, or the record edited/disappearing before the final delete — is `DECISION_PRUNE_WRITE_FAILED`, not this code.) |
 | `DECISION_PRUNE_WRITE_FAILED` | `decision prune --write` | A write could not complete **after** preflight passed: an unreadable ledger caught in preflight, or **`PRUNED.md` edited since preflight** (`append_ledger` — refused, never clobbered, zero writes); a **source edited since preflight** (`rewrite_links` — the edit is refused, never clobbered); the **record edited or disappearing** before the delete (`delete_record` — an in-place content edit or removal between the rewrites and the delete is refused, not claimed as a removal); or a commit-time `rename`/`unlink` I/O error (disk full, permissions, a path that became a directory). `data` is `{ mode: "write", decision, phase, partial_applied, message }` where `phase` is `append_ledger` \| `rewrite_links` \| `delete_record`. `partial_applied` is whether **this invocation** already landed a mutation — the ledger was **appended this run** (not an idempotent already-recorded retry), or **≥1 source was rewritten**: so `append_ledger` is always `false`, and `rewrite_links` / `delete_record` are `true` **except** on an already-recorded retry that fails before any rewrite lands, where they are `false`. Exit 2; inspect the working tree when `partial_applied` is `true`, then re-run — the ledger append is idempotent (a decision already recorded is not duplicated) |
-| `DECISION_RETIRE_NOT_ELIGIBLE` | `decision retire`, `decision retire --write` | The decision cannot be retired. `data.blocks[].gate` lists every failing gate: `target_invalid` / `target_missing` / `target_unreadable`; `referencing_task_not_done` (**status-sensitive** — an active task's `decision_refs` needs an **accepted** record to carry the gate; an `acceptance_refs` is carried by any valid record; a **filename-scan** gate is never carriable); `open_commitments`; `live_decision_depends` / `dependency_status_unknown` / `dependency_unreadable`; `decision_scan_unreadable`; `plan_artifacts_unreadable`. Unlike `decision prune`, there is **no `target_not_accepted`** (retire accepts any status) and **no `link_rewrite_*`** (retire rewrites no links). Exit 2; identical in dry-run and `--write` |
+| `DECISION_RETIRE_NOT_ELIGIBLE` | `decision retire`, `decision retire --write` | The decision cannot be retired. `data.blocks[].gate` lists every failing gate: `target_invalid` / `target_missing` / `target_unreadable`; `referencing_task_not_done` (**status-sensitive** — an active task's `decision_refs` needs an **accepted** record to carry the gate; an `acceptance_refs` is carried by a valid record **only when it targets a top-level `design/decisions/*.md`** — a non-decision target stays strict; a **filename-scan** gate is never carriable); `open_commitments`; `live_decision_depends` / `dependency_status_unknown` / `dependency_unreadable`; `decision_scan_unreadable`; `plan_artifacts_unreadable`. Unlike `decision prune`, there is **no `target_not_accepted`** (retire accepts any status) and **no `link_rewrite_*`** (retire rewrites no links). Exit 2; identical in dry-run and `--write` |
 | `DECISION_RETIRE_NOT_RETIRED` | `decision retire`, `decision retire --write` | The decision's `.md` is **absent** (true lexical `lstat` ENOENT, real parent) but **no valid, identity-checked decision-state record** resolves it — a broken state, not "already retired". Fail-closed, exit 2 |
 | `DECISION_RETIRE_STALE` | `decision retire`, `decision retire --write` | A path/identity/verification/TOCTOU refusal; `data.reason` is one of `source_changed` (the `.md` bytes changed between baseline and delete), `identity_changed` (a symlink final/ancestor component, a non-regular file, or an inode/dev swap), `path_inaccessible` (an escape, an unreadable scan/dependency, or unreadable plan artifacts at the final recheck), `record_unverified` (the written record was not reader-resolvable, its `source_sha256` mismatched, or `writeDecisionRecord` / `planDecisionRecord` refused a stale existing record), or `gate_would_orphan` (a **post-write** external-state recheck found a current active gate the record can't carry — a non-accepted `decision_refs`, a filename-scan gate, or a live decision dependant — that appeared in the write→delete window). **Zero destructive effect** — the `.md` is untouched. Exit 2 |
 | `TASK_FINALIZE_WRITE_REFUSED` | `task finalize --write` | Safety check refused the phase YAML write (unsafe path, outside `design/phases/`, symlink escape, unparseable, etc.) |
@@ -2322,6 +2322,94 @@ Cross-file atomicity is not claimed (a POSIX filesystem cannot transact across f
 `ledger_action` is `"appended"` when a new tombstone row was written, or `"already_recorded"` when the decision was already in `PRUNED.md` (an idempotent re-run after a partial-failure prune) — in that case **nothing was appended** and `ledger_row` reports the **existing** row already in the ledger (not a freshly-generated one). The rest of the prune (link rewrites + record deletion) still runs.
 
 Pruning a record that is **already gone** (a second `--write`) exits 2 with `DECISION_PRUNE_NOT_ELIGIBLE` / `target_missing` — fail-closed, not a convergent no-op.
+
+## `phase archive`
+
+(v2.0, design-docs-ephemeral) — `phase archive <phase-id> [--write] [--json]` archives a **terminal** phase (status `done` / `cancelled`, every task terminal): it writes a phase-snapshot record under `.code-pact/state/archive/phases/<id>.json`, then deletes the matching `design/phases/*.yaml` file. The archived phase still resolves from the snapshot — **the roadmap ref is kept**, and an active task that depends on one of its tasks keeps resolving. **Dry-run by default** — it writes nothing and deletes nothing; pass `--write` to apply. It never edits the roadmap, rewrites a link, or appends a ledger. See the [`PHASE_ARCHIVE_*` error codes](#public-codes-top-level-error-envelopes) for the fail-closed verdicts and `phase archive --help` for the full flag reference.
+
+**Eligibility (a phase is archivable only when its terminal state survives the file).** Every task must have a terminal state established **independently of the YAML** — a `done` derived from `.code-pact/state/events/`, or a `cancelled` recorded as such. A YAML `status: done` **alone is not sufficient**: it disappears with the file, so a task that is `done` in the YAML but has **no `done` event** blocks the archive with `task_done_without_done_event` (older projects whose tasks pre-date the per-event ledger hit this). The narrow escape is `--attest <task-id>=<reason>` (repeatable), which attests a legacy done-task that has no done event — it does **not** let you archive a non-terminal phase or skip the snapshot.
+
+Dry-run success envelope (`--json`):
+
+```json
+{
+  "ok": true,
+  "data": {
+    "kind": "would_archive",
+    "phase_id": "P1",
+    "yaml_path": "design/phases/P1.yaml",
+    "snapshot_path": "<repo>/.code-pact/state/archive/phases/P1.json",
+    "snapshot_action": "write"
+  }
+}
+```
+
+`--write` success envelope (same shape; `kind` → `"archived"`, `snapshot_action` is the real outcome):
+
+```json
+{
+  "ok": true,
+  "data": {
+    "kind": "archived",
+    "phase_id": "P1",
+    "yaml_path": "design/phases/P1.yaml",
+    "snapshot_path": "<repo>/.code-pact/state/archive/phases/P1.json",
+    "snapshot_action": "write"
+  }
+}
+```
+
+`--write` writes the snapshot under the [advisory write lock](#public-codes-top-level-error-envelopes) (`LOCK_HELD` on contention), readback-verifies it (the written snapshot must be reader-tolerated and its `source_sha256` must match the live YAML), re-checks the YAML's identity (content + inode/dev; an ancestor symlink escape or an in-place edit between baseline and delete is refused), then deletes the YAML **last** (least-harmful order). Any drift aborts with [`PHASE_ARCHIVE_STALE`](#public-codes-top-level-error-envelopes) (`data.reason`) and **the YAML is untouched**. The `--write` envelope has the **same shape** as the dry-run one, but `kind` becomes `"archived"` and `snapshot_action` reports the **actual** write outcome — `"write"` or `"noop"` (it never reports the dry-run-only preview value `"refresh"`; a planned `refresh` applies as `"write"`). Re-running on an already-archived phase (YAML absent, valid snapshot present) is **not** an error in the readers — but `phase archive` itself exits 2 with `PHASE_ARCHIVE_NOT_ARCHIVED` only when the YAML is absent **and no valid snapshot resolves it** (a broken state, not "already archived").
+
+Examples:
+
+```sh
+code-pact phase archive P1 --json            # dry-run: read the eligibility verdict
+code-pact phase archive P1 --write --json    # write the snapshot, delete the YAML
+```
+
+## `decision retire`
+
+(v2.0, design-docs-ephemeral) — `decision retire <path> [--write] [--json]` retires a decision of **any status**: it writes a decision-state record under `.code-pact/state/archive/decisions/<stem>-<hash8>.json`, then deletes the `design/decisions/*.md`. **Dry-run by default.** Unlike [`decision prune`](#decision-prune) (accepted-only, appends `PRUNED.md`, rewrites inbound links), `decision retire` accepts any status, writes **no** `PRUNED.md` row, and rewrites **no** inbound links — a link to the deleted `.md` resolves as *retired* via the record, so `check:docs` stays green (see the [doc-link checker](maintainers/docs-maintenance.md)). An **accepted** record `may_satisfy_active_gate`; a non-accepted record is a tombstone that **never** releases a gate. See the [`DECISION_RETIRE_*` error codes](#public-codes-top-level-error-envelopes) and `decision retire --help` for the full reference.
+
+**Eligibility.** It refuses ([`DECISION_RETIRE_NOT_ELIGIBLE`](#public-codes-top-level-error-envelopes), exit 2) when an active task still needs the decision in a way the record cannot carry: a **non-accepted `decision_refs` gate**, or **any filename-scan gate** (a gated task with no explicit `decision_refs` has no canonical key to look up, so a record can never carry it — migrate to explicit `decision_refs` first). An `acceptance_refs` is carried by a valid record **only when it points at a top-level `design/decisions/*.md`**; an `acceptance_refs` to a non-decision target (e.g. `docs/cli-contract.md`) stays strict and blocks the retire. Integrity gates (open commitments, a live decision dependant, an unreadable scan) also refuse.
+
+Dry-run success envelope (`--json`):
+
+```json
+{
+  "ok": true,
+  "data": {
+    "kind": "would_retire",
+    "decision": "design/decisions/sample-rfc.md",
+    "record_path": "<repo>/.code-pact/state/archive/decisions/sample-rfc-c6e532a1.json",
+    "record_action": "write"
+  }
+}
+```
+
+`--write` success envelope (same shape; `kind` → `"retired"`, `record_action` is the real outcome):
+
+```json
+{
+  "ok": true,
+  "data": {
+    "kind": "retired",
+    "decision": "design/decisions/sample-rfc.md",
+    "record_path": "<repo>/.code-pact/state/archive/decisions/sample-rfc-c6e532a1.json",
+    "record_action": "write"
+  }
+}
+```
+
+`--write` writes the record under the advisory write lock, readback-verifies it, re-checks the **full external state** (the same eligibility minus the not-accepted check) on current disk immediately before the delete — so an active gate that appeared in the write→delete window aborts with [`DECISION_RETIRE_STALE`](#public-codes-top-level-error-envelopes) (`data.reason`, e.g. `gate_would_orphan`) and **the `.md` is never deleted**. It re-checks the `.md`'s identity (a symlink final/ancestor component, an inode/dev swap, or a content change since baseline all refuse), then deletes the `.md` **last**. The `--write` envelope has the **same shape** as the dry-run one, but `kind` becomes `"retired"` and `record_action` reports the **actual** write outcome — `"write"` or `"noop"` (it never reports the dry-run-only preview value `"refresh"`; a planned `refresh` applies as `"write"`). A truly-absent `.md` with **no valid record** is `DECISION_RETIRE_NOT_RETIRED` (a broken state, not "already retired"), exit 2.
+
+Examples:
+
+```sh
+code-pact decision retire design/decisions/foo-rfc.md --json           # dry-run
+code-pact decision retire design/decisions/foo-rfc.md --write --json   # write the record, delete the .md
+```
 
 ## `task runbook` — read-only guidance for a single task (v1.3+, P12)
 
