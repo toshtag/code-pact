@@ -63,8 +63,10 @@ export type PruneEvaluation = {
   target_content: string | null;
 };
 
-/** A decision still being decided — its rationale may still be built upon. */
-function isLiveDecisionStatus(word: string | null): boolean {
+/** A decision still being decided — its rationale may still be built upon.
+ *  Exported (move-only, behavior unchanged) so `decision retire`'s independent
+ *  verdict reuses the SAME live-status rule rather than re-deriving it. */
+export function isLiveDecisionStatus(word: string | null): boolean {
   return word === "proposed" || word === "draft";
 }
 
@@ -88,7 +90,10 @@ function stripAngleBrackets(raw: string): string {
   return s.startsWith("<") && s.endsWith(">") ? s.slice(1, -1) : s;
 }
 
-function decisionLinksTo(content: string, target: string): boolean {
+// Exported (move-only, behavior unchanged) so `decision retire` reuses the SAME
+// conservative dependant-link gate as prune. `// keep in sync with prune.ts`:
+// retire's dependency scan must over-count links identically.
+export function decisionLinksTo(content: string, target: string): boolean {
   const urls: string[] = [];
   // inline: [t](<url> | url) with an optional "title" / 'title' / (title)
   const inline =

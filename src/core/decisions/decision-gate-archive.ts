@@ -35,8 +35,10 @@ export type RetiredDecisionGate =
 
 /** The shared identity checklist (writer not trusted). Returns the valid record
  * iff every line holds, else null. Does NOT check live presence — the two
- * exported predicates do that first. */
-function recordMatchingRef(
+ * exported predicates do that first. Exported (export-only, behavior unchanged)
+ * so `decision retire`'s post-write readback verify uses the SAME identity
+ * contract step 5's readers use, never a re-implementation. */
+export function recordMatchingRef(
   res: Awaited<ReturnType<typeof loadDecisionRecord>>,
   canonical: string,
 ): DecisionStateRecord | null {

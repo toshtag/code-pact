@@ -20,6 +20,7 @@ import {
   planStaleMessage,
   writeFailedMessage,
 } from "../../commands/decision-prune.ts";
+import { runDecisionRetire } from "../../commands/decision-retire.ts";
 
 const PRUNE_HELP = `Usage: code-pact decision prune <path> [--write] [--json]
 
@@ -58,10 +59,41 @@ Examples:
   code-pact decision prune design/decisions/foo-rfc.md --json
   code-pact decision prune design/decisions/foo-rfc.md --write --json`;
 
+const RETIRE_HELP = `Usage: code-pact decision retire <path> [--write] [--json]
+
+Retire a decision of ANY status: write its decision-state record durably,
+then delete the design/decisions/<name>.md. DRY-RUN BY DEFAULT — it reports the
+eligibility verdict and writes nothing. Pass --write to apply.
+
+Unlike \`decision prune\` (accepted-only, appends PRUNED.md, rewrites links),
+\`decision retire\` accepts any status (accepted → the record may satisfy an active
+gate; non-accepted → a tombstone that NEVER releases a gate), writes NO PRUNED row,
+and rewrites NO inbound links — a link to the deleted .md resolves as retired via
+the record (check:docs stays green). It refuses (DECISION_RETIRE_NOT_ELIGIBLE,
+exit 2) when an active task still needs the decision in a way the record can't
+carry (a non-accepted decision_refs gate, or any filename-scan gate), or any
+integrity gate fails (open commitments, a live decision dependant, an unreadable
+scan). On --write it writes the record, readback-verifies it, re-checks the
+external state immediately before deleting, and refuses with DECISION_RETIRE_STALE
+(exit 2, data.reason) on any drift — the .md is never deleted on a refusal.
+
+Options:
+  --write   Write the record then delete the .md under the advisory write lock,
+            in least-harmful order (record durable + readback-verified BEFORE the
+            delete; delete last). Default is dry-run.
+  --json    Emit the {ok,data} envelope.
+
+Examples:
+  code-pact decision retire design/decisions/foo-rfc.md
+  code-pact decision retire design/decisions/foo-rfc.md --json
+  code-pact decision retire design/decisions/foo-rfc.md --write --json`;
+
 const GROUP_HELP = `Usage: code-pact decision <subcommand>
 
 Subcommands:
-  prune <path>   Retire an accepted decision record (dry-run; --write to apply).`;
+  prune <path>    Retire an accepted decision record + rewrite links (dry-run; --write).
+  retire <path>   Retire a decision of ANY status to a durable record, then delete it
+                  (dry-run; --write to apply).`;
 
 function isHelp(argv: string[]): boolean {
   return argv.includes("--help") || argv.includes("-h") || argv[0] === "help";
@@ -171,6 +203,85 @@ export async function cmdDecision(
       human: formatDecisionPruneHuman(result),
     });
     return 2;
+  }
+
+  if (subcommand === "retire") {
+    if (isHelp(rest)) {
+      process.stdout.write(`${RETIRE_HELP}\n`);
+      return 0;
+    }
+
+    let values: Record<string, unknown>;
+    let positionals: string[];
+    try {
+      ({ values, positionals } = strictParse(
+        "decision retire",
+        rest,
+        { json: { type: "boolean" }, write: { type: "boolean" } },
+        { allowPositionals: true },
+      ));
+    } catch (err) {
+      if (!(err instanceof ConfigError)) throw err;
+      emitError(globalJson || rest.includes("--json"), "CONFIG_ERROR", err.message);
+      return 2;
+    }
+
+    const json = globalJson || values.json === true;
+    const write = values.write === true;
+    const target = positionals[0];
+    if (!target) {
+      emitError(json, "CONFIG_ERROR", "decision retire requires a decision path (design/decisions/<name>.md)");
+      return 2;
+    }
+    if (positionals.length > 1) {
+      emitError(json, "CONFIG_ERROR", "decision retire takes exactly one decision path");
+      return 2;
+    }
+
+    const cwd = process.cwd();
+    const runImpl = async (): Promise<number> => {
+      const r = await runDecisionRetire({ cwd, path: target, write, now: new Date() });
+      switch (r.kind) {
+        case "would_retire":
+        case "would_already_retired":
+        case "retired":
+        case "already_retired":
+          if (json) {
+            emitOk(r);
+          } else {
+            const line =
+              r.kind === "would_retire"
+                ? `Dry run: would retire ${r.decision} (write its record, then delete the .md). Run with --write to apply.`
+                : r.kind === "retired"
+                  ? `Retired ${r.decision}: decision-state record written, design/decisions .md deleted.`
+                  : r.kind === "would_already_retired"
+                    ? `${r.decision} is already retired (its .md is gone and a valid record resolves it). Nothing to do.`
+                    : `${r.decision} is already retired. Nothing to do.`;
+            process.stdout.write(`${line}\n`);
+          }
+          return 0;
+        case "ineligible":
+          emitError(json, "DECISION_RETIRE_NOT_ELIGIBLE", `decision "${target}" cannot be retired yet`, {
+            data: { decision: r.decision, blocks: r.blocks },
+          });
+          return 2;
+        case "not_retired":
+          emitError(json, "DECISION_RETIRE_NOT_RETIRED", `decision "${target}" is missing and no valid record resolves it: ${r.reason}`, {
+            data: { decision: r.decision, reason: r.reason },
+          });
+          return 2;
+        case "stale":
+          emitError(json, "DECISION_RETIRE_STALE", `decision "${target}" retire refused: ${r.detail}`, {
+            data: { decision: r.decision, reason: r.reason, detail: r.detail },
+          });
+          return 2;
+      }
+    };
+
+    if (write) {
+      return withWriteLock(cwd, `decision retire ${target} --write`, json, runImpl);
+    }
+    return runImpl();
   }
 
   emitError(effectiveJson, "CONFIG_ERROR", `unknown decision subcommand: ${subcommand}`);
