@@ -9,7 +9,7 @@ import {
 } from "../schemas/phase-snapshot.ts";
 import { loadRoadmap } from "../plan/roadmap.ts";
 import { resolvePhaseRef } from "../plan/resolve-phase.ts";
-import { loadMergedProgress } from "../progress/io.ts";
+import { loadMergedProgress, mergeProgressStreams } from "../progress/io.ts";
 import { readPackSources } from "../progress/all-sources.ts";
 import { deriveTaskState } from "../progress/task-state.ts";
 import { computeEventId } from "../progress/event-id.ts";
@@ -390,10 +390,15 @@ export async function planPhaseSnapshot(
   const progress = await loadMergedProgress(cwd);
   const mergedEvents = progress.log.events;
   const packSources = await readPackSources(cwd, "strict");
-  const durableEvents = [
-    ...packSources.looseFiles.map((f) => f.event),
-    ...packSources.validatedPackFiles.map((f) => f.event),
-  ];
+  // Order the durable events the SAME way the live reader does (dedup by id, sort
+  // by at/id) — `deriveTaskState` reads the LAST element by position, so a
+  // file-read-append order could pick the wrong "current" once a task has events
+  // in both loose AND pack (the Layer-2 transition state). Reuse the canonical
+  // merger with no legacy input so producer and reader can never disagree.
+  const durableEvents = mergeProgressStreams(
+    [],
+    [...packSources.looseFiles, ...packSources.validatedPackFiles],
+  );
   const attestations = opts.attestations ?? {};
   const claimedAttestations = new Set(Object.keys(attestations));
   const tasks: SnapshotTask[] = [];
