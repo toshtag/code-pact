@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run as cliRun, ensureCliBuilt, type RunResult } from "../helpers/cli.ts";
+import { seedDurableEvents } from "../helpers/seed-events.ts";
 import { checkDocLinks } from "../../scripts/check-doc-links.ts";
 
 // Hand-deleting design docs keeps every gate green.
@@ -155,7 +156,7 @@ async function scaffold(): Promise<void> {
   await writeFile(join(tmpDir, "design", "decisions", "accepted-rfc.md"), ACCEPTED, "utf8");
   await writeFile(join(tmpDir, "design", "decisions", "blocked-rfc.md"), BLOCKED, "utf8");
   await mkdir(join(tmpDir, ".code-pact", "state"), { recursive: true });
-  await writeFile(join(tmpDir, ".code-pact", "state", "progress.yaml"), PROGRESS, "utf8");
+  await seedDurableEvents(tmpDir, PROGRESS);
   await writeFile(join(tmpDir, "docs", "notes.md"), NOTES, "utf8");
 }
 

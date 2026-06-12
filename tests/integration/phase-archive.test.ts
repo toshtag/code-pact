@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, rm, stat, symlink, writeFile, readFile } from "node:fs/
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run as cliRun, ensureCliBuilt, type RunResult } from "../helpers/cli.ts";
+import { seedDurableEvents } from "../helpers/seed-events.ts";
 
 // design-docs-ephemeral step 7 PR-B1 — `phase archive --write`, the first
 // destructive verb. End-to-end via the real CLI: dry-run is lock-free and writes
@@ -95,7 +96,7 @@ async function scaffold(opts: { p1?: string } = {}): Promise<void> {
   await writeFile(join(tmpDir, "design", "phases", "P1-x.yaml"), opts.p1 ?? P1_DONE, "utf8");
   await writeFile(join(tmpDir, "design", "phases", "P2-y.yaml"), P2_DEP, "utf8");
   await mkdir(join(tmpDir, ".code-pact", "state"), { recursive: true });
-  await writeFile(join(tmpDir, ".code-pact", "state", "progress.yaml"), PROGRESS, "utf8");
+  await seedDurableEvents(tmpDir, PROGRESS);
 }
 
 const P1_YAML = () => join(tmpDir, "design", "phases", "P1-x.yaml");

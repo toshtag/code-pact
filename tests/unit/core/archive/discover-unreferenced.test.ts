@@ -27,6 +27,7 @@ import {
   loadPhaseSnapshot,
 } from "../../../../src/core/archive/load-phase-snapshot.ts";
 import { writePhaseSnapshot } from "../../../../src/core/archive/phase-snapshot.ts";
+import { seedDurableEvents } from "../../../helpers/seed-events.ts";
 import { archivePhasesDir, phaseSnapshotPath } from "../../../../src/core/archive/paths.ts";
 
 const NOW = new Date("2026-06-10T00:00:00.000Z");
@@ -77,10 +78,9 @@ afterEach(async () => {
 async function writeP1Snapshot(): Promise<void> {
   await writeFile(join(cwd, "design", "roadmap.yaml"), ROADMAP, "utf8");
   await writeFile(join(cwd, "design", "phases", "P1-x.yaml"), P1_DONE, "utf8");
-  await writeFile(
-    join(cwd, ".code-pact", "state", "progress.yaml"),
+  await seedDurableEvents(
+    cwd,
     `events:\n  - task_id: P1-T1\n    status: done\n    at: 2026-06-01T00:00:00.000Z\n    actor: agent\n`,
-    "utf8",
   );
   const o = await writePhaseSnapshot(cwd, "P1", { now: NOW });
   expect(o.kind).toBe("written");

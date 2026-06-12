@@ -10,6 +10,7 @@ import {
 import { PhaseSnapshot } from "../../../../src/core/schemas/phase-snapshot.ts";
 import { SnapshotTask } from "../../../../src/core/schemas/phase-snapshot.ts";
 import { sha256Hex } from "../../../../src/core/archive/paths.ts";
+import { seedDurableEvents } from "../../../helpers/seed-events.ts";
 
 const NOW = new Date("2026-06-10T00:00:00.000Z");
 
@@ -98,11 +99,7 @@ async function scaffold(opts?: { p2DependsOn?: string; progress?: string; p1?: s
     P2_ACTIVE(opts?.p2DependsOn ?? "P1-T1"),
     "utf8",
   );
-  await writeFile(
-    join(cwd, ".code-pact", "state", "progress.yaml"),
-    opts?.progress ?? DONE_EVENT_P1T1,
-    "utf8",
-  );
+  await seedDurableEvents(cwd, opts?.progress ?? DONE_EVENT_P1T1);
 }
 
 function evidenceOf(record: PhaseSnapshot, taskId: string) {
@@ -154,20 +151,16 @@ describe("re-validation with an EXISTING record + unchanged phase YAML (no early
   it("progress events turn `failed` after the snapshot → drift, not noop", async () => {
     await scaffold();
     expect((await writePhaseSnapshot(cwd, "P1", { now: NOW })).kind).toBe("written");
-    // Same YAML; add a contradicting event for the done task.
-    await writeFile(
-      join(cwd, ".code-pact", "state", "progress.yaml"),
+    // Same YAML; append a contradicting later event for the done task (the
+    // earlier done event is already on disk from scaffold; loose files append).
+    await seedDurableEvents(
+      cwd,
       `events:
-  - task_id: P1-T1
-    status: done
-    at: 2026-06-01T00:00:00.000Z
-    actor: agent
   - task_id: P1-T1
     status: failed
     at: 2026-06-03T00:00:00.000Z
     actor: agent
 `,
-      "utf8",
     );
     const outcome = await writePhaseSnapshot(cwd, "P1", { now: NOW });
     expect(outcome.kind).toBe("ineligible");

@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run as cliRun, ensureCliBuilt, type RunResult } from "../helpers/cli.ts";
+import { seedDurableEvents } from "../helpers/seed-events.ts";
 import { writePhaseSnapshot } from "../../src/core/archive/phase-snapshot.ts";
 import { writeDecisionRecord } from "../../src/core/archive/decision-record.ts";
 
@@ -194,7 +195,7 @@ async function scaffold(adr: string, p2: string = P2_DEP_DECISION): Promise<void
   await writeFile(join(tmpDir, "design", "phases", "P1-x.yaml"), P1_DONE, "utf8");
   await writeFile(join(tmpDir, "design", "phases", "P2-y.yaml"), p2, "utf8");
   await mkdir(join(tmpDir, ".code-pact", "state"), { recursive: true });
-  await writeFile(join(tmpDir, ".code-pact", "state", "progress.yaml"), PROGRESS, "utf8");
+  await seedDurableEvents(tmpDir, PROGRESS);
   await mkdir(join(tmpDir, "design", "decisions"), { recursive: true });
   await writeFile(join(tmpDir, XREF), adr, "utf8");
 }

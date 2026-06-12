@@ -37,6 +37,12 @@ export {
   PhaseSnapshot,
 } from "./phase-snapshot.ts";
 
+export {
+  PackedEvent,
+  EventPack,
+  EVENT_PACK_SCHEMA_VERSION,
+} from "./event-pack.ts";
+
 export { DecisionStateRecord } from "./decision-state-record.ts";
 
 export {

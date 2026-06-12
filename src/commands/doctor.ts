@@ -9,9 +9,14 @@ import { computeEventId } from "../core/progress/event-id.ts";
 import {
   type LoadedEventFile,
   parseEventFileName,
-  readEventFiles,
   validateEventFileContent,
 } from "../core/progress/events-io.ts";
+import {
+  readPackSources,
+  durableIdsAndArchivedTasks,
+  filterArchivedTaskLegacyConflicts,
+} from "../core/progress/all-sources.ts";
+import { validateSnapshotEventEvidence } from "../core/archive/snapshot-evidence.ts";
 import { Project } from "../core/schemas/project.ts";
 import {
   ACCEPTED_MODEL_VERSION_INPUTS,
@@ -41,6 +46,9 @@ import {
   resolveMissingPhaseRef,
   type ArchivedTaskEntry,
 } from "../core/archive/load-phase-snapshot.ts";
+import { validateEventPackTier1 } from "../core/archive/event-pack-reader.ts";
+import { sha256Hex } from "../core/archive/paths.ts";
+import { PhaseSnapshot } from "../core/schemas/phase-snapshot.ts";
 import { phaseFilePresence } from "../core/plan/checks/fs.ts";
 import { isSupportedAgent, type SupportedAgent } from "../core/agents.ts";
 import { CONSTITUTION_PLACEHOLDER_MARKERS } from "../core/constitution.ts";
@@ -362,22 +370,43 @@ async function checkProgressLog(
     // ENOENT → missing legacy file; fall through with empty legacy events.
   }
 
-  // Merge the per-event ledger for orphan + conflict detection. A corrupt event
-  // file carries its own diagnostic code (set by validateEventFileContent):
-  // EVENT_FILE_ID_MISMATCH for a broken filename↔content invariant, INVALID_YAML
-  // for an unparseable body, SCHEMA_ERROR for a parseable-but-invalid event. We
-  // map it straight through so doctor and plan lint never disagree on the code.
-  let eventFiles;
+  // Merge loose + Tier-2-bound packs for orphan + conflict detection (lenient: a
+  // corrupt event file / unbound pack carries its own diagnostic code straight
+  // through, so doctor and plan lint never disagree). EVENT_FILE_ID_MISMATCH /
+  // INVALID_YAML / EVENT_PACK_INVALID are passed through; anything else → SCHEMA_ERROR.
+  let packSources;
   try {
-    eventFiles = await readEventFiles(cwd);
+    packSources = await readPackSources(cwd, "lenient");
   } catch (err) {
     const tag = (err as NodeJS.ErrnoException).code;
     const code =
-      tag === "EVENT_FILE_ID_MISMATCH" || tag === "INVALID_YAML" ? tag : "SCHEMA_ERROR";
+      tag === "EVENT_FILE_ID_MISMATCH" || tag === "INVALID_YAML" || tag === "EVENT_PACK_INVALID"
+        ? tag
+        : "SCHEMA_ERROR";
     issues.push({ code, severity: "error", message: (err as Error).message });
     return;
   }
-  const events = mergeProgressStreams(legacyEvents, eventFiles);
+  let returnAfterIssues = false;
+  for (const issue of packSources.issues) {
+    issues.push({ code: issue.code, severity: "error", message: issue.message });
+    returnAfterIssues = true;
+  }
+  if (returnAfterIssues) return; // a corrupt/unbound pack: stop before orphan logic
+  // Archived-task legacy conflict gate (lenient: collect + exclude from merge).
+  const { durableIds, archivedTaskIds } = await durableIdsAndArchivedTasks(cwd, packSources);
+  const { mergeableLegacyEvents, issues: legacyIssues } = filterArchivedTaskLegacyConflicts(
+    legacyEvents,
+    durableIds,
+    archivedTaskIds,
+    "lenient",
+  );
+  for (const issue of legacyIssues) {
+    issues.push({ code: issue.code, severity: "error", message: issue.message });
+  }
+  const events = mergeProgressStreams(mergeableLegacyEvents, [
+    ...packSources.looseFiles,
+    ...packSources.validatedPackFiles,
+  ]);
 
   // Known ids = live ∪ archived (step 4a): a ledger event for a hand-deleted
   // COMPLETED phase's task is not an orphan. The archived set is collision-checked
@@ -392,6 +421,41 @@ async function checkProgressLog(
   }
   for (const planIssue of detectProgressEventConflicts(events)) {
     issues.push(planIssueToDoctor(planIssue));
+  }
+}
+
+/**
+ * Validate every archived-snapshot `progress_events` evidence against the
+ * durable ledger (loose ∪ Tier-2-validated packs — never legacy). A snapshot
+ * unreadable during the scan is a silent skip (it surfaces elsewhere), matching
+ * the fail-soft discovery contract. A corrupt pack read entirely also skips
+ * (checkProgressLog owns that error code).
+ */
+async function checkSnapshotEventEvidence(cwd: string, issues: DoctorIssue[]): Promise<void> {
+  let packSources;
+  try {
+    packSources = await readPackSources(cwd, "lenient");
+  } catch {
+    return; // pack read failure is owned by checkProgressLog
+  }
+  const resolved = new Map<string, ProgressEvent>();
+  for (const f of packSources.looseFiles) resolved.set(f.id, f.event);
+  for (const f of packSources.validatedPackFiles) resolved.set(f.id, f.event);
+  const { result } = await validateSnapshotEventEvidence(cwd, resolved);
+  if (!result.ok) {
+    for (const issue of result.issues) {
+      issues.push({
+        code: "SNAPSHOT_EVENT_EVIDENCE_UNRESOLVABLE",
+        severity: "error",
+        message: issue.message,
+        details: {
+          phase_id: issue.phase_id,
+          task_id: issue.task_id,
+          event_id: issue.event_id,
+          reason: issue.reason,
+        },
+      });
+    }
   }
 }
 
@@ -994,10 +1058,69 @@ async function readEventFilesAtRev(
   return out;
 }
 
+// Reads the committed event packs at a git revision, binding each pack to the
+// snapshot AT THAT REVISION (snapshot_sha256 / phase_id / task membership), so a
+// corrupt/forged committed pack cannot enter the drift comparison as valid
+// history. Returns:
+//   - LoadedEventFile[] — events from packs that pass Tier-1 + rev-level binding
+//   - []                — no packs at that revision
+//   - null              — a committed pack is corrupt / fails rev-level binding
+async function readEventPacksAtRev(
+  cwd: string,
+  rev: string,
+): Promise<LoadedEventFile[] | null> {
+  const ls = await runGit(cwd, [
+    "ls-tree",
+    "-r",
+    "--name-only",
+    rev,
+    ".code-pact/state/archive/event-packs/",
+  ]);
+  if (!ls.ok) return []; // no packs tree at this revision
+  const paths = ls.stdout
+    .split("\n")
+    .map((s) => s.trim())
+    .filter((p) => p.length > 0 && p.endsWith(".json"));
+  const out: LoadedEventFile[] = [];
+  for (const p of paths) {
+    const fileStem = basename(p, ".json");
+    const show = await runGit(cwd, ["show", `${rev}:${p}`]);
+    if (!show.ok) continue;
+    let loaded;
+    try {
+      loaded = validateEventPackTier1(fileStem, show.stdout, p);
+    } catch {
+      return null; // corrupt committed pack
+    }
+    // Rev-level binding: the snapshot at THIS revision must match the pack.
+    const snapShow = await runGit(cwd, [
+      "show",
+      `${rev}:.code-pact/state/archive/phases/${fileStem}.json`,
+    ]);
+    if (!snapShow.ok) return null; // pack with no snapshot at the rev — unbound
+    if (sha256Hex(snapShow.stdout) !== loaded.pack.snapshot_sha256) return null;
+    let snapshot;
+    try {
+      snapshot = PhaseSnapshot.parse(JSON.parse(snapShow.stdout) as unknown);
+    } catch {
+      return null; // corrupt committed snapshot at the rev
+    }
+    if (snapshot.phase_id !== loaded.phaseId) return null;
+    const snapshotTaskIds = new Set(snapshot.tasks.map((t) => t.id));
+    for (const entry of loaded.entries) {
+      if (!snapshotTaskIds.has(entry.event.task_id)) return null; // injection
+    }
+    out.push(...loaded.entries);
+  }
+  return out;
+}
+
 // The merged committed ledger at a revision: legacy progress.yaml + per-event
-// files. Reads the git OBJECT tree ONLY — never the workspace, so a dirty
-// working tree cannot leak into the branch-diff. null when either source is
-// unparseable / corrupt at that revision.
+// files + event packs (rev-bound). Reads the git OBJECT tree ONLY — never the
+// workspace, so a dirty working tree cannot leak into the branch-diff. Applies
+// the same LEGACY_EVENT_FOR_ARCHIVED_TASK exclusion at the rev so working-tree
+// and git-rev readers treat archived-task legacy events identically. null when
+// any source is unparseable / corrupt at that revision.
 async function readMergedEventsAtRev(
   cwd: string,
   rev: string,
@@ -1006,7 +1129,47 @@ async function readMergedEventsAtRev(
   if (legacy === null) return null;
   const events = await readEventFilesAtRev(cwd, rev);
   if (events === null) return null;
-  return mergeProgressStreams(legacy, events);
+  const packs = await readEventPacksAtRev(cwd, rev);
+  if (packs === null) return null;
+  // Rev-level legacy-conflict exclusion, scoped to archived task_ids at the rev.
+  const archivedTaskIds = await readArchivedTaskIdsAtRev(cwd, rev);
+  const durableIds = new Set<string>();
+  for (const f of events) durableIds.add(f.id);
+  for (const f of packs) durableIds.add(f.id);
+  const mergeableLegacy = legacy.filter((e) => {
+    if (!archivedTaskIds.has(e.task_id)) return true;
+    return durableIds.has(computeEventId(e));
+  });
+  return mergeProgressStreams(mergeableLegacy, [...events, ...packs]);
+}
+
+// The archived task_ids committed at a revision (snapshot task ids in the git
+// tree at `rev`). A corrupt snapshot at the rev contributes no ids (soft).
+async function readArchivedTaskIdsAtRev(cwd: string, rev: string): Promise<Set<string>> {
+  const ids = new Set<string>();
+  const ls = await runGit(cwd, [
+    "ls-tree",
+    "-r",
+    "--name-only",
+    rev,
+    ".code-pact/state/archive/phases/",
+  ]);
+  if (!ls.ok) return ids;
+  const paths = ls.stdout
+    .split("\n")
+    .map((s) => s.trim())
+    .filter((p) => p.length > 0 && p.endsWith(".json"));
+  for (const p of paths) {
+    const show = await runGit(cwd, ["show", `${rev}:${p}`]);
+    if (!show.ok) continue;
+    try {
+      const snapshot = PhaseSnapshot.parse(JSON.parse(show.stdout) as unknown);
+      for (const t of snapshot.tasks) ids.add(t.id);
+    } catch {
+      // corrupt snapshot at the rev contributes no ids (soft)
+    }
+  }
+  return ids;
 }
 
 // A stable identity key for a progress event — the same content id the ledger
@@ -1053,17 +1216,24 @@ async function checkControlPlaneBranchNotDriven(
   );
   if (realChanged.length === 0) return;
 
-  // Gate 3: the committed ledger must be git-tracked — `progress.yaml` and/or
-  // the per-event files. A repo that commits neither cannot be audited by CI,
-  // so stay silent rather than cry wolf.
+  // Gate 3: the committed ledger must be git-tracked — `progress.yaml`, the
+  // per-event files, AND/OR the event packs. After compaction the loose events
+  // are gone and the history lives in packs, so a repo whose entire ledger is in
+  // packs still counts as tracked (else the gate silently skips post-compaction).
   const trackedLegacy = await runGit(cwd, [
     "ls-files",
     "--error-unmatch",
     ".code-pact/state/progress.yaml",
   ]);
   const trackedEvents = await runGit(cwd, ["ls-files", ".code-pact/state/events/"]);
+  const trackedEventPacks = await runGit(cwd, [
+    "ls-files",
+    ".code-pact/state/archive/event-packs/",
+  ]);
   const ledgerTracked =
-    trackedLegacy.ok || (trackedEvents.ok && trackedEvents.stdout.trim().length > 0);
+    trackedLegacy.ok ||
+    (trackedEvents.ok && trackedEvents.stdout.trim().length > 0) ||
+    (trackedEventPacks.ok && trackedEventPacks.stdout.trim().length > 0);
   if (!ledgerTracked) return;
 
   // Gate 4: did the branch ADD a started/done for a KNOWN non-TUTORIAL task?
@@ -1140,6 +1310,11 @@ export async function runDoctor(
 
   // 4. progress.yaml (requires phases + archived ids for the orphan check)
   await checkProgressLog(cwd, phases, archivedKnownTaskIds, allIssues);
+
+  // 4b. archived-snapshot evidence: every progress_events event_id must resolve
+  // from the durable ledger (loose ∪ validated packs). Closes the silent
+  // provenance-loss gap. So `validate` (which delegates here) enforces it too.
+  await checkSnapshotEventEvidence(cwd, allIssues);
 
   // 5. agent profiles + model_map completeness (requires project)
   if (project) {

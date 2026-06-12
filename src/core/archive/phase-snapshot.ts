@@ -10,6 +10,7 @@ import {
 import { loadRoadmap } from "../plan/roadmap.ts";
 import { resolvePhaseRef } from "../plan/resolve-phase.ts";
 import { loadMergedProgress } from "../progress/io.ts";
+import { readPackSources } from "../progress/all-sources.ts";
 import { deriveTaskState } from "../progress/task-state.ts";
 import { computeEventId } from "../progress/event-id.ts";
 import { resolveWithinProject } from "../path-safety.ts";
@@ -74,6 +75,7 @@ export type PhaseSnapshotBlock =
   | { kind: "phase_not_terminal"; status: string }
   | { kind: "task_not_terminal"; task_id: string; status: string }
   | { kind: "task_done_without_done_event"; task_id: string }
+  | { kind: "legacy_only_terminal_evidence"; task_id: string }
   | {
       kind: "task_done_progress_state_drift";
       task_id: string;
@@ -379,7 +381,19 @@ export async function planPhaseSnapshot(
     }
   }
 
+  // The producer mints terminal_evidence from DURABLE sources only — loose event
+  // files ∪ Tier-2-validated event packs — the SAME set the validator resolves
+  // against. Minting an id only the merged-with-legacy view can see would break
+  // evidence the instant the snapshot is written (the validator excludes legacy).
+  // `mergedEvents` (= durable ∪ legacy) is kept ONLY to detect a done event that
+  // exists in legacy alone, so that case blocks with a clear "run migrate" hint.
   const progress = await loadMergedProgress(cwd);
+  const mergedEvents = progress.log.events;
+  const packSources = await readPackSources(cwd, "strict");
+  const durableEvents = [
+    ...packSources.looseFiles.map((f) => f.event),
+    ...packSources.validatedPackFiles.map((f) => f.event),
+  ];
   const attestations = opts.attestations ?? {};
   const claimedAttestations = new Set(Object.keys(attestations));
   const tasks: SnapshotTask[] = [];
@@ -391,7 +405,7 @@ export async function planPhaseSnapshot(
       // Status drift: a cancelled task whose derived progress state is `done`
       // would make the snapshot contradict the event-derived dependency
       // satisfaction readers rely on. Refuse to freeze a contradiction.
-      if (deriveTaskState(progress.log.events, task.id).current === "done") {
+      if (deriveTaskState(durableEvents, task.id).current === "done") {
         blocks.push({ kind: "cancelled_task_with_done_event", task_id: task.id });
       }
       if (claimedAttestations.has(task.id)) {
@@ -418,8 +432,9 @@ export async function planPhaseSnapshot(
       blocks.push({ kind: "task_not_terminal", task_id: task.id, status: task.status });
       continue;
     }
-    const taskEvents = progress.log.events.filter((e) => e.task_id === task.id);
-    const derived = deriveTaskState(progress.log.events, task.id).current;
+    // Evidence is derived from DURABLE events only (loose ∪ pack) — never legacy.
+    const taskEvents = durableEvents.filter((e) => e.task_id === task.id);
+    const derived = deriveTaskState(durableEvents, task.id).current;
     let evidence: TerminalEvidence;
     if (derived === "done") {
       if (claimedAttestations.has(task.id)) {
@@ -435,10 +450,9 @@ export async function planPhaseSnapshot(
         .map((e) => computeEventId(e));
       evidence = { kind: "progress_events", event_ids: eventIds };
     } else if (taskEvents.length > 0) {
-      // Progress history exists and it does NOT say done: that is a drift
-      // between the design YAML and the event-derived truth. An attestation is
-      // the legacy rescue for ABSENT history — never a license to overrule
-      // recorded events with a human reason. Refuse to freeze the contradiction.
+      // Durable history exists and it does NOT say done: a drift between the
+      // design YAML and the event-derived truth. An attestation is the rescue for
+      // ABSENT history — never a license to overrule recorded events. Refuse.
       claimedAttestations.delete(task.id);
       blocks.push({
         kind: "task_done_progress_state_drift",
@@ -447,6 +461,14 @@ export async function planPhaseSnapshot(
         derived_status: derived,
         last_event_status: taskEvents[taskEvents.length - 1]!.status,
       });
+      continue;
+    } else if (deriveTaskState(mergedEvents, task.id).current === "done") {
+      // No DURABLE history, but the legacy monolith alone says done. Minting a
+      // legacy-derived event_id would dangle the instant the snapshot is written
+      // (the validator never reads legacy). Block with the migrate hint rather
+      // than forge durable evidence or silently attest.
+      claimedAttestations.delete(task.id);
+      blocks.push({ kind: "legacy_only_terminal_evidence", task_id: task.id });
       continue;
     } else if (attestations[task.id]) {
       claimedAttestations.delete(task.id);

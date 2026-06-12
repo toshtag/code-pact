@@ -1,13 +1,14 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { stringify as stringifyYaml } from "yaml";
 import { atomicWriteText } from "../../io/atomic-text.ts";
 import {
   ProgressLog,
   type ProgressEvent,
 } from "../schemas/progress-event.ts";
 import { computeEventId, normalizeAt } from "./event-id.ts";
-import { type LoadedEventFile, readEventFiles } from "./events-io.ts";
+import { type LoadedEventFile } from "./events-io.ts";
+import { readAllProgressEventSources } from "./all-sources.ts";
 
 export const PROGRESS_PATH_SEGMENTS = [".code-pact", "state", "progress.yaml"];
 
@@ -91,17 +92,28 @@ export function mergeProgressStreams(
 export async function loadMergedProgress(cwd: string): Promise<LoadedProgress> {
   const path = progressPath(cwd);
 
+  // `raw` is the legacy file bytes (empty when absent) — kept for callers that
+  // need the raw string. The merged events come from the shared reader, so event
+  // packs are included everywhere and the LEGACY_EVENT_FOR_ARCHIVED_TASK gate is
+  // enforced. Strict mode: a corrupt/unbound pack or a legacy conflict throws.
   let raw = "";
-  let legacyEvents: ProgressEvent[] = [];
   try {
     raw = await readFile(path, "utf8");
-    legacyEvents = ProgressLog.parse(parseYaml(raw) as unknown).events;
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
   }
 
-  const eventFiles = await readEventFiles(cwd);
-  return { raw, log: { events: mergeProgressStreams(legacyEvents, eventFiles) }, path };
+  const sources = await readAllProgressEventSources(cwd, { mode: "strict" });
+  return {
+    raw,
+    log: {
+      events: mergeProgressStreams(sources.mergeableLegacyEvents, [
+        ...sources.looseFiles,
+        ...sources.validatedPackFiles,
+      ]),
+    },
+    path,
+  };
 }
 
 /**
