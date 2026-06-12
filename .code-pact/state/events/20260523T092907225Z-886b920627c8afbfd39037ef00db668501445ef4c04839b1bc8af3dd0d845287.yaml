@@ -1,0 +1,9 @@
+task_id: P27-T0
+status: done
+at: 2026-05-23T09:29:07.225Z
+actor: agent
+agent: claude-code
+evidence:
+  - commands
+  - decision
+id: 886b920627c8afbfd39037ef00db668501445ef4c04839b1bc8af3dd0d845287

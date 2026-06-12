@@ -1,0 +1,10 @@
+task_id: P44-T0
+status: done
+at: 2026-06-01T04:31:05.088Z
+actor: agent
+agent: claude-code
+evidence:
+  - commands
+  - decision
+source: loop
+id: 6aa2315ba9cffb97474aff9fd92bbd78a959a14e268361331198446cbd03f1e4

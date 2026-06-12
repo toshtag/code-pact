@@ -1,0 +1,9 @@
+task_id: P11-T6
+status: done
+at: 2026-05-20T08:59:47.231Z
+actor: agent
+agent: claude-code
+evidence:
+  - commands
+  - decision
+id: 74b59fdb6e76ec837aff82e033da2d4a3fd1f67f72663d9346f001bde141fc58

@@ -1,0 +1,9 @@
+task_id: P24-T2
+status: done
+at: 2026-05-23T08:52:15.972Z
+actor: agent
+agent: claude-code
+evidence:
+  - commands
+  - decision
+id: e6760213dff226abf79b8b43dced944d80933da34d19ef72a32cf7c1d930ba26
