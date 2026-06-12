@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "canonical_ref": "design/decisions/design-docs-ephemeral-directive.md",
+  "original_path": "design/decisions/design-docs-ephemeral-directive.md",
+  "path_sha256": "7694485f657ec241574e62714fcaba5a6a2ea274f5ab7ec93e3f767c9375f19f",
+  "title": "Product Directive: Design docs are ephemeral (v2.0 control-plane relocation)",
+  "adr_status_at_snapshot": "accepted",
+  "may_satisfy_active_gate": true,
+  "snapshotted_at": "2026-06-12T02:59:53.383Z",
+  "source_sha256": "c2f56995b4274237e1d5f71ac9ee8f958ee44b3a661eb8ef9c1ae37e86da653a"
+}

@@ -51,10 +51,7 @@ decision in this project.
     fail closed** — never silently swallowed. The doc-link checker resolves a link
     to a hand-deleted, record-backed decision as *retired*, not broken.
   This model **supersedes** the pre-v2.0 rule that "`design/` is the source of
-  truth. Always." The model is now implemented; the transitional
-  [`design/decisions/design-docs-ephemeral-directive.md`](decisions/design-docs-ephemeral-directive.md)
-  that governed the migration may be retired in a follow-up lifecycle PR once its
-  public footprint references are removed or reworded.
+  truth. Always."
 
 - **Small surfaces, clear contracts.** Each command does one thing.
   Options that modify behavior must be explicit flags — no ambient magic.
