@@ -21,25 +21,40 @@ decision in this project.
 - **Fail loudly, recover cleanly.** Validation errors block all writes.
   Partial state must never be silently created. Idempotent operations are preferred.
 
-- **Runtime truth is moving to `.code-pact/state` (v2.0 target model — in
-  transition, not yet implemented).** The v2.0 target: **archived / completed
-  phase references and retired / settled decision outcomes** resolve from
-  `.code-pact/state` plus generated, deterministic control snapshots. The
-  **active roadmap and not-yet-archived phase / task definitions remain `design/`
-  inputs** — relocating *those* into `.code-pact/state` is a separate future step,
-  explicitly out of v2.0 scope. `design/` becomes the human authoring surface and
-  *historical working docs* —
-  **completed** `design/phases/*.yaml` and **retired** `design/decisions/*.md`
-  become **ephemeral** (removable / `.gitignore`-able once their
-  active-task-needed state is snapshotted; missing *archived/historical* docs
-  tolerated, missing *active* control docs fail closed). **Until the
-  snapshot/tombstone writers and readers land, current readers still require the
-  existing design files**: the roadmap, every roadmap-referenced phase YAML, and
-  live decision gates behave exactly as before — do not delete them yet. This
-  *direction* **supersedes** the pre-v2.0 rule that "`design/` is the source of
-  truth. Always."; the transition is governed by
+- **Runtime truth for completed / retired material lives in `.code-pact/state`
+  (v2.0 model — implemented).** **Archived / completed phase references and
+  retired / settled decision outcomes** resolve from `.code-pact/state` plus
+  generated, deterministic control snapshots/records. The **active roadmap and
+  not-yet-archived phase / task definitions remain `design/` inputs** — relocating
+  *those* into `.code-pact/state` is a separate future step, explicitly out of
+  v2.0 scope. `design/` is the human authoring surface for *active* control-plane
+  docs; **completed** `design/phases/*.yaml` and **retired** `design/decisions/*.md`
+  are **ephemeral** (removable / `.gitignore`-able), with these locked rules:
+  - **Completed/retired truth is snapshot/record-backed.** A completed phase's
+    terminal state survives in a validated archive snapshot
+    (`.code-pact/state/archive/phases/<id>.json`); a retired decision's outcome
+    survives in a decision-state record
+    (`.code-pact/state/archive/decisions/<stem>-<hash8>.json`). `PRUNED.md` is a
+    legacy/prune ledger — a read-only backward-compat input, **not** the durable
+    v2.0 retire truth; the decision-state record is.
+  - **Hand-delete is allowed only after the snapshot/record exists.** A completed
+    `design/phases/*.yaml` or any `design/decisions/*.md` — up to and including the
+    whole `design/decisions/` directory — may be deleted by hand (or via the
+    `phase archive --write` / `decision retire --write` verbs) **once** its
+    snapshot/record is written.
+  - **Readers/checkers resolve archived/retired state from `.code-pact/state`,
+    live-wins, fail-closed.** When the live doc is present it always wins; the
+    record/snapshot is consulted **only on a true (symlink-safe) absence**. A
+    record-backed retired decision releases a live gate **only** when it is an
+    accepted record that may satisfy that gate. **Missing *active* control docs
+    (an active phase YAML, a live decision gate with no satisfying record) still
+    fail closed** — never silently swallowed. The doc-link checker resolves a link
+    to a hand-deleted, record-backed decision as *retired*, not broken.
+  This model **supersedes** the pre-v2.0 rule that "`design/` is the source of
+  truth. Always." The model is now implemented; the transitional
   [`design/decisions/design-docs-ephemeral-directive.md`](decisions/design-docs-ephemeral-directive.md)
-  (transitional — retire after v2.0 lands).
+  that governed the migration may be retired in a follow-up lifecycle PR once its
+  public footprint references are removed or reworded.
 
 - **Small surfaces, clear contracts.** Each command does one thing.
   Options that modify behavior must be explicit flags — no ambient magic.

@@ -5,18 +5,32 @@ ships. Each file states a **Status**, **Scope**, **Owners**, and **Related**
 decisions; the longer ones open with a plain-language **Summary**. These are
 the *why* behind the code — the user-facing *how* lives in [`docs/`](../../docs/README.md).
 
-> **Current (pre-v2.0) rule: do not rename or move a gate-referenced RFC** unless
-> you update every `acceptance_refs` / `decision_refs` that names it in
-> `design/phases/*.yaml` (and the index below). A non-gate history record — one no
-> `decision_refs` / `acceptance_refs` points at — may be moved out after you
+> **Active / live decisions stay in `design/decisions/`.** A decision named by a
+> live task reference — a `decision_refs` or `acceptance_refs` in
+> `design/phases/*.yaml` — must keep its file present (or be retired the right way,
+> below); renaming or moving it without updating every reference (and the index
+> below) breaks that reference. The two references are **not** the same kind of
+> thing: `decision_refs` is a live **gate** (a missing live file fails closed
+> unless an accepted record satisfies it — see below), while `acceptance_refs` is
+> a reference-integrity **annotation**, not a gate (when the target is a
+> `design/decisions/*.md`, a valid record of any status can soften its lint — but a
+> non-decision target like `docs/cli-contract.md` stays strict, and it never
+> releases a gate either way). A non-gate history record —
+> one no `decision_refs` / `acceptance_refs` points at — may be moved out after you
 > confirm that; see [What belongs here](#what-belongs-here-and-what-does-not) for
 > where it goes.
 >
-> The [design-docs-ephemeral directive](design-docs-ephemeral-directive.md)
-> **supersedes this rule only for retired / settled decisions represented by a
-> validated `.code-pact/state` decision-state record** — those become removable
-> even when a gate referenced them. **Until those records and readers land, this
-> warning stays enforceable** for every decision still resolved from `design/`.
+> **Retired decisions are removable — once a record exists.** Under the v2.0
+> [design-docs-ephemeral model](design-docs-ephemeral-directive.md) (implemented),
+> a retired / settled decision may be removed — by hand or via
+> `decision retire --write`, up to and including the whole `design/decisions/`
+> directory — **only after** a validated `.code-pact/state` decision-state record
+> represents it. The readers then resolve a record-backed retired decision from
+> `.code-pact/state` (live file present always wins; a record is consulted only on
+> a true absence). A live `decision_refs` still **fails closed** unless the live
+> decision exists OR an **accepted** record can satisfy the gate — a non-accepted
+> record never releases a live gate. `PRUNED.md` is legacy/prune backcompat, **not**
+> the durable v2.0 retire truth; the decision-state record is.
 
 | Phase | Decision | What it decided |
 | --- | --- | --- |
@@ -54,7 +68,7 @@ the *why* behind the code — the user-facing *how* lives in [`docs/`](../../doc
 | — | [Control-plane v2](control-plane-v2-rfc.md) | **Accepted (scope-limited: PR0 + PR1a + PR1b only).** Takes up deferred Bucket C (phase identity / glob discovery / `roadmap.yaml`-advisory / per-task files). PR1a (fail-closed `AMBIGUOUS_PHASE_ID`) and PR1b (**re-scoped**: structured `recovery` on the existing `DUPLICATE_*` / `PHASE_ID_MISMATCH` errors — the `LEGACY_*` warning-default advisories are **superseded/deferred**) shipped; PR2+ remain gated on the §5 soak + forensic incident backfill. |
 | — | [Collaboration UX](collaboration-ux-rfc.md) | **Accepted (D1–D3, additive MINORs).** The *coordination* layer atop the merge-safe ledger: optional `author` attribution on events (D1), a read-only `code-pact status` activity overview — in flight / blocked / available / waiting (D2), and attribution-named (`details.events[]`) conflict recovery (D3). Pinned JSON contract; explicitly rejects presence servers, blocking locks, and auto-resolution. Ships D1 → D2 → D3 independently. |
 | — | [Decision record lifecycle](decision-lifecycle-rfc.md) | **Accepted.** Shipped `decision prune --write` (status-aware ref integrity + eligibility gates + an append-only `PRUNED.md` tombstone ledger), `decision_retention` policy reporting, the CHANGELOG rolling-archive + release-notes tooling, and the archive-discoverability guard. Dogfooding found this repo's phase-born RFCs are load-bearing, so this repo uses **`keep-full`**; `compress-on-ship` is deferred (lossy). |
-| v2.0 | [Design docs are ephemeral](design-docs-ephemeral-directive.md) → *transitional directive* | **Accepted (v2.0 product direction).** Moves runtime truth for **completed phase references and retired/settled decision outcomes** from `design/` to `.code-pact/state` + generated control snapshots (the active roadmap and not-yet-archived phase/task definitions stay `design/` inputs): completed `design/phases/*.yaml` and retired `design/decisions/*.md` become **ephemeral** (hand-removable / `.gitignore`-able once snapshotted; missing *archived* docs tolerated, missing *active* docs fail closed). Demotes `PRUNED.md` to read-only backcompat (the v2.0 tombstone lives under `.code-pact/state`). **Supersedes** constitution "`design/` is the source of truth" and the move-only-non-gate-records rule below. Staged PRs, reader-side backcompat. **Itself retire-able** after v2.0 lands. |
+| v2.0 | [Design docs are ephemeral](design-docs-ephemeral-directive.md) → *transitional directive* | **Implemented (v2.0 product direction).** Runtime truth for **completed phase references and retired/settled decision outcomes** now resolves from `.code-pact/state` archive snapshots / decision records, not `design/` (the active roadmap and not-yet-archived phase/task definitions stay `design/` inputs): completed `design/phases/*.yaml` and retired `design/decisions/*.md` are **ephemeral** (hand-removable / `.gitignore`-able once the phase snapshot or decision record exists; missing *archived* docs tolerated, missing *active* docs fail closed). `PRUNED.md` is read-only legacy/prune backcompat — the durable v2.0 retire truth is the `.code-pact/state` decision-state record. **Supersedes** the constitution's "`design/` is the source of truth" rule and the move-only-non-gate-records framing above. This transitional directive that drove the model may be retired in a follow-up lifecycle PR once its public footprint references are removed or reworded. |
 
 ## What belongs here (and what does not)
 
@@ -87,9 +101,10 @@ decisions retired by `decision prune` (see [decision-lifecycle-rfc.md](decision-
   task context pack, not as an ADR.
 
 Before moving anything, confirm it is not named by a `decision_refs` /
-`acceptance_refs` in `design/phases/*.yaml` (those are the gate-bearing
-references — see the move warning at the top). A `reads` / `writes` mention is
-not a gate reference and does not block a move.
+`acceptance_refs` in `design/phases/*.yaml` (those are the live control-plane
+references that break if you move the file — a `decision_refs` gate or an
+`acceptance_refs` annotation; see the move warning at the top). A `reads` /
+`writes` mention is neither, and does not block a move.
 
 After a move, leave those historical `reads` / `writes` paths and prose
 mentions in already-shipped phases pointing at the old location. They record
