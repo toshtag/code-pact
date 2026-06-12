@@ -76,6 +76,11 @@ const KNOWN_CODES: Record<string, "public" | "plan" | "doctor" | "adapter" | "in
   PHASE_ARCHIVE_INELIGIBLE: "public",
   PHASE_ARCHIVE_NOT_ARCHIVED: "public",
   PHASE_ARCHIVE_STALE: "public",
+  // Event pack compaction (v2.0, Layer 2): `state compact` cannot proceed
+  // (phase YAML present / no snapshot / evidence broken / pack stale|invalid),
+  // and the pack write/readback-verify failed.
+  STATE_COMPACT_INELIGIBLE: "public",
+  STATE_COMPACT_WRITE_FAILED: "public",
   PHASE_RECONCILE_WRITE_REFUSED: "public",
   TASK_FINALIZE_NOT_ELIGIBLE: "public",
   TASK_FINALIZE_WRITE_REFUSED: "public",
