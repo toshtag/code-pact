@@ -1285,7 +1285,7 @@ async function checkControlPlaneBranchNotDriven(
     code: "CONTROL_PLANE_BRANCH_NOT_DRIVEN",
     severity: "warning",
     message:
-      `This branch changed real files vs ${baseRef} but added no started/done event for a known non-TUTORIAL task in the committed ledger — code changed without driving the control plane. ` +
+      `This branch changed real files vs ${baseRef} but added no started/done event for a known non-TUTORIAL task in the committed ledger (state/events/**, state/archive/event-packs/**, and legacy progress.yaml) — code changed without driving the control plane. ` +
       "Drive a task with `code-pact task prepare <id> --agent <agent>` (or record out-of-loop work with `code-pact task record-done <id> --evidence \"...\"`) and commit the new event file(s) under .code-pact/state/events/. " +
       "Exempt docs/config-only paths via .code-pact/doctor.yaml (control_plane_branch_not_driven.exclude_globs), or silence via disabled_checks: [CONTROL_PLANE_BRANCH_NOT_DRIVEN].",
     recovery: {
