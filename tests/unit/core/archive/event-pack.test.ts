@@ -9,7 +9,14 @@ import {
   validateEventPackTier1,
   computeEventIdsSha256,
 } from "../../../../src/core/archive/event-pack-reader.ts";
-import { validateEventPackBinding, newSnapshotRawCache } from "../../../../src/core/archive/event-pack-binding.ts";
+import {
+  validateEventPackBinding,
+  bindPackToSnapshot,
+  newSnapshotRawCache,
+} from "../../../../src/core/archive/event-pack-binding.ts";
+import { loadPhaseSnapshot } from "../../../../src/core/archive/load-phase-snapshot.ts";
+import { phaseSnapshotPath } from "../../../../src/core/archive/paths.ts";
+import { readFile } from "node:fs/promises";
 import { readAllProgressEventSources } from "../../../../src/core/progress/all-sources.ts";
 import { computeEventId, eventFileName } from "../../../../src/core/progress/event-id.ts";
 import type { LoadedEventFile } from "../../../../src/core/progress/events-io.ts";
@@ -199,6 +206,26 @@ describe("event pack — B2 same-task injection (semantic replay)", () => {
     const issues = await validateEventPackBinding(cwd, loaded, looseBy, newSnapshotRawCache());
     expect(issues.some((i) => i.kind === "semantic_replay_conflict")).toBe(true);
   });
+
+  it("a LATER forged `done` (not in snapshot evidence ids) becomes the winning event → binding fails (Finding A)", async () => {
+    // The snapshot records the REAL done event_id as evidence. A pack that adds a
+    // later forged `done` makes the forged event the winning terminal one. Even
+    // though the derived state is still `done` and the forged event is itself a
+    // `done`, its id is NOT in the snapshot's evidence ids → must be rejected.
+    const events = await scaffoldArchivedP1();
+    const laterDone: ProgressEvent = {
+      task_id: "P1-T1",
+      status: "done",
+      at: "2026-06-05T00:00:00.000Z", // later than the real done
+      actor: "agent",
+    };
+    const pack = await buildValidEventPack(cwd, "P1", [...events, laterDone]);
+    await writeEventPackFile(cwd, "P1", pack);
+    const loaded = (await readEventPackFiles(cwd))[0]!;
+    const issues = await validateEventPackBinding(cwd, loaded, new Map(), newSnapshotRawCache());
+    expect(issues.some((i) => i.kind === "semantic_replay_conflict")).toBe(true);
+    expect(issues.some((i) => i.message.includes("winning terminal event"))).toBe(true);
+  });
 });
 
 describe("event pack — B1 no cross-pack mutual support", () => {
@@ -253,6 +280,41 @@ describe("readAllProgressEventSources — strict drops/throws unbound packs", ()
     await writeEventPackFile(cwd, "P1", pack);
     const sources = await readAllProgressEventSources(cwd, { mode: "strict" });
     expect(sources.validatedPackFiles.map((e) => e.event.status).sort()).toEqual(["done", "started"]);
+  });
+});
+
+describe("bindPackToSnapshot — the pure core the rev reader shares (Finding C)", () => {
+  it("applies full semantic replay (a later forged done is rejected by the pure core too)", async () => {
+    // The rev reader (readEventPacksAtRev) calls bindPackToSnapshot, so the same
+    // forged-later-done that the workspace binding rejects must be rejected here.
+    const events = await scaffoldArchivedP1();
+    const laterDone: ProgressEvent = {
+      task_id: "P1-T1",
+      status: "done",
+      at: "2026-06-05T00:00:00.000Z",
+      actor: "agent",
+    };
+    const pack = await buildValidEventPack(cwd, "P1", [...events, laterDone]);
+    await writeEventPackFile(cwd, "P1", pack);
+    const loaded = (await readEventPackFiles(cwd))[0]!;
+    const res = await loadPhaseSnapshot(cwd, "P1");
+    expect(res.kind).toBe("valid");
+    if (res.kind !== "valid") return;
+    const raw = await readFile(phaseSnapshotPath(cwd, "P1"), "utf8");
+    const issues = bindPackToSnapshot(loaded, res.snapshot, raw, new Map());
+    expect(issues.some((i) => i.kind === "semantic_replay_conflict")).toBe(true);
+  });
+
+  it("a snapshot_sha256 that doesn't match the given raw bytes → mismatch (pure core)", async () => {
+    const events = await scaffoldArchivedP1();
+    const pack = await buildValidEventPack(cwd, "P1", events);
+    await writeEventPackFile(cwd, "P1", pack);
+    const loaded = (await readEventPackFiles(cwd))[0]!;
+    const res = await loadPhaseSnapshot(cwd, "P1");
+    if (res.kind !== "valid") throw new Error("snapshot not valid");
+    // Pass DIFFERENT raw bytes than the pack's snapshot_sha256 was computed over.
+    const issues = bindPackToSnapshot(loaded, res.snapshot, "different bytes", new Map());
+    expect(issues.some((i) => i.kind === "snapshot_sha256_mismatch")).toBe(true);
   });
 });
 

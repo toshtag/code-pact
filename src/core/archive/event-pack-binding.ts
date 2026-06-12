@@ -3,7 +3,7 @@ import type { ProgressEvent } from "../schemas/progress-event.ts";
 import type { PhaseSnapshot, SnapshotTask } from "../schemas/phase-snapshot.ts";
 import type { LoadedEventFile } from "../progress/events-io.ts";
 import { deriveTaskState } from "../progress/task-state.ts";
-import { atCompact } from "../progress/event-id.ts";
+import { atCompact, computeEventId } from "../progress/event-id.ts";
 import { loadPhaseSnapshot } from "./load-phase-snapshot.ts";
 import { phaseSnapshotPath, sha256Hex } from "./paths.ts";
 import type { LoadedEventPack } from "./event-pack-reader.ts";
@@ -125,8 +125,12 @@ function replayTaskConsistency(
 
   if (ev.kind === "progress_events") {
     // progress_events is done-only (schema-enforced). POSITIVE proof: derived
-    // state must be `done`, and a referenced done event must be the winning
-    // terminal event (the last event in order, which deriveTaskState used).
+    // state must be `done`, AND the WINNING terminal event must be one of the
+    // snapshot's evidence event_ids — not merely any done event. Otherwise a pack
+    // could inject a LATER forged `done` after the real evidence event and that
+    // forged event would become the winning terminal one (rewriting history while
+    // still passing membership). So we check the winning event's content id is in
+    // the evidence set.
     if (task.status !== "done") {
       // Defensive: schema already ties progress_events to done.
       return `task "${task.id}" has progress_events evidence but status "${task.status}" (expected done)`;
@@ -137,6 +141,10 @@ function replayTaskConsistency(
     const last = derived.last_event;
     if (!last || last.status !== "done") {
       return `task "${task.id}" (progress_events evidence) has no winning terminal done event after replay`;
+    }
+    const winningId = computeEventId(last);
+    if (!ev.event_ids.includes(winningId)) {
+      return `task "${task.id}" (progress_events evidence) winning terminal event ${winningId} is not among the snapshot evidence ids — packed events inject a later done that rewrites the terminal event`;
     }
     return null;
   }
@@ -185,25 +193,52 @@ export async function validateEventPackBinding(
   cache: SnapshotRawCache,
 ): Promise<EventPackBindingIssue[]> {
   const phaseId = loadedPack.phaseId;
+  const snap = await loadSnapshotRaw(cwd, phaseId, cache);
+  if (snap.kind === "absent") {
+    return [
+      {
+        phase_id: phaseId,
+        kind: "snapshot_missing",
+        message: `no phase snapshot for pack "${phaseId}" — a pack must bind to an archived snapshot`,
+      },
+    ];
+  }
+  if (snap.kind === "invalid") {
+    return [
+      {
+        phase_id: phaseId,
+        kind: "snapshot_invalid",
+        message: `phase snapshot for pack "${phaseId}" is corrupt or unreadable`,
+      },
+    ];
+  }
+  return bindPackToSnapshot(loadedPack, snap.snapshot, snap.raw, looseEventsById);
+}
+
+/**
+ * The PURE snapshot-binding core: identity (`snapshot_sha256` / `phase_id`) +
+ * task membership + per-task evidence resolution + semantic replay, against a
+ * resolution set of `loose ∪ THIS pack's own entries` only. No filesystem, no
+ * cache, no reader re-entry — so it is shared by the workspace binding and the
+ * git-revision (branch-drift) reader, which loads the snapshot via `git show`.
+ * Both surfaces apply identical authority; the rev reader can never accept a pack
+ * the workspace reader would reject (Finding C).
+ */
+export function bindPackToSnapshot(
+  loadedPack: LoadedEventPack,
+  snapshot: PhaseSnapshot,
+  snapshotRaw: string,
+  looseEventsById: ReadonlyMap<string, LoadedEventFile>,
+): EventPackBindingIssue[] {
+  const phaseId = loadedPack.phaseId;
   const issues: EventPackBindingIssue[] = [];
   const mk = (kind: EventPackBindingIssue["kind"], message: string) =>
     issues.push({ phase_id: phaseId, kind, message });
 
-  const snap = await loadSnapshotRaw(cwd, phaseId, cache);
-  if (snap.kind === "absent") {
-    mk("snapshot_missing", `no phase snapshot for pack "${phaseId}" — a pack must bind to an archived snapshot`);
-    return issues;
-  }
-  if (snap.kind === "invalid") {
-    mk("snapshot_invalid", `phase snapshot for pack "${phaseId}" is corrupt or unreadable`);
-    return issues;
-  }
-
-  const snapshot = snap.snapshot;
-  if (sha256Hex(snap.raw) !== loadedPack.pack.snapshot_sha256) {
+  if (sha256Hex(snapshotRaw) !== loadedPack.pack.snapshot_sha256) {
     mk(
       "snapshot_sha256_mismatch",
-      `pack snapshot_sha256 (${loadedPack.pack.snapshot_sha256}) does not match the on-disk snapshot bytes`,
+      `pack snapshot_sha256 (${loadedPack.pack.snapshot_sha256}) does not match the snapshot bytes`,
     );
   }
   if (snapshot.phase_id !== phaseId) {

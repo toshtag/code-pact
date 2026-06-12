@@ -47,7 +47,7 @@ import {
   type ArchivedTaskEntry,
 } from "../core/archive/load-phase-snapshot.ts";
 import { validateEventPackTier1 } from "../core/archive/event-pack-reader.ts";
-import { sha256Hex } from "../core/archive/paths.ts";
+import { bindPackToSnapshot } from "../core/archive/event-pack-binding.ts";
 import { PhaseSnapshot } from "../core/schemas/phase-snapshot.ts";
 import { phaseFilePresence } from "../core/plan/checks/fs.ts";
 import { isSupportedAgent, type SupportedAgent } from "../core/agents.ts";
@@ -393,12 +393,14 @@ async function checkProgressLog(
   }
   if (returnAfterIssues) return; // a corrupt/unbound pack: stop before orphan logic
   // Archived-task legacy conflict gate (lenient: collect + exclude from merge).
-  const { durableIds, archivedTaskIds } = await durableIdsAndArchivedTasks(cwd, packSources);
+  const { durableIds, archivedTaskIds, archivedEnumerationComplete } =
+    await durableIdsAndArchivedTasks(cwd, packSources);
   const { mergeableLegacyEvents, issues: legacyIssues } = filterArchivedTaskLegacyConflicts(
     legacyEvents,
     durableIds,
     archivedTaskIds,
     "lenient",
+    archivedEnumerationComplete,
   );
   for (const issue of legacyIssues) {
     issues.push({ code: issue.code, severity: "error", message: issue.message });
@@ -1068,6 +1070,7 @@ async function readEventFilesAtRev(
 async function readEventPacksAtRev(
   cwd: string,
   rev: string,
+  looseAtRev: readonly LoadedEventFile[],
 ): Promise<LoadedEventFile[] | null> {
   const ls = await runGit(cwd, [
     "ls-tree",
@@ -1081,6 +1084,8 @@ async function readEventPacksAtRev(
     .split("\n")
     .map((s) => s.trim())
     .filter((p) => p.length > 0 && p.endsWith(".json"));
+  const looseById = new Map<string, LoadedEventFile>();
+  for (const f of looseAtRev) looseById.set(f.id, f);
   const out: LoadedEventFile[] = [];
   for (const p of paths) {
     const fileStem = basename(p, ".json");
@@ -1098,18 +1103,17 @@ async function readEventPacksAtRev(
       `${rev}:.code-pact/state/archive/phases/${fileStem}.json`,
     ]);
     if (!snapShow.ok) return null; // pack with no snapshot at the rev — unbound
-    if (sha256Hex(snapShow.stdout) !== loaded.pack.snapshot_sha256) return null;
     let snapshot;
     try {
       snapshot = PhaseSnapshot.parse(JSON.parse(snapShow.stdout) as unknown);
     } catch {
       return null; // corrupt committed snapshot at the rev
     }
-    if (snapshot.phase_id !== loaded.phaseId) return null;
-    const snapshotTaskIds = new Set(snapshot.tasks.map((t) => t.id));
-    for (const entry of loaded.entries) {
-      if (!snapshotTaskIds.has(entry.event.task_id)) return null; // injection
-    }
+    // FULL Tier-2 binding at the rev (identity + membership + evidence + semantic
+    // replay) via the shared pure core — so the rev reader can never accept a pack
+    // the workspace reader would reject (Finding C). loose ∪ ownPack at the rev.
+    const issues = bindPackToSnapshot(loaded, snapshot, snapShow.stdout, looseById);
+    if (issues.length > 0) return null; // unbound/forged committed pack
     out.push(...loaded.entries);
   }
   return out;
@@ -1129,7 +1133,7 @@ async function readMergedEventsAtRev(
   if (legacy === null) return null;
   const events = await readEventFilesAtRev(cwd, rev);
   if (events === null) return null;
-  const packs = await readEventPacksAtRev(cwd, rev);
+  const packs = await readEventPacksAtRev(cwd, rev, events);
   if (packs === null) return null;
   // Rev-level legacy-conflict exclusion, scoped to archived task_ids at the rev.
   const archivedTaskIds = await readArchivedTaskIdsAtRev(cwd, rev);

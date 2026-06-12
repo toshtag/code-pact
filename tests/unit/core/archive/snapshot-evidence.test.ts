@@ -260,6 +260,45 @@ describe("LEGACY_EVENT_FOR_ARCHIVED_TASK — legacy conflict for an archived tas
     const { taskIds } = await readArchivedTaskIds(cwd);
     expect(taskIds.has("P1-T1")).toBe(true);
   });
+
+  it("a corrupt snapshot shrinks the archived set → the legacy gate FAILS CLOSED (Finding B)", async () => {
+    // Archive P1, then corrupt its snapshot so readArchivedTaskIds skips it and
+    // omits P1-T1. A forged legacy event for P1-T1 (not in the durable set) must
+    // NOT slip through just because the archived-task set is now incomplete.
+    await scaffoldP1("done", DONE_EVENTS);
+    await writeFile(
+      join(cwd, ".code-pact", "state", "archive", "phases", "P1.json"),
+      "{ corrupt json",
+      "utf8",
+    );
+    await writeFile(
+      join(cwd, ".code-pact", "state", "progress.yaml"),
+      `events:
+  - task_id: P1-T1
+    status: failed
+    at: 2026-06-09T00:00:00.000Z
+    actor: agent
+`,
+      "utf8",
+    );
+    // The corrupt snapshot means the archived-task set is incomplete → strict
+    // refuses the whole legacy stream rather than admit a possibly-conflicting one.
+    await expect(
+      readAllProgressEventSources(cwd, { mode: "strict" }),
+    ).rejects.toMatchObject({ code: "LEGACY_EVENT_FOR_ARCHIVED_TASK" });
+  });
+
+  it("a corrupt snapshot + NO legacy events → no false failure (nothing to gate)", async () => {
+    await scaffoldP1("done", DONE_EVENTS);
+    await writeFile(
+      join(cwd, ".code-pact", "state", "archive", "phases", "P1.json"),
+      "{ corrupt json",
+      "utf8",
+    );
+    // No legacy progress.yaml at all → the incomplete-set gate has nothing to gate.
+    const sources = await readAllProgressEventSources(cwd, { mode: "strict" });
+    expect(sources.issues).toEqual([]);
+  });
 });
 
 describe("producer durable-only — LEGACY_ONLY_TERMINAL_EVIDENCE", () => {

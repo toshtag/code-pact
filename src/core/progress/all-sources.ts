@@ -90,9 +90,27 @@ export function filterArchivedTaskLegacyConflicts(
   durableIds: ReadonlySet<string>,
   archivedTaskIds: ReadonlySet<string>,
   mode: "strict" | "lenient",
+  archivedEnumerationComplete = true,
 ): { mergeableLegacyEvents: ProgressEvent[]; issues: ProgressSourceIssue[] } {
   const mergeableLegacyEvents: ProgressEvent[] = [];
   const issues: ProgressSourceIssue[] = [];
+
+  // FAIL CLOSED on an incomplete archived-task set (a corrupt snapshot was
+  // skipped during enumeration). The set can no longer be trusted to contain
+  // every archived task_id, so a legacy event for a now-invisible archived task
+  // would slip past the per-event check below. With legacy events present and
+  // the set known-incomplete, refuse the whole legacy stream rather than admit a
+  // possibly-conflicting event. (No legacy events → nothing to gate.)
+  if (!archivedEnumerationComplete && rawLegacyEvents.length > 0) {
+    const message =
+      "cannot trust legacy progress.yaml against archived tasks: a phase snapshot was unreadable, so the archived-task set is incomplete and the conflict gate cannot be applied safely; fix or remove the corrupt snapshot (and run `code-pact plan migrate --write`)";
+    if (mode === "strict") {
+      throw progressSourceError("LEGACY_EVENT_FOR_ARCHIVED_TASK", message);
+    }
+    issues.push({ code: "LEGACY_EVENT_FOR_ARCHIVED_TASK", message });
+    return { mergeableLegacyEvents: [], issues }; // drop ALL legacy, fail closed
+  }
+
   for (const event of rawLegacyEvents) {
     if (archivedTaskIds.has(event.task_id)) {
       const id = computeEventId(event);
@@ -196,12 +214,19 @@ export async function readPackSources(
 export async function durableIdsAndArchivedTasks(
   cwd: string,
   pack: PackSources,
-): Promise<{ durableIds: Set<string>; archivedTaskIds: Set<string> }> {
+): Promise<{
+  durableIds: Set<string>;
+  archivedTaskIds: Set<string>;
+  /** False when a snapshot was unreadable during enumeration — the archived-task
+   *  set is then INCOMPLETE and the legacy gate must fail closed (a legacy event
+   *  for a now-invisible archived task would otherwise slip through). */
+  archivedEnumerationComplete: boolean;
+}> {
   const durableIds = new Set<string>();
   for (const f of pack.looseFiles) durableIds.add(f.id);
   for (const f of pack.validatedPackFiles) durableIds.add(f.id);
-  const { taskIds: archivedTaskIds } = await readArchivedTaskIds(cwd);
-  return { durableIds, archivedTaskIds };
+  const { taskIds: archivedTaskIds, skipped } = await readArchivedTaskIds(cwd);
+  return { durableIds, archivedTaskIds, archivedEnumerationComplete: skipped.length === 0 };
 }
 
 export async function readAllProgressEventSources(
@@ -213,12 +238,14 @@ export async function readAllProgressEventSources(
   // Steps 2-6: loose + packs + binding.
   const pack = await readPackSources(cwd, opts.mode);
   // Step 7: legacy split (archived-task conflict gate).
-  const { durableIds, archivedTaskIds } = await durableIdsAndArchivedTasks(cwd, pack);
+  const { durableIds, archivedTaskIds, archivedEnumerationComplete } =
+    await durableIdsAndArchivedTasks(cwd, pack);
   const { mergeableLegacyEvents, issues: legacyIssues } = filterArchivedTaskLegacyConflicts(
     rawLegacyEvents,
     durableIds,
     archivedTaskIds,
     opts.mode,
+    archivedEnumerationComplete,
   );
   return {
     rawLegacyEvents,

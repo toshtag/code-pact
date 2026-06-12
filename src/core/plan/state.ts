@@ -435,12 +435,14 @@ export async function collectPlanArtifacts(
   }
   // Archived-task legacy conflict gate (lenient: collect as FileIssue + exclude
   // the offending legacy event from the merged stream so state stays reproducible).
-  const { durableIds, archivedTaskIds } = await durableIdsAndArchivedTasks(cwd, packSources);
+  const { durableIds, archivedTaskIds, archivedEnumerationComplete } =
+    await durableIdsAndArchivedTasks(cwd, packSources);
   const { mergeableLegacyEvents, issues: legacyIssues } = filterArchivedTaskLegacyConflicts(
     legacyEvents,
     durableIds,
     archivedTaskIds,
     "lenient",
+    archivedEnumerationComplete,
   );
   for (const issue of legacyIssues) {
     fileIssues.push({ code: issue.code, severity: "error", message: issue.message });
