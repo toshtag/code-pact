@@ -5,11 +5,13 @@ import { join } from "node:path";
 import { run as cliRun, ensureCliBuilt, type RunResult } from "../helpers/cli.ts";
 import { writePhaseSnapshot } from "../../src/core/archive/phase-snapshot.ts";
 
-// design-docs-ephemeral A2 (step 4a) — hand-`rm` a COMPLETED phase whose roadmap
-// ref stays, with a valid snapshot, and the control plane stays green; without a
-// (valid) snapshot it fails closed. Cross-phase depends_on into the deleted phase
-// is the load-bearing case. The snapshot is written via the library (no CLI verb
-// yet — step 3 is library-only).
+// When a completed phase's YAML is hand-deleted but its roadmap ref stays AND a
+// valid archive snapshot exists, the control plane stays green: an active task in
+// another phase that `depends_on` a task of the deleted phase still resolves (from
+// the snapshot, not the missing file). Without a valid snapshot, that resolution
+// fails closed. The cross-phase `depends_on` into the deleted phase is the
+// load-bearing case. (Snapshots are written here via the library API directly.)
+// design-docs-ephemeral provenance: the archived-phase reader.
 
 let tmpDir: string;
 const NOW = new Date("2026-06-10T00:00:00.000Z");
@@ -75,8 +77,8 @@ ${TASK_FIELDS}
       - P1-T1
 `;
 
-// Same as P2_DEP but with NO depends_on (for 4b cases that must not have a live dep
-// on the archived phase's task).
+// Same as P2_DEP but with NO depends_on (for unreferenced-archived-phase cases that
+// must not have a live dep on the archived phase's task).
 const P2_NO_DEP = `id: P2
 name: Next
 weight: 1
@@ -192,7 +194,7 @@ afterAll(async () => {
   if (tmpDir) await rm(tmpDir, { recursive: true, force: true });
 });
 
-describe("A2 bare-rm of a completed phase with a cross-phase depends_on", () => {
+describe("hand-deleted completed phase with a valid snapshot keeps cross-phase depends_on resolving", () => {
   it("with a valid snapshot → validate / plan lint / analyze --strict + task context/prepare all GREEN", async () => {
     await scaffold();
     await writePhaseSnapshot(tmpDir, "P1", { now: NOW });
@@ -354,7 +356,7 @@ describe("A2 bare-rm of a completed phase with a cross-phase depends_on", () => 
 });
 
 // ---------------------------------------------------------------------------
-// Step 4b — UNREFERENCED archived phase (roadmap ref GONE).
+// UNREFERENCED archived phase (its roadmap ref is GONE, not just its file).
 // ---------------------------------------------------------------------------
 
 const ROADMAP_P2_ONLY = `phases:
@@ -387,7 +389,7 @@ async function makeUnreferencedP1(p2: string, progressAfter?: string) {
   await rm(join(tmpDir, "design", "phases", "P1-x.yaml"));
 }
 
-describe("4b: cross-phase depends_on into an UNREFERENCED archived phase", () => {
+describe("cross-phase depends_on into an UNREFERENCED archived phase", () => {
   it("valid unreferenced snapshot whose task a live phase depends_on → all GREEN", async () => {
     await makeUnreferencedP1(P2_DEP); // P2-T1 depends_on P1-T1
     expect(jsonOk(run(["validate", "--json"]))).toBe(true);
@@ -406,9 +408,10 @@ describe("4b: cross-phase depends_on into an UNREFERENCED archived phase", () =>
   // Q4 case (a): corrupt unreferenced snapshot + NO leftover event + NO live dep →
   // the advisory is genuinely inert. The init'd fixture carries unrelated default
   // warnings (ADAPTER_MISSING / BRIEF_MISSING …) so `validate --strict` is not green
-  // in the absolute — assert the precise delta: 4b introduces NEITHER
-  // PHASE_SNAPSHOT_INVALID NOR ORPHAN_PROGRESS_EVENT, and `plan lint --strict` (which
-  // only carries 4b-relevant issues here) stays green with the advisory visible.
+  // in the absolute — assert the precise delta: unreferenced-archive discovery
+  // introduces NEITHER PHASE_SNAPSHOT_INVALID NOR ORPHAN_PROGRESS_EVENT, and
+  // `plan lint --strict` (which here only carries issues relevant to unreferenced
+  // archive discovery) stays green with the advisory visible.
   it("(a) corrupt unreferenced snapshot, no event, no dep → no PHASE_SNAPSHOT_INVALID/ORPHAN from validate; plan lint advisory only", async () => {
     // Remove the P1-T1 done event after the snapshot, so no orphan event remains.
     await makeUnreferencedP1(P2_NO_DEP, PROGRESS_P2_ONLY);
@@ -476,8 +479,8 @@ describe("4b: cross-phase depends_on into an UNREFERENCED archived phase", () =>
     expect(issues.some((i) => i.code === "PHASE_SNAPSHOT_INVALID" && i.severity === "error")).toBe(false);
   });
 
-  // DIRECTORY-level soft failure + live dep (the new 4b soft class the file-level case
-  // does not cover): an unreadable archive dir supplies no ids, so a live depends_on
+  // DIRECTORY-level soft failure + live dep (the directory-level soft-failure class the
+  // file-level case does not cover): an unreadable archive dir supplies no ids, so a live depends_on
   // into it is a TASK_DEPENDS_ON_UNRESOLVED error (plan lint), NOT a hard
   // PHASE_SNAPSHOT_INVALID. plan analyze does NOT run the depends-on detector.
   it("(d) unreadable archive dir + a live dep → TASK_DEPENDS_ON_UNRESOLVED error (plan lint), no hard PHASE_SNAPSHOT_INVALID", async () => {
@@ -508,7 +511,8 @@ describe("4b: cross-phase depends_on into an UNREFERENCED archived phase", () =>
     await rm(join(tmpDir, "design", "phases", "P1-x.yaml"));
 
     // Every public reader path that runs discovery must hard-fail on the collision
-    // (4b's discovery path is new, so pin each — not just the 4a referenced path).
+    // (pin each — the unreferenced-snapshot discovery path as well as the
+    // roadmap-referenced snapshot path).
     for (const cmd of [
       ["validate", "--json"],
       ["plan", "lint", "--strict", "--json"],
@@ -528,7 +532,7 @@ describe("4b: cross-phase depends_on into an UNREFERENCED archived phase", () =>
     }
   });
 
-  it("A5: a project with NO archive dir is unaffected", async () => {
+  it("a project with NO archive dir is unaffected (deletes nothing → behaves as before)", async () => {
     await scaffold({ p2: P2_NO_DEP }); // no snapshot ever written
     expect(jsonOk(run(["validate", "--json"]))).toBe(true);
     expect(jsonOk(run(["plan", "lint", "--strict", "--json"]))).toBe(true);
