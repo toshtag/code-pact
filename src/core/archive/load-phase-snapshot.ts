@@ -11,8 +11,9 @@ import { archivePhasesDir, phaseSnapshotPath, sha256Hex } from "./paths.ts";
 // hand-deleted COMPLETED phase whose roadmap ref still points at the now-missing
 // file — WITHOUT faking a `Phase` and WITHOUT introducing task-id ambiguity.
 //
-// Locked invariants (see design/decisions/design-docs-ephemeral-directive.md and
-// the step-4a plan):
+// Locked invariants (the archived-resolution model is recorded in
+// design/constitution.md; the design-docs-ephemeral directive that introduced it
+// was itself retired once the model landed — see its git history if needed):
 //   - LIVE WINS — callers read a snapshot ONLY when the live phase YAML is gone.
 //   - NEVER coerce a snapshot into `Phase` — a snapshot is intentionally smaller.
 //   - The reader does NOT trust the writer: every identity / terminal / collision

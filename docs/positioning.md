@@ -18,12 +18,12 @@ The project keeps two state surfaces:
   plans. Roadmap, phase YAML, task readiness fields, decisions,
   acceptance references, and rules all live here,
   version-controlled, schema-validated, lint-able. **Completed**
-  phases and **retired** decisions are ephemeral: their runtime
-  truth lives in `.code-pact/state` archive snapshots / decision
-  records, so a completed `design/phases/*.yaml` or a retired
-  `design/decisions/*.md` may be hand-deleted once its
-  snapshot/record exists (the [design-docs-ephemeral
-  directive](../design/decisions/design-docs-ephemeral-directive.md)).
+  phases and **retired** decisions are ephemeral: a completed
+  phase's runtime truth lives in a `.code-pact/state` archive
+  snapshot and a retired decision's in a `.code-pact/state`
+  decision record, so a completed `design/phases/*.yaml` or a
+  retired `design/decisions/*.md` may be hand-deleted once its
+  snapshot (for a phase) or record (for a decision) exists.
 - **the progress ledger (`.code-pact/state/events/`)** — the operational log.
   An append-only event stream of `started` / `done` / `failed` /
   `blocked` / `resumed` events that drives state-machine
