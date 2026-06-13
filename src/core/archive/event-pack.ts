@@ -195,6 +195,74 @@ async function findLivePhaseYamlsById(
   return { paths: matches, incomplete: null };
 }
 
+/** One live phase whose task array claims a given task_id. */
+export type LiveTaskOwner = { phase_id: string; phase_path: string };
+
+/**
+ * Scan EVERY `design/phases/*.yaml` for live phases whose **task array** contains
+ * `taskId`. This is a DIFFERENT question from `findLivePhaseYamlsById` /
+ * `phaseFileStillPresent`, which find a live phase by its **phase id**: a loose
+ * event binds to its phase by `task_id` alone, so a task_id re-used under a
+ * differently-named live phase would slip past phase-id discovery while the loose
+ * event is still live. The Layer 3 delete-time gate (G6) needs THIS to refuse to
+ * unlink a loose event whose task is owned by any live phase.
+ *
+ * Fail-closed throughout, mirroring `findLivePhaseYamlsById`: a directory that
+ * cannot be enumerated (non-ENOENT), a phase file that cannot be resolved within
+ * the project (symlink escape), read, or parsed as a `Phase` returns a non-null
+ * `incomplete` reason — the caller MUST treat that as "cannot prove no live phase
+ * owns the task" and abort, never unlink. A missing `design/phases/` dir (ENOENT)
+ * is `{ owners: [], incomplete: null }` (nothing live exists). Global
+ * `DUPLICATE_TASK_ID` uniqueness is the invariant, but it is RE-CHECKED here
+ * (owners can have length > 1) rather than assumed — the writer never trusts a
+ * prior lint/doctor pass before the irreversible step.
+ */
+export async function findLiveTaskOwnersByTaskId(
+  cwd: string,
+  taskId: string,
+): Promise<{ owners: LiveTaskOwner[]; incomplete: string | null }> {
+  const phasesDir = join(cwd, "design", "phases");
+  let entries: string[];
+  try {
+    entries = await readdir(phasesDir);
+  } catch (err) {
+    if (isEnoent(err)) return { owners: [], incomplete: null }; // no dir → nothing live
+    return {
+      owners: [],
+      incomplete: `design/phases/ could not be enumerated (${(err as NodeJS.ErrnoException).code ?? "unknown"})`,
+    };
+  }
+  const owners: LiveTaskOwner[] = [];
+  for (const entry of entries.sort()) {
+    if (!entry.endsWith(".yaml")) continue;
+    const rel = `design/phases/${entry}`;
+    let abs: string;
+    try {
+      abs = await resolveWithinProject(cwd, rel);
+    } catch {
+      // A symlink escaping the project: fail closed — we cannot read it to prove
+      // it does NOT own the task_id.
+      return { owners: [], incomplete: `${rel} escapes the project (symlink) — cannot prove no live phase owns task "${taskId}"` };
+    }
+    let raw: string;
+    try {
+      raw = await readFile(abs, "utf8");
+    } catch {
+      return { owners: [], incomplete: `${rel} is unreadable — cannot prove no live phase owns task "${taskId}"` };
+    }
+    let parsed: Phase;
+    try {
+      parsed = Phase.parse(parseYaml(raw) as unknown);
+    } catch {
+      return { owners: [], incomplete: `${rel} is not a parseable phase YAML — cannot prove no live phase owns task "${taskId}"` };
+    }
+    if ((parsed.tasks ?? []).some((t) => t.id === taskId)) {
+      owners.push({ phase_id: parsed.id, phase_path: rel });
+    }
+  }
+  return { owners, incomplete: null };
+}
+
 /**
  * Decide whether the phase's live design YAML is still on disk. An archived phase
  * has none (the normal case), but a missing/silent roadmap does NOT prove absence —
