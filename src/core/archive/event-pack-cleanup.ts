@@ -129,27 +129,45 @@ export type CleanupOutcome =
       partial_applied: false;
       cleanup_started: false;
       loose_deleted_count: 0;
-      cleanup_remaining_loose: 0;
+      /**
+       * `null`, NOT 0 — the cleanup never ran, so the remaining-loose count is
+       * NOT-APPLICABLE / not-computed, not "zero left". `phase_file_still_present`
+       * / `pack_stale` can leave loose files on disk; returning 0 here would let a
+       * consumer misread "no loose remains". Mirrors the RFC terminal table's `—`.
+       */
+      cleanup_remaining_loose: null;
       vanished_count: 0;
       skipped: [];
       advisories: CleanupAdvisory[];
     }
   // --- write/cleanup failures (ok: false). ---
+  // WRITE_FAILED is split into two variants so the `phase`↔`partial_applied`
+  // pairing is FIXED by the type (not just `boolean`): a `write_pack` failure can
+  // never be `partial_applied:true`, and `verify_pack` never `false`. The field is
+  // named `phase` — REUSING Layer 2's existing error field (state.ts emits
+  // `phase: err.phase`), deliberately NOT a new `write_phase` field. `cleanup_started`
+  // is always false — the failure is before the unlink phase.
   | {
       ok: false;
       code: "STATE_COMPACT_WRITE_FAILED";
-      /**
-       * Which pack step failed. This REUSES Layer 2's existing error field name
-       * `phase` (state.ts emits `phase: err.phase`) — it is deliberately NOT a new
-       * `write_phase` field. The RFC locks this: "Layer 3 reuses Layer 2's field
-       * name", so Layer 3b wires this straight through without a rename.
-       * `partial_applied` is inherited from EventPackWriteError: `write_pack`→false
-       * (pack never on disk), `verify_pack`→true (pack on disk). `cleanup_started`
-       * is always false here — the failure is before the unlink phase.
-       */
-      phase: "write_pack" | "verify_pack";
+      /** `write_pack` failure: the pack never reached disk. */
+      phase: "write_pack";
       cleanup_pending: true;
-      partial_applied: boolean;
+      partial_applied: false;
+      cleanup_started: false;
+      loose_deleted_count: 0;
+      cleanup_remaining_loose: number;
+      vanished_count: number;
+      skipped: CleanupSkip[];
+      advisories: CleanupAdvisory[];
+    }
+  | {
+      ok: false;
+      code: "STATE_COMPACT_WRITE_FAILED";
+      /** `verify_pack` failure: the pack IS on disk but failed readback. */
+      phase: "verify_pack";
+      cleanup_pending: true;
+      partial_applied: true;
       cleanup_started: false;
       loose_deleted_count: 0;
       cleanup_remaining_loose: number;
@@ -160,7 +178,12 @@ export type CleanupOutcome =
   | {
       ok: false;
       code: "STATE_COMPACT_CLEANUP_FAILED";
-      /** On CLEANUP_FAILED via reconciliation R1.1, the coverage-failure block. */
+      /**
+       * On CLEANUP_FAILED via reconciliation R1.1, the coverage-failure block.
+       * Currently only R1.1 emits a structured block; G0 / G6 / G8 aborts may add
+       * their own cleanup-failure blocks here in Layer 3b if structured diagnostics
+       * are wanted (the union would grow, not change shape).
+       */
       block?: "pack_stale_after_cleanup";
       cleanup_pending: true;
       partial_applied: boolean;
