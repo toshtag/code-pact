@@ -136,12 +136,6 @@ function sortLooseForPack(files: readonly LoadedEventFile[]): LoadedEventFile[] 
 }
 
 /**
- * Is the phase's live design YAML still on disk? An archived phase has none
- * (that's the normal case), so a missing roadmap / `PHASE_NOT_FOUND` / ENOENT
- * all mean "absent, proceed — the snapshot is the authority". Only a YAML that
- * actually resolves to a path on disk blocks compaction.
- */
-/**
  * Best-effort scan of `design/phases/*.yaml` for live phase docs whose `id`
  * equals `phaseId`. The roadmap is NOT the only place a live phase YAML can
  * exist — a doc can sit in the dir without a roadmap reference (orphan), or with
@@ -201,6 +195,15 @@ async function findLivePhaseYamlsById(
   return { paths: matches, incomplete: null };
 }
 
+/**
+ * Decide whether the phase's live design YAML is still on disk. An archived phase
+ * has none (the normal case), but a missing/silent roadmap does NOT prove absence —
+ * a live YAML can sit in `design/phases/` with no roadmap reference. So a roadmap
+ * miss falls through to a directory scan rather than concluding "absent". Fail
+ * closed: a duplicate id (`ambiguous`) or any phase file we cannot read/parse/
+ * resolve (`discovery_incomplete`) blocks compaction. Only a clean, unambiguous
+ * "nothing live exists" returns `absent`.
+ */
 async function phaseFileStillPresent(
   cwd: string,
   phaseId: string,
