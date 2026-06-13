@@ -197,36 +197,65 @@ describe("CleanupOutcome — every RFC terminal-table result is representable, v
   });
 
   it("NEGATIVE compile guards — the fixed RFC values cannot be violated (type errors are the assertion)", () => {
+    // Route each bad literal through a typed identity so the type error is reported
+    // ON THE CALL LINE (right after the @ts-expect-error), not on whichever inner
+    // field happens to mismatch — a multi-line literal would otherwise put the error
+    // on a field line and leave the directive "unused".
+    const out = (o: CleanupOutcome): CleanupOutcome => o;
+
     // @ts-expect-error cleaned must imply partial_applied:true / cleanup_started:true
-    const badCleaned: CleanupOutcome = {
+    out({
       ok: true, kind: "cleaned", cleanup_pending: false,
       partial_applied: false, cleanup_started: true,
       loose_deleted_count: 1, cleanup_remaining_loose: 0, vanished_count: 0, advisories: [],
-    };
+    });
     // @ts-expect-error write_pack failure must imply partial_applied:false (pack never on disk)
-    const badWritePack: CleanupOutcome = {
+    out({
       ok: false, code: "STATE_COMPACT_WRITE_FAILED", phase: "write_pack",
       cleanup_pending: true, partial_applied: true, cleanup_started: false,
       loose_deleted_count: 0, cleanup_remaining_loose: 2, vanished_count: 0,
       skipped: [], advisories: [],
-    };
+    });
     // @ts-expect-error verify_pack failure must imply partial_applied:true (pack on disk)
-    const badVerifyPack: CleanupOutcome = {
+    out({
       ok: false, code: "STATE_COMPACT_WRITE_FAILED", phase: "verify_pack",
       cleanup_pending: true, partial_applied: false, cleanup_started: false,
       loose_deleted_count: 0, cleanup_remaining_loose: 2, vanished_count: 0,
       skipped: [], advisories: [],
-    };
+    });
     // @ts-expect-error ineligible must use cleanup_remaining_loose:null, not 0 (cleanup never ran)
-    const badIneligible: CleanupOutcome = {
+    out({
       ok: false, code: "STATE_COMPACT_INELIGIBLE", kind: "ineligible",
       block: { kind: "snapshot_missing" },
       cleanup_pending: false, partial_applied: false, cleanup_started: false,
       loose_deleted_count: 0, cleanup_remaining_loose: 0, vanished_count: 0,
       skipped: [], advisories: [],
-    };
-    // The bindings exist only to host the @ts-expect-error directives; the test
+    });
+    out({
+      ok: false, code: "STATE_COMPACT_WRITE_FAILED", phase: "write_pack",
+      cleanup_pending: true, partial_applied: false, cleanup_started: false,
+      loose_deleted_count: 0, cleanup_remaining_loose: 2, vanished_count: 0,
+      // @ts-expect-error write failure is before cleanup, so skipped must be [] (no gate ran).
+      // (TS reports the tuple-overflow on this field line, so the directive sits here.)
+      skipped: [{ path: "x", reason: "appeared_during_cleanup" }],
+      advisories: [],
+    });
+    // @ts-expect-error write failure is before cleanup, so vanished_count must be 0
+    out({
+      ok: false, code: "STATE_COMPACT_WRITE_FAILED", phase: "verify_pack",
+      cleanup_pending: true, partial_applied: true, cleanup_started: false,
+      loose_deleted_count: 0, cleanup_remaining_loose: 2, vanished_count: 1,
+      skipped: [], advisories: [],
+    });
+    // @ts-expect-error already_cleaned never started cleanup, so vanished_count must be 0
+    out({
+      ok: true, kind: "already_cleaned", cleanup_pending: false,
+      partial_applied: false, cleanup_started: false,
+      loose_deleted_count: 0, cleanup_remaining_loose: 0, vanished_count: 3, advisories: [],
+    });
+
+    // The call above only exist to host the @ts-expect-error directives; the test
     // passes iff each directive sees a real type error (tsc fails otherwise).
-    expect([badCleaned, badWritePack, badVerifyPack, badIneligible]).toHaveLength(4);
+    expect(typeof out).toBe("function");
   });
 });

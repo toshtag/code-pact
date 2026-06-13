@@ -101,7 +101,10 @@ export type CleanupOutcome =
       cleanup_started: false;
       loose_deleted_count: 0;
       cleanup_remaining_loose: 0;
-      vanished_count: number;
+      // cleanup_started is false (no loose to remove), so the cleanup-derived
+      // vanished_count is fixed 0 — same invariant as WRITE_FAILED below. Only
+      // `cleaned` (cleanup_started:true) can report a non-zero vanished_count.
+      vanished_count: 0;
       advisories: CleanupAdvisory[];
     }
   | {
@@ -145,8 +148,15 @@ export type CleanupOutcome =
   // pairing is FIXED by the type (not just `boolean`): a `write_pack` failure can
   // never be `partial_applied:true`, and `verify_pack` never `false`. The field is
   // named `phase` — REUSING Layer 2's existing error field (state.ts emits
-  // `phase: err.phase`), deliberately NOT a new `write_phase` field. `cleanup_started`
-  // is always false — the failure is before the unlink phase.
+  // `phase: err.phase`), deliberately NOT a new `write_phase` field.
+  //
+  // Because `cleanup_started` is false (the failure is BEFORE the unlink phase — no
+  // per-file gate and no reconciliation ran), the cleanup-DERIVED fields are fixed:
+  // `vanished_count:0` and `skipped:[]`. Only `cleanup_remaining_loose` is a count
+  // (the loose set the failed pack would have covered still sits on disk), and
+  // `advisories` stays open (a pre-cleanup advisory like `legacy_progress_retained`
+  // could still attach). An impossible payload — `skipped[]`/`vanished_count` from a
+  // run that never started cleanup — must not type-check.
   | {
       ok: false;
       code: "STATE_COMPACT_WRITE_FAILED";
@@ -157,8 +167,8 @@ export type CleanupOutcome =
       cleanup_started: false;
       loose_deleted_count: 0;
       cleanup_remaining_loose: number;
-      vanished_count: number;
-      skipped: CleanupSkip[];
+      vanished_count: 0;
+      skipped: [];
       advisories: CleanupAdvisory[];
     }
   | {
@@ -171,8 +181,8 @@ export type CleanupOutcome =
       cleanup_started: false;
       loose_deleted_count: 0;
       cleanup_remaining_loose: number;
-      vanished_count: number;
-      skipped: CleanupSkip[];
+      vanished_count: 0;
+      skipped: [];
       advisories: CleanupAdvisory[];
     }
   | {
