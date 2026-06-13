@@ -145,6 +145,32 @@ describe("planEventPack — eligibility blocks", () => {
     expect(await exists(eventPackPath(cwd, "P1"))).toBe(false);
   });
 
+  it("orphan live YAML with matching id (roadmap doesn't name it) → ineligible(phase_file_still_present)", async () => {
+    // The fail-open the roadmap-only check missed: a live phase doc with id P1
+    // sitting in design/phases/ under a name the roadmap never references.
+    await scaffoldArchivedP1(); // snapshot present, roadmap empty, no live P1 YAML
+    await rm(join(cwd, "design", "roadmap.yaml")); // no roadmap at all
+    await writeFile(join(cwd, "design", "phases", "P1-orphan.yaml"), P1_DONE, "utf8");
+    const plan = await planEventPack(cwd, "P1");
+    expect(plan.kind).toBe("ineligible");
+    if (plan.kind !== "ineligible") return;
+    expect(plan.block.kind).toBe("phase_file_still_present");
+    if (plan.block.kind !== "phase_file_still_present") return;
+    expect(plan.block.phase_path).toBe("design/phases/P1-orphan.yaml");
+  });
+
+  it("design/phases/ unreadable (not a dir) → ineligible(phase_discovery_incomplete), fail closed", async () => {
+    await scaffoldArchivedP1();
+    await rm(join(cwd, "design", "roadmap.yaml"));
+    // Replace the phases dir with a regular file so readdir fails with ENOTDIR.
+    await rm(join(cwd, "design", "phases"), { recursive: true, force: true });
+    await writeFile(join(cwd, "design", "phases"), "not a dir", "utf8");
+    const plan = await planEventPack(cwd, "P1");
+    expect(plan.kind).toBe("ineligible");
+    if (plan.kind !== "ineligible") return;
+    expect(plan.block.kind).toBe("phase_discovery_incomplete");
+  });
+
   it("corrupt snapshot → ineligible(snapshot_invalid)", async () => {
     await scaffoldArchivedP1();
     await writeFile(phaseSnapshotPath(cwd, "P1"), "{ corrupt", "utf8");
@@ -276,6 +302,25 @@ describe("applyEventPackPlan — write/verify fail-closed (NO unlink anywhere)",
       }),
     ).rejects.toMatchObject({ phase: "verify_pack", partial_applied: true });
     // Layer 2 does NOT delete the bad pack.
+    expect(await exists(eventPackPath(cwd, "P1"))).toBe(true);
+  });
+
+  it("snapshot swapped on disk between plan and verify → verify_pack fails (readback re-reads the snapshot)", async () => {
+    await scaffoldArchivedP1();
+    const writePlan = await planEventPack(cwd, "P1");
+    if (writePlan.kind !== "write") throw new Error("expected write");
+    // beforeVerify swaps the on-disk snapshot bytes (valid JSON, but DIFFERENT —
+    // pad with whitespace so sha256Hex changes while the parse still succeeds).
+    await expect(
+      applyEventPackPlan(cwd, writePlan, {
+        beforeVerify: async () => {
+          const cur = await readFile(phaseSnapshotPath(cwd, "P1"), "utf8");
+          await writeFile(phaseSnapshotPath(cwd, "P1"), cur + "\n", "utf8");
+        },
+      }),
+    ).rejects.toMatchObject({ phase: "verify_pack", partial_applied: true });
+    // The pack (bound to the ORIGINAL snapshot_sha256) stays on disk — Layer 2
+    // does not delete it; the operator is told via next_action.
     expect(await exists(eventPackPath(cwd, "P1"))).toBe(true);
   });
 

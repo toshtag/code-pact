@@ -41,7 +41,9 @@ function ineligibleDetail(phaseId: string, block: EventPackBlock): string {
     case "phase_file_still_present":
       return `the phase YAML still exists at ${block.phase_path} — run \`code-pact phase archive ${phaseId} --write\` first`;
     case "ambiguous_phase_id":
-      return `phase id "${phaseId}" maps to multiple roadmap entries (${block.phase_paths.join(", ")}) — resolve the duplicate phase ids before compacting`;
+      return `phase id "${phaseId}" maps to multiple live phase YAMLs (${block.phase_paths.join(", ")}) — resolve the duplicates before compacting`;
+    case "phase_discovery_incomplete":
+      return block.detail;
     case "snapshot_missing":
       return `no phase snapshot found — run \`code-pact phase archive ${phaseId} --write\` first`;
     case "snapshot_invalid":

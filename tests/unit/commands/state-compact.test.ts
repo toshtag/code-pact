@@ -153,21 +153,59 @@ describe("runStateCompact — --write", () => {
   });
 });
 
-describe("runStateCompact — archived-phase lookup (sixth-review must-have)", () => {
-  it("design/phases/P1.yaml ABSENT + snapshot PRESENT → runs (does NOT die on PHASE_NOT_FOUND)", async () => {
+describe("runStateCompact — archived-phase lookup (does NOT die on PHASE_NOT_FOUND)", () => {
+  it("no live YAML + snapshot present → runs (snapshot is the authority, no PHASE_NOT_FOUND crash)", async () => {
     // scaffoldArchivedP1 deletes the YAML and empties the roadmap — the normal
-    // archived state. state compact must treat the snapshot as the authority.
+    // archived state. No design/phases/*.yaml has id P1, so the scan finds nothing.
     await scaffoldArchivedP1();
     const r = await runStateCompact({ cwd, phaseId: "P1", write: false });
-    // Any non-throwing verdict is acceptable; the point is it does NOT raise
-    // PHASE_NOT_FOUND. Here the eligible phase yields would_pack.
     expect(["would_pack", "would_already_packed", "would_noop_no_events"]).toContain(r.kind);
   });
 
-  it("works even with NO roadmap at all (snapshot is the sole authority)", async () => {
-    await scaffoldArchivedP1();
-    await rm(join(cwd, "design", "roadmap.yaml"));
+  it("empty roadmap + NO matching live YAML + snapshot present → would_pack", async () => {
+    await scaffoldArchivedP1(); // YAML deleted, roadmap empty, no live P1 YAML on disk
     const r = await runStateCompact({ cwd, phaseId: "P1", write: false });
     expect(r.kind).toBe("would_pack");
+  });
+});
+
+describe("runStateCompact — live phase YAML the roadmap doesn't name (sixth-review-2 fail-open fix)", () => {
+  it("roadmap MISSING but an orphan live YAML with id P1 exists → ineligible(phase_file_still_present), NO pack", async () => {
+    await scaffoldArchivedP1(); // snapshot present, roadmap empty
+    await rm(join(cwd, "design", "roadmap.yaml")); // no roadmap at all
+    // A live phase doc with id P1 sits in design/phases/ under a different name.
+    await writeFile(join(cwd, "design", "phases", "P1-orphan.yaml"), P1_DONE, "utf8");
+    const r = await runStateCompact({ cwd, phaseId: "P1", write: true });
+    expect(r.kind).toBe("ineligible");
+    if (r.kind !== "ineligible") return;
+    expect(r.block.kind).toBe("phase_file_still_present");
+    expect(await exists(eventPackPath(cwd, "P1"))).toBe(false); // fail closed
+  });
+
+  it("roadmap present but does NOT reference P1, yet an orphan live YAML with id P1 exists → ineligible(phase_file_still_present)", async () => {
+    await scaffoldArchivedP1();
+    // roadmap is non-empty but references a DIFFERENT phase, not P1.
+    await writeFile(
+      join(cwd, "design", "roadmap.yaml"),
+      `phases:\n  - id: P9\n    path: design/phases/P9.yaml\n    weight: 1\n`,
+      "utf8",
+    );
+    await writeFile(join(cwd, "design", "phases", "P1-orphan.yaml"), P1_DONE, "utf8");
+    const r = await runStateCompact({ cwd, phaseId: "P1", write: false });
+    expect(r.kind).toBe("ineligible");
+    if (r.kind !== "ineligible") return;
+    expect(r.block.kind).toBe("phase_file_still_present");
+    expect(await exists(eventPackPath(cwd, "P1"))).toBe(false);
+  });
+
+  it("TWO orphan live YAMLs with id P1 (roadmap missing) → ineligible(ambiguous_phase_id)", async () => {
+    await scaffoldArchivedP1();
+    await rm(join(cwd, "design", "roadmap.yaml"));
+    await writeFile(join(cwd, "design", "phases", "P1-a.yaml"), P1_DONE, "utf8");
+    await writeFile(join(cwd, "design", "phases", "P1-b.yaml"), P1_DONE, "utf8");
+    const r = await runStateCompact({ cwd, phaseId: "P1", write: false });
+    expect(r.kind).toBe("ineligible");
+    if (r.kind !== "ineligible") return;
+    expect(r.block.kind).toBe("ambiguous_phase_id");
   });
 });

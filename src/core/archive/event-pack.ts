@@ -1,9 +1,12 @@
-import { readFile, lstat } from "node:fs/promises";
+import { readFile, lstat, readdir } from "node:fs/promises";
+import { join } from "node:path";
+import { parse as parseYaml } from "yaml";
 import {
   EventPack,
   EVENT_PACK_SCHEMA_VERSION,
   type PackedEvent,
 } from "../schemas/event-pack.ts";
+import { Phase } from "../schemas/phase.ts";
 import type { PhaseSnapshot } from "../schemas/phase-snapshot.ts";
 import type { ProgressEvent } from "../schemas/progress-event.ts";
 import type { LoadedEventFile } from "../progress/events-io.ts";
@@ -46,6 +49,7 @@ import { atomicWriteText } from "../../io/atomic-text.ts";
 export type EventPackBlock =
   | { kind: "phase_file_still_present"; phase_path: string }
   | { kind: "ambiguous_phase_id"; phase_paths: string[] }
+  | { kind: "phase_discovery_incomplete"; detail: string }
   | { kind: "snapshot_missing" }
   | { kind: "snapshot_invalid"; detail: string }
   | { kind: "snapshot_evidence_broken"; issues: SnapshotEvidenceIssue[] }
@@ -139,6 +143,59 @@ function sortLooseForPack(files: readonly LoadedEventFile[]): LoadedEventFile[] 
  * all mean "absent, proceed — the snapshot is the authority". Only a YAML that
  * actually resolves to a path on disk blocks compaction.
  */
+/**
+ * Best-effort scan of `design/phases/*.yaml` for live phase docs whose `id`
+ * equals `phaseId`. The roadmap is NOT the only place a live phase YAML can
+ * exist — a doc can sit in the dir without a roadmap reference (orphan), or with
+ * no roadmap at all. The `phase_file_still_present` gate must catch those too, so
+ * compaction never runs while a live phase doc exists.
+ *
+ * Returns the matching relative paths, plus `unreadable` when the directory
+ * itself could not be enumerated (a permissions/IO error — NOT a missing dir).
+ * A missing `design/phases/` dir (ENOENT) is `{ paths: [], unreadable: false }`
+ * (nothing live exists). A single unparseable / unreadable phase FILE is skipped
+ * (it can't prove an id match), but a directory we cannot read at all is
+ * `unreadable: true` so the caller fails closed (we cannot prove absence).
+ */
+async function findLivePhaseYamlsById(
+  cwd: string,
+  phaseId: string,
+): Promise<{ paths: string[]; unreadable: boolean }> {
+  const phasesDir = join(cwd, "design", "phases");
+  let entries: string[];
+  try {
+    entries = await readdir(phasesDir);
+  } catch (err) {
+    if (isEnoent(err)) return { paths: [], unreadable: false }; // no dir → nothing live
+    return { paths: [], unreadable: true }; // can't enumerate → fail closed upstream
+  }
+  const matches: string[] = [];
+  for (const entry of entries.sort()) {
+    if (!entry.endsWith(".yaml")) continue;
+    const rel = `design/phases/${entry}`;
+    let abs: string;
+    try {
+      abs = await resolveWithinProject(cwd, rel);
+    } catch {
+      continue; // symlink escape on a sibling file — skip it, it's not our phase
+    }
+    let raw: string;
+    try {
+      raw = await readFile(abs, "utf8");
+    } catch {
+      continue; // unreadable single file — can't prove an id match, skip
+    }
+    let parsed: unknown;
+    try {
+      parsed = Phase.parse(parseYaml(raw) as unknown);
+    } catch {
+      continue; // unparseable / non-phase YAML — skip
+    }
+    if ((parsed as { id: string }).id === phaseId) matches.push(rel);
+  }
+  return { paths: matches, unreadable: false };
+}
+
 async function phaseFileStillPresent(
   cwd: string,
   phaseId: string,
@@ -146,35 +203,51 @@ async function phaseFileStillPresent(
   | { kind: "absent" }
   | { kind: "present"; phase_path: string }
   | { kind: "ambiguous"; phase_paths: string[] }
+  | { kind: "discovery_incomplete"; detail: string }
 > {
-  let phasePath: string;
+  // 1. Try the roadmap. A unique resolution + an on-disk file is the clearest
+  //    "present"; AMBIGUOUS is control-plane corruption (fail closed).
+  let roadmapPath: string | null = null;
   try {
     const roadmap = await loadRoadmap(cwd);
-    phasePath = resolvePhaseRef(roadmap, phaseId).path;
+    roadmapPath = resolvePhaseRef(roadmap, phaseId).path;
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
-    // No roadmap (ENOENT) or the phase isn't in it (PHASE_NOT_FOUND) → no live
-    // file can exist for it: absent, proceed (the snapshot is the authority).
-    if (isEnoent(err) || code === "PHASE_NOT_FOUND") return { kind: "absent" };
-    // AMBIGUOUS_PHASE_ID is control-plane corruption: the id maps to MULTIPLE
-    // roadmap entries, so one or more live phase YAMLs likely exist. Fail closed —
-    // do NOT compact while duplicate live phases may exist (the same fail-closed
-    // posture as `phase_file_still_present`).
     if (code === "AMBIGUOUS_PHASE_ID") {
       const phases = (err as NodeJS.ErrnoException & { phases?: string[] }).phases ?? [];
       return { kind: "ambiguous", phase_paths: phases };
     }
-    throw err;
+    // ENOENT (no roadmap) / PHASE_NOT_FOUND (id not referenced): the roadmap is
+    // SILENT on this id, but a live YAML can still exist in design/phases/. Fall
+    // through to the directory scan below — do NOT assume absent.
+    if (!isEnoent(err) && code !== "PHASE_NOT_FOUND") throw err;
   }
-  try {
-    await lstat(await resolveWithinProject(cwd, phasePath));
-    return { kind: "present", phase_path: phasePath }; // resolves to something on disk
-  } catch (err) {
-    if (isEnoent(err)) return { kind: "absent" };
-    // A symlink escape / unreadable path: fail closed (treat as present so we do
-    // NOT compact while an unresolved live doc may exist).
-    return { kind: "present", phase_path: phasePath };
+
+  if (roadmapPath !== null) {
+    try {
+      await lstat(await resolveWithinProject(cwd, roadmapPath));
+      return { kind: "present", phase_path: roadmapPath }; // the referenced file is on disk
+    } catch (err) {
+      if (!isEnoent(err)) {
+        // A symlink escape / unreadable referenced path: fail closed.
+        return { kind: "present", phase_path: roadmapPath };
+      }
+      // The referenced path is gone — but a DIFFERENTLY-named live YAML with the
+      // same id could still exist (a stale roadmap). Fall through to the scan.
+    }
   }
+
+  // 2. Directory scan: catch a live YAML the roadmap doesn't (or can't) name.
+  const scan = await findLivePhaseYamlsById(cwd, phaseId);
+  if (scan.unreadable) {
+    return {
+      kind: "discovery_incomplete",
+      detail: `design/phases/ could not be enumerated — cannot prove no live phase "${phaseId}" YAML exists`,
+    };
+  }
+  if (scan.paths.length === 1) return { kind: "present", phase_path: scan.paths[0]! };
+  if (scan.paths.length > 1) return { kind: "ambiguous", phase_paths: scan.paths };
+  return { kind: "absent" };
 }
 
 /**
@@ -200,6 +273,13 @@ export async function planEventPack(cwd: string, phaseId: string): Promise<Event
       kind: "ineligible",
       phaseId,
       block: { kind: "ambiguous_phase_id", phase_paths: live.phase_paths },
+    };
+  }
+  if (live.kind === "discovery_incomplete") {
+    return {
+      kind: "ineligible",
+      phaseId,
+      block: { kind: "phase_discovery_incomplete", detail: live.detail },
     };
   }
 
@@ -380,7 +460,10 @@ export async function applyEventPackPlan(
   // authoritative (writePhaseSnapshot's re-plan discipline).
   const fresh = await planEventPack(cwd, plan.phaseId);
   if (fresh.kind !== "write") return fresh;
-  const { phaseId, packPath, pack, snapshot, snapshotRaw, looseEventsById, loose_count } = fresh;
+  // snapshot/snapshotRaw from the plan are NOT reused at verify time — the
+  // readback re-reads the snapshot from disk (below) so the verify reflects the
+  // current on-disk snapshot, not the plan-time bytes.
+  const { phaseId, packPath, pack, looseEventsById, loose_count } = fresh;
 
   if (hooks.beforeWrite) await hooks.beforeWrite();
   try {
@@ -392,8 +475,13 @@ export async function applyEventPackPlan(
   }
 
   if (hooks.beforeVerify) await hooks.beforeVerify();
-  // Readback: re-read from disk and run the SAME Tier-1 + binding the runtime
-  // uses — never trust the in-memory pack.
+  // Readback: re-read BOTH the pack AND the snapshot from disk, then run the SAME
+  // Tier-1 + binding the runtime uses — never trust the in-memory pack OR the
+  // in-memory snapshot bytes. Re-reading the snapshot makes the verify reflect the
+  // CURRENT on-disk snapshot: if it was swapped/edited between plan and verify, the
+  // pack's snapshot_sha256 (computed at plan time) won't match the re-read bytes
+  // and binding fails closed — rather than reporting success on a pack that the
+  // next strict reader would reject.
   let readbackRaw: string;
   try {
     readbackRaw = await readFile(packPath, "utf8");
@@ -406,7 +494,30 @@ export async function applyEventPackPlan(
   } catch (err) {
     throw new EventPackWriteError("verify_pack", true, `readback Tier-1 failed: ${(err as Error).message}`);
   }
-  const bindIssues = bindPackToSnapshot(loaded, snapshot, snapshotRaw, looseEventsById);
+  let verifySnapshotRaw: string;
+  try {
+    verifySnapshotRaw = await readFile(phaseSnapshotPath(cwd, phaseId), "utf8");
+  } catch (err) {
+    throw new EventPackWriteError(
+      "verify_pack",
+      true,
+      `readback snapshot read failed: ${(err as Error).message}`,
+    );
+  }
+  const verifySnap = await loadPhaseSnapshot(cwd, phaseId);
+  if (verifySnap.kind !== "valid") {
+    throw new EventPackWriteError(
+      "verify_pack",
+      true,
+      `snapshot is no longer valid at verify time (${verifySnap.kind})`,
+    );
+  }
+  const bindIssues = bindPackToSnapshot(
+    loaded,
+    verifySnap.snapshot,
+    verifySnapshotRaw,
+    looseEventsById,
+  );
   if (bindIssues.length > 0) {
     throw new EventPackWriteError(
       "verify_pack",
@@ -414,6 +525,5 @@ export async function applyEventPackPlan(
       `readback binding failed: ${bindIssues.map((i) => i.message).join("; ")}`,
     );
   }
-
   return { kind: "written", phaseId, packPath, pack, loose_count };
 }
