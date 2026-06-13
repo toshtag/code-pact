@@ -65,6 +65,21 @@ export type CleanupErrorCode =
   | "STATE_COMPACT_CLEANUP_INCOMPLETE";
 
 /**
+ * The unlink-progress half of a cleanup-phase result: `loose_deleted_count > 0`
+ * means at least one file was unlinked, which is itself a filesystem mutation, so
+ * `partial_applied` MUST be true. The two are paired by the type so a cleanup
+ * result can never claim "2 files deleted" with `partial_applied:false`.
+ *
+ * `partial_applied:true` + `loose_deleted_count:0` IS allowed: on the cell-10 path
+ * the pack write succeeds (a mutation → partial_applied:true) and the cleanup phase
+ * then aborts BEFORE any unlink (loose_deleted_count:0). `partial_applied` tracks
+ * ANY filesystem mutation (pack OR unlink), not unlink alone — hence the asymmetry.
+ */
+export type CleanupMutationProgress =
+  | { partial_applied: false; loose_deleted_count: 0 }
+  | { partial_applied: true; loose_deleted_count: number };
+
+/**
  * The Layer 3 cleanup result contract. `partial_applied`, `cleanup_started`, and
  * `vanished_count` are emitted on EVERY result (success and error) so a consumer
  * reads them unconditionally — `vanished_count` is ALWAYS present (0 when none),
@@ -185,7 +200,13 @@ export type CleanupOutcome =
       skipped: [];
       advisories: CleanupAdvisory[];
     }
-  | {
+  // CLEANUP_FAILED / CLEANUP_INCOMPLETE both ran the cleanup phase
+  // (`cleanup_started:true`), so `partial_applied`↔`loose_deleted_count` are paired
+  // via CleanupMutationProgress: a non-zero deleted count forces partial_applied:true,
+  // while partial_applied:true + 0 deleted is the legal "pack written, aborted before
+  // unlink" case. The base object below omits those two fields; the intersection adds
+  // them in the only two valid shapes.
+  | ({
       ok: false;
       code: "STATE_COMPACT_CLEANUP_FAILED";
       /**
@@ -196,26 +217,22 @@ export type CleanupOutcome =
        */
       block?: "pack_stale_after_cleanup";
       cleanup_pending: true;
-      partial_applied: boolean;
       cleanup_started: true;
-      loose_deleted_count: number;
       cleanup_remaining_loose: number;
       vanished_count: number;
       skipped: CleanupSkip[];
       advisories: CleanupAdvisory[];
-    }
-  | {
+    } & CleanupMutationProgress)
+  | ({
       ok: false;
       code: "STATE_COMPACT_CLEANUP_INCOMPLETE";
       cleanup_pending: true;
-      partial_applied: boolean;
       cleanup_started: true;
-      loose_deleted_count: number;
       cleanup_remaining_loose: number;
       vanished_count: number;
       skipped: CleanupSkip[];
       advisories: CleanupAdvisory[];
-    };
+    } & CleanupMutationProgress);
 
 // ---------------------------------------------------------------------------
 // Post-run reconciliation (R1) — PURE classifier for ONE present survivor.

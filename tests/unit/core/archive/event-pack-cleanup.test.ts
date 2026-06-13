@@ -253,6 +253,20 @@ describe("CleanupOutcome — every RFC terminal-table result is representable, v
       partial_applied: false, cleanup_started: false,
       loose_deleted_count: 0, cleanup_remaining_loose: 0, vanished_count: 3, advisories: [],
     });
+    // @ts-expect-error CLEANUP_INCOMPLETE deleted files, so partial_applied cannot be false
+    out({
+      ok: false, code: "STATE_COMPACT_CLEANUP_INCOMPLETE",
+      cleanup_pending: true, partial_applied: false, cleanup_started: true,
+      loose_deleted_count: 1, cleanup_remaining_loose: 1, vanished_count: 0,
+      skipped: [{ path: "x", reason: "task_not_in_snapshot" }], advisories: [],
+    });
+    // @ts-expect-error CLEANUP_FAILED deleted files, so partial_applied cannot be false
+    out({
+      ok: false, code: "STATE_COMPACT_CLEANUP_FAILED", block: "pack_stale_after_cleanup",
+      cleanup_pending: true, partial_applied: false, cleanup_started: true,
+      loose_deleted_count: 2, cleanup_remaining_loose: 1, vanished_count: 0,
+      skipped: [{ path: "y", reason: "appeared_during_cleanup" }], advisories: [],
+    });
 
     // The call above only exist to host the @ts-expect-error directives; the test
     // passes iff each directive sees a real type error (tsc fails otherwise).
