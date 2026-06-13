@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile, symlink } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { findLiveTaskOwnersByTaskId } from "../../../../src/core/archive/event-pack.ts";
@@ -108,6 +108,22 @@ describe("findLiveTaskOwnersByTaskId", () => {
     const res = await findLiveTaskOwnersByTaskId(cwd, "P1-T1");
     expect(res.owners).toEqual([]);
     expect(res.incomplete).not.toBeNull();
+  });
+
+  it("fails closed on a SYMLINK escaping the project (could be the live owner; cannot read it)", async () => {
+    // A *.yaml in design/phases/ that is a symlink pointing outside the project.
+    // resolveWithinProject must reject it → incomplete, never a clean "no owner".
+    const outside = await mkdtemp(join(tmpdir(), "code-pact-l3-outside-"));
+    try {
+      await writeFile(join(outside, "real.yaml"), phaseYaml("PX", ["P1-T1"]), "utf8");
+      await symlink(join(outside, "real.yaml"), join(cwd, "design", "phases", "escape.yaml"));
+      const res = await findLiveTaskOwnersByTaskId(cwd, "P1-T1");
+      expect(res.owners).toEqual([]);
+      expect(res.incomplete).not.toBeNull();
+      expect(res.incomplete).toContain("escape.yaml");
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
   });
 
   it("ignores non-.yaml files in the dir", async () => {

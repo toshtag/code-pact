@@ -13,6 +13,8 @@
 // contract are the binding source for everything here.
 // ---------------------------------------------------------------------------
 
+import type { EventPackBlock } from "./event-pack.ts";
+
 /**
  * Why a loose file could NOT be unlinked, recorded per surviving file. Split so
  * operator recovery differs per reason (a corrupt file vs a swapped one vs a
@@ -75,32 +77,106 @@ export type CleanupErrorCode =
  * classifier below be unit-tested against a fixed shape first.
  */
 export type CleanupOutcome =
+  // --- success / no-op (ok: true) — every boolean is FIXED per the RFC, not just
+  // typed `boolean`, so Layer 3b cannot return e.g. `cleaned` with
+  // partial_applied:false without a type error. ---
   | {
       ok: true;
-      /** `cleaned` = loose files removed this run; `already_cleaned` = none to remove. */
-      kind: "cleaned" | "already_cleaned";
+      /** Loose files were removed this run. */
+      kind: "cleaned";
       cleanup_pending: false;
-      partial_applied: boolean;
-      cleanup_started: boolean;
+      partial_applied: true;
+      cleanup_started: true;
       loose_deleted_count: number;
       cleanup_remaining_loose: 0;
       vanished_count: number;
       advisories: CleanupAdvisory[];
     }
   | {
+      ok: true;
+      /** A pack covered the phase but there was nothing left to remove. */
+      kind: "already_cleaned";
+      cleanup_pending: false;
+      partial_applied: false;
+      cleanup_started: false;
+      loose_deleted_count: 0;
+      cleanup_remaining_loose: 0;
+      vanished_count: number;
+      advisories: CleanupAdvisory[];
+    }
+  | {
+      ok: true;
+      /** The archived phase had no events to pack or clean (attested / pre-event). */
+      kind: "noop_no_events";
+      cleanup_pending: false;
+      partial_applied: false;
+      cleanup_started: false;
+      loose_deleted_count: 0;
+      cleanup_remaining_loose: 0;
+      vanished_count: 0;
+      advisories: CleanupAdvisory[];
+    }
+  // --- pre-write / pre-cleanup ineligible (ok: false) — the run stopped before the
+  // pack write step, so NOTHING on disk changed: partial_applied / cleanup_started /
+  // loose_deleted_count are FIXED. `cleanup_pending` follows the existing CLI
+  // contract (block-dependent), so it stays `boolean`. ---
+  | {
       ok: false;
-      code: CleanupErrorCode;
+      code: "STATE_COMPACT_INELIGIBLE";
+      kind: "ineligible";
+      block: EventPackBlock;
+      cleanup_pending: boolean;
+      partial_applied: false;
+      cleanup_started: false;
+      loose_deleted_count: 0;
+      cleanup_remaining_loose: 0;
+      vanished_count: 0;
+      skipped: [];
+      advisories: CleanupAdvisory[];
+    }
+  // --- write/cleanup failures (ok: false). ---
+  | {
+      ok: false;
+      code: "STATE_COMPACT_WRITE_FAILED";
       /**
-       * Present on WRITE_FAILED: which pack step failed. This REUSES Layer 2's
-       * existing error field name `phase` (state.ts emits `phase: err.phase`) —
-       * it is deliberately NOT a new `write_phase` field. The RFC locks this:
-       * "Layer 3 reuses Layer 2's field name", so Layer 3b wires this straight
-       * through to the existing CLI error data without a rename.
+       * Which pack step failed. This REUSES Layer 2's existing error field name
+       * `phase` (state.ts emits `phase: err.phase`) — it is deliberately NOT a new
+       * `write_phase` field. The RFC locks this: "Layer 3 reuses Layer 2's field
+       * name", so Layer 3b wires this straight through without a rename.
+       * `partial_applied` is inherited from EventPackWriteError: `write_pack`→false
+       * (pack never on disk), `verify_pack`→true (pack on disk). `cleanup_started`
+       * is always false here — the failure is before the unlink phase.
        */
-      phase?: "write_pack" | "verify_pack";
+      phase: "write_pack" | "verify_pack";
       cleanup_pending: true;
       partial_applied: boolean;
-      cleanup_started: boolean;
+      cleanup_started: false;
+      loose_deleted_count: 0;
+      cleanup_remaining_loose: number;
+      vanished_count: number;
+      skipped: CleanupSkip[];
+      advisories: CleanupAdvisory[];
+    }
+  | {
+      ok: false;
+      code: "STATE_COMPACT_CLEANUP_FAILED";
+      /** On CLEANUP_FAILED via reconciliation R1.1, the coverage-failure block. */
+      block?: "pack_stale_after_cleanup";
+      cleanup_pending: true;
+      partial_applied: boolean;
+      cleanup_started: true;
+      loose_deleted_count: number;
+      cleanup_remaining_loose: number;
+      vanished_count: number;
+      skipped: CleanupSkip[];
+      advisories: CleanupAdvisory[];
+    }
+  | {
+      ok: false;
+      code: "STATE_COMPACT_CLEANUP_INCOMPLETE";
+      cleanup_pending: true;
+      partial_applied: boolean;
+      cleanup_started: true;
       loose_deleted_count: number;
       cleanup_remaining_loose: number;
       vanished_count: number;
@@ -224,11 +300,15 @@ export function classifyPostRunSurvivor(
  * FAILED dominates: any single `pack_stale_after_cleanup` makes the whole run
  * FAILED; otherwise any present survivor makes it INCOMPLETE; an empty list means
  * the cleanup is complete (the caller maps that to `cleaned`/`already_cleaned`).
+ * On a FAILED run, `block: "pack_stale_after_cleanup"` is carried up so the caller
+ * can populate the public failure contract WITHOUT re-scanning the verdicts — the
+ * block would otherwise be lost between classify and the CleanupOutcome.
  */
 export function aggregateSurvivorVerdicts(
   verdicts: readonly SurvivorVerdict[],
 ): {
   terminal: CleanupErrorCode | null;
+  block?: "pack_stale_after_cleanup";
   skipped: CleanupSkip[];
 } {
   if (verdicts.length === 0) return { terminal: null, skipped: [] };
@@ -236,10 +316,8 @@ export function aggregateSurvivorVerdicts(
   const anyFailed = verdicts.some(
     (v) => v.terminal === "STATE_COMPACT_CLEANUP_FAILED",
   );
-  return {
-    terminal: anyFailed
-      ? "STATE_COMPACT_CLEANUP_FAILED"
-      : "STATE_COMPACT_CLEANUP_INCOMPLETE",
-    skipped,
-  };
+  if (anyFailed) {
+    return { terminal: "STATE_COMPACT_CLEANUP_FAILED", block: "pack_stale_after_cleanup", skipped };
+  }
+  return { terminal: "STATE_COMPACT_CLEANUP_INCOMPLETE", skipped };
 }
