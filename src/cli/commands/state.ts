@@ -71,7 +71,7 @@ function humanLine(phaseId: string, result: StateCompactResult): string {
         return `"${phaseId}" is already packed and fully cleaned up (no loose files remain).`;
       }
       return result.loose_relationship === "strict_subset"
-        ? `"${phaseId}" is already packed; a prior cleanup was partial — ${result.loose_remaining_count} loose file(s) remain and can be resumed by Layer 3 cleanup.`
+        ? `"${phaseId}" is already packed; a prior cleanup or manual removal left a partial loose set — ${result.loose_remaining_count} loose file(s) remain and can be resumed by Layer 3 cleanup.`
         : `"${phaseId}" is already packed; ${result.loose_remaining_count} loose file(s) still await Layer 3 cleanup.`;
     case "would_noop_no_events":
     case "noop_no_events":

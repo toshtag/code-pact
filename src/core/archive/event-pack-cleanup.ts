@@ -235,15 +235,20 @@ export type CleanupOutcome =
     } & CleanupMutationProgress);
 
 // ---------------------------------------------------------------------------
-// Existing-pack ∩ loose SET RELATIONSHIP — the cell-12/13/14 distinction (PURE).
+// Existing-pack ∩ loose SET RELATIONSHIP — the cell-11/12/13/14 split (PURE).
 //
-// Layer 2's `planEventPack` step 8 collapses every "pack present, loose ≠ pack"
-// case to `pack_stale`. Layer 3 must split that by the SET relationship between the
-// loose id-set and the pack id-set, because a strict subset is a RESUMABLE partial
-// cleanup (cell 14) while a divergence is genuine staleness (cell 13). This function
-// computes that relationship and NOTHING else — it does NOT change `planEventPack`'s
-// return (Layer 2's `pack_stale` behavior is untouched in 3b-1); Layer 3b-2 calls it
-// to drive the resume-vs-stale branch when the unlink loop is wired.
+// Layer 3b-1 introduced this pure relationship classifier. Layer 3b-2a WIRED it
+// into `planEventPack`'s existing-pack branch: a strict, non-empty subset is now
+// classified as a RESUMABLE already-packed state (`noop_already_packed`,
+// cleanup_pending:true) instead of `ineligible(pack_stale)`, so a phase whose loose
+// files were partially removed is no longer permanently stuck. (Before 3b-2a,
+// `planEventPack` step 8 collapsed every "pack present, loose ≠ pack" case — subset
+// AND divergence alike — to `pack_stale`.)
+//
+// This still does NOT unlink loose files and does NOT perform the Layer 3 cleanup
+// naming migration (`cleaned` / `would_cleanup_loose` / `would_resume_cleanup`). It
+// only gives the planner/result surface enough information for Layer 3b-2b to
+// distinguish, once the unlink loop is wired:
 //
 //   empty         loose == ∅              → cell 11 (already cleaned, nothing to do)
 //   equal         loose id-set == pack    → cell 12 (clean the full set)
