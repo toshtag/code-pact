@@ -4,6 +4,7 @@ import { withWriteLock, emitOk, emitError } from "../util.ts";
 import { isHelpToken } from "../usage.ts";
 import { runStateCompact, type StateCompactResult } from "../../commands/state-compact.ts";
 import { EventPackWriteError, type EventPackBlock } from "../../core/archive/event-pack.ts";
+import { eventPackPath } from "../../core/archive/paths.ts";
 
 // ---------------------------------------------------------------------------
 // `state` command cluster. Layer 2 ships ONE subcommand: `state compact`. It
@@ -39,6 +40,8 @@ function ineligibleDetail(phaseId: string, block: EventPackBlock): string {
   switch (block.kind) {
     case "phase_file_still_present":
       return `the phase YAML still exists at ${block.phase_path} — run \`code-pact phase archive ${phaseId} --write\` first`;
+    case "ambiguous_phase_id":
+      return `phase id "${phaseId}" maps to multiple roadmap entries (${block.phase_paths.join(", ")}) — resolve the duplicate phase ids before compacting`;
     case "snapshot_missing":
       return `no phase snapshot found — run \`code-pact phase archive ${phaseId} --write\` first`;
     case "snapshot_invalid":
@@ -118,6 +121,10 @@ async function cmdStateCompact(
               phase_id: phaseId,
               phase: err.phase,
               partial_applied: err.partial_applied,
+              // The pack path is always reported so an operator can locate the
+              // file — critical for verify_pack+partial_applied (the bad pack is
+              // on disk and Layer 2 does not auto-remove it).
+              pack_path: eventPackPath(cwd, phaseId),
               ...(err.phase === "verify_pack" && err.partial_applied
                 ? { next_action: "Inspect or remove the pack file, then rerun state compact." }
                 : {}),

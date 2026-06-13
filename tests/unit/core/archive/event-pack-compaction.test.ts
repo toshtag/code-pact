@@ -117,6 +117,34 @@ describe("planEventPack — eligibility blocks", () => {
     expect(plan.block.kind).toBe("snapshot_missing");
   });
 
+  it("duplicate phase id in the roadmap (AMBIGUOUS_PHASE_ID) → ineligible(ambiguous_phase_id), NO pack written", async () => {
+    // Control-plane corruption: the id maps to two roadmap entries, each with a
+    // live YAML on disk. The snapshot also exists. state compact must fail closed
+    // — never compact while duplicate live phases may exist.
+    const events = await scaffoldArchivedP1(); // snapshot written, YAML deleted, roadmap empty
+    // Re-introduce TWO live P1 phases with the SAME id.
+    await writeFile(join(cwd, "design", "phases", "P1-a.yaml"), P1_DONE, "utf8");
+    await writeFile(join(cwd, "design", "phases", "P1-b.yaml"), P1_DONE, "utf8");
+    await writeFile(
+      join(cwd, "design", "roadmap.yaml"),
+      `phases:\n  - id: P1\n    path: design/phases/P1-a.yaml\n    weight: 1\n  - id: P1\n    path: design/phases/P1-b.yaml\n    weight: 1\n`,
+      "utf8",
+    );
+    const plan = await planEventPack(cwd, "P1");
+    expect(plan.kind).toBe("ineligible");
+    if (plan.kind !== "ineligible") return;
+    expect(plan.block.kind).toBe("ambiguous_phase_id");
+    if (plan.block.kind !== "ambiguous_phase_id") return;
+    expect(plan.block.phase_paths.sort()).toEqual([
+      "design/phases/P1-a.yaml",
+      "design/phases/P1-b.yaml",
+    ]);
+    // No pack written by a dry-run plan; assert the eligible events would have
+    // packed (so the block is the ONLY reason it stopped).
+    expect(events.length).toBeGreaterThan(0);
+    expect(await exists(eventPackPath(cwd, "P1"))).toBe(false);
+  });
+
   it("corrupt snapshot → ineligible(snapshot_invalid)", async () => {
     await scaffoldArchivedP1();
     await writeFile(phaseSnapshotPath(cwd, "P1"), "{ corrupt", "utf8");

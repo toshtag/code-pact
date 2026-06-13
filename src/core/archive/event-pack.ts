@@ -45,6 +45,7 @@ import { atomicWriteText } from "../../io/atomic-text.ts";
 
 export type EventPackBlock =
   | { kind: "phase_file_still_present"; phase_path: string }
+  | { kind: "ambiguous_phase_id"; phase_paths: string[] }
   | { kind: "snapshot_missing" }
   | { kind: "snapshot_invalid"; detail: string }
   | { kind: "snapshot_evidence_broken"; issues: SnapshotEvidenceIssue[] }
@@ -141,7 +142,11 @@ function sortLooseForPack(files: readonly LoadedEventFile[]): LoadedEventFile[] 
 async function phaseFileStillPresent(
   cwd: string,
   phaseId: string,
-): Promise<{ present: false } | { present: true; phase_path: string }> {
+): Promise<
+  | { kind: "absent" }
+  | { kind: "present"; phase_path: string }
+  | { kind: "ambiguous"; phase_paths: string[] }
+> {
   let phasePath: string;
   try {
     const roadmap = await loadRoadmap(cwd);
@@ -149,22 +154,26 @@ async function phaseFileStillPresent(
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     // No roadmap (ENOENT) or the phase isn't in it (PHASE_NOT_FOUND) → no live
-    // file can exist for it. AMBIGUOUS_PHASE_ID is a broken active control plane,
-    // but for compaction purposes there is no single live file to protect; treat
-    // as absent (the snapshot identity checks below still fail-close on mismatch).
-    if (isEnoent(err) || code === "PHASE_NOT_FOUND" || code === "AMBIGUOUS_PHASE_ID") {
-      return { present: false };
+    // file can exist for it: absent, proceed (the snapshot is the authority).
+    if (isEnoent(err) || code === "PHASE_NOT_FOUND") return { kind: "absent" };
+    // AMBIGUOUS_PHASE_ID is control-plane corruption: the id maps to MULTIPLE
+    // roadmap entries, so one or more live phase YAMLs likely exist. Fail closed —
+    // do NOT compact while duplicate live phases may exist (the same fail-closed
+    // posture as `phase_file_still_present`).
+    if (code === "AMBIGUOUS_PHASE_ID") {
+      const phases = (err as NodeJS.ErrnoException & { phases?: string[] }).phases ?? [];
+      return { kind: "ambiguous", phase_paths: phases };
     }
     throw err;
   }
   try {
     await lstat(await resolveWithinProject(cwd, phasePath));
-    return { present: true, phase_path: phasePath }; // resolves to something on disk
+    return { kind: "present", phase_path: phasePath }; // resolves to something on disk
   } catch (err) {
-    if (isEnoent(err)) return { present: false };
+    if (isEnoent(err)) return { kind: "absent" };
     // A symlink escape / unreadable path: fail closed (treat as present so we do
     // NOT compact while an unresolved live doc may exist).
-    return { present: true, phase_path: phasePath };
+    return { kind: "present", phase_path: phasePath };
   }
 }
 
@@ -175,13 +184,22 @@ export async function planEventPack(cwd: string, phaseId: string): Promise<Event
   assertSafePlanId(phaseId, "Phase id");
   const packPath = eventPackPath(cwd, phaseId);
 
-  // 1. The live phase YAML must be gone (compact follows archive).
+  // 1. The live phase YAML must be gone (compact follows archive). A duplicate
+  //    phase id (AMBIGUOUS_PHASE_ID) is control-plane corruption with likely-live
+  //    YAMLs → fail closed, never compact.
   const live = await phaseFileStillPresent(cwd, phaseId);
-  if (live.present) {
+  if (live.kind === "present") {
     return {
       kind: "ineligible",
       phaseId,
       block: { kind: "phase_file_still_present", phase_path: live.phase_path },
+    };
+  }
+  if (live.kind === "ambiguous") {
+    return {
+      kind: "ineligible",
+      phaseId,
+      block: { kind: "ambiguous_phase_id", phase_paths: live.phase_paths },
     };
   }
 

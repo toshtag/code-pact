@@ -107,6 +107,22 @@ describe("runStateCompact — dry-run", () => {
     if (r.kind !== "ineligible") return;
     expect(r.block.kind).toBe("phase_file_still_present");
   });
+
+  it("duplicate phase id (AMBIGUOUS_PHASE_ID) → ineligible(ambiguous_phase_id), no pack", async () => {
+    await scaffoldArchivedP1();
+    await writeFile(join(cwd, "design", "phases", "P1-a.yaml"), P1_DONE, "utf8");
+    await writeFile(join(cwd, "design", "phases", "P1-b.yaml"), P1_DONE, "utf8");
+    await writeFile(
+      join(cwd, "design", "roadmap.yaml"),
+      `phases:\n  - id: P1\n    path: design/phases/P1-a.yaml\n    weight: 1\n  - id: P1\n    path: design/phases/P1-b.yaml\n    weight: 1\n`,
+      "utf8",
+    );
+    const r = await runStateCompact({ cwd, phaseId: "P1", write: true });
+    expect(r.kind).toBe("ineligible");
+    if (r.kind !== "ineligible") return;
+    expect(r.block.kind).toBe("ambiguous_phase_id");
+    expect(await exists(eventPackPath(cwd, "P1"))).toBe(false); // fail closed — no pack
+  });
 });
 
 describe("runStateCompact — --write", () => {

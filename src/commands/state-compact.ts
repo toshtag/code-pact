@@ -14,7 +14,7 @@ import {
 // ---------------------------------------------------------------------------
 
 const LOOSE_NOTE =
-  "Layer 3 (state prune) will remove the loose event files after verified pack coverage.";
+  "Layer 3 of state compact will remove the loose event files after verified pack coverage.";
 
 export type StateCompactOptions = {
   cwd: string;
