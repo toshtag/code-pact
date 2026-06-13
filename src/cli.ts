@@ -28,6 +28,7 @@ import { cmdAdapter } from "./cli/commands/adapter.ts";
 import { cmdTask } from "./cli/commands/task.ts";
 import { cmdPlan } from "./cli/commands/plan.ts";
 import { cmdPhase } from "./cli/commands/phase.ts";
+import { cmdState } from "./cli/commands/state.ts";
 import { cmdSpec } from "./cli/commands/spec.ts";
 import { cmdDecision } from "./cli/commands/decision.ts";
 import type { LocaleCode } from "./core/schemas/locale.ts";
@@ -815,6 +816,9 @@ async function main(): Promise<number> {
 
     case "phase":
       return cmdPhase(rest, locale, json);
+
+    case "state":
+      return cmdState(rest, locale, json);
 
     case "task":
       return cmdTask(rest, locale, json);

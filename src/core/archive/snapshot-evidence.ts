@@ -1,6 +1,7 @@
 import { readdir } from "node:fs/promises";
 import { basename } from "node:path";
 import type { ProgressEvent } from "../schemas/progress-event.ts";
+import type { PhaseSnapshot } from "../schemas/phase-snapshot.ts";
 import { isSafePlanId } from "../schemas/plan-id.ts";
 import { archivePhasesDir } from "./paths.ts";
 import { loadPhaseSnapshot } from "./load-phase-snapshot.ts";
@@ -41,6 +42,83 @@ export type SnapshotEvidenceIssue = {
 export type SnapshotEvidenceResult =
   | { ok: true }
   | { ok: false; issues: SnapshotEvidenceIssue[] };
+
+/**
+ * The pure per-snapshot evidence check: for ONE already-parsed snapshot, every
+ * `progress_events` event_id must resolve from `resolved` to an event with the
+ * SAME task_id, a `done` status, and a task in the phase's task set. Pushes
+ * issues into `out`. No I/O — the caller supplies the parsed snapshot. Shared by
+ * the global validator (loops over all snapshots) and the per-phase validator
+ * (one snapshot the caller already holds).
+ */
+function collectSnapshotEvidenceIssues(
+  snapshot: PhaseSnapshot,
+  resolved: ReadonlyMap<string, ProgressEvent>,
+  out: SnapshotEvidenceIssue[],
+): void {
+  const phaseTaskIds = new Set(snapshot.tasks.map((t) => t.id));
+  for (const task of snapshot.tasks) {
+    const ev = task.terminal_evidence;
+    if (ev.kind !== "progress_events") continue;
+    for (const eventId of ev.event_ids) {
+      const event = resolved.get(eventId);
+      if (!event) {
+        out.push({
+          phase_id: snapshot.phase_id,
+          task_id: task.id,
+          event_id: eventId,
+          reason: "unresolved",
+          message: `snapshot "${snapshot.phase_id}" task "${task.id}" evidence event_id ${eventId} does not resolve from the durable ledger (loose ∪ packs)`,
+        });
+        continue;
+      }
+      if (event.task_id !== task.id) {
+        out.push({
+          phase_id: snapshot.phase_id,
+          task_id: task.id,
+          event_id: eventId,
+          reason: "wrong_task",
+          message: `snapshot "${snapshot.phase_id}" task "${task.id}" evidence event_id ${eventId} belongs to task "${event.task_id}"`,
+        });
+      }
+      if (event.status !== "done") {
+        out.push({
+          phase_id: snapshot.phase_id,
+          task_id: task.id,
+          event_id: eventId,
+          reason: "wrong_status",
+          message: `snapshot "${snapshot.phase_id}" task "${task.id}" progress_events evidence event_id ${eventId} has status "${event.status}" (expected done)`,
+        });
+      }
+      if (!phaseTaskIds.has(event.task_id)) {
+        out.push({
+          phase_id: snapshot.phase_id,
+          task_id: task.id,
+          event_id: eventId,
+          reason: "task_not_in_phase",
+          message: `snapshot "${snapshot.phase_id}" evidence event_id ${eventId} resolves to task "${event.task_id}" which is not in the phase task set`,
+        });
+      }
+    }
+  }
+}
+
+/**
+ * TARGET-ONLY evidence validation for ONE already-parsed snapshot (the
+ * `state compact` preflight path). Pass the snapshot the caller already read —
+ * NOT cwd+phaseId — so the writer and the validator check the SAME bytes (no
+ * TOCTOU). Does NOT scan other snapshots, so a corrupt OTHER phase can never
+ * block compacting THIS phase. Global multi-snapshot validation stays the job of
+ * validate / plan lint / doctor via `validateSnapshotEventEvidence`.
+ */
+export function validateSnapshotEventEvidenceForSnapshot(args: {
+  snapshot: PhaseSnapshot;
+  resolved: ReadonlyMap<string, ProgressEvent>;
+}): SnapshotEvidenceResult {
+  const issues: SnapshotEvidenceIssue[] = [];
+  collectSnapshotEvidenceIssues(args.snapshot, args.resolved, issues);
+  return issues.length === 0 ? { ok: true } : { ok: false, issues };
+}
 
 /**
  * The set of every task_id that belongs to an archived phase snapshot, plus soft
@@ -125,52 +203,7 @@ export async function validateSnapshotEventEvidence(
       skipped.push({ scope: "file", detail: `snapshot "${fileStem}" is corrupt or unreadable` });
       continue;
     }
-    const snapshot = res.snapshot;
-    const phaseTaskIds = new Set(snapshot.tasks.map((t) => t.id));
-    for (const task of snapshot.tasks) {
-      const ev = task.terminal_evidence;
-      if (ev.kind !== "progress_events") continue;
-      for (const eventId of ev.event_ids) {
-        const event = resolved.get(eventId);
-        if (!event) {
-          issues.push({
-            phase_id: snapshot.phase_id,
-            task_id: task.id,
-            event_id: eventId,
-            reason: "unresolved",
-            message: `snapshot "${snapshot.phase_id}" task "${task.id}" evidence event_id ${eventId} does not resolve from the durable ledger (loose ∪ packs)`,
-          });
-          continue;
-        }
-        if (event.task_id !== task.id) {
-          issues.push({
-            phase_id: snapshot.phase_id,
-            task_id: task.id,
-            event_id: eventId,
-            reason: "wrong_task",
-            message: `snapshot "${snapshot.phase_id}" task "${task.id}" evidence event_id ${eventId} belongs to task "${event.task_id}"`,
-          });
-        }
-        if (event.status !== "done") {
-          issues.push({
-            phase_id: snapshot.phase_id,
-            task_id: task.id,
-            event_id: eventId,
-            reason: "wrong_status",
-            message: `snapshot "${snapshot.phase_id}" task "${task.id}" progress_events evidence event_id ${eventId} has status "${event.status}" (expected done)`,
-          });
-        }
-        if (!phaseTaskIds.has(event.task_id)) {
-          issues.push({
-            phase_id: snapshot.phase_id,
-            task_id: task.id,
-            event_id: eventId,
-            reason: "task_not_in_phase",
-            message: `snapshot "${snapshot.phase_id}" evidence event_id ${eventId} resolves to task "${event.task_id}" which is not in the phase task set`,
-          });
-        }
-      }
-    }
+    collectSnapshotEvidenceIssues(res.snapshot, resolved, issues);
   }
 
   return {

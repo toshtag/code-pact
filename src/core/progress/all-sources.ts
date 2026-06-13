@@ -6,6 +6,7 @@ import { type LoadedEventFile, readEventFiles } from "./events-io.ts";
 import { progressPath } from "./io.ts";
 import {
   readEventPackFiles,
+  readEventPackFilesLenient,
   type LoadedEventPack,
 } from "../archive/event-pack-reader.ts";
 import {
@@ -169,12 +170,17 @@ export async function readPackSources(
   for (const f of looseFiles) looseById.set(f.id, f);
 
   let packs: LoadedEventPack[];
-  try {
-    packs = await readEventPackFiles(cwd);
-  } catch (err) {
-    if (!lenient) throw err;
-    issues.push({ code: "EVENT_PACK_INVALID", message: (err as Error).message });
-    packs = [];
+  if (lenient) {
+    // PER-FILE lenient: one corrupt pack must NOT discard the other valid packs
+    // (a corrupt OTHER phase's pack can't block compacting THIS phase). A dir
+    // that cannot be enumerated still throws — that is not a per-file issue.
+    const { packs: validPacks, errors } = await readEventPackFilesLenient(cwd);
+    for (const e of errors) {
+      issues.push({ code: "EVENT_PACK_INVALID", message: `event pack ${e.path}: ${e.message}` });
+    }
+    packs = validPacks;
+  } else {
+    packs = await readEventPackFiles(cwd); // strict: throw on the first bad pack
   }
 
   const cache = newSnapshotRawCache();
