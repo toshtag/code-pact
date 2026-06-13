@@ -51,7 +51,7 @@ function ineligibleDetail(phaseId: string, block: EventPackBlock): string {
     case "snapshot_evidence_broken":
       return `the phase snapshot's progress_events evidence does not resolve from the durable ledger (loose ∪ packs)`;
     case "pack_stale":
-      return `an event pack exists but its event set differs from the current loose files — inspect the pack manually`;
+      return `a loose event file is not covered by the existing pack (the pack and loose set have diverged) — inspect the pack manually`;
     case "pack_invalid":
       return `the existing event pack failed validation: ${block.detail}`;
     case "candidate_bind_failed":
