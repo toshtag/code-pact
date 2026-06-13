@@ -7,7 +7,6 @@ import {
   type PackedEvent,
 } from "../schemas/event-pack.ts";
 import { Phase } from "../schemas/phase.ts";
-import type { PhaseSnapshot } from "../schemas/phase-snapshot.ts";
 import type { ProgressEvent } from "../schemas/progress-event.ts";
 import type { LoadedEventFile } from "../progress/events-io.ts";
 import { atCompact } from "../progress/event-id.ts";
@@ -63,12 +62,11 @@ export type EventPackPlan =
       phaseId: string;
       packPath: string;
       pack: EventPack;
-      /** The parsed snapshot + raw bytes, held for readback bind (no re-read). */
-      snapshot: PhaseSnapshot;
-      snapshotRaw: string;
-      /** loose ∪ THIS pack's events, by id — the readback resolution set. */
-      looseEventsById: Map<string, LoadedEventFile>;
-      /** Count of loose files for the phase's tasks (for loose_remaining_count). */
+      /** Count of loose files for the phase's tasks (for loose_remaining_count).
+       *  The snapshot, its raw bytes, and the per-id loose map are NOT carried on
+       *  the plan: `applyEventPackPlan` re-runs `planEventPack` inside the lock and
+       *  re-reads all of them from disk at verify time, so a plan-time copy would
+       *  be stale by the time it was used. */
       loose_count: number;
     }
   | {
@@ -347,25 +345,10 @@ export async function planEventPack(cwd: string, phaseId: string): Promise<Event
   // 4. Durable sources (lenient: a corrupt OTHER phase's pack can't block this;
   //    the TARGET pack's own validity was already decided above).
   const packSources = await readPackSources(cwd, "lenient");
-  const resolved = new Map<string, ProgressEvent>();
-  for (const f of [...packSources.looseFiles, ...packSources.validatedPackFiles]) {
-    resolved.set(f.id, f.event);
-  }
 
-  // 5. TARGET-ONLY evidence check — the parsed snapshot we already hold, NOT a
-  //    re-read (no TOCTOU), and NOT the global multi-snapshot validator. A valid
-  //    target pack (validated in step 3) is in `validatedPackFiles`, so the
-  //    snapshot's event_ids resolve from it here.
-  const evidence = validateSnapshotEventEvidenceForSnapshot({ snapshot, resolved });
-  if (!evidence.ok) {
-    return {
-      kind: "ineligible",
-      phaseId,
-      block: { kind: "snapshot_evidence_broken", issues: evidence.issues },
-    };
-  }
-
-  // 6. The phase's loose files (ALL statuses for the snapshot's task_ids).
+  // 5. The phase's loose files (ALL statuses for the snapshot's task_ids) — the
+  //    binding's own-pack resolution set. Built BEFORE the evidence check because
+  //    the target pack's Tier-2 binding (step 6) needs it.
   const snapshotTaskIds = new Set(snapshot.tasks.map((t) => t.id));
   const phaseLooseFiles = packSources.looseFiles.filter((f) =>
     snapshotTaskIds.has(f.event.task_id),
@@ -373,7 +356,15 @@ export async function planEventPack(cwd: string, phaseId: string): Promise<Event
   const looseEventsById = new Map<string, LoadedEventFile>();
   for (const f of phaseLooseFiles) looseEventsById.set(f.id, f);
 
-  // 7. Existing-pack branch (the target pack was Tier-1-validated in step 3).
+  // 6. TARGET pack Tier-2 binding BEFORE the evidence check. Ordering is
+  //    load-bearing: a target pack that is Tier-1-valid but Tier-2-invalid
+  //    (snapshot_sha256 mismatch, semantic replay conflict, task_id_not_in_snapshot)
+  //    is dropped from `validatedPackFiles` by the lenient read above. If the
+  //    evidence check ran first against `loose ∪ validatedPackFiles` it would find
+  //    the snapshot's event_ids unresolved and misreport `snapshot_evidence_broken`
+  //    — pointing the operator at the snapshot when the EXISTING PACK is what's
+  //    broken. Binding it here pins the verdict to `pack_invalid`. (Tier-1
+  //    corruption was already caught in step 3; this closes the Tier-2 path.)
   if (existing !== null) {
     const bindIssues = bindPackToSnapshot(existing, snapshot, snapshotRaw, looseEventsById);
     if (bindIssues.length > 0) {
@@ -383,6 +374,31 @@ export async function planEventPack(cwd: string, phaseId: string): Promise<Event
         block: { kind: "pack_invalid", detail: bindIssues.map((i) => i.message).join("; ") },
       };
     }
+  }
+
+  // 7. TARGET-ONLY evidence check — the parsed snapshot we already hold, NOT a
+  //    re-read (no TOCTOU), and NOT the global multi-snapshot validator. The
+  //    resolved map is `loose ∪ validatedPackFiles`, PLUS the target pack's own
+  //    entries when it bound cleanly above (do not depend on the lenient read
+  //    having re-admitted it — make the target's contribution explicit).
+  const resolved = new Map<string, ProgressEvent>();
+  for (const f of [...packSources.looseFiles, ...packSources.validatedPackFiles]) {
+    resolved.set(f.id, f.event);
+  }
+  if (existing !== null) {
+    for (const f of existing.entries) resolved.set(f.id, f.event);
+  }
+  const evidence = validateSnapshotEventEvidenceForSnapshot({ snapshot, resolved });
+  if (!evidence.ok) {
+    return {
+      kind: "ineligible",
+      phaseId,
+      block: { kind: "snapshot_evidence_broken", issues: evidence.issues },
+    };
+  }
+
+  // 8. Existing-pack branch (Tier-1 in step 3, Tier-2 bound in step 6).
+  if (existing !== null) {
     // Branch on loose count FIRST — once loose is gone there is nothing to compare
     // against, so NEVER compare the pack's hash to computeEventIdsSha256([]).
     if (phaseLooseFiles.length === 0) {
@@ -415,12 +431,12 @@ export async function planEventPack(cwd: string, phaseId: string): Promise<Event
     };
   }
 
-  // 8. No existing pack.
+  // 9. No existing pack.
   if (phaseLooseFiles.length === 0) {
     return { kind: "noop_no_events", phaseId };
   }
 
-  // 9. Build the candidate pack from the COMPLETE loose set.
+  // 10. Build the candidate pack from the COMPLETE loose set.
   const sorted = sortLooseForPack(phaseLooseFiles);
   const packedEvents: PackedEvent[] = sorted.map((f) => ({ id: f.id, file: f.file, event: f.event }));
   const candidate = EventPack.parse({
@@ -431,7 +447,7 @@ export async function planEventPack(cwd: string, phaseId: string): Promise<Event
     events: packedEvents,
   } satisfies EventPack);
 
-  // 10. Pre-write gate: the SAME binding the readback will run. Should never fail
+  // 11. Pre-write gate: the SAME binding the readback will run. Should never fail
   //    (built from the complete loose set) — fail closed if it somehow does.
   const candidateLoaded: LoadedEventPack = {
     phaseId,
@@ -453,9 +469,6 @@ export async function planEventPack(cwd: string, phaseId: string): Promise<Event
     phaseId,
     packPath,
     pack: candidate,
-    snapshot,
-    snapshotRaw,
-    looseEventsById,
     loose_count: phaseLooseFiles.length,
   };
 }
@@ -514,6 +527,23 @@ export async function applyEventPackPlan(
         : `re-plan is ${verifyPlan.kind} (expected noop_already_packed)`;
     throw new EventPackWriteError("verify_pack", true, `readback verification failed: ${detail}`);
   }
+  // Option A — the verify verdict must match the write we just performed: Layer 2
+  // does NOT unlink, so a faithful write leaves EXACTLY the loose set it packed
+  // (`cleanup_pending:true`, `loose_remaining_count === fresh.loose_count`). If a
+  // concurrent delete / external edit removed loose files between write and verify,
+  // `verifyPlan` reports a smaller count (or `cleanup_pending:false` at zero) — the
+  // pack no longer reflects the on-disk state, so fail closed rather than return a
+  // stale `loose_count`. The returned count is taken from the VERIFIED verdict, not
+  // the pre-write plan.
+  if (verifyPlan.cleanup_pending !== true || verifyPlan.loose_remaining_count !== loose_count) {
+    throw new EventPackWriteError(
+      "verify_pack",
+      true,
+      `readback verification failed: loose set changed during write ` +
+        `(packed ${loose_count}, on disk now ${verifyPlan.loose_remaining_count}, ` +
+        `cleanup_pending=${verifyPlan.cleanup_pending})`,
+    );
+  }
 
-  return { kind: "written", phaseId, packPath, pack, loose_count };
+  return { kind: "written", phaseId, packPath, pack, loose_count: verifyPlan.loose_remaining_count };
 }

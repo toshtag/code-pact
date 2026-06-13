@@ -11,6 +11,7 @@ import {
 import { eventPackPath, phaseSnapshotPath } from "../../../../src/core/archive/paths.ts";
 import { eventFileName } from "../../../../src/core/progress/event-id.ts";
 import { EventPack } from "../../../../src/core/schemas/event-pack.ts";
+import type { ProgressEvent } from "../../../../src/core/schemas/progress-event.ts";
 import { seedDurableEvents } from "../../../helpers/seed-events.ts";
 import { buildValidEventPack, writeEventPackFile } from "../../../helpers/event-pack-fixture.ts";
 
@@ -359,6 +360,27 @@ describe("applyEventPackPlan — write/verify fail-closed (NO unlink anywhere)",
     expect(await exists(eventPackPath(cwd, "P1"))).toBe(true); // not deleted
   });
 
+  it("loose files DELETED between write and verify → verify_pack fails (no stale loose_remaining_count)", async () => {
+    // Option A: Layer 2 never unlinks, so a faithful write leaves EXACTLY the loose
+    // set it packed. If a concurrent delete removes the loose files before verify,
+    // the re-plan reports already_packed cleanup_pending:false (zero loose) — which
+    // does NOT match the write (cleanup_pending:true, loose_remaining_count==2). The
+    // apply must fail closed rather than return the stale pre-write count.
+    const events = await scaffoldArchivedP1();
+    const writePlan = await planEventPack(cwd, "P1");
+    if (writePlan.kind !== "write") throw new Error("expected write");
+    await expect(
+      applyEventPackPlan(cwd, writePlan, {
+        beforeVerify: async () => {
+          for (const e of events) {
+            await rm(join(cwd, ".code-pact", "state", "events", eventFileName(e)));
+          }
+        },
+      }),
+    ).rejects.toMatchObject({ phase: "verify_pack", partial_applied: true });
+    expect(await exists(eventPackPath(cwd, "P1"))).toBe(true); // pack not deleted
+  });
+
   it("a live phase YAML reappears between plan and verify → verify_pack fails", async () => {
     await scaffoldArchivedP1();
     const writePlan = await planEventPack(cwd, "P1");
@@ -446,6 +468,47 @@ describe("planEventPack — corrupt UNRELATED pack does not block the target (si
     }
     // The TARGET pack itself is corrupt.
     await writeEventPackFile(cwd, "P1", { not: "valid" });
+    const plan = await planEventPack(cwd, "P1");
+    expect(plan.kind).toBe("ineligible");
+    if (plan.kind !== "ineligible") return;
+    expect(plan.block.kind).toBe("pack_invalid");
+  });
+
+  it("P1 target pack Tier-1-valid but snapshot_sha256 mismatch + zero loose → pack_invalid, NOT snapshot_evidence_broken", async () => {
+    // The third-review blocker: a Tier-1-valid pack that fails Tier-2 binding is
+    // dropped from validatedPackFiles by the lenient read. With loose at zero the
+    // evidence would otherwise be unresolved and misreport snapshot_evidence_broken;
+    // the existing-pack Tier-2 binding must run FIRST and pin pack_invalid.
+    const events = await scaffoldArchivedP1();
+    const pack = await buildValidEventPack(cwd, "P1", events);
+    pack.snapshot_sha256 = "0".repeat(64); // wrong binding — Tier-1 still passes
+    await writeEventPackFile(cwd, "P1", pack);
+    for (const e of events) {
+      await rm(join(cwd, ".code-pact", "state", "events", eventFileName(e)));
+    }
+    const plan = await planEventPack(cwd, "P1");
+    expect(plan.kind).toBe("ineligible");
+    if (plan.kind !== "ineligible") return;
+    expect(plan.block.kind).toBe("pack_invalid");
+    if (plan.block.kind !== "pack_invalid") return;
+    expect(plan.block.detail).toMatch(/snapshot_sha256|binding|snapshot/i);
+  });
+
+  it("P1 target pack Tier-1-valid but a foreign task_id (not in snapshot) + zero loose → pack_invalid, NOT snapshot_evidence_broken", async () => {
+    // Tier-2 task-membership failure: same lenient-drop path, same misdiagnosis
+    // risk. Recompute event_ids_sha256 so the tampered pack stays Tier-1-valid.
+    const events = await scaffoldArchivedP1();
+    const foreign: ProgressEvent = {
+      task_id: "P9-T9",
+      status: "done",
+      at: "2026-06-02T00:00:00.000Z",
+      actor: "agent",
+    };
+    const pack = await buildValidEventPack(cwd, "P1", [...events, foreign]);
+    await writeEventPackFile(cwd, "P1", pack);
+    for (const e of events) {
+      await rm(join(cwd, ".code-pact", "state", "events", eventFileName(e)));
+    }
     const plan = await planEventPack(cwd, "P1");
     expect(plan.kind).toBe("ineligible");
     if (plan.kind !== "ineligible") return;
