@@ -29,6 +29,10 @@ import {
   bindPackToSnapshot,
   type EventPackBindingIssue,
 } from "./event-pack-binding.ts";
+import {
+  classifyLoosePackRelationship,
+  type CoveredLooseRelationship,
+} from "./event-pack-cleanup.ts";
 import { eventPackPath, sha256Hex, phaseSnapshotPath } from "./paths.ts";
 import { atomicWriteText } from "../../io/atomic-text.ts";
 
@@ -75,6 +79,12 @@ export type EventPackPlan =
       packPath: string;
       loose_remaining_count: number;
       cleanup_pending: boolean;
+      /** Which loose↔pack relationship this verdict reflects — `empty` (fully
+       *  compacted), `equal` (pack matches loose exactly), or `strict_subset` (a
+       *  resumable partial cleanup: every remaining loose id is in the pack but some
+       *  loose files were already removed). Lets Layer 3 pick resume-vs-finish, and
+       *  un-sticks a `strict_subset` phase that Layer 2 mis-reported as `pack_stale`. */
+      loose_relationship: CoveredLooseRelationship;
     }
   | { kind: "noop_no_events"; phaseId: string }
   | { kind: "ineligible"; phaseId: string; block: EventPackBlock };
@@ -93,6 +103,12 @@ export type EventPackApplyOutcome =
       packPath: string;
       loose_remaining_count: number;
       cleanup_pending: boolean;
+      /** Which loose↔pack relationship this verdict reflects — `empty` (fully
+       *  compacted), `equal` (pack matches loose exactly), or `strict_subset` (a
+       *  resumable partial cleanup: every remaining loose id is in the pack but some
+       *  loose files were already removed). Lets Layer 3 pick resume-vs-finish, and
+       *  un-sticks a `strict_subset` phase that Layer 2 mis-reported as `pack_stale`. */
+      loose_relationship: CoveredLooseRelationship;
     }
   | { kind: "noop_no_events"; phaseId: string }
   | { kind: "ineligible"; phaseId: string; block: EventPackBlock };
@@ -468,37 +484,44 @@ export async function planEventPack(cwd: string, phaseId: string): Promise<Event
     };
   }
 
-  // 8. Existing-pack branch (Tier-1 in step 3, Tier-2 bound in step 6).
+  // 8. Existing-pack branch (Tier-1 in step 3, Tier-2 bound in step 6). Classify by
+  //    the SET relationship between the loose id-set and the pack id-set — NOT bare
+  //    hash equality — so a strict, non-empty subset (a phase whose loose files were
+  //    PARTIALLY removed by an earlier Layer 3 run) is recognized as a RESUMABLE
+  //    cleanup instead of being mis-reported as `pack_stale` (which is exit-2 and
+  //    leaves the operator permanently stuck). Reachability: Tier-2 binding (step 6)
+  //    already rejected any loose event NOT in the pack (`pack_missing_phase_event`
+  //    → `pack_invalid`), so by here every loose id IS in the pack and the reachable
+  //    relationships are `empty` / `equal` / `strict_subset`. `diverged` is the
+  //    defensive fallback (a loose id outside the pack that binding somehow missed):
+  //    fail closed to `pack_stale`, never resume against it. (`empty` is classified
+  //    without touching the hash, preserving the "never hash an empty loose set"
+  //    invariant — only `diverged` recomputes the hash, and only to fill the block.)
   if (existing !== null) {
-    // Branch on loose count FIRST — once loose is gone there is nothing to compare
-    // against, so NEVER compare the pack's hash to computeEventIdsSha256([]).
-    if (phaseLooseFiles.length === 0) {
+    const packIds = new Set(existing.pack.events.map((e) => e.id));
+    const looseIds = new Set(phaseLooseFiles.map((f) => f.id));
+    const relationship = classifyLoosePackRelationship(looseIds, packIds);
+    if (relationship === "diverged") {
       return {
-        kind: "noop_already_packed",
+        kind: "ineligible",
         phaseId,
-        packPath,
-        loose_remaining_count: 0,
-        cleanup_pending: false,
+        block: {
+          kind: "pack_stale",
+          existing_event_ids_sha256: existing.pack.event_ids_sha256,
+          expected_event_ids_sha256: computeEventIdsSha256(phaseLooseFiles),
+        },
       };
     }
-    const expected = computeEventIdsSha256(phaseLooseFiles);
-    if (existing.pack.event_ids_sha256 === expected) {
-      return {
-        kind: "noop_already_packed",
-        phaseId,
-        packPath,
-        loose_remaining_count: phaseLooseFiles.length,
-        cleanup_pending: true,
-      };
-    }
+    // empty → fully compacted; equal → pack matches loose exactly; strict_subset →
+    // a prior partial cleanup left a resumable remnant. cleanup_pending iff any
+    // loose file still remains on disk.
     return {
-      kind: "ineligible",
+      kind: "noop_already_packed",
       phaseId,
-      block: {
-        kind: "pack_stale",
-        existing_event_ids_sha256: existing.pack.event_ids_sha256,
-        expected_event_ids_sha256: expected,
-      },
+      packPath,
+      loose_remaining_count: phaseLooseFiles.length,
+      cleanup_pending: relationship !== "empty",
+      loose_relationship: relationship,
     };
   }
 

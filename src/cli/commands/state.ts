@@ -51,7 +51,7 @@ function ineligibleDetail(phaseId: string, block: EventPackBlock): string {
     case "snapshot_evidence_broken":
       return `the phase snapshot's progress_events evidence does not resolve from the durable ledger (loose ∪ packs)`;
     case "pack_stale":
-      return `an event pack exists but its event set differs from the current loose files — inspect the pack manually`;
+      return `a loose event file is not covered by the existing pack (the pack and loose set have diverged) — inspect the pack manually`;
     case "pack_invalid":
       return `the existing event pack failed validation: ${block.detail}`;
     case "candidate_bind_failed":
@@ -67,9 +67,12 @@ function humanLine(phaseId: string, result: StateCompactResult): string {
       return `Packed ${result.packed_event_count} event(s) for "${phaseId}" into ${result.pack_path}. ${result.loose_remaining_count} loose file(s) still on disk — ${result.next_action}`;
     case "would_already_packed":
     case "already_packed":
-      return result.cleanup_pending
-        ? `"${phaseId}" is already packed; ${result.loose_remaining_count} loose file(s) still await Layer 3 cleanup.`
-        : `"${phaseId}" is already packed and fully cleaned up (no loose files remain).`;
+      if (!result.cleanup_pending) {
+        return `"${phaseId}" is already packed and fully cleaned up (no loose files remain).`;
+      }
+      return result.loose_relationship === "strict_subset"
+        ? `"${phaseId}" is already packed; a prior cleanup or manual removal left a partial loose set — ${result.loose_remaining_count} loose file(s) remain and can be resumed by Layer 3 cleanup.`
+        : `"${phaseId}" is already packed; ${result.loose_remaining_count} loose file(s) still await Layer 3 cleanup.`;
     case "would_noop_no_events":
     case "noop_no_events":
       return `No progress events found for archived phase "${phaseId}" — likely attested or predates event tracking. Nothing was packed.`;

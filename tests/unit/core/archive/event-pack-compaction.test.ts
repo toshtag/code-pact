@@ -246,6 +246,7 @@ describe("planEventPack — existing-pack state machine (sixth-review pins)", ()
     if (plan.kind !== "noop_already_packed") return;
     expect(plan.cleanup_pending).toBe(false);
     expect(plan.loose_remaining_count).toBe(0);
+    expect(plan.loose_relationship).toBe("empty");
   });
 
   it("(b) existing valid pack + loose remain + matching hash → already_packed cleanup_pending:true", async () => {
@@ -257,6 +258,27 @@ describe("planEventPack — existing-pack state machine (sixth-review pins)", ()
     if (plan.kind !== "noop_already_packed") return;
     expect(plan.cleanup_pending).toBe(true);
     expect(plan.loose_remaining_count).toBe(2);
+    expect(plan.loose_relationship).toBe("equal");
+  });
+
+  it("existing valid pack + loose is a strict SUBSET (resumable partial cleanup) → already_packed cleanup_pending:true, loose_relationship:strict_subset (NOT pack_stale)", async () => {
+    // A prior Layer 3 unlink removed SOME loose files: the pack still covers the full
+    // event set, but only a subset of loose files remain on disk. Every remaining
+    // loose id IS in the pack, so the pack is a valid covering superset → this is a
+    // RESUMABLE cleanup, not divergence. Layer 2 mis-reported this as pack_stale
+    // (exit 2, operator stuck); Layer 3a's set-relationship classification recognizes
+    // the subset and keeps the phase eligible to resume.
+    const events = await scaffoldArchivedP1(); // started + done loose present
+    await writeEventPackFile(cwd, "P1", await buildValidEventPack(cwd, "P1", events)); // pack covers BOTH
+    // Simulate a partial cleanup: remove the `started` loose file, keep `done`.
+    const started = events.find((e) => e.status === "started")!;
+    await rm(join(cwd, ".code-pact", "state", "events", eventFileName(started)));
+    const plan = await planEventPack(cwd, "P1");
+    expect(plan.kind).toBe("noop_already_packed");
+    if (plan.kind !== "noop_already_packed") return;
+    expect(plan.cleanup_pending).toBe(true);
+    expect(plan.loose_remaining_count).toBe(1);
+    expect(plan.loose_relationship).toBe("strict_subset");
   });
 
   it("(c) existing valid pack + loose remain + hash differs → ineligible(pack_stale)", async () => {
