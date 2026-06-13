@@ -213,3 +213,42 @@ export async function readEventPackFiles(cwd: string): Promise<LoadedEventPack[]
   }
   return out;
 }
+
+/** One pack that failed Tier-1 (or read), for the per-file lenient reader. */
+export type EventPackReadError = { phaseId: string; path: string; message: string };
+
+/**
+ * PER-FILE lenient read of every event pack: a single invalid/unreadable pack is
+ * collected as an error and SKIPPED — it does NOT discard the other valid packs.
+ * (`readEventPackFiles` is all-or-nothing: it throws on the FIRST bad pack, which
+ * a strict caller wants but which would let one corrupt pack hide every healthy
+ * one in lenient mode.) Returns `[]` valid packs when the dir is absent; a dir
+ * that cannot be enumerated (a non-ENOENT readdir failure) throws — that is not a
+ * per-file issue and the caller must decide.
+ */
+export async function readEventPackFilesLenient(
+  cwd: string,
+): Promise<{ packs: LoadedEventPack[]; errors: EventPackReadError[] }> {
+  const dir = archiveEventPacksDir(cwd);
+  let names: string[];
+  try {
+    names = await readdir(dir);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return { packs: [], errors: [] };
+    throw err;
+  }
+  const packs: LoadedEventPack[] = [];
+  const errors: EventPackReadError[] = [];
+  for (const name of names.sort()) {
+    if (!name.endsWith(".json")) continue;
+    const fileStem = basename(name, ".json");
+    const path = join(dir, name);
+    try {
+      const raw = await readFile(path, "utf8");
+      packs.push(validateEventPackTier1(fileStem, raw, path));
+    } catch (err) {
+      errors.push({ phaseId: fileStem, path, message: (err as Error).message });
+    }
+  }
+  return { packs, errors };
+}

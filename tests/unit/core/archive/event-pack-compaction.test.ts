@@ -171,6 +171,19 @@ describe("planEventPack — eligibility blocks", () => {
     expect(plan.block.kind).toBe("phase_discovery_incomplete");
   });
 
+  it("a SINGLE unparseable phase YAML in design/phases/ → ineligible(phase_discovery_incomplete), not skipped", async () => {
+    // The dir is readable, but one file in it is not a parseable Phase. The scan
+    // must NOT skip it (it could be a broken live target phase doc) — fail closed.
+    await scaffoldArchivedP1();
+    await rm(join(cwd, "design", "roadmap.yaml"));
+    await writeFile(join(cwd, "design", "phases", "P1-broken.yaml"), "{ not: valid phase", "utf8");
+    const plan = await planEventPack(cwd, "P1");
+    expect(plan.kind).toBe("ineligible");
+    if (plan.kind !== "ineligible") return;
+    expect(plan.block.kind).toBe("phase_discovery_incomplete");
+    expect(await exists(eventPackPath(cwd, "P1"))).toBe(false); // fail closed — no pack
+  });
+
   it("corrupt snapshot → ineligible(snapshot_invalid)", async () => {
     await scaffoldArchivedP1();
     await writeFile(phaseSnapshotPath(cwd, "P1"), "{ corrupt", "utf8");
@@ -324,6 +337,44 @@ describe("applyEventPackPlan — write/verify fail-closed (NO unlink anywhere)",
     expect(await exists(eventPackPath(cwd, "P1"))).toBe(true);
   });
 
+  it("a loose event added between plan and verify → verify_pack fails (re-plan uses CURRENT loose)", async () => {
+    // The just-written pack was built from 2 loose events; if a 3rd loose event
+    // for a snapshot task appears before verify, the re-plan sees a different loose
+    // set (hash differs) → pack_stale → verify_pack failure. The verify must use the
+    // CURRENT loose, not the stale plan-time set.
+    await scaffoldArchivedP1();
+    const writePlan = await planEventPack(cwd, "P1");
+    if (writePlan.kind !== "write") throw new Error("expected write");
+    await expect(
+      applyEventPackPlan(cwd, writePlan, {
+        beforeVerify: async () => {
+          // Add a NEW loose event for the snapshot's task P1-T1 (a later resumed).
+          await seedDurableEvents(
+            cwd,
+            `events:\n  - task_id: P1-T1\n    status: blocked\n    at: 2026-06-01T02:00:00.000Z\n    actor: agent\n    reason: x\n`,
+          );
+        },
+      }),
+    ).rejects.toMatchObject({ phase: "verify_pack", partial_applied: true });
+    expect(await exists(eventPackPath(cwd, "P1"))).toBe(true); // not deleted
+  });
+
+  it("a live phase YAML reappears between plan and verify → verify_pack fails", async () => {
+    await scaffoldArchivedP1();
+    const writePlan = await planEventPack(cwd, "P1");
+    if (writePlan.kind !== "write") throw new Error("expected write");
+    await expect(
+      applyEventPackPlan(cwd, writePlan, {
+        beforeVerify: async () => {
+          // A live phase doc with id P1 reappears in design/phases/ → the re-plan's
+          // discovery scan finds it → phase_file_still_present → verify failure.
+          await writeFile(join(cwd, "design", "phases", "P1-back.yaml"), P1_DONE, "utf8");
+        },
+      }),
+    ).rejects.toMatchObject({ phase: "verify_pack", partial_applied: true });
+    expect(await exists(eventPackPath(cwd, "P1"))).toBe(true);
+  });
+
   it("ExpectedState fail-closed: a concurrent writer creates the pack before rename → write_pack error, partial_applied:false", async () => {
     await scaffoldArchivedP1();
     const writePlan = await planEventPack(cwd, "P1");
@@ -366,5 +417,38 @@ describe("applyEventPackPlan — write/verify fail-closed (NO unlink anywhere)",
     await writeEventPackFile(cwd, "P1", await buildValidEventPack(cwd, "P1", events));
     const outcome = await applyEventPackPlan(cwd, stalePlan);
     expect(outcome.kind).toBe("noop_already_packed");
+  });
+});
+
+describe("planEventPack — corrupt UNRELATED pack does not block the target (sixth-review-3)", () => {
+  it("P1 valid pack + zero P1 loose + a corrupt P0 pack → P1 is already_packed (NOT snapshot_evidence_broken)", async () => {
+    // P1 fully compacted: valid pack, loose deleted. Evidence resolves only from
+    // the P1 pack. A corrupt UNRELATED P0 pack must not discard the P1 pack from
+    // the durable map (per-file lenient read) — else P1 would falsely report
+    // snapshot_evidence_broken.
+    const events = await scaffoldArchivedP1();
+    await writeEventPackFile(cwd, "P1", await buildValidEventPack(cwd, "P1", events));
+    for (const e of events) {
+      await rm(join(cwd, ".code-pact", "state", "events", eventFileName(e)));
+    }
+    // Plant a corrupt P0 pack alongside.
+    await writeEventPackFile(cwd, "P0", { not: "a valid pack" });
+    const plan = await planEventPack(cwd, "P1");
+    expect(plan.kind).toBe("noop_already_packed");
+    if (plan.kind !== "noop_already_packed") return;
+    expect(plan.cleanup_pending).toBe(false);
+  });
+
+  it("P1 CORRUPT target pack + zero loose → ineligible(pack_invalid), NOT snapshot_evidence_broken", async () => {
+    const events = await scaffoldArchivedP1();
+    for (const e of events) {
+      await rm(join(cwd, ".code-pact", "state", "events", eventFileName(e)));
+    }
+    // The TARGET pack itself is corrupt.
+    await writeEventPackFile(cwd, "P1", { not: "valid" });
+    const plan = await planEventPack(cwd, "P1");
+    expect(plan.kind).toBe("ineligible");
+    if (plan.kind !== "ineligible") return;
+    expect(plan.block.kind).toBe("pack_invalid");
   });
 });

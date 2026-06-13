@@ -150,24 +150,25 @@ function sortLooseForPack(files: readonly LoadedEventFile[]): LoadedEventFile[] 
  * no roadmap at all. The `phase_file_still_present` gate must catch those too, so
  * compaction never runs while a live phase doc exists.
  *
- * Returns the matching relative paths, plus `unreadable` when the directory
- * itself could not be enumerated (a permissions/IO error — NOT a missing dir).
- * A missing `design/phases/` dir (ENOENT) is `{ paths: [], unreadable: false }`
- * (nothing live exists). A single unparseable / unreadable phase FILE is skipped
- * (it can't prove an id match), but a directory we cannot read at all is
- * `unreadable: true` so the caller fails closed (we cannot prove absence).
+ * Returns the matching relative paths, plus a non-null `incomplete` reason when
+ * we cannot prove absence: the directory could not be enumerated (a
+ * permissions/IO error — NOT a missing dir), OR a single phase FILE in it could
+ * not be read / parsed / resolved within the project (it could itself be the live
+ * target phase doc). A missing `design/phases/` dir (ENOENT) is `{ paths: [],
+ * incomplete: null }` (nothing live exists). Fail-closed throughout: any file we
+ * cannot rule out returns `incomplete` so the caller blocks rather than compacts.
  */
 async function findLivePhaseYamlsById(
   cwd: string,
   phaseId: string,
-): Promise<{ paths: string[]; unreadable: boolean }> {
+): Promise<{ paths: string[]; incomplete: string | null }> {
   const phasesDir = join(cwd, "design", "phases");
   let entries: string[];
   try {
     entries = await readdir(phasesDir);
   } catch (err) {
-    if (isEnoent(err)) return { paths: [], unreadable: false }; // no dir → nothing live
-    return { paths: [], unreadable: true }; // can't enumerate → fail closed upstream
+    if (isEnoent(err)) return { paths: [], incomplete: null }; // no dir → nothing live
+    return { paths: [], incomplete: `design/phases/ could not be enumerated (${(err as NodeJS.ErrnoException).code ?? "unknown"})` };
   }
   const matches: string[] = [];
   for (const entry of entries.sort()) {
@@ -177,23 +178,29 @@ async function findLivePhaseYamlsById(
     try {
       abs = await resolveWithinProject(cwd, rel);
     } catch {
-      continue; // symlink escape on a sibling file — skip it, it's not our phase
+      // A symlink escaping the project: fail closed — we cannot read it to prove
+      // it is NOT a live YAML with the target id.
+      return { paths: [], incomplete: `${rel} escapes the project (symlink) — cannot prove no live phase exists` };
     }
     let raw: string;
     try {
       raw = await readFile(abs, "utf8");
     } catch {
-      continue; // unreadable single file — can't prove an id match, skip
+      // A YAML in design/phases/ we cannot read could be the live target phase —
+      // fail closed rather than assume it is not.
+      return { paths: [], incomplete: `${rel} is unreadable — cannot prove no live phase "${phaseId}" exists` };
     }
     let parsed: unknown;
     try {
       parsed = Phase.parse(parseYaml(raw) as unknown);
     } catch {
-      continue; // unparseable / non-phase YAML — skip
+      // An unparseable / non-Phase YAML in design/phases/ could be a broken live
+      // target phase doc — fail closed.
+      return { paths: [], incomplete: `${rel} is not a parseable phase YAML — cannot prove no live phase "${phaseId}" exists` };
     }
     if ((parsed as { id: string }).id === phaseId) matches.push(rel);
   }
-  return { paths: matches, unreadable: false };
+  return { paths: matches, incomplete: null };
 }
 
 async function phaseFileStillPresent(
@@ -237,13 +244,12 @@ async function phaseFileStillPresent(
     }
   }
 
-  // 2. Directory scan: catch a live YAML the roadmap doesn't (or can't) name.
+  // 2. Directory scan: catch a live YAML the roadmap doesn't (or can't) name. Any
+  //    file in design/phases/ we cannot read/parse is fail-closed (it could be the
+  //    live target phase) → discovery_incomplete.
   const scan = await findLivePhaseYamlsById(cwd, phaseId);
-  if (scan.unreadable) {
-    return {
-      kind: "discovery_incomplete",
-      detail: `design/phases/ could not be enumerated — cannot prove no live phase "${phaseId}" YAML exists`,
-    };
+  if (scan.incomplete !== null) {
+    return { kind: "discovery_incomplete", detail: scan.incomplete };
   }
   if (scan.paths.length === 1) return { kind: "present", phase_path: scan.paths[0]! };
   if (scan.paths.length > 1) return { kind: "ambiguous", phase_paths: scan.paths };
@@ -308,47 +314,16 @@ export async function planEventPack(cwd: string, phaseId: string): Promise<Event
   }
   const snapshot = snapRes.snapshot;
 
-  // 3. Durable sources (lenient: a corrupt OTHER phase's pack can't block this).
-  const packSources = await readPackSources(cwd, "lenient");
-  const resolved = new Map<string, ProgressEvent>();
-  for (const f of [...packSources.looseFiles, ...packSources.validatedPackFiles]) {
-    resolved.set(f.id, f.event);
-  }
-
-  // 4. TARGET-ONLY evidence check — the parsed snapshot we already hold, NOT a
-  //    re-read (no TOCTOU), and NOT the global multi-snapshot validator.
-  const evidence = validateSnapshotEventEvidenceForSnapshot({ snapshot, resolved });
-  if (!evidence.ok) {
-    return {
-      kind: "ineligible",
-      phaseId,
-      block: { kind: "snapshot_evidence_broken", issues: evidence.issues },
-    };
-  }
-
-  // 5. The phase's loose files (ALL statuses for the snapshot's task_ids).
-  const snapshotTaskIds = new Set(snapshot.tasks.map((t) => t.id));
-  const phaseLooseFiles = packSources.looseFiles.filter((f) =>
-    snapshotTaskIds.has(f.event.task_id),
-  );
-  const looseEventsById = new Map<string, LoadedEventFile>();
-  for (const f of phaseLooseFiles) looseEventsById.set(f.id, f);
-
-  // 6. Existing-pack branch.
-  let existingRaw: string | null = null;
+  // 3. Read + Tier-1-validate the TARGET pack (if any) BEFORE the evidence check.
+  //    Ordering is load-bearing: a corrupt TARGET pack must be diagnosed as
+  //    `pack_invalid` (the pack itself is broken), NOT `snapshot_evidence_broken`
+  //    (which would misread the cause as missing evidence — the corrupt pack just
+  //    contributes nothing to the resolved map). The lenient read below already
+  //    skips this same corrupt pack as an EVENT_PACK_INVALID issue; we want the
+  //    sharper, pack-specific verdict to win.
+  let existing: LoadedEventPack | null = null;
   try {
-    existingRaw = await readFile(packPath, "utf8");
-  } catch (err) {
-    if (!isEnoent(err)) {
-      return {
-        kind: "ineligible",
-        phaseId,
-        block: { kind: "pack_invalid", detail: (err as Error).message },
-      };
-    }
-  }
-  if (existingRaw !== null) {
-    let existing: LoadedEventPack;
+    const existingRaw = await readFile(packPath, "utf8");
     try {
       existing = validateEventPackTier1(phaseId, existingRaw, packPath);
     } catch (err) {
@@ -358,6 +333,48 @@ export async function planEventPack(cwd: string, phaseId: string): Promise<Event
         block: { kind: "pack_invalid", detail: (err as Error).message },
       };
     }
+  } catch (err) {
+    if (!isEnoent(err)) {
+      return {
+        kind: "ineligible",
+        phaseId,
+        block: { kind: "pack_invalid", detail: (err as Error).message },
+      };
+    }
+    // ENOENT — no existing pack; fall through to the candidate-build branch.
+  }
+
+  // 4. Durable sources (lenient: a corrupt OTHER phase's pack can't block this;
+  //    the TARGET pack's own validity was already decided above).
+  const packSources = await readPackSources(cwd, "lenient");
+  const resolved = new Map<string, ProgressEvent>();
+  for (const f of [...packSources.looseFiles, ...packSources.validatedPackFiles]) {
+    resolved.set(f.id, f.event);
+  }
+
+  // 5. TARGET-ONLY evidence check — the parsed snapshot we already hold, NOT a
+  //    re-read (no TOCTOU), and NOT the global multi-snapshot validator. A valid
+  //    target pack (validated in step 3) is in `validatedPackFiles`, so the
+  //    snapshot's event_ids resolve from it here.
+  const evidence = validateSnapshotEventEvidenceForSnapshot({ snapshot, resolved });
+  if (!evidence.ok) {
+    return {
+      kind: "ineligible",
+      phaseId,
+      block: { kind: "snapshot_evidence_broken", issues: evidence.issues },
+    };
+  }
+
+  // 6. The phase's loose files (ALL statuses for the snapshot's task_ids).
+  const snapshotTaskIds = new Set(snapshot.tasks.map((t) => t.id));
+  const phaseLooseFiles = packSources.looseFiles.filter((f) =>
+    snapshotTaskIds.has(f.event.task_id),
+  );
+  const looseEventsById = new Map<string, LoadedEventFile>();
+  for (const f of phaseLooseFiles) looseEventsById.set(f.id, f);
+
+  // 7. Existing-pack branch (the target pack was Tier-1-validated in step 3).
+  if (existing !== null) {
     const bindIssues = bindPackToSnapshot(existing, snapshot, snapshotRaw, looseEventsById);
     if (bindIssues.length > 0) {
       return {
@@ -398,12 +415,12 @@ export async function planEventPack(cwd: string, phaseId: string): Promise<Event
     };
   }
 
-  // 7. No existing pack.
+  // 8. No existing pack.
   if (phaseLooseFiles.length === 0) {
     return { kind: "noop_no_events", phaseId };
   }
 
-  // 8. Build the candidate pack from the COMPLETE loose set.
+  // 9. Build the candidate pack from the COMPLETE loose set.
   const sorted = sortLooseForPack(phaseLooseFiles);
   const packedEvents: PackedEvent[] = sorted.map((f) => ({ id: f.id, file: f.file, event: f.event }));
   const candidate = EventPack.parse({
@@ -414,7 +431,7 @@ export async function planEventPack(cwd: string, phaseId: string): Promise<Event
     events: packedEvents,
   } satisfies EventPack);
 
-  // 9. Pre-write gate: the SAME binding the readback will run. Should never fail
+  // 10. Pre-write gate: the SAME binding the readback will run. Should never fail
   //    (built from the complete loose set) — fail closed if it somehow does.
   const candidateLoaded: LoadedEventPack = {
     phaseId,
@@ -460,10 +477,10 @@ export async function applyEventPackPlan(
   // authoritative (writePhaseSnapshot's re-plan discipline).
   const fresh = await planEventPack(cwd, plan.phaseId);
   if (fresh.kind !== "write") return fresh;
-  // snapshot/snapshotRaw from the plan are NOT reused at verify time — the
-  // readback re-reads the snapshot from disk (below) so the verify reflects the
-  // current on-disk snapshot, not the plan-time bytes.
-  const { phaseId, packPath, pack, looseEventsById, loose_count } = fresh;
+  // Only the write target is taken from the plan. The verify re-runs planEventPack,
+  // which re-reads the snapshot AND the current loose files — so the plan's
+  // snapshot/snapshotRaw/looseEventsById are deliberately NOT reused at verify time.
+  const { phaseId, packPath, pack, loose_count } = fresh;
 
   if (hooks.beforeWrite) await hooks.beforeWrite();
   try {
@@ -475,55 +492,28 @@ export async function applyEventPackPlan(
   }
 
   if (hooks.beforeVerify) await hooks.beforeVerify();
-  // Readback: re-read BOTH the pack AND the snapshot from disk, then run the SAME
-  // Tier-1 + binding the runtime uses — never trust the in-memory pack OR the
-  // in-memory snapshot bytes. Re-reading the snapshot makes the verify reflect the
-  // CURRENT on-disk snapshot: if it was swapped/edited between plan and verify, the
-  // pack's snapshot_sha256 (computed at plan time) won't match the re-read bytes
-  // and binding fails closed — rather than reporting success on a pack that the
-  // next strict reader would reject.
-  let readbackRaw: string;
+  // Readback verify = RE-RUN THE WHOLE PLAN. The plan re-reads the pack (Tier-1 +
+  // binding), the snapshot (raw + parsed), the CURRENT loose files, and re-runs
+  // live-phase discovery + the existing-pack hash comparison — the complete state
+  // machine the next runtime reader / `planEventPack` will see. After a faithful
+  // write, that verdict MUST be `noop_already_packed`. Anything else means the
+  // just-written pack does not match the current on-disk state (the snapshot was
+  // swapped, a loose event was added/removed, a live YAML reappeared, the pack is
+  // unreadable, …) — fail closed. This is strictly stronger than re-reading the
+  // pack alone: it uses the SAME loose set the runtime will, not the plan-time one.
+  let verifyPlan: EventPackPlan;
   try {
-    readbackRaw = await readFile(packPath, "utf8");
+    verifyPlan = await planEventPack(cwd, phaseId);
   } catch (err) {
-    throw new EventPackWriteError("verify_pack", true, `readback read failed: ${(err as Error).message}`);
+    throw new EventPackWriteError("verify_pack", true, `readback re-plan threw: ${(err as Error).message}`);
   }
-  let loaded: LoadedEventPack;
-  try {
-    loaded = validateEventPackTier1(phaseId, readbackRaw, packPath);
-  } catch (err) {
-    throw new EventPackWriteError("verify_pack", true, `readback Tier-1 failed: ${(err as Error).message}`);
+  if (verifyPlan.kind !== "noop_already_packed") {
+    const detail =
+      verifyPlan.kind === "ineligible"
+        ? `re-plan is ${verifyPlan.kind}(${verifyPlan.block.kind})`
+        : `re-plan is ${verifyPlan.kind} (expected noop_already_packed)`;
+    throw new EventPackWriteError("verify_pack", true, `readback verification failed: ${detail}`);
   }
-  let verifySnapshotRaw: string;
-  try {
-    verifySnapshotRaw = await readFile(phaseSnapshotPath(cwd, phaseId), "utf8");
-  } catch (err) {
-    throw new EventPackWriteError(
-      "verify_pack",
-      true,
-      `readback snapshot read failed: ${(err as Error).message}`,
-    );
-  }
-  const verifySnap = await loadPhaseSnapshot(cwd, phaseId);
-  if (verifySnap.kind !== "valid") {
-    throw new EventPackWriteError(
-      "verify_pack",
-      true,
-      `snapshot is no longer valid at verify time (${verifySnap.kind})`,
-    );
-  }
-  const bindIssues = bindPackToSnapshot(
-    loaded,
-    verifySnap.snapshot,
-    verifySnapshotRaw,
-    looseEventsById,
-  );
-  if (bindIssues.length > 0) {
-    throw new EventPackWriteError(
-      "verify_pack",
-      true,
-      `readback binding failed: ${bindIssues.map((i) => i.message).join("; ")}`,
-    );
-  }
+
   return { kind: "written", phaseId, packPath, pack, loose_count };
 }
