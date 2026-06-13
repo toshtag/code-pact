@@ -235,6 +235,51 @@ export type CleanupOutcome =
     } & CleanupMutationProgress);
 
 // ---------------------------------------------------------------------------
+// Existing-pack ∩ loose SET RELATIONSHIP — the cell-12/13/14 distinction (PURE).
+//
+// Layer 2's `planEventPack` step 8 collapses every "pack present, loose ≠ pack"
+// case to `pack_stale`. Layer 3 must split that by the SET relationship between the
+// loose id-set and the pack id-set, because a strict subset is a RESUMABLE partial
+// cleanup (cell 14) while a divergence is genuine staleness (cell 13). This function
+// computes that relationship and NOTHING else — it does NOT change `planEventPack`'s
+// return (Layer 2's `pack_stale` behavior is untouched in 3b-1); Layer 3b-2 calls it
+// to drive the resume-vs-stale branch when the unlink loop is wired.
+//
+//   empty         loose == ∅              → cell 11 (already cleaned, nothing to do)
+//   equal         loose id-set == pack    → cell 12 (clean the full set)
+//   strict_subset loose ⊊ pack (non-∅,    → cell 14 (RESUMABLE: clean the survivors
+//                 every loose id ∈ pack)            the pack still covers)
+//   diverged      some loose id ∉ pack    → cell 13 (pack_stale — never unlink)
+// ---------------------------------------------------------------------------
+
+export type LoosePackRelationship = "empty" | "equal" | "strict_subset" | "diverged";
+
+/**
+ * Classify the loose id-set against the verified pack's id-set. Pure set algebra,
+ * no filesystem. `looseIds` is the current loose event-id set for the phase's
+ * tasks; `packIds` is the verified pack's covered id-set.
+ *
+ * - `empty`         — no loose remains (cell 11).
+ * - `diverged`      — at least one loose id is NOT in the pack (cell 13, pack_stale);
+ *                     checked BEFORE subset/equal so an extra-id loose set is never
+ *                     mistaken for resumable.
+ * - `equal`         — the loose id-set equals the pack id-set (cell 12).
+ * - `strict_subset` — non-empty, every loose id ∈ pack, but loose ⊊ pack (cell 14,
+ *                     resumable cleanup).
+ */
+export function classifyLoosePackRelationship(
+  looseIds: ReadonlySet<string>,
+  packIds: ReadonlySet<string>,
+): LoosePackRelationship {
+  if (looseIds.size === 0) return "empty";
+  for (const id of looseIds) {
+    if (!packIds.has(id)) return "diverged"; // an extra id ⇒ not a clean subset
+  }
+  // Every loose id is in the pack. Equal iff the sizes match (loose ⊆ pack already).
+  return looseIds.size === packIds.size ? "equal" : "strict_subset";
+}
+
+// ---------------------------------------------------------------------------
 // Post-run reconciliation (R1) — PURE classifier for ONE present survivor.
 //
 // R0 (build the in-scope candidate set + re-enumerate from disk) and the unlink
