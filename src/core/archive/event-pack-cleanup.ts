@@ -255,6 +255,17 @@ export type CleanupOutcome =
 export type LoosePackRelationship = "empty" | "equal" | "strict_subset" | "diverged";
 
 /**
+ * The loose↔pack relationships in which the pack is still a VALID covering set for
+ * the loose remnant — everything EXCEPT `diverged` (which is `pack_stale`, never a
+ * covering pack). `empty`/`equal`/`strict_subset` all mean "the pack covers every
+ * remaining loose id"; only the count of remaining loose differs. `planEventPack`
+ * carries this on its `noop_already_packed` verdict so a consumer can tell a fully
+ * compacted phase (`empty`) from a pack-matches-loose phase (`equal`) from a
+ * resumable partial cleanup (`strict_subset`) without recomputing the set algebra.
+ */
+export type CoveredLooseRelationship = Exclude<LoosePackRelationship, "diverged">;
+
+/**
  * Classify the loose id-set against the verified pack's id-set. Pure set algebra,
  * no filesystem. `looseIds` is the current loose event-id set for the phase's
  * tasks; `packIds` is the verified pack's covered id-set.

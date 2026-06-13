@@ -4,6 +4,7 @@ import {
   applyEventPackPlan,
   type ApplyEventPackHooks,
 } from "../core/archive/event-pack.ts";
+import type { CoveredLooseRelationship } from "../core/archive/event-pack-cleanup.ts";
 
 // ---------------------------------------------------------------------------
 // `state compact <phase-id>` runner (Layer 2 — write pack + readback verify,
@@ -49,6 +50,7 @@ export type StateCompactResult =
       pack_path: string;
       loose_remaining_count: number;
       cleanup_pending: boolean;
+      loose_relationship: CoveredLooseRelationship;
     }
   | {
       kind: "already_packed";
@@ -56,6 +58,7 @@ export type StateCompactResult =
       pack_path: string;
       loose_remaining_count: number;
       cleanup_pending: boolean;
+      loose_relationship: CoveredLooseRelationship;
     }
   | { kind: "would_noop_no_events"; phase_id: string }
   | { kind: "noop_no_events"; phase_id: string }
@@ -79,6 +82,7 @@ export async function runStateCompact(opts: StateCompactOptions): Promise<StateC
       pack_path: plan.packPath,
       loose_remaining_count: plan.loose_remaining_count,
       cleanup_pending: plan.cleanup_pending,
+      loose_relationship: plan.loose_relationship,
     } as const;
     return write
       ? { kind: "already_packed", ...shape }
@@ -114,6 +118,7 @@ export async function runStateCompact(opts: StateCompactOptions): Promise<StateC
       pack_path: outcome.packPath,
       loose_remaining_count: outcome.loose_remaining_count,
       cleanup_pending: outcome.cleanup_pending,
+      loose_relationship: outcome.loose_relationship,
     };
   }
   // outcome.kind === "written"

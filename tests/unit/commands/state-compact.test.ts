@@ -123,6 +123,19 @@ describe("runStateCompact — dry-run", () => {
     expect(r.block.kind).toBe("ambiguous_phase_id");
     expect(await exists(eventPackPath(cwd, "P1"))).toBe(false); // fail closed — no pack
   });
+
+  it("dry-run: loose is a strict subset after a partial cleanup → would_already_packed, loose_relationship:strict_subset", async () => {
+    const events = await scaffoldArchivedP1();
+    expect((await runStateCompact({ cwd, phaseId: "P1", write: true })).kind).toBe("packed");
+    const started = events.find((e) => e.status === "started")!;
+    await rm(join(cwd, ".code-pact", "state", "events", eventFileName(started)));
+    const r = await runStateCompact({ cwd, phaseId: "P1", write: false });
+    expect(r.kind).toBe("would_already_packed");
+    if (r.kind !== "would_already_packed") return;
+    expect(r.cleanup_pending).toBe(true);
+    expect(r.loose_remaining_count).toBe(1);
+    expect(r.loose_relationship).toBe("strict_subset");
+  });
 });
 
 describe("runStateCompact — --write", () => {
@@ -150,6 +163,22 @@ describe("runStateCompact — --write", () => {
     expect(again.kind).toBe("already_packed");
     if (again.kind !== "already_packed") return;
     expect(again.cleanup_pending).toBe(true);
+  });
+
+  it("loose is a strict subset after a partial cleanup → already_packed cleanup_pending:true (resumable, NOT ineligible/pack_stale)", async () => {
+    const events = await scaffoldArchivedP1();
+    expect((await runStateCompact({ cwd, phaseId: "P1", write: true })).kind).toBe("packed");
+    // Simulate Layer 3 having removed ONE loose file (a partial cleanup). The pack
+    // still covers the full event set, so the phase stays eligible to RESUME — it
+    // must NOT regress to ineligible(pack_stale).
+    const started = events.find((e) => e.status === "started")!;
+    await rm(join(cwd, ".code-pact", "state", "events", eventFileName(started)));
+    const r = await runStateCompact({ cwd, phaseId: "P1", write: true });
+    expect(r.kind).toBe("already_packed");
+    if (r.kind !== "already_packed") return;
+    expect(r.cleanup_pending).toBe(true);
+    expect(r.loose_remaining_count).toBe(1);
+    expect(r.loose_relationship).toBe("strict_subset");
   });
 });
 

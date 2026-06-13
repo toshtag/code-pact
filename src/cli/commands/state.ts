@@ -67,9 +67,12 @@ function humanLine(phaseId: string, result: StateCompactResult): string {
       return `Packed ${result.packed_event_count} event(s) for "${phaseId}" into ${result.pack_path}. ${result.loose_remaining_count} loose file(s) still on disk — ${result.next_action}`;
     case "would_already_packed":
     case "already_packed":
-      return result.cleanup_pending
-        ? `"${phaseId}" is already packed; ${result.loose_remaining_count} loose file(s) still await Layer 3 cleanup.`
-        : `"${phaseId}" is already packed and fully cleaned up (no loose files remain).`;
+      if (!result.cleanup_pending) {
+        return `"${phaseId}" is already packed and fully cleaned up (no loose files remain).`;
+      }
+      return result.loose_relationship === "strict_subset"
+        ? `"${phaseId}" is already packed; a prior cleanup was partial — ${result.loose_remaining_count} loose file(s) remain and can be resumed by Layer 3 cleanup.`
+        : `"${phaseId}" is already packed; ${result.loose_remaining_count} loose file(s) still await Layer 3 cleanup.`;
     case "would_noop_no_events":
     case "noop_no_events":
       return `No progress events found for archived phase "${phaseId}" — likely attested or predates event tracking. Nothing was packed.`;
