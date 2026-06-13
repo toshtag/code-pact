@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   classifyPostRunSurvivor,
   aggregateSurvivorVerdicts,
+  classifyLoosePackRelationship,
   type CleanupOutcome,
   type PackCoverage,
   type SurvivorFacts,
@@ -271,5 +272,42 @@ describe("CleanupOutcome — every RFC terminal-table result is representable, v
     // The call above only exist to host the @ts-expect-error directives; the test
     // passes iff each directive sees a real type error (tsc fails otherwise).
     expect(typeof out).toBe("function");
+  });
+});
+
+describe("classifyLoosePackRelationship — the cell 11/12/13/14 split", () => {
+  const set = (...ids: string[]) => new Set(ids);
+
+  it("empty — no loose remains (cell 11)", () => {
+    expect(classifyLoosePackRelationship(set(), set("a", "b"))).toBe("empty");
+    // empty wins even against an empty pack.
+    expect(classifyLoosePackRelationship(set(), set())).toBe("empty");
+  });
+
+  it("equal — loose id-set equals pack id-set (cell 12, clean the full set)", () => {
+    expect(classifyLoosePackRelationship(set("a", "b"), set("a", "b"))).toBe("equal");
+    expect(classifyLoosePackRelationship(set("a"), set("a"))).toBe("equal");
+  });
+
+  it("strict_subset — non-empty, every loose id in pack, loose ⊊ pack (cell 14, resumable)", () => {
+    // The partial-cleanup case: pack covers {a,b}, only {a} survived a prior unlink.
+    expect(classifyLoosePackRelationship(set("a"), set("a", "b"))).toBe("strict_subset");
+    expect(classifyLoosePackRelationship(set("a", "b"), set("a", "b", "c"))).toBe("strict_subset");
+  });
+
+  it("diverged — at least one loose id NOT in pack (cell 13, pack_stale; never unlink)", () => {
+    // An extra id outside the pack: not a clean subset, genuine staleness.
+    expect(classifyLoosePackRelationship(set("a", "z"), set("a", "b"))).toBe("diverged");
+    expect(classifyLoosePackRelationship(set("z"), set("a", "b"))).toBe("diverged");
+  });
+
+  it("diverged by membership, not count — same size, different members is NOT equal", () => {
+    // {a,c} and {a,b} are both size 2; c ∉ pack makes it diverged, not equal.
+    expect(classifyLoosePackRelationship(set("a", "c"), set("a", "b"))).toBe("diverged");
+  });
+
+  it("diverged is checked before subset/equal — an extra id is never read as resumable", () => {
+    // loose has every pack id PLUS an extra → diverged (a superset is not a subset).
+    expect(classifyLoosePackRelationship(set("a", "b", "z"), set("a", "b"))).toBe("diverged");
   });
 });
