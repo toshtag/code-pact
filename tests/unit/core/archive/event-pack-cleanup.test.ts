@@ -142,16 +142,35 @@ describe("aggregateSurvivorVerdicts — FAILED dominates", () => {
   });
 });
 
-describe("CleanupOutcome — every RFC terminal-table result is representable, values FIXED", () => {
+describe("CleanupOutcome — every terminal-table result is representable, impossible combinations rejected", () => {
   // These are compile-time contract assertions: each literal must type-check as a
-  // CleanupOutcome with the RFC's fixed partial_applied / cleanup_started values.
-  // A wrong fixed value (e.g. cleaned with partial_applied:false) fails typecheck,
+  // CleanupOutcome with the RFC's value combinations — some FIXED (e.g. ineligible's
+  // cleanup_remaining_loose:null), some PAIRED (e.g. cleaned's partial_applied ↔
+  // loose_deleted_count via CleanupMutationProgress). An impossible combination
+  // (e.g. cleaned with partial_applied:false AND files deleted) fails typecheck,
   // which is the point — the contract type, not just docs, enforces it.
   it("represents cleaned / already_cleaned / noop_no_events / ineligible / write+cleanup failures", () => {
     const cleaned: CleanupOutcome = {
       ok: true, kind: "cleaned", cleanup_pending: false,
       partial_applied: true, cleanup_started: true,
       loose_deleted_count: 3, cleanup_remaining_loose: 0, vanished_count: 0, advisories: [],
+    };
+    // The all-vanished edge: the cleanup ran but every targeted loose file VANISHED
+    // concurrently (a pre-existing pack, no pack write) — the phase ended clean, but
+    // this run mutated nothing, so partial_applied:false / loose_deleted_count:0 with
+    // a non-zero vanished_count. This must be representable as `cleaned`.
+    const cleanedAllVanished: CleanupOutcome = {
+      ok: true, kind: "cleaned", cleanup_pending: false,
+      partial_applied: false, cleanup_started: true,
+      loose_deleted_count: 0, cleanup_remaining_loose: 0, vanished_count: 2, advisories: [],
+    };
+    // The cell-10 all-vanished sub-case: the pack WAS written this run
+    // (partial_applied:true), but every target then vanished before unlink
+    // (loose_deleted_count:0, vanished_count>0). Also `cleaned`.
+    const cleanedAllVanishedAfterPackWrite: CleanupOutcome = {
+      ok: true, kind: "cleaned", cleanup_pending: false,
+      partial_applied: true, cleanup_started: true,
+      loose_deleted_count: 0, cleanup_remaining_loose: 0, vanished_count: 2, advisories: [],
     };
     const alreadyCleaned: CleanupOutcome = {
       ok: true, kind: "already_cleaned", cleanup_pending: false,
@@ -189,25 +208,36 @@ describe("CleanupOutcome — every RFC terminal-table result is representable, v
       skipped: [{ path: "y", reason: "task_not_in_snapshot" }], advisories: [],
     };
     // Runtime touch so the literals are not dead code.
-    for (const o of [cleaned, alreadyCleaned, noopNoEvents, ineligible, writeFailed, cleanupFailed, cleanupIncomplete]) {
+    for (const o of [cleaned, cleanedAllVanished, cleanedAllVanishedAfterPackWrite, alreadyCleaned, noopNoEvents, ineligible, writeFailed, cleanupFailed, cleanupIncomplete]) {
       expect(o).toBeTruthy();
     }
     expect(cleaned.partial_applied).toBe(true);
+    expect(cleanedAllVanished.partial_applied).toBe(false); // no write, all vanished → mutated nothing
+    expect(cleanedAllVanished.vanished_count).toBe(2);
+    // Pack written this run → partial_applied:true even though 0 unlinked (all vanished).
+    expect(cleanedAllVanishedAfterPackWrite.partial_applied).toBe(true);
+    expect(cleanedAllVanishedAfterPackWrite.loose_deleted_count).toBe(0);
     expect(noopNoEvents.cleanup_started).toBe(false);
     expect(ineligible.ok).toBe(false);
   });
 
-  it("NEGATIVE compile guards — the fixed RFC values cannot be violated (type errors are the assertion)", () => {
+  it("NEGATIVE compile guards — type-enforceable impossible combinations are rejected (type errors are the assertion)", () => {
     // Route each bad literal through a typed identity so the type error is reported
     // ON THE CALL LINE (right after the @ts-expect-error), not on whichever inner
     // field happens to mismatch — a multi-line literal would otherwise put the error
     // on a field line and leave the directive "unused".
     const out = (o: CleanupOutcome): CleanupOutcome => o;
 
-    // @ts-expect-error cleaned must imply partial_applied:true / cleanup_started:true
+    // @ts-expect-error cleaned pairs partial_applied↔loose_deleted_count: partial_applied:false forbids deleted>0
     out({
       ok: true, kind: "cleaned", cleanup_pending: false,
       partial_applied: false, cleanup_started: true,
+      loose_deleted_count: 1, cleanup_remaining_loose: 0, vanished_count: 0, advisories: [],
+    });
+    // @ts-expect-error cleaned always started the cleanup, so cleanup_started must be true
+    out({
+      ok: true, kind: "cleaned", cleanup_pending: false,
+      partial_applied: true, cleanup_started: false,
       loose_deleted_count: 1, cleanup_remaining_loose: 0, vanished_count: 0, advisories: [],
     });
     // @ts-expect-error write_pack failure must imply partial_applied:false (pack never on disk)

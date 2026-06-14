@@ -92,21 +92,43 @@ export type CleanupMutationProgress =
  * classifier below be unit-tested against a fixed shape first.
  */
 export type CleanupOutcome =
-  // --- success / no-op (ok: true) — every boolean is FIXED per the RFC, not just
-  // typed `boolean`, so Layer 3b cannot return e.g. `cleaned` with
-  // partial_applied:false without a type error. ---
-  | {
+  // --- success / no-op (ok: true) — success booleans are either FIXED or PAIRED by
+  // the contract (not just typed `boolean`). NOTE `cleaned` is NOT fixed to
+  // partial_applied:true: it uses CleanupMutationProgress so the all-vanished cleanup
+  // is representable honestly. TYPE-enforced: partial_applied:false forbids
+  // loose_deleted_count>0. RUNTIME-enforced by the orchestrator: a `cleaned` with
+  // loose_deleted_count===0 requires vanished_count>0 (a zero-op cleaned is incoherent). ---
+  | ({
       ok: true;
-      /** Loose files were removed this run. */
+      /**
+       * The cleanup ran and the phase is now clean (no loose remains). USUALLY loose
+       * files were removed this run (`partial_applied:true`, `loose_deleted_count > 0`).
+       * The edge where every targeted loose file VANISHED concurrently instead — a
+       * pre-existing pack, NO pack write this run — is also `cleaned`, but with
+       * `partial_applied:false` / `loose_deleted_count:0` / `vanished_count > 0`: the run
+       * mutated nothing yet the phase ended clean. So `partial_applied`↔`loose_deleted_count`
+       * are paired via `CleanupMutationProgress` (NOT fixed `true`), so the impossible
+       * "partial_applied:false with files deleted" cannot type-check, while the legal
+       * all-vanished case is representable with an honest `partial_applied:false`.
+       *
+       * RUNTIME INVARIANT (not type-enforceable): whenever `loose_deleted_count === 0`,
+       * `vanished_count` MUST be `> 0` — REGARDLESS of `partial_applied`. A `cleaned`
+       * run that removed nothing must have ended clean because the loose VANISHED, so a
+       * zero-op `{loose_deleted_count:0, vanished_count:0}` is incoherent (it implies the
+       * loop ran over an empty target, which returns `already_cleaned` BEFORE the loop —
+       * never `cleaned`). This also covers the cell-10 path where the pack WAS written
+       * (`partial_applied:true`) but every target then vanished before unlink
+       * (`loose_deleted_count:0`, `vanished_count > 0`). TS can't express `> 0` and a
+       * branded int is overkill, so the orchestrator upholds this and its PR pins
+       * `cleaned ∧ loose_deleted_count === 0 ⇒ vanished_count > 0` by test.
+       */
       kind: "cleaned";
       cleanup_pending: false;
-      partial_applied: true;
       cleanup_started: true;
-      loose_deleted_count: number;
       cleanup_remaining_loose: 0;
       vanished_count: number;
       advisories: CleanupAdvisory[];
-    }
+    } & CleanupMutationProgress)
   | {
       ok: true;
       /** A pack covered the phase but there was nothing left to remove. */
