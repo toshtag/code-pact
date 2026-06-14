@@ -7,7 +7,7 @@
 
 ## Summary
 
-The v2.0 mechanism to delete completed phase YAMLs and retired decision `.md` **safely** is shipped (`phase archive --write`, `decision retire --write`, and now event-pack compaction `state compact --write`). What is NOT yet true is that **this repo** can exercise it end to end: almost all of `design/phases/*.yaml` are still live, because the durable evidence those archives bind to is uneven across the repo's own history. This RFC measures that history, fixes how each part converts to durable truth, states the on-purpose-vs-accident goal split, and defines the v2.0.0 release gate. The headline finding corrects the prior plan: the blocker is **not** "run `plan migrate`" (that is a no-op here) and **not** 196 untracked tasks — it is a clean two-population split where **34 of 46 phases archive today** and only **12 phases / 52 tasks** need maintainer attestation.
+The v2.0 mechanism to delete completed phase YAMLs and retired decision `.md` **safely** is shipped (`phase archive --write`, `decision retire --write`, and now event-pack compaction `state compact --write`). What is NOT yet true is that **this repo** can exercise it end to end: almost all of `design/phases/*.yaml` are still live, because the durable evidence those archives bind to is uneven across the repo's own history. This RFC measures that history, fixes how each part converts to durable truth, states the on-purpose-vs-accident goal split, and defines the v2.0.0 release gate. The headline finding is a clean two-population split, **measured by running `phase archive <id> --json` on every phase** (the authoritative per-done-task eligibility check — NOT a heuristic for "does the phase have any event"): **32 of 46 phases archive today** and **14 phases / 54 done tasks** need maintainer attestation. The committed durable ledger (`.code-pact/state/events/`, 262 git-tracked files) is the source of truth; the legacy `progress.yaml` is a gitignored maintainer-local artifact and plays no part in this plan.
 
 ## Durable-truth model (what is canonical)
 
@@ -18,22 +18,22 @@ The durable record of "what was built and decided" is, in priority order:
 3. **Decision records** — `.code-pact/state/archive/decisions/<stem>-<hash>.json`, written by `decision retire --write`. A record makes the live `design/decisions/<stem>.md` redundant (a link to the deleted `.md` resolves as *retired* via the record).
 4. **Git history + CHANGELOG** — the backstop and the human-readable narrative.
 
-The live `design/phases/*.yaml` and `design/decisions/*.md` are **authored working views**. Once (2)/(3) exist for an item, its live file is a deletable view, not the truth. The legacy monolithic `progress.yaml` is **not** in this hierarchy — it predates the per-event ledger and is redundant with it (see below).
+The live `design/phases/*.yaml` and `design/decisions/*.md` are **authored working views**. Once (2)/(3) exist for an item, its live file is a deletable view, not the truth. The per-event ledger (1) is **committed** (`.code-pact/state/events/` is git-tracked, exactly as a user project commits it). The legacy monolithic `progress.yaml` is **not** in this hierarchy and **not** committed — it is `.gitignore`d (`.gitignore` line for `/.code-pact/state/progress.yaml`), a maintainer-local pre-ledger artifact; the archive producer never reads it (evidence comes from `loose ∪ packs`). It is therefore irrelevant to this plan (see below).
 
 ## Current state — measured 2026-06-14 (motivating inventory, point-in-time)
 
 > This section is a measurement that motivated the decisions below. It is **not** a progress tracker — an RFC fixes the *decision*; per-item migration status lives in the execution PRs and CHANGELOG, not here.
 
 - **Phases:** 46 live in `design/phases/` (45 `done`, 1 `cancelled` = P22). **0 archived** (`.code-pact/state/archive/phases/` empty).
-- **Decisions:** 43 `.md` in `design/decisions/` — **41** decision/RFC docs plus the `README.md` index and the `PRUNED.md` ledger (the latter two are **not** retirement candidates). **1** archived decision record exists.
-- **Execution ledger:** `.code-pact/state/events/` has **262** per-event files (142 `done` + 120 `started`). The legacy `.code-pact/state/progress.yaml` (1774 lines) holds the **same 262 events** — it is the pre-ledger monolith and the per-event files are its already-migrated form. `code-pact plan migrate --json` reports `legacy_events: 262` but is a **no-op** (the events are already present as files; `written`/`already_present` are only counted under `--write`, so the dry-run's `0/0` is expected, not "nothing to migrate").
-- **Coverage is uneven.** Both the ledger and `progress.yaml` cover the **same 33 phases** (P5, P9–P21, P24, P26–P34, P36, P38–P39, P42, P44, P46–P47, P49–P50). The remaining phases have **no execution events anywhere** — their YAML says `status: done` but no `started`/`done` event was ever recorded.
-- **Eligibility, verified by dry-run:** a phase **with** events archives cleanly (`phase archive P10` → `would_archive`); the cancelled P22 archives cleanly (`would_archive`); a phase **without** events is refused (`phase archive P1` → `PHASE_ARCHIVE_INELIGIBLE`, blocks `task_done_without_done_event` for P1-T1/P1-T2). `validate` is currently green with everything live.
+- **Decisions:** at the measurement (before this RFC was added) **43** `.md` in `design/decisions/` — **41** existing decision/RFC docs plus the `README.md` index and the `PRUNED.md` ledger. Only the 41 are retirement candidates; `README.md`, `PRUNED.md`, and *this proposed RFC* are not. (On this branch the directory now has 44 `.md`, +1 for this RFC.)
+- **Execution ledger (committed):** `.code-pact/state/events/` has **262** git-tracked per-event files (142 `done` + 120 `started`). This is the durable truth a clone/CI sees.
+- **Legacy `progress.yaml` (NOT committed):** a maintainer-local `progress.yaml` is `.gitignore`d and absent from the committed tree; it mirrors the per-event ledger. `code-pact plan migrate` is therefore a **no-op** for this repo (the per-event files already exist) **and** operates only on that ignored local file — so it is **out of scope** for any execution PR (PRs change committed state). Mentioned only to forestall "just run migrate."
+- **Eligibility is per-DONE-TASK, not per-phase.** A phase having *some* events does NOT make it archivable — every `done` task needs durable terminal evidence (`loose ∪ packs`). Re-derived **authoritatively by running `phase archive <id> --json` on all 46 phases** (the prior phase-prefix heuristic was wrong): a fully-evidenced done phase → `would_archive` (e.g. P10); the cancelled P22 → `would_archive` (cancelled needs no `done` events); a phase missing any done-task evidence → `PHASE_ARCHIVE_INELIGIBLE` with one `task_done_without_done_event` block per missing task. Crucially, **P5 and P38 have events but each has one done task with no done event** (`P5-T1`, `P38-T0`), so they are ineligible until attested — phase-level event presence is not eligibility. `validate` is currently green with everything live.
 
-**Two populations fall out of this:**
+**Two populations fall out of this (authoritative `phase archive --json` classification):**
 
-- **Population A — archives today (34 phases):** the 33 with events + P22 (cancelled phases need no `done` events).
-- **Population B — needs attestation (12 phases / 52 done tasks):** P1, P2, P3, P4, P6, P7, P8, P40, P41, P43, P45, P48. These predate the per-event ledger; their completion is real (the code shipped) but was never recorded as events.
+- **Population A — archives today (32 phases):** 31 fully-evidenced `done` phases + the cancelled P22.
+- **Population B — needs attestation (14 phases / 54 done tasks):** P1, P2, P3, P4, **P5**, P6, P7, P8, **P38**, P40, P41, P43, P45, P48. These have at least one `done` task that predates the per-event ledger; their completion is real (the code shipped) but was never recorded as a `done` event. (P5 and P38 are mostly evidenced — only 1 task each is missing.)
 
 ## The goal split (load-bearing)
 
@@ -44,25 +44,25 @@ A consequence for (B): the fail-closed errors (`PHASE_ARCHIVE_NOT_ARCHIVED` / mi
 
 ## Migration strategy
 
-### Population A — archive the 34 ready phases
+### Population A — archive the 32 ready phases
 
 Run `phase archive <id> --write` per phase: it writes the snapshot (binding to the ledger evidence), readback-verifies, then deletes the live YAML last. The roadmap reference is kept; archived phases still resolve. No attestation, no forged history.
 
-### Population B — attest, then archive (12 phases / 52 tasks)
+### Population B — attest, then archive (14 phases / 54 tasks)
 
-These tasks were genuinely completed but predate the ledger. **Do NOT synthesize events from `status: done`** — that forges an execution timeline the repo never had. Use the existing `phase archive --write --attest <task-id>="<reason>"` (repeatable), which records a maintainer's signed statement that the task completed, with the *basis* for that claim (the shipped artifact / git history), distinct from a replayed event. At **52 tasks across 12 invocations** this is tractable by hand — the prior estimate of "196 tasks, need a bulk UX" no longer holds because Population A carries its own evidence.
+These `done` tasks were genuinely completed but predate the ledger. **Do NOT synthesize events from `status: done`** — that forges an execution timeline the repo never had. Use the existing `phase archive --write --attest <task-id>="<reason>"` (repeatable), which records a maintainer's signed statement that the task completed, with the *basis* for that claim (the shipped artifact / git history), distinct from a replayed event. **Attest only the missing tasks**, not the whole phase — for P5 and P38 that is a single `--attest` (`P5-T1`, `P38-T0`); the rest of those phases is already evidenced. At **54 tasks across 14 invocations** this is tractable by hand — the prior estimate of "196 tasks, need a bulk UX" no longer holds because Population A and most of P5/P38 carry their own evidence.
 
 **Attestation-reason policy (fix here):** the reason is an honest provenance statement, e.g. `"pre-ledger phase; completion evidenced by shipped code + git history"`, never a fabricated run. One reason per task is acceptable; a per-phase shared rationale is fine.
 
 **Optional, non-blocking:** a bulk-attest convenience (`phase archive <id> --attest-all="<reason>"` or a dry-run that lists every missing-evidence task then one attested write) would smooth Population B. It is a nice-to-have, **not** a prerequisite — flag it, don't gate on it.
 
-### The legacy `progress.yaml`
+### The legacy `progress.yaml` (out of scope)
 
-It is redundant with the per-event ledger (same 262 events, already migrated). Plan: after Population A's archives prove green, **remove `progress.yaml`** in its own step and confirm no `LEGACY_EVENT_FOR_ARCHIVED_TASK` fires (it will not — every legacy event's content id already resolves from the per-event files, so the durable ledger still covers each archived task). Keep it until then as a zero-cost backstop. Removal is reversible via git.
+It is a `.gitignore`d, maintainer-local file (not in the committed tree) that mirrors the committed per-event ledger. It is **not** a migration target and **not** an execution-PR step — an execution PR changes committed state, and there is nothing committed to remove. Deleting the local copy is optional maintainer housekeeping, done outside this plan and reversible (it is regenerable / git-backed history); if removed, no `LEGACY_EVENT_FOR_ARCHIVED_TASK` would fire because every event's content id already resolves from the committed per-event files.
 
-### Decision records (41 decision docs → retire the shipped ones)
+### Decision records (41 existing decision docs → retire the shipped ones)
 
-Decisions already convert cleanly via `decision retire --write` (one record exists). Retire shipped/accepted decisions (of the 41 decision/RFC docs — never `README.md` or `PRUNED.md`) per the [decision-lifecycle](decision-lifecycle-rfc.md) policy so `design/decisions/` visibly shrinks, links still resolve as *retired*, and `check:docs` stays green. This track is independent of the phase work and lower-risk; sequence it in parallel or after Population A.
+Decisions already convert cleanly via `decision retire --write` (one record exists). Retire shipped/accepted decisions (of the 41 existing decision/RFC docs — never `README.md`, `PRUNED.md`, or a still-*proposed* RFC like this one) per the [decision-lifecycle](decision-lifecycle-rfc.md) policy so `design/decisions/` visibly shrinks, links still resolve as *retired*, and `check:docs` stays green. This track is independent of the phase work and lower-risk; sequence it in parallel or after Population A.
 
 ## Sequencing (smoke-test order, not a checklist)
 
@@ -74,13 +74,18 @@ Decisions already convert cleanly via `decision retire --write` (one record exis
 
 ## v2.0.0 product gate
 
-`code-pact` ships v2.0.0 **only if this repo itself** proves the story: ≥1 phase snapshot **and** ≥2 decision records present, and **all gates green after the corresponding live docs are removed** (a phase YAML and a decision `.md` actually deleted, control plane still green, dependents still resolve). If the dogfood migration is not done by release time, ship the surface as a **v1.x additive minor** instead — the CLI additions are backward-compatible; v2.0.0 is a product-positioning claim ("design docs are ephemeral"), not a semver necessity. The claim must be *demonstrated on this repo*, not just *implemented*.
+The v2.0.0 claim is "design docs are ephemeral **because** durable execution truth exists" — so a cancelled-phase snapshot alone is too weak (it carries no done-task evidence). `code-pact` ships v2.0.0 **only if this repo itself** proves the story, all of:
+
+- **≥1 evidence-bound `done` phase archive whose live `design/phases/<id>.yaml` is actually deleted** (e.g. P10) — the representative case, not P22. (P22 cancelled is a fine *smoke test* but does not satisfy the gate on its own.)
+- **≥2 retired decision records whose live `design/decisions/*.md` are actually removed** (links still resolve as *retired*).
+- **All gates green after those deletions** (`validate` + `plan lint --strict` + `check:docs`; dependents still resolve).
+
+If the migration is not done by release time, ship the surface as a **v1.x additive minor** instead — the CLI additions are backward-compatible; v2.0.0 is a product-positioning claim, not a semver necessity. The claim must be *demonstrated on this repo*, not just *implemented*.
 
 ## Open questions
 
 - **Attestation reason granularity** — per-task vs one shared per-phase string. Default: shared per-phase is acceptable; revisit only if a reviewer wants per-task basis.
-- **Delete `progress.yaml` or keep as backstop?** Default: delete after Population A is green (it is pure redundancy); git is the backstop.
-- **Bulk-attest UX** — build it or hand-attest 52 tasks? Default: hand-attest now; build the convenience only if a second large migration appears.
+- **Bulk-attest UX** — build it or hand-attest 54 tasks? Default: hand-attest now; build the convenience only if a second large migration appears.
 
 ## Non-goals
 
