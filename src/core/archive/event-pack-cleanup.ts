@@ -95,18 +95,34 @@ export type CleanupOutcome =
   // --- success / no-op (ok: true) — every boolean is FIXED per the RFC, not just
   // typed `boolean`, so Layer 3b cannot return e.g. `cleaned` with
   // partial_applied:false without a type error. ---
-  | {
+  | ({
       ok: true;
-      /** Loose files were removed this run. */
+      /**
+       * The cleanup ran and the phase is now clean (no loose remains). USUALLY loose
+       * files were removed this run (`partial_applied:true`, `loose_deleted_count > 0`).
+       * The edge where every targeted loose file VANISHED concurrently instead — a
+       * pre-existing pack, NO pack write this run — is also `cleaned`, but with
+       * `partial_applied:false` / `loose_deleted_count:0` / `vanished_count > 0`: the run
+       * mutated nothing yet the phase ended clean. So `partial_applied`↔`loose_deleted_count`
+       * are paired via `CleanupMutationProgress` (NOT fixed `true`), so the impossible
+       * "partial_applied:false with files deleted" cannot type-check, while the legal
+       * all-vanished case is representable with an honest `partial_applied:false`.
+       *
+       * RUNTIME INVARIANT (not type-enforceable): the `partial_applied:false` arm
+       * additionally requires `vanished_count > 0` — a `cleaned` run that mutated
+       * NOTHING must have ended clean because the loose VANISHED, so a zero-op
+       * `{partial_applied:false, loose_deleted_count:0, vanished_count:0}` is incoherent
+       * (an empty target returns `already_cleaned` before the loop, never `cleaned`). TS
+       * can't express `> 0` and a branded int is overkill, so the orchestrator upholds
+       * this and its PR pins `cleaned & partial_applied:false ⇒ vanished_count > 0` by test.
+       */
       kind: "cleaned";
       cleanup_pending: false;
-      partial_applied: true;
       cleanup_started: true;
-      loose_deleted_count: number;
       cleanup_remaining_loose: 0;
       vanished_count: number;
       advisories: CleanupAdvisory[];
-    }
+    } & CleanupMutationProgress)
   | {
       ok: true;
       /** A pack covered the phase but there was nothing left to remove. */

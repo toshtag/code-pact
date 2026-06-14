@@ -153,6 +153,15 @@ describe("CleanupOutcome — every RFC terminal-table result is representable, v
       partial_applied: true, cleanup_started: true,
       loose_deleted_count: 3, cleanup_remaining_loose: 0, vanished_count: 0, advisories: [],
     };
+    // The all-vanished edge: the cleanup ran but every targeted loose file VANISHED
+    // concurrently (a pre-existing pack, no pack write) — the phase ended clean, but
+    // this run mutated nothing, so partial_applied:false / loose_deleted_count:0 with
+    // a non-zero vanished_count. This must be representable as `cleaned`.
+    const cleanedAllVanished: CleanupOutcome = {
+      ok: true, kind: "cleaned", cleanup_pending: false,
+      partial_applied: false, cleanup_started: true,
+      loose_deleted_count: 0, cleanup_remaining_loose: 0, vanished_count: 2, advisories: [],
+    };
     const alreadyCleaned: CleanupOutcome = {
       ok: true, kind: "already_cleaned", cleanup_pending: false,
       partial_applied: false, cleanup_started: false,
@@ -189,10 +198,12 @@ describe("CleanupOutcome — every RFC terminal-table result is representable, v
       skipped: [{ path: "y", reason: "task_not_in_snapshot" }], advisories: [],
     };
     // Runtime touch so the literals are not dead code.
-    for (const o of [cleaned, alreadyCleaned, noopNoEvents, ineligible, writeFailed, cleanupFailed, cleanupIncomplete]) {
+    for (const o of [cleaned, cleanedAllVanished, alreadyCleaned, noopNoEvents, ineligible, writeFailed, cleanupFailed, cleanupIncomplete]) {
       expect(o).toBeTruthy();
     }
     expect(cleaned.partial_applied).toBe(true);
+    expect(cleanedAllVanished.partial_applied).toBe(false); // all-vanished mutated nothing
+    expect(cleanedAllVanished.vanished_count).toBe(2);
     expect(noopNoEvents.cleanup_started).toBe(false);
     expect(ineligible.ok).toBe(false);
   });
@@ -204,10 +215,16 @@ describe("CleanupOutcome — every RFC terminal-table result is representable, v
     // on a field line and leave the directive "unused".
     const out = (o: CleanupOutcome): CleanupOutcome => o;
 
-    // @ts-expect-error cleaned must imply partial_applied:true / cleanup_started:true
+    // @ts-expect-error cleaned pairs partial_applied↔loose_deleted_count: partial_applied:false forbids deleted>0
     out({
       ok: true, kind: "cleaned", cleanup_pending: false,
       partial_applied: false, cleanup_started: true,
+      loose_deleted_count: 1, cleanup_remaining_loose: 0, vanished_count: 0, advisories: [],
+    });
+    // @ts-expect-error cleaned always started the cleanup, so cleanup_started must be true
+    out({
+      ok: true, kind: "cleaned", cleanup_pending: false,
+      partial_applied: true, cleanup_started: false,
       loose_deleted_count: 1, cleanup_remaining_loose: 0, vanished_count: 0, advisories: [],
     });
     // @ts-expect-error write_pack failure must imply partial_applied:false (pack never on disk)
