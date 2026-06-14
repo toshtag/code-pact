@@ -142,10 +142,12 @@ describe("aggregateSurvivorVerdicts — FAILED dominates", () => {
   });
 });
 
-describe("CleanupOutcome — every RFC terminal-table result is representable, values FIXED", () => {
+describe("CleanupOutcome — every terminal-table result is representable, impossible combinations rejected", () => {
   // These are compile-time contract assertions: each literal must type-check as a
-  // CleanupOutcome with the RFC's fixed partial_applied / cleanup_started values.
-  // A wrong fixed value (e.g. cleaned with partial_applied:false) fails typecheck,
+  // CleanupOutcome with the RFC's value combinations — some FIXED (e.g. ineligible's
+  // cleanup_remaining_loose:null), some PAIRED (e.g. cleaned's partial_applied ↔
+  // loose_deleted_count via CleanupMutationProgress). An impossible combination
+  // (e.g. cleaned with partial_applied:false AND files deleted) fails typecheck,
   // which is the point — the contract type, not just docs, enforces it.
   it("represents cleaned / already_cleaned / noop_no_events / ineligible / write+cleanup failures", () => {
     const cleaned: CleanupOutcome = {

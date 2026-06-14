@@ -108,13 +108,16 @@ export type CleanupOutcome =
        * "partial_applied:false with files deleted" cannot type-check, while the legal
        * all-vanished case is representable with an honest `partial_applied:false`.
        *
-       * RUNTIME INVARIANT (not type-enforceable): the `partial_applied:false` arm
-       * additionally requires `vanished_count > 0` — a `cleaned` run that mutated
-       * NOTHING must have ended clean because the loose VANISHED, so a zero-op
-       * `{partial_applied:false, loose_deleted_count:0, vanished_count:0}` is incoherent
-       * (an empty target returns `already_cleaned` before the loop, never `cleaned`). TS
-       * can't express `> 0` and a branded int is overkill, so the orchestrator upholds
-       * this and its PR pins `cleaned & partial_applied:false ⇒ vanished_count > 0` by test.
+       * RUNTIME INVARIANT (not type-enforceable): whenever `loose_deleted_count === 0`,
+       * `vanished_count` MUST be `> 0` — REGARDLESS of `partial_applied`. A `cleaned`
+       * run that removed nothing must have ended clean because the loose VANISHED, so a
+       * zero-op `{loose_deleted_count:0, vanished_count:0}` is incoherent (it implies the
+       * loop ran over an empty target, which returns `already_cleaned` BEFORE the loop —
+       * never `cleaned`). This also covers the cell-10 path where the pack WAS written
+       * (`partial_applied:true`) but every target then vanished before unlink
+       * (`loose_deleted_count:0`, `vanished_count > 0`). TS can't express `> 0` and a
+       * branded int is overkill, so the orchestrator upholds this and its PR pins
+       * `cleaned ∧ loose_deleted_count === 0 ⇒ vanished_count > 0` by test.
        */
       kind: "cleaned";
       cleanup_pending: false;
