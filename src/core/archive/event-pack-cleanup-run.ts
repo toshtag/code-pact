@@ -225,8 +225,11 @@ function cleanedAllVanishedAfterWriteOutcome(vanishedCount: number): CleanupOutc
 
 /** Map a Layer-2 `EventPackWriteError` (the cell-10 pack-write step) to a
  *  `STATE_COMPACT_WRITE_FAILED` outcome. `phase` fixes `partial_applied`
- *  (`write_pack`→false, the pack never reached disk; `verify_pack`→true, the pack IS
- *  on disk). `cleanup_started:false` — the unlink phase never began. */
+ *  (`write_pack`→false, the pack never reached disk; `verify_pack`→true, the pack
+ *  step mutated the tree). This is the Layer-2 EventPackWriteError path ONLY — here a
+ *  `verify_pack` readback failure leaves the pack ON disk. (The other `verify_pack`
+ *  source, `writeFailedAfterPackBrokenOutcome`, is a post-write re-prepare failure
+ *  where the pack may already be gone.) `cleanup_started:false` — no unlink began. */
 function writeFailedOutcome(err: EventPackWriteError, looseRemaining: number): CleanupOutcome {
   if (err.phase === "write_pack") {
     return {
@@ -456,11 +459,13 @@ export async function runEventPackCleanup(
       return noopNoEventsOutcome();
     case "ineligible":
     case "needs_pack_write":
-      // If WE wrote the pack this run, the pack IS on disk (a mutation) — a broken
-      // pre-cleanup state (snapshot corrupted, pack removed, a live phase reappeared)
-      // must NOT report partial_applied:false. Closest honest terminal: a verify_pack
-      // WRITE_FAILED (cleanup never started). Without a write this run it is a plain
-      // ineligible (or the pack-absent-after-no-write defensive for needs_pack_write).
+      // If WE completed the pack step this run, this invocation already mutated the
+      // tree — so a broken pre-cleanup state must NOT report partial_applied:false. The
+      // pack may or may not still be present (the post-write re-prepare can fail because
+      // the pack was removed/invalidated or the surrounding evidence changed), so the
+      // honest terminal is a verify_pack WRITE_FAILED (partial_applied:true, cleanup
+      // never started) — NOT an ineligible/partial_applied:false. Without a write this
+      // run it is a plain ineligible (or the pack-absent defensive for needs_pack_write).
       if (packWrittenThisRun) return writeFailedAfterPackBrokenOutcome(preWriteLooseCount);
       return prep.kind === "ineligible"
         ? ineligibleOutcome(prep.block)
