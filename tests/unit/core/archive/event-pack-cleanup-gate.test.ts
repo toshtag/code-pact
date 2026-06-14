@@ -6,6 +6,7 @@ import { writePhaseSnapshot } from "../../../../src/core/archive/phase-snapshot.
 import {
   evaluateDeleteGate,
   planLooseCleanup,
+  prepareLooseCleanup,
   looseEventRelPath,
   type DeleteGateContext,
 } from "../../../../src/core/archive/event-pack-cleanup-gate.ts";
@@ -366,5 +367,42 @@ describe("planLooseCleanup — dry-run over the loose target set (NO unlink)", (
       },
     });
     expect(r.kind).toBe("already_clean");
+  });
+});
+
+describe("prepareLooseCleanup — shared cleanup-ready builder (NO unlink)", () => {
+  it("ready: a covering pack + full loose → ctx (pack/snapshot) + target basenames + relationship equal", async () => {
+    const { events } = await archivedWithPack();
+    const r = await prepareLooseCleanup(cwd, "P1");
+    expect(r.kind).toBe("ready");
+    if (r.kind !== "ready") return;
+    expect(r.relationship).toBe("equal");
+    expect(r.target.sort()).toEqual(
+      [looseFileOf(events, "started"), looseFileOf(events, "done")].sort(),
+    );
+    expect(r.ctx.snapshotTaskIds.has("P1-T1")).toBe(true);
+    // The gate ctx's pack id-set covers both events (the pack the target is bound to).
+    expect(r.ctx.packIds.size).toBe(2);
+  });
+
+  it("ready: a strict subset (a loose file removed) → relationship strict_subset, target is the remnant", async () => {
+    const { events } = await archivedWithPack();
+    await rm(join(eventsDir(cwd), looseFileOf(events, "started")));
+    const r = await prepareLooseCleanup(cwd, "P1");
+    expect(r.kind).toBe("ready");
+    if (r.kind !== "ready") return;
+    expect(r.relationship).toBe("strict_subset");
+    expect(r.target).toEqual([looseFileOf(events, "done")]);
+  });
+
+  it("already_clean: a covering pack + no loose → already_clean", async () => {
+    const { events } = await archivedWithPack();
+    for (const e of events) await rm(join(eventsDir(cwd), eventFileName(e)));
+    expect((await prepareLooseCleanup(cwd, "P1")).kind).toBe("already_clean");
+  });
+
+  it("needs_pack_write: loose present, no pack → needs_pack_write", async () => {
+    await scaffoldArchivedP1();
+    expect((await prepareLooseCleanup(cwd, "P1")).kind).toBe("needs_pack_write");
   });
 });

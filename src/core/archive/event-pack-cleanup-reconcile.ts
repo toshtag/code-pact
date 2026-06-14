@@ -135,11 +135,11 @@ export type LooseCleanupReconciliation = {
   skipped: CleanupSkip[];
   /** Count of present in-scope survivors after R1 (R2). Vanished files are excluded. */
   cleanup_remaining_loose: number;
-  /** Files this phase observed vanish DURING reconciliation (present at the
-   *  re-enumeration, ENOENT by the content read), scoped to this phase by a
-   *  filename/target/skip tie. NOT a survivor (not in `skipped` / remaining). The
-   *  orchestrator adds this to the unlink loop's own vanished tally for the public
-   *  `vanished_count`. */
+  /** Files this phase observed vanish during reconciliation, scoped to this phase by
+   *  a filename/target/skip tie — EITHER present at the re-enumeration then ENOENT by
+   *  the content read, OR a loop-skipped file already absent from the re-enumeration.
+   *  NOT a survivor (not in `skipped` / remaining). The orchestrator adds this to the
+   *  unlink loop's own vanished tally for the public `vanished_count`. */
   vanished_count: number;
   /** Global out-of-scope anomalies (R5) — present on success too (empty when none). */
   advisories: CleanupAdvisory[];
