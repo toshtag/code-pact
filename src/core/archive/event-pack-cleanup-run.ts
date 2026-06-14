@@ -10,11 +10,10 @@
 //      irreversible step (TOCTOU). A file is removed ONLY when every G1–G8 check
 //      passes; a global safety gate (G6 live owner / G7 pack missing / G8 snapshot
 //      diverged) ABORTS the whole loop, unlinking no further files.
-//   2. `runEventPackCleanup` (+ the pure `buildPostLoopOutcome`) — the still-UNWIRED
-//      orchestrator: prepare (G0) → optional cell-10 pack write → the unlink loop →
-//      post-run R0–R5 reconciliation → the public `CleanupOutcome`. NOT yet wired into
-//      `runStateCompact`/CLI (Layer 3b-2b-2d) — production `state compact --write` is
-//      unchanged until that PR.
+//   2. `runEventPackCleanup` (+ the pure `buildPostLoopOutcome`) — the orchestrator:
+//      prepare (G0) → optional cell-10 pack write → the unlink loop → post-run R0–R5
+//      reconciliation → the public `CleanupOutcome`. WIRED into `runStateCompact`/CLI —
+//      `state compact --write` calls it; it is the first reachable destructive path.
 //
 // CALLER CONTRACT for the loop / orchestrator: hold the write lock; the orchestrator
 // builds the gate `ctx` + `target` UNDER THAT LOCK from a verified G0 re-plan (a bound
@@ -150,11 +149,10 @@ export async function unlinkGatedLoose(
 }
 
 // ---------------------------------------------------------------------------
-// Layer 3b-2b-2c — the cleanup ORCHESTRATOR. Ties the merged parts into the public
-// `CleanupOutcome`: prepare (G0 under lock) → write the pack if needed (cell 10) →
-// `unlinkGatedLoose` → `reconcileSurvivors` → build the outcome. NOT yet wired into
-// `runStateCompact`/CLI (Layer 3b-2b-2d) — production `state compact --write` is
-// unchanged until that PR.
+// The cleanup ORCHESTRATOR. Ties the merged parts into the public `CleanupOutcome`:
+// prepare (G0 under lock) → write the pack if needed (cell 10) → `unlinkGatedLoose` →
+// `reconcileSurvivors` → build the outcome. WIRED into `runStateCompact`/CLI —
+// `state compact --write` calls it (the first reachable destructive path).
 // ---------------------------------------------------------------------------
 
 /** A `STATE_COMPACT_INELIGIBLE` outcome (cleanup never ran — nothing on disk
@@ -410,7 +408,7 @@ export type RunEventPackCleanupHooks = {
  *   3. `unlinkGatedLoose` — the gated, interleaved unlink loop (the only deletes).
  *   4. `reconcileSurvivors` — post-run R0–R5 over the SAME target.
  *   5. `buildPostLoopOutcome` — the terminal `CleanupOutcome`.
- * NOT wired into the CLI yet (Layer 3b-2b-2d).
+ * Wired into the CLI: `state compact --write` → `runStateCompact` → here.
  */
 export async function runEventPackCleanup(
   cwd: string,

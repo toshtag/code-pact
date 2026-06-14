@@ -7,6 +7,7 @@ import { runStateCompact } from "../../../src/commands/state-compact.ts";
 import { eventPackPath } from "../../../src/core/archive/paths.ts";
 import { eventFileName } from "../../../src/core/progress/event-id.ts";
 import { seedDurableEvents } from "../../helpers/seed-events.ts";
+import { buildValidEventPack, writeEventPackFile } from "../../helpers/event-pack-fixture.ts";
 
 const NOW = new Date("2026-06-10T00:00:00.000Z");
 
@@ -118,15 +119,19 @@ describe("runStateCompact — dry-run", () => {
       "utf8",
     );
     const r = await runStateCompact({ cwd, phaseId: "P1", write: true });
-    expect(r.kind).toBe("ineligible");
-    if (r.kind !== "ineligible") return;
-    expect(r.block.kind).toBe("ambiguous_phase_id");
+    // --write fails closed: the cleanup outcome is ineligible, nothing written.
+    expect(r.kind).toBe("cleanup_outcome");
+    if (r.kind !== "cleanup_outcome" || r.outcome.ok) return;
+    expect(r.outcome.code).toBe("STATE_COMPACT_INELIGIBLE");
+    if (r.outcome.code !== "STATE_COMPACT_INELIGIBLE") return;
+    expect(r.outcome.block.kind).toBe("ambiguous_phase_id");
     expect(await exists(eventPackPath(cwd, "P1"))).toBe(false); // fail closed — no pack
   });
 
   it("dry-run: loose is a strict subset after a partial cleanup → would_already_packed, loose_relationship:strict_subset", async () => {
     const events = await scaffoldArchivedP1();
-    expect((await runStateCompact({ cwd, phaseId: "P1", write: true })).kind).toBe("packed");
+    // Pack covers both events, loose remain; then a partial cleanup removed one.
+    await writeEventPackFile(cwd, "P1", await buildValidEventPack(cwd, "P1", events));
     const started = events.find((e) => e.status === "started")!;
     await rm(join(cwd, ".code-pact", "state", "events", eventFileName(started)));
     const r = await runStateCompact({ cwd, phaseId: "P1", write: false });
@@ -138,47 +143,55 @@ describe("runStateCompact — dry-run", () => {
   });
 });
 
-describe("runStateCompact — --write", () => {
-  it("eligible → packed with cleanup_pending:true, loose_deleted_count:0, files UNTOUCHED", async () => {
+describe("runStateCompact — --write (Layer 3: writes the pack AND deletes loose)", () => {
+  it("eligible (no pack) → cleanup_outcome cleaned; pack written AND every loose file deleted", async () => {
     const events = await scaffoldArchivedP1();
     const r = await runStateCompact({ cwd, phaseId: "P1", write: true });
-    expect(r.kind).toBe("packed");
-    if (r.kind !== "packed") return;
-    expect(r.packed_event_count).toBe(2);
-    expect(r.loose_remaining_count).toBe(2);
-    expect(r.loose_deleted_count).toBe(0);
-    expect(r.cleanup_pending).toBe(true);
-    expect(r.next_action).toMatch(/Layer 3/);
-    expect(await exists(eventPackPath(cwd, "P1"))).toBe(true);
-    // Layer 2 leaves loose files on disk.
+    expect(r.kind).toBe("cleanup_outcome");
+    if (r.kind !== "cleanup_outcome" || !r.outcome.ok) return;
+    expect(r.outcome.kind).toBe("cleaned");
+    if (r.outcome.kind !== "cleaned") return;
+    expect(r.outcome.loose_deleted_count).toBe(2);
+    expect(r.outcome.cleanup_remaining_loose).toBe(0);
+    expect(await exists(eventPackPath(cwd, "P1"))).toBe(true); // pack is the durable record
+    // Every loose file is gone.
     for (const e of events) {
-      expect(await exists(join(cwd, ".code-pact", "state", "events", eventFileName(e)))).toBe(true);
+      expect(await exists(join(cwd, ".code-pact", "state", "events", eventFileName(e)))).toBe(false);
     }
   });
 
-  it("re-run after packing → already_packed cleanup_pending:true (loose still remain)", async () => {
+  it("re-run after a clean → already_cleaned (pack covers it, no loose remain)", async () => {
     await scaffoldArchivedP1();
-    expect((await runStateCompact({ cwd, phaseId: "P1", write: true })).kind).toBe("packed");
+    // The FIRST run must actually clean (deletes loose) — assert it, so a regression
+    // where it returned already_cleaned prematurely can't be masked by the re-run.
+    const first = await runStateCompact({ cwd, phaseId: "P1", write: true });
+    expect(first.kind).toBe("cleanup_outcome");
+    if (first.kind !== "cleanup_outcome" || !first.outcome.ok) return;
+    expect(first.outcome.kind).toBe("cleaned");
+    if (first.outcome.kind !== "cleaned") return;
+    expect(first.outcome.loose_deleted_count).toBeGreaterThan(0);
     const again = await runStateCompact({ cwd, phaseId: "P1", write: true });
-    expect(again.kind).toBe("already_packed");
-    if (again.kind !== "already_packed") return;
-    expect(again.cleanup_pending).toBe(true);
+    expect(again.kind).toBe("cleanup_outcome");
+    if (again.kind !== "cleanup_outcome" || !again.outcome.ok) return;
+    expect(again.outcome.kind).toBe("already_cleaned");
   });
 
-  it("loose is a strict subset after a partial cleanup → already_packed cleanup_pending:true (resumable, NOT ineligible/pack_stale)", async () => {
+  it("pack covers it but a partial cleanup left a loose subset → cleaned; the remnant is removed", async () => {
     const events = await scaffoldArchivedP1();
-    expect((await runStateCompact({ cwd, phaseId: "P1", write: true })).kind).toBe("packed");
-    // Simulate Layer 3 having removed ONE loose file (a partial cleanup). The pack
-    // still covers the full event set, so the phase stays eligible to RESUME — it
-    // must NOT regress to ineligible(pack_stale).
+    // Pack already covers the full event set; a prior partial cleanup left one loose.
+    await writeEventPackFile(cwd, "P1", await buildValidEventPack(cwd, "P1", events));
     const started = events.find((e) => e.status === "started")!;
     await rm(join(cwd, ".code-pact", "state", "events", eventFileName(started)));
     const r = await runStateCompact({ cwd, phaseId: "P1", write: true });
-    expect(r.kind).toBe("already_packed");
-    if (r.kind !== "already_packed") return;
-    expect(r.cleanup_pending).toBe(true);
-    expect(r.loose_remaining_count).toBe(1);
-    expect(r.loose_relationship).toBe("strict_subset");
+    expect(r.kind).toBe("cleanup_outcome");
+    if (r.kind !== "cleanup_outcome" || !r.outcome.ok) return;
+    expect(r.outcome.kind).toBe("cleaned");
+    if (r.outcome.kind !== "cleaned") return;
+    expect(r.outcome.loose_deleted_count).toBe(1);
+    expect(r.outcome.cleanup_remaining_loose).toBe(0);
+    // The remaining loose file (the `done` event) is removed.
+    const done = events.find((e) => e.status === "done")!;
+    expect(await exists(join(cwd, ".code-pact", "state", "events", eventFileName(done)))).toBe(false);
   });
 });
 
@@ -204,7 +217,7 @@ describe("runStateCompact — live phase YAML the roadmap doesn't name (sixth-re
     await rm(join(cwd, "design", "roadmap.yaml")); // no roadmap at all
     // A live phase doc with id P1 sits in design/phases/ under a different name.
     await writeFile(join(cwd, "design", "phases", "P1-orphan.yaml"), P1_DONE, "utf8");
-    const r = await runStateCompact({ cwd, phaseId: "P1", write: true });
+    const r = await runStateCompact({ cwd, phaseId: "P1", write: false });
     expect(r.kind).toBe("ineligible");
     if (r.kind !== "ineligible") return;
     expect(r.block.kind).toBe("phase_file_still_present");
