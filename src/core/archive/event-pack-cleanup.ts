@@ -70,10 +70,11 @@ export type CleanupErrorCode =
  * `partial_applied` MUST be true. The two are paired by the type so a cleanup
  * result can never claim "2 files deleted" with `partial_applied:false`.
  *
- * `partial_applied:true` + `loose_deleted_count:0` IS allowed: on the cell-10 path
- * the pack write succeeds (a mutation → partial_applied:true) and the cleanup phase
- * then aborts BEFORE any unlink (loose_deleted_count:0). `partial_applied` tracks
- * ANY filesystem mutation (pack OR unlink), not unlink alone — hence the asymmetry.
+ * `partial_applied:true` + `loose_deleted_count:0` IS allowed in two cell-10 cases
+ * (the pack write is itself a mutation): the cleanup phase aborts BEFORE any unlink,
+ * OR it completes as an ALL-VANISHED `cleaned` (every target vanished before unlink,
+ * `vanished_count > 0`). `partial_applied` tracks ANY filesystem mutation (pack OR
+ * unlink), not unlink alone — hence the asymmetry.
  */
 export type CleanupMutationProgress =
   | { partial_applied: false; loose_deleted_count: 0 }
