@@ -144,7 +144,13 @@ export type DeleteGateAbortReason =
  *  - `abort`    — a global safety gate failed; the loop must STOP, removing no more.
  */
 export type DeleteGateVerdict =
-  | { disposition: "unlink" }
+  | {
+      disposition: "unlink";
+      /** The project-resolved absolute path the gate VERIFIED. The unlink loop
+       *  removes exactly this path — it does NOT re-resolve, so it cannot diverge
+       *  from what was gated and cannot mislabel a re-resolve failure. */
+      abs: string;
+    }
   | { disposition: "skip"; reason: CleanupSkipReason }
   | { disposition: "vanished" }
   | { disposition: "abort"; reason: DeleteGateAbortReason; detail: string };
@@ -262,8 +268,9 @@ export async function evaluateDeleteGate(
     };
   }
 
-  // All G1–G8 passed — the destructive loop MAY unlink this file.
-  return { disposition: "unlink" };
+  // All G1–G8 passed — the destructive loop MAY unlink this file. Hand back the
+  // resolved-and-verified `abs` so the loop removes exactly this path.
+  return { disposition: "unlink", abs };
 }
 
 /** One loose file that would be skipped, with its project-relative path + reason. */
