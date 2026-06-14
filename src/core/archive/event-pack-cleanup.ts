@@ -88,10 +88,11 @@ export type CleanupMutationProgress =
  * resolving the RFC's "optional?" ambiguity in favor of always-emit, consistent
  * with the other two booleans. `advisories` is always present (empty when none).
  *
- * NOTE: This type is defined and tested in Layer 3a but is WIRED into
- * `runStateCompact` only in the Layer 3b PR (together with the unlink loop and the
- * `would_cleanup_loose`/`cleaned` result-name migration). Keeping it here lets the
- * classifier below be unit-tested against a fixed shape first.
+ * This type is WIRED into `runStateCompact` / the `state compact --write` CLI: the
+ * orchestrator returns it and `emitCleanupOutcome` maps every variant to the public
+ * JSON/exit surface. (One naming follow-up remains: the dry-run verdict names
+ * `would_cleanup_loose` / `would_resume_cleanup`; the `cleaned` / `already_cleaned`
+ * result names ARE shipped.)
  */
 export type CleanupOutcome =
   // --- success / no-op (ok: true) — success booleans are either FIXED or PAIRED by
@@ -278,10 +279,10 @@ export type CleanupOutcome =
 // `planEventPack` step 8 collapsed every "pack present, loose ≠ pack" case — subset
 // AND divergence alike — to `pack_stale`.)
 //
-// This still does NOT unlink loose files and does NOT perform the Layer 3 cleanup
-// naming migration (`cleaned` / `would_cleanup_loose` / `would_resume_cleanup`). It
-// only gives the planner/result surface enough information for Layer 3b-2b to
-// distinguish, once the unlink loop is wired:
+// This classifier itself is PURE — it never unlinks; the wired cleanup path
+// (`runEventPackCleanup` → `unlinkGatedLoose`) consumes its verdict. The dry-run
+// verdict-name migration (`would_cleanup_loose` / `would_resume_cleanup`) is the one
+// remaining follow-up; `cleaned` is already shipped. The relationship maps to a cell:
 //
 //   empty         loose == ∅              → cell 11 (already cleaned, nothing to do)
 //   equal         loose id-set == pack    → cell 12 (clean the full set)

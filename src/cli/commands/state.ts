@@ -84,16 +84,81 @@ function dryRunHumanLine(phaseId: string, result: StateCompactResult): string {
 
 /** Human line for a successful `--write` cleanup outcome. */
 function cleanupSuccessLine(phaseId: string, o: Extract<CleanupOutcome, { ok: true }>): string {
+  // `cleaned` can carry advisories (e.g. R5 `unclassified_loose_after_cleanup`); the
+  // human line is a summary, so it only hints at them and points to `--json` for the
+  // detail (which always carries the full `advisories[]`).
+  const advisory =
+    o.advisories.length > 0 ? ` (${o.advisories.length} advisory — see --json for detail)` : "";
   switch (o.kind) {
     case "cleaned": {
       const vanished = o.vanished_count > 0 ? ` (${o.vanished_count} already gone)` : "";
-      return `Compacted "${phaseId}": removed ${o.loose_deleted_count} loose event file(s)${vanished}; the event pack is the durable record.`;
+      return `Compacted "${phaseId}": removed ${o.loose_deleted_count} loose event file(s)${vanished}; the event pack is the durable record.${advisory}`;
     }
     case "already_cleaned":
-      return `"${phaseId}" is already compacted — a pack covers it and no loose files remain.`;
+      return `"${phaseId}" is already compacted — a pack covers it and no loose files remain.${advisory}`;
     case "noop_no_events":
-      return `No progress events found for archived phase "${phaseId}" — nothing to compact.`;
+      return `No progress events found for archived phase "${phaseId}" — nothing to compact.${advisory}`;
   }
+}
+
+/** Human message for a failed `--write` cleanup outcome. */
+function cleanupErrorMessage(
+  outcome: Extract<CleanupOutcome, { ok: false }>,
+  phaseId: string,
+): string {
+  switch (outcome.code) {
+    case "STATE_COMPACT_INELIGIBLE":
+      return `phase "${phaseId}" cannot be compacted: ${ineligibleDetail(phaseId, outcome.block)}`;
+    case "STATE_COMPACT_WRITE_FAILED":
+      return `state compact --write failed during ${outcome.phase} (no loose files were removed)`;
+    case "STATE_COMPACT_CLEANUP_FAILED":
+      return `state compact --write: cleanup aborted${outcome.block ? ` (${outcome.block})` : ""} — resolve the conflict and rerun`;
+    case "STATE_COMPACT_CLEANUP_INCOMPLETE":
+      return `state compact --write: ${outcome.cleanup_remaining_loose} loose file(s) could not be removed — read skipped[], fix each, and rerun`;
+  }
+}
+
+/**
+ * The JSON `data` payload for a `CleanupOutcome`. The `CleanupOutcome` type guarantees
+ * `cleanup_pending` / `partial_applied` / `cleanup_started` / `loose_deleted_count` /
+ * `cleanup_remaining_loose` / `vanished_count` / `advisories` on EVERY result (success
+ * AND failure) so a consumer reads them unconditionally; `skipped` is present on the
+ * FAILURE variants only (always `[]` until the cleanup phase records a survivor). The
+ * CLI must NOT drop any of these on the error paths (an earlier version did, breaking
+ * the public failure contract). To stay exhaustive by construction we spread the WHOLE
+ * outcome rather than re-listing fields, stripping only the `ok` discriminant (the
+ * envelope owns `ok`) and, on errors, `code` (the envelope owns `error.code`); then add
+ * the CLI-only fields: `phase_id` always, plus `pack_path` / `next_action` on a write
+ * failure. Pure + exported so every variant's data shape can be pinned by a unit test
+ * (the happy-path E2E can't see the failure shapes).
+ */
+export function cleanupOutcomeData(
+  outcome: CleanupOutcome,
+  phaseId: string,
+  cwd: string,
+): Record<string, unknown> {
+  if (outcome.ok) {
+    const { ok: _ok, ...rest } = outcome;
+    return { phase_id: phaseId, ...rest };
+  }
+  const { ok: _ok, code: _code, ...rest } = outcome;
+  if (outcome.code === "STATE_COMPACT_WRITE_FAILED") {
+    return {
+      phase_id: phaseId,
+      ...rest,
+      pack_path: eventPackPath(cwd, phaseId),
+      // `verify_pack` means the pack step mutated the tree but the pack may NOT still be
+      // present (a post-write re-prepare race can remove it), so the next_action must not
+      // assume it can be inspected.
+      ...(outcome.phase === "verify_pack"
+        ? {
+            next_action:
+              "Inspect the pack file if it is still present, resolve the conflict, then rerun state compact.",
+          }
+        : {}),
+    };
+  }
+  return { phase_id: phaseId, ...rest };
 }
 
 /** Map a `--write` `CleanupOutcome` to CLI output + exit code. */
@@ -103,88 +168,14 @@ function emitCleanupOutcome(
   cwd: string,
   json: boolean,
 ): number {
+  const data = cleanupOutcomeData(outcome, phaseId, cwd);
   if (outcome.ok) {
-    // Strip the outcome's own `ok` discriminant — `emitOk` owns the envelope's
-    // `ok`, so the data payload must not carry a redundant nested `ok` (the
-    // dry-run `emitOk(result)` payloads don't, and the shapes should match).
-    const { ok: _ok, ...data } = outcome;
-    if (json) emitOk({ phase_id: phaseId, ...data });
+    if (json) emitOk(data);
     else process.stdout.write(`${cleanupSuccessLine(phaseId, outcome)}\n`);
     return 0;
   }
-
-  switch (outcome.code) {
-    case "STATE_COMPACT_INELIGIBLE":
-      emitError(
-        json,
-        "STATE_COMPACT_INELIGIBLE",
-        `phase "${phaseId}" cannot be compacted: ${ineligibleDetail(phaseId, outcome.block)}`,
-        { data: { phase_id: phaseId, block: outcome.block, advisories: outcome.advisories } },
-      );
-      return 2;
-    case "STATE_COMPACT_WRITE_FAILED":
-      emitError(
-        json,
-        "STATE_COMPACT_WRITE_FAILED",
-        `state compact --write failed during ${outcome.phase} (no loose files were removed)`,
-        {
-          data: {
-            phase_id: phaseId,
-            phase: outcome.phase,
-            partial_applied: outcome.partial_applied,
-            cleanup_remaining_loose: outcome.cleanup_remaining_loose,
-            pack_path: eventPackPath(cwd, phaseId),
-            advisories: outcome.advisories,
-            // `verify_pack` means the pack step mutated the tree but the pack may NOT
-            // still be present (a post-write re-prepare failure can remove it), so the
-            // next_action must not assume it can be inspected.
-            ...(outcome.phase === "verify_pack"
-              ? { next_action: "Inspect the pack file if it is still present, resolve the conflict, then rerun state compact." }
-              : {}),
-          },
-        },
-      );
-      return 2;
-    case "STATE_COMPACT_CLEANUP_FAILED":
-      emitError(
-        json,
-        "STATE_COMPACT_CLEANUP_FAILED",
-        `state compact --write: cleanup aborted${outcome.block ? ` (${outcome.block})` : ""} — resolve the conflict and rerun`,
-        {
-          data: {
-            phase_id: phaseId,
-            ...(outcome.block ? { block: outcome.block } : {}),
-            partial_applied: outcome.partial_applied,
-            cleanup_started: outcome.cleanup_started,
-            loose_deleted_count: outcome.loose_deleted_count,
-            cleanup_remaining_loose: outcome.cleanup_remaining_loose,
-            vanished_count: outcome.vanished_count,
-            skipped: outcome.skipped,
-            advisories: outcome.advisories,
-          },
-        },
-      );
-      return 2;
-    case "STATE_COMPACT_CLEANUP_INCOMPLETE":
-      emitError(
-        json,
-        "STATE_COMPACT_CLEANUP_INCOMPLETE",
-        `state compact --write: ${outcome.cleanup_remaining_loose} loose file(s) could not be removed — read skipped[], fix each, and rerun`,
-        {
-          data: {
-            phase_id: phaseId,
-            partial_applied: outcome.partial_applied,
-            cleanup_started: outcome.cleanup_started,
-            loose_deleted_count: outcome.loose_deleted_count,
-            cleanup_remaining_loose: outcome.cleanup_remaining_loose,
-            vanished_count: outcome.vanished_count,
-            skipped: outcome.skipped,
-            advisories: outcome.advisories,
-          },
-        },
-      );
-      return 2;
-  }
+  emitError(json, outcome.code, cleanupErrorMessage(outcome, phaseId), { data });
+  return 2;
 }
 
 async function cmdStateCompact(
