@@ -81,8 +81,8 @@ const KNOWN_CODES: Record<string, "public" | "plan" | "doctor" | "adapter" | "in
   // and the pack write/readback-verify failed.
   STATE_COMPACT_INELIGIBLE: "public",
   STATE_COMPACT_WRITE_FAILED: "public",
-  // Layer 3 cleanup contract — type-reserved in Layer 3a (event-pack-cleanup.ts),
-  // emitted by `state compact --write` only once the unlink loop is wired in Layer 3b.
+  // Layer 3 cleanup contract — emitted by `state compact --write` (the wired unlink
+  // path) when a gate aborts the cleanup or a survivor remains.
   STATE_COMPACT_CLEANUP_FAILED: "public",
   STATE_COMPACT_CLEANUP_INCOMPLETE: "public",
   PHASE_RECONCILE_WRITE_REFUSED: "public",

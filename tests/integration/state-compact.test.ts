@@ -155,3 +155,54 @@ describe("state compact --write (Layer 3: deletes loose)", () => {
     expect(await looseCount()).toBe(0);
   });
 });
+
+describe("state compact — ineligible JSON shape: dry-run (legacy) vs --write (CleanupOutcome)", () => {
+  const CLEANUP_FIELDS = [
+    "cleanup_pending",
+    "partial_applied",
+    "cleanup_started",
+    "loose_deleted_count",
+    "cleanup_remaining_loose",
+    "vanished_count",
+    "skipped",
+    "advisories",
+  ] as const;
+  const blockKind = (data: Record<string, unknown> | undefined): unknown =>
+    (data?.block as Record<string, unknown> | undefined)?.kind;
+
+  // A live phase YAML is still present → ineligible(phase_file_still_present), the same
+  // block on BOTH paths — but the JSON data shapes deliberately differ.
+  async function scaffoldUnarchived(): Promise<void> {
+    const init = run(["init", "--non-interactive", "--locale", "en-US", "--agent", "claude-code", "--json"]);
+    if (init.code !== 0) throw new Error(`init failed: ${init.stdout}${init.stderr}`);
+    await writeFile(join(tmpDir, "design", "roadmap.yaml"), ROADMAP, "utf8");
+    await writeFile(join(tmpDir, "design", "phases", "P1-x.yaml"), P1_DONE, "utf8");
+    await mkdir(join(tmpDir, ".code-pact", "state"), { recursive: true });
+    await seedDurableEvents(tmpDir, PROGRESS);
+  }
+
+  it("dry-run ineligible → legacy shape (phase_id + block only, NO cleanup fields)", async () => {
+    await scaffoldUnarchived();
+    const r = run(["state", "compact", "P1", "--json"]);
+    expect(r.code).toBe(2);
+    const body = json(r);
+    expect(body.error?.code).toBe("STATE_COMPACT_INELIGIBLE");
+    expect(body.data?.phase_id).toBe("P1");
+    expect(blockKind(body.data)).toBe("phase_file_still_present");
+    for (const k of CLEANUP_FIELDS) expect(k in (body.data ?? {})).toBe(false);
+  });
+
+  it("--write ineligible → CleanupOutcome shape (full contract fields), fail-closed", async () => {
+    await scaffoldUnarchived();
+    const r = run(["state", "compact", "P1", "--write", "--json"]);
+    expect(r.code).toBe(2);
+    const body = json(r);
+    expect(body.error?.code).toBe("STATE_COMPACT_INELIGIBLE");
+    expect(body.data?.phase_id).toBe("P1");
+    expect(blockKind(body.data)).toBe("phase_file_still_present");
+    for (const k of CLEANUP_FIELDS) expect(k in (body.data ?? {})).toBe(true);
+    // `code` is owned by the envelope's error.code — must not be duplicated in data.
+    expect("code" in (body.data ?? {})).toBe(false);
+    expect(await fileExists(PACK_PATH())).toBe(false); // fail-closed: nothing written
+  });
+});

@@ -87,8 +87,8 @@ function cleanupSuccessLine(phaseId: string, o: Extract<CleanupOutcome, { ok: tr
   // `cleaned` can carry advisories (e.g. R5 `unclassified_loose_after_cleanup`); the
   // human line is a summary, so it only hints at them and points to `--json` for the
   // detail (which always carries the full `advisories[]`).
-  const advisory =
-    o.advisories.length > 0 ? ` (${o.advisories.length} advisory — see --json for detail)` : "";
+  const n = o.advisories.length;
+  const advisory = n > 0 ? ` (${n} ${n === 1 ? "advisory" : "advisories"} — see --json for detail)` : "";
   switch (o.kind) {
     case "cleaned": {
       const vanished = o.vanished_count > 0 ? ` (${o.vanished_count} already gone)` : "";
