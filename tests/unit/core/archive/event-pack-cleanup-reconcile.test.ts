@@ -143,6 +143,23 @@ describe("reconcileSurvivors — R0–R5 post-run classification (NO unlink)", (
     expect(r.vanished_count).toBe(1); // but the vanish IS observed for the public count
   });
 
+  it("a loop-skipped file already GONE before the reconciliation readdir → counted in vanished_count, not a survivor", async () => {
+    // No file on disk; the loop recorded a skip for it (R0 iv tie), then it vanished
+    // before reconciliation even enumerated — so it never appears in `readdir`.
+    const goneName = `20260601T000000000Z-${"c".repeat(64)}.yaml`;
+    const r = await reconcileSurvivors(cwd, {
+      target: [],
+      packIds: new Set(),
+      snapshotTaskIds: new Set(),
+      loopSkipped: [{ path: looseEventRelPath(goneName), reason: "unreadable" }],
+    });
+    expect(r.terminal).toBeNull();
+    expect(r.cleanup_remaining_loose).toBe(0); // not a present survivor
+    expect(r.skipped).toEqual([]);
+    expect(r.vanished_count).toBe(1); // but this phase had already claimed it (R0 iv)
+    expect(r.advisories).toEqual([]);
+  });
+
   it("R5: a broken (unparseable) event file with NO filename/pack/skip tie → advisory, not counted", async () => {
     const name = `20260601T000000000Z-${"e".repeat(64)}.yaml`;
     await writeFile(join(eventsDir(cwd), name), "{ not: valid :::", "utf8");

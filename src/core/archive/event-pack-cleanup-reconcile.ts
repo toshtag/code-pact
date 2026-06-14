@@ -65,8 +65,13 @@ type SurvivorContent =
 /**
  * Re-read ONE present survivor's content id + task_id, fresh from disk, mapping
  * every failure to the matching R1.0 `*_after_cleanup` reason. `ENOENT` means it
- * vanished since the re-enumeration (`"gone"` — not a survivor). Best-effort, like
- * the gate: this runs post-unlink and never removes anything.
+ * vanished since the re-enumeration (`"gone"` — not a survivor).
+ *
+ * Unlike the delete-time gate (`O_NOFOLLOW` + fd inode-identity, because it gates an
+ * irreversible unlink), this is a plain `lstat` + `readFile` — best-effort, read-only,
+ * removes NOTHING. Under the non-hostile-FS threat model (accidental corruption /
+ * honest concurrent writers) a symlink read here only mis-classifies a survivor for
+ * the advisory/INCOMPLETE counts; it can never cause a delete.
  */
 async function readSurvivorContent(abs: string): Promise<SurvivorContent> {
   let st;
@@ -178,6 +183,10 @@ export async function reconcileSurvivors(
   const verdicts: SurvivorVerdict[] = [];
   const advisories: CleanupAdvisory[] = [];
   let vanishedCount = 0;
+  // The post-run enumeration snapshot. A loop-skipped file MISSING from it vanished
+  // BEFORE this readdir (handled after the main loop); the `presentNames` guard there
+  // prevents double-counting a skip file the main loop instead sees vanish at read.
+  const presentNames = new Set(names);
 
   if (hooks.afterReaddir) await hooks.afterReaddir();
 
@@ -228,6 +237,19 @@ export async function reconcileSurvivors(
         { has: (eventId) => packIds.has(eventId) },
       ),
     );
+  }
+
+  // A loop-skipped file (already proven THIS phase's via R0 (iv)) that is ABSENT from
+  // the post-run enumeration vanished before this readdir — not a present survivor,
+  // but a vanish this phase observed, so count it. Only the loop-skip tie is
+  // unambiguous here: a target/pack-tied file missing from disk may have been the
+  // loop's own deletion (the loop's tallies own that), but a SKIP means the loop kept
+  // it, so its absence now is a genuine vanish. `presentNames` excludes the
+  // read-time-vanish files the main loop already counted.
+  for (const s of loopSkipped) {
+    const base = s.path.slice(s.path.lastIndexOf("/") + 1);
+    if (!parseEventFileName(base)) continue; // not an event file — ignore
+    if (!presentNames.has(base)) vanishedCount += 1;
   }
 
   const agg = aggregateSurvivorVerdicts(verdicts);
