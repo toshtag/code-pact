@@ -164,6 +164,14 @@ describe("CleanupOutcome — every terminal-table result is representable, impos
       partial_applied: false, cleanup_started: true,
       loose_deleted_count: 0, cleanup_remaining_loose: 0, vanished_count: 2, advisories: [],
     };
+    // The cell-10 all-vanished sub-case: the pack WAS written this run
+    // (partial_applied:true), but every target then vanished before unlink
+    // (loose_deleted_count:0, vanished_count>0). Also `cleaned`.
+    const cleanedAllVanishedAfterPackWrite: CleanupOutcome = {
+      ok: true, kind: "cleaned", cleanup_pending: false,
+      partial_applied: true, cleanup_started: true,
+      loose_deleted_count: 0, cleanup_remaining_loose: 0, vanished_count: 2, advisories: [],
+    };
     const alreadyCleaned: CleanupOutcome = {
       ok: true, kind: "already_cleaned", cleanup_pending: false,
       partial_applied: false, cleanup_started: false,
@@ -200,17 +208,20 @@ describe("CleanupOutcome — every terminal-table result is representable, impos
       skipped: [{ path: "y", reason: "task_not_in_snapshot" }], advisories: [],
     };
     // Runtime touch so the literals are not dead code.
-    for (const o of [cleaned, cleanedAllVanished, alreadyCleaned, noopNoEvents, ineligible, writeFailed, cleanupFailed, cleanupIncomplete]) {
+    for (const o of [cleaned, cleanedAllVanished, cleanedAllVanishedAfterPackWrite, alreadyCleaned, noopNoEvents, ineligible, writeFailed, cleanupFailed, cleanupIncomplete]) {
       expect(o).toBeTruthy();
     }
     expect(cleaned.partial_applied).toBe(true);
-    expect(cleanedAllVanished.partial_applied).toBe(false); // all-vanished mutated nothing
+    expect(cleanedAllVanished.partial_applied).toBe(false); // no write, all vanished → mutated nothing
     expect(cleanedAllVanished.vanished_count).toBe(2);
+    // Pack written this run → partial_applied:true even though 0 unlinked (all vanished).
+    expect(cleanedAllVanishedAfterPackWrite.partial_applied).toBe(true);
+    expect(cleanedAllVanishedAfterPackWrite.loose_deleted_count).toBe(0);
     expect(noopNoEvents.cleanup_started).toBe(false);
     expect(ineligible.ok).toBe(false);
   });
 
-  it("NEGATIVE compile guards — the fixed RFC values cannot be violated (type errors are the assertion)", () => {
+  it("NEGATIVE compile guards — type-enforceable impossible combinations are rejected (type errors are the assertion)", () => {
     // Route each bad literal through a typed identity so the type error is reported
     // ON THE CALL LINE (right after the @ts-expect-error), not on whichever inner
     // field happens to mismatch — a multi-line literal would otherwise put the error

@@ -92,9 +92,12 @@ export type CleanupMutationProgress =
  * classifier below be unit-tested against a fixed shape first.
  */
 export type CleanupOutcome =
-  // --- success / no-op (ok: true) — every boolean is FIXED per the RFC, not just
-  // typed `boolean`, so Layer 3b cannot return e.g. `cleaned` with
-  // partial_applied:false without a type error. ---
+  // --- success / no-op (ok: true) — success booleans are either FIXED or PAIRED by
+  // the contract (not just typed `boolean`). NOTE `cleaned` is NOT fixed to
+  // partial_applied:true: it uses CleanupMutationProgress so the all-vanished cleanup
+  // is representable honestly. TYPE-enforced: partial_applied:false forbids
+  // loose_deleted_count>0. RUNTIME-enforced by the orchestrator: a `cleaned` with
+  // loose_deleted_count===0 requires vanished_count>0 (a zero-op cleaned is incoherent). ---
   | ({
       ok: true;
       /**
