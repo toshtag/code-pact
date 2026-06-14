@@ -13,6 +13,7 @@ import { loadMergedProgress, mergeProgressStreams } from "../progress/io.ts";
 import { readPackSources } from "../progress/all-sources.ts";
 import { deriveTaskState } from "../progress/task-state.ts";
 import { computeEventId } from "../progress/event-id.ts";
+import { resolveMissingPhaseRef } from "./load-phase-snapshot.ts";
 import { resolveWithinProject } from "../path-safety.ts";
 import { atomicWriteText, type ExpectedState } from "../../io/atomic-text.ts";
 import { phaseSnapshotPath, sha256Hex } from "./paths.ts";
@@ -333,13 +334,45 @@ export async function planPhaseSnapshot(
   // Load every active phase once (id-verified), in roadmap order — shared by
   // the duplicate-task-id scan and the active-dependant scan below. An
   // id-diverged active control doc is never scanned (its verdicts could not be
-  // trusted).
-  const activePhases: { refId: string; refPath: string; phase: Phase }[] = [];
+  // trusted). A sibling whose live YAML is ABSENT is tolerated when a valid
+  // archive snapshot resolves it — the SAME tolerance every reader path applies
+  // (step-4 archive-reader invariants: one shared merge on every path). The
+  // producer previously read each sibling YAML directly, so archiving one phase
+  // made every *subsequent* archive crash with ENOENT on the gone YAML. A
+  // tolerated archived sibling still joins the duplicate-task-id scan (collision
+  // stays fail-closed), and its tasks are all terminal (done/cancelled), so they
+  // can never block the active-dependant scan. A genuinely missing sibling (no
+  // valid snapshot) re-throws unchanged.
+  // `status` is the live PhaseStatus enum (snapshot tasks carry its done/cancelled
+  // subset). Narrow, NOT `string`, so adding a new status breaks this assignment at
+  // typecheck and forces a look at the dependant-scan skip below — not a silent miss.
+  type ScanTask = { id: string; status: "planned" | "in_progress" | "done" | "cancelled"; depends_on?: string[] };
+  const activePhases: { refId: string; refPath: string; id: string; tasks: ScanTask[] }[] = [];
   for (const otherRef of roadmap.phases) {
-    const otherPhase =
-      otherRef.id === ref.id
-        ? phase
-        : Phase.parse(parseYaml(await readRawWithin(cwd, otherRef.path)) as unknown);
+    if (otherRef.id === ref.id) {
+      activePhases.push({ refId: ref.id, refPath: ref.path, id: phase.id, tasks: phase.tasks ?? [] });
+      continue;
+    }
+    let raw: string;
+    try {
+      raw = await readRawWithin(cwd, otherRef.path);
+    } catch (err) {
+      if (!isEnoent(err)) throw err;
+      const res = await resolveMissingPhaseRef(cwd, { id: otherRef.id, path: otherRef.path });
+      if (res.kind !== "tolerated") throw err; // no valid snapshot → genuinely broken ref
+      activePhases.push({
+        refId: otherRef.id,
+        refPath: otherRef.path,
+        id: res.snapshot.phase_id,
+        tasks: res.snapshot.tasks.map((t) => ({
+          id: t.id,
+          status: t.status,
+          ...(t.depends_on ? { depends_on: t.depends_on } : {}),
+        })),
+      });
+      continue;
+    }
+    const otherPhase = Phase.parse(parseYaml(raw) as unknown);
     if (otherPhase.id !== otherRef.id) {
       blocks.push({
         kind: "phase_id_mismatch",
@@ -350,7 +383,7 @@ export async function planPhaseSnapshot(
       });
       continue;
     }
-    activePhases.push({ refId: otherRef.id, refPath: otherRef.path, phase: otherPhase });
+    activePhases.push({ refId: otherRef.id, refPath: otherRef.path, id: otherPhase.id, tasks: otherPhase.tasks ?? [] });
   }
 
   // Task-id uniqueness across the WHOLE active graph. Progress events bind by
@@ -363,7 +396,7 @@ export async function planPhaseSnapshot(
   {
     const seen = new Map<string, { phase_id: string; path: string }>();
     for (const entry of activePhases) {
-      for (const t of entry.phase.tasks ?? []) {
+      for (const t of entry.tasks) {
         const first = seen.get(t.id);
         if (first) {
           blocks.push({
@@ -508,14 +541,14 @@ export async function planPhaseSnapshot(
   // id-verified activePhases set loaded above.
   if (cancelledTaskIds.size > 0) {
     for (const entry of activePhases) {
-      for (const otherTask of entry.phase.tasks ?? []) {
+      for (const otherTask of entry.tasks) {
         if (otherTask.status === "done" || otherTask.status === "cancelled") continue;
         for (const dep of otherTask.depends_on ?? []) {
           if (cancelledTaskIds.has(dep)) {
             blocks.push({
               kind: "active_dependant_on_non_done_task",
               dependant_task_id: otherTask.id,
-              dependant_phase_id: entry.phase.id,
+              dependant_phase_id: entry.id,
               depends_on_task_id: dep,
             });
           }

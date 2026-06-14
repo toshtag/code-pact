@@ -267,3 +267,75 @@ describe("phase archive --write", () => {
     expect(roadmap).toContain("id: P1");
   });
 });
+
+// Regression: archiving one phase must NOT break archiving the NEXT one. The snapshot
+// producer reads every roadmap-listed sibling phase (to run its duplicate-task-id and
+// active-dependant scans); it must tolerate a sibling whose YAML was already archived
+// away (resolve it from its snapshot), not crash with ENOENT on the gone file. Before
+// the fix, the FIRST archive succeeded but every SUBSEQUENT archive died — which would
+// have blocked the dogfood durable-truth migration after a single phase.
+describe("phase archive — an archived sibling does not break later archives (ENOENT regression)", () => {
+  const ROADMAP_AB = `phases:
+  - id: PA
+    path: design/phases/PA.yaml
+    weight: 1
+  - id: PB
+    path: design/phases/PB.yaml
+    weight: 1
+`;
+  const donePhase = (id: string): string => `id: ${id}
+name: ${id}
+weight: 1
+confidence: high
+risk: low
+status: done
+objective: Build the ${id} increment
+definition_of_done:
+  - it works
+verification:
+  commands:
+    - "true"
+tasks:
+  - id: ${id}-T1
+    type: feature
+${TASK_FIELDS}
+    status: done
+`;
+  const PROGRESS_AB = `events:
+  - task_id: PA-T1
+    status: done
+    at: 2026-06-01T00:00:00.000Z
+    actor: agent
+  - task_id: PB-T1
+    status: done
+    at: 2026-06-01T01:00:00.000Z
+    actor: agent
+`;
+  async function scaffoldAB(): Promise<void> {
+    const init = run(["init", "--non-interactive", "--locale", "en-US", "--agent", "claude-code", "--json"]);
+    if (init.code !== 0) throw new Error(`init failed: ${init.stdout}${init.stderr}`);
+    await writeFile(join(tmpDir, "design", "roadmap.yaml"), ROADMAP_AB, "utf8");
+    await writeFile(join(tmpDir, "design", "phases", "PA.yaml"), donePhase("PA"), "utf8");
+    await writeFile(join(tmpDir, "design", "phases", "PB.yaml"), donePhase("PB"), "utf8");
+    await mkdir(join(tmpDir, ".code-pact", "state"), { recursive: true });
+    await seedDurableEvents(tmpDir, PROGRESS_AB);
+  }
+
+  it("archive PA, then PB still archives (no internal ENOENT on the gone PA YAML)", async () => {
+    await scaffoldAB();
+    expect(run(["phase", "archive", "PA", "--write", "--json"]).code).toBe(0);
+    expect(await fileExists(join(tmpDir, "design", "phases", "PA.yaml"))).toBe(false); // PA gone
+    // PB dry-run must succeed — before the fix this exited non-zero with an internal
+    // ENOENT on design/phases/PA.yaml while building the sibling scans.
+    const dry = run(["phase", "archive", "PB", "--json"]);
+    expect(dry.code).toBe(0);
+    expect(json(dry).data?.kind).toBe("would_archive");
+    // And PB actually archives.
+    const wr = run(["phase", "archive", "PB", "--write", "--json"]);
+    expect(wr.code).toBe(0);
+    expect(json(wr).data?.kind).toBe("archived");
+    expect(await fileExists(join(tmpDir, "design", "phases", "PB.yaml"))).toBe(false);
+    // Control plane green with BOTH phases archived (resolved from snapshots).
+    expect(json(run(["validate", "--json"])).ok).toBe(true);
+  });
+});
