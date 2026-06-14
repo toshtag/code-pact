@@ -318,29 +318,52 @@ export type LooseCleanupDryRun =
     };
 
 /**
- * Options for `planLooseCleanup`. `afterPlan` is a TEST SEAM (mirrors
+ * Options for the cleanup prepare/dry-run. `afterPlan` is a TEST SEAM (mirrors
  * `ApplyEventPackHooks`): it fires AFTER the G0 `planEventPack` re-check and BEFORE
  * the loose/pack re-read, so a test can mutate the loose set in between and assert
- * the dry-run stays self-consistent with what it RE-READ — not G0's stale view.
+ * the result stays self-consistent with what it RE-READ — not G0's stale view.
  */
-export type PlanLooseCleanupHooks = { afterPlan?: () => Promise<void> };
+export type PrepareLooseCleanupHooks = { afterPlan?: () => Promise<void> };
 
 /**
- * Evaluate the delete-time gate across a phase's whole loose target set WITHOUT
- * removing anything (the dry-run column of the Layer 3 cleanup). G0 (`planEventPack`)
- * is the ENTRY check only — it decides cleanup is applicable; the returned
- * `relationship` AND the per-file verdicts are derived from a SUBSEQUENT re-read of
- * the loose set + pack, so the dry-run is self-consistent with its own enumeration
- * even if the loose set changed since G0. NO unlink, no lock — this is read-only.
+ * The cleanup-ready state shared by the dry-run (`planLooseCleanup`) and the
+ * destructive orchestrator: a verified covering pack bound to the snapshot, the gate
+ * `ctx`, the loose `target` basenames, and the RE-DERIVED relationship. Non-`ready`
+ * verdicts mirror the truth table's pre-cleanup cells (no loose to remove yet).
  */
-export async function planLooseCleanup(
+export type PreparedLooseCleanup =
+  | { kind: "ineligible"; block: EventPackBlock }
+  | { kind: "noop_no_events" }
+  | { kind: "needs_pack_write" }
+  | { kind: "already_clean" }
+  | {
+      kind: "ready";
+      relationship: "equal" | "strict_subset";
+      /** The delete-time gate context, built from the verified + re-bound pack. */
+      ctx: DeleteGateContext;
+      /** The cleanup target loose basenames (the set the pack covers). */
+      target: string[];
+    };
+
+/**
+ * Build the cleanup-ready state for a phase: G0 (`planEventPack`) ENTRY check → re-read
+ * the snapshot + pack (Tier-2 re-bind) → ctx + target + a RE-DERIVED relationship.
+ * Shared by the dry-run and the destructive orchestrator so both scope identically.
+ * The relationship is derived from the re-read (NOT G0's stale value), so a loose-set
+ * change between G0 and the re-read cannot make the result lie. NO unlink.
+ *
+ * CALLER NOTE: the destructive orchestrator calls this UNDER THE WRITE LOCK so the
+ * re-read pack/snapshot cannot change under it; the dry-run calls it lock-free (a
+ * concurrent change only yields a stale verdict — re-run to refresh).
+ */
+export async function prepareLooseCleanup(
   cwd: string,
   phaseId: string,
-  hooks: PlanLooseCleanupHooks = {},
-): Promise<LooseCleanupDryRun> {
+  hooks: PrepareLooseCleanupHooks = {},
+): Promise<PreparedLooseCleanup> {
   // G0 — ENTRY SIGNAL ONLY: a covering pack must exist (any loose_relationship). The
-  // final verdict is RE-DERIVED from the re-read below, NOT from G0's snapshot — so
-  // a loose-set change between G0 and the re-read cannot make the result lie.
+  // relationship is RE-DERIVED from the re-read below, NOT from G0's snapshot — so a
+  // loose-set change between G0 and the re-read cannot make the result lie.
   const plan = await planEventPack(cwd, phaseId);
   if (plan.kind === "ineligible") return { kind: "ineligible", block: plan.block };
   if (plan.kind === "noop_no_events") return { kind: "noop_no_events" };
@@ -370,21 +393,18 @@ export async function planLooseCleanup(
   // this read is caught per-file by the gate (G3a/G3b/G4). (A broken LOOSE file — of
   // this OR another phase — makes G0's `planEventPack` throw first, the same as
   // Layer 2; tolerating an out-of-scope broken loose file is the reconciliation
-  // layer's job (Layer 3b-2b-2), not this dry-run's.)
+  // layer's job, not this prepare's.)
   const sources = await readPackSources(cwd, "lenient");
-  const target = sources.looseFiles.filter((f) => snapshotTaskIds.has(f.event.task_id));
-  const looseEventsById = new Map(target.map((f) => [f.id, f] as const));
+  const targetFiles = sources.looseFiles.filter((f) => snapshotTaskIds.has(f.event.task_id));
+  const looseEventsById = new Map(targetFiles.map((f) => [f.id, f] as const));
 
   // Load the pack for the gate ctx and RE-BIND it (Tier-1 + Tier-2) against the
   // snapshot. NOTE this is a SECOND read of the pack (G0's `planEventPack` already
   // validated it), so re-checking Tier-1 ALONE is not enough: a concurrent swap to a
-  // Tier-1-valid but Tier-2-UNBOUND pack would feed the gate a bogus id-set / binding
-  // and the dry-run could report a file as unlinkable against an unbound pack. So
-  // re-run the full snapshot binding and report `pack_invalid` if it fails. (Dry-run
-  // only — for a read-only run a swap at worst yields a stale verdict; re-run to
-  // refresh. The DESTRUCTIVE loop (Layer 3b-2b-2) MUST instead build the gate ctx
-  // from the SAME pack its G0 re-plan verified UNDER THE WRITE LOCK, never a second
-  // read.)
+  // Tier-1-valid but Tier-2-UNBOUND pack would feed the gate a bogus id-set / binding.
+  // So re-run the full snapshot binding and report `pack_invalid` if it fails. (Under
+  // the orchestrator's write lock no swap can happen; lock-free dry-run only risks a
+  // stale verdict — re-run to refresh.)
   const packPath = eventPackPath(cwd, phaseId);
   let packIds: Set<string>;
   let packSnapshotSha256: string;
@@ -406,14 +426,12 @@ export async function planLooseCleanup(
 
   // RE-DERIVE the loose↔pack relationship from the RE-READ target + pack — never
   // G0's `loose_relationship`, which can be stale (a loose file may have vanished or
-  // appeared since G0). This keeps the returned verdict self-consistent with what
-  // this run actually enumerated: G0 `equal` + a vanished loose ⇒ `strict_subset`
-  // here; all loose gone ⇒ `already_clean` (not a `ready`/`equal` with no files).
-  // The Tier-2 re-bind above already rejected any re-read loose id not in the pack as
-  // `pack_invalid`, so `diverged` is unreachable here — kept as a defensive,
-  // fail-closed guard reported as `pack_invalid` to match the re-bind / planEventPack.
+  // appeared since G0). G0 `equal` + a vanished loose ⇒ `strict_subset` here; all
+  // loose gone ⇒ `already_clean`. The Tier-2 re-bind above already rejected any
+  // re-read loose id not in the pack as `pack_invalid`, so `diverged` is unreachable
+  // here — kept as a defensive, fail-closed guard reported as `pack_invalid`.
   const currentRelationship = classifyLoosePackRelationship(
-    new Set(target.map((f) => f.id)),
+    new Set(targetFiles.map((f) => f.id)),
     packIds,
   );
   if (currentRelationship === "empty") return { kind: "already_clean" };
@@ -424,34 +442,55 @@ export async function planLooseCleanup(
     };
   }
 
-  const ctx: DeleteGateContext = {
-    snapshotTaskIds,
-    packIds,
-    packSnapshotSha256,
-    snapshotPath: phaseSnapshotPath(cwd, phaseId),
+  return {
+    kind: "ready",
+    relationship: currentRelationship,
+    ctx: {
+      snapshotTaskIds,
+      packIds,
+      packSnapshotSha256,
+      snapshotPath: phaseSnapshotPath(cwd, phaseId),
+    },
+    target: targetFiles.map((f) => f.file),
   };
+}
+
+/**
+ * Evaluate the delete-time gate across a phase's whole loose target set WITHOUT
+ * removing anything (the dry-run column of the Layer 3 cleanup). Delegates to
+ * `prepareLooseCleanup` for the shared cleanup-ready state, then runs the per-file
+ * gate over the target. NO unlink, no lock — read-only.
+ */
+export async function planLooseCleanup(
+  cwd: string,
+  phaseId: string,
+  hooks: PrepareLooseCleanupHooks = {},
+): Promise<LooseCleanupDryRun> {
+  const prep = await prepareLooseCleanup(cwd, phaseId, hooks);
+  if (prep.kind !== "ready") return prep;
+  const { relationship, ctx, target } = prep;
 
   const unlinkable: string[] = [];
   const vanished: string[] = [];
   const skipped: LooseCleanupSkip[] = [];
   const aborts: LooseCleanupAbort[] = [];
-  for (const f of target) {
-    const verdict = await evaluateDeleteGate(cwd, f.file, ctx);
+  for (const file of target) {
+    const verdict = await evaluateDeleteGate(cwd, file, ctx);
     switch (verdict.disposition) {
       case "unlink":
-        unlinkable.push(f.file);
+        unlinkable.push(file);
         break;
       case "vanished":
-        vanished.push(f.file);
+        vanished.push(file);
         break;
       case "skip":
-        skipped.push({ path: looseEventRelPath(f.file), reason: verdict.reason });
+        skipped.push({ path: looseEventRelPath(file), reason: verdict.reason });
         break;
       case "abort":
-        aborts.push({ path: looseEventRelPath(f.file), reason: verdict.reason, detail: verdict.detail });
+        aborts.push({ path: looseEventRelPath(file), reason: verdict.reason, detail: verdict.detail });
         break;
     }
   }
 
-  return { kind: "ready", relationship: currentRelationship, unlinkable, skipped, vanished, aborts };
+  return { kind: "ready", relationship, unlinkable, skipped, vanished, aborts };
 }
