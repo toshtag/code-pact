@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "phase_id": "P22",
+  "phase_name": "Adapter schema v2 — investigated, cancelled (no shippable scope)",
+  "original_path": "design/phases/P22-adapter-schema-v2.yaml",
+  "phase_status": "cancelled",
+  "weight": 10,
+  "snapshotted_at": "2026-06-14T14:10:08.837Z",
+  "source_sha256": "f270b5ce9fb03383e76b725c05115537c5af772a3717f354d54f00935d0ad9df",
+  "path_sha256": "eec92adf4bdd40734848691b90a87b89de0c38b0d6f69ffc5edd89854746a6bd",
+  "tasks": [
+    {
+      "id": "P22-T0",
+      "status": "cancelled",
+      "terminal_evidence": {
+        "kind": "design_status",
+        "observed_status": "cancelled",
+        "source_field": "tasks[].status"
+      }
+    }
+  ]
+}
