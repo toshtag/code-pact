@@ -37,6 +37,7 @@ describe("reconcileSurvivors — R0–R5 post-run classification (NO unlink)", (
     expect(r.terminal).toBeNull();
     expect(r.cleanup_remaining_loose).toBe(0);
     expect(r.skipped).toEqual([]);
+    expect(r.vanished_count).toBe(0);
     expect(r.advisories).toEqual([]);
   });
 
@@ -127,6 +128,58 @@ describe("reconcileSurvivors — R0–R5 post-run classification (NO unlink)", (
     expect(r.terminal).toBe("STATE_COMPACT_CLEANUP_FAILED");
     expect(r.cleanup_remaining_loose).toBe(1);
     expect(r.advisories).toEqual([]);
+  });
+
+  it("vanished during reconciliation (deleted after readdir, before the content read) → counted in vanished_count, NOT a survivor", async () => {
+    const { file, id } = await seed("P1-T1", "2026-06-01T00:00:00.000Z");
+    const r = await reconcileSurvivors(
+      cwd,
+      { target: [file], packIds: new Set([id]), snapshotTaskIds: SNAP, loopSkipped: [] },
+      { afterReaddir: async () => rm(join(eventsDir(cwd), file)) },
+    );
+    expect(r.terminal).toBeNull();
+    expect(r.cleanup_remaining_loose).toBe(0); // not a present survivor
+    expect(r.skipped).toEqual([]);
+    expect(r.vanished_count).toBe(1); // but the vanish IS observed for the public count
+  });
+
+  it("R5: a broken (unparseable) event file with NO filename/pack/skip tie → advisory, not counted", async () => {
+    const name = `20260601T000000000Z-${"e".repeat(64)}.yaml`;
+    await writeFile(join(eventsDir(cwd), name), "{ not: valid :::", "utf8");
+    const r = await reconcileSurvivors(cwd, {
+      target: [],
+      packIds: new Set(), // filename id not in the pack
+      snapshotTaskIds: SNAP, // and its task can't be read anyway
+      loopSkipped: [],
+    });
+    expect(r.terminal).toBeNull();
+    expect(r.cleanup_remaining_loose).toBe(0); // another phase's / stray broken file
+    expect(r.skipped).toEqual([]);
+    expect(r.vanished_count).toBe(0);
+    expect(r.advisories).toEqual([
+      { code: "unclassified_loose_after_cleanup", path: looseEventRelPath(name) },
+    ]);
+  });
+
+  it("R1.1 via the disk adapter: a swapped body (filename id in pack, CONTENT id not in pack) → FAILED, not R1.0", async () => {
+    const filenameId = "f".repeat(64);
+    const name = `20260601T000000000Z-${filenameId}.yaml`;
+    // A PARSEABLE event whose content id ≠ the filename id (a swapped body). The
+    // content id is computable, so this is R1.1 (known, not-in-pack), NOT R1.0.
+    await writeFile(
+      join(eventsDir(cwd), name),
+      "task_id: P1-T1\nstatus: done\nat: 2026-06-01T00:00:00.000Z\nactor: agent\n",
+      "utf8",
+    );
+    const r = await reconcileSurvivors(cwd, {
+      target: [],
+      packIds: new Set([filenameId]), // filename id ties it in (R0 ii); content id is NOT in the pack
+      snapshotTaskIds: SNAP,
+      loopSkipped: [],
+    });
+    expect(r.terminal).toBe("STATE_COMPACT_CLEANUP_FAILED");
+    expect(r.block).toBe("pack_stale_after_cleanup");
+    expect(r.cleanup_remaining_loose).toBe(1);
   });
 
   it("FAILED dominates: one not-in-pack survivor + one in-pack skip → terminal FAILED, both counted", async () => {

@@ -112,6 +112,11 @@ export type ReconcileSurvivorsInput = {
   loopSkipped: readonly CleanupSkip[];
 };
 
+/** Test seam: `afterReaddir` fires AFTER the events-dir re-enumeration and BEFORE
+ *  any per-file content read, so a test can inject a vanish/change race and assert
+ *  reconciliation handles it (mirrors the other layers' hooks). */
+export type ReconcileSurvivorsHooks = { afterReaddir?: () => Promise<void> };
+
 /** The reconciliation verdict: the terminal disposition + the authoritative counts.
  *  The orchestrator combines this with the loop tallies (deleted / vanished) and
  *  the pack-write fact to build the public `CleanupOutcome`. */
@@ -125,6 +130,12 @@ export type LooseCleanupReconciliation = {
   skipped: CleanupSkip[];
   /** Count of present in-scope survivors after R1 (R2). Vanished files are excluded. */
   cleanup_remaining_loose: number;
+  /** Files this phase observed vanish DURING reconciliation (present at the
+   *  re-enumeration, ENOENT by the content read), scoped to this phase by a
+   *  filename/target/skip tie. NOT a survivor (not in `skipped` / remaining). The
+   *  orchestrator adds this to the unlink loop's own vanished tally for the public
+   *  `vanished_count`. */
+  vanished_count: number;
   /** Global out-of-scope anomalies (R5) — present on success too (empty when none). */
   advisories: CleanupAdvisory[];
 };
@@ -145,6 +156,7 @@ export type LooseCleanupReconciliation = {
 export async function reconcileSurvivors(
   cwd: string,
   input: ReconcileSurvivorsInput,
+  hooks: ReconcileSurvivorsHooks = {},
 ): Promise<LooseCleanupReconciliation> {
   const { target, packIds, snapshotTaskIds, loopSkipped } = input;
   // R0 (i) matches on BASENAME (`readdir` yields basenames). Normalize each target
@@ -165,24 +177,38 @@ export async function reconcileSurvivors(
 
   const verdicts: SurvivorVerdict[] = [];
   const advisories: CleanupAdvisory[] = [];
+  let vanishedCount = 0;
+
+  if (hooks.afterReaddir) await hooks.afterReaddir();
 
   for (const name of [...names].sort()) {
     const parsedName = parseEventFileName(name);
     if (!parsedName) continue; // not an event-shaped file — not a loose event at all
 
-    const survivor = await readSurvivorContent(join(dir, name));
-    if (survivor === "gone") continue; // vanished since the re-enumeration — not present
-
     const relPath = looseEventRelPath(name);
     const existingSkipReason: CleanupSkipReason | null = skipByPath.get(relPath) ?? null;
-
-    // R0 — in-scope for THIS phase's cleanup? (the union; none of (i)/(ii)/(iv) need
-    // the content, so an unreadable file with a pack/target/skip tie is still scoped).
-    const inScope =
+    // FILENAME-only R0 ties (i)/(ii)/(iv) — they need neither the content nor the
+    // task_id, so they hold even for a file that has since vanished or gone unreadable.
+    const filenameScoped =
       targetSet.has(name) || // (i) was a cleanup target
       packIds.has(parsedName.id) || // (ii) filename id is in the verified pack
-      (survivor.taskId !== null && snapshotTaskIds.has(survivor.taskId)) || // (iii)
       existingSkipReason !== null; // (iv) carries a loop skip record
+
+    const survivor = await readSurvivorContent(join(dir, name));
+    if (survivor === "gone") {
+      // Vanished between the re-enumeration and the content read. NOT a present
+      // survivor (so never in `skipped` / remaining), but if a filename/target/skip
+      // tie makes it THIS phase's, it IS a vanish this phase observed — count it so
+      // the orchestrator's public `vanished_count` is accurate. Its task_id is
+      // unreadable, so the snapshot-membership tie (iii) cannot apply here.
+      if (filenameScoped) vanishedCount += 1;
+      continue;
+    }
+
+    // R0 — in-scope for THIS phase: a filename tie, OR the content's task ∈ snapshot
+    // (iii). (i)/(ii)/(iv) hold without the content; (iii) needs the parsed task_id.
+    const inScope =
+      filenameScoped || (survivor.taskId !== null && snapshotTaskIds.has(survivor.taskId));
 
     if (!inScope) {
       // R5 — an event-looking file no phase cleanup owns. Surface it globally; never
@@ -211,6 +237,7 @@ export async function reconcileSurvivors(
     skipped: agg.skipped,
     // R2 — present in-scope survivors only; vanished/out-of-scope excluded.
     cleanup_remaining_loose: verdicts.length,
+    vanished_count: vanishedCount,
     advisories,
   };
 }
