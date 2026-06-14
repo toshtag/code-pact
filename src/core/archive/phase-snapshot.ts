@@ -22,9 +22,11 @@ import { phaseSnapshotPath, sha256Hex } from "./paths.ts";
 // Phase snapshot writer (record layer — NO CLI, NO reader changes).
 //
 // Pure `.code-pact/state` writes: this module never deletes a design file,
-// never edits the roadmap, never rewrites a doc link. Writing a snapshot does
-// NOT make hand deletion safe until the reader layers land — the record exists
-// so those later layers have an authority to resolve against.
+// never edits the roadmap, never rewrites a doc link. The reader / resolver
+// layers that make a hand-deleted phase safe to resolve are shipped
+// (`resolveMissingPhaseRef` et al.); this producer itself now uses that resolver
+// to tolerate an ALREADY-archived sibling phase while scanning the active graph
+// (see the `activePhases` loop) — one shared tolerance on every phase-read path.
 //
 // LIVE DESIGN FILE WINS: while the phase YAML exists it is the truth; the
 // record is fallback authority only once the file is gone. Hence the locked

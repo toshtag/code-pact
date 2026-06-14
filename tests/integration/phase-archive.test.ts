@@ -338,4 +338,42 @@ ${TASK_FIELDS}
     // Control plane green with BOTH phases archived (resolved from snapshots).
     expect(json(run(["validate", "--json"])).ok).toBe(true);
   });
+
+  it("a live target task-id that collides with an ARCHIVED sibling → duplicate_task_id, fail-closed", async () => {
+    await scaffoldAB();
+    // Archive PA cleanly (PA-T1 vs PB-T1 — no collision at this point).
+    expect(run(["phase", "archive", "PA", "--write", "--json"]).code).toBe(0);
+    // Now give PB a SECOND task whose id collides with archived PA's task (PA-T1).
+    await writeFile(
+      join(tmpDir, "design", "phases", "PB.yaml"),
+      donePhase("PB") + `  - id: PA-T1\n    type: feature\n${TASK_FIELDS}\n    status: done\n`,
+      "utf8",
+    );
+    // Archiving PB must be REFUSED: the duplicate-task-id scan sees PB's live PA-T1 AND
+    // archived PA's PA-T1 (resolved from its snapshot), so the graph is ambiguous — a
+    // snapshot must never be minted from it. This pins the fix's central safety claim:
+    // an archived sibling's task-ids still participate in the collision scan.
+    const r = run(["phase", "archive", "PB", "--json"]);
+    expect(r.code).toBe(2);
+    const body = json(r);
+    expect(body.error?.code).toBe("PHASE_ARCHIVE_INELIGIBLE");
+    const blocks = (body.data?.blocks ?? []) as { kind: string; task_id?: string }[];
+    expect(blocks.some((b) => b.kind === "duplicate_task_id" && b.task_id === "PA-T1")).toBe(true);
+    // Fail-closed: nothing written for PB.
+    expect(await fileExists(join(tmpDir, ".code-pact", "state", "archive", "phases", "PB.json"))).toBe(false);
+  });
+
+  it("a sibling YAML missing with NO snapshot → fail-closed (not tolerated), nothing mutated", async () => {
+    await scaffoldAB();
+    // Delete PA's YAML BY HAND without archiving — there is no snapshot for it.
+    await rm(join(tmpDir, "design", "phases", "PA.yaml"));
+    // Archiving PB must fail closed: the sibling scan hits PA's missing YAML and
+    // resolveMissingPhaseRef finds no valid snapshot, so it does NOT tolerate — a
+    // genuinely-broken sibling ref is never silently skipped.
+    const r = run(["phase", "archive", "PB", "--json"]);
+    expect(r.code).not.toBe(0);
+    // Nothing mutated: PB stays live, no PB snapshot written.
+    expect(await fileExists(join(tmpDir, "design", "phases", "PB.yaml"))).toBe(true);
+    expect(await fileExists(join(tmpDir, ".code-pact", "state", "archive", "phases", "PB.json"))).toBe(false);
+  });
 });
