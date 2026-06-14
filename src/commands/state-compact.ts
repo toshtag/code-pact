@@ -1,31 +1,34 @@
 import type { EventPackBlock } from "../core/archive/event-pack.ts";
+import { planEventPack } from "../core/archive/event-pack.ts";
+import type { CoveredLooseRelationship, CleanupOutcome } from "../core/archive/event-pack-cleanup.ts";
 import {
-  planEventPack,
-  applyEventPackPlan,
-  type ApplyEventPackHooks,
-} from "../core/archive/event-pack.ts";
-import type { CoveredLooseRelationship } from "../core/archive/event-pack-cleanup.ts";
+  runEventPackCleanup,
+  type RunEventPackCleanupHooks,
+} from "../core/archive/event-pack-cleanup-run.ts";
 
 // ---------------------------------------------------------------------------
-// `state compact <phase-id>` runner (Layer 2 — write pack + readback verify,
-// NO loose-event unlink). The result naming is reality-matching: after `--write`
-// the pack is on disk but the loose files REMAIN, so it is `packed` /
-// `already_packed` with `cleanup_pending` + a `next_action` naming Layer 3 —
-// NEVER `compacted` (which would read as "files removed, done").
+// `state compact <phase-id>` runner.
+//   - DRY-RUN (no `--write`): a no-mutation `planEventPack` verdict (`would_pack` /
+//     `would_already_packed` / `would_noop_no_events` / `ineligible`). (The Layer-3
+//     dry-run naming migration — `would_cleanup_loose` / `would_resume_cleanup` — is a
+//     follow-up; the dry-run still reports cleanup as PENDING, consistent with the
+//     `--write` path now performing it.)
+//   - `--write` (Layer 3): writes the pack if needed AND removes the gated loose files,
+//     returning the public `CleanupOutcome` (`cleaned` / `already_cleaned` / `noop` /
+//     `ineligible` / the three failure codes). This is the FIRST path that actually
+//     deletes loose event files. The caller (`cmdStateCompact`) holds the write lock.
 // ---------------------------------------------------------------------------
-
-const LOOSE_NOTE =
-  "Layer 3 of state compact will remove the loose event files after verified pack coverage.";
 
 export type StateCompactOptions = {
   cwd: string;
   phaseId: string;
   write?: boolean;
-  /** Test seam, threaded to applyEventPackPlan. */
-  hooks?: ApplyEventPackHooks;
+  /** Test seam, threaded to `runEventPackCleanup` on the `--write` path. */
+  hooks?: RunEventPackCleanupHooks;
 };
 
 export type StateCompactResult =
+  // --- dry-run verdicts (no disk mutation) ---
   | {
       kind: "would_pack";
       phase_id: string;
@@ -35,16 +38,6 @@ export type StateCompactResult =
       cleanup_pending: true;
     }
   | {
-      kind: "packed";
-      phase_id: string;
-      pack_path: string;
-      packed_event_count: number;
-      loose_remaining_count: number;
-      loose_deleted_count: 0;
-      cleanup_pending: true;
-      next_action: string;
-    }
-  | {
       kind: "would_already_packed";
       phase_id: string;
       pack_path: string;
@@ -52,84 +45,48 @@ export type StateCompactResult =
       cleanup_pending: boolean;
       loose_relationship: CoveredLooseRelationship;
     }
-  | {
-      kind: "already_packed";
-      phase_id: string;
-      pack_path: string;
-      loose_remaining_count: number;
-      cleanup_pending: boolean;
-      loose_relationship: CoveredLooseRelationship;
-    }
   | { kind: "would_noop_no_events"; phase_id: string }
-  | { kind: "noop_no_events"; phase_id: string }
-  | { kind: "ineligible"; phase_id: string; block: EventPackBlock };
+  | { kind: "ineligible"; phase_id: string; block: EventPackBlock }
+  // --- `--write` result: the public Layer-3 cleanup outcome ---
+  | { kind: "cleanup_outcome"; phase_id: string; outcome: CleanupOutcome };
 
 export async function runStateCompact(opts: StateCompactOptions): Promise<StateCompactResult> {
   const { cwd, phaseId, write = false } = opts;
-  const plan = await planEventPack(cwd, phaseId);
 
+  if (write) {
+    // Layer 3: write the pack if needed, then unlink the gated loose files. The caller
+    // holds the write lock. `runEventPackCleanup` returns a structured `CleanupOutcome`
+    // — it does NOT throw `EventPackWriteError` (it maps a pack-step failure to a
+    // `STATE_COMPACT_WRITE_FAILED` outcome itself).
+    const outcome = await runEventPackCleanup(cwd, phaseId, opts.hooks);
+    return { kind: "cleanup_outcome", phase_id: phaseId, outcome };
+  }
+
+  // DRY-RUN: the Layer-2 `planEventPack` verdict, no disk mutation.
+  const plan = await planEventPack(cwd, phaseId);
   if (plan.kind === "ineligible") {
     return { kind: "ineligible", phase_id: phaseId, block: plan.block };
   }
   if (plan.kind === "noop_no_events") {
-    return write
-      ? { kind: "noop_no_events", phase_id: phaseId }
-      : { kind: "would_noop_no_events", phase_id: phaseId };
+    return { kind: "would_noop_no_events", phase_id: phaseId };
   }
   if (plan.kind === "noop_already_packed") {
-    const shape = {
+    return {
+      kind: "would_already_packed",
       phase_id: phaseId,
       pack_path: plan.packPath,
       loose_remaining_count: plan.loose_remaining_count,
       cleanup_pending: plan.cleanup_pending,
       loose_relationship: plan.loose_relationship,
-    } as const;
-    return write
-      ? { kind: "already_packed", ...shape }
-      : { kind: "would_already_packed", ...shape };
+    };
   }
-
   // plan.kind === "write"
-  if (!write) {
-    return {
-      kind: "would_pack",
-      phase_id: phaseId,
-      pack_path: plan.packPath,
-      would_pack_event_count: plan.pack.events.length,
-      would_leave_loose_count: plan.loose_count,
-      cleanup_pending: true,
-    };
-  }
-
-  // --write: apply under the caller's lock. May throw EventPackWriteError (the
-  // CLI maps it to STATE_COMPACT_WRITE_FAILED). The re-plan inside apply may
-  // also reclassify (concurrent write → already_packed).
-  const outcome = await applyEventPackPlan(cwd, plan, opts.hooks);
-  if (outcome.kind === "ineligible") {
-    return { kind: "ineligible", phase_id: phaseId, block: outcome.block };
-  }
-  if (outcome.kind === "noop_no_events") {
-    return { kind: "noop_no_events", phase_id: phaseId };
-  }
-  if (outcome.kind === "noop_already_packed") {
-    return {
-      kind: "already_packed",
-      phase_id: phaseId,
-      pack_path: outcome.packPath,
-      loose_remaining_count: outcome.loose_remaining_count,
-      cleanup_pending: outcome.cleanup_pending,
-      loose_relationship: outcome.loose_relationship,
-    };
-  }
-  // outcome.kind === "written"
   return {
-    kind: "packed",
+    kind: "would_pack",
     phase_id: phaseId,
-    pack_path: outcome.packPath,
-    packed_event_count: outcome.pack.events.length,
-    loose_remaining_count: outcome.loose_count,
-    loose_deleted_count: 0,
+    pack_path: plan.packPath,
+    would_pack_event_count: plan.pack.events.length,
+    would_leave_loose_count: plan.loose_count,
     cleanup_pending: true,
-    next_action: LOOSE_NOTE,
   };
 }
