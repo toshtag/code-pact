@@ -247,7 +247,7 @@ describe("CleanupOutcome — every terminal-table result is representable, impos
       loose_deleted_count: 0, cleanup_remaining_loose: 2, vanished_count: 0,
       skipped: [], advisories: [],
     });
-    // @ts-expect-error verify_pack failure must imply partial_applied:true (pack on disk)
+    // @ts-expect-error verify_pack failure must imply partial_applied:true (pack-step mutation happened)
     out({
       ok: false, code: "STATE_COMPACT_WRITE_FAILED", phase: "verify_pack",
       cleanup_pending: true, partial_applied: false, cleanup_started: false,
