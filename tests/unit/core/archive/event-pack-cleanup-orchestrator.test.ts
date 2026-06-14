@@ -323,4 +323,35 @@ describe("runEventPackCleanup — end-to-end truth table (REAL unlink)", () => {
     expect(r.vanished_count).toBe(2); // the pre-write loose count, all vanished
     await stat(eventPackPath(cwd, "P1")); // the pack was written
   });
+
+  it("cell 10 PARTIAL vanish after the pack write → cleaned, deleted:1, vanished:1 (the pre-loop vanish is counted)", async () => {
+    const events = await scaffoldArchivedP1(); // no pack — cell 10
+    const r = await runEventPackCleanup(cwd, "P1", {
+      // After the pack write, ONE of two loose vanishes before the re-prepare; the
+      // remaining one is unlinked by the loop. The vanished one must still be counted.
+      afterWrite: async () => {
+        await rm(join(eventsDir(cwd), looseFileOf(events, "started")));
+      },
+    });
+    expect(r).toMatchObject({ ok: true, kind: "cleaned", partial_applied: true, loose_deleted_count: 1, cleanup_remaining_loose: 0 });
+    expect(r.vanished_count).toBe(1); // the pre-loop vanish, not dropped
+    expect(await exists(looseFileOf(events, "done"))).toBe(false); // the remnant was unlinked
+  });
+
+  it("cell 10 pack written, then the pre-cleanup state breaks → WRITE_FAILED(verify_pack), partial_applied:true, no unlink (not ineligible/partial:false)", async () => {
+    const events = await scaffoldArchivedP1(); // no pack — cell 10
+    const r = await runEventPackCleanup(cwd, "P1", {
+      // The pack write + verify succeed; then the pack is removed before the
+      // re-prepare. The pack WAS our mutation, so this must NOT be an ineligible with
+      // partial_applied:false.
+      afterWrite: async () => {
+        await rm(eventPackPath(cwd, "P1"));
+      },
+    });
+    expect(r).toMatchObject({ ok: false, code: "STATE_COMPACT_WRITE_FAILED", cleanup_started: false });
+    if (r.ok || r.code !== "STATE_COMPACT_WRITE_FAILED") return;
+    expect(r.phase).toBe("verify_pack");
+    expect(r.partial_applied).toBe(true);
+    for (const e of events) expect(await exists(eventFileName(e))).toBe(true); // no unlink
+  });
 });
