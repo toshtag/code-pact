@@ -35,7 +35,7 @@ import {
   validateEventFileContent,
 } from "../progress/events-io.ts";
 import { eventPackPath, phaseSnapshotPath, sha256Hex } from "./paths.ts";
-import type { CleanupSkipReason } from "./event-pack-cleanup.ts";
+import { classifyLoosePackRelationship, type CleanupSkipReason } from "./event-pack-cleanup.ts";
 
 /** Project-relative path of a loose event file (matches CleanupSkip.path). */
 export function looseEventRelPath(file: string): string {
@@ -51,9 +51,9 @@ function isEnoent(err: unknown): boolean {
 const O_NOFOLLOW_READONLY = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0);
 
 /**
- * Read a loose event file as a REGULAR file, never following a symlink at the final
- * path component (the RFC's `readRegularEventFileNoSymlink` contract), on EVERY
- * platform — not only where `O_NOFOLLOW` exists. Three layers:
+ * Read a loose event file as a REGULAR file, never reading or accepting a symlink's
+ * target at the final path component (the RFC's `readRegularEventFileNoSymlink`
+ * contract), on EVERY platform — not only where `O_NOFOLLOW` exists. Three layers:
  *   (1) `lstat` first — it never follows a symlink, so a symlink/dir/special is
  *       rejected here on all platforms; `ENOENT` → vanished (already gone).
  *   (2) open with `O_NOFOLLOW` where the platform supports it — a symlink fails the
@@ -61,7 +61,9 @@ const O_NOFOLLOW_READONLY = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0);
  *   (3) `fstat` the OPEN fd and require the SAME inode the `lstat` saw — so a symlink
  *       swapped in BETWEEN the lstat and the open (where, lacking `O_NOFOLLOW`, the
  *       open would follow it) resolves to a different inode and is rejected. This is
- *       the RFC's identity-check fallback; with (1) it never follows a symlink.
+ *       the RFC's identity-check fallback; with (1) a symlink's target is never read
+ *       or accepted on any platform (where O_NOFOLLOW is absent the open may briefly
+ *       open the target, but the inode check rejects it before any read).
  * Returns the body on success, or the gate verdict to emit on failure. Best-effort
  * per the RFC: the threat model is accidental corruption / honest concurrent
  * writers, not a hostile local filesystem racing the read.
@@ -309,24 +311,35 @@ export type LooseCleanupDryRun =
     };
 
 /**
+ * Options for `planLooseCleanup`. `afterPlan` is a TEST SEAM (mirrors
+ * `ApplyEventPackHooks`): it fires AFTER the G0 `planEventPack` re-check and BEFORE
+ * the loose/pack re-read, so a test can mutate the loose set in between and assert
+ * the dry-run stays self-consistent with what it RE-READ — not G0's stale view.
+ */
+export type PlanLooseCleanupHooks = { afterPlan?: () => Promise<void> };
+
+/**
  * Evaluate the delete-time gate across a phase's whole loose target set WITHOUT
- * removing anything (the dry-run column of the Layer 3 cleanup). G0 is the
- * `planEventPack` re-check; the target set is the loose files whose task_id is in
- * the bound snapshot (the same set Layer 2 packs). Each target file is run through
- * `evaluateDeleteGate`. NO unlink, no lock — this is read-only.
+ * removing anything (the dry-run column of the Layer 3 cleanup). G0 (`planEventPack`)
+ * is the ENTRY check only — it decides cleanup is applicable; the returned
+ * `relationship` AND the per-file verdicts are derived from a SUBSEQUENT re-read of
+ * the loose set + pack, so the dry-run is self-consistent with its own enumeration
+ * even if the loose set changed since G0. NO unlink, no lock — this is read-only.
  */
 export async function planLooseCleanup(
   cwd: string,
   phaseId: string,
+  hooks: PlanLooseCleanupHooks = {},
 ): Promise<LooseCleanupDryRun> {
-  // G0 — the plan must still describe a valid, bound pack with loose to clean.
+  // G0 — ENTRY SIGNAL ONLY: a covering pack must exist (any loose_relationship). The
+  // final verdict is RE-DERIVED from the re-read below, NOT from G0's snapshot — so
+  // a loose-set change between G0 and the re-read cannot make the result lie.
   const plan = await planEventPack(cwd, phaseId);
   if (plan.kind === "ineligible") return { kind: "ineligible", block: plan.block };
   if (plan.kind === "noop_no_events") return { kind: "noop_no_events" };
   if (plan.kind === "write") return { kind: "needs_pack_write" };
-  // plan.kind === "noop_already_packed"
-  if (plan.loose_relationship === "empty") return { kind: "already_clean" };
-  const relationship = plan.loose_relationship; // "equal" | "strict_subset"
+  // plan.kind === "noop_already_packed" — proceed to the authoritative re-read.
+  if (hooks.afterPlan) await hooks.afterPlan();
 
   // Re-load the snapshot (task set + path for G8) and the verified pack (ids +
   // snapshot_sha256). The plan just proved both valid; a race that broke them since
@@ -384,6 +397,26 @@ export async function planLooseCleanup(
     return { kind: "ineligible", block: { kind: "pack_invalid", detail: (err as Error).message } };
   }
 
+  // RE-DERIVE the loose↔pack relationship from the RE-READ target + pack — never
+  // G0's `loose_relationship`, which can be stale (a loose file may have vanished or
+  // appeared since G0). This keeps the returned verdict self-consistent with what
+  // this run actually enumerated: G0 `equal` + a vanished loose ⇒ `strict_subset`
+  // here; all loose gone ⇒ `already_clean` (not a `ready`/`equal` with no files).
+  // The Tier-2 re-bind above already rejected any re-read loose id not in the pack as
+  // `pack_invalid`, so `diverged` is unreachable here — kept as a defensive,
+  // fail-closed guard reported as `pack_invalid` to match the re-bind / planEventPack.
+  const currentRelationship = classifyLoosePackRelationship(
+    new Set(target.map((f) => f.id)),
+    packIds,
+  );
+  if (currentRelationship === "empty") return { kind: "already_clean" };
+  if (currentRelationship === "diverged") {
+    return {
+      kind: "ineligible",
+      block: { kind: "pack_invalid", detail: "re-read loose set diverged from the pack" },
+    };
+  }
+
   const ctx: DeleteGateContext = {
     snapshotTaskIds,
     packIds,
@@ -413,5 +446,5 @@ export async function planLooseCleanup(
     }
   }
 
-  return { kind: "ready", relationship, unlinkable, skipped, vanished, aborts };
+  return { kind: "ready", relationship: currentRelationship, unlinkable, skipped, vanished, aborts };
 }

@@ -332,4 +332,30 @@ describe("planLooseCleanup — dry-run over the loose target set (NO unlink)", (
     expect(r.aborts.every((a) => a.reason === "live_task_owner")).toBe(true);
     expect(r.aborts.map((a) => a.path)).toContain(looseEventRelPath(looseFileOf(events, "done")));
   });
+
+  it("self-consistent: G0 sees `equal` but one loose file vanishes before the re-read → result is strict_subset (re-read state wins, not G0)", async () => {
+    const { events } = await archivedWithPack();
+    // afterPlan fires AFTER G0 (which sees equal) and BEFORE the re-read; delete one
+    // loose file in between, so the re-read enumerates a strict subset. The returned
+    // relationship must reflect the re-read, not G0's stale `equal`.
+    const r = await planLooseCleanup(cwd, "P1", {
+      afterPlan: async () => {
+        await rm(join(eventsDir(cwd), looseFileOf(events, "started")));
+      },
+    });
+    expect(r.kind).toBe("ready");
+    if (r.kind !== "ready") return;
+    expect(r.relationship).toBe("strict_subset");
+    expect(r.unlinkable).toEqual([looseFileOf(events, "done")]);
+  });
+
+  it("self-consistent: G0 sees `equal` but ALL loose vanish before the re-read → already_clean (NOT ready/equal/unlinkable:[])", async () => {
+    const { events } = await archivedWithPack();
+    const r = await planLooseCleanup(cwd, "P1", {
+      afterPlan: async () => {
+        for (const e of events) await rm(join(eventsDir(cwd), eventFileName(e)));
+      },
+    });
+    expect(r.kind).toBe("already_clean");
+  });
 });
