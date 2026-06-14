@@ -87,11 +87,11 @@ async function scaffoldArchivedP1() {
 }
 
 describe("runStateCompact — dry-run", () => {
-  it("eligible phase → would_pack with counts + cleanup_pending, writes nothing", async () => {
+  it("eligible phase (no pack) → would_pack_and_cleanup with counts + cleanup_pending, writes nothing", async () => {
     await scaffoldArchivedP1();
     const r = await runStateCompact({ cwd, phaseId: "P1", write: false });
-    expect(r.kind).toBe("would_pack");
-    if (r.kind !== "would_pack") return;
+    expect(r.kind).toBe("would_pack_and_cleanup");
+    if (r.kind !== "would_pack_and_cleanup") return;
     expect(r.would_pack_event_count).toBe(2);
     expect(r.would_leave_loose_count).toBe(2);
     expect(r.cleanup_pending).toBe(true);
@@ -128,18 +128,41 @@ describe("runStateCompact — dry-run", () => {
     expect(await exists(eventPackPath(cwd, "P1"))).toBe(false); // fail closed — no pack
   });
 
-  it("dry-run: loose is a strict subset after a partial cleanup → would_already_packed, loose_relationship:strict_subset", async () => {
+  it("dry-run: loose is a strict subset after a partial cleanup → would_resume_cleanup (cell 14)", async () => {
     const events = await scaffoldArchivedP1();
     // Pack covers both events, loose remain; then a partial cleanup removed one.
     await writeEventPackFile(cwd, "P1", await buildValidEventPack(cwd, "P1", events));
     const started = events.find((e) => e.status === "started")!;
     await rm(join(cwd, ".code-pact", "state", "events", eventFileName(started)));
     const r = await runStateCompact({ cwd, phaseId: "P1", write: false });
-    expect(r.kind).toBe("would_already_packed");
-    if (r.kind !== "would_already_packed") return;
+    expect(r.kind).toBe("would_resume_cleanup");
+    if (r.kind !== "would_resume_cleanup") return;
     expect(r.cleanup_pending).toBe(true);
     expect(r.loose_remaining_count).toBe(1);
-    expect(r.loose_relationship).toBe("strict_subset");
+  });
+
+  it("dry-run: pack covers the FULL loose set (equal) → would_cleanup_loose (cell 12)", async () => {
+    const events = await scaffoldArchivedP1();
+    // Pack covers both events; all loose still on disk (no partial cleanup).
+    await writeEventPackFile(cwd, "P1", await buildValidEventPack(cwd, "P1", events));
+    const r = await runStateCompact({ cwd, phaseId: "P1", write: false });
+    expect(r.kind).toBe("would_cleanup_loose");
+    if (r.kind !== "would_cleanup_loose") return;
+    expect(r.cleanup_pending).toBe(true);
+    expect(r.loose_remaining_count).toBe(2);
+  });
+
+  it("dry-run: pack present, NO loose left (empty) → noop_already_cleaned (cell 11)", async () => {
+    const events = await scaffoldArchivedP1();
+    await writeEventPackFile(cwd, "P1", await buildValidEventPack(cwd, "P1", events));
+    // Remove every loose file by hand — the pack is the durable record.
+    for (const e of events) {
+      await rm(join(cwd, ".code-pact", "state", "events", eventFileName(e)));
+    }
+    const r = await runStateCompact({ cwd, phaseId: "P1", write: false });
+    expect(r.kind).toBe("noop_already_cleaned");
+    if (r.kind !== "noop_already_cleaned") return;
+    expect(r.cleanup_pending).toBe(false);
   });
 });
 
@@ -201,13 +224,19 @@ describe("runStateCompact — archived-phase lookup (does NOT die on PHASE_NOT_F
     // archived state. No design/phases/*.yaml has id P1, so the scan finds nothing.
     await scaffoldArchivedP1();
     const r = await runStateCompact({ cwd, phaseId: "P1", write: false });
-    expect(["would_pack", "would_already_packed", "would_noop_no_events"]).toContain(r.kind);
+    expect([
+      "would_pack_and_cleanup",
+      "would_cleanup_loose",
+      "would_resume_cleanup",
+      "noop_already_cleaned",
+      "noop_no_events",
+    ]).toContain(r.kind);
   });
 
-  it("empty roadmap + NO matching live YAML + snapshot present → would_pack", async () => {
+  it("empty roadmap + NO matching live YAML + snapshot present → would_pack_and_cleanup", async () => {
     await scaffoldArchivedP1(); // YAML deleted, roadmap empty, no live P1 YAML on disk
     const r = await runStateCompact({ cwd, phaseId: "P1", write: false });
-    expect(r.kind).toBe("would_pack");
+    expect(r.kind).toBe("would_pack_and_cleanup");
   });
 });
 

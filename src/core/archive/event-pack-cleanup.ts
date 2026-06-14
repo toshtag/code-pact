@@ -90,9 +90,8 @@ export type CleanupMutationProgress =
  *
  * This type is WIRED into `runStateCompact` / the `state compact --write` CLI: the
  * orchestrator returns it and `emitCleanupOutcome` maps every variant to the public
- * JSON/exit surface. (One naming follow-up remains: the dry-run verdict names
- * `would_cleanup_loose` / `would_resume_cleanup`; the `cleaned` / `already_cleaned`
- * result names ARE shipped.)
+ * JSON/exit surface. The dry-run verdicts now mirror this contract too
+ * (`would_cleanup_loose` / `would_resume_cleanup` / `noop_already_cleaned` / …).
  */
 export type CleanupOutcome =
   // --- success / no-op (ok: true) — success booleans are either FIXED or PAIRED by
@@ -280,9 +279,8 @@ export type CleanupOutcome =
 // AND divergence alike — to `pack_stale`.)
 //
 // This classifier itself is PURE — it never unlinks; the wired cleanup path
-// (`runEventPackCleanup` → `unlinkGatedLoose`) consumes its verdict. The dry-run
-// verdict-name migration (`would_cleanup_loose` / `would_resume_cleanup`) is the one
-// remaining follow-up; `cleaned` is already shipped. The relationship maps to a cell:
+// (`runEventPackCleanup` → `unlinkGatedLoose`) consumes its verdict, and the dry-run
+// maps the relationship to its RFC verdict name. The relationship maps to a cell:
 //
 //   empty         loose == ∅              → cell 11 (already cleaned, nothing to do)
 //   equal         loose id-set == pack    → cell 12 (clean the full set)

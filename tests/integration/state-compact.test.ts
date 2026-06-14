@@ -117,13 +117,13 @@ afterEach(async () => {
 });
 
 describe("state compact — dry-run (mutates nothing)", () => {
-  it("eligible → would_pack; no pack written, loose files untouched", async () => {
+  it("eligible → would_pack_and_cleanup; no pack written, loose files untouched", async () => {
     await scaffoldArchived();
     const before = await looseCount();
     expect(before).toBe(2);
     const r = run(["state", "compact", "P1", "--json"]);
     expect(r.code).toBe(0);
-    expect(json(r).data?.kind).toBe("would_pack");
+    expect(json(r).data?.kind).toBe("would_pack_and_cleanup");
     expect(await fileExists(PACK_PATH())).toBe(false); // dry-run wrote nothing
     expect(await looseCount()).toBe(before); // loose untouched
   });

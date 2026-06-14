@@ -63,16 +63,15 @@ function ineligibleDetail(phaseId: string, block: EventPackBlock): string {
 /** Human line for a DRY-RUN verdict (no disk mutation). */
 function dryRunHumanLine(phaseId: string, result: StateCompactResult): string {
   switch (result.kind) {
-    case "would_pack":
-      return `Would pack ${result.would_pack_event_count} event(s) for "${phaseId}" into ${result.pack_path}, then remove ${result.would_leave_loose_count} loose file(s) (run with --write).`;
-    case "would_already_packed":
-      if (!result.cleanup_pending) {
-        return `"${phaseId}" is already compacted (a pack covers it and no loose files remain).`;
-      }
-      return result.loose_relationship === "strict_subset"
-        ? `"${phaseId}" is already packed; a prior cleanup or manual removal left a partial loose set — --write would remove the remaining ${result.loose_remaining_count} loose file(s).`
-        : `"${phaseId}" is already packed; --write would remove ${result.loose_remaining_count} loose file(s).`;
-    case "would_noop_no_events":
+    case "would_pack_and_cleanup":
+      return `Would compact "${phaseId}": pack ${result.would_pack_event_count} event(s) into ${result.pack_path} and remove ${result.would_leave_loose_count} loose file(s) (run with --write).`;
+    case "would_cleanup_loose":
+      return `Would compact "${phaseId}": a pack already covers it — --write would remove ${result.loose_remaining_count} loose file(s).`;
+    case "would_resume_cleanup":
+      return `Would resume compacting "${phaseId}": a prior cleanup or manual removal left a partial loose set — --write would remove the remaining ${result.loose_remaining_count} loose file(s).`;
+    case "noop_already_cleaned":
+      return `"${phaseId}" is already compacted (a pack covers it and no loose files remain).`;
+    case "noop_no_events":
       return `No progress events found for archived phase "${phaseId}" — nothing to pack or clean.`;
     case "ineligible":
       return `Cannot compact "${phaseId}": ${ineligibleDetail(phaseId, result.block)}`;
