@@ -2,11 +2,12 @@
 // Event-pack compaction LAYER 3 — cleanup contract types + pure classifiers.
 //
 // This module holds the NON-DESTRUCTIVE half of Layer 3: the public result/
-// failure-contract types and the pure post-run reconciliation classifier. The
-// actual `unlink` loop and the delete-time ownership gate (G0–G8) that consume
-// these land in a later PR — nothing here removes a file. Pinning the contract
-// and the classification logic first lets the destructive code be reviewed
-// against a fixed, tested target.
+// failure-contract types and the pure post-run reconciliation classifier. Nothing
+// here removes a file — the destructive parts that CONSUME these types (the
+// delete-time gate `event-pack-cleanup-gate.ts`, the unlink loop + orchestrator
+// `event-pack-cleanup-run.ts`, the reconciliation `event-pack-cleanup-reconcile.ts`)
+// live in sibling modules. Pinning the contract + classification logic here lets the
+// destructive code be reviewed against a fixed, tested target.
 //
 // See design/decisions/event-pack-compaction-rfc.md — the truth table, the
 // delete-time ownership gate table, the R0–R5 reconciliation, and the failure
@@ -212,7 +213,16 @@ export type CleanupOutcome =
   | {
       ok: false;
       code: "STATE_COMPACT_WRITE_FAILED";
-      /** `verify_pack` failure: the pack IS on disk but failed readback. */
+      /**
+       * `verify_pack`: the pack STEP mutated the tree (`partial_applied:true`) and the
+       * cleanup never started. Two sources: (1) the Layer-2 readback failed — the pack
+       * IS on disk; (2) the orchestrator wrote+verified the pack, then the post-write
+       * pre-cleanup re-prepare failed (snapshot corrupted / a live phase reappeared /
+       * the pack was removed) — the pack may NO LONGER be present. So
+       * `partial_applied:true` means "a pack-step mutation happened this run", NOT
+       * "the pack is guaranteed to still be on disk"; a CLI `next_action` must not
+       * assume the pack can be inspected.
+       */
       phase: "verify_pack";
       cleanup_pending: true;
       partial_applied: true;

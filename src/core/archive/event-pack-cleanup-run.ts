@@ -259,10 +259,13 @@ function writeFailedOutcome(err: EventPackWriteError, looseRemaining: number): C
 }
 
 /** Pack write SUCCEEDED this run, then the pre-cleanup state broke BEFORE the unlink
- *  loop (snapshot corrupted / pack removed / a live phase reappeared at re-prepare).
- *  The pack IS on disk (partial_applied:true) and the cleanup never started, so the
- *  closest honest terminal is a `verify_pack` WRITE_FAILED — NOT an ineligible, which
- *  would falsely report partial_applied:false despite the pack write. */
+ *  loop (the post-write re-prepare returned ineligible / needs_pack_write, or threw:
+ *  snapshot corrupted, a live phase reappeared, the pack itself was removed). The pack
+ *  STEP mutated the tree this run (partial_applied:true) and the cleanup never started,
+ *  so the closest honest terminal is a `verify_pack` WRITE_FAILED — NOT an ineligible,
+ *  which would falsely report partial_applied:false despite the pack write. NOTE the
+ *  pack may NO LONGER be on disk here (e.g. removed before re-prepare), so partial:true
+ *  asserts a mutation happened, not that the pack is still present. */
 function writeFailedAfterPackBrokenOutcome(looseRemaining: number): CleanupOutcome {
   return {
     ok: false,
@@ -435,7 +438,17 @@ export async function runEventPackCleanup(
       packWrittenThisRun = outcome.kind === "written";
     }
     if (hooks.afterWrite) await hooks.afterWrite();
-    prep = await prepareLooseCleanup(cwd, phaseId, hooks.prepare);
+    // The re-prepare can THROW (e.g. G0's planEventPack reads a now-broken loose file).
+    // We already wrote the pack this run (a mutation), so return a STRUCTURED outcome
+    // (a verify_pack WRITE_FAILED) rather than leaking the exception — the caller must
+    // learn partial_applied:true. A throw with no prior write stays a throw (pre-mutation,
+    // Layer-2-consistent).
+    try {
+      prep = await prepareLooseCleanup(cwd, phaseId, hooks.prepare);
+    } catch (err) {
+      if (packWrittenThisRun) return writeFailedAfterPackBrokenOutcome(preWriteLooseCount);
+      throw err;
+    }
   }
 
   switch (prep.kind) {

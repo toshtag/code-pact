@@ -354,4 +354,21 @@ describe("runEventPackCleanup — end-to-end truth table (REAL unlink)", () => {
     expect(r.partial_applied).toBe(true);
     for (const e of events) expect(await exists(eventFileName(e))).toBe(true); // no unlink
   });
+
+  it("cell 10 pack written, then a loose file is CORRUPTED → re-prepare throws → WRITE_FAILED(verify_pack) (not an unhandled exception)", async () => {
+    const events = await scaffoldArchivedP1(); // no pack — cell 10
+    const r = await runEventPackCleanup(cwd, "P1", {
+      // Corrupt a loose file so the re-prepare's G0 (readEventFiles) THROWS. We already
+      // wrote the pack (a mutation), so this must return a structured WRITE_FAILED, not
+      // leak the exception.
+      afterWrite: async () => {
+        await writeFile(join(eventsDir(cwd), looseFileOf(events, "done")), "{ broken not an event", "utf8");
+      },
+    });
+    expect(r).toMatchObject({ ok: false, code: "STATE_COMPACT_WRITE_FAILED", cleanup_started: false });
+    if (r.ok || r.code !== "STATE_COMPACT_WRITE_FAILED") return;
+    expect(r.phase).toBe("verify_pack");
+    expect(r.partial_applied).toBe(true);
+    expect(await exists(looseFileOf(events, "started"))).toBe(true); // no unlink
+  });
 });
