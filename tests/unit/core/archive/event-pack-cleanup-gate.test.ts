@@ -134,6 +134,15 @@ describe("evaluateDeleteGate — per-file dispositions (NO unlink)", () => {
     expect(v).toEqual({ disposition: "skip", reason: "not_event_file" });
   });
 
+  it("G1: a basename that escapes the events dir (path traversal) → skip(path_escape)", async () => {
+    const { ctx } = await archivedWithPack();
+    // Resolves to outside the project — G1 (resolveWithinProject) must refuse it
+    // BEFORE the file is ever opened. (A real readdir yields plain basenames; this is
+    // an exported-function hardening pin.)
+    const v = await evaluateDeleteGate(cwd, "../../../../../../../../etc/passwd", ctx);
+    expect(v).toEqual({ disposition: "skip", reason: "path_escape" });
+  });
+
   it("G3a: a well-formed event name that is absent → vanished", async () => {
     const { ctx } = await archivedWithPack();
     const absentName = `20260601T000000000Z-${"a".repeat(64)}.yaml`;
