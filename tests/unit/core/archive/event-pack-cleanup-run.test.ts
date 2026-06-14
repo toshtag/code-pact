@@ -151,6 +151,7 @@ describe("unlinkGatedLoose — the gated unlink loop (THE destructive core)", ()
     const r = await unlinkGatedLoose(cwd, target, ctx);
     expect(r.abort).not.toBeNull();
     expect(r.abort?.reason).toBe("live_task_owner");
+    expect(r.abort?.path).toBe(looseEventRelPath(startedFile)); // the aborting file
     expect(r.deleted).toEqual([]);
     // Fail-closed: no file removed once a live owner is detected.
     expect(await exists(startedFile)).toBe(true);
@@ -250,5 +251,26 @@ describe("unlinkGatedLoose — the gated unlink loop (THE destructive core)", ()
     expect(r.abort).toBeNull();
     expect(r.deleted).toEqual([startedFile]);
     expect(r.vanished).toEqual([doneFile]);
+  });
+
+  it("non-ENOENT unlink failure (gate passed, then the path became a dir) → skipped survivor; not deleted/vanished/abort; loop continues", async () => {
+    const { ctx, startedFile, doneFile, target } = await archivedWithPack();
+    const r = await unlinkGatedLoose(cwd, target, ctx, {
+      beforeUnlink: async (file) => {
+        if (file === startedFile) {
+          // Replace the gate-cleared regular file with a directory, so our unlink
+          // fails with a NON-ENOENT error (EISDIR / EPERM): the file is still present
+          // and unremovable — a survivor, never a false deleted/vanished, never abort.
+          await rm(join(eventsDir(cwd), startedFile));
+          await mkdir(join(eventsDir(cwd), startedFile));
+        }
+      },
+    });
+    expect(r.abort).toBeNull(); // a per-file FS failure is NOT a global abort
+    expect(r.deleted).toEqual([doneFile]); // the loop continued past the failure
+    expect(r.vanished).toEqual([]);
+    expect(r.skipped).toEqual([{ path: looseEventRelPath(startedFile), reason: "unreadable" }]);
+    expect(await exists(startedFile)).toBe(true); // unremovable survivor (now a dir)
+    expect(await exists(doneFile)).toBe(false);
   });
 });

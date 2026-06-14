@@ -46,8 +46,10 @@ export type UnlinkGatedLooseResult = {
   /** Files a per-file gate could not clear — still present, with the reason. */
   skipped: CleanupSkip[];
   /** A global gate abort (G6/G7/G8) that STOPPED the loop, or null if it ran to the
-   *  end. On abort, `deleted` holds the files removed BEFORE the aborting file. */
-  abort: { reason: DeleteGateAbortReason; detail: string } | null;
+   *  end. `path` is the project-relative path of the aborting file (matches the
+   *  dry-run `LooseCleanupAbort` shape, for the mapper / human diagnostics). On
+   *  abort, `deleted` holds the files removed BEFORE the aborting file. */
+  abort: { path: string; reason: DeleteGateAbortReason; detail: string } | null;
 };
 
 /** Test seams to inject a TOCTOU change at the two windows the loop must survive. */
@@ -91,7 +93,7 @@ export async function unlinkGatedLoose(
         deleted,
         vanished,
         skipped,
-        abort: { reason: verdict.reason, detail: verdict.detail },
+        abort: { path: looseEventRelPath(file), reason: verdict.reason, detail: verdict.detail },
       };
     }
     if (verdict.disposition === "vanished") {
