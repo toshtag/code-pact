@@ -285,6 +285,7 @@ export async function planDecisionRecord(
         ],
       };
     }
+    if (!existing.looseFilePresent) return refuseCompactedRefresh(path);
     return {
       kind: "refresh",
       path,
@@ -337,24 +338,7 @@ export async function planDecisionRecord(
       ],
     };
   }
-  // Bundle-only existing record (loose compacted away): refuse the refresh rather than
-  // materialize a fresh loose, which would strand a stale bundle member + a diverging
-  // loose the current compactor cannot re-fold (id already bundled → not re-bundled;
-  // byte-diff → delete gate skips it as bundle_stale). Fail closed until Layer 4 adds
-  // bundle member supersession; the bundle stays the single authority for now.
-  if (!existing.looseFilePresent) {
-    return {
-      kind: "ineligible",
-      path,
-      blocks: [
-        {
-          kind: "compacted_record_refresh_unsupported",
-          detail:
-            "the existing record is bundle-only (compacted); refreshing a compacted decision record is not yet supported (would strand a stale bundle member + a diverging loose). Restore/uncompact the loose record first.",
-        },
-      ],
-    };
-  }
+  if (!existing.looseFilePresent) return refuseCompactedRefresh(path);
   return {
     kind: "refresh",
     path,
@@ -362,6 +346,26 @@ export async function planDecisionRecord(
     existing_source_sha256: existing.record.source_sha256,
     current_source_sha256: currentSha,
     existing_raw: existing.raw,
+  };
+}
+
+/** Every explicit-refresh path funnels through this when the existing record is
+ *  bundle-only (compacted): refuse rather than materialize a fresh loose, which would
+ *  strand a stale bundle member + a diverging loose the current compactor cannot re-fold
+ *  (id already bundled → not re-bundled; byte-diff → delete gate skips it as
+ *  bundle_stale). Fail closed until Layer 4 adds bundle-member supersession/rebundling;
+ *  the bundle stays the single authority for now. */
+function refuseCompactedRefresh(path: string): DecisionRecordPlan {
+  return {
+    kind: "ineligible",
+    path,
+    blocks: [
+      {
+        kind: "compacted_record_refresh_unsupported",
+        detail:
+          "the existing record is bundle-only (compacted); refreshing a compacted decision record is not yet supported (would strand a stale bundle member + a diverging loose). Restore/uncompact the loose record first.",
+      },
+    ],
   };
 }
 

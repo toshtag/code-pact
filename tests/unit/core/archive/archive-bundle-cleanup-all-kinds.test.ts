@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { ProgressEvent } from "../../../../src/core/schemas/progress-event.ts";
 import { writePhaseSnapshot, planPhaseSnapshot } from "../../../../src/core/archive/phase-snapshot.ts";
-import { writeDecisionRecord } from "../../../../src/core/archive/decision-record.ts";
+import { writeDecisionRecord, planDecisionRecord } from "../../../../src/core/archive/decision-record.ts";
 import { planEventPack } from "../../../../src/core/archive/event-pack.ts";
 import { runDecisionRetire } from "../../../../src/commands/decision-retire.ts";
 import {
@@ -148,6 +148,36 @@ describe("event_pack bundle WRITER rejects a Tier-1-invalid pack (P1.1 — no ba
     const { archiveBundlesDir } = await import("../../../../src/core/archive/paths.ts");
     const names = await readdir(archiveBundlesDir(cwd)).catch(() => [] as string[]);
     expect(names).toEqual([]);
+  });
+});
+
+describe("decision_record refresh of a bundle-only record is REFUSED, not a dead-end (the new P1)", () => {
+  it("an explicit refresh after compaction → ineligible, no materialize, re-compact clean", async () => {
+    await writeFile(join(cwd, DEC_REF), ACCEPTED_ADR, "utf8");
+    expect((await writeDecisionRecord(cwd, DEC_REF, { now: NOW })).kind).toBe("written");
+    await compactArchive(cwd, "decision_record"); // bundle + delete the loose record
+    expect(await readFile(decisionRecordPath(cwd, DEC_REF), "utf8").then(() => true, () => false)).toBe(false);
+    // Edit the ADR body so source_sha256 drifts (still accepted), then refresh EXPLICITLY
+    // — this exercises the source-changed refresh branch (the one previously unguarded).
+    const editedAdr = ACCEPTED_ADR.replace("Settled.", "Settled now.");
+    await writeFile(join(cwd, DEC_REF), editedAdr, "utf8");
+    const plan = await planDecisionRecord(cwd, DEC_REF, {
+      now: NOW,
+      refresh: {
+        expected_old_source_sha256: sha256Hex(ACCEPTED_ADR),
+        expected_new_source_sha256: sha256Hex(editedAdr),
+      },
+    });
+    expect(plan.kind).toBe("ineligible");
+    if (plan.kind === "ineligible") {
+      expect(plan.blocks.map((b) => b.kind)).toContain("compacted_record_refresh_unsupported");
+    }
+    // No fresh loose materialized → no stuck stale-bundle + diverging-loose state.
+    expect(await readFile(decisionRecordPath(cwd, DEC_REF), "utf8").then(() => true, () => false)).toBe(false);
+    const re = await compactArchive(cwd, "decision_record");
+    expect(re.bundle.kind).toBe("noop_no_members");
+    expect(re.delete.deleted).toEqual([]);
+    expect(re.delete.skipped).toEqual([]); // no bundle_stale survivor
   });
 });
 
