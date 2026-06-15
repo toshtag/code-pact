@@ -20,6 +20,29 @@ import {
 } from "../../../../src/core/archive/paths.ts";
 import { buildValidEventPack, writeEventPackFile } from "../../../helpers/event-pack-fixture.ts";
 import { seedDurableEvents } from "../../../helpers/seed-events.ts";
+import { archiveBundlesDir, sha256Hex } from "../../../../src/core/archive/paths.ts";
+import { computeMemberIdsSha256 } from "../../../../src/core/archive/archive-bundle-reader.ts";
+import { ARCHIVE_BUNDLE_SCHEMA_VERSION } from "../../../../src/core/schemas/archive-bundle.ts";
+
+/** Write a bundle file DIRECTLY (bypassing the writer's own validation) so a test can
+ *  plant a Tier-1-valid-bundle whose MEMBER is not Tier-1-valid for its kind. */
+async function writeRawBundle(c: string, kind: string, name: string, members: { id: string; bytes: string }[]): Promise<void> {
+  const dir = archiveBundlesDir(c);
+  await mkdir(dir, { recursive: true });
+  const full = members
+    .map((m) => ({ id: m.id, sha256: sha256Hex(m.bytes), bytes: m.bytes }))
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  await writeFile(
+    join(dir, name),
+    JSON.stringify({
+      schema_version: ARCHIVE_BUNDLE_SCHEMA_VERSION,
+      kind,
+      member_ids_sha256: computeMemberIdsSha256(full.map((m) => m.id)),
+      members: full,
+    }),
+    "utf8",
+  );
+}
 
 // Layer 3 — destructive deletion exercised through the REAL produce/command paths of
 // EVERY kind, proving the authority migration (loose → bundle) is complete: deleting a
@@ -100,6 +123,49 @@ describe("event_pack: deleting a bundled loose pack does not change planEventPac
     expect(planBundle.kind).toBe(planLoose.kind); // identical verdict — bundle == loose
     // Specifically NOT regenerated as a fresh subset write (loose pack was recognized).
     expect(planBundle.kind).not.toBe("write");
+    // Deeper than .kind: the cleanup state machine must be identical too (a matching
+    // kind with a drifted loose_relationship / cleanup_pending would still misbehave).
+    if (planBundle.kind === "noop_already_packed" && planLoose.kind === "noop_already_packed") {
+      expect(planBundle.loose_relationship).toBe(planLoose.loose_relationship);
+    }
+  });
+});
+
+describe("event_pack bundle WRITER rejects a Tier-1-invalid pack (P1.1 — no bad authority artifact)", () => {
+  it("writeArchiveBundle(event_pack, semantically-invalid pack) throws and writes no bundle", async () => {
+    const events = await scaffoldP1();
+    const pack = await buildValidEventPack(cwd, "P1", events);
+    // Schema-valid + canonical but Tier-1-invalid (wrong event_ids_sha256).
+    const tampered = { ...pack, event_ids_sha256: "0".repeat(64) };
+    const tamperedBytes = JSON.stringify(tampered, null, 2) + "\n";
+    await expect(writeArchiveBundle(cwd, "event_pack", [{ id: "P1", bytes: tamperedBytes }])).rejects.toThrow();
+    // The store must not contain a bad event_pack bundle.
+    const { readdir } = await import("node:fs/promises");
+    const { archiveBundlesDir } = await import("../../../../src/core/archive/paths.ts");
+    const names = await readdir(archiveBundlesDir(cwd)).catch(() => [] as string[]);
+    expect(names).toEqual([]);
+  });
+});
+
+describe("phase_snapshot refresh of a bundle-only record materializes a fresh loose (P1.2 honesty)", () => {
+  it("an EXPLICIT refresh of a bundle-only existing → verdict is write (materialize), not refresh", async () => {
+    const oldYaml = P1_DONE;
+    await scaffoldP1();
+    await compactArchive(cwd, "phase_snapshot"); // bundle + delete the loose snapshot
+    // Change the phase YAML (objective) so source_sha256 drifts, and refresh EXPLICITLY.
+    const newYaml = oldYaml.replace("Build the base", "Build the base anew");
+    await writeFile(join(cwd, "design", "phases", "P1-x.yaml"), newYaml, "utf8");
+    const plan = await planPhaseSnapshot(cwd, "P1", {
+      now: NOW,
+      refresh: {
+        expected_old_source_sha256: sha256Hex(oldYaml),
+        expected_new_source_sha256: sha256Hex(newYaml),
+      },
+    });
+    // The producer VERDICT changes: a refresh would expect loose bytes that no longer
+    // exist, so it becomes a fresh write (ExpectedState absent). Logical effect is the
+    // same — the new loose record supersedes the stale bundle member via loose-wins.
+    expect(plan.kind).toBe("write");
   });
 });
 
@@ -140,7 +206,9 @@ describe("event_pack delete gate runs full Tier-1 on the bundle member (P1)", ()
     const tampered = { ...pack, event_ids_sha256: "0".repeat(64) };
     const tamperedBytes = JSON.stringify(tampered, null, 2) + "\n";
     await writeEventPackFile(cwd, "P1", tampered);
-    await writeArchiveBundle(cwd, "event_pack", [{ id: "P1", bytes: tamperedBytes }]);
+    // Plant the bad bundle DIRECTLY — the writer (P1.1) would reject it, so this
+    // exercises the delete gate's own defense-in-depth Tier-1 check on a hand-crafted bundle.
+    await writeRawBundle(cwd, "event_pack", "ep.json", [{ id: "P1", bytes: tamperedBytes }]);
     const del = await deleteLooseCoveredByBundle(cwd, "event_pack");
     expect(del.deleted).toEqual([]);
     expect(del.skipped[0]?.reason).toBe("bundle_member_invalid");

@@ -15,6 +15,7 @@ import {
 } from "./paths.ts";
 import { computeMemberIdsSha256, validateArchiveBundleTier1 } from "./archive-bundle-reader.ts";
 import { bindBundleMember } from "./archive-bundle-binding.ts";
+import { validateEventPackTier1 } from "./event-pack-reader.ts";
 import { reconcileLooseAndBundle } from "./archive-bundle-index.ts";
 
 // ---------------------------------------------------------------------------
@@ -81,6 +82,12 @@ export function buildArchiveBundle(kind: ArchiveBundleKind, members: readonly Lo
     // Self-bind: assert the loose record is a canonical record of `kind` whose own
     // internal identity equals `m.id`. Throws ARCHIVE_BUNDLE_INVALID otherwise.
     bindBundleMember(kind, { id: m.id, sha256, bytes: m.bytes }, "(building bundle)");
+    // event_pack also needs full Tier-1 (per-entry bijection / order / event_ids_sha256):
+    // bindBundleMember only checks schema + canonical + id, so without this a
+    // semantically-invalid pack could be written into the store as a bad authority
+    // artifact the store could never self-repair. Reject it at WRITE time, not just at
+    // delete time.
+    if (kind === "event_pack") validateEventPackTier1(m.id, m.bytes, "(building bundle)");
     return { id: m.id, sha256, bytes: m.bytes };
   });
   records.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
