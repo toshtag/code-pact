@@ -1,7 +1,31 @@
-// The verdict for ONE CHANGELOG "closes Pxx" claim (check-doc-invariants rule #9),
-// extracted as a PURE function so it is unit-testable without running the whole
-// repo-bound script. The script does the I/O (readdir live phases, read the archive
-// snapshot) and hands the results here; this decides pass/fail.
+// Helpers for check-doc-invariants rule #9 (CHANGELOG "closes Pxx"), extracted so the
+// repo-bound script's hard-to-test bits are unit-testable: `readLivePhaseFiles` (the
+// directory read, which must tolerate an ABSENT `design/phases/` once every phase is
+// archived) and the PURE `closesClaimProblem` verdict.
+//
+import { readdirSync } from "node:fs";
+import { resolve } from "node:path";
+
+/**
+ * List the live `design/phases/*.yaml` files. design-docs-ephemeral end state: once
+ * EVERY phase is archived, `design/phases/` is empty and git does not track an empty
+ * directory — on a fresh checkout the directory is ABSENT. Treat ENOENT as "no live
+ * phases" (`[]`); re-throw anything else (e.g. ENOTDIR) so a real fault is not masked.
+ * @param {string} repoRoot
+ * @param {string} [phaseDir]
+ * @returns {string[]} the `.yaml` basenames (possibly empty)
+ */
+export function readLivePhaseFiles(repoRoot, phaseDir = "design/phases") {
+  try {
+    return readdirSync(resolve(repoRoot, phaseDir)).filter((f) => f.endsWith(".yaml"));
+  } catch (err) {
+    if (err && err.code === "ENOENT") return [];
+    throw err;
+  }
+}
+
+// The verdict for ONE CHANGELOG "closes Pxx" claim — a PURE function, so the snapshot
+// identity / status logic is unit-testable without running the whole repo-bound script.
 //
 // design-docs-ephemeral: a phase named by a "closes" claim may be LIVE (a
 // design/phases YAML) or ARCHIVED (its YAML deleted, runtime truth in a
