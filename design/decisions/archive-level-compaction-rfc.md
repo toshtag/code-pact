@@ -1,72 +1,85 @@
-# RFC: Archive-level compaction — the archive must compact too, not just grow
+# RFC: Bounded archive — retention + compaction so committed state does not grow forever
 
-**Status:** proposed — design contract. Fixes the model + invariants for compacting the `.code-pact/state/archive/` records themselves; an implementation ships later in small reviewed layers (reader/binding → bundle writer → gated loose-record deletion), mirroring [event-pack-compaction](event-pack-compaction-rfc.md). No code is authorized by this RFC. (2026-06)
-**Scope:** make the per-item archive records — phase snapshots, event-packs, and decision records — **fold into content-addressed bundles** so the archive's *file count* does not grow monotonically with the project's lifetime. Defines the bundle format, loose∪bundle resolution, fail-closed binding, sharding (so a bundle is not itself unbounded), and the prune *capability* (policy is separate). **Not** a new retention policy and **not** a change to the per-item record formats.
+**Status:** proposed — design contract. Fixes the model + invariants for keeping `.code-pact/state/archive/` **bounded**: retention/prune (the bound) plus content-addressed bundles (the compaction of the retained set). Implementation ships later in small reviewed layers (reader/binding → bundle writer → gated loose-record deletion → retention/prune), mirroring [event-pack-compaction](event-pack-compaction-rfc.md). No code is authorized by this RFC. (2026-06)
+**Scope:** make the committed archive — phase snapshots, event-packs, decision records — **stop growing monotonically with the project's lifetime**. The bound comes from a **retention policy** that drops archive truth a policy no longer keeps; **bundling** then compacts the retained set into few content-addressed files. Defines the retention modes (with a default that is bounded-capable, not keep-full-only), the bundle format + canonical-bytes hashing, loose∪bundle resolution with **cross-bundle global member uniqueness**, sharding (bounds file *size* within the retained set), and the fail-closed posture. **Not** a per-item record *format* change.
 **Owners:** maintainer
-**Related:** [event-pack-compaction](event-pack-compaction-rfc.md) (the loose∪pack lifecycle this generalises one level up — reader/binding, writer+readback, the delete-time gate G0–G8, R0–R5 reconciliation) · [collaboration-safe-state](collaboration-safe-state-rfc.md) (the one-record-per-file ledgers being folded) · [decision-lifecycle](decision-lifecycle-rfc.md) (decision records / `decision_retention`) · [dogfood-durable-truth-migration](dogfood-durable-truth-migration-rfc.md) (the migration that produced 80 archive files and surfaced this need) · [control-plane-v2](control-plane-v2-rfc.md) (phase identity the bundles bind to).
+**Related:** [event-pack-compaction](event-pack-compaction-rfc.md) (the loose∪pack lifecycle this generalises — reader/binding, writer+readback, the delete-time gate, R0–R5 reconciliation) · [decision-lifecycle](decision-lifecycle-rfc.md) (`decision_retention` / the `PRUNED.md` tombstone — the retention precedent this extends to phases/packs) · [collaboration-safe-state](collaboration-safe-state-rfc.md) (the one-record-per-file ledgers) · [dogfood-durable-truth-migration](dogfood-durable-truth-migration-rfc.md) (the migration that produced 80 archive files and surfaced this) · [control-plane-v2](control-plane-v2-rfc.md) (phase identity bundles bind to).
 
 ## Summary
 
-design-docs-ephemeral moved completed phase YAMLs and shipped decision `.md` out of `design/` into `.code-pact/state/archive/` records, and event-pack compaction folded loose per-event files into per-phase packs. That was necessary but **incomplete**: it converted "many loose docs / loose events" into "**one archive record per phase / per pack / per decision**", which still grows **monotonically** — on this repo, after the migration, `.code-pact/state/archive/` holds **46 phase snapshots + 31 event-packs + 3 decision records (80 files)**, and the count rises by one for every future phase archived, phase compacted, and decision retired. **Moving the pile is not the goal; the pile must be compactable.** This RFC fixes that: the **per-item archive record is an intermediate form**, and many records fold into one content-addressed **bundle** via the same loose∪pack discipline event-pack compaction already proved — applied recursively one level up. After bundling, `validate` / `plan lint` / `check:docs` still resolve every item, and no level (loose docs, loose events, loose archive records) grows without bound.
+design-docs-ephemeral moved completed phase YAMLs / shipped decision `.md` into `.code-pact/state/archive/` records, and event-pack compaction folded loose per-event files into per-phase packs. Both were necessary but they only **moved the pile**: "many loose docs/events" became "**one archive record per phase / pack / decision**", which still grows **monotonically** — 80 files on this repo today, +1 for every future archive / compact / retire. **A determinism tool whose own committed state grows without bound for the project's lifetime is the problem this RFC must actually fix — not relocate.**
+
+The honest decomposition (a correction to this RFC's first draft, which wrongly claimed bundling alone bounds growth):
+
+- **Bundling does NOT bound file count.** With a per-bundle member cap `C` and `N` retained items, the bundle-file count is `ceil(N / C)` — still O(N). Sharding bounds a single bundle's *size*, never the *count*. Bundling only removes per-item file overhead; it compacts, it does not bound.
+- **The bound comes from RETENTION/PRUNE** — dropping archive truth a policy no longer keeps, so the committed archive is O(retention window) instead of O(project lifetime). This is the [decision-lifecycle](decision-lifecycle-rfc.md) `decision_retention` idea, extended to phase snapshots and event-packs.
+
+So the product promise is: **code-pact provides a supported, default-available path to keep committed archive state bounded.** keep-full remains *available* but is **not the only first-class mode**. Retention is the bound; bundling compacts what retention keeps.
 
 ## The growth that must stop (measured 2026-06-15)
 
-| level | loose form | first compaction | still grows as | this RFC adds |
+| level | loose form | first compaction | without retention, grows as | this RFC |
 | --- | --- | --- | --- | --- |
-| design docs | `design/phases/*.yaml`, `design/decisions/*.md` | archive snapshot / decision record | — (live docs are deletable) | — |
-| events | `.code-pact/state/events/<at>-<id>.yaml` (one/event) | event-pack (one/phase) | **one pack per archived phase** | event-pack **bundles** |
-| **archive records** | `state/archive/phases/<id>.json`, `event-packs/<id>.json`, `decisions/<stem>-<hash>.json` (one each) | — (none today) | **+1 per phase / pack / decision, forever** | phase-snapshot, event-pack, and decision **bundles** |
-
-The archive-record row has **no second compaction today** — that is the gap. 80 files now; unbounded over the project's life.
+| design docs | `design/phases/*.yaml`, `design/decisions/*.md` | archive snapshot / decision record | — (live docs deletable) | — |
+| events | `state/events/<at>-<id>.yaml` | event-pack (one/phase) | one pack per archived phase = O(phases) | bundled + retained |
+| **archive records** | `state/archive/{phases,event-packs,decisions}/<id>.json` | **none today** | **+1 per phase / pack / decision, O(lifetime)** | **retention bounds it; bundles compact the kept set** |
 
 ## Decision
 
-Adopt **archive bundles**: a content-addressed JSON that folds N per-item archive records of one kind into one file, resolved as **loose records ∪ bundle members**, exactly as the durable ledger resolves **loose events ∪ packs**. The per-item record format is unchanged — a bundle *contains* records verbatim plus an integrity manifest. Three bundle kinds, one per archive directory:
+Adopt a **two-part model**: (A) a **retention policy** that bounds *what* the committed archive keeps, and (B) content-addressed **bundles** that compact *the retained set* into few files. (A) is the bound; (B) is the compaction. Both ship; (A) is the part that satisfies "does not grow forever".
 
-- **phase-snapshot bundle** — N `phases/<id>.json` snapshots.
-- **event-pack bundle** — N `event-packs/<id>.json` packs.
-- **decision-record bundle** — N `decisions/<stem>-<hash>.json` records.
+### (A) Retention — the bound (central, NOT a non-goal)
 
-### Bundle format + binding (fail-closed, mirrors Tier-1/Tier-2 packs)
+`state compact-archive` carries a retention mode; the project may configure a default in `project.yaml` (alongside `decision_retention`). Modes (the design space; ≥1 bounded mode MUST ship, and the shipped default MUST be bounded-capable, i.e. keep-full is selectable but not forced):
 
-- A bundle is content-addressed and carries, per member, the member's own id + a `sha256` of its canonical bytes; plus a bundle-level `member_ids_sha256` over the sorted member-id set (the event-pack `event_ids_sha256` analogue).
-- **Tier-1** (self): schema, per-member id↔content bijection, no duplicate ids, sorted, `member_ids_sha256` matches.
-- **Tier-2** (binding): each member still binds to its own authority (a phase snapshot to its roadmap identity / `path_sha256`; an event-pack to its snapshot; a decision record to its stem/hash) — bundling must not weaken per-member integrity.
-- A bundle that fails either tier is **dropped** by the lenient readers (surfaced as an issue) and **throws** in strict loaders — the same fail-closed posture as a bad pack. A member present in BOTH a loose record and a bundle must be byte-identical (else `bundle_stale`, fail-closed).
+- `--prune-unreferenced` — drop any archive record (and its bundle slot) that **no live or archived authority references** (a decision record no `decision_refs`/`acceptance_refs` points at; an event-pack whose phase snapshot is gone; a phase snapshot whose roadmap ref has been removed). Safe by construction — nothing resolves it.
+- `--keep-releases N` / `--keep-latest N` — keep the archive truth for the last N releases / N most-recent items; older retained truth is dropped (git history remains the cold backstop).
+- `--drop-unreferenced-before <date>` — a time-horizon prune of unreferenced records.
+- `keep-full` — explicit opt-in to unbounded retention (this repo's current `decision_retention` default for load-bearing RFCs); allowed, but the operator chose it.
 
-### Resolution (loose ∪ bundle, live-wins is N/A here — archive only)
+Pruning a phase snapshot may require dropping its **roadmap ref** too (the migration deliberately *kept* refs so archived phases resolve; a release-horizon prune that forgets an old phase removes the ref in the same step). Retention removal is **fail-closed-ordered**: never drop a record an authority still references; drop the authority (ref) and the record together or not at all. git is always the cold backstop for pruned truth.
 
-Every archive reader (`validate`, `plan lint`, `check:docs`, `resolveMissingPhaseRef`, the event-pack binder, decision-record resolution) resolves an item from **loose record ∪ bundle members**, deduped by id, a bundle member proven by its `sha256`. A loose record always satisfies on its own; a bundle satisfies for members not present loose. This is the [event-pack](event-pack-compaction-rfc.md) loose∪pack rule, lifted to archive records.
+### (B) Bundles — compact the retained set
 
-### Sharding (a bundle is not itself unbounded)
+A **bundle** folds N retained per-item archive records of one kind into one content-addressed JSON, resolved as **loose records ∪ bundle members**, exactly as the durable ledger resolves **loose events ∪ packs**. One bundle kind per archive directory (phase-snapshot, event-pack, decision-record). The per-item record format is unchanged — a bundle *contains* records plus an integrity manifest.
 
-A single bundle has a **member cap**; beyond it, members shard into multiple bundles by a deterministic key (content-hash prefix, or id range) so neither the file count NOR any single bundle grows without bound — a bounded fan-out (√n-style), not one-giant-file and not one-file-per-item.
+**Canonical bytes (pin, P1).** A bundle member's `sha256` is over the member's **canonical serialized bytes = the exact bytes the per-item writer emits** (the existing snapshot / pack / decision-record serializers, which already produce deterministic output: stable key order, fixed 2-space indent, trailing newline — the same determinism `pack-byte-identical` relies on). Hashing the writer's canonical output (not a re-canonicalization, not arbitrary raw bytes) is the single source so newline/key-order/spacing can never drift a hash. A bundle stores each member's canonical bytes verbatim + that `sha256`, plus a bundle-level `member_ids_sha256` over the sorted member-id set.
 
-### Prune capability (policy separate)
+**Binding (fail-closed, mirrors Tier-1/Tier-2 packs):**
+- **Tier-1** (self): schema; per-member id↔canonical-bytes match (recompute `sha256`); sorted; `member_ids_sha256` matches; no duplicate ids *within* the bundle.
+- **Tier-2** (per member): each member still binds to its own authority (snapshot→roadmap identity/`path_sha256`; pack→snapshot; decision record→stem/hash). Bundling never weakens per-member integrity.
+- A bundle failing either tier is **dropped** by lenient readers (reported issue) and **throws** in strict loaders.
 
-The model MUST **support** dropping a bundle (or a member) whose item is no longer referenced by any live or archived authority — e.g. a decision record superseded past a retention horizon. The **default policy is keep-full** (consistent with this repo's `decision_retention`); prune is opt-in and governed separately. This RFC fixes that prune is *expressible* (bundles are removable, readers tolerate their absence when nothing references the members), not when it runs.
+**Cross-bundle global uniqueness (Blocker — must be deterministic).** Across ALL accepted bundles **and loose records** of one kind, a member id resolves to exactly one record:
+- same id in two places with **identical `sha256`** → allowed as a redundant duplicate, deterministically deduped (optionally a warning); never ambiguous.
+- same id with **different `sha256`** → **fail-closed** `duplicate_member_conflict` (a stale/forked bundle), never "pick one".
+- a loose record and a bundle member for the same id must be byte-identical, else `bundle_stale`, fail-closed.
 
-### Compaction verb + destructive deletion (small layers)
+**Sharding (bounds file SIZE within the retained set, not the count).** A bundle has a member cap; beyond it, members shard by a deterministic key (content-hash prefix). Stated honestly: sharding keeps any single bundle small; it does **not** bound the bundle *count* — only retention (A) does.
 
-A `state compact-archive` step (or an extension of `state compact`) folds loose archive records into bundles, readback-verifies, then **deletes the now-bundled loose records** — the irreversible step, behind a delete-time gate and post-run reconciliation, exactly as event-pack Layer 3. Ships in layers: **(1)** bundle reader + binding (no write), **(2)** bundle writer + readback (no delete), **(3)** gated loose-record deletion. Each layer reviewed before the next, per [[split-destructive-work-into-layers]].
+### Resolution
+
+Every archive reader (`validate`, `plan lint`, `check:docs`, `resolveMissingPhaseRef`, the event-pack binder, decision resolution) resolves an item from **loose record ∪ bundle members**, deduped by id under the cross-bundle uniqueness rule above. The verb `state compact-archive` ships in layers — **(1)** bundle reader + binding (no write), **(2)** bundle writer + readback (no delete), **(3)** gated loose-record deletion, **(4)** retention/prune — each reviewed before the next, per [[split-destructive-work-into-layers]].
 
 ## Invariants (binding for the implementation)
 
-1. **No level grows unboundedly.** Loose docs → records → bundles → sharded bundles; every level has a next compaction, and sharding bounds the last.
-2. **Per-item records are intermediate, not final.** The `<id>.json` / `<stem>-<hash>.json` form remains valid *input* (loose∪bundle); a bundle is the compact durable form. Tools must never assume an item exists only as a loose file.
-3. **Gates green after bundling.** `validate` + `plan lint --strict` + `check:docs` resolve every phase / pack / decision from bundles after the loose records are deleted — pinned by tests, and dogfood-guarded once this repo's archive is bundled.
-4. **Fail-closed binding.** A bundle is trusted only on full Tier-1 + per-member Tier-2; a corrupt / stale / identity-mismatched bundle is dropped (lenient) or throws (strict), never silently accepted — the archive-reader identity discipline ([[step4-archive-reader-invariants]]) applies to bundle members too.
-5. **Readers tolerate every shape.** loose-only, bundle-only, loose∪bundle, and **none** (an absent archive dir — the same all-archived/empty edge that broke `check-doc-invariants` in the migration) all resolve without crashing.
+1. **Committed archive state is bounded under a bounded retention mode** — O(retention window), not O(project lifetime). Bundling reduces the constant; retention provides the bound. The RFC must not claim bundling alone bounds anything.
+2. **A bounded retention path is default-available**, not opt-in-only; keep-full is selectable, not the only first-class mode.
+3. **Per-item records are intermediate, not final.** The `<id>.json` form stays valid *input* (loose∪bundle); a bundle is the compact form; tools never assume an item exists only as a loose file.
+4. **Gates green after bundling AND after prune** — `validate` + `plan lint --strict` + `check:docs` resolve every still-referenced item; pinned by tests, dogfood-guarded once this repo's archive is bundled/pruned.
+5. **Fail-closed binding + global uniqueness** — a bundle is trusted only on full Tier-1 + per-member Tier-2; a different-hash duplicate id is `duplicate_member_conflict`; the [[step4-archive-reader-invariants]] identity discipline applies to bundle members.
+6. **Absent dirs are tolerated ONLY as empty stores — a referenced-but-missing item still fails closed.** An absent `state/archive/*` dir (or empty bundle set) resolves as "no archived items", never a crash. **But if a live or archived authority references an item absent from loose records AND all valid bundles, strict gates fail closed** (a real missing-truth fault is never masked by emptiness tolerance).
 
 ## Non-goals
 
-- **No new retention policy** — only the *capability* to prune; when/what to prune is a separate decision (default keep-full).
-- **No per-item record format change** — bundles contain records verbatim; the snapshot / pack / decision-record schemas are frozen here.
+- **No per-item record *format* change** — bundles contain records verbatim (canonical bytes); the snapshot / pack / decision-record schemas are frozen here.
 - **No automation / scheduling** — `state compact-archive` is operator-invoked, like `state compact`.
-- **No change to the event/pack lifecycle below** — event-pack compaction (loose events → pack) is unchanged; this adds the layer ABOVE it (packs → pack bundle).
+- **No change to the event/pack lifecycle below** — event-pack compaction (loose events → pack) is unchanged; this adds the layer above (packs → bundle) and the retention bound.
+- **No external/non-git store** — the committed, diffable, content-addressed file model stays; the bound comes from retention, not from moving state out of git.
 
 ## Alternatives considered
 
-- **Leave the archive as one-file-per-item.** Rejected — it is the "moved the pile" outcome: the archive grows monotonically for the project's life, which is exactly the unbounded-growth the user rejected.
-- **One giant bundle per kind (no sharding).** Rejected — trades file-count growth for single-file growth; sharding bounds both.
-- **A database / non-file store.** Rejected — breaks the git-tracked, diffable, merge-safe, content-addressed file model the rest of `.code-pact/state` relies on (CI reads the committed tree).
+- **Bundling without retention (this RFC's first draft).** Rejected — `ceil(N/C)` bundle files still grow O(N); it relocates the pile into `bundles/` instead of bounding it. Retention is required.
+- **keep-full as the only mode (with bundling).** Rejected — "grows unless you opt out" is the UX the user rejected; a bounded mode must be default-available.
+- **One giant bundle per kind.** Rejected — trades file count for unbounded single-file size; sharding + retention is the pair.
+- **External datastore.** Rejected — breaks git-tracked, merge-safe, CI-readable committed state.
