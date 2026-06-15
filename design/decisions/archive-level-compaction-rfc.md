@@ -30,7 +30,7 @@ Adopt a **two-part model**: (A) a **retention policy** that bounds *what* the co
 
 ### (A) Retention — the bound (central, NOT a non-goal)
 
-`state compact-archive` carries a retention mode; the project may configure a default in `project.yaml` (alongside `decision_retention`). Modes (the design space; ≥1 bounded mode MUST ship, and the shipped default MUST be bounded-capable, i.e. keep-full is selectable but not forced):
+`state compact-archive` carries a retention mode; the project may configure a default in `project.yaml` (alongside `decision_retention`). Modes (the design space; ≥1 bounded mode MUST ship, and the no-config/no-flag default is **bounded, never keep-full** — pinned precisely below):
 
 - `--prune-unreferenced` — drop any archive record (and its bundle slot) that **no live or archived authority references** (a decision record no `decision_refs`/`acceptance_refs` points at; an event-pack whose phase snapshot is gone; a phase snapshot whose roadmap ref has been removed). Safe by construction — nothing resolves it.
 - `--keep-releases N` / `--keep-latest N` — keep the archive truth for the last N releases / N most-recent items; older retained truth is dropped (git history remains the cold backstop).
@@ -38,6 +38,16 @@ Adopt a **two-part model**: (A) a **retention policy** that bounds *what* the co
 - `keep-full` — explicit opt-in to unbounded retention (this repo's current `decision_retention` default for load-bearing RFCs); allowed, but the operator chose it.
 
 Pruning a phase snapshot may require dropping its **roadmap ref** too (the migration deliberately *kept* refs so archived phases resolve; a release-horizon prune that forgets an old phase removes the ref in the same step). Retention removal is **fail-closed-ordered**: never drop a record an authority still references; drop the authority (ref) and the record together or not at all. git is always the cold backstop for pruned truth.
+
+#### Pinned before the first implementation PR (review P1s — binding)
+
+These three are fixed here so an implementer cannot quietly fall back to "bounded mode exists, but the default is effectively keep-full":
+
+1. **No-config / no-flag default is BOUNDED, never keep-full.** With no `project.yaml` retention config and no CLI retention flag, `state compact-archive` MUST choose a bounded mode — it MUST NOT default to `keep-full`. `keep-full` (retain everything, including records no authority references) requires an **explicit** config key or flag. The shipped default is the safest bounded mode that loses no reachable truth: **`prune-unreferenced`** (drops only records nothing resolves; git keeps the bytes). A project that wants the tighter O(releases) bound sets `keep-releases N` (which also trims old roadmap refs + their snapshots/packs); a project that wants unbounded sets `keep-full` on purpose. The contract is: *invoking `state compact-archive` with no options shrinks the archive, it never silently keeps everything.*
+
+2. **Ordering key for `keep-latest N` / `keep-releases N` is fixed per kind** (so "latest" cannot drift): **phase snapshots** order by their recorded `archived_at`; **decision records** by `retired_at`; **event-packs have no independent order — a pack is retained iff its phase snapshot is retained** (it follows its phase, never kept or dropped on its own). `keep-releases N` keys off the release tags in `CHANGELOG.md` (the existing release ledger), mapping each archived item to the release that closed it; items closed by the last N releases are kept.
+
+3. **Retention deletion has a fixed dependency order, gated like event-pack Layer 3.** Drop in this order, re-verifying at each step: **(a)** decision records that no live/archived `decision_refs`/`acceptance_refs` resolves; **(b)** an event-pack only together with (or after) its phase snapshot — never a pack whose snapshot still references it; **(c)** a phase snapshot **and** its roadmap ref together (never a snapshot while the roadmap still points at it, never a roadmap ref while a dependent task resolves the phase). A wrong order leaves dangling truth, so the implementation MUST use a **delete-time ownership gate** (re-check, immediately before each unlink, that nothing still references the record — TOCTOU-safe) and a **post-run reconciliation** pass, at the same granularity as the [event-pack-compaction](event-pack-compaction-rfc.md) Layer 3 G0–G8 gate + R0–R5 reconciliation. Any gate failure → no unlink of that record; report what was skipped (no silent truncation).
 
 ### (B) Bundles — compact the retained set
 
