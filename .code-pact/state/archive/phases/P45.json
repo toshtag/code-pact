@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "phase_id": "P45",
+  "phase_name": "Context-pack write contract hygiene — align the pack write with the public atomic-write contract and correct the docs that blur which command writes it",
+  "original_path": "design/phases/P45-context-pack-write-contract-hygiene.yaml",
+  "phase_status": "done",
+  "weight": 3,
+  "snapshotted_at": "2026-06-15T03:08:26.058Z",
+  "source_sha256": "bcb16c26b9c86cfdd1b2dab5baad043578c16d671987e230ed9f4e68a90621f0",
+  "path_sha256": "8471f96230f99d30a9987f08089cdc6f10d2c77cffd91db67818dced046d6645",
+  "tasks": [
+    {
+      "id": "P45-T0",
+      "status": "done",
+      "terminal_evidence": {
+        "kind": "maintainer_attestation",
+        "recorded_at": "2026-06-15T03:08:26.058Z",
+        "reason": "pre-ledger phase (predates the per-event ledger); completion evidenced by shipped code + git history"
+      }
+    },
+    {
+      "id": "P45-T1",
+      "status": "done",
+      "depends_on": [
+        "P45-T0"
+      ],
+      "terminal_evidence": {
+        "kind": "maintainer_attestation",
+        "recorded_at": "2026-06-15T03:08:26.058Z",
+        "reason": "pre-ledger phase (predates the per-event ledger); completion evidenced by shipped code + git history"
+      }
+    },
+    {
+      "id": "P45-T2",
+      "status": "done",
+      "depends_on": [
+        "P45-T0"
+      ],
+      "terminal_evidence": {
+        "kind": "maintainer_attestation",
+        "recorded_at": "2026-06-15T03:08:26.058Z",
+        "reason": "pre-ledger phase (predates the per-event ledger); completion evidenced by shipped code + git history"
+      }
+    },
+    {
+      "id": "P45-T3",
+      "status": "done",
+      "depends_on": [
+        "P45-T1",
+        "P45-T2"
+      ],
+      "terminal_evidence": {
+        "kind": "maintainer_attestation",
+        "recorded_at": "2026-06-15T03:08:26.058Z",
+        "reason": "pre-ledger phase (predates the per-event ledger); completion evidenced by shipped code + git history"
+      }
+    },
+    {
+      "id": "P45-T4",
+      "status": "done",
+      "depends_on": [
+        "P45-T1",
+        "P45-T2",
+        "P45-T3"
+      ],
+      "terminal_evidence": {
+        "kind": "maintainer_attestation",
+        "recorded_at": "2026-06-15T03:08:26.058Z",
+        "reason": "pre-ledger phase (predates the per-event ledger); completion evidenced by shipped code + git history"
+      }
+    }
+  ]
+}

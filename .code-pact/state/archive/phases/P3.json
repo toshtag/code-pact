@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "phase_id": "P3",
+  "phase_name": "Agent Integration",
+  "original_path": "design/phases/P3-agent-integration.yaml",
+  "phase_status": "done",
+  "weight": 30,
+  "snapshotted_at": "2026-06-15T03:08:17.154Z",
+  "source_sha256": "9ef01c1582c50af20e2413e29048b9ef40e91a91fa249a7424b07b89deeb19c9",
+  "path_sha256": "0a611d1a4cb07f388922d618496e7f197ea21e32c0c77d35a160bdc5e3ff6f25",
+  "tasks": [
+    {
+      "id": "P3-T1",
+      "status": "done",
+      "terminal_evidence": {
+        "kind": "maintainer_attestation",
+        "recorded_at": "2026-06-15T03:08:17.154Z",
+        "reason": "pre-ledger phase (predates the per-event ledger); completion evidenced by shipped code + git history"
+      }
+    },
+    {
+      "id": "P3-T2",
+      "status": "done",
+      "terminal_evidence": {
+        "kind": "maintainer_attestation",
+        "recorded_at": "2026-06-15T03:08:17.154Z",
+        "reason": "pre-ledger phase (predates the per-event ledger); completion evidenced by shipped code + git history"
+      }
+    },
+    {
+      "id": "P3-T3",
+      "status": "done",
+      "terminal_evidence": {
+        "kind": "maintainer_attestation",
+        "recorded_at": "2026-06-15T03:08:17.154Z",
+        "reason": "pre-ledger phase (predates the per-event ledger); completion evidenced by shipped code + git history"
+      }
+    },
+    {
+      "id": "P3-T4",
+      "status": "done",
+      "terminal_evidence": {
+        "kind": "maintainer_attestation",
+        "recorded_at": "2026-06-15T03:08:17.154Z",
+        "reason": "pre-ledger phase (predates the per-event ledger); completion evidenced by shipped code + git history"
+      }
+    }
+  ]
+}

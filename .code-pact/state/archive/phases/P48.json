@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "phase_id": "P48",
+  "phase_name": "Context Fit recommendation integration — an optional, additive contextFit recommendation on recommend / task prepare, derived deterministically from task readiness fields",
+  "original_path": "design/phases/P48-context-fit-recommendation.yaml",
+  "phase_status": "done",
+  "weight": 4,
+  "snapshotted_at": "2026-06-15T03:08:27.318Z",
+  "source_sha256": "b41491d43c8e88006aa87fbc3300510e7106645872d52b2515c9dd5f3cc89928",
+  "path_sha256": "0d416ebc8f6e25a56c4c12f9f1b3b552ca7f0e5155a673d29878dc4cbb358f5b",
+  "tasks": [
+    {
+      "id": "P48-T0",
+      "status": "done",
+      "terminal_evidence": {
+        "kind": "maintainer_attestation",
+        "recorded_at": "2026-06-15T03:08:27.318Z",
+        "reason": "pre-ledger phase (predates the per-event ledger); completion evidenced by shipped code + git history"
+      }
+    },
+    {
+      "id": "P48-T1",
+      "status": "done",
+      "depends_on": [
+        "P48-T0"
+      ],
+      "terminal_evidence": {
+        "kind": "maintainer_attestation",
+        "recorded_at": "2026-06-15T03:08:27.318Z",
+        "reason": "pre-ledger phase (predates the per-event ledger); completion evidenced by shipped code + git history"
+      }
+    },
+    {
+      "id": "P48-T2",
+      "status": "done",
+      "depends_on": [
+        "P48-T1"
+      ],
+      "terminal_evidence": {
+        "kind": "maintainer_attestation",
+        "recorded_at": "2026-06-15T03:08:27.318Z",
+        "reason": "pre-ledger phase (predates the per-event ledger); completion evidenced by shipped code + git history"
+      }
+    },
+    {
+      "id": "P48-T3",
+      "status": "done",
+      "depends_on": [
+        "P48-T2"
+      ],
+      "terminal_evidence": {
+        "kind": "maintainer_attestation",
+        "recorded_at": "2026-06-15T03:08:27.318Z",
+        "reason": "pre-ledger phase (predates the per-event ledger); completion evidenced by shipped code + git history"
+      }
+    },
+    {
+      "id": "P48-T4",
+      "status": "done",
+      "depends_on": [
+        "P48-T3"
+      ],
+      "terminal_evidence": {
+        "kind": "maintainer_attestation",
+        "recorded_at": "2026-06-15T03:08:27.318Z",
+        "reason": "pre-ledger phase (predates the per-event ledger); completion evidenced by shipped code + git history"
+      }
+    }
+  ]
+}

@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "phase_id": "P4",
+  "phase_name": "Stabilize & Dogfood",
+  "original_path": "design/phases/P4-stabilize.yaml",
+  "phase_status": "done",
+  "weight": 25,
+  "snapshotted_at": "2026-06-15T03:08:17.984Z",
+  "source_sha256": "940f34b7cb24fcc4cf71afcfc55f0fb630847f975201c46150a63d9a7ee1147e",
+  "path_sha256": "9796b840b2cd8e613e8ed36531bf8f567313750419677a46ef0bf118b4146735",
+  "tasks": [
+    {
+      "id": "P4-T1",
+      "status": "done",
+      "terminal_evidence": {
+        "kind": "maintainer_attestation",
+        "recorded_at": "2026-06-15T03:08:17.984Z",
+        "reason": "pre-ledger phase (predates the per-event ledger); completion evidenced by shipped code + git history"
+      }
+    },
+    {
+      "id": "P4-T2",
+      "status": "done",
+      "terminal_evidence": {
+        "kind": "maintainer_attestation",
+        "recorded_at": "2026-06-15T03:08:17.984Z",
+        "reason": "pre-ledger phase (predates the per-event ledger); completion evidenced by shipped code + git history"
+      }
+    },
+    {
+      "id": "P4-T3",
+      "status": "done",
+      "terminal_evidence": {
+        "kind": "maintainer_attestation",
+        "recorded_at": "2026-06-15T03:08:17.984Z",
+        "reason": "pre-ledger phase (predates the per-event ledger); completion evidenced by shipped code + git history"
+      }
+    },
+    {
+      "id": "P4-T4",
+      "status": "done",
+      "terminal_evidence": {
+        "kind": "maintainer_attestation",
+        "recorded_at": "2026-06-15T03:08:17.984Z",
+        "reason": "pre-ledger phase (predates the per-event ledger); completion evidenced by shipped code + git history"
+      }
+    },
+    {
+      "id": "P4-T5",
+      "status": "done",
+      "terminal_evidence": {
+        "kind": "maintainer_attestation",
+        "recorded_at": "2026-06-15T03:08:17.984Z",
+        "reason": "pre-ledger phase (predates the per-event ledger); completion evidenced by shipped code + git history"
+      }
+    }
+  ]
+}

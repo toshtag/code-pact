@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "phase_id": "P41",
+  "phase_name": "Leaf help + docs straightening — bring the 7 stubbed task lifecycle verbs' --help to parity behind a coverage test, and consolidate the record_only explanation to its one canonical home",
+  "original_path": "design/phases/P41-leaf-help-docs-straightening.yaml",
+  "phase_status": "done",
+  "weight": 4,
+  "snapshotted_at": "2026-06-15T03:08:23.468Z",
+  "source_sha256": "1842ea47f1e9c23ce89f0956784700168ff255935689a277c89eee7ef9426081",
+  "path_sha256": "9cd87e2189a92d2741a82aa1004ddc8df7ef3604e92388f411423afd63fc1cff",
+  "tasks": [
+    {
+      "id": "P41-T0",
+      "status": "done",
+      "terminal_evidence": {
+        "kind": "maintainer_attestation",
+        "recorded_at": "2026-06-15T03:08:23.468Z",
+        "reason": "pre-ledger phase (predates the per-event ledger); completion evidenced by shipped code + git history"
+      }
+    },
+    {
+      "id": "P41-T1",
+      "status": "done",
+      "depends_on": [
+        "P41-T0"
+      ],
+      "terminal_evidence": {
+        "kind": "maintainer_attestation",
+        "recorded_at": "2026-06-15T03:08:23.468Z",
+        "reason": "pre-ledger phase (predates the per-event ledger); completion evidenced by shipped code + git history"
+      }
+    },
+    {
+      "id": "P41-T2",
+      "status": "done",
+      "depends_on": [
+        "P41-T0"
+      ],
+      "terminal_evidence": {
+        "kind": "maintainer_attestation",
+        "recorded_at": "2026-06-15T03:08:23.468Z",
+        "reason": "pre-ledger phase (predates the per-event ledger); completion evidenced by shipped code + git history"
+      }
+    }
+  ]
+}
