@@ -1,9 +1,12 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { mkdir, mkdtemp, rm, stat, writeFile, readdir } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run as cliRun, ensureCliBuilt, type RunResult } from "../helpers/cli.ts";
 import { seedDurableEvents } from "../helpers/seed-events.ts";
+import { buildValidEventPack } from "../helpers/event-pack-fixture.ts";
+import { ProgressLog } from "../../src/core/schemas/progress-event.ts";
+import { parse as parseYaml } from "yaml";
 
 // Layer 4 entry — `state compact-archive` folds loose archive records into bundles and
 // deletes the verified loose copies, end-to-end through the real built CLI. Dry-run
@@ -157,5 +160,64 @@ describe("state compact-archive — arg handling", () => {
     expect(r.code).toBe(2);
     expect(json(r).error?.code).toBe("ARCHIVE_BUNDLE_INVALID");
     expect(await fileExists(LOOSE_SNAPSHOT())).toBe(true); // nothing deleted
+  });
+
+  it("extra positional → CONFIG_ERROR (exit 2)", async () => {
+    await scaffoldArchivedSnapshot();
+    const r = run(["state", "compact-archive", "phase_snapshot", "garbage", "--json"]);
+    expect(r.code).toBe(2);
+    expect(json(r).error?.code).toBe("CONFIG_ERROR");
+  });
+});
+
+describe("state compact-archive — build-fault surfacing (P1.1/P1.2)", () => {
+  it("a non-canonical loose record → ARCHIVE_BUNDLE_WRITE_FAILED (not ARCHIVE_BUNDLE_INVALID); nothing folded/deleted", async () => {
+    await scaffoldArchivedSnapshot();
+    // Rewrite the loose snapshot non-canonically (compact JSON ≠ the writer's 2-space form):
+    // schema-valid + right phase_id, but bindBundleMember's canonical check fails at build.
+    const canonical = await readFile(LOOSE_SNAPSHOT(), "utf8");
+    await writeFile(LOOSE_SNAPSHOT(), JSON.stringify(JSON.parse(canonical)), "utf8");
+    const r = run(["state", "compact-archive", "phase_snapshot", "--write", "--json"]);
+    expect(r.code).toBe(2);
+    expect(json(r).error?.code).toBe("ARCHIVE_BUNDLE_WRITE_FAILED"); // build fault, NOT a corrupt store
+    expect(await fileExists(LOOSE_SNAPSHOT())).toBe(true); // not deleted
+    expect(await bundleCount()).toBe(0); // no bad bundle written
+  });
+
+  it("dry-run also fails on a non-canonical loose record (no would_bundle lie)", async () => {
+    await scaffoldArchivedSnapshot();
+    const canonical = await readFile(LOOSE_SNAPSHOT(), "utf8");
+    await writeFile(LOOSE_SNAPSHOT(), JSON.stringify(JSON.parse(canonical)), "utf8");
+    const r = run(["state", "compact-archive", "phase_snapshot", "--json"]); // dry-run
+    expect(r.code).toBe(2);
+    expect(json(r).error?.code).toBe("ARCHIVE_BUNDLE_WRITE_FAILED");
+  });
+});
+
+describe("state compact-archive — partial multi-kind failure is reported, not hidden (P1.3)", () => {
+  it("an earlier kind applies, a later kind fails → error envelope carries completed_results + failed_kind + partial_applied", async () => {
+    await scaffoldArchivedSnapshot();
+    // A non-canonical loose EVENT PACK for P1 (valid pack, compacted bytes): event_pack
+    // build fails, but phase_snapshot (processed first) already folded + deleted.
+    const events = ProgressLog.parse(parseYaml(PROGRESS)).events;
+    const pack = await buildValidEventPack(tmpDir, "P1", events);
+    await mkdir(join(tmpDir, ".code-pact", "state", "archive", "event-packs"), { recursive: true });
+    await writeFile(
+      join(tmpDir, ".code-pact", "state", "archive", "event-packs", "P1.json"),
+      JSON.stringify(pack), // compact (non-canonical) → fails the canonical bind at build
+      "utf8",
+    );
+    const r = run(["state", "compact-archive", "--write", "--json"]);
+    expect(r.code).toBe(2);
+    const body = json(r);
+    expect(body.error?.code).toBe("ARCHIVE_BUNDLE_WRITE_FAILED");
+    // failed_kind / completed_results / partial_applied live in the top-level envelope data.
+    const ed = body.data!;
+    expect(ed.failed_kind).toBe("event_pack");
+    expect(ed.partial_applied).toBe(true);
+    const completed = ed.completed_results as { kind: string; deleted: string[] }[];
+    expect(completed.find((c) => c.kind === "phase_snapshot")!.deleted).toContain("P1");
+    // The earlier kind's mutation really happened (loose snapshot gone).
+    expect(await fileExists(LOOSE_SNAPSHOT())).toBe(false);
   });
 });

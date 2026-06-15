@@ -6,7 +6,12 @@ import { loadArchiveBundles } from "./archive-bundle-loader.ts";
 import { bindBundleMember } from "./archive-bundle-binding.ts";
 import { validateEventPackTier1 } from "./event-pack-reader.ts";
 import { reconcileLooseAndBundle, type BundleMemberIndex } from "./archive-bundle-index.ts";
-import { enumerateLooseMembers, writeArchiveBundle, type BundleWriteOutcome } from "./archive-bundle-writer.ts";
+import {
+  assertLooseMemberValid,
+  enumerateLooseMembers,
+  writeArchiveBundle,
+  type BundleWriteOutcome,
+} from "./archive-bundle-writer.ts";
 import {
   ARCHIVE_DECISIONS_DIR_SEGMENTS,
   ARCHIVE_EVENT_PACKS_DIR_SEGMENTS,
@@ -237,6 +242,12 @@ export async function planCompactArchive(
   for (const m of loose) {
     const entry = index.get(kind)?.get(m.id) ?? null;
     if (entry == null) {
+      // Would be folded into a new bundle — validate it the SAME way the writer would,
+      // so the dry-run never promises a would_bundle the write path would fail to build.
+      // An unfoldable loose record THROWS BundleWriteError("build") here, exactly as
+      // `compactArchive` would (fail-fast — an invalid archive record is a corruption,
+      // not a skip-and-continue).
+      assertLooseMemberValid(kind, m);
       would_bundle.push(m.id);
       continue;
     }

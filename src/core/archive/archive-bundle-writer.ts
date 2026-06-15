@@ -68,6 +68,23 @@ export function serializeArchiveBundle(bundle: ArchiveBundle): string {
  * (Tier-1 canonical order); `member_ids_sha256` is the sorted id-set checksum.
  * Throws on a duplicate id or an empty member set.
  */
+/**
+ * Assert a single LOOSE record's bytes are a valid prospective bundle member of `kind`:
+ * canonical, self-consistent, id↔internal-identity, and (event_pack) full Tier-1. The
+ * underlying validators throw `ARCHIVE_BUNDLE_INVALID` / `EVENT_PACK_INVALID`; this wraps
+ * any such fault as `BundleWriteError("build")` so a build-time member fault surfaces as
+ * `ARCHIVE_BUNDLE_WRITE_FAILED` (NOT `ARCHIVE_BUNDLE_INVALID`, which means a corrupt bundle
+ * STORE). Shared by the writer and the dry-run so they agree on what is foldable.
+ */
+export function assertLooseMemberValid(kind: ArchiveBundleKind, member: LooseMember): void {
+  try {
+    bindBundleMember(kind, { id: member.id, sha256: sha256Hex(member.bytes), bytes: member.bytes }, "(building bundle)");
+    if (kind === "event_pack") validateEventPackTier1(member.id, member.bytes, "(building bundle)");
+  } catch (err) {
+    throw new BundleWriteError("build", false, `loose record "${member.id}" is not foldable: ${(err as Error).message}`);
+  }
+}
+
 export function buildArchiveBundle(kind: ArchiveBundleKind, members: readonly LooseMember[]): ArchiveBundle {
   if (members.length === 0) {
     throw new BundleWriteError("build", false, "cannot build a bundle with no members");
@@ -78,17 +95,8 @@ export function buildArchiveBundle(kind: ArchiveBundleKind, members: readonly Lo
       throw new BundleWriteError("build", false, `duplicate member id "${m.id}"`);
     }
     seen.add(m.id);
-    const sha256 = sha256Hex(m.bytes);
-    // Self-bind: assert the loose record is a canonical record of `kind` whose own
-    // internal identity equals `m.id`. Throws ARCHIVE_BUNDLE_INVALID otherwise.
-    bindBundleMember(kind, { id: m.id, sha256, bytes: m.bytes }, "(building bundle)");
-    // event_pack also needs full Tier-1 (per-entry bijection / order / event_ids_sha256):
-    // bindBundleMember only checks schema + canonical + id, so without this a
-    // semantically-invalid pack could be written into the store as a bad authority
-    // artifact the store could never self-repair. Reject it at WRITE time, not just at
-    // delete time.
-    if (kind === "event_pack") validateEventPackTier1(m.id, m.bytes, "(building bundle)");
-    return { id: m.id, sha256, bytes: m.bytes };
+    assertLooseMemberValid(kind, m);
+    return { id: m.id, sha256: sha256Hex(m.bytes), bytes: m.bytes };
   });
   records.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   return ArchiveBundle.parse({

@@ -270,6 +270,10 @@ async function cmdStateCompactArchive(argv: string[], globalJson: boolean): Prom
   const json = globalJson || values.json === true;
   const write = values.write === true;
 
+  if (positionals.length > 1) {
+    emitError(json, "CONFIG_ERROR", "state compact-archive accepts at most one kind positional.");
+    return 2;
+  }
   // Optional positional restricts to one kind; otherwise all kinds.
   let kinds = ArchiveBundleKind.options;
   const kindArg = positionals[0];
@@ -288,11 +292,39 @@ async function cmdStateCompactArchive(argv: string[], globalJson: boolean): Prom
 
   const cwd = process.cwd();
 
+  // A build/write/verify member fault → ARCHIVE_BUNDLE_WRITE_FAILED; a corrupt bundle
+  // STORE (loadArchiveBundles) → ARCHIVE_BUNDLE_INVALID. Literal codes so the error-code
+  // surface lock tracks them. `failedKind` + `completed` make a partial multi-kind
+  // --write run honest: earlier kinds may already have applied before a later kind fails.
+  const emitFailure = (
+    err: unknown,
+    failedKind: ArchiveBundleKind | null,
+    completed: unknown[],
+  ): number => {
+    const message = `state compact-archive failed${failedKind ? ` on ${failedKind}` : ""}: ${(err as Error).message}`;
+    const partial = completed.length > 0 || (err instanceof BundleWriteError && err.partial_applied);
+    const data = {
+      ...(failedKind ? { failed_kind: failedKind } : {}),
+      ...(err instanceof BundleWriteError ? { phase: err.phase } : {}),
+      partial_applied: partial,
+      completed_results: completed,
+    };
+    if (err instanceof BundleWriteError) emitError(json, "ARCHIVE_BUNDLE_WRITE_FAILED", message, { data });
+    else emitError(json, "ARCHIVE_BUNDLE_INVALID", message, { data });
+    return 2;
+  };
+
   const runImpl = async (): Promise<number> => {
-    try {
-      if (!write) {
+    if (!write) {
+      // Dry-run: read-only. A would_bundle member fault throws fail-closed (no mutation).
+      let failedKind: ArchiveBundleKind | null = null;
+      try {
         const plans = [];
-        for (const kind of kinds) plans.push(await planCompactArchive(cwd, kind));
+        for (const kind of kinds) {
+          failedKind = kind;
+          plans.push(await planCompactArchive(cwd, kind));
+          failedKind = null;
+        }
         if (json) emitOk({ mode: "dry_run", plans });
         else {
           for (const p of plans) {
@@ -302,36 +334,38 @@ async function cmdStateCompactArchive(argv: string[], globalJson: boolean): Prom
           }
         }
         return 0;
+      } catch (err) {
+        return emitFailure(err, failedKind, []); // dry-run mutates nothing
       }
-      const written = [];
+    }
+
+    const completed: Array<Record<string, unknown>> = [];
+    let failedKind: ArchiveBundleKind | null = null;
+    try {
       for (const kind of kinds) {
+        failedKind = kind;
         const out = await compactArchive(cwd, kind);
-        written.push({
+        completed.push({
           kind,
           bundle: out.bundle.kind,
           deleted: out.delete.deleted,
           skipped: out.delete.skipped,
           remaining_loose: out.delete.remaining_loose,
         });
+        failedKind = null;
       }
-      if (json) emitOk({ mode: "written", results: written });
-      else {
-        for (const r of written) {
-          process.stdout.write(
-            `${r.kind}: bundle=${r.bundle}, deleted ${r.deleted.length}, skipped ${r.skipped.length}, remaining ${r.remaining_loose}\n`,
-          );
-        }
-      }
-      return 0;
     } catch (err) {
-      // A bundle write/verify fault or a corrupt bundle store (loadArchiveBundles)
-      // surfaces fail-closed; nothing more is mutated past the point it threw. Literal
-      // codes (not a variable) so the error-code surface lock detects + tracks them.
-      const message = `state compact-archive failed: ${(err as Error).message}`;
-      if (err instanceof BundleWriteError) emitError(json, "ARCHIVE_BUNDLE_WRITE_FAILED", message);
-      else emitError(json, "ARCHIVE_BUNDLE_INVALID", message);
-      return 2;
+      return emitFailure(err, failedKind, completed);
     }
+    if (json) emitOk({ mode: "written", results: completed });
+    else {
+      for (const r of completed) {
+        process.stdout.write(
+          `${String(r.kind)}: bundle=${String(r.bundle)}, deleted ${(r.deleted as string[]).length}, skipped ${(r.skipped as unknown[]).length}, remaining ${String(r.remaining_loose)}\n`,
+        );
+      }
+    }
+    return 0;
   };
 
   if (write) return withWriteLock(cwd, "state compact-archive --write", json, runImpl);

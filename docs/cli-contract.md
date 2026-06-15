@@ -2412,7 +2412,7 @@ code-pact state compact P1 --write --json    # write the pack, delete the loose 
 
 **`--write` success shape** (`data.mode === "written"`, exit 0): `data.results[]`, one per kind, each `{ kind, bundle, deleted[], skipped[], remaining_loose }` — `bundle` is the write outcome (`written` / `noop_already_bundled` / `noop_no_members`), `deleted` the unlinked ids, `skipped` the per-record fail-closed skips, `remaining_loose` the loose records that survived the run.
 
-**Failure** (exit 2): a build/write/verify fault → `ARCHIVE_BUNDLE_WRITE_FAILED`; a corrupt bundle **store** (any Tier-1-invalid bundle) → `ARCHIVE_BUNDLE_INVALID`. Both fail closed before/at the offending step — nothing past it is mutated. Refreshing a record after its loose copy was compacted is currently unsupported (the producer returns `ineligible compacted_record_refresh_unsupported`); restore the loose record first.
+**Failure** (exit 2): a build/write/verify fault (a non-canonical / Tier-1-invalid loose member, a write/verify failure) → `ARCHIVE_BUNDLE_WRITE_FAILED`; a corrupt bundle **store** (any Tier-1-invalid bundle) → `ARCHIVE_BUNDLE_INVALID`. The command never proceeds past the failing kind. In all-kind `--write` mode, **earlier kinds may already have applied** before a later kind fails — the failure envelope's `data` carries `failed_kind`, `data.phase` (`build` / `write_bundle` / `verify_bundle`), `partial_applied`, and `completed_results[]` (the kinds that finished) so "how far it got" is never hidden. Refreshing a record after its loose copy was compacted is currently unsupported (the producer returns `ineligible compacted_record_refresh_unsupported`); restore the loose record first.
 
 Examples:
 
