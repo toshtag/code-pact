@@ -15,7 +15,7 @@ import { loadRoadmap } from "../plan/roadmap.ts";
 import { resolvePhaseRef } from "../plan/resolve-phase.ts";
 import { resolveWithinProject } from "../path-safety.ts";
 import { readPackSources } from "../progress/all-sources.ts";
-import { loadPhaseSnapshot } from "./load-phase-snapshot.ts";
+import { resolvePhaseSnapshotRaw } from "./load-phase-snapshot.ts";
 import {
   validateSnapshotEventEvidenceForSnapshot,
   type SnapshotEvidenceIssue,
@@ -23,6 +23,7 @@ import {
 import {
   validateEventPackTier1,
   computeEventIdsSha256,
+  resolveEventPackRaw,
   type LoadedEventPack,
 } from "./event-pack-reader.ts";
 import {
@@ -33,7 +34,7 @@ import {
   classifyLoosePackRelationship,
   type CoveredLooseRelationship,
 } from "./event-pack-cleanup.ts";
-import { eventPackPath, sha256Hex, phaseSnapshotPath } from "./paths.ts";
+import { eventPackPath, sha256Hex } from "./paths.ts";
 import { atomicWriteText } from "../../io/atomic-text.ts";
 
 // ---------------------------------------------------------------------------
@@ -374,19 +375,11 @@ export async function planEventPack(cwd: string, phaseId: string): Promise<Event
     };
   }
 
-  // 2. Read the snapshot RAW bytes (for snapshot_sha256) + the parsed form.
-  let snapshotRaw: string;
-  try {
-    snapshotRaw = await readFile(phaseSnapshotPath(cwd, phaseId), "utf8");
-  } catch (err) {
-    if (isEnoent(err)) return { kind: "ineligible", phaseId, block: { kind: "snapshot_missing" } };
-    return {
-      kind: "ineligible",
-      phaseId,
-      block: { kind: "snapshot_invalid", detail: (err as Error).message },
-    };
-  }
-  const snapRes = await loadPhaseSnapshot(cwd, phaseId);
+  // 2. Resolve the snapshot RAW bytes (for snapshot_sha256) + the parsed form from
+  //    loose ∪ bundle, so compaction still works once the snapshot was compacted
+  //    into a phase_snapshot bundle (the resolved bytes are canonical, so the sha is
+  //    unchanged). A bundle fault is fail-closed to snapshot_invalid.
+  const snapRes = await resolvePhaseSnapshotRaw(cwd, phaseId);
   if (snapRes.kind === "absent") {
     return { kind: "ineligible", phaseId, block: { kind: "snapshot_missing" } };
   }
@@ -397,6 +390,7 @@ export async function planEventPack(cwd: string, phaseId: string): Promise<Event
       block: { kind: "snapshot_invalid", detail: String(snapRes.error) },
     };
   }
+  const snapshotRaw = snapRes.raw;
   const snapshot = snapRes.snapshot;
 
   // 3. Read + Tier-1-validate the TARGET pack (if any) BEFORE the evidence check.
@@ -406,11 +400,21 @@ export async function planEventPack(cwd: string, phaseId: string): Promise<Event
   //    contributes nothing to the resolved map). The lenient read below already
   //    skips this same corrupt pack as an EVENT_PACK_INVALID issue; we want the
   //    sharper, pack-specific verdict to win.
+  // Resolve the existing pack from loose ∪ bundle, so a pack compacted into a bundle
+  // (loose file gone) is recognized as existing — NOT treated as absent, which would
+  // regenerate a subset pack from any leftover loose events. Full Tier-1 still runs.
   let existing: LoadedEventPack | null = null;
-  try {
-    const existingRaw = await readFile(packPath, "utf8");
+  const existingPackRaw = await resolveEventPackRaw(cwd, phaseId);
+  if (existingPackRaw.kind === "invalid") {
+    return {
+      kind: "ineligible",
+      phaseId,
+      block: { kind: "pack_invalid", detail: String(existingPackRaw.error) },
+    };
+  }
+  if (existingPackRaw.kind === "present") {
     try {
-      existing = validateEventPackTier1(phaseId, existingRaw, packPath);
+      existing = validateEventPackTier1(phaseId, existingPackRaw.bytes, packPath);
     } catch (err) {
       return {
         kind: "ineligible",
@@ -418,16 +422,8 @@ export async function planEventPack(cwd: string, phaseId: string): Promise<Event
         block: { kind: "pack_invalid", detail: (err as Error).message },
       };
     }
-  } catch (err) {
-    if (!isEnoent(err)) {
-      return {
-        kind: "ineligible",
-        phaseId,
-        block: { kind: "pack_invalid", detail: (err as Error).message },
-      };
-    }
-    // ENOENT — no existing pack; fall through to the candidate-build branch.
   }
+  // absent — no existing pack; fall through to the candidate-build branch.
 
   // 4. Durable sources (lenient: a corrupt OTHER phase's pack can't block this;
   //    the TARGET pack's own validity was already decided above).

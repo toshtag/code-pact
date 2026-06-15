@@ -10,7 +10,6 @@ import {
   looseEventRelPath,
   type DeleteGateContext,
 } from "../../../../src/core/archive/event-pack-cleanup-gate.ts";
-import { phaseSnapshotPath } from "../../../../src/core/archive/paths.ts";
 import { eventFileName } from "../../../../src/core/progress/event-id.ts";
 import { eventsDir } from "../../../../src/core/progress/events-io.ts";
 import type { ProgressEvent } from "../../../../src/core/schemas/progress-event.ts";
@@ -126,7 +125,8 @@ async function archivedWithPack(): Promise<{
     snapshotTaskIds: new Set(["P1-T1"]),
     packIds: new Set(pack.events.map((e) => e.id)),
     packSnapshotSha256: pack.snapshot_sha256,
-    snapshotPath: phaseSnapshotPath(cwd, "P1"),
+    cwd,
+    phaseId: "P1",
   };
   const startedFile = eventFileName(events.find((e) => e.status === "started")!);
   const doneFile = eventFileName(events.find((e) => e.status === "done")!);

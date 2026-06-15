@@ -10,7 +10,6 @@ import {
   looseEventRelPath,
   type DeleteGateContext,
 } from "../../../../src/core/archive/event-pack-cleanup-gate.ts";
-import { phaseSnapshotPath } from "../../../../src/core/archive/paths.ts";
 import { eventFileName } from "../../../../src/core/progress/event-id.ts";
 import { eventsDir, parseEventFileName } from "../../../../src/core/progress/events-io.ts";
 import type { ProgressEvent } from "../../../../src/core/schemas/progress-event.ts";
@@ -114,7 +113,8 @@ async function archivedWithPack(): Promise<{ events: ProgressEvent[]; ctx: Delet
     snapshotTaskIds: new Set(["P1-T1"]),
     packIds: new Set(pack.events.map((e) => e.id)),
     packSnapshotSha256: pack.snapshot_sha256,
-    snapshotPath: phaseSnapshotPath(cwd, "P1"),
+    cwd,
+    phaseId: "P1",
   };
   return { events, ctx };
 }
@@ -198,7 +198,8 @@ describe("evaluateDeleteGate — per-file dispositions (NO unlink)", () => {
       snapshotTaskIds: new Set(["P9-T9"]),
       packIds: new Set(),
       packSnapshotSha256: "0".repeat(64),
-      snapshotPath: phaseSnapshotPath(cwd, "P1"),
+      cwd,
+    phaseId: "P1",
     };
     const v = await evaluateDeleteGate(cwd, looseFileOf(events, "done"), foreignCtx);
     expect(v).toEqual({ disposition: "skip", reason: "task_not_in_snapshot" });
