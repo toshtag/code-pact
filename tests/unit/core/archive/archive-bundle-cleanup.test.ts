@@ -7,6 +7,7 @@ import {
   compactArchive,
   deleteLooseCoveredByBundle,
   planCompactArchive,
+  retireSupersededBundles,
 } from "../../../../src/core/archive/archive-bundle-cleanup.ts";
 import { writeArchiveBundle } from "../../../../src/core/archive/archive-bundle-writer.ts";
 import { planEventPack } from "../../../../src/core/archive/event-pack.ts";
@@ -204,12 +205,13 @@ describe("compactArchive — fold + drop (file-count reduction)", () => {
     expect(loadArchiveBundles(cwd).index.get("phase_snapshot")?.get("P1")).toBeTruthy();
   });
 
-  it("idempotent: a second run finds nothing loose (no redundant bundle, no deletes)", async () => {
+  it("idempotent: a second run is a converged noop (consolidated bundle already exists)", async () => {
     await scaffold();
     await compactArchive(cwd, "phase_snapshot");
     const bundlesAfter1 = loadArchiveBundles(cwd).bundles.length;
     const out2 = await compactArchive(cwd, "phase_snapshot");
-    expect(out2.bundle.kind).toBe("noop_no_members"); // nothing new to bundle
+    expect(out2.bundle.kind).toBe("noop_already_bundled"); // the consolidated bundle is already there
+    expect(out2.retired_bundles).toEqual([]);
     expect(out2.delete.deleted).toEqual([]);
     expect(loadArchiveBundles(cwd).bundles.length).toBe(bundlesAfter1); // no duplicate bundle
   });
@@ -232,24 +234,112 @@ describe("compactArchive — fold + drop (file-count reduction)", () => {
     expect(planBundle.kind).toBe("write"); // identical verdict — snapshot resolved from bundle
   });
 
-  it("redundant-bundle-safe: a later new loose record bundles ONLY itself", async () => {
+  it("CONVERGES: a later new loose record consolidates with the existing bundle (one bundle, both members)", async () => {
     await scaffold(true); // P1 + P2 loose
     // First, compact only P1 by pre-deleting P2's loose so the first run sees just P1.
     const p2bytes = await readFile(phaseSnapshotPath(cwd, "P2"), "utf8");
     await rm(phaseSnapshotPath(cwd, "P2"));
-    await compactArchive(cwd, "phase_snapshot"); // bundles {P1}, deletes P1
-    // Now restore P2 as a new loose record and compact again.
+    await compactArchive(cwd, "phase_snapshot"); // bundle {P1}, delete loose P1
+    expect(loadArchiveBundles(cwd).bundles.length).toBe(1);
+    // Now restore P2 as a new loose record and compact again → CONSOLIDATE into one bundle.
     await writeFile(phaseSnapshotPath(cwd, "P2"), p2bytes, "utf8");
     const out = await compactArchive(cwd, "phase_snapshot");
     expect(out.bundle.kind).toBe("written");
-    if (out.bundle.kind === "written") expect(out.bundle.member_count).toBe(1); // ONLY P2, not P1 again
+    if (out.bundle.kind === "written") expect(out.bundle.member_count).toBe(2); // P1 + P2 consolidated
+    expect(out.retired_bundles.length).toBe(1); // the old {P1} bundle is retired
     expect(out.delete.deleted).toEqual(["P2"]);
-    // Both phases resolve from bundles; no loose remain.
+    // Exactly ONE bundle now holds both phases; no loose remain; the count did NOT grow.
+    expect(loadArchiveBundles(cwd).bundles.length).toBe(1);
     const idx = loadArchiveBundles(cwd).index.get("phase_snapshot")!;
     expect(idx.has("P1")).toBe(true);
     expect(idx.has("P2")).toBe(true);
     expect(await exists(phaseSnapshotPath(cwd, "P1"))).toBe(false);
     expect(await exists(phaseSnapshotPath(cwd, "P2"))).toBe(false);
+  });
+});
+
+describe("compactArchive — bundle CONSOLIDATION (the bound: bundle count converges to 1/kind)", () => {
+  it("two separate bundles → consolidated into ONE; both old bundles retired; no truth lost", async () => {
+    await scaffold(true); // P1 + P2 snapshots on disk
+    const p1 = await readFile(phaseSnapshotPath(cwd, "P1"), "utf8");
+    const p2 = await readFile(phaseSnapshotPath(cwd, "P2"), "utf8");
+    // Two pre-existing bundles (as if from two prior compaction runs); loose removed.
+    await writePhaseSnapshotBundle("a.json", [{ id: "P1", bytes: p1 }]);
+    await writePhaseSnapshotBundle("b.json", [{ id: "P2", bytes: p2 }]);
+    await rm(phaseSnapshotPath(cwd, "P1"));
+    await rm(phaseSnapshotPath(cwd, "P2"));
+    expect(loadArchiveBundles(cwd).bundles.length).toBe(2);
+
+    const out = await compactArchive(cwd, "phase_snapshot");
+    expect(out.bundle.kind).toBe("written"); // a new consolidated bundle {P1,P2}
+    if (out.bundle.kind === "written") expect(out.bundle.member_count).toBe(2);
+    expect(out.retired_bundles.sort()).toEqual(["bundles/a.json", "bundles/b.json"]);
+    // Converged: exactly ONE bundle holds both; both phases still resolve.
+    const after = loadArchiveBundles(cwd);
+    expect(after.bundles.length).toBe(1);
+    expect(after.index.get("phase_snapshot")!.has("P1")).toBe(true);
+    expect(after.index.get("phase_snapshot")!.has("P2")).toBe(true);
+  });
+
+  it("dry-run would_retire_bundles PREDICTS exactly what --write retires", async () => {
+    await scaffold(true);
+    const p1 = await readFile(phaseSnapshotPath(cwd, "P1"), "utf8");
+    const p2 = await readFile(phaseSnapshotPath(cwd, "P2"), "utf8");
+    await writePhaseSnapshotBundle("a.json", [{ id: "P1", bytes: p1 }]);
+    await writePhaseSnapshotBundle("b.json", [{ id: "P2", bytes: p2 }]);
+    await rm(phaseSnapshotPath(cwd, "P1"));
+    await rm(phaseSnapshotPath(cwd, "P2"));
+    const plan = await planCompactArchive(cwd, "phase_snapshot");
+    expect(plan.would_retire_bundles.sort()).toEqual(["bundles/a.json", "bundles/b.json"]);
+    // The write actually retires the SAME set the dry-run predicted.
+    const out = await compactArchive(cwd, "phase_snapshot");
+    expect(out.retired_bundles.sort()).toEqual(plan.would_retire_bundles.sort());
+  });
+
+  it("retire GATE: a VANISHED keep authority → throws, retires nothing (delete authority is on-disk)", async () => {
+    await scaffold(true);
+    const p1 = await readFile(phaseSnapshotPath(cwd, "P1"), "utf8");
+    await rm(phaseSnapshotPath(cwd, "P1"));
+    await writePhaseSnapshotBundle("covered.json", [{ id: "P1", bytes: p1 }]);
+    // keepFile names a bundle that does NOT exist on disk → must refuse, never unlink on a
+    // caller-asserted (but absent) authority. (This is the truth-loss hole the gate closes.)
+    await expect(
+      retireSupersededBundles(cwd, "phase_snapshot", "bundles/nonexistent.json"),
+    ).rejects.toThrow();
+    expect(loadArchiveBundles(cwd).index.get("phase_snapshot")!.has("P1")).toBe(true); // survives
+  });
+
+  it("retire GATE: a bundle the on-disk KEEP bundle does NOT fully cover is KEPT; a covered one is retired", async () => {
+    await scaffold(true);
+    const p1 = await readFile(phaseSnapshotPath(cwd, "P1"), "utf8");
+    const p2 = await readFile(phaseSnapshotPath(cwd, "P2"), "utf8");
+    await rm(phaseSnapshotPath(cwd, "P1"));
+    await rm(phaseSnapshotPath(cwd, "P2"));
+    await writePhaseSnapshotBundle("keep.json", [{ id: "P1", bytes: p1 }]); // the on-disk authority: covers P1 only
+    await writePhaseSnapshotBundle("covered.json", [{ id: "P1", bytes: p1 }]); // covered by keep
+    await writePhaseSnapshotBundle("uncovered.json", [{ id: "P2", bytes: p2 }]); // P2 NOT in keep
+    const retired = await retireSupersededBundles(cwd, "phase_snapshot", "bundles/keep.json");
+    expect(retired).toEqual(["bundles/covered.json"]); // only the fully-covered bundle
+    expect(loadArchiveBundles(cwd).index.get("phase_snapshot")!.has("P2")).toBe(true); // uncovered survives
+  });
+
+  it("CRASH-SAFE reconverge: a leftover stale overlapping old bundle is retired on the next run", async () => {
+    await scaffold(true);
+    const p1 = await readFile(phaseSnapshotPath(cwd, "P1"), "utf8");
+    // First compaction → the real consolidated {P1,P2} bundle (canonical bytes) + loose gone.
+    await compactArchive(cwd, "phase_snapshot");
+    expect(loadArchiveBundles(cwd).bundles.length).toBe(1);
+    // Simulate a crash that left a stale old {P1} bundle behind (its P1 member is byte-
+    // identical to the consolidated one — the cross-bundle uniqueness rule tolerates it).
+    await writePhaseSnapshotBundle("old.json", [{ id: "P1", bytes: p1 }]);
+    expect(loadArchiveBundles(cwd).bundles.length).toBe(2);
+
+    const out = await compactArchive(cwd, "phase_snapshot");
+    // The full set already exists as the consolidated bundle → noop write; the stale {P1}
+    // bundle is retired (its member lives byte-identically in the consolidated one).
+    expect(out.bundle.kind).toBe("noop_already_bundled");
+    expect(out.retired_bundles).toEqual(["bundles/old.json"]);
+    expect(loadArchiveBundles(cwd).bundles.length).toBe(1); // reconverged
   });
 });
 

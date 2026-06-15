@@ -329,7 +329,7 @@ async function cmdStateCompactArchive(argv: string[], globalJson: boolean): Prom
         else {
           for (const p of plans) {
             process.stdout.write(
-              `${p.kind}: would bundle ${p.would_bundle.length}, delete ${p.would_delete.length}, skip ${p.would_skip.length}\n`,
+              `${p.kind}: would bundle ${p.would_bundle.length}, delete ${p.would_delete.length}, retire ${p.would_retire_bundles.length} bundle(s), skip ${p.would_skip.length}\n`,
             );
           }
         }
@@ -348,6 +348,7 @@ async function cmdStateCompactArchive(argv: string[], globalJson: boolean): Prom
         completed.push({
           kind,
           bundle: out.bundle.kind,
+          retired_bundles: out.retired_bundles,
           deleted: out.delete.deleted,
           skipped: out.delete.skipped,
           remaining_loose: out.delete.remaining_loose,
@@ -361,7 +362,7 @@ async function cmdStateCompactArchive(argv: string[], globalJson: boolean): Prom
     else {
       for (const r of completed) {
         process.stdout.write(
-          `${String(r.kind)}: bundle=${String(r.bundle)}, deleted ${(r.deleted as string[]).length}, skipped ${(r.skipped as unknown[]).length}, remaining ${String(r.remaining_loose)}\n`,
+          `${String(r.kind)}: bundle=${String(r.bundle)}, retired ${(r.retired_bundles as string[]).length} bundle(s), deleted ${(r.deleted as string[]).length}, skipped ${(r.skipped as unknown[]).length}, remaining ${String(r.remaining_loose)}\n`,
         );
       }
     }

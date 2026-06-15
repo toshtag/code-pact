@@ -7,6 +7,28 @@ import { seedDurableEvents } from "../helpers/seed-events.ts";
 import { buildValidEventPack } from "../helpers/event-pack-fixture.ts";
 import { ProgressLog } from "../../src/core/schemas/progress-event.ts";
 import { parse as parseYaml } from "yaml";
+import { sha256Hex } from "../../src/core/archive/paths.ts";
+import { computeMemberIdsSha256 } from "../../src/core/archive/archive-bundle-reader.ts";
+import { ARCHIVE_BUNDLE_SCHEMA_VERSION } from "../../src/core/schemas/archive-bundle.ts";
+
+/** Write a Tier-1-VALID bundle file directly (the member bytes may be semantically
+ *  invalid for the kind — bundle Tier-1 only checks sha / order / set). */
+async function writeRawBundle(dir: string, name: string, kind: string, members: { id: string; bytes: string }[]): Promise<void> {
+  await mkdir(dir, { recursive: true });
+  const full = members
+    .map((m) => ({ id: m.id, sha256: sha256Hex(m.bytes), bytes: m.bytes }))
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  await writeFile(
+    join(dir, name),
+    JSON.stringify({
+      schema_version: ARCHIVE_BUNDLE_SCHEMA_VERSION,
+      kind,
+      member_ids_sha256: computeMemberIdsSha256(full.map((m) => m.id)),
+      members: full,
+    }),
+    "utf8",
+  );
+}
 
 // Layer 4 entry — `state compact-archive` folds loose archive records into bundles and
 // deletes the verified loose copies, end-to-end through the real built CLI. Dry-run
@@ -191,6 +213,57 @@ describe("state compact-archive — build-fault surfacing (P1.1/P1.2)", () => {
     const r = run(["state", "compact-archive", "phase_snapshot", "--json"]); // dry-run
     expect(r.code).toBe(2);
     expect(json(r).error?.code).toBe("ARCHIVE_BUNDLE_WRITE_FAILED");
+  });
+
+  it("an EXISTING bundle member that is not foldable (Tier-1-invalid event_pack) → build fault in BOTH dry-run and --write; nothing retired/deleted", async () => {
+    await scaffoldArchivedSnapshot(); // gives the on-disk snapshot buildValidEventPack needs
+    const events = ProgressLog.parse(parseYaml(PROGRESS)).events;
+    const pack = await buildValidEventPack(tmpDir, "P1", events);
+    // A canonical event_pack with a WRONG event_ids_sha256: bundle Tier-1 passes (sha
+    // matches its bytes), but it is NOT foldable (event_pack Tier-1 rejects it).
+    const tamperedBytes = JSON.stringify({ ...pack, event_ids_sha256: "0".repeat(64) }, null, 2) + "\n";
+    await writeRawBundle(BUNDLES_DIR(), "ep.json", "event_pack", [{ id: "P1", bytes: tamperedBytes }]);
+
+    const dry = run(["state", "compact-archive", "event_pack", "--json"]); // dry-run lies if unfixed
+    expect(dry.code).toBe(2);
+    expect(json(dry).error?.code).toBe("ARCHIVE_BUNDLE_WRITE_FAILED");
+    expect(json(dry).data?.phase).toBe("build");
+
+    const w = run(["state", "compact-archive", "event_pack", "--write", "--json"]);
+    expect(w.code).toBe(2);
+    expect(json(w).error?.code).toBe("ARCHIVE_BUNDLE_WRITE_FAILED");
+    expect(json(w).data?.phase).toBe("build");
+    // The bad bundle is untouched — no retire, no consolidated write.
+    expect(await fileExists(join(BUNDLES_DIR(), "ep.json"))).toBe(true);
+    expect(await bundleCount()).toBe(1); // only the bad one; no consolidated bundle written
+  });
+
+  it("a Tier-1-valid but writer-NON-canonical bundle at its OWN content-address path → write_bundle conflict in BOTH dry-run and --write; nothing retired/deleted", async () => {
+    await scaffoldArchivedSnapshot(); // canonical loose P1.json — a foldable phase snapshot
+    const memberBytes = await readFile(LOOSE_SNAPSHOT(), "utf8");
+    // The consolidation for the {P1} set targets exactly this content-addressed filename.
+    const name = `phase_snapshot-${computeMemberIdsSha256(["P1"]).slice(0, 16)}.json`;
+    // writeRawBundle emits a COMPACT (no-indent) wrapper — Tier-1-valid and the member is
+    // foldable, but it is NOT the writer's canonical 2-space+newline serialization. So the
+    // build succeeds, then the content-address target already holds DIFFERENT raw bytes →
+    // the writer (and now the dry-run) must fail closed at write_bundle, not overwrite it.
+    await writeRawBundle(BUNDLES_DIR(), name, "phase_snapshot", [{ id: "P1", bytes: memberBytes }]);
+    await rm(LOOSE_SNAPSHOT()); // no loose — the conflict is bundle-only
+    const before = await readFile(join(BUNDLES_DIR(), name), "utf8");
+
+    const dry = run(["state", "compact-archive", "phase_snapshot", "--json"]); // dry-run lies if unfixed
+    expect(dry.code).toBe(2);
+    expect(json(dry).error?.code).toBe("ARCHIVE_BUNDLE_WRITE_FAILED");
+    expect(json(dry).data?.phase).toBe("write_bundle");
+
+    const w = run(["state", "compact-archive", "phase_snapshot", "--write", "--json"]);
+    expect(w.code).toBe(2);
+    expect(json(w).error?.code).toBe("ARCHIVE_BUNDLE_WRITE_FAILED");
+    expect(json(w).data?.phase).toBe("write_bundle");
+
+    // The non-canonical bundle is untouched — not retired, not overwritten; no second bundle.
+    expect(await readFile(join(BUNDLES_DIR(), name), "utf8")).toBe(before);
+    expect(await bundleCount()).toBe(1);
   });
 });
 

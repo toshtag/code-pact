@@ -40,11 +40,12 @@ export type BundleWriteOutcome =
   | { kind: "noop_already_bundled"; bundleFile: string; member_count: number }
   | { kind: "noop_no_members" };
 
-/** A bundle write/verify failure. `phase` says how far it got; `partial_applied` is
- *  true once the bundle file reached disk (a verify failure leaves it there). */
+/** A bundle write/verify/retire failure. `phase` says how far it got; `partial_applied`
+ *  is true once disk was mutated (the bundle file reached disk on verify, or some old
+ *  bundle was already retired on retire_bundle). */
 export class BundleWriteError extends Error {
   readonly code = "ARCHIVE_BUNDLE_WRITE_FAILED";
-  readonly phase: "build" | "write_bundle" | "verify_bundle";
+  readonly phase: "build" | "write_bundle" | "verify_bundle" | "retire_bundle";
   readonly partial_applied: boolean;
   readonly detail: string;
   constructor(phase: BundleWriteError["phase"], partialApplied: boolean, detail: string) {
@@ -69,19 +70,26 @@ export function serializeArchiveBundle(bundle: ArchiveBundle): string {
  * Throws on a duplicate id or an empty member set.
  */
 /**
- * Assert a single LOOSE record's bytes are a valid prospective bundle member of `kind`:
+ * Assert a single prospective bundle MEMBER's bytes are foldable into a bundle of `kind`:
  * canonical, self-consistent, id↔internal-identity, and (event_pack) full Tier-1. The
  * underlying validators throw `ARCHIVE_BUNDLE_INVALID` / `EVENT_PACK_INVALID`; this wraps
  * any such fault as `BundleWriteError("build")` so a build-time member fault surfaces as
  * `ARCHIVE_BUNDLE_WRITE_FAILED` (NOT `ARCHIVE_BUNDLE_INVALID`, which means a corrupt bundle
- * STORE). Shared by the writer and the dry-run so they agree on what is foldable.
+ * STORE). Shared by the writer (over the FULL consolidated set: existing bundle members ∪
+ * loose) and the dry-run, so they agree on what is foldable. `sourceLabel` (e.g. "loose
+ * record" / "existing bundle member") keeps the error honest about where the bad member came
+ * from.
  */
-export function assertLooseMemberValid(kind: ArchiveBundleKind, member: LooseMember): void {
+export function assertBundleMemberFoldable(
+  kind: ArchiveBundleKind,
+  member: LooseMember,
+  sourceLabel = "record",
+): void {
   try {
     bindBundleMember(kind, { id: member.id, sha256: sha256Hex(member.bytes), bytes: member.bytes }, "(building bundle)");
     if (kind === "event_pack") validateEventPackTier1(member.id, member.bytes, "(building bundle)");
   } catch (err) {
-    throw new BundleWriteError("build", false, `loose record "${member.id}" is not foldable: ${(err as Error).message}`);
+    throw new BundleWriteError("build", false, `${sourceLabel} "${member.id}" is not foldable: ${(err as Error).message}`);
   }
 }
 
@@ -95,7 +103,7 @@ export function buildArchiveBundle(kind: ArchiveBundleKind, members: readonly Lo
       throw new BundleWriteError("build", false, `duplicate member id "${m.id}"`);
     }
     seen.add(m.id);
-    assertLooseMemberValid(kind, m);
+    assertBundleMemberFoldable(kind, m, "bundle member");
     return { id: m.id, sha256: sha256Hex(m.bytes), bytes: m.bytes };
   });
   records.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));

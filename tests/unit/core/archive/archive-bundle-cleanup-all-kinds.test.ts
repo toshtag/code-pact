@@ -175,7 +175,7 @@ describe("decision_record refresh of a bundle-only record is REFUSED, not a dead
     // No fresh loose materialized → no stuck stale-bundle + diverging-loose state.
     expect(await readFile(decisionRecordPath(cwd, DEC_REF), "utf8").then(() => true, () => false)).toBe(false);
     const re = await compactArchive(cwd, "decision_record");
-    expect(re.bundle.kind).toBe("noop_no_members");
+    expect(re.bundle.kind).toBe("noop_already_bundled"); // consolidated bundle already exists
     expect(re.delete.deleted).toEqual([]);
     expect(re.delete.skipped).toEqual([]); // no bundle_stale survivor
   });
@@ -203,7 +203,7 @@ describe("phase_snapshot refresh of a bundle-only record is REFUSED, not a dead-
     expect(await readFile(phaseSnapshotPath(cwd, "P1"), "utf8").then(() => true, () => false)).toBe(false);
     // Re-compacting stays clean: nothing loose to fold, the existing bundle is intact.
     const re = await compactArchive(cwd, "phase_snapshot");
-    expect(re.bundle.kind).toBe("noop_no_members");
+    expect(re.bundle.kind).toBe("noop_already_bundled"); // consolidated bundle already exists
     expect(re.delete.deleted).toEqual([]);
     expect(re.delete.skipped).toEqual([]); // crucially: no bundle_stale survivor
   });
