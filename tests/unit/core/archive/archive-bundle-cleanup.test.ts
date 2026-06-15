@@ -296,19 +296,31 @@ describe("compactArchive — bundle CONSOLIDATION (the bound: bundle count conve
     expect(out.retired_bundles.sort()).toEqual(plan.would_retire_bundles.sort());
   });
 
-  it("retire GATE: a bundle the consolidated set does NOT fully cover is KEPT (no truth lost)", async () => {
+  it("retire GATE: a VANISHED keep authority → throws, retires nothing (delete authority is on-disk)", async () => {
+    await scaffold(true);
+    const p1 = await readFile(phaseSnapshotPath(cwd, "P1"), "utf8");
+    await rm(phaseSnapshotPath(cwd, "P1"));
+    await writePhaseSnapshotBundle("covered.json", [{ id: "P1", bytes: p1 }]);
+    // keepFile names a bundle that does NOT exist on disk → must refuse, never unlink on a
+    // caller-asserted (but absent) authority. (This is the truth-loss hole the gate closes.)
+    await expect(
+      retireSupersededBundles(cwd, "phase_snapshot", "bundles/nonexistent.json"),
+    ).rejects.toThrow();
+    expect(loadArchiveBundles(cwd).index.get("phase_snapshot")!.has("P1")).toBe(true); // survives
+  });
+
+  it("retire GATE: a bundle the on-disk KEEP bundle does NOT fully cover is KEPT; a covered one is retired", async () => {
     await scaffold(true);
     const p1 = await readFile(phaseSnapshotPath(cwd, "P1"), "utf8");
     const p2 = await readFile(phaseSnapshotPath(cwd, "P2"), "utf8");
-    await writePhaseSnapshotBundle("covered.json", [{ id: "P1", bytes: p1 }]);
-    await writePhaseSnapshotBundle("uncovered.json", [{ id: "P2", bytes: p2 }]);
-    // A consolidated set that covers P1 but NOT P2 (defensive: never delete a bundle
-    // whose member would be lost). keepFile names neither, so both are candidates.
-    const consolidatedById = new Map([["P1", p1]]);
-    const retired = await retireSupersededBundles(cwd, "phase_snapshot", "bundles/consolidated.json", consolidatedById);
+    await rm(phaseSnapshotPath(cwd, "P1"));
+    await rm(phaseSnapshotPath(cwd, "P2"));
+    await writePhaseSnapshotBundle("keep.json", [{ id: "P1", bytes: p1 }]); // the on-disk authority: covers P1 only
+    await writePhaseSnapshotBundle("covered.json", [{ id: "P1", bytes: p1 }]); // covered by keep
+    await writePhaseSnapshotBundle("uncovered.json", [{ id: "P2", bytes: p2 }]); // P2 NOT in keep
+    const retired = await retireSupersededBundles(cwd, "phase_snapshot", "bundles/keep.json");
     expect(retired).toEqual(["bundles/covered.json"]); // only the fully-covered bundle
-    // uncovered.json survives → P2 is still resolvable from a bundle.
-    expect(loadArchiveBundles(cwd).index.get("phase_snapshot")!.has("P2")).toBe(true);
+    expect(loadArchiveBundles(cwd).index.get("phase_snapshot")!.has("P2")).toBe(true); // uncovered survives
   });
 
   it("CRASH-SAFE reconverge: a leftover stale overlapping old bundle is retired on the next run", async () => {

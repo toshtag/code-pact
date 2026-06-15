@@ -8,6 +8,7 @@ import { validateEventPackTier1 } from "./event-pack-reader.ts";
 import { reconcileLooseAndBundle, type BundleMemberIndex } from "./archive-bundle-index.ts";
 import {
   assertLooseMemberValid,
+  BundleWriteError,
   enumerateLooseMembers,
   writeArchiveBundle,
   type BundleWriteOutcome,
@@ -322,22 +323,36 @@ function gatherConsolidatedMembers(
   return [...byId].map(([id, bytes]) => ({ id, bytes }));
 }
 
-/** Retire every bundle file of `kind` EXCEPT `keepFile`, once the consolidated bundle
- *  (`consolidatedById`) holds all of its members byte-identically — so no truth is lost.
- *  TOCTOU + path-safe; a bundle whose member is missing/diverges from the consolidated
- *  one is SKIPPED (kept), never deleted. Exported for direct testing of that safety gate. */
+/** Retire every bundle file of `kind` EXCEPT `keepFile`, once the on-disk KEEP bundle
+ *  holds all of that bundle's members byte-identically — so no truth is lost. The delete
+ *  AUTHORITY is the freshly-loaded, Tier-1-validated `keepFile` bundle itself (NOT a
+ *  caller-supplied map): a `keepById` is built from its members, and a bundle is retired
+ *  only when every member is present in `keepById` byte-identically. The keep bundle MUST
+ *  exist (and match `kind`) in the just-loaded store; if it is gone we throw rather than
+ *  delete on a vanished authority (in `compactArchive` it was written + readback-verified
+ *  immediately before, so its absence here is an abnormal race). TOCTOU + path-safe; a
+ *  bundle whose member is missing/diverges from the keep bundle is SKIPPED (kept). */
 export async function retireSupersededBundles(
   cwd: string,
   kind: ArchiveBundleKind,
   keepFile: string,
-  consolidatedById: ReadonlyMap<string, string>,
 ): Promise<string[]> {
-  const retired: string[] = [];
   const { bundles } = loadArchiveBundles(cwd);
+  const keep = bundles.find((b) => b.file === keepFile && b.loaded.kind === kind);
+  if (!keep) {
+    throw new BundleWriteError(
+      "verify_bundle",
+      true,
+      `consolidated bundle ${keepFile} is not present at retire time — refusing to retire on a vanished authority`,
+    );
+  }
+  const keepById = new Map(keep.loaded.members.map((m) => [m.id, m.bytes] as const));
+
+  const retired: string[] = [];
   for (const { file, loaded } of bundles) {
     if (loaded.kind !== kind || file === keepFile) continue;
-    const allCovered = loaded.members.every((m) => consolidatedById.get(m.id) === m.bytes);
-    if (!allCovered) continue; // fail-closed: keep a bundle the consolidated one doesn't fully cover
+    const allCovered = loaded.members.every((m) => keepById.get(m.id) === m.bytes);
+    if (!allCovered) continue; // fail-closed: keep a bundle the keep bundle doesn't fully cover
     let abs: string;
     try {
       abs = await resolveWithinProject(cwd, [...ARCHIVE_BUNDLES_DIR_SEGMENTS, basename(file)].join("/"));
@@ -355,8 +370,10 @@ export async function retireSupersededBundles(
 }
 
 /**
- * Fold + CONSOLIDATE + drop, so repeated runs converge to ONE bundle per kind (the
- * bundle file count stays bounded): gather the kind's full member set (existing bundle
+ * Fold + CONSOLIDATE + drop, so repeated runs converge to ONE bundle per kind IN A
+ * HEALTHY STORE (the bundle file count stays bounded; a `bundle_stale` loose / an
+ * uncovered bundle / a fail-closed survivor is left in place to protect truth, by
+ * design): gather the kind's full member set (existing bundle
  * members ∪ new loose), write it as a SINGLE consolidated bundle, retire the now-
  * superseded smaller bundles, then delete every loose record the consolidated bundle
  * holds. CRASH-SAFE by ordering: the consolidated bundle is written + verified BEFORE
@@ -380,13 +397,10 @@ export async function compactArchive(
   // Retire the smaller bundles the consolidated one now supersedes (AFTER it is on disk
   // + verified). Skip when nothing was consolidated (no members).
   let retired: string[] = [];
-  if (bundle.kind !== "noop_no_members") {
-    const consolidatedFile =
-      bundle.kind === "written" || bundle.kind === "noop_already_bundled" ? bundle.bundleFile : null;
-    if (consolidatedFile) {
-      const byId = new Map(members.map((m) => [m.id, m.bytes] as const));
-      retired = await retireSupersededBundles(cwd, kind, consolidatedFile, byId);
-    }
+  if (bundle.kind === "written" || bundle.kind === "noop_already_bundled") {
+    // The retire authority is the on-disk consolidated bundle itself, re-loaded +
+    // Tier-1-validated inside retireSupersededBundles — not the in-memory `members`.
+    retired = await retireSupersededBundles(cwd, kind, bundle.bundleFile);
   }
 
   const del = await deleteLooseCoveredByBundle(cwd, kind);
