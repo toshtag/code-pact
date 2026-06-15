@@ -6,7 +6,12 @@ import { loadArchiveBundles } from "./archive-bundle-loader.ts";
 import { bindBundleMember } from "./archive-bundle-binding.ts";
 import { validateEventPackTier1 } from "./event-pack-reader.ts";
 import { reconcileLooseAndBundle, type BundleMemberIndex } from "./archive-bundle-index.ts";
-import { enumerateLooseMembers, writeArchiveBundle, type BundleWriteOutcome } from "./archive-bundle-writer.ts";
+import {
+  assertLooseMemberValid,
+  enumerateLooseMembers,
+  writeArchiveBundle,
+  type BundleWriteOutcome,
+} from "./archive-bundle-writer.ts";
 import {
   ARCHIVE_DECISIONS_DIR_SEGMENTS,
   ARCHIVE_EVENT_PACKS_DIR_SEGMENTS,
@@ -206,6 +211,62 @@ export async function deleteLooseCoveredByBundle(
   }
 
   return { kind, deleted, vanished, skipped, partial_applied: deleted.length > 0, remaining_loose: remaining };
+}
+
+export type CompactArchivePlan = {
+  kind: ArchiveBundleKind;
+  /** loose ids not yet in any bundle — would be folded into a new bundle. */
+  would_bundle: string[];
+  /** loose ids a verified bundle already holds byte-identically — would be deleted. */
+  would_delete: string[];
+  /** loose ids that cannot be acted on (bundle bytes differ / member invalid). */
+  would_skip: ArchiveDeleteSkip[];
+};
+
+/**
+ * READ-ONLY plan of what {@link compactArchive} would do for `kind`: partition the
+ * loose records into would-bundle (not yet in a bundle), would-delete (a bundle holds
+ * them byte-identically), and would-skip (a same-id bundle member differs / is invalid).
+ * No mutation. The bundle store is loaded STRICT — a corrupt store throws (the dry-run
+ * surfaces the same fault the write path would fail-closed on).
+ */
+export async function planCompactArchive(
+  cwd: string,
+  kind: ArchiveBundleKind,
+): Promise<CompactArchivePlan> {
+  const index = loadArchiveBundles(cwd).index;
+  const loose = await enumerateLooseMembers(cwd, kind);
+  const would_bundle: string[] = [];
+  const would_delete: string[] = [];
+  const would_skip: ArchiveDeleteSkip[] = [];
+  for (const m of loose) {
+    const entry = index.get(kind)?.get(m.id) ?? null;
+    if (entry == null) {
+      // Would be folded into a new bundle — validate it the SAME way the writer would,
+      // so the dry-run never promises a would_bundle the write path would fail to build.
+      // An unfoldable loose record THROWS BundleWriteError("build") here, exactly as
+      // `compactArchive` would (fail-fast — an invalid archive record is a corruption,
+      // not a skip-and-continue).
+      assertLooseMemberValid(kind, m);
+      would_bundle.push(m.id);
+      continue;
+    }
+    // Mirror the delete gate's member validation so the dry-run cannot promise a
+    // would_delete the write path would actually skip as bundle_member_invalid.
+    try {
+      bindBundleMember(kind, { id: m.id, sha256: entry.sha256, bytes: entry.bytes }, ARCHIVE_BUNDLE_STORE_LABEL);
+      if (kind === "event_pack") validateEventPackTier1(m.id, entry.bytes, ARCHIVE_BUNDLE_STORE_LABEL);
+    } catch (err) {
+      would_skip.push({ id: m.id, reason: "bundle_member_invalid", detail: (err as Error).message });
+      continue;
+    }
+    if (entry.bytes === m.bytes) {
+      would_delete.push(m.id);
+      continue;
+    }
+    would_skip.push({ id: m.id, reason: "bundle_stale" });
+  }
+  return { kind, would_bundle, would_delete, would_skip };
 }
 
 export type CompactArchiveOutcome = {

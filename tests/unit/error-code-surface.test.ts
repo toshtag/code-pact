@@ -55,6 +55,7 @@ const KNOWN_CODES: Record<string, "public" | "plan" | "doctor" | "adapter" | "in
   ALREADY_INITIALIZED: "public",
   AMBIGUOUS_TASK_ID: "public",
   AMBIGUOUS_PHASE_ID: "public",
+  ARCHIVE_BUNDLE_WRITE_FAILED: "public",
   BASELINE_NOT_FOUND: "public",
   COMMANDS_FAILED: "public",
   CONFIG_ERROR: "public",
