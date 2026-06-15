@@ -24,7 +24,7 @@ import {
   findLiveTaskOwnersByTaskId,
   type EventPackBlock,
 } from "./event-pack.ts";
-import { loadPhaseSnapshot } from "./load-phase-snapshot.ts";
+import { resolvePhaseSnapshotRaw } from "./load-phase-snapshot.ts";
 import { validateEventPackTier1 } from "./event-pack-reader.ts";
 import { bindPackToSnapshot } from "./event-pack-binding.ts";
 import { readPackSources } from "../progress/all-sources.ts";
@@ -34,7 +34,7 @@ import {
   parseEventFileName,
   validateEventFileContent,
 } from "../progress/events-io.ts";
-import { eventPackPath, phaseSnapshotPath, sha256Hex } from "./paths.ts";
+import { eventPackPath, sha256Hex } from "./paths.ts";
 import { classifyLoosePackRelationship, type CleanupSkipReason } from "./event-pack-cleanup.ts";
 
 /** Project-relative path of a loose event file (matches CleanupSkip.path). */
@@ -124,8 +124,10 @@ export type DeleteGateContext = {
   packIds: ReadonlySet<string>;
   /** G8: the verified pack's `snapshot_sha256`. */
   packSnapshotSha256: string;
-  /** G8: the snapshot file path, re-read each call so divergence is caught live. */
-  snapshotPath: string;
+  /** G8: the project + phase id, so the snapshot is RE-RESOLVED (loose ∪ bundle)
+   *  fresh each call — divergence is caught live AND a bundled snapshot still binds. */
+  cwd: string;
+  phaseId: string;
 };
 
 /** A global abort signal (G6/G7/G8): the pack/snapshot/control-plane is no longer
@@ -248,18 +250,18 @@ export async function evaluateDeleteGate(
     };
   }
 
-  // G8 — pack and snapshot have not diverged since the plan. Re-read the snapshot
-  // bytes NOW so a swap between plan and this check is caught.
-  let currentSnapshotSha256: string;
-  try {
-    currentSnapshotSha256 = sha256Hex(await readFile(ctx.snapshotPath, "utf8"));
-  } catch (err) {
+  // G8 — pack and snapshot have not diverged since the plan. RE-RESOLVE the snapshot
+  // bytes NOW from loose ∪ bundle so a swap between plan and this check is caught AND
+  // a snapshot compacted into a bundle (loose file gone) still resolves canonically.
+  const snapNow = await resolvePhaseSnapshotRaw(ctx.cwd, ctx.phaseId);
+  if (snapNow.kind !== "valid") {
     return {
       disposition: "abort",
       reason: "snapshot_diverged",
-      detail: `snapshot became unreadable at delete time: ${(err as Error).message}`,
+      detail: `snapshot unresolvable at delete time (${snapNow.kind})`,
     };
   }
+  const currentSnapshotSha256 = sha256Hex(snapNow.raw);
   if (ctx.packSnapshotSha256 !== currentSnapshotSha256) {
     return {
       disposition: "abort",
@@ -371,10 +373,12 @@ export async function prepareLooseCleanup(
   // plan.kind === "noop_already_packed" — proceed to the authoritative re-read.
   if (hooks.afterPlan) await hooks.afterPlan();
 
-  // Re-load the snapshot (task set + path for G8) and the verified pack (ids +
-  // snapshot_sha256). The plan just proved both valid; a race that broke them since
-  // is reported as the matching ineligible block rather than crashing.
-  const snapRes = await loadPhaseSnapshot(cwd, phaseId);
+  // Re-resolve the snapshot (task set + raw bytes for binding) from loose ∪ bundle,
+  // so cleanup works once the snapshot was compacted into a bundle. The plan just
+  // proved both valid; a race that broke them since is reported as the matching
+  // ineligible block rather than crashing. G8 re-resolves fresh per file from the
+  // ctx's cwd/phaseId (TOCTOU), so a snapshot change at delete time is still caught.
+  const snapRes = await resolvePhaseSnapshotRaw(cwd, phaseId);
   if (snapRes.kind !== "valid") {
     return {
       kind: "ineligible",
@@ -385,6 +389,7 @@ export async function prepareLooseCleanup(
     };
   }
   const snapshot = snapRes.snapshot;
+  const snapshotRaw = snapRes.raw;
   const snapshotTaskIds = new Set(snapshot.tasks.map((t) => t.id));
 
   // The cleanup TARGET SET — the loose files for the snapshot's tasks (the set the
@@ -409,7 +414,6 @@ export async function prepareLooseCleanup(
   let packIds: Set<string>;
   let packSnapshotSha256: string;
   try {
-    const snapshotRaw = await readFile(phaseSnapshotPath(cwd, phaseId), "utf8");
     const loadedPack = validateEventPackTier1(phaseId, await readFile(packPath, "utf8"), packPath);
     const bindIssues = bindPackToSnapshot(loadedPack, snapshot, snapshotRaw, looseEventsById);
     if (bindIssues.length > 0) {
@@ -449,7 +453,8 @@ export async function prepareLooseCleanup(
       snapshotTaskIds,
       packIds,
       packSnapshotSha256,
-      snapshotPath: phaseSnapshotPath(cwd, phaseId),
+      cwd,
+      phaseId,
     },
     target: targetFiles.map((f) => f.file),
   };

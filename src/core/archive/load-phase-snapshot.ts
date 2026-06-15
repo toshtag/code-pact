@@ -89,6 +89,50 @@ export async function loadPhaseSnapshot(
   }
 }
 
+/** A snapshot resolved from loose ∪ bundle, carrying BOTH the canonical raw bytes
+ *  (for `snapshot_sha256`) and the parsed body. `invalid` is never collapsed to
+ *  `absent`. */
+export type ResolvedPhaseSnapshotRaw =
+  | { kind: "absent" }
+  | { kind: "invalid"; error: unknown }
+  | { kind: "valid"; raw: string; snapshot: PhaseSnapshot };
+
+/**
+ * Resolve a phase snapshot's canonical raw bytes + parsed body from loose ∪ bundle
+ * (`reader-loose-wins`), so the event-pack compaction path (which needs the snapshot
+ * to compute / re-verify `snapshot_sha256`) works whether the snapshot is a loose
+ * file or has been compacted into a `phase_snapshot` bundle. The resolved bytes ARE
+ * the canonical bytes the writer emitted (loose file and bundle member are
+ * byte-identical), so `sha256Hex(raw)` matches any stored `snapshot_sha256`. A
+ * bundle-integrity fault is fail-closed to `invalid` (never thrown). Behaves exactly
+ * like `loadPhaseSnapshot` (plus raw) when no bundles exist.
+ */
+export async function resolvePhaseSnapshotRaw(
+  cwd: string,
+  phaseId: string,
+): Promise<ResolvedPhaseSnapshotRaw> {
+  let resolved;
+  try {
+    resolved = await resolveArchiveRecordBytes({
+      kind: "phase_snapshot",
+      id: phaseId,
+      mode: "reader-loose-wins",
+      readLooseRaw: () => readLoosePhaseSnapshotRaw(cwd, phaseId),
+      loadBundleIndex: () => loadArchiveBundles(cwd).index,
+    });
+  } catch (error) {
+    return { kind: "invalid", error };
+  }
+  if (resolved.kind === "absent") return { kind: "absent" };
+  if (resolved.kind === "invalid") return { kind: "invalid", error: resolved.error };
+  try {
+    const snapshot = PhaseSnapshot.parse(JSON.parse(resolved.bytes) as unknown);
+    return { kind: "valid", raw: resolved.bytes, snapshot };
+  } catch (error) {
+    return { kind: "invalid", error };
+  }
+}
+
 /** Resolution of a roadmap ref whose live phase file is missing. */
 export type PhaseRefResolution =
   | { kind: "tolerated"; snapshot: PhaseSnapshot }

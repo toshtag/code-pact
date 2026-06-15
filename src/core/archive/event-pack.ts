@@ -15,7 +15,7 @@ import { loadRoadmap } from "../plan/roadmap.ts";
 import { resolvePhaseRef } from "../plan/resolve-phase.ts";
 import { resolveWithinProject } from "../path-safety.ts";
 import { readPackSources } from "../progress/all-sources.ts";
-import { loadPhaseSnapshot } from "./load-phase-snapshot.ts";
+import { resolvePhaseSnapshotRaw } from "./load-phase-snapshot.ts";
 import {
   validateSnapshotEventEvidenceForSnapshot,
   type SnapshotEvidenceIssue,
@@ -33,7 +33,7 @@ import {
   classifyLoosePackRelationship,
   type CoveredLooseRelationship,
 } from "./event-pack-cleanup.ts";
-import { eventPackPath, sha256Hex, phaseSnapshotPath } from "./paths.ts";
+import { eventPackPath, sha256Hex } from "./paths.ts";
 import { atomicWriteText } from "../../io/atomic-text.ts";
 
 // ---------------------------------------------------------------------------
@@ -374,19 +374,11 @@ export async function planEventPack(cwd: string, phaseId: string): Promise<Event
     };
   }
 
-  // 2. Read the snapshot RAW bytes (for snapshot_sha256) + the parsed form.
-  let snapshotRaw: string;
-  try {
-    snapshotRaw = await readFile(phaseSnapshotPath(cwd, phaseId), "utf8");
-  } catch (err) {
-    if (isEnoent(err)) return { kind: "ineligible", phaseId, block: { kind: "snapshot_missing" } };
-    return {
-      kind: "ineligible",
-      phaseId,
-      block: { kind: "snapshot_invalid", detail: (err as Error).message },
-    };
-  }
-  const snapRes = await loadPhaseSnapshot(cwd, phaseId);
+  // 2. Resolve the snapshot RAW bytes (for snapshot_sha256) + the parsed form from
+  //    loose ∪ bundle, so compaction still works once the snapshot was compacted
+  //    into a phase_snapshot bundle (the resolved bytes are canonical, so the sha is
+  //    unchanged). A bundle fault is fail-closed to snapshot_invalid.
+  const snapRes = await resolvePhaseSnapshotRaw(cwd, phaseId);
   if (snapRes.kind === "absent") {
     return { kind: "ineligible", phaseId, block: { kind: "snapshot_missing" } };
   }
@@ -397,6 +389,7 @@ export async function planEventPack(cwd: string, phaseId: string): Promise<Event
       block: { kind: "snapshot_invalid", detail: String(snapRes.error) },
     };
   }
+  const snapshotRaw = snapRes.raw;
   const snapshot = snapRes.snapshot;
 
   // 3. Read + Tier-1-validate the TARGET pack (if any) BEFORE the evidence check.
