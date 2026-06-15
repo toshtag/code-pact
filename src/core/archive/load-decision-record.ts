@@ -1,6 +1,12 @@
 import { readFile } from "node:fs/promises";
 import { DecisionStateRecord } from "../schemas/decision-state-record.ts";
 import { decisionRecordPath } from "./paths.ts";
+import { loadArchiveBundles } from "./archive-bundle-loader.ts";
+import { decisionRecordStem } from "./archive-bundle-binding.ts";
+import {
+  resolveArchiveRecordBytes,
+  type RawLooseRecord,
+} from "./resolve-archive-record.ts";
 
 // ---------------------------------------------------------------------------
 // The FIRST reader of the `.code-pact/state/archive/decisions/<stem>-<hash8>.json`
@@ -33,24 +39,76 @@ export type LoadDecisionRecordResult =
  * `design/decisions/*.md` (the caller's `normalizeDecisionRef`); the schema's
  * `DecisionRefPath` would reject anything else at parse time anyway.
  */
+/**
+ * Read the LOOSE decision record's raw bytes off disk (no parsing). ENOENT →
+ * `absent`; any other read error (EACCES/EISDIR) → `invalid` (never collapsed to
+ * `absent`). Factored out of {@link loadDecisionRecord} so the loose ∪ bundle
+ * resolver can compare loose↔bundle byte-for-byte (the loose writer emits the same
+ * canonical `serializeDecisionRecord` bytes a bundle member carries).
+ */
+export async function readLooseDecisionRecordRaw(
+  cwd: string,
+  canonicalRef: string,
+): Promise<RawLooseRecord> {
+  const path = decisionRecordPath(cwd, canonicalRef);
+  try {
+    return { kind: "present", bytes: await readFile(path, "utf8") };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { kind: "absent" };
+    return { kind: "invalid", error };
+  }
+}
+
 export async function loadDecisionRecord(
   cwd: string,
   canonicalRef: string,
 ): Promise<LoadDecisionRecordResult> {
-  const path = decisionRecordPath(cwd, canonicalRef);
-
-  let raw: string;
+  const raw = await readLooseDecisionRecordRaw(cwd, canonicalRef);
+  if (raw.kind === "absent") return { kind: "absent" };
+  if (raw.kind === "invalid") return { kind: "invalid", error: raw.error };
   try {
-    raw = await readFile(path, "utf8");
+    const record = DecisionStateRecord.parse(JSON.parse(raw.bytes) as unknown);
+    return { kind: "valid", record };
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { kind: "absent" };
-    // Present-but-unreadable (EACCES, EISDIR, …) must NOT be treated as absent —
-    // that would silently tolerate a missing decision on a broken record.
     return { kind: "invalid", error };
   }
+}
 
+/**
+ * Resolve a decision-state record from loose ∪ bundle (`reader-loose-wins`): the
+ * loose record wins; a RETIRED + compacted decision resolves from its bundle member
+ * once its loose copy is gone. Returns the SAME {@link LoadDecisionRecordResult}
+ * shape `loadDecisionRecord` returns, so the gate / lint predicates and
+ * `recordMatchingRef` consume it unchanged — they keep their own identity authority
+ * checks (`canonical_ref` / `original_path` / `path_sha256`).
+ *
+ * POSTURE: a bundle-integrity fault (the shared resolver throws) is fail-closed
+ * mapped to `invalid` here and never re-thrown — for the gate that yields
+ * `not_released`, for lint-soften it yields "do not soften" (the lint stays at its
+ * original severity; the reader never crashes — fail-soft). A bundle-only decision
+ * still passes `recordMatchingRef`'s identity checks, since `bindBundleMember` alone
+ * is not full authority.
+ */
+export async function resolveArchiveDecisionRecord(
+  cwd: string,
+  canonicalRef: string,
+): Promise<LoadDecisionRecordResult> {
+  let resolved;
   try {
-    const record = DecisionStateRecord.parse(JSON.parse(raw) as unknown);
+    resolved = await resolveArchiveRecordBytes({
+      kind: "decision_record",
+      id: decisionRecordStem(canonicalRef),
+      mode: "reader-loose-wins",
+      readLooseRaw: () => readLooseDecisionRecordRaw(cwd, canonicalRef),
+      loadBundleIndex: () => loadArchiveBundles(cwd).index,
+    });
+  } catch (error) {
+    return { kind: "invalid", error };
+  }
+  if (resolved.kind === "invalid") return { kind: "invalid", error: resolved.error };
+  if (resolved.kind === "absent") return { kind: "absent" };
+  try {
+    const record = DecisionStateRecord.parse(JSON.parse(resolved.bytes) as unknown);
     return { kind: "valid", record };
   } catch (error) {
     return { kind: "invalid", error };

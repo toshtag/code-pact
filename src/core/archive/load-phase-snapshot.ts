@@ -5,13 +5,7 @@ import type { TerminalEvidence } from "../schemas/phase-snapshot.ts";
 import { isSafePlanId } from "../schemas/plan-id.ts";
 import { archivePhasesDir, phaseSnapshotPath, sha256Hex } from "./paths.ts";
 import { loadArchiveBundles } from "./archive-bundle-loader.ts";
-import { bindBundleMember } from "./archive-bundle-binding.ts";
-
-// A generic label for bundle-integrity error messages. The index merges members
-// across many bundle files, so the specific offending file is named by
-// `loadArchiveBundles` itself (duplicate_member_conflict); self-bind faults are
-// reported against the store as a whole.
-const ARCHIVE_BUNDLE_STORE_LABEL = ".code-pact/state/archive/bundles";
+import { resolveArchiveRecordBytes } from "./resolve-archive-record.ts";
 
 // ---------------------------------------------------------------------------
 // The FIRST reader of the `.code-pact/state/archive/phases/<id>.json` snapshots
@@ -117,70 +111,54 @@ export type PhaseRefResolution =
  * enforced by `mergeArchivedTaskIndex`, which every reader path runs before any
  * archived id enters the known set.
  *
- * SOURCE = loose ∪ bundle (bounded-archive compaction). The loose
- * `archive/phases/<id>.json` record is the existing source and WINS; a bundle
- * (`archive/bundles/*.json`) supplies the record ONLY once its loose copy is
- * compacted away. Because loose wins, a PRESENT loose record is the answer and the
- * bundle store is NOT loaded at all for that id — this keeps the loose-only path
- * byte-for-byte unchanged AND isolates it: an unrelated corrupt bundle elsewhere in
- * the store can never turn a healthy loose resolution into a failure. (Detecting a
- * loose+bundle SAME-id disagreement — `bundle_stale` — is the compaction
- * delete-time gate's job, not every reader's; that is where `reconcileLooseAndBundle`
- * lives.) Only when the loose record is ABSENT do we consult the bundle: load the
- * index → `bindBundleMember` self-binding (the member is a canonical,
- * self-consistent phase_snapshot whose own `phase_id` equals its id) → the EXISTING
- * ref-identity authority checks below. `bindBundleMember` ALONE is NOT full
- * authority binding: it never proves the record answers THIS roadmap ref — the
- * phase_id/original_path/path_sha256 checks below still run on the bundle bytes.
- * Every bundle-integrity fault (the bundle ops throw) is converted to `fail_invalid`
- * here — fail-closed, never tolerated and never thrown out of this resolver.
+ * SOURCE = loose ∪ bundle (bounded-archive compaction), resolved through the shared
+ * `resolveArchiveRecordBytes` in `reader-loose-wins` mode so this reader and every
+ * other archive reader stay on one implementation. The loose `archive/phases/<id>.json`
+ * record WINS; a bundle (`archive/bundles/*.json`) supplies the record ONLY once its
+ * loose copy is compacted away. A PRESENT loose record is the answer and the bundle
+ * store is NOT loaded for that id — keeping the loose-only path byte-for-byte
+ * unchanged AND isolating it: an unrelated corrupt bundle elsewhere can never fail a
+ * healthy loose resolution. (Detecting a loose+bundle SAME-id `bundle_stale` is the
+ * `strict-reconcile` callers' job — writer/readback, the delete-time gate, explicit
+ * verify — not a reader's.) The shared resolver self-binds the bundle member; this
+ * reader's POSTURE is fail-closed strict (a referenced phase), so a bundle-integrity
+ * throw maps to `fail_invalid`. `bindBundleMember` ALONE is NOT full authority
+ * binding: the EXISTING ref-identity checks below (phase_id/original_path/path_sha256/
+ * terminal) still run on the resolved bytes. This resolver never throws.
  */
 export async function resolveMissingPhaseRef(
   cwd: string,
   ref: { id: string; path: string },
 ): Promise<PhaseRefResolution> {
-  // Loose record bytes (loose-wins; the existing source). Unsafe id /
-  // present-but-unreadable is fail-closed invalid (never absent), as before.
-  const loose = await readLoosePhaseSnapshotRaw(cwd, ref.id);
-  if (loose.kind === "invalid") {
+  // Resolve from loose ∪ bundle via the shared resolver (reader-loose-wins): a
+  // present loose record wins and the bundle store is not loaded; only an absent
+  // loose record consults the bundle. A bundle-integrity fault THROWS — this
+  // resolver's posture is fail-closed strict (a referenced phase), so every throw
+  // maps to `fail_invalid`. A loose-read invalidity is returned, not thrown.
+  let resolved;
+  try {
+    resolved = await resolveArchiveRecordBytes({
+      kind: "phase_snapshot",
+      id: ref.id,
+      mode: "reader-loose-wins",
+      readLooseRaw: () => readLoosePhaseSnapshotRaw(cwd, ref.id),
+      loadBundleIndex: () => loadArchiveBundles(cwd).index,
+    });
+  } catch (error) {
+    return {
+      kind: "fail_invalid",
+      reason: `archive bundle integrity check failed (${(error as Error).message})`,
+    };
+  }
+  if (resolved.kind === "invalid") {
     return { kind: "fail_invalid", reason: "archive snapshot is corrupt or unreadable" };
   }
-
-  let canonicalBytes: string | null;
-  if (loose.kind === "present") {
-    // Loose wins unconditionally: the bundle store is irrelevant to this id and is
-    // NOT loaded, so an unrelated corrupt bundle cannot fail a healthy resolution.
-    canonicalBytes = loose.bytes;
-  } else {
-    // No loose record → the bundle store is the fallback. load + self-bind THROW on
-    // any integrity fault; this resolver must not — every throw is fail-closed.
-    try {
-      const { index } = loadArchiveBundles(cwd);
-      const bundleEntry = index.get("phase_snapshot")?.get(ref.id) ?? null;
-      if (bundleEntry != null) {
-        // Self-bind the bundle member: schema + phase_id↔id identity + canonical
-        // bytes. (Authority that it answers THIS ref is the checklist below.)
-        bindBundleMember(
-          "phase_snapshot",
-          { id: ref.id, sha256: bundleEntry.sha256, bytes: bundleEntry.bytes },
-          ARCHIVE_BUNDLE_STORE_LABEL,
-        );
-      }
-      canonicalBytes = bundleEntry?.bytes ?? null;
-    } catch (error) {
-      return {
-        kind: "fail_invalid",
-        reason: `archive bundle integrity check failed (${(error as Error).message})`,
-      };
-    }
-  }
-
   // Referenced, but neither loose nor bundle has it → strict fail-closed missing.
-  if (canonicalBytes == null) return { kind: "fail_missing" };
+  if (resolved.kind === "absent") return { kind: "fail_missing" };
 
   let s: PhaseSnapshot;
   try {
-    s = PhaseSnapshot.parse(JSON.parse(canonicalBytes) as unknown);
+    s = PhaseSnapshot.parse(JSON.parse(resolved.bytes) as unknown);
   } catch {
     return { kind: "fail_invalid", reason: "archive snapshot is corrupt or unreadable" };
   }

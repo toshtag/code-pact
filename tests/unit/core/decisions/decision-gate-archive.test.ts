@@ -26,7 +26,14 @@ import {
 } from "../../../../src/core/decisions/decision-gate-archive.ts";
 import { resolveDecisionGate } from "../../../../src/core/decisions/adr.ts";
 import { writeDecisionRecord } from "../../../../src/core/archive/decision-record.ts";
-import { decisionRecordPath, sha256Hex } from "../../../../src/core/archive/paths.ts";
+import {
+  archiveBundlesDir,
+  decisionRecordPath,
+  sha256Hex,
+} from "../../../../src/core/archive/paths.ts";
+import { decisionRecordStem } from "../../../../src/core/archive/archive-bundle-binding.ts";
+import { computeMemberIdsSha256 } from "../../../../src/core/archive/archive-bundle-reader.ts";
+import { ARCHIVE_BUNDLE_SCHEMA_VERSION } from "../../../../src/core/schemas/archive-bundle.ts";
 
 const NOW = new Date("2026-06-10T00:00:00.000Z");
 const REF = "design/decisions/foo-rfc.md";
@@ -227,5 +234,105 @@ describe("resolveDecisionGate wrapper — record fallback only on retired explic
     } finally {
       await rm(outside, { recursive: true, force: true });
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// loose ∪ bundle predicate wiring: a RETIRED + compacted decision (its loose record
+// folded into a bundle) still releases a gate / softens a lint, and a corrupt bundle
+// is fail-closed (gate) / fail-soft (lint) without throwing.
+// ---------------------------------------------------------------------------
+
+async function writeDecisionBundle(
+  name: string,
+  members: { id: string; bytes: string }[],
+): Promise<void> {
+  const dir = archiveBundlesDir(cwd);
+  await mkdir(dir, { recursive: true });
+  const full = members
+    .map((m) => ({ id: m.id, sha256: sha256Hex(m.bytes), bytes: m.bytes }))
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  await writeFile(
+    join(dir, name),
+    JSON.stringify({
+      schema_version: ARCHIVE_BUNDLE_SCHEMA_VERSION,
+      kind: "decision_record",
+      member_ids_sha256: computeMemberIdsSha256(full.map((m) => m.id)),
+      members: full,
+    }),
+    "utf8",
+  );
+}
+
+/** Retire the decision AND compact its loose record into a bundle: write ADR +
+ *  record, read the canonical bytes, delete the live .md and the loose record. */
+async function setupBundleOnly(adr: string): Promise<void> {
+  await writeFile(join(cwd, REF), adr, "utf8");
+  expect((await writeDecisionRecord(cwd, REF, { now: NOW })).kind).toBe("written");
+  const recPath = decisionRecordPath(cwd, REF);
+  const bytes = await readFile(recPath, "utf8");
+  await rm(join(cwd, REF)); // retire (live .md gone)
+  await rm(recPath); // compact loose record away
+  await writeDecisionBundle("bundle-a.json", [{ id: decisionRecordStem(REF), bytes }]);
+}
+
+describe("predicate wiring — loose ∪ bundle (bundle-only retired decision)", () => {
+  it("gate-release: retired + bundle-only ACCEPTED record → released", async () => {
+    await setupBundleOnly(ACCEPTED);
+    expect((await resolveRetiredDecisionGate(cwd, REF)).kind).toBe("released");
+  });
+
+  it("gate-release: retired + bundle-only BLOCKED record → not_released (may_satisfy false)", async () => {
+    await setupBundleOnly(BLOCKED);
+    expect((await resolveRetiredDecisionGate(cwd, REF)).kind).toBe("not_released");
+  });
+
+  it("lint-soften: retired + bundle-only record (any status) → softens", async () => {
+    await setupBundleOnly(BLOCKED);
+    expect(await decisionRecordSoftensMissingRef(cwd, REF)).toBe(true);
+  });
+
+  it("isolation: loose record present + unrelated corrupt bundle → still released (loose wins)", async () => {
+    await setup(ACCEPTED); // retires live .md but LEAVES the loose record
+    await mkdir(archiveBundlesDir(cwd), { recursive: true });
+    await writeFile(join(archiveBundlesDir(cwd), "bad.json"), "{ not json", "utf8");
+    expect((await resolveRetiredDecisionGate(cwd, REF)).kind).toBe("released");
+  });
+
+  it("gate fail-closed: retired, loose gone, Tier-1-corrupt bundle → not_released (no throw)", async () => {
+    await writeFile(join(cwd, REF), ACCEPTED, "utf8");
+    expect((await writeDecisionRecord(cwd, REF, { now: NOW })).kind).toBe("written");
+    await rm(join(cwd, REF));
+    await rm(decisionRecordPath(cwd, REF));
+    await mkdir(archiveBundlesDir(cwd), { recursive: true });
+    await writeFile(join(archiveBundlesDir(cwd), "bad.json"), "{ not json", "utf8");
+    expect((await resolveRetiredDecisionGate(cwd, REF)).kind).toBe("not_released");
+  });
+
+  it("lint fail-soft: retired, loose gone, Tier-1-corrupt bundle → not softened (no throw)", async () => {
+    await writeFile(join(cwd, REF), ACCEPTED, "utf8");
+    expect((await writeDecisionRecord(cwd, REF, { now: NOW })).kind).toBe("written");
+    await rm(join(cwd, REF));
+    await rm(decisionRecordPath(cwd, REF));
+    await mkdir(archiveBundlesDir(cwd), { recursive: true });
+    await writeFile(join(archiveBundlesDir(cwd), "bad.json"), "{ not json", "utf8");
+    expect(await decisionRecordSoftensMissingRef(cwd, REF)).toBe(false);
+  });
+
+  it("bundle member self-binds but path_sha256 ≠ ref → not_released (bindBundleMember is NOT full authority)", async () => {
+    // The schema enforces canonical_ref === original_path but NOT path_sha256 ===
+    // sha256Hex(ref) — that authority lives in recordMatchingRef. Replace ONLY the
+    // path_sha256 value (same-length hex) so the bytes stay canonical: bindBundleMember
+    // passes (valid schema + identity + canonical), and only recordMatchingRef rejects.
+    await writeFile(join(cwd, REF), ACCEPTED, "utf8");
+    expect((await writeDecisionRecord(cwd, REF, { now: NOW })).kind).toBe("written");
+    const recPath = decisionRecordPath(cwd, REF);
+    const canonical = await readFile(recPath, "utf8");
+    const tampered = canonical.replace(sha256Hex(REF), sha256Hex("design/decisions/elsewhere.md"));
+    expect(tampered).not.toBe(canonical);
+    await rm(join(cwd, REF)); // retire
+    await rm(recPath); // compact loose away
+    await writeDecisionBundle("bundle-a.json", [{ id: decisionRecordStem(REF), bytes: tampered }]);
+    expect((await resolveRetiredDecisionGate(cwd, REF)).kind).toBe("not_released");
   });
 });

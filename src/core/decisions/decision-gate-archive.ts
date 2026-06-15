@@ -1,5 +1,8 @@
 import { access } from "node:fs/promises";
-import { loadDecisionRecord } from "../archive/load-decision-record.ts";
+import {
+  loadDecisionRecord,
+  resolveArchiveDecisionRecord,
+} from "../archive/load-decision-record.ts";
 import { normalizeDecisionRef, sha256Hex } from "../archive/paths.ts";
 import { resolveWithinProject } from "../path-safety.ts";
 import type { DecisionStateRecord } from "../schemas/decision-state-record.ts";
@@ -107,7 +110,10 @@ export async function resolveRetiredDecisionGate(
   const canonical = normalizeDecisionRef(rawRef);
   if (canonical === null) return { kind: "not_released" };
   if (!(await liveDecisionAbsent(cwd, canonical))) return { kind: "not_released" };
-  const record = recordMatchingRef(await loadDecisionRecord(cwd, canonical), canonical);
+  // Resolve from loose ∪ bundle: a retired+compacted decision resolves from its
+  // bundle member. Identity authority stays here (recordMatchingRef); a bundle fault
+  // is fail-closed to `invalid` → not_released.
+  const record = recordMatchingRef(await resolveArchiveDecisionRecord(cwd, canonical), canonical);
   if (record === null) return { kind: "not_released" };
   if (!record.may_satisfy_active_gate) return { kind: "not_released" };
   return { kind: "released", record };
@@ -126,5 +132,8 @@ export async function decisionRecordSoftensMissingRef(
   const canonical = normalizeDecisionRef(rawRef);
   if (canonical === null) return false;
   if (!(await liveDecisionAbsent(cwd, canonical))) return false;
-  return recordMatchingRef(await loadDecisionRecord(cwd, canonical), canonical) !== null;
+  // Resolve from loose ∪ bundle (a retired+compacted decision softens via its bundle
+  // member). A bundle fault is fail-closed to `invalid` → not softened (the lint
+  // stays at its original severity); the reader never throws — fail-soft lenient.
+  return recordMatchingRef(await resolveArchiveDecisionRecord(cwd, canonical), canonical) !== null;
 }
