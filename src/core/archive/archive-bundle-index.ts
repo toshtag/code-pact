@@ -13,14 +13,24 @@ import {
 //      two bundles with the SAME sha256 dedupes (a redundant copy is fine); with a
 //      DIFFERENT sha256 it fails closed (`duplicate_member_conflict`) — never
 //      "pick one". (archive-level-compaction-rfc.md, Blocker-3.)
-//   2. `reconcileLooseAndBundle` — resolve ONE id from `loose ∪ bundle`: a loose
-//      record always wins, but if a loose record AND a bundle member both exist for
-//      the id they must be byte-identical, else `bundle_stale` (fail closed).
+//   2. `reconcileLooseAndBundle` — the STRICT-RECONCILE primitive: resolve ONE id
+//      from `loose ∪ bundle` when BOTH sides are deliberately loaded, requiring a
+//      loose record AND a bundle member for the id to be byte-identical, else
+//      `bundle_stale` (fail closed). This is NOT a "every reader must call it"
+//      primitive — its callers are the contexts where loose and bundle copies
+//      legitimately coexist and must agree: the bundle WRITER + READBACK, the
+//      `state compact-archive` DELETE-TIME GATE (before any loose unlink), and
+//      explicit archive-bundle VERIFY. A normal READ path uses loose-wins instead:
+//      a present loose record satisfies the request and the bundle is consulted
+//      ONLY when loose is absent, so the reader never calls this and never observes
+//      `bundle_stale` (isolating a healthy loose record from an unrelated stale
+//      bundle). The two postures are `reader-loose-wins` vs `strict-reconcile` in
+//      archive-level-compaction-rfc.md.
 //
-// NOTE these resolve to a record's BYTES only. The wiring layer parses those bytes
-// with the member's schema AND combines `bindBundleMember`'s self-binding with the
-// EXISTING reader-side authority checks (roadmap identity / snapshot_sha256 /
-// requested canonical_ref) — `bindBundleMember` alone is NOT full authority binding.
+// NOTE these resolve to a record's BYTES only. A caller parses those bytes with the
+// member's schema AND combines `bindBundleMember`'s self-binding with the EXISTING
+// reader-side authority checks (roadmap identity / snapshot_sha256 / requested
+// canonical_ref) — `bindBundleMember` alone is NOT full authority binding.
 // ---------------------------------------------------------------------------
 
 export type BundleIndexEntry = { sha256: string; bytes: string };
@@ -58,11 +68,14 @@ export function buildBundleMemberIndex(
 }
 
 /**
- * Resolve one id's canonical bytes from `loose ∪ bundle`. A loose record wins; when
- * both a loose record and a bundle member exist they must be byte-identical, else
- * `bundle_stale` (fail closed — never silently prefer one). Returns `null` when
- * neither side has the id (the caller decides whether that absence is a real
- * missing-truth fault per its own authority).
+ * STRICT-RECONCILE resolution of one id's canonical bytes from `loose ∪ bundle`,
+ * for callers that deliberately load BOTH sides (bundle writer/readback, the
+ * `state compact-archive` delete-time gate, explicit verify) — NOT normal read
+ * paths, which use loose-wins and skip the bundle when a loose record is present.
+ * A loose record wins; when both a loose record AND a bundle member exist they must
+ * be byte-identical, else `bundle_stale` (fail closed — never silently prefer one).
+ * Returns `null` when neither side has the id (the caller decides whether that
+ * absence is a real missing-truth fault per its own authority).
  */
 export function reconcileLooseAndBundle(
   id: string,
