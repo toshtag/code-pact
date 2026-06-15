@@ -133,6 +133,10 @@ const KNOWN_CODES: Record<string, "public" | "plan" | "doctor" | "adapter" | "in
   // a snapshot evidence event_id that does not resolve from the durable ledger,
   // and a legacy event for an archived task that conflicts with the durable set.
   EVENT_PACK_INVALID: "plan",
+  // Archive-level compaction (v2.0, Layer 1a): an archive bundle failed Tier-1
+  // self/bijection validation. Strict loaders throw it; lenient surfaces (later
+  // layers) will drop the bundle. Reader-validation code, same family as EVENT_PACK_INVALID.
+  ARCHIVE_BUNDLE_INVALID: "plan",
   SNAPSHOT_EVENT_EVIDENCE_UNRESOLVABLE: "plan",
   LEGACY_EVENT_FOR_ARCHIVED_TASK: "plan",
   PHASE_DONE_WITH_OPEN_TASKS: "plan",
