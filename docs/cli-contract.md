@@ -64,7 +64,7 @@ Canonical names remain the **primary** documented commands and the names emitted
 | `task reconcile <id>` | [`task finalize`](#task-finalize--flip-task-design-status-to-done-v12-p11) | verb-consistent with `phase reconcile` |
 | `plan import <yaml>` | [`phase import`](#phase-import) | it ingests a whole multi-phase roadmap |
 
-Rationale and the compatibility constraints are in [`design/decisions/cli-alias-ux-rfc.md`](../design/decisions/cli-alias-ux-rfc.md).
+This table is the live compatibility contract for the aliases. The historical rationale was recorded in the now-retired [`design/decisions/cli-alias-ux-rfc.md`](../design/decisions/cli-alias-ux-rfc.md) decision record.
 
 ## Stdout / stderr
 
