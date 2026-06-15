@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "phase_id": "P26",
+  "phase_name": "Evidence Harness v2 — aggregate stats and adherence baselines",
+  "original_path": "design/phases/P26-evidence-harness-v2.yaml",
+  "phase_status": "done",
+  "weight": 18,
+  "snapshotted_at": "2026-06-15T02:52:07.659Z",
+  "source_sha256": "931bd0b721a64422b2e437204114c19c3f2b3ecbf88c46d5cf7cc19f437bee02",
+  "path_sha256": "0bc26164be731f09cd0c436e0ad35476590ddd3910a5339ed021acdb63eb680e",
+  "tasks": [
+    {
+      "id": "P26-T0",
+      "status": "done",
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "9d1bafdc7242b334ccd1ea9ee52eae81803194f38afc2840fde441ae2916b566"
+        ]
+      }
+    },
+    {
+      "id": "P26-T1",
+      "status": "done",
+      "depends_on": [
+        "P26-T0"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "980fbbb4c91bedb51009b30bbe373bda4e96240dc0cead3214397a5e6fc048d4"
+        ]
+      }
+    },
+    {
+      "id": "P26-T2",
+      "status": "done",
+      "depends_on": [
+        "P26-T1"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "66968432e7a100c753aafb0ce7f369f07bdf6602277543d6302eb837e9f072ea"
+        ]
+      }
+    },
+    {
+      "id": "P26-T3",
+      "status": "done",
+      "depends_on": [
+        "P26-T2"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "304d9734b9c8218a335653538c85a477ce3bbbdec3b346c6e4f33780e03ba070"
+        ]
+      }
+    }
+  ]
+}

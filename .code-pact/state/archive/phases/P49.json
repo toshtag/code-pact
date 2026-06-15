@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "phase_id": "P49",
+  "phase_name": "Context Fit explain metrics — additive byte metrics on task context --explain --json that make the natural pack size, the budget-driven savings, and the achievable floor observable, sharing one floor helper with CONTEXT_OVER_BUDGET",
+  "original_path": "design/phases/P49-context-fit-explain-metrics.yaml",
+  "phase_status": "done",
+  "weight": 5,
+  "snapshotted_at": "2026-06-15T02:57:07.993Z",
+  "source_sha256": "6ce9672f7325813fb1bd385cf24001fd1c604b764e71089da216ffde73375183",
+  "path_sha256": "d941389bc31e73c2b15028a9b90bf44ae741e2f2bf57bf7fbf04c88780dd328e",
+  "tasks": [
+    {
+      "id": "P49-T0",
+      "status": "done",
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "a3fd3b279f6465eb9bdf94cc7bc04469f4badacc5772b69fa38533bd25dc6007"
+        ]
+      }
+    },
+    {
+      "id": "P49-T1",
+      "status": "done",
+      "depends_on": [
+        "P49-T0"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "1a3a11cae3dd8c9107263a3644e25310d8f9cdc99e8988d8a94c49567b2c2d7c"
+        ]
+      }
+    },
+    {
+      "id": "P49-T2",
+      "status": "done",
+      "depends_on": [
+        "P49-T1"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "44b249a9422ffb1e3204ef20df658ceeefe62093fa33250f25fa57204cffb8f1"
+        ]
+      }
+    },
+    {
+      "id": "P49-T3",
+      "status": "done",
+      "depends_on": [
+        "P49-T2"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "ddba1be8ddfcbe459d6e561a67548096e69f866b7585936a091366ff3b419cbc"
+        ]
+      }
+    }
+  ]
+}

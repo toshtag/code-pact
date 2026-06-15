@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "phase_id": "P28",
+  "phase_name": "Spec-conformance remediation — align P24/P26 implementations with their accepted RFCs and pin the load-bearing clauses with tests",
+  "original_path": "design/phases/P28-spec-conformance-remediation.yaml",
+  "phase_status": "done",
+  "weight": 12,
+  "snapshotted_at": "2026-06-15T02:56:53.805Z",
+  "source_sha256": "cab8d7015feec257dc4076a9ef67ddb8a3c792ecdd090bd4c607abfa1e58a19e",
+  "path_sha256": "7f1ffa5d73d39ba84b898aa4ed1effbd034392cbb8b99bd5c538bed7581771c0",
+  "tasks": [
+    {
+      "id": "P28-T0",
+      "status": "done",
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "6b2b5d1c23240ed767c47018868ed2ceac851296853f177222f852030039b761"
+        ]
+      }
+    },
+    {
+      "id": "P28-T1",
+      "status": "done",
+      "depends_on": [
+        "P28-T0"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "1d3da54b70256e84d5dbbd84324f065c586783d026d09d8787fb0968245d4b65"
+        ]
+      }
+    },
+    {
+      "id": "P28-T2",
+      "status": "done",
+      "depends_on": [
+        "P28-T1"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "3ae9283b6f81e9d24e83d1452467e2f20ba91959384485af6686d25f8987495c"
+        ]
+      }
+    },
+    {
+      "id": "P28-T3",
+      "status": "done",
+      "depends_on": [
+        "P28-T2"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "ba5f65890eab7383f4a6ef9e150636fed5462413050b246144ff369631fb108a"
+        ]
+      }
+    }
+  ]
+}

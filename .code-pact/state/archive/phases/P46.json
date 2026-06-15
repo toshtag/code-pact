@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "phase_id": "P46",
+  "phase_name": "Context Fit — named budget profiles, recommended budget, explain metrics, and readiness advisories layered additively on the P24 --budget-bytes mechanism\n",
+  "original_path": "design/phases/P46-context-fit.yaml",
+  "phase_status": "done",
+  "weight": 3,
+  "snapshotted_at": "2026-06-15T02:57:05.967Z",
+  "source_sha256": "b345c375a615cc3e30ce345ea78d399cefae8a1ef45a7b6567eb8127b66333c3",
+  "path_sha256": "1be03b8729861e43942a89ef993033173f12dbfa85b7dafa9bfc339bb30f6ad6",
+  "tasks": [
+    {
+      "id": "P46-T0",
+      "status": "done",
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "2789c294cad846d198fea3ca1bec606dee56d978ce72c684fb85204a631ae9d5"
+        ]
+      }
+    },
+    {
+      "id": "P46-T1",
+      "status": "done",
+      "depends_on": [
+        "P46-T0"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "2824ea5f5383b0d2fb9997c44f1a1842b39829f0983d36e040062c6843021719"
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "phase_id": "P42",
+  "snapshot_sha256": "884f9d6ceb8678dbb45b95473012b39792de7271a6e9e786d36de6121b3fc1d9",
+  "event_ids_sha256": "c59ff20766561570a04eea46db83184e8d714a29f41015082bde5cb1db5279ce",
+  "events": [
+    {
+      "id": "c28fcadf6e49125495f26f3676f7b9e83cd360d82d62a15e68e645d3f9ae6183",
+      "file": "20260531T141324329Z-c28fcadf6e49125495f26f3676f7b9e83cd360d82d62a15e68e645d3f9ae6183.yaml",
+      "event": {
+        "task_id": "P42-T0",
+        "status": "started",
+        "at": "2026-05-31T14:13:24.329Z",
+        "actor": "agent",
+        "agent": "claude-code"
+      }
+    },
+    {
+      "id": "f8bf6bc3694ef1ef7772669cec8ccf889d8108a281151bdc0b4d5016d965a211",
+      "file": "20260531T141327313Z-f8bf6bc3694ef1ef7772669cec8ccf889d8108a281151bdc0b4d5016d965a211.yaml",
+      "event": {
+        "task_id": "P42-T0",
+        "status": "done",
+        "at": "2026-05-31T14:13:27.313Z",
+        "actor": "agent",
+        "agent": "claude-code",
+        "evidence": [
+          "commands",
+          "decision"
+        ],
+        "source": "loop"
+      }
+    }
+  ]
+}

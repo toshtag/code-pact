@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "phase_id": "P27",
+  "phase_name": "CLI maintainability hardening — split task and adapter clusters out of src/cli.ts",
+  "original_path": "design/phases/P27-cli-maintainability.yaml",
+  "phase_status": "done",
+  "weight": 15,
+  "snapshotted_at": "2026-06-15T02:56:52.458Z",
+  "source_sha256": "c53f48096e594f7ee8ebd79b68c0f840af8ac35ebe95b25ee1933a09ccebc187",
+  "path_sha256": "ee3f98df8bd75b793f4ef50ce08866bdc7b9413248fc22494806102ca824630b",
+  "tasks": [
+    {
+      "id": "P27-T0",
+      "status": "done",
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "886b920627c8afbfd39037ef00db668501445ef4c04839b1bc8af3dd0d845287"
+        ]
+      }
+    },
+    {
+      "id": "P27-T1",
+      "status": "done",
+      "depends_on": [
+        "P27-T0"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "09d8591f4a5bc6e9a880034d76a8e919ec79264c070cefbfabdf258693651706"
+        ]
+      }
+    },
+    {
+      "id": "P27-T2",
+      "status": "done",
+      "depends_on": [
+        "P27-T1"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "6d559e76b011652f6d797bf2458df1a6868bb475f2d3ace1f7d2d1ca8b6e9162"
+        ]
+      }
+    },
+    {
+      "id": "P27-T3",
+      "status": "done",
+      "depends_on": [
+        "P27-T2"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "6a581f01610979a88b988521d42355c5e6ad40fe57f2bf631a3dbcfda031eab5"
+        ]
+      }
+    }
+  ]
+}

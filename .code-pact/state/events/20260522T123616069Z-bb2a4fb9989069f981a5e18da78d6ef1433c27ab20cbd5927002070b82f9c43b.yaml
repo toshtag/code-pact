@@ -1,9 +1,0 @@
-task_id: P21-T0
-status: done
-at: 2026-05-22T12:36:16.069Z
-actor: agent
-agent: claude-code
-evidence:
-  - commands
-  - decision
-id: bb2a4fb9989069f981a5e18da78d6ef1433c27ab20cbd5927002070b82f9c43b
