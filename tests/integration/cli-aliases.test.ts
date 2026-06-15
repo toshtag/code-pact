@@ -1,5 +1,6 @@
-// CLI integration suite for the beginner-friendly command aliases
-// (design/decisions/cli-alias-ux-rfc.md):
+// CLI integration suite for the beginner-friendly command aliases. The live alias
+// contract is docs/cli-contract.md (§ Command aliases); the rationale was recorded in
+// the now-retired design/decisions/cli-alias-ux-rfc.md decision record:
 //
 //   task next <id>      → task runbook <id>
 //   phase next <id>     → phase runbook <id>
