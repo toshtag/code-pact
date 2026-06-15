@@ -17,6 +17,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { closesClaimProblem } from "./closes-claim.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (rel) => readFileSync(resolve(repoRoot, rel), "utf8");
@@ -137,12 +138,17 @@ for (const rel of ["docs/getting-started.md"]) {
 }
 
 // 9. Control-plane↔CHANGELOG consistency. If CHANGELOG.md claims a phase is done
-//    ("closes P43", "(closes P41)"), that phase's YAML must actually be
-//    `status: done`. This caught itself TWICE (P43 and P41 both shipped with the
-//    phase/task status left `planned` while the CHANGELOG said "closes" — found
-//    only in post-merge review). The check derives the obligation from the
-//    CHANGELOG's own claim, so a future "closes PNN" can no longer ship with a
-//    stale phase status; CI fails before review.
+//    ("closes P43", "(closes P41)"), that phase must actually be `done`. This caught
+//    itself TWICE (P43 and P41 both shipped with the phase/task status left `planned`
+//    while the CHANGELOG said "closes" — found only in post-merge review). The check
+//    derives the obligation from the CHANGELOG's own claim, so a future "closes PNN"
+//    can no longer ship with a stale phase status; CI fails before review.
+//    design-docs-ephemeral: a phase may be ARCHIVED (its live YAML deleted, runtime
+//    truth in a `.code-pact/state/archive/phases/<id>.json` snapshot). A "closes Pxx"
+//    claim is still satisfied by a terminal archive snapshot (`phase_status: done`),
+//    so resolve a missing live phase from its snapshot before failing — the same
+//    archived-tolerance every phase-existence reader applies, so archiving a phase
+//    named by a "closes" claim does not break this gate.
 {
   const changelog = read("CHANGELOG.md");
   const claimed = new Set(
@@ -162,21 +168,25 @@ for (const rel of ["docs/getting-started.md"]) {
     }
     for (const phaseId of claimed) {
       const entry = byId.get(phaseId);
+      // When no live YAML resolves the id, read the archive snapshot: `null` = no
+      // snapshot file, `"PARSE_ERROR"` = a file is present but unparseable (distinct
+      // diagnostics; the verdict — incl. the snapshot phase_id identity check — lives
+      // in the pure `closesClaimProblem`).
+      let snapshot = null;
       if (!entry) {
-        fail(
-          "CHANGELOG.md",
-          `claims "closes ${phaseId}" but no design/phases/*.yaml has \`id: ${phaseId}\``,
-        );
-        continue;
+        try {
+          const raw = read(`.code-pact/state/archive/phases/${phaseId}.json`);
+          try {
+            snapshot = JSON.parse(raw);
+          } catch {
+            snapshot = "PARSE_ERROR";
+          }
+        } catch {
+          snapshot = null; // no snapshot file
+        }
       }
-      const statusMatch = entry.body.match(/^status:\s*(\S+)/m);
-      const status = statusMatch ? statusMatch[1] : "(none)";
-      if (status !== "done") {
-        fail(
-          `${phaseDir}/${entry.file}`,
-          `CHANGELOG.md says "closes ${phaseId}" but the phase status is "${status}", not "done" — flip the phase (and its tasks) to done, or drop the "closes" claim`,
-        );
-      }
+      const problem = closesClaimProblem(phaseId, entry, snapshot);
+      if (problem) fail(problem.rel, problem.msg);
     }
   }
 }
