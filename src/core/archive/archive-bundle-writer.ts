@@ -16,7 +16,8 @@ import {
 import { computeMemberIdsSha256, validateArchiveBundleTier1 } from "./archive-bundle-reader.ts";
 import { bindBundleMember } from "./archive-bundle-binding.ts";
 import { validateEventPackTier1 } from "./event-pack-reader.ts";
-import { reconcileLooseAndBundle } from "./archive-bundle-index.ts";
+import { buildBundleMemberIndex, reconcileLooseAndBundle } from "./archive-bundle-index.ts";
+import { loadArchiveBundles } from "./archive-bundle-loader.ts";
 
 // ---------------------------------------------------------------------------
 // Archive-bundle WRITER + READBACK (Layer 2). Folds N loose archive records of one
@@ -116,6 +117,66 @@ export function buildArchiveBundle(kind: ArchiveBundleKind, members: readonly Lo
   } satisfies ArchiveBundle);
 }
 
+/**
+ * Preflight a supersede REPLACE so the primitive is SELF-SAFE — it can never turn a valid
+ * bundle store into an unloadable one, even called directly before the wiring layer adds a
+ * retire-before-replace plan. Loads the store STRICT (a corrupt bundle ANYWHERE →
+ * `ARCHIVE_BUNDLE_INVALID`, fail closed before any write), then refuses
+ * (`BundleWriteError("write_bundle")`) when:
+ *   - the content-address target is not a loaded bundle (a race / non-bundle file);
+ *   - the target is a different KIND than we are writing (a misplaced/foreign bundle);
+ *   - the target holds a different member ID SET than the rebuilt bundle (not the bundle we
+ *     think we are replacing — content addresses are by id set, so this is a misplaced file);
+ *   - replacing the target would make a REDUNDANT old bundle collide. A valid store may carry
+ *     a crash-survivor redundant bundle (same member, same bytes, deduped across files); once
+ *     this replace changes that member's bytes the other bundle would diverge →
+ *     `duplicate_member_conflict` and the store would no longer load. We catch that here by
+ *     simulating the post-replace store through the SAME cross-bundle index builder the loader
+ *     uses (so the conflict rule cannot drift), and refuse rather than corrupt the store.
+ */
+function assertSupersedeReplaceSafe(
+  cwd: string,
+  kind: ArchiveBundleKind,
+  file: string,
+  rebuilt: ArchiveBundle,
+  rebuiltBytes: string,
+): void {
+  const store = loadArchiveBundles(cwd); // STRICT: a corrupt bundle store throws here, pre-write.
+  const target = store.bundles.find((b) => b.file === file);
+  if (!target) {
+    throw new BundleWriteError("write_bundle", false, `supersede target ${file} is not present in the loaded bundle store`);
+  }
+  if (target.loaded.kind !== kind) {
+    throw new BundleWriteError(
+      "write_bundle",
+      false,
+      `supersede target ${file} is a "${target.loaded.kind}" bundle, not "${kind}" — refusing to replace`,
+    );
+  }
+  // The target's members are Tier-1-sorted, so their id-set checksum is comparable to the
+  // rebuilt bundle's member_ids_sha256 (same derivation as buildArchiveBundle).
+  if (computeMemberIdsSha256(target.loaded.members.map((m) => m.id)) !== rebuilt.member_ids_sha256) {
+    throw new BundleWriteError(
+      "write_bundle",
+      false,
+      `supersede target ${file} holds a different member id set than the rebuilt bundle — refusing to replace`,
+    );
+  }
+  // Simulate the store AFTER the replace and run the loader's own conflict check on it.
+  const postReplace = store.bundles
+    .filter((b) => b.file !== file)
+    .concat([{ file, loaded: validateArchiveBundleTier1(rebuiltBytes, file) }]);
+  try {
+    buildBundleMemberIndex(postReplace);
+  } catch (err) {
+    throw new BundleWriteError(
+      "write_bundle",
+      false,
+      `supersede would corrupt the bundle store (a redundant bundle holds a superseded member): ${(err as Error).message}`,
+    );
+  }
+}
+
 /** Re-read the just-written bundle from disk and verify it (Tier-1 + Tier-2 +
  *  strict-reconcile vs the folded loose). Shared by the create and supersede paths. */
 async function readbackAndVerify(
@@ -184,13 +245,18 @@ async function persistArchiveBundle(
       );
     }
     // Supersede mode: this divergence is the POINT — a fresher loose has been adopted, so
-    // atomically replace the stale bundle in place. atomicReplaceExistingText expects the
-    // exact old bytes just before the rename (TOCTOU-narrowed) and does NOT recreate a
-    // vanished bundles/ dir. The replace is ATOMIC: rename(2) either fully swaps in the new
-    // bytes or fails leaving the old bundle untouched (the temp is cleaned up on throw). So a
-    // failure here means NO disk mutation → partial_applied:false (like the create-path write
-    // failure below). partial_applied only flips true once readbackAndVerify sees the new
-    // bundle on disk but rejects it.
+    // replace the stale bundle. FIRST prove the replace is safe (the target is the same-id-set
+    // bundle we mean to replace, and the replace will not corrupt the cross-bundle store) so
+    // the primitive can never turn a valid store into an unloadable one — see
+    // assertSupersedeReplaceSafe. Read-only; throws fail-closed before any write.
+    assertSupersedeReplaceSafe(cwd, kind, file, bundle, bytes);
+    // Then atomically replace in place. atomicReplaceExistingText expects the exact old bytes
+    // just before the rename (TOCTOU-narrowed) and does NOT recreate a vanished bundles/ dir.
+    // The replace is ATOMIC: rename(2) either fully swaps in the new bytes or fails leaving the
+    // old bundle untouched (the temp is cleaned up on throw). So a failure here means NO disk
+    // mutation → partial_applied:false (like the create-path write failure below).
+    // partial_applied only flips true once readbackAndVerify sees the new bundle on disk but
+    // rejects it.
     try {
       await atomicReplaceExistingText(path, bytes, existing);
     } catch (err) {
