@@ -156,9 +156,17 @@ for (const rel of ["docs/getting-started.md"]) {
   );
   if (claimed.size > 0) {
     const phaseDir = "design/phases";
-    const files = readdirSync(resolve(repoRoot, phaseDir)).filter((f) =>
-      f.endsWith(".yaml"),
-    );
+    // design-docs-ephemeral end state: once EVERY phase is archived, `design/phases/`
+    // is empty and git does not track an empty dir — on a fresh checkout the directory
+    // is absent. Treat ENOENT as "no live phases" (every `closes` claim then resolves
+    // from its archive snapshot below), not a hard scandir crash.
+    let files;
+    try {
+      files = readdirSync(resolve(repoRoot, phaseDir)).filter((f) => f.endsWith(".yaml"));
+    } catch (err) {
+      if (err && err.code === "ENOENT") files = [];
+      else throw err;
+    }
     // Map phase id -> its YAML file (id read from the file, not the name).
     const byId = new Map();
     for (const f of files) {
