@@ -7,3 +7,5 @@ export function closesClaimProblem(
   liveEntry: { file: string; body: string } | undefined,
   snapshot: Record<string, unknown> | null | "PARSE_ERROR",
 ): { rel: string; msg: string } | null;
+
+export function readLivePhaseFiles(repoRoot: string, phaseDir?: string): string[];

@@ -13,11 +13,11 @@
 // blocks are stripped before scanning) to avoid false positives on legitimate
 // examples.
 
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { closesClaimProblem } from "./closes-claim.mjs";
+import { closesClaimProblem, readLivePhaseFiles } from "./closes-claim.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (rel) => readFileSync(resolve(repoRoot, rel), "utf8");
@@ -156,9 +156,10 @@ for (const rel of ["docs/getting-started.md"]) {
   );
   if (claimed.size > 0) {
     const phaseDir = "design/phases";
-    const files = readdirSync(resolve(repoRoot, phaseDir)).filter((f) =>
-      f.endsWith(".yaml"),
-    );
+    // Tolerates an ABSENT design/phases (all phases archived → git drops the empty dir);
+    // every `closes` claim then resolves from its archive snapshot below. Pinned in
+    // tests/unit/scripts/check-doc-invariants.test.ts.
+    const files = readLivePhaseFiles(repoRoot, phaseDir);
     // Map phase id -> its YAML file (id read from the file, not the name).
     const byId = new Map();
     for (const f of files) {
