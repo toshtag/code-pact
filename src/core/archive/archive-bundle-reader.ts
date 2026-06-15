@@ -31,10 +31,12 @@ export function computeMemberIdsSha256(ids: readonly string[]): string {
   return sha256Hex(JSON.stringify(sorted));
 }
 
+export type LoadedBundleMember = { id: string; sha256: string; bytes: string };
+
 export type LoadedArchiveBundle = {
   kind: ArchiveBundleKind;
-  /** member id → its canonical bytes (verbatim), in stored order. */
-  members: { id: string; bytes: string }[];
+  /** members in stored order; `sha256` carried for the cross-bundle uniqueness check. */
+  members: LoadedBundleMember[];
 };
 
 /**
@@ -88,5 +90,8 @@ export function validateArchiveBundleTier1(raw: string, bundleFile: string): Loa
     );
   }
 
-  return { kind: bundle.kind, members: bundle.members.map((m) => ({ id: m.id, bytes: m.bytes })) };
+  return {
+    kind: bundle.kind,
+    members: bundle.members.map((m) => ({ id: m.id, sha256: m.sha256, bytes: m.bytes })),
+  };
 }
