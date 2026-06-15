@@ -5,7 +5,12 @@ import type { TerminalEvidence } from "../schemas/phase-snapshot.ts";
 import { isSafePlanId } from "../schemas/plan-id.ts";
 import { archivePhasesDir, phaseSnapshotPath, sha256Hex } from "./paths.ts";
 import { loadArchiveBundles } from "./archive-bundle-loader.ts";
+import { bindBundleMember } from "./archive-bundle-binding.ts";
+import type { BundleIndexEntry, BundleMemberIndex } from "./archive-bundle-index.ts";
 import { resolveArchiveRecordBytes, type RawLooseRecord } from "./resolve-archive-record.ts";
+
+// The bundle store label for bundle-integrity error messages from this module.
+const ARCHIVE_BUNDLE_STORE_LABEL = ".code-pact/state/archive/bundles";
 
 // ---------------------------------------------------------------------------
 // The FIRST reader of the `.code-pact/state/archive/phases/<id>.json` snapshots
@@ -429,36 +434,17 @@ export async function discoverUnreferencedSnapshots(
   const entries: ArchivedTaskEntry[] = [];
   const invalid: UnreferencedSnapshotInvalid[] = [];
 
-  let names: string[];
-  try {
-    names = await readdir(archivePhasesDir(cwd));
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    // No archive dir is the normal untouched-project state — not even an advisory.
-    if (code === "ENOENT") return { entries, invalid };
-    // ENOTDIR / EACCES / EPERM / anything else: a directory we can't read supplies
-    // no ids → soft directory-level invalid, NEVER thrown (the A5 contract).
-    invalid.push({
-      scope: "directory",
-      reason: `archive phases directory could not be read (${code ?? "unknown error"})`,
-    });
-    return { entries, invalid };
+  const { entries: enumerated, skipped } = await enumerateArchivedPhaseSnapshots(cwd);
+  for (const s of skipped) {
+    invalid.push(
+      s.scope === "directory"
+        ? { scope: "directory", reason: s.detail }
+        : { scope: "file", fileStem: s.fileStem, reason: s.detail },
+    );
   }
-
-  // Deterministic order so advisory order / collision reporting / index build are
-  // environment-independent (control-plane reader).
-  const jsonFiles = names.filter((n) => n.endsWith(".json")).sort();
-
-  for (const name of jsonFiles) {
-    const fileStem = basename(name, ".json");
+  for (const { fileStem, res } of enumerated) {
     // 4a/4b boundary: a snapshot whose id IS a live roadmap phase is 4a's case.
     if (liveRoadmapPhaseIds.has(fileStem)) continue;
-    // Unsafe stem: never let phaseSnapshotPath/assertSafePlanId throw out of here.
-    if (!isSafePlanId(fileStem)) {
-      invalid.push({ scope: "file", fileStem, reason: "unsafe archive snapshot filename" });
-      continue;
-    }
-    const res = await loadPhaseSnapshot(cwd, fileStem);
     const resolved = resolveUnreferencedSnapshot(fileStem, res);
     if (resolved.kind === "tolerated") {
       entries.push(...archivedEntriesFromSnapshot(resolved.snapshot));
@@ -468,4 +454,111 @@ export async function discoverUnreferencedSnapshots(
   }
 
   return { entries, invalid };
+}
+
+// ---------------------------------------------------------------------------
+// Shared loose ∪ bundle ENUMERATION of every archived phase snapshot. The three
+// fail-soft global readers (discoverUnreferencedSnapshots here, readArchivedTaskIds
+// + validateSnapshotEventEvidence in snapshot-evidence.ts) all route through this so
+// a snapshot compacted into a `phase_snapshot` bundle is still visible — without
+// each re-implementing loose-vs-bundle handling. (The fail-CLOSED, per-id,
+// referenced path is resolveMissingPhaseRef, which does NOT use this enumeration.)
+// ---------------------------------------------------------------------------
+
+/** One enumerated archived phase snapshot + its load result (absent/invalid/valid).
+ *  Callers reuse their existing branch on `res.kind` unchanged. */
+export type EnumeratedPhaseSnapshot = { fileStem: string; res: LoadPhaseSnapshotResult };
+
+/** A soft enumeration skip: a STORE that could not be read (the loose directory or
+ *  the bundle store) or an unsafe id. The per-snapshot corrupt case is NOT a skip —
+ *  it is carried as an `invalid` result in the entry's `res`. */
+export type PhaseSnapshotEnumSkip =
+  | { scope: "directory"; detail: string }
+  | { scope: "file"; fileStem: string; detail: string };
+
+/** Bind one `phase_snapshot` bundle member into a `LoadPhaseSnapshotResult`: valid on
+ *  self-bind success (schema + id↔phase_id + canonical bytes), invalid on any fault. */
+function bindBundlePhaseSnapshot(phaseId: string, entry: BundleIndexEntry): LoadPhaseSnapshotResult {
+  try {
+    const bound = bindBundleMember(
+      "phase_snapshot",
+      { id: phaseId, sha256: entry.sha256, bytes: entry.bytes },
+      ARCHIVE_BUNDLE_STORE_LABEL,
+    );
+    if (bound.kind !== "phase_snapshot") {
+      return { kind: "invalid", error: new Error("bundle member kind is not phase_snapshot") };
+    }
+    return { kind: "valid", snapshot: bound.record };
+  } catch (error) {
+    return { kind: "invalid", error };
+  }
+}
+
+/**
+ * Enumerate EVERY archived phase snapshot from loose ∪ bundle, FAIL-SOFT. The loose
+ * `archive/phases/<id>.json` files PLUS any `phase_snapshot` bundle members whose
+ * loose copy is gone (loose-wins: a loose id skips its bundle copy with no
+ * bind/reconcile). Each entry carries the phase id (`fileStem`) and a
+ * `LoadPhaseSnapshotResult`, so a caller reuses its existing absent/invalid/valid
+ * branch. NEVER throws: an unreadable loose directory, an unsafe id, and a corrupt
+ * bundle STORE are soft `skipped[]`; a corrupt loose file or a failed bundle bind is
+ * a per-entry `invalid` result. Deterministic order (loose sorted, then bundle-only
+ * sorted) so advisory/collision reporting is environment-independent.
+ */
+export async function enumerateArchivedPhaseSnapshots(
+  cwd: string,
+): Promise<{ entries: EnumeratedPhaseSnapshot[]; skipped: PhaseSnapshotEnumSkip[] }> {
+  const entries: EnumeratedPhaseSnapshot[] = [];
+  const skipped: PhaseSnapshotEnumSkip[] = [];
+  const looseStems = new Set<string>();
+
+  // 1. Loose snapshot files.
+  let names: string[] = [];
+  try {
+    names = await readdir(archivePhasesDir(cwd));
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    // No archive dir is the normal untouched-project state — not even an advisory.
+    if (code !== "ENOENT") {
+      skipped.push({
+        scope: "directory",
+        detail: `archive phases directory could not be read (${code ?? "unknown error"})`,
+      });
+    }
+  }
+  for (const name of names.filter((n) => n.endsWith(".json")).sort()) {
+    const fileStem = basename(name, ".json");
+    if (!isSafePlanId(fileStem)) {
+      skipped.push({ scope: "file", fileStem, detail: "unsafe archive snapshot filename" });
+      continue;
+    }
+    looseStems.add(fileStem);
+    entries.push({ fileStem, res: await loadPhaseSnapshot(cwd, fileStem) });
+  }
+
+  // 2. phase_snapshot bundle members for phases whose loose copy is gone (loose wins).
+  let index: BundleMemberIndex | null = null;
+  try {
+    index = loadArchiveBundles(cwd).index;
+  } catch (err) {
+    // A corrupt bundle STORE supplies no bundle ids → soft directory-level skip,
+    // NEVER thrown (the A5 fail-soft contract; the loose snapshots already read stay).
+    skipped.push({
+      scope: "directory",
+      detail: `archive bundle store could not be read (${(err as Error).message})`,
+    });
+  }
+  const members = index?.get("phase_snapshot");
+  if (members) {
+    for (const [phaseId, entry] of [...members].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))) {
+      if (looseStems.has(phaseId)) continue; // loose wins
+      if (!isSafePlanId(phaseId)) {
+        skipped.push({ scope: "file", fileStem: phaseId, detail: "unsafe archive snapshot bundle member id" });
+        continue;
+      }
+      entries.push({ fileStem: phaseId, res: bindBundlePhaseSnapshot(phaseId, entry) });
+    }
+  }
+
+  return { entries, skipped };
 }
