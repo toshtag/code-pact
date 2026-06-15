@@ -25,6 +25,13 @@ export const ARCHIVE_EVENT_PACKS_DIR_SEGMENTS = [
   "archive",
   "event-packs",
 ] as const;
+/** Archive bundles (bounded-archive compaction): one file folds many per-item records. */
+export const ARCHIVE_BUNDLES_DIR_SEGMENTS = [
+  ".code-pact",
+  "state",
+  "archive",
+  "bundles",
+] as const;
 
 export function sha256Hex(content: string): string {
   return createHash("sha256").update(content, "utf8").digest("hex");
@@ -64,6 +71,11 @@ export function eventPackPath(cwd: string, phaseId: string): string {
 /** The archive event-packs directory, for enumeration by the pack reader. */
 export function archiveEventPacksDir(cwd: string): string {
   return join(cwd, ...ARCHIVE_EVENT_PACKS_DIR_SEGMENTS);
+}
+
+/** The archive bundles directory, for enumeration by the bundle loader. */
+export function archiveBundlesDir(cwd: string): string {
+  return join(cwd, ...ARCHIVE_BUNDLES_DIR_SEGMENTS);
 }
 
 /**
