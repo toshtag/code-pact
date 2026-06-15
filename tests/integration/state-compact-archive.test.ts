@@ -237,6 +237,34 @@ describe("state compact-archive — build-fault surfacing (P1.1/P1.2)", () => {
     expect(await fileExists(join(BUNDLES_DIR(), "ep.json"))).toBe(true);
     expect(await bundleCount()).toBe(1); // only the bad one; no consolidated bundle written
   });
+
+  it("a Tier-1-valid but writer-NON-canonical bundle at its OWN content-address path → write_bundle conflict in BOTH dry-run and --write; nothing retired/deleted", async () => {
+    await scaffoldArchivedSnapshot(); // canonical loose P1.json — a foldable phase snapshot
+    const memberBytes = await readFile(LOOSE_SNAPSHOT(), "utf8");
+    // The consolidation for the {P1} set targets exactly this content-addressed filename.
+    const name = `phase_snapshot-${computeMemberIdsSha256(["P1"]).slice(0, 16)}.json`;
+    // writeRawBundle emits a COMPACT (no-indent) wrapper — Tier-1-valid and the member is
+    // foldable, but it is NOT the writer's canonical 2-space+newline serialization. So the
+    // build succeeds, then the content-address target already holds DIFFERENT raw bytes →
+    // the writer (and now the dry-run) must fail closed at write_bundle, not overwrite it.
+    await writeRawBundle(BUNDLES_DIR(), name, "phase_snapshot", [{ id: "P1", bytes: memberBytes }]);
+    await rm(LOOSE_SNAPSHOT()); // no loose — the conflict is bundle-only
+    const before = await readFile(join(BUNDLES_DIR(), name), "utf8");
+
+    const dry = run(["state", "compact-archive", "phase_snapshot", "--json"]); // dry-run lies if unfixed
+    expect(dry.code).toBe(2);
+    expect(json(dry).error?.code).toBe("ARCHIVE_BUNDLE_WRITE_FAILED");
+    expect(json(dry).data?.phase).toBe("write_bundle");
+
+    const w = run(["state", "compact-archive", "phase_snapshot", "--write", "--json"]);
+    expect(w.code).toBe(2);
+    expect(json(w).error?.code).toBe("ARCHIVE_BUNDLE_WRITE_FAILED");
+    expect(json(w).data?.phase).toBe("write_bundle");
+
+    // The non-canonical bundle is untouched — not retired, not overwritten; no second bundle.
+    expect(await readFile(join(BUNDLES_DIR(), name), "utf8")).toBe(before);
+    expect(await bundleCount()).toBe(1);
+  });
 });
 
 describe("state compact-archive — partial multi-kind failure is reported, not hidden (P1.3)", () => {

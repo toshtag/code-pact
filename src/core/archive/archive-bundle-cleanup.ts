@@ -7,9 +7,10 @@ import { bindBundleMember } from "./archive-bundle-binding.ts";
 import { validateEventPackTier1 } from "./event-pack-reader.ts";
 import { reconcileLooseAndBundle, type BundleMemberIndex } from "./archive-bundle-index.ts";
 import {
-  assertBundleMemberFoldable,
+  buildArchiveBundle,
   BundleWriteError,
   enumerateLooseMembers,
+  serializeArchiveBundle,
   writeArchiveBundle,
   type BundleWriteOutcome,
   type LooseMember,
@@ -24,7 +25,6 @@ import {
   archiveEventPacksDir,
   archivePhasesDir,
 } from "./paths.ts";
-import { computeMemberIdsSha256 } from "./archive-bundle-reader.ts";
 
 // ---------------------------------------------------------------------------
 // Archive-bundle GATED DELETE (Layer 3) — the destructive step that finally drops
@@ -244,16 +244,6 @@ export async function planCompactArchive(
 ): Promise<CompactArchivePlan> {
   const { index, bundles } = loadArchiveBundles(cwd);
   const loose = await enumerateLooseMembers(cwd, kind);
-  const looseIds = new Set(loose.map((m) => m.id));
-
-  // The writer validates EVERY consolidated member (existing bundle members ∪ loose). So
-  // the dry-run must too: a Tier-1-valid bundle whose MEMBER bytes are not foldable (e.g.
-  // an event_pack member with a bad event_ids_sha256) loads fine but fails the build on
-  // --write. Validate the existing bundle members that aren't shadowed by a loose record
-  // here (the loose ones are validated in the loop below), fail-fast like compactArchive.
-  for (const [id, entry] of index.get(kind) ?? []) {
-    if (!looseIds.has(id)) assertBundleMemberFoldable(kind, { id, bytes: entry.bytes }, "existing bundle member");
-  }
 
   const would_bundle: string[] = [];
   const would_delete: string[] = [];
@@ -261,10 +251,6 @@ export async function planCompactArchive(
   for (const m of loose) {
     const entry = index.get(kind)?.get(m.id) ?? null;
     if (entry == null) {
-      // Would be folded into the consolidated bundle — validate it the SAME way the
-      // writer would, so the dry-run never promises a would_bundle the write path would
-      // fail to build (throws BundleWriteError("build"), fail-fast, like compactArchive).
-      assertBundleMemberFoldable(kind, m, "loose record");
       would_bundle.push(m.id);
       continue;
     }
@@ -284,18 +270,37 @@ export async function planCompactArchive(
     would_skip.push({ id: m.id, reason: "bundle_stale" });
   }
 
-  // The consolidated bundle's id set = existing members ∪ the new loose to fold; any OTHER
-  // existing bundle of this kind would be retired by the consolidation.
-  const allIds = [...(index.get(kind)?.keys() ?? []), ...would_bundle];
-  const would_retire_bundles =
-    allIds.length === 0
-      ? []
-      : (() => {
-          const consolidatedFile = join("bundles", basename(archiveBundlePath(cwd, kind, computeMemberIdsSha256(allIds))));
-          return bundles
-            .filter((b) => b.loaded.kind === kind && b.file !== consolidatedFile)
-            .map((b) => b.file);
-        })();
+  // BUILD the exact consolidated bundle the write path would, so the dry-run predicts every
+  // write fault read-only: (a) BUILD — buildArchiveBundle validates EVERY member (existing
+  // bundle members ∪ loose; a non-canonical / Tier-1-invalid member throws BundleWriteError
+  // "build", fail-fast like compactArchive); (b) WRITE — if the content-addressed target file
+  // already exists with DIFFERENT raw bytes (a Tier-1-valid but non-canonical wrapper that
+  // loadArchiveBundles tolerates), the write would throw "different bundle exists" — predict it.
+  const members = gatherConsolidatedMembers(index, kind, loose);
+  let would_retire_bundles: string[] = [];
+  if (members.length > 0) {
+    const bundle = buildArchiveBundle(kind, members);
+    const absPath = archiveBundlePath(cwd, kind, bundle.member_ids_sha256);
+    const consolidatedFile = join("bundles", basename(absPath));
+    let existing: string | null = null;
+    try {
+      existing = await readFile(absPath, "utf8");
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw new BundleWriteError("write_bundle", false, `existing bundle unreadable: ${(err as Error).message}`);
+      }
+    }
+    if (existing !== null && existing !== serializeArchiveBundle(bundle)) {
+      throw new BundleWriteError(
+        "write_bundle",
+        false,
+        `a different bundle already exists at ${consolidatedFile} (same id set, different bytes)`,
+      );
+    }
+    would_retire_bundles = bundles
+      .filter((b) => b.loaded.kind === kind && b.file !== consolidatedFile)
+      .map((b) => b.file);
+  }
 
   return { kind, would_bundle, would_delete, would_skip, would_retire_bundles };
 }
