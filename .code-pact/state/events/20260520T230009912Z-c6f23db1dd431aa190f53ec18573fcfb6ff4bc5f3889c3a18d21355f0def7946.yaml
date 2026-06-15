@@ -1,9 +1,0 @@
-task_id: P13-T4
-status: done
-at: 2026-05-20T23:00:09.912Z
-actor: agent
-agent: claude-code
-evidence:
-  - commands
-  - decision
-id: c6f23db1dd431aa190f53ec18573fcfb6ff4bc5f3889c3a18d21355f0def7946

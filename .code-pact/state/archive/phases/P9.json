@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "phase_id": "P9",
+  "phase_name": "Post-v1.0 Dogfood Close & Onboarding Baseline",
+  "original_path": "design/phases/P9-post-v1-dogfood-onboarding.yaml",
+  "phase_status": "done",
+  "weight": 20,
+  "snapshotted_at": "2026-06-15T01:25:57.375Z",
+  "source_sha256": "2975012555d4866628595d2f46050aa77289f790f697b4f3acab98d07f74900d",
+  "path_sha256": "e04636effa39ec3eb62119017a41923f35723c908e7c96c12d32b6f84cfc9db6",
+  "tasks": [
+    {
+      "id": "P9-T1",
+      "status": "done",
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "3d1061ca41994a477de9cbc6ce48597a6b8f8f75cb37e49ff404a4c1f325e5cb"
+        ]
+      }
+    },
+    {
+      "id": "P9-T2",
+      "status": "done",
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "566a3727b819d6965ecc3d8e6277e97f0fc03a9d729cac15b89e13f8ccbc1e0b"
+        ]
+      }
+    },
+    {
+      "id": "P9-T3",
+      "status": "done",
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "51d29e02f49115e1bac8dbdedab7031893c18038e263cec35fdf87e97fd44143"
+        ]
+      }
+    },
+    {
+      "id": "P9-T4",
+      "status": "done",
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "173cccf35a1232930f8cef1171b1e18dca075933c28e4a5ba4769795faa50be2"
+        ]
+      }
+    },
+    {
+      "id": "P9-T5",
+      "status": "done",
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "582c7877b530dea2b3a3709d09b28a90cfc002c8a8594174e0728243014f9190"
+        ]
+      }
+    },
+    {
+      "id": "P9-T6",
+      "status": "done",
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "73b0d231538ad8252fa910d3657748835fd4dded7cc2c2eb7235ce1023b15f1e"
+        ]
+      }
+    },
+    {
+      "id": "P9-T7",
+      "status": "done",
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "0445062452e853dfa3dd23baa2b0e76476a7abe240ef9cbe2de6a531ccc2f564"
+        ]
+      }
+    }
+  ]
+}

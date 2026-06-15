@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "phase_id": "P12",
+  "phase_name": "Lightweight Runbook",
+  "original_path": "design/phases/P12-lightweight-runbook.yaml",
+  "phase_status": "done",
+  "weight": 20,
+  "snapshotted_at": "2026-06-15T01:26:00.755Z",
+  "source_sha256": "c85fe1839c6bb7f8f3ea2716e87451b52e49f6626af48eb631c5b2d6ab8fe086",
+  "path_sha256": "f777110636d45e869706b8ce2a8620afc9747f356a13b7da73627b74a22f0003",
+  "tasks": [
+    {
+      "id": "P12-T1",
+      "status": "done",
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "64e9eb2e90988b01d8b7c8f36fbb498830fffd7272673a6da0fd3cad683e3ae4"
+        ]
+      }
+    },
+    {
+      "id": "P12-T2",
+      "status": "done",
+      "depends_on": [
+        "P12-T1"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "2e9b805bbc1fc890978d6e5de0b4e2b77c688b9e320fb4693556c66c93ae3481"
+        ]
+      }
+    },
+    {
+      "id": "P12-T3",
+      "status": "done",
+      "depends_on": [
+        "P12-T1",
+        "P12-T2"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "fcce85e9f3e62bfd6a6ac73f89c64aa28c1a59e97aaf2a0b10961ead8957203b"
+        ]
+      }
+    },
+    {
+      "id": "P12-T4",
+      "status": "done",
+      "depends_on": [
+        "P12-T1",
+        "P12-T2"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "298bf58b1c1c6200005558a06402d38c64e977d15690d81fb559f3c509ac15d5"
+        ]
+      }
+    },
+    {
+      "id": "P12-T5",
+      "status": "done",
+      "depends_on": [
+        "P12-T3",
+        "P12-T4"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "6debb28c68241e71d18545ccd0ef9db4b800fc356a64fa6e3e2826f346862340"
+        ]
+      }
+    }
+  ]
+}

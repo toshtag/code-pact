@@ -1,9 +1,0 @@
-task_id: P9-T4
-status: done
-at: 2026-05-20T00:43:21.706Z
-actor: agent
-agent: claude-code
-evidence:
-  - commands
-  - decision
-id: 173cccf35a1232930f8cef1171b1e18dca075933c28e4a5ba4769795faa50be2

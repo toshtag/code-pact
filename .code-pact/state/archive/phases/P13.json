@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "phase_id": "P13",
+  "phase_name": "Planning UX and init hardening",
+  "original_path": "design/phases/P13-planning-ux-init-hardening.yaml",
+  "phase_status": "done",
+  "weight": 15,
+  "snapshotted_at": "2026-06-15T01:26:02.143Z",
+  "source_sha256": "94f903a904ee4acf26de7db1e2af19c8f0b517350b4d314dc338ec141ab1c00c",
+  "path_sha256": "8ba8d07f4568b89c4d0a6675ea99cdf6efffe8233878fe6f0d344f4b9808193b",
+  "tasks": [
+    {
+      "id": "P13-T1",
+      "status": "done",
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "5e731cce5971fbfbc7298e56ad90c113eb36b86db614a0243b61314b50656729"
+        ]
+      }
+    },
+    {
+      "id": "P13-T2",
+      "status": "done",
+      "depends_on": [
+        "P13-T1"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "fb2d5fa2ef9d0e5341150d5994f35d853c479838795bc74b77859f6135697022"
+        ]
+      }
+    },
+    {
+      "id": "P13-T3",
+      "status": "done",
+      "depends_on": [
+        "P13-T1"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "19145694d01da99bb8f8ccbf300b0ea7c806e01af1b2cb79bfc7664b51b91275"
+        ]
+      }
+    },
+    {
+      "id": "P13-T4",
+      "status": "done",
+      "depends_on": [
+        "P13-T1"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "c6f23db1dd431aa190f53ec18573fcfb6ff4bc5f3889c3a18d21355f0def7946"
+        ]
+      }
+    },
+    {
+      "id": "P13-T5",
+      "status": "done",
+      "depends_on": [
+        "P13-T2",
+        "P13-T3",
+        "P13-T4"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "5697a91bfe959a54fceab3806feb11af70fdcf27b47da0aff43af5cf3ac674c1"
+        ]
+      }
+    },
+    {
+      "id": "P13-T6",
+      "status": "done",
+      "depends_on": [
+        "P13-T2",
+        "P13-T3",
+        "P13-T4",
+        "P13-T5"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "fcad5e85930bdd36d8535dde7b5601efad7de32c5953cda9727b75918c8be509"
+        ]
+      }
+    }
+  ]
+}
