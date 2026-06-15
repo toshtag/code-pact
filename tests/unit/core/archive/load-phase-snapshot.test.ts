@@ -10,7 +10,13 @@ import {
   type ArchivedTaskEntry,
 } from "../../../../src/core/archive/load-phase-snapshot.ts";
 import { writePhaseSnapshot } from "../../../../src/core/archive/phase-snapshot.ts";
-import { phaseSnapshotPath, sha256Hex } from "../../../../src/core/archive/paths.ts";
+import {
+  archiveBundlesDir,
+  phaseSnapshotPath,
+  sha256Hex,
+} from "../../../../src/core/archive/paths.ts";
+import { computeMemberIdsSha256 } from "../../../../src/core/archive/archive-bundle-reader.ts";
+import { ARCHIVE_BUNDLE_SCHEMA_VERSION } from "../../../../src/core/schemas/archive-bundle.ts";
 import { seedDurableEvents } from "../../../helpers/seed-events.ts";
 
 const NOW = new Date("2026-06-10T00:00:00.000Z");
@@ -182,6 +188,114 @@ describe("resolveMissingPhaseRef", () => {
     const obj = JSON.parse(await readFile(snapPath, "utf8"));
     obj.path_sha256 = sha256Hex("design/phases/something-else.yaml");
     await writeFile(snapPath, JSON.stringify(obj), "utf8");
+    expect((await resolveMissingPhaseRef(cwd, ref)).kind).toBe("fail_invalid");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Layer 1c-ii-b: resolveMissingPhaseRef resolves from loose ∪ bundle. The loose
+// `archive/phases/<id>.json` record wins; a phase_snapshot BUNDLE supplies the
+// record once its loose copy is compacted away.
+// ---------------------------------------------------------------------------
+
+/** Write a phase_snapshot bundle holding `members`, Tier-1-canonical (sha256 +
+ * ascending id order + member_ids_sha256). */
+async function writePhaseSnapshotBundle(
+  name: string,
+  members: { id: string; bytes: string }[],
+): Promise<void> {
+  const dir = archiveBundlesDir(cwd);
+  await mkdir(dir, { recursive: true });
+  const full = members
+    .map((m) => ({ id: m.id, sha256: sha256Hex(m.bytes), bytes: m.bytes }))
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  const bundle = {
+    schema_version: ARCHIVE_BUNDLE_SCHEMA_VERSION,
+    kind: "phase_snapshot",
+    member_ids_sha256: computeMemberIdsSha256(full.map((m) => m.id)),
+    members: full,
+  };
+  await writeFile(join(dir, name), JSON.stringify(bundle), "utf8");
+}
+
+/** Canonical loose P1 bytes, then DELETE the loose file (simulate compaction). */
+async function compactP1IntoBundleBytes(): Promise<string> {
+  const snapPath = await scaffoldWithP1Snapshot();
+  const bytes = await readFile(snapPath, "utf8");
+  await rm(snapPath);
+  return bytes;
+}
+
+describe("resolveMissingPhaseRef — loose ∪ bundle (Layer 1c-ii-b)", () => {
+  const ref = { id: "P1", path: "design/phases/P1-x.yaml" };
+
+  it("bundle-only (loose compacted away) → tolerated", async () => {
+    const bytes = await compactP1IntoBundleBytes();
+    await writePhaseSnapshotBundle("bundle-a.json", [{ id: "P1", bytes }]);
+    const res = await resolveMissingPhaseRef(cwd, ref);
+    expect(res.kind).toBe("tolerated");
+    if (res.kind === "tolerated") expect(res.snapshot.phase_id).toBe("P1");
+  });
+
+  it("loose present → loose wins; the bundle store is not consulted (tolerated)", async () => {
+    const snapPath = await scaffoldWithP1Snapshot();
+    const bytes = await readFile(snapPath, "utf8"); // loose stays on disk
+    await writePhaseSnapshotBundle("bundle-a.json", [{ id: "P1", bytes }]);
+    expect((await resolveMissingPhaseRef(cwd, ref)).kind).toBe("tolerated");
+  });
+
+  it("loose present is ISOLATED from a differing same-id bundle (loose wins → tolerated)", async () => {
+    const snapPath = await scaffoldWithP1Snapshot();
+    const looseBytes = await readFile(snapPath, "utf8"); // loose stays on disk
+    const differing = looseBytes.replace('"phase_id": "P1"', '"phase_id": "PX"');
+    expect(differing).not.toBe(looseBytes);
+    await writePhaseSnapshotBundle("bundle-a.json", [{ id: "P1", bytes: differing }]);
+    // Loose wins and the bundle is never loaded — a stale bundle copy does not fail
+    // a healthy loose resolution (stale detection is the compaction gate's job).
+    expect((await resolveMissingPhaseRef(cwd, ref)).kind).toBe("tolerated");
+  });
+
+  it("loose present is ISOLATED from an unrelated Tier-1-corrupt bundle (tolerated)", async () => {
+    await scaffoldWithP1Snapshot(); // loose P1 stays on disk
+    await mkdir(archiveBundlesDir(cwd), { recursive: true });
+    await writeFile(join(archiveBundlesDir(cwd), "bad.json"), "{ not json", "utf8");
+    // A corrupt bundle elsewhere in the store must NOT fail P1's healthy loose record.
+    expect((await resolveMissingPhaseRef(cwd, ref)).kind).toBe("tolerated");
+  });
+
+  it("bundle member id ≠ its own phase_id (wrong id) → fail_invalid (self-bind)", async () => {
+    const bytes = await compactP1IntoBundleBytes();
+    // Stored under member id "P1" but the body says phase_id "PX": bindBundleMember
+    // must reject it (the filename/id is never trusted over the record's identity).
+    const wrongIdBytes = bytes.replace('"phase_id": "P1"', '"phase_id": "PX"');
+    await writePhaseSnapshotBundle("bundle-a.json", [{ id: "P1", bytes: wrongIdBytes }]);
+    expect((await resolveMissingPhaseRef(cwd, ref)).kind).toBe("fail_invalid");
+  });
+
+  it("referenced id absent from loose AND bundle → fail_missing (strict)", async () => {
+    // A bundle exists, but it holds some OTHER phase, not P1. The P2 member is a
+    // deliberate non-target filler: it is only Tier-1-checked (sha256/order/set), is
+    // NEVER bound (we look up id "P1", not "P2"), so its bytes need not be a
+    // canonical PhaseSnapshot. Do NOT copy this filler for a member that gets
+    // looked up — use compactP1IntoBundleBytes() for canonical, bindable bytes.
+    await writePhaseSnapshotBundle("bundle-a.json", [{ id: "P2", bytes: '{"phase_id":"P2"}' }]);
+    expect((await resolveMissingPhaseRef(cwd, ref)).kind).toBe("fail_missing");
+  });
+
+  it("same id in two bundles with different bytes → fail_invalid (duplicate_member_conflict)", async () => {
+    const bytes = await compactP1IntoBundleBytes();
+    const other = bytes.replace('"phase_id": "P1"', '"phase_id": "PX"');
+    await writePhaseSnapshotBundle("bundle-a.json", [{ id: "P1", bytes }]);
+    await writePhaseSnapshotBundle("bundle-b.json", [{ id: "P1", bytes: other }]);
+    expect((await resolveMissingPhaseRef(cwd, ref)).kind).toBe("fail_invalid");
+  });
+
+  it("loose absent + a Tier-1-invalid bundle in the store → fail_invalid (fail-closed)", async () => {
+    // With loose gone the bundle store IS the source, so a corrupt bundle anywhere
+    // in it fails the load closed — never silently tolerated.
+    const bytes = await compactP1IntoBundleBytes();
+    await writePhaseSnapshotBundle("good.json", [{ id: "P1", bytes }]);
+    await writeFile(join(archiveBundlesDir(cwd), "bad.json"), "{ not json", "utf8");
     expect((await resolveMissingPhaseRef(cwd, ref)).kind).toBe("fail_invalid");
   });
 });

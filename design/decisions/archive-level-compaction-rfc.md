@@ -67,13 +67,18 @@ A **bundle** folds N retained per-item archive records of one kind into one cont
 **Cross-bundle global uniqueness (Blocker — must be deterministic).** Across ALL accepted bundles **and loose records** of one kind, a member id resolves to exactly one record:
 - same id in two places with **identical `sha256`** → allowed as a redundant duplicate, deterministically deduped (optionally a warning); never ambiguous.
 - same id with **different `sha256`** → **fail-closed** `duplicate_member_conflict` (a stale/forked bundle), never "pick one".
-- a loose record and a bundle member for the same id must be byte-identical, else `bundle_stale`, fail-closed.
+- a loose record and a bundle member for the same id must be byte-identical (else `bundle_stale`). This is the **`strict-reconcile` invariant**, enforced where loose and bundle copies legitimately coexist and must agree: the **bundle writer + readback**, the **`state compact-archive` delete-time gate** (before any loose unlink), and **explicit archive-bundle verification**. It is **NOT** required of every read path: a reader satisfied by a present loose record (loose-wins, below) MAY skip bundle loading entirely and never observe a `bundle_stale` condition — that isolates a healthy loose record from an unrelated corrupt/stale bundle, and stale detection stays the delete-gate's job rather than every reader's.
 
 **Sharding (bounds file SIZE within the retained set, not the count).** A bundle has a member cap; beyond it, members shard by a deterministic key (content-hash prefix). Stated honestly: sharding keeps any single bundle small; it does **not** bound the bundle *count* — only retention (A) does.
 
 ### Resolution
 
-Every archive reader (`validate`, `plan lint`, `check:docs`, `resolveMissingPhaseRef`, the event-pack binder, decision resolution) resolves an item from **loose record ∪ bundle members**, deduped by id under the cross-bundle uniqueness rule above. The verb `state compact-archive` ships in layers — **(1)** bundle reader + binding (no write), **(2)** bundle writer + readback (no delete), **(3)** gated loose-record deletion, **(4)** retention/prune — each reviewed before the next, per [[split-destructive-work-into-layers]].
+Every archive reader (`validate`, `plan lint`, `check:docs`, `resolveMissingPhaseRef`, the event-pack binder, decision resolution) resolves an item from the SOURCE **loose record ∪ bundle members**, deduped by id under the cross-bundle uniqueness rule above. Two resolution **modes** share that source but differ in posture:
+
+- **`reader-loose-wins`** (every read path). A **present** loose record satisfies the request and the bundle store is **not loaded for that id** — loose-wins short-circuit. The bundle is consulted **only when the loose record is absent**: load + Tier-1/Tier-2-bind the bundle member, then run the item's existing reader-side authority checks. This keeps the loose-only path byte-for-byte unchanged and **isolates** it — an unrelated corrupt/stale bundle elsewhere in the store can never fail a healthy loose resolution. A read path therefore does **not** call the strict loose∪bundle reconciliation primitive merely to detect `bundle_stale`.
+- **`strict-reconcile`** (bundle writer + readback, the `state compact-archive` delete-time gate, explicit verify). Loads BOTH sides for an id and enforces the byte-identical invariant (`bundle_stale` fail-closed) — this is where a loose+bundle disagreement is caught, immediately before any loose unlink.
+
+The verb `state compact-archive` ships in layers — **(1)** bundle reader + binding (no write), **(2)** bundle writer + readback (no delete), **(3)** gated loose-record deletion, **(4)** retention/prune — each reviewed before the next, per [[split-destructive-work-into-layers]]. To keep the two modes from drifting across the many readers, the wiring layers SHOULD route both through one shared `resolveArchiveRecordBytes({ kind, id, looseReader, bundleIndex, mode })` helper rather than re-implementing loose-vs-bundle handling per reader.
 
 ## Invariants (binding for the implementation)
 
