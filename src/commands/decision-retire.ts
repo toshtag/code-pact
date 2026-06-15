@@ -9,7 +9,7 @@ import {
   planDecisionRecord,
   type DecisionRecordBlock,
 } from "../core/archive/decision-record.ts";
-import { loadDecisionRecord } from "../core/archive/load-decision-record.ts";
+import { resolveArchiveDecisionRecord } from "../core/archive/load-decision-record.ts";
 import { recordMatchingRef } from "../core/decisions/decision-gate-archive.ts";
 import {
   evaluateRetire,
@@ -177,7 +177,10 @@ async function readbackResolve(
   cwd: string,
   canonical: string,
 ): Promise<{ ok: true; record_path: string; may_satisfy: boolean; source_sha256: string } | { ok: false }> {
-  const matched = recordMatchingRef(await loadDecisionRecord(cwd, canonical), canonical);
+  // Resolve from loose ∪ bundle so a retired decision whose loose record was compacted
+  // into a bundle still reads back as already-retired (not a spurious not_retired). The
+  // POST-WRITE verify path is unchanged: the just-written loose record wins (loose-wins).
+  const matched = recordMatchingRef(await resolveArchiveDecisionRecord(cwd, canonical), canonical);
   if (matched === null) return { ok: false };
   return {
     ok: true,

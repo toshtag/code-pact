@@ -17,7 +17,7 @@
 // gate table (G0–G8) is the binding source for every disposition here.
 // ---------------------------------------------------------------------------
 
-import { open, lstat, readFile, type FileHandle } from "node:fs/promises";
+import { open, lstat, type FileHandle } from "node:fs/promises";
 import { constants } from "node:fs";
 import {
   planEventPack,
@@ -25,7 +25,7 @@ import {
   type EventPackBlock,
 } from "./event-pack.ts";
 import { resolvePhaseSnapshotRaw } from "./load-phase-snapshot.ts";
-import { validateEventPackTier1 } from "./event-pack-reader.ts";
+import { validateEventPackTier1, resolveEventPackRaw } from "./event-pack-reader.ts";
 import { bindPackToSnapshot } from "./event-pack-binding.ts";
 import { readPackSources } from "../progress/all-sources.ts";
 import { resolveWithinProject } from "../path-safety.ts";
@@ -414,7 +414,16 @@ export async function prepareLooseCleanup(
   let packIds: Set<string>;
   let packSnapshotSha256: string;
   try {
-    const loadedPack = validateEventPackTier1(phaseId, await readFile(packPath, "utf8"), packPath);
+    // Resolve the pack from loose ∪ bundle (a bundled pack is recognized once its loose
+    // copy is compacted away), then full Tier-1 + Tier-2 re-bind against the snapshot.
+    const packRaw = await resolveEventPackRaw(cwd, phaseId);
+    if (packRaw.kind !== "present") {
+      return {
+        kind: "ineligible",
+        block: { kind: "pack_invalid", detail: packRaw.kind === "absent" ? "pack vanished" : String(packRaw.error) },
+      };
+    }
+    const loadedPack = validateEventPackTier1(phaseId, packRaw.bytes, packPath);
     const bindIssues = bindPackToSnapshot(loadedPack, snapshot, snapshotRaw, looseEventsById);
     if (bindIssues.length > 0) {
       return {

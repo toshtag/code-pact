@@ -4,6 +4,7 @@ import { resolveWithinProject } from "../path-safety.ts";
 import type { ArchiveBundleKind } from "../schemas/archive-bundle.ts";
 import { loadArchiveBundles } from "./archive-bundle-loader.ts";
 import { bindBundleMember } from "./archive-bundle-binding.ts";
+import { validateEventPackTier1 } from "./event-pack-reader.ts";
 import { reconcileLooseAndBundle, type BundleMemberIndex } from "./archive-bundle-index.ts";
 import { enumerateLooseMembers, writeArchiveBundle, type BundleWriteOutcome } from "./archive-bundle-writer.ts";
 import {
@@ -32,6 +33,13 @@ import {
 // `compactArchive` is the redundant-bundle-safe driver: it bundles only the loose
 // records not already in a bundle, then deletes everything a bundle now covers — so
 // re-running never grows a duplicate bundle.
+//
+// TOCTOU threat model (explicit): the gate re-reads the loose file immediately before
+// deciding, and the unlink targets the gate-resolved abs path. This proves LOGICAL
+// safety just before unlink; it does NOT close the tiny gate→unlink window against an
+// adversarial same-path replacement (the loose store is not a hostile-input boundary).
+// Callers MUST run this under the repo write lock (Layer 4's verb does) so no concurrent
+// code-pact mutation races it; the threat model is accidental races, not an attacker.
 // ---------------------------------------------------------------------------
 
 const ARCHIVE_BUNDLE_STORE_LABEL = ".code-pact/state/archive/bundles";
@@ -109,8 +117,12 @@ async function evaluateRecordDeleteGate(
   const entry = index.get(kind)?.get(id) ?? null;
   if (!entry) return { disposition: "skip", reason: "not_in_bundle" };
   // Tier-2 self-bind the covering member, then assert loose ≡ bundle byte-for-byte.
+  // For event_pack, ALSO run full Tier-1 (per-entry bijection / order / event_ids_sha256)
+  // — bindBundleMember only checks schema + canonical + id, so a byte-identical pair of
+  // semantically-invalid event-pack bytes must NOT be a deletion authority.
   try {
     bindBundleMember(kind, { id, sha256: entry.sha256, bytes: entry.bytes }, ARCHIVE_BUNDLE_STORE_LABEL);
+    if (kind === "event_pack") validateEventPackTier1(id, entry.bytes, ARCHIVE_BUNDLE_STORE_LABEL);
   } catch (err) {
     return { disposition: "skip", reason: "bundle_member_invalid", detail: (err as Error).message };
   }

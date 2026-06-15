@@ -4,11 +4,12 @@ import { EventPack, type PackedEvent } from "../schemas/event-pack.ts";
 import type { LoadedEventFile } from "../progress/events-io.ts";
 import { parseEventFileName } from "../progress/events-io.ts";
 import { atCompact, computeEventId, eventFileName } from "../progress/event-id.ts";
-import { archiveEventPacksDir } from "./paths.ts";
+import { archiveEventPacksDir, eventPackPath } from "./paths.ts";
 import { sha256Hex } from "./paths.ts";
 import { loadArchiveBundles } from "./archive-bundle-loader.ts";
 import { bindBundleMember } from "./archive-bundle-binding.ts";
 import type { BundleIndexEntry } from "./archive-bundle-index.ts";
+import { resolveArchiveRecordBytes, type RawLooseRecord } from "./resolve-archive-record.ts";
 
 // ---------------------------------------------------------------------------
 // Event-pack READER — Tier 1 (cheap, per-load, self-contained).
@@ -263,6 +264,41 @@ export async function readEventPackFiles(cwd: string): Promise<LoadedEventPack[]
     out.push(loadEventPackFromBundleMember(phaseId, entry));
   }
   return out;
+}
+
+/** Read the LOOSE event-pack file's raw bytes. ENOENT → absent; other error → invalid. */
+async function readLooseEventPackRaw(cwd: string, phaseId: string): Promise<RawLooseRecord> {
+  try {
+    return { kind: "present", bytes: await readFile(eventPackPath(cwd, phaseId), "utf8") };
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return { kind: "absent" };
+    return { kind: "invalid", error: err };
+  }
+}
+
+/** The raw bytes of a phase's event-pack, resolved from loose ∪ bundle
+ *  (`reader-loose-wins`): the loose `event-packs/<id>.json` wins; an event_pack bundle
+ *  member supplies it once the loose copy is compacted away. So the event-pack PRODUCER
+ *  (`planEventPack`) and cleanup gate see an existing bundled pack instead of treating
+ *  it as absent (which would regenerate a subset pack). `absent` when neither store has
+ *  it; `invalid` on a bundle-integrity fault or an unreadable loose file. The CALLER
+ *  still runs `validateEventPackTier1` on the bytes (full Tier-1). */
+export async function resolveEventPackRaw(cwd: string, phaseId: string): Promise<RawLooseRecord> {
+  let resolved;
+  try {
+    resolved = await resolveArchiveRecordBytes({
+      kind: "event_pack",
+      id: phaseId,
+      mode: "reader-loose-wins",
+      readLooseRaw: () => readLooseEventPackRaw(cwd, phaseId),
+      loadBundleIndex: () => loadArchiveBundles(cwd).index,
+    });
+  } catch (error) {
+    return { kind: "invalid", error };
+  }
+  if (resolved.kind === "absent") return { kind: "absent" };
+  if (resolved.kind === "invalid") return { kind: "invalid", error: resolved.error };
+  return { kind: "present", bytes: resolved.bytes };
 }
 
 /** One pack that failed Tier-1 (or read), for the per-file lenient reader. */

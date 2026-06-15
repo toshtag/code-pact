@@ -7,6 +7,10 @@ import { classifyAdr } from "../decisions/adr.ts";
 import { resolveWithinProject } from "../path-safety.ts";
 import { atomicWriteText, type ExpectedState } from "../../io/atomic-text.ts";
 import { decisionRecordPath, normalizeDecisionRef, sha256Hex } from "./paths.ts";
+import { readLooseDecisionRecordRaw } from "./load-decision-record.ts";
+import { decisionRecordStem } from "./archive-bundle-binding.ts";
+import { loadArchiveBundles } from "./archive-bundle-loader.ts";
+import { resolveArchiveRecordBytes } from "./resolve-archive-record.ts";
 
 // ---------------------------------------------------------------------------
 // Decision-state record writer (record layer — NO CLI, NO reader changes).
@@ -96,21 +100,44 @@ function extractTitle(content: string): string | undefined {
 }
 
 async function readExistingRecord(
-  path: string,
+  cwd: string,
+  canonical: string,
 ): Promise<
   | { state: "missing" }
   | { state: "invalid"; detail: string }
-  | { state: "present"; record: DecisionStateRecord; raw: string }
+  | { state: "present"; record: DecisionStateRecord; raw: string; looseFilePresent: boolean }
 > {
-  let raw: string;
+  // Resolve from loose ∪ bundle (reader-loose-wins): a record compacted into a bundle
+  // (loose gone) is still "present", so a re-run reports noop_record_authoritative
+  // rather than re-materializing. `looseFilePresent` tells the apply whether a refresh
+  // overwrites a loose file or must write a fresh one.
+  let resolved;
   try {
-    raw = await readFile(path, "utf8");
+    resolved = await resolveArchiveRecordBytes({
+      kind: "decision_record",
+      id: decisionRecordStem(canonical),
+      mode: "reader-loose-wins",
+      readLooseRaw: () => readLooseDecisionRecordRaw(cwd, canonical),
+      loadBundleIndex: () => loadArchiveBundles(cwd).index,
+    });
   } catch (err) {
-    if (isEnoent(err)) return { state: "missing" };
-    throw err;
+    return { state: "invalid", detail: err instanceof Error ? err.message : String(err) };
   }
+  if (resolved.kind === "absent") return { state: "missing" };
+  if (resolved.kind === "invalid") {
+    return {
+      state: "invalid",
+      detail: resolved.error instanceof Error ? resolved.error.message : String(resolved.error),
+    };
+  }
+  const raw = resolved.bytes;
   try {
-    return { state: "present", record: DecisionStateRecord.parse(JSON.parse(raw)), raw };
+    return {
+      state: "present",
+      record: DecisionStateRecord.parse(JSON.parse(raw)),
+      raw,
+      looseFilePresent: resolved.source === "loose",
+    };
   } catch (err) {
     return { state: "invalid", detail: err instanceof Error ? err.message : String(err) };
   }
@@ -160,7 +187,7 @@ export async function planDecisionRecord(
   }
   const path = decisionRecordPath(cwd, canonical);
 
-  const existing = await readExistingRecord(path);
+  const existing = await readExistingRecord(cwd, canonical);
   if (existing.state === "invalid") {
     return { kind: "ineligible", path, blocks: [{ kind: "record_invalid", detail: existing.detail }] };
   }
@@ -308,6 +335,11 @@ export async function planDecisionRecord(
         },
       ],
     };
+  }
+  // Bundle-only existing record (loose compacted away): no loose file to overwrite, so
+  // write a fresh loose record (ExpectedState absent) instead of a refresh.
+  if (!existing.looseFilePresent) {
+    return { kind: "write", path, record };
   }
   return {
     kind: "refresh",

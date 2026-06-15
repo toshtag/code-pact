@@ -13,7 +13,9 @@ import { loadMergedProgress, mergeProgressStreams } from "../progress/io.ts";
 import { readPackSources } from "../progress/all-sources.ts";
 import { deriveTaskState } from "../progress/task-state.ts";
 import { computeEventId } from "../progress/event-id.ts";
-import { resolveMissingPhaseRef } from "./load-phase-snapshot.ts";
+import { resolveMissingPhaseRef, readLoosePhaseSnapshotRaw } from "./load-phase-snapshot.ts";
+import { loadArchiveBundles } from "./archive-bundle-loader.ts";
+import { resolveArchiveRecordBytes } from "./resolve-archive-record.ts";
 import { resolveWithinProject } from "../path-safety.ts";
 import { atomicWriteText, type ExpectedState } from "../../io/atomic-text.ts";
 import { phaseSnapshotPath, sha256Hex } from "./paths.ts";
@@ -158,21 +160,45 @@ async function readRawWithin(cwd: string, relPath: string): Promise<string> {
 }
 
 async function readExistingRecord(
-  path: string,
+  cwd: string,
+  phaseId: string,
 ): Promise<
   | { state: "missing" }
   | { state: "invalid"; detail: string }
-  | { state: "present"; record: PhaseSnapshot; raw: string }
+  | { state: "present"; record: PhaseSnapshot; raw: string; looseFilePresent: boolean }
 > {
-  let raw: string;
+  // Resolve the existing record from loose ∪ bundle (reader-loose-wins): a snapshot
+  // compacted into a bundle (loose gone) is still "present", so a re-run correctly
+  // reports noop_record_authoritative instead of treating it as missing (which would
+  // re-materialize a loose copy / mis-verdict). `looseFilePresent` tells the apply
+  // whether a refresh can overwrite a loose file or must write a fresh one.
+  let resolved;
   try {
-    raw = await readFile(path, "utf8");
+    resolved = await resolveArchiveRecordBytes({
+      kind: "phase_snapshot",
+      id: phaseId,
+      mode: "reader-loose-wins",
+      readLooseRaw: () => readLoosePhaseSnapshotRaw(cwd, phaseId),
+      loadBundleIndex: () => loadArchiveBundles(cwd).index,
+    });
   } catch (err) {
-    if (isEnoent(err)) return { state: "missing" };
-    throw err;
+    return { state: "invalid", detail: err instanceof Error ? err.message : String(err) };
   }
+  if (resolved.kind === "absent") return { state: "missing" };
+  if (resolved.kind === "invalid") {
+    return {
+      state: "invalid",
+      detail: resolved.error instanceof Error ? resolved.error.message : String(resolved.error),
+    };
+  }
+  const raw = resolved.bytes;
   try {
-    return { state: "present", record: PhaseSnapshot.parse(JSON.parse(raw)), raw };
+    return {
+      state: "present",
+      record: PhaseSnapshot.parse(JSON.parse(raw)),
+      raw,
+      looseFilePresent: resolved.source === "loose",
+    };
   } catch (err) {
     // Fail closed: an unreadable/invalid record silences nothing and is never
     // silently overwritten — surface it instead.
@@ -235,7 +261,7 @@ export async function planPhaseSnapshot(
   opts: PhaseSnapshotOptions,
 ): Promise<PhaseSnapshotPlan> {
   const path = phaseSnapshotPath(cwd, phaseId);
-  const existing = await readExistingRecord(path);
+  const existing = await readExistingRecord(cwd, phaseId);
   if (existing.state === "invalid") {
     return { kind: "ineligible", path, blocks: [{ kind: "record_invalid", detail: existing.detail }] };
   }
@@ -643,6 +669,13 @@ export async function planPhaseSnapshot(
           ],
         };
       }
+    }
+    // The existing record is bundle-only (its loose file was compacted away): there
+    // is no loose file to overwrite, so re-materialize a fresh loose record (write,
+    // ExpectedState absent) rather than a refresh (which expects the loose bytes).
+    // Loose-wins means the fresh loose then supersedes the now-stale bundle member.
+    if (!existing.looseFilePresent) {
+      return { kind: "write", path, record };
     }
     return {
       kind: "refresh",

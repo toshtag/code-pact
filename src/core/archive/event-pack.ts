@@ -23,6 +23,7 @@ import {
 import {
   validateEventPackTier1,
   computeEventIdsSha256,
+  resolveEventPackRaw,
   type LoadedEventPack,
 } from "./event-pack-reader.ts";
 import {
@@ -399,11 +400,21 @@ export async function planEventPack(cwd: string, phaseId: string): Promise<Event
   //    contributes nothing to the resolved map). The lenient read below already
   //    skips this same corrupt pack as an EVENT_PACK_INVALID issue; we want the
   //    sharper, pack-specific verdict to win.
+  // Resolve the existing pack from loose ∪ bundle, so a pack compacted into a bundle
+  // (loose file gone) is recognized as existing — NOT treated as absent, which would
+  // regenerate a subset pack from any leftover loose events. Full Tier-1 still runs.
   let existing: LoadedEventPack | null = null;
-  try {
-    const existingRaw = await readFile(packPath, "utf8");
+  const existingPackRaw = await resolveEventPackRaw(cwd, phaseId);
+  if (existingPackRaw.kind === "invalid") {
+    return {
+      kind: "ineligible",
+      phaseId,
+      block: { kind: "pack_invalid", detail: String(existingPackRaw.error) },
+    };
+  }
+  if (existingPackRaw.kind === "present") {
     try {
-      existing = validateEventPackTier1(phaseId, existingRaw, packPath);
+      existing = validateEventPackTier1(phaseId, existingPackRaw.bytes, packPath);
     } catch (err) {
       return {
         kind: "ineligible",
@@ -411,16 +422,8 @@ export async function planEventPack(cwd: string, phaseId: string): Promise<Event
         block: { kind: "pack_invalid", detail: (err as Error).message },
       };
     }
-  } catch (err) {
-    if (!isEnoent(err)) {
-      return {
-        kind: "ineligible",
-        phaseId,
-        block: { kind: "pack_invalid", detail: (err as Error).message },
-      };
-    }
-    // ENOENT — no existing pack; fall through to the candidate-build branch.
   }
+  // absent — no existing pack; fall through to the candidate-build branch.
 
   // 4. Durable sources (lenient: a corrupt OTHER phase's pack can't block this;
   //    the TARGET pack's own validity was already decided above).
