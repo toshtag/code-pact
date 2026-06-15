@@ -7,6 +7,7 @@ import {
   bundleLooseRecords,
   enumerateLooseMembers,
   serializeArchiveBundle,
+  supersedeArchiveBundle,
   verifyBundleReadback,
   writeArchiveBundle,
   type BundleWriteError,
@@ -20,6 +21,7 @@ import {
   archiveBundlePath,
   decisionRecordPath,
   phaseSnapshotPath,
+  sha256Hex,
 } from "../../../../src/core/archive/paths.ts";
 import { seedDurableEvents } from "../../../helpers/seed-events.ts";
 
@@ -291,5 +293,74 @@ describe("verifyBundleReadback — fail-closed on a corrupt/divergent readback",
         "x.json",
       ),
     ).toThrow();
+  });
+});
+
+/** Refresh the on-disk P1 snapshot to a DIFFERENT-but-valid record (edit the design file,
+ *  then an explicit refresh re-records it) and return the new loose bytes. The supersede
+ *  scenario: a record was compacted into a bundle, then refreshed, so a fresher loose now
+ *  diverges from the bundle member at the same id. */
+async function refreshP1SnapshotToNewBytes(): Promise<string> {
+  const edited = P1_DONE.replace("Build the base", "Build the base (edited)");
+  await writeFile(join(cwd, "design", "phases", "P1-x.yaml"), edited, "utf8");
+  const refreshed = await writePhaseSnapshot(cwd, "P1", {
+    now: new Date("2026-06-11T00:00:00.000Z"),
+    refresh: { expected_old_source_sha256: sha256Hex(P1_DONE), expected_new_source_sha256: sha256Hex(edited) },
+  });
+  expect(refreshed.kind).toBe("written");
+  return readFile(phaseSnapshotPath(cwd, "P1"), "utf8");
+}
+
+describe("supersedeArchiveBundle — intentional same-id-set replace (UNWIRED Layer-4 primitive)", () => {
+  it("a stale bundle at the content address is REPLACED with the fresher member; the bundle now holds the new bytes", async () => {
+    const v1 = await scaffoldP1Snapshot();
+    expect((await writeArchiveBundle(cwd, "phase_snapshot", [{ id: "P1", bytes: v1 }])).kind).toBe("written");
+    const v2 = await refreshP1SnapshotToNewBytes();
+    expect(v2).not.toBe(v1); // a genuinely different (but valid) snapshot
+
+    const out = await supersedeArchiveBundle(cwd, "phase_snapshot", [{ id: "P1", bytes: v2 }]);
+    expect(out.kind).toBe("superseded");
+    if (out.kind === "superseded") expect(out.member_count).toBe(1);
+    // The bundle's authority for P1 is now the NEW bytes — the old member bytes are DROPPED.
+    const member = loadArchiveBundles(cwd).index.get("phase_snapshot")?.get("P1");
+    expect(member?.bytes).toBe(v2);
+    expect(member?.bytes).not.toBe(v1);
+    // Layer-3 boundary preserved: supersede touches only the bundle, never the loose record.
+    expect(await readFile(phaseSnapshotPath(cwd, "P1"), "utf8")).toBe(v2);
+  });
+
+  it("OPT-IN boundary: where writeArchiveBundle FAILS CLOSED on a same-id divergence, supersedeArchiveBundle REPLACES", async () => {
+    const v1 = await scaffoldP1Snapshot();
+    expect((await writeArchiveBundle(cwd, "phase_snapshot", [{ id: "P1", bytes: v1 }])).kind).toBe("written");
+    const v2 = await refreshP1SnapshotToNewBytes();
+
+    // The default create path refuses to overwrite the diverging bundle (the #467 guard)...
+    await expect(writeArchiveBundle(cwd, "phase_snapshot", [{ id: "P1", bytes: v2 }])).rejects.toThrow(
+      /different bundle already exists/,
+    );
+    // ...but the explicit supersede path adopts the fresher member.
+    expect((await supersedeArchiveBundle(cwd, "phase_snapshot", [{ id: "P1", bytes: v2 }])).kind).toBe("superseded");
+  });
+
+  it("idempotent: superseding to the bytes already on disk → noop_already_bundled (no needless rewrite)", async () => {
+    const v1 = await scaffoldP1Snapshot();
+    expect((await writeArchiveBundle(cwd, "phase_snapshot", [{ id: "P1", bytes: v1 }])).kind).toBe("written");
+    const v2 = await refreshP1SnapshotToNewBytes();
+    expect((await supersedeArchiveBundle(cwd, "phase_snapshot", [{ id: "P1", bytes: v2 }])).kind).toBe("superseded");
+    // A second supersede with the same v2 is a converged noop.
+    expect((await supersedeArchiveBundle(cwd, "phase_snapshot", [{ id: "P1", bytes: v2 }])).kind).toBe(
+      "noop_already_bundled",
+    );
+  });
+
+  it("no existing bundle at the content address → a plain written (supersede degrades to create)", async () => {
+    const v1 = await scaffoldP1Snapshot();
+    const out = await supersedeArchiveBundle(cwd, "phase_snapshot", [{ id: "P1", bytes: v1 }]);
+    expect(out.kind).toBe("written");
+    expect(loadArchiveBundles(cwd).index.get("phase_snapshot")?.get("P1")?.bytes).toBe(v1);
+  });
+
+  it("empty member set → noop_no_members", async () => {
+    expect((await supersedeArchiveBundle(cwd, "phase_snapshot", [])).kind).toBe("noop_no_members");
   });
 });

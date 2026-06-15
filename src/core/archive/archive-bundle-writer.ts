@@ -5,7 +5,7 @@ import {
   ARCHIVE_BUNDLE_SCHEMA_VERSION,
   type ArchiveBundleKind,
 } from "../schemas/archive-bundle.ts";
-import { atomicWriteText } from "../../io/atomic-text.ts";
+import { atomicReplaceExistingText, atomicWriteText } from "../../io/atomic-text.ts";
 import {
   archiveBundlePath,
   archiveDecisionsDir,
@@ -37,6 +37,7 @@ export type LooseMember = { id: string; bytes: string };
 
 export type BundleWriteOutcome =
   | { kind: "written"; bundleFile: string; member_count: number }
+  | { kind: "superseded"; bundleFile: string; member_count: number }
   | { kind: "noop_already_bundled"; bundleFile: string; member_count: number }
   | { kind: "noop_no_members" };
 
@@ -115,18 +116,41 @@ export function buildArchiveBundle(kind: ArchiveBundleKind, members: readonly Lo
   } satisfies ArchiveBundle);
 }
 
+/** Re-read the just-written bundle from disk and verify it (Tier-1 + Tier-2 +
+ *  strict-reconcile vs the folded loose). Shared by the create and supersede paths. */
+async function readbackAndVerify(
+  path: string,
+  kind: ArchiveBundleKind,
+  members: readonly LooseMember[],
+  file: string,
+): Promise<void> {
+  let reread: string;
+  try {
+    reread = await readFile(path, "utf8");
+  } catch (err) {
+    throw new BundleWriteError("verify_bundle", true, `readback read failed: ${(err as Error).message}`);
+  }
+  verifyBundleReadback(reread, kind, members, file);
+}
+
 /**
- * Write a bundle folding `members` (loose records of `kind`) and verify the readback.
- * Idempotent by content address: the same id set re-writes to the same path, so an
- * identical existing bundle is a `noop_already_bundled`; an existing file at that path
- * with DIFFERENT bytes (same id set, changed member content) fails closed. NO loose
- * deletion (Layer 3). Run inside a write lock (the caller's job, mirroring
- * `applyEventPackPlan`). An empty member set is `noop_no_members` (a bundle needs ≥1).
+ * Persist the consolidated bundle for `members` of `kind` at its content-addressed path
+ * and verify the readback. ONE shared core behind {@link writeArchiveBundle} (create) and
+ * {@link supersedeArchiveBundle} (replace) so the two entry points cannot drift in how they
+ * build, place, write, or verify a bundle — they differ ONLY in what a same-id-set / different
+ * -bytes collision means:
+ *   - `mode: "create"` — an unintended divergence; **fail closed** (never overwrite).
+ *   - `mode: "supersede"` — the intended adoption of a fresher member; **atomically replace**
+ *     the stale bundle (TOCTOU-narrowed by expecting the exact old bytes) and verify.
+ * A byte-identical existing bundle is an idempotent `noop_already_bundled` in BOTH modes; no
+ * existing file is a plain create in both. An empty member set is `noop_no_members`. NO loose
+ * deletion here (Layer 3). Run inside a write lock (the caller's job).
  */
-export async function writeArchiveBundle(
+async function persistArchiveBundle(
   cwd: string,
   kind: ArchiveBundleKind,
   members: readonly LooseMember[],
+  mode: "create" | "supersede",
 ): Promise<BundleWriteOutcome> {
   if (members.length === 0) return { kind: "noop_no_members" };
 
@@ -135,9 +159,6 @@ export async function writeArchiveBundle(
   const path = archiveBundlePath(cwd, kind, bundle.member_ids_sha256);
   const file = join("bundles", basename(path));
 
-  // Idempotency / conflict: a file already at this content-addressed path is either
-  // byte-identical (idempotent re-run → noop) or a same-id-set/different-bytes
-  // conflict (fail closed — never silently overwrite a diverging bundle).
   let existing: string | null = null;
   try {
     existing = await readFile(path, "utf8");
@@ -146,33 +167,84 @@ export async function writeArchiveBundle(
       throw new BundleWriteError("write_bundle", false, `existing bundle unreadable: ${(err as Error).message}`);
     }
   }
+
   if (existing !== null) {
     if (existing === bytes) {
+      // Same content address, byte-identical → already at the desired state (idempotent).
       verifyBundleReadback(existing, kind, members, file);
       return { kind: "noop_already_bundled", bundleFile: file, member_count: members.length };
     }
-    throw new BundleWriteError(
-      "write_bundle",
-      false,
-      `a different bundle already exists at ${file} (same id set, different bytes)`,
-    );
+    // Same id set, DIFFERENT bytes — a member's content changed under the same address.
+    if (mode === "create") {
+      // Create mode never overwrites a diverging bundle — fail closed (the #467 guard).
+      throw new BundleWriteError(
+        "write_bundle",
+        false,
+        `a different bundle already exists at ${file} (same id set, different bytes)`,
+      );
+    }
+    // Supersede mode: this divergence is the POINT — a fresher loose has been adopted, so
+    // atomically replace the stale bundle in place. atomicReplaceExistingText expects the
+    // exact old bytes just before the rename (TOCTOU-narrowed) and does NOT recreate a
+    // vanished bundles/ dir. The replace is ATOMIC: rename(2) either fully swaps in the new
+    // bytes or fails leaving the old bundle untouched (the temp is cleaned up on throw). So a
+    // failure here means NO disk mutation → partial_applied:false (like the create-path write
+    // failure below). partial_applied only flips true once readbackAndVerify sees the new
+    // bundle on disk but rejects it.
+    try {
+      await atomicReplaceExistingText(path, bytes, existing);
+    } catch (err) {
+      throw new BundleWriteError("write_bundle", false, `atomic replace failed: ${(err as Error).message}`);
+    }
+    await readbackAndVerify(path, kind, members, file);
+    return { kind: "superseded", bundleFile: file, member_count: members.length };
   }
 
+  // No existing bundle at this content address — a plain create (identical in both modes).
   try {
     await atomicWriteText(path, bytes, { kind: "absent" }, { mkdir: true });
   } catch (err) {
     throw new BundleWriteError("write_bundle", false, `atomic write failed: ${(err as Error).message}`);
   }
-
-  // Readback: re-read from disk and verify (Tier-1 + Tier-2 + strict-reconcile vs loose).
-  let reread: string;
-  try {
-    reread = await readFile(path, "utf8");
-  } catch (err) {
-    throw new BundleWriteError("verify_bundle", true, `readback read failed: ${(err as Error).message}`);
-  }
-  verifyBundleReadback(reread, kind, members, file);
+  await readbackAndVerify(path, kind, members, file);
   return { kind: "written", bundleFile: file, member_count: members.length };
+}
+
+/**
+ * Write a bundle folding `members` (loose records of `kind`) and verify the readback.
+ * Idempotent by content address: the same id set re-writes to the same path, so an
+ * identical existing bundle is a `noop_already_bundled`; an existing file at that path
+ * with DIFFERENT bytes (same id set, changed member content) **fails closed** — never
+ * silently overwrites a diverging bundle (use {@link supersedeArchiveBundle} for the
+ * intentional adopt-the-fresher-member replace). NO loose deletion (Layer 3). Run inside
+ * a write lock (the caller's job, mirroring `applyEventPackPlan`). An empty member set is
+ * `noop_no_members` (a bundle needs ≥1).
+ */
+export async function writeArchiveBundle(
+  cwd: string,
+  kind: ArchiveBundleKind,
+  members: readonly LooseMember[],
+): Promise<BundleWriteOutcome> {
+  return persistArchiveBundle(cwd, kind, members, "create");
+}
+
+/**
+ * Like {@link writeArchiveBundle} but for the INTENTIONAL supersession of a stale bundle:
+ * when a bundle already exists at the content address with DIFFERENT bytes (a member whose
+ * content a fresher loose record has changed), it is atomically REPLACED with the rebuilt
+ * bundle (and the readback verified) rather than failing closed. This is the most truth-
+ * destructive bundle op — it drops the old member bytes — so it is a SEPARATE, opt-in entry
+ * point, never the default `writeArchiveBundle` collision behavior. A byte-identical existing
+ * bundle is a `noop_already_bundled`; an absent one is a plain `written`; a replace is
+ * `superseded`. UNWIRED into the compaction flow for now (the loose-wins adoption + the
+ * delete gate that consume it land in the next layer). Run inside a write lock.
+ */
+export async function supersedeArchiveBundle(
+  cwd: string,
+  kind: ArchiveBundleKind,
+  members: readonly LooseMember[],
+): Promise<BundleWriteOutcome> {
+  return persistArchiveBundle(cwd, kind, members, "supersede");
 }
 
 /** Verify on-disk bundle bytes: Tier-1, then per folded member Tier-2 self-bind +
