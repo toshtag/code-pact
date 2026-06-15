@@ -17,6 +17,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
+import { closesClaimProblem } from "./closes-claim.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (rel) => readFileSync(resolve(repoRoot, rel), "utf8");
@@ -167,38 +168,25 @@ for (const rel of ["docs/getting-started.md"]) {
     }
     for (const phaseId of claimed) {
       const entry = byId.get(phaseId);
+      // When no live YAML resolves the id, read the archive snapshot: `null` = no
+      // snapshot file, `"PARSE_ERROR"` = a file is present but unparseable (distinct
+      // diagnostics; the verdict — incl. the snapshot phase_id identity check — lives
+      // in the pure `closesClaimProblem`).
+      let snapshot = null;
       if (!entry) {
-        // No live phase YAML — it may be ARCHIVED. Resolve from its snapshot: a
-        // terminal `phase_status: done` snapshot satisfies the "closes" claim.
-        let snap = null;
         try {
-          snap = JSON.parse(read(`.code-pact/state/archive/phases/${phaseId}.json`));
-        } catch {
-          /* no snapshot — fall through to the not-found failure */
-        }
-        if (snap) {
-          if (snap.phase_status !== "done") {
-            fail(
-              "CHANGELOG.md",
-              `says "closes ${phaseId}" but its archive snapshot's phase_status is "${snap.phase_status}", not "done"`,
-            );
+          const raw = read(`.code-pact/state/archive/phases/${phaseId}.json`);
+          try {
+            snapshot = JSON.parse(raw);
+          } catch {
+            snapshot = "PARSE_ERROR";
           }
-          continue; // archived + done → claim satisfied
+        } catch {
+          snapshot = null; // no snapshot file
         }
-        fail(
-          "CHANGELOG.md",
-          `claims "closes ${phaseId}" but no live design/phases/*.yaml has \`id: ${phaseId}\` and no archive snapshot resolves it`,
-        );
-        continue;
       }
-      const statusMatch = entry.body.match(/^status:\s*(\S+)/m);
-      const status = statusMatch ? statusMatch[1] : "(none)";
-      if (status !== "done") {
-        fail(
-          `${phaseDir}/${entry.file}`,
-          `CHANGELOG.md says "closes ${phaseId}" but the phase status is "${status}", not "done" — flip the phase (and its tasks) to done, or drop the "closes" claim`,
-        );
-      }
+      const problem = closesClaimProblem(phaseId, entry, snapshot);
+      if (problem) fail(problem.rel, problem.msg);
     }
   }
 }
