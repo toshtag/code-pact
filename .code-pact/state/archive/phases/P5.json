@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "phase_id": "P5",
+  "phase_name": "Planning Integrity",
+  "original_path": "design/phases/P5-planning-integrity.yaml",
+  "phase_status": "done",
+  "weight": 20,
+  "snapshotted_at": "2026-06-15T03:06:17.881Z",
+  "source_sha256": "6e7d73c2993c53196ad5c8bbd5fbcd857972309545f8cbf5dfdbaaecbeb4b793",
+  "path_sha256": "a0b9495dc7299885288916dadd3017a751b605dc4b5d85206954129ad9d3442d",
+  "tasks": [
+    {
+      "id": "P5-T1",
+      "status": "done",
+      "terminal_evidence": {
+        "kind": "maintainer_attestation",
+        "recorded_at": "2026-06-15T03:06:17.881Z",
+        "reason": "pre-ledger phase (predates the per-event ledger); completion evidenced by shipped code + git history"
+      }
+    },
+    {
+      "id": "P5-T2",
+      "status": "done",
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "2dceb8aa8f9f9d9395f3d7235ba644bdd8a156cbe9cb480fb8d30f646a2ef196"
+        ]
+      }
+    },
+    {
+      "id": "P5-T3",
+      "status": "done",
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "8dfefb9b7aa039598b459d49ad536ec8db494f5217f123999c3c817e05922bb0"
+        ]
+      }
+    },
+    {
+      "id": "P5-T4",
+      "status": "done",
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "fa3f50287a945ffb1055fdff3e3d5478243cd488b2d7aa22c0d31eaea49efdd2"
+        ]
+      }
+    },
+    {
+      "id": "P5-T5",
+      "status": "done",
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "aea0445641660972171abd98c3d43e537633e50ee13e844a6a405ff0e49e0ff1"
+        ]
+      }
+    }
+  ]
+}
