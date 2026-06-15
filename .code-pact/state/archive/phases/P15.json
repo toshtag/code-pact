@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "phase_id": "P15",
+  "phase_name": "Declared Writes Audit",
+  "original_path": "design/phases/P15-declared-writes-audit.yaml",
+  "phase_status": "done",
+  "weight": 25,
+  "snapshotted_at": "2026-06-15T02:34:55.461Z",
+  "source_sha256": "85846a8205af9f3ec1754815d1762ca8b90b22f63118f78603a12774dc2909fa",
+  "path_sha256": "3ec8f2e417f714e129d5ab772826fe606031f4044776773bc25f4d79a156d69f",
+  "tasks": [
+    {
+      "id": "P15-T1",
+      "status": "done",
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "e3f682b9ed1ae96f86cd4c10d73b12a777a437fb9b3f9e4b27811399d245ddae"
+        ]
+      }
+    },
+    {
+      "id": "P15-T2",
+      "status": "done",
+      "depends_on": [
+        "P15-T1"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "715d632d1ce9ce62f3efc740caff66ae28e518c8bd2fb792442c4188b587bfa4"
+        ]
+      }
+    },
+    {
+      "id": "P15-T3",
+      "status": "done",
+      "depends_on": [
+        "P15-T1"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "d90990afdd3cf85608672c5d6e1a82684db5b71707ffe2eeebe4f611060d4236"
+        ]
+      }
+    },
+    {
+      "id": "P15-T4",
+      "status": "done",
+      "depends_on": [
+        "P15-T1"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "26cb4fcebaa40651d8cc530e381f56d06dca7299bb1a1506a7bb747713591bf9"
+        ]
+      }
+    },
+    {
+      "id": "P15-T5",
+      "status": "cancelled",
+      "depends_on": [
+        "P15-T1"
+      ],
+      "terminal_evidence": {
+        "kind": "design_status",
+        "observed_status": "cancelled",
+        "source_field": "tasks[].status"
+      }
+    },
+    {
+      "id": "P15-T6",
+      "status": "done",
+      "depends_on": [
+        "P15-T1",
+        "P15-T4"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "243f38b29aa32f5b7980d326235379936c1ccb1a8d270f61d2737611964043a7"
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "phase_id": "P16",
+  "phase_name": "Agent Contract Adapter Hardening",
+  "original_path": "design/phases/P16-agent-contract-adapter-hardening.yaml",
+  "phase_status": "done",
+  "weight": 25,
+  "snapshotted_at": "2026-06-15T02:34:57.073Z",
+  "source_sha256": "cfbf8c28d85f70f5dfb5ea6b0e50a2bf83111cd85fb8f4484dae5dda67258aeb",
+  "path_sha256": "a55e68098c5a28fa959bccb432a3c7417476ded5048096135a3ae55b7166c369",
+  "tasks": [
+    {
+      "id": "P16-T1",
+      "status": "done",
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "bd479344ed605a0f7ec54547d49260bef9e285235919e3b795bb7161fe9a7280"
+        ]
+      }
+    },
+    {
+      "id": "P16-T2",
+      "status": "done",
+      "depends_on": [
+        "P16-T1"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "966812f3aebed31b274ad425c92f9451f3c3c7eee9ae7aced4f4141e8fbb9825"
+        ]
+      }
+    },
+    {
+      "id": "P16-T3",
+      "status": "done",
+      "depends_on": [
+        "P16-T1"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "d791a4c7f8981d8e459a89da9a0a68bea3b7b8e2d17a899faec10160a3371c50"
+        ]
+      }
+    },
+    {
+      "id": "P16-T4",
+      "status": "done",
+      "depends_on": [
+        "P16-T2",
+        "P16-T3"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "920e32645147af47890f29db7991c46a2de51ea07e0711fa608adced03c92a4b"
+        ]
+      }
+    },
+    {
+      "id": "P16-T5",
+      "status": "done",
+      "depends_on": [
+        "P16-T2",
+        "P16-T3"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "5f08d5b206968c011884349dad0e694a50b638e9e74d100d3bac5b075e063494"
+        ]
+      }
+    }
+  ]
+}
