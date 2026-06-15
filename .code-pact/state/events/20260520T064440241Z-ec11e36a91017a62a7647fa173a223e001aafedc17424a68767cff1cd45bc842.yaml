@@ -1,9 +1,0 @@
-task_id: P10-T6
-status: done
-at: 2026-05-20T06:44:40.241Z
-actor: agent
-agent: claude-code
-evidence:
-  - commands
-  - decision
-id: ec11e36a91017a62a7647fa173a223e001aafedc17424a68767cff1cd45bc842
