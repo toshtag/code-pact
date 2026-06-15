@@ -7,7 +7,7 @@ import { bindBundleMember } from "./archive-bundle-binding.ts";
 import { validateEventPackTier1 } from "./event-pack-reader.ts";
 import { reconcileLooseAndBundle, type BundleMemberIndex } from "./archive-bundle-index.ts";
 import {
-  assertLooseMemberValid,
+  assertBundleMemberFoldable,
   BundleWriteError,
   enumerateLooseMembers,
   writeArchiveBundle,
@@ -244,6 +244,17 @@ export async function planCompactArchive(
 ): Promise<CompactArchivePlan> {
   const { index, bundles } = loadArchiveBundles(cwd);
   const loose = await enumerateLooseMembers(cwd, kind);
+  const looseIds = new Set(loose.map((m) => m.id));
+
+  // The writer validates EVERY consolidated member (existing bundle members ∪ loose). So
+  // the dry-run must too: a Tier-1-valid bundle whose MEMBER bytes are not foldable (e.g.
+  // an event_pack member with a bad event_ids_sha256) loads fine but fails the build on
+  // --write. Validate the existing bundle members that aren't shadowed by a loose record
+  // here (the loose ones are validated in the loop below), fail-fast like compactArchive.
+  for (const [id, entry] of index.get(kind) ?? []) {
+    if (!looseIds.has(id)) assertBundleMemberFoldable(kind, { id, bytes: entry.bytes }, "existing bundle member");
+  }
+
   const would_bundle: string[] = [];
   const would_delete: string[] = [];
   const would_skip: ArchiveDeleteSkip[] = [];
@@ -253,7 +264,7 @@ export async function planCompactArchive(
       // Would be folded into the consolidated bundle — validate it the SAME way the
       // writer would, so the dry-run never promises a would_bundle the write path would
       // fail to build (throws BundleWriteError("build"), fail-fast, like compactArchive).
-      assertLooseMemberValid(kind, m);
+      assertBundleMemberFoldable(kind, m, "loose record");
       would_bundle.push(m.id);
       continue;
     }
@@ -363,7 +374,16 @@ export async function retireSupersededBundles(
       await unlink(abs);
       retired.push(file);
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err; // ENOENT → already gone
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") continue; // already gone — fine
+      // A real retire-phase unlink failure is a destructive-write fault, NOT a corrupt
+      // store: surface it as ARCHIVE_BUNDLE_WRITE_FAILED with phase "retire_bundle".
+      // partial_applied is always true here — the consolidated bundle is already on disk
+      // (and `retired` may already hold earlier removals this run).
+      throw new BundleWriteError(
+        "retire_bundle",
+        true,
+        `failed to retire superseded bundle ${file}: ${(err as Error).message}`,
+      );
     }
   }
   return retired;
