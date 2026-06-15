@@ -137,12 +137,17 @@ for (const rel of ["docs/getting-started.md"]) {
 }
 
 // 9. Control-plane↔CHANGELOG consistency. If CHANGELOG.md claims a phase is done
-//    ("closes P43", "(closes P41)"), that phase's YAML must actually be
-//    `status: done`. This caught itself TWICE (P43 and P41 both shipped with the
-//    phase/task status left `planned` while the CHANGELOG said "closes" — found
-//    only in post-merge review). The check derives the obligation from the
-//    CHANGELOG's own claim, so a future "closes PNN" can no longer ship with a
-//    stale phase status; CI fails before review.
+//    ("closes P43", "(closes P41)"), that phase must actually be `done`. This caught
+//    itself TWICE (P43 and P41 both shipped with the phase/task status left `planned`
+//    while the CHANGELOG said "closes" — found only in post-merge review). The check
+//    derives the obligation from the CHANGELOG's own claim, so a future "closes PNN"
+//    can no longer ship with a stale phase status; CI fails before review.
+//    design-docs-ephemeral: a phase may be ARCHIVED (its live YAML deleted, runtime
+//    truth in a `.code-pact/state/archive/phases/<id>.json` snapshot). A "closes Pxx"
+//    claim is still satisfied by a terminal archive snapshot (`phase_status: done`),
+//    so resolve a missing live phase from its snapshot before failing — the same
+//    archived-tolerance every phase-existence reader applies, so archiving a phase
+//    named by a "closes" claim does not break this gate.
 {
   const changelog = read("CHANGELOG.md");
   const claimed = new Set(
@@ -163,9 +168,26 @@ for (const rel of ["docs/getting-started.md"]) {
     for (const phaseId of claimed) {
       const entry = byId.get(phaseId);
       if (!entry) {
+        // No live phase YAML — it may be ARCHIVED. Resolve from its snapshot: a
+        // terminal `phase_status: done` snapshot satisfies the "closes" claim.
+        let snap = null;
+        try {
+          snap = JSON.parse(read(`.code-pact/state/archive/phases/${phaseId}.json`));
+        } catch {
+          /* no snapshot — fall through to the not-found failure */
+        }
+        if (snap) {
+          if (snap.phase_status !== "done") {
+            fail(
+              "CHANGELOG.md",
+              `says "closes ${phaseId}" but its archive snapshot's phase_status is "${snap.phase_status}", not "done"`,
+            );
+          }
+          continue; // archived + done → claim satisfied
+        }
         fail(
           "CHANGELOG.md",
-          `claims "closes ${phaseId}" but no design/phases/*.yaml has \`id: ${phaseId}\``,
+          `claims "closes ${phaseId}" but no live design/phases/*.yaml has \`id: ${phaseId}\` and no archive snapshot resolves it`,
         );
         continue;
       }
