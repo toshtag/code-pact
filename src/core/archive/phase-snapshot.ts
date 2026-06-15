@@ -105,7 +105,8 @@ export type PhaseSnapshotBlock =
       expected_new_source_sha256: string;
       current_source_sha256: string;
     }
-  | { kind: "live_file_missing"; original_path: string };
+  | { kind: "live_file_missing"; original_path: string }
+  | { kind: "compacted_record_refresh_unsupported"; detail: string };
 
 export type PhaseSnapshotPlan =
   | { kind: "write"; path: string; record: PhaseSnapshot }
@@ -670,12 +671,25 @@ export async function planPhaseSnapshot(
         };
       }
     }
-    // The existing record is bundle-only (its loose file was compacted away): there
-    // is no loose file to overwrite, so re-materialize a fresh loose record (write,
-    // ExpectedState absent) rather than a refresh (which expects the loose bytes).
-    // Loose-wins means the fresh loose then supersedes the now-stale bundle member.
+    // The existing record is bundle-only (its loose file was compacted away). Refusing
+    // here rather than materializing a fresh loose: a fresh-loose write would leave a
+    // STALE bundle member + a DIVERGING fresh loose that the current compactor cannot
+    // re-fold (the id is already bundled, so it is not re-bundled; the byte-diff makes
+    // the delete gate skip it as bundle_stale) — i.e. both copies persist. Fail closed
+    // until Layer 4 adds bundle member supersession/rebundling; refreshing a compacted
+    // record is unsupported for now (the bundle stays the single authority).
     if (!existing.looseFilePresent) {
-      return { kind: "write", path, record };
+      return {
+        kind: "ineligible",
+        path,
+        blocks: [
+          {
+            kind: "compacted_record_refresh_unsupported",
+            detail:
+              "the existing record is bundle-only (compacted); refreshing a compacted phase snapshot is not yet supported (would strand a stale bundle member + a diverging loose). Restore/uncompact the loose record first.",
+          },
+        ],
+      };
     }
     return {
       kind: "refresh",

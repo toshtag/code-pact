@@ -59,7 +59,8 @@ export type DecisionRecordBlock =
       expected_new_source_sha256: string;
       current_source_sha256: string;
     }
-  | { kind: "live_file_missing"; canonical_ref: string };
+  | { kind: "live_file_missing"; canonical_ref: string }
+  | { kind: "compacted_record_refresh_unsupported"; detail: string };
 
 export type DecisionRecordPlan =
   | { kind: "write"; path: string; record: DecisionStateRecord }
@@ -336,10 +337,23 @@ export async function planDecisionRecord(
       ],
     };
   }
-  // Bundle-only existing record (loose compacted away): no loose file to overwrite, so
-  // write a fresh loose record (ExpectedState absent) instead of a refresh.
+  // Bundle-only existing record (loose compacted away): refuse the refresh rather than
+  // materialize a fresh loose, which would strand a stale bundle member + a diverging
+  // loose the current compactor cannot re-fold (id already bundled → not re-bundled;
+  // byte-diff → delete gate skips it as bundle_stale). Fail closed until Layer 4 adds
+  // bundle member supersession; the bundle stays the single authority for now.
   if (!existing.looseFilePresent) {
-    return { kind: "write", path, record };
+    return {
+      kind: "ineligible",
+      path,
+      blocks: [
+        {
+          kind: "compacted_record_refresh_unsupported",
+          detail:
+            "the existing record is bundle-only (compacted); refreshing a compacted decision record is not yet supported (would strand a stale bundle member + a diverging loose). Restore/uncompact the loose record first.",
+        },
+      ],
+    };
   }
   return {
     kind: "refresh",

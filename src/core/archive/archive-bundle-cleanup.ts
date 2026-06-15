@@ -144,9 +144,11 @@ export type ArchiveDeleteHooks = {
 /**
  * Delete every loose record of `kind` that a VERIFIED bundle already holds
  * byte-identically. Gated per-record at delete time (TOCTOU); a record not safely
- * captured is skipped, never deleted. The bundle store is loaded STRICT — a corrupt
- * bundle throws before any unlink (fail-closed: never delete a loose record we can't
- * prove is captured). Run under a write lock (the caller's job).
+ * captured is skipped, never deleted. Two failure granularities (don't conflate them):
+ * a **Tier-1-corrupt bundle STORE** throws from `loadArchiveBundles` BEFORE any unlink
+ * (whole-run fail-closed — nothing deleted); a **per-member** fault (Tier-2 bind /
+ * event_pack Tier-1 / loose≠bundle bytes) is a per-record SKIP that leaves that record
+ * but does not block deleting other safely-captured records. Run under a write lock.
  */
 export async function deleteLooseCoveredByBundle(
   cwd: string,
