@@ -6,6 +6,9 @@ import { parseEventFileName } from "../progress/events-io.ts";
 import { atCompact, computeEventId, eventFileName } from "../progress/event-id.ts";
 import { archiveEventPacksDir } from "./paths.ts";
 import { sha256Hex } from "./paths.ts";
+import { loadArchiveBundles } from "./archive-bundle-loader.ts";
+import { bindBundleMember } from "./archive-bundle-binding.ts";
+import type { BundleIndexEntry } from "./archive-bundle-index.ts";
 
 // ---------------------------------------------------------------------------
 // Event-pack READER — Tier 1 (cheap, per-load, self-contained).
@@ -186,13 +189,54 @@ export function validateEventPackTier1(
   return { phaseId: pack.phase_id, path: packFile, pack, entries };
 }
 
+// The bundle store, for loose ∪ bundle resolution of event-packs.
+const ARCHIVE_BUNDLE_STORE_LABEL = ".code-pact/state/archive/bundles";
+
 /**
- * Read and Tier-1-validate every event pack under
- * `.code-pact/state/archive/event-packs/`. Returns `[]` when the directory does
- * not exist. Non-`.json` files are ignored. Throws `EVENT_PACK_INVALID` on the
- * first invalid pack (same fail-closed policy as `readEventFiles`); a lenient
- * caller catches and collects. Tier 2 binding is NOT run here — it needs the
- * in-memory durable map the caller assembles.
+ * Validate one `event_pack` BUNDLE member into a `LoadedEventPack`: FIRST the SAME
+ * Tier-1 a loose pack gets (`validateEventPackTier1` — per-entry bijection, order,
+ * `event_ids_sha256`), so a pack-content fault surfaces as `EVENT_PACK_INVALID`
+ * exactly as for a loose pack; THEN the bundle self-bind (`bindBundleMember` —
+ * id↔phase_id and the canonical-bytes authority), which adds the bundle-only
+ * guarantee (`ARCHIVE_BUNDLE_INVALID` on non-canonical bytes). Used only for a phase
+ * whose LOOSE pack is absent (loose-wins).
+ */
+function loadEventPackFromBundleMember(phaseId: string, entry: BundleIndexEntry): LoadedEventPack {
+  const loaded = validateEventPackTier1(
+    phaseId,
+    entry.bytes,
+    `${ARCHIVE_BUNDLE_STORE_LABEL} (event_pack ${phaseId})`,
+  );
+  bindBundleMember(
+    "event_pack",
+    { id: phaseId, sha256: entry.sha256, bytes: entry.bytes },
+    ARCHIVE_BUNDLE_STORE_LABEL,
+  );
+  return loaded;
+}
+
+/** The `event_pack` bundle members not shadowed by a loose pack, sorted by phaseId
+ *  for deterministic order. Loose wins: a phaseId with a loose pack skips its bundle
+ *  copy (no reconcile — stale detection is the delete-time gate's job, not a read). */
+function bundleOnlyEventPackEntries(
+  index: ReturnType<typeof loadArchiveBundles>["index"],
+  looseStems: ReadonlySet<string>,
+): [string, BundleIndexEntry][] {
+  const members = index.get("event_pack");
+  if (!members) return [];
+  return [...members]
+    .filter(([phaseId]) => !looseStems.has(phaseId))
+    .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+}
+
+/**
+ * Read and Tier-1-validate every event pack from loose ∪ bundle: the loose
+ * `.code-pact/state/archive/event-packs/<id>.json` files PLUS any `event_pack`
+ * bundle members whose loose copy was compacted away (loose wins). Returns `[]`
+ * when neither store has packs. Non-`.json` files are ignored. Throws
+ * `EVENT_PACK_INVALID` on the first invalid pack and `ARCHIVE_BUNDLE_INVALID` on a
+ * corrupt bundle (same all-or-nothing fail-closed policy as `readEventFiles`); a
+ * lenient caller catches and collects. Tier 2 binding is NOT run here.
  */
 export async function readEventPackFiles(cwd: string): Promise<LoadedEventPack[]> {
   const dir = archiveEventPacksDir(cwd);
@@ -200,16 +244,23 @@ export async function readEventPackFiles(cwd: string): Promise<LoadedEventPack[]
   try {
     names = await readdir(dir);
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
-    throw err;
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") names = [];
+    else throw err;
   }
   const out: LoadedEventPack[] = [];
+  const looseStems = new Set<string>();
   for (const name of names.sort()) {
     if (!name.endsWith(".json")) continue;
     const fileStem = basename(name, ".json");
+    looseStems.add(fileStem);
     const path = join(dir, name);
     const raw = await readFile(path, "utf8");
     out.push(validateEventPackTier1(fileStem, raw, path));
+  }
+  // Bundle members for phases whose loose pack is gone (strict: throws on a bad bundle).
+  const index = loadArchiveBundles(cwd).index;
+  for (const [phaseId, entry] of bundleOnlyEventPackEntries(index, looseStems)) {
+    out.push(loadEventPackFromBundleMember(phaseId, entry));
   }
   return out;
 }
@@ -234,20 +285,48 @@ export async function readEventPackFilesLenient(
   try {
     names = await readdir(dir);
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return { packs: [], errors: [] };
-    throw err;
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") names = [];
+    else throw err; // a dir that cannot be enumerated is not a per-file issue
   }
   const packs: LoadedEventPack[] = [];
   const errors: EventPackReadError[] = [];
+  const looseStems = new Set<string>();
   for (const name of names.sort()) {
     if (!name.endsWith(".json")) continue;
     const fileStem = basename(name, ".json");
+    looseStems.add(fileStem);
     const path = join(dir, name);
     try {
       const raw = await readFile(path, "utf8");
       packs.push(validateEventPackTier1(fileStem, raw, path));
     } catch (err) {
       errors.push({ phaseId: fileStem, path, message: (err as Error).message });
+    }
+  }
+  // Bundle members for phases whose loose pack is gone. Lenient: a corrupt bundle
+  // STORE is collected as one error (loose packs already read are kept), and a
+  // single bad bundle member is collected per-member — never thrown to the caller.
+  let index: ReturnType<typeof loadArchiveBundles>["index"] | null = null;
+  try {
+    index = loadArchiveBundles(cwd).index;
+  } catch (err) {
+    errors.push({
+      phaseId: "(bundles)",
+      path: ARCHIVE_BUNDLE_STORE_LABEL,
+      message: (err as Error).message,
+    });
+  }
+  if (index) {
+    for (const [phaseId, entry] of bundleOnlyEventPackEntries(index, looseStems)) {
+      try {
+        packs.push(loadEventPackFromBundleMember(phaseId, entry));
+      } catch (err) {
+        errors.push({
+          phaseId,
+          path: `${ARCHIVE_BUNDLE_STORE_LABEL} (event_pack ${phaseId})`,
+          message: (err as Error).message,
+        });
+      }
     }
   }
   return { packs, errors };

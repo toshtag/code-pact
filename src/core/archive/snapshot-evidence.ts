@@ -1,10 +1,6 @@
-import { readdir } from "node:fs/promises";
-import { basename } from "node:path";
 import type { ProgressEvent } from "../schemas/progress-event.ts";
 import type { PhaseSnapshot } from "../schemas/phase-snapshot.ts";
-import { isSafePlanId } from "../schemas/plan-id.ts";
-import { archivePhasesDir } from "./paths.ts";
-import { loadPhaseSnapshot } from "./load-phase-snapshot.ts";
+import { enumerateArchivedPhaseSnapshots } from "./load-phase-snapshot.ts";
 
 // ---------------------------------------------------------------------------
 // Snapshot event-evidence validator.
@@ -132,25 +128,16 @@ export async function readArchivedTaskIds(
 ): Promise<{ taskIds: Set<string>; skipped: SnapshotEvidenceSkip[] }> {
   const taskIds = new Set<string>();
   const skipped: SnapshotEvidenceSkip[] = [];
-  let names: string[];
-  try {
-    names = await readdir(archivePhasesDir(cwd));
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code === "ENOENT") return { taskIds, skipped };
+  const { entries, skipped: enumSkips } = await enumerateArchivedPhaseSnapshots(cwd);
+  // SnapshotEvidenceSkip is flat (no fileStem field); preserve the id from a
+  // file-scoped enum skip by folding it into the detail so no diagnostic is lost.
+  for (const s of enumSkips) {
     skipped.push({
-      scope: "directory",
-      detail: `archive phases directory could not be read (${code ?? "unknown error"})`,
+      scope: s.scope,
+      detail: s.scope === "file" ? `${s.detail} ("${s.fileStem}")` : s.detail,
     });
-    return { taskIds, skipped };
   }
-  for (const name of names.filter((n) => n.endsWith(".json")).sort()) {
-    const fileStem = basename(name, ".json");
-    if (!isSafePlanId(fileStem)) {
-      skipped.push({ scope: "file", detail: `unsafe snapshot filename "${name}"` });
-      continue;
-    }
-    const res = await loadPhaseSnapshot(cwd, fileStem);
+  for (const { fileStem, res } of entries) {
     if (res.kind === "absent") continue;
     if (res.kind === "invalid") {
       skipped.push({ scope: "file", detail: `snapshot "${fileStem}" is corrupt or unreadable` });
@@ -178,26 +165,16 @@ export async function validateSnapshotEventEvidence(
   const issues: SnapshotEvidenceIssue[] = [];
   const skipped: SnapshotEvidenceSkip[] = [];
 
-  let names: string[];
-  try {
-    names = await readdir(archivePhasesDir(cwd));
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code === "ENOENT") return { result: { ok: true }, skipped };
+  const { entries, skipped: enumSkips } = await enumerateArchivedPhaseSnapshots(cwd);
+  // SnapshotEvidenceSkip is flat (no fileStem field); preserve the id from a
+  // file-scoped enum skip by folding it into the detail so no diagnostic is lost.
+  for (const s of enumSkips) {
     skipped.push({
-      scope: "directory",
-      detail: `archive phases directory could not be read (${code ?? "unknown error"})`,
+      scope: s.scope,
+      detail: s.scope === "file" ? `${s.detail} ("${s.fileStem}")` : s.detail,
     });
-    return { result: { ok: true }, skipped };
   }
-
-  for (const name of names.filter((n) => n.endsWith(".json")).sort()) {
-    const fileStem = basename(name, ".json");
-    if (!isSafePlanId(fileStem)) {
-      skipped.push({ scope: "file", detail: `unsafe snapshot filename "${name}"` });
-      continue;
-    }
-    const res = await loadPhaseSnapshot(cwd, fileStem);
+  for (const { fileStem, res } of entries) {
     if (res.kind === "absent") continue; // vanished mid-scan
     if (res.kind === "invalid") {
       skipped.push({ scope: "file", detail: `snapshot "${fileStem}" is corrupt or unreadable` });
