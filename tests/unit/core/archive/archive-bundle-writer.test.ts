@@ -448,4 +448,64 @@ describe("supersedeArchiveBundle — intentional same-id-set replace (UNWIRED La
     expect(() => loadArchiveBundles(cwd)).not.toThrow();
     expect(loadArchiveBundles(cwd).index.get("phase_snapshot")?.get("P1")?.bytes).toBe(p1);
   });
+
+  it("DEGRADE-TO-CREATE: superseding a PARTIAL id set whose member a consolidated bundle still holds → refuses, no bundle created (caller bug must not corrupt the store)", async () => {
+    const { p1, p2 } = await scaffoldTwoSnapshots();
+    // A valid production-like store: ONE consolidated {P1,P2} bundle. There is NO {P1} bundle.
+    expect(
+      (await writeArchiveBundle(cwd, "phase_snapshot", [{ id: "P1", bytes: p1 }, { id: "P2", bytes: p2 }])).kind,
+    ).toBe("written");
+    const consolidatedPath = archiveBundlePath(cwd, "phase_snapshot", computeMemberIdsSha256(["P1", "P2"]));
+    const consolidatedBefore = await readFile(consolidatedPath, "utf8");
+    const p1OnlyPath = archiveBundlePath(cwd, "phase_snapshot", computeMemberIdsSha256(["P1"]));
+
+    const p1v2 = await refreshP1SnapshotToNewBytes();
+    // A caller supersedes the PARTIAL {P1} id set (wrong: P1 lives in the {P1,P2} bundle). The
+    // {P1} content-address path is ABSENT, so this would degrade to CREATE — but creating a
+    // {P1=v2} bundle leaves the {P1,P2} bundle holding P1=v1 → duplicate_member_conflict. The
+    // self-safe create path must refuse rather than write the conflicting bundle.
+    await expect(supersedeArchiveBundle(cwd, "phase_snapshot", [{ id: "P1", bytes: p1v2 }])).rejects.toMatchObject({
+      code: "ARCHIVE_BUNDLE_WRITE_FAILED",
+      message: expect.stringMatching(/supersede would corrupt the bundle store/),
+    });
+    // No {P1} bundle was created; the consolidated bundle is untouched; the store still loads.
+    await expect(readFile(p1OnlyPath, "utf8")).rejects.toThrow();
+    expect(await readFile(consolidatedPath, "utf8")).toBe(consolidatedBefore);
+    expect(() => loadArchiveBundles(cwd)).not.toThrow();
+    expect(loadArchiveBundles(cwd).index.get("phase_snapshot")?.get("P1")?.bytes).toBe(p1);
+  });
+
+  it("DEGRADE-TO-CREATE SUCCEEDS when the new member collides with NO existing bundle (preflight is not over-conservative)", async () => {
+    const { p1, p2 } = await scaffoldTwoSnapshots();
+    // Store holds only a {P2} bundle; P1 is in NO bundle. Superseding {P1} safely degrades to a
+    // create — the preflight must ALLOW it (refusing would block legitimate supersession).
+    expect((await writeArchiveBundle(cwd, "phase_snapshot", [{ id: "P2", bytes: p2 }])).kind).toBe("written");
+    const out = await supersedeArchiveBundle(cwd, "phase_snapshot", [{ id: "P1", bytes: p1 }]);
+    expect(out.kind).toBe("written");
+    const idx = loadArchiveBundles(cwd).index.get("phase_snapshot");
+    expect(idx?.get("P1")?.bytes).toBe(p1);
+    expect(idx?.get("P2")?.bytes).toBe(p2);
+  });
+
+  it("DEGRADE-TO-CREATE: a non-canonically-named bundle already holds the member → refuses to create a colliding canonical bundle", async () => {
+    const { p1 } = await scaffoldTwoSnapshots();
+    // A valid bundle holding {P1} sits at a NON-canonical filename; the canonical {P1} path is
+    // absent. (A hand-placed / legacy-named bundle — still a valid, loadable store.)
+    const bundlesDir = dirname(archiveBundlePath(cwd, "phase_snapshot", computeMemberIdsSha256(["P1"])));
+    await mkdir(bundlesDir, { recursive: true });
+    await writeFile(
+      join(bundlesDir, "manual.json"),
+      serializeArchiveBundle(buildArchiveBundle("phase_snapshot", [{ id: "P1", bytes: p1 }])),
+      "utf8",
+    );
+    expect(() => loadArchiveBundles(cwd)).not.toThrow();
+
+    const p1v2 = await refreshP1SnapshotToNewBytes();
+    // Creating the canonical {P1=v2} bundle would collide with manual.json's P1=v1.
+    await expect(supersedeArchiveBundle(cwd, "phase_snapshot", [{ id: "P1", bytes: p1v2 }])).rejects.toThrow(
+      /supersede would corrupt the bundle store/,
+    );
+    expect(() => loadArchiveBundles(cwd)).not.toThrow();
+    expect(loadArchiveBundles(cwd).index.get("phase_snapshot")?.get("P1")?.bytes).toBe(p1);
+  });
 });

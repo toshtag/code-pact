@@ -118,23 +118,29 @@ export function buildArchiveBundle(kind: ArchiveBundleKind, members: readonly Lo
 }
 
 /**
- * Preflight a supersede REPLACE so the primitive is SELF-SAFE — it can never turn a valid
+ * Preflight a supersede PERSIST (a same-id-set REPLACE, or a degrade-to-CREATE when no bundle
+ * yet sits at the content address) so the primitive is SELF-SAFE — it can never turn a valid
  * bundle store into an unloadable one, even called directly before the wiring layer adds a
  * retire-before-replace plan. Loads the store STRICT (a corrupt bundle ANYWHERE →
  * `ARCHIVE_BUNDLE_INVALID`, fail closed before any write), then refuses
  * (`BundleWriteError("write_bundle")`) when:
- *   - the content-address target is not a loaded bundle (a race / non-bundle file);
- *   - the target is a different KIND than we are writing (a misplaced/foreign bundle);
- *   - the target holds a different member ID SET than the rebuilt bundle (not the bundle we
- *     think we are replacing — content addresses are by id set, so this is a misplaced file);
- *   - replacing the target would make a REDUNDANT old bundle collide. A valid store may carry
- *     a crash-survivor redundant bundle (same member, same bytes, deduped across files); once
- *     this replace changes that member's bytes the other bundle would diverge →
- *     `duplicate_member_conflict` and the store would no longer load. We catch that here by
- *     simulating the post-replace store through the SAME cross-bundle index builder the loader
- *     uses (so the conflict rule cannot drift), and refuse rather than corrupt the store.
+ *   - a target bundle EXISTS at the content address but is a different KIND than we are writing
+ *     (a misplaced/foreign bundle), or holds a different member ID SET than the rebuilt bundle
+ *     (content addresses are by id set, so this is a misplaced file — not the bundle we think
+ *     we are replacing). These two checks apply only when a target is present (a degrade-to-
+ *     create has no target to validate).
+ *   - writing the rebuilt bundle would make ANOTHER bundle collide. A valid store may carry a
+ *     member id in more than one bundle byte-identically (a crash-survivor redundant bundle —
+ *     deduped across files). Once this write gives that id different bytes — whether by
+ *     REPLACING the bundle that held the old bytes, or by CREATING a NEW single-id bundle for a
+ *     member a larger consolidated bundle still holds (a partial-id-set supersede / caller bug)
+ *     — the other bundle diverges → `duplicate_member_conflict` and the store no longer loads.
+ *     Caught by simulating the POST-WRITE store through the SAME cross-bundle index builder the
+ *     loader uses (so the conflict rule cannot drift) and refusing rather than corrupt it. The
+ *     simulation `bundles - target + rebuilt` models both cases: a present target is filtered
+ *     out and replaced; an absent target adds the rebuilt bundle to the existing set.
  */
-function assertSupersedeReplaceSafe(
+function assertSupersedePersistSafe(
   cwd: string,
   kind: ArchiveBundleKind,
   file: string,
@@ -143,36 +149,37 @@ function assertSupersedeReplaceSafe(
 ): void {
   const store = loadArchiveBundles(cwd); // STRICT: a corrupt bundle store throws here, pre-write.
   const target = store.bundles.find((b) => b.file === file);
-  if (!target) {
-    throw new BundleWriteError("write_bundle", false, `supersede target ${file} is not present in the loaded bundle store`);
+  if (target) {
+    // A REPLACE: prove we are replacing the same-id-set bundle of this kind we mean to.
+    if (target.loaded.kind !== kind) {
+      throw new BundleWriteError(
+        "write_bundle",
+        false,
+        `supersede target ${file} is a "${target.loaded.kind}" bundle, not "${kind}" — refusing to replace`,
+      );
+    }
+    // The target's members are Tier-1-sorted, so their id-set checksum is comparable to the
+    // rebuilt bundle's member_ids_sha256 (same derivation as buildArchiveBundle).
+    if (computeMemberIdsSha256(target.loaded.members.map((m) => m.id)) !== rebuilt.member_ids_sha256) {
+      throw new BundleWriteError(
+        "write_bundle",
+        false,
+        `supersede target ${file} holds a different member id set than the rebuilt bundle — refusing to replace`,
+      );
+    }
   }
-  if (target.loaded.kind !== kind) {
-    throw new BundleWriteError(
-      "write_bundle",
-      false,
-      `supersede target ${file} is a "${target.loaded.kind}" bundle, not "${kind}" — refusing to replace`,
-    );
-  }
-  // The target's members are Tier-1-sorted, so their id-set checksum is comparable to the
-  // rebuilt bundle's member_ids_sha256 (same derivation as buildArchiveBundle).
-  if (computeMemberIdsSha256(target.loaded.members.map((m) => m.id)) !== rebuilt.member_ids_sha256) {
-    throw new BundleWriteError(
-      "write_bundle",
-      false,
-      `supersede target ${file} holds a different member id set than the rebuilt bundle — refusing to replace`,
-    );
-  }
-  // Simulate the store AFTER the replace and run the loader's own conflict check on it.
-  const postReplace = store.bundles
+  // Simulate the store AFTER the write (replace OR create) and run the loader's own conflict
+  // check on it — refuse if the write would make the store unloadable.
+  const postWrite = store.bundles
     .filter((b) => b.file !== file)
     .concat([{ file, loaded: validateArchiveBundleTier1(rebuiltBytes, file) }]);
   try {
-    buildBundleMemberIndex(postReplace);
+    buildBundleMemberIndex(postWrite);
   } catch (err) {
     throw new BundleWriteError(
       "write_bundle",
       false,
-      `supersede would corrupt the bundle store (a redundant bundle holds a superseded member): ${(err as Error).message}`,
+      `supersede would corrupt the bundle store (another bundle already holds a written member): ${(err as Error).message}`,
     );
   }
 }
@@ -248,8 +255,8 @@ async function persistArchiveBundle(
     // replace the stale bundle. FIRST prove the replace is safe (the target is the same-id-set
     // bundle we mean to replace, and the replace will not corrupt the cross-bundle store) so
     // the primitive can never turn a valid store into an unloadable one — see
-    // assertSupersedeReplaceSafe. Read-only; throws fail-closed before any write.
-    assertSupersedeReplaceSafe(cwd, kind, file, bundle, bytes);
+    // assertSupersedePersistSafe. Read-only; throws fail-closed before any write.
+    assertSupersedePersistSafe(cwd, kind, file, bundle, bytes);
     // Then atomically replace in place. atomicReplaceExistingText expects the exact old bytes
     // just before the rename (TOCTOU-narrowed) and does NOT recreate a vanished bundles/ dir.
     // The replace is ATOMIC: rename(2) either fully swaps in the new bytes or fails leaving the
@@ -266,7 +273,20 @@ async function persistArchiveBundle(
     return { kind: "superseded", bundleFile: file, member_count: members.length };
   }
 
-  // No existing bundle at this content address — a plain create (identical in both modes).
+  // No existing bundle at this content address — a plain create. In SUPERSEDE mode this is a
+  // degrade-to-create, which must ALSO be self-safe: creating a new single-id bundle for a
+  // member another (consolidated) bundle still holds would make the store unloadable
+  // (duplicate_member_conflict — a partial-id-set supersede / caller bug). So run the same
+  // post-write conflict preflight before the create.
+  //
+  // Create mode (writeArchiveBundle) deliberately does NOT run this preflight — it keeps its
+  // thin #464 contract (idempotent content-addressed create; fail-closed only on a same-path
+  // BYTE divergence) and trusts the caller to pass a coherent member set, as compactArchive
+  // does (it folds the kind's FULL member set, never a partial one). The store-load self-safety
+  // guard is specific to the destructive supersede entry point.
+  if (mode === "supersede") {
+    assertSupersedePersistSafe(cwd, kind, file, bundle, bytes);
+  }
   try {
     await atomicWriteText(path, bytes, { kind: "absent" }, { mkdir: true });
   } catch (err) {
