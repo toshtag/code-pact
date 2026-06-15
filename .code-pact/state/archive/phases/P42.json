@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "phase_id": "P42",
+  "phase_name": "Project-side version pinning guidance — close docs-first (devDependency pin path in getting-started; reject the .code-pact/code-pact.version mechanism)",
+  "original_path": "design/phases/P42-version-pinning-guidance.yaml",
+  "phase_status": "done",
+  "weight": 4,
+  "snapshotted_at": "2026-06-15T02:57:04.155Z",
+  "source_sha256": "07818079d9bcf9be676b69a219e8d94caca4279525c5f4fe0e8ab5ad895271b1",
+  "path_sha256": "86311192bda4e29506b7cec176d4dd596669381ab49c54c11028194392338c09",
+  "tasks": [
+    {
+      "id": "P42-T0",
+      "status": "done",
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "f8bf6bc3694ef1ef7772669cec8ccf889d8108a281151bdc0b4d5016d965a211"
+        ]
+      }
+    }
+  ]
+}

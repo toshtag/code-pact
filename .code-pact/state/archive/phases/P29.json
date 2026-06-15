@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "phase_id": "P29",
+  "phase_name": "Contract truth & baseline integrity — make `task prepare`'s emitted commands, the docs, and the measurement baselines all executable and consistent",
+  "original_path": "design/phases/P29-contract-truth.yaml",
+  "phase_status": "done",
+  "weight": 8,
+  "snapshotted_at": "2026-06-15T02:56:55.127Z",
+  "source_sha256": "b3e59482602f3a969036baa1b5ec407f774d7deb29e264335cba04a3baec3b4f",
+  "path_sha256": "c8bef1edbd48263215db6259ebae03267de872d1171bd7d8691b908e19219752",
+  "tasks": [
+    {
+      "id": "P29-T0",
+      "status": "done",
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "92a4364ee9adea88a81a6ae8af9d7a05fe9bf872cd8cb3692f52cc5d79f26cb5"
+        ]
+      }
+    },
+    {
+      "id": "P29-T1",
+      "status": "done",
+      "depends_on": [
+        "P29-T0"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "e4bd3967effa4b612fe3d3e9f8237e3fcd75d46f753f60583ea5e8f782b66d50"
+        ]
+      }
+    },
+    {
+      "id": "P29-T2",
+      "status": "done",
+      "depends_on": [
+        "P29-T1"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "4a606db1ab2a6677d13ae1d301e93afc108c3ee9922ea632513ada98e68b1bd9"
+        ]
+      }
+    },
+    {
+      "id": "P29-T3",
+      "status": "done",
+      "depends_on": [
+        "P29-T2"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "2531a7c9aff17e7ba3df21f093c067e0ac9bdeb87cdec582fd528d23a0a10540"
+        ]
+      }
+    },
+    {
+      "id": "P29-T4",
+      "status": "done",
+      "depends_on": [
+        "P29-T3"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "9215b5673f9ab3756d58af0814eee19ac5de04ca04afb93e873ff1ccc108c74c"
+        ]
+      }
+    },
+    {
+      "id": "P29-T5",
+      "status": "done",
+      "depends_on": [
+        "P29-T4"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "1cc7fd3f1e0887defdd863a6b88f523551390d75167b5fec83f1df93de9cb5b0"
+        ]
+      }
+    }
+  ]
+}

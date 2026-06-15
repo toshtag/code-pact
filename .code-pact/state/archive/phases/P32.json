@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "phase_id": "P32",
+  "phase_name": "Failure clarity — surface the true root cause and the deterministic next action on task complete / finalize failure",
+  "original_path": "design/phases/P32-failure-clarity.yaml",
+  "phase_status": "done",
+  "weight": 8,
+  "snapshotted_at": "2026-06-15T02:56:58.853Z",
+  "source_sha256": "505ede12112f2d6d3d40ffb68e7bc92da316e7fbc7e819304c64bffe5d11da32",
+  "path_sha256": "bf0f8166981861a09824ea8e5f9cf04e81682a3851d1ece0a483564c5402fca2",
+  "tasks": [
+    {
+      "id": "P32-T0",
+      "status": "done",
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "a1763cd40d65fa992f31bf5080a8d4ce6866ae1e7b6314f41aad1f151927c173"
+        ]
+      }
+    },
+    {
+      "id": "P32-T1",
+      "status": "done",
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "66472c16c419614f850720a6bdb306f276a80aa0309855c560a3adb338f8e2bf"
+        ]
+      }
+    },
+    {
+      "id": "P32-T2",
+      "status": "done",
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "65097d90b72abb7b55385b05ff71e39c6d38bcd35534a9c635a0a002cab9cfe5"
+        ]
+      }
+    },
+    {
+      "id": "P32-T3",
+      "status": "done",
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "3e83f6cc760fff485652b6d085abb5b8e04e9c0b5da3ccf4393b104b3ae7e82e"
+        ]
+      }
+    }
+  ]
+}

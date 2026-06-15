@@ -1,0 +1,104 @@
+{
+  "schema_version": 1,
+  "phase_id": "P21",
+  "phase_name": "Agent Contract v2 — task prepare, context explain, adapter conformance",
+  "original_path": "design/phases/P21-agent-contract-v2.yaml",
+  "phase_status": "done",
+  "weight": 25,
+  "snapshotted_at": "2026-06-15T02:52:04.734Z",
+  "source_sha256": "2ceb9eae27999f519c5ad03078836bfab90eb08ad4f06bacf32bfbae7512d4cc",
+  "path_sha256": "58d45dcb584f5068e7ac832a281563bea2385336153a9aad259d0040e0c26225",
+  "tasks": [
+    {
+      "id": "P21-T0",
+      "status": "done",
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "bb2a4fb9989069f981a5e18da78d6ef1433c27ab20cbd5927002070b82f9c43b"
+        ]
+      }
+    },
+    {
+      "id": "P21-T1",
+      "status": "done",
+      "depends_on": [
+        "P21-T0"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "34080750a5d1cae1f4c249a77b5624a782f22fd09958a7c9dde2116de4eacc06"
+        ]
+      }
+    },
+    {
+      "id": "P21-T2",
+      "status": "done",
+      "depends_on": [
+        "P21-T0"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "84052a58b8488a216d749f70ccdcf18829cccc1407e239ba9f200eba88bfae9d"
+        ]
+      }
+    },
+    {
+      "id": "P21-T3",
+      "status": "done",
+      "depends_on": [
+        "P21-T2"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "8ab1e65d02361ad58254f2e2f4a6f45d8bcde27880968ba03498f73064fce177"
+        ]
+      }
+    },
+    {
+      "id": "P21-T4",
+      "status": "done",
+      "depends_on": [
+        "P21-T0"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "add66ab6a64815f94d414766ef54443bc3f10a61fdc3be520685805130913be9"
+        ]
+      }
+    },
+    {
+      "id": "P21-T5",
+      "status": "done",
+      "depends_on": [
+        "P21-T0"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "6a16aeefcb534ce625f591883b0d1896aca5a6682343fe6f4c69aa72d7f44e9b"
+        ]
+      }
+    },
+    {
+      "id": "P21-T6",
+      "status": "done",
+      "depends_on": [
+        "P21-T1",
+        "P21-T3",
+        "P21-T4",
+        "P21-T5"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "7e719893b95a505a01df4a3e95f8465fc58171bc4b1bf26b6605c6ae8401a1b0"
+        ]
+      }
+    }
+  ]
+}

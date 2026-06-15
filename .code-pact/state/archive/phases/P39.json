@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "phase_id": "P39",
+  "phase_name": "Root-cause-first completion errors — surface the real cause (decision / commands) on the task complete primary error face, not just in data",
+  "original_path": "design/phases/P39-root-cause-completion-errors.yaml",
+  "phase_status": "done",
+  "weight": 6,
+  "snapshotted_at": "2026-06-15T02:57:03.166Z",
+  "source_sha256": "3fa8dba7f28dec2ce546505cea92ba429f7ce880a892109754ff8b5194fa37ad",
+  "path_sha256": "57c4ca6bdfc9f1fafdddcb70f2b5db9ee6831433b83e396e52e56780283103b3",
+  "tasks": [
+    {
+      "id": "P39-T0",
+      "status": "done",
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "6dfd2891398bf43c977a0dcf94c4ebab892b4a6fdac05f9c8fe28003c79989c9"
+        ]
+      }
+    },
+    {
+      "id": "P39-T1",
+      "status": "done",
+      "depends_on": [
+        "P39-T0"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "e9bcb6b64c03697f51a1fa2d6c93605ce991014790ccdcafb93c1424463ca283"
+        ]
+      }
+    },
+    {
+      "id": "P39-T2",
+      "status": "done",
+      "depends_on": [
+        "P39-T1"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "1ded543ff34bf398b4218b08ccfbbefa35a133c33d1dfbc5867e0c533eb39396"
+        ]
+      }
+    }
+  ]
+}

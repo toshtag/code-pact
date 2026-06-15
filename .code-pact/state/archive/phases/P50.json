@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "phase_id": "P50",
+  "phase_name": "Context Fit advisories — four opt-in, non-exit-affecting plan-lint advisories under --include-quality that flag likely context-size risk (large natural pack, unachievable recommended budget, oversized declared decision, over-broad reads glob) before a task runs",
+  "original_path": "design/phases/P50-context-fit-advisories.yaml",
+  "phase_status": "done",
+  "weight": 5,
+  "snapshotted_at": "2026-06-15T02:57:08.994Z",
+  "source_sha256": "eeb6164f91017b7a8c66e3d2b9c1d03ff70308ada36c19306ce96b13df45e0a2",
+  "path_sha256": "35df17e5993f1bdc3cd6a27b43a84df49105065b4365c6f9157cde31fa0abbd7",
+  "tasks": [
+    {
+      "id": "P50-T0",
+      "status": "done",
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "b0c3c4461c0668ded83e48cb1a1ce98b86110bebb2ca35bee43468a62d24f824"
+        ]
+      }
+    },
+    {
+      "id": "P50-T1",
+      "status": "done",
+      "depends_on": [
+        "P50-T0"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "1d620c77f5c0bda97caedeb93f668a2b9ef11388c4d11a8e7077be432ac7b01c"
+        ]
+      }
+    },
+    {
+      "id": "P50-T2",
+      "status": "done",
+      "depends_on": [
+        "P50-T1"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "9c0e0d43c075ce29f523eed4261503fb01119d8a9c44648dc1b7da9ca9c78e93"
+        ]
+      }
+    },
+    {
+      "id": "P50-T3",
+      "status": "done",
+      "depends_on": [
+        "P50-T2"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "1669b0dab2249b7324d47719e448024dbb18187d35e0c6a2e564def93c8b4c67"
+        ]
+      }
+    }
+  ]
+}

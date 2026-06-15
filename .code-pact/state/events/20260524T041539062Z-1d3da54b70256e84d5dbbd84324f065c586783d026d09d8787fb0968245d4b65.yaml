@@ -1,9 +1,0 @@
-task_id: P28-T1
-status: done
-at: 2026-05-24T04:15:39.062Z
-actor: agent
-agent: claude-code
-evidence:
-  - commands
-  - decision
-id: 1d3da54b70256e84d5dbbd84324f065c586783d026d09d8787fb0968245d4b65

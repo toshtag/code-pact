@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "phase_id": "P24",
+  "phase_name": "Context budget enforcement — --budget-bytes on task context / task prepare",
+  "original_path": "design/phases/P24-context-budget.yaml",
+  "phase_status": "done",
+  "weight": 18,
+  "snapshotted_at": "2026-06-15T02:52:06.359Z",
+  "source_sha256": "1e74eb8dda5cc14dcdd704b72405c10684c63804d0f84691aab4524dfc3bb0ab",
+  "path_sha256": "92690a5f7ab6476e0da3c95c75cf5a138a99a399e49bf18e7a28f28aee98af63",
+  "tasks": [
+    {
+      "id": "P24-T0",
+      "status": "done",
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "a3f2e12144ada14a5ebefe031f22b516ce84ce9fa866296e1ff597b8cbf01117"
+        ]
+      }
+    },
+    {
+      "id": "P24-T1",
+      "status": "done",
+      "depends_on": [
+        "P24-T0"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "38390eb203483035030b5815e2459ee6c6e93588909d87908c0944867855fa4e"
+        ]
+      }
+    },
+    {
+      "id": "P24-T2",
+      "status": "done",
+      "depends_on": [
+        "P24-T1"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "e6760213dff226abf79b8b43dced944d80933da34d19ef72a32cf7c1d930ba26"
+        ]
+      }
+    }
+  ]
+}

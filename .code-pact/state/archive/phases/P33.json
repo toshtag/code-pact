@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "phase_id": "P33",
+  "phase_name": "Lightweight lane + recommendation consumption — let code-pact steer how an agent proceeds, not just what it must verify",
+  "original_path": "design/phases/P33-lightweight-lane.yaml",
+  "phase_status": "done",
+  "weight": 8,
+  "snapshotted_at": "2026-06-15T02:57:00.010Z",
+  "source_sha256": "4ac85605b223660d23ecf72930ce5949726875430ba4bc39a98d081e914ad7e9",
+  "path_sha256": "d6886cfc477910822d30402435cf3087a436f04ea82696915d8fa6e94b4013d8",
+  "tasks": [
+    {
+      "id": "P33-T0",
+      "status": "done",
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "eb5907dfc97de466246292a56289715b13de077500b0a925a06ef84ce5e3e2c2"
+        ]
+      }
+    },
+    {
+      "id": "P33-T1",
+      "status": "done",
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "a26d4bfefc1d3271a32677ee0125a34d5f2cd99b33a7640a067572ef5f9bc4a0"
+        ]
+      }
+    },
+    {
+      "id": "P33-T2",
+      "status": "done",
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "5fa4fa7b5890c6fcf130ffe6cdc9c09a04ec472c871a8c4c33ca3dd4204bbe96"
+        ]
+      }
+    }
+  ]
+}

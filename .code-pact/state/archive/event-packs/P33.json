@@ -1,0 +1,89 @@
+{
+  "schema_version": 1,
+  "phase_id": "P33",
+  "snapshot_sha256": "ee29d71ea63f1babf853df13d976a3881c7b4c36ff90c6fcd3bd1ef9dc65dc90",
+  "event_ids_sha256": "23316b95209a85bcfc4d023b909e6c1de7b9586e978a3e4e0f5d3d61b1ed3238",
+  "events": [
+    {
+      "id": "fcfe37e4302329316d4c2b3976280c53662140563a45b64327934f4b1d3c335c",
+      "file": "20260528T122328523Z-fcfe37e4302329316d4c2b3976280c53662140563a45b64327934f4b1d3c335c.yaml",
+      "event": {
+        "task_id": "P33-T0",
+        "status": "started",
+        "at": "2026-05-28T12:23:28.523Z",
+        "actor": "agent",
+        "agent": "claude-code"
+      }
+    },
+    {
+      "id": "eb5907dfc97de466246292a56289715b13de077500b0a925a06ef84ce5e3e2c2",
+      "file": "20260528T122428488Z-eb5907dfc97de466246292a56289715b13de077500b0a925a06ef84ce5e3e2c2.yaml",
+      "event": {
+        "task_id": "P33-T0",
+        "status": "done",
+        "at": "2026-05-28T12:24:28.488Z",
+        "actor": "agent",
+        "agent": "claude-code",
+        "evidence": [
+          "commands",
+          "decision"
+        ],
+        "source": "loop"
+      }
+    },
+    {
+      "id": "4ca4c059de42e1d18670c3053bc9eff14ed07a48ba7514144a1484de8dc5bd21",
+      "file": "20260528T123040716Z-4ca4c059de42e1d18670c3053bc9eff14ed07a48ba7514144a1484de8dc5bd21.yaml",
+      "event": {
+        "task_id": "P33-T1",
+        "status": "started",
+        "at": "2026-05-28T12:30:40.716Z",
+        "actor": "agent",
+        "agent": "claude-code"
+      }
+    },
+    {
+      "id": "a26d4bfefc1d3271a32677ee0125a34d5f2cd99b33a7640a067572ef5f9bc4a0",
+      "file": "20260528T132422103Z-a26d4bfefc1d3271a32677ee0125a34d5f2cd99b33a7640a067572ef5f9bc4a0.yaml",
+      "event": {
+        "task_id": "P33-T1",
+        "status": "done",
+        "at": "2026-05-28T13:24:22.103Z",
+        "actor": "agent",
+        "agent": "claude-code",
+        "evidence": [
+          "commands",
+          "decision"
+        ],
+        "source": "loop"
+      }
+    },
+    {
+      "id": "9bb7cd411af8df5cc982301896c9827ab4b9e748c61ac42e23aabb4544861108",
+      "file": "20260528T133709094Z-9bb7cd411af8df5cc982301896c9827ab4b9e748c61ac42e23aabb4544861108.yaml",
+      "event": {
+        "task_id": "P33-T2",
+        "status": "started",
+        "at": "2026-05-28T13:37:09.094Z",
+        "actor": "agent",
+        "agent": "claude-code"
+      }
+    },
+    {
+      "id": "5fa4fa7b5890c6fcf130ffe6cdc9c09a04ec472c871a8c4c33ca3dd4204bbe96",
+      "file": "20260528T134344502Z-5fa4fa7b5890c6fcf130ffe6cdc9c09a04ec472c871a8c4c33ca3dd4204bbe96.yaml",
+      "event": {
+        "task_id": "P33-T2",
+        "status": "done",
+        "at": "2026-05-28T13:43:44.502Z",
+        "actor": "agent",
+        "agent": "claude-code",
+        "evidence": [
+          "commands",
+          "decision"
+        ],
+        "source": "loop"
+      }
+    }
+  ]
+}

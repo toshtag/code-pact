@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "phase_id": "P30",
+  "phase_name": "Adapter contract hardening — make the post-P29 `task prepare` primary contract mechanically enforceable in adapter conformance",
+  "original_path": "design/phases/P30-adapter-contract-hardening.yaml",
+  "phase_status": "done",
+  "weight": 8,
+  "snapshotted_at": "2026-06-15T02:56:56.596Z",
+  "source_sha256": "225ea2f41453d9bf641bafc7ea5c8776cd08159b8a1e9ee2a5980b44992c607f",
+  "path_sha256": "df466b7edcfa823e4c2798183a8205563d0f43d14a0b2885d989bb69dbcecb9c",
+  "tasks": [
+    {
+      "id": "P30-T0",
+      "status": "done",
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "051fae142e96b201c20b24890f4971d4df3c179bb3597d356e52586d8b51e6e1"
+        ]
+      }
+    },
+    {
+      "id": "P30-T1",
+      "status": "done",
+      "depends_on": [
+        "P30-T0"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "40afebc94121b5aa1237e0f2f31c786d880df7a8f5765fdc8aeac2b74fe36d91"
+        ]
+      }
+    },
+    {
+      "id": "P30-T2",
+      "status": "done",
+      "depends_on": [
+        "P30-T1"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "09944d1d8a6539af7c25fa3120e1716a06c2bfebf637cfbb9f2844b9ebc9eb23"
+        ]
+      }
+    },
+    {
+      "id": "P30-T3",
+      "status": "done",
+      "depends_on": [
+        "P30-T2"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "694c7159814266d7786d8c3313ed16b85dc2bccc0a6aca24c00e23cbeb7a8215"
+        ]
+      }
+    },
+    {
+      "id": "P30-T4",
+      "status": "done",
+      "depends_on": [
+        "P30-T3"
+      ],
+      "terminal_evidence": {
+        "kind": "progress_events",
+        "event_ids": [
+          "5b0403105dad2853e2c70eda22a01442b0f3f673a1e80ada452670c09db00b43"
+        ]
+      }
+    }
+  ]
+}

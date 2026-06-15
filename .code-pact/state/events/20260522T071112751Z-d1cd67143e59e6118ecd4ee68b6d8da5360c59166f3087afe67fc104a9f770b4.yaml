@@ -1,9 +1,0 @@
-task_id: P19-T1
-status: done
-at: 2026-05-22T07:11:12.751Z
-actor: agent
-agent: claude-code
-evidence:
-  - commands
-  - decision
-id: d1cd67143e59e6118ecd4ee68b6d8da5360c59166f3087afe67fc104a9f770b4
