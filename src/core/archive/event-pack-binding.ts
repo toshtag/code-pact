@@ -1,11 +1,13 @@
-import { readFile } from "node:fs/promises";
 import type { ProgressEvent } from "../schemas/progress-event.ts";
-import type { PhaseSnapshot, SnapshotTask } from "../schemas/phase-snapshot.ts";
+import { PhaseSnapshot } from "../schemas/phase-snapshot.ts";
+import type { SnapshotTask } from "../schemas/phase-snapshot.ts";
 import type { LoadedEventFile } from "../progress/events-io.ts";
 import { deriveTaskState } from "../progress/task-state.ts";
 import { atCompact, computeEventId } from "../progress/event-id.ts";
-import { loadPhaseSnapshot } from "./load-phase-snapshot.ts";
-import { phaseSnapshotPath, sha256Hex } from "./paths.ts";
+import { readLoosePhaseSnapshotRaw } from "./load-phase-snapshot.ts";
+import { loadArchiveBundles } from "./archive-bundle-loader.ts";
+import { resolveArchiveRecordBytes } from "./resolve-archive-record.ts";
+import { sha256Hex } from "./paths.ts";
 import type { LoadedEventPack } from "./event-pack-reader.ts";
 
 // ---------------------------------------------------------------------------
@@ -59,9 +61,13 @@ export function newSnapshotRawCache(): SnapshotRawCache {
 }
 
 /**
- * Read a snapshot's raw bytes + parsed body once per phase, memoized. Mirrors
- * `loadPhaseSnapshot` (ENOENT → absent; other error / parse failure → invalid)
- * but also keeps the raw bytes so the caller can verify `snapshot_sha256`.
+ * Resolve a snapshot's canonical raw bytes + parsed body once per phase, memoized,
+ * from loose ∪ bundle (`reader-loose-wins`) — so a pack binds even when its phase
+ * snapshot was compacted into a bundle. The resolved bytes ARE the canonical bytes
+ * the writer emitted (loose file or bundle member are byte-identical), so
+ * `sha256Hex(raw)` still matches the pack's stored `snapshot_sha256`. POSTURE here
+ * is fail-closed strict (binding a referenced pack): a bundle-integrity throw →
+ * `invalid`. ENOENT → `absent`; an unsafe id / unreadable loose record → `invalid`.
  */
 async function loadSnapshotRaw(
   cwd: string,
@@ -71,29 +77,31 @@ async function loadSnapshotRaw(
   const hit = cache.get(phaseId);
   if (hit) return hit;
   let entry: SnapshotRawCacheEntry;
-  let path: string;
+  let resolved;
   try {
-    path = phaseSnapshotPath(cwd, phaseId);
+    resolved = await resolveArchiveRecordBytes({
+      kind: "phase_snapshot",
+      id: phaseId,
+      mode: "reader-loose-wins",
+      readLooseRaw: () => readLoosePhaseSnapshotRaw(cwd, phaseId),
+      loadBundleIndex: () => loadArchiveBundles(cwd).index,
+    });
   } catch (error) {
     entry = { kind: "invalid", error };
     cache.set(phaseId, entry);
     return entry;
   }
-  try {
-    const raw = await readFile(path, "utf8");
-    // Reuse the canonical parse/validate (fail-closed on a corrupt record).
-    const res = await loadPhaseSnapshot(cwd, phaseId);
-    if (res.kind === "valid") {
-      entry = { kind: "valid", raw, snapshot: res.snapshot };
-    } else if (res.kind === "invalid") {
-      entry = { kind: "invalid", error: res.error };
-    } else {
-      // raw read succeeded but loadPhaseSnapshot says absent: a race; treat as invalid.
-      entry = { kind: "invalid", error: new Error("snapshot vanished during binding") };
+  if (resolved.kind === "absent") {
+    entry = { kind: "absent" };
+  } else if (resolved.kind === "invalid") {
+    entry = { kind: "invalid", error: resolved.error };
+  } else {
+    try {
+      const snapshot = PhaseSnapshot.parse(JSON.parse(resolved.bytes) as unknown);
+      entry = { kind: "valid", raw: resolved.bytes, snapshot };
+    } catch (error) {
+      entry = { kind: "invalid", error };
     }
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") entry = { kind: "absent" };
-    else entry = { kind: "invalid", error };
   }
   cache.set(phaseId, entry);
   return entry;

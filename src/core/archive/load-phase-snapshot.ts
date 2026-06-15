@@ -5,7 +5,7 @@ import type { TerminalEvidence } from "../schemas/phase-snapshot.ts";
 import { isSafePlanId } from "../schemas/plan-id.ts";
 import { archivePhasesDir, phaseSnapshotPath, sha256Hex } from "./paths.ts";
 import { loadArchiveBundles } from "./archive-bundle-loader.ts";
-import { resolveArchiveRecordBytes } from "./resolve-archive-record.ts";
+import { resolveArchiveRecordBytes, type RawLooseRecord } from "./resolve-archive-record.ts";
 
 // ---------------------------------------------------------------------------
 // The FIRST reader of the `.code-pact/state/archive/phases/<id>.json` snapshots
@@ -34,27 +34,20 @@ export type LoadPhaseSnapshotResult =
   | { kind: "invalid"; error: unknown }
   | { kind: "valid"; snapshot: PhaseSnapshot };
 
-/** Raw bytes of one LOOSE snapshot file, before any JSON/schema parsing. Mirrors
- * {@link LoadPhaseSnapshotResult}'s absent/invalid distinction so the bundle
- * reconcile path can compare loose↔bundle byte-for-byte (the loose writer emits
- * the SAME canonical `JSON.stringify(x,null,2)+"\n"` bytes that a bundle member
- * carries). `invalid` is NEVER collapsed to `absent`. */
-type RawLoosePhaseSnapshot =
-  | { kind: "absent" }
-  | { kind: "invalid"; error: unknown }
-  | { kind: "present"; bytes: string };
-
 /**
  * Read the LOOSE `.code-pact/state/archive/phases/<phaseId>.json` bytes off disk
  * (no parsing). ENOENT → `absent`; an unsafe `phaseId` (rejected by
  * `phaseSnapshotPath` → `assertSafePlanId`) or any other read error
  * (EACCES/EISDIR/…) → `invalid` (never `absent`, fail-closed — a present-but-
- * broken record must be louder than "nothing there").
+ * broken record must be louder than "nothing there"). Exported so the event-pack
+ * binding's snapshot read resolves the snapshot from loose ∪ bundle too. The loose
+ * writer emits the SAME canonical `JSON.stringify(x,null,2)+"\n"` bytes a bundle
+ * member carries, so `invalid` is NEVER collapsed to `absent`.
  */
-async function readLoosePhaseSnapshotRaw(
+export async function readLoosePhaseSnapshotRaw(
   cwd: string,
   phaseId: string,
-): Promise<RawLoosePhaseSnapshot> {
+): Promise<RawLooseRecord> {
   let path: string;
   try {
     path = phaseSnapshotPath(cwd, phaseId);
