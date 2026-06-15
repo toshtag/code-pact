@@ -11,6 +11,7 @@ import {
   compactArchive,
   deleteLooseCoveredByBundle,
 } from "../../../../src/core/archive/archive-bundle-cleanup.ts";
+import { loadArchiveBundles } from "../../../../src/core/archive/archive-bundle-loader.ts";
 import { writeArchiveBundle } from "../../../../src/core/archive/archive-bundle-writer.ts";
 import { decisionRecordStem } from "../../../../src/core/archive/archive-bundle-binding.ts";
 import {
@@ -47,10 +48,10 @@ async function writeRawBundle(c: string, kind: string, name: string, members: { 
 // Layer 3 — destructive deletion exercised through the REAL produce/command paths of
 // EVERY kind. Default / no-refresh paths preserve producer/command semantics (noop /
 // already-retired) after a loose record is compacted away. An EXPLICIT refresh of a
-// bundle-only record is NOT a no-op verdict: it is refused (ineligible
-// compacted_record_refresh_unsupported) rather than materialized, so it never strands a
-// stale bundle member + a diverging loose. (Bundle-member supersession/rebundling — the
-// path that would make a refreshed-after-compaction record re-foldable — is Layer 4.)
+// bundle-only record now MATERIALIZES a fresh loose (it used to be refused); the fresh
+// loose diverges from the stale bundle member, and the next compaction ADOPTS it
+// (supersession, Layer 4) — replacing the bundle member in place and deleting the loose.
+// So refresh-after-compaction is supported end-to-end without stranding both copies.
 
 const NOW = new Date("2026-06-10T00:00:00.000Z");
 const TASK_FIELDS = `    ambiguity: low
@@ -151,61 +152,66 @@ describe("event_pack bundle WRITER rejects a Tier-1-invalid pack (P1.1 — no ba
   });
 });
 
-describe("decision_record refresh of a bundle-only record is REFUSED, not a dead-end (the new P1)", () => {
-  it("an explicit refresh after compaction → ineligible, no materialize, re-compact clean", async () => {
+describe("decision_record refresh-after-compaction MATERIALIZES, then compaction adopts it", () => {
+  it("an explicit refresh of a bundle-only record writes a fresh loose; the next compact supersedes the bundle member + deletes the loose", async () => {
     await writeFile(join(cwd, DEC_REF), ACCEPTED_ADR, "utf8");
     expect((await writeDecisionRecord(cwd, DEC_REF, { now: NOW })).kind).toBe("written");
     await compactArchive(cwd, "decision_record"); // bundle + delete the loose record
     expect(await readFile(decisionRecordPath(cwd, DEC_REF), "utf8").then(() => true, () => false)).toBe(false);
-    // Edit the ADR body so source_sha256 drifts (still accepted), then refresh EXPLICITLY
-    // — this exercises the source-changed refresh branch (the one previously unguarded).
+    // Edit the ADR body so source_sha256 drifts (still accepted), then refresh EXPLICITLY.
     const editedAdr = ACCEPTED_ADR.replace("Settled.", "Settled now.");
     await writeFile(join(cwd, DEC_REF), editedAdr, "utf8");
-    const plan = await planDecisionRecord(cwd, DEC_REF, {
-      now: NOW,
-      refresh: {
-        expected_old_source_sha256: sha256Hex(ACCEPTED_ADR),
-        expected_new_source_sha256: sha256Hex(editedAdr),
-      },
-    });
-    expect(plan.kind).toBe("ineligible");
-    if (plan.kind === "ineligible") {
-      expect(plan.blocks.map((b) => b.kind)).toContain("compacted_record_refresh_unsupported");
-    }
-    // No fresh loose materialized → no stuck stale-bundle + diverging-loose state.
-    expect(await readFile(decisionRecordPath(cwd, DEC_REF), "utf8").then(() => true, () => false)).toBe(false);
+    const refresh = {
+      expected_old_source_sha256: sha256Hex(ACCEPTED_ADR),
+      expected_new_source_sha256: sha256Hex(editedAdr),
+    };
+    // The planner materializes (refresh with existing_raw null = no loose to overwrite),
+    // it no longer refuses with compacted_record_refresh_unsupported.
+    const plan = await planDecisionRecord(cwd, DEC_REF, { now: NOW, refresh });
+    expect(plan.kind).toBe("refresh");
+    if (plan.kind === "refresh") expect(plan.existing_raw).toBeNull();
+    const out = await writeDecisionRecord(cwd, DEC_REF, { now: NOW, refresh });
+    expect(out.kind).toBe("written"); // a fresh loose was MATERIALIZED (no longer refused)
+    const stem = decisionRecordStem(DEC_REF);
+    const materialized = await readFile(decisionRecordPath(cwd, DEC_REF), "utf8");
+
+    // The next compact adopts the fresher loose into the bundle and deletes the loose.
     const re = await compactArchive(cwd, "decision_record");
-    expect(re.bundle.kind).toBe("noop_already_bundled"); // consolidated bundle already exists
-    expect(re.delete.deleted).toEqual([]);
-    expect(re.delete.skipped).toEqual([]); // no bundle_stale survivor
+    expect(re.bundle.kind).toBe("superseded");
+    expect(re.delete.deleted).toContain(stem);
+    expect(await readFile(decisionRecordPath(cwd, DEC_REF), "utf8").then(() => true, () => false)).toBe(false);
+    expect(() => loadArchiveBundles(cwd)).not.toThrow();
+    expect(loadArchiveBundles(cwd).index.get("decision_record")?.get(stem)?.bytes).toBe(materialized);
   });
 });
 
-describe("phase_snapshot refresh of a bundle-only record is REFUSED, not a dead-end (the new P1)", () => {
-  it("an explicit refresh after compaction → ineligible (never strands a stale bundle + diverging loose)", async () => {
+describe("phase_snapshot refresh-after-compaction MATERIALIZES, then compaction adopts it", () => {
+  it("an explicit refresh of a bundle-only record writes a fresh loose; the next compact supersedes the bundle member + deletes the loose", async () => {
     const oldYaml = P1_DONE;
     await scaffoldP1();
     await compactArchive(cwd, "phase_snapshot"); // bundle + delete the loose snapshot
+    expect(await readFile(phaseSnapshotPath(cwd, "P1"), "utf8").then(() => true, () => false)).toBe(false);
     const newYaml = oldYaml.replace("Build the base", "Build the base anew");
     await writeFile(join(cwd, "design", "phases", "P1-x.yaml"), newYaml, "utf8");
-    const plan = await planPhaseSnapshot(cwd, "P1", {
-      now: NOW,
-      refresh: {
-        expected_old_source_sha256: sha256Hex(oldYaml),
-        expected_new_source_sha256: sha256Hex(newYaml),
-      },
-    });
-    expect(plan.kind).toBe("ineligible");
-    if (plan.kind === "ineligible") {
-      expect(plan.blocks.map((b) => b.kind)).toContain("compacted_record_refresh_unsupported");
-    }
-    // No fresh loose was materialized → no stuck stale-bundle + diverging-loose state.
-    expect(await readFile(phaseSnapshotPath(cwd, "P1"), "utf8").then(() => true, () => false)).toBe(false);
-    // Re-compacting stays clean: nothing loose to fold, the existing bundle is intact.
+    const refresh = {
+      expected_old_source_sha256: sha256Hex(oldYaml),
+      expected_new_source_sha256: sha256Hex(newYaml),
+    };
+    // The planner materializes (refresh with existing_raw null), no longer refuses.
+    const plan = await planPhaseSnapshot(cwd, "P1", { now: NOW, refresh });
+    expect(plan.kind).toBe("refresh");
+    if (plan.kind === "refresh") expect(plan.existing_raw).toBeNull();
+    const out = await writePhaseSnapshot(cwd, "P1", { now: NOW, refresh });
+    expect(out.kind).toBe("written"); // a fresh loose was MATERIALIZED, not refused
+    const materialized = await readFile(phaseSnapshotPath(cwd, "P1"), "utf8");
+
     const re = await compactArchive(cwd, "phase_snapshot");
-    expect(re.bundle.kind).toBe("noop_already_bundled"); // consolidated bundle already exists
-    expect(re.delete.deleted).toEqual([]);
-    expect(re.delete.skipped).toEqual([]); // crucially: no bundle_stale survivor
+    expect(re.bundle.kind).toBe("superseded");
+    expect(re.delete.deleted).toContain("P1");
+    expect(await readFile(phaseSnapshotPath(cwd, "P1"), "utf8").then(() => true, () => false)).toBe(false);
+    // The bundle's authority for P1 is now the fresher (refreshed) record; store still loads.
+    expect(() => loadArchiveBundles(cwd)).not.toThrow();
+    expect(loadArchiveBundles(cwd).index.get("phase_snapshot")?.get("P1")?.bytes).toBe(materialized);
   });
 });
 

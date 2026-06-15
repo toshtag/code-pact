@@ -105,8 +105,7 @@ export type PhaseSnapshotBlock =
       expected_new_source_sha256: string;
       current_source_sha256: string;
     }
-  | { kind: "live_file_missing"; original_path: string }
-  | { kind: "compacted_record_refresh_unsupported"; detail: string };
+  | { kind: "live_file_missing"; original_path: string };
 
 export type PhaseSnapshotPlan =
   | { kind: "write"; path: string; record: PhaseSnapshot }
@@ -116,8 +115,11 @@ export type PhaseSnapshotPlan =
       record: PhaseSnapshot;
       existing_source_sha256: string;
       current_source_sha256: string;
-      /** Exact raw bytes of the record being replaced — the apply-time ExpectedState. */
-      existing_raw: string;
+      /** Exact raw bytes of the loose record being replaced — the apply-time ExpectedState.
+       *  `null` when the existing record is BUNDLE-ONLY (its loose copy was compacted away):
+       *  the refresh then MATERIALIZES a fresh loose (apply-time ExpectedState `absent`), which
+       *  diverges from the bundle member until the next compaction adopts it (supersession). */
+      existing_raw: string | null;
     }
   | { kind: "noop_same_source"; path: string }
   | { kind: "noop_record_authoritative"; path: string }
@@ -671,33 +673,19 @@ export async function planPhaseSnapshot(
         };
       }
     }
-    // The existing record is bundle-only (its loose file was compacted away). Refusing
-    // here rather than materializing a fresh loose: a fresh-loose write would leave a
-    // STALE bundle member + a DIVERGING fresh loose that the current compactor cannot
-    // re-fold (the id is already bundled, so it is not re-bundled; the byte-diff makes
-    // the delete gate skip it as bundle_stale) — i.e. both copies persist. Fail closed
-    // until Layer 4 adds bundle member supersession/rebundling; refreshing a compacted
-    // record is unsupported for now (the bundle stays the single authority).
-    if (!existing.looseFilePresent) {
-      return {
-        kind: "ineligible",
-        path,
-        blocks: [
-          {
-            kind: "compacted_record_refresh_unsupported",
-            detail:
-              "the existing record is bundle-only (compacted); refreshing a compacted phase snapshot is not yet supported (would strand a stale bundle member + a diverging loose). Restore/uncompact the loose record first.",
-          },
-        ],
-      };
-    }
+    // A refresh of a BUNDLE-ONLY record (its loose copy was compacted away) MATERIALIZES a
+    // fresh loose (existing_raw: null → apply-time ExpectedState `absent`). The fresh loose
+    // diverges from the stale bundle member; the next compaction ADOPTS it (supersession,
+    // Layer 4) — replacing the bundle member in place and deleting the loose. So refreshing a
+    // compacted record no longer strands both copies: readers resolve loose-wins immediately
+    // and a compact makes the fresher record the durable single authority.
     return {
       kind: "refresh",
       path,
       record,
       existing_source_sha256: existing.record.source_sha256,
       current_source_sha256: currentSha,
-      existing_raw: existing.raw,
+      existing_raw: existing.looseFilePresent ? existing.raw : null,
     };
   }
   return { kind: "write", path, record };
@@ -724,8 +712,10 @@ export async function applyPhaseSnapshotPlan(
   plan: PhaseSnapshotPlan,
 ): Promise<PhaseSnapshotWriteOutcome> {
   if (plan.kind === "write" || plan.kind === "refresh") {
+    // `absent` for a fresh write OR a bundle-only refresh that MATERIALIZES a new loose
+    // (existing_raw null); the exact existing loose bytes for a refresh over a present loose.
     const expected: ExpectedState =
-      plan.kind === "write"
+      plan.kind === "write" || plan.existing_raw === null
         ? { kind: "absent" }
         : { kind: "present", content: plan.existing_raw };
     await atomicWriteText(plan.path, serializePhaseSnapshot(plan.record), expected);

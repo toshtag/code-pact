@@ -460,4 +460,26 @@ describe("compactArchive — supersession (adopt a fresher diverging loose into 
     expect(await exists(phaseSnapshotPath(cwd, "P1"))).toBe(true);
     expect(loadArchiveBundles(cwd).index.get("phase_snapshot")?.get("P1")?.bytes).toBe(v1); // unchanged
   });
+
+  it("MIXED in one run: a {P1,P2} bundle with a diverging P1 loose and a byte-identical P2 loose → supersede P1, delete both loose", async () => {
+    const v1 = await scaffold(true); // loose P1 + loose P2 on disk
+    const p2 = await readFile(phaseSnapshotPath(cwd, "P2"), "utf8");
+    // One content-addressed bundle holding the stale P1 and the (will-stay-identical) P2.
+    await writeArchiveBundle(cwd, "phase_snapshot", [{ id: "P1", bytes: v1 }, { id: "P2", bytes: p2 }]);
+    const v2 = v1.replace(sha256Hex("design/phases/P1-x.yaml"), sha256Hex("design/phases/elsewhere.yaml"));
+    await writeFile(phaseSnapshotPath(cwd, "P1"), v2, "utf8"); // P1 loose now diverges; P2 loose stays == bundle
+
+    const plan = await planCompactArchive(cwd, "phase_snapshot");
+    expect(plan.would_supersede).toEqual(["P1"]); // P1 adopted
+    expect(plan.would_delete).toEqual(["P2"]); // P2 already byte-identical → just delete
+
+    const out = await compactArchive(cwd, "phase_snapshot");
+    expect(out.bundle.kind).toBe("superseded");
+    expect(out.delete.deleted.sort()).toEqual(["P1", "P2"]); // BOTH loose removed in one run
+    expect(await exists(phaseSnapshotPath(cwd, "P1"))).toBe(false);
+    expect(await exists(phaseSnapshotPath(cwd, "P2"))).toBe(false);
+    const idx = loadArchiveBundles(cwd).index.get("phase_snapshot");
+    expect(idx?.get("P1")?.bytes).toBe(v2); // P1 adopted into the bundle
+    expect(idx?.get("P2")?.bytes).toBe(p2); // P2 unchanged
+  });
 });
