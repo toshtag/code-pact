@@ -420,9 +420,13 @@ export async function compactArchive(
   const bundle = await writeArchiveBundle(cwd, kind, members);
 
   // Retire the smaller bundles the consolidated one now supersedes (AFTER it is on disk
-  // + verified). Skip when nothing was consolidated (no members).
+  // + verified). Retire whenever a consolidated bundle exists on disk — every write outcome
+  // EXCEPT `noop_no_members` (which has no bundleFile and means nothing was consolidated).
+  // Phrased as `!== noop_no_members` so a future `superseded` outcome (a member replaced in
+  // place; see supersedeArchiveBundle) still triggers retirement rather than silently
+  // skipping it.
   let retired: string[] = [];
-  if (bundle.kind === "written" || bundle.kind === "noop_already_bundled") {
+  if (bundle.kind !== "noop_no_members") {
     // The retire authority is the on-disk consolidated bundle itself, re-loaded +
     // Tier-1-validated inside retireSupersededBundles — not the in-memory `members`.
     retired = await retireSupersededBundles(cwd, kind, bundle.bundleFile);

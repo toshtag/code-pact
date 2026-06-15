@@ -1,12 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
+import { ARCHIVE_BUNDLE_SCHEMA_VERSION } from "../../../../src/core/schemas/archive-bundle.ts";
 import {
   buildArchiveBundle,
   bundleLooseRecords,
   enumerateLooseMembers,
   serializeArchiveBundle,
+  supersedeArchiveBundle,
   verifyBundleReadback,
   writeArchiveBundle,
   type BundleWriteError,
@@ -20,6 +22,7 @@ import {
   archiveBundlePath,
   decisionRecordPath,
   phaseSnapshotPath,
+  sha256Hex,
 } from "../../../../src/core/archive/paths.ts";
 import { seedDurableEvents } from "../../../helpers/seed-events.ts";
 
@@ -291,5 +294,218 @@ describe("verifyBundleReadback — fail-closed on a corrupt/divergent readback",
         "x.json",
       ),
     ).toThrow();
+  });
+});
+
+/** Refresh the on-disk P1 snapshot to a DIFFERENT-but-valid record (edit the design file,
+ *  then an explicit refresh re-records it) and return the new loose bytes. The supersede
+ *  scenario: a record was compacted into a bundle, then refreshed, so a fresher loose now
+ *  diverges from the bundle member at the same id. */
+async function refreshP1SnapshotToNewBytes(): Promise<string> {
+  const edited = P1_DONE.replace("Build the base", "Build the base (edited)");
+  await writeFile(join(cwd, "design", "phases", "P1-x.yaml"), edited, "utf8");
+  const refreshed = await writePhaseSnapshot(cwd, "P1", {
+    now: new Date("2026-06-11T00:00:00.000Z"),
+    refresh: { expected_old_source_sha256: sha256Hex(P1_DONE), expected_new_source_sha256: sha256Hex(edited) },
+  });
+  expect(refreshed.kind).toBe("written");
+  return readFile(phaseSnapshotPath(cwd, "P1"), "utf8");
+}
+
+describe("supersedeArchiveBundle — intentional same-id-set replace (UNWIRED Layer-4 primitive)", () => {
+  it("a stale bundle at the content address is REPLACED with the fresher member; the bundle now holds the new bytes", async () => {
+    const v1 = await scaffoldP1Snapshot();
+    expect((await writeArchiveBundle(cwd, "phase_snapshot", [{ id: "P1", bytes: v1 }])).kind).toBe("written");
+    const v2 = await refreshP1SnapshotToNewBytes();
+    expect(v2).not.toBe(v1); // a genuinely different (but valid) snapshot
+
+    const out = await supersedeArchiveBundle(cwd, "phase_snapshot", [{ id: "P1", bytes: v2 }]);
+    expect(out.kind).toBe("superseded");
+    if (out.kind === "superseded") expect(out.member_count).toBe(1);
+    // The bundle's authority for P1 is now the NEW bytes — the old member bytes are DROPPED.
+    const member = loadArchiveBundles(cwd).index.get("phase_snapshot")?.get("P1");
+    expect(member?.bytes).toBe(v2);
+    expect(member?.bytes).not.toBe(v1);
+    // Layer-3 boundary preserved: supersede touches only the bundle, never the loose record.
+    expect(await readFile(phaseSnapshotPath(cwd, "P1"), "utf8")).toBe(v2);
+  });
+
+  it("OPT-IN boundary: where writeArchiveBundle FAILS CLOSED on a same-id divergence, supersedeArchiveBundle REPLACES", async () => {
+    const v1 = await scaffoldP1Snapshot();
+    expect((await writeArchiveBundle(cwd, "phase_snapshot", [{ id: "P1", bytes: v1 }])).kind).toBe("written");
+    const v2 = await refreshP1SnapshotToNewBytes();
+
+    // The default create path refuses to overwrite the diverging bundle (the #467 guard)...
+    await expect(writeArchiveBundle(cwd, "phase_snapshot", [{ id: "P1", bytes: v2 }])).rejects.toThrow(
+      /different bundle already exists/,
+    );
+    // ...but the explicit supersede path adopts the fresher member.
+    expect((await supersedeArchiveBundle(cwd, "phase_snapshot", [{ id: "P1", bytes: v2 }])).kind).toBe("superseded");
+  });
+
+  it("idempotent: superseding to the bytes already on disk → noop_already_bundled (no needless rewrite)", async () => {
+    const v1 = await scaffoldP1Snapshot();
+    expect((await writeArchiveBundle(cwd, "phase_snapshot", [{ id: "P1", bytes: v1 }])).kind).toBe("written");
+    const v2 = await refreshP1SnapshotToNewBytes();
+    expect((await supersedeArchiveBundle(cwd, "phase_snapshot", [{ id: "P1", bytes: v2 }])).kind).toBe("superseded");
+    // A second supersede with the same v2 is a converged noop.
+    expect((await supersedeArchiveBundle(cwd, "phase_snapshot", [{ id: "P1", bytes: v2 }])).kind).toBe(
+      "noop_already_bundled",
+    );
+  });
+
+  it("no existing bundle at the content address → a plain written (supersede degrades to create)", async () => {
+    const v1 = await scaffoldP1Snapshot();
+    const out = await supersedeArchiveBundle(cwd, "phase_snapshot", [{ id: "P1", bytes: v1 }]);
+    expect(out.kind).toBe("written");
+    expect(loadArchiveBundles(cwd).index.get("phase_snapshot")?.get("P1")?.bytes).toBe(v1);
+  });
+
+  it("empty member set → noop_no_members", async () => {
+    expect((await supersedeArchiveBundle(cwd, "phase_snapshot", [])).kind).toBe("noop_no_members");
+  });
+
+  // ---- self-safety: a destructive replace must never overwrite the wrong target, nor turn a
+  //      valid store into an unloadable one (the primitive is safe even called directly). ----
+
+  it("a corrupt (non-bundle) file at the content-address target → fail closed (ARCHIVE_BUNDLE_INVALID, a corrupt STORE — not a write fault), target untouched", async () => {
+    const v1 = await scaffoldP1Snapshot();
+    const path = archiveBundlePath(cwd, "phase_snapshot", computeMemberIdsSha256(["P1"]));
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, "not a bundle\n", "utf8");
+    // The strict store load inside the supersede preflight refuses before any write. A corrupt
+    // bundle is a corrupt STORE, so this surfaces ARCHIVE_BUNDLE_INVALID (raw, from
+    // loadArchiveBundles) — DELIBERATELY a different class than the BundleWriteError /
+    // ARCHIVE_BUNDLE_WRITE_FAILED the other preflight refusals throw, matching how
+    // compactArchive already distinguishes a corrupt store from a write fault (state.ts).
+    await expect(supersedeArchiveBundle(cwd, "phase_snapshot", [{ id: "P1", bytes: v1 }])).rejects.toMatchObject({
+      code: "ARCHIVE_BUNDLE_INVALID",
+    });
+    expect(await readFile(path, "utf8")).toBe("not a bundle\n");
+  });
+
+  it("a valid bundle of a DIFFERENT KIND at the target path → refuses to replace, target untouched", async () => {
+    const v1 = await scaffoldP1Snapshot();
+    const path = archiveBundlePath(cwd, "phase_snapshot", computeMemberIdsSha256(["P1"]));
+    await mkdir(dirname(path), { recursive: true });
+    // Tier-1-valid (sha-consistent members) but declares kind "decision_record" — Tier-1 does
+    // not check member-body kind-validity, so this loads; the kind guard must catch it.
+    const raw =
+      JSON.stringify(
+        {
+          schema_version: ARCHIVE_BUNDLE_SCHEMA_VERSION,
+          kind: "decision_record",
+          member_ids_sha256: computeMemberIdsSha256(["P1"]),
+          members: [{ id: "P1", sha256: sha256Hex("x"), bytes: "x" }],
+        },
+        null,
+        2,
+      ) + "\n";
+    await writeFile(path, raw, "utf8");
+    // A wrong-kind target is a write-level REFUSAL (ARCHIVE_BUNDLE_WRITE_FAILED), the
+    // counterpart class to the corrupt-store ARCHIVE_BUNDLE_INVALID above.
+    await expect(supersedeArchiveBundle(cwd, "phase_snapshot", [{ id: "P1", bytes: v1 }])).rejects.toMatchObject({
+      code: "ARCHIVE_BUNDLE_WRITE_FAILED",
+      message: expect.stringMatching(/not "phase_snapshot"/),
+    });
+    expect(await readFile(path, "utf8")).toBe(raw);
+  });
+
+  it("a valid bundle with a DIFFERENT id set at the target path → refuses to replace, target untouched", async () => {
+    const { p1, p2 } = await scaffoldTwoSnapshots();
+    // Place a valid {P1,P2} bundle at the content-address path for the {P1} id set (a misplaced
+    // file: its NAME addresses {P1} but its CONTENT is {P1,P2}).
+    const p1Path = archiveBundlePath(cwd, "phase_snapshot", computeMemberIdsSha256(["P1"]));
+    await mkdir(dirname(p1Path), { recursive: true });
+    const misplaced = serializeArchiveBundle(
+      buildArchiveBundle("phase_snapshot", [{ id: "P1", bytes: p1 }, { id: "P2", bytes: p2 }]),
+    );
+    await writeFile(p1Path, misplaced, "utf8");
+    // Superseding the {P1} id set targets p1Path, but the file there holds {P1,P2}.
+    await expect(supersedeArchiveBundle(cwd, "phase_snapshot", [{ id: "P1", bytes: p1 }])).rejects.toThrow(
+      /different member id set/,
+    );
+    expect(await readFile(p1Path, "utf8")).toBe(misplaced);
+  });
+
+  it("superseding a member a REDUNDANT bundle still holds → refuses rather than corrupt the store (duplicate_member_conflict)", async () => {
+    const { p1, p2 } = await scaffoldTwoSnapshots();
+    // A valid crash-survivor store: a consolidated {P1,P2} bundle AND a redundant {P1} bundle.
+    // P1 is byte-identical in both → deduped, so the store loads clean today.
+    expect(
+      (await writeArchiveBundle(cwd, "phase_snapshot", [{ id: "P1", bytes: p1 }, { id: "P2", bytes: p2 }])).kind,
+    ).toBe("written");
+    expect((await writeArchiveBundle(cwd, "phase_snapshot", [{ id: "P1", bytes: p1 }])).kind).toBe("written");
+    expect(loadArchiveBundles(cwd).index.get("phase_snapshot")?.get("P1")?.bytes).toBe(p1);
+
+    const p1v2 = await refreshP1SnapshotToNewBytes();
+    // Superseding P1 in the {P1,P2} bundle would leave the redundant {P1} bundle holding the
+    // OLD P1 → a cross-bundle duplicate_member_conflict. The primitive must refuse.
+    await expect(
+      supersedeArchiveBundle(cwd, "phase_snapshot", [{ id: "P1", bytes: p1v2 }, { id: "P2", bytes: p2 }]),
+    ).rejects.toThrow(/supersede would corrupt the bundle store/);
+    // Both bundles untouched; the store still loads and still resolves the OLD P1.
+    expect(() => loadArchiveBundles(cwd)).not.toThrow();
+    expect(loadArchiveBundles(cwd).index.get("phase_snapshot")?.get("P1")?.bytes).toBe(p1);
+  });
+
+  it("DEGRADE-TO-CREATE: superseding a PARTIAL id set whose member a consolidated bundle still holds → refuses, no bundle created (caller bug must not corrupt the store)", async () => {
+    const { p1, p2 } = await scaffoldTwoSnapshots();
+    // A valid production-like store: ONE consolidated {P1,P2} bundle. There is NO {P1} bundle.
+    expect(
+      (await writeArchiveBundle(cwd, "phase_snapshot", [{ id: "P1", bytes: p1 }, { id: "P2", bytes: p2 }])).kind,
+    ).toBe("written");
+    const consolidatedPath = archiveBundlePath(cwd, "phase_snapshot", computeMemberIdsSha256(["P1", "P2"]));
+    const consolidatedBefore = await readFile(consolidatedPath, "utf8");
+    const p1OnlyPath = archiveBundlePath(cwd, "phase_snapshot", computeMemberIdsSha256(["P1"]));
+
+    const p1v2 = await refreshP1SnapshotToNewBytes();
+    // A caller supersedes the PARTIAL {P1} id set (wrong: P1 lives in the {P1,P2} bundle). The
+    // {P1} content-address path is ABSENT, so this would degrade to CREATE — but creating a
+    // {P1=v2} bundle leaves the {P1,P2} bundle holding P1=v1 → duplicate_member_conflict. The
+    // self-safe create path must refuse rather than write the conflicting bundle.
+    await expect(supersedeArchiveBundle(cwd, "phase_snapshot", [{ id: "P1", bytes: p1v2 }])).rejects.toMatchObject({
+      code: "ARCHIVE_BUNDLE_WRITE_FAILED",
+      message: expect.stringMatching(/supersede would corrupt the bundle store/),
+    });
+    // No {P1} bundle was created; the consolidated bundle is untouched; the store still loads.
+    await expect(readFile(p1OnlyPath, "utf8")).rejects.toThrow();
+    expect(await readFile(consolidatedPath, "utf8")).toBe(consolidatedBefore);
+    expect(() => loadArchiveBundles(cwd)).not.toThrow();
+    expect(loadArchiveBundles(cwd).index.get("phase_snapshot")?.get("P1")?.bytes).toBe(p1);
+  });
+
+  it("DEGRADE-TO-CREATE SUCCEEDS when the new member collides with NO existing bundle (preflight is not over-conservative)", async () => {
+    const { p1, p2 } = await scaffoldTwoSnapshots();
+    // Store holds only a {P2} bundle; P1 is in NO bundle. Superseding {P1} safely degrades to a
+    // create — the preflight must ALLOW it (refusing would block legitimate supersession).
+    expect((await writeArchiveBundle(cwd, "phase_snapshot", [{ id: "P2", bytes: p2 }])).kind).toBe("written");
+    const out = await supersedeArchiveBundle(cwd, "phase_snapshot", [{ id: "P1", bytes: p1 }]);
+    expect(out.kind).toBe("written");
+    const idx = loadArchiveBundles(cwd).index.get("phase_snapshot");
+    expect(idx?.get("P1")?.bytes).toBe(p1);
+    expect(idx?.get("P2")?.bytes).toBe(p2);
+  });
+
+  it("DEGRADE-TO-CREATE: a non-canonically-named bundle already holds the member → refuses to create a colliding canonical bundle", async () => {
+    const { p1 } = await scaffoldTwoSnapshots();
+    // A valid bundle holding {P1} sits at a NON-canonical filename; the canonical {P1} path is
+    // absent. (A hand-placed / legacy-named bundle — still a valid, loadable store.)
+    const bundlesDir = dirname(archiveBundlePath(cwd, "phase_snapshot", computeMemberIdsSha256(["P1"])));
+    await mkdir(bundlesDir, { recursive: true });
+    await writeFile(
+      join(bundlesDir, "manual.json"),
+      serializeArchiveBundle(buildArchiveBundle("phase_snapshot", [{ id: "P1", bytes: p1 }])),
+      "utf8",
+    );
+    expect(() => loadArchiveBundles(cwd)).not.toThrow();
+
+    const p1v2 = await refreshP1SnapshotToNewBytes();
+    // Creating the canonical {P1=v2} bundle would collide with manual.json's P1=v1.
+    await expect(supersedeArchiveBundle(cwd, "phase_snapshot", [{ id: "P1", bytes: p1v2 }])).rejects.toThrow(
+      /supersede would corrupt the bundle store/,
+    );
+    expect(() => loadArchiveBundles(cwd)).not.toThrow();
+    expect(loadArchiveBundles(cwd).index.get("phase_snapshot")?.get("P1")?.bytes).toBe(p1);
   });
 });
