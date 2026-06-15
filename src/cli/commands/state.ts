@@ -329,7 +329,7 @@ async function cmdStateCompactArchive(argv: string[], globalJson: boolean): Prom
         else {
           for (const p of plans) {
             process.stdout.write(
-              `${p.kind}: would bundle ${p.would_bundle.length}, delete ${p.would_delete.length}, retire ${p.would_retire_bundles.length} bundle(s), skip ${p.would_skip.length}\n`,
+              `${p.kind}: would bundle ${p.would_bundle.length}, supersede ${p.would_supersede.length}, delete ${p.would_delete.length}, retire ${p.would_retire_bundles.length} bundle(s), skip ${p.would_skip.length}\n`,
             );
           }
         }

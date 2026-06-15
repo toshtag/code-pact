@@ -360,15 +360,104 @@ describe("planCompactArchive — read-only dry-run partition (matches compactArc
     expect(plan.would_bundle).toEqual([]);
   });
 
-  it("loose differs from a same-id bundle member → would_skip(bundle_stale), not would_delete", async () => {
-    const bytes = await scaffold(); // loose P1 stays on disk
+  it("loose differs from a same-id bundle member (single content-addressed bundle, nothing to fold) → would_supersede, not would_delete", async () => {
+    const bytes = await scaffold(); // loose P1 stays on disk — the FRESHER record
     const differing = bytes.replace(
       sha256Hex("design/phases/P1-x.yaml"),
       sha256Hex("design/phases/elsewhere.yaml"),
     );
-    await writePhaseSnapshotBundle("snap.json", [{ id: "P1", bytes: differing }]);
+    // A content-addressed bundle holding the STALE P1 bytes (writeArchiveBundle places it at
+    // its own content address — the precondition for an in-place supersede).
+    await writeArchiveBundle(cwd, "phase_snapshot", [{ id: "P1", bytes: differing }]);
     const plan = await planCompactArchive(cwd, "phase_snapshot");
-    expect(plan.would_delete).toEqual([]); // the dry-run must NOT promise a delete the gate skips
+    // The fresher loose adopts over the stale bundle member (supersession), not a blind delete.
+    expect(plan.would_delete).toEqual([]);
+    expect(plan.would_supersede).toEqual(["P1"]);
+    expect(plan.would_skip).toEqual([]);
+  });
+
+  it("loose differs but the bundle is MISNAMED (not at its content address) → deferred as bundle_stale (no would_supersede)", async () => {
+    const bytes = await scaffold();
+    const differing = bytes.replace(
+      sha256Hex("design/phases/P1-x.yaml"),
+      sha256Hex("design/phases/elsewhere.yaml"),
+    );
+    await writePhaseSnapshotBundle("snap.json", [{ id: "P1", bytes: differing }]); // non-content-addressed
+    const plan = await planCompactArchive(cwd, "phase_snapshot");
+    expect(plan.would_supersede).toEqual([]);
+    expect(plan.would_delete).toEqual([]);
     expect(plan.would_skip.map((s) => s.reason)).toContain("bundle_stale");
+  });
+});
+
+describe("compactArchive — supersession (adopt a fresher diverging loose into the bundle)", () => {
+  /** A fresh, valid, DIFFERENT P1 snapshot: rewrite the recorded source path hash (stays
+   *  canonical + id-consistent, so it is foldable, but ≠ the original bytes). */
+  const fresher = (v1: string): string =>
+    v1.replace(sha256Hex("design/phases/P1-x.yaml"), sha256Hex("design/phases/elsewhere.yaml"));
+
+  it("a single content-addressed bundle + a fresher diverging loose → SUPERSEDES the member, deletes the loose, store stays valid", async () => {
+    const v1 = await scaffold();
+    await writeArchiveBundle(cwd, "phase_snapshot", [{ id: "P1", bytes: v1 }]); // bundle holds the STALE v1
+    const v2 = fresher(v1);
+    await writeFile(phaseSnapshotPath(cwd, "P1"), v2, "utf8"); // refresh the loose to the fresher v2
+
+    const out = await compactArchive(cwd, "phase_snapshot");
+    expect(out.bundle.kind).toBe("superseded"); // the bundle member was replaced in place
+    expect(out.delete.deleted).toContain("P1"); // the now-adopted loose is removed
+    expect(await exists(phaseSnapshotPath(cwd, "P1"))).toBe(false);
+    // The store still loads and its authority for P1 is now the FRESH bytes.
+    expect(() => loadArchiveBundles(cwd)).not.toThrow();
+    expect(loadArchiveBundles(cwd).index.get("phase_snapshot")?.get("P1")?.bytes).toBe(v2);
+
+    // A second run is a converged noop — the loose is gone and the bundle already holds v2.
+    const again = await compactArchive(cwd, "phase_snapshot");
+    expect(again.bundle.kind).toBe("noop_already_bundled");
+    expect(again.delete.deleted).toEqual([]);
+  });
+
+  it("DEFER then ADOPT: a pending fold blocks supersede on run 1; run 2 (nothing left to fold) adopts it", async () => {
+    const v1 = await scaffold(true); // loose P1 + loose P2 on disk
+    const p2 = await readFile(phaseSnapshotPath(cwd, "P2"), "utf8");
+    await writeArchiveBundle(cwd, "phase_snapshot", [{ id: "P1", bytes: v1 }]); // bundle {P1@v1}
+    const v2 = fresher(v1);
+    await writeFile(phaseSnapshotPath(cwd, "P1"), v2, "utf8"); // P1 loose now diverges
+
+    // Run 1: P2 is a new fold → would_bundle non-empty → P1 supersede is DEFERRED (loose stays).
+    const plan1 = await planCompactArchive(cwd, "phase_snapshot");
+    expect(plan1.would_bundle).toContain("P2");
+    expect(plan1.would_supersede).toEqual([]);
+    expect(plan1.would_skip.map((s) => s.reason)).toContain("bundle_stale");
+    const run1 = await compactArchive(cwd, "phase_snapshot");
+    expect(run1.bundle.kind).not.toBe("superseded"); // consolidation, not adoption
+    expect(run1.delete.deleted).toContain("P2"); // the new fold was deleted
+    expect(await exists(phaseSnapshotPath(cwd, "P1"))).toBe(true); // P1 loose deferred, kept
+    expect(loadArchiveBundles(cwd).index.get("phase_snapshot")?.get("P1")?.bytes).toBe(v1); // still stale
+
+    // Run 2: P2 folded already (nothing new to fold), single content-addressed bundle → ADOPT P1.
+    const plan2 = await planCompactArchive(cwd, "phase_snapshot");
+    expect(plan2.would_supersede).toEqual(["P1"]);
+    const run2 = await compactArchive(cwd, "phase_snapshot");
+    expect(run2.bundle.kind).toBe("superseded");
+    expect(run2.delete.deleted).toContain("P1");
+    expect(await exists(phaseSnapshotPath(cwd, "P1"))).toBe(false);
+    const idx = loadArchiveBundles(cwd).index.get("phase_snapshot");
+    expect(idx?.get("P1")?.bytes).toBe(v2); // adopted
+    expect(idx?.get("P2")?.bytes).toBe(p2); // still present
+  });
+
+  it("a fresher loose whose bytes are NOT foldable is never adopted → stays a bundle_stale skip", async () => {
+    const v1 = await scaffold();
+    await writeArchiveBundle(cwd, "phase_snapshot", [{ id: "P1", bytes: v1 }]);
+    await writeFile(phaseSnapshotPath(cwd, "P1"), v1 + "\ngarbage", "utf8"); // diverges but not foldable
+
+    const plan = await planCompactArchive(cwd, "phase_snapshot");
+    expect(plan.would_supersede).toEqual([]);
+    expect(plan.would_skip.map((s) => s.reason)).toContain("bundle_stale");
+    const out = await compactArchive(cwd, "phase_snapshot");
+    expect(out.bundle.kind).toBe("noop_already_bundled"); // bundle untouched (no adoption)
+    expect(out.delete.deleted).toEqual([]); // the unfoldable loose is NOT deleted
+    expect(await exists(phaseSnapshotPath(cwd, "P1"))).toBe(true);
+    expect(loadArchiveBundles(cwd).index.get("phase_snapshot")?.get("P1")?.bytes).toBe(v1); // unchanged
   });
 });

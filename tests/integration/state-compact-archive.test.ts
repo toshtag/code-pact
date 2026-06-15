@@ -156,6 +156,43 @@ describe("state compact-archive --write (folds + deletes)", () => {
     for (const x of results2) expect(x.deleted).toEqual([]);
     expect(await bundleCount()).toBe(1); // no duplicate bundle grown
   });
+
+  it("supersession: a fresher diverging loose for a compacted record → dry-run would_supersede; --write reports bundle=superseded and deletes the loose", async () => {
+    await scaffoldArchivedSnapshot();
+    const v1 = await readFile(LOOSE_SNAPSHOT(), "utf8");
+    // Fold P1 into ONE content-addressed bundle and delete the loose.
+    expect(run(["state", "compact-archive", "phase_snapshot", "--write", "--json"]).code).toBe(0);
+    expect(await fileExists(LOOSE_SNAPSHOT())).toBe(false);
+    expect(await bundleCount()).toBe(1);
+
+    // Re-materialize a FRESHER, diverging-but-foldable loose for the now-compacted record
+    // (rewrite the recorded source-path hash — stays canonical + id-consistent).
+    const v2 = v1.replace(sha256Hex("design/phases/P1-x.yaml"), sha256Hex("design/phases/elsewhere.yaml"));
+    expect(v2).not.toBe(v1);
+    await writeFile(LOOSE_SNAPSHOT(), v2, "utf8");
+
+    // Dry-run surfaces the supersession (the single content-addressed bundle, nothing to fold).
+    const dry = run(["state", "compact-archive", "phase_snapshot", "--json"]);
+    expect(dry.code).toBe(0);
+    const plans = json(dry).data?.plans as { kind: string; would_supersede: string[] }[];
+    expect(plans[0]!.would_supersede).toContain("P1");
+
+    // --write adopts the fresher loose into the bundle in place, then deletes the loose.
+    const w = run(["state", "compact-archive", "phase_snapshot", "--write", "--json"]);
+    expect(w.code).toBe(0);
+    const results = json(w).data?.results as { kind: string; bundle: string; deleted: string[] }[];
+    expect(results[0]!.bundle).toBe("superseded");
+    expect(results[0]!.deleted).toContain("P1");
+    expect(await fileExists(LOOSE_SNAPSHOT())).toBe(false);
+    expect(await bundleCount()).toBe(1); // still one bundle — superseded in place, not grown
+
+    // The store reloads cleanly (no duplicate_member_conflict) and a re-run is a converged noop.
+    // (The fixture's fresher bytes are foldable but not authoritative vs the live design file, so
+    // `validate` is intentionally not asserted here — store-validity is covered in the unit tests.)
+    const again = run(["state", "compact-archive", "phase_snapshot", "--write", "--json"]);
+    expect(again.code).toBe(0);
+    expect((json(again).data?.results as { bundle: string }[])[0]!.bundle).toBe("noop_already_bundled");
+  });
 });
 
 describe("state compact-archive — arg handling", () => {
