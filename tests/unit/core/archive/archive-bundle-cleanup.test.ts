@@ -6,6 +6,7 @@ import { writePhaseSnapshot } from "../../../../src/core/archive/phase-snapshot.
 import {
   compactArchive,
   deleteLooseCoveredByBundle,
+  planCompactArchive,
 } from "../../../../src/core/archive/archive-bundle-cleanup.ts";
 import { writeArchiveBundle } from "../../../../src/core/archive/archive-bundle-writer.ts";
 import { planEventPack } from "../../../../src/core/archive/event-pack.ts";
@@ -249,5 +250,35 @@ describe("compactArchive — fold + drop (file-count reduction)", () => {
     expect(idx.has("P2")).toBe(true);
     expect(await exists(phaseSnapshotPath(cwd, "P1"))).toBe(false);
     expect(await exists(phaseSnapshotPath(cwd, "P2"))).toBe(false);
+  });
+});
+
+describe("planCompactArchive — read-only dry-run partition (matches compactArchive/the delete gate)", () => {
+  it("loose not in any bundle → would_bundle", async () => {
+    await scaffold();
+    const plan = await planCompactArchive(cwd, "phase_snapshot");
+    expect(plan.would_bundle).toEqual(["P1"]);
+    expect(plan.would_delete).toEqual([]);
+    expect(plan.would_skip).toEqual([]);
+  });
+
+  it("loose byte-identical to a verified bundle member → would_delete", async () => {
+    const bytes = await scaffold();
+    await writeArchiveBundle(cwd, "phase_snapshot", [{ id: "P1", bytes }]);
+    const plan = await planCompactArchive(cwd, "phase_snapshot");
+    expect(plan.would_delete).toEqual(["P1"]);
+    expect(plan.would_bundle).toEqual([]);
+  });
+
+  it("loose differs from a same-id bundle member → would_skip(bundle_stale), not would_delete", async () => {
+    const bytes = await scaffold(); // loose P1 stays on disk
+    const differing = bytes.replace(
+      sha256Hex("design/phases/P1-x.yaml"),
+      sha256Hex("design/phases/elsewhere.yaml"),
+    );
+    await writePhaseSnapshotBundle("snap.json", [{ id: "P1", bytes: differing }]);
+    const plan = await planCompactArchive(cwd, "phase_snapshot");
+    expect(plan.would_delete).toEqual([]); // the dry-run must NOT promise a delete the gate skips
+    expect(plan.would_skip.map((s) => s.reason)).toContain("bundle_stale");
   });
 });

@@ -6,6 +6,12 @@ import { runStateCompact, type StateCompactResult } from "../../commands/state-c
 import { type EventPackBlock } from "../../core/archive/event-pack.ts";
 import type { CleanupOutcome } from "../../core/archive/event-pack-cleanup.ts";
 import { eventPackPath } from "../../core/archive/paths.ts";
+import { ArchiveBundleKind } from "../../core/schemas/archive-bundle.ts";
+import {
+  compactArchive,
+  planCompactArchive,
+} from "../../core/archive/archive-bundle-cleanup.ts";
+import { BundleWriteError } from "../../core/archive/archive-bundle-writer.ts";
 
 // ---------------------------------------------------------------------------
 // `state` command cluster. ONE subcommand: `state compact`. The DRY-RUN reports a
@@ -24,15 +30,20 @@ export async function cmdState(
   // No subcommand, a help token, or only flags (e.g. `state --json`) → usage.
   if (subcommand === undefined || isHelpToken(subcommand) || subcommand.startsWith("-")) {
     const json = globalJson || argv.includes("--json");
-    if (json) emitOk({ available: ["compact"] });
-    else process.stdout.write("Usage: code-pact state compact <phase-id> [--write] [--json]\n");
+    if (json) emitOk({ available: ["compact", "compact-archive"] });
+    else
+      process.stdout.write(
+        "Usage: code-pact state compact <phase-id> [--write] [--json]\n" +
+          "       code-pact state compact-archive [<kind>] [--write] [--json]\n",
+      );
     return 0;
   }
   if (subcommand === "compact") return cmdStateCompact(rest, locale, globalJson);
+  if (subcommand === "compact-archive") return cmdStateCompactArchive(rest, globalJson);
   emitError(
     globalJson || argv.includes("--json"),
     "CONFIG_ERROR",
-    `state: unknown subcommand "${subcommand}". Available: compact`,
+    `state: unknown subcommand "${subcommand}". Available: compact, compact-archive`,
   );
   return 2;
 }
@@ -227,5 +238,102 @@ async function cmdStateCompact(
   };
 
   if (write) return withWriteLock(cwd, `state compact ${phaseId} --write`, json, runImpl);
+  return runImpl();
+}
+
+// ---------------------------------------------------------------------------
+// `state compact-archive [<kind>] [--write]` — Layer 4 entry to archive-bundle
+// compaction. DRY-RUN reports, per kind, the loose records that would be folded
+// into a bundle (`would_bundle`), deleted because a verified bundle already holds
+// them (`would_delete`), or skipped (`would_skip`: a same-id bundle member differs
+// or is invalid — fail-closed). `--write` (under the write lock) runs the
+// redundant-bundle-safe `compactArchive` per kind and reports the outcome. NOTE the
+// `*_path` ids are LOGICAL record ids, not necessarily a physical loose file once
+// compaction has run (the record may live only in a bundle).
+// ---------------------------------------------------------------------------
+async function cmdStateCompactArchive(argv: string[], globalJson: boolean): Promise<number> {
+  let values: Record<string, unknown>;
+  let positionals: string[];
+  try {
+    ({ values, positionals } = strictParse(
+      "state compact-archive",
+      argv,
+      { json: { type: "boolean" }, write: { type: "boolean" } },
+      { allowPositionals: true },
+    ));
+  } catch (err) {
+    if (!(err instanceof ConfigError)) throw err;
+    emitError(globalJson || argv.includes("--json"), "CONFIG_ERROR", err.message);
+    return 2;
+  }
+
+  const json = globalJson || values.json === true;
+  const write = values.write === true;
+
+  // Optional positional restricts to one kind; otherwise all kinds.
+  let kinds = ArchiveBundleKind.options;
+  const kindArg = positionals[0];
+  if (kindArg !== undefined) {
+    const parsed = ArchiveBundleKind.safeParse(kindArg);
+    if (!parsed.success) {
+      emitError(
+        json,
+        "CONFIG_ERROR",
+        `state compact-archive: unknown kind "${kindArg}". Expected one of: ${ArchiveBundleKind.options.join(", ")}.`,
+      );
+      return 2;
+    }
+    kinds = [parsed.data];
+  }
+
+  const cwd = process.cwd();
+
+  const runImpl = async (): Promise<number> => {
+    try {
+      if (!write) {
+        const plans = [];
+        for (const kind of kinds) plans.push(await planCompactArchive(cwd, kind));
+        if (json) emitOk({ mode: "dry_run", plans });
+        else {
+          for (const p of plans) {
+            process.stdout.write(
+              `${p.kind}: would bundle ${p.would_bundle.length}, delete ${p.would_delete.length}, skip ${p.would_skip.length}\n`,
+            );
+          }
+        }
+        return 0;
+      }
+      const written = [];
+      for (const kind of kinds) {
+        const out = await compactArchive(cwd, kind);
+        written.push({
+          kind,
+          bundle: out.bundle.kind,
+          deleted: out.delete.deleted,
+          skipped: out.delete.skipped,
+          remaining_loose: out.delete.remaining_loose,
+        });
+      }
+      if (json) emitOk({ mode: "written", results: written });
+      else {
+        for (const r of written) {
+          process.stdout.write(
+            `${r.kind}: bundle=${r.bundle}, deleted ${r.deleted.length}, skipped ${r.skipped.length}, remaining ${r.remaining_loose}\n`,
+          );
+        }
+      }
+      return 0;
+    } catch (err) {
+      // A bundle write/verify fault or a corrupt bundle store (loadArchiveBundles)
+      // surfaces fail-closed; nothing more is mutated past the point it threw. Literal
+      // codes (not a variable) so the error-code surface lock detects + tracks them.
+      const message = `state compact-archive failed: ${(err as Error).message}`;
+      if (err instanceof BundleWriteError) emitError(json, "ARCHIVE_BUNDLE_WRITE_FAILED", message);
+      else emitError(json, "ARCHIVE_BUNDLE_INVALID", message);
+      return 2;
+    }
+  };
+
+  if (write) return withWriteLock(cwd, "state compact-archive --write", json, runImpl);
   return runImpl();
 }
