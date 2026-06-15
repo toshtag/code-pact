@@ -78,6 +78,23 @@ export function archiveBundlesDir(cwd: string): string {
   return join(cwd, ...ARCHIVE_BUNDLES_DIR_SEGMENTS);
 }
 
+/** The archive decisions directory, for enumeration by the bundle writer. */
+export function archiveDecisionsDir(cwd: string): string {
+  return join(cwd, ...ARCHIVE_DECISIONS_DIR_SEGMENTS);
+}
+
+/**
+ * Path of one bundle file: `bundles/<kind>-<idsHash16>.json`. CONTENT-ADDRESSED by
+ * the member-id-SET hash (`member_ids_sha256`, first 16 hex), so the same id set of
+ * the same kind always maps to the same file (idempotent re-write), and a different
+ * id set is a different file (bundles of one kind can coexist — the multi-bundle
+ * model the cross-bundle uniqueness rule already covers). `idsHash16` is hex from a
+ * trusted sha256; never an external path component.
+ */
+export function archiveBundlePath(cwd: string, kind: string, memberIdsSha256: string): string {
+  return join(cwd, ...ARCHIVE_BUNDLES_DIR_SEGMENTS, `${kind}-${memberIdsSha256.slice(0, 16)}.json`);
+}
+
 /**
  * Normalize a raw decision ref to its canonical form, or null to reject it.
  * Reuses the PRUNED.md normalizer on purpose: identical confinement semantics
