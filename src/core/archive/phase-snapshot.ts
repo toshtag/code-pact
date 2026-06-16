@@ -53,9 +53,10 @@ import { phaseSnapshotPath, sha256Hex } from "./paths.ts";
 //     `resolveWithinProject`, so a symlink escaping the project can never feed
 //     a control record.
 //   - The apply step passes the plan's observed destination state to
-//     `atomicWriteText` as `ExpectedState` (absent for write, the exact raw
-//     bytes for refresh) — a record created/changed by a concurrent writer
-//     between plan and rename is refused, not overwritten.
+//     `atomicWriteText` as `ExpectedState` — `absent` for a fresh write OR a
+//     bundle-only refresh that MATERIALIZES a new loose; the exact existing raw
+//     bytes for a refresh over a present loose — so a record created/changed by a
+//     concurrent writer between plan and rename is refused, not overwritten.
 // ---------------------------------------------------------------------------
 
 export type PhaseSnapshotBlock =

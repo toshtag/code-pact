@@ -41,8 +41,10 @@ import { resolveArchiveRecordBytes } from "./resolve-archive-record.ts";
 //   - The live .md is read through `resolveWithinProject` (symlink-escape
 //     guard); a record is never built from content outside the project.
 //   - The apply step hands the plan's observed destination state to
-//     `atomicWriteText` as ExpectedState (absent / exact raw bytes), so a
-//     concurrent writer is refused, not overwritten.
+//     `atomicWriteText` as ExpectedState — `absent` for a fresh write OR a
+//     bundle-only refresh that MATERIALIZES a new loose; the exact existing raw
+//     bytes for a refresh over a present loose — so a concurrent writer is
+//     refused, not overwritten.
 // ---------------------------------------------------------------------------
 
 export type DecisionRecordBlock =
@@ -361,8 +363,9 @@ export function serializeDecisionRecord(record: DecisionStateRecord): string {
 
 /**
  * Apply a `write` / `refresh` plan under the plan's ExpectedState guard
- * (absent for write, exact raw bytes for refresh) — a concurrent writer is
- * refused, not overwritten. Non-mutating plans pass through unchanged.
+ * (`absent` for a write OR a bundle-only refresh that materializes a new loose;
+ * the exact existing raw bytes for a refresh over a present loose) — a concurrent
+ * writer is refused, not overwritten. Non-mutating plans pass through unchanged.
  */
 export async function applyDecisionRecordPlan(
   plan: DecisionRecordPlan,

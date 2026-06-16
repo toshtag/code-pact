@@ -3,7 +3,11 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { ProgressEvent } from "../../../../src/core/schemas/progress-event.ts";
-import { writePhaseSnapshot, planPhaseSnapshot } from "../../../../src/core/archive/phase-snapshot.ts";
+import {
+  writePhaseSnapshot,
+  planPhaseSnapshot,
+  applyPhaseSnapshotPlan,
+} from "../../../../src/core/archive/phase-snapshot.ts";
 import { writeDecisionRecord, planDecisionRecord } from "../../../../src/core/archive/decision-record.ts";
 import { planEventPack } from "../../../../src/core/archive/event-pack.ts";
 import { runDecisionRetire } from "../../../../src/commands/decision-retire.ts";
@@ -212,6 +216,27 @@ describe("phase_snapshot refresh-after-compaction MATERIALIZES, then compaction 
     // The bundle's authority for P1 is now the fresher (refreshed) record; store still loads.
     expect(() => loadArchiveBundles(cwd)).not.toThrow();
     expect(loadArchiveBundles(cwd).index.get("phase_snapshot")?.get("P1")?.bytes).toBe(materialized);
+  });
+
+  it("the materialize is FAIL-CLOSED: a loose appearing between plan and apply (ExpectedState absent) refuses, never clobbers", async () => {
+    const oldYaml = P1_DONE;
+    await scaffoldP1();
+    await compactArchive(cwd, "phase_snapshot"); // bundle-only now (loose deleted)
+    const newYaml = oldYaml.replace("Build the base", "Build the base anew");
+    await writeFile(join(cwd, "design", "phases", "P1-x.yaml"), newYaml, "utf8");
+    const plan = await planPhaseSnapshot(cwd, "P1", {
+      now: NOW,
+      refresh: { expected_old_source_sha256: sha256Hex(oldYaml), expected_new_source_sha256: sha256Hex(newYaml) },
+    });
+    expect(plan.kind).toBe("refresh");
+    if (plan.kind !== "refresh") return;
+    expect(plan.existing_raw).toBeNull(); // bundle-only → materialize (ExpectedState absent)
+
+    // A concurrent writer creates a loose at the path AFTER the plan observed it absent.
+    await writeFile(phaseSnapshotPath(cwd, "P1"), "concurrent\n", "utf8");
+    // The materialize refuses rather than clobbering the concurrent loose.
+    await expect(applyPhaseSnapshotPlan(plan)).rejects.toThrow();
+    expect(await readFile(phaseSnapshotPath(cwd, "P1"), "utf8")).toBe("concurrent\n"); // untouched
   });
 });
 
