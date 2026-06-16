@@ -59,8 +59,7 @@ export type DecisionRecordBlock =
       expected_new_source_sha256: string;
       current_source_sha256: string;
     }
-  | { kind: "live_file_missing"; canonical_ref: string }
-  | { kind: "compacted_record_refresh_unsupported"; detail: string };
+  | { kind: "live_file_missing"; canonical_ref: string };
 
 export type DecisionRecordPlan =
   | { kind: "write"; path: string; record: DecisionStateRecord }
@@ -70,8 +69,11 @@ export type DecisionRecordPlan =
       record: DecisionStateRecord;
       existing_source_sha256: string;
       current_source_sha256: string;
-      /** Exact raw bytes of the record being replaced — the apply-time ExpectedState. */
-      existing_raw: string;
+      /** Exact raw bytes of the loose record being replaced — the apply-time ExpectedState.
+       *  `null` when the existing record is BUNDLE-ONLY (its loose copy was compacted away):
+       *  the refresh then MATERIALIZES a fresh loose (ExpectedState `absent`), which diverges
+       *  from the bundle member until the next compaction adopts it (supersession). */
+      existing_raw: string | null;
     }
   | { kind: "noop_same_source"; path: string }
   | { kind: "noop_record_authoritative"; path: string }
@@ -285,14 +287,13 @@ export async function planDecisionRecord(
         ],
       };
     }
-    if (!existing.looseFilePresent) return refuseCompactedRefresh(path);
     return {
       kind: "refresh",
       path,
       record,
       existing_source_sha256: existing.record.source_sha256,
       current_source_sha256: currentSha,
-      existing_raw: existing.raw,
+      existing_raw: existing.looseFilePresent ? existing.raw : null,
     };
   }
 
@@ -338,34 +339,13 @@ export async function planDecisionRecord(
       ],
     };
   }
-  if (!existing.looseFilePresent) return refuseCompactedRefresh(path);
   return {
     kind: "refresh",
     path,
     record,
     existing_source_sha256: existing.record.source_sha256,
     current_source_sha256: currentSha,
-    existing_raw: existing.raw,
-  };
-}
-
-/** Every explicit-refresh path funnels through this when the existing record is
- *  bundle-only (compacted): refuse rather than materialize a fresh loose, which would
- *  strand a stale bundle member + a diverging loose the current compactor cannot re-fold
- *  (id already bundled → not re-bundled; byte-diff → delete gate skips it as
- *  bundle_stale). Fail closed until Layer 4 adds bundle-member supersession/rebundling;
- *  the bundle stays the single authority for now. */
-function refuseCompactedRefresh(path: string): DecisionRecordPlan {
-  return {
-    kind: "ineligible",
-    path,
-    blocks: [
-      {
-        kind: "compacted_record_refresh_unsupported",
-        detail:
-          "the existing record is bundle-only (compacted); refreshing a compacted decision record is not yet supported (would strand a stale bundle member + a diverging loose). Restore/uncompact the loose record first.",
-      },
-    ],
+    existing_raw: existing.looseFilePresent ? existing.raw : null,
   };
 }
 
@@ -388,8 +368,10 @@ export async function applyDecisionRecordPlan(
   plan: DecisionRecordPlan,
 ): Promise<DecisionRecordWriteOutcome> {
   if (plan.kind === "write" || plan.kind === "refresh") {
+    // `absent` for a fresh write OR a bundle-only refresh that MATERIALIZES a new loose
+    // (existing_raw null); the exact existing loose bytes for a refresh over a present loose.
     const expected: ExpectedState =
-      plan.kind === "write"
+      plan.kind === "write" || plan.existing_raw === null
         ? { kind: "absent" }
         : { kind: "present", content: plan.existing_raw };
     await atomicWriteText(plan.path, serializeDecisionRecord(plan.record), expected);
