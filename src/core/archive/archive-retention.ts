@@ -1,5 +1,5 @@
 import { readFile, readdir } from "node:fs/promises";
-import { basename } from "node:path";
+import { basename, join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { Phase } from "../schemas/phase.ts";
 import { PhaseSnapshot } from "../schemas/phase-snapshot.ts";
@@ -8,7 +8,8 @@ import { loadRoadmap } from "../plan/roadmap.ts";
 import { resolveWithinProject } from "../path-safety.ts";
 import { loadArchiveBundles } from "./archive-bundle-loader.ts";
 import { enumerateArchivedPhaseSnapshots, resolveUnreferencedSnapshot } from "./load-phase-snapshot.ts";
-import { decisionRecordStem } from "./archive-bundle-binding.ts";
+import { bindBundleMember, decisionRecordStem } from "./archive-bundle-binding.ts";
+import { validateEventPackTier1 } from "./event-pack-reader.ts";
 import { archiveDecisionsDir, archiveEventPacksDir, archivePhasesDir, normalizeDecisionRef, sha256Hex } from "./paths.ts";
 import type { ArchiveBundleKind } from "../schemas/archive-bundle.ts";
 
@@ -33,6 +34,8 @@ import type { ArchiveBundleKind } from "../schemas/archive-bundle.ts";
 // ---------------------------------------------------------------------------
 
 export const DEFAULT_KEEP_LATEST = 20;
+
+const ARCHIVE_EVENT_PACK_LABEL = ".code-pact/state/archive/event-packs";
 
 export type RetentionReferenceType = "roadmap_phase" | "task_depends_on" | "decision_ref" | "acceptance_ref";
 export type RetentionReference = { type: RetentionReferenceType; from: string; to: string };
@@ -423,36 +426,63 @@ async function planEventPackRetention(
   phaseVerdict: PhaseVerdict,
 ): Promise<RetentionPlan> {
   const items: RetentionItem[] = [];
-  const srcOf = (id: string): "loose" | "bundle" | "both" => (source.ok ? source.source.get(id) ?? "loose" : "loose");
-
-  // Enumerate pack ids = loose ∪ bundle (the stem is the phase id). A store read failure
-  // is fail-closed: a single blocked diagnostic, no pack dropped on a partial view.
-  let packIds: Set<string>;
+  // A partial store/source view is fail-closed: a single blocked diagnostic, no pack dropped.
+  if (!source.ok) {
+    return partition("event_pack", [
+      { kind: "event_pack", id: "(store)", snapshotted_at: null, source: "loose", action: "blocked", reason: "reference_scan_failed" },
+    ]);
+  }
+  let bundleMembers: ReadonlyMap<string, { sha256: string; bytes: string }>;
   try {
-    const looseNames = await readdir(archiveEventPacksDir(cwd)).catch((err) => {
-      if ((err as NodeJS.ErrnoException).code === "ENOENT") return [] as string[];
-      throw err;
-    });
-    const bundleIds = loadArchiveBundles(cwd).index.get("event_pack")?.keys() ?? [];
-    packIds = new Set([...looseNames.filter((n) => n.endsWith(".json")).map((n) => basename(n, ".json")), ...bundleIds]);
+    bundleMembers = loadArchiveBundles(cwd).index.get("event_pack") ?? new Map();
   } catch {
     return partition("event_pack", [
       { kind: "event_pack", id: "(store)", snapshotted_at: null, source: "loose", action: "blocked", reason: "invalid" },
     ]);
   }
 
-  for (const id of packIds) {
+  for (const id of [...source.source.keys()].sort()) {
+    const src = source.source.get(id)!;
+    const base = { kind: "event_pack" as const, id, snapshotted_at: null, source: src };
+    // AUTHORITY-validate the pack bytes (loose-wins) BEFORE trusting the parent verdict — a
+    // schema/Tier-1-invalid OR MISFILED pack (filename id ≠ its body phase_id) must NEVER be
+    // dropped just because its FILENAME's phase snapshot is being dropped (it may be another
+    // phase's pack). validateEventPackTier1 enforces phase_id === fileStem + per-entry
+    // bijection + order + event_ids_sha256; a bundle-only member also self-binds (canonical).
+    let bytes: string | null = null;
+    try {
+      bytes =
+        src === "bundle"
+          ? bundleMembers.get(id)?.bytes ?? null
+          : await readFile(join(archiveEventPacksDir(cwd), `${id}.json`), "utf8");
+    } catch {
+      bytes = null;
+    }
+    let valid = false;
+    if (bytes !== null) {
+      try {
+        validateEventPackTier1(id, bytes, ARCHIVE_EVENT_PACK_LABEL);
+        if (src === "bundle") {
+          const m = bundleMembers.get(id)!;
+          bindBundleMember("event_pack", { id, sha256: m.sha256, bytes: m.bytes }, ARCHIVE_EVENT_PACK_LABEL);
+        }
+        valid = true;
+      } catch {
+        valid = false;
+      }
+    }
+    if (!valid) {
+      items.push({ ...base, action: "blocked", reason: "invalid" });
+      continue;
+    }
+    // A VALID pack drops ONLY with its phase snapshot. An orphan (no parent snapshot) is an
+    // anomaly → kept (blocked invalid), never dropped on a parent we cannot locate.
     const parent = phaseVerdict.get(id);
-    const base = { kind: "event_pack" as const, id, snapshotted_at: null, source: srcOf(id) };
     if (parent === "would_drop") {
-      // Drops as a dependent of its phase snapshot (which aged out of keep-latest).
       items.push({ ...base, action: "would_drop", reason: "older_than_keep_latest" });
     } else if (parent === undefined) {
-      // ORPHAN: no phase snapshot for this pack id — an anomaly, NOT "dependent on a kept
-      // snapshot". Keep it (never drop a pack whose parent we cannot locate).
       items.push({ ...base, action: "blocked", reason: "invalid" });
     } else {
-      // Parent kept (would_keep) or blocked → the pack is kept with it.
       items.push({ ...base, action: "blocked", reason: "dependent_on_kept_phase_snapshot" });
     }
   }

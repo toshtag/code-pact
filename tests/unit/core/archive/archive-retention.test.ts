@@ -5,7 +5,11 @@ import { tmpdir } from "node:os";
 import { writePhaseSnapshot } from "../../../../src/core/archive/phase-snapshot.ts";
 import { writeDecisionRecord } from "../../../../src/core/archive/decision-record.ts";
 import { planArchiveRetention, resolveKeepLatest, type RetentionPlan } from "../../../../src/core/archive/archive-retention.ts";
-import { phaseSnapshotPath, decisionRecordPath } from "../../../../src/core/archive/paths.ts";
+import { phaseSnapshotPath, decisionRecordPath, archiveBundlesDir, sha256Hex } from "../../../../src/core/archive/paths.ts";
+import { computeMemberIdsSha256 } from "../../../../src/core/archive/archive-bundle-reader.ts";
+import { ARCHIVE_BUNDLE_SCHEMA_VERSION } from "../../../../src/core/schemas/archive-bundle.ts";
+import { buildValidEventPack, writeEventPackFile } from "../../../helpers/event-pack-fixture.ts";
+import { ProgressLog } from "../../../../src/core/schemas/progress-event.ts";
 import { seedDurableEvents } from "../../../helpers/seed-events.ts";
 
 // Conservative keep-latest-N retention planner (dry-run authority). The gate: a record
@@ -225,6 +229,66 @@ describe("planArchiveRetention — the reference gate is fail-CLOSED", () => {
       "reference_scan_failed",
       "reference_scan_failed",
     ]);
+  });
+});
+
+describe("planArchiveRetention — event_pack AUTHORITY (a pack is validated, not just id-followed)", () => {
+  const eventsFor = (id: string) =>
+    ProgressLog.parse({
+      events: [{ task_id: `${id}-T1`, status: "done", at: "2026-06-01T00:00:00.000Z", actor: "agent" }],
+    }).events;
+
+  it("a MISFILED pack (filename P1, body phase_id P2) is NOT dropped with P1 → blocked invalid", async () => {
+    await archivePhases([
+      { id: "P1", at: "2026-01-01T00:00:00.000Z" },
+      { id: "P2", at: "2026-02-01T00:00:00.000Z" },
+    ]);
+    const pack = await buildValidEventPack(cwd, "P1", eventsFor("P1"));
+    await writeEventPackFile(cwd, "P1", { ...pack, phase_id: "P2" }); // file P1.json, body says P2
+    await setRoadmap([]); // both unreferenced → keepLatest 1 makes P1 the would_drop phase
+    const plan = planFor(await planArchiveRetention(cwd, { keepLatest: 1 }), "event_pack");
+    expect(plan.would_drop).toEqual([]);
+    expect(plan.blocked.find((i) => i.id === "P1")!.reason).toBe("invalid");
+  });
+
+  it("a pack with a broken event_ids_sha256 is NOT dropped with its phase → blocked invalid", async () => {
+    await archivePhases([
+      { id: "P1", at: "2026-01-01T00:00:00.000Z" },
+      { id: "P2", at: "2026-02-01T00:00:00.000Z" },
+    ]);
+    const pack = await buildValidEventPack(cwd, "P1", eventsFor("P1"));
+    await writeEventPackFile(cwd, "P1", { ...pack, event_ids_sha256: "0".repeat(64) }); // tampered checksum
+    await setRoadmap([]);
+    const plan = planFor(await planArchiveRetention(cwd, { keepLatest: 1 }), "event_pack");
+    expect(plan.would_drop).toEqual([]);
+    expect(plan.blocked.find((i) => i.id === "P1")!.reason).toBe("invalid");
+  });
+
+  it("a bundle-only event_pack member that is Tier-1-invalid for the kind → blocked invalid, not dropped", async () => {
+    await archivePhases([
+      { id: "P1", at: "2026-01-01T00:00:00.000Z" },
+      { id: "P2", at: "2026-02-01T00:00:00.000Z" },
+    ]);
+    // A valid bundle WRAPPER (correct sha/order/member_ids_sha256) whose member BYTES are an
+    // event_pack misfiled to P2 — loadArchiveBundles Tier-1 passes, but the pack is invalid.
+    const bad = { ...(await buildValidEventPack(cwd, "P1", eventsFor("P1"))), phase_id: "P2" };
+    const bytes = JSON.stringify(bad, null, 2) + "\n";
+    const dir = archiveBundlesDir(cwd);
+    await mkdir(dir, { recursive: true });
+    await writeFile(
+      join(dir, "ep.json"),
+      JSON.stringify({
+        schema_version: ARCHIVE_BUNDLE_SCHEMA_VERSION,
+        kind: "event_pack",
+        member_ids_sha256: computeMemberIdsSha256(["P1"]),
+        members: [{ id: "P1", sha256: sha256Hex(bytes), bytes }],
+      }),
+      "utf8",
+    );
+    await setRoadmap([]);
+    const plan = planFor(await planArchiveRetention(cwd, { keepLatest: 1 }), "event_pack");
+    expect(plan.would_drop).toEqual([]);
+    expect(plan.blocked.find((i) => i.id === "P1")!.reason).toBe("invalid");
   });
 });
 
