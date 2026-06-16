@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { writePhaseSnapshot } from "../../../../src/core/archive/phase-snapshot.ts";
 import { writeDecisionRecord } from "../../../../src/core/archive/decision-record.ts";
 import { planArchiveRetention, resolveKeepLatest, type RetentionPlan } from "../../../../src/core/archive/archive-retention.ts";
-import { phaseSnapshotPath } from "../../../../src/core/archive/paths.ts";
+import { phaseSnapshotPath, decisionRecordPath } from "../../../../src/core/archive/paths.ts";
 import { seedDurableEvents } from "../../../helpers/seed-events.ts";
 
 // Conservative keep-latest-N retention planner (dry-run authority). The gate: a record
@@ -252,6 +252,62 @@ describe("planArchiveRetention — event_pack is DEPENDENT on its phase snapshot
     expect(pack.would_drop.map((i) => i.id)).toEqual(["P1"]);
     expect(pack.blocked.map((i) => i.id)).toContain("P2");
     expect(pack.blocked.find((i) => i.id === "P2")!.reason).toBe("dependent_on_kept_phase_snapshot");
+  });
+});
+
+describe("planArchiveRetention — archive AUTHORITY validation (schema-valid ≠ trustworthy)", () => {
+  const ADR = `# RFC\n\n**Status:** accepted (P9, 2026-06)\n\n## Summary\n\nX.\n`;
+  const tamper = async (path: string, mut: (o: Record<string, unknown>) => void): Promise<void> => {
+    const o = JSON.parse(await readFile(path, "utf8"));
+    mut(o);
+    await writeFile(path, JSON.stringify(o, null, 2) + "\n", "utf8");
+  };
+
+  it("phase snapshot whose body phase_id != its filename → blocked invalid, NEVER dropped", async () => {
+    await archivePhases([{ id: "P1", at: "2026-01-01T00:00:00.000Z" }]);
+    await setRoadmap([]);
+    await tamper(phaseSnapshotPath(cwd, "P1"), (o) => (o.phase_id = "PZ")); // misfiled: P1.json claims to be PZ
+    const plan = planFor(await planArchiveRetention(cwd, { keepLatest: 5 }), "phase_snapshot");
+    expect(plan.would_drop).toEqual([]);
+    expect(plan.blocked.map((i) => [i.id, i.reason])).toEqual([["P1", "invalid"]]);
+  });
+
+  it("phase snapshot whose path_sha256 does not cover its original_path → blocked invalid", async () => {
+    await archivePhases([{ id: "P1", at: "2026-01-01T00:00:00.000Z" }]);
+    await setRoadmap([]);
+    await tamper(phaseSnapshotPath(cwd, "P1"), (o) => (o.path_sha256 = "0".repeat(64)));
+    const plan = planFor(await planArchiveRetention(cwd, { keepLatest: 5 }), "phase_snapshot");
+    expect(plan.would_drop).toEqual([]);
+    expect(plan.blocked.find((i) => i.id === "P1")!.reason).toBe("invalid");
+  });
+
+  it("decision record whose canonical_ref disagrees with its filename stem → blocked invalid", async () => {
+    const DEC = "design/decisions/foo-rfc.md";
+    await writeFile(join(cwd, DEC), ADR, "utf8");
+    await writeDecisionRecord(cwd, DEC, { now: new Date("2026-01-01T00:00:00.000Z") });
+    await setRoadmap([]);
+    await tamper(decisionRecordPath(cwd, DEC), (o) => {
+      o.canonical_ref = "design/decisions/other-rfc.md"; // id no longer matches stem(canonical_ref)
+      o.original_path = "design/decisions/other-rfc.md";
+    });
+    const plan = planFor(await planArchiveRetention(cwd, { keepLatest: 5 }), "decision_record");
+    expect(plan.would_drop).toEqual([]);
+    expect(plan.blocked.some((i) => i.reason === "invalid")).toBe(true);
+  });
+
+  it("decision record whose path_sha256 mismatches its canonical_ref → blocked invalid", async () => {
+    const DEC = "design/decisions/foo-rfc.md";
+    await writeFile(join(cwd, DEC), ADR, "utf8");
+    await writeDecisionRecord(cwd, DEC, { now: new Date("2026-01-01T00:00:00.000Z") });
+    await setRoadmap([]);
+    await tamper(decisionRecordPath(cwd, DEC), (o) => (o.path_sha256 = "0".repeat(64)));
+    const plan = planFor(await planArchiveRetention(cwd, { keepLatest: 5 }), "decision_record");
+    expect(plan.would_drop).toEqual([]);
+    expect(plan.blocked.find((i) => i.reason === "invalid")).toBeDefined();
+  });
+
+  it("the core planArchiveRetention rejects keepLatest < 1 (the delete authority can't bypass the bound)", async () => {
+    await expect(planArchiveRetention(cwd, { keepLatest: 0 })).rejects.toThrow(/≥ 1/);
   });
 });
 

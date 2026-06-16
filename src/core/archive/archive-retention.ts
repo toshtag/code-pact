@@ -7,8 +7,9 @@ import { DecisionStateRecord } from "../schemas/decision-state-record.ts";
 import { loadRoadmap } from "../plan/roadmap.ts";
 import { resolveWithinProject } from "../path-safety.ts";
 import { loadArchiveBundles } from "./archive-bundle-loader.ts";
-import { enumerateArchivedPhaseSnapshots } from "./load-phase-snapshot.ts";
-import { archiveDecisionsDir, archiveEventPacksDir, archivePhasesDir, normalizeDecisionRef } from "./paths.ts";
+import { enumerateArchivedPhaseSnapshots, resolveUnreferencedSnapshot } from "./load-phase-snapshot.ts";
+import { decisionRecordStem } from "./archive-bundle-binding.ts";
+import { archiveDecisionsDir, archiveEventPacksDir, archivePhasesDir, normalizeDecisionRef, sha256Hex } from "./paths.ts";
 import type { ArchiveBundleKind } from "../schemas/archive-bundle.ts";
 
 // ---------------------------------------------------------------------------
@@ -75,18 +76,24 @@ export class RetentionConfigError extends Error {
   }
 }
 
-/** Validate keep-latest N: an integer ≥ 1 (0 = "drop all unreferenced" needs a future
- *  explicit opt-in; a non-integer / negative is a config error). */
-export function resolveKeepLatest(raw: string | undefined): number {
-  if (raw === undefined) return DEFAULT_KEEP_LATEST;
-  if (!/^\d+$/.test(raw)) throw new RetentionConfigError(`--keep-latest must be a positive integer (≥ 1), got "${raw}"`);
-  const n = Number(raw);
-  if (n < 1) {
+/** Assert keep-latest N is an integer ≥ 1 (0 = "drop all unreferenced" needs a future
+ *  explicit opt-in). The SINGLE validator both the CLI and the core planner go through, so
+ *  a direct `planArchiveRetention(cwd, { keepLatest: 0 })` (the future delete authority)
+ *  cannot bypass the bound. */
+export function assertKeepLatest(n: number): number {
+  if (!Number.isInteger(n) || n < 1) {
     throw new RetentionConfigError(
-      "--keep-latest must be ≥ 1 (dropping ALL unreferenced records is not yet supported)",
+      `keep-latest must be a positive integer (≥ 1), got ${n} (dropping ALL unreferenced records is not yet supported)`,
     );
   }
   return n;
+}
+
+/** Parse + validate the CLI `--keep-latest` value (a non-negative integer string ≥ 1). */
+export function resolveKeepLatest(raw: string | undefined): number {
+  if (raw === undefined) return DEFAULT_KEEP_LATEST;
+  if (!/^\d+$/.test(raw)) throw new RetentionConfigError(`--keep-latest must be a positive integer (≥ 1), got "${raw}"`);
+  return assertKeepLatest(Number(raw));
 }
 
 // --- the live reference graph (the gate's authority) -------------------------
@@ -250,17 +257,22 @@ async function planPhaseRetention(
     items.push({ kind: "phase_snapshot", id: "(store)", snapshotted_at: null, source: "loose", action: "blocked", reason: "reference_scan_failed" });
   }
 
-  // Collect valid snapshots; build taskId → owning phase ids for ambiguity detection.
+  // Collect AUTHORITY-valid snapshots; build taskId → owning phase ids for ambiguity. A
+  // schema-valid record is NOT enough for a delete authority — resolveUnreferencedSnapshot
+  // re-checks archive identity (phase_id === filename, path_sha256 covers original_path,
+  // terminal status). An authority-invalid record is `blocked: invalid`, NEVER ranked/dropped
+  // (a misfiled `P1.json` whose body is P2 must not be droppable just because the roadmap
+  // lists P2). Identity is checked BEFORE any roadmap/dependency classification.
   const valid: { phaseId: string; snapshot: PhaseSnapshot }[] = [];
   const taskToPhases = new Map<string, string[]>();
   for (const { fileStem, res } of entries) {
-    if (res.kind === "valid") {
-      valid.push({ phaseId: fileStem, snapshot: res.snapshot });
-      for (const t of res.snapshot.tasks) pushTo(taskToPhases, t.id, fileStem);
-    } else if (res.kind === "invalid") {
+    const resolved = resolveUnreferencedSnapshot(fileStem, res);
+    if (resolved.kind === "tolerated") {
+      valid.push({ phaseId: fileStem, snapshot: resolved.snapshot });
+      for (const t of resolved.snapshot.tasks) pushTo(taskToPhases, t.id, fileStem);
+    } else {
       items.push({ kind: "phase_snapshot", id: fileStem, snapshotted_at: null, source: srcOf(fileStem), action: "blocked", reason: "invalid" });
     }
-    // res.kind === "absent" cannot occur from enumeration (only present entries).
   }
   const ambiguous = new Set<string>();
   for (const [, phases] of taskToPhases) if (phases.length > 1) for (const ph of phases) ambiguous.add(ph);
@@ -329,11 +341,26 @@ async function enumerateArchivedDecisions(
   const parseInto = (id: string, bytes: string): void => {
     if (seen.has(id)) return;
     seen.add(id);
+    let record: DecisionStateRecord;
     try {
-      records.push({ id, record: DecisionStateRecord.parse(JSON.parse(bytes)) });
+      record = DecisionStateRecord.parse(JSON.parse(bytes));
     } catch {
       invalid.push(id);
+      return;
     }
+    // Authority identity (NOT just schema): the record must be FOR this file id, and its
+    // path_sha256 must cover its own canonical_ref. A schema-valid record whose id /
+    // canonical_ref / path_sha256 disagree is a misfiled/forged artifact → invalid, never
+    // ranked/dropped.
+    if (
+      id !== decisionRecordStem(record.canonical_ref) ||
+      record.original_path !== record.canonical_ref ||
+      record.path_sha256 !== sha256Hex(record.canonical_ref)
+    ) {
+      invalid.push(id);
+      return;
+    }
+    records.push({ id, record });
   };
   for (const name of looseNames.sort()) {
     const id = basename(name, ".json");
@@ -445,7 +472,8 @@ export async function planArchiveRetention(
   cwd: string,
   opts: { keepLatest?: number } = {},
 ): Promise<RetentionPlan[]> {
-  const keepLatest = opts.keepLatest ?? DEFAULT_KEEP_LATEST;
+  // Validate in the CORE too (not only the CLI) — this planner is the delete authority.
+  const keepLatest = assertKeepLatest(opts.keepLatest ?? DEFAULT_KEEP_LATEST);
   const live = await buildLiveGraph(cwd);
   const phaseSource = await buildSourceMap(cwd, "phase_snapshot");
   const decisionSource = await buildSourceMap(cwd, "decision_record");
