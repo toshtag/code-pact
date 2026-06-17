@@ -69,6 +69,11 @@ export function newSnapshotRawCache(): SnapshotRawCache {
  * is fail-closed strict (binding a referenced pack): a bundle-integrity throw →
  * `invalid`. ENOENT → `absent`; an unsafe id / unreadable loose record → `invalid`.
  */
+// NOTE: this binder does NOT apply the delete-intent `pendingAbsentIds` filter, on
+// purpose: it only binds packs that came through `readEventPackFiles[Lenient]`, which
+// already drop a pending pack — and the journal names a pair WHOLE (pack P pending ⟺
+// snapshot P pending), so a surviving pack never binds to a hidden snapshot. A future
+// caller that binds a pack sourced OUTSIDE the filtered enumeration must filter first.
 async function loadSnapshotRaw(
   cwd: string,
   phaseId: string,

@@ -134,7 +134,12 @@ export async function writeDeleteIntent(cwd: string, pairs: DeleteIntentPair[]):
     await unlink(tmp).catch(() => {});
     throw new DeleteIntentDurabilityError("failed", `delete-intent temp write/fsync failed: ${(err as Error).message}`);
   }
-  await fh.close();
+  try {
+    await fh.close(); // a close failure after fsync is still a durability fault (the data may not be flushed)
+  } catch (err) {
+    await unlink(tmp).catch(() => {});
+    throw new DeleteIntentDurabilityError("failed", `delete-intent temp close failed: ${(err as Error).message}`);
+  }
   try {
     // Never clobber an existing journal (an un-recovered prior commit). Under the
     // write lock there is no concurrent creator, so this check is race-free in
@@ -195,6 +200,12 @@ export async function readDeleteIntent(cwd: string): Promise<DeleteIntentRead> {
   } catch (err) {
     return { kind: "corrupt", cause: "parse_error", detail: `delete-intent journal is not a valid intent: ${(err as Error).message}` };
   }
+  // The journal is a recovery AUTHORITY: parse-able is not enough. Require the exact
+  // CANONICAL bytes the writer emits — a hand-edited / non-canonical journal (extra
+  // whitespace, reordered keys) is not a form the writer produces, so don't trust it.
+  if (raw !== serializeDeleteIntent(intent)) {
+    return { kind: "corrupt", cause: "parse_error", detail: "delete-intent journal is not the writer's canonical bytes" };
+  }
   // A duplicate phase_id is schema-valid but a malformed recovery authority (the
   // writer never emits one). Treat it as corrupt — fail-closed rather than guess.
   const ids = intent.pairs.map((p) => p.phase_id);
@@ -202,6 +213,21 @@ export async function readDeleteIntent(cwd: string): Promise<DeleteIntentRead> {
     return { kind: "corrupt", cause: "parse_error", detail: "delete-intent journal names a phase_id more than once" };
   }
   return { kind: "present", intent };
+}
+
+/** The set of phase_ids a PENDING delete-intent journal names — each is a
+ *  phase_snapshot ↔ event_pack pair mid-deletion that READERS must treat as
+ *  logically absent (until recovery completes it), so `validate` / `plan lint` /
+ *  `doctor` never observe the half-deleted intermediate. An absent journal → empty
+ *  set. A CORRUPT journal → empty set: readers cannot tell which records are
+ *  pending, so they hide none — the corruption surfaces by recovery being blocked
+ *  on the next mutation, never silently honoured as a reader filter. READ-ONLY: a
+ *  reader never mutates or clears the journal (the journal is the recovery
+ *  authority; only `recoverPendingDeletes`, under the write lock, may complete it). */
+export async function readPendingDeleteIds(cwd: string): Promise<ReadonlySet<string>> {
+  const read = await readDeleteIntent(cwd);
+  if (read.kind !== "present") return new Set();
+  return new Set(read.intent.pairs.map((p) => p.phase_id));
 }
 
 /** A corrupt delete-intent journal blocks recovery (and therefore the mutation it

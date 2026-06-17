@@ -11,6 +11,7 @@ import {
   type RetentionPlan,
 } from "../../../../src/core/archive/archive-retention.ts";
 import { writeArchiveBundle } from "../../../../src/core/archive/archive-bundle-writer.ts";
+import { writeDeleteIntent } from "../../../../src/core/archive/delete-intent-journal.ts";
 import { phaseSnapshotPath, decisionRecordPath, eventPackPath, archiveBundlesDir, archiveEventPacksDir, sha256Hex } from "../../../../src/core/archive/paths.ts";
 import { computeMemberIdsSha256 } from "../../../../src/core/archive/archive-bundle-reader.ts";
 import { decisionRecordStem } from "../../../../src/core/archive/archive-bundle-binding.ts";
@@ -449,6 +450,22 @@ describe("planArchiveRetention — archive AUTHORITY validation (schema-valid �
 
   it("the core planArchiveRetention rejects keepLatest < 1 (the delete authority can't bypass the bound)", async () => {
     await expect(planArchiveRetention(cwd, { keepLatest: 0 })).rejects.toThrow(/≥ 1/);
+  });
+});
+
+describe("planArchiveRetention — a pending delete-intent hides the pair from the planner", () => {
+  it("a phase named in a pending delete-intent is absent from the plan (dry-run consistency)", async () => {
+    await archivePhases([
+      { id: "P1", at: "2026-01-01T00:00:00.000Z" },
+      { id: "P2", at: "2026-02-01T00:00:00.000Z" },
+    ]);
+    await setRoadmap([]); // both unreferenced
+    // P1 is mid-deletion (a pending intent). The planner must treat it as already gone.
+    await writeDeleteIntent(cwd, [{ phase_id: "P1", phase_sha256: sha256Hex("x"), pack_sha256: sha256Hex("y") }]);
+    const plan = planFor(await planArchiveRetention(cwd, { keepLatest: 5 }), "phase_snapshot");
+    const ids = [...plan.would_keep, ...plan.would_drop, ...plan.blocked].map((i) => i.id);
+    expect(ids).not.toContain("P1"); // logically absent — not re-planned for drop
+    expect(ids).toContain("P2");
   });
 });
 

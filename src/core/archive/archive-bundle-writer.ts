@@ -14,6 +14,7 @@ import {
   sha256Hex,
 } from "./paths.ts";
 import { computeMemberIdsSha256, validateArchiveBundleTier1 } from "./archive-bundle-reader.ts";
+import { readPendingDeleteIds } from "./delete-intent-journal.ts";
 import { bindBundleMember } from "./archive-bundle-binding.ts";
 import { validateEventPackTier1 } from "./event-pack-reader.ts";
 import { buildBundleMemberIndex, reconcileLooseAndBundle } from "./archive-bundle-index.ts";
@@ -377,7 +378,16 @@ export function verifyBundleReadback(
 }
 
 /** Enumerate every loose record of `kind` from its archive directory as a
- *  {@link LooseMember} (file stem → member id, raw bytes). ENOENT dir → none. */
+ *  {@link LooseMember} (file stem → member id, raw bytes). ENOENT dir → none.
+ *
+ *  A phase_snapshot / event_pack named in a pending delete-intent is mid-deletion
+ *  and LOGICALLY ABSENT — it is NOT enumerated, so compaction never folds a record
+ *  that retention is deleting into a bundle (which would resurrect a
+ *  logically-deleted record as a bundle member after the loose copy is unlinked).
+ *  This is loose-side only and is COMPLETE because the journal only ever names
+ *  loose-only pairs (the retention wiring commits a pair only when both members are
+ *  `source: "loose"`), so a pending id has no bundle copy to exclude — and excluding
+ *  a bundle member here would be a wrongful destructive removal, not a hide. */
 export async function enumerateLooseMembers(
   cwd: string,
   kind: ArchiveBundleKind,
@@ -397,13 +407,16 @@ export async function enumerateLooseMembers(
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
     throw err;
   }
+  const pendingAbsentIds = kind === "decision_record" ? new Set<string>() : await readPendingDeleteIds(cwd);
   const names = dirents
     .filter((e) => e.isFile() && e.name.endsWith(".json"))
     .map((e) => e.name)
     .sort();
   const out: LooseMember[] = [];
   for (const name of names) {
-    out.push({ id: basename(name, ".json"), bytes: await readFile(join(dir, name), "utf8") });
+    const id = basename(name, ".json");
+    if (pendingAbsentIds.has(id)) continue; // mid-deletion pair → not folded into a bundle
+    out.push({ id, bytes: await readFile(join(dir, name), "utf8") });
   }
   return out;
 }

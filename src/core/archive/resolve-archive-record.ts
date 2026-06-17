@@ -48,6 +48,12 @@ export type ResolveArchiveRecordOpts = {
   /** The bundle member id (phase_id for snapshot/pack; stem-hash for a decision). */
   id: string;
   mode: ResolveMode;
+  /** Phase ids named by a PENDING delete-intent (a phase_snapshot↔event_pack pair
+   *  mid-deletion). A record whose id is in this set reads as LOGICALLY ABSENT, so
+   *  no reader observes the crash→recovery half-state. Decisions are never in the
+   *  journal (it is keyed by phase_id), so the filter applies only to
+   *  phase_snapshot / event_pack. Omit (or empty) when there is no pending intent. */
+  pendingAbsentIds?: ReadonlySet<string>;
   /** Read the loose record's raw bytes (absent / invalid / present). */
   readLooseRaw: () => Promise<RawLooseRecord> | RawLooseRecord;
   /** Build the cross-bundle index. LAZY: invoked only when the bundle store must be
@@ -66,6 +72,13 @@ export type ResolveArchiveRecordOpts = {
 export async function resolveArchiveRecordBytes(
   opts: ResolveArchiveRecordOpts,
 ): Promise<ResolvedArchiveRecord> {
+  // A phase_snapshot / event_pack named in a pending delete-intent is mid-deletion
+  // (its pair is being removed both-or-neither). Until recovery completes it, every
+  // reader treats it as LOGICALLY ABSENT — so the transient half-state (one file
+  // already unlinked) is never read as archive truth. Decisions are never pending.
+  if (opts.kind !== "decision_record" && opts.pendingAbsentIds?.has(opts.id)) {
+    return { kind: "absent" };
+  }
   const loose = await opts.readLooseRaw();
   if (loose.kind === "invalid") return { kind: "invalid", error: loose.error };
 
