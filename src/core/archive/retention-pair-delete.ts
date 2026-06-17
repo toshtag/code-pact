@@ -1,4 +1,5 @@
 import { gateLooseDelete, type RetentionDeleteSkipReason } from "./archive-retention.ts";
+import { loadArchiveBundles } from "./archive-bundle-loader.ts";
 import {
   completePairsThenClear,
   PendingDeleteIntentError,
@@ -86,12 +87,27 @@ export async function deleteLoosePairsJournaled(
     throw new Error("deleteLoosePairsJournaled: duplicate phase_id in the input pairs");
   }
 
+  // ENFORCE the loose-only invariant the whole reader/compaction model rests on: the
+  // journal must name ONLY pairs whose phase_snapshot AND event_pack are loose-only
+  // (no bundle copy). A pending id with a bundle copy would (a) let the reader filter
+  // wrongly hide a surviving bundle copy and (b) make the compaction loose-side filter
+  // incomplete. So a member that also exists as a bundle member is a `both` case →
+  // deferred to bundle-member removal, never committed here. (loadArchiveBundles
+  // throws on a corrupt store → fail-closed: the whole operation aborts.)
+  const bundleIndex = loadArchiveBundles(cwd).index;
+  const hasBundleCopy = (id: string): boolean =>
+    (bundleIndex.get("phase_snapshot")?.has(id) ?? false) || (bundleIndex.get("event_pack")?.has(id) ?? false);
+
   const committed: { phase_id: string; phase_sha256: string; pack_sha256: string }[] = [];
   const retained: { phase_id: string; reason: PairRetainReason }[] = [];
 
   // Gate BOTH members of every pair BEFORE committing anything. Both must gate to
-  // `delete`, else the pair is retained whole (never half-removed).
+  // `delete` AND be loose-only, else the pair is retained whole (never half-removed).
   for (const pair of pairs) {
+    if (hasBundleCopy(pair.phase_id)) {
+      retained.push({ phase_id: pair.phase_id, reason: "needs_bundle_member_removal" });
+      continue;
+    }
     const packVerdict = await gateLooseDelete(cwd, "event_pack", pair.phase_id, pair.pack_sha256);
     const phaseVerdict = await gateLooseDelete(cwd, "phase_snapshot", pair.phase_id, pair.phase_sha256);
     if (packVerdict.kind === "delete" && phaseVerdict.kind === "delete") {

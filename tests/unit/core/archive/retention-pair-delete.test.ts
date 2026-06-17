@@ -29,6 +29,7 @@ import {
 import { enumerateArchivedPhaseSnapshots, resolvePhaseSnapshotRaw } from "../../../../src/core/archive/load-phase-snapshot.ts";
 import { readEventPackFiles, resolveEventPackRaw } from "../../../../src/core/archive/event-pack-reader.ts";
 import { planCompactArchive } from "../../../../src/core/archive/archive-bundle-cleanup.ts";
+import { writeArchiveBundle } from "../../../../src/core/archive/archive-bundle-writer.ts";
 
 // Crash-safe both-or-neither deletion of a loose phase_snapshot ↔ event_pack pair,
 // committed through the delete-intent journal. The journal write is the COMMIT: a
@@ -269,6 +270,19 @@ describe("deleteLoosePairsJournaled — crash-safe both-or-neither", () => {
     const pair = await setupPair("P1");
     await expect(deleteLoosePairsJournaled(cwd, [pair, pair])).rejects.toThrow(/duplicate phase_id/);
     expect(await intentExists()).toBe(false);
+    expect(await exists(phaseSnapshotPath(cwd, "P1"))).toBe(true);
+  });
+
+  it("ENFORCES loose-only — a pair with a bundle copy is NOT journaled (needs_bundle_member_removal)", async () => {
+    const pair = await setupPair("P1");
+    // Give P1's phase snapshot a bundle copy → P1 is `both`, not loose-only. The journal
+    // must refuse it (so the reader filter never wrongly hides the surviving bundle copy).
+    const looseP1 = await readFile(phaseSnapshotPath(cwd, "P1"), "utf8");
+    await writeArchiveBundle(cwd, "phase_snapshot", [{ id: "P1", bytes: looseP1 }]);
+    const out = await deleteLoosePairsJournaled(cwd, [pair]);
+    expect(out.deleted).toEqual([]);
+    expect(out.retained).toEqual([{ phase_id: "P1", reason: "needs_bundle_member_removal" }]);
+    expect(await intentExists()).toBe(false); // never committed
     expect(await exists(phaseSnapshotPath(cwd, "P1"))).toBe(true);
   });
 
