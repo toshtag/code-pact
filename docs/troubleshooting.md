@@ -14,6 +14,7 @@ When a command surfaces one of the diagnostic codes below, this page maps it to 
 | [`DECISION_PRUNE_NOT_ELIGIBLE`](#decision_prune_not_eligible-from-decision-prune) | A decision record cannot be retired yet | Read `data.blocks[]`; resolve each gate (or pick a different target) |
 | [`DECISION_PRUNE_PLAN_STALE`](#decision_prune_plan_stale-from-decision-prune---write) | The tree changed under a `--write` plan (zero writes) | Re-run `decision prune` to rebuild the plan |
 | [`DECISION_PRUNE_WRITE_FAILED`](#decision_prune_write_failed-from-decision-prune---write) | A disk write failed during `--write` | Read `data.phase` / `data.partial_applied`; fix the cause and re-run |
+| [`DELETE_INTENT_RECOVERY_FAILED` / `DELETE_INTENT_DURABILITY_FAILED` / `PENDING_DELETE_INTENT`](#delete_intent_recovery_failed--delete_intent_durability_failed--pending_delete_intent-from-state-archive-retention---write) | A retention pair-delete journal fault (fail-closed, recoverable) | Read `data.recovery_pending`; repair/remove a corrupt journal or fix the I/O fault, then re-run |
 | [`LOCK_HELD`](#lock_held-from-a-lock-covered-mutation) | Another mutation is running | Wait, then retry (transient) |
 | [`MANIFEST_NOT_FOUND`](#manifest_not_found-from-adapter-upgrade---check----write) | Adapter not installed yet | Run `adapter install <agent>` |
 | [`ADAPTER_GENERATOR_STALE`](#adapter_generator_stale-from-adapter-doctor--global-doctor) | Older CLI stamp **and** generated output drifted (stamp-only lag is silent) | Run `adapter upgrade --check`, then `--write` |
@@ -228,6 +229,24 @@ code-pact decision prune design/decisions/<name>.md --write --json
 ```
 
 `partial_applied` reports whether **this invocation** already changed the tree: the ledger was appended **this run** (not an idempotent already-recorded retry), or ≥1 source was rewritten. `append_ledger` is therefore always `false`; `rewrite_links` / `delete_record` are `true` **except** on an already-recorded retry that fails before any rewrite lands (then `false` — nothing was mutated this run, so there is nothing to inspect). When `partial_applied` is `true`, inspect the working tree (`git status` / `git diff`) before retrying — the ledger row and/or some link rewrites are already committed; a re-run is **idempotent** (a decision already in `PRUNED.md` is not re-appended). A `rewrite_links` failure from a concurrent edit means your edit is intact — re-run `decision prune` to rebuild the plan against it.
+
+## `DELETE_INTENT_RECOVERY_FAILED` / `DELETE_INTENT_DURABILITY_FAILED` / `PENDING_DELETE_INTENT` from `state archive-retention --write`
+
+These are the fail-closed faults of the retention **pair-delete journal** — how `state archive-retention --write` removes a loose `phase_snapshot` ↔ `event_pack` pair both-or-neither across a crash. All three are **recoverable**: the journal is a durable record, and a re-run completes it.
+
+- **`DELETE_INTENT_RECOVERY_FAILED`** — the apply tried to complete a prior crashed pair-delete first, but the journal (`.code-pact/state/archive/delete-intent.json`) is unreadable or not the writer's canonical bytes (a hand-edit / corruption). The run plans and deletes **nothing**. The journal is the recovery authority — inspect it, then repair or remove it, and re-run.
+- **`DELETE_INTENT_DURABILITY_FAILED`** — a REQUIRED durability barrier (`fsync` of the journal's temp data, or of a directory) failed with a real I/O fault (`reason: "failed"`). A platform that simply cannot `fsync` a directory (`reason: "unsupported"`, e.g. Windows) is NOT this error — it defers the pair conservatively (`requires_atomic_pair_removal`) instead. Fix the I/O fault and re-run.
+- **`PENDING_DELETE_INTENT`** — a journal already exists when a new pair-delete tried to start (a prior crash was not recovered). The apply recovers first, so this is a defensive guard; re-run and recovery completes the prior journal before the new plan.
+
+```json
+{
+  "ok": false,
+  "error": { "code": "DELETE_INTENT_DURABILITY_FAILED", "message": "directory fsync failed (commit, ...): EIO" },
+  "data": { "recovery_pending": true }
+}
+```
+
+`data.recovery_pending` tells you whether a delete-intent journal still remains on disk: `true` → a re-run will complete it (both-or-neither); `false` → nothing was committed (only the named record set is at stake). The deletion is always atomic across these failures — you never get one half of a pair.
 
 ## `LOCK_HELD` from a lock-covered mutation
 Another `code-pact` mutation is in progress on the same project. The advisory write lock (`.code-pact/locks/write.lock`) is held by the process whose details appear in the envelope:

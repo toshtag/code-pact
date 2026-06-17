@@ -11,7 +11,8 @@ import { loadArchiveBundles } from "./archive-bundle-loader.ts";
 import { enumerateArchivedPhaseSnapshots, resolveUnreferencedSnapshot } from "./load-phase-snapshot.ts";
 import { bindBundleMember, decisionRecordStem } from "./archive-bundle-binding.ts";
 import { validateEventPackTier1 } from "./event-pack-reader.ts";
-import { readPendingDeleteIds } from "./delete-intent-journal.ts";
+import { DeleteIntentDurabilityError, readPendingDeleteIds, recoverPendingDeletes } from "./delete-intent-journal.ts";
+import { deleteLoosePairsJournaled, type LoosePairToDelete, type PairDeleteOutcome, type PairMemberRetain } from "./retention-pair-delete.ts";
 import { archiveDecisionsDir, archiveEventPacksDir, archivePhasesDir, normalizeDecisionRef, sha256Hex } from "./paths.ts";
 import type { ArchiveBundleKind } from "../schemas/archive-bundle.ts";
 
@@ -621,12 +622,16 @@ export type RetentionDeleteSkipReason =
 
 export type RetentionDeleteOutcome = {
   kind: ArchiveBundleKind;
-  /** loose ids unlinked (old truth dropped). */
+  /** loose ids unlinked because THIS run's plan decided to drop them (old truth dropped). */
   deleted: string[];
   /** ids already gone at gate / unlink time (ENOENT) — idempotent, not a failure. */
   vanished: string[];
   /** ids NOT deleted, per-record reason (fail-closed; never a silent drop). */
   skipped: { id: string; reason: RetentionDeleteSkipReason }[];
+  /** ids COMPLETED from a pending delete-intent journal (a prior run committed the delete and
+   *  crashed before finishing) — recovered + removed by THIS run before it planned. Distinct from
+   *  `deleted` (this run's plan decision) so a recovery-completed drop is never reported silently. */
+  recovered: string[];
 };
 
 function looseRelPath(kind: ArchiveBundleKind, id: string): string {
@@ -705,9 +710,15 @@ export async function gateLooseDelete(
   return { kind: "delete", abs };
 }
 
-/** Test seam: a hook fired immediately before each loose record's delete gate, so a test can
- *  inject a between-plan-and-unlink swap and prove the digest gate skips it. */
-export type RetentionApplyHooks = { beforeGate?: (kind: ArchiveBundleKind, id: string) => Promise<void> | void };
+/** Test seam: `beforeGate` fires before each INDEPENDENT loose record's delete gate (the per-record
+ *  `deleteLooseDropped` path), so a test can inject a between-plan-and-unlink swap and prove the
+ *  digest gate skips it. `beforePairGate` fires before each PAIR member's gate inside the journaled
+ *  pair delete (a distinct path), so a test can inject a half-vanished pair — it is NOT the same as
+ *  `beforeGate` (a journal pair never goes through the per-record gate). */
+export type RetentionApplyHooks = {
+  beforeGate?: (kind: ArchiveBundleKind, id: string) => Promise<void> | void;
+  beforePairGate?: (kind: ArchiveBundleKind, id: string) => Promise<void> | void;
+};
 
 async function deleteLooseDropped(
   cwd: string,
@@ -715,7 +726,7 @@ async function deleteLooseDropped(
   preSkip: ReadonlyMap<string, RetentionDeleteSkipReason> | null,
   hooks: RetentionApplyHooks,
 ): Promise<RetentionDeleteOutcome> {
-  const out: RetentionDeleteOutcome = { kind: plan.kind, deleted: [], vanished: [], skipped: [] };
+  const out: RetentionDeleteOutcome = { kind: plan.kind, deleted: [], vanished: [], skipped: [], recovered: [] };
   for (const item of plan.would_drop) {
     // PR-2a deletes loose-only; a bundle-only / both copy is the bundle-member-removal layer.
     if (item.source !== "loose") {
@@ -752,30 +763,24 @@ async function deleteLooseDropped(
 }
 
 /**
- * Apply keep-latest-N retention DESTRUCTIVELY (PR-2a: loose-only, INDEPENDENT records only).
- * RE-RUNS the planner here as the delete authority (a caller never passes a stale plan), then
- * unlinks each removable loose-only `would_drop` record through a per-record re-read +
- * digest-match + re-authority-validate gate. A bundle-only / `both` would_drop is SKIPPED
- * (bundle-member removal is a later layer).
+ * Apply keep-latest-N retention DESTRUCTIVELY. RECOVERS any crashed prior pair-delete FIRST (under
+ * the caller's write lock — a corrupt journal is fail-closed), then RE-RUNS the planner as the
+ * delete authority (a caller never passes a stale plan) and removes each `would_drop` record:
+ *   - a `decision_record` (no cross-binding) → a single atomic unlink;
+ *   - a `phase_snapshot` with NO event_pack (nothing binds to it) → a single atomic unlink;
+ *   - a loose `phase_snapshot` ↔ loose `event_pack` PAIR → `deleteLoosePairsJournaled`, which removes
+ *     the two files both-or-neither, crash-safe, via the durable delete-intent journal.
  *
- * PR-2a does NOT delete a phase_snapshot↔event_pack pair. The two are MUTUALLY bound:
- *   - the pack carries the snapshot's `snapshot_sha256` — a pack WITHOUT its snapshot is broken;
- *   - the snapshot's `progress_events` evidence resolves event_ids from the durable ledger
- *     (loose events ∪ validated packs) — once the loose events are compacted into the pack, the
- *     pack is that evidence's only durable source, so a snapshot WITHOUT its pack DANGLES.
- * A filesystem cannot unlink two files atomically, so a sequential two-unlink "both" cannot be
- * crash-safe: a process crash, or a per-record gate skip / `unlink_failed` / `unreadable` BETWEEN
- * the two unlinks, leaves exactly one side and breaks the archive. So a bound pair is DEFERRED
- * WHOLE (`requires_atomic_pair_removal`) to the atomic-pair-removal layer; PR-2a deletes only
- * records with NO cross-binding, each a single independent unlink (atomic on its own):
- *   - a `decision_record` (no binding either way);
- *   - a `phase_snapshot` with NO event_pack (nothing binds to it — the snapshot is the *referencer*
- *     of its own evidence, so deleting it strands nothing; with no pack carrying its
- *     `snapshot_sha256`, nothing is orphaned).
- * A would_drop event_pack ALWAYS has a would_drop phase (the planner drops a pack only with its
- * phase), so every would_drop pack is half a pair → always deferred. If the event_pack store is a
- * PARTIAL view (a `(store)` block — its loose dir or bundle store unreadable) we cannot prove a
- * phase has no pack, so every loose phase is deferred fail-closed.
+ * The pair is MUTUALLY bound (the pack carries the snapshot's `snapshot_sha256`; the snapshot's
+ * `progress_events` evidence resolves only from the pack once the loose events are compacted), so a
+ * filesystem (which cannot unlink two files atomically) needs the journal to make "both gone" survive
+ * a crash. A pair is journaled only when BOTH members are loose-only `would_drop` with captured
+ * digests and the event store is fully visible; otherwise it is DEFERRED `requires_atomic_pair_removal`
+ * (a bundle-only / `both` member is `needs_bundle_member_removal` — that layer is still later). On a
+ * platform that cannot fsync a directory (`DeleteIntentDurabilityError` reason `unsupported`), durable
+ * pair deletion is unavailable, so the pairs are deferred (the same conservative posture); a real I/O
+ * failure (`failed`) propagates and fails the run.
+ *
  * Returns a per-kind partial outcome (deleted / vanished / skipped); nothing is silently dropped.
  * Run under the write lock.
  */
@@ -784,41 +789,107 @@ export async function applyArchiveRetention(
   opts: { keepLatest?: number } = {},
   hooks: RetentionApplyHooks = {},
 ): Promise<RetentionDeleteOutcome[]> {
+  // 0. Heal any crashed prior pair-delete BEFORE planning, under the caller's write lock — so a
+  //    half-deleted pair is completed (both gone) before the planner re-reads. A corrupt journal
+  //    throws (DeleteIntentRecoveryError) → fail-closed (the mutation does not proceed). The
+  //    completed ids are surfaced in the outcome (`recovered`) so a recovery-completed drop of old
+  //    truth is never reported silently — it is NOT this run's plan decision (`deleted`).
+  const recovery = await recoverPendingDeletes(cwd);
+
   const plans = await planArchiveRetention(cwd, opts);
   const byKind = new Map(plans.map((p) => [p.kind, p]));
   const empty = (kind: ArchiveBundleKind): RetentionPlan => ({ kind, would_keep: [], would_drop: [], blocked: [] });
   const eventPlan = byKind.get("event_pack") ?? empty("event_pack");
   const phasePlan = byKind.get("phase_snapshot") ?? empty("phase_snapshot");
 
-  // Every event_pack id the planner saw (real packs only — the `(store)` block is a store-level
-  // fault marker, not a record). Its PRESENCE means the event_pack store was only a PARTIAL view,
-  // so we cannot prove a phase has no pack and must fail closed.
+  // The `(store)` block marks a PARTIAL event_pack view — we cannot prove a phase has no pack, so
+  // we cannot form pairs and must defer fail-closed. `packIds` are the real pack ids the planner saw.
   const eventItems = [...eventPlan.would_keep, ...eventPlan.would_drop, ...eventPlan.blocked];
   const eventStoreUncertain = eventItems.some((i) => i.id === STORE_BLOCK_ID);
-  const packIds = new Set<string>(eventItems.filter((i) => i.id !== STORE_BLOCK_ID).map((i) => i.id));
+  const looseDropPackById = new Map(eventPlan.would_drop.filter((p) => p.source === "loose").map((p) => [p.id, p]));
 
-  // 1. Event packs are EVALUATED first only to EMIT their skipped outcomes — PR-2a never unlinks
-  //    a pack. A would_drop pack always has a would_drop phase (the planner drops a pack only with
-  //    its phase), so it is always half a bound pair → deferred whole `requires_atomic_pair_removal`.
-  //    (A bundle-only / `both` pack is skipped needs_bundle_member_removal first by its source.)
+  // The loose-loose pairs to journal-delete (both members loose `would_drop`, digests captured,
+  // store fully visible). Their ids are EXCLUDED from the per-record loops below (the journal owns
+  // them); the journal also re-enforces loose-only (a pair with a bundle copy is refused).
+  const pairedIds = new Set<string>();
+  const pairs: LoosePairToDelete[] = [];
+  if (!eventStoreUncertain) {
+    for (const phase of phasePlan.would_drop) {
+      if (phase.source !== "loose") continue;
+      const pack = looseDropPackById.get(phase.id);
+      if (!pack || phase.loose_sha256 === undefined || pack.loose_sha256 === undefined) continue;
+      pairedIds.add(phase.id);
+      pairs.push({ phase_id: phase.id, phase_sha256: phase.loose_sha256, pack_sha256: pack.loose_sha256 });
+    }
+  }
+
+  // Remove the paired ids from the per-record plans — the journal handles them.
+  const withoutPaired = (p: RetentionPlan): RetentionPlan => ({ ...p, would_drop: p.would_drop.filter((i) => !pairedIds.has(i.id)) });
+
+  // 1. Journal-delete the pairs (both-or-neither). On `unsupported` defer them; `failed` propagates.
+  let pairOutcome: PairDeleteOutcome;
+  try {
+    pairOutcome = await deleteLoosePairsJournaled(cwd, pairs, { beforeGate: hooks.beforePairGate });
+  } catch (err) {
+    if (err instanceof DeleteIntentDurabilityError && err.reason === "unsupported") {
+      const deferred: PairMemberRetain = { kind: "skip", reason: "requires_atomic_pair_removal" };
+      pairOutcome = { deleted: [], retained: pairs.map((p) => ({ phase_id: p.phase_id, phase: deferred, pack: deferred })) };
+    } else {
+      throw err; // a real durability failure, or a recovery/other error — fail-closed
+    }
+  }
+
+  // 2. Non-paired event packs: every remaining loose `would_drop` pack is NOT journal-able (its
+  //    phase is bundle/both, or a digest was missing) → defer; a bundle/both pack →
+  //    needs_bundle_member_removal by its source.
   const eventPreSkip = new Map<string, RetentionDeleteSkipReason>();
   for (const pack of eventPlan.would_drop) {
-    if (pack.source === "loose") eventPreSkip.set(pack.id, "requires_atomic_pair_removal");
+    if (pack.source === "loose" && !pairedIds.has(pack.id)) eventPreSkip.set(pack.id, "requires_atomic_pair_removal");
   }
-  const eventOut = await deleteLooseDropped(cwd, eventPlan, eventPreSkip, hooks);
+  const eventOut = await deleteLooseDropped(cwd, withoutPaired(eventPlan), eventPreSkip, hooks);
 
-  // 2. Phase snapshots: delete a loose-only would_drop snapshot ONLY when it has NO event_pack and
-  //    the event store view is complete; a snapshot WITH a pack (or one we cannot rule out) is a
-  //    bound pair, deferred whole.
+  // 3. Non-paired phase snapshots: delete a loose-only snapshot with NO event_pack (independent);
+  //    a snapshot with a pack we could not pair, or an uncertain store, is deferred.
   const phasePreSkip = new Map<string, RetentionDeleteSkipReason>();
   for (const phase of phasePlan.would_drop) {
-    if (phase.source !== "loose") continue; // handled as needs_bundle_member_removal in deleteLooseDropped
-    if (eventStoreUncertain || packIds.has(phase.id)) phasePreSkip.set(phase.id, "requires_atomic_pair_removal");
+    if (phase.source !== "loose" || pairedIds.has(phase.id)) continue;
+    if (eventStoreUncertain || looseDropPackById.has(phase.id) || hasAnyPack(eventItems, phase.id)) {
+      phasePreSkip.set(phase.id, "requires_atomic_pair_removal");
+    }
   }
-  const phaseOut = await deleteLooseDropped(cwd, phasePlan, phasePreSkip, hooks);
+  const phaseOut = await deleteLooseDropped(cwd, withoutPaired(phasePlan), phasePreSkip, hooks);
 
-  // 3. Decisions are independent — delete last.
+  // 4. Decisions are independent — delete last.
   const decisionOut = await deleteLooseDropped(cwd, byKind.get("decision_record") ?? empty("decision_record"), null, hooks);
 
+  // Merge the journal pair results into the per-kind outcomes (a pair touches both kinds). A
+  // committed pair removed both files. A retained pair reports EACH member's OWN outcome — a side
+  // that gate-vanished goes to that kind's `vanished`; the present side goes to `skipped`. A
+  // half-vanished pair must never report the surviving side as vanished.
+  for (const id of pairOutcome.deleted) {
+    phaseOut.deleted.push(id);
+    eventOut.deleted.push(id);
+  }
+  const applyMember = (out: RetentionDeleteOutcome, id: string, m: PairMemberRetain): void => {
+    if (m.kind === "vanished") out.vanished.push(id);
+    else out.skipped.push({ id, reason: m.reason });
+  };
+  for (const { phase_id, phase, pack } of pairOutcome.retained) {
+    applyMember(phaseOut, phase_id, phase);
+    applyMember(eventOut, phase_id, pack);
+  }
+
+  // Surface the recovery-completed pair ids (a prior run's committed delete this run finished) on
+  // BOTH bound kinds — a recovered pair removed both its phase snapshot and its event pack.
+  phaseOut.recovered = recovery.completed;
+  eventOut.recovered = recovery.completed;
+
   return [phaseOut, eventOut, decisionOut];
+}
+
+/** Whether the planner saw ANY pack (would_keep/drop/blocked) for `id` — a phase with a pack we
+ *  could not pair (bundle/both pack, or a missing digest) must not be deleted alone (it would
+ *  orphan or strand the pack), so it is deferred. */
+function hasAnyPack(eventItems: readonly RetentionItem[], id: string): boolean {
+  return eventItems.some((i) => i.id === id && i.id !== STORE_BLOCK_ID);
 }

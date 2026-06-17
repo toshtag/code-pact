@@ -63,6 +63,11 @@ const KNOWN_CODES: Record<string, "public" | "plan" | "doctor" | "adapter" | "in
   DECISION_PRUNE_NOT_ELIGIBLE: "public",
   DECISION_PRUNE_PLAN_STALE: "public",
   DECISION_PRUNE_WRITE_FAILED: "public",
+  // archive-level compaction Layer 4: the retention pair-delete journal faults surfaced by
+  // `state archive-retention --write` (fail-closed, recoverable — re-run completes the journal).
+  DELETE_INTENT_RECOVERY_FAILED: "public",
+  DELETE_INTENT_DURABILITY_FAILED: "public",
+  PENDING_DELETE_INTENT: "public",
   // design-docs-ephemeral step 7 PR-B2: the `decision retire` destructive verb.
   DECISION_RETIRE_NOT_ELIGIBLE: "public",
   DECISION_RETIRE_NOT_RETIRED: "public",
