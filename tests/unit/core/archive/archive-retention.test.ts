@@ -11,7 +11,7 @@ import {
   type RetentionPlan,
 } from "../../../../src/core/archive/archive-retention.ts";
 import { writeArchiveBundle } from "../../../../src/core/archive/archive-bundle-writer.ts";
-import { phaseSnapshotPath, decisionRecordPath, eventPackPath, archiveBundlesDir, sha256Hex } from "../../../../src/core/archive/paths.ts";
+import { phaseSnapshotPath, decisionRecordPath, eventPackPath, archiveBundlesDir, archiveEventPacksDir, sha256Hex } from "../../../../src/core/archive/paths.ts";
 import { computeMemberIdsSha256 } from "../../../../src/core/archive/archive-bundle-reader.ts";
 import { decisionRecordStem } from "../../../../src/core/archive/archive-bundle-binding.ts";
 import { ARCHIVE_BUNDLE_SCHEMA_VERSION } from "../../../../src/core/schemas/archive-bundle.ts";
@@ -545,7 +545,7 @@ describe("applyArchiveRetention — destructive LOOSE-ONLY delete (PR-2a)", () =
     expect(await exists(eventPackPath(cwd, "P1"))).toBe(false);
   });
 
-  it("a loose pack whose phase is bundle-only IS deleted (the snapshot survives in the bundle — no orphan)", async () => {
+  it("a loose pack whose phase is bundle-only is SKIPPED — deleting it would strand the surviving snapshot's evidence", async () => {
     await archivePhases([
       { id: "P1", at: "2026-01-01T00:00:00.000Z" },
       { id: "P2", at: "2026-02-01T00:00:00.000Z" },
@@ -560,13 +560,61 @@ describe("applyArchiveRetention — destructive LOOSE-ONLY delete (PR-2a)", () =
     await writeEventPackFile(cwd, "P1", pack); // pack loose, would_drop
     await setRoadmap([]);
     const out = await applyArchiveRetention(cwd, { keepLatest: 1 });
-    // The pack (DEPENDENT) is deleted — a snapshot-without-pack is fine (binding goes pack→snapshot).
-    // The phase snapshot stays in the bundle (deferred to bundle-member removal).
-    expect(out.find((o) => o.kind === "event_pack")!.deleted).toEqual(["P1"]);
-    expect(await exists(eventPackPath(cwd, "P1"))).toBe(false);
+    // BOTH-OR-NEITHER: the snapshot survives (bundle-only), and its progress_events evidence
+    // resolves from this pack — deleting the pack would leave the snapshot's evidence dangling.
+    // So the pack is HELD (its phase is not co-removable) and the snapshot stays in the bundle.
+    expect(out.find((o) => o.kind === "event_pack")!.deleted).toEqual([]);
+    expect(out.find((o) => o.kind === "event_pack")!.skipped.find((s) => s.id === "P1")?.reason).toBe(
+      "parent_phase_snapshot_not_removable",
+    );
+    expect(await exists(eventPackPath(cwd, "P1"))).toBe(true); // the loose pack is NOT deleted
     expect(out.find((o) => o.kind === "phase_snapshot")!.skipped.find((s) => s.id === "P1")?.reason).toBe(
       "needs_bundle_member_removal",
     );
+  });
+
+  it("a loose pack whose phase is source:both is SKIPPED — the pair is not co-removable", async () => {
+    await archivePhases([
+      { id: "P1", at: "2026-01-01T00:00:00.000Z" },
+      { id: "P2", at: "2026-02-01T00:00:00.000Z" },
+    ]);
+    const events = ProgressLog.parse({
+      events: [{ task_id: "P1-T1", status: "done", at: "2026-06-01T00:00:00.000Z", actor: "agent" }],
+    }).events;
+    const looseP1 = await readFile(phaseSnapshotPath(cwd, "P1"), "utf8");
+    await writeArchiveBundle(cwd, "phase_snapshot", [{ id: "P1", bytes: looseP1 }]); // phase P1 now source:both (loose kept)
+    await writeEventPackFile(cwd, "P1", await buildValidEventPack(cwd, "P1", events)); // pack loose, would_drop
+    await setRoadmap([]);
+    const out = await applyArchiveRetention(cwd, { keepLatest: 1 });
+    // phase P1 is `both` → not loose-only removable in PR-2a → its pack must NOT be deleted either.
+    expect(out.find((o) => o.kind === "event_pack")!.deleted).toEqual([]);
+    expect(out.find((o) => o.kind === "event_pack")!.skipped.find((s) => s.id === "P1")?.reason).toBe(
+      "parent_phase_snapshot_not_removable",
+    );
+    expect(await exists(eventPackPath(cwd, "P1"))).toBe(true);
+    expect(await exists(phaseSnapshotPath(cwd, "P1"))).toBe(true);
+  });
+
+  it("event_pack loose store unreadable (partial view) → NO phase snapshot is deleted (fail-closed)", async () => {
+    await archivePhases([
+      { id: "P1", at: "2026-01-01T00:00:00.000Z" },
+      { id: "P2", at: "2026-02-01T00:00:00.000Z" },
+    ]);
+    await setRoadmap([]); // phase P1 loose would_drop (no pack); phase store is fine
+    // Make the loose event-pack dir UNREADABLE without touching the bundle store or the phase
+    // store: a FILE at the event-packs dir path → readdir gives ENOTDIR (a non-ENOENT error) →
+    // the event_pack source map cannot be built → the planner emits a `(store)` block. The apply
+    // then cannot enumerate packs, so it must NOT delete any phase snapshot (a pack it could not
+    // see could be bound to / depended on by the snapshot). The phase store being fine is exactly
+    // what makes phase P1 a would_drop — so this proves the apply's own fail-closed guard, not the
+    // planner blocking the phase.
+    await writeFile(archiveEventPacksDir(cwd), "not a directory", "utf8");
+    const out = await applyArchiveRetention(cwd, { keepLatest: 1 });
+    expect(out.find((o) => o.kind === "phase_snapshot")!.deleted).toEqual([]);
+    expect(out.find((o) => o.kind === "phase_snapshot")!.skipped.find((s) => s.id === "P1")?.reason).toBe(
+      "dependent_event_pack_not_removable",
+    );
+    expect(await exists(phaseSnapshotPath(cwd, "P1"))).toBe(true);
   });
 
   it("a phase snapshot whose event_pack is NOT removable (bundle-only) is SKIPPED — never orphan the pack", async () => {
