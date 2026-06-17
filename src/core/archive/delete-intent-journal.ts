@@ -109,10 +109,17 @@ async function pathExists(path: string): Promise<boolean> {
   }
 }
 
-/** Durably write (commit) the delete intent — the WAL barrier. fsyncs the temp
- *  data AND the parent directory (both required; a failure throws). Refuses to
- *  overwrite an existing journal (`PendingDeleteIntentError`). Rejects duplicate
- *  `phase_id`s. */
+/** LOW-LEVEL journal primitive: durably write (commit) the delete intent — the WAL
+ *  barrier. fsyncs the temp data AND the parent directory (both required; a failure
+ *  throws). Refuses to overwrite an existing journal (`PendingDeleteIntentError`).
+ *  Rejects duplicate `phase_id`s.
+ *
+ *  DO NOT call this directly to delete archive records. The production retention
+ *  delete is `deleteLoosePairsJournaled`, which enforces the load-bearing authority
+ *  this primitive does NOT: gating each member's bytes, and the LOOSE-ONLY invariant
+ *  (refusing a pair with a bundle copy) that the reader-awareness + compaction
+ *  filters depend on. A direct caller that journaled a non-loose-only / ungated pair
+ *  would silently break those filters. */
 export async function writeDeleteIntent(cwd: string, pairs: DeleteIntentPair[]): Promise<void> {
   const ids = pairs.map((p) => p.phase_id);
   if (new Set(ids).size !== ids.length) {
@@ -123,6 +130,13 @@ export async function writeDeleteIntent(cwd: string, pairs: DeleteIntentPair[]):
   const path = archiveDeleteIntentPath(cwd);
   const dir = dirname(path);
   await mkdir(dir, { recursive: true });
+  // PREFLIGHT the directory durability barrier BEFORE writing anything: if the platform
+  // cannot fsync a directory (`unsupported`) or the dir fsync fails (`failed`), abort HERE
+  // so the journal is NEVER left on disk. (A barrier failure only AFTER the rename would
+  // leave a committed journal that the next run's recovery completes — silently deleting a
+  // pair the caller was told was deferred. The preflight makes `unsupported` mean "no
+  // journal", so the caller's defer is honest.)
+  await fsyncDirRequired(dir, "commit");
   const tmp = `${path}.tmp-${process.pid}-${Date.now()}`;
 
   const fh = await open(tmp, "w");

@@ -286,6 +286,18 @@ describe("deleteLoosePairsJournaled — crash-safe both-or-neither", () => {
     expect(await exists(phaseSnapshotPath(cwd, "P1"))).toBe(true);
   });
 
+  it("ENFORCES loose-only — a pair whose EVENT_PACK has a bundle copy is NOT journaled either", async () => {
+    const pair = await setupPair("P1");
+    // Give P1's event_pack a bundle copy (the loose pack is canonical, so writeArchiveBundle accepts it).
+    const loosePack = await readFile(eventPackPath(cwd, "P1"), "utf8");
+    await writeArchiveBundle(cwd, "event_pack", [{ id: "P1", bytes: loosePack }]);
+    const out = await deleteLoosePairsJournaled(cwd, [pair]);
+    expect(out.deleted).toEqual([]);
+    expect(out.retained).toEqual([{ phase_id: "P1", reason: "needs_bundle_member_removal" }]);
+    expect(await intentExists()).toBe(false);
+    expect(await exists(eventPackPath(cwd, "P1"))).toBe(true);
+  });
+
   it("a multi-pair batch commits all gated pairs in ONE intent, then removes each pair", async () => {
     const p1 = await setupPair("P1");
     const p2 = await setupPair("P2");
@@ -300,16 +312,17 @@ describe("deleteLoosePairsJournaled — crash-safe both-or-neither", () => {
 });
 
 describe("deleteLoosePairsJournaled — durability barriers are REQUIRED (fail-closed, not best-effort)", () => {
-  it("a COMMIT parent-dir fsync failure fails closed — no member is unlinked", async () => {
+  it("a COMMIT dir-fsync failure fails closed at the PREFLIGHT — no journal, no member unlinked", async () => {
     const pair = await setupPair("P1");
     failDirFsyncFor("commit");
     await expect(deleteLoosePairsJournaled(cwd, [pair])).rejects.toBeInstanceOf(DeleteIntentDurabilityError);
-    // The barrier threw BEFORE any unlink, so both members are still present. (The
-    // journal is on disk — a possibly-durable commit recovery will complete — so the
-    // pair converges to both-gone or both-retained, never one side.)
+    // The commit barrier is PREFLIGHTED before the journal is written, so a failure leaves NO
+    // journal on disk (nothing for recovery to complete) and no member unlinked — both retained.
+    // This is what makes an `unsupported` platform's "defer" honest: it can't leave a committed
+    // journal that a later recovery would silently complete.
+    expect(await intentExists()).toBe(false);
     expect(await exists(eventPackPath(cwd, "P1"))).toBe(true);
     expect(await exists(phaseSnapshotPath(cwd, "P1"))).toBe(true);
-    expect(await intentExists()).toBe(true);
   });
 
   it("a MEMBER-dir fsync failure fails closed — the journal is NOT cleared (recovery will retry)", async () => {
