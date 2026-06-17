@@ -11,6 +11,7 @@ import { loadArchiveBundles } from "./archive-bundle-loader.ts";
 import { enumerateArchivedPhaseSnapshots, resolveUnreferencedSnapshot } from "./load-phase-snapshot.ts";
 import { bindBundleMember, decisionRecordStem } from "./archive-bundle-binding.ts";
 import { validateEventPackTier1 } from "./event-pack-reader.ts";
+import { readPendingDeleteIds } from "./delete-intent-journal.ts";
 import { archiveDecisionsDir, archiveEventPacksDir, archivePhasesDir, normalizeDecisionRef, sha256Hex } from "./paths.ts";
 import type { ArchiveBundleKind } from "../schemas/archive-bundle.ts";
 
@@ -211,9 +212,17 @@ async function buildSourceMap(cwd: string, kind: ArchiveBundleKind): Promise<Sou
   } catch (err) {
     return { ok: false, detail: `bundle store unreadable: ${(err as Error).message}` };
   }
+  // A phase_snapshot / event_pack named in a pending delete-intent is mid-deletion —
+  // already being dropped — so the planner treats it as LOGICALLY ABSENT (never
+  // counts it in the source map, never re-plans its drop). Keeps the dry-run plan
+  // consistent with the journal-aware readers. (Decisions are never pending.)
+  const pendingAbsentIds = kind === "decision_record" ? new Set<string>() : await readPendingDeleteIds(cwd);
   let looseIds: string[];
   try {
-    looseIds = (await readdir(looseDirFor(cwd, kind))).filter((n) => n.endsWith(".json")).map((n) => basename(n, ".json"));
+    looseIds = (await readdir(looseDirFor(cwd, kind)))
+      .filter((n) => n.endsWith(".json"))
+      .map((n) => basename(n, ".json"))
+      .filter((id) => !pendingAbsentIds.has(id));
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") looseIds = [];
     else return { ok: false, detail: `loose ${kind} dir unreadable: ${(err as Error).message}` };
@@ -221,7 +230,7 @@ async function buildSourceMap(cwd: string, kind: ArchiveBundleKind): Promise<Sou
   const looseSet = new Set(looseIds);
   const source = new Map<string, "loose" | "bundle" | "both">();
   for (const id of looseSet) source.set(id, members.has(id) ? "both" : "loose");
-  for (const id of members.keys()) if (!looseSet.has(id)) source.set(id, "bundle");
+  for (const id of members.keys()) if (!looseSet.has(id) && !pendingAbsentIds.has(id)) source.set(id, "bundle");
 
   // Read every loose record's raw ONCE: record its digest (the gate's expected-bytes authority)
   // and, for a `both` id, STRICT-RECONCILE against the shadowed bundle member (byte-identical

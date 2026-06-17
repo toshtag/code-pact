@@ -26,6 +26,8 @@ import {
   deleteLoosePairsJournaled,
   type LoosePairToDelete,
 } from "../../../../src/core/archive/retention-pair-delete.ts";
+import { enumerateArchivedPhaseSnapshots, resolvePhaseSnapshotRaw } from "../../../../src/core/archive/load-phase-snapshot.ts";
+import { readEventPackFiles, resolveEventPackRaw } from "../../../../src/core/archive/event-pack-reader.ts";
 
 // Crash-safe both-or-neither deletion of a loose phase_snapshot ↔ event_pack pair,
 // committed through the delete-intent journal. The journal write is the COMMIT: a
@@ -310,6 +312,16 @@ describe("deleteLoosePairsJournaled — durability barriers are REQUIRED (fail-c
     await expect(deleteLoosePairsJournaled(cwd, [pair])).rejects.toBeInstanceOf(DeleteIntentDurabilityError);
   });
 
+  it("a schema-valid but NON-CANONICAL journal (compact bytes) is corrupt — not the writer's form", async () => {
+    await mkdir(join(cwd, ".code-pact", "state", "archive"), { recursive: true });
+    // Valid intent, but compact JSON (no 2-space indent / trailing newline) — a hand-edit.
+    const compact = JSON.stringify({ schema_version: 1, pairs: [{ phase_id: "P1", phase_sha256: sha256Hex("a"), pack_sha256: sha256Hex("b") }] });
+    await writeFile(archiveDeleteIntentPath(cwd), compact, "utf8");
+    const read = await readDeleteIntent(cwd);
+    expect(read.kind).toBe("corrupt");
+    if (read.kind === "corrupt") expect(read.cause).toBe("parse_error");
+  });
+
   it("a schema-valid but DUPLICATE-id journal is corrupt → recovery fail-closed", async () => {
     await mkdir(join(cwd, ".code-pact", "state", "archive"), { recursive: true });
     const dup =
@@ -329,5 +341,65 @@ describe("deleteLoosePairsJournaled — durability barriers are REQUIRED (fail-c
     expect(read.kind).toBe("corrupt");
     if (read.kind === "corrupt") expect(read.cause).toBe("parse_error");
     await expect(recoverPendingDeletes(cwd)).rejects.toBeInstanceOf(DeleteIntentRecoveryError);
+  });
+});
+
+describe("reader-awareness — a pending delete-intent hides the pair from readers", () => {
+  /** Write a pending journal naming `phaseId` (a pair mid-deletion). */
+  async function pendIntent(phaseId: string): Promise<void> {
+    await writeDeleteIntent(cwd, [{ phase_id: phaseId, phase_sha256: sha256Hex("p"), pack_sha256: sha256Hex("k") }]);
+  }
+
+  it("resolvePhaseSnapshotRaw reads a pending phase as ABSENT (its loose file still present)", async () => {
+    await setupPair("P1");
+    expect((await resolvePhaseSnapshotRaw(cwd, "P1")).kind).toBe("valid"); // before the intent
+    await pendIntent("P1");
+    expect((await resolvePhaseSnapshotRaw(cwd, "P1")).kind).toBe("absent"); // logically absent now
+    expect(await exists(phaseSnapshotPath(cwd, "P1"))).toBe(true); // the file is physically still there
+  });
+
+  it("resolveEventPackRaw reads a pending pack as ABSENT", async () => {
+    await setupPair("P1");
+    expect((await resolveEventPackRaw(cwd, "P1")).kind).toBe("present");
+    await pendIntent("P1");
+    expect((await resolveEventPackRaw(cwd, "P1")).kind).toBe("absent");
+  });
+
+  it("enumerateArchivedPhaseSnapshots and readEventPackFiles exclude a pending pair", async () => {
+    await setupPair("P1");
+    await setupPair("P2");
+    await pendIntent("P1"); // only P1 is mid-deletion
+    const stems = (await enumerateArchivedPhaseSnapshots(cwd)).entries.map((e) => e.fileStem);
+    expect(stems).toEqual(["P2"]); // P1 hidden
+    const packIds = (await readEventPackFiles(cwd)).map((p) => p.pack.phase_id);
+    expect(packIds).toEqual(["P2"]);
+  });
+
+  it("the crash→recovery HALF-STATE (journal present, pack gone, phase present) reads as absent — no dangling", async () => {
+    await setupPair("P1");
+    await pendIntent("P1");
+    await rm(eventPackPath(cwd, "P1")); // simulate: pack already unlinked, phase not yet
+    // The snapshot reads absent (so its progress_events evidence is never validated
+    // against the now-gone pack), and the pack reads absent — the pair is hidden whole.
+    expect((await resolvePhaseSnapshotRaw(cwd, "P1")).kind).toBe("absent");
+    expect((await resolveEventPackRaw(cwd, "P1")).kind).toBe("absent");
+    expect((await enumerateArchivedPhaseSnapshots(cwd)).entries.map((e) => e.fileStem)).toEqual([]);
+  });
+
+  it("readers are READ-ONLY — consulting the journal never mutates or clears it", async () => {
+    await setupPair("P1");
+    await pendIntent("P1");
+    await resolvePhaseSnapshotRaw(cwd, "P1");
+    await enumerateArchivedPhaseSnapshots(cwd);
+    await readEventPackFiles(cwd);
+    expect(await intentExists()).toBe(true); // the recovery authority is untouched
+  });
+
+  it("once the journal is cleared (recovery done), surviving records read normally again", async () => {
+    await setupPair("P1");
+    await pendIntent("P1");
+    expect((await resolvePhaseSnapshotRaw(cwd, "P1")).kind).toBe("absent");
+    await clearDeleteIntent(cwd); // recovery completed (here the files happen to survive)
+    expect((await resolvePhaseSnapshotRaw(cwd, "P1")).kind).toBe("valid"); // visible again
   });
 });

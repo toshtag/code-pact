@@ -8,6 +8,7 @@ import { loadArchiveBundles } from "./archive-bundle-loader.ts";
 import { bindBundleMember } from "./archive-bundle-binding.ts";
 import type { BundleIndexEntry, BundleMemberIndex } from "./archive-bundle-index.ts";
 import { resolveArchiveRecordBytes, type RawLooseRecord } from "./resolve-archive-record.ts";
+import { readPendingDeleteIds } from "./delete-intent-journal.ts";
 
 // The bundle store label for bundle-integrity error messages from this module.
 const ARCHIVE_BUNDLE_STORE_LABEL = ".code-pact/state/archive/bundles";
@@ -117,6 +118,7 @@ export async function resolvePhaseSnapshotRaw(
       kind: "phase_snapshot",
       id: phaseId,
       mode: "reader-loose-wins",
+      pendingAbsentIds: await readPendingDeleteIds(cwd), // mid-deletion pair → logically absent
       readLooseRaw: () => readLoosePhaseSnapshotRaw(cwd, phaseId),
       loadBundleIndex: () => loadArchiveBundles(cwd).index,
     });
@@ -183,6 +185,7 @@ export async function resolveMissingPhaseRef(
       kind: "phase_snapshot",
       id: ref.id,
       mode: "reader-loose-wins",
+      pendingAbsentIds: await readPendingDeleteIds(cwd), // a mid-deletion pair → logically absent
       readLooseRaw: () => readLoosePhaseSnapshotRaw(cwd, ref.id),
       loadBundleIndex: () => loadArchiveBundles(cwd).index,
     });
@@ -555,6 +558,10 @@ export async function enumerateArchivedPhaseSnapshots(
   const entries: EnumeratedPhaseSnapshot[] = [];
   const skipped: PhaseSnapshotEnumSkip[] = [];
   const looseStems = new Set<string>();
+  // A phase named in a pending delete-intent (its pair is mid-deletion) is LOGICALLY
+  // ABSENT — never enumerated (loose OR bundle) — so a half-deleted intermediate is
+  // never read as archive truth. Read-only consultation; the journal is untouched.
+  const pendingAbsentIds = await readPendingDeleteIds(cwd);
 
   // 1. Loose snapshot files.
   let names: string[] = [];
@@ -572,6 +579,7 @@ export async function enumerateArchivedPhaseSnapshots(
   }
   for (const name of names.filter((n) => n.endsWith(".json")).sort()) {
     const fileStem = basename(name, ".json");
+    if (pendingAbsentIds.has(fileStem)) continue; // mid-deletion pair → absent
     if (!isSafePlanId(fileStem)) {
       skipped.push({ scope: "file", fileStem, detail: "unsafe archive snapshot filename" });
       continue;
@@ -596,6 +604,7 @@ export async function enumerateArchivedPhaseSnapshots(
   if (members) {
     for (const [phaseId, entry] of [...members].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))) {
       if (looseStems.has(phaseId)) continue; // loose wins
+      if (pendingAbsentIds.has(phaseId)) continue; // mid-deletion pair → absent
       if (!isSafePlanId(phaseId)) {
         skipped.push({ scope: "file", fileStem: phaseId, detail: "unsafe archive snapshot bundle member id" });
         continue;
