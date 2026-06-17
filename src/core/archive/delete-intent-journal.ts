@@ -8,22 +8,23 @@ import { archiveDeleteIntentPath, archiveEventPacksDir, archivePhasesDir, eventP
 // phase_snapshot ↔ event_pack pair deletion crash-safe (both-or-neither), even
 // across power loss / OS crash (not just a thrown error / SIGKILL).
 //
-// The COMMIT BARRIER is `writeDeleteIntent`: it writes the journal to a temp file,
-// **fsyncs the temp file's data**, renames it into place, then **fsyncs the parent
-// directory** so the rename itself is durable. Only when it returns is the intent
-// on stable storage. The caller MUST issue every destructive unlink AFTER it
-// returns — so the ordering "commit durable ≤ any unlink durable" holds, and a
-// power loss can never leave an unlinked member with no journal to recover it.
-//   - crash BEFORE the commit returns → no durable journal AND no unlink yet → both
-//     retained (clean rollback).
-//   - crash AFTER the commit returns → the journal is durable → recovery completes
-//     both unlinks idempotently → both gone.
-// So the pair is always both-deleted or both-retained, never one side.
+// The COMMIT BARRIER is `writeDeleteIntent`: write the journal to a temp file →
+// **fsync the temp file's data** → refuse if a journal already exists → rename →
+// **fsync the parent directory** (so the rename itself is durable). Every one of
+// those fsyncs is a REQUIRED barrier: a FAILED fsync is fail-closed (throws
+// `DeleteIntentDurabilityError`), never swallowed — a swallowed parent-dir fsync
+// failure would let the commit "succeed" while the rename is not durable, and the
+// later unlinks would reintroduce the half-state this journal exists to prevent.
 //
-// (Durability is to the extent the platform's `fsync` guarantees. The DIRECTORY
-// fsync is best-effort — some platforms cannot fsync a directory; there the
-// rename's durability is the platform's concern. The data fsync on the temp file
-// is mandatory.)
+// Only when `writeDeleteIntent` returns is the intent on stable storage — and the
+// operation issues every unlink AFTER it returns. So the ordering "commit durable
+// ≤ any unlink durable" holds: a power loss that lost the commit also lost every
+// unlink, so the worst observable state is BOTH retained, never one side.
+//
+// `DeleteIntentDurabilityError.cause` separates a platform that cannot fsync a
+// directory at all (`unsupported`, e.g. Windows) from a real I/O failure on a
+// platform that can (`failed`). The wiring layer refuses the durable pair-delete
+// path on `unsupported` (pairs stay deferred there) and fails the run on `failed`.
 //
 // See design/decisions/retention-pair-delete-journal-rfc.md.
 // ---------------------------------------------------------------------------
@@ -45,20 +46,53 @@ export class PendingDeleteIntentError extends Error {
   }
 }
 
-/** fsync a directory so a rename/unlink within it is durable. Best-effort: some
- *  platforms cannot open a directory for fsync — there the operation's durability
- *  is the platform's concern, not something we can force. */
-async function fsyncDir(dir: string): Promise<void> {
+/** A REQUIRED durability barrier failed. `reason`: `unsupported` = the platform
+ *  cannot fsync a directory (the durable pair-delete path is not available there);
+ *  `failed` = a real I/O failure on a platform that can. Never swallowed. */
+export class DeleteIntentDurabilityError extends Error {
+  readonly code = "DELETE_INTENT_DURABILITY_FAILED" as const;
+  constructor(
+    readonly reason: "unsupported" | "failed",
+    detail: string,
+  ) {
+    super(detail);
+    this.name = "DeleteIntentDurabilityError";
+  }
+}
+
+// Directory fsync — the barrier that makes a rename/unlink within a directory
+// durable — is unavailable on Windows (a directory cannot be opened for fsync).
+const DIRECTORY_FSYNC_SUPPORTED = process.platform !== "win32";
+
+// Test seam (failure injection): override the directory-fsync barrier so a test can
+// prove the operation fails closed when a barrier fails. `null` = the real barrier.
+let dirFsyncOverride: ((dir: string, purpose: string) => Promise<void> | void) | null = null;
+export function __setDeleteIntentDirFsyncForTests(fn: ((dir: string, purpose: string) => Promise<void> | void) | null): void {
+  dirFsyncOverride = fn;
+}
+
+/** fsync a directory so a rename/unlink within it is durable — a REQUIRED WAL
+ *  barrier. Throws `DeleteIntentDurabilityError` on ANY failure (never swallowed):
+ *  `unsupported` on a platform that cannot fsync a directory, `failed` on a real
+ *  I/O error (`EIO` / `ENOSPC` / permission / handle failure). */
+async function fsyncDirRequired(dir: string, purpose: string): Promise<void> {
+  if (dirFsyncOverride) {
+    await dirFsyncOverride(dir, purpose);
+    return;
+  }
+  if (!DIRECTORY_FSYNC_SUPPORTED) {
+    throw new DeleteIntentDurabilityError("unsupported", `directory fsync is unsupported on ${process.platform} (${purpose})`);
+  }
   let dh;
   try {
     dh = await open(dir, "r");
-  } catch {
-    return; // cannot open the directory (e.g. Windows) — skip
+  } catch (err) {
+    throw new DeleteIntentDurabilityError("failed", `cannot open directory for fsync (${purpose}, ${dir}): ${(err as Error).message}`);
   }
   try {
     await dh.sync();
-  } catch {
-    // platform/filesystem does not support directory fsync — best-effort
+  } catch (err) {
+    throw new DeleteIntentDurabilityError("failed", `directory fsync failed (${purpose}, ${dir}): ${(err as Error).message}`);
   } finally {
     await dh.close();
   }
@@ -75,9 +109,10 @@ async function pathExists(path: string): Promise<boolean> {
   }
 }
 
-/** Durably write (commit) the delete intent — the WAL barrier. Refuses to overwrite
- *  an existing journal (`PendingDeleteIntentError`): a present journal is an
- *  un-recovered prior commit. Rejects duplicate `phase_id`s. */
+/** Durably write (commit) the delete intent — the WAL barrier. fsyncs the temp
+ *  data AND the parent directory (both required; a failure throws). Refuses to
+ *  overwrite an existing journal (`PendingDeleteIntentError`). Rejects duplicate
+ *  `phase_id`s. */
 export async function writeDeleteIntent(cwd: string, pairs: DeleteIntentPair[]): Promise<void> {
   const ids = pairs.map((p) => p.phase_id);
   if (new Set(ids).size !== ids.length) {
@@ -93,10 +128,13 @@ export async function writeDeleteIntent(cwd: string, pairs: DeleteIntentPair[]):
   const fh = await open(tmp, "w");
   try {
     await fh.writeFile(content, "utf8");
-    await fh.sync(); // fsync the data BEFORE it can be renamed into place
-  } finally {
-    await fh.close();
+    await fh.sync(); // MANDATORY: fsync the data before it can be renamed into place
+  } catch (err) {
+    await fh.close().catch(() => {});
+    await unlink(tmp).catch(() => {});
+    throw new DeleteIntentDurabilityError("failed", `delete-intent temp write/fsync failed: ${(err as Error).message}`);
   }
+  await fh.close();
   try {
     // Never clobber an existing journal (an un-recovered prior commit). Under the
     // write lock there is no concurrent creator, so this check is race-free in
@@ -107,11 +145,15 @@ export async function writeDeleteIntent(cwd: string, pairs: DeleteIntentPair[]):
     await unlink(tmp).catch(() => {});
     throw err;
   }
-  await fsyncDir(dir); // make the rename (the commit) durable
+  // REQUIRED: make the rename (the commit) durable. A failure here throws BEFORE
+  // the caller unlinks anything — the journal stays on disk (a possibly-durable
+  // commit) for recovery to complete; the caller never proceeds to unlink.
+  await fsyncDirRequired(dir, "commit");
 }
 
 /** Remove the journal durably (idempotent — an already-absent journal is success):
- *  unlink the file, then fsync the directory so the removal survives power loss. */
+ *  unlink the file, then fsync the directory (required) so the removal survives
+ *  power loss. */
 export async function clearDeleteIntent(cwd: string): Promise<void> {
   const path = archiveDeleteIntentPath(cwd);
   try {
@@ -120,7 +162,7 @@ export async function clearDeleteIntent(cwd: string): Promise<void> {
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
     return; // already gone — nothing to make durable
   }
-  await fsyncDir(dirname(path));
+  await fsyncDirRequired(dirname(path), "clear");
 }
 
 /** The journal as read from disk: absent (the normal steady state), present (a
@@ -128,7 +170,7 @@ export async function clearDeleteIntent(cwd: string): Promise<void> {
  *  silently ignored, since ignoring would skip recovery and leave a half-deleted
  *  pair. `cause` separates a transient/permissions read failure (`io_error` — the
  *  journal may be intact but currently unreadable) from genuinely mangled content
- *  (`parse_error`), so an operator looks in the right place. */
+ *  (`parse_error`, which also covers a schema-valid but duplicate-id journal). */
 export type DeleteIntentRead =
   | { kind: "absent" }
   | { kind: "present"; intent: DeleteIntent }
@@ -147,11 +189,19 @@ export async function readDeleteIntent(cwd: string): Promise<DeleteIntentRead> {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return { kind: "absent" };
     return { kind: "corrupt", cause: "io_error", detail: `delete-intent journal unreadable: ${(err as Error).message}` };
   }
+  let intent: DeleteIntent;
   try {
-    return { kind: "present", intent: DeleteIntent.parse(JSON.parse(raw)) };
+    intent = DeleteIntent.parse(JSON.parse(raw));
   } catch (err) {
     return { kind: "corrupt", cause: "parse_error", detail: `delete-intent journal is not a valid intent: ${(err as Error).message}` };
   }
+  // A duplicate phase_id is schema-valid but a malformed recovery authority (the
+  // writer never emits one). Treat it as corrupt — fail-closed rather than guess.
+  const ids = intent.pairs.map((p) => p.phase_id);
+  if (new Set(ids).size !== ids.length) {
+    return { kind: "corrupt", cause: "parse_error", detail: "delete-intent journal names a phase_id more than once" };
+  }
+  return { kind: "present", intent };
 }
 
 /** A corrupt delete-intent journal blocks recovery (and therefore the mutation it
@@ -173,10 +223,11 @@ export type PairUnlinkHooks = {
 };
 
 /** Complete a committed batch: unlink both members of every pair (idempotent —
- *  ENOENT is success), make the unlinks durable (fsync the member dirs) so "both
- *  gone" is on stable storage, THEN clear the journal durably. Shared by the live
- *  delete and recovery so they cannot drift. Throwing in a hook leaves the journal
- *  in place (recovery will re-run this), so an interrupted unlink is healed. */
+ *  ENOENT is success), make the unlinks durable (fsync the member dirs — REQUIRED,
+ *  a failure throws and the journal is NOT cleared), THEN clear the journal durably.
+ *  Shared by the live delete and recovery so they cannot drift. Throwing in a hook
+ *  or a barrier leaves the journal in place (recovery re-runs this), so an
+ *  interrupted/failed unlink is healed. */
 export async function completePairsThenClear(cwd: string, phaseIds: string[], hooks: PairUnlinkHooks = {}): Promise<void> {
   for (const phaseId of phaseIds) {
     await unlinkIfPresent(eventPackPath(cwd, phaseId)); // pack first; either order is healed by recovery
@@ -184,10 +235,11 @@ export async function completePairsThenClear(cwd: string, phaseIds: string[], ho
     await unlinkIfPresent(phaseSnapshotPath(cwd, phaseId));
     if (hooks.afterPhaseUnlinked) await hooks.afterPhaseUnlinked(phaseId);
   }
-  // Make the unlinks durable BEFORE removing the commit record, so a power loss
-  // after the clear cannot resurrect a member with no journal to re-delete it.
-  await fsyncDir(archiveEventPacksDir(cwd));
-  await fsyncDir(archivePhasesDir(cwd));
+  // REQUIRED: make the unlinks durable BEFORE removing the commit record, so a
+  // power loss after the clear cannot resurrect a member with no journal to
+  // re-delete it. A barrier failure throws → the journal is not cleared → recovery.
+  await fsyncDirRequired(archiveEventPacksDir(cwd), "event_packs");
+  await fsyncDirRequired(archivePhasesDir(cwd), "phases");
   await clearDeleteIntent(cwd);
 }
 

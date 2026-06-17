@@ -13,7 +13,9 @@ import {
   sha256Hex,
 } from "../../../../src/core/archive/paths.ts";
 import {
+  __setDeleteIntentDirFsyncForTests,
   clearDeleteIntent,
+  DeleteIntentDurabilityError,
   DeleteIntentRecoveryError,
   PendingDeleteIntentError,
   readDeleteIntent,
@@ -37,8 +39,17 @@ beforeEach(async () => {
   await mkdir(join(cwd, ".code-pact", "state", "archive", "phases"), { recursive: true });
 });
 afterEach(async () => {
+  __setDeleteIntentDirFsyncForTests(null); // clear any injected barrier failure
   if (cwd) await rm(cwd, { recursive: true, force: true });
 });
+
+/** Inject a directory-fsync barrier failure for ONE purpose; all other barriers
+ *  succeed (return without a real fsync — the test exercises control flow). */
+function failDirFsyncFor(target: string): void {
+  __setDeleteIntentDirFsyncForTests((_dir, purpose) => {
+    if (purpose === target) throw new DeleteIntentDurabilityError("failed", `injected ${purpose} fsync failure`);
+  });
+}
 
 const TASK_FIELDS = `    ambiguity: low
     risk: low
@@ -268,5 +279,55 @@ describe("deleteLoosePairsJournaled — crash-safe both-or-neither", () => {
       expect(await exists(eventPackPath(cwd, id))).toBe(false);
     }
     expect(await intentExists()).toBe(false);
+  });
+});
+
+describe("deleteLoosePairsJournaled — durability barriers are REQUIRED (fail-closed, not best-effort)", () => {
+  it("a COMMIT parent-dir fsync failure fails closed — no member is unlinked", async () => {
+    const pair = await setupPair("P1");
+    failDirFsyncFor("commit");
+    await expect(deleteLoosePairsJournaled(cwd, [pair])).rejects.toBeInstanceOf(DeleteIntentDurabilityError);
+    // The barrier threw BEFORE any unlink, so both members are still present. (The
+    // journal is on disk — a possibly-durable commit recovery will complete — so the
+    // pair converges to both-gone or both-retained, never one side.)
+    expect(await exists(eventPackPath(cwd, "P1"))).toBe(true);
+    expect(await exists(phaseSnapshotPath(cwd, "P1"))).toBe(true);
+    expect(await intentExists()).toBe(true);
+  });
+
+  it("a MEMBER-dir fsync failure fails closed — the journal is NOT cleared (recovery will retry)", async () => {
+    const pair = await setupPair("P1");
+    failDirFsyncFor("event_packs"); // commit + others succeed; the member-dir barrier throws
+    await expect(deleteLoosePairsJournaled(cwd, [pair])).rejects.toBeInstanceOf(DeleteIntentDurabilityError);
+    // The barrier threw before clearDeleteIntent → the journal survives, so a later
+    // recoverPendingDeletes re-runs the deletion (idempotent) rather than stranding it.
+    expect(await intentExists()).toBe(true);
+  });
+
+  it("a CLEAR dir fsync failure is reported (not swallowed as success)", async () => {
+    const pair = await setupPair("P1");
+    failDirFsyncFor("clear");
+    await expect(deleteLoosePairsJournaled(cwd, [pair])).rejects.toBeInstanceOf(DeleteIntentDurabilityError);
+  });
+
+  it("a schema-valid but DUPLICATE-id journal is corrupt → recovery fail-closed", async () => {
+    await mkdir(join(cwd, ".code-pact", "state", "archive"), { recursive: true });
+    const dup =
+      JSON.stringify(
+        {
+          schema_version: 1,
+          pairs: [
+            { phase_id: "P1", phase_sha256: sha256Hex("a"), pack_sha256: sha256Hex("b") },
+            { phase_id: "P1", phase_sha256: sha256Hex("c"), pack_sha256: sha256Hex("d") },
+          ],
+        },
+        null,
+        2,
+      ) + "\n";
+    await writeFile(archiveDeleteIntentPath(cwd), dup, "utf8");
+    const read = await readDeleteIntent(cwd);
+    expect(read.kind).toBe("corrupt");
+    if (read.kind === "corrupt") expect(read.cause).toBe("parse_error");
+    await expect(recoverPendingDeletes(cwd)).rejects.toBeInstanceOf(DeleteIntentRecoveryError);
   });
 });

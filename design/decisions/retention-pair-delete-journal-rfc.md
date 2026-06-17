@@ -60,7 +60,14 @@ An atomic `rename` gives atomic *visibility*, not *durability* across power loss
 2. refuse if a journal already exists (see below), then `rename` temp → `delete-intent.json`;
 3. **`fsync` the parent directory** so the rename itself is durable.
 
-Only when `writeDeleteIntent` returns is the intent on stable storage — and the operation issues every unlink *after* it returns. So the ordering **"commit durable ≤ any unlink durable"** holds: a power loss that lost the commit also lost every unlink (the unlinks come after the commit `fsync`), so the worst observable state is *both retained*, never one side. After the unlinks the member directories are `fsync`ed before the journal is cleared, so "both gone" is durable before the commit record is removed (a power loss after the clear cannot resurrect a member with no journal to re-delete it). The clear `unlink` + directory `fsync` make journal removal durable too. (Durability is to the extent the platform's `fsync` guarantees; the **directory** `fsync` is best-effort — some platforms cannot `fsync` a directory, where the rename's durability is the platform's concern. The data `fsync` on the temp file is mandatory.)
+Only when `writeDeleteIntent` returns is the intent on stable storage — and the operation issues every unlink *after* it returns. So the ordering **"commit durable ≤ any unlink durable"** holds: a power loss that lost the commit also lost every unlink (the unlinks come after the commit `fsync`), so the worst observable state is *both retained*, never one side. After the unlinks the member directories are `fsync`ed before the journal is cleared, so "both gone" is durable before the commit record is removed (a power loss after the clear cannot resurrect a member with no journal to re-delete it). The clear `unlink` + directory `fsync` make journal removal durable too.
+
+**Every one of these `fsync`s is a REQUIRED barrier, not best-effort.** A *failed* `fsync` is fail-closed (throws `DeleteIntentDurabilityError`), never swallowed — swallowing a failed parent-directory `fsync` would let the commit "succeed" while the rename is not durable, and the later unlinks would reintroduce the half-state. The failure modes are distinguished by `reason`:
+
+- `unsupported` — the platform cannot `fsync` a directory at all (e.g. Windows, where a directory cannot be opened for `fsync`). The durable pair-delete path is **not available** there; the wiring layer keeps pairs deferred on such a platform (the archive's pair tail just does not shrink — the same conservative posture as PR-2a), rather than running a non-durable "WAL".
+- `failed` — a real I/O failure (`EIO` / `ENOSPC` / permission / handle failure) on a platform that *can* `fsync` a directory. The run fails.
+
+The data `fsync` on the temp file is likewise mandatory (a failure throws). Durability is to the extent the platform's `fsync` guarantees (e.g. macOS `fsync` is not `F_FULLFSYNC`); within that, the commit barrier is enforced, not assumed.
 
 ### No-overwrite — a pending journal blocks a new commit
 
@@ -91,8 +98,9 @@ Immediately before committing the intent, BOTH the loose phase and the loose pac
 6. **Stale / changed bytes are never deleted:** if either member's on-disk bytes no longer match the digest the plan captured, the gate skips it, no intent is committed, both retained (`authority_changed`).
 7. **`both` / bundle-only members are never touched:** a member with no loose copy (or a shadowed/divergent one) gates to `vanished` / `skip`, no intent is committed.
 8. **Dry-run and write share one planner authority:** the apply re-runs the planner internally (never a stale dry-run plan); the journal operation consumes that same authority's gated verdicts.
-9. **No-overwrite:** a pending (un-recovered) journal blocks a new pair delete — `writeDeleteIntent` refuses to clobber it (`PendingDeleteIntentError`) and `deleteLoosePairsJournaled` preconditions on an absent journal — so a prior crash's recovery authority is never lost; a duplicate `phase_id` batch is rejected before any commit.
+9. **No-overwrite:** a pending (un-recovered) journal blocks a new pair delete — `writeDeleteIntent` refuses to clobber it (`PendingDeleteIntentError`) and `deleteLoosePairsJournaled` preconditions on an absent journal — so a prior crash's recovery authority is never lost; a duplicate `phase_id` batch is rejected before any commit, and a duplicate-id journal already on disk reads as `corrupt` (recovery fail-closed).
 10. **Durable commit ordering:** the commit `fsync`s (temp data + parent directory) before any unlink, so a power loss can never leave a member unlinked with no journal — the worst observable post-power-loss state is *both retained*, never one side. (Verified by construction + the fsync-ordering reasoning above; a unit test cannot induce a real power loss.)
+11. **Durability barriers are fail-closed:** a *failed* directory `fsync` throws (`DeleteIntentDurabilityError`), never swallowed — a commit-barrier failure stops before any unlink, a member-dir-barrier failure leaves the journal uncleared (recovery retries), and a clear-barrier failure is reported. (Proven by failure injection at each barrier.)
 
 ## Non-goals (this RFC)
 
