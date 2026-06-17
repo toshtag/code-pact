@@ -75,7 +75,7 @@ export function __setDeleteIntentDirFsyncForTests(fn: ((dir: string, purpose: st
  *  barrier. Throws `DeleteIntentDurabilityError` on ANY failure (never swallowed):
  *  `unsupported` on a platform that cannot fsync a directory, `failed` on a real
  *  I/O error (`EIO` / `ENOSPC` / permission / handle failure). */
-async function fsyncDirRequired(dir: string, purpose: string): Promise<void> {
+export async function fsyncDirRequired(dir: string, purpose: string): Promise<void> {
   if (dirFsyncOverride) {
     await dirFsyncOverride(dir, purpose);
     return;

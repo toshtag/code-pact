@@ -647,7 +647,7 @@ function looseRelPath(kind: ArchiveBundleKind, id: string): string {
 /** Re-validate a loose record's ARCHIVE AUTHORITY from its current on-disk bytes (the same
  *  checks the planner ran) — so a file that changed between plan and unlink is not deleted on
  *  a stale verdict. */
-function looseStillAuthorityValid(kind: ArchiveBundleKind, id: string, raw: string): boolean {
+export function looseStillAuthorityValid(kind: ArchiveBundleKind, id: string, raw: string): boolean {
   try {
     if (kind === "phase_snapshot") {
       const snapshot = PhaseSnapshot.parse(JSON.parse(raw));

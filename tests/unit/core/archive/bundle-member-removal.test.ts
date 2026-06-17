@@ -4,9 +4,14 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { writePhaseSnapshot } from "../../../../src/core/archive/phase-snapshot.ts";
 import { writeArchiveBundle } from "../../../../src/core/archive/archive-bundle-writer.ts";
+import { computeMemberIdsSha256 } from "../../../../src/core/archive/archive-bundle-reader.ts";
 import { seedDurableEvents } from "../../../helpers/seed-events.ts";
-import { phaseSnapshotPath, archiveBundlesDir } from "../../../../src/core/archive/paths.ts";
-import { planBundleMemberRemoval } from "../../../../src/core/archive/bundle-member-removal.ts";
+import { phaseSnapshotPath, archiveBundlePath, archiveBundlesDir, sha256Hex } from "../../../../src/core/archive/paths.ts";
+import { planBundleMemberRemoval, removeBundleMembers } from "../../../../src/core/archive/bundle-member-removal.ts";
+import {
+  __setDeleteIntentDirFsyncForTests,
+  DeleteIntentDurabilityError,
+} from "../../../../src/core/archive/delete-intent-journal.ts";
 
 // Bundle-member removal — Layer 1a: the READ-ONLY planner. A bundle is content-addressed
 // by its member-id SET, so removal = rebuild the kind's bundle minus the removed members.
@@ -27,8 +32,26 @@ beforeEach(async () => {
   await mkdir(join(cwd, ".code-pact", "state", "archive", "phases"), { recursive: true });
 });
 afterEach(async () => {
+  __setDeleteIntentDirFsyncForTests(null);
   if (cwd) await rm(cwd, { recursive: true, force: true });
 });
+
+/** Write a Tier-1-VALID bundle directly (bypassing the writer's per-member authority foldability),
+ *  so a test can plant a MISFILED member (id "P1" whose bytes are another phase's snapshot). */
+async function rawBundle(members: { id: string; bytes: string }[]): Promise<void> {
+  const records = members
+    .map((m) => ({ id: m.id, sha256: sha256Hex(m.bytes), bytes: m.bytes }))
+    .sort((a, b) => (a.id < b.id ? -1 : 1));
+  const bundle = {
+    schema_version: 1,
+    kind: "phase_snapshot",
+    member_ids_sha256: computeMemberIdsSha256(records.map((r) => r.id)),
+    members: records,
+  };
+  const file = archiveBundlePath(cwd, "phase_snapshot", bundle.member_ids_sha256);
+  await mkdir(archiveBundlesDir(cwd), { recursive: true });
+  await writeFile(file, JSON.stringify(bundle, null, 2) + "\n", "utf8");
+}
 
 /** Archive a done phase as a snapshot and return its canonical bytes (the loose file is removed,
  *  so the snapshot lives only where a caller puts it — here, a bundle). */
@@ -74,7 +97,7 @@ describe("planBundleMemberRemoval — read-only removal plan", () => {
     expect(plan.new_bundle).not.toBeNull();
     expect(plan.new_bundle!.file).toMatch(/^phase_snapshot-[0-9a-f]{16}\.json$/);
     expect(plan.new_bundle!.file).not.toBe(oldBundle); // a different content address (smaller set)
-    expect(plan.retire_bundles).toEqual([oldBundle]); // the old {P1,P2,P3} bundle is superseded
+    expect(plan.retire_bundles.map((r) => r.file)).toEqual([oldBundle]); // the old {P1,P2,P3} bundle
   });
 
   it("an id that is NOT a current member → not_member (no-op), nothing else changes", async () => {
@@ -103,7 +126,7 @@ describe("planBundleMemberRemoval — read-only removal plan", () => {
     expect(plan.removable).toEqual(["P1", "P2"]);
     expect(plan.survivors).toEqual([]);
     expect(plan.new_bundle).toBeNull(); // no survivors → no replacement bundle
-    expect(plan.retire_bundles).toEqual([theBundle]);
+    expect(plan.retire_bundles.map((r) => r.file)).toEqual([theBundle]);
   });
 
   it("MULTIPLE old bundles of the kind: removing a member consolidates the survivors, retiring all old bundles", async () => {
@@ -118,7 +141,7 @@ describe("planBundleMemberRemoval — read-only removal plan", () => {
     expect(plan.removable).toEqual(["P1"]);
     expect(plan.survivors).toEqual(["P2", "P3", "P4"]);
     expect(plan.new_bundle).not.toBeNull();
-    expect(plan.retire_bundles).toEqual(olds); // both old bundles superseded by the consolidated one
+    expect(plan.retire_bundles.map((r) => r.file)).toEqual(olds); // both old bundles superseded
   });
 
   it("when a bundle already sits at addr(survivors), it is the KEEP — only the bundle holding the removed member is retired", async () => {
@@ -132,7 +155,7 @@ describe("planBundleMemberRemoval — read-only removal plan", () => {
     expect(plan.survivors).toEqual(["P2", "P3"]);
     // The new bundle's address already exists (the {P2,P3} bundle) → it is the keep, not retired;
     // only the {P1} bundle is retired.
-    expect(plan.retire_bundles).not.toContain(plan.new_bundle!.file);
+    expect(plan.retire_bundles.map((r) => r.file)).not.toContain(plan.new_bundle!.file);
     expect(plan.retire_bundles.length).toBe(1);
     expect(await listBundles()).toContain(plan.new_bundle!.file); // the keep is an existing file
   });
@@ -141,5 +164,114 @@ describe("planBundleMemberRemoval — read-only removal plan", () => {
     await mkdir(archiveBundlesDir(cwd), { recursive: true });
     await writeFile(join(archiveBundlesDir(cwd), "phase_snapshot-deadbeefdeadbeef.json"), "{ not a bundle", "utf8");
     expect(() => planBundleMemberRemoval(cwd, "phase_snapshot", ["P1"])).toThrow();
+  });
+
+  it("an authority-INVALID current member (misfiled: id P1, body phase_id PX) → unsafe, kind fail-closed", async () => {
+    const pxBytes = await snapshotBytes("PX"); // a valid PX snapshot...
+    const p2Bytes = await snapshotBytes("P2");
+    await rawBundle([{ id: "P1", bytes: pxBytes }, { id: "P2", bytes: p2Bytes }]); // ...filed under member id "P1"
+
+    const plan = planBundleMemberRemoval(cwd, "phase_snapshot", ["P1"]);
+    expect(plan.unsafe).toBe(true);
+    expect(plan.invalid).toEqual(["P1"]); // the misfiled member is authority-invalid
+    expect(plan.removable).toEqual([]); // never treats a Tier-1-present member as removable truth
+    expect(plan.new_bundle).toBeNull();
+    expect(plan.retire_bundles).toEqual([]);
+  });
+});
+
+describe("removeBundleMembers — destructive single-kind apply", () => {
+  it("removes a bundle-only member: writes the consolidated new bundle, retires the old, reports deleted", async () => {
+    const bytesById = new Map<string, string>();
+    for (const id of ["P1", "P2", "P3"]) bytesById.set(id, await snapshotBytes(id));
+    await bundlePhases(["P1", "P2", "P3"], bytesById);
+
+    const out = await removeBundleMembers(cwd, "phase_snapshot", ["P1"]);
+    expect(out.removed).toEqual([{ id: "P1", outcome: "deleted" }]); // no loose copy → fully deleted
+    expect(out.unsafe_invalid).toEqual([]);
+    expect(out.skipped_stale).toEqual([]);
+    // The store now holds ONE bundle = the {P2,P3} consolidation; P1 is gone everywhere.
+    expect((await listBundles()).length).toBe(1);
+    const after = planBundleMemberRemoval(cwd, "phase_snapshot", []);
+    expect(after.survivors).toEqual(["P2", "P3"]);
+  });
+
+  it("a `both` member (also loose) → bundle_member_removed (NOT deleted — the loose copy still resolves)", async () => {
+    const bytesById = new Map<string, string>();
+    for (const id of ["P1", "P2"]) bytesById.set(id, await snapshotBytes(id));
+    await bundlePhases(["P1", "P2"], bytesById);
+    await writeFile(phaseSnapshotPath(cwd, "P1"), bytesById.get("P1")!, "utf8"); // P1 is now BOTH (loose + bundle)
+
+    const out = await removeBundleMembers(cwd, "phase_snapshot", ["P1"]);
+    expect(out.removed).toEqual([{ id: "P1", outcome: "bundle_member_removed" }]);
+    expect(await readFile(phaseSnapshotPath(cwd, "P1"), "utf8")).toBe(bytesById.get("P1")); // loose half survives
+  });
+
+  it("removing ALL members → the bundle is deleted, no replacement written", async () => {
+    const bytesById = new Map<string, string>();
+    for (const id of ["P1", "P2"]) bytesById.set(id, await snapshotBytes(id));
+    await bundlePhases(["P1", "P2"], bytesById);
+
+    const out = await removeBundleMembers(cwd, "phase_snapshot", ["P1", "P2"]);
+    expect(out.removed.map((r) => r.id).sort()).toEqual(["P1", "P2"]);
+    expect(await listBundles()).toEqual([]); // empty-set → bundle deleted
+  });
+
+  it("an authority-invalid kind is left UNTOUCHED (unsafe_invalid), no bundle written or retired", async () => {
+    const pxBytes = await snapshotBytes("PX");
+    const p2Bytes = await snapshotBytes("P2");
+    await rawBundle([{ id: "P1", bytes: pxBytes }, { id: "P2", bytes: p2Bytes }]);
+    const before = await listBundles();
+
+    const out = await removeBundleMembers(cwd, "phase_snapshot", ["P1"]);
+    expect(out.removed).toEqual([]);
+    expect(out.unsafe_invalid).toEqual(["P1"]);
+    expect(await listBundles()).toEqual(before); // untouched
+  });
+
+  it("a retire bundle SWAPPED between plan and unlink (bytes changed) → skipped_stale, NOT retired", async () => {
+    const bytesById = new Map<string, string>();
+    for (const id of ["P1", "P2", "P3"]) bytesById.set(id, await snapshotBytes(id));
+    await bundlePhases(["P1", "P2", "P3"], bytesById);
+
+    const out = await removeBundleMembers(cwd, "phase_snapshot", ["P1"], {
+      beforeRetire: async (file) => {
+        // After the new bundle is durably written, swap the old bundle's bytes (append a byte).
+        const abs = join(archiveBundlesDir(cwd), file);
+        await writeFile(abs, (await readFile(abs, "utf8")) + " ", "utf8");
+      },
+    });
+    expect(out.skipped_stale.length).toBe(1); // the old bundle no longer matches the plan → not retired
+    // CONVERGENCE: the skip leaves a consistent store (new {P2,P3} + old {P1,P2,P3}; P2/P3 dedupe by
+    // identical sha256, P1 still resolves from the old bundle). A plain re-run (no swap) completes it.
+    expect(() => planBundleMemberRemoval(cwd, "phase_snapshot", ["P1"])).not.toThrow();
+    const again = await removeBundleMembers(cwd, "phase_snapshot", ["P1"]);
+    expect(again.removed).toEqual([{ id: "P1", outcome: "deleted" }]);
+    expect((await listBundles()).length).toBe(1); // converged to the {P2,P3} consolidation only
+  });
+
+  it("a durability barrier failure (new-bundle dir fsync) fails closed — no retire", async () => {
+    const bytesById = new Map<string, string>();
+    for (const id of ["P1", "P2", "P3"]) bytesById.set(id, await snapshotBytes(id));
+    await bundlePhases(["P1", "P2", "P3"], bytesById);
+    const before = await listBundles();
+    __setDeleteIntentDirFsyncForTests((_d, purpose) => {
+      if (purpose === "bundle_write") throw new DeleteIntentDurabilityError("failed", "injected");
+    });
+    await expect(removeBundleMembers(cwd, "phase_snapshot", ["P1"])).rejects.toBeInstanceOf(DeleteIntentDurabilityError);
+    // The barrier threw before any retire → the old bundle is NOT retired (still present).
+    expect(await listBundles()).toEqual(expect.arrayContaining(before));
+  });
+
+  it("the RETIRE-phase dir-fsync barrier is REQUIRED too — a failure there fails closed (no silent non-durable retire)", async () => {
+    const bytesById = new Map<string, string>();
+    for (const id of ["P1", "P2"]) bytesById.set(id, await snapshotBytes(id));
+    await bundlePhases(["P1", "P2"], bytesById);
+    // Remove ALL members: new_bundle is null, so there is NO bundle_write barrier — the only
+    // durability barrier is the post-retire `bundle_retire` dir-fsync. It must be fail-closed.
+    __setDeleteIntentDirFsyncForTests((_d, purpose) => {
+      if (purpose === "bundle_retire") throw new DeleteIntentDurabilityError("failed", "injected");
+    });
+    await expect(removeBundleMembers(cwd, "phase_snapshot", ["P1", "P2"])).rejects.toBeInstanceOf(DeleteIntentDurabilityError);
   });
 });
