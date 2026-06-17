@@ -603,8 +603,7 @@ export async function planArchiveRetention(
 
 export type RetentionDeleteSkipReason =
   | "needs_bundle_member_removal" // bundle-only / both → deferred to the bundle-member-removal layer
-  | "dependent_event_pack_not_removable" // a phase snapshot whose event_pack could NOT be removed this run
-  | "parent_phase_snapshot_not_removable" // an event_pack whose phase snapshot is NOT co-removable this run
+  | "requires_atomic_pair_removal" // a phase_snapshot↔event_pack bound pair — PR-2a does not delete pairs
   | "path_escape"
   | "unreadable"
   | "authority_changed" // the loose bytes no longer match the digest the plan decided on (swapped under us)
@@ -710,9 +709,9 @@ async function deleteLooseDropped(
       out.skipped.push({ id: item.id, reason: "needs_bundle_member_removal" });
       continue;
     }
-    // A caller-supplied pre-skip: one half of a phase/pack pair the caller decided is NOT safely
-    // removable this run (the pack's phase isn't co-removable, or the phase's pack survives) —
-    // so this loose-only would_drop is held rather than breaking the surviving partner.
+    // A caller-supplied pre-skip: this loose-only would_drop is half of a phase_snapshot↔event_pack
+    // bound pair, which PR-2a defers whole (a pair cannot be unlinked atomically) — held rather
+    // than risk a crash/failure between two unlinks leaving exactly one side.
     const pre = preSkip?.get(item.id);
     if (pre) {
       out.skipped.push({ id: item.id, reason: pre });
@@ -740,25 +739,30 @@ async function deleteLooseDropped(
 }
 
 /**
- * Apply keep-latest-N retention DESTRUCTIVELY (PR-2a: loose-only). RE-RUNS the planner here as
- * the delete authority (a caller never passes a stale plan), then unlinks each loose-only
- * `would_drop` record through a per-record re-read + digest-match + re-authority-validate gate.
- * A bundle-only / `both` would_drop is SKIPPED (bundle-member removal is a later layer).
+ * Apply keep-latest-N retention DESTRUCTIVELY (PR-2a: loose-only, INDEPENDENT records only).
+ * RE-RUNS the planner here as the delete authority (a caller never passes a stale plan), then
+ * unlinks each removable loose-only `would_drop` record through a per-record re-read +
+ * digest-match + re-authority-validate gate. A bundle-only / `both` would_drop is SKIPPED
+ * (bundle-member removal is a later layer).
  *
- * A phase snapshot and its event_pack are a MUTUALLY-bound unit, so PR-2a removes them
- * BOTH-OR-NEITHER:
+ * PR-2a does NOT delete a phase_snapshot↔event_pack pair. The two are MUTUALLY bound:
  *   - the pack carries the snapshot's `snapshot_sha256` — a pack WITHOUT its snapshot is broken;
  *   - the snapshot's `progress_events` evidence resolves event_ids from the durable ledger
  *     (loose events ∪ validated packs) — once the loose events are compacted into the pack, the
  *     pack is that evidence's only durable source, so a snapshot WITHOUT its pack DANGLES.
- * So a pack/snapshot pair is deleted only when BOTH copies are loose-only `would_drop` removable
- * THIS run; if either side is bundle-only / `both` / blocked / unlink-failed, BOTH are kept
- * (`parent_phase_snapshot_not_removable` on the pack, `dependent_event_pack_not_removable` on the
- * snapshot). The event_pack store being a PARTIAL view (a `(store)` block) is fail-closed: no
- * phase snapshot is removable (a pack we could not enumerate might depend on / be depended on by
- * it). Within a removable pair the pack is unlinked FIRST, then the snapshot only once the pack
- * is gone this run — so a crash mid-pair never leaves a snapshot bound to a deleted pack.
- * Decisions are independent (an archived snapshot carries no decision_refs) and delete last.
+ * A filesystem cannot unlink two files atomically, so a sequential two-unlink "both" cannot be
+ * crash-safe: a process crash, or a per-record gate skip / `unlink_failed` / `unreadable` BETWEEN
+ * the two unlinks, leaves exactly one side and breaks the archive. So a bound pair is DEFERRED
+ * WHOLE (`requires_atomic_pair_removal`) to the atomic-pair-removal layer; PR-2a deletes only
+ * records with NO cross-binding, each a single independent unlink (atomic on its own):
+ *   - a `decision_record` (no binding either way);
+ *   - a `phase_snapshot` with NO event_pack (nothing binds to it — the snapshot is the *referencer*
+ *     of its own evidence, so deleting it strands nothing; with no pack carrying its
+ *     `snapshot_sha256`, nothing is orphaned).
+ * A would_drop event_pack ALWAYS has a would_drop phase (the planner drops a pack only with its
+ * phase), so every would_drop pack is half a pair → always deferred. If the event_pack store is a
+ * PARTIAL view (a `(store)` block — its loose dir or bundle store unreadable) we cannot prove a
+ * phase has no pack, so every loose phase is deferred fail-closed.
  * Returns a per-kind partial outcome (deleted / vanished / skipped); nothing is silently dropped.
  * Run under the write lock.
  */
@@ -773,43 +777,29 @@ export async function applyArchiveRetention(
   const eventPlan = byKind.get("event_pack") ?? empty("event_pack");
   const phasePlan = byKind.get("phase_snapshot") ?? empty("phase_snapshot");
 
-  // The event_pack plan as a per-id index (real packs only — the `(store)` block is a store-level
+  // Every event_pack id the planner saw (real packs only — the `(store)` block is a store-level
   // fault marker, not a record). Its PRESENCE means the event_pack store was only a PARTIAL view,
-  // so we cannot enumerate packs and must fail closed.
+  // so we cannot prove a phase has no pack and must fail closed.
   const eventItems = [...eventPlan.would_keep, ...eventPlan.would_drop, ...eventPlan.blocked];
   const eventStoreUncertain = eventItems.some((i) => i.id === STORE_BLOCK_ID);
-  const packById = new Map<string, RetentionItem>();
-  for (const i of eventItems) if (i.id !== STORE_BLOCK_ID) packById.set(i.id, i);
+  const packIds = new Set<string>(eventItems.filter((i) => i.id !== STORE_BLOCK_ID).map((i) => i.id));
 
-  // BOTH-OR-NEITHER: a phase snapshot is part of a removable pair only when its pack (if any) is
-  // ALSO a loose-only would_drop this run, and the event store view is complete. Else keep both.
-  const removablePair = new Set<string>();
-  if (!eventStoreUncertain) {
-    for (const phase of phasePlan.would_drop) {
-      if (phase.source !== "loose") continue; // the snapshot itself is not loose-only removable
-      const pack = packById.get(phase.id);
-      if (pack && !(pack.action === "would_drop" && pack.source === "loose")) continue; // pack not co-removable
-      removablePair.add(phase.id);
-    }
-  }
-
-  // 1. Event packs FIRST (within a removable pair). A would_drop pack whose phase is NOT part of a
-  //    removable pair is held — deleting it would strand its surviving snapshot's evidence.
+  // 1. Event packs: a would_drop pack always has a would_drop phase → it is always half a bound
+  //    pair → deferred whole. (A bundle-only / `both` pack is skipped needs_bundle_member_removal
+  //    first by its source.)
   const eventPreSkip = new Map<string, RetentionDeleteSkipReason>();
   for (const pack of eventPlan.would_drop) {
-    if (!removablePair.has(pack.id)) eventPreSkip.set(pack.id, "parent_phase_snapshot_not_removable");
+    if (pack.source === "loose") eventPreSkip.set(pack.id, "requires_atomic_pair_removal");
   }
   const eventOut = await deleteLooseDropped(cwd, eventPlan, eventPreSkip, hooks);
-  const packGone = new Set<string>([...eventOut.deleted, ...eventOut.vanished]);
 
-  // 2. Phase snapshots: delete only a removable-pair snapshot whose pack is gone this run (or had
-  //    no pack). A non-removable-pair snapshot, or one whose pack delete failed, is held — never
-  //    leave a surviving pack bound to a deleted snapshot.
+  // 2. Phase snapshots: delete a loose-only would_drop snapshot ONLY when it has NO event_pack and
+  //    the event store view is complete; a snapshot WITH a pack (or one we cannot rule out) is a
+  //    bound pair, deferred whole.
   const phasePreSkip = new Map<string, RetentionDeleteSkipReason>();
   for (const phase of phasePlan.would_drop) {
     if (phase.source !== "loose") continue; // handled as needs_bundle_member_removal in deleteLooseDropped
-    const safe = removablePair.has(phase.id) && (!packById.has(phase.id) || packGone.has(phase.id));
-    if (!safe) phasePreSkip.set(phase.id, "dependent_event_pack_not_removable");
+    if (eventStoreUncertain || packIds.has(phase.id)) phasePreSkip.set(phase.id, "requires_atomic_pair_removal");
   }
   const phaseOut = await deleteLooseDropped(cwd, phasePlan, phasePreSkip, hooks);
 

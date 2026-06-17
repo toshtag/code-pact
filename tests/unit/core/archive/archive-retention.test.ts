@@ -478,14 +478,16 @@ describe("planArchiveRetention — decision_record", () => {
 });
 
 describe("applyArchiveRetention — destructive LOOSE-ONLY delete (PR-2a)", () => {
-  it("deletes a loose-only would_drop record; keeps the would_keep", async () => {
+  it("deletes a loose-only would_drop phase snapshot that has NO event_pack (an independent record); keeps the would_keep", async () => {
     await archivePhases([
       { id: "P1", at: "2026-01-01T00:00:00.000Z" },
       { id: "P2", at: "2026-02-01T00:00:00.000Z" },
     ]);
-    await setRoadmap([]); // both unreferenced; keepLatest 1 → P2 keep, P1 drop
+    await setRoadmap([]); // both unreferenced; keepLatest 1 → P2 keep, P1 drop — and P1 has NO pack
     const out = await applyArchiveRetention(cwd, { keepLatest: 1 });
     const phase = out.find((o) => o.kind === "phase_snapshot")!;
+    // A phase snapshot with no event_pack is independent (nothing binds to it), so it is a single
+    // atomic unlink — safe to delete in PR-2a.
     expect(phase.deleted).toEqual(["P1"]);
     expect(phase.skipped).toEqual([]);
     expect(await exists(phaseSnapshotPath(cwd, "P1"))).toBe(false); // old truth dropped
@@ -529,7 +531,7 @@ describe("applyArchiveRetention — destructive LOOSE-ONLY delete (PR-2a)", () =
     expect(phase.skipped.find((s) => s.id === "P1")?.reason).toBe("needs_bundle_member_removal");
   });
 
-  it("event_pack loose is dropped WITH its phase snapshot (both loose, both would_drop)", async () => {
+  it("a loose phase + loose pack PAIR is DEFERRED WHOLE — both skipped requires_atomic_pair_removal, neither deleted", async () => {
     await archivePhases([
       { id: "P1", at: "2026-01-01T00:00:00.000Z" },
       { id: "P2", at: "2026-02-01T00:00:00.000Z" },
@@ -538,11 +540,50 @@ describe("applyArchiveRetention — destructive LOOSE-ONLY delete (PR-2a)", () =
       events: [{ task_id: "P1-T1", status: "done", at: "2026-06-01T00:00:00.000Z", actor: "agent" }],
     }).events;
     await writeEventPackFile(cwd, "P1", await buildValidEventPack(cwd, "P1", events));
-    await setRoadmap([]); // P1 (phase + pack) would_drop, both loose
+    await setRoadmap([]); // P1 (phase + pack) both loose, both would_drop — but PR-2a does NOT delete a pair
     const out = await applyArchiveRetention(cwd, { keepLatest: 1 });
-    expect(out.find((o) => o.kind === "phase_snapshot")!.deleted).toEqual(["P1"]);
-    expect(out.find((o) => o.kind === "event_pack")!.deleted).toEqual(["P1"]);
-    expect(await exists(eventPackPath(cwd, "P1"))).toBe(false);
+    // A filesystem can't unlink two files atomically, so a sequential two-unlink "both" is not
+    // crash-safe — the pair is deferred WHOLE to the atomic-pair-removal layer.
+    const phase = out.find((o) => o.kind === "phase_snapshot")!;
+    const event = out.find((o) => o.kind === "event_pack")!;
+    expect(phase.deleted).toEqual([]);
+    expect(event.deleted).toEqual([]);
+    expect(phase.skipped.find((s) => s.id === "P1")?.reason).toBe("requires_atomic_pair_removal");
+    expect(event.skipped.find((s) => s.id === "P1")?.reason).toBe("requires_atomic_pair_removal");
+    expect(await exists(phaseSnapshotPath(cwd, "P1"))).toBe(true);
+    expect(await exists(eventPackPath(cwd, "P1"))).toBe(true);
+  });
+
+  it("a bound pair NEVER enters the unlink gate — a beforeGate that throws is never called for either half", async () => {
+    await archivePhases([
+      { id: "P1", at: "2026-01-01T00:00:00.000Z" },
+      { id: "P2", at: "2026-02-01T00:00:00.000Z" },
+    ]);
+    const events = ProgressLog.parse({
+      events: [{ task_id: "P1-T1", status: "done", at: "2026-06-01T00:00:00.000Z", actor: "agent" }],
+    }).events;
+    await writeEventPackFile(cwd, "P1", await buildValidEventPack(cwd, "P1", events));
+    await setRoadmap([]); // P1 phase + pack both loose would_drop = a bound pair
+    const gated: string[] = [];
+    // The pair is pre-skipped BEFORE the gate, so neither half reaches beforeGate — a throwing
+    // hook here proves no unlink path starts for P1, so no crash/failure window can split the pair.
+    const out = await applyArchiveRetention(
+      cwd,
+      { keepLatest: 1 },
+      {
+        beforeGate: (kind, id) => {
+          gated.push(`${kind}:${id}`);
+          if (id === "P1") throw new Error("the bound pair must never be gated");
+        },
+      },
+    );
+    expect(gated).not.toContain("event_pack:P1");
+    expect(gated).not.toContain("phase_snapshot:P1");
+    expect(await exists(phaseSnapshotPath(cwd, "P1"))).toBe(true);
+    expect(await exists(eventPackPath(cwd, "P1"))).toBe(true);
+    expect(out.find((o) => o.kind === "event_pack")!.skipped.find((s) => s.id === "P1")?.reason).toBe(
+      "requires_atomic_pair_removal",
+    );
   });
 
   it("a loose pack whose phase is bundle-only is SKIPPED — deleting it would strand the surviving snapshot's evidence", async () => {
@@ -560,12 +601,12 @@ describe("applyArchiveRetention — destructive LOOSE-ONLY delete (PR-2a)", () =
     await writeEventPackFile(cwd, "P1", pack); // pack loose, would_drop
     await setRoadmap([]);
     const out = await applyArchiveRetention(cwd, { keepLatest: 1 });
-    // BOTH-OR-NEITHER: the snapshot survives (bundle-only), and its progress_events evidence
-    // resolves from this pack — deleting the pack would leave the snapshot's evidence dangling.
-    // So the pack is HELD (its phase is not co-removable) and the snapshot stays in the bundle.
+    // The snapshot survives (bundle-only), and its progress_events evidence resolves from this pack
+    // — deleting the pack would leave the snapshot's evidence dangling. The pack is a bound pair
+    // half, so it is deferred whole; the snapshot stays in the bundle.
     expect(out.find((o) => o.kind === "event_pack")!.deleted).toEqual([]);
     expect(out.find((o) => o.kind === "event_pack")!.skipped.find((s) => s.id === "P1")?.reason).toBe(
-      "parent_phase_snapshot_not_removable",
+      "requires_atomic_pair_removal",
     );
     expect(await exists(eventPackPath(cwd, "P1"))).toBe(true); // the loose pack is NOT deleted
     expect(out.find((o) => o.kind === "phase_snapshot")!.skipped.find((s) => s.id === "P1")?.reason).toBe(
@@ -586,10 +627,11 @@ describe("applyArchiveRetention — destructive LOOSE-ONLY delete (PR-2a)", () =
     await writeEventPackFile(cwd, "P1", await buildValidEventPack(cwd, "P1", events)); // pack loose, would_drop
     await setRoadmap([]);
     const out = await applyArchiveRetention(cwd, { keepLatest: 1 });
-    // phase P1 is `both` → not loose-only removable in PR-2a → its pack must NOT be deleted either.
+    // phase P1 is `both` → not loose-only removable in PR-2a → its pack (a bound pair half) is
+    // deferred whole, never deleted.
     expect(out.find((o) => o.kind === "event_pack")!.deleted).toEqual([]);
     expect(out.find((o) => o.kind === "event_pack")!.skipped.find((s) => s.id === "P1")?.reason).toBe(
-      "parent_phase_snapshot_not_removable",
+      "requires_atomic_pair_removal",
     );
     expect(await exists(eventPackPath(cwd, "P1"))).toBe(true);
     expect(await exists(phaseSnapshotPath(cwd, "P1"))).toBe(true);
@@ -612,7 +654,7 @@ describe("applyArchiveRetention — destructive LOOSE-ONLY delete (PR-2a)", () =
     const out = await applyArchiveRetention(cwd, { keepLatest: 1 });
     expect(out.find((o) => o.kind === "phase_snapshot")!.deleted).toEqual([]);
     expect(out.find((o) => o.kind === "phase_snapshot")!.skipped.find((s) => s.id === "P1")?.reason).toBe(
-      "dependent_event_pack_not_removable",
+      "requires_atomic_pair_removal",
     );
     expect(await exists(phaseSnapshotPath(cwd, "P1"))).toBe(true);
   });
@@ -630,10 +672,10 @@ describe("applyArchiveRetention — destructive LOOSE-ONLY delete (PR-2a)", () =
     await writeArchiveBundle(cwd, "event_pack", [{ id: "P1", bytes: JSON.stringify(pack, null, 2) + "\n" }]);
     await setRoadmap([]);
     const out = await applyArchiveRetention(cwd, { keepLatest: 1 });
-    // Deleting the loose phase snapshot would orphan the surviving bundle pack → BOTH kept.
+    // Deleting the loose phase snapshot would orphan the surviving bundle pack → the pair is kept.
     expect(out.find((o) => o.kind === "phase_snapshot")!.deleted).toEqual([]);
     expect(out.find((o) => o.kind === "phase_snapshot")!.skipped.find((s) => s.id === "P1")?.reason).toBe(
-      "dependent_event_pack_not_removable",
+      "requires_atomic_pair_removal",
     );
     expect(out.find((o) => o.kind === "event_pack")!.skipped.find((s) => s.id === "P1")?.reason).toBe(
       "needs_bundle_member_removal",
@@ -654,9 +696,9 @@ describe("applyArchiveRetention — destructive LOOSE-ONLY delete (PR-2a)", () =
     await writeArchiveBundle(cwd, "event_pack", [{ id: "P1", bytes: loosePack }]); // byte-identical bundle → source:both
     await setRoadmap([]);
     const out = await applyArchiveRetention(cwd, { keepLatest: 1 });
-    // The pack is `both` (not loose-only → not removable in PR-2a) → the phase snapshot is held.
+    // The phase has an event_pack (here a `both` one) → a bound pair → the phase is deferred whole.
     expect(out.find((o) => o.kind === "phase_snapshot")!.skipped.find((s) => s.id === "P1")?.reason).toBe(
-      "dependent_event_pack_not_removable",
+      "requires_atomic_pair_removal",
     );
     expect(await exists(phaseSnapshotPath(cwd, "P1"))).toBe(true);
   });
