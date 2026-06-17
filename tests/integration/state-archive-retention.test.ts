@@ -31,7 +31,7 @@ async function init(): Promise<void> {
   if (r.code !== 0) throw new Error(`init failed: ${r.stdout}${r.stderr}`);
 }
 
-describe("state archive-retention — dry-run only", () => {
+describe("state archive-retention — CLI surface (dry-run + --write)", () => {
   it("--json emits { mode: dry_run, keep_latest, retention_plans[] } per kind, mutates nothing", async () => {
     await init();
     const r = run(["state", "archive-retention", "--json"]);
@@ -49,11 +49,16 @@ describe("state archive-retention — dry-run only", () => {
     expect((json(run(["state", "archive-retention", "--keep-latest", "5", "--json"])).data as { keep_latest: number }).keep_latest).toBe(5);
   });
 
-  it("--write → CONFIG_ERROR (dry-run only until the destructive layer lands)", async () => {
+  it("--write under the lock emits { mode: written, results[] } (nothing to drop on a fresh project)", async () => {
     await init();
     const r = run(["state", "archive-retention", "--write", "--json"]);
-    expect(r.code).toBe(2);
-    expect(json(r).error?.code).toBe("CONFIG_ERROR");
+    expect(r.code).toBe(0);
+    const body = json(r);
+    expect(body.ok).toBe(true);
+    expect(body.data?.mode).toBe("written");
+    const results = body.data?.results as { kind: string; deleted: string[] }[];
+    expect(results.map((x) => x.kind).sort()).toEqual(["decision_record", "event_pack", "phase_snapshot"]);
+    for (const x of results) expect(x.deleted).toEqual([]); // fresh project: nothing unreferenced to drop
   });
 
   it("--keep-latest 0 → CONFIG_ERROR", async () => {

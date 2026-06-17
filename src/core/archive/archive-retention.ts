@@ -1,4 +1,4 @@
-import { readFile, readdir } from "node:fs/promises";
+import { readFile, readdir, unlink } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { Phase } from "../schemas/phase.ts";
@@ -6,6 +6,7 @@ import { PhaseSnapshot } from "../schemas/phase-snapshot.ts";
 import { DecisionStateRecord } from "../schemas/decision-state-record.ts";
 import { loadRoadmap } from "../plan/roadmap.ts";
 import { resolveWithinProject } from "../path-safety.ts";
+import { ARCHIVE_DECISIONS_DIR_SEGMENTS, ARCHIVE_EVENT_PACKS_DIR_SEGMENTS, ARCHIVE_PHASES_DIR_SEGMENTS } from "./paths.ts";
 import { loadArchiveBundles } from "./archive-bundle-loader.ts";
 import { enumerateArchivedPhaseSnapshots, resolveUnreferencedSnapshot } from "./load-phase-snapshot.ts";
 import { bindBundleMember, decisionRecordStem } from "./archive-bundle-binding.ts";
@@ -37,6 +38,12 @@ export const DEFAULT_KEEP_LATEST = 20;
 
 const ARCHIVE_EVENT_PACK_LABEL = ".code-pact/state/archive/event-packs";
 
+/** The id the planner emits for a STORE-level (not per-record) fault — a `would_drop`-blocking
+ *  diagnostic standing in for "the whole store view was partial, so no record is droppable".
+ *  Shared so the destructive apply can recognise a partial event_pack store and fail closed
+ *  (never delete a phase snapshot whose dependent pack we could not even enumerate). */
+const STORE_BLOCK_ID = "(store)";
+
 export type RetentionReferenceType = "roadmap_phase" | "task_depends_on" | "decision_ref" | "acceptance_ref";
 export type RetentionReference = { type: RetentionReferenceType; from: string; to: string };
 
@@ -63,6 +70,10 @@ export type RetentionItem = {
   reason: RetentionReason;
   /** WHY a record is referenced/kept — so a user can answer "why isn't this dropped?". */
   references?: RetentionReference[];
+  /** sha256 of the loose copy's raw bytes the plan decided on (loose / both records). The
+   *  destructive apply's gate confirms the on-disk bytes still match this before unlinking, so
+   *  a loose file swapped (even to another valid record) since the plan is not deleted. */
+  loose_sha256?: string;
 };
 
 export type RetentionPlan = {
@@ -175,6 +186,10 @@ type SourceResult =
        *  of a `both` record, so a divergent shadow is unsafe to delete on a loose-wins view —
        *  these are blocked `bundle_stale` (reconcile via compaction/supersession first). */
       divergedBoth: ReadonlySet<string>;
+      /** sha256 of each loose record's raw bytes AT PLAN TIME — the gate confirms the on-disk
+       *  bytes still match before deleting, so a loose file swapped (even to another VALID
+       *  record) between plan and unlink is NOT deleted on the stale verdict. */
+      looseSha256: ReadonlyMap<string, string>;
     }
   | { ok: false; detail: string };
 
@@ -208,22 +223,27 @@ async function buildSourceMap(cwd: string, kind: ArchiveBundleKind): Promise<Sou
   for (const id of looseSet) source.set(id, members.has(id) ? "both" : "loose");
   for (const id of members.keys()) if (!looseSet.has(id)) source.set(id, "bundle");
 
-  // STRICT-RECONCILE the `both` ids: the loose raw and the shadowed bundle member raw must be
-  // byte-identical, else the record's two physical copies disagree and a delete cannot safely
-  // pick truth → divergedBoth (blocked bundle_stale by the per-kind planners).
+  // Read every loose record's raw ONCE: record its digest (the gate's expected-bytes authority)
+  // and, for a `both` id, STRICT-RECONCILE against the shadowed bundle member (byte-identical
+  // else divergedBoth → blocked bundle_stale, since a delete removes both physical copies).
+  const looseSha256 = new Map<string, string>();
   const divergedBoth = new Set<string>();
   for (const [id, src] of source) {
-    if (src !== "both") continue;
-    const member = members.get(id)!;
+    if (src === "bundle") continue; // no loose copy
     let looseRaw: string | null = null;
     try {
       looseRaw = await readFile(join(looseDirFor(cwd, kind), `${id}.json`), "utf8");
     } catch {
       looseRaw = null;
     }
-    if (looseRaw === null || looseRaw !== member.bytes) divergedBoth.add(id);
+    if (looseRaw === null) {
+      if (src === "both") divergedBoth.add(id); // can't reconcile a shadow we can't read
+      continue;
+    }
+    looseSha256.set(id, sha256Hex(looseRaw));
+    if (src === "both" && looseRaw !== members.get(id)!.bytes) divergedBoth.add(id);
   }
-  return { ok: true, source, divergedBoth };
+  return { ok: true, source, divergedBoth, looseSha256 };
 }
 
 // --- keep-latest partition (the shared selection) ----------------------------
@@ -279,12 +299,12 @@ async function planPhaseRetention(
   // is then `blocked` (never ranked/dropped). A per-FILE skip is a single-record fault only.
   const storeFailed = !source.ok || skipped.some((sk) => sk.scope === "directory");
   for (const sk of skipped) {
-    const id = sk.scope === "file" ? sk.fileStem : "(store)";
+    const id = sk.scope === "file" ? sk.fileStem : STORE_BLOCK_ID;
     const reason: RetentionReason = sk.scope === "file" ? "invalid" : "reference_scan_failed";
     items.push({ kind: "phase_snapshot", id, snapshotted_at: null, source: srcOf(id), action: "blocked", reason });
   }
   if (!source.ok) {
-    items.push({ kind: "phase_snapshot", id: "(store)", snapshotted_at: null, source: "loose", action: "blocked", reason: "reference_scan_failed" });
+    items.push({ kind: "phase_snapshot", id: STORE_BLOCK_ID, snapshotted_at: null, source: "loose", action: "blocked", reason: "reference_scan_failed" });
   }
 
   // Collect AUTHORITY-valid snapshots; build taskId → owning phase ids for ambiguity. A
@@ -308,8 +328,15 @@ async function planPhaseRetention(
   for (const [, phases] of taskToPhases) if (phases.length > 1) for (const ph of phases) ambiguous.add(ph);
 
   const unreferenced: RetentionItem[] = [];
+  const shaOf = (id: string): string | undefined => (source.ok ? source.looseSha256.get(id) : undefined);
   for (const { phaseId, snapshot } of valid) {
-    const base = { kind: "phase_snapshot" as const, id: phaseId, snapshotted_at: snapshot.snapshotted_at, source: srcOf(phaseId) };
+    const base = {
+      kind: "phase_snapshot" as const,
+      id: phaseId,
+      snapshotted_at: snapshot.snapshotted_at,
+      source: srcOf(phaseId),
+      loose_sha256: shaOf(phaseId),
+    };
     // Fail-closed: the live graph could not be built, OR the archive enumeration was a
     // partial view (store/source unreadable) → cannot prove this record is unreferenced.
     if (!live.ok || storeFailed) {
@@ -429,12 +456,18 @@ async function planDecisionRetention(
   // records alongside a storeError).
   const storeFailed = storeError !== null || !source.ok;
   if (storeFailed) {
-    items.push({ kind: "decision_record", id: "(store)", snapshotted_at: null, source: "loose", action: "blocked", reason: storeError ? "invalid" : "reference_scan_failed" });
+    items.push({ kind: "decision_record", id: STORE_BLOCK_ID, snapshotted_at: null, source: "loose", action: "blocked", reason: storeError ? "invalid" : "reference_scan_failed" });
   }
 
   const unreferenced: RetentionItem[] = [];
   for (const { id, record } of records) {
-    const base = { kind: "decision_record" as const, id, snapshotted_at: record.snapshotted_at, source: srcOf(id) };
+    const base = {
+      kind: "decision_record" as const,
+      id,
+      snapshotted_at: record.snapshotted_at,
+      source: srcOf(id),
+      loose_sha256: source.ok ? source.looseSha256.get(id) : undefined,
+    };
     if (!live.ok || storeFailed) {
       items.push({ ...base, action: "blocked", reason: "reference_scan_failed" });
       continue;
@@ -467,7 +500,7 @@ async function planEventPackRetention(
   // A partial store/source view is fail-closed: a single blocked diagnostic, no pack dropped.
   if (!source.ok) {
     return partition("event_pack", [
-      { kind: "event_pack", id: "(store)", snapshotted_at: null, source: "loose", action: "blocked", reason: "reference_scan_failed" },
+      { kind: "event_pack", id: STORE_BLOCK_ID, snapshotted_at: null, source: "loose", action: "blocked", reason: "reference_scan_failed" },
     ]);
   }
   let bundleMembers: ReadonlyMap<string, { sha256: string; bytes: string }>;
@@ -475,13 +508,13 @@ async function planEventPackRetention(
     bundleMembers = loadArchiveBundles(cwd).index.get("event_pack") ?? new Map();
   } catch {
     return partition("event_pack", [
-      { kind: "event_pack", id: "(store)", snapshotted_at: null, source: "loose", action: "blocked", reason: "invalid" },
+      { kind: "event_pack", id: STORE_BLOCK_ID, snapshotted_at: null, source: "loose", action: "blocked", reason: "invalid" },
     ]);
   }
 
   for (const id of [...source.source.keys()].sort()) {
     const src = source.source.get(id)!;
-    const base = { kind: "event_pack" as const, id, snapshotted_at: null, source: src };
+    const base = { kind: "event_pack" as const, id, snapshotted_at: null, source: src, loose_sha256: source.looseSha256.get(id) };
     // AUTHORITY-validate the pack bytes (loose-wins) BEFORE trusting the parent verdict — a
     // schema/Tier-1-invalid OR MISFILED pack (filename id ≠ its body phase_id) must NEVER be
     // dropped just because its FILENAME's phase snapshot is being dropped (it may be another
@@ -557,4 +590,221 @@ export async function planArchiveRetention(
   const eventPlan = await planEventPackRetention(cwd, eventSource, verdict);
 
   return [phasePlan, eventPlan, decisionPlan];
+}
+
+// --- destructive apply (Layer 4 retention, PR-2a: LOOSE-ONLY) -----------------
+// The first layer that actually DROPS old archive truth. Conservative scope: it deletes
+// ONLY a `would_drop` record that lives loose-only (a bundle-only / `both` would_drop is
+// SKIPPED — physically removing a bundle MEMBER is the separate bundle-member-removal layer).
+// Every unlink is gated: the plan is the AUTHORITY (re-run here, never a stale caller plan),
+// and each loose file is re-read + re-authority-validated immediately before the unlink
+// (TOCTOU-narrowed). A reference-scan / store failure makes the planner block (no would_drop),
+// so a partial/uncertain view never deletes. Run under the repo write lock (the verb's job).
+
+export type RetentionDeleteSkipReason =
+  | "needs_bundle_member_removal" // bundle-only / both → deferred to the bundle-member-removal layer
+  | "requires_atomic_pair_removal" // a phase_snapshot↔event_pack bound pair — PR-2a does not delete pairs
+  | "path_escape"
+  | "unreadable"
+  | "authority_changed" // the loose bytes no longer match the digest the plan decided on (swapped under us)
+  | "authority_invalid" // the loose file changed under us and no longer authority-validates
+  | "unlink_failed";
+
+export type RetentionDeleteOutcome = {
+  kind: ArchiveBundleKind;
+  /** loose ids unlinked (old truth dropped). */
+  deleted: string[];
+  /** ids already gone at gate / unlink time (ENOENT) — idempotent, not a failure. */
+  vanished: string[];
+  /** ids NOT deleted, per-record reason (fail-closed; never a silent drop). */
+  skipped: { id: string; reason: RetentionDeleteSkipReason }[];
+};
+
+function looseRelPath(kind: ArchiveBundleKind, id: string): string {
+  const segs =
+    kind === "phase_snapshot"
+      ? ARCHIVE_PHASES_DIR_SEGMENTS
+      : kind === "event_pack"
+        ? ARCHIVE_EVENT_PACKS_DIR_SEGMENTS
+        : ARCHIVE_DECISIONS_DIR_SEGMENTS;
+  return [...segs, `${id}.json`].join("/");
+}
+
+/** Re-validate a loose record's ARCHIVE AUTHORITY from its current on-disk bytes (the same
+ *  checks the planner ran) — so a file that changed between plan and unlink is not deleted on
+ *  a stale verdict. */
+function looseStillAuthorityValid(kind: ArchiveBundleKind, id: string, raw: string): boolean {
+  try {
+    if (kind === "phase_snapshot") {
+      const snapshot = PhaseSnapshot.parse(JSON.parse(raw));
+      return resolveUnreferencedSnapshot(id, { kind: "valid", snapshot }).kind === "tolerated";
+    }
+    if (kind === "decision_record") {
+      const r = DecisionStateRecord.parse(JSON.parse(raw));
+      return (
+        id === decisionRecordStem(r.canonical_ref) &&
+        r.original_path === r.canonical_ref &&
+        r.path_sha256 === sha256Hex(r.canonical_ref)
+      );
+    }
+    validateEventPackTier1(id, raw, ARCHIVE_EVENT_PACK_LABEL);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+type LooseDeleteVerdict = { kind: "delete"; abs: string } | { kind: "vanished" } | { kind: "skip"; reason: RetentionDeleteSkipReason };
+
+/** Gate ONE loose record for deletion: path-in-project + fresh re-read + re-authority-validate.
+ *  No unlink (the caller does it). Reads disk fresh to narrow the plan→unlink TOCTOU. It
+ *  re-validates AUTHORITY (the bytes are still a valid record of this id), but NOT the
+ *  reference graph nor `source` — those were established by the re-plan at the start of this
+ *  run, and the repo write lock (the caller's job) bars any concurrent code-pact mutation from
+ *  adding a reference or a bundle copy mid-run; an external edit outside the lock is the
+ *  documented out-of-scope window. */
+async function gateLooseDelete(
+  cwd: string,
+  kind: ArchiveBundleKind,
+  id: string,
+  expectedSha256: string | undefined,
+): Promise<LooseDeleteVerdict> {
+  let abs: string;
+  try {
+    abs = await resolveWithinProject(cwd, looseRelPath(kind, id));
+  } catch {
+    return { kind: "skip", reason: "path_escape" };
+  }
+  let raw: string;
+  try {
+    raw = await readFile(abs, "utf8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return { kind: "vanished" };
+    return { kind: "skip", reason: "unreadable" };
+  }
+  // Delete EXACTLY the bytes the plan decided to drop, not merely "a valid record at this path":
+  // if the loose file was swapped (even to another authority-valid record) since the plan read
+  // it, the digest differs → skip, never delete on the stale verdict.
+  if (expectedSha256 === undefined || sha256Hex(raw) !== expectedSha256) {
+    return { kind: "skip", reason: "authority_changed" };
+  }
+  if (!looseStillAuthorityValid(kind, id, raw)) return { kind: "skip", reason: "authority_invalid" };
+  return { kind: "delete", abs };
+}
+
+/** Test seam: a hook fired immediately before each loose record's delete gate, so a test can
+ *  inject a between-plan-and-unlink swap and prove the digest gate skips it. */
+export type RetentionApplyHooks = { beforeGate?: (kind: ArchiveBundleKind, id: string) => Promise<void> | void };
+
+async function deleteLooseDropped(
+  cwd: string,
+  plan: RetentionPlan,
+  preSkip: ReadonlyMap<string, RetentionDeleteSkipReason> | null,
+  hooks: RetentionApplyHooks,
+): Promise<RetentionDeleteOutcome> {
+  const out: RetentionDeleteOutcome = { kind: plan.kind, deleted: [], vanished: [], skipped: [] };
+  for (const item of plan.would_drop) {
+    // PR-2a deletes loose-only; a bundle-only / both copy is the bundle-member-removal layer.
+    if (item.source !== "loose") {
+      out.skipped.push({ id: item.id, reason: "needs_bundle_member_removal" });
+      continue;
+    }
+    // A caller-supplied pre-skip: this loose-only would_drop is half of a phase_snapshot↔event_pack
+    // bound pair, which PR-2a defers whole (a pair cannot be unlinked atomically) — held rather
+    // than risk a crash/failure between two unlinks leaving exactly one side.
+    const pre = preSkip?.get(item.id);
+    if (pre) {
+      out.skipped.push({ id: item.id, reason: pre });
+      continue;
+    }
+    if (hooks.beforeGate) await hooks.beforeGate(plan.kind, item.id);
+    const verdict = await gateLooseDelete(cwd, plan.kind, item.id, item.loose_sha256);
+    if (verdict.kind === "vanished") {
+      out.vanished.push(item.id);
+      continue;
+    }
+    if (verdict.kind === "skip") {
+      out.skipped.push({ id: item.id, reason: verdict.reason });
+      continue;
+    }
+    try {
+      await unlink(verdict.abs);
+      out.deleted.push(item.id);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") out.vanished.push(item.id);
+      else out.skipped.push({ id: item.id, reason: "unlink_failed" });
+    }
+  }
+  return out;
+}
+
+/**
+ * Apply keep-latest-N retention DESTRUCTIVELY (PR-2a: loose-only, INDEPENDENT records only).
+ * RE-RUNS the planner here as the delete authority (a caller never passes a stale plan), then
+ * unlinks each removable loose-only `would_drop` record through a per-record re-read +
+ * digest-match + re-authority-validate gate. A bundle-only / `both` would_drop is SKIPPED
+ * (bundle-member removal is a later layer).
+ *
+ * PR-2a does NOT delete a phase_snapshot↔event_pack pair. The two are MUTUALLY bound:
+ *   - the pack carries the snapshot's `snapshot_sha256` — a pack WITHOUT its snapshot is broken;
+ *   - the snapshot's `progress_events` evidence resolves event_ids from the durable ledger
+ *     (loose events ∪ validated packs) — once the loose events are compacted into the pack, the
+ *     pack is that evidence's only durable source, so a snapshot WITHOUT its pack DANGLES.
+ * A filesystem cannot unlink two files atomically, so a sequential two-unlink "both" cannot be
+ * crash-safe: a process crash, or a per-record gate skip / `unlink_failed` / `unreadable` BETWEEN
+ * the two unlinks, leaves exactly one side and breaks the archive. So a bound pair is DEFERRED
+ * WHOLE (`requires_atomic_pair_removal`) to the atomic-pair-removal layer; PR-2a deletes only
+ * records with NO cross-binding, each a single independent unlink (atomic on its own):
+ *   - a `decision_record` (no binding either way);
+ *   - a `phase_snapshot` with NO event_pack (nothing binds to it — the snapshot is the *referencer*
+ *     of its own evidence, so deleting it strands nothing; with no pack carrying its
+ *     `snapshot_sha256`, nothing is orphaned).
+ * A would_drop event_pack ALWAYS has a would_drop phase (the planner drops a pack only with its
+ * phase), so every would_drop pack is half a pair → always deferred. If the event_pack store is a
+ * PARTIAL view (a `(store)` block — its loose dir or bundle store unreadable) we cannot prove a
+ * phase has no pack, so every loose phase is deferred fail-closed.
+ * Returns a per-kind partial outcome (deleted / vanished / skipped); nothing is silently dropped.
+ * Run under the write lock.
+ */
+export async function applyArchiveRetention(
+  cwd: string,
+  opts: { keepLatest?: number } = {},
+  hooks: RetentionApplyHooks = {},
+): Promise<RetentionDeleteOutcome[]> {
+  const plans = await planArchiveRetention(cwd, opts);
+  const byKind = new Map(plans.map((p) => [p.kind, p]));
+  const empty = (kind: ArchiveBundleKind): RetentionPlan => ({ kind, would_keep: [], would_drop: [], blocked: [] });
+  const eventPlan = byKind.get("event_pack") ?? empty("event_pack");
+  const phasePlan = byKind.get("phase_snapshot") ?? empty("phase_snapshot");
+
+  // Every event_pack id the planner saw (real packs only — the `(store)` block is a store-level
+  // fault marker, not a record). Its PRESENCE means the event_pack store was only a PARTIAL view,
+  // so we cannot prove a phase has no pack and must fail closed.
+  const eventItems = [...eventPlan.would_keep, ...eventPlan.would_drop, ...eventPlan.blocked];
+  const eventStoreUncertain = eventItems.some((i) => i.id === STORE_BLOCK_ID);
+  const packIds = new Set<string>(eventItems.filter((i) => i.id !== STORE_BLOCK_ID).map((i) => i.id));
+
+  // 1. Event packs: a would_drop pack always has a would_drop phase → it is always half a bound
+  //    pair → deferred whole. (A bundle-only / `both` pack is skipped needs_bundle_member_removal
+  //    first by its source.)
+  const eventPreSkip = new Map<string, RetentionDeleteSkipReason>();
+  for (const pack of eventPlan.would_drop) {
+    if (pack.source === "loose") eventPreSkip.set(pack.id, "requires_atomic_pair_removal");
+  }
+  const eventOut = await deleteLooseDropped(cwd, eventPlan, eventPreSkip, hooks);
+
+  // 2. Phase snapshots: delete a loose-only would_drop snapshot ONLY when it has NO event_pack and
+  //    the event store view is complete; a snapshot WITH a pack (or one we cannot rule out) is a
+  //    bound pair, deferred whole.
+  const phasePreSkip = new Map<string, RetentionDeleteSkipReason>();
+  for (const phase of phasePlan.would_drop) {
+    if (phase.source !== "loose") continue; // handled as needs_bundle_member_removal in deleteLooseDropped
+    if (eventStoreUncertain || packIds.has(phase.id)) phasePreSkip.set(phase.id, "requires_atomic_pair_removal");
+  }
+  const phaseOut = await deleteLooseDropped(cwd, phasePlan, phasePreSkip, hooks);
+
+  // 3. Decisions are independent — delete last.
+  const decisionOut = await deleteLooseDropped(cwd, byKind.get("decision_record") ?? empty("decision_record"), null, hooks);
+
+  return [phaseOut, eventOut, decisionOut];
 }
