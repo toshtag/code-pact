@@ -49,6 +49,7 @@ export type RetentionReason =
   | "referenced_by_decision_link"
   | "dependent_on_kept_phase_snapshot"
   | "invalid"
+  | "bundle_stale"
   | "ambiguous"
   | "reference_scan_failed";
 
@@ -165,7 +166,17 @@ async function buildLiveGraph(cwd: string): Promise<LiveGraphResult> {
 // --- per-kind loose ∪ bundle source map --------------------------------------
 
 type SourceMap = ReadonlyMap<string, "loose" | "bundle" | "both">;
-type SourceResult = { ok: true; source: SourceMap } | { ok: false; detail: string };
+type SourceResult =
+  | {
+      ok: true;
+      source: SourceMap;
+      /** ids present in BOTH loose and a bundle whose two raw copies DIVERGE (not byte-
+       *  identical, or the loose unreadable). A retention DELETE removes BOTH physical copies
+       *  of a `both` record, so a divergent shadow is unsafe to delete on a loose-wins view —
+       *  these are blocked `bundle_stale` (reconcile via compaction/supersession first). */
+      divergedBoth: ReadonlySet<string>;
+    }
+  | { ok: false; detail: string };
 
 function looseDirFor(cwd: string, kind: ArchiveBundleKind): string {
   return kind === "phase_snapshot"
@@ -179,9 +190,9 @@ function looseDirFor(cwd: string, kind: ArchiveBundleKind): string {
  *  Loads the bundle store STRICT — a corrupt store is a fail-closed `{ ok: false }`
  *  (the planner must not under-count members and mis-rank/mis-drop). */
 async function buildSourceMap(cwd: string, kind: ArchiveBundleKind): Promise<SourceResult> {
-  let bundleIds: Set<string>;
+  let members: ReadonlyMap<string, { sha256: string; bytes: string }>;
   try {
-    bundleIds = new Set(loadArchiveBundles(cwd).index.get(kind)?.keys() ?? []);
+    members = loadArchiveBundles(cwd).index.get(kind) ?? new Map();
   } catch (err) {
     return { ok: false, detail: `bundle store unreadable: ${(err as Error).message}` };
   }
@@ -194,9 +205,25 @@ async function buildSourceMap(cwd: string, kind: ArchiveBundleKind): Promise<Sou
   }
   const looseSet = new Set(looseIds);
   const source = new Map<string, "loose" | "bundle" | "both">();
-  for (const id of looseSet) source.set(id, bundleIds.has(id) ? "both" : "loose");
-  for (const id of bundleIds) if (!looseSet.has(id)) source.set(id, "bundle");
-  return { ok: true, source };
+  for (const id of looseSet) source.set(id, members.has(id) ? "both" : "loose");
+  for (const id of members.keys()) if (!looseSet.has(id)) source.set(id, "bundle");
+
+  // STRICT-RECONCILE the `both` ids: the loose raw and the shadowed bundle member raw must be
+  // byte-identical, else the record's two physical copies disagree and a delete cannot safely
+  // pick truth → divergedBoth (blocked bundle_stale by the per-kind planners).
+  const divergedBoth = new Set<string>();
+  for (const [id, src] of source) {
+    if (src !== "both") continue;
+    const member = members.get(id)!;
+    let looseRaw: string | null = null;
+    try {
+      looseRaw = await readFile(join(looseDirFor(cwd, kind), `${id}.json`), "utf8");
+    } catch {
+      looseRaw = null;
+    }
+    if (looseRaw === null || looseRaw !== member.bytes) divergedBoth.add(id);
+  }
+  return { ok: true, source, divergedBoth };
 }
 
 // --- keep-latest partition (the shared selection) ----------------------------
@@ -287,6 +314,12 @@ async function planPhaseRetention(
     // partial view (store/source unreadable) → cannot prove this record is unreferenced.
     if (!live.ok || storeFailed) {
       items.push({ ...base, action: "blocked", reason: "reference_scan_failed" });
+      continue;
+    }
+    // A `both` record whose loose and shadowed bundle copies DIVERGE is unsafe to delete
+    // (a delete removes both physical copies) → blocked bundle_stale, never ranked.
+    if (source.ok && source.divergedBoth.has(phaseId)) {
+      items.push({ ...base, action: "blocked", reason: "bundle_stale" });
       continue;
     }
     // A task-id collision across archived snapshots → cannot attribute a depends_on safely.
@@ -406,6 +439,11 @@ async function planDecisionRetention(
       items.push({ ...base, action: "blocked", reason: "reference_scan_failed" });
       continue;
     }
+    // A `both` decision whose loose and shadowed bundle copies diverge → unsafe to delete.
+    if (source.ok && source.divergedBoth.has(id)) {
+      items.push({ ...base, action: "blocked", reason: "bundle_stale" });
+      continue;
+    }
     const refs = live.graph.decisionRefs.get(record.canonical_ref);
     if (refs && refs.length > 0) {
       items.push({ ...base, action: "blocked", reason: "referenced_by_decision_link", references: refs });
@@ -473,6 +511,11 @@ async function planEventPackRetention(
     }
     if (!valid) {
       items.push({ ...base, action: "blocked", reason: "invalid" });
+      continue;
+    }
+    // A `both` pack whose loose and shadowed bundle copies diverge → unsafe to delete.
+    if (source.divergedBoth.has(id)) {
+      items.push({ ...base, action: "blocked", reason: "bundle_stale" });
       continue;
     }
     // A VALID pack drops ONLY with its phase snapshot. An orphan (no parent snapshot) is an

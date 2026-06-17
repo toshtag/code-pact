@@ -7,6 +7,7 @@ import { writeDecisionRecord } from "../../../../src/core/archive/decision-recor
 import { planArchiveRetention, resolveKeepLatest, type RetentionPlan } from "../../../../src/core/archive/archive-retention.ts";
 import { phaseSnapshotPath, decisionRecordPath, archiveBundlesDir, sha256Hex } from "../../../../src/core/archive/paths.ts";
 import { computeMemberIdsSha256 } from "../../../../src/core/archive/archive-bundle-reader.ts";
+import { decisionRecordStem } from "../../../../src/core/archive/archive-bundle-binding.ts";
 import { ARCHIVE_BUNDLE_SCHEMA_VERSION } from "../../../../src/core/schemas/archive-bundle.ts";
 import { buildValidEventPack, writeEventPackFile } from "../../../helpers/event-pack-fixture.ts";
 import { ProgressLog } from "../../../../src/core/schemas/progress-event.ts";
@@ -229,6 +230,75 @@ describe("planArchiveRetention — the reference gate is fail-CLOSED", () => {
       "reference_scan_failed",
       "reference_scan_failed",
     ]);
+  });
+});
+
+describe("planArchiveRetention — source:both STRICT-RECONCILE (a retention delete removes BOTH copies)", () => {
+  const ADR = `# RFC\n\n**Status:** accepted (P9, 2026-06)\n\n## Summary\n\nX.\n`;
+  // Write a Tier-1-VALID bundle holding `members` directly (loadArchiveBundles tolerates any
+  // member-body bytes — only the wrapper sha/order/checksum are validated here).
+  async function rawBundle(kind: string, members: { id: string; bytes: string }[]): Promise<void> {
+    const dir = archiveBundlesDir(cwd);
+    await mkdir(dir, { recursive: true });
+    const full = members
+      .map((m) => ({ id: m.id, sha256: sha256Hex(m.bytes), bytes: m.bytes }))
+      .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    await writeFile(
+      join(dir, `${kind}-shadow.json`),
+      JSON.stringify({
+        schema_version: ARCHIVE_BUNDLE_SCHEMA_VERSION,
+        kind,
+        member_ids_sha256: computeMemberIdsSha256(full.map((m) => m.id)),
+        members: full,
+      }),
+      "utf8",
+    );
+  }
+  // A different-but-valid serialization (compact JSON) of the same record — both copies are
+  // individually valid yet byte-DIVERGENT, the case the reviewer flagged as still unsafe.
+  const compact = (raw: string): string => JSON.stringify(JSON.parse(raw));
+
+  it("phase_snapshot in BOTH loose+bundle with divergent (compact) shadow → blocked bundle_stale, never dropped", async () => {
+    await archivePhases([
+      { id: "P1", at: "2026-01-01T00:00:00.000Z" },
+      { id: "P2", at: "2026-02-01T00:00:00.000Z" },
+    ]);
+    await setRoadmap([]); // both unreferenced; keepLatest 1 would otherwise drop P1
+    const loose = await readFile(phaseSnapshotPath(cwd, "P1"), "utf8");
+    await rawBundle("phase_snapshot", [{ id: "P1", bytes: compact(loose) }]); // shadow ≠ loose bytes
+    const plan = planFor(await planArchiveRetention(cwd, { keepLatest: 1 }), "phase_snapshot");
+    expect(plan.would_drop).toEqual([]);
+    expect(plan.blocked.find((i) => i.id === "P1")!.reason).toBe("bundle_stale");
+  });
+
+  it("decision_record in BOTH loose+bundle with divergent shadow → blocked bundle_stale, never dropped", async () => {
+    const DEC = "design/decisions/foo-rfc.md";
+    await writeFile(join(cwd, DEC), ADR, "utf8");
+    await writeDecisionRecord(cwd, DEC, { now: new Date("2026-01-01T00:00:00.000Z") });
+    await setRoadmap([]);
+    const stem = decisionRecordStem(DEC);
+    const loose = await readFile(decisionRecordPath(cwd, DEC), "utf8");
+    await rawBundle("decision_record", [{ id: stem, bytes: compact(loose) }]);
+    const plan = planFor(await planArchiveRetention(cwd, { keepLatest: 1 }), "decision_record");
+    expect(plan.would_drop).toEqual([]);
+    expect(plan.blocked.find((i) => i.id === stem)!.reason).toBe("bundle_stale");
+  });
+
+  it("event_pack in BOTH loose+bundle with divergent shadow → blocked bundle_stale, never dropped", async () => {
+    await archivePhases([
+      { id: "P1", at: "2026-01-01T00:00:00.000Z" },
+      { id: "P2", at: "2026-02-01T00:00:00.000Z" },
+    ]);
+    const events = ProgressLog.parse({
+      events: [{ task_id: "P1-T1", status: "done", at: "2026-06-01T00:00:00.000Z", actor: "agent" }],
+    }).events;
+    const pack = await buildValidEventPack(cwd, "P1", events);
+    await writeEventPackFile(cwd, "P1", pack); // loose (2-space) valid
+    await rawBundle("event_pack", [{ id: "P1", bytes: JSON.stringify(pack) }]); // compact shadow ≠ loose
+    await setRoadmap([]);
+    const plan = planFor(await planArchiveRetention(cwd, { keepLatest: 1 }), "event_pack");
+    expect(plan.would_drop).toEqual([]);
+    expect(plan.blocked.find((i) => i.id === "P1")!.reason).toBe("bundle_stale");
   });
 });
 
