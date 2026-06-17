@@ -69,11 +69,16 @@ export async function readLoosePhaseSnapshotRaw(
 }
 
 /**
- * Read `.code-pact/state/archive/phases/<phaseId>.json`, JSON-parse, and
- * `PhaseSnapshot.parse()`-validate. ENOENT → `absent`; any other read error or
- * a JSON/schema failure → `invalid` (never `absent`). An unsafe `phaseId`
+ * LOW-LEVEL loose-only reader: read `.code-pact/state/archive/phases/<phaseId>.json`,
+ * JSON-parse, and `PhaseSnapshot.parse()`-validate. ENOENT → `absent`; any other read
+ * error or a JSON/schema failure → `invalid` (never `absent`). An unsafe `phaseId`
  * (rejected by `phaseSnapshotPath` → `assertSafePlanId`) surfaces as `invalid`,
  * fail-closed — a malformed roadmap id never silently resolves a missing phase.
+ *
+ * NOT bundle-aware and NOT delete-intent-aware: it reads only the loose file. Callers
+ * wanting the full archive view (loose ∪ bundle, with a pending delete-intent treated
+ * as absent) MUST use `resolvePhaseSnapshotRaw` / `enumerateArchivedPhaseSnapshots`
+ * (which is the only in-repo caller, and it applies the delete-intent filter itself).
  */
 export async function loadPhaseSnapshot(
   cwd: string,

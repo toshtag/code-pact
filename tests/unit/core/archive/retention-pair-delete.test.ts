@@ -28,6 +28,7 @@ import {
 } from "../../../../src/core/archive/retention-pair-delete.ts";
 import { enumerateArchivedPhaseSnapshots, resolvePhaseSnapshotRaw } from "../../../../src/core/archive/load-phase-snapshot.ts";
 import { readEventPackFiles, resolveEventPackRaw } from "../../../../src/core/archive/event-pack-reader.ts";
+import { planCompactArchive } from "../../../../src/core/archive/archive-bundle-cleanup.ts";
 
 // Crash-safe both-or-neither deletion of a loose phase_snapshot ↔ event_pack pair,
 // committed through the delete-intent journal. The journal write is the COMMIT: a
@@ -401,5 +402,17 @@ describe("reader-awareness — a pending delete-intent hides the pair from reade
     expect((await resolvePhaseSnapshotRaw(cwd, "P1")).kind).toBe("absent");
     await clearDeleteIntent(cwd); // recovery completed (here the files happen to survive)
     expect((await resolvePhaseSnapshotRaw(cwd, "P1")).kind).toBe("valid"); // visible again
+  });
+
+  it("the COMPACTION planner (planCompactArchive) never folds a pending pair — both phase and pack kinds", async () => {
+    await setupPair("P1");
+    await setupPair("P2");
+    await pendIntent("P1"); // P1 is mid-deletion
+    for (const kind of ["phase_snapshot", "event_pack"] as const) {
+      const plan = await planCompactArchive(cwd, kind);
+      const ids = [...plan.would_bundle, ...plan.would_delete, ...plan.would_supersede, ...plan.would_skip.map((s) => s.id)];
+      expect(ids).not.toContain("P1"); // logically absent — compaction must not touch a mid-deletion record
+      expect(ids).toContain("P2"); // P2 is a normal loose record, foldable
+    }
   });
 });
