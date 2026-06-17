@@ -12,7 +12,7 @@ import { enumerateArchivedPhaseSnapshots, resolveUnreferencedSnapshot } from "./
 import { bindBundleMember, decisionRecordStem } from "./archive-bundle-binding.ts";
 import { validateEventPackTier1 } from "./event-pack-reader.ts";
 import { DeleteIntentDurabilityError, readPendingDeleteIds, recoverPendingDeletes } from "./delete-intent-journal.ts";
-import { deleteLoosePairsJournaled, type LoosePairToDelete, type PairRetainReason } from "./retention-pair-delete.ts";
+import { deleteLoosePairsJournaled, type LoosePairToDelete, type PairDeleteOutcome, type PairMemberRetain } from "./retention-pair-delete.ts";
 import { archiveDecisionsDir, archiveEventPacksDir, archivePhasesDir, normalizeDecisionRef, sha256Hex } from "./paths.ts";
 import type { ArchiveBundleKind } from "../schemas/archive-bundle.ts";
 
@@ -710,9 +710,15 @@ export async function gateLooseDelete(
   return { kind: "delete", abs };
 }
 
-/** Test seam: a hook fired immediately before each loose record's delete gate, so a test can
- *  inject a between-plan-and-unlink swap and prove the digest gate skips it. */
-export type RetentionApplyHooks = { beforeGate?: (kind: ArchiveBundleKind, id: string) => Promise<void> | void };
+/** Test seam: `beforeGate` fires before each INDEPENDENT loose record's delete gate (the per-record
+ *  `deleteLooseDropped` path), so a test can inject a between-plan-and-unlink swap and prove the
+ *  digest gate skips it. `beforePairGate` fires before each PAIR member's gate inside the journaled
+ *  pair delete (a distinct path), so a test can inject a half-vanished pair — it is NOT the same as
+ *  `beforeGate` (a journal pair never goes through the per-record gate). */
+export type RetentionApplyHooks = {
+  beforeGate?: (kind: ArchiveBundleKind, id: string) => Promise<void> | void;
+  beforePairGate?: (kind: ArchiveBundleKind, id: string) => Promise<void> | void;
+};
 
 async function deleteLooseDropped(
   cwd: string,
@@ -821,12 +827,13 @@ export async function applyArchiveRetention(
   const withoutPaired = (p: RetentionPlan): RetentionPlan => ({ ...p, would_drop: p.would_drop.filter((i) => !pairedIds.has(i.id)) });
 
   // 1. Journal-delete the pairs (both-or-neither). On `unsupported` defer them; `failed` propagates.
-  let pairOutcome: { deleted: string[]; retained: { phase_id: string; reason: PairRetainReason }[] };
+  let pairOutcome: PairDeleteOutcome;
   try {
-    pairOutcome = await deleteLoosePairsJournaled(cwd, pairs);
+    pairOutcome = await deleteLoosePairsJournaled(cwd, pairs, { beforeGate: hooks.beforePairGate });
   } catch (err) {
     if (err instanceof DeleteIntentDurabilityError && err.reason === "unsupported") {
-      pairOutcome = { deleted: [], retained: pairs.map((p) => ({ phase_id: p.phase_id, reason: "requires_atomic_pair_removal" })) };
+      const deferred: PairMemberRetain = { kind: "skip", reason: "requires_atomic_pair_removal" };
+      pairOutcome = { deleted: [], retained: pairs.map((p) => ({ phase_id: p.phase_id, phase: deferred, pack: deferred })) };
     } else {
       throw err; // a real durability failure, or a recovery/other error — fail-closed
     }
@@ -856,19 +863,20 @@ export async function applyArchiveRetention(
   const decisionOut = await deleteLooseDropped(cwd, byKind.get("decision_record") ?? empty("decision_record"), null, hooks);
 
   // Merge the journal pair results into the per-kind outcomes (a pair touches both kinds). A
-  // `vanished` retain (a side already gone at gate — idempotent) goes to `vanished`, not `skipped`.
+  // committed pair removed both files. A retained pair reports EACH member's OWN outcome — a side
+  // that gate-vanished goes to that kind's `vanished`; the present side goes to `skipped`. A
+  // half-vanished pair must never report the surviving side as vanished.
   for (const id of pairOutcome.deleted) {
     phaseOut.deleted.push(id);
     eventOut.deleted.push(id);
   }
-  for (const { phase_id, reason } of pairOutcome.retained) {
-    if (reason === "vanished") {
-      phaseOut.vanished.push(phase_id);
-      eventOut.vanished.push(phase_id);
-    } else {
-      phaseOut.skipped.push({ id: phase_id, reason });
-      eventOut.skipped.push({ id: phase_id, reason });
-    }
+  const applyMember = (out: RetentionDeleteOutcome, id: string, m: PairMemberRetain): void => {
+    if (m.kind === "vanished") out.vanished.push(id);
+    else out.skipped.push({ id, reason: m.reason });
+  };
+  for (const { phase_id, phase, pack } of pairOutcome.retained) {
+    applyMember(phaseOut, phase_id, phase);
+    applyMember(eventOut, phase_id, pack);
   }
 
   // Surface the recovery-completed pair ids (a prior run's committed delete this run finished) on

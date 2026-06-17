@@ -622,6 +622,76 @@ describe("applyArchiveRetention — destructive LOOSE-ONLY delete (PR-2a)", () =
     expect(event.deleted).not.toContain("P1");
   });
 
+  it("HALF-VANISHED pair (pack vanishes at the gate) → ONLY event_pack reports vanished; the present phase is skipped", async () => {
+    await archivePhases([
+      { id: "P1", at: "2026-01-01T00:00:00.000Z" },
+      { id: "P2", at: "2026-02-01T00:00:00.000Z" },
+    ]);
+    const events = ProgressLog.parse({
+      events: [{ task_id: "P1-T1", status: "done", at: "2026-06-01T00:00:00.000Z", actor: "agent" }],
+    }).events;
+    await writeEventPackFile(cwd, "P1", await buildValidEventPack(cwd, "P1", events));
+    await setRoadmap([]); // P1 is a loose-loose pair at plan time
+    // Between the plan and the journal gate, the pack vanishes (e.g. an out-of-lock removal).
+    const out = await applyArchiveRetention(cwd, { keepLatest: 1 }, {
+      beforePairGate: async (kind, id) => {
+        if (kind === "event_pack" && id === "P1") await rm(eventPackPath(cwd, "P1"));
+      },
+    });
+    const phase = out.find((o) => o.kind === "phase_snapshot")!;
+    const event = out.find((o) => o.kind === "event_pack")!;
+    expect(event.vanished).toContain("P1"); // the pack was genuinely gone
+    expect(phase.vanished).not.toContain("P1"); // the phase is PRESENT — never falsely vanished
+    expect(phase.skipped.find((s) => s.id === "P1")?.reason).toBe("requires_atomic_pair_removal");
+    expect(await exists(phaseSnapshotPath(cwd, "P1"))).toBe(true); // and it really is still on disk
+  });
+
+  it("HALF-VANISHED pair (phase vanishes at the gate) → ONLY phase_snapshot reports vanished; the present pack is skipped", async () => {
+    await archivePhases([
+      { id: "P1", at: "2026-01-01T00:00:00.000Z" },
+      { id: "P2", at: "2026-02-01T00:00:00.000Z" },
+    ]);
+    const events = ProgressLog.parse({
+      events: [{ task_id: "P1-T1", status: "done", at: "2026-06-01T00:00:00.000Z", actor: "agent" }],
+    }).events;
+    await writeEventPackFile(cwd, "P1", await buildValidEventPack(cwd, "P1", events));
+    await setRoadmap([]);
+    const out = await applyArchiveRetention(cwd, { keepLatest: 1 }, {
+      beforePairGate: async (kind, id) => {
+        if (kind === "phase_snapshot" && id === "P1") await rm(phaseSnapshotPath(cwd, "P1"));
+      },
+    });
+    const phase = out.find((o) => o.kind === "phase_snapshot")!;
+    const event = out.find((o) => o.kind === "event_pack")!;
+    expect(phase.vanished).toContain("P1");
+    expect(event.vanished).not.toContain("P1"); // the pack is PRESENT
+    expect(event.skipped.find((s) => s.id === "P1")?.reason).toBe("requires_atomic_pair_removal");
+    expect(await exists(eventPackPath(cwd, "P1"))).toBe(true);
+  });
+
+  it("BOTH-VANISHED pair (both sides vanish at the gate) → both kinds report vanished, no journal", async () => {
+    await archivePhases([
+      { id: "P1", at: "2026-01-01T00:00:00.000Z" },
+      { id: "P2", at: "2026-02-01T00:00:00.000Z" },
+    ]);
+    const events = ProgressLog.parse({
+      events: [{ task_id: "P1-T1", status: "done", at: "2026-06-01T00:00:00.000Z", actor: "agent" }],
+    }).events;
+    await writeEventPackFile(cwd, "P1", await buildValidEventPack(cwd, "P1", events));
+    await setRoadmap([]);
+    const out = await applyArchiveRetention(cwd, { keepLatest: 1 }, {
+      beforePairGate: async (_kind, id) => {
+        if (id === "P1") {
+          await rm(eventPackPath(cwd, "P1"), { force: true });
+          await rm(phaseSnapshotPath(cwd, "P1"), { force: true });
+        }
+      },
+    });
+    expect(out.find((o) => o.kind === "phase_snapshot")!.vanished).toContain("P1");
+    expect(out.find((o) => o.kind === "event_pack")!.vanished).toContain("P1");
+    expect(await readFile(archiveDeleteIntentPath(cwd), "utf8").then(() => true, () => false)).toBe(false); // nothing committed
+  });
+
   it("reports a HALF-recovered journal (pack already gone, phase present) in recovered[] too", async () => {
     await archivePhases([
       { id: "P1", at: "2026-01-01T00:00:00.000Z" },

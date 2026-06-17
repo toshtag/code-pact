@@ -217,18 +217,24 @@ describe("deleteLoosePairsJournaled — crash-safe both-or-neither", () => {
     await writeFile(phaseSnapshotPath(cwd, "P1"), JSON.stringify(JSON.parse(phaseRaw)), "utf8");
     const out = await deleteLoosePairsJournaled(cwd, [pair]);
     expect(out.deleted).toEqual([]);
-    expect(out.retained).toEqual([{ phase_id: "P1", reason: "authority_changed" }]);
+    // The phase is stale (authority_changed); the pack was removable but its pair didn't commit.
+    expect(out.retained).toEqual([
+      { phase_id: "P1", phase: { kind: "skip", reason: "authority_changed" }, pack: { kind: "skip", reason: "requires_atomic_pair_removal" } },
+    ]);
     expect(await intentExists()).toBe(false); // nothing committed
     expect(await exists(phaseSnapshotPath(cwd, "P1"))).toBe(true); // both retained
     expect(await exists(eventPackPath(cwd, "P1"))).toBe(true);
   });
 
-  it("INVARIANT 7 — a member with no loose copy (bundle-only / already gone) is NOT committed: retained vanished", async () => {
+  it("INVARIANT 7 — a member with no loose copy (already gone) is NOT committed: ONLY that side is vanished", async () => {
     const pair = await setupPair("P1");
     await rm(eventPackPath(cwd, "P1")); // the pack has no loose copy
     const out = await deleteLoosePairsJournaled(cwd, [pair]);
     expect(out.deleted).toEqual([]);
-    expect(out.retained).toEqual([{ phase_id: "P1", reason: "vanished" }]);
+    // The pack is genuinely gone (vanished); the present phase is NOT reported vanished.
+    expect(out.retained).toEqual([
+      { phase_id: "P1", phase: { kind: "skip", reason: "requires_atomic_pair_removal" }, pack: { kind: "vanished" } },
+    ]);
     expect(await intentExists()).toBe(false);
     expect(await exists(phaseSnapshotPath(cwd, "P1"))).toBe(true); // the phase is untouched
   });
@@ -238,7 +244,9 @@ describe("deleteLoosePairsJournaled — crash-safe both-or-neither", () => {
     // The pack digest still matches, but the phase digest is from a different plan.
     const out = await deleteLoosePairsJournaled(cwd, [{ ...pair, phase_sha256: sha256Hex("a different plan") }]);
     expect(out.deleted).toEqual([]);
-    expect(out.retained).toEqual([{ phase_id: "P1", reason: "authority_changed" }]);
+    expect(out.retained).toEqual([
+      { phase_id: "P1", phase: { kind: "skip", reason: "authority_changed" }, pack: { kind: "skip", reason: "requires_atomic_pair_removal" } },
+    ]);
     expect(await exists(phaseSnapshotPath(cwd, "P1"))).toBe(true);
     expect(await exists(eventPackPath(cwd, "P1"))).toBe(true);
   });
@@ -281,7 +289,9 @@ describe("deleteLoosePairsJournaled — crash-safe both-or-neither", () => {
     await writeArchiveBundle(cwd, "phase_snapshot", [{ id: "P1", bytes: looseP1 }]);
     const out = await deleteLoosePairsJournaled(cwd, [pair]);
     expect(out.deleted).toEqual([]);
-    expect(out.retained).toEqual([{ phase_id: "P1", reason: "needs_bundle_member_removal" }]);
+    expect(out.retained).toEqual([
+      { phase_id: "P1", phase: { kind: "skip", reason: "needs_bundle_member_removal" }, pack: { kind: "skip", reason: "needs_bundle_member_removal" } },
+    ]);
     expect(await intentExists()).toBe(false); // never committed
     expect(await exists(phaseSnapshotPath(cwd, "P1"))).toBe(true);
   });
@@ -293,7 +303,9 @@ describe("deleteLoosePairsJournaled — crash-safe both-or-neither", () => {
     await writeArchiveBundle(cwd, "event_pack", [{ id: "P1", bytes: loosePack }]);
     const out = await deleteLoosePairsJournaled(cwd, [pair]);
     expect(out.deleted).toEqual([]);
-    expect(out.retained).toEqual([{ phase_id: "P1", reason: "needs_bundle_member_removal" }]);
+    expect(out.retained).toEqual([
+      { phase_id: "P1", phase: { kind: "skip", reason: "needs_bundle_member_removal" }, pack: { kind: "skip", reason: "needs_bundle_member_removal" } },
+    ]);
     expect(await intentExists()).toBe(false);
     expect(await exists(eventPackPath(cwd, "P1"))).toBe(true);
   });
