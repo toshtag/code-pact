@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run as cliRun, ensureCliBuilt, type RunResult } from "../helpers/cli.ts";
 
-// `state archive-retention` CLI surface (dry-run only this layer) through the real built CLI.
+// `state archive-retention` CLI surface (dry-run + destructive `--write`) through the real built CLI.
 
 let tmpDir: string;
 function run(args: string[]): RunResult {
