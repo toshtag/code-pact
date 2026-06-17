@@ -597,7 +597,7 @@ export async function planArchiveRetention(
 
 export type RetentionDeleteSkipReason =
   | "needs_bundle_member_removal" // bundle-only / both → deferred to the bundle-member-removal layer
-  | "parent_phase_snapshot_kept" // event_pack whose phase snapshot was NOT deleted this run
+  | "dependent_event_pack_not_removable" // a phase snapshot whose event_pack could NOT be removed this run
   | "path_escape"
   | "unreadable"
   | "authority_changed" // the loose bytes no longer match the digest the plan decided on (swapped under us)
@@ -693,7 +693,7 @@ export type RetentionApplyHooks = { beforeGate?: (kind: ArchiveBundleKind, id: s
 async function deleteLooseDropped(
   cwd: string,
   plan: RetentionPlan,
-  parentDeleted: ReadonlySet<string> | null,
+  preSkip: ReadonlyMap<string, RetentionDeleteSkipReason> | null,
   hooks: RetentionApplyHooks,
 ): Promise<RetentionDeleteOutcome> {
   const out: RetentionDeleteOutcome = { kind: plan.kind, deleted: [], vanished: [], skipped: [] };
@@ -703,13 +703,11 @@ async function deleteLooseDropped(
       out.skipped.push({ id: item.id, reason: "needs_bundle_member_removal" });
       continue;
     }
-    // An event_pack is only dropped once its phase snapshot is gone this run — `parentDeleted`
-    // is (deleted ∪ vanished): the snapshot was either unlinked here OR already absent at gate
-    // time (and the re-plan confirmed it was `source: loose`, so no bundle copy remains). Either
-    // way the snapshot is gone, so dropping the pack orphans nothing. A phase snapshot that is
-    // kept / bundle-only / blocked is NOT in the set → its pack is kept.
-    if (parentDeleted && !parentDeleted.has(item.id)) {
-      out.skipped.push({ id: item.id, reason: "parent_phase_snapshot_kept" });
+    // A pre-skip (a phase snapshot whose dependent event_pack could NOT be removed this run —
+    // deleting the snapshot would orphan the surviving pack, which binds to it).
+    const pre = preSkip?.get(item.id);
+    if (pre) {
+      out.skipped.push({ id: item.id, reason: pre });
       continue;
     }
     if (hooks.beforeGate) await hooks.beforeGate(plan.kind, item.id);
@@ -736,10 +734,18 @@ async function deleteLooseDropped(
 /**
  * Apply keep-latest-N retention DESTRUCTIVELY (PR-2a: loose-only). RE-RUNS the planner here as
  * the delete authority (a caller never passes a stale plan), then unlinks each loose-only
- * `would_drop` record through a per-record re-read + re-authority-validate gate. A bundle-only
- * / `both` would_drop is SKIPPED (bundle-member removal is a later layer). event_pack is dropped
- * only AFTER its phase snapshot was deleted this run. Returns a per-kind partial outcome
- * (deleted / vanished / skipped) — nothing is ever silently dropped. Run under the write lock.
+ * `would_drop` record through a per-record re-read + digest-match + re-authority-validate gate.
+ * A bundle-only / `both` would_drop is SKIPPED (bundle-member removal is a later layer).
+ *
+ * DEPENDENCY ORDER: an event_pack BINDS to its phase snapshot (snapshot_sha256), so a pack
+ * without its snapshot is broken, while a snapshot without its pack is fine. So event packs
+ * (the dependents) are deleted FIRST — deleting a pack never orphans anything — and a phase
+ * snapshot is then deleted ONLY if its pack is gone this run (deleted/vanished) or never existed;
+ * a phase whose pack survives (bundle-only / both / blocked / unlink-failed) is skipped
+ * `dependent_event_pack_not_removable`, so a pack is NEVER left bound to a deleted snapshot.
+ * Decisions are independent (an archived snapshot carries no decision_refs) and delete last.
+ * Returns a per-kind partial outcome (deleted / vanished / skipped); nothing is silently dropped.
+ * Run under the write lock.
  */
 export async function applyArchiveRetention(
   cwd: string,
@@ -749,14 +755,25 @@ export async function applyArchiveRetention(
   const plans = await planArchiveRetention(cwd, opts);
   const byKind = new Map(plans.map((p) => [p.kind, p]));
   const empty = (kind: ArchiveBundleKind): RetentionPlan => ({ kind, would_keep: [], would_drop: [], blocked: [] });
+  const eventPlan = byKind.get("event_pack") ?? empty("event_pack");
+  const phasePlan = byKind.get("phase_snapshot") ?? empty("phase_snapshot");
 
-  // Mutation order (matches the contract): phase snapshots → event packs (each dropped only once
-  // its phase snapshot is gone this run) → decisions LAST. Decisions are independent of phase/pack
-  // (an ARCHIVED phase snapshot carries no decision_refs — live-task references are what keep a
-  // decision blocked, handled by the planner), so they delete after the phase/pack chain.
-  const phaseOut = await deleteLooseDropped(cwd, byKind.get("phase_snapshot") ?? empty("phase_snapshot"), null, hooks);
-  const phaseGone = new Set<string>([...phaseOut.deleted, ...phaseOut.vanished]);
-  const eventOut = await deleteLooseDropped(cwd, byKind.get("event_pack") ?? empty("event_pack"), phaseGone, hooks);
+  // 1. Event packs (dependents) FIRST — deleting a pack never orphans a snapshot.
+  const eventOut = await deleteLooseDropped(cwd, eventPlan, null, hooks);
+  const packGone = new Set<string>([...eventOut.deleted, ...eventOut.vanished]);
+  const packExists = new Set<string>(
+    [...eventPlan.would_keep, ...eventPlan.would_drop, ...eventPlan.blocked].map((i) => i.id),
+  );
+  // 2. A phase snapshot is deletable only if its pack is gone this run (or never existed) — else
+  //    deleting it would orphan the surviving pack that binds to it.
+  const phaseBlock = new Map<string, RetentionDeleteSkipReason>();
+  for (const item of phasePlan.would_drop) {
+    if (item.source === "loose" && packExists.has(item.id) && !packGone.has(item.id)) {
+      phaseBlock.set(item.id, "dependent_event_pack_not_removable");
+    }
+  }
+  const phaseOut = await deleteLooseDropped(cwd, phasePlan, phaseBlock, hooks);
+  // 3. Decisions are independent — delete last.
   const decisionOut = await deleteLooseDropped(cwd, byKind.get("decision_record") ?? empty("decision_record"), null, hooks);
 
   return [phaseOut, eventOut, decisionOut];
