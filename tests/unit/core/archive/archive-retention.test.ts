@@ -607,11 +607,38 @@ describe("applyArchiveRetention — destructive LOOSE-ONLY delete (PR-2a)", () =
     await setRoadmap([]);
     // Simulate a prior crash mid-delete: a pending journal naming P1, both files still present.
     await writeDeleteIntent(cwd, [{ phase_id: "P1", phase_sha256: sha256Hex("p"), pack_sha256: sha256Hex("k") }]);
-    await applyArchiveRetention(cwd, { keepLatest: 5 }); // keepLatest high → nothing NEW would drop
+    const out = await applyArchiveRetention(cwd, { keepLatest: 5 }); // keepLatest high → nothing NEW would drop
     // Recovery completed P1's deletion (both gone) and cleared the journal, before the planner ran.
     expect(await exists(phaseSnapshotPath(cwd, "P1"))).toBe(false);
     expect(await exists(eventPackPath(cwd, "P1"))).toBe(false);
     expect(await readFile(archiveDeleteIntentPath(cwd), "utf8").then(() => true, () => false)).toBe(false);
+    // The recovery-completed drop of old truth is REPORTED — in `recovered` (not `deleted`, which is
+    // reserved for THIS run's plan decisions) — on both bound kinds. Never a silent deletion.
+    const phase = out.find((o) => o.kind === "phase_snapshot")!;
+    const event = out.find((o) => o.kind === "event_pack")!;
+    expect(phase.recovered).toEqual(["P1"]);
+    expect(event.recovered).toEqual(["P1"]);
+    expect(phase.deleted).not.toContain("P1");
+    expect(event.deleted).not.toContain("P1");
+  });
+
+  it("reports a HALF-recovered journal (pack already gone, phase present) in recovered[] too", async () => {
+    await archivePhases([
+      { id: "P1", at: "2026-01-01T00:00:00.000Z" },
+      { id: "P2", at: "2026-02-01T00:00:00.000Z" },
+    ]);
+    const events = ProgressLog.parse({
+      events: [{ task_id: "P1-T1", status: "done", at: "2026-06-01T00:00:00.000Z", actor: "agent" }],
+    }).events;
+    await writeEventPackFile(cwd, "P1", await buildValidEventPack(cwd, "P1", events));
+    await setRoadmap([]);
+    await writeDeleteIntent(cwd, [{ phase_id: "P1", phase_sha256: sha256Hex("p"), pack_sha256: sha256Hex("k") }]);
+    await rm(eventPackPath(cwd, "P1")); // crash AFTER the pack unlink, BEFORE the phase unlink
+    const out = await applyArchiveRetention(cwd, { keepLatest: 5 });
+    // Recovery completes the phase unlink (idempotent on the gone pack) and reports P1 recovered.
+    expect(await exists(phaseSnapshotPath(cwd, "P1"))).toBe(false);
+    expect(out.find((o) => o.kind === "phase_snapshot")!.recovered).toEqual(["P1"]);
+    expect(out.find((o) => o.kind === "event_pack")!.recovered).toEqual(["P1"]);
   });
 
   it("on a platform that cannot fsync a directory (unsupported), a loose pair is DEFERRED, not deleted", async () => {

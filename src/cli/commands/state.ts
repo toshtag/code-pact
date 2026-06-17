@@ -18,6 +18,12 @@ import {
   resolveKeepLatest,
   RetentionConfigError,
 } from "../../core/archive/archive-retention.ts";
+import {
+  DeleteIntentDurabilityError,
+  DeleteIntentRecoveryError,
+  PendingDeleteIntentError,
+  readDeleteIntent,
+} from "../../core/archive/delete-intent-journal.ts";
 
 // ---------------------------------------------------------------------------
 // `state` command cluster. ONE subcommand: `state compact`. The DRY-RUN reports a
@@ -109,12 +115,34 @@ async function cmdStateArchiveRetention(argv: string[], globalJson: boolean): Pr
   }
 
   return withWriteLock(cwd, "state archive-retention --write", json, async () => {
-    const results = await applyArchiveRetention(cwd, { keepLatest });
+    let results;
+    try {
+      results = await applyArchiveRetention(cwd, { keepLatest });
+    } catch (err) {
+      // Known journal/durability faults are fail-closed but RECOVERABLE — surface them as a proper
+      // error envelope (not a generic internal error). `recovery_pending` tells the operator whether
+      // a delete-intent journal still needs completing (re-run does it), based on what is on disk.
+      if (
+        !(err instanceof DeleteIntentRecoveryError) &&
+        !(err instanceof DeleteIntentDurabilityError) &&
+        !(err instanceof PendingDeleteIntentError)
+      ) {
+        throw err;
+      }
+      const message = err.message;
+      const recoveryPending = await readDeleteIntent(cwd).then((r) => r.kind !== "absent", () => true);
+      const human = `${message}${recoveryPending ? " — a delete-intent journal remains; re-run `state archive-retention --write` to complete it." : ""}`;
+      const data = { recovery_pending: recoveryPending };
+      if (err instanceof DeleteIntentRecoveryError) emitError(json, "DELETE_INTENT_RECOVERY_FAILED", message, { data, human });
+      else if (err instanceof DeleteIntentDurabilityError) emitError(json, "DELETE_INTENT_DURABILITY_FAILED", message, { data, human });
+      else emitError(json, "PENDING_DELETE_INTENT", message, { data, human });
+      return 2;
+    }
     if (json) emitOk({ mode: "written", keep_latest: keepLatest, results });
     else {
       for (const r of results) {
         process.stdout.write(
-          `${r.kind}: deleted ${r.deleted.length}, vanished ${r.vanished.length}, skipped ${r.skipped.length}\n`,
+          `${r.kind}: deleted ${r.deleted.length}, recovered ${r.recovered.length}, vanished ${r.vanished.length}, skipped ${r.skipped.length}\n`,
         );
       }
     }

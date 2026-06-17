@@ -622,12 +622,16 @@ export type RetentionDeleteSkipReason =
 
 export type RetentionDeleteOutcome = {
   kind: ArchiveBundleKind;
-  /** loose ids unlinked (old truth dropped). */
+  /** loose ids unlinked because THIS run's plan decided to drop them (old truth dropped). */
   deleted: string[];
   /** ids already gone at gate / unlink time (ENOENT) — idempotent, not a failure. */
   vanished: string[];
   /** ids NOT deleted, per-record reason (fail-closed; never a silent drop). */
   skipped: { id: string; reason: RetentionDeleteSkipReason }[];
+  /** ids COMPLETED from a pending delete-intent journal (a prior run committed the delete and
+   *  crashed before finishing) — recovered + removed by THIS run before it planned. Distinct from
+   *  `deleted` (this run's plan decision) so a recovery-completed drop is never reported silently. */
+  recovered: string[];
 };
 
 function looseRelPath(kind: ArchiveBundleKind, id: string): string {
@@ -716,7 +720,7 @@ async function deleteLooseDropped(
   preSkip: ReadonlyMap<string, RetentionDeleteSkipReason> | null,
   hooks: RetentionApplyHooks,
 ): Promise<RetentionDeleteOutcome> {
-  const out: RetentionDeleteOutcome = { kind: plan.kind, deleted: [], vanished: [], skipped: [] };
+  const out: RetentionDeleteOutcome = { kind: plan.kind, deleted: [], vanished: [], skipped: [], recovered: [] };
   for (const item of plan.would_drop) {
     // PR-2a deletes loose-only; a bundle-only / both copy is the bundle-member-removal layer.
     if (item.source !== "loose") {
@@ -781,8 +785,10 @@ export async function applyArchiveRetention(
 ): Promise<RetentionDeleteOutcome[]> {
   // 0. Heal any crashed prior pair-delete BEFORE planning, under the caller's write lock — so a
   //    half-deleted pair is completed (both gone) before the planner re-reads. A corrupt journal
-  //    throws (DeleteIntentRecoveryError) → fail-closed (the mutation does not proceed).
-  await recoverPendingDeletes(cwd);
+  //    throws (DeleteIntentRecoveryError) → fail-closed (the mutation does not proceed). The
+  //    completed ids are surfaced in the outcome (`recovered`) so a recovery-completed drop of old
+  //    truth is never reported silently — it is NOT this run's plan decision (`deleted`).
+  const recovery = await recoverPendingDeletes(cwd);
 
   const plans = await planArchiveRetention(cwd, opts);
   const byKind = new Map(plans.map((p) => [p.kind, p]));
@@ -864,6 +870,11 @@ export async function applyArchiveRetention(
       eventOut.skipped.push({ id: phase_id, reason });
     }
   }
+
+  // Surface the recovery-completed pair ids (a prior run's committed delete this run finished) on
+  // BOTH bound kinds — a recovered pair removed both its phase snapshot and its event pack.
+  phaseOut.recovered = recovery.completed;
+  eventOut.recovered = recovery.completed;
 
   return [phaseOut, eventOut, decisionOut];
 }

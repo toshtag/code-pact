@@ -56,9 +56,14 @@ describe("state archive-retention — CLI surface (dry-run + --write)", () => {
     const body = json(r);
     expect(body.ok).toBe(true);
     expect(body.data?.mode).toBe("written");
-    const results = body.data?.results as { kind: string; deleted: string[] }[];
+    const results = body.data?.results as { kind: string; deleted: string[]; recovered: string[]; vanished: string[]; skipped: unknown[] }[];
     expect(results.map((x) => x.kind).sort()).toEqual(["decision_record", "event_pack", "phase_snapshot"]);
-    for (const x of results) expect(x.deleted).toEqual([]); // fresh project: nothing unreferenced to drop
+    for (const x of results) {
+      expect(x.deleted).toEqual([]); // fresh project: nothing unreferenced to drop
+      // The CLI envelope carries `recovered` (recovery-completed drops of old truth) — the field is
+      // present on every result so a recovery-completed deletion is never reported silently.
+      expect(x.recovered).toEqual([]);
+    }
   });
 
   it("--keep-latest 0 → CONFIG_ERROR", async () => {
