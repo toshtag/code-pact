@@ -15,6 +15,7 @@ import {
 import {
   clearDeleteIntent,
   DeleteIntentRecoveryError,
+  PendingDeleteIntentError,
   readDeleteIntent,
   recoverPendingDeletes,
   writeDeleteIntent,
@@ -225,6 +226,36 @@ describe("deleteLoosePairsJournaled — crash-safe both-or-neither", () => {
     expect(out.retained).toEqual([{ phase_id: "P1", reason: "authority_changed" }]);
     expect(await exists(phaseSnapshotPath(cwd, "P1"))).toBe(true);
     expect(await exists(eventPackPath(cwd, "P1"))).toBe(true);
+  });
+
+  it("NO-OVERWRITE — a pending journal blocks a new pair delete (the caller must recover first)", async () => {
+    const pair = await setupPair("P1");
+    // A leftover journal from an unrecovered prior crash (names a different pair).
+    await writeDeleteIntent(cwd, [{ phase_id: "P9", phase_sha256: sha256Hex("x"), pack_sha256: sha256Hex("y") }]);
+    await expect(deleteLoosePairsJournaled(cwd, [pair])).rejects.toBeInstanceOf(PendingDeleteIntentError);
+    // The existing journal is untouched (its recovery authority is preserved) and
+    // nothing was deleted.
+    const read = await readDeleteIntent(cwd);
+    expect(read.kind === "present" && read.intent.pairs[0]!.phase_id).toBe("P9");
+    expect(await exists(phaseSnapshotPath(cwd, "P1"))).toBe(true);
+    expect(await exists(eventPackPath(cwd, "P1"))).toBe(true);
+  });
+
+  it("writeDeleteIntent itself refuses to overwrite an existing journal", async () => {
+    await mkdir(join(cwd, ".code-pact", "state", "archive"), { recursive: true });
+    await writeDeleteIntent(cwd, [{ phase_id: "P1", phase_sha256: sha256Hex("a"), pack_sha256: sha256Hex("b") }]);
+    await expect(
+      writeDeleteIntent(cwd, [{ phase_id: "P2", phase_sha256: sha256Hex("c"), pack_sha256: sha256Hex("d") }]),
+    ).rejects.toBeInstanceOf(PendingDeleteIntentError);
+    const read = await readDeleteIntent(cwd);
+    expect(read.kind === "present" && read.intent.pairs[0]!.phase_id).toBe("P1"); // the first commit survives
+  });
+
+  it("a duplicate phase_id in the input is rejected (no commit, both retained)", async () => {
+    const pair = await setupPair("P1");
+    await expect(deleteLoosePairsJournaled(cwd, [pair, pair])).rejects.toThrow(/duplicate phase_id/);
+    expect(await intentExists()).toBe(false);
+    expect(await exists(phaseSnapshotPath(cwd, "P1"))).toBe(true);
   });
 
   it("a multi-pair batch commits all gated pairs in ONE intent, then removes each pair", async () => {

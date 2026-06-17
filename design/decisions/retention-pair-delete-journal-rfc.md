@@ -51,7 +51,20 @@ So every crash converges, under recovery, to exactly one of **both-deleted** (in
 
 - `phase_id` names the pair (the loose phase snapshot AND the loose event pack share the id; their paths are derived). Recovery needs only the id to finish the unlinks.
 - `phase_sha256` / `pack_sha256` record the exact bytes the gate validated at commit — **diagnostic / audit only**. Recovery does **not** gate on them: a delete intent must COMPLETE, never skip (a skip would leave a permanent half-state if one side is already gone). Re-validation belongs at the commit point, not at recovery.
-- Written with the existing single-file atomic primitive (`atomicWriteText`, temp + rename) — the rename is the atomic commit. Cleared by `unlink` of the journal file (idempotent).
+
+### Durability — the commit is a real WAL barrier, not just an atomic rename
+
+An atomic `rename` gives atomic *visibility*, not *durability* across power loss / OS crash: the rename can be in the page cache when a later `unlink` is also in the page cache, and a power loss can persist the unlink but not the rename — leaving a member gone with no journal to recover it (exactly the half-state this RFC must prevent). So the commit `fsync`s:
+
+1. write the journal to a temp file, **`fsync` the temp file's data**;
+2. refuse if a journal already exists (see below), then `rename` temp → `delete-intent.json`;
+3. **`fsync` the parent directory** so the rename itself is durable.
+
+Only when `writeDeleteIntent` returns is the intent on stable storage — and the operation issues every unlink *after* it returns. So the ordering **"commit durable ≤ any unlink durable"** holds: a power loss that lost the commit also lost every unlink (the unlinks come after the commit `fsync`), so the worst observable state is *both retained*, never one side. After the unlinks the member directories are `fsync`ed before the journal is cleared, so "both gone" is durable before the commit record is removed (a power loss after the clear cannot resurrect a member with no journal to re-delete it). The clear `unlink` + directory `fsync` make journal removal durable too. (Durability is to the extent the platform's `fsync` guarantees; the **directory** `fsync` is best-effort — some platforms cannot `fsync` a directory, where the rename's durability is the platform's concern. The data `fsync` on the temp file is mandatory.)
+
+### No-overwrite — a pending journal blocks a new commit
+
+`writeDeleteIntent` **refuses** to overwrite an existing journal (`PendingDeleteIntentError`), and `deleteLoosePairsJournaled` first checks the journal is **absent** (else it throws). A present journal is an **un-recovered prior commit**; overwriting it would destroy the authority to finish (or roll back) that pair, stranding it. So the only way past a pending journal is `recoverPendingDeletes` — recovery, never silent clobber. The journal also rejects a duplicate `phase_id` (a malformed batch), fail-closed before any commit.
 
 ### The gate (reused, unchanged)
 
@@ -78,6 +91,8 @@ Immediately before committing the intent, BOTH the loose phase and the loose pac
 6. **Stale / changed bytes are never deleted:** if either member's on-disk bytes no longer match the digest the plan captured, the gate skips it, no intent is committed, both retained (`authority_changed`).
 7. **`both` / bundle-only members are never touched:** a member with no loose copy (or a shadowed/divergent one) gates to `vanished` / `skip`, no intent is committed.
 8. **Dry-run and write share one planner authority:** the apply re-runs the planner internally (never a stale dry-run plan); the journal operation consumes that same authority's gated verdicts.
+9. **No-overwrite:** a pending (un-recovered) journal blocks a new pair delete — `writeDeleteIntent` refuses to clobber it (`PendingDeleteIntentError`) and `deleteLoosePairsJournaled` preconditions on an absent journal — so a prior crash's recovery authority is never lost; a duplicate `phase_id` batch is rejected before any commit.
+10. **Durable commit ordering:** the commit `fsync`s (temp data + parent directory) before any unlink, so a power loss can never leave a member unlinked with no journal — the worst observable post-power-loss state is *both retained*, never one side. (Verified by construction + the fsync-ordering reasoning above; a unit test cannot induce a real power loss.)
 
 ## Non-goals (this RFC)
 

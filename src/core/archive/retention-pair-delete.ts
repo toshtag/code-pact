@@ -1,18 +1,23 @@
-import { unlink } from "node:fs/promises";
 import { gateLooseDelete, type RetentionDeleteSkipReason } from "./archive-retention.ts";
-import { clearDeleteIntent, writeDeleteIntent } from "./delete-intent-journal.ts";
+import {
+  completePairsThenClear,
+  PendingDeleteIntentError,
+  readDeleteIntent,
+  writeDeleteIntent,
+} from "./delete-intent-journal.ts";
 
 // ---------------------------------------------------------------------------
 // Crash-safe BOTH-OR-NEITHER deletion of a loose phase_snapshot ↔ event_pack
 // pair, gated like every other retention unlink and committed through the
-// delete-intent journal.
+// durable delete-intent journal.
 //
 // The sequence (see design/decisions/retention-pair-delete-journal-rfc.md):
-//   gate BOTH (digest + authority) ──► write intent (COMMIT) ──► unlink pack
-//   ──► unlink phase ──► clear intent
-// A crash BEFORE the intent write leaves no journal → both retained. A crash
-// AFTER it leaves the journal → `recoverPendingDeletes` completes both unlinks →
-// both gone. So the pair is always both-deleted or both-retained, never one side.
+//   recover any prior intent FIRST ──► gate BOTH (digest + authority)
+//   ──► write intent (DURABLE COMMIT) ──► unlink pack ──► unlink phase
+//   ──► fsync member dirs ──► clear intent
+// A crash BEFORE the durable commit returns leaves no journal → both retained. A
+// crash AFTER it leaves the journal → `recoverPendingDeletes` completes both
+// unlinks → both gone. So the pair is always both-deleted or both-retained.
 //
 // FOUNDATION layer: this operation is not yet wired into `state archive-retention
 // --write` (which still defers every pair). Wiring + reader-awareness ship next.
@@ -55,21 +60,33 @@ function retainReasonOf(verdict: { kind: "delete"; abs: string } | { kind: "vani
 }
 
 /**
- * Delete each loose phase/pack pair both-or-neither, crash-safe. Gates BOTH members
- * first; a pair is committed (its intent written) only if BOTH gate to `delete` — so
- * stale/changed bytes (`authority_changed`) and `both`/bundle-only members (whose
- * loose path is absent → `vanished`) are never committed, leaving the pair retained.
- * Then the committed pairs are written to the journal in ONE atomic intent (the
- * commit), and each pair's pack then snapshot are unlinked; a crash anywhere after
- * the commit is healed by `recoverPendingDeletes`. MUST run under the write lock,
- * AFTER `recoverPendingDeletes` has healed any prior crash.
+ * Delete each loose phase/pack pair both-or-neither, crash-safe. Preconditions on a
+ * CLEAN journal (the caller must have run `recoverPendingDeletes` first — a pending
+ * intent means a prior crash is unhealed, so we refuse rather than overwrite its
+ * recovery authority). Gates BOTH members; a pair is committed (its intent written)
+ * only if BOTH gate to `delete` — so stale/changed bytes (`authority_changed`) and
+ * `both`/bundle-only members (loose absent → `vanished`) are never committed,
+ * leaving the pair retained. The committed pairs are written to the journal in ONE
+ * DURABLE atomic intent (the commit barrier), then their files are unlinked and the
+ * removal made durable; a crash anywhere after the commit is healed by
+ * `recoverPendingDeletes`. MUST run under the write lock.
  */
 export async function deleteLoosePairsJournaled(
   cwd: string,
   pairs: LoosePairToDelete[],
   hooks: PairDeleteHooks = {},
 ): Promise<PairDeleteOutcome> {
-  const committed: { phase_id: string; phase_sha256: string; pack_sha256: string; packAbs: string; phaseAbs: string }[] = [];
+  // A pending journal means a prior crash was not recovered — refuse rather than
+  // overwrite its recovery authority. (Recovery is the caller's first step.)
+  const pending = await readDeleteIntent(cwd);
+  if (pending.kind !== "absent") throw new PendingDeleteIntentError();
+
+  const inputIds = pairs.map((p) => p.phase_id);
+  if (new Set(inputIds).size !== inputIds.length) {
+    throw new Error("deleteLoosePairsJournaled: duplicate phase_id in the input pairs");
+  }
+
+  const committed: { phase_id: string; phase_sha256: string; pack_sha256: string }[] = [];
   const retained: { phase_id: string; reason: PairRetainReason }[] = [];
 
   // Gate BOTH members of every pair BEFORE committing anything. Both must gate to
@@ -78,13 +95,7 @@ export async function deleteLoosePairsJournaled(
     const packVerdict = await gateLooseDelete(cwd, "event_pack", pair.phase_id, pair.pack_sha256);
     const phaseVerdict = await gateLooseDelete(cwd, "phase_snapshot", pair.phase_id, pair.phase_sha256);
     if (packVerdict.kind === "delete" && phaseVerdict.kind === "delete") {
-      committed.push({
-        phase_id: pair.phase_id,
-        phase_sha256: pair.phase_sha256,
-        pack_sha256: pair.pack_sha256,
-        packAbs: packVerdict.abs,
-        phaseAbs: phaseVerdict.abs,
-      });
+      committed.push({ phase_id: pair.phase_id, phase_sha256: pair.phase_sha256, pack_sha256: pair.pack_sha256 });
     } else {
       // Report the side that blocked the pair (pack first, else phase — at least one is non-delete).
       const blocker = packVerdict.kind !== "delete" ? packVerdict : phaseVerdict;
@@ -94,30 +105,16 @@ export async function deleteLoosePairsJournaled(
 
   if (committed.length === 0) return { deleted: [], retained };
 
-  // COMMIT: one atomic intent naming every committed pair. From here a crash is
-  // rolled forward by recovery, not back.
-  await writeDeleteIntent(
-    cwd,
-    committed.map((c) => ({ phase_id: c.phase_id, phase_sha256: c.phase_sha256, pack_sha256: c.pack_sha256 })),
-  );
+  // DURABLE COMMIT: one atomic intent naming every committed pair, fsynced to stable
+  // storage before any unlink. From here a crash is rolled forward by recovery.
+  await writeDeleteIntent(cwd, committed);
   if (hooks.afterIntentWritten) await hooks.afterIntentWritten();
 
-  const deleted: string[] = [];
-  for (const c of committed) {
-    await unlinkIfPresent(c.packAbs); // pack first; either order is healed by recovery
-    if (hooks.afterPackUnlinked) await hooks.afterPackUnlinked(c.phase_id);
-    await unlinkIfPresent(c.phaseAbs);
-    if (hooks.afterPhaseUnlinked) await hooks.afterPhaseUnlinked(c.phase_id);
-    deleted.push(c.phase_id);
-  }
-  await clearDeleteIntent(cwd);
-  return { deleted, retained };
-}
-
-async function unlinkIfPresent(abs: string): Promise<void> {
-  try {
-    await unlink(abs);
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
-  }
+  // Complete the deletes durably (unlink both members of each pair, fsync, clear).
+  await completePairsThenClear(
+    cwd,
+    committed.map((c) => c.phase_id),
+    { afterPackUnlinked: hooks.afterPackUnlinked, afterPhaseUnlinked: hooks.afterPhaseUnlinked },
+  );
+  return { deleted: committed.map((c) => c.phase_id), retained };
 }
