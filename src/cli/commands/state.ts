@@ -12,6 +12,7 @@ import {
   planCompactArchive,
 } from "../../core/archive/archive-bundle-cleanup.ts";
 import { BundleWriteError } from "../../core/archive/archive-bundle-writer.ts";
+import { planArchiveRetention, resolveKeepLatest, RetentionConfigError } from "../../core/archive/archive-retention.ts";
 
 // ---------------------------------------------------------------------------
 // `state` command cluster. ONE subcommand: `state compact`. The DRY-RUN reports a
@@ -30,22 +31,79 @@ export async function cmdState(
   // No subcommand, a help token, or only flags (e.g. `state --json`) → usage.
   if (subcommand === undefined || isHelpToken(subcommand) || subcommand.startsWith("-")) {
     const json = globalJson || argv.includes("--json");
-    if (json) emitOk({ available: ["compact", "compact-archive"] });
+    if (json) emitOk({ available: ["compact", "compact-archive", "archive-retention"] });
     else
       process.stdout.write(
         "Usage: code-pact state compact <phase-id> [--write] [--json]\n" +
-          "       code-pact state compact-archive [<kind>] [--write] [--json]\n",
+          "       code-pact state compact-archive [<kind>] [--write] [--json]\n" +
+          "       code-pact state archive-retention [--keep-latest N] [--json]\n",
       );
     return 0;
   }
   if (subcommand === "compact") return cmdStateCompact(rest, locale, globalJson);
   if (subcommand === "compact-archive") return cmdStateCompactArchive(rest, globalJson);
+  if (subcommand === "archive-retention") return cmdStateArchiveRetention(rest, globalJson);
   emitError(
     globalJson || argv.includes("--json"),
     "CONFIG_ERROR",
-    `state: unknown subcommand "${subcommand}". Available: compact, compact-archive`,
+    `state: unknown subcommand "${subcommand}". Available: compact, compact-archive, archive-retention`,
   );
   return 2;
+}
+
+/**
+ * `state archive-retention [--keep-latest N] [--json]` — DRY-RUN ONLY (this foundation
+ * layer). Reports the conservative keep-latest-N retention plan per kind (would_keep /
+ * would_drop / blocked); mutates nothing. `--write` is intentionally rejected until the
+ * destructive retention-delete layer lands (its safety model differs from compaction's).
+ */
+async function cmdStateArchiveRetention(argv: string[], globalJson: boolean): Promise<number> {
+  const json = globalJson || argv.includes("--json");
+  let values: Record<string, unknown>;
+  let positionals: string[];
+  try {
+    ({ values, positionals } = strictParse(
+      "state archive-retention",
+      argv,
+      { json: { type: "boolean" }, write: { type: "boolean" }, "keep-latest": { type: "string" } },
+      { allowPositionals: true },
+    ));
+  } catch (err) {
+    if (!(err instanceof ConfigError)) throw err;
+    emitError(json, "CONFIG_ERROR", err.message);
+    return 2;
+  }
+  if (positionals.length > 0) {
+    emitError(json, "CONFIG_ERROR", `state archive-retention takes no positional arguments (got "${positionals[0]}").`);
+    return 2;
+  }
+  if (values.write === true) {
+    emitError(
+      json,
+      "CONFIG_ERROR",
+      "state archive-retention is dry-run only for now; the destructive retention delete (--write) lands in a later layer.",
+    );
+    return 2;
+  }
+  let keepLatest: number;
+  try {
+    keepLatest = resolveKeepLatest(values["keep-latest"] as string | undefined);
+  } catch (err) {
+    if (!(err instanceof RetentionConfigError)) throw err;
+    emitError(json, "CONFIG_ERROR", err.message);
+    return 2;
+  }
+
+  const plans = await planArchiveRetention(process.cwd(), { keepLatest });
+  if (json) emitOk({ mode: "dry_run", keep_latest: keepLatest, retention_plans: plans });
+  else {
+    for (const p of plans) {
+      process.stdout.write(
+        `${p.kind}: keep ${p.would_keep.length}, drop ${p.would_drop.length}, blocked ${p.blocked.length}\n`,
+      );
+    }
+  }
+  return 0;
 }
 
 function ineligibleDetail(phaseId: string, block: EventPackBlock): string {
