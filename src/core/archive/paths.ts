@@ -32,6 +32,13 @@ export const ARCHIVE_BUNDLES_DIR_SEGMENTS = [
   "archive",
   "bundles",
 ] as const;
+/** The retention delete-intent journal (write-ahead log for a crash-safe pair delete). */
+export const ARCHIVE_DELETE_INTENT_SEGMENTS = [
+  ".code-pact",
+  "state",
+  "archive",
+  "delete-intent.json",
+] as const;
 
 export function sha256Hex(content: string): string {
   return createHash("sha256").update(content, "utf8").digest("hex");
@@ -81,6 +88,11 @@ export function archiveBundlesDir(cwd: string): string {
 /** The archive decisions directory, for enumeration by the bundle writer. */
 export function archiveDecisionsDir(cwd: string): string {
   return join(cwd, ...ARCHIVE_DECISIONS_DIR_SEGMENTS);
+}
+
+/** The retention delete-intent journal file (a single write-ahead log, not a directory). */
+export function archiveDeleteIntentPath(cwd: string): string {
+  return join(cwd, ...ARCHIVE_DELETE_INTENT_SEGMENTS);
 }
 
 /**

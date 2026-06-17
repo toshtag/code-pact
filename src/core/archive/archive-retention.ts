@@ -654,7 +654,7 @@ function looseStillAuthorityValid(kind: ArchiveBundleKind, id: string, raw: stri
   }
 }
 
-type LooseDeleteVerdict = { kind: "delete"; abs: string } | { kind: "vanished" } | { kind: "skip"; reason: RetentionDeleteSkipReason };
+export type LooseDeleteVerdict = { kind: "delete"; abs: string } | { kind: "vanished" } | { kind: "skip"; reason: RetentionDeleteSkipReason };
 
 /** Gate ONE loose record for deletion: path-in-project + fresh re-read + re-authority-validate.
  *  No unlink (the caller does it). Reads disk fresh to narrow the plan→unlink TOCTOU. It
@@ -662,8 +662,10 @@ type LooseDeleteVerdict = { kind: "delete"; abs: string } | { kind: "vanished" }
  *  reference graph nor `source` — those were established by the re-plan at the start of this
  *  run, and the repo write lock (the caller's job) bars any concurrent code-pact mutation from
  *  adding a reference or a bundle copy mid-run; an external edit outside the lock is the
- *  documented out-of-scope window. */
-async function gateLooseDelete(
+ *  documented out-of-scope window. Returns `delete` (with the resolved absolute path), `vanished`
+ *  (ENOENT — already gone), or `skip` (with the reason). Shared by the per-record apply loop and
+ *  the journaled pair delete. */
+export async function gateLooseDelete(
   cwd: string,
   kind: ArchiveBundleKind,
   id: string,
@@ -684,7 +686,9 @@ async function gateLooseDelete(
   }
   // Delete EXACTLY the bytes the plan decided to drop, not merely "a valid record at this path":
   // if the loose file was swapped (even to another authority-valid record) since the plan read
-  // it, the digest differs → skip, never delete on the stale verdict.
+  // it, the digest differs → skip, never delete on the stale verdict. A missing expected digest
+  // (`expectedSha256` undefined — the planner captured none) is also a SKIP, never a digest-agnostic
+  // delete: with no committed-bytes authority there is nothing to delete EXACTLY, so fail safe.
   if (expectedSha256 === undefined || sha256Hex(raw) !== expectedSha256) {
     return { kind: "skip", reason: "authority_changed" };
   }
@@ -784,9 +788,10 @@ export async function applyArchiveRetention(
   const eventStoreUncertain = eventItems.some((i) => i.id === STORE_BLOCK_ID);
   const packIds = new Set<string>(eventItems.filter((i) => i.id !== STORE_BLOCK_ID).map((i) => i.id));
 
-  // 1. Event packs: a would_drop pack always has a would_drop phase → it is always half a bound
-  //    pair → deferred whole. (A bundle-only / `both` pack is skipped needs_bundle_member_removal
-  //    first by its source.)
+  // 1. Event packs are EVALUATED first only to EMIT their skipped outcomes — PR-2a never unlinks
+  //    a pack. A would_drop pack always has a would_drop phase (the planner drops a pack only with
+  //    its phase), so it is always half a bound pair → deferred whole `requires_atomic_pair_removal`.
+  //    (A bundle-only / `both` pack is skipped needs_bundle_member_removal first by its source.)
   const eventPreSkip = new Map<string, RetentionDeleteSkipReason>();
   for (const pack of eventPlan.would_drop) {
     if (pack.source === "loose") eventPreSkip.set(pack.id, "requires_atomic_pair_removal");
