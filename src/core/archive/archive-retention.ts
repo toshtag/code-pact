@@ -1,4 +1,4 @@
-import { readFile, readdir } from "node:fs/promises";
+import { readFile, readdir, unlink } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { Phase } from "../schemas/phase.ts";
@@ -6,6 +6,7 @@ import { PhaseSnapshot } from "../schemas/phase-snapshot.ts";
 import { DecisionStateRecord } from "../schemas/decision-state-record.ts";
 import { loadRoadmap } from "../plan/roadmap.ts";
 import { resolveWithinProject } from "../path-safety.ts";
+import { ARCHIVE_DECISIONS_DIR_SEGMENTS, ARCHIVE_EVENT_PACKS_DIR_SEGMENTS, ARCHIVE_PHASES_DIR_SEGMENTS } from "./paths.ts";
 import { loadArchiveBundles } from "./archive-bundle-loader.ts";
 import { enumerateArchivedPhaseSnapshots, resolveUnreferencedSnapshot } from "./load-phase-snapshot.ts";
 import { bindBundleMember, decisionRecordStem } from "./archive-bundle-binding.ts";
@@ -557,4 +558,159 @@ export async function planArchiveRetention(
   const eventPlan = await planEventPackRetention(cwd, eventSource, verdict);
 
   return [phasePlan, eventPlan, decisionPlan];
+}
+
+// --- destructive apply (Layer 4 retention, PR-2a: LOOSE-ONLY) -----------------
+// The first layer that actually DROPS old archive truth. Conservative scope: it deletes
+// ONLY a `would_drop` record that lives loose-only (a bundle-only / `both` would_drop is
+// SKIPPED — physically removing a bundle MEMBER is the separate bundle-member-removal layer).
+// Every unlink is gated: the plan is the AUTHORITY (re-run here, never a stale caller plan),
+// and each loose file is re-read + re-authority-validated immediately before the unlink
+// (TOCTOU-narrowed). A reference-scan / store failure makes the planner block (no would_drop),
+// so a partial/uncertain view never deletes. Run under the repo write lock (the verb's job).
+
+export type RetentionDeleteSkipReason =
+  | "needs_bundle_member_removal" // bundle-only / both → deferred to the bundle-member-removal layer
+  | "parent_phase_snapshot_kept" // event_pack whose phase snapshot was NOT deleted this run
+  | "path_escape"
+  | "unreadable"
+  | "authority_invalid" // the loose file changed under us and no longer authority-validates
+  | "unlink_failed";
+
+export type RetentionDeleteOutcome = {
+  kind: ArchiveBundleKind;
+  /** loose ids unlinked (old truth dropped). */
+  deleted: string[];
+  /** ids already gone at gate / unlink time (ENOENT) — idempotent, not a failure. */
+  vanished: string[];
+  /** ids NOT deleted, per-record reason (fail-closed; never a silent drop). */
+  skipped: { id: string; reason: RetentionDeleteSkipReason }[];
+};
+
+function looseRelPath(kind: ArchiveBundleKind, id: string): string {
+  const segs =
+    kind === "phase_snapshot"
+      ? ARCHIVE_PHASES_DIR_SEGMENTS
+      : kind === "event_pack"
+        ? ARCHIVE_EVENT_PACKS_DIR_SEGMENTS
+        : ARCHIVE_DECISIONS_DIR_SEGMENTS;
+  return [...segs, `${id}.json`].join("/");
+}
+
+/** Re-validate a loose record's ARCHIVE AUTHORITY from its current on-disk bytes (the same
+ *  checks the planner ran) — so a file that changed between plan and unlink is not deleted on
+ *  a stale verdict. */
+function looseStillAuthorityValid(kind: ArchiveBundleKind, id: string, raw: string): boolean {
+  try {
+    if (kind === "phase_snapshot") {
+      const snapshot = PhaseSnapshot.parse(JSON.parse(raw));
+      return resolveUnreferencedSnapshot(id, { kind: "valid", snapshot }).kind === "tolerated";
+    }
+    if (kind === "decision_record") {
+      const r = DecisionStateRecord.parse(JSON.parse(raw));
+      return (
+        id === decisionRecordStem(r.canonical_ref) &&
+        r.original_path === r.canonical_ref &&
+        r.path_sha256 === sha256Hex(r.canonical_ref)
+      );
+    }
+    validateEventPackTier1(id, raw, ARCHIVE_EVENT_PACK_LABEL);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+type LooseDeleteVerdict = { kind: "delete"; abs: string } | { kind: "vanished" } | { kind: "skip"; reason: RetentionDeleteSkipReason };
+
+/** Gate ONE loose record for deletion: path-in-project + fresh re-read + re-authority-validate.
+ *  No unlink (the caller does it). Reads disk fresh to narrow the plan→unlink TOCTOU. It
+ *  re-validates AUTHORITY (the bytes are still a valid record of this id), but NOT the
+ *  reference graph nor `source` — those were established by the re-plan at the start of this
+ *  run, and the repo write lock (the caller's job) bars any concurrent code-pact mutation from
+ *  adding a reference or a bundle copy mid-run; an external edit outside the lock is the
+ *  documented out-of-scope window. */
+async function gateLooseDelete(cwd: string, kind: ArchiveBundleKind, id: string): Promise<LooseDeleteVerdict> {
+  let abs: string;
+  try {
+    abs = await resolveWithinProject(cwd, looseRelPath(kind, id));
+  } catch {
+    return { kind: "skip", reason: "path_escape" };
+  }
+  let raw: string;
+  try {
+    raw = await readFile(abs, "utf8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return { kind: "vanished" };
+    return { kind: "skip", reason: "unreadable" };
+  }
+  if (!looseStillAuthorityValid(kind, id, raw)) return { kind: "skip", reason: "authority_invalid" };
+  return { kind: "delete", abs };
+}
+
+async function deleteLooseDropped(
+  cwd: string,
+  plan: RetentionPlan,
+  parentDeleted: ReadonlySet<string> | null,
+): Promise<RetentionDeleteOutcome> {
+  const out: RetentionDeleteOutcome = { kind: plan.kind, deleted: [], vanished: [], skipped: [] };
+  for (const item of plan.would_drop) {
+    // PR-2a deletes loose-only; a bundle-only / both copy is the bundle-member-removal layer.
+    if (item.source !== "loose") {
+      out.skipped.push({ id: item.id, reason: "needs_bundle_member_removal" });
+      continue;
+    }
+    // An event_pack is only dropped once its phase snapshot is gone this run — `parentDeleted`
+    // is (deleted ∪ vanished): the snapshot was either unlinked here OR already absent at gate
+    // time (and the re-plan confirmed it was `source: loose`, so no bundle copy remains). Either
+    // way the snapshot is gone, so dropping the pack orphans nothing. A phase snapshot that is
+    // kept / bundle-only / blocked is NOT in the set → its pack is kept.
+    if (parentDeleted && !parentDeleted.has(item.id)) {
+      out.skipped.push({ id: item.id, reason: "parent_phase_snapshot_kept" });
+      continue;
+    }
+    const verdict = await gateLooseDelete(cwd, plan.kind, item.id);
+    if (verdict.kind === "vanished") {
+      out.vanished.push(item.id);
+      continue;
+    }
+    if (verdict.kind === "skip") {
+      out.skipped.push({ id: item.id, reason: verdict.reason });
+      continue;
+    }
+    try {
+      await unlink(verdict.abs);
+      out.deleted.push(item.id);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") out.vanished.push(item.id);
+      else out.skipped.push({ id: item.id, reason: "unlink_failed" });
+    }
+  }
+  return out;
+}
+
+/**
+ * Apply keep-latest-N retention DESTRUCTIVELY (PR-2a: loose-only). RE-RUNS the planner here as
+ * the delete authority (a caller never passes a stale plan), then unlinks each loose-only
+ * `would_drop` record through a per-record re-read + re-authority-validate gate. A bundle-only
+ * / `both` would_drop is SKIPPED (bundle-member removal is a later layer). event_pack is dropped
+ * only AFTER its phase snapshot was deleted this run. Returns a per-kind partial outcome
+ * (deleted / vanished / skipped) — nothing is ever silently dropped. Run under the write lock.
+ */
+export async function applyArchiveRetention(
+  cwd: string,
+  opts: { keepLatest?: number } = {},
+): Promise<RetentionDeleteOutcome[]> {
+  const plans = await planArchiveRetention(cwd, opts);
+  const byKind = new Map(plans.map((p) => [p.kind, p]));
+  const empty = (kind: ArchiveBundleKind): RetentionPlan => ({ kind, would_keep: [], would_drop: [], blocked: [] });
+
+  // Decisions are independent. Phase snapshots next; event packs LAST, gated on their phase
+  // snapshot having been deleted this run (the dependent is removed only after its parent).
+  const decisionOut = await deleteLooseDropped(cwd, byKind.get("decision_record") ?? empty("decision_record"), null);
+  const phaseOut = await deleteLooseDropped(cwd, byKind.get("phase_snapshot") ?? empty("phase_snapshot"), null);
+  const phaseGone = new Set<string>([...phaseOut.deleted, ...phaseOut.vanished]);
+  const eventOut = await deleteLooseDropped(cwd, byKind.get("event_pack") ?? empty("event_pack"), phaseGone);
+
+  return [phaseOut, eventOut, decisionOut];
 }

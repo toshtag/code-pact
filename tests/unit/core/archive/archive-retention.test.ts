@@ -4,8 +4,14 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { writePhaseSnapshot } from "../../../../src/core/archive/phase-snapshot.ts";
 import { writeDecisionRecord } from "../../../../src/core/archive/decision-record.ts";
-import { planArchiveRetention, resolveKeepLatest, type RetentionPlan } from "../../../../src/core/archive/archive-retention.ts";
-import { phaseSnapshotPath, decisionRecordPath, archiveBundlesDir, sha256Hex } from "../../../../src/core/archive/paths.ts";
+import {
+  applyArchiveRetention,
+  planArchiveRetention,
+  resolveKeepLatest,
+  type RetentionPlan,
+} from "../../../../src/core/archive/archive-retention.ts";
+import { writeArchiveBundle } from "../../../../src/core/archive/archive-bundle-writer.ts";
+import { phaseSnapshotPath, decisionRecordPath, eventPackPath, archiveBundlesDir, sha256Hex } from "../../../../src/core/archive/paths.ts";
 import { computeMemberIdsSha256 } from "../../../../src/core/archive/archive-bundle-reader.ts";
 import { decisionRecordStem } from "../../../../src/core/archive/archive-bundle-binding.ts";
 import { ARCHIVE_BUNDLE_SCHEMA_VERSION } from "../../../../src/core/schemas/archive-bundle.ts";
@@ -99,6 +105,7 @@ async function setRoadmap(keepIds: string[], liveYaml: Record<string, { dependsO
 }
 
 const planFor = (plans: RetentionPlan[], kind: string): RetentionPlan => plans.find((p) => p.kind === kind)!;
+const exists = (p: string): Promise<boolean> => readFile(p, "utf8").then(() => true, () => false);
 
 describe("resolveKeepLatest", () => {
   it("defaults to 20, accepts ≥1, rejects 0 / negative / non-integer", () => {
@@ -467,5 +474,114 @@ describe("planArchiveRetention — decision_record", () => {
     const plan = planFor(await planArchiveRetention(cwd, { keepLatest: 1 }), "decision_record");
     expect(plan.would_drop).toEqual([]);
     expect(plan.blocked.map((i) => i.reason)).toEqual(["reference_scan_failed"]);
+  });
+});
+
+describe("applyArchiveRetention — destructive LOOSE-ONLY delete (PR-2a)", () => {
+  it("deletes a loose-only would_drop record; keeps the would_keep", async () => {
+    await archivePhases([
+      { id: "P1", at: "2026-01-01T00:00:00.000Z" },
+      { id: "P2", at: "2026-02-01T00:00:00.000Z" },
+    ]);
+    await setRoadmap([]); // both unreferenced; keepLatest 1 → P2 keep, P1 drop
+    const out = await applyArchiveRetention(cwd, { keepLatest: 1 });
+    const phase = out.find((o) => o.kind === "phase_snapshot")!;
+    expect(phase.deleted).toEqual(["P1"]);
+    expect(phase.skipped).toEqual([]);
+    expect(await exists(phaseSnapshotPath(cwd, "P1"))).toBe(false); // old truth dropped
+    expect(await exists(phaseSnapshotPath(cwd, "P2"))).toBe(true); // kept
+  });
+
+  it("a referenced record is NEVER deleted (the apply re-plans as the authority)", async () => {
+    await archivePhases([{ id: "P1", at: "2020-01-01T00:00:00.000Z" }]); // very old but still in roadmap
+    const out = await applyArchiveRetention(cwd, { keepLatest: 1 });
+    expect(out.find((o) => o.kind === "phase_snapshot")!.deleted).toEqual([]);
+    expect(await exists(phaseSnapshotPath(cwd, "P1"))).toBe(true);
+  });
+
+  it("a byte-identical BOTH would_drop is SKIPPED (needs_bundle_member_removal); the loose is NOT deleted", async () => {
+    await archivePhases([
+      { id: "P1", at: "2026-01-01T00:00:00.000Z" },
+      { id: "P2", at: "2026-02-01T00:00:00.000Z" },
+    ]);
+    const looseP1 = await readFile(phaseSnapshotPath(cwd, "P1"), "utf8");
+    await writeArchiveBundle(cwd, "phase_snapshot", [{ id: "P1", bytes: looseP1 }]); // P1 now loose+bundle, byte-identical
+    await setRoadmap([]); // P1 (both) would_drop — but PR-2a must NOT delete the loose half alone
+    const out = await applyArchiveRetention(cwd, { keepLatest: 1 });
+    const phase = out.find((o) => o.kind === "phase_snapshot")!;
+    expect(phase.deleted).toEqual([]); // a `both` record is deferred whole, never half-deleted
+    expect(phase.skipped.find((s) => s.id === "P1")?.reason).toBe("needs_bundle_member_removal");
+    expect(await exists(phaseSnapshotPath(cwd, "P1"))).toBe(true); // the loose copy is NOT deleted
+  });
+
+  it("a bundle-only would_drop is SKIPPED (needs_bundle_member_removal); the bundle is untouched", async () => {
+    await archivePhases([
+      { id: "P1", at: "2026-01-01T00:00:00.000Z" },
+      { id: "P2", at: "2026-02-01T00:00:00.000Z" },
+    ]);
+    const looseP1 = await readFile(phaseSnapshotPath(cwd, "P1"), "utf8");
+    await writeArchiveBundle(cwd, "phase_snapshot", [{ id: "P1", bytes: looseP1 }]);
+    await rm(phaseSnapshotPath(cwd, "P1")); // P1 now bundle-only
+    await setRoadmap([]);
+    const out = await applyArchiveRetention(cwd, { keepLatest: 1 });
+    const phase = out.find((o) => o.kind === "phase_snapshot")!;
+    expect(phase.deleted).toEqual([]); // PR-2a never removes a bundle member
+    expect(phase.skipped.find((s) => s.id === "P1")?.reason).toBe("needs_bundle_member_removal");
+  });
+
+  it("event_pack loose is dropped WITH its phase snapshot (both loose, both would_drop)", async () => {
+    await archivePhases([
+      { id: "P1", at: "2026-01-01T00:00:00.000Z" },
+      { id: "P2", at: "2026-02-01T00:00:00.000Z" },
+    ]);
+    const events = ProgressLog.parse({
+      events: [{ task_id: "P1-T1", status: "done", at: "2026-06-01T00:00:00.000Z", actor: "agent" }],
+    }).events;
+    await writeEventPackFile(cwd, "P1", await buildValidEventPack(cwd, "P1", events));
+    await setRoadmap([]); // P1 (phase + pack) would_drop, both loose
+    const out = await applyArchiveRetention(cwd, { keepLatest: 1 });
+    expect(out.find((o) => o.kind === "phase_snapshot")!.deleted).toEqual(["P1"]);
+    expect(out.find((o) => o.kind === "event_pack")!.deleted).toEqual(["P1"]);
+    expect(await exists(eventPackPath(cwd, "P1"))).toBe(false);
+  });
+
+  it("event_pack is NOT deleted when its phase snapshot was not deleted (parent bundle-only → skip)", async () => {
+    await archivePhases([
+      { id: "P1", at: "2026-01-01T00:00:00.000Z" },
+      { id: "P2", at: "2026-02-01T00:00:00.000Z" },
+    ]);
+    // Build the pack BEFORE compacting the phase snapshot away (buildValidEventPack reads it).
+    const events = ProgressLog.parse({
+      events: [{ task_id: "P1-T1", status: "done", at: "2026-06-01T00:00:00.000Z", actor: "agent" }],
+    }).events;
+    const pack = await buildValidEventPack(cwd, "P1", events);
+    const looseP1 = await readFile(phaseSnapshotPath(cwd, "P1"), "utf8");
+    await writeArchiveBundle(cwd, "phase_snapshot", [{ id: "P1", bytes: looseP1 }]);
+    await rm(phaseSnapshotPath(cwd, "P1")); // phase P1 bundle-only → its loose delete is skipped
+    await writeEventPackFile(cwd, "P1", pack); // pack loose
+    await setRoadmap([]);
+    const out = await applyArchiveRetention(cwd, { keepLatest: 1 });
+    const packOut = out.find((o) => o.kind === "event_pack")!;
+    expect(packOut.deleted).toEqual([]); // parent phase snapshot not deleted → pack kept
+    expect(packOut.skipped.find((s) => s.id === "P1")?.reason).toBe("parent_phase_snapshot_kept");
+    expect(await exists(eventPackPath(cwd, "P1"))).toBe(true);
+  });
+
+  it("IDEMPOTENT: a record whose loose is already gone is a clean no-op (re-plan never sees it)", async () => {
+    await archivePhases([
+      { id: "P1", at: "2026-01-01T00:00:00.000Z" },
+      { id: "P2", at: "2026-02-01T00:00:00.000Z" },
+    ]);
+    await setRoadmap([]);
+    // Remove P1's loose BEFORE the run: the apply's internal re-plan (the authority) never sees
+    // it, so it is neither deleted nor skipped — exactly how a second --write after the first
+    // is a clean no-op. (The vanish-BETWEEN-re-plan-and-unlink race is handled by the gate's
+    // ENOENT → vanished path; this asserts the already-gone case.)
+    await rm(phaseSnapshotPath(cwd, "P1"));
+    const out = await applyArchiveRetention(cwd, { keepLatest: 1 });
+    const phase = out.find((o) => o.kind === "phase_snapshot")!;
+    expect(phase.deleted).toEqual([]);
+    expect(phase.skipped).toEqual([]);
+    expect(await exists(phaseSnapshotPath(cwd, "P2"))).toBe(true);
   });
 });
