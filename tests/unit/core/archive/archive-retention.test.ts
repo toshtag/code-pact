@@ -567,6 +567,58 @@ describe("applyArchiveRetention — destructive LOOSE-ONLY delete (PR-2a)", () =
     expect(await exists(eventPackPath(cwd, "P1"))).toBe(true);
   });
 
+  it("phase loose SWAPPED to another valid record between plan and unlink → skipped authority_changed, NOT deleted", async () => {
+    await archivePhases([
+      { id: "P1", at: "2026-01-01T00:00:00.000Z" },
+      { id: "P2", at: "2026-02-01T00:00:00.000Z" },
+    ]);
+    await setRoadmap([]); // P1 would_drop
+    const original = await readFile(phaseSnapshotPath(cwd, "P1"), "utf8");
+    const out = await applyArchiveRetention(
+      cwd,
+      { keepLatest: 1 },
+      {
+        beforeGate: async (kind, id) => {
+          // After the plan read P1, swap it to a DIFFERENT-but-authority-valid serialization.
+          if (kind === "phase_snapshot" && id === "P1") {
+            await writeFile(phaseSnapshotPath(cwd, "P1"), JSON.stringify(JSON.parse(original)), "utf8");
+          }
+        },
+      },
+    );
+    const phase = out.find((o) => o.kind === "phase_snapshot")!;
+    expect(phase.deleted).toEqual([]); // the on-disk bytes changed since the plan → not deleted
+    expect(phase.skipped.find((s) => s.id === "P1")?.reason).toBe("authority_changed");
+    expect(await exists(phaseSnapshotPath(cwd, "P1"))).toBe(true); // the swapped copy survives
+  });
+
+  it("decision loose SWAPPED between plan and unlink → skipped authority_changed, NOT deleted", async () => {
+    const D1 = "design/decisions/d1-rfc.md";
+    const D2 = "design/decisions/d2-rfc.md";
+    const ADR = `# RFC\n\n**Status:** accepted (P9, 2026-06)\n\n## Summary\n\nX.\n`;
+    await writeFile(join(cwd, D1), ADR, "utf8");
+    await writeFile(join(cwd, D2), ADR, "utf8");
+    await writeDecisionRecord(cwd, D1, { now: new Date("2026-01-01T00:00:00.000Z") });
+    await writeDecisionRecord(cwd, D2, { now: new Date("2026-02-01T00:00:00.000Z") });
+    await setRoadmap([]); // both unreferenced; keepLatest 1 → D2 keep, D1 (older) would_drop
+    const stem1 = decisionRecordStem(D1);
+    const original = await readFile(decisionRecordPath(cwd, D1), "utf8");
+    const out = await applyArchiveRetention(
+      cwd,
+      { keepLatest: 1 },
+      {
+        beforeGate: async (kind, id) => {
+          if (kind === "decision_record" && id === stem1) {
+            await writeFile(decisionRecordPath(cwd, D1), JSON.stringify(JSON.parse(original)), "utf8");
+          }
+        },
+      },
+    );
+    const dec = out.find((o) => o.kind === "decision_record")!;
+    expect(dec.deleted).toEqual([]);
+    expect(dec.skipped.find((s) => s.id === stem1)?.reason).toBe("authority_changed");
+  });
+
   it("IDEMPOTENT: a record whose loose is already gone is a clean no-op (re-plan never sees it)", async () => {
     await archivePhases([
       { id: "P1", at: "2026-01-01T00:00:00.000Z" },

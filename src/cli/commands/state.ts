@@ -41,7 +41,7 @@ export async function cmdState(
       process.stdout.write(
         "Usage: code-pact state compact <phase-id> [--write] [--json]\n" +
           "       code-pact state compact-archive [<kind>] [--write] [--json]\n" +
-          "       code-pact state archive-retention [--keep-latest N] [--json]\n",
+          "       code-pact state archive-retention [--keep-latest N] [--write] [--json]\n",
       );
     return 0;
   }

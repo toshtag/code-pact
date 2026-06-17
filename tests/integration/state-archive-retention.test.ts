@@ -31,7 +31,7 @@ async function init(): Promise<void> {
   if (r.code !== 0) throw new Error(`init failed: ${r.stdout}${r.stderr}`);
 }
 
-describe("state archive-retention — dry-run only", () => {
+describe("state archive-retention — CLI surface (dry-run + --write)", () => {
   it("--json emits { mode: dry_run, keep_latest, retention_plans[] } per kind, mutates nothing", async () => {
     await init();
     const r = run(["state", "archive-retention", "--json"]);

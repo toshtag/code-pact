@@ -64,6 +64,10 @@ export type RetentionItem = {
   reason: RetentionReason;
   /** WHY a record is referenced/kept — so a user can answer "why isn't this dropped?". */
   references?: RetentionReference[];
+  /** sha256 of the loose copy's raw bytes the plan decided on (loose / both records). The
+   *  destructive apply's gate confirms the on-disk bytes still match this before unlinking, so
+   *  a loose file swapped (even to another valid record) since the plan is not deleted. */
+  loose_sha256?: string;
 };
 
 export type RetentionPlan = {
@@ -176,6 +180,10 @@ type SourceResult =
        *  of a `both` record, so a divergent shadow is unsafe to delete on a loose-wins view —
        *  these are blocked `bundle_stale` (reconcile via compaction/supersession first). */
       divergedBoth: ReadonlySet<string>;
+      /** sha256 of each loose record's raw bytes AT PLAN TIME — the gate confirms the on-disk
+       *  bytes still match before deleting, so a loose file swapped (even to another VALID
+       *  record) between plan and unlink is NOT deleted on the stale verdict. */
+      looseSha256: ReadonlyMap<string, string>;
     }
   | { ok: false; detail: string };
 
@@ -209,22 +217,27 @@ async function buildSourceMap(cwd: string, kind: ArchiveBundleKind): Promise<Sou
   for (const id of looseSet) source.set(id, members.has(id) ? "both" : "loose");
   for (const id of members.keys()) if (!looseSet.has(id)) source.set(id, "bundle");
 
-  // STRICT-RECONCILE the `both` ids: the loose raw and the shadowed bundle member raw must be
-  // byte-identical, else the record's two physical copies disagree and a delete cannot safely
-  // pick truth → divergedBoth (blocked bundle_stale by the per-kind planners).
+  // Read every loose record's raw ONCE: record its digest (the gate's expected-bytes authority)
+  // and, for a `both` id, STRICT-RECONCILE against the shadowed bundle member (byte-identical
+  // else divergedBoth → blocked bundle_stale, since a delete removes both physical copies).
+  const looseSha256 = new Map<string, string>();
   const divergedBoth = new Set<string>();
   for (const [id, src] of source) {
-    if (src !== "both") continue;
-    const member = members.get(id)!;
+    if (src === "bundle") continue; // no loose copy
     let looseRaw: string | null = null;
     try {
       looseRaw = await readFile(join(looseDirFor(cwd, kind), `${id}.json`), "utf8");
     } catch {
       looseRaw = null;
     }
-    if (looseRaw === null || looseRaw !== member.bytes) divergedBoth.add(id);
+    if (looseRaw === null) {
+      if (src === "both") divergedBoth.add(id); // can't reconcile a shadow we can't read
+      continue;
+    }
+    looseSha256.set(id, sha256Hex(looseRaw));
+    if (src === "both" && looseRaw !== members.get(id)!.bytes) divergedBoth.add(id);
   }
-  return { ok: true, source, divergedBoth };
+  return { ok: true, source, divergedBoth, looseSha256 };
 }
 
 // --- keep-latest partition (the shared selection) ----------------------------
@@ -309,8 +322,15 @@ async function planPhaseRetention(
   for (const [, phases] of taskToPhases) if (phases.length > 1) for (const ph of phases) ambiguous.add(ph);
 
   const unreferenced: RetentionItem[] = [];
+  const shaOf = (id: string): string | undefined => (source.ok ? source.looseSha256.get(id) : undefined);
   for (const { phaseId, snapshot } of valid) {
-    const base = { kind: "phase_snapshot" as const, id: phaseId, snapshotted_at: snapshot.snapshotted_at, source: srcOf(phaseId) };
+    const base = {
+      kind: "phase_snapshot" as const,
+      id: phaseId,
+      snapshotted_at: snapshot.snapshotted_at,
+      source: srcOf(phaseId),
+      loose_sha256: shaOf(phaseId),
+    };
     // Fail-closed: the live graph could not be built, OR the archive enumeration was a
     // partial view (store/source unreadable) → cannot prove this record is unreferenced.
     if (!live.ok || storeFailed) {
@@ -435,7 +455,13 @@ async function planDecisionRetention(
 
   const unreferenced: RetentionItem[] = [];
   for (const { id, record } of records) {
-    const base = { kind: "decision_record" as const, id, snapshotted_at: record.snapshotted_at, source: srcOf(id) };
+    const base = {
+      kind: "decision_record" as const,
+      id,
+      snapshotted_at: record.snapshotted_at,
+      source: srcOf(id),
+      loose_sha256: source.ok ? source.looseSha256.get(id) : undefined,
+    };
     if (!live.ok || storeFailed) {
       items.push({ ...base, action: "blocked", reason: "reference_scan_failed" });
       continue;
@@ -482,7 +508,7 @@ async function planEventPackRetention(
 
   for (const id of [...source.source.keys()].sort()) {
     const src = source.source.get(id)!;
-    const base = { kind: "event_pack" as const, id, snapshotted_at: null, source: src };
+    const base = { kind: "event_pack" as const, id, snapshotted_at: null, source: src, loose_sha256: source.looseSha256.get(id) };
     // AUTHORITY-validate the pack bytes (loose-wins) BEFORE trusting the parent verdict — a
     // schema/Tier-1-invalid OR MISFILED pack (filename id ≠ its body phase_id) must NEVER be
     // dropped just because its FILENAME's phase snapshot is being dropped (it may be another
@@ -574,6 +600,7 @@ export type RetentionDeleteSkipReason =
   | "parent_phase_snapshot_kept" // event_pack whose phase snapshot was NOT deleted this run
   | "path_escape"
   | "unreadable"
+  | "authority_changed" // the loose bytes no longer match the digest the plan decided on (swapped under us)
   | "authority_invalid" // the loose file changed under us and no longer authority-validates
   | "unlink_failed";
 
@@ -630,7 +657,12 @@ type LooseDeleteVerdict = { kind: "delete"; abs: string } | { kind: "vanished" }
  *  run, and the repo write lock (the caller's job) bars any concurrent code-pact mutation from
  *  adding a reference or a bundle copy mid-run; an external edit outside the lock is the
  *  documented out-of-scope window. */
-async function gateLooseDelete(cwd: string, kind: ArchiveBundleKind, id: string): Promise<LooseDeleteVerdict> {
+async function gateLooseDelete(
+  cwd: string,
+  kind: ArchiveBundleKind,
+  id: string,
+  expectedSha256: string | undefined,
+): Promise<LooseDeleteVerdict> {
   let abs: string;
   try {
     abs = await resolveWithinProject(cwd, looseRelPath(kind, id));
@@ -644,14 +676,25 @@ async function gateLooseDelete(cwd: string, kind: ArchiveBundleKind, id: string)
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return { kind: "vanished" };
     return { kind: "skip", reason: "unreadable" };
   }
+  // Delete EXACTLY the bytes the plan decided to drop, not merely "a valid record at this path":
+  // if the loose file was swapped (even to another authority-valid record) since the plan read
+  // it, the digest differs → skip, never delete on the stale verdict.
+  if (expectedSha256 === undefined || sha256Hex(raw) !== expectedSha256) {
+    return { kind: "skip", reason: "authority_changed" };
+  }
   if (!looseStillAuthorityValid(kind, id, raw)) return { kind: "skip", reason: "authority_invalid" };
   return { kind: "delete", abs };
 }
+
+/** Test seam: a hook fired immediately before each loose record's delete gate, so a test can
+ *  inject a between-plan-and-unlink swap and prove the digest gate skips it. */
+export type RetentionApplyHooks = { beforeGate?: (kind: ArchiveBundleKind, id: string) => Promise<void> | void };
 
 async function deleteLooseDropped(
   cwd: string,
   plan: RetentionPlan,
   parentDeleted: ReadonlySet<string> | null,
+  hooks: RetentionApplyHooks,
 ): Promise<RetentionDeleteOutcome> {
   const out: RetentionDeleteOutcome = { kind: plan.kind, deleted: [], vanished: [], skipped: [] };
   for (const item of plan.would_drop) {
@@ -669,7 +712,8 @@ async function deleteLooseDropped(
       out.skipped.push({ id: item.id, reason: "parent_phase_snapshot_kept" });
       continue;
     }
-    const verdict = await gateLooseDelete(cwd, plan.kind, item.id);
+    if (hooks.beforeGate) await hooks.beforeGate(plan.kind, item.id);
+    const verdict = await gateLooseDelete(cwd, plan.kind, item.id, item.loose_sha256);
     if (verdict.kind === "vanished") {
       out.vanished.push(item.id);
       continue;
@@ -700,17 +744,20 @@ async function deleteLooseDropped(
 export async function applyArchiveRetention(
   cwd: string,
   opts: { keepLatest?: number } = {},
+  hooks: RetentionApplyHooks = {},
 ): Promise<RetentionDeleteOutcome[]> {
   const plans = await planArchiveRetention(cwd, opts);
   const byKind = new Map(plans.map((p) => [p.kind, p]));
   const empty = (kind: ArchiveBundleKind): RetentionPlan => ({ kind, would_keep: [], would_drop: [], blocked: [] });
 
-  // Decisions are independent. Phase snapshots next; event packs LAST, gated on their phase
-  // snapshot having been deleted this run (the dependent is removed only after its parent).
-  const decisionOut = await deleteLooseDropped(cwd, byKind.get("decision_record") ?? empty("decision_record"), null);
-  const phaseOut = await deleteLooseDropped(cwd, byKind.get("phase_snapshot") ?? empty("phase_snapshot"), null);
+  // Mutation order (matches the contract): phase snapshots → event packs (each dropped only once
+  // its phase snapshot is gone this run) → decisions LAST. Decisions are independent of phase/pack
+  // (an ARCHIVED phase snapshot carries no decision_refs — live-task references are what keep a
+  // decision blocked, handled by the planner), so they delete after the phase/pack chain.
+  const phaseOut = await deleteLooseDropped(cwd, byKind.get("phase_snapshot") ?? empty("phase_snapshot"), null, hooks);
   const phaseGone = new Set<string>([...phaseOut.deleted, ...phaseOut.vanished]);
-  const eventOut = await deleteLooseDropped(cwd, byKind.get("event_pack") ?? empty("event_pack"), phaseGone);
+  const eventOut = await deleteLooseDropped(cwd, byKind.get("event_pack") ?? empty("event_pack"), phaseGone, hooks);
+  const decisionOut = await deleteLooseDropped(cwd, byKind.get("decision_record") ?? empty("decision_record"), null, hooks);
 
   return [phaseOut, eventOut, decisionOut];
 }
