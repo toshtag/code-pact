@@ -13,10 +13,13 @@ import {
   DeleteIntentDurabilityError,
 } from "../../../../src/core/archive/delete-intent-journal.ts";
 
-// Bundle-member removal — Layer 1a: the READ-ONLY planner. A bundle is content-addressed
-// by its member-id SET, so removal = rebuild the kind's bundle minus the removed members.
-// The planner computes (read-only) the removable ids, the survivors, the new consolidated
-// bundle (or empty-set verdict), and the old bundles that would be retired. It mutates nothing.
+// Bundle-member removal — Layer 1: the READ-ONLY planner AND the DESTRUCTIVE single-kind apply.
+// A bundle is content-addressed by its member-id SET, so removal = rebuild the kind's bundle minus
+// the removed members. The planner computes (read-only) the removable ids, the survivors, the new
+// consolidated bundle (or empty-set verdict), and the old bundles that would be retired. The apply
+// (`removeBundleMembers`) durably writes the new bundle BEFORE retiring the old ones (crash-safe
+// ordering), preflights the dir-fsync capability (unsupported → defer), and reports a removed id
+// only once every old bundle that held it is gone (a stale retire → `skipped`, never a false delete).
 
 const TASK_FIELDS = `    ambiguity: low
     risk: low
@@ -242,12 +245,67 @@ describe("removeBundleMembers — destructive single-kind apply", () => {
       },
     });
     expect(out.skipped_stale.length).toBe(1); // the old bundle no longer matches the plan → not retired
+    // ACCOUNTING (the load-bearing honesty bit): the old {P1,P2,P3} bundle wasn't retired, so P1 STILL
+    // resolves from it → P1 must NOT be reported `deleted`; it is `skipped: bundle_stale`.
+    expect(out.removed).toEqual([]);
+    expect(out.skipped).toEqual([{ id: "P1", reason: "bundle_stale" }]);
     // CONVERGENCE: the skip leaves a consistent store (new {P2,P3} + old {P1,P2,P3}; P2/P3 dedupe by
     // identical sha256, P1 still resolves from the old bundle). A plain re-run (no swap) completes it.
     expect(() => planBundleMemberRemoval(cwd, "phase_snapshot", ["P1"])).not.toThrow();
     const again = await removeBundleMembers(cwd, "phase_snapshot", ["P1"]);
     expect(again.removed).toEqual([{ id: "P1", outcome: "deleted" }]);
+    expect(again.skipped).toEqual([]);
     expect((await listBundles()).length).toBe(1); // converged to the {P2,P3} consolidation only
+  });
+
+  it("a STALE retire target that does NOT hold the removed id → that id is still removed (precise accounting)", async () => {
+    const bytesById = new Map<string, string>();
+    for (const id of ["P1", "P2", "P3", "P4"]) bytesById.set(id, await snapshotBytes(id));
+    await bundlePhases(["P1", "P2"], bytesById); // P1 lives here
+    await bundlePhases(["P3", "P4"], bytesById); // P3/P4 here — both bundles are superseded by {P2,P3,P4}
+
+    const out = await removeBundleMembers(cwd, "phase_snapshot", ["P1"], {
+      beforeRetire: async (file) => {
+        // Swap ONLY the {P3,P4} bundle (it does not hold P1) — the {P1,P2} bundle retires cleanly.
+        const abs = join(archiveBundlesDir(cwd), file);
+        const content = await readFile(abs, "utf8");
+        if (content.includes('"id": "P3"')) await writeFile(abs, content + " ", "utf8");
+      },
+    });
+    expect(out.skipped_stale.length).toBe(1); // the {P3,P4} bundle was not retired
+    expect(out.removed).toEqual([{ id: "P1", outcome: "deleted" }]); // its OWN bundle {P1,P2} retired → P1 gone
+    expect(out.skipped).toEqual([]); // a stale bundle not holding P1 does not block P1's removal
+  });
+
+  it("a byte-identical KEEP already on disk still re-confirms the dir-fsync barrier before any retire", async () => {
+    const bytesById = new Map<string, string>();
+    for (const id of ["P1", "P2", "P3"]) bytesById.set(id, await snapshotBytes(id));
+    await bundlePhases(["P1", "P2", "P3"], bytesById);
+    await bundlePhases(["P2", "P3"], bytesById); // the survivor set ALREADY exists byte-identically (the keep)
+    const before = await listBundles();
+    // Inject a bundle_write barrier failure: the idempotent keep path MUST go through it, so the
+    // op fails closed and the old {P1,P2,P3} bundle is NOT retired (a non-durable keep must never
+    // let a durable old-bundle unlink proceed).
+    __setDeleteIntentDirFsyncForTests((_d, purpose) => {
+      if (purpose === "bundle_write") throw new DeleteIntentDurabilityError("failed", "injected");
+    });
+    await expect(removeBundleMembers(cwd, "phase_snapshot", ["P1"])).rejects.toBeInstanceOf(DeleteIntentDurabilityError);
+    expect(await listBundles()).toEqual(before); // nothing retired — the {P1,P2,P3} bundle survives
+  });
+
+  it("an `unsupported` directory-fsync platform DEFERS the whole kind — no unlink, nothing reported removed", async () => {
+    const bytesById = new Map<string, string>();
+    for (const id of ["P1", "P2"]) bytesById.set(id, await snapshotBytes(id));
+    await bundlePhases(["P1", "P2"], bytesById);
+    const before = await listBundles();
+    // The preflight barrier reports the platform cannot fsync a directory → an honest defer.
+    __setDeleteIntentDirFsyncForTests((_d, purpose) => {
+      if (purpose === "bundle_removal_preflight") throw new DeleteIntentDurabilityError("unsupported", "injected");
+    });
+    const out = await removeBundleMembers(cwd, "phase_snapshot", ["P1"]);
+    expect(out.removed).toEqual([]); // NO destructive action — nothing claimed removed
+    expect(out.skipped).toEqual([{ id: "P1", reason: "unsupported_platform" }]);
+    expect(await listBundles()).toEqual(before); // the old bundle is untouched (no unlink)
   });
 
   it("a durability barrier failure (new-bundle dir fsync) fails closed — no retire", async () => {

@@ -145,13 +145,24 @@ export function planBundleMemberRemoval(cwd: string, kind: ArchiveBundleKind, re
  *  `bundle_member_removed` (a loose copy still resolves — the loose layer drops it next run). */
 export type RemovedMember = { id: string; outcome: "deleted" | "bundle_member_removed" };
 
+/** A removable id that was NOT removed this run, with why — reported at the SAME per-record
+ *  granularity as `removed` so the caller is never told a record is gone when it still resolves.
+ *  `bundle_stale`: an old bundle that still holds the id failed the expected-bytes retire gate, so
+ *  the id still resolves from it. `unsupported_platform`: the platform cannot fsync a directory, so
+ *  the durable removal path is deferred whole (no destructive action taken). */
+export type SkippedMember = { id: string; reason: "bundle_stale" | "unsupported_platform" };
+
 export type BundleMemberRemovalOutcome = {
   kind: ArchiveBundleKind;
   removed: RemovedMember[];
   not_member: string[];
   /** the kind was left UNTOUCHED because a current member is authority-invalid. */
   unsafe_invalid: string[];
-  /** retire-bundle files SKIPPED because their on-disk bytes no longer matched the plan. */
+  /** removable ids NOT removed this run, per-record (an un-retired stale bundle still holds them,
+   *  or the platform can't durably remove). NEVER reported in `removed`. */
+  skipped: SkippedMember[];
+  /** retire-bundle FILES skipped because their on-disk bytes no longer matched the plan (a
+   *  file-level diagnostic; the per-record consequence is in `skipped`). */
   skipped_stale: string[];
 };
 
@@ -159,12 +170,16 @@ export type BundleMemberRemovalOutcome = {
 export type BundleRemovalHooks = { beforeRetire?: (file: string) => Promise<void> | void };
 
 /**
- * Apply a single-kind bundle-member removal DESTRUCTIVELY (supersede-by-removal). DURABLY writes the
- * consolidated new bundle (fsync DATA + DIR) BEFORE retiring any old bundle, then retires each old
+ * Apply a single-kind bundle-member removal DESTRUCTIVELY (supersede-by-removal). First PREFLIGHTS the
+ * directory-fsync capability (an `unsupported` platform defers the whole kind — no destructive action),
+ * then DURABLY writes the consolidated new bundle (fsync DATA + DIR — even when the keep already exists
+ * byte-identically, the barrier is re-confirmed) BEFORE retiring any old bundle, then retires each old
  * bundle through a re-read-expected-bytes gate, then fsyncs the directory. The order
  * (new-bundle-durable ≤ any old-retire-durable) is the crash-safety: until the retire is durable the
- * removed member still resolves from the old bundle, so a power loss converges on a re-run. Run under
- * the write lock. An authority-invalid kind is left untouched.
+ * removed member still resolves from the old bundle, so a power loss converges on a re-run. A removed id
+ * is reported in `removed` ONLY once every old bundle that held it is gone; an un-retired stale bundle
+ * → `skipped: bundle_stale` (never a false `deleted`). Run under the write lock. An authority-invalid
+ * kind is left untouched (`unsafe_invalid`).
  */
 export async function removeBundleMembers(
   cwd: string,
@@ -173,16 +188,31 @@ export async function removeBundleMembers(
   hooks: BundleRemovalHooks = {},
 ): Promise<BundleMemberRemovalOutcome> {
   const c = computeRemoval(cwd, kind, removeIds); // re-run the authority (never a stale caller plan)
-  if (c.unsafe) return { kind, removed: [], not_member: c.not_member, unsafe_invalid: c.invalid, skipped_stale: [] };
-  if (c.removable.length === 0) return { kind, removed: [], not_member: c.not_member, unsafe_invalid: [], skipped_stale: [] };
+  if (c.unsafe) return { kind, removed: [], not_member: c.not_member, unsafe_invalid: c.invalid, skipped: [], skipped_stale: [] };
+  if (c.removable.length === 0) return { kind, removed: [], not_member: c.not_member, unsafe_invalid: [], skipped: [], skipped_stale: [] };
 
   const dir = archiveBundlesDir(cwd);
+
+  // 0. PREFLIGHT the directory-fsync capability BEFORE any destructive action. On a platform that
+  //    cannot fsync a directory (`unsupported`, e.g. win32) the durable removal path is unavailable,
+  //    so DEFER the whole kind (no write, no unlink) — an HONEST defer, never an unlink whose
+  //    non-durability is discovered only after it has already run (the #476 class). A real I/O
+  //    `failed` here fails the run (it is a genuine fault, not a capability gap).
+  try {
+    await fsyncDirRequired(dir, "bundle_removal_preflight");
+  } catch (err) {
+    if (err instanceof DeleteIntentDurabilityError && err.reason === "unsupported") {
+      return { kind, removed: [], not_member: c.not_member, unsafe_invalid: [], skipped: c.removable.map((id) => ({ id, reason: "unsupported_platform" as const })), skipped_stale: [] };
+    }
+    throw err;
+  }
 
   // 1. DURABLY write the consolidated new bundle (if any survivors) BEFORE any retire.
   if (c.new_bundle) await durablyWriteBundle(cwd, kind, c.new_bundle);
 
   // 2. Retire each old bundle through the expected-bytes gate, then make the removal durable.
   const skipped_stale: string[] = [];
+  const staleHeldIds = new Set<string>(); // ids that still resolve from an un-retired (stale) old bundle
   let retiredAny = false;
   for (const rb of c.retire) {
     if (hooks.beforeRetire) await hooks.beforeRetire(rb.file);
@@ -196,6 +226,7 @@ export async function removeBundleMembers(
     }
     if (sha256Hex(raw) !== rb.sha256) {
       skipped_stale.push(rb.file); // swapped under us → never retire on a stale proof
+      for (const id of rb.member_ids) staleHeldIds.add(id); // its members STILL resolve from this un-retired bundle
       continue;
     }
     await unlink(abs);
@@ -203,25 +234,43 @@ export async function removeBundleMembers(
   }
   if (retiredAny) await fsyncDirRequired(dir, "bundle_retire"); // make the removal durable
 
-  // 3. Per-record outcome: a removed member that still has a loose copy is `bundle_member_removed`.
+  // 3. Per-record outcome. A removed id is `deleted`/`bundle_member_removed` ONLY once EVERY old
+  //    bundle that held it is gone (retired or already ENOENT). If an un-retired stale bundle still
+  //    holds it, it still resolves → report `skipped: bundle_stale`, NEVER a false `deleted`.
   const removed: RemovedMember[] = [];
+  const skipped: SkippedMember[] = [];
   for (const id of c.removable) {
+    if (staleHeldIds.has(id)) {
+      skipped.push({ id, reason: "bundle_stale" });
+      continue;
+    }
     const hasLoose = await pathExists(join(looseDirFor(cwd, kind), `${id}.json`));
     removed.push({ id, outcome: hasLoose ? "bundle_member_removed" : "deleted" });
   }
-  return { kind, removed, not_member: c.not_member, unsafe_invalid: [], skipped_stale };
+  return { kind, removed, not_member: c.not_member, unsafe_invalid: [], skipped, skipped_stale };
 }
 
 /** Durably write a built content-addressed bundle: write temp → fsync DATA → rename → fsync DIR →
- *  readback-verify. No-op if the target already holds the byte-identical bundle (the keep). */
+ *  readback-verify. No-op if the target already holds the byte-identical bundle (the keep) — but
+ *  even then it RE-CONFIRMS the directory durability barrier before returning (see below). */
 async function durablyWriteBundle(cwd: string, kind: ArchiveBundleKind, bundle: ArchiveBundle): Promise<void> {
   const path = archiveBundlePath(cwd, kind, bundle.member_ids_sha256);
   const bytes = serializeArchiveBundle(bundle);
+  const dir = archiveBundlesDir(cwd);
   if (await pathExists(path)) {
-    if ((await readFile(path, "utf8")) === bytes) return; // already the keep — idempotent
+    const existing = await readFile(path, "utf8");
+    if (existing === bytes) {
+      // The keep already exists — but "visible on disk" is NOT "durable". A prior run could have
+      // renamed it into place and then crashed / failed BEFORE the dir-fsync barrier, so its
+      // directory entry may not survive a power loss. Re-confirm the REQUIRED barrier (and re-verify
+      // the bytes) BEFORE the caller proceeds to retire any old bundle — otherwise a durable
+      // old-bundle unlink could outlive a non-durable new-bundle rename → survivor truth loss.
+      await fsyncDirRequired(dir, "bundle_write");
+      verifyBundleReadback(existing, kind, bundle.members, basename(path));
+      return;
+    }
     throw new Error(`bundle-member removal: a different bundle already exists at ${basename(path)}`);
   }
-  const dir = archiveBundlesDir(cwd);
   const tmp = `${path}.tmp-${process.pid}-${Date.now()}`;
   const fh = await open(tmp, "w");
   try {
