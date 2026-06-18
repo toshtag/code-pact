@@ -153,6 +153,23 @@ describe("deleteBundlePairsJournaled — both-or-neither bundle-pair removal", (
     expect(await readFile(eventPackPath(cwd, "P1"), "utf8")).toBe(bytesById.get("P1")!.pack);
   });
 
+  it("a MIXED-source pair (one side has a surviving loose copy, the other does not) is DEFERRED whole — no half-state", async () => {
+    const bytesById = new Map<string, { snap: string; pack: string }>();
+    for (const id of ["P1", "P2"]) bytesById.set(id, await pairBytes(id));
+    await bundlePairs(["P1", "P2"], bytesById);
+    // P1 phase is `both` (re-materialize its loose copy); P1 pack stays bundle-only → MIXED source.
+    await writeFile(phaseSnapshotPath(cwd, "P1"), bytesById.get("P1")!.snap, "utf8");
+    const before = await listBundleNames();
+
+    const out = await deleteBundlePairsJournaled(cwd, [{ phase_id: "P1" }]);
+    expect(out.removed).toEqual([]);
+    expect(out.skipped).toEqual([{ phase_id: "P1", reason: "mixed_source" }]); // removing both bundle members would orphan the pack
+    expect(await listBundleNames()).toEqual(before); // nothing written, nothing retired
+    expect((await readDeleteIntent(cwd)).kind).toBe("absent"); // no commit
+    expect(await resolvesInBundles("P1")).toEqual({ phase: true, pack: true }); // both bundle members intact
+    expect(await readFile(phaseSnapshotPath(cwd, "P1"), "utf8")).toBe(bytesById.get("P1")!.snap); // loose half intact
+  });
+
   it("an authority-INVALID event_pack member (misfiled: id P1, body phase_id P2) → unsafe_authority, untouched", async () => {
     const bytesById = new Map<string, { snap: string; pack: string }>();
     for (const id of ["P1", "P2"]) bytesById.set(id, await pairBytes(id));

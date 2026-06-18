@@ -959,6 +959,46 @@ describe("applyArchiveRetention — bundle-pair removal (CLI wiring, Layer 2)", 
     expect(await exists(phaseSnapshotPath(cwd, "P2"))).toBe(true);
   });
 
+  it("a MIXED pair (phase `both`, pack `bundle`) is DEFERRED whole — never a snapshot-without-pack half-state", async () => {
+    await archivePhases([
+      { id: "P1", at: "2026-01-01T00:00:00.000Z" },
+      { id: "P2", at: "2026-02-01T00:00:00.000Z" },
+    ]);
+    const { snap } = await toBundlePair("P1");
+    await writeFile(phaseSnapshotPath(cwd, "P1"), snap, "utf8"); // phase `both`; pack stays bundle-only → MIXED
+    await setRoadmap([]);
+
+    const out = await applyArchiveRetention(cwd, { keepLatest: 1 });
+    const phase = out.find((o) => o.kind === "phase_snapshot")!;
+    const event = out.find((o) => o.kind === "event_pack")!;
+    expect(phase.bundle_member_removed).not.toContain("P1");
+    expect(event.deleted).not.toContain("P1");
+    expect(phase.skipped.find((s) => s.id === "P1")?.reason).toBe("needs_bundle_member_removal");
+    expect(event.skipped.find((s) => s.id === "P1")?.reason).toBe("needs_bundle_member_removal");
+    expect(await exists(phaseSnapshotPath(cwd, "P1"))).toBe(true); // phase loose survives
+    expect(loadArchiveBundles(cwd).index.get("event_pack")?.has("P1") ?? false).toBe(true); // pack bundle survives (not orphaned)
+  });
+
+  it("a MIXED pair (phase `bundle`, pack `both`) is DEFERRED whole — never an orphan pack", async () => {
+    await archivePhases([
+      { id: "P1", at: "2026-01-01T00:00:00.000Z" },
+      { id: "P2", at: "2026-02-01T00:00:00.000Z" },
+    ]);
+    const { pack } = await toBundlePair("P1");
+    await writeEventPackFile(cwd, "P1", JSON.parse(pack)); // pack `both`; phase stays bundle-only → MIXED
+    await setRoadmap([]);
+
+    const out = await applyArchiveRetention(cwd, { keepLatest: 1 });
+    const phase = out.find((o) => o.kind === "phase_snapshot")!;
+    const event = out.find((o) => o.kind === "event_pack")!;
+    expect(phase.deleted).not.toContain("P1");
+    expect(event.bundle_member_removed).not.toContain("P1");
+    expect(phase.skipped.find((s) => s.id === "P1")?.reason).toBe("needs_bundle_member_removal");
+    expect(event.skipped.find((s) => s.id === "P1")?.reason).toBe("needs_bundle_member_removal");
+    expect(loadArchiveBundles(cwd).index.get("phase_snapshot")?.has("P1") ?? false).toBe(true); // phase bundle survives
+    expect(await exists(eventPackPath(cwd, "P1"))).toBe(true); // pack loose survives
+  });
+
   it("a `source: both` pair converges in ≤2 runs: run 1 bundle_member_removed, run 2 deleted", async () => {
     await archivePhases([
       { id: "P1", at: "2026-01-01T00:00:00.000Z" },

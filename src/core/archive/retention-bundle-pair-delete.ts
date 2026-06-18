@@ -48,6 +48,7 @@ export type BundlePairToDelete = { phase_id: string };
 export type BundlePairSkipReason =
   | "not_bundle_member" // a side is not a current bundle member of its kind → not a bundle pair
   | "unsafe_authority" // a side's kind has an authority-invalid member → fail-closed for the kind
+  | "mixed_source" // exactly one side has a surviving loose copy → removing both bundle members would leave a half-state
   | "unsupported_platform"; // the platform cannot fsync a directory → the durable path is deferred
 
 /** Per side, the removed member's outcome: `deleted` (no copy resolves anymore) or
@@ -133,11 +134,25 @@ export async function deleteBundlePairsJournaled(
   // (loadArchiveBundles loads STRICT — a corrupt store throws, fail-closed.)
   const index = loadArchiveBundles(cwd).index;
   const skipped: { phase_id: string; reason: BundlePairSkipReason }[] = [];
-  const committableIds: string[] = [];
+  const candidateIds: string[] = [];
   for (const { phase_id } of pairs) {
     const isBundlePair = (index.get("phase_snapshot")?.has(phase_id) ?? false) && (index.get("event_pack")?.has(phase_id) ?? false);
-    if (isBundlePair) committableIds.push(phase_id);
+    if (isBundlePair) candidateIds.push(phase_id);
     else skipped.push({ phase_id, reason: "not_bundle_member" });
+  }
+
+  // MIXED-SOURCE guard (the both-or-neither invariant is PER PAIR, not per side): removing both bundle
+  // members is safe ONLY when both sides have the SAME loose presence — both loose-only (→ both
+  // `deleted`) or both `both` (→ both `bundle_member_removed`, the loose pair drops next run). If
+  // EXACTLY ONE side has a surviving loose copy, removing both bundle members leaves that side
+  // resolving (loose) while the other is gone → a snapshot-without-pack / orphan-pack half-state. Defer
+  // such a pair WHOLE (`mixed_source`); it needs a coordinated loose+bundle removal this layer omits.
+  const committableIds: string[] = [];
+  for (const phase_id of candidateIds) {
+    const phaseLoose = await looseCopyExists(cwd, "phase_snapshot", phase_id);
+    const packLoose = await looseCopyExists(cwd, "event_pack", phase_id);
+    if (phaseLoose === packLoose) committableIds.push(phase_id);
+    else skipped.push({ phase_id, reason: "mixed_source" });
   }
   if (committableIds.length === 0) return { removed: [], skipped };
 
