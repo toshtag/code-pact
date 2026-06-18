@@ -229,6 +229,42 @@ describe("state archive-maintain --write — compaction + retention", () => {
     }
   });
 
+  it("no would_drop record silently disappears: every planned drop lands in a terminal output bucket", async () => {
+    await seedArchivedPhases(["P1", "P2", "P3"]);
+    await unreference(["P3"], ["P1", "P2"]);
+    // What does the planner intend to drop? (dry-run, before any mutation.)
+    const dry = json(run(["state", "archive-maintain", "--keep-latest", "1", "--json"]));
+    const plannedDrop = new Set(
+      (dry.data!.steps.retention.plans as { would_drop: { id: string }[] }[]).flatMap((p) => p.would_drop.map((i) => i.id)),
+    );
+    expect(plannedDrop.size).toBeGreaterThan(0); // there IS droppable truth to account for
+
+    const w = json(run(["state", "archive-maintain", "--write", "--keep-latest", "1", "--json"]));
+    // Collect EVERY id that reached a terminal output bucket across the retention results.
+    const accounted = new Set<string>();
+    for (const res of w.data!.steps.retention.results as {
+      deleted: string[];
+      bundle_member_removed: string[];
+      vanished: string[];
+      skipped: { id: string }[];
+      recovered: { id: string }[];
+    }[]) {
+      for (const id of [
+        ...res.deleted,
+        ...res.bundle_member_removed,
+        ...res.vanished,
+        ...res.skipped.map((s) => s.id),
+        ...res.recovered.map((x) => x.id),
+      ]) {
+        accounted.add(id);
+      }
+    }
+    // Every planned drop must appear in some terminal bucket — fail-closed, never a silent drop.
+    for (const id of plannedDrop) {
+      expect(accounted.has(id), `would_drop id ${id} silently disappeared (in no terminal output bucket)`).toBe(true);
+    }
+  });
+
   it("a source:both unreferenced record is resolved in a single run (≤ 2-run convergence); a 2nd run is a clean no-op", async () => {
     // P3 stays referenced (keeps checks green). Fold all into a bundle, then re-materialise a
     // byte-identical loose copy for P1+P2 → source: both. archive-maintain's compact-first deletes
