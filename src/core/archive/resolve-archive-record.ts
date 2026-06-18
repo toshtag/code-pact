@@ -54,6 +54,13 @@ export type ResolveArchiveRecordOpts = {
    *  journal (it is keyed by phase_id), so the filter applies only to
    *  phase_snapshot / event_pack. Omit (or empty) when there is no pending intent. */
   pendingAbsentIds?: ReadonlySet<string>;
+  /** Ids named by a PENDING BUNDLE-pair delete-intent — a bundle member mid-removal
+   *  whose OLD bundle still physically holds it. These read as absent from BUNDLE
+   *  resolution ONLY (the INVERSE of `pendingAbsentIds`): a `both` record's surviving
+   *  LOOSE copy must still resolve (`bundle_member_removed`, not `deleted`). So a
+   *  present loose record is unaffected; only the bundle consult is skipped. Omit (or
+   *  empty) when there is no pending bundle intent. */
+  pendingBundleAbsentIds?: ReadonlySet<string>;
   /** Read the loose record's raw bytes (absent / invalid / present). */
   readLooseRaw: () => Promise<RawLooseRecord> | RawLooseRecord;
   /** Build the cross-bundle index. LAZY: invoked only when the bundle store must be
@@ -84,9 +91,12 @@ export async function resolveArchiveRecordBytes(
 
   if (opts.mode === "reader-loose-wins") {
     // Loose wins: a present loose record is the answer; the bundle is never loaded
-    // for this id (isolation from an unrelated corrupt/stale bundle).
+    // for this id (isolation from an unrelated corrupt/stale bundle). A `both` record
+    // mid-bundle-removal returns HERE — its loose copy still resolves.
     if (loose.kind === "present") return { kind: "resolved", bytes: loose.bytes, source: "loose" };
-    // Loose absent → consult the bundle store (lazy load).
+    // Loose absent → the bundle would answer, BUT a bundle member named in a pending
+    // bundle-pair intent is mid-removal → treat it as absent (do not consult the bundle).
+    if (opts.pendingBundleAbsentIds?.has(opts.id)) return { kind: "absent" };
     const entry = opts.loadBundleIndex().get(opts.kind)?.get(opts.id) ?? null;
     if (entry == null) return { kind: "absent" };
     bindBundleMember(
@@ -97,9 +107,11 @@ export async function resolveArchiveRecordBytes(
     return { kind: "resolved", bytes: entry.bytes, source: "bundle" };
   }
 
-  // strict-reconcile: load BOTH sides and enforce the byte-identical invariant.
+  // strict-reconcile: load BOTH sides and enforce the byte-identical invariant. A
+  // bundle member mid-removal (pending bundle-pair) is treated as absent from the
+  // bundle side, so a `both` record reconciles to its surviving loose copy.
   const looseBytes = loose.kind === "present" ? loose.bytes : null;
-  const entry = opts.loadBundleIndex().get(opts.kind)?.get(opts.id) ?? null;
+  const entry = opts.pendingBundleAbsentIds?.has(opts.id) ? null : (opts.loadBundleIndex().get(opts.kind)?.get(opts.id) ?? null);
   if (entry != null) {
     bindBundleMember(
       opts.kind,

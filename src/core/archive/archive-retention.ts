@@ -11,7 +11,7 @@ import { loadArchiveBundles } from "./archive-bundle-loader.ts";
 import { enumerateArchivedPhaseSnapshots, resolveUnreferencedSnapshot } from "./load-phase-snapshot.ts";
 import { bindBundleMember, decisionRecordStem } from "./archive-bundle-binding.ts";
 import { validateEventPackTier1 } from "./event-pack-reader.ts";
-import { DeleteIntentDurabilityError, readPendingDeleteIds, recoverPendingDeletes } from "./delete-intent-journal.ts";
+import { DeleteIntentDurabilityError, readPendingDeleteFilters, recoverPendingDeletes } from "./delete-intent-journal.ts";
 import { deleteLoosePairsJournaled, type LoosePairToDelete, type PairDeleteOutcome, type PairMemberRetain } from "./retention-pair-delete.ts";
 import { archiveDecisionsDir, archiveEventPacksDir, archivePhasesDir, normalizeDecisionRef, sha256Hex } from "./paths.ts";
 import type { ArchiveBundleKind } from "../schemas/archive-bundle.ts";
@@ -213,25 +213,35 @@ async function buildSourceMap(cwd: string, kind: ArchiveBundleKind): Promise<Sou
   } catch (err) {
     return { ok: false, detail: `bundle store unreadable: ${(err as Error).message}` };
   }
-  // A phase_snapshot / event_pack named in a pending delete-intent is mid-deletion —
-  // already being dropped — so the planner treats it as LOGICALLY ABSENT (never
-  // counts it in the source map, never re-plans its drop). Keeps the dry-run plan
-  // consistent with the journal-aware readers. (Decisions are never pending.)
-  const pendingAbsentIds = kind === "decision_record" ? new Set<string>() : await readPendingDeleteIds(cwd);
+  // A phase_snapshot / event_pack named in a pending LOOSE-pair intent is mid-deletion
+  // (both copies being unlinked) → LOGICALLY ABSENT everywhere; one named in a pending
+  // BUNDLE-pair intent has its BUNDLE member mid-removal → logically absent from the
+  // BUNDLE side only (a `both` record's loose copy survives → it reads as `loose`, not
+  // `both`). Keeps the dry-run plan consistent with the journal-aware readers, and never
+  // re-plans a record already mid-removal. (Decisions are never in the journal.)
+  const { looseAbsentIds, bundleAbsentIds } =
+    kind === "decision_record"
+      ? { looseAbsentIds: new Set<string>(), bundleAbsentIds: new Set<string>() }
+      : await readPendingDeleteFilters(cwd);
   let looseIds: string[];
   try {
     looseIds = (await readdir(looseDirFor(cwd, kind)))
       .filter((n) => n.endsWith(".json"))
       .map((n) => basename(n, ".json"))
-      .filter((id) => !pendingAbsentIds.has(id));
+      .filter((id) => !looseAbsentIds.has(id));
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") looseIds = [];
     else return { ok: false, detail: `loose ${kind} dir unreadable: ${(err as Error).message}` };
   }
   const looseSet = new Set(looseIds);
   const source = new Map<string, "loose" | "bundle" | "both">();
-  for (const id of looseSet) source.set(id, members.has(id) ? "both" : "loose");
-  for (const id of members.keys()) if (!looseSet.has(id) && !pendingAbsentIds.has(id)) source.set(id, "bundle");
+  // A pending bundle-pair member is absent from the bundle side: a loose id with a
+  // mid-removal bundle member reads as `loose` (not `both`).
+  for (const id of looseSet) source.set(id, members.has(id) && !bundleAbsentIds.has(id) ? "both" : "loose");
+  for (const id of members.keys()) {
+    if (looseSet.has(id) || looseAbsentIds.has(id) || bundleAbsentIds.has(id)) continue; // loose handled above / loose-pair absent / bundle member mid-removal
+    source.set(id, "bundle");
+  }
 
   // Read every loose record's raw ONCE: record its digest (the gate's expected-bytes authority)
   // and, for a `both` id, STRICT-RECONCILE against the shadowed bundle member (byte-identical

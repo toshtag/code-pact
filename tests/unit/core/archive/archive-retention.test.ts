@@ -466,7 +466,7 @@ describe("planArchiveRetention — a pending delete-intent hides the pair from t
     ]);
     await setRoadmap([]); // both unreferenced
     // P1 is mid-deletion (a pending intent). The planner must treat it as already gone.
-    await writeDeleteIntent(cwd, [{ phase_id: "P1", phase_sha256: sha256Hex("x"), pack_sha256: sha256Hex("y") }]);
+    await writeDeleteIntent(cwd, [{ intent_kind: "loose_pair", phase_id: "P1", phase_sha256: sha256Hex("x"), pack_sha256: sha256Hex("y") }]);
     const plan = planFor(await planArchiveRetention(cwd, { keepLatest: 5 }), "phase_snapshot");
     const ids = [...plan.would_keep, ...plan.would_drop, ...plan.blocked].map((i) => i.id);
     expect(ids).not.toContain("P1"); // logically absent — not re-planned for drop
@@ -606,7 +606,7 @@ describe("applyArchiveRetention — destructive LOOSE-ONLY delete (PR-2a)", () =
     await writeEventPackFile(cwd, "P1", await buildValidEventPack(cwd, "P1", events));
     await setRoadmap([]);
     // Simulate a prior crash mid-delete: a pending journal naming P1, both files still present.
-    await writeDeleteIntent(cwd, [{ phase_id: "P1", phase_sha256: sha256Hex("p"), pack_sha256: sha256Hex("k") }]);
+    await writeDeleteIntent(cwd, [{ intent_kind: "loose_pair", phase_id: "P1", phase_sha256: sha256Hex("p"), pack_sha256: sha256Hex("k") }]);
     const out = await applyArchiveRetention(cwd, { keepLatest: 5 }); // keepLatest high → nothing NEW would drop
     // Recovery completed P1's deletion (both gone) and cleared the journal, before the planner ran.
     expect(await exists(phaseSnapshotPath(cwd, "P1"))).toBe(false);
@@ -702,7 +702,7 @@ describe("applyArchiveRetention — destructive LOOSE-ONLY delete (PR-2a)", () =
     }).events;
     await writeEventPackFile(cwd, "P1", await buildValidEventPack(cwd, "P1", events));
     await setRoadmap([]);
-    await writeDeleteIntent(cwd, [{ phase_id: "P1", phase_sha256: sha256Hex("p"), pack_sha256: sha256Hex("k") }]);
+    await writeDeleteIntent(cwd, [{ intent_kind: "loose_pair", phase_id: "P1", phase_sha256: sha256Hex("p"), pack_sha256: sha256Hex("k") }]);
     await rm(eventPackPath(cwd, "P1")); // crash AFTER the pack unlink, BEFORE the phase unlink
     const out = await applyArchiveRetention(cwd, { keepLatest: 5 });
     // Recovery completes the phase unlink (idempotent on the gone pack) and reports P1 recovered.

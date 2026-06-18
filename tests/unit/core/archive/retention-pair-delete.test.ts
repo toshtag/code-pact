@@ -112,11 +112,11 @@ const intentExists = (): Promise<boolean> => exists(archiveDeleteIntentPath(cwd)
 describe("delete-intent journal — primitives", () => {
   it("write → read round-trips the committed pairs", async () => {
     await mkdir(join(cwd, ".code-pact", "state", "archive"), { recursive: true });
-    const pairs = [{ phase_id: "P1", phase_sha256: sha256Hex("a"), pack_sha256: sha256Hex("b") }];
-    await writeDeleteIntent(cwd, pairs);
+    const intents = [{ intent_kind: "loose_pair" as const, phase_id: "P1", phase_sha256: sha256Hex("a"), pack_sha256: sha256Hex("b") }];
+    await writeDeleteIntent(cwd, intents);
     const read = await readDeleteIntent(cwd);
     expect(read.kind).toBe("present");
-    if (read.kind === "present") expect(read.intent.pairs).toEqual(pairs);
+    if (read.kind === "present") expect(read.intent.intents).toEqual(intents);
   });
 
   it("clear is idempotent — clearing an absent journal is a no-op", async () => {
@@ -254,24 +254,24 @@ describe("deleteLoosePairsJournaled — crash-safe both-or-neither", () => {
   it("NO-OVERWRITE — a pending journal blocks a new pair delete (the caller must recover first)", async () => {
     const pair = await setupPair("P1");
     // A leftover journal from an unrecovered prior crash (names a different pair).
-    await writeDeleteIntent(cwd, [{ phase_id: "P9", phase_sha256: sha256Hex("x"), pack_sha256: sha256Hex("y") }]);
+    await writeDeleteIntent(cwd, [{ intent_kind: "loose_pair", phase_id: "P9", phase_sha256: sha256Hex("x"), pack_sha256: sha256Hex("y") }]);
     await expect(deleteLoosePairsJournaled(cwd, [pair])).rejects.toBeInstanceOf(PendingDeleteIntentError);
     // The existing journal is untouched (its recovery authority is preserved) and
     // nothing was deleted.
     const read = await readDeleteIntent(cwd);
-    expect(read.kind === "present" && read.intent.pairs[0]!.phase_id).toBe("P9");
+    expect(read.kind === "present" && read.intent.intents[0]!.phase_id).toBe("P9");
     expect(await exists(phaseSnapshotPath(cwd, "P1"))).toBe(true);
     expect(await exists(eventPackPath(cwd, "P1"))).toBe(true);
   });
 
   it("writeDeleteIntent itself refuses to overwrite an existing journal", async () => {
     await mkdir(join(cwd, ".code-pact", "state", "archive"), { recursive: true });
-    await writeDeleteIntent(cwd, [{ phase_id: "P1", phase_sha256: sha256Hex("a"), pack_sha256: sha256Hex("b") }]);
+    await writeDeleteIntent(cwd, [{ intent_kind: "loose_pair", phase_id: "P1", phase_sha256: sha256Hex("a"), pack_sha256: sha256Hex("b") }]);
     await expect(
-      writeDeleteIntent(cwd, [{ phase_id: "P2", phase_sha256: sha256Hex("c"), pack_sha256: sha256Hex("d") }]),
+      writeDeleteIntent(cwd, [{ intent_kind: "loose_pair", phase_id: "P2", phase_sha256: sha256Hex("c"), pack_sha256: sha256Hex("d") }]),
     ).rejects.toBeInstanceOf(PendingDeleteIntentError);
     const read = await readDeleteIntent(cwd);
-    expect(read.kind === "present" && read.intent.pairs[0]!.phase_id).toBe("P1"); // the first commit survives
+    expect(read.kind === "present" && read.intent.intents[0]!.phase_id).toBe("P1"); // the first commit survives
   });
 
   it("a duplicate phase_id in the input is rejected (no commit, both retained)", async () => {
@@ -355,7 +355,7 @@ describe("deleteLoosePairsJournaled — durability barriers are REQUIRED (fail-c
   it("a schema-valid but NON-CANONICAL journal (compact bytes) is corrupt — not the writer's form", async () => {
     await mkdir(join(cwd, ".code-pact", "state", "archive"), { recursive: true });
     // Valid intent, but compact JSON (no 2-space indent / trailing newline) — a hand-edit.
-    const compact = JSON.stringify({ schema_version: 1, pairs: [{ phase_id: "P1", phase_sha256: sha256Hex("a"), pack_sha256: sha256Hex("b") }] });
+    const compact = JSON.stringify({ schema_version: 2, intents: [{ intent_kind: "loose_pair", phase_id: "P1", phase_sha256: sha256Hex("a"), pack_sha256: sha256Hex("b") }] });
     await writeFile(archiveDeleteIntentPath(cwd), compact, "utf8");
     const read = await readDeleteIntent(cwd);
     expect(read.kind).toBe("corrupt");
@@ -367,10 +367,10 @@ describe("deleteLoosePairsJournaled — durability barriers are REQUIRED (fail-c
     const dup =
       JSON.stringify(
         {
-          schema_version: 1,
-          pairs: [
-            { phase_id: "P1", phase_sha256: sha256Hex("a"), pack_sha256: sha256Hex("b") },
-            { phase_id: "P1", phase_sha256: sha256Hex("c"), pack_sha256: sha256Hex("d") },
+          schema_version: 2,
+          intents: [
+            { intent_kind: "loose_pair", phase_id: "P1", phase_sha256: sha256Hex("a"), pack_sha256: sha256Hex("b") },
+            { intent_kind: "loose_pair", phase_id: "P1", phase_sha256: sha256Hex("c"), pack_sha256: sha256Hex("d") },
           ],
         },
         null,
@@ -387,7 +387,7 @@ describe("deleteLoosePairsJournaled — durability barriers are REQUIRED (fail-c
 describe("reader-awareness — a pending delete-intent hides the pair from readers", () => {
   /** Write a pending journal naming `phaseId` (a pair mid-deletion). */
   async function pendIntent(phaseId: string): Promise<void> {
-    await writeDeleteIntent(cwd, [{ phase_id: phaseId, phase_sha256: sha256Hex("p"), pack_sha256: sha256Hex("k") }]);
+    await writeDeleteIntent(cwd, [{ intent_kind: "loose_pair", phase_id: phaseId, phase_sha256: sha256Hex("p"), pack_sha256: sha256Hex("k") }]);
   }
 
   it("resolvePhaseSnapshotRaw reads a pending phase as ABSENT (its loose file still present)", async () => {
