@@ -1,22 +1,22 @@
 {
   "harness_version": "0.2.0",
   "summary_schema_version": 1,
-  "input_git_sha": "f711d4075181b4d670baa3dea452a53f00ef36ba",
-  "code_pact_cli_version": "1.32.0",
-  "generated_at": "2026-06-05",
+  "input_git_sha": "3f46380acafdf0d98b0afac9cc526df8a72693d1",
+  "code_pact_cli_version": "2.0.0",
+  "generated_at": "2026-06-18",
   "metrics": {
-    "pack_size_p50_bytes": 19876,
-    "pack_size_p90_bytes": 45854,
-    "pack_size_max_bytes": 566789,
-    "first_pass_verify_rate_percent": 100,
-    "lifecycle_adherence_rate_percent": 84.5,
+    "pack_size_p50_bytes": 0,
+    "pack_size_p90_bytes": 0,
+    "pack_size_max_bytes": 0,
+    "first_pass_verify_rate_percent": 0,
+    "lifecycle_adherence_rate_percent": 0,
     "adapter_drift_rate_percent": 0,
     "undeclared_write_rate_status": "deferred",
     "undeclared_write_rate_note": "Computing this metric requires attributing git commits to tasks. The project does not enforce a formal commit → task link, so a historical retrofit would either over-claim or require new lifecycle instrumentation. Tracked under evidence-harness-v2-rfc.md Non-goals."
   },
   "denominators": {
-    "tasks_done": 142,
-    "tasks_total": 198,
+    "tasks_done": 0,
+    "tasks_total": 0,
     "agents_enabled": 1
   }
 }
