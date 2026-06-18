@@ -154,7 +154,7 @@ describe("harness --write (persistence)", () => {
       ),
     );
     expect(summary.summary_schema_version).toBe(2);
-    expect(summary.harness_version).toBe("0.2.0");
+    expect(summary.harness_version).toBe("0.3.0");
     expect(["measured", "no_live_tasks"]).toContain(summary.corpus_status);
     expect(typeof summary.corpus_note).toBe("string");
     expect(summary.metrics).toMatchObject({

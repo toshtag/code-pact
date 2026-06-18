@@ -29,7 +29,7 @@ The sibling `measurements.manifest.json` records the harness version, the corpus
 
 ```json
 {
-  "harness_version": "0.2.0",
+  "harness_version": "0.3.0",
   "summary_schema_version": 2,
   "input_git_sha": "<commit>[-dirty]",
   "code_pact_cli_version": "<version>",

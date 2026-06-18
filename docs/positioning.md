@@ -186,7 +186,7 @@ Two standing caveats on that snapshot:
   rate/size reads 0 because this repo's phases are all archived under
   `.code-pact/state/archive` (which the harness does not yet read) — that is "nothing
   measured", not a measured failure; the last live-corpus baseline is in git history,
-  and reading archived phase snapshots is the tracked harness follow-up.
+  and reading archived phase snapshots is intentionally deferred.
 - **Undeclared-write rate is `deferred`** (rationale in the evidence-harness-v2 RFC
   Non-goals — retired; in git history / the `.code-pact/state` archive record)
   — it awaits a future phase that attributes git commits to tasks via

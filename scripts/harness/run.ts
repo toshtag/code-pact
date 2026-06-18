@@ -41,7 +41,7 @@ import {
   type VerifySuccessRow,
 } from "./metrics.ts";
 
-const HARNESS_VERSION = "0.2.0";
+const HARNESS_VERSION = "0.3.0";
 const SUMMARY_SCHEMA_VERSION = 2;
 
 interface HarnessOptions {

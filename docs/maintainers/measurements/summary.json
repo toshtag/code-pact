@@ -1,11 +1,11 @@
 {
-  "harness_version": "0.2.0",
+  "harness_version": "0.3.0",
   "summary_schema_version": 2,
-  "input_git_sha": "e9a4d473131b8de5dedae93072277e99b8333002-dirty",
+  "input_git_sha": "6f8efdf605bd9891e3175c3e2929f3079a3702f9-dirty",
   "code_pact_cli_version": "2.0.0",
   "generated_at": "2026-06-18",
   "corpus_status": "no_live_tasks",
-  "corpus_note": "No live tasks in design/phases, so the task-derived metrics (pack size, verification rate, lifecycle adherence, task event density) are 0 — there were no live tasks to measure, not a measured failure. Agent-level adapter drift and plan-lint issues are still measured (see denominators.agents_enabled). This corpus's completed phases are archived under .code-pact/state/archive, which the harness does not yet read; the last live-corpus baseline is in git history, and harness archive-awareness is the tracked follow-up.",
+  "corpus_note": "No live tasks in design/phases, so the task-derived metrics (pack size, verification rate, lifecycle adherence, task event density) are 0 — there were no live tasks to measure, not a measured failure. Agent-level adapter drift and plan-lint issues are still measured (see denominators.agents_enabled). This corpus's completed phases are archived under .code-pact/state/archive, which the harness does not yet read; the last live-corpus baseline is in git history, and reading archived phase snapshots is intentionally deferred (no live tracker).",
   "metrics": {
     "pack_size_p50_bytes": 0,
     "pack_size_p90_bytes": 0,

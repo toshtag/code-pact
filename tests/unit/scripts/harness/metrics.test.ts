@@ -400,7 +400,7 @@ describe("ratePercent", () => {
 describe("buildSummary", () => {
   it("computes every metric and never emits budget_reserved_for_later", () => {
     const summary = buildSummary({
-      harnessVersion: "0.2.0",
+      harnessVersion: "0.3.0",
       summarySchemaVersion: 1,
       inputGitSha: "abc123",
       codePactCliVersion: "1.12.0",
@@ -424,7 +424,7 @@ describe("buildSummary", () => {
       tasksTotal: 3,
     });
 
-    expect(summary.harness_version).toBe("0.2.0");
+    expect(summary.harness_version).toBe("0.3.0");
     expect(summary.summary_schema_version).toBe(1);
     expect(summary.metrics.pack_size_p50_bytes).toBe(200); // lower median of [100, 200, 300] → idx 1 → 200
     expect(summary.metrics.pack_size_max_bytes).toBe(300);
@@ -447,7 +447,7 @@ describe("buildSummary", () => {
 
   it("flags an empty live corpus as no_live_tasks (0s are 'nothing measured', not a measured failure)", () => {
     const summary = buildSummary({
-      harnessVersion: "0.2.0",
+      harnessVersion: "0.3.0",
       summarySchemaVersion: 2,
       inputGitSha: "abc123-dirty",
       codePactCliVersion: "2.0.0",
@@ -468,7 +468,7 @@ describe("buildSummary", () => {
 
   it("excludes legacy_planned_to_done_shortcut tasks from the adherence numerator but keeps them in the denominator", () => {
     const summary = buildSummary({
-      harnessVersion: "0.2.0",
+      harnessVersion: "0.3.0",
       summarySchemaVersion: 1,
       inputGitSha: "x",
       codePactCliVersion: "1.12.0",

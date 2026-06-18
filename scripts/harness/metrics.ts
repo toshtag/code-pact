@@ -385,7 +385,7 @@ const UNDECLARED_WRITE_RATE_NOTE =
 // TASK-derived metrics only — adapter drift and plan-lint issues do NOT depend on
 // live tasks and are still measured — so the note never over-claims "nothing measured".
 const NO_LIVE_TASKS_NOTE =
-  "No live tasks in design/phases, so the task-derived metrics (pack size, verification rate, lifecycle adherence, task event density) are 0 — there were no live tasks to measure, not a measured failure. Agent-level adapter drift and plan-lint issues are still measured (see denominators.agents_enabled). This corpus's completed phases are archived under .code-pact/state/archive, which the harness does not yet read; the last live-corpus baseline is in git history, and harness archive-awareness is the tracked follow-up.";
+  "No live tasks in design/phases, so the task-derived metrics (pack size, verification rate, lifecycle adherence, task event density) are 0 — there were no live tasks to measure, not a measured failure. Agent-level adapter drift and plan-lint issues are still measured (see denominators.agents_enabled). This corpus's completed phases are archived under .code-pact/state/archive, which the harness does not yet read; the last live-corpus baseline is in git history, and reading archived phase snapshots is intentionally deferred (no live tracker).";
 
 export interface BuildSummaryInput {
   harnessVersion: string;

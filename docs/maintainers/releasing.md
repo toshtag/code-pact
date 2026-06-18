@@ -4,9 +4,11 @@ The repeatable steps to cut a release. Most of it is a normal PR; only the
 **signed tag** and **`npm publish`** are maintainer-local (they need the
 maintainer's signing key and npm credentials).
 
-Only `dist/` + `LICENSE` ship in the npm package (`package.json` `files`). So
-**code changes under `src/` require a release to reach users; docs-only changes
-do not** (they're already visible in the repo).
+`package.json` `files` whitelists `dist/` + `LICENSE`; npm additionally **always**
+includes `package.json` and the `README` regardless of `files`. Source under `src/`
+and docs other than the README are **not** shipped. So **code changes under `src/`
+require a release to reach users; docs-only changes do not** (they're already
+visible in the repo).
 
 ## Pick the version
 
