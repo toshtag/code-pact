@@ -379,7 +379,7 @@ export interface Summary {
 }
 
 const UNDECLARED_WRITE_RATE_NOTE =
-  "Computing this metric requires attributing git commits to tasks. The project does not enforce a formal commit → task link, so a historical retrofit would either over-claim or require new lifecycle instrumentation. Tracked under evidence-harness-v2-rfc.md Non-goals.";
+  "Computing this metric requires attributing git commits to tasks. The project does not enforce a formal commit → task link, so a historical retrofit would either over-claim or require new lifecycle instrumentation. This remains intentionally deferred (no live tracker); the original rationale is in the retired evidence-harness-v2 RFC, via git history / the .code-pact/state archive record.";
 
 // Emitted when the live plan has no tasks (all phases archived). Scoped to the
 // TASK-derived metrics only — adapter drift and plan-lint issues do NOT depend on

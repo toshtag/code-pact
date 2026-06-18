@@ -1,7 +1,7 @@
 {
   "harness_version": "0.3.0",
   "summary_schema_version": 2,
-  "input_git_sha": "6f8efdf605bd9891e3175c3e2929f3079a3702f9-dirty",
+  "input_git_sha": "b956f2e0376568701300f9ff679131777e0b3a4b-dirty",
   "code_pact_cli_version": "2.0.0",
   "generated_at": "2026-06-18",
   "corpus_status": "no_live_tasks",
@@ -14,7 +14,7 @@
     "lifecycle_adherence_rate_percent": 0,
     "adapter_drift_rate_percent": 0,
     "undeclared_write_rate_status": "deferred",
-    "undeclared_write_rate_note": "Computing this metric requires attributing git commits to tasks. The project does not enforce a formal commit → task link, so a historical retrofit would either over-claim or require new lifecycle instrumentation. Tracked under evidence-harness-v2-rfc.md Non-goals."
+    "undeclared_write_rate_note": "Computing this metric requires attributing git commits to tasks. The project does not enforce a formal commit → task link, so a historical retrofit would either over-claim or require new lifecycle instrumentation. This remains intentionally deferred (no live tracker); the original rationale is in the retired evidence-harness-v2 RFC, via git history / the .code-pact/state archive record."
   },
   "denominators": {
     "tasks_done": 0,

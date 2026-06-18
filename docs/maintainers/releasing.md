@@ -7,8 +7,11 @@ maintainer's signing key and npm credentials).
 `package.json` `files` whitelists `dist/` + `LICENSE`; npm additionally **always**
 includes `package.json` and the `README` regardless of `files`. Source under `src/`
 and docs other than the README are **not** shipped. So **code changes under `src/`
-require a release to reach users; docs-only changes do not** (they're already
-visible in the repo).
+require a release to reach users; docs under `docs/**` / `design/**` do not** (they
+are not shipped — read them in the repo). The one exception is `README.md`: it is
+visible in the repo immediately, but the README shown on the **npm package page**
+updates only on publish — release a README-only change when that npm-facing copy
+matters.
 
 ## Pick the version
 
