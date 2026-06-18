@@ -13,11 +13,43 @@
 // blocks are stripped before scanning) to avoid false positives on legitimate
 // examples.
 
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
+import { dirname, resolve, join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { closesClaimProblem, readLivePhaseFiles } from "./closes-claim.mjs";
+
+/** Resolve an archived phase snapshot for `phaseId` from the BUNDLE store — the
+ *  compacted form (`state compact-archive` folds the loose `archive/phases/<id>.json`
+ *  into `archive/bundles/phase_snapshot-<hash>.json` and deletes the loose file). The
+ *  same loose∪bundle resolution the runtime readers use, so this CI check survives a
+ *  compacted repo. Returns the parsed snapshot, `"PARSE_ERROR"` (a member is present
+ *  but its bytes are unparseable), or `null` (no bundle member for the id). */
+function resolveSnapshotFromBundle(repoRoot, phaseId) {
+  const dir = resolve(repoRoot, ".code-pact/state/archive/bundles");
+  let names;
+  try {
+    names = readdirSync(dir).filter((n) => n.startsWith("phase_snapshot-") && n.endsWith(".json"));
+  } catch {
+    return null; // no bundles dir → no compacted snapshot
+  }
+  for (const name of names) {
+    let bundle;
+    try {
+      bundle = JSON.parse(readFileSync(join(dir, name), "utf8"));
+    } catch {
+      continue; // a corrupt bundle file is the bundle reader's concern, not this CI check's
+    }
+    const member = (bundle.members ?? []).find((m) => m.id === phaseId);
+    if (!member) continue;
+    try {
+      return JSON.parse(member.bytes);
+    } catch {
+      return "PARSE_ERROR";
+    }
+  }
+  return null;
+}
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (rel) => readFileSync(resolve(repoRoot, rel), "utf8");
@@ -183,7 +215,10 @@ for (const rel of ["docs/getting-started.md"]) {
             snapshot = "PARSE_ERROR";
           }
         } catch {
-          snapshot = null; // no snapshot file
+          // No LOOSE snapshot — resolve from the BUNDLE store (the compacted form). A
+          // compacted repo has the snapshot only as a bundle member; loose-wins, so the
+          // bundle is consulted only when the loose file is absent.
+          snapshot = resolveSnapshotFromBundle(repoRoot, phaseId);
         }
       }
       const problem = closesClaimProblem(phaseId, entry, snapshot);
