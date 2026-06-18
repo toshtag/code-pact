@@ -228,9 +228,9 @@ describe("rowsToCsv", () => {
     expect(csv).toBe("a,b\n1,x\n2,y\n");
   });
 
-  it("emits header only when no rows", () => {
+  it("emits header only (newline-terminated) when no rows", () => {
     const csv = rowsToCsv<{ a: number }>([], ["a"]);
-    expect(csv).toBe("a");
+    expect(csv).toBe("a\n");
   });
 
   it("escapes embedded commas in strings", () => {

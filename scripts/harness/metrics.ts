@@ -461,5 +461,7 @@ export function rowsToCsv<T extends Record<string, string | number | boolean>>(
       })
       .join(","),
   );
-  return [header, ...body].join("\n") + (body.length > 0 ? "\n" : "");
+  // Always terminate with a newline — including the header-only (empty-corpus)
+  // case — so the CSVs are well-formed POSIX text files (`wc -l` counts the header).
+  return [header, ...body].join("\n") + "\n";
 }

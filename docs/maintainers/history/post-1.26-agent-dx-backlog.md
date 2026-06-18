@@ -7,7 +7,7 @@
 
 - Status: complete (intent record, not an implementation RFC; P40-P44 all shipped)
 - Date: 2026-05-30
-- Related: [Root-cause-first completion errors](../../../design/decisions/root-cause-completion-errors-rfc.md) (P39, accepted)
+- Related: `root-cause-completion-errors-rfc.md` (P39, accepted — retired; in git history / the `.code-pact/state` archive record)
 
 ## What this is
 

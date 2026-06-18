@@ -1,8 +1,9 @@
 # Migration guide (archive)
 
-> **For current upgrade guidance, start with [upgrading.md](upgrading.md).**
-> Within the v1.x line, upgrading is just a version bump — the CLI contract is
-> frozen and additive.
+> **This archived page preserves the v1.x-era migration notes. For current upgrade
+> guidance, start with [upgrading.md](upgrading.md).**
+> Within the historical v1.x line, an upgrade was just a version bump — the CLI
+> contract stayed frozen and additive within that major.
 
 This page is kept as a compatibility archive. Older design phases, RFC decision
 records, and a few concept docs link to its per-version anchors, so the file

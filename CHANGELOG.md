@@ -78,8 +78,8 @@ No changes yet.
   can fail only a PR that touches the generated contract surface (the catalog, the
   generator, or the block itself); the fix is `pnpm gen:doc-blocks`. The decision,
   rollout, and the CI-burden contract every future doc check must satisfy are in
-  [doc-truth-from-code-rfc.md](design/decisions/doc-truth-from-code-rfc.md) /
-  [design/rules/doc-authoring.md](design/rules/doc-authoring.md).
+  the retired `doc-truth-from-code-rfc.md` (git history / `.code-pact/state` archive
+  record) and the live [design/rules/doc-authoring.md](design/rules/doc-authoring.md).
 - **Generated detail enums for `plan brief` / `plan constitution`.** The
   `--from-file` / `--stdin` `data.detail` enums now derive from a shared
   side-effect-free catalog (`src/contracts/plan-capture-details.ts`) consumed by
