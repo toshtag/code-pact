@@ -153,6 +153,23 @@ describe("deleteBundlePairsJournaled — both-or-neither bundle-pair removal", (
     expect(await readFile(eventPackPath(cwd, "P1"), "utf8")).toBe(bytesById.get("P1")!.pack);
   });
 
+  it("a MIXED-source pair (one side has a surviving loose copy, the other does not) is DEFERRED whole — no half-state", async () => {
+    const bytesById = new Map<string, { snap: string; pack: string }>();
+    for (const id of ["P1", "P2"]) bytesById.set(id, await pairBytes(id));
+    await bundlePairs(["P1", "P2"], bytesById);
+    // P1 phase is `both` (re-materialize its loose copy); P1 pack stays bundle-only → MIXED source.
+    await writeFile(phaseSnapshotPath(cwd, "P1"), bytesById.get("P1")!.snap, "utf8");
+    const before = await listBundleNames();
+
+    const out = await deleteBundlePairsJournaled(cwd, [{ phase_id: "P1" }]);
+    expect(out.removed).toEqual([]);
+    expect(out.skipped).toEqual([{ phase_id: "P1", reason: "mixed_source" }]); // removing both bundle members would orphan the pack
+    expect(await listBundleNames()).toEqual(before); // nothing written, nothing retired
+    expect((await readDeleteIntent(cwd)).kind).toBe("absent"); // no commit
+    expect(await resolvesInBundles("P1")).toEqual({ phase: true, pack: true }); // both bundle members intact
+    expect(await readFile(phaseSnapshotPath(cwd, "P1"), "utf8")).toBe(bytesById.get("P1")!.snap); // loose half intact
+  });
+
   it("an authority-INVALID event_pack member (misfiled: id P1, body phase_id P2) → unsafe_authority, untouched", async () => {
     const bytesById = new Map<string, { snap: string; pack: string }>();
     for (const id of ["P1", "P2"]) bytesById.set(id, await pairBytes(id));
@@ -389,6 +406,26 @@ describe("deleteBundlePairsJournaled — reader-awareness in the pending window"
     ).rejects.toThrow("stop");
     expect(observed).toEqual({ phase: "valid", pack: "present" }); // loose copy resolves despite the pending bundle removal
     await recoverPendingDeletes(cwd); // heal
+  });
+
+  it("readDeleteIntent rejects a writer-impossible bundle_pair (removed_ids != [phase_id]) as corrupt", async () => {
+    await mkdir(archiveBundlesDir(cwd), { recursive: true });
+    const j = (members: unknown): string =>
+      JSON.stringify({ schema_version: 2, intents: [{ intent_kind: "bundle_pair", phase_id: "P1", members }] }, null, 2) + "\n";
+    const ok = { removed_ids: ["P1"], old_bundles: [{ file: "phase_snapshot-0123456789abcdef.json", sha256: sha256Hex("a") }], new_bundle: null };
+    const okPack = { removed_ids: ["P1"], old_bundles: [{ file: "event_pack-0123456789abcdef.json", sha256: sha256Hex("b") }], new_bundle: null };
+    // removed_ids names a DIFFERENT id than the pair's phase_id → corrupt (a writer never emits this).
+    await writeFile(join(cwd, ".code-pact", "state", "archive", "delete-intent.json"), j({ phase_snapshot: { ...ok, removed_ids: ["PX"] }, event_pack: okPack }), "utf8");
+    expect((await readDeleteIntent(cwd)).kind).toBe("corrupt");
+  });
+
+  it("readDeleteIntent rejects a bundle_pair whose file names another kind's bundle as corrupt", async () => {
+    await mkdir(archiveBundlesDir(cwd), { recursive: true });
+    const phaseMember = { removed_ids: ["P1"], old_bundles: [{ file: "event_pack-0123456789abcdef.json", sha256: sha256Hex("a") }], new_bundle: null }; // wrong-kind prefix
+    const packMember = { removed_ids: ["P1"], old_bundles: [{ file: "event_pack-0123456789abcdef.json", sha256: sha256Hex("b") }], new_bundle: null };
+    const raw = JSON.stringify({ schema_version: 2, intents: [{ intent_kind: "bundle_pair", phase_id: "P1", members: { phase_snapshot: phaseMember, event_pack: packMember } }] }, null, 2) + "\n";
+    await writeFile(join(cwd, ".code-pact", "state", "archive", "delete-intent.json"), raw, "utf8");
+    expect((await readDeleteIntent(cwd)).kind).toBe("corrupt");
   });
 
   it("compaction must NOT fold a pending `both` member's loose copy (enumerateLooseMembers excludes it)", async () => {

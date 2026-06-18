@@ -11,6 +11,7 @@ import {
   type RetentionPlan,
 } from "../../../../src/core/archive/archive-retention.ts";
 import { writeArchiveBundle } from "../../../../src/core/archive/archive-bundle-writer.ts";
+import { loadArchiveBundles } from "../../../../src/core/archive/archive-bundle-loader.ts";
 import {
   __setDeleteIntentDirFsyncForTests,
   DeleteIntentDurabilityError,
@@ -921,5 +922,167 @@ describe("applyArchiveRetention — destructive LOOSE-ONLY delete (PR-2a)", () =
     expect(phase.deleted).toEqual([]);
     expect(phase.skipped).toEqual([]);
     expect(await exists(phaseSnapshotPath(cwd, "P2"))).toBe(true);
+  });
+});
+
+describe("applyArchiveRetention — bundle-pair removal (CLI wiring, Layer 2)", () => {
+  /** Make an already-archived `id` a BUNDLE pair: build its pack from the loose snapshot, bundle the
+   *  snapshot AND the pack, then remove the loose copies (bundle-only). */
+  async function toBundlePair(id: string): Promise<{ snap: string; pack: string }> {
+    const events = ProgressLog.parse({ events: [{ task_id: `${id}-T1`, status: "done", at: "2026-06-01T00:00:00.000Z", actor: "agent" }] }).events;
+    const packBytes = JSON.stringify(await buildValidEventPack(cwd, id, events), null, 2) + "\n";
+    const snap = await readFile(phaseSnapshotPath(cwd, id), "utf8");
+    await writeArchiveBundle(cwd, "phase_snapshot", [{ id, bytes: snap }]);
+    await writeArchiveBundle(cwd, "event_pack", [{ id, bytes: packBytes }]);
+    await rm(phaseSnapshotPath(cwd, id));
+    return { snap, pack: packBytes };
+  }
+
+  it("a would_drop BUNDLE pair (phase + pack both bundled) is REMOVED both-or-neither → deleted", async () => {
+    await archivePhases([
+      { id: "P1", at: "2026-01-01T00:00:00.000Z" },
+      { id: "P2", at: "2026-02-01T00:00:00.000Z" },
+    ]);
+    await toBundlePair("P1"); // P1 phase + pack → a bundle pair; P2 stays loose (the keep)
+    await setRoadmap([]); // both unreferenced; keepLatest 1 keeps P2 (latest), drops P1
+
+    const out = await applyArchiveRetention(cwd, { keepLatest: 1 });
+    const phase = out.find((o) => o.kind === "phase_snapshot")!;
+    const event = out.find((o) => o.kind === "event_pack")!;
+    expect(phase.deleted).toContain("P1"); // no copy of P1 resolves anymore
+    expect(event.deleted).toContain("P1");
+    expect(phase.bundle_member_removed).toEqual([]);
+    // P1 is gone from BOTH bundle stores; P2 (loose) survives.
+    const idx = loadArchiveBundles(cwd).index;
+    expect(idx.get("phase_snapshot")?.has("P1") ?? false).toBe(false);
+    expect(idx.get("event_pack")?.has("P1") ?? false).toBe(false);
+    expect(await exists(phaseSnapshotPath(cwd, "P2"))).toBe(true);
+  });
+
+  it("a MIXED pair (phase `both`, pack `bundle`) is DEFERRED whole — never a snapshot-without-pack half-state", async () => {
+    await archivePhases([
+      { id: "P1", at: "2026-01-01T00:00:00.000Z" },
+      { id: "P2", at: "2026-02-01T00:00:00.000Z" },
+    ]);
+    const { snap } = await toBundlePair("P1");
+    await writeFile(phaseSnapshotPath(cwd, "P1"), snap, "utf8"); // phase `both`; pack stays bundle-only → MIXED
+    await setRoadmap([]);
+
+    const out = await applyArchiveRetention(cwd, { keepLatest: 1 });
+    const phase = out.find((o) => o.kind === "phase_snapshot")!;
+    const event = out.find((o) => o.kind === "event_pack")!;
+    expect(phase.bundle_member_removed).not.toContain("P1");
+    expect(event.deleted).not.toContain("P1");
+    expect(phase.skipped.find((s) => s.id === "P1")?.reason).toBe("needs_bundle_member_removal");
+    expect(event.skipped.find((s) => s.id === "P1")?.reason).toBe("needs_bundle_member_removal");
+    expect(await exists(phaseSnapshotPath(cwd, "P1"))).toBe(true); // phase loose survives
+    expect(loadArchiveBundles(cwd).index.get("event_pack")?.has("P1") ?? false).toBe(true); // pack bundle survives (not orphaned)
+  });
+
+  it("a MIXED pair (phase `bundle`, pack `both`) is DEFERRED whole — never an orphan pack", async () => {
+    await archivePhases([
+      { id: "P1", at: "2026-01-01T00:00:00.000Z" },
+      { id: "P2", at: "2026-02-01T00:00:00.000Z" },
+    ]);
+    const { pack } = await toBundlePair("P1");
+    await writeEventPackFile(cwd, "P1", JSON.parse(pack)); // pack `both`; phase stays bundle-only → MIXED
+    await setRoadmap([]);
+
+    const out = await applyArchiveRetention(cwd, { keepLatest: 1 });
+    const phase = out.find((o) => o.kind === "phase_snapshot")!;
+    const event = out.find((o) => o.kind === "event_pack")!;
+    expect(phase.deleted).not.toContain("P1");
+    expect(event.bundle_member_removed).not.toContain("P1");
+    expect(phase.skipped.find((s) => s.id === "P1")?.reason).toBe("needs_bundle_member_removal");
+    expect(event.skipped.find((s) => s.id === "P1")?.reason).toBe("needs_bundle_member_removal");
+    expect(loadArchiveBundles(cwd).index.get("phase_snapshot")?.has("P1") ?? false).toBe(true); // phase bundle survives
+    expect(await exists(eventPackPath(cwd, "P1"))).toBe(true); // pack loose survives
+  });
+
+  it("a `source: both` pair converges in ≤2 runs: run 1 bundle_member_removed, run 2 deleted", async () => {
+    await archivePhases([
+      { id: "P1", at: "2026-01-01T00:00:00.000Z" },
+      { id: "P2", at: "2026-02-01T00:00:00.000Z" },
+    ]);
+    const { snap, pack } = await toBundlePair("P1");
+    // Re-materialize P1's loose copies so it is `both` (loose + bundle on each side).
+    await writeFile(phaseSnapshotPath(cwd, "P1"), snap, "utf8");
+    await writeEventPackFile(cwd, "P1", JSON.parse(pack));
+    await setRoadmap([]);
+
+    // RUN 1: the bundle members are removed; the loose copies SURVIVE → bundle_member_removed.
+    const run1 = await applyArchiveRetention(cwd, { keepLatest: 1 });
+    const phase1 = run1.find((o) => o.kind === "phase_snapshot")!;
+    const event1 = run1.find((o) => o.kind === "event_pack")!;
+    expect(phase1.bundle_member_removed).toContain("P1");
+    expect(event1.bundle_member_removed).toContain("P1");
+    expect(phase1.deleted).not.toContain("P1"); // NOT deleted — the loose copy still resolves
+    expect(await exists(phaseSnapshotPath(cwd, "P1"))).toBe(true); // loose half survives
+    const idx1 = loadArchiveBundles(cwd).index;
+    expect(idx1.get("phase_snapshot")?.has("P1") ?? false).toBe(false); // bundle half gone
+
+    // RUN 2: P1 is now `source: loose` (a loose pair) → the loose layer deletes it.
+    const run2 = await applyArchiveRetention(cwd, { keepLatest: 1 });
+    const phase2 = run2.find((o) => o.kind === "phase_snapshot")!;
+    expect(phase2.deleted).toContain("P1"); // now fully deleted (no copy resolves)
+    expect(await exists(phaseSnapshotPath(cwd, "P1"))).toBe(false);
+    expect(await exists(phaseSnapshotPath(cwd, "P2"))).toBe(true);
+  });
+
+  it("a crashed prior BUNDLE-pair delete is RECOVERED by the next run (reported `recovered`, not `deleted`)", async () => {
+    await archivePhases([
+      { id: "P1", at: "2026-01-01T00:00:00.000Z" },
+      { id: "P2", at: "2026-02-01T00:00:00.000Z" },
+    ]);
+    await toBundlePair("P1");
+    await toBundlePair("P2"); // both bundled so removing P1 leaves a P2 survivor bundle
+    await setRoadmap([]);
+
+    // Simulate a crash right after the bundle-pair commit (journal present, old bundles not retired).
+    const { deleteBundlePairsJournaled } = await import("../../../../src/core/archive/retention-bundle-pair-delete.ts");
+    await expect(
+      deleteBundlePairsJournaled(cwd, [{ phase_id: "P1" }], { afterIntentWritten: () => { throw new Error("crash"); } }),
+    ).rejects.toThrow("crash");
+
+    // The next retention run RECOVERS the committed delete FIRST, then plans. keepLatest 5 → nothing
+    // new drops, so P1 appears ONLY as `recovered` (a prior commit completed), never `deleted`.
+    const out = await applyArchiveRetention(cwd, { keepLatest: 5 });
+    const phase = out.find((o) => o.kind === "phase_snapshot")!;
+    const event = out.find((o) => o.kind === "event_pack")!;
+    expect(phase.recovered).toContain("P1");
+    expect(event.recovered).toContain("P1");
+    expect(phase.deleted).not.toContain("P1"); // recovery is NOT this run's plan decision
+    expect(loadArchiveBundles(cwd).index.get("phase_snapshot")?.has("P1") ?? false).toBe(false); // retired
+  });
+
+  it("a recovered `both` bundle pair is reported `recovered` ONLY this run (not also `deleted`), then deleted NEXT run", async () => {
+    await archivePhases([
+      { id: "P1", at: "2026-01-01T00:00:00.000Z" },
+      { id: "P2", at: "2026-02-01T00:00:00.000Z" },
+    ]);
+    const { snap, pack } = await toBundlePair("P1");
+    await toBundlePair("P2"); // P2 bundled so removing P1 leaves a P2 survivor bundle
+    await writeFile(phaseSnapshotPath(cwd, "P1"), snap, "utf8"); // P1 is `both` — loose copies survive the bundle retire
+    await writeEventPackFile(cwd, "P1", JSON.parse(pack));
+    await setRoadmap([]);
+
+    const { deleteBundlePairsJournaled } = await import("../../../../src/core/archive/retention-bundle-pair-delete.ts");
+    await expect(
+      deleteBundlePairsJournaled(cwd, [{ phase_id: "P1" }], { afterIntentWritten: () => { throw new Error("crash"); } }),
+    ).rejects.toThrow("crash");
+
+    // RUN 1: recovery retires P1's bundle members; P1's surviving loose copies are NOT also dropped
+    // this run (that would double-bucket the id as recovered AND deleted). P1 is recovered ONLY.
+    const run1 = await applyArchiveRetention(cwd, { keepLatest: 1 });
+    const phase1 = run1.find((o) => o.kind === "phase_snapshot")!;
+    expect(phase1.recovered).toContain("P1");
+    expect(phase1.deleted).not.toContain("P1"); // never in two buckets in one run
+    expect(phase1.bundle_member_removed).not.toContain("P1");
+    expect(await exists(phaseSnapshotPath(cwd, "P1"))).toBe(true); // loose half deferred to next run
+
+    // RUN 2: P1 is now a plain `source: loose` would_drop → the loose layer deletes it (converged).
+    const run2 = await applyArchiveRetention(cwd, { keepLatest: 1 });
+    expect(run2.find((o) => o.kind === "phase_snapshot")!.deleted).toContain("P1");
+    expect(await exists(phaseSnapshotPath(cwd, "P1"))).toBe(false);
   });
 });
