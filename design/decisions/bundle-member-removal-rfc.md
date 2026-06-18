@@ -61,12 +61,12 @@ Removing a `phase_snapshot` bundle member AND its `event_pack` bundle member is 
       "members": {
         "phase_snapshot": {
           "removed_ids": ["P1"],
-          "old_bundle": { "file": "phase_snapshot-<old16>.json", "sha256": "<digest of old bundle bytes>" },
-          "new_bundle": { "file": "phase_snapshot-<new16>.json", "member_ids_sha256": "<addr(S)>" }
+          "old_bundles": [{ "file": "phase_snapshot-<old16>.json", "sha256": "<digest of old bundle bytes>" }],
+          "new_bundle": { "file": "phase_snapshot-<new16>.json", "member_ids_sha256": "<addr(S)>", "sha256": "<digest of new bundle bytes>" }
         },
         "event_pack": {
           "removed_ids": ["P1"],
-          "old_bundle": { "file": "event_pack-<old16>.json", "sha256": "<digest>" },
+          "old_bundles": [{ "file": "event_pack-<old16>.json", "sha256": "<digest>" }],
           "new_bundle": null
         }
       }
@@ -75,7 +75,7 @@ Removing a `phase_snapshot` bundle member AND its `event_pack` bundle member is 
 }
 ```
 
-`new_bundle: null` is the empty-set marker (the kind had no survivors → the old bundle is just deleted, no replacement). `removed_ids` is per kind so a future N-member removal in one bundle is expressible. (Each member's per-kind payload is what recovery needs; the per-kind split also lets reader-awareness hide exactly the named bundle-member ids.)
+`new_bundle: null` is the empty-set marker (the kind had no survivors → the old bundle is just deleted, no replacement); a present `new_bundle` carries BOTH `member_ids_sha256` (the content address) AND the raw `sha256` (symmetric with `old_bundles[].sha256`, so recovery's diagnostics are precise). `old_bundles` is an ARRAY: a healthy consolidated store has one, but a crash-survivor / redundant / pre-consolidation store can have several old bundles of the kind holding the removed member — all are retired (each via the expected-bytes gate). `removed_ids` is per kind so a future N-member removal in one bundle is expressible. (Each member's per-kind payload is what recovery needs; the per-kind split also lets reader-awareness hide exactly the named bundle-member ids.)
 
 Recovery, before retiring an old bundle, RE-VERIFIES from disk: the new bundle exists and covers every survivor byte-identically (or the empty-set marker holds and the old bundle still matches its expected hash), and the old bundle still matches the intent's expected hash. Only then does it unlink the old bundle (durably). If a re-verify fails (the store changed under the lock — out-of-scope window, or a corrupt store), recovery is fail-closed (`DELETE_INTENT_RECOVERY_FAILED`), never a guess. **Reader-awareness** for a pending `bundle_pair` intent treats the named members as logically absent in the crash→recovery window — the old bundle still physically holds them, but the intent says they are being removed, so a reader must not resolve them (the inverse of the loose-pair filter, which hides loose ids; here it hides bundle-member ids named in a pending bundle intent).
 
@@ -92,7 +92,7 @@ Every removed/retained record reports its OWN outcome — a `would_drop` bundle-
 1. **Removal PLANNER + single-kind PRIMITIVE (foundation, UNWIRED):** `planBundleMemberRemoval(cwd, kind, R)` (read-only: the surviving set, the bundles that would be retired, the empty-set verdict, per-id authority validation) + `removeBundleMembers(cwd, kind, R)` (**durable** write-new-then-retire-old, the removal-aware retire gate with the expected-old-bytes re-read, empty→delete). Crash-safe by construction (no journal) **given the durable barriers** — uses `buildArchiveBundle` for the PURE build + a **durable** bundle write (fsync data + dir, fail-closed, `unsupported`/`failed` split) + `verifyBundleReadback`. Tests: a member shrinks the bundle, survivors byte-identical, removed member gone, empty set deletes the bundle, a re-run is idempotent, a crash-simulated double-bundle converges, a swapped old bundle is not retired (expected-bytes gate), a barrier failure leaves no removal committed (injected fsync failure, like the loose journal's seam).
 2. **Bundle-PAIR removal (journaled both-or-neither):** the two-bundle retire intent + recovery + reader-awareness for pending bundle-pair ids. Reuses the delete-intent journal machinery.
 3. **CLI wiring:** route the planner's `needs_bundle_member_removal` `would_drop` records through layer 1 (independent) / layer 2 (pairs); surface `deleted` / `recovered` / per-side outcomes.
-4. **Final bounded-archive validation:** on a fixture (and a measured dry-run of this repo), prove the bundle file count AND the unreferenced old-truth tail are bounded — the v2.0 "ゴミが溜まらない" gate.
+4. **Final bounded-archive validation:** on a fixture (and a measured dry-run of this repo), prove the bundle file count AND the unreferenced old-truth tail are bounded — the v2.0 "ゴミが溜まらない" gate. MUST include the `source: both` **≤ 2-run convergence** test (run 1 → `bundle_member_removed`, run 2 → `source: loose` → `deleted`), so "the bundle member is gone but the loose tail remains" is never mistaken for the bound being met.
 
 ## Invariants (binding on the implementation)
 
