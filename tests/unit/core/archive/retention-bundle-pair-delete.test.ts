@@ -15,6 +15,7 @@ import { resolvePhaseSnapshotRaw } from "../../../../src/core/archive/load-phase
 import { deleteBundlePairsJournaled } from "../../../../src/core/archive/retention-bundle-pair-delete.ts";
 import {
   __setDeleteIntentDirFsyncForTests,
+  BundlePairNotCommittableError,
   DeleteIntentDurabilityError,
   DeleteIntentRecoveryError,
   readDeleteIntent,
@@ -262,6 +263,69 @@ describe("deleteBundlePairsJournaled — crash safety (journal recovery)", () =>
       }),
     ).rejects.toThrow("crash");
     await expect(recoverPendingDeletes(cwd)).rejects.toBeInstanceOf(DeleteIntentRecoveryError);
+  });
+
+  it("PRE-COMMIT: an old phase bundle that goes stale before the commit → NO journal written, no wedge", async () => {
+    const bytesById = new Map<string, { snap: string; pack: string }>();
+    for (const id of ["P1", "P2"]) bytesById.set(id, await pairBytes(id));
+    await bundlePairs(["P1", "P2"], bytesById);
+    const before = await listBundleNames();
+
+    await expect(
+      deleteBundlePairsJournaled(cwd, [{ phase_id: "P1" }], {
+        beforeIntentWritten: async () => {
+          // After the reduced bundles are written but before the commit, stale the OLD phase bundle
+          // (the {P1,P2,P3}-style bundle holding P1). The commit must be refused, not written.
+          for (const f of await listBundleNames()) {
+            if (f.startsWith("phase_snapshot-") && (await readFile(join(archiveBundlesDir(cwd), f), "utf8")).includes('"P1"')) {
+              await writeFile(join(archiveBundlesDir(cwd), f), (await readFile(join(archiveBundlesDir(cwd), f), "utf8")) + " ", "utf8");
+            }
+          }
+        },
+      }),
+    ).rejects.toBeInstanceOf(BundlePairNotCommittableError);
+    expect((await readDeleteIntent(cwd)).kind).toBe("absent"); // NO journal → recovery has nothing to wedge on
+    // The old bundles still resolve P1 (nothing retired) — a clean re-plan can decide afresh.
+    expect((await resolvesInBundles("P1")).phase).toBe(true);
+    expect(await recoverPendingDeletes(cwd).then((r) => r.completed)).toEqual([]); // no pending state
+    void before;
+  });
+
+  it("PRE-COMMIT: an old event_pack bundle that goes stale before the commit → NO journal written", async () => {
+    const bytesById = new Map<string, { snap: string; pack: string }>();
+    for (const id of ["P1", "P2"]) bytesById.set(id, await pairBytes(id));
+    await bundlePairs(["P1", "P2"], bytesById);
+
+    await expect(
+      deleteBundlePairsJournaled(cwd, [{ phase_id: "P1" }], {
+        beforeIntentWritten: async () => {
+          for (const f of await listBundleNames()) {
+            if (f.startsWith("event_pack-") && (await readFile(join(archiveBundlesDir(cwd), f), "utf8")).includes('"P1"')) {
+              await writeFile(join(archiveBundlesDir(cwd), f), (await readFile(join(archiveBundlesDir(cwd), f), "utf8")) + " ", "utf8");
+            }
+          }
+        },
+      }),
+    ).rejects.toBeInstanceOf(BundlePairNotCommittableError);
+    expect((await readDeleteIntent(cwd)).kind).toBe("absent");
+  });
+
+  it("PRE-COMMIT: a survivor reduced bundle deleted before the commit → NO journal written", async () => {
+    const bytesById = new Map<string, { snap: string; pack: string }>();
+    for (const id of ["P1", "P2"]) bytesById.set(id, await pairBytes(id));
+    await bundlePairs(["P1", "P2"], bytesById);
+
+    await expect(
+      deleteBundlePairsJournaled(cwd, [{ phase_id: "P1" }], {
+        beforeIntentWritten: async () => {
+          // Delete the just-written survivor reduced bundles (the ones NOT holding P1).
+          for (const f of await listBundleNames()) {
+            if (!(await readFile(join(archiveBundlesDir(cwd), f), "utf8")).includes('"P1"')) await rm(join(archiveBundlesDir(cwd), f));
+          }
+        },
+      }),
+    ).rejects.toBeInstanceOf(BundlePairNotCommittableError);
+    expect((await readDeleteIntent(cwd)).kind).toBe("absent");
   });
 
   it("an `unsupported` directory-fsync platform DEFERS every pair (no write, no retire)", async () => {

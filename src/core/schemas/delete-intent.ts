@@ -47,11 +47,17 @@ export type LoosePairIntent = z.infer<typeof LoosePairIntent>;
 
 // --- bundle pair (the bundle-member-removal extension) ----------------------
 
+/** A bundle FILE name as the recovery authority sees it: a `bundles/` basename, the
+ *  content-addressed `<kind>-<16hex>.json` form the writer emits. Constrained (not a
+ *  bare string) because the journal is a recovery authority that `join(dir, file)`s and
+ *  re-reads this name — a hand-edited / traversal name must read as corrupt, not be opened. */
+export const BundleFileName = z.string().regex(/^(phase_snapshot|event_pack|decision_record)-[0-9a-f]{16}\.json$/);
+
 /** An old bundle a retire must remove, with the exact bytes digest the commit saw —
  *  recovery RE-READS the bundle and confirms this hash before the unlink (delete
  *  exactly the planned bytes). `file` is the basename under `bundles/`. */
 export const BundleRetireTarget = z.strictObject({
-  file: z.string().min(1),
+  file: BundleFileName,
   sha256: Sha256Hex,
 });
 export type BundleRetireTarget = z.infer<typeof BundleRetireTarget>;
@@ -61,7 +67,7 @@ export type BundleRetireTarget = z.infer<typeof BundleRetireTarget>;
  *  recovery can re-verify it covers the survivors byte-identically. `null` is the
  *  EMPTY-SET marker: the kind had no survivors → the old bundle is just deleted. */
 export const BundlePairNewBundle = z.strictObject({
-  file: z.string().min(1),
+  file: BundleFileName,
   member_ids_sha256: Sha256Hex,
   sha256: Sha256Hex,
 });
@@ -94,7 +100,9 @@ export type BundlePairIntent = z.infer<typeof BundlePairIntent>;
 // --- the journal ------------------------------------------------------------
 
 /** One committed pair deletion — a loose pair OR a bundle pair. Both are keyed by
- *  `phase_id`; recovery branches on `intent_kind`. */
+ *  `phase_id`; recovery branches on `intent_kind`. A given `phase_id` appears AT MOST
+ *  ONCE across the whole journal (a phase is one pair, loose XOR bundle — never both in
+ *  one run); `readDeleteIntent` rejects a duplicate `phase_id` as corrupt. */
 export const DeleteIntentRecord = z.discriminatedUnion("intent_kind", [LoosePairIntent, BundlePairIntent]);
 export type DeleteIntentRecord = z.infer<typeof DeleteIntentRecord>;
 

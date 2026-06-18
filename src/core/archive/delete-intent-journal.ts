@@ -349,6 +349,48 @@ export async function completePairsThenClear(cwd: string, phaseIds: string[], ho
   await clearDeleteIntent(cwd);
 }
 
+/** A bundle-pair intent cannot be committed because the store no longer matches the
+ *  plan (an old bundle / survivor bundle is missing or its bytes changed since the plan).
+ *  Thrown BEFORE the durable commit so NO journal is written — the run fails closed and a
+ *  re-plan can decide afresh. (Detecting this only AFTER the commit would durably write an
+ *  intent recovery can never complete — a permanent wedge.) */
+export class BundlePairNotCommittableError extends Error {
+  readonly code = "BUNDLE_PAIR_NOT_COMMITTABLE" as const;
+  constructor(detail: string) {
+    super(detail);
+    this.name = "BundlePairNotCommittableError";
+  }
+}
+
+/** PRE-COMMIT reverify: every old bundle the intent will retire must still EXIST and match
+ *  its committed digest, and every non-null survivor bundle must EXIST and match its committed
+ *  digest. Read-only. Throws `BundlePairNotCommittableError` on any miss/mismatch, BEFORE the
+ *  journal is written — so the journal only ever names a pair whose retires recovery can complete
+ *  (the digest gate in `completeBundlePairRetires` then never fails on a committed intent). Run
+ *  immediately before `writeDeleteIntent`, when nothing has been retired yet (so EVERY old bundle
+ *  must be present — unlike recovery, which tolerates an already-retired ENOENT). */
+export async function assertBundlePairsCommittable(cwd: string, pairs: BundlePairIntent[]): Promise<void> {
+  const dir = archiveBundlesDir(cwd);
+  const readMatch = async (file: string, expected: string, what: string): Promise<void> => {
+    let raw: string;
+    try {
+      raw = await readFile(join(dir, basename(file)), "utf8");
+    } catch (err) {
+      throw new BundlePairNotCommittableError(`${what} ${file} is missing before commit: ${(err as Error).message}`);
+    }
+    if (sha256Hex(raw) !== expected) {
+      throw new BundlePairNotCommittableError(`${what} ${file} changed before commit (digest no longer matches the plan)`);
+    }
+  };
+  for (const pair of pairs) {
+    for (const kind of ["phase_snapshot", "event_pack"] as const) {
+      const member = pair.members[kind];
+      if (member.new_bundle != null) await readMatch(member.new_bundle.file, member.new_bundle.sha256, `survivor bundle (${kind}, ${pair.phase_id})`);
+      for (const old of member.old_bundles) await readMatch(old.file, old.sha256, `old bundle (${kind}, ${pair.phase_id})`);
+    }
+  }
+}
+
 /** Test seam for the bundle-pair retire phase (so the live bundle delete can simulate
  *  a crash between the two old-bundle unlinks). Recovery passes none. */
 export type BundlePairRetireHooks = {

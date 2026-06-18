@@ -5,6 +5,7 @@ import { computeRemoval, durablyWriteBundle, looseCopyExists, type RemovalComput
 import { loadArchiveBundles } from "./archive-bundle-loader.ts";
 import { serializeArchiveBundle } from "./archive-bundle-writer.ts";
 import {
+  assertBundlePairsCommittable,
   completeBundlePairsThenClear,
   DeleteIntentDurabilityError,
   fsyncDirRequired,
@@ -60,9 +61,13 @@ export type BundlePairDeleteOutcome = {
   skipped: { phase_id: string; reason: BundlePairSkipReason }[];
 };
 
-/** Test seam: simulate a crash between the two old-bundle retires (`beforeRetire`),
- *  or after the durable commit (`afterIntentWritten`), then prove recovery converges. */
+/** Test seam: `beforeIntentWritten` fires after the reduced bundles are durably written
+ *  but BEFORE the pre-commit reverify + the commit (so a test can stale a bundle and prove
+ *  NO journal is written); `afterIntentWritten` fires after the durable commit (so a test
+ *  can simulate a crash and prove recovery converges); `beforeRetire` fires before each old
+ *  bundle unlink (a crash between the two retires). */
 export type BundlePairDeleteHooks = {
+  beforeIntentWritten?: () => Promise<void> | void;
   afterIntentWritten?: () => Promise<void> | void;
   beforeRetire?: (file: string) => Promise<void> | void;
 };
@@ -168,16 +173,26 @@ export async function deleteBundlePairsJournaled(
   // 1. DURABLY write each kind's ONE consolidated survivor bundle BEFORE the commit.
   if (phaseRemoval.new_bundle) await durablyWriteBundle(cwd, "phase_snapshot", phaseRemoval.new_bundle);
   if (packRemoval.new_bundle) await durablyWriteBundle(cwd, "event_pack", packRemoval.new_bundle);
+  if (hooks.beforeIntentWritten) await hooks.beforeIntentWritten();
 
-  // 2. DURABLE COMMIT: one atomic journal naming every committed bundle pair.
+  // 2. PRE-COMMIT REVERIFY (the #474 principle): the journal is the commit point, and recovery
+  //    completes a committed pair by re-reading the old/new bundles and matching their committed
+  //    digests — so a bundle that is stale/missing AT COMMIT TIME yields an intent recovery can
+  //    NEVER complete (a permanent fail-closed wedge). Detect it HERE, before the durable write:
+  //    if any old/survivor bundle no longer matches the plan, throw and write NO journal (the run
+  //    fails closed; a re-plan decides afresh). Under the write lock nothing should have changed —
+  //    this is the guard that makes "the committed intent is always completable" a proven invariant.
+  await assertBundlePairsCommittable(cwd, intents);
+
+  // 3. DURABLE COMMIT: one atomic journal naming every committed bundle pair.
   await writeDeleteIntent(cwd, intents);
   if (hooks.afterIntentWritten) await hooks.afterIntentWritten();
 
-  // 3. Retire both old bundles of every pair (re-verify survivor durable + expected old
+  // 4. Retire both old bundles of every pair (re-verify survivor durable + expected old
   //    bytes), make durable, then clear the journal.
   await completeBundlePairsThenClear(cwd, intents, { beforeRetire: hooks.beforeRetire });
 
-  // 4. Per-side outcome: a removed member whose loose copy still resolves is
+  // 5. Per-side outcome: a removed member whose loose copy still resolves is
   //    `bundle_member_removed` (the loose layer drops it next run); else `deleted`.
   const removed: BundlePairDeleteOutcome["removed"] = [];
   for (const phase_id of committableIds) {
