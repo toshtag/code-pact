@@ -142,7 +142,7 @@ async function cmdStateArchiveRetention(argv: string[], globalJson: boolean): Pr
     else {
       for (const r of results) {
         process.stdout.write(
-          `${r.kind}: deleted ${r.deleted.length}, recovered ${r.recovered.length}, vanished ${r.vanished.length}, skipped ${r.skipped.length}\n`,
+          `${r.kind}: deleted ${r.deleted.length}, bundle_member_removed ${r.bundle_member_removed.length}, recovered ${r.recovered.length}, vanished ${r.vanished.length}, skipped ${r.skipped.length}\n`,
         );
       }
     }

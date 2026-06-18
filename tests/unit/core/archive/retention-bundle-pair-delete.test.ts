@@ -391,6 +391,26 @@ describe("deleteBundlePairsJournaled — reader-awareness in the pending window"
     await recoverPendingDeletes(cwd); // heal
   });
 
+  it("readDeleteIntent rejects a writer-impossible bundle_pair (removed_ids != [phase_id]) as corrupt", async () => {
+    await mkdir(archiveBundlesDir(cwd), { recursive: true });
+    const j = (members: unknown): string =>
+      JSON.stringify({ schema_version: 2, intents: [{ intent_kind: "bundle_pair", phase_id: "P1", members }] }, null, 2) + "\n";
+    const ok = { removed_ids: ["P1"], old_bundles: [{ file: "phase_snapshot-0123456789abcdef.json", sha256: sha256Hex("a") }], new_bundle: null };
+    const okPack = { removed_ids: ["P1"], old_bundles: [{ file: "event_pack-0123456789abcdef.json", sha256: sha256Hex("b") }], new_bundle: null };
+    // removed_ids names a DIFFERENT id than the pair's phase_id → corrupt (a writer never emits this).
+    await writeFile(join(cwd, ".code-pact", "state", "archive", "delete-intent.json"), j({ phase_snapshot: { ...ok, removed_ids: ["PX"] }, event_pack: okPack }), "utf8");
+    expect((await readDeleteIntent(cwd)).kind).toBe("corrupt");
+  });
+
+  it("readDeleteIntent rejects a bundle_pair whose file names another kind's bundle as corrupt", async () => {
+    await mkdir(archiveBundlesDir(cwd), { recursive: true });
+    const phaseMember = { removed_ids: ["P1"], old_bundles: [{ file: "event_pack-0123456789abcdef.json", sha256: sha256Hex("a") }], new_bundle: null }; // wrong-kind prefix
+    const packMember = { removed_ids: ["P1"], old_bundles: [{ file: "event_pack-0123456789abcdef.json", sha256: sha256Hex("b") }], new_bundle: null };
+    const raw = JSON.stringify({ schema_version: 2, intents: [{ intent_kind: "bundle_pair", phase_id: "P1", members: { phase_snapshot: phaseMember, event_pack: packMember } }] }, null, 2) + "\n";
+    await writeFile(join(cwd, ".code-pact", "state", "archive", "delete-intent.json"), raw, "utf8");
+    expect((await readDeleteIntent(cwd)).kind).toBe("corrupt");
+  });
+
   it("compaction must NOT fold a pending `both` member's loose copy (enumerateLooseMembers excludes it)", async () => {
     const bytesById = new Map<string, { snap: string; pack: string }>();
     for (const id of ["P1", "P2"]) bytesById.set(id, await pairBytes(id));

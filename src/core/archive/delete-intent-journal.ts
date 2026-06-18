@@ -250,6 +250,23 @@ export async function readDeleteIntent(cwd: string): Promise<DeleteIntentRead> {
   if (new Set(ids).size !== ids.length) {
     return { kind: "corrupt", cause: "parse_error", detail: "delete-intent journal names a phase_id more than once" };
   }
+  // Writer-impossible bundle_pair shapes are corrupt too (the journal is a recovery authority — a
+  // hand-edited / mis-built intent must not be acted on): each kind's bundle files must carry that
+  // kind's filename prefix, and at THIS layer a pair removes exactly its own id from each kind
+  // (`removed_ids === [phase_id]`). A future N-member removal bumps schema_version, not this check.
+  for (const i of intent.intents) {
+    if (i.intent_kind !== "bundle_pair") continue;
+    for (const kind of ["phase_snapshot", "event_pack"] as const) {
+      const m = i.members[kind];
+      if (m.removed_ids.length !== 1 || m.removed_ids[0] !== i.phase_id) {
+        return { kind: "corrupt", cause: "parse_error", detail: `bundle_pair ${i.phase_id} ${kind}.removed_ids must be exactly [${i.phase_id}]` };
+      }
+      const files = [...m.old_bundles.map((b) => b.file), ...(m.new_bundle ? [m.new_bundle.file] : [])];
+      if (files.some((f) => !f.startsWith(`${kind}-`))) {
+        return { kind: "corrupt", cause: "parse_error", detail: `bundle_pair ${i.phase_id} ${kind} names a bundle file of another kind` };
+      }
+    }
+  }
   return { kind: "present", intent };
 }
 
@@ -457,15 +474,21 @@ export async function completeBundlePairsThenClear(cwd: string, pairs: BundlePai
   await clearDeleteIntent(cwd);
 }
 
+/** The phase ids a recovery completed, SPLIT by kind so the caller can account for them
+ *  honestly: a LOOSE-pair recovery removed both loose files; a BUNDLE-pair recovery retired
+ *  the bundle members (a `both` record's loose copy may survive). `completed` is the union
+ *  (back-compat). Never conflate a bundle recovery with a loose delete (the #476 lesson). */
+export type RecoveryOutcome = { completed: string[]; loose_pairs: string[]; bundle_pairs: string[] };
+
 /** Complete any committed-but-incomplete pair deletion (loose unlinks AND bundle
  *  retires), then clear the journal. Idempotent: an absent journal is a no-op; an
  *  already-finished member re-unlinks/re-retires to ENOENT (success). MUST run first,
  *  under the write lock, in any archive mutation — so a crashed prior run is healed
- *  before the new run plans. Returns the phase ids it completed. Throws
+ *  before the new run plans. Returns the phase ids it completed (split by kind). Throws
  *  `DeleteIntentRecoveryError` on a corrupt journal or a failed bundle re-verify. */
-export async function recoverPendingDeletes(cwd: string): Promise<{ completed: string[] }> {
+export async function recoverPendingDeletes(cwd: string): Promise<RecoveryOutcome> {
   const read = await readDeleteIntent(cwd);
-  if (read.kind === "absent") return { completed: [] };
+  if (read.kind === "absent") return { completed: [], loose_pairs: [], bundle_pairs: [] };
   if (read.kind === "corrupt") throw new DeleteIntentRecoveryError(read.detail);
   // Recovery never re-gates a loose pair — the commit already decided it is deleted; a
   // skip would leave a permanent half-state. A bundle pair DOES re-verify the on-disk
@@ -479,7 +502,8 @@ export async function recoverPendingDeletes(cwd: string): Promise<{ completed: s
   await completeLoosePairUnlinks(cwd, loosePhaseIds);
   await completeBundlePairRetires(cwd, bundlePairs);
   await clearDeleteIntent(cwd); // one clear after BOTH kinds are durably complete
-  return { completed: read.intent.intents.map((i) => i.phase_id) };
+  const bundlePhaseIds = bundlePairs.map((p) => p.phase_id);
+  return { completed: [...loosePhaseIds, ...bundlePhaseIds], loose_pairs: loosePhaseIds, bundle_pairs: bundlePhaseIds };
 }
 
 async function unlinkIfPresent(abs: string): Promise<void> {
