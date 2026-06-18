@@ -221,34 +221,40 @@ export function deriveBoundedStatus(
 
 // --- shared accounting -------------------------------------------------------
 
-/** The skip reasons that mean "droppable truth was deferred to a future run/layer"
- *  (a mixed pair, or a loose pair that could not be atomically removed) — counted as
- *  `mixed_source_deferred` so a deferred pair is never read as bounded success. */
-const DEFERRED_SKIP_REASONS = new Set(["needs_bundle_member_removal", "requires_atomic_pair_removal"]);
-
 /** Roll up the destructive retention results into operator-grade summary counts.
  *  `recovered` is set IDENTICALLY on every kind's result (a pair touches two kinds),
  *  so it is deduped by (id, intent_kind) to avoid double-counting; the other buckets
- *  are summed across kinds (a pair's two members are two physical removals). */
+ *  are summed across kinds (a pair's two members are two physical removals).
+ *
+ *  Deferrals are reported in PRECISE buckets, not lumped: `bundle_member_deferred`
+ *  (`needs_bundle_member_removal` — NOT always a mixed pair: it also covers an
+ *  independent bundle record / a not-yet-pairable bundle phase) and `atomic_pair_deferred`
+ *  (`requires_atomic_pair_removal` — a loose pair held back by an unsupported-platform fsync,
+ *  a partial store view, or a missing digest — NOT fixed by `compact-archive`). `mixed_source_deferred`
+ *  is kept as their SUM for back-compat, but the two precise counts are what an operator acts on. */
 function summarizeRetention(results: readonly RetentionDeleteOutcome[]): {
   deleted: number;
   bundle_member_removed: number;
   recovered_loose_pairs: number;
   recovered_bundle_pairs: number;
   skipped: number;
+  bundle_member_deferred: number;
+  atomic_pair_deferred: number;
   mixed_source_deferred: number;
 } {
   let deleted = 0;
   let bundleMemberRemoved = 0;
   let skipped = 0;
-  let mixedSourceDeferred = 0;
+  let bundleMemberDeferred = 0;
+  let atomicPairDeferred = 0;
   const recoveredLoose = new Set<string>();
   const recoveredBundle = new Set<string>();
   for (const r of results) {
     deleted += r.deleted.length;
     bundleMemberRemoved += r.bundle_member_removed.length;
     skipped += r.skipped.length;
-    mixedSourceDeferred += r.skipped.filter((s) => DEFERRED_SKIP_REASONS.has(s.reason)).length;
+    bundleMemberDeferred += r.skipped.filter((s) => s.reason === "needs_bundle_member_removal").length;
+    atomicPairDeferred += r.skipped.filter((s) => s.reason === "requires_atomic_pair_removal").length;
     for (const rec of r.recovered) {
       (rec.intent_kind === "loose_pair" ? recoveredLoose : recoveredBundle).add(rec.id);
     }
@@ -259,7 +265,9 @@ function summarizeRetention(results: readonly RetentionDeleteOutcome[]): {
     recovered_loose_pairs: recoveredLoose.size,
     recovered_bundle_pairs: recoveredBundle.size,
     skipped,
-    mixed_source_deferred: mixedSourceDeferred,
+    bundle_member_deferred: bundleMemberDeferred,
+    atomic_pair_deferred: atomicPairDeferred,
+    mixed_source_deferred: bundleMemberDeferred + atomicPairDeferred,
   };
 }
 
@@ -359,7 +367,10 @@ export type ArchiveMaintenanceDryRun = {
     planned_compact_skipped: number;
   };
   steps: {
-    journal: { name: "journal" } & JournalStatus;
+    /** `plans_are_pre_recovery` is true when a journal is pending: `--write` recovers FIRST, which
+     *  changes the store, so the `compact` / `retention` plans below are CURRENT pre-recovery
+     *  diagnostics, NOT the exact post-recovery plan. Re-run the dry-run after recovery for exact plans. */
+    journal: { name: "journal"; plans_are_pre_recovery: boolean } & JournalStatus;
     compact: { name: "compact"; plans: CompactArchivePlan[] };
     retention: { name: "retention"; plans: RetentionPlan[] };
     checks: { name: "checks" } & CheckResult;
@@ -397,7 +408,7 @@ export async function planArchiveMaintenance(
       planned_compact_skipped,
     },
     steps: {
-      journal: { name: "journal", ...journal },
+      journal: { name: "journal", ...journal, plans_are_pre_recovery: journal.pending_before },
       compact: { name: "compact", plans: compactPlans },
       retention: { name: "retention", plans: retentionPlans },
       checks: { name: "checks", ...checks },
@@ -427,9 +438,18 @@ export type ArchiveMaintenanceWrite = {
     compact_skipped: number;
     /** retention skips (needs_bundle_member_removal / requires_atomic_pair_removal / authority / unlink). */
     retention_skipped: number;
+    /** records retention deferred to a future run/layer: `bundle_member_deferred` + `atomic_pair_deferred`.
+     *  NOT all are "pairs" — kept under this name for back-compat; act on the two precise counts. */
     mixed_source_deferred: number;
+    /** `needs_bundle_member_removal` deferrals (a bundle/both record the bundle-member layer holds back). */
+    bundle_member_deferred: number;
+    /** `requires_atomic_pair_removal` deferrals (a loose pair held back — unsupported fsync / partial store / missing digest). */
+    atomic_pair_deferred: number;
     source_both_follow_up: number;
   };
+  /** machine-readable verdict mirrored INTO `data` (the envelope `ok` is always `true` on the
+   *  success path, so a consumer reading only stdout JSON needs this to see the exit verdict). */
+  verdict: { exit_code: 0 | 1; v2_bounded: boolean; checks_ok: boolean };
   steps: {
     journal: { name: "journal"; ok: true; recovered: RetentionDeleteOutcome["recovered"] } & JournalStatus;
     compact_before_retention: { name: "compact_before_retention"; ok: true; files_removed: number; bundles_written: number; skipped: ArchiveDeleteSkip[] };
@@ -596,8 +616,11 @@ export async function runArchiveMaintenance(
       compact_skipped: compactSkipped,
       retention_skipped: retSummary.skipped,
       mixed_source_deferred: retSummary.mixed_source_deferred,
+      bundle_member_deferred: retSummary.bundle_member_deferred,
+      atomic_pair_deferred: retSummary.atomic_pair_deferred,
       source_both_follow_up: retSummary.bundle_member_removed,
     },
+    verdict: { exit_code: ok ? 0 : 1, v2_bounded: isV2Bounded(boundedStatus), checks_ok: checksPass },
     steps: {
       journal: { name: "journal", ok: true, ...journalBefore, recovered },
       compact_before_retention: {

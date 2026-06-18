@@ -10,11 +10,12 @@ import { DELETE_INTENT_SCHEMA_VERSION } from "../../src/core/schemas/delete-inte
 import { deleteBundlePairsJournaled } from "../../src/core/archive/retention-bundle-pair-delete.ts";
 
 // `state archive-maintain` — the high-level operator orchestration over the existing
-// archive primitives (compact → retention → compact-again → re-plan → validate →
-// plan lint), end-to-end through the real built CLI. UX/DX-level proofs: read-only
-// dry-run, loose-heavy → bundles, honest accounting, honest bounded-status (never
-// falsely green), recovery surfaced, idempotency, determinism across copies, safe
-// design-doc deletion, and the live `design/` tree is never touched.
+// archive primitives (RECOVER pending journal → compact → retention → compact-again →
+// re-plan → validate → plan lint), end-to-end through the real built CLI. UX/DX-level
+// proofs: read-only dry-run, loose-heavy → bundles, honest accounting, honest
+// bounded-status (never falsely green), recover-FIRST (no bundle-pair wedge),
+// idempotency, determinism across copies, safe design-doc deletion, and the live
+// `design/` tree is never touched.
 
 let tmpDir: string;
 function run(args: string[], dir = tmpDir): RunResult {
@@ -478,6 +479,19 @@ describe("state archive-maintain — pending delete-intent recovery is surfaced 
     expect(am.ok).toBe(true);
     expect(am.data!.summary.recovered_bundle_pairs).toBe(1);
     expect(await fileExists(journalPath)).toBe(false);
+  });
+
+  it("`state compact-archive --write` distinguishes a CORRUPT journal (DELETE_INTENT_RECOVERY_FAILED, not PENDING_DELETE_INTENT) — it cannot be auto-recovered", async () => {
+    await seedArchivedPhases(["P1"]);
+    // A corrupt delete-intent journal: `archive-maintain` CANNOT auto-recover it, so the low-level
+    // verb must NOT tell the operator to "run archive-maintain to recover" — it surfaces the
+    // recovery-failed code + journal_status so the next action (inspect/repair) is honest.
+    await writeFile(join(tmpDir, ".code-pact", "state", "archive", "delete-intent.json"), "{ not valid json", "utf8");
+    const r = run(["state", "compact-archive", "--write", "--json"]);
+    expect(r.code).toBe(2);
+    const body = json(r);
+    expect(body.error?.code).toBe("DELETE_INTENT_RECOVERY_FAILED");
+    expect((body.data as { journal_status?: string }).journal_status).toBe("corrupt");
   });
 });
 

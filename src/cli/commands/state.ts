@@ -454,16 +454,24 @@ async function cmdStateCompactArchive(argv: string[], globalJson: boolean): Prom
     // A pending delete-intent journal must be RECOVERED before any archive compaction. This
     // low-level verb REFUSES (it has no recovery path of its own): consolidation would retire a
     // crashed bundle-pair removal's reduced SURVIVOR bundle as "superseded", after which recovery
-    // can never complete — a permanent wedge (DELETE_INTENT_RECOVERY_FAILED). The recovery entry
-    // is the high-level `state archive-maintain --write` (which recovers first, then compacts).
+    // can never complete — a permanent wedge. PRESENT and CORRUPT are DISTINCT next actions: a
+    // present journal `state archive-maintain --write` recovers; a CORRUPT journal it CANNOT
+    // auto-recover (it must be inspected/repaired), so emit the recovery-failed code, not "pending".
     const pending = await readDeleteIntent(cwd);
-    if (pending.kind !== "absent") {
+    if (pending.kind === "present") {
       emitError(
         json,
         "PENDING_DELETE_INTENT",
         "a delete-intent journal is pending; run `code-pact state archive-maintain --write` to recover it before archive compaction.",
-        { data: { recovery_pending: true } },
+        { data: { recovery_pending: true, journal_status: "present" } },
       );
+      return 2;
+    }
+    if (pending.kind === "corrupt") {
+      emitError(json, "DELETE_INTENT_RECOVERY_FAILED", pending.detail, {
+        data: { recovery_pending: true, journal_status: "corrupt", cause: pending.cause },
+        human: `${pending.detail} — inspect/repair .code-pact/state/archive/delete-intent.json; archive-maintain cannot auto-recover a corrupt journal.`,
+      });
       return 2;
     }
 
@@ -614,6 +622,13 @@ function renderDryRunHuman(d: ArchiveMaintenanceDryRun): string {
   lines.push(
     "",
     `Pending delete-intent journal: ${journalLine}`,
+  );
+  if (j.plans_are_pre_recovery) {
+    lines.push(
+      "  (the Planned / Scope figures above are CURRENT pre-recovery diagnostics — `--write` recovers the journal FIRST, then compacts; re-run dry-run after recovery for the exact plan.)",
+    );
+  }
+  lines.push(
     "",
     "Checks (current):",
     `  validate: ${d.steps.checks.validate.ok ? "ok" : `FAILED (${d.steps.checks.validate.errors} error(s))`}`,
@@ -648,11 +663,11 @@ function renderWriteHuman(d: ArchiveMaintenanceWrite): string {
     "  referenced truth: retained",
     `  unreferenced old truth: ${b.unreferenced_old_truth_bounded ? "none remaining" : `${s.deleted} dropped this run; a follow-up run is needed (re-run archive-maintain)`}`,
     `  source:both follow-up: ${s.source_both_follow_up === 0 ? "none" : `${s.source_both_follow_up} (re-run archive-maintain to drop the surviving copies)`}`,
-    // `deferred pairs` (= mixed_source_deferred) counts needs_bundle_member_removal AND
-    // requires_atomic_pair_removal — NOT all are fixed by `compact-archive` (an unsupported-platform
-    // fsync / partial store / missing digest is not). So point at the per-record reasons, don't
-    // over-promise a single remedy.
-    `  deferred pairs: ${s.mixed_source_deferred === 0 ? "none" : `${s.mixed_source_deferred} (inspect --json steps.retention.results[].skipped[] for each reason)`}`,
+    // Deferred retention records — NOT all are "pairs": `bundle_member_deferred` covers an
+    // independent bundle record / a not-yet-pairable bundle phase, and `atomic_pair_deferred`
+    // is a loose pair held back by an unsupported fsync / partial store / missing digest (NOT
+    // fixed by `compact-archive`). So name them accurately and point at the per-record reasons.
+    `  deferred retention records: ${s.mixed_source_deferred === 0 ? "none" : `${s.mixed_source_deferred} (${s.bundle_member_deferred} bundle-member, ${s.atomic_pair_deferred} atomic-pair — inspect --json steps.retention.results[].skipped[])`}`,
   ];
   if (s.recovered_loose_pairs > 0 || s.recovered_bundle_pairs > 0) {
     lines.push(

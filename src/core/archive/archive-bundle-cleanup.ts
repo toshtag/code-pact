@@ -28,6 +28,7 @@ import {
   sha256Hex,
 } from "./paths.ts";
 import { computeMemberIdsSha256 } from "./archive-bundle-reader.ts";
+import { assertNoPendingDeleteIntent } from "./delete-intent-journal.ts";
 
 // ---------------------------------------------------------------------------
 // Archive-bundle GATED DELETE (Layer 3) — the destructive step that finally drops
@@ -511,6 +512,11 @@ export async function compactArchive(
   cwd: string,
   kind: ArchiveBundleKind,
 ): Promise<CompactArchiveOutcome> {
+  // RECOVERY-FIRST invariant (enforced at the primitive, not only the CLI): refuse while a
+  // delete-intent journal is pending. Consolidation would retire a crashed bundle-pair removal's
+  // reduced SURVIVOR bundle as "superseded", after which recovery could never complete — a
+  // permanent wedge. The recovery entry is `state archive-maintain --write` (recovers first).
+  await assertNoPendingDeleteIntent(cwd);
   const plan = await buildCompactionPlan(cwd, kind);
 
   // ONE consolidated bundle holding every member. Adoption (a member's bytes changed under the
