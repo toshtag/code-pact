@@ -68,6 +68,10 @@ const KNOWN_CODES: Record<string, "public" | "plan" | "doctor" | "adapter" | "in
   DELETE_INTENT_RECOVERY_FAILED: "public",
   DELETE_INTENT_DURABILITY_FAILED: "public",
   PENDING_DELETE_INTENT: "public",
+  // archive-level compaction (bundle-member-removal): the bundle-pair removal's pre-commit
+  // reverify found the store no longer matches the plan. Surfaced by `state archive-maintain
+  // --write` (which orchestrates the bundle-pair removal); fail-closed, re-plan and re-run.
+  BUNDLE_PAIR_NOT_COMMITTABLE: "public",
   // design-docs-ephemeral step 7 PR-B2: the `decision retire` destructive verb.
   DECISION_RETIRE_NOT_ELIGIBLE: "public",
   DECISION_RETIRE_NOT_RETIRED: "public",

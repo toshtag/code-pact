@@ -142,6 +142,15 @@ real decision this way.)
 - **Live-wins** — a present source file is never overridden by a snapshot/record.
 - **Doc links stay green** — an inbound `.md` link to a retired decision resolves as
   *retired* via the record, not as a broken link.
+- **Archive maintenance never touches a live `design/` doc** — `state archive-maintain`
+  (and the low-level `state compact-archive` / `state archive-retention` it orchestrates)
+  bounds **only** `.code-pact/state/archive`. It folds the loose archive tail into bundles
+  and removes unreferenced **archived** truth; it never deletes, rewrites, or resurrects a
+  `design/decisions/*.md`, `design/phases/*.yaml`, `design/rules/`, or `design/roadmap.yaml`.
+  A doc you safely removed *after* archiving stays removed — maintenance reads the archive,
+  not the authoring surface. (Pinned by the `state-archive-maintain` integration tests:
+  the live `design/` tree is byte-identical before and after `--write`, and the
+  `hand-delete`-style safe-delete gates stay green.)
 
 ## See also
 

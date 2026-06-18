@@ -19,11 +19,19 @@ import {
   RetentionConfigError,
 } from "../../core/archive/archive-retention.ts";
 import {
+  BundlePairNotCommittableError,
   DeleteIntentDurabilityError,
   DeleteIntentRecoveryError,
   PendingDeleteIntentError,
   readDeleteIntent,
 } from "../../core/archive/delete-intent-journal.ts";
+import {
+  ArchiveMaintenanceError,
+  planArchiveMaintenance,
+  runArchiveMaintenance,
+  type ArchiveMaintenanceDryRun,
+  type ArchiveMaintenanceWrite,
+} from "../../core/archive/archive-maintenance.ts";
 
 // ---------------------------------------------------------------------------
 // `state` command cluster. ONE subcommand: `state compact`. The DRY-RUN reports a
@@ -42,22 +50,24 @@ export async function cmdState(
   // No subcommand, a help token, or only flags (e.g. `state --json`) → usage.
   if (subcommand === undefined || isHelpToken(subcommand) || subcommand.startsWith("-")) {
     const json = globalJson || argv.includes("--json");
-    if (json) emitOk({ available: ["compact", "compact-archive", "archive-retention"] });
+    if (json) emitOk({ available: ["compact", "compact-archive", "archive-retention", "archive-maintain"] });
     else
       process.stdout.write(
         "Usage: code-pact state compact <phase-id> [--write] [--json]\n" +
           "       code-pact state compact-archive [<kind>] [--write] [--json]\n" +
-          "       code-pact state archive-retention [--keep-latest N] [--write] [--json]\n",
+          "       code-pact state archive-retention [--keep-latest N] [--write] [--json]\n" +
+          "       code-pact state archive-maintain [--keep-latest N] [--write] [--json]\n",
       );
     return 0;
   }
   if (subcommand === "compact") return cmdStateCompact(rest, locale, globalJson);
   if (subcommand === "compact-archive") return cmdStateCompactArchive(rest, globalJson);
   if (subcommand === "archive-retention") return cmdStateArchiveRetention(rest, globalJson);
+  if (subcommand === "archive-maintain") return cmdStateArchiveMaintain(rest, globalJson);
   emitError(
     globalJson || argv.includes("--json"),
     "CONFIG_ERROR",
-    `state: unknown subcommand "${subcommand}". Available: compact, compact-archive, archive-retention`,
+    `state: unknown subcommand "${subcommand}". Available: compact, compact-archive, archive-retention, archive-maintain`,
   );
   return 2;
 }
@@ -473,4 +483,202 @@ async function cmdStateCompactArchive(argv: string[], globalJson: boolean): Prom
 
   if (write) return withWriteLock(cwd, "state compact-archive --write", json, runImpl);
   return runImpl();
+}
+
+// ---------------------------------------------------------------------------
+// `state archive-maintain [--keep-latest N] [--write]` — the HIGH-LEVEL operator
+// entry that orchestrates the existing archive primitives in the safe order
+// (compact → retention (recovers first) → compact-again → re-plan → validate →
+// plan lint), so an operator runs ONE obvious command instead of remembering the
+// low-level sequence. It adds NO new destructive semantics and NO new tracked
+// state. DRY-RUN is read-only and lock-free; `--write` runs under ONE outer write
+// lock for the whole orchestration. The result is reported honestly: a source:both
+// follow-up, a deferred mixed pair, an un-foldable record, or a pending journal all
+// read as NOT bounded, and `bundle_byte_size_bounded` is ALWAYS false (sharding
+// deferred). See docs/cli-contract.md → `state archive-maintain`.
+// ---------------------------------------------------------------------------
+
+/** Map a wrapped maintenance fault to its public error code + diagnostic data. The
+ *  cause is the primitive's own error (the same one the low-level verbs surface), so
+ *  the operator sees the SAME code whether they ran the high-level or low-level verb. */
+function maintErrorEnvelope(
+  err: ArchiveMaintenanceError,
+  json: boolean,
+  recoveryPending: boolean,
+): void {
+  const cause = err.cause_error;
+  const base = {
+    step: err.step,
+    completed_steps: err.completed_steps,
+    partial_applied: err.partial_applied,
+  };
+  const journalHuman = recoveryPending
+    ? " — a delete-intent journal remains; re-run `state archive-maintain --write` to complete it."
+    : "";
+  if (cause instanceof BundleWriteError) {
+    emitError(json, "ARCHIVE_BUNDLE_WRITE_FAILED", `state archive-maintain failed during ${err.step}: ${cause.message}`, {
+      data: { ...base, phase: cause.phase },
+    });
+  } else if (cause instanceof DeleteIntentRecoveryError) {
+    emitError(json, "DELETE_INTENT_RECOVERY_FAILED", cause.message, {
+      data: { ...base, recovery_pending: recoveryPending },
+      human: `${cause.message}${journalHuman}`,
+    });
+  } else if (cause instanceof DeleteIntentDurabilityError) {
+    emitError(json, "DELETE_INTENT_DURABILITY_FAILED", cause.message, {
+      data: { ...base, recovery_pending: recoveryPending, reason: cause.reason },
+      human: `${cause.message}${journalHuman}`,
+    });
+  } else if (cause instanceof PendingDeleteIntentError) {
+    emitError(json, "PENDING_DELETE_INTENT", cause.message, {
+      data: { ...base, recovery_pending: recoveryPending },
+      human: `${cause.message}${journalHuman}`,
+    });
+  } else if (cause instanceof BundlePairNotCommittableError) {
+    emitError(json, "BUNDLE_PAIR_NOT_COMMITTABLE", cause.message, { data: base });
+  } else {
+    // A corrupt bundle STORE (loadArchiveBundles strict) or any other fold-time fault.
+    emitError(json, "ARCHIVE_BUNDLE_INVALID", `state archive-maintain failed during ${err.step}: ${cause.message}`, {
+      data: base,
+    });
+  }
+}
+
+/** `bounded` / `not bounded` plus a short qualifier, for the human Scope block. */
+function boundedLine(label: string, ok: boolean, notBoundedDetail: string): string {
+  return `  ${label}: ${ok ? "bounded" : `not bounded — ${notBoundedDetail}`}`;
+}
+
+function renderDryRunHuman(d: ArchiveMaintenanceDryRun): string {
+  const s = d.summary;
+  const b = d.bounded_status;
+  const lines: string[] = [
+    "Archive maintenance — dry run (no changes).",
+    "",
+    `Current archive files: ${s.archive_files} (${s.loose_records} loose record(s), ${s.bundles} bundle(s))`,
+    "",
+    "Planned:",
+    `  fold ${s.planned_loose_folded} loose record(s) into bundles`,
+    `  delete ${s.planned_loose_deleted} already-bundled loose record(s)`,
+    `  drop ${s.planned_drop} unreferenced old record(s)`,
+  ];
+  if (s.planned_compact_skipped > 0) {
+    lines.push(`  ${s.planned_compact_skipped} record(s) cannot be folded (skipped — inspect with --json)`);
+  }
+  lines.push(
+    "",
+    `Pending delete-intent journal: ${d.steps.journal.pending_before ? "present — --write recovers it first" : "none"}`,
+    "",
+    "Checks (current):",
+    `  validate: ${d.steps.checks.validate.ok ? "ok" : `FAILED (${d.steps.checks.validate.errors} error(s))`}`,
+    `  plan lint: ${d.steps.checks.plan_lint.errors} error(s), ${d.steps.checks.plan_lint.warnings} warning(s), ${d.steps.checks.plan_lint.advisories} advisor${d.steps.checks.plan_lint.advisories === 1 ? "y" : "ies"}`,
+    "",
+    "Scope (current):",
+    boundedLine("file-count garbage", b.file_count_bounded, `${s.planned_loose_folded + s.planned_loose_deleted + s.planned_compact_skipped} loose record(s) to fold or delete (run --write)`),
+    boundedLine("unreferenced old truth", b.unreferenced_old_truth_bounded, `${s.planned_drop} droppable (run --write)`),
+    "  bundle byte size: not bounded yet; sharding deferred",
+    "",
+    "Run `code-pact state archive-maintain --write` to apply.",
+  );
+  return lines.join("\n");
+}
+
+function renderWriteHuman(d: ArchiveMaintenanceWrite): string {
+  const s = d.summary;
+  const b = d.bounded_status;
+  const checks = d.steps.checks;
+  const lines: string[] = [
+    "Archive maintenance complete.",
+    "",
+    "Files:",
+    `  archive loose records: ${s.loose_records_before} → ${s.loose_records_after}`,
+    `  archive bundles:       ${s.bundles_before} → ${s.bundles_after}`,
+    `  total archive files:   ${s.archive_files_before} → ${s.archive_files_after}`,
+    "",
+    "Truth:",
+    "  referenced truth: retained",
+    `  unreferenced old truth: ${b.unreferenced_old_truth_bounded ? "none remaining" : `${s.deleted} dropped this run; a follow-up run is needed (re-run archive-maintain)`}`,
+    `  source:both follow-up: ${s.source_both_follow_up === 0 ? "none" : `${s.source_both_follow_up} (re-run archive-maintain to drop the surviving loose copies)`}`,
+    `  mixed-source pairs: ${s.mixed_source_deferred === 0 ? "none" : `${s.mixed_source_deferred} deferred (run state compact-archive, then retry)`}`,
+  ];
+  if (s.recovered_loose_pairs > 0 || s.recovered_bundle_pairs > 0) {
+    lines.push(
+      `  recovered: ${s.recovered_loose_pairs} loose pair(s), ${s.recovered_bundle_pairs} bundle pair(s) (a prior crashed delete was completed)`,
+    );
+  }
+  lines.push(
+    "",
+    "Checks:",
+    `  validate: ${checks.validate.ok ? "ok" : `FAILED (${checks.validate.errors} error(s))`}`,
+    `  plan lint: ${checks.plan_lint.errors} error(s), ${checks.plan_lint.warnings} warning(s), ${checks.plan_lint.advisories} advisor${checks.plan_lint.advisories === 1 ? "y" : "ies"}`,
+    "",
+    "Scope:",
+    boundedLine("file-count garbage", b.file_count_bounded, `${s.skipped} record(s) could not be folded/removed — inspect --json`),
+    boundedLine("unreferenced old truth", b.unreferenced_old_truth_bounded, "a follow-up run is needed (re-run archive-maintain)"),
+    "  bundle byte size: not bounded yet; sharding deferred",
+  );
+  if (!checks.ok) {
+    lines.push("", "⚠ a post-check did not pass — the archive maintenance itself succeeded; investigate the check above.");
+  }
+  return lines.join("\n");
+}
+
+async function cmdStateArchiveMaintain(argv: string[], globalJson: boolean): Promise<number> {
+  const json = globalJson || argv.includes("--json");
+  let values: Record<string, unknown>;
+  let positionals: string[];
+  try {
+    ({ values, positionals } = strictParse(
+      "state archive-maintain",
+      argv,
+      { json: { type: "boolean" }, write: { type: "boolean" }, "keep-latest": { type: "string" } },
+      { allowPositionals: true },
+    ));
+  } catch (err) {
+    if (!(err instanceof ConfigError)) throw err;
+    emitError(json, "CONFIG_ERROR", err.message);
+    return 2;
+  }
+  if (positionals.length > 0) {
+    emitError(json, "CONFIG_ERROR", `state archive-maintain takes no positional arguments (got "${positionals[0]}").`);
+    return 2;
+  }
+  let keepLatest: number;
+  try {
+    keepLatest = resolveKeepLatest(values["keep-latest"] as string | undefined);
+  } catch (err) {
+    if (!(err instanceof RetentionConfigError)) throw err;
+    emitError(json, "CONFIG_ERROR", err.message);
+    return 2;
+  }
+  const cwd = process.cwd();
+  const write = values.write === true;
+
+  if (!write) {
+    const plan = await planArchiveMaintenance(cwd, { keepLatest });
+    if (json) emitOk(plan);
+    else process.stdout.write(`${renderDryRunHuman(plan)}\n`);
+    return 0; // dry-run is a read-only preview — always exit 0
+  }
+
+  return withWriteLock(cwd, "state archive-maintain --write", json, async () => {
+    let result: ArchiveMaintenanceWrite;
+    try {
+      result = await runArchiveMaintenance(cwd, { keepLatest });
+    } catch (err) {
+      if (!(err instanceof ArchiveMaintenanceError)) throw err;
+      // Surface whether a delete-intent journal still remains (re-run completes it).
+      const recoveryPending = await readDeleteIntent(cwd).then((r) => r.kind !== "absent", () => true);
+      maintErrorEnvelope(err, json, recoveryPending);
+      return 2;
+    }
+    // The maintenance MUTATIONS succeeded → success envelope. The read-only post-checks
+    // (validate + plan lint) are a CONVENIENCE PREVIEW: they do not change the envelope
+    // shape, but a failing check sets exit 1 so a CI that runs only this verb still gets a
+    // non-zero signal (the authoritative gates are the separate validate / plan-lint runs).
+    const { ok, ...data } = result;
+    if (json) emitOk(data);
+    else process.stdout.write(`${renderWriteHuman(result)}\n`);
+    return ok ? 0 : 1;
+  });
 }

@@ -248,6 +248,23 @@ These are the fail-closed faults of the retention **pair-delete journal** — ho
 
 `data.recovery_pending` tells you whether a delete-intent journal still remains on disk: `true` → a re-run will complete it (both-or-neither); `false` → nothing was committed (only the named record set is at stake). The deletion is always atomic across these failures — you never get one half of a pair.
 
+## Reading `state archive-maintain --write` output
+
+`state archive-maintain --write` orchestrates the low-level archive verbs (recover → `compact-archive` → `archive-retention` → compact again → re-plan → `validate` → `plan lint`). It adds no new destructive semantics, so its faults are the SAME codes the low-level verbs surface, plus an honest `bounded_status`. Common operator questions:
+
+- **A maintenance step failed (exit 2).** The error envelope carries the underlying code (`ARCHIVE_BUNDLE_WRITE_FAILED` / `ARCHIVE_BUNDLE_INVALID` / a `DELETE_INTENT_*` / `PENDING_DELETE_INTENT` / `BUNDLE_PAIR_NOT_COMMITTABLE`) plus `data.step` (which step), `data.completed_steps` (what already ran), and `data.partial_applied`. Treat it exactly as you would the same code from `state compact-archive` / `state archive-retention` (see the `DELETE_INTENT_*` section above and the `ARCHIVE_BUNDLE_*` / `BUNDLE_PAIR_NOT_COMMITTABLE` rows in [cli-contract.md](cli-contract.md)). A `DELETE_INTENT_DURABILITY_FAILED` with `reason: "unsupported"` is NOT an error path — that platform (e.g. Windows) cannot `fsync` a directory, so the pair is deferred conservatively; the run still succeeds.
+
+- **A post-check failed (exit 1, but the envelope is `ok: true`).** The archive MUTATIONS succeeded; the read-only post-checks (`validate` + `plan lint --include-quality --strict`) found a problem. Read `data.steps.checks` for the detail. The exit-1 is a CI convenience signal — the authoritative gates are the separate `validate` / `plan lint` runs. Fix the reported check (usually unrelated to the archive) and re-run, or run the gates directly.
+
+- **The result reports `skipped` records.** A non-empty `summary.skipped` is fail-closed truth that could NOT be removed — never a silent drop. Inspect `data.steps.retention.results[].skipped[]` for the per-record reason:
+  - `needs_bundle_member_removal` / `mixed_source_deferred` — a mixed-source pair (one side has a surviving loose copy, the other does not). **Resolution: it should already be gone** — `archive-maintain`'s compact-first step makes mixed pairs uniform. If it persists, a record is genuinely stuck (a `bundle_stale` divergent copy); run `state compact-archive --json` and inspect `would_skip` for the offending id.
+  - `requires_atomic_pair_removal` — a loose pair could not be removed atomically (a missing digest, a partial store view, or an unsupported-platform `fsync`). The pair is retained whole; re-run after resolving the cause (or accept the conservative defer on Windows).
+  - `bundle_stale` (from a `state compact-archive` skip) — a loose record DIVERGES from its bundle member and is not adoptable this run. Inspect both copies; the consolidation converges the store over runs, or reconcile the divergence by hand.
+
+- **`bounded_status` says NOT bounded.** This is honest, not a bug. `file_count_bounded: false` → there is un-foldable loose (a `bundle_stale` skip) or a pending journal; `unreferenced_old_truth_bounded: false` → a `would_drop` record remains (a follow-up run, or a deferred pair). Re-run `archive-maintain --write`; a healthy store converges. `bundle_byte_size_bounded` is **ALWAYS `false`** — see below.
+
+- **The bundle keeps growing in BYTES even though the file count is bounded.** Expected. `archive-maintain` bounds the archive FILE COUNT (folds the loose tail into ~one bundle per kind) and removes UNREFERENCED old truth. It does NOT bound a single bundle's BYTE SIZE — a kind's bundle grows with the number of REFERENCED records, which are kept by design. Sharding a large bundle (and a referenced-truth lifetime policy) is deferred future work, reported as `bundle_byte_size_bound_deferred_to: "sharding"`. Do not read `bundle_byte_size_bounded: false` as a failure — it is the explicit, intentional boundary of the current archive-maintenance layer.
+
 ## `LOCK_HELD` from a lock-covered mutation
 Another `code-pact` mutation is in progress on the same project. The advisory write lock (`.code-pact/locks/write.lock`) is held by the process whose details appear in the envelope:
 

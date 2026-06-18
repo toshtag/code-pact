@@ -14,6 +14,7 @@ bottom.
 | Import Spec Kit artifacts | [Ingesting a Spec Kit `tasks.md`](#ingesting-an-existing-spec-kit-tasksmd-v18) |
 | Refresh generated agent files | [Upgrading an adapter safely](#upgrading-an-adapter-safely-v09) |
 | Prepare a release PR | [Planning integrity](#planning-integrity-v07--checkpoint-commands) · [Release prep](#release-prep-uses-strict-clean-dogfood-checks-v151-guidance) |
+| Keep the archive bounded | [Archive maintenance](#archive-maintenance-v20) |
 | Understand design-vs-progress drift | [`task complete` vs `design/`](#task-complete-vs-design-v10-contract) |
 
 ## Reading `recommend --json` (v0.8)
@@ -412,3 +413,30 @@ When the two diverge, `plan analyze` surfaces a `STATUS_DRIFT` warning so it's v
 - `done-historical` — `design.status: done` but no progress events exist. Hidden by default (`affects_exit: false`) so legacy projects don't fail CI. Surface them with `plan analyze --include-historical`.
 
 In practice: the v0.6–v1.1 release-prep PRs flipped the phase YAML `status` fields manually as part of the release-prep commit (see `chore(design): mark P8-T1 as done` and similar). v1.2 keeps the v1.0 contract — `task complete` still records progress only and never mutates design YAML — but adds `task finalize <task-id>` and `phase reconcile <phase-id>` as Stable (v1.2+) commands that flip the design YAML's `status` field explicitly, with default dry-run and `--write` opt-in. v1.3 adds `task runbook <task-id>` and `phase runbook <phase-id>` as Stable (v1.3+) read-only guidance commands that return the recommended next steps (including `task finalize` / `phase reconcile` invocations when drift is present) without executing anything. See [`docs/concepts/finalization-reconciliation.md`](../concepts/finalization-reconciliation.md) and [`docs/concepts/runbook.md`](../concepts/runbook.md) for the walkthroughs.
+
+## Archive maintenance (v2.0)
+
+A long-running project's `.code-pact/state/archive` accumulates one loose file per archived record. `state archive-maintain` is the **one command** that keeps it bounded — it orchestrates the low-level archive verbs (recover any pending delete-intent journal → `compact-archive` → `archive-retention` → compact again → re-plan → `validate` → `plan lint`) in the safe order and reports the result honestly. It adds no new destructive semantics and writes nothing outside `.code-pact/state/archive`. See [`cli-contract.md` § `state archive-maintain`](../cli-contract.md#state-archive-maintain) for the full contract.
+
+```sh
+# 1. Preview (read-only): what would be folded / dropped, and the current bounded status.
+code-pact state archive-maintain --json
+
+# 2. Apply (under one write lock): recover → compact → retain → compact → re-plan → checks.
+code-pact state archive-maintain --write --json
+
+# 3. Re-run the authoritative gates (archive-maintain runs them as a preview; these are the gate).
+code-pact validate --json
+code-pact plan lint --include-quality --strict --json
+pnpm check:docs
+pnpm release:check
+```
+
+Operator checklist when running `--write`:
+
+- **Inspect `summary.skipped`** — a non-empty value is fail-closed truth that could not be removed (never a silent drop). Read `data.steps.retention.results[].skipped[]` for the per-record reason.
+- **Inspect `summary.mixed_source_deferred`** — should be `0` after a healthy run (compact-first makes mixed pairs uniform). A non-zero value means a record is genuinely stuck (a `bundle_stale` divergence) — investigate before trusting the archive as bounded.
+- **Do not tag a release if the bounded status is misleading** — `bounded_status.file_count_bounded` / `unreferenced_old_truth_bounded` must be `true`, and `skipped` empty, before claiming the archive is bounded. A pending delete-intent journal or a `bundle_stale` skip makes it honestly `false`; re-run after resolving the cause.
+- **`bundle_byte_size_bounded` is ALWAYS `false`** for v2.0.0 — a single bundle's byte size is not bounded (sharding is deferred). This is the intentional boundary, not a regression; do not treat it as a release blocker.
+
+`state archive-maintain` exits **0** when the maintenance mutations succeeded AND the preview checks pass, **1** when a preview check failed (the mutations still succeeded — re-run the authoritative gates above), and **2** on a maintenance-step fault (the same error codes the low-level verbs surface).
