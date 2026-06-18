@@ -26,7 +26,14 @@ import { dirname, resolve, join, normalize } from "node:path";
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 const ROOT_FILES = ["README.md", "CHANGELOG.md", "SECURITY.md", "CONTRIBUTING.md"];
-const SCAN_DIRS = ["docs", "design", ".github"];
+// Mirrors check-doc-links' source roots: docs / design are Markdown; `.github`
+// also carries `.yml` (issue templates render their `value:` strings as Markdown
+// on GitHub, so a relative `.md` link in one is just as clickable / 404-able).
+const SCAN_DIRS: { dir: string; exts: string[] }[] = [
+  { dir: "docs", exts: [".md"] },
+  { dir: "design", exts: [".md"] },
+  { dir: ".github", exts: [".md", ".yml"] },
+];
 // Verbatim historical content; its links are point-in-time (mirrors check-doc-links).
 const ARCHIVED_CHANGELOG_RE = /^docs[/\\]maintainers[/\\]history[/\\]CHANGELOG-\d+\.md$/;
 const EXTERNAL_RE = /^(?:[a-z][a-z0-9+.-]*:|\/\/|#)/i;
@@ -40,7 +47,7 @@ function blankCode(text: string): string {
     .replace(/`[^`\n]*`/g, (m) => " ".repeat(m.length));
 }
 
-function mdFilesUnder(absDir: string, relDir: string, out: string[]): void {
+function filesUnder(absDir: string, relDir: string, exts: string[], out: string[]): void {
   let entries;
   try {
     entries = readdirSync(absDir, { withFileTypes: true });
@@ -50,8 +57,8 @@ function mdFilesUnder(absDir: string, relDir: string, out: string[]): void {
   for (const e of entries) {
     const abs = join(absDir, e.name);
     const rel = join(relDir, e.name);
-    if (e.isDirectory()) mdFilesUnder(abs, rel, out);
-    else if (e.name.endsWith(".md")) out.push(rel);
+    if (e.isDirectory()) filesUnder(abs, rel, exts, out);
+    else if (exts.some((x) => e.name.endsWith(x))) out.push(rel);
   }
 }
 
@@ -59,7 +66,7 @@ function mdFilesUnder(absDir: string, relDir: string, out: string[]): void {
 export function checkPublicMdLinks(root: string): string[] {
   const problems: string[] = [];
   const sources = [...ROOT_FILES];
-  for (const d of SCAN_DIRS) mdFilesUnder(resolve(root, d), d, sources);
+  for (const { dir, exts } of SCAN_DIRS) filesUnder(resolve(root, dir), dir, exts, sources);
 
   for (const rel of sources) {
     const relNorm = rel.split("\\").join("/");

@@ -7,8 +7,7 @@
 // NOT a product feature. Not registered in package.json bin. Walks the
 // dogfood corpus (or any path with a design/ directory), computes the
 // four metric sets locked in the P20-T1 RFC, and emits CSV files under
-// docs/maintainers/measurements/ on --write (or prints them to stdout on default
-// --check).
+// docs/maintainers/measurements/ on --write (or prints them to stdout by default).
 
 import { parseArgs } from "node:util";
 import { mkdir, readFile, writeFile } from "node:fs/promises";

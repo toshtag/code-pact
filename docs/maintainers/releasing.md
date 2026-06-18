@@ -109,6 +109,9 @@ After the release-prep PR merges to `main`:
 
 ## What does NOT need a release
 
-- Documentation (`docs/**`, `README.md`, `design/**`) — not shipped; already in
-  the repo on merge.
+- Documentation under `docs/**` and `design/**` — not shipped; already in the repo
+  on merge.
+- `README.md` is the exception: it is visible in the repo immediately, but the README
+  shown on the **npm package page** updates only on publish — release a README-only
+  change only when that npm-facing copy matters.
 - CI scripts / dev dependencies — not in the published package.

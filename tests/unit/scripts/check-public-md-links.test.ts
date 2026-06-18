@@ -78,4 +78,16 @@ describe("checkPublicMdLinks — disk-only clickable view", () => {
     const problems = checkPublicMdLinks(root);
     expect(problems.some((p) => p.includes("CHANGELOG.md") && p.includes("retired-rfc.md"))).toBe(true);
   });
+
+  it("scans .github/**/*.yml (issue-template `value` renders as Markdown on GitHub)", async () => {
+    root = await tree();
+    await mkdir(join(root, ".github", "ISSUE_TEMPLATE"), { recursive: true });
+    await w(
+      root,
+      ".github/ISSUE_TEMPLATE/bug.yml",
+      "name: Bug\nbody:\n  - type: markdown\n    attributes:\n      value: \"See [the RFC](../../design/decisions/retired-rfc.md).\"\n",
+    );
+    const problems = checkPublicMdLinks(root);
+    expect(problems.some((p) => p.includes("bug.yml") && p.includes("retired-rfc.md"))).toBe(true);
+  });
 });
