@@ -153,8 +153,10 @@ describe("harness --write (persistence)", () => {
         "utf8",
       ),
     );
-    expect(summary.summary_schema_version).toBe(1);
+    expect(summary.summary_schema_version).toBe(2);
     expect(summary.harness_version).toBe("0.2.0");
+    expect(["measured", "no_live_tasks"]).toContain(summary.corpus_status);
+    expect(typeof summary.corpus_note).toBe("string");
     expect(summary.metrics).toMatchObject({
       pack_size_p50_bytes: expect.any(Number),
       pack_size_p90_bytes: expect.any(Number),

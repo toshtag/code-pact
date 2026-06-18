@@ -10,13 +10,13 @@ do not** (they're already visible in the repo).
 
 ## Pick the version
 
-Semantic versioning across the v1.x line:
+Semantic versioning, per major line (`MAJOR.MINOR.PATCH`):
 
-- **patch** (`1.x.Y`) — bug fixes only, no new surface.
-- **minor** (`1.X.0`) — additive features (new commands/flags/aliases, new
+- **patch** (`MAJOR.MINOR.patch`) — bug fixes only, no new surface.
+- **minor** (`MAJOR.minor.0`) — additive features (new commands/flags/aliases, new
   optional schema fields). Backwards-compatible.
-- **major** — a breaking change to a `Stable (v1.0)` surface. Avoid; the v1.x
-  contract is frozen.
+- **major** (`major.0.0`) — a breaking change to a `Stable` surface. Rare; each one
+  ships with a migration note in [`docs/upgrading.md` § Major upgrades](../upgrading.md#major-upgrades).
 
 ## Release-prep PR (all automatable steps)
 
@@ -67,7 +67,7 @@ On a `chore/release-<version>` branch:
 After the release-prep PR merges to `main`:
 
 7. **SSH-signed annotated tag** on the merge commit. `SECURITY.md` requires
-   v1.x releases to use SSH-signed tags (so the GitHub tag page shows
+   stable releases to use SSH-signed tags (so the GitHub tag page shows
    "Verified"); use `-s` (not `-a`, which is annotated but not signed).
    Lightweight tags are rejected by a hook; signing setup is in
    [CONTRIBUTING](../../CONTRIBUTING.md#tag-signing-maintainer-only):

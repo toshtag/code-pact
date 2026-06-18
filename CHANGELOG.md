@@ -11,6 +11,10 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ---
 
+## [Unreleased]
+
+No changes yet.
+
 ## [2.0.0] — 2026-06-18
 
 **v2.0.0 — bounded archive maintenance.** `state archive-maintain` is the one command that keeps `.code-pact/state/archive` bounded — it recovers any pending delete-intent journal, compacts the loose tail into bundles, retains/removes unreferenced old truth, re-plans, and runs `validate` + `plan lint`, reporting an honest `bounded_status`. **Scope (no over-claim):** v2.0.0 bounds the archive's **file-count** sprawl and removes **unreferenced old truth** while **preserving referenced truth**. It does **not** yet bound a single bundle's **byte size** — sharding is the next storage milestone. This is a **major** bump because of one breaking error-code-contract change (see Changed → `MISSING_PHASE_FILE`).

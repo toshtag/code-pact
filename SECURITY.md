@@ -7,7 +7,7 @@ Starting with `v1.0.0`, `code-pact` ships under the npm `latest` tag. Only the m
 | Version | Supported |
 |---|---|
 | latest release on the `latest` tag | yes |
-| older `v1.x` releases | no — upgrade to the current `v1.x` |
+| any release older than `latest` | no — upgrade to the current `latest` |
 | pre-1.0 alpha releases (`@alpha`) | no |
 
 ## Reporting a vulnerability
@@ -44,7 +44,7 @@ Out of scope:
 
 ## Supply chain notes
 
-- Releases from `v0.2.0-alpha.0` onward (including all `v1.x` releases) use **SSH-signed annotated git tags**. The signing key is registered on GitHub as the maintainer's signing key, so the tag page displays a "Verified" badge. The maintainer setup is documented in [CONTRIBUTING.md](CONTRIBUTING.md#tag-signing-maintainer-only).
+- Releases from `v0.2.0-alpha.0` onward use **SSH-signed annotated git tags**. The signing key is registered on GitHub as the maintainer's signing key, so the tag page displays a "Verified" badge. The maintainer setup is documented in [CONTRIBUTING.md](CONTRIBUTING.md#tag-signing-maintainer-only).
 - The tag `v0.1.0-alpha.0` is unsigned (it predates this policy) and is left untouched; moving it would invalidate the corresponding npm publish.
 - Releases are built locally from a clean checkout before publish.
 - The published tarball shasum is recorded in the corresponding GitHub Release notes.

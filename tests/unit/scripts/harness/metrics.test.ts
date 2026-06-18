@@ -435,11 +435,35 @@ describe("buildSummary", () => {
     expect(summary.metrics.undeclared_write_rate_note.length).toBeGreaterThan(
       0,
     );
+    // A non-empty live corpus is "measured" with no disambiguating note.
+    expect(summary.corpus_status).toBe("measured");
+    expect(summary.corpus_note).toBe("");
     expect(summary.denominators).toEqual({
       tasks_done: 2,
       tasks_total: 3,
       agents_enabled: 1,
     });
+  });
+
+  it("flags an empty live corpus as no_live_tasks (0s are 'nothing measured', not a measured failure)", () => {
+    const summary = buildSummary({
+      harnessVersion: "0.2.0",
+      summarySchemaVersion: 2,
+      inputGitSha: "abc123-dirty",
+      codePactCliVersion: "2.0.0",
+      generatedAt: "2026-06-18",
+      packSizeRows: [],
+      verifySuccessRows: [],
+      lifecycleAdherenceRows: [],
+      adapterDriftRows: [],
+      tasksTotal: 0,
+    });
+    expect(summary.corpus_status).toBe("no_live_tasks");
+    expect(summary.corpus_note).toMatch(/archived under \.code-pact\/state\/archive/);
+    // The numeric metrics are still 0 — but now disambiguated by corpus_status.
+    expect(summary.metrics.first_pass_verify_rate_percent).toBe(0);
+    expect(summary.metrics.lifecycle_adherence_rate_percent).toBe(0);
+    expect(summary.denominators.tasks_total).toBe(0);
   });
 
   it("excludes legacy_planned_to_done_shortcut tasks from the adherence numerator but keeps them in the denominator", () => {

@@ -1,9 +1,11 @@
 {
   "harness_version": "0.2.0",
-  "summary_schema_version": 1,
-  "input_git_sha": "3f46380acafdf0d98b0afac9cc526df8a72693d1",
+  "summary_schema_version": 2,
+  "input_git_sha": "ebe7b3bd3cebc61c1d8c9ecef959ff628b21d07d-dirty",
   "code_pact_cli_version": "2.0.0",
   "generated_at": "2026-06-18",
+  "corpus_status": "no_live_tasks",
+  "corpus_note": "No live tasks in design/phases — this corpus's completed phases are archived under .code-pact/state/archive, which the harness does not yet read. Every metric below is 0 because there was nothing to measure (not a measured failure). The last live-corpus baseline is in git history; harness archive-awareness is the tracked follow-up.",
   "metrics": {
     "pack_size_p50_bytes": 0,
     "pack_size_p90_bytes": 0,

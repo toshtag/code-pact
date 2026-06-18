@@ -42,7 +42,7 @@ import {
 } from "./metrics.ts";
 
 const HARNESS_VERSION = "0.2.0";
-const SUMMARY_SCHEMA_VERSION = 1;
+const SUMMARY_SCHEMA_VERSION = 2;
 
 interface HarnessOptions {
   corpus: string;
@@ -74,10 +74,23 @@ function readGitSha(cwd: string): string {
     cwd,
     encoding: "utf8",
   });
-  if (result.status === 0 && typeof result.stdout === "string") {
-    return result.stdout.trim();
+  if (result.status !== 0 || typeof result.stdout !== "string") {
+    return "unknown";
   }
-  return "unknown";
+  const sha = result.stdout.trim();
+  // Mark a dirty working tree: the snapshot was generated against uncommitted
+  // changes (e.g. a release version bump made alongside the refresh), so this
+  // exact commit does NOT reproduce the snapshot. Honest evidence > a clean-looking
+  // SHA that points at the wrong tree.
+  const status = spawnSync("git", ["status", "--porcelain"], {
+    cwd,
+    encoding: "utf8",
+  });
+  const dirty =
+    status.status === 0 &&
+    typeof status.stdout === "string" &&
+    status.stdout.trim().length > 0;
+  return dirty ? `${sha}-dirty` : sha;
 }
 
 // P28: the declared enabled-agent set, read from .code-pact/project.yaml.

@@ -24,7 +24,7 @@ the Evidence Harness v2.
 
 ## 1. What `code-pact` guarantees
 
-These guarantees hold across the v1.x line. Breaking any of them
+These guarantees hold within a major version. Breaking any of them
 requires a major-version bump.
 
 ### CLI surface stability
@@ -34,7 +34,7 @@ Every command listed under the `Stable (v1.0)` entry of the
 frozen flag surface, JSON envelope shape, exit code contract, and
 error code set. New optional flags and new envelope fields are
 additive; existing flags, fields, and codes do not change meaning
-within v1.x.
+within a major.
 
 `task prepare`, `task context --explain`, and `adapter conformance`
 join the stable set and carry the same guarantee.
@@ -73,7 +73,7 @@ human-readable output is informative only.
 
 Public error codes are listed in
 [`docs/cli-contract.md`](cli-contract.md#error-codes). New error
-codes are additive within v1.x; existing codes do not change meaning.
+codes are additive within a major; existing codes do not change meaning.
 The `code` field of an error envelope is the contract — agents may
 branch on the value.
 
