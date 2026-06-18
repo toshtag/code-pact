@@ -146,7 +146,10 @@ async function cmdStateArchiveRetention(argv: string[], globalJson: boolean): Pr
       }
       const message = err.message;
       const journal = describeJournal(await readDeleteIntent(cwd));
-      const baseData = { recovery_pending: journal.pending_before, journal_status: journal.status };
+      // A valid `present` journal's recovery can complete PART of a committed delete before failing
+      // (loose unlinks run before bundle retires), so report partial_applied conservatively — the
+      // same honesty the high-level `archive-maintain` envelope gives. corrupt/absent → no mutation.
+      const baseData = { recovery_pending: journal.pending_before, journal_status: journal.status, partial_applied: journal.status === "present" };
       if (err instanceof DeleteIntentRecoveryError) {
         // NOT re-runnable — corrupt journal OR a valid-present journal whose referenced authority
         // is broken. Guidance is inspect/repair, never blind re-run (the high-level verb's logic).

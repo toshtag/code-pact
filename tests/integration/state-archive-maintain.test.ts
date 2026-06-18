@@ -549,6 +549,31 @@ describe("state archive-maintain — pending delete-intent recovery is surfaced 
     expect(human).not.toMatch(/re-run .* to complete it/); // a blind re-run fails the same way
     expect(human).toMatch(/inspect\/repair the referenced archive bundles/);
   });
+
+  it("the LOW-level `state archive-retention --write` gives the SAME present-journal recovery-failure honesty (recovery_failure_kind + partial_applied)", async () => {
+    // The low-level verb's contract must match the high-level one: a valid present journal whose
+    // referenced authority is broken is `present_journal_recovery_failed` with `partial_applied`
+    // surfaced (recovery can complete part of a committed delete before failing), NOT "re-run".
+    await seedArchivedPhases(["P1", "P2"]);
+    for (const id of ["P1", "P2"]) expect(run(["state", "compact", id, "--write", "--json"]).code).toBe(0);
+    expect(run(["state", "compact-archive", "--write", "--json"]).code).toBe(0);
+    await expect(
+      deleteBundlePairsJournaled(tmpDir, [{ phase_id: "P1" }], { beforeRetire: () => { throw new Error("crash"); } }),
+    ).rejects.toThrow();
+    const journalRaw = JSON.parse(await readFile(join(tmpDir, ".code-pact", "state", "archive", "delete-intent.json"), "utf8"));
+    await rm(join(BUNDLES_DIR(), journalRaw.intents[0].members.phase_snapshot.new_bundle.file), { force: true });
+
+    const r = run(["state", "archive-retention", "--write", "--json"]);
+    expect(r.code).toBe(2);
+    const data = json(r).data as { journal_status?: string; recovery_failure_kind?: string; partial_applied?: boolean };
+    expect(json(r).error?.code).toBe("DELETE_INTENT_RECOVERY_FAILED");
+    expect(data.journal_status).toBe("present");
+    expect(data.recovery_failure_kind).toBe("present_journal_recovery_failed");
+    expect(data.partial_applied).toBe(true); // operator-grade: low-level verb surfaces it too
+    const human = run(["state", "archive-retention", "--write"]).stderr;
+    expect(human).not.toMatch(/re-run .* to complete it/);
+    expect(human).toMatch(/inspect\/repair the referenced archive bundles/);
+  });
 });
 
 describe("state archive-maintain — idempotency, determinism + cross-branch merge convergence", () => {
