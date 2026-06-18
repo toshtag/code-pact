@@ -10,6 +10,7 @@ import { phaseSnapshotPath, archiveBundlePath, archiveBundlesDir, sha256Hex } fr
 import { planBundleMemberRemoval, removeBundleMembers } from "../../../../src/core/archive/bundle-member-removal.ts";
 import {
   __setDeleteIntentDirFsyncForTests,
+  __setDeleteIntentFileFsyncForTests,
   DeleteIntentDurabilityError,
 } from "../../../../src/core/archive/delete-intent-journal.ts";
 
@@ -36,6 +37,7 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   __setDeleteIntentDirFsyncForTests(null);
+  __setDeleteIntentFileFsyncForTests(null);
   if (cwd) await rm(cwd, { recursive: true, force: true });
 });
 
@@ -291,6 +293,61 @@ describe("removeBundleMembers — destructive single-kind apply", () => {
     });
     await expect(removeBundleMembers(cwd, "phase_snapshot", ["P1"])).rejects.toBeInstanceOf(DeleteIntentDurabilityError);
     expect(await listBundles()).toEqual(before); // nothing retired — the {P1,P2,P3} bundle survives
+  });
+
+  it("a byte-identical KEEP already on disk must fsync the keep's FILE DATA before any retire", async () => {
+    const bytesById = new Map<string, string>();
+    for (const id of ["P1", "P2", "P3"]) bytesById.set(id, await snapshotBytes(id));
+    await bundlePhases(["P1", "P2", "P3"], bytesById);
+    await bundlePhases(["P2", "P3"], bytesById); // the survivor set already exists byte-identically (the keep)
+    const before = await listBundles();
+    // Inject a FILE-data fsync failure (distinct from the directory barrier): adopting a pre-existing
+    // keep as the survivor authority must prove its DATA is durable, else a non-durable keep could let
+    // a durable old-bundle unlink proceed → survivor truth loss. So the op must fail closed, nothing retired.
+    __setDeleteIntentFileFsyncForTests((purpose) => {
+      if (purpose === "bundle_write") throw new DeleteIntentDurabilityError("failed", "injected file fsync");
+    });
+    await expect(removeBundleMembers(cwd, "phase_snapshot", ["P1"])).rejects.toBeInstanceOf(DeleteIntentDurabilityError);
+    expect(await listBundles()).toEqual(before); // nothing retired — the {P1,P2,P3} bundle survives
+  });
+
+  it("if the survivor bundle vanishes between the durable write and the retire → old bundle NOT retired, nothing removed", async () => {
+    const bytesById = new Map<string, string>();
+    for (const id of ["P1", "P2", "P3"]) bytesById.set(id, await snapshotBytes(id));
+    await bundlePhases(["P1", "P2", "P3"], bytesById);
+    const oldBundle = (await listBundles())[0];
+
+    // After the new {P2,P3} survivor bundle is durably written, delete it just before the old retire.
+    // Retiring the old {P1,P2,P3} now would also lose P2/P3 → the op must refuse (re-derive survivor
+    // authority from disk before destroying old authority).
+    await expect(
+      removeBundleMembers(cwd, "phase_snapshot", ["P1"], {
+        beforeRetire: async () => {
+          for (const f of await listBundles()) {
+            if (f !== oldBundle) await rm(join(archiveBundlesDir(cwd), f)); // remove the survivor bundle
+          }
+        },
+      }),
+    ).rejects.toThrow(/survivor bundle .* vanished/);
+    expect(await listBundles()).toContain(oldBundle); // the old {P1,P2,P3} bundle is NOT retired
+  });
+
+  it("if the survivor bundle is CORRUPTED between the durable write and the retire → old bundle NOT retired", async () => {
+    const bytesById = new Map<string, string>();
+    for (const id of ["P1", "P2", "P3"]) bytesById.set(id, await snapshotBytes(id));
+    await bundlePhases(["P1", "P2", "P3"], bytesById);
+    const oldBundle = (await listBundles())[0];
+
+    await expect(
+      removeBundleMembers(cwd, "phase_snapshot", ["P1"], {
+        beforeRetire: async () => {
+          for (const f of await listBundles()) {
+            if (f !== oldBundle) await writeFile(join(archiveBundlesDir(cwd), f), "{ corrupted", "utf8"); // corrupt the survivor bundle
+          }
+        },
+      }),
+    ).rejects.toThrow(/survivor bundle/);
+    expect(await listBundles()).toContain(oldBundle); // the old {P1,P2,P3} bundle is NOT retired
   });
 
   it("an `unsupported` directory-fsync platform DEFERS the whole kind — no unlink, nothing reported removed", async () => {

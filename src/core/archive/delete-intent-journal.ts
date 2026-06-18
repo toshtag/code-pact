@@ -1,4 +1,4 @@
-import { mkdir, open, rename, unlink } from "node:fs/promises";
+import { mkdir, open, rename, unlink, type FileHandle } from "node:fs/promises";
 import { dirname } from "node:path";
 import { DeleteIntent, DELETE_INTENT_SCHEMA_VERSION, type DeleteIntentPair } from "../schemas/delete-intent.ts";
 import { archiveDeleteIntentPath, archiveEventPacksDir, archivePhasesDir, eventPackPath, phaseSnapshotPath } from "./paths.ts";
@@ -95,6 +95,30 @@ export async function fsyncDirRequired(dir: string, purpose: string): Promise<vo
     throw new DeleteIntentDurabilityError("failed", `directory fsync failed (${purpose}, ${dir}): ${(err as Error).message}`);
   } finally {
     await dh.close();
+  }
+}
+
+// Test seam (failure injection) for the FILE DATA fsync — separate from the dir seam
+// so a test can fail a file barrier without touching directory barriers. `null` = real.
+let fileFsyncOverride: ((purpose: string) => Promise<void> | void) | null = null;
+export function __setDeleteIntentFileFsyncForTests(fn: ((purpose: string) => Promise<void> | void) | null): void {
+  fileFsyncOverride = fn;
+}
+
+/** fsync a FILE's DATA so its contents are durable — a REQUIRED barrier, distinct
+ *  from `fsyncDirRequired` (which only makes a directory entry / rename / unlink
+ *  durable, NOT the bytes inside a file). Throws `DeleteIntentDurabilityError("failed")`
+ *  on any I/O failure (never swallowed). Unlike a directory fsync this is supported on
+ *  every platform (fsync of a regular file), so there is no `unsupported` case. */
+export async function fsyncFileRequired(fh: FileHandle, purpose: string): Promise<void> {
+  if (fileFsyncOverride) {
+    await fileFsyncOverride(purpose);
+    return;
+  }
+  try {
+    await fh.sync();
+  } catch (err) {
+    throw new DeleteIntentDurabilityError("failed", `file fsync failed (${purpose}): ${(err as Error).message}`);
   }
 }
 

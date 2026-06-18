@@ -7,7 +7,7 @@ import { computeMemberIdsSha256 } from "./archive-bundle-reader.ts";
 import { buildArchiveBundle, serializeArchiveBundle, verifyBundleReadback } from "./archive-bundle-writer.ts";
 import { bindBundleMember } from "./archive-bundle-binding.ts";
 import { looseStillAuthorityValid } from "./archive-retention.ts";
-import { DeleteIntentDurabilityError, fsyncDirRequired } from "./delete-intent-journal.ts";
+import { DeleteIntentDurabilityError, fsyncDirRequired, fsyncFileRequired } from "./delete-intent-journal.ts";
 import {
   archiveBundlePath,
   archiveBundlesDir,
@@ -216,6 +216,11 @@ export async function removeBundleMembers(
   let retiredAny = false;
   for (const rb of c.retire) {
     if (hooks.beforeRetire) await hooks.beforeRetire(rb.file);
+    // RE-DERIVE the proof from the ON-DISK survivor authority: before destroying old authority, confirm
+    // the new survivor bundle is STILL present + byte-correct + readback-valid on disk. Otherwise a
+    // survivor bundle that vanished / was corrupted between the durable write and this unlink (a bug, or
+    // the test seam modelling it) would let us retire the old bundle and lose the survivors too.
+    if (c.new_bundle) await assertSurvivorBundleOnDisk(cwd, kind, c.new_bundle);
     const abs = join(dir, basename(rb.file));
     let raw: string;
     try {
@@ -250,26 +255,57 @@ export async function removeBundleMembers(
   return { kind, removed, not_member: c.not_member, unsafe_invalid: [], skipped, skipped_stale };
 }
 
+/** Re-derive the survivor authority from disk: the just-written consolidated new bundle must STILL be
+ *  present, byte-identical to the plan, and readback-valid. Called immediately before each old-bundle
+ *  unlink so we never destroy old authority while the survivor authority is missing/corrupt. Throws
+ *  fail-closed (nothing is retired) on any mismatch. */
+async function assertSurvivorBundleOnDisk(cwd: string, kind: ArchiveBundleKind, bundle: ArchiveBundle): Promise<void> {
+  const path = archiveBundlePath(cwd, kind, bundle.member_ids_sha256);
+  let raw: string;
+  try {
+    raw = await readFile(path, "utf8");
+  } catch (err) {
+    throw new Error(`bundle-member removal: the survivor bundle ${basename(path)} vanished before retiring the old bundle(s): ${(err as Error).message}`);
+  }
+  if (sha256Hex(raw) !== sha256Hex(serializeArchiveBundle(bundle))) {
+    throw new Error(`bundle-member removal: the survivor bundle ${basename(path)} changed before retiring the old bundle(s)`);
+  }
+  verifyBundleReadback(raw, kind, bundle.members, basename(path)); // survivors still authority-valid on disk
+}
+
 /** Durably write a built content-addressed bundle: write temp → fsync DATA → rename → fsync DIR →
  *  readback-verify. No-op if the target already holds the byte-identical bundle (the keep) — but
- *  even then it RE-CONFIRMS the directory durability barrier before returning (see below). */
+ *  even then it RE-CONFIRMS BOTH durability barriers (file DATA + directory) before returning (see below). */
 async function durablyWriteBundle(cwd: string, kind: ArchiveBundleKind, bundle: ArchiveBundle): Promise<void> {
   const path = archiveBundlePath(cwd, kind, bundle.member_ids_sha256);
   const bytes = serializeArchiveBundle(bundle);
   const dir = archiveBundlesDir(cwd);
   if (await pathExists(path)) {
-    const existing = await readFile(path, "utf8");
-    if (existing === bytes) {
-      // The keep already exists — but "visible on disk" is NOT "durable". A prior run could have
-      // renamed it into place and then crashed / failed BEFORE the dir-fsync barrier, so its
-      // directory entry may not survive a power loss. Re-confirm the REQUIRED barrier (and re-verify
-      // the bytes) BEFORE the caller proceeds to retire any old bundle — otherwise a durable
-      // old-bundle unlink could outlive a non-durable new-bundle rename → survivor truth loss.
-      await fsyncDirRequired(dir, "bundle_write");
+    // The keep already exists — but "visible on disk" is NOT "durable", in TWO ways: a prior run
+    // could have written its DATA without an fsync (data pages still only in the page cache) AND/OR
+    // renamed it into place without the dir-fsync barrier. If we adopt this pre-existing keep as the
+    // survivor authority and then retire the old bundle, a durable old-bundle unlink could outlive a
+    // non-durable keep → survivor truth loss on power loss. So re-confirm BOTH required barriers
+    // (file DATA fsync + directory fsync) and re-verify the bytes BEFORE returning to the retire step.
+    const fh = await open(path, "r+");
+    try {
+      const existing = await fh.readFile("utf8");
+      if (existing !== bytes) {
+        throw new Error(`bundle-member removal: a different bundle already exists at ${basename(path)}`);
+      }
       verifyBundleReadback(existing, kind, bundle.members, basename(path));
-      return;
+      await fsyncFileRequired(fh, "bundle_write"); // REQUIRED: the keep's DATA must be durable
+    } catch (err) {
+      await fh.close().catch(() => {});
+      throw err; // propagate the ORIGINAL fault (different-bundle / readback / data-fsync), never masked
     }
-    throw new Error(`bundle-member removal: a different bundle already exists at ${basename(path)}`);
+    try {
+      await fh.close(); // on the success path the close is itself a barrier — an unflushed write can surface here
+    } catch (err) {
+      throw new DeleteIntentDurabilityError("failed", `keep bundle close failed: ${(err as Error).message}`);
+    }
+    await fsyncDirRequired(dir, "bundle_write"); // REQUIRED: the keep's directory entry must be durable
+    return;
   }
   const tmp = `${path}.tmp-${process.pid}-${Date.now()}`;
   const fh = await open(tmp, "w");
