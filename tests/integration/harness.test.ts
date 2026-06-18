@@ -5,7 +5,7 @@
 //     produce identical CSV outputs (excluding the manifest's
 //     `code_pact_cli_version` which is read at runtime — that field
 //     stays stable across runs in a single CI session anyway).
-//   * --check (default) prints CSVs to stdout AND does NOT touch
+//   * default read-only mode (no --write) prints CSVs to stdout AND does NOT touch
 //     docs/maintainers/measurements/.
 //   * --write persists the four CSVs + manifest under docs/maintainers/measurements/.
 
@@ -178,7 +178,7 @@ describe("harness --write (persistence)", () => {
   });
 });
 
-describe("harness (default --check)", () => {
+describe("harness (default read-only mode)", () => {
   it("prints CSVs to stdout WITHOUT writing any file", async () => {
     const p = await setupCorpus("check");
     const result = runHarness(p.dir, []);
