@@ -522,6 +522,33 @@ describe("state archive-maintain — pending delete-intent recovery is surfaced 
     expect(human).toMatch(/inspect\/repair/);
     expect(human).not.toMatch(/re-run .* to complete it/);
   });
+
+  it("a VALID present journal whose referenced bundle is gone → DELETE_INTENT_RECOVERY_FAILED with journal_status present; guidance is inspect the BUNDLES, NOT blind re-run", async () => {
+    // DELETE_INTENT_RECOVERY_FAILED is NOT "corrupt journal only": a valid `present` journal whose
+    // recovery authority (a survivor / old bundle) is missing or byte-changed fails recovery the SAME
+    // way on every re-run. The guidance must point at the referenced bundles, never "re-run to complete".
+    await seedArchivedPhases(["P1", "P2"]);
+    for (const id of ["P1", "P2"]) expect(run(["state", "compact", id, "--write", "--json"]).code).toBe(0);
+    expect(run(["state", "compact-archive", "--write", "--json"]).code).toBe(0);
+    // Crash a bundle-pair removal of P1 → a VALID present journal + reduced survivor bundles on disk.
+    await expect(
+      deleteBundlePairsJournaled(tmpDir, [{ phase_id: "P1" }], { beforeRetire: () => { throw new Error("crash"); } }),
+    ).rejects.toThrow();
+    // Now break the recovery AUTHORITY: delete a survivor bundle the journal references.
+    const journalRaw = JSON.parse(await readFile(join(tmpDir, ".code-pact", "state", "archive", "delete-intent.json"), "utf8"));
+    const survivorFile = journalRaw.intents[0].members.phase_snapshot.new_bundle.file as string;
+    await rm(join(BUNDLES_DIR(), survivorFile), { force: true });
+
+    const r = run(["state", "archive-maintain", "--write", "--json"]);
+    expect(r.code).toBe(2);
+    const data = json(r).data as { journal_status?: string; recovery_failure_kind?: string };
+    expect(json(r).error?.code).toBe("DELETE_INTENT_RECOVERY_FAILED");
+    expect(data.journal_status).toBe("present"); // the journal is VALID — only the authority is broken
+    expect(data.recovery_failure_kind).toBe("present_journal_recovery_failed");
+    const human = run(["state", "archive-maintain", "--write"]).stderr;
+    expect(human).not.toMatch(/re-run .* to complete it/); // a blind re-run fails the same way
+    expect(human).toMatch(/inspect\/repair the referenced archive bundles/);
+  });
 });
 
 describe("state archive-maintain — idempotency, determinism + cross-branch merge convergence", () => {

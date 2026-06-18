@@ -36,8 +36,11 @@ identifiers. Starting with v1.0.0, stable releases use plain
   write lock. The result is reported honestly via a `bounded_status`: a
   `source: both` follow-up, a deferred mixed pair, an un-foldable record, or a
   pending journal all read as NOT bounded, and every `skipped` record is
-  surfaced (never a silent drop). Because compaction runs first, a mixed-source
-  pair (and a `source: both` record) is resolved in a **single run**.
+  surfaced (never a silent drop). In healthy, compactable cases, compaction
+  running first resolves ordinary mixed-source / `source: both` redundancy in the
+  same maintenance run; deferred / skipped records (a `bundle_stale` divergence,
+  an unsupported-platform `fsync`, a recovered bundle-pair survivor) remain
+  explicitly **not bounded** and are reported with per-record reasons.
   **Scope (no over-claim):** v2.0.0 bounds the archive **file-count sprawl** and
   removes **unreferenced old truth** while **preserving referenced truth**. It
   does **not** yet bound a single bundle's **byte size** —

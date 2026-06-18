@@ -145,26 +145,31 @@ async function cmdStateArchiveRetention(argv: string[], globalJson: boolean): Pr
         throw err;
       }
       const message = err.message;
-      // Distinguish a CORRUPT journal (re-run won't help — inspect/repair) from a PRESENT one
-      // (re-run completes it) — the same honesty the high-level verb gives.
       const journal = describeJournal(await readDeleteIntent(cwd));
-      const journalHuman =
-        journal.status === "corrupt"
-          ? " — a CORRUPT delete-intent journal remains; inspect/repair `.code-pact/state/archive/delete-intent.json` (it cannot be auto-recovered), do NOT just re-run."
-          : journal.status === "present"
-            ? " — a delete-intent journal remains; re-run `state archive-retention --write` to complete it."
+      const baseData = { recovery_pending: journal.pending_before, journal_status: journal.status };
+      if (err instanceof DeleteIntentRecoveryError) {
+        // NOT re-runnable — corrupt journal OR a valid-present journal whose referenced authority
+        // is broken. Guidance is inspect/repair, never blind re-run (the high-level verb's logic).
+        const g = recoveryFailureGuidance(journal);
+        emitError(json, "DELETE_INTENT_RECOVERY_FAILED", message, {
+          data: { ...baseData, recovery_failure_kind: g.recovery_failure_kind },
+          human: `${message}${g.human}`,
+        });
+        return 2;
+      }
+      // PENDING / a (transient) DURABILITY fault ARE re-runnable when a present journal remains.
+      const reRunHuman =
+        journal.status === "present"
+          ? " — a delete-intent journal remains; re-run `state archive-retention --write` to complete it."
+          : journal.status === "corrupt"
+            ? " — a CORRUPT delete-intent journal remains; inspect/repair it, do NOT just re-run."
             : "";
-      const human = `${message}${journalHuman}`;
-      const data = {
-        recovery_pending: journal.pending_before,
-        journal_status: journal.status,
-        // `reason` (`failed` / `unsupported`) is part of the durability contract the docs describe —
-        // restore it on the low-level verb too (the high-level `maintErrorEnvelope` already carries it).
-        ...(err instanceof DeleteIntentDurabilityError ? { reason: err.reason } : {}),
-      };
-      if (err instanceof DeleteIntentRecoveryError) emitError(json, "DELETE_INTENT_RECOVERY_FAILED", message, { data, human });
-      else if (err instanceof DeleteIntentDurabilityError) emitError(json, "DELETE_INTENT_DURABILITY_FAILED", message, { data, human });
-      else emitError(json, "PENDING_DELETE_INTENT", message, { data, human });
+      const human = `${message}${reRunHuman}`;
+      if (err instanceof DeleteIntentDurabilityError) {
+        emitError(json, "DELETE_INTENT_DURABILITY_FAILED", message, { data: { ...baseData, reason: err.reason }, human });
+      } else {
+        emitError(json, "PENDING_DELETE_INTENT", message, { data: baseData, human });
+      }
       return 2;
     }
     if (json) emitOk({ mode: "written", keep_latest: keepLatest, results });
@@ -446,7 +451,8 @@ async function cmdStateCompactArchive(argv: string[], globalJson: boolean): Prom
     if (err instanceof PendingDeleteIntentError) {
       emitError(json, "PENDING_DELETE_INTENT", err.message, { data: { ...data, recovery_pending: true, journal_status: "present" } });
     } else if (err instanceof DeleteIntentRecoveryError) {
-      emitError(json, "DELETE_INTENT_RECOVERY_FAILED", err.message, { data: { ...data, recovery_pending: true, journal_status: "corrupt" } });
+      // compactArchive's guard throws this ONLY for a corrupt journal (it does no bundle-pair recovery).
+      emitError(json, "DELETE_INTENT_RECOVERY_FAILED", err.message, { data: { ...data, recovery_pending: true, journal_status: "corrupt", recovery_failure_kind: "journal_corrupt" } });
     } else if (err instanceof BundleWriteError) emitError(json, "ARCHIVE_BUNDLE_WRITE_FAILED", message, { data });
     else emitError(json, "ARCHIVE_BUNDLE_INVALID", message, { data });
     return 2;
@@ -561,6 +567,28 @@ async function cmdStateCompactArchive(argv: string[], globalJson: boolean): Prom
 // deferred). See docs/cli-contract.md → `state archive-maintain`.
 // ---------------------------------------------------------------------------
 
+/** Guidance for a `DELETE_INTENT_RECOVERY_FAILED` — which is NOT "corrupt journal only". It
+ *  fires when the recovery AUTHORITY cannot be used safely, in TWO shapes: a `corrupt` journal
+ *  (repair the journal file), OR a VALID `present` journal whose referenced archive bundles/files
+ *  are missing or byte-changed (repair the referenced bundles). In BOTH a blind re-run fails the
+ *  SAME way — so the guidance is NEVER "re-run to complete it" (unlike `PENDING_DELETE_INTENT` /
+ *  a transient `DELETE_INTENT_DURABILITY_FAILED`, which ARE re-runnable). */
+function recoveryFailureGuidance(journal: JournalStatus): { recovery_failure_kind: string; human: string } {
+  if (journal.status === "corrupt") {
+    return {
+      recovery_failure_kind: "journal_corrupt",
+      human: " — a CORRUPT delete-intent journal remains; inspect/repair `.code-pact/state/archive/delete-intent.json` (it cannot be auto-recovered), do NOT just re-run.",
+    };
+  }
+  if (journal.status === "present") {
+    return {
+      recovery_failure_kind: "present_journal_recovery_failed",
+      human: " — the delete-intent journal is VALID, but recovery FAILED verifying/retiring the archive authority it references (a survivor / old bundle is missing or its bytes changed); inspect/repair the referenced archive bundles, do NOT blindly re-run unchanged.",
+    };
+  }
+  return { recovery_failure_kind: "recovery_failed", human: " — recovery failed; inspect the archive state before retrying." };
+}
+
 /** Map a wrapped maintenance fault to its public error code + diagnostic data. The
  *  cause is the primitive's own error (the same one the low-level verbs surface), so
  *  the operator sees the SAME code whether they ran the high-level or low-level verb. */
@@ -580,23 +608,24 @@ function maintErrorEnvelope(
     // recovery-completed drop of old truth is never lost just because a later step failed.
     ...(err.recovered.length > 0 ? { recovered: err.recovered } : {}),
   };
-  // The recovery guidance depends on WHAT journal remains: a `corrupt` journal CANNOT be
-  // auto-recovered by a re-run (recovery fails on it) — it must be inspected/repaired; a
-  // `present` journal a re-run completes (it recovers first); an `absent` journal needs no note.
+  // A re-runnable journal (PendingDeleteIntent / a transient durability fault) → "re-run completes
+  // it" when present. A RECOVERY failure (DeleteIntentRecoveryError) is NOT re-runnable — handled
+  // separately by `recoveryFailureGuidance` (corrupt OR a present-but-broken authority).
   const journalHuman =
-    journal.status === "corrupt"
-      ? " — a CORRUPT delete-intent journal remains; inspect/repair `.code-pact/state/archive/delete-intent.json` (archive-maintain cannot auto-recover a corrupt journal), do NOT just re-run."
-      : journal.status === "present"
-        ? " — a delete-intent journal remains; re-run `state archive-maintain --write` to complete it."
+    journal.status === "present"
+      ? " — a delete-intent journal remains; re-run `state archive-maintain --write` to complete it."
+      : journal.status === "corrupt"
+        ? " — a CORRUPT delete-intent journal remains; inspect/repair `.code-pact/state/archive/delete-intent.json`, do NOT just re-run."
         : "";
   if (cause instanceof BundleWriteError) {
     emitError(json, "ARCHIVE_BUNDLE_WRITE_FAILED", `state archive-maintain failed during ${err.step}: ${cause.message}`, {
       data: { ...base, phase: cause.phase },
     });
   } else if (cause instanceof DeleteIntentRecoveryError) {
+    const g = recoveryFailureGuidance(journal);
     emitError(json, "DELETE_INTENT_RECOVERY_FAILED", cause.message, {
-      data: base,
-      human: `${cause.message}${journalHuman}`,
+      data: { ...base, recovery_failure_kind: g.recovery_failure_kind },
+      human: `${cause.message}${g.human}`,
     });
   } else if (cause instanceof DeleteIntentDurabilityError) {
     emitError(json, "DELETE_INTENT_DURABILITY_FAILED", cause.message, {
