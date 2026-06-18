@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run as cliRun, ensureCliBuilt, type RunResult } from "../helpers/cli.ts";
@@ -84,5 +84,20 @@ describe("state archive-retention — CLI surface (dry-run + --write)", () => {
     const r = run(["state", "archive-retention", "extra", "--json"]);
     expect(r.code).toBe(2);
     expect(json(r).error?.code).toBe("CONFIG_ERROR");
+  });
+
+  it("a CORRUPT delete-intent journal → DELETE_INTENT_RECOVERY_FAILED (journal_status corrupt; guidance is inspect/repair, not blind re-run)", async () => {
+    await init();
+    await mkdir(join(tmpDir, ".code-pact", "state", "archive"), { recursive: true });
+    await writeFile(join(tmpDir, ".code-pact", "state", "archive", "delete-intent.json"), "{ not valid json", "utf8");
+    const r = run(["state", "archive-retention", "--write", "--json"]);
+    expect(r.code).toBe(2);
+    const body = json(r);
+    expect(body.error?.code).toBe("DELETE_INTENT_RECOVERY_FAILED");
+    expect((body.data as { journal_status?: string }).journal_status).toBe("corrupt");
+    // Human must NOT tell the operator to blindly re-run a journal a re-run cannot recover.
+    const human = run(["state", "archive-retention", "--write"]).stderr;
+    expect(human).toMatch(/inspect\/repair/);
+    expect(human).not.toMatch(/re-run .* to complete it/);
   });
 });

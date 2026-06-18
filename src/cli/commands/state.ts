@@ -155,7 +155,13 @@ async function cmdStateArchiveRetention(argv: string[], globalJson: boolean): Pr
             ? " — a delete-intent journal remains; re-run `state archive-retention --write` to complete it."
             : "";
       const human = `${message}${journalHuman}`;
-      const data = { recovery_pending: journal.pending_before, journal_status: journal.status };
+      const data = {
+        recovery_pending: journal.pending_before,
+        journal_status: journal.status,
+        // `reason` (`failed` / `unsupported`) is part of the durability contract the docs describe —
+        // restore it on the low-level verb too (the high-level `maintErrorEnvelope` already carries it).
+        ...(err instanceof DeleteIntentDurabilityError ? { reason: err.reason } : {}),
+      };
       if (err instanceof DeleteIntentRecoveryError) emitError(json, "DELETE_INTENT_RECOVERY_FAILED", message, { data, human });
       else if (err instanceof DeleteIntentDurabilityError) emitError(json, "DELETE_INTENT_DURABILITY_FAILED", message, { data, human });
       else emitError(json, "PENDING_DELETE_INTENT", message, { data, human });
@@ -457,12 +463,25 @@ async function cmdStateCompactArchive(argv: string[], globalJson: boolean): Prom
           plans.push(await planCompactArchive(cwd, kind));
           failedKind = null;
         }
-        if (json) emitOk({ mode: "dry_run", plans });
+        // A pending journal means `--write` would REFUSE here (this verb is not recovery-first) —
+        // surface it in the read-only dry-run so an operator who reads the plan isn't surprised by
+        // a refusal on `--write`. (Mirrors `archive-maintain`'s `plans_are_pre_recovery`.)
+        const jr = await readDeleteIntent(cwd);
+        const journal =
+          jr.kind === "absent"
+            ? { status: "absent" as const, write_will_refuse: false }
+            : jr.kind === "corrupt"
+              ? { status: "corrupt" as const, write_will_refuse: true, next_action: "inspect/repair the delete-intent journal (archive-maintain cannot auto-recover it)" }
+              : { status: "present" as const, write_will_refuse: true, next_action: "run `state archive-maintain --write` to recover, then compact" };
+        if (json) emitOk({ mode: "dry_run", plans, journal });
         else {
           for (const p of plans) {
             process.stdout.write(
               `${p.kind}: would bundle ${p.would_bundle.length}, supersede ${p.would_supersede.length}, delete ${p.would_delete.length}, retire ${p.would_retire_bundles.length} bundle(s), skip ${p.would_skip.length}\n`,
             );
+          }
+          if (journal.write_will_refuse) {
+            process.stdout.write(`NOTE: a ${journal.status} delete-intent journal is pending — \`--write\` will REFUSE; ${journal.next_action}.\n`);
           }
         }
         return 0;

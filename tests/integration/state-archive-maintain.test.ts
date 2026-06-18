@@ -471,6 +471,11 @@ describe("state archive-maintain — pending delete-intent recovery is surfaced 
     expect(await fileExists(journalPath)).toBe(true);
     const bundlesBefore = (await readdir(BUNDLES_DIR())).sort();
 
+    // The read-only DRY-RUN surfaces that `--write` would refuse (so the operator isn't surprised).
+    const dry = json(run(["state", "compact-archive", "--json"]));
+    expect((dry.data!.journal as { status: string; write_will_refuse: boolean }).status).toBe("present");
+    expect((dry.data!.journal as { write_will_refuse: boolean }).write_will_refuse).toBe(true);
+
     // REFUSE — exit 2 PENDING_DELETE_INTENT, and the survivor bundle + journal are UNTOUCHED.
     const refused = run(["state", "compact-archive", "--write", "--json"]);
     expect(refused.code).toBe(2);
