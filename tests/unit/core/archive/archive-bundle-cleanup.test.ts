@@ -20,6 +20,13 @@ import {
 } from "../../../../src/core/archive/paths.ts";
 import { computeMemberIdsSha256 } from "../../../../src/core/archive/archive-bundle-reader.ts";
 import { ARCHIVE_BUNDLE_SCHEMA_VERSION } from "../../../../src/core/schemas/archive-bundle.ts";
+import { archiveDeleteIntentPath } from "../../../../src/core/archive/paths.ts";
+import {
+  DeleteIntentRecoveryError,
+  PendingDeleteIntentError,
+  serializeDeleteIntent,
+} from "../../../../src/core/archive/delete-intent-journal.ts";
+import { DELETE_INTENT_SCHEMA_VERSION } from "../../../../src/core/schemas/delete-intent.ts";
 import { seedDurableEvents } from "../../../helpers/seed-events.ts";
 
 // Layer 3: the gated delete. Removes a loose record once a verified bundle holds it
@@ -481,5 +488,28 @@ describe("compactArchive — supersession (adopt a fresher diverging loose into 
     const idx = loadArchiveBundles(cwd).index.get("phase_snapshot");
     expect(idx?.get("P1")?.bytes).toBe(v2); // P1 adopted into the bundle
     expect(idx?.get("P2")?.bytes).toBe(p2); // P2 unchanged
+  });
+});
+
+describe("compactArchive — recovery-first guard (refuses a pending delete-intent journal at the PRIMITIVE)", () => {
+  it("a PRESENT journal → PendingDeleteIntentError; nothing folded/deleted (no survivor-bundle wedge)", async () => {
+    await scaffold();
+    const journal = serializeDeleteIntent({
+      schema_version: DELETE_INTENT_SCHEMA_VERSION,
+      intents: [{ intent_kind: "loose_pair", phase_id: "P1", phase_sha256: sha256Hex("a"), pack_sha256: sha256Hex("b") }],
+    });
+    await writeFile(archiveDeleteIntentPath(cwd), journal, "utf8");
+    // The destructive primitive itself refuses — not only the CLI. Consolidation would retire a
+    // crashed bundle-pair removal's reduced survivor bundle, wedging recovery; the guard prevents it.
+    await expect(compactArchive(cwd, "phase_snapshot")).rejects.toBeInstanceOf(PendingDeleteIntentError);
+    expect(await exists(phaseSnapshotPath(cwd, "P1"))).toBe(true); // loose untouched
+    expect(await exists(join(archiveBundlesDir(cwd), "phase_snapshot.json"))).toBe(false); // no bundle written
+  });
+
+  it("a CORRUPT journal → DeleteIntentRecoveryError (it cannot be auto-recovered)", async () => {
+    await scaffold();
+    await writeFile(archiveDeleteIntentPath(cwd), "{ not valid json", "utf8");
+    await expect(compactArchive(cwd, "phase_snapshot")).rejects.toBeInstanceOf(DeleteIntentRecoveryError);
+    expect(await exists(phaseSnapshotPath(cwd, "P1"))).toBe(true);
   });
 });

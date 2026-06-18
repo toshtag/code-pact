@@ -270,6 +270,20 @@ export async function readDeleteIntent(cwd: string): Promise<DeleteIntentRead> {
   return { kind: "present", intent };
 }
 
+/** Refuse to proceed with a DESTRUCTIVE archive mutation while a delete-intent journal is
+ *  pending — the "any archive mutation is recovery-first" invariant, enforced at the primitive
+ *  (not only the CLI). A `present` journal is an un-recovered prior commit (`PendingDeleteIntentError`
+ *  → the caller must recover first); a `corrupt` journal cannot be recovered automatically
+ *  (`DeleteIntentRecoveryError` → it must be inspected/repaired). An `absent` journal is the clean
+ *  steady state (no-op). Read-only. Call this at the TOP of a destructive primitive that is NOT
+ *  itself recovery-first (e.g. `compactArchive`, whose consolidation would retire a pending
+ *  bundle-pair's reduced survivor bundle, wedging recovery). */
+export async function assertNoPendingDeleteIntent(cwd: string): Promise<void> {
+  const read = await readDeleteIntent(cwd);
+  if (read.kind === "present") throw new PendingDeleteIntentError();
+  if (read.kind === "corrupt") throw new DeleteIntentRecoveryError(read.detail);
+}
+
 /** The phase_ids a PENDING LOOSE-pair intent names — each is a loose
  *  phase_snapshot ↔ event_pack pair mid-deletion that READERS must treat as
  *  logically absent (loose AND bundle, since a loose-pair member is loose-ONLY by

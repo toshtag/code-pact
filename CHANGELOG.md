@@ -20,6 +20,36 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ### Added
 
+- **`state archive-maintain [--keep-latest N] [--write] [--json]` — the one
+  high-level command that keeps the archive bounded.** It orchestrates the
+  existing archive primitives in the safe order (recover any pending
+  delete-intent journal → `compact-archive` all kinds → `archive-retention` →
+  compact again if a follow-up materialised → re-plan → `validate` → `plan
+  lint`) so an operator no longer has to remember and order the low-level verbs.
+  It adds **no new destructive semantics and no new persistent state** — a thin,
+  honest orchestration over `compactArchive` / `applyArchiveRetention` and their
+  journal recovery, writing nothing outside `.code-pact/state/archive` (no
+  global maintenance ledger, no status/cache file, no timestamps/PIDs into
+  tracked state — so it does not add a Git merge hotspot, and the same records
+  fold to byte-identical bundles on independent branches). Dry-run by default
+  (read-only, lock-free); `--write` runs the whole orchestration under one outer
+  write lock. The result is reported honestly via a `bounded_status`: a
+  `source: both` follow-up, a deferred mixed pair, an un-foldable record, or a
+  pending journal all read as NOT bounded, and every `skipped` record is
+  surfaced (never a silent drop). In healthy, compactable cases, compaction
+  running first resolves ordinary mixed-source / `source: both` redundancy in the
+  same maintenance run; deferred / skipped records (a `bundle_stale` divergence,
+  an unsupported-platform `fsync`, a recovered bundle-pair survivor) remain
+  explicitly **not bounded** and are reported with per-record reasons.
+  **Scope (no over-claim):** v2.0.0 bounds the archive **file-count sprawl** and
+  removes **unreferenced old truth** while **preserving referenced truth**. It
+  does **not** yet bound a single bundle's **byte size** —
+  `bundle_byte_size_bounded` is always `false`; sharding is the next storage
+  milestone. New public error code `BUNDLE_PAIR_NOT_COMMITTABLE` (a bundle-pair
+  removal's pre-commit reverify found the store no longer matches the plan;
+  fail-closed, re-plan and re-run). See
+  [`cli-contract.md` § `state archive-maintain`](docs/cli-contract.md#state-archive-maintain)
+  and [`docs/maintainers/operations.md` § Archive maintenance](docs/maintainers/operations.md#archive-maintenance-v20).
 - **`plan sync-paths --rename <old>=<new>`** — apply an explicit old→new path
   rename to the `reads` / `writes` of every phase task. Renaming or merging a
   source file that a (often historical, done) phase still lists in its `reads`
