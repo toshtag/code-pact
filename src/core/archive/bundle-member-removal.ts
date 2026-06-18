@@ -145,18 +145,22 @@ export function planBundleMemberRemoval(cwd: string, kind: ArchiveBundleKind, re
  *  `bundle_member_removed` (a loose copy still resolves — the loose layer drops it next run). */
 export type RemovedMember = { id: string; outcome: "deleted" | "bundle_member_removed" };
 
-/** A removable id that was NOT removed this run, with why — reported at the SAME per-record
- *  granularity as `removed` so the caller is never told a record is gone when it still resolves.
- *  `bundle_stale`: an old bundle that still holds the id failed the expected-bytes retire gate, so
- *  the id still resolves from it. `unsupported_platform`: the platform cannot fsync a directory, so
- *  the durable removal path is deferred whole (no destructive action taken). */
-export type SkippedMember = { id: string; reason: "bundle_stale" | "unsupported_platform" };
+/** A REQUESTED id that was NOT removed this run, with why — reported at the SAME per-record
+ *  granularity as `removed`, for EVERY requested current member that survives, so the caller can give
+ *  each its own terminal bucket (never a requested would_drop id with no outcome). `bundle_stale`: an
+ *  old bundle that still holds the id failed the expected-bytes retire gate, so the id still resolves
+ *  from it. `unsupported_platform`: the platform cannot fsync a directory, so the durable removal path
+ *  is deferred. `unsafe_kind`: another current member of this kind is authority-invalid, so the whole
+ *  kind is fail-closed and THIS requested id (valid or not) cannot be safely removed this run. */
+export type SkippedMember = { id: string; reason: "bundle_stale" | "unsupported_platform" | "unsafe_kind" };
 
 export type BundleMemberRemovalOutcome = {
   kind: ArchiveBundleKind;
   removed: RemovedMember[];
   not_member: string[];
-  /** the kind was left UNTOUCHED because a current member is authority-invalid. */
+  /** DIAGNOSTIC: the current members whose authority is invalid (the reason the kind was left
+   *  untouched) — NOT a terminal outcome for the REQUESTED ids; a requested id that could not be
+   *  removed is reported in `skipped` (`unsafe_kind`), whether or not it is itself one of these. */
   unsafe_invalid: string[];
   /** removable ids NOT removed this run, per-record (an un-retired stale bundle still holds them,
    *  or the platform can't durably remove). NEVER reported in `removed`. */
@@ -188,7 +192,15 @@ export async function removeBundleMembers(
   hooks: BundleRemovalHooks = {},
 ): Promise<BundleMemberRemovalOutcome> {
   const c = computeRemoval(cwd, kind, removeIds); // re-run the authority (never a stale caller plan)
-  if (c.unsafe) return { kind, removed: [], not_member: c.not_member, unsafe_invalid: c.invalid, skipped: [], skipped_stale: [] };
+  if (c.unsafe) {
+    // The kind is fail-closed (an authority-invalid current member), so NOTHING is touched — but EVERY
+    // requested CURRENT member must still get a terminal outcome (it was asked for, it still resolves):
+    // report each in `skipped: unsafe_kind`. `unsafe_invalid` stays the DIAGNOSTIC (which members are
+    // invalid), never the requested ids' bucket. (Requested non-members go to `not_member`.)
+    const notMember = new Set(c.not_member);
+    const requestedMembers = [...new Set(removeIds)].filter((id) => !notMember.has(id));
+    return { kind, removed: [], not_member: c.not_member, unsafe_invalid: c.invalid, skipped: requestedMembers.map((id) => ({ id, reason: "unsafe_kind" as const })), skipped_stale: [] };
+  }
   if (c.removable.length === 0) return { kind, removed: [], not_member: c.not_member, unsafe_invalid: [], skipped: [], skipped_stale: [] };
 
   const dir = archiveBundlesDir(cwd);

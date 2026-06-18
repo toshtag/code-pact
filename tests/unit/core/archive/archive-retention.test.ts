@@ -524,34 +524,35 @@ describe("applyArchiveRetention — destructive LOOSE-ONLY delete (PR-2a)", () =
     expect(await exists(phaseSnapshotPath(cwd, "P1"))).toBe(true);
   });
 
-  it("a byte-identical BOTH would_drop is SKIPPED (needs_bundle_member_removal); the loose is NOT deleted", async () => {
+  it("a byte-identical BOTH INDEPENDENT phase (no pack) → bundle_member_removed (the loose copy survives)", async () => {
     await archivePhases([
       { id: "P1", at: "2026-01-01T00:00:00.000Z" },
       { id: "P2", at: "2026-02-01T00:00:00.000Z" },
     ]);
     const looseP1 = await readFile(phaseSnapshotPath(cwd, "P1"), "utf8");
-    await writeArchiveBundle(cwd, "phase_snapshot", [{ id: "P1", bytes: looseP1 }]); // P1 now loose+bundle, byte-identical
-    await setRoadmap([]); // P1 (both) would_drop — but PR-2a must NOT delete the loose half alone
+    await writeArchiveBundle(cwd, "phase_snapshot", [{ id: "P1", bytes: looseP1 }]); // P1 now loose+bundle, no pack → independent
+    await setRoadmap([]);
     const out = await applyArchiveRetention(cwd, { keepLatest: 1 });
     const phase = out.find((o) => o.kind === "phase_snapshot")!;
-    expect(phase.deleted).toEqual([]); // a `both` record is deferred whole, never half-deleted
-    expect(phase.skipped.find((s) => s.id === "P1")?.reason).toBe("needs_bundle_member_removal");
-    expect(await exists(phaseSnapshotPath(cwd, "P1"))).toBe(true); // the loose copy is NOT deleted
+    expect(phase.deleted).toEqual([]); // NOT deleted — the loose copy still resolves
+    expect(phase.bundle_member_removed).toContain("P1"); // the bundle member IS removed (the loose layer drops the loose next run)
+    expect(await exists(phaseSnapshotPath(cwd, "P1"))).toBe(true); // loose half survives
+    expect(loadArchiveBundles(cwd).index.get("phase_snapshot")?.has("P1") ?? false).toBe(false); // bundle member gone
   });
 
-  it("a bundle-only would_drop is SKIPPED (needs_bundle_member_removal); the bundle is untouched", async () => {
+  it("a bundle-only INDEPENDENT phase (no pack) → deleted (the bundle member is removed, no copy resolves)", async () => {
     await archivePhases([
       { id: "P1", at: "2026-01-01T00:00:00.000Z" },
       { id: "P2", at: "2026-02-01T00:00:00.000Z" },
     ]);
     const looseP1 = await readFile(phaseSnapshotPath(cwd, "P1"), "utf8");
     await writeArchiveBundle(cwd, "phase_snapshot", [{ id: "P1", bytes: looseP1 }]);
-    await rm(phaseSnapshotPath(cwd, "P1")); // P1 now bundle-only
+    await rm(phaseSnapshotPath(cwd, "P1")); // P1 now bundle-only, no pack → independent
     await setRoadmap([]);
     const out = await applyArchiveRetention(cwd, { keepLatest: 1 });
     const phase = out.find((o) => o.kind === "phase_snapshot")!;
-    expect(phase.deleted).toEqual([]); // PR-2a never removes a bundle member
-    expect(phase.skipped.find((s) => s.id === "P1")?.reason).toBe("needs_bundle_member_removal");
+    expect(phase.deleted).toContain("P1"); // independent bundle phase removed (no copy resolves)
+    expect(loadArchiveBundles(cwd).index.get("phase_snapshot")?.has("P1") ?? false).toBe(false); // bundle member gone
   });
 
   it("a loose phase + loose pack PAIR is DELETED via the journal (both gone, both-or-neither)", async () => {
@@ -1084,5 +1085,113 @@ describe("applyArchiveRetention — bundle-pair removal (CLI wiring, Layer 2)", 
     const run2 = await applyArchiveRetention(cwd, { keepLatest: 1 });
     expect(run2.find((o) => o.kind === "phase_snapshot")!.deleted).toContain("P1");
     expect(await exists(phaseSnapshotPath(cwd, "P1"))).toBe(false);
+  });
+});
+
+describe("applyArchiveRetention — INDEPENDENT bundle records (single-kind Layer-1 wiring)", () => {
+  const D1 = "design/decisions/old-rfc.md";
+  const D2 = "design/decisions/new-rfc.md";
+  const ADR = `# RFC\n\n**Status:** accepted (P9, 2026-06)\n\n## Summary\n\nSettled.\n`;
+
+  it("an unreferenced bundle-only DECISION beyond keep-latest → deleted (single-kind removal, no journal)", async () => {
+    await writeFile(join(cwd, D1), ADR, "utf8");
+    await writeFile(join(cwd, D2), ADR, "utf8");
+    expect((await writeDecisionRecord(cwd, D1, { now: new Date("2026-01-01T00:00:00.000Z") })).kind).toBe("written");
+    expect((await writeDecisionRecord(cwd, D2, { now: new Date("2026-02-01T00:00:00.000Z") })).kind).toBe("written");
+    // Bundle D1 (the older one) as bundle-only; D2 stays loose (the keep).
+    const stem1 = decisionRecordStem(D1);
+    const bytes1 = await readFile(decisionRecordPath(cwd, D1), "utf8");
+    await writeArchiveBundle(cwd, "decision_record", [{ id: stem1, bytes: bytes1 }]);
+    await rm(decisionRecordPath(cwd, D1));
+    await setRoadmap(["LP"]); // a live phase that references no decision → D1/D2 unreferenced; scan succeeds
+
+    const out = await applyArchiveRetention(cwd, { keepLatest: 1 });
+    const decision = out.find((o) => o.kind === "decision_record")!;
+    expect(decision.deleted).toContain(stem1); // the bundle decision member is removed (no copy resolves)
+    expect(loadArchiveBundles(cwd).index.get("decision_record")?.has(stem1) ?? false).toBe(false);
+  });
+
+  it("a `source: both` bundle DECISION → bundle_member_removed (the loose copy survives, dropped next run)", async () => {
+    await writeFile(join(cwd, D1), ADR, "utf8");
+    await writeFile(join(cwd, D2), ADR, "utf8");
+    await writeDecisionRecord(cwd, D1, { now: new Date("2026-01-01T00:00:00.000Z") });
+    await writeDecisionRecord(cwd, D2, { now: new Date("2026-02-01T00:00:00.000Z") });
+    const stem1 = decisionRecordStem(D1);
+    const bytes1 = await readFile(decisionRecordPath(cwd, D1), "utf8");
+    await writeArchiveBundle(cwd, "decision_record", [{ id: stem1, bytes: bytes1 }]); // D1 now `both` (loose + bundle)
+    await setRoadmap(["LP"]);
+
+    const run1 = await applyArchiveRetention(cwd, { keepLatest: 1 });
+    const decision1 = run1.find((o) => o.kind === "decision_record")!;
+    expect(decision1.bundle_member_removed).toContain(stem1); // bundle member removed, loose survives
+    expect(decision1.deleted).not.toContain(stem1);
+    expect(await exists(decisionRecordPath(cwd, D1))).toBe(true);
+
+    const run2 = await applyArchiveRetention(cwd, { keepLatest: 1 });
+    expect(run2.find((o) => o.kind === "decision_record")!.deleted).toContain(stem1); // loose layer finishes it
+    expect(await exists(decisionRecordPath(cwd, D1))).toBe(false);
+  });
+});
+
+describe("applyArchiveRetention — independent bundle removal accounting when the kind is fail-closed", () => {
+  const D1 = "design/decisions/keepme-rfc.md";
+  const D2 = "design/decisions/newer-rfc.md";
+  const ADR = `# RFC\n\n**Status:** accepted (P9, 2026-06)\n\n## Summary\n\nSettled.\n`;
+
+  /** Write a Tier-1-valid bundle directly (bypassing the writer's per-member authority foldability),
+   *  so a test can plant a MISFILED member that makes the whole kind fail-closed. */
+  async function rawBundle(kind: string, members: { id: string; bytes: string }[]): Promise<void> {
+    const recs = members.map((m) => ({ id: m.id, sha256: sha256Hex(m.bytes), bytes: m.bytes })).sort((a, b) => (a.id < b.id ? -1 : 1));
+    const idsHash = computeMemberIdsSha256(recs.map((r) => r.id));
+    await mkdir(archiveBundlesDir(cwd), { recursive: true });
+    await writeFile(join(archiveBundlesDir(cwd), `${kind}-${idsHash.slice(0, 16)}.json`), JSON.stringify({ schema_version: ARCHIVE_BUNDLE_SCHEMA_VERSION, kind, member_ids_sha256: idsHash, members: recs }, null, 2) + "\n", "utf8");
+  }
+
+  it("a would_drop independent DECISION + an UNRELATED authority-invalid member → the requested id is skipped, never lost", async () => {
+    await writeFile(join(cwd, D1), ADR, "utf8");
+    await writeFile(join(cwd, D2), ADR, "utf8");
+    await writeDecisionRecord(cwd, D1, { now: new Date("2026-01-01T00:00:00.000Z") });
+    await writeDecisionRecord(cwd, D2, { now: new Date("2026-02-01T00:00:00.000Z") });
+    const stem1 = decisionRecordStem(D1);
+    const bytes1 = await readFile(decisionRecordPath(cwd, D1), "utf8");
+    const bytes2 = await readFile(decisionRecordPath(cwd, D2), "utf8");
+    // Bundle D1 (valid, the OLDER one → would_drop) ALONGSIDE a MISFILED member (a valid decision's bytes
+    // under a bogus id) → the decision kind is fail-closed. D2 stays LOOSE (the keep), so D1 is would_drop.
+    await rawBundle("decision_record", [{ id: stem1, bytes: bytes1 }, { id: "bogus-decoy-0000000000000000", bytes: bytes2 }]);
+    await rm(decisionRecordPath(cwd, D1)); // D1 now bundle-only
+    await setRoadmap(["LP"]);
+
+    const out = await applyArchiveRetention(cwd, { keepLatest: 1 });
+    const decision = out.find((o) => o.kind === "decision_record")!;
+    // D1 was would_drop and is bundle-backed but the kind is fail-closed → reported skipped, NOT silently dropped.
+    expect(decision.deleted).not.toContain(stem1);
+    expect(decision.bundle_member_removed).not.toContain(stem1);
+    expect(decision.skipped.find((s) => s.id === stem1)?.reason).toBe("needs_bundle_member_removal");
+    // Exactly one terminal bucket for the requested id.
+    const buckets = [decision.deleted, decision.bundle_member_removed, decision.vanished, decision.skipped.map((s) => s.id), decision.recovered];
+    expect(buckets.filter((b) => b.includes(stem1)).length).toBe(1);
+    expect(loadArchiveBundles(cwd).index.get("decision_record")?.has(stem1) ?? false).toBe(true); // D1 still resolves (not removed)
+  });
+
+  it("a would_drop independent pack-less PHASE + an UNRELATED authority-invalid member → the requested id is skipped, never lost", async () => {
+    await archivePhases([
+      { id: "P1", at: "2026-01-01T00:00:00.000Z" },
+      { id: "P2", at: "2026-02-01T00:00:00.000Z" },
+    ]);
+    const looseP1 = await readFile(phaseSnapshotPath(cwd, "P1"), "utf8");
+    const looseP2 = await readFile(phaseSnapshotPath(cwd, "P2"), "utf8");
+    // P1 valid bundle (would_drop, no pack) ALONGSIDE a MISFILED member (P2's bytes under id "PX") → kind fail-closed.
+    await rawBundle("phase_snapshot", [{ id: "P1", bytes: looseP1 }, { id: "PX", bytes: looseP2 }]);
+    await rm(phaseSnapshotPath(cwd, "P1"));
+    await setRoadmap([]);
+
+    const out = await applyArchiveRetention(cwd, { keepLatest: 1 });
+    const phase = out.find((o) => o.kind === "phase_snapshot")!;
+    expect(phase.deleted).not.toContain("P1");
+    expect(phase.bundle_member_removed).not.toContain("P1");
+    expect(phase.skipped.find((s) => s.id === "P1")?.reason).toBe("needs_bundle_member_removal");
+    const buckets = [phase.deleted, phase.bundle_member_removed, phase.vanished, phase.skipped.map((s) => s.id), phase.recovered];
+    expect(buckets.filter((b) => b.includes("P1")).length).toBe(1); // exactly one bucket
+    expect(loadArchiveBundles(cwd).index.get("phase_snapshot")?.has("P1") ?? false).toBe(true); // still resolves
   });
 });

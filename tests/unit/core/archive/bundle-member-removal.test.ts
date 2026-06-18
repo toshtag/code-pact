@@ -234,6 +234,19 @@ describe("removeBundleMembers — destructive single-kind apply", () => {
     expect(await listBundles()).toEqual(before); // untouched
   });
 
+  it("a VALID requested member + an UNRELATED invalid member → the requested id is skipped `unsafe_kind` (never lost)", async () => {
+    const p1 = await snapshotBytes("P1"); // a VALID P1 snapshot
+    const pxMisfiled = await snapshotBytes("PX"); // a valid PX snapshot, but filed under id "P2" → authority-invalid
+    await rawBundle([{ id: "P1", bytes: p1 }, { id: "P2", bytes: pxMisfiled }]);
+    const before = await listBundles();
+
+    const out = await removeBundleMembers(cwd, "phase_snapshot", ["P1"]); // request the VALID P1
+    expect(out.removed).toEqual([]); // the kind is fail-closed → nothing removed
+    expect(out.skipped).toEqual([{ id: "P1", reason: "unsafe_kind" }]); // the REQUESTED id still gets a terminal outcome
+    expect(out.unsafe_invalid).toEqual(["P2"]); // the OFFENDING member is the DIAGNOSTIC, not P1
+    expect(await listBundles()).toEqual(before); // untouched
+  });
+
   it("a retire bundle SWAPPED between plan and unlink (bytes changed) → skipped_stale, NOT retired", async () => {
     const bytesById = new Map<string, string>();
     for (const id of ["P1", "P2", "P3"]) bytesById.set(id, await snapshotBytes(id));

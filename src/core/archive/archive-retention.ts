@@ -14,6 +14,7 @@ import { validateEventPackTier1 } from "./event-pack-reader.ts";
 import { DeleteIntentDurabilityError, readPendingDeleteFilters, recoverPendingDeletes } from "./delete-intent-journal.ts";
 import { deleteLoosePairsJournaled, type LoosePairToDelete, type PairDeleteOutcome, type PairMemberRetain } from "./retention-pair-delete.ts";
 import { deleteBundlePairsJournaled, type BundlePairDeleteOutcome } from "./retention-bundle-pair-delete.ts";
+import { removeBundleMembers } from "./bundle-member-removal.ts";
 import { archiveDecisionsDir, archiveEventPacksDir, archivePhasesDir, normalizeDecisionRef, sha256Hex } from "./paths.ts";
 import type { ArchiveBundleKind } from "../schemas/archive-bundle.ts";
 
@@ -738,6 +739,38 @@ export type RetentionApplyHooks = {
   beforePairGate?: (kind: ArchiveBundleKind, id: string) => Promise<void> | void;
 };
 
+/** Remove INDEPENDENT bundle-backed records of one kind (a decision, or a phase_snapshot with NO
+ *  event_pack — nothing binds to it) through the single-kind bundle-member removal (Layer 1, no
+ *  journal: crash-safe by the durable write-new-then-retire-old ordering). Maps the primitive's
+ *  outcome into the retention buckets: `deleted` (no copy resolves), `bundle_member_removed` (a `both`
+ *  record's loose copy survives → the loose layer drops it next run), and every non-removed id
+ *  (stale / unsupported-platform / authority-invalid) → `skipped: needs_bundle_member_removal` (never
+ *  silently dropped). No-op for an empty id set. */
+async function removeIndependentBundleRecords(
+  cwd: string,
+  kind: ArchiveBundleKind,
+  ids: string[],
+): Promise<{ deleted: string[]; bundle_member_removed: string[]; skipped: { id: string; reason: RetentionDeleteSkipReason }[] }> {
+  if (ids.length === 0) return { deleted: [], bundle_member_removed: [], skipped: [] };
+  const out = await removeBundleMembers(cwd, kind, ids);
+  const deleted: string[] = [];
+  const bundle_member_removed: string[] = [];
+  const skipped: { id: string; reason: RetentionDeleteSkipReason }[] = [];
+  for (const r of out.removed) (r.outcome === "deleted" ? deleted : bundle_member_removed).push(r.id);
+  // Anything not removed this run stays deferred to the bundle-member-removal layer (a stale bundle,
+  // an unsupported platform, an `unsafe_kind` fail-close, or a non-member) — reported per requested id.
+  // `out.unsafe_invalid` is NOT mapped here: it is a DIAGNOSTIC list of the OFFENDING members, not the
+  // requested ids' outcome (a requested-and-invalid id already appears in `out.skipped: unsafe_kind`).
+  for (const s of out.skipped) skipped.push({ id: s.id, reason: "needs_bundle_member_removal" });
+  for (const id of out.not_member) skipped.push({ id, reason: "needs_bundle_member_removal" });
+  // REQUESTED-ID ACCOUNTING GUARD (the destructive output's last safety net): every requested id MUST
+  // reach exactly one terminal bucket. Any id the primitive's outcome did not account for → defer it,
+  // never let a `would_drop` id we excluded from the per-record loops vanish from the output.
+  const accounted = new Set([...deleted, ...bundle_member_removed, ...skipped.map((s) => s.id)]);
+  for (const id of ids) if (!accounted.has(id)) skipped.push({ id, reason: "needs_bundle_member_removal" });
+  return { deleted, bundle_member_removed, skipped };
+}
+
 async function deleteLooseDropped(
   cwd: string,
   plan: RetentionPlan,
@@ -867,12 +900,6 @@ export async function applyArchiveRetention(
     }
   }
 
-  // Remove the paired ids (loose AND bundle) from the per-record plans — the journals handle them.
-  const withoutPaired = (p: RetentionPlan): RetentionPlan => ({
-    ...p,
-    would_drop: p.would_drop.filter((i) => !pairedIds.has(i.id) && !bundlePairedIds.has(i.id)),
-  });
-
   // 1. Journal-delete the LOOSE pairs (both-or-neither). On `unsupported` defer them; `failed` propagates.
   let pairOutcome: PairDeleteOutcome;
   try {
@@ -896,6 +923,25 @@ export async function applyArchiveRetention(
       ? await deleteBundlePairsJournaled(cwd, bundlePairPhaseIds.map((phase_id) => ({ phase_id })))
       : { removed: [], skipped: [] };
 
+  // 1c. INDEPENDENT bundle records (single-kind Layer-1 removal, no journal): a bundle-backed
+  //     would_drop DECISION (nothing binds to it), and a bundle-backed would_drop PHASE with NO
+  //     event_pack (nothing binds to it either — a pack-less snapshot is its own evidence referencer).
+  //     A bundle phase WITH any pack is a pair (handled above) or a mixed/unpairable case (deferred by
+  //     the per-record loop). These ids are EXCLUDED from the per-record loops below.
+  const decisionPlan = byKind.get("decision_record") ?? empty("decision_record");
+  const independentDecisionIds = decisionPlan.would_drop.filter((i) => i.source !== "loose").map((i) => i.id);
+  const independentPhaseIds = phasePlan.would_drop
+    .filter((i) => i.source !== "loose" && !bundlePairedIds.has(i.id) && !eventStoreUncertain && !hasAnyPack(eventItems, i.id))
+    .map((i) => i.id);
+  const independentSet = new Set([...independentDecisionIds, ...independentPhaseIds]);
+  const decisionLayer1 = await removeIndependentBundleRecords(cwd, "decision_record", independentDecisionIds);
+  const phaseLayer1 = await removeIndependentBundleRecords(cwd, "phase_snapshot", independentPhaseIds);
+  // Exclude the loose/bundle paired ids AND the Layer-1-handled independent ids from the per-record loops.
+  const withoutHandled = (p: RetentionPlan): RetentionPlan => ({
+    ...p,
+    would_drop: p.would_drop.filter((i) => !pairedIds.has(i.id) && !bundlePairedIds.has(i.id) && !independentSet.has(i.id)),
+  });
+
   // 2. Non-paired event packs: every remaining loose `would_drop` pack is NOT journal-able (its
   //    phase is bundle/both, or a digest was missing) → defer; a bundle/both pack →
   //    needs_bundle_member_removal by its source.
@@ -903,7 +949,7 @@ export async function applyArchiveRetention(
   for (const pack of eventPlan.would_drop) {
     if (pack.source === "loose" && !pairedIds.has(pack.id)) eventPreSkip.set(pack.id, "requires_atomic_pair_removal");
   }
-  const eventOut = await deleteLooseDropped(cwd, withoutPaired(eventPlan), eventPreSkip, hooks);
+  const eventOut = await deleteLooseDropped(cwd, withoutHandled(eventPlan), eventPreSkip, hooks);
 
   // 3. Non-paired phase snapshots: delete a loose-only snapshot with NO event_pack (independent);
   //    a snapshot with a pack we could not pair, or an uncertain store, is deferred.
@@ -914,10 +960,16 @@ export async function applyArchiveRetention(
       phasePreSkip.set(phase.id, "requires_atomic_pair_removal");
     }
   }
-  const phaseOut = await deleteLooseDropped(cwd, withoutPaired(phasePlan), phasePreSkip, hooks);
+  const phaseOut = await deleteLooseDropped(cwd, withoutHandled(phasePlan), phasePreSkip, hooks);
 
-  // 4. Decisions are independent — delete last.
-  const decisionOut = await deleteLooseDropped(cwd, byKind.get("decision_record") ?? empty("decision_record"), null, hooks);
+  // 4. Decisions are independent — delete last (loose ones here; bundle ones handled in 1c).
+  const decisionOut = await deleteLooseDropped(cwd, withoutHandled(decisionPlan), null, hooks);
+  // Merge the Layer-1 independent-bundle results into their kinds.
+  for (const [out, layer1] of [[phaseOut, phaseLayer1], [decisionOut, decisionLayer1]] as const) {
+    out.deleted.push(...layer1.deleted);
+    out.bundle_member_removed.push(...layer1.bundle_member_removed);
+    out.skipped.push(...layer1.skipped);
+  }
 
   // Merge the journal pair results into the per-kind outcomes (a pair touches both kinds). A
   // committed pair removed both files. A retained pair reports EACH member's OWN outcome — a side
