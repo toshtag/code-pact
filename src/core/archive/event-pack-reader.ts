@@ -10,7 +10,7 @@ import { loadArchiveBundles } from "./archive-bundle-loader.ts";
 import { bindBundleMember } from "./archive-bundle-binding.ts";
 import type { BundleIndexEntry } from "./archive-bundle-index.ts";
 import { resolveArchiveRecordBytes, type RawLooseRecord } from "./resolve-archive-record.ts";
-import { readPendingDeleteIds } from "./delete-intent-journal.ts";
+import { readPendingDeleteFilters } from "./delete-intent-journal.ts";
 
 // ---------------------------------------------------------------------------
 // Event-pack READER — Tier 1 (cheap, per-load, self-contained).
@@ -249,15 +249,16 @@ export async function readEventPackFiles(cwd: string): Promise<LoadedEventPack[]
     if ((err as NodeJS.ErrnoException).code === "ENOENT") names = [];
     else throw err;
   }
-  // A pack named in a pending delete-intent (its pair is mid-deletion) is LOGICALLY
-  // ABSENT — never read (loose OR bundle). Read-only; the journal is untouched.
-  const pendingAbsentIds = await readPendingDeleteIds(cwd);
+  // A pack named in a pending LOOSE-pair intent is LOGICALLY ABSENT everywhere; a pack
+  // named in a pending BUNDLE-pair intent is absent from the BUNDLE side only (its loose
+  // copy, if any, still resolves). Read-only; the journal is untouched.
+  const { looseAbsentIds, bundleAbsentIds } = await readPendingDeleteFilters(cwd);
   const out: LoadedEventPack[] = [];
   const looseStems = new Set<string>();
   for (const name of names.sort()) {
     if (!name.endsWith(".json")) continue;
     const fileStem = basename(name, ".json");
-    if (pendingAbsentIds.has(fileStem)) continue; // mid-deletion pair → absent
+    if (looseAbsentIds.has(fileStem)) continue; // loose-pair mid-deletion → absent
     looseStems.add(fileStem);
     const path = join(dir, name);
     const raw = await readFile(path, "utf8");
@@ -266,7 +267,7 @@ export async function readEventPackFiles(cwd: string): Promise<LoadedEventPack[]
   // Bundle members for phases whose loose pack is gone (strict: throws on a bad bundle).
   const index = loadArchiveBundles(cwd).index;
   for (const [phaseId, entry] of bundleOnlyEventPackEntries(index, looseStems)) {
-    if (pendingAbsentIds.has(phaseId)) continue; // mid-deletion pair → absent
+    if (looseAbsentIds.has(phaseId) || bundleAbsentIds.has(phaseId)) continue; // mid-deletion pair → bundle member absent
     out.push(loadEventPackFromBundleMember(phaseId, entry));
   }
   return out;
@@ -292,11 +293,13 @@ async function readLooseEventPackRaw(cwd: string, phaseId: string): Promise<RawL
 export async function resolveEventPackRaw(cwd: string, phaseId: string): Promise<RawLooseRecord> {
   let resolved;
   try {
+    const { looseAbsentIds, bundleAbsentIds } = await readPendingDeleteFilters(cwd); // mid-deletion pair → logically absent (bundle-pair: bundle side only)
     resolved = await resolveArchiveRecordBytes({
       kind: "event_pack",
       id: phaseId,
       mode: "reader-loose-wins",
-      pendingAbsentIds: await readPendingDeleteIds(cwd), // a mid-deletion pair → logically absent
+      pendingAbsentIds: looseAbsentIds,
+      pendingBundleAbsentIds: bundleAbsentIds,
       readLooseRaw: () => readLooseEventPackRaw(cwd, phaseId),
       loadBundleIndex: () => loadArchiveBundles(cwd).index,
     });
@@ -331,14 +334,14 @@ export async function readEventPackFilesLenient(
     if ((err as NodeJS.ErrnoException).code === "ENOENT") names = [];
     else throw err; // a dir that cannot be enumerated is not a per-file issue
   }
-  const pendingAbsentIds = await readPendingDeleteIds(cwd); // mid-deletion pairs → logically absent
+  const { looseAbsentIds, bundleAbsentIds } = await readPendingDeleteFilters(cwd); // mid-deletion pairs → logically absent
   const packs: LoadedEventPack[] = [];
   const errors: EventPackReadError[] = [];
   const looseStems = new Set<string>();
   for (const name of names.sort()) {
     if (!name.endsWith(".json")) continue;
     const fileStem = basename(name, ".json");
-    if (pendingAbsentIds.has(fileStem)) continue; // mid-deletion pair → absent
+    if (looseAbsentIds.has(fileStem)) continue; // loose-pair mid-deletion → absent
     looseStems.add(fileStem);
     const path = join(dir, name);
     try {
@@ -363,7 +366,7 @@ export async function readEventPackFilesLenient(
   }
   if (index) {
     for (const [phaseId, entry] of bundleOnlyEventPackEntries(index, looseStems)) {
-      if (pendingAbsentIds.has(phaseId)) continue; // mid-deletion pair → absent
+      if (looseAbsentIds.has(phaseId) || bundleAbsentIds.has(phaseId)) continue; // mid-deletion pair → bundle member absent
       try {
         packs.push(loadEventPackFromBundleMember(phaseId, entry));
       } catch (err) {

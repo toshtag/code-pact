@@ -140,7 +140,10 @@ export async function deleteLoosePairsJournaled(
 
   // DURABLE COMMIT: one atomic intent naming every committed pair, fsynced to stable
   // storage before any unlink. From here a crash is rolled forward by recovery.
-  await writeDeleteIntent(cwd, committed);
+  await writeDeleteIntent(
+    cwd,
+    committed.map((c) => ({ intent_kind: "loose_pair" as const, phase_id: c.phase_id, phase_sha256: c.phase_sha256, pack_sha256: c.pack_sha256 })),
+  );
   if (hooks.afterIntentWritten) await hooks.afterIntentWritten();
 
   // Complete the deletes durably (unlink both members of each pair, fsync, clear).

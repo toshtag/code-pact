@@ -39,7 +39,7 @@ import {
 
 type RetireTarget = { file: string; sha256: string; member_ids_sha256: string; member_ids: string[] };
 
-type RemovalComputation = {
+export type RemovalComputation = {
   kind: ArchiveBundleKind;
   removable: string[];
   not_member: string[];
@@ -62,7 +62,7 @@ function memberAuthorityValid(kind: ArchiveBundleKind, id: string, bytes: string
   }
 }
 
-function computeRemoval(cwd: string, kind: ArchiveBundleKind, removeIds: readonly string[]): RemovalComputation {
+export function computeRemoval(cwd: string, kind: ArchiveBundleKind, removeIds: readonly string[]): RemovalComputation {
   const { index, bundles } = loadArchiveBundles(cwd); // STRICT — a corrupt store throws (fail-closed)
   const members = index.get(kind) ?? new Map<string, { sha256: string; bytes: string }>();
   const removeSet = new Set(removeIds);
@@ -276,7 +276,7 @@ async function assertSurvivorBundleOnDisk(cwd: string, kind: ArchiveBundleKind, 
 /** Durably write a built content-addressed bundle: write temp → fsync DATA → rename → fsync DIR →
  *  readback-verify. No-op if the target already holds the byte-identical bundle (the keep) — but
  *  even then it RE-CONFIRMS BOTH durability barriers (file DATA + directory) before returning (see below). */
-async function durablyWriteBundle(cwd: string, kind: ArchiveBundleKind, bundle: ArchiveBundle): Promise<void> {
+export async function durablyWriteBundle(cwd: string, kind: ArchiveBundleKind, bundle: ArchiveBundle): Promise<void> {
   const path = archiveBundlePath(cwd, kind, bundle.member_ids_sha256);
   const bytes = serializeArchiveBundle(bundle);
   const dir = archiveBundlesDir(cwd);
@@ -287,6 +287,8 @@ async function durablyWriteBundle(cwd: string, kind: ArchiveBundleKind, bundle: 
     // survivor authority and then retire the old bundle, a durable old-bundle unlink could outlive a
     // non-durable keep → survivor truth loss on power loss. So re-confirm BOTH required barriers
     // (file DATA fsync + directory fsync) and re-verify the bytes BEFORE returning to the retire step.
+    // Opened `r+` (not `r`): fsync of a read-only fd is not durability-meaningful on every platform,
+    // so a write handle makes the keep's DATA-fsync barrier unambiguous (the file is one we own).
     const fh = await open(path, "r+");
     try {
       const existing = await fh.readFile("utf8");
@@ -335,6 +337,12 @@ async function durablyWriteBundle(cwd: string, kind: ArchiveBundleKind, bundle: 
 
 function looseDirFor(cwd: string, kind: ArchiveBundleKind): string {
   return kind === "phase_snapshot" ? archivePhasesDir(cwd) : kind === "event_pack" ? archiveEventPacksDir(cwd) : archiveDecisionsDir(cwd);
+}
+
+/** Does a LOOSE copy of this id still resolve for `kind`? A removed bundle member whose loose
+ *  copy survives is `bundle_member_removed` (not `deleted` — old truth still resolves from loose). */
+export async function looseCopyExists(cwd: string, kind: ArchiveBundleKind, id: string): Promise<boolean> {
+  return pathExists(join(looseDirFor(cwd, kind), `${id}.json`));
 }
 
 async function pathExists(path: string): Promise<boolean> {

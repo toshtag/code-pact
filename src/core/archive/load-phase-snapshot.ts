@@ -8,7 +8,7 @@ import { loadArchiveBundles } from "./archive-bundle-loader.ts";
 import { bindBundleMember } from "./archive-bundle-binding.ts";
 import type { BundleIndexEntry, BundleMemberIndex } from "./archive-bundle-index.ts";
 import { resolveArchiveRecordBytes, type RawLooseRecord } from "./resolve-archive-record.ts";
-import { readPendingDeleteIds } from "./delete-intent-journal.ts";
+import { readPendingDeleteFilters } from "./delete-intent-journal.ts";
 
 // The bundle store label for bundle-integrity error messages from this module.
 const ARCHIVE_BUNDLE_STORE_LABEL = ".code-pact/state/archive/bundles";
@@ -119,11 +119,13 @@ export async function resolvePhaseSnapshotRaw(
 ): Promise<ResolvedPhaseSnapshotRaw> {
   let resolved;
   try {
+    const { looseAbsentIds, bundleAbsentIds } = await readPendingDeleteFilters(cwd); // mid-deletion pair → logically absent (bundle-pair: bundle side only)
     resolved = await resolveArchiveRecordBytes({
       kind: "phase_snapshot",
       id: phaseId,
       mode: "reader-loose-wins",
-      pendingAbsentIds: await readPendingDeleteIds(cwd), // mid-deletion pair → logically absent
+      pendingAbsentIds: looseAbsentIds,
+      pendingBundleAbsentIds: bundleAbsentIds,
       readLooseRaw: () => readLoosePhaseSnapshotRaw(cwd, phaseId),
       loadBundleIndex: () => loadArchiveBundles(cwd).index,
     });
@@ -186,11 +188,13 @@ export async function resolveMissingPhaseRef(
   // maps to `fail_invalid`. A loose-read invalidity is returned, not thrown.
   let resolved;
   try {
+    const { looseAbsentIds, bundleAbsentIds } = await readPendingDeleteFilters(cwd); // a mid-deletion pair → logically absent (bundle-pair: bundle side only)
     resolved = await resolveArchiveRecordBytes({
       kind: "phase_snapshot",
       id: ref.id,
       mode: "reader-loose-wins",
-      pendingAbsentIds: await readPendingDeleteIds(cwd), // a mid-deletion pair → logically absent
+      pendingAbsentIds: looseAbsentIds,
+      pendingBundleAbsentIds: bundleAbsentIds,
       readLooseRaw: () => readLoosePhaseSnapshotRaw(cwd, ref.id),
       loadBundleIndex: () => loadArchiveBundles(cwd).index,
     });
@@ -563,10 +567,10 @@ export async function enumerateArchivedPhaseSnapshots(
   const entries: EnumeratedPhaseSnapshot[] = [];
   const skipped: PhaseSnapshotEnumSkip[] = [];
   const looseStems = new Set<string>();
-  // A phase named in a pending delete-intent (its pair is mid-deletion) is LOGICALLY
-  // ABSENT — never enumerated (loose OR bundle) — so a half-deleted intermediate is
-  // never read as archive truth. Read-only consultation; the journal is untouched.
-  const pendingAbsentIds = await readPendingDeleteIds(cwd);
+  // A phase named in a pending LOOSE-pair intent is LOGICALLY ABSENT everywhere; a
+  // phase named in a pending BUNDLE-pair intent is absent from the BUNDLE side only
+  // (its loose copy, if any, still resolves). Read-only; the journal is untouched.
+  const { looseAbsentIds, bundleAbsentIds } = await readPendingDeleteFilters(cwd);
 
   // 1. Loose snapshot files.
   let names: string[] = [];
@@ -584,7 +588,7 @@ export async function enumerateArchivedPhaseSnapshots(
   }
   for (const name of names.filter((n) => n.endsWith(".json")).sort()) {
     const fileStem = basename(name, ".json");
-    if (pendingAbsentIds.has(fileStem)) continue; // mid-deletion pair → absent
+    if (looseAbsentIds.has(fileStem)) continue; // loose-pair mid-deletion → absent
     if (!isSafePlanId(fileStem)) {
       skipped.push({ scope: "file", fileStem, detail: "unsafe archive snapshot filename" });
       continue;
@@ -609,7 +613,7 @@ export async function enumerateArchivedPhaseSnapshots(
   if (members) {
     for (const [phaseId, entry] of [...members].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))) {
       if (looseStems.has(phaseId)) continue; // loose wins
-      if (pendingAbsentIds.has(phaseId)) continue; // mid-deletion pair → absent
+      if (looseAbsentIds.has(phaseId) || bundleAbsentIds.has(phaseId)) continue; // mid-deletion pair → bundle member absent
       if (!isSafePlanId(phaseId)) {
         skipped.push({ scope: "file", fileStem: phaseId, detail: "unsafe archive snapshot bundle member id" });
         continue;
