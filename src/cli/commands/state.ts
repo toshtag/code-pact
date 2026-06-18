@@ -451,6 +451,22 @@ async function cmdStateCompactArchive(argv: string[], globalJson: boolean): Prom
       }
     }
 
+    // A pending delete-intent journal must be RECOVERED before any archive compaction. This
+    // low-level verb REFUSES (it has no recovery path of its own): consolidation would retire a
+    // crashed bundle-pair removal's reduced SURVIVOR bundle as "superseded", after which recovery
+    // can never complete — a permanent wedge (DELETE_INTENT_RECOVERY_FAILED). The recovery entry
+    // is the high-level `state archive-maintain --write` (which recovers first, then compacts).
+    const pending = await readDeleteIntent(cwd);
+    if (pending.kind !== "absent") {
+      emitError(
+        json,
+        "PENDING_DELETE_INTENT",
+        "a delete-intent journal is pending; run `code-pact state archive-maintain --write` to recover it before archive compaction.",
+        { data: { recovery_pending: true } },
+      );
+      return 2;
+    }
+
     const completed: Array<Record<string, unknown>> = [];
     let failedKind: ArchiveBundleKind | null = null;
     try {
@@ -488,13 +504,13 @@ async function cmdStateCompactArchive(argv: string[], globalJson: boolean): Prom
 // ---------------------------------------------------------------------------
 // `state archive-maintain [--keep-latest N] [--write]` — the HIGH-LEVEL operator
 // entry that orchestrates the existing archive primitives in the safe order
-// (compact → retention (recovers first) → compact-again → re-plan → validate →
-// plan lint), so an operator runs ONE obvious command instead of remembering the
-// low-level sequence. It adds NO new destructive semantics and NO new tracked
-// state. DRY-RUN is read-only and lock-free; `--write` runs under ONE outer write
-// lock for the whole orchestration. The result is reported honestly: a source:both
-// follow-up, a deferred mixed pair, an un-foldable record, or a pending journal all
-// read as NOT bounded, and `bundle_byte_size_bounded` is ALWAYS false (sharding
+// (RECOVER any pending delete-intent journal FIRST → compact → retention → compact-
+// again → re-plan → validate → plan lint), so an operator runs ONE obvious command
+// instead of remembering the low-level sequence. It adds NO new destructive semantics
+// and NO new tracked state. DRY-RUN is read-only and lock-free; `--write` runs under
+// ONE outer write lock for the whole orchestration. The result is reported honestly:
+// a source:both follow-up, a deferred pair, an un-foldable record, or a pending journal
+// all read as NOT bounded, and `bundle_byte_size_bounded` is ALWAYS false (sharding
 // deferred). See docs/cli-contract.md → `state archive-maintain`.
 // ---------------------------------------------------------------------------
 
@@ -511,6 +527,9 @@ function maintErrorEnvelope(
     step: err.step,
     completed_steps: err.completed_steps,
     partial_applied: err.partial_applied,
+    // Report any delete-intent recovery the run already COMPLETED before the fault — so a
+    // recovery-completed drop of old truth is never lost just because a later step failed.
+    ...(err.recovered.length > 0 ? { recovered: err.recovered } : {}),
   };
   const journalHuman = recoveryPending
     ? " — a delete-intent journal remains; re-run `state archive-maintain --write` to complete it."
@@ -585,9 +604,16 @@ function renderDryRunHuman(d: ArchiveMaintenanceDryRun): string {
   if (s.planned_compact_skipped > 0) {
     lines.push(`  ${s.planned_compact_skipped} record(s) cannot be folded (skipped — inspect with --json)`);
   }
+  const j = d.steps.journal;
+  const journalLine =
+    j.status === "absent"
+      ? "none"
+      : j.status === "corrupt"
+        ? "CORRUPT — `--write` will fail recovery (DELETE_INTENT_RECOVERY_FAILED); inspect/repair the journal first"
+        : `present (${j.count} ${j.intent_kinds.join("+")} intent(s)) — --write recovers it first`;
   lines.push(
     "",
-    `Pending delete-intent journal: ${d.steps.journal.pending_before ? "present — --write recovers it first" : "none"}`,
+    `Pending delete-intent journal: ${journalLine}`,
     "",
     "Checks (current):",
     `  validate: ${d.steps.checks.validate.ok ? "ok" : `FAILED (${d.steps.checks.validate.errors} error(s))`}`,
@@ -621,8 +647,12 @@ function renderWriteHuman(d: ArchiveMaintenanceWrite): string {
     "Truth:",
     "  referenced truth: retained",
     `  unreferenced old truth: ${b.unreferenced_old_truth_bounded ? "none remaining" : `${s.deleted} dropped this run; a follow-up run is needed (re-run archive-maintain)`}`,
-    `  source:both follow-up: ${s.source_both_follow_up === 0 ? "none" : `${s.source_both_follow_up} (re-run archive-maintain to drop the surviving loose copies)`}`,
-    `  mixed-source pairs: ${s.mixed_source_deferred === 0 ? "none" : `${s.mixed_source_deferred} deferred (run state compact-archive, then retry)`}`,
+    `  source:both follow-up: ${s.source_both_follow_up === 0 ? "none" : `${s.source_both_follow_up} (re-run archive-maintain to drop the surviving copies)`}`,
+    // `deferred pairs` (= mixed_source_deferred) counts needs_bundle_member_removal AND
+    // requires_atomic_pair_removal — NOT all are fixed by `compact-archive` (an unsupported-platform
+    // fsync / partial store / missing digest is not). So point at the per-record reasons, don't
+    // over-promise a single remedy.
+    `  deferred pairs: ${s.mixed_source_deferred === 0 ? "none" : `${s.mixed_source_deferred} (inspect --json steps.retention.results[].skipped[] for each reason)`}`,
   ];
   if (s.recovered_loose_pairs > 0 || s.recovered_bundle_pairs > 0) {
     lines.push(

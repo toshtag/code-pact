@@ -186,6 +186,9 @@ describe("state archive-maintain --write — compaction + retention", () => {
     expect(s.loose_records_before).toBe(3);
     expect(s.loose_records_after).toBe(0); // all folded
     expect(s.bundles_after).toBeGreaterThanOrEqual(1);
+    // `skipped` is the TOTAL across both layers — never just retention (so an inspector reading
+    // `skipped === 0` is never misled while a compaction skip lurks).
+    expect(s.skipped).toBe(s.compact_skipped + s.retention_skipped);
     expect(await countJson(PHASES_DIR())).toBe(0);
     expect(await countJson(BUNDLES_DIR())).toBe(1); // one phase_snapshot bundle
 
@@ -314,7 +317,12 @@ describe("state archive-maintain — honest bounded-status (never falsely green)
 
     const body = json(run(["state", "archive-maintain", "--json"])); // dry-run, read-only
     expect(body.data?.mode).toBe("dry_run");
-    expect(body.data!.steps.journal.pending_before).toBe(true);
+    // Operator-grade journal status (not just a boolean): status + the pending intent kinds + count.
+    const journal = body.data!.steps.journal;
+    expect(journal.pending_before).toBe(true);
+    expect(journal.status).toBe("present");
+    expect(journal.intent_kinds).toEqual(["loose_pair"]);
+    expect(journal.count).toBe(1);
     const b = body.data!.bounded_status;
     expect(b.file_count_bounded).toBe(false); // pending journal → unsettled → never falsely bounded
     expect(b.unreferenced_old_truth_bounded).toBe(false);
@@ -442,6 +450,34 @@ describe("state archive-maintain — pending delete-intent recovery is surfaced 
     const b2 = json(r2).data!.bounded_status;
     expect(b2.file_count_bounded && b2.unreferenced_old_truth_bounded).toBe(true);
     expect(r2.code).toBe(0);
+  });
+
+  it("the low-level `state compact-archive --write` REFUSES under a pending delete-intent journal (no wedge); archive-maintain still recovers", async () => {
+    // The public low-level verb must not be a back door to the same wedge: compaction would retire a
+    // crashed bundle-pair's reduced SURVIVOR bundle as superseded, after which even archive-maintain
+    // could never recover. So `compact-archive --write` REFUSES; only the high-level verb recovers.
+    await seedArchivedPhases(["P1", "P2"]);
+    for (const id of ["P1", "P2"]) expect(run(["state", "compact", id, "--write", "--json"]).code).toBe(0);
+    expect(run(["state", "compact-archive", "--write", "--json"]).code).toBe(0); // P1,P2 → bundles
+    await expect(
+      deleteBundlePairsJournaled(tmpDir, [{ phase_id: "P1" }], { beforeRetire: () => { throw new Error("crash"); } }),
+    ).rejects.toThrow();
+    const journalPath = join(tmpDir, ".code-pact", "state", "archive", "delete-intent.json");
+    expect(await fileExists(journalPath)).toBe(true);
+    const bundlesBefore = (await readdir(BUNDLES_DIR())).sort();
+
+    // REFUSE — exit 2 PENDING_DELETE_INTENT, and the survivor bundle + journal are UNTOUCHED.
+    const refused = run(["state", "compact-archive", "--write", "--json"]);
+    expect(refused.code).toBe(2);
+    expect(json(refused).error?.code).toBe("PENDING_DELETE_INTENT");
+    expect(await fileExists(journalPath)).toBe(true);
+    expect((await readdir(BUNDLES_DIR())).sort()).toEqual(bundlesBefore); // nothing retired/folded
+
+    // archive-maintain CAN still recover — the wedge was never created.
+    const am = json(run(["state", "archive-maintain", "--write", "--json"]));
+    expect(am.ok).toBe(true);
+    expect(am.data!.summary.recovered_bundle_pairs).toBe(1);
+    expect(await fileExists(journalPath)).toBe(false);
   });
 });
 

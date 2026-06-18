@@ -20,7 +20,7 @@ import {
   type RetentionDeleteOutcome,
   type RetentionPlan,
 } from "./archive-retention.ts";
-import { readDeleteIntent, recoverPendingDeletes, type RecoveryOutcome } from "./delete-intent-journal.ts";
+import { readDeleteIntent, recoverPendingDeletes, type DeleteIntentRead, type RecoveryOutcome } from "./delete-intent-journal.ts";
 import { runValidate } from "../../commands/validate.ts";
 import { runPlanLint } from "../../commands/plan-lint.ts";
 
@@ -77,6 +77,27 @@ async function countJsonFiles(dir: string): Promise<number> {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return 0;
     throw err;
   }
+}
+
+/** Operator-grade journal status — distinguishes a clean store (`absent`) from an
+ *  un-recovered prior crash (`present`, with the pending intent kinds + count) from a
+ *  CORRUPT journal (`corrupt`) that `--write` would fail to recover. So the dry-run can warn
+ *  "a `--write` here will fail recovery", not merely "pending: true". */
+export type JournalStatus = {
+  status: "absent" | "present" | "corrupt";
+  /** true when a journal exists (present OR corrupt) — recovery is owed before any compaction. */
+  pending_before: boolean;
+  /** the distinct pending intent kinds (e.g. `["bundle_pair","loose_pair"]`); empty if absent/corrupt. */
+  intent_kinds: ("loose_pair" | "bundle_pair")[];
+  /** number of pending intents; 0 if absent/corrupt. */
+  count: number;
+};
+
+function describeJournal(read: DeleteIntentRead): JournalStatus {
+  if (read.kind === "absent") return { status: "absent", pending_before: false, intent_kinds: [], count: 0 };
+  if (read.kind === "corrupt") return { status: "corrupt", pending_before: true, intent_kinds: [], count: 0 };
+  const kinds = [...new Set(read.intent.intents.map((i) => i.intent_kind))].sort() as ("loose_pair" | "bundle_pair")[];
+  return { status: "present", pending_before: true, intent_kinds: kinds, count: read.intent.intents.length };
 }
 
 /** Count the physical archive files on disk (loose records + bundles). Read-only. */
@@ -280,8 +301,9 @@ async function planAllKinds(cwd: string): Promise<CompactArchivePlan[]> {
 
 /** A maintenance step faulted. Carries the underlying primitive error (so the CLI maps
  *  it to the right public error code), which step failed, which steps already completed,
- *  and whether any mutation was applied — so a failure after partial mutation is reported
- *  honestly (never a silent partial). */
+ *  whether any mutation was applied, AND any delete-intent journal recovery the run had
+ *  already completed before the fault — so a failure after partial mutation is reported
+ *  honestly (never a silent partial; the recovery output is reported even on the error path). */
 export class ArchiveMaintenanceError extends Error {
   readonly code = "ARCHIVE_MAINTENANCE_FAILED" as const;
   constructor(
@@ -289,6 +311,7 @@ export class ArchiveMaintenanceError extends Error {
     readonly cause_error: Error,
     readonly completed_steps: string[],
     readonly partial_applied: boolean,
+    readonly recovered: RetentionDeleteOutcome["recovered"] = [],
   ) {
     super(cause_error.message);
     this.name = "ArchiveMaintenanceError";
@@ -336,7 +359,7 @@ export type ArchiveMaintenanceDryRun = {
     planned_compact_skipped: number;
   };
   steps: {
-    journal: { name: "journal"; pending_before: boolean };
+    journal: { name: "journal" } & JournalStatus;
     compact: { name: "compact"; plans: CompactArchivePlan[] };
     retention: { name: "retention"; plans: RetentionPlan[] };
     checks: { name: "checks" } & CheckResult;
@@ -352,7 +375,7 @@ export async function planArchiveMaintenance(
   opts: { keepLatest?: number } = {},
 ): Promise<ArchiveMaintenanceDryRun> {
   const counts = await countArchiveFiles(cwd);
-  const pendingBefore = (await readDeleteIntent(cwd)).kind !== "absent";
+  const journal = describeJournal(await readDeleteIntent(cwd));
   const compactPlans = await planAllKinds(cwd);
   const retentionPlans = await planArchiveRetention(cwd, opts);
   const checks = await runChecks(cwd);
@@ -374,12 +397,12 @@ export async function planArchiveMaintenance(
       planned_compact_skipped,
     },
     steps: {
-      journal: { name: "journal", pending_before: pendingBefore },
+      journal: { name: "journal", ...journal },
       compact: { name: "compact", plans: compactPlans },
       retention: { name: "retention", plans: retentionPlans },
       checks: { name: "checks", ...checks },
     },
-    bounded_status: deriveBoundedStatus(compactPlans, retentionPlans, pendingBefore),
+    bounded_status: deriveBoundedStatus(compactPlans, retentionPlans, journal.pending_before),
   };
 }
 
@@ -398,12 +421,17 @@ export type ArchiveMaintenanceWrite = {
     bundle_member_removed: number;
     recovered_loose_pairs: number;
     recovered_bundle_pairs: number;
+    /** TOTAL fail-closed skips = `compact_skipped` + `retention_skipped`. */
     skipped: number;
+    /** compaction skips (bundle_stale / invalid member / unsafe path) — keep file_count not bounded. */
+    compact_skipped: number;
+    /** retention skips (needs_bundle_member_removal / requires_atomic_pair_removal / authority / unlink). */
+    retention_skipped: number;
     mixed_source_deferred: number;
     source_both_follow_up: number;
   };
   steps: {
-    journal: { name: "journal"; ok: true; pending_before: boolean; recovered: RetentionDeleteOutcome["recovered"] };
+    journal: { name: "journal"; ok: true; recovered: RetentionDeleteOutcome["recovered"] } & JournalStatus;
     compact_before_retention: { name: "compact_before_retention"; ok: true; files_removed: number; bundles_written: number; skipped: ArchiveDeleteSkip[] };
     retention: { name: "retention"; ok: true; results: RetentionDeleteOutcome[] };
     compact_after_retention: { name: "compact_after_retention"; ok: true; ran: boolean; reason: string | null; files_removed: number; bundles_written: number; skipped: ArchiveDeleteSkip[] };
@@ -419,18 +447,18 @@ export type ArchiveMaintenanceWrite = {
 
 /** `--write`: orchestrate the existing primitives under the caller's outer write lock.
  *
- *  1. read the pending journal status (before).
- *  2. compact every kind → folds loose into bundles, deletes bundled loose. (Runs FIRST,
- *     so a loose member of a mixed-source pair is folded into a bundle and the pair
+ *  1. RECOVER any pending delete-intent journal FIRST — before any compaction. This is
+ *     load-bearing: compaction is not recovery-first, and its consolidation would RETIRE a
+ *     crashed bundle-pair's reduced survivor bundle as "superseded", wedging recovery. The
+ *     result is passed to retention as `preRecovered` (no double-recovery) and a recovered
+ *     bundle-pair's surviving copy is excluded from THIS run's drop (one bucket per id per run).
+ *  2. compact every kind → folds loose into bundles, deletes bundled loose. (Runs after
+ *     recovery, so a loose member of a mixed-source pair is folded into a bundle and the pair
  *     becomes a uniform bundle pair retention can remove atomically this run.)
- *  3. retention apply → RECOVERS any crashed prior pair-delete FIRST (surfaced as
- *     `recovered`, split loose/bundle), then drops unreferenced old truth. We rely on
- *     `applyArchiveRetention`'s INTERNAL recovery (not an external pre-pass) precisely so
- *     a recovered source:both survivor is deferred to the next run rather than landing in
- *     two buckets (recovered AND deleted) this run — preserving one-bucket-per-id-per-run.
- *  4. compact again IFF foldable loose remains (e.g. a source:both survivor materialised by
- *     a bundle_member_removed) — keeps the file count at its floor while the loose layer
- *     drops the survivor on the next run.
+ *  3. retention apply (with `preRecovered`) → drops unreferenced old truth; does NOT recover again.
+ *  4. compact again IFF foldable loose remains — keeps the file count at its floor while the
+ *     deferred record (a recovered bundle-pair survivor, or a source:both follow-up) is dropped
+ *     on a subsequent run.
  *  5. re-plan the real store → the TRUE post-maintenance bounded status.
  *  6. run the read-only checks (validate + plan lint).
  *
@@ -443,7 +471,8 @@ export async function runArchiveMaintenance(
   hooks: RetentionApplyHooks = {},
 ): Promise<ArchiveMaintenanceWrite> {
   const before = await countArchiveFiles(cwd);
-  const pendingBefore = (await readDeleteIntent(cwd)).kind !== "absent";
+  const journalBefore = describeJournal(await readDeleteIntent(cwd));
+  const pendingBefore = journalBefore.pending_before;
   const completed: string[] = [];
 
   // 1. RECOVER any crashed prior pair-delete FIRST — BEFORE compaction. This is load-bearing:
@@ -452,14 +481,25 @@ export async function runArchiveMaintenance(
   //    "superseded", after which recovery can never complete — a permanent wedge). So
   //    `archive-maintain` heals the journal here, then passes the result to
   //    `applyArchiveRetention` as `preRecovered` so it does NOT double-recover but STILL defers
-  //    each recovered bundle-pair's loose survivor (one-bucket-per-run; the survivor drops next run).
+  //    each recovered bundle-pair's id (one-bucket-per-run). Any surviving copy — loose, OR
+  //    re-compacted into a bundle by the maintenance compaction pass — is dropped on a subsequent
+  //    run; it is NOT necessarily still loose by the time this run returns.
   let recovery: RecoveryOutcome;
   try {
     recovery = await recoverPendingDeletes(cwd);
   } catch (err) {
-    throw new ArchiveMaintenanceError("journal_recovery", err as Error, completed, false);
+    // recoverPendingDeletes can do PARTIAL destructive work (an unlink / a bundle retire) before a
+    // later fsync fails, so partial_applied is honestly `pendingBefore` — true when there WAS a
+    // journal to act on (an absent-journal no-op cannot have mutated anything).
+    throw new ArchiveMaintenanceError("journal_recovery", err as Error, completed, pendingBefore);
   }
   completed.push("journal_recovery");
+  // The recovery-completed ids, tagged by intent_kind — reported on EVERY path (success AND any
+  // later step's error envelope), so "what did the prior crashed delete complete?" is never lost.
+  const recovered: RetentionDeleteOutcome["recovered"] = [
+    ...recovery.loose_pairs.map((id) => ({ id, intent_kind: "loose_pair" as const })),
+    ...recovery.bundle_pairs.map((id) => ({ id, intent_kind: "bundle_pair" as const })),
+  ];
 
   // 2. compact-before-retention (now SAFE — no journal is pending after step 1).
   let compactBefore: CompactPassResult;
@@ -468,7 +508,7 @@ export async function runArchiveMaintenance(
   } catch (err) {
     // Compaction unlinks loose files / writes+retires bundles, so a mid-run fault may have
     // already applied a kind — report partial_applied conservatively true.
-    throw new ArchiveMaintenanceError("compact_before_retention", err as Error, completed, true);
+    throw new ArchiveMaintenanceError("compact_before_retention", err as Error, completed, true, recovered);
   }
   completed.push("compact_before_retention");
 
@@ -478,12 +518,10 @@ export async function runArchiveMaintenance(
   try {
     retentionResults = await applyArchiveRetention(cwd, { ...opts, preRecovered: recovery }, hooks);
   } catch (err) {
-    throw new ArchiveMaintenanceError("retention", err as Error, completed, true);
+    throw new ArchiveMaintenanceError("retention", err as Error, completed, true, recovered);
   }
   completed.push("retention");
   const retSummary = summarizeRetention(retentionResults);
-  // `recovered` is identical on every kind's result — take it from the first (or []).
-  const recovered = retentionResults[0]?.recovered ?? [];
 
   // 4. compact-after-retention IFF a fresh plan shows foldable loose remains (a source:both
   //    survivor materialised by a bundle_member_removed, or recovery-left loose). Driven by
@@ -501,7 +539,7 @@ export async function runArchiveMaintenance(
     try {
       compactAfter = summarizeCompactPass(await compactAllKinds(cwd));
     } catch (err) {
-      throw new ArchiveMaintenanceError("compact_after_retention", err as Error, completed, true);
+      throw new ArchiveMaintenanceError("compact_after_retention", err as Error, completed, true, recovered);
     }
     completed.push("compact_after_retention");
   }
@@ -519,14 +557,14 @@ export async function runArchiveMaintenance(
     const pendingAfter = (await readDeleteIntent(cwd)).kind !== "absent";
     boundedStatus = deriveBoundedStatus(finalCompactPlans, finalRetentionPlans, pendingAfter);
   } catch (err) {
-    throw new ArchiveMaintenanceError("bounded_status", err as Error, completed, true);
+    throw new ArchiveMaintenanceError("bounded_status", err as Error, completed, true, recovered);
   }
   completed.push("bounded_status");
   try {
     checks = await runChecks(cwd);
     after = await countArchiveFiles(cwd);
   } catch (err) {
-    throw new ArchiveMaintenanceError("checks", err as Error, completed, true);
+    throw new ArchiveMaintenanceError("checks", err as Error, completed, true, recovered);
   }
 
   // Overall verdict (drives the CLI exit code). It is NOT just "did the checks pass" — the
@@ -534,6 +572,12 @@ export async function runArchiveMaintenance(
   // `isV2Bounded` (file-count + unreferenced-old-truth). The byte-size NON-goal never fails it.
   const checksPass = checks.validate.ok && checks.plan_lint.ok;
   const ok = checksPass && isV2Bounded(boundedStatus);
+
+  // `skipped` is the TOTAL fail-closed skip count — compaction skips (bundle_stale / invalid
+  // member / unsafe path, which keep `file_count_bounded` false) AND retention skips — so a
+  // reader inspecting `summary.skipped === 0` is never misled into "no skipped work" while a
+  // compaction skip lurks. The split is reported alongside (`compact_skipped` / `retention_skipped`).
+  const compactSkipped = compactBefore.skipped.length + compactAfter.skipped.length;
 
   return {
     mode: "write",
@@ -548,12 +592,14 @@ export async function runArchiveMaintenance(
       bundle_member_removed: retSummary.bundle_member_removed,
       recovered_loose_pairs: retSummary.recovered_loose_pairs,
       recovered_bundle_pairs: retSummary.recovered_bundle_pairs,
-      skipped: retSummary.skipped,
+      skipped: compactSkipped + retSummary.skipped,
+      compact_skipped: compactSkipped,
+      retention_skipped: retSummary.skipped,
       mixed_source_deferred: retSummary.mixed_source_deferred,
       source_both_follow_up: retSummary.bundle_member_removed,
     },
     steps: {
-      journal: { name: "journal", ok: true, pending_before: pendingBefore, recovered },
+      journal: { name: "journal", ok: true, ...journalBefore, recovered },
       compact_before_retention: {
         name: "compact_before_retention",
         ok: true,
