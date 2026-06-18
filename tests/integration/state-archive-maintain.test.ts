@@ -111,6 +111,18 @@ async function seedArchivedPhases(ids: string[]): Promise<void> {
   }
 }
 
+/** Add ONE new phase to an already-initialized dir (its prior phases already archived) and
+ *  archive it — appending to the roadmap, writing the YAML + done event, then `phase archive`.
+ *  `priorIds` are the dir's already-archived phases (still roadmap-referenced, resolving from
+ *  their snapshots). Used to model a branch archiving its OWN phase on top of a shared base. */
+async function addAndArchive(dir: string, priorIds: string[], newId: string): Promise<void> {
+  await writeFile(join(dir, "design", "roadmap.yaml"), roadmapFor([...priorIds, newId]), "utf8");
+  await writeFile(join(dir, "design", "phases", `${newId}-x.yaml`), phaseYaml(newId), "utf8");
+  await seedDurableEvents(dir, progressFor(newId));
+  const r = run(["phase", "archive", newId, "--write", "--json"], dir);
+  if (r.code !== 0) throw new Error(`archive ${newId} in ${dir} failed: ${r.stdout}${r.stderr}`);
+}
+
 /** Drop a set of archived phases from the live reference graph: empty the roadmap of
  *  them and remove their live YAMLs. The snapshots then read as UNREFERENCED. */
 async function unreference(keepIds: string[], dropIds: string[]): Promise<void> {
@@ -274,6 +286,31 @@ describe("state archive-maintain — honest bounded-status (never falsely green)
     expect(await fileExists(join(tmpDir, ".code-pact", "state", "archive", "delete-intent.json"))).toBe(true);
   });
 
+  it("a mixed-source pair (bundle snapshot + loose pack) is RESOLVED by compact-first in one run — never falsely deferred as bounded", async () => {
+    // The scenario the bounded guarantee hinges on: a would-drop phase whose snapshot lives in a
+    // bundle but whose event_pack is still loose (a mid-refresh artifact). archive-maintain's
+    // compact-first folds the loose pack into a bundle, making the pair UNIFORM, so retention
+    // removes it as a clean bundle pair THIS run — it is never left deferred while the status
+    // claims bounded.
+    await seedArchivedPhases(["P1", "P2", "P3"]); // P3 referenced (keeps checks green)
+    expect(run(["state", "compact", "P1", "--write", "--json"]).code).toBe(0); // loose event pack P1
+    expect(run(["state", "compact", "P2", "--write", "--json"]).code).toBe(0); // loose event pack P2
+    // Fold ONLY the phase snapshots → P1/P2 snapshots are bundle-backed, their packs stay loose → MIXED.
+    expect(run(["state", "compact-archive", "phase_snapshot", "--write", "--json"]).code).toBe(0);
+    expect(await countJson(PHASES_DIR())).toBe(0); // snapshots folded
+    expect(await countJson(EVENT_PACKS_DIR())).toBe(2); // packs still loose → mixed-source pairs
+    await unreference(["P3"], ["P1", "P2"]);
+
+    const body = json(run(["state", "archive-maintain", "--write", "--keep-latest", "1", "--json"]));
+    expect(body.data?.mode).toBe("write");
+    const s = body.data!.summary;
+    expect(s.mixed_source_deferred).toBe(0); // compact-first made the pair uniform → NOT deferred
+    expect(s.deleted).toBeGreaterThanOrEqual(1); // the dropped pair (snapshot + pack) was really removed
+    // Honest bounded status: the dropped record is gone, nothing droppable remains for it.
+    expect(body.data!.bounded_status.unreferenced_old_truth_bounded).toBe(true);
+    expect(body.data!.bounded_status.file_count_bounded).toBe(true);
+  });
+
   it("final output explicitly says bundle byte-size is NOT solved (sharding deferred), in JSON and human", async () => {
     await seedArchivedPhases(["P1"]);
     const body = json(run(["state", "archive-maintain", "--write", "--json"]));
@@ -308,7 +345,7 @@ describe("state archive-maintain — pending delete-intent recovery is surfaced 
   });
 });
 
-describe("state archive-maintain — idempotency + determinism (multi-contributor safety)", () => {
+describe("state archive-maintain — idempotency, determinism + cross-branch merge convergence", () => {
   it("repeated --write runs are idempotent (no new bundle, nothing re-dropped)", async () => {
     await seedArchivedPhases(["P1", "P2"]);
     expect(run(["state", "archive-maintain", "--write", "--json"]).code).toBe(0);
@@ -339,6 +376,51 @@ describe("state archive-maintain — idempotency + determinism (multi-contributo
         const bytesB = await readFile(join(BUNDLES_DIR(b), name), "utf8");
         expect(bytesA).toBe(bytesB); // byte-identical bundle contents (no timestamps/pids/paths)
       }
+    } finally {
+      await rm(a, { recursive: true, force: true });
+      await rm(b, { recursive: true, force: true });
+    }
+  });
+
+  it("two branches that archive DIFFERENT phases produce non-colliding bundles; the merge re-converges to one bundle (no conflict on differing records)", async () => {
+    // The provable multi-contributor claim: DIFFERENT records on independent branches fold to
+    // DIFFERENT-named (content-addressed) bundles, so a merge adds both files with no conflict,
+    // and a follow-up archive-maintain re-consolidates them. The SHARED record (P1) is archived in
+    // the BASE before the branch copy, so its snapshot bytes are byte-identical on both branches
+    // (two branches archiving the same phase INDEPENDENTLY would instead conflict on
+    // snapshotted_at — the documented, NOT-claimed-conflict-free case; see cli-contract.md).
+    const a = await mkdtemp(join(tmpdir(), "code-pact-am-brA-"));
+    const b = await mkdtemp(join(tmpdir(), "code-pact-am-brB-"));
+    try {
+      // Base: P1 archived ONCE (shared, byte-identical), then copied to both branches.
+      await seedArchivedPhases(["P1"]); // tmpDir is the base
+      await cp(tmpDir, a, { recursive: true });
+      await cp(tmpDir, b, { recursive: true });
+      // Each branch adds + archives its OWN unique phase on top of the shared base.
+      await addAndArchive(a, ["P1"], "P2");
+      await addAndArchive(b, ["P1"], "P3");
+      expect(run(["state", "archive-maintain", "--write", "--json"], a).code).toBe(0);
+      expect(run(["state", "archive-maintain", "--write", "--json"], b).code).toBe(0);
+
+      const nameA = (await readdir(BUNDLES_DIR(a))).find((n) => n.startsWith("phase_snapshot-"))!;
+      const nameB = (await readdir(BUNDLES_DIR(b))).find((n) => n.startsWith("phase_snapshot-"))!;
+      expect(nameA).not.toBe(nameB); // {P1,P2} vs {P1,P3} → different content addresses → no filename collision
+
+      // Simulate the git merge of the two archive trees + roadmaps into A: union the roadmap, and
+      // add B's bundle file. The two bundles have different names, so a real merge adds BOTH (no
+      // conflict); the shared P1 member is byte-identical in both, so even its bytes never conflict.
+      await writeFile(join(a, "design", "roadmap.yaml"), roadmapFor(["P1", "P2", "P3"]), "utf8");
+      await cp(join(BUNDLES_DIR(b), nameB), join(BUNDLES_DIR(a), nameB));
+      expect((await readdir(BUNDLES_DIR(a))).filter((n) => n.startsWith("phase_snapshot-")).length).toBe(2);
+
+      // Re-converge: archive-maintain consolidates the two bundles into one ({P1,P2,P3}).
+      const merged = json(run(["state", "archive-maintain", "--write", "--json"], a));
+      expect(merged.ok).toBe(true);
+      expect((await readdir(BUNDLES_DIR(a))).filter((n) => n.startsWith("phase_snapshot-")).length).toBe(1);
+      expect(merged.data!.bounded_status.file_count_bounded).toBe(true);
+      const consolidated = (await readdir(BUNDLES_DIR(a))).find((n) => n.startsWith("phase_snapshot-"))!;
+      const bundle = JSON.parse(await readFile(join(BUNDLES_DIR(a), consolidated), "utf8"));
+      expect((bundle.members as { id: string }[]).map((m) => m.id).sort()).toEqual(["P1", "P2", "P3"]);
     } finally {
       await rm(a, { recursive: true, force: true });
       await rm(b, { recursive: true, force: true });
