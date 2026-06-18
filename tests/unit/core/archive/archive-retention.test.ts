@@ -618,8 +618,8 @@ describe("applyArchiveRetention — destructive LOOSE-ONLY delete (PR-2a)", () =
     // reserved for THIS run's plan decisions) — on both bound kinds. Never a silent deletion.
     const phase = out.find((o) => o.kind === "phase_snapshot")!;
     const event = out.find((o) => o.kind === "event_pack")!;
-    expect(phase.recovered).toEqual(["P1"]);
-    expect(event.recovered).toEqual(["P1"]);
+    expect(phase.recovered).toEqual([{ id: "P1", intent_kind: "loose_pair" }]);
+    expect(event.recovered).toEqual([{ id: "P1", intent_kind: "loose_pair" }]);
     expect(phase.deleted).not.toContain("P1");
     expect(event.deleted).not.toContain("P1");
   });
@@ -709,8 +709,8 @@ describe("applyArchiveRetention — destructive LOOSE-ONLY delete (PR-2a)", () =
     const out = await applyArchiveRetention(cwd, { keepLatest: 5 });
     // Recovery completes the phase unlink (idempotent on the gone pack) and reports P1 recovered.
     expect(await exists(phaseSnapshotPath(cwd, "P1"))).toBe(false);
-    expect(out.find((o) => o.kind === "phase_snapshot")!.recovered).toEqual(["P1"]);
-    expect(out.find((o) => o.kind === "event_pack")!.recovered).toEqual(["P1"]);
+    expect(out.find((o) => o.kind === "phase_snapshot")!.recovered).toEqual([{ id: "P1", intent_kind: "loose_pair" }]);
+    expect(out.find((o) => o.kind === "event_pack")!.recovered).toEqual([{ id: "P1", intent_kind: "loose_pair" }]);
   });
 
   it("on a platform that cannot fsync a directory (unsupported), a loose pair is DEFERRED, not deleted", async () => {
@@ -1050,8 +1050,8 @@ describe("applyArchiveRetention — bundle-pair removal (CLI wiring, Layer 2)", 
     const out = await applyArchiveRetention(cwd, { keepLatest: 5 });
     const phase = out.find((o) => o.kind === "phase_snapshot")!;
     const event = out.find((o) => o.kind === "event_pack")!;
-    expect(phase.recovered).toContain("P1");
-    expect(event.recovered).toContain("P1");
+    expect(phase.recovered).toContainEqual({ id: "P1", intent_kind: "bundle_pair" });
+    expect(event.recovered).toContainEqual({ id: "P1", intent_kind: "bundle_pair" });
     expect(phase.deleted).not.toContain("P1"); // recovery is NOT this run's plan decision
     expect(loadArchiveBundles(cwd).index.get("phase_snapshot")?.has("P1") ?? false).toBe(false); // retired
   });
@@ -1076,7 +1076,7 @@ describe("applyArchiveRetention — bundle-pair removal (CLI wiring, Layer 2)", 
     // this run (that would double-bucket the id as recovered AND deleted). P1 is recovered ONLY.
     const run1 = await applyArchiveRetention(cwd, { keepLatest: 1 });
     const phase1 = run1.find((o) => o.kind === "phase_snapshot")!;
-    expect(phase1.recovered).toContain("P1");
+    expect(phase1.recovered).toContainEqual({ id: "P1", intent_kind: "bundle_pair" });
     expect(phase1.deleted).not.toContain("P1"); // never in two buckets in one run
     expect(phase1.bundle_member_removed).not.toContain("P1");
     expect(await exists(phaseSnapshotPath(cwd, "P1"))).toBe(true); // loose half deferred to next run
@@ -1168,7 +1168,7 @@ describe("applyArchiveRetention — independent bundle removal accounting when t
     expect(decision.bundle_member_removed).not.toContain(stem1);
     expect(decision.skipped.find((s) => s.id === stem1)?.reason).toBe("needs_bundle_member_removal");
     // Exactly one terminal bucket for the requested id.
-    const buckets = [decision.deleted, decision.bundle_member_removed, decision.vanished, decision.skipped.map((s) => s.id), decision.recovered];
+    const buckets = [decision.deleted, decision.bundle_member_removed, decision.vanished, decision.skipped.map((s) => s.id), decision.recovered.map((r) => r.id)];
     expect(buckets.filter((b) => b.includes(stem1)).length).toBe(1);
     expect(loadArchiveBundles(cwd).index.get("decision_record")?.has(stem1) ?? false).toBe(true); // D1 still resolves (not removed)
   });
@@ -1190,7 +1190,7 @@ describe("applyArchiveRetention — independent bundle removal accounting when t
     expect(phase.deleted).not.toContain("P1");
     expect(phase.bundle_member_removed).not.toContain("P1");
     expect(phase.skipped.find((s) => s.id === "P1")?.reason).toBe("needs_bundle_member_removal");
-    const buckets = [phase.deleted, phase.bundle_member_removed, phase.vanished, phase.skipped.map((s) => s.id), phase.recovered];
+    const buckets = [phase.deleted, phase.bundle_member_removed, phase.vanished, phase.skipped.map((s) => s.id), phase.recovered.map((r) => r.id)];
     expect(buckets.filter((b) => b.includes("P1")).length).toBe(1); // exactly one bucket
     expect(loadArchiveBundles(cwd).index.get("phase_snapshot")?.has("P1") ?? false).toBe(true); // still resolves
   });
