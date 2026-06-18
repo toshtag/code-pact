@@ -758,10 +758,16 @@ async function removeIndependentBundleRecords(
   const skipped: { id: string; reason: RetentionDeleteSkipReason }[] = [];
   for (const r of out.removed) (r.outcome === "deleted" ? deleted : bundle_member_removed).push(r.id);
   // Anything not removed this run stays deferred to the bundle-member-removal layer (a stale bundle,
-  // an unsupported platform, an authority-invalid kind, or a non-member) — reported, never dropped.
+  // an unsupported platform, an `unsafe_kind` fail-close, or a non-member) — reported per requested id.
+  // `out.unsafe_invalid` is NOT mapped here: it is a DIAGNOSTIC list of the OFFENDING members, not the
+  // requested ids' outcome (a requested-and-invalid id already appears in `out.skipped: unsafe_kind`).
   for (const s of out.skipped) skipped.push({ id: s.id, reason: "needs_bundle_member_removal" });
-  for (const id of out.unsafe_invalid) skipped.push({ id, reason: "needs_bundle_member_removal" });
   for (const id of out.not_member) skipped.push({ id, reason: "needs_bundle_member_removal" });
+  // REQUESTED-ID ACCOUNTING GUARD (the destructive output's last safety net): every requested id MUST
+  // reach exactly one terminal bucket. Any id the primitive's outcome did not account for → defer it,
+  // never let a `would_drop` id we excluded from the per-record loops vanish from the output.
+  const accounted = new Set([...deleted, ...bundle_member_removed, ...skipped.map((s) => s.id)]);
+  for (const id of ids) if (!accounted.has(id)) skipped.push({ id, reason: "needs_bundle_member_removal" });
   return { deleted, bundle_member_removed, skipped };
 }
 
