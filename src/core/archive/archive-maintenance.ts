@@ -93,7 +93,7 @@ export type JournalStatus = {
   count: number;
 };
 
-function describeJournal(read: DeleteIntentRead): JournalStatus {
+export function describeJournal(read: DeleteIntentRead): JournalStatus {
   if (read.kind === "absent") return { status: "absent", pending_before: false, intent_kinds: [], count: 0 };
   if (read.kind === "corrupt") return { status: "corrupt", pending_before: true, intent_kinds: [], count: 0 };
   const kinds = [...new Set(read.intent.intents.map((i) => i.intent_kind))].sort() as ("loose_pair" | "bundle_pair")[];
@@ -492,7 +492,6 @@ export async function runArchiveMaintenance(
 ): Promise<ArchiveMaintenanceWrite> {
   const before = await countArchiveFiles(cwd);
   const journalBefore = describeJournal(await readDeleteIntent(cwd));
-  const pendingBefore = journalBefore.pending_before;
   const completed: string[] = [];
 
   // 1. RECOVER any crashed prior pair-delete FIRST — BEFORE compaction. This is load-bearing:
@@ -508,10 +507,11 @@ export async function runArchiveMaintenance(
   try {
     recovery = await recoverPendingDeletes(cwd);
   } catch (err) {
-    // recoverPendingDeletes can do PARTIAL destructive work (an unlink / a bundle retire) before a
-    // later fsync fails, so partial_applied is honestly `pendingBefore` — true when there WAS a
-    // journal to act on (an absent-journal no-op cannot have mutated anything).
-    throw new ArchiveMaintenanceError("journal_recovery", err as Error, completed, pendingBefore);
+    // partial_applied only when a PRESENT (schema-valid) journal was being completed — recovery can
+    // do partial destructive work (an unlink / a bundle retire) before a later fsync fails. A CORRUPT
+    // journal throws straight from `readDeleteIntent` BEFORE any mutation (and an absent one is a
+    // no-op), so partial_applied is honestly false there.
+    throw new ArchiveMaintenanceError("journal_recovery", err as Error, completed, journalBefore.status === "present");
   }
   completed.push("journal_recovery");
   // The recovery-completed ids, tagged by intent_kind — reported on EVERY path (success AND any

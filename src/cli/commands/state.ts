@@ -27,18 +27,23 @@ import {
 } from "../../core/archive/delete-intent-journal.ts";
 import {
   ArchiveMaintenanceError,
+  describeJournal,
   planArchiveMaintenance,
   runArchiveMaintenance,
   type ArchiveMaintenanceDryRun,
   type ArchiveMaintenanceWrite,
+  type JournalStatus,
 } from "../../core/archive/archive-maintenance.ts";
 
 // ---------------------------------------------------------------------------
-// `state` command cluster. ONE subcommand: `state compact`. The DRY-RUN reports a
-// no-mutation verdict (`would_*`); `--write` (under `withWriteLock`) writes the event
-// pack AND removes the gated loose event files, emitting the public `CleanupOutcome`
-// (success: `cleaned` / `already_cleaned` / `noop_no_events`; failure: one of the four
-// `STATE_COMPACT_*` codes). `--write` is the first path that deletes loose files.
+// `state` command cluster. Subcommands: `state compact` (event-pack compaction for ONE
+// phase), `state compact-archive` (fold loose archive records into bundles), `state
+// archive-retention` (keep-latest-N retention), and `state archive-maintain` (the
+// high-level recover→compact→retain→re-plan→validate→plan-lint orchestration). Every
+// verb is DRY-RUN by default (reports a no-mutation `would_*` verdict); `--write` (under
+// `withWriteLock`) applies. The destructive `--write` paths are the ones that delete
+// loose files / retire bundles; the lower verbs emit `STATE_COMPACT_*` / `ARCHIVE_*` /
+// `DELETE_INTENT_*` codes, `archive-maintain` reuses those plus a `verdict`/`bounded_status`.
 // ---------------------------------------------------------------------------
 
 export async function cmdState(
@@ -140,9 +145,17 @@ async function cmdStateArchiveRetention(argv: string[], globalJson: boolean): Pr
         throw err;
       }
       const message = err.message;
-      const recoveryPending = await readDeleteIntent(cwd).then((r) => r.kind !== "absent", () => true);
-      const human = `${message}${recoveryPending ? " — a delete-intent journal remains; re-run `state archive-retention --write` to complete it." : ""}`;
-      const data = { recovery_pending: recoveryPending };
+      // Distinguish a CORRUPT journal (re-run won't help — inspect/repair) from a PRESENT one
+      // (re-run completes it) — the same honesty the high-level verb gives.
+      const journal = describeJournal(await readDeleteIntent(cwd));
+      const journalHuman =
+        journal.status === "corrupt"
+          ? " — a CORRUPT delete-intent journal remains; inspect/repair `.code-pact/state/archive/delete-intent.json` (it cannot be auto-recovered), do NOT just re-run."
+          : journal.status === "present"
+            ? " — a delete-intent journal remains; re-run `state archive-retention --write` to complete it."
+            : "";
+      const human = `${message}${journalHuman}`;
+      const data = { recovery_pending: journal.pending_before, journal_status: journal.status };
       if (err instanceof DeleteIntentRecoveryError) emitError(json, "DELETE_INTENT_RECOVERY_FAILED", message, { data, human });
       else if (err instanceof DeleteIntentDurabilityError) emitError(json, "DELETE_INTENT_DURABILITY_FAILED", message, { data, human });
       else emitError(json, "PENDING_DELETE_INTENT", message, { data, human });
@@ -421,7 +434,14 @@ async function cmdStateCompactArchive(argv: string[], globalJson: boolean): Prom
       partial_applied: partial,
       completed_results: completed,
     };
-    if (err instanceof BundleWriteError) emitError(json, "ARCHIVE_BUNDLE_WRITE_FAILED", message, { data });
+    // The `compactArchive` core primitive now enforces the recovery-first invariant itself, so it
+    // can throw the journal errors even past the CLI pre-check (a future/raced path). Map them to
+    // their OWN public codes — never mislabel a pending/corrupt journal as a corrupt bundle store.
+    if (err instanceof PendingDeleteIntentError) {
+      emitError(json, "PENDING_DELETE_INTENT", err.message, { data: { ...data, recovery_pending: true, journal_status: "present" } });
+    } else if (err instanceof DeleteIntentRecoveryError) {
+      emitError(json, "DELETE_INTENT_RECOVERY_FAILED", err.message, { data: { ...data, recovery_pending: true, journal_status: "corrupt" } });
+    } else if (err instanceof BundleWriteError) emitError(json, "ARCHIVE_BUNDLE_WRITE_FAILED", message, { data });
     else emitError(json, "ARCHIVE_BUNDLE_INVALID", message, { data });
     return 2;
   };
@@ -528,37 +548,45 @@ async function cmdStateCompactArchive(argv: string[], globalJson: boolean): Prom
 function maintErrorEnvelope(
   err: ArchiveMaintenanceError,
   json: boolean,
-  recoveryPending: boolean,
+  journal: JournalStatus,
 ): void {
   const cause = err.cause_error;
   const base = {
     step: err.step,
     completed_steps: err.completed_steps,
     partial_applied: err.partial_applied,
+    recovery_pending: journal.pending_before,
+    journal_status: journal.status,
     // Report any delete-intent recovery the run already COMPLETED before the fault — so a
     // recovery-completed drop of old truth is never lost just because a later step failed.
     ...(err.recovered.length > 0 ? { recovered: err.recovered } : {}),
   };
-  const journalHuman = recoveryPending
-    ? " — a delete-intent journal remains; re-run `state archive-maintain --write` to complete it."
-    : "";
+  // The recovery guidance depends on WHAT journal remains: a `corrupt` journal CANNOT be
+  // auto-recovered by a re-run (recovery fails on it) — it must be inspected/repaired; a
+  // `present` journal a re-run completes (it recovers first); an `absent` journal needs no note.
+  const journalHuman =
+    journal.status === "corrupt"
+      ? " — a CORRUPT delete-intent journal remains; inspect/repair `.code-pact/state/archive/delete-intent.json` (archive-maintain cannot auto-recover a corrupt journal), do NOT just re-run."
+      : journal.status === "present"
+        ? " — a delete-intent journal remains; re-run `state archive-maintain --write` to complete it."
+        : "";
   if (cause instanceof BundleWriteError) {
     emitError(json, "ARCHIVE_BUNDLE_WRITE_FAILED", `state archive-maintain failed during ${err.step}: ${cause.message}`, {
       data: { ...base, phase: cause.phase },
     });
   } else if (cause instanceof DeleteIntentRecoveryError) {
     emitError(json, "DELETE_INTENT_RECOVERY_FAILED", cause.message, {
-      data: { ...base, recovery_pending: recoveryPending },
+      data: base,
       human: `${cause.message}${journalHuman}`,
     });
   } else if (cause instanceof DeleteIntentDurabilityError) {
     emitError(json, "DELETE_INTENT_DURABILITY_FAILED", cause.message, {
-      data: { ...base, recovery_pending: recoveryPending, reason: cause.reason },
+      data: { ...base, reason: cause.reason },
       human: `${cause.message}${journalHuman}`,
     });
   } else if (cause instanceof PendingDeleteIntentError) {
     emitError(json, "PENDING_DELETE_INTENT", cause.message, {
-      data: { ...base, recovery_pending: recoveryPending },
+      data: base,
       human: `${cause.message}${journalHuman}`,
     });
   } else if (cause instanceof BundlePairNotCommittableError) {
@@ -673,6 +701,12 @@ function renderWriteHuman(d: ArchiveMaintenanceWrite): string {
     lines.push(
       `  recovered: ${s.recovered_loose_pairs} loose pair(s), ${s.recovered_bundle_pairs} bundle pair(s) (a prior crashed delete was completed)`,
     );
+    // A recovered BUNDLE pair's `source: both` survivor is deferred to a later run, so it does NOT
+    // show in `source:both follow-up` (that counts THIS run's bundle_member_removed). Flag it
+    // explicitly so "follow-up: none" + "not bounded" never reads as a contradiction.
+    if (s.recovered_bundle_pairs > 0 && !b.unreferenced_old_truth_bounded) {
+      lines.push("    ↳ a recovered bundle-pair survivor still needs a later drop — re-run archive-maintain to converge.");
+    }
   }
   lines.push(
     "",
@@ -738,9 +772,9 @@ async function cmdStateArchiveMaintain(argv: string[], globalJson: boolean): Pro
       result = await runArchiveMaintenance(cwd, { keepLatest });
     } catch (err) {
       if (!(err instanceof ArchiveMaintenanceError)) throw err;
-      // Surface whether a delete-intent journal still remains (re-run completes it).
-      const recoveryPending = await readDeleteIntent(cwd).then((r) => r.kind !== "absent", () => true);
-      maintErrorEnvelope(err, json, recoveryPending);
+      // Surface WHAT delete-intent journal still remains (absent / present / CORRUPT) — a corrupt
+      // journal needs inspect/repair, not a blind re-run; the envelope's guidance depends on it.
+      maintErrorEnvelope(err, json, describeJournal(await readDeleteIntent(cwd)));
       return 2;
     }
     // The maintenance MUTATIONS succeeded → success envelope. The read-only post-checks

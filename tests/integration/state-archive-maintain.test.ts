@@ -383,6 +383,10 @@ describe("state archive-maintain — pending delete-intent recovery is surfaced 
     expect(s.recovered_loose_pairs).toBe(1);
     expect(s.recovered_bundle_pairs).toBe(0); // distinct field — never flattened
     expect(body.data!.steps.journal.recovered).toContainEqual({ id: "P1", intent_kind: "loose_pair" });
+    // EXACT accounting: `recovered` carries each completed pair ONCE — no duplicate (id, intent_kind).
+    const recoveredKeys = (body.data!.steps.journal.recovered as { id: string; intent_kind: string }[]).map((x) => `${x.intent_kind}:${x.id}`);
+    expect(new Set(recoveredKeys).size).toBe(recoveredKeys.length);
+    expect(body.data!.steps.journal.recovered).toEqual([{ id: "P1", intent_kind: "loose_pair" }]);
     // The journal completed: both loose files are gone, and the journal is cleared.
     expect(await fileExists(join(PHASES_DIR(), "P1.json"))).toBe(false);
     expect(await fileExists(join(EVENT_PACKS_DIR(), "P1.json"))).toBe(false);
@@ -492,6 +496,26 @@ describe("state archive-maintain — pending delete-intent recovery is surfaced 
     const body = json(r);
     expect(body.error?.code).toBe("DELETE_INTENT_RECOVERY_FAILED");
     expect((body.data as { journal_status?: string }).journal_status).toBe("corrupt");
+  });
+
+  it("`state archive-maintain --write` on a CORRUPT journal fails honestly (journal_status corrupt; guidance is inspect/repair, NOT blind re-run)", async () => {
+    await seedArchivedPhases(["P1"]);
+    await writeFile(join(tmpDir, ".code-pact", "state", "archive", "delete-intent.json"), "{ not valid json", "utf8");
+    // JSON: the high-level verb surfaces the SAME honesty as the low-level one — a corrupt journal
+    // is DELETE_INTENT_RECOVERY_FAILED with journal_status corrupt, and partial_applied false (it
+    // throws from readDeleteIntent before any mutation).
+    const jr = run(["state", "archive-maintain", "--write", "--json"]);
+    expect(jr.code).toBe(2);
+    const jbody = json(jr);
+    expect(jbody.error?.code).toBe("DELETE_INTENT_RECOVERY_FAILED");
+    const data = jbody.data as { journal_status?: string; step?: string; partial_applied?: boolean };
+    expect(data.journal_status).toBe("corrupt");
+    expect(data.step).toBe("journal_recovery");
+    expect(data.partial_applied).toBe(false);
+    // Human: must NOT tell the operator to "re-run to complete" a journal a re-run cannot recover.
+    const human = run(["state", "archive-maintain", "--write"]).stderr;
+    expect(human).toMatch(/inspect\/repair/);
+    expect(human).not.toMatch(/re-run .* to complete it/);
   });
 });
 
