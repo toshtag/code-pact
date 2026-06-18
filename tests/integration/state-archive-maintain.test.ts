@@ -500,7 +500,11 @@ describe("state archive-maintain — pending delete-intent recovery is surfaced 
     expect(r.code).toBe(2);
     const body = json(r);
     expect(body.error?.code).toBe("DELETE_INTENT_RECOVERY_FAILED");
-    expect((body.data as { journal_status?: string }).journal_status).toBe("corrupt");
+    // The pre-check path must carry the SAME documented contract fields as the core-guard catch path.
+    const data = body.data as { journal_status?: string; recovery_failure_kind?: string; partial_applied?: boolean };
+    expect(data.journal_status).toBe("corrupt");
+    expect(data.recovery_failure_kind).toBe("journal_corrupt");
+    expect(data.partial_applied).toBe(false);
   });
 
   it("`state archive-maintain --write` on a CORRUPT journal fails honestly (journal_status corrupt; guidance is inspect/repair, NOT blind re-run)", async () => {

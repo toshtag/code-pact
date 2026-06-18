@@ -134,9 +134,10 @@ async function cmdStateArchiveRetention(argv: string[], globalJson: boolean): Pr
     try {
       results = await applyArchiveRetention(cwd, { keepLatest });
     } catch (err) {
-      // Known journal/durability faults are fail-closed but RECOVERABLE — surface them as a proper
-      // error envelope (not a generic internal error). `recovery_pending` tells the operator whether
-      // a delete-intent journal still needs completing (re-run does it), based on what is on disk.
+      // Known journal/durability faults are fail-closed and operator-GUIDED (not a generic internal
+      // error): a PENDING journal (or a transient DURABILITY fault) is re-runnable; a RECOVERY
+      // failure is NOT — it needs inspect/repair (corrupt journal, or a present journal whose
+      // referenced authority is broken). The envelope below routes each to the right next action.
       if (
         !(err instanceof DeleteIntentRecoveryError) &&
         !(err instanceof DeleteIntentDurabilityError) &&
@@ -516,8 +517,11 @@ async function cmdStateCompactArchive(argv: string[], globalJson: boolean): Prom
       return 2;
     }
     if (pending.kind === "corrupt") {
+      // SAME `DELETE_INTENT_RECOVERY_FAILED` contract as the core-guard catch path and the
+      // high-level verb: `recovery_failure_kind` + `partial_applied` (false — readDeleteIntent
+      // stopped before any mutation). Never let the pre-check path drop the documented fields.
       emitError(json, "DELETE_INTENT_RECOVERY_FAILED", pending.detail, {
-        data: { recovery_pending: true, journal_status: "corrupt", cause: pending.cause },
+        data: { recovery_pending: true, journal_status: "corrupt", recovery_failure_kind: "journal_corrupt", partial_applied: false, cause: pending.cause },
         human: `${pending.detail} — inspect/repair .code-pact/state/archive/delete-intent.json; archive-maintain cannot auto-recover a corrupt journal.`,
       });
       return 2;
@@ -656,15 +660,17 @@ function boundedLine(label: string, ok: boolean, notBoundedDetail: string): stri
 }
 
 /** Precise "why file-count is not bounded" detail from the reason counts — so the operator
- *  never reads a vague "0 records" line; each non-zero driver is named. */
+ *  never reads a vague "0 records" line; each non-zero driver is named. No action suffix: the
+ *  caller's footer (`Run --write` / the not-bounded warning) owns rerun-vs-inspect guidance, so a
+ *  "skipped (cannot be folded)" driver is never paired with a contradictory "rerun". */
 function fileCountNotBoundedDetail(r: ArchiveMaintenanceWrite["bounded_status"]["file_count_unbounded_reasons"]): string {
   const parts: string[] = [];
   if (r.pending_delete_intent) parts.push("a pending delete-intent journal");
   const fold = r.would_bundle + r.would_delete + r.would_supersede;
   if (fold > 0) parts.push(`${fold} loose record(s) to fold/delete`);
   if (r.would_retire_bundles > 0) parts.push(`${r.would_retire_bundles} superseded bundle(s) to retire`);
-  if (r.would_skip > 0) parts.push(`${r.would_skip} record(s) that cannot be folded (skipped)`);
-  return `${parts.length ? parts.join("; ") : "compaction work remains"}; rerun archive-maintain`;
+  if (r.would_skip > 0) parts.push(`${r.would_skip} record(s) that cannot be folded (skipped — needs inspection)`);
+  return parts.length ? parts.join("; ") : "compaction work remains";
 }
 
 /** Precise "why unreferenced old truth is not bounded" detail from the reason counts. */
@@ -672,7 +678,7 @@ function unreferencedNotBoundedDetail(r: ArchiveMaintenanceWrite["bounded_status
   const parts: string[] = [];
   if (r.would_drop > 0) parts.push(`${r.would_drop} droppable record(s) remain`);
   if (r.pending_delete_intent) parts.push("a pending delete-intent journal");
-  return `${parts.length ? parts.join("; ") : "droppable truth remains"}; rerun archive-maintain`;
+  return parts.length ? parts.join("; ") : "droppable truth remains";
 }
 
 function renderDryRunHuman(d: ArchiveMaintenanceDryRun): string {
@@ -771,7 +777,18 @@ function renderWriteHuman(d: ArchiveMaintenanceWrite): string {
     "  bundle byte size: not bounded yet; sharding deferred",
   );
   if (!v2Bounded) {
-    lines.push("", "⚠ the archive is NOT yet bounded (see Scope above) — rerun `code-pact state archive-maintain --write` to converge. Exit code 1.");
+    // Two kinds of not-bounded need DIFFERENT next actions: rerun-to-converge (a healthy
+    // source:both follow-up / a recovered bundle-pair survivor) vs INSPECT-needed (any skipped /
+    // deferred record — a `bundle_stale`, an unsupported `fsync`, a partial store — does NOT clear
+    // on a blind rerun). `summary.skipped` (compact + retention skips) is the inspect-needed signal.
+    if (s.skipped > 0) {
+      lines.push(
+        "",
+        `⚠ the archive is NOT yet bounded, and ${s.skipped} skipped/deferred record(s) (${s.compact_skipped} compaction, ${s.retention_skipped} retention) will NOT clear on a blind rerun — INSPECT them: read --json \`summary.bundle_member_deferred\` / \`atomic_pair_deferred\`, \`steps.compact_*.skipped[]\`, \`steps.retention.results[].skipped[]\`, and the \`bounded_status\` reasons. Exit code 1.`,
+      );
+    } else {
+      lines.push("", "⚠ the archive is NOT yet bounded (see Scope above) — rerun `code-pact state archive-maintain --write` to converge. Exit code 1.");
+    }
   }
   if (!checks.ok) {
     lines.push("", "⚠ a post-check did not pass — investigate the check above. Exit code 1.");

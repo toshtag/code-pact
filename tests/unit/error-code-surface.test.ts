@@ -63,8 +63,10 @@ const KNOWN_CODES: Record<string, "public" | "plan" | "doctor" | "adapter" | "in
   DECISION_PRUNE_NOT_ELIGIBLE: "public",
   DECISION_PRUNE_PLAN_STALE: "public",
   DECISION_PRUNE_WRITE_FAILED: "public",
-  // archive-level compaction Layer 4: the retention pair-delete journal faults surfaced by
-  // `state archive-retention --write` (fail-closed, recoverable — re-run completes the journal).
+  // archive-level compaction Layer 4: the delete-intent journal faults surfaced by the archive
+  // write verbs. Fail-closed and operator-guided: PENDING_* (and a transient DURABILITY fault) is
+  // re-runnable; RECOVERY_FAILED is NOT — it needs inspect/repair (corrupt journal, or a present
+  // journal whose referenced bundle authority is missing/changed).
   DELETE_INTENT_RECOVERY_FAILED: "public",
   DELETE_INTENT_DURABILITY_FAILED: "public",
   PENDING_DELETE_INTENT: "public",

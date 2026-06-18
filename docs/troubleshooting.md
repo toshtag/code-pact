@@ -242,11 +242,11 @@ These are the fail-closed faults of the **delete-intent journal** — how the ar
 {
   "ok": false,
   "error": { "code": "DELETE_INTENT_DURABILITY_FAILED", "message": "directory fsync failed (commit, ...): EIO" },
-  "data": { "recovery_pending": true }
+  "data": { "recovery_pending": true, "journal_status": "present", "partial_applied": true, "reason": "failed" }
 }
 ```
 
-`data.recovery_pending` tells you whether a delete-intent journal still remains on disk: `true` → a re-run will complete it (both-or-neither); `false` → nothing was committed (only the named record set is at stake). The deletion is always atomic across these failures — you never get one half of a pair.
+Read `data.journal_status` (`absent` / `present` / `corrupt`), `data.reason` (`failed` = a real I/O fault, fix it and re-run; `unsupported` = the platform cannot `fsync` a directory, so the pair was deferred conservatively — not this error), and `data.partial_applied` (a valid `present` journal's recovery may have completed part of a committed delete before failing). `data.recovery_pending` says whether a journal still remains: `true` → for a re-runnable fault, a re-run completes it (both-or-neither); the deletion is always atomic across these failures — you never get one half of a pair.
 
 ## Reading `state archive-maintain --write` output
 
