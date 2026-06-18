@@ -1,6 +1,6 @@
 # Governance
 
-This document is the agent- and reviewer-facing walkthrough of code-pact's **governance layer** — the deterministic rules for *who can write what, and when*. For the full design rationale, read [`design/decisions/governance-rfc.md`](../../design/decisions/governance-rfc.md).
+This document is the agent- and reviewer-facing walkthrough of code-pact's **governance layer** — the deterministic rules for *who can write what, and when*. For the full design rationale, see the **governance RFC** (retired — in git history and the `.code-pact/state` archive record).
 
 ## Why this layer exists
 
@@ -105,7 +105,7 @@ The governance layer adds one public code, `LOCK_HELD` — exit 2, transient and
 
 ## See also
 
-- [`design/decisions/governance-rfc.md`](../../design/decisions/governance-rfc.md) — the full accepted RFC with alternatives and open questions.
+- The **governance RFC** (retired; in git history / the `.code-pact/state` archive record) — the full accepted RFC with alternatives and open questions.
 - [`docs/cli-contract.md`](../cli-contract.md) — Public codes table (`LOCK_HELD`), § Advisory write lock, § Roadmap mutation policy, § Reserved phase ids, § Phase status manual-flip convention.
 - [`docs/migration.md`](../migration.md#v14x--v150) — governance adoption pattern, CI implications, backward compatibility.
 - [`docs/concepts/sample-phase.md`](sample-phase.md) — the TUTORIAL artifact and the reserved-id rules from the user side.

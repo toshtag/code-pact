@@ -1,6 +1,6 @@
 # Finalization & Reconciliation
 
-This document is the agent- and reviewer-facing walkthrough of `task finalize` and `phase reconcile`, the two commands that mechanize the drift between progress evidence and design intent. For the full design rationale, read [`design/decisions/finalization-reconciliation-rfc.md`](../../design/decisions/finalization-reconciliation-rfc.md).
+This document is the agent- and reviewer-facing walkthrough of `task finalize` and `phase reconcile`, the two commands that mechanize the drift between progress evidence and design intent. For the full design rationale, see the **finalization-reconciliation RFC** (retired — in git history and the `.code-pact/state` archive record).
 
 ## The drift these commands close
 
@@ -157,7 +157,7 @@ These commands' public codes (`TASK_FINALIZE_NOT_ELIGIBLE`, `TASK_FINALIZE_WRITE
 
 ## See also
 
-- [`design/decisions/finalization-reconciliation-rfc.md`](../../design/decisions/finalization-reconciliation-rfc.md) — the full RFC (alternatives considered, open questions).
+- The **finalization-reconciliation RFC** (retired; in git history / the `.code-pact/state` archive record) — the full RFC (alternatives considered, open questions).
 - [`docs/cli-contract.md` § `task finalize`](../cli-contract.md#task-finalize--flip-task-design-status-to-done-v12-p11) — full flag, envelope, and write-audit reference.
 - [`docs/cli-contract.md` § `phase reconcile`](../cli-contract.md#phase-reconcile--bulk-flip-task-design-statuses-for-a-phase-v12-p11) — full reconcile reference.
 - [`docs/concepts/task-readiness-fields.md`](task-readiness-fields.md) — the `writes` and `acceptance_refs` fields that finalize surfaces (and audits) but does not enforce mid-task.

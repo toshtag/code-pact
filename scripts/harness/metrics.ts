@@ -381,10 +381,11 @@ export interface Summary {
 const UNDECLARED_WRITE_RATE_NOTE =
   "Computing this metric requires attributing git commits to tasks. The project does not enforce a formal commit → task link, so a historical retrofit would either over-claim or require new lifecycle instrumentation. Tracked under evidence-harness-v2-rfc.md Non-goals.";
 
-// Emitted when the live plan has no tasks (all phases archived). Points at where
-// the real evidence lives instead of presenting 0s as a measured result.
+// Emitted when the live plan has no tasks (all phases archived). Scoped to the
+// TASK-derived metrics only — adapter drift and plan-lint issues do NOT depend on
+// live tasks and are still measured — so the note never over-claims "nothing measured".
 const NO_LIVE_TASKS_NOTE =
-  "No live tasks in design/phases — this corpus's completed phases are archived under .code-pact/state/archive, which the harness does not yet read. Every metric below is 0 because there was nothing to measure (not a measured failure). The last live-corpus baseline is in git history; harness archive-awareness is the tracked follow-up.";
+  "No live tasks in design/phases, so the task-derived metrics (pack size, verification rate, lifecycle adherence, task event density) are 0 — there were no live tasks to measure, not a measured failure. Agent-level adapter drift and plan-lint issues are still measured (see denominators.agents_enabled). This corpus's completed phases are archived under .code-pact/state/archive, which the harness does not yet read; the last live-corpus baseline is in git history, and harness archive-awareness is the tracked follow-up.";
 
 export interface BuildSummaryInput {
   harnessVersion: string;

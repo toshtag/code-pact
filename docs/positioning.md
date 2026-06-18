@@ -187,12 +187,13 @@ Two standing caveats on that snapshot:
   `.code-pact/state/archive` (which the harness does not yet read) — that is "nothing
   measured", not a measured failure; the last live-corpus baseline is in git history,
   and reading archived phase snapshots is the tracked harness follow-up.
-- **Undeclared-write rate is `deferred`** ([rationale](../design/decisions/evidence-harness-v2-rfc.md#non-goals-out-of-scope-for-p26))
+- **Undeclared-write rate is `deferred`** (rationale in the evidence-harness-v2 RFC
+  Non-goals — retired; in git history / the `.code-pact/state` archive record)
   — it awaits a future phase that attributes git commits to tasks via
   lifecycle instrumentation.
 
-Reproduce or refresh: `pnpm harness --corpus . --check` (read-only) or
-`--write` (overwrite the committed snapshot).
+Reproduce or refresh: `pnpm harness --corpus .` (read-only) or
+`pnpm harness --corpus . --write` (overwrite the committed snapshot).
 
 ## How positioning relates to scope
 

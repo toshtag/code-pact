@@ -5,7 +5,8 @@ applies_to: [feature, refactor, docs]
 
 # Doc authoring — generate enumerable facts; never police prose
 
-The rule behind [doc-truth-from-code-rfc.md](../decisions/doc-truth-from-code-rfc.md).
+This file is the live form of the rule decided in the **doc-truth-from-code RFC**
+(retired — in git history and the `.code-pact/state` archive record).
 Two short halves: how a contract fact reaches the docs, and the bar a new doc
 check must clear before it can fail anyone's PR.
 
@@ -82,6 +83,6 @@ link is the win; adding a check on that doc is not.
 
 ## References
 
-- [doc-truth-from-code-rfc.md](../decisions/doc-truth-from-code-rfc.md) — the decision and rollout.
+- The **doc-truth-from-code RFC** (retired; in git history / the `.code-pact/state` archive record) — the decision and rollout.
 - [`scripts/gen-doc-blocks.ts`](../../scripts/gen-doc-blocks.ts) — the generator + `--check`.
 - [`docs/maintainers/docs-maintenance.md`](../../docs/maintainers/docs-maintenance.md) — the doc-ownership map and the `check:docs` list.
