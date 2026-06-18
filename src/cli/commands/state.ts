@@ -549,6 +549,26 @@ function boundedLine(label: string, ok: boolean, notBoundedDetail: string): stri
   return `  ${label}: ${ok ? "bounded" : `not bounded — ${notBoundedDetail}`}`;
 }
 
+/** Precise "why file-count is not bounded" detail from the reason counts — so the operator
+ *  never reads a vague "0 records" line; each non-zero driver is named. */
+function fileCountNotBoundedDetail(r: ArchiveMaintenanceWrite["bounded_status"]["file_count_unbounded_reasons"]): string {
+  const parts: string[] = [];
+  if (r.pending_delete_intent) parts.push("a pending delete-intent journal");
+  const fold = r.would_bundle + r.would_delete + r.would_supersede;
+  if (fold > 0) parts.push(`${fold} loose record(s) to fold/delete`);
+  if (r.would_retire_bundles > 0) parts.push(`${r.would_retire_bundles} superseded bundle(s) to retire`);
+  if (r.would_skip > 0) parts.push(`${r.would_skip} record(s) that cannot be folded (skipped)`);
+  return `${parts.length ? parts.join("; ") : "compaction work remains"}; rerun archive-maintain`;
+}
+
+/** Precise "why unreferenced old truth is not bounded" detail from the reason counts. */
+function unreferencedNotBoundedDetail(r: ArchiveMaintenanceWrite["bounded_status"]["unreferenced_old_truth_unbounded_reasons"]): string {
+  const parts: string[] = [];
+  if (r.would_drop > 0) parts.push(`${r.would_drop} droppable record(s) remain`);
+  if (r.pending_delete_intent) parts.push("a pending delete-intent journal");
+  return `${parts.length ? parts.join("; ") : "droppable truth remains"}; rerun archive-maintain`;
+}
+
 function renderDryRunHuman(d: ArchiveMaintenanceDryRun): string {
   const s = d.summary;
   const b = d.bounded_status;
@@ -574,8 +594,8 @@ function renderDryRunHuman(d: ArchiveMaintenanceDryRun): string {
     `  plan lint: ${d.steps.checks.plan_lint.errors} error(s), ${d.steps.checks.plan_lint.warnings} warning(s), ${d.steps.checks.plan_lint.advisories} advisor${d.steps.checks.plan_lint.advisories === 1 ? "y" : "ies"}`,
     "",
     "Scope (current):",
-    boundedLine("file-count garbage", b.file_count_bounded, `${s.planned_loose_folded + s.planned_loose_deleted + s.planned_compact_skipped} loose record(s) to fold or delete (run --write)`),
-    boundedLine("unreferenced old truth", b.unreferenced_old_truth_bounded, `${s.planned_drop} droppable (run --write)`),
+    boundedLine("file-count garbage", b.file_count_bounded, fileCountNotBoundedDetail(b.file_count_unbounded_reasons)),
+    boundedLine("unreferenced old truth", b.unreferenced_old_truth_bounded, unreferencedNotBoundedDetail(b.unreferenced_old_truth_unbounded_reasons)),
     "  bundle byte size: not bounded yet; sharding deferred",
     "",
     "Run `code-pact state archive-maintain --write` to apply.",
@@ -587,8 +607,11 @@ function renderWriteHuman(d: ArchiveMaintenanceWrite): string {
   const s = d.summary;
   const b = d.bounded_status;
   const checks = d.steps.checks;
+  const v2Bounded = b.file_count_bounded && b.unreferenced_old_truth_bounded;
   const lines: string[] = [
-    "Archive maintenance complete.",
+    // Don't say "complete" when the archive is not yet bounded — the mutations were applied,
+    // but the operator (or CI) must rerun to converge.
+    v2Bounded ? "Archive maintenance complete." : "Archive maintenance applied, but the archive is not yet bounded.",
     "",
     "Files:",
     `  archive loose records: ${s.loose_records_before} → ${s.loose_records_after}`,
@@ -613,12 +636,15 @@ function renderWriteHuman(d: ArchiveMaintenanceWrite): string {
     `  plan lint: ${checks.plan_lint.errors} error(s), ${checks.plan_lint.warnings} warning(s), ${checks.plan_lint.advisories} advisor${checks.plan_lint.advisories === 1 ? "y" : "ies"}`,
     "",
     "Scope:",
-    boundedLine("file-count garbage", b.file_count_bounded, `${s.skipped} record(s) could not be folded/removed — inspect --json`),
-    boundedLine("unreferenced old truth", b.unreferenced_old_truth_bounded, "a follow-up run is needed (re-run archive-maintain)"),
+    boundedLine("file-count garbage", b.file_count_bounded, fileCountNotBoundedDetail(b.file_count_unbounded_reasons)),
+    boundedLine("unreferenced old truth", b.unreferenced_old_truth_bounded, unreferencedNotBoundedDetail(b.unreferenced_old_truth_unbounded_reasons)),
     "  bundle byte size: not bounded yet; sharding deferred",
   );
+  if (!v2Bounded) {
+    lines.push("", "⚠ the archive is NOT yet bounded (see Scope above) — rerun `code-pact state archive-maintain --write` to converge. Exit code 1.");
+  }
   if (!checks.ok) {
-    lines.push("", "⚠ a post-check did not pass — the archive maintenance itself succeeded; investigate the check above.");
+    lines.push("", "⚠ a post-check did not pass — investigate the check above. Exit code 1.");
   }
   return lines.join("\n");
 }

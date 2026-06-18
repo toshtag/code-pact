@@ -20,7 +20,7 @@ import {
   type RetentionDeleteOutcome,
   type RetentionPlan,
 } from "./archive-retention.ts";
-import { readDeleteIntent } from "./delete-intent-journal.ts";
+import { readDeleteIntent, recoverPendingDeletes, type RecoveryOutcome } from "./delete-intent-journal.ts";
 import { runValidate } from "../../commands/validate.ts";
 import { runPlanLint } from "../../commands/plan-lint.ts";
 
@@ -89,16 +89,49 @@ export async function countArchiveFiles(cwd: string): Promise<ArchiveFileCounts>
   return { loose_records: loose, bundles, total: loose + bundles };
 }
 
+/** The exact counts that drive `file_count_bounded` — so a "not bounded" verdict is never
+ *  a bare boolean: the operator (and the human renderer) can see WHICH compaction work
+ *  remains. The flag is true iff every count here is 0 / false. */
+export type FileCountReasons = {
+  /** loose records not yet in a bundle (would be folded). */
+  would_bundle: number;
+  /** loose records a verified bundle already holds (would be deleted). */
+  would_delete: number;
+  /** diverging loose records adopted into a bundle (would supersede). */
+  would_supersede: number;
+  /** superseded bundle files awaiting retire. */
+  would_retire_bundles: number;
+  /** records compaction CANNOT fold (bundle_stale / invalid member / unsafe path) — fail-closed. */
+  would_skip: number;
+  /** a pending delete-intent journal means the store is mid-mutation (unsettled). */
+  pending_delete_intent: boolean;
+};
+
+/** The exact counts that drive `unreferenced_old_truth_bounded`. The flag is true iff every
+ *  count is 0 / false. */
+export type UnreferencedReasons = {
+  /** records retention would still drop (a source:both survivor, a deferred pair, etc.). */
+  would_drop: number;
+  /** a pending delete-intent journal means the store is mid-mutation (unsettled). */
+  pending_delete_intent: boolean;
+};
+
 /** The bounded-status model. `referenced_truth_retained` is true BY CONSTRUCTION
  *  (retention never drops a referenced record — it blocks them). `bundle_byte_size_bounded`
- *  is ALWAYS false (sharding deferred) — the explicit no-over-claim field. */
+ *  is ALWAYS false (sharding deferred) — the explicit no-over-claim field. Each `*_bounded`
+ *  flag is paired with the exact counts that drove it, so a "not bounded" verdict is
+ *  actionable, never a bare boolean. */
 export type BoundedStatus = {
   /** the loose tail is folded and no compaction work remains (no foldable loose, no
    *  un-foldable `bundle_stale` loose, no superseded bundle to retire). */
   file_count_bounded: boolean;
+  /** the counts that drive `file_count_bounded` (all 0/false ⟺ bounded). */
+  file_count_unbounded_reasons: FileCountReasons;
   /** retention has no `would_drop` record left to remove (a source:both follow-up,
    *  a deferred mixed pair, or any other droppable record makes this false). */
   unreferenced_old_truth_bounded: boolean;
+  /** the counts that drive `unreferenced_old_truth_bounded` (all 0/false ⟺ bounded). */
+  unreferenced_old_truth_unbounded_reasons: UnreferencedReasons;
   /** always true — referenced records are kept (blocked), never dropped. */
   referenced_truth_retained: boolean;
   /** ALWAYS false — a single bundle's byte size is not bounded (sharding deferred). */
@@ -106,6 +139,13 @@ export type BoundedStatus = {
   /** where the byte-size bound is deferred to. */
   bundle_byte_size_bound_deferred_to: "sharding";
 };
+
+/** The two IN-SCOPE bounds of this layer (file-count + unreferenced-old-truth). `bundle_byte_size`
+ *  is an explicit NON-goal and is NOT part of this verdict — so the exit code never fails on the
+ *  documented deferral, only on the bounds the layer claims to hold. */
+export function isV2Bounded(b: BoundedStatus): boolean {
+  return b.file_count_bounded && b.unreferenced_old_truth_bounded;
+}
 
 /** Derive the bounded status from a set of compaction + retention plans (READ-ONLY).
  *  Used for the dry-run preview (current state) AND, on a FRESH re-plan after the write
@@ -126,21 +166,32 @@ export function deriveBoundedStatus(
   retentionPlans: readonly RetentionPlan[],
   pendingDeleteIntent: boolean,
 ): BoundedStatus {
+  const sum = (pick: (p: CompactArchivePlan) => number): number => compactPlans.reduce((n, p) => n + pick(p), 0);
+  const fileReasons: FileCountReasons = {
+    would_bundle: sum((p) => p.would_bundle.length),
+    would_delete: sum((p) => p.would_delete.length),
+    would_supersede: sum((p) => p.would_supersede.length),
+    would_retire_bundles: sum((p) => p.would_retire_bundles.length),
+    would_skip: sum((p) => p.would_skip.length),
+    pending_delete_intent: pendingDeleteIntent,
+  };
+  const unrefReasons: UnreferencedReasons = {
+    would_drop: retentionPlans.reduce((n, p) => n + p.would_drop.length, 0),
+    pending_delete_intent: pendingDeleteIntent,
+  };
   const fileCountBounded =
-    !pendingDeleteIntent &&
-    compactPlans.every(
-      (p) =>
-        p.would_bundle.length === 0 &&
-        p.would_supersede.length === 0 &&
-        p.would_delete.length === 0 &&
-        p.would_retire_bundles.length === 0 &&
-        p.would_skip.length === 0,
-    );
-  const unreferencedBounded =
-    !pendingDeleteIntent && retentionPlans.every((p) => p.would_drop.length === 0);
+    !fileReasons.pending_delete_intent &&
+    fileReasons.would_bundle === 0 &&
+    fileReasons.would_delete === 0 &&
+    fileReasons.would_supersede === 0 &&
+    fileReasons.would_retire_bundles === 0 &&
+    fileReasons.would_skip === 0;
+  const unreferencedBounded = !unrefReasons.pending_delete_intent && unrefReasons.would_drop === 0;
   return {
     file_count_bounded: fileCountBounded,
+    file_count_unbounded_reasons: fileReasons,
     unreferenced_old_truth_bounded: unreferencedBounded,
+    unreferenced_old_truth_unbounded_reasons: unrefReasons,
     referenced_truth_retained: true,
     bundle_byte_size_bounded: false,
     bundle_byte_size_bound_deferred_to: "sharding",
@@ -356,11 +407,13 @@ export type ArchiveMaintenanceWrite = {
     compact_before_retention: { name: "compact_before_retention"; ok: true; files_removed: number; bundles_written: number; skipped: ArchiveDeleteSkip[] };
     retention: { name: "retention"; ok: true; results: RetentionDeleteOutcome[] };
     compact_after_retention: { name: "compact_after_retention"; ok: true; ran: boolean; reason: string | null; files_removed: number; bundles_written: number; skipped: ArchiveDeleteSkip[] };
-    bounded_status: { name: "bounded_status"; ok: true };
+    bounded_status: { name: "bounded_status"; ok: boolean };
     checks: { name: "checks"; ok: boolean } & CheckResult;
   };
   bounded_status: BoundedStatus;
-  /** overall verdict: maintenance mutations succeeded AND the read-only post-checks pass. */
+  /** overall verdict (drives the CLI exit code): the maintenance mutations succeeded, the
+   *  read-only post-checks pass, AND the archive is bounded in this layer's sense (file-count +
+   *  unreferenced old truth). The byte-size NON-goal never makes this false. */
   ok: boolean;
 };
 
@@ -393,7 +446,22 @@ export async function runArchiveMaintenance(
   const pendingBefore = (await readDeleteIntent(cwd)).kind !== "absent";
   const completed: string[] = [];
 
-  // 2. compact-before-retention.
+  // 1. RECOVER any crashed prior pair-delete FIRST — BEFORE compaction. This is load-bearing:
+  //    compaction is NOT recovery-first (its readers hide pending-journal ids from FOLDING, but
+  //    its consolidation would RETIRE a pending bundle-pair's reduced survivor bundle as
+  //    "superseded", after which recovery can never complete — a permanent wedge). So
+  //    `archive-maintain` heals the journal here, then passes the result to
+  //    `applyArchiveRetention` as `preRecovered` so it does NOT double-recover but STILL defers
+  //    each recovered bundle-pair's loose survivor (one-bucket-per-run; the survivor drops next run).
+  let recovery: RecoveryOutcome;
+  try {
+    recovery = await recoverPendingDeletes(cwd);
+  } catch (err) {
+    throw new ArchiveMaintenanceError("journal_recovery", err as Error, completed, false);
+  }
+  completed.push("journal_recovery");
+
+  // 2. compact-before-retention (now SAFE — no journal is pending after step 1).
   let compactBefore: CompactPassResult;
   try {
     compactBefore = summarizeCompactPass(await compactAllKinds(cwd));
@@ -404,10 +472,11 @@ export async function runArchiveMaintenance(
   }
   completed.push("compact_before_retention");
 
-  // 3. retention (recovers first, then drops).
+  // 3. retention — recovery already ran (passed as `preRecovered`), so it plans + drops with the
+  //    recovered-bundle-pair exclusion in place; it does not recover a second time.
   let retentionResults: RetentionDeleteOutcome[];
   try {
-    retentionResults = await applyArchiveRetention(cwd, opts, hooks);
+    retentionResults = await applyArchiveRetention(cwd, { ...opts, preRecovered: recovery }, hooks);
   } catch (err) {
     throw new ArchiveMaintenanceError("retention", err as Error, completed, true);
   }
@@ -437,17 +506,34 @@ export async function runArchiveMaintenance(
     completed.push("compact_after_retention");
   }
 
-  // 5. bounded status from a FRESH re-plan of the real post-maintenance store.
-  const finalCompactPlans = compactAfterRan ? await planAllKinds(cwd) : afterRetentionPlans;
-  const finalRetentionPlans = await planArchiveRetention(cwd, opts);
-  const pendingAfter = (await readDeleteIntent(cwd)).kind !== "absent";
-  const boundedStatus = deriveBoundedStatus(finalCompactPlans, finalRetentionPlans, pendingAfter);
+  // 5. bounded status from a FRESH re-plan of the real post-maintenance store, then 6. the
+  //    read-only checks. These run AFTER the destructive steps, so a fault here is a fault
+  //    AFTER partial mutation — wrap it in the SAME honest envelope (which steps completed,
+  //    partial_applied) rather than letting an uncaught error escape the contract.
+  let boundedStatus: BoundedStatus;
+  let checks: CheckResult;
+  let after: ArchiveFileCounts;
+  try {
+    const finalCompactPlans = compactAfterRan ? await planAllKinds(cwd) : afterRetentionPlans;
+    const finalRetentionPlans = await planArchiveRetention(cwd, opts);
+    const pendingAfter = (await readDeleteIntent(cwd)).kind !== "absent";
+    boundedStatus = deriveBoundedStatus(finalCompactPlans, finalRetentionPlans, pendingAfter);
+  } catch (err) {
+    throw new ArchiveMaintenanceError("bounded_status", err as Error, completed, true);
+  }
+  completed.push("bounded_status");
+  try {
+    checks = await runChecks(cwd);
+    after = await countArchiveFiles(cwd);
+  } catch (err) {
+    throw new ArchiveMaintenanceError("checks", err as Error, completed, true);
+  }
 
-  // 6. read-only checks.
-  const checks = await runChecks(cwd);
-  const after = await countArchiveFiles(cwd);
-
-  const ok = checks.validate.ok && checks.plan_lint.ok;
+  // Overall verdict (drives the CLI exit code). It is NOT just "did the checks pass" — the
+  // command's JOB is to make the archive bounded in this layer's sense, so it must ALSO be
+  // `isV2Bounded` (file-count + unreferenced-old-truth). The byte-size NON-goal never fails it.
+  const checksPass = checks.validate.ok && checks.plan_lint.ok;
+  const ok = checksPass && isV2Bounded(boundedStatus);
 
   return {
     mode: "write",
@@ -485,8 +571,8 @@ export async function runArchiveMaintenance(
         bundles_written: compactAfter.bundles_written,
         skipped: compactAfter.skipped,
       },
-      bounded_status: { name: "bounded_status", ok: true },
-      checks: { name: "checks", ok, ...checks },
+      bounded_status: { name: "bounded_status", ok: isV2Bounded(boundedStatus) },
+      checks: { name: "checks", ok: checksPass, ...checks },
     },
     bounded_status: boundedStatus,
     ok,

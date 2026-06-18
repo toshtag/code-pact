@@ -11,7 +11,7 @@ import { loadArchiveBundles } from "./archive-bundle-loader.ts";
 import { enumerateArchivedPhaseSnapshots, resolveUnreferencedSnapshot } from "./load-phase-snapshot.ts";
 import { bindBundleMember, decisionRecordStem } from "./archive-bundle-binding.ts";
 import { validateEventPackTier1 } from "./event-pack-reader.ts";
-import { DeleteIntentDurabilityError, readPendingDeleteFilters, recoverPendingDeletes } from "./delete-intent-journal.ts";
+import { DeleteIntentDurabilityError, readPendingDeleteFilters, recoverPendingDeletes, type RecoveryOutcome } from "./delete-intent-journal.ts";
 import { deleteLoosePairsJournaled, type LoosePairToDelete, type PairDeleteOutcome, type PairMemberRetain } from "./retention-pair-delete.ts";
 import { deleteBundlePairsJournaled, type BundlePairDeleteOutcome } from "./retention-bundle-pair-delete.ts";
 import { removeBundleMembers } from "./bundle-member-removal.ts";
@@ -839,7 +839,7 @@ async function deleteLooseDropped(
  */
 export async function applyArchiveRetention(
   cwd: string,
-  opts: { keepLatest?: number } = {},
+  opts: { keepLatest?: number; preRecovered?: RecoveryOutcome } = {},
   hooks: RetentionApplyHooks = {},
 ): Promise<RetentionDeleteOutcome[]> {
   // 0. Heal any crashed prior pair-delete BEFORE planning, under the caller's write lock — so a
@@ -847,7 +847,12 @@ export async function applyArchiveRetention(
   //    throws (DeleteIntentRecoveryError) → fail-closed (the mutation does not proceed). The
   //    completed ids are surfaced in the outcome (`recovered`) so a recovery-completed drop of old
   //    truth is never reported silently — it is NOT this run's plan decision (`deleted`).
-  const recovery = await recoverPendingDeletes(cwd);
+  //    A caller that MUST run other archive mutations BEFORE retention (e.g. `state
+  //    archive-maintain`, which compacts first) recovers EXTERNALLY and passes the result as
+  //    `opts.preRecovered`, so this never double-recovers AND the recovered-bundle-pair exclusion
+  //    (below) still defers each loose survivor — the caller cannot let compaction run while a
+  //    journal is pending, but it still needs the same one-bucket-per-run accounting.
+  const recovery = opts.preRecovered ?? (await recoverPendingDeletes(cwd));
 
   const plans = await planArchiveRetention(cwd, opts);
   const byKind = new Map(plans.map((p) => [p.kind, p]));

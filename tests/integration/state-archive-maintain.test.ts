@@ -7,6 +7,7 @@ import { seedDurableEvents } from "../helpers/seed-events.ts";
 import { sha256Hex } from "../../src/core/archive/paths.ts";
 import { serializeDeleteIntent } from "../../src/core/archive/delete-intent-journal.ts";
 import { DELETE_INTENT_SCHEMA_VERSION } from "../../src/core/schemas/delete-intent.ts";
+import { deleteBundlePairsJournaled } from "../../src/core/archive/retention-bundle-pair-delete.ts";
 
 // `state archive-maintain` — the high-level operator orchestration over the existing
 // archive primitives (compact → retention → compact-again → re-plan → validate →
@@ -341,7 +342,70 @@ describe("state archive-maintain — pending delete-intent recovery is surfaced 
     expect(await fileExists(join(PHASES_DIR(), "P1.json"))).toBe(false);
     expect(await fileExists(join(EVENT_PACKS_DIR(), "P1.json"))).toBe(false);
     expect(await fileExists(join(tmpDir, ".code-pact", "state", "archive", "delete-intent.json"))).toBe(false);
-    expect(r.code).toBe(0); // P2 still referenced → validate/plan-lint green
+    // DECISIVE: a recovered loose pair is "old truth FULLY gone" — P1 must NOT have been folded
+    // into a bundle by the compact-before-retention step. (Compaction is reader-aware of the
+    // pending delete-intent ids, so it skips P1; recovery then unlinks the loose copies. Without
+    // that filter, compact-before-recovery would resurrect P1 into a bundle — this asserts it does not.)
+    for (const name of await readdir(BUNDLES_DIR())) {
+      const bundle = JSON.parse(await readFile(join(BUNDLES_DIR(), name), "utf8"));
+      expect((bundle.members as { id: string }[]).map((m) => m.id)).not.toContain("P1");
+    }
+    expect(r.code).toBe(0); // P2 still referenced + archive bounded → validate/plan-lint green & exit 0
+  });
+
+  it("a pending BUNDLE-pair journal is recovered FIRST (before compaction) — no wedge; the loose survivor is deferred, not double-counted; exit code follows bounded status", async () => {
+    // The regression guard for the recover-BEFORE-compact ordering. A crashed bundle-pair removal
+    // leaves a journal whose SURVIVOR bundle compaction would retire as "superseded"; if compaction
+    // ran first, recovery could NEVER find the survivor again — a permanent wedge
+    // (DELETE_INTENT_RECOVERY_FAILED). archive-maintain recovers first, so it heals cleanly.
+    await seedArchivedPhases(["P1", "P2", "P3"]); // P3 referenced (keeps validate green); P1,P2 unreferenced
+    for (const id of ["P1", "P2", "P3"]) expect(run(["state", "compact", id, "--write", "--json"]).code).toBe(0);
+    expect(run(["state", "compact-archive", "--write", "--json"]).code).toBe(0); // all → bundles (both kinds)
+    // Re-materialise P1's loose snapshot + pack (byte-identical) → P1 is `source: both`, so the
+    // bundle-pair removal leaves a LOOSE survivor (the ≤2-run convergence case).
+    for (const [dir, kind] of [[PHASES_DIR(), "phase_snapshot"], [EVENT_PACKS_DIR(), "event_pack"]] as const) {
+      const bn = (await readdir(BUNDLES_DIR())).find((n) => n.startsWith(`${kind}-`))!;
+      const bundle = JSON.parse(await readFile(join(BUNDLES_DIR(), bn), "utf8"));
+      const m = (bundle.members as { id: string; bytes: string }[]).find((x) => x.id === "P1")!;
+      await writeFile(join(dir, "P1.json"), m.bytes, "utf8");
+    }
+    await unreference(["P3"], ["P1", "P2"]);
+
+    // Crash a bundle-pair removal of P1 AFTER the journal commit, BEFORE the retire → a pending
+    // journal + the mid-state (old {P1,P2,P3} + reduced {P2,P3} survivor bundles coexist).
+    await expect(
+      deleteBundlePairsJournaled(tmpDir, [{ phase_id: "P1" }], { beforeRetire: () => { throw new Error("simulated crash after commit"); } }),
+    ).rejects.toThrow();
+    expect(await fileExists(join(tmpDir, ".code-pact", "state", "archive", "delete-intent.json"))).toBe(true);
+
+    const r = run(["state", "archive-maintain", "--write", "--keep-latest", "1", "--json"]);
+    const body = json(r);
+    expect(body.ok).toBe(true); // NOT DELETE_INTENT_RECOVERY_FAILED — recovered first, no wedge
+    const s = body.data!.summary;
+    expect(s.recovered_bundle_pairs).toBe(1); // the bundle pair was completed by recovery
+    expect(s.recovered_loose_pairs).toBe(0); // distinct field
+    expect(await fileExists(join(tmpDir, ".code-pact", "state", "archive", "delete-intent.json"))).toBe(false); // cleared
+
+    // The recovered bundle pair's id (P1) is NEVER `deleted` the same run — it is `recovered`
+    // (one bucket per run); its loose survivor is dropped by a subsequent run.
+    for (const res of body.data!.steps.retention.results as { deleted: string[] }[]) {
+      expect(res.deleted).not.toContain("P1");
+    }
+    // Exit code FOLLOWS the v2.0 bounded status (file-count + unreferenced), with validate green:
+    // 0 when bounded, 1 when a deferred record leaves it not-yet-bounded. (Which of the two
+    // unreferenced records keep-latest drops is timing-dependent, so assert the INVARIANT, not a
+    // fixed outcome — the byte-size NON-goal never affects the exit.)
+    const b = body.data!.bounded_status;
+    expect(b.bundle_byte_size_bounded).toBe(false);
+    expect(run(["validate", "--json"]).code).toBe(0); // validate is green → exit reflects bounded status alone
+    const v2Bounded = b.file_count_bounded && b.unreferenced_old_truth_bounded;
+    expect(r.code).toBe(v2Bounded ? 0 : 1);
+
+    // Converges to bounded within one more run (exit 0).
+    const r2 = run(["state", "archive-maintain", "--write", "--keep-latest", "1", "--json"]);
+    const b2 = json(r2).data!.bounded_status;
+    expect(b2.file_count_bounded && b2.unreferenced_old_truth_bounded).toBe(true);
+    expect(r2.code).toBe(0);
   });
 });
 
