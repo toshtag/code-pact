@@ -56,7 +56,13 @@ describe("state archive-retention — CLI surface (dry-run + --write)", () => {
     const body = json(r);
     expect(body.ok).toBe(true);
     expect(body.data?.mode).toBe("written");
-    const results = body.data?.results as { kind: string; deleted: string[]; recovered: string[]; vanished: string[]; skipped: unknown[] }[];
+    const results = body.data?.results as {
+      kind: string;
+      deleted: string[];
+      recovered: { id: string; intent_kind: "loose_pair" | "bundle_pair" }[];
+      vanished: string[];
+      skipped: unknown[];
+    }[];
     expect(results.map((x) => x.kind).sort()).toEqual(["decision_record", "event_pack", "phase_snapshot"]);
     for (const x of results) {
       expect(x.deleted).toEqual([]); // fresh project: nothing unreferenced to drop

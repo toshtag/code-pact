@@ -138,9 +138,12 @@ describe("bounded-archive validation — every would_drop kind is removed (v2.0 
 
     const run2 = await applyArchiveRetention(cwd, { keepLatest: 1 });
     expect(run2.find((o) => o.kind === "phase_snapshot")!.deleted).toContain("P1"); // now fully gone
+    expect(run2.find((o) => o.kind === "event_pack")!.deleted).toContain("P1");
     expect(await exists(phaseSnapshotPath(cwd, "P1"))).toBe(false);
     expect(await exists(eventPackPath(cwd, "P1"))).toBe(false);
+    // BOTH bundle members gone — no surviving copy of either side resolves.
     expect(resolvesInBundle("phase_snapshot", "P1")).toBe(false);
+    expect(resolvesInBundle("event_pack", "P1")).toBe(false);
   });
 
   it("a MIXED-source pair is resolved by compact-FIRST, then removed by retention (transient, not a leak)", async () => {
