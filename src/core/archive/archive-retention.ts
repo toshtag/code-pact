@@ -647,10 +647,12 @@ export type RetentionDeleteOutcome = {
   skipped: { id: string; reason: RetentionDeleteSkipReason }[];
   /** ids COMPLETED from a pending delete-intent journal (a prior run committed the delete and
    *  crashed before finishing) — recovered by THIS run before it planned. Distinct from `deleted`
-   *  (this run's plan decision) so a recovery-completed drop is never reported silently. A LOOSE-pair
-   *  recovery removed both files; a BUNDLE-pair recovery retired the bundle members (a `both` record's
-   *  loose copy may survive — still `recovered`, the bundle half was completed). */
-  recovered: string[];
+   *  (this run's plan decision) so a recovery-completed drop is never reported silently. TAGGED by
+   *  `intent_kind` because the two recoveries mean DIFFERENT things: a `loose_pair` recovery removed
+   *  both loose files (old truth fully gone); a `bundle_pair` recovery retired the bundle members,
+   *  but a `source: both` record's loose copy MAY still resolve (the loose layer drops it next run).
+   *  Never flatten the two — a reader must not treat a bundle-pair recovery as "fully gone". */
+  recovered: { id: string; intent_kind: "loose_pair" | "bundle_pair" }[];
 };
 
 function looseRelPath(kind: ArchiveBundleKind, id: string): string {
@@ -1007,11 +1009,16 @@ export async function applyArchiveRetention(
   }
 
   // Surface the recovery-completed pair ids (a prior run's committed delete this run finished) on
-  // BOTH bound kinds — a recovered LOOSE pair removed both files; a recovered BUNDLE pair retired
-  // both bundle members (a `both` record's loose copy may survive — still a completed recovery, not
-  // this run's `deleted`). `recovery.completed` is the union of both (split available on the result).
-  phaseOut.recovered = recovery.completed;
-  eventOut.recovered = recovery.completed;
+  // BOTH bound kinds, TAGGED by intent_kind — a recovered LOOSE pair removed both files (fully gone);
+  // a recovered BUNDLE pair retired both bundle members (a `both` record's loose copy may survive —
+  // still a completed recovery, not this run's `deleted`). The two are NOT flattened (the #480 P2.1
+  // contract): a reader must distinguish "old truth fully gone" from "the bundle half was completed".
+  const recoveredEntries = [
+    ...recovery.loose_pairs.map((id) => ({ id, intent_kind: "loose_pair" as const })),
+    ...recovery.bundle_pairs.map((id) => ({ id, intent_kind: "bundle_pair" as const })),
+  ];
+  phaseOut.recovered = recoveredEntries;
+  eventOut.recovered = recoveredEntries;
 
   return [phaseOut, eventOut, decisionOut];
 }
