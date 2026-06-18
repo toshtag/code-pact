@@ -4,19 +4,24 @@ The repeatable steps to cut a release. Most of it is a normal PR; only the
 **signed tag** and **`npm publish`** are maintainer-local (they need the
 maintainer's signing key and npm credentials).
 
-Only `dist/` + `LICENSE` ship in the npm package (`package.json` `files`). So
-**code changes under `src/` require a release to reach users; docs-only changes
-do not** (they're already visible in the repo).
+`package.json` `files` whitelists `dist/` + `LICENSE`; npm additionally **always**
+includes `package.json` and the `README` regardless of `files`. Source under `src/`
+and docs other than the README are **not** shipped. So **code changes under `src/`
+require a release to reach users; docs under `docs/**` / `design/**` do not** (they
+are not shipped — read them in the repo). The one exception is `README.md`: it is
+visible in the repo immediately, but the README shown on the **npm package page**
+updates only on publish — release a README-only change when that npm-facing copy
+matters.
 
 ## Pick the version
 
-Semantic versioning across the v1.x line:
+Semantic versioning, per major line (`MAJOR.MINOR.PATCH`):
 
-- **patch** (`1.x.Y`) — bug fixes only, no new surface.
-- **minor** (`1.X.0`) — additive features (new commands/flags/aliases, new
+- **patch** (`MAJOR.MINOR.patch`) — bug fixes only, no new surface.
+- **minor** (`MAJOR.minor.0`) — additive features (new commands/flags/aliases, new
   optional schema fields). Backwards-compatible.
-- **major** — a breaking change to a `Stable (v1.0)` surface. Avoid; the v1.x
-  contract is frozen.
+- **major** (`major.0.0`) — a breaking change to a `Stable` surface. Rare; each one
+  ships with a migration note in [`docs/upgrading.md` § Major upgrades](../upgrading.md#major-upgrades).
 
 ## Release-prep PR (all automatable steps)
 
@@ -67,7 +72,7 @@ On a `chore/release-<version>` branch:
 After the release-prep PR merges to `main`:
 
 7. **SSH-signed annotated tag** on the merge commit. `SECURITY.md` requires
-   v1.x releases to use SSH-signed tags (so the GitHub tag page shows
+   stable releases to use SSH-signed tags (so the GitHub tag page shows
    "Verified"); use `-s` (not `-a`, which is annotated but not signed).
    Lightweight tags are rejected by a hook; signing setup is in
    [CONTRIBUTING](../../CONTRIBUTING.md#tag-signing-maintainer-only):
@@ -104,6 +109,9 @@ After the release-prep PR merges to `main`:
 
 ## What does NOT need a release
 
-- Documentation (`docs/**`, `README.md`, `design/**`) — not shipped; already in
-  the repo on merge.
+- Documentation under `docs/**` and `design/**` — not shipped; already in the repo
+  on merge.
+- `README.md` is the exception: it is visible in the repo immediately, but the README
+  shown on the **npm package page** updates only on publish — release a README-only
+  change only when that npm-facing copy matters.
 - CI scripts / dev dependencies — not in the published package.

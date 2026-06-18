@@ -1,0 +1,227 @@
+{
+  "schema_version": 1,
+  "kind": "decision_record",
+  "member_ids_sha256": "cba137192bc13244878bf3dcb23dd307f31a3e1d1e36e8fcb81918a27ff92e65",
+  "members": [
+    {
+      "id": "P22-cancelled-adapter-schema-v2-b7bb9dba",
+      "sha256": "9bcfbd7ef5590762bca83d54bbfdd19f53994ef41350b0858b3e847dd6db3269",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/P22-cancelled-adapter-schema-v2.md\",\n  \"original_path\": \"design/decisions/P22-cancelled-adapter-schema-v2.md\",\n  \"path_sha256\": \"b7bb9dba5e72c87c291b56f686ac70a47cc3004f16c73a949889850f508f2fea\",\n  \"title\": \"P22 cancellation — Adapter schema v2 and template signature tracking\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-06-18T09:53:25.373Z\",\n  \"source_sha256\": \"3238610a4452bfb54ba3911b044b1c2cc0866416726a7584ff39ac2f0840a81d\"\n}\n"
+    },
+    {
+      "id": "P37-deferred-outcome-audit-75c3d3ee",
+      "sha256": "9f079c365ab8720c54cb8855639059be8e194ba20dd6a49fde54e3007c8c6f99",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/P37-deferred-outcome-audit.md\",\n  \"original_path\": \"design/decisions/P37-deferred-outcome-audit.md\",\n  \"path_sha256\": \"75c3d3ee08a35ee79c15102fe83384c7261cbc0b7de9c067759c65b026270bfb\",\n  \"title\": \"P37 deferral — outcome audit / effectiveness measurement\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-06-18T09:53:25.693Z\",\n  \"source_sha256\": \"a63614e7d414fcd686ea961caef2fbdbca1be88431571a1d1bf13c47c75b576d\"\n}\n"
+    },
+    {
+      "id": "adapter-contract-hardening-rfc-640f8916",
+      "sha256": "fbe7c2f79df5f20dbc35d9de4c7570acbb00b3672b2bc4a8127eb61a30e91ca5",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/adapter-contract-hardening-rfc.md\",\n  \"original_path\": \"design/decisions/adapter-contract-hardening-rfc.md\",\n  \"path_sha256\": \"640f891649e816ceddfbdd48dc116da38cb4209da35f691d4a44560ecf807e43\",\n  \"title\": \"Adapter Contract Hardening (P30)\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-06-18T09:53:26.009Z\",\n  \"source_sha256\": \"63601cb75ffc0da63e4f4d0ded86f6a08977b8b24bba671cac2e0f938de65e72\"\n}\n"
+    },
+    {
+      "id": "adr-downstream-commitments-rfc-edd57e4e",
+      "sha256": "9008ed4902625cd454882150e13527909c56f876cab53b75ab5f5147a7984f60",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/adr-downstream-commitments-rfc.md\",\n  \"original_path\": \"design/decisions/adr-downstream-commitments-rfc.md\",\n  \"path_sha256\": \"edd57e4ec897e57ef4bb36e69413c2dcbc57c8d5ab5c44e4d03004b27aceaf1b\",\n  \"title\": \"RFC: ADR downstream commitments\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-06-18T09:53:26.324Z\",\n  \"source_sha256\": \"f3f666a3ae28d11f73a73292b90913403fd8854ca91dc02ca86826d2ba3b1ada\"\n}\n"
+    },
+    {
+      "id": "adr-quality-advisory-rfc-9b1d0f92",
+      "sha256": "5270aadcb25b3e33a7ee390ddeb5191bb25dd67d1233718b08b1b5fb40200724",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/adr-quality-advisory-rfc.md\",\n  \"original_path\": \"design/decisions/adr-quality-advisory-rfc.md\",\n  \"path_sha256\": \"9b1d0f927b893bc737cd7dd81911f82e7f432cb03b94a5c180e6f429e06567ec\",\n  \"title\": \"RFC: ADR quality advisory (stub-only)\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-06-18T09:53:26.646Z\",\n  \"source_sha256\": \"e41dae68bd7142aaae58f990f7dc7a541e94aa9147b27254c01f6cb7f105cc36\"\n}\n"
+    },
+    {
+      "id": "agent-contract-rfc-8b3c92ac",
+      "sha256": "ec52a4557233b7f42245a40fa21cce5768cd72aa54b680177b022784885a1269",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/agent-contract-rfc.md\",\n  \"original_path\": \"design/decisions/agent-contract-rfc.md\",\n  \"path_sha256\": \"8b3c92ac9d5a2e1f52f0c188d4164487f9c1d9081bd842c864a761dc52742ad3\",\n  \"title\": \"RFC: Agent contract adapter hardening\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-06-18T09:53:26.971Z\",\n  \"source_sha256\": \"46fc68ae87798c37f8988f404021583f854613eb223f02f6c293aca81eea876c\"\n}\n"
+    },
+    {
+      "id": "agent-contract-v2-rfc-6a50ccfd",
+      "sha256": "9ab07332d31bcca9202cf3ca2ef034f35e0995231b52e914ad281db39a47124f",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/agent-contract-v2-rfc.md\",\n  \"original_path\": \"design/decisions/agent-contract-v2-rfc.md\",\n  \"path_sha256\": \"6a50ccfd79f63826b738fd7fbec606212cdbc9b111106109d14680bd6328ac03\",\n  \"title\": \"RFC: Agent Contract v2 — task prepare, context explain, adapter conformance\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-06-18T09:53:27.305Z\",\n  \"source_sha256\": \"000dc1e9c342190bcd64dc225e3a7a24a10a26828ccc9d054dac4ba6a246dc80\"\n}\n"
+    },
+    {
+      "id": "archive-level-compaction-rfc-b8864cd7",
+      "sha256": "e63d1ddf11e5c64935ec4d92062abad9401a196d199794478ad6a175306b3cb7",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/archive-level-compaction-rfc.md\",\n  \"original_path\": \"design/decisions/archive-level-compaction-rfc.md\",\n  \"path_sha256\": \"b8864cd7ecb79decd68242d689973813363d6df2e4edeb709668d09350cb58c7\",\n  \"title\": \"RFC: Bounded archive — retention + compaction so committed state does not grow forever\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-06-18T10:03:56.372Z\",\n  \"source_sha256\": \"0fc698476f7d20c1cbf5f06e201787747d990d76d2755aef54e6bf025f3650cb\"\n}\n"
+    },
+    {
+      "id": "bundle-member-removal-rfc-1ac0126e",
+      "sha256": "020a1fcd3cdc291ddea150908824175a8c6b71dbc37f5c04be2518b93d66cd22",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/bundle-member-removal-rfc.md\",\n  \"original_path\": \"design/decisions/bundle-member-removal-rfc.md\",\n  \"path_sha256\": \"1ac0126e1bfd41289692dde47dd220244b19420021e65b09af25c2671917f2f4\",\n  \"title\": \"RFC: Bundle-member removal — actually shrink the bundle-backed `would_drop` tail (supersede-by-removal)\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-06-18T10:03:56.714Z\",\n  \"source_sha256\": \"7ea3bde503f52031f2307c4882824c9f87e08be5d895a440dc4a15abc7aa8bf2\"\n}\n"
+    },
+    {
+      "id": "ci-adoption-page-rfc-c8072cde",
+      "sha256": "9a0d5c7e6138e3bd75a5d6446cd87e39d85b3dd91cf66c3d3a9abe78ccac69fb",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/ci-adoption-page-rfc.md\",\n  \"original_path\": \"design/decisions/ci-adoption-page-rfc.md\",\n  \"path_sha256\": \"c8072cde6b33996eade9dfeb953e3026708dc4e3fe8d68550cac570b2fd2ee26\",\n  \"title\": \"RFC: CI / adoption page (P44)\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-06-18T09:53:27.622Z\",\n  \"source_sha256\": \"9c7bb7951b03b75aeda09ce41b69d524fba52a60ef2a95b2bae826182078be19\"\n}\n"
+    },
+    {
+      "id": "ci-branch-drift-rfc-c7de75f1",
+      "sha256": "85475b3a6ea151977dfeb5fd59f275b8aacc6471f21491ce5b1e6da25bc4c4b2",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/ci-branch-drift-rfc.md\",\n  \"original_path\": \"design/decisions/ci-branch-drift-rfc.md\",\n  \"path_sha256\": \"c7de75f183824e839e41866e94c2d6c0bbe8cd175921d5c49092517d5feade38\",\n  \"title\": \"RFC: CI branch-drift detection\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-06-18T09:53:27.940Z\",\n  \"source_sha256\": \"cada2c53e3fcb3f0eccd6f8dfa07f64d53ba11528ef23b68ca50134ac1d087be\"\n}\n"
+    },
+    {
+      "id": "cli-alias-ux-rfc-6d80fa15",
+      "sha256": "8118bad8206d4e10cc7f23b957a8e83366276f63931fb8f194e23ddd9511f52a",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/cli-alias-ux-rfc.md\",\n  \"original_path\": \"design/decisions/cli-alias-ux-rfc.md\",\n  \"path_sha256\": \"6d80fa154de98a2391f9a78f0603c9981a59f8dae28ed35a32ba62f786636e59\",\n  \"title\": \"RFC: Beginner-friendly CLI aliases\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-06-15T00:21:36.497Z\",\n  \"source_sha256\": \"b87114807d8de51bd05eb56bc678dbf891b4aea7b9349cee67793a7695185185\"\n}\n"
+    },
+    {
+      "id": "cli-command-spec-rfc-f780653c",
+      "sha256": "b38b17253226abd40c0761eec835d8753c423b7f01dfedf989325a6d89def76a",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/cli-command-spec-rfc.md\",\n  \"original_path\": \"design/decisions/cli-command-spec-rfc.md\",\n  \"path_sha256\": \"f780653cb4feb872392c9c073df91facc8e7cbbdb216864f07c18aab8e14f668\",\n  \"title\": \"RFC: CLI command spec — single source for parse, help, and reference docs\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-06-18T09:53:28.256Z\",\n  \"source_sha256\": \"60a944a24db314ddf5d9567126af866d63525bd485a270a27e546a64aa86fba6\"\n}\n"
+    },
+    {
+      "id": "cli-maintainability-rfc-4508e72e",
+      "sha256": "08ecf25233b12e5908cc867ed0cfb66051f4a8d8e934cdc3b97824fb74b1de98",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/cli-maintainability-rfc.md\",\n  \"original_path\": \"design/decisions/cli-maintainability-rfc.md\",\n  \"path_sha256\": \"4508e72e879c3de1b35d971eb9aae280a53a1fb7a3a7bff34fa824397738b415\",\n  \"title\": \"RFC: CLI maintainability hardening — `src/cli.ts` split\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-06-18T09:53:28.573Z\",\n  \"source_sha256\": \"f1a041f3e065436d121db45d82d9a79a2d4f1dda480f056b52686200de628a87\"\n}\n"
+    },
+    {
+      "id": "collaboration-safe-state-rfc-cd897ac7",
+      "sha256": "71a89dccf1068e6736103d9e15d2aeaff0d2f68e9fa4060cce35cc86744c12d7",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/collaboration-safe-state-rfc.md\",\n  \"original_path\": \"design/decisions/collaboration-safe-state-rfc.md\",\n  \"path_sha256\": \"cd897ac785a49ca8bc7803035d64beb32842875b83870a19f709585ce96afcc6\",\n  \"title\": \"RFC: Collaboration-safe shared state — event-file progress ledger\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-06-18T10:03:57.149Z\",\n  \"source_sha256\": \"14c2b4ca8a1a1218b5315339c877ba1264dbdb224f424f90458f37ab66ac708e\"\n}\n"
+    },
+    {
+      "id": "collaboration-ux-rfc-34f208a2",
+      "sha256": "8b26f5a595dd1685c6883a943a09438e646dfdd26fceba555bc75950d6ca734f",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/collaboration-ux-rfc.md\",\n  \"original_path\": \"design/decisions/collaboration-ux-rfc.md\",\n  \"path_sha256\": \"34f208a205f94737107b7da955b320df3bfe33ce4ef7be380cec1288846599a6\",\n  \"title\": \"RFC: Collaboration UX — attribution, activity overview, and conflict recovery\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-06-18T09:53:28.889Z\",\n  \"source_sha256\": \"6d317eeffa97c4d9594acaca1f30f42e1915f79ed3173221e8d2fc694ba70a6d\"\n}\n"
+    },
+    {
+      "id": "context-budget-rfc-948a6828",
+      "sha256": "be0375e3558928446ceb588a02b9ab510c1f002bbfa4b17f3176f4be1722248f",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/context-budget-rfc.md\",\n  \"original_path\": \"design/decisions/context-budget-rfc.md\",\n  \"path_sha256\": \"948a6828896de72791ee3f6745fcf7abfc32d797560953fede4077e4e798fdc5\",\n  \"title\": \"RFC: Context budget enforcement\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-06-18T09:53:29.204Z\",\n  \"source_sha256\": \"cf10a44142c9d0c85fbc254c004a94dcb49bccc1bf378769da9d000fc08a5e4c\"\n}\n"
+    },
+    {
+      "id": "context-fit-rfc-eeb4f9ee",
+      "sha256": "b3c94bc691e541636152ad85410deec90de956cd0802a9874407661de33d8585",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/context-fit-rfc.md\",\n  \"original_path\": \"design/decisions/context-fit-rfc.md\",\n  \"path_sha256\": \"eeb4f9ee1c022f6e8caca9497dd95898ecc6af85a4c587abfc5f4366806a32a4\",\n  \"title\": \"RFC: Context Fit\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-06-18T09:53:29.582Z\",\n  \"source_sha256\": \"e39bf1cba6c2b1c1ccc3cdcc7b5429b3d8279d32734cb256fba95c0d5272e4de\"\n}\n"
+    },
+    {
+      "id": "context-pack-write-contract-hygiene-rfc-b127e12d",
+      "sha256": "14e155bc19382628e653cc6625c532eff23f88716e9faff3261c9828a1912980",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/context-pack-write-contract-hygiene-rfc.md\",\n  \"original_path\": \"design/decisions/context-pack-write-contract-hygiene-rfc.md\",\n  \"path_sha256\": \"b127e12dd8a0c91ec4f4745ef551f6e144fca24ff981ffd1e17c1e18f7fd28c8\",\n  \"title\": \"RFC: Context-pack write contract hygiene (P45)\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-06-18T09:53:29.905Z\",\n  \"source_sha256\": \"b8409337bdaa213e98740de5726b0e3ae5663ab9ed71475545a2832b63707cac\"\n}\n"
+    },
+    {
+      "id": "control-plane-v2-rfc-d3dfc339",
+      "sha256": "a26bc9c2819e4ea109bc7c9f3c97a77940496d89aec43f0622c56b7a57445bce",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/control-plane-v2-rfc.md\",\n  \"original_path\": \"design/decisions/control-plane-v2-rfc.md\",\n  \"path_sha256\": \"d3dfc339630db09e6a9796f7da7ad9454ff8f652da6a8dbc2a87933f217e3c52\",\n  \"title\": \"RFC: Control-plane v2 — collaboration-safe phases, discovery, and task layout\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-06-18T10:03:57.529Z\",\n  \"source_sha256\": \"a6be8c187f3044333ebcfdc23fc723b5961d81a5f976f25ba8721dae248e1d5a\"\n}\n"
+    },
+    {
+      "id": "cross-phase-deps-rfc-dad2728d",
+      "sha256": "0d084a376bf920d51d2dcc6b8c99fab113542ac4cabbd4ca867fa8b2e18b5257",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/cross-phase-deps-rfc.md\",\n  \"original_path\": \"design/decisions/cross-phase-deps-rfc.md\",\n  \"path_sha256\": \"dad2728d7a64a08ce3ddf3795299852ab115733f127b97b28a4c370865ca019d\",\n  \"title\": \"RFC: Cross-phase dependencies + aggregated runbook\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-06-18T09:53:30.217Z\",\n  \"source_sha256\": \"1fcf82a786c647ed610f679530fe646dd8cbbc096a0de40fed6b79572e20a7c5\"\n}\n"
+    },
+    {
+      "id": "design-docs-ephemeral-directive-7694485f",
+      "sha256": "ff75a98c8e2bea8793ff2a51d3478eb4cf397d2c61d56fd8450a1000af361ad4",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/design-docs-ephemeral-directive.md\",\n  \"original_path\": \"design/decisions/design-docs-ephemeral-directive.md\",\n  \"path_sha256\": \"7694485f657ec241574e62714fcaba5a6a2ea274f5ab7ec93e3f767c9375f19f\",\n  \"title\": \"Product Directive: Design docs are ephemeral (v2.0 control-plane relocation)\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-06-12T02:59:53.383Z\",\n  \"source_sha256\": \"c2f56995b4274237e1d5f71ac9ee8f958ee44b3a661eb8ef9c1ae37e86da653a\"\n}\n"
+    },
+    {
+      "id": "deterministic-roadmap-stabilization-rfc-f2108a77",
+      "sha256": "7804335a85f07a9ac8d2d5e7b02d46ebbe1428bff982e3d639ea2d86b17c02ba",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/deterministic-roadmap-stabilization-rfc.md\",\n  \"original_path\": \"design/decisions/deterministic-roadmap-stabilization-rfc.md\",\n  \"path_sha256\": \"f2108a77f149435a41e361975cb8e5a3f8f67a909904d4d60d94a1ee255398b3\",\n  \"title\": \"RFC: Deterministic stabilization of AI-assisted roadmap generation\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-06-18T09:53:30.533Z\",\n  \"source_sha256\": \"be177ba0279b56f931080eb9ce1ea11526d48ab2d42dbf9eefa879d5624dc4f3\"\n}\n"
+    },
+    {
+      "id": "doc-truth-from-code-rfc-5c5975cf",
+      "sha256": "fd9c4c17f3b672b6afef4be9eeb5ff9beb70265c4cd1317a632fef2015de000b",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/doc-truth-from-code-rfc.md\",\n  \"original_path\": \"design/decisions/doc-truth-from-code-rfc.md\",\n  \"path_sha256\": \"5c5975cf6cda1a0a98dee26de10cdebf917565304dbdac0c0c30b0452b184cbf\",\n  \"title\": \"RFC: Doc truth from code\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-06-18T09:53:30.849Z\",\n  \"source_sha256\": \"d3de5ee91244a2e644174ee954b19069d76656b005720411f7d469b516593167\"\n}\n"
+    },
+    {
+      "id": "dogfood-durable-truth-migration-rfc-1d0599dc",
+      "sha256": "fa7dd872de6ec7eea7425a2d2c95809bd0ad8892cc048f41f255ab58c6b7baec",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/dogfood-durable-truth-migration-rfc.md\",\n  \"original_path\": \"design/decisions/dogfood-durable-truth-migration-rfc.md\",\n  \"path_sha256\": \"1d0599dc86b650b1769aa04ef0d33b0e9d07af57662e2e4774d5207cb1f66a01\",\n  \"title\": \"RFC: Dogfood durable-truth migration — converting this repo's history so deleting `design/` just works\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-06-18T10:03:57.865Z\",\n  \"source_sha256\": \"a8c3d377c05baec304853a390bc684e6fc6d8a2ec6f01c9fcc26b30f2aeb902b\"\n}\n"
+    },
+    {
+      "id": "dogfood-trust-hardening-rfc-1282a38d",
+      "sha256": "22cdd1d6aacb8f56169c3c39865fbdd4abebfc7e928ae5757d631fa35b645794",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/dogfood-trust-hardening-rfc.md\",\n  \"original_path\": \"design/decisions/dogfood-trust-hardening-rfc.md\",\n  \"path_sha256\": \"1282a38d93b5daa266d7ebc61265a558cf1f6ae84de843af369608b656372b2a\",\n  \"title\": \"RFC: Dogfood Trust Hardening — External Completion, Drift Detection, ADR Status\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-06-15T00:21:37.009Z\",\n  \"source_sha256\": \"c33141d14af6c28fef2807a97607c917e81a6097212680b6c6bd275696958810\"\n}\n"
+    },
+    {
+      "id": "event-pack-compaction-rfc-886dfe69",
+      "sha256": "903265cc8e77d436f9e604fe795e7e762ec35dfbd625cfbc7d1ef963f372f5a7",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/event-pack-compaction-rfc.md\",\n  \"original_path\": \"design/decisions/event-pack-compaction-rfc.md\",\n  \"path_sha256\": \"886dfe69bf3809a592c627927d9dca9edef2c0b5661420520c9a65b6b41be7d1\",\n  \"title\": \"RFC: Event-pack compaction lifecycle\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-06-18T10:03:58.214Z\",\n  \"source_sha256\": \"43af0411e8f6f9297fde2fd412a864386485ca695d679f2c222c0127637dd274\"\n}\n"
+    },
+    {
+      "id": "evidence-harness-rfc-bd468600",
+      "sha256": "e494446ac190e0281f6bc1d8922e4ec5a3331c7c7967835941db57b7dc9ed346",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/evidence-harness-rfc.md\",\n  \"original_path\": \"design/decisions/evidence-harness-rfc.md\",\n  \"path_sha256\": \"bd46860027e72876aeee7b055d655736863fc34570f592f8ea9bc0416c609fa3\",\n  \"title\": \"RFC: Evidence harness — internal-only dogfood measurement\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-06-18T09:53:31.161Z\",\n  \"source_sha256\": \"4ec8611bbc478d5e3c5757e8729819f68ac711abbc03a7ce8e3e7496bc1cd0d3\"\n}\n"
+    },
+    {
+      "id": "evidence-harness-v2-rfc-2bacb199",
+      "sha256": "1e2c68db1e07f9c2f5d97592e8d42de304a1b5bb2b062eadd80f2c687ea66bad",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/evidence-harness-v2-rfc.md\",\n  \"original_path\": \"design/decisions/evidence-harness-v2-rfc.md\",\n  \"path_sha256\": \"2bacb199ce83a3542b0468f456edf470de7f6e318cdf22e10e855aa20099722b\",\n  \"title\": \"RFC: Evidence Harness v2 — aggregate stats and adherence baselines\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-06-18T09:53:31.472Z\",\n  \"source_sha256\": \"a7d5dc6bf7d6cac5c240557f94b8a06ff6852dd5a08b932d67ac2118313ee48a\"\n}\n"
+    },
+    {
+      "id": "failure-clarity-rfc-f8f24cc1",
+      "sha256": "cc1b2a418c4b733e5e1b16e0bff0db5b1205a3f74bfff2653ad048cd61c8056a",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/failure-clarity-rfc.md\",\n  \"original_path\": \"design/decisions/failure-clarity-rfc.md\",\n  \"path_sha256\": \"f8f24cc14fd73aa2b9c91ac53cae25b71481a973463e17bc120cdf9b93634686\",\n  \"title\": \"RFC: Failure clarity for `task complete` / `task finalize`\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-06-18T09:53:31.789Z\",\n  \"source_sha256\": \"bfd89444ad8ac64881a2e5ad36dd89f77abd29001731b5345f6e8399611f544c\"\n}\n"
+    },
+    {
+      "id": "finalization-reconciliation-rfc-5c893a13",
+      "sha256": "cd748c0a9c4168e87f6b566fb5c3b6cc7ae38f1cd7292fb3aef9200c2b07184b",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/finalization-reconciliation-rfc.md\",\n  \"original_path\": \"design/decisions/finalization-reconciliation-rfc.md\",\n  \"path_sha256\": \"5c893a13276a9fde2b11e6f4fe3936b9d08c7f78abbe0cd1cb04f5ca8a6f4632\",\n  \"title\": \"RFC: Finalization & Reconciliation\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-06-18T09:53:32.106Z\",\n  \"source_sha256\": \"c46d3e10c3e23bd5b5b7861c4431972d3ee14b7de2ca38a2413871f9c214ba0c\"\n}\n"
+    },
+    {
+      "id": "governance-rfc-028d7ede",
+      "sha256": "3059ae0d65f01e961914edff1c9ef75bf664116b30a7b8e3ed44fa6dd608468a",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/governance-rfc.md\",\n  \"original_path\": \"design/decisions/governance-rfc.md\",\n  \"path_sha256\": \"028d7edea931bf5fac6b1c83e0d143731d96a1ccf81d68d2bb55e513ee1e8f8c\",\n  \"title\": \"RFC: Governance\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-06-18T09:53:32.428Z\",\n  \"source_sha256\": \"6ed10f1800235a2644f895a877e7756bfec394b61fdf53f0f15d825f4560e1f1\"\n}\n"
+    },
+    {
+      "id": "leaf-help-docs-straightening-rfc-3b900922",
+      "sha256": "4eb8346125909cf3e37cf62d65adbe2704b331209b108b1e6668b14b03db5894",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/leaf-help-docs-straightening-rfc.md\",\n  \"original_path\": \"design/decisions/leaf-help-docs-straightening-rfc.md\",\n  \"path_sha256\": \"3b9009220c39d9d2ac1aded60c25e0e9b1384dcf904d388386f7720d3a14eb2b\",\n  \"title\": \"RFC: Leaf help + docs straightening (P41)\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-06-18T09:53:32.739Z\",\n  \"source_sha256\": \"7433a9fd54a2eff31aa12389d259eb490ba9d3cea8cb2c9f0b788689a42acd02\"\n}\n"
+    },
+    {
+      "id": "lightweight-lane-rfc-b6558f06",
+      "sha256": "efcd84e43924160c2ab100b2e48a8a29ece63dc125b21d066b33dd47d347e00a",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/lightweight-lane-rfc.md\",\n  \"original_path\": \"design/decisions/lightweight-lane-rfc.md\",\n  \"path_sha256\": \"b6558f06670dc5137f6d6b7c085dd497a9cc225b261614b59d644abc9ce58314\",\n  \"title\": \"RFC: Lightweight lane + recommendation consumption\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-06-18T09:53:33.050Z\",\n  \"source_sha256\": \"3311f6dc17fa5e79023822a2ad735d2f28599e4f86fc112469c662def6c06173\"\n}\n"
+    },
+    {
+      "id": "lightweight-runbook-rfc-0eba7396",
+      "sha256": "ec272e9d2df9a0e34313abfcc930c1a7c2e9f7ae1fc711c90414b3c3bcbd2fbc",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/lightweight-runbook-rfc.md\",\n  \"original_path\": \"design/decisions/lightweight-runbook-rfc.md\",\n  \"path_sha256\": \"0eba73963067eb8aa4dd83f8dfb86a06c1646f0ea65bf593f688338727fe3f12\",\n  \"title\": \"RFC: Lightweight Runbook\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-06-18T09:53:33.360Z\",\n  \"source_sha256\": \"a86d3faad0ae08fbb644d4ca7d6f877b2238b9e7bad8c98a5e96501a2c028600\"\n}\n"
+    },
+    {
+      "id": "planning-ux-init-hardening-rfc-5a92c2bc",
+      "sha256": "2c14d7f63fc5d0b36e584aeb59eea44002ddbedb56121714818c79232bac71d5",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/planning-ux-init-hardening-rfc.md\",\n  \"original_path\": \"design/decisions/planning-ux-init-hardening-rfc.md\",\n  \"path_sha256\": \"5a92c2bc4518f8f2ebc58191a59e53fc0a62eea9ef35b73f0b14e2a01e407d6b\",\n  \"title\": \"RFC: Planning UX and init hardening\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-06-18T09:53:33.676Z\",\n  \"source_sha256\": \"2b2bd79c1360b80ce507087503eb1967c06365b1662614367057883dab8926ec\"\n}\n"
+    },
+    {
+      "id": "release-readiness-invariants-rfc-bd445efd",
+      "sha256": "7fa975c440234ea3c336bbabb2500eeb7fc9a1dbef1f3d4b43e69345779d3fdf",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/release-readiness-invariants-rfc.md\",\n  \"original_path\": \"design/decisions/release-readiness-invariants-rfc.md\",\n  \"path_sha256\": \"bd445efd2492ae89c085823ad329326912d85b5071f75f33d6692a1e75dd0933\",\n  \"title\": \"RFC: Release readiness invariants (minimal cut)\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-06-18T09:53:33.991Z\",\n  \"source_sha256\": \"6aed92c29a4422861f2441c589da43615a4fd11faf94bf6288d20999324fc613\"\n}\n"
+    },
+    {
+      "id": "retention-pair-delete-journal-rfc-e4278608",
+      "sha256": "08a9cf050854d0fc1d14ad6b49788df27f27f9b5e87017b40acc87f464c92781",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/retention-pair-delete-journal-rfc.md\",\n  \"original_path\": \"design/decisions/retention-pair-delete-journal-rfc.md\",\n  \"path_sha256\": \"e42786088bfb27bf926598b37a1fa45c925779dcefba900a721597cff9f5c898\",\n  \"title\": \"RFC: Retention pair-delete journal — crash-safe both-or-neither for a phase snapshot ↔ event_pack pair\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-06-18T10:03:58.547Z\",\n  \"source_sha256\": \"77b15713c1dc9e71cd60a879f5e19477bd5ae58a5460faf5a6b1356564fd7cc7\"\n}\n"
+    },
+    {
+      "id": "root-cause-completion-errors-rfc-ca5340c6",
+      "sha256": "945ee7141f710185cc9103232b2034adec5aa973c5e52125efa57af0b4c8ea86",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/root-cause-completion-errors-rfc.md\",\n  \"original_path\": \"design/decisions/root-cause-completion-errors-rfc.md\",\n  \"path_sha256\": \"ca5340c6f61ea1b418b7ae30a7fe5adf79e6f7e5960e4e34ad998a7ad4f4b796\",\n  \"title\": \"RFC: Root-cause-first completion errors\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-06-18T09:53:34.300Z\",\n  \"source_sha256\": \"3fb68deb1efe30abdbe56b63eaac58e41161114fb8a44af30cda635e908e61ae\"\n}\n"
+    },
+    {
+      "id": "spec-conformance-rfc-6248f66c",
+      "sha256": "74d7c3315d25511508b21ea6be1b25bcecc8845a1e0cb05636395f262de7f87c",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/spec-conformance-rfc.md\",\n  \"original_path\": \"design/decisions/spec-conformance-rfc.md\",\n  \"path_sha256\": \"6248f66c6fad2ec18aac2b27976566f42970c4237f51d2f3261678e58aa6b4c3\",\n  \"title\": \"RFC: Spec-conformance remediation + RFC-conformance test convention\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-06-18T09:53:34.616Z\",\n  \"source_sha256\": \"32a5016f9a694e37205305d843e24e595a252351a3d540b54aae884033008b7e\"\n}\n"
+    },
+    {
+      "id": "spec-kit-bridge-rfc-b42bbb42",
+      "sha256": "7c93d0b833d3fccbf2824db21a4696cd0bca57433dd4552dd006fff26aafd933",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/spec-kit-bridge-rfc.md\",\n  \"original_path\": \"design/decisions/spec-kit-bridge-rfc.md\",\n  \"path_sha256\": \"b42bbb42e5773b84e38d03c662d7e2179f2698cc1c25c95b3acd3de86dd3d2d4\",\n  \"title\": \"RFC: Spec Kit bridge\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-06-18T09:53:34.931Z\",\n  \"source_sha256\": \"2db0f7bc669c01ae11f56b9119634c305bc89921f9ff397b54fd32dfcaa7196f\"\n}\n"
+    },
+    {
+      "id": "stability-taxonomy-3d863d58",
+      "sha256": "38b6796480b68e40e61e45b65549a83bc6cd0029a45917bddce5e74632d9c33b",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/stability-taxonomy.md\",\n  \"original_path\": \"design/decisions/stability-taxonomy.md\",\n  \"path_sha256\": \"3d863d580400d6f1d55581445e7fac2579d8ea1f9f4b91404345898cb29db6f8\",\n  \"title\": \"Decision: Stability taxonomy and v1.0 public contract freeze\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-06-18T09:53:35.240Z\",\n  \"source_sha256\": \"05d42f0ff157e5bfce8e734d5fa08c3c823acbd03415f6de26ee2cba1d94d3ca\"\n}\n"
+    },
+    {
+      "id": "task-readiness-schema-rfc-8f971144",
+      "sha256": "2f0ccb14ecb1f7d88ed2d50e38be95ae21aaf9e482901cf8d9266adc8fcc796c",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/task-readiness-schema-rfc.md\",\n  \"original_path\": \"design/decisions/task-readiness-schema-rfc.md\",\n  \"path_sha256\": \"8f97114415c745269b31b5667e69af8551047f249954edb02d0ef6c74b3f66c2\",\n  \"title\": \"RFC: Task Readiness Schema\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-06-18T09:53:35.550Z\",\n  \"source_sha256\": \"bc8e49a385618faee6e2c8d5edbbb0c22ffc726317679cbe7069d7fe2c41b2d3\"\n}\n"
+    },
+    {
+      "id": "version-pinning-guidance-rfc-706dfb8f",
+      "sha256": "c6a4aa1ffda66f87fecb154575294b760e891a55df38c420ed44478665d16957",
+      "bytes": "{\n  \"schema_version\": 1,\n  \"canonical_ref\": \"design/decisions/version-pinning-guidance-rfc.md\",\n  \"original_path\": \"design/decisions/version-pinning-guidance-rfc.md\",\n  \"path_sha256\": \"706dfb8f08b328876e5c0a2440ecddd369135fbe2662d34aeb6bbde4c2b5e290\",\n  \"title\": \"RFC: Project-side version pinning guidance (P42)\",\n  \"adr_status_at_snapshot\": \"accepted\",\n  \"may_satisfy_active_gate\": true,\n  \"snapshotted_at\": \"2026-06-18T09:53:35.856Z\",\n  \"source_sha256\": \"a0685c48aceb36708ffad101f999c6153e66476caa234f4816905b3303d0deac\"\n}\n"
+    }
+  ]
+}

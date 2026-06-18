@@ -24,7 +24,7 @@ the Evidence Harness v2.
 
 ## 1. What `code-pact` guarantees
 
-These guarantees hold across the v1.x line. Breaking any of them
+These guarantees hold within a major version. Breaking any of them
 requires a major-version bump.
 
 ### CLI surface stability
@@ -34,7 +34,7 @@ Every command listed under the `Stable (v1.0)` entry of the
 frozen flag surface, JSON envelope shape, exit code contract, and
 error code set. New optional flags and new envelope fields are
 additive; existing flags, fields, and codes do not change meaning
-within v1.x.
+within a major.
 
 `task prepare`, `task context --explain`, and `adapter conformance`
 join the stable set and carry the same guarantee.
@@ -73,7 +73,7 @@ human-readable output is informative only.
 
 Public error codes are listed in
 [`docs/cli-contract.md`](cli-contract.md#error-codes). New error
-codes are additive within v1.x; existing codes do not change meaning.
+codes are additive within a major; existing codes do not change meaning.
 The `code` field of an error envelope is the contract — agents may
 branch on the value.
 
@@ -373,7 +373,7 @@ Evidence Harness v2 computes these and recomputes them on every
 harness run. The metric set is fixed here; the **values** live only in
 [`docs/maintainers/measurements/summary.json`](maintainers/measurements/summary.json)
 (plus the per-task CSVs beside it) so the numbers can never drift between
-this prose and the source of truth — reproduce with `pnpm harness --corpus . --check`.
+this prose and the source of truth — reproduce (read-only) with `pnpm harness --corpus .`, or persist with `--write`.
 
 | Metric | Definition |
 |---|---|
@@ -381,8 +381,8 @@ this prose and the source of truth — reproduce with `pnpm harness --corpus . -
 | Context pack p90 bytes | Per-task pack size, lower 90th percentile |
 | Context pack max bytes | Largest single task's pack size |
 | First-pass verification rate | Percentage of `task complete` invocations whose declared verification passes on the first attempt |
-| Task lifecycle adherence rate | State-machine adherence: among tasks that have any progress events, the percentage with at least one `started` event before the first `done` event AND no legacy `planned → done` shortcut. `task prepare` emits no progress event, so prepare-adherence is **not** measured. Sits below 100% because of historical tasks that used the legacy `planned → done` shortcut, not current behaviour |
-| Undeclared write rate | Files changed by a task whose paths are not covered by the task's declared `writes` globs. Currently `deferred` ([rationale](../design/decisions/evidence-harness-v2-rfc.md#non-goals-out-of-scope-for-p26)) |
+| Task lifecycle adherence rate | State-machine adherence: among tasks that have any progress events, the percentage with at least one `started` event before the first `done` event AND no legacy `planned → done` shortcut. `task prepare` emits no progress event, so prepare-adherence is **not** measured. When `summary.corpus_status` is `measured`, this can sit below 100% because of historical tasks that used the legacy `planned → done` shortcut; when it is `no_live_tasks`, the rate is 0 because there are no live tasks to measure (see [`positioning.md`](positioning.md#baseline-values)) |
+| Undeclared write rate | Files changed by a task whose paths are not covered by the task's declared `writes` globs. Currently `deferred` (rationale in the evidence-harness-v2 RFC Non-goals — retired; in git history / the archive record) |
 | Adapter drift detection rate | Percentage of enabled agents where `adapter doctor` returns at least one error-severity issue |
 
 These metrics evaluate the contract — they are not part of the
@@ -401,5 +401,6 @@ is not itself a contract violation.
   — single source of truth for the required surfaces and headings;
   imported by `adapter doctor`, `adapter conformance`, and the
   integration test suite.
-- [`design/decisions/agent-contract-v2-rfc.md`](../design/decisions/agent-contract-v2-rfc.md)
-  — the RFC that locks the agent-contract decisions.
+- The **agent-contract v2 RFC** — the RFC that locked the agent-contract
+  decisions; retired, so its text is in git history and the `.code-pact/state`
+  archive record.

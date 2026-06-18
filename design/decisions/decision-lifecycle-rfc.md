@@ -3,7 +3,7 @@
 **Status:** accepted (C2/D1/E/E2 shipped; compress-on-ship deferred, 2026-06)
 **Scope:** make a *shipped* decision record safely removable without breaking control-plane integrity. Three additive layers: (1) **status-aware ref integrity** — a `done` task no longer hard-requires its `decision_refs` / `acceptance_refs` file to exist on disk; (2) a **`code-pact decision prune`** command with eligibility gates + an append-only tombstone ledger; (3) a per-project **`decision_retention`** policy (`keep-full` | `compress-on-ship` | `prune-on-ship`). Plus the long-term record-of-truth model (CHANGELOG authored + rolling-archived; release notes generated; the RFC is a policy-governed working doc — kept by default, pruned only when standalone/decoupled; git is the backstop).
 **Owners:** maintainer
-**Related:** [task-readiness-schema](task-readiness-schema-rfc.md) (defines `decision_refs` / `acceptance_refs`) · [finalization-reconciliation](finalization-reconciliation-rfc.md) (`task finalize` flips design status to `done` — the signal this RFC keys off) · [adr-downstream-commitments](adr-downstream-commitments-rfc.md) + [adr-quality-advisory](adr-quality-advisory-rfc.md) (the `## Implementation commitments` surface an eligibility gate must honor) · [doc-truth-from-code](doc-truth-from-code-rfc.md) (the lean compress form the `compress-on-ship` policy reuses).
+**Related** (all retired — read via git history / `.code-pact/state` archive records): `task-readiness-schema-rfc.md` (defines `decision_refs` / `acceptance_refs`) · `finalization-reconciliation-rfc.md` (`task finalize` flips design status to `done` — the signal this RFC keys off) · `adr-downstream-commitments-rfc.md` + `adr-quality-advisory-rfc.md` (the `## Implementation commitments` surface an eligibility gate must honor) · `doc-truth-from-code-rfc.md` (the lean compress form the `compress-on-ship` policy reuses).
 
 ## Summary
 
@@ -60,7 +60,7 @@ Append-only table: `decision path | phase/task | pruned date | rationale home (C
 | Value | Shipped (`done`) decision becomes |
 | --- | --- |
 | `keep-full` (**default** — today's behavior, ADR tradition) | kept verbatim, forever |
-| `compress-on-ship` | compressed to decision + rationale + contract stub (the lean [doc-truth-from-code](doc-truth-from-code-rfc.md) form) |
+| `compress-on-ship` | compressed to decision + rationale + contract stub (the lean `doc-truth-from-code-rfc.md` form — retired) |
 | `prune-on-ship` | eligible decisions retired via `decision prune` |
 
 `decision prune` carries the project's policy; `--policy <v>` overrides per-invocation. The core fix is that the **spec stops dictating retention** — it becomes the maintainer's preference, which is what it always was. **As shipped in PR-D1 the policy is *reported, not enacted*:** `decision prune` surfaces the effective value as `data.policy` / `data.policy_source`, but eligibility, deletion, and link rewrites are unchanged and explicit — pruning is always a deliberate `decision prune` action, never an automatic consequence of the policy. *Enactment* of `compress-on-ship` (rewriting a shipped ADR to the lean form) is the later PR-D2 layer.

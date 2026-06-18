@@ -50,6 +50,14 @@ const SOURCE_ROOTS: { dir: string; recursive: boolean; exts: string[] }[] = [
 // Root-level .md files we do NOT scan as sources (still valid as targets).
 const ROOT_SOURCE_SKIP = new Set(["CHANGELOG.md"]);
 
+// The archived CHANGELOG history (`docs/maintainers/history/CHANGELOG-<major>.md`) is the
+// SAME verbatim historical content as root `CHANGELOG.md` — older major sections MOVED out
+// of the root file by `changelog:archive` — so it is excluded as a SOURCE for the identical
+// reason: its links are POINT-IN-TIME (they reference docs / `design/decisions/*.md` as they
+// were at that release; some have since moved or retired), so checking them is noise, not
+// signal, and could never stay green as the tree evolves. It remains valid as a link TARGET.
+const ARCHIVED_CHANGELOG_RE = /^docs[/\\]maintainers[/\\]history[/\\]CHANGELOG-\d+\.md$/;
+
 const EXTERNAL_RE = /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i;
 const LINK_RE = /\[(?:[^\]]*)\]\(([^)\s]+)(?:[ \t]+"[^"]*")?\)/g;
 const HEADING_RE = /^[ \t]{0,3}(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$/gm;
@@ -97,6 +105,7 @@ async function collectSourceFiles(repoRoot: string): Promise<string[]> {
       if (!root.exts.includes(extname(abs))) continue;
       const rel = relative(repoRoot, abs);
       if (root.dir === "." && ROOT_SOURCE_SKIP.has(rel)) continue;
+      if (ARCHIVED_CHANGELOG_RE.test(rel.split(sep).join("/"))) continue; // verbatim historical content
       files.add(abs);
     }
   }

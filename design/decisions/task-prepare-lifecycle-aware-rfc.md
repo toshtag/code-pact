@@ -3,7 +3,7 @@
 **Status:** accepted (P40, 2026-05)
 **Scope:** make `task prepare`'s guidance surfaces honor `recommendation.lifecycleMode` (`full_loop` / `record_only` / `decision_loop`) — an additive `commands["record-done"]` key (every mode) plus a mode-aware `next_action.message`. No envelope-shape break, no new `next_action.type`, no behavioral change to `task complete` / `record-done` / `verify`.
 **Owners:** maintainer
-**Related:** [adr-downstream-commitments](adr-downstream-commitments-rfc.md) (P43 — the `## Implementation commitments` surface this RFC dogfoods; the additive-one-key discipline). Authored as a `decision_loop` phase (P40-T0 `requires_decision`, gated on this RFC).
+**Related:** `adr-downstream-commitments-rfc.md` (retired — P43; the `## Implementation commitments` surface this RFC dogfoods; the additive-one-key discipline). Authored as a `decision_loop` phase (P40-T0 `requires_decision`, gated on this RFC).
 
 ## Summary
 
@@ -62,5 +62,5 @@ The concrete downstream work this decision implies (P40 is itself a `requires_de
 
 ## References
 
-- RFCs: [adr-downstream-commitments](adr-downstream-commitments-rfc.md) (P43).
+- RFCs: `adr-downstream-commitments-rfc.md` (retired; P43).
 - Docs: [docs/cli-contract.md](../../docs/cli-contract.md) · [docs/agent-contract.md](../../docs/agent-contract.md) · per-task-loop.md (linked for `record_only` semantics).

@@ -228,9 +228,9 @@ describe("rowsToCsv", () => {
     expect(csv).toBe("a,b\n1,x\n2,y\n");
   });
 
-  it("emits header only when no rows", () => {
+  it("emits header only (newline-terminated) when no rows", () => {
     const csv = rowsToCsv<{ a: number }>([], ["a"]);
-    expect(csv).toBe("a");
+    expect(csv).toBe("a\n");
   });
 
   it("escapes embedded commas in strings", () => {
@@ -400,8 +400,8 @@ describe("ratePercent", () => {
 describe("buildSummary", () => {
   it("computes every metric and never emits budget_reserved_for_later", () => {
     const summary = buildSummary({
-      harnessVersion: "0.2.0",
-      summarySchemaVersion: 1,
+      harnessVersion: "0.3.0",
+      summarySchemaVersion: 2,
       inputGitSha: "abc123",
       codePactCliVersion: "1.12.0",
       generatedAt: "2026-05-23",
@@ -424,8 +424,8 @@ describe("buildSummary", () => {
       tasksTotal: 3,
     });
 
-    expect(summary.harness_version).toBe("0.2.0");
-    expect(summary.summary_schema_version).toBe(1);
+    expect(summary.harness_version).toBe("0.3.0");
+    expect(summary.summary_schema_version).toBe(2);
     expect(summary.metrics.pack_size_p50_bytes).toBe(200); // lower median of [100, 200, 300] → idx 1 → 200
     expect(summary.metrics.pack_size_max_bytes).toBe(300);
     expect(summary.metrics.first_pass_verify_rate_percent).toBe(50);
@@ -435,6 +435,9 @@ describe("buildSummary", () => {
     expect(summary.metrics.undeclared_write_rate_note.length).toBeGreaterThan(
       0,
     );
+    // A non-empty live corpus is "measured" with no disambiguating note.
+    expect(summary.corpus_status).toBe("measured");
+    expect(summary.corpus_note).toBe("");
     expect(summary.denominators).toEqual({
       tasks_done: 2,
       tasks_total: 3,
@@ -442,10 +445,31 @@ describe("buildSummary", () => {
     });
   });
 
+  it("flags an empty live corpus as no_live_tasks (0s are 'nothing measured', not a measured failure)", () => {
+    const summary = buildSummary({
+      harnessVersion: "0.3.0",
+      summarySchemaVersion: 2,
+      inputGitSha: "abc123-dirty",
+      codePactCliVersion: "2.0.0",
+      generatedAt: "2026-06-18",
+      packSizeRows: [],
+      verifySuccessRows: [],
+      lifecycleAdherenceRows: [],
+      adapterDriftRows: [],
+      tasksTotal: 0,
+    });
+    expect(summary.corpus_status).toBe("no_live_tasks");
+    expect(summary.corpus_note).toMatch(/archived under \.code-pact\/state\/archive/);
+    // The numeric metrics are still 0 — but now disambiguated by corpus_status.
+    expect(summary.metrics.first_pass_verify_rate_percent).toBe(0);
+    expect(summary.metrics.lifecycle_adherence_rate_percent).toBe(0);
+    expect(summary.denominators.tasks_total).toBe(0);
+  });
+
   it("excludes legacy_planned_to_done_shortcut tasks from the adherence numerator but keeps them in the denominator", () => {
     const summary = buildSummary({
-      harnessVersion: "0.2.0",
-      summarySchemaVersion: 1,
+      harnessVersion: "0.3.0",
+      summarySchemaVersion: 2,
       inputGitSha: "x",
       codePactCliVersion: "1.12.0",
       generatedAt: "2026-05-23",

@@ -189,3 +189,39 @@ describe("checkDocLinks — archive-record-aware (step 7 PR-A)", () => {
     }
   });
 });
+
+describe("checkDocLinks — archived CHANGELOG history is excluded as a SOURCE (verbatim point-in-time content)", () => {
+  async function writeHistory(rel: string, body: string): Promise<void> {
+    await mkdir(join(cwd, "docs", "maintainers", "history"), { recursive: true });
+    await writeFile(join(cwd, "docs", "maintainers", "history", rel), body, "utf8");
+  }
+
+  it("a broken link INSIDE CHANGELOG-<major>.md does not fail (the archive is not scanned as a source)", async () => {
+    await writeHistory(
+      "CHANGELOG-1.md",
+      "# Changelog (v1.x)\n\nSee [a doc that has since moved](does-not-exist.md).\n",
+    );
+    const r = await run();
+    expect(r.code).toBe(0);
+    expect(r.err).toBe("");
+  });
+
+  it("a link TO an archived CHANGELOG still resolves (excluded as source, valid as target)", async () => {
+    await writeHistory("CHANGELOG-1.md", "# Changelog (v1.x)\n\nArchived verbatim.\n");
+    await writeFile(
+      join(cwd, "README.md"),
+      "# P\n\nOlder releases: [v1.x](docs/maintainers/history/CHANGELOG-1.md).\n",
+      "utf8",
+    );
+    const r = await run();
+    expect(r.code).toBe(0);
+    expect(r.err).toBe("");
+  });
+
+  it("a NON-CHANGELOG history doc IS still scanned (the exclusion is narrow, not all of history/)", async () => {
+    await writeHistory("some-backlog.md", "# Backlog\n\nSee [a gone target](nope.md).\n");
+    const r = await run();
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("nope.md");
+  });
+});

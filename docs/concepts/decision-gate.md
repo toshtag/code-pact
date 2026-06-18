@@ -1,6 +1,6 @@
 # The decision gate
 
-The decision gate is the one thing code-pact **enforces** for design-sensitive tasks: a task marked `requires_decision: true` cannot be completed until an accepted Architecture Decision Record (ADR) exists for it. This page is the user-facing walkthrough. The exact contract (error codes, JSON envelopes) lives in [`cli-contract.md`](../cli-contract.md#error-codes) — this page and `cli-contract.md` are the live contract. The historical RFC that introduced the status-aware gate is retired and resolves from its decision record: [`design/decisions/dogfood-trust-hardening-rfc.md`](../../design/decisions/dogfood-trust-hardening-rfc.md).
+The decision gate is the one thing code-pact **enforces** for design-sensitive tasks: a task marked `requires_decision: true` cannot be completed until an accepted Architecture Decision Record (ADR) exists for it. This page is the user-facing walkthrough. The exact contract (error codes, JSON envelopes) lives in [`cli-contract.md`](../cli-contract.md#error-codes) — this page and `cli-contract.md` are the live contract. The historical RFC that introduced the status-aware gate (the **dogfood-trust-hardening RFC**) is retired and resolves from its decision record (in git history / the `.code-pact/state` archive).
 
 ## Why it exists
 
@@ -91,6 +91,6 @@ surfaces it earlier as advisories.
 ## See also
 
 - [`design/decisions/README.md` § ADR status convention](../../design/decisions/README.md) — the canonical status-line format and the `proposed → accepted` lifecycle.
-- [`design/decisions/dogfood-trust-hardening-rfc.md`](../../design/decisions/dogfood-trust-hardening-rfc.md) — retired historical decision record for the status-aware gate / scaffolding work; this page and `cli-contract.md` are the live contract.
+- The **dogfood-trust-hardening RFC** (retired; in git history / the `.code-pact/state` archive record) — historical decision record for the status-aware gate / scaffolding work; this page and `cli-contract.md` are the live contract.
 - [`docs/troubleshooting.md`](../troubleshooting.md#decision_required-from-task-record-done) — recovery for `DECISION_REQUIRED` / `ADR_STATUS_UNRECOGNIZED`.
 - [`docs/cli-contract.md` § Error codes](../cli-contract.md#error-codes) — the exact `DECISION_REQUIRED` envelope (`via` / `considered` / `current_resolution`).

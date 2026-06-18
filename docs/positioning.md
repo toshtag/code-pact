@@ -70,7 +70,7 @@ of complexity that would otherwise dilute the deterministic
 The CLI is organised around a per-task lifecycle plus a small
 set of phase-level and adapter-level commands. Each verb has
 a stable JSON envelope, a documented exit code contract, and
-a fixed flag surface across the v1.x line.
+a fixed flag surface within a major line.
 
 - **`code-pact recommend`** — returns an execution plan for a
   given task: model tier, effort, planning posture, context
@@ -179,14 +179,21 @@ metric values, the dogfood-corpus git SHA, the denominators
 
 Two standing caveats on that snapshot:
 
-- **Lifecycle adherence sits below 100%** — the gap is historical tasks
-  that used the legacy `planned → done` shortcut, not current behaviour.
-- **Undeclared-write rate is `deferred`** ([rationale](../design/decisions/evidence-harness-v2-rfc.md#non-goals-out-of-scope-for-p26))
+- **`corpus_status` tells you how to read the metrics.** The harness measures the
+  **live** plan (`design/phases/*.yaml`). When `corpus_status` is `measured`, a
+  lifecycle-adherence gap below 100% reflects historical tasks that used the legacy
+  `planned → done` shortcut, not current behaviour. When it is `no_live_tasks`, every
+  rate/size reads 0 because this repo's phases are all archived under
+  `.code-pact/state/archive` (which the harness does not yet read) — that is "nothing
+  measured", not a measured failure; the last live-corpus baseline is in git history,
+  and reading archived phase snapshots is intentionally deferred.
+- **Undeclared-write rate is `deferred`** (rationale in the evidence-harness-v2 RFC
+  Non-goals — retired; in git history / the `.code-pact/state` archive record)
   — it awaits a future phase that attributes git commits to tasks via
   lifecycle instrumentation.
 
-Reproduce or refresh: `pnpm harness --corpus . --check` (read-only) or
-`--write` (overwrite the committed snapshot).
+Reproduce or refresh: `pnpm harness --corpus .` (read-only) or
+`pnpm harness --corpus . --write` (overwrite the committed snapshot).
 
 ## How positioning relates to scope
 

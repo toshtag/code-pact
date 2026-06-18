@@ -31,7 +31,7 @@ Pick the guide that matches where you're starting from. Both defer to `getting-s
 | [cli-reference.generated.md](cli-reference.generated.md) | **Task** command flags, usage, and examples — generated from the `CommandSpec` single source. (Other clusters: see each command's `--help` and `cli-contract.md`.) |
 | [agent-contract.md](agent-contract.md) | The agent contract and what `adapter conformance` requires of each agent integration. |
 | [spec-kit-bridge.md](spec-kit-bridge.md) | Importing an existing Spec Kit `tasks.md` / `spec.md` into a code-pact roadmap. |
-| [upgrading.md](upgrading.md) | How to upgrade — additive within v1.x; pointers for coming from an earlier alpha. |
+| [upgrading.md](upgrading.md) | How to upgrade — additive within a major, with a migration note per major bump; pointers for coming from an earlier alpha. |
 
 ## Concepts
 

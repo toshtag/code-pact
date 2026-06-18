@@ -367,12 +367,25 @@ export interface Summary {
   input_git_sha: string;
   code_pact_cli_version: string;
   generated_at: string;
+  // Whether the live plan actually had tasks to measure. When every phase is
+  // archived (a fully dogfooded corpus has no live `design/phases/*.yaml`), the
+  // harness has nothing to measure and every rate/size below reads 0 — which is
+  // "nothing measured", NOT "measured and scored 0". This field disambiguates so
+  // a reader never mistakes an empty corpus for a failing one.
+  corpus_status: "measured" | "no_live_tasks";
+  corpus_note: string;
   metrics: SummaryMetrics;
   denominators: SummaryDenominators;
 }
 
 const UNDECLARED_WRITE_RATE_NOTE =
-  "Computing this metric requires attributing git commits to tasks. The project does not enforce a formal commit → task link, so a historical retrofit would either over-claim or require new lifecycle instrumentation. Tracked under evidence-harness-v2-rfc.md Non-goals.";
+  "Computing this metric requires attributing git commits to tasks. The project does not enforce a formal commit → task link, so a historical retrofit would either over-claim or require new lifecycle instrumentation. This remains intentionally deferred (no live tracker); the original rationale is in the retired evidence-harness-v2 RFC, via git history / the .code-pact/state archive record.";
+
+// Emitted when the live plan has no tasks (all phases archived). Scoped to the
+// TASK-derived metrics only — adapter drift and plan-lint issues do NOT depend on
+// live tasks and are still measured — so the note never over-claims "nothing measured".
+const NO_LIVE_TASKS_NOTE =
+  "No live tasks in design/phases, so the task-derived metrics (pack size, verification rate, lifecycle adherence, task event density) are 0 — there were no live tasks to measure, not a measured failure. Agent-level adapter drift and plan-lint issues are still measured (see denominators.agents_enabled). This corpus's completed phases are archived under .code-pact/state/archive, which the harness does not yet read; the last live-corpus baseline is in git history, and reading archived phase snapshots is intentionally deferred (no live tracker).";
 
 export interface BuildSummaryInput {
   harnessVersion: string;
@@ -412,6 +425,8 @@ export function buildSummary(input: BuildSummaryInput): Summary {
     input_git_sha: input.inputGitSha,
     code_pact_cli_version: input.codePactCliVersion,
     generated_at: input.generatedAt,
+    corpus_status: input.tasksTotal === 0 ? "no_live_tasks" : "measured",
+    corpus_note: input.tasksTotal === 0 ? NO_LIVE_TASKS_NOTE : "",
     metrics: {
       pack_size_p50_bytes: lowerPercentile(packBytesSorted, 50),
       pack_size_p90_bytes: lowerPercentile(packBytesSorted, 90),
@@ -446,5 +461,7 @@ export function rowsToCsv<T extends Record<string, string | number | boolean>>(
       })
       .join(","),
   );
-  return [header, ...body].join("\n") + (body.length > 0 ? "\n" : "");
+  // Always terminate with a newline — including the header-only (empty-corpus)
+  // case — so the CSVs are well-formed POSIX text files (`wc -l` counts the header).
+  return [header, ...body].join("\n") + "\n";
 }

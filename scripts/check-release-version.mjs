@@ -83,6 +83,14 @@ export function checkReleaseVersion(root) {
       `docs/maintainers/measurements/summary.json: code_pact_cli_version "${summaryVersion}" != package.json "${pkgVersion}" — run \`pnpm harness --corpus . --write\``,
     );
   }
+  // The manifest is written by the same harness run as summary.json; check it too
+  // so "measurements agree" covers BOTH files, not just the summary.
+  const manifestVersion = JSON.parse(read("docs/maintainers/measurements/measurements.manifest.json")).code_pact_cli_version;
+  if (manifestVersion !== pkgVersion) {
+    problems.push(
+      `docs/maintainers/measurements/measurements.manifest.json: code_pact_cli_version "${manifestVersion}" != package.json "${pkgVersion}" — run \`pnpm harness --corpus . --write\``,
+    );
+  }
 
   // 3. docs `code-pact@X.Y.Z` install/usage examples must match the package
   //    version (a stale example tells users to install an old release).

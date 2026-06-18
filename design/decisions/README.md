@@ -21,7 +21,8 @@ the *why* behind the code — the user-facing *how* lives in [`docs/`](../../doc
 > where it goes.
 >
 > **Retired decisions are removable — once a record exists.** Under the v2.0
-> design-docs-ephemeral model (implemented; see the index row below),
+> design-docs-ephemeral model (implemented; the durable model lives in
+> [`constitution.md`](../constitution.md)),
 > a retired / settled decision may be removed — by hand or via
 > `decision retire --write`, up to and including the whole `design/decisions/`
 > directory — **only after** a validated `.code-pact/state` decision-state record
@@ -32,46 +33,28 @@ the *why* behind the code — the user-facing *how* lives in [`docs/`](../../doc
 > record never releases a live gate. `PRUNED.md` is legacy/prune backcompat, **not**
 > the durable v2.0 retire truth; the decision-state record is.
 
-| Phase | Decision | What it decided |
-| --- | --- | --- |
-| v1.0 | [Stability taxonomy](stability-taxonomy.md) | Froze the public CLI surface at v1.0 and defined the Stable / Experimental / Deprecated bands. |
-| P10 | [Task Readiness Schema](task-readiness-schema-rfc.md) | Added the optional task fields (`depends_on` / `reads` / `writes` / `decision_refs` / `acceptance_refs`). |
-| P11 | [Finalization & Reconciliation](finalization-reconciliation-rfc.md) | Added `task finalize` / `phase reconcile` to flip design status to `done` after `task complete`. |
-| P12 | [Lightweight Runbook](lightweight-runbook-rfc.md) | Added read-only `task runbook` / `phase runbook` sequencing guidance. |
-| P13 | [Planning UX & init hardening](planning-ux-init-hardening-rfc.md) | Made the sample phase opt-in (`init --sample-phase`, `TUTORIAL`), added non-interactive `task add`. |
-| P14 | [Governance](governance-rfc.md) | Added the advisory write lock (`LOCK_HELD`), reserved `TUTORIAL`, and extracted the task→phase resolver. |
-| P16 | [Agent contract adapter hardening](agent-contract-rfc.md) | Hardened the agent/adapter contract and conformance surface. |
-| P18 | [Spec Kit bridge](spec-kit-bridge-rfc.md) | Added the read-only one-way importer for Spec Kit `tasks.md` / `spec.md` / `plan.md`. |
-| P19 | [Cross-phase dependencies](cross-phase-deps-rfc.md) | Allowed cross-phase `depends_on` and the aggregated `phase runbook --across-phases`. |
-| P20 | [Evidence harness](evidence-harness-rfc.md) | Added the internal-only deterministic dogfood measurement harness. |
-| P21 | [Agent Contract v2](agent-contract-v2-rfc.md) | Added `task prepare`, `task context --explain`, and `adapter conformance`. |
-| P22 | [Adapter schema v2 — cancelled](P22-cancelled-adapter-schema-v2.md) | **Cancelled.** Recorded why adapter schema v2 / template-signature tracking was not pursued. |
-| P24 | [Context budget enforcement](context-budget-rfc.md) | Added `--budget-bytes` and the `CONTEXT_OVER_BUDGET` contract. |
-| P26 | [Evidence Harness v2](evidence-harness-v2-rfc.md) | Added aggregate stats and the lifecycle-adherence baselines reported in positioning. |
-| P27 | [CLI maintainability](cli-maintainability-rfc.md) | Split the monolithic `src/cli.ts` into a command-cluster layout. |
-| P28 | [Spec-conformance remediation](spec-conformance-rfc.md) | Established the RFC-conformance test convention. |
-| P30 | [Adapter contract hardening](adapter-contract-hardening-rfc.md) | Further hardened the adapter contract checks. |
-| P31 | [Deterministic roadmap stabilization](deterministic-roadmap-stabilization-rfc.md) | Made AI-assisted roadmap generation reproducible. |
-| P32 | [Failure clarity](failure-clarity-rfc.md) | Surfaced the failing check, its reason, and the rerun-after-fixing command on `task complete` / `task finalize` failures. |
-| P33 | [Lightweight lane + recommendation consumption](lightweight-lane-rfc.md) | Added `lifecycleMode` (`full_loop` / `record_only` / `decision_loop`) and the adapter guidance that consumes the recommendation (P35 merged in). |
-| P34 | [CI branch-drift detection](ci-branch-drift-rfc.md) | Added `--base-ref` + the `CONTROL_PLANE_BRANCH_NOT_DRIVEN` advisory for PR CI. |
-| P36 | [ADR quality advisory](adr-quality-advisory-rfc.md) | Added the `ADR_ACCEPTED_BODY_THIN` stub advisory (no heading-name sniffing). |
-| P37 | [Outcome audit — deferred](P37-deferred-outcome-audit.md) | **Deferred.** Recorded why effectiveness-measurement was not built (gameable subjective fields; not reliably derivable from `progress.yaml` today). |
-| P39 | [Root-cause-first completion errors](root-cause-completion-errors-rfc.md) | Add `error.cause_code` + an actionable `error.message` on `task complete` failures (port the `record-done` cause); minimal surface — no error-side duplication of the P32 `data` fields, no new structured block, `finalize` unchanged (it never runs the decision gate). |
-| — | [Beginner-friendly CLI aliases](cli-alias-ux-rfc.md) | **Retired** (shipped; resolves from its `.code-pact/state` decision record). Added additive aliases `task next` / `phase next` / `task reconcile` / `plan import` (thin sugar to the canonical handlers). The `dogfood.md` rename stays deferred. |
-| — | [Doc truth from code](doc-truth-from-code-rfc.md) | Generate *enumerable* public-contract facts (e.g. the `spec import` `data.detail` table) from a typed catalog in `src/` as a `@generated` doc block; CI checks only block drift. Reduces hand-written facts — it does **not** add doc-quality / style policing. |
-| P44 | [CI / adoption page](ci-adoption-page-rfc.md) | Added `docs/workflows/ci.md` (+ ja mirror) as the single CI adoption home — a thin orchestration page (contributor-vs-maintainer loops, one minimal pinned GitHub Actions gate, a preconditions checklist) that links to `cli-contract.md` for the `--base-ref` contract rather than duplicating the workflow YAML. |
-| P45 | [Context-pack write contract hygiene](context-pack-write-contract-hygiene-rfc.md) | Routed `writeContextPack()` through `atomicWriteText` (it used a raw `writeFile`, breaking the published atomic-write guarantee for listed managed file-content writes) and corrected the docs that blur `task context` (read-only — builds/returns the pack) with `task prepare` / `pack` (the writers). Patch-level (v1.29.1); no surface change. |
-| P46 | [Context Fit](context-fit-rfc.md) | The future RFC P24 deferred: named budget profiles + `--context-budget`, a recommended budget on `recommend` / `task prepare`, `--explain` fit metrics, and `plan lint` context-bloat advisories — four additive layers over `--budget-bytes`, plus the recorded principle to prefer local deterministic computation over agent reasoning (the Reduction taxonomy). RFC-only bootstrap; behavior ships in P47–P50. |
-| — | [Post-1.26 agent-DX backlog](../../docs/maintainers/history/post-1.26-agent-dx-backlog.md) → *moved to history* | **Complete.** Sequencing + re-scope intent for P40-P44 (not a gated decision). P43, P41, P40, P42, and P44 each shipped with its own RFC; this backlog now lives under [`docs/maintainers/history/`](../../docs/maintainers/history/post-1.26-agent-dx-backlog.md). |
-| — | [Collaboration-safe state](collaboration-safe-state-rfc.md) | **Accepted (A+B; C deferred).** Move the progress ledger to one-file-per-event under `.code-pact/state/events/` (conflict-free, lost-update-free, dual-reads legacy `progress.yaml`) and reconcile the `.code-pact/` shared-vs-local policy across `init`/ci/dogfood. Explicitly **defers** collision-resistant phase ids, `roadmap.yaml`-optional, and task-file split (Bucket C) behind a real-demand trigger. |
-| — | [Control-plane v2](control-plane-v2-rfc.md) | **Accepted (scope-limited: PR0 + PR1a + PR1b only).** Takes up deferred Bucket C (phase identity / glob discovery / `roadmap.yaml`-advisory / per-task files). PR1a (fail-closed `AMBIGUOUS_PHASE_ID`) and PR1b (**re-scoped**: structured `recovery` on the existing `DUPLICATE_*` / `PHASE_ID_MISMATCH` errors — the `LEGACY_*` warning-default advisories are **superseded/deferred**) shipped; PR2+ remain gated on the §5 soak + forensic incident backfill. |
-| — | [Event-pack compaction lifecycle](event-pack-compaction-rfc.md) | **Proposed (design contract only — no code authorized).** Records Layer 1 (fail-closed pack reader/binding/evidence, #425) and Layer 2 (pack writer + readback-verify, no unlink, #426) retroactively, and locks the **Layer 3** (destructive loose-file `unlink`) design before implementation: the `planEventPack` / `state compact` branch truth table (dry-run verdict vs `--write` terminal outcome), the delete-time ownership gate (G0–G8, incl. a task-id owner gate), post-run reconciliation (R0–R5), and the `STATE_COMPACT_WRITE_FAILED` / `CLEANUP_FAILED` / `CLEANUP_INCOMPLETE` failure contract. Layer 3 implementation begins only in a separate PR after this RFC is accepted. |
-| — | [Collaboration UX](collaboration-ux-rfc.md) | **Accepted (D1–D3, additive MINORs).** The *coordination* layer atop the merge-safe ledger: optional `author` attribution on events (D1), a read-only `code-pact status` activity overview — in flight / blocked / available / waiting (D2), and attribution-named (`details.events[]`) conflict recovery (D3). Pinned JSON contract; explicitly rejects presence servers, blocking locks, and auto-resolution. Ships D1 → D2 → D3 independently. |
-| — | [Decision record lifecycle](decision-lifecycle-rfc.md) | **Accepted.** Shipped `decision prune --write` (status-aware ref integrity + eligibility gates + an append-only `PRUNED.md` tombstone ledger), `decision_retention` policy reporting, the CHANGELOG rolling-archive + release-notes tooling, and the archive-discoverability guard. Dogfooding found this repo's phase-born RFCs are load-bearing, so this repo uses **`keep-full`**; `compress-on-ship` is deferred (lossy). |
-| v2.0 | [Design docs are ephemeral](design-docs-ephemeral-directive.md) → *retired transitional directive* | **Implemented.** Made completed `design/phases/*.yaml` and retired `design/decisions/*.md` removable: their runtime truth moved to `.code-pact/state` archive snapshots / decision records, so a hand-deleted completed/retired doc resolves from its snapshot/record (active docs still fail closed if missing). **Supersedes** the constitution's "`design/` is the source of truth" rule and the move-only-non-gate-records framing above. The directive that drove this was itself **retired** once the model landed — the link above resolves from its `.code-pact/state` record (the durable model lives in [`constitution.md`](../constitution.md)). |
-| v2.0 | [Dogfood durable-truth migration](dogfood-durable-truth-migration-rfc.md) | **Accepted.** Converts *this repo's* completed-phase and shipped-decision history into durable archive records (phase snapshots / decision records) so the live `design/` docs become deletable views. Measured split (authoritative via `phase archive --json`): **32 phases archive today**, **14 phases / 54 done-tasks** need attestation. Execution begins with the P22 cancelled-phase smoke; the v2.0.0 product gate requires an evidence-bound *done*-phase archive with its live YAML deleted. |
-| — | [Bounded archive (retention + compaction)](archive-level-compaction-rfc.md) | **Proposed (design contract — no code authorized).** Closes the "moved the pile" gap: per-item archive records (`state/archive/phases`/`event-packs`/`decisions/*.json`) grow O(project lifetime). The BOUND comes from **retention/prune** (drop archive truth a policy no longer keeps — extends `decision_retention` to phases/packs; a bounded mode is default-available, keep-full is opt-in not forced); **bundles** then compact the retained set (loose∪bundle resolution, canonical-bytes hashing, cross-bundle global member uniqueness, sharding bounds file *size* not count, fail-closed). Honest: bundling alone is still `ceil(N/C)` files — only retention bounds growth. Generalises [event-pack compaction](event-pack-compaction-rfc.md) one level up. Ships in reviewed layers (reader/binding → writer → gated delete → retention). |
+### Live decisions
+
+Only a decision still in flight — or `accepted` but holding an open
+`## Implementation commitments` — keeps a file here. The list stays short by
+construction, so it never drifts as decisions retire:
+
+| Decision | Status |
+| --- | --- |
+| [Decision record lifecycle](decision-lifecycle-rfc.md) | **Accepted** — the `decision compress` form (PR-D2) is still open (lossy; unbuilt). |
+| [Task-prepare lifecycle-aware](task-prepare-lifecycle-aware-rfc.md) | **Accepted** — `task record-done` shipped; the RFC's closing commitments are not all checked off yet. |
+
+### Retired decisions
+
+A shipped or settled decision is **retired**, not re-listed here. Its durable
+record moves to `.code-pact/state/archive` — which `code-pact`'s own checks resolve a
+record-backed reference against — and its original Markdown stays in **git history**
+and the [`CHANGELOG`](../../CHANGELOG.md). This index deliberately tracks **only live
+decisions**: enumerating retired ones would 404 on GitHub the moment a file is
+removed and would need an edit on every retire (exactly the maintenance cost the
+ephemeral model exists to remove). To read a retired decision, run
+`git log --follow -- design/decisions/<name>.md`, or inspect its record under
+`.code-pact/state/archive`.
 
 ## What belongs here (and what does not)
 
@@ -86,8 +69,8 @@ decisions retired by `decision prune` (see [decision-lifecycle-rfc.md](decision-
 
 - An RFC for any significant, durable design decision and its rationale.
 - *Negative-space* decisions — a cancellation, deferral, or supersession that a
-  future contributor would otherwise re-litigate (e.g. [P22 cancelled](P22-cancelled-adapter-schema-v2.md),
-  [P37 deferred](P37-deferred-outcome-audit.md)). These stay `accepted` (the
+  future contributor would otherwise re-litigate (e.g. P22 *cancelled adapter
+  schema v2*, P37 *deferred outcome audit* — both now retired). These stay `accepted` (the
   decision *to not build* was made and approved) and say so in their title and
   first line, so they read as closed, not as live commitments.
 
@@ -142,8 +125,8 @@ The status word governs the [decision gate](../../docs/cli-contract.md#error-cod
 It deliberately does *not* say what was decided. A decision to **cancel** or
 **defer** a feature is still a real, approved decision, so it stays `accepted`
 (so the gate resolves and it never reads as unfinished work) and records the
-cancellation/deferral in its title and first line — see [P22](P22-cancelled-adapter-schema-v2.md)
-and [P37](P37-deferred-outcome-audit.md). Use `status: superseded` (which does
+cancellation/deferral in its title and first line — as P22 (cancelled) and P37
+(deferred) did before they were retired. Use `status: superseded` (which does
 *not* resolve the gate) only when you genuinely want the gate to stop resolving
 against an ADR a later one replaces. There is no separate machine-read `outcome`
 field today: with cancellations and deferrals this rare, the human-readable

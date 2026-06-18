@@ -1,6 +1,6 @@
 {
   "name": "code-pact",
-  "version": "1.32.0",
+  "version": "2.0.0",
   "description": "Design Control Plane for AI Coding Agents",
   "type": "module",
   "license": "MIT",
@@ -47,6 +47,7 @@
     "typecheck": "tsc --noEmit",
     "harness": "tsx scripts/harness/run.ts",
     "check:doc-links": "tsx scripts/check-doc-links.ts",
+    "check:public-md-links": "tsx scripts/check-public-md-links.ts",
     "check:doc-invariants": "node scripts/check-doc-invariants.mjs",
     "check:history-noise": "node scripts/check-history-noise.mjs",
     "check:changelog-archive": "node scripts/changelog-archive.mjs --check",
@@ -56,7 +57,7 @@
     "check:cli-reference": "tsx scripts/gen-cli-reference.ts --check",
     "gen:doc-blocks": "tsx scripts/gen-doc-blocks.ts",
     "check:doc-blocks": "tsx scripts/gen-doc-blocks.ts --check",
-    "check:docs": "pnpm check:doc-links && pnpm check:doc-invariants && pnpm check:history-noise && pnpm check:changelog-archive && pnpm check:cli-reference && pnpm check:doc-blocks",
+    "check:docs": "pnpm check:doc-links && pnpm check:public-md-links && pnpm check:doc-invariants && pnpm check:history-noise && pnpm check:changelog-archive && pnpm check:cli-reference && pnpm check:doc-blocks",
     "check:release-version": "node scripts/check-release-version.mjs",
     "release:check": "pnpm typecheck && pnpm test && pnpm build && pnpm check:docs && pnpm check:release-version && node dist/cli.js validate --json && node dist/cli.js plan lint --include-quality --strict --json && node dist/cli.js plan analyze --strict --json",
     "prepublishOnly": "node scripts/assert-package-metadata.mjs"

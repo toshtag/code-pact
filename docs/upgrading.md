@@ -1,8 +1,23 @@
 # Upgrading
 
-`code-pact` froze its public CLI surface at v1.0. Everything in the v1.x line is **additive** — new flags, new commands, and new *optional* schema fields, never a breaking change to an existing flag, exit code, JSON envelope, or error code. See [`cli-contract.md` § Stability taxonomy](cli-contract.md#stability-taxonomy-v10).
+`code-pact` froze its public CLI surface at v1.0. **Within a major version** every change is **additive** — new flags, new commands, and new *optional* schema fields, never a breaking change to an existing flag, exit code, JSON envelope, or error code. A breaking change to that surface is what bumps the **major**; each major bump's migration is recorded under [Major upgrades](#major-upgrades) below. See [`cli-contract.md` § Stability taxonomy](cli-contract.md#stability-taxonomy-v10).
 
-## Within the v1.x line
+## Major upgrades
+
+A major bump carries at most a small, documented set of breaking changes. Upgrade one major at a time and apply that major's notes; everything else in the release is additive.
+
+### v1.x → v2.0.0
+
+v2.0.0 is a major release for **one** breaking error-code-contract change:
+
+- **`doctor` / `validate` now report a roadmap-referenced *missing* phase file as `MISSING_PHASE_FILE`, not `ORPHAN_PHASE_FILE`** (severity unchanged — `error`).
+  - A consumer that string-matched `ORPHAN_PHASE_FILE` to detect a *missing referenced* phase must switch to `MISSING_PHASE_FILE`.
+  - A consumer that keys only on `severity` needs no change.
+  - `ORPHAN_PHASE_FILE` (warning) still exists and now means **only** *present but unreferenced*.
+
+Everything else in v2.0.0 is additive — see [`CHANGELOG.md`](../CHANGELOG.md).
+
+## Upgrading within a major
 
 Just bump the version. Existing phase YAML, progress logs, and generated adapter files keep working unchanged. New optional features (task readiness fields in v1.1, `task finalize` / `phase reconcile` in v1.2, runbooks in v1.3, the governance layer in v1.5, the declared-writes audit in v1.6, `task record-done` in v1.21, the [decision gate](concepts/decision-gate.md) going status-aware in v1.22, `phase import --scaffold-decisions` in v1.23, …) are opt-in — adopt them on new work; no backfill is required.
 
@@ -44,4 +59,4 @@ The progress ledger moved from a single `.code-pact/state/progress.yaml` array t
 
 ## Coming from a pre-v1.0 alpha (v0.6 – v0.9)?
 
-New projects use the default `latest` tag (v1.x); pinned alphas remain installable on the `alpha` dist-tag. The detailed alpha-era, version-by-version upgrade notes are archived in [migration.md](migration.md), and the release-by-release history is in [`CHANGELOG.md`](../CHANGELOG.md).
+New projects use the default `latest` tag; pinned alphas remain installable on the `alpha` dist-tag. The detailed alpha-era, version-by-version upgrade notes are archived in [migration.md](migration.md), and the release-by-release history is in [`CHANGELOG.md`](../CHANGELOG.md).

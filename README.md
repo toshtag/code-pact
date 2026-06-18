@@ -36,9 +36,9 @@ code-pact validate                                            # CI-friendly heal
 
 ## Status
 
-The v1.x line freezes the public CLI surface — flags, exit codes, JSON envelope shapes, and error codes are stable across it. The full stability taxonomy (`Stable (v1.0)` / `Stable (human-output)` / `Experimental` / `Deprecated`) lives in [`docs/cli-contract.md`](docs/cli-contract.md#stability-taxonomy-v10).
+Within a major version the public CLI surface — flags, exit codes, JSON envelope shapes, and error codes — is stable; changing any of them is what bumps the major. The full stability taxonomy (`Stable (v1.0)` / `Stable (human-output)` / `Experimental` / `Deprecated`) lives in [`docs/cli-contract.md`](docs/cli-contract.md#stability-taxonomy-v10).
 
-Release notes live in [`CHANGELOG.md`](CHANGELOG.md). Upgrade guidance lives in [`docs/upgrading.md`](docs/upgrading.md) (within v1.x it is just a version bump; the earlier alpha notes are archived in [`docs/migration.md`](docs/migration.md)).
+Release notes live in [`CHANGELOG.md`](CHANGELOG.md). Upgrade guidance lives in [`docs/upgrading.md`](docs/upgrading.md) (within a major an upgrade is just a version bump; each major bump's migration is noted there; the earlier alpha notes are archived in [`docs/migration.md`](docs/migration.md)).
 
 ## Install
 
@@ -81,7 +81,7 @@ New to the terms used here (context pack, envelope, derived state, …)? The [`d
 | [`docs/agent-contract.md`](docs/agent-contract.md) | The agent contract: what `code-pact` guarantees, what `adapter conformance` requires of each agent integration, and the recommended per-task lifecycle. |
 | [`docs/getting-started.md`](docs/getting-started.md) | First-thirty-minutes guide (onboarding approaches + the per-task loop). |
 | [`docs/cli-contract.md`](docs/cli-contract.md) | Full flag / exit code / JSON envelope / error code reference and the Stability taxonomy. |
-| [`docs/upgrading.md`](docs/upgrading.md) | How to upgrade — additive within v1.x; pointers for coming from an earlier alpha. |
+| [`docs/upgrading.md`](docs/upgrading.md) | How to upgrade — additive within a major, with a migration note per major bump; pointers for coming from an earlier alpha. |
 | [`docs/troubleshooting.md`](docs/troubleshooting.md) | Diagnostic code → recovery action for the most common error codes. |
 | [`docs/community.md`](docs/community.md) | Where to file issues / discussions / PRs, the GitHub Discussions intent, and the scope-discipline rule for the Non-goals list. |
 

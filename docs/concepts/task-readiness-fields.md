@@ -1,6 +1,6 @@
 # Task Readiness Schema
 
-This document is the agent- and reviewer-facing walkthrough of the five optional task fields. For the full design rationale and the per-field decision matrix, read [`design/decisions/task-readiness-schema-rfc.md`](../../design/decisions/task-readiness-schema-rfc.md).
+This document is the agent- and reviewer-facing walkthrough of the five optional task fields. For the full design rationale and the per-field decision matrix, see the **task-readiness-schema RFC** (retired — in git history and the `.code-pact/state` archive record).
 
 ## The five optional fields
 
@@ -124,7 +124,7 @@ Not supported: brace expansion (`{a,b}`), extglob (`@(...)` / `+(...)` / `*(...)
 
 ## See also
 
-- [`design/decisions/task-readiness-schema-rfc.md`](../../design/decisions/task-readiness-schema-rfc.md) — full RFC with field semantics, validation rules, and the backward-compat contract.
+- The **task-readiness-schema RFC** (retired; in git history / the `.code-pact/state` archive record) — full RFC with field semantics, validation rules, and the backward-compat contract.
 - [`docs/migration.md`](../migration.md#v10x--v110) — upgrade walkthrough.
 - [`docs/cli-contract.md` § `phase import`](../cli-contract.md#phase-import) — the phase-import schema reference, including the lenient-mode behaviour for these fields.
 - [`docs/cli-contract.md` § `task context`](../cli-contract.md#task-context--context-quality-gates-v051-v11-additions) — the pack's declared-sections reference.

@@ -8,7 +8,7 @@ Many design decisions in code-pact are made on qualitative judgement: "this feel
 
 The harness is the path out. It captures a small set of deterministic metrics from the corpus and emits CSV that an RFC can cite as "the baseline shows X". Move design judgement from "感覚" to "measurement", one row at a time.
 
-See [`design/decisions/evidence-harness-rfc.md`](../../design/decisions/evidence-harness-rfc.md) for the full rationale and alternatives considered.
+The full rationale and alternatives considered are in the **evidence-harness RFC** — now retired, so its text lives in git history and the `.code-pact/state` archive decision record rather than as a live `design/decisions/*.md`.
 
 ## What it measures
 
@@ -25,15 +25,17 @@ Six CSV files plus a manifest and an aggregate summary, under `docs/maintainers/
 
 The sibling `measurements.manifest.json` records the harness version, the corpus git SHA, the cli version, the generation date (date only, no clock time), and the CSV file list.
 
-`summary.json` is an aggregate sidecar with `summary_schema_version: 1`. It computes the five success metrics [`docs/positioning.md`](../positioning.md) and [`docs/agent-contract.md`](../agent-contract.md) cite from the rows of the CSVs above. Shape:
+`summary.json` is an aggregate sidecar with `summary_schema_version: 2`. It computes the success metrics [`docs/positioning.md`](../positioning.md) and [`docs/agent-contract.md`](../agent-contract.md) cite from the rows of the CSVs above. A top-level **`corpus_status`** (`"measured"` | `"no_live_tasks"`) records whether the **live** plan actually had tasks to measure: when every phase is archived (a fully dogfooded corpus has no live `design/phases/*.yaml`), the task-derived metrics read 0 because there was nothing to measure — `corpus_status: "no_live_tasks"` plus `corpus_note` say so, so a reader never mistakes an empty corpus for a failing one. (Agent-level adapter drift and plan-lint issues do not depend on live tasks and are still measured.) `input_git_sha` carries a `-dirty` suffix when generated against an uncommitted tree. Shape (this repo's corpus is currently fully archived, so the example shows the `no_live_tasks` state):
 
 ```json
 {
-  "harness_version": "0.2.0",
-  "summary_schema_version": 1,
-  "input_git_sha": "<commit>",
+  "harness_version": "0.3.0",
+  "summary_schema_version": 2,
+  "input_git_sha": "<commit>[-dirty]",
   "code_pact_cli_version": "<version>",
   "generated_at": "YYYY-MM-DD",
+  "corpus_status": "no_live_tasks",
+  "corpus_note": "No live tasks in design/phases, so the task-derived metrics ... are 0 ... Agent-level adapter drift and plan-lint issues are still measured ...",
   "metrics": {
     "pack_size_p50_bytes": 0,
     "pack_size_p90_bytes": 0,
@@ -47,10 +49,12 @@ The sibling `measurements.manifest.json` records the harness version, the corpus
   "denominators": {
     "tasks_done": 0,
     "tasks_total": 0,
-    "agents_enabled": 0
+    "agents_enabled": 1
   }
 }
 ```
+
+On a corpus with live phases, `corpus_status` is `"measured"`, `corpus_note` is empty, and the metric/denominator values are populated from the CSV rows.
 
 ### Computation rules
 
@@ -63,7 +67,7 @@ The sibling `measurements.manifest.json` records the harness version, the corpus
 
 `summary.json` carries `undeclared_write_rate_status: "deferred"` (never `"computed"`). The metric is defined in `docs/positioning.md` but is intentionally not computed because the project does not enforce a formal commit → task link — commits often touch multiple tasks; many tasks have no clean git boundary. A historical retrofit would either over-claim or require new lifecycle instrumentation.
 
-A future phase may add an event-on-finalize that records the `task finalize --audit-strict` audit result to the progress ledger, making the metric observable historically without git attribution. The deferral is documented in [`design/decisions/evidence-harness-v2-rfc.md` Non-goals](../../design/decisions/evidence-harness-v2-rfc.md#non-goals-out-of-scope-for-p26).
+A future phase may add an event-on-finalize that records the `task finalize --audit-strict` audit result to the progress ledger, making the metric observable historically without git attribution. The deferral is documented in the evidence-harness-v2 RFC Non-goals (retired — in git history and the `.code-pact/state` archive record).
 
 ## Running it
 
@@ -107,11 +111,13 @@ Once the CSVs are committed under `docs/maintainers/measurements/`, future `desi
 
 The committed CSV becomes the evidence the reader can audit. **This is the whole point** of the harness — without committable, deterministic-input CSVs, "I measured this once locally" is the same as "I felt it was bad", and we lose the move from 感覚 to evidence.
 
+When the live corpus is empty (`corpus_status: "no_live_tasks"`), the task-derived CSVs contain headers only. In that case the evidence is precisely that absence: `summary.corpus_status` / `corpus_note` record that the harness measured **no live tasks**, not a failing task corpus, and the last populated baseline is in git history.
+
 ## Adding a new metric
 
 Adding a new CSV requires a follow-up RFC amendment because the column shapes are part of the contract (other PR descriptions / decision docs may cite specific column names verbatim). The process:
 
-1. Update `design/decisions/evidence-harness-rfc.md` with the new file's column shape under "CSV format specifications".
+1. Record the new file's column shape — in the **What it measures** table above (this doc is the live home for the CSV contract now that the originating evidence-harness RFC is retired) and, if a new RFC motivates the metric, in that RFC.
 2. Add a new `buildXxxRow()` helper to `scripts/harness/metrics.ts` (pure, no I/O).
 3. Wire it into `scripts/harness/run.ts`'s `buildHarnessOutput`, `serializeOutputs`, and the manifest's `csv_files` array.
 4. Add a unit test in `tests/unit/scripts/harness/metrics.test.ts`.

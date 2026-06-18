@@ -198,4 +198,4 @@ If you do not already have spec-driven planning artifacts from another tool, you
 - **Importers for non-Spec-Kit formats** (Cursor rules, Linear specs, Notion exports): out of scope; each format needs its own supported-subset analysis and import contract.
 - **A full Spec Kit-compatible spec generator**: out of charter. Re-implementing Spec Kit would invite the "code-pact replaces Spec Kit" misframing and dilute the control-plane positioning.
 
-See [design/decisions/spec-kit-bridge-rfc.md](../design/decisions/spec-kit-bridge-rfc.md) for the full design rationale and alternatives considered.
+See the **spec-kit-bridge RFC** (retired — in git history and the `.code-pact/state` archive record) for the full design rationale and alternatives considered.
