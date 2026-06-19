@@ -96,7 +96,20 @@ export async function readManifest(
     throw err;
   }
   const schema = opts.tolerantDuplicatePaths ? AdapterManifestLenient : AdapterManifest;
-  return schema.parse(parseYaml(raw) as unknown);
+  try {
+    return schema.parse(parseYaml(raw) as unknown);
+  } catch (err) {
+    // A project-controlled manifest with malformed YAML or a schema violation is
+    // adversarial-but-expected input. Tag it `ADAPTER_MANIFEST_INVALID` so the
+    // command layer (install / upgrade / doctor / list) maps it to a structured
+    // envelope instead of letting an uncoded throw surface as an internal error.
+    // `tolerantDuplicatePaths` still tolerates duplicate paths (no throw there).
+    const e = new Error(
+      `Adapter manifest at ${path} is malformed (YAML or schema): ${(err as Error).message}`,
+    );
+    (e as NodeJS.ErrnoException).code = "ADAPTER_MANIFEST_INVALID";
+    throw e;
+  }
 }
 
 /**
