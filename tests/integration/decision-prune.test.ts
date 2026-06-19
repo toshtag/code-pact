@@ -4,8 +4,9 @@
 // PR-D1: decision_retention policy surfaced as data.policy / data.policy_source; --policy override.
 
 import { describe, it, expect, beforeAll, afterEach } from "vitest";
-import { mkdir, writeFile, readFile, readdir } from "node:fs/promises";
+import { mkdir, writeFile, readFile, readdir, rm, symlink, mkdtemp } from "node:fs/promises";
 import { join, relative } from "node:path";
+import { tmpdir } from "node:os";
 import {
   createTempProject,
   ensureCliBuilt,
@@ -386,5 +387,34 @@ describe("decision prune — CLI (dry-run)", () => {
     const res = p.run(["--help"]);
     expect(res.code).toBe(0);
     expect(res.stdout).toContain("decision");
+  });
+});
+
+describe("decision prune — symlinked roadmap cannot bypass the referencing-task gate (security)", () => {
+  it("a roadmap symlinked OUTSIDE that hides a referencing not-done task → prune fails closed, decision preserved", async () => {
+    // SECURITY (Blocker 2): collectPlanArtifacts feeds prune's referencing-task
+    // gate. P1-T1 is NOT done and references foo-rfc.md, so prune is normally
+    // BLOCKED. If the roadmap could be symlinked to an external EMPTY roadmap, the
+    // referencing task would vanish and prune would wrongly become eligible —
+    // deleting a still-referenced decision. With the roadmap read contained, the
+    // symlink escape becomes a graph-file FileIssue → plan_artifacts_unreadable →
+    // fail-closed; the decision is never deleted.
+    const p = await project(ACCEPTED, "planned"); // P1-T1 planned (not done) → baseline blocked
+    const decisionPath = join(p.dir, "design", "decisions", "foo-rfc.md");
+    const before = await readFile(decisionPath, "utf8");
+
+    const outside = await mkdtemp(join(tmpdir(), "decprune-out-"));
+    cleanups.push(() => rm(outside, { recursive: true, force: true }));
+    await writeFile(join(outside, "roadmap.yaml"), "phases: []\n"); // valid, empty → hides P1-T1
+    await rm(join(p.dir, "design", "roadmap.yaml"), { force: true });
+    await symlink(join(outside, "roadmap.yaml"), join(p.dir, "design", "roadmap.yaml"));
+
+    const res = p.run(["decision", "prune", "design/decisions/foo-rfc.md", "--write", "--json"]);
+    // Not eligible (fail-closed) — never a clean success that deletes the file.
+    expect(res.code).not.toBe(0);
+    const parsed = JSON.parse(res.stdout) as { ok: boolean };
+    expect(parsed.ok).toBe(false);
+    // The decision is byte-identical: the external roadmap did NOT authorize a prune.
+    expect(await readFile(decisionPath, "utf8")).toBe(before);
   });
 });

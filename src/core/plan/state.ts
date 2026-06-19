@@ -2,6 +2,7 @@ import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { loadYaml, ParseError } from "../../io/load.ts";
+import { resolveWithinProject } from "../path-safety.ts";
 import { Phase, type Phase as PhaseT } from "../schemas/phase.ts";
 import {
   ProgressLog,
@@ -84,14 +85,9 @@ export type LenientLoadResult = {
 };
 
 const ROADMAP_REL_PATH = ["design", "roadmap.yaml"] as const;
-const PHASES_DIR_SEGMENTS = ["design", "phases"] as const;
 
 function roadmapPath(cwd: string): string {
   return join(cwd, ...ROADMAP_REL_PATH);
-}
-
-function phasesDirPath(cwd: string): string {
-  return join(cwd, ...PHASES_DIR_SEGMENTS);
 }
 
 /**
@@ -115,6 +111,26 @@ function phasesDirPath(cwd: string): string {
  */
 function loadPlanStatePhase(absPath: string): Promise<PhaseT> {
   return loadYaml(absPath, Phase);
+}
+
+/**
+ * Resolve a project-relative control-plane path (the roadmap, or a roadmap-
+ * referenced phase) to a CONTAINED absolute path for the STRICT loader. A `..` /
+ * symlink escape is mapped to CONFIG_ERROR (fail-closed) so a hostile repo cannot
+ * point the roadmap/phase graph at an out-of-project file and have it read as the
+ * control plane. The actual `loadYaml` then operates on the contained path, so
+ * its ParseError-on-malformed contract is unchanged. (CWE-59.)
+ */
+async function resolveGraphPathStrict(cwd: string, relPath: string): Promise<string> {
+  try {
+    return await resolveWithinProject(cwd, relPath);
+  } catch (err) {
+    const e = new Error(
+      `"${relPath}" is not a safe project-relative path: ${(err as Error).message}`,
+    );
+    (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+    throw e;
+  }
 }
 
 /**
@@ -208,13 +224,18 @@ function buildTaskIndex(
  * and analyze treats every task as historical / planned.
  */
 export async function loadPlanState(cwd: string): Promise<PlanState> {
-  const rmPath = roadmapPath(cwd);
+  // Contained roadmap read (CONFIG_ERROR on `..`/symlink escape) so this strict
+  // graph — behind task/phase runbook, status, plan analyze — can never be read
+  // from an out-of-project roadmap.
+  const rmPath = await resolveGraphPathStrict(cwd, "design/roadmap.yaml");
   const roadmap = await loadYaml(rmPath, Roadmap);
 
   const phases: PhaseEntry[] = [];
   const archivedCandidates: ArchivedTaskEntry[] = [];
   for (const ref of roadmap.phases) {
-    const absPath = join(cwd, ref.path);
+    // Contain each roadmap-referenced phase path too; a symlink-escaping ref is a
+    // hard CONFIG_ERROR (NOT an ENOENT archive-toleration candidate).
+    const absPath = await resolveGraphPathStrict(cwd, ref.path);
     try {
       phases.push({ ref, absPath, phase: await loadPlanStatePhase(absPath) });
     } catch (err) {
@@ -337,13 +358,20 @@ export async function collectPlanArtifacts(
 ): Promise<LenientLoadResult> {
   const fileIssues: FileIssue[] = [];
   const skippedChecks: string[] = [];
-  const rmPath = roadmapPath(cwd);
+  const rmPath = roadmapPath(cwd); // display label for the returned field
 
   let roadmap: RoadmapT | null = null;
   try {
-    roadmap = await loadYaml(rmPath, Roadmap);
+    // Contain the roadmap read. A `..`/symlink escape OR a parse/schema error
+    // both become a FileIssue on `design/roadmap.yaml` → planArtifactsUnreadable
+    // fail-closes (so decision prune/retire cannot be authorized off an
+    // out-of-project roadmap that hides the current project's referencing tasks).
+    // pushParseIssue tags the containment refusal (a non-ParseError CONFIG_ERROR)
+    // as an INVALID_YAML error FileIssue.
+    const rmAbs = await resolveWithinProject(cwd, "design/roadmap.yaml");
+    roadmap = await loadYaml(rmAbs, Roadmap);
   } catch (err) {
-    pushParseIssue(fileIssues, err, rmPath);
+    pushParseIssue(fileIssues, err, "design/roadmap.yaml");
     skippedChecks.push(
       "MISSING_PHASE_FILE",
       "ORPHAN_PHASE_FILE",
@@ -368,7 +396,15 @@ export async function collectPlanArtifacts(
   const phases: PhaseEntry[] = [];
   const archivedCandidates: ArchivedTaskEntry[] = [];
   for (const ref of roadmap.phases) {
-    const absPath = join(cwd, ref.path);
+    let absPath: string;
+    try {
+      // Contain each phase ref; a symlink-escaping ref becomes a graph-file
+      // FileIssue (fail-closed for prune/retire), not an out-of-project read.
+      absPath = await resolveWithinProject(cwd, ref.path);
+    } catch (err) {
+      pushParseIssue(fileIssues, err, ref.path);
+      continue;
+    }
     try {
       const phase = await loadPlanStatePhase(absPath);
       phases.push({ ref, absPath, phase });
@@ -503,9 +539,11 @@ async function scanPhasesDirBestEffort(
   cwd: string,
   fileIssues: FileIssue[],
 ): Promise<PhaseEntry[]> {
-  const phasesDir = phasesDirPath(cwd);
   let entries: string[] = [];
   try {
+    // Contain the directory BEFORE enumerating it: a symlinked-outside
+    // design/phases must not be readdir'd (out-of-project enumeration).
+    const phasesDir = await resolveWithinProject(cwd, "design/phases");
     entries = await readdir(phasesDir);
   } catch {
     return [];
@@ -514,8 +552,14 @@ async function scanPhasesDirBestEffort(
   const phases: PhaseEntry[] = [];
   for (const entry of entries) {
     if (!entry.endsWith(".yaml")) continue;
-    const absPath = join(phasesDir, entry);
     const relPath = `design/phases/${entry}`;
+    let absPath: string;
+    try {
+      absPath = await resolveWithinProject(cwd, relPath);
+    } catch (err) {
+      pushParseIssue(fileIssues, err, relPath);
+      continue;
+    }
     try {
       const phase = await loadPlanStatePhase(absPath);
       // Without a roadmap, ref.id is unknown — fall back to the phase id

@@ -167,10 +167,11 @@ describe("CLI: post-command --json (BUG-001)", () => {
       await symlink(join(outside, "roadmap.yaml"), join(tmpDir, "design", "roadmap.yaml"));
 
       for (const args of [
-        ["task", "complete", "P1-T1", "--dry-run", "--json"],
-        ["task", "status", "P1-T1", "--json"],
-        ["phase", "archive", "P1", "--json"],
-        ["phase", "reconcile", "P1", "--write", "--json"],
+        ["task", "complete", "P1-T1", "--dry-run", "--json"], // resolveTaskInRoadmap
+        ["task", "status", "P1-T1", "--json"], // resolveTaskInRoadmap
+        ["task", "runbook", "P1-T1", "--json"], // loadPlanState
+        ["phase", "archive", "P1", "--json"], // phase-archive loadRef
+        ["phase", "reconcile", "P1", "--write", "--json"], // phase-reconcile resolvePhase
       ]) {
         const res = run(args);
         const label = args.join(" ");
