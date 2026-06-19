@@ -97,8 +97,11 @@ export function globToRegex(pattern: string): RegExp {
   const DOUBLE = "\u0001"; // sentinel for `**` segments
   const segments = pattern.split("/").map((seg) => {
     if (seg === "**") return DOUBLE;
-    // Escape regex metachars (excluding `*`), then expand `*` to `[^/]*`.
-    const escaped = seg.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+    // Escape regex metachars (excluding `*`), then expand `*` to `[^/]*`. `?` is a
+    // LITERAL in this glob subset (validateGlobSyntax accepts it), so it MUST be
+    // escaped — otherwise `a?` compiles to the regex quantifier and `?` alone is
+    // an invalid regex. `[^/]` already matches a newline, so `*` needs no change.
+    const escaped = seg.replace(/[.+^${}()|[\]?\\]/g, "\\$&");
     return escaped.replace(/\*/g, "[^/]*");
   });
 
@@ -113,13 +116,15 @@ export function globToRegex(pattern: string): RegExp {
   );
 
   let joined = collapsed.join("/");
-  // Collapse `/**/` patterns and boundaries so `**` matches zero+ segments.
+  // Expand `**` so it matches zero+ segments. Use `[\s\S]*` (NOT `.*`): `.` does
+  // not match a newline in JS regex, but matchGlob's `**` does match a segment
+  // containing a newline, so `.*` would diverge on paths with newlines.
   joined = joined
-    .replace(new RegExp(`/${DOUBLE}/`, "g"), "/(?:.*/)?")
-    .replace(new RegExp(`/${DOUBLE}$`, "g"), "(?:/.*)?")
-    .replace(new RegExp(`^${DOUBLE}/`, "g"), "(?:.*/)?")
-    .replace(new RegExp(`^${DOUBLE}$`, "g"), ".*")
-    .replace(new RegExp(DOUBLE, "g"), ".*");
+    .replace(new RegExp(`/${DOUBLE}/`, "g"), "/(?:[\\s\\S]*/)?")
+    .replace(new RegExp(`/${DOUBLE}$`, "g"), "(?:/[\\s\\S]*)?")
+    .replace(new RegExp(`^${DOUBLE}/`, "g"), "(?:[\\s\\S]*/)?")
+    .replace(new RegExp(`^${DOUBLE}$`, "g"), "[\\s\\S]*")
+    .replace(new RegExp(DOUBLE, "g"), "[\\s\\S]*");
 
   return new RegExp(`^${joined}$`);
 }

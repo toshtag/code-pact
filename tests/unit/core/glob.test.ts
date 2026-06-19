@@ -160,6 +160,59 @@ describe("matchGlob", () => {
     }
   });
 
+  it("treats `?` as a LITERAL — parity with globToRegex (which must escape it)", () => {
+    // validateGlobSyntax accepts `?`; matchGlob treats it as a literal char. The
+    // regex form MUST escape it, else `a?` becomes a quantifier and `?` alone is
+    // an invalid RegExp (this previously threw / disagreed).
+    expect(validateGlobSyntax("a?")).toBeNull();
+    expect(matchGlob("a?", "a?")).toBe(true);
+    expect(matchGlob("a?", "a")).toBe(false);
+    expect(globToRegex("a?").test("a?")).toBe(true);
+    expect(globToRegex("a?").test("a")).toBe(false);
+    expect(() => globToRegex("?")).not.toThrow();
+  });
+
+  it("matches `**` across a newline-containing segment — parity with globToRegex", () => {
+    // `.` does not match a newline in JS regex but matchGlob's `**` does; the
+    // regex form uses [\\s\\S]* so the two agree even on (exotic) newline paths.
+    const p = "a/**/b";
+    const s = "a/x\ny/b";
+    expect(matchGlob(p, s)).toBe(true);
+    expect(globToRegex(p).test(s)).toBe(true);
+  });
+
+  it("generative parity: matchGlob === globToRegex over the validated subset", () => {
+    // Build patterns/paths from the FULL alphabet validateGlobSyntax accepts
+    // (literals incl. regex metachars `. + ( ) | $ ^` and the wildcard `?`,
+    // plus `*` and full-segment `**`) so parity is enforced across the input
+    // space, not a hand-picked sample. Deterministic LCG — no Math.random.
+    const SEG_TOKENS = ["a", "b", ".", "x.y", "c+d", "(g)", "p|q", "$z", "a?", "*", "i*j"];
+    const PATH_TOKENS = ["a", "b", ".", "x.y", "c+d", "(g)", "p|q", "$z", "a?", "ab", "i_j"];
+    let seed = 0x12345678;
+    const rnd = (n: number): number => {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      return seed % n;
+    };
+    const pick = <T,>(arr: readonly T[]): T => arr[rnd(arr.length)]!;
+    const build = (tokens: readonly string[], allowDouble: boolean): string => {
+      const n = 1 + rnd(3);
+      const segs: string[] = [];
+      for (let i = 0; i < n; i++) {
+        segs.push(allowDouble && rnd(4) === 0 ? "**" : pick(tokens));
+      }
+      return segs.join("/");
+    };
+    for (let i = 0; i < 3000; i++) {
+      const pattern = build(SEG_TOKENS, true);
+      if (validateGlobSyntax(pattern) !== null) continue; // only assert on in-subset patterns
+      const path = build(PATH_TOKENS, false);
+      const re = globToRegex(pattern);
+      expect(matchGlob(pattern, path), `pattern=${JSON.stringify(pattern)} path=${JSON.stringify(path)}`).toBe(
+        re.test(path),
+      );
+    }
+  });
+
   it("handles a pathological **-heavy non-match FAST (no catastrophic backtracking)", () => {
     // The old regex matcher took ~35s for 5 doublestars over a long path; the
     // linear matcher is bounded. Use a deep path + many `**` and a final literal
