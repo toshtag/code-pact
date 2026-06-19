@@ -22,7 +22,11 @@ import { join } from "node:path";
 const FS_FNS =
   "readFile|writeFile|appendFile|mkdir|readdir|rmdir|rm|unlink|rename|copyFile|cp|open|truncate|stat|lstat|opendir|watch";
 // `fsfn( [await] join(` — a lexically-joined path handed straight to an fs call.
-const SMELL = new RegExp(`\\b(${FS_FNS})\\s*\\(\\s*(?:await\\s+)?join\\s*\\(`);
+// `\s*` spans newlines so a MULTILINE `readFile(\n join(...),\n "utf8")` is caught
+// too (a single-line regex missed exactly that — e.g. the old resolve-task read).
+// NOTE: a path stashed in a variable first (`const d = join(...); readFile(d)`)
+// is still NOT caught — that needs dataflow (the AST-lint / projectFs follow-up).
+const SMELL = new RegExp(`\\b(${FS_FNS})\\s*\\(\\s*(?:await\\s+)?join\\s*\\(`, "g");
 
 // Only the path-handling layers take attacker-controlled project paths. The
 // neutral path-safety module itself is exempt (it IS the safe primitive).
@@ -42,14 +46,15 @@ function checkFile(file) {
   }
   const findings = [];
   const lines = text.split("\n");
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
+  for (const m of text.matchAll(SMELL)) {
+    // Line number of the fs-call (the match start).
+    const lineNo = text.slice(0, m.index).split("\n").length;
+    const line = lines[lineNo - 1] ?? "";
     const trimmed = line.trimStart();
     if (trimmed.startsWith("//") || trimmed.startsWith("*")) continue; // comment
-    if (!SMELL.test(line)) continue;
     if (line.includes("resolveWithinProject")) continue; // already contained
-    if (/\/\/\s*fs-safe:/.test(line)) continue; // explicitly justified
-    findings.push({ line: i + 1, text: line.trim() });
+    if (/\/\/\s*fs-safe:/.test(line)) continue; // explicitly justified on the fs-call line
+    findings.push({ line: lineNo, text: line.trim() });
   }
   return findings;
 }
