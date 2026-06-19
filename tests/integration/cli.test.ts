@@ -658,18 +658,21 @@ describe("CLI: task complete (v0.2)", () => {
     expect(after).toBe(before);
   });
 
-  it("verify failure (--dry-run --json): still runs verification and surfaces the failure fields", async () => {
+  it("SECURITY (--dry-run --json): does NOT execute verification commands", async () => {
     await setupWithTask();
-    await rewritePhaseCommands(true);
+    await rewritePhaseCommands(true); // the verify command is `false` (exits 1)
 
     const before = await readFile(
       join(tmpDir, ".code-pact", "state", "progress.yaml"),
       "utf8",
     );
 
-    // --dry-run does NOT skip verification: verify runs before the dry-run
-    // short-circuit, so a failing dry-run is still VERIFICATION_FAILED and
-    // carries the same clarity fields.
+    // --dry-run must NOT run the project-controlled (shell: true) verification
+    // commands. The commands check is previewed, not executed, so a command that
+    // would FAIL if run does not fail the dry run: the result is a clean dry_run
+    // preview (exit 0), NOT VERIFICATION_FAILED. (Were the command executed, the
+    // failing `false` would surface VERIFICATION_FAILED / exit 1 as it does in
+    // the non-dry-run "verify failure" test above.)
     const res = run([
       "task",
       "complete",
@@ -679,23 +682,14 @@ describe("CLI: task complete (v0.2)", () => {
       "--dry-run",
       "--json",
     ]);
-    expect(res.code).toBe(1);
+    expect(res.code).toBe(0);
     const parsed = JSON.parse(res.stdout) as {
       ok: boolean;
-      error: { code: string };
-      data: {
-        failed_checks: string[];
-        first_failure: { name: string } | null;
-        suggested_next_command: string | null;
-      };
+      data: { dry_run: boolean; would_append: { task_id: string } };
     };
-    expect(parsed.ok).toBe(false);
-    expect(parsed.error.code).toBe("VERIFICATION_FAILED");
-    expect(parsed.data.failed_checks).toContain("commands");
-    expect(parsed.data.first_failure?.name).toBe("commands");
-    expect(parsed.data.suggested_next_command).toBe(
-      "code-pact task complete P1-T1",
-    );
+    expect(parsed.ok).toBe(true);
+    expect(parsed.data.dry_run).toBe(true);
+    expect(parsed.data.would_append.task_id).toBe("P1-T1");
 
     const after = await readFile(
       join(tmpDir, ".code-pact", "state", "progress.yaml"),

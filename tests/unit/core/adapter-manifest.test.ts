@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtemp, rm, writeFile, mkdir, readFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, mkdir, readFile, symlink, readdir } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -199,6 +200,63 @@ describe("writeManifest", () => {
     await writeManifest(dir, "claude-code", next);
     const read = await readManifest(dir, "claude-code");
     expect(read?.generator_version).toBe("0.9.1-alpha.0");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SECURITY: manifest I/O must fail closed if `.code-pact/adapters` is a symlink
+// that escapes the project root (CWE-59). A malicious repo could otherwise make
+// writeManifest write outside cwd, or readManifest read a foreign manifest.
+// ---------------------------------------------------------------------------
+
+describe("manifest symlink containment", () => {
+  let outside: string;
+
+  beforeEach(async () => {
+    outside = await mkdtemp(join(tmpdir(), "code-pact-adapter-outside-"));
+  });
+  afterEach(async () => {
+    await rm(outside, { recursive: true, force: true });
+  });
+
+  async function linkAdaptersOutside(): Promise<void> {
+    await mkdir(join(dir, ".code-pact"), { recursive: true });
+    // .code-pact/adapters -> <outside dir>
+    await symlink(outside, join(dir, ".code-pact", "adapters"));
+  }
+
+  it("writeManifest refuses to write through an escaping .code-pact/adapters symlink", async () => {
+    await linkAdaptersOutside();
+    await expect(
+      writeManifest(dir, "claude-code", manifestFixture()),
+    ).rejects.toThrow();
+    // Nothing landed in the outside directory.
+    expect(existsSync(join(outside, "claude-code.manifest.yaml"))).toBe(false);
+    expect(await readdir(outside)).toEqual([]);
+  });
+
+  it("readManifest does not read a manifest from an escaping symlink target", async () => {
+    await linkAdaptersOutside();
+    // Plant a valid manifest at the symlink target (outside the project).
+    await writeFile(
+      join(outside, "claude-code.manifest.yaml"),
+      [
+        "schema_version: 1",
+        "agent_name: claude-code",
+        "generator_version: 0.9.0-alpha.0",
+        "adapter_schema_version: 1",
+        "generated_at: 2026-05-19T12:00:00+00:00",
+        "profile_fingerprint:",
+        "  instruction_filename: CLAUDE.md",
+        "  context_dir: .context/claude-code",
+        "files: []",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    // Fail closed: the escape must throw, NOT return the foreign manifest as if
+    // it were the project's own (and NOT be swallowed as a missing-manifest null).
+    await expect(readManifest(dir, "claude-code")).rejects.toThrow();
   });
 });
 

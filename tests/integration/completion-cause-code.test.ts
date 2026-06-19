@@ -187,7 +187,10 @@ describe("P39: task complete cause_code", () => {
   });
 
   it("command failure -> cause_code COMMANDS_FAILED; data backward-compatible", async () => {
-    // No decision gate; the verify command fails.
+    // No decision gate; the verify command fails. Run a REAL completion (not
+    // --dry-run): --dry-run no longer executes verification commands (security
+    // hardening), so the command-failure cause is exercised by an actual run. A
+    // failed verify records no progress event, so this is still side-effect-free.
     await setupTask(() => {}, ["false"]);
 
     const res = run([
@@ -197,7 +200,6 @@ describe("P39: task complete cause_code", () => {
       "--agent",
       "claude-code",
       "--json",
-      "--dry-run",
     ]);
     expect(res.code).toBe(1);
     const env = JSON.parse(res.stdout) as Envelope;
@@ -218,6 +220,9 @@ describe("P39: task complete cause_code", () => {
       t.requires_decision = true;
     }, ["false"]);
 
+    // Real completion (not --dry-run): --dry-run previews commands rather than
+    // executing them, so the command must actually run for `commands` to be the
+    // first failure ahead of `decision`. A failed verify records nothing.
     const res = run([
       "task",
       "complete",
@@ -225,7 +230,6 @@ describe("P39: task complete cause_code", () => {
       "--agent",
       "claude-code",
       "--json",
-      "--dry-run",
     ]);
     expect(res.code).toBe(1);
     const env = JSON.parse(res.stdout) as Envelope;

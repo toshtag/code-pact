@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { atomicWriteText } from "../../io/atomic-text.ts";
+import { resolveWithinProject } from "../path-safety.ts";
 import {
   AdapterManifest,
   AdapterManifestLenient,
@@ -14,11 +15,31 @@ import {
 
 export const ADAPTER_MANIFEST_DIR_SEGMENTS = [".code-pact", "adapters"];
 
+/**
+ * LEXICAL manifest path — a display / synchronous helper only. It does NOT
+ * touch the filesystem, so it does not guard against symlink escape. Real I/O
+ * (readManifest / writeManifest) routes through {@link resolveManifestPath},
+ * which fails closed when `.code-pact/adapters` resolves outside the project.
+ */
 export function manifestPath(cwd: string, agentName: string): string {
   return join(
     cwd,
     ...ADAPTER_MANIFEST_DIR_SEGMENTS,
     `${agentName}.manifest.yaml`,
+  );
+}
+
+/**
+ * Resolves the on-disk manifest path through {@link resolveWithinProject} so a
+ * symlinked `.code-pact/adapters` (or a symlinked manifest file) cannot make a
+ * read or write escape the project root. Throws (fail-closed) when the path
+ * resolves outside the project or `agentName` is structurally unsafe — callers
+ * must NOT treat that throw as "manifest missing".
+ */
+async function resolveManifestPath(cwd: string, agentName: string): Promise<string> {
+  return resolveWithinProject(
+    cwd,
+    [...ADAPTER_MANIFEST_DIR_SEGMENTS, `${agentName}.manifest.yaml`].join("/"),
   );
 }
 
@@ -50,7 +71,9 @@ export async function readManifest(
   agentName: string,
   opts: ReadManifestOptions = {},
 ): Promise<AdapterManifest | null> {
-  const path = manifestPath(cwd, agentName);
+  // Resolve OUTSIDE the read try/catch: a symlink-escape throw must propagate
+  // (fail-closed) rather than be swallowed as a missing-manifest `null`.
+  const path = await resolveManifestPath(cwd, agentName);
   let raw: string;
   try {
     raw = await readFile(path, "utf8");
@@ -73,7 +96,9 @@ export async function writeManifest(
   agentName: string,
   manifest: AdapterManifest,
 ): Promise<string> {
-  const path = manifestPath(cwd, agentName);
+  // Fail closed before writing a byte if `.code-pact/adapters` resolves outside
+  // the project (symlink escape) — never write a manifest outside cwd.
+  const path = await resolveManifestPath(cwd, agentName);
   const parsed = AdapterManifest.parse(manifest);
   await atomicWriteText(path, stringifyYaml(parsed));
   return path;

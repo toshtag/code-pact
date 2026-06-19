@@ -64,11 +64,12 @@ export async function loadAgentProfile(cwd: string, agentName: string): Promise<
 }
 
 export async function loadConstitution(cwd: string): Promise<string | null> {
-  try {
-    return await readFile(join(cwd, "design", "constitution.md"), "utf8");
-  } catch {
-    return null;
-  }
+  // Route through the project-contained read helper — identical to rule and
+  // decision reads — so a `design/constitution.md` symlinked OUTSIDE the
+  // project (resolveWithinProject rejects symlink escape) cannot leak a
+  // foreign file into the agent-facing context pack. OPTIONAL source:
+  // missing / unreadable / unsafe → null, same degrade contract as before.
+  return readWithinProject(cwd, "design/constitution.md");
 }
 
 // includeAll=true bypasses the applies_to filter (used for write_surface: large)

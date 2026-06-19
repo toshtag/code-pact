@@ -55,7 +55,7 @@ import { CONSTITUTION_PLACEHOLDER_MARKERS } from "../core/constitution.ts";
 import { readManifest } from "../core/adapters/manifest.ts";
 import { auditWrites, runGit } from "../core/audit/index.ts";
 import { gitIgnoredControlPlaneAreas } from "../core/control-plane-ignore.ts";
-import { globToRegex, validateGlobSyntax } from "../core/glob.ts";
+import { matchGlob, validateGlobSyntax } from "../core/glob.ts";
 import { inspectAgent, type AdapterDoctorIssue } from "./adapter-doctor.ts";
 import { readPackageVersion } from "../lib/package-version.ts";
 import type { Locale } from "../i18n/index.ts";
@@ -1230,11 +1230,11 @@ async function checkControlPlaneBranchNotDriven(
 
   // files_touched already excludes code-pact runtime state. Drop team-declared
   // exclude_globs (default empty). If nothing real remains → skip.
-  const compiled = excludeGlobs
-    .filter((g) => validateGlobSyntax(g) === null)
-    .map((g) => globToRegex(g));
+  const validExcludeGlobs = excludeGlobs.filter(
+    (g) => validateGlobSyntax(g) === null,
+  );
   const realChanged = audit.files_touched.filter(
-    (f) => !compiled.some((re) => re.test(f)),
+    (f) => !validExcludeGlobs.some((g) => matchGlob(g, f)),
   );
   if (realChanged.length === 0) return;
 

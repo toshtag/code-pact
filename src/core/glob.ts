@@ -45,8 +45,19 @@ const WALK_IGNORE_DIRS = new Set<string>([
  *
  * The check is purely syntactic — it does not look at the filesystem.
  */
+/**
+ * Upper bound on glob length. Real repo-root-relative globs are short; a
+ * pathologically long pattern is rejected before it can be compiled into a
+ * regex (defense-in-depth against {@link globToRegex} blow-up). Matching on the
+ * walk hot path uses the linear {@link matchGlob}, which is bounded regardless,
+ * but this keeps any residual regex caller cheap.
+ */
+export const MAX_GLOB_LENGTH = 1024;
+
 export function validateGlobSyntax(pattern: string): string | null {
   if (pattern.length === 0) return "empty glob pattern";
+  if (pattern.length > MAX_GLOB_LENGTH)
+    return `glob pattern exceeds ${MAX_GLOB_LENGTH} characters`;
   if (pattern.startsWith("!")) return "negation patterns ('!') are not supported in P10";
   if (/[{}]/.test(pattern)) return "brace expansion ('{...}') is not supported in P10";
   if (/[@+?!*]\(/.test(pattern)) return "extglob syntax ('@(...)', '+(...)', '*(...)', '?(...)', '!(...)') is not supported in P10";
@@ -104,9 +115,83 @@ export function globToRegex(pattern: string): RegExp {
 }
 
 /**
+ * Linear glob matcher — the runtime replacement for `globToRegex(p).test(s)` on
+ * any path that tests MANY candidates (the file walk, the write audit, doctor's
+ * exclude globs). `globToRegex` compiles `**` into greedy optional regex groups
+ * that backtrack catastrophically: a pattern with several `**` segments tested
+ * against a deep path can take tens of seconds (a project-controlled `task.reads`
+ * glob is a DoS vector). This two-pointer matcher is O(patternSegments ×
+ * pathSegments) with NO backtracking blow-up.
+ *
+ * Same subset and semantics as `globToRegex` (literal segments, `*` within a
+ * segment not crossing `/`, `**` as a full segment matching zero+ segments).
+ * The caller is expected to have validated the pattern via `validateGlobSyntax`
+ * first — both inputs are POSIX, repo-root-relative paths.
+ */
+export function matchGlob(pattern: string, path: string): boolean {
+  return matchSegments(pattern.split("/"), path.split("/"));
+}
+
+/** Two-pointer segment matcher with `**` (zero+ segments) backtracking. */
+function matchSegments(p: readonly string[], s: readonly string[]): boolean {
+  let pi = 0;
+  let si = 0;
+  let starPi = -1; // pattern index of the last `**` seen
+  let starSi = 0; // path index it is currently allowed to have consumed up to
+
+  while (si < s.length) {
+    if (pi < p.length && p[pi] === "**") {
+      starPi = pi;
+      starSi = si;
+      pi += 1; // first try `**` matching zero segments
+    } else if (pi < p.length && p[pi] !== "**" && matchSegment(p[pi]!, s[si]!)) {
+      pi += 1;
+      si += 1;
+    } else if (starPi !== -1) {
+      // Let the most recent `**` consume one more path segment, then retry.
+      starSi += 1;
+      si = starSi;
+      pi = starPi + 1;
+    } else {
+      return false;
+    }
+  }
+  // Trailing pattern must be only `**` segments to match the empty remainder.
+  while (pi < p.length && p[pi] === "**") pi += 1;
+  return pi === p.length;
+}
+
+/** Match a single path segment against a single pattern segment (`*` = run of non-`/`). */
+function matchSegment(pat: string, str: string): boolean {
+  let pi = 0;
+  let si = 0;
+  let starPi = -1;
+  let starSi = 0;
+
+  while (si < str.length) {
+    if (pi < pat.length && pat[pi] === "*") {
+      starPi = pi;
+      starSi = si;
+      pi += 1; // `*` matches zero chars first
+    } else if (pi < pat.length && pat[pi] === str[si]) {
+      pi += 1;
+      si += 1;
+    } else if (starPi !== -1) {
+      starSi += 1;
+      si = starSi;
+      pi = starPi + 1;
+    } else {
+      return false;
+    }
+  }
+  while (pi < pat.length && pat[pi] === "*") pi += 1;
+  return pi === pat.length;
+}
+
+/**
  * Walks `cwd` recursively and returns the repo-root-relative POSIX
- * paths that match `pattern`. Uses `globToRegex` internally; the caller
- * is responsible for validating the pattern's syntax first.
+ * paths that match `pattern`. Uses `matchGlob` (linear, backtrack-free); the
+ * caller is responsible for validating the pattern's syntax first.
  *
  * Standard ignore directories (.git / node_modules / dist / .code-pact
  * / .context / .local / .claude / .cursor / .vscode / .idea) are
@@ -119,7 +204,6 @@ export async function walkAndMatch(
   cwd: string,
   pattern: string,
 ): Promise<string[]> {
-  const regex = globToRegex(pattern);
   const matches: string[] = [];
 
   async function walk(dir: string): Promise<void> {
@@ -136,7 +220,7 @@ export async function walkAndMatch(
         if (WALK_IGNORE_DIRS.has(entry.name)) continue;
         await walk(abs);
       } else if (entry.isFile()) {
-        if (regex.test(rel)) matches.push(rel);
+        if (matchGlob(pattern, rel)) matches.push(rel);
       }
     }
   }

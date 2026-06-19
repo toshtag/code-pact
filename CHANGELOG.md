@@ -13,7 +13,15 @@ identifiers. Starting with v1.0.0, stable releases use plain
 
 ## [Unreleased]
 
-No changes yet.
+### Security
+
+- **Context pack no longer follows a `design/constitution.md` symlink out of the project (CWE-59).** `loadConstitution` now reads through the same project-contained helper as rules/decisions (`resolveWithinProject`), so a repo that symlinks `design/constitution.md` to an outside file cannot leak that file into the agent-facing context pack. A missing/unreadable/unsafe constitution still degrades to "not included".
+- **`task complete --dry-run` no longer executes verification shell commands (CWE-78).** The caller's `dryRun` is now propagated into verify, so the project-controlled `verification.commands` (run with `shell: true`) are previewed, not executed, on a dry run. The read-only decision gate still runs. **Behavior change:** a `--dry-run` whose only failing check is a command no longer exits 1 — it returns a clean `dry_run` preview. A non-dry-run completion is unchanged (it executes commands and fails on a failing command).
+- **Adapter manifest I/O fails closed on a `.code-pact/adapters` symlink escape (CWE-59).** `readManifest` / `writeManifest` resolve the manifest path through `resolveWithinProject`, so a symlinked adapters directory can no longer make a read pull a foreign manifest or a write land outside the project.
+- **Atomic writes use unpredictable, exclusively-created temp files (CWE-59 / CWE-377).** Temp paths are now crypto-random and opened with `wx` (`O_CREAT|O_EXCL`), so a pre-planted symlink at the temp path is refused (EEXIST, never followed) instead of being written through to an outside target.
+- **`adapter install` no longer trusts a project-shipped manifest hash to preserve stale/forged generated content (CWE-345).** A `managed-clean` file whose content no longer matches the generator output is now re-rendered (`update`) instead of skipped, so a forged manifest hash matching shipped-malicious instructions is self-healed. **Genuinely user-modified (`managed-modified`) files are still left untouched.**
+- **`adapter upgrade --write` no longer deletes an orphan just because the manifest claims it (CWE-73).** An orphan is auto-pruned only when its path is in the adapter descriptor's `ownedPathGlobs`; an orphan outside that set is surfaced (`action: "warn"`) and kept on disk. **Behavior change:** a renamed/removed generated file whose path is not in the owned set is now reported rather than auto-deleted, so a forged manifest entry cannot turn `upgrade --write` into an arbitrary in-project delete.
+- **Glob matching is now linear and backtrack-free (CWE-1333).** The file-walk / write-audit / doctor match paths use a two-pointer segment matcher instead of a regex compiled from `**`, eliminating the catastrophic backtracking a project-controlled `task.reads` glob could trigger. A pattern-length cap is also enforced in `validateGlobSyntax`.
 
 ## [2.0.0] — 2026-06-18
 

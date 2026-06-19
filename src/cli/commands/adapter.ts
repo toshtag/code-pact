@@ -324,16 +324,41 @@ async function cmdAdapterUpgrade(
       emitOk(result);
     } else {
       for (const entry of result.plan) {
-        if (entry.action === "skip") continue;
+        // `warn` (unowned orphan) gets its own explained block below, so it is
+        // not surfaced as a bare action line here (it would read as a cryptic
+        // "warn <path>" with no reason or next step).
+        if (entry.action === "skip" || entry.action === "warn") continue;
         process.stderr.write(
           `  ${entry.action.padEnd(18)} ${entry.relPath} [${entry.local} × ${entry.desired}]\n`,
         );
       }
+
+      // Unowned orphans: files the manifest tracked but the generator no longer
+      // emits, whose path is NOT in this adapter's owned set. code-pact will not
+      // delete a file based on a project-supplied (unauthenticated) manifest
+      // alone, so it keeps them and tells the user exactly what to inspect.
+      const warned = result.plan.filter((p) => p.action === "warn");
+      if (warned.length > 0) {
+        const verb = mode === "check" ? "are still on disk" : "were kept on disk";
+        process.stderr.write(
+          `${warned.length} orphaned file(s) ${verb} — no longer generated, but not auto-removed ` +
+            `(not in this adapter's owned path set, so deleting on a project-supplied manifest alone is unsafe):\n`,
+        );
+        for (const w of warned) process.stderr.write(`  ${w.relPath}\n`);
+        process.stderr.write(
+          `Review and delete them by hand if they are stale (e.g. \`rm <path>\`).\n`,
+        );
+      }
+
       if (mode === "check") {
         if (result.clean) {
           process.stderr.write("Clean — no upgrade actions needed.\n");
-        } else {
+        } else if (result.plan.some((p) => p.action !== "skip" && p.action !== "warn")) {
           process.stderr.write(`Drift detected — run "code-pact adapter upgrade ${agentName} --write" to apply.\n`);
+        } else {
+          // warn-only: --write would not change anything (an unowned orphan is
+          // never auto-removed), so the manual step above is the only action.
+          process.stderr.write(`No automatic upgrade actions — review the orphaned file(s) listed above.\n`);
         }
       } else {
         const refused = result.plan.filter((p) => p.action === "refuse").length;

@@ -5,6 +5,8 @@ import { join } from "node:path";
 import {
   findProtectedPathOverlaps,
   globToRegex,
+  matchGlob,
+  MAX_GLOB_LENGTH,
   PROTECTED_PATHS,
   validateGlobSyntax,
   walkAndMatch,
@@ -54,6 +56,98 @@ describe("validateGlobSyntax", () => {
   it("rejects partial **  inside a segment (e.g. foo**bar)", () => {
     const reason = validateGlobSyntax("src/foo**bar/baz.ts");
     expect(reason).toContain("full path segment");
+  });
+
+  it("rejects an over-length pattern (DoS guard)", () => {
+    const huge = "a/".repeat(MAX_GLOB_LENGTH) + "b.ts";
+    expect(huge.length).toBeGreaterThan(MAX_GLOB_LENGTH);
+    expect(validateGlobSyntax(huge)).toContain(`${MAX_GLOB_LENGTH}`);
+  });
+
+  it("accepts a pattern at exactly the length bound", () => {
+    const pat = "a".repeat(MAX_GLOB_LENGTH);
+    expect(pat.length).toBe(MAX_GLOB_LENGTH);
+    expect(validateGlobSyntax(pat)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// matchGlob — the linear, backtrack-free runtime matcher (replaces
+// globToRegex on the file-walk / audit / doctor hot paths). It must agree
+// with globToRegex's semantics AND must not blow up on `**`-heavy patterns.
+// ---------------------------------------------------------------------------
+
+describe("matchGlob", () => {
+  it("matches literal paths exactly", () => {
+    expect(matchGlob("src/commands/init.ts", "src/commands/init.ts")).toBe(true);
+    expect(matchGlob("src/commands/init.ts", "src/commands/init.js")).toBe(false);
+  });
+
+  it("single * does not cross /", () => {
+    expect(matchGlob("src/commands/*.ts", "src/commands/init.ts")).toBe(true);
+    expect(matchGlob("src/commands/*.ts", "src/commands/sub/init.ts")).toBe(false);
+  });
+
+  it("** matches zero or more segments", () => {
+    expect(matchGlob("src/**/foo.ts", "src/foo.ts")).toBe(true);
+    expect(matchGlob("src/**/foo.ts", "src/a/foo.ts")).toBe(true);
+    expect(matchGlob("src/**/foo.ts", "src/a/b/c/foo.ts")).toBe(true);
+    expect(matchGlob("src/**/foo.ts", "other/foo.ts")).toBe(false);
+  });
+
+  it("standalone ** matches everything", () => {
+    expect(matchGlob("**", "foo.ts")).toBe(true);
+    expect(matchGlob("**", "src/a/b/c.ts")).toBe(true);
+  });
+
+  it("treats regex metachars in segments as literals", () => {
+    expect(matchGlob("src/a.b/c+d.ts", "src/a.b/c+d.ts")).toBe(true);
+    expect(matchGlob("src/a.b/c+d.ts", "src/aXb/cXdXts")).toBe(false);
+  });
+
+  it("multiple * within one segment", () => {
+    expect(matchGlob("src/task-*-*.ts", "src/task-add-impl.ts")).toBe(true);
+    expect(matchGlob("src/task-*-*.ts", "src/task-add.ts")).toBe(false);
+  });
+
+  it("agrees with globToRegex across a sample of patterns and paths", () => {
+    const patterns = [
+      "src/commands/*.ts",
+      "src/**/*.ts",
+      "**/*.test.ts",
+      "design/phases/*.yaml",
+      "**",
+      "a/b/c.ts",
+      "src/**/test/**/*.ts",
+    ];
+    const paths = [
+      "src/commands/a.ts",
+      "src/a/b/c.ts",
+      "src/x.test.ts",
+      "design/phases/P1.yaml",
+      "a/b/c.ts",
+      "src/a/test/b/c.ts",
+      "README.md",
+    ];
+    for (const p of patterns) {
+      const re = globToRegex(p);
+      for (const s of paths) {
+        expect(matchGlob(p, s), `pattern="${p}" path="${s}"`).toBe(re.test(s));
+      }
+    }
+  });
+
+  it("handles a pathological **-heavy non-match FAST (no catastrophic backtracking)", () => {
+    // The old regex matcher took ~35s for 5 doublestars over a long path; the
+    // linear matcher is bounded. Use a deep path + many `**` and a final literal
+    // that cannot match, so any backtracking matcher would explore exponentially.
+    const pattern = Array(12).fill("**").join("/") + "/zzz.ts";
+    const path = Array(200).fill("dir").join("/") + "/actual.ts";
+    const start = Date.now();
+    const result = matchGlob(pattern, path);
+    const elapsedMs = Date.now() - start;
+    expect(result).toBe(false);
+    expect(elapsedMs).toBeLessThan(1000); // sub-ms in practice; 1s is a huge margin
   });
 });
 

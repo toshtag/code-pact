@@ -1,8 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdtemp, rm, writeFile, readFile, readdir } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, readFile, readdir, symlink } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { atomicWriteText, atomicReplaceExistingText } from "../../../src/io/atomic-text.ts";
+import {
+  atomicWriteText,
+  atomicReplaceExistingText,
+  __setAtomicTempTokenForTests,
+} from "../../../src/io/atomic-text.ts";
 
 let dir: string;
 beforeEach(async () => {
@@ -80,6 +85,47 @@ describe("atomicWriteText", () => {
     const p = join(dir, "gone", "a.txt"); // parent missing → must fail, not mkdir
     await expect(atomicWriteText(p, "v", undefined, { mkdir: false })).rejects.toThrow();
     expect(await noTempLeftBehind()).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SECURITY: temp files are created with crypto-random names and EXCLUSIVE
+// (no-follow) semantics. An attacker who pre-creates a symlink at the temp
+// path must not get the write redirected through it onto an outside target
+// (CWE-59 / CWE-377). We force a fixed temp token to make the temp path
+// predictable for the test; exclusive create must still refuse it.
+// ---------------------------------------------------------------------------
+
+describe("atomicWriteText — temp symlink clobber resistance", () => {
+  let outside: string;
+
+  beforeEach(async () => {
+    outside = await mkdtemp(join(tmpdir(), "code-pact-atomic-outside-"));
+  });
+  afterEach(async () => {
+    __setAtomicTempTokenForTests(null); // restore crypto-random
+    if (outside) await rm(outside, { recursive: true, force: true });
+  });
+
+  it("refuses to write through a pre-planted temp-path symlink; outside target untouched", async () => {
+    const FIXED = "fixed-token-for-test";
+    __setAtomicTempTokenForTests(() => FIXED);
+
+    const dest = join(dir, "target.txt");
+    const tempPath = `${dest}.tmp-${FIXED}`;
+    const outsideFile = join(outside, "victim.txt");
+    await writeFile(outsideFile, "original outside content", "utf8");
+    // Attacker squats the predictable temp path with a symlink to the victim.
+    await symlink(outsideFile, tempPath);
+
+    // Exclusive create (flag "wx") fails EEXIST on the symlink and never follows
+    // it; retries exhaust on the fixed token → the write rejects.
+    await expect(atomicWriteText(dest, "attacker-would-overwrite")).rejects.toThrow();
+
+    // The outside target was never written through.
+    expect(await readFile(outsideFile, "utf8")).toBe("original outside content");
+    // The real destination was never created.
+    expect(existsSync(dest)).toBe(false);
   });
 });
 

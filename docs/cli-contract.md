@@ -1126,7 +1126,8 @@ manifest, but it NEVER overwrites a file already recorded in the manifest (`mana
 | `new` (manifest no, disk no) | always write (`--force` not needed) |
 | `unmanaged × current` (disk matches desired, no manifest entry) | with `--force`: **adopt** (manifest only, no write) |
 | `unmanaged × stale` (disk differs from desired, no manifest entry) | with `--force`: **replace_unmanaged** (overwrite + manifest) |
-| `managed-*` (already in the manifest) | `--force` is ignored — install is hands-off |
+| `managed-clean × stale` (disk matches the manifest hash but the generator output changed) | re-rendered to current output (**update**); `--force` not required. The file is verbatim generator output, so refreshing it loses no edits — and install does **not** trust a project-shipped (possibly forged) manifest hash to preserve stale generated content (security). |
+| `managed-clean × current` / `managed-modified × *` (already in the manifest) | `skip` — `--force` is ignored. Install never overwrites a recorded file's local modifications. |
 
 Destructive overwrite of a managed-modified file requires `adapter upgrade --write --accept-modified`.
 The `--regen-skills` flag is a role-scoped force: it makes `--force` apply only to files with
@@ -1298,11 +1299,19 @@ non-skip action), `2` on `CONFIG_ERROR` (missing positional, mutex flags) /
 
 Executes the action matrix. The new manifest reflects the post-write state:
 files written / adopted have their hash refreshed, skipped managed files
-preserve their existing hash, refused entries are preserved unchanged, and
-orphans (manifest entries no longer emitted by the generator) drop out. Files
-on disk that are no longer in the new manifest remain where they are; the next
-`adapter doctor` run surfaces them as `ADAPTER_UNMANAGED_FILE` if they fall
-under the adapter's `ownedPathGlobs`.
+preserve their existing hash, refused entries are preserved unchanged.
+
+**Orphan handling (security — CWE-73).** An orphan is a manifest entry the
+generator no longer emits. Because the manifest is project-controlled and
+unauthenticated, an orphan is **auto-deleted (`action: "prune"`) only when its
+path is in the adapter descriptor's `ownedPathGlobs`** AND its content still
+matches the manifest hash. An owned orphan the user edited is `refuse`d (kept on
+disk). An orphan **outside** the owned path set is never deleted — even when
+clean — but surfaced as `action: "warn"` and kept tracked, so a forged manifest
+entry (any in-project path + that file's real sha256) cannot turn
+`upgrade --write` into an arbitrary in-project delete. Files left on disk that
+are not in the new manifest are surfaced by the next `adapter doctor` run as
+`ADAPTER_UNMANAGED_FILE` if they fall under the adapter's `ownedPathGlobs`.
 
 ```json
 {
@@ -1980,7 +1989,7 @@ Order of operations:
 3. **State check**. Derived from the append-only progress ledger (per-event files under `state/events/` merged with the legacy `progress.yaml`) via `deriveTaskState`. If the current state is `done`, returns `{ ok: true, data: { already_done: true } }` with exit 0 and **does not re-run verification** (to force re-verification, use `task complete --rerun` — planned for a later release). If the current state is `blocked`, exits 2 with `INVALID_TASK_TRANSITION`: the task must be resumed via `task resume <id>` before it can complete, so the resume event records the unblock decision. Other current states (`planned`, `started`, `resumed`, `failed`) proceed to verification. `planned → done` is permitted at the command layer for v0.5 backwards compatibility, even though the state machine itself does not list that transition.
 4. **Verification (preflight mode)**. Runs the deterministic checks from `code-pact verify` — `commands` and `decision` — but skips the state-consistency checks (`progress_event`, `task_status`) because `task complete` is the action that produces that state. On failure, exits 1 with `VERIFICATION_FAILED`; no progress event is recorded (the ledger is unchanged). Standalone `code-pact verify` still runs all four checks for after-the-fact consistency auditing.
 5. **Progress record**. On verify pass, records a `done` event with shape `{ task_id, status: "done", at, actor: "agent", agent, evidence, source: "loop", author? }` as **one new file** under `.code-pact/state/events/` (the progress ledger). `author` (Collaboration UX RFC, D1) is the human identity captured at write time (see [§ Author attribution](#author-attribution-collaboration-ux-rfc-d1)); omitted when capture is off or no identity resolves. The write is lock-free by construction: each event is published as a separate no-overwrite file (write a temp file, then `link` it onto the final path, whose name is the event's content id), so two concurrent `task complete` runs produce two distinct files and neither is lost. The legacy `.code-pact/state/progress.yaml` is **not** written. Re-recording the canonically identical event is idempotent (the file already exists).
-6. **`--dry-run`**. Skips the progress record. Returns `{ ok: true, data: { dry_run: true, would_append: <event> } }`. No event file is written. **`--dry-run` does not skip verification** — step 4 runs before the dry-run short-circuit, so a failing `--dry-run` still exits 1 with `VERIFICATION_FAILED` and the same failure-clarity fields below.
+6. **`--dry-run`**. Skips the progress record. Returns `{ ok: true, data: { dry_run: true, would_append: <event> } }`. No event file is written. **`--dry-run` must not cause side effects**: it does **not** execute the project-controlled `verification.commands` (which run with `shell: true`). The `commands` check is previewed (reported as would-execute, treated as passing) rather than run, so a command that would fail does **not** fail the dry run. The read-only `decision` gate still runs, so an unresolved-decision dry-run still exits 1 with `VERIFICATION_FAILED` (`cause_code: DECISION_REQUIRED`). A non-dry-run completion executes the commands and a failing command exits 1 with `VERIFICATION_FAILED` (`cause_code: COMMANDS_FAILED`).
 
 **Failure envelope (v1.26+, P32 — additive).** On `VERIFICATION_FAILED`, the `data` object carries three additive fields alongside the unchanged `data.verify.checks`:
 

@@ -242,11 +242,15 @@ describe("decideAction — install", () => {
     expect(decide({ local: "managed-clean", desired: "current", mode })).toBe("skip");
   });
 
-  it("managed-clean × stale → skip (install does not update)", () => {
-    expect(decide({ local: "managed-clean", desired: "stale", mode })).toBe("skip");
+  it("managed-clean × stale → update (re-render verbatim generator output; no manifest trust)", () => {
+    // SECURITY: install must NOT trust a project-shipped manifest hash to keep a
+    // stale (or forged-to-match-malicious) managed-clean file. The file is
+    // verbatim generator output, so refreshing it to current desired content
+    // destroys no edits and self-heals poisoned instructions.
+    expect(decide({ local: "managed-clean", desired: "stale", mode })).toBe("update");
   });
 
-  it("managed-modified × current → skip (install is hands-off)", () => {
+  it("managed-modified × current → skip (install is hands-off for local edits)", () => {
     expect(decide({ local: "managed-modified", desired: "current", mode })).toBe("skip");
   });
 

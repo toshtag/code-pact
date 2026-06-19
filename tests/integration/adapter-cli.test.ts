@@ -1,10 +1,15 @@
 import { beforeAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdtemp, realpath, rm } from "node:fs/promises";
+import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runInit } from "../../src/commands/init.ts";
+import {
+  computeContentHash,
+  readManifest,
+  writeManifest,
+} from "../../src/core/adapters/manifest.ts";
 import { cliPath, ensureCliBuilt } from "../helpers/cli.ts";
 
 beforeAll(() => {
@@ -381,6 +386,55 @@ describe("adapter unknown subcommand — CLI", () => {
     expect(parsed.ok).toBe(false);
     expect(parsed.error.code).toBe("CONFIG_ERROR");
     expect(parsed.error.message).toContain("foobar");
+  });
+});
+
+describe("adapter upgrade — unowned orphan warn output (security)", () => {
+  // Seed an orphan whose path is NOT in claude's ownedPathGlobs: managed-clean
+  // (manifest hash == disk hash) but not emitted by the generator. The CLI must
+  // KEEP it and explain why + how to remove it (vs. silently deleting on a
+  // project-supplied manifest's say-so).
+  async function seedUnownedOrphan(relPath: string, content: string): Promise<void> {
+    await writeFile(join(dir, relPath), content, "utf8");
+    const m = await readManifest(dir, "claude-code");
+    if (m === null) throw new Error("manifest expected after install");
+    m.files.push({
+      path: relPath,
+      sha256: computeContentHash(content),
+      managed: true,
+      role: "skill",
+    });
+    await writeManifest(dir, "claude-code", m);
+  }
+
+  it("--write keeps an unowned orphan and prints which file + why + how to remove", async () => {
+    expect(runCli(["adapter", "install", "claude-code"]).status).toBe(0);
+    const orphan = ".claude/skills/old-renamed-skill.md";
+    await seedUnownedOrphan(orphan, "# old skill\n");
+
+    const res = runCli(["adapter", "upgrade", "claude-code", "--write"]);
+    expect(res.status).toBe(0);
+    // WHICH file
+    expect(res.stderr).toContain(orphan);
+    // WHY it was not deleted
+    expect(res.stderr).toMatch(/not auto-removed|owned path set/);
+    // HOW to remove it
+    expect(res.stderr).toMatch(/by hand|rm </);
+    // The file is still on disk (not deleted on the manifest's say-so).
+    expect(existsSync(join(dir, orphan))).toBe(true);
+  });
+
+  it("--check surfaces the unowned orphan and does not suggest --write would fix it", async () => {
+    expect(runCli(["adapter", "install", "claude-code"]).status).toBe(0);
+    const orphan = ".claude/skills/old-renamed-skill.md";
+    await seedUnownedOrphan(orphan, "# old skill\n");
+
+    const res = runCli(["adapter", "upgrade", "claude-code", "--check"]);
+    expect(res.status).toBe(1); // not clean
+    expect(res.stderr).toContain(orphan);
+    // warn-only drift: do NOT tell the user "run --write to apply" (it won't help).
+    expect(res.stderr).not.toContain('--write" to apply');
+    expect(res.stderr).toMatch(/review the orphaned file/i);
   });
 });
 

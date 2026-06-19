@@ -143,9 +143,13 @@ function buildFingerprint(
 
 /**
  * Generates the adapter for `agentName` and writes a manifest.
- * `--force` only adopts / replaces UNMANAGED files. It never
- * overwrites a file that is recorded in the existing manifest. To force-
- * overwrite a managed-modified file, callers must use
+ * `--force` only adopts / replaces UNMANAGED files. It never overwrites a
+ * managed-MODIFIED file (one whose disk content diverges from its manifest
+ * hash). It DOES re-render a managed-clean file whose content is stale relative
+ * to the current generator output — that file is verbatim generator output, so
+ * refreshing it destroys no edits and prevents a project-shipped (possibly
+ * forged) manifest from preserving stale generated content. To force-overwrite
+ * a managed-modified file, callers must use
  * `adapter upgrade --write --accept-modified`.
  *
  * On every invocation, regardless of whether the manifest existed before,
@@ -255,7 +259,10 @@ export async function runAdapterInstall(
 
     let recordedHash: string | null = null;
 
-    if (action === "write" || action === "replace_unmanaged") {
+    if (action === "write" || action === "replace_unmanaged" || action === "update") {
+      // `update` arises for managed-clean × stale: the file is verbatim (older)
+      // generator output, safe to refresh to current desired content. This also
+      // self-heals a forged manifest that matched shipped-stale instructions.
       await mkdir(dirname(absPath), { recursive: true });
       await atomicWriteText(absPath, desired.content);
       recordedHash = desiredHash;
@@ -272,8 +279,8 @@ export async function runAdapterInstall(
         recordedHash = manifestHash;
       }
     }
-    // Other actions (update / update_manifest / refuse / warn) are not
-    // reachable in install mode per the action matrix.
+    // Other actions (update_manifest / refuse / warn) are not reachable in
+    // install mode per the action matrix.
 
     if (recordedHash !== null) {
       newManifestFiles.push({

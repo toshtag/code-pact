@@ -1,5 +1,55 @@
 import { mkdir, rename, writeFile, unlink, readFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import { randomUUID } from "node:crypto";
+
+// ---------------------------------------------------------------------------
+// Temp-file token generation
+//
+// Temp paths used to be `${path}.tmp-${pid}-${Date.now()}` — predictable, and
+// opened with a plain (symlink-following) write. An attacker who pre-created a
+// symlink at the predicted temp path could make the write land on (clobber) an
+// out-of-project target before the rename. Defenses:
+//   1. UNPREDICTABLE name (crypto-random) so the path cannot be pre-created.
+//   2. EXCLUSIVE create (flag "wx" = O_CREAT|O_EXCL|O_WRONLY): if the temp path
+//      already exists — including as a symlink — open fails with EEXIST and is
+//      never followed (POSIX guarantees O_CREAT|O_EXCL fails on a symlink).
+// `tempToken` is injectable so a test can force a known suffix and assert the
+// exclusive-create refuses a pre-planted symlink.
+// ---------------------------------------------------------------------------
+
+const defaultTempToken = (): string => randomUUID();
+let tempToken: () => string = defaultTempToken;
+
+/** Test-only seam: force the temp-name token, or pass null to restore random. */
+export function __setAtomicTempTokenForTests(fn: (() => string) | null): void {
+  tempToken = fn ?? defaultTempToken;
+}
+
+/**
+ * Creates a same-directory temp file with EXCLUSIVE, no-follow semantics and
+ * writes `content` into it; returns the temp path. Retries on the (astronomically
+ * unlikely with a UUID) EEXIST collision. An EEXIST that never clears — e.g. a
+ * squatting symlink at a forced/fixed token — exhausts the retries and throws,
+ * so the squatted target is never written through.
+ */
+async function createExclusiveTemp(path: string, content: string): Promise<string> {
+  const MAX_ATTEMPTS = 5;
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
+    const tmp = `${path}.tmp-${tempToken()}`;
+    try {
+      await writeFile(tmp, content, { encoding: "utf8", flag: "wx" });
+      return tmp;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "EEXIST") {
+        lastErr = err;
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastErr ?? new Error("could not create a unique temp file");
+}
 
 /**
  * The expected on-disk state of a destination just before an atomic write — used
@@ -27,20 +77,22 @@ async function verifyExpected(path: string, expected: ExpectedState): Promise<vo
 }
 
 async function writeThenRename(
-  tmp: string,
   path: string,
   content: string,
   expected?: ExpectedState,
 ): Promise<void> {
+  // Exclusive create: if this throws (e.g. a squatting symlink at the temp
+  // path), no temp file of ours exists to clean up, and nothing was written
+  // through the squatted path.
+  const tmp = await createExclusiveTemp(path, content);
   try {
-    await writeFile(tmp, content, "utf8");
     // Re-check just before rename: refuse if the destination drifted since the
     // caller's read (narrows, does not close, the window).
     if (expected !== undefined) await verifyExpected(path, expected);
     await rename(tmp, path);
   } catch (err) {
     // Best-effort: never leave a stray temp file behind, whether the failure was
-    // the temp write (e.g. ENOSPC mid-write), the drift re-check, or the rename.
+    // the drift re-check or the rename.
     await unlink(tmp).catch(() => {});
     throw err;
   }
@@ -71,9 +123,8 @@ export async function atomicWriteText(
   expected?: ExpectedState,
   opts: { mkdir?: boolean } = {},
 ): Promise<void> {
-  const tmp = `${path}.tmp-${process.pid}-${Date.now()}`;
   if (opts.mkdir !== false) await mkdir(dirname(path), { recursive: true });
-  await writeThenRename(tmp, path, content, expected);
+  await writeThenRename(path, content, expected);
 }
 
 /**
@@ -96,8 +147,7 @@ export async function atomicReplaceExistingText(
   content: string,
   expectedCurrent?: string,
 ): Promise<void> {
-  const tmp = `${path}.tmp-${process.pid}-${Date.now()}`;
   const expected: ExpectedState | undefined =
     expectedCurrent !== undefined ? { kind: "present", content: expectedCurrent } : undefined;
-  await writeThenRename(tmp, path, content, expected);
+  await writeThenRename(path, content, expected);
 }

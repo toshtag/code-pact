@@ -112,9 +112,12 @@ export type ActionDecisionInput = {
  * to the single FileAction the command layer should perform for one file.
  *
  * Notes on semantics:
- *  - `install` is initial setup and never updates an existing managed file.
- *    `managed-clean × stale` and `managed-modified × *` return `skip` so
- *    re-running install is always idempotent.
+ *  - `install` is initial setup. It re-renders a `managed-clean × stale` file
+ *    (`update`) — the file is verbatim generator output, so refreshing it is
+ *    safe and avoids trusting a project-shipped manifest to keep stale (or
+ *    forged) generated content. It still leaves `managed-modified × *` alone
+ *    (`skip`) so local edits survive, and `managed-clean × current` is `skip`,
+ *    keeping a no-change re-install idempotent.
  *  - `--force` is unmanaged-adoption only. It NEVER overrides
  *    `managed-modified`; destructive overwrite of locally-modified files
  *    requires `--accept-modified` on `upgrade --write`.
@@ -141,8 +144,14 @@ export function decideAction(input: ActionDecisionInput): FileAction {
   // managed-clean
   if (local === "managed-clean") {
     if (desired === "current") return "skip";
-    // desired === "stale" → safe update; install is hands-off so skip there
-    if (mode === "install") return "skip";
+    // desired === "stale" → safe update. Includes INSTALL: a project ships the
+    // manifest, so trusting a manifest hash to keep a stale generated file lets
+    // a forged manifest (hash matching shipped malicious content) survive
+    // install untouched. A managed-clean file is by definition unmodified
+    // relative to its manifest entry, so overwriting it with the current
+    // generator output destroys no user edits — and self-heals poisoned
+    // instructions. (managed-MODIFIED × stale is still refused/skipped below,
+    // so genuine local edits are never clobbered.)
     return "update";
   }
 
