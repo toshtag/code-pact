@@ -728,6 +728,16 @@ async function cmdPack(argv: string[], locale: Locale, globalJson: boolean): Pro
       emitError(json, "TASK_NOT_FOUND", msg);
       return 2;
     }
+    if (code === "CONFIG_ERROR") {
+      // A control-plane read refused on path-safety grounds (a roadmap/phase
+      // path that escapes the project via `..`/symlink → loadPhase/loadRoadmap
+      // throw CONFIG_ERROR). Surface the structured envelope (exit 2) instead of
+      // letting it fall through to the top-level internal-error / exit 3. Mirrors
+      // `task context`, which already maps CONFIG_ERROR here.
+      const msg = err instanceof Error ? err.message : "Invalid configuration.";
+      emitError(json, "CONFIG_ERROR", msg);
+      return 2;
+    }
     throw err;
   }
 }

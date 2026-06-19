@@ -46,6 +46,26 @@ export async function loadPhase(cwd: string, path: string): Promise<Phase> {
     (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
     throw e;
   }
-  const raw = await readFile(abs, "utf8");
-  return Phase.parse(parseYaml(raw) as unknown);
+  let raw: string;
+  try {
+    raw = await readFile(abs, "utf8");
+  } catch (err) {
+    // ENOENT stays RAW: a missing roadmap-referenced phase is the legitimate
+    // archived-fallback signal (resolve-task keys on `code === "ENOENT"`). Any
+    // OTHER read failure on a project-controlled path (the phase ref is a
+    // directory → EISDIR, an intermediate is a file → ENOTDIR, EACCES, …) is an
+    // adversarial input → CONFIG_ERROR, not an uncoded exit-3 internal error.
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") throw err;
+    const e = new Error(`Phase at ${abs} cannot be read: ${(err as Error).message}`);
+    (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+    throw e;
+  }
+  try {
+    return Phase.parse(parseYaml(raw) as unknown);
+  } catch (err) {
+    // Malformed YAML / schema violation on a project-controlled phase → structured.
+    const e = new Error(`Phase at ${abs} is malformed (YAML or schema): ${(err as Error).message}`);
+    (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+    throw e;
+  }
 }

@@ -29,6 +29,23 @@ export async function loadRoadmap(cwd: string): Promise<Roadmap> {
     (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
     throw e;
   }
-  const raw = await readFile(abs, "utf8");
-  return Roadmap.parse(parseYaml(raw) as unknown);
+  let raw: string;
+  try {
+    raw = await readFile(abs, "utf8");
+  } catch (err) {
+    // ENOENT stays RAW (callers treat a missing roadmap as "no project yet").
+    // Any other read failure (a directory at the path → EISDIR, ENOTDIR, EACCES)
+    // is structured rather than an uncoded exit-3.
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") throw err;
+    const e = new Error(`design/roadmap.yaml cannot be read: ${(err as Error).message}`);
+    (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+    throw e;
+  }
+  try {
+    return Roadmap.parse(parseYaml(raw) as unknown);
+  } catch (err) {
+    const e = new Error(`design/roadmap.yaml is malformed (YAML or schema): ${(err as Error).message}`);
+    (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+    throw e;
+  }
 }

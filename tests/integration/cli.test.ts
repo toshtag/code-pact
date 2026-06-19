@@ -2,7 +2,7 @@
 // `spawnSync`. The integration test script builds dist once before Vitest
 // starts so files can run in parallel without racing tsup cleanup.
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
-import { mkdtemp, mkdir, rm, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, readFile, writeFile, symlink } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
@@ -116,6 +116,34 @@ describe("CLI: post-command --json (BUG-001)", () => {
     expect(() => JSON.parse(res.stdout)).not.toThrow();
     const parsed = JSON.parse(res.stdout) as { ok: boolean };
     expect(typeof parsed.ok).toBe("boolean");
+  });
+
+  it("pack with a phase file symlinked OUTSIDE the project → CONFIG_ERROR exit 2 (no leak, no internal error)", async () => {
+    // SECURITY (Blocker 3): loadPhase refuses an out-of-project phase ref with
+    // CONFIG_ERROR; cmdPack must map that to a structured envelope (exit 2), not
+    // let it fall through to a top-level internal error / exit 3 — and the foreign
+    // phase's contents must never reach the agent-facing pack.
+    run(["init", "--locale", "en-US", "--agent", "claude-code", "--json"]);
+    run(["phase", "add", "--id", "P1", "--name", "Foundation", "--objective", "Foundation phase", "--weight", "10", "--json"]);
+    const roadmap = parseYaml(await readFile(join(tmpDir, "design", "roadmap.yaml"), "utf8")) as {
+      phases: Array<{ id: string; path: string }>;
+    };
+    const phasePath = roadmap.phases[0]!.path; // e.g. design/phases/P1-foundation.yaml
+    const outside = await mkdtemp(join(tmpdir(), "code-pact-pack-out-"));
+    try {
+      await writeFile(join(outside, "leak.yaml"), "objective: SECRET_PHASE_MARKER\n", "utf8");
+      await rm(join(tmpDir, phasePath), { force: true });
+      await symlink(join(outside, "leak.yaml"), join(tmpDir, phasePath)); // phase file → outside
+      const res = run(["pack", "--phase", "P1", "--task", "P1-T1", "--agent", "claude-code", "--json"]);
+      expect(res.code).toBe(2);
+      const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+      expect(parsed.ok).toBe(false);
+      expect(parsed.error.code).toBe("CONFIG_ERROR");
+      expect(`${res.stdout}${res.stderr}`).not.toMatch(/internal error/i);
+      expect(`${res.stdout}${res.stderr}`).not.toContain("SECRET_PHASE_MARKER");
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
   });
 
   it("verify ... --json (post-command) produces JSON-only stdout", () => {
