@@ -1,6 +1,20 @@
-import { realpath } from "node:fs/promises";
-import { dirname, resolve, sep } from "node:path";
+import { lstat, readlink, realpath } from "node:fs/promises";
+import { dirname, isAbsolute, join, parse, resolve, sep } from "node:path";
 import { RelativePosixPath } from "./schemas/relative-path.ts";
+
+// A symlink-resolution hop cap, matching the conventional OS `ELOOP` limit. A
+// path that needs more hops is treated as an unresolvable cycle and refused with
+// a stable path-safety code rather than spinning or surfacing a raw error.
+const MAX_SYMLINK_HOPS = 40;
+
+/**
+ * Splits a `readlink` target into path components on EITHER separator, dropping
+ * empty and `.` segments while PRESERVING `..` (the caller's walk pops a parent
+ * for each `..`). Used for the non-root portion of a link target.
+ */
+function splitLinkSegments(linkBody: string): string[] {
+  return linkBody.split(/[\\/]+/).filter((s) => s.length > 0 && s !== ".");
+}
 
 // ---------------------------------------------------------------------------
 // Neutral path-safety module
@@ -26,21 +40,35 @@ export function assertSafeRelativePath(relPath: string): void {
 }
 
 /**
- * Resolves `relPath` against `cwd` and returns the joined absolute path,
- * but throws if any existing ancestor of the target resolves outside
- * `realpath(cwd)` via a symlink. The check walks up from the target
- * through existing parents until it finds one that exists on disk; that
- * ancestor's realpath must remain within the project root.
+ * Resolves `relPath` against `cwd` and returns the joined absolute path, but
+ * throws `PATH_OUTSIDE_PROJECT` if it would resolve OUTSIDE `realpath(cwd)` via a
+ * symlink — including a DANGLING symlink whose target does not exist.
  *
- * Returns the path joined to the ORIGINAL `cwd` (not the realpath'd
- * cwd). This matters on macOS where `/var/folders/...` is a symlink to
- * `/private/var/folders/...`; users passing the former in expect the
- * former back out. The realpath is computed internally only for the
- * symlink-escape safety check.
+ * Why not `realpath`: `realpath()` fails with a bare `ENOENT` on a dangling
+ * symlink, indistinguishable from a genuinely not-yet-created path. A walk that
+ * trusts `realpath` therefore mistakes `.context -> /outside/does-not-exist` for
+ * a safe missing path and lets a later `mkdir`/write escape the project. Instead
+ * this canonicalizes `relPath` one component at a time from the real project
+ * root, using `lstat`/`readlink` so a symlink is followed to where it POINTS even
+ * when that target is absent. The final canonical location must stay within the
+ * project; a genuinely non-existent component (not a symlink) ends the walk
+ * safely (so creating new files/dirs still works).
  *
- * Throws on:
- *  - any structural path failure from `assertSafeRelativePath`
- *  - an existing ancestor whose realpath escapes the project root
+ * Contract:
+ *  - non-existent in-project path (no symlink)            → allowed (returned)
+ *  - existing in-project path / in-project symlink chain  → allowed
+ *  - in-project symlink whose target is in-project but    → allowed (write
+ *    absent (dangling-but-contained)                          lands in-project)
+ *  - any symlink (existing OR dangling) pointing OUTSIDE   → PATH_OUTSIDE_PROJECT
+ *  - unresolvable symlink cycle (> MAX_SYMLINK_HOPS)       → PATH_OUTSIDE_PROJECT
+ *  - structural path failure (assertSafeRelativePath)      → throws (no code)
+ *
+ * Returns the path joined to the ORIGINAL `cwd` (not the realpath'd cwd). This
+ * matters on macOS where `/var/folders/...` is a symlink to `/private/var/...`;
+ * callers passing the former expect the former back. The canonicalization is
+ * internal, only for the escape check. The `PATH_OUTSIDE_PROJECT` code lets
+ * command layers map a refusal to a structured envelope; broad optional-source
+ * catchers that degrade to null are unaffected (they ignore the code).
  */
 export async function resolveWithinProject(
   cwd: string,
@@ -49,47 +77,70 @@ export async function resolveWithinProject(
   assertSafeRelativePath(relPath);
   const cwdReal = await realpath(cwd);
   const target = resolve(cwd, relPath);
-  const targetReal = resolve(cwdReal, relPath);
 
-  // Walk up `targetReal` (the realpath-rooted candidate) until we hit
-  // something that exists on disk, then verify its realpath is still
-  // under cwdReal. This catches symlink escape both for files that
-  // exist and for files we are about to create whose parent directory
-  // is a symlink to outside the project.
-  let ancestor = targetReal;
-  // eslint-disable-next-line no-constant-condition
-  while (true) {
+  const within = (p: string): boolean =>
+    p === cwdReal || p.startsWith(cwdReal + sep);
+
+  // `base` is the canonical (symlink-free) absolute prefix resolved so far. It
+  // starts at the real project root and only ever grows by a literal component,
+  // a `..` pop, or a symlink redirect — each re-checked at the end.
+  let base = cwdReal;
+  const pending = relPath.split("/").filter((s) => s.length > 0 && s !== ".");
+  let hops = 0;
+
+  while (pending.length > 0) {
+    const seg = pending.shift()!;
+    if (seg === "..") {
+      base = dirname(base);
+      continue;
+    }
+    const candidate = join(base, seg);
+    let st: import("node:fs").Stats;
     try {
-      const ancestorReal = await realpath(ancestor);
-      if (
-        ancestorReal !== cwdReal &&
-        !ancestorReal.startsWith(cwdReal + sep)
-      ) {
-        const escape = new Error(
-          `path "${relPath}" resolves outside project root (ancestor "${ancestor}" → "${ancestorReal}")`,
-        );
-        // Stable, additive code so command layers can map a symlink-escape
-        // refusal to a structured envelope instead of leaking an internal error.
-        // Existing broad catchers (e.g. the optional-source loaders that degrade
-        // to null) are unaffected — they ignore the code.
-        (escape as NodeJS.ErrnoException).code = "PATH_OUTSIDE_PROJECT";
-        throw escape;
-      }
-      return target;
+      st = await lstat(candidate);
     } catch (err) {
-      const code = (err as NodeJS.ErrnoException).code;
-      if (code === "ENOENT") {
-        const parent = dirname(ancestor);
-        if (parent === ancestor) {
-          // Reached filesystem root without finding an existing ancestor.
-          // This cannot happen in practice because cwd itself exists, but
-          // guard defensively so we never loop forever.
-          return target;
-        }
-        ancestor = parent;
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+        // `candidate` does not exist as ANY entry (not even a symlink): a plain,
+        // not-yet-created child of `base`. Nothing below it can be a symlink, so
+        // adopt it and keep consuming the remaining literal segments.
+        base = candidate;
         continue;
       }
       throw err;
     }
+    if (st.isSymbolicLink()) {
+      if (++hops > MAX_SYMLINK_HOPS) {
+        const cycle = new Error(
+          `path "${relPath}" resolves through an unresolvable symlink cycle (at "${candidate}")`,
+        );
+        (cycle as NodeJS.ErrnoException).code = "PATH_OUTSIDE_PROJECT";
+        throw cycle;
+      }
+      // Follow the link to where it POINTS, target existence irrelevant. An
+      // absolute link restarts `base` at its root; a relative link resolves
+      // against the directory holding it (`base`). Either way the link's segments
+      // are re-processed, so a chain that leaves and re-enters the project is
+      // judged by its FINAL canonical location, like realpath.
+      const link = await readlink(candidate);
+      if (isAbsolute(link)) {
+        const root = parse(link).root;
+        base = root;
+        pending.unshift(...splitLinkSegments(link.slice(root.length)));
+      } else {
+        pending.unshift(...splitLinkSegments(link));
+      }
+      continue;
+    }
+    // A real (non-symlink) directory or file. `base` stays canonical.
+    base = candidate;
   }
+
+  if (!within(base)) {
+    const escape = new Error(
+      `path "${relPath}" resolves outside project root (→ "${base}")`,
+    );
+    (escape as NodeJS.ErrnoException).code = "PATH_OUTSIDE_PROJECT";
+    throw escape;
+  }
+  return target;
 }

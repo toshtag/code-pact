@@ -109,6 +109,54 @@ describe("resolveWithinProject", () => {
     expect(got).toBe(join(dir, "linked/file.md"));
   });
 
+  // SECURITY (CWE-59): realpath() reports a DANGLING symlink as a bare ENOENT,
+  // indistinguishable from a not-yet-created path. A walk that trusts realpath
+  // would mistake `.ctx -> /outside/does-not-exist` for a safe missing path and
+  // let a later mkdir/write escape. resolveWithinProject must follow the link to
+  // where it POINTS (lstat/readlink), target existence irrelevant.
+  it("rejects an ANCESTOR dangling symlink pointing outside the project", async () => {
+    // `.ctx` points at a path under `outside` that does NOT exist.
+    await symlink(join(outside, "does-not-exist"), join(dir, ".ctx"), "dir");
+    await expect(
+      resolveWithinProject(dir, ".ctx/claude-code"),
+    ).rejects.toThrow(/outside project root/);
+  });
+
+  it("rejects a FINAL dangling symlink pointing outside the project", async () => {
+    await symlink(join(outside, "missing.md"), join(dir, "leak.md"), "file");
+    await expect(
+      resolveWithinProject(dir, "leak.md"),
+    ).rejects.toThrow(/outside project root/);
+  });
+
+  it("tags a dangling-outside escape with the PATH_OUTSIDE_PROJECT code", async () => {
+    await symlink(join(outside, "does-not-exist"), join(dir, ".ctx"), "dir");
+    await expect(
+      resolveWithinProject(dir, ".ctx/x"),
+    ).rejects.toMatchObject({ code: "PATH_OUTSIDE_PROJECT" });
+  });
+
+  it("accepts an in-project symlink that is dangling but stays inside the project", async () => {
+    // Points within the project at a not-yet-created dir — a write through it
+    // would land in-project, so it is allowed (like any not-yet-created path).
+    await symlink(join(dir, "real-DNE"), join(dir, ".inlink"), "dir");
+    const got = await resolveWithinProject(dir, ".inlink/file.md");
+    expect(got).toBe(join(dir, ".inlink/file.md"));
+  });
+
+  it("rejects an unresolvable symlink cycle with a stable path-safety code", async () => {
+    await symlink(join(dir, ".loopb"), join(dir, ".loopa"), "dir");
+    await symlink(join(dir, ".loopa"), join(dir, ".loopb"), "dir");
+    await expect(
+      resolveWithinProject(dir, ".loopa/file"),
+    ).rejects.toMatchObject({ code: "PATH_OUTSIDE_PROJECT" });
+  });
+
+  it("still accepts an ordinary deep non-existent path (no symlink)", async () => {
+    const got = await resolveWithinProject(dir, ".new/a/b/c.md");
+    expect(got).toBe(join(dir, ".new/a/b/c.md"));
+  });
+
   it("resolves paths whose ancestor only exists at the project root", async () => {
     // No intermediate directories — entire suffix is non-existent.
     const got = await resolveWithinProject(dir, "a/b/c/d/e.md");
