@@ -8,6 +8,7 @@ import { isSupportedAgent } from "../core/agents.ts";
 import { resolveAgentProfilePath } from "../core/agent-profile-path.ts";
 import type { DesiredAdapterFileRole } from "../core/adapters/types.ts";
 import {
+  assertAdapterWritePathsContained,
   assertSafeRelativePath,
   classifyFileState,
   decideAction,
@@ -218,29 +219,13 @@ export async function runAdapterInstall(
     (existingManifest?.files ?? []).map((f) => [f.path, f]),
   );
 
-  // Directory placeholders: every adapter gets its context_dir, Claude also gets
-  // its hook_dir. Routed through resolveWithinProject so a symlinked `.context`
-  // / `.claude` ancestor cannot make `mkdir` create a directory OUTSIDE the
-  // project (RelativePosixPath already blocks lexical `..`; this adds the
-  // symlink-escape guard). An escape is mapped to a structured error by the CLI.
-  //
-  // Done BEFORE the `--model` pin so a placeholder-dir escape fails closed with
-  // no persistent side effect — symmetric with the manifest read above. Pinning
-  // first would rewrite the profile's `model_version` on a doomed install. The
-  // mkdirs themselves are idempotent, in-project, and benign.
-  await mkdir(await resolveWithinProject(cwd, profile.context_dir), { recursive: true });
-  if (profile.hook_dir) {
-    await mkdir(await resolveWithinProject(cwd, profile.hook_dir), { recursive: true });
-  }
-
-  // Now safe to PERSIST the `--model` pin: the manifest read and the placeholder
-  // mkdirs above both fail closed, so nothing persistent was written before this.
-  const resolvedModelVersion = await resolveAndPinModelVersion({
-    cwd,
-    agentName,
-    profile,
-    modelVersionInput: modelVersion,
-  });
+  // Effective model version for GENERATION, computed WITHOUT persisting it. The
+  // `--model` pin is a profile write (a persistent side effect) and is deferred
+  // until after the path-safety preflight below, so a doomed install never
+  // strands a pinned `model_version`. (Matches `resolveAndPinModelVersion`'s own
+  // resolution: normalized `--model`, else the profile's existing pin.)
+  const resolvedModelVersion =
+    validateModelVersionInput(modelVersion) ?? profile.model_version;
 
   const descriptor = adapterRegistry[agentName];
   const desiredFiles = dedupeDesiredFiles(
@@ -252,6 +237,35 @@ export async function runAdapterInstall(
       modelVersion: resolvedModelVersion,
     }),
   );
+
+  // Path-safety PREFLIGHT — fail closed BEFORE any persistent side effect. The
+  // manifest read above already covered `.code-pact/adapters`; this resolves the
+  // placeholder dirs AND every generated file path through resolveWithinProject,
+  // so a symlinked `.context` / `.claude` ancestor OR a final-component symlink
+  // (e.g. `CLAUDE.md` pointed out of the project) aborts the install here — with
+  // no pin and no write — instead of after the `--model` pin. An escape surfaces
+  // as PATH_OUTSIDE_PROJECT, which the CLI maps to CONFIG_ERROR.
+  await assertAdapterWritePathsContained(cwd, [
+    profile.context_dir,
+    ...(profile.hook_dir ? [profile.hook_dir] : []),
+    ...desiredFiles.map((d) => d.path),
+  ]);
+
+  // Preflight passed — now safe to PERSIST the `--model` pin: the manifest read
+  // and the path preflight both fail closed, so nothing persistent was written
+  // before this. The mkdirs below are idempotent, in-project, and benign.
+  await resolveAndPinModelVersion({
+    cwd,
+    agentName,
+    profile,
+    modelVersionInput: modelVersion,
+  });
+
+  // Directory placeholders (verified safe in the preflight above).
+  await mkdir(await resolveWithinProject(cwd, profile.context_dir), { recursive: true });
+  if (profile.hook_dir) {
+    await mkdir(await resolveWithinProject(cwd, profile.hook_dir), { recursive: true });
+  }
 
   const created: string[] = [];
   const skipped: string[] = [];

@@ -11,6 +11,7 @@ import {
 } from "../core/agent-profile-path.ts";
 import type { DesiredAdapterFileRole } from "../core/adapters/types.ts";
 import {
+  assertAdapterWritePathsContained,
   assertSafeRelativePath,
   classifyFileState,
   decideAction,
@@ -236,19 +237,14 @@ export async function runAdapterUpgrade(
     loadModelProfiles(cwd),
   ]);
 
-  // `--write` pins `--model` to the profile (after validation). `--check` is
-  // read-only: it validates the value (unknown → CONFIG_ERROR) but never
-  // persists. The CLI also rejects `--check --model` outright; this keeps the
-  // core honest if called directly.
+  // Effective model version for GENERATION, computed WITHOUT persisting it.
+  // `--check` never pins (and the CLI rejects `--check --model`); `--write` pins
+  // `--model`, but the pin is a profile write deferred until AFTER the path-safety
+  // preflight below, so a doomed `--write` never strands a pinned `model_version`.
+  // validateModelVersionInput is pure and fails fast (CONFIG_ERROR) on an unknown
+  // `--model` in both modes. (Matches resolveAndPinModelVersion's own resolution.)
   const resolvedModelVersion =
-    mode === "write"
-      ? await resolveAndPinModelVersion({
-          cwd,
-          agentName,
-          profile,
-          modelVersionInput: modelVersion,
-        })
-      : (validateModelVersionInput(modelVersion) ?? profile.model_version);
+    validateModelVersionInput(modelVersion) ?? profile.model_version;
 
   const descriptor = adapterRegistry[agentName];
   const desiredFiles = dedupeDesiredFiles(
@@ -265,10 +261,31 @@ export async function runAdapterUpgrade(
     existingManifest.files.map((f) => [f.path, f]),
   );
 
-  // For --write only: ensure directory placeholders exist before any write.
-  // Routed through resolveWithinProject so a symlinked `.context` / `.claude`
-  // ancestor cannot make `mkdir` create a directory outside the project.
+  // For --write: fail-closed path-safety PREFLIGHT, THEN pin, THEN create dirs.
   if (mode === "write") {
+    // Resolve every path the write pass will touch — placeholder dirs, generated
+    // files, and manifest-tracked orphan candidates — BEFORE the `--model` pin
+    // (the first persistent mutation), so a symlink escape (`.context`/`.claude`,
+    // a generated-file ancestor, a `CLAUDE.md` final symlink, or a forged
+    // manifest path) aborts here with no pin, no write, no unlink. Mirrors
+    // adapter install. An escape → PATH_OUTSIDE_PROJECT → CONFIG_ERROR at the CLI.
+    await assertAdapterWritePathsContained(cwd, [
+      profile.context_dir,
+      ...(profile.hook_dir ? [profile.hook_dir] : []),
+      ...desiredFiles.map((d) => d.path),
+      ...existingByPath.keys(),
+    ]);
+
+    // Preflight passed — now safe to PERSIST the `--model` pin (a no-op write
+    // when no `--model` was given). Nothing persistent was written before this.
+    await resolveAndPinModelVersion({
+      cwd,
+      agentName,
+      profile,
+      modelVersionInput: modelVersion,
+    });
+
+    // Directory placeholders (verified safe in the preflight above).
     await mkdir(await resolveWithinProject(cwd, profile.context_dir), { recursive: true });
     if (profile.hook_dir) {
       await mkdir(await resolveWithinProject(cwd, profile.hook_dir), { recursive: true });

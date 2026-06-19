@@ -635,6 +635,102 @@ describe("adapter placeholder dir symlink escape — CLI error mapping (security
     expect(await readdir(outside)).toEqual([]);
     await rm(outside, { recursive: true, force: true });
   });
+
+  it("upgrade --write --model with `.context` symlinked outside does NOT pin the profile", async () => {
+    // The upgrade --write pin is deferred until after the path-safety preflight,
+    // so a `.context` escape aborts (CONFIG_ERROR) with the profile untouched —
+    // matching install (the pre-failure-side-effect fix had been install-only).
+    expect(runCli(["adapter", "install", "claude-code"]).status).toBe(0);
+    const profilePath = join(dir, ".code-pact", "agent-profiles", "claude-code.yaml");
+    const before = await readFile(profilePath, "utf8");
+    const outside = await linkDirOutside(".context");
+    const res = runCli(["adapter", "upgrade", "claude-code", "--write", "--model", "sonnet-4.6", "--json"]);
+    expect(res.status).toBe(2);
+    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+    expect(parsed.error.code).toBe("CONFIG_ERROR");
+    expect(await readFile(profilePath, "utf8")).toBe(before);
+    expect(await readdir(outside)).toEqual([]);
+    await rm(outside, { recursive: true, force: true });
+  });
+});
+
+describe("adapter agent-profile path symlink escape — CLI error mapping (security)", () => {
+  // resolveAgentProfilePath routes through resolveWithinProject, so a symlinked
+  // `.code-pact/agent-profiles` cannot make a profile READ — or the `--model`
+  // pin's WRITE — escape the project. The escape maps to CONFIG_ERROR (exit 2),
+  // and no profile YAML is created/updated in the symlinked-outside directory.
+  async function linkProfilesOutside(): Promise<string> {
+    const outside = await mkdtemp(join(tmpdir(), "code-pact-profiles-escape-"));
+    await rm(join(dir, ".code-pact", "agent-profiles"), { recursive: true, force: true });
+    await symlink(outside, join(dir, ".code-pact", "agent-profiles"));
+    return outside;
+  }
+
+  it("install --model with `.code-pact/agent-profiles` symlinked outside → CONFIG_ERROR exit 2", async () => {
+    const outside = await linkProfilesOutside();
+    const res = runCli(["adapter", "install", "claude-code", "--model", "sonnet-4.6", "--json"]);
+    expect(res.status).toBe(2);
+    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+    expect(parsed.error.code).toBe("CONFIG_ERROR");
+    // No profile written into the out-of-project directory.
+    expect(existsSync(join(outside, "claude-code.yaml"))).toBe(false);
+    await rm(outside, { recursive: true, force: true });
+  });
+
+  it("upgrade --write --model with `.code-pact/agent-profiles` symlinked outside → CONFIG_ERROR exit 2", async () => {
+    expect(runCli(["adapter", "install", "claude-code"]).status).toBe(0);
+    const outside = await linkProfilesOutside();
+    const res = runCli(["adapter", "upgrade", "claude-code", "--write", "--model", "sonnet-4.6", "--json"]);
+    expect(res.status).toBe(2);
+    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+    expect(parsed.error.code).toBe("CONFIG_ERROR");
+    expect(existsSync(join(outside, "claude-code.yaml"))).toBe(false);
+    await rm(outside, { recursive: true, force: true });
+  });
+});
+
+describe("adapter generated-file symlink escape — no pre-failure model pin (security)", () => {
+  // A generated file (e.g. CLAUDE.md) symlinked OUT of the project is caught by
+  // the path-safety preflight that runs BEFORE the `--model` pin, so a doomed
+  // install/upgrade fails closed (CONFIG_ERROR) with the profile untouched and
+  // the out-of-project target unwritten.
+  async function linkFileOutside(rel: string): Promise<{ outside: string; target: string }> {
+    const outside = await mkdtemp(join(tmpdir(), "code-pact-genfile-escape-"));
+    const target = join(outside, "leaked.md");
+    await writeFile(target, "ORIGINAL_OUTSIDE_CONTENT\n", "utf8");
+    await rm(join(dir, rel), { recursive: true, force: true });
+    await symlink(target, join(dir, rel));
+    return { outside, target };
+  }
+
+  it("install --model with CLAUDE.md symlinked outside → CONFIG_ERROR, profile not pinned, target unwritten", async () => {
+    const profilePath = join(dir, ".code-pact", "agent-profiles", "claude-code.yaml");
+    const before = await readFile(profilePath, "utf8");
+    const { outside, target } = await linkFileOutside("CLAUDE.md");
+    const res = runCli(["adapter", "install", "claude-code", "--model", "sonnet-4.6", "--json"]);
+    expect(res.status).toBe(2);
+    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+    expect(parsed.error.code).toBe("CONFIG_ERROR");
+    expect(await readFile(profilePath, "utf8")).toBe(before);
+    expect(await readFile(profilePath, "utf8")).not.toContain("model_version");
+    // The out-of-project file the symlink points at was never overwritten.
+    expect(await readFile(target, "utf8")).toBe("ORIGINAL_OUTSIDE_CONTENT\n");
+    await rm(outside, { recursive: true, force: true });
+  });
+
+  it("upgrade --write --model with CLAUDE.md symlinked outside → CONFIG_ERROR, profile not pinned", async () => {
+    expect(runCli(["adapter", "install", "claude-code"]).status).toBe(0);
+    const profilePath = join(dir, ".code-pact", "agent-profiles", "claude-code.yaml");
+    const before = await readFile(profilePath, "utf8");
+    const { outside, target } = await linkFileOutside("CLAUDE.md");
+    const res = runCli(["adapter", "upgrade", "claude-code", "--write", "--model", "sonnet-4.6", "--json"]);
+    expect(res.status).toBe(2);
+    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+    expect(parsed.error.code).toBe("CONFIG_ERROR");
+    expect(await readFile(profilePath, "utf8")).toBe(before);
+    expect(await readFile(target, "utf8")).toBe("ORIGINAL_OUTSIDE_CONTENT\n");
+    await rm(outside, { recursive: true, force: true });
+  });
 });
 
 describe("adapter install — divergent managed file is surfaced, not silent (security)", () => {

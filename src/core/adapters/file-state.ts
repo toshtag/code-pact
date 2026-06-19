@@ -7,10 +7,38 @@
 // re-exports below keep existing adapter call sites working unchanged.
 // ---------------------------------------------------------------------------
 
+import {
+  assertSafeRelativePath as assertSafeRelativePathImpl,
+  resolveWithinProject as resolveWithinProjectImpl,
+} from "../path-safety.ts";
+
 export {
   assertSafeRelativePath,
   resolveWithinProject,
 } from "../path-safety.ts";
+
+/**
+ * Fail-closed path-safety PREFLIGHT for an adapter write pass. Resolves every
+ * project-relative path the pass will touch — placeholder dirs, generated files,
+ * and (for upgrade) manifest-tracked orphan candidates — through
+ * {@link resolveWithinProject} WITHOUT mutating anything. A symlink escape
+ * (`.context` / `.claude`, a generated-file ancestor, a final-component symlink
+ * like `CLAUDE.md`, or a forged manifest path) therefore throws
+ * `PATH_OUTSIDE_PROJECT` BEFORE the caller's first persistent side effect (the
+ * `--model` profile pin, a file write, an orphan unlink), so a doomed run leaves
+ * nothing behind. Each path is also structurally validated
+ * (`assertSafeRelativePath`). Order is irrelevant — it is a pure gate; the real
+ * passes re-resolve for use.
+ */
+export async function assertAdapterWritePathsContained(
+  cwd: string,
+  relPaths: Iterable<string>,
+): Promise<void> {
+  for (const rel of relPaths) {
+    assertSafeRelativePathImpl(rel);
+    await resolveWithinProjectImpl(cwd, rel);
+  }
+}
 
 // ---------------------------------------------------------------------------
 // 2-axis file state classification
