@@ -230,6 +230,13 @@ const KNOWN_CODES: Record<string, "public" | "plan" | "doctor" | "adapter" | "in
 
   // Internal
   INTERNAL_ERROR: "internal",
+  // Path-safety escape: `resolveWithinProject` tags a symlink/unsafe-path escape
+  // with this code so command layers can map it to a structured envelope
+  // (e.g. adapter install/upgrade → ADAPTER_MANIFEST_INVALID for the manifest
+  // path, CONFIG_ERROR for placeholder dirs) and the decision prune/retire gates
+  // classify it as `target_invalid`. It is always caught + remapped, so it never
+  // reaches an agent as a top-level `error.code` — hence "internal".
+  PATH_OUTSIDE_PROJECT: "internal",
   // Defense-in-depth invariant: an adapter generator produced two desired
   // files at the same path with differing content. Should never fire (each
   // adapter uniquifies its own paths); surfaced as an unhandled exception

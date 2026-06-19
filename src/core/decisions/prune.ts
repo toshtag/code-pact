@@ -178,8 +178,10 @@ export async function evaluatePrune(
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "ENOENT") {
       blocks.push({ gate: "target_missing", detail: `${decision} does not exist on disk` });
-    } else if (code === undefined) {
-      // resolveWithinProject throws a plain Error (no errno) on a path escape.
+    } else if (code === "PATH_OUTSIDE_PROJECT" || code === undefined) {
+      // resolveWithinProject tags a symlink/path escape `PATH_OUTSIDE_PROJECT`;
+      // a structural rejection (assertSafeRelativePath's code-less ZodError) is
+      // the `code === undefined` case. Both are path-validity failures → invalid.
       blocks.push({
         gate: "target_invalid",
         detail: `${decision} escapes the project root (symlink or unsafe path)`,

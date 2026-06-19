@@ -65,9 +65,15 @@ export async function resolveWithinProject(
         ancestorReal !== cwdReal &&
         !ancestorReal.startsWith(cwdReal + sep)
       ) {
-        throw new Error(
+        const escape = new Error(
           `path "${relPath}" resolves outside project root (ancestor "${ancestor}" → "${ancestorReal}")`,
         );
+        // Stable, additive code so command layers can map a symlink-escape
+        // refusal to a structured envelope instead of leaking an internal error.
+        // Existing broad catchers (e.g. the optional-source loaders that degrade
+        // to null) are unaffected — they ignore the code.
+        (escape as NodeJS.ErrnoException).code = "PATH_OUTSIDE_PROJECT";
+        throw escape;
       }
       return target;
     } catch (err) {
