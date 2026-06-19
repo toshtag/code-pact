@@ -2,6 +2,7 @@ import { mkdir, open, readFile, rename, unlink, type FileHandle } from "node:fs/
 import { basename, dirname, join } from "node:path";
 import { DeleteIntent, DELETE_INTENT_SCHEMA_VERSION, type BundlePairIntent, type DeleteIntentRecord } from "../schemas/delete-intent.ts";
 import { archiveBundlesDir, archiveDeleteIntentPath, archiveEventPacksDir, archivePhasesDir, eventPackPath, phaseSnapshotPath, sha256Hex } from "./paths.ts";
+import { resolveWithinProject } from "../path-safety.ts";
 
 // ---------------------------------------------------------------------------
 // Retention DELETE-INTENT journal — a durable write-ahead log that makes a loose
@@ -401,11 +402,13 @@ export class BundlePairNotCommittableError extends Error {
  *  immediately before `writeDeleteIntent`, when nothing has been retired yet (so EVERY old bundle
  *  must be present — unlike recovery, which tolerates an already-retired ENOENT). */
 export async function assertBundlePairsCommittable(cwd: string, pairs: BundlePairIntent[]): Promise<void> {
-  const dir = archiveBundlesDir(cwd);
   const readMatch = async (file: string, expected: string, what: string): Promise<void> => {
     let raw: string;
     try {
-      raw = await readFile(join(dir, basename(file)), "utf8");
+      raw = await readFile(
+        await resolveWithinProject(cwd, [".code-pact", "state", "archive", "bundles", basename(file)].join("/")),
+        "utf8",
+      );
     } catch (err) {
       throw new BundlePairNotCommittableError(`${what} ${file} is missing before commit: ${(err as Error).message}`);
     }

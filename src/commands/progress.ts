@@ -1,9 +1,9 @@
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 import { loadRoadmap } from "../core/plan/roadmap.ts";
 import { loadPhase } from "../core/plan/load-phase.ts";
 import { BaselineSnapshot } from "../core/schemas/baseline-snapshot.ts";
 import { assertSafePlanId } from "../core/schemas/plan-id.ts";
+import { resolveWithinProject } from "../core/path-safety.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -54,7 +54,7 @@ async function loadBaseline(cwd: string, name: string): Promise<BaselineSnapshot
   let raw: string;
   try {
     raw = await readFile(
-      join(cwd, ".code-pact", "state", "baselines", `${name}.json`),
+      await resolveWithinProject(cwd, `.code-pact/state/baselines/${name}.json`),
       "utf8",
     );
   } catch {

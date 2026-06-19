@@ -24,7 +24,6 @@
 //     `context_budget` key in isolation, not the whole AgentProfile.
 
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { Project } from "../schemas/project.ts";
 import { loadProject, resolveEnabledAgent } from "../project.ts";
@@ -34,6 +33,7 @@ import {
   type ContextBudgetProfiles as ContextBudgetProfilesType,
 } from "../schemas/agent-profile.ts";
 import { resolveAgentProfilePath } from "../agent-profile-path.ts";
+import { readProjectTextOrNull } from "../project-read.ts";
 
 export type LoadAgentContextBudgetResult = {
   /** The resolved agent name (explicit, else project default_agent). */
@@ -99,12 +99,8 @@ export async function loadAgentContextBudgetBestEffort(
   agent: string | undefined,
 ): Promise<ContextBudgetProfilesType | undefined> {
   // project.yaml unreadable/absent → no override (built-in fallback applies).
-  let projectRaw: string;
-  try {
-    projectRaw = await readFile(join(cwd, ".code-pact", "project.yaml"), "utf8");
-  } catch {
-    return undefined;
-  }
+  const projectRaw = await readProjectTextOrNull(cwd, ".code-pact/project.yaml");
+  if (projectRaw === null) return undefined;
   let project;
   try {
     project = Project.parse(parseYaml(projectRaw) as unknown);

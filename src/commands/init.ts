@@ -12,6 +12,7 @@ import { DEFAULT_AGENT_PROFILES, type SupportedAgent } from "../core/agents.ts";
 import { renderInitConstitution } from "../core/constitution.ts";
 import { messages as messageCatalog } from "../i18n/index.ts";
 import { isGitRepo, gitIgnoredControlPlaneAreas } from "../core/control-plane-ignore.ts";
+import { resolveWithinProject } from "../core/path-safety.ts";
 
 export type { SupportedAgent } from "../core/agents.ts";
 
@@ -348,7 +349,8 @@ export async function runInitCore(opts: InitCoreOptions): Promise<InitResult> {
   const KEEP_HINT =
     "keep only `/.code-pact/locks/`, `/.code-pact/cache/`, `/.local/`, `/.context/` ignored";
   const warnings: string[] = [];
-  const blanketLine = await readFile(join(cwd, ".gitignore"), "utf8")
+  const blanketLine = await resolveWithinProject(cwd, ".gitignore")
+    .then((path) => readFile(path, "utf8"))
     .then((c) => detectBlanketCodePactIgnore(c))
     .catch(() => null);
   if (await isGitRepo(cwd)) {

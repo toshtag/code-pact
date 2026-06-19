@@ -1,5 +1,4 @@
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { RelativePosixPath } from "./schemas/relative-path.ts";
 import { assertSafePlanId } from "./schemas/plan-id.ts";
@@ -52,7 +51,7 @@ export async function resolveAgentProfileRel(
   assertSafePlanId(agentName, "Agent");
   let raw: string;
   try {
-    raw = await readFile(join(cwd, ".code-pact", "project.yaml"), "utf8");
+    raw = await readFile(await resolveWithinProject(cwd, ".code-pact/project.yaml"), "utf8");
   } catch (err) {
     // Absent project.yaml → convention. But a present-but-unreadable file
     // (EACCES, EISDIR, transient I/O) is a real problem: surface it rather than

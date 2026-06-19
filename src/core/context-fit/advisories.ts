@@ -20,12 +20,11 @@
 // surface size risk; they never block work or apply a budget automatically.
 
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 import { buildContextPack } from "../pack/index.ts";
 import { recommendContextFit } from "../recommend/context-fit.ts";
 import { STANDARD_CONTEXT_BUDGET_PROFILES } from "./budget-profiles.ts";
 import { validateGlobSyntax, walkAndMatch } from "../glob.ts";
-import { assertSafeRelativePath } from "../path-safety.ts";
+import { assertSafeRelativePath, resolveWithinProject } from "../path-safety.ts";
 import type { PhaseEntry } from "../plan/state.ts";
 import type { PlanIssue } from "../plan/shared.ts";
 
@@ -126,7 +125,7 @@ export async function detectContextFitAdvisories(
         let bytes = fileBytesCache.get(ref);
         if (bytes === undefined) {
           try {
-            const content = await readFile(join(cwd, ref), "utf8");
+            const content = await readFile(await resolveWithinProject(cwd, ref), "utf8");
             bytes = Buffer.byteLength(content, "utf8");
           } catch {
             bytes = null; // missing/unreadable → not our advisory to raise

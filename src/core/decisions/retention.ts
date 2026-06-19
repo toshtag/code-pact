@@ -1,10 +1,9 @@
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import {
   DECISION_RETENTION_VALUES,
   type DecisionRetention,
 } from "../schemas/project.ts";
+import { readProjectTextOrNull } from "../project-read.ts";
 
 export { DECISION_RETENTION_VALUES, type DecisionRetention };
 
@@ -40,7 +39,8 @@ function isRetention(v: unknown): v is DecisionRetention {
  */
 export async function readDecisionRetention(cwd: string): Promise<ResolvedRetention> {
   try {
-    const raw = await readFile(join(cwd, ".code-pact", "project.yaml"), "utf8");
+    const raw = await readProjectTextOrNull(cwd, ".code-pact/project.yaml");
+    if (raw === null) return { policy: DEFAULT_DECISION_RETENTION, source: "default" };
     const doc = parseYaml(raw) as unknown;
     if (doc && typeof doc === "object" && !Array.isArray(doc)) {
       // Key the decision on PRESENCE, not on the value: a present-but-empty field

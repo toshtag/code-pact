@@ -7,6 +7,7 @@ import { Project } from "../core/schemas/project.ts";
 import { adapterRegistry } from "../core/adapters/index.ts";
 import { isSupportedAgent, type SupportedAgent } from "../core/agents.ts";
 import { resolveAgentProfilePath } from "../core/agent-profile-path.ts";
+import { resolveWithinProject } from "../core/path-safety.ts";
 import {
   computeContentHash,
   manifestPath,
@@ -102,7 +103,8 @@ async function loadAgentProfileSafe(
 }
 
 async function loadModelProfilesSafe(cwd: string): Promise<ModelProfile[]> {
-  const dir = join(cwd, ".code-pact", "model-profiles");
+  const dir = await resolveWithinProject(cwd, ".code-pact/model-profiles").catch(() => null);
+  if (dir === null) return [];
   let entries: string[];
   try {
     entries = await readdir(dir);
@@ -113,7 +115,10 @@ async function loadModelProfilesSafe(cwd: string): Promise<ModelProfile[]> {
   for (const entry of entries.sort()) {
     if (!entry.endsWith(".yaml")) continue;
     try {
-      const raw = await readFile(join(dir, entry), "utf8");
+      const raw = await readFile(
+        await resolveWithinProject(cwd, [".code-pact", "model-profiles", entry].join("/")),
+        "utf8",
+      );
       profiles.push(ModelProfile.parse(parseYaml(raw) as unknown));
     } catch {
       // skip malformed
@@ -514,7 +519,7 @@ async function listOwnedCandidates(
 
   let entries: string[];
   try {
-    entries = await readdir(join(cwd, dir));
+    entries = await readdir(dir === "." ? cwd : await resolveWithinProject(cwd, dir));
   } catch {
     return [];
   }

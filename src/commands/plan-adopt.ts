@@ -14,10 +14,9 @@
 // honest signal to use `plan prompt --schema-only` + an agent instead.
 
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
-import { assertSafeRelativePath } from "../core/path-safety.ts";
+import { assertSafeRelativePath, resolveWithinProject } from "../core/path-safety.ts";
 import { PhaseImportInput, type PhaseImportEntry } from "../core/schemas/phase-import.ts";
 import { loadRoadmap } from "../core/plan/roadmap.ts";
 import {
@@ -384,8 +383,15 @@ export async function runPlanAdopt(
 
   let raw: string;
   try {
-    raw = await readFile(join(cwd, fromPath), "utf8");
+    raw = await readFile(await resolveWithinProject(cwd, fromPath), "utf8");
   } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "PATH_OUTSIDE_PROJECT") {
+      throw new PlanAdoptError(
+        "unsafe_path",
+        `plan adopt: path is unsafe: ${(err as Error).message}`,
+        fromPath,
+      );
+    }
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "ENOENT") {
       throw new PlanAdoptError(

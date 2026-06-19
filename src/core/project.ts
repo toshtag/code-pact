@@ -4,13 +4,13 @@
 // the per-function doc below is the contract of record.
 
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { Project } from "./schemas/project.ts";
+import { resolveWithinProject } from "./path-safety.ts";
 
 /** Load and validate `.code-pact/project.yaml`. */
 export async function loadProject(cwd: string): Promise<Project> {
-  const raw = await readFile(join(cwd, ".code-pact", "project.yaml"), "utf8");
+  const raw = await readFile(await resolveWithinProject(cwd, ".code-pact/project.yaml"), "utf8");
   return Project.parse(parseYaml(raw) as unknown);
 }
 

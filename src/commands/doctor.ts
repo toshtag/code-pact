@@ -18,6 +18,7 @@ import {
 } from "../core/progress/all-sources.ts";
 import { validateSnapshotEventEvidence } from "../core/archive/snapshot-evidence.ts";
 import { Project } from "../core/schemas/project.ts";
+import { resolveWithinProject } from "../core/path-safety.ts";
 import {
   ACCEPTED_MODEL_VERSION_INPUTS,
   AgentProfile,
@@ -647,7 +648,7 @@ function checkDuplicateIds(phaseEntries: PhaseEntry[], issues: DoctorIssue[]): v
 async function checkLocalGitignored(cwd: string, issues: DoctorIssue[]): Promise<void> {
   let content: string;
   try {
-    content = await readFile(join(cwd, ".gitignore"), "utf8");
+    content = await readFile(await resolveWithinProject(cwd, ".gitignore"), "utf8");
   } catch {
     issues.push({
       code: "LOCAL_NOT_GITIGNORED",

@@ -1,5 +1,4 @@
 import { readFile, readdir } from "node:fs/promises";
-import { join } from "node:path";
 import { parseFrontMatter } from "../pack/front-matter.ts";
 import { resolveWithinProject } from "../path-safety.ts";
 import { resolveRetiredDecisionGate } from "./decision-gate-archive.ts";
@@ -68,7 +67,7 @@ export async function readLiveDecisionDir(
   cwd: string,
 ): Promise<{ present: boolean; entries: string[] }> {
   try {
-    const entries = await readdir(join(cwd, "design", "decisions"));
+    const entries = await readdir(await resolveWithinProject(cwd, "design/decisions"));
     return { present: true, entries: entries.filter((e) => !NON_DECISION_FILES.has(e)) };
   } catch (error) {
     if (isAbsentDecisionsDirError(error)) return { present: false, entries: [] };

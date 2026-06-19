@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 import type { SupportedAgent } from "../core/agents.ts";
+import { resolveWithinProject } from "../core/path-safety.ts";
 import {
   ACTIVATION_RULE_ANCHORS,
   ADAPTER_CONTRACT_HARDENING_FROM_VERSION,
@@ -297,10 +297,7 @@ export async function runAdapterConformance(
   // surface, and failure-guidance check below operates on this string.
   let instructionContent: string;
   try {
-    instructionContent = await readFile(
-      join(cwd, instructionEntry.path),
-      "utf8",
-    );
+    instructionContent = await readFile(await resolveWithinProject(cwd, instructionEntry.path), "utf8");
   } catch {
     checks.push(
       fail("instruction_file_present", instructionEntry.path, {
@@ -453,7 +450,7 @@ export async function runAdapterConformance(
   for (const entry of manifest.files) {
     let diskContent: string;
     try {
-      diskContent = await readFile(join(cwd, entry.path), "utf8");
+      diskContent = await readFile(await resolveWithinProject(cwd, entry.path), "utf8");
     } catch {
       checks.push(
         fail("file_checksum_match", entry.path, {

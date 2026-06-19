@@ -1,5 +1,5 @@
 import { readFile, readdir, unlink } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { basename } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { Phase } from "../schemas/phase.ts";
 import { PhaseSnapshot } from "../schemas/phase-snapshot.ts";
@@ -254,7 +254,7 @@ async function buildSourceMap(cwd: string, kind: ArchiveBundleKind): Promise<Sou
     if (src === "bundle") continue; // no loose copy
     let looseRaw: string | null = null;
     try {
-      looseRaw = await readFile(join(looseDirFor(cwd, kind), `${id}.json`), "utf8");
+      looseRaw = await readFile(await resolveWithinProject(cwd, looseRelPath(kind, id)), "utf8");
     } catch {
       looseRaw = null;
     }
@@ -547,7 +547,7 @@ async function planEventPackRetention(
       bytes =
         src === "bundle"
           ? bundleMembers.get(id)?.bytes ?? null
-          : await readFile(join(archiveEventPacksDir(cwd), `${id}.json`), "utf8");
+          : await readFile(await resolveWithinProject(cwd, looseRelPath("event_pack", id)), "utf8");
     } catch {
       bytes = null;
     }
