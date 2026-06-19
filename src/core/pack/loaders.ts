@@ -28,23 +28,12 @@ import {
 import { loadMergedProgress } from "../progress/io.ts";
 import { validateGlobSyntax, walkAndMatch } from "../glob.ts";
 import { assertSafePlanId } from "../schemas/plan-id.ts";
-import { resolveWithinProject } from "../path-safety.ts";
+import { readProjectTextOrNull } from "../project-read.ts";
 import { resolveAgentProfilePath } from "../agent-profile-path.ts";
 
-/**
- * Read a project file only if `relPath` resolves within the project root —
- * rejects `..`/absolute (lexical) AND symlink escape (via resolveWithinProject).
- * Returns null when unsafe or unreadable so callers can skip silently. This is
- * the read-side guard for every file whose path is derived from loaded YAML
- * (decision_refs) or from a readdir entry (which could be a symlink).
- */
-async function readWithinProject(cwd: string, relPath: string): Promise<string | null> {
-  try {
-    return await readFile(await resolveWithinProject(cwd, relPath), "utf8");
-  } catch {
-    return null;
-  }
-}
+// The project-contained read guard (`..`/absolute/symlink-escape → null) lives
+// in the shared `core/project-read.ts` (`readProjectTextOrNull`) so the planning
+// prompt and any other agent-facing grounding read share one implementation.
 
 export async function loadAgentProfile(cwd: string, agentName: string): Promise<AgentProfile | null> {
   // Validate the agent name and resolve the path OUTSIDE the try, so an unsafe
@@ -69,7 +58,7 @@ export async function loadConstitution(cwd: string): Promise<string | null> {
   // project (resolveWithinProject rejects symlink escape) cannot leak a
   // foreign file into the agent-facing context pack. OPTIONAL source:
   // missing / unreadable / unsafe → null, same degrade contract as before.
-  return readWithinProject(cwd, "design/constitution.md");
+  return readProjectTextOrNull(cwd, "design/constitution.md");
 }
 
 // includeAll=true bypasses the applies_to filter (used for write_surface: large)
@@ -92,7 +81,7 @@ export async function loadRules(
     // constitution.md is included via the dedicated constitution slot, not rules
     if (entry === "constitution.md") continue;
 
-    const raw = await readWithinProject(cwd, `design/rules/${entry}`);
+    const raw = await readProjectTextOrNull(cwd, `design/rules/${entry}`);
     if (raw === null) continue; // unsafe (e.g. symlink escape) or unreadable
     const { frontMatter, body } = parseFrontMatter(raw);
     const tags: string[] = Array.isArray(frontMatter.tags) ? (frontMatter.tags as string[]) : [];

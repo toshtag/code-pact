@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, mkdir, symlink } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -224,6 +224,39 @@ describe("runPlanPrompt", () => {
   it("schemaOnly defaults to false in normal mode (additive field)", async () => {
     const result = await runPlanPrompt({ cwd: tmpDir, locale: "en-US", clipboard: false });
     expect(result.schemaOnly).toBe(false);
+  });
+
+  // SECURITY (CWE-59): the planning prompt is agent-facing (and goes to the
+  // clipboard with --clipboard). A `design/brief.md` / `design/constitution.md`
+  // symlinked OUT of the project must NOT leak its target into the prompt.
+  it("does NOT leak an out-of-project file symlinked as design/brief.md", async () => {
+    const outside = await mkdtemp(join(tmpdir(), "code-pact-prompt-outside-"));
+    try {
+      const secret = join(outside, "secret.md");
+      await writeFile(secret, "SECRET_FROM_OUTSIDE_REPO\n", "utf8");
+      await symlink(secret, join(tmpDir, "design", "brief.md"));
+
+      const result = await runPlanPrompt({ cwd: tmpDir, locale: "en-US", clipboard: false });
+      expect(result.prompt).not.toContain("SECRET_FROM_OUTSIDE_REPO");
+      expect(result.hasBrief).toBe(false);
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("does NOT leak an out-of-project file symlinked as design/constitution.md", async () => {
+    const outside = await mkdtemp(join(tmpdir(), "code-pact-prompt-outside-"));
+    try {
+      const secret = join(outside, "secret.md");
+      await writeFile(secret, "SECRET_FROM_OUTSIDE_REPO\n", "utf8");
+      await symlink(secret, join(tmpDir, "design", "constitution.md"));
+
+      const result = await runPlanPrompt({ cwd: tmpDir, locale: "en-US", clipboard: false });
+      expect(result.prompt).not.toContain("SECRET_FROM_OUTSIDE_REPO");
+      expect(result.hasConstitution).toBe(false);
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
   });
 });
 
