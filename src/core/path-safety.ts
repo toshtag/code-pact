@@ -1,20 +1,6 @@
-import { lstat, readlink, realpath } from "node:fs/promises";
-import { dirname, isAbsolute, join, parse, resolve, sep } from "node:path";
+import { lstat, realpath } from "node:fs/promises";
+import { join, resolve, sep } from "node:path";
 import { RelativePosixPath } from "./schemas/relative-path.ts";
-
-// A symlink-resolution hop cap, matching the conventional OS `ELOOP` limit. A
-// path that needs more hops is treated as an unresolvable cycle and refused with
-// a stable path-safety code rather than spinning or surfacing a raw error.
-const MAX_SYMLINK_HOPS = 40;
-
-/**
- * Splits a `readlink` target into path components on EITHER separator, dropping
- * empty and `.` segments while PRESERVING `..` (the caller's walk pops a parent
- * for each `..`). Used for the non-root portion of a link target.
- */
-function splitLinkSegments(linkBody: string): string[] {
-  return linkBody.split(/[\\/]+/).filter((s) => s.length > 0 && s !== ".");
-}
 
 // ---------------------------------------------------------------------------
 // Neutral path-safety module
@@ -41,34 +27,37 @@ export function assertSafeRelativePath(relPath: string): void {
 
 /**
  * Resolves `relPath` against `cwd` and returns the joined absolute path, but
- * throws `PATH_OUTSIDE_PROJECT` if it would resolve OUTSIDE `realpath(cwd)` via a
- * symlink — including a DANGLING symlink whose target does not exist.
+ * throws `PATH_OUTSIDE_PROJECT` unless it resolves to a location WITHIN
+ * `realpath(cwd)`. This is a WRITE-safe containment preflight: a not-yet-created
+ * path is allowed (so callers can create files/dirs), but a DANGLING symlink is
+ * refused regardless of where it points.
  *
- * Why not `realpath`: `realpath()` fails with a bare `ENOENT` on a dangling
- * symlink, indistinguishable from a genuinely not-yet-created path. A walk that
- * trusts `realpath` therefore mistakes `.context -> /outside/does-not-exist` for
- * a safe missing path and lets a later `mkdir`/write escape the project. Instead
- * this canonicalizes `relPath` one component at a time from the real project
- * root, using `lstat`/`readlink` so a symlink is followed to where it POINTS even
- * when that target is absent. The final canonical location must stay within the
- * project; a genuinely non-existent component (not a symlink) ends the walk
- * safely (so creating new files/dirs still works).
+ * Why per-component, not a single `realpath`: `realpath()` on a dangling symlink
+ * fails with a bare `ENOENT`, indistinguishable from a genuinely not-yet-created
+ * path — so a whole-path `realpath` would mistake `.ctx -> .../missing` for a
+ * safe missing path. Instead this walks `relPath` one component at a time from
+ * the real project root and uses `lstat` to tell the two apart: a plain missing
+ * component ends the walk safely, while a symlink component is resolved with
+ * `realpath(candidate)` (which fully follows chains and is correct on
+ * case-insensitive / Windows filesystems). If that `realpath` throws, the
+ * symlink is DANGLING (`ENOENT`) or cyclic (`ELOOP`) and is refused.
  *
  * Contract:
- *  - non-existent in-project path (no symlink)            → allowed (returned)
- *  - existing in-project path / in-project symlink chain  → allowed
- *  - in-project symlink whose target is in-project but    → allowed (write
- *    absent (dangling-but-contained)                          lands in-project)
- *  - any symlink (existing OR dangling) pointing OUTSIDE   → PATH_OUTSIDE_PROJECT
- *  - unresolvable symlink cycle (> MAX_SYMLINK_HOPS)       → PATH_OUTSIDE_PROJECT
+ *  - plain not-yet-created path (no symlink component)     → allowed (returned)
+ *  - existing in-project path / in-project symlink (chain) → allowed
+ *  - any symlink pointing OUTSIDE the project              → PATH_OUTSIDE_PROJECT
+ *  - any DANGLING symlink (target absent), in- or out-of   → PATH_OUTSIDE_PROJECT
+ *    project — writing through it is never intended for a
+ *    generated path and would strand a partial side effect
+ *  - symlink cycle (ELOOP)                                 → PATH_OUTSIDE_PROJECT
  *  - structural path failure (assertSafeRelativePath)      → throws (no code)
  *
  * Returns the path joined to the ORIGINAL `cwd` (not the realpath'd cwd). This
  * matters on macOS where `/var/folders/...` is a symlink to `/private/var/...`;
- * callers passing the former expect the former back. The canonicalization is
- * internal, only for the escape check. The `PATH_OUTSIDE_PROJECT` code lets
- * command layers map a refusal to a structured envelope; broad optional-source
- * catchers that degrade to null are unaffected (they ignore the code).
+ * callers passing the former expect the former back. The resolution is internal,
+ * only for the escape check. The `PATH_OUTSIDE_PROJECT` code lets command layers
+ * map a refusal to a structured envelope; broad optional-source catchers that
+ * degrade to null are unaffected (they ignore the code).
  */
 export async function resolveWithinProject(
   cwd: string,
@@ -81,19 +70,13 @@ export async function resolveWithinProject(
   const within = (p: string): boolean =>
     p === cwdReal || p.startsWith(cwdReal + sep);
 
-  // `base` is the canonical (symlink-free) absolute prefix resolved so far. It
-  // starts at the real project root and only ever grows by a literal component,
-  // a `..` pop, or a symlink redirect — each re-checked at the end.
+  // `base` is the canonical (symlink-resolved, existing) prefix walked so far —
+  // always within the project (invariant: it starts at cwdReal and only advances
+  // to a realpath'd symlink target that was containment-checked, or to a literal
+  // existing child). `relPath` is pre-validated (no `..`, `.`, or empty segment).
   let base = cwdReal;
-  const pending = relPath.split("/").filter((s) => s.length > 0 && s !== ".");
-  let hops = 0;
 
-  while (pending.length > 0) {
-    const seg = pending.shift()!;
-    if (seg === "..") {
-      base = dirname(base);
-      continue;
-    }
+  for (const seg of relPath.split("/").filter((s) => s.length > 0 && s !== ".")) {
     const candidate = join(base, seg);
     let st: import("node:fs").Stats;
     try {
@@ -101,46 +84,47 @@ export async function resolveWithinProject(
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") {
         // `candidate` does not exist as ANY entry (not even a symlink): a plain,
-        // not-yet-created child of `base`. Nothing below it can be a symlink, so
-        // adopt it and keep consuming the remaining literal segments.
-        base = candidate;
-        continue;
+        // not-yet-created child of an in-project `base`. Everything below it is
+        // likewise non-existent and cannot be a symlink — safe to create.
+        return target;
       }
       throw err;
     }
     if (st.isSymbolicLink()) {
-      if (++hops > MAX_SYMLINK_HOPS) {
-        const cycle = new Error(
-          `path "${relPath}" resolves through an unresolvable symlink cycle (at "${candidate}")`,
+      // Resolve the symlink fully via the OS (follows chains; correct on
+      // case-insensitive / Windows paths). A DANGLING symlink surfaces as ENOENT
+      // and a cycle as ELOOP — both refused: writing through a broken symlink is
+      // never intended for a generated path and would strand a partial side
+      // effect (e.g. a persisted `--model` pin) when the later mkdir/write fails.
+      let real: string;
+      try {
+        real = await realpath(candidate);
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code === "ENOENT" || code === "ELOOP") {
+          const broken = new Error(
+            `path "${relPath}" resolves through a ${
+              code === "ELOOP" ? "symlink cycle" : "dangling symlink"
+            } (at "${candidate}")`,
+          );
+          (broken as NodeJS.ErrnoException).code = "PATH_OUTSIDE_PROJECT";
+          throw broken;
+        }
+        throw err;
+      }
+      if (!within(real)) {
+        const escape = new Error(
+          `path "${relPath}" resolves outside project root (symlink "${candidate}" → "${real}")`,
         );
-        (cycle as NodeJS.ErrnoException).code = "PATH_OUTSIDE_PROJECT";
-        throw cycle;
+        (escape as NodeJS.ErrnoException).code = "PATH_OUTSIDE_PROJECT";
+        throw escape;
       }
-      // Follow the link to where it POINTS, target existence irrelevant. An
-      // absolute link restarts `base` at its root; a relative link resolves
-      // against the directory holding it (`base`). Either way the link's segments
-      // are re-processed, so a chain that leaves and re-enters the project is
-      // judged by its FINAL canonical location, like realpath.
-      const link = await readlink(candidate);
-      if (isAbsolute(link)) {
-        const root = parse(link).root;
-        base = root;
-        pending.unshift(...splitLinkSegments(link.slice(root.length)));
-      } else {
-        pending.unshift(...splitLinkSegments(link));
-      }
+      base = real;
       continue;
     }
-    // A real (non-symlink) directory or file. `base` stays canonical.
+    // A real (non-symlink) directory or file. `base` stays within the project.
     base = candidate;
   }
 
-  if (!within(base)) {
-    const escape = new Error(
-      `path "${relPath}" resolves outside project root (→ "${base}")`,
-    );
-    (escape as NodeJS.ErrnoException).code = "PATH_OUTSIDE_PROJECT";
-    throw escape;
-  }
   return target;
 }

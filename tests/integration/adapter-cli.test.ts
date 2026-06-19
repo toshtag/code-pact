@@ -789,6 +789,58 @@ describe("adapter DANGLING symlink escape — CLI error mapping (security)", () 
     expect(await readdir(base)).toEqual([]); // no manifest (or anything) written outside
     await rm(base, { recursive: true, force: true });
   });
+
+  // INTERNAL dangling: the symlink points WITHIN the project at a missing target.
+  // It is still refused — a write-safe preflight rejects ALL dangling symlinks,
+  // because `mkdir`/write through one fails (ENOENT) and would strand a partial
+  // side effect (a persisted --model pin) after the failure. `missingName` does
+  // NOT exist, so resolving `<rel> -> <cwd>/<missingName>` is a dangling link.
+  async function linkDanglingInternal(rel: string, missingName: string): Promise<void> {
+    await rm(join(dir, rel), { recursive: true, force: true });
+    await symlink(join(dir, missingName), join(dir, rel));
+  }
+
+  it("install --model with `.context` dangling INSIDE the project → CONFIG_ERROR, profile not pinned", async () => {
+    const profilePath = join(dir, ".code-pact", "agent-profiles", "claude-code.yaml");
+    const before = await readFile(profilePath, "utf8");
+    await linkDanglingInternal(".context", "missing-context");
+    const res = runCli(["adapter", "install", "claude-code", "--model", "sonnet-4.6", "--json"]);
+    expect(res.status).toBe(2);
+    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+    expect(parsed.error.code).toBe("CONFIG_ERROR");
+    expect(await readFile(profilePath, "utf8")).toBe(before);
+    expect(await readFile(profilePath, "utf8")).not.toContain("model_version");
+    // The dangling target was never materialized as a side effect.
+    expect(existsSync(join(dir, "missing-context"))).toBe(false);
+  });
+
+  it("upgrade --write --model with `.context` dangling INSIDE the project → CONFIG_ERROR, profile not pinned", async () => {
+    expect(runCli(["adapter", "install", "claude-code"]).status).toBe(0);
+    const profilePath = join(dir, ".code-pact", "agent-profiles", "claude-code.yaml");
+    const before = await readFile(profilePath, "utf8");
+    await linkDanglingInternal(".context", "missing-context");
+    const res = runCli(["adapter", "upgrade", "claude-code", "--write", "--model", "sonnet-4.6", "--json"]);
+    expect(res.status).toBe(2);
+    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+    expect(parsed.error.code).toBe("CONFIG_ERROR");
+    expect(await readFile(profilePath, "utf8")).toBe(before);
+    expect(existsSync(join(dir, "missing-context"))).toBe(false);
+  });
+
+  it("install with `.code-pact/adapters` dangling INSIDE the project → ADAPTER_MANIFEST_INVALID, no partial state", async () => {
+    const profilePath = join(dir, ".code-pact", "agent-profiles", "claude-code.yaml");
+    const before = await readFile(profilePath, "utf8");
+    await linkDanglingInternal(join(".code-pact", "adapters"), join(".code-pact", "missing-adapters"));
+    const res = runCli(["adapter", "install", "claude-code", "--model", "sonnet-4.6", "--json"]);
+    // readManifest fails closed at the dangling symlink BEFORE any write/pin: no
+    // generated files, no model pin, no manifest — never a partial-applied state.
+    expect(res.status).toBe(2);
+    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+    expect(parsed.error.code).toBe("ADAPTER_MANIFEST_INVALID");
+    expect(await readFile(profilePath, "utf8")).toBe(before);
+    expect(await readFile(profilePath, "utf8")).not.toContain("model_version");
+    expect(existsSync(join(dir, ".code-pact", "missing-adapters"))).toBe(false);
+  });
 });
 
 describe("adapter install — divergent managed file is surfaced, not silent (security)", () => {

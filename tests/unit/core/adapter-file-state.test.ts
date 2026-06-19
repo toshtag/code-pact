@@ -119,14 +119,14 @@ describe("resolveWithinProject", () => {
     await symlink(join(outside, "does-not-exist"), join(dir, ".ctx"), "dir");
     await expect(
       resolveWithinProject(dir, ".ctx/claude-code"),
-    ).rejects.toThrow(/outside project root/);
+    ).rejects.toMatchObject({ code: "PATH_OUTSIDE_PROJECT" });
   });
 
   it("rejects a FINAL dangling symlink pointing outside the project", async () => {
     await symlink(join(outside, "missing.md"), join(dir, "leak.md"), "file");
     await expect(
       resolveWithinProject(dir, "leak.md"),
-    ).rejects.toThrow(/outside project root/);
+    ).rejects.toMatchObject({ code: "PATH_OUTSIDE_PROJECT" });
   });
 
   it("tags a dangling-outside escape with the PATH_OUTSIDE_PROJECT code", async () => {
@@ -136,12 +136,16 @@ describe("resolveWithinProject", () => {
     ).rejects.toMatchObject({ code: "PATH_OUTSIDE_PROJECT" });
   });
 
-  it("accepts an in-project symlink that is dangling but stays inside the project", async () => {
-    // Points within the project at a not-yet-created dir — a write through it
-    // would land in-project, so it is allowed (like any not-yet-created path).
+  it("rejects an in-project DANGLING symlink (write-safe preflight refuses broken links)", async () => {
+    // Points within the project but at a not-yet-created dir. A `mkdir`/write
+    // through a dangling symlink fails (ENOENT) — accepting it in the preflight
+    // would strand a partial side effect (e.g. a persisted --model pin) when the
+    // later write fails. A write-safe containment check refuses ALL dangling
+    // symlinks; only a PLAIN (non-symlink) missing path is a create target.
     await symlink(join(dir, "real-DNE"), join(dir, ".inlink"), "dir");
-    const got = await resolveWithinProject(dir, ".inlink/file.md");
-    expect(got).toBe(join(dir, ".inlink/file.md"));
+    await expect(
+      resolveWithinProject(dir, ".inlink/file.md"),
+    ).rejects.toMatchObject({ code: "PATH_OUTSIDE_PROJECT" });
   });
 
   it("rejects an unresolvable symlink cycle with a stable path-safety code", async () => {
