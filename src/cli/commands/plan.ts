@@ -689,7 +689,7 @@ async function cmdPlanAnalyze(
     const code = planCatchCode(err, "PLAN_ANALYZE_FAILED");
     const message = err instanceof Error ? err.message : String(err);
     emitError(json, code, message);
-    return 1;
+    return code === "CONFIG_ERROR" ? 2 : 1;
   }
 }
 

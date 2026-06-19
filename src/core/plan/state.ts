@@ -113,6 +113,31 @@ function loadPlanStatePhase(absPath: string): Promise<PhaseT> {
   return loadYaml(absPath, Phase);
 }
 
+function planStateConfigError(file: string, err: unknown): Error {
+  if ((err as NodeJS.ErrnoException).code === "CONFIG_ERROR") return err as Error;
+  const msg = err instanceof Error ? err.message : String(err);
+  const e = new Error(`${file} cannot be read or parsed as plan state: ${msg}`);
+  (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+  return e;
+}
+
+async function loadPlanStateRoadmap(absPath: string): Promise<RoadmapT> {
+  try {
+    return await loadYaml(absPath, Roadmap);
+  } catch (err) {
+    throw planStateConfigError("design/roadmap.yaml", err);
+  }
+}
+
+async function loadPlanStatePhaseStrict(ref: PhaseRef, absPath: string): Promise<PhaseT> {
+  try {
+    return await loadPlanStatePhase(absPath);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") throw err;
+    throw planStateConfigError(ref.path, err);
+  }
+}
+
 /**
  * Resolve a project-relative control-plane path (the roadmap, or a roadmap-
  * referenced phase) to a CONTAINED absolute path for the STRICT loader. A `..` /
@@ -228,7 +253,7 @@ export async function loadPlanState(cwd: string): Promise<PlanState> {
   // graph — behind task/phase runbook, status, plan analyze — can never be read
   // from an out-of-project roadmap.
   const rmPath = await resolveGraphPathStrict(cwd, "design/roadmap.yaml");
-  const roadmap = await loadYaml(rmPath, Roadmap);
+  const roadmap = await loadPlanStateRoadmap(rmPath);
 
   const phases: PhaseEntry[] = [];
   const archivedCandidates: ArchivedTaskEntry[] = [];
@@ -237,11 +262,11 @@ export async function loadPlanState(cwd: string): Promise<PlanState> {
     // hard CONFIG_ERROR (NOT an ENOENT archive-toleration candidate).
     const absPath = await resolveGraphPathStrict(cwd, ref.path);
     try {
-      phases.push({ ref, absPath, phase: await loadPlanStatePhase(absPath) });
+      phases.push({ ref, absPath, phase: await loadPlanStatePhaseStrict(ref, absPath) });
     } catch (err) {
       // design-docs-ephemeral (step 4a): ONLY a missing file (ENOENT) is a
       // candidate for archive toleration; a ParseError (schema-invalid live file)
-      // keeps propagating unchanged.
+      // is already mapped to CONFIG_ERROR by loadPlanStatePhaseStrict.
       if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
       const r = await resolveDeletedPhaseRef(cwd, ref);
       if (r.tolerated) {

@@ -261,7 +261,12 @@ export async function cmdPhase(argv: string[], locale: Locale, globalJson: boole
       }
       return 0;
     } catch (err: unknown) {
+      const code = (err as NodeJS.ErrnoException).code;
       const msg = err instanceof Error ? err.message : String(err);
+      if (code === "CONFIG_ERROR") {
+        emitError(json, "CONFIG_ERROR", msg);
+        return 2;
+      }
       emitError(json, "INTERNAL_ERROR", msg);
       return 3;
     }

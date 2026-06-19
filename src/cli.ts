@@ -457,7 +457,8 @@ async function cmdStatus(argv: string[], globalJson: boolean): Promise<number> {
     const cleanExit2 =
       code === "PHASE_NOT_FOUND" ||
       code === "AMBIGUOUS_PHASE_ID" ||
-      code === "PHASE_SNAPSHOT_INVALID";
+      code === "PHASE_SNAPSHOT_INVALID" ||
+      code === "CONFIG_ERROR";
     emitError(
       json,
       code,
