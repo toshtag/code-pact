@@ -224,12 +224,22 @@ async function cmdPlanBrief(
     return 2;
   }
 
-  const result = await runPlanBrief({
-    cwd,
-    locale,
-    force,
-    answers: preCollectedAnswers,
-  });
+  let result: Awaited<ReturnType<typeof runPlanBrief>>;
+  try {
+    result = await runPlanBrief({
+      cwd,
+      locale,
+      force,
+      answers: preCollectedAnswers,
+    });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "CONFIG_ERROR") {
+      const message = err instanceof Error ? err.message : String(err);
+      emitError(json, "CONFIG_ERROR", message);
+      return 2;
+    }
+    throw err;
+  }
   if (result.skipped) {
     emitError(json, "ALREADY_EXISTS", m.plan.briefSkipped(result.path));
     return 2;
@@ -486,12 +496,22 @@ async function cmdPlanConstitution(
     return 2;
   }
 
-  const result = await runPlanConstitution({
-    cwd,
-    locale,
-    force,
-    answers: preCollectedAnswers,
-  });
+  let result: Awaited<ReturnType<typeof runPlanConstitution>>;
+  try {
+    result = await runPlanConstitution({
+      cwd,
+      locale,
+      force,
+      answers: preCollectedAnswers,
+    });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "CONFIG_ERROR") {
+      const message = err instanceof Error ? err.message : String(err);
+      emitError(json, "CONFIG_ERROR", message);
+      return 2;
+    }
+    throw err;
+  }
   if (result.skipped) {
     emitError(json, "ALREADY_EXISTS", m.plan.constitutionSkipped(result.path));
     return 2;
@@ -619,7 +639,7 @@ async function cmdPlanNormalize(
       (err as NodeJS.ErrnoException).code ?? "PLAN_NORMALIZE_FAILED";
     const message = err instanceof Error ? err.message : String(err);
     emitError(json, code, message);
-    return 3;
+    return code === "CONFIG_ERROR" ? 2 : 3;
   }
 }
 
@@ -827,7 +847,17 @@ async function cmdPlanSyncPaths(
   const mode = writeFlag ? "write" : "check";
 
   const run = async (): Promise<number> => {
-    const result = await runPlanSyncPaths({ cwd, renames, mode });
+    let result: Awaited<ReturnType<typeof runPlanSyncPaths>>;
+    try {
+      result = await runPlanSyncPaths({ cwd, renames, mode });
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "CONFIG_ERROR") {
+        const message = err instanceof Error ? err.message : String(err);
+        emitError(json, "CONFIG_ERROR", message);
+        return 2;
+      }
+      throw err;
+    }
     if (json) {
       emitOk(serializePlanSyncPathsData(result));
     } else {

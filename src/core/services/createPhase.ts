@@ -1,5 +1,4 @@
 import { mkdir } from "node:fs/promises";
-import { join } from "node:path";
 import { stringify as toYaml } from "yaml";
 import { atomicWriteText } from "../../io/atomic-text.ts";
 import { Phase } from "../schemas/phase.ts";
@@ -7,6 +6,7 @@ import type { Task } from "../schemas/task.ts";
 import { Roadmap, PhaseRef } from "../schemas/roadmap.ts";
 import { loadRoadmap } from "../plan/roadmap.ts";
 import { assertSafePlanId } from "../schemas/plan-id.ts";
+import { resolveWithinProject } from "../path-safety.ts";
 
 export type Confidence = "low" | "medium" | "high";
 export type Risk = "low" | "medium" | "high";
@@ -58,7 +58,23 @@ export type CreatePhaseResult = {
 };
 
 async function saveRoadmap(cwd: string, roadmap: Roadmap): Promise<void> {
-  await atomicWriteText(join(cwd, "design", "roadmap.yaml"), toYaml(roadmap));
+  const path = await resolveWritablePath(cwd, "design/roadmap.yaml");
+  await atomicWriteText(path, toYaml(roadmap));
+}
+
+async function resolveWritablePath(cwd: string, relPath: string): Promise<string> {
+  try {
+    return await resolveWithinProject(cwd, relPath);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "PATH_OUTSIDE_PROJECT") {
+      const e = new Error(
+        `${relPath} is not a safe project-contained write path: ${(err as Error).message}`,
+      );
+      (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+      throw e;
+    }
+    throw err;
+  }
 }
 
 function slugify(name: string): string {
@@ -119,7 +135,7 @@ export async function createPhase(opts: CreatePhaseInput): Promise<CreatePhaseRe
   const slug = slugify(name);
   const filename = `${id}-${slug}.yaml`;
   const relPath = `design/phases/${filename}`;
-  const absPath = join(cwd, relPath);
+  const absPath = await resolveWritablePath(cwd, relPath);
 
   // Parse the assembled phase before writing so no invalid plan state (e.g. an
   // unsafe id smuggled in via an embedded imported task) is ever persisted.
@@ -138,7 +154,7 @@ export async function createPhase(opts: CreatePhaseInput): Promise<CreatePhaseRe
     ...(opts.tasks && opts.tasks.length > 0 ? { tasks: opts.tasks } : {}),
   });
 
-  await mkdir(join(cwd, "design", "phases"), { recursive: true });
+  await mkdir(await resolveWritablePath(cwd, "design/phases"), { recursive: true });
   await atomicWriteText(absPath, toYaml(phase));
 
   const ref: PhaseRef = PhaseRef.parse({ id, path: relPath, weight });

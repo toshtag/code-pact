@@ -1,7 +1,8 @@
 import type { Dirent } from "node:fs";
 import { readFile, readdir, stat } from "node:fs/promises";
-import { join, relative } from "node:path";
+import { join, relative, sep } from "node:path";
 import { atomicWriteText } from "../../io/atomic-text.ts";
+import { resolveWithinProject } from "../path-safety.ts";
 import { progressPath } from "../progress/io.ts";
 
 const TRAILING_WHITESPACE = /[ \t]+$/;
@@ -54,6 +55,21 @@ async function walkFiles(root: string): Promise<string[]> {
   }
   await recurse(root);
   return out;
+}
+
+async function resolveNormalizePath(cwd: string, relPath: string): Promise<string> {
+  try {
+    return await resolveWithinProject(cwd, relPath);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "PATH_OUTSIDE_PROJECT") {
+      const e = new Error(
+        `${relPath} is not a safe project-contained normalize path: ${(err as Error).message}`,
+      );
+      (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+      throw e;
+    }
+    throw err;
+  }
 }
 
 function isYamlFile(p: string): boolean {
@@ -161,7 +177,7 @@ export async function runNormalize(opts: {
 async function collectTargetFiles(cwd: string): Promise<string[]> {
   const files: string[] = [];
 
-  const designDir = join(cwd, "design");
+  const designDir = await resolveNormalizePath(cwd, "design");
   if (await pathExists(designDir)) {
     const all = await walkFiles(designDir);
     for (const abs of all) {
@@ -169,7 +185,8 @@ async function collectTargetFiles(cwd: string): Promise<string[]> {
     }
   }
 
-  const progress = progressPath(cwd);
+  const progressRel = relative(cwd, progressPath(cwd)).split(sep).join("/");
+  const progress = await resolveNormalizePath(cwd, progressRel);
   if (await pathExists(progress)) files.push(progress);
 
   files.sort();
