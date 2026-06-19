@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { RelativePosixPath } from "./schemas/relative-path.ts";
 import { assertSafePlanId } from "./schemas/plan-id.ts";
+import { resolveWithinProject } from "./path-safety.ts";
 
 // Single source of truth for where an agent's profile lives.
 //
@@ -106,10 +107,35 @@ export async function resolveAgentProfileRel(
   return defaultProfileRel(agentName);
 }
 
-/** Absolute path form of {@link resolveAgentProfileRel}. */
+/**
+ * Absolute path form of {@link resolveAgentProfileRel}, CONTAINED to the project.
+ *
+ * `resolveAgentProfileRel` validates the path lexically (`RelativePosixPath`: no
+ * `..`/absolute/backslash), but a lexical `join` cannot stop a symlinked
+ * `.code-pact/agent-profiles` (or a symlinked profile file) from resolving
+ * outside the project. Every profile READ and — critically — the `--model` pin's
+ * WRITE flow through this single resolver, so the containment belongs here:
+ * route through {@link resolveWithinProject} so a symlink escape fails closed
+ * before any I/O. The escape is mapped to `CONFIG_ERROR` (a project/profile
+ * configuration problem — consistent with this resolver's other throws) so every
+ * caller's existing CONFIG_ERROR handling applies unchanged, with no new code to
+ * map at each of the ~9 call sites.
+ */
 export async function resolveAgentProfilePath(
   cwd: string,
   agentName: string,
 ): Promise<string> {
-  return join(cwd, ".code-pact", await resolveAgentProfileRel(cwd, agentName));
+  const rel = await resolveAgentProfileRel(cwd, agentName);
+  try {
+    return await resolveWithinProject(cwd, [".code-pact", rel].join("/"));
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "PATH_OUTSIDE_PROJECT") {
+      const e = new Error(
+        `Agent profile path for "${agentName}" resolves outside the project root and was refused: ${(err as Error).message}`,
+      );
+      (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+      throw e;
+    }
+    throw err;
+  }
 }
