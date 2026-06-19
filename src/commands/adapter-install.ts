@@ -1,5 +1,5 @@
 import { readFile, readdir, mkdir } from "node:fs/promises";
-import { join, dirname } from "node:path";
+import { dirname } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { AgentProfile } from "../core/schemas/agent-profile.ts";
 import { ModelProfile } from "../core/schemas/model-profile.ts";
@@ -55,6 +55,16 @@ export type AdapterInstallOptions = {
   generatorVersionOverride?: string;
 };
 
+/**
+ * Why a file was `refuse`d — so the CLI can give CORRECT remediation. Only
+ * `managed_modified` is resolvable with `--accept-modified`; the security
+ * refusals are NOT (re-running with that flag refuses again).
+ */
+export type RefuseReason =
+  | "managed_modified" // a local edit diverging from BOTH manifest and generator
+  | "unowned_generated_path" // generated path outside the trusted owned set
+  | "symlink_traversal"; // the path reaches its real target through a symlink
+
 export type AdapterInstallFile = {
   /** Absolute path. */
   path: string;
@@ -62,6 +72,8 @@ export type AdapterInstallFile = {
   relPath: string;
   role: DesiredAdapterFileRole;
   action: FileAction;
+  /** Set when `action === "refuse"`; drives the CLI's remediation message. */
+  reason?: RefuseReason;
 };
 
 export type AdapterInstallResult = {
@@ -127,9 +139,12 @@ async function loadAgentProfile(
 }
 
 async function loadModelProfiles(cwd: string): Promise<ModelProfile[]> {
-  const dir = join(cwd, ".code-pact", "model-profiles");
   let entries: string[];
   try {
+    // Contain the DIRECTORY before enumerating it: a symlinked-outside
+    // `.code-pact/model-profiles` must not even be `readdir`'d (out-of-project
+    // enumeration / large-dir DoS). Optional source → an unsafe/missing dir is [].
+    const dir = await resolveWithinProject(cwd, ".code-pact/model-profiles");
     entries = await readdir(dir);
   } catch {
     return [];
@@ -342,10 +357,17 @@ export async function runAdapterInstall(
     //   2. the path traverses NO symlink — else an in-project symlink (e.g.
     //      `.claude/skills -> ../src`) makes the owned-looking lexical path
     //      resolve to a DIFFERENT real file, so the glob match is not ownership.
+    // `refuse` from decideAction is the managed-modified × stale local-edit case.
+    let refuseReason: RefuseReason | undefined =
+      action === "refuse" ? "managed_modified" : undefined;
     if (action === "update" || action === "replace_unmanaged") {
       const owned = descriptor.ownedPathGlobs.some((g) => matchGlob(g, desired.path));
-      if (!owned || (await pathTraversesSymlink(cwd, desired.path))) {
+      if (!owned) {
         action = "refuse";
+        refuseReason = "unowned_generated_path";
+      } else if (await pathTraversesSymlink(cwd, desired.path)) {
+        action = "refuse";
+        refuseReason = "symlink_traversal";
       }
     }
 
@@ -354,6 +376,7 @@ export async function runAdapterInstall(
       relPath: desired.path,
       role: desired.role,
       action,
+      ...(refuseReason ? { reason: refuseReason } : {}),
     });
 
     let recordedHash: string | null = null;

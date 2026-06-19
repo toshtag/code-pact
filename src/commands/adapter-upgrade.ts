@@ -134,9 +134,11 @@ async function loadAgentProfile(
 }
 
 async function loadModelProfiles(cwd: string): Promise<ModelProfile[]> {
-  const dir = join(cwd, ".code-pact", "model-profiles");
   let entries: string[];
   try {
+    // Contain the DIRECTORY before enumerating it (no out-of-project readdir on a
+    // symlinked model-profiles). Optional source → unsafe/missing dir is [].
+    const dir = await resolveWithinProject(cwd, ".code-pact/model-profiles");
     entries = await readdir(dir);
   } catch {
     return [];
@@ -346,10 +348,17 @@ export async function runAdapterUpgrade(
     // set, AND the path traverses no symlink (an in-project symlink would make the
     // owned-looking lexical path resolve to a different real file). Applied in
     // BOTH modes so `--check` previews the refusal that `--write` would take.
+    // `refuse` from decideAction is managed-modified × stale (a local edit).
+    let refuseReason: string | undefined =
+      action === "refuse" ? "managed_modified" : undefined;
     if (action === "update" || action === "replace_unmanaged") {
       const owned = descriptor.ownedPathGlobs.some((g) => matchGlob(g, desired.path));
-      if (!owned || (await pathTraversesSymlink(cwd, desired.path))) {
+      if (!owned) {
         action = "refuse";
+        refuseReason = "unowned_generated_path";
+      } else if (await pathTraversesSymlink(cwd, desired.path)) {
+        action = "refuse";
+        refuseReason = "symlink_traversal";
       }
     }
 
@@ -360,6 +369,7 @@ export async function runAdapterUpgrade(
       local: cls.local,
       desired: cls.desired,
       action,
+      ...(refuseReason ? { reason: refuseReason } : {}),
     });
 
     if (mode === "check") {
@@ -461,10 +471,13 @@ export async function runAdapterUpgrade(
       local: isClean ? "managed-clean" : "managed-modified",
       desired: "stale", // generator no longer emits this path
       action,
-      // Machine-readable signal for a security `warn`: kept on disk because its
-      // path is outside the adapter's owned set, so deleting on a project-
-      // supplied manifest's say-so would be unsafe.
-      ...(action === "warn" ? { reason: "unowned_orphan_not_pruned" } : {}),
+      // Machine-readable reason: `warn` = unowned orphan kept on disk; `refuse` =
+      // a symlinked owned orphan (would delete the real target) or a local edit.
+      ...(action === "warn"
+        ? { reason: "unowned_orphan_not_pruned" }
+        : action === "refuse"
+          ? { reason: traversesSymlink ? "symlink_traversal" : "managed_modified" }
+          : {}),
     });
 
     if (mode === "check") continue; // read-only

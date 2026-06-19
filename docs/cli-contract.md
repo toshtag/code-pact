@@ -1184,9 +1184,13 @@ if neither is set, the version-agnostic template is used. (Separately: if an exi
 already contains an unrecognized `model_version`, generation falls back to the generic
 guidance block and `doctor` reports `MODEL_ID_UNKNOWN`.)
 
-`--regen-skills` is the role-scoped `--force` described above; documented separately because
-it's the common way users handle stale dynamic skill files after the roadmap's
-`verification.commands` changes.
+`--regen-skills` is the role-scoped `--force` described above (it applies `--force` to skill
+files only). It refreshes the **built-in** skills and adopts new ones, but it does **NOT**
+overwrite a divergent DYNAMIC command-skill: those live in the shared `.claude/skills/` dir
+alongside hand-authored user skills, so a forged manifest + a colliding `verification.commands`
+name could otherwise replace a user's skill. A divergent dynamic skill is therefore `refused`
+(reason `unowned_generated_path`), and `--accept-modified` does not override it. Safe automatic
+re-render of dynamic skills will return with a reserved generated-skill namespace (follow-up).
 
 Result envelope:
 

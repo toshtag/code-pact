@@ -741,6 +741,7 @@ describe("runGenerateAdapter — forged manifest cannot overwrite a colliding us
     // overwrite is refused and the hand-authored content is preserved.
     const entry = result.files.find((f) => f.relPath === ".claude/skills/deploy.md");
     expect(entry?.action).toBe("refuse");
+    expect(entry?.reason).toBe("unowned_generated_path"); // not --accept-modified's managed_modified
     expect(await readFile(userSkill, "utf8")).toBe(USER);
   });
 });

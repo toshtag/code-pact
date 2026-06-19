@@ -1021,9 +1021,11 @@ describe("adapter forged-manifest + profile → arbitrary file overwrite is REFU
     expect(await readFile(victim, "utf8")).toBe(VICTIM);
     expect(res.status).toBe(1); // refused → exit 1
     const parsed = JSON.parse(res.stdout) as {
-      data: { files: Array<{ relPath: string; action: string }> };
+      data: { files: Array<{ relPath: string; action: string; reason?: string }> };
     };
-    expect(parsed.data.files.find((f) => f.relPath === ".claude/skills/context.md")?.action).toBe("refuse");
+    const entry = parsed.data.files.find((f) => f.relPath === ".claude/skills/context.md");
+    expect(entry?.action).toBe("refuse");
+    expect(entry?.reason).toBe("symlink_traversal"); // correct machine-readable reason
   });
 });
 

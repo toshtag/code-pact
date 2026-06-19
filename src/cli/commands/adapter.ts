@@ -361,11 +361,28 @@ async function cmdAdapterUpgrade(
           process.stderr.write(`No automatic upgrade actions — review the orphaned file(s) listed above.\n`);
         }
       } else {
-        const refused = result.plan.filter((p) => p.action === "refuse").length;
-        if (refused > 0) {
-          process.stderr.write(
-            `${refused} file(s) refused — re-run with --accept-modified to overwrite local changes.\n`,
-          );
+        const refusedEntries = result.plan.filter((p) => p.action === "refuse");
+        if (refusedEntries.length > 0) {
+          const reasons = new Set(refusedEntries.map((p) => p.reason));
+          process.stderr.write(`${refusedEntries.length} file(s) refused — review them.\n`);
+          if (reasons.has("managed_modified")) {
+            process.stderr.write(
+              `  - local edits: re-run with --accept-modified to overwrite them.\n`,
+            );
+          }
+          if (reasons.has("unowned_generated_path")) {
+            process.stderr.write(
+              `  - generated path outside this adapter's owned set — NOT auto-written;\n` +
+                `    --accept-modified will NOT override it. Inspect/remove it by hand.\n`,
+            );
+          }
+          if (reasons.has("symlink_traversal")) {
+            process.stderr.write(
+              `  - path reaches its real target through a symlink — refused so a write/delete\n` +
+                `    cannot escape the owned namespace; --accept-modified will NOT override it.\n` +
+                `    Replace the symlink with a real directory/file.\n`,
+            );
+          }
         } else {
           process.stderr.write(`${m.adapter.done(agentName)} Manifest: ${result.manifestPath}\n`);
           // Human-only hint for the one advisory adapter upgrade intentionally
@@ -485,12 +502,36 @@ async function runAdapterInstallAndEmit(args: {
       process.stderr.write(`  manifest  ${result.manifestPath}\n`);
       process.stderr.write(`${m.adapter.done(agentName)}\n`);
       if (result.refused.length > 0) {
-        process.stderr.write(
-          `${result.refused.length} managed file(s) differ from BOTH the manifest and the generator ` +
-            `— NOT overwritten (could be a local edit). Review them; this is also the shape a hostile ` +
-            `repo would ship. To regenerate from the current adapter, run:\n` +
-            `  code-pact adapter upgrade ${agentName} --write --accept-modified\n`,
+        // Remediation depends on WHY each file was refused — `--accept-modified`
+        // only resolves a genuine local edit (managed_modified); the security
+        // refusals (a generated path outside the trusted owned set, or one that
+        // reaches its real target through a symlink) are NOT overridable by it.
+        const reasons = new Set(
+          result.files.filter((f) => f.action === "refuse").map((f) => f.reason),
         );
+        process.stderr.write(
+          `${result.refused.length} file(s) were NOT overwritten. Review them.\n`,
+        );
+        if (reasons.has("managed_modified")) {
+          process.stderr.write(
+            `  - local edits (differ from BOTH manifest and generator): to regenerate, run\n` +
+              `      code-pact adapter upgrade ${agentName} --write --accept-modified\n`,
+          );
+        }
+        if (reasons.has("unowned_generated_path")) {
+          process.stderr.write(
+            `  - a generated path OUTSIDE this adapter's owned set (e.g. a profile field or\n` +
+              `    manifest entry pointing at a non-adapter file). NOT auto-overwritten and\n` +
+              `    --accept-modified will NOT override it — inspect/remove it by hand.\n`,
+          );
+        }
+        if (reasons.has("symlink_traversal")) {
+          process.stderr.write(
+            `  - a path that reaches its real target through a SYMLINK. Refused so a write\n` +
+              `    cannot escape the owned namespace; --accept-modified will NOT override it —\n` +
+              `    replace the symlink with a real directory/file.\n`,
+          );
+        }
       }
     }
     // A refused file is a divergence the operator must review, so install does
