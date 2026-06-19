@@ -68,6 +68,14 @@ export type AdapterInstallResult = {
   skipped: string[];
   /** Absolute paths of files adopted into the manifest without write (action: adopt). */
   adopted: string[];
+  /**
+   * Absolute paths of managed files whose on-disk content matches NEITHER the
+   * manifest hash NOR the current generator output (managed-modified × stale).
+   * Install does not overwrite them (possible local edit) but surfaces them so
+   * a hostile-repo divergence is never silently passed over (action: refuse).
+   * Overwrite with `adapter upgrade --write --accept-modified`.
+   */
+  refused: string[];
   files: AdapterInstallFile[];
 };
 
@@ -148,8 +156,14 @@ function buildFingerprint(
  * hash). It DOES re-render a managed-clean file whose content is stale relative
  * to the current generator output — that file is verbatim generator output, so
  * refreshing it destroys no edits and prevents a project-shipped (possibly
- * forged) manifest from preserving stale generated content. To force-overwrite
- * a managed-modified file, callers must use
+ * forged) manifest from preserving stale generated content.
+ *
+ * A managed file whose disk content matches NEITHER the manifest hash NOR the
+ * generator output (managed-modified × stale) is **refused** (`refused[]`): not
+ * overwritten (it could be a genuine local edit), but not silently skipped
+ * either — the divergence is surfaced (the command layer warns + exits
+ * non-zero) so a hostile-repo file is never passed over in silence. To
+ * force-overwrite a managed-modified file, callers must use
  * `adapter upgrade --write --accept-modified`.
  *
  * On every invocation, regardless of whether the manifest existed before,
@@ -224,6 +238,7 @@ export async function runAdapterInstall(
   const created: string[] = [];
   const skipped: string[] = [];
   const adopted: string[] = [];
+  const refused: string[] = [];
   const fileResults: AdapterInstallFile[] = [];
   const newManifestFiles: ManifestFile[] = [];
 
@@ -278,9 +293,18 @@ export async function runAdapterInstall(
       if (manifestHash !== null) {
         recordedHash = manifestHash;
       }
+    } else if (action === "refuse") {
+      // managed-modified × stale: divergent from BOTH the manifest and the
+      // generator. Do not overwrite (possible local edit) but surface it (the
+      // command layer warns + exits non-zero). Keep tracking it so it stays
+      // visible rather than re-classifying as an unmanaged surprise next run.
+      refused.push(absPath);
+      if (manifestHash !== null) {
+        recordedHash = manifestHash;
+      }
     }
-    // Other actions (update_manifest / refuse / warn) are not reachable in
-    // install mode per the action matrix.
+    // Other actions (update_manifest / warn) are not reachable in install mode
+    // per the action matrix.
 
     if (recordedHash !== null) {
       newManifestFiles.push({
@@ -315,6 +339,7 @@ export async function runAdapterInstall(
     created,
     skipped,
     adopted,
+    refused,
     files: fileResults,
   };
 }

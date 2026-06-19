@@ -254,7 +254,14 @@ describe("decideAction — install", () => {
     expect(decide({ local: "managed-modified", desired: "current", mode })).toBe("skip");
   });
 
-  it("managed-modified × stale → skip even with --accept-modified", () => {
+  it("managed-modified × stale → refuse (surfaced, not silently skipped; not overwritten)", () => {
+    // SECURITY: content matches NEITHER the manifest nor the generator. Install
+    // does not overwrite (possible local edit) but must not silently pass over
+    // it either — a hostile repo could ship exactly this shape. --accept-modified
+    // is not an install flag, so it is irrelevant here.
+    expect(
+      decide({ local: "managed-modified", desired: "stale", mode }),
+    ).toBe("refuse");
     expect(
       decide({
         local: "managed-modified",
@@ -262,7 +269,7 @@ describe("decideAction — install", () => {
         mode,
         acceptModified: true,
       }),
-    ).toBe("skip");
+    ).toBe("refuse");
   });
 });
 

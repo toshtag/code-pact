@@ -431,6 +431,11 @@ async function cmdAdapterUpgrade(
         emitError(json, "MANIFEST_NOT_FOUND", err.message);
         return 2;
       }
+      if (code === "ADAPTER_MANIFEST_INVALID") {
+        // A `.code-pact/adapters` symlink escape (fail-closed in manifest I/O).
+        emitError(json, "ADAPTER_MANIFEST_INVALID", err.message);
+        return 2;
+      }
       if (code === "CONFIG_ERROR") {
         emitError(json, "CONFIG_ERROR", err.message);
         return 2;
@@ -469,16 +474,34 @@ async function runAdapterInstallAndEmit(args: {
       for (const f of result.adopted) process.stderr.write(`  adopted   ${f}\n`);
       for (const f of result.skipped)
         process.stderr.write(`  skipped   ${f} (already exists)\n`);
+      for (const f of result.refused) process.stderr.write(`  refused   ${f}\n`);
       process.stderr.write(`  manifest  ${result.manifestPath}\n`);
       process.stderr.write(`${m.adapter.done(agentName)}\n`);
+      if (result.refused.length > 0) {
+        process.stderr.write(
+          `${result.refused.length} managed file(s) differ from BOTH the manifest and the generator ` +
+            `— NOT overwritten (could be a local edit). Review them; this is also the shape a hostile ` +
+            `repo would ship. To regenerate from the current adapter, run:\n` +
+            `  code-pact adapter upgrade ${agentName} --write --accept-modified\n`,
+        );
+      }
     }
-    return 0;
+    // A refused file is a divergence the operator must review, so install does
+    // not report unqualified success — exit 1 (mirrors `adapter upgrade`'s
+    // refuse → exit 1). Clean installs still exit 0.
+    return result.refused.length > 0 ? 1 : 0;
   } catch (err: unknown) {
     if (err instanceof Error) {
       const code = (err as NodeJS.ErrnoException).code;
       if (code === "AGENT_NOT_FOUND") {
         const msg = m.adapter.agentNotFound(agentName);
         emitError(json, "AGENT_NOT_FOUND", msg);
+        return 2;
+      }
+      if (code === "ADAPTER_MANIFEST_INVALID") {
+        // A `.code-pact/adapters` symlink escape (fail-closed in manifest I/O).
+        // Surface a structured envelope + exit 2, not an internal error.
+        emitError(json, "ADAPTER_MANIFEST_INVALID", err.message);
         return 2;
       }
       if (code === "CONFIG_ERROR") {

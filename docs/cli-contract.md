@@ -185,6 +185,7 @@ CI. (For `error.cause_code` values, see [Public cause codes](#public-cause-codes
 | `INVALID_TASK_TRANSITION` | `task start/block/resume/complete/record-done` | Requested state transition is not allowed from the current state |
 | `DUPLICATE_PHASE_ID` | `phase add`, `phase import` | Phase id collides with an existing or imported phase |
 | `MANIFEST_NOT_FOUND` | `adapter upgrade` | `.code-pact/adapters/<agent>.manifest.yaml` does not exist (run `adapter install` first) |
+| `ADAPTER_MANIFEST_INVALID` | `adapter install`, `adapter upgrade` (also a `doctor` / `adapter doctor` issue) | Manifest state is unusable. As a **top-level** envelope (exit 2): manifest I/O was fail-closed because `.code-pact/adapters` resolves **outside** the project (a symlink escape — `resolveWithinProject` refused it; no bytes are read or written outside the project). The same code is also emitted as a `doctor` issue for a manifest that failed YAML parse / schema validation. The adversarial-symlink case is surfaced as this structured envelope rather than an internal error |
 | `VERIFICATION_FAILED` | `verify`, `task complete` | Deterministic completion check did not pass. On `task complete` (v1.27+, P39) the envelope also carries `error.cause_code` (`DECISION_REQUIRED` or `COMMANDS_FAILED` — see [Public cause codes](#public-cause-codes)) and an actionable `error.message`; `error.code` stays `VERIFICATION_FAILED` at exit 1 |
 | `DECISION_REQUIRED` (v1.21+) | `task record-done` | A `requires_decision` task's ADR could not be resolved by the decision gate. As a **top-level `error.code`** this is raised only by `task record-done`; on `task complete` the *same semantic cause* appears only as `error.cause_code` under `VERIFICATION_FAILED` (see [Public cause codes](#public-cause-codes)). **The two surfaces differ.** **On `task record-done` (as `error.code`):** exit code 2, no progress event recorded, and the full structured envelope — `data.task_id`, `data.decision_check` (the gate's `{name, ok, reason}`), `data.current_resolution` (`"status-aware"` since v1.22), `data.via` (`"decision_refs"` or `"filename-scan"`), `data.considered` (per-ADR `{path, status, accepted, acceptance}`; `acceptance` ∈ `"accepted" \| "blocked" \| "empty" \| "unknown_status" \| "missing" \| "unsafe_path"`), `data.declared_decision_refs`, and `data.expected_pattern` (only when `via === "filename-scan"`). **On `task complete` (as `error.cause_code`):** `error.code` stays `VERIFICATION_FAILED` at exit 1, there is **no** full `DecisionRequiredData` block, and the P32 fields (`failed_checks` / `first_failure` / `suggested_next_command`) stay under `data` — see the [`task complete`](#task-complete) failure envelope. Resolution semantics (shared by both surfaces): explicit `decision_refs` use **all-must-be-accepted**; the filename scan uses **any-accepted-wins** (preserves the substring-collision compat). A `decision_refs` entry that is structurally unsafe or resolves outside the project root (`..`, an absolute path, or a symlink out of the repo) is **fail-closed**: it is never read and reported as `acceptance: "unsafe_path"` with `accepted: false`, so the gate stays unresolved regardless of the file's contents. |
 | `VALIDATE_FAILED` | `validate` | One or more errors (or, under `--strict`, any issue) detected by the underlying doctor checks |
@@ -1127,7 +1128,8 @@ manifest, but it NEVER overwrites a file already recorded in the manifest (`mana
 | `unmanaged × current` (disk matches desired, no manifest entry) | with `--force`: **adopt** (manifest only, no write) |
 | `unmanaged × stale` (disk differs from desired, no manifest entry) | with `--force`: **replace_unmanaged** (overwrite + manifest) |
 | `managed-clean × stale` (disk matches the manifest hash but the generator output changed) | re-rendered to current output (**update**); `--force` not required. The file is verbatim generator output, so refreshing it loses no edits — and install does **not** trust a project-shipped (possibly forged) manifest hash to preserve stale generated content (security). |
-| `managed-clean × current` / `managed-modified × *` (already in the manifest) | `skip` — `--force` is ignored. Install never overwrites a recorded file's local modifications. |
+| `managed-clean × current` / `managed-modified × current` (already in the manifest, content matches the generator) | `skip` — `--force` is ignored. Install never overwrites a recorded file's local modifications. |
+| `managed-modified × stale` (disk matches NEITHER the manifest hash NOR the generator output) | **`refuse`** — not overwritten (could be a genuine local edit), but **not silently skipped** either: it is surfaced (`result.refused[]`, `files[].action: "refuse"`) and `adapter install` exits **1**. This is the shape a hostile repo ships (malicious content + a forged manifest hash that does not match it); install never passes it over in silence. `--force` does not override it. |
 
 Destructive overwrite of a managed-modified file requires `adapter upgrade --write --accept-modified`.
 The `--regen-skills` flag is a role-scoped force: it makes `--force` apply only to files with
@@ -1307,10 +1309,13 @@ unauthenticated, an orphan is **auto-deleted (`action: "prune"`) only when its
 path is in the adapter descriptor's `ownedPathGlobs`** AND its content still
 matches the manifest hash. An owned orphan the user edited is `refuse`d (kept on
 disk). An orphan **outside** the owned path set is never deleted — even when
-clean — but surfaced as `action: "warn"` and kept tracked, so a forged manifest
-entry (any in-project path + that file's real sha256) cannot turn
-`upgrade --write` into an arbitrary in-project delete. Files left on disk that
-are not in the new manifest are surfaced by the next `adapter doctor` run as
+clean — but surfaced as `action: "warn"` (with a machine-readable
+`reason: "unowned_orphan_not_pruned"` on the plan entry) and kept tracked, so a
+forged manifest entry (any in-project path + that file's real sha256) cannot turn
+`upgrade --write` into an arbitrary in-project delete. The human CLI names each
+kept file and the manual-removal step; a warn-only `--check` exits 1 without
+claiming `--write` would clear it. Files left on disk that are not in the new
+manifest are surfaced by the next `adapter doctor` run as
 `ADAPTER_UNMANAGED_FILE` if they fall under the adapter's `ownedPathGlobs`.
 
 ```json

@@ -115,9 +115,12 @@ export type ActionDecisionInput = {
  *  - `install` is initial setup. It re-renders a `managed-clean × stale` file
  *    (`update`) — the file is verbatim generator output, so refreshing it is
  *    safe and avoids trusting a project-shipped manifest to keep stale (or
- *    forged) generated content. It still leaves `managed-modified × *` alone
- *    (`skip`) so local edits survive, and `managed-clean × current` is `skip`,
- *    keeping a no-change re-install idempotent.
+ *    forged) generated content. `managed-modified × current` stays `skip`
+ *    (benign hash drift), and `managed-clean × current` is `skip`, keeping a
+ *    no-change re-install idempotent. `managed-modified × stale` is **`refuse`d**
+ *    (not overwritten — possible local edit — but not silently skipped either:
+ *    the content matches neither the manifest nor the generator, a divergence
+ *    install surfaces rather than passing over).
  *  - `--force` is unmanaged-adoption only. It NEVER overrides
  *    `managed-modified`; destructive overwrite of locally-modified files
  *    requires `--accept-modified` on `upgrade --write`.
@@ -162,8 +165,13 @@ export function decideAction(input: ActionDecisionInput): FileAction {
     return "update_manifest";
   }
 
-  // managed-modified × stale: refuse unless --accept-modified
-  if (mode === "install") return "skip";
+  // managed-modified × stale: the on-disk content matches NEITHER the manifest
+  // hash NOR the current generator output. install REFUSES (does not overwrite —
+  // it could be a genuine local edit) but must NOT silently skip: on a fresh
+  // clone of a hostile repo it cannot tell a user edit from attacker-shipped
+  // content, so the divergence is surfaced rather than passed over in silence.
+  // Overwriting requires the explicit `upgrade --write --accept-modified`.
+  if (mode === "install") return "refuse";
   if (mode === "upgrade-check") return "refuse";
   return acceptModified ? "update" : "refuse";
 }

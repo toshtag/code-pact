@@ -37,10 +37,24 @@ export function manifestPath(cwd: string, agentName: string): string {
  * must NOT treat that throw as "manifest missing".
  */
 async function resolveManifestPath(cwd: string, agentName: string): Promise<string> {
-  return resolveWithinProject(
-    cwd,
-    [...ADAPTER_MANIFEST_DIR_SEGMENTS, `${agentName}.manifest.yaml`].join("/"),
-  );
+  try {
+    return await resolveWithinProject(
+      cwd,
+      [...ADAPTER_MANIFEST_DIR_SEGMENTS, `${agentName}.manifest.yaml`].join("/"),
+    );
+  } catch (err) {
+    // A path-containment refusal (a `.code-pact/adapters` symlink that escapes
+    // the project) is an ADVERSARIAL but EXPECTED input — surface it as a clean
+    // `ADAPTER_MANIFEST_INVALID` (the manifest state is unreachable/untrustable),
+    // not as an uncoded throw that the CLI would render as an internal error.
+    const e = new Error(
+      `Adapter manifest path for "${agentName}" resolves outside the project root and was refused: ${
+        (err as Error).message
+      }`,
+    );
+    (e as NodeJS.ErrnoException).code = "ADAPTER_MANIFEST_INVALID";
+    throw e;
+  }
 }
 
 // ---------------------------------------------------------------------------

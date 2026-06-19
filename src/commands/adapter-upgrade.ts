@@ -75,6 +75,12 @@ export type AdapterUpgradePlanEntry = {
   local: LocalFileState;
   desired: DesiredFileState;
   action: FileAction;
+  /**
+   * Stable machine-readable reason for a non-obvious action. Set for `warn`
+   * (an unowned orphan kept on disk): `"unowned_orphan_not_pruned"`. Absent
+   * for actions whose meaning is self-evident from `(action, local, desired)`.
+   */
+  reason?: string;
 };
 
 export type AdapterUpgradeResult = {
@@ -389,6 +395,10 @@ export async function runAdapterUpgrade(
       local: isClean ? "managed-clean" : "managed-modified",
       desired: "stale", // generator no longer emits this path
       action,
+      // Machine-readable signal for a security `warn`: kept on disk because its
+      // path is outside the adapter's owned set, so deleting on a project-
+      // supplied manifest's say-so would be unsafe.
+      ...(action === "warn" ? { reason: "unowned_orphan_not_pruned" } : {}),
     });
 
     if (mode === "check") continue; // read-only
