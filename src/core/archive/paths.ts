@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { join, posix } from "node:path";
 import { assertSafePlanId } from "../schemas/plan-id.ts";
 import { normalizePrunedDecisionPath } from "../decisions/pruned-ledger.ts";
+import { resolveOwnedProjectPath } from "../path-safety.ts";
 
 // Record locations for the archive layer. One file per record (mirroring the
 // per-event ledger and `baselines/initial.json` precedents) — an append-only
@@ -44,6 +45,28 @@ export function sha256Hex(content: string): string {
   return createHash("sha256").update(content, "utf8").digest("hex");
 }
 
+function relPath(segments: readonly string[]): string {
+  return segments.join("/");
+}
+
+function mapArchiveOwnershipError(err: unknown): never {
+  const code = (err as NodeJS.ErrnoException).code;
+  if (code === "PATH_OUTSIDE_PROJECT" || code === "PATH_NOT_OWNED") {
+    const wrapped = new Error((err as Error).message);
+    (wrapped as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+    throw wrapped;
+  }
+  throw err;
+}
+
+export async function resolveArchiveOwnedPath(cwd: string, relPath: string): Promise<string> {
+  try {
+    return await resolveOwnedProjectPath(cwd, relPath);
+  } catch (err) {
+    mapArchiveOwnershipError(err);
+  }
+}
+
 /**
  * First 8 hex chars of sha256 over the CANONICAL normalized ref (POSIX,
  * project-relative). Never feed an OS-native path here — a raw Windows path
@@ -55,7 +78,16 @@ export function pathHash8(canonicalRef: string): string {
 
 export function phaseSnapshotPath(cwd: string, phaseId: string): string {
   assertSafePlanId(phaseId, "Phase id");
-  return join(cwd, ...ARCHIVE_PHASES_DIR_SEGMENTS, `${phaseId}.json`);
+  return join(cwd, phaseSnapshotRelPath(phaseId));
+}
+
+export function phaseSnapshotRelPath(phaseId: string): string {
+  assertSafePlanId(phaseId, "Phase id");
+  return relPath([...ARCHIVE_PHASES_DIR_SEGMENTS, `${phaseId}.json`]);
+}
+
+export function archivePhasesRelDir(): string {
+  return relPath(ARCHIVE_PHASES_DIR_SEGMENTS);
 }
 
 /** The archive phases directory. Used by step-4b discovery to enumerate
@@ -72,7 +104,28 @@ export function archivePhasesDir(cwd: string): string {
  */
 export function eventPackPath(cwd: string, phaseId: string): string {
   assertSafePlanId(phaseId, "Phase id");
-  return join(cwd, ...ARCHIVE_EVENT_PACKS_DIR_SEGMENTS, `${phaseId}.json`);
+  return join(cwd, eventPackRelPath(phaseId));
+}
+
+export function eventPackRelPath(phaseId: string): string {
+  assertSafePlanId(phaseId, "Phase id");
+  return relPath([...ARCHIVE_EVENT_PACKS_DIR_SEGMENTS, `${phaseId}.json`]);
+}
+
+export function archiveEventPacksRelDir(): string {
+  return relPath(ARCHIVE_EVENT_PACKS_DIR_SEGMENTS);
+}
+
+export function archiveBundlesRelDir(): string {
+  return relPath(ARCHIVE_BUNDLES_DIR_SEGMENTS);
+}
+
+export function archiveDecisionsRelDir(): string {
+  return relPath(ARCHIVE_DECISIONS_DIR_SEGMENTS);
+}
+
+export function archiveDeleteIntentRelPath(): string {
+  return relPath(ARCHIVE_DELETE_INTENT_SEGMENTS);
 }
 
 /** The archive event-packs directory, for enumeration by the pack reader. */
@@ -92,7 +145,7 @@ export function archiveDecisionsDir(cwd: string): string {
 
 /** The retention delete-intent journal file (a single write-ahead log, not a directory). */
 export function archiveDeleteIntentPath(cwd: string): string {
-  return join(cwd, ...ARCHIVE_DELETE_INTENT_SEGMENTS);
+  return join(cwd, archiveDeleteIntentRelPath());
 }
 
 /**
@@ -104,7 +157,11 @@ export function archiveDeleteIntentPath(cwd: string): string {
  * trusted sha256; never an external path component.
  */
 export function archiveBundlePath(cwd: string, kind: string, memberIdsSha256: string): string {
-  return join(cwd, ...ARCHIVE_BUNDLES_DIR_SEGMENTS, `${kind}-${memberIdsSha256.slice(0, 16)}.json`);
+  return join(cwd, archiveBundleRelPath(kind, memberIdsSha256));
+}
+
+export function archiveBundleRelPath(kind: string, memberIdsSha256: string): string {
+  return relPath([...ARCHIVE_BUNDLES_DIR_SEGMENTS, `${kind}-${memberIdsSha256.slice(0, 16)}.json`]);
 }
 
 /**
@@ -119,10 +176,10 @@ export function normalizeDecisionRef(raw: string): string | null {
 
 /** `<stem>-<hash8>.json`; hash8 from the canonical ref to survive stem collisions. */
 export function decisionRecordPath(cwd: string, canonicalRef: string): string {
+  return join(cwd, decisionRecordRelPath(canonicalRef));
+}
+
+export function decisionRecordRelPath(canonicalRef: string): string {
   const stem = posix.basename(canonicalRef, ".md");
-  return join(
-    cwd,
-    ...ARCHIVE_DECISIONS_DIR_SEGMENTS,
-    `${stem}-${pathHash8(canonicalRef)}.json`,
-  );
+  return relPath([...ARCHIVE_DECISIONS_DIR_SEGMENTS, `${stem}-${pathHash8(canonicalRef)}.json`]);
 }

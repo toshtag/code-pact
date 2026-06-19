@@ -34,7 +34,7 @@ import {
   classifyLoosePackRelationship,
   type CoveredLooseRelationship,
 } from "./event-pack-cleanup.ts";
-import { eventPackPath, sha256Hex } from "./paths.ts";
+import { eventPackRelPath, resolveArchiveOwnedPath, sha256Hex } from "./paths.ts";
 import { atomicWriteText } from "../../io/atomic-text.ts";
 
 // ---------------------------------------------------------------------------
@@ -347,7 +347,7 @@ async function phaseFileStillPresent(
  */
 export async function planEventPack(cwd: string, phaseId: string): Promise<EventPackPlan> {
   assertSafePlanId(phaseId, "Phase id");
-  const packPath = eventPackPath(cwd, phaseId);
+  const packPath = await resolveArchiveOwnedPath(cwd, eventPackRelPath(phaseId));
 
   // 1. The live phase YAML must be gone (compact follows archive). A duplicate
   //    phase id (AMBIGUOUS_PHASE_ID) is control-plane corruption with likely-live

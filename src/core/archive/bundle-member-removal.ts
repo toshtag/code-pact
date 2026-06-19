@@ -9,11 +9,13 @@ import { bindBundleMember } from "./archive-bundle-binding.ts";
 import { looseStillAuthorityValid } from "./archive-retention.ts";
 import { DeleteIntentDurabilityError, fsyncDirRequired, fsyncFileRequired } from "./delete-intent-journal.ts";
 import {
-  archiveBundlePath,
+  archiveBundleRelPath,
   archiveBundlesDir,
-  archiveDecisionsDir,
-  archiveEventPacksDir,
-  archivePhasesDir,
+  archiveBundlesRelDir,
+  archiveDecisionsRelDir,
+  archiveEventPacksRelDir,
+  archivePhasesRelDir,
+  resolveArchiveOwnedPath,
   sha256Hex,
 } from "./paths.ts";
 
@@ -62,7 +64,7 @@ function memberAuthorityValid(kind: ArchiveBundleKind, id: string, bytes: string
   }
 }
 
-export function computeRemoval(cwd: string, kind: ArchiveBundleKind, removeIds: readonly string[]): RemovalComputation {
+export function computeRemoval(cwd: string, kind: ArchiveBundleKind, removeIds: readonly string[], bundleDir = archiveBundlesDir(cwd)): RemovalComputation {
   const { index, bundles } = loadArchiveBundles(cwd); // STRICT — a corrupt store throws (fail-closed)
   const members = index.get(kind) ?? new Map<string, { sha256: string; bytes: string }>();
   const removeSet = new Set(removeIds);
@@ -83,13 +85,13 @@ export function computeRemoval(cwd: string, kind: ArchiveBundleKind, removeIds: 
   }
 
   const new_bundle = survivors.length > 0 ? buildArchiveBundle(kind, survivors.map((id) => ({ id, bytes: members.get(id)!.bytes }))) : null;
-  const keepFile = new_bundle ? basename(archiveBundlePath(cwd, kind, new_bundle.member_ids_sha256)) : null;
+  const keepFile = new_bundle ? basename(archiveBundleRelPath(kind, new_bundle.member_ids_sha256)) : null;
 
   const retire: RetireTarget[] = bundles
     .filter((b) => b.loaded.kind === kind && basename(b.file) !== keepFile)
     .map((b) => ({
       file: basename(b.file),
-      sha256: sha256Hex(readFileSync(join(archiveBundlesDir(cwd), basename(b.file)), "utf8")), // the on-disk raw bytes
+      sha256: sha256Hex(readFileSync(join(bundleDir, basename(b.file)), "utf8")), // the on-disk raw bytes
       member_ids_sha256: computeMemberIdsSha256(b.loaded.members.map((m) => m.id)),
       member_ids: b.loaded.members.map((m) => m.id),
     }))
@@ -132,7 +134,7 @@ export function planBundleMemberRemoval(cwd: string, kind: ArchiveBundleKind, re
     invalid: c.invalid,
     survivors: c.survivors,
     new_bundle: c.new_bundle
-      ? { file: basename(archiveBundlePath(cwd, kind, c.new_bundle.member_ids_sha256)), member_ids_sha256: c.new_bundle.member_ids_sha256, sha256: sha256Hex(serializeArchiveBundle(c.new_bundle)) }
+      ? { file: basename(archiveBundleRelPath(kind, c.new_bundle.member_ids_sha256)), member_ids_sha256: c.new_bundle.member_ids_sha256, sha256: sha256Hex(serializeArchiveBundle(c.new_bundle)) }
       : null,
     retire_bundles: c.retire,
     unsafe: c.unsafe,
@@ -191,7 +193,8 @@ export async function removeBundleMembers(
   removeIds: readonly string[],
   hooks: BundleRemovalHooks = {},
 ): Promise<BundleMemberRemovalOutcome> {
-  const c = computeRemoval(cwd, kind, removeIds); // re-run the authority (never a stale caller plan)
+  const dir = await resolveArchiveOwnedPath(cwd, archiveBundlesRelDir());
+  const c = computeRemoval(cwd, kind, removeIds, dir); // re-run the authority (never a stale caller plan)
   if (c.unsafe) {
     // The kind is fail-closed (an authority-invalid current member), so NOTHING is touched — but EVERY
     // requested CURRENT member must still get a terminal outcome (it was asked for, it still resolves):
@@ -202,8 +205,6 @@ export async function removeBundleMembers(
     return { kind, removed: [], not_member: c.not_member, unsafe_invalid: c.invalid, skipped: requestedMembers.map((id) => ({ id, reason: "unsafe_kind" as const })), skipped_stale: [] };
   }
   if (c.removable.length === 0) return { kind, removed: [], not_member: c.not_member, unsafe_invalid: [], skipped: [], skipped_stale: [] };
-
-  const dir = archiveBundlesDir(cwd);
 
   // 0. PREFLIGHT the directory-fsync capability BEFORE any destructive action. On a platform that
   //    cannot fsync a directory (`unsupported`, e.g. win32) the durable removal path is unavailable,
@@ -233,7 +234,7 @@ export async function removeBundleMembers(
     // survivor bundle that vanished / was corrupted between the durable write and this unlink (a bug, or
     // the test seam modelling it) would let us retire the old bundle and lose the survivors too.
     if (c.new_bundle) await assertSurvivorBundleOnDisk(cwd, kind, c.new_bundle);
-    const abs = join(dir, basename(rb.file));
+    const abs = await resolveArchiveOwnedPath(cwd, `${archiveBundlesRelDir()}/${basename(rb.file)}`);
     let raw: string;
     try {
       raw = await readFile(abs, "utf8");
@@ -261,7 +262,7 @@ export async function removeBundleMembers(
       skipped.push({ id, reason: "bundle_stale" });
       continue;
     }
-    const hasLoose = await pathExists(join(looseDirFor(cwd, kind), `${id}.json`));
+    const hasLoose = await looseCopyExists(cwd, kind, id);
     removed.push({ id, outcome: hasLoose ? "bundle_member_removed" : "deleted" });
   }
   return { kind, removed, not_member: c.not_member, unsafe_invalid: [], skipped, skipped_stale };
@@ -272,7 +273,7 @@ export async function removeBundleMembers(
  *  unlink so we never destroy old authority while the survivor authority is missing/corrupt. Throws
  *  fail-closed (nothing is retired) on any mismatch. */
 async function assertSurvivorBundleOnDisk(cwd: string, kind: ArchiveBundleKind, bundle: ArchiveBundle): Promise<void> {
-  const path = archiveBundlePath(cwd, kind, bundle.member_ids_sha256);
+  const path = await resolveArchiveOwnedPath(cwd, archiveBundleRelPath(kind, bundle.member_ids_sha256));
   let raw: string;
   try {
     raw = await readFile(path, "utf8");
@@ -289,9 +290,9 @@ async function assertSurvivorBundleOnDisk(cwd: string, kind: ArchiveBundleKind, 
  *  readback-verify. No-op if the target already holds the byte-identical bundle (the keep) — but
  *  even then it RE-CONFIRMS BOTH durability barriers (file DATA + directory) before returning (see below). */
 export async function durablyWriteBundle(cwd: string, kind: ArchiveBundleKind, bundle: ArchiveBundle): Promise<void> {
-  const path = archiveBundlePath(cwd, kind, bundle.member_ids_sha256);
+  const path = await resolveArchiveOwnedPath(cwd, archiveBundleRelPath(kind, bundle.member_ids_sha256));
   const bytes = serializeArchiveBundle(bundle);
-  const dir = archiveBundlesDir(cwd);
+  const dir = await resolveArchiveOwnedPath(cwd, archiveBundlesRelDir());
   if (await pathExists(path)) {
     // The keep already exists — but "visible on disk" is NOT "durable", in TWO ways: a prior run
     // could have written its DATA without an fsync (data pages still only in the page cache) AND/OR
@@ -347,14 +348,14 @@ export async function durablyWriteBundle(cwd: string, kind: ArchiveBundleKind, b
   verifyBundleReadback(await readFile(path, "utf8"), kind, bundle.members, basename(path)); // re-read + verify
 }
 
-function looseDirFor(cwd: string, kind: ArchiveBundleKind): string {
-  return kind === "phase_snapshot" ? archivePhasesDir(cwd) : kind === "event_pack" ? archiveEventPacksDir(cwd) : archiveDecisionsDir(cwd);
+function looseRelDirFor(kind: ArchiveBundleKind): string {
+  return kind === "phase_snapshot" ? archivePhasesRelDir() : kind === "event_pack" ? archiveEventPacksRelDir() : archiveDecisionsRelDir();
 }
 
 /** Does a LOOSE copy of this id still resolve for `kind`? A removed bundle member whose loose
  *  copy survives is `bundle_member_removed` (not `deleted` — old truth still resolves from loose). */
 export async function looseCopyExists(cwd: string, kind: ArchiveBundleKind, id: string): Promise<boolean> {
-  return pathExists(join(looseDirFor(cwd, kind), `${id}.json`));
+  return pathExists(await resolveArchiveOwnedPath(cwd, `${looseRelDirFor(kind)}/${id}.json`));
 }
 
 async function pathExists(path: string): Promise<boolean> {

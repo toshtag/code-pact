@@ -7,16 +7,13 @@ import {
 } from "../schemas/archive-bundle.ts";
 import { atomicReplaceExistingText, atomicWriteText } from "../../io/atomic-text.ts";
 import {
-  archiveBundlePath,
-  archiveDecisionsDir,
-  archiveEventPacksDir,
-  archivePhasesDir,
-  ARCHIVE_DECISIONS_DIR_SEGMENTS,
-  ARCHIVE_EVENT_PACKS_DIR_SEGMENTS,
-  ARCHIVE_PHASES_DIR_SEGMENTS,
+  archiveBundleRelPath,
+  archiveDecisionsRelDir,
+  archiveEventPacksRelDir,
+  archivePhasesRelDir,
+  resolveArchiveOwnedPath,
   sha256Hex,
 } from "./paths.ts";
-import { resolveWithinProject } from "../path-safety.ts";
 import { computeMemberIdsSha256, validateArchiveBundleTier1 } from "./archive-bundle-reader.ts";
 import { readPendingDeleteFilters } from "./delete-intent-journal.ts";
 import { bindBundleMember } from "./archive-bundle-binding.ts";
@@ -229,7 +226,7 @@ async function persistArchiveBundle(
 
   const bundle = buildArchiveBundle(kind, members);
   const bytes = serializeArchiveBundle(bundle);
-  const path = archiveBundlePath(cwd, kind, bundle.member_ids_sha256);
+  const path = await resolveArchiveOwnedPath(cwd, archiveBundleRelPath(kind, bundle.member_ids_sha256));
   const file = join("bundles", basename(path));
 
   let existing: string | null = null;
@@ -398,12 +395,13 @@ export async function enumerateLooseMembers(
   cwd: string,
   kind: ArchiveBundleKind,
 ): Promise<LooseMember[]> {
-  const dir =
+  const relDir =
     kind === "phase_snapshot"
-      ? archivePhasesDir(cwd)
+      ? archivePhasesRelDir()
       : kind === "event_pack"
-        ? archiveEventPacksDir(cwd)
-        : archiveDecisionsDir(cwd);
+        ? archiveEventPacksRelDir()
+        : archiveDecisionsRelDir();
+  const dir = await resolveArchiveOwnedPath(cwd, relDir);
   let dirents: import("node:fs").Dirent[];
   try {
     // withFileTypes + isFile so a `.json`-named SUBDIRECTORY can never reach
@@ -422,16 +420,10 @@ export async function enumerateLooseMembers(
     .map((e) => e.name)
     .sort();
   const out: LooseMember[] = [];
-  const relDir =
-    kind === "phase_snapshot"
-      ? ARCHIVE_PHASES_DIR_SEGMENTS
-      : kind === "event_pack"
-        ? ARCHIVE_EVENT_PACKS_DIR_SEGMENTS
-        : ARCHIVE_DECISIONS_DIR_SEGMENTS;
   for (const name of names) {
     const id = basename(name, ".json");
     if (looseAbsentIds.has(id) || bundleAbsentIds.has(id)) continue; // mid-deletion pair → not folded into a bundle
-    out.push({ id, bytes: await readFile(await resolveWithinProject(cwd, [...relDir, name].join("/")), "utf8") });
+    out.push({ id, bytes: await readFile(await resolveArchiveOwnedPath(cwd, `${relDir}/${name}`), "utf8") });
   }
   return out;
 }
