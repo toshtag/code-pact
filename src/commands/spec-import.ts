@@ -2,7 +2,7 @@ import { readFile, stat } from "node:fs/promises";
 import { stringify as stringifyYaml } from "yaml";
 
 import { atomicWriteText } from "../io/atomic-text.ts";
-import { assertSafeRelativePath, resolveWithinProject } from "../core/path-safety.ts";
+import { assertSafeRelativePath, resolveOwnedProjectPath, resolveWithinProject } from "../core/path-safety.ts";
 import { type SpecImportDetail } from "../contracts/spec-import-details.ts";
 import { parseTasksMd, type ParserWarning } from "../core/spec-import/tasks-md-parser.ts";
 import {
@@ -57,9 +57,12 @@ async function resolveSpecPath(
   ctx: { sourcePath?: string; phaseId?: string; purpose: "input" | "output" },
 ): Promise<string> {
   try {
-    return await resolveWithinProject(cwd, relPath);
+    return ctx.purpose === "output"
+      ? await resolveOwnedProjectPath(cwd, relPath)
+      : await resolveWithinProject(cwd, relPath);
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "PATH_OUTSIDE_PROJECT") {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "PATH_OUTSIDE_PROJECT" || code === "PATH_NOT_OWNED") {
       throw new SpecImportError(
         "unsafe_path",
         `spec import: ${ctx.purpose} path is unsafe: ${(err as Error).message}`,

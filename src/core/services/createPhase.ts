@@ -6,7 +6,7 @@ import type { Task } from "../schemas/task.ts";
 import { Roadmap, PhaseRef } from "../schemas/roadmap.ts";
 import { loadRoadmap } from "../plan/roadmap.ts";
 import { assertSafePlanId } from "../schemas/plan-id.ts";
-import { resolveWithinProject } from "../path-safety.ts";
+import { resolveOwnedProjectPath } from "../path-safety.ts";
 
 export type Confidence = "low" | "medium" | "high";
 export type Risk = "low" | "medium" | "high";
@@ -64,9 +64,10 @@ async function saveRoadmap(cwd: string, roadmap: Roadmap): Promise<void> {
 
 async function resolveWritablePath(cwd: string, relPath: string): Promise<string> {
   try {
-    return await resolveWithinProject(cwd, relPath);
+    return await resolveOwnedProjectPath(cwd, relPath);
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "PATH_OUTSIDE_PROJECT") {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "PATH_OUTSIDE_PROJECT" || code === "PATH_NOT_OWNED") {
       const e = new Error(
         `${relPath} is not a safe project-contained write path: ${(err as Error).message}`,
       );

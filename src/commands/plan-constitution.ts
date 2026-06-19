@@ -3,7 +3,7 @@ import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { atomicWriteText } from "../io/atomic-text.ts";
 import { Prompter } from "../lib/prompt.ts";
-import { assertSafeRelativePath, resolveWithinProject } from "../core/path-safety.ts";
+import { assertSafeRelativePath, resolveOwnedProjectPath, resolveWithinProject } from "../core/path-safety.ts";
 import { Project } from "../core/schemas/project.ts";
 import type { LocaleCode } from "../core/schemas/locale.ts";
 import { isPristineInitConstitution } from "../core/constitution.ts";
@@ -294,9 +294,10 @@ async function existingIsPristinePlaceholder(
 
 async function resolveConstitutionOutputPath(cwd: string): Promise<string> {
   try {
-    return await resolveWithinProject(cwd, "design/constitution.md");
+    return await resolveOwnedProjectPath(cwd, "design/constitution.md");
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "PATH_OUTSIDE_PROJECT") {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "PATH_OUTSIDE_PROJECT" || code === "PATH_NOT_OWNED") {
       const e = new Error(
         `design/constitution.md is not a safe project-contained write path: ${(err as Error).message}`,
       );

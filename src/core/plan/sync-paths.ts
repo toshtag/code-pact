@@ -1,7 +1,7 @@
 import { readdir, readFile } from "node:fs/promises";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { atomicWriteText } from "../../io/atomic-text.ts";
-import { resolveWithinProject } from "../path-safety.ts";
+import { resolveOwnedProjectPath } from "../path-safety.ts";
 import { Phase } from "../schemas/phase.ts";
 
 // Apply an explicit old -> new path rename map to the `reads` / `writes`
@@ -94,9 +94,10 @@ function applyToList(
 
 async function resolveSyncPath(cwd: string, relPath: string): Promise<string> {
   try {
-    return await resolveWithinProject(cwd, relPath);
+    return await resolveOwnedProjectPath(cwd, relPath);
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "PATH_OUTSIDE_PROJECT") {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "PATH_OUTSIDE_PROJECT" || code === "PATH_NOT_OWNED") {
       const e = new Error(
         `${relPath} is not a safe project-contained sync path: ${(err as Error).message}`,
       );

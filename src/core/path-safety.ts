@@ -61,6 +61,32 @@ export async function pathTraversesSymlink(cwd: string, relPath: string): Promis
 }
 
 /**
+ * Resolve a project-relative path for an owned automated write/delete namespace.
+ *
+ * Unlike {@link resolveWithinProject}, this rejects EVERY symlink component,
+ * including symlinks whose final target stays inside the project. That stricter
+ * ownership rule is required for generated control-plane namespaces such as
+ * `design/`, `.code-pact/state/events/`, and archive stores: a lexical path
+ * match is not proof that the real destination belongs to that namespace if any
+ * component is a symlink.
+ *
+ * Missing tails are still allowed so callers can create fresh directories/files.
+ */
+export async function resolveOwnedProjectPath(
+  cwd: string,
+  relPath: string,
+): Promise<string> {
+  if (await pathTraversesSymlink(cwd, relPath)) {
+    const err = new Error(
+      `path "${relPath}" resolves through a symlink; refusing to write/delete through an unowned project path`,
+    );
+    (err as NodeJS.ErrnoException).code = "PATH_NOT_OWNED";
+    throw err;
+  }
+  return resolveWithinProject(cwd, relPath);
+}
+
+/**
  * Resolves `relPath` against `cwd` and returns the joined absolute path, but
  * throws `PATH_OUTSIDE_PROJECT` unless it resolves to a location WITHIN
  * `realpath(cwd)`. This is a WRITE-safe containment preflight: a not-yet-created

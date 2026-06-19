@@ -3,7 +3,7 @@ import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { atomicWriteText } from "../io/atomic-text.ts";
 import { Prompter } from "../lib/prompt.ts";
-import { assertSafeRelativePath, resolveWithinProject } from "../core/path-safety.ts";
+import { assertSafeRelativePath, resolveOwnedProjectPath, resolveWithinProject } from "../core/path-safety.ts";
 import type { Locale } from "../i18n/index.ts";
 import { messages as messageCatalog } from "../i18n/index.ts";
 import type {
@@ -291,9 +291,10 @@ export async function runBriefWizard(
 
 async function resolveBriefOutputPath(cwd: string): Promise<string> {
   try {
-    return await resolveWithinProject(cwd, "design/brief.md");
+    return await resolveOwnedProjectPath(cwd, "design/brief.md");
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "PATH_OUTSIDE_PROJECT") {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "PATH_OUTSIDE_PROJECT" || code === "PATH_NOT_OWNED") {
       const e = new Error(
         `design/brief.md is not a safe project-contained write path: ${(err as Error).message}`,
       );

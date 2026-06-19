@@ -2,7 +2,7 @@ import type { Dirent } from "node:fs";
 import { readFile, readdir, stat } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
 import { atomicWriteText } from "../../io/atomic-text.ts";
-import { resolveWithinProject } from "../path-safety.ts";
+import { resolveOwnedProjectPath } from "../path-safety.ts";
 import { progressPath } from "../progress/io.ts";
 
 const TRAILING_WHITESPACE = /[ \t]+$/;
@@ -59,9 +59,10 @@ async function walkFiles(root: string): Promise<string[]> {
 
 async function resolveNormalizePath(cwd: string, relPath: string): Promise<string> {
   try {
-    return await resolveWithinProject(cwd, relPath);
+    return await resolveOwnedProjectPath(cwd, relPath);
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "PATH_OUTSIDE_PROJECT") {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "PATH_OUTSIDE_PROJECT" || code === "PATH_NOT_OWNED") {
       const e = new Error(
         `${relPath} is not a safe project-contained normalize path: ${(err as Error).message}`,
       );
