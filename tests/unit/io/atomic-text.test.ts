@@ -7,6 +7,7 @@ import {
   atomicWriteText,
   atomicReplaceExistingText,
   __setAtomicTempTokenForTests,
+  __setAtomicWriteFailAfterOpenForTests,
 } from "../../../src/io/atomic-text.ts";
 
 let dir: string;
@@ -126,6 +127,44 @@ describe("atomicWriteText — temp symlink clobber resistance", () => {
     expect(await readFile(outsideFile, "utf8")).toBe("original outside content");
     // The real destination was never created.
     expect(existsSync(dest)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A write that fails AFTER the exclusive temp file was created (EFBIG, ENOSPC,
+// EIO) must not leak the partial `.tmp-<uuid>`. The temp is opened with
+// `open(..,"wx")` to claim ownership, so a post-open failure closes the handle
+// and unlinks the temp before rethrowing.
+// ---------------------------------------------------------------------------
+
+describe("atomicWriteText — temp cleanup on mid-write failure", () => {
+  afterEach(() => __setAtomicWriteFailAfterOpenForTests(null));
+
+  it("unlinks the partial temp and does not create the destination when the write fails", async () => {
+    __setAtomicWriteFailAfterOpenForTests(() => {
+      const e = new Error("simulated disk-full mid write");
+      (e as NodeJS.ErrnoException).code = "EFBIG";
+      return e;
+    });
+    const dest = join(dir, "target.txt");
+    await expect(atomicWriteText(dest, "data")).rejects.toMatchObject({ code: "EFBIG" });
+    // No stray `.tmp-<uuid>` left behind, and the destination was never created.
+    expect(await noTempLeftBehind()).toBe(true);
+    expect(existsSync(dest)).toBe(false);
+    expect(await readdir(dir)).toEqual([]);
+  });
+
+  it("replace path also cleans up the temp on a mid-write failure", async () => {
+    const dest = join(dir, "exists.txt");
+    await writeFile(dest, "original", "utf8");
+    __setAtomicWriteFailAfterOpenForTests(() => {
+      const e = new Error("simulated I/O error");
+      (e as NodeJS.ErrnoException).code = "EIO";
+      return e;
+    });
+    await expect(atomicReplaceExistingText(dest, "new")).rejects.toMatchObject({ code: "EIO" });
+    expect(await noTempLeftBehind()).toBe(true);
+    expect(await readFile(dest, "utf8")).toBe("original"); // destination untouched
   });
 });
 

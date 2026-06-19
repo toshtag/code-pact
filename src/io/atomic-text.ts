@@ -1,4 +1,4 @@
-import { mkdir, rename, writeFile, unlink, readFile } from "node:fs/promises";
+import { mkdir, rename, unlink, readFile, open } from "node:fs/promises";
 import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
 
@@ -26,25 +26,56 @@ export function __setAtomicTempTokenForTests(fn: (() => string) | null): void {
 }
 
 /**
+ * Test-only seam: force a write failure AFTER the exclusive temp file has been
+ * created (i.e. we own it), to prove the temp is cleaned up rather than leaked.
+ * Returns the error to throw, or null to write normally.
+ */
+let failAfterTempOpen: (() => Error) | null = null;
+export function __setAtomicWriteFailAfterOpenForTests(fn: (() => Error) | null): void {
+  failAfterTempOpen = fn;
+}
+
+/**
  * Creates a same-directory temp file with EXCLUSIVE, no-follow semantics and
  * writes `content` into it; returns the temp path. Retries on the (astronomically
  * unlikely with a UUID) EEXIST collision. An EEXIST that never clears — e.g. a
  * squatting symlink at a forced/fixed token — exhausts the retries and throws,
  * so the squatted target is never written through.
+ *
+ * Ownership is claimed with `open(tmp, "wx")` (O_CREAT|O_EXCL — refuses and never
+ * follows a symlink) BEFORE writing. Once that open succeeds the temp file is
+ * OURS, so if the subsequent write (or fsync-less close) fails — EFBIG, ENOSPC,
+ * EIO — we close the handle and `unlink` the partial temp before rethrowing,
+ * never leaking a stray `.tmp-<uuid>`. An EEXIST from `open` is NOT ours, so it
+ * is retried (a fresh token) and never unlinked.
  */
 async function createExclusiveTemp(path: string, content: string): Promise<string> {
   const MAX_ATTEMPTS = 5;
   let lastErr: unknown;
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
     const tmp = `${path}.tmp-${tempToken()}`;
+    let handle;
     try {
-      await writeFile(tmp, content, { encoding: "utf8", flag: "wx" });
-      return tmp;
+      handle = await open(tmp, "wx");
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === "EEXIST") {
+        // The temp path is occupied (incl. a squatting symlink) — NOT ours.
+        // Retry with a fresh token; do NOT unlink someone else's path.
         lastErr = err;
         continue;
       }
+      throw err;
+    }
+    // We now exclusively own `tmp`. Any failure past this point must clean it up.
+    try {
+      const injected = failAfterTempOpen?.();
+      if (injected) throw injected;
+      await handle.writeFile(content, "utf8");
+      await handle.close();
+      return tmp;
+    } catch (err) {
+      await handle.close().catch(() => {});
+      await unlink(tmp).catch(() => {});
       throw err;
     }
   }
