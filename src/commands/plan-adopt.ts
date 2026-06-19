@@ -19,7 +19,7 @@ import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
 import { assertSafeRelativePath } from "../core/path-safety.ts";
 import { PhaseImportInput, type PhaseImportEntry } from "../core/schemas/phase-import.ts";
-import { Roadmap } from "../core/schemas/roadmap.ts";
+import { loadRoadmap } from "../core/plan/roadmap.ts";
 import {
   applyParsedPhaseImport,
   collectMisshapeWarnings,
@@ -258,11 +258,9 @@ function buildInputFromMarkdown(
 
 async function nextPhaseSeed(cwd: string): Promise<number> {
   try {
-    const rawRoadmap = await readFile(
-      join(cwd, "design", "roadmap.yaml"),
-      "utf8",
-    );
-    const roadmap = Roadmap.parse(parseYaml(rawRoadmap) as unknown);
+    // Contained roadmap seam; a missing / unsafe / malformed roadmap degrades to
+    // "start numbering at P1" (best-effort), never an out-of-project read.
+    const roadmap = await loadRoadmap(cwd);
     let max = 0;
     for (const ref of roadmap.phases) {
       const m = ref.id.match(/^P(\d+)$/);
@@ -270,7 +268,7 @@ async function nextPhaseSeed(cwd: string): Promise<number> {
     }
     return max + 1;
   } catch {
-    // No readable roadmap → start numbering at P1.
+    // No readable / safe roadmap → start numbering at P1.
     return 1;
   }
 }

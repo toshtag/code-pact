@@ -666,6 +666,12 @@ async function cmdVerify(argv: string[], locale: Locale, globalJson: boolean): P
       emitError(json, "TASK_NOT_FOUND", msg);
       return 2;
     }
+    if (code === "CONFIG_ERROR") {
+      // A contained-loader path-safety refusal / malformed roadmap or phase →
+      // structured envelope (exit 2), not a top-level internal error / exit 3.
+      emitError(json, "CONFIG_ERROR", err instanceof Error ? err.message : "Invalid configuration.");
+      return 2;
+    }
     throw err;
   }
 }
@@ -874,6 +880,16 @@ main().then(
   (code) => process.exit(code),
   (err: unknown) => {
     const msg = err instanceof Error ? err.message : String(err);
+    // Safety net: a structured CONFIG_ERROR that no command-level catch mapped
+    // (e.g. a contained control-plane loader's path-safety refusal surfacing from
+    // a command whose catch this PR did not individually wire) must STILL be a
+    // clean exit-2 envelope, never a top-level internal error / exit 3. This
+    // guarantees CONFIG_ERROR completeness across every command in one place; the
+    // per-command cases above stay for their nicer, localized messages.
+    if ((err as NodeJS.ErrnoException)?.code === "CONFIG_ERROR") {
+      emitError(process.argv.includes("--json"), "CONFIG_ERROR", msg);
+      process.exit(2);
+    }
     process.stderr.write(`internal error: ${msg}\n`);
     process.exit(3);
   },

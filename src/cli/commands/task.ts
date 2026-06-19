@@ -559,6 +559,11 @@ async function cmdTaskAdd(
           );
           return code === "DUPLICATE_TASK_ID" ? 1 : 2;
         }
+        if (code === "CONFIG_ERROR") {
+          // Contained roadmap/phase loader refusal → structured, not exit 3.
+          emitError(json, "CONFIG_ERROR", message);
+          return 2;
+        }
         throw err;
       }
     },
@@ -968,6 +973,13 @@ async function cmdTaskComplete(
         msg = err.message;
         outCode = "PHASE_SNAPSHOT_INVALID";
         break;
+      // A path-safety refusal / malformed roadmap or phase from the now-contained
+      // control-plane loaders (resolveTaskInRoadmap → loadRoadmap → loadPhase):
+      // structured (exit 2), never an uncoded internal error (exit 3).
+      case "CONFIG_ERROR":
+        msg = err.message;
+        outCode = "CONFIG_ERROR";
+        break;
       default:
         throw err;
     }
@@ -1119,6 +1131,13 @@ async function cmdTaskRecordDone(
       case "PHASE_SNAPSHOT_INVALID":
         msg = err.message;
         outCode = "PHASE_SNAPSHOT_INVALID";
+        break;
+      // A path-safety refusal / malformed roadmap or phase from the now-contained
+      // control-plane loaders (resolveTaskInRoadmap → loadRoadmap → loadPhase):
+      // structured (exit 2), never an uncoded internal error (exit 3).
+      case "CONFIG_ERROR":
+        msg = err.message;
+        outCode = "CONFIG_ERROR";
         break;
       default:
         throw err;
@@ -1366,6 +1385,11 @@ async function cmdTaskFinalize(
         msg = err.message;
         outCode = "PHASE_SNAPSHOT_INVALID";
         break;
+      // Contained control-plane loader refusal → structured (exit 2), not exit 3.
+      case "CONFIG_ERROR":
+        msg = err.message;
+        outCode = "CONFIG_ERROR";
+        break;
       default:
         throw err;
     }
@@ -1538,6 +1562,13 @@ function emitTaskCommonError(
     case "PHASE_SNAPSHOT_INVALID":
       msg = err.message;
       outCode = "PHASE_SNAPSHOT_INVALID";
+      break;
+    // Path-safety refusal / malformed roadmap or phase from the now-contained
+    // loaders (resolveTaskInRoadmap → loadRoadmap → loadPhase): structured (exit
+    // 2), not an uncoded internal error (exit 3). Covers task start/block/resume.
+    case "CONFIG_ERROR":
+      msg = err.message;
+      outCode = "CONFIG_ERROR";
       break;
     default:
       return null;
@@ -1816,6 +1847,13 @@ async function cmdTaskStatus(
       case "PHASE_SNAPSHOT_INVALID":
         msg = err.message;
         outCode = "PHASE_SNAPSHOT_INVALID";
+        break;
+      // A path-safety refusal / malformed roadmap or phase from the now-contained
+      // control-plane loaders (resolveTaskInRoadmap → loadRoadmap → loadPhase):
+      // structured (exit 2), never an uncoded internal error (exit 3).
+      case "CONFIG_ERROR":
+        msg = err.message;
+        outCode = "CONFIG_ERROR";
         break;
       default:
         throw err;

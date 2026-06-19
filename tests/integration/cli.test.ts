@@ -146,6 +146,46 @@ describe("CLI: post-command --json (BUG-001)", () => {
     }
   });
 
+  it("task/phase commands with design/roadmap.yaml symlinked OUTSIDE → CONFIG_ERROR exit 2, not exit 3", async () => {
+    // SECURITY (Blocker 1+2): resolveTaskInRoadmap / phase-archive / phase-reconcile
+    // now read the roadmap through the CONTAINED loadRoadmap, and every consumer's
+    // CLI maps the resulting CONFIG_ERROR (plus a top-level safety net). A symlinked
+    // design/roadmap.yaml must not be read as the control plane, and must surface as
+    // a structured exit-2 envelope across these commands — never an internal exit-3.
+    run(["init", "--locale", "en-US", "--agent", "claude-code", "--json"]);
+    run(["phase", "add", "--id", "P1", "--name", "Foundation", "--objective", "Foundation phase", "--weight", "10", "--json"]);
+    const outside = await mkdtemp(join(tmpdir(), "code-pact-roadmap-out-"));
+    try {
+      // A valid-shaped outside roadmap carrying a marker (loadRoadmap refuses it
+      // at the symlink before reading, so the marker must never surface anyway).
+      await writeFile(
+        join(outside, "roadmap.yaml"),
+        "phases:\n  - id: P1\n    path: design/phases/SECRET_ROADMAP_MARKER.yaml\n    weight: 1\n",
+        "utf8",
+      );
+      await rm(join(tmpDir, "design", "roadmap.yaml"), { force: true });
+      await symlink(join(outside, "roadmap.yaml"), join(tmpDir, "design", "roadmap.yaml"));
+
+      for (const args of [
+        ["task", "complete", "P1-T1", "--dry-run", "--json"],
+        ["task", "status", "P1-T1", "--json"],
+        ["phase", "archive", "P1", "--json"],
+        ["phase", "reconcile", "P1", "--write", "--json"],
+      ]) {
+        const res = run(args);
+        const label = args.join(" ");
+        expect(res.code, `${label} exit`).toBe(2);
+        const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+        expect(parsed.ok, `${label} ok`).toBe(false);
+        expect(parsed.error.code, `${label} code`).toBe("CONFIG_ERROR");
+        expect(`${res.stdout}${res.stderr}`, `${label} no internal error`).not.toMatch(/internal error/i);
+        expect(`${res.stdout}${res.stderr}`, `${label} no leak`).not.toContain("SECRET_ROADMAP_MARKER");
+      }
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
   it("verify ... --json (post-command) produces JSON-only stdout", () => {
     run(["init", "--locale", "en-US", "--agent", "claude-code", "--json"]);
     run([

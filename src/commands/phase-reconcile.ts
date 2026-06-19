@@ -1,9 +1,6 @@
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
-import { parse as parseYaml } from "yaml";
-import { Roadmap } from "../core/schemas/roadmap.ts";
 import { resolvePhaseRef } from "../core/plan/resolve-phase.ts";
 import { loadPhase } from "../core/plan/load-phase.ts";
+import { loadRoadmap } from "../core/plan/roadmap.ts";
 import { Phase, type PhaseStatus } from "../core/schemas/phase.ts";
 import { loadProgressLog } from "../core/progress/io.ts";
 import {
@@ -89,8 +86,9 @@ async function resolvePhase(
   cwd: string,
   phaseId: string,
 ): Promise<{ phase: Phase; file: string }> {
-  const roadmapRaw = await readFile(join(cwd, "design", "roadmap.yaml"), "utf8");
-  const roadmap = Roadmap.parse(parseYaml(roadmapRaw) as unknown);
+  // Contained roadmap seam — this is a `--write` (mutating) command, so reading
+  // the target phase from an out-of-project symlinked roadmap is refused.
+  const roadmap = await loadRoadmap(cwd);
   const ref = resolvePhaseRef(roadmap, phaseId);
   const phase = await loadPhase(cwd, ref.path);
   return { phase, file: ref.path };

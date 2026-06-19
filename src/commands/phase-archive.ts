@@ -1,8 +1,7 @@
 import { readFile, lstat, stat, unlink } from "node:fs/promises";
-import { join, dirname } from "node:path";
-import { parse as parseYaml } from "yaml";
-import { Roadmap } from "../core/schemas/roadmap.ts";
+import { dirname } from "node:path";
 import { resolvePhaseRef } from "../core/plan/resolve-phase.ts";
+import { loadRoadmap } from "../core/plan/roadmap.ts";
 import type { PhaseRef } from "../core/schemas/roadmap.ts";
 import { resolveWithinProject } from "../core/path-safety.ts";
 import { sha256Hex, phaseSnapshotPath } from "../core/archive/paths.ts";
@@ -68,8 +67,9 @@ function isEnoent(err: unknown): boolean {
 }
 
 async function loadRef(cwd: string, phaseId: string): Promise<PhaseRef> {
-  const roadmapRaw = await readFile(join(cwd, "design", "roadmap.yaml"), "utf8");
-  const roadmap = Roadmap.parse(parseYaml(roadmapRaw) as unknown);
+  // Contained roadmap seam: a symlinked/`..` design/roadmap.yaml cannot make this
+  // mutating command select a target phase from an out-of-project roadmap.
+  const roadmap = await loadRoadmap(cwd);
   return resolvePhaseRef(roadmap, phaseId); // throws PHASE_NOT_FOUND / AMBIGUOUS_PHASE_ID
 }
 
