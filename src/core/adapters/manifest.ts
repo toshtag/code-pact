@@ -93,7 +93,18 @@ export async function readManifest(
     raw = await readFile(path, "utf8");
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
-    throw err;
+    // Any OTHER read failure on a project-controlled (adversarial) manifest path
+    // — the path is a directory (EISDIR), an intermediate component is a file
+    // (ENOTDIR), it is unreadable (EACCES/EPERM), a symlink that passed
+    // containment but then breaks on read, etc. — is tagged ADAPTER_MANIFEST_INVALID
+    // so the command layer maps it to a structured envelope (exit 2) instead of
+    // letting an uncoded errno surface as an internal error / exit 3. ENOENT alone
+    // is "no manifest" (null); everything else is "manifest unreadable".
+    const e = new Error(
+      `Adapter manifest at ${path} cannot be read: ${(err as Error).message}`,
+    );
+    (e as NodeJS.ErrnoException).code = "ADAPTER_MANIFEST_INVALID";
+    throw e;
   }
   const schema = opts.tolerantDuplicatePaths ? AdapterManifestLenient : AdapterManifest;
   try {

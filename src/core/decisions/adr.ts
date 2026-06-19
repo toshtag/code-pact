@@ -529,10 +529,20 @@ export async function classifyDecisionAdrs(cwd: string): Promise<
   }[] = [];
   for (const name of await readDecisionAdrFiles(cwd)) {
     if (!name.endsWith(".md")) continue;
-    const content = await readFile(
-      join(cwd, "design", "decisions", name),
-      "utf8",
-    );
+    // Route through the project-contained read seam (resolveWithinProject) and
+    // degrade on any error: a `design/decisions` symlinked outside the project
+    // is `unsafe` → skip, and an UNREADABLE entry — e.g. a directory named
+    // `*.md` planted by a hostile repo (readFile → EISDIR) — is caught and
+    // skipped rather than crashing this advisory classifier with an uncoded
+    // errno (exit 3). Best-effort surface, like the pack/lint decision loaders.
+    let content: string;
+    try {
+      const r = await readLiveDecisionFile(cwd, `design/decisions/${name}`);
+      if (r.kind !== "ok") continue;
+      content = r.content;
+    } catch {
+      continue;
+    }
     const { acceptance, status } = classifyAdr(content);
     out.push({
       file: `design/decisions/${name}`,

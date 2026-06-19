@@ -125,9 +125,14 @@ async function loadModelProfilesSafe(cwd: string): Promise<ModelProfile[]> {
 async function readFileMaybe(absPath: string): Promise<string | null> {
   try {
     return await readFile(absPath, "utf8");
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
-    throw err;
+  } catch {
+    // Best-effort DIAGNOSTIC read: any failure degrades to null. ENOENT is a
+    // missing file; EISDIR (a manifest-declared path that is actually a directory,
+    // planted by a hostile repo), ENOTDIR, EACCES, etc. are likewise treated as
+    // "not a readable managed file" — surfaced via the existing FILE_MISSING /
+    // DRIFT advisories, never re-thrown as an uncoded errno that crashes doctor
+    // (exit 3). doctor must report problems, not abort on them.
+    return null;
   }
 }
 

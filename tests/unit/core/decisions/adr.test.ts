@@ -527,6 +527,27 @@ describe("classifyDecisionAdrs", () => {
     const files = (await classifyDecisionAdrs(cwd)).map((a) => a.file);
     expect(files).toEqual(["design/decisions/real.md"]);
   });
+
+  it("skips (does not crash on) a DIRECTORY named *.md — hostile repo, EISDIR", async () => {
+    await writeAdr("real.md", "**Status:** accepted\n");
+    // A directory named like an ADR: a bare readFile would throw EISDIR (exit 3).
+    await mkdir(join(cwd, "design", "decisions", "evil.md"), { recursive: true });
+    const files = (await classifyDecisionAdrs(cwd)).map((a) => a.file);
+    expect(files).toEqual(["design/decisions/real.md"]); // evil.md skipped, no throw
+  });
+
+  it("skips an ADR whose file symlink-escapes the project (contained read)", async () => {
+    const outside = await mkdtemp(join(tmpdir(), "adr-classify-out-"));
+    try {
+      await writeFile(join(outside, "secret.md"), "**Status:** accepted\nSECRET\n", "utf8");
+      await mkdir(join(cwd, "design", "decisions"), { recursive: true });
+      await symlink(join(outside, "secret.md"), join(cwd, "design", "decisions", "leak.md"));
+      const files = (await classifyDecisionAdrs(cwd)).map((a) => a.file);
+      expect(files).toEqual([]); // the escaping symlink is `unsafe` → skipped
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("parseAdrCommitments", () => {

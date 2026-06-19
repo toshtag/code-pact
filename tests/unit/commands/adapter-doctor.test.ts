@@ -130,6 +130,32 @@ describe("adapter doctor — ADAPTER_MANIFEST_INVALID", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Hostile on-disk types must not crash doctor (exit 3) — a diagnostic reports
+// problems, never aborts on attacker input.
+// ---------------------------------------------------------------------------
+
+describe("adapter doctor — managed file path is a directory (no exit-3 crash)", () => {
+  it("reports a managed path that is a directory as a drift/missing advisory, does not throw EISDIR", async () => {
+    await runAdapterInstall({
+      cwd: dir,
+      agentName: "claude-code",
+      force: false,
+      locale: "en-US",
+      generatorVersionOverride: "0.9.0-alpha.0",
+    });
+    // Replace the managed CLAUDE.md with a DIRECTORY: a bare readFile would throw
+    // EISDIR, which (pre-fix) surfaced as an internal error / exit 3.
+    await unlink(join(dir, "CLAUDE.md"));
+    await mkdir(join(dir, "CLAUDE.md"), { recursive: true });
+    const result = await runAdapterDoctor({ cwd: dir, locale: "en-US" });
+    // No throw: doctor returns an envelope; the directory reads as a missing/changed
+    // managed file and is surfaced as a claude-code advisory.
+    expect(Array.isArray(result.issues)).toBe(true);
+    expect(result.issues.some((i) => i.agent === "claude-code")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // ADAPTER_GENERATOR_STALE / SCHEMA_DRIFT / PROFILE_DRIFT
 // ---------------------------------------------------------------------------
 

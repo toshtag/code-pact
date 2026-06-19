@@ -26,6 +26,7 @@ import {
   makeDecisionResolver,
   classifyDecisionAdrs,
   readDecisionAdrFiles,
+  readLiveDecisionFile,
   classifyAdr,
   parseAdrCommitments,
 } from "../decisions/adr.ts";
@@ -443,10 +444,18 @@ export async function detectAdrAcceptedBodyThin(cwd: string): Promise<PlanIssue[
   const issues: PlanIssue[] = [];
   for (const name of await readDecisionAdrFiles(cwd)) {
     if (!name.endsWith(".md")) continue;
-    const content = await readFile(
-      join(cwd, "design", "decisions", name),
-      "utf8",
-    );
+    // Project-contained read + degrade-on-error: a `design/decisions` symlinked
+    // outside is `unsafe` → skip; an unreadable entry (e.g. a directory named
+    // `*.md` → readFile EISDIR) is caught and skipped, not thrown uncoded which
+    // would crash `plan lint` (exit 3). Best-effort advisory, like the loaders.
+    let content: string;
+    try {
+      const r = await readLiveDecisionFile(cwd, `design/decisions/${name}`);
+      if (r.kind !== "ok") continue;
+      content = r.content;
+    } catch {
+      continue;
+    }
     // Only accepted ADRs carry the "approved but empty" contradiction. A 0-byte
     // file classifies as "empty" (a different concern); a `**Status:** accepted`
     // line — even with no other body — classifies as "accepted" and IS in scope.
