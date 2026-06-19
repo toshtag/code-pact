@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { Roadmap } from "../schemas/roadmap.ts";
+import { resolveWithinProject } from "../path-safety.ts";
 
 /**
  * Strict loader for the phase registry at `design/roadmap.yaml`.
@@ -15,6 +15,20 @@ import { Roadmap } from "../schemas/roadmap.ts";
  * This is the single roadmap-discovery seam shared by every command.
  */
 export async function loadRoadmap(cwd: string): Promise<Roadmap> {
-  const raw = await readFile(join(cwd, "design", "roadmap.yaml"), "utf8");
+  // Contain the read: a symlinked `design/` or `design/roadmap.yaml` must not
+  // pull an out-of-project roadmap into agent-facing output (context pack /
+  // generated skills). A path-safety refusal maps to CONFIG_ERROR (fail-closed,
+  // structured); a missing/invalid roadmap still throws ENOENT/ZodError as before.
+  let abs: string;
+  try {
+    abs = await resolveWithinProject(cwd, "design/roadmap.yaml");
+  } catch (err) {
+    const e = new Error(
+      `design/roadmap.yaml is not a safe project-relative path: ${(err as Error).message}`,
+    );
+    (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+    throw e;
+  }
+  const raw = await readFile(abs, "utf8");
   return Roadmap.parse(parseYaml(raw) as unknown);
 }

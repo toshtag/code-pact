@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { Phase } from "../schemas/phase.ts";
+import { resolveWithinProject } from "../path-safety.ts";
 
 // The single seam that reads one LIVE phase YAML file off disk and validates it
 // as a full `Phase`. This exact body used to be byte-duplicated across ~8
@@ -29,6 +29,23 @@ import { Phase } from "../schemas/phase.ts";
 // context — missing-tolerance, where wanted, is a SEPARATE archived-aware path,
 // never a swallowed throw here.
 export async function loadPhase(cwd: string, path: string): Promise<Phase> {
-  const raw = await readFile(join(cwd, path), "utf8");
+  // `path` is the roadmap's (project-controlled) phase ref. Resolve it through
+  // the project boundary so a `..`/absolute ref or a symlinked `design/phases/*`
+  // cannot read an out-of-project file into the rendered context pack / generated
+  // skills (CWE-59) — the same agent-facing-read class as the constitution leak.
+  // A path-safety refusal maps to CONFIG_ERROR (fail-closed, structured — this is
+  // a control-plane input, NOT an optional source, so it is never swallowed to
+  // null). A missing/invalid phase still throws ENOENT/ZodError as before.
+  let abs: string;
+  try {
+    abs = await resolveWithinProject(cwd, path);
+  } catch (err) {
+    const e = new Error(
+      `Phase path "${path}" is not a safe project-relative path: ${(err as Error).message}`,
+    );
+    (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+    throw e;
+  }
+  const raw = await readFile(abs, "utf8");
   return Phase.parse(parseYaml(raw) as unknown);
 }
