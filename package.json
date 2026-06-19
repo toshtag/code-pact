@@ -59,6 +59,7 @@
     "check:doc-blocks": "tsx scripts/gen-doc-blocks.ts --check",
     "check:docs": "pnpm check:doc-links && pnpm check:public-md-links && pnpm check:doc-invariants && pnpm check:history-noise && pnpm check:changelog-archive && pnpm check:cli-reference && pnpm check:doc-blocks",
     "check:release-version": "node scripts/check-release-version.mjs",
+    "check:fs-containment": "node scripts/check-fs-containment.mjs",
     "release:check": "pnpm typecheck && pnpm test && pnpm build && pnpm check:docs && pnpm check:release-version && node dist/cli.js validate --json && node dist/cli.js plan lint --include-quality --strict --json && node dist/cli.js plan analyze --strict --json",
     "prepublishOnly": "node scripts/assert-package-metadata.mjs"
   },
