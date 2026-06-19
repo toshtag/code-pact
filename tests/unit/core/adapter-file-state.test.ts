@@ -3,6 +3,7 @@ import { mkdtemp, rm, mkdir, writeFile, symlink, realpath } from "node:fs/promis
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
+  assertAdapterWritePathsContained,
   assertSafeRelativePath,
   classifyFileState,
   decideAction,
@@ -165,6 +166,81 @@ describe("resolveWithinProject", () => {
     // No intermediate directories — entire suffix is non-existent.
     const got = await resolveWithinProject(dir, "a/b/c/d/e.md");
     expect(got).toBe(join(dir, "a/b/c/d/e.md"));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// assertAdapterWritePathsContained — typed write preflight
+//
+// A forged agent profile / manifest can point a write at an EXISTING on-disk
+// entry of the WRONG type (a regular file where a directory is expected, or a
+// directory where a file is expected). The later mkdir/write fails AFTER the
+// caller's --model pin, stranding a partial side effect. The preflight catches
+// the type mismatch as CONFIG_ERROR before any mutation.
+// ---------------------------------------------------------------------------
+
+describe("assertAdapterWritePathsContained", () => {
+  let dir: string;
+  beforeEach(async () => {
+    dir = await realpath(await mkdtemp(join(tmpdir(), "code-pact-preflight-")));
+  });
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("accepts non-existent paths for both kinds (the create case)", async () => {
+    await expect(
+      assertAdapterWritePathsContained(dir, [
+        { path: ".context/claude", kind: "directory" },
+        { path: "CLAUDE.md", kind: "file" },
+        { path: ".claude/skills/x.md", kind: "file" },
+      ]),
+    ).resolves.toBeUndefined();
+  });
+
+  it("accepts existing entries of the matching type", async () => {
+    await mkdir(join(dir, ".context", "claude"), { recursive: true });
+    await writeFile(join(dir, "CLAUDE.md"), "ok", "utf8");
+    await expect(
+      assertAdapterWritePathsContained(dir, [
+        { path: ".context/claude", kind: "directory" },
+        { path: "CLAUDE.md", kind: "file" },
+      ]),
+    ).resolves.toBeUndefined();
+  });
+
+  it("rejects a directory spec that is actually a regular file (mkdir would EEXIST)", async () => {
+    await mkdir(join(dir, ".context"), { recursive: true });
+    await writeFile(join(dir, ".context", "claude"), "not a dir", "utf8");
+    await expect(
+      assertAdapterWritePathsContained(dir, [{ path: ".context/claude", kind: "directory" }]),
+    ).rejects.toMatchObject({ code: "CONFIG_ERROR" });
+  });
+
+  it("rejects a file spec that is actually a directory (write would EISDIR)", async () => {
+    await mkdir(join(dir, "CLAUDE.md"), { recursive: true });
+    await expect(
+      assertAdapterWritePathsContained(dir, [{ path: "CLAUDE.md", kind: "file" }]),
+    ).rejects.toMatchObject({ code: "CONFIG_ERROR" });
+  });
+
+  it("rejects a path whose intermediate component is a regular file (ENOTDIR)", async () => {
+    await writeFile(join(dir, "blocker"), "i am a file", "utf8");
+    await expect(
+      assertAdapterWritePathsContained(dir, [{ path: "blocker/child.md", kind: "file" }]),
+    ).rejects.toMatchObject({ code: "CONFIG_ERROR" });
+  });
+
+  it("still surfaces a symlink escape as PATH_OUTSIDE_PROJECT (containment unchanged)", async () => {
+    const outside = await realpath(await mkdtemp(join(tmpdir(), "code-pact-preflight-out-")));
+    try {
+      await symlink(outside, join(dir, ".context"), "dir");
+      await expect(
+        assertAdapterWritePathsContained(dir, [{ path: ".context/claude", kind: "directory" }]),
+      ).rejects.toMatchObject({ code: "PATH_OUTSIDE_PROJECT" });
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
   });
 });
 

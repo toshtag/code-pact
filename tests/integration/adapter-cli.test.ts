@@ -843,6 +843,98 @@ describe("adapter DANGLING symlink escape — CLI error mapping (security)", () 
   });
 });
 
+describe("adapter wrong-type write path — CLI error mapping (security)", () => {
+  // A forged agent profile / on-disk state can put an EXISTING entry of the wrong
+  // type where a write expects another (a file where context_dir wants a dir, a
+  // dir where an instruction file goes). The typed write preflight rejects it as
+  // CONFIG_ERROR BEFORE the --model pin, instead of failing the later mkdir/write
+  // (EEXIST / EISDIR) AFTER pinning — which would strand a partial side effect.
+  const profileRel = join(".code-pact", "agent-profiles", "claude-code.yaml");
+
+  // The default claude-code profile's context_dir is `.context/claude-code`.
+  const CONTEXT_DIR = join(".context", "claude-code");
+
+  it("install --model with context_dir occupied by a regular file → CONFIG_ERROR, no pin", async () => {
+    const before = await readFile(join(dir, profileRel), "utf8");
+    // Plant a regular file exactly where context_dir's mkdir expects a directory.
+    await mkdir(join(dir, ".context"), { recursive: true });
+    await writeFile(join(dir, CONTEXT_DIR), "not a directory", "utf8");
+    const res = runCli(["adapter", "install", "claude-code", "--model", "sonnet-4.6", "--json"]);
+    expect(res.status).toBe(2);
+    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+    expect(parsed.error.code).toBe("CONFIG_ERROR");
+    expect(await readFile(join(dir, profileRel), "utf8")).toBe(before);
+    expect(await readFile(join(dir, profileRel), "utf8")).not.toContain("model_version");
+  });
+
+  it("upgrade --write --model with context_dir occupied by a regular file → CONFIG_ERROR, no pin", async () => {
+    expect(runCli(["adapter", "install", "claude-code"]).status).toBe(0);
+    const before = await readFile(join(dir, profileRel), "utf8");
+    await rm(join(dir, CONTEXT_DIR), { recursive: true, force: true });
+    await writeFile(join(dir, CONTEXT_DIR), "not a directory", "utf8");
+    const res = runCli(["adapter", "upgrade", "claude-code", "--write", "--model", "sonnet-4.6", "--json"]);
+    expect(res.status).toBe(2);
+    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+    expect(parsed.error.code).toBe("CONFIG_ERROR");
+    expect(await readFile(join(dir, profileRel), "utf8")).toBe(before);
+  });
+
+  it("install --model with CLAUDE.md occupied by a directory → CONFIG_ERROR, no pin, no internal error", async () => {
+    const before = await readFile(join(dir, profileRel), "utf8");
+    await rm(join(dir, "CLAUDE.md"), { recursive: true, force: true });
+    await mkdir(join(dir, "CLAUDE.md"), { recursive: true }); // instruction file path is a dir
+    const res = runCli(["adapter", "install", "claude-code", "--model", "sonnet-4.6", "--json"]);
+    expect(res.status).toBe(2);
+    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+    expect(parsed.error.code).toBe("CONFIG_ERROR");
+    expect(res.stderr).not.toMatch(/internal error/i);
+    expect(await readFile(join(dir, profileRel), "utf8")).toBe(before);
+  });
+});
+
+describe("adapter manifest path is a directory — CLI error mapping (security)", () => {
+  // A non-ENOENT manifest read failure (the path is a directory → EISDIR, an
+  // intermediate is a file → ENOTDIR, EACCES, …) must map to a structured
+  // ADAPTER_MANIFEST_INVALID, not surface as an internal error / exit 3.
+  async function makeManifestADirectory(): Promise<void> {
+    const mp = join(dir, ".code-pact", "adapters", "claude-code.manifest.yaml");
+    await rm(mp, { recursive: true, force: true });
+    await mkdir(mp, { recursive: true });
+  }
+
+  it("install --json → ADAPTER_MANIFEST_INVALID exit 2", async () => {
+    await makeManifestADirectory();
+    const res = runCli(["adapter", "install", "claude-code", "--json"]);
+    expect(res.status).toBe(2);
+    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+    expect(parsed.error.code).toBe("ADAPTER_MANIFEST_INVALID");
+  });
+
+  it("install (human) → exit 2, no internal error", async () => {
+    await makeManifestADirectory();
+    const res = runCli(["adapter", "install", "claude-code"]);
+    expect(res.status).toBe(2);
+    expect(res.stderr).not.toMatch(/internal error/i);
+    expect(res.stderr.length).toBeGreaterThan(0);
+  });
+
+  it("upgrade --check --json → ADAPTER_MANIFEST_INVALID exit 2", async () => {
+    await makeManifestADirectory();
+    const res = runCli(["adapter", "upgrade", "claude-code", "--check", "--json"]);
+    expect(res.status).toBe(2);
+    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+    expect(parsed.error.code).toBe("ADAPTER_MANIFEST_INVALID");
+  });
+
+  it("upgrade --write --json → ADAPTER_MANIFEST_INVALID exit 2", async () => {
+    await makeManifestADirectory();
+    const res = runCli(["adapter", "upgrade", "claude-code", "--write", "--json"]);
+    expect(res.status).toBe(2);
+    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+    expect(parsed.error.code).toBe("ADAPTER_MANIFEST_INVALID");
+  });
+});
+
 describe("adapter install — divergent managed file is surfaced, not silent (security)", () => {
   it("install --force on a managed-modified × stale file → refuse + warn + exit 1, file untouched", async () => {
     expect(runCli(["adapter", "install", "claude-code"]).status).toBe(0);

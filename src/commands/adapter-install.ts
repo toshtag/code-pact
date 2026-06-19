@@ -116,11 +116,14 @@ async function loadModelProfiles(cwd: string): Promise<ModelProfile[]> {
   const profiles: ModelProfile[] = [];
   for (const entry of entries.sort()) {
     if (!entry.endsWith(".yaml")) continue;
-    const raw = await readFile(join(dir, entry), "utf8");
     try {
+      // readFile inside the try: an UNREADABLE entry (e.g. a directory named
+      // `*.yaml` → EISDIR, planted by a hostile repo) is skipped like a malformed
+      // one rather than throwing an uncoded errno that crashes the command (exit 3).
+      const raw = await readFile(join(dir, entry), "utf8");
       profiles.push(ModelProfile.parse(parseYaml(raw) as unknown));
     } catch {
-      // skip malformed profiles
+      // skip unreadable / malformed profiles
     }
   }
   return profiles;
@@ -238,22 +241,26 @@ export async function runAdapterInstall(
     }),
   );
 
-  // Path-safety PREFLIGHT — fail closed BEFORE any persistent side effect. The
-  // manifest read above already covered `.code-pact/adapters`; this resolves the
-  // placeholder dirs AND every generated file path through resolveWithinProject,
-  // so a symlinked `.context` / `.claude` ancestor OR a final-component symlink
-  // (e.g. `CLAUDE.md` pointed out of the project) aborts the install here — with
-  // no pin and no write — instead of after the `--model` pin. An escape surfaces
-  // as PATH_OUTSIDE_PROJECT, which the CLI maps to CONFIG_ERROR.
+  // Write PREFLIGHT — fail closed BEFORE any persistent side effect. The manifest
+  // read above already covered `.code-pact/adapters`; this checks the placeholder
+  // dirs AND every generated file for BOTH containment (symlink escape / dangling
+  // → PATH_OUTSIDE_PROJECT) AND on-disk TYPE (a dir spec that is really a file,
+  // or a file spec that is really a directory → CONFIG_ERROR). Either aborts the
+  // install here — no pin, no write — instead of failing the later mkdir/write
+  // AFTER the `--model` pin. The CLI maps PATH_OUTSIDE_PROJECT → CONFIG_ERROR.
   await assertAdapterWritePathsContained(cwd, [
-    profile.context_dir,
-    ...(profile.hook_dir ? [profile.hook_dir] : []),
-    ...desiredFiles.map((d) => d.path),
+    { path: profile.context_dir, kind: "directory" },
+    ...(profile.hook_dir ? [{ path: profile.hook_dir, kind: "directory" as const }] : []),
+    ...desiredFiles.map((d) => ({ path: d.path, kind: "file" as const })),
   ]);
 
-  // Preflight passed — now safe to PERSIST the `--model` pin: the manifest read
-  // and the path preflight both fail closed, so nothing persistent was written
-  // before this. The mkdirs below are idempotent, in-project, and benign.
+  // Preflight passed — this is the MINIMUM-MUTATION point to PERSIST the `--model`
+  // pin: the manifest read and the containment+type preflight both fail closed,
+  // so no containment/type failure can strand a pin afterwards. (This is NOT a
+  // crash-atomic guarantee: a process death between the pin and the manifest
+  // write below, or a runtime fault like ENOSPC during a write, can still leave
+  // the profile pinned ahead of the manifest — `adapter doctor` reports that
+  // drift.) The mkdirs below are idempotent, in-project, and benign.
   await resolveAndPinModelVersion({
     cwd,
     agentName,

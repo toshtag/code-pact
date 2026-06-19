@@ -7,6 +7,7 @@
 // re-exports below keep existing adapter call sites working unchanged.
 // ---------------------------------------------------------------------------
 
+import { stat } from "node:fs/promises";
 import {
   assertSafeRelativePath as assertSafeRelativePathImpl,
   resolveWithinProject as resolveWithinProjectImpl,
@@ -18,25 +19,83 @@ export {
 } from "../path-safety.ts";
 
 /**
- * Fail-closed path-safety PREFLIGHT for an adapter write pass. Resolves every
- * project-relative path the pass will touch — placeholder dirs, generated files,
- * and (for upgrade) manifest-tracked orphan candidates — through
- * {@link resolveWithinProject} WITHOUT mutating anything. A symlink escape
- * (`.context` / `.claude`, a generated-file ancestor, a final-component symlink
- * like `CLAUDE.md`, or a forged manifest path) therefore throws
- * `PATH_OUTSIDE_PROJECT` BEFORE the caller's first persistent side effect (the
- * `--model` profile pin, a file write, an orphan unlink), so a doomed run leaves
- * nothing behind. Each path is also structurally validated
- * (`assertSafeRelativePath`). Order is irrelevant — it is a pure gate; the real
- * passes re-resolve for use.
+ * What an adapter write path will be used AS, so the preflight can reject an
+ * existing on-disk entry of the WRONG type before the write is attempted:
+ *  - `directory`: a `mkdir(..., {recursive})` target (context_dir / hook_dir).
+ *    An existing regular file there fails the mkdir with EEXIST.
+ *  - `file`: an `atomicWriteText` / `readFileMaybe` target (a generated file or a
+ *    manifest-tracked orphan). An existing directory there fails with EISDIR.
+ */
+export type AdapterWritePathKind = "directory" | "file";
+export type AdapterWritePathSpec = { path: string; kind: AdapterWritePathKind };
+
+function configError(message: string): Error {
+  const e = new Error(message);
+  (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+  return e;
+}
+
+/**
+ * Fail-closed write PREFLIGHT for an adapter write pass. For every path the pass
+ * will touch — placeholder dirs, generated files, and (for upgrade) manifest-
+ * tracked orphan candidates — it checks BOTH:
+ *
+ *  1. CONTAINMENT — {@link resolveWithinProject} (symlink escape / dangling /
+ *     cycle → `PATH_OUTSIDE_PROJECT`).
+ *  2. TYPE — an EXISTING entry must match how the pass will use it: a `directory`
+ *     spec must not already be a file (the `mkdir` would EEXIST); a `file` spec
+ *     must not already be a directory (the write/read would EISDIR); and a
+ *     non-directory intermediate component (ENOTDIR) is rejected. Mismatches map
+ *     to `CONFIG_ERROR`.
+ *
+ * Both run BEFORE the caller's first persistent side effect (the `--model` pin,
+ * a file write, an orphan unlink), so a path-containment OR type failure aborts
+ * with NO mutation — never a half-applied run that pinned the model and then
+ * failed the mkdir/write. (Runtime faults during the real write — ENOSPC, a
+ * concurrent change — are out of scope; this guarantees only that a *containment
+ * or type* problem is caught before any mutation.) Nothing is mutated here.
  */
 export async function assertAdapterWritePathsContained(
   cwd: string,
-  relPaths: Iterable<string>,
+  specs: Iterable<AdapterWritePathSpec>,
 ): Promise<void> {
-  for (const rel of relPaths) {
-    assertSafeRelativePathImpl(rel);
-    await resolveWithinProjectImpl(cwd, rel);
+  for (const { path, kind } of specs) {
+    assertSafeRelativePathImpl(path);
+
+    let abs: string;
+    try {
+      abs = await resolveWithinProjectImpl(cwd, path);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "PATH_OUTSIDE_PROJECT") throw err;
+      // ENOTDIR (a non-directory component blocks the path) or any other resolve
+      // failure means a write here cannot succeed: a CONFIG_ERROR, not exit 3.
+      throw configError(
+        `adapter write path "${path}" is not usable: ${(err as Error).message}`,
+      );
+    }
+
+    // Type check the FINAL entry (follow symlinks — containment already vetted).
+    let st: import("node:fs").Stats;
+    try {
+      st = await stat(abs);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === "ENOENT") continue; // not-yet-created — valid for file & directory
+      // ENOTDIR (intermediate component is a file), EACCES, etc.
+      throw configError(
+        `adapter write path "${path}" cannot be used (${code ?? "unreadable"})`,
+      );
+    }
+    if (kind === "directory" && !st.isDirectory()) {
+      throw configError(
+        `adapter directory "${path}" already exists but is not a directory`,
+      );
+    }
+    if (kind === "file" && st.isDirectory()) {
+      throw configError(
+        `adapter file path "${path}" already exists but is a directory`,
+      );
+    }
   }
 }
 

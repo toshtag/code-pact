@@ -128,11 +128,14 @@ async function loadModelProfiles(cwd: string): Promise<ModelProfile[]> {
   const profiles: ModelProfile[] = [];
   for (const entry of entries.sort()) {
     if (!entry.endsWith(".yaml")) continue;
-    const raw = await readFile(join(dir, entry), "utf8");
     try {
+      // readFile inside the try: an UNREADABLE entry (e.g. a directory named
+      // `*.yaml` → EISDIR) is skipped like a malformed one, not thrown uncoded
+      // (which would crash the command with exit 3).
+      const raw = await readFile(join(dir, entry), "utf8");
       profiles.push(ModelProfile.parse(parseYaml(raw) as unknown));
     } catch {
-      // skip malformed
+      // skip unreadable / malformed
     }
   }
   return profiles;
@@ -263,17 +266,18 @@ export async function runAdapterUpgrade(
 
   // For --write: fail-closed path-safety PREFLIGHT, THEN pin, THEN create dirs.
   if (mode === "write") {
-    // Resolve every path the write pass will touch — placeholder dirs, generated
-    // files, and manifest-tracked orphan candidates — BEFORE the `--model` pin
-    // (the first persistent mutation), so a symlink escape (`.context`/`.claude`,
-    // a generated-file ancestor, a `CLAUDE.md` final symlink, or a forged
-    // manifest path) aborts here with no pin, no write, no unlink. Mirrors
-    // adapter install. An escape → PATH_OUTSIDE_PROJECT → CONFIG_ERROR at the CLI.
+    // Check every path the write pass will touch — placeholder dirs (directory),
+    // generated files (file), and manifest-tracked orphan candidates (file) — for
+    // BOTH containment (symlink escape/dangling → PATH_OUTSIDE_PROJECT) and on-disk
+    // TYPE mismatch (→ CONFIG_ERROR), BEFORE the `--model` pin (the first
+    // persistent mutation). A forged manifest path, a symlinked `.context`/`.claude`,
+    // a `CLAUDE.md` final symlink, or an existing-entry-of-wrong-type aborts here
+    // with no pin, no write, no unlink. Mirrors adapter install.
     await assertAdapterWritePathsContained(cwd, [
-      profile.context_dir,
-      ...(profile.hook_dir ? [profile.hook_dir] : []),
-      ...desiredFiles.map((d) => d.path),
-      ...existingByPath.keys(),
+      { path: profile.context_dir, kind: "directory" },
+      ...(profile.hook_dir ? [{ path: profile.hook_dir, kind: "directory" as const }] : []),
+      ...desiredFiles.map((d) => ({ path: d.path, kind: "file" as const })),
+      ...[...existingByPath.keys()].map((p) => ({ path: p, kind: "file" as const })),
     ]);
 
     // Preflight passed — now safe to PERSIST the `--model` pin (a no-op write
