@@ -935,6 +935,95 @@ describe("adapter manifest path is a directory — CLI error mapping (security)"
   });
 });
 
+describe("adapter forged-manifest + profile → arbitrary file overwrite is REFUSED (security)", () => {
+  // HIGH: AgentProfile.instruction_filename and manifest files[].path are BOTH
+  // attacker-controlled. A forged manifest whose hash == a victim file's real
+  // hash makes it `managed-clean`; since the victim != generated content it is
+  // `stale` → would auto-`update` (overwrite) on a plain `adapter install`. The
+  // overwrite gate refuses any path outside the trusted static overwrite
+  // namespace, so a profile pointed at an arbitrary in-project file cannot
+  // destroy it via manifest trust.
+  const profileRel = join(".code-pact", "agent-profiles", "claude-code.yaml");
+  const VICTIM = "important.txt";
+  const VICTIM_CONTENT = "# important project file\nload-bearing\n";
+
+  async function pointInstructionAt(victim: string): Promise<void> {
+    const p = join(dir, profileRel);
+    const yaml = await readFile(p, "utf8");
+    await writeFile(p, yaml.replace(/instruction_filename:.*/, `instruction_filename: ${victim}`), "utf8");
+  }
+
+  it("install does NOT overwrite a victim file the forged manifest claims (refuse, exit 1)", async () => {
+    await pointInstructionAt(VICTIM);
+    await writeFile(join(dir, VICTIM), VICTIM_CONTENT, "utf8");
+    // Forge a manifest entry whose hash matches the victim's CURRENT content.
+    await writeManifest(dir, "claude-code", {
+      schema_version: 1,
+      agent_name: "claude-code",
+      generator_version: "0.0.0",
+      adapter_schema_version: 1,
+      generated_at: "2026-01-01T00:00:00.000Z",
+      profile_fingerprint: { instruction_filename: VICTIM, context_dir: ".context/claude-code" },
+      files: [
+        { path: VICTIM, sha256: computeContentHash(VICTIM_CONTENT), managed: true, role: "instruction" },
+      ],
+    });
+
+    const res = runCli(["adapter", "install", "claude-code", "--json"]);
+    const parsed = JSON.parse(res.stdout) as {
+      ok: boolean;
+      data: { refused: string[]; files: Array<{ relPath: string; action: string }> };
+    };
+    // The victim is untouched, and surfaced as refused (install exits 1).
+    expect(await readFile(join(dir, VICTIM), "utf8")).toBe(VICTIM_CONTENT);
+    expect(res.status).toBe(1);
+    expect(parsed.data.files.find((f) => f.relPath === VICTIM)?.action).toBe("refuse");
+    expect(parsed.data.refused.some((p) => p.endsWith(`/${VICTIM}`))).toBe(true);
+  });
+
+  it("install --force STILL does not overwrite the victim (force only adopts unmanaged owned paths)", async () => {
+    await pointInstructionAt(VICTIM);
+    await writeFile(join(dir, VICTIM), VICTIM_CONTENT, "utf8");
+    // No manifest at all this time → victim is unmanaged × stale; --force would be
+    // `replace_unmanaged`, which the same gate refuses for a non-owned path.
+    const res = runCli(["adapter", "install", "claude-code", "--force", "--json"]);
+    expect(await readFile(join(dir, VICTIM), "utf8")).toBe(VICTIM_CONTENT);
+    expect(res.status).toBe(1);
+  });
+});
+
+describe("adapter malformed agent profile — CLI error mapping (security)", () => {
+  const profileRel = join(".code-pact", "agent-profiles", "claude-code.yaml");
+
+  it("install --json with malformed-YAML profile → CONFIG_ERROR exit 2, no internal error", async () => {
+    await writeFile(join(dir, profileRel), "instruction_filename: [oops:\n  bad\n", "utf8");
+    const res = runCli(["adapter", "install", "claude-code", "--json"]);
+    expect(res.status).toBe(2);
+    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+    expect(parsed.error.code).toBe("CONFIG_ERROR");
+    expect(res.stderr).not.toMatch(/internal error/i);
+  });
+
+  it("upgrade --check --json with schema-invalid profile → CONFIG_ERROR exit 2", async () => {
+    expect(runCli(["adapter", "install", "claude-code"]).status).toBe(0);
+    // Valid YAML, but not a valid AgentProfile (missing required fields).
+    await writeFile(join(dir, profileRel), "instruction_filename: 123\n", "utf8");
+    const res = runCli(["adapter", "upgrade", "claude-code", "--check", "--json"]);
+    expect(res.status).toBe(2);
+    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+    expect(parsed.error.code).toBe("CONFIG_ERROR");
+  });
+
+  it("upgrade --write --json with malformed-YAML profile → CONFIG_ERROR exit 2", async () => {
+    expect(runCli(["adapter", "install", "claude-code"]).status).toBe(0);
+    await writeFile(join(dir, profileRel), ": not valid yaml :\n", "utf8");
+    const res = runCli(["adapter", "upgrade", "claude-code", "--write", "--json"]);
+    expect(res.status).toBe(2);
+    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+    expect(parsed.error.code).toBe("CONFIG_ERROR");
+  });
+});
+
 describe("adapter install — divergent managed file is surfaced, not silent (security)", () => {
   it("install --force on a managed-modified × stale file → refuse + warn + exit 1, file untouched", async () => {
     expect(runCli(["adapter", "install", "claude-code"]).status).toBe(0);

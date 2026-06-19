@@ -91,9 +91,13 @@ export async function assertAdapterWritePathsContained(
         `adapter directory "${path}" already exists but is not a directory`,
       );
     }
-    if (kind === "file" && st.isDirectory()) {
+    if (kind === "file" && !st.isFile()) {
+      // Reject a directory AND any non-regular file (FIFO / socket / device):
+      // a later readFile on a FIFO BLOCKS forever waiting for a writer, which —
+      // after the --model pin — would hang the command with the pin stranded.
+      // (stat followed the symlink, so a symlink → regular file is still a file.)
       throw configError(
-        `adapter file path "${path}" already exists but is a directory`,
+        `adapter file path "${path}" already exists but is not a regular file`,
       );
     }
   }

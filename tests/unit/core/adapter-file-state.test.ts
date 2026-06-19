@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtemp, rm, mkdir, writeFile, symlink, realpath } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -240,6 +241,24 @@ describe("assertAdapterWritePathsContained", () => {
       ).rejects.toMatchObject({ code: "PATH_OUTSIDE_PROJECT" });
     } finally {
       await rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a `file` spec that is a FIFO/special file (a later read would BLOCK)", async () => {
+    // A non-regular file (FIFO) where a generated file is written: readFile on a
+    // FIFO blocks forever waiting for a writer, which after the --model pin would
+    // hang the command. The preflight must refuse it (regular files only).
+    let madeFifo = false;
+    try {
+      execFileSync("mkfifo", [join(dir, "CLAUDE.md")]);
+      madeFifo = true;
+    } catch {
+      return; // mkfifo unavailable on this platform — skip
+    }
+    if (madeFifo) {
+      await expect(
+        assertAdapterWritePathsContained(dir, [{ path: "CLAUDE.md", kind: "file" }]),
+      ).rejects.toMatchObject({ code: "CONFIG_ERROR" });
     }
   });
 });

@@ -1,6 +1,3 @@
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
-import { parse as parseYaml } from "yaml";
 import type { AgentProfile } from "../schemas/agent-profile.ts";
 import { normalizeModelVersion } from "../schemas/agent-profile.ts";
 import {
@@ -9,8 +6,8 @@ import {
   type ClaudeModelVersion,
 } from "../models/catalog.ts";
 import type { ModelProfile } from "../schemas/model-profile.ts";
-import { Roadmap } from "../schemas/roadmap.ts";
 import { loadPhase } from "../plan/load-phase.ts";
+import { loadRoadmap } from "../plan/roadmap.ts";
 import type { Locale } from "../../i18n/index.ts";
 import type {
   AdapterDescriptor,
@@ -238,15 +235,14 @@ function buildCommandSkill(skillName: string, command: string): string {
 }
 
 async function readVerificationCommands(cwd: string): Promise<string[]> {
-  let roadmapRaw: string;
+  // Best-effort skill generation: route through the project-contained loaders so
+  // a symlinked `design/roadmap.yaml` / `design/phases/*` (or a `..` phase ref)
+  // cannot pull an out-of-project command string into a generated skill (CWE-59).
+  // A missing / unsafe / invalid roadmap or phase degrades to "no command skills"
+  // (this is generation, not a fail-closed control-plane read).
+  let roadmap;
   try {
-    roadmapRaw = await readFile(join(cwd, "design", "roadmap.yaml"), "utf8");
-  } catch {
-    return [];
-  }
-  let roadmap: Roadmap;
-  try {
-    roadmap = Roadmap.parse(parseYaml(roadmapRaw) as unknown);
+    roadmap = await loadRoadmap(cwd);
   } catch {
     return [];
   }
@@ -256,7 +252,7 @@ async function readVerificationCommands(cwd: string): Promise<string[]> {
       const phase = await loadPhase(cwd, ref.path);
       for (const cmd of phase.verification.commands) seen.add(cmd);
     } catch {
-      // skip unreadable phases
+      // skip unreadable / unsafe phases
     }
   }
   return Array.from(seen);
@@ -331,6 +327,15 @@ export const claudeAdapterDescriptor: AdapterDescriptor = {
     ".claude/skills/context.md",
     ".claude/skills/verify.md",
     ".claude/skills/progress.md",
+  ] as const,
+  // Auto-overwrite namespace (re-render of stale generated files). Broader than
+  // the delete gate above: it includes the conventional skills dir so DYNAMIC
+  // command-skills (`.claude/skills/<derived>.md`) self-heal — but ONLY under the
+  // conventional `.claude/skills/` path, so a profile that redirects skill_dir /
+  // instruction_filename at an arbitrary file falls outside it and is refused.
+  overwriteOwnedPathGlobs: [
+    "CLAUDE.md",
+    ".claude/skills/*.md",
   ] as const,
   adapterSchemaVersion: 1,
 };

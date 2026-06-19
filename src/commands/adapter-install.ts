@@ -31,6 +31,7 @@ import type {
   ProfileFingerprint,
 } from "../core/schemas/adapter-manifest.ts";
 import { atomicWriteText } from "../io/atomic-text.ts";
+import { matchGlob } from "../core/glob.ts";
 import { readPackageVersion } from "../lib/package-version.ts";
 import type { Locale } from "../i18n/index.ts";
 
@@ -95,14 +96,33 @@ async function loadAgentProfile(
   let raw: string;
   try {
     raw = await readFile(path, "utf8");
-  } catch {
-    const err = new Error(
-      `Agent profile for "${agentName}" not found at ${path}.`,
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      const e = new Error(`Agent profile for "${agentName}" not found at ${path}.`);
+      (e as NodeJS.ErrnoException).code = "AGENT_NOT_FOUND";
+      throw e;
+    }
+    // A non-ENOENT read failure (the profile path is a directory → EISDIR, an
+    // intermediate is a file → ENOTDIR, EACCES, …) is a CONFIG problem, not a
+    // missing agent — surface it structured, not as an uncoded exit 3.
+    const e = new Error(
+      `Agent profile for "${agentName}" at ${path} cannot be read: ${(err as Error).message}`,
     );
-    (err as NodeJS.ErrnoException).code = "AGENT_NOT_FOUND";
-    throw err;
+    (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+    throw e;
   }
-  return AgentProfile.parse(parseYaml(raw) as unknown);
+  // Parse + schema-validate INSIDE a try: a project-controlled (adversarial)
+  // profile with malformed YAML or a schema violation maps to CONFIG_ERROR, not
+  // an uncoded throw that the CLI renders as an internal error / exit 3.
+  try {
+    return AgentProfile.parse(parseYaml(raw) as unknown);
+  } catch (err) {
+    const e = new Error(
+      `Agent profile for "${agentName}" at ${path} is malformed (YAML or schema): ${(err as Error).message}`,
+    );
+    (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+    throw e;
+  }
 }
 
 async function loadModelProfiles(cwd: string): Promise<ModelProfile[]> {
@@ -296,13 +316,31 @@ export async function runAdapterInstall(
     // to skill files. It still cannot override managed-modified (handled
     // by decideAction below).
     const effectiveForce = force || (regenSkills && desired.role === "skill");
-    const action = decideAction({
+    let action = decideAction({
       local: cls.local,
       desired: cls.desired,
       mode: "install",
       force: effectiveForce,
       acceptModified: false,
     });
+
+    // SECURITY (CWE-345/CWE-22): a content OVERWRITE of an EXISTING, divergent
+    // file (`update` = managed-clean × stale; `replace_unmanaged` = unmanaged ×
+    // stale with --force) must NOT be authorized by the project-supplied manifest
+    // hash or the project-supplied profile path alone — both are attacker-
+    // controlled. A forged manifest (hash == the victim file's real hash) plus a
+    // profile whose `instruction_filename`/`skill_dir` points at an arbitrary
+    // in-project file (e.g. `package.json`) would otherwise overwrite that file
+    // with generator output on a plain `adapter install`. Only re-render a path
+    // inside the TRUSTED static overwrite namespace; anything else is refused
+    // (surfaced, not written).
+    if (action === "update" || action === "replace_unmanaged") {
+      const overwriteGlobs =
+        descriptor.overwriteOwnedPathGlobs ?? descriptor.ownedPathGlobs;
+      if (!overwriteGlobs.some((g) => matchGlob(g, desired.path))) {
+        action = "refuse";
+      }
+    }
 
     fileResults.push({
       path: absPath,

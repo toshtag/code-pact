@@ -107,14 +107,29 @@ async function loadAgentProfile(
   let raw: string;
   try {
     raw = await readFile(path, "utf8");
-  } catch {
-    const err = new Error(
-      `Agent profile for "${agentName}" not found at ${path}.`,
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      const e = new Error(`Agent profile for "${agentName}" not found at ${path}.`);
+      (e as NodeJS.ErrnoException).code = "AGENT_NOT_FOUND";
+      throw e;
+    }
+    const e = new Error(
+      `Agent profile for "${agentName}" at ${path} cannot be read: ${(err as Error).message}`,
     );
-    (err as NodeJS.ErrnoException).code = "AGENT_NOT_FOUND";
-    throw err;
+    (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+    throw e;
   }
-  return AgentProfile.parse(parseYaml(raw) as unknown);
+  // Parse + schema-validate inside a try: a malformed / schema-invalid project
+  // profile maps to CONFIG_ERROR, not an uncoded internal error (exit 3).
+  try {
+    return AgentProfile.parse(parseYaml(raw) as unknown);
+  } catch (err) {
+    const e = new Error(
+      `Agent profile for "${agentName}" at ${path} is malformed (YAML or schema): ${(err as Error).message}`,
+    );
+    (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+    throw e;
+  }
 }
 
 async function loadModelProfiles(cwd: string): Promise<ModelProfile[]> {
@@ -312,13 +327,27 @@ export async function runAdapterUpgrade(
 
     const cls = classifyFileState({ manifestHash, diskHash, desiredHash });
     const effectiveForce = force || (regenSkills && desired.role === "skill");
-    const action = decideAction({
+    let action = decideAction({
       local: cls.local,
       desired: cls.desired,
       mode: mode === "check" ? "upgrade-check" : "upgrade-write",
       force: effectiveForce,
       acceptModified,
     });
+
+    // SECURITY (CWE-345/CWE-22): same gate as `adapter install` — a content
+    // OVERWRITE of an existing divergent file (`update` / `replace_unmanaged`) is
+    // authorized ONLY when the GENERATED path falls inside the trusted static
+    // overwrite namespace. A forged manifest + a profile redirecting a path field
+    // at an arbitrary in-project file cannot make `--write` overwrite it. Applied
+    // in BOTH modes so `--check` previews the refusal that `--write` would take.
+    if (action === "update" || action === "replace_unmanaged") {
+      const overwriteGlobs =
+        descriptor.overwriteOwnedPathGlobs ?? descriptor.ownedPathGlobs;
+      if (!overwriteGlobs.some((g) => matchGlob(g, desired.path))) {
+        action = "refuse";
+      }
+    }
 
     plan.push({
       path: absPath,
