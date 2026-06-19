@@ -102,7 +102,17 @@ export function globToRegex(pattern: string): RegExp {
     return escaped.replace(/\*/g, "[^/]*");
   });
 
-  let joined = segments.join("/");
+  // Collapse runs of consecutive `**` segments to a single one so this agrees
+  // with the canonical {@link matchGlob}, where adjacent `**` each match zero
+  // segments (`a/**/**` ≡ `a/**`). Without this, `**/**` compiles to
+  // `(?:.*/)?.*/` which forces an intermediate segment that matchGlob does not
+  // require — a divergence that let `design/**/**/roadmap.yaml` match
+  // `design/roadmap.yaml` at runtime but not via this regex.
+  const collapsed = segments.filter(
+    (s, i) => !(s === DOUBLE && segments[i - 1] === DOUBLE),
+  );
+
+  let joined = collapsed.join("/");
   // Collapse `/**/` patterns and boundaries so `**` matches zero+ segments.
   joined = joined
     .replace(new RegExp(`/${DOUBLE}/`, "g"), "/(?:.*/)?")
@@ -123,10 +133,13 @@ export function globToRegex(pattern: string): RegExp {
  * glob is a DoS vector). This two-pointer matcher is O(patternSegments ×
  * pathSegments) with NO backtracking blow-up.
  *
- * Same subset and semantics as `globToRegex` (literal segments, `*` within a
- * segment not crossing `/`, `**` as a full segment matching zero+ segments).
- * The caller is expected to have validated the pattern via `validateGlobSyntax`
- * first — both inputs are POSIX, repo-root-relative paths.
+ * This is the CANONICAL matcher: same subset as `globToRegex` (literal segments,
+ * single-star within a segment not crossing a slash, doublestar as a full segment
+ * matching zero or more segments) AND now the same semantics — `globToRegex`
+ * collapses adjacent doublestar segments to agree with this function (they
+ * previously diverged when two doublestar segments were adjacent). The caller is
+ * expected to have validated the pattern via `validateGlobSyntax` first — both
+ * inputs are POSIX, repo-root-relative paths.
  */
 export function matchGlob(pattern: string, path: string): boolean {
   return matchSegments(pattern.split("/"), path.split("/"));
@@ -241,9 +254,9 @@ function toPosix(p: string): string {
  * A protected path entry: a glob plus a representative concrete sample
  * that any "covers this protected pattern" check can test the declared
  * write pattern against. The sample is chosen so that
- * `globToRegex(declaredWrite).test(sample)` returning true is a strong
+ * `matchGlob(declaredWrite, sample)` returning true is a strong
  * signal that the declared write would actually touch a protected
- * resource if executed.
+ * resource if executed (matched with the SAME matcher as the runtime walk).
  */
 export type ProtectedPathEntry = {
   pattern: string;
@@ -291,12 +304,18 @@ export function findProtectedPathOverlaps(
   protectedPaths: readonly ProtectedPathEntry[] = PROTECTED_PATHS,
 ): ProtectedPathEntry[] {
   if (validateGlobSyntax(declaredGlob) !== null) return [];
-  const declaredRe = globToRegex(declaredGlob);
   const declaredSample = synthesizeSample(declaredGlob);
+  // Match with `matchGlob` — the SAME matcher the runtime walk / write audit use
+  // — so this advisory cannot disagree with what actually matches on disk.
+  // `globToRegex` is NOT equivalent for adjacent `**` segments (it forces an
+  // intermediate segment where `matchGlob` lets each `**` match zero), which let
+  // a declared write like `design/**/**/roadmap.yaml` evade this protected-path
+  // overlap while still matching `design/roadmap.yaml` at runtime.
   return protectedPaths.filter((entry) => {
-    if (declaredRe.test(entry.sample)) return true;
-    const protectedRe = globToRegex(entry.pattern);
-    return protectedRe.test(declaredSample);
+    // declared glob is broader-than/equal-to the protected pattern.
+    if (matchGlob(declaredGlob, entry.sample)) return true;
+    // protected pattern is broader-than/equal-to the declared glob.
+    return matchGlob(entry.pattern, declaredSample);
   });
 }
 

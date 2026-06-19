@@ -119,6 +119,11 @@ describe("matchGlob", () => {
       "**",
       "a/b/c.ts",
       "src/**/test/**/*.ts",
+      // Adjacent doublestar segments — these previously DIVERGED (matchGlob let
+      // each match zero, globToRegex forced an intermediate segment).
+      "a/**/**",
+      "a/**/**/b",
+      "design/**/**/roadmap.yaml",
     ];
     const paths = [
       "src/commands/a.ts",
@@ -128,12 +133,30 @@ describe("matchGlob", () => {
       "a/b/c.ts",
       "src/a/test/b/c.ts",
       "README.md",
+      "a",
+      "a/b",
+      "a/x/b",
+      "design/roadmap.yaml",
+      "design/sub/roadmap.yaml",
     ];
     for (const p of patterns) {
       const re = globToRegex(p);
       for (const s of paths) {
         expect(matchGlob(p, s), `pattern="${p}" path="${s}"`).toBe(re.test(s));
       }
+    }
+  });
+
+  it("treats adjacent `**` segments as one (each matches zero) — parity with globToRegex", () => {
+    // Regression for the Round-5 divergence: a declared write with repeated `**`
+    // matched a protected file at runtime but evaded globToRegex-based checks.
+    for (const [p, s] of [
+      ["a/**/**", "a"],
+      ["a/**/**/b", "a/b"],
+      ["design/**/**/roadmap.yaml", "design/roadmap.yaml"],
+    ] as const) {
+      expect(matchGlob(p, s)).toBe(true);
+      expect(globToRegex(p).test(s)).toBe(true);
     }
   });
 
@@ -213,6 +236,15 @@ describe("findProtectedPathOverlaps", () => {
   it("does not flag a write to an unrelated path", () => {
     const overlaps = findProtectedPathOverlaps("src/commands/foo.ts");
     expect(overlaps).toEqual([]);
+  });
+
+  it("flags a repeated-`**` glob that the runtime matcher would match (no evasion)", () => {
+    // Round-5 regression: `design/**/**/roadmap.yaml` matches design/roadmap.yaml
+    // via the runtime matchGlob walk, so the advisory must flag it too — it must
+    // NOT slip through because the old check used the divergent globToRegex.
+    expect(matchGlob("design/**/**/roadmap.yaml", "design/roadmap.yaml")).toBe(true);
+    const overlaps = findProtectedPathOverlaps("design/**/**/roadmap.yaml");
+    expect(overlaps.map((e) => e.pattern)).toContain("design/roadmap.yaml");
   });
 
   it("does not flag when the pattern syntax is invalid", () => {
