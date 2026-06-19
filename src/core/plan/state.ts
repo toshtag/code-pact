@@ -10,7 +10,7 @@ import {
 } from "../schemas/progress-event.ts";
 import { Roadmap, type PhaseRef, type Roadmap as RoadmapT } from "../schemas/roadmap.ts";
 import type { Task as TaskT } from "../schemas/task.ts";
-import { mergeProgressStreams, progressPath } from "../progress/io.ts";
+import { mergeProgressStreams, progressPath, resolveProgressPath } from "../progress/io.ts";
 import {
   eventsDir,
   type LoadedEventFile,
@@ -464,7 +464,8 @@ export async function collectPlanArtifacts(
   let legacyEvents: ProgressEvent[] = [];
   let hasLegacy = false;
   try {
-    const raw = await readFile(progPath, "utf8");
+    const progReadPath = await resolveProgressPath(cwd);
+    const raw = await readFile(progReadPath, "utf8");
     const parsed = ProgressLog.safeParse(parseYaml(raw) as unknown);
     if (parsed.success) {
       legacyEvents = parsed.data.events;

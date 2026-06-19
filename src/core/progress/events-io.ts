@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { ProgressEvent } from "../schemas/progress-event.ts";
 import { atCompact, computeEventId, eventFileName, normalizeAt } from "./event-id.ts";
+import { resolveOwnedProjectPath } from "../path-safety.ts";
 
 /**
  * Per-event progress ledger.
@@ -22,6 +23,38 @@ export const EVENTS_DIR_SEGMENTS = [".code-pact", "state", "events"];
 
 export function eventsDir(cwd: string): string {
   return join(cwd, ...EVENTS_DIR_SEGMENTS);
+}
+
+export async function resolveEventsDir(cwd: string): Promise<string> {
+  try {
+    return await resolveOwnedProjectPath(cwd, EVENTS_DIR_SEGMENTS.join("/"));
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "PATH_OUTSIDE_PROJECT" || code === "PATH_NOT_OWNED") {
+      const e = new Error(
+        `.code-pact/state/events is not a safe owned progress ledger path: ${(err as Error).message}`,
+      );
+      (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+      throw e;
+    }
+    throw err;
+  }
+}
+
+async function resolveEventPath(cwd: string, file: string): Promise<string> {
+  try {
+    return await resolveOwnedProjectPath(cwd, [...EVENTS_DIR_SEGMENTS, file].join("/"));
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "PATH_OUTSIDE_PROJECT" || code === "PATH_NOT_OWNED") {
+      const e = new Error(
+        `.code-pact/state/events/${file} is not a safe owned progress ledger path: ${(err as Error).message}`,
+      );
+      (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+      throw e;
+    }
+    throw err;
+  }
 }
 
 export type LoadedEventFile = {
@@ -158,9 +191,9 @@ export async function writeEventFile(
 ): Promise<WrittenEvent> {
   const parsed = ProgressEvent.parse(event); // fail closed on an invalid event
   const id = computeEventId(parsed);
-  const dir = eventsDir(cwd);
+  const dir = await resolveEventsDir(cwd);
   const file = eventFileName(parsed);
-  const path = join(dir, file);
+  const path = await resolveEventPath(cwd, file);
   await mkdir(dir, { recursive: true });
   const body = stringifyYaml({ ...parsed, at: normalizeAt(parsed.at), id });
 
@@ -200,7 +233,7 @@ export async function writeEventFile(
  * file (callers map to the usual INVALID_YAML / SCHEMA_ERROR surfaces).
  */
 export async function readEventFiles(cwd: string): Promise<LoadedEventFile[]> {
-  const dir = eventsDir(cwd);
+  const dir = await resolveEventsDir(cwd);
   let names: string[];
   try {
     names = await readdir(dir);
@@ -211,7 +244,7 @@ export async function readEventFiles(cwd: string): Promise<LoadedEventFile[]> {
   const out: LoadedEventFile[] = [];
   for (const file of names.sort()) {
     if (!parseEventFileName(file)) continue; // not an event file — ignore
-    out.push(await readValidatedEventFile(join(dir, file), file));
+    out.push(await readValidatedEventFile(await resolveEventPath(cwd, file), file));
   }
   return out;
 }

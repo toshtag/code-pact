@@ -3,7 +3,7 @@ import { parse as parseYaml } from "yaml";
 import { ProgressLog, type ProgressEvent } from "../schemas/progress-event.ts";
 import { computeEventId } from "./event-id.ts";
 import { type LoadedEventFile, readEventFiles } from "./events-io.ts";
-import { progressPath } from "./io.ts";
+import { resolveProgressPath } from "./io.ts";
 import {
   readEventPackFiles,
   readEventPackFilesLenient,
@@ -132,7 +132,7 @@ export function filterArchivedTaskLegacyConflicts(
 /** Read legacy `progress.yaml` events (ENOENT → empty); strict parse always. */
 async function readLegacyEvents(cwd: string): Promise<ProgressEvent[]> {
   try {
-    const raw = await readFile(progressPath(cwd), "utf8");
+    const raw = await readFile(await resolveProgressPath(cwd), "utf8");
     return ProgressLog.parse(parseYaml(raw) as unknown).events;
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
