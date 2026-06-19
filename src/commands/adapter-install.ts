@@ -20,7 +20,10 @@ import {
   writeManifest,
 } from "../core/adapters/manifest.ts";
 import { dedupeDesiredFiles } from "../core/adapters/desired.ts";
-import { resolveAndPinModelVersion } from "../core/adapters/model-version.ts";
+import {
+  resolveAndPinModelVersion,
+  validateModelVersionInput,
+} from "../core/adapters/model-version.ts";
 import type {
   AdapterManifest,
   ManifestFile,
@@ -198,9 +201,40 @@ export async function runAdapterInstall(
     loadModelProfiles(cwd),
   ]);
 
-  // Validate `--model` and pin it to the agent profile BEFORE any other
-  // filesystem mutation. An unknown value throws CONFIG_ERROR here, before
-  // a single directory or file is written.
+  // Validate `--model` (PURE — no filesystem access) up front, so an unknown
+  // value is a clean CONFIG_ERROR before anything is read or written.
+  validateModelVersionInput(modelVersion);
+
+  // Read the existing manifest BEFORE persisting the `--model` pin. A
+  // fail-closed manifest state (a `.code-pact/adapters` symlink escape, or a
+  // malformed/schema-invalid manifest) must abort the install HERE, before any
+  // persistent side effect — otherwise a doomed `--model` install would still
+  // have rewritten the agent profile's `model_version`. Tolerant read: a legacy
+  // manifest with duplicate paths is repairable here (we regenerate below).
+  const existingManifest = await readManifest(cwd, agentName, {
+    tolerantDuplicatePaths: true,
+  });
+  const existingByPath = new Map<string, ManifestFile>(
+    (existingManifest?.files ?? []).map((f) => [f.path, f]),
+  );
+
+  // Directory placeholders: every adapter gets its context_dir, Claude also gets
+  // its hook_dir. Routed through resolveWithinProject so a symlinked `.context`
+  // / `.claude` ancestor cannot make `mkdir` create a directory OUTSIDE the
+  // project (RelativePosixPath already blocks lexical `..`; this adds the
+  // symlink-escape guard). An escape is mapped to a structured error by the CLI.
+  //
+  // Done BEFORE the `--model` pin so a placeholder-dir escape fails closed with
+  // no persistent side effect — symmetric with the manifest read above. Pinning
+  // first would rewrite the profile's `model_version` on a doomed install. The
+  // mkdirs themselves are idempotent, in-project, and benign.
+  await mkdir(await resolveWithinProject(cwd, profile.context_dir), { recursive: true });
+  if (profile.hook_dir) {
+    await mkdir(await resolveWithinProject(cwd, profile.hook_dir), { recursive: true });
+  }
+
+  // Now safe to PERSIST the `--model` pin: the manifest read and the placeholder
+  // mkdirs above both fail closed, so nothing persistent was written before this.
   const resolvedModelVersion = await resolveAndPinModelVersion({
     cwd,
     agentName,
@@ -218,22 +252,6 @@ export async function runAdapterInstall(
       modelVersion: resolvedModelVersion,
     }),
   );
-
-  // Tolerant read: a legacy manifest with duplicate paths is repairable here —
-  // we regenerate a unique manifest below — so it must not abort the install.
-  const existingManifest = await readManifest(cwd, agentName, {
-    tolerantDuplicatePaths: true,
-  });
-  const existingByPath = new Map<string, ManifestFile>(
-    (existingManifest?.files ?? []).map((f) => [f.path, f]),
-  );
-
-  // Directory placeholders: every adapter gets its
-  // context_dir, Claude additionally gets its hook_dir.
-  await mkdir(join(cwd, profile.context_dir), { recursive: true });
-  if (profile.hook_dir) {
-    await mkdir(join(cwd, profile.hook_dir), { recursive: true });
-  }
 
   const created: string[] = [];
   const skipped: string[] = [];

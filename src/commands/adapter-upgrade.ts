@@ -266,10 +266,12 @@ export async function runAdapterUpgrade(
   );
 
   // For --write only: ensure directory placeholders exist before any write.
+  // Routed through resolveWithinProject so a symlinked `.context` / `.claude`
+  // ancestor cannot make `mkdir` create a directory outside the project.
   if (mode === "write") {
-    await mkdir(join(cwd, profile.context_dir), { recursive: true });
+    await mkdir(await resolveWithinProject(cwd, profile.context_dir), { recursive: true });
     if (profile.hook_dir) {
-      await mkdir(join(cwd, profile.hook_dir), { recursive: true });
+      await mkdir(await resolveWithinProject(cwd, profile.hook_dir), { recursive: true });
     }
   }
 

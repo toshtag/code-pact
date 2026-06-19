@@ -432,8 +432,15 @@ async function cmdAdapterUpgrade(
         return 2;
       }
       if (code === "ADAPTER_MANIFEST_INVALID") {
-        // A `.code-pact/adapters` symlink escape (fail-closed in manifest I/O).
+        // A `.code-pact/adapters` symlink escape OR a malformed/schema-invalid
+        // manifest (both fail-closed in manifest I/O).
         emitError(json, "ADAPTER_MANIFEST_INVALID", err.message);
+        return 2;
+      }
+      if (code === "PATH_OUTSIDE_PROJECT") {
+        // A symlinked placeholder dir (.context / .claude) or generated-file
+        // ancestor escaping the project — fail-closed in resolveWithinProject.
+        emitError(json, "CONFIG_ERROR", err.message);
         return 2;
       }
       if (code === "CONFIG_ERROR") {
@@ -499,9 +506,16 @@ async function runAdapterInstallAndEmit(args: {
         return 2;
       }
       if (code === "ADAPTER_MANIFEST_INVALID") {
-        // A `.code-pact/adapters` symlink escape (fail-closed in manifest I/O).
-        // Surface a structured envelope + exit 2, not an internal error.
+        // A `.code-pact/adapters` symlink escape OR a malformed/schema-invalid
+        // manifest (both fail-closed in manifest I/O). Surface a structured
+        // envelope + exit 2, not an internal error.
         emitError(json, "ADAPTER_MANIFEST_INVALID", err.message);
+        return 2;
+      }
+      if (code === "PATH_OUTSIDE_PROJECT") {
+        // A symlinked placeholder dir (.context / .claude) or generated-file
+        // ancestor escaping the project — fail-closed in resolveWithinProject.
+        emitError(json, "CONFIG_ERROR", err.message);
         return 2;
       }
       if (code === "CONFIG_ERROR") {
