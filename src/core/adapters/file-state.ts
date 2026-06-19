@@ -16,6 +16,7 @@ import {
 export {
   assertSafeRelativePath,
   resolveWithinProject,
+  pathTraversesSymlink,
 } from "../path-safety.ts";
 
 /**

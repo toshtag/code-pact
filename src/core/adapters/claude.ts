@@ -322,20 +322,19 @@ export const claudeAdapterDescriptor: AdapterDescriptor = {
     "hooks_dir",
     "context_dir",
   ] as const,
+  // EXACT static paths the generator owns — used for BOTH the delete gate (#6)
+  // AND the auto-overwrite gate. Deliberately NOT a `.claude/skills/*.md`
+  // wildcard: that directory is SHARED with hand-authored user skills, so a
+  // wildcard would let a forged manifest + a colliding verification-command skill
+  // name overwrite a user's skill (CWE-345). Dynamic command-skills therefore are
+  // NOT auto-overwritten when stale — they are refused (see the install/upgrade
+  // overwrite gate). A reserved generated-skill namespace that restores safe
+  // dynamic re-render is the planned follow-up.
   ownedPathGlobs: [
     "CLAUDE.md",
     ".claude/skills/context.md",
     ".claude/skills/verify.md",
     ".claude/skills/progress.md",
-  ] as const,
-  // Auto-overwrite namespace (re-render of stale generated files). Broader than
-  // the delete gate above: it includes the conventional skills dir so DYNAMIC
-  // command-skills (`.claude/skills/<derived>.md`) self-heal — but ONLY under the
-  // conventional `.claude/skills/` path, so a profile that redirects skill_dir /
-  // instruction_filename at an arbitrary file falls outside it and is refused.
-  overwriteOwnedPathGlobs: [
-    "CLAUDE.md",
-    ".claude/skills/*.md",
   ] as const,
   adapterSchemaVersion: 1,
 };

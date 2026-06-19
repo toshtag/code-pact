@@ -990,6 +990,41 @@ describe("adapter forged-manifest + profile → arbitrary file overwrite is REFU
     expect(await readFile(join(dir, VICTIM), "utf8")).toBe(VICTIM_CONTENT);
     expect(res.status).toBe(1);
   });
+
+  it("a symlinked owned skills dir cannot escape the overwrite gate (lexical-owned != real target)", async () => {
+    // HIGH: the overwrite gate matches the LEXICAL path against the owned globs,
+    // but an in-project symlink makes an owned-looking path resolve to a DIFFERENT
+    // real file. `.claude/skills/context.md` IS owned, yet via `.claude/skills ->
+    // src` it reaches `src/context.md`. The path-traverses-symlink check refuses it.
+    expect(runCli(["adapter", "install", "claude-code"]).status).toBe(0); // clean baseline
+    const victimDir = join(dir, "src");
+    await mkdir(victimDir, { recursive: true });
+    const victim = join(victimDir, "context.md");
+    const VICTIM = "LOAD-BEARING SOURCE\n";
+    await writeFile(victim, VICTIM, "utf8");
+    await rm(join(dir, ".claude", "skills"), { recursive: true, force: true });
+    await symlink(victimDir, join(dir, ".claude", "skills")); // .claude/skills -> src
+    // Forge a manifest: .claude/skills/context.md (owned name) == the victim hash.
+    await writeManifest(dir, "claude-code", {
+      schema_version: 1,
+      agent_name: "claude-code",
+      generator_version: "0.0.0",
+      adapter_schema_version: 1,
+      generated_at: "2026-01-01T00:00:00.000Z",
+      profile_fingerprint: { instruction_filename: "CLAUDE.md", context_dir: ".context/claude-code" },
+      files: [
+        { path: ".claude/skills/context.md", sha256: computeContentHash(VICTIM), managed: true, role: "skill" },
+      ],
+    });
+    const res = runCli(["adapter", "install", "claude-code", "--json"]);
+    // The real source file behind the symlink is NOT overwritten.
+    expect(await readFile(victim, "utf8")).toBe(VICTIM);
+    expect(res.status).toBe(1); // refused → exit 1
+    const parsed = JSON.parse(res.stdout) as {
+      data: { files: Array<{ relPath: string; action: string }> };
+    };
+    expect(parsed.data.files.find((f) => f.relPath === ".claude/skills/context.md")?.action).toBe("refuse");
+  });
 });
 
 describe("adapter malformed agent profile — CLI error mapping (security)", () => {

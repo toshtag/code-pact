@@ -26,6 +26,41 @@ export function assertSafeRelativePath(relPath: string): void {
 }
 
 /**
+ * True if resolving `relPath` under `cwd` traverses ANY symlink component — a
+ * parent dir OR the final entry.
+ *
+ * This is the OWNERSHIP companion to {@link resolveWithinProject}'s CONTAINMENT.
+ * resolveWithinProject only proves the canonical target stays inside the project
+ * and returns the LEXICAL path; it deliberately allows an IN-project symlink. But
+ * a destructive AUTO action (overwrite / delete of an existing file) authorizes
+ * itself by matching that lexical path against an owned-namespace glob — and an
+ * in-project symlink (e.g. `.claude/skills -> ../src`) makes the lexical owned
+ * path resolve to a DIFFERENT real file (`src/...`), so the glob match is NOT
+ * proof of ownership of the real destination. Such actions must refuse a path
+ * that traverses a symlink, so lexical path == real destination (CWE-59/CWE-61).
+ *
+ * Existence-tolerant: a not-yet-created tail returns false (nothing below a
+ * missing entry can be a symlink) — callers gate this only for actions on an
+ * EXISTING target, where every component exists.
+ */
+export async function pathTraversesSymlink(cwd: string, relPath: string): Promise<boolean> {
+  assertSafeRelativePath(relPath);
+  let base = await realpath(cwd);
+  for (const seg of relPath.split("/").filter((s) => s.length > 0 && s !== ".")) {
+    const candidate = join(base, seg);
+    let st: import("node:fs").Stats;
+    try {
+      st = await lstat(candidate);
+    } catch {
+      return false; // missing component → nothing below it can be a symlink
+    }
+    if (st.isSymbolicLink()) return true;
+    base = candidate;
+  }
+  return false;
+}
+
+/**
  * Resolves `relPath` against `cwd` and returns the joined absolute path, but
  * throws `PATH_OUTSIDE_PROJECT` unless it resolves to a location WITHIN
  * `realpath(cwd)`. This is a WRITE-safe containment preflight: a not-yet-created

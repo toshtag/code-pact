@@ -15,6 +15,7 @@ import {
   assertSafeRelativePath,
   classifyFileState,
   decideAction,
+  pathTraversesSymlink,
   resolveWithinProject,
   type DesiredFileState,
   type FileAction,
@@ -144,13 +145,17 @@ async function loadModelProfiles(cwd: string): Promise<ModelProfile[]> {
   for (const entry of entries.sort()) {
     if (!entry.endsWith(".yaml")) continue;
     try {
-      // readFile inside the try: an UNREADABLE entry (e.g. a directory named
-      // `*.yaml` → EISDIR) is skipped like a malformed one, not thrown uncoded
-      // (which would crash the command with exit 3).
-      const raw = await readFile(join(dir, entry), "utf8");
+      // Contain the read so a symlinked model-profiles dir / file can't read out
+      // of the project; all inside the try so an unreadable / out-of-project /
+      // malformed entry is skipped, never an uncoded errno crash (exit 3).
+      const abs = await resolveWithinProject(
+        cwd,
+        [".code-pact", "model-profiles", entry].join("/"),
+      );
+      const raw = await readFile(abs, "utf8");
       profiles.push(ModelProfile.parse(parseYaml(raw) as unknown));
     } catch {
-      // skip unreadable / malformed
+      // skip unreadable / malformed / out-of-project
     }
   }
   return profiles;
@@ -335,16 +340,15 @@ export async function runAdapterUpgrade(
       acceptModified,
     });
 
-    // SECURITY (CWE-345/CWE-22): same gate as `adapter install` — a content
+    // SECURITY (CWE-345/CWE-22/CWE-59): same gate as `adapter install`. A content
     // OVERWRITE of an existing divergent file (`update` / `replace_unmanaged`) is
-    // authorized ONLY when the GENERATED path falls inside the trusted static
-    // overwrite namespace. A forged manifest + a profile redirecting a path field
-    // at an arbitrary in-project file cannot make `--write` overwrite it. Applied
-    // in BOTH modes so `--check` previews the refusal that `--write` would take.
+    // authorized ONLY when BOTH: the GENERATED path is in the trusted static owned
+    // set, AND the path traverses no symlink (an in-project symlink would make the
+    // owned-looking lexical path resolve to a different real file). Applied in
+    // BOTH modes so `--check` previews the refusal that `--write` would take.
     if (action === "update" || action === "replace_unmanaged") {
-      const overwriteGlobs =
-        descriptor.overwriteOwnedPathGlobs ?? descriptor.ownedPathGlobs;
-      if (!overwriteGlobs.some((g) => matchGlob(g, desired.path))) {
+      const owned = descriptor.ownedPathGlobs.some((g) => matchGlob(g, desired.path));
+      if (!owned || (await pathTraversesSymlink(cwd, desired.path))) {
         action = "refuse";
       }
     }
@@ -438,7 +442,17 @@ export async function runAdapterUpgrade(
     // remove it deliberately. An owned managed-MODIFIED orphan is still refused
     // so a local edit is never destroyed.
     const isOwned = descriptor.ownedPathGlobs.some((g) => matchGlob(g, relPath));
-    const action: FileAction = !isOwned ? "warn" : isClean ? "prune" : "refuse";
+    // SECURITY (CWE-59/CWE-61): even an OWNED orphan path must not be auto-rm'd if
+    // it traverses a symlink. `.claude/skills -> ../src` makes the owned-looking
+    // `.claude/skills/context.md` resolve to `src/context.md`, so an unconditional
+    // `rm` would delete an out-of-namespace real file. A symlinked owned path is
+    // refused (kept + surfaced), never auto-pruned.
+    const traversesSymlink = await pathTraversesSymlink(cwd, relPath);
+    const action: FileAction = !isOwned
+      ? "warn"
+      : traversesSymlink || !isClean
+        ? "refuse"
+        : "prune";
 
     plan.push({
       path: absPath,

@@ -12,6 +12,7 @@ import {
   assertSafeRelativePath,
   classifyFileState,
   decideAction,
+  pathTraversesSymlink,
   resolveWithinProject,
   type FileAction,
 } from "../core/adapters/file-state.ts";
@@ -137,13 +138,19 @@ async function loadModelProfiles(cwd: string): Promise<ModelProfile[]> {
   for (const entry of entries.sort()) {
     if (!entry.endsWith(".yaml")) continue;
     try {
-      // readFile inside the try: an UNREADABLE entry (e.g. a directory named
-      // `*.yaml` → EISDIR, planted by a hostile repo) is skipped like a malformed
-      // one rather than throwing an uncoded errno that crashes the command (exit 3).
-      const raw = await readFile(join(dir, entry), "utf8");
+      // Contain the read (resolveWithinProject): a symlinked `.code-pact/model-
+      // profiles` (or a per-file symlink) cannot read an out-of-project file.
+      // All inside the try so an UNREADABLE entry (a `*.yaml` directory → EISDIR,
+      // or an escaping symlink) is skipped like a malformed one, never an uncoded
+      // errno that crashes the command (exit 3). Best-effort source.
+      const abs = await resolveWithinProject(
+        cwd,
+        [".code-pact", "model-profiles", entry].join("/"),
+      );
+      const raw = await readFile(abs, "utf8");
       profiles.push(ModelProfile.parse(parseYaml(raw) as unknown));
     } catch {
-      // skip unreadable / malformed profiles
+      // skip unreadable / malformed / out-of-project profiles
     }
   }
   return profiles;
@@ -324,20 +331,20 @@ export async function runAdapterInstall(
       acceptModified: false,
     });
 
-    // SECURITY (CWE-345/CWE-22): a content OVERWRITE of an EXISTING, divergent
-    // file (`update` = managed-clean × stale; `replace_unmanaged` = unmanaged ×
-    // stale with --force) must NOT be authorized by the project-supplied manifest
-    // hash or the project-supplied profile path alone — both are attacker-
-    // controlled. A forged manifest (hash == the victim file's real hash) plus a
-    // profile whose `instruction_filename`/`skill_dir` points at an arbitrary
-    // in-project file (e.g. `package.json`) would otherwise overwrite that file
-    // with generator output on a plain `adapter install`. Only re-render a path
-    // inside the TRUSTED static overwrite namespace; anything else is refused
-    // (surfaced, not written).
+    // SECURITY (CWE-345/CWE-22/CWE-59): a content OVERWRITE of an EXISTING,
+    // divergent file (`update` = managed-clean × stale; `replace_unmanaged` =
+    // unmanaged × stale with --force) must NOT be authorized by the project-
+    // supplied manifest hash or profile path alone — both are attacker-controlled.
+    // Refuse unless BOTH hold:
+    //   1. the GENERATED path is in the TRUSTED static owned set (a profile
+    //      redirecting instruction_filename/skill_dir at e.g. package.json, or a
+    //      shared `.claude/skills/<user>.md`, is outside it), AND
+    //   2. the path traverses NO symlink — else an in-project symlink (e.g.
+    //      `.claude/skills -> ../src`) makes the owned-looking lexical path
+    //      resolve to a DIFFERENT real file, so the glob match is not ownership.
     if (action === "update" || action === "replace_unmanaged") {
-      const overwriteGlobs =
-        descriptor.overwriteOwnedPathGlobs ?? descriptor.ownedPathGlobs;
-      if (!overwriteGlobs.some((g) => matchGlob(g, desired.path))) {
+      const owned = descriptor.ownedPathGlobs.some((g) => matchGlob(g, desired.path));
+      if (!owned || (await pathTraversesSymlink(cwd, desired.path))) {
         action = "refuse";
       }
     }
