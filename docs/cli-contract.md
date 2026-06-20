@@ -365,6 +365,7 @@ Emitted by `adapter doctor` and (manifest-aware) global `doctor`. See the `adapt
 | `ADAPTER_SCHEMA_DRIFT` | warning | Manifest's `adapter_schema_version` is older than the module's declared version |
 | `ADAPTER_PROFILE_DRIFT` | warning | Profile fields recorded in `profile_fingerprint` have changed since install |
 | `ADAPTER_FILE_MISSING` | error | A file listed in the manifest is missing from disk |
+| `ADAPTER_FILE_PATH_UNSAFE` | error | A file listed in the manifest resolves through an unsafe / non-contained path (for example, a symlink escape). `adapter doctor` / global `doctor` do not read the target; fix the path or regenerate the adapter output. |
 | `ADAPTER_FILE_DRIFT` | warning | A managed file was locally modified AND the generator output also moved on |
 | `ADAPTER_DESIRED_STALE` | warning | A managed file is unchanged locally but the generator now produces different content |
 | `ADAPTER_UNMANAGED_FILE` | warning | A file under `ownedPathGlobs` exists on disk but is not in the manifest |
@@ -1404,6 +1405,7 @@ issues additionally carry `path` (absolute).
 | `ADAPTER_SCHEMA_DRIFT` | warning | Manifest's `adapter_schema_version` is older than the adapter module's declared value. |
 | `ADAPTER_PROFILE_DRIFT` | warning | Agent profile fields recorded in `profile_fingerprint` (instruction_filename, context_dir, optional skill_dir / hook_dir / resolved_model) have changed since install. |
 | `ADAPTER_FILE_MISSING` | error | A file listed in the manifest is missing from disk (`managed-missing` × `absent`). |
+| `ADAPTER_FILE_PATH_UNSAFE` | error | A file listed in the manifest cannot be proven project-contained (for example, it resolves through an external symlink). The file is not read, so external target contents do not appear in human or JSON output. |
 | `ADAPTER_FILE_DRIFT` | warning | A managed file was locally modified AND the generator output also moved on (`managed-modified` × `stale`). Requires `--accept-modified` on `upgrade --write`. |
 | `ADAPTER_DESIRED_STALE` | warning | A managed file is unchanged locally but the generator now produces different content (`managed-clean` × `stale`). Safe to apply with `upgrade --write` (no `--accept-modified` required). |
 | `ADAPTER_UNMANAGED_FILE` | warning | A file under one of the adapter's `ownedPathGlobs` exists on disk but is not in the manifest. Narrow scope — does NOT fire for arbitrary user-created files such as `.claude/skills/custom.md`. |

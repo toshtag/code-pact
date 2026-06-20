@@ -1,4 +1,4 @@
-import { readFile, readdir } from "node:fs/promises";
+import { readFile, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { AgentProfile } from "../core/schemas/agent-profile.ts";
@@ -66,13 +66,14 @@ export type AdapterDoctorOptions = {
 // schema-invalid) is surfaced as CONFIG_ERROR rather than masked as "no
 // project", so `adapter doctor` doesn't report a clean bill on a broken config.
 async function loadProjectSafe(cwd: string): Promise<Project | null> {
-  const path = join(cwd, ".code-pact", "project.yaml");
+  let path: string;
   let raw: string;
   try {
+    path = await resolveWithinProject(cwd, ".code-pact/project.yaml");
     raw = await readFile(path, "utf8");
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
-    const e = new Error(`Cannot read ${path}.`);
+    const e = new Error(`Cannot read .code-pact/project.yaml.`);
     (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
     throw e;
   }
@@ -127,18 +128,61 @@ async function loadModelProfilesSafe(cwd: string): Promise<ModelProfile[]> {
   return profiles;
 }
 
-async function readFileMaybe(absPath: string): Promise<string | null> {
+type ProjectReadResult =
+  | { kind: "content"; absPath: string; content: string }
+  | { kind: "missing"; absPath: string }
+  | { kind: "unsafe"; absPath: string; message: string };
+
+async function readProjectFileForDoctor(
+  cwd: string,
+  relPath: string,
+): Promise<ProjectReadResult> {
+  const absPath = join(cwd, relPath);
+  let containedPath: string;
   try {
-    return await readFile(absPath, "utf8");
-  } catch {
+    containedPath = await resolveWithinProject(cwd, relPath);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      return { kind: "missing", absPath };
+    }
+    return { kind: "unsafe", absPath, message: (err as Error).message };
+  }
+
+  try {
+    const s = await stat(containedPath);
+    if (!s.isFile()) return { kind: "missing", absPath };
+    return {
+      kind: "content",
+      absPath,
+      content: await readFile(containedPath, "utf8"),
+    };
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      return { kind: "missing", absPath };
+    }
     // Best-effort DIAGNOSTIC read: any failure degrades to null. ENOENT is a
     // missing file; EISDIR (a manifest-declared path that is actually a directory,
     // planted by a hostile repo), ENOTDIR, EACCES, etc. are likewise treated as
     // "not a readable managed file" — surfaced via the existing FILE_MISSING /
     // DRIFT advisories, never re-thrown as an uncoded errno that crashes doctor
     // (exit 3). doctor must report problems, not abort on them.
-    return null;
+    return { kind: "missing", absPath };
   }
+}
+
+function unsafeAdapterFileIssue(
+  agentName: SupportedAgent,
+  relPath: string,
+  absPath: string,
+  message: string,
+): AdapterDoctorIssue {
+  return {
+    code: "ADAPTER_FILE_PATH_UNSAFE",
+    severity: "error",
+    message: `Managed file "${relPath}" is not a safe project-contained path and was not read: ${message}`,
+    agent: agentName,
+    path: absPath,
+  };
 }
 
 function buildCurrentFingerprint(
@@ -394,8 +438,21 @@ export async function inspectAgent(
     const desiredByPath = new Map(desiredFiles.map((f) => [f.path, f]));
 
     for (const entry of manifest.files) {
-      const absPath = join(cwd, entry.path);
-      const diskContent = await readFileMaybe(absPath);
+      const diskRead = await readProjectFileForDoctor(cwd, entry.path);
+      const absPath = diskRead.absPath;
+      if (diskRead.kind === "unsafe") {
+        issues.push(
+          unsafeAdapterFileIssue(
+            agentName as SupportedAgent,
+            entry.path,
+            absPath,
+            diskRead.message,
+          ),
+        );
+        continue;
+      }
+      const diskContent =
+        diskRead.kind === "content" ? diskRead.content : null;
       const diskHash =
         diskContent === null ? null : computeContentHash(diskContent);
       const desired = desiredByPath.get(entry.path);
@@ -506,8 +563,8 @@ async function listOwnedCandidates(
   glob: string,
 ): Promise<string[]> {
   if (!glob.includes("*")) {
-    const exists = await readFileMaybe(join(cwd, glob));
-    return exists !== null ? [glob] : [];
+    const exists = await readProjectFileForDoctor(cwd, glob);
+    return exists.kind === "content" ? [glob] : [];
   }
   const slash = glob.lastIndexOf("/");
   const dir = slash >= 0 ? glob.slice(0, slash) : ".";

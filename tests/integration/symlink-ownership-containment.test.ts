@@ -421,6 +421,80 @@ tasks: []
     expect(res.stdout).not.toContain("EXTERNAL-MODEL");
   });
 
+  it("global --help does not read locale from an external project.yaml symlink", async () => {
+    const p = await createTempProject({ init: false, prefix: "code-pact-help-locale-external-symlink-" });
+    cleanups.push(p.cleanup);
+    const outside = await outsideTree("code-pact-help-locale-outside-");
+    await writeFile(join(outside.dir, "project.yaml"), "locale: ja-JP\n", "utf8");
+    await mkdir(join(p.dir, ".code-pact"), { recursive: true });
+    await symlink(join(outside.dir, "project.yaml"), join(p.dir, ".code-pact", "project.yaml"));
+
+    const res = p.run(["--help"], { LANG: "C", CODE_PACT_LOCALE: "" });
+
+    expect(res.code).toBe(0);
+    expect(res.stdout).toContain("Usage:");
+    expect(res.stdout).not.toContain("使い方");
+  });
+
+  it("plan lint does not leak a symlinked-outside protected-paths rule", async () => {
+    const p = await projectWithTask("code-pact-protected-paths-external-symlink-");
+    const outside = await outsideTree("code-pact-protected-paths-outside-");
+    await writeFile(
+      join(outside.dir, "protected-paths.md"),
+      "OUTSIDE_SECRET_PROTECTED_PATTERN/**\n",
+      "utf8",
+    );
+    await mkdir(join(p.dir, "design", "rules"), { recursive: true });
+    await symlink(
+      join(outside.dir, "protected-paths.md"),
+      join(p.dir, "design", "rules", "protected-paths.md"),
+    );
+    const phasePath = join(p.dir, "design", "phases", "P1-foundation.yaml");
+    const doc = parseYaml(await readFile(phasePath, "utf8")) as Record<string, unknown>;
+    doc.tasks = (doc.tasks as Array<Record<string, unknown>>).map((task) => ({
+      ...task,
+      writes: ["**"],
+    }));
+    await writeFile(phasePath, stringifyYaml(doc), "utf8");
+
+    const json = p.run(["plan", "lint", "--strict", "--json"]);
+    expect(json.code).toBe(1);
+    expectJsonErr(json, "PLAN_LINT_FAILED");
+    expect(json.stdout).toContain("TASK_WRITES_PROTECTED_PATH");
+    expect(`${json.stdout}\n${json.stderr}`).not.toContain("OUTSIDE_SECRET_PROTECTED_PATTERN");
+
+    const human = p.run(["plan", "lint", "--strict"]);
+    expect(human.code).toBe(1);
+    expect(`${human.stdout}\n${human.stderr}`).toContain("TASK_WRITES_PROTECTED_PATH");
+    expect(`${human.stdout}\n${human.stderr}`).not.toContain("OUTSIDE_SECRET_PROTECTED_PATTERN");
+  });
+
+  it("adapter doctor and validate report unsafe manifest file symlinks without reading targets", async () => {
+    const p = await createTempProject({ prefix: "code-pact-adapter-doctor-manifest-file-symlink-" });
+    cleanups.push(p.cleanup);
+    const install = p.run(["adapter", "install", "claude-code", "--json"]);
+    expect(install.code).toBe(0);
+
+    const outside = await outsideTree("code-pact-adapter-doctor-manifest-file-outside-");
+    await writeFile(
+      join(outside.dir, "CLAUDE.md"),
+      "OUTSIDE_ADAPTER_DOCTOR_SECRET_MARKER\n",
+      "utf8",
+    );
+    await rm(join(p.dir, "CLAUDE.md"), { force: true });
+    await symlink(join(outside.dir, "CLAUDE.md"), join(p.dir, "CLAUDE.md"));
+
+    const doctor = p.run(["adapter", "doctor", "--agent", "claude-code", "--json"]);
+    expect(doctor.code).toBe(1);
+    expect(doctor.stdout).toContain("ADAPTER_FILE_PATH_UNSAFE");
+    expect(`${doctor.stdout}\n${doctor.stderr}`).not.toContain("OUTSIDE_ADAPTER_DOCTOR_SECRET_MARKER");
+
+    const validate = p.run(["validate", "--json"]);
+    expect(validate.code).toBe(1);
+    expect(validate.stdout).toContain("ADAPTER_FILE_PATH_UNSAFE");
+    expect(`${validate.stdout}\n${validate.stderr}`).not.toContain("OUTSIDE_ADAPTER_DOCTOR_SECRET_MARKER");
+  });
+
   it("plan lint --strict does not satisfy acceptance_refs through an external symlink", async () => {
     const p = await projectWithTask("code-pact-plan-lint-acceptance-external-symlink-");
     const outside = await outsideTree("code-pact-plan-lint-acceptance-outside-");
