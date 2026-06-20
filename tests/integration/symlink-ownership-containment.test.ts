@@ -345,6 +345,104 @@ describe("owned symlink containment", () => {
     expect(await snapshotTree(join(p.dir, "src"))).toEqual(before);
   });
 
+  it("adapter upgrade --check reports CONFIG_ERROR when a desired path is a directory", async () => {
+    const p = await createTempProject({ prefix: "code-pact-adapter-check-desired-dir-" });
+    cleanups.push(p.cleanup);
+    const install = p.run(["adapter", "install", "claude-code", "--json"]);
+    expect(install.code).toBe(0);
+    await rm(join(p.dir, "CLAUDE.md"), { force: true });
+    await mkdir(join(p.dir, "CLAUDE.md"));
+
+    const res = p.run(["adapter", "upgrade", "claude-code", "--check", "--json"]);
+
+    expectConfigRefusal(res);
+    expect(res.stderr).not.toContain("internal error");
+  });
+
+  it("validate --strict refuses an externally symlinked phase without reading its marker", async () => {
+    const p = await projectWithTask("code-pact-validate-phase-external-symlink-");
+    const outside = await outsideTree("code-pact-validate-phase-outside-");
+    await writeFile(
+      join(outside.dir, "phase.yaml"),
+      `id: EXTERNAL_MARKER_PHASE
+name: External marker phase
+weight: 10
+confidence: medium
+risk: low
+status: planned
+objective: This external marker must never enter validate output
+definition_of_done:
+  - done
+verification:
+  commands:
+    - "true"
+tasks: []
+`,
+      "utf8",
+    );
+    await rm(join(p.dir, "design", "phases", "P1-foundation.yaml"), { force: true });
+    await symlink(join(outside.dir, "phase.yaml"), join(p.dir, "design", "phases", "P1-foundation.yaml"));
+
+    const res = p.run(["validate", "--strict", "--json"]);
+
+    expect(res.code).toBe(1);
+    expectJsonErr(res, "VALIDATE_FAILED");
+    expect(res.stdout).toContain("PATH_OUTSIDE_PROJECT");
+    expect(res.stdout).not.toContain("EXTERNAL_MARKER_PHASE");
+  });
+
+  it("doctor refuses an external context directory without leaking filenames", async () => {
+    const p = await projectWithTask("code-pact-doctor-context-external-symlink-");
+    const outside = await outsideTree("code-pact-doctor-context-outside-");
+    await writeFile(join(outside.dir, "EXTERNAL-STALE-CONTEXT.md"), "secret context\n", "utf8");
+    await rm(join(p.dir, ".context", "claude-code"), { recursive: true, force: true });
+    await mkdir(join(p.dir, ".context"), { recursive: true });
+    await symlink(outside.dir, join(p.dir, ".context", "claude-code"));
+
+    const res = p.run(["doctor", "--json"]);
+
+    expect(res.code).toBe(1);
+    expect(res.stdout).toContain("PATH_OUTSIDE_PROJECT");
+    expect(res.stdout).not.toContain("EXTERNAL-STALE-CONTEXT");
+  });
+
+  it("doctor refuses an external model-profile directory without listing entries", async () => {
+    const p = await createTempProject({ prefix: "code-pact-doctor-model-profiles-external-symlink-" });
+    cleanups.push(p.cleanup);
+    const outside = await outsideTree("code-pact-doctor-model-profiles-outside-");
+    await writeFile(join(outside.dir, "EXTERNAL-MODEL.yaml"), "tier: small\n", "utf8");
+    await rm(join(p.dir, ".code-pact", "model-profiles"), { recursive: true, force: true });
+    await symlink(outside.dir, join(p.dir, ".code-pact", "model-profiles"));
+
+    const res = p.run(["doctor", "--json"]);
+
+    expect(res.code).toBe(1);
+    expect(res.stdout).toContain("PATH_OUTSIDE_PROJECT");
+    expect(res.stdout).not.toContain("EXTERNAL-MODEL");
+  });
+
+  it("plan lint --strict does not satisfy acceptance_refs through an external symlink", async () => {
+    const p = await projectWithTask("code-pact-plan-lint-acceptance-external-symlink-");
+    const outside = await outsideTree("code-pact-plan-lint-acceptance-outside-");
+    await writeFile(join(outside.dir, "acceptance.md"), "external acceptance marker\n", "utf8");
+    await mkdir(join(p.dir, "docs"), { recursive: true });
+    await symlink(join(outside.dir, "acceptance.md"), join(p.dir, "docs", "acceptance.md"));
+    const phasePath = join(p.dir, "design", "phases", "P1-foundation.yaml");
+    const doc = parseYaml(await readFile(phasePath, "utf8")) as Record<string, unknown>;
+    doc.tasks = (doc.tasks as Array<Record<string, unknown>>).map((task) => ({
+      ...task,
+      acceptance_refs: ["docs/acceptance.md"],
+    }));
+    await writeFile(phasePath, stringifyYaml(doc), "utf8");
+
+    const res = p.run(["plan", "lint", "--strict", "--json"]);
+
+    expect(res.code).toBe(1);
+    expectJsonErr(res, "PLAN_LINT_FAILED");
+    expect(res.stdout).toContain("TASK_ACCEPTANCE_REF_NOT_FOUND");
+    expect(res.stdout).not.toContain("external acceptance marker");
+  });
+
   it("phase archive --write refuses a symlinked archive root before deleting live design", async () => {
     const p = await projectReadyForArchive("code-pact-archive-root-symlink-");
     const outside = await outsideTree("code-pact-archive-root-outside-");

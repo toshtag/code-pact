@@ -975,6 +975,81 @@ describe("adapter upgrade — orphan handling", () => {
   });
 });
 
+describe("adapter install — owned control-plane write paths", () => {
+  it("refuses an in-project symlinked manifest namespace before generated files or model pin", async () => {
+    await mkdir(join(dir, "src"), { recursive: true });
+    await rm(join(dir, ".code-pact", "adapters"), { recursive: true, force: true });
+    await symlink("../src", join(dir, ".code-pact", "adapters"));
+    const profilePath = join(dir, ".code-pact", "agent-profiles", "claude-code.yaml");
+    const profileBefore = await readFile(profilePath, "utf8");
+
+    await expect(
+      runAdapterInstall({
+        cwd: dir,
+        agentName: "claude-code",
+        force: false,
+        locale: "en-US",
+        modelVersion: "sonnet-4.6",
+      }),
+    ).rejects.toMatchObject({ code: "ADAPTER_MANIFEST_INVALID" });
+
+    expect(await readFile(profilePath, "utf8")).toBe(profileBefore);
+    expect(existsSync(join(dir, "src", "claude-code.manifest.yaml"))).toBe(false);
+    expect(existsSync(join(dir, "CLAUDE.md"))).toBe(false);
+  });
+
+  it("refuses --model pin through an in-project symlinked agent profile namespace before generated files", async () => {
+    const profilePath = join(dir, ".code-pact", "agent-profiles", "claude-code.yaml");
+    const profileBefore = await readFile(profilePath, "utf8");
+    await mkdir(join(dir, "alternate"), { recursive: true });
+    await writeFile(join(dir, "alternate", "claude-code.yaml"), profileBefore, "utf8");
+    await rm(join(dir, ".code-pact", "agent-profiles"), { recursive: true, force: true });
+    await symlink("../alternate", join(dir, ".code-pact", "agent-profiles"));
+
+    await expect(
+      runAdapterInstall({
+        cwd: dir,
+        agentName: "claude-code",
+        force: false,
+        locale: "en-US",
+        modelVersion: "sonnet-4.6",
+      }),
+    ).rejects.toMatchObject({ code: "CONFIG_ERROR" });
+
+    expect(await readFile(join(dir, "alternate", "claude-code.yaml"), "utf8")).toBe(profileBefore);
+    expect(existsSync(manifestPath(dir, "claude-code"))).toBe(false);
+    expect(existsSync(join(dir, "CLAUDE.md"))).toBe(false);
+  });
+});
+
+describe("adapter upgrade --check — typed preflight", () => {
+  it("throws CONFIG_ERROR when a manifest-tracked orphan path is a directory", async () => {
+    await freshInstall();
+    const orphan = ".claude/skills/old-orphan.md";
+    await mkdir(join(dir, orphan), { recursive: true });
+    const m = await readManifestMut();
+    m.files.push({
+      path: orphan,
+      sha256: "0".repeat(64),
+      managed: true,
+      role: "skill",
+    });
+    await writeManifest(dir, "claude-code", m);
+
+    await expect(
+      runAdapterUpgrade({
+        cwd: dir,
+        agentName: "claude-code",
+        mode: "check",
+        force: false,
+        acceptModified: false,
+        locale: "en-US",
+      }),
+    ).rejects.toMatchObject({ code: "CONFIG_ERROR" });
+    expect(existsSync(join(dir, orphan))).toBe(true);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // detectAgentModelMapDrift — backs the `adapter upgrade --write` remaining-
 // advisory hint. `adapter upgrade` never rewrites model_map, so a stale pin
