@@ -1,4 +1,3 @@
-import { join } from "node:path";
 import type { PhaseEntry } from "../state.ts";
 import type { PlanIssue } from "../shared.ts";
 import { assertSafeRelativePath } from "../../path-safety.ts";
@@ -8,7 +7,7 @@ import {
   validateGlobSyntax,
   walkAndMatch,
 } from "../../glob.ts";
-import { phaseFilePresence } from "./fs.ts";
+import { projectPathPresence } from "./fs.ts";
 import { readPrunedLedger, normalizeRelPath } from "../../decisions/pruned-ledger.ts";
 import {
   decisionRecordSoftensMissingRef,
@@ -132,7 +131,7 @@ export async function detectTaskDecisionRefNotFound(
         // `fileExists` boolean (which collapses any access failure to "missing"
         // and would re-open the live-wins-inaccessible hole). `present` → no issue;
         // `inaccessible` keeps the existing severity, never record-softened.
-        const presence = await phaseFilePresence(join(cwd, p));
+        const presence = await projectPathPresence(cwd, p);
         if (presence === "present") continue;
         const historical = refIsHistorical(task);
         if (presence === "absent") {
@@ -456,7 +455,7 @@ export async function detectTaskAcceptanceRefNotFound(
         // Three-way presence (step 5): record consultation is gated on a TRUE absence
         // (ENOENT). `present` → no issue; `inaccessible` keeps the existing severity
         // and never consults a record (never the old `fileExists` boolean).
-        const presence = await phaseFilePresence(join(cwd, p));
+        const presence = await projectPathPresence(cwd, p);
         if (presence === "present") continue;
         const historical = refIsHistorical(task);
         // Done task → advisory for ANY target (existing baseline, unchanged).

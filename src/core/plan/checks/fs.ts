@@ -1,4 +1,6 @@
 import { access } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { resolveWithinProject, resolveWithinProjectSync } from "../../path-safety.ts";
 
 /**
  * True when `p` exists and is accessible. Shared internal helper for the
@@ -33,4 +35,43 @@ export async function phaseFilePresence(
   } catch (err) {
     return (err as NodeJS.ErrnoException).code === "ENOENT" ? "absent" : "inaccessible";
   }
+}
+
+export type ProjectPathPresence = "present" | "absent" | "inaccessible";
+
+/**
+ * Three-way presence for project-relative references. Unlike a lexical
+ * `access(join(cwd, relPath))`, this refuses external or dangling symlink
+ * traversal before probing existence, so refs cannot be satisfied by files
+ * outside the project root.
+ */
+export async function projectPathPresence(
+  cwd: string,
+  relPath: string,
+): Promise<ProjectPathPresence> {
+  let abs: string;
+  try {
+    abs = await resolveWithinProject(cwd, relPath);
+  } catch {
+    return "inaccessible";
+  }
+  try {
+    await access(abs);
+    return "present";
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === "ENOENT" ? "absent" : "inaccessible";
+  }
+}
+
+export function projectPathPresenceSync(
+  cwd: string,
+  relPath: string,
+): ProjectPathPresence {
+  let abs: string;
+  try {
+    abs = resolveWithinProjectSync(cwd, relPath);
+  } catch {
+    return "inaccessible";
+  }
+  return existsSync(abs) ? "present" : "absent";
 }
