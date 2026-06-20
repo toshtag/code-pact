@@ -13,7 +13,6 @@
 // wrap them in a call-site catch to keep their optional degrade-to-[]/skip.
 
 import { readFile, readdir } from "node:fs/promises";
-import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { Phase } from "../schemas/phase.ts";
 import { AgentProfile } from "../schemas/agent-profile.ts";
@@ -30,6 +29,7 @@ import { validateGlobSyntax, walkAndMatch } from "../glob.ts";
 import { assertSafePlanId } from "../schemas/plan-id.ts";
 import { readProjectTextOrNull } from "../project-read.ts";
 import { resolveAgentProfilePath } from "../agent-profile-path.ts";
+import { resolveOwnedProjectPath } from "../path-safety.ts";
 
 // The project-contained read guard (`..`/absolute/symlink-escape → null) lives
 // in the shared `core/project-read.ts` (`readProjectTextOrNull`) so the planning
@@ -67,9 +67,9 @@ export async function loadRules(
   taskType: string,
   includeAll = false,
 ): Promise<RuleDoc[]> {
-  const rulesDir = join(cwd, "design", "rules");
   let entries: string[];
   try {
+    const rulesDir = await resolveOwnedProjectPath(cwd, "design/rules");
     entries = await readdir(rulesDir);
   } catch {
     return [];

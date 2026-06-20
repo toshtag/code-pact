@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtemp, rm, readFile, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, readFile, mkdir, writeFile, symlink } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runPack } from "../../../src/commands/pack.ts";
@@ -333,6 +333,55 @@ describe("runPack — v0.5.1 context quality", () => {
     await writePhaseYaml([{ id: "PQ-T1", ambiguity: "high" }]);
     const result = await runPack({ cwd: dir, phaseId: "PQ", taskId: "PQ-T1", agentName: "claude-code", outputDir: dir });
     expect(result.includedConstitution).toBe(true);
+  });
+
+  it("does not include a project-local secret symlinked as constitution", async () => {
+    await writePhaseYaml([{ id: "PQ-T1", context_size: "large" }]);
+    await writeFile(join(dir, ".env"), "PACK_CONSTITUTION_SECRET\n", "utf8");
+    await rm(join(dir, "design", "constitution.md"));
+    await symlink("../.env", join(dir, "design", "constitution.md"));
+
+    const result = await runPack({ cwd: dir, phaseId: "PQ", taskId: "PQ-T1", agentName: "claude-code", outputDir: dir });
+    const content = await readFile(join(dir, "PQ-T1.md"), "utf8");
+
+    expect(result.includedConstitution).toBe(false);
+    expect(content).not.toContain("PACK_CONSTITUTION_SECRET");
+  });
+
+  it("does not list or read a symlinked rules directory", async () => {
+    await writePhaseYaml([{ id: "PQ-T1", write_surface: "high" }]);
+    await mkdir(join(dir, ".local"), { recursive: true });
+    await writeFile(
+      join(dir, ".local", "SECRET_RULE_FILENAME.md"),
+      "# Rule\n\nPACK_RULE_SECRET\n",
+      "utf8",
+    );
+    await rm(join(dir, "design", "rules"), { recursive: true, force: true });
+    await symlink("../.local", join(dir, "design", "rules"));
+
+    const result = await runPack({ cwd: dir, phaseId: "PQ", taskId: "PQ-T1", agentName: "claude-code", outputDir: dir });
+    const content = await readFile(join(dir, "PQ-T1.md"), "utf8");
+
+    expect(result.includedRules).toEqual([]);
+    expect(content).not.toContain("SECRET_RULE_FILENAME");
+    expect(content).not.toContain("PACK_RULE_SECRET");
+  });
+
+  it("does not include a project-local secret symlinked as a decision file", async () => {
+    await writePhaseYaml([{ id: "PQ-T1", context_size: "large" }]);
+    await mkdir(join(dir, ".local"), { recursive: true });
+    await writeFile(join(dir, ".local", "private.md"), "PACK_DECISION_SECRET\n", "utf8");
+    await rm(join(dir, "design", "decisions", "PQ-T1-decision.md"));
+    await symlink(
+      "../../.local/private.md",
+      join(dir, "design", "decisions", "PQ-T1-decision.md"),
+    );
+
+    const result = await runPack({ cwd: dir, phaseId: "PQ", taskId: "PQ-T1", agentName: "claude-code", outputDir: dir });
+    const content = await readFile(join(dir, "PQ-T1.md"), "utf8");
+
+    expect(result.includedDecisions).not.toContain("PQ-T1-decision.md");
+    expect(content).not.toContain("PACK_DECISION_SECRET");
   });
 
   it("ambiguity: high with done events in phase shows completed tasks section in output", async () => {

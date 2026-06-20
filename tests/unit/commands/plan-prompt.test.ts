@@ -258,6 +258,31 @@ describe("runPlanPrompt", () => {
       await rm(outside, { recursive: true, force: true });
     }
   });
+
+  it("does NOT leak a project-local private file symlinked as design/brief.md", async () => {
+    await mkdir(join(tmpDir, ".local"), { recursive: true });
+    await writeFile(
+      join(tmpDir, ".local", "private.md"),
+      "PROJECT_LOCAL_BRIEF_SECRET\n",
+      "utf8",
+    );
+    await symlink("../.local/private.md", join(tmpDir, "design", "brief.md"));
+
+    const result = await runPlanPrompt({ cwd: tmpDir, locale: "en-US", clipboard: false });
+
+    expect(result.prompt).not.toContain("PROJECT_LOCAL_BRIEF_SECRET");
+    expect(result.hasBrief).toBe(false);
+  });
+
+  it("does NOT leak a project-local env file symlinked as design/constitution.md", async () => {
+    await writeFile(join(tmpDir, ".env"), "PROJECT_LOCAL_CONSTITUTION_SECRET\n", "utf8");
+    await symlink("../.env", join(tmpDir, "design", "constitution.md"));
+
+    const result = await runPlanPrompt({ cwd: tmpDir, locale: "en-US", clipboard: false });
+
+    expect(result.prompt).not.toContain("PROJECT_LOCAL_CONSTITUTION_SECRET");
+    expect(result.hasConstitution).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------

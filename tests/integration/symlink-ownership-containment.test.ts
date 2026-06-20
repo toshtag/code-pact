@@ -469,6 +469,77 @@ tasks: []
     expect(`${human.stdout}\n${human.stderr}`).not.toContain("OUTSIDE_SECRET_PROTECTED_PATTERN");
   });
 
+  it("plan prompt does not leak a project-local private file through design/brief.md", async () => {
+    const p = await createTempProject({ prefix: "code-pact-prompt-local-brief-symlink-" });
+    cleanups.push(p.cleanup);
+    await mkdir(join(p.dir, ".local"), { recursive: true });
+    await writeFile(
+      join(p.dir, ".local", "private.md"),
+      "PROJECT_LOCAL_PROMPT_SECRET_MARKER\n",
+      "utf8",
+    );
+    await rm(join(p.dir, "design", "brief.md"), { force: true });
+    await symlink("../.local/private.md", join(p.dir, "design", "brief.md"));
+
+    const res = p.run(["plan", "prompt", "--json"]);
+
+    expect(res.code).toBe(0);
+    expect(`${res.stdout}\n${res.stderr}`).not.toContain(
+      "PROJECT_LOCAL_PROMPT_SECRET_MARKER",
+    );
+  });
+
+  it("task context does not leak a project-local .env through design/constitution.md", async () => {
+    const p = await projectWithTask("code-pact-context-local-constitution-symlink-");
+    const phasePath = join(p.dir, "design", "phases", "P1-foundation.yaml");
+    const doc = parseYaml(await readFile(phasePath, "utf8")) as Record<string, unknown>;
+    doc.tasks = (doc.tasks as Array<Record<string, unknown>>).map((task) => ({
+      ...task,
+      context_size: "large",
+    }));
+    await writeFile(phasePath, stringifyYaml(doc), "utf8");
+    await writeFile(join(p.dir, ".env"), "PROJECT_LOCAL_CONTEXT_SECRET_MARKER\n", "utf8");
+    await rm(join(p.dir, "design", "constitution.md"), { force: true });
+    await symlink("../.env", join(p.dir, "design", "constitution.md"));
+
+    const res = p.run(["task", "context", "P1-T1", "--json"]);
+
+    expect(res.code).toBe(0);
+    expect(`${res.stdout}\n${res.stderr}`).not.toContain(
+      "PROJECT_LOCAL_CONTEXT_SECRET_MARKER",
+    );
+  });
+
+  it("plan lint does not leak a project-local secret through protected-paths.md", async () => {
+    const p = await projectWithTask("code-pact-protected-paths-local-symlink-");
+    await writeFile(
+      join(p.dir, ".env"),
+      "API_TOKEN=PROJECT_LOCAL_LINT_SECRET_MARKER\n",
+      "utf8",
+    );
+    await mkdir(join(p.dir, "design", "rules"), { recursive: true });
+    await symlink(
+      "../../.env",
+      join(p.dir, "design", "rules", "protected-paths.md"),
+    );
+    const phasePath = join(p.dir, "design", "phases", "P1-foundation.yaml");
+    const doc = parseYaml(await readFile(phasePath, "utf8")) as Record<string, unknown>;
+    doc.tasks = (doc.tasks as Array<Record<string, unknown>>).map((task) => ({
+      ...task,
+      writes: ["**"],
+    }));
+    await writeFile(phasePath, stringifyYaml(doc), "utf8");
+
+    const res = p.run(["plan", "lint", "--strict", "--json"]);
+
+    expect(res.code).toBe(1);
+    expectJsonErr(res, "PLAN_LINT_FAILED");
+    expect(res.stdout).toContain("TASK_WRITES_PROTECTED_PATH");
+    expect(`${res.stdout}\n${res.stderr}`).not.toContain(
+      "PROJECT_LOCAL_LINT_SECRET_MARKER",
+    );
+  });
+
   it("adapter doctor and validate report unsafe manifest file symlinks without reading targets", async () => {
     const p = await createTempProject({ prefix: "code-pact-adapter-doctor-manifest-file-symlink-" });
     cleanups.push(p.cleanup);

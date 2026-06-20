@@ -1,6 +1,6 @@
 import { readFile, readdir } from "node:fs/promises";
 import { parseFrontMatter } from "../pack/front-matter.ts";
-import { resolveWithinProject } from "../path-safety.ts";
+import { resolveOwnedProjectPath } from "../path-safety.ts";
 import { resolveRetiredDecisionGate } from "./decision-gate-archive.ts";
 
 /**
@@ -67,7 +67,7 @@ export async function readLiveDecisionDir(
   cwd: string,
 ): Promise<{ present: boolean; entries: string[] }> {
   try {
-    const entries = await readdir(await resolveWithinProject(cwd, "design/decisions"));
+    const entries = await readdir(await resolveOwnedProjectPath(cwd, "design/decisions"));
     return { present: true, entries: entries.filter((e) => !NON_DECISION_FILES.has(e)) };
   } catch (error) {
     if (isAbsentDecisionsDirError(error)) return { present: false, entries: [] };
@@ -274,11 +274,10 @@ export type DecisionResolution = {
 };
 
 /**
- * Reads a repo-relative file through the project-root boundary. `ok` carries
- * the content; `missing` = no such file; `unsafe` = the path escapes the
- * project root (`..`, absolute, Windows drive, or an existing-ancestor symlink
- * that resolves outside `cwd`). This is the gate's fail-closed I/O primitive:
- * an unsafe `decision_refs` path is never read.
+ * Reads a repo-relative file through the owned project-path boundary. `ok`
+ * carries the content; `missing` = no such file; `unsafe` = the path escapes
+ * the project root OR traverses any symlink component. This is the gate's
+ * fail-closed I/O primitive: an unsafe `decision_refs` path is never read.
  */
 export type ReadResult =
   | { kind: "ok"; content: string }
@@ -290,9 +289,9 @@ function diskReader(cwd: string): RelFileReader {
   return async (relPath) => {
     let abs: string;
     try {
-      // Structural path-safety + symlink-escape guard. Throws on `..`,
-      // absolute paths, drive letters, and ancestors that realpath outside cwd.
-      abs = await resolveWithinProject(cwd, relPath);
+      // Structural path-safety + ownership guard. Throws on `..`, absolute
+      // paths, drive letters, and any symlink component.
+      abs = await resolveOwnedProjectPath(cwd, relPath);
     } catch {
       return { kind: "unsafe" };
     }

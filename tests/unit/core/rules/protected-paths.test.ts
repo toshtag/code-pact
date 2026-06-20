@@ -72,6 +72,20 @@ describe("loadProtectedPaths — fallback", () => {
       await rm(outside, { recursive: true, force: true });
     }
   });
+
+  it("falls back instead of reading a project-local secret symlinked as the rule file", async () => {
+    await writeFile(join(cwd, ".env"), "API_TOKEN=LOCAL_SECRET_MARKER\n", "utf8");
+    await mkdir(join(cwd, "design", "rules"), { recursive: true });
+    await symlink("../../.env", join(cwd, "design", "rules", "protected-paths.md"));
+
+    const result = await loadProtectedPaths(cwd);
+
+    expect(result.source).toBe("fallback");
+    expect(result.paths).toBe(PROTECTED_PATHS);
+    expect(result.paths.map((p) => p.pattern)).not.toContain(
+      "API_TOKEN=LOCAL_SECRET_MARKER",
+    );
+  });
 });
 
 describe("loadProtectedPaths — rule-file parsing", () => {
