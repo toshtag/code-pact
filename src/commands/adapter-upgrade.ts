@@ -24,6 +24,7 @@ import {
 import { resolveOwnedProjectPath } from "../core/path-safety.ts";
 import {
   computeContentHash,
+  manifestRelPath,
   readManifest,
   writeManifest,
 } from "../core/adapters/manifest.ts";
@@ -301,23 +302,17 @@ export async function runAdapterUpgrade(
     existingManifest.files.map((f) => [f.path, f]),
   );
 
-  // For --write: fail-closed path-safety PREFLIGHT, THEN pin, THEN create dirs.
-  if (mode === "write") {
-    // Check every path the write pass will touch — placeholder dirs (directory),
-    // generated files (file), and manifest-tracked orphan candidates (file) — for
-    // BOTH containment (symlink escape/dangling → PATH_OUTSIDE_PROJECT) and on-disk
-    // TYPE mismatch (→ CONFIG_ERROR), BEFORE the `--model` pin (the first
-    // persistent mutation). A forged manifest path, a symlinked `.context`/`.claude`,
-    // a `CLAUDE.md` final symlink, or an existing-entry-of-wrong-type aborts here
-    // with no pin, no write, no unlink. Mirrors adapter install.
-    await assertAdapterWritePathsContained(cwd, [
-      { path: profile.context_dir, kind: "directory" },
-      ...(profile.hook_dir ? [{ path: profile.hook_dir, kind: "directory" as const }] : []),
-      ...desiredFiles.map((d) => ({ path: d.path, kind: "file" as const })),
-      ...[...existingByPath.keys()].map((p) => ({ path: p, kind: "file" as const })),
-    ]);
-
-  }
+  // Fail-closed path-safety PREFLIGHT for both --check and --write. It is
+  // read-only, and in check mode it prevents a directory/FIFO/socket at a
+  // desired or orphan path from reaching readFileMaybe as an uncoded errno or
+  // blocking read. In write mode it still runs before the first mutation.
+  await assertAdapterWritePathsContained(cwd, [
+    { path: profile.context_dir, kind: "directory" },
+    ...(profile.hook_dir ? [{ path: profile.hook_dir, kind: "directory" as const }] : []),
+    { path: manifestRelPath(agentName), kind: "file" },
+    ...desiredFiles.map((d) => ({ path: d.path, kind: "file" as const })),
+    ...[...existingByPath.keys()].map((p) => ({ path: p, kind: "file" as const })),
+  ]);
 
   const plan: AdapterUpgradePlanEntry[] = [];
   const newManifestFiles: ManifestFile[] = [];

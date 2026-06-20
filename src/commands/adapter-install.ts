@@ -20,6 +20,7 @@ import { resolveOwnedProjectPath } from "../core/path-safety.ts";
 import {
   computeContentHash,
   manifestPath,
+  manifestRelPath,
   readManifest,
   writeManifest,
 } from "../core/adapters/manifest.ts";
@@ -309,6 +310,7 @@ export async function runAdapterInstall(
   await assertAdapterWritePathsContained(cwd, [
     { path: profile.context_dir, kind: "directory" },
     ...(profile.hook_dir ? [{ path: profile.hook_dir, kind: "directory" as const }] : []),
+    { path: manifestRelPath(agentName), kind: "file" },
     ...desiredFiles.map((d) => ({ path: d.path, kind: "file" as const })),
   ]);
 

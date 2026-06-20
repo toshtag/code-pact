@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { atomicWriteText } from "../../io/atomic-text.ts";
-import { resolveWithinProject } from "../path-safety.ts";
+import { resolveOwnedProjectPath } from "../path-safety.ts";
 import {
   AdapterManifest,
   AdapterManifestLenient,
@@ -29,26 +29,27 @@ export function manifestPath(cwd: string, agentName: string): string {
   );
 }
 
+export function manifestRelPath(agentName: string): string {
+  return [...ADAPTER_MANIFEST_DIR_SEGMENTS, `${agentName}.manifest.yaml`].join("/");
+}
+
 /**
- * Resolves the on-disk manifest path through {@link resolveWithinProject} so a
- * symlinked `.code-pact/adapters` (or a symlinked manifest file) cannot make a
- * read or write escape the project root. Throws (fail-closed) when the path
- * resolves outside the project or `agentName` is structurally unsafe — callers
- * must NOT treat that throw as "manifest missing".
+ * Resolves the on-disk manifest path through {@link resolveOwnedProjectPath} so
+ * `.code-pact/adapters` cannot be an in-project symlink alias for another
+ * namespace. Throws (fail-closed) when the path escapes the project, traverses a
+ * symlink, or `agentName` is structurally unsafe — callers must NOT treat that
+ * throw as "manifest missing".
  */
 async function resolveManifestPath(cwd: string, agentName: string): Promise<string> {
   try {
-    return await resolveWithinProject(
-      cwd,
-      [...ADAPTER_MANIFEST_DIR_SEGMENTS, `${agentName}.manifest.yaml`].join("/"),
-    );
+    return await resolveOwnedProjectPath(cwd, manifestRelPath(agentName));
   } catch (err) {
     // A path-containment refusal (a `.code-pact/adapters` symlink that escapes
     // the project) is an ADVERSARIAL but EXPECTED input — surface it as a clean
     // `ADAPTER_MANIFEST_INVALID` (the manifest state is unreachable/untrustable),
     // not as an uncoded throw that the CLI would render as an internal error.
     const e = new Error(
-      `Adapter manifest path for "${agentName}" resolves outside the project root and was refused: ${
+      `Adapter manifest path for "${agentName}" is not an owned project path and was refused: ${
         (err as Error).message
       }`,
     );

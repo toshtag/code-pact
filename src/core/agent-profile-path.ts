@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { parse as parseYaml } from "yaml";
 import { RelativePosixPath } from "./schemas/relative-path.ts";
 import { assertSafePlanId } from "./schemas/plan-id.ts";
-import { resolveWithinProject } from "./path-safety.ts";
+import { resolveOwnedProjectPath, resolveWithinProject } from "./path-safety.ts";
 
 // Single source of truth for where an agent's profile lives.
 //
@@ -131,6 +131,33 @@ export async function resolveAgentProfilePath(
     if ((err as NodeJS.ErrnoException).code === "PATH_OUTSIDE_PROJECT") {
       const e = new Error(
         `Agent profile path for "${agentName}" resolves outside the project root and was refused: ${(err as Error).message}`,
+      );
+      (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+      throw e;
+    }
+    throw err;
+  }
+}
+
+/**
+ * Absolute path for PERSISTING an agent profile. Reads may accept an in-project
+ * symlinked profile location for compatibility, but automatic writes such as
+ * `adapter install --model` must own the `.code-pact` profile namespace. An
+ * in-project symlink alias (for example `.code-pact/agent-profiles -> ../alt`)
+ * is therefore refused with CONFIG_ERROR before any pin is written.
+ */
+export async function resolveOwnedAgentProfilePath(
+  cwd: string,
+  agentName: string,
+): Promise<string> {
+  const rel = await resolveAgentProfileRel(cwd, agentName);
+  try {
+    return await resolveOwnedProjectPath(cwd, [".code-pact", rel].join("/"));
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "PATH_OUTSIDE_PROJECT" || code === "PATH_NOT_OWNED") {
+      const e = new Error(
+        `Agent profile path for "${agentName}" is not an owned project path and was refused: ${(err as Error).message}`,
       );
       (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
       throw e;
