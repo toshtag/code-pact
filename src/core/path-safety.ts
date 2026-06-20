@@ -52,7 +52,8 @@ export async function pathTraversesSymlink(cwd: string, relPath: string): Promis
     let st: import("node:fs").Stats;
     try {
       st = await lstat(candidate);
-    } catch {
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
       return false; // missing component → nothing below it can be a symlink
     }
     if (st.isSymbolicLink()) return true;
@@ -69,7 +70,8 @@ export function pathTraversesSymlinkSync(cwd: string, relPath: string): boolean 
     let st: import("node:fs").Stats;
     try {
       st = lstatSync(candidate);
-    } catch {
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
       return false;
     }
     if (st.isSymbolicLink()) return true;

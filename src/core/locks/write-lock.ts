@@ -69,7 +69,14 @@ async function resolveLockPath(cwd: string): Promise<string> {
     return await resolveOwnedProjectPath(cwd, ".code-pact/locks/write.lock");
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
-    if (code === "PATH_OUTSIDE_PROJECT" || code === "PATH_NOT_OWNED") {
+    if (
+      code === "PATH_OUTSIDE_PROJECT" ||
+      code === "PATH_NOT_OWNED" ||
+      code === "ENOTDIR" ||
+      code === "EACCES" ||
+      code === "EPERM" ||
+      code === "ELOOP"
+    ) {
       const wrapped = new Error((err as Error).message);
       (wrapped as NodeJS.ErrnoException).code = "CONFIG_ERROR";
       throw wrapped;
