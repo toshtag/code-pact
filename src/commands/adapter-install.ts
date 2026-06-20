@@ -350,22 +350,27 @@ export async function runAdapterInstall(
       acceptModified: false,
     });
 
-    // SECURITY (CWE-345/CWE-22/CWE-59): a content OVERWRITE of an EXISTING,
-    // divergent file (`update` = managed-clean × stale; `replace_unmanaged` =
-    // unmanaged × stale with --force) must NOT be authorized by the project-
-    // supplied manifest hash or profile path alone — both are attacker-controlled.
-    // Refuse unless BOTH hold:
-    //   1. the GENERATED path is in the TRUSTED static owned set (a profile
-    //      redirecting instruction_filename/skill_dir at e.g. package.json, or a
-    //      shared `.claude/skills/<user>.md`, is outside it), AND
+    // SECURITY (CWE-345/CWE-22/CWE-59): generated-file creation/overwrite must
+    // NOT be authorized by the project-supplied manifest hash or profile path
+    // alone — both are attacker-controlled. `write` (absent file) may use the
+    // adapter's static generated-write allowlist; destructive update/replace
+    // stays on the narrower ownedPathGlobs delete/overwrite authority. Refuse
+    // unless BOTH hold:
+    //   1. the GENERATED path is in the relevant TRUSTED static set (a profile
+    //      redirecting instruction_filename/skill_dir at e.g. package.json is
+    //      outside it), AND
     //   2. the path traverses NO symlink — else an in-project symlink (e.g.
     //      `.claude/skills -> ../src`) makes the owned-looking lexical path
     //      resolve to a DIFFERENT real file, so the glob match is not ownership.
     // `refuse` from decideAction is the managed-modified × stale local-edit case.
     let refuseReason: RefuseReason | undefined =
       action === "refuse" ? "managed_modified" : undefined;
-    if (action === "update" || action === "replace_unmanaged") {
-      const owned = descriptor.ownedPathGlobs.some((g) => matchGlob(g, desired.path));
+    if (action === "write" || action === "update" || action === "replace_unmanaged") {
+      const allowedGlobs =
+        action === "write"
+          ? (descriptor.writePathGlobs ?? descriptor.ownedPathGlobs)
+          : descriptor.ownedPathGlobs;
+      const owned = allowedGlobs.some((g) => matchGlob(g, desired.path));
       if (!owned) {
         action = "refuse";
         refuseReason = "unowned_generated_path";

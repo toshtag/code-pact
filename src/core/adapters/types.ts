@@ -34,5 +34,13 @@ export type AdapterDescriptor = {
    * must never authorize deleting a user file. See the orphan-prune security note.
    */
   ownedPathGlobs: readonly string[];
+  /**
+   * STATIC generated paths the adapter may CREATE/OVERWRITE automatically.
+   * Defaults to `ownedPathGlobs`. This may be broader than the delete/orphan
+   * surface when an adapter intentionally generates a bounded family of files
+   * (for example `.claude/skills/*.md`) but still must not use that family for
+   * automatic deletes or orphan warnings.
+   */
+  writePathGlobs?: readonly string[];
   adapterSchemaVersion: number;
 };

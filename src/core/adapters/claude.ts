@@ -322,19 +322,19 @@ export const claudeAdapterDescriptor: AdapterDescriptor = {
     "hooks_dir",
     "context_dir",
   ] as const,
-  // EXACT static paths the generator owns — used for BOTH the delete gate (#6)
-  // AND the auto-overwrite gate. Deliberately NOT a `.claude/skills/*.md`
-  // wildcard: that directory is SHARED with hand-authored user skills, so a
-  // wildcard would let a forged manifest + a colliding verification-command skill
-  // name overwrite a user's skill (CWE-345). Dynamic command-skills therefore are
-  // NOT auto-overwritten when stale — they are refused (see the install/upgrade
-  // overwrite gate). A reserved generated-skill namespace that restores safe
-  // dynamic re-render is the planned follow-up.
+  // EXACT static paths the generator owns for delete/orphan scan. Deliberately
+  // not `.claude/skills/*.md`: that directory is shared with hand-authored user
+  // skills, so manifest-driven delete/orphan authority must stay narrow.
   ownedPathGlobs: [
     "CLAUDE.md",
     ".claude/skills/context.md",
     ".claude/skills/verify.md",
     ".claude/skills/progress.md",
   ] as const,
+  // Static CREATE/OVERWRITE allowlist. Broader than ownedPathGlobs because
+  // code-pact intentionally generates verification-command skills in the
+  // default Claude skills directory. Profile redirects to arbitrary locations
+  // such as `.github/workflows/*.yml` are still refused.
+  writePathGlobs: ["CLAUDE.md", ".claude/skills/*.md"] as const,
   adapterSchemaVersion: 1,
 };

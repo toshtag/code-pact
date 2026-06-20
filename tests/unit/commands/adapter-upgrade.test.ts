@@ -3,6 +3,7 @@ import { mkdtemp, mkdir, readFile, rm, symlink, writeFile, unlink } from "node:f
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { runInit } from "../../../src/commands/init.ts";
 import { runAdapterInstall } from "../../../src/commands/adapter-install.ts";
 import {
@@ -976,6 +977,27 @@ describe("adapter upgrade — orphan handling", () => {
 });
 
 describe("adapter install — owned control-plane write paths", () => {
+  async function defaultProfileText(): Promise<string> {
+    return readFile(
+      join(dir, ".code-pact", "agent-profiles", "claude-code.yaml"),
+      "utf8",
+    );
+  }
+
+  async function expectInstallConfigErrorWithoutWrites(): Promise<void> {
+    await expect(
+      runAdapterInstall({
+        cwd: dir,
+        agentName: "claude-code",
+        force: false,
+        locale: "en-US",
+        modelVersion: "sonnet-4.6",
+      }),
+    ).rejects.toMatchObject({ code: "CONFIG_ERROR" });
+    expect(existsSync(manifestPath(dir, "claude-code"))).toBe(false);
+    expect(existsSync(join(dir, "CLAUDE.md"))).toBe(false);
+  }
+
   it("refuses an in-project symlinked manifest namespace before generated files or model pin", async () => {
     await mkdir(join(dir, "src"), { recursive: true });
     await rm(join(dir, ".code-pact", "adapters"), { recursive: true, force: true });
@@ -1019,6 +1041,119 @@ describe("adapter install — owned control-plane write paths", () => {
     expect(await readFile(join(dir, "alternate", "claude-code.yaml"), "utf8")).toBe(profileBefore);
     expect(existsSync(manifestPath(dir, "claude-code"))).toBe(false);
     expect(existsSync(join(dir, "CLAUDE.md"))).toBe(false);
+  });
+
+  it("refuses --model writes when agents[].profile points at project.yaml", async () => {
+    const projectPath = join(dir, ".code-pact", "project.yaml");
+    const profile = parseYaml(await defaultProfileText()) as Record<string, unknown>;
+    const project = {
+      ...profile,
+      name: "claude-code",
+      version: "0.1.0",
+      locale: "en-US",
+      default_agent: "claude-code",
+      agents: [{ name: "claude-code", profile: "project.yaml" }],
+    };
+    await writeFile(projectPath, stringifyYaml(project), "utf8");
+    const before = await readFile(projectPath, "utf8");
+
+    await expectInstallConfigErrorWithoutWrites();
+
+    expect(await readFile(projectPath, "utf8")).toBe(before);
+  });
+
+  it("refuses --model writes when agents[].profile points at state/progress.yaml", async () => {
+    const progressPath = join(dir, ".code-pact", "state", "progress.yaml");
+    await writeFile(progressPath, await defaultProfileText(), "utf8");
+    const projectPath = join(dir, ".code-pact", "project.yaml");
+    const project = await readFile(projectPath, "utf8");
+    await writeFile(
+      projectPath,
+      project.replace(
+        "profile: agent-profiles/claude-code.yaml",
+        "profile: state/progress.yaml",
+      ),
+      "utf8",
+    );
+    const before = await readFile(progressPath, "utf8");
+
+    await expectInstallConfigErrorWithoutWrites();
+
+    expect(await readFile(progressPath, "utf8")).toBe(before);
+  });
+
+  it("refuses --model writes when two agents share one profile path", async () => {
+    await writeFile(
+      join(dir, ".code-pact", "project.yaml"),
+      [
+        "name: code-pact",
+        "version: 0.1.0",
+        "locale: en-US",
+        "default_agent: claude-code",
+        "agents:",
+        "  - name: claude-code",
+        "    profile: agent-profiles/shared.yaml",
+        "  - name: codex",
+        "    profile: agent-profiles/shared.yaml",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    const sharedPath = join(dir, ".code-pact", "agent-profiles", "shared.yaml");
+    await writeFile(sharedPath, await defaultProfileText(), "utf8");
+    const before = await readFile(sharedPath, "utf8");
+
+    await expectInstallConfigErrorWithoutWrites();
+
+    expect(await readFile(sharedPath, "utf8")).toBe(before);
+  });
+
+  it("refuses --model writes when profile.name does not match the target agent", async () => {
+    const profilePath = join(dir, ".code-pact", "agent-profiles", "claude-code.yaml");
+    const before = (await readFile(profilePath, "utf8")).replace(
+      "name: claude-code",
+      "name: codex",
+    );
+    await writeFile(profilePath, before, "utf8");
+
+    await expectInstallConfigErrorWithoutWrites();
+
+    expect(await readFile(profilePath, "utf8")).toBe(before);
+  });
+
+  it("maps an agent-profiles path type failure to CONFIG_ERROR before writes", async () => {
+    const profileDir = join(dir, ".code-pact", "agent-profiles");
+    await rm(profileDir, { recursive: true, force: true });
+    await writeFile(profileDir, "not a directory\n", "utf8");
+
+    await expectInstallConfigErrorWithoutWrites();
+  });
+
+  it("refuses new generated files outside ownedPathGlobs", async () => {
+    const profilePath = join(dir, ".code-pact", "agent-profiles", "claude-code.yaml");
+    const profileBefore = await readFile(profilePath, "utf8");
+    await writeFile(
+      profilePath,
+      profileBefore.replace(
+        "instruction_filename: CLAUDE.md",
+        "instruction_filename: .github/workflows/generated.yml",
+      ),
+      "utf8",
+    );
+
+    const result = await runAdapterInstall({
+      cwd: dir,
+      agentName: "claude-code",
+      force: false,
+      locale: "en-US",
+    });
+
+    expect(result.refused).toContain(join(dir, ".github", "workflows", "generated.yml"));
+    expect(
+      result.files.find((f) => f.relPath === ".github/workflows/generated.yml")?.reason,
+    ).toBe("unowned_generated_path");
+    expect(existsSync(join(dir, ".github", "workflows", "generated.yml"))).toBe(false);
+    expect(existsSync(manifestPath(dir, "claude-code"))).toBe(false);
   });
 });
 

@@ -344,17 +344,20 @@ export async function runAdapterUpgrade(
       acceptModified,
     });
 
-    // SECURITY (CWE-345/CWE-22/CWE-59): same gate as `adapter install`. A content
-    // OVERWRITE of an existing divergent file (`update` / `replace_unmanaged`) is
-    // authorized ONLY when BOTH: the GENERATED path is in the trusted static owned
-    // set, AND the path traverses no symlink (an in-project symlink would make the
-    // owned-looking lexical path resolve to a different real file). Applied in
-    // BOTH modes so `--check` previews the refusal that `--write` would take.
+    // SECURITY (CWE-345/CWE-22/CWE-59): same gate as `adapter install`.
+    // `write` (absent file) may use the adapter's static generated-write
+    // allowlist; destructive update/replace stays on the narrower ownedPathGlobs
+    // authority. Applied in BOTH modes so `--check` previews the refusal that
+    // `--write` would take.
     // `refuse` from decideAction is managed-modified × stale (a local edit).
     let refuseReason: string | undefined =
       action === "refuse" ? "managed_modified" : undefined;
-    if (action === "update" || action === "replace_unmanaged") {
-      const owned = descriptor.ownedPathGlobs.some((g) => matchGlob(g, desired.path));
+    if (action === "write" || action === "update" || action === "replace_unmanaged") {
+      const allowedGlobs =
+        action === "write"
+          ? (descriptor.writePathGlobs ?? descriptor.ownedPathGlobs)
+          : descriptor.ownedPathGlobs;
+      const owned = allowedGlobs.some((g) => matchGlob(g, desired.path));
       if (!owned) {
         action = "refuse";
         refuseReason = "unowned_generated_path";
