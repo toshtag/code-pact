@@ -317,24 +317,16 @@ export async function runAdapterUpgrade(
       ...[...existingByPath.keys()].map((p) => ({ path: p, kind: "file" as const })),
     ]);
 
-    // Preflight passed — now safe to PERSIST the `--model` pin (a no-op write
-    // when no `--model` was given). Nothing persistent was written before this.
-    await resolveAndPinModelVersion({
-      cwd,
-      agentName,
-      profile,
-      modelVersionInput: modelVersion,
-    });
-
-    // Directory placeholders (verified safe in the preflight above).
-    await mkdir(await resolveOwnedAdapterPath(cwd, profile.context_dir), { recursive: true });
-    if (profile.hook_dir) {
-      await mkdir(await resolveOwnedAdapterPath(cwd, profile.hook_dir), { recursive: true });
-    }
   }
 
   const plan: AdapterUpgradePlanEntry[] = [];
   const newManifestFiles: ManifestFile[] = [];
+  const desiredApply: Array<{
+    desired: (typeof desiredFiles)[number];
+    absPath: string;
+    action: FileAction;
+  }> = [];
+  const orphanApply: Array<{ absPath: string; action: FileAction }> = [];
 
   for (const desired of desiredFiles) {
     assertSafeRelativePath(desired.path);
@@ -394,12 +386,10 @@ export async function runAdapterUpgrade(
       continue;
     }
 
-    // ---- --write: execute action ----
+    desiredApply.push({ desired, absPath, action });
     let recordedHash: string | null = null;
 
     if (action === "write" || action === "replace_unmanaged" || action === "update") {
-      await mkdir(dirname(absPath), { recursive: true });
-      await atomicWriteText(absPath, desired.content);
       recordedHash = desiredHash;
     } else if (action === "adopt") {
       // Disk matches desired; record manifest entry only.
@@ -498,10 +488,8 @@ export async function runAdapterUpgrade(
 
     if (mode === "check") continue; // read-only
 
-    if (action === "prune") {
-      await rm(absPath, { force: true });
-      // Orphan is intentionally NOT added to newManifestFiles — it is gone.
-    } else {
+    orphanApply.push({ absPath, action });
+    if (action !== "prune") {
       // refuse / warn: keep the file on disk AND keep tracking it, so the next
       // run still sees it as a managed orphan (and still refuses/warns) rather
       // than re-classifying it as an unmanaged surprise.
@@ -532,7 +520,40 @@ export async function runAdapterUpgrade(
     };
   }
 
-  // --write: persist the new manifest.
+  if (plan.some((p) => p.action === "refuse")) {
+    return {
+      agentName,
+      mode,
+      manifestPath: join(cwd, ".code-pact", "adapters", `${agentName}.manifest.yaml`),
+      generatorVersion,
+      clean,
+      plan,
+    };
+  }
+
+  await resolveAndPinModelVersion({
+    cwd,
+    agentName,
+    profile,
+    modelVersionInput: modelVersion,
+  });
+
+  await mkdir(await resolveOwnedAdapterPath(cwd, profile.context_dir), { recursive: true });
+  if (profile.hook_dir) {
+    await mkdir(await resolveOwnedAdapterPath(cwd, profile.hook_dir), { recursive: true });
+  }
+
+  for (const item of desiredApply) {
+    if (item.action === "write" || item.action === "replace_unmanaged" || item.action === "update") {
+      await mkdir(dirname(item.absPath), { recursive: true });
+      await atomicWriteText(item.absPath, item.desired.content);
+    }
+  }
+  for (const item of orphanApply) {
+    if (item.action === "prune") await rm(item.absPath, { force: true });
+  }
+
+  // --write: persist the new manifest after all refusal checks have passed.
   const manifest: AdapterManifest = {
     schema_version: 1,
     agent_name: agentName,

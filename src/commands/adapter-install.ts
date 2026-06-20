@@ -19,6 +19,7 @@ import {
 import { resolveOwnedProjectPath } from "../core/path-safety.ts";
 import {
   computeContentHash,
+  manifestPath,
   readManifest,
   writeManifest,
 } from "../core/adapters/manifest.ts";
@@ -311,32 +312,18 @@ export async function runAdapterInstall(
     ...desiredFiles.map((d) => ({ path: d.path, kind: "file" as const })),
   ]);
 
-  // Preflight passed — this is the MINIMUM-MUTATION point to PERSIST the `--model`
-  // pin: the manifest read and the containment+type preflight both fail closed,
-  // so no containment/type failure can strand a pin afterwards. (This is NOT a
-  // crash-atomic guarantee: a process death between the pin and the manifest
-  // write below, or a runtime fault like ENOSPC during a write, can still leave
-  // the profile pinned ahead of the manifest — `adapter doctor` reports that
-  // drift.) The mkdirs below are idempotent, in-project, and benign.
-  await resolveAndPinModelVersion({
-    cwd,
-    agentName,
-    profile,
-    modelVersionInput: modelVersion,
-  });
-
-  // Directory placeholders (verified safe in the preflight above).
-  await mkdir(await resolveOwnedAdapterPath(cwd, profile.context_dir), { recursive: true });
-  if (profile.hook_dir) {
-    await mkdir(await resolveOwnedAdapterPath(cwd, profile.hook_dir), { recursive: true });
-  }
-
   const created: string[] = [];
   const skipped: string[] = [];
   const adopted: string[] = [];
   const refused: string[] = [];
   const fileResults: AdapterInstallFile[] = [];
   const newManifestFiles: ManifestFile[] = [];
+  const plannedFiles: Array<{
+    desired: (typeof desiredFiles)[number];
+    absPath: string;
+    action: FileAction;
+    desiredHash: string;
+  }> = [];
 
   for (const desired of desiredFiles) {
     assertSafeRelativePath(desired.path);
@@ -395,20 +382,14 @@ export async function runAdapterInstall(
       ...(refuseReason ? { reason: refuseReason } : {}),
     });
 
+    plannedFiles.push({ desired, absPath, action, desiredHash });
+
     let recordedHash: string | null = null;
 
     if (action === "write" || action === "replace_unmanaged" || action === "update") {
-      // `update` arises for managed-clean × stale: the file is verbatim (older)
-      // generator output, safe to refresh to current desired content. This also
-      // self-heals a forged manifest that matched shipped-stale instructions.
-      await mkdir(dirname(absPath), { recursive: true });
-      await atomicWriteText(absPath, desired.content);
       recordedHash = desiredHash;
-      created.push(absPath);
     } else if (action === "adopt") {
-      // Disk content already matches desired; just record in the manifest.
       recordedHash = desiredHash;
-      adopted.push(absPath);
     } else if (action === "skip") {
       skipped.push(absPath);
       // Preserve existing manifest entry for managed files we did not touch.
@@ -442,6 +423,41 @@ export async function runAdapterInstall(
   const generatorVersion =
     generatorVersionOverride ?? (await readPackageVersion());
   const resolvedModel = resolvedModelVersion;
+
+  if (refused.length > 0) {
+    return {
+      agentName,
+      manifestPath: existingManifest ? manifestPath(cwd, agentName) : manifestPath(cwd, agentName),
+      generatorVersion,
+      created: [],
+      skipped,
+      adopted: [],
+      refused,
+      files: fileResults,
+    };
+  }
+
+  await resolveAndPinModelVersion({
+    cwd,
+    agentName,
+    profile,
+    modelVersionInput: modelVersion,
+  });
+
+  await mkdir(await resolveOwnedAdapterPath(cwd, profile.context_dir), { recursive: true });
+  if (profile.hook_dir) {
+    await mkdir(await resolveOwnedAdapterPath(cwd, profile.hook_dir), { recursive: true });
+  }
+
+  for (const planned of plannedFiles) {
+    if (planned.action === "write" || planned.action === "replace_unmanaged" || planned.action === "update") {
+      await mkdir(dirname(planned.absPath), { recursive: true });
+      await atomicWriteText(planned.absPath, planned.desired.content);
+      created.push(planned.absPath);
+    } else if (planned.action === "adopt") {
+      adopted.push(planned.absPath);
+    }
+  }
 
   const manifest: AdapterManifest = {
     schema_version: 1,
