@@ -10,8 +10,30 @@ import { resolveWithinProject } from "./path-safety.ts";
 
 /** Load and validate `.code-pact/project.yaml`. */
 export async function loadProject(cwd: string): Promise<Project> {
-  const raw = await readFile(await resolveWithinProject(cwd, ".code-pact/project.yaml"), "utf8");
-  return Project.parse(parseYaml(raw) as unknown);
+  let path: string;
+  let raw: string;
+  try {
+    path = await resolveWithinProject(cwd, ".code-pact/project.yaml");
+    raw = await readFile(path, "utf8");
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    const detail =
+      code === "ENOENT"
+        ? ".code-pact/project.yaml is missing"
+        : (err as Error).message;
+    const e = new Error(`Cannot read .code-pact/project.yaml: ${detail}.`);
+    (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+    throw e;
+  }
+  try {
+    return Project.parse(parseYaml(raw) as unknown);
+  } catch (err) {
+    const e = new Error(
+      `Cannot parse or validate .code-pact/project.yaml: ${(err as Error).message}`,
+    );
+    (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+    throw e;
+  }
 }
 
 /**
