@@ -237,6 +237,11 @@ const KNOWN_CODES: Record<string, "public" | "plan" | "doctor" | "adapter" | "in
   // classify it as `target_invalid`. It is always caught + remapped, so it never
   // reaches an agent as a top-level `error.code` — hence "internal".
   PATH_OUTSIDE_PROJECT: "internal",
+  // Path-ownership refusal: `resolveOwnedProjectPath` tags an in-project symlink
+  // alias with this code so write/delete call sites can distinguish "contained"
+  // from "owned". Command layers map it to CONFIG_ERROR / ADAPTER_MANIFEST_INVALID.
+  // It is internal, not a top-level public envelope.
+  PATH_NOT_OWNED: "internal",
   // Defense-in-depth invariant: an adapter generator produced two desired
   // files at the same path with differing content. Should never fire (each
   // adapter uniquifies its own paths); surfaced as an unhandled exception

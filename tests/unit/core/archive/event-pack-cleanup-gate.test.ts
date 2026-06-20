@@ -159,15 +159,15 @@ describe("evaluateDeleteGate — per-file dispositions (NO unlink)", () => {
     expect(v).toEqual({ disposition: "skip", reason: "not_regular_file" });
   });
 
-  it("G1/G3b: a SYMLINK at the event path → skip(not_regular_file), target never followed", async () => {
+  it("G1: a SYMLINK at the event path → skip(path_escape), target never followed", async () => {
     const { events, ctx } = await archivedWithPack();
     // A symlink whose name is a valid event filename, pointing at a real, valid
-    // event file. Following it would read a body that passes G4 — so the gate must
-    // refuse to follow (O_NOFOLLOW) and skip it as not_regular_file.
+    // event file. Following it would read a body that passes G4 — so the owned
+    // path guard must refuse the symlink before the file is opened.
     const linkName = `20260601T000000000Z-${"d".repeat(64)}.yaml`;
     await symlink(join(eventsDir(cwd), looseFileOf(events, "done")), join(eventsDir(cwd), linkName));
     const v = await evaluateDeleteGate(cwd, linkName, ctx);
-    expect(v).toEqual({ disposition: "skip", reason: "not_regular_file" });
+    expect(v).toEqual({ disposition: "skip", reason: "path_escape" });
   });
 
   it("G4: an unparseable body under a valid event name → skip(parse_failed)", async () => {
