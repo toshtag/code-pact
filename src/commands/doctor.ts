@@ -18,7 +18,7 @@ import {
 } from "../core/progress/all-sources.ts";
 import { validateSnapshotEventEvidence } from "../core/archive/snapshot-evidence.ts";
 import { Project } from "../core/schemas/project.ts";
-import { resolveWithinProject } from "../core/path-safety.ts";
+import { resolveOwnedProjectPath, resolveWithinProject } from "../core/path-safety.ts";
 import {
   ACCEPTED_MODEL_VERSION_INPUTS,
   AgentProfile,
@@ -314,10 +314,11 @@ async function checkPhases(
   // Check for phase YAML files in design/phases/ not referenced in roadmap
   let phaseFiles: string[] = [];
   try {
-    const phasesDir = await resolveWithinProject(cwd, "design/phases");
+    const phasesDir = await resolveOwnedProjectPath(cwd, "design/phases");
     phaseFiles = await readdir(phasesDir);
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "PATH_OUTSIDE_PROJECT") {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "PATH_OUTSIDE_PROJECT" || code === "PATH_NOT_OWNED") {
       pushPathIssue(issues, "design/phases");
     }
   }

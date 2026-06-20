@@ -1,8 +1,11 @@
 import { afterEach, beforeEach, expect, it } from "vitest";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { detectMissingPhaseFiles } from "../../../../../src/core/plan/checks/phase-files.ts";
+import {
+  detectMissingPhaseFiles,
+  detectOrphanPhaseFiles,
+} from "../../../../../src/core/plan/checks/phase-files.ts";
 import { writePhaseSnapshot } from "../../../../../src/core/archive/phase-snapshot.ts";
 import { phaseSnapshotPath } from "../../../../../src/core/archive/paths.ts";
 import { seedDurableEvents } from "../../../../helpers/seed-events.ts";
@@ -138,6 +141,23 @@ it("live present + corrupt snapshot on disk → STILL no issue (live-wins, snaps
   await writeFile(phaseSnapshotPath(cwd, "P1"), "{ corrupt", "utf8");
   // P1-x.yaml is still present → the snapshot must never be read.
   expect(await detectMissingPhaseFiles(cwd, roadmap)).toEqual([]);
+});
+
+it("orphan scan refuses an external design/phases directory without listing its filenames", async () => {
+  const outside = await mkdtemp(join(tmpdir(), "code-pact-phasefiles-outside-"));
+  try {
+    await writeFile(join(outside, "EXTERNAL_SECRET_PHASE.yaml"), P1_DONE, "utf8");
+    await rm(join(cwd, "design", "phases"), { recursive: true, force: true });
+    await symlink(outside, join(cwd, "design", "phases"));
+
+    const issues = await detectOrphanPhaseFiles(cwd, roadmap);
+
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.code).toBe("MISSING_PHASE_FILE");
+    expect(JSON.stringify(issues)).not.toContain("EXTERNAL_SECRET_PHASE");
+  } finally {
+    await rm(outside, { recursive: true, force: true });
+  }
 });
 
 // Present-but-INACCESSIBLE (non-searchable parent dir → access() EACCES) must

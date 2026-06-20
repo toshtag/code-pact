@@ -4,6 +4,7 @@ import type { PlanIssue } from "../shared.ts";
 import type { Roadmap } from "../../schemas/roadmap.ts";
 import { phaseFilePresence } from "./fs.ts";
 import { resolveMissingPhaseRef } from "../../archive/load-phase-snapshot.ts";
+import { resolveOwnedProjectPath } from "../../path-safety.ts";
 
 /**
  * Roadmap references a phase file that does not exist on disk. Both `plan lint`
@@ -73,11 +74,21 @@ export async function detectOrphanPhaseFiles(
   cwd: string,
   roadmap: Roadmap,
 ): Promise<PlanIssue[]> {
-  const phasesDir = join(cwd, "design", "phases");
   let entries: string[] = [];
   try {
+    const phasesDir = await resolveOwnedProjectPath(cwd, "design/phases");
     entries = await readdir(phasesDir);
-  } catch {
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+      return [
+        {
+          code: "MISSING_PHASE_FILE",
+          severity: "error",
+          message: `design/phases cannot be safely enumerated: ${(err as Error).message}`,
+          file: "design/phases",
+        },
+      ];
+    }
     return [];
   }
   const referenced = new Set(roadmap.phases.map((r) => r.path));

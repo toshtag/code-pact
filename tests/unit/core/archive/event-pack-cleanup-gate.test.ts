@@ -225,6 +225,23 @@ describe("evaluateDeleteGate — per-file dispositions (NO unlink)", () => {
     expect(v.reason).toBe("live_owner_discovery_incomplete");
   });
 
+  it("G6: an external empty design/phases symlink → abort(live_owner_discovery_incomplete)", async () => {
+    const { events, ctx } = await archivedWithPack();
+    const outside = await mkdtemp(join(tmpdir(), "code-pact-cleanup-phases-outside-"));
+    try {
+      await rm(join(cwd, "design", "phases"), { recursive: true, force: true });
+      await symlink(outside, join(cwd, "design", "phases"));
+
+      const v = await evaluateDeleteGate(cwd, looseFileOf(events, "done"), ctx);
+
+      expect(v.disposition).toBe("abort");
+      if (v.disposition !== "abort") return;
+      expect(v.reason).toBe("live_owner_discovery_incomplete");
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
   it("G7: the verified pack does NOT cover the present loose id → abort(pack_missing_event)", async () => {
     const { events, ctx } = await archivedWithPack();
     // ctx with an empty pack id-set: the loose file is present but not covered.

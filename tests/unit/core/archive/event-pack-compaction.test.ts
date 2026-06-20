@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdir, mkdtemp, rm, readFile, writeFile, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, readFile, writeFile, stat, symlink } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { writePhaseSnapshot } from "../../../../src/core/archive/phase-snapshot.ts";
@@ -170,6 +170,24 @@ describe("planEventPack — eligibility blocks", () => {
     expect(plan.kind).toBe("ineligible");
     if (plan.kind !== "ineligible") return;
     expect(plan.block.kind).toBe("phase_discovery_incomplete");
+  });
+
+  it("design/phases symlinked to an external empty directory → phase_discovery_incomplete", async () => {
+    await scaffoldArchivedP1();
+    const outside = await mkdtemp(join(tmpdir(), "code-pact-l2-phases-outside-"));
+    try {
+      await rm(join(cwd, "design", "phases"), { recursive: true, force: true });
+      await symlink(outside, join(cwd, "design", "phases"));
+
+      const plan = await planEventPack(cwd, "P1");
+
+      expect(plan.kind).toBe("ineligible");
+      if (plan.kind !== "ineligible") return;
+      expect(plan.block.kind).toBe("phase_discovery_incomplete");
+      expect(await exists(eventPackPath(cwd, "P1"))).toBe(false);
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
   });
 
   it("a SINGLE unparseable phase YAML in design/phases/ → ineligible(phase_discovery_incomplete), not skipped", async () => {

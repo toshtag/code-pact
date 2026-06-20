@@ -2,7 +2,7 @@ import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { loadYaml, ParseError } from "../../io/load.ts";
-import { resolveWithinProject } from "../path-safety.ts";
+import { resolveOwnedProjectPath, resolveWithinProject } from "../path-safety.ts";
 import { Phase, type Phase as PhaseT } from "../schemas/phase.ts";
 import {
   ProgressLog,
@@ -140,15 +140,16 @@ async function loadPlanStatePhaseStrict(ref: PhaseRef, absPath: string): Promise
 
 /**
  * Resolve a project-relative control-plane path (the roadmap, or a roadmap-
- * referenced phase) to a CONTAINED absolute path for the STRICT loader. A `..` /
- * symlink escape is mapped to CONFIG_ERROR (fail-closed) so a hostile repo cannot
- * point the roadmap/phase graph at an out-of-project file and have it read as the
- * control plane. The actual `loadYaml` then operates on the contained path, so
- * its ParseError-on-malformed contract is unchanged. (CWE-59.)
+ * referenced phase) to an OWNED absolute path for the STRICT loader. A `..` /
+ * symlink component is mapped to CONFIG_ERROR (fail-closed) so a hostile repo
+ * cannot point the roadmap/phase graph at another project file or an external
+ * target and have it read as the control plane. The actual `loadYaml` then
+ * operates on the owned path, so its ParseError-on-malformed contract is
+ * unchanged. (CWE-59.)
  */
 async function resolveGraphPathStrict(cwd: string, relPath: string): Promise<string> {
   try {
-    return await resolveWithinProject(cwd, relPath);
+    return await resolveOwnedProjectPath(cwd, relPath);
   } catch (err) {
     const e = new Error(
       `"${relPath}" is not a safe project-relative path: ${(err as Error).message}`,
@@ -567,9 +568,9 @@ async function scanPhasesDirBestEffort(
 ): Promise<PhaseEntry[]> {
   let entries: string[] = [];
   try {
-    // Contain the directory BEFORE enumerating it: a symlinked-outside
-    // design/phases must not be readdir'd (out-of-project enumeration).
-    const phasesDir = await resolveWithinProject(cwd, "design/phases");
+    // Require an owned directory BEFORE enumerating it: no symlink alias may
+    // turn the control-plane phase namespace into a view of another directory.
+    const phasesDir = await resolveOwnedProjectPath(cwd, "design/phases");
     entries = await readdir(phasesDir);
   } catch {
     return [];
@@ -581,7 +582,7 @@ async function scanPhasesDirBestEffort(
     const relPath = `design/phases/${entry}`;
     let absPath: string;
     try {
-      absPath = await resolveWithinProject(cwd, relPath);
+      absPath = await resolveOwnedProjectPath(cwd, relPath);
     } catch (err) {
       pushParseIssue(fileIssues, err, relPath);
       continue;
