@@ -1,4 +1,5 @@
 import { lstat, realpath } from "node:fs/promises";
+import { lstatSync, realpathSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import { RelativePosixPath } from "./schemas/relative-path.ts";
 
@@ -60,6 +61,23 @@ export async function pathTraversesSymlink(cwd: string, relPath: string): Promis
   return false;
 }
 
+export function pathTraversesSymlinkSync(cwd: string, relPath: string): boolean {
+  assertSafeRelativePath(relPath);
+  let base = realpathSync(cwd);
+  for (const seg of relPath.split("/").filter((s) => s.length > 0 && s !== ".")) {
+    const candidate = join(base, seg);
+    let st: import("node:fs").Stats;
+    try {
+      st = lstatSync(candidate);
+    } catch {
+      return false;
+    }
+    if (st.isSymbolicLink()) return true;
+    base = candidate;
+  }
+  return false;
+}
+
 /**
  * Resolve a project-relative path for an owned automated write/delete namespace.
  *
@@ -84,6 +102,17 @@ export async function resolveOwnedProjectPath(
     throw err;
   }
   return resolveWithinProject(cwd, relPath);
+}
+
+export function resolveOwnedProjectPathSync(cwd: string, relPath: string): string {
+  if (pathTraversesSymlinkSync(cwd, relPath)) {
+    const err = new Error(
+      `path "${relPath}" resolves through a symlink; refusing to write/delete through an unowned project path`,
+    );
+    (err as NodeJS.ErrnoException).code = "PATH_NOT_OWNED";
+    throw err;
+  }
+  return resolveWithinProjectSync(cwd, relPath);
 }
 
 /**
@@ -187,5 +216,51 @@ export async function resolveWithinProject(
     base = candidate;
   }
 
+  return target;
+}
+
+export function resolveWithinProjectSync(cwd: string, relPath: string): string {
+  assertSafeRelativePath(relPath);
+  const cwdReal = realpathSync(cwd);
+  const target = resolve(cwd, relPath);
+  const within = (p: string): boolean =>
+    p === cwdReal || p.startsWith(cwdReal + sep);
+
+  let base = cwdReal;
+  for (const seg of relPath.split("/").filter((s) => s.length > 0 && s !== ".")) {
+    const candidate = join(base, seg);
+    try {
+      const st = lstatSync(candidate);
+      if (st.isSymbolicLink()) {
+        let linkReal: string;
+        try {
+          linkReal = realpathSync(candidate);
+        } catch (err) {
+          const e = new Error(
+            `path "${relPath}" resolves through an unreadable or dangling symlink at "${seg}"`,
+          );
+          (e as NodeJS.ErrnoException).code = "PATH_OUTSIDE_PROJECT";
+          throw e;
+        }
+        if (!within(linkReal)) {
+          const e = new Error(`path "${relPath}" resolves outside the project`);
+          (e as NodeJS.ErrnoException).code = "PATH_OUTSIDE_PROJECT";
+          throw e;
+        }
+        base = linkReal;
+      } else {
+        base = candidate;
+      }
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") break;
+      throw err;
+    }
+  }
+
+  if (!within(resolve(cwdReal, relPath))) {
+    const e = new Error(`path "${relPath}" resolves outside the project`);
+    (e as NodeJS.ErrnoException).code = "PATH_OUTSIDE_PROJECT";
+    throw e;
+  }
   return target;
 }

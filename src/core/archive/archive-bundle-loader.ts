@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { archiveBundlesDir } from "./paths.ts";
+import { archiveBundlesRelDir, resolveArchiveOwnedPathSync } from "./paths.ts";
 import { validateArchiveBundleTier1, type LoadedArchiveBundle } from "./archive-bundle-reader.ts";
 import { buildBundleMemberIndex, type BundleMemberIndex } from "./archive-bundle-index.ts";
 
@@ -31,7 +31,7 @@ export type LoadedArchiveBundles = {
  * bundles directory yields an empty index (tolerated as an empty store).
  */
 export function loadArchiveBundles(cwd: string): LoadedArchiveBundles {
-  const dir = archiveBundlesDir(cwd);
+  const dir = resolveArchiveOwnedPathSync(cwd, archiveBundlesRelDir());
   let names: string[];
   try {
     // withFileTypes + isFile() so a `.json`-named SUBDIRECTORY can never reach

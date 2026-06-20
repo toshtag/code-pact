@@ -3,7 +3,7 @@ import { basename } from "node:path";
 import { PhaseSnapshot } from "../schemas/phase-snapshot.ts";
 import type { TerminalEvidence } from "../schemas/phase-snapshot.ts";
 import { isSafePlanId } from "../schemas/plan-id.ts";
-import { archivePhasesDir, phaseSnapshotPath, sha256Hex } from "./paths.ts";
+import { archivePhasesRelDir, phaseSnapshotRelPath, resolveArchiveOwnedPath, sha256Hex } from "./paths.ts";
 import { loadArchiveBundles } from "./archive-bundle-loader.ts";
 import { bindBundleMember } from "./archive-bundle-binding.ts";
 import type { BundleIndexEntry, BundleMemberIndex } from "./archive-bundle-index.ts";
@@ -56,7 +56,7 @@ export async function readLoosePhaseSnapshotRaw(
 ): Promise<RawLooseRecord> {
   let path: string;
   try {
-    path = phaseSnapshotPath(cwd, phaseId);
+    path = await resolveArchiveOwnedPath(cwd, phaseSnapshotRelPath(phaseId));
   } catch (error) {
     return { kind: "invalid", error };
   }
@@ -575,7 +575,7 @@ export async function enumerateArchivedPhaseSnapshots(
   // 1. Loose snapshot files.
   let names: string[] = [];
   try {
-    names = await readdir(archivePhasesDir(cwd));
+    names = await readdir(await resolveArchiveOwnedPath(cwd, archivePhasesRelDir()));
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     // No archive dir is the normal untouched-project state — not even an advisory.

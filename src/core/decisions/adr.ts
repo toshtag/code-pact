@@ -463,7 +463,7 @@ export async function resolveDecisionGate(
   taskId: string,
   decisionRefs?: string[],
 ): Promise<DecisionResolution> {
-  const dir = await readLiveDecisionDir(cwd);
+  const dir = await readLiveDecisionDir(cwd).catch(() => ({ present: true, entries: [] }));
   return resolveWith(taskId, decisionRefs, dir, diskReader(cwd), (ref) =>
     resolveRetiredDecisionGate(cwd, ref).then((x) => x.kind === "released"),
   );
@@ -478,7 +478,7 @@ export async function resolveDecisionGate(
 export async function makeDecisionResolver(
   cwd: string,
 ): Promise<{ resolve(taskId: string, decisionRefs?: string[]): Promise<DecisionResolution> }> {
-  const dir = await readLiveDecisionDir(cwd);
+  const dir = await readLiveDecisionDir(cwd).catch(() => ({ present: true, entries: [] }));
   const cache = new Map<string, ReadResult>();
   const base = diskReader(cwd);
   const cachedRead: RelFileReader = async (relPath) => {

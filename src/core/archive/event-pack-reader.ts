@@ -1,11 +1,10 @@
 import { readdir, readFile } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { basename } from "node:path";
 import { EventPack, type PackedEvent } from "../schemas/event-pack.ts";
 import type { LoadedEventFile } from "../progress/events-io.ts";
 import { parseEventFileName } from "../progress/events-io.ts";
 import { atCompact, computeEventId, eventFileName } from "../progress/event-id.ts";
-import { archiveEventPacksDir, eventPackPath } from "./paths.ts";
-import { sha256Hex } from "./paths.ts";
+import { archiveEventPacksRelDir, eventPackRelPath, resolveArchiveOwnedPath, sha256Hex } from "./paths.ts";
 import { loadArchiveBundles } from "./archive-bundle-loader.ts";
 import { bindBundleMember } from "./archive-bundle-binding.ts";
 import type { BundleIndexEntry } from "./archive-bundle-index.ts";
@@ -241,7 +240,7 @@ function bundleOnlyEventPackEntries(
  * lenient caller catches and collects. Tier 2 binding is NOT run here.
  */
 export async function readEventPackFiles(cwd: string): Promise<LoadedEventPack[]> {
-  const dir = archiveEventPacksDir(cwd);
+  const dir = await resolveArchiveOwnedPath(cwd, archiveEventPacksRelDir());
   let names: string[];
   try {
     names = await readdir(dir);
@@ -260,7 +259,7 @@ export async function readEventPackFiles(cwd: string): Promise<LoadedEventPack[]
     const fileStem = basename(name, ".json");
     if (looseAbsentIds.has(fileStem)) continue; // loose-pair mid-deletion → absent
     looseStems.add(fileStem);
-    const path = join(dir, name);
+    const path = await resolveArchiveOwnedPath(cwd, `${archiveEventPacksRelDir()}/${name}`);
     const raw = await readFile(path, "utf8");
     out.push(validateEventPackTier1(fileStem, raw, path));
   }
@@ -276,7 +275,7 @@ export async function readEventPackFiles(cwd: string): Promise<LoadedEventPack[]
 /** Read the LOOSE event-pack file's raw bytes. ENOENT → absent; other error → invalid. */
 async function readLooseEventPackRaw(cwd: string, phaseId: string): Promise<RawLooseRecord> {
   try {
-    return { kind: "present", bytes: await readFile(eventPackPath(cwd, phaseId), "utf8") };
+    return { kind: "present", bytes: await readFile(await resolveArchiveOwnedPath(cwd, eventPackRelPath(phaseId)), "utf8") };
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return { kind: "absent" };
     return { kind: "invalid", error: err };
@@ -326,7 +325,7 @@ export type EventPackReadError = { phaseId: string; path: string; message: strin
 export async function readEventPackFilesLenient(
   cwd: string,
 ): Promise<{ packs: LoadedEventPack[]; errors: EventPackReadError[] }> {
-  const dir = archiveEventPacksDir(cwd);
+  const dir = await resolveArchiveOwnedPath(cwd, archiveEventPacksRelDir());
   let names: string[];
   try {
     names = await readdir(dir);
@@ -343,7 +342,7 @@ export async function readEventPackFilesLenient(
     const fileStem = basename(name, ".json");
     if (looseAbsentIds.has(fileStem)) continue; // loose-pair mid-deletion → absent
     looseStems.add(fileStem);
-    const path = join(dir, name);
+    const path = await resolveArchiveOwnedPath(cwd, `${archiveEventPacksRelDir()}/${name}`);
     try {
       const raw = await readFile(path, "utf8");
       packs.push(validateEventPackTier1(fileStem, raw, path));

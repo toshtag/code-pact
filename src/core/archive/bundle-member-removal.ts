@@ -10,12 +10,12 @@ import { looseStillAuthorityValid } from "./archive-retention.ts";
 import { DeleteIntentDurabilityError, fsyncDirRequired, fsyncFileRequired } from "./delete-intent-journal.ts";
 import {
   archiveBundleRelPath,
-  archiveBundlesDir,
   archiveBundlesRelDir,
   archiveDecisionsRelDir,
   archiveEventPacksRelDir,
   archivePhasesRelDir,
   resolveArchiveOwnedPath,
+  resolveArchiveOwnedPathSync,
   sha256Hex,
 } from "./paths.ts";
 
@@ -64,7 +64,7 @@ function memberAuthorityValid(kind: ArchiveBundleKind, id: string, bytes: string
   }
 }
 
-export function computeRemoval(cwd: string, kind: ArchiveBundleKind, removeIds: readonly string[], bundleDir = archiveBundlesDir(cwd)): RemovalComputation {
+export function computeRemoval(cwd: string, kind: ArchiveBundleKind, removeIds: readonly string[], bundleDir = resolveArchiveOwnedPathSync(cwd, archiveBundlesRelDir())): RemovalComputation {
   const { index, bundles } = loadArchiveBundles(cwd); // STRICT — a corrupt store throws (fail-closed)
   const members = index.get(kind) ?? new Map<string, { sha256: string; bytes: string }>();
   const removeSet = new Set(removeIds);
