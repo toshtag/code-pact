@@ -1,4 +1,4 @@
-import { mkdir, access, readFile } from "node:fs/promises";
+import { mkdir, access, lstat, readFile } from "node:fs/promises";
 import { atomicWriteText } from "../io/atomic-text.ts";
 import { stringify as toYaml } from "yaml";
 import type { LocaleCode } from "../core/schemas/locale.ts";
@@ -127,7 +127,14 @@ async function resolveInitPath(cwd: string, relPath: string): Promise<string> {
     return await resolveOwnedProjectPath(cwd, relPath);
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
-    if (code === "PATH_OUTSIDE_PROJECT" || code === "PATH_NOT_OWNED") {
+    if (
+      code === "PATH_OUTSIDE_PROJECT" ||
+      code === "PATH_NOT_OWNED" ||
+      code === "ENOTDIR" ||
+      code === "EACCES" ||
+      code === "EPERM" ||
+      code === "ELOOP"
+    ) {
       const e = new Error(
         `init refuses to write through unsafe project path "${relPath}": ${(err as Error).message}`,
       );
@@ -138,9 +145,47 @@ async function resolveInitPath(cwd: string, relPath: string): Promise<string> {
   }
 }
 
-async function preflightInitNamespaces(cwd: string): Promise<void> {
+async function assertInitEntryType(cwd: string, relPath: string, expected: "directory" | "file"): Promise<void> {
+  const abs = await resolveInitPath(cwd, relPath);
+  let st;
+  try {
+    st = await lstat(abs);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
+    const e = new Error(`init cannot inspect "${relPath}": ${(err as Error).message}`);
+    (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+    throw e;
+  }
+  const ok = expected === "directory" ? st.isDirectory() : st.isFile();
+  if (!ok) {
+    const actual = st.isDirectory()
+      ? "directory"
+      : st.isFile()
+        ? "file"
+        : st.isSymbolicLink()
+          ? "symlink"
+          : "special file";
+    const e = new Error(`init expected "${relPath}" to be ${expected} or absent, but found ${actual}`);
+    (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+    throw e;
+  }
+}
+
+async function preflightInitNamespaces(cwd: string, agents: SupportedAgent[]): Promise<void> {
   for (const rel of [
     ".gitignore",
+    ".code-pact/project.yaml",
+    ".code-pact/state/progress.yaml",
+    ".code-pact/state/baselines/initial.json",
+    "design/constitution.md",
+    "design/rules/coding-style.md",
+    "design/roadmap.yaml",
+    ...agents.map((agent) => `.code-pact/agent-profiles/${agent}.yaml`),
+    ...DEFAULT_MODEL_PROFILES.map((mp) => `.code-pact/model-profiles/${mp.tier.replace(/_/g, "-")}.yaml`),
+  ]) {
+    await assertInitEntryType(cwd, rel, "file");
+  }
+  for (const rel of [
     ".code-pact",
     ".code-pact/agent-profiles",
     ".code-pact/model-profiles",
@@ -151,7 +196,7 @@ async function preflightInitNamespaces(cwd: string): Promise<void> {
     "design/phases",
     "design/decisions",
   ]) {
-    await resolveInitPath(cwd, rel);
+    await assertInitEntryType(cwd, rel, "directory");
   }
 }
 
@@ -263,7 +308,7 @@ export async function runInitCore(opts: InitCoreOptions): Promise<InitResult> {
   const now = new Date().toISOString();
   const projectName = cwd.split("/").pop() ?? "my-project";
 
-  await preflightInitNamespaces(cwd);
+  await preflightInitNamespaces(cwd, agents);
 
   // Guard: if .code-pact/ already exists and no --force, abort early
   const toolDir = await resolveInitPath(cwd, ".code-pact");
