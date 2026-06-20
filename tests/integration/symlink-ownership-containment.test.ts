@@ -209,6 +209,28 @@ describe("owned symlink containment", () => {
     expect(await snapshotTree(outside.dir)).toEqual(outside.before);
   });
 
+  it("write lock reports CONFIG_ERROR when the locks path is a file", async () => {
+    const p = await projectWithTask("code-pact-lock-file-");
+    await rm(join(p.dir, ".code-pact", "locks"), { recursive: true, force: true });
+    await writeFile(join(p.dir, ".code-pact", "locks"), "not a directory\n", "utf8");
+
+    const res = p.run([
+      "phase",
+      "add",
+      "--id",
+      "P2",
+      "--name",
+      "Lock file",
+      "--objective",
+      "Refuse invalid lock path types",
+      "--weight",
+      "10",
+      "--json",
+    ], { CODE_PACT_DISABLE_LOCKS: "" });
+
+    expectConfigRefusal(res);
+  });
+
   it("task status refuses a symlinked legacy progress.yaml instead of reading it", async () => {
     const p = await projectWithTask("code-pact-progress-yaml-symlink-");
     const outside = await outsideTree("code-pact-progress-yaml-outside-");
@@ -245,6 +267,18 @@ describe("owned symlink containment", () => {
 
     expectConfigRefusal(res);
     expect(await snapshotTree(join(p.dir, ".github"))).toEqual(before);
+  });
+
+  it("init refuses wrong path types before partial initialization", async () => {
+    const p = await createTempProject({ init: false, prefix: "code-pact-init-type-preflight-" });
+    cleanups.push(p.cleanup);
+    await mkdir(join(p.dir, "design"), { recursive: true });
+    await writeFile(join(p.dir, "design", "rules"), "not a directory\n", "utf8");
+
+    const res = p.run(["init", "--non-interactive", "--locale", "en-US", "--agent", "claude-code", "--json"]);
+
+    expectConfigRefusal(res);
+    await expect(readdir(join(p.dir, ".code-pact"))).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("task add refuses an in-project symlinked phase file and leaves the target phase unchanged", async () => {
@@ -324,5 +358,55 @@ describe("owned symlink containment", () => {
     expectConfigRefusal(res);
     expect(await snapshotTree(outside.dir)).toEqual(outside.before);
     expect(await readFile(phasePath, "utf8")).toBe(phaseBefore);
+  });
+
+  it("phase archive --write refuses an in-project symlinked phases directory", async () => {
+    const p = await projectReadyForArchive("code-pact-phase-archive-parent-symlink-");
+    const phaseRel = "P1-foundation.yaml";
+    const alternate = join(p.dir, "alternate-phases");
+    await mkdir(alternate, { recursive: true });
+    const realPhase = await readFile(join(p.dir, "design", "phases", phaseRel), "utf8");
+    await writeFile(join(alternate, phaseRel), realPhase, "utf8");
+    await rm(join(p.dir, "design", "phases"), { recursive: true, force: true });
+    await symlink("../alternate-phases", join(p.dir, "design", "phases"));
+    const before = await snapshotTree(alternate);
+
+    const res = p.run(["phase", "archive", "P1", "--write", "--json"]);
+
+    expect(res.code).toBe(2);
+    expect(await snapshotTree(alternate)).toEqual(before);
+    await expect(readdir(join(p.dir, ".code-pact", "state", "archive", "phases"))).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("decision retire --write refuses an in-project symlinked decisions directory", async () => {
+    const p = await createTempProject({ prefix: "code-pact-decision-retire-parent-symlink-" });
+    cleanups.push(p.cleanup);
+    await mkdir(join(p.dir, "docs"), { recursive: true });
+    await writeFile(join(p.dir, "docs", "victim.md"), "# RFC\n\n**Status:** accepted\n\n## Decision\n\nKeep me.\n", "utf8");
+    await rm(join(p.dir, "design", "decisions"), { recursive: true, force: true });
+    await symlink("../docs", join(p.dir, "design", "decisions"));
+    const before = await snapshotTree(join(p.dir, "docs"));
+
+    const res = p.run(["decision", "retire", "design/decisions/victim.md", "--write", "--json"]);
+
+    expect(res.code).toBe(2);
+    expect(await snapshotTree(join(p.dir, "docs"))).toEqual(before);
+    await expect(readdir(join(p.dir, ".code-pact", "state", "archive", "decisions"))).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("decision prune --write refuses an in-project symlinked decisions directory", async () => {
+    const p = await createTempProject({ prefix: "code-pact-decision-prune-parent-symlink-" });
+    cleanups.push(p.cleanup);
+    await mkdir(join(p.dir, "docs"), { recursive: true });
+    await writeFile(join(p.dir, "docs", "victim.md"), "# RFC\n\n**Status:** accepted\n\n## Decision\n\nKeep me.\n", "utf8");
+    await rm(join(p.dir, "design", "decisions"), { recursive: true, force: true });
+    await symlink("../docs", join(p.dir, "design", "decisions"));
+    const before = await snapshotTree(join(p.dir, "docs"));
+
+    const res = p.run(["decision", "prune", "design/decisions/victim.md", "--write", "--json"]);
+
+    expect(res.code).toBe(2);
+    expect(await snapshotTree(join(p.dir, "docs"))).toEqual(before);
+    await expect(readFile(join(p.dir, "docs", "PRUNED.md"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   });
 });

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtemp, mkdir, readFile, rm, writeFile, unlink } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, symlink, writeFile, unlink } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -605,6 +605,155 @@ describe("adapter upgrade — --check is fully read-only", () => {
       beforeManifest,
     );
     expect(await readFile(join(dir, "CLAUDE.md"), "utf8")).toBe(beforeFile);
+  });
+});
+
+describe("adapter install/upgrade — refused runs do not partially apply --model", () => {
+  const profilePath = () => join(dir, ".code-pact", "agent-profiles", "claude-code.yaml");
+
+  it("install --model with a symlinked generated directory leaves profile and manifest untouched", async () => {
+    const beforeProfile = await readFile(profilePath(), "utf8");
+    await mkdir(join(dir, "src"), { recursive: true });
+    await mkdir(join(dir, ".claude"), { recursive: true });
+    await symlink("../src", join(dir, ".claude", "skills"));
+
+    const result = await runAdapterInstall({
+      cwd: dir,
+      agentName: "claude-code",
+      force: false,
+      locale: "en-US",
+      modelVersion: "sonnet-4.6",
+      generatorVersionOverride: "0.9.0-alpha.0",
+    });
+
+    expect(result.files.some((f) => f.action === "refuse" && f.reason === "symlink_traversal")).toBe(true);
+    expect(await readFile(profilePath(), "utf8")).toBe(beforeProfile);
+    expect(existsSync(manifestPath(dir, "claude-code"))).toBe(false);
+    expect(existsSync(join(dir, "src", "context.md"))).toBe(false);
+  });
+
+  it("install --model with managed-modified content leaves profile, manifest, and files untouched", async () => {
+    await freshInstall();
+    const beforeProfile = await readFile(profilePath(), "utf8");
+    const beforeManifest = await readFile(manifestPath(dir, "claude-code"), "utf8");
+    const divergent = "# CLAUDE.md\nlocal edit\n";
+    await writeFile(join(dir, "CLAUDE.md"), divergent, "utf8");
+
+    const result = await runAdapterInstall({
+      cwd: dir,
+      agentName: "claude-code",
+      force: true,
+      locale: "en-US",
+      modelVersion: "sonnet-4.6",
+      generatorVersionOverride: "0.9.0-alpha.0",
+    });
+
+    expect(result.files.find((f) => f.relPath === "CLAUDE.md")?.action).toBe("refuse");
+    expect(await readFile(profilePath(), "utf8")).toBe(beforeProfile);
+    expect(await readFile(manifestPath(dir, "claude-code"), "utf8")).toBe(beforeManifest);
+    expect(await readFile(join(dir, "CLAUDE.md"), "utf8")).toBe(divergent);
+  });
+
+  it("install --model with an unowned generated overwrite leaves profile and target untouched", async () => {
+    const beforeProfile = await readFile(profilePath(), "utf8");
+    const profile = beforeProfile.replace("instruction_filename: CLAUDE.md", "instruction_filename: docs/agent.md");
+    await writeFile(profilePath(), profile, "utf8");
+    await mkdir(join(dir, "docs"), { recursive: true });
+    const existing = "hand authored\n";
+    await writeFile(join(dir, "docs", "agent.md"), existing, "utf8");
+    const beforeProfileWithRedirect = await readFile(profilePath(), "utf8");
+
+    const result = await runAdapterInstall({
+      cwd: dir,
+      agentName: "claude-code",
+      force: true,
+      locale: "en-US",
+      modelVersion: "sonnet-4.6",
+      generatorVersionOverride: "0.9.0-alpha.0",
+    });
+
+    expect(result.files.find((f) => f.relPath === "docs/agent.md")?.reason).toBe("unowned_generated_path");
+    expect(await readFile(profilePath(), "utf8")).toBe(beforeProfileWithRedirect);
+    expect(await readFile(join(dir, "docs", "agent.md"), "utf8")).toBe(existing);
+    expect(existsSync(manifestPath(dir, "claude-code"))).toBe(false);
+  });
+
+  it("upgrade --write --model with managed-modified content leaves profile, manifest, and files untouched", async () => {
+    await freshInstall();
+    const beforeProfile = await readFile(profilePath(), "utf8");
+    const beforeManifest = await readFile(manifestPath(dir, "claude-code"), "utf8");
+    const divergent = "# CLAUDE.md\nlocal edit\n";
+    await writeFile(join(dir, "CLAUDE.md"), divergent, "utf8");
+
+    const result = await runAdapterUpgrade({
+      cwd: dir,
+      agentName: "claude-code",
+      mode: "write",
+      force: false,
+      acceptModified: false,
+      locale: "en-US",
+      modelVersion: "sonnet-4.6",
+      generatorVersionOverride: "0.9.0-alpha.0",
+    });
+
+    expect(result.plan.find((f) => f.relPath === "CLAUDE.md")?.action).toBe("refuse");
+    expect(await readFile(profilePath(), "utf8")).toBe(beforeProfile);
+    expect(await readFile(manifestPath(dir, "claude-code"), "utf8")).toBe(beforeManifest);
+    expect(await readFile(join(dir, "CLAUDE.md"), "utf8")).toBe(divergent);
+  });
+
+  it("upgrade --write --model with a symlinked generated directory leaves profile and manifest untouched", async () => {
+    await freshInstall();
+    const beforeProfile = await readFile(profilePath(), "utf8");
+    const beforeManifest = await readFile(manifestPath(dir, "claude-code"), "utf8");
+    await rm(join(dir, ".claude", "skills"), { recursive: true, force: true });
+    await mkdir(join(dir, "src"), { recursive: true });
+    await symlink("../src", join(dir, ".claude", "skills"));
+
+    const result = await runAdapterUpgrade({
+      cwd: dir,
+      agentName: "claude-code",
+      mode: "write",
+      force: false,
+      acceptModified: false,
+      locale: "en-US",
+      modelVersion: "sonnet-4.6",
+      generatorVersionOverride: "0.9.0-alpha.0",
+    });
+
+    expect(result.plan.some((f) => f.action === "refuse" && f.reason === "symlink_traversal")).toBe(true);
+    expect(await readFile(profilePath(), "utf8")).toBe(beforeProfile);
+    expect(await readFile(manifestPath(dir, "claude-code"), "utf8")).toBe(beforeManifest);
+    expect(existsSync(join(dir, "src", "context.md"))).toBe(false);
+  });
+
+  it("upgrade --write --model with an unowned generated overwrite leaves profile, manifest, and target untouched", async () => {
+    await freshInstall();
+    const redirectedProfile = (await readFile(profilePath(), "utf8")).replace(
+      "instruction_filename: CLAUDE.md",
+      "instruction_filename: docs/agent.md",
+    );
+    await writeFile(profilePath(), redirectedProfile, "utf8");
+    await mkdir(join(dir, "docs"), { recursive: true });
+    const existing = "hand authored\n";
+    await writeFile(join(dir, "docs", "agent.md"), existing, "utf8");
+    const beforeManifest = await readFile(manifestPath(dir, "claude-code"), "utf8");
+
+    const result = await runAdapterUpgrade({
+      cwd: dir,
+      agentName: "claude-code",
+      mode: "write",
+      force: true,
+      acceptModified: false,
+      locale: "en-US",
+      modelVersion: "sonnet-4.6",
+      generatorVersionOverride: "0.9.0-alpha.0",
+    });
+
+    expect(result.plan.find((f) => f.relPath === "docs/agent.md")?.reason).toBe("unowned_generated_path");
+    expect(await readFile(profilePath(), "utf8")).toBe(redirectedProfile);
+    expect(await readFile(manifestPath(dir, "claude-code"), "utf8")).toBe(beforeManifest);
+    expect(await readFile(join(dir, "docs", "agent.md"), "utf8")).toBe(existing);
   });
 });
 
