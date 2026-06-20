@@ -97,6 +97,55 @@ async function projectReadyForArchive(prefix: string): Promise<Awaited<ReturnTyp
   return p;
 }
 
+async function projectWithSymlinkedPhaseAlias(prefix: string): Promise<{
+  p: Awaited<ReturnType<typeof createTempProject>>;
+  p2Path: string;
+  p2Before: string;
+}> {
+  const p = await createTempProject({ prefix });
+  cleanups.push(p.cleanup);
+  await writeFile(
+    join(p.dir, "design", "roadmap.yaml"),
+    `phases:
+  - id: P1
+    path: design/phases/P1.yaml
+    weight: 10
+  - id: P2
+    path: design/phases/P2.yaml
+    weight: 10
+`,
+    "utf8",
+  );
+  const p2 = `id: P2
+name: Aliased target
+weight: 10
+confidence: medium
+risk: low
+status: planned
+objective: Phase used to prove symlink alias writes are refused
+definition_of_done:
+  - done
+verification:
+  commands:
+    - "true"
+tasks:
+  - id: P1-T1
+    type: feature
+    ambiguity: low
+    risk: low
+    context_size: small
+    write_surface: low
+    verification_strength: weak
+    expected_duration: short
+    status: planned
+    description: aliased task
+`;
+  const p2Path = join(p.dir, "design", "phases", "P2.yaml");
+  await writeFile(p2Path, p2, "utf8");
+  await symlink("P2.yaml", join(p.dir, "design", "phases", "P1.yaml"));
+  return { p, p2Path, p2Before: await readFile(p2Path, "utf8") };
+}
+
 describe("owned symlink containment", () => {
   it("init refuses a symlinked design namespace before creating project files", async () => {
     const p = await createTempProject({ init: false, prefix: "code-pact-init-design-symlink-" });
@@ -131,6 +180,30 @@ describe("owned symlink containment", () => {
     await rm(join(p.dir, ".code-pact", "state", "events"), { recursive: true, force: true });
     await symlink(outside.dir, join(p.dir, ".code-pact", "state", "events"));
     const res = p.run(["task", "start", "P1-T1", "--agent", "claude-code", "--json"]);
+
+    expectConfigRefusal(res);
+    expect(await snapshotTree(outside.dir)).toEqual(outside.before);
+  });
+
+  it("write lock refuses a symlinked lock directory before creating an outside lock", async () => {
+    const p = await projectWithTask("code-pact-lock-symlink-");
+    const outside = await outsideTree("code-pact-lock-outside-");
+
+    await rm(join(p.dir, ".code-pact", "locks"), { recursive: true, force: true });
+    await symlink(outside.dir, join(p.dir, ".code-pact", "locks"));
+    const res = p.run([
+      "phase",
+      "add",
+      "--id",
+      "P2",
+      "--name",
+      "Lock symlink",
+      "--objective",
+      "Refuse lock writes through a symlink",
+      "--weight",
+      "10",
+      "--json",
+    ], { CODE_PACT_DISABLE_LOCKS: "" });
 
     expectConfigRefusal(res);
     expect(await snapshotTree(outside.dir)).toEqual(outside.before);
@@ -172,6 +245,70 @@ describe("owned symlink containment", () => {
 
     expectConfigRefusal(res);
     expect(await snapshotTree(join(p.dir, ".github"))).toEqual(before);
+  });
+
+  it("task add refuses an in-project symlinked phase file and leaves the target phase unchanged", async () => {
+    const { p, p2Path, p2Before } = await projectWithSymlinkedPhaseAlias("code-pact-task-add-phase-alias-");
+
+    const res = p.run([
+      "task",
+      "add",
+      "P1",
+      "--description",
+      "must not be written through a symlink alias",
+      "--type",
+      "feature",
+      "--json",
+    ]);
+
+    expectConfigRefusal(res);
+    expect(await readFile(p2Path, "utf8")).toBe(p2Before);
+  });
+
+  it("task finalize --write refuses an in-project symlinked phase file and leaves the target phase unchanged", async () => {
+    const { p, p2Path, p2Before } = await projectWithSymlinkedPhaseAlias("code-pact-task-finalize-phase-alias-");
+    await seedDurableEvents(
+      p.dir,
+      `events:
+  - task_id: P1-T1
+    status: done
+    at: 2026-06-01T00:00:00.000Z
+    actor: agent
+`,
+    );
+
+    const res = p.run(["task", "finalize", "P1-T1", "--write", "--json"]);
+
+    expect(res.code).toBe(2);
+    expect(await readFile(p2Path, "utf8")).toBe(p2Before);
+  });
+
+  it("task prepare refuses a profile-derived context_dir symlink and does not write into the target", async () => {
+    const p = await projectWithTask("code-pact-context-dir-symlink-");
+    await mkdir(join(p.dir, "src"), { recursive: true });
+    const before = await snapshotTree(join(p.dir, "src"));
+
+    await rm(join(p.dir, ".context", "claude-code"), { recursive: true, force: true });
+    await mkdir(join(p.dir, ".context"), { recursive: true });
+    await symlink("../src", join(p.dir, ".context", "claude-code"));
+    const res = p.run(["task", "prepare", "P1-T1", "--agent", "claude-code", "--json"]);
+
+    expectConfigRefusal(res);
+    expect(await snapshotTree(join(p.dir, "src"))).toEqual(before);
+  });
+
+  it("adapter install refuses new generated files through a symlinked owned directory", async () => {
+    const p = await createTempProject({ prefix: "code-pact-adapter-new-symlink-" });
+    cleanups.push(p.cleanup);
+    await mkdir(join(p.dir, "src"), { recursive: true });
+    await mkdir(join(p.dir, ".claude"), { recursive: true });
+    await symlink("../src", join(p.dir, ".claude", "skills"));
+    const before = await snapshotTree(join(p.dir, "src"));
+
+    const res = p.run(["adapter", "install", "claude-code", "--json"]);
+
+    expect(res.code).not.toBe(0);
+    expect(await snapshotTree(join(p.dir, "src"))).toEqual(before);
   });
 
   it("phase archive --write refuses a symlinked archive root before deleting live design", async () => {
