@@ -16,6 +16,7 @@ import {
   resolveWithinProject,
   type FileAction,
 } from "../core/adapters/file-state.ts";
+import { resolveOwnedProjectPath } from "../core/path-safety.ts";
 import {
   computeContentHash,
   readManifest,
@@ -135,6 +136,20 @@ async function loadAgentProfile(
     );
     (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
     throw e;
+  }
+}
+
+async function resolveOwnedAdapterPath(cwd: string, relPath: string): Promise<string> {
+  try {
+    return await resolveOwnedProjectPath(cwd, relPath);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "PATH_OUTSIDE_PROJECT" || code === "PATH_NOT_OWNED") {
+      const e = new Error((err as Error).message);
+      (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+      throw e;
+    }
+    throw err;
   }
 }
 
@@ -311,9 +326,9 @@ export async function runAdapterInstall(
   });
 
   // Directory placeholders (verified safe in the preflight above).
-  await mkdir(await resolveWithinProject(cwd, profile.context_dir), { recursive: true });
+  await mkdir(await resolveOwnedAdapterPath(cwd, profile.context_dir), { recursive: true });
   if (profile.hook_dir) {
-    await mkdir(await resolveWithinProject(cwd, profile.hook_dir), { recursive: true });
+    await mkdir(await resolveOwnedAdapterPath(cwd, profile.hook_dir), { recursive: true });
   }
 
   const created: string[] = [];
@@ -365,10 +380,11 @@ export async function runAdapterInstall(
       if (!owned) {
         action = "refuse";
         refuseReason = "unowned_generated_path";
-      } else if (await pathTraversesSymlink(cwd, desired.path)) {
-        action = "refuse";
-        refuseReason = "symlink_traversal";
       }
+    }
+    if (action !== "refuse" && await pathTraversesSymlink(cwd, desired.path)) {
+      action = "refuse";
+      refuseReason = "symlink_traversal";
     }
 
     fileResults.push({
