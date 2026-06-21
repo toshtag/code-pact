@@ -5,10 +5,11 @@ import { AgentProfile } from "../core/schemas/agent-profile.ts";
 import { ModelProfile } from "../core/schemas/model-profile.ts";
 import { Project } from "../core/schemas/project.ts";
 import { adapterRegistry } from "../core/adapters/index.ts";
-import { classifyManifestFileForRead } from "../core/adapters/manifest-file-ownership.ts";
+import { buildOwnedRoleMap } from "../core/adapters/manifest-file-ownership.ts";
+import { matchGlob } from "../core/glob.ts";
 import { isSupportedAgent, type SupportedAgent } from "../core/agents.ts";
 import { resolveAgentProfilePath } from "../core/agent-profile-path.ts";
-import { resolveWithinProject } from "../core/path-safety.ts";
+import { resolveOwnedProjectPath, resolveWithinProject } from "../core/path-safety.ts";
 import {
   computeContentHash,
   manifestPath,
@@ -437,25 +438,69 @@ export async function inspectAgent(
     }
 
     const desiredByPath = new Map(desiredFiles.map((f) => [f.path, f]));
-
+    // SECURITY (forged-manifest content/SHA oracle) — three authority tiers:
+    //
+    //   1. EXACT-AUTHORITY (in the current generated set with matching role, OR
+    //      in the narrow built-in static set). Doctor re-derived these, so it may
+    //      fully verify them — hash drift AND contract-heading inspection.
+    //   2. WRITE-NAMESPACE-ONLY (matches the broad writePathGlobs but NOT the
+    //      current desired/static set): a LEGITIMATE managed skill that is stale
+    //      or orphaned — its bytes are NOT exact-authority. Pre-existing behavior
+    //      is a benign drift/stale/missing WARNING; a skill's drift issues carry
+    //      NO sha256 / content, so they are not an oracle. We KEEP that behavior
+    //      but NEVER run the instruction heading/substring inspection on it (that
+    //      IS a content oracle) — guarded below by `isExactAuthority`.
+    //   3. OUT-OF-NAMESPACE (`.env`, a path matching neither): the forged-
+    //      manifest attack — refused, never read, hashed, or inspected.
+    const ownedStaticRoleMap = buildOwnedRoleMap(descriptor, desiredFiles);
+    const writeNamespace = descriptor.writePathGlobs ?? descriptor.ownedPathGlobs;
     for (const entry of manifest.files) {
-      // SECURITY (forged-manifest content/SHA oracle): the manifest is
-      // project-supplied. Refuse to read — and to hash or run contract-heading
-      // inspection on — any entry naming a path this adapter could not have
-      // generated. A forged `path: .env` is `unowned` → reported, never read,
-      // never hashed; `role: instruction, path: .env` never reaches
-      // detectContractDrift. Gated by the SAME trusted authority the writer
-      // uses (writePathGlobs ?? ownedPathGlobs) + the owned-path symlink guard.
-      const ownership = await classifyManifestFileForRead(cwd, descriptor, entry.path);
-      if (ownership.kind !== "owned") {
+      const desiredForAuth = desiredByPath.get(entry.path);
+      const inExactDesiredSet = desiredForAuth !== undefined && desiredForAuth.role === entry.role;
+      const inOwnedStaticSet = ownedStaticRoleMap.get(entry.path) === entry.role;
+      const isExactAuthority = inExactDesiredSet || inOwnedStaticSet;
+      const inWriteNamespace = writeNamespace.some((g) => matchGlob(g, entry.path));
+      if (!isExactAuthority && !inWriteNamespace) {
+        // Tier 3: forged path outside everything → refuse.
         issues.push(
           unsafeAdapterFileIssue(
             agentName as SupportedAgent,
             entry.path,
             join(cwd, entry.path),
-            ownership.kind === "unsafe"
-              ? "resolves through a symlink or escapes the project root"
-              : "is not a path this adapter generates (forged-manifest guard)",
+            "is not a path/role this adapter generates (forged-manifest guard) — refusing to read",
+          ),
+        );
+        continue;
+      }
+      if (!isExactAuthority) {
+        // Tier 2: in the broad write namespace but NOT the current exact set —
+        // a legitimate stale/orphaned managed skill OR a victim's hand-authored
+        // `.claude/skills/private.md`. The two are INDISTINGUISHABLE by path, and
+        // reading the bytes would be a potential content oracle, so doctor does
+        // NOT read it. Advisory (warning, never an error) so a normal repo with
+        // stale command-skills does not fail validate; resolve by re-running
+        // `adapter upgrade --write` (which rewrites the manifest to the current
+        // set) or removing the stray file.
+        issues.push({
+          code: "ADAPTER_FILE_UNVERIFIABLE",
+          severity: "warning",
+          message: `Managed file "${entry.path}" is in the shared skills namespace but not in the adapter's current generated set — read-ownership cannot be proven, so it was not read or verified. Re-run "adapter upgrade ${agentName} --write" to refresh the manifest, or remove the stray file.`,
+          agent: agentName,
+          path: join(cwd, entry.path),
+        });
+        continue;
+      }
+      // Even an authorized path must traverse no symlink before any read
+      // (an in-project `.claude/skills -> ../../etc` redirect must be refused).
+      try {
+        await resolveOwnedProjectPath(cwd, entry.path);
+      } catch {
+        issues.push(
+          unsafeAdapterFileIssue(
+            agentName as SupportedAgent,
+            entry.path,
+            join(cwd, entry.path),
+            "resolves through a symlink or escapes the project root",
           ),
         );
         continue;
@@ -527,7 +572,12 @@ export async function inspectAgent(
       // signal). Resolution: `code-pact adapter upgrade <agent>
       // --write --accept-modified` reinstates the section while
       // preserving any user edits.
-      if (entry.role === "instruction" && diskContent !== null) {
+      // SECURITY: the heading/substring inspection IS a content oracle, so it
+      // runs ONLY on an EXACT-AUTHORITY instruction file (the built-in CLAUDE.md
+      // doctor itself generates) — never on a mere write-namespace member that
+      // forged `role: instruction`. A skill or a stale/aliased path never gets
+      // here as an instruction inspection.
+      if (isExactAuthority && entry.role === "instruction" && diskContent !== null) {
         const contractIssue = detectContractDrift(
           agentName as SupportedAgent,
           entry.path,

@@ -284,9 +284,12 @@ export async function runAdapterConformance(
 
   checks.push(pass("manifest_present"));
 
-  // The adapter's trusted authority — the source of truth for which paths this
-  // adapter could have generated. EVERY manifest-entry read below is gated by it
-  // so a forged manifest cannot turn a diagnostic into a file-content/SHA oracle.
+  // The adapter descriptor carries the NARROW static read authority
+  // (ownedPathGlobs — the wildcard-free built-in paths, NOT the shared
+  // writePathGlobs namespace). EVERY manifest-entry read below is gated by it so
+  // a forged manifest cannot turn a diagnostic into a file-content/SHA oracle —
+  // including on a victim's hand-authored `.claude/skills/private.md`, which is
+  // in the shared write namespace but NOT in the narrow read-authority set.
   const descriptor = adapterRegistry[agentName];
 
   const instructionEntry = findInstructionFile(manifest);
@@ -482,6 +485,19 @@ export async function runAdapterConformance(
     // computed, no content leaves this function. This closes the dictionary/
     // low-entropy-token oracle on arbitrary local files.
     const ownership = await classifyManifestFileForRead(cwd, descriptor, entry.path);
+    if (ownership.kind === "unverifiable_dynamic") {
+      // A legitimately generated dynamic skill in the shared namespace. Its name
+      // is attacker-influenceable, so we cannot prove read-ownership: skip the
+      // checksum (never read it) rather than hashing it or flagging it. Advisory
+      // so a normal adapter with command-derived skills stays compliant.
+      checks.push(
+        fail("file_checksum_skipped_unverifiable", entry.path, {
+          reason:
+            "dynamic skill in the shared .claude/skills namespace — read-ownership cannot be proven; checksum skipped (not read)",
+        }, "advisory"),
+      );
+      continue;
+    }
     if (ownership.kind !== "owned") {
       checks.push(
         fail("adapter_file_path_unowned", entry.path, {

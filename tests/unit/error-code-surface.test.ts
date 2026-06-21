@@ -221,6 +221,7 @@ const KNOWN_CODES: Record<string, "public" | "plan" | "doctor" | "adapter" | "in
   ADAPTER_FILE_DRIFT: "adapter",
   ADAPTER_FILE_MISSING: "adapter",
   ADAPTER_FILE_PATH_UNSAFE: "adapter",
+  ADAPTER_FILE_UNVERIFIABLE: "adapter",
   ADAPTER_GENERATOR_STALE: "adapter",
   ADAPTER_MANIFEST_INVALID: "adapter",
   ADAPTER_MANIFEST_MISSING: "adapter",

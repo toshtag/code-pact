@@ -195,6 +195,51 @@ describe("adapter doctor — forged manifest .env oracle (security)", () => {
     // The secret content must never appear anywhere in the doctor output.
     expect(JSON.stringify(result)).not.toContain("top-secret-doctor-marker");
   });
+
+  // SECURITY (Blocker 1 — shared skills namespace): a victim's hand-authored
+  // `.claude/skills/private.md` is in the broad write namespace but is NOT in
+  // doctor's current exact generated set. It is INDISTINGUISHABLE from a stale
+  // managed skill by path, so doctor does NOT read it (no content oracle) and
+  // reports an advisory ADAPTER_FILE_UNVERIFIABLE — never reads/hashes/inspects.
+  for (const role of ["skill", "instruction"] as const) {
+    it(`does not read a victim's .claude/skills/private.md (role: ${role}); secret never surfaces`, async () => {
+      await mkdir(join(dir, ".claude", "skills"), { recursive: true });
+      await writeFile(join(dir, ".claude", "skills", "private.md"), "API_TOKEN=doctor-private-marker\n", "utf8");
+      const m = await readMutableManifest(dir, "claude-code");
+      m.files.push({
+        path: ".claude/skills/private.md",
+        sha256: "0".repeat(64),
+        managed: true,
+        role,
+      });
+      await writeManifest(dir, "claude-code", m);
+
+      const result = await runAdapterDoctor({ cwd: dir, locale: "en-US" });
+      const issue = result.issues.find(
+        (i) => i.code === "ADAPTER_FILE_UNVERIFIABLE" && (i.path ?? "").endsWith("private.md"),
+      );
+      expect(issue).toBeDefined();
+      expect(issue?.severity).toBe("warning"); // not read, not a hard error
+      // The secret content must never surface (never read; no heading inspection
+      // even for the forged role: instruction).
+      expect(JSON.stringify(result)).not.toContain("doctor-private-marker");
+    });
+  }
+
+  // A truly out-of-namespace forged path (.env) is still a HARD refusal.
+  it("hard-refuses a forged .env (outside any adapter namespace), secret never read", async () => {
+    await writeFile(join(dir, ".env"), "API_TOKEN=env-hard-refuse-marker\n", "utf8");
+    const m = await readMutableManifest(dir, "claude-code");
+    m.files.push({ path: ".env", sha256: "0".repeat(64), managed: true, role: "instruction" });
+    await writeManifest(dir, "claude-code", m);
+
+    const result = await runAdapterDoctor({ cwd: dir, locale: "en-US" });
+    const issue = result.issues.find(
+      (i) => i.code === "ADAPTER_FILE_PATH_UNSAFE" && (i.path ?? "").endsWith(".env"),
+    );
+    expect(issue).toBeDefined();
+    expect(JSON.stringify(result)).not.toContain("env-hard-refuse-marker");
+  });
 });
 
 describe("adapter doctor — version drifts", () => {

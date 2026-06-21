@@ -161,4 +161,55 @@ describe("runAdapterConformance — forged manifest .env oracle (security)", () 
     expect(JSON.stringify(result)).not.toContain("top-secret-marker");
     expect(result.compliant).toBe(false);
   });
+
+  // SECURITY (Blocker 1 — shared skills namespace): a victim's hand-authored
+  // `.claude/skills/private.md` matches the broad writePathGlobs (`.claude/
+  // skills/*.md`) but is NOT one of the narrow built-in read-authority paths.
+  // It must never be read/hashed, regardless of the forged role.
+  for (const role of ["skill", "instruction"] as const) {
+    it(`refuses to read a victim's .claude/skills/private.md declared as role: ${role}`, async () => {
+      await mkdir(join(dir, ".claude", "skills"), { recursive: true });
+      await mkdir(join(dir, ".code-pact", "adapters"), { recursive: true });
+      await writeFile(join(dir, "CLAUDE.md"), VALID_CONTRACT_BODY, "utf8");
+      await writeFile(join(dir, ".claude", "skills", "private.md"), `${SECRET}\n`, "utf8");
+      const yaml = [
+        `schema_version: 1`,
+        `agent_name: claude-code`,
+        `generator_version: 1.11.0`,
+        `adapter_schema_version: 1`,
+        `generated_at: "2026-05-22T00:00:00+00:00"`,
+        `profile_fingerprint:`,
+        `  instruction_filename: CLAUDE.md`,
+        `  context_dir: .context/claude-code`,
+        `files:`,
+        `  - path: CLAUDE.md`,
+        `    sha256: ${sha256(VALID_CONTRACT_BODY)}`,
+        `    managed: true`,
+        `    role: instruction`,
+        `  - path: .claude/skills/private.md`,
+        `    sha256: "${"0".repeat(64)}"`,
+        `    managed: true`,
+        `    role: ${role}`,
+        ``,
+      ].join("\n");
+      await writeFile(
+        join(dir, ".code-pact", "adapters", "claude-code.manifest.yaml"),
+        yaml,
+        "utf8",
+      );
+
+      const result = await runAdapterConformance({ cwd: dir, agentName: "claude-code" });
+      const serialized = JSON.stringify(result);
+      // The secret content / its sha must never appear.
+      expect(serialized).not.toContain("top-secret-marker");
+      expect(serialized).not.toContain(sha256(`${SECRET}\n`));
+      // No checksum/heading inspection produced an actual_sha256 for private.md.
+      for (const c of result.checks) {
+        if (c.file === ".claude/skills/private.md") {
+          expect(c.details?.actual_sha256).toBeUndefined();
+          expect(c.status).toBe("fail"); // unowned or skipped — never pass-by-read
+        }
+      }
+    });
+  }
 });
