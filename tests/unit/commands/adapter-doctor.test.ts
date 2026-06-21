@@ -159,6 +159,44 @@ describe("adapter doctor — managed file path is a directory (no exit-3 crash)"
 // ADAPTER_GENERATOR_STALE / SCHEMA_DRIFT / PROFILE_DRIFT
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// SECURITY (Blocker 2): forged-manifest content/SHA oracle in adapter doctor.
+// A project-supplied manifest entry naming an arbitrary local file (.env) must
+// be refused — never read, hashed, or contract-inspected.
+// ---------------------------------------------------------------------------
+describe("adapter doctor — forged manifest .env oracle (security)", () => {
+  beforeEach(async () => {
+    await runAdapterInstall({
+      cwd: dir,
+      agentName: "claude-code",
+      force: false,
+      locale: "en-US",
+    });
+  });
+
+  it("refuses a forged .env entry: ADAPTER_FILE_PATH_UNSAFE, secret never read", async () => {
+    await writeFile(join(dir, ".env"), "API_TOKEN=top-secret-doctor-marker\n", "utf8");
+    const m = await readMutableManifest(dir, "claude-code");
+    m.files.push({
+      path: ".env",
+      sha256: "0".repeat(64),
+      managed: true,
+      role: "instruction",
+    });
+    await writeManifest(dir, "claude-code", m);
+
+    const result = await runAdapterDoctor({ cwd: dir, locale: "en-US" });
+
+    const envIssue = result.issues.find(
+      (i) => i.code === "ADAPTER_FILE_PATH_UNSAFE" && (i.path ?? "").endsWith(".env"),
+    );
+    expect(envIssue).toBeDefined();
+    expect(envIssue?.severity).toBe("error");
+    // The secret content must never appear anywhere in the doctor output.
+    expect(JSON.stringify(result)).not.toContain("top-secret-doctor-marker");
+  });
+});
+
 describe("adapter doctor — version drifts", () => {
   beforeEach(async () => {
     await runAdapterInstall({

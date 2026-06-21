@@ -246,6 +246,7 @@ ids require an RFC and an entry in `src/core/adapters/conformance-spec.ts`.
 | `lifecycle_mode_guidance_present` | The guidance documents `lifecycleMode` and the `record_only` lane (anchored on `lifecycleMode` + `record_only`) |
 | `cannot_switch_model_fallback_present` | The guidance tells the agent to report a limitation when it `cannot switch model` rather than ignore the recommendation |
 | `file_checksum_match` | Per-file: on-disk sha256 equals manifest |
+| `adapter_file_path_unowned` | Manifest entry names a path this adapter could not have generated, or one resolving through a symlink. Target is not read (no `actual_sha256`, no heading inspection) — forged-manifest content/SHA-oracle guard. Always `required` |
 
 **Severity.** Each check carries a `severity` of `required`
 or `advisory`. `compliant` is `true` unless a **required** check fails;

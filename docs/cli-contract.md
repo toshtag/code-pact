@@ -365,7 +365,7 @@ Emitted by `adapter doctor` and (manifest-aware) global `doctor`. See the `adapt
 | `ADAPTER_SCHEMA_DRIFT` | warning | Manifest's `adapter_schema_version` is older than the module's declared version |
 | `ADAPTER_PROFILE_DRIFT` | warning | Profile fields recorded in `profile_fingerprint` have changed since install |
 | `ADAPTER_FILE_MISSING` | error | A file listed in the manifest is missing from disk |
-| `ADAPTER_FILE_PATH_UNSAFE` | error | A file listed in the manifest resolves through an unsafe / non-contained path (for example, a symlink escape). `adapter doctor` / global `doctor` do not read the target; fix the path or regenerate the adapter output. |
+| `ADAPTER_FILE_PATH_UNSAFE` | error | A file listed in the manifest resolves through an unsafe / non-contained path (for example, a symlink escape), OR names a path this adapter could not have generated (forged-manifest guard). `adapter doctor` / global `doctor` do not read, hash, or inspect the target; fix the path or regenerate the adapter output. |
 | `ADAPTER_FILE_DRIFT` | warning | A managed file was locally modified AND the generator output also moved on |
 | `ADAPTER_DESIRED_STALE` | warning | A managed file is unchanged locally but the generator now produces different content |
 | `ADAPTER_UNMANAGED_FILE` | warning | A file under `ownedPathGlobs` exists on disk but is not in the manifest |
@@ -1544,6 +1544,7 @@ Every check object carries a `severity` (`required` | `advisory`). The three P30
 | `no_contract_antipatterns` | The instruction / its examples contain no P29 anti-pattern (e.g. `task finalize ... --agent`) |
 | `activation_rules_documented` | The activation-rule anchors (`task finalize --write`, `wait_for_dependencies`, `CONTEXT_OVER_BUDGET`) are present — verifies documentation presence, not runtime obedience |
 | `file_checksum_match` | One per manifest file: the on-disk LF-normalised UTF-8 sha256 equals the manifest's recorded value |
+| `adapter_file_path_unowned` | A manifest entry (the `role: instruction` file, or any `files[]` entry) names a path this adapter could not have generated, or that resolves through a symlink. The target is NOT read — no `actual_sha256` and no contract-heading inspection are produced — so a forged manifest cannot turn conformance into a file-content/SHA oracle on arbitrary local files (e.g. `.env`). Always `required` severity (fail-closed). |
 
 #### Severity (v1.x, P30)
 

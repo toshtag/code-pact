@@ -5,6 +5,7 @@ import { AgentProfile } from "../core/schemas/agent-profile.ts";
 import { ModelProfile } from "../core/schemas/model-profile.ts";
 import { Project } from "../core/schemas/project.ts";
 import { adapterRegistry } from "../core/adapters/index.ts";
+import { classifyManifestFileForRead } from "../core/adapters/manifest-file-ownership.ts";
 import { isSupportedAgent, type SupportedAgent } from "../core/agents.ts";
 import { resolveAgentProfilePath } from "../core/agent-profile-path.ts";
 import { resolveWithinProject } from "../core/path-safety.ts";
@@ -438,6 +439,27 @@ export async function inspectAgent(
     const desiredByPath = new Map(desiredFiles.map((f) => [f.path, f]));
 
     for (const entry of manifest.files) {
+      // SECURITY (forged-manifest content/SHA oracle): the manifest is
+      // project-supplied. Refuse to read — and to hash or run contract-heading
+      // inspection on — any entry naming a path this adapter could not have
+      // generated. A forged `path: .env` is `unowned` → reported, never read,
+      // never hashed; `role: instruction, path: .env` never reaches
+      // detectContractDrift. Gated by the SAME trusted authority the writer
+      // uses (writePathGlobs ?? ownedPathGlobs) + the owned-path symlink guard.
+      const ownership = await classifyManifestFileForRead(cwd, descriptor, entry.path);
+      if (ownership.kind !== "owned") {
+        issues.push(
+          unsafeAdapterFileIssue(
+            agentName as SupportedAgent,
+            entry.path,
+            join(cwd, entry.path),
+            ownership.kind === "unsafe"
+              ? "resolves through a symlink or escapes the project root"
+              : "is not a path this adapter generates (forged-manifest guard)",
+          ),
+        );
+        continue;
+      }
       const diskRead = await readProjectFileForDoctor(cwd, entry.path);
       const absPath = diskRead.absPath;
       if (diskRead.kind === "unsafe") {

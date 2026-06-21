@@ -34,6 +34,14 @@ jobs:
       - run: pnpm check:docs
         if: matrix.profile == 'full'
 
+      # Lexical filesystem-containment guard: flags raw readFile(join(cwd, ...))
+      # reads that bypass the owned/contained path seams. A structural backstop
+      # for the path-containment work; the SEMANTIC invariants (decision_refs
+      # namespace, forged-manifest ownership) are pinned by the security
+      # regression tests in test:unit, which this does NOT replace.
+      - run: pnpm check:fs-containment
+        if: matrix.profile == 'full'
+
       - run: pnpm typecheck
 
       - run: pnpm test:unit
