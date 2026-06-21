@@ -2,7 +2,7 @@
 // `spawnSync`. The integration test script builds dist once before Vitest
 // starts so files can run in parallel without racing tsup cleanup.
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
-import { mkdtemp, mkdir, rm, readFile, writeFile, symlink } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, readFile, readdir, writeFile, symlink } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
@@ -185,6 +185,32 @@ describe("CLI: post-command --json (BUG-001)", () => {
     } finally {
       await rm(outside, { recursive: true, force: true });
     }
+  });
+
+  it("task add --decision-ref .env → CONFIG_ERROR exit 2 (user input, not internal exit 3); phase YAML untouched", async () => {
+    // Must-fix: a bad --decision-ref is USER INPUT. It must surface as a
+    // structured CONFIG_ERROR / exit 2 at the CLI boundary, never the exit-3
+    // internal fault a downstream Phase.parse ZodError would otherwise become.
+    run(["init", "--locale", "en-US", "--agent", "claude-code", "--json"]);
+    run(["phase", "add", "--id", "P1", "--name", "Foundation", "--objective", "Foundation phase", "--weight", "10", "--json"]);
+    const phaseFile = join(tmpDir, "design", "phases", "P1-foundation.yaml");
+    const before = await readFile(phaseFile, "utf8").catch(async () => {
+      // phase file name may differ; read whatever single phase file exists
+      const dirents = await readdir(join(tmpDir, "design", "phases"));
+      return readFile(join(tmpDir, "design", "phases", dirents[0]!), "utf8");
+    });
+
+    const res = run(["task", "add", "P1", "--description", "x", "--decision-ref", ".env", "--json"]);
+    expect(res.code).toBe(2);
+    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+    expect(parsed.ok).toBe(false);
+    expect(parsed.error.code).toBe("CONFIG_ERROR");
+    expect(`${res.stdout}${res.stderr}`).not.toMatch(/internal error/i);
+
+    // Phase YAML byte-identical: nothing was written, no task added.
+    const dirents = await readdir(join(tmpDir, "design", "phases"));
+    const after = await readFile(join(tmpDir, "design", "phases", dirents[0]!), "utf8");
+    expect(after).toBe(before);
   });
 
   it("verify ... --json (post-command) produces JSON-only stdout", () => {

@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { parse as parseYaml } from "yaml";
 import { Phase } from "../schemas/phase.ts";
-import { resolveWithinProject } from "../path-safety.ts";
+import { resolveOwnedProjectPath } from "../path-safety.ts";
 
 // The single seam that reads one LIVE phase YAML file off disk and validates it
 // as a full `Phase`. This exact body used to be byte-duplicated across ~8
@@ -29,19 +29,22 @@ import { resolveWithinProject } from "../path-safety.ts";
 // context — missing-tolerance, where wanted, is a SEPARATE archived-aware path,
 // never a swallowed throw here.
 export async function loadPhase(cwd: string, path: string): Promise<Phase> {
-  // `path` is the roadmap's (project-controlled) phase ref. Resolve it through
-  // the project boundary so a `..`/absolute ref or a symlinked `design/phases/*`
-  // cannot read an out-of-project file into the rendered context pack / generated
-  // skills (CWE-59) — the same agent-facing-read class as the constitution leak.
-  // A path-safety refusal maps to CONFIG_ERROR (fail-closed, structured — this is
-  // a control-plane input, NOT an optional source, so it is never swallowed to
-  // null). A missing/invalid phase still throws ENOENT/ZodError as before.
+  // `path` is the roadmap's (project-controlled) phase ref. OWN the read: a
+  // `..`/absolute ref OR a symlinked `design/phases/*` — even one pointing to an
+  // IN-PROJECT private file (e.g. `.local/private-phase.yaml`) — must not read an
+  // aliased file into the rendered context pack / generated skills (CWE-59), the
+  // same agent-facing-read class as the constitution leak. resolveOwnedProjectPath
+  // rejects EVERY symlink component, matching the strict loadPlanState contract
+  // on the same control plane (Blocker: roadmap/phase symlink-alias parity). A
+  // refusal maps to CONFIG_ERROR (fail-closed; control-plane input, never
+  // swallowed to null). A genuinely-missing (non-symlink) phase still throws RAW
+  // ENOENT — the legitimate archived-fallback signal resolve-task keys on.
   let abs: string;
   try {
-    abs = await resolveWithinProject(cwd, path);
+    abs = await resolveOwnedProjectPath(cwd, path);
   } catch (err) {
     const e = new Error(
-      `Phase path "${path}" is not a safe project-relative path: ${(err as Error).message}`,
+      `Phase path "${path}" is not a safe owned project path: ${(err as Error).message}`,
     );
     (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
     throw e;

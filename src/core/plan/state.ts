@@ -2,7 +2,7 @@ import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { loadYaml, ParseError } from "../../io/load.ts";
-import { resolveOwnedProjectPath, resolveWithinProject } from "../path-safety.ts";
+import { resolveOwnedProjectPath } from "../path-safety.ts";
 import { Phase, type Phase as PhaseT } from "../schemas/phase.ts";
 import {
   ProgressLog,
@@ -388,13 +388,14 @@ export async function collectPlanArtifacts(
 
   let roadmap: RoadmapT | null = null;
   try {
-    // Contain the roadmap read. A `..`/symlink escape OR a parse/schema error
-    // both become a FileIssue on `design/roadmap.yaml` → planArtifactsUnreadable
-    // fail-closes (so decision prune/retire cannot be authorized off an
-    // out-of-project roadmap that hides the current project's referencing tasks).
-    // pushParseIssue tags the containment refusal (a non-ParseError CONFIG_ERROR)
-    // as an INVALID_YAML error FileIssue.
-    const rmAbs = await resolveWithinProject(cwd, "design/roadmap.yaml");
+    // OWN the roadmap read. A `..`/symlink alias (in- OR out-of-project) OR a
+    // parse/schema error both become a FileIssue on `design/roadmap.yaml` →
+    // planArtifactsUnreadable fail-closes (so decision prune/retire cannot be
+    // authorized off an ALIASED roadmap that hides the current project's
+    // referencing tasks — the same control-plane parity the strict loader holds).
+    // pushParseIssue tags the ownership refusal (a non-ParseError CONFIG_ERROR /
+    // PATH_NOT_OWNED) as an INVALID_YAML error FileIssue.
+    const rmAbs = await resolveOwnedProjectPath(cwd, "design/roadmap.yaml");
     roadmap = await loadYaml(rmAbs, Roadmap);
   } catch (err) {
     pushParseIssue(fileIssues, err, "design/roadmap.yaml");
@@ -424,9 +425,9 @@ export async function collectPlanArtifacts(
   for (const ref of roadmap.phases) {
     let absPath: string;
     try {
-      // Contain each phase ref; a symlink-escaping ref becomes a graph-file
-      // FileIssue (fail-closed for prune/retire), not an out-of-project read.
-      absPath = await resolveWithinProject(cwd, ref.path);
+      // OWN each phase ref; a symlink alias (in- OR out-of-project) becomes a
+      // graph-file FileIssue (fail-closed for prune/retire), not an aliased read.
+      absPath = await resolveOwnedProjectPath(cwd, ref.path);
     } catch (err) {
       pushParseIssue(fileIssues, err, ref.path);
       continue;

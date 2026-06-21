@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { parse as parseYaml } from "yaml";
 import { Roadmap } from "../schemas/roadmap.ts";
-import { resolveWithinProject } from "../path-safety.ts";
+import { resolveOwnedProjectPath } from "../path-safety.ts";
 
 /**
  * Strict loader for the phase registry at `design/roadmap.yaml`.
@@ -15,16 +15,20 @@ import { resolveWithinProject } from "../path-safety.ts";
  * This is the single roadmap-discovery seam shared by every command.
  */
 export async function loadRoadmap(cwd: string): Promise<Roadmap> {
-  // Contain the read: a symlinked `design/` or `design/roadmap.yaml` must not
-  // pull an out-of-project roadmap into agent-facing output (context pack /
-  // generated skills). A path-safety refusal maps to CONFIG_ERROR (fail-closed,
-  // structured); a missing/invalid roadmap still throws ENOENT/ZodError as before.
+  // OWN the read: `design/roadmap.yaml` is control-plane. A symlinked `design/`
+  // or `design/roadmap.yaml` — even one pointing INSIDE the project (e.g. to a
+  // `.local/` private file) — must not pull an aliased roadmap into agent-facing
+  // output (context pack / generated skills). resolveOwnedProjectPath rejects
+  // EVERY symlink component, matching the strict loadPlanState contract on the
+  // same control plane (Blocker: roadmap/phase symlink-alias parity). A refusal
+  // maps to CONFIG_ERROR (fail-closed); a missing/invalid roadmap still throws
+  // ENOENT/ZodError as before.
   let abs: string;
   try {
-    abs = await resolveWithinProject(cwd, "design/roadmap.yaml");
+    abs = await resolveOwnedProjectPath(cwd, "design/roadmap.yaml");
   } catch (err) {
     const e = new Error(
-      `design/roadmap.yaml is not a safe project-relative path: ${(err as Error).message}`,
+      `design/roadmap.yaml is not a safe owned project path: ${(err as Error).message}`,
     );
     (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
     throw e;

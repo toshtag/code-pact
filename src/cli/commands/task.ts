@@ -56,6 +56,7 @@ import {
   VerificationStrength,
   ExpectedDuration,
 } from "../../core/schemas/task.ts";
+import { decisionRefPathReason } from "../../core/schemas/decision-ref.ts";
 import {
   buildFailureSummaryFromChecks,
   buildFailureSummaryFromFinalizeCode,
@@ -493,6 +494,26 @@ async function cmdTaskAdd(
       if (Array.isArray(raw)) return raw.filter((v): v is string => typeof v === "string");
       return undefined;
     };
+
+    // Validate --decision-ref at the CLI boundary. A bad value (`.env`, a
+    // traversal, a nested path) is USER INPUT — surface it as CONFIG_ERROR /
+    // exit 2, not as the exit-3 internal fault a downstream Phase.parse ZodError
+    // would become (which has no `code` and escapes the catch below). The schema
+    // re-validates on write; this is the early, honest boundary error. The
+    // phase YAML is never touched: we return before runTaskAdd.
+    const declaredDecisionRefs = asStringArray(values["decision-ref"]);
+    if (declaredDecisionRefs) {
+      for (const ref of declaredDecisionRefs) {
+        const reason = decisionRefPathReason(ref);
+        if (reason !== "") {
+          emitConfigError(
+            `task add: invalid --decision-ref "${ref}": ${reason} (expected design/decisions/*.md, top-level)`,
+            json,
+          );
+          return 2;
+        }
+      }
+    }
 
     nonInteractiveSpec = {
       description,

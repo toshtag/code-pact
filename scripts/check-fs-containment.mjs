@@ -7,10 +7,16 @@
 // file into agent-facing output, or make the write escape the project.
 //
 // This is NOT a proof — it is a cheap, local, edit-time nudge (wired as a
-// PostToolUse hook) so the class is caught at authoring time WITHOUT bloating
-// CI. It deliberately favors a few false positives over a miss; silence a line
-// that is genuinely safe (e.g. a path with no attacker influence) with a
-// trailing `// fs-safe: <reason>` marker, which doubles as the migration log.
+// PostToolUse hook) AND a CI tripwire (run as `pnpm check:fs-containment` in the
+// CI full profile) so the class is caught both at authoring time and on every
+// PR. It is a STRUCTURAL backstop only: it flags lexical `join(...)` fs calls,
+// NOT semantic ownership, shared-namespace authority, helper-indirected I/O,
+// schema/lifecycle contracts, in-project-symlink aliases, or CLI error mapping —
+// those are pinned by the security regression tests, which this does not
+// replace. A clean exit 0 is NOT a proof of filesystem security. It deliberately
+// favors a few false positives over a miss; silence a line that is genuinely
+// safe (e.g. a path with no attacker influence) with a trailing
+// `// fs-safe: <reason>` marker, which doubles as the migration log.
 //
 // Usage: node scripts/check-fs-containment.mjs <file.ts> [<file.ts> ...]
 // Exit: 0 = clean (or nothing to check); 1 = findings printed to stdout.
@@ -75,11 +81,11 @@ function walk(dir, out) {
 }
 
 // With explicit file args (the hook's mode) check just those; with no args
-// (`pnpm check:fs-containment`) sweep the whole path-handling surface as a
-// migration report. This is NOT wired into the gate — the existing codebase has
-// a known baseline of lexical reads (some are the open follow-up to contain
-// .code-pact/project.yaml / model-profiles); it is a discoverable report + the
-// engine behind the local edit-time hook.
+// (`pnpm check:fs-containment`) sweep the whole path-handling surface. This IS
+// wired into the CI gate (full profile) and currently exits 0 on a clean tree;
+// it is also the engine behind the local edit-time hook. Remember it is a
+// STRUCTURAL tripwire (lexical join only) — exit 0 does not prove the semantic
+// invariants; those live in the security regression tests.
 const argv = process.argv.slice(2);
 const files = (argv.length > 0 ? argv : walk("src", [])).filter(inScope);
 let total = 0;
