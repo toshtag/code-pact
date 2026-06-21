@@ -24,7 +24,8 @@ import { buildContextPack } from "../pack/index.ts";
 import { recommendContextFit } from "../recommend/context-fit.ts";
 import { STANDARD_CONTEXT_BUDGET_PROFILES } from "./budget-profiles.ts";
 import { validateGlobSyntax, walkAndMatch } from "../glob.ts";
-import { assertSafeRelativePath, resolveWithinProject } from "../path-safety.ts";
+import { assertSafeRelativePath, resolveOwnedProjectPath } from "../path-safety.ts";
+import { isDecisionRefPath } from "../schemas/decision-ref.ts";
 import type { PhaseEntry } from "../plan/state.ts";
 import type { PlanIssue } from "../plan/shared.ts";
 
@@ -117,15 +118,18 @@ export async function detectContextFitAdvisories(
       const decisionRefs = task.decision_refs ?? [];
       for (let i = 0; i < decisionRefs.length; i++) {
         const ref = decisionRefs[i]!;
-        // An unsafe or missing decision ref is already reported by the
-        // dedicated structural detectors (TASK_DECISION_REF_UNSAFE_PATH /
-        // TASK_DECISION_REF_NOT_FOUND). Skip those here to avoid a misleading
-        // duplicate advisory.
-        if (!isSafePath(ref)) continue;
+        // An out-of-namespace, unsafe, or missing decision ref is already
+        // reported by the dedicated structural detector
+        // (TASK_DECISION_REF_UNSAFE_PATH). Skip those here to avoid a
+        // misleading duplicate advisory — AND, critically, to never read an
+        // arbitrary file (e.g. `.env`) just to measure its size. The namespace
+        // check is the same `isDecisionRefPath` the schema/gate use; the read
+        // goes through the owned seam (rejects any symlink component).
+        if (!isDecisionRefPath(ref)) continue;
         let bytes = fileBytesCache.get(ref);
         if (bytes === undefined) {
           try {
-            const content = await readFile(await resolveWithinProject(cwd, ref), "utf8");
+            const content = await readFile(await resolveOwnedProjectPath(cwd, ref), "utf8");
             bytes = Buffer.byteLength(content, "utf8");
           } catch {
             bytes = null; // missing/unreadable → not our advisory to raise

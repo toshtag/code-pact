@@ -16,6 +16,7 @@ import {
   makeDecisionResolver,
   classifyDecisionAdrs,
 } from "../../../../src/core/decisions/adr.ts";
+import { loadDeclaredDecisions } from "../../../../src/core/pack/loaders.ts";
 
 describe("hasDecisionAdrForTaskId", () => {
   it("matches a .md whose name includes the task id", () => {
@@ -448,6 +449,39 @@ describe("resolveDecisionGate — decision_refs path safety (fail-closed)", () =
     expect(
       res.considered.find((c) => c.path.includes("outside.md"))?.acceptance,
     ).toBe("unsafe_path");
+  });
+
+  // SECURITY (Blocker 1): an IN-PROJECT non-decision file. Path-safety alone
+  // would PASS (.env is inside the root, no `..`, no symlink), and `.env` has
+  // no status line — so WITHOUT the namespace guard the gate would read it,
+  // classify it "accepted" (lenient no-status rule), and RELEASE the
+  // requires_decision gate. The namespace check (isDecisionRefPath) closes it:
+  // out-of-namespace → unsafe_path, never read, never resolves.
+  it("in-project .env ref → unsafe_path, never read, gate NOT released", async () => {
+    await writeFile(join(cwd, ".env"), "API_TOKEN=secret-marker\n");
+    const res = await resolveDecisionGate(cwd, "P1-T1", [".env"]);
+    expect(res.resolved).toBe(false);
+    const entry = res.considered.find((c) => c.path.includes(".env"));
+    expect(entry?.acceptance).toBe("unsafe_path");
+    expect(entry?.accepted).toBe(false);
+    // The secret content must never surface in the resolution result.
+    expect(JSON.stringify(res)).not.toContain("secret-marker");
+  });
+
+  it("in-project doc outside design/decisions/ → unsafe_path, gate NOT released", async () => {
+    await mkdir(join(cwd, "docs"), { recursive: true });
+    await writeFile(join(cwd, "docs", "cli-contract.md"), "# no status line\n");
+    const res = await resolveDecisionGate(cwd, "P1-T1", ["docs/cli-contract.md"]);
+    expect(res.resolved).toBe(false);
+    expect(
+      res.considered.find((c) => c.path.includes("cli-contract.md"))?.acceptance,
+    ).toBe("unsafe_path");
+  });
+
+  it("loadDeclaredDecisions never renders an in-project .env into the pack", async () => {
+    await writeFile(join(cwd, ".env"), "API_TOKEN=secret-marker\n");
+    const docs = await loadDeclaredDecisions(cwd, [".env"]);
+    expect(docs).toEqual([]);
   });
 });
 

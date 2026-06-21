@@ -1137,20 +1137,26 @@ describe("runPhaseImport — scaffold decisions (RFC §3-D)", () => {
     expect(content).toBe("original\n");
   });
 
-  it("reports a safe decision_ref OUTSIDE design/decisions/ as scaffold_skipped; phases still imported", async () => {
+  it("rejects a safe-but-OUTSIDE-namespace decision_ref (docs/foo.md) with CONFIG_ERROR and writes nothing", async () => {
+    // SECURITY (Blocker 1): `decision_refs` now carries the DecisionRefPath
+    // namespace contract on the import schema too, so an out-of-namespace ref —
+    // even a path-safe one like `docs/foo.md` — is rejected at import. The old
+    // lenient `scaffold_skipped` advisory tolerated it; the runtime contract is
+    // now fail-closed (a hostile/AI-generated phase YAML can't name an arbitrary
+    // in-project file as a "decision"). Atomic: nothing is written on rejection.
     await setupEmptyProject(dir);
+    const before = (await readRoadmap(dir)).raw;
     const inputPath = await writeInput(
       dir,
       phaseWithDecisionTask(`
         decision_refs:
           - docs/foo.md`),
     );
-    const result = await runPhaseImport({ cwd: dir, inputPath, scaffoldDecisions: true });
-    expect(result.imported_phases).toHaveLength(1);
-    expect(result.scaffolded_decisions).toEqual([]);
-    expect(result.scaffold_skipped).toEqual([
-      { ref: "docs/foo.md", reason: "outside design/decisions/" },
-    ]);
+    await expect(
+      runPhaseImport({ cwd: dir, inputPath, scaffoldDecisions: true }),
+    ).rejects.toMatchObject({ code: "CONFIG_ERROR" });
+    expect((await readRoadmap(dir)).raw).toBe(before);
+    expect(await listPhaseFiles(dir)).toEqual([]);
     expect(await adrExists(dir, "docs/foo.md")).toBe(false);
   });
 

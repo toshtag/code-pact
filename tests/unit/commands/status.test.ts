@@ -270,11 +270,12 @@ describe("runStatus — MISSING_DECISION.decision_ref points at the blocker", ()
     ]);
   });
 
-  it("omits decision_ref for an unsafe_path ref (structural — not status's job)", async () => {
+  it("rejects an unsafe_path decision_ref at plan load (fail-closed, never status output)", async () => {
+    // `decision_refs` now carries the DecisionRefPath namespace contract, so an
+    // escaping ref (`../escape.md`) is rejected when the phase YAML is parsed —
+    // the plan never loads, so no MISSING_DECISION view can be produced from it.
     await setupDecisionProject(["../escape.md"]);
-    const r = await runStatus({ cwd: dir });
-    const w = r.waiting.find((e) => e.task_id === "P1-T1");
-    expect(w?.reasons).toEqual([{ code: "MISSING_DECISION" }]); // no decision_ref
+    await expect(runStatus({ cwd: dir })).rejects.toThrow(/cannot be read or parsed|CONFIG_ERROR/i);
   });
 });
 

@@ -1,6 +1,7 @@
 import { readFile, readdir } from "node:fs/promises";
 import { parseFrontMatter } from "../pack/front-matter.ts";
 import { resolveOwnedProjectPath } from "../path-safety.ts";
+import { isDecisionRefPath } from "../schemas/decision-ref.ts";
 import { resolveRetiredDecisionGate } from "./decision-gate-archive.ts";
 
 /**
@@ -287,6 +288,18 @@ type RelFileReader = (relPath: string) => Promise<ReadResult>;
 
 function diskReader(cwd: string): RelFileReader {
   return async (relPath) => {
+    // NAMESPACE guard (multi-layer defense): the decision read seam ONLY reads
+    // ADRs under `design/decisions/**/*.md`. The Task/phase-import schemas
+    // already hard-fail a `decision_refs: [.env]` at parse time, but this seam
+    // re-validates so a value reaching here by any other route (legacy plan
+    // YAML parsed before the schema tightened, a direct programmatic caller, a
+    // future call site) can NEVER read `.env` / a credential file and have it
+    // classified "accepted" or rendered into the pack. Out-of-namespace →
+    // `unsafe` (never read). Filename-scan paths are `design/decisions/<x>.md`
+    // and pass this; README/PRUNED are filtered upstream by NON_DECISION_FILES.
+    if (!isDecisionRefPath(relPath)) {
+      return { kind: "unsafe" };
+    }
     let abs: string;
     try {
       // Structural path-safety + ownership guard. Throws on `..`, absolute

@@ -249,18 +249,20 @@ describe("buildContextPack — Declared decisions", () => {
     expect(out).toContain("body of the decision");
   });
 
-  // Security: a decision_ref is loaded YAML content read into the pack body, so
-  // a traversal value must NOT be read (it would otherwise exfiltrate an
-  // arbitrary file into the context pack shown to the agent).
-  it("does NOT read a decision_ref that escapes the project root", async () => {
-    const secretName = `pack-traversal-secret-${Date.now()}.md`;
+  // Security (Blocker 1): a decision_ref is loaded YAML content read into the
+  // pack body, so a traversal value must NOT be read (it would otherwise
+  // exfiltrate an arbitrary file into the context pack shown to the agent).
+  // The namespace contract (DecisionRefPath) now hard-fails such a value at
+  // PHASE LOAD — even earlier and more strongly than the prior load-then-skip:
+  // the plan is rejected (CONFIG_ERROR) before any pack body is built, so the
+  // secret can never be reached at all.
+  it("rejects a decision_ref that escapes the project root at phase load", async () => {
+    const secretName = `pack-traversal-secret-9f3a.md`;
     const secretAbs = join(work, "..", secretName);
     await writeFile(secretAbs, "**Status:** accepted\n\nLEAKED-SECRET-MARKER-9f3a", "utf8");
     try {
       await setupProject({ taskExtras: { decision_refs: [`../${secretName}`] } });
-      const out = await buildPack();
-      expect(out).not.toContain("LEAKED-SECRET-MARKER-9f3a");
-      expect(out).not.toContain("## Declared decisions");
+      await expect(buildPack()).rejects.toThrow(/malformed|CONFIG_ERROR/i);
     } finally {
       await rm(secretAbs, { force: true });
     }
