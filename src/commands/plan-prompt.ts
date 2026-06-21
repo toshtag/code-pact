@@ -1,8 +1,7 @@
-import { readFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
-import { join } from "node:path";
 import type { Locale } from "../i18n/index.ts";
 import { messages as messageCatalog } from "../i18n/index.ts";
+import { readProjectTextOrNull } from "../core/project-read.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -155,14 +154,6 @@ async function copyToClipboard(text: string): Promise<boolean> {
 // Main
 // ---------------------------------------------------------------------------
 
-async function readFileOrNull(path: string): Promise<string | null> {
-  try {
-    return await readFile(path, "utf8");
-  } catch {
-    return null;
-  }
-}
-
 /**
  * Builds the additive `suggested_next_steps` array. Always returns the
  * canonical four-step AI-assisted planning sequence; appends a
@@ -221,9 +212,13 @@ export async function runPlanPrompt(opts: PlanPromptOptions): Promise<PlanPrompt
     };
   }
 
+  // Project-contained reads: a `design/brief.md` / `design/constitution.md`
+  // symlinked to an out-of-project file is refused (→ null) so it cannot leak
+  // into the agent-facing planning prompt / clipboard (CWE-59). Optional
+  // grounding sources, so unsafe/missing/unreadable all degrade to null.
   const [brief, constitution] = await Promise.all([
-    readFileOrNull(join(cwd, "design", "brief.md")),
-    readFileOrNull(join(cwd, "design", "constitution.md")),
+    readProjectTextOrNull(cwd, "design/brief.md"),
+    readProjectTextOrNull(cwd, "design/constitution.md"),
   ]);
 
   const prompt = generatePlanningPrompt(brief, constitution, locale);

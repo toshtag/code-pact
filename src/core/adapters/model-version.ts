@@ -5,7 +5,7 @@ import {
   AgentProfile,
   normalizeModelVersion,
 } from "../schemas/agent-profile.ts";
-import { resolveAgentProfilePath } from "../agent-profile-path.ts";
+import { resolveOwnedAgentProfilePath } from "../agent-profile-path.ts";
 
 /**
  * Validates a `--model` input and returns its canonical form, or throws a
@@ -52,7 +52,7 @@ export async function resolveAndPinModelVersion(opts: {
   if (normalized !== profile.model_version) {
     profile.model_version = normalized;
     await atomicWriteText(
-      await resolveAgentProfilePath(cwd, agentName),
+      await resolveOwnedAgentProfilePath(cwd, agentName),
       toYaml(AgentProfile.parse(profile)),
     );
   }

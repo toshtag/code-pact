@@ -1,5 +1,15 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtemp, rm, stat, mkdir, readFile, writeFile, cp, readdir } from "node:fs/promises";
+import {
+  mkdtemp,
+  rm,
+  stat,
+  mkdir,
+  readFile,
+  writeFile,
+  cp,
+  readdir,
+  symlink,
+} from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -181,5 +191,73 @@ describe("writeContextPack — side effects", () => {
       agentName: "custom-agent",
     });
     expect(result.outputPath).toContain(join(".context", "custom"));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SECURITY: constitution reads must not follow a symlink out of the project.
+// `design/constitution.md` is rendered into the agent-facing pack for
+// context_size: large / ambiguity: high tasks. A malicious repo that symlinks
+// it to an outside file must NOT leak that file into the pack (CWE-59).
+// ---------------------------------------------------------------------------
+
+describe("buildContextPack — constitution symlink containment", () => {
+  let workDir: string;
+  let outsideDir: string;
+
+  beforeEach(async () => {
+    workDir = await mkdtemp(join(tmpdir(), "code-pact-pack-const-"));
+    outsideDir = await mkdtemp(join(tmpdir(), "code-pact-outside-"));
+    await cp(fixtureDir, workDir, { recursive: true });
+    await rm(join(workDir, ".context"), { recursive: true, force: true });
+    // Make the task large so the pack includes the constitution slot.
+    const phasePath = join(workDir, "design", "phases", "P2-core.yaml");
+    const phaseYaml = await readFile(phasePath, "utf8");
+    await writeFile(
+      phasePath,
+      phaseYaml.replace("context_size: medium", "context_size: large"),
+      "utf8",
+    );
+    // Remove any real constitution shipped by the fixture so each test controls it.
+    await rm(join(workDir, "design", "constitution.md"), { force: true });
+  });
+
+  afterEach(async () => {
+    await rm(workDir, { recursive: true, force: true });
+    await rm(outsideDir, { recursive: true, force: true });
+  });
+
+  it("does NOT leak an out-of-project file symlinked as design/constitution.md", async () => {
+    const secret = join(outsideDir, "secret.md");
+    await writeFile(secret, "# SECRET_FROM_OUTSIDE_REPO\nstolen contents\n", "utf8");
+    await symlink(secret, join(workDir, "design", "constitution.md"));
+
+    const pack = await buildContextPack({
+      cwd: workDir,
+      phaseId: "P2",
+      taskId: "P2-E1-T1",
+      agentName: "claude-code",
+    });
+
+    expect(pack.content).not.toContain("SECRET_FROM_OUTSIDE_REPO");
+    expect(pack.includedConstitution).toBe(false);
+  });
+
+  it("still includes a real in-project design/constitution.md", async () => {
+    await writeFile(
+      join(workDir, "design", "constitution.md"),
+      "# Project Constitution\nIN_PROJECT_CONSTITUTION_MARKER\n",
+      "utf8",
+    );
+
+    const pack = await buildContextPack({
+      cwd: workDir,
+      phaseId: "P2",
+      taskId: "P2-E1-T1",
+      agentName: "claude-code",
+    });
+
+    expect(pack.content).toContain("IN_PROJECT_CONSTITUTION_MARKER");
+    expect(pack.includedConstitution).toBe(true);
   });
 });

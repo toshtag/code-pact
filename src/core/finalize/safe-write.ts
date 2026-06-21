@@ -3,7 +3,7 @@ import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { atomicWriteText } from "../../io/atomic-text.ts";
 import {
   assertSafeRelativePath,
-  resolveWithinProject,
+  resolveOwnedProjectPath,
 } from "../path-safety.ts";
 import { Phase, type PhaseStatus } from "../schemas/phase.ts";
 import {
@@ -34,7 +34,8 @@ import {
 //     leading `/`, etc.).
 //   - The target path must be under `design/phases/` and end with
 //     `.yaml`. design/roadmap.yaml is deliberately NOT writable.
-//   - `resolveWithinProject` must succeed (catches symlink escape).
+//   - `resolveOwnedProjectPath` must succeed (catches symlink escape and
+//     in-project symlink aliases).
 //   - The file must be readable and parseable as a Phase.
 //   - The task id must exist in the parsed phase's tasks[].
 //
@@ -50,7 +51,7 @@ export type WriteRefusalReason =
   | "outside_design_phases"
   /** The path does not end in `.yaml`. */
   | "not_yaml"
-  /** `resolveWithinProject` rejected the path (symlink escape). */
+  /** Owned path resolution rejected the path (symlink escape or alias). */
   | "symlink_escape"
   /** The file could not be read from disk. */
   | "unreadable"
@@ -150,11 +151,11 @@ export async function classifyWriteRequest(
     };
   }
 
-  // 3. Symlink-escape check (via realpath ancestor walk) and absolute
-  //    path resolution.
+  // 3. Owned path resolution: no symlink component is allowed for automated
+  //    phase mutation, including in-project aliases.
   let absPath: string;
   try {
-    absPath = await resolveWithinProject(cwd, file);
+    absPath = await resolveOwnedProjectPath(cwd, file);
   } catch (err) {
     return {
       kind: "refused",
@@ -226,7 +227,7 @@ export async function classifyWriteRequest(
  * makes the mutation deterministic against the current on-disk state.
  *
  * Throws when:
- *   - `resolveWithinProject` fails (path safety changed since classify).
+ *   - owned path resolution fails (path safety changed since classify).
  *   - The file has been deleted or become unreadable since classify.
  *   - The file no longer parses as a Phase.
  *   - The task id no longer exists in `phase.tasks[]`.
@@ -239,7 +240,7 @@ export async function applyPlannedWrite(
   cwd: string,
   diff: TaskStatusDiff,
 ): Promise<void> {
-  const absPath = await resolveWithinProject(cwd, diff.file);
+  const absPath = await resolveOwnedProjectPath(cwd, diff.file);
   const raw = await readFile(absPath, "utf8");
   const phase = Phase.parse(parseYaml(raw) as unknown);
   const tasks = phase.tasks ?? [];

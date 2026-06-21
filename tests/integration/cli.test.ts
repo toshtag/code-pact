@@ -2,7 +2,7 @@
 // `spawnSync`. The integration test script builds dist once before Vitest
 // starts so files can run in parallel without racing tsup cleanup.
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
-import { mkdtemp, mkdir, rm, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, readFile, readdir, writeFile, symlink } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
@@ -116,6 +116,101 @@ describe("CLI: post-command --json (BUG-001)", () => {
     expect(() => JSON.parse(res.stdout)).not.toThrow();
     const parsed = JSON.parse(res.stdout) as { ok: boolean };
     expect(typeof parsed.ok).toBe("boolean");
+  });
+
+  it("pack with a phase file symlinked OUTSIDE the project → CONFIG_ERROR exit 2 (no leak, no internal error)", async () => {
+    // SECURITY (Blocker 3): loadPhase refuses an out-of-project phase ref with
+    // CONFIG_ERROR; cmdPack must map that to a structured envelope (exit 2), not
+    // let it fall through to a top-level internal error / exit 3 — and the foreign
+    // phase's contents must never reach the agent-facing pack.
+    run(["init", "--locale", "en-US", "--agent", "claude-code", "--json"]);
+    run(["phase", "add", "--id", "P1", "--name", "Foundation", "--objective", "Foundation phase", "--weight", "10", "--json"]);
+    const roadmap = parseYaml(await readFile(join(tmpDir, "design", "roadmap.yaml"), "utf8")) as {
+      phases: Array<{ id: string; path: string }>;
+    };
+    const phasePath = roadmap.phases[0]!.path; // e.g. design/phases/P1-foundation.yaml
+    const outside = await mkdtemp(join(tmpdir(), "code-pact-pack-out-"));
+    try {
+      await writeFile(join(outside, "leak.yaml"), "objective: SECRET_PHASE_MARKER\n", "utf8");
+      await rm(join(tmpDir, phasePath), { force: true });
+      await symlink(join(outside, "leak.yaml"), join(tmpDir, phasePath)); // phase file → outside
+      const res = run(["pack", "--phase", "P1", "--task", "P1-T1", "--agent", "claude-code", "--json"]);
+      expect(res.code).toBe(2);
+      const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+      expect(parsed.ok).toBe(false);
+      expect(parsed.error.code).toBe("CONFIG_ERROR");
+      expect(`${res.stdout}${res.stderr}`).not.toMatch(/internal error/i);
+      expect(`${res.stdout}${res.stderr}`).not.toContain("SECRET_PHASE_MARKER");
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("task/phase commands with design/roadmap.yaml symlinked OUTSIDE → CONFIG_ERROR exit 2, not exit 3", async () => {
+    // SECURITY (Blocker 1+2): resolveTaskInRoadmap / phase-archive / phase-reconcile
+    // now read the roadmap through the CONTAINED loadRoadmap, and every consumer's
+    // CLI maps the resulting CONFIG_ERROR (plus a top-level safety net). A symlinked
+    // design/roadmap.yaml must not be read as the control plane, and must surface as
+    // a structured exit-2 envelope across these commands — never an internal exit-3.
+    run(["init", "--locale", "en-US", "--agent", "claude-code", "--json"]);
+    run(["phase", "add", "--id", "P1", "--name", "Foundation", "--objective", "Foundation phase", "--weight", "10", "--json"]);
+    const outside = await mkdtemp(join(tmpdir(), "code-pact-roadmap-out-"));
+    try {
+      // A valid-shaped outside roadmap carrying a marker (loadRoadmap refuses it
+      // at the symlink before reading, so the marker must never surface anyway).
+      await writeFile(
+        join(outside, "roadmap.yaml"),
+        "phases:\n  - id: P1\n    path: design/phases/SECRET_ROADMAP_MARKER.yaml\n    weight: 1\n",
+        "utf8",
+      );
+      await rm(join(tmpDir, "design", "roadmap.yaml"), { force: true });
+      await symlink(join(outside, "roadmap.yaml"), join(tmpDir, "design", "roadmap.yaml"));
+
+      for (const args of [
+        ["task", "complete", "P1-T1", "--dry-run", "--json"], // resolveTaskInRoadmap
+        ["task", "status", "P1-T1", "--json"], // resolveTaskInRoadmap
+        ["task", "runbook", "P1-T1", "--json"], // loadPlanState
+        ["phase", "archive", "P1", "--json"], // phase-archive loadRef
+        ["phase", "reconcile", "P1", "--write", "--json"], // phase-reconcile resolvePhase
+      ]) {
+        const res = run(args);
+        const label = args.join(" ");
+        expect(res.code, `${label} exit`).toBe(2);
+        const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+        expect(parsed.ok, `${label} ok`).toBe(false);
+        expect(parsed.error.code, `${label} code`).toBe("CONFIG_ERROR");
+        expect(`${res.stdout}${res.stderr}`, `${label} no internal error`).not.toMatch(/internal error/i);
+        expect(`${res.stdout}${res.stderr}`, `${label} no leak`).not.toContain("SECRET_ROADMAP_MARKER");
+      }
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("task add --decision-ref .env → CONFIG_ERROR exit 2 (user input, not internal exit 3); phase YAML untouched", async () => {
+    // Must-fix: a bad --decision-ref is USER INPUT. It must surface as a
+    // structured CONFIG_ERROR / exit 2 at the CLI boundary, never the exit-3
+    // internal fault a downstream Phase.parse ZodError would otherwise become.
+    run(["init", "--locale", "en-US", "--agent", "claude-code", "--json"]);
+    run(["phase", "add", "--id", "P1", "--name", "Foundation", "--objective", "Foundation phase", "--weight", "10", "--json"]);
+    const phaseFile = join(tmpDir, "design", "phases", "P1-foundation.yaml");
+    const before = await readFile(phaseFile, "utf8").catch(async () => {
+      // phase file name may differ; read whatever single phase file exists
+      const dirents = await readdir(join(tmpDir, "design", "phases"));
+      return readFile(join(tmpDir, "design", "phases", dirents[0]!), "utf8");
+    });
+
+    const res = run(["task", "add", "P1", "--description", "x", "--decision-ref", ".env", "--json"]);
+    expect(res.code).toBe(2);
+    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+    expect(parsed.ok).toBe(false);
+    expect(parsed.error.code).toBe("CONFIG_ERROR");
+    expect(`${res.stdout}${res.stderr}`).not.toMatch(/internal error/i);
+
+    // Phase YAML byte-identical: nothing was written, no task added.
+    const dirents = await readdir(join(tmpDir, "design", "phases"));
+    const after = await readFile(join(tmpDir, "design", "phases", dirents[0]!), "utf8");
+    expect(after).toBe(before);
   });
 
   it("verify ... --json (post-command) produces JSON-only stdout", () => {
@@ -658,18 +753,21 @@ describe("CLI: task complete (v0.2)", () => {
     expect(after).toBe(before);
   });
 
-  it("verify failure (--dry-run --json): still runs verification and surfaces the failure fields", async () => {
+  it("SECURITY (--dry-run --json): does NOT execute verification commands", async () => {
     await setupWithTask();
-    await rewritePhaseCommands(true);
+    await rewritePhaseCommands(true); // the verify command is `false` (exits 1)
 
     const before = await readFile(
       join(tmpDir, ".code-pact", "state", "progress.yaml"),
       "utf8",
     );
 
-    // --dry-run does NOT skip verification: verify runs before the dry-run
-    // short-circuit, so a failing dry-run is still VERIFICATION_FAILED and
-    // carries the same clarity fields.
+    // --dry-run must NOT run the project-controlled (shell: true) verification
+    // commands. The commands check is previewed, not executed, so a command that
+    // would FAIL if run does not fail the dry run: the result is a clean dry_run
+    // preview (exit 0), NOT VERIFICATION_FAILED. (Were the command executed, the
+    // failing `false` would surface VERIFICATION_FAILED / exit 1 as it does in
+    // the non-dry-run "verify failure" test above.)
     const res = run([
       "task",
       "complete",
@@ -679,23 +777,14 @@ describe("CLI: task complete (v0.2)", () => {
       "--dry-run",
       "--json",
     ]);
-    expect(res.code).toBe(1);
+    expect(res.code).toBe(0);
     const parsed = JSON.parse(res.stdout) as {
       ok: boolean;
-      error: { code: string };
-      data: {
-        failed_checks: string[];
-        first_failure: { name: string } | null;
-        suggested_next_command: string | null;
-      };
+      data: { dry_run: boolean; would_append: { task_id: string } };
     };
-    expect(parsed.ok).toBe(false);
-    expect(parsed.error.code).toBe("VERIFICATION_FAILED");
-    expect(parsed.data.failed_checks).toContain("commands");
-    expect(parsed.data.first_failure?.name).toBe("commands");
-    expect(parsed.data.suggested_next_command).toBe(
-      "code-pact task complete P1-T1",
-    );
+    expect(parsed.ok).toBe(true);
+    expect(parsed.data.dry_run).toBe(true);
+    expect(parsed.data.would_append.task_id).toBe("P1-T1");
 
     const after = await readFile(
       join(tmpDir, ".code-pact", "state", "progress.yaml"),

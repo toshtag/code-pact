@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { DecisionStateRecord } from "../schemas/decision-state-record.ts";
-import { decisionRecordPath } from "./paths.ts";
+import { decisionRecordRelPath, resolveArchiveOwnedPath } from "./paths.ts";
 import { loadArchiveBundles } from "./archive-bundle-loader.ts";
 import { decisionRecordStem } from "./archive-bundle-binding.ts";
 import {
@@ -50,7 +50,7 @@ export async function readLooseDecisionRecordRaw(
   cwd: string,
   canonicalRef: string,
 ): Promise<RawLooseRecord> {
-  const path = decisionRecordPath(cwd, canonicalRef);
+  const path = await resolveArchiveOwnedPath(cwd, decisionRecordRelPath(canonicalRef));
   try {
     return { kind: "present", bytes: await readFile(path, "utf8") };
   } catch (error) {

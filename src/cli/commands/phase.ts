@@ -261,7 +261,12 @@ export async function cmdPhase(argv: string[], locale: Locale, globalJson: boole
       }
       return 0;
     } catch (err: unknown) {
+      const code = (err as NodeJS.ErrnoException).code;
       const msg = err instanceof Error ? err.message : String(err);
+      if (code === "CONFIG_ERROR") {
+        emitError(json, "CONFIG_ERROR", msg);
+        return 2;
+      }
       emitError(json, "INTERNAL_ERROR", msg);
       return 3;
     }
@@ -462,6 +467,12 @@ async function cmdPhaseReconcile(
         extraData = { phase_id: phaseId, file, skipped_writes: skipped };
         break;
       }
+      // Contained roadmap/phase loader refusal (now that loadRef → loadRoadmap):
+      // structured (exit 2), not a top-level internal error / exit 3.
+      case "CONFIG_ERROR":
+        msg = (err as Error).message;
+        outCode = "CONFIG_ERROR";
+        break;
       default:
         throw err;
     }
@@ -592,6 +603,11 @@ async function cmdPhaseArchive(
         emitError(json, "AMBIGUOUS_PHASE_ID", err.message, {
           data: { phases: (err as NodeJS.ErrnoException & { phases?: string[] }).phases ?? [] },
         });
+        return 2;
+      }
+      if (code === "CONFIG_ERROR") {
+        // Contained roadmap loader refusal (loadRef → loadRoadmap) → exit 2.
+        emitError(json, "CONFIG_ERROR", err.message);
         return 2;
       }
       throw err;

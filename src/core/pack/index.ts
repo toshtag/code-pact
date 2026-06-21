@@ -11,7 +11,7 @@ import { resolvePhaseInRoadmap } from "../plan/resolve-phase.ts";
 import { loadPhase } from "../plan/load-phase.ts";
 import { renderSections, type DependsOnEntry } from "./formatters/markdown.ts";
 import { deriveTaskState } from "../progress/task-state.ts";
-import { resolveWithinProject } from "../path-safety.ts";
+import { resolveOwnedProjectPath } from "../path-safety.ts";
 import {
   loadAgentProfile,
   loadConstitution,
@@ -102,6 +102,20 @@ export type WriteContextPackOptions = {
 export type WriteContextPackResult = {
   outputPath: string;
 };
+
+async function resolveProfileContextDir(cwd: string, relPath: string): Promise<string> {
+  try {
+    return await resolveOwnedProjectPath(cwd, relPath);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "PATH_OUTSIDE_PROJECT" || code === "PATH_NOT_OWNED") {
+      const e = new Error((err as Error).message);
+      (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+      throw e;
+    }
+    throw err;
+  }
+}
 
 /**
  * Pure-ish context pack builder. Reads design files and renders the
@@ -291,12 +305,10 @@ export async function writeContextPack(
   const { cwd, agentName, outputDir } = opts;
   const profile = await loadAgentProfile(cwd, agentName);
   // An explicit `outputDir` is a deliberate caller/CLI choice (`--output-dir`),
-  // left as-is. The profile-derived dir is confined to the project root:
-  // context_dir is lexically a RelativePosixPath, but resolveWithinProject also
-  // rejects symlink escape (e.g. `.context/<agent>` symlinked outside), so a
-  // profile cannot redirect the pack write out of the repo.
+  // left as-is. The profile-derived dir is an owned generated namespace: no
+  // symlink component is allowed, even when it stays inside the project.
   const outDir =
-    outputDir ?? (await resolveWithinProject(cwd, profile?.context_dir ?? `.context/${agentName}`));
+    outputDir ?? (await resolveProfileContextDir(cwd, profile?.context_dir ?? `.context/${agentName}`));
   const outputPath = join(outDir, `${pack.taskId}.md`);
   // atomicWriteText recursively creates the parent dir before writing, so no
   // separate mkdir(outDir) is needed.

@@ -28,6 +28,19 @@ export type AdapterGenerateInput = {
 export type AdapterDescriptor = {
   generateDesiredFiles(input: AdapterGenerateInput): Promise<DesiredAdapterFile[]>;
   capabilities: readonly AdapterCapability[];
+  /**
+   * STATIC paths the generator owns for the DELETE gate (orphan auto-prune, #6).
+   * Deliberately NARROW (exact paths, no user-namespace globs) — a forged manifest
+   * must never authorize deleting a user file. See the orphan-prune security note.
+   */
   ownedPathGlobs: readonly string[];
+  /**
+   * STATIC generated paths the adapter may CREATE/OVERWRITE automatically.
+   * Defaults to `ownedPathGlobs`. This may be broader than the delete/orphan
+   * surface when an adapter intentionally generates a bounded family of files
+   * (for example `.claude/skills/*.md`) but still must not use that family for
+   * automatic deletes or orphan warnings.
+   */
+  writePathGlobs?: readonly string[];
   adapterSchemaVersion: number;
 };

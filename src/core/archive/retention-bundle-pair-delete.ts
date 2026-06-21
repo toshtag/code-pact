@@ -13,7 +13,7 @@ import {
   readDeleteIntent,
   writeDeleteIntent,
 } from "./delete-intent-journal.ts";
-import { archiveBundlePath, archiveBundlesDir, sha256Hex } from "./paths.ts";
+import { archiveBundleRelPath, archiveBundlesRelDir, resolveArchiveOwnedPath, sha256Hex } from "./paths.ts";
 
 // ---------------------------------------------------------------------------
 // Crash-safe BOTH-OR-NEITHER removal of a phase_snapshot ↔ event_pack BUNDLE pair:
@@ -76,7 +76,7 @@ export type BundlePairDeleteHooks = {
 /** Build one kind's half of a pair intent from the kind's CONSOLIDATED removal: this
  *  pair's removed id, the old bundle(s) that held it (a subset of the retired set),
  *  and the ONE consolidated survivor bundle (shared across the batch) or the empty marker. */
-function intentMemberFor(cwd: string, kind: ArchiveBundleKind, phaseId: string, consolidated: RemovalComputation): BundlePairMember {
+function intentMemberFor(kind: ArchiveBundleKind, phaseId: string, consolidated: RemovalComputation): BundlePairMember {
   const old_bundles = consolidated.retire
     .filter((r) => r.member_ids.includes(phaseId))
     .map((r) => ({ file: r.file, sha256: r.sha256 }));
@@ -85,7 +85,7 @@ function intentMemberFor(cwd: string, kind: ArchiveBundleKind, phaseId: string, 
     old_bundles,
     new_bundle: consolidated.new_bundle
       ? {
-          file: basename(archiveBundlePath(cwd, kind, consolidated.new_bundle.member_ids_sha256)),
+          file: basename(archiveBundleRelPath(kind, consolidated.new_bundle.member_ids_sha256)),
           member_ids_sha256: consolidated.new_bundle.member_ids_sha256,
           sha256: sha256Hex(serializeArchiveBundle(consolidated.new_bundle)),
         }
@@ -116,7 +116,7 @@ export async function deleteBundlePairsJournaled(
     throw new Error("deleteBundlePairsJournaled: duplicate phase_id in the input pairs");
   }
 
-  const dir = archiveBundlesDir(cwd);
+  const dir = await resolveArchiveOwnedPath(cwd, archiveBundlesRelDir());
   // PREFLIGHT the dir-fsync capability BEFORE any destructive action. `unsupported`
   // (e.g. win32) → the durable path is unavailable, so defer EVERY pair honestly (no
   // write, no retire). A real I/O `failed` fails the run.
@@ -157,8 +157,8 @@ export async function deleteBundlePairsJournaled(
   if (committableIds.length === 0) return { removed: [], skipped };
 
   // CONSOLIDATED removal per kind over the FULL committable batch (shared-bundle correct).
-  const phaseRemoval = computeRemoval(cwd, "phase_snapshot", committableIds);
-  const packRemoval = computeRemoval(cwd, "event_pack", committableIds);
+  const phaseRemoval = computeRemoval(cwd, "phase_snapshot", committableIds, dir);
+  const packRemoval = computeRemoval(cwd, "event_pack", committableIds, dir);
   if (phaseRemoval.unsafe || packRemoval.unsafe) {
     // A kind has an authority-invalid member → the whole kind's removal is unprovable.
     for (const phase_id of committableIds) skipped.push({ phase_id, reason: "unsafe_authority" });
@@ -169,8 +169,8 @@ export async function deleteBundlePairsJournaled(
     intent_kind: "bundle_pair",
     phase_id,
     members: {
-      phase_snapshot: intentMemberFor(cwd, "phase_snapshot", phase_id, phaseRemoval),
-      event_pack: intentMemberFor(cwd, "event_pack", phase_id, packRemoval),
+      phase_snapshot: intentMemberFor("phase_snapshot", phase_id, phaseRemoval),
+      event_pack: intentMemberFor("event_pack", phase_id, packRemoval),
     },
   }));
   // Pre-commit invariant: every committed member names ≥1 old bundle to retire (a removed

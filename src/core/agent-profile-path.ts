@@ -1,8 +1,9 @@
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { RelativePosixPath } from "./schemas/relative-path.ts";
 import { assertSafePlanId } from "./schemas/plan-id.ts";
+import { resolveOwnedProjectPath, resolveWithinProject } from "./path-safety.ts";
+import { AgentProfile } from "./schemas/agent-profile.ts";
 
 // Single source of truth for where an agent's profile lives.
 //
@@ -24,6 +25,95 @@ import { assertSafePlanId } from "./schemas/plan-id.ts";
 /** The conventional profile path (relative to `.code-pact/`), POSIX-separated. */
 function defaultProfileRel(agentName: string): string {
   return `agent-profiles/${agentName}.yaml`;
+}
+
+const WRITABLE_AGENT_PROFILE_PREFIX = "agent-profiles/";
+
+function profileConfigError(message: string): Error {
+  const err = new Error(message);
+  (err as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+  return err;
+}
+
+function shouldMapPathErrorToConfig(err: unknown): boolean {
+  const code = (err as NodeJS.ErrnoException).code;
+  return (
+    code === "PATH_OUTSIDE_PROJECT" ||
+    code === "PATH_NOT_OWNED" ||
+    code === "ENOTDIR" ||
+    code === "EISDIR" ||
+    code === "ELOOP" ||
+    code === "EACCES" ||
+    code === "EPERM"
+  );
+}
+
+function assertWritableProfileRel(agentName: string, rel: string): void {
+  if (rel.startsWith(WRITABLE_AGENT_PROFILE_PREFIX)) return;
+  throw profileConfigError(
+    `Agent profile path for "${agentName}" is read-compatible but not writable by automation: ".code-pact/${rel}". Automatic profile writes are limited to ".code-pact/${WRITABLE_AGENT_PROFILE_PREFIX}**".`,
+  );
+}
+
+async function readProjectYamlForProfileChecks(cwd: string): Promise<unknown | null> {
+  try {
+    const raw = await readFile(await resolveWithinProject(cwd, ".code-pact/project.yaml"), "utf8");
+    return parseYaml(raw) as unknown;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw profileConfigError(
+      `Cannot read .code-pact/project.yaml while checking writable agent profile paths.`,
+    );
+  }
+}
+
+async function assertProfileRelNotShared(
+  cwd: string,
+  agentName: string,
+  rel: string,
+): Promise<void> {
+  const doc = await readProjectYamlForProfileChecks(cwd);
+  const agents = (doc as { agents?: unknown } | null)?.agents;
+  if (!Array.isArray(agents)) return;
+  for (const a of agents) {
+    if (!a || typeof a !== "object") continue;
+    const name = (a as { name?: unknown }).name;
+    if (typeof name !== "string" || name === agentName) continue;
+    const parsed = RelativePosixPath.safeParse((a as { profile?: unknown }).profile);
+    if (parsed.success && parsed.data === rel) {
+      throw profileConfigError(
+        `Agent profile path ".code-pact/${rel}" is shared by "${agentName}" and "${name}". Automatic profile writes require a dedicated profile per agent.`,
+      );
+    }
+  }
+}
+
+async function assertProfileNameMatches(
+  absPath: string,
+  agentName: string,
+): Promise<void> {
+  let raw: string;
+  try {
+    raw = await readFile(absPath, "utf8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw profileConfigError(
+      `Agent profile for "${agentName}" at ${absPath} cannot be read before writing.`,
+    );
+  }
+  try {
+    const profile = AgentProfile.parse(parseYaml(raw) as unknown);
+    if (profile.name !== agentName) {
+      throw profileConfigError(
+        `Agent profile at ${absPath} declares name "${profile.name}", but "${agentName}" was requested. Automatic profile writes require the profile name to match the target agent.`,
+      );
+    }
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "CONFIG_ERROR") throw err;
+    throw profileConfigError(
+      `Agent profile for "${agentName}" at ${absPath} is malformed and cannot be safely written.`,
+    );
+  }
 }
 
 /**
@@ -51,7 +141,7 @@ export async function resolveAgentProfileRel(
   assertSafePlanId(agentName, "Agent");
   let raw: string;
   try {
-    raw = await readFile(join(cwd, ".code-pact", "project.yaml"), "utf8");
+    raw = await readFile(await resolveWithinProject(cwd, ".code-pact/project.yaml"), "utf8");
   } catch (err) {
     // Absent project.yaml → convention. But a present-but-unreadable file
     // (EACCES, EISDIR, transient I/O) is a real problem: surface it rather than
@@ -106,10 +196,61 @@ export async function resolveAgentProfileRel(
   return defaultProfileRel(agentName);
 }
 
-/** Absolute path form of {@link resolveAgentProfileRel}. */
+/**
+ * Absolute path form of {@link resolveAgentProfileRel}, CONTAINED to the project.
+ *
+ * `resolveAgentProfileRel` validates the path lexically (`RelativePosixPath`: no
+ * `..`/absolute/backslash), but a lexical `join` cannot stop a symlinked
+ * `.code-pact/agent-profiles` (or a symlinked profile file) from resolving
+ * outside the project. Every profile READ and — critically — the `--model` pin's
+ * WRITE flow through this single resolver, so the containment belongs here:
+ * route through {@link resolveWithinProject} so a symlink escape fails closed
+ * before any I/O. The escape is mapped to `CONFIG_ERROR` (a project/profile
+ * configuration problem — consistent with this resolver's other throws) so every
+ * caller's existing CONFIG_ERROR handling applies unchanged, with no new code to
+ * map at each of the ~9 call sites.
+ */
 export async function resolveAgentProfilePath(
   cwd: string,
   agentName: string,
 ): Promise<string> {
-  return join(cwd, ".code-pact", await resolveAgentProfileRel(cwd, agentName));
+  const rel = await resolveAgentProfileRel(cwd, agentName);
+  try {
+    return await resolveWithinProject(cwd, [".code-pact", rel].join("/"));
+  } catch (err) {
+    if (shouldMapPathErrorToConfig(err)) {
+      throw profileConfigError(
+        `Agent profile path for "${agentName}" resolves outside the project root and was refused: ${(err as Error).message}`,
+      );
+    }
+    throw err;
+  }
+}
+
+/**
+ * Absolute path for PERSISTING an agent profile. Reads may accept an in-project
+ * symlinked profile location for compatibility, but automatic writes such as
+ * `adapter install --model` must own the `.code-pact` profile namespace. An
+ * in-project symlink alias (for example `.code-pact/agent-profiles -> ../alt`)
+ * is therefore refused with CONFIG_ERROR before any pin is written.
+ */
+export async function resolveOwnedAgentProfilePath(
+  cwd: string,
+  agentName: string,
+): Promise<string> {
+  const rel = await resolveAgentProfileRel(cwd, agentName);
+  assertWritableProfileRel(agentName, rel);
+  await assertProfileRelNotShared(cwd, agentName, rel);
+  try {
+    const path = await resolveOwnedProjectPath(cwd, [".code-pact", rel].join("/"));
+    await assertProfileNameMatches(path, agentName);
+    return path;
+  } catch (err) {
+    if (shouldMapPathErrorToConfig(err)) {
+      throw profileConfigError(
+        `Agent profile path for "${agentName}" is not an owned project path and was refused: ${(err as Error).message}`,
+      );
+    }
+    throw err;
+  }
 }

@@ -1,5 +1,5 @@
 import { readFile, readdir, unlink } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { basename } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { Phase } from "../schemas/phase.ts";
 import { PhaseSnapshot } from "../schemas/phase-snapshot.ts";
@@ -15,7 +15,14 @@ import { DeleteIntentDurabilityError, readPendingDeleteFilters, recoverPendingDe
 import { deleteLoosePairsJournaled, type LoosePairToDelete, type PairDeleteOutcome, type PairMemberRetain } from "./retention-pair-delete.ts";
 import { deleteBundlePairsJournaled, type BundlePairDeleteOutcome } from "./retention-bundle-pair-delete.ts";
 import { removeBundleMembers } from "./bundle-member-removal.ts";
-import { archiveDecisionsDir, archiveEventPacksDir, archivePhasesDir, normalizeDecisionRef, sha256Hex } from "./paths.ts";
+import {
+  archiveDecisionsRelDir,
+  archiveEventPacksRelDir,
+  archivePhasesRelDir,
+  normalizeDecisionRef,
+  resolveArchiveOwnedPath,
+  sha256Hex,
+} from "./paths.ts";
 import type { ArchiveBundleKind } from "../schemas/archive-bundle.ts";
 
 // ---------------------------------------------------------------------------
@@ -197,12 +204,12 @@ type SourceResult =
     }
   | { ok: false; detail: string };
 
-function looseDirFor(cwd: string, kind: ArchiveBundleKind): string {
+function looseRelDirFor(kind: ArchiveBundleKind): string {
   return kind === "phase_snapshot"
-    ? archivePhasesDir(cwd)
+    ? archivePhasesRelDir()
     : kind === "event_pack"
-      ? archiveEventPacksDir(cwd)
-      : archiveDecisionsDir(cwd);
+      ? archiveEventPacksRelDir()
+      : archiveDecisionsRelDir();
 }
 
 /** Map every record id of `kind` to whether it lives loose-only / bundle-only / both.
@@ -227,7 +234,7 @@ async function buildSourceMap(cwd: string, kind: ArchiveBundleKind): Promise<Sou
       : await readPendingDeleteFilters(cwd);
   let looseIds: string[];
   try {
-    looseIds = (await readdir(looseDirFor(cwd, kind)))
+    looseIds = (await readdir(await resolveArchiveOwnedPath(cwd, looseRelDirFor(kind))))
       .filter((n) => n.endsWith(".json"))
       .map((n) => basename(n, ".json"))
       .filter((id) => !looseAbsentIds.has(id));
@@ -254,7 +261,7 @@ async function buildSourceMap(cwd: string, kind: ArchiveBundleKind): Promise<Sou
     if (src === "bundle") continue; // no loose copy
     let looseRaw: string | null = null;
     try {
-      looseRaw = await readFile(join(looseDirFor(cwd, kind), `${id}.json`), "utf8");
+      looseRaw = await readFile(await resolveArchiveOwnedPath(cwd, looseRelPath(kind, id)), "utf8");
     } catch {
       looseRaw = null;
     }
@@ -418,7 +425,7 @@ async function enumerateArchivedDecisions(
   // Loose decisions win over bundle members (reader-loose-wins).
   let looseNames: string[];
   try {
-    looseNames = (await readdir(archiveDecisionsDir(cwd))).filter((n) => n.endsWith(".json"));
+    looseNames = (await readdir(await resolveArchiveOwnedPath(cwd, archiveDecisionsRelDir()))).filter((n) => n.endsWith(".json"));
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") looseNames = [];
     else return { records: [], invalid: [], storeError: `loose decisions dir unreadable: ${(err as Error).message}` };
@@ -450,7 +457,7 @@ async function enumerateArchivedDecisions(
   for (const name of looseNames.sort()) {
     const id = basename(name, ".json");
     try {
-      parseInto(id, await readFile(await resolveWithinProject(cwd, `.code-pact/state/archive/decisions/${name}`), "utf8"));
+      parseInto(id, await readFile(await resolveArchiveOwnedPath(cwd, `${archiveDecisionsRelDir()}/${name}`), "utf8"));
     } catch {
       invalid.push(id);
       seen.add(id);
@@ -547,7 +554,7 @@ async function planEventPackRetention(
       bytes =
         src === "bundle"
           ? bundleMembers.get(id)?.bytes ?? null
-          : await readFile(join(archiveEventPacksDir(cwd), `${id}.json`), "utf8");
+          : await readFile(await resolveArchiveOwnedPath(cwd, looseRelPath("event_pack", id)), "utf8");
     } catch {
       bytes = null;
     }
@@ -708,7 +715,7 @@ export async function gateLooseDelete(
 ): Promise<LooseDeleteVerdict> {
   let abs: string;
   try {
-    abs = await resolveWithinProject(cwd, looseRelPath(kind, id));
+    abs = await resolveArchiveOwnedPath(cwd, looseRelPath(kind, id));
   } catch {
     return { kind: "skip", reason: "path_escape" };
   }

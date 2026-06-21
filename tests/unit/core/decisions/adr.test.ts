@@ -16,6 +16,7 @@ import {
   makeDecisionResolver,
   classifyDecisionAdrs,
 } from "../../../../src/core/decisions/adr.ts";
+import { loadDeclaredDecisions } from "../../../../src/core/pack/loaders.ts";
 
 describe("hasDecisionAdrForTaskId", () => {
   it("matches a .md whose name includes the task id", () => {
@@ -127,12 +128,16 @@ describe("readLiveDecisionDir / readLiveDecisionFile (live decision-read seam)",
     expect(r.kind).toBe("unsafe");
   });
 
-  it("readLiveDecisionFile reads a NESTED in-project ADR (live nested refs are in scope; state-record fallback is NOT)", async () => {
+  it("readLiveDecisionFile REFUSES a nested ADR as unsafe (flat-only namespace, matches downstream lifecycle)", async () => {
+    // The decision read seam now enforces the flat-only DecisionRefPath
+    // namespace. A nested path is `unsafe` — never read — so it stays in
+    // lockstep with normalizeDecisionRef / pruned-ledger / retire / prune,
+    // which are all top-level only. (A nested decision_refs value also cannot
+    // reach here legitimately: the Task/phase-import schemas reject it at parse.)
     await mkdir(join(cwd, "design", "decisions", "p3"), { recursive: true });
     await writeFile(join(cwd, "design", "decisions", "p3", "adr.md"), "nested body");
     const r = await readLiveDecisionFile(cwd, "design/decisions/p3/adr.md");
-    expect(r.kind).toBe("ok");
-    expect(r.kind === "ok" && r.content).toBe("nested body");
+    expect(r.kind).toBe("unsafe");
   });
 });
 
@@ -449,6 +454,39 @@ describe("resolveDecisionGate — decision_refs path safety (fail-closed)", () =
       res.considered.find((c) => c.path.includes("outside.md"))?.acceptance,
     ).toBe("unsafe_path");
   });
+
+  // SECURITY (Blocker 1): an IN-PROJECT non-decision file. Path-safety alone
+  // would PASS (.env is inside the root, no `..`, no symlink), and `.env` has
+  // no status line — so WITHOUT the namespace guard the gate would read it,
+  // classify it "accepted" (lenient no-status rule), and RELEASE the
+  // requires_decision gate. The namespace check (isDecisionRefPath) closes it:
+  // out-of-namespace → unsafe_path, never read, never resolves.
+  it("in-project .env ref → unsafe_path, never read, gate NOT released", async () => {
+    await writeFile(join(cwd, ".env"), "API_TOKEN=secret-marker\n");
+    const res = await resolveDecisionGate(cwd, "P1-T1", [".env"]);
+    expect(res.resolved).toBe(false);
+    const entry = res.considered.find((c) => c.path.includes(".env"));
+    expect(entry?.acceptance).toBe("unsafe_path");
+    expect(entry?.accepted).toBe(false);
+    // The secret content must never surface in the resolution result.
+    expect(JSON.stringify(res)).not.toContain("secret-marker");
+  });
+
+  it("in-project doc outside design/decisions/ → unsafe_path, gate NOT released", async () => {
+    await mkdir(join(cwd, "docs"), { recursive: true });
+    await writeFile(join(cwd, "docs", "cli-contract.md"), "# no status line\n");
+    const res = await resolveDecisionGate(cwd, "P1-T1", ["docs/cli-contract.md"]);
+    expect(res.resolved).toBe(false);
+    expect(
+      res.considered.find((c) => c.path.includes("cli-contract.md"))?.acceptance,
+    ).toBe("unsafe_path");
+  });
+
+  it("loadDeclaredDecisions never renders an in-project .env into the pack", async () => {
+    await writeFile(join(cwd, ".env"), "API_TOKEN=secret-marker\n");
+    const docs = await loadDeclaredDecisions(cwd, [".env"]);
+    expect(docs).toEqual([]);
+  });
 });
 
 describe("makeDecisionResolver", () => {
@@ -526,6 +564,27 @@ describe("classifyDecisionAdrs", () => {
     await writeAdr(".DS_Store", "binary-ish\n");
     const files = (await classifyDecisionAdrs(cwd)).map((a) => a.file);
     expect(files).toEqual(["design/decisions/real.md"]);
+  });
+
+  it("skips (does not crash on) a DIRECTORY named *.md — hostile repo, EISDIR", async () => {
+    await writeAdr("real.md", "**Status:** accepted\n");
+    // A directory named like an ADR: a bare readFile would throw EISDIR (exit 3).
+    await mkdir(join(cwd, "design", "decisions", "evil.md"), { recursive: true });
+    const files = (await classifyDecisionAdrs(cwd)).map((a) => a.file);
+    expect(files).toEqual(["design/decisions/real.md"]); // evil.md skipped, no throw
+  });
+
+  it("skips an ADR whose file symlink-escapes the project (contained read)", async () => {
+    const outside = await mkdtemp(join(tmpdir(), "adr-classify-out-"));
+    try {
+      await writeFile(join(outside, "secret.md"), "**Status:** accepted\nSECRET\n", "utf8");
+      await mkdir(join(cwd, "design", "decisions"), { recursive: true });
+      await symlink(join(outside, "secret.md"), join(cwd, "design", "decisions", "leak.md"));
+      const files = (await classifyDecisionAdrs(cwd)).map((a) => a.file);
+      expect(files).toEqual([]); // the escaping symlink is `unsafe` → skipped
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
   });
 });
 

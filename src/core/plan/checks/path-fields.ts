@@ -1,4 +1,3 @@
-import { join } from "node:path";
 import type { PhaseEntry } from "../state.ts";
 import type { PlanIssue } from "../shared.ts";
 import { assertSafeRelativePath } from "../../path-safety.ts";
@@ -8,7 +7,8 @@ import {
   validateGlobSyntax,
   walkAndMatch,
 } from "../../glob.ts";
-import { phaseFilePresence } from "./fs.ts";
+import { projectPathPresence } from "./fs.ts";
+import { decisionRefPathReason } from "../../schemas/decision-ref.ts";
 import { readPrunedLedger, normalizeRelPath } from "../../decisions/pruned-ledger.ts";
 import {
   decisionRecordSoftensMissingRef,
@@ -85,19 +85,29 @@ function decisionRefAdvisory(
   };
 }
 
-/** `decision_refs` path is not a safe repo-root-relative POSIX path. */
+/**
+ * `decision_refs` path violates the decision namespace contract (not a safe
+ * repo-relative path, OR outside `design/decisions/**\/*.md`, OR README/PRUNED).
+ *
+ * The Task/phase-import schemas hard-fail these at parse time, so a normally
+ * loaded plan never reaches lint with a bad ref. This detector is the lint-layer
+ * of the multi-layer defense: it still produces a precise, exit-affecting
+ * diagnostic for any path that reaches lint by another route (a raw-YAML lint
+ * surface, a plan written before the schema tightened). Uses the SAME
+ * `decisionRefPathReason` as the schema so the verdict can never drift.
+ */
 export function detectTaskDecisionRefUnsafePath(phases: PhaseEntry[]): PlanIssue[] {
   const issues: PlanIssue[] = [];
   for (const { phase, ref } of phases) {
     for (const task of phase.tasks ?? []) {
       const refs = task.decision_refs ?? [];
       refs.forEach((p, index) => {
-        const reason = safePathReason(p);
+        const reason = decisionRefPathReason(p);
         if (reason !== "") {
           issues.push({
             code: "TASK_DECISION_REF_UNSAFE_PATH",
             severity: "error",
-            message: `Task "${task.id}" decision_refs path "${p}" is not a safe repo-root-relative path: ${reason}`,
+            message: `Task "${task.id}" decision_refs path "${p}" is not a valid decision reference (design/decisions/*.md, top-level only): ${reason}`,
             file: ref.path,
             phase_id: phase.id,
             task_id: task.id,
@@ -132,7 +142,7 @@ export async function detectTaskDecisionRefNotFound(
         // `fileExists` boolean (which collapses any access failure to "missing"
         // and would re-open the live-wins-inaccessible hole). `present` → no issue;
         // `inaccessible` keeps the existing severity, never record-softened.
-        const presence = await phaseFilePresence(join(cwd, p));
+        const presence = await projectPathPresence(cwd, p);
         if (presence === "present") continue;
         const historical = refIsHistorical(task);
         if (presence === "absent") {
@@ -456,7 +466,7 @@ export async function detectTaskAcceptanceRefNotFound(
         // Three-way presence (step 5): record consultation is gated on a TRUE absence
         // (ENOENT). `present` → no issue; `inaccessible` keeps the existing severity
         // and never consults a record (never the old `fileExists` boolean).
-        const presence = await phaseFilePresence(join(cwd, p));
+        const presence = await projectPathPresence(cwd, p);
         if (presence === "present") continue;
         const historical = refIsHistorical(task);
         // Done task → advisory for ANY target (existing baseline, unchanged).

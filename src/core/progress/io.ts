@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { stringify as stringifyYaml } from "yaml";
 import { atomicWriteText } from "../../io/atomic-text.ts";
+import { resolveOwnedProjectPath } from "../path-safety.ts";
 import {
   ProgressLog,
   type ProgressEvent,
@@ -14,6 +15,22 @@ export const PROGRESS_PATH_SEGMENTS = [".code-pact", "state", "progress.yaml"];
 
 export function progressPath(cwd: string): string {
   return join(cwd, ...PROGRESS_PATH_SEGMENTS);
+}
+
+export async function resolveProgressPath(cwd: string): Promise<string> {
+  try {
+    return await resolveOwnedProjectPath(cwd, PROGRESS_PATH_SEGMENTS.join("/"));
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "PATH_OUTSIDE_PROJECT" || code === "PATH_NOT_OWNED") {
+      const e = new Error(
+        `.code-pact/state/progress.yaml is not a safe owned progress ledger path: ${(err as Error).message}`,
+      );
+      (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+      throw e;
+    }
+    throw err;
+  }
 }
 
 export type LoadedProgress = {
@@ -90,7 +107,7 @@ export function mergeProgressStreams(
  * never be mixed.
  */
 export async function loadMergedProgress(cwd: string): Promise<LoadedProgress> {
-  const path = progressPath(cwd);
+  const path = await resolveProgressPath(cwd);
 
   // `raw` is the legacy file bytes (empty when absent) — kept for callers that
   // need the raw string. The merged events come from the shared reader, so event

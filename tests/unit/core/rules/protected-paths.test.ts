@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadProtectedPaths } from "../../../../src/core/rules/protected-paths.ts";
@@ -45,6 +45,46 @@ describe("loadProtectedPaths — fallback", () => {
     const result = await loadProtectedPaths(cwd);
     expect(result.source).toBe("fallback");
     expect(result.paths).toBe(PROTECTED_PATHS);
+  });
+
+  it("falls back instead of reading a symlinked-outside rule file", async () => {
+    const outside = await mkdtemp(join(tmpdir(), "code-pact-protected-paths-outside-"));
+    try {
+      await writeFile(
+        join(outside, "protected-paths.md"),
+        "OUTSIDE_SECRET_PROTECTED_PATTERN/**\n",
+        "utf8",
+      );
+      await mkdir(join(cwd, "design", "rules"), { recursive: true });
+      await symlink(
+        join(outside, "protected-paths.md"),
+        join(cwd, "design", "rules", "protected-paths.md"),
+      );
+
+      const result = await loadProtectedPaths(cwd);
+
+      expect(result.source).toBe("fallback");
+      expect(result.paths).toBe(PROTECTED_PATHS);
+      expect(result.paths.map((p) => p.pattern)).not.toContain(
+        "OUTSIDE_SECRET_PROTECTED_PATTERN/**",
+      );
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("falls back instead of reading a project-local secret symlinked as the rule file", async () => {
+    await writeFile(join(cwd, ".env"), "API_TOKEN=LOCAL_SECRET_MARKER\n", "utf8");
+    await mkdir(join(cwd, "design", "rules"), { recursive: true });
+    await symlink("../../.env", join(cwd, "design", "rules", "protected-paths.md"));
+
+    const result = await loadProtectedPaths(cwd);
+
+    expect(result.source).toBe("fallback");
+    expect(result.paths).toBe(PROTECTED_PATHS);
+    expect(result.paths.map((p) => p.pattern)).not.toContain(
+      "API_TOKEN=LOCAL_SECRET_MARKER",
+    );
   });
 });
 

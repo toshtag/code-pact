@@ -1,10 +1,8 @@
 import { readFile, stat } from "node:fs/promises";
-import { dirname, join } from "node:path";
-import { mkdir } from "node:fs/promises";
 import { stringify as stringifyYaml } from "yaml";
 
 import { atomicWriteText } from "../io/atomic-text.ts";
-import { assertSafeRelativePath } from "../core/path-safety.ts";
+import { assertSafeRelativePath, resolveOwnedProjectPath, resolveWithinProject } from "../core/path-safety.ts";
 import { type SpecImportDetail } from "../contracts/spec-import-details.ts";
 import { parseTasksMd, type ParserWarning } from "../core/spec-import/tasks-md-parser.ts";
 import {
@@ -53,6 +51,28 @@ export interface SpecImportResult {
 
 const PHASE_ID_RE = /^[A-Za-z][A-Za-z0-9_-]*$/;
 
+async function resolveSpecPath(
+  cwd: string,
+  relPath: string,
+  ctx: { sourcePath?: string; phaseId?: string; purpose: "input" | "output" },
+): Promise<string> {
+  try {
+    return ctx.purpose === "output"
+      ? await resolveOwnedProjectPath(cwd, relPath)
+      : await resolveWithinProject(cwd, relPath);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "PATH_OUTSIDE_PROJECT" || code === "PATH_NOT_OWNED") {
+      throw new SpecImportError(
+        "unsafe_path",
+        `spec import: ${ctx.purpose} path is unsafe: ${(err as Error).message}`,
+        { sourcePath: ctx.sourcePath, phaseId: ctx.phaseId },
+      );
+    }
+    throw err;
+  }
+}
+
 export async function runSpecImport(opts: SpecImportOptions): Promise<SpecImportResult> {
   const { cwd, fromPath, phaseId, write, force } = opts;
 
@@ -74,7 +94,11 @@ export async function runSpecImport(opts: SpecImportOptions): Promise<SpecImport
     );
   }
 
-  const absInput = join(cwd, fromPath);
+  const absInput = await resolveSpecPath(cwd, fromPath, {
+    sourcePath: fromPath,
+    phaseId,
+    purpose: "input",
+  });
   let raw: string;
   try {
     raw = await readFile(absInput, "utf8");
@@ -112,7 +136,11 @@ export async function runSpecImport(opts: SpecImportOptions): Promise<SpecImport
   const phaseYaml = stringifyYaml(phaseYamlObj);
 
   const outputRel = `design/phases/${phaseId}-imported.yaml`;
-  const outputAbs = join(cwd, outputRel);
+  const outputAbs = await resolveSpecPath(cwd, outputRel, {
+    sourcePath: fromPath,
+    phaseId,
+    purpose: "output",
+  });
 
   if (write) {
     if (!force) {
@@ -135,7 +163,6 @@ export async function runSpecImport(opts: SpecImportOptions): Promise<SpecImport
         }
       }
     }
-    await mkdir(dirname(outputAbs), { recursive: true });
     await atomicWriteText(outputAbs, phaseYaml);
   }
 
@@ -238,7 +265,10 @@ export async function runSpecSuggest(opts: SpecSuggestOptions): Promise<SpecSugg
     );
   }
 
-  const absInput = join(cwd, suggestFromPath);
+  const absInput = await resolveSpecPath(cwd, suggestFromPath, {
+    sourcePath: suggestFromPath,
+    purpose: "input",
+  });
   let raw: string;
   try {
     raw = await readFile(absInput, "utf8");

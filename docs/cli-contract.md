@@ -185,6 +185,7 @@ CI. (For `error.cause_code` values, see [Public cause codes](#public-cause-codes
 | `INVALID_TASK_TRANSITION` | `task start/block/resume/complete/record-done` | Requested state transition is not allowed from the current state |
 | `DUPLICATE_PHASE_ID` | `phase add`, `phase import` | Phase id collides with an existing or imported phase |
 | `MANIFEST_NOT_FOUND` | `adapter upgrade` | `.code-pact/adapters/<agent>.manifest.yaml` does not exist (run `adapter install` first) |
+| `ADAPTER_MANIFEST_INVALID` | `adapter install`, `adapter upgrade` (also a `doctor` / `adapter doctor` issue) | Manifest state is unusable. As a **top-level** envelope (exit 2): manifest I/O was fail-closed because `.code-pact/adapters` resolves **outside** the project (a symlink escape — `resolveWithinProject` refused it; no bytes are read or written outside the project). The same code is also emitted as a `doctor` issue for a manifest that failed YAML parse / schema validation. The adversarial-symlink case is surfaced as this structured envelope rather than an internal error |
 | `VERIFICATION_FAILED` | `verify`, `task complete` | Deterministic completion check did not pass. On `task complete` (v1.27+, P39) the envelope also carries `error.cause_code` (`DECISION_REQUIRED` or `COMMANDS_FAILED` — see [Public cause codes](#public-cause-codes)) and an actionable `error.message`; `error.code` stays `VERIFICATION_FAILED` at exit 1 |
 | `DECISION_REQUIRED` (v1.21+) | `task record-done` | A `requires_decision` task's ADR could not be resolved by the decision gate. As a **top-level `error.code`** this is raised only by `task record-done`; on `task complete` the *same semantic cause* appears only as `error.cause_code` under `VERIFICATION_FAILED` (see [Public cause codes](#public-cause-codes)). **The two surfaces differ.** **On `task record-done` (as `error.code`):** exit code 2, no progress event recorded, and the full structured envelope — `data.task_id`, `data.decision_check` (the gate's `{name, ok, reason}`), `data.current_resolution` (`"status-aware"` since v1.22), `data.via` (`"decision_refs"` or `"filename-scan"`), `data.considered` (per-ADR `{path, status, accepted, acceptance}`; `acceptance` ∈ `"accepted" \| "blocked" \| "empty" \| "unknown_status" \| "missing" \| "unsafe_path"`), `data.declared_decision_refs`, and `data.expected_pattern` (only when `via === "filename-scan"`). **On `task complete` (as `error.cause_code`):** `error.code` stays `VERIFICATION_FAILED` at exit 1, there is **no** full `DecisionRequiredData` block, and the P32 fields (`failed_checks` / `first_failure` / `suggested_next_command`) stay under `data` — see the [`task complete`](#task-complete) failure envelope. Resolution semantics (shared by both surfaces): explicit `decision_refs` use **all-must-be-accepted**; the filename scan uses **any-accepted-wins** (preserves the substring-collision compat). A `decision_refs` entry that is structurally unsafe or resolves outside the project root (`..`, an absolute path, or a symlink out of the repo) is **fail-closed**: it is never read and reported as `acceptance: "unsafe_path"` with `accepted: false`, so the gate stays unresolved regardless of the file's contents. |
 | `VALIDATE_FAILED` | `validate` | One or more errors (or, under `--strict`, any issue) detected by the underlying doctor checks |
@@ -217,6 +218,8 @@ CI. (For `error.cause_code` values, see [Public cause codes](#public-cause-codes
 | `CONTEXT_OVER_BUDGET` (v1.13+ / P24) | `task context --budget-bytes`, `task prepare --budget-bytes` | Even maximal section elision could not bring the rendered pack at or below the requested byte budget. Exit code 2. The envelope carries `data.budget_bytes`, `data.minimum_achievable_bytes` (the post-maximal-elision size — re-running with this value as the budget succeeds), and `data.unelidable_sections` (the structural floor) |
 | `INTERNAL_ERROR` | any command | Reserved for unhandled exceptions |
 | `ADAPTER_DESIRED_PATH_CONFLICT` (v1.20+) | `adapter install`, `adapter upgrade --write` | Defense-in-depth invariant: an adapter generator produced two desired files at the same path with differing content. Should never fire in practice (each adapter uniquifies its own paths); surfaced as an unhandled exception (exit 3), not a structured envelope |
+| `PATH_OUTSIDE_PROJECT` | (internal — never a top-level `error.code`) | Path-safety guard: `resolveWithinProject` tags a symlink/unsafe-path escape with this code. It is always **caught and remapped** at the command boundary before it reaches an agent — `adapter install` / `adapter upgrade` map it to `ADAPTER_MANIFEST_INVALID` (manifest path) or `CONFIG_ERROR` (placeholder `.context` / hook dir), and `decision prune` / `decision retire` classify it as the `target_invalid` gate. Listed here only so the error-code surface stays complete |
+| `PATH_NOT_OWNED` | (internal — never a top-level `error.code`) | Path-ownership guard: `resolveOwnedProjectPath` tags an in-project symlink alias with this code. It is caught and remapped at command boundaries before it reaches an agent — adapter manifest/profile writes map it to `ADAPTER_MANIFEST_INVALID` or `CONFIG_ERROR`, and lifecycle destructive paths fail closed. Listed here only so the error-code surface stays complete |
 
 > **Not a top-level command error:** `EVENT_FILE_ID_MISMATCH` (collaboration-safe-state RFC, B1/B5) is a **ledger-integrity diagnostic**, not a public structured command error. It is surfaced as a structured `data.issues[]` entry only by the lenient-loader surfaces (`doctor`, `plan lint`) — see [Plan diagnostic codes](#plan-diagnostic-codes). The strict-loader readers never expose it as the top-level `error.code`: `task *` and `verify` abort as a raw unhandled failure (exit 3, no JSON envelope — the same as a corrupt legacy `progress.yaml`), while `plan analyze` and `plan migrate` wrap the ledger-read failure in the command's own code (`PLAN_ANALYZE_FAILED` for analyze, `PLAN_MIGRATE_FAILED` for migrate) with the original cause in `error.message`. `pack` is best-effort and skips it.
 
@@ -362,8 +365,10 @@ Emitted by `adapter doctor` and (manifest-aware) global `doctor`. See the `adapt
 | `ADAPTER_SCHEMA_DRIFT` | warning | Manifest's `adapter_schema_version` is older than the module's declared version |
 | `ADAPTER_PROFILE_DRIFT` | warning | Profile fields recorded in `profile_fingerprint` have changed since install |
 | `ADAPTER_FILE_MISSING` | error | A file listed in the manifest is missing from disk |
+| `ADAPTER_FILE_PATH_UNSAFE` | error | A file listed in the manifest resolves through an unsafe / non-contained path (for example, a symlink escape), OR names a path this adapter could not have generated (forged-manifest guard). `adapter doctor` / global `doctor` do not read, hash, or inspect the target; fix the path or regenerate the adapter output. |
 | `ADAPTER_FILE_DRIFT` | warning | A managed file was locally modified AND the generator output also moved on |
 | `ADAPTER_DESIRED_STALE` | warning | A managed file is unchanged locally but the generator now produces different content |
+| `ADAPTER_FILE_UNVERIFIABLE` | warning | A manifest file is in the shared skills namespace but NOT in the adapter's current generated set (a stale/orphaned skill, or a hand-authored file the manifest claims). Indistinguishable by path, so `doctor` does NOT read/hash/inspect it (no content oracle). Re-run `adapter upgrade --write` or remove the stray file. |
 | `ADAPTER_UNMANAGED_FILE` | warning | A file under `ownedPathGlobs` exists on disk but is not in the manifest |
 | `ADAPTER_CONTRACT_DRIFT` (v1.7+, P16-T5) | warning | An instruction file's body lacks the v1.7+ agent-contract section or one of its three axis sub-headings. Soft signal — does NOT change the doctor exit code. Independent of `ADAPTER_FILE_DRIFT` (file-level hash drift); both can fire in the same run. `details.kind` is `"section_missing"` (whole `## Agent contract` heading absent) or `"axes_incomplete"` (heading present but one or more of `### When to invoke code-pact`, `### What to verify first`, `### How to handle failures` is missing). `details.missing_axes: string[]` enumerates which axes are missing when `kind === "axes_incomplete"`. Resolution: `adapter upgrade <agent> --write` (use `--accept-modified` to preserve user edits to the file body). |
 
@@ -1126,7 +1131,9 @@ manifest, but it NEVER overwrites a file already recorded in the manifest (`mana
 | `new` (manifest no, disk no) | always write (`--force` not needed) |
 | `unmanaged × current` (disk matches desired, no manifest entry) | with `--force`: **adopt** (manifest only, no write) |
 | `unmanaged × stale` (disk differs from desired, no manifest entry) | with `--force`: **replace_unmanaged** (overwrite + manifest) |
-| `managed-*` (already in the manifest) | `--force` is ignored — install is hands-off |
+| `managed-clean × stale` (disk matches the manifest hash but the generator output changed) | re-rendered to current output (**update**); `--force` not required. The file is verbatim generator output, so refreshing it loses no edits — and install does **not** trust a project-shipped (possibly forged) manifest hash to preserve stale generated content (security). |
+| `managed-clean × current` / `managed-modified × current` (already in the manifest, content matches the generator) | `skip` — `--force` is ignored. Install never overwrites a recorded file's local modifications. |
+| `managed-modified × stale` (disk matches NEITHER the manifest hash NOR the generator output) | **`refuse`** — not overwritten (could be a genuine local edit), but **not silently skipped** either: it is surfaced (`result.refused[]`, `files[].action: "refuse"`) and `adapter install` exits **1**. This is the shape a hostile repo ships (malicious content + a forged manifest hash that does not match it); install never passes it over in silence. `--force` does not override it. |
 
 Destructive overwrite of a managed-modified file requires `adapter upgrade --write --accept-modified`.
 The `--regen-skills` flag is a role-scoped force: it makes `--force` apply only to files with
@@ -1180,9 +1187,13 @@ if neither is set, the version-agnostic template is used. (Separately: if an exi
 already contains an unrecognized `model_version`, generation falls back to the generic
 guidance block and `doctor` reports `MODEL_ID_UNKNOWN`.)
 
-`--regen-skills` is the role-scoped `--force` described above; documented separately because
-it's the common way users handle stale dynamic skill files after the roadmap's
-`verification.commands` changes.
+`--regen-skills` is the role-scoped `--force` described above (it applies `--force` to skill
+files only). It refreshes the **built-in** skills and adopts new ones, but it does **NOT**
+overwrite a divergent DYNAMIC command-skill: those live in the shared `.claude/skills/` dir
+alongside hand-authored user skills, so a forged manifest + a colliding `verification.commands`
+name could otherwise replace a user's skill. A divergent dynamic skill is therefore `refused`
+(reason `unowned_generated_path`), and `--accept-modified` does not override it. Safe automatic
+re-render of dynamic skills will return with a reserved generated-skill namespace (follow-up).
 
 Result envelope:
 
@@ -1298,11 +1309,22 @@ non-skip action), `2` on `CONFIG_ERROR` (missing positional, mutex flags) /
 
 Executes the action matrix. The new manifest reflects the post-write state:
 files written / adopted have their hash refreshed, skipped managed files
-preserve their existing hash, refused entries are preserved unchanged, and
-orphans (manifest entries no longer emitted by the generator) drop out. Files
-on disk that are no longer in the new manifest remain where they are; the next
-`adapter doctor` run surfaces them as `ADAPTER_UNMANAGED_FILE` if they fall
-under the adapter's `ownedPathGlobs`.
+preserve their existing hash, refused entries are preserved unchanged.
+
+**Orphan handling (security — CWE-73).** An orphan is a manifest entry the
+generator no longer emits. Because the manifest is project-controlled and
+unauthenticated, an orphan is **auto-deleted (`action: "prune"`) only when its
+path is in the adapter descriptor's `ownedPathGlobs`** AND its content still
+matches the manifest hash. An owned orphan the user edited is `refuse`d (kept on
+disk). An orphan **outside** the owned path set is never deleted — even when
+clean — but surfaced as `action: "warn"` (with a machine-readable
+`reason: "unowned_orphan_not_pruned"` on the plan entry) and kept tracked, so a
+forged manifest entry (any in-project path + that file's real sha256) cannot turn
+`upgrade --write` into an arbitrary in-project delete. The human CLI names each
+kept file and the manual-removal step; a warn-only `--check` exits 1 without
+claiming `--write` would clear it. Files left on disk that are not in the new
+manifest are surfaced by the next `adapter doctor` run as
+`ADAPTER_UNMANAGED_FILE` if they fall under the adapter's `ownedPathGlobs`.
 
 ```json
 {
@@ -1384,8 +1406,10 @@ issues additionally carry `path` (absolute).
 | `ADAPTER_SCHEMA_DRIFT` | warning | Manifest's `adapter_schema_version` is older than the adapter module's declared value. |
 | `ADAPTER_PROFILE_DRIFT` | warning | Agent profile fields recorded in `profile_fingerprint` (instruction_filename, context_dir, optional skill_dir / hook_dir / resolved_model) have changed since install. |
 | `ADAPTER_FILE_MISSING` | error | A file listed in the manifest is missing from disk (`managed-missing` × `absent`). |
+| `ADAPTER_FILE_PATH_UNSAFE` | error | A file listed in the manifest cannot be proven project-contained (for example, it resolves through an external symlink). The file is not read, so external target contents do not appear in human or JSON output. |
 | `ADAPTER_FILE_DRIFT` | warning | A managed file was locally modified AND the generator output also moved on (`managed-modified` × `stale`). Requires `--accept-modified` on `upgrade --write`. |
 | `ADAPTER_DESIRED_STALE` | warning | A managed file is unchanged locally but the generator now produces different content (`managed-clean` × `stale`). Safe to apply with `upgrade --write` (no `--accept-modified` required). |
+| `ADAPTER_FILE_UNVERIFIABLE` | warning | A manifest file is in the shared skills namespace but not in the current generated set — read-ownership cannot be proven, so it is not read or verified (forged-manifest content/SHA-oracle guard). Resolve with `upgrade --write` or by removing the stray file. |
 | `ADAPTER_UNMANAGED_FILE` | warning | A file under one of the adapter's `ownedPathGlobs` exists on disk but is not in the manifest. Narrow scope — does NOT fire for arbitrary user-created files such as `.claude/skills/custom.md`. |
 
 `managed-modified × current` (hash drift only) and `managed-clean × current`
@@ -1522,6 +1546,8 @@ Every check object carries a `severity` (`required` | `advisory`). The three P30
 | `no_contract_antipatterns` | The instruction / its examples contain no P29 anti-pattern (e.g. `task finalize ... --agent`) |
 | `activation_rules_documented` | The activation-rule anchors (`task finalize --write`, `wait_for_dependencies`, `CONTEXT_OVER_BUDGET`) are present — verifies documentation presence, not runtime obedience |
 | `file_checksum_match` | One per manifest file: the on-disk LF-normalised UTF-8 sha256 equals the manifest's recorded value |
+| `adapter_file_path_unowned` | A manifest entry (the `role: instruction` file, or any `files[]` entry) names a path this adapter could not have generated, or that resolves through a symlink. The target is NOT read — no `actual_sha256` and no contract-heading inspection are produced — so a forged manifest cannot turn conformance into a file-content/SHA oracle on arbitrary local files (e.g. `.env`). Read authority is the NARROW built-in path set (`ownedPathGlobs`), NOT the broad write namespace — so a victim's hand-authored `.claude/skills/private.md` is refused too. Always `required` severity (fail-closed). |
+| `file_checksum_skipped_unverifiable` | A manifest entry names a dynamically-generated skill in the shared `.claude/skills/` namespace (matches the broad write allowlist but not the narrow read-authority set). Its name is attacker-influenceable, so read-ownership cannot be proven: the file is NOT read or checksummed. `advisory` severity — a normal adapter with verification-command skills stays compliant; conformance simply cannot verify those bytes (run `adapter doctor`, which regenerates the exact set, to verify them). |
 
 #### Severity (v1.x, P30)
 
@@ -1980,7 +2006,7 @@ Order of operations:
 3. **State check**. Derived from the append-only progress ledger (per-event files under `state/events/` merged with the legacy `progress.yaml`) via `deriveTaskState`. If the current state is `done`, returns `{ ok: true, data: { already_done: true } }` with exit 0 and **does not re-run verification** (to force re-verification, use `task complete --rerun` — planned for a later release). If the current state is `blocked`, exits 2 with `INVALID_TASK_TRANSITION`: the task must be resumed via `task resume <id>` before it can complete, so the resume event records the unblock decision. Other current states (`planned`, `started`, `resumed`, `failed`) proceed to verification. `planned → done` is permitted at the command layer for v0.5 backwards compatibility, even though the state machine itself does not list that transition.
 4. **Verification (preflight mode)**. Runs the deterministic checks from `code-pact verify` — `commands` and `decision` — but skips the state-consistency checks (`progress_event`, `task_status`) because `task complete` is the action that produces that state. On failure, exits 1 with `VERIFICATION_FAILED`; no progress event is recorded (the ledger is unchanged). Standalone `code-pact verify` still runs all four checks for after-the-fact consistency auditing.
 5. **Progress record**. On verify pass, records a `done` event with shape `{ task_id, status: "done", at, actor: "agent", agent, evidence, source: "loop", author? }` as **one new file** under `.code-pact/state/events/` (the progress ledger). `author` (Collaboration UX RFC, D1) is the human identity captured at write time (see [§ Author attribution](#author-attribution-collaboration-ux-rfc-d1)); omitted when capture is off or no identity resolves. The write is lock-free by construction: each event is published as a separate no-overwrite file (write a temp file, then `link` it onto the final path, whose name is the event's content id), so two concurrent `task complete` runs produce two distinct files and neither is lost. The legacy `.code-pact/state/progress.yaml` is **not** written. Re-recording the canonically identical event is idempotent (the file already exists).
-6. **`--dry-run`**. Skips the progress record. Returns `{ ok: true, data: { dry_run: true, would_append: <event> } }`. No event file is written. **`--dry-run` does not skip verification** — step 4 runs before the dry-run short-circuit, so a failing `--dry-run` still exits 1 with `VERIFICATION_FAILED` and the same failure-clarity fields below.
+6. **`--dry-run`**. Skips the progress record. Returns `{ ok: true, data: { dry_run: true, would_append: <event> } }`. No event file is written. **`--dry-run` must not cause side effects**: it does **not** execute the project-controlled `verification.commands` (which run with `shell: true`). The `commands` check is previewed (reported as would-execute, treated as passing) rather than run, so a command that would fail does **not** fail the dry run. The read-only `decision` gate still runs, so an unresolved-decision dry-run still exits 1 with `VERIFICATION_FAILED` (`cause_code: DECISION_REQUIRED`). A non-dry-run completion executes the commands and a failing command exits 1 with `VERIFICATION_FAILED` (`cause_code: COMMANDS_FAILED`).
 
 **Failure envelope (v1.26+, P32 — additive).** On `VERIFICATION_FAILED`, the `data` object carries three additive fields alongside the unchanged `data.verify.checks`:
 

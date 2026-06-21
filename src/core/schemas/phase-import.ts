@@ -10,6 +10,7 @@ import {
   TaskStatus,
 } from "./task.ts";
 import { PlanId } from "./plan-id.ts";
+import { DecisionRefPath } from "./decision-ref.ts";
 
 // Lenient task schema for imports. Only `id` is required; all detail
 // fields have defaults applied by runPhaseImport() unless --strict is set.
@@ -33,7 +34,10 @@ export const TaskImport = z.object({
   // verbatim by applyTaskDefaults() without synthetic defaults so
   // absent == undefined == old behaviour.
   depends_on: z.array(z.string().min(1)).optional(),
-  decision_refs: z.array(z.string().min(1)).optional(),
+  // Namespace contract enforced even on lenient import — an external/
+  // AI-generated phase YAML is exactly the hostile-input path this guards.
+  // See the Task schema note: design/decisions/*.md (top-level) only, multi-layer.
+  decision_refs: z.array(DecisionRefPath).optional(),
   reads: z.array(z.string().min(1)).optional(),
   writes: z.array(z.string().min(1)).optional(),
   acceptance_refs: z.array(z.string().min(1)).optional(),

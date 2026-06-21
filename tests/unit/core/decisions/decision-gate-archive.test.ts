@@ -138,6 +138,29 @@ describe("resolveRetiredDecisionGate (predicate A — gate release, self-guards 
       await rm(outside, { recursive: true, force: true });
     }
   });
+
+  it("archive decisions symlinked outside + external accepted record → not_released", async () => {
+    await writeFile(join(cwd, REF), ACCEPTED, "utf8");
+    await rm(join(cwd, REF));
+
+    const outside = await mkdtemp(join(tmpdir(), "code-pact-outside-archive-dec-"));
+    try {
+      await mkdir(join(outside, "design", "decisions"), { recursive: true });
+      await mkdir(join(outside, ".code-pact", "state", "archive", "decisions"), { recursive: true });
+      await writeFile(join(outside, REF), ACCEPTED, "utf8");
+      expect((await writeDecisionRecord(outside, REF, { now: NOW })).kind).toBe("written");
+
+      await rm(join(cwd, ".code-pact", "state", "archive", "decisions"), { recursive: true, force: true });
+      await symlink(
+        join(outside, ".code-pact", "state", "archive", "decisions"),
+        join(cwd, ".code-pact", "state", "archive", "decisions"),
+      );
+
+      expect((await resolveRetiredDecisionGate(cwd, REF)).kind).toBe("not_released");
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("decisionRecordSoftensMissingRef (predicate B — lint soften, any status)", () => {

@@ -1,6 +1,5 @@
 import { readdir, readFile, unlink } from "node:fs/promises";
 import { basename, join } from "node:path";
-import { resolveWithinProject } from "../path-safety.ts";
 import type { ArchiveBundleKind } from "../schemas/archive-bundle.ts";
 import { loadArchiveBundles } from "./archive-bundle-loader.ts";
 import { bindBundleMember } from "./archive-bundle-binding.ts";
@@ -17,14 +16,15 @@ import {
   type LooseMember,
 } from "./archive-bundle-writer.ts";
 import {
-  ARCHIVE_BUNDLES_DIR_SEGMENTS,
   ARCHIVE_DECISIONS_DIR_SEGMENTS,
+  archiveBundleRelPath,
+  archiveBundlesRelDir,
   ARCHIVE_EVENT_PACKS_DIR_SEGMENTS,
   ARCHIVE_PHASES_DIR_SEGMENTS,
-  archiveBundlePath,
-  archiveDecisionsDir,
-  archiveEventPacksDir,
-  archivePhasesDir,
+  archiveDecisionsRelDir,
+  archiveEventPacksRelDir,
+  archivePhasesRelDir,
+  resolveArchiveOwnedPath,
   sha256Hex,
 } from "./paths.ts";
 import { computeMemberIdsSha256 } from "./archive-bundle-reader.ts";
@@ -58,12 +58,12 @@ import { assertNoPendingDeleteIntent } from "./delete-intent-journal.ts";
 
 const ARCHIVE_BUNDLE_STORE_LABEL = ".code-pact/state/archive/bundles";
 
-function looseDirFor(cwd: string, kind: ArchiveBundleKind): string {
+function looseRelDirFor(kind: ArchiveBundleKind): string {
   return kind === "phase_snapshot"
-    ? archivePhasesDir(cwd)
+    ? archivePhasesRelDir()
     : kind === "event_pack"
-      ? archiveEventPacksDir(cwd)
-      : archiveDecisionsDir(cwd);
+      ? archiveEventPacksRelDir()
+      : archiveDecisionsRelDir();
 }
 
 function looseRelPath(kind: ArchiveBundleKind, name: string): string {
@@ -117,7 +117,7 @@ async function evaluateRecordDeleteGate(
   const id = basename(name, ".json");
   let abs: string;
   try {
-    abs = await resolveWithinProject(cwd, looseRelPath(kind, name));
+    abs = await resolveArchiveOwnedPath(cwd, looseRelPath(kind, name));
   } catch {
     return { disposition: "skip", reason: "path_escape" };
   }
@@ -173,7 +173,7 @@ export async function deleteLooseCoveredByBundle(
   // never delete a loose record we cannot prove is captured.
   const { index } = loadArchiveBundles(cwd);
 
-  const dir = looseDirFor(cwd, kind);
+  const dir = await resolveArchiveOwnedPath(cwd, looseRelDirFor(kind));
   let names: string[];
   try {
     const dirents = await readdir(dir, { withFileTypes: true });
@@ -361,7 +361,7 @@ async function buildCompactionPlan(cwd: string, kind: ArchiveBundleKind): Promis
   const only = kindBundles.length === 1 ? kindBundles[0] : undefined;
   let canAdopt = false;
   if (only && would_bundle.length === 0) {
-    const caPath = archiveBundlePath(cwd, kind, computeMemberIdsSha256(only.loaded.members.map((m) => m.id)));
+    const caPath = archiveBundleRelPath(kind, computeMemberIdsSha256(only.loaded.members.map((m) => m.id)));
     canAdopt = only.file === join("bundles", basename(caPath));
   }
   const would_supersede: string[] = [];
@@ -397,7 +397,7 @@ async function buildCompactionPlan(cwd: string, kind: ArchiveBundleKind): Promis
   let would_retire_bundles: string[] = [];
   if (consolidated_members.length > 0) {
     const bundle = buildArchiveBundle(kind, consolidated_members);
-    const absPath = archiveBundlePath(cwd, kind, bundle.member_ids_sha256);
+    const absPath = await resolveArchiveOwnedPath(cwd, archiveBundleRelPath(kind, bundle.member_ids_sha256));
     const consolidatedFile = join("bundles", basename(absPath));
     let existingBytes: string | null = null;
     try {
@@ -466,7 +466,7 @@ export async function retireSupersededBundles(
     if (!allCovered) continue; // fail-closed: keep a bundle the keep bundle doesn't fully cover
     let abs: string;
     try {
-      abs = await resolveWithinProject(cwd, [...ARCHIVE_BUNDLES_DIR_SEGMENTS, basename(file)].join("/"));
+      abs = await resolveArchiveOwnedPath(cwd, `${archiveBundlesRelDir()}/${basename(file)}`);
     } catch {
       continue; // unsafe path → never unlink
     }

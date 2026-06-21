@@ -1,10 +1,9 @@
-import { readFile, mkdir } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { readFile } from "node:fs/promises";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { atomicWriteText } from "../io/atomic-text.ts";
 import { Prompter } from "../lib/prompt.ts";
-import { assertSafeRelativePath } from "../core/path-safety.ts";
+import { assertSafeRelativePath, resolveOwnedProjectPath, resolveWithinProject } from "../core/path-safety.ts";
 import type { Locale } from "../i18n/index.ts";
 import { messages as messageCatalog } from "../i18n/index.ts";
 import type {
@@ -105,7 +104,16 @@ export async function loadBriefFromFile(
     );
   }
 
-  const absPath = join(cwd, relPath);
+  let absPath: string;
+  try {
+    absPath = await resolveWithinProject(cwd, relPath);
+  } catch (err) {
+    throw new PlanBriefFromFileError(
+      "unsafe_path",
+      relPath,
+      `plan brief --from-file: path "${relPath}" is not a safe repo-root-relative path: ${(err as Error).message}`,
+    );
+  }
   let raw: string;
   try {
     raw = await readFile(absPath, "utf8");
@@ -281,13 +289,29 @@ export async function runBriefWizard(
   return { what, who, differentiator };
 }
 
+async function resolveBriefOutputPath(cwd: string): Promise<string> {
+  try {
+    return await resolveOwnedProjectPath(cwd, "design/brief.md");
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "PATH_OUTSIDE_PROJECT" || code === "PATH_NOT_OWNED") {
+      const e = new Error(
+        `design/brief.md is not a safe project-contained write path: ${(err as Error).message}`,
+      );
+      (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+      throw e;
+    }
+    throw err;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Main command
 // ---------------------------------------------------------------------------
 
 export async function runPlanBrief(opts: PlanBriefOptions): Promise<PlanBriefResult> {
   const { cwd, locale, force } = opts;
-  const briefPath = join(cwd, "design", "brief.md");
+  const briefPath = await resolveBriefOutputPath(cwd);
 
   if (!force) {
     try {
@@ -315,7 +339,6 @@ export async function runPlanBrief(opts: PlanBriefOptions): Promise<PlanBriefRes
 
   try {
     const content = generateBriefMd(answers, locale);
-    await mkdir(dirname(briefPath), { recursive: true });
     await atomicWriteText(briefPath, content);
     return { path: briefPath, skipped: false };
   } finally {

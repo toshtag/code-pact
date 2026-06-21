@@ -295,6 +295,27 @@ describe("detectTaskDecisionRefUnsafePath", () => {
     expect(issues[0]?.code).toBe("TASK_DECISION_REF_UNSAFE_PATH");
     expect(issues[0]?.severity).toBe("error");
   });
+
+  // Security (Blocker 1): the lint layer of the multi-layer defense. A safe
+  // repo-relative path that is OUTSIDE the decision namespace (.env, a doc,
+  // README/PRUNED) is still an error — the detector shares the schema's
+  // `decisionRefPathReason`, so a value reaching lint by a non-schema route
+  // is reported precisely.
+  it.each([
+    [".env", "in-project non-decision file"],
+    ["docs/cli-contract.md", "doc outside the namespace"],
+    ["design/decisions/README.md", "the index"],
+    ["design/decisions/PRUNED.md", "the tombstone"],
+    ["design/decisions/notes.txt", "not a .md"],
+  ])("error for %s (%s)", (badRef) => {
+    const entries = [
+      entry(phase("P1", [task("P1-T1", { decision_refs: [badRef] })])),
+    ];
+    const issues = detectTaskDecisionRefUnsafePath(entries);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.code).toBe("TASK_DECISION_REF_UNSAFE_PATH");
+    expect(issues[0]?.severity).toBe("error");
+  });
 });
 
 describe("detectTaskReadsUnsafePath", () => {

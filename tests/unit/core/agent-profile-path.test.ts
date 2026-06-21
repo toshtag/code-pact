@@ -195,13 +195,14 @@ describe("adapter generation honors a custom profile path end-to-end", () => {
   it("reads and pins model_version to the project's profile path, not the default", async () => {
     const { runGenerateAdapter } = await import("../../../src/commands/adapter.ts");
 
-    // Move the profile to a non-default location and repoint project.yaml.
-    await mkdir(join(dir, ".code-pact", "custom"), { recursive: true });
+    // Move the profile to a non-default but still writable location under
+    // `.code-pact/agent-profiles/**` and repoint project.yaml.
+    await mkdir(join(dir, ".code-pact", "agent-profiles", "custom"), { recursive: true });
     const defaultPath = join(dir, ".code-pact", "agent-profiles", "claude-code.yaml");
-    const customPath = join(dir, ".code-pact", "custom", "cc.yaml");
+    const customPath = join(dir, ".code-pact", "agent-profiles", "custom", "cc.yaml");
     await writeFile(customPath, await readFile(defaultPath, "utf8"), "utf8");
     await rm(defaultPath, { force: true });
-    await setProfileRel("claude-code", "custom/cc.yaml");
+    await setProfileRel("claude-code", "agent-profiles/custom/cc.yaml");
 
     await runGenerateAdapter({
       cwd: dir,

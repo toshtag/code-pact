@@ -1,10 +1,11 @@
 import { readdir } from "node:fs/promises";
 import { ArchiveBundleKind } from "../schemas/archive-bundle.ts";
 import {
-  archiveBundlesDir,
-  archiveDecisionsDir,
-  archiveEventPacksDir,
-  archivePhasesDir,
+  archiveBundlesRelDir,
+  archiveDecisionsRelDir,
+  archiveEventPacksRelDir,
+  archivePhasesRelDir,
+  resolveArchiveOwnedPath,
 } from "./paths.ts";
 import {
   compactArchive,
@@ -103,10 +104,10 @@ export function describeJournal(read: DeleteIntentRead): JournalStatus {
 /** Count the physical archive files on disk (loose records + bundles). Read-only. */
 export async function countArchiveFiles(cwd: string): Promise<ArchiveFileCounts> {
   const loose =
-    (await countJsonFiles(archivePhasesDir(cwd))) +
-    (await countJsonFiles(archiveEventPacksDir(cwd))) +
-    (await countJsonFiles(archiveDecisionsDir(cwd)));
-  const bundles = await countJsonFiles(archiveBundlesDir(cwd));
+    (await countJsonFiles(await resolveArchiveOwnedPath(cwd, archivePhasesRelDir()))) +
+    (await countJsonFiles(await resolveArchiveOwnedPath(cwd, archiveEventPacksRelDir()))) +
+    (await countJsonFiles(await resolveArchiveOwnedPath(cwd, archiveDecisionsRelDir())));
+  const bundles = await countJsonFiles(await resolveArchiveOwnedPath(cwd, archiveBundlesRelDir()));
   return { loose_records: loose, bundles, total: loose + bundles };
 }
 

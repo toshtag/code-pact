@@ -1,7 +1,7 @@
 import { readFile, readdir } from "node:fs/promises";
-import { join } from "node:path";
 import { parseFrontMatter } from "../pack/front-matter.ts";
-import { resolveWithinProject } from "../path-safety.ts";
+import { resolveOwnedProjectPath } from "../path-safety.ts";
+import { isDecisionRefPath } from "../schemas/decision-ref.ts";
 import { resolveRetiredDecisionGate } from "./decision-gate-archive.ts";
 
 /**
@@ -68,7 +68,7 @@ export async function readLiveDecisionDir(
   cwd: string,
 ): Promise<{ present: boolean; entries: string[] }> {
   try {
-    const entries = await readdir(join(cwd, "design", "decisions"));
+    const entries = await readdir(await resolveOwnedProjectPath(cwd, "design/decisions"));
     return { present: true, entries: entries.filter((e) => !NON_DECISION_FILES.has(e)) };
   } catch (error) {
     if (isAbsentDecisionsDirError(error)) return { present: false, entries: [] };
@@ -275,11 +275,10 @@ export type DecisionResolution = {
 };
 
 /**
- * Reads a repo-relative file through the project-root boundary. `ok` carries
- * the content; `missing` = no such file; `unsafe` = the path escapes the
- * project root (`..`, absolute, Windows drive, or an existing-ancestor symlink
- * that resolves outside `cwd`). This is the gate's fail-closed I/O primitive:
- * an unsafe `decision_refs` path is never read.
+ * Reads a repo-relative file through the owned project-path boundary. `ok`
+ * carries the content; `missing` = no such file; `unsafe` = the path escapes
+ * the project root OR traverses any symlink component. This is the gate's
+ * fail-closed I/O primitive: an unsafe `decision_refs` path is never read.
  */
 export type ReadResult =
   | { kind: "ok"; content: string }
@@ -289,11 +288,23 @@ type RelFileReader = (relPath: string) => Promise<ReadResult>;
 
 function diskReader(cwd: string): RelFileReader {
   return async (relPath) => {
+    // NAMESPACE guard (multi-layer defense): the decision read seam ONLY reads
+    // ADRs under `design/decisions/*.md` (top-level only). The Task/phase-import schemas
+    // already hard-fail a `decision_refs: [.env]` at parse time, but this seam
+    // re-validates so a value reaching here by any other route (legacy plan
+    // YAML parsed before the schema tightened, a direct programmatic caller, a
+    // future call site) can NEVER read `.env` / a credential file and have it
+    // classified "accepted" or rendered into the pack. Out-of-namespace →
+    // `unsafe` (never read). Filename-scan paths are `design/decisions/<x>.md`
+    // and pass this; README/PRUNED are filtered upstream by NON_DECISION_FILES.
+    if (!isDecisionRefPath(relPath)) {
+      return { kind: "unsafe" };
+    }
     let abs: string;
     try {
-      // Structural path-safety + symlink-escape guard. Throws on `..`,
-      // absolute paths, drive letters, and ancestors that realpath outside cwd.
-      abs = await resolveWithinProject(cwd, relPath);
+      // Structural path-safety + ownership guard. Throws on `..`, absolute
+      // paths, drive letters, and any symlink component.
+      abs = await resolveOwnedProjectPath(cwd, relPath);
     } catch {
       return { kind: "unsafe" };
     }
@@ -464,7 +475,7 @@ export async function resolveDecisionGate(
   taskId: string,
   decisionRefs?: string[],
 ): Promise<DecisionResolution> {
-  const dir = await readLiveDecisionDir(cwd);
+  const dir = await readLiveDecisionDir(cwd).catch(() => ({ present: true, entries: [] }));
   return resolveWith(taskId, decisionRefs, dir, diskReader(cwd), (ref) =>
     resolveRetiredDecisionGate(cwd, ref).then((x) => x.kind === "released"),
   );
@@ -479,7 +490,7 @@ export async function resolveDecisionGate(
 export async function makeDecisionResolver(
   cwd: string,
 ): Promise<{ resolve(taskId: string, decisionRefs?: string[]): Promise<DecisionResolution> }> {
-  const dir = await readLiveDecisionDir(cwd);
+  const dir = await readLiveDecisionDir(cwd).catch(() => ({ present: true, entries: [] }));
   const cache = new Map<string, ReadResult>();
   const base = diskReader(cwd);
   const cachedRead: RelFileReader = async (relPath) => {
@@ -529,10 +540,20 @@ export async function classifyDecisionAdrs(cwd: string): Promise<
   }[] = [];
   for (const name of await readDecisionAdrFiles(cwd)) {
     if (!name.endsWith(".md")) continue;
-    const content = await readFile(
-      join(cwd, "design", "decisions", name),
-      "utf8",
-    );
+    // Route through the project-contained read seam (resolveWithinProject) and
+    // degrade on any error: a `design/decisions` symlinked outside the project
+    // is `unsafe` → skip, and an UNREADABLE entry — e.g. a directory named
+    // `*.md` planted by a hostile repo (readFile → EISDIR) — is caught and
+    // skipped rather than crashing this advisory classifier with an uncoded
+    // errno (exit 3). Best-effort surface, like the pack/lint decision loaders.
+    let content: string;
+    try {
+      const r = await readLiveDecisionFile(cwd, `design/decisions/${name}`);
+      if (r.kind !== "ok") continue;
+      content = r.content;
+    } catch {
+      continue;
+    }
     const { acceptance, status } = classifyAdr(content);
     out.push({
       file: `design/decisions/${name}`,

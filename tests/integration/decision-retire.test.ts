@@ -1,5 +1,6 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import type { Dirent } from "node:fs";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { run as cliRun, ensureCliBuilt, type RunResult } from "../helpers/cli.ts";
@@ -92,6 +93,28 @@ async function recordCount(): Promise<number> {
   } catch {
     return 0;
   }
+}
+async function snapshotTree(root: string): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  async function walk(dir: string): Promise<void> {
+    let entries: Dirent[];
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw err;
+    }
+    for (const entry of entries) {
+      const abs = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        await walk(abs);
+      } else if (entry.isFile()) {
+        out[abs.slice(root.length + 1)] = await readFile(abs, "utf8");
+      }
+    }
+  }
+  await walk(root);
+  return out;
 }
 
 beforeAll(() => ensureCliBuilt(), 60_000);
@@ -218,6 +241,29 @@ ${TASK_FIELDS}
     expect(r.code).toBe(2);
     expect(json(r).error?.code).toBe("DECISION_RETIRE_NOT_ELIGIBLE");
     expect(await fileExists(join(tmpDir, scanRef))).toBe(true);
+  });
+
+  it("external empty roadmap symlink cannot hide an active decision_refs gate", async () => {
+    await scaffold({ adr: BLOCKED, refField: "decision_refs" });
+    const beforeDecision = await readFile(X_MD(), "utf8");
+
+    const outside = await mkdtemp(join(tmpdir(), "code-pact-retire-roadmap-out-"));
+    try {
+      await writeFile(join(outside, "roadmap.yaml"), "phases: []\n", "utf8");
+      await rm(join(tmpDir, "design", "roadmap.yaml"));
+      await symlink(join(outside, "roadmap.yaml"), join(tmpDir, "design", "roadmap.yaml"));
+
+      const beforeState = await snapshotTree(join(tmpDir, ".code-pact", "state"));
+      const r = run(["decision", "retire", XREF, "--write", "--json"]);
+
+      expect(r.code).toBe(2);
+      expect(json(r).error?.code).toBe("DECISION_RETIRE_NOT_ELIGIBLE");
+      expect(await readFile(X_MD(), "utf8")).toBe(beforeDecision);
+      expect(await recordCount()).toBe(0);
+      expect(await snapshotTree(join(tmpDir, ".code-pact", "state"))).toEqual(beforeState);
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
   });
 });
 

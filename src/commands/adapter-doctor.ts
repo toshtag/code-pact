@@ -1,12 +1,17 @@
-import { readFile, readdir } from "node:fs/promises";
+import { readFile, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { AgentProfile } from "../core/schemas/agent-profile.ts";
 import { ModelProfile } from "../core/schemas/model-profile.ts";
 import { Project } from "../core/schemas/project.ts";
 import { adapterRegistry } from "../core/adapters/index.ts";
+import {
+  buildOwnedRoleMap,
+  classifyManifestFileForRead,
+} from "../core/adapters/manifest-file-ownership.ts";
 import { isSupportedAgent, type SupportedAgent } from "../core/agents.ts";
 import { resolveAgentProfilePath } from "../core/agent-profile-path.ts";
+import { resolveWithinProject } from "../core/path-safety.ts";
 import {
   computeContentHash,
   manifestPath,
@@ -65,13 +70,14 @@ export type AdapterDoctorOptions = {
 // schema-invalid) is surfaced as CONFIG_ERROR rather than masked as "no
 // project", so `adapter doctor` doesn't report a clean bill on a broken config.
 async function loadProjectSafe(cwd: string): Promise<Project | null> {
-  const path = join(cwd, ".code-pact", "project.yaml");
+  let path: string;
   let raw: string;
   try {
+    path = await resolveWithinProject(cwd, ".code-pact/project.yaml");
     raw = await readFile(path, "utf8");
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
-    const e = new Error(`Cannot read ${path}.`);
+    const e = new Error(`Cannot read .code-pact/project.yaml.`);
     (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
     throw e;
   }
@@ -102,7 +108,8 @@ async function loadAgentProfileSafe(
 }
 
 async function loadModelProfilesSafe(cwd: string): Promise<ModelProfile[]> {
-  const dir = join(cwd, ".code-pact", "model-profiles");
+  const dir = await resolveWithinProject(cwd, ".code-pact/model-profiles").catch(() => null);
+  if (dir === null) return [];
   let entries: string[];
   try {
     entries = await readdir(dir);
@@ -113,7 +120,10 @@ async function loadModelProfilesSafe(cwd: string): Promise<ModelProfile[]> {
   for (const entry of entries.sort()) {
     if (!entry.endsWith(".yaml")) continue;
     try {
-      const raw = await readFile(join(dir, entry), "utf8");
+      const raw = await readFile(
+        await resolveWithinProject(cwd, [".code-pact", "model-profiles", entry].join("/")),
+        "utf8",
+      );
       profiles.push(ModelProfile.parse(parseYaml(raw) as unknown));
     } catch {
       // skip malformed
@@ -122,13 +132,61 @@ async function loadModelProfilesSafe(cwd: string): Promise<ModelProfile[]> {
   return profiles;
 }
 
-async function readFileMaybe(absPath: string): Promise<string | null> {
+type ProjectReadResult =
+  | { kind: "content"; absPath: string; content: string }
+  | { kind: "missing"; absPath: string }
+  | { kind: "unsafe"; absPath: string; message: string };
+
+async function readProjectFileForDoctor(
+  cwd: string,
+  relPath: string,
+): Promise<ProjectReadResult> {
+  const absPath = join(cwd, relPath);
+  let containedPath: string;
   try {
-    return await readFile(absPath, "utf8");
+    containedPath = await resolveWithinProject(cwd, relPath);
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
-    throw err;
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      return { kind: "missing", absPath };
+    }
+    return { kind: "unsafe", absPath, message: (err as Error).message };
   }
+
+  try {
+    const s = await stat(containedPath);
+    if (!s.isFile()) return { kind: "missing", absPath };
+    return {
+      kind: "content",
+      absPath,
+      content: await readFile(containedPath, "utf8"),
+    };
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      return { kind: "missing", absPath };
+    }
+    // Best-effort DIAGNOSTIC read: any failure degrades to null. ENOENT is a
+    // missing file; EISDIR (a manifest-declared path that is actually a directory,
+    // planted by a hostile repo), ENOTDIR, EACCES, etc. are likewise treated as
+    // "not a readable managed file" — surfaced via the existing FILE_MISSING /
+    // DRIFT advisories, never re-thrown as an uncoded errno that crashes doctor
+    // (exit 3). doctor must report problems, not abort on them.
+    return { kind: "missing", absPath };
+  }
+}
+
+function unsafeAdapterFileIssue(
+  agentName: SupportedAgent,
+  relPath: string,
+  absPath: string,
+  message: string,
+): AdapterDoctorIssue {
+  return {
+    code: "ADAPTER_FILE_PATH_UNSAFE",
+    severity: "error",
+    message: `Managed file "${relPath}" is not a safe project-contained path and was not read: ${message}`,
+    agent: agentName,
+    path: absPath,
+  };
 }
 
 function buildCurrentFingerprint(
@@ -382,10 +440,60 @@ export async function inspectAgent(
     }
 
     const desiredByPath = new Map(desiredFiles.map((f) => [f.path, f]));
-
+    // SECURITY (forged-manifest content/SHA oracle): generator output proves
+    // write intent, not ownership of bytes already present at that path. Read
+    // authority therefore comes only from the adapter's narrow static owned
+    // paths, with a matching role and symlink-free resolution. Dynamic desired
+    // paths remain unverifiable even when the current generator emits them.
+    const ownedStaticRoleMap = buildOwnedRoleMap(descriptor, desiredFiles);
     for (const entry of manifest.files) {
-      const absPath = join(cwd, entry.path);
-      const diskContent = await readFileMaybe(absPath);
+      const ownership = await classifyManifestFileForRead(
+        cwd,
+        descriptor,
+        entry.path,
+        {
+          declaredRole: entry.role,
+          expectedRoleFor: ownedStaticRoleMap,
+        },
+      );
+      if (ownership.kind === "unowned" || ownership.kind === "unsafe") {
+        issues.push(
+          unsafeAdapterFileIssue(
+            agentName as SupportedAgent,
+            entry.path,
+            join(cwd, entry.path),
+            ownership.kind === "unsafe"
+              ? "resolves through a symlink or escapes the project root"
+              : "is not a statically owned path/role for this adapter (forged-manifest guard) — refusing to read",
+          ),
+        );
+        continue;
+      }
+      if (ownership.kind === "unverifiable_dynamic") {
+        issues.push({
+          code: "ADAPTER_FILE_UNVERIFIABLE",
+          severity: "warning",
+          message: `Managed file "${entry.path}" is in a shared dynamic namespace — current generator output does not prove ownership of existing bytes, so it was not read or verified. Re-run "adapter upgrade ${agentName} --write" to refresh the manifest, or remove the stray file.`,
+          agent: agentName,
+          path: join(cwd, entry.path),
+        });
+        continue;
+      }
+      const diskRead = await readProjectFileForDoctor(cwd, entry.path);
+      const absPath = diskRead.absPath;
+      if (diskRead.kind === "unsafe") {
+        issues.push(
+          unsafeAdapterFileIssue(
+            agentName as SupportedAgent,
+            entry.path,
+            absPath,
+            diskRead.message,
+          ),
+        );
+        continue;
+      }
+      const diskContent =
+        diskRead.kind === "content" ? diskRead.content : null;
       const diskHash =
         diskContent === null ? null : computeContentHash(diskContent);
       const desired = desiredByPath.get(entry.path);
@@ -438,6 +546,9 @@ export async function inspectAgent(
       // signal). Resolution: `code-pact adapter upgrade <agent>
       // --write --accept-modified` reinstates the section while
       // preserving any user edits.
+      // SECURITY: the heading/substring inspection IS a content oracle, so it
+      // runs ONLY after classifyManifestFileForRead returned `owned` — never on
+      // a dynamic write-namespace member that forged `role: instruction`.
       if (entry.role === "instruction" && diskContent !== null) {
         const contractIssue = detectContractDrift(
           agentName as SupportedAgent,
@@ -496,8 +607,8 @@ async function listOwnedCandidates(
   glob: string,
 ): Promise<string[]> {
   if (!glob.includes("*")) {
-    const exists = await readFileMaybe(join(cwd, glob));
-    return exists !== null ? [glob] : [];
+    const exists = await readProjectFileForDoctor(cwd, glob);
+    return exists.kind === "content" ? [glob] : [];
   }
   const slash = glob.lastIndexOf("/");
   const dir = slash >= 0 ? glob.slice(0, slash) : ".";
@@ -509,7 +620,7 @@ async function listOwnedCandidates(
 
   let entries: string[];
   try {
-    entries = await readdir(join(cwd, dir));
+    entries = await readdir(dir === "." ? cwd : await resolveWithinProject(cwd, dir));
   } catch {
     return [];
   }

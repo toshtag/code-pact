@@ -26,16 +26,18 @@ import {
   makeDecisionResolver,
   classifyDecisionAdrs,
   readDecisionAdrFiles,
+  readLiveDecisionFile,
   classifyAdr,
   parseAdrCommitments,
 } from "../decisions/adr.ts";
 import { parseFrontMatter } from "../pack/front-matter.ts";
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { Project } from "../schemas/project.ts";
 import { detectContextFitAdvisories } from "../context-fit/advisories.ts";
 import { loadAgentContextBudgetBestEffort } from "../context-fit/load-context-budget.ts";
+import { resolveWithinProject } from "../path-safety.ts";
+import { readProjectTextOrNull } from "../project-read.ts";
 import type { PhaseEntry, PlanState } from "./state.ts";
 import { collectPlanArtifacts } from "./state.ts";
 import type { PlanIssue } from "./shared.ts";
@@ -206,7 +208,8 @@ export async function runLint(opts: LintOptions): Promise<LintResult> {
  */
 async function resolveDefaultAgent(cwd: string): Promise<string | undefined> {
   try {
-    const raw = await readFile(join(cwd, ".code-pact", "project.yaml"), "utf8");
+    const raw = await readProjectTextOrNull(cwd, ".code-pact/project.yaml");
+    if (raw === null) return undefined;
     return Project.parse(parseYaml(raw) as unknown).default_agent;
   } catch {
     return undefined;
@@ -443,10 +446,18 @@ export async function detectAdrAcceptedBodyThin(cwd: string): Promise<PlanIssue[
   const issues: PlanIssue[] = [];
   for (const name of await readDecisionAdrFiles(cwd)) {
     if (!name.endsWith(".md")) continue;
-    const content = await readFile(
-      join(cwd, "design", "decisions", name),
-      "utf8",
-    );
+    // Project-contained read + degrade-on-error: a `design/decisions` symlinked
+    // outside is `unsafe` → skip; an unreadable entry (e.g. a directory named
+    // `*.md` → readFile EISDIR) is caught and skipped, not thrown uncoded which
+    // would crash `plan lint` (exit 3). Best-effort advisory, like the loaders.
+    let content: string;
+    try {
+      const r = await readLiveDecisionFile(cwd, `design/decisions/${name}`);
+      if (r.kind !== "ok") continue;
+      content = r.content;
+    } catch {
+      continue;
+    }
     // Only accepted ADRs carry the "approved but empty" contradiction. A 0-byte
     // file classifies as "empty" (a different concern); a `**Status:** accepted`
     // line — even with no other body — classifies as "accepted" and IS in scope.
@@ -536,7 +547,7 @@ async function detectAdrCommitmentsEmpty(
   for (const [adrPath, { task_id, phase_id }] of accepted) {
     let content: string;
     try {
-      content = await readFile(join(cwd, adrPath), "utf8");
+      content = await readFile(await resolveWithinProject(cwd, adrPath), "utf8");
     } catch {
       continue; // referenced ADR vanished — nothing to advise on
     }

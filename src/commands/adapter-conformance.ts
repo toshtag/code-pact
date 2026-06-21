@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 import type { SupportedAgent } from "../core/agents.ts";
 import {
   ACTIVATION_RULE_ANCHORS,
@@ -17,6 +16,8 @@ import {
   REQUIRED_FAILURE_GUIDANCE,
 } from "../core/adapters/conformance-spec.ts";
 import { readManifest } from "../core/adapters/manifest.ts";
+import { adapterRegistry } from "../core/adapters/index.ts";
+import { classifyManifestFileForRead } from "../core/adapters/manifest-file-ownership.ts";
 import type {
   AdapterManifest,
   ManifestFile,
@@ -283,6 +284,14 @@ export async function runAdapterConformance(
 
   checks.push(pass("manifest_present"));
 
+  // The adapter descriptor carries the NARROW static read authority
+  // (ownedPathGlobs — the wildcard-free built-in paths, NOT the shared
+  // writePathGlobs namespace). EVERY manifest-entry read below is gated by it so
+  // a forged manifest cannot turn a diagnostic into a file-content/SHA oracle —
+  // including on a victim's hand-authored `.claude/skills/private.md`, which is
+  // in the shared write namespace but NOT in the narrow read-authority set.
+  const descriptor = adapterRegistry[agentName];
+
   const instructionEntry = findInstructionFile(manifest);
   if (instructionEntry === null) {
     checks.push(
@@ -295,12 +304,31 @@ export async function runAdapterConformance(
 
   // Load the instruction file off disk. The body of every contract,
   // surface, and failure-guidance check below operates on this string.
+  //
+  // SECURITY (forged-manifest content oracle): the instruction path is
+  // project-supplied. Refuse to read it — and to run ANY heading/substring
+  // contract inspection on it — unless it is a path THIS adapter could have
+  // generated (ownership) AND traverses no symlink. A forged
+  // `role: instruction, path: .env` is `unowned` → reported, never read.
+  const instructionOwnership = await classifyManifestFileForRead(
+    cwd,
+    descriptor,
+    instructionEntry.path,
+  );
+  if (instructionOwnership.kind !== "owned") {
+    checks.push(
+      fail("adapter_file_path_unowned", instructionEntry.path, {
+        reason:
+          instructionOwnership.kind === "unsafe"
+            ? "instruction path declared in manifest resolves through a symlink or escapes the project root — refusing to read"
+            : "instruction path declared in manifest is not a path this adapter generates — refusing to read (forged-manifest guard)",
+      }),
+    );
+    return { agent: agentName, compliant: false, checks };
+  }
   let instructionContent: string;
   try {
-    instructionContent = await readFile(
-      join(cwd, instructionEntry.path),
-      "utf8",
-    );
+    instructionContent = await readFile(instructionOwnership.absPath, "utf8");
   } catch {
     checks.push(
       fail("instruction_file_present", instructionEntry.path, {
@@ -451,9 +479,39 @@ export async function runAdapterConformance(
 
   // ----- per-file checksum match -----
   for (const entry of manifest.files) {
+    // SECURITY (forged-manifest SHA oracle): gate the read on ownership BEFORE
+    // touching the file. An entry naming `.env` (or any path this adapter could
+    // not have generated) is refused — it is never read, no `actual_sha256` is
+    // computed, no content leaves this function. This closes the dictionary/
+    // low-entropy-token oracle on arbitrary local files.
+    const ownership = await classifyManifestFileForRead(cwd, descriptor, entry.path);
+    if (ownership.kind === "unverifiable_dynamic") {
+      // A legitimately generated dynamic skill in the shared namespace. Its name
+      // is attacker-influenceable, so we cannot prove read-ownership: skip the
+      // checksum (never read it) rather than hashing it or flagging it. Advisory
+      // so a normal adapter with command-derived skills stays compliant.
+      checks.push(
+        fail("file_checksum_skipped_unverifiable", entry.path, {
+          reason:
+            "dynamic skill in the shared .claude/skills namespace — read-ownership cannot be proven; checksum skipped (not read)",
+        }, "advisory"),
+      );
+      continue;
+    }
+    if (ownership.kind !== "owned") {
+      checks.push(
+        fail("adapter_file_path_unowned", entry.path, {
+          reason:
+            ownership.kind === "unsafe"
+              ? "manifest file path resolves through a symlink or escapes the project root — refusing to read"
+              : "manifest file path is not a path this adapter generates — refusing to read (forged-manifest guard)",
+        }),
+      );
+      continue;
+    }
     let diskContent: string;
     try {
-      diskContent = await readFile(join(cwd, entry.path), "utf8");
+      diskContent = await readFile(ownership.absPath, "utf8");
     } catch {
       checks.push(
         fail("file_checksum_match", entry.path, {

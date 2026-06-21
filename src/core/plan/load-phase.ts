@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { Phase } from "../schemas/phase.ts";
+import { resolveOwnedProjectPath } from "../path-safety.ts";
 
 // The single seam that reads one LIVE phase YAML file off disk and validates it
 // as a full `Phase`. This exact body used to be byte-duplicated across ~8
@@ -29,6 +29,46 @@ import { Phase } from "../schemas/phase.ts";
 // context — missing-tolerance, where wanted, is a SEPARATE archived-aware path,
 // never a swallowed throw here.
 export async function loadPhase(cwd: string, path: string): Promise<Phase> {
-  const raw = await readFile(join(cwd, path), "utf8");
-  return Phase.parse(parseYaml(raw) as unknown);
+  // `path` is the roadmap's (project-controlled) phase ref. OWN the read: a
+  // `..`/absolute ref OR a symlinked `design/phases/*` — even one pointing to an
+  // IN-PROJECT private file (e.g. `.local/private-phase.yaml`) — must not read an
+  // aliased file into the rendered context pack / generated skills (CWE-59), the
+  // same agent-facing-read class as the constitution leak. resolveOwnedProjectPath
+  // rejects EVERY symlink component, matching the strict loadPlanState contract
+  // on the same control plane (Blocker: roadmap/phase symlink-alias parity). A
+  // refusal maps to CONFIG_ERROR (fail-closed; control-plane input, never
+  // swallowed to null). A genuinely-missing (non-symlink) phase still throws RAW
+  // ENOENT — the legitimate archived-fallback signal resolve-task keys on.
+  let abs: string;
+  try {
+    abs = await resolveOwnedProjectPath(cwd, path);
+  } catch (err) {
+    const e = new Error(
+      `Phase path "${path}" is not a safe owned project path: ${(err as Error).message}`,
+    );
+    (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+    throw e;
+  }
+  let raw: string;
+  try {
+    raw = await readFile(abs, "utf8");
+  } catch (err) {
+    // ENOENT stays RAW: a missing roadmap-referenced phase is the legitimate
+    // archived-fallback signal (resolve-task keys on `code === "ENOENT"`). Any
+    // OTHER read failure on a project-controlled path (the phase ref is a
+    // directory → EISDIR, an intermediate is a file → ENOTDIR, EACCES, …) is an
+    // adversarial input → CONFIG_ERROR, not an uncoded exit-3 internal error.
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") throw err;
+    const e = new Error(`Phase at ${abs} cannot be read: ${(err as Error).message}`);
+    (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+    throw e;
+  }
+  try {
+    return Phase.parse(parseYaml(raw) as unknown);
+  } catch (err) {
+    // Malformed YAML / schema violation on a project-controlled phase → structured.
+    const e = new Error(`Phase at ${abs} is malformed (YAML or schema): ${(err as Error).message}`);
+    (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+    throw e;
+  }
 }

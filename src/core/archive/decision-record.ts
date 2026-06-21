@@ -6,7 +6,7 @@ import {
 import { classifyAdr } from "../decisions/adr.ts";
 import { resolveWithinProject } from "../path-safety.ts";
 import { atomicWriteText, type ExpectedState } from "../../io/atomic-text.ts";
-import { decisionRecordPath, normalizeDecisionRef, sha256Hex } from "./paths.ts";
+import { decisionRecordRelPath, normalizeDecisionRef, resolveArchiveOwnedPath, sha256Hex } from "./paths.ts";
 import { readLooseDecisionRecordRaw } from "./load-decision-record.ts";
 import { decisionRecordStem } from "./archive-bundle-binding.ts";
 import { loadArchiveBundles } from "./archive-bundle-loader.ts";
@@ -190,7 +190,7 @@ export async function planDecisionRecord(
   if (canonical === null) {
     return { kind: "ineligible", path: null, blocks: [{ kind: "invalid_ref", raw: rawRef }] };
   }
-  const path = decisionRecordPath(cwd, canonical);
+  const path = await resolveArchiveOwnedPath(cwd, decisionRecordRelPath(canonical));
 
   const existing = await readExistingRecord(cwd, canonical);
   if (existing.state === "invalid") {

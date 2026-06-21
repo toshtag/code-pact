@@ -1,7 +1,16 @@
 import { mkdir, open, readFile, rename, unlink, type FileHandle } from "node:fs/promises";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname } from "node:path";
 import { DeleteIntent, DELETE_INTENT_SCHEMA_VERSION, type BundlePairIntent, type DeleteIntentRecord } from "../schemas/delete-intent.ts";
-import { archiveBundlesDir, archiveDeleteIntentPath, archiveEventPacksDir, archivePhasesDir, eventPackPath, phaseSnapshotPath, sha256Hex } from "./paths.ts";
+import {
+  archiveBundlesRelDir,
+  archiveDeleteIntentRelPath,
+  archiveEventPacksRelDir,
+  archivePhasesRelDir,
+  eventPackRelPath,
+  phaseSnapshotRelPath,
+  resolveArchiveOwnedPath,
+  sha256Hex,
+} from "./paths.ts";
 
 // ---------------------------------------------------------------------------
 // Retention DELETE-INTENT journal — a durable write-ahead log that makes a loose
@@ -133,6 +142,10 @@ async function pathExists(path: string): Promise<boolean> {
   }
 }
 
+async function resolveArchiveBundleFile(cwd: string, file: string): Promise<string> {
+  return resolveArchiveOwnedPath(cwd, `${archiveBundlesRelDir()}/${basename(file)}`);
+}
+
 /** LOW-LEVEL journal primitive: durably write (commit) the delete intent — the WAL
  *  barrier. fsyncs the temp data AND the parent directory (both required; a failure
  *  throws). Refuses to overwrite an existing journal (`PendingDeleteIntentError`).
@@ -151,7 +164,7 @@ export async function writeDeleteIntent(cwd: string, intents: DeleteIntentRecord
   }
   const intent: DeleteIntent = { schema_version: DELETE_INTENT_SCHEMA_VERSION, intents };
   const content = serializeDeleteIntent(intent);
-  const path = archiveDeleteIntentPath(cwd);
+  const path = await resolveArchiveOwnedPath(cwd, archiveDeleteIntentRelPath());
   const dir = dirname(path);
   await mkdir(dir, { recursive: true });
   // PREFLIGHT the directory durability barrier BEFORE writing anything: if the platform
@@ -198,7 +211,7 @@ export async function writeDeleteIntent(cwd: string, intents: DeleteIntentRecord
  *  unlink the file, then fsync the directory (required) so the removal survives
  *  power loss. */
 export async function clearDeleteIntent(cwd: string): Promise<void> {
-  const path = archiveDeleteIntentPath(cwd);
+  const path = await resolveArchiveOwnedPath(cwd, archiveDeleteIntentRelPath());
   try {
     await unlink(path);
   } catch (err) {
@@ -222,7 +235,7 @@ export type DeleteIntentRead =
 export async function readDeleteIntent(cwd: string): Promise<DeleteIntentRead> {
   let raw: string;
   try {
-    const fh = await open(archiveDeleteIntentPath(cwd), "r");
+    const fh = await open(await resolveArchiveOwnedPath(cwd, archiveDeleteIntentRelPath()), "r");
     try {
       raw = await fh.readFile("utf8");
     } finally {
@@ -361,15 +374,15 @@ export type PairUnlinkHooks = {
 async function completeLoosePairUnlinks(cwd: string, phaseIds: string[], hooks: PairUnlinkHooks = {}): Promise<void> {
   if (phaseIds.length === 0) return;
   for (const phaseId of phaseIds) {
-    await unlinkIfPresent(eventPackPath(cwd, phaseId)); // pack first; either order is healed by recovery
+    await unlinkIfPresent(await resolveArchiveOwnedPath(cwd, eventPackRelPath(phaseId))); // pack first; either order is healed by recovery
     if (hooks.afterPackUnlinked) await hooks.afterPackUnlinked(phaseId);
-    await unlinkIfPresent(phaseSnapshotPath(cwd, phaseId));
+    await unlinkIfPresent(await resolveArchiveOwnedPath(cwd, phaseSnapshotRelPath(phaseId)));
     if (hooks.afterPhaseUnlinked) await hooks.afterPhaseUnlinked(phaseId);
   }
   // REQUIRED: make the unlinks durable BEFORE the journal is cleared, so a power loss
   // after the clear cannot resurrect a member with no journal to re-delete it.
-  await fsyncDirRequired(archiveEventPacksDir(cwd), "event_packs");
-  await fsyncDirRequired(archivePhasesDir(cwd), "phases");
+  await fsyncDirRequired(await resolveArchiveOwnedPath(cwd, archiveEventPacksRelDir()), "event_packs");
+  await fsyncDirRequired(await resolveArchiveOwnedPath(cwd, archivePhasesRelDir()), "phases");
 }
 
 /** Complete a committed LOOSE batch then clear the journal durably. The live loose
@@ -401,11 +414,10 @@ export class BundlePairNotCommittableError extends Error {
  *  immediately before `writeDeleteIntent`, when nothing has been retired yet (so EVERY old bundle
  *  must be present — unlike recovery, which tolerates an already-retired ENOENT). */
 export async function assertBundlePairsCommittable(cwd: string, pairs: BundlePairIntent[]): Promise<void> {
-  const dir = archiveBundlesDir(cwd);
   const readMatch = async (file: string, expected: string, what: string): Promise<void> => {
     let raw: string;
     try {
-      raw = await readFile(join(dir, basename(file)), "utf8");
+      raw = await readFile(await resolveArchiveBundleFile(cwd, file), "utf8");
     } catch (err) {
       throw new BundlePairNotCommittableError(`${what} ${file} is missing before commit: ${(err as Error).message}`);
     }
@@ -438,7 +450,7 @@ export type BundlePairRetireHooks = {
  *  clear the journal. Shared by the live bundle delete and recovery so they cannot drift. */
 async function completeBundlePairRetires(cwd: string, pairs: BundlePairIntent[], hooks: BundlePairRetireHooks = {}): Promise<void> {
   if (pairs.length === 0) return;
-  const dir = archiveBundlesDir(cwd);
+  const dir = await resolveArchiveOwnedPath(cwd, archiveBundlesRelDir());
   let retiredAny = false;
   for (const pair of pairs) {
     for (const kind of ["phase_snapshot", "event_pack"] as const) {
@@ -446,7 +458,7 @@ async function completeBundlePairRetires(cwd: string, pairs: BundlePairIntent[],
       // 1. The survivor authority must be durable + intact on disk BEFORE we retire the
       //    old authority that still holds the removed member. (Empty-set → no survivors.)
       if (member.new_bundle != null) {
-        const newPath = join(dir, member.new_bundle.file);
+        const newPath = await resolveArchiveBundleFile(cwd, member.new_bundle.file);
         let newRaw: string;
         try {
           newRaw = await readFile(newPath, "utf8");
@@ -461,7 +473,7 @@ async function completeBundlePairRetires(cwd: string, pairs: BundlePairIntent[],
       //    committed bytes); an already-gone old bundle is a completed retire.
       for (const old of member.old_bundles) {
         if (hooks.beforeRetire) await hooks.beforeRetire(old.file);
-        const oldPath = join(dir, basename(old.file));
+        const oldPath = await resolveArchiveBundleFile(cwd, old.file);
         let oldRaw: string;
         try {
           oldRaw = await readFile(oldPath, "utf8");

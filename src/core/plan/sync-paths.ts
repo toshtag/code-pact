@@ -1,7 +1,7 @@
 import { readdir, readFile } from "node:fs/promises";
-import { join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { atomicWriteText } from "../../io/atomic-text.ts";
+import { resolveOwnedProjectPath } from "../path-safety.ts";
 import { Phase } from "../schemas/phase.ts";
 
 // Apply an explicit old -> new path rename map to the `reads` / `writes`
@@ -92,6 +92,22 @@ function applyToList(
   return { next, changed: true };
 }
 
+async function resolveSyncPath(cwd: string, relPath: string): Promise<string> {
+  try {
+    return await resolveOwnedProjectPath(cwd, relPath);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "PATH_OUTSIDE_PROJECT" || code === "PATH_NOT_OWNED") {
+      const e = new Error(
+        `${relPath} is not a safe project-contained sync path: ${(err as Error).message}`,
+      );
+      (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+      throw e;
+    }
+    throw err;
+  }
+}
+
 export async function runSyncPaths(opts: {
   cwd: string;
   renames: RenamePair[];
@@ -100,7 +116,7 @@ export async function runSyncPaths(opts: {
   const { cwd, renames, mode } = opts;
   const renameMap = new Map(renames.map((r) => [r.from, r.to]));
 
-  const phasesDir = join(cwd, "design", "phases");
+  const phasesDir = await resolveSyncPath(cwd, "design/phases");
   let entries: string[] = [];
   try {
     entries = await readdir(phasesDir);
@@ -116,8 +132,8 @@ export async function runSyncPaths(opts: {
 
   for (const entry of entries) {
     if (!entry.endsWith(".yaml")) continue;
-    const absPath = join(phasesDir, entry);
     const relPath = `design/phases/${entry}`;
+    const absPath = await resolveSyncPath(cwd, relPath);
 
     // READ-MODIFY-WRITE site — deliberately NOT routed through the
     // core/plan/load-phase.ts seam. It needs the raw bytes to rewrite them in

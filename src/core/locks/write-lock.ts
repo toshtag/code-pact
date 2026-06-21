@@ -29,9 +29,10 @@
 // exercise the real path. NOT documented in public surfaces — no
 // compatibility guarantee.
 
-import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { hostname } from "node:os";
 import { dirname, join } from "node:path";
+import { resolveOwnedProjectPath } from "../path-safety.ts";
 
 export type LockHolder = {
   pid: number;
@@ -63,6 +64,27 @@ export function lockPathFor(cwd: string): string {
   return join(cwd, ".code-pact", "locks", "write.lock");
 }
 
+async function resolveLockPath(cwd: string): Promise<string> {
+  try {
+    return await resolveOwnedProjectPath(cwd, ".code-pact/locks/write.lock");
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (
+      code === "PATH_OUTSIDE_PROJECT" ||
+      code === "PATH_NOT_OWNED" ||
+      code === "ENOTDIR" ||
+      code === "EACCES" ||
+      code === "EPERM" ||
+      code === "ELOOP"
+    ) {
+      const wrapped = new Error((err as Error).message);
+      (wrapped as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+      throw wrapped;
+    }
+    throw err;
+  }
+}
+
 /**
  * Acquire the advisory write lock for the project rooted at `cwd`.
  *
@@ -89,7 +111,7 @@ export async function acquireWriteLock(
 ): Promise<LockHandle> {
   if (locksDisabledViaEnv()) return NOOP_HANDLE;
 
-  const lockPath = lockPathFor(cwd);
+  const lockPath = await resolveLockPath(cwd);
   await mkdir(dirname(lockPath), { recursive: true });
 
   const holder: LockHolder = {
@@ -135,10 +157,15 @@ export async function acquireWriteLock(
     throw err;
   }
 
+  const created = await stat(lockPath);
   return {
     release: async () => {
       try {
-        await unlink(lockPath);
+        const currentPath = await resolveLockPath(cwd);
+        const current = await stat(currentPath);
+        if (current.dev === created.dev && current.ino === created.ino) {
+          await unlink(currentPath);
+        }
       } catch {
         // Best-effort release. The lock file may have been removed
         // externally (manual cleanup of a stale lock by the user)

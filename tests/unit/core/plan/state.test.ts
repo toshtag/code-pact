@@ -77,21 +77,42 @@ describe("loadPlanState (strict)", () => {
     expect(state.progress).toBeNull();
   });
 
-  it("throws ParseError when a phase file fails schema validation", async () => {
+  it("throws CONFIG_ERROR when the roadmap path is a directory", async () => {
+    await mkdir(join(cwd, "design", "roadmap.yaml"));
+
+    await expect(loadPlanState(cwd)).rejects.toMatchObject({ code: "CONFIG_ERROR" });
+  });
+
+  it("throws CONFIG_ERROR when the roadmap is malformed", async () => {
+    await writeRoadmap(":\n  not: [valid");
+
+    await expect(loadPlanState(cwd)).rejects.toMatchObject({ code: "CONFIG_ERROR" });
+  });
+
+  it("throws CONFIG_ERROR when a phase path is a directory", async () => {
+    await writeRoadmap(
+      `phases:\n  - id: P1\n    path: design/phases/P1.yaml\n    weight: 10\n`,
+    );
+    await mkdir(join(cwd, "design", "phases", "P1.yaml"));
+
+    await expect(loadPlanState(cwd)).rejects.toMatchObject({ code: "CONFIG_ERROR" });
+  });
+
+  it("throws CONFIG_ERROR when a phase file fails schema validation", async () => {
     await writeRoadmap(
       `phases:\n  - id: P1\n    path: design/phases/P1.yaml\n    weight: 10\n`,
     );
     await writePhase("P1.yaml", "id: P1\nname: invalid\n");
 
-    await expect(loadPlanState(cwd)).rejects.toThrow();
+    await expect(loadPlanState(cwd)).rejects.toMatchObject({ code: "CONFIG_ERROR" });
   });
 
-  it("throws ParseError when the roadmap references an unsafe phase path", async () => {
+  it("throws CONFIG_ERROR when the roadmap references an unsafe phase path", async () => {
     await writeRoadmap(
       `phases:\n  - id: P1\n    path: ../outside.yaml\n    weight: 10\n`,
     );
 
-    await expect(loadPlanState(cwd)).rejects.toThrow();
+    await expect(loadPlanState(cwd)).rejects.toMatchObject({ code: "CONFIG_ERROR" });
   });
 
   it("loads progress events when progress.yaml exists", async () => {

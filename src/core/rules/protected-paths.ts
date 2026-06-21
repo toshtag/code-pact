@@ -1,12 +1,11 @@
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 import {
   PROTECTED_PATHS,
   synthesizeSample,
   validateGlobSyntax,
   type ProtectedPathEntry,
 } from "../glob.ts";
-import { assertSafeRelativePath } from "../path-safety.ts";
+import { assertSafeRelativePath, resolveOwnedProjectPath } from "../path-safety.ts";
 
 // ---------------------------------------------------------------------------
 // Configurable protected paths.
@@ -53,9 +52,9 @@ export type LoadProtectedPathsResult = {
 export async function loadProtectedPaths(
   cwd: string,
 ): Promise<LoadProtectedPathsResult> {
-  const abs = join(cwd, PROTECTED_PATHS_RULE_FILE);
   let raw: string;
   try {
+    const abs = await resolveOwnedProjectPath(cwd, PROTECTED_PATHS_RULE_FILE);
     raw = await readFile(abs, "utf8");
   } catch {
     return { paths: PROTECTED_PATHS, source: "fallback" };

@@ -1,5 +1,5 @@
 import { readFile, stat, unlink } from "node:fs/promises";
-import { resolveWithinProject } from "../path-safety.ts";
+import { resolveOwnedProjectPath } from "../path-safety.ts";
 import { atomicWriteText, atomicReplaceExistingText, type ExpectedState } from "../../io/atomic-text.ts";
 import {
   collectInboundLinks,
@@ -232,7 +232,7 @@ async function inspectTarget(
 ): Promise<TargetCheck> {
   let abs: string;
   try {
-    abs = await resolveWithinProject(cwd, relPath);
+    abs = await resolveOwnedProjectPath(cwd, relPath);
   } catch {
     return { ok: false, found: "<path now escapes the project root>" };
   }
@@ -341,7 +341,7 @@ export async function applyPrune(
     let abs: string;
     let content: string;
     try {
-      abs = await resolveWithinProject(cwd, file);
+      abs = await resolveOwnedProjectPath(cwd, file);
       content = await readFile(abs, "utf8");
     } catch {
       for (const it of its) {
@@ -430,7 +430,7 @@ export async function applyPrune(
     // Re-resolve the ledger path at COMMIT time (not the cached preflight one), so
     // a design/decisions ancestor symlinked out of the repo since preflight is
     // caught here — never read/write an external PRUNED.md.
-    const ledgerPath = await resolveWithinProject(cwd, LEDGER_REL);
+    const ledgerPath = await resolveOwnedProjectPath(cwd, LEDGER_REL);
     // Read the ledger as it stands now, tracking existence precisely so "absent"
     // is distinguishable from "present but empty".
     let currentLedger = "";
@@ -492,7 +492,7 @@ export async function applyPrune(
     }
     let abs: string;
     try {
-      abs = await resolveWithinProject(cwd, r.rel);
+      abs = await resolveOwnedProjectPath(cwd, r.rel);
     } catch {
       throw new PruneWriteError("rewrite_links", mutationLanded(), `source path escapes the project root: ${r.rel}`);
     }

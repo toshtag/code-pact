@@ -18,22 +18,17 @@
 // no more) — not an audit/security control. It must never throw: a malformed
 // project.yaml or missing git simply yields undefined.
 
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { runGit } from "../audit/index.ts";
+import { readProjectTextOrNull } from "../project-read.ts";
 
 /** True iff project.yaml explicitly sets `collaboration.author: off`. Tolerant:
  * a missing / unparseable / partial project.yaml is treated as "not off".
  * Exported so `code-pact status --mine` can distinguish "capture disabled"
  * (`AUTHOR_CAPTURE_DISABLED`) from "no identity resolved" (`AUTHOR_UNAVAILABLE`). */
 export async function isAuthorCaptureDisabled(cwd: string): Promise<boolean> {
-  let raw: string;
-  try {
-    raw = await readFile(join(cwd, ".code-pact", "project.yaml"), "utf8");
-  } catch {
-    return false;
-  }
+  const raw = await readProjectTextOrNull(cwd, ".code-pact/project.yaml");
+  if (raw === null) return false;
   try {
     const doc = parseYaml(raw) as { collaboration?: { author?: unknown } } | null;
     return doc?.collaboration?.author === "off";

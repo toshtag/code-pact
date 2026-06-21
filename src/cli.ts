@@ -33,9 +33,11 @@ import { cmdSpec } from "./cli/commands/spec.ts";
 import { cmdDecision } from "./cli/commands/decision.ts";
 import type { LocaleCode } from "./core/schemas/locale.ts";
 import { LocaleConfig } from "./core/schemas/locale.ts";
+import { resolveWithinProject } from "./core/path-safety.ts";
 
 const KNOWN_LOCALES: ReadonlySet<Locale> = new Set(["en-US", "ja-JP"]);
 const KNOWN_AGENTS: ReadonlySet<SupportedAgent> = new Set(SUPPORTED_AGENTS);
+const PROJECT_YAML_LOCALE_MAX_BYTES = 128 * 1024;
 
 /**
  * `true` when `<cwd>/.code-pact/` exists on disk. Used by `cmdInit` to
@@ -58,6 +60,31 @@ async function codePactDirExists(cwd: string): Promise<boolean> {
   }
 }
 
+function detectCodePactEnvLocale(): Locale | null {
+  const codePactLocale = process.env.CODE_PACT_LOCALE;
+  if (codePactLocale && KNOWN_LOCALES.has(codePactLocale as Locale)) {
+    return codePactLocale as Locale;
+  }
+  return null;
+}
+
+function detectLangLocale(): Locale | null {
+  const lang = process.env.LANG ?? "";
+  if (lang.startsWith("ja")) return "ja-JP";
+  return null;
+}
+
+async function readProjectYamlForLocale(cwd: string): Promise<string | null> {
+  try {
+    const path = await resolveWithinProject(cwd, ".code-pact/project.yaml");
+    const s = await stat(path);
+    if (!s.isFile()) return null;
+    if (s.size > PROJECT_YAML_LOCALE_MAX_BYTES) return null;
+    return await readFile(path, "utf8");
+  } catch {
+    return null;
+  }
+}
 
 // Locale resolution priority:
 // 1. --locale flag (handled in main before this is called)
@@ -65,29 +92,31 @@ async function codePactDirExists(cwd: string): Promise<boolean> {
 // 3. .code-pact/project.yaml locale field
 // 4. LANG env var
 // 5. default en-US
-async function detectLocale(cwd: string): Promise<Locale> {
-  const codePactLocale = process.env.CODE_PACT_LOCALE;
-  if (codePactLocale && KNOWN_LOCALES.has(codePactLocale as Locale)) {
-    return codePactLocale as Locale;
-  }
+async function detectLocale(cwd: string, opts?: { readProject?: boolean }): Promise<Locale> {
+  const envLocale = detectCodePactEnvLocale();
+  if (envLocale !== null) return envLocale;
 
-  try {
-    const raw = await readFile(join(cwd, ".code-pact", "project.yaml"), "utf8");
-    const data = parseYaml(raw) as { locale?: unknown };
-    if (data && typeof data === "object" && data.locale != null) {
-      const result = LocaleConfig.safeParse(data.locale);
-      if (result.success) {
-        const cfg = result.data;
-        const code = typeof cfg === "string" ? cfg : (cfg.cli ?? cfg.default);
-        if (KNOWN_LOCALES.has(code as Locale)) return code as Locale;
+  if (opts?.readProject !== false) {
+    const raw = await readProjectYamlForLocale(cwd);
+    if (raw !== null) {
+      try {
+        const data = parseYaml(raw) as { locale?: unknown };
+        if (data && typeof data === "object" && data.locale != null) {
+          const result = LocaleConfig.safeParse(data.locale);
+          if (result.success) {
+            const cfg = result.data;
+            const code = typeof cfg === "string" ? cfg : (cfg.cli ?? cfg.default);
+            if (KNOWN_LOCALES.has(code as Locale)) return code as Locale;
+          }
+        }
+      } catch {
+        // project.yaml unparseable for locale discovery — continue
       }
     }
-  } catch {
-    // project.yaml absent or unparseable — continue
   }
 
-  const lang = process.env.LANG ?? "";
-  if (lang.startsWith("ja")) return "ja-JP";
+  const langLocale = detectLangLocale();
+  if (langLocale !== null) return langLocale;
   return "en-US";
 }
 
@@ -457,7 +486,8 @@ async function cmdStatus(argv: string[], globalJson: boolean): Promise<number> {
     const cleanExit2 =
       code === "PHASE_NOT_FOUND" ||
       code === "AMBIGUOUS_PHASE_ID" ||
-      code === "PHASE_SNAPSHOT_INVALID";
+      code === "PHASE_SNAPSHOT_INVALID" ||
+      code === "CONFIG_ERROR";
     emitError(
       json,
       code,
@@ -666,6 +696,12 @@ async function cmdVerify(argv: string[], locale: Locale, globalJson: boolean): P
       emitError(json, "TASK_NOT_FOUND", msg);
       return 2;
     }
+    if (code === "CONFIG_ERROR") {
+      // A contained-loader path-safety refusal / malformed roadmap or phase →
+      // structured envelope (exit 2), not a top-level internal error / exit 3.
+      emitError(json, "CONFIG_ERROR", err instanceof Error ? err.message : "Invalid configuration.");
+      return 2;
+    }
     throw err;
   }
 }
@@ -728,6 +764,16 @@ async function cmdPack(argv: string[], locale: Locale, globalJson: boolean): Pro
       emitError(json, "TASK_NOT_FOUND", msg);
       return 2;
     }
+    if (code === "CONFIG_ERROR") {
+      // A control-plane read refused on path-safety grounds (a roadmap/phase
+      // path that escapes the project via `..`/symlink → loadPhase/loadRoadmap
+      // throw CONFIG_ERROR). Surface the structured envelope (exit 2) instead of
+      // letting it fall through to the top-level internal-error / exit 3. Mirrors
+      // `task context`, which already maps CONFIG_ERROR here.
+      const msg = err instanceof Error ? err.message : "Invalid configuration.";
+      emitError(json, "CONFIG_ERROR", msg);
+      return 2;
+    }
     throw err;
   }
 }
@@ -782,11 +828,6 @@ async function cmdProgress(argv: string[], locale: Locale, globalJson: boolean):
 async function main(): Promise<number> {
   const { globalValues, command, rest } = splitArgv(process.argv.slice(2));
   const cwd = process.cwd();
-  const locale: Locale =
-    globalValues.locale && KNOWN_LOCALES.has(globalValues.locale as Locale)
-      ? (globalValues.locale as Locale)
-      : await detectLocale(cwd);
-  const m = messages[locale];
   const json = globalValues.json === true;
 
   if (globalValues.version) {
@@ -798,6 +839,12 @@ async function main(): Promise<number> {
     }
     return 0;
   }
+
+  const locale: Locale =
+    globalValues.locale && KNOWN_LOCALES.has(globalValues.locale as Locale)
+      ? (globalValues.locale as Locale)
+      : await detectLocale(cwd, { readProject: !(globalValues.help || !command) });
+  const m = messages[locale];
 
   if (globalValues.help || !command) {
     process.stdout.write(`${m.usage}\n`);
@@ -864,6 +911,16 @@ main().then(
   (code) => process.exit(code),
   (err: unknown) => {
     const msg = err instanceof Error ? err.message : String(err);
+    // Safety net: a structured CONFIG_ERROR that no command-level catch mapped
+    // (e.g. a contained control-plane loader's path-safety refusal surfacing from
+    // a command whose catch this PR did not individually wire) must STILL be a
+    // clean exit-2 envelope, never a top-level internal error / exit 3. This
+    // guarantees CONFIG_ERROR completeness across every command in one place; the
+    // per-command cases above stay for their nicer, localized messages.
+    if ((err as NodeJS.ErrnoException)?.code === "CONFIG_ERROR") {
+      emitError(process.argv.includes("--json"), "CONFIG_ERROR", msg);
+      process.exit(2);
+    }
     process.stderr.write(`internal error: ${msg}\n`);
     process.exit(3);
   },

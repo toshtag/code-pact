@@ -6,6 +6,7 @@ import { runInit } from "../../../src/commands/init.ts";
 import { runInitCore } from "../../../src/commands/init.ts";
 import { runGenerateAdapter } from "../../../src/commands/adapter.ts";
 import { deriveSkillName, deriveSkillNameVariants } from "../../../src/core/adapters/claude.ts";
+import { writeManifest, computeContentHash } from "../../../src/core/adapters/manifest.ts";
 
 let dir: string;
 
@@ -619,8 +620,15 @@ describe("runGenerateAdapter — v0.5.2 skill generation", () => {
     expect(await readFile(join(dir, ".claude", "skills", "test.md"), "utf8")).toBe("OLD");
   });
 
-  it("--regen-skills adopts a pre-existing unmanaged skill (role-scoped force)", async () => {
-    // Pre-create a stale test.md (unmanaged — no manifest yet).
+  it("--regen-skills does NOT overwrite a divergent DYNAMIC skill outside the owned set (security)", async () => {
+    // SECURITY (Blocker 2): `.claude/skills/` is SHARED with hand-authored user
+    // skills, so a DYNAMIC command-skill path (here `test.md`, derived from a
+    // verification command) is NOT in the trusted owned set. Even with the
+    // role-scoped force of --regen-skills, an existing divergent dynamic skill is
+    // REFUSED, not overwritten — otherwise a hostile repo whose command name
+    // collides with a user skill (e.g. `deploy`) could replace that user skill.
+    // Restoring safe auto-regeneration of dynamic skills is the reserved-namespace
+    // follow-up (e.g. `.claude/skills/code-pact-*.md`).
     await mkdir(join(dir, ".claude", "skills"), { recursive: true });
     await writeFile(join(dir, ".claude", "skills", "test.md"), "STALE", "utf8");
     // Pre-create an unmanaged CLAUDE.md too — it should be left alone since
@@ -635,10 +643,10 @@ describe("runGenerateAdapter — v0.5.2 skill generation", () => {
       regenSkills: true,
     });
 
-    // test.md was unmanaged × stale → replace_unmanaged (regenSkills scopes force to skills)
+    // test.md (dynamic, not in ownedPathGlobs) → refused, content untouched.
     const testFile = result.files.find((f) => f.relPath.endsWith("test.md"));
-    expect(testFile?.action).toBe("replace_unmanaged");
-    expect(await readFile(join(dir, ".claude", "skills", "test.md"), "utf8")).toContain("pnpm test");
+    expect(testFile?.action).toBe("refuse");
+    expect(await readFile(join(dir, ".claude", "skills", "test.md"), "utf8")).toBe("STALE");
 
     // CLAUDE.md (role=instruction) is NOT touched by --regen-skills.
     const claude = result.files.find((f) => f.relPath === "CLAUDE.md");
@@ -684,5 +692,56 @@ describe("runGenerateAdapter — v0.5.2 skill generation", () => {
     const result = await runGenerateAdapter({ cwd: dir, agentName: "claude-code", force: true, locale: "en-US" });
     const skillFiles = result.created.filter((p) => p.includes("test.md"));
     expect(skillFiles).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SECURITY (Blocker 2): a DYNAMIC command-skill path can collide with a
+// hand-authored user skill in the shared `.claude/skills/` dir. A forged manifest
+// (hash == the user skill's current content) + a verification command whose
+// derived name equals the user skill name must NOT auto-overwrite the user file.
+// ---------------------------------------------------------------------------
+
+describe("runGenerateAdapter — forged manifest cannot overwrite a colliding user skill", () => {
+  beforeEach(async () => {
+    await runInitCore({
+      cwd: dir,
+      locale: "en-US",
+      agents: ["claude-code"],
+      force: false,
+      json: false,
+      createSamplePhase: true,
+      // deriveSkillName("deploy") === "deploy" → generator wants .claude/skills/deploy.md
+      verifyCommand: "deploy",
+    });
+  });
+
+  it("refuses to overwrite a hand-authored .claude/skills/deploy.md (managed-clean via forged manifest)", async () => {
+    const userSkill = join(dir, ".claude", "skills", "deploy.md");
+    await mkdir(join(dir, ".claude", "skills"), { recursive: true });
+    const USER = "# my deploy notes\nhand-authored, load-bearing\n";
+    await writeFile(userSkill, USER, "utf8");
+    // Forge a manifest claiming deploy.md is a managed skill whose hash == the
+    // user's current content → it classifies managed-clean × stale → would update.
+    await writeManifest(dir, "claude-code", {
+      schema_version: 1,
+      agent_name: "claude-code",
+      generator_version: "0.0.0",
+      adapter_schema_version: 1,
+      generated_at: "2026-01-01T00:00:00.000Z",
+      profile_fingerprint: { instruction_filename: "CLAUDE.md", context_dir: ".context/claude-code" },
+      files: [
+        { path: ".claude/skills/deploy.md", sha256: computeContentHash(USER), managed: true, role: "skill" },
+      ],
+    });
+
+    const result = await runGenerateAdapter({ cwd: dir, agentName: "claude-code", force: false, locale: "en-US" });
+
+    // deploy.md is a DYNAMIC skill path — NOT in the trusted owned set — so the
+    // overwrite is refused and the hand-authored content is preserved.
+    const entry = result.files.find((f) => f.relPath === ".claude/skills/deploy.md");
+    expect(entry?.action).toBe("refuse");
+    expect(entry?.reason).toBe("unowned_generated_path"); // not --accept-modified's managed_modified
+    expect(await readFile(userSkill, "utf8")).toBe(USER);
   });
 });

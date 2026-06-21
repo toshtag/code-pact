@@ -18,6 +18,7 @@ import {
 } from "../core/progress/all-sources.ts";
 import { validateSnapshotEventEvidence } from "../core/archive/snapshot-evidence.ts";
 import { Project } from "../core/schemas/project.ts";
+import { resolveOwnedProjectPath, resolveWithinProject } from "../core/path-safety.ts";
 import {
   ACCEPTED_MODEL_VERSION_INPUTS,
   AgentProfile,
@@ -49,13 +50,12 @@ import {
 import { validateEventPackTier1 } from "../core/archive/event-pack-reader.ts";
 import { bindPackToSnapshot } from "../core/archive/event-pack-binding.ts";
 import { PhaseSnapshot } from "../core/schemas/phase-snapshot.ts";
-import { phaseFilePresence } from "../core/plan/checks/fs.ts";
 import { isSupportedAgent, type SupportedAgent } from "../core/agents.ts";
 import { CONSTITUTION_PLACEHOLDER_MARKERS } from "../core/constitution.ts";
 import { readManifest } from "../core/adapters/manifest.ts";
 import { auditWrites, runGit } from "../core/audit/index.ts";
 import { gitIgnoredControlPlaneAreas } from "../core/control-plane-ignore.ts";
-import { globToRegex, validateGlobSyntax } from "../core/glob.ts";
+import { matchGlob, validateGlobSyntax } from "../core/glob.ts";
 import { inspectAgent, type AdapterDoctorIssue } from "./adapter-doctor.ts";
 import { readPackageVersion } from "../lib/package-version.ts";
 import type { Locale } from "../i18n/index.ts";
@@ -125,21 +125,42 @@ export type DoctorResult = {
 // Helpers
 // ---------------------------------------------------------------------------
 
-async function fileExists(p: string): Promise<boolean> {
+type SafeYamlResult =
+  | { ok: true; data: unknown }
+  | { ok: false; code: "PATH_OUTSIDE_PROJECT" | "INVALID_YAML" };
+
+async function safeReadProjectYaml(
+  cwd: string,
+  relPath: string,
+): Promise<SafeYamlResult> {
+  let abs: string;
   try {
-    await access(p);
-    return true;
+    abs = await resolveWithinProject(cwd, relPath);
   } catch {
-    return false;
+    return { ok: false, code: "PATH_OUTSIDE_PROJECT" };
+  }
+  try {
+    const raw = await readFile(abs, "utf8");
+    return { ok: true, data: parseYaml(raw) };
+  } catch {
+    return { ok: false, code: "INVALID_YAML" };
   }
 }
 
-async function safeReadYaml(p: string): Promise<{ ok: true; data: unknown } | { ok: false }> {
+function pushPathIssue(issues: DoctorIssue[], relPath: string): void {
+  issues.push({
+    code: "PATH_OUTSIDE_PROJECT",
+    severity: "error",
+    message: `${relPath} resolves outside the project root or through an unsafe symlink and was not read`,
+  });
+}
+
+async function projectFileExists(cwd: string, relPath: string): Promise<boolean> {
   try {
-    const raw = await readFile(p, "utf8");
-    return { ok: true, data: parseYaml(raw) };
+    await access(await resolveWithinProject(cwd, relPath));
+    return true;
   } catch {
-    return { ok: false };
+    return false;
   }
 }
 
@@ -148,10 +169,11 @@ async function safeReadYaml(p: string): Promise<{ ok: true; data: unknown } | { 
 // ---------------------------------------------------------------------------
 
 async function checkProjectYaml(cwd: string, issues: DoctorIssue[]): Promise<Project | null> {
-  const path = join(cwd, ".code-pact", "project.yaml");
-  const result = await safeReadYaml(path);
+  const path = ".code-pact/project.yaml";
+  const result = await safeReadProjectYaml(cwd, path);
   if (!result.ok) {
-    issues.push({ code: "INVALID_YAML", severity: "error", message: `Cannot read ${path}` });
+    if (result.code === "PATH_OUTSIDE_PROJECT") pushPathIssue(issues, path);
+    else issues.push({ code: "INVALID_YAML", severity: "error", message: `Cannot read ${path}` });
     return null;
   }
   const parsed = Project.safeParse(result.data);
@@ -167,10 +189,11 @@ async function checkProjectYaml(cwd: string, issues: DoctorIssue[]): Promise<Pro
 }
 
 async function checkRoadmap(cwd: string, issues: DoctorIssue[]): Promise<Roadmap | null> {
-  const path = join(cwd, "design", "roadmap.yaml");
-  const result = await safeReadYaml(path);
+  const path = "design/roadmap.yaml";
+  const result = await safeReadProjectYaml(cwd, path);
   if (!result.ok) {
-    issues.push({ code: "INVALID_YAML", severity: "error", message: `Cannot read ${path}` });
+    if (result.code === "PATH_OUTSIDE_PROJECT") pushPathIssue(issues, path);
+    else issues.push({ code: "INVALID_YAML", severity: "error", message: `Cannot read ${path}` });
     return null;
   }
   const parsed = Roadmap.safeParse(result.data);
@@ -207,7 +230,18 @@ async function checkPhases(
 
   for (const ref of roadmap.phases) {
     const absPath = join(cwd, ref.path);
-    const presence = await phaseFilePresence(absPath);
+    let presence: "present" | "absent" | "inaccessible";
+    try {
+      await access(await resolveWithinProject(cwd, ref.path));
+      presence = "present";
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === "PATH_OUTSIDE_PROJECT") {
+        pushPathIssue(issues, ref.path);
+        continue;
+      }
+      presence = code === "ENOENT" ? "absent" : "inaccessible";
+    }
     if (presence === "inaccessible") {
       // Present but unreadable (e.g. a non-searchable parent dir) — fail closed.
       // The snapshot must NOT release a live file that is actually on disk.
@@ -243,13 +277,16 @@ async function checkPhases(
       });
       continue;
     }
-    const result = await safeReadYaml(absPath);
+    const result = await safeReadProjectYaml(cwd, ref.path);
     if (!result.ok) {
-      issues.push({
-        code: "INVALID_YAML",
-        severity: "error",
-        message: `Cannot parse phase file: ${ref.path}`,
-      });
+      if (result.code === "PATH_OUTSIDE_PROJECT") pushPathIssue(issues, ref.path);
+      else {
+        issues.push({
+          code: "INVALID_YAML",
+          severity: "error",
+          message: `Cannot parse phase file: ${ref.path}`,
+        });
+      }
       continue;
     }
     const parsed = Phase.safeParse(result.data);
@@ -275,12 +312,15 @@ async function checkPhases(
   }
 
   // Check for phase YAML files in design/phases/ not referenced in roadmap
-  const phasesDir = join(cwd, "design", "phases");
   let phaseFiles: string[] = [];
   try {
+    const phasesDir = await resolveOwnedProjectPath(cwd, "design/phases");
     phaseFiles = await readdir(phasesDir);
-  } catch {
-    // directory may not exist
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "PATH_OUTSIDE_PROJECT" || code === "PATH_NOT_OWNED") {
+      pushPathIssue(issues, "design/phases");
+    }
   }
   const referencedPaths = new Set(roadmap.phases.map((r) => r.path));
   for (const file of phaseFiles) {
@@ -338,13 +378,13 @@ async function checkProgressLog(
   archivedKnownTaskIds: Set<string>,
   issues: DoctorIssue[],
 ): Promise<void> {
-  const path = join(cwd, ".code-pact", "state", "progress.yaml");
+  const path = ".code-pact/state/progress.yaml";
   // A missing progress.yaml is NOT an error — event files may still supply
   // events (the post-migration / events-only state). Only an existing but
   // unreadable / schema-invalid legacy file is INVALID_YAML / SCHEMA_ERROR.
   let legacyEvents: ProgressEvent[] = [];
   try {
-    const raw = await readFile(path, "utf8");
+    const raw = await readFile(await resolveWithinProject(cwd, path), "utf8");
     let doc: unknown;
     try {
       doc = parseYaml(raw);
@@ -363,6 +403,10 @@ async function checkProgressLog(
     }
     legacyEvents = parsed.data.events;
   } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "PATH_OUTSIDE_PROJECT") {
+      pushPathIssue(issues, path);
+      return;
+    }
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
       issues.push({ code: "INVALID_YAML", severity: "error", message: `Cannot read ${path}` });
       return;
@@ -484,14 +528,17 @@ async function checkAgentProfiles(
   const knownTiers = new Set(ModelTier.options);
 
   for (const agentRef of project.agents) {
-    const profilePath = join(cwd, ".code-pact", agentRef.profile);
-    const result = await safeReadYaml(profilePath);
+    const profilePath = [".code-pact", agentRef.profile].join("/");
+    const result = await safeReadProjectYaml(cwd, profilePath);
     if (!result.ok) {
-      issues.push({
-        code: "AGENT_NOT_FOUND",
-        severity: "error",
-        message: `Agent profile "${agentRef.profile}" cannot be read`,
-      });
+      if (result.code === "PATH_OUTSIDE_PROJECT") pushPathIssue(issues, profilePath);
+      else {
+        issues.push({
+          code: "AGENT_NOT_FOUND",
+          severity: "error",
+          message: `Agent profile "${agentRef.profile}" cannot be read`,
+        });
+      }
       continue;
     }
     const parsed = AgentProfile.safeParse(result.data);
@@ -569,11 +616,16 @@ async function checkAgentProfiles(
 }
 
 async function checkModelProfiles(cwd: string, issues: DoctorIssue[]): Promise<void> {
-  const dir = join(cwd, ".code-pact", "model-profiles");
+  const dirRel = ".code-pact/model-profiles";
   let entries: string[] = [];
   try {
+    const dir = await resolveWithinProject(cwd, dirRel);
     entries = await readdir(dir);
-  } catch {
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "PATH_OUTSIDE_PROJECT") {
+      pushPathIssue(issues, dirRel);
+      return;
+    }
     issues.push({
       code: "MISSING_DIR",
       severity: "warning",
@@ -584,13 +636,17 @@ async function checkModelProfiles(cwd: string, issues: DoctorIssue[]): Promise<v
 
   for (const entry of entries) {
     if (!entry.endsWith(".yaml")) continue;
-    const result = await safeReadYaml(join(dir, entry));
+    const relPath = `${dirRel}/${entry}`;
+    const result = await safeReadProjectYaml(cwd, relPath);
     if (!result.ok) {
-      issues.push({
-        code: "INVALID_YAML",
-        severity: "error",
-        message: `.code-pact/model-profiles/${entry} cannot be parsed`,
-      });
+      if (result.code === "PATH_OUTSIDE_PROJECT") pushPathIssue(issues, relPath);
+      else {
+        issues.push({
+          code: "INVALID_YAML",
+          severity: "error",
+          message: `.code-pact/model-profiles/${entry} cannot be parsed`,
+        });
+      }
       continue;
     }
     const parsed = ModelProfile.safeParse(result.data);
@@ -606,15 +662,16 @@ async function checkModelProfiles(cwd: string, issues: DoctorIssue[]): Promise<v
 
 async function checkBakFiles(cwd: string, issues: DoctorIssue[]): Promise<void> {
   // Check design/ tree for .bak files
-  const dirs = [
-    join(cwd, "design"),
-    join(cwd, ".code-pact"),
-  ];
-  for (const dir of dirs) {
+  const dirs = ["design", ".code-pact"];
+  for (const relDir of dirs) {
     let entries: string[] = [];
     try {
+      const dir = await resolveWithinProject(cwd, relDir);
       entries = await readdir(dir);
-    } catch {
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "PATH_OUTSIDE_PROJECT") {
+        pushPathIssue(issues, relDir);
+      }
       continue;
     }
     for (const entry of entries) {
@@ -622,7 +679,7 @@ async function checkBakFiles(cwd: string, issues: DoctorIssue[]): Promise<void> 
         issues.push({
           code: "BAK_FILE",
           severity: "warning",
-          message: `Backup file found: ${dir.replace(cwd + "/", "")}/${entry} — safe to delete`,
+          message: `Backup file found: ${relDir}/${entry} — safe to delete`,
         });
       }
     }
@@ -647,7 +704,7 @@ function checkDuplicateIds(phaseEntries: PhaseEntry[], issues: DoctorIssue[]): v
 async function checkLocalGitignored(cwd: string, issues: DoctorIssue[]): Promise<void> {
   let content: string;
   try {
-    content = await readFile(join(cwd, ".gitignore"), "utf8");
+    content = await readFile(await resolveWithinProject(cwd, ".gitignore"), "utf8");
   } catch {
     issues.push({
       code: "LOCAL_NOT_GITIGNORED",
@@ -693,13 +750,12 @@ async function checkAdapterMissing(
       }
     }
 
-    const profilePath = join(cwd, ".code-pact", agentRef.profile);
-    const result = await safeReadYaml(profilePath);
+    const profilePath = [".code-pact", agentRef.profile].join("/");
+    const result = await safeReadProjectYaml(cwd, profilePath);
     if (!result.ok) continue; // already reported by checkAgentProfiles
     const parsed = AgentProfile.safeParse(result.data);
     if (!parsed.success) continue;
-    const instructionFile = join(cwd, parsed.data.instruction_filename);
-    if (!(await fileExists(instructionFile))) {
+    if (!(await projectFileExists(cwd, parsed.data.instruction_filename))) {
       issues.push({
         code: "ADAPTER_MISSING",
         severity: "warning",
@@ -783,7 +839,7 @@ async function checkBriefMissing(
   const hasRealPhase = phases.some((p) => p.id !== "TUTORIAL");
   if (!hasRealPhase) return;
 
-  if (!(await fileExists(join(cwd, "design", "brief.md")))) {
+  if (!(await projectFileExists(cwd, "design/brief.md"))) {
     issues.push({
       code: "BRIEF_MISSING",
       severity: "warning",
@@ -807,10 +863,10 @@ async function checkConstitutionPlaceholder(
   const hasRealPhase = phases.some((p) => p.id !== "TUTORIAL");
   if (!hasRealPhase) return;
 
-  const path = join(cwd, "design", "constitution.md");
+  const path = "design/constitution.md";
   let content: string;
   try {
-    content = await readFile(path, "utf8");
+    content = await readFile(await resolveWithinProject(cwd, path), "utf8");
   } catch {
     return; // file absent — BRIEF_MISSING or similar handles the design dir; skip here
   }
@@ -845,8 +901,8 @@ async function checkAdapterStale(
 ): Promise<void> {
   for (const agentRef of project.agents) {
     if (agentRef.enabled === false) continue;
-    const profilePath = join(cwd, ".code-pact", agentRef.profile);
-    const result = await safeReadYaml(profilePath);
+    const profilePath = [".code-pact", agentRef.profile].join("/");
+    const result = await safeReadProjectYaml(cwd, profilePath);
     if (!result.ok) continue; // already reported elsewhere
     const parsed = AgentProfile.safeParse(result.data);
     if (!parsed.success) continue;
@@ -870,17 +926,20 @@ async function checkStaleContext(
 
   for (const agentRef of project.agents) {
     // Derive context dir from agent profile
-    const profilePath = join(cwd, ".code-pact", agentRef.profile);
-    const result = await safeReadYaml(profilePath);
+    const profilePath = [".code-pact", agentRef.profile].join("/");
+    const result = await safeReadProjectYaml(cwd, profilePath);
     if (!result.ok) continue;
     const parsed = AgentProfile.safeParse(result.data);
     if (!parsed.success) continue;
 
-    const contextDir = join(cwd, parsed.data.context_dir);
     let entries: string[] = [];
     try {
+      const contextDir = await resolveWithinProject(cwd, parsed.data.context_dir);
       entries = await readdir(contextDir);
-    } catch {
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "PATH_OUTSIDE_PROJECT") {
+        pushPathIssue(issues, parsed.data.context_dir);
+      }
       continue;
     }
     for (const entry of entries) {
@@ -978,7 +1037,7 @@ async function checkControlPlaneGitignored(
   issues: DoctorIssue[],
 ): Promise<void> {
   // Only meaningful for a real, initialized project.
-  if (!(await fileExists(join(cwd, ".code-pact", "project.yaml")))) return;
+  if (!(await projectFileExists(cwd, ".code-pact/project.yaml"))) return;
   const ignoredAreas = await gitIgnoredControlPlaneAreas(cwd);
   if (ignoredAreas.length === 0) return; // none ignored, or git could not answer
 
@@ -1230,11 +1289,11 @@ async function checkControlPlaneBranchNotDriven(
 
   // files_touched already excludes code-pact runtime state. Drop team-declared
   // exclude_globs (default empty). If nothing real remains → skip.
-  const compiled = excludeGlobs
-    .filter((g) => validateGlobSyntax(g) === null)
-    .map((g) => globToRegex(g));
+  const validExcludeGlobs = excludeGlobs.filter(
+    (g) => validateGlobSyntax(g) === null,
+  );
   const realChanged = audit.files_touched.filter(
-    (f) => !compiled.some((re) => re.test(f)),
+    (f) => !validExcludeGlobs.some((g) => matchGlob(g, f)),
   );
   if (realChanged.length === 0) return;
 

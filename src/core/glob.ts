@@ -45,8 +45,19 @@ const WALK_IGNORE_DIRS = new Set<string>([
  *
  * The check is purely syntactic — it does not look at the filesystem.
  */
+/**
+ * Upper bound on glob length. Real repo-root-relative globs are short; a
+ * pathologically long pattern is rejected before it can be compiled into a
+ * regex (defense-in-depth against {@link globToRegex} blow-up). Matching on the
+ * walk hot path uses the linear {@link matchGlob}, which is bounded regardless,
+ * but this keeps any residual regex caller cheap.
+ */
+export const MAX_GLOB_LENGTH = 1024;
+
 export function validateGlobSyntax(pattern: string): string | null {
   if (pattern.length === 0) return "empty glob pattern";
+  if (pattern.length > MAX_GLOB_LENGTH)
+    return `glob pattern exceeds ${MAX_GLOB_LENGTH} characters`;
   if (pattern.startsWith("!")) return "negation patterns ('!') are not supported in P10";
   if (/[{}]/.test(pattern)) return "brace expansion ('{...}') is not supported in P10";
   if (/[@+?!*]\(/.test(pattern)) return "extglob syntax ('@(...)', '+(...)', '*(...)', '?(...)', '!(...)') is not supported in P10";
@@ -86,27 +97,119 @@ export function globToRegex(pattern: string): RegExp {
   const DOUBLE = "\u0001"; // sentinel for `**` segments
   const segments = pattern.split("/").map((seg) => {
     if (seg === "**") return DOUBLE;
-    // Escape regex metachars (excluding `*`), then expand `*` to `[^/]*`.
-    const escaped = seg.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+    // Escape regex metachars (excluding `*`), then expand `*` to `[^/]*`. `?` is a
+    // LITERAL in this glob subset (validateGlobSyntax accepts it), so it MUST be
+    // escaped — otherwise `a?` compiles to the regex quantifier and `?` alone is
+    // an invalid regex. `[^/]` already matches a newline, so `*` needs no change.
+    const escaped = seg.replace(/[.+^${}()|[\]?\\]/g, "\\$&");
     return escaped.replace(/\*/g, "[^/]*");
   });
 
-  let joined = segments.join("/");
-  // Collapse `/**/` patterns and boundaries so `**` matches zero+ segments.
+  // Collapse runs of consecutive `**` segments to a single one so this agrees
+  // with the canonical {@link matchGlob}, where adjacent `**` each match zero
+  // segments (`a/**/**` ≡ `a/**`). Without this, `**/**` compiles to
+  // `(?:.*/)?.*/` which forces an intermediate segment that matchGlob does not
+  // require — a divergence that let `design/**/**/roadmap.yaml` match
+  // `design/roadmap.yaml` at runtime but not via this regex.
+  const collapsed = segments.filter(
+    (s, i) => !(s === DOUBLE && segments[i - 1] === DOUBLE),
+  );
+
+  let joined = collapsed.join("/");
+  // Expand `**` so it matches zero+ segments. Use `[\s\S]*` (NOT `.*`): `.` does
+  // not match a newline in JS regex, but matchGlob's `**` does match a segment
+  // containing a newline, so `.*` would diverge on paths with newlines.
   joined = joined
-    .replace(new RegExp(`/${DOUBLE}/`, "g"), "/(?:.*/)?")
-    .replace(new RegExp(`/${DOUBLE}$`, "g"), "(?:/.*)?")
-    .replace(new RegExp(`^${DOUBLE}/`, "g"), "(?:.*/)?")
-    .replace(new RegExp(`^${DOUBLE}$`, "g"), ".*")
-    .replace(new RegExp(DOUBLE, "g"), ".*");
+    .replace(new RegExp(`/${DOUBLE}/`, "g"), "/(?:[\\s\\S]*/)?")
+    .replace(new RegExp(`/${DOUBLE}$`, "g"), "(?:/[\\s\\S]*)?")
+    .replace(new RegExp(`^${DOUBLE}/`, "g"), "(?:[\\s\\S]*/)?")
+    .replace(new RegExp(`^${DOUBLE}$`, "g"), "[\\s\\S]*")
+    .replace(new RegExp(DOUBLE, "g"), "[\\s\\S]*");
 
   return new RegExp(`^${joined}$`);
 }
 
 /**
+ * Linear glob matcher — the runtime replacement for `globToRegex(p).test(s)` on
+ * any path that tests MANY candidates (the file walk, the write audit, doctor's
+ * exclude globs). `globToRegex` compiles `**` into greedy optional regex groups
+ * that backtrack catastrophically: a pattern with several `**` segments tested
+ * against a deep path can take tens of seconds (a project-controlled `task.reads`
+ * glob is a DoS vector). This two-pointer matcher is O(patternSegments ×
+ * pathSegments) with NO backtracking blow-up.
+ *
+ * This is the CANONICAL matcher: same subset as `globToRegex` (literal segments,
+ * single-star within a segment not crossing a slash, doublestar as a full segment
+ * matching zero or more segments) AND now the same semantics — `globToRegex`
+ * collapses adjacent doublestar segments to agree with this function (they
+ * previously diverged when two doublestar segments were adjacent). The caller is
+ * expected to have validated the pattern via `validateGlobSyntax` first — both
+ * inputs are POSIX, repo-root-relative paths.
+ */
+export function matchGlob(pattern: string, path: string): boolean {
+  return matchSegments(pattern.split("/"), path.split("/"));
+}
+
+/** Two-pointer segment matcher with `**` (zero+ segments) backtracking. */
+function matchSegments(p: readonly string[], s: readonly string[]): boolean {
+  let pi = 0;
+  let si = 0;
+  let starPi = -1; // pattern index of the last `**` seen
+  let starSi = 0; // path index it is currently allowed to have consumed up to
+
+  while (si < s.length) {
+    if (pi < p.length && p[pi] === "**") {
+      starPi = pi;
+      starSi = si;
+      pi += 1; // first try `**` matching zero segments
+    } else if (pi < p.length && p[pi] !== "**" && matchSegment(p[pi]!, s[si]!)) {
+      pi += 1;
+      si += 1;
+    } else if (starPi !== -1) {
+      // Let the most recent `**` consume one more path segment, then retry.
+      starSi += 1;
+      si = starSi;
+      pi = starPi + 1;
+    } else {
+      return false;
+    }
+  }
+  // Trailing pattern must be only `**` segments to match the empty remainder.
+  while (pi < p.length && p[pi] === "**") pi += 1;
+  return pi === p.length;
+}
+
+/** Match a single path segment against a single pattern segment (`*` = run of non-`/`). */
+function matchSegment(pat: string, str: string): boolean {
+  let pi = 0;
+  let si = 0;
+  let starPi = -1;
+  let starSi = 0;
+
+  while (si < str.length) {
+    if (pi < pat.length && pat[pi] === "*") {
+      starPi = pi;
+      starSi = si;
+      pi += 1; // `*` matches zero chars first
+    } else if (pi < pat.length && pat[pi] === str[si]) {
+      pi += 1;
+      si += 1;
+    } else if (starPi !== -1) {
+      starSi += 1;
+      si = starSi;
+      pi = starPi + 1;
+    } else {
+      return false;
+    }
+  }
+  while (pi < pat.length && pat[pi] === "*") pi += 1;
+  return pi === pat.length;
+}
+
+/**
  * Walks `cwd` recursively and returns the repo-root-relative POSIX
- * paths that match `pattern`. Uses `globToRegex` internally; the caller
- * is responsible for validating the pattern's syntax first.
+ * paths that match `pattern`. Uses `matchGlob` (linear, backtrack-free); the
+ * caller is responsible for validating the pattern's syntax first.
  *
  * Standard ignore directories (.git / node_modules / dist / .code-pact
  * / .context / .local / .claude / .cursor / .vscode / .idea) are
@@ -119,7 +222,6 @@ export async function walkAndMatch(
   cwd: string,
   pattern: string,
 ): Promise<string[]> {
-  const regex = globToRegex(pattern);
   const matches: string[] = [];
 
   async function walk(dir: string): Promise<void> {
@@ -136,7 +238,7 @@ export async function walkAndMatch(
         if (WALK_IGNORE_DIRS.has(entry.name)) continue;
         await walk(abs);
       } else if (entry.isFile()) {
-        if (regex.test(rel)) matches.push(rel);
+        if (matchGlob(pattern, rel)) matches.push(rel);
       }
     }
   }
@@ -157,9 +259,9 @@ function toPosix(p: string): string {
  * A protected path entry: a glob plus a representative concrete sample
  * that any "covers this protected pattern" check can test the declared
  * write pattern against. The sample is chosen so that
- * `globToRegex(declaredWrite).test(sample)` returning true is a strong
+ * `matchGlob(declaredWrite, sample)` returning true is a strong
  * signal that the declared write would actually touch a protected
- * resource if executed.
+ * resource if executed (matched with the SAME matcher as the runtime walk).
  */
 export type ProtectedPathEntry = {
   pattern: string;
@@ -207,12 +309,18 @@ export function findProtectedPathOverlaps(
   protectedPaths: readonly ProtectedPathEntry[] = PROTECTED_PATHS,
 ): ProtectedPathEntry[] {
   if (validateGlobSyntax(declaredGlob) !== null) return [];
-  const declaredRe = globToRegex(declaredGlob);
   const declaredSample = synthesizeSample(declaredGlob);
+  // Match with `matchGlob` — the SAME matcher the runtime walk / write audit use
+  // — so this advisory cannot disagree with what actually matches on disk.
+  // `globToRegex` is NOT equivalent for adjacent `**` segments (it forces an
+  // intermediate segment where `matchGlob` lets each `**` match zero), which let
+  // a declared write like `design/**/**/roadmap.yaml` evade this protected-path
+  // overlap while still matching `design/roadmap.yaml` at runtime.
   return protectedPaths.filter((entry) => {
-    if (declaredRe.test(entry.sample)) return true;
-    const protectedRe = globToRegex(entry.pattern);
-    return protectedRe.test(declaredSample);
+    // declared glob is broader-than/equal-to the protected pattern.
+    if (matchGlob(declaredGlob, entry.sample)) return true;
+    // protected pattern is broader-than/equal-to the declared glob.
+    return matchGlob(entry.pattern, declaredSample);
   });
 }
 

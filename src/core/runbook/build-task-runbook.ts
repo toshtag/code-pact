@@ -1,5 +1,3 @@
-import { existsSync } from "node:fs";
-import { join } from "node:path";
 import {
   deriveTaskState,
   type TaskCurrentState,
@@ -20,7 +18,7 @@ import {
   type AcceptanceRefCheck,
   type DependsOnEntry,
 } from "./types.ts";
-import { assertSafeRelativePath } from "../path-safety.ts";
+import { projectPathPresenceSync } from "../plan/checks/fs.ts";
 
 // ---------------------------------------------------------------------------
 // Task runbook builder.
@@ -63,15 +61,7 @@ function checkAcceptanceRefs(
   task: Task,
 ): AcceptanceRefCheck[] {
   return (task.acceptance_refs ?? []).map((path) => {
-    // Confine the existence probe to the project root (reject `..` / absolute)
-    // so an unsafe ref can't be used as an out-of-tree existence oracle.
-    let exists = false;
-    try {
-      assertSafeRelativePath(path);
-      exists = existsSync(join(cwd, path));
-    } catch {
-      exists = false;
-    }
+    const exists = projectPathPresenceSync(cwd, path) === "present";
     return { path, exists };
   });
 }

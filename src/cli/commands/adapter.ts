@@ -324,23 +324,65 @@ async function cmdAdapterUpgrade(
       emitOk(result);
     } else {
       for (const entry of result.plan) {
-        if (entry.action === "skip") continue;
+        // `warn` (unowned orphan) gets its own explained block below, so it is
+        // not surfaced as a bare action line here (it would read as a cryptic
+        // "warn <path>" with no reason or next step).
+        if (entry.action === "skip" || entry.action === "warn") continue;
         process.stderr.write(
           `  ${entry.action.padEnd(18)} ${entry.relPath} [${entry.local} × ${entry.desired}]\n`,
         );
       }
+
+      // Unowned orphans: files the manifest tracked but the generator no longer
+      // emits, whose path is NOT in this adapter's owned set. code-pact will not
+      // delete a file based on a project-supplied (unauthenticated) manifest
+      // alone, so it keeps them and tells the user exactly what to inspect.
+      const warned = result.plan.filter((p) => p.action === "warn");
+      if (warned.length > 0) {
+        const verb = mode === "check" ? "are still on disk" : "were kept on disk";
+        process.stderr.write(
+          `${warned.length} orphaned file(s) ${verb} — no longer generated, but not auto-removed ` +
+            `(not in this adapter's owned path set, so deleting on a project-supplied manifest alone is unsafe):\n`,
+        );
+        for (const w of warned) process.stderr.write(`  ${w.relPath}\n`);
+        process.stderr.write(
+          `Review and delete them by hand if they are stale (e.g. \`rm <path>\`).\n`,
+        );
+      }
+
       if (mode === "check") {
         if (result.clean) {
           process.stderr.write("Clean — no upgrade actions needed.\n");
-        } else {
+        } else if (result.plan.some((p) => p.action !== "skip" && p.action !== "warn")) {
           process.stderr.write(`Drift detected — run "code-pact adapter upgrade ${agentName} --write" to apply.\n`);
+        } else {
+          // warn-only: --write would not change anything (an unowned orphan is
+          // never auto-removed), so the manual step above is the only action.
+          process.stderr.write(`No automatic upgrade actions — review the orphaned file(s) listed above.\n`);
         }
       } else {
-        const refused = result.plan.filter((p) => p.action === "refuse").length;
-        if (refused > 0) {
-          process.stderr.write(
-            `${refused} file(s) refused — re-run with --accept-modified to overwrite local changes.\n`,
-          );
+        const refusedEntries = result.plan.filter((p) => p.action === "refuse");
+        if (refusedEntries.length > 0) {
+          const reasons = new Set(refusedEntries.map((p) => p.reason));
+          process.stderr.write(`${refusedEntries.length} file(s) refused — review them.\n`);
+          if (reasons.has("managed_modified")) {
+            process.stderr.write(
+              `  - local edits: re-run with --accept-modified to overwrite them.\n`,
+            );
+          }
+          if (reasons.has("unowned_generated_path")) {
+            process.stderr.write(
+              `  - generated path outside this adapter's owned set — NOT auto-written;\n` +
+                `    --accept-modified will NOT override it. Inspect/remove it by hand.\n`,
+            );
+          }
+          if (reasons.has("symlink_traversal")) {
+            process.stderr.write(
+              `  - path reaches its real target through a symlink — refused so a write/delete\n` +
+                `    cannot escape the owned namespace; --accept-modified will NOT override it.\n` +
+                `    Replace the symlink with a real directory/file.\n`,
+            );
+          }
         } else {
           process.stderr.write(`${m.adapter.done(agentName)} Manifest: ${result.manifestPath}\n`);
           // Human-only hint for the one advisory adapter upgrade intentionally
@@ -406,6 +448,18 @@ async function cmdAdapterUpgrade(
         emitError(json, "MANIFEST_NOT_FOUND", err.message);
         return 2;
       }
+      if (code === "ADAPTER_MANIFEST_INVALID") {
+        // A `.code-pact/adapters` symlink escape OR a malformed/schema-invalid
+        // manifest (both fail-closed in manifest I/O).
+        emitError(json, "ADAPTER_MANIFEST_INVALID", err.message);
+        return 2;
+      }
+      if (code === "PATH_OUTSIDE_PROJECT") {
+        // A symlinked placeholder dir (.context / .claude) or generated-file
+        // ancestor escaping the project — fail-closed in resolveWithinProject.
+        emitError(json, "CONFIG_ERROR", err.message);
+        return 2;
+      }
       if (code === "CONFIG_ERROR") {
         emitError(json, "CONFIG_ERROR", err.message);
         return 2;
@@ -444,16 +498,65 @@ async function runAdapterInstallAndEmit(args: {
       for (const f of result.adopted) process.stderr.write(`  adopted   ${f}\n`);
       for (const f of result.skipped)
         process.stderr.write(`  skipped   ${f} (already exists)\n`);
+      for (const f of result.refused) process.stderr.write(`  refused   ${f}\n`);
       process.stderr.write(`  manifest  ${result.manifestPath}\n`);
       process.stderr.write(`${m.adapter.done(agentName)}\n`);
+      if (result.refused.length > 0) {
+        // Remediation depends on WHY each file was refused — `--accept-modified`
+        // only resolves a genuine local edit (managed_modified); the security
+        // refusals (a generated path outside the trusted owned set, or one that
+        // reaches its real target through a symlink) are NOT overridable by it.
+        const reasons = new Set(
+          result.files.filter((f) => f.action === "refuse").map((f) => f.reason),
+        );
+        process.stderr.write(
+          `${result.refused.length} file(s) were NOT overwritten. Review them.\n`,
+        );
+        if (reasons.has("managed_modified")) {
+          process.stderr.write(
+            `  - local edits (differ from BOTH manifest and generator): to regenerate, run\n` +
+              `      code-pact adapter upgrade ${agentName} --write --accept-modified\n`,
+          );
+        }
+        if (reasons.has("unowned_generated_path")) {
+          process.stderr.write(
+            `  - a generated path OUTSIDE this adapter's owned set (e.g. a profile field or\n` +
+              `    manifest entry pointing at a non-adapter file). NOT auto-overwritten and\n` +
+              `    --accept-modified will NOT override it — inspect/remove it by hand.\n`,
+          );
+        }
+        if (reasons.has("symlink_traversal")) {
+          process.stderr.write(
+            `  - a path that reaches its real target through a SYMLINK. Refused so a write\n` +
+              `    cannot escape the owned namespace; --accept-modified will NOT override it —\n` +
+              `    replace the symlink with a real directory/file.\n`,
+          );
+        }
+      }
     }
-    return 0;
+    // A refused file is a divergence the operator must review, so install does
+    // not report unqualified success — exit 1 (mirrors `adapter upgrade`'s
+    // refuse → exit 1). Clean installs still exit 0.
+    return result.refused.length > 0 ? 1 : 0;
   } catch (err: unknown) {
     if (err instanceof Error) {
       const code = (err as NodeJS.ErrnoException).code;
       if (code === "AGENT_NOT_FOUND") {
         const msg = m.adapter.agentNotFound(agentName);
         emitError(json, "AGENT_NOT_FOUND", msg);
+        return 2;
+      }
+      if (code === "ADAPTER_MANIFEST_INVALID") {
+        // A `.code-pact/adapters` symlink escape OR a malformed/schema-invalid
+        // manifest (both fail-closed in manifest I/O). Surface a structured
+        // envelope + exit 2, not an internal error.
+        emitError(json, "ADAPTER_MANIFEST_INVALID", err.message);
+        return 2;
+      }
+      if (code === "PATH_OUTSIDE_PROJECT") {
+        // A symlinked placeholder dir (.context / .claude) or generated-file
+        // ancestor escaping the project — fail-closed in resolveWithinProject.
+        emitError(json, "CONFIG_ERROR", err.message);
         return 2;
       }
       if (code === "CONFIG_ERROR") {

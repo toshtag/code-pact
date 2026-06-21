@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtemp, readFile, rm, writeFile, mkdir, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -6,6 +6,8 @@ import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { runInit } from "../../../src/commands/init.ts";
 import { runAdapterInstall } from "../../../src/commands/adapter-install.ts";
 import { runAdapterDoctor } from "../../../src/commands/adapter-doctor.ts";
+import { runDoctor } from "../../../src/commands/doctor.ts";
+import { runValidate } from "../../../src/commands/validate.ts";
 import {
   manifestPath,
   readManifest,
@@ -13,6 +15,19 @@ import {
 } from "../../../src/core/adapters/manifest.ts";
 import { ADAPTER_MANIFEST_DIR_SEGMENTS } from "../../../src/core/adapters/manifest.ts";
 import type { AdapterManifest } from "../../../src/core/schemas/adapter-manifest.ts";
+
+const { readFileSpy } = vi.hoisted(() => ({ readFileSpy: vi.fn() }));
+
+vi.mock("node:fs/promises", async (importActual) => {
+  const actual = await importActual<typeof import("node:fs/promises")>();
+  return {
+    ...actual,
+    readFile: async (...args: Parameters<typeof actual.readFile>) => {
+      readFileSpy(args[0]);
+      return actual.readFile(...args);
+    },
+  };
+});
 
 let dir: string;
 
@@ -130,8 +145,216 @@ describe("adapter doctor — ADAPTER_MANIFEST_INVALID", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Hostile on-disk types must not crash doctor (exit 3) — a diagnostic reports
+// problems, never aborts on attacker input.
+// ---------------------------------------------------------------------------
+
+describe("adapter doctor — managed file path is a directory (no exit-3 crash)", () => {
+  it("reports a managed path that is a directory as a drift/missing advisory, does not throw EISDIR", async () => {
+    await runAdapterInstall({
+      cwd: dir,
+      agentName: "claude-code",
+      force: false,
+      locale: "en-US",
+      generatorVersionOverride: "0.9.0-alpha.0",
+    });
+    // Replace the managed CLAUDE.md with a DIRECTORY: a bare readFile would throw
+    // EISDIR, which (pre-fix) surfaced as an internal error / exit 3.
+    await unlink(join(dir, "CLAUDE.md"));
+    await mkdir(join(dir, "CLAUDE.md"), { recursive: true });
+    const result = await runAdapterDoctor({ cwd: dir, locale: "en-US" });
+    // No throw: doctor returns an envelope; the directory reads as a missing/changed
+    // managed file and is surfaced as a claude-code advisory.
+    expect(Array.isArray(result.issues)).toBe(true);
+    expect(result.issues.some((i) => i.agent === "claude-code")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // ADAPTER_GENERATOR_STALE / SCHEMA_DRIFT / PROFILE_DRIFT
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// SECURITY (Blocker 2): forged-manifest content/SHA oracle in adapter doctor.
+// A project-supplied manifest entry naming an arbitrary local file (.env) must
+// be refused — never read, hashed, or contract-inspected.
+// ---------------------------------------------------------------------------
+describe("adapter doctor — forged manifest .env oracle (security)", () => {
+  beforeEach(async () => {
+    await runAdapterInstall({
+      cwd: dir,
+      agentName: "claude-code",
+      force: false,
+      locale: "en-US",
+    });
+  });
+
+  it("refuses a forged .env entry: ADAPTER_FILE_PATH_UNSAFE, secret never read", async () => {
+    await writeFile(join(dir, ".env"), "API_TOKEN=top-secret-doctor-marker\n", "utf8");
+    const m = await readMutableManifest(dir, "claude-code");
+    m.files.push({
+      path: ".env",
+      sha256: "0".repeat(64),
+      managed: true,
+      role: "instruction",
+    });
+    await writeManifest(dir, "claude-code", m);
+
+    const result = await runAdapterDoctor({ cwd: dir, locale: "en-US" });
+
+    const envIssue = result.issues.find(
+      (i) => i.code === "ADAPTER_FILE_PATH_UNSAFE" && (i.path ?? "").endsWith(".env"),
+    );
+    expect(envIssue).toBeDefined();
+    expect(envIssue?.severity).toBe("error");
+    // The secret content must never appear anywhere in the doctor output.
+    expect(JSON.stringify(result)).not.toContain("top-secret-doctor-marker");
+  });
+
+  // SECURITY (Blocker 1 — shared skills namespace): a victim's hand-authored
+  // `.claude/skills/private.md` is in the broad write namespace but is NOT in
+  // doctor's current exact generated set. It is INDISTINGUISHABLE from a stale
+  // managed skill by path, so doctor does NOT read it (no content oracle) and
+  // reports an advisory ADAPTER_FILE_UNVERIFIABLE — never reads/hashes/inspects.
+  for (const role of ["skill", "instruction"] as const) {
+    it(`does not read a victim's .claude/skills/private.md (role: ${role}); secret never surfaces`, async () => {
+      await mkdir(join(dir, ".claude", "skills"), { recursive: true });
+      await writeFile(join(dir, ".claude", "skills", "private.md"), "API_TOKEN=doctor-private-marker\n", "utf8");
+      const m = await readMutableManifest(dir, "claude-code");
+      m.files.push({
+        path: ".claude/skills/private.md",
+        sha256: "0".repeat(64),
+        managed: true,
+        role,
+      });
+      await writeManifest(dir, "claude-code", m);
+
+      const result = await runAdapterDoctor({ cwd: dir, locale: "en-US" });
+      const issue = result.issues.find(
+        (i) => i.code === "ADAPTER_FILE_UNVERIFIABLE" && (i.path ?? "").endsWith("private.md"),
+      );
+      expect(issue).toBeDefined();
+      expect(issue?.severity).toBe("warning"); // not read, not a hard error
+      // The secret content must never surface (never read; no heading inspection
+      // even for the forged role: instruction).
+      expect(JSON.stringify(result)).not.toContain("doctor-private-marker");
+    });
+  }
+
+  // A truly out-of-namespace forged path (.env) is still a HARD refusal.
+  it("hard-refuses a forged .env (outside any adapter namespace), secret never read", async () => {
+    await writeFile(join(dir, ".env"), "API_TOKEN=env-hard-refuse-marker\n", "utf8");
+    const m = await readMutableManifest(dir, "claude-code");
+    m.files.push({ path: ".env", sha256: "0".repeat(64), managed: true, role: "instruction" });
+    await writeManifest(dir, "claude-code", m);
+
+    const result = await runAdapterDoctor({ cwd: dir, locale: "en-US" });
+    const issue = result.issues.find(
+      (i) => i.code === "ADAPTER_FILE_PATH_UNSAFE" && (i.path ?? "").endsWith(".env"),
+    );
+    expect(issue).toBeDefined();
+    expect(JSON.stringify(result)).not.toContain("env-hard-refuse-marker");
+  });
+
+  for (const surface of ["adapter doctor", "doctor", "validate"] as const) {
+    it(`${surface} hard-refuses a profile-redirected .env without reading it`, async () => {
+      const envPath = join(dir, ".env");
+      await writeFile(envPath, "## Agent contract\nAPI_TOKEN=redirect-marker\n", "utf8");
+
+      const profilePath = join(dir, ".code-pact", "agent-profiles", "claude-code.yaml");
+      const profile = parseYaml(await readFile(profilePath, "utf8")) as Record<string, unknown>;
+      profile.instruction_filename = ".env";
+      await writeFile(profilePath, stringifyYaml(profile), "utf8");
+
+      const m = await readMutableManifest(dir, "claude-code");
+      m.files.push({
+        path: ".env",
+        sha256: "0".repeat(64),
+        managed: true,
+        role: "instruction",
+      });
+      await writeManifest(dir, "claude-code", m);
+
+      readFileSpy.mockClear();
+      const result = surface === "adapter doctor"
+        ? await runAdapterDoctor({ cwd: dir, locale: "en-US" })
+        : surface === "doctor"
+          ? await runDoctor(dir)
+          : await runValidate({ cwd: dir });
+
+      expect(result.issues.some((i) => i.code === "ADAPTER_FILE_PATH_UNSAFE")).toBe(true);
+      expect(result.issues.some((i) => i.code === "ADAPTER_CONTRACT_DRIFT")).toBe(false);
+      expect(readFileSpy.mock.calls.some(([path]) => String(path) === envPath)).toBe(false);
+    });
+  }
+
+  async function addPrivateVerificationCommand(): Promise<void> {
+    await mkdir(join(dir, "design", "phases"), { recursive: true });
+    await writeFile(
+      join(dir, "design", "roadmap.yaml"),
+      "phases:\n  - id: P1\n    path: design/phases/P1-private.yaml\n    weight: 1\n",
+      "utf8",
+    );
+    await writeFile(
+      join(dir, "design", "phases", "P1-private.yaml"),
+      [
+        "id: P1", "name: Private", "weight: 1", "confidence: high", "risk: low",
+        "status: planned", "objective: Exercise dynamic read authority.",
+        "definition_of_done:", "  - Done", "verification:", "  commands:",
+        "    - private", "tasks: []", "",
+      ].join("\n"),
+      "utf8",
+    );
+  }
+
+  for (const shaMode of ["matching", "non-matching"] as const) {
+    it(`does not read a current dynamic skill collision with a ${shaMode} manifest SHA`, async () => {
+      await addPrivateVerificationCommand();
+      const privatePath = join(dir, ".claude", "skills", "private.md");
+      const secret = "# private\nAPI_TOKEN=dynamic-collision-marker\n";
+      await writeFile(privatePath, secret, "utf8");
+      const m = await readMutableManifest(dir, "claude-code");
+      const { computeContentHash } = await import("../../../src/core/adapters/manifest.ts");
+      m.files.push({
+        path: ".claude/skills/private.md",
+        sha256: shaMode === "matching" ? computeContentHash(secret) : "0".repeat(64),
+        managed: true,
+        role: "skill",
+      });
+      await writeManifest(dir, "claude-code", m);
+
+      readFileSpy.mockClear();
+      const result = await runAdapterDoctor({ cwd: dir, locale: "en-US" });
+      const privateIssues = result.issues.filter((i) => i.path === privatePath);
+      expect(privateIssues.map((i) => i.code)).toEqual(["ADAPTER_FILE_UNVERIFIABLE"]);
+      expect(privateIssues.some((i) =>
+        i.code === "ADAPTER_FILE_DRIFT" || i.code === "ADAPTER_DESIRED_STALE"
+      )).toBe(false);
+      expect(readFileSpy.mock.calls.some(([path]) => String(path) === privatePath)).toBe(false);
+    });
+  }
+
+  it("does not heading-inspect a current dynamic skill forged as an instruction", async () => {
+    await addPrivateVerificationCommand();
+    const privatePath = join(dir, ".claude", "skills", "private.md");
+    await writeFile(privatePath, "not an agent contract\n", "utf8");
+    const m = await readMutableManifest(dir, "claude-code");
+    m.files.push({
+      path: ".claude/skills/private.md",
+      sha256: "0".repeat(64),
+      managed: true,
+      role: "instruction",
+    });
+    await writeManifest(dir, "claude-code", m);
+
+    readFileSpy.mockClear();
+    const result = await runAdapterDoctor({ cwd: dir, locale: "en-US" });
+    const privateIssues = result.issues.filter((i) => i.path === privatePath);
+    expect(privateIssues.some((i) => i.code === "ADAPTER_FILE_UNVERIFIABLE")).toBe(true);
+    expect(privateIssues.some((i) => i.code === "ADAPTER_CONTRACT_DRIFT")).toBe(false);
+    expect(readFileSpy.mock.calls.some(([path]) => String(path) === privatePath)).toBe(false);
+  });
+});
 
 describe("adapter doctor — version drifts", () => {
   beforeEach(async () => {

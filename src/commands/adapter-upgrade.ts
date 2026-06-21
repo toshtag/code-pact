@@ -11,16 +11,20 @@ import {
 } from "../core/agent-profile-path.ts";
 import type { DesiredAdapterFileRole } from "../core/adapters/types.ts";
 import {
+  assertAdapterWritePathsContained,
   assertSafeRelativePath,
   classifyFileState,
   decideAction,
+  pathTraversesSymlink,
   resolveWithinProject,
   type DesiredFileState,
   type FileAction,
   type LocalFileState,
 } from "../core/adapters/file-state.ts";
+import { resolveOwnedProjectPath } from "../core/path-safety.ts";
 import {
   computeContentHash,
+  manifestRelPath,
   readManifest,
   writeManifest,
 } from "../core/adapters/manifest.ts";
@@ -35,6 +39,7 @@ import type {
   ProfileFingerprint,
 } from "../core/schemas/adapter-manifest.ts";
 import { atomicWriteText } from "../io/atomic-text.ts";
+import { matchGlob } from "../core/glob.ts";
 import { readPackageVersion } from "../lib/package-version.ts";
 import {
   detectModelMapDrift,
@@ -74,6 +79,12 @@ export type AdapterUpgradePlanEntry = {
   local: LocalFileState;
   desired: DesiredFileState;
   action: FileAction;
+  /**
+   * Stable machine-readable reason for a non-obvious action. Set for `warn`
+   * (an unowned orphan kept on disk): `"unowned_orphan_not_pruned"`. Absent
+   * for actions whose meaning is self-evident from `(action, local, desired)`.
+   */
+  reason?: string;
 };
 
 export type AdapterUpgradeResult = {
@@ -99,20 +110,51 @@ async function loadAgentProfile(
   let raw: string;
   try {
     raw = await readFile(path, "utf8");
-  } catch {
-    const err = new Error(
-      `Agent profile for "${agentName}" not found at ${path}.`,
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      const e = new Error(`Agent profile for "${agentName}" not found at ${path}.`);
+      (e as NodeJS.ErrnoException).code = "AGENT_NOT_FOUND";
+      throw e;
+    }
+    const e = new Error(
+      `Agent profile for "${agentName}" at ${path} cannot be read: ${(err as Error).message}`,
     );
-    (err as NodeJS.ErrnoException).code = "AGENT_NOT_FOUND";
+    (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+    throw e;
+  }
+  // Parse + schema-validate inside a try: a malformed / schema-invalid project
+  // profile maps to CONFIG_ERROR, not an uncoded internal error (exit 3).
+  try {
+    return AgentProfile.parse(parseYaml(raw) as unknown);
+  } catch (err) {
+    const e = new Error(
+      `Agent profile for "${agentName}" at ${path} is malformed (YAML or schema): ${(err as Error).message}`,
+    );
+    (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+    throw e;
+  }
+}
+
+async function resolveOwnedAdapterPath(cwd: string, relPath: string): Promise<string> {
+  try {
+    return await resolveOwnedProjectPath(cwd, relPath);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "PATH_OUTSIDE_PROJECT" || code === "PATH_NOT_OWNED") {
+      const e = new Error((err as Error).message);
+      (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+      throw e;
+    }
     throw err;
   }
-  return AgentProfile.parse(parseYaml(raw) as unknown);
 }
 
 async function loadModelProfiles(cwd: string): Promise<ModelProfile[]> {
-  const dir = join(cwd, ".code-pact", "model-profiles");
   let entries: string[];
   try {
+    // Contain the DIRECTORY before enumerating it (no out-of-project readdir on a
+    // symlinked model-profiles). Optional source → unsafe/missing dir is [].
+    const dir = await resolveWithinProject(cwd, ".code-pact/model-profiles");
     entries = await readdir(dir);
   } catch {
     return [];
@@ -120,11 +162,18 @@ async function loadModelProfiles(cwd: string): Promise<ModelProfile[]> {
   const profiles: ModelProfile[] = [];
   for (const entry of entries.sort()) {
     if (!entry.endsWith(".yaml")) continue;
-    const raw = await readFile(join(dir, entry), "utf8");
     try {
+      // Contain the read so a symlinked model-profiles dir / file can't read out
+      // of the project; all inside the try so an unreadable / out-of-project /
+      // malformed entry is skipped, never an uncoded errno crash (exit 3).
+      const abs = await resolveWithinProject(
+        cwd,
+        [".code-pact", "model-profiles", entry].join("/"),
+      );
+      const raw = await readFile(abs, "utf8");
       profiles.push(ModelProfile.parse(parseYaml(raw) as unknown));
     } catch {
-      // skip malformed
+      // skip unreadable / malformed / out-of-project
     }
   }
   return profiles;
@@ -177,13 +226,16 @@ function buildFingerprint(
  * preserved unchanged.
  *
  * **Orphan prune:** a path the OLD manifest tracked but the generator no
- * longer emits (e.g. a renamed skill) is pruned — deleted from disk when its
- * content still matches the manifest hash (`action: "prune"`), or refused and
- * left in place when the user edited it (`action: "refuse"`). `--check`
- * reports the same actions without touching disk. This keeps the generated
- * skill set convergent: a rename leaves no stale `-N` file behind. Files never
- * tracked by the manifest (hand-authored skills) are not manifest entries, so
- * they are never pruned.
+ * longer emits is auto-deleted ONLY when (a) its path is in the adapter
+ * descriptor's owned path set and (b) its content still matches the manifest
+ * hash (`action: "prune"`). An owned orphan the user edited is `refuse`d (left
+ * in place). An orphan OUTSIDE the owned set is never deleted — even when
+ * clean — but surfaced as `warn` and kept tracked, because the manifest is
+ * project-controlled and trusting it to authorize a delete would let a forged
+ * manifest remove arbitrary in-project files (see the security note at the
+ * prune loop). `--check` reports the same actions without touching disk. Files
+ * never tracked by the manifest (hand-authored skills) are not manifest
+ * entries, so they are never considered.
  */
 export async function runAdapterUpgrade(
   opts: AdapterUpgradeOptions,
@@ -226,19 +278,14 @@ export async function runAdapterUpgrade(
     loadModelProfiles(cwd),
   ]);
 
-  // `--write` pins `--model` to the profile (after validation). `--check` is
-  // read-only: it validates the value (unknown → CONFIG_ERROR) but never
-  // persists. The CLI also rejects `--check --model` outright; this keeps the
-  // core honest if called directly.
+  // Effective model version for GENERATION, computed WITHOUT persisting it.
+  // `--check` never pins (and the CLI rejects `--check --model`); `--write` pins
+  // `--model`, but the pin is a profile write deferred until AFTER the path-safety
+  // preflight below, so a doomed `--write` never strands a pinned `model_version`.
+  // validateModelVersionInput is pure and fails fast (CONFIG_ERROR) on an unknown
+  // `--model` in both modes. (Matches resolveAndPinModelVersion's own resolution.)
   const resolvedModelVersion =
-    mode === "write"
-      ? await resolveAndPinModelVersion({
-          cwd,
-          agentName,
-          profile,
-          modelVersionInput: modelVersion,
-        })
-      : (validateModelVersionInput(modelVersion) ?? profile.model_version);
+    validateModelVersionInput(modelVersion) ?? profile.model_version;
 
   const descriptor = adapterRegistry[agentName];
   const desiredFiles = dedupeDesiredFiles(
@@ -255,16 +302,26 @@ export async function runAdapterUpgrade(
     existingManifest.files.map((f) => [f.path, f]),
   );
 
-  // For --write only: ensure directory placeholders exist before any write.
-  if (mode === "write") {
-    await mkdir(join(cwd, profile.context_dir), { recursive: true });
-    if (profile.hook_dir) {
-      await mkdir(join(cwd, profile.hook_dir), { recursive: true });
-    }
-  }
+  // Fail-closed path-safety PREFLIGHT for both --check and --write. It is
+  // read-only, and in check mode it prevents a directory/FIFO/socket at a
+  // desired or orphan path from reaching readFileMaybe as an uncoded errno or
+  // blocking read. In write mode it still runs before the first mutation.
+  await assertAdapterWritePathsContained(cwd, [
+    { path: profile.context_dir, kind: "directory" },
+    ...(profile.hook_dir ? [{ path: profile.hook_dir, kind: "directory" as const }] : []),
+    { path: manifestRelPath(agentName), kind: "file" },
+    ...desiredFiles.map((d) => ({ path: d.path, kind: "file" as const })),
+    ...[...existingByPath.keys()].map((p) => ({ path: p, kind: "file" as const })),
+  ]);
 
   const plan: AdapterUpgradePlanEntry[] = [];
   const newManifestFiles: ManifestFile[] = [];
+  const desiredApply: Array<{
+    desired: (typeof desiredFiles)[number];
+    absPath: string;
+    action: FileAction;
+  }> = [];
+  const orphanApply: Array<{ absPath: string; action: FileAction }> = [];
 
   for (const desired of desiredFiles) {
     assertSafeRelativePath(desired.path);
@@ -279,13 +336,37 @@ export async function runAdapterUpgrade(
 
     const cls = classifyFileState({ manifestHash, diskHash, desiredHash });
     const effectiveForce = force || (regenSkills && desired.role === "skill");
-    const action = decideAction({
+    let action = decideAction({
       local: cls.local,
       desired: cls.desired,
       mode: mode === "check" ? "upgrade-check" : "upgrade-write",
       force: effectiveForce,
       acceptModified,
     });
+
+    // SECURITY (CWE-345/CWE-22/CWE-59): same gate as `adapter install`.
+    // `write` (absent file) may use the adapter's static generated-write
+    // allowlist; destructive update/replace stays on the narrower ownedPathGlobs
+    // authority. Applied in BOTH modes so `--check` previews the refusal that
+    // `--write` would take.
+    // `refuse` from decideAction is managed-modified × stale (a local edit).
+    let refuseReason: string | undefined =
+      action === "refuse" ? "managed_modified" : undefined;
+    if (action === "write" || action === "update" || action === "replace_unmanaged") {
+      const allowedGlobs =
+        action === "write"
+          ? (descriptor.writePathGlobs ?? descriptor.ownedPathGlobs)
+          : descriptor.ownedPathGlobs;
+      const owned = allowedGlobs.some((g) => matchGlob(g, desired.path));
+      if (!owned) {
+        action = "refuse";
+        refuseReason = "unowned_generated_path";
+      }
+    }
+    if (action !== "refuse" && await pathTraversesSymlink(cwd, desired.path)) {
+      action = "refuse";
+      refuseReason = "symlink_traversal";
+    }
 
     plan.push({
       path: absPath,
@@ -294,6 +375,7 @@ export async function runAdapterUpgrade(
       local: cls.local,
       desired: cls.desired,
       action,
+      ...(refuseReason ? { reason: refuseReason } : {}),
     });
 
     if (mode === "check") {
@@ -302,12 +384,10 @@ export async function runAdapterUpgrade(
       continue;
     }
 
-    // ---- --write: execute action ----
+    desiredApply.push({ desired, absPath, action });
     let recordedHash: string | null = null;
 
     if (action === "write" || action === "replace_unmanaged" || action === "update") {
-      await mkdir(dirname(absPath), { recursive: true });
-      await atomicWriteText(absPath, desired.content);
       recordedHash = desiredHash;
     } else if (action === "adopt") {
       // Disk matches desired; record manifest entry only.
@@ -364,7 +444,29 @@ export async function runAdapterUpgrade(
 
     const diskHash = computeContentHash(diskContent);
     const isClean = diskHash === entry.sha256;
-    const action: FileAction = isClean ? "prune" : "refuse";
+
+    // SECURITY (CWE-73): the manifest is project-controlled and unauthenticated.
+    // Deleting a file just because a manifest entry claims it is "managed" turns
+    // `upgrade --write` into an arbitrary in-project delete: a forged manifest
+    // entry (any in-project path + that file's real sha256) would be pruned as a
+    // managed-clean orphan. So we only AUTO-PRUNE an orphan whose path is in the
+    // adapter descriptor's OWNED path set — the generator's own namespace, kept
+    // deliberately narrow. An orphan OUTSIDE that set is never deleted, even when
+    // managed-clean: we surface it (`warn`) and keep tracking it so the user can
+    // remove it deliberately. An owned managed-MODIFIED orphan is still refused
+    // so a local edit is never destroyed.
+    const isOwned = descriptor.ownedPathGlobs.some((g) => matchGlob(g, relPath));
+    // SECURITY (CWE-59/CWE-61): even an OWNED orphan path must not be auto-rm'd if
+    // it traverses a symlink. `.claude/skills -> ../src` makes the owned-looking
+    // `.claude/skills/context.md` resolve to `src/context.md`, so an unconditional
+    // `rm` would delete an out-of-namespace real file. A symlinked owned path is
+    // refused (kept + surfaced), never auto-pruned.
+    const traversesSymlink = await pathTraversesSymlink(cwd, relPath);
+    const action: FileAction = !isOwned
+      ? "warn"
+      : traversesSymlink || !isClean
+        ? "refuse"
+        : "prune";
 
     plan.push({
       path: absPath,
@@ -373,17 +475,22 @@ export async function runAdapterUpgrade(
       local: isClean ? "managed-clean" : "managed-modified",
       desired: "stale", // generator no longer emits this path
       action,
+      // Machine-readable reason: `warn` = unowned orphan kept on disk; `refuse` =
+      // a symlinked owned orphan (would delete the real target) or a local edit.
+      ...(action === "warn"
+        ? { reason: "unowned_orphan_not_pruned" }
+        : action === "refuse"
+          ? { reason: traversesSymlink ? "symlink_traversal" : "managed_modified" }
+          : {}),
     });
 
     if (mode === "check") continue; // read-only
 
-    if (action === "prune") {
-      await rm(absPath, { force: true });
-      // Orphan is intentionally NOT added to newManifestFiles — it is gone.
-    } else {
-      // refuse: keep the user's modified file on disk AND keep tracking it, so
-      // the next run still sees it as managed (and still refuses) rather than
-      // re-classifying it as an unmanaged surprise.
+    orphanApply.push({ absPath, action });
+    if (action !== "prune") {
+      // refuse / warn: keep the file on disk AND keep tracking it, so the next
+      // run still sees it as a managed orphan (and still refuses/warns) rather
+      // than re-classifying it as an unmanaged surprise.
       newManifestFiles.push({
         path: relPath,
         sha256: entry.sha256,
@@ -411,7 +518,40 @@ export async function runAdapterUpgrade(
     };
   }
 
-  // --write: persist the new manifest.
+  if (plan.some((p) => p.action === "refuse")) {
+    return {
+      agentName,
+      mode,
+      manifestPath: join(cwd, ".code-pact", "adapters", `${agentName}.manifest.yaml`),
+      generatorVersion,
+      clean,
+      plan,
+    };
+  }
+
+  await resolveAndPinModelVersion({
+    cwd,
+    agentName,
+    profile,
+    modelVersionInput: modelVersion,
+  });
+
+  await mkdir(await resolveOwnedAdapterPath(cwd, profile.context_dir), { recursive: true });
+  if (profile.hook_dir) {
+    await mkdir(await resolveOwnedAdapterPath(cwd, profile.hook_dir), { recursive: true });
+  }
+
+  for (const item of desiredApply) {
+    if (item.action === "write" || item.action === "replace_unmanaged" || item.action === "update") {
+      await mkdir(dirname(item.absPath), { recursive: true });
+      await atomicWriteText(item.absPath, item.desired.content);
+    }
+  }
+  for (const item of orphanApply) {
+    if (item.action === "prune") await rm(item.absPath, { force: true });
+  }
+
+  // --write: persist the new manifest after all refusal checks have passed.
   const manifest: AdapterManifest = {
     schema_version: 1,
     agent_name: agentName,

@@ -1,10 +1,9 @@
-import { readFile, mkdir } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { readFile } from "node:fs/promises";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { atomicWriteText } from "../io/atomic-text.ts";
 import { Prompter } from "../lib/prompt.ts";
-import { assertSafeRelativePath } from "../core/path-safety.ts";
+import { assertSafeRelativePath, resolveOwnedProjectPath, resolveWithinProject } from "../core/path-safety.ts";
 import { Project } from "../core/schemas/project.ts";
 import type { LocaleCode } from "../core/schemas/locale.ts";
 import { isPristineInitConstitution } from "../core/constitution.ts";
@@ -123,7 +122,16 @@ export async function loadConstitutionFromFile(
     );
   }
 
-  const absPath = join(cwd, relPath);
+  let absPath: string;
+  try {
+    absPath = await resolveWithinProject(cwd, relPath);
+  } catch (err) {
+    throw new PlanConstitutionFromFileError(
+      "unsafe_path",
+      relPath,
+      `plan constitution --from-file: path "${relPath}" is not a safe repo-root-relative path: ${(err as Error).message}`,
+    );
+  }
   let raw: string;
   try {
     raw = await readFile(absPath, "utf8");
@@ -274,7 +282,7 @@ async function existingIsPristinePlaceholder(
   existing: string,
 ): Promise<boolean> {
   try {
-    const raw = await readFile(join(cwd, ".code-pact", "project.yaml"), "utf8");
+    const raw = await readFile(await resolveWithinProject(cwd, ".code-pact/project.yaml"), "utf8");
     const project = Project.parse(parseYaml(raw) as unknown);
     const localeCode: LocaleCode =
       typeof project.locale === "string" ? project.locale : project.locale.default;
@@ -284,11 +292,27 @@ async function existingIsPristinePlaceholder(
   }
 }
 
+async function resolveConstitutionOutputPath(cwd: string): Promise<string> {
+  try {
+    return await resolveOwnedProjectPath(cwd, "design/constitution.md");
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "PATH_OUTSIDE_PROJECT" || code === "PATH_NOT_OWNED") {
+      const e = new Error(
+        `design/constitution.md is not a safe project-contained write path: ${(err as Error).message}`,
+      );
+      (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+      throw e;
+    }
+    throw err;
+  }
+}
+
 export async function runPlanConstitution(
   opts: PlanConstitutionOptions,
 ): Promise<PlanConstitutionResult> {
   const { cwd, locale, force } = opts;
-  const constitutionPath = join(cwd, "design", "constitution.md");
+  const constitutionPath = await resolveConstitutionOutputPath(cwd);
 
   if (!force) {
     let existing: string | null = null;
@@ -320,7 +344,6 @@ export async function runPlanConstitution(
 
   try {
     const content = generateConstitutionMd(answers, locale);
-    await mkdir(dirname(constitutionPath), { recursive: true });
     await atomicWriteText(constitutionPath, content);
     return { path: constitutionPath, skipped: false };
   } finally {

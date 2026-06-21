@@ -28,7 +28,7 @@ import { resolvePhaseSnapshotRaw } from "./load-phase-snapshot.ts";
 import { validateEventPackTier1, resolveEventPackRaw } from "./event-pack-reader.ts";
 import { bindPackToSnapshot } from "./event-pack-binding.ts";
 import { readPackSources } from "../progress/all-sources.ts";
-import { resolveWithinProject } from "../path-safety.ts";
+import { resolveOwnedProjectPath } from "../path-safety.ts";
 import {
   EVENTS_DIR_SEGMENTS,
   parseEventFileName,
@@ -177,7 +177,7 @@ export async function evaluateDeleteGate(
   // the RFC's locked order.
   let abs: string;
   try {
-    abs = await resolveWithinProject(cwd, looseEventRelPath(file));
+    abs = await resolveOwnedProjectPath(cwd, looseEventRelPath(file));
   } catch {
     return { disposition: "skip", reason: "path_escape" };
   }

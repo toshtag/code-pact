@@ -1,5 +1,5 @@
 import { readFile, readdir, mkdir } from "node:fs/promises";
-import { join, dirname } from "node:path";
+import { dirname } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { AgentProfile } from "../core/schemas/agent-profile.ts";
 import { ModelProfile } from "../core/schemas/model-profile.ts";
@@ -8,25 +8,34 @@ import { isSupportedAgent } from "../core/agents.ts";
 import { resolveAgentProfilePath } from "../core/agent-profile-path.ts";
 import type { DesiredAdapterFileRole } from "../core/adapters/types.ts";
 import {
+  assertAdapterWritePathsContained,
   assertSafeRelativePath,
   classifyFileState,
   decideAction,
+  pathTraversesSymlink,
   resolveWithinProject,
   type FileAction,
 } from "../core/adapters/file-state.ts";
+import { resolveOwnedProjectPath } from "../core/path-safety.ts";
 import {
   computeContentHash,
+  manifestPath,
+  manifestRelPath,
   readManifest,
   writeManifest,
 } from "../core/adapters/manifest.ts";
 import { dedupeDesiredFiles } from "../core/adapters/desired.ts";
-import { resolveAndPinModelVersion } from "../core/adapters/model-version.ts";
+import {
+  resolveAndPinModelVersion,
+  validateModelVersionInput,
+} from "../core/adapters/model-version.ts";
 import type {
   AdapterManifest,
   ManifestFile,
   ProfileFingerprint,
 } from "../core/schemas/adapter-manifest.ts";
 import { atomicWriteText } from "../io/atomic-text.ts";
+import { matchGlob } from "../core/glob.ts";
 import { readPackageVersion } from "../lib/package-version.ts";
 import type { Locale } from "../i18n/index.ts";
 
@@ -49,6 +58,16 @@ export type AdapterInstallOptions = {
   generatorVersionOverride?: string;
 };
 
+/**
+ * Why a file was `refuse`d — so the CLI can give CORRECT remediation. Only
+ * `managed_modified` is resolvable with `--accept-modified`; the security
+ * refusals are NOT (re-running with that flag refuses again).
+ */
+export type RefuseReason =
+  | "managed_modified" // a local edit diverging from BOTH manifest and generator
+  | "unowned_generated_path" // generated path outside the trusted owned set
+  | "symlink_traversal"; // the path reaches its real target through a symlink
+
 export type AdapterInstallFile = {
   /** Absolute path. */
   path: string;
@@ -56,6 +75,8 @@ export type AdapterInstallFile = {
   relPath: string;
   role: DesiredAdapterFileRole;
   action: FileAction;
+  /** Set when `action === "refuse"`; drives the CLI's remediation message. */
+  reason?: RefuseReason;
 };
 
 export type AdapterInstallResult = {
@@ -68,6 +89,14 @@ export type AdapterInstallResult = {
   skipped: string[];
   /** Absolute paths of files adopted into the manifest without write (action: adopt). */
   adopted: string[];
+  /**
+   * Absolute paths of managed files whose on-disk content matches NEITHER the
+   * manifest hash NOR the current generator output (managed-modified × stale).
+   * Install does not overwrite them (possible local edit) but surfaces them so
+   * a hostile-repo divergence is never silently passed over (action: refuse).
+   * Overwrite with `adapter upgrade --write --accept-modified`.
+   */
+  refused: string[];
   files: AdapterInstallFile[];
 };
 
@@ -83,20 +112,56 @@ async function loadAgentProfile(
   let raw: string;
   try {
     raw = await readFile(path, "utf8");
-  } catch {
-    const err = new Error(
-      `Agent profile for "${agentName}" not found at ${path}.`,
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      const e = new Error(`Agent profile for "${agentName}" not found at ${path}.`);
+      (e as NodeJS.ErrnoException).code = "AGENT_NOT_FOUND";
+      throw e;
+    }
+    // A non-ENOENT read failure (the profile path is a directory → EISDIR, an
+    // intermediate is a file → ENOTDIR, EACCES, …) is a CONFIG problem, not a
+    // missing agent — surface it structured, not as an uncoded exit 3.
+    const e = new Error(
+      `Agent profile for "${agentName}" at ${path} cannot be read: ${(err as Error).message}`,
     );
-    (err as NodeJS.ErrnoException).code = "AGENT_NOT_FOUND";
+    (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+    throw e;
+  }
+  // Parse + schema-validate INSIDE a try: a project-controlled (adversarial)
+  // profile with malformed YAML or a schema violation maps to CONFIG_ERROR, not
+  // an uncoded throw that the CLI renders as an internal error / exit 3.
+  try {
+    return AgentProfile.parse(parseYaml(raw) as unknown);
+  } catch (err) {
+    const e = new Error(
+      `Agent profile for "${agentName}" at ${path} is malformed (YAML or schema): ${(err as Error).message}`,
+    );
+    (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+    throw e;
+  }
+}
+
+async function resolveOwnedAdapterPath(cwd: string, relPath: string): Promise<string> {
+  try {
+    return await resolveOwnedProjectPath(cwd, relPath);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "PATH_OUTSIDE_PROJECT" || code === "PATH_NOT_OWNED") {
+      const e = new Error((err as Error).message);
+      (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+      throw e;
+    }
     throw err;
   }
-  return AgentProfile.parse(parseYaml(raw) as unknown);
 }
 
 async function loadModelProfiles(cwd: string): Promise<ModelProfile[]> {
-  const dir = join(cwd, ".code-pact", "model-profiles");
   let entries: string[];
   try {
+    // Contain the DIRECTORY before enumerating it: a symlinked-outside
+    // `.code-pact/model-profiles` must not even be `readdir`'d (out-of-project
+    // enumeration / large-dir DoS). Optional source → an unsafe/missing dir is [].
+    const dir = await resolveWithinProject(cwd, ".code-pact/model-profiles");
     entries = await readdir(dir);
   } catch {
     return [];
@@ -104,11 +169,20 @@ async function loadModelProfiles(cwd: string): Promise<ModelProfile[]> {
   const profiles: ModelProfile[] = [];
   for (const entry of entries.sort()) {
     if (!entry.endsWith(".yaml")) continue;
-    const raw = await readFile(join(dir, entry), "utf8");
     try {
+      // Contain the read (resolveWithinProject): a symlinked `.code-pact/model-
+      // profiles` (or a per-file symlink) cannot read an out-of-project file.
+      // All inside the try so an UNREADABLE entry (a `*.yaml` directory → EISDIR,
+      // or an escaping symlink) is skipped like a malformed one, never an uncoded
+      // errno that crashes the command (exit 3). Best-effort source.
+      const abs = await resolveWithinProject(
+        cwd,
+        [".code-pact", "model-profiles", entry].join("/"),
+      );
+      const raw = await readFile(abs, "utf8");
       profiles.push(ModelProfile.parse(parseYaml(raw) as unknown));
     } catch {
-      // skip malformed profiles
+      // skip unreadable / malformed / out-of-project profiles
     }
   }
   return profiles;
@@ -143,9 +217,19 @@ function buildFingerprint(
 
 /**
  * Generates the adapter for `agentName` and writes a manifest.
- * `--force` only adopts / replaces UNMANAGED files. It never
- * overwrites a file that is recorded in the existing manifest. To force-
- * overwrite a managed-modified file, callers must use
+ * `--force` only adopts / replaces UNMANAGED files. It never overwrites a
+ * managed-MODIFIED file (one whose disk content diverges from its manifest
+ * hash). It DOES re-render a managed-clean file whose content is stale relative
+ * to the current generator output — that file is verbatim generator output, so
+ * refreshing it destroys no edits and prevents a project-shipped (possibly
+ * forged) manifest from preserving stale generated content.
+ *
+ * A managed file whose disk content matches NEITHER the manifest hash NOR the
+ * generator output (managed-modified × stale) is **refused** (`refused[]`): not
+ * overwritten (it could be a genuine local edit), but not silently skipped
+ * either — the divergence is surfaced (the command layer warns + exits
+ * non-zero) so a hostile-repo file is never passed over in silence. To
+ * force-overwrite a managed-modified file, callers must use
  * `adapter upgrade --write --accept-modified`.
  *
  * On every invocation, regardless of whether the manifest existed before,
@@ -180,15 +264,30 @@ export async function runAdapterInstall(
     loadModelProfiles(cwd),
   ]);
 
-  // Validate `--model` and pin it to the agent profile BEFORE any other
-  // filesystem mutation. An unknown value throws CONFIG_ERROR here, before
-  // a single directory or file is written.
-  const resolvedModelVersion = await resolveAndPinModelVersion({
-    cwd,
-    agentName,
-    profile,
-    modelVersionInput: modelVersion,
+  // Validate `--model` (PURE — no filesystem access) up front, so an unknown
+  // value is a clean CONFIG_ERROR before anything is read or written.
+  validateModelVersionInput(modelVersion);
+
+  // Read the existing manifest BEFORE persisting the `--model` pin. A
+  // fail-closed manifest state (a `.code-pact/adapters` symlink escape, or a
+  // malformed/schema-invalid manifest) must abort the install HERE, before any
+  // persistent side effect — otherwise a doomed `--model` install would still
+  // have rewritten the agent profile's `model_version`. Tolerant read: a legacy
+  // manifest with duplicate paths is repairable here (we regenerate below).
+  const existingManifest = await readManifest(cwd, agentName, {
+    tolerantDuplicatePaths: true,
   });
+  const existingByPath = new Map<string, ManifestFile>(
+    (existingManifest?.files ?? []).map((f) => [f.path, f]),
+  );
+
+  // Effective model version for GENERATION, computed WITHOUT persisting it. The
+  // `--model` pin is a profile write (a persistent side effect) and is deferred
+  // until after the path-safety preflight below, so a doomed install never
+  // strands a pinned `model_version`. (Matches `resolveAndPinModelVersion`'s own
+  // resolution: normalized `--model`, else the profile's existing pin.)
+  const resolvedModelVersion =
+    validateModelVersionInput(modelVersion) ?? profile.model_version;
 
   const descriptor = adapterRegistry[agentName];
   const desiredFiles = dedupeDesiredFiles(
@@ -201,27 +300,32 @@ export async function runAdapterInstall(
     }),
   );
 
-  // Tolerant read: a legacy manifest with duplicate paths is repairable here —
-  // we regenerate a unique manifest below — so it must not abort the install.
-  const existingManifest = await readManifest(cwd, agentName, {
-    tolerantDuplicatePaths: true,
-  });
-  const existingByPath = new Map<string, ManifestFile>(
-    (existingManifest?.files ?? []).map((f) => [f.path, f]),
-  );
-
-  // Directory placeholders: every adapter gets its
-  // context_dir, Claude additionally gets its hook_dir.
-  await mkdir(join(cwd, profile.context_dir), { recursive: true });
-  if (profile.hook_dir) {
-    await mkdir(join(cwd, profile.hook_dir), { recursive: true });
-  }
+  // Write PREFLIGHT — fail closed BEFORE any persistent side effect. The manifest
+  // read above already covered `.code-pact/adapters`; this checks the placeholder
+  // dirs AND every generated file for BOTH containment (symlink escape / dangling
+  // → PATH_OUTSIDE_PROJECT) AND on-disk TYPE (a dir spec that is really a file,
+  // or a file spec that is really a directory → CONFIG_ERROR). Either aborts the
+  // install here — no pin, no write — instead of failing the later mkdir/write
+  // AFTER the `--model` pin. The CLI maps PATH_OUTSIDE_PROJECT → CONFIG_ERROR.
+  await assertAdapterWritePathsContained(cwd, [
+    { path: profile.context_dir, kind: "directory" },
+    ...(profile.hook_dir ? [{ path: profile.hook_dir, kind: "directory" as const }] : []),
+    { path: manifestRelPath(agentName), kind: "file" },
+    ...desiredFiles.map((d) => ({ path: d.path, kind: "file" as const })),
+  ]);
 
   const created: string[] = [];
   const skipped: string[] = [];
   const adopted: string[] = [];
+  const refused: string[] = [];
   const fileResults: AdapterInstallFile[] = [];
   const newManifestFiles: ManifestFile[] = [];
+  const plannedFiles: Array<{
+    desired: (typeof desiredFiles)[number];
+    absPath: string;
+    action: FileAction;
+    desiredHash: string;
+  }> = [];
 
   for (const desired of desiredFiles) {
     assertSafeRelativePath(desired.path);
@@ -238,7 +342,7 @@ export async function runAdapterInstall(
     // to skill files. It still cannot override managed-modified (handled
     // by decideAction below).
     const effectiveForce = force || (regenSkills && desired.role === "skill");
-    const action = decideAction({
+    let action = decideAction({
       local: cls.local,
       desired: cls.desired,
       mode: "install",
@@ -246,24 +350,53 @@ export async function runAdapterInstall(
       acceptModified: false,
     });
 
+    // SECURITY (CWE-345/CWE-22/CWE-59): generated-file creation/overwrite must
+    // NOT be authorized by the project-supplied manifest hash or profile path
+    // alone — both are attacker-controlled. `write` (absent file) may use the
+    // adapter's static generated-write allowlist; destructive update/replace
+    // stays on the narrower ownedPathGlobs delete/overwrite authority. Refuse
+    // unless BOTH hold:
+    //   1. the GENERATED path is in the relevant TRUSTED static set (a profile
+    //      redirecting instruction_filename/skill_dir at e.g. package.json is
+    //      outside it), AND
+    //   2. the path traverses NO symlink — else an in-project symlink (e.g.
+    //      `.claude/skills -> ../src`) makes the owned-looking lexical path
+    //      resolve to a DIFFERENT real file, so the glob match is not ownership.
+    // `refuse` from decideAction is the managed-modified × stale local-edit case.
+    let refuseReason: RefuseReason | undefined =
+      action === "refuse" ? "managed_modified" : undefined;
+    if (action === "write" || action === "update" || action === "replace_unmanaged") {
+      const allowedGlobs =
+        action === "write"
+          ? (descriptor.writePathGlobs ?? descriptor.ownedPathGlobs)
+          : descriptor.ownedPathGlobs;
+      const owned = allowedGlobs.some((g) => matchGlob(g, desired.path));
+      if (!owned) {
+        action = "refuse";
+        refuseReason = "unowned_generated_path";
+      }
+    }
+    if (action !== "refuse" && await pathTraversesSymlink(cwd, desired.path)) {
+      action = "refuse";
+      refuseReason = "symlink_traversal";
+    }
+
     fileResults.push({
       path: absPath,
       relPath: desired.path,
       role: desired.role,
       action,
+      ...(refuseReason ? { reason: refuseReason } : {}),
     });
+
+    plannedFiles.push({ desired, absPath, action, desiredHash });
 
     let recordedHash: string | null = null;
 
-    if (action === "write" || action === "replace_unmanaged") {
-      await mkdir(dirname(absPath), { recursive: true });
-      await atomicWriteText(absPath, desired.content);
+    if (action === "write" || action === "replace_unmanaged" || action === "update") {
       recordedHash = desiredHash;
-      created.push(absPath);
     } else if (action === "adopt") {
-      // Disk content already matches desired; just record in the manifest.
       recordedHash = desiredHash;
-      adopted.push(absPath);
     } else if (action === "skip") {
       skipped.push(absPath);
       // Preserve existing manifest entry for managed files we did not touch.
@@ -271,9 +404,18 @@ export async function runAdapterInstall(
       if (manifestHash !== null) {
         recordedHash = manifestHash;
       }
+    } else if (action === "refuse") {
+      // managed-modified × stale: divergent from BOTH the manifest and the
+      // generator. Do not overwrite (possible local edit) but surface it (the
+      // command layer warns + exits non-zero). Keep tracking it so it stays
+      // visible rather than re-classifying as an unmanaged surprise next run.
+      refused.push(absPath);
+      if (manifestHash !== null) {
+        recordedHash = manifestHash;
+      }
     }
-    // Other actions (update / update_manifest / refuse / warn) are not
-    // reachable in install mode per the action matrix.
+    // Other actions (update_manifest / warn) are not reachable in install mode
+    // per the action matrix.
 
     if (recordedHash !== null) {
       newManifestFiles.push({
@@ -288,6 +430,41 @@ export async function runAdapterInstall(
   const generatorVersion =
     generatorVersionOverride ?? (await readPackageVersion());
   const resolvedModel = resolvedModelVersion;
+
+  if (refused.length > 0) {
+    return {
+      agentName,
+      manifestPath: existingManifest ? manifestPath(cwd, agentName) : manifestPath(cwd, agentName),
+      generatorVersion,
+      created: [],
+      skipped,
+      adopted: [],
+      refused,
+      files: fileResults,
+    };
+  }
+
+  await resolveAndPinModelVersion({
+    cwd,
+    agentName,
+    profile,
+    modelVersionInput: modelVersion,
+  });
+
+  await mkdir(await resolveOwnedAdapterPath(cwd, profile.context_dir), { recursive: true });
+  if (profile.hook_dir) {
+    await mkdir(await resolveOwnedAdapterPath(cwd, profile.hook_dir), { recursive: true });
+  }
+
+  for (const planned of plannedFiles) {
+    if (planned.action === "write" || planned.action === "replace_unmanaged" || planned.action === "update") {
+      await mkdir(dirname(planned.absPath), { recursive: true });
+      await atomicWriteText(planned.absPath, planned.desired.content);
+      created.push(planned.absPath);
+    } else if (planned.action === "adopt") {
+      adopted.push(planned.absPath);
+    }
+  }
 
   const manifest: AdapterManifest = {
     schema_version: 1,
@@ -308,6 +485,7 @@ export async function runAdapterInstall(
     created,
     skipped,
     adopted,
+    refused,
     files: fileResults,
   };
 }

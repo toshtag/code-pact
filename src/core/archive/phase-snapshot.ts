@@ -18,7 +18,7 @@ import { loadArchiveBundles } from "./archive-bundle-loader.ts";
 import { resolveArchiveRecordBytes } from "./resolve-archive-record.ts";
 import { resolveWithinProject } from "../path-safety.ts";
 import { atomicWriteText, type ExpectedState } from "../../io/atomic-text.ts";
-import { phaseSnapshotPath, sha256Hex } from "./paths.ts";
+import { phaseSnapshotRelPath, resolveArchiveOwnedPath, sha256Hex } from "./paths.ts";
 
 // ---------------------------------------------------------------------------
 // Phase snapshot writer (record layer — NO CLI, NO reader changes).
@@ -264,7 +264,7 @@ export async function planPhaseSnapshot(
   phaseId: string,
   opts: PhaseSnapshotOptions,
 ): Promise<PhaseSnapshotPlan> {
-  const path = phaseSnapshotPath(cwd, phaseId);
+  const path = await resolveArchiveOwnedPath(cwd, phaseSnapshotRelPath(phaseId));
   const existing = await readExistingRecord(cwd, phaseId);
   if (existing.state === "invalid") {
     return { kind: "ineligible", path, blocks: [{ kind: "record_invalid", detail: existing.detail }] };

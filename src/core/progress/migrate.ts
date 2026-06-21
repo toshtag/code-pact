@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { parse as parseYaml } from "yaml";
 import { ProgressLog, type ProgressEvent } from "../schemas/progress-event.ts";
-import { mergeProgressStreams, progressPath } from "./io.ts";
+import { mergeProgressStreams, resolveProgressPath } from "./io.ts";
 import { readEventFiles, writeEventFile } from "./events-io.ts";
 import { computeEventId } from "./event-id.ts";
 import { deriveTaskState } from "./task-state.ts";
@@ -47,7 +47,7 @@ export async function migrateProgressToEvents(
 ): Promise<MigrationResult> {
   let legacyEvents: ProgressEvent[] = [];
   try {
-    const raw = await readFile(progressPath(cwd), "utf8");
+    const raw = await readFile(await resolveProgressPath(cwd), "utf8");
     legacyEvents = ProgressLog.parse(parseYaml(raw) as unknown).events;
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
