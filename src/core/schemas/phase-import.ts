@@ -36,7 +36,7 @@ export const TaskImport = z.object({
   depends_on: z.array(z.string().min(1)).optional(),
   // Namespace contract enforced even on lenient import — an external/
   // AI-generated phase YAML is exactly the hostile-input path this guards.
-  // See the Task schema note: design/decisions/**/*.md only, multi-layer.
+  // See the Task schema note: design/decisions/*.md (top-level) only, multi-layer.
   decision_refs: z.array(DecisionRefPath).optional(),
   reads: z.array(z.string().min(1)).optional(),
   writes: z.array(z.string().min(1)).optional(),

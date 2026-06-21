@@ -15,12 +15,19 @@ import { RelativePosixPath } from "./relative-path.ts";
  * Contract (CVE class: arbitrary local file read via decision_refs):
  *   - project-relative POSIX (RelativePosixPath rejects absolute, `..`,
  *     `.`, empty segments, backslash, drive letters)
- *   - under `design/decisions/` (any depth — nested ADRs like
- *     `design/decisions/2026/ADR-001.md` are supported, matching the gate
- *     and `normalizeDecisionRef`)
+ *   - directly under `design/decisions/` — TOP-LEVEL ONLY, no subdirectories.
+ *     This deliberately matches `normalizeDecisionRef` /
+ *     `normalizePrunedDecisionPath` and the flat top-level scans in the gate
+ *     archive fallback, pruned ledger, decision-state-record schema, retire,
+ *     prune, and quality scan. Nested ADRs (`design/decisions/2026/ADR.md`)
+ *     are rejected here because those downstream lifecycle stages do NOT yet
+ *     support them; allowing them at the schema boundary while the rest of the
+ *     lifecycle silently drops them is the inconsistency we refuse to ship.
+ *     Nested support is a deliberate future extension across the WHOLE
+ *     lifecycle, not a schema-only widening.
  *   - ends with `.md`
- *   - never the index (`README.md`) or the prune tombstone (`PRUNED.md`),
- *     at ANY depth — those are not decision records
+ *   - never the index (`README.md`) or the prune tombstone (`PRUNED.md`) —
+ *     those are not decision records
  *
  * Symlink escape is NOT a lexical concern: it is enforced at READ time by
  * `resolveOwnedProjectPath` (rejects any symlink component). This validator
@@ -52,7 +59,13 @@ export function decisionRefPathReason(value: string): string {
   if (!value.endsWith(".md")) {
     return "decision path must end with .md";
   }
-  const basename = value.split("/").pop() ?? "";
+  // TOP-LEVEL ONLY: no subdirectory between the prefix and the filename. Keeps
+  // the schema in lockstep with the flat-only downstream lifecycle.
+  const rest = value.slice(DECISIONS_PREFIX.length);
+  if (rest.includes("/")) {
+    return "decision path must be directly under design/decisions/ (no subdirectories)";
+  }
+  const basename = rest;
   if (NON_DECISION_BASENAMES.has(basename)) {
     return "README.md / PRUNED.md are never decision records";
   }

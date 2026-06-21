@@ -616,7 +616,7 @@ describe("runTaskRecordDone — decision gate", () => {
   it("requires_decision with an UNSAFE decision_refs ('..' to an accepted ADR outside the repo) → rejected at phase load, progress unchanged", async () => {
     // The regression this pins: an `accepted` ADR planted OUTSIDE the project
     // root must never satisfy the gate. `decision_refs` now carries a
-    // schema-level namespace contract (DecisionRefPath: design/decisions/**/*.md),
+    // schema-level namespace contract (DecisionRefPath: design/decisions/*.md top-level),
     // so an escaping ref is rejected when the phase YAML is PARSED — even
     // earlier and more strongly than the old gate-level unsafe_path verdict.
     // Either way the gate is never released and progress.yaml is untouched.

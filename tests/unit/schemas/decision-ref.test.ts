@@ -12,8 +12,6 @@ describe("decision-ref validator (security)", () => {
   const ACCEPT = [
     "design/decisions/ADR-001.md",
     "design/decisions/stability-taxonomy.md",
-    "design/decisions/2026/ADR-001.md", // nested
-    "design/decisions/a/b/c/deep.md", // deeply nested
   ];
   const REJECT: [string, string][] = [
     [".env", "arbitrary local file"],
@@ -21,6 +19,8 @@ describe("decision-ref validator (security)", () => {
     ["docs/cli-contract.md", "outside the namespace"],
     ["design/decisions/README.md", "the index"],
     ["design/decisions/PRUNED.md", "the tombstone ledger"],
+    ["design/decisions/2026/ADR-001.md", "nested — flat-only, downstream lifecycle is flat"],
+    ["design/decisions/a/b/c/deep.md", "deeply nested"],
     ["design/decisions/nested/README.md", "README at any depth"],
     ["design/decisions/secret", "not a .md"],
     ["design/decisions/", "no file"],

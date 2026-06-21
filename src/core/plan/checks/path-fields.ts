@@ -107,7 +107,7 @@ export function detectTaskDecisionRefUnsafePath(phases: PhaseEntry[]): PlanIssue
           issues.push({
             code: "TASK_DECISION_REF_UNSAFE_PATH",
             severity: "error",
-            message: `Task "${task.id}" decision_refs path "${p}" is not a valid decision reference (design/decisions/**/*.md): ${reason}`,
+            message: `Task "${task.id}" decision_refs path "${p}" is not a valid decision reference (design/decisions/*.md, top-level only): ${reason}`,
             file: ref.path,
             phase_id: phase.id,
             task_id: task.id,

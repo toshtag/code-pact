@@ -289,7 +289,7 @@ type RelFileReader = (relPath: string) => Promise<ReadResult>;
 function diskReader(cwd: string): RelFileReader {
   return async (relPath) => {
     // NAMESPACE guard (multi-layer defense): the decision read seam ONLY reads
-    // ADRs under `design/decisions/**/*.md`. The Task/phase-import schemas
+    // ADRs under `design/decisions/*.md` (top-level only). The Task/phase-import schemas
     // already hard-fail a `decision_refs: [.env]` at parse time, but this seam
     // re-validates so a value reaching here by any other route (legacy plan
     // YAML parsed before the schema tightened, a direct programmatic caller, a

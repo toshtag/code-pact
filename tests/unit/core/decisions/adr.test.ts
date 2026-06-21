@@ -128,12 +128,16 @@ describe("readLiveDecisionDir / readLiveDecisionFile (live decision-read seam)",
     expect(r.kind).toBe("unsafe");
   });
 
-  it("readLiveDecisionFile reads a NESTED in-project ADR (live nested refs are in scope; state-record fallback is NOT)", async () => {
+  it("readLiveDecisionFile REFUSES a nested ADR as unsafe (flat-only namespace, matches downstream lifecycle)", async () => {
+    // The decision read seam now enforces the flat-only DecisionRefPath
+    // namespace. A nested path is `unsafe` — never read — so it stays in
+    // lockstep with normalizeDecisionRef / pruned-ledger / retire / prune,
+    // which are all top-level only. (A nested decision_refs value also cannot
+    // reach here legitimately: the Task/phase-import schemas reject it at parse.)
     await mkdir(join(cwd, "design", "decisions", "p3"), { recursive: true });
     await writeFile(join(cwd, "design", "decisions", "p3", "adr.md"), "nested body");
     const r = await readLiveDecisionFile(cwd, "design/decisions/p3/adr.md");
-    expect(r.kind).toBe("ok");
-    expect(r.kind === "ok" && r.content).toBe("nested body");
+    expect(r.kind).toBe("unsafe");
   });
 });
 
