@@ -1,7 +1,16 @@
 import { beforeAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdtemp, mkdir, readdir, realpath, rm, writeFile, readFile, symlink } from "node:fs/promises";
+import {
+  mkdtemp,
+  mkdir,
+  readdir,
+  realpath,
+  rm,
+  writeFile,
+  readFile,
+  symlink,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runInit } from "../../src/commands/init.ts";
@@ -22,7 +31,9 @@ beforeEach(async () => {
   // On macOS /var/folders/... is a symlink to /private/var/folders/...; the
   // spawned node's process.cwd() returns the realpath'd form, so we
   // realpath dir up front to make path comparisons stable.
-  dir = await realpath(await mkdtemp(join(tmpdir(), "code-pact-adapter-cli-test-")));
+  dir = await realpath(
+    await mkdtemp(join(tmpdir(), "code-pact-adapter-cli-test-")),
+  );
   await runInit({
     cwd: dir,
     locale: "en-US",
@@ -53,7 +64,7 @@ describe("adapter list — CLI", () => {
       data: { agents: Array<{ name: string }> };
     };
     expect(parsed.ok).toBe(true);
-    expect(parsed.data.agents.map((a) => a.name).sort()).toEqual(
+    expect(parsed.data.agents.map(a => a.name).sort()).toEqual(
       ["claude-code", "codex", "cursor", "gemini-cli", "generic"].sort(),
     );
   });
@@ -73,7 +84,11 @@ describe("adapter install <agent> — CLI", () => {
     expect(res.status).toBe(0);
     const parsed = JSON.parse(res.stdout) as {
       ok: boolean;
-      data: { agentName: string; manifestPath: string; generatorVersion: string };
+      data: {
+        agentName: string;
+        manifestPath: string;
+        generatorVersion: string;
+      };
     };
     expect(parsed.ok).toBe(true);
     expect(parsed.data.agentName).toBe("claude-code");
@@ -86,7 +101,10 @@ describe("adapter install <agent> — CLI", () => {
   it("missing <agent> positional → CONFIG_ERROR exit 2", () => {
     const res = runCli(["adapter", "install", "--json"]);
     expect(res.status).toBe(2);
-    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+    const parsed = JSON.parse(res.stdout) as {
+      ok: false;
+      error: { code: string };
+    };
     expect(parsed.ok).toBe(false);
     expect(parsed.error.code).toBe("CONFIG_ERROR");
   });
@@ -94,7 +112,10 @@ describe("adapter install <agent> — CLI", () => {
   it("unknown agent → AGENT_NOT_FOUND exit 2", () => {
     const res = runCli(["adapter", "install", "no-such-agent", "--json"]);
     expect(res.status).toBe(2);
-    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+    const parsed = JSON.parse(res.stdout) as {
+      ok: false;
+      error: { code: string };
+    };
     expect(parsed.ok).toBe(false);
     expect(parsed.error.code).toBe("AGENT_NOT_FOUND");
   });
@@ -104,21 +125,37 @@ describe("adapter bare-form removed — CLI", () => {
   it("bare `adapter` (no subcommand) → CONFIG_ERROR exit 2, no side effects", () => {
     const res = runCli(["adapter", "--json"]);
     expect(res.status).toBe(2);
-    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string; message: string } };
+    const parsed = JSON.parse(res.stdout) as {
+      ok: false;
+      error: { code: string; message: string };
+    };
     expect(parsed.ok).toBe(false);
     expect(parsed.error.code).toBe("CONFIG_ERROR");
     expect(parsed.error.message).toMatch(/adapter install/);
     // No implicit install: no manifest was created.
-    const manifestPath = join(dir, ".code-pact", "adapters", "claude-code.manifest.yaml");
+    const manifestPath = join(
+      dir,
+      ".code-pact",
+      "adapters",
+      "claude-code.manifest.yaml",
+    );
     expect(existsSync(manifestPath)).toBe(false);
   });
 
   it("former bare-form `adapter --agent claude-code` → CONFIG_ERROR, no manifest", () => {
     const res = runCli(["adapter", "--agent", "claude-code", "--json"]);
     expect(res.status).toBe(2);
-    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+    const parsed = JSON.parse(res.stdout) as {
+      ok: false;
+      error: { code: string };
+    };
     expect(parsed.error.code).toBe("CONFIG_ERROR");
-    const manifestPath = join(dir, ".code-pact", "adapters", "claude-code.manifest.yaml");
+    const manifestPath = join(
+      dir,
+      ".code-pact",
+      "adapters",
+      "claude-code.manifest.yaml",
+    );
     expect(existsSync(manifestPath)).toBe(false);
   });
 
@@ -138,7 +175,10 @@ describe("adapter --help — CLI", () => {
   });
 
   it("`adapter -h` and `adapter help` also print usage, exit 0", () => {
-    for (const variant of [["adapter", "-h"], ["adapter", "help"]]) {
+    for (const variant of [
+      ["adapter", "-h"],
+      ["adapter", "help"],
+    ]) {
       const res = runCli(variant);
       expect(res.status).toBe(0);
       expect(res.stdout).toMatch(/Subcommands:/);
@@ -149,7 +189,12 @@ describe("adapter --help — CLI", () => {
     const res = runCli(["adapter", "install", "--help"]);
     expect(res.status).toBe(0);
     expect(res.stdout).toMatch(/adapter install/);
-    const manifestPath = join(dir, ".code-pact", "adapters", "claude-code.manifest.yaml");
+    const manifestPath = join(
+      dir,
+      ".code-pact",
+      "adapters",
+      "claude-code.manifest.yaml",
+    );
     expect(existsSync(manifestPath)).toBe(false);
   });
 });
@@ -158,75 +203,148 @@ describe("adapter upgrade — CLI", () => {
   it("missing <agent> → CONFIG_ERROR exit 2", () => {
     const res = runCli(["adapter", "upgrade", "--check", "--json"]);
     expect(res.status).toBe(2);
-    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+    const parsed = JSON.parse(res.stdout) as {
+      ok: false;
+      error: { code: string };
+    };
     expect(parsed.error.code).toBe("CONFIG_ERROR");
   });
 
   it("neither --check nor --write → CONFIG_ERROR exit 2", () => {
     const res = runCli(["adapter", "upgrade", "claude-code", "--json"]);
     expect(res.status).toBe(2);
-    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string; message: string } };
+    const parsed = JSON.parse(res.stdout) as {
+      ok: false;
+      error: { code: string; message: string };
+    };
     expect(parsed.error.code).toBe("CONFIG_ERROR");
     expect(parsed.error.message).toMatch(/--check or --write/);
   });
 
   it("both --check and --write → CONFIG_ERROR exit 2 (mutually exclusive)", () => {
-    const res = runCli(["adapter", "upgrade", "claude-code", "--check", "--write", "--json"]);
+    const res = runCli([
+      "adapter",
+      "upgrade",
+      "claude-code",
+      "--check",
+      "--write",
+      "--json",
+    ]);
     expect(res.status).toBe(2);
-    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string; message: string } };
+    const parsed = JSON.parse(res.stdout) as {
+      ok: false;
+      error: { code: string; message: string };
+    };
     expect(parsed.error.code).toBe("CONFIG_ERROR");
     expect(parsed.error.message).toMatch(/mutually exclusive/);
   });
 
   it("no manifest → MANIFEST_NOT_FOUND exit 2", () => {
-    const res = runCli(["adapter", "upgrade", "claude-code", "--check", "--json"]);
+    const res = runCli([
+      "adapter",
+      "upgrade",
+      "claude-code",
+      "--check",
+      "--json",
+    ]);
     expect(res.status).toBe(2);
-    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+    const parsed = JSON.parse(res.stdout) as {
+      ok: false;
+      error: { code: string };
+    };
     expect(parsed.error.code).toBe("MANIFEST_NOT_FOUND");
   });
 
   it("--check --model → CONFIG_ERROR exit 2 (read-only must not pin)", () => {
     runCli(["adapter", "install", "claude-code", "--json"]);
-    const res = runCli(["adapter", "upgrade", "claude-code", "--check", "--model", "opus-4.7", "--json"]);
+    const res = runCli([
+      "adapter",
+      "upgrade",
+      "claude-code",
+      "--check",
+      "--model",
+      "opus-4.7",
+      "--json",
+    ]);
     expect(res.status).toBe(2);
-    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string; message: string } };
+    const parsed = JSON.parse(res.stdout) as {
+      ok: false;
+      error: { code: string; message: string };
+    };
     expect(parsed.error.code).toBe("CONFIG_ERROR");
     expect(parsed.error.message).toMatch(/--model.*--check|--check.*--model/);
   });
 
   it("unknown agent → AGENT_NOT_FOUND exit 2", () => {
-    const res = runCli(["adapter", "upgrade", "no-such-agent", "--check", "--json"]);
+    const res = runCli([
+      "adapter",
+      "upgrade",
+      "no-such-agent",
+      "--check",
+      "--json",
+    ]);
     expect(res.status).toBe(2);
-    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+    const parsed = JSON.parse(res.stdout) as {
+      ok: false;
+      error: { code: string };
+    };
     expect(parsed.error.code).toBe("AGENT_NOT_FOUND");
   });
 
   it("--write --model (unknown value) → CONFIG_ERROR exit 2", () => {
     runCli(["adapter", "install", "claude-code", "--json"]);
-    const res = runCli(["adapter", "upgrade", "claude-code", "--write", "--model", "gpt-9", "--json"]);
+    const res = runCli([
+      "adapter",
+      "upgrade",
+      "claude-code",
+      "--write",
+      "--model",
+      "gpt-9",
+      "--json",
+    ]);
     expect(res.status).toBe(2);
-    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+    const parsed = JSON.parse(res.stdout) as {
+      ok: false;
+      error: { code: string };
+    };
     expect(parsed.error.code).toBe("CONFIG_ERROR");
   });
 
   it("--check after fresh install → clean true, exit 0", () => {
     runCli(["adapter", "install", "claude-code", "--json"]);
-    const res = runCli(["adapter", "upgrade", "claude-code", "--check", "--json"]);
+    const res = runCli([
+      "adapter",
+      "upgrade",
+      "claude-code",
+      "--check",
+      "--json",
+    ]);
     expect(res.status).toBe(0);
-    const parsed = JSON.parse(res.stdout) as { ok: boolean; data: { clean: boolean } };
+    const parsed = JSON.parse(res.stdout) as {
+      ok: boolean;
+      data: { clean: boolean };
+    };
     expect(parsed.ok).toBe(true);
     expect(parsed.data.clean).toBe(true);
   });
 
   it("--write after fresh install → idempotent (manifest hashes unchanged)", () => {
     const install = runCli(["adapter", "install", "claude-code", "--json"]);
-    const installed = JSON.parse(install.stdout) as { data: { manifestPath: string } };
+    const installed = JSON.parse(install.stdout) as {
+      data: { manifestPath: string };
+    };
     const manifestPath = installed.data.manifestPath;
     const fs = require("node:fs") as typeof import("node:fs");
     const before = fs.readFileSync(manifestPath, "utf8");
     const hashesBefore = before.match(/sha256: [0-9a-f]{64}/g);
 
-    const res = runCli(["adapter", "upgrade", "claude-code", "--write", "--json"]);
+    const res = runCli([
+      "adapter",
+      "upgrade",
+      "claude-code",
+      "--write",
+      "--json",
+    ]);
     expect(res.status).toBe(0);
     const after = fs.readFileSync(manifestPath, "utf8");
     const hashesAfter = after.match(/sha256: [0-9a-f]{64}/g);
@@ -273,10 +391,19 @@ describe("adapter upgrade — MODEL_MAP_STALE remaining-advisory hint (CLI)", ()
   it("--json never emits the hint (human-only; envelope stays clean)", () => {
     runCli(["adapter", "install", "claude-code", "--json"]);
     pinStale();
-    const res = runCli(["adapter", "upgrade", "claude-code", "--write", "--json"]);
+    const res = runCli([
+      "adapter",
+      "upgrade",
+      "claude-code",
+      "--write",
+      "--json",
+    ]);
     expect(res.status).toBe(0);
     expect(res.stderr).not.toContain("MODEL_MAP_STALE");
-    const parsed = JSON.parse(res.stdout) as { ok: boolean; data: Record<string, unknown> };
+    const parsed = JSON.parse(res.stdout) as {
+      ok: boolean;
+      data: Record<string, unknown>;
+    };
     expect(parsed.ok).toBe(true);
     expect("drift" in parsed.data).toBe(false);
   });
@@ -301,7 +428,11 @@ describe("adapter upgrade — MODEL_MAP_STALE remaining-advisory hint (CLI)", ()
     const fs = require("node:fs") as typeof import("node:fs");
     // Locally edit the managed CLAUDE.md → managed-modified × stale → refuse.
     const claudeMd = join(dir, "CLAUDE.md");
-    fs.writeFileSync(claudeMd, fs.readFileSync(claudeMd, "utf8") + "\n<!-- local edit -->\n", "utf8");
+    fs.writeFileSync(
+      claudeMd,
+      fs.readFileSync(claudeMd, "utf8") + "\n<!-- local edit -->\n",
+      "utf8",
+    );
     const res = runCli(["adapter", "upgrade", "claude-code", "--write"]);
     expect(res.status).toBe(1); // a refusal exits 1
     expect(res.stderr).toContain("refused");
@@ -324,7 +455,7 @@ describe("adapter doctor — CLI", () => {
     };
     expect(parsed.ok).toBe(true);
     expect(parsed.data.ok).toBe(true);
-    const codes = parsed.data.issues.map((i) => i.code);
+    const codes = parsed.data.issues.map(i => i.code);
     expect(codes).toContain("ADAPTER_MANIFEST_MISSING");
   });
 
@@ -347,15 +478,27 @@ describe("adapter doctor — CLI", () => {
   it("--agent flag accepts an explicit target", () => {
     const res = runCli(["adapter", "doctor", "--agent", "codex", "--json"]);
     expect(res.status).toBe(0); // codex isn't enabled in this project → no findings
-    const parsed = JSON.parse(res.stdout) as { ok: boolean; data: { issues: unknown[] } };
+    const parsed = JSON.parse(res.stdout) as {
+      ok: boolean;
+      data: { issues: unknown[] };
+    };
     expect(parsed.ok).toBe(true);
     expect(parsed.data.issues).toEqual([]);
   });
 
   it("--agent with an unknown name → AGENT_NOT_FOUND exit 2", () => {
-    const res = runCli(["adapter", "doctor", "--agent", "no-such-agent", "--json"]);
+    const res = runCli([
+      "adapter",
+      "doctor",
+      "--agent",
+      "no-such-agent",
+      "--json",
+    ]);
     expect(res.status).toBe(2);
-    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+    const parsed = JSON.parse(res.stdout) as {
+      ok: false;
+      error: { code: string };
+    };
     expect(parsed.error.code).toBe("AGENT_NOT_FOUND");
   });
 
@@ -370,7 +513,10 @@ describe("adapter unknown subcommand — CLI", () => {
   it("rejects unknown sub-word with CONFIG_ERROR exit 2", () => {
     const res = runCli(["adapter", "foobar", "--json"]);
     expect(res.status).toBe(2);
-    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string; message: string } };
+    const parsed = JSON.parse(res.stdout) as {
+      ok: false;
+      error: { code: string; message: string };
+    };
     expect(parsed.error.code).toBe("CONFIG_ERROR");
     expect(parsed.error.message).toContain("foobar");
   });
@@ -382,7 +528,10 @@ describe("adapter unknown subcommand — CLI", () => {
     const res = runCli(["--json", "adapter", "foobar"]);
     expect(res.status).toBe(2);
     expect(res.stderr).toBe("");
-    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string; message: string } };
+    const parsed = JSON.parse(res.stdout) as {
+      ok: false;
+      error: { code: string; message: string };
+    };
     expect(parsed.ok).toBe(false);
     expect(parsed.error.code).toBe("CONFIG_ERROR");
     expect(parsed.error.message).toContain("foobar");
@@ -390,11 +539,14 @@ describe("adapter unknown subcommand — CLI", () => {
 });
 
 describe("adapter upgrade — unowned orphan warn output (security)", () => {
-  // Seed an orphan whose path is NOT in claude's ownedPathGlobs: managed-clean
+  // Seed an orphan whose path is NOT in claude's ownedPathRoles: managed-clean
   // (manifest hash == disk hash) but not emitted by the generator. The CLI must
   // KEEP it and explain why + how to remove it (vs. silently deleting on a
   // project-supplied manifest's say-so).
-  async function seedUnownedOrphan(relPath: string, content: string): Promise<void> {
+  async function seedUnownedOrphan(
+    relPath: string,
+    content: string,
+  ): Promise<void> {
     await writeFile(join(dir, relPath), content, "utf8");
     const m = await readManifest(dir, "claude-code");
     if (m === null) throw new Error("manifest expected after install");
@@ -434,7 +586,7 @@ describe("adapter upgrade — unowned orphan warn output (security)", () => {
     expect(res.stderr).toContain(orphan);
     // warn-only drift: do NOT tell the user "run --write to apply" (it won't help).
     expect(res.stderr).not.toContain('--write" to apply');
-    expect(res.stderr).toMatch(/review the orphaned file/i);
+    expect(res.stderr).toMatch(/review the file/i);
   });
 });
 
@@ -444,7 +596,10 @@ describe("adapter manifest symlink escape — CLI error mapping (security)", () 
   // envelope (exit 2), NOT leak it as an internal error / exit 3.
   async function linkAdaptersOutside(): Promise<string> {
     const outside = await mkdtemp(join(tmpdir(), "code-pact-adapter-escape-"));
-    await rm(join(dir, ".code-pact", "adapters"), { recursive: true, force: true });
+    await rm(join(dir, ".code-pact", "adapters"), {
+      recursive: true,
+      force: true,
+    });
     await symlink(outside, join(dir, ".code-pact", "adapters"));
     return outside;
   }
@@ -453,7 +608,10 @@ describe("adapter manifest symlink escape — CLI error mapping (security)", () 
     const outside = await linkAdaptersOutside();
     const res = runCli(["adapter", "install", "claude-code", "--json"]);
     expect(res.status).toBe(2);
-    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+    const parsed = JSON.parse(res.stdout) as {
+      ok: false;
+      error: { code: string };
+    };
     expect(parsed.ok).toBe(false);
     expect(parsed.error.code).toBe("ADAPTER_MANIFEST_INVALID");
     expect(existsSync(join(outside, "claude-code.manifest.yaml"))).toBe(false);
@@ -473,9 +631,18 @@ describe("adapter manifest symlink escape — CLI error mapping (security)", () 
     // Install first (clean), THEN swap the adapters dir for an escaping symlink.
     expect(runCli(["adapter", "install", "claude-code"]).status).toBe(0);
     const outside = await linkAdaptersOutside();
-    const res = runCli(["adapter", "upgrade", "claude-code", "--check", "--json"]);
+    const res = runCli([
+      "adapter",
+      "upgrade",
+      "claude-code",
+      "--check",
+      "--json",
+    ]);
     expect(res.status).toBe(2);
-    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+    const parsed = JSON.parse(res.stdout) as {
+      ok: false;
+      error: { code: string };
+    };
     expect(parsed.error.code).toBe("ADAPTER_MANIFEST_INVALID");
     await rm(outside, { recursive: true, force: true });
   });
@@ -483,9 +650,18 @@ describe("adapter manifest symlink escape — CLI error mapping (security)", () 
   it("upgrade --write --json → ADAPTER_MANIFEST_INVALID envelope, exit 2", async () => {
     expect(runCli(["adapter", "install", "claude-code"]).status).toBe(0);
     const outside = await linkAdaptersOutside();
-    const res = runCli(["adapter", "upgrade", "claude-code", "--write", "--json"]);
+    const res = runCli([
+      "adapter",
+      "upgrade",
+      "claude-code",
+      "--write",
+      "--json",
+    ]);
     expect(res.status).toBe(2);
-    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+    const parsed = JSON.parse(res.stdout) as {
+      ok: false;
+      error: { code: string };
+    };
     expect(parsed.error.code).toBe("ADAPTER_MANIFEST_INVALID");
     expect(existsSync(join(outside, "claude-code.manifest.yaml"))).toBe(false);
     await rm(outside, { recursive: true, force: true });
@@ -495,12 +671,27 @@ describe("adapter manifest symlink escape — CLI error mapping (security)", () 
     // Blocker: a doomed `--model` install must not persist the model pin before
     // it fails. The manifest read fails closed BEFORE resolveAndPinModelVersion
     // writes the profile, so the agent profile must be byte-identical afterwards.
-    const profilePath = join(dir, ".code-pact", "agent-profiles", "claude-code.yaml");
+    const profilePath = join(
+      dir,
+      ".code-pact",
+      "agent-profiles",
+      "claude-code.yaml",
+    );
     const before = await readFile(profilePath, "utf8");
     const outside = await linkAdaptersOutside();
-    const res = runCli(["adapter", "install", "claude-code", "--model", "sonnet-4.6", "--json"]);
+    const res = runCli([
+      "adapter",
+      "install",
+      "claude-code",
+      "--model",
+      "sonnet-4.6",
+      "--json",
+    ]);
     expect(res.status).toBe(2);
-    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+    const parsed = JSON.parse(res.stdout) as {
+      ok: false;
+      error: { code: string };
+    };
     expect(parsed.error.code).toBe("ADAPTER_MANIFEST_INVALID");
     // The pin never ran — profile unchanged (and no model_version was added).
     expect(await readFile(profilePath, "utf8")).toBe(before);
@@ -516,7 +707,11 @@ describe("adapter malformed / schema-invalid manifest — CLI error mapping (sec
   // schema violation must surface as a structured ADAPTER_MANIFEST_INVALID
   // envelope (exit 2) from install / upgrade — NOT leak as an internal error /
   // exit 3. (doctor + list already mapped this; install + upgrade close the gap.)
-  const MANIFEST_REL = join(".code-pact", "adapters", "claude-code.manifest.yaml");
+  const MANIFEST_REL = join(
+    ".code-pact",
+    "adapters",
+    "claude-code.manifest.yaml",
+  );
   // Bad indentation + unterminated flow → the YAML parser throws.
   const MALFORMED_YAML = "schema_version: 1\n  files: [oops:\n";
   // Valid YAML, but `schema_version` must be 1 and required fields are missing.
@@ -531,7 +726,10 @@ describe("adapter malformed / schema-invalid manifest — CLI error mapping (sec
     await writeRawManifest(MALFORMED_YAML);
     const res = runCli(["adapter", "install", "claude-code", "--json"]);
     expect(res.status).toBe(2);
-    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+    const parsed = JSON.parse(res.stdout) as {
+      ok: false;
+      error: { code: string };
+    };
     expect(parsed.ok).toBe(false);
     expect(parsed.error.code).toBe("ADAPTER_MANIFEST_INVALID");
   });
@@ -540,7 +738,10 @@ describe("adapter malformed / schema-invalid manifest — CLI error mapping (sec
     await writeRawManifest(SCHEMA_INVALID);
     const res = runCli(["adapter", "install", "claude-code", "--json"]);
     expect(res.status).toBe(2);
-    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+    const parsed = JSON.parse(res.stdout) as {
+      ok: false;
+      error: { code: string };
+    };
     expect(parsed.error.code).toBe("ADAPTER_MANIFEST_INVALID");
   });
 
@@ -554,17 +755,35 @@ describe("adapter malformed / schema-invalid manifest — CLI error mapping (sec
 
   it("upgrade --check --json with malformed YAML → ADAPTER_MANIFEST_INVALID, exit 2", async () => {
     await writeRawManifest(MALFORMED_YAML);
-    const res = runCli(["adapter", "upgrade", "claude-code", "--check", "--json"]);
+    const res = runCli([
+      "adapter",
+      "upgrade",
+      "claude-code",
+      "--check",
+      "--json",
+    ]);
     expect(res.status).toBe(2);
-    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+    const parsed = JSON.parse(res.stdout) as {
+      ok: false;
+      error: { code: string };
+    };
     expect(parsed.error.code).toBe("ADAPTER_MANIFEST_INVALID");
   });
 
   it("upgrade --write --json with a schema-invalid manifest → ADAPTER_MANIFEST_INVALID, exit 2", async () => {
     await writeRawManifest(SCHEMA_INVALID);
-    const res = runCli(["adapter", "upgrade", "claude-code", "--write", "--json"]);
+    const res = runCli([
+      "adapter",
+      "upgrade",
+      "claude-code",
+      "--write",
+      "--json",
+    ]);
     expect(res.status).toBe(2);
-    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+    const parsed = JSON.parse(res.stdout) as {
+      ok: false;
+      error: { code: string };
+    };
     expect(parsed.error.code).toBe("ADAPTER_MANIFEST_INVALID");
   });
 
@@ -582,7 +801,9 @@ describe("adapter placeholder dir symlink escape — CLI error mapping (security
   // project cannot make `mkdir` (or any later file write) escape the project.
   // The refusal maps to CONFIG_ERROR (exit 2), and nothing lands outside.
   async function linkDirOutside(rel: string): Promise<string> {
-    const outside = await mkdtemp(join(tmpdir(), "code-pact-placeholder-escape-"));
+    const outside = await mkdtemp(
+      join(tmpdir(), "code-pact-placeholder-escape-"),
+    );
     await rm(join(dir, rel), { recursive: true, force: true });
     await symlink(outside, join(dir, rel));
     return outside;
@@ -592,7 +813,10 @@ describe("adapter placeholder dir symlink escape — CLI error mapping (security
     const outside = await linkDirOutside(".context");
     const res = runCli(["adapter", "install", "claude-code", "--json"]);
     expect(res.status).toBe(2);
-    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+    const parsed = JSON.parse(res.stdout) as {
+      ok: false;
+      error: { code: string };
+    };
     expect(parsed.error.code).toBe("CONFIG_ERROR");
     expect(await readdir(outside)).toEqual([]);
     await rm(outside, { recursive: true, force: true });
@@ -602,7 +826,10 @@ describe("adapter placeholder dir symlink escape — CLI error mapping (security
     const outside = await linkDirOutside(".claude");
     const res = runCli(["adapter", "install", "claude-code", "--json"]);
     expect(res.status).toBe(2);
-    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+    const parsed = JSON.parse(res.stdout) as {
+      ok: false;
+      error: { code: string };
+    };
     expect(parsed.error.code).toBe("CONFIG_ERROR");
     expect(await readdir(outside)).toEqual([]);
     await rm(outside, { recursive: true, force: true });
@@ -611,9 +838,18 @@ describe("adapter placeholder dir symlink escape — CLI error mapping (security
   it("upgrade --write with `.context` symlinked outside → CONFIG_ERROR exit 2", async () => {
     expect(runCli(["adapter", "install", "claude-code"]).status).toBe(0);
     const outside = await linkDirOutside(".context");
-    const res = runCli(["adapter", "upgrade", "claude-code", "--write", "--json"]);
+    const res = runCli([
+      "adapter",
+      "upgrade",
+      "claude-code",
+      "--write",
+      "--json",
+    ]);
     expect(res.status).toBe(2);
-    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+    const parsed = JSON.parse(res.stdout) as {
+      ok: false;
+      error: { code: string };
+    };
     expect(parsed.error.code).toBe("CONFIG_ERROR");
     expect(await readdir(outside)).toEqual([]);
     await rm(outside, { recursive: true, force: true });
@@ -623,12 +859,27 @@ describe("adapter placeholder dir symlink escape — CLI error mapping (security
     // Symmetric with the manifest-escape Blocker: the placeholder mkdir fails
     // closed BEFORE resolveAndPinModelVersion writes the profile, so a doomed
     // `--model` install must leave the agent profile byte-identical.
-    const profilePath = join(dir, ".code-pact", "agent-profiles", "claude-code.yaml");
+    const profilePath = join(
+      dir,
+      ".code-pact",
+      "agent-profiles",
+      "claude-code.yaml",
+    );
     const before = await readFile(profilePath, "utf8");
     const outside = await linkDirOutside(".context");
-    const res = runCli(["adapter", "install", "claude-code", "--model", "sonnet-4.6", "--json"]);
+    const res = runCli([
+      "adapter",
+      "install",
+      "claude-code",
+      "--model",
+      "sonnet-4.6",
+      "--json",
+    ]);
     expect(res.status).toBe(2);
-    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+    const parsed = JSON.parse(res.stdout) as {
+      ok: false;
+      error: { code: string };
+    };
     expect(parsed.error.code).toBe("CONFIG_ERROR");
     expect(await readFile(profilePath, "utf8")).toBe(before);
     expect(await readFile(profilePath, "utf8")).not.toContain("model_version");
@@ -641,12 +892,28 @@ describe("adapter placeholder dir symlink escape — CLI error mapping (security
     // so a `.context` escape aborts (CONFIG_ERROR) with the profile untouched —
     // matching install (the pre-failure-side-effect fix had been install-only).
     expect(runCli(["adapter", "install", "claude-code"]).status).toBe(0);
-    const profilePath = join(dir, ".code-pact", "agent-profiles", "claude-code.yaml");
+    const profilePath = join(
+      dir,
+      ".code-pact",
+      "agent-profiles",
+      "claude-code.yaml",
+    );
     const before = await readFile(profilePath, "utf8");
     const outside = await linkDirOutside(".context");
-    const res = runCli(["adapter", "upgrade", "claude-code", "--write", "--model", "sonnet-4.6", "--json"]);
+    const res = runCli([
+      "adapter",
+      "upgrade",
+      "claude-code",
+      "--write",
+      "--model",
+      "sonnet-4.6",
+      "--json",
+    ]);
     expect(res.status).toBe(2);
-    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+    const parsed = JSON.parse(res.stdout) as {
+      ok: false;
+      error: { code: string };
+    };
     expect(parsed.error.code).toBe("CONFIG_ERROR");
     expect(await readFile(profilePath, "utf8")).toBe(before);
     expect(await readdir(outside)).toEqual([]);
@@ -661,16 +928,29 @@ describe("adapter agent-profile path symlink escape — CLI error mapping (secur
   // and no profile YAML is created/updated in the symlinked-outside directory.
   async function linkProfilesOutside(): Promise<string> {
     const outside = await mkdtemp(join(tmpdir(), "code-pact-profiles-escape-"));
-    await rm(join(dir, ".code-pact", "agent-profiles"), { recursive: true, force: true });
+    await rm(join(dir, ".code-pact", "agent-profiles"), {
+      recursive: true,
+      force: true,
+    });
     await symlink(outside, join(dir, ".code-pact", "agent-profiles"));
     return outside;
   }
 
   it("install --model with `.code-pact/agent-profiles` symlinked outside → CONFIG_ERROR exit 2", async () => {
     const outside = await linkProfilesOutside();
-    const res = runCli(["adapter", "install", "claude-code", "--model", "sonnet-4.6", "--json"]);
+    const res = runCli([
+      "adapter",
+      "install",
+      "claude-code",
+      "--model",
+      "sonnet-4.6",
+      "--json",
+    ]);
     expect(res.status).toBe(2);
-    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+    const parsed = JSON.parse(res.stdout) as {
+      ok: false;
+      error: { code: string };
+    };
     expect(parsed.error.code).toBe("CONFIG_ERROR");
     // No profile written into the out-of-project directory.
     expect(existsSync(join(outside, "claude-code.yaml"))).toBe(false);
@@ -680,9 +960,20 @@ describe("adapter agent-profile path symlink escape — CLI error mapping (secur
   it("upgrade --write --model with `.code-pact/agent-profiles` symlinked outside → CONFIG_ERROR exit 2", async () => {
     expect(runCli(["adapter", "install", "claude-code"]).status).toBe(0);
     const outside = await linkProfilesOutside();
-    const res = runCli(["adapter", "upgrade", "claude-code", "--write", "--model", "sonnet-4.6", "--json"]);
+    const res = runCli([
+      "adapter",
+      "upgrade",
+      "claude-code",
+      "--write",
+      "--model",
+      "sonnet-4.6",
+      "--json",
+    ]);
     expect(res.status).toBe(2);
-    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+    const parsed = JSON.parse(res.stdout) as {
+      ok: false;
+      error: { code: string };
+    };
     expect(parsed.error.code).toBe("CONFIG_ERROR");
     expect(existsSync(join(outside, "claude-code.yaml"))).toBe(false);
     await rm(outside, { recursive: true, force: true });
@@ -692,7 +983,9 @@ describe("adapter agent-profile path symlink escape — CLI error mapping (secur
 describe("adapter generated-file symlink escape — no pre-failure model pin (security)", () => {
   // A generated file (e.g. CLAUDE.md) symlinked OUT of the project is refused
   // by the per-file read-authority gate before any read/hash or `--model` pin.
-  async function linkFileOutside(rel: string): Promise<{ outside: string; target: string }> {
+  async function linkFileOutside(
+    rel: string,
+  ): Promise<{ outside: string; target: string }> {
     const outside = await mkdtemp(join(tmpdir(), "code-pact-genfile-escape-"));
     const target = join(outside, "leaked.md");
     await writeFile(target, "ORIGINAL_OUTSIDE_CONTENT\n", "utf8");
@@ -702,16 +995,32 @@ describe("adapter generated-file symlink escape — no pre-failure model pin (se
   }
 
   it("install --model with CLAUDE.md symlinked outside → refusal, profile not pinned, target unwritten", async () => {
-    const profilePath = join(dir, ".code-pact", "agent-profiles", "claude-code.yaml");
+    const profilePath = join(
+      dir,
+      ".code-pact",
+      "agent-profiles",
+      "claude-code.yaml",
+    );
     const before = await readFile(profilePath, "utf8");
     const { outside, target } = await linkFileOutside("CLAUDE.md");
-    const res = runCli(["adapter", "install", "claude-code", "--model", "sonnet-4.6", "--json"]);
+    const res = runCli([
+      "adapter",
+      "install",
+      "claude-code",
+      "--model",
+      "sonnet-4.6",
+      "--json",
+    ]);
     expect(res.status).toBe(1);
     const parsed = JSON.parse(res.stdout) as {
       ok: true;
-      data: { files: Array<{ relPath: string; action: string; reason?: string }> };
+      data: {
+        files: Array<{ relPath: string; action: string; reason?: string }>;
+      };
     };
-    expect(parsed.data.files.find((f) => f.relPath === "CLAUDE.md")).toMatchObject({
+    expect(
+      parsed.data.files.find(f => f.relPath === "CLAUDE.md"),
+    ).toMatchObject({
       action: "refuse",
       reason: "symlink_traversal",
     });
@@ -724,19 +1033,36 @@ describe("adapter generated-file symlink escape — no pre-failure model pin (se
 
   it("upgrade --write --model with CLAUDE.md symlinked outside → refusal, profile not pinned", async () => {
     expect(runCli(["adapter", "install", "claude-code"]).status).toBe(0);
-    const profilePath = join(dir, ".code-pact", "agent-profiles", "claude-code.yaml");
+    const profilePath = join(
+      dir,
+      ".code-pact",
+      "agent-profiles",
+      "claude-code.yaml",
+    );
     const before = await readFile(profilePath, "utf8");
     const { outside, target } = await linkFileOutside("CLAUDE.md");
-    const res = runCli(["adapter", "upgrade", "claude-code", "--write", "--model", "sonnet-4.6", "--json"]);
+    const res = runCli([
+      "adapter",
+      "upgrade",
+      "claude-code",
+      "--write",
+      "--model",
+      "sonnet-4.6",
+      "--json",
+    ]);
     expect(res.status).toBe(1);
     const parsed = JSON.parse(res.stdout) as {
       ok: true;
-      data: { plan: Array<{ relPath: string; action: string; reason?: string }> };
+      data: {
+        plan: Array<{ relPath: string; action: string; reason?: string }>;
+      };
     };
-    expect(parsed.data.plan.find((f) => f.relPath === "CLAUDE.md")).toMatchObject({
-      action: "refuse",
-      reason: "symlink_traversal",
-    });
+    expect(parsed.data.plan.find(f => f.relPath === "CLAUDE.md")).toMatchObject(
+      {
+        action: "refuse",
+        reason: "symlink_traversal",
+      },
+    );
     expect(await readFile(profilePath, "utf8")).toBe(before);
     expect(await readFile(target, "utf8")).toBe("ORIGINAL_OUTSIDE_CONTENT\n");
     await rm(outside, { recursive: true, force: true });
@@ -757,12 +1083,27 @@ describe("adapter DANGLING symlink escape — CLI error mapping (security)", () 
   }
 
   it("install --model with `.context` dangling outside → CONFIG_ERROR, profile not pinned", async () => {
-    const profilePath = join(dir, ".code-pact", "agent-profiles", "claude-code.yaml");
+    const profilePath = join(
+      dir,
+      ".code-pact",
+      "agent-profiles",
+      "claude-code.yaml",
+    );
     const before = await readFile(profilePath, "utf8");
     const base = await linkDangling(".context");
-    const res = runCli(["adapter", "install", "claude-code", "--model", "sonnet-4.6", "--json"]);
+    const res = runCli([
+      "adapter",
+      "install",
+      "claude-code",
+      "--model",
+      "sonnet-4.6",
+      "--json",
+    ]);
     expect(res.status).toBe(2);
-    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+    const parsed = JSON.parse(res.stdout) as {
+      ok: false;
+      error: { code: string };
+    };
     expect(parsed.error.code).toBe("CONFIG_ERROR");
     expect(await readFile(profilePath, "utf8")).toBe(before);
     expect(await readFile(profilePath, "utf8")).not.toContain("model_version");
@@ -772,12 +1113,28 @@ describe("adapter DANGLING symlink escape — CLI error mapping (security)", () 
 
   it("upgrade --write --model with `.context` dangling outside → CONFIG_ERROR, profile not pinned", async () => {
     expect(runCli(["adapter", "install", "claude-code"]).status).toBe(0);
-    const profilePath = join(dir, ".code-pact", "agent-profiles", "claude-code.yaml");
+    const profilePath = join(
+      dir,
+      ".code-pact",
+      "agent-profiles",
+      "claude-code.yaml",
+    );
     const before = await readFile(profilePath, "utf8");
     const base = await linkDangling(".context");
-    const res = runCli(["adapter", "upgrade", "claude-code", "--write", "--model", "sonnet-4.6", "--json"]);
+    const res = runCli([
+      "adapter",
+      "upgrade",
+      "claude-code",
+      "--write",
+      "--model",
+      "sonnet-4.6",
+      "--json",
+    ]);
     expect(res.status).toBe(2);
-    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+    const parsed = JSON.parse(res.stdout) as {
+      ok: false;
+      error: { code: string };
+    };
     expect(parsed.error.code).toBe("CONFIG_ERROR");
     expect(await readFile(profilePath, "utf8")).toBe(before);
     expect(await readdir(base)).toEqual([]);
@@ -785,14 +1142,29 @@ describe("adapter DANGLING symlink escape — CLI error mapping (security)", () 
   });
 
   it("install with `.code-pact/adapters` dangling outside → ADAPTER_MANIFEST_INVALID, no pin, no partial state", async () => {
-    const profilePath = join(dir, ".code-pact", "agent-profiles", "claude-code.yaml");
+    const profilePath = join(
+      dir,
+      ".code-pact",
+      "agent-profiles",
+      "claude-code.yaml",
+    );
     const before = await readFile(profilePath, "utf8");
     const base = await linkDangling(join(".code-pact", "adapters"));
-    const res = runCli(["adapter", "install", "claude-code", "--model", "sonnet-4.6", "--json"]);
+    const res = runCli([
+      "adapter",
+      "install",
+      "claude-code",
+      "--model",
+      "sonnet-4.6",
+      "--json",
+    ]);
     // readManifest fails closed at the dangling symlink BEFORE any write/pin, so
     // the partial "generated files but no manifest" state can never form.
     expect(res.status).toBe(2);
-    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+    const parsed = JSON.parse(res.stdout) as {
+      ok: false;
+      error: { code: string };
+    };
     expect(parsed.error.code).toBe("ADAPTER_MANIFEST_INVALID");
     expect(await readFile(profilePath, "utf8")).toBe(before);
     expect(await readFile(profilePath, "utf8")).not.toContain("model_version");
@@ -805,18 +1177,36 @@ describe("adapter DANGLING symlink escape — CLI error mapping (security)", () 
   // because `mkdir`/write through one fails (ENOENT) and would strand a partial
   // side effect (a persisted --model pin) after the failure. `missingName` does
   // NOT exist, so resolving `<rel> -> <cwd>/<missingName>` is a dangling link.
-  async function linkDanglingInternal(rel: string, missingName: string): Promise<void> {
+  async function linkDanglingInternal(
+    rel: string,
+    missingName: string,
+  ): Promise<void> {
     await rm(join(dir, rel), { recursive: true, force: true });
     await symlink(join(dir, missingName), join(dir, rel));
   }
 
   it("install --model with `.context` dangling INSIDE the project → CONFIG_ERROR, profile not pinned", async () => {
-    const profilePath = join(dir, ".code-pact", "agent-profiles", "claude-code.yaml");
+    const profilePath = join(
+      dir,
+      ".code-pact",
+      "agent-profiles",
+      "claude-code.yaml",
+    );
     const before = await readFile(profilePath, "utf8");
     await linkDanglingInternal(".context", "missing-context");
-    const res = runCli(["adapter", "install", "claude-code", "--model", "sonnet-4.6", "--json"]);
+    const res = runCli([
+      "adapter",
+      "install",
+      "claude-code",
+      "--model",
+      "sonnet-4.6",
+      "--json",
+    ]);
     expect(res.status).toBe(2);
-    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+    const parsed = JSON.parse(res.stdout) as {
+      ok: false;
+      error: { code: string };
+    };
     expect(parsed.error.code).toBe("CONFIG_ERROR");
     expect(await readFile(profilePath, "utf8")).toBe(before);
     expect(await readFile(profilePath, "utf8")).not.toContain("model_version");
@@ -826,26 +1216,60 @@ describe("adapter DANGLING symlink escape — CLI error mapping (security)", () 
 
   it("upgrade --write --model with `.context` dangling INSIDE the project → CONFIG_ERROR, profile not pinned", async () => {
     expect(runCli(["adapter", "install", "claude-code"]).status).toBe(0);
-    const profilePath = join(dir, ".code-pact", "agent-profiles", "claude-code.yaml");
+    const profilePath = join(
+      dir,
+      ".code-pact",
+      "agent-profiles",
+      "claude-code.yaml",
+    );
     const before = await readFile(profilePath, "utf8");
     await linkDanglingInternal(".context", "missing-context");
-    const res = runCli(["adapter", "upgrade", "claude-code", "--write", "--model", "sonnet-4.6", "--json"]);
+    const res = runCli([
+      "adapter",
+      "upgrade",
+      "claude-code",
+      "--write",
+      "--model",
+      "sonnet-4.6",
+      "--json",
+    ]);
     expect(res.status).toBe(2);
-    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+    const parsed = JSON.parse(res.stdout) as {
+      ok: false;
+      error: { code: string };
+    };
     expect(parsed.error.code).toBe("CONFIG_ERROR");
     expect(await readFile(profilePath, "utf8")).toBe(before);
     expect(existsSync(join(dir, "missing-context"))).toBe(false);
   });
 
   it("install with `.code-pact/adapters` dangling INSIDE the project → ADAPTER_MANIFEST_INVALID, no partial state", async () => {
-    const profilePath = join(dir, ".code-pact", "agent-profiles", "claude-code.yaml");
+    const profilePath = join(
+      dir,
+      ".code-pact",
+      "agent-profiles",
+      "claude-code.yaml",
+    );
     const before = await readFile(profilePath, "utf8");
-    await linkDanglingInternal(join(".code-pact", "adapters"), join(".code-pact", "missing-adapters"));
-    const res = runCli(["adapter", "install", "claude-code", "--model", "sonnet-4.6", "--json"]);
+    await linkDanglingInternal(
+      join(".code-pact", "adapters"),
+      join(".code-pact", "missing-adapters"),
+    );
+    const res = runCli([
+      "adapter",
+      "install",
+      "claude-code",
+      "--model",
+      "sonnet-4.6",
+      "--json",
+    ]);
     // readManifest fails closed at the dangling symlink BEFORE any write/pin: no
     // generated files, no model pin, no manifest — never a partial-applied state.
     expect(res.status).toBe(2);
-    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+    const parsed = JSON.parse(res.stdout) as {
+      ok: false;
+      error: { code: string };
+    };
     expect(parsed.error.code).toBe("ADAPTER_MANIFEST_INVALID");
     expect(await readFile(profilePath, "utf8")).toBe(before);
     expect(await readFile(profilePath, "utf8")).not.toContain("model_version");
@@ -869,12 +1293,24 @@ describe("adapter wrong-type write path — CLI error mapping (security)", () =>
     // Plant a regular file exactly where context_dir's mkdir expects a directory.
     await mkdir(join(dir, ".context"), { recursive: true });
     await writeFile(join(dir, CONTEXT_DIR), "not a directory", "utf8");
-    const res = runCli(["adapter", "install", "claude-code", "--model", "sonnet-4.6", "--json"]);
+    const res = runCli([
+      "adapter",
+      "install",
+      "claude-code",
+      "--model",
+      "sonnet-4.6",
+      "--json",
+    ]);
     expect(res.status).toBe(2);
-    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+    const parsed = JSON.parse(res.stdout) as {
+      ok: false;
+      error: { code: string };
+    };
     expect(parsed.error.code).toBe("CONFIG_ERROR");
     expect(await readFile(join(dir, profileRel), "utf8")).toBe(before);
-    expect(await readFile(join(dir, profileRel), "utf8")).not.toContain("model_version");
+    expect(await readFile(join(dir, profileRel), "utf8")).not.toContain(
+      "model_version",
+    );
   });
 
   it("upgrade --write --model with context_dir occupied by a regular file → CONFIG_ERROR, no pin", async () => {
@@ -882,9 +1318,20 @@ describe("adapter wrong-type write path — CLI error mapping (security)", () =>
     const before = await readFile(join(dir, profileRel), "utf8");
     await rm(join(dir, CONTEXT_DIR), { recursive: true, force: true });
     await writeFile(join(dir, CONTEXT_DIR), "not a directory", "utf8");
-    const res = runCli(["adapter", "upgrade", "claude-code", "--write", "--model", "sonnet-4.6", "--json"]);
+    const res = runCli([
+      "adapter",
+      "upgrade",
+      "claude-code",
+      "--write",
+      "--model",
+      "sonnet-4.6",
+      "--json",
+    ]);
     expect(res.status).toBe(2);
-    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+    const parsed = JSON.parse(res.stdout) as {
+      ok: false;
+      error: { code: string };
+    };
     expect(parsed.error.code).toBe("CONFIG_ERROR");
     expect(await readFile(join(dir, profileRel), "utf8")).toBe(before);
   });
@@ -893,9 +1340,19 @@ describe("adapter wrong-type write path — CLI error mapping (security)", () =>
     const before = await readFile(join(dir, profileRel), "utf8");
     await rm(join(dir, "CLAUDE.md"), { recursive: true, force: true });
     await mkdir(join(dir, "CLAUDE.md"), { recursive: true }); // instruction file path is a dir
-    const res = runCli(["adapter", "install", "claude-code", "--model", "sonnet-4.6", "--json"]);
+    const res = runCli([
+      "adapter",
+      "install",
+      "claude-code",
+      "--model",
+      "sonnet-4.6",
+      "--json",
+    ]);
     expect(res.status).toBe(2);
-    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+    const parsed = JSON.parse(res.stdout) as {
+      ok: false;
+      error: { code: string };
+    };
     expect(parsed.error.code).toBe("CONFIG_ERROR");
     expect(res.stderr).not.toMatch(/internal error/i);
     expect(await readFile(join(dir, profileRel), "utf8")).toBe(before);
@@ -916,7 +1373,10 @@ describe("adapter manifest path is a directory — CLI error mapping (security)"
     await makeManifestADirectory();
     const res = runCli(["adapter", "install", "claude-code", "--json"]);
     expect(res.status).toBe(2);
-    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+    const parsed = JSON.parse(res.stdout) as {
+      ok: false;
+      error: { code: string };
+    };
     expect(parsed.error.code).toBe("ADAPTER_MANIFEST_INVALID");
   });
 
@@ -930,17 +1390,35 @@ describe("adapter manifest path is a directory — CLI error mapping (security)"
 
   it("upgrade --check --json → ADAPTER_MANIFEST_INVALID exit 2", async () => {
     await makeManifestADirectory();
-    const res = runCli(["adapter", "upgrade", "claude-code", "--check", "--json"]);
+    const res = runCli([
+      "adapter",
+      "upgrade",
+      "claude-code",
+      "--check",
+      "--json",
+    ]);
     expect(res.status).toBe(2);
-    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+    const parsed = JSON.parse(res.stdout) as {
+      ok: false;
+      error: { code: string };
+    };
     expect(parsed.error.code).toBe("ADAPTER_MANIFEST_INVALID");
   });
 
   it("upgrade --write --json → ADAPTER_MANIFEST_INVALID exit 2", async () => {
     await makeManifestADirectory();
-    const res = runCli(["adapter", "upgrade", "claude-code", "--write", "--json"]);
+    const res = runCli([
+      "adapter",
+      "upgrade",
+      "claude-code",
+      "--write",
+      "--json",
+    ]);
     expect(res.status).toBe(2);
-    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+    const parsed = JSON.parse(res.stdout) as {
+      ok: false;
+      error: { code: string };
+    };
     expect(parsed.error.code).toBe("ADAPTER_MANIFEST_INVALID");
   });
 });
@@ -960,7 +1438,14 @@ describe("adapter forged-manifest + profile → arbitrary file overwrite is REFU
   async function pointInstructionAt(victim: string): Promise<void> {
     const p = join(dir, profileRel);
     const yaml = await readFile(p, "utf8");
-    await writeFile(p, yaml.replace(/instruction_filename:.*/, `instruction_filename: ${victim}`), "utf8");
+    await writeFile(
+      p,
+      yaml.replace(
+        /instruction_filename:.*/,
+        `instruction_filename: ${victim}`,
+      ),
+      "utf8",
+    );
   }
 
   it("install does NOT overwrite a victim file the forged manifest claims (refuse, exit 1)", async () => {
@@ -973,22 +1458,35 @@ describe("adapter forged-manifest + profile → arbitrary file overwrite is REFU
       generator_version: "0.0.0",
       adapter_schema_version: 1,
       generated_at: "2026-01-01T00:00:00.000Z",
-      profile_fingerprint: { instruction_filename: VICTIM, context_dir: ".context/claude-code" },
+      profile_fingerprint: {
+        instruction_filename: VICTIM,
+        context_dir: ".context/claude-code",
+      },
       files: [
-        { path: VICTIM, sha256: computeContentHash(VICTIM_CONTENT), managed: true, role: "instruction" },
+        {
+          path: VICTIM,
+          sha256: computeContentHash(VICTIM_CONTENT),
+          managed: true,
+          role: "instruction",
+        },
       ],
     });
 
     const res = runCli(["adapter", "install", "claude-code", "--json"]);
     const parsed = JSON.parse(res.stdout) as {
       ok: boolean;
-      data: { refused: string[]; files: Array<{ relPath: string; action: string }> };
+      data: {
+        refused: string[];
+        files: Array<{ relPath: string; action: string }>;
+      };
     };
     // The victim is untouched, and surfaced as refused (install exits 1).
     expect(await readFile(join(dir, VICTIM), "utf8")).toBe(VICTIM_CONTENT);
     expect(res.status).toBe(1);
-    expect(parsed.data.files.find((f) => f.relPath === VICTIM)?.action).toBe("refuse");
-    expect(parsed.data.refused.some((p) => p.endsWith(`/${VICTIM}`))).toBe(true);
+    expect(parsed.data.files.find(f => f.relPath === VICTIM)?.action).toBe(
+      "refuse",
+    );
+    expect(parsed.data.refused.some(p => p.endsWith(`/${VICTIM}`))).toBe(true);
   });
 
   it("install --force STILL does not overwrite the victim (force only adopts unmanaged owned paths)", async () => {
@@ -996,7 +1494,13 @@ describe("adapter forged-manifest + profile → arbitrary file overwrite is REFU
     await writeFile(join(dir, VICTIM), VICTIM_CONTENT, "utf8");
     // No manifest at all this time → victim is unmanaged × stale; --force would be
     // `replace_unmanaged`, which the same gate refuses for a non-owned path.
-    const res = runCli(["adapter", "install", "claude-code", "--force", "--json"]);
+    const res = runCli([
+      "adapter",
+      "install",
+      "claude-code",
+      "--force",
+      "--json",
+    ]);
     expect(await readFile(join(dir, VICTIM), "utf8")).toBe(VICTIM_CONTENT);
     expect(res.status).toBe(1);
   });
@@ -1021,9 +1525,17 @@ describe("adapter forged-manifest + profile → arbitrary file overwrite is REFU
       generator_version: "0.0.0",
       adapter_schema_version: 1,
       generated_at: "2026-01-01T00:00:00.000Z",
-      profile_fingerprint: { instruction_filename: "CLAUDE.md", context_dir: ".context/claude-code" },
+      profile_fingerprint: {
+        instruction_filename: "CLAUDE.md",
+        context_dir: ".context/claude-code",
+      },
       files: [
-        { path: ".claude/skills/context.md", sha256: computeContentHash(VICTIM), managed: true, role: "skill" },
+        {
+          path: ".claude/skills/context.md",
+          sha256: computeContentHash(VICTIM),
+          managed: true,
+          role: "skill",
+        },
       ],
     });
     const res = runCli(["adapter", "install", "claude-code", "--json"]);
@@ -1031,9 +1543,13 @@ describe("adapter forged-manifest + profile → arbitrary file overwrite is REFU
     expect(await readFile(victim, "utf8")).toBe(VICTIM);
     expect(res.status).toBe(1); // refused → exit 1
     const parsed = JSON.parse(res.stdout) as {
-      data: { files: Array<{ relPath: string; action: string; reason?: string }> };
+      data: {
+        files: Array<{ relPath: string; action: string; reason?: string }>;
+      };
     };
-    const entry = parsed.data.files.find((f) => f.relPath === ".claude/skills/context.md");
+    const entry = parsed.data.files.find(
+      f => f.relPath === ".claude/skills/context.md",
+    );
     expect(entry?.action).toBe("refuse");
     expect(entry?.reason).toBe("symlink_traversal"); // correct machine-readable reason
   });
@@ -1043,10 +1559,17 @@ describe("adapter malformed agent profile — CLI error mapping (security)", () 
   const profileRel = join(".code-pact", "agent-profiles", "claude-code.yaml");
 
   it("install --json with malformed-YAML profile → CONFIG_ERROR exit 2, no internal error", async () => {
-    await writeFile(join(dir, profileRel), "instruction_filename: [oops:\n  bad\n", "utf8");
+    await writeFile(
+      join(dir, profileRel),
+      "instruction_filename: [oops:\n  bad\n",
+      "utf8",
+    );
     const res = runCli(["adapter", "install", "claude-code", "--json"]);
     expect(res.status).toBe(2);
-    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+    const parsed = JSON.parse(res.stdout) as {
+      ok: false;
+      error: { code: string };
+    };
     expect(parsed.error.code).toBe("CONFIG_ERROR");
     expect(res.stderr).not.toMatch(/internal error/i);
   });
@@ -1054,19 +1577,41 @@ describe("adapter malformed agent profile — CLI error mapping (security)", () 
   it("upgrade --check --json with schema-invalid profile → CONFIG_ERROR exit 2", async () => {
     expect(runCli(["adapter", "install", "claude-code"]).status).toBe(0);
     // Valid YAML, but not a valid AgentProfile (missing required fields).
-    await writeFile(join(dir, profileRel), "instruction_filename: 123\n", "utf8");
-    const res = runCli(["adapter", "upgrade", "claude-code", "--check", "--json"]);
+    await writeFile(
+      join(dir, profileRel),
+      "instruction_filename: 123\n",
+      "utf8",
+    );
+    const res = runCli([
+      "adapter",
+      "upgrade",
+      "claude-code",
+      "--check",
+      "--json",
+    ]);
     expect(res.status).toBe(2);
-    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+    const parsed = JSON.parse(res.stdout) as {
+      ok: false;
+      error: { code: string };
+    };
     expect(parsed.error.code).toBe("CONFIG_ERROR");
   });
 
   it("upgrade --write --json with malformed-YAML profile → CONFIG_ERROR exit 2", async () => {
     expect(runCli(["adapter", "install", "claude-code"]).status).toBe(0);
     await writeFile(join(dir, profileRel), ": not valid yaml :\n", "utf8");
-    const res = runCli(["adapter", "upgrade", "claude-code", "--write", "--json"]);
+    const res = runCli([
+      "adapter",
+      "upgrade",
+      "claude-code",
+      "--write",
+      "--json",
+    ]);
     expect(res.status).toBe(2);
-    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
+    const parsed = JSON.parse(res.stdout) as {
+      ok: false;
+      error: { code: string };
+    };
     expect(parsed.error.code).toBe("CONFIG_ERROR");
   });
 });
@@ -1093,17 +1638,26 @@ describe("adapter install — divergent managed file is surfaced, not silent (se
     expect(runCli(["adapter", "install", "claude-code"]).status).toBe(0);
     await writeFile(join(dir, "CLAUDE.md"), "# CLAUDE.md\ndivergent\n", "utf8");
 
-    const res = runCli(["adapter", "install", "claude-code", "--force", "--json"]);
+    const res = runCli([
+      "adapter",
+      "install",
+      "claude-code",
+      "--force",
+      "--json",
+    ]);
     expect(res.status).toBe(1);
     const parsed = JSON.parse(res.stdout) as {
       ok: boolean;
-      data: { refused: string[]; files: Array<{ relPath: string; action: string }> };
+      data: {
+        refused: string[];
+        files: Array<{ relPath: string; action: string }>;
+      };
     };
     expect(parsed.ok).toBe(true);
-    expect(parsed.data.refused.some((p) => p.endsWith("/CLAUDE.md"))).toBe(true);
-    expect(
-      parsed.data.files.find((f) => f.relPath === "CLAUDE.md")?.action,
-    ).toBe("refuse");
+    expect(parsed.data.refused.some(p => p.endsWith("/CLAUDE.md"))).toBe(true);
+    expect(parsed.data.files.find(f => f.relPath === "CLAUDE.md")?.action).toBe(
+      "refuse",
+    );
   });
 });
 
@@ -1112,7 +1666,10 @@ describe("adapter bare form (no subcommand) — CLI", () => {
     const res = runCli(["adapter", "--json"]);
     expect(res.status).toBe(2);
     expect(res.stderr).toBe("");
-    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string; message: string } };
+    const parsed = JSON.parse(res.stdout) as {
+      ok: false;
+      error: { code: string; message: string };
+    };
     expect(parsed.ok).toBe(false);
     expect(parsed.error.code).toBe("CONFIG_ERROR");
     expect(parsed.error.message).toContain("requires a subcommand");

@@ -54,18 +54,23 @@ beforeAll(() => {
 }, 60_000);
 
 afterEach(async () => {
-  await Promise.all(cleanups.map((c) => c()));
+  await Promise.all(cleanups.map(c => c()));
   cleanups = [];
 });
 
 async function freshProject(prefix: string): Promise<Project> {
-  const p = await createTempProject({ prefix: `code-pact-migration-${prefix}-` });
+  const p = await createTempProject({
+    prefix: `code-pact-migration-${prefix}-`,
+  });
   cleanups.push(p.cleanup);
   return p;
 }
 
 /** Add a phase with the same shape across all migration scenarios. */
-function addPhase(p: Project, opts: { id: string; verifyCommand: string }): void {
+function addPhase(
+  p: Project,
+  opts: { id: string; verifyCommand: string },
+): void {
   const res = p.run([
     "phase",
     "add",
@@ -92,7 +97,10 @@ async function injectTasks(
   tasks: Array<Record<string, unknown>>,
 ): Promise<void> {
   const path = join(p.dir, "design", "phases", phaseFile);
-  const doc = parseYaml(await readFile(path, "utf8")) as Record<string, unknown>;
+  const doc = parseYaml(await readFile(path, "utf8")) as Record<
+    string,
+    unknown
+  >;
   doc.tasks = tasks;
   await writeFile(path, stringifyYaml(doc), "utf8");
 }
@@ -136,9 +144,9 @@ describe("migration: v0.6-era project (design done, no progress events)", () => 
     }>(["doctor", "--json"]);
     expect(env.ok).toBe(true);
     if (env.ok) {
-      const errors = env.data.issues.filter((i) => i.severity === "error");
+      const errors = env.data.issues.filter(i => i.severity === "error");
       expect(errors).toEqual([]);
-      const codes = env.data.issues.map((i) => i.code);
+      const codes = env.data.issues.map(i => i.code);
       // Legacy v0.8 path: ADAPTER_MISSING must fire when no manifest exists.
       expect(codes).toContain("ADAPTER_MISSING");
       // None of the manifest-aware codes may fire before adapter install.
@@ -189,16 +197,25 @@ describe("migration: v0.6-era project (design done, no progress events)", () => 
       data: { issues: { code: string; details?: { kind?: string } }[] };
     };
     const kinds = env.data.issues
-      .filter((i) => i.code === "STATUS_DRIFT")
-      .map((i) => i.details?.kind);
+      .filter(i => i.code === "STATUS_DRIFT")
+      .map(i => i.details?.kind);
     expect(kinds).toContain("done-historical");
   });
 
   it("adapter upgrade --check refuses before adapter install (no manifest yet)", async () => {
     const p = await buildV06Project("v06-upgrade");
-    const res = p.run(["adapter", "upgrade", "claude-code", "--check", "--json"]);
+    const res = p.run([
+      "adapter",
+      "upgrade",
+      "claude-code",
+      "--check",
+      "--json",
+    ]);
     expect(res.code).toBe(2);
-    const env = JSON.parse(res.stdout) as { ok: boolean; error: { code: string } };
+    const env = JSON.parse(res.stdout) as {
+      ok: boolean;
+      error: { code: string };
+    };
     expect(env.ok).toBe(false);
     expect(["MANIFEST_NOT_FOUND", "CONFIG_ERROR"]).toContain(env.error.code);
   });
@@ -256,9 +273,9 @@ describe("migration: v0.8-era project (mixed events + historical tasks)", () => 
     }>(["doctor", "--json"]);
     expect(env.ok).toBe(true);
     if (env.ok) {
-      const errors = env.data.issues.filter((i) => i.severity === "error");
+      const errors = env.data.issues.filter(i => i.severity === "error");
       expect(errors).toEqual([]);
-      const codes = env.data.issues.map((i) => i.code);
+      const codes = env.data.issues.map(i => i.code);
       expect(codes).toContain("ADAPTER_MISSING");
       const manifestAware = [
         "ADAPTER_FILE_MISSING",
@@ -290,13 +307,13 @@ describe("migration: v0.8-era project (mixed events + historical tasks)", () => 
     if (env.ok) {
       expect(env.data.summary.errors).toBe(0);
       const t1Drift = env.data.issues.find(
-        (i) => i.code === "STATUS_DRIFT" && i.task_id === "P1-T1",
+        i => i.code === "STATUS_DRIFT" && i.task_id === "P1-T1",
       );
       expect(t1Drift?.details?.kind).toBe("done-but-design-not-done");
       // P1-T2 is the historical one. With --include-historical it would
       // surface; in default mode it's hidden.
       const t2DriftVisible = env.data.issues.find(
-        (i) => i.code === "STATUS_DRIFT" && i.task_id === "P1-T2",
+        i => i.code === "STATUS_DRIFT" && i.task_id === "P1-T2",
       );
       expect(t2DriftVisible).toBeUndefined();
       expect(env.data.summary.hidden).toBeGreaterThanOrEqual(1);
@@ -312,7 +329,7 @@ describe("migration: v0.8-era project (mixed events + historical tasks)", () => 
     expect(env.ok).toBe(true);
     if (env.ok) {
       expect(env.data.current).toBe("done");
-      expect(env.data.history.map((h) => h.status)).toEqual(["started", "done"]);
+      expect(env.data.history.map(h => h.status)).toEqual(["started", "done"]);
     }
   });
 });
@@ -373,7 +390,12 @@ describe("migration: v0.9-era project (manifest with stale generator_version)", 
       "--json",
     ]);
     expect(installRes.ok).toBe(true);
-    const manifestPath = join(p.dir, ".code-pact", "adapters", "claude-code.manifest.yaml");
+    const manifestPath = join(
+      p.dir,
+      ".code-pact",
+      "adapters",
+      "claude-code.manifest.yaml",
+    );
 
     // Patch the manifest to simulate a pre-v1.0 generator_version.
     const manifestText = await readFile(manifestPath, "utf8");
@@ -384,8 +406,9 @@ describe("migration: v0.9-era project (manifest with stale generator_version)", 
       // Break one recorded hash so the desired output no longer matches the
       // manifest — turning the stamp-only lag into a real content-drift case.
       const files = manifest.files as { path: string; sha256: string }[];
-      const claudeMd = files.find((f) => f.path === "CLAUDE.md");
-      if (claudeMd === undefined) throw new Error("expected CLAUDE.md in manifest");
+      const claudeMd = files.find(f => f.path === "CLAUDE.md");
+      if (claudeMd === undefined)
+        throw new Error("expected CLAUDE.md in manifest");
       claudeMd.sha256 = "a".repeat(64);
     }
     await writeFile(manifestPath, stringifyYaml(manifest), "utf8");
@@ -401,9 +424,9 @@ describe("migration: v0.9-era project (manifest with stale generator_version)", 
     }>(["adapter", "doctor", "--json"]);
     expect(env.ok).toBe(true);
     if (env.ok) {
-      const errors = env.data.issues.filter((i) => i.severity === "error");
+      const errors = env.data.issues.filter(i => i.severity === "error");
       expect(errors).toEqual([]);
-      const codes = env.data.issues.map((i) => i.code);
+      const codes = env.data.issues.map(i => i.code);
       // Stamp-only lag: the generated files are byte-identical to the current
       // generator output, so the version mismatch alone must not warn.
       expect(codes).not.toContain("ADAPTER_GENERATOR_STALE");
@@ -411,18 +434,21 @@ describe("migration: v0.9-era project (manifest with stale generator_version)", 
   });
 
   it("adapter doctor surfaces ADAPTER_GENERATOR_STALE when the desired output also drifted", async () => {
-    const { project: p } = await buildV09StaleProject("v09-adapter-doctor-drift", {
-      mutateOutput: true,
-    });
+    const { project: p } = await buildV09StaleProject(
+      "v09-adapter-doctor-drift",
+      {
+        mutateOutput: true,
+      },
+    );
     const env = p.runJson<{
       ok: boolean;
       issues: { code: string; severity: string }[];
     }>(["adapter", "doctor", "--json"]);
     expect(env.ok).toBe(true);
     if (env.ok) {
-      const errors = env.data.issues.filter((i) => i.severity === "error");
+      const errors = env.data.issues.filter(i => i.severity === "error");
       expect(errors).toEqual([]);
-      const codes = env.data.issues.map((i) => i.code);
+      const codes = env.data.issues.map(i => i.code);
       expect(codes).toContain("ADAPTER_GENERATOR_STALE");
     }
   });
@@ -435,37 +461,52 @@ describe("migration: v0.9-era project (manifest with stale generator_version)", 
     }>(["doctor", "--json"]);
     expect(env.ok).toBe(true);
     if (env.ok) {
-      const errors = env.data.issues.filter((i) => i.severity === "error");
+      const errors = env.data.issues.filter(i => i.severity === "error");
       expect(errors).toEqual([]);
-      const codes = env.data.issues.map((i) => i.code);
+      const codes = env.data.issues.map(i => i.code);
       expect(codes).not.toContain("ADAPTER_MISSING");
       // Issue #340: byte-identical output → no nag on version stamp alone.
       expect(codes).not.toContain("ADAPTER_GENERATOR_STALE");
     }
   });
 
-  it("adapter upgrade --write does not re-stamp while an existing dynamic skill is unverifiable", async () => {
-    const { project: p, manifestPath, originalVersion } = await buildV09StaleProject("v09-upgrade");
+  it("adapter upgrade --write preserves an existing dynamic skill opaquely and continues re-stamping", async () => {
+    const { project: p, manifestPath } =
+      await buildV09StaleProject("v09-upgrade");
 
     // Confirm the patch is in place before the upgrade.
-    const beforeYaml = parseYaml(await readFile(manifestPath, "utf8")) as Record<string, unknown>;
+    const beforeYaml = parseYaml(
+      await readFile(manifestPath, "utf8"),
+    ) as Record<string, unknown>;
     expect(beforeYaml.generator_version).toBe("0.8.0-alpha.0");
 
     const env = p.runJson<{
-      plan: Array<{ relPath: string; action: string; reason?: string; local: string }>;
+      plan: Array<{
+        relPath: string;
+        action: string;
+        reason?: string;
+        local: string;
+      }>;
     }>(["adapter", "upgrade", "claude-code", "--write", "--json"]);
     expect(env.ok).toBe(true);
     if (env.ok) {
-      expect(env.data.plan.find((row) => row.reason === "unowned_generated_path")).toMatchObject({
+      expect(
+        env.data.plan.find(row => row.reason === "dynamic_file_unverifiable"),
+      ).toMatchObject({
         local: "unverifiable",
-        action: "refuse",
-        reason: "unowned_generated_path",
+        desired: "unverifiable",
+        action: "warn",
+        reason: "dynamic_file_unverifiable",
       });
     }
 
-    const afterYaml = parseYaml(await readFile(manifestPath, "utf8")) as Record<string, unknown>;
-    expect(afterYaml.generator_version).toBe("0.8.0-alpha.0");
-    expect(afterYaml.generator_version).not.toBe(originalVersion);
+    const afterYaml = parseYaml(await readFile(manifestPath, "utf8")) as Record<
+      string,
+      unknown
+    >;
+    // With the new preserve-opaquely policy, the upgrade CONTINUES past the
+    // dynamic file warning, so the generator_version IS re-stamped.
+    expect(afterYaml.generator_version).not.toBe("0.8.0-alpha.0");
 
     // After upgrade, adapter doctor should be clean (no STALE warning).
     const after = p.runJson<{
@@ -474,7 +515,7 @@ describe("migration: v0.9-era project (manifest with stale generator_version)", 
     }>(["adapter", "doctor", "--json"]);
     expect(after.ok).toBe(true);
     if (after.ok) {
-      const codes = after.data.issues.map((i) => i.code);
+      const codes = after.data.issues.map(i => i.code);
       expect(codes).not.toContain("ADAPTER_GENERATOR_STALE");
     }
   });

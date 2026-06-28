@@ -23,7 +23,10 @@ import { runAdapterInstall } from "../../../src/commands/adapter-install.ts";
 import { runAdapterUpgrade } from "../../../src/commands/adapter-upgrade.ts";
 import { runAdapterDoctor } from "../../../src/commands/adapter-doctor.ts";
 import { runDoctor } from "../../../src/commands/doctor.ts";
-import { readManifest, manifestPath } from "../../../src/core/adapters/manifest.ts";
+import {
+  readManifest,
+  manifestPath,
+} from "../../../src/core/adapters/manifest.ts";
 import { AgentProfile } from "../../../src/core/schemas/agent-profile.ts";
 
 let dir: string;
@@ -66,12 +69,23 @@ describe("adapter convergence — verification-command skill collides with a bui
   });
 
   it("keeps the built-in verify.md and emits the derived skill as verify-2.md", async () => {
-    await runAdapterInstall({ cwd: dir, agentName: "claude-code", force: false, locale: "en-US" });
+    await runAdapterInstall({
+      cwd: dir,
+      agentName: "claude-code",
+      force: false,
+      locale: "en-US",
+    });
 
-    const builtin = await readFile(join(dir, ".claude", "skills", "verify.md"), "utf8");
+    const builtin = await readFile(
+      join(dir, ".claude", "skills", "verify.md"),
+      "utf8",
+    );
     expect(builtin).toContain("Verify task completion criteria"); // built-in SKILL_VERIFY
 
-    const derived = await readFile(join(dir, ".claude", "skills", "verify-2.md"), "utf8");
+    const derived = await readFile(
+      join(dir, ".claude", "skills", "verify-2.md"),
+      "utf8",
+    );
     // Final uniquified name is used in BOTH the path and the rendered body.
     expect(derived).toContain("/verify-2");
     expect(derived).toContain("pnpm verify");
@@ -79,42 +93,72 @@ describe("adapter convergence — verification-command skill collides with a bui
   });
 
   it("manifest records unique paths (no duplicate verify.md)", async () => {
-    await runAdapterInstall({ cwd: dir, agentName: "claude-code", force: false, locale: "en-US" });
+    await runAdapterInstall({
+      cwd: dir,
+      agentName: "claude-code",
+      force: false,
+      locale: "en-US",
+    });
     const manifest = await readManifest(dir, "claude-code"); // strict read must not throw
     expect(manifest).not.toBeNull();
-    const paths = manifest!.files.map((f) => f.path);
+    const paths = manifest!.files.map(f => f.path);
     expect(new Set(paths).size).toBe(paths.length);
     expect(paths).toContain(".claude/skills/verify.md");
     expect(paths).toContain(".claude/skills/verify-2.md");
   });
 
-  it("install → later mutation runs refuse the existing dynamic skill without treating its manifest hash as authority", async () => {
-    await runAdapterInstall({ cwd: dir, agentName: "claude-code", force: false, locale: "en-US" });
+  it("install → later mutation runs preserve the existing dynamic skill with a warning (no read/hash)", async () => {
+    await runAdapterInstall({
+      cwd: dir,
+      agentName: "claude-code",
+      force: false,
+      locale: "en-US",
+    });
 
     const check1 = await runAdapterUpgrade({
-      cwd: dir, agentName: "claude-code", mode: "check", force: false, acceptModified: false, locale: "en-US",
+      cwd: dir,
+      agentName: "claude-code",
+      mode: "check",
+      force: false,
+      acceptModified: false,
+      locale: "en-US",
     });
     expect(check1.clean).toBe(false);
-    expect(check1.plan.find((p) => p.relPath.endsWith("verify-2.md"))).toMatchObject({
+    expect(
+      check1.plan.find(p => p.relPath.endsWith("verify-2.md")),
+    ).toMatchObject({
       local: "unverifiable",
-      action: "refuse",
-      reason: "unowned_generated_path",
+      desired: "unverifiable",
+      action: "warn",
+      reason: "dynamic_file_unverifiable",
     });
 
     const write = await runAdapterUpgrade({
-      cwd: dir, agentName: "claude-code", mode: "write", force: false, acceptModified: false, locale: "en-US",
+      cwd: dir,
+      agentName: "claude-code",
+      mode: "write",
+      force: false,
+      acceptModified: false,
+      locale: "en-US",
     });
-    expect(write.plan.find((p) => p.relPath.endsWith("verify-2.md"))?.action).toBe("refuse");
+    expect(
+      write.plan.find(p => p.relPath.endsWith("verify-2.md"))?.action,
+    ).toBe("warn");
 
     const check2 = await runAdapterUpgrade({
-      cwd: dir, agentName: "claude-code", mode: "check", force: false, acceptModified: false, locale: "en-US",
+      cwd: dir,
+      agentName: "claude-code",
+      mode: "check",
+      force: false,
+      acceptModified: false,
+      locale: "en-US",
     });
-    expect(check2.plan.find((p) => p.relPath.endsWith("verify-2.md"))).toEqual(
-      check1.plan.find((p) => p.relPath.endsWith("verify-2.md")),
+    expect(check2.plan.find(p => p.relPath.endsWith("verify-2.md"))).toEqual(
+      check1.plan.find(p => p.relPath.endsWith("verify-2.md")),
     );
 
     const doctor = await runAdapterDoctor({ cwd: dir, locale: "en-US" });
-    const codes = doctor.issues.map((i) => i.code);
+    const codes = doctor.issues.map(i => i.code);
     expect(codes).not.toContain("ADAPTER_DESIRED_STALE");
     expect(codes).not.toContain("ADAPTER_FILE_DRIFT");
   });
@@ -126,8 +170,19 @@ describe("adapter convergence — verification-command skill collides with a bui
 
 describe("adapter convergence — legacy duplicate-path manifest repair", () => {
   beforeEach(async () => {
-    await runInit({ cwd: dir, locale: "en-US", agents: ["claude-code"], force: false, json: false });
-    await runAdapterInstall({ cwd: dir, agentName: "claude-code", force: false, locale: "en-US" });
+    await runInit({
+      cwd: dir,
+      locale: "en-US",
+      agents: ["claude-code"],
+      force: false,
+      json: false,
+    });
+    await runAdapterInstall({
+      cwd: dir,
+      agentName: "claude-code",
+      force: false,
+      locale: "en-US",
+    });
   });
 
   it("upgrade --write repairs a duplicate-path manifest from an older generator without crashing", async () => {
@@ -140,7 +195,11 @@ describe("adapter convergence — legacy duplicate-path manifest repair", () => 
       generator_version: "1.0.0",
       files: [...current!.files, current!.files[0]], // duplicate the first path
     };
-    await writeFile(manifestPath(dir, "claude-code"), stringifyYaml(corrupt), "utf8");
+    await writeFile(
+      manifestPath(dir, "claude-code"),
+      stringifyYaml(corrupt),
+      "utf8",
+    );
 
     // Strict read rejects the duplicate; the lenient repair read tolerates it.
     await expect(readManifest(dir, "claude-code")).rejects.toThrow();
@@ -151,14 +210,19 @@ describe("adapter convergence — legacy duplicate-path manifest repair", () => 
     // The repair: upgrade --write must converge, not abort.
     await expect(
       runAdapterUpgrade({
-        cwd: dir, agentName: "claude-code", mode: "write", force: false, acceptModified: false, locale: "en-US",
+        cwd: dir,
+        agentName: "claude-code",
+        mode: "write",
+        force: false,
+        acceptModified: false,
+        locale: "en-US",
       }),
     ).resolves.toBeDefined();
 
     // Repaired manifest is strict-parseable with unique paths and a refreshed version.
     const repaired = await readManifest(dir, "claude-code");
     expect(repaired).not.toBeNull();
-    const paths = repaired!.files.map((f) => f.path);
+    const paths = repaired!.files.map(f => f.path);
     expect(new Set(paths).size).toBe(paths.length);
     expect(repaired!.generator_version).not.toBe("1.0.0");
   });
@@ -169,18 +233,29 @@ describe("adapter convergence — legacy duplicate-path manifest repair", () => 
       ...current!,
       files: [...current!.files, current!.files[0]],
     };
-    await writeFile(manifestPath(dir, "claude-code"), stringifyYaml(corrupt), "utf8");
+    await writeFile(
+      manifestPath(dir, "claude-code"),
+      stringifyYaml(corrupt),
+      "utf8",
+    );
 
     // --check is read-only and tolerant: it must not throw a schema error.
     await expect(
       runAdapterUpgrade({
-        cwd: dir, agentName: "claude-code", mode: "check", force: false, acceptModified: false, locale: "en-US",
+        cwd: dir,
+        agentName: "claude-code",
+        mode: "check",
+        force: false,
+        acceptModified: false,
+        locale: "en-US",
       }),
     ).resolves.toBeDefined();
 
     // doctor surfaces the invalid manifest as an issue instead of crashing.
     const adapterDoctor = await runAdapterDoctor({ cwd: dir, locale: "en-US" });
-    expect(adapterDoctor.issues.map((i) => i.code)).toContain("ADAPTER_MANIFEST_INVALID");
+    expect(adapterDoctor.issues.map(i => i.code)).toContain(
+      "ADAPTER_MANIFEST_INVALID",
+    );
     await expect(runDoctor(dir)).resolves.toBeDefined(); // global doctor must not throw
   });
 });
@@ -191,14 +266,24 @@ describe("adapter convergence — legacy duplicate-path manifest repair", () => 
 
 describe("adapter --model pin", () => {
   beforeEach(async () => {
-    await runInit({ cwd: dir, locale: "en-US", agents: ["claude-code"], force: false, json: false });
+    await runInit({
+      cwd: dir,
+      locale: "en-US",
+      agents: ["claude-code"],
+      force: false,
+      json: false,
+    });
   });
 
   it("install --model claude-opus-4-7 persists model_version: opus-4.7 to the profile", async () => {
     expect((await readProfile()).model_version).toBeUndefined();
 
     await runAdapterInstall({
-      cwd: dir, agentName: "claude-code", force: false, locale: "en-US", modelVersion: "claude-opus-4-7",
+      cwd: dir,
+      agentName: "claude-code",
+      force: false,
+      locale: "en-US",
+      modelVersion: "claude-opus-4-7",
     });
 
     expect((await readProfile()).model_version).toBe("opus-4.7");
@@ -206,32 +291,48 @@ describe("adapter --model pin", () => {
 
   it("canonical and alias inputs both normalize on pin", async () => {
     await runAdapterInstall({
-      cwd: dir, agentName: "claude-code", force: true, locale: "en-US", modelVersion: "opus-4.7",
+      cwd: dir,
+      agentName: "claude-code",
+      force: true,
+      locale: "en-US",
+      modelVersion: "opus-4.7",
     });
     expect((await readProfile()).model_version).toBe("opus-4.7");
 
     await runAdapterInstall({
-      cwd: dir, agentName: "claude-code", force: true, locale: "en-US", modelVersion: "claude-sonnet-4-6",
+      cwd: dir,
+      agentName: "claude-code",
+      force: true,
+      locale: "en-US",
+      modelVersion: "claude-sonnet-4-6",
     });
     expect((await readProfile()).model_version).toBe("sonnet-4.6");
   });
 
   it("after pinning, global doctor no longer reports ADAPTER_STALE", async () => {
     const before = await runDoctor(dir);
-    expect(before.issues.map((i) => i.code)).toContain("ADAPTER_STALE");
+    expect(before.issues.map(i => i.code)).toContain("ADAPTER_STALE");
 
     await runAdapterInstall({
-      cwd: dir, agentName: "claude-code", force: false, locale: "en-US", modelVersion: "claude-opus-4-7",
+      cwd: dir,
+      agentName: "claude-code",
+      force: false,
+      locale: "en-US",
+      modelVersion: "claude-opus-4-7",
     });
 
     const after = await runDoctor(dir);
-    expect(after.issues.map((i) => i.code)).not.toContain("ADAPTER_STALE");
+    expect(after.issues.map(i => i.code)).not.toContain("ADAPTER_STALE");
   });
 
   it("unknown --model rejects with CONFIG_ERROR and leaves the profile unpinned", async () => {
     await expect(
       runAdapterInstall({
-        cwd: dir, agentName: "claude-code", force: false, locale: "en-US", modelVersion: "gpt-9",
+        cwd: dir,
+        agentName: "claude-code",
+        force: false,
+        locale: "en-US",
+        modelVersion: "gpt-9",
       }),
     ).rejects.toMatchObject({ code: "CONFIG_ERROR" });
     expect((await readProfile()).model_version).toBeUndefined();

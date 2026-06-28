@@ -19,7 +19,7 @@ import {
 
 const { readFileSpy } = vi.hoisted(() => ({ readFileSpy: vi.fn() }));
 
-vi.mock("node:fs/promises", async (importActual) => {
+vi.mock("node:fs/promises", async importActual => {
   const actual = await importActual<typeof import("node:fs/promises")>();
   return {
     ...actual,
@@ -54,7 +54,7 @@ function targetReads(...targets: string[]): string[] {
   const wanted = new Set(targets);
   return readFileSpy.mock.calls
     .map(([path]) => String(path))
-    .filter((path) => wanted.has(path));
+    .filter(path => wanted.has(path));
 }
 
 async function forgeManifest(
@@ -74,7 +74,7 @@ async function forgeManifest(
       instruction_filename: "CLAUDE.md",
       context_dir: ".context/claude-code",
     },
-    files: files.map((file) => ({ ...file, managed: true })),
+    files: files.map(file => ({ ...file, managed: true })),
   });
 }
 
@@ -83,7 +83,12 @@ describe("adapter install/upgrade read authority", () => {
     const target = join(dir, ".env");
     const content = "API_TOKEN=low-entropy-secret\n";
     await writeFile(target, content, "utf8");
-    const profilePath = join(dir, ".code-pact", "agent-profiles", "claude-code.yaml");
+    const profilePath = join(
+      dir,
+      ".code-pact",
+      "agent-profiles",
+      "claude-code.yaml",
+    );
     await writeFile(
       profilePath,
       (await readFile(profilePath, "utf8")).replace(
@@ -106,7 +111,7 @@ describe("adapter install/upgrade read authority", () => {
         locale: "en-US",
         generatorVersionOverride: "test",
       });
-      installRows.push(install.files.find((f) => f.relPath === ".env"));
+      installRows.push(install.files.find(f => f.relPath === ".env"));
       expect(targetReads(target)).toEqual([]);
 
       for (const mode of ["check", "write"] as const) {
@@ -120,7 +125,7 @@ describe("adapter install/upgrade read authority", () => {
           locale: "en-US",
           generatorVersionOverride: "test",
         });
-        upgradeRows.push(upgrade.plan.find((f) => f.relPath === ".env"));
+        upgradeRows.push(upgrade.plan.find(f => f.relPath === ".env"));
         expect(targetReads(target)).toEqual([]);
       }
     }
@@ -158,14 +163,15 @@ describe("adapter install/upgrade read authority", () => {
         acceptModified: false,
         locale: "en-US",
       });
-      rows.push(result.plan.find((f) => f.relPath === relPath));
+      rows.push(result.plan.find(f => f.relPath === relPath));
       expect(targetReads(target)).toEqual([]);
     }
     expect(rows[0]).toEqual(rows[1]);
     expect(rows[0]).toMatchObject({
       local: "unverifiable",
-      action: "refuse",
-      reason: "unowned_generated_path",
+      desired: "unverifiable",
+      action: "warn",
+      reason: "dynamic_file_unverifiable",
     });
   });
 
@@ -188,7 +194,7 @@ describe("adapter install/upgrade read authority", () => {
         acceptModified: false,
         locale: "en-US",
       });
-      rows.push(result.plan.find((f) => f.relPath === "CLAUDE.md"));
+      rows.push(result.plan.find(f => f.relPath === "CLAUDE.md"));
       expect(targetReads(lexical, target)).toEqual([]);
     }
     expect(rows[0]).toEqual(rows[1]);
@@ -213,11 +219,16 @@ describe("adapter install/upgrade read authority", () => {
         } else {
           await writeFile(target, content, "utf8");
         }
-        await forgeManifest([{
-          path: relPath,
-          sha256: state === "matching" ? computeContentHash(content) : "b".repeat(64),
-          role: "instruction",
-        }]);
+        await forgeManifest([
+          {
+            path: relPath,
+            sha256:
+              state === "matching"
+                ? computeContentHash(content)
+                : "b".repeat(64),
+            role: "instruction",
+          },
+        ]);
         readFileSpy.mockClear();
         const result = await runAdapterUpgrade({
           cwd: dir,
@@ -228,7 +239,7 @@ describe("adapter install/upgrade read authority", () => {
           locale: "en-US",
           generatorVersionOverride: "test",
         });
-        rows.push(result.plan.find((f) => f.relPath === relPath));
+        rows.push(result.plan.find(f => f.relPath === relPath));
         expect(targetReads(target)).toEqual([]);
       }
     }

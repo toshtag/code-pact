@@ -94,18 +94,21 @@ afterEach(async () => {
 describe("runAdapterConformance — forged manifest .env oracle (security)", () => {
   it("refuses to read a forged .env entry: no actual_sha256, no secret in output", async () => {
     await setupForged(dir);
-    const result = await runAdapterConformance({ cwd: dir, agentName: "claude-code" });
+    const result = await runAdapterConformance({
+      cwd: dir,
+      agentName: "claude-code",
+    });
 
     // The forged entry must be reported as an ownership failure, not hashed.
     const unowned = result.checks.find(
-      (c) => c.id === "adapter_file_path_unowned" && c.file === ".env",
+      c => c.id === "adapter_file_path_unowned" && c.file === ".env",
     );
     expect(unowned?.status).toBe("fail");
     expect(unowned?.severity).toBe("required");
 
     // No checksum result was produced for .env (the file was never read).
     const envChecksum = result.checks.find(
-      (c) => c.id === "file_checksum_match" && c.file === ".env",
+      c => c.id === "file_checksum_match" && c.file === ".env",
     );
     expect(envChecksum).toBeUndefined();
 
@@ -152,26 +155,37 @@ describe("runAdapterConformance — forged manifest .env oracle (security)", () 
       "utf8",
     );
 
-    const result = await runAdapterConformance({ cwd: dir, agentName: "claude-code" });
+    const result = await runAdapterConformance({
+      cwd: dir,
+      agentName: "claude-code",
+    });
 
-    const unowned = result.checks.find((c) => c.id === "adapter_file_path_unowned");
+    const unowned = result.checks.find(
+      c => c.id === "adapter_file_path_unowned",
+    );
     expect(unowned?.status).toBe("fail");
     // No contract-section / axis checks ran (we returned before reading).
-    expect(result.checks.find((c) => c.id === "contract_section_present")).toBeUndefined();
+    expect(
+      result.checks.find(c => c.id === "contract_section_present"),
+    ).toBeUndefined();
     expect(JSON.stringify(result)).not.toContain("top-secret-marker");
     expect(result.compliant).toBe(false);
   });
 
   // SECURITY (Blocker 1 — shared skills namespace): a victim's hand-authored
-  // `.claude/skills/private.md` matches the broad writePathGlobs (`.claude/
-  // skills/*.md`) but is NOT one of the narrow built-in read-authority paths.
+  // `.claude/skills/private.md` matches the broad createPathGlobsByRole (`.claude/
+  // skills/*.md` for role=skill) but is NOT one of the narrow built-in read-authority paths.
   // It must never be read/hashed, regardless of the forged role.
   for (const role of ["skill", "instruction"] as const) {
     it(`refuses to read a victim's .claude/skills/private.md declared as role: ${role}`, async () => {
       await mkdir(join(dir, ".claude", "skills"), { recursive: true });
       await mkdir(join(dir, ".code-pact", "adapters"), { recursive: true });
       await writeFile(join(dir, "CLAUDE.md"), VALID_CONTRACT_BODY, "utf8");
-      await writeFile(join(dir, ".claude", "skills", "private.md"), `${SECRET}\n`, "utf8");
+      await writeFile(
+        join(dir, ".claude", "skills", "private.md"),
+        `${SECRET}\n`,
+        "utf8",
+      );
       const yaml = [
         `schema_version: 1`,
         `agent_name: claude-code`,
@@ -198,7 +212,10 @@ describe("runAdapterConformance — forged manifest .env oracle (security)", () 
         "utf8",
       );
 
-      const result = await runAdapterConformance({ cwd: dir, agentName: "claude-code" });
+      const result = await runAdapterConformance({
+        cwd: dir,
+        agentName: "claude-code",
+      });
       const serialized = JSON.stringify(result);
       // The secret content / its sha must never appear.
       expect(serialized).not.toContain("top-secret-marker");
