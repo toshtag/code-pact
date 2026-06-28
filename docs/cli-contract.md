@@ -1189,10 +1189,11 @@ guidance block and `doctor` reports `MODEL_ID_UNKNOWN`.)
 
 `--regen-skills` is the role-scoped `--force` described above (it applies `--force` to skill
 files only). It refreshes the **built-in** skills and adopts new ones, but it does **NOT**
-overwrite a divergent DYNAMIC command-skill: those live in the shared `.claude/skills/` dir
+overwrite an existing DYNAMIC command-skill: those live in the shared `.claude/skills/` dir
 alongside hand-authored user skills, so a forged manifest + a colliding `verification.commands`
-name could otherwise replace a user's skill. A divergent dynamic skill is therefore `refused`
-(reason `unowned_generated_path`), and `--accept-modified` does not override it. Safe automatic
+name could otherwise replace or hash-classify a user's skill. An existing dynamic skill is
+therefore refused without reading its bytes (reason `unowned_generated_path`), regardless of
+whether a manifest hash matches; `--accept-modified` does not override it. Safe automatic
 re-render of dynamic skills will return with a reserved generated-skill namespace (follow-up).
 
 Result envelope:
@@ -1314,7 +1315,7 @@ preserve their existing hash, refused entries are preserved unchanged.
 **Orphan handling (security — CWE-73).** An orphan is a manifest entry the
 generator no longer emits. Because the manifest is project-controlled and
 unauthenticated, an orphan is **auto-deleted (`action: "prune"`) only when its
-path is in the adapter descriptor's `ownedPathGlobs`** AND its content still
+path has an exact path-and-role entry in the adapter descriptor's `ownedPathRoles`** AND its content still
 matches the manifest hash. An owned orphan the user edited is `refuse`d (kept on
 disk). An orphan **outside** the owned path set is never deleted — even when
 clean — but surfaced as `action: "warn"` (with a machine-readable
@@ -1325,6 +1326,9 @@ kept file and the manual-removal step; a warn-only `--check` exits 1 without
 claiming `--write` would clear it. Files left on disk that are not in the new
 manifest are surfaced by the next `adapter doctor` run as
 `ADAPTER_UNMANAGED_FILE` if they fall under the adapter's `ownedPathGlobs`.
+An unowned orphan is not statted, read, or hashed; its plan state is always
+`local: "unverifiable"`, whether the target is present, missing, hash-matching,
+or divergent.
 
 ```json
 {
