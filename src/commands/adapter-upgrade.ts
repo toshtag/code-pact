@@ -13,15 +13,16 @@ import type { DesiredAdapterFileRole } from "../core/adapters/types.ts";
 import {
   assertAdapterWritePathsContained,
   assertSafeRelativePath,
+  authorizedPathExists,
   classifyFileState,
   decideAction,
-  pathTraversesSymlink,
-  resolveWithinProject,
+  readAuthorizedRegularFileMaybe,
   type DesiredFileState,
   type FileAction,
   type LocalFileState,
 } from "../core/adapters/file-state.ts";
-import { resolveOwnedProjectPath } from "../core/path-safety.ts";
+import { resolveWithinProject } from "../core/path-safety.ts";
+import { authorizeAdapterMutationPath } from "../core/adapters/manifest-file-ownership.ts";
 import {
   computeContentHash,
   manifestRelPath,
@@ -39,7 +40,6 @@ import type {
   ProfileFingerprint,
 } from "../core/schemas/adapter-manifest.ts";
 import { atomicWriteText } from "../io/atomic-text.ts";
-import { matchGlob } from "../core/glob.ts";
 import { readPackageVersion } from "../lib/package-version.ts";
 import {
   detectModelMapDrift,
@@ -76,7 +76,7 @@ export type AdapterUpgradePlanEntry = {
   /** Project-relative POSIX path. */
   relPath: string;
   role: DesiredAdapterFileRole;
-  local: LocalFileState;
+  local: LocalFileState | "unverifiable";
   desired: DesiredFileState;
   action: FileAction;
   /**
@@ -135,20 +135,6 @@ async function loadAgentProfile(
   }
 }
 
-async function resolveOwnedAdapterPath(cwd: string, relPath: string): Promise<string> {
-  try {
-    return await resolveOwnedProjectPath(cwd, relPath);
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code === "PATH_OUTSIDE_PROJECT" || code === "PATH_NOT_OWNED") {
-      const e = new Error((err as Error).message);
-      (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
-      throw e;
-    }
-    throw err;
-  }
-}
-
 async function loadModelProfiles(cwd: string): Promise<ModelProfile[]> {
   let entries: string[];
   try {
@@ -177,15 +163,6 @@ async function loadModelProfiles(cwd: string): Promise<ModelProfile[]> {
     }
   }
   return profiles;
-}
-
-async function readFileMaybe(absPath: string): Promise<string | null> {
-  try {
-    return await readFile(absPath, "utf8");
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
-    throw err;
-  }
 }
 
 function buildFingerprint(
@@ -302,17 +279,25 @@ export async function runAdapterUpgrade(
     existingManifest.files.map((f) => [f.path, f]),
   );
 
-  // Fail-closed path-safety PREFLIGHT for both --check and --write. It is
-  // read-only, and in check mode it prevents a directory/FIFO/socket at a
-  // desired or orphan path from reaching readFileMaybe as an uncoded errno or
-  // blocking read. In write mode it still runs before the first mutation.
-  await assertAdapterWritePathsContained(cwd, [
+  // Strict no-symlink preflight for placeholder dirs and the manifest path.
+  // Desired and orphan targets are authorized independently below before any
+  // target existence check, read, or hash.
+  const resolvedPreflight = await assertAdapterWritePathsContained(cwd, [
     { path: profile.context_dir, kind: "directory" },
     ...(profile.hook_dir ? [{ path: profile.hook_dir, kind: "directory" as const }] : []),
     { path: manifestRelPath(agentName), kind: "file" },
-    ...desiredFiles.map((d) => ({ path: d.path, kind: "file" as const })),
-    ...[...existingByPath.keys()].map((p) => ({ path: p, kind: "file" as const })),
   ]);
+  const contextDirAbs = resolvedPreflight.find(
+    (p) => p.kind === "directory" && p.path === profile.context_dir,
+  )!.absPath;
+  const hookDirAbs = profile.hook_dir
+    ? resolvedPreflight.find(
+        (p) => p.kind === "directory" && p.path === profile.hook_dir,
+      )!.absPath
+    : undefined;
+  const manifestAbs = resolvedPreflight.find(
+    (p) => p.kind === "file" && p.path === manifestRelPath(agentName),
+  )!.absPath;
 
   const plan: AdapterUpgradePlanEntry[] = [];
   const newManifestFiles: ManifestFile[] = [];
@@ -325,55 +310,73 @@ export async function runAdapterUpgrade(
 
   for (const desired of desiredFiles) {
     assertSafeRelativePath(desired.path);
-    const absPath = await resolveWithinProject(cwd, desired.path);
-
     const desiredHash = computeContentHash(desired.content);
-    const diskContent = await readFileMaybe(absPath);
-    const diskHash =
-      diskContent === null ? null : computeContentHash(diskContent);
     const manifestEntry = existingByPath.get(desired.path);
     const manifestHash = manifestEntry?.sha256 ?? null;
-
-    const cls = classifyFileState({ manifestHash, diskHash, desiredHash });
-    const effectiveForce = force || (regenSkills && desired.role === "skill");
-    let action = decideAction({
-      local: cls.local,
-      desired: cls.desired,
-      mode: mode === "check" ? "upgrade-check" : "upgrade-write",
-      force: effectiveForce,
-      acceptModified,
+    const authority = await authorizeAdapterMutationPath(cwd, descriptor, desired.path, {
+      expectedRole: desired.role,
+      declaredRole: manifestEntry?.role,
+      allowDynamicWrite: true,
     });
+    const absPath =
+      authority.kind === "owned" || authority.kind === "dynamic_write"
+        ? authority.absPath
+        : join(cwd, desired.path);
 
-    // SECURITY (CWE-345/CWE-22/CWE-59): same gate as `adapter install`.
-    // `write` (absent file) may use the adapter's static generated-write
-    // allowlist; destructive update/replace stays on the narrower ownedPathGlobs
-    // authority. Applied in BOTH modes so `--check` previews the refusal that
-    // `--write` would take.
-    // `refuse` from decideAction is managed-modified × stale (a local edit).
-    let refuseReason: string | undefined =
-      action === "refuse" ? "managed_modified" : undefined;
-    if (action === "write" || action === "update" || action === "replace_unmanaged") {
-      const allowedGlobs =
-        action === "write"
-          ? (descriptor.writePathGlobs ?? descriptor.ownedPathGlobs)
-          : descriptor.ownedPathGlobs;
-      const owned = allowedGlobs.some((g) => matchGlob(g, desired.path));
-      if (!owned) {
-        action = "refuse";
-        refuseReason = "unowned_generated_path";
-      }
-    }
-    if (action !== "refuse" && await pathTraversesSymlink(cwd, desired.path)) {
+    let local: LocalFileState | "unverifiable";
+    let desiredState: DesiredFileState;
+    let action: FileAction;
+    let refuseReason: string | undefined;
+    if (authority.kind === "unowned") {
+      local = "unverifiable";
+      desiredState = "stale";
+      action = "refuse";
+      refuseReason = "unowned_generated_path";
+    } else if (authority.kind === "unsafe") {
+      local = "unverifiable";
+      desiredState = "stale";
       action = "refuse";
       refuseReason = "symlink_traversal";
+    } else if (authority.kind === "dynamic_write") {
+      if (await authorizedPathExists(absPath, desired.path)) {
+        local = "unverifiable";
+        desiredState = "stale";
+        action = "refuse";
+        refuseReason = "unowned_generated_path";
+      } else {
+        const cls = classifyFileState({ manifestHash, diskHash: null, desiredHash });
+        local = cls.local;
+        desiredState = cls.desired;
+        action = decideAction({
+          local,
+          desired: desiredState,
+          mode: mode === "check" ? "upgrade-check" : "upgrade-write",
+          force: force || (regenSkills && desired.role === "skill"),
+          acceptModified,
+        });
+      }
+    } else {
+      const diskContent = await readAuthorizedRegularFileMaybe(absPath, desired.path);
+      const diskHash = diskContent === null ? null : computeContentHash(diskContent);
+      const cls = classifyFileState({ manifestHash, diskHash, desiredHash });
+      local = cls.local;
+      desiredState = cls.desired;
+      action = decideAction({
+        local,
+        desired: desiredState,
+        mode: mode === "check" ? "upgrade-check" : "upgrade-write",
+        force: force || (regenSkills && desired.role === "skill"),
+        acceptModified,
+      });
+      if (action === "refuse") refuseReason = "managed_modified";
     }
 
     plan.push({
       path: absPath,
       relPath: desired.path,
       role: desired.role,
-      local: cls.local,
-      desired: cls.desired,
+      local,
+      desired: desiredState,
       action,
       ...(refuseReason ? { reason: refuseReason } : {}),
     });
@@ -438,35 +441,45 @@ export async function runAdapterUpgrade(
   for (const [relPath, entry] of existingByPath) {
     if (desiredPaths.has(relPath)) continue; // still emitted — handled above
     assertSafeRelativePath(relPath);
-    const absPath = await resolveWithinProject(cwd, relPath);
-    const diskContent = await readFileMaybe(absPath);
+    const authority = await authorizeAdapterMutationPath(cwd, descriptor, relPath, {
+      expectedRole: entry.role,
+      declaredRole: entry.role,
+      allowDynamicWrite: false,
+    });
+    const absPath = authority.kind === "owned" ? authority.absPath : join(cwd, relPath);
+
+    if (authority.kind === "unowned" || authority.kind === "dynamic_write") {
+      // Manifest-only unowned paths are never statted or read. Report the same
+      // opaque state whether the target is missing, present, or hash-matching.
+      plan.push({
+        path: absPath,
+        relPath,
+        role: entry.role,
+        local: "unverifiable",
+        desired: "stale",
+        action: "warn",
+        reason: "unowned_orphan_not_pruned",
+      });
+      if (mode === "write") newManifestFiles.push(entry);
+      continue;
+    }
+    if (authority.kind === "unsafe") {
+      plan.push({
+        path: absPath,
+        relPath,
+        role: entry.role,
+        local: "unverifiable",
+        desired: "stale",
+        action: "refuse",
+        reason: "symlink_traversal",
+      });
+      continue;
+    }
+
+    const diskContent = await readAuthorizedRegularFileMaybe(absPath, relPath);
     if (diskContent === null) continue; // managed-missing: nothing on disk to prune
-
-    const diskHash = computeContentHash(diskContent);
-    const isClean = diskHash === entry.sha256;
-
-    // SECURITY (CWE-73): the manifest is project-controlled and unauthenticated.
-    // Deleting a file just because a manifest entry claims it is "managed" turns
-    // `upgrade --write` into an arbitrary in-project delete: a forged manifest
-    // entry (any in-project path + that file's real sha256) would be pruned as a
-    // managed-clean orphan. So we only AUTO-PRUNE an orphan whose path is in the
-    // adapter descriptor's OWNED path set — the generator's own namespace, kept
-    // deliberately narrow. An orphan OUTSIDE that set is never deleted, even when
-    // managed-clean: we surface it (`warn`) and keep tracking it so the user can
-    // remove it deliberately. An owned managed-MODIFIED orphan is still refused
-    // so a local edit is never destroyed.
-    const isOwned = descriptor.ownedPathGlobs.some((g) => matchGlob(g, relPath));
-    // SECURITY (CWE-59/CWE-61): even an OWNED orphan path must not be auto-rm'd if
-    // it traverses a symlink. `.claude/skills -> ../src` makes the owned-looking
-    // `.claude/skills/context.md` resolve to `src/context.md`, so an unconditional
-    // `rm` would delete an out-of-namespace real file. A symlinked owned path is
-    // refused (kept + surfaced), never auto-pruned.
-    const traversesSymlink = await pathTraversesSymlink(cwd, relPath);
-    const action: FileAction = !isOwned
-      ? "warn"
-      : traversesSymlink || !isClean
-        ? "refuse"
-        : "prune";
+    const isClean = computeContentHash(diskContent) === entry.sha256;
+    const action: FileAction = isClean ? "prune" : "refuse";
 
     plan.push({
       path: absPath,
@@ -477,11 +490,7 @@ export async function runAdapterUpgrade(
       action,
       // Machine-readable reason: `warn` = unowned orphan kept on disk; `refuse` =
       // a symlinked owned orphan (would delete the real target) or a local edit.
-      ...(action === "warn"
-        ? { reason: "unowned_orphan_not_pruned" }
-        : action === "refuse"
-          ? { reason: traversesSymlink ? "symlink_traversal" : "managed_modified" }
-          : {}),
+      ...(action === "refuse" ? { reason: "managed_modified" } : {}),
     });
 
     if (mode === "check") continue; // read-only
@@ -536,9 +545,9 @@ export async function runAdapterUpgrade(
     modelVersionInput: modelVersion,
   });
 
-  await mkdir(await resolveOwnedAdapterPath(cwd, profile.context_dir), { recursive: true });
-  if (profile.hook_dir) {
-    await mkdir(await resolveOwnedAdapterPath(cwd, profile.hook_dir), { recursive: true });
+  await mkdir(contextDirAbs, { recursive: true });
+  if (hookDirAbs) {
+    await mkdir(hookDirAbs, { recursive: true });
   }
 
   for (const item of desiredApply) {
@@ -561,7 +570,9 @@ export async function runAdapterUpgrade(
     profile_fingerprint: buildFingerprint(profile, resolvedModel),
     files: newManifestFiles,
   };
-  const writtenManifestPath = await writeManifest(cwd, agentName, manifest);
+  const writtenManifestPath = await writeManifest(cwd, agentName, manifest, {
+    preResolvedOwnedPath: manifestAbs,
+  });
 
   return {
     agentName,

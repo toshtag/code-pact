@@ -865,7 +865,7 @@ describe("adapter upgrade — orphan handling", () => {
     const entry = result.plan.find((p) => p.relPath === orphan)!;
     // Not in the descriptor's owned set → surfaced, never auto-pruned.
     expect(entry.action).toBe("warn");
-    expect(entry.local).toBe("managed-clean");
+    expect(entry.local).toBe("unverifiable");
     expect(entry.desired).toBe("stale");
     // Machine-readable reason so a JSON consumer can act without parsing prose.
     expect(entry.reason).toBe("unowned_orphan_not_pruned");
@@ -905,7 +905,7 @@ describe("adapter upgrade — orphan handling", () => {
 
     const entry = result.plan.find((p) => p.relPath === orphan)!;
     expect(entry.action).toBe("warn");
-    expect(entry.local).toBe("managed-modified");
+    expect(entry.local).toBe("unverifiable");
     expect(await readFile(join(dir, orphan), "utf8")).toContain("USER EDIT");
     const m = await readManifestMut();
     expect(m.files.some((f) => f.path === orphan)).toBe(true);
@@ -1157,8 +1157,8 @@ describe("adapter install — owned control-plane write paths", () => {
   });
 });
 
-describe("adapter upgrade --check — typed preflight", () => {
-  it("throws CONFIG_ERROR when a manifest-tracked orphan path is a directory", async () => {
+describe("adapter upgrade --check — unowned orphan read authority", () => {
+  it("does not inspect an unowned manifest-tracked orphan even when it is a directory", async () => {
     await freshInstall();
     const orphan = ".claude/skills/old-orphan.md";
     await mkdir(join(dir, orphan), { recursive: true });
@@ -1171,16 +1171,19 @@ describe("adapter upgrade --check — typed preflight", () => {
     });
     await writeManifest(dir, "claude-code", m);
 
-    await expect(
-      runAdapterUpgrade({
-        cwd: dir,
-        agentName: "claude-code",
-        mode: "check",
-        force: false,
-        acceptModified: false,
-        locale: "en-US",
-      }),
-    ).rejects.toMatchObject({ code: "CONFIG_ERROR" });
+    const result = await runAdapterUpgrade({
+      cwd: dir,
+      agentName: "claude-code",
+      mode: "check",
+      force: false,
+      acceptModified: false,
+      locale: "en-US",
+    });
+    expect(result.plan.find((p) => p.relPath === orphan)).toMatchObject({
+      local: "unverifiable",
+      action: "warn",
+      reason: "unowned_orphan_not_pruned",
+    });
     expect(existsSync(join(dir, orphan))).toBe(true);
   });
 });

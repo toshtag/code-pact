@@ -2,9 +2,10 @@
 //
 // These lock the two failure modes dogfooding surfaced in v1.19.0:
 //   1. A verification command whose derived skill name collides with a
-//      built-in skill (context/verify/progress) used to clobber the built-in
-//      and break `install → upgrade --check → upgrade --write → doctor`
-//      convergence. The derived skill must now be deterministically uniquified.
+//      built-in skill (context/verify/progress) used to clobber the built-in.
+//      The derived skill must be deterministically uniquified. Because dynamic
+//      names do not grant read authority, later mutation runs report the
+//      existing dynamic file as unverifiable until a reserved namespace exists.
 //   2. `--model` was a no-op (fingerprint only) while doctor told users to run
 //      it to pin a model. It must now persist `model_version` to the profile.
 //
@@ -87,22 +88,30 @@ describe("adapter convergence — verification-command skill collides with a bui
     expect(paths).toContain(".claude/skills/verify-2.md");
   });
 
-  it("install → upgrade --check (clean) → upgrade --write → upgrade --check (clean) → doctor (no drift)", async () => {
+  it("install → later mutation runs refuse the existing dynamic skill without treating its manifest hash as authority", async () => {
     await runAdapterInstall({ cwd: dir, agentName: "claude-code", force: false, locale: "en-US" });
 
     const check1 = await runAdapterUpgrade({
       cwd: dir, agentName: "claude-code", mode: "check", force: false, acceptModified: false, locale: "en-US",
     });
-    expect(check1.clean).toBe(true);
+    expect(check1.clean).toBe(false);
+    expect(check1.plan.find((p) => p.relPath.endsWith("verify-2.md"))).toMatchObject({
+      local: "unverifiable",
+      action: "refuse",
+      reason: "unowned_generated_path",
+    });
 
-    await runAdapterUpgrade({
+    const write = await runAdapterUpgrade({
       cwd: dir, agentName: "claude-code", mode: "write", force: false, acceptModified: false, locale: "en-US",
     });
+    expect(write.plan.find((p) => p.relPath.endsWith("verify-2.md"))?.action).toBe("refuse");
 
     const check2 = await runAdapterUpgrade({
       cwd: dir, agentName: "claude-code", mode: "check", force: false, acceptModified: false, locale: "en-US",
     });
-    expect(check2.clean).toBe(true);
+    expect(check2.plan.find((p) => p.relPath.endsWith("verify-2.md"))).toEqual(
+      check1.plan.find((p) => p.relPath.endsWith("verify-2.md")),
+    );
 
     const doctor = await runAdapterDoctor({ cwd: dir, locale: "en-US" });
     const codes = doctor.issues.map((i) => i.code);
