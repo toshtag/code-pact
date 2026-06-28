@@ -1,5 +1,5 @@
 import { readFile, readdir, mkdir } from "node:fs/promises";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { AgentProfile } from "../core/schemas/agent-profile.ts";
 import { ModelProfile } from "../core/schemas/model-profile.ts";
@@ -10,13 +10,14 @@ import type { DesiredAdapterFileRole } from "../core/adapters/types.ts";
 import {
   assertAdapterWritePathsContained,
   assertSafeRelativePath,
+  authorizedPathExists,
   classifyFileState,
   decideAction,
-  pathTraversesSymlink,
-  resolveWithinProject,
+  readAuthorizedRegularFileMaybe,
   type FileAction,
 } from "../core/adapters/file-state.ts";
-import { resolveOwnedProjectPath } from "../core/path-safety.ts";
+import { resolveWithinProject } from "../core/path-safety.ts";
+import { authorizeAdapterMutationPath } from "../core/adapters/manifest-file-ownership.ts";
 import {
   computeContentHash,
   manifestPath,
@@ -35,7 +36,6 @@ import type {
   ProfileFingerprint,
 } from "../core/schemas/adapter-manifest.ts";
 import { atomicWriteText } from "../io/atomic-text.ts";
-import { matchGlob } from "../core/glob.ts";
 import { readPackageVersion } from "../lib/package-version.ts";
 import type { Locale } from "../i18n/index.ts";
 
@@ -141,20 +141,6 @@ async function loadAgentProfile(
   }
 }
 
-async function resolveOwnedAdapterPath(cwd: string, relPath: string): Promise<string> {
-  try {
-    return await resolveOwnedProjectPath(cwd, relPath);
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code === "PATH_OUTSIDE_PROJECT" || code === "PATH_NOT_OWNED") {
-      const e = new Error((err as Error).message);
-      (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
-      throw e;
-    }
-    throw err;
-  }
-}
-
 async function loadModelProfiles(cwd: string): Promise<ModelProfile[]> {
   let entries: string[];
   try {
@@ -186,15 +172,6 @@ async function loadModelProfiles(cwd: string): Promise<ModelProfile[]> {
     }
   }
   return profiles;
-}
-
-async function readFileMaybe(absPath: string): Promise<string | null> {
-  try {
-    return await readFile(absPath, "utf8");
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
-    throw err;
-  }
 }
 
 function buildFingerprint(
@@ -302,17 +279,25 @@ export async function runAdapterInstall(
 
   // Write PREFLIGHT — fail closed BEFORE any persistent side effect. The manifest
   // read above already covered `.code-pact/adapters`; this checks the placeholder
-  // dirs AND every generated file for BOTH containment (symlink escape / dangling
-  // → PATH_OUTSIDE_PROJECT) AND on-disk TYPE (a dir spec that is really a file,
-  // or a file spec that is really a directory → CONFIG_ERROR). Either aborts the
-  // install here — no pin, no write — instead of failing the later mkdir/write
-  // AFTER the `--model` pin. The CLI maps PATH_OUTSIDE_PROJECT → CONFIG_ERROR.
-  await assertAdapterWritePathsContained(cwd, [
+  // dirs and manifest path with the strict no-symlink resolver. Generated-file
+  // targets are authorized separately below before any target stat/read/hash.
+  // Either phase aborts before the model pin or any generated-file write.
+  const resolvedPreflight = await assertAdapterWritePathsContained(cwd, [
     { path: profile.context_dir, kind: "directory" },
     ...(profile.hook_dir ? [{ path: profile.hook_dir, kind: "directory" as const }] : []),
     { path: manifestRelPath(agentName), kind: "file" },
-    ...desiredFiles.map((d) => ({ path: d.path, kind: "file" as const })),
   ]);
+  const contextDirAbs = resolvedPreflight.find(
+    (p) => p.kind === "directory" && p.path === profile.context_dir,
+  )!.absPath;
+  const hookDirAbs = profile.hook_dir
+    ? resolvedPreflight.find(
+        (p) => p.kind === "directory" && p.path === profile.hook_dir,
+      )!.absPath
+    : undefined;
+  const manifestAbs = resolvedPreflight.find(
+    (p) => p.kind === "file" && p.path === manifestRelPath(agentName),
+  )!.absPath;
 
   const created: string[] = [];
   const skipped: string[] = [];
@@ -329,56 +314,57 @@ export async function runAdapterInstall(
 
   for (const desired of desiredFiles) {
     assertSafeRelativePath(desired.path);
-    const absPath = await resolveWithinProject(cwd, desired.path);
-
     const desiredHash = computeContentHash(desired.content);
-    const diskContent = await readFileMaybe(absPath);
-    const diskHash =
-      diskContent === null ? null : computeContentHash(diskContent);
-    const manifestHash = existingByPath.get(desired.path)?.sha256 ?? null;
-
-    const cls = classifyFileState({ manifestHash, diskHash, desiredHash });
-    // `--regen-skills` is a role-scoped force: it makes `--force` apply only
-    // to skill files. It still cannot override managed-modified (handled
-    // by decideAction below).
-    const effectiveForce = force || (regenSkills && desired.role === "skill");
-    let action = decideAction({
-      local: cls.local,
-      desired: cls.desired,
-      mode: "install",
-      force: effectiveForce,
-      acceptModified: false,
+    const manifestEntry = existingByPath.get(desired.path);
+    const manifestHash = manifestEntry?.sha256 ?? null;
+    const authority = await authorizeAdapterMutationPath(cwd, descriptor, desired.path, {
+      expectedRole: desired.role,
+      declaredRole: manifestEntry?.role,
+      allowDynamicWrite: true,
     });
+    const absPath =
+      authority.kind === "owned" || authority.kind === "dynamic_write"
+        ? authority.absPath
+        : join(cwd, desired.path);
 
-    // SECURITY (CWE-345/CWE-22/CWE-59): generated-file creation/overwrite must
-    // NOT be authorized by the project-supplied manifest hash or profile path
-    // alone — both are attacker-controlled. `write` (absent file) may use the
-    // adapter's static generated-write allowlist; destructive update/replace
-    // stays on the narrower ownedPathGlobs delete/overwrite authority. Refuse
-    // unless BOTH hold:
-    //   1. the GENERATED path is in the relevant TRUSTED static set (a profile
-    //      redirecting instruction_filename/skill_dir at e.g. package.json is
-    //      outside it), AND
-    //   2. the path traverses NO symlink — else an in-project symlink (e.g.
-    //      `.claude/skills -> ../src`) makes the owned-looking lexical path
-    //      resolve to a DIFFERENT real file, so the glob match is not ownership.
-    // `refuse` from decideAction is the managed-modified × stale local-edit case.
-    let refuseReason: RefuseReason | undefined =
-      action === "refuse" ? "managed_modified" : undefined;
-    if (action === "write" || action === "update" || action === "replace_unmanaged") {
-      const allowedGlobs =
-        action === "write"
-          ? (descriptor.writePathGlobs ?? descriptor.ownedPathGlobs)
-          : descriptor.ownedPathGlobs;
-      const owned = allowedGlobs.some((g) => matchGlob(g, desired.path));
-      if (!owned) {
-        action = "refuse";
-        refuseReason = "unowned_generated_path";
-      }
-    }
-    if (action !== "refuse" && await pathTraversesSymlink(cwd, desired.path)) {
+    let action: FileAction;
+    let refuseReason: RefuseReason | undefined;
+    if (authority.kind === "unowned") {
+      action = "refuse";
+      refuseReason = "unowned_generated_path";
+    } else if (authority.kind === "unsafe") {
       action = "refuse";
       refuseReason = "symlink_traversal";
+    } else if (authority.kind === "dynamic_write") {
+      // Dynamic paths may be CREATED, but an existing target is never read or
+      // hashed: the shared namespace cannot prove ownership of existing bytes.
+      if (await authorizedPathExists(absPath, desired.path)) {
+        action = "refuse";
+        refuseReason = "unowned_generated_path";
+      } else {
+        const cls = classifyFileState({ manifestHash, diskHash: null, desiredHash });
+        action = decideAction({
+          local: cls.local,
+          desired: cls.desired,
+          mode: "install",
+          force: force || (regenSkills && desired.role === "skill"),
+          acceptModified: false,
+        });
+      }
+    } else {
+      const diskContent = await readAuthorizedRegularFileMaybe(absPath, desired.path);
+      const diskHash = diskContent === null ? null : computeContentHash(diskContent);
+      const cls = classifyFileState({ manifestHash, diskHash, desiredHash });
+      // `--regen-skills` is a role-scoped force: it makes `--force` apply only
+      // to skill files. It still cannot override managed-modified.
+      action = decideAction({
+        local: cls.local,
+        desired: cls.desired,
+        mode: "install",
+        force: force || (regenSkills && desired.role === "skill"),
+        acceptModified: false,
+      });
+      if (action === "refuse") refuseReason = "managed_modified";
     }
 
     fileResults.push({
@@ -451,9 +437,9 @@ export async function runAdapterInstall(
     modelVersionInput: modelVersion,
   });
 
-  await mkdir(await resolveOwnedAdapterPath(cwd, profile.context_dir), { recursive: true });
-  if (profile.hook_dir) {
-    await mkdir(await resolveOwnedAdapterPath(cwd, profile.hook_dir), { recursive: true });
+  await mkdir(contextDirAbs, { recursive: true });
+  if (hookDirAbs) {
+    await mkdir(hookDirAbs, { recursive: true });
   }
 
   for (const planned of plannedFiles) {
@@ -476,7 +462,9 @@ export async function runAdapterInstall(
     files: newManifestFiles,
   };
 
-  const writtenManifestPath = await writeManifest(cwd, agentName, manifest);
+  const writtenManifestPath = await writeManifest(cwd, agentName, manifest, {
+    preResolvedOwnedPath: manifestAbs,
+  });
 
   return {
     agentName,

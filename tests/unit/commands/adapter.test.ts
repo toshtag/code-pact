@@ -599,10 +599,13 @@ describe("runGenerateAdapter — v0.5.2 skill generation", () => {
     expect(names.some((n) => n.includes("test.md"))).toBe(true);
   });
 
-  it("re-run without force skips existing skill files", async () => {
+  it("re-run refuses an existing dynamic skill without reading it as owned", async () => {
     await runGenerateAdapter({ cwd: dir, agentName: "claude-code", force: false, locale: "en-US" });
     const second = await runGenerateAdapter({ cwd: dir, agentName: "claude-code", force: false, locale: "en-US" });
-    expect(second.skipped.some((p) => p.includes("test.md"))).toBe(true);
+    expect(second.files.find((f) => f.relPath.endsWith("test.md"))).toMatchObject({
+      action: "refuse",
+      reason: "unowned_generated_path",
+    });
   });
 
   it("--regen-skills does NOT overwrite a user-modified skill file (v0.9 safety invariant)", async () => {
