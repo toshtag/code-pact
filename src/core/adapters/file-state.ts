@@ -29,7 +29,9 @@ export {
  */
 export type AdapterWritePathKind = "directory" | "file";
 export type AdapterWritePathSpec = { path: string; kind: AdapterWritePathKind };
-export type ResolvedAdapterWritePathSpec = AdapterWritePathSpec & { absPath: string };
+export type ResolvedAdapterWritePathSpec = AdapterWritePathSpec & {
+  absPath: string;
+};
 
 function configError(message: string): Error {
   const e = new Error(message);
@@ -115,7 +117,8 @@ export async function assertAdapterWritePathsContained(
     try {
       abs = await resolveOwnedProjectPath(cwd, path);
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === "PATH_OUTSIDE_PROJECT") throw err;
+      if ((err as NodeJS.ErrnoException).code === "PATH_OUTSIDE_PROJECT")
+        throw err;
       // ENOTDIR (a non-directory component blocks the path) or any other resolve
       // failure means a write here cannot succeed: a CONFIG_ERROR, not exit 3.
       throw configError(
@@ -173,6 +176,22 @@ export type DesiredFileState =
   | "current" // disk hash == desired hash (content matches current generator output)
   | "stale" // disk hash != desired hash (or generator no longer emits this path)
   | "absent"; // disk has no file — desired comparison is not applicable
+
+/**
+ * Upgrade plan desired state, extended to cover unverifiable files whose
+ * content cannot be compared (dynamic existing, unowned, unsafe).
+ */
+export type AdapterUpgradePlanDesiredState = DesiredFileState | "unverifiable";
+
+/**
+ * Stable machine-readable reason for a non-obvious action in upgrade plans.
+ */
+export type AdapterUpgradeReason =
+  | "managed_modified"
+  | "unowned_generated_path"
+  | "symlink_traversal"
+  | "dynamic_file_unverifiable"
+  | "unowned_orphan_not_pruned";
 
 export type FileClassificationInput = {
   manifestHash: string | null;
@@ -243,7 +262,9 @@ export type FileAction =
   | "update_manifest" // update only the manifest hash (managed-modified × current)
   | "refuse" // would destroy local modifications; requires --accept-modified
   | "prune" // delete a managed-clean file the generator no longer emits (orphan cleanup on upgrade)
-  | "warn"; // surfaceable issue but no action (e.g. unmanaged without --force in check mode)
+  | "warn"; // non-blocking advisory: no mutation on this file, but the run continues.
+//   Can occur in both --check and --write (e.g. an existing dynamic
+//   file that cannot be read/hashed, or an unowned orphan kept on disk).
 
 export type ActionDecisionInput = {
   local: LocalFileState;

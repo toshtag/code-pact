@@ -68,6 +68,8 @@ export type RefuseReason =
   | "unowned_generated_path" // generated path outside the trusted owned set
   | "symlink_traversal"; // the path reaches its real target through a symlink
 
+export type AdapterInstallWarningReason = "dynamic_file_unverifiable"; // existing dynamic file preserved without read/hash
+
 export type AdapterInstallFile = {
   /** Absolute path. */
   path: string;
@@ -75,8 +77,8 @@ export type AdapterInstallFile = {
   relPath: string;
   role: DesiredAdapterFileRole;
   action: FileAction;
-  /** Set when `action === "refuse"`; drives the CLI's remediation message. */
-  reason?: RefuseReason;
+  /** Set when `action === "refuse"` or `action === "warn"`; drives the CLI's remediation message. */
+  reason?: RefuseReason | AdapterInstallWarningReason;
 };
 
 export type AdapterInstallResult = {
@@ -97,6 +99,13 @@ export type AdapterInstallResult = {
    * Overwrite with `adapter upgrade --write --accept-modified`.
    */
   refused: string[];
+  /**
+   * Absolute paths of existing dynamic files that were preserved without
+   * reading or hashing (action: warn, reason: dynamic_file_unverifiable).
+   * Their bytes cannot be verified because the shared namespace does not
+   * prove ownership.
+   */
+  preserved: string[];
   files: AdapterInstallFile[];
 };
 
@@ -114,7 +123,9 @@ async function loadAgentProfile(
     raw = await readFile(path, "utf8");
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-      const e = new Error(`Agent profile for "${agentName}" not found at ${path}.`);
+      const e = new Error(
+        `Agent profile for "${agentName}" not found at ${path}.`,
+      );
       (e as NodeJS.ErrnoException).code = "AGENT_NOT_FOUND";
       throw e;
     }
@@ -231,7 +242,9 @@ export async function runAdapterInstall(
   } = opts;
 
   if (!isSupportedAgent(agentName)) {
-    const err = new Error(`No adapter implementation for agent "${agentName}".`);
+    const err = new Error(
+      `No adapter implementation for agent "${agentName}".`,
+    );
     (err as NodeJS.ErrnoException).code = "AGENT_NOT_FOUND";
     throw err;
   }
@@ -255,7 +268,7 @@ export async function runAdapterInstall(
     tolerantDuplicatePaths: true,
   });
   const existingByPath = new Map<string, ManifestFile>(
-    (existingManifest?.files ?? []).map((f) => [f.path, f]),
+    (existingManifest?.files ?? []).map(f => [f.path, f]),
   );
 
   // Effective model version for GENERATION, computed WITHOUT persisting it. The
@@ -284,25 +297,28 @@ export async function runAdapterInstall(
   // Either phase aborts before the model pin or any generated-file write.
   const resolvedPreflight = await assertAdapterWritePathsContained(cwd, [
     { path: profile.context_dir, kind: "directory" },
-    ...(profile.hook_dir ? [{ path: profile.hook_dir, kind: "directory" as const }] : []),
+    ...(profile.hook_dir
+      ? [{ path: profile.hook_dir, kind: "directory" as const }]
+      : []),
     { path: manifestRelPath(agentName), kind: "file" },
   ]);
   const contextDirAbs = resolvedPreflight.find(
-    (p) => p.kind === "directory" && p.path === profile.context_dir,
+    p => p.kind === "directory" && p.path === profile.context_dir,
   )!.absPath;
   const hookDirAbs = profile.hook_dir
     ? resolvedPreflight.find(
-        (p) => p.kind === "directory" && p.path === profile.hook_dir,
+        p => p.kind === "directory" && p.path === profile.hook_dir,
       )!.absPath
     : undefined;
   const manifestAbs = resolvedPreflight.find(
-    (p) => p.kind === "file" && p.path === manifestRelPath(agentName),
+    p => p.kind === "file" && p.path === manifestRelPath(agentName),
   )!.absPath;
 
   const created: string[] = [];
   const skipped: string[] = [];
   const adopted: string[] = [];
   const refused: string[] = [];
+  const preserved: string[] = [];
   const fileResults: AdapterInstallFile[] = [];
   const newManifestFiles: ManifestFile[] = [];
   const plannedFiles: Array<{
@@ -317,11 +333,16 @@ export async function runAdapterInstall(
     const desiredHash = computeContentHash(desired.content);
     const manifestEntry = existingByPath.get(desired.path);
     const manifestHash = manifestEntry?.sha256 ?? null;
-    const authority = await authorizeAdapterMutationPath(cwd, descriptor, desired.path, {
-      expectedRole: desired.role,
-      declaredRole: manifestEntry?.role,
-      allowDynamicWrite: true,
-    });
+    const authority = await authorizeAdapterMutationPath(
+      cwd,
+      descriptor,
+      desired.path,
+      {
+        expectedRole: desired.role,
+        declaredRole: manifestEntry?.role,
+        allowDynamicWrite: true,
+      },
+    );
     const absPath =
       authority.kind === "owned" || authority.kind === "dynamic_write"
         ? authority.absPath
@@ -329,6 +350,7 @@ export async function runAdapterInstall(
 
     let action: FileAction;
     let refuseReason: RefuseReason | undefined;
+    let warningReason: AdapterInstallWarningReason | undefined;
     if (authority.kind === "unowned") {
       action = "refuse";
       refuseReason = "unowned_generated_path";
@@ -338,22 +360,22 @@ export async function runAdapterInstall(
     } else if (authority.kind === "dynamic_write") {
       // Dynamic paths may be CREATED, but an existing target is never read or
       // hashed: the shared namespace cannot prove ownership of existing bytes.
+      // An existing dynamic file is preserved (warn) — not refused — so the
+      // rest of the install can proceed (static writes, model pin, manifest).
       if (await authorizedPathExists(absPath, desired.path)) {
-        action = "refuse";
-        refuseReason = "unowned_generated_path";
+        action = "warn";
+        warningReason = "dynamic_file_unverifiable";
+        preserved.push(absPath);
       } else {
-        const cls = classifyFileState({ manifestHash, diskHash: null, desiredHash });
-        action = decideAction({
-          local: cls.local,
-          desired: cls.desired,
-          mode: "install",
-          force: force || (regenSkills && desired.role === "skill"),
-          acceptModified: false,
-        });
+        action = "write";
       }
     } else {
-      const diskContent = await readAuthorizedRegularFileMaybe(absPath, desired.path);
-      const diskHash = diskContent === null ? null : computeContentHash(diskContent);
+      const diskContent = await readAuthorizedRegularFileMaybe(
+        absPath,
+        desired.path,
+      );
+      const diskHash =
+        diskContent === null ? null : computeContentHash(diskContent);
       const cls = classifyFileState({ manifestHash, diskHash, desiredHash });
       // `--regen-skills` is a role-scoped force: it makes `--force` apply only
       // to skill files. It still cannot override managed-modified.
@@ -373,13 +395,18 @@ export async function runAdapterInstall(
       role: desired.role,
       action,
       ...(refuseReason ? { reason: refuseReason } : {}),
+      ...(warningReason ? { reason: warningReason } : {}),
     });
 
     plannedFiles.push({ desired, absPath, action, desiredHash });
 
     let recordedHash: string | null = null;
 
-    if (action === "write" || action === "replace_unmanaged" || action === "update") {
+    if (
+      action === "write" ||
+      action === "replace_unmanaged" ||
+      action === "update"
+    ) {
       recordedHash = desiredHash;
     } else if (action === "adopt") {
       recordedHash = desiredHash;
@@ -398,6 +425,12 @@ export async function runAdapterInstall(
       refused.push(absPath);
       if (manifestHash !== null) {
         recordedHash = manifestHash;
+      }
+    } else if (action === "warn") {
+      // Existing dynamic file preserved without read/hash. Keep the existing
+      // manifest entry unchanged; do not adopt or update the hash.
+      if (manifestEntry !== undefined) {
+        newManifestFiles.push(manifestEntry);
       }
     }
     // Other actions (update_manifest / warn) are not reachable in install mode
@@ -420,12 +453,15 @@ export async function runAdapterInstall(
   if (refused.length > 0) {
     return {
       agentName,
-      manifestPath: existingManifest ? manifestPath(cwd, agentName) : manifestPath(cwd, agentName),
+      manifestPath: existingManifest
+        ? manifestPath(cwd, agentName)
+        : manifestPath(cwd, agentName),
       generatorVersion,
       created: [],
       skipped,
       adopted: [],
       refused,
+      preserved,
       files: fileResults,
     };
   }
@@ -443,7 +479,11 @@ export async function runAdapterInstall(
   }
 
   for (const planned of plannedFiles) {
-    if (planned.action === "write" || planned.action === "replace_unmanaged" || planned.action === "update") {
+    if (
+      planned.action === "write" ||
+      planned.action === "replace_unmanaged" ||
+      planned.action === "update"
+    ) {
       await mkdir(dirname(planned.absPath), { recursive: true });
       await atomicWriteText(planned.absPath, planned.desired.content);
       created.push(planned.absPath);
@@ -474,6 +514,7 @@ export async function runAdapterInstall(
     skipped,
     adopted,
     refused,
+    preserved,
     files: fileResults,
   };
 }

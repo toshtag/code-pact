@@ -17,7 +17,8 @@ import {
   classifyFileState,
   decideAction,
   readAuthorizedRegularFileMaybe,
-  type DesiredFileState,
+  type AdapterUpgradePlanDesiredState,
+  type AdapterUpgradeReason,
   type FileAction,
   type LocalFileState,
 } from "../core/adapters/file-state.ts";
@@ -77,14 +78,14 @@ export type AdapterUpgradePlanEntry = {
   relPath: string;
   role: DesiredAdapterFileRole;
   local: LocalFileState | "unverifiable";
-  desired: DesiredFileState;
+  desired: AdapterUpgradePlanDesiredState;
   action: FileAction;
   /**
    * Stable machine-readable reason for a non-obvious action. Set for `warn`
-   * (an unowned orphan kept on disk): `"unowned_orphan_not_pruned"`. Absent
-   * for actions whose meaning is self-evident from `(action, local, desired)`.
+   * (`dynamic_file_unverifiable`, `unowned_orphan_not_pruned`) and `refuse`
+   * (`managed_modified`, `unowned_generated_path`, `symlink_traversal`).
    */
-  reason?: string;
+  reason?: AdapterUpgradeReason;
 };
 
 export type AdapterUpgradeResult = {
@@ -112,7 +113,9 @@ async function loadAgentProfile(
     raw = await readFile(path, "utf8");
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-      const e = new Error(`Agent profile for "${agentName}" not found at ${path}.`);
+      const e = new Error(
+        `Agent profile for "${agentName}" not found at ${path}.`,
+      );
       (e as NodeJS.ErrnoException).code = "AGENT_NOT_FOUND";
       throw e;
     }
@@ -230,7 +233,9 @@ export async function runAdapterUpgrade(
   } = opts;
 
   if (!isSupportedAgent(agentName)) {
-    const err = new Error(`No adapter implementation for agent "${agentName}".`);
+    const err = new Error(
+      `No adapter implementation for agent "${agentName}".`,
+    );
     (err as NodeJS.ErrnoException).code = "AGENT_NOT_FOUND";
     throw err;
   }
@@ -276,7 +281,7 @@ export async function runAdapterUpgrade(
   );
 
   const existingByPath = new Map<string, ManifestFile>(
-    existingManifest.files.map((f) => [f.path, f]),
+    existingManifest.files.map(f => [f.path, f]),
   );
 
   // Strict no-symlink preflight for placeholder dirs and the manifest path.
@@ -284,19 +289,21 @@ export async function runAdapterUpgrade(
   // target existence check, read, or hash.
   const resolvedPreflight = await assertAdapterWritePathsContained(cwd, [
     { path: profile.context_dir, kind: "directory" },
-    ...(profile.hook_dir ? [{ path: profile.hook_dir, kind: "directory" as const }] : []),
+    ...(profile.hook_dir
+      ? [{ path: profile.hook_dir, kind: "directory" as const }]
+      : []),
     { path: manifestRelPath(agentName), kind: "file" },
   ]);
   const contextDirAbs = resolvedPreflight.find(
-    (p) => p.kind === "directory" && p.path === profile.context_dir,
+    p => p.kind === "directory" && p.path === profile.context_dir,
   )!.absPath;
   const hookDirAbs = profile.hook_dir
     ? resolvedPreflight.find(
-        (p) => p.kind === "directory" && p.path === profile.hook_dir,
+        p => p.kind === "directory" && p.path === profile.hook_dir,
       )!.absPath
     : undefined;
   const manifestAbs = resolvedPreflight.find(
-    (p) => p.kind === "file" && p.path === manifestRelPath(agentName),
+    p => p.kind === "file" && p.path === manifestRelPath(agentName),
   )!.absPath;
 
   const plan: AdapterUpgradePlanEntry[] = [];
@@ -313,51 +320,68 @@ export async function runAdapterUpgrade(
     const desiredHash = computeContentHash(desired.content);
     const manifestEntry = existingByPath.get(desired.path);
     const manifestHash = manifestEntry?.sha256 ?? null;
-    const authority = await authorizeAdapterMutationPath(cwd, descriptor, desired.path, {
-      expectedRole: desired.role,
-      declaredRole: manifestEntry?.role,
-      allowDynamicWrite: true,
-    });
+    const authority = await authorizeAdapterMutationPath(
+      cwd,
+      descriptor,
+      desired.path,
+      {
+        expectedRole: desired.role,
+        declaredRole: manifestEntry?.role,
+        allowDynamicWrite: true,
+      },
+    );
     const absPath =
       authority.kind === "owned" || authority.kind === "dynamic_write"
         ? authority.absPath
         : join(cwd, desired.path);
 
     let local: LocalFileState | "unverifiable";
-    let desiredState: DesiredFileState;
+    let desiredState: AdapterUpgradePlanDesiredState;
     let action: FileAction;
-    let refuseReason: string | undefined;
+    let reason: AdapterUpgradeReason | undefined;
     if (authority.kind === "unowned") {
       local = "unverifiable";
-      desiredState = "stale";
+      desiredState = "unverifiable";
       action = "refuse";
-      refuseReason = "unowned_generated_path";
+      reason = "unowned_generated_path";
     } else if (authority.kind === "unsafe") {
       local = "unverifiable";
-      desiredState = "stale";
+      desiredState = "unverifiable";
       action = "refuse";
-      refuseReason = "symlink_traversal";
+      reason = "symlink_traversal";
     } else if (authority.kind === "dynamic_write") {
+      // Dynamic paths may be CREATED, but an existing target is never read or
+      // hashed. An existing dynamic file is preserved (warn) — not refused —
+      // so the rest of the upgrade can proceed (static writes, model pin,
+      // manifest refresh).
       if (await authorizedPathExists(absPath, desired.path)) {
         local = "unverifiable";
-        desiredState = "stale";
-        action = "refuse";
-        refuseReason = "unowned_generated_path";
+        desiredState = "unverifiable";
+        action = "warn";
+        reason = "dynamic_file_unverifiable";
       } else {
-        const cls = classifyFileState({ manifestHash, diskHash: null, desiredHash });
+        const cls = classifyFileState({
+          manifestHash,
+          diskHash: null,
+          desiredHash,
+        });
         local = cls.local;
         desiredState = cls.desired;
         action = decideAction({
           local,
-          desired: desiredState,
+          desired: cls.desired,
           mode: mode === "check" ? "upgrade-check" : "upgrade-write",
           force: force || (regenSkills && desired.role === "skill"),
           acceptModified,
         });
       }
     } else {
-      const diskContent = await readAuthorizedRegularFileMaybe(absPath, desired.path);
-      const diskHash = diskContent === null ? null : computeContentHash(diskContent);
+      const diskContent = await readAuthorizedRegularFileMaybe(
+        absPath,
+        desired.path,
+      );
+      const diskHash =
+        diskContent === null ? null : computeContentHash(diskContent);
       const cls = classifyFileState({ manifestHash, diskHash, desiredHash });
       local = cls.local;
       desiredState = cls.desired;
@@ -368,7 +392,7 @@ export async function runAdapterUpgrade(
         force: force || (regenSkills && desired.role === "skill"),
         acceptModified,
       });
-      if (action === "refuse") refuseReason = "managed_modified";
+      if (action === "refuse") reason = "managed_modified";
     }
 
     plan.push({
@@ -378,7 +402,7 @@ export async function runAdapterUpgrade(
       local,
       desired: desiredState,
       action,
-      ...(refuseReason ? { reason: refuseReason } : {}),
+      ...(reason ? { reason } : {}),
     });
 
     if (mode === "check") {
@@ -390,7 +414,11 @@ export async function runAdapterUpgrade(
     desiredApply.push({ desired, absPath, action });
     let recordedHash: string | null = null;
 
-    if (action === "write" || action === "replace_unmanaged" || action === "update") {
+    if (
+      action === "write" ||
+      action === "replace_unmanaged" ||
+      action === "update"
+    ) {
       recordedHash = desiredHash;
     } else if (action === "adopt") {
       // Disk matches desired; record manifest entry only.
@@ -410,10 +438,13 @@ export async function runAdapterUpgrade(
       if (manifestHash !== null) {
         recordedHash = manifestHash;
       }
+    } else if (action === "warn") {
+      // Existing dynamic file preserved without read/hash. Keep the existing
+      // manifest entry unchanged; do not adopt or update the hash.
+      if (manifestEntry !== undefined) {
+        newManifestFiles.push(manifestEntry);
+      }
     }
-    // action === "warn" is only used by --check for unmanaged rows;
-    // --write should never produce it (decideAction returns skip/adopt/
-    // replace_unmanaged instead). Defensive no-op.
 
     if (recordedHash !== null) {
       newManifestFiles.push({
@@ -437,16 +468,22 @@ export async function runAdapterUpgrade(
   // already gone (managed-missing) needs no action. Files never tracked by the
   // manifest (hand-authored skills like ship-task.md) are not in
   // `existingByPath`, so they are never considered here.
-  const desiredPaths = new Set(desiredFiles.map((d) => d.path));
+  const desiredPaths = new Set(desiredFiles.map(d => d.path));
   for (const [relPath, entry] of existingByPath) {
     if (desiredPaths.has(relPath)) continue; // still emitted — handled above
     assertSafeRelativePath(relPath);
-    const authority = await authorizeAdapterMutationPath(cwd, descriptor, relPath, {
-      expectedRole: entry.role,
-      declaredRole: entry.role,
-      allowDynamicWrite: false,
-    });
-    const absPath = authority.kind === "owned" ? authority.absPath : join(cwd, relPath);
+    const authority = await authorizeAdapterMutationPath(
+      cwd,
+      descriptor,
+      relPath,
+      {
+        expectedRole: entry.role,
+        declaredRole: entry.role,
+        allowDynamicWrite: false,
+      },
+    );
+    const absPath =
+      authority.kind === "owned" ? authority.absPath : join(cwd, relPath);
 
     if (authority.kind === "unowned" || authority.kind === "dynamic_write") {
       // Manifest-only unowned paths are never statted or read. Report the same
@@ -509,7 +546,7 @@ export async function runAdapterUpgrade(
     }
   }
 
-  const clean = plan.every((p) => p.action === "skip");
+  const clean = plan.every(p => p.action === "skip");
 
   // Build the result + (for --write) write the manifest.
   const generatorVersion =
@@ -520,18 +557,28 @@ export async function runAdapterUpgrade(
     return {
       agentName,
       mode,
-      manifestPath: join(cwd, ".code-pact", "adapters", `${agentName}.manifest.yaml`),
+      manifestPath: join(
+        cwd,
+        ".code-pact",
+        "adapters",
+        `${agentName}.manifest.yaml`,
+      ),
       generatorVersion: existingManifest.generator_version,
       clean,
       plan,
     };
   }
 
-  if (plan.some((p) => p.action === "refuse")) {
+  if (plan.some(p => p.action === "refuse")) {
     return {
       agentName,
       mode,
-      manifestPath: join(cwd, ".code-pact", "adapters", `${agentName}.manifest.yaml`),
+      manifestPath: join(
+        cwd,
+        ".code-pact",
+        "adapters",
+        `${agentName}.manifest.yaml`,
+      ),
       generatorVersion,
       clean,
       plan,
@@ -551,7 +598,11 @@ export async function runAdapterUpgrade(
   }
 
   for (const item of desiredApply) {
-    if (item.action === "write" || item.action === "replace_unmanaged" || item.action === "update") {
+    if (
+      item.action === "write" ||
+      item.action === "replace_unmanaged" ||
+      item.action === "update"
+    ) {
       await mkdir(dirname(item.absPath), { recursive: true });
       await atomicWriteText(item.absPath, item.desired.content);
     }
