@@ -44,7 +44,10 @@ function geminiMd(profile: AgentProfile, locale: Locale): string {
     `> Install only from the official org (\`google-gemini\`) — typosquat`,
     `> packages with similar names have been reported on npm.`,
     ``,
-    ...renderWorkflowSection(t, "gemini-cli", { step0: false, validateNote: false }),
+    ...renderWorkflowSection(t, "gemini-cli", {
+      step0: false,
+      validateNote: false,
+    }),
     ``,
     ...renderContextDirectorySection(profile),
     ``,
@@ -71,7 +74,6 @@ export async function generateGeminiCliDesiredFiles(
 export const geminiCliAdapterDescriptor: AdapterDescriptor = {
   generateDesiredFiles: generateGeminiCliDesiredFiles,
   capabilities: ["instructions_file", "context_dir"] as const,
-  ownedPathGlobs: ["GEMINI.md"] as const,
   ownedPathRoles: { "GEMINI.md": "instruction" } as const,
   adapterSchemaVersion: 1,
 };

@@ -27,7 +27,9 @@ import {
 // ---------------------------------------------------------------------------
 
 function modelGuidanceSection(modelVersion: string): string {
-  const isKnown = (CLAUDE_MODEL_VERSIONS as readonly string[]).includes(modelVersion);
+  const isKnown = (CLAUDE_MODEL_VERSIONS as readonly string[]).includes(
+    modelVersion,
+  );
   if (!isKnown) {
     return [
       `## Model guidance (${modelVersion})`,
@@ -57,7 +59,9 @@ function claudeMd(
   modelVersion?: string,
 ): string {
   const t = adapterCommon(locale);
-  const modelSection = modelVersion ? `\n\n${modelGuidanceSection(modelVersion)}` : "";
+  const modelSection = modelVersion
+    ? `\n\n${modelGuidanceSection(modelVersion)}`
+    : "";
 
   return [
     `# Claude Code — Project Instructions`,
@@ -65,7 +69,10 @@ function claudeMd(
     `> ${t.managedNotice}`,
     `> ${t.editNotice}`,
     ``,
-    ...renderWorkflowSection(t, "claude-code", { step0: true, validateNote: true }),
+    ...renderWorkflowSection(t, "claude-code", {
+      step0: true,
+      validateNote: true,
+    }),
     ``,
     ...renderAgentContractSection(t),
     ``,
@@ -132,7 +139,10 @@ const PACKAGE_MANAGERS = ["pnpm", "npm", "yarn", "bun"] as const;
  * flag before a word would otherwise wrongly eat that word). `--flag=value`
  * forms are self-contained and never produce a stray word either way.
  */
-function tokenizeCommand(command: string): { words: string[]; flags: string[] } {
+function tokenizeCommand(command: string): {
+  words: string[];
+  flags: string[];
+} {
   const tokens = command.trim().split(/\s+/).filter(Boolean);
   // Strip runner prefix.
   let i = 0;
@@ -207,7 +217,11 @@ export function deriveSkillNameVariants(command: string): string[] {
 }
 
 function sanitizeSkillName(s: string): string {
-  const cleaned = s.toLowerCase().replace(/[^a-z0-9]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+  const cleaned = s
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
   return cleaned || "cmd";
 }
 
@@ -231,7 +245,14 @@ function uniquifySkillName(base: string, taken: ReadonlySet<string>): string {
 }
 
 function buildCommandSkill(skillName: string, command: string): string {
-  return [`# /${skillName} — ${command}`, ``, `Usage: /${skillName}`, ``, `Runs: ${command}`, ``].join("\n");
+  return [
+    `# /${skillName} — ${command}`,
+    ``,
+    `Usage: /${skillName}`,
+    ``,
+    `Runs: ${command}`,
+    ``,
+  ].join("\n");
 }
 
 async function readVerificationCommands(cwd: string): Promise<string[]> {
@@ -300,9 +321,10 @@ export async function generateClaudeDesiredFiles(
     // forms); take the first free one. Only if the whole ladder is taken do we
     // fall back to a numeric suffix on the most specific candidate.
     const variants = deriveSkillNameVariants(cmd);
-    const free = variants.find((v) => !takenSkillNames.has(v));
+    const free = variants.find(v => !takenSkillNames.has(v));
     const skillName =
-      free ?? uniquifySkillName(variants[variants.length - 1]!, takenSkillNames);
+      free ??
+      uniquifySkillName(variants[variants.length - 1]!, takenSkillNames);
     takenSkillNames.add(skillName);
     files.push({
       path: `${skillDir}/${skillName}.md`,
@@ -322,25 +344,18 @@ export const claudeAdapterDescriptor: AdapterDescriptor = {
     "hooks_dir",
     "context_dir",
   ] as const,
-  // EXACT static paths the generator owns for delete/orphan scan. Deliberately
-  // not `.claude/skills/*.md`: that directory is shared with hand-authored user
-  // skills, so manifest-driven delete/orphan authority must stay narrow.
-  ownedPathGlobs: [
-    "CLAUDE.md",
-    ".claude/skills/context.md",
-    ".claude/skills/verify.md",
-    ".claude/skills/progress.md",
-  ] as const,
   ownedPathRoles: {
     "CLAUDE.md": "instruction",
     ".claude/skills/context.md": "skill",
     ".claude/skills/verify.md": "skill",
     ".claude/skills/progress.md": "skill",
   } as const,
-  // Static CREATE/OVERWRITE allowlist. Broader than ownedPathGlobs because
-  // code-pact intentionally generates verification-command skills in the
-  // default Claude skills directory. Profile redirects to arbitrary locations
-  // such as `.github/workflows/*.yml` are still refused.
-  writePathGlobs: ["CLAUDE.md", ".claude/skills/*.md"] as const,
+  // Role-scoped create-only authority: missing skill files in the shared
+  // `.claude/skills/*.md` namespace may be CREATED, but existing files there
+  // are never read/hashed/overwritten — the namespace is shared with
+  // hand-authored user skills and attacker-influenceable dynamic names.
+  createPathGlobsByRole: {
+    skill: [".claude/skills/*.md"],
+  } as const,
   adapterSchemaVersion: 1,
 };

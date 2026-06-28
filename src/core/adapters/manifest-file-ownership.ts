@@ -44,6 +44,9 @@ export type AdapterMutationPathAuthority =
  * resolved for creation, but it never gains authority to read existing bytes.
  * Manifest-only orphans pass `allowDynamicWrite: false`, so an unowned path is
  * rejected without even touching the target on disk.
+ *
+ * Role check order is fixed: role mismatch is determined BEFORE filesystem
+ * resolution so an unowned verdict never touches the target.
  */
 export async function authorizeAdapterMutationPath(
   cwd: string,
@@ -64,15 +67,28 @@ export async function authorizeAdapterMutationPath(
       return { kind: "unowned" };
     }
     try {
-      return { kind: "owned", absPath: await resolveOwnedProjectPath(cwd, relPath) };
+      return {
+        kind: "owned",
+        absPath: await resolveOwnedProjectPath(cwd, relPath),
+      };
     } catch {
       return { kind: "unsafe" };
     }
   }
 
   if (!opts.allowDynamicWrite) return { kind: "unowned" };
-  const writeNamespace = descriptor.writePathGlobs ?? descriptor.ownedPathGlobs;
-  if (!writeNamespace.some((g) => matchGlob(g, relPath))) {
+
+  // Role mismatch on a dynamic path is checked before filesystem resolution.
+  if (
+    opts.declaredRole !== undefined &&
+    opts.declaredRole !== opts.expectedRole
+  ) {
+    return { kind: "unowned" };
+  }
+
+  const createGlobs =
+    descriptor.createPathGlobsByRole?.[opts.expectedRole] ?? [];
+  if (!createGlobs.some(g => matchGlob(g, relPath))) {
     return { kind: "unowned" };
   }
   try {
@@ -95,17 +111,18 @@ export async function authorizeAdapterMutationPath(
  * READ AUTHORITY IS NARROWER THAN WRITE AUTHORITY. The two are distinct rights:
  *   "may CREATE a new generated file here"  ≠  "may READ + hash + inspect an
  *   EXISTING file here".
- * In particular `writePathGlobs` (e.g. `.claude/skills/*.md`) covers a namespace
- * SHARED with hand-authored user skills and with dynamically-named, attacker-
- * influenceable verification-command skills. Using it as read authority would
- * let a forged manifest read a victim's `.claude/skills/private.md` (it matches
- * the wildcard) and oracle its sha256 / headings. So this gate uses ONLY the
- * adapter's NARROW `ownedPathGlobs` — the exact, wildcard-free, BUILT-IN static
- * paths (e.g. `CLAUDE.md`, `.claude/skills/context.md|verify.md|progress.md`).
- * A dynamic skill in the shared namespace cannot prove read ownership and is
- * therefore never read by a diagnostic. The role must also match the expected
- * role for that static path, and the path must traverse no symlink
- * (resolveOwnedProjectPath rejects every symlink component).
+ * In particular `createPathGlobsByRole` (e.g. `.claude/skills/*.md` for
+ * role=skill) covers a namespace SHARED with hand-authored user skills and
+ * with dynamically-named, attacker-influenceable verification-command skills.
+ * Using it as read authority would let a forged manifest read a victim's
+ * `.claude/skills/private.md` (it matches the wildcard) and oracle its sha256
+ * / headings. So this gate uses ONLY the adapter's NARROW `ownedPathRoles` —
+ * the exact, wildcard-free, BUILT-IN static paths (e.g. `CLAUDE.md`,
+ * `.claude/skills/context.md|verify.md|progress.md`). A dynamic skill in the
+ * shared namespace cannot prove read ownership and is therefore never read by
+ * a diagnostic. The role must also match the expected role for that static
+ * path, and the path must traverse no symlink (resolveOwnedProjectPath rejects
+ * every symlink component).
  *
  * The PRIMARY guard is the narrow exact-path set (it alone blocks reading a
  * victim's `.claude/skills/private.md`). When the caller can afford to run the
@@ -115,6 +132,10 @@ export async function authorizeAdapterMutationPath(
  * (a forged `role: instruction` on a skill path is refused before any heading
  * inspection). Conformance, which does not run the generator, omits it and
  * relies on the exact-path + symlink guards, which already close the oracle.
+ *
+ * For dynamic paths, the manifest's declared role must match the role-scoped
+ * create namespace (e.g. a `.claude/skills/private.md` with role=skill is
+ * `unverifiable_dynamic`; with role=instruction it is `unowned`).
  */
 export async function classifyManifestFileForRead(
   cwd: string,
@@ -122,25 +143,29 @@ export async function classifyManifestFileForRead(
   relPath: string,
   roleCheck?: {
     declaredRole: DesiredAdapterFileRole;
-    expectedRoleFor: ReadonlyMap<string, DesiredAdapterFileRole>;
+    expectedRoleFor?: ReadonlyMap<string, DesiredAdapterFileRole>;
   },
 ): Promise<ManifestFileOwnership> {
-  // NARROW static read authority — exact lookup, never glob matching and never
-  // the shared writePathGlobs namespace.
+  // NARROW static read authority — exact lookup, never glob matching.
   const staticRole = descriptor.ownedPathRoles[relPath];
   if (staticRole === undefined) {
-    // Distinguish a LEGITIMATE-but-unverifiable dynamic skill (inside the broad
-    // write namespace) from a forged arbitrary path. The former is skipped (not
-    // read, not a failure); the latter is a fail-closed security issue.
-    const writeNamespace = descriptor.writePathGlobs ?? descriptor.ownedPathGlobs;
-    if (writeNamespace.some((g) => matchGlob(g, relPath))) {
-      return { kind: "unverifiable_dynamic" };
+    // Distinguish a LEGITIMATE-but-unverifiable dynamic skill (inside the
+    // role-scoped create namespace) from a forged arbitrary path. The declared
+    // role must match the create namespace's role for the path to qualify as
+    // `unverifiable_dynamic`; otherwise it is `unowned`.
+    const declaredRole = roleCheck?.declaredRole;
+    if (declaredRole !== undefined) {
+      const createGlobs =
+        descriptor.createPathGlobsByRole?.[declaredRole] ?? [];
+      if (createGlobs.some(g => matchGlob(g, relPath))) {
+        return { kind: "unverifiable_dynamic" };
+      }
     }
     return { kind: "unowned" };
   }
   // Secondary defense (when the caller generated the desired set): the declared
   // role must match the path's only legitimate role.
-  if (roleCheck !== undefined) {
+  if (roleCheck !== undefined && roleCheck.expectedRoleFor !== undefined) {
     const expected = roleCheck.expectedRoleFor.get(relPath);
     if (
       expected === undefined ||
@@ -163,10 +188,10 @@ export async function classifyManifestFileForRead(
 /**
  * Build the exact `path → role` map for the adapter's NARROW static read
  * authority: run the generator, then keep only the desired files whose path is
- * in `ownedPathGlobs` (the wildcard-free built-in set). Dynamic skills in the
- * shared `.claude/skills/*.md` namespace are intentionally EXCLUDED — their
- * names are attacker-influenceable (derived from project verification commands),
- * so they can never be a read-ownership proof.
+ * in `ownedPathRoles` (the exact built-in set). Dynamic skills in the shared
+ * `.claude/skills/*.md` namespace are intentionally EXCLUDED — their names are
+ * attacker-influenceable (derived from project verification commands), so they
+ * can never be a read-ownership proof.
  */
 export function buildOwnedRoleMap(
   descriptor: AdapterDescriptor,

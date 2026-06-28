@@ -62,7 +62,6 @@ export async function generateGenericDesiredFiles(
 export const genericAdapterDescriptor: AdapterDescriptor = {
   generateDesiredFiles: generateGenericDesiredFiles,
   capabilities: ["instructions_file", "context_dir"] as const,
-  ownedPathGlobs: ["docs/code-pact/agent-instructions.md"] as const,
   ownedPathRoles: {
     "docs/code-pact/agent-instructions.md": "instruction",
   } as const,
