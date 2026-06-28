@@ -190,24 +190,26 @@ describe("assertAdapterWritePathsContained", () => {
   });
 
   it("accepts non-existent paths for both kinds (the create case)", async () => {
-    await expect(
-      assertAdapterWritePathsContained(dir, [
-        { path: ".context/claude", kind: "directory" },
-        { path: "CLAUDE.md", kind: "file" },
-        { path: ".claude/skills/x.md", kind: "file" },
-      ]),
-    ).resolves.toBeUndefined();
+    const resolved = await assertAdapterWritePathsContained(dir, [
+      { path: ".context/claude", kind: "directory" },
+      { path: "CLAUDE.md", kind: "file" },
+      { path: ".claude/skills/x.md", kind: "file" },
+    ]);
+    expect(resolved.map((p) => p.absPath)).toEqual([
+      join(dir, ".context/claude"),
+      join(dir, "CLAUDE.md"),
+      join(dir, ".claude/skills/x.md"),
+    ]);
   });
 
   it("accepts existing entries of the matching type", async () => {
     await mkdir(join(dir, ".context", "claude"), { recursive: true });
     await writeFile(join(dir, "CLAUDE.md"), "ok", "utf8");
-    await expect(
-      assertAdapterWritePathsContained(dir, [
-        { path: ".context/claude", kind: "directory" },
-        { path: "CLAUDE.md", kind: "file" },
-      ]),
-    ).resolves.toBeUndefined();
+    const resolved = await assertAdapterWritePathsContained(dir, [
+      { path: ".context/claude", kind: "directory" },
+      { path: "CLAUDE.md", kind: "file" },
+    ]);
+    expect(resolved).toHaveLength(2);
   });
 
   it("rejects a directory spec that is actually a regular file (mkdir would EEXIST)", async () => {
@@ -232,16 +234,37 @@ describe("assertAdapterWritePathsContained", () => {
     ).rejects.toMatchObject({ code: "CONFIG_ERROR" });
   });
 
-  it("still surfaces a symlink escape as PATH_OUTSIDE_PROJECT (containment unchanged)", async () => {
+  it("maps an escaping symlink to CONFIG_ERROR under strict ownership preflight", async () => {
     const outside = await realpath(await mkdtemp(join(tmpdir(), "code-pact-preflight-out-")));
     try {
       await symlink(outside, join(dir, ".context"), "dir");
       await expect(
         assertAdapterWritePathsContained(dir, [{ path: ".context/claude", kind: "directory" }]),
-      ).rejects.toMatchObject({ code: "PATH_OUTSIDE_PROJECT" });
+      ).rejects.toMatchObject({ code: "CONFIG_ERROR" });
     } finally {
       await rm(outside, { recursive: true, force: true });
     }
+  });
+
+  it("rejects a final in-project directory symlink", async () => {
+    await mkdir(join(dir, "alt-context"));
+    await mkdir(join(dir, ".context"));
+    await symlink("../alt-context", join(dir, ".context", "claude"), "dir");
+    await expect(
+      assertAdapterWritePathsContained(dir, [
+        { path: ".context/claude", kind: "directory" },
+      ]),
+    ).rejects.toMatchObject({ code: "CONFIG_ERROR" });
+  });
+
+  it("rejects an in-project symlink in a parent component", async () => {
+    await mkdir(join(dir, "alt-context"));
+    await symlink("alt-context", join(dir, ".context"), "dir");
+    await expect(
+      assertAdapterWritePathsContained(dir, [
+        { path: ".context/claude", kind: "directory" },
+      ]),
+    ).rejects.toMatchObject({ code: "CONFIG_ERROR" });
   });
 
   it("rejects a `file` spec that is a FIFO/special file (a later read would BLOCK)", async () => {

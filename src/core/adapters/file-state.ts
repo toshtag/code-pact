@@ -7,10 +7,10 @@
 // re-exports below keep existing adapter call sites working unchanged.
 // ---------------------------------------------------------------------------
 
-import { stat } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import {
   assertSafeRelativePath as assertSafeRelativePathImpl,
-  resolveWithinProject as resolveWithinProjectImpl,
+  resolveOwnedProjectPath,
 } from "../path-safety.ts";
 
 export {
@@ -29,6 +29,7 @@ export {
  */
 export type AdapterWritePathKind = "directory" | "file";
 export type AdapterWritePathSpec = { path: string; kind: AdapterWritePathKind };
+export type ResolvedAdapterWritePathSpec = AdapterWritePathSpec & { absPath: string };
 
 function configError(message: string): Error {
   const e = new Error(message);
@@ -36,13 +37,59 @@ function configError(message: string): Error {
   return e;
 }
 
+/** Read a path only after the caller has established static read authority. */
+export async function readAuthorizedRegularFileMaybe(
+  absPath: string,
+  relPath: string,
+): Promise<string | null> {
+  let st: import("node:fs").Stats;
+  try {
+    st = await stat(absPath);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") return null;
+    throw configError(
+      `authorized adapter file "${relPath}" cannot be inspected (${code ?? "unreadable"})`,
+    );
+  }
+  if (!st.isFile()) {
+    throw configError(
+      `authorized adapter file "${relPath}" exists but is not a regular file`,
+    );
+  }
+  try {
+    return await readFile(absPath, "utf8");
+  } catch (err) {
+    throw configError(
+      `authorized adapter file "${relPath}" cannot be read (${(err as NodeJS.ErrnoException).code ?? "unreadable"})`,
+    );
+  }
+}
+
+/** Existence probe for an authorized dynamic create target; never reads bytes. */
+export async function authorizedPathExists(
+  absPath: string,
+  relPath: string,
+): Promise<boolean> {
+  try {
+    await stat(absPath);
+    return true;
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") return false;
+    throw configError(
+      `authorized adapter path "${relPath}" cannot be inspected (${code ?? "unreadable"})`,
+    );
+  }
+}
+
 /**
  * Fail-closed write PREFLIGHT for an adapter write pass. For every path the pass
  * will touch — placeholder dirs, generated files, and (for upgrade) manifest-
  * tracked orphan candidates — it checks BOTH:
  *
- *  1. CONTAINMENT — {@link resolveWithinProject} (symlink escape / dangling /
- *     cycle → `PATH_OUTSIDE_PROJECT`).
+ *  1. OWNERSHIP — {@link resolveOwnedProjectPath} (every symlink component,
+ *     including an in-project alias, is rejected).
  *  2. TYPE — an EXISTING entry must match how the pass will use it: a `directory`
  *     spec must not already be a file (the `mkdir` would EEXIST); a `file` spec
  *     must not already be a directory (the write/read would EISDIR); and a
@@ -59,13 +106,14 @@ function configError(message: string): Error {
 export async function assertAdapterWritePathsContained(
   cwd: string,
   specs: Iterable<AdapterWritePathSpec>,
-): Promise<void> {
+): Promise<ResolvedAdapterWritePathSpec[]> {
+  const resolved: ResolvedAdapterWritePathSpec[] = [];
   for (const { path, kind } of specs) {
     assertSafeRelativePathImpl(path);
 
     let abs: string;
     try {
-      abs = await resolveWithinProjectImpl(cwd, path);
+      abs = await resolveOwnedProjectPath(cwd, path);
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === "PATH_OUTSIDE_PROJECT") throw err;
       // ENOTDIR (a non-directory component blocks the path) or any other resolve
@@ -81,7 +129,11 @@ export async function assertAdapterWritePathsContained(
       st = await stat(abs);
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
-      if (code === "ENOENT") continue; // not-yet-created — valid for file & directory
+      if (code === "ENOENT") {
+        // not-yet-created — valid for file & directory
+        resolved.push({ path, kind, absPath: abs });
+        continue;
+      }
       // ENOTDIR (intermediate component is a file), EACCES, etc.
       throw configError(
         `adapter write path "${path}" cannot be used (${code ?? "unreadable"})`,
@@ -101,7 +153,9 @@ export async function assertAdapterWritePathsContained(
         `adapter file path "${path}" already exists but is not a regular file`,
       );
     }
+    resolved.push({ path, kind, absPath: abs });
   }
+  return resolved;
 }
 
 // ---------------------------------------------------------------------------
