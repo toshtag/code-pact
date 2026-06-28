@@ -84,7 +84,9 @@ async function loadProjectSafe(cwd: string): Promise<Project | null> {
   try {
     return Project.parse(parseYaml(raw) as unknown);
   } catch (err) {
-    const e = new Error(`Cannot parse or validate ${path}: ${(err as Error).message}`);
+    const e = new Error(
+      `Cannot parse or validate ${path}: ${(err as Error).message}`,
+    );
     (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
     throw e;
   }
@@ -108,7 +110,10 @@ async function loadAgentProfileSafe(
 }
 
 async function loadModelProfilesSafe(cwd: string): Promise<ModelProfile[]> {
-  const dir = await resolveWithinProject(cwd, ".code-pact/model-profiles").catch(() => null);
+  const dir = await resolveWithinProject(
+    cwd,
+    ".code-pact/model-profiles",
+  ).catch(() => null);
   if (dir === null) return [];
   let entries: string[];
   try {
@@ -121,7 +126,10 @@ async function loadModelProfilesSafe(cwd: string): Promise<ModelProfile[]> {
     if (!entry.endsWith(".yaml")) continue;
     try {
       const raw = await readFile(
-        await resolveWithinProject(cwd, [".code-pact", "model-profiles", entry].join("/")),
+        await resolveWithinProject(
+          cwd,
+          [".code-pact", "model-profiles", entry].join("/"),
+        ),
         "utf8",
       );
       profiles.push(ModelProfile.parse(parseYaml(raw) as unknown));
@@ -203,7 +211,10 @@ function buildCurrentFingerprint(
   return fp;
 }
 
-function fingerprintsEqual(a: ProfileFingerprint, b: ProfileFingerprint): boolean {
+function fingerprintsEqual(
+  a: ProfileFingerprint,
+  b: ProfileFingerprint,
+): boolean {
   return (
     a.instruction_filename === b.instruction_filename &&
     a.context_dir === b.context_dir &&
@@ -256,7 +267,7 @@ function detectContractDrift(
   }
 
   const missing = AGENT_CONTRACT_AXIS_HEADINGS.filter(
-    (heading) => !diskContent.includes(heading),
+    heading => !diskContent.includes(heading),
   );
   if (missing.length > 0) {
     return {
@@ -314,7 +325,7 @@ function desiredEquivalentToManifest(
   if (deduped.length !== manifest.files.length) return false;
 
   const manifestHashByPath = new Map(
-    manifest.files.map((f) => [f.path, f.sha256]),
+    manifest.files.map(f => [f.path, f.sha256]),
   );
   if (manifestHashByPath.size !== manifest.files.length) return false; // dup paths
 
@@ -439,7 +450,7 @@ export async function inspectAgent(
       });
     }
 
-    const desiredByPath = new Map(desiredFiles.map((f) => [f.path, f]));
+    const desiredByPath = new Map(desiredFiles.map(f => [f.path, f]));
     // SECURITY (forged-manifest content/SHA oracle): generator output proves
     // write intent, not ownership of bytes already present at that path. Read
     // authority therefore comes only from the adapter's narrow static owned
@@ -492,8 +503,7 @@ export async function inspectAgent(
         );
         continue;
       }
-      const diskContent =
-        diskRead.kind === "content" ? diskRead.content : null;
+      const diskContent = diskRead.kind === "content" ? diskRead.content : null;
       const diskHash =
         diskContent === null ? null : computeContentHash(diskContent);
       const desired = desiredByPath.get(entry.path);
@@ -561,17 +571,20 @@ export async function inspectAgent(
     }
 
     // ---- Orphan scan ----
-    const manifestPaths = new Set(manifest.files.map((f) => f.path));
-    for (const glob of descriptor.ownedPathGlobs) {
-      const candidates = await listOwnedCandidates(cwd, glob);
-      for (const rel of candidates) {
-        if (manifestPaths.has(rel)) continue;
+    // ownedPathRoles keys are exact paths (no globs), so the scan is a simple
+    // existence check per static owned path. A file that exists on disk but is
+    // NOT in the manifest is flagged as ADAPTER_UNMANAGED_FILE.
+    const manifestPaths = new Set(manifest.files.map(f => f.path));
+    for (const ownedPath of Object.keys(descriptor.ownedPathRoles)) {
+      if (manifestPaths.has(ownedPath)) continue;
+      const exists = await readProjectFileForDoctor(cwd, ownedPath);
+      if (exists.kind === "content") {
         issues.push({
           code: "ADAPTER_UNMANAGED_FILE",
           severity: "warning",
-          message: `"${rel}" sits under a code-pact-owned namespace but is not in the manifest`,
+          message: `"${ownedPath}" sits under a code-pact-owned namespace but is not in the manifest`,
           agent: agentName,
-          path: join(cwd, rel),
+          path: join(cwd, ownedPath),
         });
       }
     }
@@ -591,48 +604,6 @@ export async function inspectAgent(
   return issues;
 }
 
-/**
- * Resolves `ownedPathGlobs` entries to project-relative POSIX paths that
- * exist on disk. Two forms are supported intentionally:
- *  - exact path: returned if the file exists
- *  - single-wildcard basename: directory part listed and entries matched
- *    by prefix+suffix around the `*` (e.g. `.claude/skills/code-pact-*.md`)
- *
- * Broad multi-segment globs (`.claude/skills/**`) are not supported, by
- * design — narrow ownedPathGlobs is the safety invariant that keeps
- * doctor from flagging user-created files like `.claude/skills/custom.md`.
- */
-async function listOwnedCandidates(
-  cwd: string,
-  glob: string,
-): Promise<string[]> {
-  if (!glob.includes("*")) {
-    const exists = await readProjectFileForDoctor(cwd, glob);
-    return exists.kind === "content" ? [glob] : [];
-  }
-  const slash = glob.lastIndexOf("/");
-  const dir = slash >= 0 ? glob.slice(0, slash) : ".";
-  const pattern = slash >= 0 ? glob.slice(slash + 1) : glob;
-  const star = pattern.indexOf("*");
-  if (star < 0) return [];
-  const prefix = pattern.slice(0, star);
-  const suffix = pattern.slice(star + 1);
-
-  let entries: string[];
-  try {
-    entries = await readdir(dir === "." ? cwd : await resolveWithinProject(cwd, dir));
-  } catch {
-    return [];
-  }
-  const out: string[] = [];
-  for (const entry of entries) {
-    if (!entry.startsWith(prefix) || !entry.endsWith(suffix)) continue;
-    if (entry.length < prefix.length + suffix.length) continue; // overlap
-    out.push(dir === "." ? entry : `${dir}/${entry}`);
-  }
-  return out;
-}
-
 // ---------------------------------------------------------------------------
 // Public runner
 // ---------------------------------------------------------------------------
@@ -643,7 +614,9 @@ export async function runAdapterDoctor(
   const { cwd, agentName, locale } = opts;
 
   if (agentName !== undefined && !isSupportedAgent(agentName)) {
-    const err = new Error(`No adapter implementation for agent "${agentName}".`);
+    const err = new Error(
+      `No adapter implementation for agent "${agentName}".`,
+    );
     (err as NodeJS.ErrnoException).code = "AGENT_NOT_FOUND";
     throw err;
   }
@@ -681,6 +654,6 @@ export async function runAdapterDoctor(
     issues.push(...found);
   }
 
-  const ok = issues.every((i) => i.severity !== "error");
+  const ok = issues.every(i => i.severity !== "error");
   return { ok, issues };
 }

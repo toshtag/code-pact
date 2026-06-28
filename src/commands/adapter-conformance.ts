@@ -64,7 +64,7 @@ export type AdapterConformanceResult = {
 // ---------------------------------------------------------------------------
 
 function findInstructionFile(manifest: AdapterManifest): ManifestFile | null {
-  return manifest.files.find((f) => f.role === "instruction") ?? null;
+  return manifest.files.find(f => f.role === "instruction") ?? null;
 }
 
 /**
@@ -110,8 +110,8 @@ function parseVersionCore(v: string): [number, number, number] | null {
   const core = (v.split("+")[0] ?? "").split("-")[0] ?? "";
   const parts = core.split(".");
   if (parts.length < 3) return null;
-  const nums = parts.slice(0, 3).map((p) => Number(p));
-  if (nums.some((n) => !Number.isInteger(n) || n < 0)) return null;
+  const nums = parts.slice(0, 3).map(p => Number(p));
+  if (nums.some(n => !Number.isInteger(n) || n < 0)) return null;
   return [nums[0]!, nums[1]!, nums[2]!];
 }
 
@@ -165,8 +165,11 @@ export function checkConsumptionAnchors(
   content: string,
   anchors: ReadonlyArray<string>,
 ): HardeningCheckResult {
-  const missing = anchors.filter((a) => !content.includes(a));
-  return { ok: missing.length === 0, details: { anchors: [...anchors], missing } };
+  const missing = anchors.filter(a => !content.includes(a));
+  return {
+    ok: missing.length === 0,
+    details: { anchors: [...anchors], missing },
+  };
 }
 
 /**
@@ -174,9 +177,7 @@ export function checkConsumptionAnchors(
  * check is surfaced (with remediation) but does not break compliance.
  */
 export function isAdapterCompliant(checks: ConformanceCheck[]): boolean {
-  return checks.every(
-    (c) => c.status === "pass" || c.severity === "advisory",
-  );
+  return checks.every(c => c.status === "pass" || c.severity === "advisory");
 }
 
 export type HardeningCheckResult = {
@@ -185,7 +186,9 @@ export type HardeningCheckResult = {
 };
 
 /** `task prepare` appears and precedes the first `recommend` / `task context`. */
-export function checkTaskPrepareIsPrimary(content: string): HardeningCheckResult {
+export function checkTaskPrepareIsPrimary(
+  content: string,
+): HardeningCheckResult {
   const prepareIdx = content.indexOf(PRIMARY_ENTRYPOINT_SURFACE);
   if (prepareIdx < 0) {
     return {
@@ -196,7 +199,7 @@ export function checkTaskPrepareIsPrimary(content: string): HardeningCheckResult
       },
     };
   }
-  const precededBy = PRIMARY_PRECEDES_SURFACES.filter((s) => {
+  const precededBy = PRIMARY_PRECEDES_SURFACES.filter(s => {
     const idx = content.indexOf(s);
     return idx >= 0 && idx < prepareIdx;
   });
@@ -211,14 +214,16 @@ export function checkTaskPrepareIsPrimary(content: string): HardeningCheckResult
 }
 
 /** No anti-pattern (e.g. `task finalize ... --agent`) in the guidance. */
-export function checkNoContractAntipatterns(content: string): HardeningCheckResult {
-  const found = CONTRACT_ANTIPATTERNS.filter((a) => a.pattern.test(content)).map(
-    (a) => a.id,
+export function checkNoContractAntipatterns(
+  content: string,
+): HardeningCheckResult {
+  const found = CONTRACT_ANTIPATTERNS.filter(a => a.pattern.test(content)).map(
+    a => a.id,
   );
   return {
     ok: found.length === 0,
     details: {
-      checked: CONTRACT_ANTIPATTERNS.map((a) => a.id),
+      checked: CONTRACT_ANTIPATTERNS.map(a => a.id),
       found,
     },
   };
@@ -229,14 +234,16 @@ export function checkNoContractAntipatterns(content: string): HardeningCheckResu
  * locale-independent anchor tokens. Verifies documentation PRESENCE,
  * never runtime obedience (a static file check cannot observe behaviour).
  */
-export function checkActivationRulesDocumented(content: string): HardeningCheckResult {
+export function checkActivationRulesDocumented(
+  content: string,
+): HardeningCheckResult {
   const missing = ACTIVATION_RULE_ANCHORS.filter(
-    (r) => !content.includes(r.anchor),
-  ).map((r) => r.id);
+    r => !content.includes(r.anchor),
+  ).map(r => r.id);
   return {
     ok: missing.length === 0,
     details: {
-      rules: ACTIVATION_RULE_ANCHORS.map((r) => r.id),
+      rules: ACTIVATION_RULE_ANCHORS.map(r => r.id),
       missing,
       checks: "documentation presence, not runtime obedience",
     },
@@ -275,8 +282,10 @@ export async function runAdapterConformance(
   if (manifest === null) {
     checks.push(
       fail("manifest_present", undefined, {
-        reason: "no adapter manifest at .code-pact/adapters/" +
-          agentName + ".manifest.yaml — run `code-pact adapter install` first",
+        reason:
+          "no adapter manifest at .code-pact/adapters/" +
+          agentName +
+          ".manifest.yaml — run `code-pact adapter install` first",
       }),
     );
     return { agent: agentName, compliant: false, checks };
@@ -285,11 +294,12 @@ export async function runAdapterConformance(
   checks.push(pass("manifest_present"));
 
   // The adapter descriptor carries the NARROW static read authority
-  // (ownedPathGlobs — the wildcard-free built-in paths, NOT the shared
-  // writePathGlobs namespace). EVERY manifest-entry read below is gated by it so
-  // a forged manifest cannot turn a diagnostic into a file-content/SHA oracle —
-  // including on a victim's hand-authored `.claude/skills/private.md`, which is
-  // in the shared write namespace but NOT in the narrow read-authority set.
+  // (ownedPathRoles — the exact built-in paths, NOT the shared
+  // createPathGlobsByRole namespace). EVERY manifest-entry read below is gated
+  // by it so a forged manifest cannot turn a diagnostic into a file-content/SHA
+  // oracle — including on a victim's hand-authored `.claude/skills/private.md`,
+  // which is in the shared create namespace but NOT in the narrow read-authority
+  // set.
   const descriptor = adapterRegistry[agentName];
 
   const instructionEntry = findInstructionFile(manifest);
@@ -362,18 +372,16 @@ export async function runAdapterConformance(
     if (instructionContent.includes(heading)) {
       checks.push(pass(checkId, instructionEntry.path));
     } else {
-      checks.push(
-        fail(checkId, instructionEntry.path, { expected: heading }),
-      );
+      checks.push(fail(checkId, instructionEntry.path, { expected: heading }));
     }
   }
 
   // ----- required CLI surface mentions (lifecycle + diagnostic) -----
   const missingLifecycle = LIFECYCLE_REQUIRED_SURFACES.filter(
-    (s) => !instructionContent.includes(s),
+    s => !instructionContent.includes(s),
   );
   const missingDiagnostic = DIAGNOSTIC_REQUIRED_SURFACES.filter(
-    (s) => !instructionContent.includes(s),
+    s => !instructionContent.includes(s),
   );
   const surfaceDetails = {
     lifecycle_required: [...LIFECYCLE_REQUIRED_SURFACES],
@@ -401,7 +409,7 @@ export async function runAdapterConformance(
 
   // ----- required failure guidance keywords -----
   const missingFailureGuidance = REQUIRED_FAILURE_GUIDANCE.filter(
-    (k) => !instructionContent.includes(k),
+    k => !instructionContent.includes(k),
   );
   const failureDetails = {
     required: [...REQUIRED_FAILURE_GUIDANCE],
@@ -409,19 +417,11 @@ export async function runAdapterConformance(
   };
   if (missingFailureGuidance.length === 0) {
     checks.push(
-      pass(
-        "required_failure_guidance",
-        instructionEntry.path,
-        failureDetails,
-      ),
+      pass("required_failure_guidance", instructionEntry.path, failureDetails),
     );
   } else {
     checks.push(
-      fail(
-        "required_failure_guidance",
-        instructionEntry.path,
-        failureDetails,
-      ),
+      fail("required_failure_guidance", instructionEntry.path, failureDetails),
     );
   }
 
@@ -430,20 +430,33 @@ export async function runAdapterConformance(
   // templates carry the hardened guidance (generator_version >=
   // threshold), advisory below so pre-hardening installs warn rather
   // than hard-fail. A failure's details carry the upgrade remediation.
-  const hardeningSeverity = resolveHardeningSeverity(manifest.generator_version);
+  const hardeningSeverity = resolveHardeningSeverity(
+    manifest.generator_version,
+  );
   const remediation = `adapter upgrade ${agentName} --write`;
 
   const hardeningChecks: Array<{
     id: string;
     result: HardeningCheckResult;
   }> = [
-    { id: "task_prepare_is_primary", result: checkTaskPrepareIsPrimary(instructionContent) },
-    { id: "no_contract_antipatterns", result: checkNoContractAntipatterns(instructionContent) },
-    { id: "activation_rules_documented", result: checkActivationRulesDocumented(instructionContent) },
+    {
+      id: "task_prepare_is_primary",
+      result: checkTaskPrepareIsPrimary(instructionContent),
+    },
+    {
+      id: "no_contract_antipatterns",
+      result: checkNoContractAntipatterns(instructionContent),
+    },
+    {
+      id: "activation_rules_documented",
+      result: checkActivationRulesDocumented(instructionContent),
+    },
   ];
   for (const { id, result } of hardeningChecks) {
     if (result.ok) {
-      checks.push(pass(id, instructionEntry.path, result.details, hardeningSeverity));
+      checks.push(
+        pass(id, instructionEntry.path, result.details, hardeningSeverity),
+      );
     } else {
       checks.push(
         fail(
@@ -460,11 +473,15 @@ export async function runAdapterConformance(
   // Verifies the guidance is PRESENT (anchored on short stable tokens), not
   // that an agent obeys it. Gated on its own release threshold so existing
   // 1.14–1.25 adapters stay advisory rather than failing en masse.
-  const consumptionSeverity = resolveConsumptionSeverity(manifest.generator_version);
+  const consumptionSeverity = resolveConsumptionSeverity(
+    manifest.generator_version,
+  );
   for (const { id, anchors } of RECOMMENDATION_CONSUMPTION_ANCHORS) {
     const result = checkConsumptionAnchors(instructionContent, anchors);
     if (result.ok) {
-      checks.push(pass(id, instructionEntry.path, result.details, consumptionSeverity));
+      checks.push(
+        pass(id, instructionEntry.path, result.details, consumptionSeverity),
+      );
     } else {
       checks.push(
         fail(
@@ -484,17 +501,29 @@ export async function runAdapterConformance(
     // not have generated) is refused — it is never read, no `actual_sha256` is
     // computed, no content leaves this function. This closes the dictionary/
     // low-entropy-token oracle on arbitrary local files.
-    const ownership = await classifyManifestFileForRead(cwd, descriptor, entry.path);
+    const ownership = await classifyManifestFileForRead(
+      cwd,
+      descriptor,
+      entry.path,
+      {
+        declaredRole: entry.role,
+      },
+    );
     if (ownership.kind === "unverifiable_dynamic") {
       // A legitimately generated dynamic skill in the shared namespace. Its name
       // is attacker-influenceable, so we cannot prove read-ownership: skip the
       // checksum (never read it) rather than hashing it or flagging it. Advisory
       // so a normal adapter with command-derived skills stays compliant.
       checks.push(
-        fail("file_checksum_skipped_unverifiable", entry.path, {
-          reason:
-            "dynamic skill in the shared .claude/skills namespace — read-ownership cannot be proven; checksum skipped (not read)",
-        }, "advisory"),
+        fail(
+          "file_checksum_skipped_unverifiable",
+          entry.path,
+          {
+            reason:
+              "dynamic skill in the shared .claude/skills namespace — read-ownership cannot be proven; checksum skipped (not read)",
+          },
+          "advisory",
+        ),
       );
       continue;
     }
