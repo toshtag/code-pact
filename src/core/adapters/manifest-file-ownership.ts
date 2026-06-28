@@ -32,6 +32,59 @@ export type ManifestFileOwnership =
   // (no checksum) rather than reading it or flagging it unowned.
   | { kind: "unverifiable_dynamic" };
 
+export type AdapterMutationPathAuthority =
+  | { kind: "owned"; absPath: string }
+  | { kind: "dynamic_write"; absPath: string }
+  | { kind: "unowned" }
+  | { kind: "unsafe" };
+
+/**
+ * Authorize a mutation-command path before any existence check, read, or hash.
+ * Static paths require an exact path/role match. A desired dynamic path may be
+ * resolved for creation, but it never gains authority to read existing bytes.
+ * Manifest-only orphans pass `allowDynamicWrite: false`, so an unowned path is
+ * rejected without even touching the target on disk.
+ */
+export async function authorizeAdapterMutationPath(
+  cwd: string,
+  descriptor: AdapterDescriptor,
+  relPath: string,
+  opts: {
+    expectedRole: DesiredAdapterFileRole;
+    declaredRole?: DesiredAdapterFileRole;
+    allowDynamicWrite: boolean;
+  },
+): Promise<AdapterMutationPathAuthority> {
+  const staticRole = descriptor.ownedPathRoles[relPath];
+  if (staticRole !== undefined) {
+    if (
+      staticRole !== opts.expectedRole ||
+      (opts.declaredRole !== undefined && opts.declaredRole !== staticRole)
+    ) {
+      return { kind: "unowned" };
+    }
+    try {
+      return { kind: "owned", absPath: await resolveOwnedProjectPath(cwd, relPath) };
+    } catch {
+      return { kind: "unsafe" };
+    }
+  }
+
+  if (!opts.allowDynamicWrite) return { kind: "unowned" };
+  const writeNamespace = descriptor.writePathGlobs ?? descriptor.ownedPathGlobs;
+  if (!writeNamespace.some((g) => matchGlob(g, relPath))) {
+    return { kind: "unowned" };
+  }
+  try {
+    return {
+      kind: "dynamic_write",
+      absPath: await resolveOwnedProjectPath(cwd, relPath),
+    };
+  } catch {
+    return { kind: "unsafe" };
+  }
+}
+
 /**
  * SECURITY (CWE-22/CWE-59/CWE-200 — forged-manifest file-content/SHA oracle):
  * a manifest is project-supplied and attacker-controllable. Its `files[].path`
@@ -72,9 +125,10 @@ export async function classifyManifestFileForRead(
     expectedRoleFor: ReadonlyMap<string, DesiredAdapterFileRole>;
   },
 ): Promise<ManifestFileOwnership> {
-  // NARROW static read authority — never the shared writePathGlobs namespace.
-  const ownedExact = descriptor.ownedPathGlobs;
-  if (!ownedExact.some((g) => matchGlob(g, relPath))) {
+  // NARROW static read authority — exact lookup, never glob matching and never
+  // the shared writePathGlobs namespace.
+  const staticRole = descriptor.ownedPathRoles[relPath];
+  if (staticRole === undefined) {
     // Distinguish a LEGITIMATE-but-unverifiable dynamic skill (inside the broad
     // write namespace) from a forged arbitrary path. The former is skipped (not
     // read, not a failure); the latter is a fail-closed security issue.
@@ -88,7 +142,11 @@ export async function classifyManifestFileForRead(
   // role must match the path's only legitimate role.
   if (roleCheck !== undefined) {
     const expected = roleCheck.expectedRoleFor.get(relPath);
-    if (expected === undefined || expected !== roleCheck.declaredRole) {
+    if (
+      expected === undefined ||
+      expected !== staticRole ||
+      roleCheck.declaredRole !== staticRole
+    ) {
       return { kind: "unowned" };
     }
   }
@@ -116,7 +174,7 @@ export function buildOwnedRoleMap(
 ): Map<string, DesiredAdapterFileRole> {
   const out = new Map<string, DesiredAdapterFileRole>();
   for (const f of desiredFiles) {
-    if (descriptor.ownedPathGlobs.some((g) => matchGlob(g, f.path))) {
+    if (descriptor.ownedPathRoles[f.path] === f.role) {
       out.set(f.path, f.role);
     }
   }

@@ -79,5 +79,6 @@ export const cursorAdapterDescriptor: AdapterDescriptor = {
   generateDesiredFiles: generateCursorDesiredFiles,
   capabilities: ["rules_file", "context_dir"] as const,
   ownedPathGlobs: [".cursor/rules/code-pact.mdc"] as const,
+  ownedPathRoles: { ".cursor/rules/code-pact.mdc": "rule" } as const,
   adapterSchemaVersion: 1,
 };

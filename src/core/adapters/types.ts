@@ -35,6 +35,12 @@ export type AdapterDescriptor = {
    */
   ownedPathGlobs: readonly string[];
   /**
+   * Exact static read/delete authority, including the only valid role for each
+   * path. Unlike `ownedPathGlobs`, this is not glob-matched: adding a wildcard
+   * must never silently expand authority to read or delete existing files.
+   */
+  ownedPathRoles: Readonly<Record<string, DesiredAdapterFileRole>>;
+  /**
    * STATIC generated paths the adapter may CREATE/OVERWRITE automatically.
    * Defaults to `ownedPathGlobs`. This may be broader than the delete/orphan
    * surface when an adapter intentionally generates a bounded family of files

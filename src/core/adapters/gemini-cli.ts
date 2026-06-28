@@ -72,5 +72,6 @@ export const geminiCliAdapterDescriptor: AdapterDescriptor = {
   generateDesiredFiles: generateGeminiCliDesiredFiles,
   capabilities: ["instructions_file", "context_dir"] as const,
   ownedPathGlobs: ["GEMINI.md"] as const,
+  ownedPathRoles: { "GEMINI.md": "instruction" } as const,
   adapterSchemaVersion: 1,
 };

@@ -331,6 +331,12 @@ export const claudeAdapterDescriptor: AdapterDescriptor = {
     ".claude/skills/verify.md",
     ".claude/skills/progress.md",
   ] as const,
+  ownedPathRoles: {
+    "CLAUDE.md": "instruction",
+    ".claude/skills/context.md": "skill",
+    ".claude/skills/verify.md": "skill",
+    ".claude/skills/progress.md": "skill",
+  } as const,
   // Static CREATE/OVERWRITE allowlist. Broader than ownedPathGlobs because
   // code-pact intentionally generates verification-command skills in the
   // default Claude skills directory. Profile redirects to arbitrary locations
