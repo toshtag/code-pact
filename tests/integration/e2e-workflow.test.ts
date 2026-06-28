@@ -241,9 +241,14 @@ describe("e2e: full agent-facing loop (init → adapter install → recommend �
       expect(driftKinds).toContain("done-but-design-not-done");
     }
 
-    // 12. adapter upgrade --check — fresh install, no drift expected.
+    // 12. adapter upgrade --check — static files are clean, while the existing
+    //     dynamic command skill is intentionally unverifiable in the shared
+    //     namespace and must be refused without reading its bytes.
     {
-      const env = project.runJson<{ clean: boolean; plan: { action: string }[] }>([
+      const env = project.runJson<{
+        clean: boolean;
+        plan: { relPath: string; action: string; reason?: string; local: string }[];
+      }>([
         "adapter",
         "upgrade",
         "claude-code",
@@ -252,11 +257,12 @@ describe("e2e: full agent-facing loop (init → adapter install → recommend �
       ]);
       expect(env.ok).toBe(true);
       if (env.ok) {
-        expect(env.data.clean).toBe(true);
-        // Every entry should be action: skip when clean.
-        for (const p of env.data.plan) {
-          expect(["skip", "update_manifest"]).toContain(p.action);
-        }
+        expect(env.data.clean).toBe(false);
+        expect(env.data.plan.find((p) => p.reason === "unowned_generated_path")).toMatchObject({
+          local: "unverifiable",
+          action: "refuse",
+          reason: "unowned_generated_path",
+        });
       }
     }
 

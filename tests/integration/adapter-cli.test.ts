@@ -690,10 +690,8 @@ describe("adapter agent-profile path symlink escape — CLI error mapping (secur
 });
 
 describe("adapter generated-file symlink escape — no pre-failure model pin (security)", () => {
-  // A generated file (e.g. CLAUDE.md) symlinked OUT of the project is caught by
-  // the path-safety preflight that runs BEFORE the `--model` pin, so a doomed
-  // install/upgrade fails closed (CONFIG_ERROR) with the profile untouched and
-  // the out-of-project target unwritten.
+  // A generated file (e.g. CLAUDE.md) symlinked OUT of the project is refused
+  // by the per-file read-authority gate before any read/hash or `--model` pin.
   async function linkFileOutside(rel: string): Promise<{ outside: string; target: string }> {
     const outside = await mkdtemp(join(tmpdir(), "code-pact-genfile-escape-"));
     const target = join(outside, "leaked.md");
@@ -703,14 +701,20 @@ describe("adapter generated-file symlink escape — no pre-failure model pin (se
     return { outside, target };
   }
 
-  it("install --model with CLAUDE.md symlinked outside → CONFIG_ERROR, profile not pinned, target unwritten", async () => {
+  it("install --model with CLAUDE.md symlinked outside → refusal, profile not pinned, target unwritten", async () => {
     const profilePath = join(dir, ".code-pact", "agent-profiles", "claude-code.yaml");
     const before = await readFile(profilePath, "utf8");
     const { outside, target } = await linkFileOutside("CLAUDE.md");
     const res = runCli(["adapter", "install", "claude-code", "--model", "sonnet-4.6", "--json"]);
-    expect(res.status).toBe(2);
-    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
-    expect(parsed.error.code).toBe("CONFIG_ERROR");
+    expect(res.status).toBe(1);
+    const parsed = JSON.parse(res.stdout) as {
+      ok: true;
+      data: { files: Array<{ relPath: string; action: string; reason?: string }> };
+    };
+    expect(parsed.data.files.find((f) => f.relPath === "CLAUDE.md")).toMatchObject({
+      action: "refuse",
+      reason: "symlink_traversal",
+    });
     expect(await readFile(profilePath, "utf8")).toBe(before);
     expect(await readFile(profilePath, "utf8")).not.toContain("model_version");
     // The out-of-project file the symlink points at was never overwritten.
@@ -718,15 +722,21 @@ describe("adapter generated-file symlink escape — no pre-failure model pin (se
     await rm(outside, { recursive: true, force: true });
   });
 
-  it("upgrade --write --model with CLAUDE.md symlinked outside → CONFIG_ERROR, profile not pinned", async () => {
+  it("upgrade --write --model with CLAUDE.md symlinked outside → refusal, profile not pinned", async () => {
     expect(runCli(["adapter", "install", "claude-code"]).status).toBe(0);
     const profilePath = join(dir, ".code-pact", "agent-profiles", "claude-code.yaml");
     const before = await readFile(profilePath, "utf8");
     const { outside, target } = await linkFileOutside("CLAUDE.md");
     const res = runCli(["adapter", "upgrade", "claude-code", "--write", "--model", "sonnet-4.6", "--json"]);
-    expect(res.status).toBe(2);
-    const parsed = JSON.parse(res.stdout) as { ok: false; error: { code: string } };
-    expect(parsed.error.code).toBe("CONFIG_ERROR");
+    expect(res.status).toBe(1);
+    const parsed = JSON.parse(res.stdout) as {
+      ok: true;
+      data: { plan: Array<{ relPath: string; action: string; reason?: string }> };
+    };
+    expect(parsed.data.plan.find((f) => f.relPath === "CLAUDE.md")).toMatchObject({
+      action: "refuse",
+      reason: "symlink_traversal",
+    });
     expect(await readFile(profilePath, "utf8")).toBe(before);
     expect(await readFile(target, "utf8")).toBe("ORIGINAL_OUTSIDE_CONTENT\n");
     await rm(outside, { recursive: true, force: true });

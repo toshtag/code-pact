@@ -444,19 +444,28 @@ describe("migration: v0.9-era project (manifest with stale generator_version)", 
     }
   });
 
-  it("adapter upgrade --write refreshes the manifest's generator_version", async () => {
+  it("adapter upgrade --write does not re-stamp while an existing dynamic skill is unverifiable", async () => {
     const { project: p, manifestPath, originalVersion } = await buildV09StaleProject("v09-upgrade");
 
     // Confirm the patch is in place before the upgrade.
     const beforeYaml = parseYaml(await readFile(manifestPath, "utf8")) as Record<string, unknown>;
     expect(beforeYaml.generator_version).toBe("0.8.0-alpha.0");
 
-    const env = p.runJson(["adapter", "upgrade", "claude-code", "--write", "--json"]);
+    const env = p.runJson<{
+      plan: Array<{ relPath: string; action: string; reason?: string; local: string }>;
+    }>(["adapter", "upgrade", "claude-code", "--write", "--json"]);
     expect(env.ok).toBe(true);
+    if (env.ok) {
+      expect(env.data.plan.find((row) => row.reason === "unowned_generated_path")).toMatchObject({
+        local: "unverifiable",
+        action: "refuse",
+        reason: "unowned_generated_path",
+      });
+    }
 
     const afterYaml = parseYaml(await readFile(manifestPath, "utf8")) as Record<string, unknown>;
-    expect(afterYaml.generator_version).toBe(originalVersion);
-    expect(afterYaml.generator_version).not.toBe("0.8.0-alpha.0");
+    expect(afterYaml.generator_version).toBe("0.8.0-alpha.0");
+    expect(afterYaml.generator_version).not.toBe(originalVersion);
 
     // After upgrade, adapter doctor should be clean (no STALE warning).
     const after = p.runJson<{
