@@ -103,6 +103,66 @@ describe("validateAdapterDescriptor", () => {
     ).toThrow(/protected namespace/);
   });
 
+  it("rejects instruction and rule create globs", () => {
+    expect(() =>
+      validateAdapterDescriptor("bad", {
+        ...baseDescriptor,
+        createPathGlobsByRole: {
+          instruction: ["design/*.md"],
+        },
+      }),
+    ).toThrow(/instruction and rule paths must be exact/);
+
+    expect(() =>
+      validateAdapterDescriptor("bad", {
+        ...baseDescriptor,
+        capabilities: ["rules_file", "context_dir"] as const,
+        ownedPathRoles: {
+          ".cursor/rules/code-pact.mdc": "rule",
+        },
+        profilePathContract: {
+          instructionFilename: ".cursor/rules/code-pact.mdc",
+        },
+        createPathGlobsByRole: {
+          rule: [".github/*.md"],
+        },
+      }),
+    ).toThrow(/instruction and rule paths must be exact/);
+  });
+
+  it("rejects skill or hook create globs without the matching directory contract", () => {
+    expect(() =>
+      validateAdapterDescriptor("bad", {
+        ...baseDescriptor,
+        capabilities: ["instructions_file", "skills_dir", "context_dir"] as const,
+        createPathGlobsByRole: {
+          skill: [".claude/skills/*.md"],
+        },
+      }),
+    ).toThrow(/requires profilePathContract.skillDir/);
+
+    expect(() =>
+      validateAdapterDescriptor("bad", {
+        ...baseDescriptor,
+        capabilities: ["instructions_file", "hooks_dir", "context_dir"] as const,
+        createPathGlobsByRole: {
+          hook: [".claude/hooks/*.json"],
+        },
+      }),
+    ).toThrow(/requires profilePathContract.hookDir/);
+  });
+
+  it("rejects duplicate create glob patterns", () => {
+    expect(() =>
+      validateAdapterDescriptor("bad", {
+        ...claudeLikeDescriptor,
+        createPathGlobsByRole: {
+          skill: [".claude/skills/*.md", ".claude/skills/*.md"],
+        },
+      }),
+    ).toThrow(/duplicated/);
+  });
+
   it("rejects create globs outside the role's profile directory", () => {
     expect(() =>
       validateAdapterDescriptor("bad", {
@@ -118,12 +178,23 @@ describe("validateAdapterDescriptor", () => {
     expect(() =>
       validateAdapterDescriptor("bad", {
         ...baseDescriptor,
-        capabilities: ["instructions_file", "skills_dir", "context_dir"] as const,
+        capabilities: [
+          "instructions_file",
+          "skills_dir",
+          "hooks_dir",
+          "context_dir",
+        ] as const,
+        ownedPathRoles: {
+          "AGENTS.md": "instruction",
+          ".claude/skills/context.md": "hook",
+        },
         createPathGlobsByRole: {
-          skill: ["*.md"],
+          skill: [".claude/skills/*.md"],
         },
         profilePathContract: {
           instructionFilename: "AGENTS.md",
+          skillDir: ".claude/skills",
+          hookDir: ".claude/hooks",
         },
       }),
     ).toThrow(/overlaps owned path/);

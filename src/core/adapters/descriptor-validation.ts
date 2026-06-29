@@ -14,7 +14,13 @@ const ROLE_BY_CAPABILITY: Partial<
 };
 
 const GLOB_META = /[*?[\]{}]/;
-const PROTECTED_CREATE_PREFIXES = [".git/", ".code-pact/"] as const;
+const PROTECTED_CREATE_PREFIXES = [
+  ".git/",
+  ".code-pact/",
+  ".context/",
+  "design/",
+  "node_modules/",
+] as const;
 
 function descriptorError(agentName: string, message: string): Error {
   const err = new Error(`Invalid adapter descriptor for "${agentName}": ${message}`);
@@ -109,7 +115,19 @@ function assertCreateGlobMatchesProfileContract(
   pattern: string,
 ): void {
   const contract = descriptor.profilePathContract;
-  if (role === "skill" && contract.skillDir !== undefined) {
+  if (role !== "skill" && role !== "hook") {
+    throw descriptorError(
+      agentName,
+      `create globs for role "${role}" are not allowed; instruction and rule paths must be exact owned paths.`,
+    );
+  }
+  if (role === "skill") {
+    if (contract.skillDir === undefined) {
+      throw descriptorError(
+        agentName,
+        `create glob "${pattern}" for role "skill" requires profilePathContract.skillDir.`,
+      );
+    }
     if (!pattern.startsWith(`${contract.skillDir}/`)) {
       throw descriptorError(
         agentName,
@@ -117,7 +135,13 @@ function assertCreateGlobMatchesProfileContract(
       );
     }
   }
-  if (role === "hook" && contract.hookDir !== undefined) {
+  if (role === "hook") {
+    if (contract.hookDir === undefined) {
+      throw descriptorError(
+        agentName,
+        `create glob "${pattern}" for role "hook" requires profilePathContract.hookDir.`,
+      );
+    }
     if (!pattern.startsWith(`${contract.hookDir}/`)) {
       throw descriptorError(
         agentName,
@@ -180,15 +204,29 @@ export function validateAdapterDescriptor(
   for (const [role, patterns] of Object.entries(
     descriptor.createPathGlobsByRole ?? {},
   ) as Array<[DesiredAdapterFileRole, readonly string[]]>) {
+    if (role !== "skill" && role !== "hook") {
+      throw descriptorError(
+        agentName,
+        `create globs for role "${role}" are not allowed; instruction and rule paths must be exact owned paths.`,
+      );
+    }
     if (!roleMatchesCapabilities(descriptor, role)) {
       throw descriptorError(
         agentName,
         `create globs declare role "${role}" but the matching capability is not declared.`,
       );
     }
+    const seenPatterns = new Set<string>();
     for (const pattern of patterns) {
       assertCreateGlobPath(agentName, `createPathGlobsByRole.${role}`, pattern);
       assertCreateGlobMatchesProfileContract(agentName, descriptor, role, pattern);
+      if (seenPatterns.has(pattern)) {
+        throw descriptorError(
+          agentName,
+          `create glob "${pattern}" for role "${role}" is duplicated.`,
+        );
+      }
+      seenPatterns.add(pattern);
       for (const [ownedPath, ownedRole] of Object.entries(
         descriptor.ownedPathRoles,
       )) {
