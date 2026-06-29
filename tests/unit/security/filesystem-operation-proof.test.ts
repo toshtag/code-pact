@@ -14,6 +14,7 @@ const spies = vi.hoisted(() => ({
   writeFile: vi.fn(),
   readdir: vi.fn(),
   mkdir: vi.fn(),
+  open: vi.fn(),
   rename: vi.fn(),
   rm: vi.fn(),
   access: vi.fn(),
@@ -53,8 +54,13 @@ vi.mock("node:fs/promises", async importActual => {
       spies.mkdir(String(args[0]));
       return actual.mkdir(...args);
     },
+    open: async (...args: Parameters<typeof actual.open>) => {
+      spies.open(String(args[0]));
+      return actual.open(...args);
+    },
     rename: async (...args: Parameters<typeof actual.rename>) => {
       spies.rename(String(args[0]));
+      spies.rename(String(args[1]));
       return actual.rename(...args);
     },
     rm: async (...args: Parameters<typeof actual.rm>) => {
@@ -67,10 +73,12 @@ vi.mock("node:fs/promises", async importActual => {
     },
     cp: async (...args: Parameters<typeof actual.cp>) => {
       spies.cp(String(args[0]));
+      spies.cp(String(args[1]));
       return actual.cp(...args);
     },
     copyFile: async (...args: Parameters<typeof actual.copyFile>) => {
       spies.copyFile(String(args[0]));
+      spies.copyFile(String(args[1]));
       return actual.copyFile(...args);
     },
   };
@@ -94,6 +102,7 @@ function targetOps(target: string): {
   write: string[];
   readdir: string[];
   mkdir: string[];
+  open: string[];
   rename: string[];
   rm: string[];
   access: string[];
@@ -122,6 +131,9 @@ function targetOps(target: string): {
     mkdir: spies.mkdir.mock.calls
       .map(([p]) => String(p))
       .filter(p => p === target),
+    open: spies.open.mock.calls
+      .map(([p]) => String(p))
+      .filter(p => p === target),
     rename: spies.rename.mock.calls
       .map(([p]) => String(p))
       .filter(p => p === target),
@@ -144,6 +156,7 @@ function resetSpies() {
   spies.writeFile.mockClear();
   spies.readdir.mockClear();
   spies.mkdir.mockClear();
+  spies.open.mockClear();
   spies.rename.mockClear();
   spies.rm.mockClear();
   spies.access.mockClear();
@@ -276,6 +289,7 @@ describe("filesystem operation proof — conformance", () => {
     expect(ops.write).toEqual([]);
     expect(ops.readdir).toEqual([]);
     expect(ops.mkdir).toEqual([]);
+    expect(ops.open).toEqual([]);
     expect(ops.rename).toEqual([]);
     expect(ops.rm).toEqual([]);
     expect(ops.access).toEqual([]);
@@ -332,6 +346,7 @@ describe("filesystem operation proof — conformance", () => {
     expect(ops.unlink).toEqual([]);
     expect(ops.readdir).toEqual([]);
     expect(ops.mkdir).toEqual([]);
+    expect(ops.open).toEqual([]);
     expect(ops.rename).toEqual([]);
     expect(ops.rm).toEqual([]);
     expect(ops.access).toEqual([]);
@@ -388,11 +403,13 @@ describe("filesystem operation proof — conformance", () => {
     expect(symlinkOps.unlink).toEqual([]);
     expect(symlinkOps.readdir).toEqual([]);
     expect(symlinkOps.mkdir).toEqual([]);
+    expect(symlinkOps.open).toEqual([]);
     expect(symlinkOps.rename).toEqual([]);
     expect(symlinkOps.rm).toEqual([]);
     expect(symlinkOps.access).toEqual([]);
     expect(targetOps2.readdir).toEqual([]);
     expect(targetOps2.mkdir).toEqual([]);
+    expect(targetOps2.open).toEqual([]);
     expect(targetOps2.rename).toEqual([]);
     expect(targetOps2.rm).toEqual([]);
     expect(targetOps2.access).toEqual([]);
@@ -427,6 +444,7 @@ describe("filesystem operation proof — doctor", () => {
     expect(ops.write).toEqual([]);
     expect(ops.readdir).toEqual([]);
     expect(ops.mkdir).toEqual([]);
+    expect(ops.open).toEqual([]);
     expect(ops.rename).toEqual([]);
     expect(ops.rm).toEqual([]);
     expect(ops.access).toEqual([]);
@@ -459,6 +477,7 @@ describe("filesystem operation proof — doctor", () => {
     expect(ops.write).toEqual([]);
     expect(ops.readdir).toEqual([]);
     expect(ops.mkdir).toEqual([]);
+    expect(ops.open).toEqual([]);
     expect(ops.rename).toEqual([]);
     expect(ops.rm).toEqual([]);
     expect(ops.access).toEqual([]);

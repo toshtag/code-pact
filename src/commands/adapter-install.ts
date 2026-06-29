@@ -474,9 +474,29 @@ export async function runAdapterInstall(
       planned.action === "replace_unmanaged" ||
       planned.action === "update"
     ) {
-      await mkdir(dirname(planned.absPath), { recursive: true });
-      await atomicWriteText(planned.absPath, planned.desired.content);
-      created.push(planned.absPath);
+      const writeAuthority = await authorizeAdapterMutationPath(
+        cwd,
+        descriptor,
+        planned.desired.path,
+        {
+          expectedRole: planned.desired.role,
+          allowDynamicWrite: true,
+        },
+      );
+      if (
+        writeAuthority.kind !== "owned" &&
+        writeAuthority.kind !== "dynamic_write"
+      ) {
+        const err = new Error(
+          `Refusing to write adapter file "${planned.desired.path}" without path authority.`,
+        );
+        (err as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+        throw err;
+      }
+      const absPath = writeAuthority.absPath;
+      await mkdir(dirname(absPath), { recursive: true });
+      await atomicWriteText(absPath, planned.desired.content);
+      created.push(absPath);
     } else if (planned.action === "adopt") {
       adopted.push(planned.absPath);
     }

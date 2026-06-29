@@ -303,7 +303,12 @@ export async function runAdapterUpgrade(
     absPath: string;
     action: FileAction;
   }> = [];
-  const orphanApply: Array<{ absPath: string; action: FileAction }> = [];
+  const orphanApply: Array<{
+    relPath: string;
+    role: DesiredAdapterFileRole;
+    absPath: string;
+    action: FileAction;
+  }> = [];
 
   for (const desired of desiredFiles) {
     assertSafeRelativePath(desired.path);
@@ -522,7 +527,7 @@ export async function runAdapterUpgrade(
 
     if (mode === "check") continue; // read-only
 
-    orphanApply.push({ absPath, action });
+    orphanApply.push({ relPath, role: entry.role, absPath, action });
     if (action !== "prune") {
       // refuse / warn: keep the file on disk AND keep tracking it, so the next
       // run still sees it as a managed orphan (and still refuses/warns) rather
@@ -591,12 +596,52 @@ export async function runAdapterUpgrade(
       item.action === "replace_unmanaged" ||
       item.action === "update"
     ) {
-      await mkdir(dirname(item.absPath), { recursive: true });
-      await atomicWriteText(item.absPath, item.desired.content);
+      const writeAuthority = await authorizeAdapterMutationPath(
+        cwd,
+        descriptor,
+        item.desired.path,
+        {
+          expectedRole: item.desired.role,
+          allowDynamicWrite: true,
+        },
+      );
+      if (
+        writeAuthority.kind !== "owned" &&
+        writeAuthority.kind !== "dynamic_write"
+      ) {
+        const err = new Error(
+          `Refusing to write adapter file "${item.desired.path}" without path authority.`,
+        );
+        (err as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+        throw err;
+      }
+      const absPath = writeAuthority.absPath;
+      await mkdir(dirname(absPath), { recursive: true });
+      await atomicWriteText(absPath, item.desired.content);
     }
   }
   for (const item of orphanApply) {
-    if (item.action === "prune") await rm(item.absPath, { force: true });
+    if (item.action === "prune") {
+      const pruneAuthority = await authorizeAdapterMutationPath(
+        cwd,
+        descriptor,
+        item.relPath,
+        {
+          expectedRole: item.role,
+          declaredRole: item.role,
+          allowDynamicWrite: false,
+        },
+      );
+      if (pruneAuthority.kind !== "owned") {
+        const err = new Error(
+          `Refusing to prune adapter file "${item.relPath}" without path authority.`,
+        );
+        (err as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+        throw err;
+      }
+      const absPath = pruneAuthority.absPath;
+      await rm(absPath, { force: true });
+    }
   }
 
   // --write: persist the new manifest after all refusal checks have passed.

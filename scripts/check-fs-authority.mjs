@@ -24,10 +24,6 @@
 //   writeManifest
 //   readManifest
 //
-// Variables that hold pre-resolved safe paths (assigned from authority
-// resolvers or destructured from their results):
-//   absPath, contextDirAbs, absTarget, absOther, containedPath
-//
 // Exemptions:
 //   - Lines with `// fs-safe: <reason>` are exempt.
 //   - The authority resolver definitions themselves are exempt.
@@ -89,15 +85,7 @@ const AUTHORITY_CALLS = new Set([
   "readManifest",
 ]);
 
-const AUTHORITY_VARS = new Set([
-  "absPath",
-  "contextDirAbs",
-  "absTarget",
-  "absOther",
-  "containedPath",
-]);
-
-const AUTHORITY_PROPS = new Set(["absPath"]);
+const AUTHORITY_RESULT_PROPS = new Set(["absPath"]);
 
 // ---------------------------------------------------------------------------
 // AST analysis
@@ -123,18 +111,20 @@ function isAuthorityExpression(node, varProvenance) {
 
   if (ts.isPropertyAccessExpression(node)) {
     const propName = node.name.text;
-    if (AUTHORITY_PROPS.has(propName)) return true;
     if (ts.isIdentifier(node.expression)) {
       const objName = node.expression.text;
-      if (AUTHORITY_VARS.has(objName)) return true;
-      if (varProvenance.has(objName)) return true;
+      if (
+        AUTHORITY_RESULT_PROPS.has(propName) &&
+        varProvenance.has(objName)
+      ) {
+        return true;
+      }
     }
     return false;
   }
 
   if (ts.isIdentifier(node)) {
     const name = node.text;
-    if (AUTHORITY_VARS.has(name)) return true;
     if (varProvenance.has(name)) return true;
     return false;
   }
@@ -187,10 +177,13 @@ function collectVarProvenance(sourceFile) {
       for (const decl of node.declarationList.declarations) {
         if (
           decl.initializer &&
-          ts.isIdentifier(decl.name) &&
-          isAuthorityExpression(decl.initializer, provenance)
+          ts.isIdentifier(decl.name)
         ) {
-          provenance.add(decl.name.text);
+          if (isAuthorityExpression(decl.initializer, provenance)) {
+            provenance.add(decl.name.text);
+          } else {
+            provenance.delete(decl.name.text);
+          }
         }
       }
     }
@@ -198,10 +191,14 @@ function collectVarProvenance(sourceFile) {
       ts.isExpressionStatement(node) &&
       ts.isBinaryExpression(node.expression) &&
       node.expression.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
-      ts.isIdentifier(node.expression.left) &&
-      isAuthorityExpression(node.expression.right, provenance)
+      ts.isIdentifier(node.expression.left)
     ) {
-      provenance.add(node.expression.left.text);
+      const name = node.expression.left.text;
+      if (isAuthorityExpression(node.expression.right, provenance)) {
+        provenance.add(name);
+      } else {
+        provenance.delete(name);
+      }
     }
     ts.forEachChild(node, visit);
   }
