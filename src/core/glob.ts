@@ -1,5 +1,5 @@
-import type { Dirent } from "node:fs";
-import { readdir } from "node:fs/promises";
+import type { Dirent } from "./project-fs/index.ts";
+import { readdir } from "./project-fs/index.ts";
 import { join, relative } from "node:path";
 
 // ---------------------------------------------------------------------------

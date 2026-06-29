@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile } from "../project-fs/index.ts";
 import { DecisionStateRecord } from "../schemas/decision-state-record.ts";
 import { decisionRecordRelPath, resolveArchiveOwnedPath } from "./paths.ts";
 import { loadArchiveBundles } from "./archive-bundle-loader.ts";

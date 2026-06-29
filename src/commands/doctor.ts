@@ -1,4 +1,4 @@
-import { readFile, readdir, access } from "node:fs/promises";
+import { readFile, readdir, access } from "../core/project-fs/index.ts";
 import { join, basename, extname } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { Roadmap } from "../core/schemas/roadmap.ts";

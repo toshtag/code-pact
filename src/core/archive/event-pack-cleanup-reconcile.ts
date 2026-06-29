@@ -20,7 +20,7 @@
 // step (R0–R5)" is the binding source here.
 // ---------------------------------------------------------------------------
 
-import { readdir, lstat, readFile } from "node:fs/promises";
+import { readdir, lstat, readFile } from "../project-fs/index.ts";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { ProgressEvent } from "../schemas/progress-event.ts";

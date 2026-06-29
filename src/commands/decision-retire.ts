@@ -1,4 +1,4 @@
-import { readFile, lstat, stat, unlink } from "node:fs/promises";
+import { readFile, lstat, stat, unlink } from "../core/project-fs/index.ts";
 import { dirname } from "node:path";
 import { resolveSymlinkFreeProjectPath } from "../core/path-safety.ts";
 import { sha256Hex, normalizeDecisionRef, decisionRecordPath } from "../core/archive/paths.ts";

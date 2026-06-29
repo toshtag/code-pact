@@ -1,4 +1,4 @@
-import { mkdir, rename, unlink, readFile, open } from "node:fs/promises";
+import { mkdir, rename, unlink, readFile, open } from "../core/project-fs/index.ts";
 import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
 

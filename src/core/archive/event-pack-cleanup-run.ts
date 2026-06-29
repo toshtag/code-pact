@@ -20,7 +20,7 @@
 // pack covering the snapshot) — NEVER from the dry-run `planLooseCleanup` cross-read.
 // ---------------------------------------------------------------------------
 
-import { unlink } from "node:fs/promises";
+import { unlink } from "../project-fs/index.ts";
 import {
   evaluateDeleteGate,
   looseEventRelPath,

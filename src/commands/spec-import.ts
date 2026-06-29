@@ -1,4 +1,4 @@
-import { readFile, stat } from "node:fs/promises";
+import { readFile, stat } from "../core/project-fs/index.ts";
 import { stringify as stringifyYaml } from "yaml";
 
 import { atomicWriteText } from "../io/atomic-text.ts";

@@ -31,7 +31,7 @@ import {
   parseAdrCommitments,
 } from "../decisions/adr.ts";
 import { parseFrontMatter } from "../pack/front-matter.ts";
-import { readFile } from "node:fs/promises";
+import { readFile } from "../project-fs/index.ts";
 import { parse as parseYaml } from "yaml";
 import { Project } from "../schemas/project.ts";
 import { detectContextFitAdvisories } from "../context-fit/advisories.ts";

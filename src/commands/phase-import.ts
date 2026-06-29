@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile } from "../core/project-fs/index.ts";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { PhaseImportInput, type PhaseImportEntry, type TaskImport } from "../core/schemas/phase-import.ts";

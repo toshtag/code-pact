@@ -1,4 +1,4 @@
-import { mkdir, access, lstat, readFile } from "node:fs/promises";
+import { mkdir, access, lstat, readFile } from "../core/project-fs/index.ts";
 import { atomicWriteText } from "../io/atomic-text.ts";
 import { stringify as toYaml } from "yaml";
 import type { LocaleCode } from "../core/schemas/locale.ts";

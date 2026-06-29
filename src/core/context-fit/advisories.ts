@@ -19,7 +19,7 @@
 // reference, or a broad reads glob can all be legitimate. The advisories
 // surface size risk; they never block work or apply a budget automatically.
 
-import { readFile } from "node:fs/promises";
+import { readFile } from "../project-fs/index.ts";
 import { buildContextPack } from "../pack/index.ts";
 import { recommendContextFit } from "../recommend/context-fit.ts";
 import { STANDARD_CONTEXT_BUDGET_PROFILES } from "./budget-profiles.ts";

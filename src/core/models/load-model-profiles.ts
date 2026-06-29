@@ -1,4 +1,4 @@
-import { readFile, readdir, stat } from "node:fs/promises";
+import { readFile, readdir, stat } from "../project-fs/index.ts";
 import { parse as parseYaml } from "yaml";
 import { ModelProfile } from "../schemas/model-profile.ts";
 import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";

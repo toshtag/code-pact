@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile } from "../project-fs/index.ts";
 import {
   PROTECTED_PATHS,
   synthesizeSample,

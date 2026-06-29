@@ -1,4 +1,4 @@
-import { readdir, readFile } from "node:fs/promises";
+import { readdir, readFile } from "../project-fs/index.ts";
 import { basename } from "node:path";
 import { PhaseSnapshot } from "../schemas/phase-snapshot.ts";
 import type { TerminalEvidence } from "../schemas/phase-snapshot.ts";

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { readFile } from "../core/project-fs/index.ts";
 import type { SupportedAgent } from "../core/agents.ts";
 import {
   ACTIVATION_RULE_ANCHORS,

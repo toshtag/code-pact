@@ -1,4 +1,4 @@
-import { readdir } from "node:fs/promises";
+import { readdir } from "../../project-fs/index.ts";
 import { join } from "node:path";
 import type { PlanIssue } from "../shared.ts";
 import type { Roadmap } from "../../schemas/roadmap.ts";

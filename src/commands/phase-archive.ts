@@ -1,4 +1,4 @@
-import { readFile, lstat, stat, unlink } from "node:fs/promises";
+import { readFile, lstat, stat, unlink } from "../core/project-fs/index.ts";
 import { dirname } from "node:path";
 import { resolvePhaseRef } from "../core/plan/resolve-phase.ts";
 import { loadRoadmap } from "../core/plan/roadmap.ts";

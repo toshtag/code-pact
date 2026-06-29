@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile } from "../core/project-fs/index.ts";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { atomicWriteText } from "../io/atomic-text.ts";

@@ -1,4 +1,4 @@
-import { readFile, readdir } from "node:fs/promises";
+import { readFile, readdir } from "../project-fs/index.ts";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { loadYaml, ParseError } from "../../io/load.ts";

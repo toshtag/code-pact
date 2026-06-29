@@ -1,5 +1,5 @@
-import { lstat, realpath } from "node:fs/promises";
-import { lstatSync, realpathSync } from "node:fs";
+import { lstat, realpath } from "./project-fs/index.ts";
+import { lstatSync, realpathSync } from "./project-fs/index.ts";
 import { join, resolve, sep } from "node:path";
 import { RelativePosixPath } from "./schemas/relative-path.ts";
 

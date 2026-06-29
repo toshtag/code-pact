@@ -1,4 +1,4 @@
-import { access } from "node:fs/promises";
+import { access } from "../project-fs/index.ts";
 import { atomicWriteText } from "../../io/atomic-text.ts";
 import { assertSafeRelativePath, resolveSymlinkFreeProjectPath } from "../path-safety.ts";
 import { PLAN_ID_PATTERN } from "../schemas/plan-id.ts";

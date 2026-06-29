@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile } from "../core/project-fs/index.ts";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 

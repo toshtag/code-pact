@@ -1,4 +1,4 @@
-import { access } from "node:fs/promises";
+import { access } from "../project-fs/index.ts";
 import {
   loadDecisionRecord,
   resolveArchiveDecisionRecord,

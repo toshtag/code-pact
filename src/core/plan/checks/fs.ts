@@ -1,5 +1,5 @@
-import { access } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { access } from "../../project-fs/index.ts";
+import { existsSync } from "../../project-fs/index.ts";
 import {
   resolveSymlinkFreeProjectPath,
   resolveSymlinkFreeProjectPathSync,

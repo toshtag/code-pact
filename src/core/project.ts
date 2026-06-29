@@ -3,7 +3,7 @@
 // agent-resolution contract (codes, messages, precedence) defined in one place;
 // the per-function doc below is the contract of record.
 
-import { readFile } from "node:fs/promises";
+import { readFile } from "./project-fs/index.ts";
 import { parse as parseYaml } from "yaml";
 import { Project } from "./schemas/project.ts";
 import { resolveProjectConfigPath } from "./project-config-path.ts";

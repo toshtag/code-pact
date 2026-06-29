@@ -12,7 +12,7 @@
 // decision seams are FAIL-CLOSED (throw on a non-ENOENT error), so the loaders
 // wrap them in a call-site catch to keep their optional degrade-to-[]/skip.
 
-import { readFile, readdir } from "node:fs/promises";
+import { readFile, readdir } from "../project-fs/index.ts";
 import { parse as parseYaml } from "yaml";
 import { Phase } from "../schemas/phase.ts";
 import { AgentProfile } from "../schemas/agent-profile.ts";

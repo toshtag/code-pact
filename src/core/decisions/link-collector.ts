@@ -1,4 +1,4 @@
-import { readFile, readdir } from "node:fs/promises";
+import { readFile, readdir } from "../project-fs/index.ts";
 import { posix } from "node:path";
 import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
 

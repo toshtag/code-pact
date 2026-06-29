@@ -1,4 +1,4 @@
-import { readFile, readdir, stat } from "node:fs/promises";
+import { readFile, readdir, stat } from "./index.ts";
 import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
 import { isDecisionRefPath } from "../schemas/decision-ref.ts";
 import { PhaseRef } from "../schemas/roadmap.ts";

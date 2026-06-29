@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile } from "../core/project-fs/index.ts";
 import { parse as parseYaml } from "yaml";
 import type { ZodType } from "zod";
 

@@ -141,6 +141,7 @@ const AUTHORITY_EXPORTS = new Map([
 // internally because they use resolveSymlinkFreeProjectPath internally.
 // These are excluded from checking (like authority export modules).
 const TRUSTED_FS_MODULES = new Set([
+  join("src", "core", "project-fs", "index.ts"),
   join("src", "core", "path-safety.ts"),
   join("src", "core", "project-config-path.ts"),
   join("src", "core", "project-fs", "owned-read.ts"),

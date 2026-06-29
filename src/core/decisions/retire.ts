@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile } from "../project-fs/index.ts";
 import type { PhaseEntry } from "../plan/state.ts";
 import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
 import { normalizePrunedDecisionPath } from "./pruned-ledger.ts";

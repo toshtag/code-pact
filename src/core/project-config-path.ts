@@ -1,4 +1,4 @@
-import { readFile, stat } from "node:fs/promises";
+import { readFile, stat } from "./project-fs/index.ts";
 import { resolveSymlinkFreeProjectPath } from "./path-safety.ts";
 
 const PROJECT_YAML_LOCALE_MAX_BYTES = 64 * 1024;

@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile } from "../core/project-fs/index.ts";
 import { loadRoadmap } from "../core/plan/roadmap.ts";
 import { loadPhase } from "../core/plan/load-phase.ts";
 import { BaselineSnapshot } from "../core/schemas/baseline-snapshot.ts";

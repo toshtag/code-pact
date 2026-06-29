@@ -1,4 +1,4 @@
-import { readdir } from "node:fs/promises";
+import { readdir } from "../project-fs/index.ts";
 import { ArchiveBundleKind } from "../schemas/archive-bundle.ts";
 import {
   archiveBundlesRelDir,

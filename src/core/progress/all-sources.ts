@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile } from "../project-fs/index.ts";
 import { parse as parseYaml } from "yaml";
 import { ProgressLog, type ProgressEvent } from "../schemas/progress-event.ts";
 import { computeEventId } from "./event-id.ts";

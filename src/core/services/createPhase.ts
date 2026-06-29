@@ -1,4 +1,4 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir } from "../project-fs/index.ts";
 import { stringify as toYaml } from "yaml";
 import { atomicWriteText } from "../../io/atomic-text.ts";
 import { Phase } from "../schemas/phase.ts";
