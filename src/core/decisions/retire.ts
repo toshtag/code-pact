@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import type { PhaseEntry } from "../plan/state.ts";
-import { resolveWithinProject } from "../path-safety.ts";
+import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
 import { normalizePrunedDecisionPath } from "./pruned-ledger.ts";
 import {
   classifyAdr,
@@ -33,15 +33,28 @@ export type RetireBlock =
   | { gate: "target_invalid"; detail: string }
   | { gate: "target_missing"; detail: string }
   | { gate: "target_unreadable"; detail: string }
-  | { gate: "referencing_task_not_done"; task_id: string; phase_id: string; via: RetireRefVia; status: string }
+  | {
+      gate: "referencing_task_not_done";
+      task_id: string;
+      phase_id: string;
+      via: RetireRefVia;
+      status: string;
+    }
   | { gate: "open_commitments"; open_items: number }
   | { gate: "live_decision_depends"; decision: string; status: string }
-  | { gate: "dependency_status_unknown"; decision: string; status: string | null }
+  | {
+      gate: "dependency_status_unknown";
+      decision: string;
+      status: string | null;
+    }
   | { gate: "dependency_unreadable"; decision: string }
   | { gate: "decision_scan_unreadable"; detail: string }
   | { gate: "plan_artifacts_unreadable"; detail: string };
 
-export type RetireRefVia = "decision_refs" | "acceptance_refs" | "filename_scan";
+export type RetireRefVia =
+  | "decision_refs"
+  | "acceptance_refs"
+  | "filename_scan";
 
 export type RetireReferencingTask = {
   task_id: string;
@@ -101,10 +114,10 @@ export async function collectRetireReferences(
   for (const { phase } of phases) {
     for (const task of phase.tasks ?? []) {
       const viaDecisionRef = (task.decision_refs ?? []).some(
-        (r) => normalizePrunedDecisionPath(r) === decision,
+        r => normalizePrunedDecisionPath(r) === decision,
       );
       const viaAcceptanceRef = (task.acceptance_refs ?? []).some(
-        (r) => normalizePrunedDecisionPath(r) === decision,
+        r => normalizePrunedDecisionPath(r) === decision,
       );
       // Filename-scan gate: a `requires_decision` task whose gate the resolver
       // resolves via a filename match on this decision. CRITICAL: this runs whenever
@@ -115,11 +128,15 @@ export async function collectRetireReferences(
       // can never carry a filename-scan gate, so this case MUST block even when the
       // same target is also an `acceptance_refs` (else retire would orphan the gate).
       let viaFilenameScan = false;
-      if (!viaDecisionRef && resolver !== null && isDecisionRequiredForTask(phase, task)) {
+      if (
+        !viaDecisionRef &&
+        resolver !== null &&
+        isDecisionRequiredForTask(phase, task)
+      ) {
         try {
           const res = await resolver.resolve(task.id, task.decision_refs);
           viaFilenameScan = res.considered.some(
-            (c) => normalizePrunedDecisionPath(c.path) === decision,
+            c => normalizePrunedDecisionPath(c.path) === decision,
           );
         } catch (err) {
           blocks.push({
@@ -139,13 +156,22 @@ export async function collectRetireReferences(
         : viaFilenameScan
           ? "filename_scan"
           : "acceptance_refs";
-      referencing.push({ task_id: task.id, phase_id: phase.id, status: task.status, via });
+      referencing.push({
+        task_id: task.id,
+        phase_id: phase.id,
+        status: task.status,
+        via,
+      });
 
       if (task.status === "done") continue; // settled — never blocks
 
       // STATUS-SENSITIVE carriability of an ACTIVE reference:
       const carried =
-        via === "acceptance_refs" ? true : via === "decision_refs" ? recordAccepted : false;
+        via === "acceptance_refs"
+          ? true
+          : via === "decision_refs"
+            ? recordAccepted
+            : false;
       if (!carried) {
         blocks.push({
           gate: "referencing_task_not_done",
@@ -176,30 +202,42 @@ async function sharedExternalGates(
   // Target must be a readable regular file inside the project (symlink-escape-safe).
   let content: string | null = null;
   try {
-    const absTarget = await resolveWithinProject(cwd, decision);
+    const absTarget = await resolveSymlinkFreeProjectPath(cwd, decision);
     content = await readFile(absTarget, "utf8");
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "ENOENT") {
-      blocks.push({ gate: "target_missing", detail: `${decision} does not exist on disk` });
-    } else if (code === "PATH_OUTSIDE_PROJECT" || code === undefined) {
-      // resolveWithinProject tags a symlink/path escape `PATH_OUTSIDE_PROJECT`;
+      blocks.push({
+        gate: "target_missing",
+        detail: `${decision} does not exist on disk`,
+      });
+    } else if (
+      code === "PATH_OUTSIDE_PROJECT" ||
+      code === "PATH_NOT_OWNED" ||
+      code === undefined
+    ) {
+      // resolveSymlinkFreeProjectPath tags a symlink traversal `PATH_NOT_OWNED`;
+      // resolveWithinProject tags a containment escape `PATH_OUTSIDE_PROJECT`;
       // a structural rejection (assertSafeRelativePath's code-less ZodError) is
-      // the `code === undefined` case. Both are path-validity failures → invalid.
+      // the `code === undefined` case. All are path-validity failures → invalid.
       blocks.push({
         gate: "target_invalid",
         detail: `${decision} escapes the project root (symlink or unsafe path)`,
       });
     } else {
-      blocks.push({ gate: "target_unreadable", detail: `${decision} is not a readable file (${code})` });
+      blocks.push({
+        gate: "target_unreadable",
+        detail: `${decision} is not a readable file (${code})`,
+      });
     }
   }
 
   // open_commitments (same content read).
   if (content !== null) {
     const { hasSection, items } = parseAdrCommitments(content);
-    const open = items.filter((i) => !i.done).length;
-    if (hasSection && open > 0) blocks.push({ gate: "open_commitments", open_items: open });
+    const open = items.filter(i => !i.done).length;
+    if (hasSection && open > 0)
+      blocks.push({ gate: "open_commitments", open_items: open });
   }
 
   // live_decision_depends / dependency_status_unknown / dependency_unreadable —
@@ -220,7 +258,7 @@ async function sharedExternalGates(
     if (otherPath === decision) continue;
     let other: string;
     try {
-      const absOther = await resolveWithinProject(cwd, otherPath);
+      const absOther = await resolveSymlinkFreeProjectPath(cwd, otherPath);
       other = await readFile(absOther, "utf8");
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") continue; // raced away
@@ -236,7 +274,11 @@ async function sharedExternalGates(
         status: cls.status.word ?? "proposed",
       });
     } else if (cls.acceptance === "unknown_status") {
-      blocks.push({ gate: "dependency_status_unknown", decision: otherPath, status: cls.status.word });
+      blocks.push({
+        gate: "dependency_status_unknown",
+        decision: otherPath,
+        status: cls.status.word,
+      });
     }
   }
 
@@ -272,10 +314,15 @@ export async function evaluateRetire(
     };
   }
 
-  const { blocks: externalBlocks, target_content } = await sharedExternalGates(cwd, decision);
+  const { blocks: externalBlocks, target_content } = await sharedExternalGates(
+    cwd,
+    decision,
+  );
 
   // "accepted" for the pre-write referencing gate = the live `.md`'s classification.
-  const liveAccepted = target_content !== null && classifyAdr(target_content).acceptance === "accepted";
+  const liveAccepted =
+    target_content !== null &&
+    classifyAdr(target_content).acceptance === "accepted";
   const { referencing, blocks: refBlocks } = await collectRetireReferences(
     cwd,
     decision,
@@ -311,6 +358,11 @@ export async function recheckRetireExternalState(
   // dependency / scan that became unreadable, or a new live dependant, IS caught.
   const { blocks: externalBlocks } = await sharedExternalGates(cwd, decision);
   // (B) retire-only reference scan re-run, accepted = the written record's verdict.
-  const { blocks: refBlocks } = await collectRetireReferences(cwd, decision, phases, recordAccepted);
+  const { blocks: refBlocks } = await collectRetireReferences(
+    cwd,
+    decision,
+    phases,
+    recordAccepted,
+  );
   return [...externalBlocks, ...refBlocks];
 }

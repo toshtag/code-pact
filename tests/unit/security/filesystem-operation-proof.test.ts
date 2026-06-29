@@ -12,6 +12,13 @@ const spies = vi.hoisted(() => ({
   lstat: vi.fn(),
   unlink: vi.fn(),
   writeFile: vi.fn(),
+  readdir: vi.fn(),
+  mkdir: vi.fn(),
+  rename: vi.fn(),
+  rm: vi.fn(),
+  access: vi.fn(),
+  cp: vi.fn(),
+  copyFile: vi.fn(),
 }));
 
 vi.mock("node:fs/promises", async importActual => {
@@ -38,6 +45,34 @@ vi.mock("node:fs/promises", async importActual => {
       spies.writeFile(String(args[0]));
       return actual.writeFile(...args);
     },
+    readdir: async (...args: Parameters<typeof actual.readdir>) => {
+      spies.readdir(String(args[0]));
+      return actual.readdir(...args);
+    },
+    mkdir: async (...args: Parameters<typeof actual.mkdir>) => {
+      spies.mkdir(String(args[0]));
+      return actual.mkdir(...args);
+    },
+    rename: async (...args: Parameters<typeof actual.rename>) => {
+      spies.rename(String(args[0]));
+      return actual.rename(...args);
+    },
+    rm: async (...args: Parameters<typeof actual.rm>) => {
+      spies.rm(String(args[0]));
+      return actual.rm(...args);
+    },
+    access: async (...args: Parameters<typeof actual.access>) => {
+      spies.access(String(args[0]));
+      return actual.access(...args);
+    },
+    cp: async (...args: Parameters<typeof actual.cp>) => {
+      spies.cp(String(args[0]));
+      return actual.cp(...args);
+    },
+    copyFile: async (...args: Parameters<typeof actual.copyFile>) => {
+      spies.copyFile(String(args[0]));
+      return actual.copyFile(...args);
+    },
   };
 });
 
@@ -57,6 +92,13 @@ function targetOps(target: string): {
   lstat: string[];
   unlink: string[];
   write: string[];
+  readdir: string[];
+  mkdir: string[];
+  rename: string[];
+  rm: string[];
+  access: string[];
+  cp: string[];
+  copyFile: string[];
 } {
   return {
     read: spies.readFile.mock.calls
@@ -74,6 +116,23 @@ function targetOps(target: string): {
     write: spies.writeFile.mock.calls
       .map(([p]) => String(p))
       .filter(p => p === target),
+    readdir: spies.readdir.mock.calls
+      .map(([p]) => String(p))
+      .filter(p => p === target),
+    mkdir: spies.mkdir.mock.calls
+      .map(([p]) => String(p))
+      .filter(p => p === target),
+    rename: spies.rename.mock.calls
+      .map(([p]) => String(p))
+      .filter(p => p === target),
+    rm: spies.rm.mock.calls.map(([p]) => String(p)).filter(p => p === target),
+    access: spies.access.mock.calls
+      .map(([p]) => String(p))
+      .filter(p => p === target),
+    cp: spies.cp.mock.calls.map(([p]) => String(p)).filter(p => p === target),
+    copyFile: spies.copyFile.mock.calls
+      .map(([p]) => String(p))
+      .filter(p => p === target),
   };
 }
 
@@ -83,6 +142,13 @@ function resetSpies() {
   spies.lstat.mockClear();
   spies.unlink.mockClear();
   spies.writeFile.mockClear();
+  spies.readdir.mockClear();
+  spies.mkdir.mockClear();
+  spies.rename.mockClear();
+  spies.rm.mockClear();
+  spies.access.mockClear();
+  spies.cp.mockClear();
+  spies.copyFile.mockClear();
 }
 
 const VALID_CONTRACT_BODY = `# Some Adapter
@@ -208,6 +274,13 @@ describe("filesystem operation proof — conformance", () => {
     expect(ops.lstat).toEqual([]);
     expect(ops.unlink).toEqual([]);
     expect(ops.write).toEqual([]);
+    expect(ops.readdir).toEqual([]);
+    expect(ops.mkdir).toEqual([]);
+    expect(ops.rename).toEqual([]);
+    expect(ops.rm).toEqual([]);
+    expect(ops.access).toEqual([]);
+    expect(ops.cp).toEqual([]);
+    expect(ops.copyFile).toEqual([]);
   });
 
   it("never reads/stats a role-swapped owned path (CLAUDE.md with role: skill)", async () => {
@@ -257,6 +330,11 @@ describe("filesystem operation proof — conformance", () => {
     // No writes or deletes.
     expect(ops.write).toEqual([]);
     expect(ops.unlink).toEqual([]);
+    expect(ops.readdir).toEqual([]);
+    expect(ops.mkdir).toEqual([]);
+    expect(ops.rename).toEqual([]);
+    expect(ops.rm).toEqual([]);
+    expect(ops.access).toEqual([]);
   });
 
   it("never reads/stats a symlinked owned path (CLAUDE.md → real-claude.md)", async () => {
@@ -308,6 +386,16 @@ describe("filesystem operation proof — conformance", () => {
     expect(targetOps2.read).toEqual([]);
     expect(symlinkOps.write).toEqual([]);
     expect(symlinkOps.unlink).toEqual([]);
+    expect(symlinkOps.readdir).toEqual([]);
+    expect(symlinkOps.mkdir).toEqual([]);
+    expect(symlinkOps.rename).toEqual([]);
+    expect(symlinkOps.rm).toEqual([]);
+    expect(symlinkOps.access).toEqual([]);
+    expect(targetOps2.readdir).toEqual([]);
+    expect(targetOps2.mkdir).toEqual([]);
+    expect(targetOps2.rename).toEqual([]);
+    expect(targetOps2.rm).toEqual([]);
+    expect(targetOps2.access).toEqual([]);
   });
 });
 
@@ -337,6 +425,13 @@ describe("filesystem operation proof — doctor", () => {
     expect(ops.lstat).toEqual([]);
     expect(ops.unlink).toEqual([]);
     expect(ops.write).toEqual([]);
+    expect(ops.readdir).toEqual([]);
+    expect(ops.mkdir).toEqual([]);
+    expect(ops.rename).toEqual([]);
+    expect(ops.rm).toEqual([]);
+    expect(ops.access).toEqual([]);
+    expect(ops.cp).toEqual([]);
+    expect(ops.copyFile).toEqual([]);
   });
 
   it("never reads a dynamic skill in the shared namespace during doctor", async () => {
@@ -362,5 +457,10 @@ describe("filesystem operation proof — doctor", () => {
     expect(ops.read).toEqual([]);
     expect(ops.unlink).toEqual([]);
     expect(ops.write).toEqual([]);
+    expect(ops.readdir).toEqual([]);
+    expect(ops.mkdir).toEqual([]);
+    expect(ops.rename).toEqual([]);
+    expect(ops.rm).toEqual([]);
+    expect(ops.access).toEqual([]);
   });
 });

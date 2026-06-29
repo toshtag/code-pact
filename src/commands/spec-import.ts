@@ -2,9 +2,16 @@ import { readFile, stat } from "node:fs/promises";
 import { stringify as stringifyYaml } from "yaml";
 
 import { atomicWriteText } from "../io/atomic-text.ts";
-import { assertSafeRelativePath, resolveSymlinkFreeProjectPath, resolveWithinProject } from "../core/path-safety.ts";
+import {
+  assertSafeRelativePath,
+  resolveSymlinkFreeProjectPath,
+  resolveWithinProject,
+} from "../core/path-safety.ts";
 import { type SpecImportDetail } from "../contracts/spec-import-details.ts";
-import { parseTasksMd, type ParserWarning } from "../core/spec-import/tasks-md-parser.ts";
+import {
+  parseTasksMd,
+  type ParserWarning,
+} from "../core/spec-import/tasks-md-parser.ts";
 import {
   extractSpecMd,
   type BriefCandidates,
@@ -20,7 +27,11 @@ export class SpecImportError extends Error {
   readonly detail: SpecImportDetail;
   readonly sourcePath?: string;
   readonly phaseId?: string;
-  constructor(detail: SpecImportDetail, message: string, ctx?: { sourcePath?: string; phaseId?: string }) {
+  constructor(
+    detail: SpecImportDetail,
+    message: string,
+    ctx?: { sourcePath?: string; phaseId?: string },
+  ) {
     super(message);
     this.name = "SpecImportError";
     this.detail = detail;
@@ -56,6 +67,9 @@ async function resolveSpecPath(
   relPath: string,
   ctx: { sourcePath?: string; phaseId?: string; purpose: "input" | "output" },
 ): Promise<string> {
+  // fs-authority: containment-only for input, ownership for output
+  // reason: input is an explicit user-selected import path; output is a
+  // control-plane write (spec namespace) and must be symlink-free.
   try {
     return ctx.purpose === "output"
       ? await resolveSymlinkFreeProjectPath(cwd, relPath)
@@ -73,17 +87,23 @@ async function resolveSpecPath(
   }
 }
 
-export async function runSpecImport(opts: SpecImportOptions): Promise<SpecImportResult> {
+export async function runSpecImport(
+  opts: SpecImportOptions,
+): Promise<SpecImportResult> {
   const { cwd, fromPath, phaseId, write, force } = opts;
 
   try {
     assertSafeRelativePath(fromPath);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    throw new SpecImportError("unsafe_path", `spec import: --from path is unsafe: ${msg}`, {
-      sourcePath: fromPath,
-      phaseId,
-    });
+    throw new SpecImportError(
+      "unsafe_path",
+      `spec import: --from path is unsafe: ${msg}`,
+      {
+        sourcePath: fromPath,
+        phaseId,
+      },
+    );
   }
 
   if (!PHASE_ID_RE.test(phaseId)) {
@@ -105,10 +125,14 @@ export async function runSpecImport(opts: SpecImportOptions): Promise<SpecImport
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "ENOENT") {
-      throw new SpecImportError("file_not_found", `spec import: file not found: ${fromPath}`, {
-        sourcePath: fromPath,
-        phaseId,
-      });
+      throw new SpecImportError(
+        "file_not_found",
+        `spec import: file not found: ${fromPath}`,
+        {
+          sourcePath: fromPath,
+          phaseId,
+        },
+      );
     }
     throw new SpecImportError(
       "unreadable",
@@ -126,7 +150,10 @@ export async function runSpecImport(opts: SpecImportOptions): Promise<SpecImport
     );
   }
 
-  const tasksTotal = parsed.sections.reduce((acc, s) => acc + s.tasks.length, 0);
+  const tasksTotal = parsed.sections.reduce(
+    (acc, s) => acc + s.tasks.length,
+    0,
+  );
 
   const phaseYamlObj = buildPhaseObject({
     phaseId,
@@ -251,7 +278,9 @@ export interface SpecSuggestResult {
   skipped_sections: string[];
 }
 
-export async function runSpecSuggest(opts: SpecSuggestOptions): Promise<SpecSuggestResult> {
+export async function runSpecSuggest(
+  opts: SpecSuggestOptions,
+): Promise<SpecSuggestResult> {
   const { cwd, suggestFromPath } = opts;
 
   try {

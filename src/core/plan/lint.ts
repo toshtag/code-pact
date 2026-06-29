@@ -36,7 +36,7 @@ import { parse as parseYaml } from "yaml";
 import { Project } from "../schemas/project.ts";
 import { detectContextFitAdvisories } from "../context-fit/advisories.ts";
 import { loadAgentContextBudgetBestEffort } from "../context-fit/load-context-budget.ts";
-import { resolveWithinProject } from "../path-safety.ts";
+import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
 import { readProjectTextOrNull } from "../project-read.ts";
 import type { PhaseEntry, PlanState } from "./state.ts";
 import { collectPlanArtifacts } from "./state.ts";
@@ -98,8 +98,13 @@ export type LintResult = {
  */
 export async function runLint(opts: LintOptions): Promise<LintResult> {
   const includeQuality = opts.includeQuality === true;
-  const { state, archivedTaskIndex, fallbackPhases, fileIssues, skippedChecks } =
-    await collectPlanArtifacts(opts.cwd);
+  const {
+    state,
+    archivedTaskIndex,
+    fallbackPhases,
+    fileIssues,
+    skippedChecks,
+  } = await collectPlanArtifacts(opts.cwd);
 
   const issues: PlanIssue[] = [...fileIssues];
   const phases: PhaseEntry[] = state?.phases ?? fallbackPhases;
@@ -177,7 +182,9 @@ export async function runLint(opts: LintOptions): Promise<LintResult> {
     // malformed block must not fail an advisory pass, so it degrades to the
     // built-in fallback rather than throwing.
     const agentName = await resolveDefaultAgent(opts.cwd);
-    let agentContextBudgetProfiles: Record<string, { max_bytes: number }> | undefined;
+    let agentContextBudgetProfiles:
+      | Record<string, { max_bytes: number }>
+      | undefined;
     try {
       agentContextBudgetProfiles = (
         await loadAgentContextBudgetBestEffort(opts.cwd, undefined)
@@ -239,7 +246,10 @@ async function appendSnapshotEvidenceIssues(
   for (const f of packSources.looseFiles) resolved.set(f.id, f.event);
   for (const f of packSources.validatedPackFiles) resolved.set(f.id, f.event);
 
-  const { result, skipped } = await validateSnapshotEventEvidence(cwd, resolved);
+  const { result, skipped } = await validateSnapshotEventEvidence(
+    cwd,
+    resolved,
+  );
   if (!result.ok) {
     for (const issue of result.issues) {
       issues.push({
@@ -261,7 +271,10 @@ function detectWeakDoD(phases: PhaseEntry[]): PlanIssue[] {
   for (const { phase, ref } of phases) {
     phase.definition_of_done.forEach((bullet, index) => {
       const trimmed = bullet.trim();
-      if (trimmed.length < WEAK_DOD_MIN_CHARS || WEAK_DOD_PATTERN.test(trimmed)) {
+      if (
+        trimmed.length < WEAK_DOD_MIN_CHARS ||
+        WEAK_DOD_PATTERN.test(trimmed)
+      ) {
         issues.push({
           code: "WEAK_DOD",
           severity: "warning",
@@ -307,7 +320,7 @@ function detectPhaseDocsWriteNoDocCheck(phases: PhaseEntry[]): PlanIssue[] {
   const issues: PlanIssue[] = [];
   for (const { phase, ref } of phases) {
     if (phase.status === "done") continue; // forward-looking only
-    const hasDocCheck = phase.verification.commands.some((c) =>
+    const hasDocCheck = phase.verification.commands.some(c =>
       c.includes("check:doc"),
     );
     if (hasDocCheck) continue;
@@ -442,7 +455,9 @@ async function detectAdrStatusUnrecognized(cwd: string): Promise<PlanIssue[]> {
 // `design/decisions/` corpus without paying for a full `runLint` (which also
 // globs every phase's reads/writes against the filesystem). This detector only
 // reads the ADR files, so the direct call is fast and deterministic.
-export async function detectAdrAcceptedBodyThin(cwd: string): Promise<PlanIssue[]> {
+export async function detectAdrAcceptedBodyThin(
+  cwd: string,
+): Promise<PlanIssue[]> {
   const issues: PlanIssue[] = [];
   for (const name of await readDecisionAdrFiles(cwd)) {
     if (!name.endsWith(".md")) continue;
@@ -467,11 +482,9 @@ export async function detectAdrAcceptedBodyThin(cwd: string): Promise<PlanIssue[
     const lines = body.split(/\r?\n/);
     // h2 count is taken from the raw body (before stripping) so the structure
     // signal is stable regardless of the substantive-text computation.
-    const headingCount = lines.filter((l) => ADR_H2_PATTERN.test(l)).length;
+    const headingCount = lines.filter(l => ADR_H2_PATTERN.test(l)).length;
     const substantive = lines
-      .filter(
-        (l) => !ADR_STATUS_LINE_PATTERN.test(l) && !ADR_H1_PATTERN.test(l),
-      )
+      .filter(l => !ADR_STATUS_LINE_PATTERN.test(l) && !ADR_H1_PATTERN.test(l))
       .join(" ")
       .replace(/\s+/g, " ")
       .trim();
@@ -547,7 +560,10 @@ async function detectAdrCommitmentsEmpty(
   for (const [adrPath, { task_id, phase_id }] of accepted) {
     let content: string;
     try {
-      content = await readFile(await resolveWithinProject(cwd, adrPath), "utf8");
+      content = await readFile(
+        await resolveSymlinkFreeProjectPath(cwd, adrPath),
+        "utf8",
+      );
     } catch {
       continue; // referenced ADR vanished — nothing to advise on
     }

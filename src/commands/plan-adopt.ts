@@ -16,8 +16,14 @@
 import { readFile } from "node:fs/promises";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
-import { assertSafeRelativePath, resolveWithinProject } from "../core/path-safety.ts";
-import { PhaseImportInput, type PhaseImportEntry } from "../core/schemas/phase-import.ts";
+import {
+  assertSafeRelativePath,
+  resolveWithinProject,
+} from "../core/path-safety.ts";
+import {
+  PhaseImportInput,
+  type PhaseImportEntry,
+} from "../core/schemas/phase-import.ts";
 import { loadRoadmap } from "../core/plan/roadmap.ts";
 import {
   applyParsedPhaseImport,
@@ -152,7 +158,9 @@ function trySinglePhase(
       typeof parsed.weight === "number" && parsed.weight > 0
         ? parsed.weight
         : 20,
-    ...(parsed.confidence !== undefined ? { confidence: parsed.confidence } : {}),
+    ...(parsed.confidence !== undefined
+      ? { confidence: parsed.confidence }
+      : {}),
     ...(parsed.risk !== undefined ? { risk: parsed.risk } : {}),
     ...(verify !== undefined && verify.length > 0
       ? { verify_commands: verify }
@@ -176,7 +184,10 @@ const TYPE_RULES: { re: RegExp; type: string }[] = [
   { re: /\b(docs?|document(ation)?|readme)\b/i, type: "docs" },
   { re: /\b(tests?|spec|coverage)\b/i, type: "test" },
   { re: /\brefactor\b/i, type: "refactor" },
-  { re: /\b(architecture|schema|contract|foundation|scaffold)\b/i, type: "architecture" },
+  {
+    re: /\b(architecture|schema|contract|foundation|scaffold)\b/i,
+    type: "architecture",
+  },
 ];
 
 function inferType(text: string): string {
@@ -311,7 +322,7 @@ async function detect(
 
   // 3. markdown
   const md = parseAdoptMarkdown(raw);
-  const withTasks = md.phases.filter((p) => p.tasks.length > 0);
+  const withTasks = md.phases.filter(p => p.tasks.length > 0);
   if (withTasks.length === 0) {
     throw new PlanAdoptError(
       "no_plan_items_detected",
@@ -381,6 +392,8 @@ export async function runPlanAdopt(
     );
   }
 
+  // fs-authority: containment-only
+  // reason: explicit user-selected input path (--from)
   let raw: string;
   try {
     raw = await readFile(await resolveWithinProject(cwd, fromPath), "utf8");

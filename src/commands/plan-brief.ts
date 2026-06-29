@@ -3,7 +3,11 @@ import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { atomicWriteText } from "../io/atomic-text.ts";
 import { Prompter } from "../lib/prompt.ts";
-import { assertSafeRelativePath, resolveSymlinkFreeProjectPath, resolveWithinProject } from "../core/path-safety.ts";
+import {
+  assertSafeRelativePath,
+  resolveSymlinkFreeProjectPath,
+  resolveWithinProject,
+} from "../core/path-safety.ts";
 import type { Locale } from "../i18n/index.ts";
 import { messages as messageCatalog } from "../i18n/index.ts";
 import type {
@@ -104,6 +108,8 @@ export async function loadBriefFromFile(
     );
   }
 
+  // fs-authority: containment-only
+  // reason: explicit user-selected input path (--from-file)
   let absPath: string;
   try {
     absPath = await resolveWithinProject(cwd, relPath);
@@ -138,10 +144,7 @@ export class PlanBriefFromStdinError extends Error {
   readonly code = "CONFIG_ERROR";
   readonly detail: PlanCaptureStdinDetail;
 
-  constructor(
-    detail: PlanBriefFromStdinError["detail"],
-    message: string,
-  ) {
+  constructor(detail: PlanBriefFromStdinError["detail"], message: string) {
     super(message);
     this.name = "PlanBriefFromStdinError";
     this.detail = detail;
@@ -169,9 +172,7 @@ export async function loadBriefFromStdin(
   try {
     const chunks: string[] = [];
     for await (const chunk of stdin) {
-      chunks.push(
-        typeof chunk === "string" ? chunk : chunk.toString("utf8"),
-      );
+      chunks.push(typeof chunk === "string" ? chunk : chunk.toString("utf8"));
     }
     raw = chunks.join("");
   } catch (err) {
@@ -224,7 +225,7 @@ function parseBriefSource(
   const result = BriefFileSchema.safeParse(parsed);
   if (!result.success) {
     const summary = result.error.issues
-      .map((i) => `${i.path.join(".") || "<root>"}: ${i.message}`)
+      .map(i => `${i.path.join(".") || "<root>"}: ${i.message}`)
       .join("; ");
     throwError(
       "schema_invalid",
@@ -246,27 +247,31 @@ function parseBriefSource(
 export function generateBriefMd(answers: BriefAnswers, locale: Locale): string {
   const t = messageCatalog[locale].templates.brief;
   const diff =
-    answers.differentiator.length > 0 ? answers.differentiator : t.differentiatorPlaceholder;
+    answers.differentiator.length > 0
+      ? answers.differentiator
+      : t.differentiatorPlaceholder;
 
-  return [
-    `# ${t.header}`,
-    ``,
-    `## ${t.whatHeader}`,
-    ``,
-    answers.what,
-    ``,
-    `## ${t.whoHeader}`,
-    ``,
-    answers.who,
-    ``,
-    `## ${t.differentiatorHeader}`,
-    ``,
-    diff,
-    ``,
-    `---`,
-    ``,
-    t.footer,
-  ].join("\n") + "\n";
+  return (
+    [
+      `# ${t.header}`,
+      ``,
+      `## ${t.whatHeader}`,
+      ``,
+      answers.what,
+      ``,
+      `## ${t.whoHeader}`,
+      ``,
+      answers.who,
+      ``,
+      `## ${t.differentiatorHeader}`,
+      ``,
+      diff,
+      ``,
+      `---`,
+      ``,
+      t.footer,
+    ].join("\n") + "\n"
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -309,7 +314,9 @@ async function resolveBriefOutputPath(cwd: string): Promise<string> {
 // Main command
 // ---------------------------------------------------------------------------
 
-export async function runPlanBrief(opts: PlanBriefOptions): Promise<PlanBriefResult> {
+export async function runPlanBrief(
+  opts: PlanBriefOptions,
+): Promise<PlanBriefResult> {
   const { cwd, locale, force } = opts;
   const briefPath = await resolveBriefOutputPath(cwd);
 

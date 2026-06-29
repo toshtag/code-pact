@@ -1,6 +1,9 @@
 import { access } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { resolveWithinProject, resolveWithinProjectSync } from "../../path-safety.ts";
+import {
+  resolveSymlinkFreeProjectPath,
+  resolveSymlinkFreeProjectPathSync,
+} from "../../path-safety.ts";
 
 /**
  * True when `p` exists and is accessible. Shared internal helper for the
@@ -33,7 +36,9 @@ export async function phaseFilePresence(
     await access(p);
     return "present";
   } catch (err) {
-    return (err as NodeJS.ErrnoException).code === "ENOENT" ? "absent" : "inaccessible";
+    return (err as NodeJS.ErrnoException).code === "ENOENT"
+      ? "absent"
+      : "inaccessible";
   }
 }
 
@@ -51,7 +56,7 @@ export async function projectPathPresence(
 ): Promise<ProjectPathPresence> {
   let abs: string;
   try {
-    abs = await resolveWithinProject(cwd, relPath);
+    abs = await resolveSymlinkFreeProjectPath(cwd, relPath);
   } catch {
     return "inaccessible";
   }
@@ -59,7 +64,9 @@ export async function projectPathPresence(
     await access(abs);
     return "present";
   } catch (err) {
-    return (err as NodeJS.ErrnoException).code === "ENOENT" ? "absent" : "inaccessible";
+    return (err as NodeJS.ErrnoException).code === "ENOENT"
+      ? "absent"
+      : "inaccessible";
   }
 }
 
@@ -69,7 +76,7 @@ export function projectPathPresenceSync(
 ): ProjectPathPresence {
   let abs: string;
   try {
-    abs = resolveWithinProjectSync(cwd, relPath);
+    abs = resolveSymlinkFreeProjectPathSync(cwd, relPath);
   } catch {
     return "inaccessible";
   }

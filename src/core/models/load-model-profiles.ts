@@ -55,7 +55,10 @@ export async function loadModelProfilesSafe(
   let dirAbs: string;
   try {
     dirAbs = await resolveSymlinkFreeProjectPath(cwd, MODEL_PROFILES_DIR);
-  } catch {
+  } catch (err) {
+    // A symlink escape on the directory itself is NOT silently degraded.
+    // Propagate PATH_NOT_OWNED so callers (doctor) can surface a structured issue.
+    if ((err as NodeJS.ErrnoException).code === "PATH_NOT_OWNED") throw err;
     return [];
   }
   let entries: string[];

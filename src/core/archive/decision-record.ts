@@ -4,9 +4,14 @@ import {
   DECISION_STATE_RECORD_SCHEMA_VERSION,
 } from "../schemas/decision-state-record.ts";
 import { classifyAdr } from "../decisions/adr.ts";
-import { resolveWithinProject } from "../path-safety.ts";
+import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
 import { atomicWriteText, type ExpectedState } from "../../io/atomic-text.ts";
-import { decisionRecordRelPath, normalizeDecisionRef, resolveArchiveOwnedPath, sha256Hex } from "./paths.ts";
+import {
+  decisionRecordRelPath,
+  normalizeDecisionRef,
+  resolveArchiveOwnedPath,
+  sha256Hex,
+} from "./paths.ts";
 import { readLooseDecisionRecordRaw } from "./load-decision-record.ts";
 import { decisionRecordStem } from "./archive-bundle-binding.ts";
 import { loadArchiveBundles } from "./archive-bundle-loader.ts";
@@ -53,7 +58,11 @@ export type DecisionRecordBlock =
   | { kind: "record_invalid"; detail: string }
   | { kind: "record_identity_mismatch"; detail: string }
   | { kind: "record_state_mismatch"; detail: string }
-  | { kind: "record_stale"; existing_source_sha256: string; current_source_sha256: string }
+  | {
+      kind: "record_stale";
+      existing_source_sha256: string;
+      current_source_sha256: string;
+    }
   | {
       kind: "refresh_expectation_mismatch";
       expected_old_source_sha256: string;
@@ -110,7 +119,12 @@ async function readExistingRecord(
 ): Promise<
   | { state: "missing" }
   | { state: "invalid"; detail: string }
-  | { state: "present"; record: DecisionStateRecord; raw: string; looseFilePresent: boolean }
+  | {
+      state: "present";
+      record: DecisionStateRecord;
+      raw: string;
+      looseFilePresent: boolean;
+    }
 > {
   // Resolve from loose ∪ bundle (reader-loose-wins): a record compacted into a bundle
   // (loose gone) is still "present", so a re-run reports noop_record_authoritative
@@ -126,13 +140,19 @@ async function readExistingRecord(
       loadBundleIndex: () => loadArchiveBundles(cwd).index,
     });
   } catch (err) {
-    return { state: "invalid", detail: err instanceof Error ? err.message : String(err) };
+    return {
+      state: "invalid",
+      detail: err instanceof Error ? err.message : String(err),
+    };
   }
   if (resolved.kind === "absent") return { state: "missing" };
   if (resolved.kind === "invalid") {
     return {
       state: "invalid",
-      detail: resolved.error instanceof Error ? resolved.error.message : String(resolved.error),
+      detail:
+        resolved.error instanceof Error
+          ? resolved.error.message
+          : String(resolved.error),
     };
   }
   const raw = resolved.bytes;
@@ -144,7 +164,10 @@ async function readExistingRecord(
       looseFilePresent: resolved.source === "loose",
     };
   } catch (err) {
-    return { state: "invalid", detail: err instanceof Error ? err.message : String(err) };
+    return {
+      state: "invalid",
+      detail: err instanceof Error ? err.message : String(err),
+    };
   }
 }
 
@@ -173,7 +196,10 @@ function recordIdentityMismatch(
  * of the schema-validated objects suffices (strict schema fixes the key set;
  * `parse()` emits keys in schema order).
  */
-function semanticEqual(a: DecisionStateRecord, b: DecisionStateRecord): boolean {
+function semanticEqual(
+  a: DecisionStateRecord,
+  b: DecisionStateRecord,
+): boolean {
   const strip = (r: DecisionStateRecord) => {
     const { snapshotted_at: _at, git_ref: _ref, ...rest } = r;
     return rest;
@@ -188,13 +214,24 @@ export async function planDecisionRecord(
 ): Promise<DecisionRecordPlan> {
   const canonical = normalizeDecisionRef(rawRef);
   if (canonical === null) {
-    return { kind: "ineligible", path: null, blocks: [{ kind: "invalid_ref", raw: rawRef }] };
+    return {
+      kind: "ineligible",
+      path: null,
+      blocks: [{ kind: "invalid_ref", raw: rawRef }],
+    };
   }
-  const path = await resolveArchiveOwnedPath(cwd, decisionRecordRelPath(canonical));
+  const path = await resolveArchiveOwnedPath(
+    cwd,
+    decisionRecordRelPath(canonical),
+  );
 
   const existing = await readExistingRecord(cwd, canonical);
   if (existing.state === "invalid") {
-    return { kind: "ineligible", path, blocks: [{ kind: "record_invalid", detail: existing.detail }] };
+    return {
+      kind: "ineligible",
+      path,
+      blocks: [{ kind: "record_invalid", detail: existing.detail }],
+    };
   }
   if (existing.state === "present") {
     const mismatch = recordIdentityMismatch(existing.record, canonical);
@@ -211,18 +248,23 @@ export async function planDecisionRecord(
   // FROM the live file, so an unreadable/escaping live file fails closed.
   let content: string;
   try {
-    const abs = await resolveWithinProject(cwd, canonical);
+    const abs = await resolveSymlinkFreeProjectPath(cwd, canonical);
     content = await readFile(abs, "utf8");
   } catch (err) {
     if (isEnoent(err)) {
-      if (existing.state === "present") return { kind: "noop_record_authoritative", path };
+      if (existing.state === "present")
+        return { kind: "noop_record_authoritative", path };
       return {
         kind: "ineligible",
         path,
         blocks: [{ kind: "live_file_missing", canonical_ref: canonical }],
       };
     }
-    return { kind: "ineligible", path, blocks: [{ kind: "unsafe_path", canonical_ref: canonical }] };
+    return {
+      kind: "ineligible",
+      path,
+      blocks: [{ kind: "unsafe_path", canonical_ref: canonical }],
+    };
   }
   const currentSha = sha256Hex(content);
 
@@ -272,7 +314,8 @@ export async function planDecisionRecord(
       };
     }
     if (
-      opts.refresh.expected_old_source_sha256 !== existing.record.source_sha256 ||
+      opts.refresh.expected_old_source_sha256 !==
+        existing.record.source_sha256 ||
       opts.refresh.expected_new_source_sha256 !== currentSha
     ) {
       return {
@@ -377,7 +420,11 @@ export async function applyDecisionRecordPlan(
       plan.kind === "write" || plan.existing_raw === null
         ? { kind: "absent" }
         : { kind: "present", content: plan.existing_raw };
-    await atomicWriteText(plan.path, serializeDecisionRecord(plan.record), expected);
+    await atomicWriteText(
+      plan.path,
+      serializeDecisionRecord(plan.record),
+      expected,
+    );
     return { kind: "written", path: plan.path, record: plan.record };
   }
   return plan;

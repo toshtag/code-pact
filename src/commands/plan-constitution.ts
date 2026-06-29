@@ -127,6 +127,8 @@ export async function loadConstitutionFromFile(
     );
   }
 
+  // fs-authority: containment-only
+  // reason: explicit user-selected input path (--from-file)
   let absPath: string;
   try {
     absPath = await resolveWithinProject(cwd, relPath);

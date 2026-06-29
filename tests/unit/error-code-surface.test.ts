@@ -231,6 +231,7 @@ const KNOWN_CODES: Record<
   ADAPTER_MISSING: "adapter",
   ADAPTER_PROFILE_DRIFT: "adapter",
   ADAPTER_PROFILE_CONTRACT_VIOLATION: "adapter",
+  MODEL_PROFILES_UNSAFE: "adapter",
   ADAPTER_SCHEMA_DRIFT: "adapter",
   ADAPTER_UNMANAGED_FILE: "adapter",
 
@@ -248,6 +249,10 @@ const KNOWN_CODES: Record<
   // from "owned". Command layers map it to CONFIG_ERROR / ADAPTER_MANIFEST_INVALID.
   // It is internal, not a top-level public envelope.
   PATH_NOT_OWNED: "internal",
+  // Node.js standard errno: emitted by control-plane readRegularText when
+  // a path that should be a regular file is a directory. Always caught and
+  // remapped by callers (e.g. ENOENT-like handling in archive/decision gates).
+  EISDIR: "internal",
   // Defense-in-depth invariant: an adapter generator produced two desired
   // files at the same path with differing content. Should never fire (each
   // adapter uniquifies its own paths); surfaced as an unhandled exception

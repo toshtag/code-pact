@@ -21,7 +21,7 @@ import { AgentProfile } from "../core/schemas/agent-profile.ts";
 import { resolveAgentProfilePath } from "../core/agent-profile-path.ts";
 import { loadPhase } from "../core/plan/load-phase.ts";
 import { loadProject, resolveEnabledAgent } from "../core/project.ts";
-import { resolveWithinProject } from "../core/path-safety.ts";
+import { resolveSymlinkFreeProjectPath } from "../core/path-safety.ts";
 import type { Task as TaskT } from "../core/schemas/task.ts";
 
 // ---------------------------------------------------------------------------
@@ -379,7 +379,7 @@ export async function runTaskPrepare(
       let adrContent: string;
       try {
         adrContent = await readFile(
-          await resolveWithinProject(cwd, considered.path),
+          await resolveSymlinkFreeProjectPath(cwd, considered.path),
           "utf8",
         );
       } catch {

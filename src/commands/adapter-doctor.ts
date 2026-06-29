@@ -1,4 +1,4 @@
-import { readFile, readdir, stat } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { AgentProfile } from "../core/schemas/agent-profile.ts";
@@ -11,6 +11,7 @@ import { resolveAgentProfilePath } from "../core/agent-profile-path.ts";
 import { resolveSymlinkFreeProjectPath } from "../core/path-safety.ts";
 import { resolveProjectConfigPath } from "../core/project-config-path.ts";
 import { validateAgentProfileForAdapter } from "../core/adapters/profile-contract.ts";
+import { loadModelProfilesSafe } from "../core/models/load-model-profiles.ts";
 import {
   computeContentHash,
   manifestPath,
@@ -108,35 +109,19 @@ async function loadAgentProfileSafe(
   }
 }
 
-async function loadModelProfilesSafe(cwd: string): Promise<ModelProfile[]> {
-  const dir = await resolveSymlinkFreeProjectPath(
-    cwd,
-    ".code-pact/model-profiles",
-  ).catch(() => null);
-  if (dir === null) return [];
-  let entries: string[];
+async function loadModelProfilesForDoctor(
+  cwd: string,
+): Promise<{ profiles: ModelProfile[]; unsafe: boolean }> {
   try {
-    entries = await readdir(dir);
-  } catch {
-    return [];
-  }
-  const profiles: ModelProfile[] = [];
-  for (const entry of entries.sort()) {
-    if (!entry.endsWith(".yaml")) continue;
-    try {
-      const raw = await readFile(
-        await resolveSymlinkFreeProjectPath(
-          cwd,
-          [".code-pact", "model-profiles", entry].join("/"),
-        ),
-        "utf8",
-      );
-      profiles.push(ModelProfile.parse(parseYaml(raw) as unknown));
-    } catch {
-      // skip malformed
+    const profiles = await loadModelProfilesSafe(cwd);
+    return { profiles, unsafe: false };
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "PATH_NOT_OWNED") {
+      return { profiles: [], unsafe: true };
     }
+    return { profiles: [], unsafe: false };
   }
-  return profiles;
 }
 
 type ProjectReadResult =
@@ -427,7 +412,17 @@ export async function inspectAgent(
       });
       return issues;
     }
-    const modelProfiles = await loadModelProfilesSafe(cwd);
+    const { profiles: modelProfiles, unsafe: modelProfilesUnsafe } =
+      await loadModelProfilesForDoctor(cwd);
+    if (modelProfilesUnsafe) {
+      issues.push({
+        code: "MODEL_PROFILES_UNSAFE",
+        severity: "error",
+        message:
+          ".code-pact/model-profiles is a symlink or escapes the project root; profiles were not read.",
+        agent: agentName,
+      });
+    }
     const resolvedModel = profile.model_version;
     const currentFP = buildCurrentFingerprint(profile, resolvedModel);
     if (!fingerprintsEqual(manifest.profile_fingerprint, currentFP)) {

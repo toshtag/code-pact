@@ -61,7 +61,7 @@
     "check:release-version": "node scripts/check-release-version.mjs",
     "check:fs-containment": "node scripts/check-fs-containment.mjs",
     "check:fs-authority": "node scripts/check-fs-authority.mjs",
-    "release:check": "pnpm typecheck && pnpm test && pnpm build && pnpm check:docs && pnpm check:release-version && node dist/cli.js validate --json && node dist/cli.js plan lint --include-quality --strict --json && node dist/cli.js plan analyze --strict --json",
+    "release:check": "pnpm typecheck && pnpm test && pnpm build && pnpm check:docs && pnpm check:fs-containment && pnpm check:fs-authority && pnpm check:release-version && node dist/cli.js validate --json && node dist/cli.js plan lint --include-quality --strict --json && node dist/cli.js plan analyze --strict --json",
     "prepublishOnly": "node scripts/assert-package-metadata.mjs"
   },
   "dependencies": {

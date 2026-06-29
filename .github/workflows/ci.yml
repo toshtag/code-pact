@@ -42,6 +42,13 @@ jobs:
       - run: pnpm check:fs-containment
         if: matrix.profile == 'full'
 
+      # AST-based filesystem-authority gate: flags fs operations on paths
+      # not sourced from an authority resolver (resolveSymlinkFreeProjectPath,
+      # resolveOwnedReadPath, etc.). A structural backstop complementing the
+      # lexical containment guard above.
+      - run: pnpm check:fs-authority
+        if: matrix.profile == 'full'
+
       - run: pnpm typecheck
 
       - run: pnpm test:unit

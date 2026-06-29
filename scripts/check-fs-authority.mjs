@@ -1,120 +1,332 @@
 #!/usr/bin/env node
-// AST gate: verify that every filesystem operation (readFile, writeFile, mkdir,
-// rm, stat, unlink, rename) in adapter-install.ts and adapter-upgrade.ts uses
-// a path that has been through an authority resolution:
-//   - authorizeAdapterMutationPath (returns .absPath from resolveSymlinkFreeProjectPath)
-//   - resolveSymlinkFreeProjectPath (direct ownership check)
-//   - resolveManifestPath (manifest-specific ownership check)
-//   - readAuthorizedRegularFileMaybe / authorizedPathExists (accept pre-resolved absPath)
-//   - writeManifest / readManifest (internally use resolveManifestPath)
-//   - atomicWriteText (accepts pre-resolved absPath)
-//   - assertAdapterWritePathsContained (returns resolved paths)
+// AST gate: verify that every filesystem operation in the checked source
+// files uses a path that has been through an authority resolution.
 //
-// This is a STRUCTURAL backstop: it flags any fs call on a path that is NOT
-// sourced from one of these authority resolvers. A clean exit 0 means the
-// adapter mutation commands do not perform raw fs I/O on unvetted paths.
+// This script uses the TypeScript compiler API to parse each file into an
+// AST and walk every CallExpression. For each call to a known fs function
+// (readFile, writeFile, mkdir, stat, etc.), it checks whether the first
+// argument (the path) is sourced from an authority resolver or a variable
+// that was assigned from one.
+//
+// Authority resolvers (function calls that produce safe paths):
+//   resolveSymlinkFreeProjectPath
+//   resolveSymlinkFreeProjectPathSync
+//   resolveOwnedReadPath
+//   resolveProjectConfigPath
+//   resolveAgentProfilePath
+//   resolveArchiveOwnedPath
+//   resolveManifestPath
+//   authorizeAdapterMutationPath
+//   readAuthorizedRegularFileMaybe
+//   authorizedPathExists
+//   assertAdapterWritePathsContained
+//   atomicWriteText
+//   writeManifest
+//   readManifest
+//
+// Variables that hold pre-resolved safe paths (assigned from authority
+// resolvers or destructured from their results):
+//   absPath, contextDirAbs, absTarget, absOther, containedPath
+//
+// Exemptions:
+//   - Lines with `// fs-safe: <reason>` are exempt.
+//   - The authority resolver definitions themselves are exempt.
+//   - Import statements are exempt.
 //
 // Usage: node scripts/check-fs-authority.mjs
 // Exit: 0 = clean; 1 = findings printed to stdout
 
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import ts from "typescript";
 
-const ADAPTER_FILES = [
+// ---------------------------------------------------------------------------
+// Configuration
+// ---------------------------------------------------------------------------
+
+const TARGET_FILES = [
   join("src", "commands", "adapter-install.ts"),
   join("src", "commands", "adapter-upgrade.ts"),
+  join("src", "commands", "adapter-doctor.ts"),
 ];
 
-// fs functions whose FIRST argument is the path we care about.
-const FS_CALL_RE =
-  /\b(readFile|writeFile|appendFile|mkdir|readdir|rmdir|rm|unlink|rename|copyFile|cp|open|truncate|stat|lstat|opendir|watch|atomicWriteText)\s*\(/g;
+const FS_FUNCTIONS = new Set([
+  "readFile",
+  "writeFile",
+  "appendFile",
+  "mkdir",
+  "readdir",
+  "rmdir",
+  "rm",
+  "unlink",
+  "rename",
+  "copyFile",
+  "cp",
+  "open",
+  "truncate",
+  "stat",
+  "lstat",
+  "opendir",
+  "watch",
+  "access",
+  "atomicWriteText",
+]);
 
-// Authority sources: variables and expressions that produce safe paths.
-const AUTHORITY_SOURCES = [
-  "authority.absPath",
-  "contextDirAbs",
-  "planned.absPath",
-  "item.absPath",
-  "absPath",
+const AUTHORITY_CALLS = new Set([
   "resolveSymlinkFreeProjectPath",
-  "resolveManifestPath",
+  "resolveSymlinkFreeProjectPathSync",
+  "resolveOwnedReadPath",
   "resolveProjectConfigPath",
+  "resolveAgentProfilePath",
+  "resolveArchiveOwnedPath",
+  "resolveManifestPath",
+  "authorizeAdapterMutationPath",
   "readAuthorizedRegularFileMaybe",
   "authorizedPathExists",
+  "assertAdapterWritePathsContained",
+  "atomicWriteText",
   "writeManifest",
   "readManifest",
-  "assertAdapterWritePathsContained",
-  "resolveOwnedReadPath",
-];
+]);
 
-// Lines exempt from the check: comments, imports, or the authority resolvers
-// themselves (they internally call fs functions on already-resolved paths).
-function isExempt(line) {
-  const trimmed = line.trimStart();
-  if (trimmed.startsWith("//") || trimmed.startsWith("*")) return true;
-  if (trimmed.startsWith("import ")) return true;
-  // The authority resolver definitions themselves contain fs calls on
-  // already-resolved paths — they are the safe primitives, not call sites.
-  if (/^(export\s+)?(async\s+)?function\s+(resolveSymlinkFreeProjectPath|resolveManifestPath|readAuthorizedRegularFileMaybe|authorizedPathExists|assertAdapterWritePathsContained|writeManifest|readManifest)/.test(trimmed)) {
-    return true;
+const AUTHORITY_VARS = new Set([
+  "absPath",
+  "contextDirAbs",
+  "absTarget",
+  "absOther",
+  "containedPath",
+]);
+
+const AUTHORITY_PROPS = new Set(["absPath"]);
+
+// ---------------------------------------------------------------------------
+// AST analysis
+// ---------------------------------------------------------------------------
+
+function isAuthorityExpression(node, varProvenance) {
+  if (!node) return false;
+
+  if (ts.isAwaitExpression(node)) {
+    return isAuthorityExpression(node.expression, varProvenance);
   }
+
+  if (ts.isCallExpression(node)) {
+    const name = getCallName(node);
+    if (name && AUTHORITY_CALLS.has(name)) return true;
+    // dirname() of an authority expression is also authority — the parent
+    // directory of a symlink-free resolved path is still within the project.
+    if (name === "dirname" && node.arguments.length > 0) {
+      return isAuthorityExpression(node.arguments[0], varProvenance);
+    }
+    return false;
+  }
+
+  if (ts.isPropertyAccessExpression(node)) {
+    const propName = node.name.text;
+    if (AUTHORITY_PROPS.has(propName)) return true;
+    if (ts.isIdentifier(node.expression)) {
+      const objName = node.expression.text;
+      if (AUTHORITY_VARS.has(objName)) return true;
+      if (varProvenance.has(objName)) return true;
+    }
+    return false;
+  }
+
+  if (ts.isIdentifier(node)) {
+    const name = node.text;
+    if (AUTHORITY_VARS.has(name)) return true;
+    if (varProvenance.has(name)) return true;
+    return false;
+  }
+
+  if (ts.isBinaryExpression(node)) {
+    return (
+      isAuthorityExpression(node.left, varProvenance) &&
+      isAuthorityExpression(node.right, varProvenance)
+    );
+  }
+
+  if (ts.isConditionalExpression(node)) {
+    return (
+      isAuthorityExpression(node.whenTrue, varProvenance) &&
+      isAuthorityExpression(node.whenFalse, varProvenance)
+    );
+  }
+
+  if (ts.isParenthesizedExpression(node)) {
+    return isAuthorityExpression(node.expression, varProvenance);
+  }
+
+  if (ts.isAsExpression(node)) {
+    return isAuthorityExpression(node.expression, varProvenance);
+  }
+
   return false;
 }
 
-function isAuthorityPath(argText) {
-  for (const src of AUTHORITY_SOURCES) {
-    if (argText.includes(src)) return true;
+function getCallName(node) {
+  if (ts.isIdentifier(node.expression)) {
+    return node.expression.text;
   }
-  return false;
+  if (ts.isPropertyAccessExpression(node.expression)) {
+    return node.expression.name.text;
+  }
+  return null;
 }
 
-function checkFile(file) {
-  let text;
-  try {
-    text = readFileSync(file, "utf8");
-  } catch {
-    return [];
-  }
-  const findings = [];
-  const lines = text.split("\n");
+function hasFsSafeMarker(sourceFile, line) {
+  const lineText = sourceFile.text.split("\n")[line - 1] ?? "";
+  return /\/\/\s*fs-safe:/.test(lineText);
+}
 
-  for (const m of text.matchAll(FS_CALL_RE)) {
-    const lineNo = text.slice(0, m.index).split("\n").length;
-    const line = lines[lineNo - 1] ?? "";
-    if (isExempt(line)) continue;
+function collectVarProvenance(sourceFile) {
+  const provenance = new Set();
 
-    // Extract the first argument (path) from the fs call
-    const callStart = m.index + m[0].length;
-    let depth = 1;
-    let argEnd = callStart;
-    for (let i = callStart; i < text.length && depth > 0; i++) {
-      if (text[i] === "(") depth++;
-      else if (text[i] === ")") depth--;
-      else if (text[i] === "," && depth === 1) {
-        argEnd = i;
-        break;
+  function visit(node) {
+    if (ts.isVariableStatement(node)) {
+      for (const decl of node.declarationList.declarations) {
+        if (
+          decl.initializer &&
+          ts.isIdentifier(decl.name) &&
+          isAuthorityExpression(decl.initializer, provenance)
+        ) {
+          provenance.add(decl.name.text);
+        }
       }
     }
-    const argText = text.slice(callStart, argEnd).trim();
-
-    // Check if the path argument comes from an authority source
-    if (!isAuthorityPath(argText)) {
-      // Check if there's a fs-safe marker
-      if (/\/\/\s*fs-safe:/.test(line)) continue;
-      findings.push({
-        line: lineNo,
-        fn: m[1],
-        arg: argText.slice(0, 60),
-        text: line.trim(),
-      });
+    if (
+      ts.isExpressionStatement(node) &&
+      ts.isBinaryExpression(node.expression) &&
+      node.expression.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+      ts.isIdentifier(node.expression.left) &&
+      isAuthorityExpression(node.expression.right, provenance)
+    ) {
+      provenance.add(node.expression.left.text);
     }
+    ts.forEachChild(node, visit);
   }
+
+  visit(sourceFile);
+  return provenance;
+}
+
+function isInsideAuthorityDefinition(node) {
+  let current = node;
+  while (current) {
+    if (
+      ts.isFunctionDeclaration(current) ||
+      ts.isFunctionExpression(current) ||
+      ts.isArrowFunction(current) ||
+      ts.isMethodDeclaration(current)
+    ) {
+      const name = current.name?.text;
+      if (name && AUTHORITY_CALLS.has(name)) return true;
+    }
+    current = current.parent;
+  }
+  return false;
+}
+
+function isInsideImport(node) {
+  let current = node;
+  while (current) {
+    if (
+      ts.isImportDeclaration(current) ||
+      ts.isImportEqualsDeclaration(current)
+    ) {
+      return true;
+    }
+    current = current.parent;
+  }
+  return false;
+}
+
+// ---------------------------------------------------------------------------
+// Main check
+// ---------------------------------------------------------------------------
+
+function checkFile(filePath) {
+  const text = readFileSync(filePath, "utf8");
+  const sourceFile = ts.createSourceFile(
+    filePath,
+    text,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+
+  function setParents(node, parent) {
+    node.parent = parent;
+    ts.forEachChild(node, child => setParents(child, node));
+  }
+  setParents(sourceFile, undefined);
+
+  const varProvenance = collectVarProvenance(sourceFile);
+  const findings = [];
+
+  function visit(node) {
+    if (ts.isCallExpression(node)) {
+      const fnName = getCallName(node);
+
+      if (fnName && FS_FUNCTIONS.has(fnName)) {
+        const line =
+          sourceFile.getLineAndCharacterOfPosition(node.getStart()).line + 1;
+
+        if (isInsideImport(node)) {
+          ts.forEachChild(node, visit);
+          return;
+        }
+
+        if (isInsideAuthorityDefinition(node)) {
+          ts.forEachChild(node, visit);
+          return;
+        }
+
+        if (hasFsSafeMarker(sourceFile, line)) {
+          ts.forEachChild(node, visit);
+          return;
+        }
+
+        const firstArg = node.arguments[0];
+        if (!firstArg) {
+          ts.forEachChild(node, visit);
+          return;
+        }
+
+        if (!isAuthorityExpression(firstArg, varProvenance)) {
+          const argText = firstArg.getText(sourceFile).slice(0, 80);
+          const lineText = sourceFile.text.split("\n")[line - 1]?.trim() ?? "";
+          findings.push({
+            line,
+            fn: fnName,
+            arg: argText,
+            text: lineText,
+          });
+        }
+      }
+    }
+
+    ts.forEachChild(node, visit);
+  }
+
+  visit(sourceFile);
   return findings;
 }
 
+// ---------------------------------------------------------------------------
+// Run
+// ---------------------------------------------------------------------------
+
 let total = 0;
-for (const file of ADAPTER_FILES) {
-  const findings = checkFile(file);
+for (const file of TARGET_FILES) {
+  const absPath = resolve(file);
+  let findings;
+  try {
+    findings = checkFile(absPath);
+  } catch (err) {
+    console.error(`fs-authority: error checking ${file}: ${err.message}`);
+    process.exit(2);
+  }
   for (const f of findings) {
     total++;
     console.log(
@@ -126,13 +338,16 @@ for (const file of ADAPTER_FILES) {
 
 if (total > 0) {
   console.log(
-    `\nfs-authority: ${total} finding(s). Adapter fs operations must use paths from:`,
+    `\nfs-authority: ${total} finding(s). Fs operations must use paths from:`,
   );
   console.log(
-    `  authorizeAdapterMutationPath, resolveSymlinkFreeProjectPath, resolveManifestPath,`,
+    `  resolveSymlinkFreeProjectPath, resolveOwnedReadPath, resolveProjectConfigPath,`,
   );
   console.log(
-    `  or a pre-resolved variable (absPath, contextDirAbs, etc.).`,
+    `  resolveAgentProfilePath, resolveArchiveOwnedPath, resolveManifestPath,`,
+  );
+  console.log(
+    `  authorizeAdapterMutationPath, or a pre-resolved variable (absPath, contextDirAbs, etc.).`,
   );
   console.log(
     `  If the path is genuinely safe, append \`// fs-safe: <reason>\`.`,

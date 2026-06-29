@@ -1,0 +1,123 @@
+import { readFile, readdir, stat } from "node:fs/promises";
+import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
+import { isDecisionRefPath } from "../schemas/decision-ref.ts";
+import { PhaseRef } from "../schemas/roadmap.ts";
+
+/**
+ * Read a regular text file at an absolute path. Throws on directory, ENOENT,
+ * or any I/O error. The path must already be authority-resolved.
+ */
+async function readRegularText(abs: string): Promise<string> {
+  const s = await stat(abs);
+  if (!s.isFile()) {
+    const err = new Error(`path is not a regular file`);
+    (err as NodeJS.ErrnoException).code = "EISDIR";
+    throw err;
+  }
+  return readFile(abs, "utf8");
+}
+
+/**
+ * Read a phase YAML from the project. The path must come from a validated
+ * PhaseRef (roadmap-declared, under `design/phases/*.yaml`). Symlink-free
+ * resolution rejects in-project symlink aliases before any read.
+ */
+export async function readOwnedPhaseRaw(
+  cwd: string,
+  ref: PhaseRef,
+): Promise<string> {
+  PhaseRef.parse(ref);
+  const abs = await resolveSymlinkFreeProjectPath(cwd, ref.path);
+  return readRegularText(abs);
+}
+
+/**
+ * Read a phase YAML from a raw path string. The path is validated against
+ * the PhaseRef namespace contract (under `design/phases/*.yaml`) before
+ * symlink-free resolution.
+ */
+export async function readOwnedPhaseRawByPath(
+  cwd: string,
+  phasePath: string,
+): Promise<string> {
+  const ref = PhaseRef.parse({ id: "unknown", path: phasePath, weight: 1 });
+  const abs = await resolveSymlinkFreeProjectPath(cwd, ref.path);
+  return readRegularText(abs);
+}
+
+/**
+ * Read a decision ADR markdown from the project. The path must be a valid
+ * DecisionRefPath (under `design/decisions/*.md`, top-level only). Symlink-free
+ * resolution rejects in-project symlink aliases before any read.
+ */
+export async function readOwnedDecisionRaw(
+  cwd: string,
+  decisionPath: string,
+): Promise<string> {
+  if (!isDecisionRefPath(decisionPath)) {
+    const err = new Error(
+      `path "${decisionPath}" is not a valid decision reference (must be under design/decisions/*.md)`,
+    );
+    (err as NodeJS.ErrnoException).code = "PATH_NOT_OWNED";
+    throw err;
+  }
+  const abs = await resolveSymlinkFreeProjectPath(cwd, decisionPath);
+  return readRegularText(abs);
+}
+
+/**
+ * Read the roadmap YAML from the project. Uses a fixed path
+ * (`design/roadmap.yaml`) with symlink-free resolution.
+ */
+export async function readOwnedRoadmapRaw(cwd: string): Promise<string> {
+  const abs = await resolveSymlinkFreeProjectPath(cwd, "design/roadmap.yaml");
+  return readRegularText(abs);
+}
+
+/**
+ * List the `design/phases/` directory via symlink-free resolution. The
+ * directory root itself must not be a symlink. Entries that are symlinks
+ * are NOT followed by the caller (readdir withFileTypes distinguishes).
+ */
+export async function listOwnedPhaseDirectory(
+  cwd: string,
+): Promise<string[]> {
+  const abs = await resolveSymlinkFreeProjectPath(cwd, "design/phases");
+  return readdir(abs);
+}
+
+/**
+ * List the `design/decisions/` directory via symlink-free resolution. The
+ * directory root itself must not be a symlink.
+ */
+export async function listOwnedDecisionDirectory(
+  cwd: string,
+): Promise<string[]> {
+  const abs = await resolveSymlinkFreeProjectPath(cwd, "design/decisions");
+  return readdir(abs);
+}
+
+/**
+ * Check existence of a path via symlink-free resolution + stat. Returns
+ * "present", "absent", or "inaccessible". Used for control-plane paths
+ * where in-project symlinks must be rejected.
+ */
+export async function ownedPathPresence(
+  cwd: string,
+  relPath: string,
+): Promise<"present" | "absent" | "inaccessible"> {
+  let abs: string;
+  try {
+    abs = await resolveSymlinkFreeProjectPath(cwd, relPath);
+  } catch {
+    return "inaccessible";
+  }
+  try {
+    await stat(abs);
+    return "present";
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === "ENOENT"
+      ? "absent"
+      : "inaccessible";
+  }
+}
