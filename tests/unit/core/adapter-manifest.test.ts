@@ -1,5 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtemp, rm, writeFile, mkdir, readFile, symlink, readdir } from "node:fs/promises";
+import {
+  mkdtemp,
+  rm,
+  writeFile,
+  mkdir,
+  readFile,
+  symlink,
+  readdir,
+} from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -22,7 +30,9 @@ afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
-function manifestFixture(overrides: Partial<AdapterManifest> = {}): AdapterManifest {
+function manifestFixture(
+  overrides: Partial<AdapterManifest> = {},
+): AdapterManifest {
   return {
     schema_version: 1,
     agent_name: "claude-code",
@@ -55,7 +65,9 @@ describe("manifestPath", () => {
   });
 
   it("scopes per agent — different agent names produce different paths", () => {
-    expect(manifestPath(dir, "codex")).not.toBe(manifestPath(dir, "claude-code"));
+    expect(manifestPath(dir, "codex")).not.toBe(
+      manifestPath(dir, "claude-code"),
+    );
   });
 });
 
@@ -71,14 +83,18 @@ describe("readManifest", () => {
 
   it("throws on malformed YAML", async () => {
     const path = manifestPath(dir, "claude-code");
-    await mkdir(join(dir, ...ADAPTER_MANIFEST_DIR_SEGMENTS), { recursive: true });
+    await mkdir(join(dir, ...ADAPTER_MANIFEST_DIR_SEGMENTS), {
+      recursive: true,
+    });
     await writeFile(path, "schema_version: 1\n  files: [oops:\n", "utf8");
     await expect(readManifest(dir, "claude-code")).rejects.toThrow();
   });
 
   it("throws on YAML that fails schema validation", async () => {
     const path = manifestPath(dir, "claude-code");
-    await mkdir(join(dir, ...ADAPTER_MANIFEST_DIR_SEGMENTS), { recursive: true });
+    await mkdir(join(dir, ...ADAPTER_MANIFEST_DIR_SEGMENTS), {
+      recursive: true,
+    });
     await writeFile(
       path,
       "schema_version: 99\nagent_name: claude-code\n",
@@ -89,7 +105,9 @@ describe("readManifest", () => {
 
   it("throws when the YAML has an absolute path in files[]", async () => {
     const path = manifestPath(dir, "claude-code");
-    await mkdir(join(dir, ...ADAPTER_MANIFEST_DIR_SEGMENTS), { recursive: true });
+    await mkdir(join(dir, ...ADAPTER_MANIFEST_DIR_SEGMENTS), {
+      recursive: true,
+    });
     const yaml = [
       "schema_version: 1",
       "agent_name: claude-code",
@@ -112,7 +130,9 @@ describe("readManifest", () => {
 
   it("throws when the YAML has a `..` path in files[]", async () => {
     const path = manifestPath(dir, "claude-code");
-    await mkdir(join(dir, ...ADAPTER_MANIFEST_DIR_SEGMENTS), { recursive: true });
+    await mkdir(join(dir, ...ADAPTER_MANIFEST_DIR_SEGMENTS), {
+      recursive: true,
+    });
     const yaml = [
       "schema_version: 1",
       "agent_name: claude-code",
@@ -160,9 +180,24 @@ describe("writeManifest", () => {
   it("round-trips a manifest with multiple file entries", async () => {
     const m = manifestFixture({
       files: [
-        { path: "CLAUDE.md", sha256: "a".repeat(64), managed: true, role: "instruction" },
-        { path: ".claude/skills/context.md", sha256: "b".repeat(64), managed: true, role: "skill" },
-        { path: ".claude/skills/verify.md", sha256: "c".repeat(64), managed: true, role: "skill" },
+        {
+          path: "CLAUDE.md",
+          sha256: "a".repeat(64),
+          managed: true,
+          role: "instruction",
+        },
+        {
+          path: ".claude/skills/context.md",
+          sha256: "b".repeat(64),
+          managed: true,
+          role: "skill",
+        },
+        {
+          path: ".claude/skills/verify.md",
+          sha256: "c".repeat(64),
+          managed: true,
+          role: "skill",
+        },
       ],
     });
     await writeManifest(dir, "claude-code", m);
@@ -200,6 +235,40 @@ describe("writeManifest", () => {
     await writeManifest(dir, "claude-code", next);
     const read = await readManifest(dir, "claude-code");
     expect(read?.generator_version).toBe("0.9.1-alpha.0");
+  });
+
+  it("readManifest throws ADAPTER_MANIFEST_INVALID when agent_name doesn't match", async () => {
+    const path = manifestPath(dir, "claude-code");
+    await mkdir(join(dir, ...ADAPTER_MANIFEST_DIR_SEGMENTS), {
+      recursive: true,
+    });
+    const yaml = [
+      "schema_version: 1",
+      "agent_name: codex",
+      "generator_version: 0.9.0-alpha.0",
+      "adapter_schema_version: 1",
+      "generated_at: 2026-05-19T12:00:00+00:00",
+      "profile_fingerprint:",
+      "  instruction_filename: CLAUDE.md",
+      "  context_dir: .context/claude-code",
+      "files:",
+      "  - path: CLAUDE.md",
+      `    sha256: ${"a".repeat(64)}`,
+      "    managed: true",
+      "    role: instruction",
+      "",
+    ].join("\n");
+    await writeFile(path, yaml, "utf8");
+    await expect(readManifest(dir, "claude-code")).rejects.toMatchObject({
+      code: "ADAPTER_MANIFEST_INVALID",
+    });
+  });
+
+  it("writeManifest throws ADAPTER_MANIFEST_INVALID when agent_name doesn't match", async () => {
+    const bad = manifestFixture({ agent_name: "codex" });
+    await expect(writeManifest(dir, "claude-code", bad)).rejects.toMatchObject({
+      code: "ADAPTER_MANIFEST_INVALID",
+    });
   });
 });
 

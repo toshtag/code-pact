@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { atomicWriteText } from "../../io/atomic-text.ts";
-import { resolveOwnedProjectPath } from "../path-safety.ts";
+import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
 import {
   AdapterManifest,
   AdapterManifestLenient,
@@ -30,19 +30,24 @@ export function manifestPath(cwd: string, agentName: string): string {
 }
 
 export function manifestRelPath(agentName: string): string {
-  return [...ADAPTER_MANIFEST_DIR_SEGMENTS, `${agentName}.manifest.yaml`].join("/");
+  return [...ADAPTER_MANIFEST_DIR_SEGMENTS, `${agentName}.manifest.yaml`].join(
+    "/",
+  );
 }
 
 /**
- * Resolves the on-disk manifest path through {@link resolveOwnedProjectPath} so
+ * Resolves the on-disk manifest path through {@link resolveSymlinkFreeProjectPath} so
  * `.code-pact/adapters` cannot be an in-project symlink alias for another
  * namespace. Throws (fail-closed) when the path escapes the project, traverses a
  * symlink, or `agentName` is structurally unsafe — callers must NOT treat that
  * throw as "manifest missing".
  */
-async function resolveManifestPath(cwd: string, agentName: string): Promise<string> {
+async function resolveManifestPath(
+  cwd: string,
+  agentName: string,
+): Promise<string> {
   try {
-    return await resolveOwnedProjectPath(cwd, manifestRelPath(agentName));
+    return await resolveSymlinkFreeProjectPath(cwd, manifestRelPath(agentName));
   } catch (err) {
     // A path-containment refusal (a `.code-pact/adapters` symlink that escapes
     // the project) is an ADVERSARIAL but EXPECTED input — surface it as a clean
@@ -107,9 +112,12 @@ export async function readManifest(
     (e as NodeJS.ErrnoException).code = "ADAPTER_MANIFEST_INVALID";
     throw e;
   }
-  const schema = opts.tolerantDuplicatePaths ? AdapterManifestLenient : AdapterManifest;
+  const schema = opts.tolerantDuplicatePaths
+    ? AdapterManifestLenient
+    : AdapterManifest;
+  let parsed: AdapterManifest;
   try {
-    return schema.parse(parseYaml(raw) as unknown);
+    parsed = schema.parse(parseYaml(raw) as unknown);
   } catch (err) {
     // A project-controlled manifest with malformed YAML or a schema violation is
     // adversarial-but-expected input. Tag it `ADAPTER_MANIFEST_INVALID` so the
@@ -122,6 +130,18 @@ export async function readManifest(
     (e as NodeJS.ErrnoException).code = "ADAPTER_MANIFEST_INVALID";
     throw e;
   }
+  // Identity check: the manifest's agent_name must match the agent being
+  // inspected. A mismatch (e.g. a claude-code manifest read as "codex") is
+  // either a file-name/agent-name confusion or a hostile swap — refuse it
+  // before any caller acts on the manifest's file list.
+  if (parsed.agent_name !== agentName) {
+    const e = new Error(
+      `Adapter manifest at ${path} has agent_name "${parsed.agent_name}" but was read as "${agentName}" — agent identity mismatch`,
+    );
+    (e as NodeJS.ErrnoException).code = "ADAPTER_MANIFEST_INVALID";
+    throw e;
+  }
+  return parsed;
 }
 
 /**
@@ -143,10 +163,23 @@ export async function writeManifest(
     opts.preResolvedOwnedPath !== undefined &&
     opts.preResolvedOwnedPath !== expectedLexicalPath
   ) {
-    throw new Error("pre-resolved adapter manifest path does not match the target agent");
+    throw new Error(
+      "pre-resolved adapter manifest path does not match the target agent",
+    );
   }
-  const path = opts.preResolvedOwnedPath ?? await resolveManifestPath(cwd, agentName);
+  const path =
+    opts.preResolvedOwnedPath ?? (await resolveManifestPath(cwd, agentName));
   const parsed = AdapterManifest.parse(manifest);
+  // Identity check: refuse to write a manifest whose agent_name doesn't match
+  // the target agent — never persist a cross-agent manifest under another
+  // agent's path.
+  if (parsed.agent_name !== agentName) {
+    const e = new Error(
+      `Refusing to write manifest for "${agentName}" — manifest agent_name is "${parsed.agent_name}" (identity mismatch)`,
+    );
+    (e as NodeJS.ErrnoException).code = "ADAPTER_MANIFEST_INVALID";
+    throw e;
+  }
   await atomicWriteText(path, stringifyYaml(parsed));
   return path;
 }
