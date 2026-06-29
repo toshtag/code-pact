@@ -136,4 +136,48 @@ describe("check-fs-authority", () => {
     expect(result.ok).toBe(false);
     expect(result.output).toContain("stat() called on non-authority path");
   });
+
+  it("rejects switch branch bypass — unauthorized case persists", async () => {
+    const result = await runFixture([
+      'import { stat } from "node:fs/promises";',
+      'import { resolveSymlinkFreeProjectPath } from "../../src/core/path-safety.ts";',
+      "",
+      "async function f(profile: any, cwd: string, mode: string) {",
+      "  let p: string;",
+      "  switch (mode) {",
+      '    case "safe":',
+      '      p = await resolveSymlinkFreeProjectPath(cwd, "CLAUDE.md");',
+      "      break;",
+      "    default:",
+      "      p = profile.instruction_filename;",
+      "      break;",
+      "  }",
+      "  await stat(p);",
+      "}",
+      "",
+    ]);
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain("stat() called on non-authority path");
+  });
+
+  it("rejects non-path helper confusion — function returning boolean treated as authority", async () => {
+    const result = await runFixture([
+      'import { stat } from "node:fs/promises";',
+      'import { resolveSymlinkFreeProjectPath } from "../../src/core/path-safety.ts";',
+      "",
+      "async function isSafe(_cwd: string, _path: string): Promise<boolean> {",
+      "  return true;",
+      "}",
+      "",
+      "async function f(profile: any, cwd: string) {",
+      "  const safe = await isSafe(cwd, profile.instruction_filename);",
+      "  if (safe) {",
+      "    await stat(profile.instruction_filename);",
+      "  }",
+      "}",
+      "",
+    ]);
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain("stat() called on non-authority path");
+  });
 });
