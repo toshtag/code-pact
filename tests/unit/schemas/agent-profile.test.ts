@@ -20,7 +20,11 @@ describe("AgentProfile", () => {
   });
 
   it("accepts optional skill_dir and hook_dir", () => {
-    const a = AgentProfile.parse({ ...VALID, skill_dir: ".claude/skills", hook_dir: ".claude/hooks" });
+    const a = AgentProfile.parse({
+      ...VALID,
+      skill_dir: ".claude/skills",
+      hook_dir: ".claude/hooks",
+    });
     expect(a.skill_dir).toBe(".claude/skills");
   });
 
@@ -38,7 +42,9 @@ describe("AgentProfile", () => {
   });
 
   it("rejects empty instruction_filename", () => {
-    expect(() => AgentProfile.parse({ ...VALID, instruction_filename: "" })).toThrow();
+    expect(() =>
+      AgentProfile.parse({ ...VALID, instruction_filename: "" }),
+    ).toThrow();
   });
 
   // Path fields must be project-relative POSIX paths so they cannot escape the
@@ -67,6 +73,35 @@ describe("AgentProfile", () => {
       hook_dir: ".claude/hooks",
     });
     expect(a.context_dir).toBe(".context/cursor");
+  });
+
+  // context_dir must be .context or .context/** — a hostile profile setting
+  // context_dir: design + taskId: constitution would overwrite
+  // design/constitution.md via the context pack write path.
+  it.each([
+    ["design"],
+    ["docs"],
+    ["src"],
+    [".code-pact"],
+    [".claude"],
+    [".contextual"],
+    [".context-old"],
+    [".context_backup"],
+    ["foo/.context"],
+  ])("rejects context_dir = %j (outside .context namespace)", value => {
+    expect(() =>
+      AgentProfile.parse({ ...VALID, context_dir: value }),
+    ).toThrow();
+  });
+
+  it.each([
+    [".context"],
+    [".context/custom"],
+    [".context/claude-code"],
+    [".context/custom/nested"],
+  ])("accepts context_dir = %j (inside .context namespace)", value => {
+    const a = AgentProfile.parse({ ...VALID, context_dir: value });
+    expect(a.context_dir).toBe(value);
   });
 });
 
@@ -155,15 +190,17 @@ describe("AgentProfile.context_budget (P47)", () => {
     ).toThrow();
   });
 
-  it.each([["", "empty"], ["has space", "space"], ["a/b", "slash"], ["a.b", "dot"]])(
-    "rejects an unsafe profile name %j (%s)",
-    (name) => {
-      expect(() =>
-        AgentProfile.parse({
-          ...VALID,
-          context_budget: { profiles: { [name]: { max_bytes: 30000 } } },
-        }),
-      ).toThrow();
-    },
-  );
+  it.each([
+    ["", "empty"],
+    ["has space", "space"],
+    ["a/b", "slash"],
+    ["a.b", "dot"],
+  ])("rejects an unsafe profile name %j (%s)", name => {
+    expect(() =>
+      AgentProfile.parse({
+        ...VALID,
+        context_budget: { profiles: { [name]: { max_bytes: 30000 } } },
+      }),
+    ).toThrow();
+  });
 });

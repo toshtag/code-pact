@@ -5,13 +5,14 @@
 // pack atomically. The loaders, budget elision, and explain machinery live in
 // sibling modules; this file is the orchestration + public type surface.
 
-import { join } from "node:path";
+import { join, isAbsolute } from "node:path";
 import { atomicWriteText } from "../../io/atomic-text.ts";
 import { resolvePhaseInRoadmap } from "../plan/resolve-phase.ts";
 import { loadPhase } from "../plan/load-phase.ts";
 import { renderSections, type DependsOnEntry } from "./formatters/markdown.ts";
 import { deriveTaskState } from "../progress/task-state.ts";
-import { resolveOwnedProjectPath } from "../path-safety.ts";
+import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
+import { resolveProfileContextOutputPath } from "./context-output-path.ts";
 import {
   loadAgentProfile,
   loadConstitution,
@@ -103,20 +104,6 @@ export type WriteContextPackResult = {
   outputPath: string;
 };
 
-async function resolveProfileContextDir(cwd: string, relPath: string): Promise<string> {
-  try {
-    return await resolveOwnedProjectPath(cwd, relPath);
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code === "PATH_OUTSIDE_PROJECT" || code === "PATH_NOT_OWNED") {
-      const e = new Error((err as Error).message);
-      (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
-      throw e;
-    }
-    throw err;
-  }
-}
-
 /**
  * Pure-ish context pack builder. Reads design files and renders the
  * Markdown content along with metadata. Does NOT write to disk.
@@ -139,7 +126,7 @@ export async function buildContextPack(
 
   const phase = await loadPhase(cwd, ref.path);
 
-  const task = phase.tasks?.find((t) => t.id === taskId);
+  const task = phase.tasks?.find(t => t.id === taskId);
   if (!task) {
     const err = new Error(`Task "${taskId}" not found in phase "${phaseId}".`);
     (err as NodeJS.ErrnoException).code = "TASK_NOT_FOUND";
@@ -165,20 +152,34 @@ export async function buildContextPack(
   const decisionRefs = task.decision_refs ?? [];
   const acceptanceRefsList = task.acceptance_refs ?? [];
 
-  const [rules, decisions, constitution, doneEvents, allEvents, declaredDecisions, readMatches] =
-    await Promise.all([
-      isSmall ? Promise.resolve([]) : loadRules(cwd, task.type, allRules),
-      isSmall ? Promise.resolve([]) : loadDecisions(cwd, taskId, allDecisions),
-      includeConstitution ? loadConstitution(cwd) : Promise.resolve(null),
-      isHighAmbiguity ? loadDoneEventsInPhase(cwd, phase) : Promise.resolve([]),
-      dependsOnIds.length > 0 ? loadAllProgressEvents(cwd) : Promise.resolve([]),
-      decisionRefs.length > 0 ? loadDeclaredDecisions(cwd, decisionRefs) : Promise.resolve([]),
-      readGlobs.length > 0 ? loadReadMatches(cwd, readGlobs) : Promise.resolve([]),
-    ]);
+  const [
+    rules,
+    decisions,
+    constitution,
+    doneEvents,
+    allEvents,
+    declaredDecisions,
+    readMatches,
+  ] = await Promise.all([
+    isSmall ? Promise.resolve([]) : loadRules(cwd, task.type, allRules),
+    isSmall ? Promise.resolve([]) : loadDecisions(cwd, taskId, allDecisions),
+    includeConstitution ? loadConstitution(cwd) : Promise.resolve(null),
+    isHighAmbiguity ? loadDoneEventsInPhase(cwd, phase) : Promise.resolve([]),
+    dependsOnIds.length > 0 ? loadAllProgressEvents(cwd) : Promise.resolve([]),
+    decisionRefs.length > 0
+      ? loadDeclaredDecisions(cwd, decisionRefs)
+      : Promise.resolve([]),
+    readGlobs.length > 0
+      ? loadReadMatches(cwd, readGlobs)
+      : Promise.resolve([]),
+  ]);
 
   const dependsOn: DependsOnEntry[] | undefined =
     dependsOnIds.length > 0
-      ? dependsOnIds.map((id) => ({ id, current: deriveTaskState(allEvents, id).current }))
+      ? dependsOnIds.map(id => ({
+          id,
+          current: deriveTaskState(allEvents, id).current,
+        }))
       : undefined;
 
   const allRendered = renderSections({
@@ -197,7 +198,9 @@ export async function buildContextPack(
     ...(readMatches.length > 0 ? { readMatches } : {}),
     ...(writeGlobsList.length > 0 ? { writeGlobs: writeGlobsList } : {}),
     ...(declaredDecisions.length > 0 ? { declaredDecisions } : {}),
-    ...(acceptanceRefsList.length > 0 ? { acceptanceRefs: acceptanceRefsList } : {}),
+    ...(acceptanceRefsList.length > 0
+      ? { acceptanceRefs: acceptanceRefsList }
+      : {}),
   });
 
   // Budget enforcement. When `budgetBytes` is set, elide sections
@@ -212,7 +215,7 @@ export async function buildContextPack(
   const elidedNames = budgetResult.elidedNames;
   const elidedSectionsBytes = budgetResult.elidedBytes;
 
-  const content = renderedSections.flatMap((s) => s.lines).join("\n");
+  const content = renderedSections.flatMap(s => s.lines).join("\n");
   const totalBytes = Buffer.byteLength(content, "utf8");
 
   const result: ContextPackResult = {
@@ -222,8 +225,8 @@ export async function buildContextPack(
     agent: agentName,
     charCount: content.length,
     totalBytes,
-    includedRules: rules.map((r) => r.filename),
-    includedDecisions: decisions.map((d) => d.filename),
+    includedRules: rules.map(r => r.filename),
+    includedDecisions: decisions.map(d => d.filename),
     includedConstitution: constitution !== null,
   };
 
@@ -256,7 +259,9 @@ export async function buildContextPack(
     result.explainMetrics = {
       naturalBytes: bm.naturalBytes,
       finalBytes: bm.finalBytes,
-      ...(opts.budgetBytes !== undefined ? { budgetBytes: opts.budgetBytes } : {}),
+      ...(opts.budgetBytes !== undefined
+        ? { budgetBytes: opts.budgetBytes }
+        : {}),
       savedBytes,
       savedRatio: bm.naturalBytes === 0 ? 0 : savedBytes / bm.naturalBytes,
       minimumAchievableBytes: bm.minimumAchievableBytes,
@@ -288,15 +293,20 @@ export async function buildContextPack(
 
 /**
  * Writes a previously built ContextPackResult to disk under the agent's
- * configured context_dir (or an explicit outputDir override). Returns
+ * configured `context_dir` (or an explicit outputDir override). Returns
  * the resolved outputPath.
  *
+ * Profile-derived `context_dir` is constrained to the reserved `.context/**`
+ * generated namespace and the FULL output path (directory + filename) is
+ * resolved through symlink-free project containment via
+ * `resolveProfileContextOutputPath`. An explicit `outputDir` is a deliberate
+ * caller/CLI choice (`--output-dir`) and is resolved through
+ * `resolveSymlinkFreeProjectPath` for containment only — it is NOT subject to
+ * the `.context/**` namespace restriction but must still stay inside the
+ * project and traverse no symlink.
+ *
  * The write goes through `atomicWriteText` (temp-file + rename), so an
- * interrupted process can never leave a half-written pack on disk. The
- * context pack is part of the deterministic agent-facing artifact surface
- * the cli-contract.md "State file write guarantees" section covers, so it
- * uses the same atomic primitive as the managed file-content writes listed
- * there (directory creation and the advisory lock are separate mechanisms).
+ * interrupted process can never leave a half-written pack on disk.
  */
 export async function writeContextPack(
   pack: ContextPackResult,
@@ -304,14 +314,26 @@ export async function writeContextPack(
 ): Promise<WriteContextPackResult> {
   const { cwd, agentName, outputDir } = opts;
   const profile = await loadAgentProfile(cwd, agentName);
-  // An explicit `outputDir` is a deliberate caller/CLI choice (`--output-dir`),
-  // left as-is. The profile-derived dir is an owned generated namespace: no
-  // symlink component is allowed, even when it stays inside the project.
-  const outDir =
-    outputDir ?? (await resolveProfileContextDir(cwd, profile?.context_dir ?? `.context/${agentName}`));
-  const outputPath = join(outDir, `${pack.taskId}.md`);
-  // atomicWriteText recursively creates the parent dir before writing, so no
-  // separate mkdir(outDir) is needed.
+  let outputPath: string;
+  if (outputDir !== undefined) {
+    // Explicit --output-dir: caller authority, not profile-derived.
+    // Absolute paths are used as-is (explicit user choice, e.g. /tmp).
+    // Project-relative paths are resolved through symlink-free containment.
+    if (isAbsolute(outputDir)) {
+      outputPath = join(outputDir, `${pack.taskId}.md`);
+    } else {
+      const dir = await resolveSymlinkFreeProjectPath(cwd, outputDir);
+      outputPath = join(dir, `${pack.taskId}.md`);
+    }
+  } else {
+    // Profile-derived: constrained to .context/** + symlink-free resolution
+    // on the FULL path (directory + filename).
+    outputPath = await resolveProfileContextOutputPath(
+      cwd,
+      profile?.context_dir ?? `.context/${agentName}`,
+      pack.taskId,
+    );
+  }
   await atomicWriteText(outputPath, pack.content);
   return { outputPath };
 }

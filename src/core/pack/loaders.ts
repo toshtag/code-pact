@@ -29,13 +29,16 @@ import { validateGlobSyntax, walkAndMatch } from "../glob.ts";
 import { assertSafePlanId } from "../schemas/plan-id.ts";
 import { readProjectTextOrNull } from "../project-read.ts";
 import { resolveAgentProfilePath } from "../agent-profile-path.ts";
-import { resolveOwnedProjectPath } from "../path-safety.ts";
+import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
 
 // The project-contained read guard (`..`/absolute/symlink-escape → null) lives
 // in the shared `core/project-read.ts` (`readProjectTextOrNull`) so the planning
 // prompt and any other agent-facing grounding read share one implementation.
 
-export async function loadAgentProfile(cwd: string, agentName: string): Promise<AgentProfile | null> {
+export async function loadAgentProfile(
+  cwd: string,
+  agentName: string,
+): Promise<AgentProfile | null> {
   // Validate the agent name and resolve the path OUTSIDE the try, so an unsafe
   // `agentName` is a hard CONFIG_ERROR rather than being swallowed by the catch
   // (which returns null) — a `../evil` name can never read outside the project.
@@ -69,7 +72,7 @@ export async function loadRules(
 ): Promise<RuleDoc[]> {
   let entries: string[];
   try {
-    const rulesDir = await resolveOwnedProjectPath(cwd, "design/rules");
+    const rulesDir = await resolveSymlinkFreeProjectPath(cwd, "design/rules");
     entries = await readdir(rulesDir);
   } catch {
     return [];
@@ -84,7 +87,9 @@ export async function loadRules(
     const raw = await readProjectTextOrNull(cwd, `design/rules/${entry}`);
     if (raw === null) continue; // unsafe (e.g. symlink escape) or unreadable
     const { frontMatter, body } = parseFrontMatter(raw);
-    const tags: string[] = Array.isArray(frontMatter.tags) ? (frontMatter.tags as string[]) : [];
+    const tags: string[] = Array.isArray(frontMatter.tags)
+      ? (frontMatter.tags as string[])
+      : [];
     const appliesTo: string[] = Array.isArray(frontMatter.applies_to)
       ? (frontMatter.applies_to as string[])
       : [];
@@ -142,12 +147,12 @@ export async function loadDoneEventsInPhase(
   cwd: string,
   phase: Phase,
 ): Promise<ProgressEvent[]> {
-  const taskIds = new Set((phase.tasks ?? []).map((t) => t.id));
+  const taskIds = new Set((phase.tasks ?? []).map(t => t.id));
   if (taskIds.size === 0) return [];
   try {
     const { log } = await loadMergedProgress(cwd);
     return log.events
-      .filter((e) => e.status === "done" && taskIds.has(e.task_id))
+      .filter(e => e.status === "done" && taskIds.has(e.task_id))
       .slice(-5);
   } catch {
     return [];
@@ -158,7 +163,9 @@ export async function loadDoneEventsInPhase(
 // .code-pact/state/events/ merged with the legacy .code-pact/state/progress.yaml)
 // or returns [] when the ledger is missing / unparseable. The pack uses this to
 // derive the current state of each id listed in task.depends_on.
-export async function loadAllProgressEvents(cwd: string): Promise<ProgressEvent[]> {
+export async function loadAllProgressEvents(
+  cwd: string,
+): Promise<ProgressEvent[]> {
   try {
     const { log } = await loadMergedProgress(cwd);
     return log.events;

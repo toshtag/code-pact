@@ -32,7 +32,10 @@ import { Phase } from "../../../src/core/schemas/phase.ts";
 import { PhaseRef } from "../../../src/core/schemas/roadmap.ts";
 import { AgentRef } from "../../../src/core/schemas/project.ts";
 import { AgentProfile } from "../../../src/core/schemas/agent-profile.ts";
-import { TaskImport, PhaseImportEntry } from "../../../src/core/schemas/phase-import.ts";
+import {
+  TaskImport,
+  PhaseImportEntry,
+} from "../../../src/core/schemas/phase-import.ts";
 
 import { runInit } from "../../../src/commands/init.ts";
 import { createPhase } from "../../../src/core/services/createPhase.ts";
@@ -82,31 +85,45 @@ const ID_SCHEMA_ENTRYPOINTS: ReadonlyArray<{
   name: string;
   parse: (v: string) => { success: boolean };
 }> = [
-  { name: "PlanId", parse: (v) => PlanId.safeParse(v) },
-  { name: "Task.id", parse: (v) => Task.safeParse({ ...VALID_TASK, id: v }) },
-  { name: "Phase.id", parse: (v) => Phase.safeParse({ ...VALID_PHASE, id: v }) },
+  { name: "PlanId", parse: v => PlanId.safeParse(v) },
+  { name: "Task.id", parse: v => Task.safeParse({ ...VALID_TASK, id: v }) },
+  { name: "Phase.id", parse: v => Phase.safeParse({ ...VALID_PHASE, id: v }) },
   {
     name: "Roadmap.PhaseRef.id",
-    parse: (v) => PhaseRef.safeParse({ id: v, path: "design/phases/P1.yaml", weight: 10 }),
+    parse: v =>
+      PhaseRef.safeParse({ id: v, path: "design/phases/P1.yaml", weight: 10 }),
   },
   {
     name: "AgentRef.name",
-    parse: (v) => AgentRef.safeParse({ name: v, profile: "agent-profiles/claude-code.yaml" }),
+    parse: v =>
+      AgentRef.safeParse({
+        name: v,
+        profile: "agent-profiles/claude-code.yaml",
+      }),
   },
-  { name: "AgentProfile.name", parse: (v) => AgentProfile.safeParse({ ...VALID_PROFILE, name: v }) },
-  { name: "TaskImport.id", parse: (v) => TaskImport.safeParse({ id: v }) },
+  {
+    name: "AgentProfile.name",
+    parse: v => AgentProfile.safeParse({ ...VALID_PROFILE, name: v }),
+  },
+  { name: "TaskImport.id", parse: v => TaskImport.safeParse({ id: v }) },
   {
     name: "PhaseImportEntry.id",
-    parse: (v) => PhaseImportEntry.safeParse({ id: v, name: "n", weight: 1, objective: "o" }),
+    parse: v =>
+      PhaseImportEntry.safeParse({
+        id: v,
+        name: "n",
+        weight: 1,
+        objective: "o",
+      }),
   },
 ];
 
 describe("write-entrypoint coverage — id schemas reject BAD_PLAN_IDS", () => {
   for (const ep of ID_SCHEMA_ENTRYPOINTS) {
-    it.each(BAD_PLAN_IDS)(`${ep.name} rejects %j`, (bad) => {
+    it.each(BAD_PLAN_IDS)(`${ep.name} rejects %j`, bad => {
       expect(ep.parse(bad).success).toBe(false);
     });
-    it.each(GOOD_PLAN_IDS)(`${ep.name} accepts %j`, (good) => {
+    it.each(GOOD_PLAN_IDS)(`${ep.name} accepts %j`, good => {
       expect(ep.parse(good).success).toBe(true);
     });
   }
@@ -119,36 +136,42 @@ describe("write-entrypoint coverage — id schemas reject BAD_PLAN_IDS", () => {
 const PATH_SCHEMA_ENTRYPOINTS: ReadonlyArray<{
   name: string;
   parse: (v: string) => { success: boolean };
+  goodPaths?: readonly string[];
 }> = [
-  { name: "RelativePosixPath", parse: (v) => RelativePosixPath.safeParse(v) },
+  { name: "RelativePosixPath", parse: v => RelativePosixPath.safeParse(v) },
   {
     name: "AgentProfile.instruction_filename",
-    parse: (v) => AgentProfile.safeParse({ ...VALID_PROFILE, instruction_filename: v }),
+    parse: v =>
+      AgentProfile.safeParse({ ...VALID_PROFILE, instruction_filename: v }),
   },
   {
     name: "AgentProfile.context_dir",
-    parse: (v) => AgentProfile.safeParse({ ...VALID_PROFILE, context_dir: v }),
+    parse: v => AgentProfile.safeParse({ ...VALID_PROFILE, context_dir: v }),
+    // context_dir is now ContextOutputDir — restricted to .context/** namespace.
+    // Good paths must be .context or below .context/.
+    goodPaths: [".context", ".context/claude-code", ".context/custom/nested"],
   },
   {
     name: "AgentProfile.skill_dir",
-    parse: (v) => AgentProfile.safeParse({ ...VALID_PROFILE, skill_dir: v }),
+    parse: v => AgentProfile.safeParse({ ...VALID_PROFILE, skill_dir: v }),
   },
   {
     name: "AgentProfile.hook_dir",
-    parse: (v) => AgentProfile.safeParse({ ...VALID_PROFILE, hook_dir: v }),
+    parse: v => AgentProfile.safeParse({ ...VALID_PROFILE, hook_dir: v }),
   },
   {
     name: "AgentRef.profile",
-    parse: (v) => AgentRef.safeParse({ name: "claude-code", profile: v }),
+    parse: v => AgentRef.safeParse({ name: "claude-code", profile: v }),
   },
 ];
 
 describe("write-entrypoint coverage — path schemas reject BAD_RELATIVE_PATHS", () => {
   for (const ep of PATH_SCHEMA_ENTRYPOINTS) {
-    it.each(BAD_RELATIVE_PATHS)(`${ep.name} rejects %j`, (bad) => {
+    it.each(BAD_RELATIVE_PATHS)(`${ep.name} rejects %j`, bad => {
       expect(ep.parse(bad).success).toBe(false);
     });
-    it.each(GOOD_RELATIVE_PATHS)(`${ep.name} accepts %j`, (good) => {
+    const goods = ep.goodPaths ?? GOOD_RELATIVE_PATHS;
+    it.each(goods)(`${ep.name} accepts %j`, good => {
       expect(ep.parse(good).success).toBe(true);
     });
   }
@@ -172,7 +195,13 @@ describe("write-entrypoint coverage — runtime commands reject unsafe input", (
 
   beforeAll(async () => {
     cwd = await mkdtemp(join(tmpdir(), "code-pact-p38-cov-"));
-    await runInit({ cwd, locale: "en-US", agents: ["claude-code"], force: false, json: false });
+    await runInit({
+      cwd,
+      locale: "en-US",
+      agents: ["claude-code"],
+      force: false,
+      json: false,
+    });
     // Seed a real phase + task so recommend / pack reach the agent-name guard.
     await createPhase({
       cwd,
@@ -188,13 +217,13 @@ describe("write-entrypoint coverage — runtime commands reject unsafe input", (
     if (cwd) await rm(cwd, { recursive: true, force: true });
   });
 
-  it.each(BAD_PLAN_IDS)("createPhase rejects unsafe id %j", async (bad) => {
+  it.each(BAD_PLAN_IDS)("createPhase rejects unsafe id %j", async bad => {
     await expect(
       createPhase({ cwd, id: bad, name: "x", weight: 1, objective: "x" }),
     ).rejects.toThrow();
   });
 
-  it.each(BAD_PLAN_IDS)("task add rejects unsafe --id %j", async (bad) => {
+  it.each(BAD_PLAN_IDS)("task add rejects unsafe --id %j", async bad => {
     await expect(
       runTaskAdd({
         cwd,
@@ -206,13 +235,13 @@ describe("write-entrypoint coverage — runtime commands reject unsafe input", (
     ).rejects.toThrow();
   });
 
-  it.each(BAD_PLAN_IDS)("recommend rejects unsafe --agent %j", async (bad) => {
+  it.each(BAD_PLAN_IDS)("recommend rejects unsafe --agent %j", async bad => {
     await expect(
       runRecommend({ cwd, phaseId: "P1", taskId: "P1-T1", agentName: bad }),
     ).rejects.toThrow();
   });
 
-  it.each(BAD_PLAN_IDS)("pack rejects unsafe --agent %j", async (bad) => {
+  it.each(BAD_PLAN_IDS)("pack rejects unsafe --agent %j", async bad => {
     await expect(
       runPack({ cwd, phaseId: "P1", taskId: "P1-T1", agentName: bad }),
     ).rejects.toThrow();
@@ -222,10 +251,15 @@ describe("write-entrypoint coverage — runtime commands reject unsafe input", (
   // positional. An unsafe path must be refused at the eligibility verdict
   // (target_invalid via normalizePrunedDecisionPath) and NEVER reach the
   // executor — so the corpus must produce an `ineligible` outcome with no write.
-  it.each(BAD_RELATIVE_PATHS)("decision prune --write rejects unsafe target %j", async (bad) => {
-    const outcome = await runDecisionPruneWrite(cwd, bad, { now: new Date(0) });
-    expect(outcome.kind).toBe("ineligible");
-  });
+  it.each(BAD_RELATIVE_PATHS)(
+    "decision prune --write rejects unsafe target %j",
+    async bad => {
+      const outcome = await runDecisionPruneWrite(cwd, bad, {
+        now: new Date(0),
+      });
+      expect(outcome.kind).toBe("ineligible");
+    },
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -236,7 +270,7 @@ describe("write-entrypoint coverage — runtime commands reject unsafe input", (
 
 describe("write-entrypoint inventory is pinned", () => {
   it("id-schema entrypoints match the documented inventory", () => {
-    expect(ID_SCHEMA_ENTRYPOINTS.map((e) => e.name).sort()).toEqual(
+    expect(ID_SCHEMA_ENTRYPOINTS.map(e => e.name).sort()).toEqual(
       [
         "AgentProfile.name",
         "AgentRef.name",
@@ -251,7 +285,7 @@ describe("write-entrypoint inventory is pinned", () => {
   });
 
   it("path-schema entrypoints match the documented inventory", () => {
-    expect(PATH_SCHEMA_ENTRYPOINTS.map((e) => e.name).sort()).toEqual(
+    expect(PATH_SCHEMA_ENTRYPOINTS.map(e => e.name).sort()).toEqual(
       [
         "AgentProfile.context_dir",
         "AgentProfile.hook_dir",
