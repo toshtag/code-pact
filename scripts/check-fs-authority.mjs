@@ -29,24 +29,35 @@ const AUTHORITY_KINDS = new Set([
   "owned_write",
   "owned_delete",
   "explicit_user_input",
-  "authority_object",
+  "authority_read_object",
+  "authority_write_object",
   "not_a_path",
   "unauthorized",
   "unknown",
 ]);
 
-// Only these kinds authorize a path argument to a filesystem sink.
+// Only semantic authority kinds authorize a path argument to a filesystem sink.
+// Symlink-free containment alone is deliberately excluded: it proves the path is
+// inside the project, but not that the caller owns that namespace.
 const SINK_AUTHORIZED_KINDS = new Set([
-  "symlink_free_contained",
   "owned_read",
   "owned_write",
   "owned_delete",
   "explicit_user_input",
 ]);
 
-// authority_object is a special kind: the variable holds an object whose
-// .absPath property is an authorized path. The .absPath access extracts it.
-const AUTHORITY_OBJECT_KINDS = new Set(["authority_object"]);
+const ALLOWLIST_AUTHORIZED_KINDS = new Set([
+  ...SINK_AUTHORIZED_KINDS,
+  // Structured allowlist entries may document fixed project paths that are
+  // intentionally guarded only by containment. This exception is never granted
+  // by dataflow inference.
+  "symlink_free_contained",
+]);
+
+const AUTHORITY_OBJECT_KINDS = new Map([
+  ["authority_read_object", "owned_read"],
+  ["authority_write_object", "owned_write"],
+]);
 
 const FS_FUNCTIONS = new Set([
   "readFile",
@@ -70,6 +81,46 @@ const FS_FUNCTIONS = new Set([
   "atomicWriteText",
 ]);
 
+const READLIKE_FS_FUNCTIONS = new Set([
+  "readFile",
+  "readdir",
+  "stat",
+  "lstat",
+  "opendir",
+  "watch",
+  "access",
+]);
+
+const WRITELIKE_FS_FUNCTIONS = new Set([
+  "writeFile",
+  "appendFile",
+  "mkdir",
+  "open",
+  "truncate",
+  "atomicWriteText",
+  "rename",
+  "copyFile",
+  "cp",
+]);
+
+const DELETELIKE_FS_FUNCTIONS = new Set(["rmdir", "rm", "unlink"]);
+
+function isSinkAuthorized(kind, fnName) {
+  if (kind === "explicit_user_input") return true;
+  if (READLIKE_FS_FUNCTIONS.has(fnName)) {
+    return (
+      kind === "owned_read" ||
+      kind === "owned_write" ||
+      kind === "owned_delete"
+    );
+  }
+  if (WRITELIKE_FS_FUNCTIONS.has(fnName)) return kind === "owned_write";
+  if (DELETELIKE_FS_FUNCTIONS.has(fnName)) {
+    return kind === "owned_delete" || kind === "owned_write";
+  }
+  return false;
+}
+
 // Authority exports: only helpers that return a path (string) or a branded
 // path object with .absPath. Helpers that return content, boolean, manifest
 // object, or write results are NOT path authority sources.
@@ -89,7 +140,7 @@ const AUTHORITY_EXPORTS = new Map([
   ],
   [
     join("src", "core", "project-config-path.ts"),
-    new Map([["resolveProjectConfigPath", "symlink_free_contained"]]),
+    new Map([["resolveProjectConfigPath", "owned_read"]]),
   ],
   [
     join("src", "core", "agent-profile-path.ts"),
@@ -115,8 +166,8 @@ const AUTHORITY_EXPORTS = new Map([
   [
     join("src", "core", "adapters", "manifest-file-ownership.ts"),
     new Map([
-      ["authorizeAdapterMutationPath", "authority_object"],
-      ["classifyManifestFileForRead", "authority_object"],
+      ["authorizeAdapterMutationPath", "authority_write_object"],
+      ["classifyManifestFileForRead", "authority_read_object"],
     ]),
   ],
   [
@@ -203,7 +254,12 @@ const ALLOWLIST_PATH = join(".code-pact", "fs-authority-allowlist.json");
 function loadAllowlist() {
   try {
     const raw = readFileSync(ALLOWLIST_PATH, "utf8");
-    return new Map(Object.entries(JSON.parse(raw)));
+    const parsed = JSON.parse(raw);
+    const out = new Map();
+    for (const [key, value] of Object.entries(parsed)) {
+      out.set(key, Array.isArray(value) ? value : [value]);
+    }
+    return out;
   } catch {
     return new Map();
   }
@@ -438,9 +494,11 @@ function isAuthorityExpression(node, scope, trustedImports, localWrappers) {
       ts.isIdentifier(node.expression)
     ) {
       const kind = getVarKind(scope, node.expression.text);
-      // If the variable is an authority_object, its .absPath is a sink-authorized path.
-      if (AUTHORITY_OBJECT_KINDS.has(kind)) {
-        return "symlink_free_contained";
+      // Authority result objects expose .absPath with read or write authority
+      // depending on the helper that produced them.
+      const objectPathKind = AUTHORITY_OBJECT_KINDS.get(kind);
+      if (objectPathKind) {
+        return objectPathKind;
       }
       // If the variable itself is sink-authorized, its .absPath is also authorized.
       return SINK_AUTHORIZED_KINDS.has(kind) ? kind : "unauthorized";
@@ -729,22 +787,28 @@ function checkFile(filePath, allowlist, allowlistUsed) {
               trustedImports,
               localWrappers,
             );
-            if (!SINK_AUTHORIZED_KINDS.has(argKind)) {
+            if (!isSinkAuthorized(argKind, fnName)) {
               // Check allowlist
               const enclosingFn = findEnclosingFunctionName(node);
               const aKey = allowlistKey(relFile, enclosingFn ?? "*");
-              const aEntry = allowlist.get(aKey);
-              if (aEntry) {
-                allowlistUsed.add(aKey);
-                if (
-                  aEntry.operation === fnName &&
-                  SINK_AUTHORIZED_KINDS.has(aEntry.authority)
-                ) {
+              const aEntries = allowlist.get(aKey);
+              if (aEntries) {
+                const matched = aEntries.find(
+                  aEntry =>
+                    aEntry.operation === fnName &&
+                    (ALLOWLIST_AUTHORIZED_KINDS.has(aEntry.authority) ||
+                      isSinkAuthorized(aEntry.authority, fnName)) &&
+                    typeof aEntry.reason === "string" &&
+                    aEntry.reason.length > 0,
+                );
+                if (matched) {
+                  allowlistUsed.add(`${aKey}:${fnName}`);
                   // Allowed
                 } else {
                   findings.push({
                     line,
                     fn: fnName,
+                    key: aKey,
                     arg: firstArg.getText(sourceFile).slice(0, 80),
                     text: sourceFile.text.split("\n")[line - 1]?.trim() ?? "",
                   });
@@ -753,6 +817,7 @@ function checkFile(filePath, allowlist, allowlistUsed) {
                 findings.push({
                   line,
                   fn: fnName,
+                  key: aKey,
                   arg: firstArg.getText(sourceFile).slice(0, 80),
                   text: sourceFile.text.split("\n")[line - 1]?.trim() ?? "",
                 });
@@ -896,7 +961,7 @@ for (const file of runFiles) {
   for (const f of findings) {
     total++;
     console.log(
-      `${file}:${f.line}: ${f.fn}() called on non-authority path "${f.arg}"`,
+      `${file}:${f.line}: ${f.fn}() called on non-authority path "${f.arg}" [${f.key}]`,
     );
     console.log(`    ${f.text}`);
   }
@@ -904,9 +969,15 @@ for (const file of runFiles) {
 
 // Check for stale allowlist entries
 const staleEntries = [];
+if (filesToCheck.length === 0) {
 for (const key of allowlist.keys()) {
-  if (!allowlistUsed.has(key)) {
-    staleEntries.push(key);
+    const entries = allowlist.get(key);
+    for (const entry of entries) {
+      const usedKey = `${key}:${entry.operation}`;
+      if (!allowlistUsed.has(usedKey)) {
+        staleEntries.push(usedKey);
+      }
+    }
   }
 }
 if (staleEntries.length > 0) {

@@ -91,6 +91,68 @@ describe("check-fs-authority", () => {
     expect(result.output).toContain("stat() called on non-authority path");
   });
 
+  it("rejects semantic containment bypass through the generic resolver", async () => {
+    const result = await runFixture([
+      'import { stat } from "node:fs/promises";',
+      'import { resolveSymlinkFreeProjectPath } from "../../src/core/path-safety.ts";',
+      "",
+      "async function f(profile: any, cwd: string) {",
+      "  const p = await resolveSymlinkFreeProjectPath(cwd, profile.instruction_filename);",
+      "  await stat(p);",
+      "}",
+      "",
+    ]);
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain("stat() called on non-authority path");
+  });
+
+  it("allows a domain resolver that grants owned read authority", async () => {
+    const result = await runFixture([
+      'import { stat } from "node:fs/promises";',
+      'import { resolveAgentProfilePath } from "../../src/core/agent-profile-path.ts";',
+      "",
+      "async function f(cwd: string) {",
+      '  const p = await resolveAgentProfilePath(cwd, "claude-code");',
+      "  await stat(p);",
+      "}",
+      "",
+    ]);
+    expect(result.ok).toBe(true);
+  });
+
+  it("rejects using read-authority object paths for write sinks", async () => {
+    const result = await runFixture([
+      'import { writeFile } from "node:fs/promises";',
+      'import { classifyManifestFileForRead } from "../../src/core/adapters/manifest-file-ownership.ts";',
+      "",
+      "async function f(cwd: string, descriptor: any) {",
+      '  const ownership = await classifyManifestFileForRead(cwd, descriptor, "CLAUDE.md", "instruction");',
+      '  if (ownership.kind === "owned") {',
+      '    await writeFile(ownership.absPath, "bad");',
+      "  }",
+      "}",
+      "",
+    ]);
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain("writeFile() called on non-authority path");
+  });
+
+  it("allows mutation-authority object paths for write sinks", async () => {
+    const result = await runFixture([
+      'import { writeFile } from "node:fs/promises";',
+      'import { authorizeAdapterMutationPath } from "../../src/core/adapters/manifest-file-ownership.ts";',
+      "",
+      "async function f(cwd: string, descriptor: any) {",
+      '  const ownership = await authorizeAdapterMutationPath(cwd, descriptor, "CLAUDE.md", { expectedRole: "instruction", allowDynamicWrite: false });',
+      '  if (ownership.kind === "owned") {',
+      '    await writeFile(ownership.absPath, "ok");',
+      "  }",
+      "}",
+      "",
+    ]);
+    expect(result.ok).toBe(true);
+  });
+
   it("does not trust a same-name local resolver", async () => {
     const result = await runFixture([
       'import { stat } from "node:fs/promises";',
@@ -101,6 +163,21 @@ describe("check-fs-authority", () => {
       "",
       "async function f(profile: any, cwd: string) {",
       "  await stat(await resolveSymlinkFreeProjectPath(cwd, profile.instruction_filename));",
+      "}",
+      "",
+    ]);
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain("stat() called on non-authority path");
+  });
+
+  it("does not trust an imported resolver shadowed by a parameter", async () => {
+    const result = await runFixture([
+      'import { stat } from "node:fs/promises";',
+      'import { resolveSymlinkFreeProjectPath } from "../../src/core/path-safety.ts";',
+      "",
+      "async function f(resolveSymlinkFreeProjectPath: any, cwd: string, profile: any) {",
+      "  const p = await resolveSymlinkFreeProjectPath(cwd, profile.instruction_filename);",
+      "  await stat(p);",
       "}",
       "",
     ]);
@@ -173,6 +250,23 @@ describe("check-fs-authority", () => {
       "  const safe = await isSafe(cwd, profile.instruction_filename);",
       "  if (safe) {",
       "    await stat(profile.instruction_filename);",
+      "  }",
+      "}",
+      "",
+    ]);
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain("stat() called on non-authority path");
+  });
+
+  it("rejects non-path helper confusion from authorized content readers", async () => {
+    const result = await runFixture([
+      'import { stat } from "node:fs/promises";',
+      'import { readAuthorizedRegularFileMaybe } from "../../src/core/adapters/file-state.ts";',
+      "",
+      "async function f(absPath: string) {",
+      '  const value = await readAuthorizedRegularFileMaybe(absPath, "CLAUDE.md");',
+      "  if (value !== null) {",
+      "    await stat(value);",
       "  }",
       "}",
       "",

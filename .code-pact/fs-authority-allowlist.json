@@ -2,51 +2,313 @@
   "src/commands/decision-retire.ts#classifyParent": {
     "operation": "lstat",
     "authority": "symlink_free_contained",
-    "reason": "parentAbs is a parameter from inspectDecisionMd which uses resolveSymlinkFreeProjectPath internally; classifyParent only lstats the parent directory for presence classification"
+    "reason": "parentAbs is derived from inspectDecisionMd, which resolves the validated decision path symlink-free; lstat only classifies parent presence"
   },
   "src/commands/decision-retire.ts#runDecisionRetire": {
     "operation": "unlink",
     "authority": "symlink_free_contained",
-    "reason": "guard.abs comes from inspectDecisionMd which uses resolveSymlinkFreeProjectPath; the stale guard verifies identity before delete"
+    "reason": "guard.abs comes from inspectDecisionMd and stale identity checks run before deleting the validated decision file"
   },
   "src/commands/phase-archive.ts#classifyParent": {
     "operation": "lstat",
     "authority": "symlink_free_contained",
-    "reason": "parentAbs is a parameter from inspectPhaseYaml which uses resolveSymlinkFreeProjectPath internally; classifyParent only lstats the parent directory for presence classification"
+    "reason": "parentAbs is derived from inspectPhaseYaml, which resolves the roadmap-validated phase path symlink-free; lstat only classifies parent presence"
   },
   "src/commands/phase-archive.ts#runPhaseArchive": {
     "operation": "unlink",
     "authority": "symlink_free_contained",
-    "reason": "guard.abs comes from inspectPhaseYaml which uses resolveSymlinkFreeProjectPath; the stale guard verifies identity before delete"
+    "reason": "guard.abs comes from inspectPhaseYaml and stale identity checks run before deleting the roadmap-validated phase file"
   },
   "src/commands/init.ts#exists": {
     "operation": "access",
     "authority": "symlink_free_contained",
-    "reason": "p parameter is from resolveInitPath (local wrapper of resolveSymlinkFreeProjectPath); init command creates project structure from fixed relative segments"
+    "reason": "p is produced by resolveInitPath from fixed scaffold segments; access only checks whether the scaffold target exists"
   },
   "src/commands/init.ts#writeIfAbsent": {
     "operation": "atomicWriteText",
     "authority": "symlink_free_contained",
-    "reason": "p parameter is from resolveInitPath (local wrapper of resolveSymlinkFreeProjectPath); init command creates project structure from fixed relative segments"
+    "reason": "p is produced by resolveInitPath from fixed scaffold segments; writeIfAbsent only creates missing scaffold files"
   },
   "src/commands/init.ts#mkdirp": {
     "operation": "mkdir",
     "authority": "symlink_free_contained",
-    "reason": "p parameter is from resolveInitPath (local wrapper of resolveSymlinkFreeProjectPath); init command creates project directories from fixed relative segments"
+    "reason": "p is produced by resolveInitPath from fixed scaffold segments; mkdirp only creates scaffold directories"
   },
   "src/commands/init.ts#runInitCore": {
     "operation": "readFile",
     "authority": "symlink_free_contained",
-    "reason": "path comes from resolveInitPath (local wrapper of resolveSymlinkFreeProjectPath) in a .then() callback; init reads existing project files"
+    "reason": "path is produced by resolveInitPath from fixed scaffold segments inside the promise chain before reading existing project files"
   },
   "src/commands/phase-import.ts#runPhaseImport": {
     "operation": "readFile",
     "authority": "explicit_user_input",
-    "reason": "inputPath is an explicit user-selected file path from CLI --input flag"
+    "reason": "inputPath is explicitly selected by the user through the phase import command"
   },
   "src/commands/tutorial.ts#runTutorial": {
     "operation": "rm",
     "authority": "explicit_user_input",
-    "reason": "sandbox is a temporary directory created by the tutorial in the system temp dir, not a project path"
+    "reason": "sandbox is a command-created temporary tutorial directory outside the project authority model"
+  },
+  "src/commands/adapter-doctor.ts#readProjectFileForDoctor": [
+    {
+      "operation": "stat",
+      "authority": "symlink_free_contained",
+      "reason": "adapter doctor reads fixed project files after caller-side schema/contract selection; stat only verifies regular-file shape before read"
+    },
+    {
+      "operation": "readFile",
+      "authority": "symlink_free_contained",
+      "reason": "adapter doctor reads fixed project files after caller-side schema/contract selection; path is symlink-free and not taken from manifest-controlled arbitrary paths"
+    }
+  ],
+  "src/commands/adapter-install.ts#runAdapterInstall": {
+    "operation": "stat",
+    "authority": "symlink_free_contained",
+    "reason": "context_dir is schema- and adapter-contract constrained, then resolved symlink-free; stat only type-checks an existing directory before any mutation"
+  },
+  "src/commands/adapter-upgrade.ts#runAdapterUpgrade": {
+    "operation": "stat",
+    "authority": "symlink_free_contained",
+    "reason": "context_dir is schema- and adapter-contract constrained, then resolved symlink-free; stat only type-checks an existing directory before any mutation"
+  },
+  "src/commands/decision-retire.ts#decisionMdPresence": {
+    "operation": "lstat",
+    "authority": "symlink_free_contained",
+    "reason": "decision path is a validated decision-ref target resolved symlink-free; lstat classifies final-entry presence without following a final symlink"
+  },
+  "src/commands/decision-retire.ts#inspectDecisionMd": [
+    {
+      "operation": "lstat",
+      "authority": "symlink_free_contained",
+      "reason": "decision path is a validated decision-ref target resolved symlink-free; lstat rejects final symlink aliases before content inspection"
+    },
+    {
+      "operation": "readFile",
+      "authority": "symlink_free_contained",
+      "reason": "decision path is a validated decision-ref target resolved symlink-free before reading for retirement guards"
+    },
+    {
+      "operation": "stat",
+      "authority": "symlink_free_contained",
+      "reason": "parent path is derived from the validated decision-ref target and used only for parent directory classification"
+    }
+  ],
+  "src/commands/doctor.ts#checkPhases": {
+    "operation": "readdir",
+    "authority": "symlink_free_contained",
+    "reason": "phase directory is the fixed design/phases namespace resolved symlink-free before orphan detection"
+  },
+  "src/commands/init.ts#assertInitEntryType": {
+    "operation": "lstat",
+    "authority": "symlink_free_contained",
+    "reason": "init checks fixed scaffold paths resolved by its local resolveInitPath wrapper before creating project structure"
+  },
+  "src/commands/init.ts#ensureGitignoreEntries": [
+    {
+      "operation": "readFile",
+      "authority": "symlink_free_contained",
+      "reason": ".gitignore path is a fixed scaffold path resolved by resolveInitPath; read preserves existing user entries"
+    },
+    {
+      "operation": "atomicWriteText",
+      "authority": "symlink_free_contained",
+      "reason": ".gitignore path is a fixed scaffold path resolved by resolveInitPath; write only merges required ignore entries"
+    }
+  ],
+  "src/commands/phase-archive.ts#phaseYamlPresence": {
+    "operation": "lstat",
+    "authority": "symlink_free_contained",
+    "reason": "phase path is a roadmap-validated phase target resolved symlink-free; lstat classifies final-entry presence without following a final symlink"
+  },
+  "src/commands/phase-archive.ts#inspectPhaseYaml": [
+    {
+      "operation": "lstat",
+      "authority": "symlink_free_contained",
+      "reason": "phase path is a roadmap-validated phase target resolved symlink-free; lstat rejects final symlink aliases before content inspection"
+    },
+    {
+      "operation": "readFile",
+      "authority": "symlink_free_contained",
+      "reason": "phase path is a roadmap-validated phase target resolved symlink-free before archive inspection"
+    },
+    {
+      "operation": "stat",
+      "authority": "symlink_free_contained",
+      "reason": "parent path is derived from the roadmap-validated phase target and used only for parent directory classification"
+    }
+  ],
+  "src/commands/plan-brief.ts#runPlanBrief": [
+    {
+      "operation": "readFile",
+      "authority": "symlink_free_contained",
+      "reason": "brief path is resolved through the plan-brief output policy before reading existing content for idempotence"
+    },
+    {
+      "operation": "atomicWriteText",
+      "authority": "symlink_free_contained",
+      "reason": "brief path is resolved through the plan-brief output policy before writing the generated brief"
+    }
+  ],
+  "src/commands/plan-constitution.ts#runPlanConstitution": [
+    {
+      "operation": "readFile",
+      "authority": "symlink_free_contained",
+      "reason": "constitution path is the fixed design/constitution.md target resolved symlink-free before merge/update"
+    },
+    {
+      "operation": "atomicWriteText",
+      "authority": "symlink_free_contained",
+      "reason": "constitution path is the fixed design/constitution.md target resolved symlink-free before writing"
+    }
+  ],
+  "src/commands/progress.ts#loadBaseline": {
+    "operation": "readFile",
+    "authority": "symlink_free_contained",
+    "reason": "baseline path is a fixed .code-pact/state path resolved symlink-free for optional progress baseline loading"
+  },
+  "src/commands/spec-import.ts#runSpecImport": [
+    {
+      "operation": "readFile",
+      "authority": "explicit_user_input",
+      "reason": "spec import input is explicitly selected by the user through the import command"
+    },
+    {
+      "operation": "stat",
+      "authority": "symlink_free_contained",
+      "reason": "output path is derived from validated imported phase id and resolved symlink-free before collision check"
+    },
+    {
+      "operation": "atomicWriteText",
+      "authority": "symlink_free_contained",
+      "reason": "output path is derived from validated imported phase id and resolved symlink-free before writing phase YAML"
+    }
+  ],
+  "src/commands/spec-import.ts#runSpecSuggest": {
+    "operation": "readFile",
+    "authority": "explicit_user_input",
+    "reason": "spec suggest input is explicitly selected by the user through the suggest command"
+  },
+  "src/commands/task-add.ts#runTaskAdd": {
+    "operation": "atomicWriteText",
+    "authority": "symlink_free_contained",
+    "reason": "task-add writes the roadmap-validated phase file resolved symlink-free after schema-level task insertion"
+  },
+  "src/commands/task-prepare.ts#runTaskPrepare": {
+    "operation": "readFile",
+    "authority": "symlink_free_contained",
+    "reason": "decision refs are schema-validated design/decisions paths and resolved symlink-free before optional context inclusion"
+  },
+  "src/core/adapters/model-version.ts#resolveAndPinModelVersion": {
+    "operation": "atomicWriteText",
+    "authority": "owned_write",
+    "reason": "compatibility helper writes only the path returned by resolveOwnedAgentProfilePath through planModelVersionPin"
+  },
+  "src/core/context-fit/advisories.ts#detectContextFitAdvisories": {
+    "operation": "readFile",
+    "authority": "symlink_free_contained",
+    "reason": "context-fit reads schema-derived project refs resolved symlink-free for advisory-only analysis"
+  },
+  "src/core/decisions/prune.ts#evaluatePrune": {
+    "operation": "readFile",
+    "authority": "symlink_free_contained",
+    "reason": "decision prune reads validated decision files resolved symlink-free before computing a dry-run/write plan"
+  },
+  "src/core/decisions/pruned-ledger.ts#readPrunedLedger": {
+    "operation": "readFile",
+    "authority": "symlink_free_contained",
+    "reason": "pruned ledger path is a fixed .code-pact/state path resolved symlink-free before reading"
+  },
+  "src/core/decisions/pruned-ledger.ts#buildAppendedLedger": {
+    "operation": "readFile",
+    "authority": "symlink_free_contained",
+    "reason": "pruned ledger path is a fixed .code-pact/state path resolved symlink-free before append planning"
+  },
+  "src/core/decisions/retire.ts#sharedExternalGates": {
+    "operation": "readFile",
+    "authority": "symlink_free_contained",
+    "reason": "decision retire reads validated decision files resolved symlink-free before computing shared-reference gates"
+  },
+  "src/core/decisions/scaffold.ts#writeProposedAdrIfAbsent": [
+    {
+      "operation": "access",
+      "authority": "symlink_free_contained",
+      "reason": "ADR scaffold target is derived from a validated decision label and resolved symlink-free before existence check"
+    },
+    {
+      "operation": "atomicWriteText",
+      "authority": "symlink_free_contained",
+      "reason": "ADR scaffold target is derived from a validated decision label and resolved symlink-free before create-only write"
+    }
+  ],
+  "src/core/doctor-config.ts#loadDoctorConfig": [
+    {
+      "operation": "stat",
+      "authority": "symlink_free_contained",
+      "reason": "doctor config is a fixed .code-pact/doctor.yaml path resolved symlink-free before size/type check"
+    },
+    {
+      "operation": "readFile",
+      "authority": "symlink_free_contained",
+      "reason": "doctor config is a fixed .code-pact/doctor.yaml path resolved symlink-free before parsing"
+    }
+  ],
+  "src/core/models/load-model-profiles.ts#loadModelProfilesStrict": [
+    {
+      "operation": "readdir",
+      "authority": "symlink_free_contained",
+      "reason": "model-profiles directory is the fixed .code-pact/model-profiles namespace resolved symlink-free"
+    },
+    {
+      "operation": "stat",
+      "authority": "symlink_free_contained",
+      "reason": "model profile entries are immediate directory children with .yaml suffix, resolved symlink-free before type check"
+    },
+    {
+      "operation": "readFile",
+      "authority": "symlink_free_contained",
+      "reason": "model profile entries are immediate directory children with .yaml suffix, resolved symlink-free before parsing"
+    }
+  ],
+  "src/core/models/load-model-profiles.ts#loadModelProfilesSafe": [
+    {
+      "operation": "readdir",
+      "authority": "symlink_free_contained",
+      "reason": "safe model-profile loader uses the same fixed namespace as strict mode but degrades to empty on read failures"
+    },
+    {
+      "operation": "stat",
+      "authority": "symlink_free_contained",
+      "reason": "safe model-profile loader type-checks immediate .yaml children only"
+    },
+    {
+      "operation": "readFile",
+      "authority": "symlink_free_contained",
+      "reason": "safe model-profile loader reads immediate .yaml children only and ignores malformed entries"
+    }
+  ],
+  "src/core/pack/loaders.ts#loadRules": {
+    "operation": "readdir",
+    "authority": "symlink_free_contained",
+    "reason": "rules directory is a fixed design/rules namespace resolved symlink-free before loading rule files"
+  },
+  "src/core/plan/checks/phase-files.ts#detectOrphanPhaseFiles": {
+    "operation": "readdir",
+    "authority": "symlink_free_contained",
+    "reason": "phase directory is the fixed design/phases namespace resolved symlink-free before orphan detection"
+  },
+  "src/core/plan/lint.ts#detectAdrCommitmentsEmpty": {
+    "operation": "readFile",
+    "authority": "symlink_free_contained",
+    "reason": "ADR paths are collected from validated decision refs and resolved symlink-free before lint-only content checks"
+  },
+  "src/core/project-read.ts#readProjectTextOrNull": {
+    "operation": "readFile",
+    "authority": "symlink_free_contained",
+    "reason": "generic nullable project read is used only by callers that pass fixed or schema-validated refs; it resolves symlink-free and returns null on failure"
+  },
+  "src/core/rules/protected-paths.ts#loadProtectedPaths": {
+    "operation": "readFile",
+    "authority": "symlink_free_contained",
+    "reason": "protected-paths rule file is the fixed design/rules/protected-paths.md path resolved symlink-free before parsing"
   }
 }
