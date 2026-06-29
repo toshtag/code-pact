@@ -4,7 +4,7 @@ import {
   resolveArchiveDecisionRecord,
 } from "../archive/load-decision-record.ts";
 import { normalizeDecisionRef, sha256Hex } from "../archive/paths.ts";
-import { resolveWithinProject } from "../path-safety.ts";
+import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
 import type { DecisionStateRecord } from "../schemas/decision-state-record.ts";
 
 // ---------------------------------------------------------------------------
@@ -74,7 +74,7 @@ async function decisionFilePresence(
 ): Promise<"present" | "absent" | "inaccessible"> {
   let abs: string;
   try {
-    abs = await resolveWithinProject(cwd, canonical);
+    abs = await resolveSymlinkFreeProjectPath(cwd, canonical);
   } catch {
     return "inaccessible"; // unsafe path / symlink escape — never a record-consult
   }
@@ -82,7 +82,9 @@ async function decisionFilePresence(
     await access(abs);
     return "present";
   } catch (err) {
-    return (err as NodeJS.ErrnoException).code === "ENOENT" ? "absent" : "inaccessible";
+    return (err as NodeJS.ErrnoException).code === "ENOENT"
+      ? "absent"
+      : "inaccessible";
   }
 }
 
@@ -93,7 +95,10 @@ async function decisionFilePresence(
  * `inaccessible` (any non-ENOENT failure, INCLUDING a symlink escape) fails closed
  * and never reads a record.
  */
-async function liveDecisionAbsent(cwd: string, canonical: string): Promise<boolean> {
+async function liveDecisionAbsent(
+  cwd: string,
+  canonical: string,
+): Promise<boolean> {
   return (await decisionFilePresence(cwd, canonical)) === "absent";
 }
 
@@ -109,11 +114,15 @@ export async function resolveRetiredDecisionGate(
 ): Promise<RetiredDecisionGate> {
   const canonical = normalizeDecisionRef(rawRef);
   if (canonical === null) return { kind: "not_released" };
-  if (!(await liveDecisionAbsent(cwd, canonical))) return { kind: "not_released" };
+  if (!(await liveDecisionAbsent(cwd, canonical)))
+    return { kind: "not_released" };
   // Resolve from loose ∪ bundle: a retired+compacted decision resolves from its
   // bundle member. Identity authority stays here (recordMatchingRef); a bundle fault
   // is fail-closed to `invalid` → not_released.
-  const record = recordMatchingRef(await resolveArchiveDecisionRecord(cwd, canonical), canonical);
+  const record = recordMatchingRef(
+    await resolveArchiveDecisionRecord(cwd, canonical),
+    canonical,
+  );
   if (record === null) return { kind: "not_released" };
   if (!record.may_satisfy_active_gate) return { kind: "not_released" };
   return { kind: "released", record };
@@ -135,5 +144,10 @@ export async function decisionRecordSoftensMissingRef(
   // Resolve from loose ∪ bundle (a retired+compacted decision softens via its bundle
   // member). A bundle fault is fail-closed to `invalid` → not softened (the lint
   // stays at its original severity); the reader never throws — fail-soft lenient.
-  return recordMatchingRef(await resolveArchiveDecisionRecord(cwd, canonical), canonical) !== null;
+  return (
+    recordMatchingRef(
+      await resolveArchiveDecisionRecord(cwd, canonical),
+      canonical,
+    ) !== null
+  );
 }

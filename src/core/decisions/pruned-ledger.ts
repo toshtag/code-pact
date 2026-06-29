@@ -1,6 +1,9 @@
 import { readFile } from "node:fs/promises";
 import { posix } from "node:path";
-import { assertSafeRelativePath, resolveWithinProject } from "../path-safety.ts";
+import {
+  assertSafeRelativePath,
+  resolveSymlinkFreeProjectPath,
+} from "../path-safety.ts";
 
 /**
  * Normalize a repo-relative path so a ledger entry and a `decision_refs` value
@@ -84,7 +87,12 @@ function rowDecisionPath(line: string): string | null {
   if (!m) return null;
   const first = m[1]!.split("|")[0]!.trim();
   // Skip the header ("Decision") and the `---` separator row.
-  if (first === "" || /^:?-{2,}:?$/.test(first) || first.toLowerCase() === "decision") return null;
+  if (
+    first === "" ||
+    /^:?-{2,}:?$/.test(first) ||
+    first.toLowerCase() === "decision"
+  )
+    return null;
   const raw = extractPath(first);
   if (!raw) return null;
   return normalizePrunedDecisionPath(raw); // null for entries outside design/decisions/**.md
@@ -101,7 +109,10 @@ export function parsePrunedLedger(text: string): Set<string> {
 }
 
 /** The FIRST raw ledger row line that records `normalizedDecision`, or null. */
-export function findPrunedRow(text: string, normalizedDecision: string): string | null {
+export function findPrunedRow(
+  text: string,
+  normalizedDecision: string,
+): string | null {
   for (const line of text.split(/\r?\n/)) {
     if (rowDecisionPath(line) === normalizedDecision) return line;
   }
@@ -114,7 +125,10 @@ export async function readPrunedLedger(cwd: string): Promise<Set<string>> {
     // Route through the symlink-escape guard: this set SILENCES missing-decision_ref
     // integrity warnings, so it must never trust a PRUNED.md that resolves outside
     // the repo. A resolve escape throws and lands in the fail-closed branch below.
-    const path = await resolveWithinProject(cwd, "design/decisions/PRUNED.md");
+    const path = await resolveSymlinkFreeProjectPath(
+      cwd,
+      "design/decisions/PRUNED.md",
+    );
     text = await readFile(path, "utf8");
   } catch {
     // Any failure (escape, absent ENOENT, EACCES, EISDIR) → empty set. This is the
@@ -208,7 +222,10 @@ export async function buildAppendedLedger(
   cwd: string,
   row: PrunedLedgerRow,
 ): Promise<PreparedLedger> {
-  const ledger_path = await resolveWithinProject(cwd, "design/decisions/PRUNED.md");
+  const ledger_path = await resolveSymlinkFreeProjectPath(
+    cwd,
+    "design/decisions/PRUNED.md",
+  );
   let existing = "";
   let existed = true;
   try {
@@ -220,7 +237,8 @@ export async function buildAppendedLedger(
   }
   const newLine = serializePrunedRow(row);
   const normalized = normalizePrunedDecisionPath(row.decision);
-  const existingRow = normalized !== null ? findPrunedRow(existing, normalized) : null;
+  const existingRow =
+    normalized !== null ? findPrunedRow(existing, normalized) : null;
   const already_recorded = existingRow !== null;
   // Idempotent on retry: if this decision is already recorded, do not append a
   // duplicate tombstone — leave the ledger byte-identical.

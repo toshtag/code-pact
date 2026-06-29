@@ -6,14 +6,14 @@
 import { readFile } from "node:fs/promises";
 import { parse as parseYaml } from "yaml";
 import { Project } from "./schemas/project.ts";
-import { resolveWithinProject } from "./path-safety.ts";
+import { resolveProjectConfigPath } from "./project-config-path.ts";
 
 /** Load and validate `.code-pact/project.yaml`. */
 export async function loadProject(cwd: string): Promise<Project> {
   let path: string;
   let raw: string;
   try {
-    path = await resolveWithinProject(cwd, ".code-pact/project.yaml");
+    path = await resolveProjectConfigPath(cwd);
     raw = await readFile(path, "utf8");
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
@@ -52,9 +52,11 @@ export function resolveEnabledAgent(
   explicitAgent?: string,
 ): string {
   const agentName = explicitAgent ?? project.default_agent;
-  const ref = project.agents.find((a) => a.name === agentName);
+  const ref = project.agents.find(a => a.name === agentName);
   if (!ref) {
-    const err = new Error(`Agent "${agentName}" is not configured in project.yaml.`);
+    const err = new Error(
+      `Agent "${agentName}" is not configured in project.yaml.`,
+    );
     (err as NodeJS.ErrnoException).code = "AGENT_NOT_FOUND";
     throw err;
   }

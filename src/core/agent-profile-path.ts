@@ -3,7 +3,13 @@ import { parse as parseYaml } from "yaml";
 import { RelativePosixPath } from "./schemas/relative-path.ts";
 import { assertSafePlanId } from "./schemas/plan-id.ts";
 import { resolveSymlinkFreeProjectPath } from "./path-safety.ts";
-import { AgentProfile } from "./schemas/agent-profile.ts";
+import { resolveProjectConfigPath } from "./project-config-path.ts";
+import {
+  AgentProfile,
+  type AgentProfile as AgentProfileType,
+} from "./schemas/agent-profile.ts";
+import type { AdapterDescriptor } from "./adapters/types.ts";
+import { validateAgentProfileForAdapter } from "./adapters/profile-contract.ts";
 
 // Single source of truth for where an agent's profile lives.
 //
@@ -59,10 +65,7 @@ async function readProjectYamlForProfileChecks(
   cwd: string,
 ): Promise<unknown | null> {
   try {
-    const raw = await readFile(
-      await resolveSymlinkFreeProjectPath(cwd, ".code-pact/project.yaml"),
-      "utf8",
-    );
+    const raw = await readFile(await resolveProjectConfigPath(cwd), "utf8");
     return parseYaml(raw) as unknown;
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
@@ -148,10 +151,7 @@ export async function resolveAgentProfileRel(
   assertSafePlanId(agentName, "Agent");
   let raw: string;
   try {
-    raw = await readFile(
-      await resolveSymlinkFreeProjectPath(cwd, ".code-pact/project.yaml"),
-      "utf8",
-    );
+    raw = await readFile(await resolveProjectConfigPath(cwd), "utf8");
   } catch (err) {
     // Absent project.yaml → convention. But a present-but-unreadable file
     // (EACCES, EISDIR, transient I/O) is a real problem: surface it rather than
@@ -281,4 +281,56 @@ export async function resolveOwnedAgentProfilePath(
     }
     throw err;
   }
+}
+
+/**
+ * Single source of truth for loading, parsing, schema-validating, and
+ * contract-validating an agent profile. Used by adapter install, upgrade,
+ * and adapter-doctor to eliminate duplicated loadAgentProfile implementations.
+ *
+ * 1. Resolves the profile path symlink-free (ownership).
+ * 2. Reads the file (ENOENT → AGENT_NOT_FOUND, other → CONFIG_ERROR).
+ * 3. Parses + schema-validates (CONFIG_ERROR on failure).
+ * 4. Validates the profile's path fields against the adapter descriptor's
+ *    profilePathContract (CONFIG_ERROR on mismatch).
+ *
+ * The contract validation runs BEFORE any filesystem operation beyond the
+ * profile read itself — a hostile profile (e.g. `instruction_filename: .env`)
+ * is refused at the contract boundary.
+ */
+export async function loadValidatedAdapterProfile(
+  cwd: string,
+  agentName: string,
+  descriptor: AdapterDescriptor,
+): Promise<AgentProfileType> {
+  const path = await resolveAgentProfilePath(cwd, agentName);
+  let raw: string;
+  try {
+    raw = await readFile(path, "utf8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      const e = new Error(
+        `Agent profile for "${agentName}" not found at ${path}.`,
+      );
+      (e as NodeJS.ErrnoException).code = "AGENT_NOT_FOUND";
+      throw e;
+    }
+    const e = new Error(
+      `Agent profile for "${agentName}" at ${path} cannot be read: ${(err as Error).message}`,
+    );
+    (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+    throw e;
+  }
+  let profile: AgentProfileType;
+  try {
+    profile = AgentProfile.parse(parseYaml(raw) as unknown);
+  } catch (err) {
+    const e = new Error(
+      `Agent profile for "${agentName}" at ${path} is malformed (YAML or schema): ${(err as Error).message}`,
+    );
+    (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+    throw e;
+  }
+  validateAgentProfileForAdapter(profile, descriptor);
+  return profile;
 }

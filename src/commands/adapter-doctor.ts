@@ -9,6 +9,7 @@ import { classifyManifestFileForRead } from "../core/adapters/manifest-file-owne
 import { isSupportedAgent, type SupportedAgent } from "../core/agents.ts";
 import { resolveAgentProfilePath } from "../core/agent-profile-path.ts";
 import { resolveSymlinkFreeProjectPath } from "../core/path-safety.ts";
+import { resolveProjectConfigPath } from "../core/project-config-path.ts";
 import { validateAgentProfileForAdapter } from "../core/adapters/profile-contract.ts";
 import {
   computeContentHash,
@@ -71,7 +72,7 @@ async function loadProjectSafe(cwd: string): Promise<Project | null> {
   let path: string;
   let raw: string;
   try {
-    path = await resolveSymlinkFreeProjectPath(cwd, ".code-pact/project.yaml");
+    path = await resolveProjectConfigPath(cwd);
     raw = await readFile(path, "utf8");
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;

@@ -60,5 +60,8 @@ export const codexAdapterDescriptor: AdapterDescriptor = {
   generateDesiredFiles: generateCodexDesiredFiles,
   capabilities: ["instructions_file", "context_dir"] as const,
   ownedPathRoles: { "AGENTS.md": "instruction" } as const,
+  profilePathContract: {
+    instructionFilename: "AGENTS.md",
+  },
   adapterSchemaVersion: 1,
 };

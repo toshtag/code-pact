@@ -65,5 +65,8 @@ export const genericAdapterDescriptor: AdapterDescriptor = {
   ownedPathRoles: {
     "docs/code-pact/agent-instructions.md": "instruction",
   } as const,
+  profilePathContract: {
+    instructionFilename: "docs/code-pact/agent-instructions.md",
+  },
   adapterSchemaVersion: 1,
 };

@@ -3,8 +3,13 @@ import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { atomicWriteText } from "../io/atomic-text.ts";
 import { Prompter } from "../lib/prompt.ts";
-import { assertSafeRelativePath, resolveSymlinkFreeProjectPath, resolveWithinProject } from "../core/path-safety.ts";
+import {
+  assertSafeRelativePath,
+  resolveSymlinkFreeProjectPath,
+  resolveWithinProject,
+} from "../core/path-safety.ts";
 import { Project } from "../core/schemas/project.ts";
+import { resolveProjectConfigPath } from "../core/project-config-path.ts";
 import type { LocaleCode } from "../core/schemas/locale.ts";
 import { isPristineInitConstitution } from "../core/constitution.ts";
 import type { Locale } from "../i18n/index.ts";
@@ -143,9 +148,14 @@ export async function loadConstitutionFromFile(
     );
   }
 
-  return parseConstitutionSource(raw, "--from-file", relPath, (detail, message) => {
-    throw new PlanConstitutionFromFileError(detail, relPath, message);
-  });
+  return parseConstitutionSource(
+    raw,
+    "--from-file",
+    relPath,
+    (detail, message) => {
+      throw new PlanConstitutionFromFileError(detail, relPath, message);
+    },
+  );
 }
 
 /**
@@ -163,9 +173,7 @@ export async function loadConstitutionFromStdin(
   try {
     const chunks: string[] = [];
     for await (const chunk of stdin) {
-      chunks.push(
-        typeof chunk === "string" ? chunk : chunk.toString("utf8"),
-      );
+      chunks.push(typeof chunk === "string" ? chunk : chunk.toString("utf8"));
     }
     raw = chunks.join("");
   } catch (err) {
@@ -175,15 +183,20 @@ export async function loadConstitutionFromStdin(
     );
   }
 
-  return parseConstitutionSource(raw, "--stdin", "<stdin>", (detail, message) => {
-    if (detail === "invalid_yaml" || detail === "schema_invalid") {
-      throw new PlanConstitutionFromStdinError(detail, message);
-    }
-    throw new PlanConstitutionFromStdinError(
-      "stdin_read_failed",
-      `plan constitution --stdin: unexpected parser detail "${detail}": ${message}`,
-    );
-  });
+  return parseConstitutionSource(
+    raw,
+    "--stdin",
+    "<stdin>",
+    (detail, message) => {
+      if (detail === "invalid_yaml" || detail === "schema_invalid") {
+        throw new PlanConstitutionFromStdinError(detail, message);
+      }
+      throw new PlanConstitutionFromStdinError(
+        "stdin_read_failed",
+        `plan constitution --stdin: unexpected parser detail "${detail}": ${message}`,
+      );
+    },
+  );
 }
 
 // The two details shared by both modes (the parse/validate failures).
@@ -213,7 +226,7 @@ function parseConstitutionSource(
   const result = ConstitutionFileSchema.safeParse(payload);
   if (!result.success) {
     const summary = result.error.issues
-      .map((i) => `${i.path.join(".") || "<root>"}: ${i.message}`)
+      .map(i => `${i.path.join(".") || "<root>"}: ${i.message}`)
       .join("; ");
     throwError(
       "schema_invalid",
@@ -231,22 +244,29 @@ function parseConstitutionSource(
 // Content generation
 // ---------------------------------------------------------------------------
 
-export function generateConstitutionMd(answers: ConstitutionAnswers, locale: Locale): string {
+export function generateConstitutionMd(
+  answers: ConstitutionAnswers,
+  locale: Locale,
+): string {
   const t = messageCatalog[locale].templates.constitution;
-  const description = answers.description.length > 0 ? answers.description : t.description;
-  const principles = answers.principles.length > 0 ? answers.principles : [...t.principles];
+  const description =
+    answers.description.length > 0 ? answers.description : t.description;
+  const principles =
+    answers.principles.length > 0 ? answers.principles : [...t.principles];
 
-  return [
-    `# Project Constitution`,
-    ``,
-    description,
-    ``,
-    `## ${t.corePrinciplesHeader}`,
-    ``,
-    ...principles.map((p) => `- ${p}`),
-    ``,
-    `> ${t.editHint}`,
-  ].join("\n") + "\n";
+  return (
+    [
+      `# Project Constitution`,
+      ``,
+      description,
+      ``,
+      `## ${t.corePrinciplesHeader}`,
+      ``,
+      ...principles.map(p => `- ${p}`),
+      ``,
+      `> ${t.editHint}`,
+    ].join("\n") + "\n"
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -261,8 +281,8 @@ export async function runConstitutionWizard(
   const principlesRaw = await prompter.ask(t.principlesPrompt);
   const principles = principlesRaw
     .split(",")
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
+    .map(s => s.trim())
+    .filter(s => s.length > 0);
   return { description: descriptionRaw.trim(), principles };
 }
 
@@ -282,10 +302,12 @@ async function existingIsPristinePlaceholder(
   existing: string,
 ): Promise<boolean> {
   try {
-    const raw = await readFile(await resolveWithinProject(cwd, ".code-pact/project.yaml"), "utf8");
+    const raw = await readFile(await resolveProjectConfigPath(cwd), "utf8");
     const project = Project.parse(parseYaml(raw) as unknown);
     const localeCode: LocaleCode =
-      typeof project.locale === "string" ? project.locale : project.locale.default;
+      typeof project.locale === "string"
+        ? project.locale
+        : project.locale.default;
     return isPristineInitConstitution(existing, project.name, localeCode);
   } catch {
     return false;
@@ -323,7 +345,10 @@ export async function runPlanConstitution(
     }
     // A pristine init placeholder may be replaced without --force; a
     // user-edited constitution is protected (skipped) until --force.
-    if (existing !== null && !(await existingIsPristinePlaceholder(cwd, existing))) {
+    if (
+      existing !== null &&
+      !(await existingIsPristinePlaceholder(cwd, existing))
+    ) {
       return { path: constitutionPath, skipped: true };
     }
   }

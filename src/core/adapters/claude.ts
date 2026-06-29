@@ -357,5 +357,10 @@ export const claudeAdapterDescriptor: AdapterDescriptor = {
   createPathGlobsByRole: {
     skill: [".claude/skills/*.md"],
   } as const,
+  profilePathContract: {
+    instructionFilename: "CLAUDE.md",
+    skillDir: ".claude/skills",
+    hookDir: ".claude/hooks",
+  },
   adapterSchemaVersion: 1,
 };

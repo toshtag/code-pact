@@ -58,6 +58,8 @@ import { validateEventPackTier1 } from "../core/archive/event-pack-reader.ts";
 import { bindPackToSnapshot } from "../core/archive/event-pack-binding.ts";
 import { PhaseSnapshot } from "../core/schemas/phase-snapshot.ts";
 import { isSupportedAgent, type SupportedAgent } from "../core/agents.ts";
+import { adapterRegistry } from "../core/adapters/index.ts";
+import { validateAgentProfileForAdapter } from "../core/adapters/profile-contract.ts";
 import { CONSTITUTION_PLACEHOLDER_MARKERS } from "../core/constitution.ts";
 import { readManifest } from "../core/adapters/manifest.ts";
 import { auditWrites, runGit } from "../core/audit/index.ts";
@@ -627,6 +629,24 @@ async function checkAgentProfiles(
       });
       continue;
     }
+    // Profile contract: validate path fields against the adapter descriptor's
+    // canonical values. A hostile profile (e.g. instruction_filename: .env) is
+    // surfaced as a structured issue, not an uncoded throw.
+    if (isSupportedAgent(parsed.data.name)) {
+      try {
+        validateAgentProfileForAdapter(
+          parsed.data,
+          adapterRegistry[parsed.data.name],
+        );
+      } catch (err) {
+        issues.push({
+          code: "ADAPTER_PROFILE_CONTRACT_VIOLATION",
+          severity: "error",
+          message: `${agentRef.profile}: ${(err as Error).message}`,
+        });
+        continue;
+      }
+    }
     // Check all tiers are present in model_map
     for (const tier of knownTiers) {
       if (!parsed.data.model_map[tier]) {
@@ -864,6 +884,20 @@ async function checkAdapterMissing(
     if (!result.ok) continue; // already reported by checkAgentProfiles
     const parsed = AgentProfile.safeParse(result.data);
     if (!parsed.success) continue;
+    // Guard: skip the existence check if the profile contract is violated —
+    // checkAgentProfiles already reported the contract issue. This prevents
+    // checkAdapterMissing from stat'ing an unowned instruction_filename (e.g.
+    // .env) and leaking an existence oracle.
+    if (isSupportedAgent(parsed.data.name)) {
+      try {
+        validateAgentProfileForAdapter(
+          parsed.data,
+          adapterRegistry[parsed.data.name],
+        );
+      } catch {
+        continue;
+      }
+    }
     if (!(await projectFileExists(cwd, parsed.data.instruction_filename))) {
       issues.push({
         code: "ADAPTER_MISSING",

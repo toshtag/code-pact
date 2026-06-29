@@ -25,6 +25,12 @@ export type AdapterGenerateInput = {
   modelVersion?: string;
 };
 
+export type AdapterProfilePathContract = {
+  instructionFilename: string;
+  skillDir?: string;
+  hookDir?: string;
+};
+
 export type AdapterDescriptor = {
   generateDesiredFiles(
     input: AdapterGenerateInput,
@@ -47,5 +53,12 @@ export type AdapterDescriptor = {
   createPathGlobsByRole?: Readonly<
     Partial<Record<DesiredAdapterFileRole, readonly string[]>>
   >;
+  /**
+   * Canonical profile path contract: the exact values an agent profile MUST
+   * declare for this adapter. The validator checks exact equality (not prefix)
+   * so a hostile profile cannot redirect instruction_filename, skill_dir, or
+   * hook_dir to an unowned path.
+   */
+  profilePathContract: AdapterProfilePathContract;
   adapterSchemaVersion: number;
 };

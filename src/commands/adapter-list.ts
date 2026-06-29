@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { parse as parseYaml } from "yaml";
 import { Project } from "../core/schemas/project.ts";
-import { resolveWithinProject } from "../core/path-safety.ts";
+import { resolveProjectConfigPath } from "../core/project-config-path.ts";
 import {
   EXPERIMENTAL_AGENTS,
   SUPPORTED_AGENTS,
@@ -47,7 +47,7 @@ export type AdapterListResult = {
 
 async function loadEnabledAgentNames(cwd: string): Promise<Set<string>> {
   try {
-    const raw = await readFile(await resolveWithinProject(cwd, ".code-pact/project.yaml"), "utf8");
+    const raw = await readFile(await resolveProjectConfigPath(cwd), "utf8");
     const project = Project.parse(parseYaml(raw) as unknown);
     const names = new Set<string>();
     for (const a of project.agents) {
@@ -130,7 +130,8 @@ export async function runAdapterList(opts: {
     if (manifestInvalid) entry.manifestInvalid = true;
     if (fileCount !== undefined) entry.fileCount = fileCount;
     if (lastGeneratedAt !== undefined) entry.lastGeneratedAt = lastGeneratedAt;
-    if (generatorVersion !== undefined) entry.generatorVersion = generatorVersion;
+    if (generatorVersion !== undefined)
+      entry.generatorVersion = generatorVersion;
 
     agents.push(entry);
   }

@@ -1,11 +1,10 @@
-import { readFile, mkdir } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { parse as parseYaml } from "yaml";
 import { AgentProfile } from "../core/schemas/agent-profile.ts";
 import { ModelProfile } from "../core/schemas/model-profile.ts";
 import { adapterRegistry } from "../core/adapters/index.ts";
 import { isSupportedAgent } from "../core/agents.ts";
-import { resolveAgentProfilePath } from "../core/agent-profile-path.ts";
+import { loadValidatedAdapterProfile } from "../core/agent-profile-path.ts";
 import type { DesiredAdapterFileRole } from "../core/adapters/types.ts";
 import {
   assertAdapterWritePathsContained,
@@ -18,7 +17,6 @@ import {
 } from "../core/adapters/file-state.ts";
 import { loadModelProfilesStrict } from "../core/models/load-model-profiles.ts";
 import { authorizeAdapterMutationPath } from "../core/adapters/manifest-file-ownership.ts";
-import { validateAgentProfileForAdapter } from "../core/adapters/profile-contract.ts";
 import {
   computeContentHash,
   manifestPath,
@@ -37,6 +35,7 @@ import type {
   ProfileFingerprint,
 } from "../core/schemas/adapter-manifest.ts";
 import { atomicWriteText } from "../io/atomic-text.ts";
+import { resolveSymlinkFreeProjectPath } from "../core/path-safety.ts";
 import { readPackageVersion } from "../lib/package-version.ts";
 import type { Locale } from "../i18n/index.ts";
 
@@ -114,50 +113,23 @@ export type AdapterInstallResult = {
 // Loaders
 // ---------------------------------------------------------------------------
 
-async function loadAgentProfile(
-  cwd: string,
-  agentName: string,
-): Promise<AgentProfile> {
-  const path = await resolveAgentProfilePath(cwd, agentName);
-  let raw: string;
-  try {
-    raw = await readFile(path, "utf8");
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-      const e = new Error(
-        `Agent profile for "${agentName}" not found at ${path}.`,
-      );
-      (e as NodeJS.ErrnoException).code = "AGENT_NOT_FOUND";
-      throw e;
-    }
-    // A non-ENOENT read failure (the profile path is a directory → EISDIR, an
-    // intermediate is a file → ENOTDIR, EACCES, …) is a CONFIG problem, not a
-    // missing agent — surface it structured, not as an uncoded exit 3.
-    const e = new Error(
-      `Agent profile for "${agentName}" at ${path} cannot be read: ${(err as Error).message}`,
-    );
-    (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
-    throw e;
-  }
-  // Parse + schema-validate INSIDE a try: a project-controlled (adversarial)
-  // profile with malformed YAML or a schema violation maps to CONFIG_ERROR, not
-  // an uncoded throw that the CLI renders as an internal error / exit 3.
-  try {
-    return AgentProfile.parse(parseYaml(raw) as unknown);
-  } catch (err) {
-    const e = new Error(
-      `Agent profile for "${agentName}" at ${path} is malformed (YAML or schema): ${(err as Error).message}`,
-    );
-    (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
-    throw e;
-  }
-}
-
 async function loadModelProfiles(cwd: string): Promise<ModelProfile[]> {
+  // Fail-closed: a symlinked or unreadable model-profiles directory is a
+  // CONFIG_ERROR, not silently degraded to empty profiles. An empty array
+  // would cause the generator to produce model-unaware output, masking the
+  // configuration problem.
   try {
     return await loadModelProfilesStrict(cwd);
-  } catch {
-    return [];
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "PATH_NOT_OWNED" || code === "PATH_OUTSIDE_PROJECT") {
+      const e = new Error(
+        `Model profiles directory is not an owned project path and was refused: ${(err as Error).message}`,
+      );
+      (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+      throw e;
+    }
+    throw err;
   }
 }
 
@@ -225,16 +197,13 @@ export async function runAdapterInstall(
     throw err;
   }
 
+  const descriptor = adapterRegistry[agentName];
   const [profile, modelProfiles] = await Promise.all([
-    loadAgentProfile(cwd, agentName),
+    loadValidatedAdapterProfile(cwd, agentName, descriptor),
     loadModelProfiles(cwd),
   ]);
 
-  // Profile contract: validate the profile's path fields against the adapter
-  // descriptor's owned paths BEFORE any filesystem operation. A hostile profile
-  // (e.g. instruction_filename: .env) is refused at the contract boundary.
-  const descriptor = adapterRegistry[agentName];
-  validateAgentProfileForAdapter(profile, descriptor);
+  // Profile contract validation has already run inside loadValidatedAdapterProfile.
 
   // Validate `--model` (PURE — no filesystem access) up front, so an unknown
   // value is a clean CONFIG_ERROR before anything is read or written.
@@ -271,30 +240,49 @@ export async function runAdapterInstall(
     }),
   );
 
-  // Write PREFLIGHT — fail closed BEFORE any persistent side effect. The manifest
-  // read above already covered `.code-pact/adapters`; this checks the context_dir
-  // and manifest path with the strict no-symlink resolver. Generated-file
-  // targets are authorized separately below before any target stat/read/hash.
-  // Either phase aborts before the model pin or any generated-file write.
-  //
-  // context_dir IS pre-created: it is schema-constrained to `.context/**`
-  // (ContextOutputDir) and symlink-free resolved, so it cannot be an arbitrary
-  // path. hook_dir is checked in the preflight (for symlink-free resolution)
-  // but NOT pre-created: it is `RelativePosixPath.optional()` (arbitrary
-  // project-relative path), so creating it up front would allow a hostile
-  // profile to force arbitrary directory creation. The generated file write
-  // loop below creates parent dirs as needed via
-  // `mkdir(dirname(absPath), { recursive: true })`.
-  const resolvedPreflight = await assertAdapterWritePathsContained(cwd, [
-    { path: profile.context_dir, kind: "directory" },
-    ...(profile.hook_dir
-      ? [{ path: profile.hook_dir, kind: "directory" as const }]
-      : []),
+  // Write PREFLIGHT — fail closed BEFORE any persistent side effect. Only the
+  // manifest path (a fixed .code-pact/adapters path) is checked here. Profile-
+  // derived paths (context_dir, hook_dir) are NOT pre-created or pre-checked:
+  // the profile contract has already validated them against canonical values,
+  // and the write loop creates parent dirs via mkdir(dirname(absPath), { recursive }).
+  // This prevents a hostile profile from forcing arbitrary directory creation
+  // even if the contract check is bypassed.
+  await assertAdapterWritePathsContained(cwd, [
     { path: manifestRelPath(agentName), kind: "file" },
   ]);
-  const contextDirAbs = resolvedPreflight.find(
-    p => p.kind === "directory" && p.path === profile.context_dir,
-  )!.absPath;
+
+  // Resolve context_dir symlink-free BEFORE the model pin. context_dir is
+  // schema-constrained to .context/** and safe to pre-create, but a symlinked
+  // .context must be caught here — before any persistent side effect — so a
+  // doomed install never strands a pinned model_version.
+  let contextDirAbs: string;
+  try {
+    contextDirAbs = await resolveSymlinkFreeProjectPath(
+      cwd,
+      profile.context_dir,
+    );
+  } catch (err) {
+    const e = new Error(
+      `context_dir "${profile.context_dir}" resolves through a symlink or outside the project root and was refused: ${(err as Error).message}`,
+    );
+    (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+    throw e;
+  }
+
+  // Verify hook_dir is symlink-free (if declared). hook_dir is NOT pre-created,
+  // but a symlinked hook_dir must be caught here — before the model pin — so
+  // the install fails closed without partial side effects.
+  if (profile.hook_dir !== undefined) {
+    try {
+      await resolveSymlinkFreeProjectPath(cwd, profile.hook_dir);
+    } catch (err) {
+      const e = new Error(
+        `hook_dir "${profile.hook_dir}" resolves through a symlink or outside the project root and was refused: ${(err as Error).message}`,
+      );
+      (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+      throw e;
+    }
+  }
 
   const created: string[] = [];
   const skipped: string[] = [];
@@ -455,6 +443,7 @@ export async function runAdapterInstall(
     modelVersionInput: modelVersion,
   });
 
+  // Create context_dir using the symlink-free resolved path.
   await mkdir(contextDirAbs, { recursive: true });
 
   for (const planned of plannedFiles) {
