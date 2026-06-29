@@ -28,3 +28,9 @@ export {
   constants,
 } from "node:fs";
 export type { Dirent, Stats } from "node:fs";
+export type {
+  SymlinkFreeContainedPath,
+  OwnedReadPath,
+  OwnedWritePath,
+  OwnedDeletePath,
+} from "./branded-paths.ts";

@@ -1,5 +1,10 @@
 import { readFile, readdir } from "./index.ts";
 import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
+import {
+  brandOwnedRead,
+  unbrand,
+  type OwnedReadPath,
+} from "./branded-paths.ts";
 
 /**
  * Resolve a project-relative path for an OWNED control-plane read. Unlike
@@ -8,6 +13,9 @@ import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
  * alias (e.g. `.code-pact/agent-profiles -> ../alt`) is rejected before any
  * read/stat/readdir.
  *
+ * Returns a branded `OwnedReadPath` that callers can pass to domain-specific
+ * read functions without mixing with unbranded strings.
+ *
  * This module does NOT grant namespace authority — the caller must verify
  * the path belongs to an owned namespace (e.g. `.code-pact/project.yaml`,
  * `design/roadmap.yaml`) BEFORE calling.
@@ -15,8 +23,9 @@ import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
 export async function resolveOwnedReadPath(
   cwd: string,
   relPath: string,
-): Promise<string> {
-  return resolveSymlinkFreeProjectPath(cwd, relPath);
+): Promise<OwnedReadPath> {
+  const abs = await resolveSymlinkFreeProjectPath(cwd, relPath);
+  return brandOwnedRead(abs);
 }
 
 /**
@@ -29,7 +38,7 @@ export async function readOwnedText(
   relPath: string,
 ): Promise<string> {
   const abs = await resolveOwnedReadPath(cwd, relPath);
-  return readFile(abs, "utf8");
+  return readFile(unbrand(abs), "utf8");
 }
 
 /**
@@ -41,5 +50,5 @@ export async function listOwnedDirectory(
   relPath: string,
 ): Promise<string[]> {
   const abs = await resolveOwnedReadPath(cwd, relPath);
-  return readdir(abs);
+  return readdir(unbrand(abs));
 }
