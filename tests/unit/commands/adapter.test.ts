@@ -356,17 +356,17 @@ describe("runGenerateAdapter — generic", () => {
     expect(content).not.toContain("npx code-pact");
   });
 
-  it("creates .context/generic/ directory for context packs", async () => {
+  it("does not pre-create .context/generic/ directory (lazy creation)", async () => {
     await runGenerateAdapter({
       cwd: dir,
       agentName: "generic",
       force: false,
       locale: "en-US",
     });
-    // Directory existence is implied by mkdir recursive; verify by reading.
-    const { readdir } = await import("node:fs/promises");
-    const entries = await readdir(join(dir, ".context"));
-    expect(entries).toContain("generic");
+    // context_dir is NOT pre-created; it is created lazily when the first
+    // context pack is written via atomicWriteText.
+    const { existsSync } = await import("node:fs");
+    expect(existsSync(join(dir, ".context", "generic"))).toBe(false);
   });
 });
 
@@ -467,9 +467,10 @@ describe("runGenerateAdapter — cursor", () => {
       force: false,
       locale: "en-US",
     });
-    const { readdir } = await import("node:fs/promises");
-    const entries = await readdir(join(dir, ".context"));
-    expect(entries).toContain("cursor");
+    // context_dir is NOT pre-created; it is created lazily when the first
+    // context pack is written via atomicWriteText.
+    const { existsSync } = await import("node:fs");
+    expect(existsSync(join(dir, ".context", "cursor"))).toBe(false);
   });
 });
 
@@ -542,9 +543,10 @@ describe("runGenerateAdapter — gemini-cli", () => {
       force: false,
       locale: "en-US",
     });
-    const { readdir } = await import("node:fs/promises");
-    const entries = await readdir(join(dir, ".context"));
-    expect(entries).toContain("gemini-cli");
+    // context_dir is NOT pre-created; it is created lazily when the first
+    // context pack is written via atomicWriteText.
+    const { existsSync } = await import("node:fs");
+    expect(existsSync(join(dir, ".context", "gemini-cli"))).toBe(false);
   });
 });
 
@@ -900,7 +902,7 @@ describe("runGenerateAdapter — v0.5.2 skill generation", () => {
     expect(names.some(n => n.includes("test.md"))).toBe(true);
   });
 
-  it("re-run preserves an existing dynamic skill with a warning (no read/hash)", async () => {
+  it("re-run adopts a code-pact-generated dynamic skill (provenance verified)", async () => {
     await runGenerateAdapter({
       cwd: dir,
       agentName: "claude-code",
@@ -913,10 +915,11 @@ describe("runGenerateAdapter — v0.5.2 skill generation", () => {
       force: false,
       locale: "en-US",
     });
+    // With provenance markers, a code-pact-generated dynamic skill is now
+    // recognized as ours and adopted (provenance matches) instead of warned.
     expect(second.files.find(f => f.relPath.endsWith("test.md"))).toMatchObject(
       {
-        action: "warn",
-        reason: "dynamic_file_unverifiable",
+        action: "adopt",
       },
     );
   });

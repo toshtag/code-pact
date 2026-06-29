@@ -246,6 +246,7 @@ function uniquifySkillName(base: string, taken: ReadonlySet<string>): string {
 
 function buildCommandSkill(skillName: string, command: string): string {
   return [
+    `<!-- code-pact:generated skill="${skillName}" command="${command.replace(/"/g, "&quot;")}" -->`,
     `# /${skillName} — ${command}`,
     ``,
     `Usage: /${skillName}`,

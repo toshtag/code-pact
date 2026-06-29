@@ -107,7 +107,7 @@ describe("adapter convergence — verification-command skill collides with a bui
     expect(paths).toContain(".claude/skills/verify-2.md");
   });
 
-  it("install → later mutation runs preserve the existing dynamic skill with a warning (no read/hash)", async () => {
+  it("install → later mutation runs adopt code-pact-generated dynamic skill (provenance verified)", async () => {
     await runAdapterInstall({
       cwd: dir,
       agentName: "claude-code",
@@ -123,14 +123,14 @@ describe("adapter convergence — verification-command skill collides with a bui
       acceptModified: false,
       locale: "en-US",
     });
-    expect(check1.clean).toBe(false);
+    // With provenance markers, a code-pact-generated dynamic skill is now
+    // recognized as ours — managed-clean and current (skip), not unverifiable.
     expect(
       check1.plan.find(p => p.relPath.endsWith("verify-2.md")),
     ).toMatchObject({
-      local: "unverifiable",
-      desired: "unverifiable",
-      action: "warn",
-      reason: "dynamic_file_unverifiable",
+      local: "managed-clean",
+      desired: "current",
+      action: "skip",
     });
 
     const write = await runAdapterUpgrade({
@@ -143,7 +143,7 @@ describe("adapter convergence — verification-command skill collides with a bui
     });
     expect(
       write.plan.find(p => p.relPath.endsWith("verify-2.md"))?.action,
-    ).toBe("warn");
+    ).toBe("skip");
 
     const check2 = await runAdapterUpgrade({
       cwd: dir,
