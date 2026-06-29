@@ -1,0 +1,52 @@
+{
+  "src/commands/decision-retire.ts#classifyParent": {
+    "operation": "lstat",
+    "authority": "symlink_free_contained",
+    "reason": "parentAbs is a parameter from inspectDecisionMd which uses resolveSymlinkFreeProjectPath internally; classifyParent only lstats the parent directory for presence classification"
+  },
+  "src/commands/decision-retire.ts#runDecisionRetire": {
+    "operation": "unlink",
+    "authority": "symlink_free_contained",
+    "reason": "guard.abs comes from inspectDecisionMd which uses resolveSymlinkFreeProjectPath; the stale guard verifies identity before delete"
+  },
+  "src/commands/phase-archive.ts#classifyParent": {
+    "operation": "lstat",
+    "authority": "symlink_free_contained",
+    "reason": "parentAbs is a parameter from inspectPhaseYaml which uses resolveSymlinkFreeProjectPath internally; classifyParent only lstats the parent directory for presence classification"
+  },
+  "src/commands/phase-archive.ts#runPhaseArchive": {
+    "operation": "unlink",
+    "authority": "symlink_free_contained",
+    "reason": "guard.abs comes from inspectPhaseYaml which uses resolveSymlinkFreeProjectPath; the stale guard verifies identity before delete"
+  },
+  "src/commands/init.ts#exists": {
+    "operation": "access",
+    "authority": "symlink_free_contained",
+    "reason": "p parameter is from resolveInitPath (local wrapper of resolveSymlinkFreeProjectPath); init command creates project structure from fixed relative segments"
+  },
+  "src/commands/init.ts#writeIfAbsent": {
+    "operation": "atomicWriteText",
+    "authority": "symlink_free_contained",
+    "reason": "p parameter is from resolveInitPath (local wrapper of resolveSymlinkFreeProjectPath); init command creates project structure from fixed relative segments"
+  },
+  "src/commands/init.ts#mkdirp": {
+    "operation": "mkdir",
+    "authority": "symlink_free_contained",
+    "reason": "p parameter is from resolveInitPath (local wrapper of resolveSymlinkFreeProjectPath); init command creates project directories from fixed relative segments"
+  },
+  "src/commands/init.ts#runInitCore": {
+    "operation": "readFile",
+    "authority": "symlink_free_contained",
+    "reason": "path comes from resolveInitPath (local wrapper of resolveSymlinkFreeProjectPath) in a .then() callback; init reads existing project files"
+  },
+  "src/commands/phase-import.ts#runPhaseImport": {
+    "operation": "readFile",
+    "authority": "explicit_user_input",
+    "reason": "inputPath is an explicit user-selected file path from CLI --input flag"
+  },
+  "src/commands/tutorial.ts#runTutorial": {
+    "operation": "rm",
+    "authority": "explicit_user_input",
+    "reason": "sandbox is a temporary directory created by the tutorial in the system temp dir, not a project path"
+  }
+}
