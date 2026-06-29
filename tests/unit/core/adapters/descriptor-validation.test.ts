@@ -209,39 +209,39 @@ describe("validateAdapterDescriptor", () => {
   });
 
   it("rejects ownedPathRoles under protected namespaces", () => {
-    expect(() =>
-      validateAdapterDescriptor("bad", {
-        ...baseDescriptor,
-        ownedPathRoles: {
-          "AGENTS.md": "instruction",
-          ".code-pact/state/progress.yaml": "instruction",
-        },
-      }),
-    ).toThrow(/protected namespace/);
-
-    expect(() =>
-      validateAdapterDescriptor("bad", {
-        ...baseDescriptor,
-        ownedPathRoles: {
-          "AGENTS.md": "instruction",
-          "design/roadmap.yaml": "instruction",
-        },
-      }),
-    ).toThrow(/protected namespace/);
+    for (const path of [
+      ".git/config",
+      ".code-pact/project.yaml",
+      ".context/private.md",
+      "design/constitution.md",
+      "node_modules/package/index.js",
+    ]) {
+      expect(() =>
+        validateAdapterDescriptor("bad", {
+          ...baseDescriptor,
+          ownedPathRoles: {
+            "AGENTS.md": "instruction",
+            [path]: "instruction",
+          },
+        }),
+      ).toThrow(/protected namespace/);
+    }
   });
 
   it("rejects instructionFilename under protected namespaces", () => {
-    expect(() =>
-      validateAdapterDescriptor("bad", {
-        ...baseDescriptor,
-        ownedPathRoles: {
-          ".code-pact/project.yaml": "instruction",
-        },
-        profilePathContract: {
-          instructionFilename: ".code-pact/project.yaml",
-        },
-      }),
-    ).toThrow(/protected namespace/);
+    for (const path of [".context/private.md", ".git/config"]) {
+      expect(() =>
+        validateAdapterDescriptor("bad", {
+          ...baseDescriptor,
+          ownedPathRoles: {
+            [path]: "instruction",
+          },
+          profilePathContract: {
+            instructionFilename: path,
+          },
+        }),
+      ).toThrow(/protected namespace/);
+    }
   });
 
   it("rejects skillDir under protected namespaces", () => {

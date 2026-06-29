@@ -4,6 +4,13 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runAdapterConformance } from "../../../src/commands/adapter-conformance.ts";
 import { runAdapterDoctor } from "../../../src/commands/adapter-doctor.ts";
+import { atomicWriteText } from "../../../src/io/atomic-text.ts";
+
+type FsOperation = {
+  operation: string;
+  path: string;
+  destination?: string;
+};
 
 // Spy on ALL filesystem operations that could leak content or mutate state.
 // This includes FileHandle methods (returned by open()) that bypass the
@@ -35,6 +42,7 @@ const spies = vi.hoisted(() => ({
   fhChmod: vi.fn(),
   fhChown: vi.fn(),
   fhUtimes: vi.fn(),
+  operations: [] as FsOperation[],
 }));
 
 vi.mock("node:fs/promises", async importActual => {
@@ -42,34 +50,42 @@ vi.mock("node:fs/promises", async importActual => {
   return {
     ...actual,
     readFile: async (...args: Parameters<typeof actual.readFile>) => {
+      spies.operations.push({ operation: "readFile", path: String(args[0]) });
       spies.readFile(String(args[0]));
       return actual.readFile(...args);
     },
     stat: async (...args: Parameters<typeof actual.stat>) => {
+      spies.operations.push({ operation: "stat", path: String(args[0]) });
       spies.stat(String(args[0]));
       return actual.stat(...args);
     },
     lstat: async (...args: Parameters<typeof actual.lstat>) => {
+      spies.operations.push({ operation: "lstat", path: String(args[0]) });
       spies.lstat(String(args[0]));
       return actual.lstat(...args);
     },
     unlink: async (...args: Parameters<typeof actual.unlink>) => {
+      spies.operations.push({ operation: "unlink", path: String(args[0]) });
       spies.unlink(String(args[0]));
       return actual.unlink(...args);
     },
     writeFile: async (...args: Parameters<typeof actual.writeFile>) => {
+      spies.operations.push({ operation: "writeFile", path: String(args[0]) });
       spies.writeFile(String(args[0]));
       return actual.writeFile(...args);
     },
     readdir: async (...args: Parameters<typeof actual.readdir>) => {
+      spies.operations.push({ operation: "readdir", path: String(args[0]) });
       spies.readdir(String(args[0]));
       return actual.readdir(...args);
     },
     mkdir: async (...args: Parameters<typeof actual.mkdir>) => {
+      spies.operations.push({ operation: "mkdir", path: String(args[0]) });
       spies.mkdir(String(args[0]));
       return actual.mkdir(...args);
     },
     open: async (...args: Parameters<typeof actual.open>) => {
+      spies.operations.push({ operation: "open", path: String(args[0]) });
       spies.open(String(args[0]));
       const fh = await actual.open(...args);
       // Wrap FileHandle methods to track reads/writes via open().
@@ -95,6 +111,10 @@ vi.mock("node:fs/promises", async importActual => {
           const spy = fhSpyMap[String(prop)];
           if (spy) {
             return (...fhArgs: unknown[]) => {
+              spies.operations.push({
+                operation: `FileHandle.${String(prop)}`,
+                path: String(args[0]),
+              });
               spy(String(args[0]));
               return val.apply(target, fhArgs);
             };
@@ -104,24 +124,56 @@ vi.mock("node:fs/promises", async importActual => {
       });
     },
     rename: async (...args: Parameters<typeof actual.rename>) => {
+      spies.operations.push({
+        operation: "rename_from",
+        path: String(args[0]),
+        destination: String(args[1]),
+      });
+      spies.operations.push({
+        operation: "rename_to",
+        path: String(args[1]),
+        destination: String(args[0]),
+      });
       spies.rename(String(args[0]));
       spies.rename(String(args[1]));
       return actual.rename(...args);
     },
     rm: async (...args: Parameters<typeof actual.rm>) => {
+      spies.operations.push({ operation: "rm", path: String(args[0]) });
       spies.rm(String(args[0]));
       return actual.rm(...args);
     },
     access: async (...args: Parameters<typeof actual.access>) => {
+      spies.operations.push({ operation: "access", path: String(args[0]) });
       spies.access(String(args[0]));
       return actual.access(...args);
     },
     cp: async (...args: Parameters<typeof actual.cp>) => {
+      spies.operations.push({
+        operation: "copy_from",
+        path: String(args[0]),
+        destination: String(args[1]),
+      });
+      spies.operations.push({
+        operation: "copy_to",
+        path: String(args[1]),
+        destination: String(args[0]),
+      });
       spies.cp(String(args[0]));
       spies.cp(String(args[1]));
       return actual.cp(...args);
     },
     copyFile: async (...args: Parameters<typeof actual.copyFile>) => {
+      spies.operations.push({
+        operation: "copy_from",
+        path: String(args[0]),
+        destination: String(args[1]),
+      });
+      spies.operations.push({
+        operation: "copy_to",
+        path: String(args[1]),
+        destination: String(args[0]),
+      });
       spies.copyFile(String(args[0]));
       spies.copyFile(String(args[1]));
       return actual.copyFile(...args);
@@ -219,6 +271,7 @@ function resetSpies() {
   spies.fhChmod.mockClear();
   spies.fhChown.mockClear();
   spies.fhUtimes.mockClear();
+  spies.operations.length = 0;
 }
 
 const VALID_CONTRACT_BODY = `# Some Adapter
@@ -318,6 +371,42 @@ async function setupAdapterWithForgedFiles(
 }
 
 describe("filesystem operation proof — conformance", () => {
+  it("records atomicWriteText temp writes and rename direction separately", async () => {
+    const target = join(dir, "atomic.txt");
+
+    resetSpies();
+    await atomicWriteText(target, "hello");
+
+    const tempOpen = spies.operations.find(
+      op =>
+        op.operation === "open" &&
+        op.path.startsWith(`${target}.tmp-`) &&
+        op.path !== target,
+    );
+    expect(tempOpen).toBeDefined();
+    expect(
+      spies.operations.some(
+        op =>
+          op.operation === "FileHandle.writeFile" &&
+          op.path.startsWith(`${target}.tmp-`),
+      ),
+    ).toBe(true);
+    expect(spies.operations).toContainEqual(
+      expect.objectContaining({
+        operation: "rename_to",
+        path: target,
+      }),
+    );
+    expect(
+      spies.operations.some(
+        op =>
+          op.operation === "rename_from" &&
+          op.path.startsWith(`${target}.tmp-`) &&
+          op.destination === target,
+      ),
+    ).toBe(true);
+  });
+
   it("never reads/stats an unowned .env file listed in a forged manifest", async () => {
     const envPath = join(dir, ".env");
     const envContent = "API_TOKEN=secret\n";
