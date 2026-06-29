@@ -42,7 +42,7 @@
     "test": "pnpm test:unit && pnpm test:integration",
     "test:unit": "vitest run --config vitest.unit.config.ts",
     "test:integration": "pnpm build && vitest run --config vitest.integration.config.ts",
-    "test:ci": "pnpm typecheck && pnpm test:unit && pnpm build && vitest run --config vitest.integration.config.ts",
+    "test:ci": "pnpm typecheck && pnpm check:fs-containment && pnpm check:fs-authority && pnpm test:unit && pnpm build && vitest run --config vitest.integration.config.ts",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "harness": "tsx scripts/harness/run.ts",
