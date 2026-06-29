@@ -621,18 +621,16 @@ First match wins. Each candidate field is independently optional.
 All `spec import` failures reuse `CONFIG_ERROR` (exit 2). No new public error codes were added in v1.8. The structured `data.detail` enum is:
 
 <!-- @generated:spec-import-details — DO NOT EDIT by hand; regenerate with `pnpm gen:doc-blocks`. Source: SPEC_IMPORT_DETAILS in src/contracts/spec-import-details.ts. -->
-
-| `detail`             | When                                                              |
-| -------------------- | ----------------------------------------------------------------- |
-| `unsafe_path`        | `--from` / `--suggest-from` failed `assertSafeRelativePath`       |
-| `file_not_found`     | source file does not exist                                        |
-| `unreadable`         | source file exists but cannot be read                             |
-| `phase_id_invalid`   | `--phase-id` does not match `/^[A-Za-z][A-Za-z0-9_-]*$/`          |
-| `phase_yaml_exists`  | `--write` would clobber an existing imported YAML (use `--force`) |
-| `no_sections_parsed` | input has no Heading 3 sections (importer mode only)              |
-| `mutex_violation`    | `--from` + `--suggest-from` both passed                           |
-| `missing_phase_id`   | `--from` passed without `--phase-id`                              |
-
+| `detail` | When |
+| --- | --- |
+| `unsafe_path` | `--from` / `--suggest-from` failed `assertSafeRelativePath` |
+| `file_not_found` | source file does not exist |
+| `unreadable` | source file exists but cannot be read |
+| `phase_id_invalid` | `--phase-id` does not match `/^[A-Za-z][A-Za-z0-9_-]*$/` |
+| `phase_yaml_exists` | `--write` would clobber an existing imported YAML (use `--force`) |
+| `no_sections_parsed` | input has no Heading 3 sections (importer mode only) |
+| `mutex_violation` | `--from` + `--suggest-from` both passed |
+| `missing_phase_id` | `--from` passed without `--phase-id` |
 <!-- @generated:spec-import-details:end -->
 
 ### Post-import advisories
@@ -715,12 +713,10 @@ On success, `--json` emits `{ ok: true, data: { path: "..." } }` (same envelope 
 `plan brief` and `plan constitution` take the same non-interactive input, so their `--from-file` / `--stdin` failure `data.detail` values (all under `CONFIG_ERROR`, exit 2) are identical:
 
 <!-- @generated:plan-capture-details — DO NOT EDIT by hand; regenerate with `pnpm gen:doc-blocks`. Source: PLAN_CAPTURE_*_DETAILS in src/contracts/plan-capture-details.ts. -->
-
-| Surface                                                   | `detail` values                                               |
-| --------------------------------------------------------- | ------------------------------------------------------------- |
+| Surface | `detail` values |
+| --- | --- |
 | `plan brief --from-file`, `plan constitution --from-file` | `unsafe_path`, `unreadable`, `invalid_yaml`, `schema_invalid` |
-| `plan brief --stdin`, `plan constitution --stdin`         | `stdin_read_failed`, `invalid_yaml`, `schema_invalid`         |
-
+| `plan brief --stdin`, `plan constitution --stdin` | `stdin_read_failed`, `invalid_yaml`, `schema_invalid` |
 <!-- @generated:plan-capture-details:end -->
 
 ### `plan prompt [--clipboard] [--schema-only]`
