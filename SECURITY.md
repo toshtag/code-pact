@@ -65,20 +65,48 @@ All control-plane reads (`.code-pact/project.yaml`, agent profiles, model profil
 
 ### Profile contract validation
 
-Before any filesystem operation, `validateAgentProfileForAdapter` checks the agent profile's path fields against the adapter descriptor's declared owned paths:
+Before any filesystem operation, `validateAgentProfileForAdapter` checks the agent profile's path fields against the adapter descriptor's `profilePathContract` — a canonical set of exact values:
 
-- `instruction_filename` must match an adapter-owned instruction or rule path.
-- `skill_dir` (when present) must be a prefix of at least one owned skill path.
-- `hook_dir` (when present) must be a prefix of at least one owned hook path.
+- `instruction_filename` must **exactly match** the adapter's canonical instruction filename.
+- `skill_dir` (when present) must **exactly match** the adapter's canonical skill directory.
+- `hook_dir` (when present) must **exactly match** the adapter's canonical hook directory.
 
-A hostile profile (e.g. `instruction_filename: .env`) is rejected at the contract boundary with `CONFIG_ERROR` — the target file is never read, hashed, or overwritten.
+This is an exact-equality check, not a prefix match — a hostile profile (e.g. `instruction_filename: .env`) is rejected at the contract boundary with `CONFIG_ERROR` — the target file is never read, hashed, or overwritten.
 
-### hook_dir policy
+Profile loading is unified through `loadValidatedAdapterProfile`, which performs symlink-free path resolution, YAML parsing, schema validation, and contract validation in a single function. All adapter commands (install, upgrade, doctor) use this single source.
 
-`hook_dir` is `RelativePosixPath.optional()` — an arbitrary project-relative path. It is included in the preflight symlink-free resolution check but is **not** pre-created via `mkdir`. This prevents a hostile profile from forcing arbitrary directory creation. Parent directories for hook files are created by the write loop's `mkdir(dirname(absPath), { recursive: true })` only when a hook file is actually generated.
+### Preflight and placeholder directories
 
-`context_dir` is schema-constrained to `.context/**` (`ContextOutputDir`) and is safe to pre-create — it cannot be an arbitrary path.
+`context_dir` and `hook_dir` are **not** included in the `assertAdapterWritePathsContained` preflight. Instead:
+
+- `context_dir` is resolved symlink-free **before the model pin** and created via `mkdir` using the resolved path. It is schema-constrained to `.context/**` (`ContextOutputDir`) and cannot be an arbitrary path.
+- `hook_dir` is resolved symlink-free **before the model pin** (to catch symlinks) but is **not** pre-created via `mkdir`. This prevents a hostile profile from forcing arbitrary directory creation. Parent directories for hook files are created by the write loop's `mkdir(dirname(absPath), { recursive: true })` only when a hook file is actually generated.
+
+The preflight itself only checks the manifest path (a fixed `.code-pact/adapters/` path). Generated-file targets are authorized individually via `authorizeAdapterMutationPath` before any stat/read/hash.
+
+### Model profile loading
+
+Model profiles (`.code-pact/model-profiles/*.yaml`) are loaded via `loadModelProfilesStrict`, which uses `resolveSymlinkFreeProjectPath` for both the directory and each entry. A symlinked or unreadable model-profiles directory is a `CONFIG_ERROR` — it is **not** silently degraded to an empty array. An empty array would cause the generator to produce model-unaware output, masking the configuration problem.
+
+### Control-plane config path
+
+`.code-pact/project.yaml` is read through `resolveProjectConfigPath`, a dedicated helper that wraps `resolveSymlinkFreeProjectPath`. This ensures the control-plane config file is always read with ownership resolution, never containment. The `readProjectYamlStrictOrNull` helper provides safe locale discovery with size and type checks.
 
 ### TOCTOU safety
 
 `writeManifest` always re-resolves the manifest path via `resolveSymlinkFreeProjectPath` at write time, regardless of any earlier preflight check. A symlink planted between the preflight and the write is detected and refused.
+
+### Static analysis gates
+
+Two CI gates provide structural backstops for path safety:
+
+- **`check:fs-containment`** (`scripts/check-fs-containment.mjs`): flags lexical `join(...)` paths handed directly to fs functions across `src/commands/`, `src/core/`, and `src/cli/`.
+- **`check:fs-authority`** (`scripts/check-fs-authority.mjs`): verifies that every fs operation in `adapter-install.ts` and `adapter-upgrade.ts` uses a path sourced from an authority resolver (`authorizeAdapterMutationPath`, `resolveSymlinkFreeProjectPath`, `resolveManifestPath`, or a pre-resolved variable).
+
+Both are structural tripwires — exit 0 does not prove semantic invariants. The security regression tests (`control-plane-ownership-red.test.ts`, `adapter-preflight-atomicity.test.ts`, `adapter-fs-operation-proof.test.ts`) are the proof layer.
+
+## Known technical debt
+
+- **`resolveWithinProject` in user-facing reads**: `plan-constitution.ts`, `plan-brief.ts`, `plan-adopt.ts`, `task-prepare.ts`, `spec-import.ts`, and `core/decisions/retire.ts`, `prune.ts`, `link-collector.ts` still use `resolveWithinProject` for user-authored design content reads. These are containment-only (in-project symlinks allowed). This is acceptable because: (a) the paths are user-facing reads, not control-plane writes; (b) the content is user-authored design files, not attacker-controllable config; (c) write operations in `prune-executor.ts` re-resolve with `resolveSymlinkFreeProjectPath` before any delete.
+- **`adapter-doctor.ts` does not use `loadValidatedAdapterProfile`**: it loads profiles via `resolveAgentProfilePath` + direct `readFile` (lenient, returns null on failure). This is acceptable because `adapter-doctor` is diagnostic-only (no writes), and `readProjectFileForDoctor` uses `resolveSymlinkFreeProjectPath` for all file reads. Contract violations are caught by `doctor.ts`'s `checkAgentProfiles`.
+- **`projectFs` seam not introduced**: the fs operation proof test (`adapter-fs-operation-proof.test.ts`) uses canary files rather than a mockable `projectFs` seam. A seam would allow exhaustive spy-matrix testing but requires a larger refactor of all fs import sites.
