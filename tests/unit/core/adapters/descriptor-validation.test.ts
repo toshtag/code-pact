@@ -134,7 +134,11 @@ describe("validateAdapterDescriptor", () => {
     expect(() =>
       validateAdapterDescriptor("bad", {
         ...baseDescriptor,
-        capabilities: ["instructions_file", "skills_dir", "context_dir"] as const,
+        capabilities: [
+          "instructions_file",
+          "skills_dir",
+          "context_dir",
+        ] as const,
         createPathGlobsByRole: {
           skill: [".claude/skills/*.md"],
         },
@@ -144,7 +148,11 @@ describe("validateAdapterDescriptor", () => {
     expect(() =>
       validateAdapterDescriptor("bad", {
         ...baseDescriptor,
-        capabilities: ["instructions_file", "hooks_dir", "context_dir"] as const,
+        capabilities: [
+          "instructions_file",
+          "hooks_dir",
+          "context_dir",
+        ] as const,
         createPathGlobsByRole: {
           hook: [".claude/hooks/*.json"],
         },
@@ -198,5 +206,67 @@ describe("validateAdapterDescriptor", () => {
         },
       }),
     ).toThrow(/overlaps owned path/);
+  });
+
+  it("rejects ownedPathRoles under protected namespaces", () => {
+    expect(() =>
+      validateAdapterDescriptor("bad", {
+        ...baseDescriptor,
+        ownedPathRoles: {
+          "AGENTS.md": "instruction",
+          ".code-pact/state/progress.yaml": "instruction",
+        },
+      }),
+    ).toThrow(/protected namespace/);
+
+    expect(() =>
+      validateAdapterDescriptor("bad", {
+        ...baseDescriptor,
+        ownedPathRoles: {
+          "AGENTS.md": "instruction",
+          "design/roadmap.yaml": "instruction",
+        },
+      }),
+    ).toThrow(/protected namespace/);
+  });
+
+  it("rejects instructionFilename under protected namespaces", () => {
+    expect(() =>
+      validateAdapterDescriptor("bad", {
+        ...baseDescriptor,
+        ownedPathRoles: {
+          ".code-pact/project.yaml": "instruction",
+        },
+        profilePathContract: {
+          instructionFilename: ".code-pact/project.yaml",
+        },
+      }),
+    ).toThrow(/protected namespace/);
+  });
+
+  it("rejects skillDir under protected namespaces", () => {
+    expect(() =>
+      validateAdapterDescriptor("bad", {
+        ...claudeLikeDescriptor,
+        profilePathContract: {
+          instructionFilename: "CLAUDE.md",
+          skillDir: "design/skills",
+          hookDir: ".claude/hooks",
+        },
+      }),
+    ).toThrow(/protected namespace/);
+  });
+
+  it("rejects hookDir under protected namespaces", () => {
+    expect(() =>
+      validateAdapterDescriptor("bad", {
+        ...claudeLikeDescriptor,
+        profilePathContract: {
+          instructionFilename: "CLAUDE.md",
+          skillDir: ".claude/skills",
+          hookDir: ".git/hooks",
+        },
+      }),
+    ).toThrow(/protected namespace/);
   });
 });

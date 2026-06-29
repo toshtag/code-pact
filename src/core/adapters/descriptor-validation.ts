@@ -23,18 +23,30 @@ const PROTECTED_CREATE_PREFIXES = [
 ] as const;
 
 function descriptorError(agentName: string, message: string): Error {
-  const err = new Error(`Invalid adapter descriptor for "${agentName}": ${message}`);
+  const err = new Error(
+    `Invalid adapter descriptor for "${agentName}": ${message}`,
+  );
   (err as NodeJS.ErrnoException).code = "CONFIG_ERROR";
   return err;
 }
 
-function assertExactRelativePath(agentName: string, label: string, path: string): void {
+function assertExactRelativePath(
+  agentName: string,
+  label: string,
+  path: string,
+): void {
   const parsed = RelativePosixPath.safeParse(path);
   if (!parsed.success) {
-    throw descriptorError(agentName, `${label} "${path}" is not a relative POSIX path.`);
+    throw descriptorError(
+      agentName,
+      `${label} "${path}" is not a relative POSIX path.`,
+    );
   }
   if (GLOB_META.test(path)) {
-    throw descriptorError(agentName, `${label} "${path}" must be an exact path, not a glob.`);
+    throw descriptorError(
+      agentName,
+      `${label} "${path}" must be an exact path, not a glob.`,
+    );
   }
 }
 
@@ -45,7 +57,10 @@ function assertCreateGlobPath(
 ): void {
   const syntax = validateGlobSyntax(pattern);
   if (syntax !== null) {
-    throw descriptorError(agentName, `${label} "${pattern}" is invalid: ${syntax}.`);
+    throw descriptorError(
+      agentName,
+      `${label} "${pattern}" is invalid: ${syntax}.`,
+    );
   }
   if (
     pattern.startsWith("/") ||
@@ -82,6 +97,23 @@ function assertCreateGlobPath(
     throw descriptorError(
       agentName,
       `${label} "${pattern}" targets a protected namespace.`,
+    );
+  }
+}
+
+function assertNotProtected(
+  agentName: string,
+  label: string,
+  path: string,
+): void {
+  if (
+    PROTECTED_CREATE_PREFIXES.some(
+      prefix => path === prefix.slice(0, -1) || path.startsWith(prefix),
+    )
+  ) {
+    throw descriptorError(
+      agentName,
+      `${label} "${path}" targets a protected namespace.`,
     );
   }
 }
@@ -157,6 +189,7 @@ export function validateAdapterDescriptor(
 ): AdapterDescriptor {
   for (const [path, role] of Object.entries(descriptor.ownedPathRoles)) {
     assertExactRelativePath(agentName, "ownedPathRoles key", path);
+    assertNotProtected(agentName, "ownedPathRoles key", path);
     if (!roleMatchesCapabilities(descriptor, role)) {
       throw descriptorError(
         agentName,
@@ -167,6 +200,11 @@ export function validateAdapterDescriptor(
 
   const instructionPath = descriptor.profilePathContract.instructionFilename;
   assertExactRelativePath(
+    agentName,
+    "profilePathContract.instructionFilename",
+    instructionPath,
+  );
+  assertNotProtected(
     agentName,
     "profilePathContract.instructionFilename",
     instructionPath,
@@ -185,8 +223,16 @@ export function validateAdapterDescriptor(
       "profilePathContract.skillDir",
       descriptor.profilePathContract.skillDir,
     );
+    assertNotProtected(
+      agentName,
+      "profilePathContract.skillDir",
+      descriptor.profilePathContract.skillDir,
+    );
     if (!hasCapability(descriptor, "skills_dir")) {
-      throw descriptorError(agentName, "skillDir is declared without the skills_dir capability.");
+      throw descriptorError(
+        agentName,
+        "skillDir is declared without the skills_dir capability.",
+      );
     }
   }
 
@@ -196,8 +242,16 @@ export function validateAdapterDescriptor(
       "profilePathContract.hookDir",
       descriptor.profilePathContract.hookDir,
     );
+    assertNotProtected(
+      agentName,
+      "profilePathContract.hookDir",
+      descriptor.profilePathContract.hookDir,
+    );
     if (!hasCapability(descriptor, "hooks_dir")) {
-      throw descriptorError(agentName, "hookDir is declared without the hooks_dir capability.");
+      throw descriptorError(
+        agentName,
+        "hookDir is declared without the hooks_dir capability.",
+      );
     }
   }
 
@@ -219,7 +273,12 @@ export function validateAdapterDescriptor(
     const seenPatterns = new Set<string>();
     for (const pattern of patterns) {
       assertCreateGlobPath(agentName, `createPathGlobsByRole.${role}`, pattern);
-      assertCreateGlobMatchesProfileContract(agentName, descriptor, role, pattern);
+      assertCreateGlobMatchesProfileContract(
+        agentName,
+        descriptor,
+        role,
+        pattern,
+      );
       if (seenPatterns.has(pattern)) {
         throw descriptorError(
           agentName,
