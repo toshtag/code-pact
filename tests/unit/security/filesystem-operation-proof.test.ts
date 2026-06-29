@@ -414,6 +414,42 @@ describe("filesystem operation proof — conformance", () => {
     expect(targetOps2.rm).toEqual([]);
     expect(targetOps2.access).toEqual([]);
   });
+
+  it("never reads/stats a protected-namespace path in a forged manifest", async () => {
+    const protectedPath = join(dir, ".code-pact", "project.yaml");
+    const protectedContent = "schema_version: 1\nagent_name: claude-code\n";
+    await setupAdapterWithForgedFiles(dir, [
+      {
+        path: ".code-pact/project.yaml",
+        content: protectedContent,
+        role: "instruction",
+        sha256: "0".repeat(64),
+      },
+    ]);
+
+    resetSpies();
+    const result = await runAdapterConformance({
+      cwd: dir,
+      agentName: "claude-code",
+    });
+
+    expect(result.compliant).toBe(false);
+
+    const ops = targetOps(protectedPath);
+    expect(ops.read).toEqual([]);
+    expect(ops.stat).toEqual([]);
+    expect(ops.lstat).toEqual([]);
+    expect(ops.unlink).toEqual([]);
+    expect(ops.write).toEqual([]);
+    expect(ops.readdir).toEqual([]);
+    expect(ops.mkdir).toEqual([]);
+    expect(ops.open).toEqual([]);
+    expect(ops.rename).toEqual([]);
+    expect(ops.rm).toEqual([]);
+    expect(ops.access).toEqual([]);
+    expect(ops.cp).toEqual([]);
+    expect(ops.copyFile).toEqual([]);
+  });
 });
 
 describe("filesystem operation proof — doctor", () => {
