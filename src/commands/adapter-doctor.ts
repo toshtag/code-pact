@@ -7,7 +7,10 @@ import { Project } from "../core/schemas/project.ts";
 import { adapterRegistry } from "../core/adapters/index.ts";
 import { classifyManifestFileForRead } from "../core/adapters/manifest-file-ownership.ts";
 import { isSupportedAgent, type SupportedAgent } from "../core/agents.ts";
-import { resolveAgentProfilePath } from "../core/agent-profile-path.ts";
+import {
+  assertAgentProfileNameMatches,
+  resolveAgentProfilePath,
+} from "../core/agent-profile-path.ts";
 import { resolveSymlinkFreeProjectPath } from "../core/path-safety.ts";
 import { resolveProjectConfigPath } from "../core/project-config-path.ts";
 import { validateAgentProfileForAdapter } from "../core/adapters/profile-contract.ts";
@@ -62,7 +65,7 @@ export type AdapterDoctorOptions = {
 };
 
 // ---------------------------------------------------------------------------
-// Loaders (lenient — doctor never throws on absence)
+// Loaders (diagnostic: absence/malformed input becomes a structured issue)
 // ---------------------------------------------------------------------------
 
 // Missing project.yaml → null (adapter doctor is a no-op without a project).
@@ -95,32 +98,75 @@ async function loadProjectSafe(cwd: string): Promise<Project | null> {
 async function loadAgentProfileSafe(
   cwd: string,
   agentName: string,
-): Promise<AgentProfile | null> {
-  // Resolve OUTSIDE the try so a CONFIG_ERROR (unparseable project.yaml or an
-  // invalid `agents[].profile`) propagates — consistent with the other commands
-  // rather than masked as "no profile". Missing/malformed profile *content* is
-  // still lenient (null), which the adapter doctor checks surface as issues.
+): Promise<
+  | { kind: "ok"; path: string; profile: AgentProfile }
+  | { kind: "missing"; path: string; message: string }
+  | { kind: "invalid"; path: string; message: string }
+> {
+  // Resolve OUTSIDE the try so a CONFIG_ERROR (unparseable project.yaml,
+  // unowned `agents[].profile`, or a symlinked profile path) propagates —
+  // consistent with the other commands rather than masked as "no profile".
   const path = await resolveAgentProfilePath(cwd, agentName);
+  let raw: string;
   try {
-    const raw = await readFile(path, "utf8");
-    return AgentProfile.parse(parseYaml(raw) as unknown);
-  } catch {
-    return null;
+    raw = await readFile(path, "utf8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      return {
+        kind: "missing",
+        path,
+        message: `Agent profile for "${agentName}" not found at ${path}.`,
+      };
+    }
+    return {
+      kind: "invalid",
+      path,
+      message: `Agent profile for "${agentName}" at ${path} cannot be read: ${(err as Error).message}`,
+    };
+  }
+  try {
+    const profile = AgentProfile.parse(parseYaml(raw) as unknown);
+    assertAgentProfileNameMatches(profile, agentName, path);
+    return { kind: "ok", path, profile };
+  } catch (err) {
+    return {
+      kind: "invalid",
+      path,
+      message: `Agent profile for "${agentName}" at ${path} is invalid: ${(err as Error).message}`,
+    };
   }
 }
 
 async function loadModelProfilesForDoctor(
   cwd: string,
-): Promise<{ profiles: ModelProfile[]; unsafe: boolean }> {
+): Promise<{
+  profiles: ModelProfile[];
+  issue?: Omit<AdapterDoctorIssue, "agent">;
+}> {
   try {
     const profiles = await loadModelProfilesSafe(cwd);
-    return { profiles, unsafe: false };
+    return { profiles };
   } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code === "PATH_NOT_OWNED") {
-      return { profiles: [], unsafe: true };
+    const errCode = (err as NodeJS.ErrnoException).code;
+    if (errCode === "PATH_NOT_OWNED" || errCode === "PATH_OUTSIDE_PROJECT") {
+      return {
+        profiles: [],
+        issue: {
+          code: "MODEL_PROFILES_UNSAFE",
+          severity: "error",
+          message:
+            ".code-pact/model-profiles is a symlink or escapes the project root; profiles were not read.",
+        },
+      };
     }
-    return { profiles: [], unsafe: false };
+    return {
+      profiles: [],
+      issue: {
+        code: "MODEL_PROFILES_INVALID",
+        severity: "error",
+        message: `.code-pact/model-profiles could not be safely loaded: ${(err as Error).message}`,
+      },
+    };
   }
 }
 
@@ -394,9 +440,31 @@ export async function inspectAgent(
     });
   }
 
-  const profile = await loadAgentProfileSafe(cwd, agentName);
+  const profileLoad = await loadAgentProfileSafe(cwd, agentName);
 
-  if (profile) {
+  if (profileLoad.kind === "missing") {
+    issues.push({
+      code: "ADAPTER_PROFILE_MISSING",
+      severity: "error",
+      message: profileLoad.message,
+      agent: agentName,
+      path: profileLoad.path,
+    });
+    return issues;
+  }
+  if (profileLoad.kind === "invalid") {
+    issues.push({
+      code: "ADAPTER_PROFILE_INVALID",
+      severity: "error",
+      message: profileLoad.message,
+      agent: agentName,
+      path: profileLoad.path,
+    });
+    return issues;
+  }
+
+  const { profile } = profileLoad;
+  {
     // Profile contract: validate the profile's path fields against the adapter
     // descriptor's owned paths. A hostile profile (e.g. instruction_filename:
     // .env) is surfaced as a structured issue, not an uncoded throw.
@@ -412,16 +480,11 @@ export async function inspectAgent(
       });
       return issues;
     }
-    const { profiles: modelProfiles, unsafe: modelProfilesUnsafe } =
+    const { profiles: modelProfiles, issue: modelProfilesIssue } =
       await loadModelProfilesForDoctor(cwd);
-    if (modelProfilesUnsafe) {
-      issues.push({
-        code: "MODEL_PROFILES_UNSAFE",
-        severity: "error",
-        message:
-          ".code-pact/model-profiles is a symlink or escapes the project root; profiles were not read.",
-        agent: agentName,
-      });
+    if (modelProfilesIssue) {
+      issues.push({ ...modelProfilesIssue, agent: agentName });
+      return issues;
     }
     const resolvedModel = profile.model_version;
     const currentFP = buildCurrentFingerprint(profile, resolvedModel);
@@ -593,17 +656,6 @@ export async function inspectAgent(
         });
       }
     }
-  } else if (versionStale) {
-    // No agent profile → the generator cannot produce desired files, so we
-    // cannot prove the output is byte-identical. Stay conservative (Issue #340)
-    // and keep the legacy version-stamp warning rather than silently suppress.
-    issues.push({
-      code: "ADAPTER_GENERATOR_STALE",
-      severity: "warning",
-      message: `Manifest generator_version is "${manifest.generator_version}" but the current code-pact version is "${packageVersion}".`,
-      agent: agentName,
-      path: manifestPath(cwd, agentName),
-    });
   }
 
   return issues;

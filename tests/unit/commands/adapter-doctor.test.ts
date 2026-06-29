@@ -595,6 +595,65 @@ describe("adapter doctor — version drifts", () => {
   });
 });
 
+describe("adapter doctor — profile loading is fail-closed", () => {
+  beforeEach(async () => {
+    await runAdapterInstall({
+      cwd: dir,
+      agentName: "claude-code",
+      force: false,
+      locale: "en-US",
+      generatorVersionOverride: "0.9.0-alpha.0",
+    });
+  });
+
+  it("reports malformed agent profile content as an error, not a clean bill", async () => {
+    await writeFile(
+      join(dir, ".code-pact", "agent-profiles", "claude-code.yaml"),
+      "name: [not-valid\n",
+      "utf8",
+    );
+
+    const result = await runAdapterDoctor({ cwd: dir, locale: "en-US" });
+    expect(result.ok).toBe(false);
+    const issue = result.issues.find(i => i.code === "ADAPTER_PROFILE_INVALID");
+    expect(issue?.severity).toBe("error");
+  });
+
+  it("reports a profile name mismatch as an error", async () => {
+    const profilePath = join(
+      dir,
+      ".code-pact",
+      "agent-profiles",
+      "claude-code.yaml",
+    );
+    const profile = parseYaml(await readFile(profilePath, "utf8")) as Record<
+      string,
+      unknown
+    >;
+    profile.name = "codex";
+    await writeFile(profilePath, stringifyYaml(profile), "utf8");
+
+    const result = await runAdapterDoctor({ cwd: dir, locale: "en-US" });
+    expect(result.ok).toBe(false);
+    const issue = result.issues.find(i => i.code === "ADAPTER_PROFILE_INVALID");
+    expect(issue?.message).toContain('declares name "codex"');
+  });
+
+  it("reports malformed model profile entries as errors", async () => {
+    await mkdir(join(dir, ".code-pact", "model-profiles"), { recursive: true });
+    await writeFile(
+      join(dir, ".code-pact", "model-profiles", "bad.yaml"),
+      "tier: highest_reasoning\npurpose: []\n",
+      "utf8",
+    );
+
+    const result = await runAdapterDoctor({ cwd: dir, locale: "en-US" });
+    expect(result.ok).toBe(false);
+    const issue = result.issues.find(i => i.code === "MODEL_PROFILES_INVALID");
+    expect(issue?.severity).toBe("error");
+  });
+});
+
 // ---------------------------------------------------------------------------
 // File-level checks
 // ---------------------------------------------------------------------------
