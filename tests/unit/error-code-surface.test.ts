@@ -239,6 +239,9 @@ const KNOWN_CODES: Record<
   MODEL_PROFILES_UNSAFE: "adapter",
   ADAPTER_SCHEMA_DRIFT: "adapter",
   ADAPTER_UNMANAGED_FILE: "adapter",
+  ADAPTER_TRANSACTION_RECOVERY_FAILED: "adapter",
+  PARTIAL_MUTATION: "adapter",
+  TRANSACTION_CLEANUP_PENDING: "adapter",
 
   // Internal
   INTERNAL_ERROR: "internal",

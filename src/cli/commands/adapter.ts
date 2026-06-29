@@ -274,6 +274,45 @@ async function cmdAdapterConformance(
   return result.compliant ? 0 : 1;
 }
 
+function adapterTransactionErrorData(err: Error): Record<string, unknown> {
+  return {
+    committed_paths: (err as { committedPaths?: readonly string[] })
+      .committedPaths,
+    rollback_failures: (err as { rollbackFailures?: readonly string[] })
+      .rollbackFailures,
+    cleanup_failures: (err as { cleanupFailures?: readonly string[] })
+      .cleanupFailures,
+    backup_paths: (err as { backupPaths?: readonly string[] }).backupPaths,
+    journal_path: (err as { journalPath?: string }).journalPath,
+  };
+}
+
+function emitAdapterTransactionError(
+  json: boolean,
+  err: Error,
+  code: string | undefined,
+): boolean {
+  if (code === "PARTIAL_MUTATION") {
+    emitError(json, "PARTIAL_MUTATION", err.message, {
+      data: adapterTransactionErrorData(err),
+    });
+    return true;
+  }
+  if (code === "TRANSACTION_CLEANUP_PENDING") {
+    emitError(json, "TRANSACTION_CLEANUP_PENDING", err.message, {
+      data: adapterTransactionErrorData(err),
+    });
+    return true;
+  }
+  if (code === "ADAPTER_TRANSACTION_RECOVERY_FAILED") {
+    emitError(json, "ADAPTER_TRANSACTION_RECOVERY_FAILED", err.message, {
+      data: adapterTransactionErrorData(err),
+    });
+    return true;
+  }
+  return false;
+}
+
 async function cmdAdapterUpgrade(
   argv: string[],
   locale: Locale,
@@ -524,6 +563,9 @@ async function cmdAdapterUpgrade(
         emitError(json, "CONFIG_ERROR", err.message);
         return 2;
       }
+      if (emitAdapterTransactionError(json, err, code)) {
+        return 2;
+      }
     }
     throw err;
   }
@@ -628,6 +670,9 @@ async function runAdapterInstallAndEmit(args: {
       }
       if (code === "CONFIG_ERROR") {
         emitError(json, "CONFIG_ERROR", err.message);
+        return 2;
+      }
+      if (emitAdapterTransactionError(json, err, code)) {
         return 2;
       }
     }
