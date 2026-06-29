@@ -29,6 +29,7 @@ import { resolveOwnedReadPath } from "../core/project-fs/owned-read.ts";
 import {
   ACCEPTED_MODEL_VERSION_INPUTS,
   AgentProfile,
+  type AgentProfile as AgentProfileType,
   normalizeModelVersion,
 } from "../core/schemas/agent-profile.ts";
 import {
@@ -60,6 +61,10 @@ import { PhaseSnapshot } from "../core/schemas/phase-snapshot.ts";
 import { isSupportedAgent, type SupportedAgent } from "../core/agents.ts";
 import { adapterRegistry } from "../core/adapters/index.ts";
 import { validateAgentProfileForAdapter } from "../core/adapters/profile-contract.ts";
+import {
+  assertAgentProfileNameMatches,
+  resolveAgentProfilePath,
+} from "../core/agent-profile-path.ts";
 import { CONSTITUTION_PLACEHOLDER_MARKERS } from "../core/constitution.ts";
 import { readManifest } from "../core/adapters/manifest.ts";
 import { auditWrites, runGit } from "../core/audit/index.ts";
@@ -179,6 +184,74 @@ async function projectFileExists(
   } catch {
     return false;
   }
+}
+
+type DoctorAgentProfileResult =
+  | { ok: true; path: string; profile: AgentProfileType }
+  | { ok: false; code: string; message: string };
+
+async function loadDoctorAgentProfile(
+  cwd: string,
+  agentName: string,
+  reportedProfileRel: string,
+): Promise<DoctorAgentProfileResult> {
+  let absPath: string;
+  try {
+    absPath = await resolveAgentProfilePath(cwd, agentName);
+  } catch (err) {
+    return {
+      ok: false,
+      code: "ADAPTER_PROFILE_INVALID",
+      message: `Agent profile "${reportedProfileRel}" for "${agentName}" is not in the owned profile namespace or is otherwise unsafe: ${(err as Error).message}`,
+    };
+  }
+
+  let raw: string;
+  try {
+    raw = await readFile(absPath, "utf8");
+  } catch {
+    return {
+      ok: false,
+      code: "AGENT_NOT_FOUND",
+      message: `Agent profile "${reportedProfileRel}" cannot be read`,
+    };
+  }
+
+  const parsedYaml = (() => {
+    try {
+      return { ok: true as const, data: parseYaml(raw) as unknown };
+    } catch {
+      return { ok: false as const };
+    }
+  })();
+  if (!parsedYaml.ok) {
+    return {
+      ok: false,
+      code: "INVALID_YAML",
+      message: `Agent profile "${reportedProfileRel}" cannot be parsed`,
+    };
+  }
+
+  const parsed = AgentProfile.safeParse(parsedYaml.data);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      code: "SCHEMA_ERROR",
+      message: `${reportedProfileRel} failed schema validation: ${parsed.error.issues[0]?.message ?? "unknown"}`,
+    };
+  }
+
+  try {
+    assertAgentProfileNameMatches(parsed.data, agentName, absPath);
+  } catch (err) {
+    return {
+      ok: false,
+      code: "ADAPTER_PROFILE_INVALID",
+      message: `${reportedProfileRel}: ${(err as Error).message}`,
+    };
+  }
+
+  return { ok: true, path: absPath, profile: parsed.data };
 }
 
 // ---------------------------------------------------------------------------
@@ -603,40 +676,28 @@ async function checkAgentProfiles(
   const knownTiers = new Set(ModelTier.options);
 
   for (const agentRef of project.agents) {
-    const profilePath = [".code-pact", agentRef.profile].join("/");
-    const result = await safeReadProjectYaml(cwd, profilePath);
-    if (!result.ok) {
-      if (
-        result.code === "PATH_OUTSIDE_PROJECT" ||
-        result.code === "PATH_NOT_OWNED"
-      )
-        pushPathIssue(issues, profilePath);
-      else {
-        issues.push({
-          code: "AGENT_NOT_FOUND",
-          severity: "error",
-          message: `Agent profile "${agentRef.profile}" cannot be read`,
-        });
-      }
-      continue;
-    }
-    const parsed = AgentProfile.safeParse(result.data);
-    if (!parsed.success) {
+    const loaded = await loadDoctorAgentProfile(
+      cwd,
+      agentRef.name,
+      agentRef.profile,
+    );
+    if (!loaded.ok) {
       issues.push({
-        code: "SCHEMA_ERROR",
+        code: loaded.code,
         severity: "error",
-        message: `${agentRef.profile} failed schema validation: ${parsed.error.issues[0]?.message ?? "unknown"}`,
+        message: loaded.message,
       });
       continue;
     }
+    const profile = loaded.profile;
     // Profile contract: validate path fields against the adapter descriptor's
     // canonical values. A hostile profile (e.g. instruction_filename: .env) is
     // surfaced as a structured issue, not an uncoded throw.
-    if (isSupportedAgent(parsed.data.name)) {
+    if (isSupportedAgent(agentRef.name)) {
       try {
         validateAgentProfileForAdapter(
-          parsed.data,
-          adapterRegistry[parsed.data.name],
+          profile,
+          adapterRegistry[agentRef.name],
         );
       } catch (err) {
         issues.push({
@@ -649,11 +710,11 @@ async function checkAgentProfiles(
     }
     // Check all tiers are present in model_map
     for (const tier of knownTiers) {
-      if (!parsed.data.model_map[tier]) {
+      if (!profile.model_map[tier]) {
         issues.push({
           code: "MISSING_MODEL_TIER",
           severity: "warning",
-          message: `Agent "${parsed.data.name}" is missing model_map entry for tier "${tier}"`,
+          message: `Agent "${agentRef.name}" is missing model_map entry for tier "${tier}"`,
         });
       }
     }
@@ -662,17 +723,17 @@ async function checkAgentProfiles(
     // the catalog describes Claude ids only, so comparing codex (gpt-5.x)
     // or other agents against it would emit false positives. Offline — these
     // compare against the bundled catalog, never the network.
-    if (parsed.data.name === "claude-code") {
+    if (agentRef.name === "claude-code") {
       const knownVendorIds = new Set(CLAUDE_KNOWN_VENDOR_MODEL_IDS);
       // The MODEL_MAP_STALE *condition* is owned by detectModelMapDrift so
       // `adapter upgrade --write`'s remaining-advisory hint can never disagree
       // with doctor about whether a profile is stale. The message text stays
       // here (doctor's full remediation differs from the upgrade hint).
       const staleByTier = new Map(
-        detectModelMapDrift(parsed.data.model_map).map(d => [d.tier, d]),
+        detectModelMapDrift(profile.model_map).map(d => [d.tier, d]),
       );
       for (const tier of knownTiers) {
-        const id = parsed.data.model_map[tier];
+        const id = profile.model_map[tier];
         if (!id) continue; // absence already reported as MISSING_MODEL_TIER
         if (!knownVendorIds.has(id)) {
           // Unknown vendor id: a typo, or a model id not represented in the
@@ -681,7 +742,7 @@ async function checkAgentProfiles(
           issues.push({
             code: "MODEL_ID_UNKNOWN",
             severity: "warning",
-            message: `Agent "${parsed.data.name}" model_map.${tier} is "${id}", which is not in the bundled Claude catalog (known: ${CLAUDE_KNOWN_VENDOR_MODEL_IDS.join(", ")}). Check for a typo, or a model id code-pact does not track yet.`,
+            message: `Agent "${agentRef.name}" model_map.${tier} is "${id}", which is not in the bundled Claude catalog (known: ${CLAUDE_KNOWN_VENDOR_MODEL_IDS.join(", ")}). Check for a typo, or a model id code-pact does not track yet.`,
           });
         } else if (staleByTier.has(tier)) {
           // Known but not the current catalog default — i.e. the profile was
@@ -693,19 +754,19 @@ async function checkAgentProfiles(
           issues.push({
             code: "MODEL_MAP_STALE",
             severity: "warning",
-            message: `Agent "${parsed.data.name}" model_map.${tier} is "${id}", but the current catalog default is "${CLAUDE_TIER_MODEL_IDS[tier]}" — a difference from the default, not an invalid value. To follow it, set model_map.${tier} to "${CLAUDE_TIER_MODEL_IDS[tier]}" in .code-pact/${agentRef.profile}, then run "code-pact adapter upgrade ${agentRef.name} --write" to regenerate the instruction file. Keep it if the pin is intentional, or silence via .code-pact/doctor.yaml (disabled_checks: [MODEL_MAP_STALE]).`,
+            message: `Agent "${agentRef.name}" model_map.${tier} is "${id}", but the current catalog default is "${CLAUDE_TIER_MODEL_IDS[tier]}" — a difference from the default, not an invalid value. To follow it, set model_map.${tier} to "${CLAUDE_TIER_MODEL_IDS[tier]}" in .code-pact/${agentRef.profile}, then run "code-pact adapter upgrade ${agentRef.name} --write" to regenerate the instruction file. Keep it if the pin is intentional, or silence via .code-pact/doctor.yaml (disabled_checks: [MODEL_MAP_STALE]).`,
           });
         }
       }
       // model_version is a deliberate user pin (set via --model). Flag only a
       // truly unrecognized value; never treat an older-but-known version as
       // "stale" — that would nag a user who explicitly pinned it.
-      const mv = parsed.data.model_version;
+      const mv = profile.model_version;
       if (mv !== undefined && normalizeModelVersion(mv) === null) {
         issues.push({
           code: "MODEL_ID_UNKNOWN",
           severity: "warning",
-          message: `Agent "${parsed.data.name}" model_version is "${mv}", which is not a recognized Claude model version (accepted: ${ACCEPTED_MODEL_VERSION_INPUTS.join(", ")}).`,
+          message: `Agent "${agentRef.name}" model_version is "${mv}", which is not a recognized Claude model version (accepted: ${ACCEPTED_MODEL_VERSION_INPUTS.join(", ")}).`,
         });
       }
     }
@@ -879,30 +940,32 @@ async function checkAdapterMissing(
       }
     }
 
-    const profilePath = [".code-pact", agentRef.profile].join("/");
-    const result = await safeReadProjectYaml(cwd, profilePath);
-    if (!result.ok) continue; // already reported by checkAgentProfiles
-    const parsed = AgentProfile.safeParse(result.data);
-    if (!parsed.success) continue;
+    const loaded = await loadDoctorAgentProfile(
+      cwd,
+      agentRef.name,
+      agentRef.profile,
+    );
+    if (!loaded.ok) continue; // already reported by checkAgentProfiles
+    const profile = loaded.profile;
     // Guard: skip the existence check if the profile contract is violated —
     // checkAgentProfiles already reported the contract issue. This prevents
     // checkAdapterMissing from stat'ing an unowned instruction_filename (e.g.
     // .env) and leaking an existence oracle.
-    if (isSupportedAgent(parsed.data.name)) {
+    if (isSupportedAgent(agentRef.name)) {
       try {
         validateAgentProfileForAdapter(
-          parsed.data,
-          adapterRegistry[parsed.data.name],
+          profile,
+          adapterRegistry[agentRef.name],
         );
       } catch {
         continue;
       }
     }
-    if (!(await projectFileExists(cwd, parsed.data.instruction_filename))) {
+    if (!(await projectFileExists(cwd, profile.instruction_filename))) {
       issues.push({
         code: "ADAPTER_MISSING",
         severity: "warning",
-        message: `Agent "${parsed.data.name}" is enabled but "${parsed.data.instruction_filename}" does not exist — run "code-pact adapter install ${agentRef.name}"`,
+        message: `Agent "${agentRef.name}" is enabled but "${profile.instruction_filename}" does not exist — run "code-pact adapter install ${agentRef.name}"`,
       });
     }
   }
@@ -1048,16 +1111,17 @@ async function checkAdapterStale(
 ): Promise<void> {
   for (const agentRef of project.agents) {
     if (agentRef.enabled === false) continue;
-    const profilePath = [".code-pact", agentRef.profile].join("/");
-    const result = await safeReadProjectYaml(cwd, profilePath);
-    if (!result.ok) continue; // already reported elsewhere
-    const parsed = AgentProfile.safeParse(result.data);
-    if (!parsed.success) continue;
-    if (!parsed.data.model_version) {
+    const loaded = await loadDoctorAgentProfile(
+      cwd,
+      agentRef.name,
+      agentRef.profile,
+    );
+    if (!loaded.ok) continue; // already reported elsewhere
+    if (!loaded.profile.model_version) {
       issues.push({
         code: "ADAPTER_STALE",
         severity: "warning",
-        message: `Agent "${parsed.data.name}" has no model_version set — run "code-pact adapter install ${agentRef.name} --model <version>" to pin a model (accepted: ${ACCEPTED_MODEL_VERSION_INPUTS.join(", ")})`,
+        message: `Agent "${agentRef.name}" has no model_version set — run "code-pact adapter install ${agentRef.name} --model <version>" to pin a model (accepted: ${ACCEPTED_MODEL_VERSION_INPUTS.join(", ")})`,
       });
     }
   }
@@ -1075,17 +1139,19 @@ async function checkStaleContext(
 
   for (const agentRef of project.agents) {
     // Derive context dir from agent profile
-    const profilePath = [".code-pact", agentRef.profile].join("/");
-    const result = await safeReadProjectYaml(cwd, profilePath);
-    if (!result.ok) continue;
-    const parsed = AgentProfile.safeParse(result.data);
-    if (!parsed.success) continue;
+    const loaded = await loadDoctorAgentProfile(
+      cwd,
+      agentRef.name,
+      agentRef.profile,
+    );
+    if (!loaded.ok) continue;
+    const profile = loaded.profile;
 
     let entries: string[] = [];
     try {
       const contextDir = await resolveOwnedReadPath(
         cwd,
-        parsed.data.context_dir,
+        profile.context_dir,
       );
       entries = await readdir(contextDir);
     } catch (err) {
@@ -1093,7 +1159,7 @@ async function checkStaleContext(
         (err as NodeJS.ErrnoException).code === "PATH_OUTSIDE_PROJECT" ||
         (err as NodeJS.ErrnoException).code === "PATH_NOT_OWNED"
       ) {
-        pushPathIssue(issues, parsed.data.context_dir);
+        pushPathIssue(issues, profile.context_dir);
       }
       continue;
     }
@@ -1104,7 +1170,7 @@ async function checkStaleContext(
         issues.push({
           code: "STALE_CONTEXT",
           severity: "warning",
-          message: `${parsed.data.context_dir}/${entry} exists but task "${taskId}" is not in any phase`,
+          message: `${profile.context_dir}/${entry} exists but task "${taskId}" is not in any phase`,
         });
       }
     }

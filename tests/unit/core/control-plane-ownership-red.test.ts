@@ -13,6 +13,7 @@ import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { runInit } from "../../../src/commands/init.ts";
 import { runAdapterInstall } from "../../../src/commands/adapter-install.ts";
 import { runDoctor } from "../../../src/commands/doctor.ts";
+import { runValidate } from "../../../src/commands/validate.ts";
 import { loadProject } from "../../../src/core/project.ts";
 import { resolveProjectConfigPath } from "../../../src/core/project-config-path.ts";
 
@@ -22,6 +23,8 @@ import { resolveProjectConfigPath } from "../../../src/core/project-config-path.
 // Tests:
 //   2.1 project.yaml in-project symlink → loadProject rejects, target not read
 //   2.2 doctor instruction existence oracle → .env not probed
+//   2.2b doctor/validate refuse agent profile paths outside agent-profiles/**
+//   2.2c profile identity mismatch cannot bypass adapter contract checks
 //   2.3 hook_dir oracle → .env not stat'd
 //   2.5 model profile directory symlink → CONFIG_ERROR, not empty array
 // ---------------------------------------------------------------------------
@@ -157,6 +160,102 @@ describe("2.2 doctor does not probe arbitrary instruction_filename paths", () =>
     );
     expect(withContract.length).toBeGreaterThan(0);
     expect(withContract).toEqual(withoutContract);
+  });
+});
+
+describe("2.2b doctor and validate enforce agent profile namespace ownership", () => {
+  async function pointProjectProfileAt(relPath: string): Promise<void> {
+    const projectPath = join(dir, ".code-pact", "project.yaml");
+    const project = await readFile(projectPath, "utf8");
+    await writeFile(
+      projectPath,
+      project.replace("profile: agent-profiles/claude-code.yaml", `profile: ${relPath}`),
+      "utf8",
+    );
+  }
+
+  it("doctor refuses .code-pact/state as an agent profile and does not leak model_map content", async () => {
+    await mkdir(join(dir, ".code-pact", "state"), { recursive: true });
+    await writeFile(
+      join(dir, ".code-pact", "state", "private-agent-profile.yaml"),
+      [
+        "name: claude-code",
+        "instruction_filename: CLAUDE.md",
+        "context_dir: .context/claude-code",
+        "skill_dir: .claude/skills",
+        "hook_dir: .claude/hooks",
+        "model_map:",
+        "  highest_reasoning: PRIVATE-DOCTOR-MARKER",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    await pointProjectProfileAt("state/private-agent-profile.yaml");
+
+    const result = await runDoctor(dir);
+    expect(result.issues.map(i => i.code)).toContain("ADAPTER_PROFILE_INVALID");
+    expect(JSON.stringify(result)).not.toContain("PRIVATE-DOCTOR-MARKER");
+  });
+
+  it("validate uses the same profile namespace boundary as doctor", async () => {
+    await mkdir(join(dir, ".code-pact", "state"), { recursive: true });
+    await writeFile(
+      join(dir, ".code-pact", "state", "private-agent-profile.yaml"),
+      [
+        "name: claude-code",
+        "instruction_filename: CLAUDE.md",
+        "context_dir: .context/claude-code",
+        "model_map:",
+        "  highest_reasoning: PRIVATE-VALIDATE-MARKER",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    await pointProjectProfileAt("state/private-agent-profile.yaml");
+
+    const result = await runValidate({ cwd: dir });
+    expect(result.issues.map(i => i.code)).toContain("ADAPTER_PROFILE_INVALID");
+    expect(JSON.stringify(result)).not.toContain("PRIVATE-VALIDATE-MARKER");
+  });
+});
+
+describe("2.2c profile identity mismatch cannot reintroduce instruction_filename oracle", () => {
+  it("doctor result does not reveal whether .env exists when profile.name is forged", async () => {
+    const profilePath = join(
+      dir,
+      ".code-pact",
+      "agent-profiles",
+      "claude-code.yaml",
+    );
+    await writeFile(
+      profilePath,
+      [
+        "name: attacker",
+        "instruction_filename: .env",
+        "context_dir: .context/attacker",
+        "model_map: {}",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const resultWithoutEnv = await runDoctor(dir);
+    await writeFile(join(dir, ".env"), "SECRET=identity-bypass\n", "utf8");
+    const resultWithEnv = await runDoctor(dir);
+
+    expect(resultWithoutEnv.issues.map(i => i.code)).toContain(
+      "ADAPTER_PROFILE_INVALID",
+    );
+    expect(resultWithEnv.issues.map(i => i.code)).toContain(
+      "ADAPTER_PROFILE_INVALID",
+    );
+    expect(
+      resultWithoutEnv.issues.filter(i => i.code === "ADAPTER_MISSING"),
+    ).toEqual([]);
+    expect(resultWithEnv.issues.filter(i => i.code === "ADAPTER_MISSING")).toEqual(
+      [],
+    );
+    expect(JSON.stringify(resultWithEnv)).not.toContain("identity-bypass");
   });
 });
 
