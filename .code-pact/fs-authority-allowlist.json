@@ -48,5 +48,20 @@
     "operation": "rm",
     "authority": "explicit_user_input",
     "reason": "sandbox is a temporary directory created by the tutorial in the system temp dir, not a project path"
+  },
+  "src/core/adapters/staged-write.ts#stage": {
+    "operation": "atomicWriteText",
+    "authority": "symlink_free_contained",
+    "reason": "tempPath is derived from the authority-checked path parameter passed from adapter-install.ts/adapter-upgrade.ts write loops; atomicWriteText creates parent dirs and the temp file with exclusive create semantics"
+  },
+  "src/core/adapters/staged-write.ts#commit": {
+    "operation": "rename",
+    "authority": "symlink_free_contained",
+    "reason": "s.tempPath and s.finalPath are both derived from the authority-checked path parameter passed to stage()"
+  },
+  "src/core/adapters/staged-write.ts#rollback": {
+    "operation": "unlink",
+    "authority": "symlink_free_contained",
+    "reason": "s.tempPath is derived from the authority-checked path parameter; rollback best-effort cleans up staged temp files"
   }
 }

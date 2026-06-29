@@ -796,9 +796,9 @@ describe("adapter malformed / schema-invalid manifest — CLI error mapping (sec
 });
 
 describe("adapter placeholder dir symlink escape — CLI error mapping (security)", () => {
-  // The context_dir / hook_dir placeholder `mkdir` routes through
-  // resolveWithinProject, so a `.context` / `.claude` symlinked OUTSIDE the
-  // project cannot make `mkdir` (or any later file write) escape the project.
+  // The context_dir / hook_dir symlink-free resolution routes through
+  // resolveSymlinkFreeProjectPath, so a `.context` / `.claude` symlinked OUTSIDE
+  // the project cannot make any later file write escape the project.
   // The refusal maps to CONFIG_ERROR (exit 2), and nothing lands outside.
   async function linkDirOutside(rel: string): Promise<string> {
     const outside = await mkdtemp(
@@ -1290,7 +1290,7 @@ describe("adapter wrong-type write path — CLI error mapping (security)", () =>
 
   it("install --model with context_dir occupied by a regular file → CONFIG_ERROR, no pin", async () => {
     const before = await readFile(join(dir, profileRel), "utf8");
-    // Plant a regular file exactly where context_dir's mkdir expects a directory.
+    // Plant a regular file exactly where context_dir should be a directory.
     await mkdir(join(dir, ".context"), { recursive: true });
     await writeFile(join(dir, CONTEXT_DIR), "not a directory", "utf8");
     const res = runCli([
@@ -1317,6 +1317,7 @@ describe("adapter wrong-type write path — CLI error mapping (security)", () =>
     expect(runCli(["adapter", "install", "claude-code"]).status).toBe(0);
     const before = await readFile(join(dir, profileRel), "utf8");
     await rm(join(dir, CONTEXT_DIR), { recursive: true, force: true });
+    await mkdir(join(dir, ".context"), { recursive: true });
     await writeFile(join(dir, CONTEXT_DIR), "not a directory", "utf8");
     const res = runCli([
       "adapter",

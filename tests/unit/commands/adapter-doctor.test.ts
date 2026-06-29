@@ -960,6 +960,8 @@ describe("adapter doctor — in-project symlinked context_dir is refused", () =>
     });
 
     // Replace .context/claude-code with an in-project symlink to a sibling dir.
+    // context_dir is no longer pre-created by install, so ensure .context exists.
+    await mkdir(join(dir, ".context"), { recursive: true });
     const symlinkTarget = join(dir, ".context-alias");
     await mkdir(symlinkTarget, { recursive: true });
     await writeFile(

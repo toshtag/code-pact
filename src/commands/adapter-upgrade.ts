@@ -1,5 +1,5 @@
-import { mkdir, rm, stat } from "node:fs/promises";
-import { join, dirname } from "node:path";
+import { rm, stat } from "../core/project-fs/index.ts";
+import { join } from "node:path";
 import { AgentProfile } from "../core/schemas/agent-profile.ts";
 import { ModelProfile } from "../core/schemas/model-profile.ts";
 import { adapterRegistry } from "../core/adapters/index.ts";
@@ -12,7 +12,7 @@ import type { DesiredAdapterFileRole } from "../core/adapters/types.ts";
 import {
   assertAdapterWritePathsContained,
   assertSafeRelativePath,
-  authorizedPathExists,
+  checkDynamicProvenance,
   classifyFileState,
   decideAction,
   readAuthorizedRegularFileMaybe,
@@ -21,6 +21,7 @@ import {
   type FileAction,
   type LocalFileState,
 } from "../core/adapters/file-state.ts";
+import { provenanceContentMatches } from "../core/adapters/provenance.ts";
 import { loadModelProfilesStrict } from "../core/models/load-model-profiles.ts";
 import { authorizeAdapterMutationPath } from "../core/adapters/manifest-file-ownership.ts";
 import {
@@ -39,7 +40,7 @@ import type {
   ManifestFile,
   ProfileFingerprint,
 } from "../core/schemas/adapter-manifest.ts";
-import { atomicWriteText } from "../io/atomic-text.ts";
+import { FileTransaction } from "../core/adapters/staged-write.ts";
 import { resolveSymlinkFreeProjectPath } from "../core/path-safety.ts";
 import { readPackageVersion } from "../lib/package-version.ts";
 import {
@@ -246,7 +247,9 @@ export async function runAdapterUpgrade(
     { path: manifestRelPath(agentName), kind: "file" },
   ]);
 
-  // Resolve context_dir symlink-free BEFORE the model pin.
+  // Resolve context_dir symlink-free BEFORE the model pin. context_dir is
+  // NOT pre-created: the atomic write path creates it lazily when the first
+  // context pack is written.
   let contextDirAbs: string;
   try {
     contextDirAbs = await resolveSymlinkFreeProjectPath(
@@ -261,8 +264,8 @@ export async function runAdapterUpgrade(
     throw e;
   }
 
-  // Type check: if context_dir already exists as a non-directory, the mkdir
-  // would EEXIST after the model pin. Catch it here — before any side effect.
+  // Type check: if context_dir already exists as a non-directory, a later
+  // context pack write would fail. Catch it here — before any side effect.
   try {
     const s = await stat(contextDirAbs);
     if (!s.isDirectory()) {
@@ -345,16 +348,10 @@ export async function runAdapterUpgrade(
       action = "refuse";
       reason = "symlink_traversal";
     } else if (authority.kind === "dynamic_write") {
-      // Dynamic paths may be CREATED, but an existing target is never read or
-      // hashed. An existing dynamic file is preserved (warn) — not refused —
-      // so the rest of the upgrade can proceed (static writes, model pin,
-      // manifest refresh).
-      if (await authorizedPathExists(absPath, desired.path)) {
-        local = "unverifiable";
-        desiredState = "unverifiable";
-        action = "warn";
-        reason = "dynamic_file_unverifiable";
-      } else {
+      // Dynamic paths may be CREATED, but an existing target's ownership is
+      // checked via provenance marker (first line only — never full content).
+      const provStatus = await checkDynamicProvenance(absPath);
+      if (provStatus.kind === "missing") {
         const cls = classifyFileState({
           manifestHash,
           diskHash: null,
@@ -369,6 +366,36 @@ export async function runAdapterUpgrade(
           force: force || (regenSkills && desired.role === "skill"),
           acceptModified,
         });
+      } else if (provStatus.kind === "ours") {
+        // We generated this file. Check if it's current.
+        if (provenanceContentMatches(provStatus.info, desired.content)) {
+          local = "managed-clean";
+          desiredState = "current";
+          action = decideAction({
+            local: "managed-clean",
+            desired: "current",
+            mode: mode === "check" ? "upgrade-check" : "upgrade-write",
+            force: force || (regenSkills && desired.role === "skill"),
+            acceptModified,
+          });
+        } else {
+          // Provenance is ours but content is stale — safe to update.
+          local = "managed-clean";
+          desiredState = "stale";
+          action = decideAction({
+            local: "managed-clean",
+            desired: "stale",
+            mode: mode === "check" ? "upgrade-check" : "upgrade-write",
+            force: force || (regenSkills && desired.role === "skill"),
+            acceptModified,
+          });
+        }
+      } else {
+        // foreign / empty / unreadable: preserve without reading full content.
+        local = "unverifiable";
+        desiredState = "unverifiable";
+        action = "warn";
+        reason = "dynamic_file_unverifiable";
       }
     } else {
       const diskContent = await readAuthorizedRegularFileMaybe(
@@ -587,39 +614,47 @@ export async function runAdapterUpgrade(
     modelVersionInput: modelVersion,
   });
 
-  // Create context_dir using the symlink-free resolved path.
-  await mkdir(contextDirAbs, { recursive: true });
-
-  for (const item of desiredApply) {
-    if (
-      item.action === "write" ||
-      item.action === "replace_unmanaged" ||
-      item.action === "update"
-    ) {
-      const writeAuthority = await authorizeAdapterMutationPath(
-        cwd,
-        descriptor,
-        item.desired.path,
-        {
-          expectedRole: item.desired.role,
-          allowDynamicWrite: true,
-        },
-      );
+  // Stage all desired-file writes in a single transaction so a mid-loop
+  // failure does not leave partial state on disk.
+  const tx = new FileTransaction();
+  try {
+    for (const item of desiredApply) {
       if (
-        writeAuthority.kind !== "owned" &&
-        writeAuthority.kind !== "dynamic_write"
+        item.action === "write" ||
+        item.action === "replace_unmanaged" ||
+        item.action === "update"
       ) {
-        const err = new Error(
-          `Refusing to write adapter file "${item.desired.path}" without path authority.`,
+        const writeAuthority = await authorizeAdapterMutationPath(
+          cwd,
+          descriptor,
+          item.desired.path,
+          {
+            expectedRole: item.desired.role,
+            allowDynamicWrite: true,
+          },
         );
-        (err as NodeJS.ErrnoException).code = "CONFIG_ERROR";
-        throw err;
+        if (
+          writeAuthority.kind !== "owned" &&
+          writeAuthority.kind !== "dynamic_write"
+        ) {
+          const err = new Error(
+            `Refusing to write adapter file "${item.desired.path}" without path authority.`,
+          );
+          (err as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+          throw err;
+        }
+        await tx.stage(writeAuthority.absPath, item.desired.content);
       }
-      const absPath = writeAuthority.absPath;
-      await mkdir(dirname(absPath), { recursive: true });
-      await atomicWriteText(absPath, item.desired.content);
     }
+    await tx.commit();
+  } catch (err) {
+    await tx.rollback();
+    throw err;
   }
+
+  // Prune orphans only after all writes are committed. A prune failure
+  // after writes are committed is non-fatal to the transaction — the
+  // manifest write below will still reflect the new desired file set.
   for (const item of orphanApply) {
     if (item.action === "prune") {
       const pruneAuthority = await authorizeAdapterMutationPath(

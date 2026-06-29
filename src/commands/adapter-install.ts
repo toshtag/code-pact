@@ -1,5 +1,5 @@
-import { mkdir, stat } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { stat } from "../core/project-fs/index.ts";
+import { join } from "node:path";
 import { AgentProfile } from "../core/schemas/agent-profile.ts";
 import { ModelProfile } from "../core/schemas/model-profile.ts";
 import { adapterRegistry } from "../core/adapters/index.ts";
@@ -9,12 +9,13 @@ import type { DesiredAdapterFileRole } from "../core/adapters/types.ts";
 import {
   assertAdapterWritePathsContained,
   assertSafeRelativePath,
-  authorizedPathExists,
+  checkDynamicProvenance,
   classifyFileState,
   decideAction,
   readAuthorizedRegularFileMaybe,
   type FileAction,
 } from "../core/adapters/file-state.ts";
+import { provenanceContentMatches } from "../core/adapters/provenance.ts";
 import { loadModelProfilesStrict } from "../core/models/load-model-profiles.ts";
 import { authorizeAdapterMutationPath } from "../core/adapters/manifest-file-ownership.ts";
 import {
@@ -34,7 +35,7 @@ import type {
   ManifestFile,
   ProfileFingerprint,
 } from "../core/schemas/adapter-manifest.ts";
-import { atomicWriteText } from "../io/atomic-text.ts";
+import { FileTransaction } from "../core/adapters/staged-write.ts";
 import { resolveSymlinkFreeProjectPath } from "../core/path-safety.ts";
 import { readPackageVersion } from "../lib/package-version.ts";
 import type { Locale } from "../i18n/index.ts";
@@ -252,9 +253,10 @@ export async function runAdapterInstall(
   ]);
 
   // Resolve context_dir symlink-free BEFORE the model pin. context_dir is
-  // schema-constrained to .context/** and safe to pre-create, but a symlinked
-  // .context must be caught here — before any persistent side effect — so a
-  // doomed install never strands a pinned model_version.
+  // schema-constrained to .context/** and a symlinked .context must be caught
+  // here — before any persistent side effect — so a doomed install never
+  // strands a pinned model_version. context_dir is NOT pre-created: the
+  // atomic write path creates it lazily when the first context pack is written.
   let contextDirAbs: string;
   try {
     contextDirAbs = await resolveSymlinkFreeProjectPath(
@@ -270,8 +272,8 @@ export async function runAdapterInstall(
   }
 
   // Type check: if context_dir already exists as a non-directory (e.g. a
-  // regular file planted by a hostile repo), the mkdir would EEXIST after
-  // the model pin. Catch it here — before any persistent side effect.
+  // regular file planted by a hostile repo), a later context pack write would
+  // fail. Catch it here — before any persistent side effect.
   try {
     const s = await stat(contextDirAbs);
     if (!s.isDirectory()) {
@@ -350,16 +352,25 @@ export async function runAdapterInstall(
       action = "refuse";
       refuseReason = "symlink_traversal";
     } else if (authority.kind === "dynamic_write") {
-      // Dynamic paths may be CREATED, but an existing target is never read or
-      // hashed: the shared namespace cannot prove ownership of existing bytes.
-      // An existing dynamic file is preserved (warn) — not refused — so the
-      // rest of the install can proceed (static writes, model pin, manifest).
-      if (await authorizedPathExists(absPath, desired.path)) {
+      // Dynamic paths may be CREATED, but an existing target's ownership is
+      // checked via provenance marker (first line only — never full content).
+      const provStatus = await checkDynamicProvenance(absPath);
+      if (provStatus.kind === "missing") {
+        action = "write";
+      } else if (provStatus.kind === "ours") {
+        // We generated this file. Check if it's current.
+        if (provenanceContentMatches(provStatus.info, desired.content)) {
+          // Provenance matches — adopt without writing.
+          action = "adopt";
+        } else {
+          // Provenance is ours but content is stale — safe to update.
+          action = "update";
+        }
+      } else {
+        // foreign / empty / unreadable: preserve without reading full content.
         action = "warn";
         warningReason = "dynamic_file_unverifiable";
         preserved.push(absPath);
-      } else {
-        action = "write";
       }
     } else {
       const diskContent = await readAuthorizedRegularFileMaybe(
@@ -465,41 +476,43 @@ export async function runAdapterInstall(
     modelVersionInput: modelVersion,
   });
 
-  // Create context_dir using the symlink-free resolved path.
-  await mkdir(contextDirAbs, { recursive: true });
-
-  for (const planned of plannedFiles) {
-    if (
-      planned.action === "write" ||
-      planned.action === "replace_unmanaged" ||
-      planned.action === "update"
-    ) {
-      const writeAuthority = await authorizeAdapterMutationPath(
-        cwd,
-        descriptor,
-        planned.desired.path,
-        {
-          expectedRole: planned.desired.role,
-          allowDynamicWrite: true,
-        },
-      );
+  const tx = new FileTransaction();
+  try {
+    for (const planned of plannedFiles) {
       if (
-        writeAuthority.kind !== "owned" &&
-        writeAuthority.kind !== "dynamic_write"
+        planned.action === "write" ||
+        planned.action === "replace_unmanaged" ||
+        planned.action === "update"
       ) {
-        const err = new Error(
-          `Refusing to write adapter file "${planned.desired.path}" without path authority.`,
+        const writeAuthority = await authorizeAdapterMutationPath(
+          cwd,
+          descriptor,
+          planned.desired.path,
+          {
+            expectedRole: planned.desired.role,
+            allowDynamicWrite: true,
+          },
         );
-        (err as NodeJS.ErrnoException).code = "CONFIG_ERROR";
-        throw err;
+        if (
+          writeAuthority.kind !== "owned" &&
+          writeAuthority.kind !== "dynamic_write"
+        ) {
+          const err = new Error(
+            `Refusing to write adapter file "${planned.desired.path}" without path authority.`,
+          );
+          (err as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+          throw err;
+        }
+        await tx.stage(writeAuthority.absPath, planned.desired.content);
+        created.push(writeAuthority.absPath);
+      } else if (planned.action === "adopt") {
+        adopted.push(planned.absPath);
       }
-      const absPath = writeAuthority.absPath;
-      await mkdir(dirname(absPath), { recursive: true });
-      await atomicWriteText(absPath, planned.desired.content);
-      created.push(absPath);
-    } else if (planned.action === "adopt") {
-      adopted.push(planned.absPath);
     }
+    await tx.commit();
+  } catch (err) {
+    await tx.rollback();
+    throw err;
   }
 
   const manifest: AdapterManifest = {
