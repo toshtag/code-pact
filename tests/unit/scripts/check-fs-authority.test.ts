@@ -274,4 +274,115 @@ describe("check-fs-authority", () => {
     expect(result.ok).toBe(false);
     expect(result.output).toContain("stat() called on non-authority path");
   });
+
+  it("rejects resolveWithinProject as containment-only authority", async () => {
+    const result = await runFixture([
+      'import { stat } from "node:fs/promises";',
+      'import { resolveWithinProject } from "../../src/core/path-safety.ts";',
+      "",
+      "async function f(profile: any, cwd: string) {",
+      "  const p = await resolveWithinProject(cwd, profile.instruction_filename);",
+      "  await stat(p);",
+      "}",
+      "",
+    ]);
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain("stat() called on non-authority path");
+  });
+
+  it("rejects generic resolveOwnedReadPath as semantic authority", async () => {
+    const result = await runFixture([
+      'import { readFile } from "node:fs/promises";',
+      'import { resolveOwnedReadPath } from "../../src/core/project-fs/owned-read.ts";',
+      "",
+      "async function f(profile: any, cwd: string) {",
+      "  const p = await resolveOwnedReadPath(cwd, profile.instruction_filename);",
+      '  await readFile(p, "utf8");',
+      "}",
+      "",
+    ]);
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain("readFile() called on non-authority path");
+  });
+
+  it("intersects branch capabilities so read/write merge cannot write", async () => {
+    const result = await runFixture([
+      'import { writeFile } from "node:fs/promises";',
+      'import { resolveAgentProfilePath, resolveOwnedAgentProfilePath } from "../../src/core/agent-profile-path.ts";',
+      "",
+      "async function f(cwd: string, cond: boolean) {",
+      "  let p: string;",
+      "  if (cond) {",
+      '    p = await resolveOwnedAgentProfilePath(cwd, "claude-code");',
+      "  } else {",
+      '    p = await resolveAgentProfilePath(cwd, "claude-code");',
+      "  }",
+      '  await writeFile(p, "x");',
+      "}",
+      "",
+    ]);
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain("writeFile() called on non-authority path");
+  });
+
+  it("checks rename destination authority separately", async () => {
+    const result = await runFixture([
+      'import { rename } from "node:fs/promises";',
+      'import { resolveOwnedAgentProfilePath } from "../../src/core/agent-profile-path.ts";',
+      "",
+      "async function f(cwd: string, profile: any) {",
+      '  const src = await resolveOwnedAgentProfilePath(cwd, "claude-code");',
+      "  await rename(src, profile.instruction_filename);",
+      "}",
+      "",
+    ]);
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain("rename() called on non-authority path");
+  });
+
+  it("does not exempt nested functions that reuse trusted import names", async () => {
+    const result = await runFixture([
+      'import { readFile } from "node:fs/promises";',
+      'import { resolveAgentProfilePath } from "../../src/core/agent-profile-path.ts";',
+      "",
+      "async function outer(profile: any) {",
+      "  async function resolveAgentProfilePath() {",
+      '    await readFile(profile.instruction_filename, "utf8");',
+      "  }",
+      "  await resolveAgentProfilePath();",
+      "}",
+      "",
+    ]);
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain("readFile() called on non-authority path");
+  });
+
+  it("rejects symlink as a filesystem sink", async () => {
+    const result = await runFixture([
+      'import { symlink } from "node:fs/promises";',
+      "",
+      "async function f(profile: any) {",
+      '  await symlink("/etc/passwd", profile.instruction_filename);',
+      "}",
+      "",
+    ]);
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain("symlink() called on non-authority path");
+  });
+
+  it("allows rename and copy when both path arguments have authority", async () => {
+    const result = await runFixture([
+      'import { copyFile, rename } from "node:fs/promises";',
+      'import { resolveOwnedAgentProfilePath } from "../../src/core/agent-profile-path.ts";',
+      "",
+      "async function f(cwd: string) {",
+      '  const src = await resolveOwnedAgentProfilePath(cwd, "claude-code");',
+      '  const dst = await resolveOwnedAgentProfilePath(cwd, "codex");',
+      "  await copyFile(src, dst);",
+      "  await rename(src, dst);",
+      "}",
+      "",
+    ]);
+    expect(result.ok).toBe(true);
+  });
 });

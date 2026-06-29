@@ -44,11 +44,18 @@
     "authority": "explicit_user_input",
     "reason": "inputPath is explicitly selected by the user through the phase import command"
   },
-  "src/commands/tutorial.ts#runTutorial": {
-    "operation": "rm",
-    "authority": "explicit_user_input",
-    "reason": "sandbox is a command-created temporary tutorial directory outside the project authority model"
-  },
+  "src/commands/tutorial.ts#runTutorial": [
+    {
+      "operation": "mkdtemp",
+      "authority": "explicit_user_input",
+      "reason": "sandbox is a command-created temporary tutorial directory under the user-selected sandbox parent or OS temp directory"
+    },
+    {
+      "operation": "rm",
+      "authority": "explicit_user_input",
+      "reason": "sandbox is a command-created temporary tutorial directory outside the project authority model"
+    }
+  ],
   "src/commands/adapter-doctor.ts#readProjectFileForDoctor": [
     {
       "operation": "stat",
@@ -93,10 +100,57 @@
       "reason": "parent path is derived from the validated decision-ref target and used only for parent directory classification"
     }
   ],
-  "src/commands/doctor.ts#checkPhases": {
+  "src/commands/doctor.ts#checkPhases": [
+    {
+      "operation": "readdir",
+      "authority": "symlink_free_contained",
+      "reason": "phase directory is the fixed design/phases namespace resolved symlink-free before orphan detection"
+    },
+    {
+      "operation": "access",
+      "authority": "symlink_free_contained",
+      "reason": "phase refs are roadmap/schema-selected project paths resolved symlink-free before existence checking"
+    }
+  ],
+  "src/commands/doctor.ts#safeReadProjectYaml": {
+    "operation": "readFile",
+    "authority": "symlink_free_contained",
+    "reason": "path is resolved through the doctor-owned project namespace before YAML parsing"
+  },
+  "src/commands/doctor.ts#projectFileExists": {
+    "operation": "access",
+    "authority": "symlink_free_contained",
+    "reason": "path is a doctor-selected project file resolved symlink-free before existence checking"
+  },
+  "src/commands/doctor.ts#checkProgressLog": {
+    "operation": "readFile",
+    "authority": "symlink_free_contained",
+    "reason": "progress log path is a fixed .code-pact/state path resolved symlink-free before parsing"
+  },
+  "src/commands/doctor.ts#checkModelProfiles": {
     "operation": "readdir",
     "authority": "symlink_free_contained",
-    "reason": "phase directory is the fixed design/phases namespace resolved symlink-free before orphan detection"
+    "reason": "model profile directory is a fixed .code-pact/model-profiles namespace resolved symlink-free before listing"
+  },
+  "src/commands/doctor.ts#checkBakFiles": {
+    "operation": "readdir",
+    "authority": "symlink_free_contained",
+    "reason": "backup-file scan lists fixed project namespaces resolved symlink-free before inspection"
+  },
+  "src/commands/doctor.ts#checkLocalGitignored": {
+    "operation": "readFile",
+    "authority": "symlink_free_contained",
+    "reason": ".gitignore is a fixed project file resolved symlink-free before reading"
+  },
+  "src/commands/doctor.ts#checkConstitutionPlaceholder": {
+    "operation": "readFile",
+    "authority": "symlink_free_contained",
+    "reason": "constitution path is a fixed design/constitution.md file resolved symlink-free before placeholder detection"
+  },
+  "src/commands/doctor.ts#checkStaleContext": {
+    "operation": "readdir",
+    "authority": "symlink_free_contained",
+    "reason": "context directory is profile-constrained and resolved symlink-free before stale file detection"
   },
   "src/commands/init.ts#assertInitEntryType": {
     "operation": "lstat",
@@ -149,6 +203,11 @@
       "reason": "brief path is resolved through the plan-brief output policy before writing the generated brief"
     }
   ],
+  "src/commands/plan-brief.ts#loadBriefFromFile": {
+    "operation": "readFile",
+    "authority": "explicit_user_input",
+    "reason": "brief source file is explicitly supplied by the user through the command input option"
+  },
   "src/commands/plan-constitution.ts#runPlanConstitution": [
     {
       "operation": "readFile",
@@ -161,6 +220,16 @@
       "reason": "constitution path is the fixed design/constitution.md target resolved symlink-free before writing"
     }
   ],
+  "src/commands/plan-adopt.ts#runPlanAdopt": {
+    "operation": "readFile",
+    "authority": "explicit_user_input",
+    "reason": "--from is explicitly supplied by the user and resolved with containment before reading"
+  },
+  "src/commands/plan-constitution.ts#loadConstitutionFromFile": {
+    "operation": "readFile",
+    "authority": "explicit_user_input",
+    "reason": "constitution source file is explicitly supplied by the user through the command input option"
+  },
   "src/commands/progress.ts#loadBaseline": {
     "operation": "readFile",
     "authority": "symlink_free_contained",

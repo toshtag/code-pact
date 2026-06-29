@@ -71,6 +71,17 @@ const FS_FUNCTIONS = new Set([
   "rename",
   "copyFile",
   "cp",
+  "symlink",
+  "link",
+  "readlink",
+  "realpath",
+  "mkdtemp",
+  "chmod",
+  "lchmod",
+  "chown",
+  "lchown",
+  "utimes",
+  "lutimes",
   "open",
   "truncate",
   "stat",
@@ -89,6 +100,8 @@ const READLIKE_FS_FUNCTIONS = new Set([
   "opendir",
   "watch",
   "access",
+  "readlink",
+  "realpath",
 ]);
 
 const WRITELIKE_FS_FUNCTIONS = new Set([
@@ -101,9 +114,64 @@ const WRITELIKE_FS_FUNCTIONS = new Set([
   "rename",
   "copyFile",
   "cp",
+  "symlink",
+  "link",
+  "mkdtemp",
+  "chmod",
+  "lchmod",
+  "chown",
+  "lchown",
+  "utimes",
+  "lutimes",
 ]);
 
 const DELETELIKE_FS_FUNCTIONS = new Set(["rmdir", "rm", "unlink"]);
+
+function capabilitiesForKind(kind) {
+  if (kind === "explicit_user_input") {
+    return { read: true, write: true, delete: true, explicitUserInput: true };
+  }
+  if (kind === "owned_write") {
+    return { read: true, write: true, delete: true, explicitUserInput: false };
+  }
+  if (kind === "owned_delete") {
+    return { read: true, write: false, delete: true, explicitUserInput: false };
+  }
+  if (kind === "owned_read") {
+    return { read: true, write: false, delete: false, explicitUserInput: false };
+  }
+  return { read: false, write: false, delete: false, explicitUserInput: false };
+}
+
+function kindForCapabilities(caps) {
+  if (!caps.read && !caps.write && !caps.delete) return "unauthorized";
+  if (caps.explicitUserInput && caps.read && caps.write && caps.delete) {
+    return "explicit_user_input";
+  }
+  if (caps.read && caps.write && caps.delete) return "owned_write";
+  if (caps.read && !caps.write && caps.delete) return "owned_delete";
+  if (caps.read && !caps.write && !caps.delete) return "owned_read";
+  return "unauthorized";
+}
+
+function intersectKinds(a, b) {
+  const ac = capabilitiesForKind(a);
+  const bc = capabilitiesForKind(b);
+  return kindForCapabilities({
+    read: ac.read && bc.read,
+    write: ac.write && bc.write,
+    delete: ac.delete && bc.delete,
+    explicitUserInput: ac.explicitUserInput && bc.explicitUserInput,
+  });
+}
+
+function isSinkAuthorizedForCapability(kind, capability) {
+  const caps = capabilitiesForKind(kind);
+  if (capability === "read") return caps.read;
+  if (capability === "write") return caps.write;
+  if (capability === "delete") return caps.delete;
+  return false;
+}
 
 function isSinkAuthorized(kind, fnName) {
   if (kind === "explicit_user_input") return true;
@@ -130,13 +198,11 @@ const AUTHORITY_EXPORTS = new Map([
     new Map([
       ["resolveSymlinkFreeProjectPath", "symlink_free_contained"],
       ["resolveSymlinkFreeProjectPathSync", "symlink_free_contained"],
-      ["resolveWithinProject", "explicit_user_input"],
-      ["resolveWithinProjectSync", "explicit_user_input"],
     ]),
   ],
   [
     join("src", "core", "project-fs", "owned-read.ts"),
-    new Map([["resolveOwnedReadPath", "owned_read"]]),
+    new Map([]),
   ],
   [
     join("src", "core", "project-config-path.ts"),
@@ -308,16 +374,7 @@ function getVarKind(scope, name) {
 
 function mergeKind(a, b) {
   if (a === b) return a;
-  // Both must be sink-authorized for the merge to be sink-authorized
-  if (SINK_AUTHORIZED_KINDS.has(a) && SINK_AUTHORIZED_KINDS.has(b)) {
-    // If they're different authorized kinds, pick the more restrictive
-    // (owned_* is more restrictive than symlink_free_contained)
-    if (a === "symlink_free_contained" || b === "symlink_free_contained") {
-      return "symlink_free_contained";
-    }
-    return a; // both are owned_*, pick either
-  }
-  return "unauthorized";
+  return intersectKinds(a, b);
 }
 
 function mergeScopes(base, left, right) {
@@ -524,22 +581,44 @@ function isAuthorityExpression(node, scope, trustedImports, localWrappers) {
   return "unauthorized";
 }
 
-function isInsideTrustedAuthorityDefinition(node, trustedImports) {
-  let current = node;
-  while (current) {
-    if (
-      (ts.isFunctionDeclaration(current) ||
-        ts.isFunctionExpression(current) ||
-        ts.isArrowFunction(current) ||
-        ts.isMethodDeclaration(current)) &&
-      current.name &&
-      trustedImports.has(current.name.text)
-    ) {
-      return true;
-    }
-    current = current.parent;
+function openRequiredCapability(node) {
+  const flags = node.arguments[1];
+  if (!flags) return "read";
+  const text = flags.getText().replaceAll(/['"`]/g, "");
+  if (/[wa+]/.test(text)) return "write";
+  if (text.includes("x")) return "write";
+  return "read";
+}
+
+function requiredPathArguments(fnName, node) {
+  if (fnName === "rename") {
+    return [
+      { index: 0, capability: "delete" },
+      { index: 1, capability: "write" },
+    ];
   }
-  return false;
+  if (fnName === "copyFile" || fnName === "cp" || fnName === "link") {
+    return [
+      { index: 0, capability: "read" },
+      { index: 1, capability: "write" },
+    ];
+  }
+  if (fnName === "symlink") {
+    return [{ index: 1, capability: "write" }];
+  }
+  if (fnName === "open") {
+    return [{ index: 0, capability: openRequiredCapability(node) }];
+  }
+  if (READLIKE_FS_FUNCTIONS.has(fnName)) {
+    return [{ index: 0, capability: "read" }];
+  }
+  if (WRITELIKE_FS_FUNCTIONS.has(fnName)) {
+    return [{ index: 0, capability: "write" }];
+  }
+  if (DELETELIKE_FS_FUNCTIONS.has(fnName)) {
+    return [{ index: 0, capability: "delete" }];
+  }
+  return [{ index: 0, capability: "read" }];
 }
 
 // ---------------------------------------------------------------------------
@@ -778,16 +857,18 @@ function checkFile(filePath, allowlist, allowlistUsed) {
       if (fnName && FS_FUNCTIONS.has(fnName)) {
         const line =
           sourceFile.getLineAndCharacterOfPosition(node.getStart()).line + 1;
-        if (!isInsideTrustedAuthorityDefinition(node, trustedImports)) {
-          const firstArg = node.arguments[0];
-          if (firstArg) {
+        for (const required of requiredPathArguments(fnName, node)) {
+          const arg = node.arguments[required.index];
+          if (arg) {
             const argKind = isAuthorityExpression(
-              firstArg,
+              arg,
               scope,
               trustedImports,
               localWrappers,
             );
-            if (!isSinkAuthorized(argKind, fnName)) {
+            if (
+              !isSinkAuthorizedForCapability(argKind, required.capability)
+            ) {
               // Check allowlist
               const enclosingFn = findEnclosingFunctionName(node);
               const aKey = allowlistKey(relFile, enclosingFn ?? "*");
@@ -797,7 +878,10 @@ function checkFile(filePath, allowlist, allowlistUsed) {
                   aEntry =>
                     aEntry.operation === fnName &&
                     (ALLOWLIST_AUTHORIZED_KINDS.has(aEntry.authority) ||
-                      isSinkAuthorized(aEntry.authority, fnName)) &&
+                      isSinkAuthorizedForCapability(
+                        aEntry.authority,
+                        required.capability,
+                      )) &&
                     typeof aEntry.reason === "string" &&
                     aEntry.reason.length > 0,
                 );
@@ -809,7 +893,7 @@ function checkFile(filePath, allowlist, allowlistUsed) {
                     line,
                     fn: fnName,
                     key: aKey,
-                    arg: firstArg.getText(sourceFile).slice(0, 80),
+                    arg: arg.getText(sourceFile).slice(0, 80),
                     text: sourceFile.text.split("\n")[line - 1]?.trim() ?? "",
                   });
                 }
@@ -818,7 +902,7 @@ function checkFile(filePath, allowlist, allowlistUsed) {
                   line,
                   fn: fnName,
                   key: aKey,
-                  arg: firstArg.getText(sourceFile).slice(0, 80),
+                  arg: arg.getText(sourceFile).slice(0, 80),
                   text: sourceFile.text.split("\n")[line - 1]?.trim() ?? "",
                 });
               }
