@@ -164,6 +164,7 @@ const TRUSTED_FS_MODULES = new Set([
   join("src", "core", "adapters", "manifest.ts"),
   join("src", "core", "adapters", "manifest-file-ownership.ts"),
   join("src", "core", "adapters", "file-state.ts"),
+  join("src", "core", "adapters", "staged-write.ts"),
   join("src", "core", "progress", "io.ts"),
   join("src", "core", "progress", "events-io.ts"),
   join("src", "core", "progress", "all-sources.ts"),
