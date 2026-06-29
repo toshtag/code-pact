@@ -373,7 +373,8 @@ async function cmdAdapterUpgrade(
         for (const w of dynamicWarnings)
           process.stderr.write(`  ${w.relPath}\n`);
         process.stderr.write(
-          `Inspect them by hand if needed. They will not be overwritten automatically.\n`,
+          `Review them by hand. To regenerate any of them, move or delete the file, then re-run\n` +
+            `  code-pact adapter upgrade ${agentName} --write\n`,
         );
       }
 
