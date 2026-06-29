@@ -247,7 +247,7 @@ ids require an RFC and an entry in `src/core/adapters/conformance-spec.ts`.
 | `cannot_switch_model_fallback_present` | The guidance tells the agent to report a limitation when it `cannot switch model` rather than ignore the recommendation |
 | `file_checksum_match` | Per-file: on-disk sha256 equals manifest |
 | `adapter_file_path_unowned` | Manifest entry names a path this adapter could not have generated (narrow built-in read authority, not the broad write namespace — so `.claude/skills/private.md` is refused), or one resolving through a symlink. Target is not read (no `actual_sha256`, no heading inspection) — forged-manifest content/SHA-oracle guard. Always `required` |
-| `file_checksum_skipped_unverifiable` | Manifest entry is a dynamic skill in the shared `.claude/skills/` namespace — read-ownership cannot be proven, so it is not read/checksummed. `advisory` (use `adapter doctor` to verify dynamic skills) |
+| `file_checksum_skipped_unverifiable` | Manifest entry is a dynamic skill in the shared `.claude/skills/` namespace — read-ownership cannot be proven, so it is not read/checksummed. `advisory`; dynamic files are create-once handoff outputs, so review or delete/regenerate them explicitly when needed |
 
 **Severity.** Each check carries a `severity` of `required`
 or `advisory`. `compliant` is `true` unless a **required** check fails;
