@@ -32,7 +32,10 @@ import {
   ContextBudgetProfiles,
   type ContextBudgetProfiles as ContextBudgetProfilesType,
 } from "../schemas/agent-profile.ts";
-import { resolveAgentProfilePath } from "../agent-profile-path.ts";
+import {
+  assertAgentProfileNameMatches,
+  resolveAgentProfilePath,
+} from "../agent-profile-path.ts";
 import { readProjectTextOrNull } from "../project-read.ts";
 
 export type LoadAgentContextBudgetResult = {
@@ -75,6 +78,7 @@ export async function loadAgentContextBudget(
   let parsed;
   try {
     parsed = AgentProfile.parse(parseYaml(profileRaw) as unknown);
+    assertAgentProfileNameMatches(parsed, agentName, path);
   } catch (cause) {
     throw configError(
       `Agent profile for "${agentName}" is invalid: ${

@@ -5,7 +5,10 @@ import { loadPhase } from "../core/plan/load-phase.ts";
 import { resolvePhaseInRoadmap } from "../core/plan/resolve-phase.ts";
 import type { Task } from "../core/schemas/task.ts";
 import { assertSafePlanId } from "../core/schemas/plan-id.ts";
-import { resolveAgentProfilePath } from "../core/agent-profile-path.ts";
+import {
+  assertAgentProfileNameMatches,
+  resolveAgentProfilePath,
+} from "../core/agent-profile-path.ts";
 import {
   resolveRecommendation,
   type RecommendResult,
@@ -47,7 +50,9 @@ async function loadAgentProfile(cwd: string, agentName: string): Promise<AgentPr
   // contextFit byte override — surfaces as CONFIG_ERROR rather than an unclassified YAML/Zod
   // throw, mirroring task-prepare.ts so `recommend` renders a clean envelope.
   try {
-    return AgentProfile.parse(parseYaml(raw) as unknown);
+    const profile = AgentProfile.parse(parseYaml(raw) as unknown);
+    assertAgentProfileNameMatches(profile, agentName, path);
+    return profile;
   } catch (cause) {
     const err = new Error(
       `Agent profile for "${agentName}" is invalid: ${

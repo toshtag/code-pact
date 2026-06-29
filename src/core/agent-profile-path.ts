@@ -61,6 +61,13 @@ function assertWritableProfileRel(agentName: string, rel: string): void {
   );
 }
 
+function assertOwnedProfileRel(agentName: string, rel: string): void {
+  if (rel.startsWith(WRITABLE_AGENT_PROFILE_PREFIX)) return;
+  throw profileConfigError(
+    `Agent profile path for "${agentName}" is outside the owned profile namespace: ".code-pact/${rel}". Agent profile reads are limited to ".code-pact/${WRITABLE_AGENT_PROFILE_PREFIX}**".`,
+  );
+}
+
 async function readProjectYamlForProfileChecks(
   cwd: string,
 ): Promise<unknown | null> {
@@ -198,7 +205,10 @@ export async function resolveAgentProfileRel(
       const parsed = RelativePosixPath.safeParse(
         (a as { profile?: unknown }).profile,
       );
-      if (parsed.success) return parsed.data;
+      if (parsed.success) {
+        assertOwnedProfileRel(agentName, parsed.data);
+        return parsed.data;
+      }
       // Matched the agent but its declared profile is an invalid path —
       // surface it instead of silently reading/writing the default file.
       const err = new Error(
@@ -250,6 +260,18 @@ export async function resolveAgentProfilePath(
     }
     throw err;
   }
+}
+
+export function assertAgentProfileNameMatches(
+  profile: AgentProfileType,
+  agentName: string,
+  path?: string,
+): void {
+  if (profile.name === agentName) return;
+  const location = path ? ` at ${path}` : "";
+  throw profileConfigError(
+    `Agent profile${location} declares name "${profile.name}", but "${agentName}" was requested.`,
+  );
 }
 
 /**
@@ -331,6 +353,7 @@ export async function loadValidatedAdapterProfile(
     (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
     throw e;
   }
+  assertAgentProfileNameMatches(profile, agentName, path);
   validateAgentProfileForAdapter(profile, descriptor);
   return profile;
 }

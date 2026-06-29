@@ -1385,7 +1385,7 @@ describe("detectAgentModelMapDrift", () => {
       projectPath,
       project.replace(
         "profile: agent-profiles/claude-code.yaml",
-        "profile: custom/claude.yaml",
+        "profile: agent-profiles/custom/claude.yaml",
       ),
       "utf8",
     );
@@ -1394,9 +1394,11 @@ describe("detectAgentModelMapDrift", () => {
       "utf8",
     );
     // default stays fresh; custom gets the stale pin
-    await mkdir(join(dir, ".code-pact", "custom"), { recursive: true });
+    await mkdir(join(dir, ".code-pact", "agent-profiles", "custom"), {
+      recursive: true,
+    });
     await writeFile(
-      join(dir, ".code-pact", "custom", "claude.yaml"),
+      join(dir, ".code-pact", "agent-profiles", "custom", "claude.yaml"),
       defaultProfile.replace(/(highest_reasoning:\s*)\S+/, "$1claude-opus-4-7"),
       "utf8",
     );
@@ -1405,7 +1407,7 @@ describe("detectAgentModelMapDrift", () => {
       dir,
       "claude-code",
     );
-    expect(profileRel).toBe("custom/claude.yaml");
+    expect(profileRel).toBe("agent-profiles/custom/claude.yaml");
     expect(drift.map(d => d.current)).toEqual(["claude-opus-4-7"]);
   });
 

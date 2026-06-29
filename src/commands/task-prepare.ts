@@ -18,7 +18,10 @@ import {
   type TaskCurrentState,
 } from "../core/progress/task-state.ts";
 import { AgentProfile } from "../core/schemas/agent-profile.ts";
-import { resolveAgentProfilePath } from "../core/agent-profile-path.ts";
+import {
+  assertAgentProfileNameMatches,
+  resolveAgentProfilePath,
+} from "../core/agent-profile-path.ts";
 import { loadPhase } from "../core/plan/load-phase.ts";
 import { loadProject, resolveEnabledAgent } from "../core/project.ts";
 import { resolveSymlinkFreeProjectPath } from "../core/path-safety.ts";
@@ -134,7 +137,9 @@ async function loadAgentProfile(
   // unclassified YAML/Zod throw, so `task prepare --context-budget …` matches
   // the documented error contract and the CLI renders a clean envelope.
   try {
-    return AgentProfile.parse(parseYaml(raw) as unknown);
+    const profile = AgentProfile.parse(parseYaml(raw) as unknown);
+    assertAgentProfileNameMatches(profile, agentName, path);
+    return profile;
   } catch (cause) {
     const err = new Error(
       `Agent profile for "${agentName}" is invalid: ${

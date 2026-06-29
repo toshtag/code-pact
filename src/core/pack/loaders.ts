@@ -28,7 +28,10 @@ import { loadMergedProgress } from "../progress/io.ts";
 import { validateGlobSyntax, walkAndMatch } from "../glob.ts";
 import { assertSafePlanId } from "../schemas/plan-id.ts";
 import { readProjectTextOrNull } from "../project-read.ts";
-import { resolveAgentProfilePath } from "../agent-profile-path.ts";
+import {
+  assertAgentProfileNameMatches,
+  resolveAgentProfilePath,
+} from "../agent-profile-path.ts";
 import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
 
 // The project-contained read guard (`..`/absolute/symlink-escape → null) lives
@@ -47,12 +50,20 @@ export async function loadAgentProfile(
   // A missing-but-safe profile still degrades gracefully to null.
   assertSafePlanId(agentName, "Agent");
   const profilePath = await resolveAgentProfilePath(cwd, agentName);
+  let raw: string;
   try {
-    const raw = await readFile(profilePath, "utf8");
-    return AgentProfile.parse(parseYaml(raw) as unknown);
+    raw = await readFile(profilePath, "utf8");
   } catch {
     return null;
   }
+  let profile: AgentProfile;
+  try {
+    profile = AgentProfile.parse(parseYaml(raw) as unknown);
+  } catch {
+    return null;
+  }
+  assertAgentProfileNameMatches(profile, agentName, profilePath);
+  return profile;
 }
 
 export async function loadConstitution(cwd: string): Promise<string | null> {

@@ -4,9 +4,11 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runInit } from "../../../src/commands/init.ts";
 import {
+  loadValidatedAdapterProfile,
   resolveAgentProfileRel,
   resolveAgentProfilePath,
 } from "../../../src/core/agent-profile-path.ts";
+import { adapterRegistry } from "../../../src/core/adapters/index.ts";
 
 let dir: string;
 
@@ -42,16 +44,16 @@ describe("resolveAgentProfileRel / resolveAgentProfilePath", () => {
     );
   });
 
-  it("honors a non-default agents[].profile from project.yaml", async () => {
-    await setProfileRel("claude-code", "custom/cc.yaml");
-    expect(await resolveAgentProfileRel(dir, "claude-code")).toBe("custom/cc.yaml");
+  it("honors a non-default agents[].profile inside the owned profile namespace", async () => {
+    await setProfileRel("claude-code", "agent-profiles/custom/cc.yaml");
+    expect(await resolveAgentProfileRel(dir, "claude-code")).toBe("agent-profiles/custom/cc.yaml");
     expect(await resolveAgentProfilePath(dir, "claude-code")).toBe(
-      join(dir, ".code-pact", "custom", "cc.yaml"),
+      join(dir, ".code-pact", "agent-profiles", "custom", "cc.yaml"),
     );
   });
 
   it("honors a custom profile even when an unrelated project.yaml field is invalid", async () => {
-    await setProfileRel("claude-code", "custom/cc.yaml");
+    await setProfileRel("claude-code", "agent-profiles/custom/cc.yaml");
     // Corrupt an unrelated field (default_agent must be a PlanId). A full
     // Project.safeParse would reject the whole file, but the resolver reads
     // only the agent's own profile, so the custom path must still win.
@@ -60,7 +62,23 @@ describe("resolveAgentProfileRel / resolveAgentProfilePath", () => {
     const next = text.replace(/default_agent: .*/, 'default_agent: "not a valid id!!"');
     expect(next).not.toBe(text);
     await writeFile(p, next, "utf8");
-    expect(await resolveAgentProfileRel(dir, "claude-code")).toBe("custom/cc.yaml");
+    expect(await resolveAgentProfileRel(dir, "claude-code")).toBe("agent-profiles/custom/cc.yaml");
+  });
+
+  it("rejects agent profiles outside .code-pact/agent-profiles for reads", async () => {
+    await mkdir(join(dir, ".code-pact", "state"), { recursive: true });
+    await writeFile(
+      join(dir, ".code-pact", "state", "private-agent-profile.yaml"),
+      await readFile(
+        join(dir, ".code-pact", "agent-profiles", "claude-code.yaml"),
+        "utf8",
+      ),
+      "utf8",
+    );
+    await setProfileRel("claude-code", "state/private-agent-profile.yaml");
+    await expect(resolveAgentProfilePath(dir, "claude-code")).rejects.toMatchObject({
+      code: "CONFIG_ERROR",
+    });
   });
 
   it("rejects an unsafe agents[].profile with CONFIG_ERROR (no silent fallback)", async () => {
@@ -132,15 +150,38 @@ describe("resolveAgentProfileRel / resolveAgentProfilePath", () => {
       code: "CONFIG_ERROR",
     });
   });
+
+  it("rejects a profile whose declared name does not match the requested agent", async () => {
+    const profilePath = join(
+      dir,
+      ".code-pact",
+      "agent-profiles",
+      "claude-code.yaml",
+    );
+    const text = await readFile(profilePath, "utf8");
+    await writeFile(
+      profilePath,
+      text.replace(/^name: claude-code$/m, "name: codex"),
+      "utf8",
+    );
+
+    await expect(
+      loadValidatedAdapterProfile(
+        dir,
+        "claude-code",
+        adapterRegistry["claude-code"],
+      ),
+    ).rejects.toMatchObject({ code: "CONFIG_ERROR" });
+  });
 });
 
 describe("adapter list honors a custom profile path", () => {
   it("reports the project.yaml agents[].profile path in profilePath", async () => {
     const { runAdapterList } = await import("../../../src/commands/adapter-list.ts");
-    await setProfileRel("claude-code", "custom/cc.yaml");
+    await setProfileRel("claude-code", "agent-profiles/custom/cc.yaml");
     const result = await runAdapterList({ cwd: dir });
     const cc = result.agents.find((a) => a.name === "claude-code");
-    expect(cc?.profilePath).toBe(join(dir, ".code-pact", "custom", "cc.yaml"));
+    expect(cc?.profilePath).toBe(join(dir, ".code-pact", "agent-profiles", "custom", "cc.yaml"));
   });
 
   it("fails with CONFIG_ERROR on an invalid matching agents[].profile (no silent fallback)", async () => {
