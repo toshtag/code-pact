@@ -295,9 +295,6 @@ export async function runAdapterInstall(
   const contextDirAbs = resolvedPreflight.find(
     p => p.kind === "directory" && p.path === profile.context_dir,
   )!.absPath;
-  const manifestAbs = resolvedPreflight.find(
-    p => p.kind === "file" && p.path === manifestRelPath(agentName),
-  )!.absPath;
 
   const created: string[] = [];
   const skipped: string[] = [];
@@ -484,9 +481,7 @@ export async function runAdapterInstall(
     files: newManifestFiles,
   };
 
-  const writtenManifestPath = await writeManifest(cwd, agentName, manifest, {
-    preResolvedOwnedPath: manifestAbs,
-  });
+  const writtenManifestPath = await writeManifest(cwd, agentName, manifest);
 
   return {
     agentName,

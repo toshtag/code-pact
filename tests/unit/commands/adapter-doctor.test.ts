@@ -6,6 +6,7 @@ import {
   writeFile,
   mkdir,
   unlink,
+  symlink,
 } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -880,5 +881,51 @@ describe("adapter doctor — ADAPTER_CONTRACT_DRIFT (v1.7 P16-T5)", () => {
     // Hand-edit also trips the file-level drift signal — both codes
     // are independent diagnoses per design/decisions/agent-contract-rfc.md.
     expect(codes).toContain("ADAPTER_FILE_DRIFT");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// In-project symlink containment: doctor must refuse an in-project symlinked
+// context_dir (containment is not ownership — a lexical .context/claude-code
+// alias to another in-project dir is still rejected by resolveSymlinkFreeProjectPath).
+// ---------------------------------------------------------------------------
+
+describe("adapter doctor — in-project symlinked context_dir is refused", () => {
+  it("doctor reports PATH_OUTSIDE_PROJECT for an in-project symlinked context_dir without reading targets", async () => {
+    await runAdapterInstall({
+      cwd: dir,
+      agentName: "claude-code",
+      force: false,
+      locale: "en-US",
+      generatorVersionOverride: "test",
+    });
+
+    // Replace .context/claude-code with an in-project symlink to a sibling dir.
+    const symlinkTarget = join(dir, ".context-alias");
+    await mkdir(symlinkTarget, { recursive: true });
+    await writeFile(
+      join(symlinkTarget, "IN-PROJECT-ALIAS-MARKER.md"),
+      "alias content\n",
+      "utf8",
+    );
+    await rm(join(dir, ".context", "claude-code"), {
+      recursive: true,
+      force: true,
+    });
+    await symlink(symlinkTarget, join(dir, ".context", "claude-code"), "dir");
+
+    readFileSpy.mockClear();
+    const result = await runDoctor(dir);
+
+    // The in-project symlink is rejected — PATH_OUTSIDE_PROJECT issue is emitted.
+    expect(result.issues.some(i => i.code === "PATH_OUTSIDE_PROJECT")).toBe(
+      true,
+    );
+    // The alias target's content must NOT appear in any readFile call.
+    expect(
+      readFileSpy.mock.calls.some(([path]) =>
+        String(path).includes("IN-PROJECT-ALIAS-MARKER"),
+      ),
+    ).toBe(false);
   });
 });

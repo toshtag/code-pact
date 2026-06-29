@@ -290,9 +290,6 @@ export async function runAdapterUpgrade(
   const contextDirAbs = resolvedPreflight.find(
     p => p.kind === "directory" && p.path === profile.context_dir,
   )!.absPath;
-  const manifestAbs = resolvedPreflight.find(
-    p => p.kind === "file" && p.path === manifestRelPath(agentName),
-  )!.absPath;
 
   const plan: AdapterUpgradePlanEntry[] = [];
   const newManifestFiles: ManifestFile[] = [];
@@ -606,9 +603,7 @@ export async function runAdapterUpgrade(
     profile_fingerprint: buildFingerprint(profile, resolvedModel),
     files: newManifestFiles,
   };
-  const writtenManifestPath = await writeManifest(cwd, agentName, manifest, {
-    preResolvedOwnedPath: manifestAbs,
-  });
+  const writtenManifestPath = await writeManifest(cwd, agentName, manifest);
 
   return {
     agentName,

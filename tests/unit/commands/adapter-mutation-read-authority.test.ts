@@ -241,3 +241,49 @@ describe("adapter install/upgrade read authority", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Instruction oracle: the profile contract is the FIRST gate — it rejects a
+// hostile instruction_filename BEFORE the adapter engine touches the filesystem.
+// This test verifies that not even the target file is read when the contract
+// refuses. The "oracle" is the profile contract itself: it knows the set of
+// valid instruction paths from the adapter descriptor without looking at disk.
+// ---------------------------------------------------------------------------
+
+describe("instruction oracle — profile contract refuses before any filesystem read", () => {
+  it("rejects instruction_filename: secrets.txt without reading secrets.txt or the manifest", async () => {
+    const target = join(dir, "secrets.txt");
+    const content = "PRIVATE_KEY=deadbeef\n";
+    await writeFile(target, content, "utf8");
+
+    // Point instruction_filename at an unowned file.
+    const profilePath = join(
+      dir,
+      ".code-pact",
+      "agent-profiles",
+      "claude-code.yaml",
+    );
+    await writeFile(
+      profilePath,
+      (await readFile(profilePath, "utf8")).replace(
+        "instruction_filename: CLAUDE.md",
+        "instruction_filename: secrets.txt",
+      ),
+      "utf8",
+    );
+
+    readFileSpy.mockClear();
+    await expect(
+      runAdapterInstall({
+        cwd: dir,
+        agentName: "claude-code",
+        force: false,
+        locale: "en-US",
+        generatorVersionOverride: "test",
+      }),
+    ).rejects.toThrow(/instruction_filename/);
+
+    // The target file was NEVER read — the contract fires before any file I/O.
+    expect(targetReads(target)).toEqual([]);
+  });
+});

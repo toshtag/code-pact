@@ -154,21 +154,12 @@ export async function writeManifest(
   cwd: string,
   agentName: string,
   manifest: AdapterManifest,
-  opts: { preResolvedOwnedPath?: string } = {},
 ): Promise<string> {
   // Fail closed before writing a byte if `.code-pact/adapters` resolves outside
   // the project (symlink escape) — never write a manifest outside cwd.
-  const expectedLexicalPath = manifestPath(cwd, agentName);
-  if (
-    opts.preResolvedOwnedPath !== undefined &&
-    opts.preResolvedOwnedPath !== expectedLexicalPath
-  ) {
-    throw new Error(
-      "pre-resolved adapter manifest path does not match the target agent",
-    );
-  }
-  const path =
-    opts.preResolvedOwnedPath ?? (await resolveManifestPath(cwd, agentName));
+  // Always re-resolve: a preflight check earlier in the call sequence does NOT
+  // substitute for a fresh symlink-free resolution at write time (TOCTOU).
+  const path = await resolveManifestPath(cwd, agentName);
   const parsed = AdapterManifest.parse(manifest);
   // Identity check: refuse to write a manifest whose agent_name doesn't match
   // the target agent — never persist a cross-agent manifest under another
