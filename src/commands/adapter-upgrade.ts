@@ -1,4 +1,4 @@
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir, rm, stat } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { AgentProfile } from "../core/schemas/agent-profile.ts";
 import { ModelProfile } from "../core/schemas/model-profile.ts";
@@ -259,6 +259,27 @@ export async function runAdapterUpgrade(
     );
     (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
     throw e;
+  }
+
+  // Type check: if context_dir already exists as a non-directory, the mkdir
+  // would EEXIST after the model pin. Catch it here — before any side effect.
+  try {
+    const s = await stat(contextDirAbs);
+    if (!s.isDirectory()) {
+      const e = new Error(
+        `context_dir "${profile.context_dir}" already exists but is not a directory`,
+      );
+      (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+      throw e;
+    }
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      // not-yet-created — valid
+    } else if ((err as NodeJS.ErrnoException).code === "CONFIG_ERROR") {
+      throw err;
+    } else {
+      throw err;
+    }
   }
 
   // Verify hook_dir is symlink-free (if declared). NOT pre-created, but a
