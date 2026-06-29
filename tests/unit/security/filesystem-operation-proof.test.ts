@@ -6,6 +6,8 @@ import { runAdapterConformance } from "../../../src/commands/adapter-conformance
 import { runAdapterDoctor } from "../../../src/commands/adapter-doctor.ts";
 
 // Spy on ALL filesystem operations that could leak content or mutate state.
+// This includes FileHandle methods (returned by open()) that bypass the
+// top-level fs/promises spies.
 const spies = vi.hoisted(() => ({
   readFile: vi.fn(),
   stat: vi.fn(),
@@ -20,6 +22,19 @@ const spies = vi.hoisted(() => ({
   access: vi.fn(),
   cp: vi.fn(),
   copyFile: vi.fn(),
+  // FileHandle method spies
+  fhRead: vi.fn(),
+  fhReadFile: vi.fn(),
+  fhWrite: vi.fn(),
+  fhWriteFile: vi.fn(),
+  fhClose: vi.fn(),
+  fhTruncate: vi.fn(),
+  fhSync: vi.fn(),
+  fhDatasync: vi.fn(),
+  fhAppendFile: vi.fn(),
+  fhChmod: vi.fn(),
+  fhChown: vi.fn(),
+  fhUtimes: vi.fn(),
 }));
 
 vi.mock("node:fs/promises", async importActual => {
@@ -56,7 +71,37 @@ vi.mock("node:fs/promises", async importActual => {
     },
     open: async (...args: Parameters<typeof actual.open>) => {
       spies.open(String(args[0]));
-      return actual.open(...args);
+      const fh = await actual.open(...args);
+      // Wrap FileHandle methods to track reads/writes via open().
+      return new Proxy(fh, {
+        get(target, prop, receiver) {
+          const val = Reflect.get(target, prop, receiver);
+          if (typeof val !== "function") return val;
+          const fhSpyMap: Record<string, ((path: string) => void) | undefined> =
+            {
+              read: spies.fhRead,
+              readFile: spies.fhReadFile,
+              write: spies.fhWrite,
+              writeFile: spies.fhWriteFile,
+              close: spies.fhClose,
+              truncate: spies.fhTruncate,
+              sync: spies.fhSync,
+              datasync: spies.fhDatasync,
+              appendFile: spies.fhAppendFile,
+              chmod: spies.fhChmod,
+              chown: spies.fhChown,
+              utimes: spies.fhUtimes,
+            };
+          const spy = fhSpyMap[String(prop)];
+          if (spy) {
+            return (...fhArgs: unknown[]) => {
+              spy(String(args[0]));
+              return val.apply(target, fhArgs);
+            };
+          }
+          return val.bind(target);
+        },
+      });
     },
     rename: async (...args: Parameters<typeof actual.rename>) => {
       spies.rename(String(args[0]));
@@ -162,6 +207,18 @@ function resetSpies() {
   spies.access.mockClear();
   spies.cp.mockClear();
   spies.copyFile.mockClear();
+  spies.fhRead.mockClear();
+  spies.fhReadFile.mockClear();
+  spies.fhWrite.mockClear();
+  spies.fhWriteFile.mockClear();
+  spies.fhClose.mockClear();
+  spies.fhTruncate.mockClear();
+  spies.fhSync.mockClear();
+  spies.fhDatasync.mockClear();
+  spies.fhAppendFile.mockClear();
+  spies.fhChmod.mockClear();
+  spies.fhChown.mockClear();
+  spies.fhUtimes.mockClear();
 }
 
 const VALID_CONTRACT_BODY = `# Some Adapter
@@ -517,5 +574,34 @@ describe("filesystem operation proof — doctor", () => {
     expect(ops.rename).toEqual([]);
     expect(ops.rm).toEqual([]);
     expect(ops.access).toEqual([]);
+  });
+
+  it("FileHandle methods are tracked — no fhRead/fhWrite on unowned paths", async () => {
+    const envPath = join(dir, ".env");
+    const envContent = "API_TOKEN=secret\n";
+    await setupAdapterWithForgedFiles(dir, [
+      {
+        path: ".env",
+        content: envContent,
+        role: "instruction",
+        sha256: "0".repeat(64),
+      },
+    ]);
+
+    resetSpies();
+    const result = await runAdapterConformance({
+      cwd: dir,
+      agentName: "claude-code",
+    });
+
+    expect(result.compliant).toBe(false);
+
+    // No FileHandle methods should be called on the .env path.
+    expect(spies.fhRead.mock.calls.map(c => c[0])).not.toContain(envPath);
+    expect(spies.fhReadFile.mock.calls.map(c => c[0])).not.toContain(envPath);
+    expect(spies.fhWrite.mock.calls.map(c => c[0])).not.toContain(envPath);
+    expect(spies.fhWriteFile.mock.calls.map(c => c[0])).not.toContain(envPath);
+    expect(spies.fhAppendFile.mock.calls.map(c => c[0])).not.toContain(envPath);
+    expect(spies.fhTruncate.mock.calls.map(c => c[0])).not.toContain(envPath);
   });
 });
