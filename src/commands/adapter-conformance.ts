@@ -324,6 +324,7 @@ export async function runAdapterConformance(
     cwd,
     descriptor,
     instructionEntry.path,
+    instructionEntry.role,
   );
   if (instructionOwnership.kind !== "owned") {
     checks.push(
@@ -505,9 +506,7 @@ export async function runAdapterConformance(
       cwd,
       descriptor,
       entry.path,
-      {
-        declaredRole: entry.role,
-      },
+      entry.role,
     );
     if (ownership.kind === "unverifiable_dynamic") {
       // A legitimately generated dynamic skill in the shared namespace. Its name

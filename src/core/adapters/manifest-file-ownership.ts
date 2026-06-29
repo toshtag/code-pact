@@ -1,5 +1,5 @@
 import { matchGlob } from "../glob.ts";
-import { resolveOwnedProjectPath } from "../path-safety.ts";
+import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
 import type { AdapterDescriptor, DesiredAdapterFileRole } from "./types.ts";
 
 /**
@@ -69,7 +69,7 @@ export async function authorizeAdapterMutationPath(
     try {
       return {
         kind: "owned",
-        absPath: await resolveOwnedProjectPath(cwd, relPath),
+        absPath: await resolveSymlinkFreeProjectPath(cwd, relPath),
       };
     } catch {
       return { kind: "unsafe" };
@@ -94,7 +94,7 @@ export async function authorizeAdapterMutationPath(
   try {
     return {
       kind: "dynamic_write",
-      absPath: await resolveOwnedProjectPath(cwd, relPath),
+      absPath: await resolveSymlinkFreeProjectPath(cwd, relPath),
     };
   } catch {
     return { kind: "unsafe" };
@@ -120,18 +120,15 @@ export async function authorizeAdapterMutationPath(
  * the exact, wildcard-free, BUILT-IN static paths (e.g. `CLAUDE.md`,
  * `.claude/skills/context.md|verify.md|progress.md`). A dynamic skill in the
  * shared namespace cannot prove read ownership and is therefore never read by
- * a diagnostic. The role must also match the expected role for that static
- * path, and the path must traverse no symlink (resolveOwnedProjectPath rejects
+ * a diagnostic. The declared role must match the static path's expected role,
+ * and the path must traverse no symlink (resolveSymlinkFreeProjectPath rejects
  * every symlink component).
  *
  * The PRIMARY guard is the narrow exact-path set (it alone blocks reading a
- * victim's `.claude/skills/private.md`). When the caller can afford to run the
- * generator it SHOULD also pass `roleCheck` — the exact `path → role` map from
- * `buildOwnedRoleMap` — for the secondary defense: a manifest entry whose
- * declared role disagrees with the path's only legitimate role is `unowned`
- * (a forged `role: instruction` on a skill path is refused before any heading
- * inspection). Conformance, which does not run the generator, omits it and
- * relies on the exact-path + symlink guards, which already close the oracle.
+ * victim's `.claude/skills/private.md`). The declared role is checked against
+ * the static path's expected role BEFORE any filesystem access — a forged
+ * `role: instruction` on a skill path (e.g. `CLAUDE.md` with `role: skill`) is
+ * `unowned` before any heading inspection or read.
  *
  * For dynamic paths, the manifest's declared role must match the role-scoped
  * create namespace (e.g. a `.claude/skills/private.md` with role=skill is
@@ -141,10 +138,7 @@ export async function classifyManifestFileForRead(
   cwd: string,
   descriptor: AdapterDescriptor,
   relPath: string,
-  roleCheck?: {
-    declaredRole: DesiredAdapterFileRole;
-    expectedRoleFor?: ReadonlyMap<string, DesiredAdapterFileRole>;
-  },
+  declaredRole: DesiredAdapterFileRole,
 ): Promise<ManifestFileOwnership> {
   // NARROW static read authority — exact lookup, never glob matching.
   const staticRole = descriptor.ownedPathRoles[relPath];
@@ -153,32 +147,21 @@ export async function classifyManifestFileForRead(
     // role-scoped create namespace) from a forged arbitrary path. The declared
     // role must match the create namespace's role for the path to qualify as
     // `unverifiable_dynamic`; otherwise it is `unowned`.
-    const declaredRole = roleCheck?.declaredRole;
-    if (declaredRole !== undefined) {
-      const createGlobs =
-        descriptor.createPathGlobsByRole?.[declaredRole] ?? [];
-      if (createGlobs.some(g => matchGlob(g, relPath))) {
-        return { kind: "unverifiable_dynamic" };
-      }
+    const createGlobs = descriptor.createPathGlobsByRole?.[declaredRole] ?? [];
+    if (createGlobs.some(g => matchGlob(g, relPath))) {
+      return { kind: "unverifiable_dynamic" };
     }
     return { kind: "unowned" };
   }
-  // Secondary defense (when the caller generated the desired set): the declared
-  // role must match the path's only legitimate role.
-  if (roleCheck !== undefined && roleCheck.expectedRoleFor !== undefined) {
-    const expected = roleCheck.expectedRoleFor.get(relPath);
-    if (
-      expected === undefined ||
-      expected !== staticRole ||
-      roleCheck.declaredRole !== staticRole
-    ) {
-      return { kind: "unowned" };
-    }
+  // Role mismatch: the declared role disagrees with the static path's only
+  // legitimate role. This is checked BEFORE any filesystem access.
+  if (declaredRole !== staticRole) {
+    return { kind: "unowned" };
   }
   try {
     // Rejects any symlink component (and `..` / absolute / drive paths): a
     // lexical path match is not proof the real destination is owned.
-    const absPath = await resolveOwnedProjectPath(cwd, relPath);
+    const absPath = await resolveSymlinkFreeProjectPath(cwd, relPath);
     return { kind: "owned", absPath };
   } catch {
     return { kind: "unsafe" };

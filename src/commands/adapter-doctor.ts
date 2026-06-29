@@ -5,10 +5,7 @@ import { AgentProfile } from "../core/schemas/agent-profile.ts";
 import { ModelProfile } from "../core/schemas/model-profile.ts";
 import { Project } from "../core/schemas/project.ts";
 import { adapterRegistry } from "../core/adapters/index.ts";
-import {
-  buildOwnedRoleMap,
-  classifyManifestFileForRead,
-} from "../core/adapters/manifest-file-ownership.ts";
+import { classifyManifestFileForRead } from "../core/adapters/manifest-file-ownership.ts";
 import { isSupportedAgent, type SupportedAgent } from "../core/agents.ts";
 import { resolveAgentProfilePath } from "../core/agent-profile-path.ts";
 import { resolveWithinProject } from "../core/path-safety.ts";
@@ -456,16 +453,12 @@ export async function inspectAgent(
     // authority therefore comes only from the adapter's narrow static owned
     // paths, with a matching role and symlink-free resolution. Dynamic desired
     // paths remain unverifiable even when the current generator emits them.
-    const ownedStaticRoleMap = buildOwnedRoleMap(descriptor, desiredFiles);
     for (const entry of manifest.files) {
       const ownership = await classifyManifestFileForRead(
         cwd,
         descriptor,
         entry.path,
-        {
-          declaredRole: entry.role,
-          expectedRoleFor: ownedStaticRoleMap,
-        },
+        entry.role,
       );
       if (ownership.kind === "unowned" || ownership.kind === "unsafe") {
         issues.push(
@@ -484,7 +477,7 @@ export async function inspectAgent(
         issues.push({
           code: "ADAPTER_FILE_UNVERIFIABLE",
           severity: "warning",
-          message: `Managed file "${entry.path}" is in a shared dynamic namespace — current generator output does not prove ownership of existing bytes, so it was not read or verified. Re-run "adapter upgrade ${agentName} --write" to refresh the manifest, or remove the stray file.`,
+          message: `Managed file "${entry.path}" is in a shared dynamic namespace — current generator output does not prove ownership of existing bytes, so it was not read or verified. Review the file. To regenerate it, move or delete it, then run "adapter upgrade ${agentName} --write".`,
           agent: agentName,
           path: join(cwd, entry.path),
         });
