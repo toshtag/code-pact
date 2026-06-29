@@ -162,6 +162,7 @@ const PATH_SCHEMA_ENTRYPOINTS: ReadonlyArray<{
   {
     name: "AgentRef.profile",
     parse: v => AgentRef.safeParse({ name: "claude-code", profile: v }),
+    goodPaths: ["agent-profiles/claude-code.yaml"],
   },
 ];
 

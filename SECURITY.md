@@ -33,13 +33,15 @@ In scope:
 
 - Command injection, path traversal, or arbitrary file write from any CLI command.
 - Issues that cause `code-pact` to leak secrets from the user's filesystem outside the project directory.
+- Cross-namespace observation or mutation of local untracked files from malicious tracked project/profile/manifest/roadmap/phase/task values.
+- Tracked symlinks and hostile tracked control-plane content.
 - Supply chain integrity of the published `code-pact` npm package (e.g. tampered tarball, unexpected `dependencies`).
 
 Out of scope:
 
 - Vulnerabilities in third-party dependencies — please report those upstream (`yaml`, `zod`, etc.).
-- Issues that require an attacker who already has write access to the user's `design/` directory or `.code-pact/` state.
 - `verify.commands` executing malicious commands from an untrusted project checkout. Verification commands are trusted local project configuration; do not run `code-pact verify` or `code-pact task complete` on a repository whose `design/` files you would not run as shell commands.
+- Attacks that require a separate local process to modify the filesystem during a command's execution.
 - Reports based on outdated releases when the issue is already fixed on the current `latest` tag.
 
 ## Supply chain notes
@@ -73,7 +75,7 @@ Before any filesystem operation, `validateAgentProfileForAdapter` checks the age
 
 This is an exact-equality check, not a prefix match — a hostile profile (e.g. `instruction_filename: .env`) is rejected at the contract boundary with `CONFIG_ERROR` — the target file is never read, hashed, or overwritten.
 
-Profile loading is unified through `loadValidatedAdapterProfile`, which performs symlink-free path resolution, YAML parsing, schema validation, and contract validation in a single function. All adapter commands (install, upgrade, doctor) use this single source.
+Adapter install/upgrade use `loadValidatedAdapterProfile`, which performs symlink-free path resolution, YAML parsing, schema validation, and contract validation in a single function. Diagnostic paths may use lenient loaders, but they still resolve profile paths through the agent-profile namespace guard and must not inspect profile-derived filesystem targets unless the adapter descriptor proves authority.
 
 ### Preflight and placeholder directories
 
@@ -89,7 +91,7 @@ The preflight itself only checks the manifest path (a fixed `.code-pact/adapters
 Model profiles (`.code-pact/model-profiles/*.yaml`) are loaded via two loaders:
 
 - `loadModelProfilesStrict`: used by adapter install/upgrade. Uses `resolveSymlinkFreeProjectPath` for both the directory and each entry. A symlinked or unreadable entry throws — it is **not** silently skipped. An empty array would cause the generator to produce model-unaware output, masking the configuration problem.
-- `loadModelProfilesSafe`: used by `adapter doctor`. Uses `resolveSymlinkFreeProjectPath` for the directory and each entry. A symlinked **directory** throws `PATH_NOT_OWNED` (surfaced as `MODEL_PROFILES_UNSAFE` issue); individual unreadable/malformed entries are skipped (doctor is diagnostic). Both loaders share the same symlink-free resolution primitive.
+- `loadModelProfilesSafe`: used by diagnostic surfaces. Uses `resolveSymlinkFreeProjectPath` for the directory and each entry. Symlinked or invalid entries fail closed into structured diagnostic issues instead of being treated as silently absent. Both loaders share the same symlink-free resolution primitive.
 
 ### Control-plane config path
 
@@ -104,14 +106,20 @@ Model profiles (`.code-pact/model-profiles/*.yaml`) are loaded via two loaders:
 Two CI gates provide structural backstops for path safety:
 
 - **`check:fs-containment`** (`scripts/check-fs-containment.mjs`): flags lexical `join(...)` paths handed directly to fs functions across `src/commands/`, `src/core/`, and `src/cli/`.
-- **`check:fs-authority`** (`scripts/check-fs-authority.mjs`): an **AST-based** gate using the TypeScript compiler API. Parses each target file into an AST, walks every `CallExpression`, and verifies that fs operations (`readFile`, `writeFile`, `mkdir`, `stat`, `unlink`, `rename`, `rm`, `readdir`, `access`, etc.) use a path sourced from an authority resolver (`resolveSymlinkFreeProjectPath`, `resolveOwnedReadPath`, `resolveProjectConfigPath`, `resolveAgentProfilePath`, `resolveArchiveOwnedPath`, `resolveManifestPath`, `authorizeAdapterMutationPath`, or a pre-resolved variable). Tracks variable provenance to follow `const abs = await resolveSymlinkFreeProjectPath(...)` assignments. Exemptions: `// fs-safe: <reason>` marker, authority resolver definitions, and import statements.
+- **`check:fs-authority`** (`scripts/check-fs-authority.mjs`): an **AST-based** gate over the adapter install/upgrade/doctor and global doctor surfaces. It verifies fs operation path arguments are sourced from approved imported authority helpers, tracks local variable provenance, and merges branch states conservatively so a variable is authorized only when every reachable branch assigns it from an approved helper. It is a targeted gate, not a whole-project proof.
 
-Both are structural tripwires — exit 0 does not prove semantic invariants. The security regression tests (`control-plane-symlink-red.test.ts`, `control-plane-ownership-red.test.ts`, `adapter-preflight-atomicity.test.ts`, `adapter-fs-operation-proof.test.ts`, `filesystem-operation-proof.test.ts`) are the proof layer. The operation proof test spies on **all** fs operations (`readFile`, `writeFile`, `stat`, `lstat`, `readdir`, `mkdir`, `rename`, `rm`, `unlink`, `access`, `cp`, `copyFile`) to verify no unowned path is touched.
+Both are structural tripwires — exit 0 does not prove semantic invariants. The security regression tests (`control-plane-symlink-red.test.ts`, `control-plane-ownership-red.test.ts`, `adapter-preflight-atomicity.test.ts`, `adapter-fs-operation-proof.test.ts`, `filesystem-operation-proof.test.ts`) are the proof layer. Operation proof tests spy on the fs operations they cover, but raw `FileHandle` methods and unlisted call forms still require code review or broader project-fs centralization.
+
+### Task reads
+
+`task.reads` is an agent-facing filename enumeration surface. It is matched only against `git ls-files -z` output. Untracked local files (for example `.env`, `.local/**`, scratch files, or ignored context output) are not walked and cannot appear in the context pack merely because a hostile task declares `reads: ["**"]`. A tracked file named `.env` is treated as intentionally repository-visible and can match. In a non-git project, `task.reads` fails closed with `TASK_READS_UNAVAILABLE`; there is no implicit untracked filesystem walk.
 
 ## Known technical debt
 
 - **`resolveWithinProject` in user-selected input paths**: `plan-constitution.ts`, `plan-brief.ts`, `plan-adopt.ts`, and `spec-import.ts` (input mode) still use `resolveWithinProject` for `--from-file` / `--from` user-selected input paths. These are containment-only (in-project symlinks allowed). This is acceptable because: (a) the paths are explicitly user-selected, not attacker-controllable config; (b) the content is user-authored design content, not control-plane config; (c) these are read-only operations with no write side effects. Each call site is annotated with `// fs-authority: containment-only` and `// reason: explicit user-selected input path`.
 - **`adapter-doctor.ts` does not use `loadValidatedAdapterProfile`**: it loads profiles via `resolveAgentProfilePath` + direct `readFile` (lenient, returns null on failure). This is acceptable because `adapter-doctor` is diagnostic-only (no writes), and `readProjectFileForDoctor` uses `resolveSymlinkFreeProjectPath` for all file reads. Contract violations are caught by `doctor.ts`'s `checkAgentProfiles`. Model profile loading uses the shared `loadModelProfilesSafe` loader with symlink-free resolution.
 - **`context_dir` placeholder side effect**: `adapter install` and `adapter upgrade` create `context_dir` via `mkdir(contextDirAbs, { recursive: true })` after all preflight checks pass but before the file write loop. This is intentional: (a) the path is symlink-free resolved; (b) it is schema-constrained to `.context/**`; (c) it is created after the model pin preflight; (d) without it, the first file write would create it anyway via `mkdir(dirname(absPath), { recursive: true })`. The side effect is a directory in an owned adapter namespace — not a file write — and is idempotent.
-- **`projectFs` seam not introduced**: the fs operation proof test (`filesystem-operation-proof.test.ts`) uses `vi.mock` spies on all fs operations rather than a mockable `projectFs` seam. A seam would allow exhaustive spy-matrix testing but requires a larger refactor of all fs import sites. The current spy approach covers `readFile`, `writeFile`, `stat`, `lstat`, `readdir`, `mkdir`, `rename`, `rm`, `unlink`, `access`, `cp`, `copyFile` — all operations that could leak content or mutate state.
-- **`check:fs-authority` scope**: the AST gate currently covers `adapter-install.ts`, `adapter-upgrade.ts`, and `adapter-doctor.ts`. Expanding to `src/core/` and `src/commands/` broadly would require handling more authority resolvers and call patterns. The `check:fs-containment` lexical guard already covers the broader scope.
+- **`projectFs` seam not introduced**: the fs operation proof tests use `vi.mock` spies over the imported `node:fs/promises` functions they cover rather than a mockable `projectFs` seam. A seam would allow a simpler exhaustive spy matrix but requires a larger refactor of raw fs import sites.
+- **`check:fs-authority` scope**: the AST gate currently covers `adapter-install.ts`, `adapter-upgrade.ts`, `adapter-doctor.ts`, and `doctor.ts`. Expanding to `src/core/` and `src/commands/` broadly would require the project-fs centralization above or a precise structured allowlist. The `check:fs-containment` lexical guard already covers the broader scope.
+- **Adapter multi-file mutation transaction**: adapter install/upgrade still perform several authorized writes/deletes sequentially. Individual file writes are atomic, but the multi-file operation is not yet a best-effort transaction with staged rollback.
+- **Dynamic generated-file provenance**: dynamic Claude skill names remain create-only and unverifiable for existing files. This avoids reading user-owned shared-namespace files, but it does not yet provide a convergent ownership policy for legacy dynamic generated files.

@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import {
   CONTEXT_FIT_ADVISORY_THRESHOLDS,
   detectContextFitAdvisories,
@@ -11,6 +13,7 @@ import { collectPlanArtifacts } from "../../../../src/core/plan/state.ts";
 import type { PlanIssue } from "../../../../src/core/plan/shared.ts";
 
 let cwd: string;
+const execFileAsync = promisify(execFile);
 
 beforeEach(async () => {
   cwd = await mkdtemp(join(tmpdir(), "code-pact-ctxfit-adv-"));
@@ -82,6 +85,11 @@ async function runAdvisories(
   return detectContextFitAdvisories({ cwd, phases, agentName });
 }
 
+async function trackFiles(paths: string[]): Promise<void> {
+  await execFileAsync("git", ["init"], { cwd });
+  if (paths.length > 0) await execFileAsync("git", ["add", ...paths], { cwd });
+}
+
 function byCode(issues: PlanIssue[], code: string): PlanIssue[] {
   return issues.filter((i) => i.code === code);
 }
@@ -139,6 +147,7 @@ describe("TASK_READS_MATCH_TOO_MANY", () => {
 
   it("does not fire when the match count is at or below the threshold", async () => {
     await writeManyFiles("src", 100);
+    await trackFiles(Array.from({ length: 100 }, (_unused, i) => `src/f${i}.ts`));
     await writePlan("P1-T1", { reads: ["src/**/*.ts"] });
     const issues = await runAdvisories(undefined);
     expect(byCode(issues, "TASK_READS_MATCH_TOO_MANY")).toHaveLength(0);
@@ -146,6 +155,7 @@ describe("TASK_READS_MATCH_TOO_MANY", () => {
 
   it("fires with a count payload when the match count exceeds the threshold", async () => {
     await writeManyFiles("src", 130);
+    await trackFiles(Array.from({ length: 130 }, (_unused, i) => `src/f${i}.ts`));
     await writePlan("P1-T1", { reads: ["src/**/*.ts"] });
     const issues = await runAdvisories(undefined);
     const fired = byCode(issues, "TASK_READS_MATCH_TOO_MANY");

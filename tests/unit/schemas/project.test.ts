@@ -73,9 +73,15 @@ describe("AgentRef.enabled", () => {
     ).toThrow();
   });
 
-  // `profile` is read as `join(cwd, ".code-pact", profile)`, so it must be a
-  // project-relative POSIX path — reject traversal / absolute values.
-  it.each(["../agent-profiles/evil.yaml", "/etc/passwd", "a/../b.yaml", "~/x.yaml"])(
+  // `profile` must stay under `.code-pact/agent-profiles/**.yaml`.
+  it.each([
+    "../agent-profiles/evil.yaml",
+    "/etc/passwd",
+    "a/../b.yaml",
+    "~/x.yaml",
+    "state/private-agent-profile.yaml",
+    "agent-profiles/not-yaml.json",
+  ])(
     "rejects unsafe profile %j",
     (profile) => {
       expect(() => AgentRef.parse({ name: "claude-code", profile })).toThrow();

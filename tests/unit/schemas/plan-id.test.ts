@@ -109,11 +109,17 @@ describe("PlanId — wired into plan schemas", () => {
 
   it("AgentRef.name rejects a shell-injection name", () => {
     expect(() =>
-      AgentRef.parse({ name: "claude-code; echo owned", profile: "claude-code" }),
+      AgentRef.parse({
+        name: "claude-code; echo owned",
+        profile: "agent-profiles/claude-code.yaml",
+      }),
     ).toThrow();
     // The conventional name still parses.
     expect(
-      AgentRef.parse({ name: "claude-code", profile: "claude-code" }).name,
+      AgentRef.parse({
+        name: "claude-code",
+        profile: "agent-profiles/claude-code.yaml",
+      }).name,
     ).toBe("claude-code");
   });
 });

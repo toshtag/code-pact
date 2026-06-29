@@ -1,16 +1,17 @@
 import { z } from "zod";
 import { LocaleConfig } from "./locale.ts";
 import { PlanId } from "./plan-id.ts";
-import { RelativePosixPath } from "./relative-path.ts";
+import { AgentProfileRefPath } from "./agent-profile-ref-path.ts";
 
 export const AgentRef = z.object({
   // Agent name flows into agent-facing command strings (`--agent <name>`) and
   // filesystem path segments (`agent-profiles/<name>.yaml`,
   // `.context/<name>/...`), so it shares the PlanId charset constraint.
   name: PlanId,
-  // `profile` is read as `join(cwd, ".code-pact", profile)` (doctor), so it is
-  // a project-relative POSIX path, not a free string — reject `..` / absolute.
-  profile: RelativePosixPath,
+  // `profile` is resolved below `.code-pact/agent-profiles/**`. Keep the
+  // runtime resolver's ownership check as defense in depth, but reject other
+  // namespaces at the schema boundary.
+  profile: AgentProfileRefPath,
   enabled: z.boolean().optional().default(true),
 });
 export type AgentRef = z.infer<typeof AgentRef>;

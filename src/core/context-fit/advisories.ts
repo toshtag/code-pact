@@ -23,9 +23,10 @@ import { readFile } from "node:fs/promises";
 import { buildContextPack } from "../pack/index.ts";
 import { recommendContextFit } from "../recommend/context-fit.ts";
 import { STANDARD_CONTEXT_BUDGET_PROFILES } from "./budget-profiles.ts";
-import { validateGlobSyntax, walkAndMatch } from "../glob.ts";
+import { matchGlob, validateGlobSyntax } from "../glob.ts";
 import { assertSafeRelativePath, resolveSymlinkFreeProjectPath } from "../path-safety.ts";
 import { isDecisionRefPath } from "../schemas/decision-ref.ts";
+import { listTrackedProjectFiles } from "../project-files/tracked-files.ts";
 import type { PhaseEntry } from "../plan/state.ts";
 import type { PlanIssue } from "../plan/shared.ts";
 
@@ -107,6 +108,7 @@ export async function detectContextFitAdvisories(
   // nothing is written to disk.
   const fileBytesCache = new Map<string, number | null>();
   const globCountCache = new Map<string, number>();
+  let trackedFiles: string[] | null | undefined;
   const packMetricsCache = new Map<
     string,
     { naturalBytes: number; minimumAchievableBytes: number } | null
@@ -165,7 +167,15 @@ export async function detectContextFitAdvisories(
         if (validateGlobSyntax(glob) !== null) continue;
         let count = globCountCache.get(glob);
         if (count === undefined) {
-          count = (await walkAndMatch(cwd, glob)).length;
+          if (trackedFiles === undefined) {
+            try {
+              trackedFiles = await listTrackedProjectFiles(cwd);
+            } catch {
+              trackedFiles = null;
+            }
+          }
+          if (trackedFiles === null) continue;
+          count = trackedFiles.filter(path => matchGlob(glob, path)).length;
           globCountCache.set(glob, count);
         }
         if (count > CONTEXT_FIT_ADVISORY_THRESHOLDS.readsMatchCount) {

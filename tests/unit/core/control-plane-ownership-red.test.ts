@@ -161,6 +161,49 @@ describe("2.2 doctor does not probe arbitrary instruction_filename paths", () =>
     expect(withContract.length).toBeGreaterThan(0);
     expect(withContract).toEqual(withoutContract);
   });
+
+  it("unsupported agent doctor/validate result is identical whether .env exists or not", async () => {
+    const projectPath = join(dir, ".code-pact", "project.yaml");
+    await writeFile(
+      projectPath,
+      [
+        "name: test-project",
+        "version: 0.1.0",
+        "locale: en-US",
+        "default_agent: private-probe",
+        "agents:",
+        "  - name: private-probe",
+        "    profile: agent-profiles/private-probe.yaml",
+        "    enabled: true",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    await writeFile(
+      join(dir, ".code-pact", "agent-profiles", "private-probe.yaml"),
+      [
+        "name: private-probe",
+        "instruction_filename: .env",
+        "context_dir: .context/private-probe",
+        "model_map: {}",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const doctorWithoutEnv = await runDoctor(dir);
+    const validateWithoutEnv = await runValidate({ cwd: dir });
+    await writeFile(join(dir, ".env"), "SECRET=unsupported-oracle\n", "utf8");
+    const doctorWithEnv = await runDoctor(dir);
+    const validateWithEnv = await runValidate({ cwd: dir });
+
+    expect(doctorWithEnv.issues).toEqual(doctorWithoutEnv.issues);
+    expect(validateWithEnv.issues).toEqual(validateWithoutEnv.issues);
+    expect(doctorWithEnv.issues.map(i => i.code)).toContain("ADAPTER_UNVERIFIABLE");
+    expect(doctorWithEnv.issues.map(i => i.code)).not.toContain("ADAPTER_MISSING");
+    expect(JSON.stringify(doctorWithEnv)).not.toContain("unsupported-oracle");
+    expect(JSON.stringify(validateWithEnv)).not.toContain("unsupported-oracle");
+  });
 });
 
 describe("2.2b doctor and validate enforce agent profile namespace ownership", () => {
@@ -193,7 +236,7 @@ describe("2.2b doctor and validate enforce agent profile namespace ownership", (
     await pointProjectProfileAt("state/private-agent-profile.yaml");
 
     const result = await runDoctor(dir);
-    expect(result.issues.map(i => i.code)).toContain("ADAPTER_PROFILE_INVALID");
+    expect(result.issues.map(i => i.code)).toContain("SCHEMA_ERROR");
     expect(JSON.stringify(result)).not.toContain("PRIVATE-DOCTOR-MARKER");
   });
 
@@ -214,7 +257,7 @@ describe("2.2b doctor and validate enforce agent profile namespace ownership", (
     await pointProjectProfileAt("state/private-agent-profile.yaml");
 
     const result = await runValidate({ cwd: dir });
-    expect(result.issues.map(i => i.code)).toContain("ADAPTER_PROFILE_INVALID");
+    expect(result.issues.map(i => i.code)).toContain("SCHEMA_ERROR");
     expect(JSON.stringify(result)).not.toContain("PRIVATE-VALIDATE-MARKER");
   });
 });

@@ -9,7 +9,11 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { buildContextPack } from "../../../src/core/pack/index.ts";
+
+const execFileAsync = promisify(execFile);
 
 let work: string;
 
@@ -130,6 +134,11 @@ async function buildPack(): Promise<string> {
   return pack.content;
 }
 
+async function trackFiles(paths: string[]): Promise<void> {
+  await execFileAsync("git", ["init"], { cwd: work });
+  await execFileAsync("git", ["add", ...paths], { cwd: work });
+}
+
 describe("buildContextPack — Depends on section", () => {
   it("omits the section when depends_on is undefined", async () => {
     await setupProject();
@@ -186,8 +195,10 @@ describe("buildContextPack — Declared read surface", () => {
         "src/foo.ts": "// foo",
         "src/bar/baz.ts": "// baz",
         "src/bar/qux.ts": "// qux",
+        "src/bar/local.ts": "// local",
       },
     });
+    await trackFiles(["src/foo.ts", "src/bar/baz.ts", "src/bar/qux.ts"]);
     const out = await buildPack();
     expect(out).toContain("## Declared read surface");
     expect(out).toContain("- `src/foo.ts`");
@@ -195,12 +206,14 @@ describe("buildContextPack — Declared read surface", () => {
     expect(out).toContain("- `src/bar/*.ts`");
     expect(out).toContain("  - `src/bar/baz.ts`");
     expect(out).toContain("  - `src/bar/qux.ts`");
+    expect(out).not.toContain("src/bar/local.ts");
   });
 
   it("renders a 'no current matches' note when nothing matches", async () => {
     await setupProject({
       taskExtras: { reads: ["src/*.ts"] },
     });
+    await trackFiles(["design/roadmap.yaml"]);
     const out = await buildPack();
     expect(out).toContain("- `src/*.ts`");
     expect(out).toContain("_(no current matches on disk)_");
@@ -336,6 +349,7 @@ describe("buildContextPack — section ordering when multiple fields declared", 
         "docs/cli-contract.md": "doc",
       },
     });
+    await trackFiles(["src/foo.ts"]);
     const out = await buildPack();
     const idx = (heading: string): number => out.indexOf(heading);
     const order = [

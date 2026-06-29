@@ -929,15 +929,24 @@ async function checkAdapterMissing(
   for (const agentRef of project.agents) {
     if (agentRef.enabled === false) continue;
 
-    if (isSupportedAgent(agentRef.name)) {
-      // Skip legacy check when a manifest exists OR is invalid — the
-      // manifest-aware path will surface the appropriate finding.
-      try {
-        const m = await readManifest(cwd, agentRef.name);
-        if (m !== null) continue;
-      } catch {
-        continue;
-      }
+    if (!isSupportedAgent(agentRef.name)) {
+      issues.push({
+        code: "ADAPTER_UNVERIFIABLE",
+        severity: "warning",
+        message:
+          `Agent "${agentRef.name}" has no registered adapter descriptor; ` +
+          "its instruction path was not inspected.",
+      });
+      continue;
+    }
+
+    // Skip legacy check when a manifest exists OR is invalid — the
+    // manifest-aware path will surface the appropriate finding.
+    try {
+      const m = await readManifest(cwd, agentRef.name);
+      if (m !== null) continue;
+    } catch {
+      continue;
     }
 
     const loaded = await loadDoctorAgentProfile(
@@ -951,21 +960,27 @@ async function checkAdapterMissing(
     // checkAgentProfiles already reported the contract issue. This prevents
     // checkAdapterMissing from stat'ing an unowned instruction_filename (e.g.
     // .env) and leaking an existence oracle.
-    if (isSupportedAgent(agentRef.name)) {
-      try {
-        validateAgentProfileForAdapter(
-          profile,
-          adapterRegistry[agentRef.name],
-        );
-      } catch {
-        continue;
-      }
+    const descriptor = adapterRegistry[agentRef.name];
+    try {
+      validateAgentProfileForAdapter(profile, descriptor);
+    } catch {
+      continue;
     }
-    if (!(await projectFileExists(cwd, profile.instruction_filename))) {
+    const instructionPath = descriptor.profilePathContract.instructionFilename;
+    const role = descriptor.ownedPathRoles[instructionPath];
+    if (role !== "instruction" && role !== "rule") {
+      issues.push({
+        code: "ADAPTER_PROFILE_CONTRACT_VIOLATION",
+        severity: "error",
+        message: `Adapter descriptor for "${agentRef.name}" does not grant instruction read authority for "${instructionPath}".`,
+      });
+      continue;
+    }
+    if (!(await projectFileExists(cwd, instructionPath))) {
       issues.push({
         code: "ADAPTER_MISSING",
         severity: "warning",
-        message: `Agent "${agentRef.name}" is enabled but "${profile.instruction_filename}" does not exist — run "code-pact adapter install ${agentRef.name}"`,
+        message: `Agent "${agentRef.name}" is enabled but "${instructionPath}" does not exist — run "code-pact adapter install ${agentRef.name}"`,
       });
     }
   }

@@ -5,8 +5,9 @@ import {
   findProtectedPathOverlaps,
   type ProtectedPathEntry,
   validateGlobSyntax,
-  walkAndMatch,
+  matchGlob,
 } from "../../glob.ts";
+import { listTrackedProjectFiles } from "../../project-files/tracked-files.ts";
 import { projectPathPresence } from "./fs.ts";
 import { decisionRefPathReason } from "../../schemas/decision-ref.ts";
 import { readPrunedLedger, normalizeRelPath } from "../../decisions/pruned-ledger.ts";
@@ -244,6 +245,7 @@ export async function detectTaskReadsNoMatch(
   phases: PhaseEntry[],
 ): Promise<PlanIssue[]> {
   const issues: PlanIssue[] = [];
+  let tracked: string[] | null = null;
   for (const { phase, ref } of phases) {
     for (const task of phase.tasks ?? []) {
       const globs = task.reads ?? [];
@@ -252,12 +254,30 @@ export async function detectTaskReadsNoMatch(
         // Skip entries that another detector already flagged.
         if (safePathReason(g) !== "") continue;
         if (validateGlobSyntax(g) !== null) continue;
-        const matched = await walkAndMatch(cwd, g);
+        if (tracked === null) {
+          try {
+            tracked = await listTrackedProjectFiles(cwd);
+          } catch {
+            issues.push({
+              code: "TASK_READS_UNAVAILABLE",
+              severity: "error",
+              message:
+                "Task reads globs require a readable Git tracked-file index; untracked filesystem walks are not allowed.",
+              file: ref.path,
+              phase_id: phase.id,
+              task_id: task.id,
+              path: `reads[${index}]`,
+              details: { value: g },
+            });
+            continue;
+          }
+        }
+        const matched = tracked.filter(path => matchGlob(g, path));
         if (matched.length === 0) {
           issues.push({
             code: "TASK_READS_NO_MATCH",
             severity: "warning",
-            message: `Task "${task.id}" reads glob "${g}" matches zero files on disk — if the file moved, redirect it with \`code-pact plan sync-paths --rename "${g}=<new-path>" --write\`; if it is gone, drop the entry`,
+            message: `Task "${task.id}" reads glob "${g}" matches zero tracked files — if the file moved, redirect it with \`code-pact plan sync-paths --rename "${g}=<new-path>" --write\`; if it is gone, drop the entry`,
             file: ref.path,
             phase_id: phase.id,
             task_id: task.id,

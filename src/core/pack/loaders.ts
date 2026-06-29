@@ -25,7 +25,7 @@ import {
   type RuleDoc,
 } from "./formatters/markdown.ts";
 import { loadMergedProgress } from "../progress/io.ts";
-import { validateGlobSyntax, walkAndMatch } from "../glob.ts";
+import { matchGlob, validateGlobSyntax } from "../glob.ts";
 import { assertSafePlanId } from "../schemas/plan-id.ts";
 import { readProjectTextOrNull } from "../project-read.ts";
 import {
@@ -33,6 +33,7 @@ import {
   resolveAgentProfilePath,
 } from "../agent-profile-path.ts";
 import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
+import { listTrackedProjectFiles } from "../project-files/tracked-files.ts";
 
 // The project-contained read guard (`..`/absolute/symlink-escape → null) lives
 // in the shared `core/project-read.ts` (`readProjectTextOrNull`) so the planning
@@ -223,15 +224,16 @@ export async function loadDeclaredDecisions(
   return docs;
 }
 
-// Walks the project for each declared `reads` glob and returns the
-// matched paths per glob. Skips any glob that the lint surface would
-// reject (path safety / syntax) so the pack renderer never sees a
-// half-parsed pattern. Returns [] when task.reads is absent or empty.
+// Matches each declared `reads` glob against Git tracked filenames only. This
+// deliberately does not walk the filesystem: task.reads is an agent-facing
+// declaration surface, and untracked local filenames must not become observable
+// through the context pack. Non-git projects fail closed when reads are present.
 export async function loadReadMatches(
   cwd: string,
   reads: readonly string[],
 ): Promise<ReadGlobMatches[]> {
   const result: ReadGlobMatches[] = [];
+  const tracked = await listTrackedProjectFiles(cwd);
   for (const glob of reads) {
     if (validateGlobSyntax(glob) !== null) {
       // Pattern lint failed — still surface it in the pack with no
@@ -239,12 +241,7 @@ export async function loadReadMatches(
       result.push({ glob, matches: [] });
       continue;
     }
-    let matches: string[];
-    try {
-      matches = await walkAndMatch(cwd, glob);
-    } catch {
-      matches = [];
-    }
+    const matches = tracked.filter(path => matchGlob(glob, path));
     result.push({ glob, matches });
   }
   return result;
