@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtemp, rm, readFile, writeFile, mkdir } from "node:fs/promises";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { runInit } from "../../../src/commands/init.ts";
 import {
@@ -14,7 +14,13 @@ let dir: string;
 
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), "code-pact-profile-path-"));
-  await runInit({ cwd: dir, locale: "en-US", agents: ["claude-code"], force: false, json: false });
+  await runInit({
+    cwd: dir,
+    locale: "en-US",
+    agents: ["claude-code"],
+    force: false,
+    json: false,
+  });
 });
 
 afterEach(async () => {
@@ -46,7 +52,9 @@ describe("resolveAgentProfileRel / resolveAgentProfilePath", () => {
 
   it("honors a non-default agents[].profile inside the owned profile namespace", async () => {
     await setProfileRel("claude-code", "agent-profiles/custom/cc.yaml");
-    expect(await resolveAgentProfileRel(dir, "claude-code")).toBe("agent-profiles/custom/cc.yaml");
+    expect(await resolveAgentProfileRel(dir, "claude-code")).toBe(
+      "agent-profiles/custom/cc.yaml",
+    );
     expect(await resolveAgentProfilePath(dir, "claude-code")).toBe(
       join(dir, ".code-pact", "agent-profiles", "custom", "cc.yaml"),
     );
@@ -59,11 +67,66 @@ describe("resolveAgentProfileRel / resolveAgentProfilePath", () => {
     // only the agent's own profile, so the custom path must still win.
     const p = join(dir, ".code-pact", "project.yaml");
     const text = await readFile(p, "utf8");
-    const next = text.replace(/default_agent: .*/, 'default_agent: "not a valid id!!"');
+    const next = text.replace(
+      /default_agent: .*/,
+      'default_agent: "not a valid id!!"',
+    );
     expect(next).not.toBe(text);
     await writeFile(p, next, "utf8");
-    expect(await resolveAgentProfileRel(dir, "claude-code")).toBe("agent-profiles/custom/cc.yaml");
+    expect(await resolveAgentProfileRel(dir, "claude-code")).toBe(
+      "agent-profiles/custom/cc.yaml",
+    );
   });
+
+  it.each([
+    "agent-profiles/private.txt",
+    "agent-profiles/private.json",
+    "agent-profiles/no-extension",
+    "state/private.yaml",
+    "model-profiles/private.yaml",
+    "adapters/private.yaml",
+  ])(
+    "rejects non-conforming profile path %s with CONFIG_ERROR (schema-runtime unified)",
+    async invalidProfile => {
+      await setProfileRel("claude-code", invalidProfile);
+      await expect(
+        resolveAgentProfileRel(dir, "claude-code"),
+      ).rejects.toMatchObject({
+        code: "CONFIG_ERROR",
+      });
+      await expect(
+        resolveAgentProfilePath(dir, "claude-code"),
+      ).rejects.toMatchObject({
+        code: "CONFIG_ERROR",
+      });
+    },
+  );
+
+  it.each(["agent-profiles/claude-code.yaml", "agent-profiles/custom/cc.yaml"])(
+    "accepts conforming profile path %s (schema-runtime unified)",
+    async validProfile => {
+      if (validProfile !== "agent-profiles/claude-code.yaml") {
+        const defaultPath = join(
+          dir,
+          ".code-pact",
+          "agent-profiles",
+          "claude-code.yaml",
+        );
+        const customPath = join(dir, ".code-pact", validProfile);
+        await mkdir(dirname(customPath), { recursive: true });
+        await writeFile(
+          customPath,
+          await readFile(defaultPath, "utf8"),
+          "utf8",
+        );
+        await rm(defaultPath, { force: true });
+        await setProfileRel("claude-code", validProfile);
+      }
+      expect(await resolveAgentProfileRel(dir, "claude-code")).toBe(
+        validProfile,
+      );
+    },
+  );
 
   it("rejects agent profiles outside .code-pact/agent-profiles for reads", async () => {
     await mkdir(join(dir, ".code-pact", "state"), { recursive: true });
@@ -76,7 +139,9 @@ describe("resolveAgentProfileRel / resolveAgentProfilePath", () => {
       "utf8",
     );
     await setProfileRel("claude-code", "state/private-agent-profile.yaml");
-    await expect(resolveAgentProfilePath(dir, "claude-code")).rejects.toMatchObject({
+    await expect(
+      resolveAgentProfilePath(dir, "claude-code"),
+    ).rejects.toMatchObject({
       code: "CONFIG_ERROR",
     });
   });
@@ -85,15 +150,23 @@ describe("resolveAgentProfileRel / resolveAgentProfilePath", () => {
     await setProfileRel("claude-code", "../../etc/evil.yaml");
     // The project explicitly declared an invalid path; surfacing it beats
     // silently reading/writing the default file elsewhere.
-    await expect(resolveAgentProfileRel(dir, "claude-code")).rejects.toMatchObject({
+    await expect(
+      resolveAgentProfileRel(dir, "claude-code"),
+    ).rejects.toMatchObject({
       code: "CONFIG_ERROR",
     });
   });
 
   it("rejects a present-but-unparseable project.yaml with CONFIG_ERROR (no fallback)", async () => {
     // Malformed YAML — present but broken. Falling back would mask it.
-    await writeFile(join(dir, ".code-pact", "project.yaml"), "agents: {unclosed", "utf8");
-    await expect(resolveAgentProfileRel(dir, "claude-code")).rejects.toMatchObject({
+    await writeFile(
+      join(dir, ".code-pact", "project.yaml"),
+      "agents: {unclosed",
+      "utf8",
+    );
+    await expect(
+      resolveAgentProfileRel(dir, "claude-code"),
+    ).rejects.toMatchObject({
       code: "CONFIG_ERROR",
     });
   });
@@ -104,7 +177,9 @@ describe("resolveAgentProfileRel / resolveAgentProfilePath", () => {
       "name: demo\nversion: 0.1.0\nlocale: en-US\ndefault_agent: claude-code\n",
       "utf8",
     );
-    await expect(resolveAgentProfileRel(dir, "claude-code")).rejects.toMatchObject({
+    await expect(
+      resolveAgentProfileRel(dir, "claude-code"),
+    ).rejects.toMatchObject({
       code: "CONFIG_ERROR",
     });
   });
@@ -115,7 +190,9 @@ describe("resolveAgentProfileRel / resolveAgentProfilePath", () => {
       "name: demo\nversion: 0.1.0\nlocale: en-US\ndefault_agent: claude-code\nagents: nope\n",
       "utf8",
     );
-    await expect(resolveAgentProfileRel(dir, "claude-code")).rejects.toMatchObject({
+    await expect(
+      resolveAgentProfileRel(dir, "claude-code"),
+    ).rejects.toMatchObject({
       code: "CONFIG_ERROR",
     });
   });
@@ -140,15 +217,19 @@ describe("resolveAgentProfileRel / resolveAgentProfilePath", () => {
     const p = join(dir, ".code-pact", "project.yaml");
     await rm(p, { force: true });
     await mkdir(p);
-    await expect(resolveAgentProfileRel(dir, "claude-code")).rejects.toMatchObject({
+    await expect(
+      resolveAgentProfileRel(dir, "claude-code"),
+    ).rejects.toMatchObject({
       code: "CONFIG_ERROR",
     });
   });
 
   it("rejects an unsafe agent name before it becomes a path segment", async () => {
-    await expect(resolveAgentProfilePath(dir, "../evil")).rejects.toMatchObject({
-      code: "CONFIG_ERROR",
-    });
+    await expect(resolveAgentProfilePath(dir, "../evil")).rejects.toMatchObject(
+      {
+        code: "CONFIG_ERROR",
+      },
+    );
   });
 
   it("rejects a profile whose declared name does not match the requested agent", async () => {
@@ -177,15 +258,19 @@ describe("resolveAgentProfileRel / resolveAgentProfilePath", () => {
 
 describe("adapter list honors a custom profile path", () => {
   it("reports the project.yaml agents[].profile path in profilePath", async () => {
-    const { runAdapterList } = await import("../../../src/commands/adapter-list.ts");
+    const { runAdapterList } =
+      await import("../../../src/commands/adapter-list.ts");
     await setProfileRel("claude-code", "agent-profiles/custom/cc.yaml");
     const result = await runAdapterList({ cwd: dir });
-    const cc = result.agents.find((a) => a.name === "claude-code");
-    expect(cc?.profilePath).toBe(join(dir, ".code-pact", "agent-profiles", "custom", "cc.yaml"));
+    const cc = result.agents.find(a => a.name === "claude-code");
+    expect(cc?.profilePath).toBe(
+      join(dir, ".code-pact", "agent-profiles", "custom", "cc.yaml"),
+    );
   });
 
   it("fails with CONFIG_ERROR on an invalid matching agents[].profile (no silent fallback)", async () => {
-    const { runAdapterList } = await import("../../../src/commands/adapter-list.ts");
+    const { runAdapterList } =
+      await import("../../../src/commands/adapter-list.ts");
     await setProfileRel("claude-code", "../../etc/evil.yaml");
     await expect(runAdapterList({ cwd: dir })).rejects.toMatchObject({
       code: "CONFIG_ERROR",
@@ -195,10 +280,20 @@ describe("adapter list honors a custom profile path", () => {
 
 describe("resolver-using commands do not fall back on a broken project.yaml", () => {
   it("adapter install fails with CONFIG_ERROR on malformed project.yaml", async () => {
-    const { runGenerateAdapter } = await import("../../../src/commands/adapter.ts");
-    await writeFile(join(dir, ".code-pact", "project.yaml"), "agents: {unclosed", "utf8");
+    const { runGenerateAdapter } =
+      await import("../../../src/commands/adapter.ts");
+    await writeFile(
+      join(dir, ".code-pact", "project.yaml"),
+      "agents: {unclosed",
+      "utf8",
+    );
     await expect(
-      runGenerateAdapter({ cwd: dir, agentName: "claude-code", force: true, locale: "en-US" }),
+      runGenerateAdapter({
+        cwd: dir,
+        agentName: "claude-code",
+        force: true,
+        locale: "en-US",
+      }),
     ).rejects.toMatchObject({ code: "CONFIG_ERROR" });
   });
 
@@ -209,14 +304,22 @@ describe("resolver-using commands do not fall back on a broken project.yaml", ()
       "name: demo\nversion: 0.1.0\nlocale: en-US\ndefault_agent: claude-code\nagents: nope\n",
       "utf8",
     );
-    await expect(runAdapterList({ cwd: dir })).rejects.toMatchObject({ code: "CONFIG_ERROR" });
+    await expect(runAdapterList({ cwd: dir })).rejects.toMatchObject({
+      code: "CONFIG_ERROR",
+    });
   });
 
   it("adapter doctor surfaces an invalid agents[].profile as CONFIG_ERROR (not silent)", async () => {
-    const { runGenerateAdapter, runAdapterDoctor } = await import("../../../src/commands/adapter.ts");
+    const { runGenerateAdapter, runAdapterDoctor } =
+      await import("../../../src/commands/adapter.ts");
     // Install first so a manifest exists — otherwise inspectAgent returns at the
     // missing-manifest check before it ever loads the profile.
-    await runGenerateAdapter({ cwd: dir, agentName: "claude-code", force: true, locale: "en-US" });
+    await runGenerateAdapter({
+      cwd: dir,
+      agentName: "claude-code",
+      force: true,
+      locale: "en-US",
+    });
     await setProfileRel("claude-code", "../../etc/evil.yaml");
     await expect(
       runAdapterDoctor({ cwd: dir, agentName: "claude-code", locale: "en-US" }),
@@ -224,8 +327,13 @@ describe("resolver-using commands do not fall back on a broken project.yaml", ()
   });
 
   it("adapter doctor without --agent does not return a clean bill on a broken project.yaml", async () => {
-    const { runAdapterDoctor } = await import("../../../src/commands/adapter.ts");
-    await writeFile(join(dir, ".code-pact", "project.yaml"), "agents: {unclosed", "utf8");
+    const { runAdapterDoctor } =
+      await import("../../../src/commands/adapter.ts");
+    await writeFile(
+      join(dir, ".code-pact", "project.yaml"),
+      "agents: {unclosed",
+      "utf8",
+    );
     await expect(
       runAdapterDoctor({ cwd: dir, locale: "en-US" }),
     ).rejects.toMatchObject({ code: "CONFIG_ERROR" });
@@ -234,13 +342,27 @@ describe("resolver-using commands do not fall back on a broken project.yaml", ()
 
 describe("adapter generation honors a custom profile path end-to-end", () => {
   it("reads and pins model_version to the project's profile path, not the default", async () => {
-    const { runGenerateAdapter } = await import("../../../src/commands/adapter.ts");
+    const { runGenerateAdapter } =
+      await import("../../../src/commands/adapter.ts");
 
     // Move the profile to a non-default but still writable location under
     // `.code-pact/agent-profiles/**` and repoint project.yaml.
-    await mkdir(join(dir, ".code-pact", "agent-profiles", "custom"), { recursive: true });
-    const defaultPath = join(dir, ".code-pact", "agent-profiles", "claude-code.yaml");
-    const customPath = join(dir, ".code-pact", "agent-profiles", "custom", "cc.yaml");
+    await mkdir(join(dir, ".code-pact", "agent-profiles", "custom"), {
+      recursive: true,
+    });
+    const defaultPath = join(
+      dir,
+      ".code-pact",
+      "agent-profiles",
+      "claude-code.yaml",
+    );
+    const customPath = join(
+      dir,
+      ".code-pact",
+      "agent-profiles",
+      "custom",
+      "cc.yaml",
+    );
     await writeFile(customPath, await readFile(defaultPath, "utf8"), "utf8");
     await rm(defaultPath, { force: true });
     await setProfileRel("claude-code", "agent-profiles/custom/cc.yaml");

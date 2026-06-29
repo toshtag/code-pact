@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { parse as parseYaml } from "yaml";
-import { RelativePosixPath } from "./schemas/relative-path.ts";
+import { AgentProfileRefPath } from "./schemas/agent-profile-ref-path.ts";
 import { assertSafePlanId } from "./schemas/plan-id.ts";
 import { resolveSymlinkFreeProjectPath } from "./path-safety.ts";
 import { resolveProjectConfigPath } from "./project-config-path.ts";
@@ -94,7 +94,7 @@ async function assertProfileRelNotShared(
     if (!a || typeof a !== "object") continue;
     const name = (a as { name?: unknown }).name;
     if (typeof name !== "string" || name === agentName) continue;
-    const parsed = RelativePosixPath.safeParse(
+    const parsed = AgentProfileRefPath.safeParse(
       (a as { profile?: unknown }).profile,
     );
     if (parsed.success && parsed.data === rel) {
@@ -202,7 +202,7 @@ export async function resolveAgentProfileRel(
       typeof a === "object" &&
       (a as { name?: unknown }).name === agentName
     ) {
-      const parsed = RelativePosixPath.safeParse(
+      const parsed = AgentProfileRefPath.safeParse(
         (a as { profile?: unknown }).profile,
       );
       if (parsed.success) {

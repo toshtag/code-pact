@@ -17,7 +17,10 @@ describe("Project", () => {
   });
 
   it("accepts locale as an object", () => {
-    const result = Project.parse({ ...VALID, locale: { default: "en-US", cli: "ja-JP" } });
+    const result = Project.parse({
+      ...VALID,
+      locale: { default: "en-US", cli: "ja-JP" },
+    });
     expect(result.locale).toMatchObject({ default: "en-US", cli: "ja-JP" });
   });
 
@@ -81,12 +84,13 @@ describe("AgentRef.enabled", () => {
     "~/x.yaml",
     "state/private-agent-profile.yaml",
     "agent-profiles/not-yaml.json",
-  ])(
-    "rejects unsafe profile %j",
-    (profile) => {
-      expect(() => AgentRef.parse({ name: "claude-code", profile })).toThrow();
-    },
-  );
+    "agent-profiles/private.txt",
+    "agent-profiles/no-extension",
+    "model-profiles/private.yaml",
+    "adapters/private.yaml",
+  ])("rejects unsafe profile %j", profile => {
+    expect(() => AgentRef.parse({ name: "claude-code", profile })).toThrow();
+  });
 
   it("Project preserves agents[].enabled defaulting through nested parse", () => {
     const result = Project.parse(VALID);
