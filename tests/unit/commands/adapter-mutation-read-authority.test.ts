@@ -79,7 +79,7 @@ async function forgeManifest(
 }
 
 describe("adapter install/upgrade read authority", () => {
-  it("never reads a profile-redirected .env and gives the same refusal for matching and mismatching hashes", async () => {
+  it("never reads a profile-redirected .env — profile contract refuses before any filesystem operation", async () => {
     const target = join(dir, ".env");
     const content = "API_TOKEN=low-entropy-secret\n";
     await writeFile(target, content, "utf8");
@@ -98,50 +98,37 @@ describe("adapter install/upgrade read authority", () => {
       "utf8",
     );
 
-    const installRows: unknown[] = [];
-    const upgradeRows: unknown[] = [];
     for (const sha256 of [computeContentHash(content), "0".repeat(64)]) {
       await forgeManifest([{ path: ".env", sha256, role: "instruction" }]);
 
       readFileSpy.mockClear();
-      const install = await runAdapterInstall({
-        cwd: dir,
-        agentName: "claude-code",
-        force: false,
-        locale: "en-US",
-        generatorVersionOverride: "test",
-      });
-      installRows.push(install.files.find(f => f.relPath === ".env"));
+      await expect(
+        runAdapterInstall({
+          cwd: dir,
+          agentName: "claude-code",
+          force: false,
+          locale: "en-US",
+          generatorVersionOverride: "test",
+        }),
+      ).rejects.toThrow(/instruction_filename/);
       expect(targetReads(target)).toEqual([]);
 
       for (const mode of ["check", "write"] as const) {
         readFileSpy.mockClear();
-        const upgrade = await runAdapterUpgrade({
-          cwd: dir,
-          agentName: "claude-code",
-          mode,
-          force: false,
-          acceptModified: false,
-          locale: "en-US",
-          generatorVersionOverride: "test",
-        });
-        upgradeRows.push(upgrade.plan.find(f => f.relPath === ".env"));
+        await expect(
+          runAdapterUpgrade({
+            cwd: dir,
+            agentName: "claude-code",
+            mode,
+            force: false,
+            acceptModified: false,
+            locale: "en-US",
+            generatorVersionOverride: "test",
+          }),
+        ).rejects.toThrow(/instruction_filename/);
         expect(targetReads(target)).toEqual([]);
       }
     }
-
-    expect(installRows[0]).toEqual(installRows[1]);
-    expect(installRows[0]).toMatchObject({
-      action: "refuse",
-      reason: "unowned_generated_path",
-    });
-    expect(upgradeRows[0]).toEqual(upgradeRows[2]);
-    expect(upgradeRows[1]).toEqual(upgradeRows[3]);
-    expect(upgradeRows[0]).toMatchObject({
-      local: "unverifiable",
-      action: "refuse",
-      reason: "unowned_generated_path",
-    });
   });
 
   it("never reads an existing dynamic skill and ignores a forged manifest hash", async () => {

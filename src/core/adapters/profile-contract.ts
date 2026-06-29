@@ -10,7 +10,9 @@ import type { AdapterDescriptor } from "./types.ts";
  * already produced a desired file at that path.
  *
  * Checks:
- *  - `instruction_filename` must match the adapter's owned instruction path.
+ *  - `instruction_filename` must match an adapter-owned instruction or rule path.
+ *    (Cursor uses `role: "rule"` for its instruction file; claude/codex/gemini
+ *    use `role: "instruction"`.)
  *  - `context_dir` is already schema-constrained to `.context/**` (ContextOutputDir).
  *  - `skill_dir` (when present) must be a prefix of at least one owned skill path.
  *  - `hook_dir` (when present) must be a prefix of at least one owned hook path.
@@ -19,14 +21,14 @@ export function validateAgentProfileForAdapter(
   profile: AgentProfile,
   descriptor: AdapterDescriptor,
 ): void {
-  // instruction_filename must be one of the adapter's owned instruction paths.
+  // instruction_filename must be one of the adapter's owned instruction or rule paths.
   const ownedInstructionPaths = Object.entries(descriptor.ownedPathRoles)
-    .filter(([, role]) => role === "instruction")
+    .filter(([, role]) => role === "instruction" || role === "rule")
     .map(([path]) => path);
 
   if (!ownedInstructionPaths.includes(profile.instruction_filename)) {
     const e = new Error(
-      `Agent profile instruction_filename "${profile.instruction_filename}" is not an owned instruction path for this adapter. Expected one of: ${ownedInstructionPaths.join(", ")}`,
+      `Agent profile instruction_filename "${profile.instruction_filename}" is not an owned instruction or rule path for this adapter. Expected one of: ${ownedInstructionPaths.join(", ")}`,
     );
     (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
     throw e;
@@ -39,7 +41,9 @@ export function validateAgentProfileForAdapter(
       .map(([path]) => path);
 
     if (ownedSkillPaths.length > 0) {
-      const hasMatch = ownedSkillPaths.some(p => p.startsWith(profile.skill_dir! + "/"));
+      const hasMatch = ownedSkillPaths.some(p =>
+        p.startsWith(profile.skill_dir! + "/"),
+      );
       if (!hasMatch) {
         const e = new Error(
           `Agent profile skill_dir "${profile.skill_dir}" does not contain any owned skill path for this adapter. Expected a prefix of: ${ownedSkillPaths.join(", ")}`,
@@ -57,7 +61,9 @@ export function validateAgentProfileForAdapter(
       .map(([path]) => path);
 
     if (ownedHookPaths.length > 0) {
-      const hasMatch = ownedHookPaths.some(p => p.startsWith(profile.hook_dir! + "/"));
+      const hasMatch = ownedHookPaths.some(p =>
+        p.startsWith(profile.hook_dir! + "/"),
+      );
       if (!hasMatch) {
         const e = new Error(
           `Agent profile hook_dir "${profile.hook_dir}" does not contain any owned hook path for this adapter. Expected a prefix of: ${ownedHookPaths.join(", ")}`,

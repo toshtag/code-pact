@@ -1,4 +1,4 @@
-import { readFile, readdir, mkdir } from "node:fs/promises";
+import { readFile, mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { AgentProfile } from "../core/schemas/agent-profile.ts";
@@ -16,8 +16,9 @@ import {
   readAuthorizedRegularFileMaybe,
   type FileAction,
 } from "../core/adapters/file-state.ts";
-import { resolveWithinProject } from "../core/path-safety.ts";
+import { loadModelProfilesStrict } from "../core/models/load-model-profiles.ts";
 import { authorizeAdapterMutationPath } from "../core/adapters/manifest-file-ownership.ts";
+import { validateAgentProfileForAdapter } from "../core/adapters/profile-contract.ts";
 import {
   computeContentHash,
   manifestPath,
@@ -153,36 +154,11 @@ async function loadAgentProfile(
 }
 
 async function loadModelProfiles(cwd: string): Promise<ModelProfile[]> {
-  let entries: string[];
   try {
-    // Contain the DIRECTORY before enumerating it: a symlinked-outside
-    // `.code-pact/model-profiles` must not even be `readdir`'d (out-of-project
-    // enumeration / large-dir DoS). Optional source → an unsafe/missing dir is [].
-    const dir = await resolveWithinProject(cwd, ".code-pact/model-profiles");
-    entries = await readdir(dir);
+    return await loadModelProfilesStrict(cwd);
   } catch {
     return [];
   }
-  const profiles: ModelProfile[] = [];
-  for (const entry of entries.sort()) {
-    if (!entry.endsWith(".yaml")) continue;
-    try {
-      // Contain the read (resolveWithinProject): a symlinked `.code-pact/model-
-      // profiles` (or a per-file symlink) cannot read an out-of-project file.
-      // All inside the try so an UNREADABLE entry (a `*.yaml` directory → EISDIR,
-      // or an escaping symlink) is skipped like a malformed one, never an uncoded
-      // errno that crashes the command (exit 3). Best-effort source.
-      const abs = await resolveWithinProject(
-        cwd,
-        [".code-pact", "model-profiles", entry].join("/"),
-      );
-      const raw = await readFile(abs, "utf8");
-      profiles.push(ModelProfile.parse(parseYaml(raw) as unknown));
-    } catch {
-      // skip unreadable / malformed / out-of-project profiles
-    }
-  }
-  return profiles;
 }
 
 function buildFingerprint(
@@ -254,6 +230,12 @@ export async function runAdapterInstall(
     loadModelProfiles(cwd),
   ]);
 
+  // Profile contract: validate the profile's path fields against the adapter
+  // descriptor's owned paths BEFORE any filesystem operation. A hostile profile
+  // (e.g. instruction_filename: .env) is refused at the contract boundary.
+  const descriptor = adapterRegistry[agentName];
+  validateAgentProfileForAdapter(profile, descriptor);
+
   // Validate `--model` (PURE — no filesystem access) up front, so an unknown
   // value is a clean CONFIG_ERROR before anything is read or written.
   validateModelVersionInput(modelVersion);
@@ -279,7 +261,6 @@ export async function runAdapterInstall(
   const resolvedModelVersion =
     validateModelVersionInput(modelVersion) ?? profile.model_version;
 
-  const descriptor = adapterRegistry[agentName];
   const desiredFiles = dedupeDesiredFiles(
     await descriptor.generateDesiredFiles({
       cwd,
@@ -291,10 +272,19 @@ export async function runAdapterInstall(
   );
 
   // Write PREFLIGHT — fail closed BEFORE any persistent side effect. The manifest
-  // read above already covered `.code-pact/adapters`; this checks the placeholder
-  // dirs and manifest path with the strict no-symlink resolver. Generated-file
+  // read above already covered `.code-pact/adapters`; this checks the context_dir
+  // and manifest path with the strict no-symlink resolver. Generated-file
   // targets are authorized separately below before any target stat/read/hash.
   // Either phase aborts before the model pin or any generated-file write.
+  //
+  // context_dir IS pre-created: it is schema-constrained to `.context/**`
+  // (ContextOutputDir) and symlink-free resolved, so it cannot be an arbitrary
+  // path. hook_dir is checked in the preflight (for symlink-free resolution)
+  // but NOT pre-created: it is `RelativePosixPath.optional()` (arbitrary
+  // project-relative path), so creating it up front would allow a hostile
+  // profile to force arbitrary directory creation. The generated file write
+  // loop below creates parent dirs as needed via
+  // `mkdir(dirname(absPath), { recursive: true })`.
   const resolvedPreflight = await assertAdapterWritePathsContained(cwd, [
     { path: profile.context_dir, kind: "directory" },
     ...(profile.hook_dir
@@ -305,11 +295,6 @@ export async function runAdapterInstall(
   const contextDirAbs = resolvedPreflight.find(
     p => p.kind === "directory" && p.path === profile.context_dir,
   )!.absPath;
-  const hookDirAbs = profile.hook_dir
-    ? resolvedPreflight.find(
-        p => p.kind === "directory" && p.path === profile.hook_dir,
-      )!.absPath
-    : undefined;
   const manifestAbs = resolvedPreflight.find(
     p => p.kind === "file" && p.path === manifestRelPath(agentName),
   )!.absPath;
@@ -474,9 +459,6 @@ export async function runAdapterInstall(
   });
 
   await mkdir(contextDirAbs, { recursive: true });
-  if (hookDirAbs) {
-    await mkdir(hookDirAbs, { recursive: true });
-  }
 
   for (const planned of plannedFiles) {
     if (

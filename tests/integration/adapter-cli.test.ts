@@ -1448,7 +1448,7 @@ describe("adapter forged-manifest + profile → arbitrary file overwrite is REFU
     );
   }
 
-  it("install does NOT overwrite a victim file the forged manifest claims (refuse, exit 1)", async () => {
+  it("install does NOT overwrite a victim file the forged manifest claims (profile contract refuses, exit 2)", async () => {
     await pointInstructionAt(VICTIM);
     await writeFile(join(dir, VICTIM), VICTIM_CONTENT, "utf8");
     // Forge a manifest entry whose hash matches the victim's CURRENT content.
@@ -1473,27 +1473,22 @@ describe("adapter forged-manifest + profile → arbitrary file overwrite is REFU
     });
 
     const res = runCli(["adapter", "install", "claude-code", "--json"]);
+    // The profile contract catches the hostile instruction_filename BEFORE any
+    // filesystem operation — the victim is never read or overwritten.
+    expect(await readFile(join(dir, VICTIM), "utf8")).toBe(VICTIM_CONTENT);
+    expect(res.status).toBe(2);
     const parsed = JSON.parse(res.stdout) as {
       ok: boolean;
-      data: {
-        refused: string[];
-        files: Array<{ relPath: string; action: string }>;
-      };
+      error: { code: string };
     };
-    // The victim is untouched, and surfaced as refused (install exits 1).
-    expect(await readFile(join(dir, VICTIM), "utf8")).toBe(VICTIM_CONTENT);
-    expect(res.status).toBe(1);
-    expect(parsed.data.files.find(f => f.relPath === VICTIM)?.action).toBe(
-      "refuse",
-    );
-    expect(parsed.data.refused.some(p => p.endsWith(`/${VICTIM}`))).toBe(true);
+    expect(parsed.error.code).toBe("CONFIG_ERROR");
   });
 
-  it("install --force STILL does not overwrite the victim (force only adopts unmanaged owned paths)", async () => {
+  it("install --force STILL does not overwrite the victim (profile contract refuses before any write)", async () => {
     await pointInstructionAt(VICTIM);
     await writeFile(join(dir, VICTIM), VICTIM_CONTENT, "utf8");
-    // No manifest at all this time → victim is unmanaged × stale; --force would be
-    // `replace_unmanaged`, which the same gate refuses for a non-owned path.
+    // No manifest at all this time → profile contract still catches the hostile
+    // instruction_filename before any filesystem operation.
     const res = runCli([
       "adapter",
       "install",
@@ -1502,7 +1497,7 @@ describe("adapter forged-manifest + profile → arbitrary file overwrite is REFU
       "--json",
     ]);
     expect(await readFile(join(dir, VICTIM), "utf8")).toBe(VICTIM_CONTENT);
-    expect(res.status).toBe(1);
+    expect(res.status).toBe(2);
   });
 
   it("a symlinked owned skills dir cannot escape the overwrite gate (lexical-owned != real target)", async () => {

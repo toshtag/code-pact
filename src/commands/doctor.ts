@@ -3,8 +3,14 @@ import { join, basename, extname } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { Roadmap } from "../core/schemas/roadmap.ts";
 import { Phase } from "../core/schemas/phase.ts";
-import { ProgressLog, type ProgressEvent } from "../core/schemas/progress-event.ts";
-import { loadMergedProgress, mergeProgressStreams } from "../core/progress/io.ts";
+import {
+  ProgressLog,
+  type ProgressEvent,
+} from "../core/schemas/progress-event.ts";
+import {
+  loadMergedProgress,
+  mergeProgressStreams,
+} from "../core/progress/io.ts";
 import { computeEventId } from "../core/progress/event-id.ts";
 import {
   type LoadedEventFile,
@@ -18,7 +24,8 @@ import {
 } from "../core/progress/all-sources.ts";
 import { validateSnapshotEventEvidence } from "../core/archive/snapshot-evidence.ts";
 import { Project } from "../core/schemas/project.ts";
-import { resolveSymlinkFreeProjectPath, resolveWithinProject } from "../core/path-safety.ts";
+import { resolveSymlinkFreeProjectPath } from "../core/path-safety.ts";
+import { resolveOwnedReadPath } from "../core/project-fs/owned-read.ts";
 import {
   ACCEPTED_MODEL_VERSION_INPUTS,
   AgentProfile,
@@ -127,7 +134,10 @@ export type DoctorResult = {
 
 type SafeYamlResult =
   | { ok: true; data: unknown }
-  | { ok: false; code: "PATH_OUTSIDE_PROJECT" | "INVALID_YAML" };
+  | {
+      ok: false;
+      code: "PATH_OUTSIDE_PROJECT" | "PATH_NOT_OWNED" | "INVALID_YAML";
+    };
 
 async function safeReadProjectYaml(
   cwd: string,
@@ -135,8 +145,10 @@ async function safeReadProjectYaml(
 ): Promise<SafeYamlResult> {
   let abs: string;
   try {
-    abs = await resolveWithinProject(cwd, relPath);
-  } catch {
+    abs = await resolveOwnedReadPath(cwd, relPath);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "PATH_NOT_OWNED") return { ok: false, code: "PATH_NOT_OWNED" };
     return { ok: false, code: "PATH_OUTSIDE_PROJECT" };
   }
   try {
@@ -155,9 +167,12 @@ function pushPathIssue(issues: DoctorIssue[], relPath: string): void {
   });
 }
 
-async function projectFileExists(cwd: string, relPath: string): Promise<boolean> {
+async function projectFileExists(
+  cwd: string,
+  relPath: string,
+): Promise<boolean> {
   try {
-    await access(await resolveWithinProject(cwd, relPath));
+    await access(await resolveOwnedReadPath(cwd, relPath));
     return true;
   } catch {
     return false;
@@ -168,12 +183,24 @@ async function projectFileExists(cwd: string, relPath: string): Promise<boolean>
 // Individual check groups
 // ---------------------------------------------------------------------------
 
-async function checkProjectYaml(cwd: string, issues: DoctorIssue[]): Promise<Project | null> {
+async function checkProjectYaml(
+  cwd: string,
+  issues: DoctorIssue[],
+): Promise<Project | null> {
   const path = ".code-pact/project.yaml";
   const result = await safeReadProjectYaml(cwd, path);
   if (!result.ok) {
-    if (result.code === "PATH_OUTSIDE_PROJECT") pushPathIssue(issues, path);
-    else issues.push({ code: "INVALID_YAML", severity: "error", message: `Cannot read ${path}` });
+    if (
+      result.code === "PATH_OUTSIDE_PROJECT" ||
+      result.code === "PATH_NOT_OWNED"
+    )
+      pushPathIssue(issues, path);
+    else
+      issues.push({
+        code: "INVALID_YAML",
+        severity: "error",
+        message: `Cannot read ${path}`,
+      });
     return null;
   }
   const parsed = Project.safeParse(result.data);
@@ -188,12 +215,24 @@ async function checkProjectYaml(cwd: string, issues: DoctorIssue[]): Promise<Pro
   return parsed.data;
 }
 
-async function checkRoadmap(cwd: string, issues: DoctorIssue[]): Promise<Roadmap | null> {
+async function checkRoadmap(
+  cwd: string,
+  issues: DoctorIssue[],
+): Promise<Roadmap | null> {
   const path = "design/roadmap.yaml";
   const result = await safeReadProjectYaml(cwd, path);
   if (!result.ok) {
-    if (result.code === "PATH_OUTSIDE_PROJECT") pushPathIssue(issues, path);
-    else issues.push({ code: "INVALID_YAML", severity: "error", message: `Cannot read ${path}` });
+    if (
+      result.code === "PATH_OUTSIDE_PROJECT" ||
+      result.code === "PATH_NOT_OWNED"
+    )
+      pushPathIssue(issues, path);
+    else
+      issues.push({
+        code: "INVALID_YAML",
+        severity: "error",
+        message: `Cannot read ${path}`,
+      });
     return null;
   }
   const parsed = Roadmap.safeParse(result.data);
@@ -232,11 +271,11 @@ async function checkPhases(
     const absPath = join(cwd, ref.path);
     let presence: "present" | "absent" | "inaccessible";
     try {
-      await access(await resolveWithinProject(cwd, ref.path));
+      await access(await resolveOwnedReadPath(cwd, ref.path));
       presence = "present";
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
-      if (code === "PATH_OUTSIDE_PROJECT") {
+      if (code === "PATH_OUTSIDE_PROJECT" || code === "PATH_NOT_OWNED") {
         pushPathIssue(issues, ref.path);
         continue;
       }
@@ -279,7 +318,11 @@ async function checkPhases(
     }
     const result = await safeReadProjectYaml(cwd, ref.path);
     if (!result.ok) {
-      if (result.code === "PATH_OUTSIDE_PROJECT") pushPathIssue(issues, ref.path);
+      if (
+        result.code === "PATH_OUTSIDE_PROJECT" ||
+        result.code === "PATH_NOT_OWNED"
+      )
+        pushPathIssue(issues, ref.path);
       else {
         issues.push({
           code: "INVALID_YAML",
@@ -322,7 +365,7 @@ async function checkPhases(
       pushPathIssue(issues, "design/phases");
     }
   }
-  const referencedPaths = new Set(roadmap.phases.map((r) => r.path));
+  const referencedPaths = new Set(roadmap.phases.map(r => r.path));
   for (const file of phaseFiles) {
     if (!file.endsWith(".yaml")) continue;
     const relPath = `design/phases/${file}`;
@@ -348,7 +391,7 @@ async function checkPhases(
   // `validate --strict` fails on THAT, not on PHASE_SNAPSHOT_INVALID.
   const discovered = await discoverUnreferencedSnapshots(
     cwd,
-    new Set(roadmap.phases.map((r) => r.id)),
+    new Set(roadmap.phases.map(r => r.id)),
   );
   archivedCandidates.push(...discovered.entries);
 
@@ -369,7 +412,11 @@ async function checkPhases(
     });
   }
 
-  return { phases, phaseEntries, archivedKnownTaskIds: new Set(merge.index.keys()) };
+  return {
+    phases,
+    phaseEntries,
+    archivedKnownTaskIds: new Set(merge.index.keys()),
+  };
 }
 
 async function checkProgressLog(
@@ -384,12 +431,16 @@ async function checkProgressLog(
   // unreadable / schema-invalid legacy file is INVALID_YAML / SCHEMA_ERROR.
   let legacyEvents: ProgressEvent[] = [];
   try {
-    const raw = await readFile(await resolveWithinProject(cwd, path), "utf8");
+    const raw = await readFile(await resolveOwnedReadPath(cwd, path), "utf8");
     let doc: unknown;
     try {
       doc = parseYaml(raw);
     } catch {
-      issues.push({ code: "INVALID_YAML", severity: "error", message: `Cannot read ${path}` });
+      issues.push({
+        code: "INVALID_YAML",
+        severity: "error",
+        message: `Cannot read ${path}`,
+      });
       return;
     }
     const parsed = ProgressLog.safeParse(doc);
@@ -403,12 +454,19 @@ async function checkProgressLog(
     }
     legacyEvents = parsed.data.events;
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "PATH_OUTSIDE_PROJECT") {
+    if (
+      (err as NodeJS.ErrnoException).code === "PATH_OUTSIDE_PROJECT" ||
+      (err as NodeJS.ErrnoException).code === "PATH_NOT_OWNED"
+    ) {
       pushPathIssue(issues, path);
       return;
     }
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
-      issues.push({ code: "INVALID_YAML", severity: "error", message: `Cannot read ${path}` });
+      issues.push({
+        code: "INVALID_YAML",
+        severity: "error",
+        message: `Cannot read ${path}`,
+      });
       return;
     }
     // ENOENT → missing legacy file; fall through with empty legacy events.
@@ -424,7 +482,9 @@ async function checkProgressLog(
   } catch (err) {
     const tag = (err as NodeJS.ErrnoException).code;
     const code =
-      tag === "EVENT_FILE_ID_MISMATCH" || tag === "INVALID_YAML" || tag === "EVENT_PACK_INVALID"
+      tag === "EVENT_FILE_ID_MISMATCH" ||
+      tag === "INVALID_YAML" ||
+      tag === "EVENT_PACK_INVALID"
         ? tag
         : "SCHEMA_ERROR";
     issues.push({ code, severity: "error", message: (err as Error).message });
@@ -432,22 +492,31 @@ async function checkProgressLog(
   }
   let returnAfterIssues = false;
   for (const issue of packSources.issues) {
-    issues.push({ code: issue.code, severity: "error", message: issue.message });
+    issues.push({
+      code: issue.code,
+      severity: "error",
+      message: issue.message,
+    });
     returnAfterIssues = true;
   }
   if (returnAfterIssues) return; // a corrupt/unbound pack: stop before orphan logic
   // Archived-task legacy conflict gate (lenient: collect + exclude from merge).
   const { durableIds, archivedTaskIds, archivedEnumerationComplete } =
     await durableIdsAndArchivedTasks(cwd, packSources);
-  const { mergeableLegacyEvents, issues: legacyIssues } = filterArchivedTaskLegacyConflicts(
-    legacyEvents,
-    durableIds,
-    archivedTaskIds,
-    "lenient",
-    archivedEnumerationComplete,
-  );
+  const { mergeableLegacyEvents, issues: legacyIssues } =
+    filterArchivedTaskLegacyConflicts(
+      legacyEvents,
+      durableIds,
+      archivedTaskIds,
+      "lenient",
+      archivedEnumerationComplete,
+    );
   for (const issue of legacyIssues) {
-    issues.push({ code: issue.code, severity: "error", message: issue.message });
+    issues.push({
+      code: issue.code,
+      severity: "error",
+      message: issue.message,
+    });
   }
   const events = mergeProgressStreams(mergeableLegacyEvents, [
     ...packSources.looseFiles,
@@ -461,7 +530,9 @@ async function checkProgressLog(
   for (const phase of phases) {
     for (const task of phase.tasks ?? []) taskIndex.add(task.id);
   }
-  const known = { has: (id: string) => taskIndex.has(id) || archivedKnownTaskIds.has(id) };
+  const known = {
+    has: (id: string) => taskIndex.has(id) || archivedKnownTaskIds.has(id),
+  };
   for (const planIssue of detectOrphanProgressEvents(events, known)) {
     issues.push(planIssueToDoctor(planIssue));
   }
@@ -477,7 +548,10 @@ async function checkProgressLog(
  * the fail-soft discovery contract. A corrupt pack read entirely also skips
  * (checkProgressLog owns that error code).
  */
-async function checkSnapshotEventEvidence(cwd: string, issues: DoctorIssue[]): Promise<void> {
+async function checkSnapshotEventEvidence(
+  cwd: string,
+  issues: DoctorIssue[],
+): Promise<void> {
   let packSources;
   try {
     packSources = await readPackSources(cwd, "lenient");
@@ -519,7 +593,6 @@ function planIssueToDoctor(issue: PlanIssue): DoctorIssue {
   };
 }
 
-
 async function checkAgentProfiles(
   cwd: string,
   project: Project,
@@ -531,7 +604,11 @@ async function checkAgentProfiles(
     const profilePath = [".code-pact", agentRef.profile].join("/");
     const result = await safeReadProjectYaml(cwd, profilePath);
     if (!result.ok) {
-      if (result.code === "PATH_OUTSIDE_PROJECT") pushPathIssue(issues, profilePath);
+      if (
+        result.code === "PATH_OUTSIDE_PROJECT" ||
+        result.code === "PATH_NOT_OWNED"
+      )
+        pushPathIssue(issues, profilePath);
       else {
         issues.push({
           code: "AGENT_NOT_FOUND",
@@ -572,7 +649,7 @@ async function checkAgentProfiles(
       // with doctor about whether a profile is stale. The message text stays
       // here (doctor's full remediation differs from the upgrade hint).
       const staleByTier = new Map(
-        detectModelMapDrift(parsed.data.model_map).map((d) => [d.tier, d]),
+        detectModelMapDrift(parsed.data.model_map).map(d => [d.tier, d]),
       );
       for (const tier of knownTiers) {
         const id = parsed.data.model_map[tier];
@@ -615,14 +692,20 @@ async function checkAgentProfiles(
   }
 }
 
-async function checkModelProfiles(cwd: string, issues: DoctorIssue[]): Promise<void> {
+async function checkModelProfiles(
+  cwd: string,
+  issues: DoctorIssue[],
+): Promise<void> {
   const dirRel = ".code-pact/model-profiles";
   let entries: string[] = [];
   try {
-    const dir = await resolveWithinProject(cwd, dirRel);
+    const dir = await resolveOwnedReadPath(cwd, dirRel);
     entries = await readdir(dir);
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "PATH_OUTSIDE_PROJECT") {
+    if (
+      (err as NodeJS.ErrnoException).code === "PATH_OUTSIDE_PROJECT" ||
+      (err as NodeJS.ErrnoException).code === "PATH_NOT_OWNED"
+    ) {
       pushPathIssue(issues, dirRel);
       return;
     }
@@ -639,7 +722,11 @@ async function checkModelProfiles(cwd: string, issues: DoctorIssue[]): Promise<v
     const relPath = `${dirRel}/${entry}`;
     const result = await safeReadProjectYaml(cwd, relPath);
     if (!result.ok) {
-      if (result.code === "PATH_OUTSIDE_PROJECT") pushPathIssue(issues, relPath);
+      if (
+        result.code === "PATH_OUTSIDE_PROJECT" ||
+        result.code === "PATH_NOT_OWNED"
+      )
+        pushPathIssue(issues, relPath);
       else {
         issues.push({
           code: "INVALID_YAML",
@@ -660,16 +747,22 @@ async function checkModelProfiles(cwd: string, issues: DoctorIssue[]): Promise<v
   }
 }
 
-async function checkBakFiles(cwd: string, issues: DoctorIssue[]): Promise<void> {
+async function checkBakFiles(
+  cwd: string,
+  issues: DoctorIssue[],
+): Promise<void> {
   // Check design/ tree for .bak files
   const dirs = ["design", ".code-pact"];
   for (const relDir of dirs) {
     let entries: string[] = [];
     try {
-      const dir = await resolveWithinProject(cwd, relDir);
+      const dir = await resolveOwnedReadPath(cwd, relDir);
       entries = await readdir(dir);
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === "PATH_OUTSIDE_PROJECT") {
+      if (
+        (err as NodeJS.ErrnoException).code === "PATH_OUTSIDE_PROJECT" ||
+        (err as NodeJS.ErrnoException).code === "PATH_NOT_OWNED"
+      ) {
         pushPathIssue(issues, relDir);
       }
       continue;
@@ -691,7 +784,10 @@ async function checkBakFiles(cwd: string, issues: DoctorIssue[]): Promise<void> 
 // SAME conflict diagnostics (and the same `recovery`). Uses the real PhaseEntry[]
 // (with roadmap ref + path) so DUPLICATE_PHASE_ID can name the colliding files —
 // the clean-but-wrong merge where two phase files both claim `P1`.
-function checkDuplicateIds(phaseEntries: PhaseEntry[], issues: DoctorIssue[]): void {
+function checkDuplicateIds(
+  phaseEntries: PhaseEntry[],
+  issues: DoctorIssue[],
+): void {
   for (const planIssue of detectDuplicatePhaseIds(phaseEntries)) {
     issues.push(planIssueToDoctor(planIssue));
   }
@@ -701,27 +797,40 @@ function checkDuplicateIds(phaseEntries: PhaseEntry[], issues: DoctorIssue[]): v
 }
 
 // Check 10: .local/ is gitignored
-async function checkLocalGitignored(cwd: string, issues: DoctorIssue[]): Promise<void> {
+async function checkLocalGitignored(
+  cwd: string,
+  issues: DoctorIssue[],
+): Promise<void> {
   let content: string;
   try {
-    content = await readFile(await resolveWithinProject(cwd, ".gitignore"), "utf8");
+    content = await readFile(
+      await resolveOwnedReadPath(cwd, ".gitignore"),
+      "utf8",
+    );
   } catch {
     issues.push({
       code: "LOCAL_NOT_GITIGNORED",
       severity: "warning",
-      message: ".gitignore not found — add \".local/\" to avoid committing sensitive planning notes",
+      message:
+        '.gitignore not found — add ".local/" to avoid committing sensitive planning notes',
     });
     return;
   }
-  const lines = content.split("\n").map((l) => l.trim());
+  const lines = content.split("\n").map(l => l.trim());
   const isIgnored = lines.some(
-    (l) => l === ".local" || l === ".local/" || l === "/.local" || l === "/.local/" || l.startsWith(".local/"),
+    l =>
+      l === ".local" ||
+      l === ".local/" ||
+      l === "/.local" ||
+      l === "/.local/" ||
+      l.startsWith(".local/"),
   );
   if (!isIgnored) {
     issues.push({
       code: "LOCAL_NOT_GITIGNORED",
       severity: "warning",
-      message: ".local/ is not in .gitignore — add \".local/\" to avoid committing sensitive planning notes",
+      message:
+        '.local/ is not in .gitignore — add ".local/" to avoid committing sensitive planning notes',
     });
   }
 }
@@ -836,14 +945,15 @@ async function checkBriefMissing(
   phases: Phase[],
   issues: DoctorIssue[],
 ): Promise<void> {
-  const hasRealPhase = phases.some((p) => p.id !== "TUTORIAL");
+  const hasRealPhase = phases.some(p => p.id !== "TUTORIAL");
   if (!hasRealPhase) return;
 
   if (!(await projectFileExists(cwd, "design/brief.md"))) {
     issues.push({
       code: "BRIEF_MISSING",
       severity: "warning",
-      message: "design/brief.md does not exist — run \"code-pact plan brief\" to create a project overview",
+      message:
+        'design/brief.md does not exist — run "code-pact plan brief" to create a project overview',
     });
   }
 }
@@ -860,22 +970,25 @@ async function checkConstitutionPlaceholder(
   phases: Phase[],
   issues: DoctorIssue[],
 ): Promise<void> {
-  const hasRealPhase = phases.some((p) => p.id !== "TUTORIAL");
+  const hasRealPhase = phases.some(p => p.id !== "TUTORIAL");
   if (!hasRealPhase) return;
 
   const path = "design/constitution.md";
   let content: string;
   try {
-    content = await readFile(await resolveWithinProject(cwd, path), "utf8");
+    content = await readFile(await resolveOwnedReadPath(cwd, path), "utf8");
   } catch {
     return; // file absent — BRIEF_MISSING or similar handles the design dir; skip here
   }
-  const isPlaceholder = CONSTITUTION_PLACEHOLDER_MARKERS.some((m) => content.includes(m));
+  const isPlaceholder = CONSTITUTION_PLACEHOLDER_MARKERS.some(m =>
+    content.includes(m),
+  );
   if (isPlaceholder) {
     issues.push({
       code: "CONSTITUTION_PLACEHOLDER",
       severity: "warning",
-      message: "design/constitution.md still contains the initial template text — edit it or run \"code-pact plan constitution\"",
+      message:
+        'design/constitution.md still contains the initial template text — edit it or run "code-pact plan constitution"',
     });
   }
 }
@@ -922,7 +1035,9 @@ async function checkStaleContext(
   project: Project,
   issues: DoctorIssue[],
 ): Promise<void> {
-  const knownTaskIds = new Set(phases.flatMap((p) => (p.tasks ?? []).map((t) => t.id)));
+  const knownTaskIds = new Set(
+    phases.flatMap(p => (p.tasks ?? []).map(t => t.id)),
+  );
 
   for (const agentRef of project.agents) {
     // Derive context dir from agent profile
@@ -934,10 +1049,16 @@ async function checkStaleContext(
 
     let entries: string[] = [];
     try {
-      const contextDir = await resolveWithinProject(cwd, parsed.data.context_dir);
+      const contextDir = await resolveOwnedReadPath(
+        cwd,
+        parsed.data.context_dir,
+      );
       entries = await readdir(contextDir);
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === "PATH_OUTSIDE_PROJECT") {
+      if (
+        (err as NodeJS.ErrnoException).code === "PATH_OUTSIDE_PROJECT" ||
+        (err as NodeJS.ErrnoException).code === "PATH_NOT_OWNED"
+      ) {
         pushPathIssue(issues, parsed.data.context_dir);
       }
       continue;
@@ -968,7 +1089,7 @@ async function checkControlPlaneNotDriven(
 ): Promise<void> {
   // Gate 1: at least one non-TUTORIAL task is planned.
   const realTasks = phases
-    .filter((p) => p.id !== "TUTORIAL")
+    .filter(p => p.id !== "TUTORIAL")
     .reduce((n, p) => n + (p.tasks?.length ?? 0), 0);
   if (realTasks === 0) return;
 
@@ -984,7 +1105,7 @@ async function checkControlPlaneNotDriven(
     return;
   }
   const drivenForReal = events.some(
-    (e) =>
+    e =>
       (e.status === "started" || e.status === "done") &&
       !e.task_id.startsWith("TUTORIAL-"),
   );
@@ -1001,12 +1122,13 @@ async function checkControlPlaneNotDriven(
     severity: "warning",
     message:
       `${realTasks} task(s) are planned and git has uncommitted changes, but the progress ledger has no started/done event for a non-TUTORIAL task — the code-pact scaffold exists but isn't being driven. ` +
-      "Start a task with `code-pact task prepare <id> --agent <agent>`, or record out-of-loop work with `code-pact task record-done <id> --evidence \"...\"`. " +
+      'Start a task with `code-pact task prepare <id> --agent <agent>`, or record out-of-loop work with `code-pact task record-done <id> --evidence "..."`. ' +
       "Silence via .code-pact/doctor.yaml (disabled_checks: [CONTROL_PLANE_NOT_DRIVEN]).",
     recovery: {
       primary: "code-pact task prepare <id> --agent <agent>",
       alternatives: ['code-pact task record-done <id> --evidence "..."'],
-      reference: ".code-pact/doctor.yaml (disabled_checks: [CONTROL_PLANE_NOT_DRIVEN])",
+      reference:
+        ".code-pact/doctor.yaml (disabled_checks: [CONTROL_PLANE_NOT_DRIVEN])",
     },
   });
 }
@@ -1104,8 +1226,8 @@ async function readEventFilesAtRev(
   if (!ls.ok) return []; // no events tree at this revision
   const paths = ls.stdout
     .split("\n")
-    .map((s) => s.trim())
-    .filter((p) => p.length > 0 && parseEventFileName(basename(p)) !== null);
+    .map(s => s.trim())
+    .filter(p => p.length > 0 && parseEventFileName(basename(p)) !== null);
   const out: LoadedEventFile[] = [];
   for (const p of paths) {
     const show = await runGit(cwd, ["show", `${rev}:${p}`]);
@@ -1141,8 +1263,8 @@ async function readEventPacksAtRev(
   if (!ls.ok) return []; // no packs tree at this revision
   const paths = ls.stdout
     .split("\n")
-    .map((s) => s.trim())
-    .filter((p) => p.length > 0 && p.endsWith(".json"));
+    .map(s => s.trim())
+    .filter(p => p.length > 0 && p.endsWith(".json"));
   const looseById = new Map<string, LoadedEventFile>();
   for (const f of looseAtRev) looseById.set(f.id, f);
   const out: LoadedEventFile[] = [];
@@ -1171,7 +1293,12 @@ async function readEventPacksAtRev(
     // FULL Tier-2 binding at the rev (identity + membership + evidence + semantic
     // replay) via the shared pure core — so the rev reader can never accept a pack
     // the workspace reader would reject (Finding C). loose ∪ ownPack at the rev.
-    const issues = bindPackToSnapshot(loaded, snapshot, snapShow.stdout, looseById);
+    const issues = bindPackToSnapshot(
+      loaded,
+      snapshot,
+      snapShow.stdout,
+      looseById,
+    );
     if (issues.length > 0) return null; // unbound/forged committed pack
     out.push(...loaded.entries);
   }
@@ -1195,7 +1322,10 @@ async function readMergedEventsAtRev(
   const packs = await readEventPacksAtRev(cwd, rev, events);
   if (packs === null) return null;
   // Rev-level legacy-conflict exclusion, scoped to archived task_ids at the rev.
-  const { ids: archivedTaskIds, complete } = await readArchivedTaskIdsAtRev(cwd, rev);
+  const { ids: archivedTaskIds, complete } = await readArchivedTaskIdsAtRev(
+    cwd,
+    rev,
+  );
   // FAIL CLOSED (the rev twin of the workspace gate): a corrupt snapshot at the
   // rev shrinks the archived-task set, so a committed legacy event for a
   // now-invisible archived task could slip through. With the set known-incomplete
@@ -1205,7 +1335,7 @@ async function readMergedEventsAtRev(
   const durableIds = new Set<string>();
   for (const f of events) durableIds.add(f.id);
   for (const f of packs) durableIds.add(f.id);
-  const mergeableLegacy = legacy.filter((e) => {
+  const mergeableLegacy = legacy.filter(e => {
     if (!archivedTaskIds.has(e.task_id)) return true;
     return durableIds.has(computeEventId(e));
   });
@@ -1234,8 +1364,8 @@ async function readArchivedTaskIdsAtRev(
   if (!ls.ok) return { ids, complete: true };
   const paths = ls.stdout
     .split("\n")
-    .map((s) => s.trim())
-    .filter((p) => p.length > 0 && p.endsWith(".json"));
+    .map(s => s.trim())
+    .filter(p => p.length > 0 && p.endsWith(".json"));
   let complete = true;
   for (const p of paths) {
     const show = await runGit(cwd, ["show", `${rev}:${p}`]);
@@ -1290,10 +1420,10 @@ async function checkControlPlaneBranchNotDriven(
   // files_touched already excludes code-pact runtime state. Drop team-declared
   // exclude_globs (default empty). If nothing real remains → skip.
   const validExcludeGlobs = excludeGlobs.filter(
-    (g) => validateGlobSyntax(g) === null,
+    g => validateGlobSyntax(g) === null,
   );
   const realChanged = audit.files_touched.filter(
-    (f) => !validExcludeGlobs.some((g) => matchGlob(g, f)),
+    f => !validExcludeGlobs.some(g => matchGlob(g, f)),
   );
   if (realChanged.length === 0) return;
 
@@ -1306,7 +1436,10 @@ async function checkControlPlaneBranchNotDriven(
     "--error-unmatch",
     ".code-pact/state/progress.yaml",
   ]);
-  const trackedEvents = await runGit(cwd, ["ls-files", ".code-pact/state/events/"]);
+  const trackedEvents = await runGit(cwd, [
+    "ls-files",
+    ".code-pact/state/events/",
+  ]);
   const trackedEventPacks = await runGit(cwd, [
     "ls-files",
     ".code-pact/state/archive/event-packs/",
@@ -1332,7 +1465,7 @@ async function checkControlPlaneBranchNotDriven(
   if (baseEvents === null) return;
   const baseKeys = new Set(baseEvents.map(eventKey));
   const driven = headEvents.some(
-    (e) =>
+    e =>
       !baseKeys.has(eventKey(e)) &&
       (e.status === "started" || e.status === "done") &&
       !e.task_id.startsWith("TUTORIAL-") &&
@@ -1345,7 +1478,7 @@ async function checkControlPlaneBranchNotDriven(
     severity: "warning",
     message:
       `This branch changed real files vs ${baseRef} but added no started/done event for a known non-TUTORIAL task in the committed ledger (state/events/**, state/archive/event-packs/**, and legacy progress.yaml) — code changed without driving the control plane. ` +
-      "Drive a task with `code-pact task prepare <id> --agent <agent>` (or record out-of-loop work with `code-pact task record-done <id> --evidence \"...\"`) and commit the new event file(s) under .code-pact/state/events/. " +
+      'Drive a task with `code-pact task prepare <id> --agent <agent>` (or record out-of-loop work with `code-pact task record-done <id> --evidence "..."`) and commit the new event file(s) under .code-pact/state/events/. ' +
       "Exempt docs/config-only paths via .code-pact/doctor.yaml (control_plane_branch_not_driven.exclude_globs), or silence via disabled_checks: [CONTROL_PLANE_BRANCH_NOT_DRIVEN].",
     recovery: {
       primary: "code-pact task prepare <id> --agent <agent>",
@@ -1471,11 +1604,12 @@ export async function runDoctor(
   }
 
   // Apply disabled_checks filter
-  const issues = disabled.size > 0
-    ? allIssues.filter((i) => !disabled.has(i.code))
-    : allIssues;
+  const issues =
+    disabled.size > 0
+      ? allIssues.filter(i => !disabled.has(i.code))
+      : allIssues;
 
-  const ok = issues.every((i) => i.severity !== "error");
+  const ok = issues.every(i => i.severity !== "error");
   return { ok, issues };
 }
 
@@ -1487,12 +1621,12 @@ export function formatDoctor(result: DoctorResult): string {
   if (result.issues.length === 0) {
     return "No issues found. Project is healthy.";
   }
-  const lines = result.issues.map((i) => {
+  const lines = result.issues.map(i => {
     const mark = i.severity === "error" ? "[error]" : "[warn] ";
     return `  ${mark} ${i.code}: ${i.message}`;
   });
   const summary = result.ok
     ? `${result.issues.length} warning(s) found.`
-    : `${result.issues.filter((i) => i.severity === "error").length} error(s), ${result.issues.filter((i) => i.severity === "warning").length} warning(s) found.`;
+    : `${result.issues.filter(i => i.severity === "error").length} error(s), ${result.issues.filter(i => i.severity === "warning").length} warning(s) found.`;
   return [summary, ...lines].join("\n");
 }

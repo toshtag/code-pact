@@ -47,7 +47,10 @@ const srcRoot = join(repoRoot, "src");
 //                   Emitted by adapter doctor and (manifest-aware) global
 //                   doctor. Severity error|warning.
 // - "internal":     Reserved for unhandled exceptions and contract drift.
-const KNOWN_CODES: Record<string, "public" | "plan" | "doctor" | "adapter" | "internal"> = {
+const KNOWN_CODES: Record<
+  string,
+  "public" | "plan" | "doctor" | "adapter" | "internal"
+> = {
   // Public
   AGENT_NOT_ENABLED: "public",
   AGENT_NOT_FOUND: "public",
@@ -227,6 +230,7 @@ const KNOWN_CODES: Record<string, "public" | "plan" | "doctor" | "adapter" | "in
   ADAPTER_MANIFEST_MISSING: "adapter",
   ADAPTER_MISSING: "adapter",
   ADAPTER_PROFILE_DRIFT: "adapter",
+  ADAPTER_PROFILE_CONTRACT_VIOLATION: "adapter",
   ADAPTER_SCHEMA_DRIFT: "adapter",
   ADAPTER_UNMANAGED_FILE: "adapter",
 
@@ -349,14 +353,22 @@ describe("error code surface (v1.0 contract anchor)", () => {
   it("every code emitted by src/ is categorized in KNOWN_CODES", async () => {
     const found = await collectCodes();
     const expected = new Set(Object.keys(KNOWN_CODES));
-    const missing = [...found].filter((c) => !expected.has(c)).sort();
-    expect(missing, `New error code(s) found in src/ but not categorized in KNOWN_CODES. Add them here AND in docs/cli-contract.md — and, if the code is user-recoverable, add a recovery entry to docs/troubleshooting.md (see docs/maintainers/docs-maintenance.md ownership map).`).toEqual([]);
+    const missing = [...found].filter(c => !expected.has(c)).sort();
+    expect(
+      missing,
+      `New error code(s) found in src/ but not categorized in KNOWN_CODES. Add them here AND in docs/cli-contract.md — and, if the code is user-recoverable, add a recovery entry to docs/troubleshooting.md (see docs/maintainers/docs-maintenance.md ownership map).`,
+    ).toEqual([]);
   });
 
   it("every code in KNOWN_CODES is still emitted somewhere in src/", async () => {
     const found = await collectCodes();
-    const stale = Object.keys(KNOWN_CODES).filter((c) => !found.has(c)).sort();
-    expect(stale, `Code(s) in KNOWN_CODES are no longer emitted by src/. Remove them here AND from docs/cli-contract.md.`).toEqual([]);
+    const stale = Object.keys(KNOWN_CODES)
+      .filter(c => !found.has(c))
+      .sort();
+    expect(
+      stale,
+      `Code(s) in KNOWN_CODES are no longer emitted by src/. Remove them here AND from docs/cli-contract.md.`,
+    ).toEqual([]);
   });
 
   it("KNOWN_CODES has no duplicate categories per code", () => {
@@ -371,9 +383,17 @@ describe("error code surface (v1.0 contract anchor)", () => {
   });
 
   it("public + plan + doctor + adapter + internal partition is total", () => {
-    const allowed = new Set(["public", "plan", "doctor", "adapter", "internal"]);
+    const allowed = new Set([
+      "public",
+      "plan",
+      "doctor",
+      "adapter",
+      "internal",
+    ]);
     for (const [code, cat] of Object.entries(KNOWN_CODES)) {
-      expect(allowed.has(cat), `code ${code} has unknown category ${cat}`).toBe(true);
+      expect(allowed.has(cat), `code ${code} has unknown category ${cat}`).toBe(
+        true,
+      );
     }
   });
 });

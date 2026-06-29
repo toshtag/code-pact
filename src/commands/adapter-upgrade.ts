@@ -1,4 +1,4 @@
-import { readFile, readdir, mkdir, rm } from "node:fs/promises";
+import { readFile, mkdir, rm } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { AgentProfile } from "../core/schemas/agent-profile.ts";
@@ -22,8 +22,9 @@ import {
   type FileAction,
   type LocalFileState,
 } from "../core/adapters/file-state.ts";
-import { resolveWithinProject } from "../core/path-safety.ts";
+import { loadModelProfilesStrict } from "../core/models/load-model-profiles.ts";
 import { authorizeAdapterMutationPath } from "../core/adapters/manifest-file-ownership.ts";
+import { validateAgentProfileForAdapter } from "../core/adapters/profile-contract.ts";
 import {
   computeContentHash,
   manifestRelPath,
@@ -139,33 +140,11 @@ async function loadAgentProfile(
 }
 
 async function loadModelProfiles(cwd: string): Promise<ModelProfile[]> {
-  let entries: string[];
   try {
-    // Contain the DIRECTORY before enumerating it (no out-of-project readdir on a
-    // symlinked model-profiles). Optional source → unsafe/missing dir is [].
-    const dir = await resolveWithinProject(cwd, ".code-pact/model-profiles");
-    entries = await readdir(dir);
+    return await loadModelProfilesStrict(cwd);
   } catch {
     return [];
   }
-  const profiles: ModelProfile[] = [];
-  for (const entry of entries.sort()) {
-    if (!entry.endsWith(".yaml")) continue;
-    try {
-      // Contain the read so a symlinked model-profiles dir / file can't read out
-      // of the project; all inside the try so an unreadable / out-of-project /
-      // malformed entry is skipped, never an uncoded errno crash (exit 3).
-      const abs = await resolveWithinProject(
-        cwd,
-        [".code-pact", "model-profiles", entry].join("/"),
-      );
-      const raw = await readFile(abs, "utf8");
-      profiles.push(ModelProfile.parse(parseYaml(raw) as unknown));
-    } catch {
-      // skip unreadable / malformed / out-of-project
-    }
-  }
-  return profiles;
 }
 
 function buildFingerprint(
@@ -260,6 +239,12 @@ export async function runAdapterUpgrade(
     loadModelProfiles(cwd),
   ]);
 
+  // Profile contract: validate the profile's path fields against the adapter
+  // descriptor's owned paths BEFORE any filesystem operation. A hostile profile
+  // (e.g. instruction_filename: .env) is refused at the contract boundary.
+  const descriptor = adapterRegistry[agentName];
+  validateAgentProfileForAdapter(profile, descriptor);
+
   // Effective model version for GENERATION, computed WITHOUT persisting it.
   // `--check` never pins (and the CLI rejects `--check --model`); `--write` pins
   // `--model`, but the pin is a profile write deferred until AFTER the path-safety
@@ -269,7 +254,6 @@ export async function runAdapterUpgrade(
   const resolvedModelVersion =
     validateModelVersionInput(modelVersion) ?? profile.model_version;
 
-  const descriptor = adapterRegistry[agentName];
   const desiredFiles = dedupeDesiredFiles(
     await descriptor.generateDesiredFiles({
       cwd,
@@ -284,9 +268,18 @@ export async function runAdapterUpgrade(
     existingManifest.files.map(f => [f.path, f]),
   );
 
-  // Strict no-symlink preflight for placeholder dirs and the manifest path.
+  // Strict no-symlink preflight for the context_dir and manifest path.
   // Desired and orphan targets are authorized independently below before any
   // target existence check, read, or hash.
+  //
+  // context_dir IS pre-created: it is schema-constrained to `.context/**`
+  // (ContextOutputDir) and symlink-free resolved, so it cannot be an arbitrary
+  // path. hook_dir is checked in the preflight (for symlink-free resolution)
+  // but NOT pre-created: it is `RelativePosixPath.optional()` (arbitrary
+  // project-relative path), so creating it up front would allow a hostile
+  // profile to force arbitrary directory creation. The generated file write
+  // loop below creates parent dirs as needed via
+  // `mkdir(dirname(absPath), { recursive: true })`.
   const resolvedPreflight = await assertAdapterWritePathsContained(cwd, [
     { path: profile.context_dir, kind: "directory" },
     ...(profile.hook_dir
@@ -297,11 +290,6 @@ export async function runAdapterUpgrade(
   const contextDirAbs = resolvedPreflight.find(
     p => p.kind === "directory" && p.path === profile.context_dir,
   )!.absPath;
-  const hookDirAbs = profile.hook_dir
-    ? resolvedPreflight.find(
-        p => p.kind === "directory" && p.path === profile.hook_dir,
-      )!.absPath
-    : undefined;
   const manifestAbs = resolvedPreflight.find(
     p => p.kind === "file" && p.path === manifestRelPath(agentName),
   )!.absPath;
@@ -593,9 +581,6 @@ export async function runAdapterUpgrade(
   });
 
   await mkdir(contextDirAbs, { recursive: true });
-  if (hookDirAbs) {
-    await mkdir(hookDirAbs, { recursive: true });
-  }
 
   for (const item of desiredApply) {
     if (

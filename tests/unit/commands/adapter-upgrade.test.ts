@@ -692,7 +692,7 @@ describe("adapter install/upgrade — refused runs do not partially apply --mode
     expect(await readFile(join(dir, "CLAUDE.md"), "utf8")).toBe(divergent);
   });
 
-  it("install --model with an unowned generated overwrite leaves profile and target untouched", async () => {
+  it("install --model with an unowned instruction_filename is refused by the profile contract before any mutation", async () => {
     const beforeProfile = await readFile(profilePath(), "utf8");
     const profile = beforeProfile.replace(
       "instruction_filename: CLAUDE.md",
@@ -702,23 +702,20 @@ describe("adapter install/upgrade — refused runs do not partially apply --mode
     await mkdir(join(dir, "docs"), { recursive: true });
     const existing = "hand authored\n";
     await writeFile(join(dir, "docs", "agent.md"), existing, "utf8");
-    const beforeProfileWithRedirect = await readFile(profilePath(), "utf8");
 
-    const result = await runAdapterInstall({
-      cwd: dir,
-      agentName: "claude-code",
-      force: true,
-      locale: "en-US",
-      modelVersion: "sonnet-4.6",
-      generatorVersionOverride: "0.9.0-alpha.0",
-    });
+    await expect(
+      runAdapterInstall({
+        cwd: dir,
+        agentName: "claude-code",
+        force: true,
+        locale: "en-US",
+        modelVersion: "sonnet-4.6",
+        generatorVersionOverride: "0.9.0-alpha.0",
+      }),
+    ).rejects.toThrow(/instruction_filename/);
 
-    expect(result.files.find(f => f.relPath === "docs/agent.md")?.reason).toBe(
-      "unowned_generated_path",
-    );
-    expect(await readFile(profilePath(), "utf8")).toBe(
-      beforeProfileWithRedirect,
-    );
+    // Profile and target are untouched — the contract fires before any write.
+    expect(await readFile(profilePath(), "utf8")).toBe(profile);
     expect(await readFile(join(dir, "docs", "agent.md"), "utf8")).toBe(
       existing,
     );
@@ -790,7 +787,7 @@ describe("adapter install/upgrade — refused runs do not partially apply --mode
     expect(existsSync(join(dir, "src", "context.md"))).toBe(false);
   });
 
-  it("upgrade --write --model with an unowned generated overwrite leaves profile, manifest, and target untouched", async () => {
+  it("upgrade --write --model with an unowned instruction_filename is refused by the profile contract before any mutation", async () => {
     await freshInstall();
     const redirectedProfile = (await readFile(profilePath(), "utf8")).replace(
       "instruction_filename: CLAUDE.md",
@@ -805,20 +802,20 @@ describe("adapter install/upgrade — refused runs do not partially apply --mode
       "utf8",
     );
 
-    const result = await runAdapterUpgrade({
-      cwd: dir,
-      agentName: "claude-code",
-      mode: "write",
-      force: true,
-      acceptModified: false,
-      locale: "en-US",
-      modelVersion: "sonnet-4.6",
-      generatorVersionOverride: "0.9.0-alpha.0",
-    });
+    await expect(
+      runAdapterUpgrade({
+        cwd: dir,
+        agentName: "claude-code",
+        mode: "write",
+        force: true,
+        acceptModified: false,
+        locale: "en-US",
+        modelVersion: "sonnet-4.6",
+        generatorVersionOverride: "0.9.0-alpha.0",
+      }),
+    ).rejects.toThrow(/instruction_filename/);
 
-    expect(result.plan.find(f => f.relPath === "docs/agent.md")?.reason).toBe(
-      "unowned_generated_path",
-    );
+    // Profile, manifest, and target are untouched.
     expect(await readFile(profilePath(), "utf8")).toBe(redirectedProfile);
     expect(await readFile(manifestPath(dir, "claude-code"), "utf8")).toBe(
       beforeManifest,
@@ -1260,7 +1257,7 @@ describe("adapter install — owned control-plane write paths", () => {
     await expectInstallConfigErrorWithoutWrites();
   });
 
-  it("refuses new generated files outside ownedPathRoles", async () => {
+  it("refuses new generated files outside ownedPathRoles via profile contract", async () => {
     const profilePath = join(
       dir,
       ".code-pact",
@@ -1277,20 +1274,15 @@ describe("adapter install — owned control-plane write paths", () => {
       "utf8",
     );
 
-    const result = await runAdapterInstall({
-      cwd: dir,
-      agentName: "claude-code",
-      force: false,
-      locale: "en-US",
-    });
+    await expect(
+      runAdapterInstall({
+        cwd: dir,
+        agentName: "claude-code",
+        force: false,
+        locale: "en-US",
+      }),
+    ).rejects.toThrow(/instruction_filename/);
 
-    expect(result.refused).toContain(
-      join(dir, ".github", "workflows", "generated.yml"),
-    );
-    expect(
-      result.files.find(f => f.relPath === ".github/workflows/generated.yml")
-        ?.reason,
-    ).toBe("unowned_generated_path");
     expect(existsSync(join(dir, ".github", "workflows", "generated.yml"))).toBe(
       false,
     );

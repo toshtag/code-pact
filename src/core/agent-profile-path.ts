@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { parse as parseYaml } from "yaml";
 import { RelativePosixPath } from "./schemas/relative-path.ts";
 import { assertSafePlanId } from "./schemas/plan-id.ts";
-import { resolveSymlinkFreeProjectPath, resolveWithinProject } from "./path-safety.ts";
+import { resolveSymlinkFreeProjectPath } from "./path-safety.ts";
 import { AgentProfile } from "./schemas/agent-profile.ts";
 
 // Single source of truth for where an agent's profile lives.
@@ -55,9 +55,14 @@ function assertWritableProfileRel(agentName: string, rel: string): void {
   );
 }
 
-async function readProjectYamlForProfileChecks(cwd: string): Promise<unknown | null> {
+async function readProjectYamlForProfileChecks(
+  cwd: string,
+): Promise<unknown | null> {
   try {
-    const raw = await readFile(await resolveWithinProject(cwd, ".code-pact/project.yaml"), "utf8");
+    const raw = await readFile(
+      await resolveSymlinkFreeProjectPath(cwd, ".code-pact/project.yaml"),
+      "utf8",
+    );
     return parseYaml(raw) as unknown;
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
@@ -79,7 +84,9 @@ async function assertProfileRelNotShared(
     if (!a || typeof a !== "object") continue;
     const name = (a as { name?: unknown }).name;
     if (typeof name !== "string" || name === agentName) continue;
-    const parsed = RelativePosixPath.safeParse((a as { profile?: unknown }).profile);
+    const parsed = RelativePosixPath.safeParse(
+      (a as { profile?: unknown }).profile,
+    );
     if (parsed.success && parsed.data === rel) {
       throw profileConfigError(
         `Agent profile path ".code-pact/${rel}" is shared by "${agentName}" and "${name}". Automatic profile writes require a dedicated profile per agent.`,
@@ -141,7 +148,10 @@ export async function resolveAgentProfileRel(
   assertSafePlanId(agentName, "Agent");
   let raw: string;
   try {
-    raw = await readFile(await resolveWithinProject(cwd, ".code-pact/project.yaml"), "utf8");
+    raw = await readFile(
+      await resolveSymlinkFreeProjectPath(cwd, ".code-pact/project.yaml"),
+      "utf8",
+    );
   } catch (err) {
     // Absent project.yaml → convention. But a present-but-unreadable file
     // (EACCES, EISDIR, transient I/O) is a real problem: surface it rather than
@@ -180,8 +190,14 @@ export async function resolveAgentProfileRel(
     throw err;
   }
   for (const a of agents) {
-    if (a && typeof a === "object" && (a as { name?: unknown }).name === agentName) {
-      const parsed = RelativePosixPath.safeParse((a as { profile?: unknown }).profile);
+    if (
+      a &&
+      typeof a === "object" &&
+      (a as { name?: unknown }).name === agentName
+    ) {
+      const parsed = RelativePosixPath.safeParse(
+        (a as { profile?: unknown }).profile,
+      );
       if (parsed.success) return parsed.data;
       // Matched the agent but its declared profile is an invalid path —
       // surface it instead of silently reading/writing the default file.
@@ -197,18 +213,24 @@ export async function resolveAgentProfileRel(
 }
 
 /**
- * Absolute path form of {@link resolveAgentProfileRel}, CONTAINED to the project.
+ * Absolute path form of {@link resolveAgentProfileRel}, symlink-free.
  *
  * `resolveAgentProfileRel` validates the path lexically (`RelativePosixPath`: no
  * `..`/absolute/backslash), but a lexical `join` cannot stop a symlinked
  * `.code-pact/agent-profiles` (or a symlinked profile file) from resolving
- * outside the project. Every profile READ and — critically — the `--model` pin's
- * WRITE flow through this single resolver, so the containment belongs here:
- * route through {@link resolveWithinProject} so a symlink escape fails closed
- * before any I/O. The escape is mapped to `CONFIG_ERROR` (a project/profile
- * configuration problem — consistent with this resolver's other throws) so every
- * caller's existing CONFIG_ERROR handling applies unchanged, with no new code to
- * map at each of the ~9 call sites.
+ * to an in-project alias. Every profile READ and — critically — the `--model`
+ * pin's WRITE flow through this single resolver, so the containment belongs here:
+ * route through {@link resolveSymlinkFreeProjectPath} so ANY symlink component
+ * (in-project alias or out-of-project escape) fails closed before any I/O.
+ *
+ * Security contract: profile reads AND writes reject in-project symlink aliases.
+ * A symlinked `.code-pact/agent-profiles -> ../alt` is refused with CONFIG_ERROR
+ * before any file is read or written — containment is not ownership.
+ *
+ * The escape is mapped to `CONFIG_ERROR` (a project/profile configuration
+ * problem — consistent with this resolver's other throws) so every caller's
+ * existing CONFIG_ERROR handling applies unchanged, with no new code to map
+ * at each of the ~9 call sites.
  */
 export async function resolveAgentProfilePath(
   cwd: string,
@@ -216,11 +238,14 @@ export async function resolveAgentProfilePath(
 ): Promise<string> {
   const rel = await resolveAgentProfileRel(cwd, agentName);
   try {
-    return await resolveWithinProject(cwd, [".code-pact", rel].join("/"));
+    return await resolveSymlinkFreeProjectPath(
+      cwd,
+      [".code-pact", rel].join("/"),
+    );
   } catch (err) {
     if (shouldMapPathErrorToConfig(err)) {
       throw profileConfigError(
-        `Agent profile path for "${agentName}" resolves outside the project root and was refused: ${(err as Error).message}`,
+        `Agent profile path for "${agentName}" resolves through a symlink or outside the project root and was refused: ${(err as Error).message}`,
       );
     }
     throw err;
@@ -228,11 +253,11 @@ export async function resolveAgentProfilePath(
 }
 
 /**
- * Absolute path for PERSISTING an agent profile. Reads may accept an in-project
- * symlinked profile location for compatibility, but automatic writes such as
- * `adapter install --model` must own the `.code-pact` profile namespace. An
- * in-project symlink alias (for example `.code-pact/agent-profiles -> ../alt`)
- * is therefore refused with CONFIG_ERROR before any pin is written.
+ * Absolute path for PERSISTING an agent profile. Both reads and writes reject
+ * in-project symlink aliases — use this for automatic writes such as
+ * `adapter install --model`. An in-project symlink alias (for example
+ * `.code-pact/agent-profiles -> ../alt`) is refused with CONFIG_ERROR before
+ * any pin is written.
  */
 export async function resolveOwnedAgentProfilePath(
   cwd: string,
@@ -242,7 +267,10 @@ export async function resolveOwnedAgentProfilePath(
   assertWritableProfileRel(agentName, rel);
   await assertProfileRelNotShared(cwd, agentName, rel);
   try {
-    const path = await resolveSymlinkFreeProjectPath(cwd, [".code-pact", rel].join("/"));
+    const path = await resolveSymlinkFreeProjectPath(
+      cwd,
+      [".code-pact", rel].join("/"),
+    );
     await assertProfileNameMatches(path, agentName);
     return path;
   } catch (err) {

@@ -8,7 +8,8 @@ import { adapterRegistry } from "../core/adapters/index.ts";
 import { classifyManifestFileForRead } from "../core/adapters/manifest-file-ownership.ts";
 import { isSupportedAgent, type SupportedAgent } from "../core/agents.ts";
 import { resolveAgentProfilePath } from "../core/agent-profile-path.ts";
-import { resolveWithinProject } from "../core/path-safety.ts";
+import { resolveSymlinkFreeProjectPath } from "../core/path-safety.ts";
+import { validateAgentProfileForAdapter } from "../core/adapters/profile-contract.ts";
 import {
   computeContentHash,
   manifestPath,
@@ -70,7 +71,7 @@ async function loadProjectSafe(cwd: string): Promise<Project | null> {
   let path: string;
   let raw: string;
   try {
-    path = await resolveWithinProject(cwd, ".code-pact/project.yaml");
+    path = await resolveSymlinkFreeProjectPath(cwd, ".code-pact/project.yaml");
     raw = await readFile(path, "utf8");
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
@@ -107,7 +108,7 @@ async function loadAgentProfileSafe(
 }
 
 async function loadModelProfilesSafe(cwd: string): Promise<ModelProfile[]> {
-  const dir = await resolveWithinProject(
+  const dir = await resolveSymlinkFreeProjectPath(
     cwd,
     ".code-pact/model-profiles",
   ).catch(() => null);
@@ -123,7 +124,7 @@ async function loadModelProfilesSafe(cwd: string): Promise<ModelProfile[]> {
     if (!entry.endsWith(".yaml")) continue;
     try {
       const raw = await readFile(
-        await resolveWithinProject(
+        await resolveSymlinkFreeProjectPath(
           cwd,
           [".code-pact", "model-profiles", entry].join("/"),
         ),
@@ -149,7 +150,7 @@ async function readProjectFileForDoctor(
   const absPath = join(cwd, relPath);
   let containedPath: string;
   try {
-    containedPath = await resolveWithinProject(cwd, relPath);
+    containedPath = await resolveSymlinkFreeProjectPath(cwd, relPath);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {
       return { kind: "missing", absPath };
@@ -410,6 +411,21 @@ export async function inspectAgent(
   const profile = await loadAgentProfileSafe(cwd, agentName);
 
   if (profile) {
+    // Profile contract: validate the profile's path fields against the adapter
+    // descriptor's owned paths. A hostile profile (e.g. instruction_filename:
+    // .env) is surfaced as a structured issue, not an uncoded throw.
+    try {
+      validateAgentProfileForAdapter(profile, descriptor);
+    } catch (err) {
+      issues.push({
+        code: "ADAPTER_PROFILE_CONTRACT_VIOLATION",
+        severity: "error",
+        message: (err as Error).message,
+        agent: agentName,
+        path: manifestPath(cwd, agentName),
+      });
+      return issues;
+    }
     const modelProfiles = await loadModelProfilesSafe(cwd);
     const resolvedModel = profile.model_version;
     const currentFP = buildCurrentFingerprint(profile, resolvedModel);

@@ -374,8 +374,12 @@ describe("adapter doctor — forged manifest .env oracle (security)", () => {
             ? await runDoctor(dir)
             : await runValidate({ cwd: dir });
 
+      // The profile contract catches the hostile .env instruction_filename
+      // BEFORE any file-level read — so .env is never opened.
       expect(
-        result.issues.some(i => i.code === "ADAPTER_FILE_PATH_UNSAFE"),
+        result.issues.some(
+          i => i.code === "ADAPTER_PROFILE_CONTRACT_VIOLATION",
+        ),
       ).toBe(true);
       expect(result.issues.some(i => i.code === "ADAPTER_CONTRACT_DRIFT")).toBe(
         false,
