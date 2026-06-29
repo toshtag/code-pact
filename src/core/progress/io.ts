@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { stringify as stringifyYaml } from "yaml";
 import { atomicWriteText } from "../../io/atomic-text.ts";
-import { resolveOwnedProjectPath } from "../path-safety.ts";
+import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
 import {
   ProgressLog,
   type ProgressEvent,
@@ -19,7 +19,7 @@ export function progressPath(cwd: string): string {
 
 export async function resolveProgressPath(cwd: string): Promise<string> {
   try {
-    return await resolveOwnedProjectPath(cwd, PROGRESS_PATH_SEGMENTS.join("/"));
+    return await resolveSymlinkFreeProjectPath(cwd, PROGRESS_PATH_SEGMENTS.join("/"));
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "PATH_OUTSIDE_PROJECT" || code === "PATH_NOT_OWNED") {

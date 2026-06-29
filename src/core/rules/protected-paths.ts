@@ -5,7 +5,7 @@ import {
   validateGlobSyntax,
   type ProtectedPathEntry,
 } from "../glob.ts";
-import { assertSafeRelativePath, resolveOwnedProjectPath } from "../path-safety.ts";
+import { assertSafeRelativePath, resolveSymlinkFreeProjectPath } from "../path-safety.ts";
 
 // ---------------------------------------------------------------------------
 // Configurable protected paths.
@@ -54,7 +54,7 @@ export async function loadProtectedPaths(
 ): Promise<LoadProtectedPathsResult> {
   let raw: string;
   try {
-    const abs = await resolveOwnedProjectPath(cwd, PROTECTED_PATHS_RULE_FILE);
+    const abs = await resolveSymlinkFreeProjectPath(cwd, PROTECTED_PATHS_RULE_FILE);
     raw = await readFile(abs, "utf8");
   } catch {
     return { paths: PROTECTED_PATHS, source: "fallback" };

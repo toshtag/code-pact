@@ -10,7 +10,7 @@
 import { readFile, stat } from "node:fs/promises";
 import {
   assertSafeRelativePath as assertSafeRelativePathImpl,
-  resolveOwnedProjectPath,
+  resolveSymlinkFreeProjectPath,
 } from "../path-safety.ts";
 
 export {
@@ -90,7 +90,7 @@ export async function authorizedPathExists(
  * will touch — placeholder dirs, generated files, and (for upgrade) manifest-
  * tracked orphan candidates — it checks BOTH:
  *
- *  1. OWNERSHIP — {@link resolveOwnedProjectPath} (every symlink component,
+ *  1. OWNERSHIP — {@link resolveSymlinkFreeProjectPath} (every symlink component,
  *     including an in-project alias, is rejected).
  *  2. TYPE — an EXISTING entry must match how the pass will use it: a `directory`
  *     spec must not already be a file (the `mkdir` would EEXIST); a `file` spec
@@ -115,7 +115,7 @@ export async function assertAdapterWritePathsContained(
 
     let abs: string;
     try {
-      abs = await resolveOwnedProjectPath(cwd, path);
+      abs = await resolveSymlinkFreeProjectPath(cwd, path);
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === "PATH_OUTSIDE_PROJECT")
         throw err;

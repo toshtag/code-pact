@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { ProgressEvent } from "../schemas/progress-event.ts";
 import { atCompact, computeEventId, eventFileName, normalizeAt } from "./event-id.ts";
-import { resolveOwnedProjectPath } from "../path-safety.ts";
+import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
 
 /**
  * Per-event progress ledger.
@@ -27,7 +27,7 @@ export function eventsDir(cwd: string): string {
 
 export async function resolveEventsDir(cwd: string): Promise<string> {
   try {
-    return await resolveOwnedProjectPath(cwd, EVENTS_DIR_SEGMENTS.join("/"));
+    return await resolveSymlinkFreeProjectPath(cwd, EVENTS_DIR_SEGMENTS.join("/"));
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "PATH_OUTSIDE_PROJECT" || code === "PATH_NOT_OWNED") {
@@ -43,7 +43,7 @@ export async function resolveEventsDir(cwd: string): Promise<string> {
 
 async function resolveEventPath(cwd: string, file: string): Promise<string> {
   try {
-    return await resolveOwnedProjectPath(cwd, [...EVENTS_DIR_SEGMENTS, file].join("/"));
+    return await resolveSymlinkFreeProjectPath(cwd, [...EVENTS_DIR_SEGMENTS, file].join("/"));
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "PATH_OUTSIDE_PROJECT" || code === "PATH_NOT_OWNED") {

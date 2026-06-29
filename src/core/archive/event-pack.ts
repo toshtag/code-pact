@@ -12,7 +12,7 @@ import { atCompact } from "../progress/event-id.ts";
 import { assertSafePlanId } from "../schemas/plan-id.ts";
 import { loadRoadmap } from "../plan/roadmap.ts";
 import { resolvePhaseRef } from "../plan/resolve-phase.ts";
-import { resolveOwnedProjectPath, resolveWithinProject } from "../path-safety.ts";
+import { resolveSymlinkFreeProjectPath, resolveWithinProject } from "../path-safety.ts";
 import { readPackSources } from "../progress/all-sources.ts";
 import { resolvePhaseSnapshotRaw } from "./load-phase-snapshot.ts";
 import {
@@ -172,7 +172,7 @@ async function findLivePhaseYamlsById(
 ): Promise<{ paths: string[]; incomplete: string | null }> {
   let entries: string[];
   try {
-    const phasesDir = await resolveOwnedProjectPath(cwd, "design/phases");
+    const phasesDir = await resolveSymlinkFreeProjectPath(cwd, "design/phases");
     entries = await readdir(phasesDir);
   } catch (err) {
     if (isEnoent(err)) return { paths: [], incomplete: null }; // no dir → nothing live
@@ -239,7 +239,7 @@ export async function findLiveTaskOwnersByTaskId(
 ): Promise<{ owners: LiveTaskOwner[]; incomplete: string | null }> {
   let entries: string[];
   try {
-    const phasesDir = await resolveOwnedProjectPath(cwd, "design/phases");
+    const phasesDir = await resolveSymlinkFreeProjectPath(cwd, "design/phases");
     entries = await readdir(phasesDir);
   } catch (err) {
     if (isEnoent(err)) return { owners: [], incomplete: null }; // no dir → nothing live

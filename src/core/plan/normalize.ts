@@ -2,7 +2,7 @@ import type { Dirent } from "node:fs";
 import { readFile, readdir, stat } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
 import { atomicWriteText } from "../../io/atomic-text.ts";
-import { resolveOwnedProjectPath } from "../path-safety.ts";
+import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
 import { progressPath } from "../progress/io.ts";
 
 const TRAILING_WHITESPACE = /[ \t]+$/;
@@ -59,7 +59,7 @@ async function walkFiles(root: string): Promise<string[]> {
 
 async function resolveNormalizePath(cwd: string, relPath: string): Promise<string> {
   try {
-    return await resolveOwnedProjectPath(cwd, relPath);
+    return await resolveSymlinkFreeProjectPath(cwd, relPath);
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "PATH_OUTSIDE_PROJECT" || code === "PATH_NOT_OWNED") {

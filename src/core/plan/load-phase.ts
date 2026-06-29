@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { parse as parseYaml } from "yaml";
 import { Phase } from "../schemas/phase.ts";
-import { resolveOwnedProjectPath } from "../path-safety.ts";
+import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
 
 // The single seam that reads one LIVE phase YAML file off disk and validates it
 // as a full `Phase`. This exact body used to be byte-duplicated across ~8
@@ -33,7 +33,7 @@ export async function loadPhase(cwd: string, path: string): Promise<Phase> {
   // `..`/absolute ref OR a symlinked `design/phases/*` — even one pointing to an
   // IN-PROJECT private file (e.g. `.local/private-phase.yaml`) — must not read an
   // aliased file into the rendered context pack / generated skills (CWE-59), the
-  // same agent-facing-read class as the constitution leak. resolveOwnedProjectPath
+  // same agent-facing-read class as the constitution leak. resolveSymlinkFreeProjectPath
   // rejects EVERY symlink component, matching the strict loadPlanState contract
   // on the same control plane (Blocker: roadmap/phase symlink-alias parity). A
   // refusal maps to CONFIG_ERROR (fail-closed; control-plane input, never
@@ -41,7 +41,7 @@ export async function loadPhase(cwd: string, path: string): Promise<Phase> {
   // ENOENT — the legitimate archived-fallback signal resolve-task keys on.
   let abs: string;
   try {
-    abs = await resolveOwnedProjectPath(cwd, path);
+    abs = await resolveSymlinkFreeProjectPath(cwd, path);
   } catch (err) {
     const e = new Error(
       `Phase path "${path}" is not a safe owned project path: ${(err as Error).message}`,

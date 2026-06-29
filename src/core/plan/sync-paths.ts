@@ -1,7 +1,7 @@
 import { readdir, readFile } from "node:fs/promises";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { atomicWriteText } from "../../io/atomic-text.ts";
-import { resolveOwnedProjectPath } from "../path-safety.ts";
+import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
 import { Phase } from "../schemas/phase.ts";
 
 // Apply an explicit old -> new path rename map to the `reads` / `writes`
@@ -94,7 +94,7 @@ function applyToList(
 
 async function resolveSyncPath(cwd: string, relPath: string): Promise<string> {
   try {
-    return await resolveOwnedProjectPath(cwd, relPath);
+    return await resolveSymlinkFreeProjectPath(cwd, relPath);
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "PATH_OUTSIDE_PROJECT" || code === "PATH_NOT_OWNED") {

@@ -32,7 +32,7 @@
 import { mkdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { hostname } from "node:os";
 import { dirname, join } from "node:path";
-import { resolveOwnedProjectPath } from "../path-safety.ts";
+import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
 
 export type LockHolder = {
   pid: number;
@@ -66,7 +66,7 @@ export function lockPathFor(cwd: string): string {
 
 async function resolveLockPath(cwd: string): Promise<string> {
   try {
-    return await resolveOwnedProjectPath(cwd, ".code-pact/locks/write.lock");
+    return await resolveSymlinkFreeProjectPath(cwd, ".code-pact/locks/write.lock");
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (

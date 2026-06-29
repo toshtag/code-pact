@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { parse as parseYaml } from "yaml";
 import { Roadmap } from "../schemas/roadmap.ts";
-import { resolveOwnedProjectPath } from "../path-safety.ts";
+import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
 
 /**
  * Strict loader for the phase registry at `design/roadmap.yaml`.
@@ -18,14 +18,14 @@ export async function loadRoadmap(cwd: string): Promise<Roadmap> {
   // OWN the read: `design/roadmap.yaml` is control-plane. A symlinked `design/`
   // or `design/roadmap.yaml` — even one pointing INSIDE the project (e.g. to a
   // `.local/` private file) — must not pull an aliased roadmap into agent-facing
-  // output (context pack / generated skills). resolveOwnedProjectPath rejects
+  // output (context pack / generated skills). resolveSymlinkFreeProjectPath rejects
   // EVERY symlink component, matching the strict loadPlanState contract on the
   // same control plane (Blocker: roadmap/phase symlink-alias parity). A refusal
   // maps to CONFIG_ERROR (fail-closed); a missing/invalid roadmap still throws
   // ENOENT/ZodError as before.
   let abs: string;
   try {
-    abs = await resolveOwnedProjectPath(cwd, "design/roadmap.yaml");
+    abs = await resolveSymlinkFreeProjectPath(cwd, "design/roadmap.yaml");
   } catch (err) {
     const e = new Error(
       `design/roadmap.yaml is not a safe owned project path: ${(err as Error).message}`,

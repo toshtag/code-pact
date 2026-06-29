@@ -2,7 +2,7 @@ import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { loadYaml, ParseError } from "../../io/load.ts";
-import { resolveOwnedProjectPath } from "../path-safety.ts";
+import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
 import { Phase, type Phase as PhaseT } from "../schemas/phase.ts";
 import {
   ProgressLog,
@@ -149,7 +149,7 @@ async function loadPlanStatePhaseStrict(ref: PhaseRef, absPath: string): Promise
  */
 async function resolveGraphPathStrict(cwd: string, relPath: string): Promise<string> {
   try {
-    return await resolveOwnedProjectPath(cwd, relPath);
+    return await resolveSymlinkFreeProjectPath(cwd, relPath);
   } catch (err) {
     const e = new Error(
       `"${relPath}" is not a safe project-relative path: ${(err as Error).message}`,
@@ -395,7 +395,7 @@ export async function collectPlanArtifacts(
     // referencing tasks — the same control-plane parity the strict loader holds).
     // pushParseIssue tags the ownership refusal (a non-ParseError CONFIG_ERROR /
     // PATH_NOT_OWNED) as an INVALID_YAML error FileIssue.
-    const rmAbs = await resolveOwnedProjectPath(cwd, "design/roadmap.yaml");
+    const rmAbs = await resolveSymlinkFreeProjectPath(cwd, "design/roadmap.yaml");
     roadmap = await loadYaml(rmAbs, Roadmap);
   } catch (err) {
     pushParseIssue(fileIssues, err, "design/roadmap.yaml");
@@ -427,7 +427,7 @@ export async function collectPlanArtifacts(
     try {
       // OWN each phase ref; a symlink alias (in- OR out-of-project) becomes a
       // graph-file FileIssue (fail-closed for prune/retire), not an aliased read.
-      absPath = await resolveOwnedProjectPath(cwd, ref.path);
+      absPath = await resolveSymlinkFreeProjectPath(cwd, ref.path);
     } catch (err) {
       pushParseIssue(fileIssues, err, ref.path);
       continue;
@@ -571,7 +571,7 @@ async function scanPhasesDirBestEffort(
   try {
     // Require an owned directory BEFORE enumerating it: no symlink alias may
     // turn the control-plane phase namespace into a view of another directory.
-    const phasesDir = await resolveOwnedProjectPath(cwd, "design/phases");
+    const phasesDir = await resolveSymlinkFreeProjectPath(cwd, "design/phases");
     entries = await readdir(phasesDir);
   } catch {
     return [];
@@ -583,7 +583,7 @@ async function scanPhasesDirBestEffort(
     const relPath = `design/phases/${entry}`;
     let absPath: string;
     try {
-      absPath = await resolveOwnedProjectPath(cwd, relPath);
+      absPath = await resolveSymlinkFreeProjectPath(cwd, relPath);
     } catch (err) {
       pushParseIssue(fileIssues, err, relPath);
       continue;

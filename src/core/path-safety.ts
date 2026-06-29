@@ -44,10 +44,13 @@ export function assertSafeRelativePath(relPath: string): void {
  * missing entry can be a symlink) — callers gate this only for actions on an
  * EXISTING target, where every component exists.
  */
-export async function pathTraversesSymlink(cwd: string, relPath: string): Promise<boolean> {
+export async function pathTraversesSymlink(
+  cwd: string,
+  relPath: string,
+): Promise<boolean> {
   assertSafeRelativePath(relPath);
   let base = await realpath(cwd);
-  for (const seg of relPath.split("/").filter((s) => s.length > 0 && s !== ".")) {
+  for (const seg of relPath.split("/").filter(s => s.length > 0 && s !== ".")) {
     const candidate = join(base, seg);
     let st: import("node:fs").Stats;
     try {
@@ -62,10 +65,13 @@ export async function pathTraversesSymlink(cwd: string, relPath: string): Promis
   return false;
 }
 
-export function pathTraversesSymlinkSync(cwd: string, relPath: string): boolean {
+export function pathTraversesSymlinkSync(
+  cwd: string,
+  relPath: string,
+): boolean {
   assertSafeRelativePath(relPath);
   let base = realpathSync(cwd);
-  for (const seg of relPath.split("/").filter((s) => s.length > 0 && s !== ".")) {
+  for (const seg of relPath.split("/").filter(s => s.length > 0 && s !== ".")) {
     const candidate = join(base, seg);
     let st: import("node:fs").Stats;
     try {
@@ -92,7 +98,7 @@ export function pathTraversesSymlinkSync(cwd: string, relPath: string): boolean 
  *
  * Missing tails are still allowed so callers can create fresh directories/files.
  */
-export async function resolveOwnedProjectPath(
+export async function resolveSymlinkFreeProjectPath(
   cwd: string,
   relPath: string,
 ): Promise<string> {
@@ -106,7 +112,10 @@ export async function resolveOwnedProjectPath(
   return resolveWithinProject(cwd, relPath);
 }
 
-export function resolveOwnedProjectPathSync(cwd: string, relPath: string): string {
+export function resolveSymlinkFreeProjectPathSync(
+  cwd: string,
+  relPath: string,
+): string {
   if (pathTraversesSymlinkSync(cwd, relPath)) {
     const err = new Error(
       `path "${relPath}" resolves through a symlink; refusing to write/delete through an unowned project path`,
@@ -116,6 +125,11 @@ export function resolveOwnedProjectPathSync(cwd: string, relPath: string): strin
   }
   return resolveWithinProjectSync(cwd, relPath);
 }
+
+/** @deprecated Use resolveSymlinkFreeProjectPath instead. */
+export const resolveOwnedProjectPath = resolveSymlinkFreeProjectPath;
+/** @deprecated Use resolveSymlinkFreeProjectPathSync instead. */
+export const resolveOwnedProjectPathSync = resolveSymlinkFreeProjectPathSync;
 
 /**
  * Resolves `relPath` against `cwd` and returns the joined absolute path, but
@@ -168,7 +182,7 @@ export async function resolveWithinProject(
   // existing child). `relPath` is pre-validated (no `..`, `.`, or empty segment).
   let base = cwdReal;
 
-  for (const seg of relPath.split("/").filter((s) => s.length > 0 && s !== ".")) {
+  for (const seg of relPath.split("/").filter(s => s.length > 0 && s !== ".")) {
     const candidate = join(base, seg);
     let st: import("node:fs").Stats;
     try {
@@ -229,7 +243,7 @@ export function resolveWithinProjectSync(cwd: string, relPath: string): string {
     p === cwdReal || p.startsWith(cwdReal + sep);
 
   let base = cwdReal;
-  for (const seg of relPath.split("/").filter((s) => s.length > 0 && s !== ".")) {
+  for (const seg of relPath.split("/").filter(s => s.length > 0 && s !== ".")) {
     const candidate = join(base, seg);
     try {
       const st = lstatSync(candidate);

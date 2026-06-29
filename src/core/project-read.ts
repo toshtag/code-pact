@@ -1,9 +1,9 @@
 import { readFile } from "node:fs/promises";
-import { resolveOwnedProjectPath } from "./path-safety.ts";
+import { resolveSymlinkFreeProjectPath } from "./path-safety.ts";
 
 /**
  * Reads an OPTIONAL, project-owned text file. `relPath` is resolved through
- * {@link resolveOwnedProjectPath}, so any symlink component is refused even when
+ * {@link resolveSymlinkFreeProjectPath}, so any symlink component is refused even when
  * its target remains inside the project root. Returns `null` when the path is
  * unsafe, unowned, missing, or unreadable.
  *
@@ -22,7 +22,7 @@ export async function readProjectTextOrNull(
   relPath: string,
 ): Promise<string | null> {
   try {
-    return await readFile(await resolveOwnedProjectPath(cwd, relPath), "utf8");
+    return await readFile(await resolveSymlinkFreeProjectPath(cwd, relPath), "utf8");
   } catch {
     return null;
   }

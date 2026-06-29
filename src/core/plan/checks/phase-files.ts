@@ -4,7 +4,7 @@ import type { PlanIssue } from "../shared.ts";
 import type { Roadmap } from "../../schemas/roadmap.ts";
 import { phaseFilePresence } from "./fs.ts";
 import { resolveMissingPhaseRef } from "../../archive/load-phase-snapshot.ts";
-import { resolveOwnedProjectPath } from "../../path-safety.ts";
+import { resolveSymlinkFreeProjectPath } from "../../path-safety.ts";
 
 /**
  * Roadmap references a phase file that does not exist on disk. Both `plan lint`
@@ -76,7 +76,7 @@ export async function detectOrphanPhaseFiles(
 ): Promise<PlanIssue[]> {
   let entries: string[] = [];
   try {
-    const phasesDir = await resolveOwnedProjectPath(cwd, "design/phases");
+    const phasesDir = await resolveSymlinkFreeProjectPath(cwd, "design/phases");
     entries = await readdir(phasesDir);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") {

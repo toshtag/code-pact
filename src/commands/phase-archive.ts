@@ -3,7 +3,7 @@ import { dirname } from "node:path";
 import { resolvePhaseRef } from "../core/plan/resolve-phase.ts";
 import { loadRoadmap } from "../core/plan/roadmap.ts";
 import type { PhaseRef } from "../core/schemas/roadmap.ts";
-import { resolveOwnedProjectPath } from "../core/path-safety.ts";
+import { resolveSymlinkFreeProjectPath } from "../core/path-safety.ts";
 import { sha256Hex, phaseSnapshotPath } from "../core/archive/paths.ts";
 import {
   planPhaseSnapshot,
@@ -113,7 +113,7 @@ async function classifyParent(parentAbs: string): Promise<Presence> {
 async function phaseYamlPresence(cwd: string, relPath: string): Promise<Presence> {
   let abs: string;
   try {
-    abs = await resolveOwnedProjectPath(cwd, relPath);
+    abs = await resolveSymlinkFreeProjectPath(cwd, relPath);
   } catch (err) {
     return { kind: "inaccessible", reason: "path_inaccessible", detail: (err as Error).message };
   }
@@ -166,7 +166,7 @@ async function inspectPhaseYaml(
 ): Promise<Inspected> {
   let abs: string;
   try {
-    abs = await resolveOwnedProjectPath(cwd, relPath);
+    abs = await resolveSymlinkFreeProjectPath(cwd, relPath);
   } catch (err) {
     return { ok: false, reason: "path_inaccessible", detail: (err as Error).message };
   }

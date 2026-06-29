@@ -1,7 +1,7 @@
 import { readFile, stat } from "node:fs/promises";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
-import { resolveOwnedProjectPath } from "./path-safety.ts";
+import { resolveSymlinkFreeProjectPath } from "./path-safety.ts";
 
 // Optional per-project doctor configuration (`.code-pact/doctor.yaml`).
 //
@@ -33,7 +33,7 @@ const DOCTOR_CONFIG_MAX_BYTES = 128 * 1024;
  */
 export async function loadDoctorConfig(cwd: string): Promise<DoctorConfig> {
   try {
-    const path = await resolveOwnedProjectPath(cwd, ".code-pact/doctor.yaml");
+    const path = await resolveSymlinkFreeProjectPath(cwd, ".code-pact/doctor.yaml");
     const s = await stat(path);
     if (!s.isFile()) return { disabled_checks: [] };
     if (s.size > DOCTOR_CONFIG_MAX_BYTES) return { disabled_checks: [] };

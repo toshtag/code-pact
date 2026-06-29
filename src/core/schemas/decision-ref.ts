@@ -30,7 +30,7 @@ import { RelativePosixPath } from "./relative-path.ts";
  *     those are not decision records
  *
  * Symlink escape is NOT a lexical concern: it is enforced at READ time by
- * `resolveOwnedProjectPath` (rejects any symlink component). This validator
+ * `resolveSymlinkFreeProjectPath` (rejects any symlink component). This validator
  * is the LEXICAL gate; the read seam is the FILESYSTEM gate. Both run — the
  * defense is multi-layer, never schema-only.
  *

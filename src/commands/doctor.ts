@@ -18,7 +18,7 @@ import {
 } from "../core/progress/all-sources.ts";
 import { validateSnapshotEventEvidence } from "../core/archive/snapshot-evidence.ts";
 import { Project } from "../core/schemas/project.ts";
-import { resolveOwnedProjectPath, resolveWithinProject } from "../core/path-safety.ts";
+import { resolveSymlinkFreeProjectPath, resolveWithinProject } from "../core/path-safety.ts";
 import {
   ACCEPTED_MODEL_VERSION_INPUTS,
   AgentProfile,
@@ -314,7 +314,7 @@ async function checkPhases(
   // Check for phase YAML files in design/phases/ not referenced in roadmap
   let phaseFiles: string[] = [];
   try {
-    const phasesDir = await resolveOwnedProjectPath(cwd, "design/phases");
+    const phasesDir = await resolveSymlinkFreeProjectPath(cwd, "design/phases");
     phaseFiles = await readdir(phasesDir);
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;

@@ -10,7 +10,7 @@ import { collectPlanArtifacts } from "../../../../src/core/plan/state.ts";
 // plane (design/roadmap.yaml, design/phases/*.yaml) must be OWNED: an in-project
 // symlink that aliases a private file (e.g. `.local/private-phase.yaml`) must be
 // refused, matching the strict loadPlanState contract. resolveWithinProject
-// allowed in-project symlinks — resolveOwnedProjectPath does not.
+// allowed in-project symlinks — resolveSymlinkFreeProjectPath does not.
 
 const VALID_PHASE = [
   "id: P1",

@@ -2,7 +2,7 @@ import { readFile, stat } from "node:fs/promises";
 import { stringify as stringifyYaml } from "yaml";
 
 import { atomicWriteText } from "../io/atomic-text.ts";
-import { assertSafeRelativePath, resolveOwnedProjectPath, resolveWithinProject } from "../core/path-safety.ts";
+import { assertSafeRelativePath, resolveSymlinkFreeProjectPath, resolveWithinProject } from "../core/path-safety.ts";
 import { type SpecImportDetail } from "../contracts/spec-import-details.ts";
 import { parseTasksMd, type ParserWarning } from "../core/spec-import/tasks-md-parser.ts";
 import {
@@ -58,7 +58,7 @@ async function resolveSpecPath(
 ): Promise<string> {
   try {
     return ctx.purpose === "output"
-      ? await resolveOwnedProjectPath(cwd, relPath)
+      ? await resolveSymlinkFreeProjectPath(cwd, relPath)
       : await resolveWithinProject(cwd, relPath);
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;

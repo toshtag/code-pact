@@ -1,6 +1,6 @@
 import { readFile, lstat, stat, unlink } from "node:fs/promises";
 import { dirname } from "node:path";
-import { resolveOwnedProjectPath } from "../core/path-safety.ts";
+import { resolveSymlinkFreeProjectPath } from "../core/path-safety.ts";
 import { sha256Hex, normalizeDecisionRef, decisionRecordPath } from "../core/archive/paths.ts";
 import { collectPlanArtifacts } from "../core/plan/state.ts";
 import type { PhaseEntry } from "../core/plan/state.ts";
@@ -106,7 +106,7 @@ async function classifyParent(parentAbs: string): Promise<Presence> {
 async function decisionMdPresence(cwd: string, canonical: string): Promise<Presence> {
   let abs: string;
   try {
-    abs = await resolveOwnedProjectPath(cwd, canonical);
+    abs = await resolveSymlinkFreeProjectPath(cwd, canonical);
   } catch (err) {
     return { kind: "inaccessible", reason: "path_inaccessible", detail: (err as Error).message };
   }
@@ -139,7 +139,7 @@ async function inspectDecisionMd(
 ): Promise<Inspected> {
   let abs: string;
   try {
-    abs = await resolveOwnedProjectPath(cwd, canonical);
+    abs = await resolveSymlinkFreeProjectPath(cwd, canonical);
   } catch (err) {
     return { ok: false, reason: "path_inaccessible", detail: (err as Error).message };
   }

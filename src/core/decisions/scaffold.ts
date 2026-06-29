@@ -1,6 +1,6 @@
 import { access } from "node:fs/promises";
 import { atomicWriteText } from "../../io/atomic-text.ts";
-import { assertSafeRelativePath, resolveOwnedProjectPath } from "../path-safety.ts";
+import { assertSafeRelativePath, resolveSymlinkFreeProjectPath } from "../path-safety.ts";
 import { PLAN_ID_PATTERN } from "../schemas/plan-id.ts";
 
 // ---------------------------------------------------------------------------
@@ -95,7 +95,7 @@ export function proposedAdrStub(label: string): string {
  * Writes a `proposed` ADR stub at `relPath` unless it already exists. Defends
  * its own write boundary — does NOT trust the caller: structural safety
  * (`assertSafeRelativePath`), under-`design/decisions/` containment, and
- * owned-path resolution (`resolveOwnedProjectPath`). Never overwrites an existing file.
+ * owned-path resolution (`resolveSymlinkFreeProjectPath`). Never overwrites an existing file.
  * Returns whether it wrote (`"created"`) or found one already present
  * (`"exists"`).
  */
@@ -110,7 +110,7 @@ export async function writeProposedAdrIfAbsent(
       `Refusing to scaffold "${relPath}": ADR stubs must live under ${DECISIONS_DIR}`,
     );
   }
-  const abs = await resolveOwnedProjectPath(cwd, relPath);
+  const abs = await resolveSymlinkFreeProjectPath(cwd, relPath);
   try {
     await access(abs);
     return "exists";

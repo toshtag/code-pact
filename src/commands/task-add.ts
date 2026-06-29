@@ -2,7 +2,7 @@ import { loadPhase } from "../core/plan/load-phase.ts";
 import { stringify as toYaml } from "yaml";
 import { atomicWriteText } from "../io/atomic-text.ts";
 import { resolvePhaseInRoadmap } from "../core/plan/resolve-phase.ts";
-import { resolveOwnedProjectPath } from "../core/path-safety.ts";
+import { resolveSymlinkFreeProjectPath } from "../core/path-safety.ts";
 import { Phase } from "../core/schemas/phase.ts";
 import { TaskType, type Task } from "../core/schemas/task.ts";
 import { assertSafePlanId } from "../core/schemas/plan-id.ts";
@@ -125,7 +125,7 @@ export async function runTaskAdd(opts: TaskAddOptions): Promise<TaskAddResult> {
     const ref = await resolvePhaseInRoadmap(opts.cwd, opts.phaseId);
     let absPath: string;
     try {
-      absPath = await resolveOwnedProjectPath(opts.cwd, ref.path);
+      absPath = await resolveSymlinkFreeProjectPath(opts.cwd, ref.path);
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
       if (code === "PATH_OUTSIDE_PROJECT" || code === "PATH_NOT_OWNED") {

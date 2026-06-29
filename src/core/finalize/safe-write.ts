@@ -3,7 +3,7 @@ import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { atomicWriteText } from "../../io/atomic-text.ts";
 import {
   assertSafeRelativePath,
-  resolveOwnedProjectPath,
+  resolveSymlinkFreeProjectPath,
 } from "../path-safety.ts";
 import { Phase, type PhaseStatus } from "../schemas/phase.ts";
 import {
@@ -34,7 +34,7 @@ import {
 //     leading `/`, etc.).
 //   - The target path must be under `design/phases/` and end with
 //     `.yaml`. design/roadmap.yaml is deliberately NOT writable.
-//   - `resolveOwnedProjectPath` must succeed (catches symlink escape and
+//   - `resolveSymlinkFreeProjectPath` must succeed (catches symlink escape and
 //     in-project symlink aliases).
 //   - The file must be readable and parseable as a Phase.
 //   - The task id must exist in the parsed phase's tasks[].
@@ -155,7 +155,7 @@ export async function classifyWriteRequest(
   //    phase mutation, including in-project aliases.
   let absPath: string;
   try {
-    absPath = await resolveOwnedProjectPath(cwd, file);
+    absPath = await resolveSymlinkFreeProjectPath(cwd, file);
   } catch (err) {
     return {
       kind: "refused",
@@ -240,7 +240,7 @@ export async function applyPlannedWrite(
   cwd: string,
   diff: TaskStatusDiff,
 ): Promise<void> {
-  const absPath = await resolveOwnedProjectPath(cwd, diff.file);
+  const absPath = await resolveSymlinkFreeProjectPath(cwd, diff.file);
   const raw = await readFile(absPath, "utf8");
   const phase = Phase.parse(parseYaml(raw) as unknown);
   const tasks = phase.tasks ?? [];

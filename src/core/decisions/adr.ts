@@ -1,6 +1,6 @@
 import { readFile, readdir } from "node:fs/promises";
 import { parseFrontMatter } from "../pack/front-matter.ts";
-import { resolveOwnedProjectPath } from "../path-safety.ts";
+import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
 import { isDecisionRefPath } from "../schemas/decision-ref.ts";
 import { resolveRetiredDecisionGate } from "./decision-gate-archive.ts";
 
@@ -68,7 +68,7 @@ export async function readLiveDecisionDir(
   cwd: string,
 ): Promise<{ present: boolean; entries: string[] }> {
   try {
-    const entries = await readdir(await resolveOwnedProjectPath(cwd, "design/decisions"));
+    const entries = await readdir(await resolveSymlinkFreeProjectPath(cwd, "design/decisions"));
     return { present: true, entries: entries.filter((e) => !NON_DECISION_FILES.has(e)) };
   } catch (error) {
     if (isAbsentDecisionsDirError(error)) return { present: false, entries: [] };
@@ -304,7 +304,7 @@ function diskReader(cwd: string): RelFileReader {
     try {
       // Structural path-safety + ownership guard. Throws on `..`, absolute
       // paths, drive letters, and any symlink component.
-      abs = await resolveOwnedProjectPath(cwd, relPath);
+      abs = await resolveSymlinkFreeProjectPath(cwd, relPath);
     } catch {
       return { kind: "unsafe" };
     }

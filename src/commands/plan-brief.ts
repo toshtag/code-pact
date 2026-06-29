@@ -3,7 +3,7 @@ import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { atomicWriteText } from "../io/atomic-text.ts";
 import { Prompter } from "../lib/prompt.ts";
-import { assertSafeRelativePath, resolveOwnedProjectPath, resolveWithinProject } from "../core/path-safety.ts";
+import { assertSafeRelativePath, resolveSymlinkFreeProjectPath, resolveWithinProject } from "../core/path-safety.ts";
 import type { Locale } from "../i18n/index.ts";
 import { messages as messageCatalog } from "../i18n/index.ts";
 import type {
@@ -291,7 +291,7 @@ export async function runBriefWizard(
 
 async function resolveBriefOutputPath(cwd: string): Promise<string> {
   try {
-    return await resolveOwnedProjectPath(cwd, "design/brief.md");
+    return await resolveSymlinkFreeProjectPath(cwd, "design/brief.md");
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "PATH_OUTSIDE_PROJECT" || code === "PATH_NOT_OWNED") {

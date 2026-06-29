@@ -11,7 +11,7 @@ import { DEFAULT_AGENT_PROFILES, type SupportedAgent } from "../core/agents.ts";
 import { renderInitConstitution } from "../core/constitution.ts";
 import { messages as messageCatalog } from "../i18n/index.ts";
 import { isGitRepo, gitIgnoredControlPlaneAreas } from "../core/control-plane-ignore.ts";
-import { resolveOwnedProjectPath } from "../core/path-safety.ts";
+import { resolveSymlinkFreeProjectPath } from "../core/path-safety.ts";
 
 export type { SupportedAgent } from "../core/agents.ts";
 
@@ -124,7 +124,7 @@ async function writeIfAbsent(
 
 async function resolveInitPath(cwd: string, relPath: string): Promise<string> {
   try {
-    return await resolveOwnedProjectPath(cwd, relPath);
+    return await resolveSymlinkFreeProjectPath(cwd, relPath);
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (

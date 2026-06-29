@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { parse as parseYaml } from "yaml";
 import { RelativePosixPath } from "./schemas/relative-path.ts";
 import { assertSafePlanId } from "./schemas/plan-id.ts";
-import { resolveOwnedProjectPath, resolveWithinProject } from "./path-safety.ts";
+import { resolveSymlinkFreeProjectPath, resolveWithinProject } from "./path-safety.ts";
 import { AgentProfile } from "./schemas/agent-profile.ts";
 
 // Single source of truth for where an agent's profile lives.
@@ -242,7 +242,7 @@ export async function resolveOwnedAgentProfilePath(
   assertWritableProfileRel(agentName, rel);
   await assertProfileRelNotShared(cwd, agentName, rel);
   try {
-    const path = await resolveOwnedProjectPath(cwd, [".code-pact", rel].join("/"));
+    const path = await resolveSymlinkFreeProjectPath(cwd, [".code-pact", rel].join("/"));
     await assertProfileNameMatches(path, agentName);
     return path;
   } catch (err) {

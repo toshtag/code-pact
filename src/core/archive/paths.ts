@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { join, posix } from "node:path";
 import { assertSafePlanId } from "../schemas/plan-id.ts";
 import { normalizePrunedDecisionPath } from "../decisions/pruned-ledger.ts";
-import { resolveOwnedProjectPath, resolveOwnedProjectPathSync } from "../path-safety.ts";
+import { resolveSymlinkFreeProjectPath, resolveSymlinkFreeProjectPathSync } from "../path-safety.ts";
 
 // Record locations for the archive layer. One file per record (mirroring the
 // per-event ledger and `baselines/initial.json` precedents) — an append-only
@@ -61,7 +61,7 @@ function mapArchiveOwnershipError(err: unknown): never {
 
 export async function resolveArchiveOwnedPath(cwd: string, relPath: string): Promise<string> {
   try {
-    return await resolveOwnedProjectPath(cwd, relPath);
+    return await resolveSymlinkFreeProjectPath(cwd, relPath);
   } catch (err) {
     mapArchiveOwnershipError(err);
   }
@@ -69,7 +69,7 @@ export async function resolveArchiveOwnedPath(cwd: string, relPath: string): Pro
 
 export function resolveArchiveOwnedPathSync(cwd: string, relPath: string): string {
   try {
-    return resolveOwnedProjectPathSync(cwd, relPath);
+    return resolveSymlinkFreeProjectPathSync(cwd, relPath);
   } catch (err) {
     mapArchiveOwnershipError(err);
   }
