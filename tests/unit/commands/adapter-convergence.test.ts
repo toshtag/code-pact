@@ -83,11 +83,11 @@ describe("adapter convergence — verification-command skill collides with a bui
     expect(builtin).toContain("Verify task completion criteria"); // built-in SKILL_VERIFY
 
     const derived = await readFile(
-      join(dir, ".claude", "skills", "verify-2.md"),
+      join(dir, ".claude", "skills", "code-pact-verify-2.md"),
       "utf8",
     );
     // Final uniquified name is used in BOTH the path and the rendered body.
-    expect(derived).toContain("/verify-2");
+    expect(derived).toContain("/code-pact-verify-2");
     expect(derived).toContain("pnpm verify");
     expect(derived).not.toContain("/verify\n"); // not the un-suffixed title
   });
@@ -104,10 +104,10 @@ describe("adapter convergence — verification-command skill collides with a bui
     const paths = manifest!.files.map(f => f.path);
     expect(new Set(paths).size).toBe(paths.length);
     expect(paths).toContain(".claude/skills/verify.md");
-    expect(paths).toContain(".claude/skills/verify-2.md");
+    expect(paths).toContain(".claude/skills/code-pact-verify-2.md");
   });
 
-  it("install → later mutation runs adopt code-pact-generated dynamic skill (provenance verified)", async () => {
+  it("install → later mutation warns on existing dynamic skill (create-only)", async () => {
     await runAdapterInstall({
       cwd: dir,
       agentName: "claude-code",
@@ -123,14 +123,14 @@ describe("adapter convergence — verification-command skill collides with a bui
       acceptModified: false,
       locale: "en-US",
     });
-    // With provenance markers, a code-pact-generated dynamic skill is now
-    // recognized as ours — managed-clean and current (skip), not unverifiable.
+    // Dynamic skills are create-only: an existing file is never read or hashed.
+    // Re-run warns (dynamic_file_unverifiable) — not managed-clean/skip.
     expect(
-      check1.plan.find(p => p.relPath.endsWith("verify-2.md")),
+      check1.plan.find(p => p.relPath.endsWith("code-pact-verify-2.md")),
     ).toMatchObject({
-      local: "managed-clean",
-      desired: "current",
-      action: "skip",
+      local: "unverifiable",
+      desired: "unverifiable",
+      action: "warn",
     });
 
     const write = await runAdapterUpgrade({
@@ -142,8 +142,8 @@ describe("adapter convergence — verification-command skill collides with a bui
       locale: "en-US",
     });
     expect(
-      write.plan.find(p => p.relPath.endsWith("verify-2.md"))?.action,
-    ).toBe("skip");
+      write.plan.find(p => p.relPath.endsWith("code-pact-verify-2.md"))?.action,
+    ).toBe("warn");
 
     const check2 = await runAdapterUpgrade({
       cwd: dir,
@@ -153,8 +153,10 @@ describe("adapter convergence — verification-command skill collides with a bui
       acceptModified: false,
       locale: "en-US",
     });
-    expect(check2.plan.find(p => p.relPath.endsWith("verify-2.md"))).toEqual(
-      check1.plan.find(p => p.relPath.endsWith("verify-2.md")),
+    expect(
+      check2.plan.find(p => p.relPath.endsWith("code-pact-verify-2.md")),
+    ).toEqual(
+      check1.plan.find(p => p.relPath.endsWith("code-pact-verify-2.md")),
     );
 
     const doctor = await runAdapterDoctor({ cwd: dir, locale: "en-US" });

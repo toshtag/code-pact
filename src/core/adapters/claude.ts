@@ -246,7 +246,6 @@ function uniquifySkillName(base: string, taken: ReadonlySet<string>): string {
 
 function buildCommandSkill(skillName: string, command: string): string {
   return [
-    `<!-- code-pact:generated skill="${skillName}" command="${command.replace(/"/g, "&quot;")}" -->`,
     `# /${skillName} — ${command}`,
     ``,
     `Usage: /${skillName}`,
@@ -316,6 +315,13 @@ export async function generateClaudeDesiredFiles(
   // built-in (or with an earlier derived name) is deterministically uniquified
   // rather than silently dropped or clobbering the built-in. The final name is
   // used for BOTH the path and the rendered skill body so they never diverge.
+  // Reserved prefix for code-pact-generated dynamic skills. This separates
+  // our generated skills from user-authored skills in the shared
+  // `.claude/skills/*.md` namespace. New dynamic skills are always generated
+  // with this prefix. Legacy shared-namespace files (without the prefix) are
+  // never read, hashed, overwritten, or deleted — they are preserved with a
+  // warning if encountered during install/upgrade.
+  const CODE_PACT_PREFIX = "code-pact-";
   const takenSkillNames = new Set<string>(RESERVED_SKILL_NAMES);
   for (const cmd of verificationCommands) {
     // Walk the self-describing candidate ladder (base, then flag-qualified
@@ -323,10 +329,11 @@ export async function generateClaudeDesiredFiles(
     // fall back to a numeric suffix on the most specific candidate.
     const variants = deriveSkillNameVariants(cmd);
     const free = variants.find(v => !takenSkillNames.has(v));
-    const skillName =
+    const baseName =
       free ??
       uniquifySkillName(variants[variants.length - 1]!, takenSkillNames);
-    takenSkillNames.add(skillName);
+    takenSkillNames.add(baseName);
+    const skillName = `${CODE_PACT_PREFIX}${baseName}`;
     files.push({
       path: `${skillDir}/${skillName}.md`,
       role: "skill",
@@ -351,12 +358,13 @@ export const claudeAdapterDescriptor: AdapterDescriptor = {
     ".claude/skills/verify.md": "skill",
     ".claude/skills/progress.md": "skill",
   } as const,
-  // Role-scoped create-only authority: missing skill files in the shared
-  // `.claude/skills/*.md` namespace may be CREATED, but existing files there
-  // are never read/hashed/overwritten — the namespace is shared with
-  // hand-authored user skills and attacker-influenceable dynamic names.
+  // Role-scoped create-only authority: missing skill files in the reserved
+  // `.claude/skills/code-pact-*.md` namespace may be CREATED, but existing
+  // files there are never read/hashed/overwritten — create-only policy.
+  // Legacy shared-namespace files (`.claude/skills/*.md` without the prefix)
+  // are also never read/hashed/overwritten/deleted.
   createPathGlobsByRole: {
-    skill: [".claude/skills/*.md"],
+    skill: [".claude/skills/code-pact-*.md"],
   } as const,
   profilePathContract: {
     instructionFilename: "CLAUDE.md",

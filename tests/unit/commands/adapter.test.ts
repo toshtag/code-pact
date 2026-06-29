@@ -876,7 +876,7 @@ describe("runGenerateAdapter — v0.5.2 skill generation", () => {
     });
   });
 
-  it("generates test.md skill from verification command pnpm test", async () => {
+  it("generates code-pact-test.md skill from verification command pnpm test", async () => {
     await runGenerateAdapter({
       cwd: dir,
       agentName: "claude-code",
@@ -884,10 +884,10 @@ describe("runGenerateAdapter — v0.5.2 skill generation", () => {
       locale: "en-US",
     });
     const skillContent = await readFile(
-      join(dir, ".claude", "skills", "test.md"),
+      join(dir, ".claude", "skills", "code-pact-test.md"),
       "utf8",
     );
-    expect(skillContent).toContain("/test");
+    expect(skillContent).toContain("/code-pact-test");
     expect(skillContent).toContain("pnpm test");
   });
 
@@ -899,10 +899,10 @@ describe("runGenerateAdapter — v0.5.2 skill generation", () => {
       locale: "en-US",
     });
     const names = result.created.map(p => p.replace(dir, ""));
-    expect(names.some(n => n.includes("test.md"))).toBe(true);
+    expect(names.some(n => n.includes("code-pact-test.md"))).toBe(true);
   });
 
-  it("re-run adopts a code-pact-generated dynamic skill (provenance verified)", async () => {
+  it("re-run warns on an existing dynamic skill (create-only, no provenance read)", async () => {
     await runGenerateAdapter({
       cwd: dir,
       agentName: "claude-code",
@@ -915,13 +915,13 @@ describe("runGenerateAdapter — v0.5.2 skill generation", () => {
       force: false,
       locale: "en-US",
     });
-    // With provenance markers, a code-pact-generated dynamic skill is now
-    // recognized as ours and adopted (provenance matches) instead of warned.
-    expect(second.files.find(f => f.relPath.endsWith("test.md"))).toMatchObject(
-      {
-        action: "adopt",
-      },
-    );
+    // Dynamic skills are create-only: an existing file is never read or hashed.
+    // Re-run warns (dynamic_file_unverifiable) instead of adopting.
+    expect(
+      second.files.find(f => f.relPath.endsWith("code-pact-test.md")),
+    ).toMatchObject({
+      action: "warn",
+    });
   });
 
   it("--regen-skills does NOT overwrite a user-modified skill file (v0.9 safety invariant)", async () => {
@@ -961,7 +961,11 @@ describe("runGenerateAdapter — v0.5.2 skill generation", () => {
     // ownership of existing bytes, so the file is left untouched and a warning
     // is issued. The rest of the install proceeds normally.
     await mkdir(join(dir, ".claude", "skills"), { recursive: true });
-    await writeFile(join(dir, ".claude", "skills", "test.md"), "STALE", "utf8");
+    await writeFile(
+      join(dir, ".claude", "skills", "code-pact-test.md"),
+      "STALE",
+      "utf8",
+    );
     // Pre-create an unmanaged CLAUDE.md too — it should be left alone since
     // --regen-skills only scopes to skill role.
     await writeFile(join(dir, "CLAUDE.md"), "USER CLAUDE", "utf8");
@@ -974,11 +978,16 @@ describe("runGenerateAdapter — v0.5.2 skill generation", () => {
       regenSkills: true,
     });
 
-    // test.md (dynamic, existing) → warn/preserve, content untouched.
-    const testFile = result.files.find(f => f.relPath.endsWith("test.md"));
+    // code-pact-test.md (dynamic, existing) → warn/preserve, content untouched.
+    const testFile = result.files.find(f =>
+      f.relPath.endsWith("code-pact-test.md"),
+    );
     expect(testFile?.action).toBe("warn");
     expect(
-      await readFile(join(dir, ".claude", "skills", "test.md"), "utf8"),
+      await readFile(
+        join(dir, ".claude", "skills", "code-pact-test.md"),
+        "utf8",
+      ),
     ).toBe("STALE");
 
     // CLAUDE.md (role=instruction) is NOT touched by --regen-skills.
@@ -1067,17 +1076,17 @@ describe("runGenerateAdapter — forged manifest cannot overwrite a colliding us
       force: false,
       json: false,
       createSamplePhase: true,
-      // deriveSkillName("deploy") === "deploy" → generator wants .claude/skills/deploy.md
+      // deriveSkillName("deploy") === "deploy" → generator wants .claude/skills/code-pact-deploy.md
       verifyCommand: "deploy",
     });
   });
 
-  it("refuses to overwrite a hand-authored .claude/skills/deploy.md (managed-clean via forged manifest)", async () => {
-    const userSkill = join(dir, ".claude", "skills", "deploy.md");
+  it("refuses to overwrite a hand-authored .claude/skills/code-pact-deploy.md (managed-clean via forged manifest)", async () => {
+    const userSkill = join(dir, ".claude", "skills", "code-pact-deploy.md");
     await mkdir(join(dir, ".claude", "skills"), { recursive: true });
     const USER = "# my deploy notes\nhand-authored, load-bearing\n";
     await writeFile(userSkill, USER, "utf8");
-    // Forge a manifest claiming deploy.md is a managed skill whose hash == the
+    // Forge a manifest claiming code-pact-deploy.md is a managed skill whose hash == the
     // user's current content → it classifies managed-clean × stale → would update.
     await writeManifest(dir, "claude-code", {
       schema_version: 1,
@@ -1091,7 +1100,7 @@ describe("runGenerateAdapter — forged manifest cannot overwrite a colliding us
       },
       files: [
         {
-          path: ".claude/skills/deploy.md",
+          path: ".claude/skills/code-pact-deploy.md",
           sha256: computeContentHash(USER),
           managed: true,
           role: "skill",
@@ -1106,11 +1115,11 @@ describe("runGenerateAdapter — forged manifest cannot overwrite a colliding us
       locale: "en-US",
     });
 
-    // deploy.md is a DYNAMIC skill path — NOT in the trusted owned set — so
+    // code-pact-deploy.md is a DYNAMIC skill path — NOT in the trusted owned set — so
     // the existing file is preserved (warn) and the hand-authored content is
     // left untouched. The install continues with other safe mutations.
     const entry = result.files.find(
-      f => f.relPath === ".claude/skills/deploy.md",
+      f => f.relPath === ".claude/skills/code-pact-deploy.md",
     );
     expect(entry?.action).toBe("warn");
     expect(entry?.reason).toBe("dynamic_file_unverifiable");

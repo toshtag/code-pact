@@ -247,21 +247,21 @@ describe("adapter doctor — forged manifest .env oracle (security)", () => {
   });
 
   // SECURITY (Blocker 1 — shared skills namespace): a victim's hand-authored
-  // `.claude/skills/private.md` is in the broad create namespace (for role=skill)
-  // but is NOT in doctor's current exact generated set. It is INDISTINGUISHABLE
-  // from a stale managed skill by path, so doctor does NOT read it (no content
-  // oracle) and reports an advisory ADAPTER_FILE_UNVERIFIABLE — never
-  // reads/hashes/inspects.
-  it(`does not read a victim's .claude/skills/private.md (role: skill); secret never surfaces`, async () => {
+  // `.claude/skills/code-pact-private.md` is in the reserved create namespace
+  // (for role=skill) but is NOT in doctor's current exact generated set. It is
+  // INDISTINGUISHABLE from a stale managed skill by path, so doctor does NOT
+  // read it (no content oracle) and reports an advisory
+  // ADAPTER_FILE_UNVERIFIABLE — never reads/hashes/inspects.
+  it(`does not read a victim's .claude/skills/code-pact-private.md (role: skill); secret never surfaces`, async () => {
     await mkdir(join(dir, ".claude", "skills"), { recursive: true });
     await writeFile(
-      join(dir, ".claude", "skills", "private.md"),
+      join(dir, ".claude", "skills", "code-pact-private.md"),
       "API_TOKEN=doctor-private-marker\n",
       "utf8",
     );
     const m = await readMutableManifest(dir, "claude-code");
     m.files.push({
-      path: ".claude/skills/private.md",
+      path: ".claude/skills/code-pact-private.md",
       sha256: "0".repeat(64),
       managed: true,
       role: "skill",
@@ -272,7 +272,7 @@ describe("adapter doctor — forged manifest .env oracle (security)", () => {
     const issue = result.issues.find(
       i =>
         i.code === "ADAPTER_FILE_UNVERIFIABLE" &&
-        (i.path ?? "").endsWith("private.md"),
+        (i.path ?? "").endsWith("code-pact-private.md"),
     );
     expect(issue).toBeDefined();
     expect(issue?.severity).toBe("warning"); // not read, not a hard error
@@ -280,19 +280,20 @@ describe("adapter doctor — forged manifest .env oracle (security)", () => {
     expect(JSON.stringify(result)).not.toContain("doctor-private-marker");
   });
 
-  // A `.claude/skills/private.md` forged with role: instruction is now a HARD
-  // error (unowned) — the create namespace is role-scoped (skill only), so an
-  // instruction role on a skill path is a forged-manifest security failure.
-  it(`hard-refuses a victim's .claude/skills/private.md forged as role: instruction`, async () => {
+  // A `.claude/skills/code-pact-private.md` forged with role: instruction is
+  // now a HARD error (unowned) — the create namespace is role-scoped (skill
+  // only), so an instruction role on a skill path is a forged-manifest security
+  // failure.
+  it(`hard-refuses a victim's .claude/skills/code-pact-private.md forged as role: instruction`, async () => {
     await mkdir(join(dir, ".claude", "skills"), { recursive: true });
     await writeFile(
-      join(dir, ".claude", "skills", "private.md"),
+      join(dir, ".claude", "skills", "code-pact-private.md"),
       "API_TOKEN=doctor-private-marker\n",
       "utf8",
     );
     const m = await readMutableManifest(dir, "claude-code");
     m.files.push({
-      path: ".claude/skills/private.md",
+      path: ".claude/skills/code-pact-private.md",
       sha256: "0".repeat(64),
       managed: true,
       role: "instruction",
@@ -303,7 +304,7 @@ describe("adapter doctor — forged manifest .env oracle (security)", () => {
     const issue = result.issues.find(
       i =>
         i.code === "ADAPTER_FILE_PATH_UNSAFE" &&
-        (i.path ?? "").endsWith("private.md"),
+        (i.path ?? "").endsWith("code-pact-private.md"),
     );
     expect(issue).toBeDefined();
     expect(issue?.severity).toBe("error"); // role mismatch → unowned → hard error
@@ -423,14 +424,19 @@ describe("adapter doctor — forged manifest .env oracle (security)", () => {
   for (const shaMode of ["matching", "non-matching"] as const) {
     it(`does not read a current dynamic skill collision with a ${shaMode} manifest SHA`, async () => {
       await addPrivateVerificationCommand();
-      const privatePath = join(dir, ".claude", "skills", "private.md");
+      const privatePath = join(
+        dir,
+        ".claude",
+        "skills",
+        "code-pact-private.md",
+      );
       const secret = "# private\nAPI_TOKEN=dynamic-collision-marker\n";
       await writeFile(privatePath, secret, "utf8");
       const m = await readMutableManifest(dir, "claude-code");
       const { computeContentHash } =
         await import("../../../src/core/adapters/manifest.ts");
       m.files.push({
-        path: ".claude/skills/private.md",
+        path: ".claude/skills/code-pact-private.md",
         sha256:
           shaMode === "matching" ? computeContentHash(secret) : "0".repeat(64),
         managed: true,
@@ -459,11 +465,11 @@ describe("adapter doctor — forged manifest .env oracle (security)", () => {
 
   it("does not heading-inspect a current dynamic skill forged as an instruction", async () => {
     await addPrivateVerificationCommand();
-    const privatePath = join(dir, ".claude", "skills", "private.md");
+    const privatePath = join(dir, ".claude", "skills", "code-pact-private.md");
     await writeFile(privatePath, "not an agent contract\n", "utf8");
     const m = await readMutableManifest(dir, "claude-code");
     m.files.push({
-      path: ".claude/skills/private.md",
+      path: ".claude/skills/code-pact-private.md",
       sha256: "0".repeat(64),
       managed: true,
       role: "instruction",

@@ -9,13 +9,12 @@ import type { DesiredAdapterFileRole } from "../core/adapters/types.ts";
 import {
   assertAdapterWritePathsContained,
   assertSafeRelativePath,
-  checkDynamicProvenance,
+  authorizedPathExists,
   classifyFileState,
   decideAction,
   readAuthorizedRegularFileMaybe,
   type FileAction,
 } from "../core/adapters/file-state.ts";
-import { provenanceContentMatches } from "../core/adapters/provenance.ts";
 import { loadModelProfilesStrict } from "../core/models/load-model-profiles.ts";
 import { authorizeAdapterMutationPath } from "../core/adapters/manifest-file-ownership.ts";
 import {
@@ -352,25 +351,17 @@ export async function runAdapterInstall(
       action = "refuse";
       refuseReason = "symlink_traversal";
     } else if (authority.kind === "dynamic_write") {
-      // Dynamic paths may be CREATED, but an existing target's ownership is
-      // checked via provenance marker (first line only — never full content).
-      const provStatus = await checkDynamicProvenance(absPath);
-      if (provStatus.kind === "missing") {
-        action = "write";
-      } else if (provStatus.kind === "ours") {
-        // We generated this file. Check if it's current.
-        if (provenanceContentMatches(provStatus.info, desired.content)) {
-          // Provenance matches — adopt without writing.
-          action = "adopt";
-        } else {
-          // Provenance is ours but content is stale — safe to update.
-          action = "update";
-        }
-      } else {
-        // foreign / empty / unreadable: preserve without reading full content.
+      // Dynamic paths may be CREATED, but an existing target is never read or
+      // hashed: even with the reserved `code-pact-*` namespace, an existing
+      // file's ownership cannot be proven via manifest SHA alone. An existing
+      // dynamic file is preserved (warn) — not refused — so the rest of the
+      // install can proceed (static writes, model pin, manifest).
+      if (await authorizedPathExists(absPath, desired.path)) {
         action = "warn";
         warningReason = "dynamic_file_unverifiable";
         preserved.push(absPath);
+      } else {
+        action = "write";
       }
     } else {
       const diskContent = await readAuthorizedRegularFileMaybe(

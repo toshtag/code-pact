@@ -7,12 +7,11 @@
 // re-exports below keep existing adapter call sites working unchanged.
 // ---------------------------------------------------------------------------
 
-import { readFile, stat, open } from "../project-fs/index.ts";
+import { readFile, stat } from "../project-fs/index.ts";
 import {
   assertSafeRelativePath as assertSafeRelativePathImpl,
   resolveSymlinkFreeProjectPath,
 } from "../path-safety.ts";
-import { checkProvenance, type ProvenanceStatus } from "./provenance.ts";
 
 export {
   assertSafeRelativePath,
@@ -83,46 +82,6 @@ export async function authorizedPathExists(
     throw configError(
       `authorized adapter path "${relPath}" cannot be inspected (${code ?? "unreadable"})`,
     );
-  }
-}
-
-/**
- * Read the first line of a dynamic skill file and check its provenance marker.
- * Reads ONLY the first line (via a bounded read), never the full content — so
- * a user-authored file's content is never inspected beyond the marker check.
- *
- * Returns the provenance status:
- * - `ours` — the file has a code-pact provenance marker (we generated it).
- * - `foreign` — the first line is NOT our marker (user-authored or unknown).
- * - `empty` — the file is empty or whitespace-only.
- * - `missing` — the file does not exist (ENOENT).
- * - `unreadable` — the file exists but cannot be read (stat/read failure).
- */
-export async function checkDynamicProvenance(
-  absPath: string,
-): Promise<ProvenanceStatus | { kind: "missing" } | { kind: "unreadable" }> {
-  let st: import("node:fs").Stats;
-  try {
-    st = await stat(absPath);
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code === "ENOENT") return { kind: "missing" };
-    return { kind: "unreadable" };
-  }
-  if (!st.isFile()) return { kind: "unreadable" };
-  try {
-    const fh = await open(absPath, "r");
-    try {
-      const buf = Buffer.alloc(256);
-      const { bytesRead } = await fh.read(buf, 0, 256, 0);
-      const firstLine =
-        buf.subarray(0, bytesRead).toString("utf8").split("\n")[0] ?? "";
-      return checkProvenance(firstLine);
-    } finally {
-      await fh.close();
-    }
-  } catch {
-    return { kind: "unreadable" };
   }
 }
 

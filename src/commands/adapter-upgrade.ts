@@ -12,7 +12,7 @@ import type { DesiredAdapterFileRole } from "../core/adapters/types.ts";
 import {
   assertAdapterWritePathsContained,
   assertSafeRelativePath,
-  checkDynamicProvenance,
+  authorizedPathExists,
   classifyFileState,
   decideAction,
   readAuthorizedRegularFileMaybe,
@@ -21,7 +21,6 @@ import {
   type FileAction,
   type LocalFileState,
 } from "../core/adapters/file-state.ts";
-import { provenanceContentMatches } from "../core/adapters/provenance.ts";
 import { loadModelProfilesStrict } from "../core/models/load-model-profiles.ts";
 import { authorizeAdapterMutationPath } from "../core/adapters/manifest-file-ownership.ts";
 import {
@@ -348,10 +347,17 @@ export async function runAdapterUpgrade(
       action = "refuse";
       reason = "symlink_traversal";
     } else if (authority.kind === "dynamic_write") {
-      // Dynamic paths may be CREATED, but an existing target's ownership is
-      // checked via provenance marker (first line only — never full content).
-      const provStatus = await checkDynamicProvenance(absPath);
-      if (provStatus.kind === "missing") {
+      // Dynamic paths may be CREATED, but an existing target is never read or
+      // hashed. Even with the reserved `code-pact-*` namespace, an existing
+      // file's ownership cannot be proven via manifest SHA alone. An existing
+      // dynamic file is preserved (warn) — not refused — so the rest of the
+      // upgrade can proceed (static writes, model pin, manifest refresh).
+      if (await authorizedPathExists(absPath, desired.path)) {
+        local = "unverifiable";
+        desiredState = "unverifiable";
+        action = "warn";
+        reason = "dynamic_file_unverifiable";
+      } else {
         const cls = classifyFileState({
           manifestHash,
           diskHash: null,
@@ -366,36 +372,6 @@ export async function runAdapterUpgrade(
           force: force || (regenSkills && desired.role === "skill"),
           acceptModified,
         });
-      } else if (provStatus.kind === "ours") {
-        // We generated this file. Check if it's current.
-        if (provenanceContentMatches(provStatus.info, desired.content)) {
-          local = "managed-clean";
-          desiredState = "current";
-          action = decideAction({
-            local: "managed-clean",
-            desired: "current",
-            mode: mode === "check" ? "upgrade-check" : "upgrade-write",
-            force: force || (regenSkills && desired.role === "skill"),
-            acceptModified,
-          });
-        } else {
-          // Provenance is ours but content is stale — safe to update.
-          local = "managed-clean";
-          desiredState = "stale";
-          action = decideAction({
-            local: "managed-clean",
-            desired: "stale",
-            mode: mode === "check" ? "upgrade-check" : "upgrade-write",
-            force: force || (regenSkills && desired.role === "skill"),
-            acceptModified,
-          });
-        }
-      } else {
-        // foreign / empty / unreadable: preserve without reading full content.
-        local = "unverifiable";
-        desiredState = "unverifiable";
-        action = "warn";
-        reason = "dynamic_file_unverifiable";
       }
     } else {
       const diskContent = await readAuthorizedRegularFileMaybe(

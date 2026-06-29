@@ -132,7 +132,7 @@ describe("adapter install/upgrade read authority", () => {
   });
 
   it("never reads an existing dynamic skill and ignores a forged manifest hash", async () => {
-    const relPath = ".claude/skills/deploy.md";
+    const relPath = ".claude/skills/code-pact-deploy.md";
     const target = join(dir, relPath);
     const content = "# hand-authored deploy notes\n";
     await mkdir(join(dir, ".claude", "skills"), { recursive: true });
