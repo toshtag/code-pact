@@ -34,3 +34,50 @@ export type {
   OwnedWritePath,
   OwnedDeletePath,
 } from "./branded-paths.ts";
+import {
+  unbrand,
+  type OwnedDeletePath,
+  type OwnedReadPath,
+  type OwnedWritePath,
+} from "./branded-paths.ts";
+import {
+  readFile as readFileRaw,
+  writeFile as writeFileRaw,
+  rm as rmRaw,
+  readdir as readdirRaw,
+  rename as renameRaw,
+  copyFile as copyFileRaw,
+} from "node:fs/promises";
+
+export async function readOwnedText(path: OwnedReadPath): Promise<string> {
+  return readFileRaw(unbrand(path), "utf8");
+}
+
+export async function writeOwnedText(
+  path: OwnedWritePath,
+  content: string,
+): Promise<void> {
+  await writeFileRaw(unbrand(path), content, "utf8");
+}
+
+export async function removeOwned(path: OwnedDeletePath): Promise<void> {
+  await rmRaw(unbrand(path), { force: true });
+}
+
+export async function listOwned(path: OwnedReadPath): Promise<string[]> {
+  return readdirRaw(unbrand(path));
+}
+
+export async function renameOwned(
+  source: OwnedDeletePath | OwnedWritePath,
+  destination: OwnedWritePath,
+): Promise<void> {
+  await renameRaw(unbrand(source), unbrand(destination));
+}
+
+export async function copyOwnedToOwned(
+  source: OwnedReadPath | OwnedWritePath,
+  destination: OwnedWritePath,
+): Promise<void> {
+  await copyFileRaw(unbrand(source), unbrand(destination));
+}
