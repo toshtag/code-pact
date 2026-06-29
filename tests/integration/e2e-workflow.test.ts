@@ -254,9 +254,9 @@ describe("e2e: full agent-facing loop (init → adapter install → recommend �
       expect(driftKinds).toContain("done-but-design-not-done");
     }
 
-    // 12. adapter upgrade --check — static files are clean, while the existing
-    //     dynamic command skill is intentionally unverifiable in the shared
-    //     namespace and must be refused without reading its bytes.
+    // 12. adapter upgrade --check — static files are clean, and the dynamic
+    //     command skill created by code-pact is a handoff output: it is not
+    //     read/hashed again and does not keep the plan dirty.
     {
       const env = project.runJson<{
         clean: boolean;
@@ -269,15 +269,10 @@ describe("e2e: full agent-facing loop (init → adapter install → recommend �
       }>(["adapter", "upgrade", "claude-code", "--check", "--json"]);
       expect(env.ok).toBe(true);
       if (env.ok) {
-        expect(env.data.clean).toBe(false);
+        expect(env.data.clean).toBe(true);
         expect(
-          env.data.plan.find(p => p.reason === "dynamic_file_unverifiable"),
-        ).toMatchObject({
-          local: "unverifiable",
-          desired: "unverifiable",
-          action: "warn",
-          reason: "dynamic_file_unverifiable",
-        });
+          env.data.plan.some(p => p.reason === "dynamic_file_unverifiable"),
+        ).toBe(false);
       }
     }
 

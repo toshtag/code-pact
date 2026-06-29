@@ -356,10 +356,16 @@ export async function runAdapterUpgrade(
       // dynamic file is preserved (warn) — not refused — so the rest of the
       // upgrade can proceed (static writes, model pin, manifest refresh).
       if (await authorizedPathExists(absPath, desired.path)) {
-        local = "unverifiable";
-        desiredState = "unverifiable";
-        action = "warn";
-        reason = "dynamic_file_unverifiable";
+        if (manifestEntry?.ownership === "handed_off") {
+          local = "managed-clean";
+          desiredState = "current";
+          action = "skip";
+        } else {
+          local = "unverifiable";
+          desiredState = "unverifiable";
+          action = "warn";
+          reason = "dynamic_file_unverifiable";
+        }
       } else {
         const cls = classifyFileState({
           manifestHash,
@@ -414,6 +420,7 @@ export async function runAdapterUpgrade(
 
     desiredApply.push({ desired, absPath, action });
     let recordedHash: string | null = null;
+    let recordedOwnership: ManifestFile["ownership"] = "managed";
 
     if (
       action === "write" ||
@@ -421,6 +428,7 @@ export async function runAdapterUpgrade(
       action === "update"
     ) {
       recordedHash = desiredHash;
+      if (authority.kind === "dynamic_write") recordedOwnership = "handed_off";
     } else if (action === "adopt") {
       // Disk matches desired; record manifest entry only.
       recordedHash = desiredHash;
@@ -432,12 +440,14 @@ export async function runAdapterUpgrade(
       // For unmanaged-without-force, we don't record (file isn't ours).
       if (manifestHash !== null) {
         recordedHash = manifestHash;
+        recordedOwnership = manifestEntry?.ownership ?? "managed";
       }
     } else if (action === "refuse") {
       // Preserve the existing manifest entry so the file stays tracked.
       // The disk content remains the user's local modification.
       if (manifestHash !== null) {
         recordedHash = manifestHash;
+        recordedOwnership = manifestEntry?.ownership ?? "managed";
       }
     } else if (action === "warn") {
       // Existing dynamic file preserved without read/hash. Keep the existing
@@ -453,6 +463,7 @@ export async function runAdapterUpgrade(
         sha256: recordedHash,
         managed: true,
         role: desired.role,
+        ownership: recordedOwnership,
       });
     }
   }

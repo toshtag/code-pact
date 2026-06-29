@@ -360,9 +360,13 @@ export async function runAdapterInstall(
       // dynamic file is preserved (warn) — not refused — so the rest of the
       // install can proceed (static writes, model pin, manifest).
       if (await authorizedPathExists(absPath, desired.path)) {
-        action = "warn";
-        warningReason = "dynamic_file_unverifiable";
-        preserved.push(absPath);
+        if (manifestEntry?.ownership === "handed_off") {
+          action = "skip";
+        } else {
+          action = "warn";
+          warningReason = "dynamic_file_unverifiable";
+          preserved.push(absPath);
+        }
       } else {
         action = "write";
       }
@@ -398,6 +402,7 @@ export async function runAdapterInstall(
     plannedFiles.push({ desired, absPath, action, desiredHash });
 
     let recordedHash: string | null = null;
+    let recordedOwnership: ManifestFile["ownership"] = "managed";
 
     if (
       action === "write" ||
@@ -405,6 +410,7 @@ export async function runAdapterInstall(
       action === "update"
     ) {
       recordedHash = desiredHash;
+      if (authority.kind === "dynamic_write") recordedOwnership = "handed_off";
     } else if (action === "adopt") {
       recordedHash = desiredHash;
     } else if (action === "skip") {
@@ -413,6 +419,7 @@ export async function runAdapterInstall(
       // For unmanaged-without-force, we don't record (file isn't ours yet).
       if (manifestHash !== null) {
         recordedHash = manifestHash;
+        recordedOwnership = manifestEntry?.ownership ?? "managed";
       }
     } else if (action === "refuse") {
       // managed-modified × stale: divergent from BOTH the manifest and the
@@ -422,6 +429,7 @@ export async function runAdapterInstall(
       refused.push(absPath);
       if (manifestHash !== null) {
         recordedHash = manifestHash;
+        recordedOwnership = manifestEntry?.ownership ?? "managed";
       }
     } else if (action === "warn") {
       // Existing dynamic file preserved without read/hash. Keep the existing
@@ -439,6 +447,7 @@ export async function runAdapterInstall(
         sha256: recordedHash,
         managed: true,
         role: desired.role,
+        ownership: recordedOwnership,
       });
     }
   }

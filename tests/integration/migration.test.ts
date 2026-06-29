@@ -470,7 +470,7 @@ describe("migration: v0.9-era project (manifest with stale generator_version)", 
     }
   });
 
-  it("adapter upgrade --write preserves an existing dynamic skill opaquely and continues re-stamping", async () => {
+  it("adapter upgrade --write skips a handed-off dynamic skill and continues re-stamping", async () => {
     const { project: p, manifestPath } =
       await buildV09StaleProject("v09-upgrade");
 
@@ -491,12 +491,14 @@ describe("migration: v0.9-era project (manifest with stale generator_version)", 
     expect(env.ok).toBe(true);
     if (env.ok) {
       expect(
-        env.data.plan.find(row => row.reason === "dynamic_file_unverifiable"),
+        env.data.plan.some(row => row.reason === "dynamic_file_unverifiable"),
+      ).toBe(false);
+      expect(
+        env.data.plan.find(row => row.relPath.includes(".claude/skills/")),
       ).toMatchObject({
-        local: "unverifiable",
-        desired: "unverifiable",
-        action: "warn",
-        reason: "dynamic_file_unverifiable",
+        local: "managed-clean",
+        desired: "current",
+        action: "skip",
       });
     }
 
@@ -504,8 +506,8 @@ describe("migration: v0.9-era project (manifest with stale generator_version)", 
       string,
       unknown
     >;
-    // With the new preserve-opaquely policy, the upgrade CONTINUES past the
-    // dynamic file warning, so the generator_version IS re-stamped.
+    // With the create-once handoff policy, the upgrade skips the dynamic file
+    // without reading it and still re-stamps the manifest.
     expect(afterYaml.generator_version).not.toBe("0.8.0-alpha.0");
 
     // After upgrade, adapter doctor should be clean (no STALE warning).

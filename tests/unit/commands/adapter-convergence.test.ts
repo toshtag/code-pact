@@ -107,7 +107,7 @@ describe("adapter convergence — verification-command skill collides with a bui
     expect(paths).toContain(".claude/skills/code-pact-verify-2.md");
   });
 
-  it("install → later mutation warns on existing dynamic skill (create-only)", async () => {
+  it("install → later mutation skips an existing handoff dynamic skill", async () => {
     await runAdapterInstall({
       cwd: dir,
       agentName: "claude-code",
@@ -123,14 +123,14 @@ describe("adapter convergence — verification-command skill collides with a bui
       acceptModified: false,
       locale: "en-US",
     });
-    // Dynamic skills are create-only: an existing file is never read or hashed.
-    // Re-run warns (dynamic_file_unverifiable) — not managed-clean/skip.
+    // Dynamic skills are create-once handoff outputs: after code-pact creates
+    // one, later runs do not read/hash it and do not keep warning.
     expect(
       check1.plan.find(p => p.relPath.endsWith("code-pact-verify-2.md")),
     ).toMatchObject({
-      local: "unverifiable",
-      desired: "unverifiable",
-      action: "warn",
+      local: "managed-clean",
+      desired: "current",
+      action: "skip",
     });
 
     const write = await runAdapterUpgrade({
@@ -143,7 +143,7 @@ describe("adapter convergence — verification-command skill collides with a bui
     });
     expect(
       write.plan.find(p => p.relPath.endsWith("code-pact-verify-2.md"))?.action,
-    ).toBe("warn");
+    ).toBe("skip");
 
     const check2 = await runAdapterUpgrade({
       cwd: dir,

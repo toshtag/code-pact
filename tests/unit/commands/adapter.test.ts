@@ -902,7 +902,7 @@ describe("runGenerateAdapter — v0.5.2 skill generation", () => {
     expect(names.some(n => n.includes("code-pact-test.md"))).toBe(true);
   });
 
-  it("re-run warns on an existing dynamic skill (create-only, no provenance read)", async () => {
+  it("re-run skips an existing handoff dynamic skill without provenance read", async () => {
     await runGenerateAdapter({
       cwd: dir,
       agentName: "claude-code",
@@ -915,12 +915,12 @@ describe("runGenerateAdapter — v0.5.2 skill generation", () => {
       force: false,
       locale: "en-US",
     });
-    // Dynamic skills are create-only: an existing file is never read or hashed.
-    // Re-run warns (dynamic_file_unverifiable) instead of adopting.
+    // Dynamic skills are create-once handoff outputs: after code-pact creates
+    // one, later runs do not read/hash it and do not keep warning.
     expect(
       second.files.find(f => f.relPath.endsWith("code-pact-test.md")),
     ).toMatchObject({
-      action: "warn",
+      action: "skip",
     });
   });
 
