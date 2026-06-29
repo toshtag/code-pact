@@ -46,15 +46,43 @@ export async function resolveAndPinModelVersion(opts: {
   profile: AgentProfile;
   modelVersionInput: string | undefined;
 }): Promise<string | undefined> {
+  const plan = await planModelVersionPin(opts);
+  if (plan.write !== null) {
+    await atomicWriteText(plan.write.path, plan.write.content);
+  }
+  return plan.resolvedModelVersion;
+}
+
+export type ModelVersionPinPlan = {
+  resolvedModelVersion: string | undefined;
+  write: { path: string; content: string } | null;
+};
+
+/**
+ * Pure planning form of {@link resolveAndPinModelVersion}. It validates and
+ * mutates the in-memory profile exactly the same way, but returns the profile
+ * write for the caller to include in a larger staged transaction.
+ */
+export async function planModelVersionPin(opts: {
+  cwd: string;
+  agentName: string;
+  profile: AgentProfile;
+  modelVersionInput: string | undefined;
+}): Promise<ModelVersionPinPlan> {
   const { cwd, agentName, profile, modelVersionInput } = opts;
   const normalized = validateModelVersionInput(modelVersionInput);
-  if (normalized === undefined) return profile.model_version;
+  if (normalized === undefined) {
+    return { resolvedModelVersion: profile.model_version, write: null };
+  }
   if (normalized !== profile.model_version) {
     profile.model_version = normalized;
-    await atomicWriteText(
-      await resolveOwnedAgentProfilePath(cwd, agentName),
-      toYaml(AgentProfile.parse(profile)),
-    );
+    return {
+      resolvedModelVersion: normalized,
+      write: {
+        path: await resolveOwnedAgentProfilePath(cwd, agentName),
+        content: toYaml(AgentProfile.parse(profile)),
+      },
+    };
   }
-  return normalized;
+  return { resolvedModelVersion: normalized, write: null };
 }

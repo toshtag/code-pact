@@ -1,4 +1,4 @@
-import { rm, stat } from "../core/project-fs/index.ts";
+import { stat } from "../core/project-fs/index.ts";
 import { join } from "node:path";
 import { AgentProfile } from "../core/schemas/agent-profile.ts";
 import { ModelProfile } from "../core/schemas/model-profile.ts";
@@ -26,12 +26,12 @@ import { authorizeAdapterMutationPath } from "../core/adapters/manifest-file-own
 import {
   computeContentHash,
   manifestRelPath,
+  planManifestWrite,
   readManifest,
-  writeManifest,
 } from "../core/adapters/manifest.ts";
 import { dedupeDesiredFiles } from "../core/adapters/desired.ts";
 import {
-  resolveAndPinModelVersion,
+  planModelVersionPin,
   validateModelVersionInput,
 } from "../core/adapters/model-version.ts";
 import type {
@@ -549,8 +549,6 @@ export async function runAdapterUpgrade(
   // Build the result + (for --write) write the manifest.
   const generatorVersion =
     generatorVersionOverride ?? (await readPackageVersion());
-  const resolvedModel = resolvedModelVersion;
-
   if (mode === "check") {
     return {
       agentName,
@@ -583,17 +581,33 @@ export async function runAdapterUpgrade(
     };
   }
 
-  await resolveAndPinModelVersion({
+  const pinPlan = await planModelVersionPin({
     cwd,
     agentName,
     profile,
     modelVersionInput: modelVersion,
   });
+  const resolvedModel = pinPlan.resolvedModelVersion;
 
-  // Stage all desired-file writes in a single transaction so a mid-loop
-  // failure does not leave partial state on disk.
+  // --write: persist the new manifest after all refusal checks have passed.
+  const manifest: AdapterManifest = {
+    schema_version: 1,
+    agent_name: agentName,
+    generator_version: generatorVersion,
+    adapter_schema_version: descriptor.adapterSchemaVersion,
+    generated_at: new Date().toISOString(),
+    profile_fingerprint: buildFingerprint(profile, resolvedModel),
+    files: newManifestFiles,
+  };
+  const manifestWrite = await planManifestWrite(cwd, agentName, manifest);
+
+  // Stage profile pin, desired-file writes, orphan deletes, and manifest in one
+  // best-effort transaction. The manifest is committed last.
   const tx = new FileTransaction();
   try {
+    if (pinPlan.write !== null) {
+      await tx.stage(pinPlan.write.path, pinPlan.write.content);
+    }
     for (const item of desiredApply) {
       if (
         item.action === "write" ||
@@ -622,55 +636,39 @@ export async function runAdapterUpgrade(
         await tx.stage(writeAuthority.absPath, item.desired.content);
       }
     }
+    for (const item of orphanApply) {
+      if (item.action === "prune") {
+        const pruneAuthority = await authorizeAdapterMutationPath(
+          cwd,
+          descriptor,
+          item.relPath,
+          {
+            expectedRole: item.role,
+            declaredRole: item.role,
+            allowDynamicWrite: false,
+          },
+        );
+        if (pruneAuthority.kind !== "owned") {
+          const err = new Error(
+            `Refusing to prune adapter file "${item.relPath}" without path authority.`,
+          );
+          (err as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+          throw err;
+        }
+        tx.stageDelete(pruneAuthority.absPath);
+      }
+    }
+    await tx.stage(manifestWrite.path, manifestWrite.content);
     await tx.commit();
   } catch (err) {
     await tx.rollback();
     throw err;
   }
 
-  // Prune orphans only after all writes are committed. A prune failure
-  // after writes are committed is non-fatal to the transaction — the
-  // manifest write below will still reflect the new desired file set.
-  for (const item of orphanApply) {
-    if (item.action === "prune") {
-      const pruneAuthority = await authorizeAdapterMutationPath(
-        cwd,
-        descriptor,
-        item.relPath,
-        {
-          expectedRole: item.role,
-          declaredRole: item.role,
-          allowDynamicWrite: false,
-        },
-      );
-      if (pruneAuthority.kind !== "owned") {
-        const err = new Error(
-          `Refusing to prune adapter file "${item.relPath}" without path authority.`,
-        );
-        (err as NodeJS.ErrnoException).code = "CONFIG_ERROR";
-        throw err;
-      }
-      const absPath = pruneAuthority.absPath;
-      await rm(absPath, { force: true });
-    }
-  }
-
-  // --write: persist the new manifest after all refusal checks have passed.
-  const manifest: AdapterManifest = {
-    schema_version: 1,
-    agent_name: agentName,
-    generator_version: generatorVersion,
-    adapter_schema_version: descriptor.adapterSchemaVersion,
-    generated_at: new Date().toISOString(),
-    profile_fingerprint: buildFingerprint(profile, resolvedModel),
-    files: newManifestFiles,
-  };
-  const writtenManifestPath = await writeManifest(cwd, agentName, manifest);
-
   return {
     agentName,
     mode,
-    manifestPath: writtenManifestPath,
+    manifestPath: manifestWrite.path,
     generatorVersion,
     clean,
     plan,

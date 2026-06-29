@@ -20,13 +20,13 @@ import { authorizeAdapterMutationPath } from "../core/adapters/manifest-file-own
 import {
   computeContentHash,
   manifestPath,
+  planManifestWrite,
   manifestRelPath,
   readManifest,
-  writeManifest,
 } from "../core/adapters/manifest.ts";
 import { dedupeDesiredFiles } from "../core/adapters/desired.ts";
 import {
-  resolveAndPinModelVersion,
+  planModelVersionPin,
   validateModelVersionInput,
 } from "../core/adapters/model-version.ts";
 import type {
@@ -442,7 +442,6 @@ export async function runAdapterInstall(
 
   const generatorVersion =
     generatorVersionOverride ?? (await readPackageVersion());
-  const resolvedModel = resolvedModelVersion;
 
   if (refused.length > 0) {
     return {
@@ -460,15 +459,30 @@ export async function runAdapterInstall(
     };
   }
 
-  await resolveAndPinModelVersion({
+  const pinPlan = await planModelVersionPin({
     cwd,
     agentName,
     profile,
     modelVersionInput: modelVersion,
   });
+  const resolvedModel = pinPlan.resolvedModelVersion;
+
+  const manifest: AdapterManifest = {
+    schema_version: 1,
+    agent_name: agentName,
+    generator_version: generatorVersion,
+    adapter_schema_version: descriptor.adapterSchemaVersion,
+    generated_at: new Date().toISOString(),
+    profile_fingerprint: buildFingerprint(profile, resolvedModel),
+    files: newManifestFiles,
+  };
+  const manifestWrite = await planManifestWrite(cwd, agentName, manifest);
 
   const tx = new FileTransaction();
   try {
+    if (pinPlan.write !== null) {
+      await tx.stage(pinPlan.write.path, pinPlan.write.content);
+    }
     for (const planned of plannedFiles) {
       if (
         planned.action === "write" ||
@@ -500,27 +514,16 @@ export async function runAdapterInstall(
         adopted.push(planned.absPath);
       }
     }
+    await tx.stage(manifestWrite.path, manifestWrite.content);
     await tx.commit();
   } catch (err) {
     await tx.rollback();
     throw err;
   }
 
-  const manifest: AdapterManifest = {
-    schema_version: 1,
-    agent_name: agentName,
-    generator_version: generatorVersion,
-    adapter_schema_version: descriptor.adapterSchemaVersion,
-    generated_at: new Date().toISOString(),
-    profile_fingerprint: buildFingerprint(profile, resolvedModel),
-    files: newManifestFiles,
-  };
-
-  const writtenManifestPath = await writeManifest(cwd, agentName, manifest);
-
   return {
     agentName,
-    manifestPath: writtenManifestPath,
+    manifestPath: manifestWrite.path,
     generatorVersion,
     created,
     skipped,

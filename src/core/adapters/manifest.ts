@@ -155,6 +155,16 @@ export async function writeManifest(
   agentName: string,
   manifest: AdapterManifest,
 ): Promise<string> {
+  const planned = await planManifestWrite(cwd, agentName, manifest);
+  await atomicWriteText(planned.path, planned.content);
+  return planned.path;
+}
+
+export async function planManifestWrite(
+  cwd: string,
+  agentName: string,
+  manifest: AdapterManifest,
+): Promise<{ path: string; content: string }> {
   // Fail closed before writing a byte if `.code-pact/adapters` resolves outside
   // the project (symlink escape) — never write a manifest outside cwd.
   // Always re-resolve: a preflight check earlier in the call sequence does NOT
@@ -171,8 +181,7 @@ export async function writeManifest(
     (e as NodeJS.ErrnoException).code = "ADAPTER_MANIFEST_INVALID";
     throw e;
   }
-  await atomicWriteText(path, stringifyYaml(parsed));
-  return path;
+  return { path, content: stringifyYaml(parsed) };
 }
 
 // ---------------------------------------------------------------------------

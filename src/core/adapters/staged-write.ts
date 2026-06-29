@@ -11,20 +11,31 @@ import { dirname, join } from "node:path";
 export class PartialMutationError extends Error {
   code = "PARTIAL_MUTATION" as const;
   committedPaths: readonly string[];
-  constructor(message: string, committedPaths: readonly string[]) {
+  rollbackFailures: readonly string[];
+  backupPaths: readonly string[];
+  constructor(
+    message: string,
+    committedPaths: readonly string[],
+    rollbackFailures: readonly string[] = [],
+    backupPaths: readonly string[] = [],
+  ) {
     super(message);
     this.name = "PartialMutationError";
     this.committedPaths = committedPaths;
+    this.rollbackFailures = rollbackFailures;
+    this.backupPaths = backupPaths;
   }
 }
 
 interface StagedEntry {
+  kind: "write" | "delete";
   tempPath: string;
   finalPath: string;
   backupPath: string | null;
 }
 
 interface JournalEntry {
+  kind: "write" | "delete";
   tempPath: string;
   finalPath: string;
   backupPath: string | null;
@@ -33,8 +44,9 @@ interface JournalEntry {
 
 /**
  * Best-effort multi-file transaction: stage all writes to temp files first,
- * then commit (rename) all at once. If any stage or commit fails, rollback
- * restores backups and deletes temp files so no partial state remains.
+ * stage deletes as backup renames, then commit the sequence. If any stage or
+ * commit fails, rollback restores backups and deletes temp files best-effort.
+ * A rollback failure is surfaced as PARTIAL_MUTATION evidence.
  *
  * Improvements over a bare temp-rename loop:
  *
@@ -44,9 +56,9 @@ interface JournalEntry {
  * - **Journal**: a JSON journal is written before commit begins, recording
  *   each staged operation. On successful commit, the journal is deleted. If
  *   a crash occurs mid-commit, the journal can be inspected for recovery.
- * - **PARTIAL_MUTATION**: if a rename fails after some files have already
- *   been committed, a `PartialMutationError` is thrown with the list of
- *   committed paths. Backups are restored best-effort.
+ * - **PARTIAL_MUTATION**: if a rename or rollback fails after some files have
+ *   already been committed, a `PartialMutationError` is thrown with committed
+ *   paths, rollback failures, and any remaining backup paths.
  *
  * This does NOT protect against concurrent writers and is NOT a filesystem
  * CAS — a crash between the first and last rename leaves partial state (but
@@ -70,7 +82,25 @@ export class FileTransaction {
   async stage(path: string, content: string): Promise<void> {
     const tempPath = `${path}.staged-${randomUUID()}`;
     await atomicWriteText(tempPath, content);
-    this.staged.push({ tempPath, finalPath: path, backupPath: null });
+    this.staged.push({
+      kind: "write",
+      tempPath,
+      finalPath: path,
+      backupPath: null,
+    });
+  }
+
+  /**
+   * Stage a delete as a commit-time backup rename. The target is not touched
+   * until commit, so staging all writes can still fail without mutating state.
+   */
+  stageDelete(path: string): void {
+    this.staged.push({
+      kind: "delete",
+      tempPath: "",
+      finalPath: path,
+      backupPath: null,
+    });
   }
 
   /**
@@ -89,6 +119,7 @@ export class FileTransaction {
       `.code-pact-txn-${randomUUID()}.journal`,
     );
     const journalEntries: JournalEntry[] = this.staged.map(s => ({
+      kind: s.kind,
       tempPath: s.tempPath,
       finalPath: s.finalPath,
       backupPath: s.backupPath,
@@ -96,7 +127,7 @@ export class FileTransaction {
     }));
     await writeFile(this.journalPath, JSON.stringify(journalEntries), "utf8");
 
-    const committed: string[] = [];
+    const committed: StagedEntry[] = [];
     try {
       for (const s of this.staged) {
         // Backup existing file before overwriting.
@@ -107,8 +138,10 @@ export class FileTransaction {
         } catch (err) {
           if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
         }
-        await rename(s.tempPath, s.finalPath);
-        committed.push(s.finalPath);
+        if (s.kind === "write") {
+          await rename(s.tempPath, s.finalPath);
+        }
+        committed.push(s);
         // Update journal entry.
         const entry = journalEntries.find(e => e.finalPath === s.finalPath);
         if (entry) {
@@ -120,10 +153,14 @@ export class FileTransaction {
             "utf8",
           );
         }
-        // Delete backup after successful rename.
+      }
+      for (const s of this.staged) {
         if (s.backupPath) {
-          await unlink(s.backupPath).catch(() => {});
+          await unlink(s.backupPath);
           s.backupPath = null;
+        }
+        if (s.kind === "write") {
+          await unlink(s.tempPath).catch(() => {});
         }
       }
       // Clean up journal on success.
@@ -132,17 +169,8 @@ export class FileTransaction {
         this.journalPath = null;
       }
     } catch (err) {
-      // Restore backups for committed files (revert them to original content).
-      for (const s of this.staged) {
-        if (s.backupPath) {
-          // This file was committed but its backup still exists — restore it.
-          await rename(s.finalPath, s.tempPath).catch(() => {});
-          await rename(s.backupPath, s.finalPath).catch(() => {});
-          s.backupPath = null;
-        }
-      }
-      // Clean up any remaining temp files.
-      await this.rollback();
+      const rollbackFailures = await this.rollbackCommitted(committed);
+      await this.cleanupUncommittedTemps(committed);
       // Clean up journal.
       if (this.journalPath) {
         await unlink(this.journalPath).catch(() => {});
@@ -150,8 +178,12 @@ export class FileTransaction {
       }
       if (committed.length > 0) {
         throw new PartialMutationError(
-          `Transaction failed after committing ${committed.length} file(s): ${(err as Error).message}`,
-          committed,
+          `Transaction failed after committing ${committed.length} operation(s): ${(err as Error).message}`,
+          committed.map(s => s.finalPath),
+          rollbackFailures,
+          this.staged
+            .map(s => s.backupPath)
+            .filter((p): p is string => p !== null),
         );
       }
       throw err;
@@ -165,7 +197,7 @@ export class FileTransaction {
    */
   async rollback(): Promise<void> {
     for (const s of this.staged) {
-      await unlink(s.tempPath).catch(() => {});
+      if (s.kind === "write") await unlink(s.tempPath).catch(() => {});
       if (s.backupPath) {
         await rename(s.backupPath, s.finalPath).catch(() => {});
         s.backupPath = null;
@@ -174,6 +206,42 @@ export class FileTransaction {
     if (this.journalPath) {
       await unlink(this.journalPath).catch(() => {});
       this.journalPath = null;
+    }
+  }
+
+  private async rollbackCommitted(
+    committed: readonly StagedEntry[],
+  ): Promise<string[]> {
+    const failures: string[] = [];
+    for (const s of [...committed].reverse()) {
+      try {
+        if (s.kind === "write") {
+          await unlink(s.finalPath).catch(err => {
+            if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+          });
+        }
+        if (s.backupPath) {
+          await rename(s.backupPath, s.finalPath);
+          s.backupPath = null;
+        }
+      } catch (rollbackErr) {
+        failures.push(`${s.finalPath}: ${(rollbackErr as Error).message}`);
+      }
+    }
+    return failures;
+  }
+
+  private async cleanupUncommittedTemps(
+    committed: readonly StagedEntry[],
+  ): Promise<void> {
+    const committedSet = new Set(committed);
+    for (const s of this.staged) {
+      if (committedSet.has(s)) continue;
+      if (s.kind === "write") await unlink(s.tempPath).catch(() => {});
+      if (s.backupPath) {
+        await rename(s.backupPath, s.finalPath).catch(() => {});
+        s.backupPath = null;
+      }
     }
   }
 }

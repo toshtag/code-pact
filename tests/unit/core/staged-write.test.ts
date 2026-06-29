@@ -23,6 +23,7 @@ vi.mock("../../../src/core/project-fs/index.ts", async importActual => {
         failAfterFirstRename.enabled &&
         failAfterFirstRename.count > failAfterFirstRename.threshold
       ) {
+        failAfterFirstRename.enabled = false;
         throw new Error("injected rename failure");
       }
       return actual.rename(...args);
@@ -93,28 +94,51 @@ describe("FileTransaction — rollback", () => {
 });
 
 describe("FileTransaction — failure injection", () => {
-  it("throws PartialMutationError when rename fails after some commits", async () => {
+  it("restores committed files when a later rename fails", async () => {
     // Stage two files; the second commit's rename will fail.
     const targetA = join(dir, "a.txt");
     const targetB = join(dir, "b.txt");
     await writeFile(targetA, "OLD_A", "utf8");
     await writeFile(targetB, "OLD_B", "utf8");
 
-    failAfterFirstRename.enabled = true;
-
     const tx = new FileTransaction();
     await tx.stage(targetA, "NEW_A");
     await tx.stage(targetB, "NEW_B");
+
+    failAfterFirstRename.count = 0;
+    failAfterFirstRename.enabled = true;
+    failAfterFirstRename.threshold = 3;
 
     await expect(tx.commit()).rejects.toMatchObject({
       code: "PARTIAL_MUTATION",
     });
 
-    // File A was committed (backup already deleted) — content is NEW_A.
-    // File B was never committed — content is still OLD_B.
-    // PartialMutationError signals this partial state to the caller.
-    expect(await readFile(targetA, "utf8")).toBe("NEW_A");
+    // File A was committed, then restored from its backup. File B failed during
+    // commit and its backup was also restored.
+    expect(await readFile(targetA, "utf8")).toBe("OLD_A");
     expect(await readFile(targetB, "utf8")).toBe("OLD_B");
+  });
+
+  it("rolls back staged deletes when a later operation fails", async () => {
+    const targetA = join(dir, "delete-me.txt");
+    const targetB = join(dir, "write-me.txt");
+    await writeFile(targetA, "KEEP_A", "utf8");
+    await writeFile(targetB, "KEEP_B", "utf8");
+
+    const tx = new FileTransaction();
+    tx.stageDelete(targetA);
+    await tx.stage(targetB, "NEW_B");
+
+    failAfterFirstRename.count = 0;
+    failAfterFirstRename.enabled = true;
+    failAfterFirstRename.threshold = 2;
+
+    await expect(tx.commit()).rejects.toMatchObject({
+      code: "PARTIAL_MUTATION",
+    });
+
+    expect(await readFile(targetA, "utf8")).toBe("KEEP_A");
+    expect(await readFile(targetB, "utf8")).toBe("KEEP_B");
   });
 
   it("non-partial failure (0 committed) rethrows original error", async () => {
