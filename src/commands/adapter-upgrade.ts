@@ -39,7 +39,10 @@ import type {
   ManifestFile,
   ProfileFingerprint,
 } from "../core/schemas/adapter-manifest.ts";
-import { FileTransaction } from "../core/adapters/staged-write.ts";
+import {
+  FileTransaction,
+  recoverPendingAdapterTransactions,
+} from "../core/adapters/staged-write.ts";
 import { resolveSymlinkFreeProjectPath } from "../core/path-safety.ts";
 import { readPackageVersion } from "../lib/package-version.ts";
 import {
@@ -603,7 +606,8 @@ export async function runAdapterUpgrade(
 
   // Stage profile pin, desired-file writes, orphan deletes, and manifest in one
   // best-effort transaction. The manifest is committed last.
-  const tx = new FileTransaction();
+  await recoverPendingAdapterTransactions(cwd);
+  const tx = new FileTransaction({ cwd });
   try {
     if (pinPlan.write !== null) {
       await tx.stage(pinPlan.write.path, pinPlan.write.content);

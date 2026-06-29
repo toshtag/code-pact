@@ -34,7 +34,10 @@ import type {
   ManifestFile,
   ProfileFingerprint,
 } from "../core/schemas/adapter-manifest.ts";
-import { FileTransaction } from "../core/adapters/staged-write.ts";
+import {
+  FileTransaction,
+  recoverPendingAdapterTransactions,
+} from "../core/adapters/staged-write.ts";
 import { resolveSymlinkFreeProjectPath } from "../core/path-safety.ts";
 import { readPackageVersion } from "../lib/package-version.ts";
 import type { Locale } from "../i18n/index.ts";
@@ -478,7 +481,8 @@ export async function runAdapterInstall(
   };
   const manifestWrite = await planManifestWrite(cwd, agentName, manifest);
 
-  const tx = new FileTransaction();
+  await recoverPendingAdapterTransactions(cwd);
+  const tx = new FileTransaction({ cwd });
   try {
     if (pinPlan.write !== null) {
       await tx.stage(pinPlan.write.path, pinPlan.write.content);
