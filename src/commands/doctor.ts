@@ -25,7 +25,7 @@ import {
 import { validateSnapshotEventEvidence } from "../core/archive/snapshot-evidence.ts";
 import { Project } from "../core/schemas/project.ts";
 import { resolveSymlinkFreeProjectPath } from "../core/path-safety.ts";
-import { resolveOwnedReadPath } from "../core/project-fs/owned-read.ts";
+import { resolveSymlinkFreeReadCandidate } from "../core/project-fs/owned-read.ts";
 import {
   ACCEPTED_MODEL_VERSION_INPUTS,
   AgentProfile,
@@ -152,7 +152,7 @@ async function safeReadProjectYaml(
 ): Promise<SafeYamlResult> {
   let abs: string;
   try {
-    abs = await resolveOwnedReadPath(cwd, relPath);
+    abs = await resolveSymlinkFreeReadCandidate(cwd, relPath);
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "PATH_NOT_OWNED") return { ok: false, code: "PATH_NOT_OWNED" };
@@ -179,7 +179,7 @@ async function projectFileExists(
   relPath: string,
 ): Promise<boolean> {
   try {
-    await access(await resolveOwnedReadPath(cwd, relPath));
+    await access(await resolveSymlinkFreeReadCandidate(cwd, relPath));
     return true;
   } catch {
     return false;
@@ -346,7 +346,7 @@ async function checkPhases(
     const absPath = join(cwd, ref.path);
     let presence: "present" | "absent" | "inaccessible";
     try {
-      await access(await resolveOwnedReadPath(cwd, ref.path));
+      await access(await resolveSymlinkFreeReadCandidate(cwd, ref.path));
       presence = "present";
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
@@ -506,7 +506,10 @@ async function checkProgressLog(
   // unreadable / schema-invalid legacy file is INVALID_YAML / SCHEMA_ERROR.
   let legacyEvents: ProgressEvent[] = [];
   try {
-    const raw = await readFile(await resolveOwnedReadPath(cwd, path), "utf8");
+    const raw = await readFile(
+      await resolveSymlinkFreeReadCandidate(cwd, path),
+      "utf8",
+    );
     let doc: unknown;
     try {
       doc = parseYaml(raw);
@@ -695,10 +698,7 @@ async function checkAgentProfiles(
     // surfaced as a structured issue, not an uncoded throw.
     if (isSupportedAgent(agentRef.name)) {
       try {
-        validateAgentProfileForAdapter(
-          profile,
-          adapterRegistry[agentRef.name],
-        );
+        validateAgentProfileForAdapter(profile, adapterRegistry[agentRef.name]);
       } catch (err) {
         issues.push({
           code: "ADAPTER_PROFILE_CONTRACT_VIOLATION",
@@ -780,7 +780,7 @@ async function checkModelProfiles(
   const dirRel = ".code-pact/model-profiles";
   let entries: string[] = [];
   try {
-    const dir = await resolveOwnedReadPath(cwd, dirRel);
+    const dir = await resolveSymlinkFreeReadCandidate(cwd, dirRel);
     entries = await readdir(dir);
   } catch (err) {
     if (
@@ -837,7 +837,7 @@ async function checkBakFiles(
   for (const relDir of dirs) {
     let entries: string[] = [];
     try {
-      const dir = await resolveOwnedReadPath(cwd, relDir);
+      const dir = await resolveSymlinkFreeReadCandidate(cwd, relDir);
       entries = await readdir(dir);
     } catch (err) {
       if (
@@ -885,7 +885,7 @@ async function checkLocalGitignored(
   let content: string;
   try {
     content = await readFile(
-      await resolveOwnedReadPath(cwd, ".gitignore"),
+      await resolveSymlinkFreeReadCandidate(cwd, ".gitignore"),
       "utf8",
     );
   } catch {
@@ -1088,7 +1088,10 @@ async function checkConstitutionPlaceholder(
   const path = "design/constitution.md";
   let content: string;
   try {
-    content = await readFile(await resolveOwnedReadPath(cwd, path), "utf8");
+    content = await readFile(
+      await resolveSymlinkFreeReadCandidate(cwd, path),
+      "utf8",
+    );
   } catch {
     return; // file absent — BRIEF_MISSING or similar handles the design dir; skip here
   }
@@ -1164,7 +1167,7 @@ async function checkStaleContext(
 
     let entries: string[] = [];
     try {
-      const contextDir = await resolveOwnedReadPath(
+      const contextDir = await resolveSymlinkFreeReadCandidate(
         cwd,
         profile.context_dir,
       );

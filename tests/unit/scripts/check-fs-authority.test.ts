@@ -34,10 +34,7 @@ async function runFixture(lines: string[]): Promise<{
 
 describe("check-fs-authority", () => {
   it("rejects raw fs wildcard re-exports", async () => {
-    const result = await runFixture([
-      'export * from "node:fs/promises";',
-      "",
-    ]);
+    const result = await runFixture(['export * from "node:fs/promises";', ""]);
     expect(result.ok).toBe(false);
     expect(result.output).toContain("raw fs wildcard re-export");
   });
@@ -299,13 +296,13 @@ describe("check-fs-authority", () => {
     expect(result.output).toContain("stat() called on non-authority path");
   });
 
-  it("rejects generic resolveOwnedReadPath as semantic authority", async () => {
+  it("rejects generic resolveSymlinkFreeReadCandidate as semantic authority", async () => {
     const result = await runFixture([
       'import { readFile } from "node:fs/promises";',
-      'import { resolveOwnedReadPath } from "../../src/core/project-fs/owned-read.ts";',
+      'import { resolveSymlinkFreeReadCandidate } from "../../src/core/project-fs/owned-read.ts";',
       "",
       "async function f(profile: any, cwd: string) {",
-      "  const p = await resolveOwnedReadPath(cwd, profile.instruction_filename);",
+      "  const p = await resolveSymlinkFreeReadCandidate(cwd, profile.instruction_filename);",
       '  await readFile(p, "utf8");',
       "}",
       "",
@@ -444,8 +441,12 @@ describe("check-fs-authority", () => {
       "",
     ]);
     expect(result.ok).toBe(false);
-    expect(result.output).toContain("readFileSync() called on non-authority path");
-    expect(result.output).toContain("writeFileSync() called on non-authority path");
+    expect(result.output).toContain(
+      "readFileSync() called on non-authority path",
+    );
+    expect(result.output).toContain(
+      "writeFileSync() called on non-authority path",
+    );
   });
 
   it("treats numeric open write flags as write authority", async () => {
@@ -495,7 +496,7 @@ describe("check-fs-authority", () => {
 
   it("rejects brand constructor imports from domain modules", async () => {
     const result = await runFixture([
-      'import { brandOwnedWrite } from "../../src/core/project-fs/branded-paths.ts";',
+      'import { brandOwnedWrite } from "../../src/core/project-fs/branded-paths-internal.ts";',
       "",
       "function f(profile: any) {",
       "  return brandOwnedWrite(profile.instruction_filename);",
@@ -625,7 +626,9 @@ describe("check-fs-authority", () => {
       "",
     ]);
     expect(result.ok).toBe(false);
-    expect(result.output).toContain("writeFileSync() called on non-authority path");
+    expect(result.output).toContain(
+      "writeFileSync() called on non-authority path",
+    );
   });
 
   it("rejects unknown raw fs operations", async () => {

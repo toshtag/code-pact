@@ -73,14 +73,11 @@ const {
   adapterManifestWriteTarget,
   adapterStaticWriteTarget,
   recoverPendingAdapterTransactions,
-} =
-  await import("../../../src/core/adapters/staged-write.ts");
-const { brandOwnedWrite } = await import(
-  "../../../src/core/project-fs/branded-paths.ts"
-);
-const { adapterTransactionProjectDir } = await import(
-  "../../../src/core/adapters/transaction-state-root.ts"
-);
+} = await import("../../../src/core/adapters/staged-write.ts");
+const { brandOwnedWrite } =
+  await import("../../../src/core/project-fs/branded-paths-internal.ts");
+const { adapterTransactionProjectDir } =
+  await import("../../../src/core/adapters/transaction-state-root.ts");
 
 let dir: string;
 let previousStateHome: string | undefined;
@@ -102,7 +99,10 @@ beforeEach(async () => {
 afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
   if (process.env.CODE_PACT_STATE_HOME) {
-    await rm(process.env.CODE_PACT_STATE_HOME, { recursive: true, force: true });
+    await rm(process.env.CODE_PACT_STATE_HOME, {
+      recursive: true,
+      force: true,
+    });
   }
   if (previousStateHome === undefined) delete process.env.CODE_PACT_STATE_HOME;
   else process.env.CODE_PACT_STATE_HOME = previousStateHome;
@@ -113,7 +113,12 @@ function sha256Text(value: string): string {
 }
 
 function manifestWriteTarget(agentName: SupportedAgent = "claude-code") {
-  const path = join(dir, ".code-pact", "adapters", `${agentName}.manifest.yaml`);
+  const path = join(
+    dir,
+    ".code-pact",
+    "adapters",
+    `${agentName}.manifest.yaml`,
+  );
   return {
     path,
     target: adapterManifestWriteTarget(agentName, brandOwnedWrite(path)),
@@ -133,7 +138,10 @@ function staticInstructionWriteTarget() {
   };
 }
 
-async function writePrivateJournal(name: string, journal: unknown): Promise<void> {
+async function writePrivateJournal(
+  name: string,
+  journal: unknown,
+): Promise<void> {
   const journalDir = await adapterTransactionProjectDir(dir);
   await writeFile(join(journalDir, name), JSON.stringify(journal), "utf8");
 }
@@ -189,7 +197,9 @@ describe("FileTransaction — authority target guards", () => {
         ),
         "content",
       ),
-    ).rejects.toThrow("transaction target metadata does not match authority path");
+    ).rejects.toThrow(
+      "transaction target metadata does not match authority path",
+    );
   });
 
   it("rejects dynamic creates when the target already exists during prepare", async () => {
@@ -329,7 +339,8 @@ describe("PartialMutationError", () => {
 
 describe("FileTransaction — cleanup failure does not roll back committed files", () => {
   it("keeps both new files when the second backup cleanup fails", async () => {
-    const { path: targetA, target: txTargetA } = manifestWriteTarget("claude-code");
+    const { path: targetA, target: txTargetA } =
+      manifestWriteTarget("claude-code");
     const { path: targetB, target: txTargetB } = staticInstructionWriteTarget();
     await mkdir(dirname(targetA), { recursive: true });
     await writeFile(targetA, "OLD_A", "utf8");
@@ -501,7 +512,10 @@ describe("FileTransaction — recovery", () => {
       "utf8",
     );
     await mkdir(join(dir, ".code-pact", "state"), { recursive: true });
-    await symlink(outside, join(dir, ".code-pact", "state", "adapter-transactions"));
+    await symlink(
+      outside,
+      join(dir, ".code-pact", "state", "adapter-transactions"),
+    );
 
     try {
       const result = await recoverPendingAdapterTransactions(dir);
@@ -577,7 +591,9 @@ describe("FileTransaction — recovery", () => {
     process.env.CODE_PACT_STATE_HOME = ".";
 
     try {
-      await expect(recoverPendingAdapterTransactions(dir)).rejects.toMatchObject({
+      await expect(
+        recoverPendingAdapterTransactions(dir),
+      ).rejects.toMatchObject({
         code: "CONFIG_ERROR",
       });
     } finally {
@@ -590,7 +606,9 @@ describe("FileTransaction — recovery", () => {
     delete process.env.CODE_PACT_STATE_HOME;
     process.env.XDG_STATE_HOME = ".state";
     try {
-      await expect(recoverPendingAdapterTransactions(dir)).rejects.toMatchObject({
+      await expect(
+        recoverPendingAdapterTransactions(dir),
+      ).rejects.toMatchObject({
         code: "CONFIG_ERROR",
       });
     } finally {
@@ -607,7 +625,9 @@ describe("FileTransaction — recovery", () => {
     process.env.CODE_PACT_STATE_HOME = link;
 
     try {
-      await expect(recoverPendingAdapterTransactions(dir)).rejects.toMatchObject({
+      await expect(
+        recoverPendingAdapterTransactions(dir),
+      ).rejects.toMatchObject({
         code: "CONFIG_ERROR",
       });
     } finally {
@@ -624,7 +644,9 @@ describe("FileTransaction — recovery", () => {
     process.env.CODE_PACT_STATE_HOME = weakState;
 
     try {
-      await expect(recoverPendingAdapterTransactions(dir)).rejects.toMatchObject({
+      await expect(
+        recoverPendingAdapterTransactions(dir),
+      ).rejects.toMatchObject({
         code: "CONFIG_ERROR",
       });
     } finally {
@@ -739,7 +761,8 @@ describe("FileTransaction — recovery", () => {
   });
 
   it("recovers cleanup-pending committed journals by preserving final files", async () => {
-    const { path: targetA, target: txTargetA } = manifestWriteTarget("claude-code");
+    const { path: targetA, target: txTargetA } =
+      manifestWriteTarget("claude-code");
     const { path: targetB, target: txTargetB } = staticInstructionWriteTarget();
     await mkdir(dirname(targetA), { recursive: true });
     await writeFile(targetA, "OLD_A", "utf8");
@@ -759,6 +782,8 @@ describe("FileTransaction — recovery", () => {
     expect(result.cleaned).toHaveLength(1);
     expect(await readFile(targetA, "utf8")).toBe("NEW_A");
     expect(await readFile(targetB, "utf8")).toBe("NEW_B");
-    expect((await recoverPendingAdapterTransactions(dir)).cleaned).toHaveLength(0);
+    expect((await recoverPendingAdapterTransactions(dir)).cleaned).toHaveLength(
+      0,
+    );
   });
 });

@@ -3,7 +3,7 @@ import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
 import {
   brandOwnedWrite,
   type OwnedWritePath,
-} from "../project-fs/branded-paths.ts";
+} from "../project-fs/branded-paths-internal.ts";
 import type { AdapterDescriptor, DesiredAdapterFileRole } from "./types.ts";
 
 /**

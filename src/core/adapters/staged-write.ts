@@ -24,8 +24,11 @@ import {
   brandOwnedDelete,
   type OwnedDeletePath,
   type OwnedWritePath,
-} from "../project-fs/branded-paths.ts";
-import { assertSafeRelativePath, pathTraversesSymlink } from "../path-safety.ts";
+} from "../project-fs/branded-paths-internal.ts";
+import {
+  assertSafeRelativePath,
+  pathTraversesSymlink,
+} from "../path-safety.ts";
 import { resolveOwnedAgentProfilePath } from "../agent-profile-path.ts";
 import { resolveManifestPath } from "./manifest.ts";
 import {
@@ -91,9 +94,7 @@ export class TransactionRecoveryError extends Error {
   }
 }
 
-type FileState =
-  | { kind: "absent" }
-  | { kind: "present"; sha256: string };
+type FileState = { kind: "absent" } | { kind: "present"; sha256: string };
 
 type JournalStatus = "prepared" | "committed" | "cleanup_pending";
 
@@ -372,9 +373,15 @@ function artifactPathsFor(
   }
   if (
     tempPath !==
-      join(dirname(finalPath), `${basename(finalPath)}.code-pact-tx-${journalId}-${entry.index}.tmp`) ||
+      join(
+        dirname(finalPath),
+        `${basename(finalPath)}.code-pact-tx-${journalId}-${entry.index}.tmp`,
+      ) ||
     backupPath !==
-      join(dirname(finalPath), `${basename(finalPath)}.bak-${journalId}-${entry.index}`)
+      join(
+        dirname(finalPath),
+        `${basename(finalPath)}.bak-${journalId}-${entry.index}`,
+      )
   ) {
     throw new Error("transaction artifact path does not match expected format");
   }
@@ -420,8 +427,12 @@ export class FileTransaction {
   private finalPaths = new Set<string>();
   private journalPath: string | null = null;
   private transactionId = randomUUID();
-  private state: "open" | "committing" | "committed" | "cleanup_pending" | "rolled_back" =
-    "open";
+  private state:
+    | "open"
+    | "committing"
+    | "committed"
+    | "cleanup_pending"
+    | "rolled_back" = "open";
   private cwd: string | null;
 
   constructor(options: FileTransactionOptions = {}) {
@@ -448,7 +459,8 @@ export class FileTransaction {
     target: AdapterWriteTarget,
     content: string,
   ): Promise<void> {
-    const path = target.kind === "test_only" ? target.absPath : unbrand(target.absPath);
+    const path =
+      target.kind === "test_only" ? target.absPath : unbrand(target.absPath);
     this.assertCanStage(path);
     const cwd = this.resolveCwd(path);
     const relPath = toRel(cwd, path);
@@ -484,7 +496,8 @@ export class FileTransaction {
   }
 
   private stageDeleteInternal(target: AdapterDeleteTarget): void {
-    const path = target.kind === "test_only" ? target.absPath : unbrand(target.absPath);
+    const path =
+      target.kind === "test_only" ? target.absPath : unbrand(target.absPath);
     this.assertCanStage(path);
     const cwd = this.resolveCwd(path);
     const relPath = toRel(cwd, path);
@@ -558,7 +571,9 @@ export class FileTransaction {
         journal.cleanup_failures = [
           `${this.requireJournalPath()}: ${(err as Error).message}`,
         ];
-        await durableWriteJson(this.requireJournalPath(), journal).catch(() => {});
+        await durableWriteJson(this.requireJournalPath(), journal).catch(
+          () => {},
+        );
         this.state = "cleanup_pending";
         throw new TransactionCleanupPendingError(
           `Transaction committed, but journal cleanup is pending: ${(err as Error).message}`,
@@ -639,7 +654,8 @@ export class FileTransaction {
   }
 
   private requireJournalPath(): string {
-    if (!this.journalPath) throw new Error("transaction journal was not prepared");
+    if (!this.journalPath)
+      throw new Error("transaction journal was not prepared");
     return this.journalPath;
   }
 
@@ -647,7 +663,9 @@ export class FileTransaction {
     const cwd = this.resolveCwd();
     await this.prepareEntries();
     const agentNames = new Set(
-      this.staged.flatMap(s => (s.agentName === undefined ? [] : [s.agentName])),
+      this.staged.flatMap(s =>
+        s.agentName === undefined ? [] : [s.agentName],
+      ),
     );
     if (agentNames.size > 1) {
       throw new Error("adapter transaction cannot mix multiple agents");
@@ -692,7 +710,10 @@ export class FileTransaction {
       }
       await ensureRegularFileIfPresent(s.finalPath);
       s.preState = await hashFile(s.finalPath);
-      if (s.targetKind === "adapter_dynamic_create" && s.preState.kind !== "absent") {
+      if (
+        s.targetKind === "adapter_dynamic_create" &&
+        s.preState.kind !== "absent"
+      ) {
         throw new Error(
           `dynamic adapter target already exists and cannot be transaction-created: ${s.relPath}`,
         );
@@ -718,7 +739,9 @@ export class FileTransaction {
       const tempStat = await dataStat(s.tempPath);
       if (!tempStat.isFile()) {
         await dataUnlink(s.tempPath).catch(() => {});
-        throw new Error(`staged temp path is not a regular file: ${s.tempPath}`);
+        throw new Error(
+          `staged temp path is not a regular file: ${s.tempPath}`,
+        );
       }
       const tempState = await hashFile(s.tempPath);
       if (!sameState(tempState, s.postState)) {
@@ -1003,14 +1026,18 @@ async function reconcileEntryToOldState(
     if (sameState(finalState, entry.post_state)) {
       await removeFileIfExists(paths.finalPath);
     } else if (finalState.kind !== "absent") {
-      throw new Error(`ambiguous new-file final state ${stateLabel(finalState)}`);
+      throw new Error(
+        `ambiguous new-file final state ${stateLabel(finalState)}`,
+      );
     }
   }
 
   if (entry.operation === "write" && sameState(tempState, entry.post_state)) {
     await removeFileIfExists(paths.tempPath);
   } else if (tempState.kind !== "absent") {
-    throw new Error(`refusing to remove mismatched temp ${stateLabel(tempState)}`);
+    throw new Error(
+      `refusing to remove mismatched temp ${stateLabel(tempState)}`,
+    );
   }
 }
 
@@ -1020,7 +1047,13 @@ async function reconcileEntryToNewState(
   paths: { finalPath: string; tempPath: string; backupPath: string },
   entry: AdapterTransactionEntryV2,
 ): Promise<void> {
-  await assertTransactionTargetStillOwned(cwd, journal, paths.finalPath, entry, false);
+  await assertTransactionTargetStillOwned(
+    cwd,
+    journal,
+    paths.finalPath,
+    entry,
+    false,
+  );
   const finalState = await hashFile(paths.finalPath);
   const backupState = await hashFile(paths.backupPath);
   const tempState = await hashFile(paths.tempPath);
@@ -1034,13 +1067,17 @@ async function reconcileEntryToNewState(
     if (sameState(backupState, entry.pre_state)) {
       await removeFileIfExists(paths.backupPath);
     } else if (backupState.kind !== "absent") {
-      throw new Error(`refusing to remove mismatched backup ${stateLabel(backupState)}`);
+      throw new Error(
+        `refusing to remove mismatched backup ${stateLabel(backupState)}`,
+      );
     }
   }
   if (entry.operation === "write" && sameState(tempState, entry.post_state)) {
     await removeFileIfExists(paths.tempPath);
   } else if (tempState.kind !== "absent") {
-    throw new Error(`refusing to remove mismatched temp ${stateLabel(tempState)}`);
+    throw new Error(
+      `refusing to remove mismatched temp ${stateLabel(tempState)}`,
+    );
   }
 }
 
@@ -1071,7 +1108,9 @@ async function assertTransactionTargetStillOwned(
   if (entry.target_kind === "agent_profile") {
     const authorized = await resolveOwnedAgentProfilePath(cwd, agentName);
     if (unbrand(authorized) !== finalPath) {
-      throw new Error("adapter transaction target is not the authorized agent profile path");
+      throw new Error(
+        "adapter transaction target is not the authorized agent profile path",
+      );
     }
     return;
   }
@@ -1079,7 +1118,9 @@ async function assertTransactionTargetStillOwned(
   if (entry.target_kind === "adapter_manifest") {
     const authorized = await resolveManifestPath(cwd, agentName);
     if (unbrand(authorized) !== finalPath) {
-      throw new Error("adapter transaction target is not the authorized manifest path");
+      throw new Error(
+        "adapter transaction target is not the authorized manifest path",
+      );
     }
     return;
   }
@@ -1099,8 +1140,13 @@ async function assertTransactionTargetStillOwned(
     },
   );
   if (entry.target_kind === "adapter_static_file") {
-    if (authority.kind !== "owned" || unbrand(authority.absPath) !== finalPath) {
-      throw new Error("adapter transaction target is not an authorized static adapter file");
+    if (
+      authority.kind !== "owned" ||
+      unbrand(authority.absPath) !== finalPath
+    ) {
+      throw new Error(
+        "adapter transaction target is not an authorized static adapter file",
+      );
     }
     return;
   }
@@ -1110,7 +1156,9 @@ async function assertTransactionTargetStillOwned(
     authority.kind !== "dynamic_write" ||
     unbrand(authority.absPath) !== finalPath
   ) {
-    throw new Error("adapter transaction target is not an authorized dynamic create");
+    throw new Error(
+      "adapter transaction target is not an authorized dynamic create",
+    );
   }
 }
 
@@ -1145,11 +1193,16 @@ export async function recoverPendingAdapterTransactions(
 
   const recovered: string[] = [];
   const cleaned: string[] = [];
-  for (const name of names.filter(n => UUID_V4_RE.test(n.replace(/\.json$/, "")) && n.endsWith(".json"))) {
+  for (const name of names.filter(
+    n => UUID_V4_RE.test(n.replace(/\.json$/, "")) && n.endsWith(".json"),
+  )) {
     const journalPath = join(stateDir, name);
     const journal = await loadJournal(resolve(cwd), journalPath);
     try {
-      if (journal.status === "committed" || journal.status === "cleanup_pending") {
+      if (
+        journal.status === "committed" ||
+        journal.status === "cleanup_pending"
+      ) {
         await cleanupCommittedJournal(resolve(cwd), journal);
         cleaned.push(journalPath);
       } else {

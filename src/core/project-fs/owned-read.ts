@@ -1,31 +1,29 @@
 import { readFile, readdir } from "./index.ts";
 import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
 import {
-  brandOwnedRead,
+  brandContained,
   unbrand,
-  type OwnedReadPath,
-} from "./branded-paths.ts";
+  type SymlinkFreeContainedPath,
+} from "./branded-paths-internal.ts";
 
 /**
- * Resolve a project-relative path for an OWNED control-plane read. Unlike
+ * Resolve a project-relative path for a symlink-free contained read. Unlike
  * {@link resolveWithinProject} (containment-only — allows in-project symlinks),
  * this uses {@link resolveSymlinkFreeProjectPath} so an in-project symlink
  * alias (e.g. `.code-pact/agent-profiles -> ../alt`) is rejected before any
  * read/stat/readdir.
  *
- * Returns a branded `OwnedReadPath` that callers can pass to domain-specific
- * read functions without mixing with unbranded strings.
- *
- * This module does NOT grant namespace authority — the caller must verify
- * the path belongs to an owned namespace (e.g. `.code-pact/project.yaml`,
- * `design/roadmap.yaml`) BEFORE calling.
+ * Returns a branded `SymlinkFreeContainedPath` — containment only, NOT
+ * namespace ownership. The caller must verify the path belongs to an owned
+ * namespace (e.g. `.code-pact/project.yaml`, `design/roadmap.yaml`) BEFORE
+ * calling.
  */
-export async function resolveOwnedReadPath(
+export async function resolveSymlinkFreeReadCandidate(
   cwd: string,
   relPath: string,
-): Promise<OwnedReadPath> {
+): Promise<SymlinkFreeContainedPath> {
   const abs = await resolveSymlinkFreeProjectPath(cwd, relPath);
-  return brandOwnedRead(abs);
+  return brandContained(abs);
 }
 
 /**
@@ -37,7 +35,7 @@ export async function readOwnedText(
   cwd: string,
   relPath: string,
 ): Promise<string> {
-  const abs = await resolveOwnedReadPath(cwd, relPath);
+  const abs = await resolveSymlinkFreeReadCandidate(cwd, relPath);
   return readFile(unbrand(abs), "utf8");
 }
 
@@ -49,6 +47,6 @@ export async function listOwnedDirectory(
   cwd: string,
   relPath: string,
 ): Promise<string[]> {
-  const abs = await resolveOwnedReadPath(cwd, relPath);
+  const abs = await resolveSymlinkFreeReadCandidate(cwd, relPath);
   return readdir(unbrand(abs));
 }

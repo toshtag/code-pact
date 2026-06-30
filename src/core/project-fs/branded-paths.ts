@@ -48,42 +48,14 @@ export type OwnedDeletePath = string & {
 };
 
 /**
- * Brand a plain string as a symlink-free contained path. Only call this from
- * `resolveSymlinkFreeProjectPath` or its wrappers.
- */
-export function brandContained(
-  path: string,
-): SymlinkFreeContainedPath {
-  return path as SymlinkFreeContainedPath;
-}
-
-/**
- * Brand a plain string as an owned-read path. Only call this from
- * `resolveOwnedReadPath` or its wrappers.
- */
-export function brandOwnedRead(path: string): OwnedReadPath {
-  return path as OwnedReadPath;
-}
-
-/**
- * Brand a plain string as an owned-write path. Only call this from
- * `resolveOwnedAgentProfilePath` or equivalent owned-write resolvers.
- */
-export function brandOwnedWrite(path: string): OwnedWritePath {
-  return path as OwnedWritePath;
-}
-
-/**
- * Brand a plain string as an owned-delete path. Only call this from
- * owned-delete resolvers.
- */
-export function brandOwnedDelete(path: string): OwnedDeletePath {
-  return path as OwnedDeletePath;
-}
-
-/**
  * Extract the underlying string from any branded path.
  */
-export function unbrand(path: SymlinkFreeContainedPath | OwnedReadPath | OwnedWritePath | OwnedDeletePath): string {
+export function unbrand(
+  path:
+    | SymlinkFreeContainedPath
+    | OwnedReadPath
+    | OwnedWritePath
+    | OwnedDeletePath,
+): string {
   return path as string;
 }
