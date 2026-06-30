@@ -104,6 +104,7 @@ const FS_FUNCTIONS = new Set([
   "accessSync",
   "existsSync",
   "atomicWriteText",
+  "atomicReplaceExistingText",
 ]);
 
 const READLIKE_FS_FUNCTIONS = new Set([
@@ -134,6 +135,7 @@ const WRITELIKE_FS_FUNCTIONS = new Set([
   "openSync",
   "truncate",
   "atomicWriteText",
+  "atomicReplaceExistingText",
   "rename",
   "renameSync",
   "copyFile",
@@ -182,7 +184,12 @@ function capabilitiesForKind(kind) {
     return { read: true, write: false, delete: true, explicitUserInput: false };
   }
   if (kind === "owned_read") {
-    return { read: true, write: false, delete: false, explicitUserInput: false };
+    return {
+      read: true,
+      write: false,
+      delete: false,
+      explicitUserInput: false,
+    };
   }
   return { read: false, write: false, delete: false, explicitUserInput: false };
 }
@@ -221,9 +228,7 @@ function isSinkAuthorized(kind, fnName) {
   if (kind === "explicit_user_input") return true;
   if (READLIKE_FS_FUNCTIONS.has(fnName)) {
     return (
-      kind === "owned_read" ||
-      kind === "owned_write" ||
-      kind === "owned_delete"
+      kind === "owned_read" || kind === "owned_write" || kind === "owned_delete"
     );
   }
   if (WRITELIKE_FS_FUNCTIONS.has(fnName)) return kind === "owned_write";
@@ -244,10 +249,7 @@ const AUTHORITY_EXPORTS = new Map([
       ["resolveSymlinkFreeProjectPathSync", "symlink_free_contained"],
     ]),
   ],
-  [
-    join("src", "core", "project-fs", "owned-read.ts"),
-    new Map([]),
-  ],
+  [join("src", "core", "project-fs", "owned-read.ts"), new Map([])],
   [
     join("src", "core", "project-config-path.ts"),
     new Map([["resolveProjectConfigPath", "owned_read"]]),
@@ -298,80 +300,67 @@ const AUTHORITY_EXPORTS = new Map([
   // atomicWriteText is a sink wrapper, not an authority source
 ]);
 
-// Trusted fs modules: modules that are trusted to do raw fs operations
-// internally because they use resolveSymlinkFreeProjectPath internally.
-// These are excluded from checking (like authority export modules).
+// Trusted fs modules: modules that implement the filesystem boundary itself.
+// Split into two tiers:
+//
+//   Core primitives — implement raw fs I/O or path resolution. Fully exempt.
+//
+//   Authority boundary modules — export path authority resolvers recognised
+//   by trustedImportsFor(). Their own fs calls are exempt because they
+//   implement the boundary (e.g. resolveSymlinkFreeProjectPath must lstat
+//   arbitrary paths to check for symlinks). Domain modules that USE these
+//   resolvers are NOT exempt — the checker verifies they pass authority-proven
+//   paths to fs sinks.
+//
+// Domain modules (archive, decisions, plan, progress, pack, services, etc.)
+// are NOT trusted: their fs calls are checked, with allowlist entries for
+// legitimate exceptions.
 const TRUSTED_FS_MODULES = new Set([
+  // — Core primitives —
   join("src", "core", "project-fs", "index.ts"),
-  join("src", "core", "path-safety.ts"),
-  join("src", "core", "project-config-path.ts"),
   join("src", "core", "project-fs", "owned-read.ts"),
+  join("src", "core", "project-fs", "branded-paths-internal.ts"),
   join("src", "core", "project-fs", "control-plane.ts"),
+  join("src", "core", "path-safety.ts"),
+  join("src", "io", "atomic-text.ts"),
+  join("src", "core", "adapters", "staged-write.ts"),
+  join("src", "core", "adapters", "transaction-state-root.ts"),
+  // — Authority boundary modules —
+  join("src", "core", "project-config-path.ts"),
   join("src", "core", "agent-profile-path.ts"),
   join("src", "core", "archive", "paths.ts"),
-  join("src", "core", "archive", "archive-bundle-cleanup.ts"),
-  join("src", "core", "archive", "archive-bundle-writer.ts"),
-  join("src", "core", "archive", "archive-maintenance.ts"),
-  join("src", "core", "archive", "archive-retention.ts"),
-  join("src", "core", "archive", "bundle-member-removal.ts"),
-  join("src", "core", "archive", "decision-record.ts"),
-  join("src", "core", "archive", "delete-intent-journal.ts"),
-  join("src", "core", "archive", "event-pack-cleanup-gate.ts"),
-  join("src", "core", "archive", "event-pack-cleanup-reconcile.ts"),
-  join("src", "core", "archive", "event-pack-cleanup-run.ts"),
-  join("src", "core", "archive", "event-pack.ts"),
-  join("src", "core", "archive", "load-phase-snapshot.ts"),
-  join("src", "core", "archive", "phase-snapshot.ts"),
   join("src", "core", "adapters", "manifest.ts"),
   join("src", "core", "adapters", "manifest-file-ownership.ts"),
   join("src", "core", "adapters", "file-state.ts"),
-  join("src", "core", "adapters", "staged-write.ts"),
-  join("src", "core", "adapters", "transaction-state-root.ts"),
   join("src", "core", "progress", "io.ts"),
-  join("src", "core", "progress", "events-io.ts"),
-  join("src", "core", "progress", "all-sources.ts"),
-  join("src", "core", "progress", "migrate.ts"),
   join("src", "core", "pack", "context-output-path.ts"),
-  join("src", "core", "pack", "index.ts"),
-  join("src", "core", "plan", "load-phase.ts"),
-  join("src", "core", "plan", "normalize.ts"),
-  join("src", "core", "plan", "roadmap.ts"),
-  join("src", "core", "plan", "state.ts"),
-  join("src", "core", "plan", "sync-paths.ts"),
-  join("src", "core", "plan", "checks", "fs.ts"),
-  join("src", "core", "services", "createPhase.ts"),
-  join("src", "core", "decisions", "adr.ts"),
-  join("src", "core", "decisions", "decision-gate-archive.ts"),
-  join("src", "core", "decisions", "link-collector.ts"),
-  join("src", "core", "decisions", "prune-executor.ts"),
-  join("src", "core", "finalize", "safe-write.ts"),
-  join("src", "core", "glob.ts"),
-  join("src", "core", "locks", "write-lock.ts"),
-  join("src", "core", "context-fit", "load-context-budget.ts"),
-  join("src", "io", "atomic-text.ts"),
 ]);
 
 // Result properties that extract a path from an authority result object.
 const AUTHORITY_RESULT_PROPS = new Set(["absPath"]);
 const OWNED_PATH_TYPES = new Set([
+  "SymlinkFreeContainedPath",
   "OwnedReadPath",
   "OwnedWritePath",
   "OwnedDeletePath",
 ]);
 const BRAND_CONSTRUCTORS = new Set([
+  "brandContained",
   "brandOwnedRead",
   "brandOwnedWrite",
   "brandOwnedDelete",
 ]);
 const BRAND_CONSTRUCTOR_IMPORT_ALLOWLIST = new Set([
-  join("src", "core", "project-fs", "index.ts"),
+  join("src", "core", "project-fs", "branded-paths-internal.ts"),
   join("src", "core", "project-fs", "owned-read.ts"),
   join("src", "core", "agent-profile-path.ts"),
   join("src", "core", "adapters", "manifest.ts"),
   join("src", "core", "adapters", "manifest-file-ownership.ts"),
+  join("src", "core", "adapters", "staged-write.ts"),
 ]);
 const OWNED_PATH_CAST_ALLOWLIST = new Set([
   join("src", "core", "project-fs", "branded-paths.ts"),
+  join("src", "core", "project-fs", "branded-paths-internal.ts"),
 ]);
 
 // ---------------------------------------------------------------------------
@@ -881,7 +870,11 @@ function checkFile(filePath, allowlist, allowlistUsed) {
       sourceFile.fileName,
       stmt.moduleSpecifier.text,
     );
-    if (modulePath !== join("src", "core", "project-fs", "branded-paths.ts")) {
+    if (
+      modulePath !== join("src", "core", "project-fs", "branded-paths.ts") &&
+      modulePath !==
+        join("src", "core", "project-fs", "branded-paths-internal.ts")
+    ) {
       continue;
     }
     const bindings = stmt.importClause?.namedBindings;
@@ -1146,16 +1139,21 @@ function checkFile(filePath, allowlist, allowlistUsed) {
       return;
     }
 
-    if (ts.isVariableDeclaration(node) && ts.isObjectBindingPattern(node.name)) {
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isObjectBindingPattern(node.name)
+    ) {
       if (node.initializer) visit(node.initializer, scope);
-      const namespaceName = node.initializer && ts.isIdentifier(node.initializer)
-        ? node.initializer.text
-        : null;
+      const namespaceName =
+        node.initializer && ts.isIdentifier(node.initializer)
+          ? node.initializer.text
+          : null;
       for (const element of node.name.elements) {
         if (!ts.isIdentifier(element.name)) continue;
-        const exported = element.propertyName && ts.isIdentifier(element.propertyName)
-          ? element.propertyName.text
-          : element.name.text;
+        const exported =
+          element.propertyName && ts.isIdentifier(element.propertyName)
+            ? element.propertyName.text
+            : element.name.text;
         declareVar(scope, element.name.text, "unauthorized");
         if (namespaceName && fsNamespaces.has(namespaceName)) {
           sinkAliases.set(element.name.text, {
@@ -1231,9 +1229,7 @@ function checkFile(filePath, allowlist, allowlistUsed) {
               trustedImports,
               localWrappers,
             );
-            if (
-              !isSinkAuthorizedForCapability(argKind, required.capability)
-            ) {
+            if (!isSinkAuthorizedForCapability(argKind, required.capability)) {
               // Check allowlist
               const enclosingFn = findEnclosingFunctionName(node);
               const aKey = allowlistKey(relFile, enclosingFn ?? "*");
@@ -1285,11 +1281,7 @@ function checkFile(filePath, allowlist, allowlistUsed) {
 }
 
 function isAuthorityModule(relFile) {
-  if (TRUSTED_FS_MODULES.has(relFile)) return true;
-  for (const key of AUTHORITY_EXPORTS.keys()) {
-    if (relFile === key) return true;
-  }
-  return false;
+  return TRUSTED_FS_MODULES.has(relFile);
 }
 
 function detectWrapperKind(fnNode, trustedImports) {
@@ -1419,7 +1411,7 @@ for (const file of runFiles) {
 // Check for stale allowlist entries
 const staleEntries = [];
 if (filesToCheck.length === 0) {
-for (const key of allowlist.keys()) {
+  for (const key of allowlist.keys()) {
     const entries = allowlist.get(key);
     for (const entry of entries) {
       const usedKey = `${key}:${entry.operation}`;
