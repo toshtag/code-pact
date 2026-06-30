@@ -158,7 +158,7 @@ export type AdapterDeleteTarget =
       agentName: SupportedAgent;
       relPath: string;
       role: DesiredAdapterFileRole;
-      absPath: OwnedWritePath;
+      absPath: OwnedDeletePath;
     }
   | {
       kind: "test_only";
@@ -257,7 +257,7 @@ export function adapterStaticDeleteTarget(
     agentName,
     relPath,
     role,
-    absPath: authority.absPath,
+    absPath: brandOwnedDelete(unbrand(authority.absPath)),
   };
 }
 
