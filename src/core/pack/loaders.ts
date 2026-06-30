@@ -122,8 +122,8 @@ export async function loadDecisions(
   // OPTIONAL context source: degrade to [] on ANY listing error. The shared
   // live-listing seam (readLiveDecisionDir) is fail-closed (throws on non-ENOENT),
   // so wrap it here to keep this loader's degrade-on-any-error contract — the
-  // leniency stays at the call site, never pushed into the seam. NON_DECISION_FILES
-  // (index + PRUNED.md) are already filtered out by the seam.
+  // leniency stays at the call site, never pushed into the seam. README.md and
+  // PRUNED.md are already filtered out by the seam via normalizeDecisionRefPath.
   let entries: string[];
   try {
     entries = (await readLiveDecisionDir(cwd)).entries;

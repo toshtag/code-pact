@@ -31,7 +31,23 @@ import { RelativePosixPath } from "./relative-path.ts";
  * context-fit, and the retire/prune/archive fallbacks.
  */
 const DECISIONS_PREFIX = "design/decisions/";
-const NON_DECISION_BASENAMES = new Set(["README.md", "PRUNED.md"]);
+const NON_DECISION_BASENAMES = new Set(["readme.md", "pruned.md"]);
+
+const FORBIDDEN_DECISION_SEGMENT = /[\u0000-\u001f\u007f<>:"\\|?*`#]/;
+const WINDOWS_DEVICE_NAME = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i;
+
+function decisionSegmentReason(segment: string): string {
+  if (FORBIDDEN_DECISION_SEGMENT.test(segment)) {
+    return "decision path contains a non-portable or markdown-significant character";
+  }
+  if (segment.endsWith(" ") || segment.endsWith(".")) {
+    return "decision path segment must not end in space or dot";
+  }
+  if (WINDOWS_DEVICE_NAME.test(segment)) {
+    return "decision path uses a reserved device name";
+  }
+  return "";
+}
 
 export function normalizeDecisionRefPath(raw: string): string | null {
   const value = raw.replace(/^(?:\.\/)+/, "");
@@ -43,6 +59,13 @@ export function normalizeDecisionRefPath(raw: string): string | null {
  * Pure and synchronous — the lexical half of the contract. Shared by the Zod
  * schema, the boolean predicate, and the lint diagnostics so the message and
  * the verdict can never drift.
+ *
+ * This is the single source of truth for decision path validation. Every site
+ * that accepts or consumes a `decision_refs` value uses it: the Task /
+ * phase-import schemas (parse-time hard fail), `task add`, plan lint, the
+ * decision gate, the pack loader, context-fit, and the retire/prune/archive
+ * fallbacks. The PRUNED ledger and archive paths also delegate here — no
+ * duplicate character constraints exist elsewhere.
  */
 export function decisionRefPathReason(value: string): string {
   const relative = RelativePosixPath.safeParse(value);
@@ -59,10 +82,17 @@ export function decisionRefPathReason(value: string): string {
   if (rest.length === 0) {
     return "decision path must include a filename under design/decisions/";
   }
-  const basename = rest.split("/").pop() ?? rest;
-  if (NON_DECISION_BASENAMES.has(basename)) {
+  const segments = rest.split("/");
+  const basename = segments.pop() ?? rest;
+  if (NON_DECISION_BASENAMES.has(basename.toLocaleLowerCase("en-US"))) {
     return "README.md / PRUNED.md are never decision records";
   }
+  for (const seg of segments) {
+    const segReason = decisionSegmentReason(seg);
+    if (segReason) return segReason;
+  }
+  const baseReason = decisionSegmentReason(basename);
+  if (baseReason) return baseReason;
   return "";
 }
 
@@ -72,8 +102,11 @@ export function isDecisionRefPath(value: string): boolean {
 }
 
 /** The parse-time schema. Use everywhere a `decision_refs` value is accepted. */
-export const DecisionRefPath = z.string().min(1).superRefine((value, ctx) => {
-  const reason = decisionRefPathReason(value);
-  if (reason !== "") ctx.addIssue({ code: "custom", message: reason });
-});
+export const DecisionRefPath = z
+  .string()
+  .min(1)
+  .superRefine((value, ctx) => {
+    const reason = decisionRefPathReason(value);
+    if (reason !== "") ctx.addIssue({ code: "custom", message: reason });
+  });
 export type DecisionRefPath = z.infer<typeof DecisionRefPath>;

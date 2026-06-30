@@ -1,7 +1,10 @@
 import { readFile, readdir, stat } from "../project-fs/index.ts";
 import { parseFrontMatter } from "../pack/front-matter.ts";
 import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
-import { isDecisionRefPath, normalizeDecisionRefPath } from "../schemas/decision-ref.ts";
+import {
+  isDecisionRefPath,
+  normalizeDecisionRefPath,
+} from "../schemas/decision-ref.ts";
 import { resolveRetiredDecisionGate } from "./decision-gate-archive.ts";
 
 /**
@@ -34,12 +37,11 @@ export async function readDecisionAdrFiles(cwd: string): Promise<string[]> {
 
 /**
  * Files under `design/decisions/` that are NOT decisions and must be skipped by
- * every candidate scan (gate filename resolution + ADR quality checks): the
- * index, and the `decision prune` tombstone ledger. Without this, the lenient
- * "no status line → accepted" rule would misclassify the ledger as an accepted
- * ADR. See design/decisions/decision-lifecycle-rfc.md.
+ * every candidate scan: the index (`README.md`) and the `decision prune`
+ * tombstone ledger (`PRUNED.md`). These are filtered case-insensitively by
+ * {@link normalizeDecisionRefPath} — the single source of truth in
+ * `decision-ref.ts`. See design/decisions/decision-lifecycle-rfc.md.
  */
-export const NON_DECISION_FILES = new Set(["README.md", "PRUNED.md"]);
 
 type LiveDecisionListing = {
   present: boolean;
@@ -57,8 +59,8 @@ function codedDecisionScanError(message: string, cause?: unknown): Error {
 
 /**
  * The shared LIVE `design/decisions/` directory-listing seam: returns whether
- * the dir is present and its decision filenames (with `NON_DECISION_FILES` —
- * the index + `PRUNED.md` ledger — filtered out). Like
+ * the dir is present and its decision filenames (with `normalizeDecisionRefPath`
+ * filtering out the index + `PRUNED.md` ledger). Like
  * {@link readDecisionAdrFiles} but also reports `present`. The gate
  * ({@link resolveDecisionGate} / {@link makeDecisionResolver}) and the lint
  * classify scans share this; the pack loader routes its listing onto it too
@@ -93,7 +95,10 @@ export async function listLiveDecisionFiles(
       if (relDir === "design/decisions" && isAbsentDecisionsDirError(error)) {
         throw error;
       }
-      throw codedDecisionScanError(`Unable to list decision records under ${relDir}`, error);
+      throw codedDecisionScanError(
+        `Unable to list decision records under ${relDir}`,
+        error,
+      );
     }
 
     for (const dirent of dirents) {
@@ -150,7 +155,7 @@ export function hasDecisionAdrForTaskId(
   entries: string[],
   taskId: string,
 ): boolean {
-  return entries.some((f) => matchesTaskId(f, taskId));
+  return entries.some(f => matchesTaskId(f, taskId));
 }
 
 /**
@@ -171,7 +176,12 @@ export function isDecisionRequiredForTask(
 // ---------------------------------------------------------------------------
 
 /** Status words that explicitly do NOT resolve the gate. */
-const BLOCKING_STATUSES = new Set(["proposed", "draft", "rejected", "superseded"]);
+const BLOCKING_STATUSES = new Set([
+  "proposed",
+  "draft",
+  "rejected",
+  "superseded",
+]);
 
 /** Acceptance verdict for one ADR file's content. */
 export type AdrAcceptance = "accepted" | "blocked" | "empty" | "unknown_status";
@@ -184,7 +194,11 @@ export type AdrAcceptance = "accepted" | "blocked" | "empty" | "unknown_status";
  * read. The gate is self-enforcing — it does not rely on `plan lint`'s
  * `TASK_DECISION_REF_UNSAFE_PATH` advisory having run first.
  */
-export type ConsideredAcceptance = AdrAcceptance | "missing" | "unsafe_path" | "unreadable";
+export type ConsideredAcceptance =
+  | AdrAcceptance
+  | "missing"
+  | "unsafe_path"
+  | "unreadable";
 
 export type AdrStatus = {
   /** First token after the status label, lowercased; null when none found. */
@@ -246,7 +260,8 @@ export function classifyAdr(content: string): {
   const status = parseAdrStatus(content);
   if (status.word === null) return { acceptance: "accepted", status };
   if (status.word === "accepted") return { acceptance: "accepted", status };
-  if (BLOCKING_STATUSES.has(status.word)) return { acceptance: "blocked", status };
+  if (BLOCKING_STATUSES.has(status.word))
+    return { acceptance: "blocked", status };
   return { acceptance: "unknown_status", status };
 }
 
@@ -292,7 +307,7 @@ export function parseAdrCommitments(content: string): AdrCommitments {
   const { body } = parseFrontMatter(normalizeNewlines(content));
   const lines = body.split("\n");
 
-  const start = lines.findIndex((l) => COMMITMENTS_HEADING.test(l));
+  const start = lines.findIndex(l => COMMITMENTS_HEADING.test(l));
   if (start === -1) return { hasSection: false, items: [] };
 
   const items: AdrCommitment[] = [];
@@ -340,7 +355,7 @@ export type ReadResult =
 type RelFileReader = (relPath: string) => Promise<ReadResult>;
 
 function diskReader(cwd: string): RelFileReader {
-  return async (relPath) => {
+  return async relPath => {
     // NAMESPACE guard (multi-layer defense): the decision read seam ONLY reads
     // .md decision records under `design/decisions/`. The Task/phase-import schemas
     // already hard-fail a `decision_refs: [.env]` at parse time, but this seam
@@ -431,7 +446,11 @@ function whyNotAccepted(c: ConsideredAdr): string {
   }
 }
 
-function listingErrorResolution(taskId: string, via: DecisionResolution["via"], error: unknown): DecisionResolution {
+function listingErrorResolution(
+  taskId: string,
+  via: DecisionResolution["via"],
+  error: unknown,
+): DecisionResolution {
   const code =
     error !== null &&
     typeof error === "object" &&
@@ -468,7 +487,12 @@ async function resolveWith(
       const r = await read(ref);
       if (r.kind === "unsafe") {
         // Fail-closed: an escaping path is never read and never resolves.
-        considered.push({ path, status: null, accepted: false, acceptance: "unsafe_path" });
+        considered.push({
+          path,
+          status: null,
+          accepted: false,
+          acceptance: "unsafe_path",
+        });
         continue;
       }
       if (r.kind === "missing") {
@@ -476,14 +500,29 @@ async function resolveWith(
         // accepted decision-state record (step 5). The hook self-checks true-ENOENT,
         // so a present-but-inaccessible file never reaches here as a record release.
         if (releaseMissingRef && (await releaseMissingRef(ref))) {
-          considered.push({ path, status: null, accepted: true, acceptance: "accepted" });
+          considered.push({
+            path,
+            status: null,
+            accepted: true,
+            acceptance: "accepted",
+          });
         } else {
-          considered.push({ path, status: null, accepted: false, acceptance: "missing" });
+          considered.push({
+            path,
+            status: null,
+            accepted: false,
+            acceptance: "missing",
+          });
         }
         continue;
       }
       if (r.kind === "unreadable") {
-        considered.push({ path, status: null, accepted: false, acceptance: "unreadable" });
+        considered.push({
+          path,
+          status: null,
+          accepted: false,
+          acceptance: "unreadable",
+        });
         continue;
       }
       const { acceptance, status } = classifyAdr(r.content);
@@ -494,8 +533,8 @@ async function resolveWith(
         acceptance,
       });
     }
-    const resolved = considered.length > 0 && considered.every((c) => c.accepted);
-    const failing = considered.filter((c) => !c.accepted).map(whyNotAccepted);
+    const resolved = considered.length > 0 && considered.every(c => c.accepted);
+    const failing = considered.filter(c => !c.accepted).map(whyNotAccepted);
     return {
       resolved,
       considered,
@@ -509,7 +548,7 @@ async function resolveWith(
 
   // Filename scan: any accepted match resolves (preserves substring-collision compat).
   const considered: ConsideredAdr[] = [];
-  for (const f of dir.entries.filter((e) => matchesTaskId(e, taskId))) {
+  for (const f of dir.entries.filter(e => matchesTaskId(e, taskId))) {
     const rel = f;
     const r = await read(rel);
     if (r.kind !== "ok") {
@@ -536,10 +575,10 @@ async function resolveWith(
       acceptance,
     });
   }
-  const resolved = considered.some((c) => c.accepted);
+  const resolved = considered.some(c => c.accepted);
   let reason: string;
   if (resolved) {
-    reason = `${considered.find((c) => c.accepted)!.path} is "accepted"`;
+    reason = `${considered.find(c => c.accepted)!.path} is "accepted"`;
   } else if (considered.length === 0) {
     reason = dir.present
       ? `No ADR found for task "${taskId}" in design/decisions/`
@@ -547,7 +586,13 @@ async function resolveWith(
   } else {
     reason = considered.map(whyNotAccepted).join("; ");
   }
-  return { resolved, considered, via: "filename-scan", dirPresent: dir.present, reason };
+  return {
+    resolved,
+    considered,
+    via: "filename-scan",
+    dirPresent: dir.present,
+    reason,
+  };
 }
 
 function toPosix(p: string): string {
@@ -572,7 +617,8 @@ export async function resolveDecisionGate(
       decisionRefs,
       { present: true, entries: [] },
       diskReader(cwd),
-      (ref) => resolveRetiredDecisionGate(cwd, ref).then((x) => x.kind === "released"),
+      ref =>
+        resolveRetiredDecisionGate(cwd, ref).then(x => x.kind === "released"),
     );
   }
   let dir: { present: boolean; entries: string[] };
@@ -581,8 +627,8 @@ export async function resolveDecisionGate(
   } catch (error) {
     return listingErrorResolution(taskId, "filename-scan", error);
   }
-  return resolveWith(taskId, decisionRefs, dir, diskReader(cwd), (ref) =>
-    resolveRetiredDecisionGate(cwd, ref).then((x) => x.kind === "released"),
+  return resolveWith(taskId, decisionRefs, dir, diskReader(cwd), ref =>
+    resolveRetiredDecisionGate(cwd, ref).then(x => x.kind === "released"),
   );
 }
 
@@ -592,9 +638,9 @@ export async function resolveDecisionGate(
  * with `verify`/`record-done` (identical `classifyAdr` + `matchesTaskId`)
  * without re-reading the directory per task.
  */
-export async function makeDecisionResolver(
-  cwd: string,
-): Promise<{ resolve(taskId: string, decisionRefs?: string[]): Promise<DecisionResolution> }> {
+export async function makeDecisionResolver(cwd: string): Promise<{
+  resolve(taskId: string, decisionRefs?: string[]): Promise<DecisionResolution>;
+}> {
   let dir: { present: boolean; entries: string[] } | null = null;
   let listingError: unknown = null;
   try {
@@ -604,7 +650,7 @@ export async function makeDecisionResolver(
   }
   const cache = new Map<string, ReadResult>();
   const base = diskReader(cwd);
-  const cachedRead: RelFileReader = async (relPath) => {
+  const cachedRead: RelFileReader = async relPath => {
     if (cache.has(relPath)) return cache.get(relPath)!;
     const content = await base(relPath);
     cache.set(relPath, content);
@@ -618,20 +664,19 @@ export async function makeDecisionResolver(
           decisionRefs,
           { present: true, entries: [] },
           cachedRead,
-          (ref) => resolveRetiredDecisionGate(cwd, ref).then((x) => x.kind === "released"),
+          ref =>
+            resolveRetiredDecisionGate(cwd, ref).then(
+              x => x.kind === "released",
+            ),
         );
       }
       if (dir === null) {
         return Promise.resolve(
-          listingErrorResolution(
-            taskId,
-            "filename-scan",
-            listingError,
-          ),
+          listingErrorResolution(taskId, "filename-scan", listingError),
         );
       }
-      return resolveWith(taskId, decisionRefs, dir, cachedRead, (ref) =>
-        resolveRetiredDecisionGate(cwd, ref).then((x) => x.kind === "released"),
+      return resolveWith(taskId, decisionRefs, dir, cachedRead, ref =>
+        resolveRetiredDecisionGate(cwd, ref).then(x => x.kind === "released"),
       );
     },
   };

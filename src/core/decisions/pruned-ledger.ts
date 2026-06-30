@@ -36,12 +36,10 @@ export function normalizePrunedDecisionPath(raw: string): string | null {
     return null;
   }
   const normalized = posix.normalize(fwd).replace(/^(?:\.\/)+/, "");
+  // Delegate to the single source of truth in decision-ref.ts. All forbidden
+  // characters (including pipe, backtick, CR/LF, hash, control chars, etc.)
+  // are rejected there — no duplicate constraints here.
   if (normalizeDecisionRefPath(normalized) === null) return null;
-  // Reject characters that cannot survive the ledger's markdown-table / code-span
-  // round-trip: a pipe ends a cell, a backtick ends the path code span, and a
-  // CR/LF ends the row. Such a path could never be parsed back by
-  // `readPrunedLedger`, so it is not a valid ledger entry (nor a prune target).
-  if (/[\r\n|`]/.test(normalized)) return null;
   return normalized;
 }
 
@@ -168,7 +166,14 @@ function cell(value: string): string {
  * code-span form back as the pruned path.
  */
 export function serializePrunedRow(row: PrunedLedgerRow): string {
-  const path = normalizePrunedDecisionPath(row.decision) ?? row.decision;
+  const path = normalizePrunedDecisionPath(row.decision);
+  if (path === null) {
+    const error = new Error(
+      `invalid pruned decision path: ${JSON.stringify(row.decision)}`,
+    );
+    (error as NodeJS.ErrnoException).code = "INVALID_PRUNED_DECISION_PATH";
+    throw error;
+  }
   return `| \`${path}\` | ${cell(row.phase_task)} | ${cell(row.pruned_date)} | ${cell(row.rationale_home)} |`;
 }
 
