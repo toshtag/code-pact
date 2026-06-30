@@ -172,6 +172,7 @@ interface StagedEntry {
   finalPath: string;
   backupPath: string;
   relPath: string;
+  content?: string;
   preState: FileState;
   postState: FileState;
 }
@@ -431,20 +432,9 @@ export class FileTransaction {
         `transaction target metadata does not match authority path: ${target.relPath} !== ${relPath}`,
       );
     }
-    if (target.kind === "adapter_dynamic_create" && (await pathExists(path))) {
-      throw new Error(
-        `dynamic adapter target already exists and cannot be transaction-created: ${relPath}`,
-      );
-    }
     const index = this.staged.length;
     const tempPath = `${path}.code-pact-tx-${this.transactionId}-${index}.tmp`;
     const backupPath = `${path}.bak-${this.transactionId}-${index}`;
-    await atomicWriteText(tempPath, content);
-    const tempStat = await dataStat(tempPath);
-    if (!tempStat.isFile()) {
-      await dataUnlink(tempPath).catch(() => {});
-      throw new Error(`staged temp path is not a regular file: ${tempPath}`);
-    }
     this.staged.push({
       kind: "write",
       targetKind: target.kind,
@@ -458,6 +448,7 @@ export class FileTransaction {
       finalPath: path,
       backupPath,
       relPath,
+      content,
       preState: { kind: "absent" },
       postState: { kind: "present", sha256: sha256Bytes(Buffer.from(content)) },
     });
@@ -498,6 +489,7 @@ export class FileTransaction {
     const journal = await this.writePreparedJournal();
     let mutated = false;
     try {
+      await this.createPreparedTemps();
       for (const s of this.staged) {
         if (s.preState.kind === "present") {
           await dataRename(s.finalPath, s.backupPath);
@@ -651,8 +643,8 @@ export class FileTransaction {
       if (await pathExists(s.backupPath)) {
         throw new Error(`backup path already exists: ${s.backupPath}`);
       }
-      if (s.kind === "write" && (await pathExists(s.tempPath)) === false) {
-        throw new Error(`staged temp path is missing: ${s.tempPath}`);
+      if (s.kind === "write" && (await pathExists(s.tempPath))) {
+        throw new Error(`temp path already exists: ${s.tempPath}`);
       }
       await ensureRegularFileIfPresent(s.finalPath);
       s.preState = await hashFile(s.finalPath);
@@ -662,13 +654,33 @@ export class FileTransaction {
         );
       }
       if (s.kind === "write") {
-        const tempState = await hashFile(s.tempPath);
-        if (tempState.kind !== "present") {
-          throw new Error(`staged temp path is missing: ${s.tempPath}`);
-        }
-        s.postState = tempState;
+        s.postState = {
+          kind: "present",
+          sha256: sha256Bytes(Buffer.from(s.content ?? "")),
+        };
       } else {
         s.postState = { kind: "absent" };
+      }
+    }
+  }
+
+  private async createPreparedTemps(): Promise<void> {
+    for (const s of this.staged) {
+      if (s.kind !== "write") continue;
+      if (s.content === undefined) {
+        throw new Error(`missing staged write content for ${s.relPath}`);
+      }
+      await atomicWriteText(s.tempPath, s.content);
+      const tempStat = await dataStat(s.tempPath);
+      if (!tempStat.isFile()) {
+        await dataUnlink(s.tempPath).catch(() => {});
+        throw new Error(`staged temp path is not a regular file: ${s.tempPath}`);
+      }
+      const tempState = await hashFile(s.tempPath);
+      if (!sameState(tempState, s.postState)) {
+        throw new Error(
+          `staged temp hash mismatch: expected ${stateLabel(s.postState)}, got ${stateLabel(tempState)}`,
+        );
       }
     }
   }

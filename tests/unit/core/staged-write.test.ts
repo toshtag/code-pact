@@ -191,23 +191,24 @@ describe("FileTransaction — authority target guards", () => {
     ).rejects.toThrow("transaction target metadata does not match authority path");
   });
 
-  it("rejects dynamic creates when the target already exists", async () => {
+  it("rejects dynamic creates when the target already exists during prepare", async () => {
     await mkdir(join(dir, ".claude", "skills"), { recursive: true });
     const target = join(dir, ".claude", "skills", "code-pact-private.md");
     await writeFile(target, "existing", "utf8");
     const tx = new FileTransaction({ cwd: dir });
 
-    await expect(
-      tx.addWrite(
-        adapterDynamicCreateTarget(
-          "claude-code",
-          ".claude/skills/code-pact-private.md",
-          "skill",
-          { kind: "dynamic_write", absPath: brandOwnedWrite(target) },
-        ),
-        "content",
+    await tx.addWrite(
+      adapterDynamicCreateTarget(
+        "claude-code",
+        ".claude/skills/code-pact-private.md",
+        "skill",
+        { kind: "dynamic_write", absPath: brandOwnedWrite(target) },
       ),
-    ).rejects.toThrow("dynamic adapter target already exists");
+      "content",
+    );
+    await expect(tx.commit()).rejects.toThrow(
+      "dynamic adapter target already exists",
+    );
   });
 });
 
@@ -280,6 +281,16 @@ describe("FileTransaction — failure injection", () => {
 });
 
 describe("FileTransaction — journal", () => {
+  it("does not write project-side temp files before the durable journal exists", async () => {
+    const tx = new FileTransaction({ cwd: dir });
+    await tx.stageForTest(join(dir, "a.txt"), "aaa");
+    const { tempPath } = tx.stagedArtifactsForTest()[0]!;
+
+    await expect(stat(tempPath)).rejects.toMatchObject({ code: "ENOENT" });
+    await tx.writePreparedJournalForTest();
+    await expect(stat(tempPath)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("journal is deleted after successful commit", async () => {
     const tx = new FileTransaction({ cwd: dir });
     await tx.stageForTest(join(dir, "a.txt"), "aaa");
@@ -585,8 +596,7 @@ describe("FileTransaction — recovery", () => {
     await tx.addWrite(txTarget, "NEW");
     await tx.writePreparedJournalForTest();
 
-    const { tempPath } = tx.stagedArtifactsForTest()[0]!;
-    await rm(tempPath);
+    await mkdir(dirname(target), { recursive: true });
     await writeFile(target, "NEW", "utf8");
 
     const result = await recoverPendingAdapterTransactions(dir);
