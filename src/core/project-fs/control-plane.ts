@@ -1,20 +1,16 @@
-import { readFile, readdir, stat } from "./index.ts";
+import { readRegularOwnedText, stat } from "./raw-internal.ts";
+import { readdir } from "./index.ts";
 import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
 import { isDecisionRefPath } from "../schemas/decision-ref.ts";
 import { PhaseRef } from "../schemas/roadmap.ts";
 
 /**
- * Read a regular text file at an absolute path. Throws on directory, ENOENT,
- * or any I/O error. The path must already be authority-resolved.
+ * Read a regular text file at an absolute path via O_NOFOLLOW fd read,
+ * preventing final-entry symlink swap races. Throws on directory, ENOENT,
+ * symlink (ELOOP), or any I/O error. The path must already be authority-resolved.
  */
 async function readRegularText(abs: string): Promise<string> {
-  const s = await stat(abs);
-  if (!s.isFile()) {
-    const err = new Error(`path is not a regular file`);
-    (err as NodeJS.ErrnoException).code = "EISDIR";
-    throw err;
-  }
-  return readFile(abs, "utf8");
+  return readRegularOwnedText(abs);
 }
 
 /**
@@ -79,9 +75,7 @@ export async function readOwnedRoadmapRaw(cwd: string): Promise<string> {
  * directory root itself must not be a symlink. Entries that are symlinks
  * are NOT followed by the caller (readdir withFileTypes distinguishes).
  */
-export async function listOwnedPhaseDirectory(
-  cwd: string,
-): Promise<string[]> {
+export async function listOwnedPhaseDirectory(cwd: string): Promise<string[]> {
   const abs = await resolveSymlinkFreeProjectPath(cwd, "design/phases");
   return readdir(abs);
 }

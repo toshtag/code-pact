@@ -1,4 +1,4 @@
-import { readFile } from "../project-fs/index.ts";
+import { readRegularOwnedText } from "../project-fs/raw-internal.ts";
 import { posix } from "node:path";
 import {
   assertSafeRelativePath,
@@ -115,7 +115,7 @@ export async function readPrunedLedger(cwd: string): Promise<Set<string>> {
       cwd,
       "design/decisions/PRUNED.md",
     );
-    text = await readFile(path, "utf8");
+    text = await readRegularOwnedText(path);
   } catch {
     // Any failure (escape, absent ENOENT, EACCES, EISDIR) → empty set. This is the
     // fail-CLOSED direction: an unreadable/untrusted ledger silences nothing, so a
@@ -222,7 +222,7 @@ export async function buildAppendedLedger(
   let existing = "";
   let existed = true;
   try {
-    existing = await readFile(ledger_path, "utf8");
+    existing = await readRegularOwnedText(ledger_path);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
     existing = "";

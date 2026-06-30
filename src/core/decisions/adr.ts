@@ -1,4 +1,5 @@
-import { readFile, readdir, stat } from "../project-fs/index.ts";
+import { readRegularOwnedText } from "../project-fs/raw-internal.ts";
+import { readdir } from "../project-fs/index.ts";
 import { parseFrontMatter } from "../pack/front-matter.ts";
 import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
 import {
@@ -378,22 +379,17 @@ function diskReader(cwd: string): RelFileReader {
       return { kind: "unsafe" };
     }
     try {
-      const s = await stat(abs);
-      if (!s.isFile()) {
-        return { kind: "unreadable", errorCode: "ENOTFILE" };
-      }
-      return { kind: "ok", content: await readFile(abs, "utf8") };
+      const content = await readRegularOwnedText(abs);
+      return { kind: "ok", content };
     } catch (error) {
-      if (isAbsentDecisionsDirError(error)) return { kind: "missing" };
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "ENOENT" || code === "ENOTDIR") return { kind: "missing" };
+      if (code === "ELOOP" || code === "ENOTFILE") {
+        return { kind: "unreadable", errorCode: code };
+      }
       return {
         kind: "unreadable",
-        errorCode:
-          error !== null &&
-          typeof error === "object" &&
-          "code" in error &&
-          typeof (error as { code?: unknown }).code === "string"
-            ? (error as { code: string }).code
-            : undefined,
+        errorCode: typeof code === "string" ? code : undefined,
       };
     }
   };

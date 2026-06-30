@@ -1,4 +1,11 @@
-import { mkdir, rename, unlink, readFile, open } from "../core/project-fs/index.ts";
+import {
+  mkdir,
+  rename,
+  unlink,
+  readFile,
+  open,
+  link,
+} from "../core/project-fs/index.ts";
 import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
 
@@ -31,7 +38,9 @@ export function __setAtomicTempTokenForTests(fn: (() => string) | null): void {
  * Returns the error to throw, or null to write normally.
  */
 let failAfterTempOpen: (() => Error) | null = null;
-export function __setAtomicWriteFailAfterOpenForTests(fn: (() => Error) | null): void {
+export function __setAtomicWriteFailAfterOpenForTests(
+  fn: (() => Error) | null,
+): void {
   failAfterTempOpen = fn;
 }
 
@@ -49,7 +58,10 @@ export function __setAtomicWriteFailAfterOpenForTests(fn: (() => Error) | null):
  * never leaking a stray `.tmp-<uuid>`. An EEXIST from `open` is NOT ours, so it
  * is retried (a fresh token) and never unlinked.
  */
-async function createExclusiveTemp(path: string, content: string): Promise<string> {
+async function createExclusiveTemp(
+  path: string,
+  content: string,
+): Promise<string> {
   const MAX_ATTEMPTS = 5;
   let lastErr: unknown;
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
@@ -88,9 +100,14 @@ async function createExclusiveTemp(path: string, content: string): Promise<strin
  * file appearing where absence was expected is a drift, not a match (which a bare
  * `""` content compare would miss).
  */
-export type ExpectedState = { kind: "absent" } | { kind: "present"; content: string };
+export type ExpectedState =
+  | { kind: "absent" }
+  | { kind: "present"; content: string };
 
-async function verifyExpected(path: string, expected: ExpectedState): Promise<void> {
+async function verifyExpected(
+  path: string,
+  expected: ExpectedState,
+): Promise<void> {
   if (expected.kind === "absent") {
     let exists = true;
     try {
@@ -99,11 +116,13 @@ async function verifyExpected(path: string, expected: ExpectedState): Promise<vo
       if ((err as NodeJS.ErrnoException).code === "ENOENT") exists = false;
       else throw err;
     }
-    if (exists) throw new Error("destination appeared before write (expected absent)");
+    if (exists)
+      throw new Error("destination appeared before write (expected absent)");
   } else {
     // A `present`-expected destination that vanished (ENOENT) throws here too — a drift.
     const current = await readFile(path, "utf8");
-    if (current !== expected.content) throw new Error("destination changed before write");
+    if (current !== expected.content)
+      throw new Error("destination changed before write");
   }
 }
 
@@ -179,6 +198,69 @@ export async function atomicReplaceExistingText(
   expectedCurrent?: string,
 ): Promise<void> {
   const expected: ExpectedState | undefined =
-    expectedCurrent !== undefined ? { kind: "present", content: expectedCurrent } : undefined;
+    expectedCurrent !== undefined
+      ? { kind: "present", content: expectedCurrent }
+      : undefined;
   await writeThenRename(path, content, expected);
+}
+
+/**
+ * **Exclusive create** — writes `content` to `path` ONLY when `path` does not
+ * already exist. Unlike {@link atomicWriteText} with `{kind:"absent"}`, which
+ * narrows but does not fully close the check-to-rename window, this uses a
+ * same-directory hard link (`link(tmp, dest)`) as the publish primitive:
+ *
+ *   - `link()` fails with `EEXIST` if `dest` already exists — no overwrite.
+ *   - The temp file is created with exclusive (`"wx"`) semantics, so it cannot
+ *     be pre-squatted by a symlink.
+ *   - The temp file is always cleaned up (success or failure).
+ *
+ * On filesystems that do not support hard links (e.g. some FUSE mounts), the
+ * `link()` call fails with `ENOSYS` or `EPERM` — this function does NOT fall
+ * back to `rename()` (which would overwrite). The caller receives the error.
+ *
+ * Test seam: {@link __setAtomicCreateConflictForTests} injects a conflict at
+ * the moment between temp creation and link, to simulate a concurrent writer.
+ */
+let createConflictInjector: (() => Promise<void>) | null = null;
+
+/** Test-only seam: inject a delay/conflict between temp write and link. */
+export function __setAtomicCreateConflictForTests(
+  fn: (() => Promise<void>) | null,
+): void {
+  createConflictInjector = fn;
+}
+
+export async function atomicCreateTextExclusive(
+  path: string,
+  content: string,
+  opts: { mkdir?: boolean } = {},
+): Promise<void> {
+  if (opts.mkdir !== false) {
+    await mkdir(dirname(path), { recursive: true });
+  }
+
+  const tmp = await createExclusiveTemp(path, content);
+
+  try {
+    if (createConflictInjector) {
+      await createConflictInjector();
+    }
+    await link(tmp, path);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "EEXIST") {
+      throw err;
+    }
+    if (code === "ENOSYS" || code === "EPERM") {
+      const error = new Error(
+        "exclusive create requires hard link support; this filesystem does not support it",
+      );
+      (error as NodeJS.ErrnoException).code = "ENOSYS";
+      throw error;
+    }
+    throw err;
+  } finally {
+    await unlink(tmp).catch(() => {});
+  }
 }

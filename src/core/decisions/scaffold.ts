@@ -1,6 +1,8 @@
-import { access } from "../project-fs/index.ts";
-import { atomicWriteText } from "../../io/atomic-text.ts";
-import { assertSafeRelativePath, resolveSymlinkFreeProjectPath } from "../path-safety.ts";
+import { atomicCreateTextExclusive } from "../../io/atomic-text.ts";
+import {
+  assertSafeRelativePath,
+  resolveSymlinkFreeProjectPath,
+} from "../path-safety.ts";
 import { PLAN_ID_PATTERN } from "../schemas/plan-id.ts";
 import { normalizeDecisionRefPath } from "../schemas/decision-ref.ts";
 
@@ -70,26 +72,28 @@ export function scaffoldTargetsForTask(
 /** The English-locked stub body. Non-empty, with `**Status:** proposed` so the
  *  gate classifies it `blocked` until a human flips it to `accepted`. */
 export function proposedAdrStub(label: string): string {
-  return [
-    `# Decision: ${label}`,
-    "",
-    "**Status:** proposed",
-    "",
-    "> Scaffolded by `code-pact … --scaffold-decisions`. Flip **Status** to `accepted`",
-    "> once the decision is settled — that is what releases the verify / record-done gate.",
-    "",
-    "## Context",
-    "",
-    "<why this decision is needed>",
-    "",
-    "## Decision",
-    "",
-    "<what was decided>",
-    "",
-    "## Consequences",
-    "",
-    "<trade-offs / follow-ups>",
-  ].join("\n") + "\n";
+  return (
+    [
+      `# Decision: ${label}`,
+      "",
+      "**Status:** proposed",
+      "",
+      "> Scaffolded by `code-pact … --scaffold-decisions`. Flip **Status** to `accepted`",
+      "> once the decision is settled — that is what releases the verify / record-done gate.",
+      "",
+      "## Context",
+      "",
+      "<why this decision is needed>",
+      "",
+      "## Decision",
+      "",
+      "<what was decided>",
+      "",
+      "## Consequences",
+      "",
+      "<trade-offs / follow-ups>",
+    ].join("\n") + "\n"
+  );
 }
 
 /**
@@ -114,15 +118,12 @@ export async function writeProposedAdrIfAbsent(
   }
   const abs = await resolveSymlinkFreeProjectPath(cwd, normalized);
   try {
-    await access(abs);
-    return "exists";
+    await atomicCreateTextExclusive(abs, proposedAdrStub(label));
+    return "created";
   } catch (err) {
-    // Only ENOENT/ENOTDIR means "not present — safe to write". Any other
-    // access failure (e.g. EACCES) is a real environment problem: rethrow it
-    // rather than overwriting a file we could not stat.
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code !== "ENOENT" && code !== "ENOTDIR") throw err;
+    if ((err as NodeJS.ErrnoException).code === "EEXIST") {
+      return "exists";
+    }
+    throw err;
   }
-  await atomicWriteText(abs, proposedAdrStub(label));
-  return "created";
 }
