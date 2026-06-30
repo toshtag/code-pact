@@ -61,15 +61,24 @@ const AUTHORITY_OBJECT_KINDS = new Map([
 
 const FS_FUNCTIONS = new Set([
   "readFile",
+  "readFileSync",
   "writeFile",
+  "writeFileSync",
   "appendFile",
+  "appendFileSync",
   "mkdir",
   "readdir",
+  "readdirSync",
   "rmdir",
+  "rmdirSync",
   "rm",
+  "rmSync",
   "unlink",
+  "unlinkSync",
   "rename",
+  "renameSync",
   "copyFile",
+  "copyFileSync",
   "cp",
   "symlink",
   "link",
@@ -83,36 +92,52 @@ const FS_FUNCTIONS = new Set([
   "utimes",
   "lutimes",
   "open",
+  "openSync",
   "truncate",
   "stat",
+  "statSync",
   "lstat",
+  "lstatSync",
   "opendir",
   "watch",
   "access",
+  "accessSync",
+  "existsSync",
   "atomicWriteText",
 ]);
 
 const READLIKE_FS_FUNCTIONS = new Set([
   "readFile",
+  "readFileSync",
   "readdir",
+  "readdirSync",
   "stat",
+  "statSync",
   "lstat",
+  "lstatSync",
   "opendir",
   "watch",
   "access",
+  "accessSync",
+  "existsSync",
   "readlink",
   "realpath",
 ]);
 
 const WRITELIKE_FS_FUNCTIONS = new Set([
   "writeFile",
+  "writeFileSync",
   "appendFile",
+  "appendFileSync",
   "mkdir",
   "open",
+  "openSync",
   "truncate",
   "atomicWriteText",
   "rename",
+  "renameSync",
   "copyFile",
+  "copyFileSync",
   "cp",
   "symlink",
   "link",
@@ -125,7 +150,14 @@ const WRITELIKE_FS_FUNCTIONS = new Set([
   "lutimes",
 ]);
 
-const DELETELIKE_FS_FUNCTIONS = new Set(["rmdir", "rm", "unlink"]);
+const DELETELIKE_FS_FUNCTIONS = new Set([
+  "rmdir",
+  "rmdirSync",
+  "rm",
+  "rmSync",
+  "unlink",
+  "unlinkSync",
+]);
 
 function capabilitiesForKind(kind) {
   if (kind === "explicit_user_input") {
@@ -282,6 +314,7 @@ const TRUSTED_FS_MODULES = new Set([
   join("src", "core", "adapters", "manifest-file-ownership.ts"),
   join("src", "core", "adapters", "file-state.ts"),
   join("src", "core", "adapters", "staged-write.ts"),
+  join("src", "core", "adapters", "transaction-state-root.ts"),
   join("src", "core", "progress", "io.ts"),
   join("src", "core", "progress", "events-io.ts"),
   join("src", "core", "progress", "all-sources.ts"),
@@ -308,6 +341,23 @@ const TRUSTED_FS_MODULES = new Set([
 
 // Result properties that extract a path from an authority result object.
 const AUTHORITY_RESULT_PROPS = new Set(["absPath"]);
+const OWNED_PATH_TYPES = new Set([
+  "OwnedReadPath",
+  "OwnedWritePath",
+  "OwnedDeletePath",
+]);
+const BRAND_CONSTRUCTORS = new Set([
+  "brandOwnedRead",
+  "brandOwnedWrite",
+  "brandOwnedDelete",
+]);
+const BRAND_CONSTRUCTOR_IMPORT_ALLOWLIST = new Set([
+  join("src", "core", "project-fs", "index.ts"),
+  join("src", "core", "project-fs", "owned-read.ts"),
+]);
+const OWNED_PATH_CAST_ALLOWLIST = new Set([
+  join("src", "core", "project-fs", "branded-paths.ts"),
+]);
 
 // ---------------------------------------------------------------------------
 // Structured allowlist for explicit user-input paths and other exceptions.
@@ -584,10 +634,29 @@ function isAuthorityExpression(node, scope, trustedImports, localWrappers) {
 function openRequiredCapability(node) {
   const flags = node.arguments[1];
   if (!flags) return "read";
-  const text = flags.getText().replaceAll(/['"`]/g, "");
-  if (/[wa+]/.test(text)) return "write";
-  if (text.includes("x")) return "write";
-  return "read";
+  if (ts.isStringLiteral(flags) || ts.isNoSubstitutionTemplateLiteral(flags)) {
+    const text = flags.text;
+    if (/[wa+]/.test(text)) return "write";
+    if (text.includes("x")) return "write";
+    return "read";
+  }
+  if (ts.isNumericLiteral(flags)) {
+    const value = Number(flags.text);
+    const O_WRONLY = 1;
+    const O_RDWR = 2;
+    const O_CREAT = 64;
+    const O_TRUNC = 512;
+    const O_APPEND = 1024;
+    return (value & (O_WRONLY | O_RDWR | O_CREAT | O_TRUNC | O_APPEND)) !== 0
+      ? "write"
+      : "read";
+  }
+  const text = flags.getText();
+  if (/\b(O_WRONLY|O_RDWR|O_CREAT|O_TRUNC|O_APPEND)\b/.test(text)) {
+    return "write";
+  }
+  if (/\bO_RDONLY\b/.test(text)) return "read";
+  return "write";
 }
 
 function requiredPathArguments(fnName, node) {
@@ -606,7 +675,7 @@ function requiredPathArguments(fnName, node) {
   if (fnName === "symlink") {
     return [{ index: 1, capability: "write" }];
   }
-  if (fnName === "open") {
+  if (fnName === "open" || fnName === "openSync") {
     return [{ index: 0, capability: openRequiredCapability(node) }];
   }
   if (READLIKE_FS_FUNCTIONS.has(fnName)) {
@@ -670,6 +739,37 @@ function checkFile(filePath, allowlist, allowlistUsed) {
   const findings = [];
   const trustedImports = trustedImportsFor(sourceFile);
 
+  for (const stmt of sourceFile.statements) {
+    if (!ts.isImportDeclaration(stmt)) continue;
+    if (!ts.isStringLiteral(stmt.moduleSpecifier)) continue;
+    const modulePath = resolveImport(
+      sourceFile.fileName,
+      stmt.moduleSpecifier.text,
+    );
+    if (modulePath !== join("src", "core", "project-fs", "branded-paths.ts")) {
+      continue;
+    }
+    const bindings = stmt.importClause?.namedBindings;
+    if (!bindings || !ts.isNamedImports(bindings)) continue;
+    for (const el of bindings.elements) {
+      const imported = el.propertyName?.text ?? el.name.text;
+      if (
+        BRAND_CONSTRUCTORS.has(imported) &&
+        !BRAND_CONSTRUCTOR_IMPORT_ALLOWLIST.has(relFile)
+      ) {
+        const line =
+          sourceFile.getLineAndCharacterOfPosition(el.getStart()).line + 1;
+        findings.push({
+          line,
+          fn: "brand constructor import",
+          key: `${relFile}#*`,
+          arg: imported,
+          text: sourceFile.text.split("\n")[line - 1]?.trim() ?? "",
+        });
+      }
+    }
+  }
+
   // Detect local wrapper functions: functions whose body is a single
   // return statement returning a trusted authority call (possibly wrapped
   // in try/catch that re-throws). These are treated as authority sources.
@@ -724,6 +824,26 @@ function checkFile(filePath, allowlist, allowlistUsed) {
       return;
     }
 
+    if (ts.isAsExpression(node)) {
+      const typeName = node.type.getText(sourceFile);
+      if (
+        OWNED_PATH_TYPES.has(typeName) &&
+        !OWNED_PATH_CAST_ALLOWLIST.has(relFile)
+      ) {
+        const line =
+          sourceFile.getLineAndCharacterOfPosition(node.getStart()).line + 1;
+        findings.push({
+          line,
+          fn: "direct OwnedPath cast",
+          key: `${relFile}#*`,
+          arg: node.expression.getText(sourceFile).slice(0, 80),
+          text: sourceFile.text.split("\n")[line - 1]?.trim() ?? "",
+        });
+      }
+      visit(node.expression, scope);
+      return;
+    }
+
     // if / else
     if (ts.isIfStatement(node)) {
       visit(node.expression, scope);
@@ -739,10 +859,15 @@ function checkFile(filePath, allowlist, allowlistUsed) {
     if (ts.isSwitchStatement(node)) {
       visit(node.expression, scope);
       const caseScopes = [];
+      let hasDefault = false;
       for (const clause of node.caseBlock.clauses) {
+        if (ts.isDefaultClause(clause)) hasDefault = true;
         const caseScope = cloneScope(scope);
         for (const stmt of clause.statements) visit(stmt, caseScope);
         caseScopes.push(caseScope);
+      }
+      if (!hasDefault) {
+        caseScopes.push(cloneScope(scope));
       }
       if (caseScopes.length === 0) return;
       // Merge all case scopes into the parent scope
@@ -804,18 +929,22 @@ function checkFile(filePath, allowlist, allowlistUsed) {
         visit(node.incrementor, scope);
       if (ts.isForInStatement(node) || ts.isForOfStatement(node))
         visit(node.expression, scope);
-      // Body may not execute at all → merge conservatively (body vars don't persist)
+      // Body may not execute, but it may also execute one or more times. Keep
+      // only authority that survives both reachable states.
+      const zeroIterationScope = cloneScope(scope);
       const bodyScope = cloneScope(scope);
       if (node.statement) visit(node.statement, bodyScope);
-      // Don't merge body scope back — body may not execute
+      mergeScopes(scope, zeroIterationScope, bodyScope);
       return;
     }
 
     if (ts.isWhileStatement(node) || ts.isDoStatement(node)) {
       if (ts.isWhileStatement(node)) visit(node.expression, scope);
+      const zeroIterationScope = cloneScope(scope);
       const bodyScope = cloneScope(scope);
       if (node.statement) visit(node.statement, bodyScope);
       if (ts.isDoStatement(node)) visit(node.expression, scope);
+      mergeScopes(scope, zeroIterationScope, bodyScope);
       return;
     }
 

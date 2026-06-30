@@ -47,7 +47,11 @@ export function loadArchiveBundles(cwd: string): LoadedArchiveBundles {
   }
   const bundles = names.map((name) => {
     const file = join("bundles", name); // stable relative label for error messages
-    const raw = readFileSync(join(dir, name), "utf8");
+    const path = resolveArchiveOwnedPathSync(
+      cwd,
+      `${archiveBundlesRelDir()}/${name}`,
+    );
+    const raw = readFileSync(path, "utf8");
     return { file, loaded: validateArchiveBundleTier1(raw, file) };
   });
   return { index: buildBundleMemberIndex(bundles), bundles };

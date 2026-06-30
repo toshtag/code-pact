@@ -385,4 +385,115 @@ describe("check-fs-authority", () => {
     ]);
     expect(result.ok).toBe(true);
   });
+
+  it("rejects unsafe reassignment inside a loop after an authorized assignment", async () => {
+    const result = await runFixture([
+      'import { writeFile } from "node:fs/promises";',
+      'import { resolveOwnedAgentProfilePath } from "../../src/core/agent-profile-path.ts";',
+      "",
+      "async function f(cwd: string, profile: any, items: string[]) {",
+      '  let p = await resolveOwnedAgentProfilePath(cwd, "claude-code");',
+      "  for (const _item of items) {",
+      "    p = profile.instruction_filename;",
+      "  }",
+      '  await writeFile(p, "x");',
+      "}",
+      "",
+    ]);
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain("writeFile() called on non-authority path");
+  });
+
+  it("rejects switch without default because the original scope remains reachable", async () => {
+    const result = await runFixture([
+      'import { writeFile } from "node:fs/promises";',
+      'import { resolveOwnedAgentProfilePath } from "../../src/core/agent-profile-path.ts";',
+      "",
+      "async function f(cwd: string, profile: any, mode: string) {",
+      "  let p = profile.instruction_filename;",
+      "  switch (mode) {",
+      '    case "safe":',
+      '      p = await resolveOwnedAgentProfilePath(cwd, "claude-code");',
+      "      break;",
+      "  }",
+      '  await writeFile(p, "x");',
+      "}",
+      "",
+    ]);
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain("writeFile() called on non-authority path");
+  });
+
+  it("rejects sync filesystem APIs", async () => {
+    const result = await runFixture([
+      'import { readFileSync, writeFileSync } from "node:fs";',
+      "",
+      "function f(profile: any) {",
+      '  readFileSync(profile.instruction_filename, "utf8");',
+      '  writeFileSync(profile.instruction_filename, "x");',
+      "}",
+      "",
+    ]);
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain("readFileSync() called on non-authority path");
+    expect(result.output).toContain("writeFileSync() called on non-authority path");
+  });
+
+  it("treats numeric open write flags as write authority", async () => {
+    const result = await runFixture([
+      'import { open } from "node:fs/promises";',
+      'import { resolveAgentProfilePath } from "../../src/core/agent-profile-path.ts";',
+      "",
+      "async function f(cwd: string) {",
+      '  const p = await resolveAgentProfilePath(cwd, "claude-code");',
+      "  await open(p, 1);",
+      "}",
+      "",
+    ]);
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain("open() called on non-authority path");
+  });
+
+  it("rejects dynamic open flags", async () => {
+    const result = await runFixture([
+      'import { open } from "node:fs/promises";',
+      'import { resolveAgentProfilePath } from "../../src/core/agent-profile-path.ts";',
+      "",
+      "async function f(cwd: string, flags: string) {",
+      '  const p = await resolveAgentProfilePath(cwd, "claude-code");',
+      "  await open(p, flags);",
+      "}",
+      "",
+    ]);
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain("open() called on non-authority path");
+  });
+
+  it("rejects direct OwnedPath casts", async () => {
+    const result = await runFixture([
+      'import { writeFile } from "node:fs/promises";',
+      'import type { OwnedWritePath } from "../../src/core/project-fs/branded-paths.ts";',
+      "",
+      "async function f(profile: any) {",
+      "  const p = profile.instruction_filename as OwnedWritePath;",
+      '  await writeFile(p, "x");',
+      "}",
+      "",
+    ]);
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain("direct OwnedPath cast");
+  });
+
+  it("rejects brand constructor imports from domain modules", async () => {
+    const result = await runFixture([
+      'import { brandOwnedWrite } from "../../src/core/project-fs/branded-paths.ts";',
+      "",
+      "function f(profile: any) {",
+      "  return brandOwnedWrite(profile.instruction_filename);",
+      "}",
+      "",
+    ]);
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain("brand constructor import");
+  });
 });
