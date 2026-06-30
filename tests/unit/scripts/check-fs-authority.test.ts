@@ -505,4 +505,139 @@ describe("check-fs-authority", () => {
     expect(result.ok).toBe(false);
     expect(result.output).toContain("brand constructor import");
   });
+
+  it("rejects projectFs sink aliases", async () => {
+    const result = await runFixture([
+      'import { writeFile } from "../../src/core/project-fs/index.ts";',
+      "",
+      "async function f(profile: any) {",
+      "  const sink = writeFile;",
+      '  await sink(profile.instruction_filename, "x");',
+      "}",
+      "",
+    ]);
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain("writeFile() called on non-authority path");
+  });
+
+  it("rejects raw fs import aliases", async () => {
+    const result = await runFixture([
+      'import { writeFile as dangerousWrite } from "node:fs/promises";',
+      "",
+      "async function f(profile: any) {",
+      '  await dangerousWrite(profile.instruction_filename, "x");',
+      "}",
+      "",
+    ]);
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain("writeFile() called on non-authority path");
+  });
+
+  it("rejects rename aliases with an untrusted destination", async () => {
+    const result = await runFixture([
+      'import { rename } from "../../src/core/project-fs/index.ts";',
+      'import { resolveOwnedAgentProfilePath } from "../../src/core/agent-profile-path.ts";',
+      "",
+      "async function f(cwd: string, profile: any) {",
+      '  const ownedSource = await resolveOwnedAgentProfilePath(cwd, "claude-code");',
+      "  const move = rename;",
+      "  await move(ownedSource, profile.instruction_filename);",
+      "}",
+      "",
+    ]);
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain("rename() called on non-authority path");
+  });
+
+  it("rejects unlink aliases", async () => {
+    const result = await runFixture([
+      'import { unlink } from "../../src/core/project-fs/index.ts";',
+      "",
+      "async function f(untrustedPath: string) {",
+      "  const remove = unlink;",
+      "  await remove(untrustedPath);",
+      "}",
+      "",
+    ]);
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain("unlink() called on non-authority path");
+  });
+
+  it("rejects open aliases with write flags", async () => {
+    const result = await runFixture([
+      'import { open } from "../../src/core/project-fs/index.ts";',
+      "",
+      "async function f(untrustedPath: string) {",
+      "  const opener = open;",
+      '  await opener(untrustedPath, "w");',
+      "}",
+      "",
+    ]);
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain("open() called on non-authority path");
+  });
+
+  it("rejects object property sink aliases", async () => {
+    const result = await runFixture([
+      'import { writeFile } from "../../src/core/project-fs/index.ts";',
+      "",
+      "async function f(untrustedPath: string) {",
+      "  const fsApi = { sink: writeFile };",
+      '  await fsApi.sink(untrustedPath, "x");',
+      "}",
+      "",
+    ]);
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain("writeFile() called on non-authority path");
+  });
+
+  it("rejects namespace fs calls", async () => {
+    const result = await runFixture([
+      'import * as fs from "node:fs/promises";',
+      "",
+      "async function f(untrustedPath: string) {",
+      '  await fs.writeFile(untrustedPath, "x");',
+      "}",
+      "",
+    ]);
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain("writeFile() called on non-authority path");
+  });
+
+  it("rejects dynamic raw fs imports", async () => {
+    const result = await runFixture([
+      "async function f(untrustedPath: string) {",
+      '  const fs = await import("node:fs/promises");',
+      '  await fs.writeFile(untrustedPath, "x");',
+      "}",
+      "",
+    ]);
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain("writeFile() called on non-authority path");
+  });
+
+  it("rejects require raw fs imports", async () => {
+    const result = await runFixture([
+      "async function f(untrustedPath: string) {",
+      '  const fs = require("node:fs");',
+      '  fs.writeFileSync(untrustedPath, "x");',
+      "}",
+      "",
+    ]);
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain("writeFileSync() called on non-authority path");
+  });
+
+  it("rejects unknown raw fs operations", async () => {
+    const result = await runFixture([
+      'import { constants as fsConstants } from "node:fs";',
+      "",
+      "async function f(untrustedPath: string) {",
+      "  fsConstants(untrustedPath);",
+      "}",
+      "",
+    ]);
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain("unknown raw fs operation");
+  });
 });

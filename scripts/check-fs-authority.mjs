@@ -159,6 +159,18 @@ const DELETELIKE_FS_FUNCTIONS = new Set([
   "unlinkSync",
 ]);
 
+const RAW_FS_MODULES = new Set([
+  "node:fs",
+  "node:fs/promises",
+  "fs",
+  "fs/promises",
+]);
+
+const PROJECT_FS_MODULES = new Set([
+  join("src", "core", "project-fs", "index.ts"),
+  join("src", "io", "atomic-text.ts"),
+]);
+
 function capabilitiesForKind(kind) {
   if (kind === "explicit_user_input") {
     return { read: true, write: true, delete: true, explicitUserInput: true };
@@ -486,6 +498,52 @@ function trustedImportsFor(sourceFile) {
   return trusted;
 }
 
+function fsImportsFor(sourceFile) {
+  const sinks = new Map();
+  const namespaces = new Set();
+  const rawNamespaces = new Set();
+
+  function recordNamed(localName, exportedName, raw) {
+    sinks.set(localName, {
+      fnName: FS_FUNCTIONS.has(exportedName) ? exportedName : null,
+      raw,
+      importedName: exportedName,
+    });
+  }
+
+  for (const stmt of sourceFile.statements) {
+    if (!ts.isImportDeclaration(stmt)) continue;
+    if (!ts.isStringLiteral(stmt.moduleSpecifier)) continue;
+    const specifier = stmt.moduleSpecifier.text;
+    const raw = RAW_FS_MODULES.has(specifier);
+    const modulePath = raw
+      ? null
+      : resolveImport(sourceFile.fileName, specifier);
+    const projectFs = modulePath !== null && PROJECT_FS_MODULES.has(modulePath);
+    if (!raw && !projectFs) continue;
+
+    const clause = stmt.importClause;
+    if (clause?.name) {
+      namespaces.add(clause.name.text);
+      if (raw) rawNamespaces.add(clause.name.text);
+    }
+    const bindings = clause?.namedBindings;
+    if (!bindings) continue;
+    if (ts.isNamespaceImport(bindings)) {
+      namespaces.add(bindings.name.text);
+      if (raw) rawNamespaces.add(bindings.name.text);
+      continue;
+    }
+    if (!ts.isNamedImports(bindings)) continue;
+    for (const el of bindings.elements) {
+      const exported = el.propertyName?.text ?? el.name.text;
+      recordNamed(el.name.text, exported, raw);
+    }
+  }
+
+  return { sinks, namespaces, rawNamespaces };
+}
+
 function resolveImport(fromFile, specifier) {
   if (!specifier.startsWith(".")) return null;
   const base = resolve(dirname(fromFile), specifier);
@@ -535,6 +593,54 @@ function getCallName(node) {
     if (ts.isIdentifier(node.expression)) return node.expression.text;
     if (ts.isPropertyAccessExpression(node.expression))
       return node.expression.name.text;
+  }
+  return null;
+}
+
+function getFsModuleSpecifier(node) {
+  if (!node) return null;
+  if (
+    ts.isAwaitExpression(node) ||
+    ts.isParenthesizedExpression(node) ||
+    ts.isAsExpression(node)
+  ) {
+    return getFsModuleSpecifier(node.expression);
+  }
+  if (
+    ts.isCallExpression(node) &&
+    node.arguments.length === 1 &&
+    ts.isStringLiteral(node.arguments[0])
+  ) {
+    if (
+      node.expression.kind === ts.SyntaxKind.ImportKeyword ||
+      (ts.isIdentifier(node.expression) && node.expression.text === "require")
+    ) {
+      const specifier = node.arguments[0].text;
+      return RAW_FS_MODULES.has(specifier) ? specifier : null;
+    }
+  }
+  return null;
+}
+
+function sinkFromExpression(node, sinkAliases, fsNamespaces, rawFsNamespaces) {
+  if (!node) return null;
+  if (ts.isIdentifier(node)) {
+    return sinkAliases.get(node.text) ?? null;
+  }
+  if (ts.isPropertyAccessExpression(node)) {
+    if (ts.isIdentifier(node.expression)) {
+      const objectName = node.expression.text;
+      const prop = node.name.text;
+      const objectSink = sinkAliases.get(`${objectName}.${prop}`);
+      if (objectSink) return objectSink;
+      if (fsNamespaces.has(objectName)) {
+        return {
+          fnName: FS_FUNCTIONS.has(prop) ? prop : null,
+          raw: rawFsNamespaces.has(objectName),
+          importedName: prop,
+        };
+      }
+    }
   }
   return null;
 }
@@ -763,6 +869,10 @@ function checkFile(filePath, allowlist, allowlistUsed) {
   if (isAuthorityModule(relFile)) return findings;
 
   const trustedImports = trustedImportsFor(sourceFile);
+  const fsImports = fsImportsFor(sourceFile);
+  const sinkAliases = new Map(fsImports.sinks);
+  const fsNamespaces = new Set(fsImports.namespaces);
+  const rawFsNamespaces = new Set(fsImports.rawNamespaces);
 
   for (const stmt of sourceFile.statements) {
     if (!ts.isImportDeclaration(stmt)) continue;
@@ -976,6 +1086,54 @@ function checkFile(filePath, allowlist, allowlistUsed) {
     // Variable declaration
     if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)) {
       if (node.initializer) visit(node.initializer, scope);
+      const fsModuleSpecifier = getFsModuleSpecifier(node.initializer);
+      if (fsModuleSpecifier) {
+        fsNamespaces.add(node.name.text);
+        rawFsNamespaces.add(node.name.text);
+      }
+      const sinkInfo = node.initializer
+        ? sinkFromExpression(
+            node.initializer,
+            sinkAliases,
+            fsNamespaces,
+            rawFsNamespaces,
+          )
+        : null;
+      if (sinkInfo) {
+        sinkAliases.set(node.name.text, sinkInfo);
+      }
+      if (node.initializer && ts.isObjectLiteralExpression(node.initializer)) {
+        for (const prop of node.initializer.properties) {
+          if (ts.isShorthandPropertyAssignment(prop)) {
+            const propSink = sinkFromExpression(
+              prop.name,
+              sinkAliases,
+              fsNamespaces,
+              rawFsNamespaces,
+            );
+            if (propSink) {
+              sinkAliases.set(`${node.name.text}.${prop.name.text}`, propSink);
+            }
+            continue;
+          }
+          if (
+            ts.isPropertyAssignment(prop) &&
+            (ts.isIdentifier(prop.name) ||
+              ts.isStringLiteral(prop.name) ||
+              ts.isNumericLiteral(prop.name))
+          ) {
+            const propSink = sinkFromExpression(
+              prop.initializer,
+              sinkAliases,
+              fsNamespaces,
+              rawFsNamespaces,
+            );
+            if (propSink) {
+              sinkAliases.set(`${node.name.text}.${prop.name.text}`, propSink);
+            }
+          }
+        }
+      }
       const kind = node.initializer
         ? isAuthorityExpression(
             node.initializer,
@@ -988,6 +1146,28 @@ function checkFile(filePath, allowlist, allowlistUsed) {
       return;
     }
 
+    if (ts.isVariableDeclaration(node) && ts.isObjectBindingPattern(node.name)) {
+      if (node.initializer) visit(node.initializer, scope);
+      const namespaceName = node.initializer && ts.isIdentifier(node.initializer)
+        ? node.initializer.text
+        : null;
+      for (const element of node.name.elements) {
+        if (!ts.isIdentifier(element.name)) continue;
+        const exported = element.propertyName && ts.isIdentifier(element.propertyName)
+          ? element.propertyName.text
+          : element.name.text;
+        declareVar(scope, element.name.text, "unauthorized");
+        if (namespaceName && fsNamespaces.has(namespaceName)) {
+          sinkAliases.set(element.name.text, {
+            fnName: FS_FUNCTIONS.has(exported) ? exported : null,
+            raw: rawFsNamespaces.has(namespaceName),
+            importedName: exported,
+          });
+        }
+      }
+      return;
+    }
+
     // Assignment (including reassignment)
     if (
       ts.isBinaryExpression(node) &&
@@ -995,6 +1175,20 @@ function checkFile(filePath, allowlist, allowlistUsed) {
       ts.isIdentifier(node.left)
     ) {
       visit(node.right, scope);
+      const fsModuleSpecifier = getFsModuleSpecifier(node.right);
+      if (fsModuleSpecifier) {
+        fsNamespaces.add(node.left.text);
+        rawFsNamespaces.add(node.left.text);
+      }
+      const sinkInfo = sinkFromExpression(
+        node.right,
+        sinkAliases,
+        fsNamespaces,
+        rawFsNamespaces,
+      );
+      if (sinkInfo) {
+        sinkAliases.set(node.left.text, sinkInfo);
+      }
       const kind = isAuthorityExpression(
         node.right,
         scope,
@@ -1007,8 +1201,25 @@ function checkFile(filePath, allowlist, allowlistUsed) {
 
     // Filesystem sink call check
     if (ts.isCallExpression(node)) {
-      const fnName = getCallName(node);
-      if (fnName && FS_FUNCTIONS.has(fnName)) {
+      const directCallName = getCallName(node);
+      const sinkInfo = sinkFromExpression(
+        node.expression,
+        sinkAliases,
+        fsNamespaces,
+        rawFsNamespaces,
+      );
+      const fnName = sinkInfo?.fnName ?? directCallName;
+      if (sinkInfo && sinkInfo.fnName === null) {
+        const line =
+          sourceFile.getLineAndCharacterOfPosition(node.getStart()).line + 1;
+        findings.push({
+          line,
+          fn: "unknown raw fs operation",
+          key: `${relFile}#*`,
+          arg: sinkInfo.importedName,
+          text: sourceFile.text.split("\n")[line - 1]?.trim() ?? "",
+        });
+      } else if (fnName && FS_FUNCTIONS.has(fnName)) {
         const line =
           sourceFile.getLineAndCharacterOfPosition(node.getStart()).line + 1;
         for (const required of requiredPathArguments(fnName, node)) {
