@@ -53,7 +53,7 @@ and the [`CHANGELOG`](../../CHANGELOG.md). This index deliberately tracks **only
 decisions**: enumerating retired ones would 404 on GitHub the moment a file is
 removed and would need an edit on every retire (exactly the maintenance cost the
 ephemeral model exists to remove). To read a retired decision, run
-`git log --follow -- design/decisions/<name>.md`, or inspect its record under
+`git log --follow -- design/decisions/<path>.md`, or inspect its record under
 `.code-pact/state/archive`.
 
 ## What belongs here (and what does not)

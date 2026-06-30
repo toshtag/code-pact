@@ -163,13 +163,13 @@ code-pact phase runbook <phase-id> --json
 If `data.tasks[]` shows every flip candidate has the same refusal reason, the issue is the phase file itself, not individual tasks — fix it once and reconcile will proceed for all of them.
 
 ## `DECISION_PRUNE_NOT_ELIGIBLE` from `decision prune`
-The target decision record cannot be retired. The verdict is identical for the dry-run preview and `--write`, so an ineligible target is **never** written either way — nothing is deleted. `data.blocks[]` lists **every applicable** failing gate so you can resolve them together (the link-rewrite gates below are only evaluated once the target itself is a readable, accepted, top-level record — a `target_*` failure short-circuits them):
+The target decision record cannot be retired. The verdict is identical for the dry-run preview and `--write`, so an ineligible target is **never** written either way — nothing is deleted. `data.blocks[]` lists **every applicable** failing gate so you can resolve them together (the link-rewrite gates below are only evaluated once the target itself is a readable, accepted decision record — a `target_*` failure short-circuits them):
 
 ```sh
-code-pact decision prune design/decisions/<name>.md --json
+code-pact decision prune design/decisions/<path>.md --json
 # data.blocks[].gate is one of:
 #   target_invalid / target_missing / target_unreadable
-#     → the target is not a readable, top-level, real design/decisions/*.md file
+#     → the target is not a readable .md decision record under design/decisions/
 #   plan_artifacts_unreadable
 #     → design/roadmap.yaml or a referenced design/phases/*.yaml could not be read,
 #       so prune cannot prove every referencing task is done; fix the plan graph first
@@ -202,7 +202,7 @@ When `data.eligible` is `true` but `data.referencing_tasks` is empty, prune cann
 The working tree changed between building the plan and applying it (a concurrent edit to a doc, or a plan applied against a tree that has since moved). `--write` re-collects inbound links and requires the plan to still describe the tree exactly, then re-checks every span byte-for-byte — so this aborts with **zero writes**: the record is not deleted, no link is rewritten, no ledger row is appended.
 
 ```sh
-code-pact decision prune design/decisions/<name>.md --write --json
+code-pact decision prune design/decisions/<path>.md --write --json
 # data → { mode: "write", decision, stale[] }
 # each stale[] entry describes one divergence:
 #   { source_file, line, column, expected, found }
@@ -221,7 +221,7 @@ A write could not complete **after** preflight passed — distinct from `PLAN_ST
 - a commit-time `rename`/`unlink` I/O error (disk full, permissions, a path that became a directory).
 
 ```sh
-code-pact decision prune design/decisions/<name>.md --write --json
+code-pact decision prune design/decisions/<path>.md --write --json
 # data → { mode: "write", decision, phase, partial_applied, message }
 #   phase           → append_ledger | rewrite_links | delete_record
 #   partial_applied → false = nothing landed; true = some changes already applied

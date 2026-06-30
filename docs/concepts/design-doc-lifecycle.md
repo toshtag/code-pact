@@ -62,8 +62,8 @@ it, the record must be able to carry that need:
   the record **cannot** carry it, and retire refuses. Migrate the task to an
   explicit, accepted `decision_refs` first.
 - An `acceptance_refs` (a reference-integrity annotation, not a gate) is softened by
-  a valid decision-state record **only when it points at a top-level
-  `design/decisions/*.md`**; an `acceptance_refs` to a non-decision target (an
+  a valid decision-state record **only when it points at a `.md` decision record
+  under `design/decisions/`**; an `acceptance_refs` to a non-decision target (an
   ordinary doc like `docs/cli-contract.md`) stays strict and is never softened by a
   record.
 
