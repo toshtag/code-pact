@@ -26,6 +26,26 @@ const failBackupUnlink = vi.hoisted(() => ({
   threshold: 2,
   count: 0,
 }));
+const failJournalCleanup = vi.hoisted(() => ({
+  enabled: false,
+}));
+
+vi.mock("node:fs/promises", async importActual => {
+  const actual = await importActual<typeof import("node:fs/promises")>();
+  return {
+    ...actual,
+    unlink: async (path: string) => {
+      if (
+        failJournalCleanup.enabled &&
+        path.includes("adapter-transactions") &&
+        path.endsWith(".json")
+      ) {
+        throw new Error("injected journal cleanup failure");
+      }
+      return actual.unlink(path);
+    },
+  };
+});
 
 vi.mock("../../../src/core/project-fs/index.ts", async importActual => {
   const actual =
@@ -94,6 +114,7 @@ beforeEach(async () => {
   failBackupUnlink.enabled = false;
   failBackupUnlink.count = 0;
   failBackupUnlink.threshold = 2;
+  failJournalCleanup.enabled = false;
 });
 
 afterEach(async () => {
@@ -723,6 +744,83 @@ describe("FileTransaction — recovery", () => {
     await expect(recoverPendingAdapterTransactions(dir)).rejects.toMatchObject({
       code: "ADAPTER_TRANSACTION_RECOVERY_FAILED",
     });
+  });
+
+  it("recovers a crash before journal — no temp or journal artifacts exist", async () => {
+    const tx = new FileTransaction({ cwd: dir });
+    await tx.stageForTest(join(dir, "a.txt"), "aaa");
+    const { tempPath } = tx.stagedArtifactsForTest()[0]!;
+    await expect(stat(tempPath)).rejects.toMatchObject({ code: "ENOENT" });
+
+    const result = await recoverPendingAdapterTransactions(dir);
+    expect(result.recovered).toHaveLength(0);
+    expect(result.cleaned).toHaveLength(0);
+    await expect(stat(join(dir, "a.txt"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
+  it("recovers a crash after journal but before first temp — journal only, no temps", async () => {
+    const { path: target, target: txTarget } = manifestWriteTarget();
+    await mkdir(dirname(target), { recursive: true });
+    const tx = new FileTransaction({ cwd: dir });
+    await tx.addWrite(txTarget, "NEW");
+    await tx.writePreparedJournalForTest();
+    const { tempPath } = tx.stagedArtifactsForTest()[0]!;
+    await expect(stat(tempPath)).rejects.toMatchObject({ code: "ENOENT" });
+
+    const result = await recoverPendingAdapterTransactions(dir);
+    expect(result.recovered).toHaveLength(1);
+    await expect(stat(target)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(stat(tempPath)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("recovers a crash after first temp — journal and partial temps exist", async () => {
+    const { path: targetA, target: txTargetA } =
+      manifestWriteTarget("claude-code");
+    const { path: targetB, target: txTargetB } = staticInstructionWriteTarget();
+    await mkdir(dirname(targetA), { recursive: true });
+
+    const tx = new FileTransaction({ cwd: dir });
+    await tx.addWrite(txTargetA, "NEW_A");
+    await tx.addWrite(txTargetB, "NEW_B");
+    await tx.writePreparedJournalForTest();
+
+    const artifacts = tx.stagedArtifactsForTest();
+    await mkdir(dirname(artifacts[0]!.tempPath), { recursive: true });
+    await writeFile(artifacts[0]!.tempPath, "NEW_A", "utf8");
+
+    const result = await recoverPendingAdapterTransactions(dir);
+    expect(result.recovered).toHaveLength(1);
+    await expect(stat(targetA)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(stat(targetB)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(stat(artifacts[0]!.tempPath)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    await expect(stat(artifacts[1]!.tempPath)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
+  it("surfaces TRANSACTION_CLEANUP_PENDING when journal cleanup fails after successful commit", async () => {
+    const { path: target, target: txTarget } = manifestWriteTarget();
+    await mkdir(dirname(target), { recursive: true });
+    await writeFile(target, "OLD", "utf8");
+
+    const tx = new FileTransaction({ cwd: dir });
+    await tx.addWrite(txTarget, "NEW");
+
+    failJournalCleanup.enabled = true;
+
+    await expect(tx.commit()).rejects.toMatchObject({
+      code: "TRANSACTION_CLEANUP_PENDING",
+    });
+
+    expect(await readFile(target, "utf8")).toBe("NEW");
+
+    failJournalCleanup.enabled = false;
+    const result = await recoverPendingAdapterTransactions(dir);
+    expect(result.cleaned).toHaveLength(1);
   });
 
   it("recovers a crash after backup rename by restoring old final content", async () => {
