@@ -229,4 +229,58 @@ describe("runAdapterConformance — forged manifest .env oracle (security)", () 
       }
     });
   }
+
+  it("skips handed-off dynamic skill entries without an unverifiable advisory", async () => {
+    await mkdir(join(dir, ".claude", "skills"), { recursive: true });
+    await mkdir(join(dir, ".code-pact", "adapters"), { recursive: true });
+    await writeFile(join(dir, "CLAUDE.md"), VALID_CONTRACT_BODY, "utf8");
+    await writeFile(
+      join(dir, ".claude", "skills", "code-pact-private.md"),
+      `${SECRET}\n`,
+      "utf8",
+    );
+    const yaml = [
+      `schema_version: 1`,
+      `agent_name: claude-code`,
+      `generator_version: 1.11.0`,
+      `adapter_schema_version: 1`,
+      `generated_at: "2026-05-22T00:00:00+00:00"`,
+      `profile_fingerprint:`,
+      `  instruction_filename: CLAUDE.md`,
+      `  context_dir: .context/claude-code`,
+      `files:`,
+      `  - path: CLAUDE.md`,
+      `    sha256: ${sha256(VALID_CONTRACT_BODY)}`,
+      `    managed: true`,
+      `    role: instruction`,
+      `  - path: .claude/skills/code-pact-private.md`,
+      `    sha256: "${"0".repeat(64)}"`,
+      `    managed: true`,
+      `    role: skill`,
+      `    ownership: handed_off`,
+      ``,
+    ].join("\n");
+    await writeFile(
+      join(dir, ".code-pact", "adapters", "claude-code.manifest.yaml"),
+      yaml,
+      "utf8",
+    );
+
+    const result = await runAdapterConformance({
+      cwd: dir,
+      agentName: "claude-code",
+    });
+
+    expect(
+      result.checks.some(
+        c =>
+          c.id === "file_checksum_skipped_unverifiable" &&
+          c.file === ".claude/skills/code-pact-private.md",
+      ),
+    ).toBe(false);
+    expect(
+      result.checks.some(c => c.file === ".claude/skills/code-pact-private.md"),
+    ).toBe(false);
+    expect(JSON.stringify(result)).not.toContain("top-secret-marker");
+  });
 });

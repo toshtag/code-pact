@@ -1,19 +1,15 @@
 import { readFile, stat } from "../core/project-fs/index.ts";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
-import { AgentProfile } from "../core/schemas/agent-profile.ts";
+import type { AgentProfile } from "../core/schemas/agent-profile.ts";
 import { ModelProfile } from "../core/schemas/model-profile.ts";
 import { Project } from "../core/schemas/project.ts";
 import { adapterRegistry } from "../core/adapters/index.ts";
 import { classifyManifestFileForRead } from "../core/adapters/manifest-file-ownership.ts";
 import { isSupportedAgent, type SupportedAgent } from "../core/agents.ts";
-import {
-  assertAgentProfileNameMatches,
-  resolveAgentProfilePath,
-} from "../core/agent-profile-path.ts";
+import { loadAdapterProfileForAdapter } from "../core/agent-profile-path.ts";
 import { resolveSymlinkFreeProjectPath } from "../core/path-safety.ts";
 import { resolveProjectConfigPath } from "../core/project-config-path.ts";
-import { validateAgentProfileForAdapter } from "../core/adapters/profile-contract.ts";
 import { loadModelProfilesSafe } from "../core/models/load-model-profiles.ts";
 import {
   computeContentHash,
@@ -92,48 +88,6 @@ async function loadProjectSafe(cwd: string): Promise<Project | null> {
     );
     (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
     throw e;
-  }
-}
-
-async function loadAgentProfileSafe(
-  cwd: string,
-  agentName: string,
-): Promise<
-  | { kind: "ok"; path: string; profile: AgentProfile }
-  | { kind: "missing"; path: string; message: string }
-  | { kind: "invalid"; path: string; message: string }
-> {
-  // Resolve OUTSIDE the try so a CONFIG_ERROR (unparseable project.yaml,
-  // unowned `agents[].profile`, or a symlinked profile path) propagates —
-  // consistent with the other commands rather than masked as "no profile".
-  const path = await resolveAgentProfilePath(cwd, agentName);
-  let raw: string;
-  try {
-    raw = await readFile(path, "utf8");
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-      return {
-        kind: "missing",
-        path,
-        message: `Agent profile for "${agentName}" not found at ${path}.`,
-      };
-    }
-    return {
-      kind: "invalid",
-      path,
-      message: `Agent profile for "${agentName}" at ${path} cannot be read: ${(err as Error).message}`,
-    };
-  }
-  try {
-    const profile = AgentProfile.parse(parseYaml(raw) as unknown);
-    assertAgentProfileNameMatches(profile, agentName, path);
-    return { kind: "ok", path, profile };
-  } catch (err) {
-    return {
-      kind: "invalid",
-      path,
-      message: `Agent profile for "${agentName}" at ${path} is invalid: ${(err as Error).message}`,
-    };
   }
 }
 
@@ -440,7 +394,11 @@ export async function inspectAgent(
     });
   }
 
-  const profileLoad = await loadAgentProfileSafe(cwd, agentName);
+  const profileLoad = await loadAdapterProfileForAdapter(
+    cwd,
+    agentName,
+    descriptor,
+  );
 
   if (profileLoad.kind === "missing") {
     issues.push({
@@ -454,7 +412,10 @@ export async function inspectAgent(
   }
   if (profileLoad.kind === "invalid") {
     issues.push({
-      code: "ADAPTER_PROFILE_INVALID",
+      code:
+        profileLoad.reason === "contract_violation"
+          ? "ADAPTER_PROFILE_CONTRACT_VIOLATION"
+          : "ADAPTER_PROFILE_INVALID",
       severity: "error",
       message: profileLoad.message,
       agent: agentName,
@@ -465,21 +426,6 @@ export async function inspectAgent(
 
   const { profile } = profileLoad;
   {
-    // Profile contract: validate the profile's path fields against the adapter
-    // descriptor's owned paths. A hostile profile (e.g. instruction_filename:
-    // .env) is surfaced as a structured issue, not an uncoded throw.
-    try {
-      validateAgentProfileForAdapter(profile, descriptor);
-    } catch (err) {
-      issues.push({
-        code: "ADAPTER_PROFILE_CONTRACT_VIOLATION",
-        severity: "error",
-        message: (err as Error).message,
-        agent: agentName,
-        path: manifestPath(cwd, agentName),
-      });
-      return issues;
-    }
     const { profiles: modelProfiles, issue: modelProfilesIssue } =
       await loadModelProfilesForDoctor(cwd);
     if (modelProfilesIssue) {
@@ -549,6 +495,9 @@ export async function inspectAgent(
         continue;
       }
       if (ownership.kind === "unverifiable_dynamic") {
+        if (entry.ownership === "handed_off") {
+          continue;
+        }
         issues.push({
           code: "ADAPTER_FILE_UNVERIFIABLE",
           severity: "warning",

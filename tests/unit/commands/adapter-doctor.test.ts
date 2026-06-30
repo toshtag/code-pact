@@ -280,6 +280,29 @@ describe("adapter doctor — forged manifest .env oracle (security)", () => {
     expect(JSON.stringify(result)).not.toContain("doctor-private-marker");
   });
 
+  it("does not warn or read handed-off dynamic manifest entries", async () => {
+    await mkdir(join(dir, ".claude", "skills"), { recursive: true });
+    const dynamicPath = join(dir, ".claude", "skills", "code-pact-private.md");
+    await writeFile(dynamicPath, "API_TOKEN=doctor-handed-off-marker\n", "utf8");
+    const m = await readMutableManifest(dir, "claude-code");
+    m.files.push({
+      path: ".claude/skills/code-pact-private.md",
+      sha256: "0".repeat(64),
+      managed: true,
+      role: "skill",
+      ownership: "handed_off",
+    });
+    await writeManifest(dir, "claude-code", m);
+
+    readFileSpy.mockClear();
+    const result = await runAdapterDoctor({ cwd: dir, locale: "en-US" });
+    expect(result.issues.some(i => i.path === dynamicPath)).toBe(false);
+    expect(
+      readFileSpy.mock.calls.some(([path]) => String(path) === dynamicPath),
+    ).toBe(false);
+    expect(JSON.stringify(result)).not.toContain("doctor-handed-off-marker");
+  });
+
   // A `.claude/skills/code-pact-private.md` forged with role: instruction is
   // now a HARD error (unowned) — the create namespace is role-scoped (skill
   // only), so an instruction role on a skill path is a forged-manifest security

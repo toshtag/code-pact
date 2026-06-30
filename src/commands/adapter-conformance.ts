@@ -509,6 +509,9 @@ export async function runAdapterConformance(
       entry.role,
     );
     if (ownership.kind === "unverifiable_dynamic") {
+      if (entry.ownership === "handed_off") {
+        continue;
+      }
       // A legitimately generated dynamic skill in the shared namespace. Its name
       // is attacker-influenceable, so we cannot prove read-ownership: skip the
       // checksum (never read it) rather than hashing it or flagging it. Advisory
