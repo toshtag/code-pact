@@ -19,6 +19,12 @@
  * Raw fs exports are deliberately explicit. Do not add a wildcard re-export
  * here: every exposed operation should be visible in review and covered by
  * `check:fs-authority`.
+ *
+ * Raw fs primitives are sourced from {@link ./raw-internal.ts} so that the
+ * canonical raw-fs import site is isolated and auditable. This barrel
+ * re-exports them for backward compatibility with existing domain modules;
+ * the `check:fs-authority` AST gate enforces that every call site has
+ * proper authority (symlink-free resolution, allowlist entries, etc.).
  */
 export {
   access,
@@ -35,8 +41,8 @@ export {
   stat,
   unlink,
   writeFile,
-} from "node:fs/promises";
-export type { FileHandle } from "node:fs/promises";
+} from "./raw-internal.ts";
+export type { FileHandle } from "./raw-internal.ts";
 export {
   readFileSync,
   writeFileSync,
@@ -46,8 +52,8 @@ export {
   lstatSync,
   realpathSync,
   constants,
-} from "node:fs";
-export type { Dirent, Stats } from "node:fs";
+} from "./raw-internal.ts";
+export type { Dirent, Stats } from "./raw-internal.ts";
 export type {
   SymlinkFreeContainedPath,
   OwnedReadPath,
@@ -67,7 +73,7 @@ import {
   readdir as readdirRaw,
   rename as renameRaw,
   copyFile as copyFileRaw,
-} from "node:fs/promises";
+} from "./raw-internal.ts";
 
 export async function readOwnedText(path: OwnedReadPath): Promise<string> {
   return readFileRaw(unbrand(path), "utf8");

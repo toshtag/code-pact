@@ -318,6 +318,7 @@ const AUTHORITY_EXPORTS = new Map([
 const TRUSTED_FS_MODULES = new Set([
   // — Core primitives —
   join("src", "core", "project-fs", "index.ts"),
+  join("src", "core", "project-fs", "raw-internal.ts"),
   join("src", "core", "project-fs", "owned-read.ts"),
   join("src", "core", "project-fs", "branded-paths-internal.ts"),
   join("src", "core", "project-fs", "control-plane.ts"),
