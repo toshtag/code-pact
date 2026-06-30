@@ -13,10 +13,27 @@
  * module (its own `node:fs/promises` import is exempt). All other src/
  * files that import from `node:fs/promises` directly are flagged.
  *
- * Re-exports match the `node:fs/promises` surface 1:1 so callers can use
- * the same function names and types.
+ * Raw fs exports are deliberately explicit. Do not add a wildcard re-export
+ * here: every exposed operation should be visible in review and covered by
+ * `check:fs-authority`.
  */
-export * from "node:fs/promises";
+export {
+  access,
+  link,
+  lstat,
+  mkdir,
+  mkdtemp,
+  open,
+  readFile,
+  readdir,
+  realpath,
+  rename,
+  rm,
+  stat,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
+export type { FileHandle } from "node:fs/promises";
 export {
   readFileSync,
   writeFileSync,

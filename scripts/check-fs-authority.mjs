@@ -257,7 +257,7 @@ const AUTHORITY_EXPORTS = new Map([
   [
     join("src", "core", "adapters", "manifest.ts"),
     new Map([
-      ["resolveManifestPath", "owned_read"],
+      ["resolveManifestPath", "owned_write"],
       // readManifest returns manifest object, writeManifest returns void — NOT path authority
     ]),
   ],
@@ -354,6 +354,9 @@ const BRAND_CONSTRUCTORS = new Set([
 const BRAND_CONSTRUCTOR_IMPORT_ALLOWLIST = new Set([
   join("src", "core", "project-fs", "index.ts"),
   join("src", "core", "project-fs", "owned-read.ts"),
+  join("src", "core", "agent-profile-path.ts"),
+  join("src", "core", "adapters", "manifest.ts"),
+  join("src", "core", "adapters", "manifest-file-ownership.ts"),
 ]);
 const OWNED_PATH_CAST_ALLOWLIST = new Set([
   join("src", "core", "project-fs", "branded-paths.ts"),
@@ -727,7 +730,6 @@ function walkTs(dir, files) {
 
 function checkFile(filePath, allowlist, allowlistUsed) {
   const relFile = rel(filePath);
-  if (isAuthorityModule(relFile)) return [];
   const text = readFileSync(filePath, "utf8");
   const sourceFile = ts.createSourceFile(
     filePath,
@@ -737,6 +739,29 @@ function checkFile(filePath, allowlist, allowlistUsed) {
     ts.ScriptKind.TS,
   );
   const findings = [];
+
+  for (const stmt of sourceFile.statements) {
+    if (
+      ts.isExportDeclaration(stmt) &&
+      stmt.exportClause === undefined &&
+      ts.isStringLiteral(stmt.moduleSpecifier) &&
+      (stmt.moduleSpecifier.text === "node:fs" ||
+        stmt.moduleSpecifier.text === "node:fs/promises")
+    ) {
+      const line =
+        sourceFile.getLineAndCharacterOfPosition(stmt.getStart()).line + 1;
+      findings.push({
+        line,
+        fn: "raw fs wildcard re-export",
+        key: `${relFile}#*`,
+        arg: stmt.moduleSpecifier.text,
+        text: sourceFile.text.split("\n")[line - 1]?.trim() ?? "",
+      });
+    }
+  }
+
+  if (isAuthorityModule(relFile)) return findings;
+
   const trustedImports = trustedImportsFor(sourceFile);
 
   for (const stmt of sourceFile.statements) {

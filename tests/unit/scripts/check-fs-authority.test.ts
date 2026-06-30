@@ -33,6 +33,15 @@ async function runFixture(lines: string[]): Promise<{
 }
 
 describe("check-fs-authority", () => {
+  it("rejects raw fs wildcard re-exports", async () => {
+    const result = await runFixture([
+      'export * from "node:fs/promises";',
+      "",
+    ]);
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain("raw fs wildcard re-export");
+  });
+
   it("does not let a later same-name authority variable bless an earlier unsafe sink", async () => {
     const dir = await mkdtemp(join(tmpdir(), "code-pact-fs-authority-"));
     const target = join(dir, "probe.ts");
