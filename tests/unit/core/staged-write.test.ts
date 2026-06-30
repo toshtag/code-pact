@@ -6,6 +6,7 @@ import {
   readFile,
   stat,
   mkdir,
+  chmod,
   symlink,
   realpath,
 } from "node:fs/promises";
@@ -514,9 +515,10 @@ describe("FileTransaction — recovery", () => {
   it("rejects private test-only journals without executing them", async () => {
     await writeFile(join(dir, ".env"), "SECRET", "utf8");
     const projectRoot = await realpath(dir);
-    await writePrivateJournal("evil.json", {
+    const id = "11111111-1111-4111-8111-111111111111";
+    await writePrivateJournal(`${id}.json`, {
       schema_version: 2,
-      id: "evil",
+      id,
       project_root: projectRoot,
       status: "prepared",
       entries: [
@@ -568,6 +570,137 @@ describe("FileTransaction — recovery", () => {
       rejected: ["LEGACY_TRANSACTION_JOURNAL_UNTRUSTED"],
     });
     expect(await readFile(join(dir, ".env"), "utf8")).toBe("SECRET");
+  });
+
+  it("rejects relative CODE_PACT_STATE_HOME", async () => {
+    const stateHome = process.env.CODE_PACT_STATE_HOME;
+    process.env.CODE_PACT_STATE_HOME = ".";
+
+    try {
+      await expect(recoverPendingAdapterTransactions(dir)).rejects.toMatchObject({
+        code: "CONFIG_ERROR",
+      });
+    } finally {
+      process.env.CODE_PACT_STATE_HOME = stateHome;
+    }
+  });
+
+  it("rejects relative XDG_STATE_HOME", async () => {
+    const stateHome = process.env.CODE_PACT_STATE_HOME;
+    delete process.env.CODE_PACT_STATE_HOME;
+    process.env.XDG_STATE_HOME = ".state";
+    try {
+      await expect(recoverPendingAdapterTransactions(dir)).rejects.toMatchObject({
+        code: "CONFIG_ERROR",
+      });
+    } finally {
+      delete process.env.XDG_STATE_HOME;
+      process.env.CODE_PACT_STATE_HOME = stateHome;
+    }
+  });
+
+  it("rejects a symlink private state root", async () => {
+    const stateHome = process.env.CODE_PACT_STATE_HOME;
+    const outside = await mkdtemp(join(tmpdir(), "code-pact-state-outside-"));
+    const link = join(dir, "state-link");
+    await symlink(outside, link);
+    process.env.CODE_PACT_STATE_HOME = link;
+
+    try {
+      await expect(recoverPendingAdapterTransactions(dir)).rejects.toMatchObject({
+        code: "CONFIG_ERROR",
+      });
+    } finally {
+      process.env.CODE_PACT_STATE_HOME = stateHome;
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a group/other writable private state root on POSIX", async () => {
+    if (process.platform === "win32") return;
+    const stateHome = process.env.CODE_PACT_STATE_HOME;
+    const weakState = await mkdtemp(join(tmpdir(), "code-pact-weak-state-"));
+    await chmod(weakState, 0o777);
+    process.env.CODE_PACT_STATE_HOME = weakState;
+
+    try {
+      await expect(recoverPendingAdapterTransactions(dir)).rejects.toMatchObject({
+        code: "CONFIG_ERROR",
+      });
+    } finally {
+      process.env.CODE_PACT_STATE_HOME = stateHome;
+      await chmod(weakState, 0o700).catch(() => {});
+      await rm(weakState, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects journal filename and body ID mismatch before artifact access", async () => {
+    const projectRoot = await realpath(dir);
+    const fileId = "22222222-2222-4222-8222-222222222222";
+    const bodyId = "33333333-3333-4333-8333-333333333333";
+    await writePrivateJournal(`${fileId}.json`, {
+      schema_version: 2,
+      id: bodyId,
+      project_root: projectRoot,
+      agent_name: "claude-code",
+      status: "prepared",
+      entries: [],
+    });
+
+    await expect(recoverPendingAdapterTransactions(dir)).rejects.toMatchObject({
+      code: "ADAPTER_TRANSACTION_RECOVERY_FAILED",
+    });
+  });
+
+  it("rejects invalid journal IDs", async () => {
+    const projectRoot = await realpath(dir);
+    const id = "44444444-4444-4444-8444-444444444444";
+    await writePrivateJournal(`${id}.json`, {
+      schema_version: 2,
+      id: "../evil",
+      project_root: projectRoot,
+      agent_name: "claude-code",
+      status: "prepared",
+      entries: [],
+    });
+
+    await expect(recoverPendingAdapterTransactions(dir)).rejects.toMatchObject({
+      code: "ADAPTER_TRANSACTION_RECOVERY_FAILED",
+    });
+  });
+
+  it("rejects duplicate journal target entries", async () => {
+    const projectRoot = await realpath(dir);
+    const id = "55555555-5555-4555-8555-555555555555";
+    await writePrivateJournal(`${id}.json`, {
+      schema_version: 2,
+      id,
+      project_root: projectRoot,
+      agent_name: "claude-code",
+      status: "prepared",
+      entries: [
+        {
+          operation: "write",
+          target_kind: "adapter_manifest",
+          target_rel_path: ".code-pact/adapters/claude-code.manifest.yaml",
+          pre_state: { kind: "absent" },
+          post_state: { kind: "present", sha256: sha256Text("A") },
+          index: 0,
+        },
+        {
+          operation: "write",
+          target_kind: "adapter_manifest",
+          target_rel_path: ".code-pact/adapters/claude-code.manifest.yaml",
+          pre_state: { kind: "absent" },
+          post_state: { kind: "present", sha256: sha256Text("B") },
+          index: 1,
+        },
+      ],
+    });
+
+    await expect(recoverPendingAdapterTransactions(dir)).rejects.toMatchObject({
+      code: "ADAPTER_TRANSACTION_RECOVERY_FAILED",
+    });
   });
 
   it("recovers a crash after backup rename by restoring old final content", async () => {

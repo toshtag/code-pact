@@ -8,7 +8,7 @@ import {
   unlink as rawUnlink,
   lstat as rawLstat,
 } from "node:fs/promises";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { atomicWriteText } from "../../io/atomic-text.ts";
 import { isSupportedAgent, type SupportedAgent } from "../agents.ts";
 import { adapterRegistry } from "./index.ts";
@@ -21,6 +21,8 @@ import {
 } from "../project-fs/index.ts";
 import {
   unbrand,
+  brandOwnedDelete,
+  type OwnedDeletePath,
   type OwnedWritePath,
 } from "../project-fs/branded-paths.ts";
 import { assertSafeRelativePath, pathTraversesSymlink } from "../path-safety.ts";
@@ -358,12 +360,39 @@ function artifactPathsFor(
   journalId: string,
   entry: Pick<AdapterTransactionEntryV2, "target_rel_path" | "index">,
 ): { finalPath: string; tempPath: string; backupPath: string } {
+  assertUuidV4(journalId, "journal id");
   const finalPath = fromRel(cwd, entry.target_rel_path);
+  const tempPath = `${finalPath}.code-pact-tx-${journalId}-${entry.index}.tmp`;
+  const backupPath = `${finalPath}.bak-${journalId}-${entry.index}`;
+  if (
+    dirname(tempPath) !== dirname(finalPath) ||
+    dirname(backupPath) !== dirname(finalPath)
+  ) {
+    throw new Error("transaction artifact path escapes target directory");
+  }
+  if (
+    tempPath !==
+      join(dirname(finalPath), `${basename(finalPath)}.code-pact-tx-${journalId}-${entry.index}.tmp`) ||
+    backupPath !==
+      join(dirname(finalPath), `${basename(finalPath)}.bak-${journalId}-${entry.index}`)
+  ) {
+    throw new Error("transaction artifact path does not match expected format");
+  }
   return {
     finalPath,
-    tempPath: `${finalPath}.code-pact-tx-${journalId}-${entry.index}.tmp`,
-    backupPath: `${finalPath}.bak-${journalId}-${entry.index}`,
+    tempPath,
+    backupPath,
   };
+}
+
+const UUID_V4_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const SHA256_RE = /^[0-9a-f]{64}$/;
+
+function assertUuidV4(value: string, label: string): void {
+  if (!UUID_V4_RE.test(value)) {
+    throw new Error(`${label} must be a UUIDv4`);
+  }
 }
 
 async function ensureRegularFileIfPresent(path: string): Promise<void> {
@@ -715,7 +744,9 @@ function isFileState(value: unknown): value is FileState {
   const state = value as Partial<FileState>;
   return (
     state.kind === "absent" ||
-    (state.kind === "present" && typeof state.sha256 === "string")
+    (state.kind === "present" &&
+      typeof state.sha256 === "string" &&
+      SHA256_RE.test(state.sha256))
   );
 }
 
@@ -751,6 +782,7 @@ async function loadJournal(
     );
   }
   const journal = parsed as Partial<AdapterTransactionJournalV2>;
+  const journalFileMatch = basename(journalPath).match(/^(.+)\.json$/);
   if (
     journal.schema_version !== 2 ||
     typeof journal.id !== "string" ||
@@ -768,6 +800,20 @@ async function loadJournal(
       journalPath,
     );
   }
+  try {
+    assertUuidV4(journal.id, "journal id");
+  } catch {
+    throw new TransactionRecoveryError(
+      "adapter transaction journal id is invalid",
+      journalPath,
+    );
+  }
+  if (!journalFileMatch || journalFileMatch[1] !== journal.id) {
+    throw new TransactionRecoveryError(
+      "adapter transaction journal filename does not match journal id",
+      journalPath,
+    );
+  }
   const canonical = await canonicalProjectRoot(cwd);
   if (journal.project_root !== canonical) {
     throw new TransactionRecoveryError(
@@ -776,6 +822,7 @@ async function loadJournal(
     );
   }
   const seen = new Set<number>();
+  const seenTargets = new Set<string>();
   for (const entry of journal.entries) {
     if (!isJournalEntryV2(entry)) {
       throw new TransactionRecoveryError(
@@ -789,10 +836,69 @@ async function loadJournal(
         journalPath,
       );
     }
+    if (entry.index >= journal.entries.length) {
+      throw new TransactionRecoveryError(
+        "adapter transaction journal has non-contiguous entry indexes",
+        journalPath,
+      );
+    }
     seen.add(entry.index);
+    if (seenTargets.has(entry.target_rel_path)) {
+      throw new TransactionRecoveryError(
+        "adapter transaction journal has duplicate target paths",
+        journalPath,
+      );
+    }
+    seenTargets.add(entry.target_rel_path);
+    if (
+      (entry.target_kind === "agent_profile" ||
+        entry.target_kind === "adapter_manifest" ||
+        entry.target_kind === "adapter_static_file" ||
+        entry.target_kind === "adapter_dynamic_create") &&
+      !journal.agent_name
+    ) {
+      throw new TransactionRecoveryError(
+        "adapter transaction journal is missing agent_name",
+        journalPath,
+      );
+    }
+    if (
+      entry.operation === "delete" &&
+      entry.target_kind !== "adapter_static_file"
+    ) {
+      throw new TransactionRecoveryError(
+        "adapter transaction journal has invalid delete target",
+        journalPath,
+      );
+    }
+    if (
+      entry.target_kind === "adapter_dynamic_create" &&
+      (entry.operation !== "write" || entry.pre_state.kind !== "absent")
+    ) {
+      throw new TransactionRecoveryError(
+        "adapter transaction journal has invalid dynamic create state",
+        journalPath,
+      );
+    }
+    if (
+      (entry.operation === "delete" && entry.post_state.kind !== "absent") ||
+      (entry.operation === "write" && entry.post_state.kind !== "present")
+    ) {
+      throw new TransactionRecoveryError(
+        "adapter transaction journal operation and post-state disagree",
+        journalPath,
+      );
+    }
     try {
       assertSafeRelativePath(entry.target_rel_path);
-      fromRel(cwd, entry.target_rel_path);
+      const paths = artifactPathsFor(cwd, journal.id, entry);
+      if (
+        relative(cwd, paths.finalPath).startsWith("..") ||
+        relative(cwd, paths.tempPath).startsWith("..") ||
+        relative(cwd, paths.backupPath).startsWith("..")
+      ) {
+        throw new Error("transaction artifact path escapes project root");
+      }
     } catch (err) {
       throw new TransactionRecoveryError(
         `adapter transaction journal contains an unsafe path: ${(err as Error).message}`,
@@ -1024,7 +1130,7 @@ export async function recoverPendingAdapterTransactions(
 
   const recovered: string[] = [];
   const cleaned: string[] = [];
-  for (const name of names.filter(n => n.endsWith(".json"))) {
+  for (const name of names.filter(n => UUID_V4_RE.test(n.replace(/\.json$/, "")) && n.endsWith(".json"))) {
     const journalPath = join(stateDir, name);
     const journal = await loadJournal(resolve(cwd), journalPath);
     try {
