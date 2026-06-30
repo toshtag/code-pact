@@ -22,7 +22,7 @@ import type { DecisionStateRecord } from "../schemas/decision-state-record.ts";
 //     fails closed. "missing" must mean absent, never unreadable.
 //   - Identity re-checked (writer NOT trusted): canonical_ref === ref AND
 //     original_path === ref AND path_sha256 === sha256(ref). A ref that does not
-//     `normalizeDecisionRef` (nested/`docs/`/traversal/README/PRUNED) is never
+//     `normalizeDecisionRef` (`docs/`/traversal/README/PRUNED) is never
 //     record-backed.
 //   - TWO predicates, DIFFERENT eligibility:
 //       Gate-RELEASE needs `may_satisfy_active_gate` (== accepted) — this is A3.

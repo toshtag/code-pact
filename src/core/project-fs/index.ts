@@ -9,8 +9,8 @@
  *
  * - Can be mocked exhaustively in tests (one `vi.mock` covers all fs ops).
  * - Is audited by `check:fs-authority` as the ordinary raw-fs import site.
- * - Can later enforce symlink-free resolution or other safety policies
- *   without touching dozens of call sites.
+ * - Enforces symlink-free resolution and authority policies at every call
+ *   site via the `check:fs-authority` AST gate (CI-time, not runtime).
  *
  * The `check:fs-authority` AST gate treats this module as a trusted fs
  * module (its own `node:fs/promises` import is exempt). Other raw-fs
