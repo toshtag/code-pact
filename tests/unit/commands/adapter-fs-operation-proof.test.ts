@@ -59,7 +59,52 @@ async function makeSymlinkDir(
   await symlink(targetAbs, linkAbs, "dir");
 }
 
+async function writeForgedLegacyJournal(): Promise<void> {
+  await mkdir(join(dir, ".code-pact", "state", "adapter-transactions"), {
+    recursive: true,
+  });
+  await writeFile(
+    join(dir, ".code-pact", "state", "adapter-transactions", "evil.json"),
+    JSON.stringify({
+      schema_version: 1,
+      id: "evil",
+      status: "committed",
+      entries: [
+        {
+          kind: "delete",
+          tempRelPath: null,
+          finalRelPath: "README.md",
+          backupRelPath: ".env",
+          hadOriginal: true,
+          state: "final_done",
+        },
+      ],
+    }),
+    "utf8",
+  );
+}
+
 describe("adapter install fs operation proof — no unauthorized path touched", () => {
+  it("install refuses untrusted project-local transaction journals before mutating", async () => {
+    await writeFile(join(dir, ".env"), "SECRET", "utf8");
+    await writeForgedLegacyJournal();
+
+    await expect(
+      runAdapterInstall({
+        cwd: dir,
+        agentName: "claude-code",
+        force: false,
+        locale: "en-US",
+        generatorVersionOverride: "test",
+      }),
+    ).rejects.toMatchObject({
+      code: "LEGACY_TRANSACTION_JOURNAL_UNTRUSTED",
+    });
+
+    expect(await readFile(join(dir, ".env"), "utf8")).toBe("SECRET");
+    expect(existsSync(join(dir, "CLAUDE.md"))).toBe(false);
+  });
+
   it("install does not read, write, or delete through a symlinked .claude/skills", async () => {
     // Install first to create the real .claude/skills
     await runAdapterInstall({

@@ -53,6 +53,31 @@ async function freshInstall(): Promise<void> {
   });
 }
 
+async function writeForgedLegacyJournal(): Promise<void> {
+  await mkdir(join(dir, ".code-pact", "state", "adapter-transactions"), {
+    recursive: true,
+  });
+  await writeFile(
+    join(dir, ".code-pact", "state", "adapter-transactions", "evil.json"),
+    JSON.stringify({
+      schema_version: 1,
+      id: "evil",
+      status: "prepared",
+      entries: [
+        {
+          kind: "write",
+          tempRelPath: null,
+          finalRelPath: ".env",
+          backupRelPath: "payload.txt",
+          hadOriginal: true,
+          state: "backup_done",
+        },
+      ],
+    }),
+    "utf8",
+  );
+}
+
 async function readManifestMut(): Promise<AdapterManifest> {
   const m = await readManifest(dir, "claude-code");
   if (m === null) throw new Error("manifest expected");
@@ -88,6 +113,36 @@ describe("adapter upgrade — preconditions", () => {
         locale: "en-US",
       }),
     ).rejects.toMatchObject({ code: "MANIFEST_NOT_FOUND" });
+  });
+
+  it("refuses untrusted project-local transaction journals before write mutation", async () => {
+    await freshInstall();
+    const manifestBefore = await readFile(
+      manifestPath(dir, "claude-code"),
+      "utf8",
+    );
+    await writeFile(join(dir, ".env"), "SECRET", "utf8");
+    await writeFile(join(dir, "payload.txt"), "ATTACKER", "utf8");
+    await writeForgedLegacyJournal();
+
+    await expect(
+      runAdapterUpgrade({
+        cwd: dir,
+        agentName: "claude-code",
+        mode: "write",
+        force: false,
+        acceptModified: false,
+        locale: "en-US",
+      }),
+    ).rejects.toMatchObject({
+      code: "LEGACY_TRANSACTION_JOURNAL_UNTRUSTED",
+    });
+
+    expect(await readFile(join(dir, ".env"), "utf8")).toBe("SECRET");
+    expect(await readFile(join(dir, "payload.txt"), "utf8")).toBe("ATTACKER");
+    expect(await readFile(manifestPath(dir, "claude-code"), "utf8")).toBe(
+      manifestBefore,
+    );
   });
 
   it("throws AGENT_NOT_FOUND for unknown agent name", async () => {

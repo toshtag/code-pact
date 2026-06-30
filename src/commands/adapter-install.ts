@@ -36,6 +36,7 @@ import type {
 } from "../core/schemas/adapter-manifest.ts";
 import {
   FileTransaction,
+  assertNoUntrustedAdapterTransactionJournals,
   recoverPendingAdapterTransactions,
 } from "../core/adapters/staged-write.ts";
 import { resolveSymlinkFreeProjectPath } from "../core/path-safety.ts";
@@ -490,7 +491,9 @@ export async function runAdapterInstall(
   };
   const manifestWrite = await planManifestWrite(cwd, agentName, manifest);
 
-  await recoverPendingAdapterTransactions(cwd);
+  assertNoUntrustedAdapterTransactionJournals(
+    await recoverPendingAdapterTransactions(cwd),
+  );
   const tx = new FileTransaction({ cwd });
   try {
     if (pinPlan.write !== null) {
@@ -528,11 +531,11 @@ export async function runAdapterInstall(
       }
     }
     await tx.stage(manifestWrite.path, manifestWrite.content);
-    await tx.commit();
   } catch (err) {
     await tx.rollback();
     throw err;
   }
+  await tx.commit();
 
   return {
     agentName,
