@@ -7,9 +7,12 @@ import {
   stat,
   mkdir,
   symlink,
+  realpath,
 } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
+import type { SupportedAgent } from "../../../src/core/agents.ts";
 
 // Mock project-fs to inject failures into rename
 const failAfterFirstRename = vi.hoisted(() => ({
@@ -66,11 +69,16 @@ const {
   PartialMutationError,
   TransactionCleanupPendingError,
   adapterDynamicCreateTarget,
+  adapterManifestWriteTarget,
+  adapterStaticWriteTarget,
   recoverPendingAdapterTransactions,
 } =
   await import("../../../src/core/adapters/staged-write.ts");
 const { brandOwnedWrite } = await import(
   "../../../src/core/project-fs/branded-paths.ts"
+);
+const { adapterTransactionProjectDir } = await import(
+  "../../../src/core/adapters/transaction-state-root.ts"
 );
 
 let dir: string;
@@ -98,6 +106,36 @@ afterEach(async () => {
   if (previousStateHome === undefined) delete process.env.CODE_PACT_STATE_HOME;
   else process.env.CODE_PACT_STATE_HOME = previousStateHome;
 });
+
+function sha256Text(value: string): string {
+  return createHash("sha256").update(Buffer.from(value)).digest("hex");
+}
+
+function manifestWriteTarget(agentName: SupportedAgent = "claude-code") {
+  const path = join(dir, ".code-pact", "adapters", `${agentName}.manifest.yaml`);
+  return {
+    path,
+    target: adapterManifestWriteTarget(agentName, brandOwnedWrite(path)),
+  };
+}
+
+function staticInstructionWriteTarget() {
+  const path = join(dir, "CLAUDE.md");
+  return {
+    path,
+    target: adapterStaticWriteTarget(
+      "claude-code",
+      "CLAUDE.md",
+      "instruction",
+      { kind: "owned", absPath: brandOwnedWrite(path) },
+    ),
+  };
+}
+
+async function writePrivateJournal(name: string, journal: unknown): Promise<void> {
+  const journalDir = await adapterTransactionProjectDir(dir);
+  await writeFile(join(journalDir, name), JSON.stringify(journal), "utf8");
+}
 
 describe("FileTransaction — basic stage and commit", () => {
   it("stages and commits a single new file", async () => {
@@ -279,14 +317,15 @@ describe("PartialMutationError", () => {
 
 describe("FileTransaction — cleanup failure does not roll back committed files", () => {
   it("keeps both new files when the second backup cleanup fails", async () => {
-    const targetA = join(dir, "a.txt");
-    const targetB = join(dir, "b.txt");
+    const { path: targetA, target: txTargetA } = manifestWriteTarget("claude-code");
+    const { path: targetB, target: txTargetB } = staticInstructionWriteTarget();
+    await mkdir(dirname(targetA), { recursive: true });
     await writeFile(targetA, "OLD_A", "utf8");
     await writeFile(targetB, "OLD_B", "utf8");
 
     const tx = new FileTransaction({ cwd: dir });
-    await tx.stageForTest(targetA, "NEW_A");
-    await tx.stageForTest(targetB, "NEW_B");
+    await tx.addWrite(txTargetA, "NEW_A");
+    await tx.addWrite(txTargetB, "NEW_B");
 
     failBackupUnlink.enabled = true;
     failBackupUnlink.threshold = 2;
@@ -461,11 +500,71 @@ describe("FileTransaction — recovery", () => {
     }
   });
 
+  it("rejects private test-only journals without executing them", async () => {
+    await writeFile(join(dir, ".env"), "SECRET", "utf8");
+    const projectRoot = await realpath(dir);
+    await writePrivateJournal("evil.json", {
+      schema_version: 2,
+      id: "evil",
+      project_root: projectRoot,
+      status: "prepared",
+      entries: [
+        {
+          operation: "write",
+          target_kind: "test_only",
+          target_rel_path: ".env",
+          pre_state: { kind: "absent" },
+          post_state: { kind: "present", sha256: sha256Text("SECRET") },
+          index: 0,
+        },
+      ],
+    });
+
+    await expect(recoverPendingAdapterTransactions(dir)).rejects.toMatchObject({
+      code: "ADAPTER_TRANSACTION_RECOVERY_FAILED",
+    });
+    expect(await readFile(join(dir, ".env"), "utf8")).toBe("SECRET");
+  });
+
+  it("does not recover private journals after detecting legacy project journals", async () => {
+    await writeFile(join(dir, ".env"), "SECRET", "utf8");
+    await mkdir(join(dir, ".code-pact", "state", "adapter-transactions"), {
+      recursive: true,
+    });
+    const projectRoot = await realpath(dir);
+    await writePrivateJournal("evil.json", {
+      schema_version: 2,
+      id: "evil",
+      project_root: projectRoot,
+      status: "prepared",
+      entries: [
+        {
+          operation: "write",
+          target_kind: "test_only",
+          target_rel_path: ".env",
+          pre_state: { kind: "absent" },
+          post_state: { kind: "present", sha256: sha256Text("SECRET") },
+          index: 0,
+        },
+      ],
+    });
+
+    const result = await recoverPendingAdapterTransactions(dir);
+
+    expect(result).toEqual({
+      recovered: [],
+      cleaned: [],
+      rejected: ["LEGACY_TRANSACTION_JOURNAL_UNTRUSTED"],
+    });
+    expect(await readFile(join(dir, ".env"), "utf8")).toBe("SECRET");
+  });
+
   it("recovers a crash after backup rename by restoring old final content", async () => {
-    const target = join(dir, "a.txt");
+    const { path: target, target: txTarget } = manifestWriteTarget();
+    await mkdir(dirname(target), { recursive: true });
     await writeFile(target, "OLD", "utf8");
     const tx = new FileTransaction({ cwd: dir });
-    await tx.stageForTest(target, "NEW");
+    await tx.addWrite(txTarget, "NEW");
     await tx.writePreparedJournalForTest();
 
     const { backupPath, tempPath } = tx.stagedArtifactsForTest()[0]!;
@@ -481,9 +580,9 @@ describe("FileTransaction — recovery", () => {
   });
 
   it("recovers a crash after final rename for a new file by removing the uncommitted final", async () => {
-    const target = join(dir, "new.txt");
+    const { path: target, target: txTarget } = manifestWriteTarget();
     const tx = new FileTransaction({ cwd: dir });
-    await tx.stageForTest(target, "NEW");
+    await tx.addWrite(txTarget, "NEW");
     await tx.writePreparedJournalForTest();
 
     const { tempPath } = tx.stagedArtifactsForTest()[0]!;
@@ -497,14 +596,15 @@ describe("FileTransaction — recovery", () => {
   });
 
   it("recovers cleanup-pending committed journals by preserving final files", async () => {
-    const targetA = join(dir, "a.txt");
-    const targetB = join(dir, "b.txt");
+    const { path: targetA, target: txTargetA } = manifestWriteTarget("claude-code");
+    const { path: targetB, target: txTargetB } = staticInstructionWriteTarget();
+    await mkdir(dirname(targetA), { recursive: true });
     await writeFile(targetA, "OLD_A", "utf8");
     await writeFile(targetB, "OLD_B", "utf8");
 
     const tx = new FileTransaction({ cwd: dir });
-    await tx.stageForTest(targetA, "NEW_A");
-    await tx.stageForTest(targetB, "NEW_B");
+    await tx.addWrite(txTargetA, "NEW_A");
+    await tx.addWrite(txTargetB, "NEW_B");
 
     failBackupUnlink.enabled = true;
     failBackupUnlink.threshold = 2;

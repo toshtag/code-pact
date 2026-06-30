@@ -538,6 +538,7 @@ export class FileTransaction {
       const rollbackFailures = await rollbackJournalToOldState(
         this.resolveCwd(),
         journal,
+        { allowTestOnlyTargets: true },
       );
       if (this.journalPath && rollbackFailures.length === 0) {
         await cleanupJournal(this.journalPath).catch(() => {});
@@ -713,8 +714,7 @@ function isJournalEntryV2(value: unknown): value is AdapterTransactionEntryV2 {
     (entry.target_kind === "agent_profile" ||
       entry.target_kind === "adapter_manifest" ||
       entry.target_kind === "adapter_static_file" ||
-      entry.target_kind === "adapter_dynamic_create" ||
-      entry.target_kind === "test_only") &&
+      entry.target_kind === "adapter_dynamic_create") &&
     typeof entry.target_rel_path === "string" &&
     (entry.role === undefined || typeof entry.role === "string") &&
     isFileState(entry.pre_state) &&
@@ -794,12 +794,19 @@ async function loadJournal(
 async function rollbackJournalToOldState(
   cwd: string,
   journal: AdapterTransactionJournalV2,
+  opts: { allowTestOnlyTargets?: boolean } = {},
 ): Promise<string[]> {
   const failures: string[] = [];
   for (const entry of [...journal.entries].reverse()) {
     const paths = artifactPathsFor(cwd, journal.id, entry);
     try {
-      await reconcileEntryToOldState(cwd, journal, paths, entry);
+      await reconcileEntryToOldState(
+        cwd,
+        journal,
+        paths,
+        entry,
+        opts.allowTestOnlyTargets === true,
+      );
     } catch (err) {
       failures.push(`${entry.target_rel_path}: ${(err as Error).message}`);
     }
@@ -828,8 +835,15 @@ async function reconcileEntryToOldState(
   journal: AdapterTransactionJournalV2,
   paths: { finalPath: string; tempPath: string; backupPath: string },
   entry: AdapterTransactionEntryV2,
+  allowTestOnlyTarget: boolean,
 ): Promise<void> {
-  await assertTransactionTargetStillOwned(cwd, journal, paths.finalPath, entry);
+  await assertTransactionTargetStillOwned(
+    cwd,
+    journal,
+    paths.finalPath,
+    entry,
+    allowTestOnlyTarget,
+  );
   const finalState = await hashFile(paths.finalPath);
   const backupState = await hashFile(paths.backupPath);
   const tempState = await hashFile(paths.tempPath);
@@ -873,7 +887,7 @@ async function reconcileEntryToNewState(
   paths: { finalPath: string; tempPath: string; backupPath: string },
   entry: AdapterTransactionEntryV2,
 ): Promise<void> {
-  await assertTransactionTargetStillOwned(cwd, journal, paths.finalPath, entry);
+  await assertTransactionTargetStillOwned(cwd, journal, paths.finalPath, entry, false);
   const finalState = await hashFile(paths.finalPath);
   const backupState = await hashFile(paths.backupPath);
   const tempState = await hashFile(paths.tempPath);
@@ -902,6 +916,7 @@ async function assertTransactionTargetStillOwned(
   journal: AdapterTransactionJournalV2,
   finalPath: string,
   entry: AdapterTransactionEntryV2,
+  allowTestOnlyTarget: boolean,
 ): Promise<void> {
   if (await pathTraversesSymlink(cwd, entry.target_rel_path)) {
     const err = new Error(
@@ -910,7 +925,10 @@ async function assertTransactionTargetStillOwned(
     (err as NodeJS.ErrnoException).code = "PATH_NOT_OWNED";
     throw err;
   }
-  if (entry.target_kind === "test_only") return;
+  if (entry.target_kind === "test_only") {
+    if (allowTestOnlyTarget) return;
+    throw new Error("test-only transaction targets are not recoverable");
+  }
 
   const agentName = journal.agent_name;
   if (!agentName) {
@@ -978,6 +996,9 @@ export async function recoverPendingAdapterTransactions(
   cwd: string,
 ): Promise<AdapterTransactionRecoveryResult> {
   const rejected = await rejectLegacyProjectJournals(cwd);
+  if (rejected.length > 0) {
+    return { recovered: [], cleaned: [], rejected };
+  }
   const stateDir = await adapterTransactionProjectDir(cwd);
   let names: string[];
   try {
