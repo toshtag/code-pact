@@ -1,17 +1,20 @@
 /**
  * Central filesystem API seam for code-pact.
  *
- * All src/ modules MUST import fs functions from this module instead of
- * `node:fs/promises` directly. This creates a single import point that:
+ * Most src/ domain modules MUST import fs functions from this module instead
+ * of `node:fs/promises` directly. A small set of primitive modules
+ * (`project-fs`, `atomic-text`, and transaction state/recovery code) may use
+ * raw fs directly where they implement the filesystem boundary itself. This
+ * creates a single common import point that:
  *
  * - Can be mocked exhaustively in tests (one `vi.mock` covers all fs ops).
- * - Is audited by `check:fs-authority` as the sole raw-fs import site.
+ * - Is audited by `check:fs-authority` as the ordinary raw-fs import site.
  * - Can later enforce symlink-free resolution or other safety policies
  *   without touching dozens of call sites.
  *
  * The `check:fs-authority` AST gate treats this module as a trusted fs
- * module (its own `node:fs/promises` import is exempt). All other src/
- * files that import from `node:fs/promises` directly are flagged.
+ * module (its own `node:fs/promises` import is exempt). Other raw-fs
+ * primitive modules must stay narrow and covered by focused tests.
  *
  * Raw fs exports are deliberately explicit. Do not add a wildcard re-export
  * here: every exposed operation should be visible in review and covered by
