@@ -1282,8 +1282,11 @@ function checkFile(filePath, allowlist, allowlistUsed) {
               localWrappers,
             );
             if (!isSinkAuthorizedForCapability(argKind, required.capability)) {
-              // Check allowlist
+              // Check allowlist — call-site granular with optional line field
               const enclosingFn = findEnclosingFunctionName(node);
+              const callLine =
+                sourceFile.getLineAndCharacterOfPosition(node.getStart()).line +
+                1;
               const aKey = allowlistKey(relFile, enclosingFn ?? "*");
               const aEntries = allowlist.get(aKey);
               if (aEntries) {
@@ -1296,7 +1299,8 @@ function checkFile(filePath, allowlist, allowlistUsed) {
                         required.capability,
                       )) &&
                     typeof aEntry.reason === "string" &&
-                    aEntry.reason.length > 0,
+                    aEntry.reason.length > 0 &&
+                    (!aEntry.line || Math.abs(aEntry.line - callLine) <= 2),
                 );
                 if (matched) {
                   allowlistUsed.add(`${aKey}:${fnName}`);

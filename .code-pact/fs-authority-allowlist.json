@@ -2,849 +2,916 @@
   "src/commands/decision-retire.ts#classifyParent": {
     "operation": "lstat",
     "authority": "symlink_free_contained",
-    "reason": "parentAbs is derived from inspectDecisionMd, which resolves the validated decision path symlink-free; lstat only classifies parent presence"
+    "reason": "parentAbs is derived from inspectDecisionMd, which resolves the validated decision path symlink-free; lstat only classifies parent presence",
+    "line": 86
   },
   "src/commands/decision-retire.ts#runDecisionRetire": {
     "operation": "unlink",
     "authority": "symlink_free_contained",
-    "reason": "guard.abs comes from inspectDecisionMd and stale identity checks run before deleting the validated decision file"
+    "reason": "guard.abs comes from inspectDecisionMd and stale identity checks run before deleting the validated decision file",
+    "line": 330
   },
   "src/commands/phase-archive.ts#classifyParent": {
     "operation": "lstat",
     "authority": "symlink_free_contained",
-    "reason": "parentAbs is derived from inspectPhaseYaml, which resolves the roadmap-validated phase path symlink-free; lstat only classifies parent presence"
+    "reason": "parentAbs is derived from inspectPhaseYaml, which resolves the roadmap-validated phase path symlink-free; lstat only classifies parent presence",
+    "line": 88
   },
   "src/commands/phase-archive.ts#runPhaseArchive": {
     "operation": "unlink",
     "authority": "symlink_free_contained",
-    "reason": "guard.abs comes from inspectPhaseYaml and stale identity checks run before deleting the roadmap-validated phase file"
+    "reason": "guard.abs comes from inspectPhaseYaml and stale identity checks run before deleting the roadmap-validated phase file",
+    "line": 322
   },
   "src/commands/init.ts#exists": {
     "operation": "access",
     "authority": "symlink_free_contained",
-    "reason": "p is produced by resolveInitPath from fixed scaffold segments; access only checks whether the scaffold target exists"
+    "reason": "p is produced by resolveInitPath from fixed scaffold segments; access only checks whether the scaffold target exists",
+    "line": 100
   },
   "src/commands/init.ts#writeIfAbsent": {
     "operation": "atomicWriteText",
     "authority": "symlink_free_contained",
-    "reason": "p is produced by resolveInitPath from fixed scaffold segments; writeIfAbsent only creates missing scaffold files"
+    "reason": "p is produced by resolveInitPath from fixed scaffold segments; writeIfAbsent only creates missing scaffold files",
+    "line": 121
   },
   "src/commands/init.ts#mkdirp": {
     "operation": "mkdir",
     "authority": "symlink_free_contained",
-    "reason": "p is produced by resolveInitPath from fixed scaffold segments; mkdirp only creates scaffold directories"
+    "reason": "p is produced by resolveInitPath from fixed scaffold segments; mkdirp only creates scaffold directories",
+    "line": 295
   },
   "src/commands/init.ts#runInitCore": {
     "operation": "readFile",
     "authority": "symlink_free_contained",
-    "reason": "path is produced by resolveInitPath from fixed scaffold segments inside the promise chain before reading existing project files"
+    "reason": "path is produced by resolveInitPath from fixed scaffold segments inside the promise chain before reading existing project files",
+    "line": 432
   },
   "src/commands/phase-import.ts#runPhaseImport": {
     "operation": "readFile",
     "authority": "explicit_user_input",
-    "reason": "inputPath is explicitly selected by the user through the phase import command"
+    "reason": "inputPath is explicitly selected by the user through the phase import command",
+    "line": 238
   },
   "src/commands/tutorial.ts#runTutorial": [
     {
       "operation": "mkdtemp",
       "authority": "explicit_user_input",
-      "reason": "sandbox is a command-created temporary tutorial directory under the user-selected sandbox parent or OS temp directory"
+      "reason": "sandbox is a command-created temporary tutorial directory under the user-selected sandbox parent or OS temp directory",
+      "line": 73
     },
     {
       "operation": "rm",
       "authority": "explicit_user_input",
-      "reason": "sandbox is a command-created temporary tutorial directory outside the project authority model"
+      "reason": "sandbox is a command-created temporary tutorial directory outside the project authority model",
+      "line": 154
     }
   ],
   "src/commands/adapter-doctor.ts#readProjectFileForDoctor": [
     {
       "operation": "stat",
       "authority": "symlink_free_contained",
-      "reason": "adapter doctor reads fixed project files after caller-side schema/contract selection; stat only verifies regular-file shape before read"
+      "reason": "adapter doctor reads fixed project files after caller-side schema/contract selection; stat only verifies regular-file shape before read",
+      "line": 148
     },
     {
       "operation": "readFile",
       "authority": "symlink_free_contained",
-      "reason": "adapter doctor reads fixed project files after caller-side schema/contract selection; path is symlink-free and not taken from manifest-controlled arbitrary paths"
+      "reason": "adapter doctor reads fixed project files after caller-side schema/contract selection; path is symlink-free and not taken from manifest-controlled arbitrary paths",
+      "line": 153
     }
   ],
   "src/commands/adapter-install.ts#runAdapterInstall": {
     "operation": "stat",
     "authority": "symlink_free_contained",
-    "reason": "context_dir is schema- and adapter-contract constrained, then resolved symlink-free; stat only type-checks an existing directory before any mutation"
+    "reason": "context_dir is schema- and adapter-contract constrained, then resolved symlink-free; stat only type-checks an existing directory before any mutation",
+    "line": 285
   },
   "src/commands/adapter-upgrade.ts#runAdapterUpgrade": {
     "operation": "stat",
     "authority": "symlink_free_contained",
-    "reason": "context_dir is schema- and adapter-contract constrained, then resolved symlink-free; stat only type-checks an existing directory before any mutation"
+    "reason": "context_dir is schema- and adapter-contract constrained, then resolved symlink-free; stat only type-checks an existing directory before any mutation",
+    "line": 278
   },
   "src/commands/decision-retire.ts#decisionMdPresence": {
     "operation": "lstat",
     "authority": "symlink_free_contained",
-    "reason": "decision path is a validated decision-ref target resolved symlink-free; lstat classifies final-entry presence without following a final symlink"
+    "reason": "decision path is a validated decision-ref target resolved symlink-free; lstat classifies final-entry presence without following a final symlink",
+    "line": 115
   },
   "src/commands/decision-retire.ts#inspectDecisionMd": [
     {
       "operation": "lstat",
       "authority": "symlink_free_contained",
-      "reason": "decision path is a validated decision-ref target resolved symlink-free; lstat rejects final symlink aliases before content inspection"
+      "reason": "decision path is a validated decision-ref target resolved symlink-free; lstat rejects final symlink aliases before content inspection",
+      "line": 148
     },
     {
       "operation": "readFile",
       "authority": "symlink_free_contained",
-      "reason": "decision path is a validated decision-ref target resolved symlink-free before reading for retirement guards"
+      "reason": "decision path is a validated decision-ref target resolved symlink-free before reading for retirement guards",
+      "line": 156
     },
     {
       "operation": "stat",
       "authority": "symlink_free_contained",
-      "reason": "parent path is derived from the validated decision-ref target and used only for parent directory classification"
+      "reason": "parent path is derived from the validated decision-ref target and used only for parent directory classification",
+      "line": 163
     }
   ],
-  "src/commands/doctor.ts#checkPhases": [
-    {
-      "operation": "readdir",
-      "authority": "symlink_free_contained",
-      "reason": "phase directory is the fixed design/phases namespace resolved symlink-free before orphan detection"
-    },
-    {
-      "operation": "access",
-      "authority": "symlink_free_contained",
-      "reason": "phase refs are roadmap/schema-selected project paths resolved symlink-free before existence checking"
-    }
-  ],
-  "src/commands/doctor.ts#checkProgressLog": {
-    "operation": "readFile",
-    "authority": "symlink_free_contained",
-    "reason": "progress log path is a fixed .code-pact/state path resolved symlink-free before parsing"
-  },
-  "src/commands/doctor.ts#checkModelProfiles": {
-    "operation": "readdir",
-    "authority": "symlink_free_contained",
-    "reason": "model profile directory is a fixed .code-pact/model-profiles namespace resolved symlink-free before listing"
-  },
-  "src/commands/doctor.ts#checkBakFiles": {
-    "operation": "readdir",
-    "authority": "symlink_free_contained",
-    "reason": "backup-file scan lists fixed project namespaces resolved symlink-free before inspection"
-  },
-  "src/commands/doctor.ts#checkLocalGitignored": {
-    "operation": "readFile",
-    "authority": "symlink_free_contained",
-    "reason": ".gitignore is a fixed project file resolved symlink-free before reading"
-  },
-  "src/commands/doctor.ts#checkConstitutionPlaceholder": {
-    "operation": "readFile",
-    "authority": "symlink_free_contained",
-    "reason": "constitution path is a fixed design/constitution.md file resolved symlink-free before placeholder detection"
-  },
-  "src/commands/doctor.ts#checkStaleContext": {
-    "operation": "readdir",
-    "authority": "symlink_free_contained",
-    "reason": "context directory is profile-constrained and resolved symlink-free before stale file detection"
-  },
   "src/commands/init.ts#assertInitEntryType": {
     "operation": "lstat",
     "authority": "symlink_free_contained",
-    "reason": "init checks fixed scaffold paths resolved by its local resolveInitPath wrapper before creating project structure"
+    "reason": "init checks fixed scaffold paths resolved by its local resolveInitPath wrapper before creating project structure",
+    "line": 152
   },
   "src/commands/init.ts#ensureGitignoreEntries": [
     {
       "operation": "readFile",
       "authority": "symlink_free_contained",
-      "reason": ".gitignore path is a fixed scaffold path resolved by resolveInitPath; read preserves existing user entries"
+      "reason": ".gitignore path is a fixed scaffold path resolved by resolveInitPath; read preserves existing user entries",
+      "line": 266
     },
     {
       "operation": "atomicWriteText",
       "authority": "symlink_free_contained",
-      "reason": ".gitignore path is a fixed scaffold path resolved by resolveInitPath; write only merges required ignore entries"
+      "reason": ".gitignore path is a fixed scaffold path resolved by resolveInitPath; write only merges required ignore entries",
+      "line": 290
     }
   ],
   "src/commands/phase-archive.ts#phaseYamlPresence": {
     "operation": "lstat",
     "authority": "symlink_free_contained",
-    "reason": "phase path is a roadmap-validated phase target resolved symlink-free; lstat classifies final-entry presence without following a final symlink"
+    "reason": "phase path is a roadmap-validated phase target resolved symlink-free; lstat classifies final-entry presence without following a final symlink",
+    "line": 122
   },
   "src/commands/phase-archive.ts#inspectPhaseYaml": [
     {
       "operation": "lstat",
       "authority": "symlink_free_contained",
-      "reason": "phase path is a roadmap-validated phase target resolved symlink-free; lstat rejects final symlink aliases before content inspection"
+      "reason": "phase path is a roadmap-validated phase target resolved symlink-free; lstat rejects final symlink aliases before content inspection",
+      "line": 175
     },
     {
       "operation": "readFile",
       "authority": "symlink_free_contained",
-      "reason": "phase path is a roadmap-validated phase target resolved symlink-free before archive inspection"
+      "reason": "phase path is a roadmap-validated phase target resolved symlink-free before archive inspection",
+      "line": 191
     },
     {
       "operation": "stat",
       "authority": "symlink_free_contained",
-      "reason": "parent path is derived from the roadmap-validated phase target and used only for parent directory classification"
+      "reason": "parent path is derived from the roadmap-validated phase target and used only for parent directory classification",
+      "line": 204
     }
   ],
   "src/commands/plan-brief.ts#runPlanBrief": [
     {
       "operation": "readFile",
       "authority": "symlink_free_contained",
-      "reason": "brief path is resolved through the plan-brief output policy before reading existing content for idempotence"
+      "reason": "brief path is resolved through the plan-brief output policy before reading existing content for idempotence",
+      "line": 325
     },
     {
       "operation": "atomicWriteText",
       "authority": "symlink_free_contained",
-      "reason": "brief path is resolved through the plan-brief output policy before writing the generated brief"
+      "reason": "brief path is resolved through the plan-brief output policy before writing the generated brief",
+      "line": 349
     }
   ],
   "src/commands/plan-brief.ts#loadBriefFromFile": {
     "operation": "readFile",
     "authority": "explicit_user_input",
-    "reason": "brief source file is explicitly supplied by the user through the command input option"
+    "reason": "brief source file is explicitly supplied by the user through the command input option",
+    "line": 125
   },
   "src/commands/plan-constitution.ts#runPlanConstitution": [
     {
       "operation": "readFile",
       "authority": "symlink_free_contained",
-      "reason": "constitution path is the fixed design/constitution.md target resolved symlink-free before merge/update"
+      "reason": "constitution path is the fixed design/constitution.md target resolved symlink-free before merge/update",
+      "line": 344
     },
     {
       "operation": "atomicWriteText",
       "authority": "symlink_free_contained",
-      "reason": "constitution path is the fixed design/constitution.md target resolved symlink-free before writing"
+      "reason": "constitution path is the fixed design/constitution.md target resolved symlink-free before writing",
+      "line": 374
     }
   ],
   "src/commands/plan-adopt.ts#runPlanAdopt": {
     "operation": "readFile",
     "authority": "explicit_user_input",
-    "reason": "--from is explicitly supplied by the user and resolved with containment before reading"
+    "reason": "--from is explicitly supplied by the user and resolved with containment before reading",
+    "line": 399
   },
   "src/commands/plan-constitution.ts#loadConstitutionFromFile": {
     "operation": "readFile",
     "authority": "explicit_user_input",
-    "reason": "constitution source file is explicitly supplied by the user through the command input option"
+    "reason": "constitution source file is explicitly supplied by the user through the command input option",
+    "line": 144
   },
   "src/commands/progress.ts#loadBaseline": {
     "operation": "readFile",
     "authority": "symlink_free_contained",
-    "reason": "baseline path is a fixed .code-pact/state path resolved symlink-free for optional progress baseline loading"
+    "reason": "baseline path is a fixed .code-pact/state path resolved symlink-free for optional progress baseline loading",
+    "line": 59
   },
   "src/commands/spec-import.ts#runSpecImport": [
     {
       "operation": "readFile",
       "authority": "explicit_user_input",
-      "reason": "spec import input is explicitly selected by the user through the import command"
+      "reason": "spec import input is explicitly selected by the user through the import command",
+      "line": 124
     },
     {
       "operation": "stat",
       "authority": "symlink_free_contained",
-      "reason": "output path is derived from validated imported phase id and resolved symlink-free before collision check"
+      "reason": "output path is derived from validated imported phase id and resolved symlink-free before collision check",
+      "line": 175
     },
     {
       "operation": "atomicWriteText",
       "authority": "symlink_free_contained",
-      "reason": "output path is derived from validated imported phase id and resolved symlink-free before writing phase YAML"
+      "reason": "output path is derived from validated imported phase id and resolved symlink-free before writing phase YAML",
+      "line": 193
     }
   ],
   "src/commands/spec-import.ts#runSpecSuggest": {
     "operation": "readFile",
     "authority": "explicit_user_input",
-    "reason": "spec suggest input is explicitly selected by the user through the suggest command"
+    "reason": "spec suggest input is explicitly selected by the user through the suggest command",
+    "line": 303
   },
   "src/commands/task-add.ts#runTaskAdd": {
     "operation": "atomicWriteText",
     "authority": "symlink_free_contained",
-    "reason": "task-add writes the roadmap-validated phase file resolved symlink-free after schema-level task insertion"
+    "reason": "task-add writes the roadmap-validated phase file resolved symlink-free after schema-level task insertion",
+    "line": 194
   },
   "src/commands/task-prepare.ts#runTaskPrepare": {
     "operation": "readFile",
     "authority": "symlink_free_contained",
-    "reason": "decision refs are schema-validated design/decisions paths and resolved symlink-free before optional context inclusion"
+    "reason": "decision refs are schema-validated design/decisions paths and resolved symlink-free before optional context inclusion",
+    "line": 386
   },
   "src/core/adapters/model-version.ts#resolveAndPinModelVersion": {
     "operation": "atomicWriteText",
     "authority": "owned_write",
-    "reason": "compatibility helper writes only the path returned by resolveOwnedAgentProfilePath through planModelVersionPin"
+    "reason": "compatibility helper writes only the path returned by resolveOwnedAgentProfilePath through planModelVersionPin",
+    "line": 52
   },
   "src/core/context-fit/advisories.ts#detectContextFitAdvisories": {
     "operation": "readFile",
     "authority": "symlink_free_contained",
-    "reason": "context-fit reads schema-derived project refs resolved symlink-free for advisory-only analysis"
+    "reason": "context-fit reads schema-derived project refs resolved symlink-free for advisory-only analysis",
+    "line": 134
   },
   "src/core/decisions/prune.ts#evaluatePrune": {
     "operation": "readFile",
     "authority": "symlink_free_contained",
-    "reason": "decision prune reads validated decision files resolved symlink-free before computing a dry-run/write plan"
-  },
-  "src/core/decisions/pruned-ledger.ts#readPrunedLedger": {
-    "operation": "readFile",
-    "authority": "symlink_free_contained",
-    "reason": "pruned ledger path is a fixed .code-pact/state path resolved symlink-free before reading"
-  },
-  "src/core/decisions/pruned-ledger.ts#buildAppendedLedger": {
-    "operation": "readFile",
-    "authority": "symlink_free_contained",
-    "reason": "pruned ledger path is a fixed .code-pact/state path resolved symlink-free before append planning"
+    "reason": "decision prune reads validated decision files resolved symlink-free before computing a dry-run/write plan",
+    "line": 184
   },
   "src/core/decisions/retire.ts#sharedExternalGates": {
     "operation": "readFile",
     "authority": "symlink_free_contained",
-    "reason": "decision retire reads validated decision files resolved symlink-free before computing shared-reference gates"
+    "reason": "decision retire reads validated decision files resolved symlink-free before computing shared-reference gates",
+    "line": 213
   },
-  "src/core/decisions/scaffold.ts#writeProposedAdrIfAbsent": [
-    {
-      "operation": "access",
-      "authority": "symlink_free_contained",
-      "reason": "ADR scaffold target is derived from a validated decision label and resolved symlink-free before existence check"
-    },
-    {
-      "operation": "atomicWriteText",
-      "authority": "symlink_free_contained",
-      "reason": "ADR scaffold target is derived from a validated decision label and resolved symlink-free before create-only write"
-    }
-  ],
   "src/core/doctor-config.ts#loadDoctorConfig": [
     {
       "operation": "stat",
       "authority": "symlink_free_contained",
-      "reason": "doctor config is a fixed .code-pact/doctor.yaml path resolved symlink-free before size/type check"
+      "reason": "doctor config is a fixed .code-pact/doctor.yaml path resolved symlink-free before size/type check",
+      "line": 37
     },
     {
       "operation": "readFile",
       "authority": "symlink_free_contained",
-      "reason": "doctor config is a fixed .code-pact/doctor.yaml path resolved symlink-free before parsing"
+      "reason": "doctor config is a fixed .code-pact/doctor.yaml path resolved symlink-free before parsing",
+      "line": 40
     }
   ],
   "src/core/models/load-model-profiles.ts#loadModelProfilesStrict": [
     {
       "operation": "readdir",
       "authority": "symlink_free_contained",
-      "reason": "model-profiles directory is the fixed .code-pact/model-profiles namespace resolved symlink-free"
+      "reason": "model-profiles directory is the fixed .code-pact/model-profiles namespace resolved symlink-free",
+      "line": 33
     },
     {
       "operation": "stat",
       "authority": "symlink_free_contained",
-      "reason": "model profile entries are immediate directory children with .yaml suffix, resolved symlink-free before type check"
+      "reason": "model profile entries are immediate directory children with .yaml suffix, resolved symlink-free before type check",
+      "line": 45
     },
     {
       "operation": "readFile",
       "authority": "symlink_free_contained",
-      "reason": "model profile entries are immediate directory children with .yaml suffix, resolved symlink-free before parsing"
+      "reason": "model profile entries are immediate directory children with .yaml suffix, resolved symlink-free before parsing",
+      "line": 51
     }
   ],
   "src/core/models/load-model-profiles.ts#loadModelProfilesSafe": [
     {
       "operation": "readdir",
       "authority": "symlink_free_contained",
-      "reason": "safe model-profile loader uses the same fixed namespace as strict mode but degrades to empty on read failures"
+      "reason": "safe model-profile loader uses the same fixed namespace as strict mode but degrades to empty on read failures",
+      "line": 75
     },
     {
       "operation": "stat",
       "authority": "symlink_free_contained",
-      "reason": "safe model-profile loader type-checks immediate .yaml children only"
+      "reason": "safe model-profile loader type-checks immediate .yaml children only",
+      "line": 85
     },
     {
       "operation": "readFile",
       "authority": "symlink_free_contained",
-      "reason": "safe model-profile loader reads immediate .yaml children only and ignores malformed entries"
+      "reason": "safe model-profile loader reads immediate .yaml children only and ignores malformed entries",
+      "line": 91
     }
   ],
   "src/core/pack/loaders.ts#loadRules": {
     "operation": "readdir",
     "authority": "symlink_free_contained",
-    "reason": "rules directory is a fixed design/rules namespace resolved symlink-free before loading rule files"
+    "reason": "rules directory is a fixed design/rules namespace resolved symlink-free before loading rule files",
+    "line": 88
   },
   "src/core/plan/checks/phase-files.ts#detectOrphanPhaseFiles": {
     "operation": "readdir",
     "authority": "symlink_free_contained",
-    "reason": "phase directory is the fixed design/phases namespace resolved symlink-free before orphan detection"
+    "reason": "phase directory is the fixed design/phases namespace resolved symlink-free before orphan detection",
+    "line": 80
   },
   "src/core/plan/lint.ts#detectAdrCommitmentsEmpty": {
     "operation": "readFile",
     "authority": "symlink_free_contained",
-    "reason": "ADR paths are collected from validated decision refs and resolved symlink-free before lint-only content checks"
+    "reason": "ADR paths are collected from validated decision refs and resolved symlink-free before lint-only content checks",
+    "line": 563
   },
   "src/core/project-read.ts#readProjectTextOrNull": {
     "operation": "readFile",
     "authority": "symlink_free_contained",
-    "reason": "generic nullable project read is used only by callers that pass fixed or schema-validated refs; it resolves symlink-free and returns null on failure"
+    "reason": "generic nullable project read is used only by callers that pass fixed or schema-validated refs; it resolves symlink-free and returns null on failure",
+    "line": 25
   },
   "src/core/rules/protected-paths.ts#loadProtectedPaths": {
     "operation": "readFile",
     "authority": "symlink_free_contained",
-    "reason": "protected-paths rule file is the fixed design/rules/protected-paths.md path resolved symlink-free before parsing"
+    "reason": "protected-paths rule file is the fixed design/rules/protected-paths.md path resolved symlink-free before parsing",
+    "line": 58
   },
   "src/core/archive/archive-bundle-cleanup.ts#deleteLooseCoveredByBundle": {
     "operation": "unlink",
     "authority": "symlink_free_contained",
-    "reason": "loose archive files are resolved through resolveArchiveOwnedPath before deletion"
+    "reason": "loose archive files are resolved through resolveArchiveOwnedPath before deletion",
+    "line": 205
   },
   "src/core/archive/archive-bundle-cleanup.ts#retireSupersededBundles": {
     "operation": "unlink",
     "authority": "symlink_free_contained",
-    "reason": "superseded bundle files are resolved through resolveArchiveOwnedPath before retirement"
+    "reason": "superseded bundle files are resolved through resolveArchiveOwnedPath before retirement",
+    "line": 474
   },
   "src/core/archive/archive-bundle-writer.ts#persistArchiveBundle": [
     {
       "operation": "atomicWriteText",
       "authority": "symlink_free_contained",
-      "reason": "bundle path is resolved through resolveArchiveOwnedPath before durable write"
+      "reason": "bundle path is resolved through resolveArchiveOwnedPath before durable write",
+      "line": 293
     },
     {
       "operation": "atomicReplaceExistingText",
       "authority": "symlink_free_contained",
-      "reason": "bundle path is resolved through resolveArchiveOwnedPath before atomic replace"
+      "reason": "bundle path is resolved through resolveArchiveOwnedPath before atomic replace",
+      "line": 270
     }
   ],
   "src/core/archive/archive-bundle-writer.ts#readbackAndVerify": {
     "operation": "readFile",
     "authority": "symlink_free_contained",
-    "reason": "bundle file is read back from the archive-owned namespace for integrity verification"
+    "reason": "bundle file is read back from the archive-owned namespace for integrity verification",
+    "line": 199
   },
   "src/core/archive/archive-maintenance.ts#countJsonFiles": {
     "operation": "readdir",
     "authority": "symlink_free_contained",
-    "reason": "archive directory is resolved through resolveArchiveOwnedPath before listing"
+    "reason": "archive directory is resolved through resolveArchiveOwnedPath before listing",
+    "line": 76
   },
   "src/core/archive/archive-retention.ts#buildLiveGraph": {
     "operation": "readFile",
     "authority": "symlink_free_contained",
-    "reason": "archive file paths are resolved through resolveSymlinkFreeProjectPath before reading for live graph construction"
+    "reason": "archive file paths are resolved through resolveSymlinkFreeProjectPath before reading for live graph construction",
+    "line": 203
   },
   "src/core/archive/archive-retention.ts#deleteLooseDropped": {
     "operation": "unlink",
     "authority": "symlink_free_contained",
-    "reason": "dropped archive files are resolved through resolveArchiveOwnedPath before deletion"
+    "reason": "dropped archive files are resolved through resolveArchiveOwnedPath before deletion",
+    "line": 1093
   },
   "src/core/archive/bundle-member-removal.ts#computeRemoval": {
     "operation": "readFileSync",
     "authority": "symlink_free_contained",
-    "reason": "bundle member paths are resolved through resolveArchiveOwnedPath before reading for removal planning"
+    "reason": "bundle member paths are resolved through resolveArchiveOwnedPath before reading for removal planning",
+    "line": 94
   },
   "src/core/archive/bundle-member-removal.ts#durablyWriteBundle": [
     {
       "operation": "open",
       "authority": "symlink_free_contained",
-      "reason": "bundle temp file is created in the archive-owned namespace with exclusive flags"
+      "reason": "bundle temp file is created in the archive-owned namespace with exclusive flags",
+      "line": 326
     },
     {
       "operation": "readFile",
       "authority": "symlink_free_contained",
-      "reason": "bundle file is read from the archive-owned namespace for re-verification"
+      "reason": "bundle file is read from the archive-owned namespace for re-verification (fh.readFile at 307 and readFile at 348)"
     },
     {
       "operation": "rename",
       "authority": "symlink_free_contained",
-      "reason": "bundle temp file is renamed into the archive-owned namespace after durable write"
+      "reason": "bundle temp file is renamed into the archive-owned namespace after durable write",
+      "line": 342
     },
     {
       "operation": "unlink",
       "authority": "symlink_free_contained",
-      "reason": "bundle temp file is cleaned up in the archive-owned namespace on failure"
+      "reason": "bundle temp file is cleaned up in the archive-owned namespace on failure",
+      "line": 332
     },
     {
       "operation": "writeFile",
       "authority": "symlink_free_contained",
-      "reason": "bundle content is written to a temp file in the archive-owned namespace"
+      "reason": "bundle content is written to a temp file in the archive-owned namespace",
+      "line": 328
     }
   ],
   "src/core/archive/bundle-member-removal.ts#pathExists": {
     "operation": "open",
     "authority": "symlink_free_contained",
-    "reason": "path is resolved through resolveArchiveOwnedPath before existence check"
+    "reason": "path is resolved through resolveArchiveOwnedPath before existence check",
+    "line": 363
   },
   "src/core/archive/bundle-member-removal.ts#removeBundleMembers": {
     "operation": "unlink",
     "authority": "symlink_free_contained",
-    "reason": "bundle members are resolved through resolveArchiveOwnedPath before removal"
+    "reason": "bundle members are resolved through resolveArchiveOwnedPath before removal",
+    "line": 250
   },
   "src/core/archive/decision-record.ts#applyDecisionRecordPlan": {
     "operation": "atomicWriteText",
     "authority": "symlink_free_contained",
-    "reason": "decision record plan path is resolved through resolveArchiveOwnedPath before writing"
+    "reason": "decision record plan path is resolved through resolveArchiveOwnedPath before writing",
+    "line": 423
   },
   "src/core/archive/decision-record.ts#planDecisionRecord": {
     "operation": "readFile",
     "authority": "symlink_free_contained",
-    "reason": "decision record path is resolved through resolveArchiveOwnedPath before reading"
+    "reason": "decision record path is resolved through resolveArchiveOwnedPath before reading",
+    "line": 252
   },
   "src/core/archive/delete-intent-journal.ts#clearDeleteIntent": {
     "operation": "unlink",
     "authority": "symlink_free_contained",
-    "reason": "delete-intent journal path is under the fixed .code-pact/state namespace resolved symlink-free"
+    "reason": "delete-intent journal path is under the fixed .code-pact/state namespace resolved symlink-free",
+    "line": 216
   },
   "src/core/archive/delete-intent-journal.ts#completeBundlePairRetires": {
     "operation": "unlink",
     "authority": "symlink_free_contained",
-    "reason": "retired bundle files are resolved through resolveArchiveOwnedPath before deletion"
+    "reason": "retired bundle files are resolved through resolveArchiveOwnedPath before deletion",
+    "line": 487
   },
   "src/core/archive/delete-intent-journal.ts#fsyncDirRequired": {
     "operation": "open",
     "authority": "symlink_free_contained",
-    "reason": "directory is under the fixed .code-pact/state namespace resolved symlink-free before fsync"
+    "reason": "directory is under the fixed .code-pact/state namespace resolved symlink-free before fsync",
+    "line": 97
   },
   "src/core/archive/delete-intent-journal.ts#pathExists": {
     "operation": "open",
     "authority": "symlink_free_contained",
-    "reason": "path is under the fixed .code-pact/state namespace resolved symlink-free before existence check"
+    "reason": "path is under the fixed .code-pact/state namespace resolved symlink-free before existence check",
+    "line": 136
   },
   "src/core/archive/delete-intent-journal.ts#readDeleteIntent": {
     "operation": "readFile",
     "authority": "symlink_free_contained",
-    "reason": "delete-intent journal path is under the fixed .code-pact/state namespace resolved symlink-free"
+    "reason": "delete-intent journal path is under the fixed .code-pact/state namespace resolved symlink-free",
+    "line": 240
   },
   "src/core/archive/delete-intent-journal.ts#unlinkIfPresent": {
     "operation": "unlink",
     "authority": "symlink_free_contained",
-    "reason": "path is resolved through resolveArchiveOwnedPath before conditional deletion"
+    "reason": "path is resolved through resolveArchiveOwnedPath before conditional deletion",
+    "line": 537
   },
   "src/core/archive/delete-intent-journal.ts#writeDeleteIntent": [
     {
       "operation": "mkdir",
       "authority": "symlink_free_contained",
-      "reason": "delete-intent journal directory is under the fixed .code-pact/state namespace resolved symlink-free"
+      "reason": "delete-intent journal directory is under the fixed .code-pact/state namespace resolved symlink-free",
+      "line": 169
     },
     {
       "operation": "open",
       "authority": "symlink_free_contained",
-      "reason": "delete-intent journal temp file is created with exclusive flags in the fixed .code-pact/state namespace"
+      "reason": "delete-intent journal temp file is created with exclusive flags in the fixed .code-pact/state namespace",
+      "line": 179
     },
     {
       "operation": "rename",
       "authority": "symlink_free_contained",
-      "reason": "delete-intent journal temp file is renamed atomically in the fixed .code-pact/state namespace"
+      "reason": "delete-intent journal temp file is renamed atomically in the fixed .code-pact/state namespace",
+      "line": 197
     },
     {
       "operation": "unlink",
       "authority": "symlink_free_contained",
-      "reason": "delete-intent journal temp file is cleaned up in the fixed .code-pact/state namespace on failure"
+      "reason": "delete-intent journal temp file is cleaned up in the fixed .code-pact/state namespace on failure",
+      "line": 185
     },
     {
       "operation": "writeFile",
       "authority": "symlink_free_contained",
-      "reason": "delete-intent journal content is written to a temp file in the fixed .code-pact/state namespace"
+      "reason": "delete-intent journal content is written to a temp file in the fixed .code-pact/state namespace",
+      "line": 181
     }
   ],
   "src/core/archive/event-pack-cleanup-gate.ts#readRegularEventFileNoSymlink": [
     {
       "operation": "lstat",
       "authority": "symlink_free_contained",
-      "reason": "event file path is resolved symlink-free and lstat rejects final symlink aliases before reading"
+      "reason": "event file path is resolved symlink-free and lstat rejects final symlink aliases before reading",
+      "line": 78
     },
     {
       "operation": "open",
       "authority": "symlink_free_contained",
-      "reason": "event file path is resolved symlink-free and opened with O_NOFOLLOW to reject symlink aliases"
+      "reason": "event file path is resolved symlink-free and opened with O_NOFOLLOW to reject symlink aliases",
+      "line": 88
     },
     {
       "operation": "readFile",
       "authority": "symlink_free_contained",
-      "reason": "event file content is read from a symlink-free resolved path after lstat verification"
+      "reason": "event file content is read from a symlink-free resolved path after lstat verification",
+      "line": 105
     }
   ],
   "src/core/archive/event-pack-cleanup-reconcile.ts#readSurvivorContent": [
     {
       "operation": "lstat",
       "authority": "symlink_free_contained",
-      "reason": "survivor file path is resolved symlink-free and lstat rejects final symlink aliases before reading"
+      "reason": "survivor file path is resolved symlink-free and lstat rejects final symlink aliases before reading",
+      "line": 79
     },
     {
       "operation": "readFile",
       "authority": "symlink_free_contained",
-      "reason": "survivor file content is read from a symlink-free resolved path after lstat verification"
+      "reason": "survivor file content is read from a symlink-free resolved path after lstat verification",
+      "line": 87
     }
   ],
   "src/core/archive/event-pack-cleanup-reconcile.ts#reconcileSurvivors": {
     "operation": "readdir",
     "authority": "symlink_free_contained",
-    "reason": "survivor directory is resolved through resolveArchiveOwnedPath before listing"
+    "reason": "survivor directory is resolved through resolveArchiveOwnedPath before listing",
+    "line": 177
   },
   "src/core/archive/event-pack-cleanup-run.ts#unlinkGatedLoose": {
     "operation": "unlink",
     "authority": "symlink_free_contained",
-    "reason": "loose file path comes from gated verdict with resolveArchiveOwnedPath-verified paths"
+    "reason": "loose file path comes from gated verdict with resolveArchiveOwnedPath-verified paths",
+    "line": 133
   },
   "src/core/archive/event-pack.ts#applyEventPackPlan": {
     "operation": "atomicWriteText",
     "authority": "symlink_free_contained",
-    "reason": "event pack path is resolved through resolveArchiveOwnedPath before writing"
+    "reason": "event pack path is resolved through resolveArchiveOwnedPath before writing",
+    "line": 670
   },
   "src/core/archive/event-pack.ts#findLivePhaseYamlsById": [
     {
       "operation": "readFile",
       "authority": "symlink_free_contained",
-      "reason": "phase YAML paths are resolved through resolveSymlinkFreeProjectPath before reading"
+      "reason": "phase YAML paths are resolved through resolveSymlinkFreeProjectPath before reading",
+      "line": 225
     },
     {
       "operation": "readdir",
       "authority": "symlink_free_contained",
-      "reason": "phases directory is the fixed design/phases namespace resolved symlink-free before listing"
+      "reason": "phases directory is the fixed design/phases namespace resolved symlink-free before listing",
+      "line": 200
     }
   ],
   "src/core/archive/event-pack.ts#findLiveTaskOwnersByTaskId": [
     {
       "operation": "readFile",
       "authority": "symlink_free_contained",
-      "reason": "task owner paths are resolved through resolveSymlinkFreeProjectPath before reading"
+      "reason": "task owner paths are resolved through resolveSymlinkFreeProjectPath before reading",
+      "line": 304
     },
     {
       "operation": "readdir",
       "authority": "symlink_free_contained",
-      "reason": "phases directory is the fixed design/phases namespace resolved symlink-free before listing"
+      "reason": "phases directory is the fixed design/phases namespace resolved symlink-free before listing",
+      "line": 279
     }
   ],
   "src/core/archive/event-pack.ts#phaseFileStillPresent": {
     "operation": "lstat",
     "authority": "symlink_free_contained",
-    "reason": "phase file path is resolved through resolveSymlinkFreeProjectPath before presence check"
+    "reason": "phase file path is resolved through resolveSymlinkFreeProjectPath before presence check",
+    "line": 366
   },
   "src/core/archive/phase-snapshot.ts#applyPhaseSnapshotPlan": {
     "operation": "atomicWriteText",
     "authority": "symlink_free_contained",
-    "reason": "snapshot plan path is resolved through resolveSymlinkFreeProjectPath before writing"
+    "reason": "snapshot plan path is resolved through resolveSymlinkFreeProjectPath before writing",
+    "line": 815
   },
   "src/core/archive/phase-snapshot.ts#readRawWithin": {
     "operation": "readFile",
     "authority": "symlink_free_contained",
-    "reason": "snapshot file path is resolved through resolveSymlinkFreeProjectPath before reading"
+    "reason": "snapshot file path is resolved through resolveSymlinkFreeProjectPath before reading",
+    "line": 174
   },
-  "src/core/decisions/adr.ts#diskReader": [
-    {
-      "operation": "stat",
-      "authority": "symlink_free_contained",
-      "reason": "ADR path is resolved through resolveSymlinkFreeProjectPath before regular-file verification"
-    },
-    {
-      "operation": "readFile",
-      "authority": "symlink_free_contained",
-      "reason": "ADR path is resolved through resolveSymlinkFreeProjectPath before reading"
-    }
-  ],
   "src/core/decisions/adr.ts#walk": {
     "operation": "readdir",
     "authority": "symlink_free_contained",
-    "reason": "decisions directory and nested child directories are resolved through resolveSymlinkFreeProjectPath before listing"
+    "reason": "decisions directory and nested child directories are resolved through resolveSymlinkFreeProjectPath before listing",
+    "line": 94
   },
   "src/core/decisions/decision-gate-archive.ts#decisionFilePresence": {
     "operation": "access",
     "authority": "symlink_free_contained",
-    "reason": "decision file path is resolved through resolveSymlinkFreeProjectPath before presence check"
+    "reason": "decision file path is resolved through resolveSymlinkFreeProjectPath before presence check",
+    "line": 82
   },
   "src/core/decisions/link-collector.ts#collectInboundLinks": {
     "operation": "readFile",
     "authority": "symlink_free_contained",
-    "reason": "linked file paths are resolved through resolveSymlinkFreeProjectPath before reading"
+    "reason": "linked file paths are resolved through resolveSymlinkFreeProjectPath before reading",
+    "line": 177
   },
   "src/core/decisions/link-collector.ts#walk": {
     "operation": "readdir",
     "authority": "symlink_free_contained",
-    "reason": "walk directories are resolved through resolveSymlinkFreeProjectPath before listing"
+    "reason": "walk directories are resolved through resolveSymlinkFreeProjectPath before listing",
+    "line": 126
   },
   "src/core/decisions/prune-executor.ts#applyPrune": [
     {
       "operation": "atomicWriteText",
       "authority": "symlink_free_contained",
-      "reason": "prune ledger path is resolved through resolveSymlinkFreeProjectPath before writing"
+      "reason": "prune ledger path is resolved through resolveSymlinkFreeProjectPath before writing",
+      "line": 468
     },
     {
       "operation": "atomicReplaceExistingText",
       "authority": "symlink_free_contained",
-      "reason": "prune target path is resolved through resolveSymlinkFreeProjectPath before atomic replace"
+      "reason": "prune target path is resolved through resolveSymlinkFreeProjectPath before atomic replace",
+      "line": 511
     },
     {
       "operation": "readFile",
       "authority": "symlink_free_contained",
-      "reason": "prune target paths are resolved through resolveSymlinkFreeProjectPath before reading"
+      "reason": "prune target paths are resolved through resolveSymlinkFreeProjectPath before reading",
+      "line": 345
     },
     {
       "operation": "unlink",
       "authority": "symlink_free_contained",
-      "reason": "prune target paths are resolved through resolveSymlinkFreeProjectPath before deletion"
+      "reason": "prune target paths are resolved through resolveSymlinkFreeProjectPath before deletion",
+      "line": 533
     }
   ],
   "src/core/decisions/prune-executor.ts#inspectTarget": [
     {
       "operation": "readFile",
       "authority": "symlink_free_contained",
-      "reason": "prune target path is resolved through resolveSymlinkFreeProjectPath before inspection"
+      "reason": "prune target path is resolved through resolveSymlinkFreeProjectPath before inspection",
+      "line": 241
     },
     {
       "operation": "stat",
       "authority": "symlink_free_contained",
-      "reason": "prune target path is resolved through resolveSymlinkFreeProjectPath before stat check"
+      "reason": "prune target path is resolved through resolveSymlinkFreeProjectPath before stat check",
+      "line": 248
     }
   ],
   "src/core/finalize/safe-write.ts#applyPlannedWrite": [
     {
       "operation": "atomicWriteText",
       "authority": "symlink_free_contained",
-      "reason": "write target path is resolved through resolveSymlinkFreeProjectPath before writing"
+      "reason": "write target path is resolved through resolveSymlinkFreeProjectPath before writing",
+      "line": 261
     },
     {
       "operation": "readFile",
       "authority": "symlink_free_contained",
-      "reason": "write target path is resolved through resolveSymlinkFreeProjectPath before reading existing content"
+      "reason": "write target path is resolved through resolveSymlinkFreeProjectPath before reading existing content",
+      "line": 244
     }
   ],
   "src/core/finalize/safe-write.ts#classifyWriteRequest": {
     "operation": "readFile",
     "authority": "symlink_free_contained",
-    "reason": "write target path is resolved through resolveSymlinkFreeProjectPath before classification"
+    "reason": "write target path is resolved through resolveSymlinkFreeProjectPath before classification",
+    "line": 171
   },
   "src/core/glob.ts#walk": {
     "operation": "readdir",
     "authority": "symlink_free_contained",
-    "reason": "walk directories are resolved through resolveSymlinkFreeProjectPath before listing"
+    "reason": "walk directories are resolved through resolveSymlinkFreeProjectPath before listing",
+    "line": 230
   },
   "src/core/locks/write-lock.ts#acquireWriteLock": [
     {
       "operation": "mkdir",
       "authority": "symlink_free_contained",
-      "reason": "lock directory is under the fixed .code-pact/state namespace resolved symlink-free"
+      "reason": "lock directory is under the fixed .code-pact/state namespace resolved symlink-free",
+      "line": 115
     },
     {
       "operation": "readFile",
       "authority": "symlink_free_contained",
-      "reason": "lock file path is under the fixed .code-pact/state namespace resolved symlink-free"
+      "reason": "lock file path is under the fixed .code-pact/state namespace resolved symlink-free",
+      "line": 133
     },
     {
       "operation": "stat",
       "authority": "symlink_free_contained",
-      "reason": "lock file path is under the fixed .code-pact/state namespace resolved symlink-free"
+      "reason": "lock file path is under the fixed .code-pact/state namespace resolved symlink-free",
+      "line": 160
     },
     {
       "operation": "unlink",
       "authority": "symlink_free_contained",
-      "reason": "lock file path is under the fixed .code-pact/state namespace resolved symlink-free"
+      "reason": "lock file path is under the fixed .code-pact/state namespace resolved symlink-free",
+      "line": 167
     },
     {
       "operation": "writeFile",
       "authority": "symlink_free_contained",
-      "reason": "lock file path is under the fixed .code-pact/state namespace resolved symlink-free"
+      "reason": "lock file path is under the fixed .code-pact/state namespace resolved symlink-free",
+      "line": 125
     }
   ],
   "src/core/pack/index.ts#writeContextPack": {
     "operation": "atomicWriteText",
     "authority": "symlink_free_contained",
-    "reason": "context pack output path is resolved through resolveProfileContextOutputPath before writing"
+    "reason": "context pack output path is resolved through resolveProfileContextOutputPath before writing",
+    "line": 337
   },
   "src/core/plan/checks/fs.ts#fileExists": {
     "operation": "access",
     "authority": "symlink_free_contained",
-    "reason": "path is resolved through resolveSymlinkFreeProjectPath before existence check"
+    "reason": "path is resolved through resolveSymlinkFreeProjectPath before existence check",
+    "line": 17
   },
   "src/core/plan/checks/fs.ts#phaseFilePresence": {
     "operation": "access",
     "authority": "symlink_free_contained",
-    "reason": "phase file path is resolved through resolveSymlinkFreeProjectPath before presence check"
+    "reason": "phase file path is resolved through resolveSymlinkFreeProjectPath before presence check",
+    "line": 36
   },
   "src/core/plan/checks/fs.ts#projectPathPresence": {
     "operation": "access",
     "authority": "symlink_free_contained",
-    "reason": "project path is resolved through resolveSymlinkFreeProjectPath before presence check"
+    "reason": "project path is resolved through resolveSymlinkFreeProjectPath before presence check",
+    "line": 64
   },
   "src/core/plan/checks/fs.ts#projectPathPresenceSync": {
     "operation": "existsSync",
     "authority": "symlink_free_contained",
-    "reason": "project path is resolved through resolveSymlinkFreeProjectPath before sync presence check"
+    "reason": "project path is resolved through resolveSymlinkFreeProjectPath before sync presence check",
+    "line": 83
   },
   "src/core/plan/load-phase.ts#loadPhase": {
     "operation": "readFile",
     "authority": "symlink_free_contained",
-    "reason": "phase path is resolved through resolveSymlinkFreeProjectPath before reading"
+    "reason": "phase path is resolved through resolveSymlinkFreeProjectPath before reading",
+    "line": 54
   },
   "src/core/plan/normalize.ts#pathExists": {
     "operation": "stat",
     "authority": "symlink_free_contained",
-    "reason": "path is resolved through resolveSymlinkFreeProjectPath before existence check"
+    "reason": "path is resolved through resolveSymlinkFreeProjectPath before existence check",
+    "line": 31
   },
   "src/core/plan/normalize.ts#recurse": {
     "operation": "readdir",
     "authority": "symlink_free_contained",
-    "reason": "directory is resolved through resolveSymlinkFreeProjectPath before listing"
+    "reason": "directory is resolved through resolveSymlinkFreeProjectPath before listing",
+    "line": 43
   },
   "src/core/plan/normalize.ts#runNormalize": [
     {
       "operation": "atomicWriteText",
       "authority": "symlink_free_contained",
-      "reason": "normalize output path is resolved through resolveSymlinkFreeProjectPath before writing"
+      "reason": "normalize output path is resolved through resolveSymlinkFreeProjectPath before writing",
+      "line": 170
     },
     {
       "operation": "readFile",
       "authority": "symlink_free_contained",
-      "reason": "normalize input path is resolved through resolveSymlinkFreeProjectPath before reading"
+      "reason": "normalize input path is resolved through resolveSymlinkFreeProjectPath before reading",
+      "line": 157
     }
   ],
   "src/core/plan/roadmap.ts#loadRoadmap": {
     "operation": "readFile",
     "authority": "symlink_free_contained",
-    "reason": "roadmap path is resolved through resolveSymlinkFreeProjectPath before reading"
+    "reason": "roadmap path is resolved through resolveSymlinkFreeProjectPath before reading",
+    "line": 38
   },
   "src/core/plan/state.ts#scanPhasesDirBestEffort": {
     "operation": "readdir",
     "authority": "symlink_free_contained",
-    "reason": "phases directory is the fixed design/phases namespace resolved symlink-free before listing"
+    "reason": "phases directory is the fixed design/phases namespace resolved symlink-free before listing",
+    "line": 575
   },
   "src/core/plan/sync-paths.ts#runSyncPaths": [
     {
       "operation": "atomicWriteText",
       "authority": "symlink_free_contained",
-      "reason": "sync output path is resolved through resolveSymlinkFreeProjectPath before writing"
+      "reason": "sync output path is resolved through resolveSymlinkFreeProjectPath before writing",
+      "line": 183
     },
     {
       "operation": "readFile",
       "authority": "symlink_free_contained",
-      "reason": "sync input path is resolved through resolveSymlinkFreeProjectPath before reading"
+      "reason": "sync input path is resolved through resolveSymlinkFreeProjectPath before reading",
+      "line": 144
     },
     {
       "operation": "readdir",
       "authority": "symlink_free_contained",
-      "reason": "phases directory is the fixed design/phases namespace resolved symlink-free before listing"
+      "reason": "phases directory is the fixed design/phases namespace resolved symlink-free before listing",
+      "line": 122
     }
   ],
   "src/core/progress/events-io.ts#readEventFiles": {
     "operation": "readdir",
     "authority": "symlink_free_contained",
-    "reason": "events directory is under the fixed .code-pact/state namespace resolved symlink-free"
+    "reason": "events directory is under the fixed .code-pact/state namespace resolved symlink-free",
+    "line": 239
   },
   "src/core/progress/events-io.ts#readValidatedEventFile": {
     "operation": "readFile",
     "authority": "symlink_free_contained",
-    "reason": "event file path is resolved symlink-free and validated before reading"
+    "reason": "event file path is resolved symlink-free and validated before reading",
+    "line": 162
   },
   "src/core/progress/events-io.ts#writeEventFile": [
     {
       "operation": "link",
       "authority": "symlink_free_contained",
-      "reason": "event file path is under the fixed .code-pact/state namespace resolved symlink-free before atomic publish"
+      "reason": "event file path is under the fixed .code-pact/state namespace resolved symlink-free before atomic publish",
+      "line": 211
     },
     {
       "operation": "mkdir",
       "authority": "symlink_free_contained",
-      "reason": "events directory is under the fixed .code-pact/state namespace resolved symlink-free"
+      "reason": "events directory is under the fixed .code-pact/state namespace resolved symlink-free",
+      "line": 197
     },
     {
       "operation": "rm",
       "authority": "symlink_free_contained",
-      "reason": "temp file is in the fixed .code-pact/state namespace resolved symlink-free before cleanup"
+      "reason": "temp file is in the fixed .code-pact/state namespace resolved symlink-free before cleanup",
+      "line": 222
     },
     {
       "operation": "writeFile",
       "authority": "symlink_free_contained",
-      "reason": "temp file is in the fixed .code-pact/state namespace resolved symlink-free before atomic publish"
+      "reason": "temp file is in the fixed .code-pact/state namespace resolved symlink-free before atomic publish",
+      "line": 209
     }
   ],
   "src/core/services/createPhase.ts#createPhase": [
     {
       "operation": "atomicWriteText",
       "authority": "symlink_free_contained",
-      "reason": "phase file path is resolved through resolveSymlinkFreeProjectPath before writing"
+      "reason": "phase file path is resolved through resolveSymlinkFreeProjectPath before writing",
+      "line": 159
     },
     {
       "operation": "mkdir",
       "authority": "symlink_free_contained",
-      "reason": "phases directory is the fixed design/phases namespace resolved symlink-free before creation"
+      "reason": "phases directory is the fixed design/phases namespace resolved symlink-free before creation",
+      "line": 158
     }
   ],
   "src/core/services/createPhase.ts#saveRoadmap": {
     "operation": "atomicWriteText",
     "authority": "symlink_free_contained",
-    "reason": "roadmap path is resolved through resolveSymlinkFreeProjectPath before writing"
+    "reason": "roadmap path is resolved through resolveSymlinkFreeProjectPath before writing",
+    "line": 62
   }
 }
