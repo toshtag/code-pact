@@ -5,6 +5,10 @@ import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { atomicWriteText } from "../../io/atomic-text.ts";
 import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
 import {
+  brandOwnedWrite,
+  type OwnedWritePath,
+} from "../project-fs/branded-paths.ts";
+import {
   AdapterManifest,
   AdapterManifestLenient,
 } from "../schemas/adapter-manifest.ts";
@@ -42,12 +46,14 @@ export function manifestRelPath(agentName: string): string {
  * symlink, or `agentName` is structurally unsafe — callers must NOT treat that
  * throw as "manifest missing".
  */
-async function resolveManifestPath(
+export async function resolveManifestPath(
   cwd: string,
   agentName: string,
-): Promise<string> {
+): Promise<OwnedWritePath> {
   try {
-    return await resolveSymlinkFreeProjectPath(cwd, manifestRelPath(agentName));
+    return brandOwnedWrite(
+      await resolveSymlinkFreeProjectPath(cwd, manifestRelPath(agentName)),
+    );
   } catch (err) {
     // A path-containment refusal (a `.code-pact/adapters` symlink that escapes
     // the project) is an ADVERSARIAL but EXPECTED input — surface it as a clean
@@ -164,7 +170,7 @@ export async function planManifestWrite(
   cwd: string,
   agentName: string,
   manifest: AdapterManifest,
-): Promise<{ path: string; content: string }> {
+): Promise<{ path: OwnedWritePath; content: string }> {
   // Fail closed before writing a byte if `.code-pact/adapters` resolves outside
   // the project (symlink escape) — never write a manifest outside cwd.
   // Always re-resolve: a preflight check earlier in the call sequence does NOT

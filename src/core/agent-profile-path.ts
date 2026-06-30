@@ -3,6 +3,10 @@ import { parse as parseYaml } from "yaml";
 import { AgentProfileRefPath } from "./schemas/agent-profile-ref-path.ts";
 import { assertSafePlanId } from "./schemas/plan-id.ts";
 import { resolveSymlinkFreeProjectPath } from "./path-safety.ts";
+import {
+  brandOwnedWrite,
+  type OwnedWritePath,
+} from "./project-fs/branded-paths.ts";
 import { resolveProjectConfigPath } from "./project-config-path.ts";
 import {
   AgentProfile,
@@ -284,7 +288,7 @@ export function assertAgentProfileNameMatches(
 export async function resolveOwnedAgentProfilePath(
   cwd: string,
   agentName: string,
-): Promise<string> {
+): Promise<OwnedWritePath> {
   const rel = await resolveAgentProfileRel(cwd, agentName);
   assertWritableProfileRel(agentName, rel);
   await assertProfileRelNotShared(cwd, agentName, rel);
@@ -294,7 +298,7 @@ export async function resolveOwnedAgentProfilePath(
       [".code-pact", rel].join("/"),
     );
     await assertProfileNameMatches(path, agentName);
-    return path;
+    return brandOwnedWrite(path);
   } catch (err) {
     if (shouldMapPathErrorToConfig(err)) {
       throw profileConfigError(
@@ -320,40 +324,74 @@ export async function resolveOwnedAgentProfilePath(
  * profile read itself — a hostile profile (e.g. `instruction_filename: .env`)
  * is refused at the contract boundary.
  */
-export async function loadValidatedAdapterProfile(
+export type AdapterProfileLoadResult =
+  | { kind: "ok"; path: string; profile: AgentProfileType }
+  | { kind: "missing"; path: string; message: string }
+  | {
+      kind: "invalid";
+      path: string;
+      message: string;
+      reason: "malformed" | "contract_violation";
+    };
+
+export async function loadAdapterProfileForAdapter(
   cwd: string,
   agentName: string,
   descriptor: AdapterDescriptor,
-): Promise<AgentProfileType> {
+): Promise<AdapterProfileLoadResult> {
   const path = await resolveAgentProfilePath(cwd, agentName);
   let raw: string;
   try {
     raw = await readFile(path, "utf8");
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-      const e = new Error(
-        `Agent profile for "${agentName}" not found at ${path}.`,
-      );
-      (e as NodeJS.ErrnoException).code = "AGENT_NOT_FOUND";
-      throw e;
+      return {
+        kind: "missing",
+        path,
+        message: `Agent profile for "${agentName}" not found at ${path}.`,
+      };
     }
-    const e = new Error(
-      `Agent profile for "${agentName}" at ${path} cannot be read: ${(err as Error).message}`,
-    );
-    (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
-    throw e;
+    return {
+      kind: "invalid",
+      path,
+      message: `Agent profile for "${agentName}" at ${path} cannot be read: ${(err as Error).message}`,
+      reason: "malformed",
+    };
   }
   let profile: AgentProfileType;
   try {
     profile = AgentProfile.parse(parseYaml(raw) as unknown);
+    assertAgentProfileNameMatches(profile, agentName, path);
   } catch (err) {
-    const e = new Error(
-      `Agent profile for "${agentName}" at ${path} is malformed (YAML or schema): ${(err as Error).message}`,
-    );
-    (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
-    throw e;
+    return {
+      kind: "invalid",
+      path,
+      message: `Agent profile for "${agentName}" at ${path} is invalid: ${(err as Error).message}`,
+      reason: "malformed",
+    };
   }
-  assertAgentProfileNameMatches(profile, agentName, path);
-  validateAgentProfileForAdapter(profile, descriptor);
-  return profile;
+  try {
+    validateAgentProfileForAdapter(profile, descriptor);
+  } catch (err) {
+    return {
+      kind: "invalid",
+      path,
+      message: (err as Error).message,
+      reason: "contract_violation",
+    };
+  }
+  return { kind: "ok", path, profile };
+}
+
+export async function loadValidatedAdapterProfile(
+  cwd: string,
+  agentName: string,
+  descriptor: AdapterDescriptor,
+): Promise<AgentProfileType> {
+  const result = await loadAdapterProfileForAdapter(cwd, agentName, descriptor);
+  if (result.kind === "ok") return result.profile;
+  const e = new Error(result.message);
+  (e as NodeJS.ErrnoException).code =
+    result.kind === "missing" ? "AGENT_NOT_FOUND" : "CONFIG_ERROR";
+  throw e;
 }

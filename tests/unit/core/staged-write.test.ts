@@ -65,9 +65,13 @@ const {
   FileTransaction,
   PartialMutationError,
   TransactionCleanupPendingError,
+  adapterDynamicCreateTarget,
   recoverPendingAdapterTransactions,
 } =
   await import("../../../src/core/adapters/staged-write.ts");
+const { brandOwnedWrite } = await import(
+  "../../../src/core/project-fs/branded-paths.ts"
+);
 
 let dir: string;
 let previousStateHome: string | undefined;
@@ -99,15 +103,15 @@ describe("FileTransaction — basic stage and commit", () => {
   it("stages and commits a single new file", async () => {
     const tx = new FileTransaction({ cwd: dir });
     const target = join(dir, "a.txt");
-    await tx.stage(target, "hello");
+    await tx.stageForTest(target, "hello");
     await tx.commit();
     expect(await readFile(target, "utf8")).toBe("hello");
   });
 
   it("stages and commits multiple new files", async () => {
     const tx = new FileTransaction({ cwd: dir });
-    await tx.stage(join(dir, "a.txt"), "aaa");
-    await tx.stage(join(dir, "b.txt"), "bbb");
+    await tx.stageForTest(join(dir, "a.txt"), "aaa");
+    await tx.stageForTest(join(dir, "b.txt"), "bbb");
     await tx.commit();
     expect(await readFile(join(dir, "a.txt"), "utf8")).toBe("aaa");
     expect(await readFile(join(dir, "b.txt"), "utf8")).toBe("bbb");
@@ -117,7 +121,7 @@ describe("FileTransaction — basic stage and commit", () => {
     const target = join(dir, "existing.txt");
     await writeFile(target, "OLD", "utf8");
     const tx = new FileTransaction({ cwd: dir });
-    await tx.stage(target, "NEW");
+    await tx.stageForTest(target, "NEW");
     await tx.commit();
     expect(await readFile(target, "utf8")).toBe("NEW");
   });
@@ -125,9 +129,47 @@ describe("FileTransaction — basic stage and commit", () => {
   it("creates parent directories lazily via atomicWriteText", async () => {
     const tx = new FileTransaction({ cwd: dir });
     const target = join(dir, "sub", "deep", "file.txt");
-    await tx.stage(target, "nested");
+    await tx.stageForTest(target, "nested");
     await tx.commit();
     expect(await readFile(target, "utf8")).toBe("nested");
+  });
+});
+
+describe("FileTransaction — authority target guards", () => {
+  it("rejects mismatched transaction target metadata before staging", async () => {
+    const tx = new FileTransaction({ cwd: dir });
+    const target = join(dir, ".claude", "skills", "code-pact-private.md");
+
+    await expect(
+      tx.addWrite(
+        adapterDynamicCreateTarget(
+          "claude-code",
+          ".claude/skills/code-pact-other.md",
+          "skill",
+          { kind: "dynamic_write", absPath: brandOwnedWrite(target) },
+        ),
+        "content",
+      ),
+    ).rejects.toThrow("transaction target metadata does not match authority path");
+  });
+
+  it("rejects dynamic creates when the target already exists", async () => {
+    await mkdir(join(dir, ".claude", "skills"), { recursive: true });
+    const target = join(dir, ".claude", "skills", "code-pact-private.md");
+    await writeFile(target, "existing", "utf8");
+    const tx = new FileTransaction({ cwd: dir });
+
+    await expect(
+      tx.addWrite(
+        adapterDynamicCreateTarget(
+          "claude-code",
+          ".claude/skills/code-pact-private.md",
+          "skill",
+          { kind: "dynamic_write", absPath: brandOwnedWrite(target) },
+        ),
+        "content",
+      ),
+    ).rejects.toThrow("dynamic adapter target already exists");
   });
 });
 
@@ -135,7 +177,7 @@ describe("FileTransaction — rollback", () => {
   it("rollback deletes staged temp files without committing", async () => {
     const tx = new FileTransaction({ cwd: dir });
     const target = join(dir, "a.txt");
-    await tx.stage(target, "hello");
+    await tx.stageForTest(target, "hello");
     await tx.rollback();
     await expect(stat(target)).rejects.toMatchObject({ code: "ENOENT" });
   });
@@ -150,8 +192,8 @@ describe("FileTransaction — failure injection", () => {
     await writeFile(targetB, "OLD_B", "utf8");
 
     const tx = new FileTransaction({ cwd: dir });
-    await tx.stage(targetA, "NEW_A");
-    await tx.stage(targetB, "NEW_B");
+    await tx.stageForTest(targetA, "NEW_A");
+    await tx.stageForTest(targetB, "NEW_B");
 
     failAfterFirstRename.count = 0;
     failAfterFirstRename.enabled = true;
@@ -174,8 +216,8 @@ describe("FileTransaction — failure injection", () => {
     await writeFile(targetB, "KEEP_B", "utf8");
 
     const tx = new FileTransaction({ cwd: dir });
-    tx.stageDelete(targetA);
-    await tx.stage(targetB, "NEW_B");
+    tx.stageDeleteForTest(targetA);
+    await tx.stageForTest(targetB, "NEW_B");
 
     failAfterFirstRename.count = 0;
     failAfterFirstRename.enabled = true;
@@ -202,7 +244,7 @@ describe("FileTransaction — failure injection", () => {
 describe("FileTransaction — journal", () => {
   it("journal is deleted after successful commit", async () => {
     const tx = new FileTransaction({ cwd: dir });
-    await tx.stage(join(dir, "a.txt"), "aaa");
+    await tx.stageForTest(join(dir, "a.txt"), "aaa");
     await tx.commit();
     const result = await recoverPendingAdapterTransactions(dir);
     expect(result.cleaned).toHaveLength(0);
@@ -211,7 +253,7 @@ describe("FileTransaction — journal", () => {
 
   it("journal is deleted after rollback", async () => {
     const tx = new FileTransaction({ cwd: dir });
-    await tx.stage(join(dir, "a.txt"), "aaa");
+    await tx.stageForTest(join(dir, "a.txt"), "aaa");
     await tx.rollback();
     const { readdirSync } = await import("node:fs");
     const files = readdirSync(dir);
@@ -243,8 +285,8 @@ describe("FileTransaction — cleanup failure does not roll back committed files
     await writeFile(targetB, "OLD_B", "utf8");
 
     const tx = new FileTransaction({ cwd: dir });
-    await tx.stage(targetA, "NEW_A");
-    await tx.stage(targetB, "NEW_B");
+    await tx.stageForTest(targetA, "NEW_A");
+    await tx.stageForTest(targetB, "NEW_B");
 
     failBackupUnlink.enabled = true;
     failBackupUnlink.threshold = 2;
@@ -266,8 +308,8 @@ describe("FileTransaction — cleanup failure does not roll back committed files
     await writeFile(writeTarget, "OLD_WRITE", "utf8");
 
     const tx = new FileTransaction({ cwd: dir });
-    tx.stageDelete(deleteTarget);
-    await tx.stage(writeTarget, "NEW_WRITE");
+    tx.stageDeleteForTest(deleteTarget);
+    await tx.stageForTest(writeTarget, "NEW_WRITE");
 
     failBackupUnlink.enabled = true;
     failBackupUnlink.threshold = 2;
@@ -302,9 +344,9 @@ describe("FileTransaction — cleanup failure does not roll back committed files
     await writeFile(manifest, "OLD_MANIFEST", "utf8");
 
     const tx = new FileTransaction({ cwd: dir });
-    await tx.stage(profile, "NEW_PROFILE");
-    await tx.stage(generated, "NEW_GENERATED");
-    await tx.stage(manifest, "NEW_MANIFEST");
+    await tx.stageForTest(profile, "NEW_PROFILE");
+    await tx.stageForTest(generated, "NEW_GENERATED");
+    await tx.stageForTest(manifest, "NEW_MANIFEST");
 
     failBackupUnlink.enabled = true;
     failBackupUnlink.threshold = 2;
@@ -423,7 +465,7 @@ describe("FileTransaction — recovery", () => {
     const target = join(dir, "a.txt");
     await writeFile(target, "OLD", "utf8");
     const tx = new FileTransaction({ cwd: dir });
-    await tx.stage(target, "NEW");
+    await tx.stageForTest(target, "NEW");
     await tx.writePreparedJournalForTest();
 
     const { backupPath, tempPath } = tx.stagedArtifactsForTest()[0]!;
@@ -441,7 +483,7 @@ describe("FileTransaction — recovery", () => {
   it("recovers a crash after final rename for a new file by removing the uncommitted final", async () => {
     const target = join(dir, "new.txt");
     const tx = new FileTransaction({ cwd: dir });
-    await tx.stage(target, "NEW");
+    await tx.stageForTest(target, "NEW");
     await tx.writePreparedJournalForTest();
 
     const { tempPath } = tx.stagedArtifactsForTest()[0]!;
@@ -461,8 +503,8 @@ describe("FileTransaction — recovery", () => {
     await writeFile(targetB, "OLD_B", "utf8");
 
     const tx = new FileTransaction({ cwd: dir });
-    await tx.stage(targetA, "NEW_A");
-    await tx.stage(targetB, "NEW_B");
+    await tx.stageForTest(targetA, "NEW_A");
+    await tx.stageForTest(targetB, "NEW_B");
 
     failBackupUnlink.enabled = true;
     failBackupUnlink.threshold = 2;

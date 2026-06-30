@@ -1,5 +1,9 @@
 import { matchGlob } from "../glob.ts";
 import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
+import {
+  brandOwnedWrite,
+  type OwnedWritePath,
+} from "../project-fs/branded-paths.ts";
 import type { AdapterDescriptor, DesiredAdapterFileRole } from "./types.ts";
 
 /**
@@ -33,8 +37,8 @@ export type ManifestFileOwnership =
   | { kind: "unverifiable_dynamic" };
 
 export type AdapterMutationPathAuthority =
-  | { kind: "owned"; absPath: string }
-  | { kind: "dynamic_write"; absPath: string }
+  | { kind: "owned"; absPath: OwnedWritePath }
+  | { kind: "dynamic_write"; absPath: OwnedWritePath }
   | { kind: "unowned" }
   | { kind: "unsafe" };
 
@@ -69,7 +73,9 @@ export async function authorizeAdapterMutationPath(
     try {
       return {
         kind: "owned",
-        absPath: await resolveSymlinkFreeProjectPath(cwd, relPath),
+        absPath: brandOwnedWrite(
+          await resolveSymlinkFreeProjectPath(cwd, relPath),
+        ),
       };
     } catch {
       return { kind: "unsafe" };
@@ -94,7 +100,9 @@ export async function authorizeAdapterMutationPath(
   try {
     return {
       kind: "dynamic_write",
-      absPath: await resolveSymlinkFreeProjectPath(cwd, relPath),
+      absPath: brandOwnedWrite(
+        await resolveSymlinkFreeProjectPath(cwd, relPath),
+      ),
     };
   } catch {
     return { kind: "unsafe" };

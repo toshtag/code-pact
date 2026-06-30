@@ -41,6 +41,11 @@ import type {
 } from "../core/schemas/adapter-manifest.ts";
 import {
   FileTransaction,
+  adapterDynamicCreateTarget,
+  adapterManifestWriteTarget,
+  adapterProfileWriteTarget,
+  adapterStaticDeleteTarget,
+  adapterStaticWriteTarget,
   assertNoUntrustedAdapterTransactionJournals,
   recoverPendingAdapterTransactions,
 } from "../core/adapters/staged-write.ts";
@@ -624,7 +629,10 @@ export async function runAdapterUpgrade(
   const tx = new FileTransaction({ cwd });
   try {
     if (pinPlan.write !== null) {
-      await tx.stage(pinPlan.write.path, pinPlan.write.content);
+      await tx.addWrite(
+        adapterProfileWriteTarget(agentName, pinPlan.write.path),
+        pinPlan.write.content,
+      );
     }
     for (const item of desiredApply) {
       if (
@@ -651,7 +659,22 @@ export async function runAdapterUpgrade(
           (err as NodeJS.ErrnoException).code = "CONFIG_ERROR";
           throw err;
         }
-        await tx.stage(writeAuthority.absPath, item.desired.content);
+        await tx.addWrite(
+          writeAuthority.kind === "owned"
+            ? adapterStaticWriteTarget(
+                agentName,
+                item.desired.path,
+                item.desired.role,
+                writeAuthority,
+              )
+            : adapterDynamicCreateTarget(
+                agentName,
+                item.desired.path,
+                item.desired.role,
+                writeAuthority,
+              ),
+          item.desired.content,
+        );
       }
     }
     for (const item of orphanApply) {
@@ -673,10 +696,20 @@ export async function runAdapterUpgrade(
           (err as NodeJS.ErrnoException).code = "CONFIG_ERROR";
           throw err;
         }
-        tx.stageDelete(pruneAuthority.absPath);
+        tx.addDelete(
+          adapterStaticDeleteTarget(
+            agentName,
+            item.relPath,
+            item.role,
+            pruneAuthority,
+          ),
+        );
       }
     }
-    await tx.stage(manifestWrite.path, manifestWrite.content);
+    await tx.addWrite(
+      adapterManifestWriteTarget(agentName, manifestWrite.path),
+      manifestWrite.content,
+    );
   } catch (err) {
     await tx.rollback();
     throw err;

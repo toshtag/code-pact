@@ -10,13 +10,26 @@ import {
 } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { atomicWriteText } from "../../io/atomic-text.ts";
+import { isSupportedAgent, type SupportedAgent } from "../agents.ts";
+import { adapterRegistry } from "./index.ts";
+import type { DesiredAdapterFileRole } from "./types.ts";
 import {
   readFile as dataReadFile,
   rename as dataRename,
   stat as dataStat,
   unlink as dataUnlink,
 } from "../project-fs/index.ts";
+import {
+  unbrand,
+  type OwnedWritePath,
+} from "../project-fs/branded-paths.ts";
 import { assertSafeRelativePath, pathTraversesSymlink } from "../path-safety.ts";
+import { resolveOwnedAgentProfilePath } from "../agent-profile-path.ts";
+import { resolveManifestPath } from "./manifest.ts";
+import {
+  authorizeAdapterMutationPath,
+  type AdapterMutationPathAuthority,
+} from "./manifest-file-ownership.ts";
 import {
   adapterTransactionProjectDir,
   canonicalProjectRoot,
@@ -84,8 +97,14 @@ type JournalStatus = "prepared" | "committed" | "cleanup_pending";
 
 type AdapterTransactionEntryV2 = {
   operation: "write" | "delete";
-  target_kind: "adapter_transaction_target";
+  target_kind:
+    | "agent_profile"
+    | "adapter_manifest"
+    | "adapter_static_file"
+    | "adapter_dynamic_create"
+    | "test_only";
   target_rel_path: string;
+  role?: DesiredAdapterFileRole;
   pre_state: FileState;
   post_state: FileState;
   index: number;
@@ -95,13 +114,60 @@ type AdapterTransactionJournalV2 = {
   schema_version: 2;
   id: string;
   project_root: string;
+  agent_name?: SupportedAgent;
   status: JournalStatus;
   entries: AdapterTransactionEntryV2[];
   cleanup_failures?: string[];
 };
 
+export type AdapterWriteTarget =
+  | {
+      kind: "agent_profile";
+      agentName: SupportedAgent;
+      absPath: OwnedWritePath;
+    }
+  | {
+      kind: "adapter_manifest";
+      agentName: SupportedAgent;
+      absPath: OwnedWritePath;
+    }
+  | {
+      kind: "adapter_static_file";
+      agentName: SupportedAgent;
+      relPath: string;
+      role: DesiredAdapterFileRole;
+      absPath: OwnedWritePath;
+    }
+  | {
+      kind: "adapter_dynamic_create";
+      agentName: SupportedAgent;
+      relPath: string;
+      role: DesiredAdapterFileRole;
+      absPath: OwnedWritePath;
+    }
+  | {
+      kind: "test_only";
+      absPath: string;
+    };
+
+export type AdapterDeleteTarget =
+  | {
+      kind: "adapter_static_file";
+      agentName: SupportedAgent;
+      relPath: string;
+      role: DesiredAdapterFileRole;
+      absPath: OwnedWritePath;
+    }
+  | {
+      kind: "test_only";
+      absPath: string;
+    };
+
 interface StagedEntry {
   kind: "write" | "delete";
+  targetKind: AdapterTransactionEntryV2["target_kind"];
+  agentName?: SupportedAgent;
+  role?: DesiredAdapterFileRole;
   tempPath: string;
   finalPath: string;
   backupPath: string;
@@ -131,6 +197,65 @@ export function assertNoUntrustedAdapterTransactionJournals(
   );
   (err as NodeJS.ErrnoException).code = LEGACY_REJECTION;
   throw err;
+}
+
+export function adapterProfileWriteTarget(
+  agentName: SupportedAgent,
+  absPath: OwnedWritePath,
+): AdapterWriteTarget {
+  return { kind: "agent_profile", agentName, absPath };
+}
+
+export function adapterManifestWriteTarget(
+  agentName: SupportedAgent,
+  absPath: OwnedWritePath,
+): AdapterWriteTarget {
+  return { kind: "adapter_manifest", agentName, absPath };
+}
+
+export function adapterStaticWriteTarget(
+  agentName: SupportedAgent,
+  relPath: string,
+  role: DesiredAdapterFileRole,
+  authority: Extract<AdapterMutationPathAuthority, { kind: "owned" }>,
+): AdapterWriteTarget {
+  return {
+    kind: "adapter_static_file",
+    agentName,
+    relPath,
+    role,
+    absPath: authority.absPath,
+  };
+}
+
+export function adapterDynamicCreateTarget(
+  agentName: SupportedAgent,
+  relPath: string,
+  role: DesiredAdapterFileRole,
+  authority: Extract<AdapterMutationPathAuthority, { kind: "dynamic_write" }>,
+): AdapterWriteTarget {
+  return {
+    kind: "adapter_dynamic_create",
+    agentName,
+    relPath,
+    role,
+    absPath: authority.absPath,
+  };
+}
+
+export function adapterStaticDeleteTarget(
+  agentName: SupportedAgent,
+  relPath: string,
+  role: DesiredAdapterFileRole,
+  authority: Extract<AdapterMutationPathAuthority, { kind: "owned" }>,
+): AdapterDeleteTarget {
+  return {
+    kind: "adapter_static_file",
+    agentName,
+    relPath,
+    role,
+    absPath: authority.absPath,
+  };
 }
 
 async function pathExists(path: string): Promise<boolean> {
@@ -273,10 +398,44 @@ export class FileTransaction {
     this.cwd = options.cwd ? resolve(options.cwd) : null;
   }
 
-  async stage(path: string, content: string): Promise<void> {
+  async addWrite(target: AdapterWriteTarget, content: string): Promise<void> {
+    await this.stageInternal(target, content);
+  }
+
+  addDelete(target: AdapterDeleteTarget): void {
+    this.stageDeleteInternal(target);
+  }
+
+  async stageForTest(path: string, content: string): Promise<void> {
+    await this.stageInternal({ kind: "test_only", absPath: path }, content);
+  }
+
+  stageDeleteForTest(path: string): void {
+    this.stageDeleteInternal({ kind: "test_only", absPath: path });
+  }
+
+  private async stageInternal(
+    target: AdapterWriteTarget,
+    content: string,
+  ): Promise<void> {
+    const path = target.kind === "test_only" ? target.absPath : unbrand(target.absPath);
     this.assertCanStage(path);
     const cwd = this.resolveCwd(path);
     const relPath = toRel(cwd, path);
+    if (
+      (target.kind === "adapter_static_file" ||
+        target.kind === "adapter_dynamic_create") &&
+      target.relPath !== relPath
+    ) {
+      throw new Error(
+        `transaction target metadata does not match authority path: ${target.relPath} !== ${relPath}`,
+      );
+    }
+    if (target.kind === "adapter_dynamic_create" && (await pathExists(path))) {
+      throw new Error(
+        `dynamic adapter target already exists and cannot be transaction-created: ${relPath}`,
+      );
+    }
     const index = this.staged.length;
     const tempPath = `${path}.code-pact-tx-${this.transactionId}-${index}.tmp`;
     const backupPath = `${path}.bak-${this.transactionId}-${index}`;
@@ -288,6 +447,13 @@ export class FileTransaction {
     }
     this.staged.push({
       kind: "write",
+      targetKind: target.kind,
+      agentName: target.kind === "test_only" ? undefined : target.agentName,
+      role:
+        target.kind === "adapter_static_file" ||
+        target.kind === "adapter_dynamic_create"
+          ? target.role
+          : undefined,
       tempPath,
       finalPath: path,
       backupPath,
@@ -297,13 +463,22 @@ export class FileTransaction {
     });
   }
 
-  stageDelete(path: string): void {
+  private stageDeleteInternal(target: AdapterDeleteTarget): void {
+    const path = target.kind === "test_only" ? target.absPath : unbrand(target.absPath);
     this.assertCanStage(path);
     const cwd = this.resolveCwd(path);
     const relPath = toRel(cwd, path);
+    if (target.kind === "adapter_static_file" && target.relPath !== relPath) {
+      throw new Error(
+        `transaction target metadata does not match authority path: ${target.relPath} !== ${relPath}`,
+      );
+    }
     const index = this.staged.length;
     this.staged.push({
       kind: "delete",
+      targetKind: target.kind,
+      agentName: target.kind === "test_only" ? undefined : target.agentName,
+      role: target.kind === "adapter_static_file" ? target.role : undefined,
       tempPath: "",
       finalPath: path,
       backupPath: `${path}.bak-${this.transactionId}-${index}`,
@@ -434,17 +609,25 @@ export class FileTransaction {
   private async writePreparedJournal(): Promise<AdapterTransactionJournalV2> {
     const cwd = this.resolveCwd();
     await this.prepareEntries();
+    const agentNames = new Set(
+      this.staged.flatMap(s => (s.agentName === undefined ? [] : [s.agentName])),
+    );
+    if (agentNames.size > 1) {
+      throw new Error("adapter transaction cannot mix multiple agents");
+    }
     const journalDir = await adapterTransactionProjectDir(cwd);
     this.journalPath = join(journalDir, `${this.transactionId}.json`);
     const journal: AdapterTransactionJournalV2 = {
       schema_version: 2,
       id: this.transactionId,
       project_root: await canonicalProjectRoot(cwd),
+      agent_name: agentNames.values().next().value,
       status: "prepared",
       entries: this.staged.map((s, index) => ({
         operation: s.kind,
-        target_kind: "adapter_transaction_target",
+        target_kind: s.targetKind,
         target_rel_path: s.relPath,
+        ...(s.role !== undefined ? { role: s.role } : {}),
         pre_state: s.preState,
         post_state: s.postState,
         index,
@@ -472,6 +655,11 @@ export class FileTransaction {
       }
       await ensureRegularFileIfPresent(s.finalPath);
       s.preState = await hashFile(s.finalPath);
+      if (s.targetKind === "adapter_dynamic_create" && s.preState.kind !== "absent") {
+        throw new Error(
+          `dynamic adapter target already exists and cannot be transaction-created: ${s.relPath}`,
+        );
+      }
       if (s.kind === "write") {
         const tempState = await hashFile(s.tempPath);
         if (tempState.kind !== "present") {
@@ -522,8 +710,13 @@ function isJournalEntryV2(value: unknown): value is AdapterTransactionEntryV2 {
   const entry = value as Partial<AdapterTransactionEntryV2>;
   return (
     (entry.operation === "write" || entry.operation === "delete") &&
-    entry.target_kind === "adapter_transaction_target" &&
+    (entry.target_kind === "agent_profile" ||
+      entry.target_kind === "adapter_manifest" ||
+      entry.target_kind === "adapter_static_file" ||
+      entry.target_kind === "adapter_dynamic_create" ||
+      entry.target_kind === "test_only") &&
     typeof entry.target_rel_path === "string" &&
+    (entry.role === undefined || typeof entry.role === "string") &&
     isFileState(entry.pre_state) &&
     isFileState(entry.post_state) &&
     typeof entry.index === "number" &&
@@ -553,6 +746,9 @@ async function loadJournal(
       journal.status !== "committed" &&
       journal.status !== "cleanup_pending") ||
     typeof journal.project_root !== "string" ||
+    (journal.agent_name !== undefined &&
+      (typeof journal.agent_name !== "string" ||
+        !isSupportedAgent(journal.agent_name))) ||
     !Array.isArray(journal.entries)
   ) {
     throw new TransactionRecoveryError(
@@ -603,7 +799,7 @@ async function rollbackJournalToOldState(
   for (const entry of [...journal.entries].reverse()) {
     const paths = artifactPathsFor(cwd, journal.id, entry);
     try {
-      await reconcileEntryToOldState(cwd, paths, entry);
+      await reconcileEntryToOldState(cwd, journal, paths, entry);
     } catch (err) {
       failures.push(`${entry.target_rel_path}: ${(err as Error).message}`);
     }
@@ -619,7 +815,7 @@ async function cleanupCommittedJournal(
   for (const entry of journal.entries) {
     const paths = artifactPathsFor(cwd, journal.id, entry);
     try {
-      await reconcileEntryToNewState(cwd, paths, entry);
+      await reconcileEntryToNewState(cwd, journal, paths, entry);
     } catch (err) {
       failures.push(`${entry.target_rel_path}: ${(err as Error).message}`);
     }
@@ -629,10 +825,11 @@ async function cleanupCommittedJournal(
 
 async function reconcileEntryToOldState(
   cwd: string,
+  journal: AdapterTransactionJournalV2,
   paths: { finalPath: string; tempPath: string; backupPath: string },
   entry: AdapterTransactionEntryV2,
 ): Promise<void> {
-  await assertTransactionTargetStillOwned(cwd, entry);
+  await assertTransactionTargetStillOwned(cwd, journal, paths.finalPath, entry);
   const finalState = await hashFile(paths.finalPath);
   const backupState = await hashFile(paths.backupPath);
   const tempState = await hashFile(paths.tempPath);
@@ -672,10 +869,11 @@ async function reconcileEntryToOldState(
 
 async function reconcileEntryToNewState(
   cwd: string,
+  journal: AdapterTransactionJournalV2,
   paths: { finalPath: string; tempPath: string; backupPath: string },
   entry: AdapterTransactionEntryV2,
 ): Promise<void> {
-  await assertTransactionTargetStillOwned(cwd, entry);
+  await assertTransactionTargetStillOwned(cwd, journal, paths.finalPath, entry);
   const finalState = await hashFile(paths.finalPath);
   const backupState = await hashFile(paths.backupPath);
   const tempState = await hashFile(paths.tempPath);
@@ -701,6 +899,8 @@ async function reconcileEntryToNewState(
 
 async function assertTransactionTargetStillOwned(
   cwd: string,
+  journal: AdapterTransactionJournalV2,
+  finalPath: string,
   entry: AdapterTransactionEntryV2,
 ): Promise<void> {
   if (await pathTraversesSymlink(cwd, entry.target_rel_path)) {
@@ -709,6 +909,57 @@ async function assertTransactionTargetStillOwned(
     );
     (err as NodeJS.ErrnoException).code = "PATH_NOT_OWNED";
     throw err;
+  }
+  if (entry.target_kind === "test_only") return;
+
+  const agentName = journal.agent_name;
+  if (!agentName) {
+    throw new Error("adapter transaction journal is missing agent_name");
+  }
+
+  if (entry.target_kind === "agent_profile") {
+    const authorized = await resolveOwnedAgentProfilePath(cwd, agentName);
+    if (unbrand(authorized) !== finalPath) {
+      throw new Error("adapter transaction target is not the authorized agent profile path");
+    }
+    return;
+  }
+
+  if (entry.target_kind === "adapter_manifest") {
+    const authorized = await resolveManifestPath(cwd, agentName);
+    if (unbrand(authorized) !== finalPath) {
+      throw new Error("adapter transaction target is not the authorized manifest path");
+    }
+    return;
+  }
+
+  if (entry.role === undefined) {
+    throw new Error("adapter transaction journal entry is missing role");
+  }
+  const descriptor = adapterRegistry[agentName];
+  const authority = await authorizeAdapterMutationPath(
+    cwd,
+    descriptor,
+    entry.target_rel_path,
+    {
+      expectedRole: entry.role,
+      declaredRole: entry.role,
+      allowDynamicWrite: entry.target_kind === "adapter_dynamic_create",
+    },
+  );
+  if (entry.target_kind === "adapter_static_file") {
+    if (authority.kind !== "owned" || unbrand(authority.absPath) !== finalPath) {
+      throw new Error("adapter transaction target is not an authorized static adapter file");
+    }
+    return;
+  }
+  if (
+    entry.operation !== "write" ||
+    entry.pre_state.kind !== "absent" ||
+    authority.kind !== "dynamic_write" ||
+    unbrand(authority.absPath) !== finalPath
+  ) {
+    throw new Error("adapter transaction target is not an authorized dynamic create");
   }
 }
 

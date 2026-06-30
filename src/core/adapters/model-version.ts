@@ -6,6 +6,7 @@ import {
   normalizeModelVersion,
 } from "../schemas/agent-profile.ts";
 import { resolveOwnedAgentProfilePath } from "../agent-profile-path.ts";
+import type { OwnedWritePath } from "../project-fs/branded-paths.ts";
 
 /**
  * Validates a `--model` input and returns its canonical form, or throws a
@@ -55,7 +56,7 @@ export async function resolveAndPinModelVersion(opts: {
 
 export type ModelVersionPinPlan = {
   resolvedModelVersion: string | undefined;
-  write: { path: string; content: string } | null;
+  write: { path: OwnedWritePath; content: string } | null;
 };
 
 /**
