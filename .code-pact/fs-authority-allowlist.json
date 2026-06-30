@@ -112,16 +112,6 @@
       "reason": "phase refs are roadmap/schema-selected project paths resolved symlink-free before existence checking"
     }
   ],
-  "src/commands/doctor.ts#safeReadProjectYaml": {
-    "operation": "readFile",
-    "authority": "symlink_free_contained",
-    "reason": "path is resolved through the doctor-owned project namespace before YAML parsing"
-  },
-  "src/commands/doctor.ts#projectFileExists": {
-    "operation": "access",
-    "authority": "symlink_free_contained",
-    "reason": "path is a doctor-selected project file resolved symlink-free before existence checking"
-  },
   "src/commands/doctor.ts#checkProgressLog": {
     "operation": "readFile",
     "authority": "symlink_free_contained",

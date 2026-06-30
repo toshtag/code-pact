@@ -25,7 +25,11 @@ import {
 import { validateSnapshotEventEvidence } from "../core/archive/snapshot-evidence.ts";
 import { Project } from "../core/schemas/project.ts";
 import { resolveSymlinkFreeProjectPath } from "../core/path-safety.ts";
-import { resolveSymlinkFreeReadCandidate } from "../core/project-fs/owned-read.ts";
+import {
+  resolveSymlinkFreeReadCandidate,
+  readOwnedText,
+} from "../core/project-fs/owned-read.ts";
+import { ownedPathPresence } from "../core/project-fs/control-plane.ts";
 import {
   ACCEPTED_MODEL_VERSION_INPUTS,
   AgentProfile,
@@ -150,18 +154,14 @@ async function safeReadProjectYaml(
   cwd: string,
   relPath: string,
 ): Promise<SafeYamlResult> {
-  let abs: string;
   try {
-    abs = await resolveSymlinkFreeReadCandidate(cwd, relPath);
+    const raw = await readOwnedText(cwd, relPath);
+    return { ok: true, data: parseYaml(raw) };
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "PATH_NOT_OWNED") return { ok: false, code: "PATH_NOT_OWNED" };
-    return { ok: false, code: "PATH_OUTSIDE_PROJECT" };
-  }
-  try {
-    const raw = await readFile(abs, "utf8");
-    return { ok: true, data: parseYaml(raw) };
-  } catch {
+    if (code === "PATH_OUTSIDE_PROJECT")
+      return { ok: false, code: "PATH_OUTSIDE_PROJECT" };
     return { ok: false, code: "INVALID_YAML" };
   }
 }
@@ -178,12 +178,8 @@ async function projectFileExists(
   cwd: string,
   relPath: string,
 ): Promise<boolean> {
-  try {
-    await access(await resolveSymlinkFreeReadCandidate(cwd, relPath));
-    return true;
-  } catch {
-    return false;
-  }
+  const presence = await ownedPathPresence(cwd, relPath);
+  return presence === "present";
 }
 
 type DoctorAgentProfileResult =
