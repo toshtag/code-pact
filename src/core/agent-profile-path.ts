@@ -5,7 +5,9 @@ import { assertSafePlanId } from "./schemas/plan-id.ts";
 import { resolveSymlinkFreeProjectPath } from "./path-safety.ts";
 import {
   brandOwnedWrite,
+  brandOwnedRead,
   type OwnedWritePath,
+  type OwnedReadPath,
 } from "./project-fs/branded-paths-internal.ts";
 import { resolveProjectConfigPath } from "./project-config-path.ts";
 import {
@@ -249,13 +251,14 @@ export async function resolveAgentProfileRel(
 export async function resolveAgentProfilePath(
   cwd: string,
   agentName: string,
-): Promise<string> {
+): Promise<OwnedReadPath> {
   const rel = await resolveAgentProfileRel(cwd, agentName);
   try {
-    return await resolveSymlinkFreeProjectPath(
+    const abs = await resolveSymlinkFreeProjectPath(
       cwd,
       [".code-pact", rel].join("/"),
     );
+    return brandOwnedRead(abs);
   } catch (err) {
     if (shouldMapPathErrorToConfig(err)) {
       throw profileConfigError(

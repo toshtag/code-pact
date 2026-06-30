@@ -260,6 +260,25 @@ const AUTHORITY_EXPORTS = new Map([
   ],
   [join("src", "core", "project-fs", "owned-read.ts"), new Map([])],
   [
+    join("src", "core", "project-fs", "authority-resolvers.ts"),
+    new Map([
+      ["resolveDecisionReadPath", "owned_read"],
+      ["resolveDecisionDirectoryReadPath", "owned_read"],
+      ["resolvePhaseReadPath", "owned_read"],
+      ["resolveRoadmapReadPath", "owned_read"],
+      ["resolveProjectConfigReadPath", "owned_read"],
+      ["resolveModelProfileReadPath", "owned_read"],
+      ["resolveModelProfileDirectoryReadPath", "owned_read"],
+      ["resolveProgressReadPath", "owned_read"],
+      ["resolveGitignoreReadPath", "owned_read"],
+      ["resolveInstructionReadPath", "owned_read"],
+      ["resolveContextDirectoryReadPath", "owned_read"],
+      ["resolveOwnedDirectoryReadPath", "owned_read"],
+      ["resolveAgentProfileReadPath", "owned_read"],
+      ["resolveAdapterStaticReadPath", "owned_read"],
+    ]),
+  ],
+  [
     join("src", "core", "project-config-path.ts"),
     new Map([["resolveProjectConfigPath", "owned_read"]]),
   ],
@@ -328,6 +347,8 @@ const TRUSTED_FS_MODULES = new Set([
   // — Core primitives —
   join("src", "core", "project-fs", "index.ts"),
   join("src", "core", "project-fs", "raw-internal.ts"),
+  join("src", "core", "project-fs", "operations.ts"),
+  join("src", "core", "project-fs", "authority-resolvers.ts"),
   join("src", "core", "project-fs", "owned-read.ts"),
   join("src", "core", "project-fs", "branded-paths-internal.ts"),
   join("src", "core", "project-fs", "control-plane.ts"),
@@ -365,6 +386,8 @@ const BRAND_CONSTRUCTORS = new Set([
 const BRAND_CONSTRUCTOR_IMPORT_ALLOWLIST = new Set([
   join("src", "core", "project-fs", "branded-paths-internal.ts"),
   join("src", "core", "project-fs", "owned-read.ts"),
+  join("src", "core", "project-fs", "authority-resolvers.ts"),
+  join("src", "core", "project-fs", "operations.ts"),
   join("src", "core", "agent-profile-path.ts"),
   join("src", "core", "adapters", "manifest.ts"),
   join("src", "core", "adapters", "manifest-file-ownership.ts"),

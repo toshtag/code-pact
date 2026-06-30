@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 import { parseArgs } from "node:util";
-import { stat } from "./core/project-fs/raw-internal.ts";
-import { join } from "node:path";
+import {
+  statOwned,
+  resolveOwnedDirectoryReadPath,
+} from "./core/project-fs/index.ts";
 import { parse as parseYaml } from "yaml";
 import { readPackageVersion } from "./lib/package-version.ts";
 import { splitArgv, strictParse, ConfigError } from "./lib/argv.ts";
@@ -52,7 +54,8 @@ const KNOWN_AGENTS: ReadonlySet<SupportedAgent> = new Set(SUPPORTED_AGENTS);
  */
 async function codePactDirExists(cwd: string): Promise<boolean> {
   try {
-    const s = await stat(join(cwd, ".code-pact"));
+    const dirPath = await resolveOwnedDirectoryReadPath(cwd, ".code-pact");
+    const s = await statOwned(dirPath);
     return s.isDirectory();
   } catch {
     return false;

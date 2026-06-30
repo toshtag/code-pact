@@ -1,4 +1,3 @@
-import { readFile, readdir, access } from "../core/project-fs/raw-internal.ts";
 import { join, basename, extname } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { Roadmap } from "../core/schemas/roadmap.ts";
@@ -24,11 +23,22 @@ import {
 } from "../core/progress/all-sources.ts";
 import { validateSnapshotEventEvidence } from "../core/archive/snapshot-evidence.ts";
 import { Project } from "../core/schemas/project.ts";
-import { resolveSymlinkFreeProjectPath } from "../core/path-safety.ts";
 import {
-  resolveSymlinkFreeReadCandidate,
   readOwnedText,
-} from "../core/project-fs/owned-read.ts";
+  listOwned,
+  accessOwned,
+  resolvePhaseReadPath,
+  resolveProgressReadPath,
+  resolveGitignoreReadPath,
+  resolveInstructionReadPath,
+  resolveModelProfileDirectoryReadPath,
+  resolveOwnedDirectoryReadPath,
+  resolveContextDirectoryReadPath,
+  resolveProjectConfigReadPath,
+  resolveRoadmapReadPath,
+  resolveModelProfileReadPath,
+  type OwnedReadPath,
+} from "../core/project-fs/index.ts";
 import { ownedPathPresence } from "../core/project-fs/control-plane.ts";
 import {
   ACCEPTED_MODEL_VERSION_INPUTS,
@@ -151,11 +161,10 @@ type SafeYamlResult =
     };
 
 async function safeReadProjectYaml(
-  cwd: string,
-  relPath: string,
+  path: OwnedReadPath,
 ): Promise<SafeYamlResult> {
   try {
-    const raw = await readOwnedText(cwd, relPath);
+    const raw = await readOwnedText(path);
     return { ok: true, data: parseYaml(raw) };
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
@@ -191,9 +200,9 @@ async function loadDoctorAgentProfile(
   agentName: string,
   reportedProfileRel: string,
 ): Promise<DoctorAgentProfileResult> {
-  let absPath: string;
+  let profilePath: OwnedReadPath;
   try {
-    absPath = await resolveAgentProfilePath(cwd, agentName);
+    profilePath = await resolveAgentProfilePath(cwd, agentName);
   } catch (err) {
     return {
       ok: false,
@@ -204,7 +213,7 @@ async function loadDoctorAgentProfile(
 
   let raw: string;
   try {
-    raw = await readFile(absPath, "utf8");
+    raw = await readOwnedText(profilePath);
   } catch {
     return {
       ok: false,
@@ -238,7 +247,7 @@ async function loadDoctorAgentProfile(
   }
 
   try {
-    assertAgentProfileNameMatches(parsed.data, agentName, absPath);
+    assertAgentProfileNameMatches(parsed.data, agentName);
   } catch (err) {
     return {
       ok: false,
@@ -247,7 +256,7 @@ async function loadDoctorAgentProfile(
     };
   }
 
-  return { ok: true, path: absPath, profile: parsed.data };
+  return { ok: true, path: profilePath, profile: parsed.data };
 }
 
 // ---------------------------------------------------------------------------
@@ -259,7 +268,9 @@ async function checkProjectYaml(
   issues: DoctorIssue[],
 ): Promise<Project | null> {
   const path = ".code-pact/project.yaml";
-  const result = await safeReadProjectYaml(cwd, path);
+  const result = await safeReadProjectYaml(
+    await resolveProjectConfigReadPath(cwd),
+  );
   if (!result.ok) {
     if (
       result.code === "PATH_OUTSIDE_PROJECT" ||
@@ -291,7 +302,7 @@ async function checkRoadmap(
   issues: DoctorIssue[],
 ): Promise<Roadmap | null> {
   const path = "design/roadmap.yaml";
-  const result = await safeReadProjectYaml(cwd, path);
+  const result = await safeReadProjectYaml(await resolveRoadmapReadPath(cwd));
   if (!result.ok) {
     if (
       result.code === "PATH_OUTSIDE_PROJECT" ||
@@ -342,7 +353,8 @@ async function checkPhases(
     const absPath = join(cwd, ref.path);
     let presence: "present" | "absent" | "inaccessible";
     try {
-      await access(await resolveSymlinkFreeReadCandidate(cwd, ref.path));
+      const phasePath = await resolvePhaseReadPath(cwd, ref.path);
+      await accessOwned(phasePath);
       presence = "present";
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
@@ -387,7 +399,9 @@ async function checkPhases(
       });
       continue;
     }
-    const result = await safeReadProjectYaml(cwd, ref.path);
+    const result = await safeReadProjectYaml(
+      await resolvePhaseReadPath(cwd, ref.path),
+    );
     if (!result.ok) {
       if (
         result.code === "PATH_OUTSIDE_PROJECT" ||
@@ -428,8 +442,8 @@ async function checkPhases(
   // Check for phase YAML files in design/phases/ not referenced in roadmap
   let phaseFiles: string[] = [];
   try {
-    const phasesDir = await resolveSymlinkFreeProjectPath(cwd, "design/phases");
-    phaseFiles = await readdir(phasesDir);
+    const phasesDir = await resolveOwnedDirectoryReadPath(cwd, "design/phases");
+    phaseFiles = await listOwned(phasesDir);
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "PATH_OUTSIDE_PROJECT" || code === "PATH_NOT_OWNED") {
@@ -502,10 +516,7 @@ async function checkProgressLog(
   // unreadable / schema-invalid legacy file is INVALID_YAML / SCHEMA_ERROR.
   let legacyEvents: ProgressEvent[] = [];
   try {
-    const raw = await readFile(
-      await resolveSymlinkFreeReadCandidate(cwd, path),
-      "utf8",
-    );
+    const raw = await readOwnedText(await resolveProgressReadPath(cwd, path));
     let doc: unknown;
     try {
       doc = parseYaml(raw);
@@ -776,8 +787,8 @@ async function checkModelProfiles(
   const dirRel = ".code-pact/model-profiles";
   let entries: string[] = [];
   try {
-    const dir = await resolveSymlinkFreeReadCandidate(cwd, dirRel);
-    entries = await readdir(dir);
+    const dir = await resolveModelProfileDirectoryReadPath(cwd);
+    entries = await listOwned(dir);
   } catch (err) {
     if (
       (err as NodeJS.ErrnoException).code === "PATH_OUTSIDE_PROJECT" ||
@@ -797,7 +808,9 @@ async function checkModelProfiles(
   for (const entry of entries) {
     if (!entry.endsWith(".yaml")) continue;
     const relPath = `${dirRel}/${entry}`;
-    const result = await safeReadProjectYaml(cwd, relPath);
+    const result = await safeReadProjectYaml(
+      await resolveModelProfileReadPath(cwd, relPath),
+    );
     if (!result.ok) {
       if (
         result.code === "PATH_OUTSIDE_PROJECT" ||
@@ -833,8 +846,8 @@ async function checkBakFiles(
   for (const relDir of dirs) {
     let entries: string[] = [];
     try {
-      const dir = await resolveSymlinkFreeReadCandidate(cwd, relDir);
-      entries = await readdir(dir);
+      const dir = await resolveOwnedDirectoryReadPath(cwd, relDir);
+      entries = await listOwned(dir);
     } catch (err) {
       if (
         (err as NodeJS.ErrnoException).code === "PATH_OUTSIDE_PROJECT" ||
@@ -880,10 +893,7 @@ async function checkLocalGitignored(
 ): Promise<void> {
   let content: string;
   try {
-    content = await readFile(
-      await resolveSymlinkFreeReadCandidate(cwd, ".gitignore"),
-      "utf8",
-    );
+    content = await readOwnedText(await resolveGitignoreReadPath(cwd));
   } catch {
     issues.push({
       code: "LOCAL_NOT_GITIGNORED",
@@ -1084,10 +1094,7 @@ async function checkConstitutionPlaceholder(
   const path = "design/constitution.md";
   let content: string;
   try {
-    content = await readFile(
-      await resolveSymlinkFreeReadCandidate(cwd, path),
-      "utf8",
-    );
+    content = await readOwnedText(await resolveInstructionReadPath(cwd, path));
   } catch {
     return; // file absent — BRIEF_MISSING or similar handles the design dir; skip here
   }
@@ -1163,11 +1170,11 @@ async function checkStaleContext(
 
     let entries: string[] = [];
     try {
-      const contextDir = await resolveSymlinkFreeReadCandidate(
+      const contextDir = await resolveContextDirectoryReadPath(
         cwd,
         profile.context_dir,
       );
-      entries = await readdir(contextDir);
+      entries = await listOwned(contextDir);
     } catch (err) {
       if (
         (err as NodeJS.ErrnoException).code === "PATH_OUTSIDE_PROJECT" ||
