@@ -550,8 +550,23 @@ export class FileTransaction {
         );
       }
 
-      await cleanupJournal(this.requireJournalPath());
-      this.journalPath = null;
+      try {
+        await cleanupJournal(this.requireJournalPath());
+        this.journalPath = null;
+      } catch (err) {
+        journal.status = "cleanup_pending";
+        journal.cleanup_failures = [
+          `${this.requireJournalPath()}: ${(err as Error).message}`,
+        ];
+        await durableWriteJson(this.requireJournalPath(), journal).catch(() => {});
+        this.state = "cleanup_pending";
+        throw new TransactionCleanupPendingError(
+          `Transaction committed, but journal cleanup is pending: ${(err as Error).message}`,
+          this.requireJournalPath(),
+          journal.cleanup_failures,
+          this.staged.map(s => s.backupPath),
+        );
+      }
     } catch (err) {
       if (this.state === "committed" || this.state === "cleanup_pending") {
         throw err;
