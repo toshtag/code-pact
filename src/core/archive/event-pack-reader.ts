@@ -1,4 +1,4 @@
-import { readdir, readFile } from "../project-fs/index.ts";
+import { readdir, readFile } from "../project-fs/raw-internal.ts";
 import { basename } from "node:path";
 import { EventPack, type PackedEvent } from "../schemas/event-pack.ts";
 import type { LoadedEventFile } from "../progress/events-io.ts";

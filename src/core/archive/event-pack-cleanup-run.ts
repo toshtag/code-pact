@@ -20,7 +20,7 @@
 // pack covering the snapshot) — NEVER from the dry-run `planLooseCleanup` cross-read.
 // ---------------------------------------------------------------------------
 
-import { unlink } from "../project-fs/index.ts";
+import { unlink } from "../project-fs/raw-internal.ts";
 import {
   evaluateDeleteGate,
   looseEventRelPath,

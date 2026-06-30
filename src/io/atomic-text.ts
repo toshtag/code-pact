@@ -5,7 +5,7 @@ import {
   readFile,
   open,
   link,
-} from "../core/project-fs/index.ts";
+} from "../core/project-fs/raw-internal.ts";
 import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
 

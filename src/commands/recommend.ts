@@ -1,4 +1,4 @@
-import { readFile } from "../core/project-fs/index.ts";
+import { readFile } from "../core/project-fs/raw-internal.ts";
 import { parse as parseYaml } from "yaml";
 import { AgentProfile } from "../core/schemas/agent-profile.ts";
 import { loadPhase } from "../core/plan/load-phase.ts";

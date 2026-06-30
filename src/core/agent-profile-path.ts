@@ -1,4 +1,4 @@
-import { readFile } from "./project-fs/index.ts";
+import { readFile } from "./project-fs/raw-internal.ts";
 import { parse as parseYaml } from "yaml";
 import { AgentProfileRefPath } from "./schemas/agent-profile-ref-path.ts";
 import { assertSafePlanId } from "./schemas/plan-id.ts";

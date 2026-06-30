@@ -1,59 +1,15 @@
 /**
- * Central filesystem API seam for code-pact.
+ * Branded filesystem API seam for code-pact.
  *
- * Most src/ domain modules MUST import fs functions from this module instead
- * of `node:fs/promises` directly. A small set of primitive modules
- * (`project-fs`, `atomic-text`, and transaction state/recovery code) may use
- * raw fs directly where they implement the filesystem boundary itself. This
- * creates a single common import point that:
+ * This module exports ONLY branded path types and branded operations.
+ * Raw fs primitives are available from {@link ./raw-internal.ts} — but only
+ * trusted modules (listed in `TRUSTED_FS_MODULES` in `check-fs-authority.mjs`)
+ * may import from there. The `check:fs-authority` AST gate enforces this at
+ * CI time.
  *
- * - Can be mocked exhaustively in tests (one `vi.mock` covers all fs ops).
- * - Is audited by `check:fs-authority` as the ordinary raw-fs import site.
- * - Enforces symlink-free resolution and authority policies at every call
- *   site via the `check:fs-authority` AST gate (CI-time, not runtime).
- *
- * The `check:fs-authority` AST gate treats this module as a trusted fs
- * module (its own `node:fs/promises` import is exempt). Other raw-fs
- * primitive modules must stay narrow and covered by focused tests.
- *
- * Raw fs exports are deliberately explicit. Do not add a wildcard re-export
- * here: every exposed operation should be visible in review and covered by
- * `check:fs-authority`.
- *
- * Raw fs primitives are sourced from {@link ./raw-internal.ts} so that the
- * canonical raw-fs import site is isolated and auditable. This barrel
- * re-exports them for backward compatibility with existing domain modules;
- * the `check:fs-authority` AST gate enforces that every call site has
- * proper authority (symlink-free resolution, allowlist entries, etc.).
+ * Domain modules MUST use the branded operations or namespace-specific
+ * resolvers (e.g. {@link ./control-plane.ts}) instead of raw fs functions.
  */
-export {
-  access,
-  link,
-  lstat,
-  mkdir,
-  mkdtemp,
-  open,
-  readFile,
-  readdir,
-  realpath,
-  rename,
-  rm,
-  stat,
-  unlink,
-  writeFile,
-} from "./raw-internal.ts";
-export type { FileHandle } from "./raw-internal.ts";
-export {
-  readFileSync,
-  writeFileSync,
-  existsSync,
-  readdirSync,
-  statSync,
-  lstatSync,
-  realpathSync,
-  constants,
-} from "./raw-internal.ts";
-export type { Dirent, Stats } from "./raw-internal.ts";
 export type {
   SymlinkFreeContainedPath,
   OwnedReadPath,

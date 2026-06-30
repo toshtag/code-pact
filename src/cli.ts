@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { parseArgs } from "node:util";
-import { stat } from "./core/project-fs/index.ts";
+import { stat } from "./core/project-fs/raw-internal.ts";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { readPackageVersion } from "./lib/package-version.ts";

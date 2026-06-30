@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from "../project-fs/index.ts";
+import { readdirSync, readFileSync } from "../project-fs/raw-internal.ts";
 import { join } from "node:path";
 import { archiveBundlesRelDir, resolveArchiveOwnedPathSync } from "./paths.ts";
 import { validateArchiveBundleTier1, type LoadedArchiveBundle } from "./archive-bundle-reader.ts";

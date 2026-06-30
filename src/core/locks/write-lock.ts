@@ -29,7 +29,7 @@
 // exercise the real path. NOT documented in public surfaces — no
 // compatibility guarantee.
 
-import { mkdir, readFile, stat, unlink, writeFile } from "../project-fs/index.ts";
+import { mkdir, readFile, stat, unlink, writeFile } from "../project-fs/raw-internal.ts";
 import { hostname } from "node:os";
 import { dirname, join } from "node:path";
 import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";

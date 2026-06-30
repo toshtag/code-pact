@@ -1,4 +1,4 @@
-import { readdir, readFile } from "../project-fs/index.ts";
+import { readdir, readFile } from "../project-fs/raw-internal.ts";
 import { basename, join } from "node:path";
 import {
   ArchiveBundle,

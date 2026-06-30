@@ -1,5 +1,5 @@
-import type { Dirent } from "../project-fs/index.ts";
-import { readFile, readdir, stat } from "../project-fs/index.ts";
+import type { Dirent } from "../project-fs/raw-internal.ts";
+import { readFile, readdir, stat } from "../project-fs/raw-internal.ts";
 import { join, relative, sep } from "node:path";
 import { atomicWriteText } from "../../io/atomic-text.ts";
 import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";

@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "../core/project-fs/index.ts";
+import { mkdtemp, rm } from "../core/project-fs/raw-internal.ts";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { LocaleCode } from "../core/schemas/locale.ts";

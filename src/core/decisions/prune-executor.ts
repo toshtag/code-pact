@@ -1,4 +1,4 @@
-import { readFile, stat, unlink } from "../project-fs/index.ts";
+import { readFile, stat, unlink } from "../project-fs/raw-internal.ts";
 import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
 import { atomicWriteText, atomicReplaceExistingText, type ExpectedState } from "../../io/atomic-text.ts";
 import {

@@ -1,4 +1,4 @@
-import { readFile, lstat, readdir } from "../project-fs/index.ts";
+import { readFile, lstat, readdir } from "../project-fs/raw-internal.ts";
 import { parse as parseYaml } from "yaml";
 import {
   EventPack,

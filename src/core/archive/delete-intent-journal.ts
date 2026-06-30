@@ -1,4 +1,4 @@
-import { mkdir, open, readFile, rename, unlink, type FileHandle } from "../project-fs/index.ts";
+import { mkdir, open, readFile, rename, unlink, type FileHandle } from "../project-fs/raw-internal.ts";
 import { basename, dirname } from "node:path";
 import { DeleteIntent, DELETE_INTENT_SCHEMA_VERSION, type BundlePairIntent, type DeleteIntentRecord } from "../schemas/delete-intent.ts";
 import {

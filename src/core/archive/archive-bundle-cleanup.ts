@@ -1,4 +1,4 @@
-import { readdir, readFile, unlink } from "../project-fs/index.ts";
+import { readdir, readFile, unlink } from "../project-fs/raw-internal.ts";
 import { basename, join } from "node:path";
 import type { ArchiveBundleKind } from "../schemas/archive-bundle.ts";
 import { loadArchiveBundles } from "./archive-bundle-loader.ts";

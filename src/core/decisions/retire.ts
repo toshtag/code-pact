@@ -1,4 +1,4 @@
-import { readFile } from "../project-fs/index.ts";
+import { readFile } from "../project-fs/raw-internal.ts";
 import type { PhaseEntry } from "../plan/state.ts";
 import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
 import { normalizePrunedDecisionPath } from "./pruned-ledger.ts";

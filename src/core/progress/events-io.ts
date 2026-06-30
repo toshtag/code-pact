@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { link, mkdir, readdir, readFile, rm, writeFile } from "../project-fs/index.ts";
+import { link, mkdir, readdir, readFile, rm, writeFile } from "../project-fs/raw-internal.ts";
 import { join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { ProgressEvent } from "../schemas/progress-event.ts";

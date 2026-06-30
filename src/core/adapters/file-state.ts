@@ -7,7 +7,7 @@
 // re-exports below keep existing adapter call sites working unchanged.
 // ---------------------------------------------------------------------------
 
-import { readFile, stat } from "../project-fs/index.ts";
+import { readFile, stat } from "../project-fs/raw-internal.ts";
 import {
   assertSafeRelativePath as assertSafeRelativePathImpl,
   resolveSymlinkFreeProjectPath,

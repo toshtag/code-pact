@@ -1,4 +1,4 @@
-import { readFile, readdir, unlink } from "../project-fs/index.ts";
+import { readFile, readdir, unlink } from "../project-fs/raw-internal.ts";
 import { basename } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { Phase } from "../schemas/phase.ts";

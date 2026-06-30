@@ -1,4 +1,4 @@
-import { readdir, readFile } from "../project-fs/index.ts";
+import { readdir, readFile } from "../project-fs/raw-internal.ts";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { atomicWriteText } from "../../io/atomic-text.ts";
 import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";

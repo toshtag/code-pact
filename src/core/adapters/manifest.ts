@@ -1,4 +1,4 @@
-import { readFile } from "../project-fs/index.ts";
+import { readFile } from "../project-fs/raw-internal.ts";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";

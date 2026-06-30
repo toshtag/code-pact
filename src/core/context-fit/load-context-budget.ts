@@ -23,7 +23,7 @@
 //     profile sink a built-in fallback, this mode validates ONLY the
 //     `context_budget` key in isolation, not the whole AgentProfile.
 
-import { readFile } from "../project-fs/index.ts";
+import { readFile } from "../project-fs/raw-internal.ts";
 import { parse as parseYaml } from "yaml";
 import { Project } from "../schemas/project.ts";
 import { loadProject, resolveEnabledAgent } from "../project.ts";

@@ -1,4 +1,4 @@
-import { readFile, stat } from "../core/project-fs/index.ts";
+import { readFile, stat } from "../core/project-fs/raw-internal.ts";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import type { AgentProfile } from "../core/schemas/agent-profile.ts";

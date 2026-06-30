@@ -18,7 +18,7 @@ import {
   rename as dataRename,
   stat as dataStat,
   unlink as dataUnlink,
-} from "../project-fs/index.ts";
+} from "../project-fs/raw-internal.ts";
 import {
   unbrand,
   brandOwnedDelete,

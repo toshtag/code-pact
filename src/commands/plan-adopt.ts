@@ -13,7 +13,7 @@
 // prose produce no list items and fall to no_plan_items_detected — the
 // honest signal to use `plan prompt --schema-only` + an agent instead.
 
-import { readFile } from "../core/project-fs/index.ts";
+import { readFile } from "../core/project-fs/raw-internal.ts";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
 import {

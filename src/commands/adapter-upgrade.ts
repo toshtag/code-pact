@@ -1,4 +1,4 @@
-import { stat } from "../core/project-fs/index.ts";
+import { stat } from "../core/project-fs/raw-internal.ts";
 import { join } from "node:path";
 import { AgentProfile } from "../core/schemas/agent-profile.ts";
 import { ModelProfile } from "../core/schemas/model-profile.ts";

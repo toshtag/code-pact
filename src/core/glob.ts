@@ -1,5 +1,5 @@
-import type { Dirent } from "./project-fs/index.ts";
-import { readdir } from "./project-fs/index.ts";
+import type { Dirent } from "./project-fs/raw-internal.ts";
+import { readdir } from "./project-fs/raw-internal.ts";
 import { join, relative } from "node:path";
 
 // ---------------------------------------------------------------------------

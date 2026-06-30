@@ -17,8 +17,8 @@
 // gate table (G0–G8) is the binding source for every disposition here.
 // ---------------------------------------------------------------------------
 
-import { open, lstat, type FileHandle } from "../project-fs/index.ts";
-import { constants } from "../project-fs/index.ts";
+import { open, lstat, type FileHandle } from "../project-fs/raw-internal.ts";
+import { constants } from "../project-fs/raw-internal.ts";
 import {
   planEventPack,
   findLiveTaskOwnersByTaskId,

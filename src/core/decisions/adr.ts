@@ -1,5 +1,5 @@
 import { readRegularOwnedText } from "../project-fs/raw-internal.ts";
-import { readdir } from "../project-fs/index.ts";
+import { readdir } from "../project-fs/raw-internal.ts";
 import { parseFrontMatter } from "../pack/front-matter.ts";
 import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
 import {

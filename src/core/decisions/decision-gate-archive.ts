@@ -1,4 +1,4 @@
-import { access } from "../project-fs/index.ts";
+import { access } from "../project-fs/raw-internal.ts";
 import {
   loadDecisionRecord,
   resolveArchiveDecisionRecord,

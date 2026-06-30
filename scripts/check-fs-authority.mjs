@@ -169,9 +169,18 @@ const RAW_FS_MODULES = new Set([
 ]);
 
 const PROJECT_FS_MODULES = new Set([
-  join("src", "core", "project-fs", "index.ts"),
+  join("src", "core", "project-fs", "raw-internal.ts"),
   join("src", "io", "atomic-text.ts"),
 ]);
+
+// Modules that may import from raw-internal.ts or node:fs directly.
+// Only TRUSTED_FS_MODULES are allowed; all others are flagged.
+const RAW_INTERNAL_MODULE = join(
+  "src",
+  "core",
+  "project-fs",
+  "raw-internal.ts",
+);
 
 function capabilitiesForKind(kind) {
   if (kind === "explicit_user_input") {
@@ -324,6 +333,8 @@ const TRUSTED_FS_MODULES = new Set([
   join("src", "core", "project-fs", "control-plane.ts"),
   join("src", "core", "path-safety.ts"),
   join("src", "io", "atomic-text.ts"),
+  join("src", "io", "load.ts"),
+  join("src", "lib", "package-version.ts"),
   join("src", "core", "adapters", "staged-write.ts"),
   join("src", "core", "adapters", "transaction-state-root.ts"),
   // — Authority boundary modules —
@@ -794,11 +805,7 @@ function requiredPathArguments(fnName, node) {
 // ---------------------------------------------------------------------------
 
 function discoverTargetFiles() {
-  const roots = [
-    join("src", "commands"),
-    join("src", "core"),
-    join("src", "cli"),
-  ];
+  const roots = [join("src")];
   const files = [];
   for (const root of roots) {
     const absRoot = resolve(root);
@@ -857,6 +864,27 @@ function checkFile(filePath, allowlist, allowlistUsed) {
   }
 
   if (isAuthorityModule(relFile)) return findings;
+
+  // Phase 3: Non-trusted modules MUST NOT import from raw-internal.ts or
+  // node:fs/node:fs/promises directly. Only TRUSTED_FS_MODULES may do so.
+  for (const stmt of sourceFile.statements) {
+    if (!ts.isImportDeclaration(stmt)) continue;
+    if (!ts.isStringLiteral(stmt.moduleSpecifier)) continue;
+    const specifier = stmt.moduleSpecifier.text;
+    const modulePath = resolveImport(sourceFile.fileName, specifier);
+    const isRawInternal = modulePath === RAW_INTERNAL_MODULE;
+    const isNodeFs = RAW_FS_MODULES.has(specifier);
+    if (!isRawInternal && !isNodeFs) continue;
+    const line =
+      sourceFile.getLineAndCharacterOfPosition(stmt.getStart()).line + 1;
+    findings.push({
+      line,
+      fn: isRawInternal ? "raw-internal import" : "node:fs import",
+      key: `${relFile}#*`,
+      arg: specifier,
+      text: sourceFile.text.split("\n")[line - 1]?.trim() ?? "",
+    });
+  }
 
   const trustedImports = trustedImportsFor(sourceFile);
   const fsImports = fsImportsFor(sourceFile);

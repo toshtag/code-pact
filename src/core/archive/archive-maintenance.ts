@@ -1,4 +1,4 @@
-import { readdir } from "../project-fs/index.ts";
+import { readdir } from "../project-fs/raw-internal.ts";
 import { ArchiveBundleKind } from "../schemas/archive-bundle.ts";
 import {
   archiveBundlesRelDir,

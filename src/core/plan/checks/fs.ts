@@ -1,5 +1,5 @@
-import { access } from "../../project-fs/index.ts";
-import { existsSync } from "../../project-fs/index.ts";
+import { access } from "../../project-fs/raw-internal.ts";
+import { existsSync } from "../../project-fs/raw-internal.ts";
 import {
   resolveSymlinkFreeProjectPath,
   resolveSymlinkFreeProjectPathSync,
