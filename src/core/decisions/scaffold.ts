@@ -2,6 +2,7 @@ import { access } from "../project-fs/index.ts";
 import { atomicWriteText } from "../../io/atomic-text.ts";
 import { assertSafeRelativePath, resolveSymlinkFreeProjectPath } from "../path-safety.ts";
 import { PLAN_ID_PATTERN } from "../schemas/plan-id.ts";
+import { normalizeDecisionRefPath } from "../schemas/decision-ref.ts";
 
 // ---------------------------------------------------------------------------
 // Proposed-ADR stub scaffolding
@@ -105,12 +106,13 @@ export async function writeProposedAdrIfAbsent(
   label: string,
 ): Promise<"created" | "exists"> {
   assertSafeRelativePath(relPath);
-  if (!isUnderDecisionsDir(relPath)) {
+  const normalized = normalizeDecisionRefPath(relPath);
+  if (normalized === null) {
     throw new Error(
-      `Refusing to scaffold "${relPath}": ADR stubs must live under ${DECISIONS_DIR}`,
+      `Refusing to scaffold "${relPath}": ADR stubs must be decision records under ${DECISIONS_DIR}`,
     );
   }
-  const abs = await resolveSymlinkFreeProjectPath(cwd, relPath);
+  const abs = await resolveSymlinkFreeProjectPath(cwd, normalized);
   try {
     await access(abs);
     return "exists";

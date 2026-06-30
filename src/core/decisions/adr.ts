@@ -1,7 +1,7 @@
-import { readFile, readdir } from "../project-fs/index.ts";
+import { readFile, readdir, stat } from "../project-fs/index.ts";
 import { parseFrontMatter } from "../pack/front-matter.ts";
 import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
-import { isDecisionRefPath } from "../schemas/decision-ref.ts";
+import { isDecisionRefPath, normalizeDecisionRefPath } from "../schemas/decision-ref.ts";
 import { resolveRetiredDecisionGate } from "./decision-gate-archive.ts";
 
 /**
@@ -29,7 +29,7 @@ export function isAbsentDecisionsDirError(error: unknown): boolean {
  * `TASK_DECISION_UNRESOLVED` advisory.
  */
 export async function readDecisionAdrFiles(cwd: string): Promise<string[]> {
-  return (await readLiveDecisionDir(cwd)).entries;
+  return (await listLiveDecisionFiles(cwd)).paths;
 }
 
 /**
@@ -40,6 +40,20 @@ export async function readDecisionAdrFiles(cwd: string): Promise<string[]> {
  * ADR. See design/decisions/decision-lifecycle-rfc.md.
  */
 export const NON_DECISION_FILES = new Set(["README.md", "PRUNED.md"]);
+
+type LiveDecisionListing = {
+  present: boolean;
+  paths: string[];
+};
+
+function codedDecisionScanError(message: string, cause?: unknown): Error {
+  const err = new Error(message);
+  (err as NodeJS.ErrnoException).code = "DECISION_SCAN_UNREADABLE";
+  if (cause !== undefined) {
+    (err as Error & { cause?: unknown }).cause = cause;
+  }
+  return err;
+}
 
 /**
  * The shared LIVE `design/decisions/` directory-listing seam: returns whether
@@ -64,16 +78,53 @@ export const NON_DECISION_FILES = new Set(["README.md", "PRUNED.md"]);
  * to keep their degrade-on-any-error contract; that leniency stays at the call
  * site, not pushed down here.
  */
+export async function listLiveDecisionFiles(
+  cwd: string,
+): Promise<LiveDecisionListing> {
+  const out: string[] = [];
+
+  async function walk(relDir: string): Promise<void> {
+    let dirents: import("node:fs").Dirent[];
+    let absDir: string;
+    try {
+      absDir = await resolveSymlinkFreeProjectPath(cwd, relDir);
+      dirents = await readdir(absDir, { withFileTypes: true });
+    } catch (error) {
+      if (relDir === "design/decisions" && isAbsentDecisionsDirError(error)) {
+        throw error;
+      }
+      throw codedDecisionScanError(`Unable to list decision records under ${relDir}`, error);
+    }
+
+    for (const dirent of dirents) {
+      const relPath = `${relDir}/${dirent.name}`;
+      if (dirent.isSymbolicLink()) {
+        continue;
+      }
+      if (dirent.isDirectory()) {
+        await walk(relPath);
+        continue;
+      }
+      if (!dirent.isFile()) continue;
+      if (normalizeDecisionRefPath(relPath) === null) continue;
+      out.push(relPath);
+    }
+  }
+
+  try {
+    await walk("design/decisions");
+    return { present: true, paths: out.sort() };
+  } catch (error) {
+    if (isAbsentDecisionsDirError(error)) return { present: false, paths: [] };
+    throw error;
+  }
+}
+
 export async function readLiveDecisionDir(
   cwd: string,
 ): Promise<{ present: boolean; entries: string[] }> {
-  try {
-    const entries = await readdir(await resolveSymlinkFreeProjectPath(cwd, "design/decisions"));
-    return { present: true, entries: entries.filter((e) => !NON_DECISION_FILES.has(e)) };
-  } catch (error) {
-    if (isAbsentDecisionsDirError(error)) return { present: false, entries: [] };
-    throw error;
-  }
+  const listing = await listLiveDecisionFiles(cwd);
+  return { present: listing.present, entries: listing.paths };
 }
 
 /**
@@ -83,7 +134,8 @@ export async function readLiveDecisionDir(
  * the `plan lint` advisory) at once.
  */
 function matchesTaskId(filename: string, taskId: string): boolean {
-  return filename.endsWith(".md") && filename.includes(taskId);
+  const basename = filename.split("/").pop() ?? filename;
+  return basename.endsWith(".md") && basename.includes(taskId);
 }
 
 /**
@@ -132,7 +184,7 @@ export type AdrAcceptance = "accepted" | "blocked" | "empty" | "unknown_status";
  * read. The gate is self-enforcing — it does not rely on `plan lint`'s
  * `TASK_DECISION_REF_UNSAFE_PATH` advisory having run first.
  */
-export type ConsideredAcceptance = AdrAcceptance | "missing" | "unsafe_path";
+export type ConsideredAcceptance = AdrAcceptance | "missing" | "unsafe_path" | "unreadable";
 
 export type AdrStatus = {
   /** First token after the status label, lowercased; null when none found. */
@@ -283,36 +335,51 @@ export type DecisionResolution = {
 export type ReadResult =
   | { kind: "ok"; content: string }
   | { kind: "missing" }
-  | { kind: "unsafe" };
+  | { kind: "unsafe" }
+  | { kind: "unreadable"; errorCode?: string };
 type RelFileReader = (relPath: string) => Promise<ReadResult>;
 
 function diskReader(cwd: string): RelFileReader {
   return async (relPath) => {
     // NAMESPACE guard (multi-layer defense): the decision read seam ONLY reads
-    // ADRs under `design/decisions/*.md` (top-level only). The Task/phase-import schemas
+    // .md decision records under `design/decisions/`. The Task/phase-import schemas
     // already hard-fail a `decision_refs: [.env]` at parse time, but this seam
     // re-validates so a value reaching here by any other route (legacy plan
     // YAML parsed before the schema tightened, a direct programmatic caller, a
     // future call site) can NEVER read `.env` / a credential file and have it
     // classified "accepted" or rendered into the pack. Out-of-namespace →
-    // `unsafe` (never read). Filename-scan paths are `design/decisions/<x>.md`
-    // and pass this; README/PRUNED are filtered upstream by NON_DECISION_FILES.
-    if (!isDecisionRefPath(relPath)) {
+    // `unsafe` (never read). Filename-scan paths are canonical full paths under
+    // `design/decisions/` and pass this; README/PRUNED are filtered upstream.
+    const normalized = normalizeDecisionRefPath(relPath);
+    if (normalized === null || !isDecisionRefPath(normalized)) {
       return { kind: "unsafe" };
     }
     let abs: string;
     try {
       // Structural path-safety + ownership guard. Throws on `..`, absolute
       // paths, drive letters, and any symlink component.
-      abs = await resolveSymlinkFreeProjectPath(cwd, relPath);
+      abs = await resolveSymlinkFreeProjectPath(cwd, normalized);
     } catch {
       return { kind: "unsafe" };
     }
     try {
+      const s = await stat(abs);
+      if (!s.isFile()) {
+        return { kind: "unreadable", errorCode: "ENOTFILE" };
+      }
       return { kind: "ok", content: await readFile(abs, "utf8") };
     } catch (error) {
       if (isAbsentDecisionsDirError(error)) return { kind: "missing" };
-      throw error;
+      return {
+        kind: "unreadable",
+        errorCode:
+          error !== null &&
+          typeof error === "object" &&
+          "code" in error &&
+          typeof (error as { code?: unknown }).code === "string"
+            ? (error as { code: string }).code
+            : undefined,
+      };
     }
   };
 }
@@ -330,17 +397,13 @@ function diskReader(cwd: string): RelFileReader {
  * design-docs-ephemeral retired-decision fallback (step 5) is added in
  * gate-aware / lint-aware WRAPPERS that compose this primitive — never inside
  * it, so the pack/quality consumers never start rendering or classifying a
- * retired `.code-pact/state` record. And note the SCOPE MISMATCH the step-5
- * wrappers must honor: a `.code-pact/state` decision-state record is top-level
- * `design/decisions/*.md` EXACT-MATCH only, so a nested `decision_refs` with no
- * live file must stay fail-closed — never resolved from a state record.
+ * retired `.code-pact/state` record. The step-5 wrappers must still honor exact
+ * canonical-ref matching: a missing live `decision_refs` target is released only
+ * by a state record for the same normalized `.md` path under `design/decisions/`.
  *
- * Error contract: ENOENT/ENOTDIR → `{ kind: "missing" }` (no file at that path
- * — `isAbsentDecisionsDirError` covers both); ANY OTHER read error THROWS
- * (matching the gate's fail-closed stance). Callers that are OPTIONAL context
- * sources (the pack loaders) must wrap this in their own `catch → skip` to
- * preserve their degrade-on-any-error contract; they must NOT push that leniency
- * down here.
+ * Error contract: ENOENT/ENOTDIR → `{ kind: "missing" }`; unsafe namespace or
+ * symlink escapes → `{ kind: "unsafe" }`; non-regular/unreadable targets →
+ * `{ kind: "unreadable" }`, not raw errno leakage.
  */
 export async function readLiveDecisionFile(
   cwd: string,
@@ -361,9 +424,28 @@ function whyNotAccepted(c: ConsideredAdr): string {
       return `${c.path} (file not found)`;
     case "unsafe_path":
       return `${c.path} (unsafe path — escapes the project root)`;
+    case "unreadable":
+      return `${c.path} (unreadable decision file)`;
     default:
       return c.path;
   }
+}
+
+function listingErrorResolution(taskId: string, via: DecisionResolution["via"], error: unknown): DecisionResolution {
+  const code =
+    error !== null &&
+    typeof error === "object" &&
+    "code" in error &&
+    typeof (error as { code?: unknown }).code === "string"
+      ? (error as { code: string }).code
+      : "DECISION_SCAN_UNREADABLE";
+  return {
+    resolved: false,
+    considered: [],
+    via,
+    dirPresent: true,
+    reason: `Unable to scan design/decisions/ for task "${taskId}" (${code})`,
+  };
 }
 
 async function resolveWith(
@@ -400,6 +482,10 @@ async function resolveWith(
         }
         continue;
       }
+      if (r.kind === "unreadable") {
+        considered.push({ path, status: null, accepted: false, acceptance: "unreadable" });
+        continue;
+      }
       const { acceptance, status } = classifyAdr(r.content);
       considered.push({
         path,
@@ -424,7 +510,7 @@ async function resolveWith(
   // Filename scan: any accepted match resolves (preserves substring-collision compat).
   const considered: ConsideredAdr[] = [];
   for (const f of dir.entries.filter((e) => matchesTaskId(e, taskId))) {
-    const rel = `design/decisions/${f}`;
+    const rel = f;
     const r = await read(rel);
     if (r.kind !== "ok") {
       // Internally-constructed path, so this is a race (file removed between
@@ -433,7 +519,12 @@ async function resolveWith(
         path: rel,
         status: null,
         accepted: false,
-        acceptance: r.kind === "unsafe" ? "unsafe_path" : "missing",
+        acceptance:
+          r.kind === "unsafe"
+            ? "unsafe_path"
+            : r.kind === "unreadable"
+              ? "unreadable"
+              : "missing",
       });
       continue;
     }
@@ -475,7 +566,21 @@ export async function resolveDecisionGate(
   taskId: string,
   decisionRefs?: string[],
 ): Promise<DecisionResolution> {
-  const dir = await readLiveDecisionDir(cwd).catch(() => ({ present: true, entries: [] }));
+  if (decisionRefs && decisionRefs.length > 0) {
+    return resolveWith(
+      taskId,
+      decisionRefs,
+      { present: true, entries: [] },
+      diskReader(cwd),
+      (ref) => resolveRetiredDecisionGate(cwd, ref).then((x) => x.kind === "released"),
+    );
+  }
+  let dir: { present: boolean; entries: string[] };
+  try {
+    dir = await readLiveDecisionDir(cwd);
+  } catch (error) {
+    return listingErrorResolution(taskId, "filename-scan", error);
+  }
   return resolveWith(taskId, decisionRefs, dir, diskReader(cwd), (ref) =>
     resolveRetiredDecisionGate(cwd, ref).then((x) => x.kind === "released"),
   );
@@ -490,7 +595,13 @@ export async function resolveDecisionGate(
 export async function makeDecisionResolver(
   cwd: string,
 ): Promise<{ resolve(taskId: string, decisionRefs?: string[]): Promise<DecisionResolution> }> {
-  const dir = await readLiveDecisionDir(cwd).catch(() => ({ present: true, entries: [] }));
+  let dir: { present: boolean; entries: string[] } | null = null;
+  let listingError: unknown = null;
+  try {
+    dir = await readLiveDecisionDir(cwd);
+  } catch (error) {
+    listingError = error;
+  }
   const cache = new Map<string, ReadResult>();
   const base = diskReader(cwd);
   const cachedRead: RelFileReader = async (relPath) => {
@@ -500,10 +611,29 @@ export async function makeDecisionResolver(
     return content;
   };
   return {
-    resolve: (taskId, decisionRefs) =>
-      resolveWith(taskId, decisionRefs, dir, cachedRead, (ref) =>
+    resolve: (taskId, decisionRefs) => {
+      if (decisionRefs && decisionRefs.length > 0) {
+        return resolveWith(
+          taskId,
+          decisionRefs,
+          { present: true, entries: [] },
+          cachedRead,
+          (ref) => resolveRetiredDecisionGate(cwd, ref).then((x) => x.kind === "released"),
+        );
+      }
+      if (dir === null) {
+        return Promise.resolve(
+          listingErrorResolution(
+            taskId,
+            "filename-scan",
+            listingError,
+          ),
+        );
+      }
+      return resolveWith(taskId, decisionRefs, dir, cachedRead, (ref) =>
         resolveRetiredDecisionGate(cwd, ref).then((x) => x.kind === "released"),
-      ),
+      );
+    },
   };
 }
 
@@ -515,14 +645,10 @@ export async function makeDecisionResolver(
  * Non-`.md` entries (e.g. `.DS_Store`) are ignored; returns `[]` when the
  * decisions directory is absent.
  *
- * Scope (deliberate): this is a **flat, top-level** scan of `design/decisions/`
- * — it does not recurse into subdirectories. The decision *gate*
- * ({@link resolveDecisionGate}) reads nested `decision_refs` paths (e.g.
- * `design/decisions/p3/adr.md`) just fine, so a nested ADR with a typo'd status
- * still BLOCKS the gate correctly; only the `ADR_STATUS_UNRECOGNIZED` advisory
- * — which warns about the typo before you hit the block — does not see nested
- * files yet. Recursing here is a possible future refinement; it was left out of
- * the trust-hardening RFC to avoid a behavior change at release time.
+ * Scope: recursive scan of regular `.md` decision records under
+ * `design/decisions/`. The same canonical path contract is used by the gate,
+ * context pack, retire/prune, and archive fallback, so quality advisories cover
+ * nested ADR paths as first-class decision records.
  */
 export async function classifyDecisionAdrs(cwd: string): Promise<
   {
@@ -538,8 +664,7 @@ export async function classifyDecisionAdrs(cwd: string): Promise<
     status: string | null;
     statusSource: AdrStatus["source"];
   }[] = [];
-  for (const name of await readDecisionAdrFiles(cwd)) {
-    if (!name.endsWith(".md")) continue;
+  for (const path of await readDecisionAdrFiles(cwd)) {
     // Route through the project-contained read seam (resolveWithinProject) and
     // degrade on any error: a `design/decisions` symlinked outside the project
     // is `unsafe` → skip, and an UNREADABLE entry — e.g. a directory named
@@ -548,7 +673,7 @@ export async function classifyDecisionAdrs(cwd: string): Promise<
     // errno (exit 3). Best-effort surface, like the pack/lint decision loaders.
     let content: string;
     try {
-      const r = await readLiveDecisionFile(cwd, `design/decisions/${name}`);
+      const r = await readLiveDecisionFile(cwd, path);
       if (r.kind !== "ok") continue;
       content = r.content;
     } catch {
@@ -556,7 +681,7 @@ export async function classifyDecisionAdrs(cwd: string): Promise<
     }
     const { acceptance, status } = classifyAdr(content);
     out.push({
-      file: `design/decisions/${name}`,
+      file: path,
       acceptance,
       status: status.word,
       statusSource: status.source,

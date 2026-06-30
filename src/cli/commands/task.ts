@@ -496,7 +496,7 @@ async function cmdTaskAdd(
     };
 
     // Validate --decision-ref at the CLI boundary. A bad value (`.env`, a
-    // traversal, a nested path) is USER INPUT — surface it as CONFIG_ERROR /
+    // traversal, README/PRUNED) is USER INPUT — surface it as CONFIG_ERROR /
     // exit 2, not as the exit-3 internal fault a downstream Phase.parse ZodError
     // would become (which has no `code` and escapes the catch below). The schema
     // re-validates on write; this is the early, honest boundary error. The
@@ -507,7 +507,7 @@ async function cmdTaskAdd(
         const reason = decisionRefPathReason(ref);
         if (reason !== "") {
           emitConfigError(
-            `task add: invalid --decision-ref "${ref}": ${reason} (expected design/decisions/*.md, top-level)`,
+            `task add: invalid --decision-ref "${ref}": ${reason} (expected a .md record under design/decisions/)`,
             json,
           );
           return 2;

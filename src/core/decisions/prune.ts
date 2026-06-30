@@ -138,8 +138,8 @@ export function decisionLinksTo(content: string, target: string): boolean {
  *  3. **No live decision depends on it** — no `proposed`/`draft` decision links
  *     to it (a decision still being made may build on this rationale).
  *
- * The target must be a **readable, top-level `design/decisions/<name>.md`**
- * record (not README/PRUNED, not an outside/traversing/nested path) that is an
+ * The target must be a **readable `.md` decision record under `design/decisions/`**
+ * record (not README/PRUNED, not an outside/traversing path) that is an
  * **accepted** decision — `decision prune` retires *settled* records, never a
  * `proposed`/`draft`/`rejected`/`superseded`/empty/unknown one. A status-less
  * ADR is treated as accepted, per the existing lenient classifier.
@@ -157,7 +157,7 @@ export async function evaluatePrune(
       blocks: [
         {
           gate: "target_invalid",
-          detail: `"${rawTarget}" is not a prunable decision — expected a design/decisions/<name>.md record (not README.md / PRUNED.md, not an outside or traversing path)`,
+          detail: `"${rawTarget}" is not a prunable decision — expected a design/decisions/**/*.md record (not README.md / PRUNED.md, not an outside or traversing path)`,
         },
       ],
       referencing_tasks: [],
@@ -248,6 +248,13 @@ export async function evaluatePrune(
       ) {
         try {
           const res = await resolver.resolve(task.id, task.decision_refs);
+          if (res.reason.startsWith("Unable to scan design/decisions/")) {
+            blocks.push({
+              gate: "decision_scan_unreadable",
+              detail: res.reason,
+            });
+            continue;
+          }
           viaGate = res.considered.some(
             c => normalizePrunedDecisionPath(c.path) === decision,
           );
@@ -305,7 +312,7 @@ export async function evaluatePrune(
   }
   for (const name of decisionNames) {
     if (!name.endsWith(".md")) continue;
-    const otherPath = `design/decisions/${name}`;
+    const otherPath = name;
     if (otherPath === decision) continue;
     let other: string;
     try {

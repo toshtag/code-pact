@@ -614,15 +614,22 @@
     "authority": "symlink_free_contained",
     "reason": "snapshot file path is resolved through resolveSymlinkFreeProjectPath before reading"
   },
-  "src/core/decisions/adr.ts#diskReader": {
-    "operation": "readFile",
-    "authority": "symlink_free_contained",
-    "reason": "ADR path is resolved through resolveSymlinkFreeProjectPath before reading"
-  },
-  "src/core/decisions/adr.ts#readLiveDecisionDir": {
+  "src/core/decisions/adr.ts#diskReader": [
+    {
+      "operation": "stat",
+      "authority": "symlink_free_contained",
+      "reason": "ADR path is resolved through resolveSymlinkFreeProjectPath before regular-file verification"
+    },
+    {
+      "operation": "readFile",
+      "authority": "symlink_free_contained",
+      "reason": "ADR path is resolved through resolveSymlinkFreeProjectPath before reading"
+    }
+  ],
+  "src/core/decisions/adr.ts#walk": {
     "operation": "readdir",
     "authority": "symlink_free_contained",
-    "reason": "decisions directory is the fixed design/decisions namespace resolved symlink-free before listing"
+    "reason": "decisions directory and nested child directories are resolved through resolveSymlinkFreeProjectPath before listing"
   },
   "src/core/decisions/decision-gate-archive.ts#decisionFilePresence": {
     "operation": "access",

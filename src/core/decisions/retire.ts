@@ -135,6 +135,13 @@ export async function collectRetireReferences(
       ) {
         try {
           const res = await resolver.resolve(task.id, task.decision_refs);
+          if (res.reason.startsWith("Unable to scan design/decisions/")) {
+            blocks.push({
+              gate: "decision_scan_unreadable",
+              detail: res.reason,
+            });
+            continue;
+          }
           viaFilenameScan = res.considered.some(
             c => normalizePrunedDecisionPath(c.path) === decision,
           );
@@ -254,7 +261,7 @@ async function sharedExternalGates(
   }
   for (const name of decisionNames) {
     if (!name.endsWith(".md")) continue;
-    const otherPath = `design/decisions/${name}`;
+    const otherPath = name;
     if (otherPath === decision) continue;
     let other: string;
     try {
@@ -306,7 +313,7 @@ export async function evaluateRetire(
       blocks: [
         {
           gate: "target_invalid",
-          detail: `"${rawTarget}" is not a retireable decision — expected a design/decisions/<name>.md record (not README.md / PRUNED.md, not an outside or traversing path)`,
+          detail: `"${rawTarget}" is not a retireable decision — expected a .md decision record under design/decisions/ (not README.md / PRUNED.md, not an outside or traversing path)`,
         },
       ],
       referencing_tasks: [],

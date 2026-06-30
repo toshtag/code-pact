@@ -133,15 +133,16 @@ export async function loadDecisions(
 
   const docs: DecisionDoc[] = [];
   for (const entry of entries.sort()) {
+    const basename = entry.split("/").pop() ?? entry;
     if (!entry.endsWith(".md")) continue;
-    if (!allDecisions && !entry.includes(taskId)) continue;
+    if (!allDecisions && !basename.includes(taskId)) continue;
 
     // Live per-file read seam; missing/unsafe → skip (identical to the prior
     // readWithinProject → null → skip). A non-ENOENT read error throws from the
     // seam; catch it to preserve the optional-source skip contract.
     let raw: string;
     try {
-      const r = await readLiveDecisionFile(cwd, `design/decisions/${entry}`);
+      const r = await readLiveDecisionFile(cwd, entry);
       if (r.kind !== "ok") continue; // unsafe (e.g. symlink escape) or missing
       raw = r.content;
     } catch {
@@ -215,11 +216,7 @@ export async function loadDeclaredDecisions(
       continue; // unexpected read error — skip (optional source)
     }
     const { body } = parseFrontMatter(raw);
-    // Use just the basename for the section header so the rendered
-    // pack matches the existing "Related Decisions" presentation
-    // (which keys by filename, not full path).
-    const filename = ref.split("/").pop() ?? ref;
-    docs.push({ filename, body });
+    docs.push({ filename: ref, body });
   }
   return docs;
 }

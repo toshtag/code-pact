@@ -39,8 +39,8 @@ export const Task = z.object({
   // TASK_DECISION_REF_*, TASK_ACCEPTANCE_REF_*), not here.
   //
   // EXCEPTION — `decision_refs` carries a NAMESPACE contract enforced at
-  // parse time (DecisionRefPath: design/decisions/*.md top-level, README/PRUNED
-  // excluded). It is NOT a lint-only advisory: a `decision_refs: [.env]`
+  // parse time (DecisionRefPath: .md records under design/decisions/,
+  // README/PRUNED excluded). It is NOT a lint-only advisory: a `decision_refs: [.env]`
   // value reaches the gate (lenient accept → release) and the context pack
   // (file body rendered). Hard-failing here stops it at YAML parse, BEFORE
   // any read; the gate/loader re-validate (multi-layer, never schema-only).

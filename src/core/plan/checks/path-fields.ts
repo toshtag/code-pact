@@ -108,7 +108,7 @@ export function detectTaskDecisionRefUnsafePath(phases: PhaseEntry[]): PlanIssue
           issues.push({
             code: "TASK_DECISION_REF_UNSAFE_PATH",
             severity: "error",
-            message: `Task "${task.id}" decision_refs path "${p}" is not a valid decision reference (design/decisions/*.md, top-level only): ${reason}`,
+            message: `Task "${task.id}" decision_refs path "${p}" is not a valid decision reference (a .md record under design/decisions/): ${reason}`,
             file: ref.path,
             phase_id: phase.id,
             task_id: task.id,
@@ -472,7 +472,7 @@ export async function detectTaskAcceptanceRefNotFound(
   // acceptance_refs (which routinely point at docs / phase YAML). A DONE task's
   // missing acceptance_ref stays a PR-A advisory for ANY target (unchanged).
   // design-docs-ephemeral (step 5): a NOT-DONE task's missing acceptance_ref softens
-  // to advisory ONLY when the target is a top-level `design/decisions/*.md` backed by
+  // to advisory ONLY when the target is a `.md` decision record under `design/decisions/` backed by
   // a VALID record of ANY status (predicate B) — acceptance_refs is a
   // reference-integrity annotation, not a gate release, so a blocked record still
   // proves intentional archival. A non-decision target (`docs/...`) never softens.

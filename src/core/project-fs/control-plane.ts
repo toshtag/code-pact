@@ -47,7 +47,7 @@ export async function readOwnedPhaseRawByPath(
 
 /**
  * Read a decision ADR markdown from the project. The path must be a valid
- * DecisionRefPath (under `design/decisions/*.md`, top-level only). Symlink-free
+ * DecisionRefPath (a nested `.md` record under `design/decisions/`). Symlink-free
  * resolution rejects in-project symlink aliases before any read.
  */
 export async function readOwnedDecisionRaw(
@@ -56,7 +56,7 @@ export async function readOwnedDecisionRaw(
 ): Promise<string> {
   if (!isDecisionRefPath(decisionPath)) {
     const err = new Error(
-      `path "${decisionPath}" is not a valid decision reference (must be under design/decisions/*.md)`,
+      `path "${decisionPath}" is not a valid decision reference (must be under design/decisions/**/*.md)`,
     );
     (err as NodeJS.ErrnoException).code = "PATH_NOT_OWNED";
     throw err;

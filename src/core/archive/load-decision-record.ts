@@ -20,7 +20,7 @@ import {
 // file — never caller discipline) live in `decisions/decision-gate-archive.ts`.
 // `loadDecisionRecord` knows nothing about live files; callers always pass the
 // CANONICAL ref (`normalizeDecisionRef(raw)`) — a ref that does not normalize
-// (nested ADR, `docs/...`, traversal, README/PRUNED) gets no lookup at all.
+// (`docs/...`, traversal, README/PRUNED) gets no lookup at all.
 // ---------------------------------------------------------------------------
 
 /** Outcome of loading one decision-state record off disk. `invalid` is NEVER
@@ -35,9 +35,10 @@ export type LoadDecisionRecordResult =
  * Read `.code-pact/state/archive/decisions/<stem>-<hash8>.json` for `canonicalRef`,
  * JSON-parse, and `DecisionStateRecord.parse()`-validate. ENOENT → `absent`; any
  * other read error (EACCES/EISDIR) or a JSON/schema failure → `invalid` (never
- * collapsed to `absent`). `canonicalRef` MUST be a normalized top-level
- * `design/decisions/*.md` (the caller's `normalizeDecisionRef`); the schema's
- * `DecisionRefPath` would reject anything else at parse time anyway.
+ * collapsed to `absent`). `canonicalRef` MUST be a normalized
+ * `.md` decision record path under `design/decisions/` (the caller's
+ * `normalizeDecisionRef`); the schema's `DecisionRefPath` would reject anything
+ * else at parse time anyway.
  */
 /**
  * Read the LOOSE decision record's raw bytes off disk (no parsing). ENOENT →

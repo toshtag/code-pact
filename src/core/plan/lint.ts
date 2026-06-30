@@ -459,15 +459,15 @@ export async function detectAdrAcceptedBodyThin(
   cwd: string,
 ): Promise<PlanIssue[]> {
   const issues: PlanIssue[] = [];
-  for (const name of await readDecisionAdrFiles(cwd)) {
-    if (!name.endsWith(".md")) continue;
+  for (const path of await readDecisionAdrFiles(cwd)) {
+    if (!path.endsWith(".md")) continue;
     // Project-contained read + degrade-on-error: a `design/decisions` symlinked
     // outside is `unsafe` → skip; an unreadable entry (e.g. a directory named
     // `*.md` → readFile EISDIR) is caught and skipped, not thrown uncoded which
     // would crash `plan lint` (exit 3). Best-effort advisory, like the loaders.
     let content: string;
     try {
-      const r = await readLiveDecisionFile(cwd, `design/decisions/${name}`);
+      const r = await readLiveDecisionFile(cwd, path);
       if (r.kind !== "ok") continue;
       content = r.content;
     } catch {
@@ -495,8 +495,8 @@ export async function detectAdrAcceptedBodyThin(
         code: "ADR_ACCEPTED_BODY_THIN",
         severity: "warning",
         affects_exit: false,
-        message: `ADR "design/decisions/${name}" is accepted but its body is nearly empty (${bodyChars} chars, no sections) — an accepted decision with no recorded reasoning. Add the decision and its rationale, or revert the status to proposed.`,
-        file: `design/decisions/${name}`,
+        message: `ADR "${path}" is accepted but its body is nearly empty (${bodyChars} chars, no sections) — an accepted decision with no recorded reasoning. Add the decision and its rationale, or revert the status to proposed.`,
+        file: path,
         details: {
           body_chars: bodyChars,
           heading_count: headingCount,

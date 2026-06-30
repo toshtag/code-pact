@@ -204,7 +204,7 @@ export async function runDecisionRetire(opts: DecisionRetireOptions): Promise<De
     return {
       kind: "ineligible",
       decision: null,
-      blocks: [{ gate: "target_invalid", detail: `"${rawPath}" is not a retireable decision (expected a top-level design/decisions/<name>.md)` }],
+      blocks: [{ gate: "target_invalid", detail: `"${rawPath}" is not a retireable decision (expected a .md decision record under design/decisions/)` }],
     };
   }
 

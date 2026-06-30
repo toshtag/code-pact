@@ -29,13 +29,13 @@ DEFAULT: it reports the eligibility verdict and the COMPLETE inbound-link rewrit
 plan, and writes nothing. Pass --write to execute that plan: after a preflight
 that writes nothing, append the design/decisions/PRUNED.md tombstone row, rewrite
 each inbound link (README index row → tombstone, body link → delink), then delete
-the record last. The target must be a readable, top-level, accepted
-design/decisions/<name>.md record.
+the record last. The target must be a readable, accepted .md decision record
+under design/decisions/.
 
 Eligible → exit 0 (dry-run reports the plan; --write applies it). Ineligible →
 exit 2 with error code DECISION_PRUNE_NOT_ELIGIBLE and
 every applicable failing gate under data.blocks[] (the link-rewrite gates are
-evaluated once the target itself is a readable, accepted, top-level record). The
+evaluated once the target itself is a readable, accepted decision record). The
 verdict is identical for dry-run and --write. If the tree no longer matches the
 plan BEFORE the commit starts, --write aborts with DECISION_PRUNE_PLAN_STALE
 (exit 2) and writes nothing. Drift or an I/O failure DURING the commit returns
@@ -62,7 +62,7 @@ Examples:
 const RETIRE_HELP = `Usage: code-pact decision retire <path> [--write] [--json]
 
 Retire a decision of ANY status: write its decision-state record durably,
-then delete the design/decisions/<name>.md. DRY-RUN BY DEFAULT — it reports the
+then delete the design/decisions/<path>.md record. DRY-RUN BY DEFAULT — it reports the
 eligibility verdict and writes nothing. Pass --write to apply.
 
 Unlike \`decision prune\` (accepted-only, appends PRUNED.md, rewrites links),
@@ -141,7 +141,7 @@ export async function cmdDecision(
     const write = values.write === true;
     const target = positionals[0];
     if (!target) {
-      emitError(json, "CONFIG_ERROR", "decision prune requires a decision path (design/decisions/<name>.md)");
+      emitError(json, "CONFIG_ERROR", "decision prune requires a decision path (design/decisions/<path>.md)");
       return 2;
     }
     if (positionals.length > 1) {
@@ -230,7 +230,7 @@ export async function cmdDecision(
     const write = values.write === true;
     const target = positionals[0];
     if (!target) {
-      emitError(json, "CONFIG_ERROR", "decision retire requires a decision path (design/decisions/<name>.md)");
+      emitError(json, "CONFIG_ERROR", "decision retire requires a decision path (design/decisions/<path>.md)");
       return 2;
     }
     if (positionals.length > 1) {

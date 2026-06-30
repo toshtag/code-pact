@@ -4,6 +4,7 @@ import {
   assertSafeRelativePath,
   resolveSymlinkFreeProjectPath,
 } from "../path-safety.ts";
+import { normalizeDecisionRefPath } from "../schemas/decision-ref.ts";
 
 /**
  * Normalize a repo-relative path so a ledger entry and a `decision_refs` value
@@ -17,43 +18,30 @@ export function normalizeRelPath(p: string): string {
   return posix.normalize(fwd).replace(/^(?:\.\/)+/, "");
 }
 
-/** README / the ledger itself are never decisions, so never pruned-decision entries. */
-const NON_DECISION_LEDGER_PATHS = new Set([
-  "design/decisions/README.md",
-  "design/decisions/PRUNED.md",
-]);
-
 /**
  * Constrain a raw `PRUNED.md` entry to a *pruned decision path*, returning its
  * normalized form or `null` to reject it. `PRUNED.md` is user-editable, so —
  * unlike a `decision_refs` value, which is validated upstream — a ledger entry
- * is re-validated here and confined to a **top-level** `design/decisions/*.md`
+ * is re-validated here and confined to nested `.md` records under `design/decisions/`
  * record. This is what stops the ledger from being a licence to silence an
- * arbitrary missing file (a `docs/` page, a `design/phases/*.yaml`, a `../`
- * traversal, a nested ADR): only a real top-level decision record can be
+ * arbitrary missing file (a `docs/` page, a `design/phases/*.yaml`, or a `../`
+ * traversal): only a decision record can be
  * tombstoned, never `README.md` / `PRUNED.md` itself.
  */
 export function normalizePrunedDecisionPath(raw: string): string | null {
-  const fwd = raw.replace(/\\/g, "/").replace(/^(?:\.\/)+/, "");
+  const fwd = raw.replace(/^(?:\.\/)+/, "");
   try {
     assertSafeRelativePath(fwd); // reject traversal / absolute / drive paths
   } catch {
     return null;
   }
   const normalized = posix.normalize(fwd).replace(/^(?:\.\/)+/, "");
-  if (!normalized.startsWith("design/decisions/")) return null;
-  if (!normalized.endsWith(".md")) return null;
+  if (normalizeDecisionRefPath(normalized) === null) return null;
   // Reject characters that cannot survive the ledger's markdown-table / code-span
   // round-trip: a pipe ends a cell, a backtick ends the path code span, and a
   // CR/LF ends the row. Such a path could never be parsed back by
   // `readPrunedLedger`, so it is not a valid ledger entry (nor a prune target).
   if (/[\r\n|`]/.test(normalized)) return null;
-  if (NON_DECISION_LEDGER_PATHS.has(normalized)) return null;
-  // Top-level records only. A nested ADR (`design/decisions/x/y.md`) is not a
-  // prune target: the gate scan that protects pruning is a flat top-level scan,
-  // so allowing nested here would let a nested dependant slip past it. Nested
-  // support is a deliberate future extension, not a silent gap.
-  if (normalized.slice("design/decisions/".length).includes("/")) return null;
   return normalized;
 }
 
