@@ -1,21 +1,32 @@
+import { createHash, randomUUID } from "node:crypto";
 import {
-  mkdir,
-  open,
-  readFile,
-  readdir,
-  rename,
-  stat,
-  unlink,
-} from "../project-fs/index.ts";
-import { randomUUID } from "node:crypto";
-import { atomicWriteText } from "../../io/atomic-text.ts";
+  mkdir as rawMkdir,
+  open as rawOpen,
+  readFile as rawReadFile,
+  readdir as rawReaddir,
+  rename as rawRename,
+  unlink as rawUnlink,
+  lstat as rawLstat,
+} from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
-import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
+import { atomicWriteText } from "../../io/atomic-text.ts";
+import {
+  readFile as dataReadFile,
+  rename as dataRename,
+  stat as dataStat,
+  unlink as dataUnlink,
+} from "../project-fs/index.ts";
+import { assertSafeRelativePath, pathTraversesSymlink } from "../path-safety.ts";
+import {
+  adapterTransactionProjectDir,
+  canonicalProjectRoot,
+  LEGACY_TRANSACTION_DIR_REL,
+} from "./transaction-state-root.ts";
 
 /**
- * Error code for a partial mutation: some files were committed but a later
- * rename failed. Backups are restored, but callers should treat the on-disk
- * state as inconsistent and surface this to the user.
+ * Error code for a partial mutation: some filesystem operation started, but a
+ * later operation failed. Recovery evidence is preserved when automatic rollback
+ * cannot safely converge the state.
  */
 export class PartialMutationError extends Error {
   code = "PARTIAL_MUTATION" as const;
@@ -65,51 +76,66 @@ export class TransactionRecoveryError extends Error {
   }
 }
 
+type FileState =
+  | { kind: "absent" }
+  | { kind: "present"; sha256: string };
+
+type JournalStatus = "prepared" | "committed" | "cleanup_pending";
+
+type AdapterTransactionEntryV2 = {
+  operation: "write" | "delete";
+  target_kind: "adapter_transaction_target";
+  target_rel_path: string;
+  pre_state: FileState;
+  post_state: FileState;
+  index: number;
+};
+
+type AdapterTransactionJournalV2 = {
+  schema_version: 2;
+  id: string;
+  project_root: string;
+  status: JournalStatus;
+  entries: AdapterTransactionEntryV2[];
+  cleanup_failures?: string[];
+};
+
 interface StagedEntry {
   kind: "write" | "delete";
   tempPath: string;
   finalPath: string;
   backupPath: string;
-  hadOriginal: boolean;
-}
-
-type JournalEntryState = "prepared" | "backup_done" | "final_done";
-
-interface JournalEntry {
-  kind: "write" | "delete";
-  tempRelPath: string | null;
-  finalRelPath: string;
-  backupRelPath: string;
-  hadOriginal: boolean;
-  state: JournalEntryState;
-}
-
-interface TransactionJournal {
-  schema_version: 1;
-  id: string;
-  status: "prepared" | "committed" | "cleanup_pending";
-  entries: JournalEntry[];
-  cleanup_failures?: string[];
+  relPath: string;
+  preState: FileState;
+  postState: FileState;
 }
 
 export type AdapterTransactionRecoveryResult = {
   recovered: string[];
   cleaned: string[];
+  rejected: string[];
 };
 
 type FileTransactionOptions = {
   cwd?: string;
 };
 
-const TRANSACTION_DIR_REL = join(
-  ".code-pact",
-  "state",
-  "adapter-transactions",
-);
+const LEGACY_REJECTION = "LEGACY_TRANSACTION_JOURNAL_UNTRUSTED";
+
+export function assertNoUntrustedAdapterTransactionJournals(
+  result: AdapterTransactionRecoveryResult,
+): void {
+  if (result.rejected.length === 0) return;
+  const err = new Error(
+    "Legacy project-local adapter transaction journals are untrusted and cannot be recovered automatically. Inspect .code-pact/state/adapter-transactions manually before retrying.",
+  );
+  (err as NodeJS.ErrnoException).code = LEGACY_REJECTION;
+  throw err;
+}
 
 async function pathExists(path: string): Promise<boolean> {
   try {
-    await stat(path);
+    await dataStat(path);
     return true;
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return false;
@@ -117,22 +143,10 @@ async function pathExists(path: string): Promise<boolean> {
   }
 }
 
-function toRel(cwd: string, absPath: string): string {
-  const rel = relative(cwd, absPath).split(sep).join("/");
-  if (rel.startsWith("../") || rel === ".." || rel.startsWith("/")) {
-    throw new Error(`transaction path is outside cwd: ${absPath}`);
-  }
-  return rel;
-}
-
-async function fromRel(cwd: string, relPath: string): Promise<string> {
-  return resolveSymlinkFreeProjectPath(cwd, relPath);
-}
-
 async function syncDirectory(dir: string): Promise<void> {
-  let handle: Awaited<ReturnType<typeof open>> | null = null;
+  let handle: Awaited<ReturnType<typeof rawOpen>> | null = null;
   try {
-    handle = await open(dir, "r");
+    handle = await rawOpen(dir, "r");
     await handle.sync();
   } catch {
     // Directory fsync is not supported on every platform/filesystem.
@@ -142,58 +156,109 @@ async function syncDirectory(dir: string): Promise<void> {
 }
 
 async function durableWriteJson(path: string, value: unknown): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
+  await rawMkdir(dirname(path), { recursive: true, mode: 0o700 });
   const tmp = `${path}.tmp-${randomUUID()}`;
-  let handle: Awaited<ReturnType<typeof open>> | null = null;
+  let handle: Awaited<ReturnType<typeof rawOpen>> | null = null;
   try {
-    handle = await open(tmp, "wx");
+    handle = await rawOpen(tmp, "wx", 0o600);
     await handle.writeFile(`${JSON.stringify(value, null, 2)}\n`, "utf8");
     await handle.sync();
     await handle.close();
     handle = null;
-    await rename(tmp, path);
+    await rawRename(tmp, path);
     await syncDirectory(dirname(path));
   } catch (err) {
     await handle?.close().catch(() => {});
-    await unlink(tmp).catch(() => {});
+    await rawUnlink(tmp).catch(() => {});
     throw err;
   }
 }
 
 async function removeFileIfExists(path: string): Promise<void> {
-  await unlink(path).catch(err => {
+  await dataUnlink(path).catch(err => {
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
   });
 }
 
 async function cleanupJournal(path: string): Promise<void> {
-  await removeFileIfExists(path);
+  await rawUnlink(path).catch(err => {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+  });
   await syncDirectory(dirname(path));
 }
 
+function sha256Bytes(bytes: Buffer): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+async function hashFile(path: string): Promise<FileState> {
+  try {
+    const bytes = await dataReadFile(path);
+    return { kind: "present", sha256: sha256Bytes(Buffer.from(bytes)) };
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      return { kind: "absent" };
+    }
+    throw err;
+  }
+}
+
+function sameState(actual: FileState, expected: FileState): boolean {
+  if (actual.kind !== expected.kind) return false;
+  if (actual.kind === "absent") return true;
+  return expected.kind === "present" && actual.sha256 === expected.sha256;
+}
+
+function stateLabel(state: FileState): string {
+  return state.kind === "absent" ? "absent" : `sha256:${state.sha256}`;
+}
+
+function toRel(cwd: string, absPath: string): string {
+  const rel = relative(cwd, absPath).split(sep).join("/");
+  if (rel.startsWith("../") || rel === ".." || rel.startsWith("/")) {
+    throw new Error(`transaction path is outside cwd: ${absPath}`);
+  }
+  assertSafeRelativePath(rel);
+  return rel;
+}
+
+function fromRel(cwd: string, relPath: string): string {
+  assertSafeRelativePath(relPath);
+  return resolve(cwd, relPath);
+}
+
+function artifactPathsFor(
+  cwd: string,
+  journalId: string,
+  entry: Pick<AdapterTransactionEntryV2, "target_rel_path" | "index">,
+): { finalPath: string; tempPath: string; backupPath: string } {
+  const finalPath = fromRel(cwd, entry.target_rel_path);
+  return {
+    finalPath,
+    tempPath: `${finalPath}.code-pact-tx-${journalId}-${entry.index}.tmp`,
+    backupPath: `${finalPath}.bak-${journalId}-${entry.index}`,
+  };
+}
+
+async function ensureRegularFileIfPresent(path: string): Promise<void> {
+  try {
+    const st = await dataStat(path);
+    if (st.isDirectory()) {
+      throw new Error(`transaction target is a directory: ${path}`);
+    }
+    if (!st.isFile()) {
+      throw new Error(`transaction target is not a regular file: ${path}`);
+    }
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw err;
+  }
+}
+
 /**
- * Best-effort multi-file transaction: stage all writes to temp files first,
- * stage deletes as backup renames, then commit the sequence. If any stage or
- * commit fails, rollback restores backups and deletes temp files best-effort.
- * A rollback failure is surfaced as PARTIAL_MUTATION evidence.
- *
- * Improvements over a bare temp-rename loop:
- *
- * - **Backup rename**: before overwriting an existing file, it is renamed to
- *   a `.bak-<uuid>` path. On rollback, backups are restored so the original
- *   content survives a failed commit.
- * - **Journal**: a JSON journal is written before commit begins, recording
- *   each staged operation. On successful commit, the journal is deleted. If
- *   a crash occurs mid-commit, the journal can be inspected for recovery.
- * - **PARTIAL_MUTATION**: if a rename or rollback fails after some files have
- *   already been committed, a `PartialMutationError` is thrown with committed
- *   paths, rollback failures, and any remaining backup paths.
- *
- * This does NOT protect against concurrent writers and is NOT a filesystem
- * CAS — a crash between the first and last rename leaves partial state (but
- * the journal records what happened). The manifest write (the "commit
- * record") happens AFTER `commit()` succeeds, so if the write loop fails,
- * the old manifest still reflects the old state.
+ * Multi-file transaction with a private v2 recovery journal. The journal is not
+ * stored in the repository because repository content is attacker-controlled.
+ * Recovery never executes project-local v1 journals.
  */
 export class FileTransaction {
   private staged: StagedEntry[] = [];
@@ -208,55 +273,46 @@ export class FileTransaction {
     this.cwd = options.cwd ? resolve(options.cwd) : null;
   }
 
-  /**
-   * Write `content` to a temp file in the same directory as `path`.
-   * The temp file is created with an unpredictable name and exclusive create
-   * semantics (via `atomicWriteText`). The parent directory is created if
-   * missing.
-   *
-   * On failure, any previously staged temp files are NOT cleaned up here —
-   * call `rollback()` to clean them all.
-   */
   async stage(path: string, content: string): Promise<void> {
     this.assertCanStage(path);
-    const tempPath = `${path}.staged-${randomUUID()}`;
+    const cwd = this.resolveCwd(path);
+    const relPath = toRel(cwd, path);
+    const index = this.staged.length;
+    const tempPath = `${path}.code-pact-tx-${this.transactionId}-${index}.tmp`;
+    const backupPath = `${path}.bak-${this.transactionId}-${index}`;
     await atomicWriteText(tempPath, content);
-    const tempStat = await stat(tempPath);
+    const tempStat = await dataStat(tempPath);
     if (!tempStat.isFile()) {
-      await unlink(tempPath).catch(() => {});
+      await dataUnlink(tempPath).catch(() => {});
       throw new Error(`staged temp path is not a regular file: ${tempPath}`);
     }
     this.staged.push({
       kind: "write",
       tempPath,
       finalPath: path,
-      backupPath: `${path}.bak-${randomUUID()}`,
-      hadOriginal: false,
+      backupPath,
+      relPath,
+      preState: { kind: "absent" },
+      postState: { kind: "present", sha256: sha256Bytes(Buffer.from(content)) },
     });
   }
 
-  /**
-   * Stage a delete as a commit-time backup rename. The target is not touched
-   * until commit, so staging all writes can still fail without mutating state.
-   */
   stageDelete(path: string): void {
     this.assertCanStage(path);
+    const cwd = this.resolveCwd(path);
+    const relPath = toRel(cwd, path);
+    const index = this.staged.length;
     this.staged.push({
       kind: "delete",
       tempPath: "",
       finalPath: path,
-      backupPath: `${path}.bak-${randomUUID()}`,
-      hadOriginal: false,
+      backupPath: `${path}.bak-${this.transactionId}-${index}`,
+      relPath,
+      preState: { kind: "absent" },
+      postState: { kind: "absent" },
     });
   }
 
-  /**
-   * Rename all staged temp files to their final destinations.
-   * Each rename is atomic. Before overwriting an existing file, it is
-   * renamed to a backup path. On success, backups are deleted and the
-   * journal is removed. On failure, backups are restored and temp files
-   * are cleaned up.
-   */
   async commit(): Promise<void> {
     if (this.staged.length === 0) return;
     if (this.state !== "open") {
@@ -264,105 +320,90 @@ export class FileTransaction {
     }
     this.state = "committing";
 
-    const cwd = this.resolveCwd();
-    await this.prepareEntries();
-
-    this.journalPath = join(
-      cwd,
-      TRANSACTION_DIR_REL,
-      `${this.transactionId}.json`,
-    );
-    const journal: TransactionJournal = {
-      schema_version: 1,
-      id: this.transactionId,
-      status: "prepared",
-      entries: this.staged.map(s => ({
-        kind: s.kind,
-        tempRelPath: s.kind === "write" ? toRel(cwd, s.tempPath) : null,
-        finalRelPath: toRel(cwd, s.finalPath),
-        backupRelPath: toRel(cwd, s.backupPath),
-        hadOriginal: s.hadOriginal,
-        state: "prepared",
-      })),
-    };
-    await durableWriteJson(this.journalPath, journal);
-
+    const journal = await this.writePreparedJournal();
+    let mutated = false;
     try {
-      for (const [index, s] of this.staged.entries()) {
-        if (s.hadOriginal) {
-          await rename(s.finalPath, s.backupPath);
-          journal.entries[index]!.state = "backup_done";
-          await durableWriteJson(this.journalPath, journal);
+      for (const s of this.staged) {
+        if (s.preState.kind === "present") {
+          await dataRename(s.finalPath, s.backupPath);
+          mutated = true;
         }
         if (s.kind === "write") {
-          await rename(s.tempPath, s.finalPath);
+          await dataRename(s.tempPath, s.finalPath);
+          mutated = true;
+        } else {
+          mutated = true;
         }
-        journal.entries[index]!.state = "final_done";
-        await durableWriteJson(this.journalPath, journal);
       }
 
       journal.status = "committed";
-      await durableWriteJson(this.journalPath, journal);
+      await durableWriteJson(this.requireJournalPath(), journal);
       this.state = "committed";
 
       const cleanupFailures = await this.cleanupCommittedArtifacts();
       if (cleanupFailures.length > 0) {
         journal.status = "cleanup_pending";
         journal.cleanup_failures = cleanupFailures;
-        await durableWriteJson(this.journalPath, journal);
+        await durableWriteJson(this.requireJournalPath(), journal);
         this.state = "cleanup_pending";
         throw new TransactionCleanupPendingError(
           `Transaction committed, but cleanup is pending: ${cleanupFailures.join("; ")}`,
-          this.journalPath,
+          this.requireJournalPath(),
           cleanupFailures,
           this.staged.map(s => s.backupPath),
         );
       }
 
-      await cleanupJournal(this.journalPath);
+      await cleanupJournal(this.requireJournalPath());
       this.journalPath = null;
     } catch (err) {
       if (this.state === "committed" || this.state === "cleanup_pending") {
         throw err;
       }
-      const rollbackFailures = await this.rollbackPreparedEntries();
-      await this.cleanupUncommittedTemps();
+      const rollbackFailures = await rollbackJournalToOldState(
+        this.resolveCwd(),
+        journal,
+      );
       if (this.journalPath && rollbackFailures.length === 0) {
         await cleanupJournal(this.journalPath).catch(() => {});
         this.journalPath = null;
       }
-      const mutated = journal.entries.filter(e => e.state !== "prepared");
-      if (mutated.length > 0 || rollbackFailures.length > 0) {
+      if (mutated || rollbackFailures.length > 0) {
         throw new PartialMutationError(
-          `Transaction failed after mutating ${mutated.length} operation(s): ${(err as Error).message}`,
-          mutated.map(e => resolve(cwd, e.finalRelPath)),
+          `Transaction failed after mutating filesystem state: ${(err as Error).message}`,
+          this.staged.map(s => s.finalPath),
           rollbackFailures,
-          this.staged
-            .map(s => s.backupPath),
+          this.staged.map(s => s.backupPath),
         );
       }
       throw err;
     }
   }
 
-  /**
-   * Delete all staged temp files and restore any remaining backups.
-   * Best-effort: errors are swallowed so rollback never masks the original
-   * failure.
-   */
   async rollback(): Promise<void> {
-    if (this.state === "committed" || this.state === "cleanup_pending") {
+    if (this.state !== "open") {
       return;
     }
     for (const s of this.staged) {
-      if (s.kind === "write") await unlink(s.tempPath).catch(() => {});
-      await rename(s.backupPath, s.finalPath).catch(() => {});
-    }
-    if (this.journalPath) {
-      await cleanupJournal(this.journalPath).catch(() => {});
-      this.journalPath = null;
+      if (s.kind === "write") await dataUnlink(s.tempPath).catch(() => {});
     }
     this.state = "rolled_back";
+  }
+
+  async writePreparedJournalForTest(): Promise<void> {
+    await this.writePreparedJournal();
+  }
+
+  stagedArtifactsForTest(): ReadonlyArray<{
+    finalPath: string;
+    tempPath: string;
+    backupPath: string;
+  }> {
+    return this.staged.map(s => ({
+      finalPath: s.finalPath,
+      tempPath: s.tempPath,
+      backupPath: s.backupPath,
+    }));
   }
 
   private assertCanStage(path: string): void {
@@ -375,35 +416,70 @@ export class FileTransaction {
     this.finalPaths.add(path);
   }
 
-  private resolveCwd(): string {
+  private resolveCwd(path?: string): string {
     if (this.cwd) return this.cwd;
+    if (path) {
+      this.cwd = dirname(path);
+      return this.cwd;
+    }
     this.cwd = dirname(this.staged[0]!.finalPath);
     return this.cwd;
   }
 
+  private requireJournalPath(): string {
+    if (!this.journalPath) throw new Error("transaction journal was not prepared");
+    return this.journalPath;
+  }
+
+  private async writePreparedJournal(): Promise<AdapterTransactionJournalV2> {
+    const cwd = this.resolveCwd();
+    await this.prepareEntries();
+    const journalDir = await adapterTransactionProjectDir(cwd);
+    this.journalPath = join(journalDir, `${this.transactionId}.json`);
+    const journal: AdapterTransactionJournalV2 = {
+      schema_version: 2,
+      id: this.transactionId,
+      project_root: await canonicalProjectRoot(cwd),
+      status: "prepared",
+      entries: this.staged.map((s, index) => ({
+        operation: s.kind,
+        target_kind: "adapter_transaction_target",
+        target_rel_path: s.relPath,
+        pre_state: s.preState,
+        post_state: s.postState,
+        index,
+      })),
+    };
+    await durableWriteJson(this.journalPath, journal);
+    return journal;
+  }
+
   private async prepareEntries(): Promise<void> {
+    const cwd = this.resolveCwd();
     for (const s of this.staged) {
+      if (await pathTraversesSymlink(cwd, s.relPath)) {
+        const err = new Error(
+          `transaction target "${s.relPath}" resolves through a symlink`,
+        );
+        (err as NodeJS.ErrnoException).code = "PATH_NOT_OWNED";
+        throw err;
+      }
       if (await pathExists(s.backupPath)) {
         throw new Error(`backup path already exists: ${s.backupPath}`);
       }
-      try {
-        const st = await stat(s.finalPath);
-        if (st.isDirectory()) {
-          throw new Error(`transaction target is a directory: ${s.finalPath}`);
-        }
-        if (!st.isFile()) {
-          throw new Error(`transaction target is not a regular file: ${s.finalPath}`);
-        }
-        s.hadOriginal = true;
-      } catch (err) {
-        if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
-        s.hadOriginal = false;
+      if (s.kind === "write" && (await pathExists(s.tempPath)) === false) {
+        throw new Error(`staged temp path is missing: ${s.tempPath}`);
       }
+      await ensureRegularFileIfPresent(s.finalPath);
+      s.preState = await hashFile(s.finalPath);
       if (s.kind === "write") {
-        const tempStat = await stat(s.tempPath);
-        if (!tempStat.isFile()) {
-          throw new Error(`staged temp path is not a regular file: ${s.tempPath}`);
+        const tempState = await hashFile(s.tempPath);
+        if (tempState.kind !== "present") {
+          throw new Error(`staged temp path is missing: ${s.tempPath}`);
         }
+        s.postState = tempState;
+      } else {
+        s.postState = { kind: "absent" };
       }
     }
   }
@@ -411,9 +487,9 @@ export class FileTransaction {
   private async cleanupCommittedArtifacts(): Promise<string[]> {
     const failures: string[] = [];
     for (const s of this.staged) {
-      if (s.hadOriginal) {
+      if (s.preState.kind === "present") {
         try {
-          await unlink(s.backupPath);
+          await dataUnlink(s.backupPath);
         } catch (err) {
           if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
             failures.push(`${s.backupPath}: ${(err as Error).message}`);
@@ -422,7 +498,7 @@ export class FileTransaction {
       }
       if (s.kind === "write") {
         try {
-          await unlink(s.tempPath);
+          await dataUnlink(s.tempPath);
         } catch (err) {
           if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
             failures.push(`${s.tempPath}: ${(err as Error).message}`);
@@ -432,64 +508,51 @@ export class FileTransaction {
     }
     return failures;
   }
-
-  private async rollbackPreparedEntries(): Promise<string[]> {
-    const failures: string[] = [];
-    for (const s of [...this.staged].reverse()) {
-      try {
-        if (s.kind === "write") {
-          await unlink(s.finalPath).catch(err => {
-            if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
-          });
-        }
-        if (s.hadOriginal) {
-          await rename(s.backupPath, s.finalPath);
-        }
-      } catch (rollbackErr) {
-        failures.push(`${s.finalPath}: ${(rollbackErr as Error).message}`);
-      }
-    }
-    return failures;
-  }
-
-  private async cleanupUncommittedTemps(): Promise<void> {
-    for (const s of this.staged) {
-      if (s.kind === "write") await unlink(s.tempPath).catch(() => {});
-    }
-  }
 }
 
-function isJournalEntry(value: unknown): value is JournalEntry {
-  const entry = value as Partial<JournalEntry>;
+function isFileState(value: unknown): value is FileState {
+  const state = value as Partial<FileState>;
   return (
-    (entry.kind === "write" || entry.kind === "delete") &&
-    (typeof entry.tempRelPath === "string" || entry.tempRelPath === null) &&
-    typeof entry.finalRelPath === "string" &&
-    typeof entry.backupRelPath === "string" &&
-    typeof entry.hadOriginal === "boolean" &&
-    (entry.state === "prepared" ||
-      entry.state === "backup_done" ||
-      entry.state === "final_done")
+    state.kind === "absent" ||
+    (state.kind === "present" && typeof state.sha256 === "string")
   );
 }
 
-async function loadJournal(cwd: string, journalPath: string): Promise<TransactionJournal> {
+function isJournalEntryV2(value: unknown): value is AdapterTransactionEntryV2 {
+  const entry = value as Partial<AdapterTransactionEntryV2>;
+  return (
+    (entry.operation === "write" || entry.operation === "delete") &&
+    entry.target_kind === "adapter_transaction_target" &&
+    typeof entry.target_rel_path === "string" &&
+    isFileState(entry.pre_state) &&
+    isFileState(entry.post_state) &&
+    typeof entry.index === "number" &&
+    Number.isInteger(entry.index) &&
+    entry.index >= 0
+  );
+}
+
+async function loadJournal(
+  cwd: string,
+  journalPath: string,
+): Promise<AdapterTransactionJournalV2> {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(await readFile(journalPath, "utf8"));
+    parsed = JSON.parse(await rawReadFile(journalPath, "utf8"));
   } catch (err) {
     throw new TransactionRecoveryError(
       `cannot read adapter transaction journal: ${(err as Error).message}`,
       journalPath,
     );
   }
-  const journal = parsed as Partial<TransactionJournal>;
+  const journal = parsed as Partial<AdapterTransactionJournalV2>;
   if (
-    journal.schema_version !== 1 ||
+    journal.schema_version !== 2 ||
     typeof journal.id !== "string" ||
     (journal.status !== "prepared" &&
       journal.status !== "committed" &&
       journal.status !== "cleanup_pending") ||
+    typeof journal.project_root !== "string" ||
     !Array.isArray(journal.entries)
   ) {
     throw new TransactionRecoveryError(
@@ -497,17 +560,31 @@ async function loadJournal(cwd: string, journalPath: string): Promise<Transactio
       journalPath,
     );
   }
+  const canonical = await canonicalProjectRoot(cwd);
+  if (journal.project_root !== canonical) {
+    throw new TransactionRecoveryError(
+      "adapter transaction journal belongs to a different project root",
+      journalPath,
+    );
+  }
+  const seen = new Set<number>();
   for (const entry of journal.entries) {
-    if (!isJournalEntry(entry)) {
+    if (!isJournalEntryV2(entry)) {
       throw new TransactionRecoveryError(
         "adapter transaction journal is corrupt",
         journalPath,
       );
     }
+    if (seen.has(entry.index)) {
+      throw new TransactionRecoveryError(
+        "adapter transaction journal has duplicate entry indexes",
+        journalPath,
+      );
+    }
+    seen.add(entry.index);
     try {
-      await fromRel(cwd, entry.finalRelPath);
-      await fromRel(cwd, entry.backupRelPath);
-      if (entry.tempRelPath !== null) await fromRel(cwd, entry.tempRelPath);
+      assertSafeRelativePath(entry.target_rel_path);
+      fromRel(cwd, entry.target_rel_path);
     } catch (err) {
       throw new TransactionRecoveryError(
         `adapter transaction journal contains an unsafe path: ${(err as Error).message}`,
@@ -515,62 +592,148 @@ async function loadJournal(cwd: string, journalPath: string): Promise<Transactio
       );
     }
   }
-  return journal as TransactionJournal;
+  return journal as AdapterTransactionJournalV2;
 }
 
-async function rollbackJournal(cwd: string, journal: TransactionJournal): Promise<void> {
+async function rollbackJournalToOldState(
+  cwd: string,
+  journal: AdapterTransactionJournalV2,
+): Promise<string[]> {
   const failures: string[] = [];
   for (const entry of [...journal.entries].reverse()) {
-    const finalPath = await fromRel(cwd, entry.finalRelPath);
-    const backupPath = await fromRel(cwd, entry.backupRelPath);
-    const tempPath =
-      entry.tempRelPath !== null ? await fromRel(cwd, entry.tempRelPath) : null;
+    const paths = artifactPathsFor(cwd, journal.id, entry);
     try {
-      if (entry.kind === "write" && entry.state === "final_done") {
-        await removeFileIfExists(finalPath);
-      }
-      if (entry.hadOriginal && entry.state !== "prepared") {
-        await rename(backupPath, finalPath);
-      }
-      if (tempPath !== null) await removeFileIfExists(tempPath);
+      await reconcileEntryToOldState(cwd, paths, entry);
     } catch (err) {
-      failures.push(`${entry.finalRelPath}: ${(err as Error).message}`);
+      failures.push(`${entry.target_rel_path}: ${(err as Error).message}`);
     }
   }
-  if (failures.length > 0) {
-    throw new Error(failures.join("; "));
-  }
+  return failures;
 }
 
 async function cleanupCommittedJournal(
   cwd: string,
-  journal: TransactionJournal,
+  journal: AdapterTransactionJournalV2,
 ): Promise<void> {
   const failures: string[] = [];
   for (const entry of journal.entries) {
-    const backupPath = await fromRel(cwd, entry.backupRelPath);
-    const tempPath =
-      entry.tempRelPath !== null ? await fromRel(cwd, entry.tempRelPath) : null;
+    const paths = artifactPathsFor(cwd, journal.id, entry);
     try {
-      if (entry.hadOriginal) await removeFileIfExists(backupPath);
-      if (tempPath !== null) await removeFileIfExists(tempPath);
+      await reconcileEntryToNewState(cwd, paths, entry);
     } catch (err) {
-      failures.push(`${entry.finalRelPath}: ${(err as Error).message}`);
+      failures.push(`${entry.target_rel_path}: ${(err as Error).message}`);
     }
   }
   if (failures.length > 0) throw new Error(failures.join("; "));
 }
 
+async function reconcileEntryToOldState(
+  cwd: string,
+  paths: { finalPath: string; tempPath: string; backupPath: string },
+  entry: AdapterTransactionEntryV2,
+): Promise<void> {
+  await assertTransactionTargetStillOwned(cwd, entry);
+  const finalState = await hashFile(paths.finalPath);
+  const backupState = await hashFile(paths.backupPath);
+  const tempState = await hashFile(paths.tempPath);
+
+  if (entry.pre_state.kind === "present") {
+    if (sameState(backupState, entry.pre_state)) {
+      if (sameState(finalState, entry.post_state)) {
+        await removeFileIfExists(paths.finalPath);
+      } else if (
+        finalState.kind !== "absent" &&
+        !sameState(finalState, entry.pre_state)
+      ) {
+        throw new Error(
+          `ambiguous final state ${stateLabel(finalState)} while backup holds pre-state`,
+        );
+      }
+      await dataRename(paths.backupPath, paths.finalPath);
+    } else if (!sameState(finalState, entry.pre_state)) {
+      throw new Error(
+        `cannot restore old state; final=${stateLabel(finalState)} backup=${stateLabel(backupState)}`,
+      );
+    }
+  } else {
+    if (sameState(finalState, entry.post_state)) {
+      await removeFileIfExists(paths.finalPath);
+    } else if (finalState.kind !== "absent") {
+      throw new Error(`ambiguous new-file final state ${stateLabel(finalState)}`);
+    }
+  }
+
+  if (entry.operation === "write" && sameState(tempState, entry.post_state)) {
+    await removeFileIfExists(paths.tempPath);
+  } else if (tempState.kind !== "absent") {
+    throw new Error(`refusing to remove mismatched temp ${stateLabel(tempState)}`);
+  }
+}
+
+async function reconcileEntryToNewState(
+  cwd: string,
+  paths: { finalPath: string; tempPath: string; backupPath: string },
+  entry: AdapterTransactionEntryV2,
+): Promise<void> {
+  await assertTransactionTargetStillOwned(cwd, entry);
+  const finalState = await hashFile(paths.finalPath);
+  const backupState = await hashFile(paths.backupPath);
+  const tempState = await hashFile(paths.tempPath);
+
+  if (!sameState(finalState, entry.post_state)) {
+    throw new Error(
+      `committed final state mismatch: expected ${stateLabel(entry.post_state)}, got ${stateLabel(finalState)}`,
+    );
+  }
+  if (entry.pre_state.kind === "present") {
+    if (sameState(backupState, entry.pre_state)) {
+      await removeFileIfExists(paths.backupPath);
+    } else if (backupState.kind !== "absent") {
+      throw new Error(`refusing to remove mismatched backup ${stateLabel(backupState)}`);
+    }
+  }
+  if (entry.operation === "write" && sameState(tempState, entry.post_state)) {
+    await removeFileIfExists(paths.tempPath);
+  } else if (tempState.kind !== "absent") {
+    throw new Error(`refusing to remove mismatched temp ${stateLabel(tempState)}`);
+  }
+}
+
+async function assertTransactionTargetStillOwned(
+  cwd: string,
+  entry: AdapterTransactionEntryV2,
+): Promise<void> {
+  if (await pathTraversesSymlink(cwd, entry.target_rel_path)) {
+    const err = new Error(
+      `transaction target "${entry.target_rel_path}" resolves through a symlink`,
+    );
+    (err as NodeJS.ErrnoException).code = "PATH_NOT_OWNED";
+    throw err;
+  }
+}
+
+async function rejectLegacyProjectJournals(cwd: string): Promise<string[]> {
+  const legacyDir = join(resolve(cwd), LEGACY_TRANSACTION_DIR_REL);
+  try {
+    await rawLstat(legacyDir);
+    return [LEGACY_REJECTION];
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw err;
+  }
+}
+
 export async function recoverPendingAdapterTransactions(
   cwd: string,
 ): Promise<AdapterTransactionRecoveryResult> {
-  const stateDir = join(resolve(cwd), TRANSACTION_DIR_REL);
+  const rejected = await rejectLegacyProjectJournals(cwd);
+  const stateDir = await adapterTransactionProjectDir(cwd);
   let names: string[];
   try {
-    names = await readdir(stateDir);
+    names = await rawReaddir(stateDir);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-      return { recovered: [], cleaned: [] };
+      return { recovered: [], cleaned: [], rejected };
     }
     throw err;
   }
@@ -585,7 +748,8 @@ export async function recoverPendingAdapterTransactions(
         await cleanupCommittedJournal(resolve(cwd), journal);
         cleaned.push(journalPath);
       } else {
-        await rollbackJournal(resolve(cwd), journal);
+        const failures = await rollbackJournalToOldState(resolve(cwd), journal);
+        if (failures.length > 0) throw new Error(failures.join("; "));
         recovered.push(journalPath);
       }
       await cleanupJournal(journalPath);
@@ -596,5 +760,5 @@ export async function recoverPendingAdapterTransactions(
       );
     }
   }
-  return { recovered, cleaned };
+  return { recovered, cleaned, rejected };
 }

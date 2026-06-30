@@ -1,5 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdtemp, rm, writeFile, readFile, stat, readdir, mkdir } from "node:fs/promises";
+import {
+  mkdtemp,
+  rm,
+  writeFile,
+  readFile,
+  stat,
+  mkdir,
+  symlink,
+} from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -62,9 +70,14 @@ const {
   await import("../../../src/core/adapters/staged-write.ts");
 
 let dir: string;
+let previousStateHome: string | undefined;
 
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), "code-pact-staged-"));
+  previousStateHome = process.env.CODE_PACT_STATE_HOME;
+  process.env.CODE_PACT_STATE_HOME = await mkdtemp(
+    join(tmpdir(), "code-pact-state-"),
+  );
   failAfterFirstRename.enabled = false;
   failAfterFirstRename.count = 0;
   failAfterFirstRename.threshold = 4;
@@ -75,6 +88,11 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
+  if (process.env.CODE_PACT_STATE_HOME) {
+    await rm(process.env.CODE_PACT_STATE_HOME, { recursive: true, force: true });
+  }
+  if (previousStateHome === undefined) delete process.env.CODE_PACT_STATE_HOME;
+  else process.env.CODE_PACT_STATE_HOME = previousStateHome;
 });
 
 describe("FileTransaction — basic stage and commit", () => {
@@ -186,11 +204,9 @@ describe("FileTransaction — journal", () => {
     const tx = new FileTransaction({ cwd: dir });
     await tx.stage(join(dir, "a.txt"), "aaa");
     await tx.commit();
-    // No journal files should remain.
-    const { readdirSync } = await import("node:fs");
-    const txDir = join(dir, ".code-pact", "state", "adapter-transactions");
-    const files = readdirSync(txDir);
-    expect(files.filter(f => f.endsWith(".json"))).toHaveLength(0);
+    const result = await recoverPendingAdapterTransactions(dir);
+    expect(result.cleaned).toHaveLength(0);
+    expect(result.recovered).toHaveLength(0);
   });
 
   it("journal is deleted after rollback", async () => {
@@ -239,9 +255,8 @@ describe("FileTransaction — cleanup failure does not roll back committed files
 
     expect(await readFile(targetA, "utf8")).toBe("NEW_A");
     expect(await readFile(targetB, "utf8")).toBe("NEW_B");
-    const journalDir = join(dir, ".code-pact", "state", "adapter-transactions");
-    const journals = (await readdir(journalDir)).filter(f => f.endsWith(".json"));
-    expect(journals).toHaveLength(1);
+    const result = await recoverPendingAdapterTransactions(dir);
+    expect(result.cleaned).toHaveLength(1);
   });
 
   it("keeps delete and write results when cleanup fails", async () => {
@@ -305,6 +320,140 @@ describe("FileTransaction — cleanup failure does not roll back committed files
 });
 
 describe("FileTransaction — recovery", () => {
+  it("does not execute forged committed journals from the project", async () => {
+    await writeFile(join(dir, ".env"), "SECRET", "utf8");
+    await mkdir(join(dir, ".code-pact", "state", "adapter-transactions"), {
+      recursive: true,
+    });
+    await writeFile(
+      join(dir, ".code-pact", "state", "adapter-transactions", "evil.json"),
+      JSON.stringify({
+        schema_version: 1,
+        id: "evil",
+        status: "committed",
+        entries: [
+          {
+            kind: "delete",
+            tempRelPath: null,
+            finalRelPath: "README.md",
+            backupRelPath: ".env",
+            hadOriginal: true,
+            state: "final_done",
+          },
+        ],
+      }),
+      "utf8",
+    );
+
+    const result = await recoverPendingAdapterTransactions(dir);
+
+    expect(await readFile(join(dir, ".env"), "utf8")).toBe("SECRET");
+    expect(result.cleaned).toHaveLength(0);
+    expect(result.rejected).toContain("LEGACY_TRANSACTION_JOURNAL_UNTRUSTED");
+  });
+
+  it("does not execute forged prepared journals from the project", async () => {
+    await writeFile(join(dir, ".env"), "SECRET", "utf8");
+    await writeFile(join(dir, "payload.txt"), "ATTACKER", "utf8");
+    await mkdir(join(dir, ".code-pact", "state", "adapter-transactions"), {
+      recursive: true,
+    });
+    await writeFile(
+      join(dir, ".code-pact", "state", "adapter-transactions", "evil.json"),
+      JSON.stringify({
+        schema_version: 1,
+        id: "evil",
+        status: "prepared",
+        entries: [
+          {
+            kind: "write",
+            tempRelPath: null,
+            finalRelPath: ".env",
+            backupRelPath: "payload.txt",
+            hadOriginal: true,
+            state: "backup_done",
+          },
+        ],
+      }),
+      "utf8",
+    );
+
+    const result = await recoverPendingAdapterTransactions(dir);
+
+    expect(await readFile(join(dir, ".env"), "utf8")).toBe("SECRET");
+    expect(await readFile(join(dir, "payload.txt"), "utf8")).toBe("ATTACKER");
+    expect(result.rejected).toContain("LEGACY_TRANSACTION_JOURNAL_UNTRUSTED");
+  });
+
+  it("does not follow a project journal directory symlink", async () => {
+    const outside = await mkdtemp(join(tmpdir(), "code-pact-outside-journal-"));
+    await writeFile(join(dir, ".env"), "SECRET", "utf8");
+    await writeFile(
+      join(outside, "evil.json"),
+      JSON.stringify({
+        schema_version: 1,
+        id: "evil",
+        status: "committed",
+        entries: [
+          {
+            kind: "delete",
+            tempRelPath: null,
+            finalRelPath: "README.md",
+            backupRelPath: ".env",
+            hadOriginal: true,
+            state: "final_done",
+          },
+        ],
+      }),
+      "utf8",
+    );
+    await mkdir(join(dir, ".code-pact", "state"), { recursive: true });
+    await symlink(outside, join(dir, ".code-pact", "state", "adapter-transactions"));
+
+    try {
+      const result = await recoverPendingAdapterTransactions(dir);
+      expect(await readFile(join(dir, ".env"), "utf8")).toBe("SECRET");
+      expect(result.rejected).toContain("LEGACY_TRANSACTION_JOURNAL_UNTRUSTED");
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("recovers a crash after backup rename by restoring old final content", async () => {
+    const target = join(dir, "a.txt");
+    await writeFile(target, "OLD", "utf8");
+    const tx = new FileTransaction({ cwd: dir });
+    await tx.stage(target, "NEW");
+    await tx.writePreparedJournalForTest();
+
+    const { backupPath, tempPath } = tx.stagedArtifactsForTest()[0]!;
+    await rm(target);
+    await writeFile(backupPath, "OLD", "utf8");
+
+    const result = await recoverPendingAdapterTransactions(dir);
+
+    expect(result.recovered).toHaveLength(1);
+    expect(await readFile(target, "utf8")).toBe("OLD");
+    await expect(stat(backupPath)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(stat(tempPath)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("recovers a crash after final rename for a new file by removing the uncommitted final", async () => {
+    const target = join(dir, "new.txt");
+    const tx = new FileTransaction({ cwd: dir });
+    await tx.stage(target, "NEW");
+    await tx.writePreparedJournalForTest();
+
+    const { tempPath } = tx.stagedArtifactsForTest()[0]!;
+    await rm(tempPath);
+    await writeFile(target, "NEW", "utf8");
+
+    const result = await recoverPendingAdapterTransactions(dir);
+
+    expect(result.recovered).toHaveLength(1);
+    await expect(stat(target)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("recovers cleanup-pending committed journals by preserving final files", async () => {
     const targetA = join(dir, "a.txt");
     const targetB = join(dir, "b.txt");
@@ -325,7 +474,6 @@ describe("FileTransaction — recovery", () => {
     expect(result.cleaned).toHaveLength(1);
     expect(await readFile(targetA, "utf8")).toBe("NEW_A");
     expect(await readFile(targetB, "utf8")).toBe("NEW_B");
-    const journalDir = join(dir, ".code-pact", "state", "adapter-transactions");
-    expect((await readdir(journalDir)).filter(f => f.endsWith(".json"))).toHaveLength(0);
+    expect((await recoverPendingAdapterTransactions(dir)).cleaned).toHaveLength(0);
   });
 });

@@ -17,3 +17,6 @@
 // § Advisory lock model → Test escape for the contract.
 
 process.env.CODE_PACT_DISABLE_LOCKS = "1";
+
+process.env.CODE_PACT_STATE_HOME ??=
+  `${process.env.TMPDIR ?? "/tmp"}/code-pact-vitest-state-${process.pid}`;
