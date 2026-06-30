@@ -87,7 +87,7 @@ describe("loadDecisions — optional-source degradation (non-ENOENT)", () => {
 });
 
 describe("readLiveDecisionFile — fail-closed seam (the contract the loaders catch)", () => {
-  it("THROWS on a non-ENOENT read error (EACCES) rather than returning a result", async () => {
+  it("returns unreadable on a non-ENOENT read error (EACCES) rather than throwing raw errno", async () => {
     // This is the fail-closed behavior the gate relies on and the pack loaders
     // must wrap. ENOENT/ENOTDIR → missing (covered elsewhere); any other error
     // must propagate, NOT be swallowed into a missing/ok result.
@@ -96,9 +96,10 @@ describe("readLiveDecisionFile — fail-closed seam (the contract the loaders ca
       "**Status:** accepted\n",
     );
     fail.readFile = true;
-    await expect(
-      readLiveDecisionFile(cwd, "design/decisions/a.md"),
-    ).rejects.toMatchObject({ code: "EACCES" });
+    await expect(readLiveDecisionFile(cwd, "design/decisions/a.md")).resolves.toEqual({
+      kind: "unreadable",
+      errorCode: "EACCES",
+    });
   });
 });
 
@@ -145,7 +146,7 @@ describe("loadDeclaredDecisions — skip (no throw) on each non-ok read outcome"
     );
     const docs = await loadDeclaredDecisions(cwd, ["design/decisions/P1-T1-rfc.md"]);
     expect(docs).toHaveLength(1);
-    expect(docs[0]!.filename).toBe("P1-T1-rfc.md");
+    expect(docs[0]!.filename).toBe("design/decisions/P1-T1-rfc.md");
     expect(docs[0]!.body).toContain("body text");
   });
 });

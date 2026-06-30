@@ -26,8 +26,27 @@ describe("loadDecisions — non-decision exclusion", () => {
 
     const docs = await loadDecisions(cwd, "P1-T1", true);
     const names = docs.map((d) => d.filename);
-    expect(names).toContain("P1-T1-rfc.md");
-    expect(names).not.toContain("README.md");
-    expect(names).not.toContain("PRUNED.md");
+    expect(names).toContain("design/decisions/P1-T1-rfc.md");
+    expect(names).not.toContain("design/decisions/README.md");
+    expect(names).not.toContain("design/decisions/PRUNED.md");
+  });
+
+  it("keeps duplicate basenames in different directories distinct by full path", async () => {
+    await mkdir(join(cwd, "design", "decisions", "security"), { recursive: true });
+    await mkdir(join(cwd, "design", "decisions", "payments"), { recursive: true });
+    await writeFile(
+      join(cwd, "design", "decisions", "security", "P1-T1-rfc.md"),
+      "# Security\n\nsecurity body",
+    );
+    await writeFile(
+      join(cwd, "design", "decisions", "payments", "P1-T1-rfc.md"),
+      "# Payments\n\npayments body",
+    );
+
+    const docs = await loadDecisions(cwd, "P1-T1", true);
+    expect(docs.map((d) => d.filename)).toEqual([
+      "design/decisions/payments/P1-T1-rfc.md",
+      "design/decisions/security/P1-T1-rfc.md",
+    ]);
   });
 });

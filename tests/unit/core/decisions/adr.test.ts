@@ -61,10 +61,10 @@ describe("readDecisionAdrFiles", () => {
     expect(await readDecisionAdrFiles(cwd)).toEqual([]);
   });
 
-  it("returns the decision filenames when the directory exists", async () => {
+  it("returns canonical decision paths when the directory exists", async () => {
     await mkdir(join(cwd, "design", "decisions"), { recursive: true });
     await writeFile(join(cwd, "design", "decisions", "P1-T1-rfc.md"), "x");
-    expect(await readDecisionAdrFiles(cwd)).toContain("P1-T1-rfc.md");
+    expect(await readDecisionAdrFiles(cwd)).toContain("design/decisions/P1-T1-rfc.md");
   });
 
   it("excludes non-decision files (README.md, PRUNED.md ledger) from the candidate scan", async () => {
@@ -73,9 +73,9 @@ describe("readDecisionAdrFiles", () => {
     await writeFile(join(cwd, "design", "decisions", "README.md"), "index");
     await writeFile(join(cwd, "design", "decisions", "PRUNED.md"), "ledger");
     const files = await readDecisionAdrFiles(cwd);
-    expect(files).toContain("P1-T1-rfc.md");
-    expect(files).not.toContain("README.md");
-    expect(files).not.toContain("PRUNED.md");
+    expect(files).toContain("design/decisions/P1-T1-rfc.md");
+    expect(files).not.toContain("design/decisions/README.md");
+    expect(files).not.toContain("design/decisions/PRUNED.md");
   });
 
 });
@@ -104,9 +104,9 @@ describe("readLiveDecisionDir / readLiveDecisionFile (live decision-read seam)",
     await writeFile(join(cwd, "design", "decisions", "PRUNED.md"), "ledger");
     const dir = await readLiveDecisionDir(cwd);
     expect(dir.present).toBe(true);
-    expect(dir.entries).toContain("P1-T1-rfc.md");
-    expect(dir.entries).not.toContain("README.md");
-    expect(dir.entries).not.toContain("PRUNED.md");
+    expect(dir.entries).toContain("design/decisions/P1-T1-rfc.md");
+    expect(dir.entries).not.toContain("design/decisions/README.md");
+    expect(dir.entries).not.toContain("design/decisions/PRUNED.md");
   });
 
   it("readLiveDecisionFile returns ok for a safe in-project decision file", async () => {
@@ -128,16 +128,12 @@ describe("readLiveDecisionDir / readLiveDecisionFile (live decision-read seam)",
     expect(r.kind).toBe("unsafe");
   });
 
-  it("readLiveDecisionFile REFUSES a nested ADR as unsafe (flat-only namespace, matches downstream lifecycle)", async () => {
-    // The decision read seam now enforces the flat-only DecisionRefPath
-    // namespace. A nested path is `unsafe` — never read — so it stays in
-    // lockstep with normalizeDecisionRef / pruned-ledger / retire / prune,
-    // which are all top-level only. (A nested decision_refs value also cannot
-    // reach here legitimately: the Task/phase-import schemas reject it at parse.)
+  it("readLiveDecisionFile accepts a nested ADR under the decision namespace", async () => {
     await mkdir(join(cwd, "design", "decisions", "p3"), { recursive: true });
     await writeFile(join(cwd, "design", "decisions", "p3", "adr.md"), "nested body");
     const r = await readLiveDecisionFile(cwd, "design/decisions/p3/adr.md");
-    expect(r.kind).toBe("unsafe");
+    expect(r.kind).toBe("ok");
+    expect(r.kind === "ok" && r.content).toBe("nested body");
   });
 });
 
@@ -375,6 +371,20 @@ describe("resolveDecisionGate — decision_refs (all-must-be-accepted)", () => {
     expect(res.resolved).toBe(false);
     const missing = res.considered.find((c) => c.path.endsWith("gone.md"));
     expect(missing?.acceptance).toBe("missing");
+  });
+
+  it("explicit ref to a directory named *.md → unreadable, unresolved, no throw", async () => {
+    await mkdir(join(cwd, "design", "decisions", "P1-T1.md"), { recursive: true });
+    const res = await resolveDecisionGate(cwd, "P1-T1", ["design/decisions/P1-T1.md"]);
+    expect(res.resolved).toBe(false);
+    expect(res.considered).toEqual([
+      {
+        path: "design/decisions/P1-T1.md",
+        status: null,
+        accepted: false,
+        acceptance: "unreadable",
+      },
+    ]);
   });
 
   it("accepted + empty → unresolved", async () => {

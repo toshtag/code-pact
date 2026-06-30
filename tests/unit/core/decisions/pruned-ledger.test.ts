@@ -95,7 +95,7 @@ describe("readPrunedLedger", () => {
     expect(set.has("design/decisions/real-rfc.md")).toBe(true);
   });
 
-  it("admits ONLY top-level design/decisions/*.md entries — a ledger is a decision tombstone, not an arbitrary silencer", async () => {
+  it("admits only design/decisions/**/*.md entries — a ledger is a decision tombstone, not an arbitrary silencer", async () => {
     await writeLedger(
       `| Decision | Pruned |
 | --- | --- |
@@ -110,9 +110,12 @@ describe("readPrunedLedger", () => {
 `,
     );
     const set = await readPrunedLedger(cwd);
-    // Every non-decision / unsafe / non-md / nested / self entry is dropped;
-    // only the genuine top-level pruned decision survives.
-    expect([...set]).toEqual(["design/decisions/retired-rfc.md"]);
+    // Every non-decision / unsafe / non-md / self entry is dropped; nested
+    // decision records survive as real tombstones.
+    expect([...set]).toEqual([
+      "design/decisions/nested/foo-rfc.md",
+      "design/decisions/retired-rfc.md",
+    ]);
   });
 });
 
@@ -132,7 +135,9 @@ describe("normalizePrunedDecisionPath", () => {
     expect(normalizePrunedDecisionPath("../outside.md")).toBeNull();
     expect(normalizePrunedDecisionPath("design/decisions/../foo.md")).toBeNull();
     expect(normalizePrunedDecisionPath("/abs/design/decisions/x.md")).toBeNull();
-    expect(normalizePrunedDecisionPath("design/decisions/nested/foo.md")).toBeNull(); // top-level only
+    expect(normalizePrunedDecisionPath("design/decisions/nested/foo.md")).toBe(
+      "design/decisions/nested/foo.md",
+    );
   });
 
   it("rejects a path with table/code-span-breaking chars (pipe, backtick, CR/LF)", () => {

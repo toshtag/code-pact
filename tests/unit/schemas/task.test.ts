@@ -147,10 +147,12 @@ describe("Task schema — decision_refs namespace contract (security)", () => {
     expect(t.decision_refs).toEqual(["design/decisions/ADR-001.md"]);
   });
 
-  it("rejects a nested ADR (flat-only: downstream lifecycle is top-level only)", () => {
-    expect(() =>
-      Task.parse({ ...V1_0_X_TASK, decision_refs: ["design/decisions/2026/ADR-001.md"] }),
-    ).toThrow();
+  it("accepts a nested ADR under design/decisions/", () => {
+    const t = Task.parse({
+      ...V1_0_X_TASK,
+      decision_refs: ["design/decisions/2026/ADR-001.md"],
+    });
+    expect(t.decision_refs).toEqual(["design/decisions/2026/ADR-001.md"]);
   });
 
   it("rejects .env (arbitrary local file)", () => {

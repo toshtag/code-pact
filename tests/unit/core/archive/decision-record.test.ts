@@ -36,6 +36,23 @@ async function writeAdr(content: string, ref = REF): Promise<void> {
 }
 
 describe("happy path + classification", () => {
+  it("nested decision refs are snapshotted with exact canonical identity", async () => {
+    const nestedRef = "design/decisions/security/foo-rfc.md";
+    await mkdir(join(cwd, "design", "decisions", "security"), { recursive: true });
+    await writeAdr(ACCEPTED_ADR, nestedRef);
+
+    const outcome = await writeDecisionRecord(cwd, nestedRef, { now: NOW });
+    expect(outcome.kind).toBe("written");
+    if (outcome.kind !== "written") return;
+
+    const onDisk = DecisionStateRecord.parse(JSON.parse(await readFile(outcome.path, "utf8")));
+    expect(onDisk.canonical_ref).toBe(nestedRef);
+    expect(onDisk.original_path).toBe(nestedRef);
+    expect(onDisk.path_sha256).toBe(sha256Hex(nestedRef));
+    expect(outcome.path).toBe(decisionRecordPath(cwd, nestedRef));
+    expect(outcome.path).not.toBe(decisionRecordPath(cwd, REF));
+  });
+
   it("table case 1: no record + live accepted ADR → write; may_satisfy_active_gate true; exact canonical_ref", async () => {
     await writeAdr(ACCEPTED_ADR);
     const outcome = await writeDecisionRecord(cwd, REF, { now: NOW, git_ref: "deadbeef" });
@@ -257,10 +274,9 @@ describe("same-source re-validation — the on-disk record must still match the 
 });
 
 describe("confinement + fail-closed reads", () => {
-  it("rejects refs outside top-level design/decisions/*.md", async () => {
+  it("rejects refs outside the decision-record namespace", async () => {
     for (const bad of [
       "docs/cli-contract.md",
-      "design/decisions/nested/adr.md",
       "design/decisions/README.md",
       "design/decisions/PRUNED.md",
       "../outside.md",

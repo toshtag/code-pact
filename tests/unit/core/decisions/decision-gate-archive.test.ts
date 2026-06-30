@@ -95,10 +95,13 @@ describe("resolveRetiredDecisionGate (predicate A — gate release, self-guards 
     expect((await resolveRetiredDecisionGate(cwd, REF)).kind).toBe("not_released");
   });
 
-  it("non-normalizing ref (docs/, nested, traversal) → not_released, no lookup", async () => {
+  it("non-normalizing ref (docs/, README/PRUNED, traversal) → not_released, no lookup", async () => {
     await setup(ACCEPTED);
     expect((await resolveRetiredDecisionGate(cwd, "docs/cli-contract.md")).kind).toBe("not_released");
-    expect((await resolveRetiredDecisionGate(cwd, "design/decisions/p3/nested.md")).kind).toBe(
+    expect((await resolveRetiredDecisionGate(cwd, "design/decisions/README.md")).kind).toBe(
+      "not_released",
+    );
+    expect((await resolveRetiredDecisionGate(cwd, "design/decisions/p3/PRUNED.md")).kind).toBe(
       "not_released",
     );
   });

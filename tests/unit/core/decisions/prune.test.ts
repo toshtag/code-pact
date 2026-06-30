@@ -85,7 +85,7 @@ describe("evaluatePrune — target validation", () => {
   });
 });
 
-describe("evaluatePrune — target must be an accepted, readable, top-level record", () => {
+describe("evaluatePrune — target must be an accepted, readable decision record", () => {
   for (const status of ["proposed", "draft", "rejected", "superseded"]) {
     it(`blocks a ${status} target (prune retires settled decisions only)`, async () => {
       await writeDecision("foo-rfc.md", `# RFC\n\n**Status:** ${status}\n\n## Decision\n\nx`);
@@ -121,10 +121,12 @@ describe("evaluatePrune — target must be an accepted, readable, top-level reco
     expect(res.blocks.some((b) => b.gate === "target_unreadable")).toBe(true);
   });
 
-  it("rejects a nested decision path as target_invalid (top-level only in PR-C1a)", async () => {
+  it("accepts a nested decision path as a prunable decision target", async () => {
+    await mkdir(join(cwd, "design", "decisions", "archive"), { recursive: true });
+    await writeFile(join(cwd, "design", "decisions", "archive", "foo-rfc.md"), ACCEPTED, "utf8");
     const res = await evaluatePrune(cwd, "design/decisions/archive/foo-rfc.md", []);
-    expect(res.decision).toBeNull();
-    expect(res.blocks[0]?.gate).toBe("target_invalid");
+    expect(res.decision).toBe("design/decisions/archive/foo-rfc.md");
+    expect(res.eligible).toBe(true);
   });
 
   it("blocks a target file that symlink-escapes the project root", async () => {
@@ -152,13 +154,13 @@ describe("evaluatePrune — target must be an accepted, readable, top-level reco
 });
 
 describe("evaluatePrune — pure verdict never throws (fail-closed scan)", () => {
-  it("returns eligible:false (not a throw) when a filename-scan candidate is a directory named *.md", async () => {
+  it("does not throw when a filename-scan candidate is a directory named *.md", async () => {
     await writeDecision("foo-rfc.md", ACCEPTED);
     await mkdir(join(cwd, "design", "decisions", "P1-T1.md"), { recursive: true }); // candidate is a dir
     const phases = [entry("P1", [task("P1-T1", { status: "planned", requires_decision: true })])];
     const res = await evaluatePrune(cwd, "design/decisions/foo-rfc.md", phases);
-    expect(res.eligible).toBe(false);
-    expect(res.blocks.some((b) => b.gate === "decision_scan_unreadable")).toBe(true);
+    expect(res.eligible).toBe(true);
+    expect(res.blocks.some((b) => b.gate === "decision_scan_unreadable")).toBe(false);
   });
 });
 

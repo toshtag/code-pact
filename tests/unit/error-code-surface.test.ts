@@ -168,6 +168,7 @@ const KNOWN_CODES: Record<
   ADR_STATUS_UNRECOGNIZED: "plan",
   PHASE_CONFIDENCE_LOW: "plan",
   TASK_DECISION_UNRESOLVED: "plan",
+  DECISION_SCAN_UNREADABLE: "plan",
   TASK_DESCRIPTION_MISSING: "plan",
   // P36 — ADR quality advisory (affects_exit: false, --include-quality).
   ADR_ACCEPTED_BODY_THIN: "plan",

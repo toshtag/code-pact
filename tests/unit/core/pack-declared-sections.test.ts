@@ -8,7 +8,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { buildContextPack } from "../../../src/core/pack/index.ts";
@@ -74,8 +74,9 @@ async function setupProject(opts: FixtureOpts = {}): Promise<void> {
     "utf8",
   );
   for (const [filename, body] of Object.entries(opts.decisions ?? {})) {
-    await mkdir(join(work, "design", "decisions"), { recursive: true });
-    await writeFile(join(work, "design", "decisions", filename), body, "utf8");
+    const target = join(work, "design", "decisions", filename);
+    await mkdir(dirname(target), { recursive: true });
+    await writeFile(target, body, "utf8");
   }
   for (const [relPath, body] of Object.entries(opts.extraFiles ?? {})) {
     await mkdir(join(work, relPath, ".."), { recursive: true });
@@ -260,6 +261,20 @@ describe("buildContextPack — Declared decisions", () => {
     expect(out).toContain("## Declared decisions");
     expect(out).toContain("### stability-taxonomy.md");
     expect(out).toContain("body of the decision");
+  });
+
+  it("shows nested decision paths without collapsing duplicate-looking basenames", async () => {
+    await setupProject({
+      taskExtras: {
+        decision_refs: ["design/decisions/security/P1-T1-rfc.md"],
+      },
+      decisions: {
+        "security/P1-T1-rfc.md": "# Security\n\nbody of the nested decision",
+      },
+    });
+    const out = await buildPack();
+    expect(out).toContain("### design/decisions/security/P1-T1-rfc.md");
+    expect(out).toContain("body of the nested decision");
   });
 
   // Security (Blocker 1): a decision_ref is loaded YAML content read into the

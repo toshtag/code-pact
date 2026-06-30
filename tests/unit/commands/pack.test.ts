@@ -106,7 +106,7 @@ describe("runPack — project-a / P2-E1-T1", () => {
       agentName: "claude-code",
       outputDir: tmpOut,
     });
-    expect(result.includedDecisions).toContain("P2-E1-T1-use-parseargs.md");
+    expect(result.includedDecisions).toContain("design/decisions/P2-E1-T1-use-parseargs.md");
   });
 
   it("output guides progress recording via the CLI, not hand-written YAML", async () => {
@@ -317,8 +317,8 @@ describe("runPack — v0.5.1 context quality", () => {
   it("context_size: large includes all decisions (not just task-id-matched)", async () => {
     await writePhaseYaml([{ id: "PQ-T1", context_size: "large" }]);
     const result = await runPack({ cwd: dir, phaseId: "PQ", taskId: "PQ-T1", agentName: "claude-code", outputDir: dir });
-    expect(result.includedDecisions).toContain("PQ-T1-decision.md");
-    expect(result.includedDecisions).toContain("PQ-other-decision.md");
+    expect(result.includedDecisions).toContain("design/decisions/PQ-T1-decision.md");
+    expect(result.includedDecisions).toContain("design/decisions/PQ-other-decision.md");
   });
 
   it("context_size: small yields no rules, decisions, or constitution", async () => {
