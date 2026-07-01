@@ -1,12 +1,4 @@
 {
-  "src/commands/init.ts#writeIfAbsent": [
-    {
-      "operation": "atomicWriteText",
-      "authority": "owned_write",
-      "reason": "Path proven by authority resolver or brand constructor; checker cannot trace through complex dataflow",
-      "line": 135
-    }
-  ],
   "src/core/adapters/manifest.ts#writeManifest": [
     {
       "operation": "atomicWriteText",
@@ -29,14 +21,6 @@
       "authority": "owned_write",
       "reason": "Path proven by authority resolver or brand constructor; checker cannot trace through complex dataflow",
       "line": 682
-    }
-  ],
-  "src/core/progress/io.ts#atomicWriteYaml": [
-    {
-      "operation": "atomicWriteText",
-      "authority": "owned_write",
-      "reason": "Path proven by authority resolver or brand constructor; checker cannot trace through complex dataflow",
-      "line": 166
     }
   ]
 }

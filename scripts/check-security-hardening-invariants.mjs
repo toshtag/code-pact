@@ -9,7 +9,16 @@
 // Run: node scripts/check-security-hardening-invariants.mjs
 // ---------------------------------------------------------------------------
 
-import { readFileSync, existsSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { execFileSync } from "node:child_process";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -36,6 +45,69 @@ function fileExists(rel) {
 function grepIn(content, pattern) {
   return new RegExp(pattern).test(content);
 }
+
+function walkTs(dir) {
+  const out = [];
+  for (const entry of readdirSync(dir)) {
+    const full = join(dir, entry);
+    const stat = statSync(full);
+    if (stat.isDirectory()) {
+      out.push(...walkTs(full));
+    } else if (entry.endsWith(".ts") && !entry.endsWith(".d.ts")) {
+      out.push(full);
+    }
+  }
+  return out;
+}
+
+function rel(abs) {
+  return abs
+    .replace(`${repoRoot}/`, "")
+    .split(/[\\/]/)
+    .join("/");
+}
+
+function actualRawImportFiles() {
+  const files = new Set();
+  const rawModulePattern =
+    /(?:import|export)\s+(?!type\b)[^'"]*\s+from\s+["']([^"']+)["']/g;
+  for (const file of walkTs(join(repoRoot, "src"))) {
+    const text = readFileSync(file, "utf8");
+    for (const match of text.matchAll(rawModulePattern)) {
+      const specifier = match[1];
+      if (
+        specifier === "node:fs" ||
+        specifier === "node:fs/promises" ||
+        specifier.endsWith("raw-internal.ts")
+      ) {
+        files.add(rel(file));
+      }
+    }
+  }
+  return [...files].sort();
+}
+
+function runAuthorityFixture(name, lines) {
+  const dir = mkdtempSync(join(repoRoot, ".tmp-security-hardening-"));
+  const fixture = join(dir, `${name}.ts`);
+  writeFileSync(fixture, `${lines.join("\n")}\n`, "utf8");
+  try {
+    execFileSync(
+      "node",
+      [join(repoRoot, "scripts/check-fs-authority.mjs"), fixture],
+      { cwd: repoRoot, stdio: "pipe" },
+    );
+    return 0;
+  } catch (err) {
+    return typeof err.status === "number" ? err.status : 1;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+const containedReadResolver = "resolveContained" + "ReadPath";
+const containedWriteResolver = "resolveContained" + "WritePath";
+const containedDeleteResolver = "resolveContained" + "DeletePath";
 
 // ---------------------------------------------------------------------------
 // 1. Branded filesystem API — raw fs primitives NOT exported from index
@@ -71,33 +143,36 @@ console.log("\n=== 2. owned-read.ts deprecated ===");
 }
 
 // ---------------------------------------------------------------------------
-// 3. TRUSTED_FS_MODULES — limited set + RAW_FS_IMPORT_ALLOWLIST
+// 3. Raw fs import boundary — exact set, no file-level trusted return
 // ---------------------------------------------------------------------------
-console.log("\n=== 3. TRUSTED_FS_MODULES scope ===");
+console.log("\n=== 3. Raw fs import boundary ===");
 {
   const checker = readFile("scripts/check-fs-authority.mjs");
-  check("TRUSTED_FS_MODULES is defined", grepIn(checker, "TRUSTED_FS_MODULES"));
   check(
     "RAW_FS_IMPORT_ALLOWLIST is defined",
     grepIn(checker, "RAW_FS_IMPORT_ALLOWLIST"),
   );
-  // Core trusted modules — fully exempt from all checks
-  const expectedCore = [
-    "raw-internal.ts",
-    "operations.ts",
-    "authority-resolvers.ts",
-    "branded-paths-internal.ts",
-    "path-safety.ts",
-    "atomic-text.ts",
-  ];
-  for (const file of expectedCore) {
-    check(`TRUSTED_FS_MODULES includes ${file}`, grepIn(checker, file));
-  }
-  // control-plane.ts must NOT be in TRUSTED_FS_MODULES anymore
-  // (it uses branded operations, not raw fs)
   check(
-    "control-plane.ts not in TRUSTED_FS_MODULES (removed)",
-    !grepIn(checker, 'join("src", "core", "project-fs", "control-plane.ts")'),
+    "TRUSTED_FS_MODULES is removed",
+    !grepIn(checker, "TRUSTED_FS_MODULES"),
+  );
+  check(
+    "file-level authority early return is removed",
+    !grepIn(checker, "isAuthorityModule\\("),
+  );
+  const expectedRawImportFiles = [
+    "src/core/path-safety.ts",
+    "src/core/project-fs/authority-resolvers.ts",
+    "src/core/project-fs/operations.ts",
+    "src/core/project-fs/raw-internal.ts",
+    "src/io/atomic-text.ts",
+    "src/lib/package-version.ts",
+  ];
+  const actual = actualRawImportFiles();
+  check(
+    "raw fs import file set matches exact allowlist",
+    JSON.stringify(actual) === JSON.stringify(expectedRawImportFiles),
+    `actual: ${actual.join(", ")}`,
   );
 }
 
@@ -179,6 +254,12 @@ console.log("\n=== 7. Symlink-safe read ===");
   check(
     "readRegularOwnedText uses O_NOFOLLOW",
     grepIn(rawInternal, "O_NOFOLLOW"),
+  );
+  const operations = readFile("src/core/project-fs/operations.ts");
+  check(
+    "readOwnedText uses fd no-follow reader, not readFileRaw",
+    grepIn(operations, "readRegularOwnedTextRaw") &&
+      !grepIn(operations, "readFileRaw\\(unbrand\\(path\\)"),
   );
 }
 
@@ -318,6 +399,18 @@ console.log("\n=== 10. Test coverage ===");
     "node:fs namespace import rejection test present",
     grepIn(authTest, "node:fs namespace"),
   );
+  check(
+    "generic resolver rejection tests present",
+    grepIn(authTest, "generic contained read/write/delete resolver fixtures"),
+  );
+  check(
+    "read-to-delete/write-open rejection tests present",
+    grepIn(authTest, "read authority passed to delete and write-open"),
+  );
+  check(
+    "namespace brand rejection test present",
+    grepIn(authTest, "brand constructor namespace import"),
+  );
 
   // Phase 9.9: nested quality scan tests
   check(
@@ -366,9 +459,50 @@ console.log("\n=== 10. Test coverage ===");
 }
 
 // ---------------------------------------------------------------------------
-// 11. Documentation updated — design/decisions/**/*.md
+// 11. Negative fixture execution
 // ---------------------------------------------------------------------------
-console.log("\n=== 11. Documentation ===");
+console.log("\n=== 11. Negative fixture execution ===");
+{
+  check(
+    "generic write fixture exits 1",
+    runAuthorityFixture("generic-write", [
+      `import { ${containedWriteResolver}, writeOwnedText } from "../src/core/project-fs/index.ts";`,
+      "async function f(cwd, userPath) {",
+      `  await writeOwnedText(await ${containedWriteResolver}(cwd, userPath), "x");`,
+      "}",
+    ]) === 1,
+  );
+  check(
+    "raw-internal wildcard re-export fixture exits 1",
+    runAuthorityFixture("raw-reexport", [
+      'export * from "../src/core/project-fs/raw-internal.ts";',
+    ]) === 1,
+  );
+  check(
+    "namespace brand fixture exits 1",
+    runAuthorityFixture("namespace-brand", [
+      'import * as brands from "../src/core/project-fs/branded-paths-internal.ts";',
+      'import { readOwnedText } from "../src/core/project-fs/index.ts";',
+      "async function f(path) {",
+      "  return readOwnedText(brands.brandOwnedRead(path));",
+      "}",
+    ]) === 1,
+  );
+  check(
+    "read-to-delete fixture exits 1",
+    runAuthorityFixture("read-delete", [
+      'import { resolveProjectConfigReadPath, unlinkOwned } from "../src/core/project-fs/index.ts";',
+      "async function f(cwd) {",
+      "  await unlinkOwned(await resolveProjectConfigReadPath(cwd));",
+      "}",
+    ]) === 1,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 12. Documentation updated — design/decisions/**/*.md
+// ---------------------------------------------------------------------------
+console.log("\n=== 12. Documentation ===");
 {
   const lifecycle = readFile("docs/concepts/design-doc-lifecycle.md");
   check(

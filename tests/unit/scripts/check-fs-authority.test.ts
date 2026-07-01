@@ -9,6 +9,9 @@ import { fileURLToPath } from "node:url";
 const execFileAsync = promisify(execFile);
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const scriptPath = join(repoRoot, "scripts", "check-fs-authority.mjs");
+const containedReadResolver = "resolveContained" + "ReadPath";
+const containedWriteResolver = "resolveContained" + "WritePath";
+const containedDeleteResolver = "resolveContained" + "DeletePath";
 
 async function runFixture(lines: string[]): Promise<{
   ok: boolean;
@@ -37,6 +40,88 @@ describe("check-fs-authority", () => {
     const result = await runFixture(['export * from "node:fs/promises";', ""]);
     expect(result.ok).toBe(false);
     expect(result.output).toContain("raw fs wildcard re-export");
+  });
+
+  it("rejects raw-internal wildcard re-exports", async () => {
+    const result = await runFixture([
+      'export * from "../../src/core/project-fs/raw-internal.ts";',
+      "",
+    ]);
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain("raw-internal wildcard re-export");
+  });
+
+  it("rejects namespace imports of brand constructors", async () => {
+    const result = await runFixture([
+      'import * as brands from "../../src/core/project-fs/branded-paths-internal.ts";',
+      'import { readOwnedText } from "../../src/core/project-fs/index.ts";',
+      "",
+      "async function leak(path: string) {",
+      "  return readOwnedText(brands.brandOwnedRead(path));",
+      "}",
+      "",
+    ]);
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain("brand constructor namespace import");
+  });
+
+  it("rejects generic contained read/write/delete resolver fixtures", async () => {
+    const read = await runFixture([
+      `import { ${containedReadResolver}, readOwnedText } from "../../src/core/project-fs/index.ts";`,
+      "",
+      "async function leak(cwd: string, userPath: string) {",
+      `  return readOwnedText(await ${containedReadResolver}(cwd, userPath));`,
+      "}",
+      "",
+    ]);
+    expect(read.ok).toBe(false);
+    expect(read.output).toContain("readOwnedText() called on non-authority path");
+
+    const write = await runFixture([
+      `import { ${containedWriteResolver}, writeOwnedText } from "../../src/core/project-fs/index.ts";`,
+      "",
+      "async function overwrite(cwd: string, userPath: string) {",
+      `  await writeOwnedText(await ${containedWriteResolver}(cwd, userPath), "owned");`,
+      "}",
+      "",
+    ]);
+    expect(write.ok).toBe(false);
+    expect(write.output).toContain("writeOwnedText() called on non-authority path");
+
+    const del = await runFixture([
+      `import { ${containedDeleteResolver}, unlinkOwned } from "../../src/core/project-fs/index.ts";`,
+      "",
+      "async function erase(cwd: string, userPath: string) {",
+      `  await unlinkOwned(await ${containedDeleteResolver}(cwd, userPath));`,
+      "}",
+      "",
+    ]);
+    expect(del.ok).toBe(false);
+    expect(del.output).toContain("unlinkOwned() called on non-authority path");
+  });
+
+  it("rejects read authority passed to delete and write-open operations", async () => {
+    const del = await runFixture([
+      'import { resolveProjectConfigReadPath, unlinkOwned } from "../../src/core/project-fs/index.ts";',
+      "",
+      "async function eraseConfig(cwd: string) {",
+      "  await unlinkOwned(await resolveProjectConfigReadPath(cwd));",
+      "}",
+      "",
+    ]);
+    expect(del.ok).toBe(false);
+    expect(del.output).toContain("unlinkOwned() called on non-authority path");
+
+    const writeOpen = await runFixture([
+      'import { resolveProjectConfigReadPath, openOwned } from "../../src/core/project-fs/index.ts";',
+      "",
+      "async function truncate(cwd: string) {",
+      '  await openOwned(await resolveProjectConfigReadPath(cwd), "w");',
+      "}",
+      "",
+    ]);
+    expect(writeOpen.ok).toBe(false);
+    expect(writeOpen.output).toContain("openOwned() called on non-authority path");
   });
 
   it("does not let a later same-name authority variable bless an earlier unsafe sink", async () => {

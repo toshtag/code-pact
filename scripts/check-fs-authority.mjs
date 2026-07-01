@@ -106,6 +106,27 @@ const FS_FUNCTIONS = new Set([
   "atomicWriteText",
   "atomicReplaceExistingText",
   "atomicCreateTextExclusive",
+  "readOwnedText",
+  "readExplicitUserText",
+  "statOwned",
+  "statExplicitUser",
+  "lstatOwned",
+  "lstatExplicitUser",
+  "listOwned",
+  "listOwnedDirents",
+  "writeOwnedText",
+  "writeOwnedFile",
+  "removeOwned",
+  "removeOwnedPath",
+  "unlinkOwned",
+  "mkdirOwned",
+  "renameOwned",
+  "copyOwnedToOwned",
+  "linkOwned",
+  "openOwnedRead",
+  "openOwned",
+  "openOwnedWrite",
+  "openOwnedWriteExclusive",
 ]);
 
 const READLIKE_FS_FUNCTIONS = new Set([
@@ -124,6 +145,15 @@ const READLIKE_FS_FUNCTIONS = new Set([
   "existsSync",
   "readlink",
   "realpath",
+  "readOwnedText",
+  "readExplicitUserText",
+  "statOwned",
+  "statExplicitUser",
+  "lstatOwned",
+  "lstatExplicitUser",
+  "listOwned",
+  "listOwnedDirents",
+  "openOwnedRead",
 ]);
 
 const WRITELIKE_FS_FUNCTIONS = new Set([
@@ -138,6 +168,11 @@ const WRITELIKE_FS_FUNCTIONS = new Set([
   "atomicWriteText",
   "atomicReplaceExistingText",
   "atomicCreateTextExclusive",
+  "writeOwnedText",
+  "writeOwnedFile",
+  "mkdirOwned",
+  "openOwnedWrite",
+  "openOwnedWriteExclusive",
   "rename",
   "renameSync",
   "copyFile",
@@ -161,6 +196,9 @@ const DELETELIKE_FS_FUNCTIONS = new Set([
   "rmSync",
   "unlink",
   "unlinkSync",
+  "removeOwned",
+  "removeOwnedPath",
+  "unlinkOwned",
 ]);
 
 const RAW_FS_MODULES = new Set([
@@ -175,8 +213,8 @@ const PROJECT_FS_MODULES = new Set([
   join("src", "io", "atomic-text.ts"),
 ]);
 
-// Modules that may import from raw-internal.ts or node:fs directly.
-// Only TRUSTED_FS_MODULES are allowed; all others are flagged.
+// Raw filesystem implementation boundary. Modules outside this exact set may
+// not import raw-internal.ts or node:fs directly.
 const RAW_INTERNAL_MODULE = join(
   "src",
   "core",
@@ -186,7 +224,7 @@ const RAW_INTERNAL_MODULE = join(
 
 function capabilitiesForKind(kind) {
   if (kind === "explicit_user_input") {
-    return { read: true, write: true, delete: true, explicitUserInput: true };
+    return { read: true, write: false, delete: false, explicitUserInput: true };
   }
   if (kind === "owned_write") {
     return { read: true, write: true, delete: true, explicitUserInput: false };
@@ -409,15 +447,8 @@ const AUTHORITY_EXPORTS = new Map([
   ],
 ]);
 
-// Trusted fs modules: modules that implement the filesystem boundary itself.
-// These are FULLY EXEMPT from all checks — both import checks and sink checks.
-// Only true core primitives belong here. Domain modules must NOT be listed.
-//
-// Modules that need raw-internal.ts or node:fs imports but should still have
-// their sink calls checked belong in RAW_FS_IMPORT_ALLOWLIST below.
-const TRUSTED_FS_MODULES = new Set([
+const RAW_FS_IMPORT_ALLOWLIST = new Set([
   // — Core primitives (raw fs I/O wrappers, brand types, path safety) —
-  join("src", "core", "project-fs", "index.ts"),
   join("src", "core", "project-fs", "raw-internal.ts"),
   join("src", "core", "project-fs", "operations.ts"),
   join("src", "core", "project-fs", "authority-resolvers.ts"),
@@ -428,12 +459,6 @@ const TRUSTED_FS_MODULES = new Set([
   join("src", "lib", "package-version.ts"),
 ]);
 
-// Modules allowed to import from raw-internal.ts or node:fs directly.
-// These modules are NOT exempt from sink checks — only from the import ban.
-// This is a transitional measure: the goal is to shrink this set to empty
-// by migrating each module to use branded operations from operations.ts.
-const RAW_FS_IMPORT_ALLOWLIST = new Set([]);
-
 // Result properties that extract a path from an authority result object.
 const AUTHORITY_RESULT_PROPS = new Set(["absPath"]);
 const OWNED_PATH_TYPES = new Set([
@@ -441,6 +466,8 @@ const OWNED_PATH_TYPES = new Set([
   "OwnedReadPath",
   "OwnedWritePath",
   "OwnedDeletePath",
+  "OwnedListPath",
+  "ExplicitUserReadPath",
 ]);
 const BRAND_CONSTRUCTORS = new Set([
   "brandContained",
@@ -517,6 +544,20 @@ function allowlistKey(relFile, fnName) {
 
 function createScope(parent = null) {
   return { parent, vars: new Map() };
+}
+
+function kindFromTypeNode(typeNode) {
+  if (!typeNode) return null;
+  const text = typeNode.getText();
+  if (/\bOwnedReadPath\b/.test(text)) return "owned_read";
+  if (/\bOwnedWritePath\b/.test(text)) return "owned_write";
+  if (/\bOwnedDeletePath\b/.test(text)) return "owned_delete";
+  if (/\bExplicitUserReadPath\b/.test(text)) return "explicit_user_input";
+  if (/\bOwnedListPath\b/.test(text)) return "owned_read";
+  if (/\bSymlinkFreeContainedPath\b/.test(text)) {
+    return "symlink_free_contained";
+  }
+  return null;
 }
 
 function cloneScope(scope) {
@@ -880,13 +921,19 @@ function openRequiredCapability(node) {
 }
 
 function requiredPathArguments(fnName, node) {
-  if (fnName === "rename") {
+  if (fnName === "rename" || fnName === "renameOwned") {
     return [
       { index: 0, capability: "delete" },
       { index: 1, capability: "write" },
     ];
   }
-  if (fnName === "copyFile" || fnName === "cp" || fnName === "link") {
+  if (
+    fnName === "copyFile" ||
+    fnName === "cp" ||
+    fnName === "link" ||
+    fnName === "copyOwnedToOwned" ||
+    fnName === "linkOwned"
+  ) {
     return [
       { index: 0, capability: "read" },
       { index: 1, capability: "write" },
@@ -895,8 +942,14 @@ function requiredPathArguments(fnName, node) {
   if (fnName === "symlink") {
     return [{ index: 1, capability: "write" }];
   }
-  if (fnName === "open" || fnName === "openSync") {
+  if (fnName === "open" || fnName === "openSync" || fnName === "openOwned") {
     return [{ index: 0, capability: openRequiredCapability(node) }];
+  }
+  if (fnName === "openOwnedRead") {
+    return [{ index: 0, capability: "read" }];
+  }
+  if (fnName === "openOwnedWrite" || fnName === "openOwnedWriteExclusive") {
+    return [{ index: 0, capability: "write" }];
   }
   if (READLIKE_FS_FUNCTIONS.has(fnName)) {
     return [{ index: 0, capability: "read" }];
@@ -1001,11 +1054,7 @@ function checkFile(filePath, allowlist, allowlistUsed) {
 
   // Detect named re-exports from raw-internal.ts (export { x } from ".../raw-internal.ts").
   // These bypass the branded API by re-exporting raw primitives.
-  // Trusted modules (e.g. index.ts) are exempt — they may re-export types and constants.
-  if (TRUSTED_FS_MODULES.has(relFile)) {
-    // skip re-export check for trusted modules
-  } else
-    for (const stmt of sourceFile.statements) {
+  for (const stmt of sourceFile.statements) {
       if (!ts.isExportDeclaration(stmt)) continue;
       if (stmt.moduleSpecifier === undefined) continue;
       if (!ts.isStringLiteral(stmt.moduleSpecifier)) continue;
@@ -1026,13 +1075,10 @@ function checkFile(filePath, allowlist, allowlistUsed) {
         arg: specifier,
         text: sourceFile.text.split("\n")[line - 1]?.trim() ?? "",
       });
-    }
+  }
 
-  if (isAuthorityModule(relFile)) return findings;
-
-  // Phase 3: Non-trusted modules MUST NOT import from raw-internal.ts or
-  // node:fs/node:fs/promises directly. Only TRUSTED_FS_MODULES and
-  // RAW_FS_IMPORT_ALLOWLIST modules may do so.
+  // Non-boundary modules MUST NOT import from raw-internal.ts or
+  // node:fs/node:fs/promises directly.
   if (!RAW_FS_IMPORT_ALLOWLIST.has(relFile)) {
     for (const stmt of sourceFile.statements) {
       if (!ts.isImportDeclaration(stmt)) continue;
@@ -1158,8 +1204,13 @@ function checkFile(filePath, allowlist, allowlistUsed) {
       if (node.name) declareVar(scope, node.name.text, "unauthorized");
       const fnScope = createScope(scope);
       for (const param of node.parameters) {
-        if (ts.isIdentifier(param.name))
-          declareVar(fnScope, param.name.text, "unauthorized");
+        if (ts.isIdentifier(param.name)) {
+          declareVar(
+            fnScope,
+            param.name.text,
+            kindFromTypeNode(param.type) ?? "unauthorized",
+          );
+        }
       }
       if (node.body) visit(node.body, fnScope);
       return;
@@ -1172,8 +1223,13 @@ function checkFile(filePath, allowlist, allowlistUsed) {
     ) {
       const fnScope = createScope(scope);
       for (const param of node.parameters) {
-        if (ts.isIdentifier(param.name))
-          declareVar(fnScope, param.name.text, "unauthorized");
+        if (ts.isIdentifier(param.name)) {
+          declareVar(
+            fnScope,
+            param.name.text,
+            kindFromTypeNode(param.type) ?? "unauthorized",
+          );
+        }
       }
       if (node.body) visit(node.body, fnScope);
       return;
@@ -1367,7 +1423,7 @@ function checkFile(filePath, allowlist, allowlistUsed) {
             trustedImports,
             localWrappers,
           )
-        : "unauthorized";
+        : (kindFromTypeNode(node.type) ?? "unauthorized");
       declareVar(scope, node.name.text, kind);
       return;
     }
@@ -1460,6 +1516,13 @@ function checkFile(filePath, allowlist, allowlistUsed) {
         ts.forEachChild(node, child => visit(child, scope));
         return;
       }
+      if (
+        RAW_FS_IMPORT_ALLOWLIST.has(relFile) &&
+        (sinkInfo || (fnName && FS_FUNCTIONS.has(fnName)))
+      ) {
+        ts.forEachChild(node, child => visit(child, scope));
+        return;
+      }
       if (sinkInfo && sinkInfo.fnName === null) {
         const line =
           sourceFile.getLineAndCharacterOfPosition(node.getStart()).line + 1;
@@ -1536,10 +1599,6 @@ function checkFile(filePath, allowlist, allowlistUsed) {
 
   visit(sourceFile, createScope());
   return findings;
-}
-
-function isAuthorityModule(relFile) {
-  return TRUSTED_FS_MODULES.has(relFile);
 }
 
 function detectWrapperKind(fnNode, trustedImports) {

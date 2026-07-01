@@ -470,10 +470,14 @@ export async function runInitCore(opts: InitCoreOptions): Promise<InitResult> {
   const KEEP_HINT =
     "keep only `/.code-pact/locks/`, `/.code-pact/cache/`, `/.local/`, `/.context/` ignored";
   const warnings: string[] = [];
-  const blanketLine = await resolveGitignoreReadPath(cwd)
-    .then(ownedPath => readOwnedText(ownedPath))
-    .then(c => detectBlanketCodePactIgnore(c))
-    .catch(() => null);
+  const blanketLine = await (async (): Promise<string | null> => {
+    try {
+      const ownedPath = await resolveGitignoreReadPath(cwd);
+      return detectBlanketCodePactIgnore(await readOwnedText(ownedPath));
+    } catch {
+      return null;
+    }
+  })();
   if (await isGitRepo(cwd)) {
     const ignoredAreas = await gitIgnoredControlPlaneAreas(cwd);
     if (ignoredAreas.length > 0) {
