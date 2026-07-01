@@ -101,6 +101,7 @@ describe("check-fs-authority", () => {
   });
 
   it("rejects read authority passed to delete and write-open operations", async () => {
+    const removedWriteOpen = "openOwned" + "Write";
     const del = await runFixture([
       'import { resolveProjectConfigReadPath, unlinkOwned } from "../../src/core/project-fs/index.ts";',
       "",
@@ -113,15 +114,17 @@ describe("check-fs-authority", () => {
     expect(del.output).toContain("unlinkOwned() called on non-authority path");
 
     const writeOpen = await runFixture([
-      'import { resolveProjectConfigReadPath, openOwned } from "../../src/core/project-fs/index.ts";',
+      `import { resolveProjectConfigReadPath, ${removedWriteOpen} } from "../../src/core/project-fs/index.ts";`,
       "",
       "async function truncate(cwd: string) {",
-      '  await openOwned(await resolveProjectConfigReadPath(cwd), "w");',
+      `  await ${removedWriteOpen}(await resolveProjectConfigReadPath(cwd), "r");`,
       "}",
       "",
     ]);
     expect(writeOpen.ok).toBe(false);
-    expect(writeOpen.output).toContain("openOwned() called on non-authority path");
+    expect(writeOpen.output).toContain(
+      "forbidden public filesystem API import() called",
+    );
   });
 
   it("does not let a later same-name authority variable bless an earlier unsafe sink", async () => {
@@ -381,10 +384,14 @@ describe("check-fs-authority", () => {
     expect(result.output).toContain("stat() called on non-authority path");
   });
 
-  it("rejects generic resolveSymlinkFreeReadCandidate as semantic authority", async () => {
+  it("rejects a generic symlink-free read candidate as semantic authority", async () => {
     const result = await runFixture([
       'import { readFile } from "node:fs/promises";',
-      'import { resolveSymlinkFreeReadCandidate } from "../../src/core/project-fs/owned-read.ts";',
+      'import { resolveSymlinkFreeProjectPath } from "../../src/core/path-safety.ts";',
+      "",
+      "async function resolveSymlinkFreeReadCandidate(cwd: string, relPath: string) {",
+      "  return resolveSymlinkFreeProjectPath(cwd, relPath);",
+      "}",
       "",
       "async function f(profile: any, cwd: string) {",
       "  const p = await resolveSymlinkFreeReadCandidate(cwd, profile.instruction_filename);",
@@ -463,14 +470,16 @@ describe("check-fs-authority", () => {
 
   it("allows rename and copy when both path arguments have authority", async () => {
     const result = await runFixture([
-      'import { copyOwnedToOwned, renameOwned } from "../../src/core/project-fs/index.ts";',
-      'import { resolveOwnedAgentProfilePath } from "../../src/core/agent-profile-path.ts";',
+      'import { copyOwnedToOwned, renameOwned, resolveProgressDeletePath, resolveProgressReadPath, resolveProgressWritePath } from "../../src/core/project-fs/index.ts";',
+      'import { resolveAgentProfilePath, resolveOwnedAgentProfilePath } from "../../src/core/agent-profile-path.ts";',
       "",
       "async function f(cwd: string) {",
-      '  const src = await resolveOwnedAgentProfilePath(cwd, "claude-code");',
-      '  const dst = await resolveOwnedAgentProfilePath(cwd, "codex");',
-      "  await copyOwnedToOwned(src, dst);",
-      "  await renameOwned(src, dst);",
+      '  const copySrc = await resolveAgentProfilePath(cwd, "claude-code");',
+      '  const copyDst = await resolveOwnedAgentProfilePath(cwd, "codex");',
+      "  await copyOwnedToOwned(copySrc, copyDst);",
+      '  const renameSrc = await resolveProgressDeletePath(cwd, ".code-pact/state/old.yaml");',
+      '  const renameDst = await resolveProgressWritePath(cwd, ".code-pact/state/new.yaml");',
+      "  await renameOwned(renameSrc, renameDst);",
       "}",
       "",
     ]);

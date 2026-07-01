@@ -20,7 +20,7 @@
 // design-docs-ephemeral step 7 (half ii): a relative `.md` link whose target file
 // is GONE but is recorded as a RETIRED decision under `.code-pact/state` resolves
 // as *retired*, not *broken* — the safety net for a hand-deleted
-// `design/decisions/*.md`. The retired judgement is delegated WHOLE to the step-5
+// `design/decisions/**/*.md`. The retired judgement is delegated WHOLE to the step-5
 // lint-soften predicate `decisionRecordSoftensMissingRef` (which itself does the
 // normalize + symlink-aware true-ENOENT presence + identity re-check + schema
 // validation); this checker re-implements none of that contract — see
@@ -53,7 +53,7 @@ const ROOT_SOURCE_SKIP = new Set(["CHANGELOG.md"]);
 // The archived CHANGELOG history (`docs/maintainers/history/CHANGELOG-<major>.md`) is the
 // SAME verbatim historical content as root `CHANGELOG.md` — older major sections MOVED out
 // of the root file by `changelog:archive` — so it is excluded as a SOURCE for the identical
-// reason: its links are POINT-IN-TIME (they reference docs / `design/decisions/*.md` as they
+// reason: its links are POINT-IN-TIME (they reference docs / nested decision records as they
 // were at that release; some have since moved or retired), so checking them is noise, not
 // signal, and could never stay green as the tree evolves. It remains valid as a link TARGET.
 const ARCHIVED_CHANGELOG_RE = /^docs[/\\]maintainers[/\\]history[/\\]CHANGELOG-\d+\.md$/;
@@ -178,7 +178,7 @@ function extractLinks(rawText: string): { target: string; line: number }[] {
 // design-docs-ephemeral step 7 (half ii). A thin adapter: convert the link's
 // resolved abs target into a project-relative POSIX ref, then delegate the WHOLE
 // retired/broken judgement to the step-5 lint-soften predicate. The predicate
-// itself does normalize (top-level design/decisions/*.md only), symlink-aware
+// itself does normalize (nested design/decisions/**/*.md records), symlink-aware
 // true-ENOENT live presence (an ancestor-symlink escape is `inaccessible`, NOT
 // absent → not retired), identity re-check (canonical_ref / original_path /
 // path_sha256), and schema validation (a corrupt record is `invalid`, never
