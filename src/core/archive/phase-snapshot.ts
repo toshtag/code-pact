@@ -1,4 +1,5 @@
 import { readOwnedText, resolvePhaseReadPath } from "../project-fs/index.ts";
+import { brandOwnedWrite } from "../project-fs/branded-paths-internal.ts";
 import { parse as parseYaml } from "yaml";
 import { Phase } from "../schemas/phase.ts";
 import {
@@ -811,7 +812,7 @@ export async function applyPhaseSnapshotPlan(
         ? { kind: "absent" }
         : { kind: "present", content: plan.existing_raw };
     await atomicWriteText(
-      plan.path,
+      brandOwnedWrite(plan.path),
       serializePhaseSnapshot(plan.record),
       expected,
     );

@@ -1,24 +1,39 @@
-import { readdir, readFile } from "../project-fs/raw-internal.ts";
+import { listOwnedDirents, readOwnedText } from "../project-fs/operations.ts";
+import {
+  unbrand,
+  brandOwnedRead,
+  brandOwnedWrite,
+} from "../project-fs/branded-paths-internal.ts";
 import { basename, join } from "node:path";
 import {
   ArchiveBundle,
   ARCHIVE_BUNDLE_SCHEMA_VERSION,
   type ArchiveBundleKind,
 } from "../schemas/archive-bundle.ts";
-import { atomicReplaceExistingText, atomicWriteText } from "../../io/atomic-text.ts";
+import {
+  atomicReplaceExistingText,
+  atomicWriteText,
+} from "../../io/atomic-text.ts";
 import {
   archiveBundleRelPath,
   archiveDecisionsRelDir,
   archiveEventPacksRelDir,
   archivePhasesRelDir,
   resolveArchiveOwnedPath,
+  resolveArchiveOwnedListPath,
   sha256Hex,
 } from "./paths.ts";
-import { computeMemberIdsSha256, validateArchiveBundleTier1 } from "./archive-bundle-reader.ts";
+import {
+  computeMemberIdsSha256,
+  validateArchiveBundleTier1,
+} from "./archive-bundle-reader.ts";
 import { readPendingDeleteFilters } from "./delete-intent-journal.ts";
 import { bindBundleMember } from "./archive-bundle-binding.ts";
 import { validateEventPackTier1 } from "./event-pack-reader.ts";
-import { buildBundleMemberIndex, reconcileLooseAndBundle } from "./archive-bundle-index.ts";
+import {
+  buildBundleMemberIndex,
+  reconcileLooseAndBundle,
+} from "./archive-bundle-index.ts";
 import { loadArchiveBundles } from "./archive-bundle-loader.ts";
 
 // ---------------------------------------------------------------------------
@@ -52,7 +67,11 @@ export class BundleWriteError extends Error {
   readonly phase: "build" | "write_bundle" | "verify_bundle" | "retire_bundle";
   readonly partial_applied: boolean;
   readonly detail: string;
-  constructor(phase: BundleWriteError["phase"], partialApplied: boolean, detail: string) {
+  constructor(
+    phase: BundleWriteError["phase"],
+    partialApplied: boolean,
+    detail: string,
+  ) {
     super(`Archive bundle ${phase}: ${detail}`);
     this.name = "BundleWriteError";
     this.phase = phase;
@@ -90,21 +109,41 @@ export function assertBundleMemberFoldable(
   sourceLabel = "record",
 ): void {
   try {
-    bindBundleMember(kind, { id: member.id, sha256: sha256Hex(member.bytes), bytes: member.bytes }, "(building bundle)");
-    if (kind === "event_pack") validateEventPackTier1(member.id, member.bytes, "(building bundle)");
+    bindBundleMember(
+      kind,
+      { id: member.id, sha256: sha256Hex(member.bytes), bytes: member.bytes },
+      "(building bundle)",
+    );
+    if (kind === "event_pack")
+      validateEventPackTier1(member.id, member.bytes, "(building bundle)");
   } catch (err) {
-    throw new BundleWriteError("build", false, `${sourceLabel} "${member.id}" is not foldable: ${(err as Error).message}`);
+    throw new BundleWriteError(
+      "build",
+      false,
+      `${sourceLabel} "${member.id}" is not foldable: ${(err as Error).message}`,
+    );
   }
 }
 
-export function buildArchiveBundle(kind: ArchiveBundleKind, members: readonly LooseMember[]): ArchiveBundle {
+export function buildArchiveBundle(
+  kind: ArchiveBundleKind,
+  members: readonly LooseMember[],
+): ArchiveBundle {
   if (members.length === 0) {
-    throw new BundleWriteError("build", false, "cannot build a bundle with no members");
+    throw new BundleWriteError(
+      "build",
+      false,
+      "cannot build a bundle with no members",
+    );
   }
   const seen = new Set<string>();
-  const records = members.map((m) => {
+  const records = members.map(m => {
     if (seen.has(m.id)) {
-      throw new BundleWriteError("build", false, `duplicate member id "${m.id}"`);
+      throw new BundleWriteError(
+        "build",
+        false,
+        `duplicate member id "${m.id}"`,
+      );
     }
     seen.add(m.id);
     assertBundleMemberFoldable(kind, m, "bundle member");
@@ -114,7 +153,7 @@ export function buildArchiveBundle(kind: ArchiveBundleKind, members: readonly Lo
   return ArchiveBundle.parse({
     schema_version: ARCHIVE_BUNDLE_SCHEMA_VERSION,
     kind,
-    member_ids_sha256: computeMemberIdsSha256(records.map((r) => r.id)),
+    member_ids_sha256: computeMemberIdsSha256(records.map(r => r.id)),
     members: records,
   } satisfies ArchiveBundle);
 }
@@ -150,7 +189,7 @@ function assertSupersedePersistSafe(
   rebuiltBytes: string,
 ): void {
   const store = loadArchiveBundles(cwd); // STRICT: a corrupt bundle store throws here, pre-write.
-  const target = store.bundles.find((b) => b.file === file);
+  const target = store.bundles.find(b => b.file === file);
   if (target) {
     // A REPLACE: prove we are replacing the same-id-set bundle of this kind we mean to.
     if (target.loaded.kind !== kind) {
@@ -162,7 +201,10 @@ function assertSupersedePersistSafe(
     }
     // The target's members are Tier-1-sorted, so their id-set checksum is comparable to the
     // rebuilt bundle's member_ids_sha256 (same derivation as buildArchiveBundle).
-    if (computeMemberIdsSha256(target.loaded.members.map((m) => m.id)) !== rebuilt.member_ids_sha256) {
+    if (
+      computeMemberIdsSha256(target.loaded.members.map(m => m.id)) !==
+      rebuilt.member_ids_sha256
+    ) {
       throw new BundleWriteError(
         "write_bundle",
         false,
@@ -173,7 +215,7 @@ function assertSupersedePersistSafe(
   // Simulate the store AFTER the write (replace OR create) and run the loader's own conflict
   // check on it — refuse if the write would make the store unloadable.
   const postWrite = store.bundles
-    .filter((b) => b.file !== file)
+    .filter(b => b.file !== file)
     .concat([{ file, loaded: validateArchiveBundleTier1(rebuiltBytes, file) }]);
   try {
     buildBundleMemberIndex(postWrite);
@@ -196,9 +238,13 @@ async function readbackAndVerify(
 ): Promise<void> {
   let reread: string;
   try {
-    reread = await readFile(path, "utf8");
+    reread = await readOwnedText(brandOwnedRead(path));
   } catch (err) {
-    throw new BundleWriteError("verify_bundle", true, `readback read failed: ${(err as Error).message}`);
+    throw new BundleWriteError(
+      "verify_bundle",
+      true,
+      `readback read failed: ${(err as Error).message}`,
+    );
   }
   verifyBundleReadback(reread, kind, members, file);
 }
@@ -226,15 +272,22 @@ async function persistArchiveBundle(
 
   const bundle = buildArchiveBundle(kind, members);
   const bytes = serializeArchiveBundle(bundle);
-  const path = await resolveArchiveOwnedPath(cwd, archiveBundleRelPath(kind, bundle.member_ids_sha256));
+  const path = await resolveArchiveOwnedPath(
+    cwd,
+    archiveBundleRelPath(kind, bundle.member_ids_sha256),
+  );
   const file = join("bundles", basename(path));
 
   let existing: string | null = null;
   try {
-    existing = await readFile(path, "utf8");
+    existing = await readOwnedText(path);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
-      throw new BundleWriteError("write_bundle", false, `existing bundle unreadable: ${(err as Error).message}`);
+      throw new BundleWriteError(
+        "write_bundle",
+        false,
+        `existing bundle unreadable: ${(err as Error).message}`,
+      );
     }
   }
 
@@ -242,7 +295,11 @@ async function persistArchiveBundle(
     if (existing === bytes) {
       // Same content address, byte-identical → already at the desired state (idempotent).
       verifyBundleReadback(existing, kind, members, file);
-      return { kind: "noop_already_bundled", bundleFile: file, member_count: members.length };
+      return {
+        kind: "noop_already_bundled",
+        bundleFile: file,
+        member_count: members.length,
+      };
     }
     // Same id set, DIFFERENT bytes — a member's content changed under the same address.
     if (mode === "create") {
@@ -267,12 +324,24 @@ async function persistArchiveBundle(
     // partial_applied only flips true once readbackAndVerify sees the new bundle on disk but
     // rejects it.
     try {
-      await atomicReplaceExistingText(path, bytes, existing);
+      await atomicReplaceExistingText(
+        brandOwnedWrite(unbrand(path)),
+        bytes,
+        existing,
+      );
     } catch (err) {
-      throw new BundleWriteError("write_bundle", false, `atomic replace failed: ${(err as Error).message}`);
+      throw new BundleWriteError(
+        "write_bundle",
+        false,
+        `atomic replace failed: ${(err as Error).message}`,
+      );
     }
     await readbackAndVerify(path, kind, members, file);
-    return { kind: "superseded", bundleFile: file, member_count: members.length };
+    return {
+      kind: "superseded",
+      bundleFile: file,
+      member_count: members.length,
+    };
   }
 
   // No existing bundle at this content address — a plain create. In SUPERSEDE mode this is a
@@ -290,9 +359,18 @@ async function persistArchiveBundle(
     assertSupersedePersistSafe(cwd, kind, file, bundle, bytes);
   }
   try {
-    await atomicWriteText(path, bytes, { kind: "absent" }, { mkdir: true });
+    await atomicWriteText(
+      brandOwnedWrite(unbrand(path)),
+      bytes,
+      { kind: "absent" },
+      { mkdir: true },
+    );
   } catch (err) {
-    throw new BundleWriteError("write_bundle", false, `atomic write failed: ${(err as Error).message}`);
+    throw new BundleWriteError(
+      "write_bundle",
+      false,
+      `atomic write failed: ${(err as Error).message}`,
+    );
   }
   await readbackAndVerify(path, kind, members, file);
   return { kind: "written", bundleFile: file, member_count: members.length };
@@ -349,10 +427,18 @@ export function verifyBundleReadback(
   try {
     loaded = validateArchiveBundleTier1(diskBytes, file);
   } catch (err) {
-    throw new BundleWriteError("verify_bundle", true, `Tier-1 readback failed: ${(err as Error).message}`);
+    throw new BundleWriteError(
+      "verify_bundle",
+      true,
+      `Tier-1 readback failed: ${(err as Error).message}`,
+    );
   }
   if (loaded.kind !== kind) {
-    throw new BundleWriteError("verify_bundle", true, `readback kind "${loaded.kind}" != "${kind}"`);
+    throw new BundleWriteError(
+      "verify_bundle",
+      true,
+      `readback kind "${loaded.kind}" != "${kind}"`,
+    );
   }
   if (loaded.members.length !== members.length) {
     throw new BundleWriteError(
@@ -361,19 +447,32 @@ export function verifyBundleReadback(
       `readback member count ${loaded.members.length} != folded ${members.length}`,
     );
   }
-  const byId = new Map(loaded.members.map((m) => [m.id, m]));
+  const byId = new Map(loaded.members.map(m => [m.id, m]));
   for (const folded of members) {
     const lm = byId.get(folded.id);
     if (!lm) {
-      throw new BundleWriteError("verify_bundle", true, `folded member "${folded.id}" missing after readback`);
+      throw new BundleWriteError(
+        "verify_bundle",
+        true,
+        `folded member "${folded.id}" missing after readback`,
+      );
     }
     try {
       // strict-reconcile: the folded loose bytes and the re-read bundle bytes must
       // be byte-identical (else bundle_stale), and the member self-binds to its kind.
-      reconcileLooseAndBundle(folded.id, folded.bytes, { sha256: lm.sha256, bytes: lm.bytes }, file);
+      reconcileLooseAndBundle(
+        folded.id,
+        folded.bytes,
+        { sha256: lm.sha256, bytes: lm.bytes },
+        file,
+      );
       bindBundleMember(kind, lm, file);
     } catch (err) {
-      throw new BundleWriteError("verify_bundle", true, `member "${folded.id}" readback: ${(err as Error).message}`);
+      throw new BundleWriteError(
+        "verify_bundle",
+        true,
+        `member "${folded.id}" readback: ${(err as Error).message}`,
+      );
     }
   }
 }
@@ -401,29 +500,37 @@ export async function enumerateLooseMembers(
       : kind === "event_pack"
         ? archiveEventPacksRelDir()
         : archiveDecisionsRelDir();
-  const dir = await resolveArchiveOwnedPath(cwd, relDir);
+  const dir = await resolveArchiveOwnedListPath(cwd, relDir);
   let dirents: import("node:fs").Dirent[];
   try {
     // withFileTypes + isFile so a `.json`-named SUBDIRECTORY can never reach
-    // readFile (which would throw an untyped EISDIR out of this module).
-    dirents = await readdir(dir, { withFileTypes: true });
+    // readOwnedText (which would throw an untyped EISDIR out of this module).
+    dirents = await listOwnedDirents(dir);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
     throw err;
   }
   const { looseAbsentIds, bundleAbsentIds } =
     kind === "decision_record"
-      ? { looseAbsentIds: new Set<string>(), bundleAbsentIds: new Set<string>() }
+      ? {
+          looseAbsentIds: new Set<string>(),
+          bundleAbsentIds: new Set<string>(),
+        }
       : await readPendingDeleteFilters(cwd);
   const names = dirents
-    .filter((e) => e.isFile() && e.name.endsWith(".json"))
-    .map((e) => e.name)
+    .filter(e => e.isFile() && e.name.endsWith(".json"))
+    .map(e => e.name)
     .sort();
   const out: LooseMember[] = [];
   for (const name of names) {
     const id = basename(name, ".json");
     if (looseAbsentIds.has(id) || bundleAbsentIds.has(id)) continue; // mid-deletion pair → not folded into a bundle
-    out.push({ id, bytes: await readFile(await resolveArchiveOwnedPath(cwd, `${relDir}/${name}`), "utf8") });
+    out.push({
+      id,
+      bytes: await readOwnedText(
+        await resolveArchiveOwnedPath(cwd, `${relDir}/${name}`),
+      ),
+    });
   }
   return out;
 }
