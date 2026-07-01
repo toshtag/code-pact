@@ -14,8 +14,8 @@
 // honest signal to use `plan prompt --schema-only` + an agent instead.
 
 import {
-  readOwnedText,
-  resolveContainedReadPath,
+  readExplicitUserText,
+  resolveExplicitUserReadPath,
 } from "../core/project-fs/index.ts";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
@@ -396,7 +396,9 @@ export async function runPlanAdopt(
   // reason: explicit user-selected input path (--from)
   let raw: string;
   try {
-    raw = await readOwnedText(await resolveContainedReadPath(cwd, fromPath));
+    raw = await readExplicitUserText(
+      await resolveExplicitUserReadPath(cwd, fromPath),
+    );
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "PATH_OUTSIDE_PROJECT") {
       throw new PlanAdoptError(

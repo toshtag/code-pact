@@ -1,6 +1,6 @@
 import {
-  readOwnedText,
-  resolveContainedReadPath,
+  readExplicitUserText,
+  resolveExplicitUserReadPath,
 } from "../core/project-fs/index.ts";
 import { parse as parseYaml } from "yaml";
 import {
@@ -265,7 +265,9 @@ export async function runPhaseImport(
   // ---- Read + schema-validate ------------------------------------------
   let raw: string;
   try {
-    raw = await readOwnedText(await resolveContainedReadPath(cwd, inputPath));
+    raw = await readExplicitUserText(
+      await resolveExplicitUserReadPath(cwd, inputPath),
+    );
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     const e = new Error(`Could not read input file: ${detail}`);

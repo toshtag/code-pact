@@ -1,6 +1,8 @@
 import {
   readOwnedText,
-  resolveContainedReadPath,
+  readExplicitUserText,
+  resolveExplicitUserReadPath,
+  resolveInstructionReadPath,
   resolveProjectConfigReadPath,
 } from "../core/project-fs/index.ts";
 import { parse as parseYaml } from "yaml";
@@ -133,7 +135,7 @@ export async function loadConstitutionFromFile(
   // reason: explicit user-selected input path (--from-file)
   let absPath;
   try {
-    absPath = await resolveContainedReadPath(cwd, relPath);
+    absPath = await resolveExplicitUserReadPath(cwd, relPath);
   } catch (err) {
     throw new PlanConstitutionFromFileError(
       "unsafe_path",
@@ -143,7 +145,7 @@ export async function loadConstitutionFromFile(
   }
   let raw: string;
   try {
-    raw = await readOwnedText(absPath);
+    raw = await readExplicitUserText(absPath);
   } catch (err) {
     throw new PlanConstitutionFromFileError(
       "unreadable",
@@ -344,7 +346,7 @@ export async function runPlanConstitution(
     let existing: string | null = null;
     try {
       existing = await readOwnedText(
-        await resolveContainedReadPath(cwd, "design/constitution.md"),
+        await resolveInstructionReadPath(cwd, "design/constitution.md"),
       );
     } catch {
       existing = null; // file doesn't exist — proceed to generate

@@ -1,11 +1,14 @@
 import {
   readOwnedText,
   lstatOwned,
+  lstatOwnedList,
   statOwned,
   unlinkOwned,
-  resolveContainedReadPath,
+  resolveOwnedDirectoryReadPath,
   resolvePhaseReadPath,
+  resolvePhaseDeletePath,
   type OwnedReadPath,
+  type OwnedListPath,
 } from "../core/project-fs/index.ts";
 import { dirname } from "node:path";
 import { resolvePhaseRef } from "../core/plan/resolve-phase.ts";
@@ -127,10 +130,10 @@ type Presence =
  *  has a real, present parent directory with no entry inside it. A parent that is a
  *  symlink (dangling ancestor), missing, or non-directory means the ENOENT is an
  *  ancestor problem, NOT an "already archived" phase → `inaccessible`, fail-closed. */
-async function classifyParent(parentAbs: OwnedReadPath): Promise<Presence> {
+async function classifyParent(parentAbs: OwnedListPath): Promise<Presence> {
   let pst;
   try {
-    pst = await lstatOwned(parentAbs);
+    pst = await lstatOwnedList(parentAbs);
   } catch (err) {
     return {
       kind: "inaccessible",
@@ -191,7 +194,7 @@ async function phaseYamlPresence(
       // it read as "already archived". (The ancestor analogue of the final
       // dangling-symlink guard below.)
       return classifyParent(
-        await resolveContainedReadPath(cwd, dirname(relPath)),
+        await resolveOwnedDirectoryReadPath(cwd, dirname(relPath)),
       );
     }
     return {
@@ -488,7 +491,7 @@ export async function runPhaseArchive(
   // symlink in the sub-ms window between the guard and this unlink — the same
   // unavoidable race `decision prune` carries; not closable without an O_NOFOLLOW
   // dir-fd unlinkat, out of scope here.)
-  await unlinkOwned(guard.abs);
+  await unlinkOwned(await resolvePhaseDeletePath(cwd, yamlPath));
 
   return {
     kind: "archived",

@@ -1,9 +1,11 @@
 import {
   readOwnedText,
+  readExplicitUserText,
   statOwned,
   resolveProjectConfigReadPath,
-  resolveContainedReadPath,
+  resolveExplicitUserReadPath,
   type OwnedReadPath,
+  type ExplicitUserReadPath,
 } from "../core/project-fs/index.ts";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
@@ -135,9 +137,9 @@ async function readProjectFileForDoctor(
   relPath: string,
 ): Promise<ProjectReadResult> {
   const absPath = join(cwd, relPath);
-  let ownedPath: OwnedReadPath;
+  let ownedPath: ExplicitUserReadPath;
   try {
-    ownedPath = await resolveContainedReadPath(cwd, relPath);
+    ownedPath = await resolveExplicitUserReadPath(cwd, relPath);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {
       return { kind: "missing", absPath };
@@ -146,12 +148,12 @@ async function readProjectFileForDoctor(
   }
 
   try {
-    const s = await statOwned(ownedPath);
+    const s = await statOwned(ownedPath as unknown as OwnedReadPath);
     if (!s.isFile()) return { kind: "missing", absPath };
     return {
       kind: "content",
       absPath,
-      content: await readOwnedText(ownedPath),
+      content: await readExplicitUserText(ownedPath),
     };
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {

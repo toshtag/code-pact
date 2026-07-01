@@ -1,6 +1,8 @@
 import {
   readOwnedText,
-  resolveContainedReadPath,
+  readExplicitUserText,
+  resolveExplicitUserReadPath,
+  resolveInstructionReadPath,
 } from "../core/project-fs/index.ts";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
@@ -114,7 +116,7 @@ export async function loadBriefFromFile(
   // reason: explicit user-selected input path (--from-file)
   let absPath;
   try {
-    absPath = await resolveContainedReadPath(cwd, relPath);
+    absPath = await resolveExplicitUserReadPath(cwd, relPath);
   } catch (err) {
     throw new PlanBriefFromFileError(
       "unsafe_path",
@@ -124,7 +126,7 @@ export async function loadBriefFromFile(
   }
   let raw: string;
   try {
-    raw = await readOwnedText(absPath);
+    raw = await readExplicitUserText(absPath);
   } catch (err) {
     throw new PlanBriefFromFileError(
       "unreadable",
@@ -325,7 +327,7 @@ export async function runPlanBrief(
   if (!force) {
     try {
       await readOwnedText(
-        await resolveContainedReadPath(cwd, "design/brief.md"),
+        await resolveInstructionReadPath(cwd, "design/brief.md"),
       );
       return { path: briefPath, skipped: true };
     } catch {

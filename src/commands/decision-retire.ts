@@ -1,11 +1,14 @@
 import {
   readOwnedText,
   lstatOwned,
+  lstatOwnedList,
   statOwned,
   unlinkOwned,
-  resolveContainedReadPath,
+  resolveOwnedDirectoryReadPath,
   resolveDecisionReadPath,
+  resolveDecisionDeletePath,
   type OwnedReadPath,
+  type OwnedListPath,
 } from "../core/project-fs/index.ts";
 import { dirname } from "node:path";
 import {
@@ -107,10 +110,10 @@ type Presence =
 /** Classify a final-component ENOENT by its PARENT (PR-B1 parity): a dangling
  *  ancestor symlink / missing-or-non-dir parent means the ENOENT is an ancestor
  *  problem, NOT a true-absent retired decision → inaccessible, fail-closed. */
-async function classifyParent(parentAbs: OwnedReadPath): Promise<Presence> {
+async function classifyParent(parentAbs: OwnedListPath): Promise<Presence> {
   let pst;
   try {
-    pst = await lstatOwned(parentAbs);
+    pst = await lstatOwnedList(parentAbs);
   } catch (err) {
     return {
       kind: "inaccessible",
@@ -160,7 +163,7 @@ async function decisionMdPresence(
   } catch (err) {
     if (isEnoent(err))
       return classifyParent(
-        await resolveContainedReadPath(cwd, dirname(canonical)),
+        await resolveOwnedDirectoryReadPath(cwd, dirname(canonical)),
       );
     return {
       kind: "inaccessible",
@@ -536,7 +539,7 @@ export async function runDecisionRetire(
 
   // DELETE the `.md` LAST. Unlink the LEXICAL path (guard.abs is lexical, and the
   // lstat above already refused a symlink, so this removes the regular file itself).
-  await unlinkOwned(guard.abs);
+  await unlinkOwned(await resolveDecisionDeletePath(cwd, canonical));
 
   return {
     kind: "retired",

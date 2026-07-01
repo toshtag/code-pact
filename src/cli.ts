@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { parseArgs } from "node:util";
 import {
-  statOwned,
+  statOwnedList,
   resolveOwnedDirectoryReadPath,
 } from "./core/project-fs/index.ts";
 import { parse as parseYaml } from "yaml";
@@ -55,7 +55,7 @@ const KNOWN_AGENTS: ReadonlySet<SupportedAgent> = new Set(SUPPORTED_AGENTS);
 async function codePactDirExists(cwd: string): Promise<boolean> {
   try {
     const dirPath = await resolveOwnedDirectoryReadPath(cwd, ".code-pact");
-    const s = await statOwned(dirPath);
+    const s = await statOwnedList(dirPath);
     return s.isDirectory();
   } catch {
     return false;

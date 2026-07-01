@@ -3,8 +3,11 @@ import {
   accessOwned,
   lstatOwned,
   mkdirOwned,
-  resolveContainedReadPath,
+  resolveInitReadPath,
+  resolveInitWritePath,
+  resolveGitignoreReadPath,
   type OwnedReadPath,
+  type OwnedWritePath,
 } from "../core/project-fs/index.ts";
 import { atomicWriteText } from "../io/atomic-text.ts";
 import { stringify as toYaml } from "yaml";
@@ -161,7 +164,24 @@ async function assertInitEntryType(
   relPath: string,
   expected: "directory" | "file",
 ): Promise<void> {
-  const abs = await resolveContainedReadPath(cwd, relPath);
+  let abs;
+  try {
+    abs = await resolveInitReadPath(cwd, relPath);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (
+      code === "PATH_NOT_OWNED" ||
+      code === "PATH_OUTSIDE_PROJECT" ||
+      code === "FS_AUTHORITY_FAILURE"
+    ) {
+      const e = new Error(
+        `init cannot inspect "${relPath}": ${(err as Error).message}`,
+      );
+      (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+      throw e;
+    }
+    throw err;
+  }
   let st;
   try {
     st = await lstatOwned(abs);
@@ -291,9 +311,7 @@ async function ensureGitignoreEntries(
   const path = await resolveInitPath(cwd, ".gitignore");
   let existing: string | null = null;
   try {
-    existing = await readOwnedText(
-      await resolveContainedReadPath(cwd, ".gitignore"),
-    );
+    existing = await readOwnedText(await resolveGitignoreReadPath(cwd));
   } catch {
     existing = null;
   }
@@ -324,7 +342,7 @@ async function ensureGitignoreEntries(
   created.push(path);
 }
 
-async function mkdirp(p: OwnedReadPath): Promise<void> {
+async function mkdirp(p: OwnedWritePath): Promise<void> {
   await mkdirOwned(p, { recursive: true });
 }
 
@@ -344,7 +362,7 @@ export async function runInitCore(opts: InitCoreOptions): Promise<InitResult> {
   await preflightInitNamespaces(cwd, agents);
 
   // Guard: if .code-pact/ already exists and no --force, abort early
-  const toolDir = await resolveContainedReadPath(cwd, ".code-pact");
+  const toolDir = await resolveInitReadPath(cwd, ".code-pact");
   if (!force && (await exists(toolDir))) {
     const err = new Error(
       `".code-pact/" already exists in ${cwd}. Run with --force to overwrite.`,
@@ -356,15 +374,9 @@ export async function runInitCore(opts: InitCoreOptions): Promise<InitResult> {
   // -------------------------------------------------------------------------
   // .code-pact/
   // -------------------------------------------------------------------------
-  await mkdirp(
-    await resolveContainedReadPath(cwd, ".code-pact/agent-profiles"),
-  );
-  await mkdirp(
-    await resolveContainedReadPath(cwd, ".code-pact/model-profiles"),
-  );
-  await mkdirp(
-    await resolveContainedReadPath(cwd, ".code-pact/state/baselines"),
-  );
+  await mkdirp(await resolveInitWritePath(cwd, ".code-pact/agent-profiles"));
+  await mkdirp(await resolveInitWritePath(cwd, ".code-pact/model-profiles"));
+  await mkdirp(await resolveInitWritePath(cwd, ".code-pact/state/baselines"));
 
   // project.yaml
   const projectYaml: Project = {
@@ -384,7 +396,7 @@ export async function runInitCore(opts: InitCoreOptions): Promise<InitResult> {
     force,
     created,
     skipped,
-    await resolveContainedReadPath(cwd, ".code-pact/project.yaml"),
+    await resolveInitReadPath(cwd, ".code-pact/project.yaml"),
   );
 
   // agent profiles
@@ -396,10 +408,7 @@ export async function runInitCore(opts: InitCoreOptions): Promise<InitResult> {
       force,
       created,
       skipped,
-      await resolveContainedReadPath(
-        cwd,
-        `.code-pact/agent-profiles/${agent}.yaml`,
-      ),
+      await resolveInitReadPath(cwd, `.code-pact/agent-profiles/${agent}.yaml`),
     );
   }
 
@@ -414,7 +423,7 @@ export async function runInitCore(opts: InitCoreOptions): Promise<InitResult> {
       force,
       created,
       skipped,
-      await resolveContainedReadPath(
+      await resolveInitReadPath(
         cwd,
         `.code-pact/model-profiles/${mp.tier.replace(/_/g, "-")}.yaml`,
       ),
@@ -433,7 +442,7 @@ export async function runInitCore(opts: InitCoreOptions): Promise<InitResult> {
     force,
     created,
     skipped,
-    await resolveContainedReadPath(cwd, ".code-pact/state/progress.yaml"),
+    await resolveInitReadPath(cwd, ".code-pact/state/progress.yaml"),
   );
 
   // initial baseline snapshot (empty roadmap)
@@ -449,10 +458,7 @@ export async function runInitCore(opts: InitCoreOptions): Promise<InitResult> {
     force,
     created,
     skipped,
-    await resolveContainedReadPath(
-      cwd,
-      ".code-pact/state/baselines/initial.json",
-    ),
+    await resolveInitReadPath(cwd, ".code-pact/state/baselines/initial.json"),
   );
 
   // .gitignore — ignore the machine-local / derived paths only; the rest of
@@ -484,7 +490,7 @@ export async function runInitCore(opts: InitCoreOptions): Promise<InitResult> {
   const KEEP_HINT =
     "keep only `/.code-pact/locks/`, `/.code-pact/cache/`, `/.local/`, `/.context/` ignored";
   const warnings: string[] = [];
-  const blanketLine = await resolveContainedReadPath(cwd, ".gitignore")
+  const blanketLine = await resolveGitignoreReadPath(cwd)
     .then(ownedPath => readOwnedText(ownedPath))
     .then(c => detectBlanketCodePactIgnore(c))
     .catch(() => null);
@@ -509,9 +515,9 @@ export async function runInitCore(opts: InitCoreOptions): Promise<InitResult> {
   // -------------------------------------------------------------------------
   // design/
   // -------------------------------------------------------------------------
-  await mkdirp(await resolveContainedReadPath(cwd, "design/rules"));
-  await mkdirp(await resolveContainedReadPath(cwd, "design/phases"));
-  await mkdirp(await resolveContainedReadPath(cwd, "design/decisions"));
+  await mkdirp(await resolveInitWritePath(cwd, "design/rules"));
+  await mkdirp(await resolveInitWritePath(cwd, "design/phases"));
+  await mkdirp(await resolveInitWritePath(cwd, "design/decisions"));
 
   // constitution.md
   await writeIfAbsent(
@@ -520,7 +526,7 @@ export async function runInitCore(opts: InitCoreOptions): Promise<InitResult> {
     force,
     created,
     skipped,
-    await resolveContainedReadPath(cwd, "design/constitution.md"),
+    await resolveInitReadPath(cwd, "design/constitution.md"),
   );
 
   // rules/coding-style.md
@@ -530,7 +536,7 @@ export async function runInitCore(opts: InitCoreOptions): Promise<InitResult> {
     force,
     created,
     skipped,
-    await resolveContainedReadPath(cwd, "design/rules/coding-style.md"),
+    await resolveInitReadPath(cwd, "design/rules/coding-style.md"),
   );
 
   // roadmap.yaml (empty phases — the sample phase below appends to it)
@@ -541,7 +547,7 @@ export async function runInitCore(opts: InitCoreOptions): Promise<InitResult> {
     force,
     created,
     skipped,
-    await resolveContainedReadPath(cwd, "design/roadmap.yaml"),
+    await resolveInitReadPath(cwd, "design/roadmap.yaml"),
   );
 
   // Optional sample phase. Goes through runPhaseAdd so the wizard output

@@ -1,8 +1,9 @@
 import {
-  readOwnedText,
+  readExplicitUserText,
   statOwned,
-  resolveContainedReadPath,
-  type OwnedReadPath,
+  resolveExplicitUserReadPath,
+  resolvePhaseReadPath,
+  type ExplicitUserReadPath,
 } from "../core/project-fs/index.ts";
 import { stringify as stringifyYaml } from "yaml";
 
@@ -70,9 +71,9 @@ async function resolveSpecInputPath(
   cwd: string,
   relPath: string,
   ctx: { sourcePath?: string; phaseId?: string },
-): Promise<OwnedReadPath> {
+): Promise<ExplicitUserReadPath> {
   try {
-    return await resolveContainedReadPath(cwd, relPath);
+    return await resolveExplicitUserReadPath(cwd, relPath);
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "PATH_OUTSIDE_PROJECT" || code === "PATH_NOT_OWNED") {
@@ -139,7 +140,7 @@ export async function runSpecImport(
   });
   let raw: string;
   try {
-    raw = await readOwnedText(absInput);
+    raw = await readExplicitUserText(absInput);
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "ENOENT") {
@@ -189,7 +190,7 @@ export async function runSpecImport(
   if (write) {
     if (!force) {
       try {
-        await statOwned(await resolveContainedReadPath(cwd, outputRel));
+        await statOwned(await resolvePhaseReadPath(cwd, outputRel));
         throw new SpecImportError(
           "phase_yaml_exists",
           `spec import: ${outputRel} already exists. Re-run with --force to overwrite.`,
@@ -316,7 +317,7 @@ export async function runSpecSuggest(
   });
   let raw: string;
   try {
-    raw = await readOwnedText(absInput);
+    raw = await readExplicitUserText(absInput);
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "ENOENT") {
