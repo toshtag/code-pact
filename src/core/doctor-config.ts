@@ -1,7 +1,7 @@
 import {
   readOwnedText,
   statOwned,
-  resolveContainedReadPath,
+  resolveDoctorConfigReadPath,
 } from "./project-fs/index.ts";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
@@ -36,7 +36,7 @@ const DOCTOR_CONFIG_MAX_BYTES = 128 * 1024;
  */
 export async function loadDoctorConfig(cwd: string): Promise<DoctorConfig> {
   try {
-    const path = await resolveContainedReadPath(cwd, ".code-pact/doctor.yaml");
+    const path = await resolveDoctorConfigReadPath(cwd);
     const s = await statOwned(path);
     if (!s.isFile()) return { disabled_checks: [] };
     if (s.size > DOCTOR_CONFIG_MAX_BYTES) return { disabled_checks: [] };

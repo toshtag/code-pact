@@ -1,8 +1,4 @@
-import {
-  readOwnedText,
-  resolveDecisionReadPath,
-  resolveContainedReadPath,
-} from "../project-fs/index.ts";
+import { readOwnedText, resolveDecisionReadPath } from "../project-fs/index.ts";
 import { posix } from "node:path";
 import type { PhaseEntry } from "../plan/state.ts";
 import { normalizePrunedDecisionPath } from "./pruned-ledger.ts";
@@ -319,7 +315,7 @@ export async function evaluatePrune(
     let other: string;
     try {
       other = await readOwnedText(
-        await resolveContainedReadPath(cwd, otherPath),
+        await resolveDecisionReadPath(cwd, otherPath),
       );
     } catch (err) {
       // ENOENT = raced away between readdir and read → cannot be a dependant; skip.

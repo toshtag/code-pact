@@ -1,5 +1,5 @@
 import {
-  readRegularOwnedTextBranded,
+  readOwnedText,
   listOwnedDirents,
   resolveDecisionReadPath,
   resolveOwnedDirectoryReadPath,
@@ -382,7 +382,7 @@ function diskReader(cwd: string): RelFileReader {
       return { kind: "unsafe" };
     }
     try {
-      const content = await readRegularOwnedTextBranded(abs);
+      const content = await readOwnedText(abs);
       return { kind: "ok", content };
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;

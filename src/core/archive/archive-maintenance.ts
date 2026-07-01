@@ -1,12 +1,12 @@
-import { listOwned } from "../project-fs/operations.ts";
-import type { OwnedReadPath } from "../project-fs/branded-paths-internal.ts";
+import { listOwnedDirents } from "../project-fs/operations.ts";
+import type { OwnedListPath } from "../project-fs/branded-paths-internal.ts";
 import { ArchiveBundleKind } from "../schemas/archive-bundle.ts";
 import {
   archiveBundlesRelDir,
   archiveDecisionsRelDir,
   archiveEventPacksRelDir,
   archivePhasesRelDir,
-  resolveArchiveOwnedPath,
+  resolveArchiveOwnedListPath,
 } from "./paths.ts";
 import {
   compactArchive,
@@ -77,9 +77,11 @@ export type ArchiveFileCounts = {
   total: number;
 };
 
-async function countJsonFiles(dir: OwnedReadPath): Promise<number> {
+async function countJsonFiles(dir: OwnedListPath): Promise<number> {
   try {
-    return (await listOwned(dir)).filter(n => n.endsWith(".json")).length;
+    return (await listOwnedDirents(dir)).filter(
+      e => e.isFile() && e.name.endsWith(".json"),
+    ).length;
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return 0;
     throw err;
@@ -132,16 +134,16 @@ export async function countArchiveFiles(
 ): Promise<ArchiveFileCounts> {
   const loose =
     (await countJsonFiles(
-      await resolveArchiveOwnedPath(cwd, archivePhasesRelDir()),
+      await resolveArchiveOwnedListPath(cwd, archivePhasesRelDir()),
     )) +
     (await countJsonFiles(
-      await resolveArchiveOwnedPath(cwd, archiveEventPacksRelDir()),
+      await resolveArchiveOwnedListPath(cwd, archiveEventPacksRelDir()),
     )) +
     (await countJsonFiles(
-      await resolveArchiveOwnedPath(cwd, archiveDecisionsRelDir()),
+      await resolveArchiveOwnedListPath(cwd, archiveDecisionsRelDir()),
     ));
   const bundles = await countJsonFiles(
-    await resolveArchiveOwnedPath(cwd, archiveBundlesRelDir()),
+    await resolveArchiveOwnedListPath(cwd, archiveBundlesRelDir()),
   );
   return { loose_records: loose, bundles, total: loose + bundles };
 }

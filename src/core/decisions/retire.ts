@@ -1,8 +1,4 @@
-import {
-  readOwnedText,
-  resolveDecisionReadPath,
-  resolveContainedReadPath,
-} from "../project-fs/index.ts";
+import { readOwnedText, resolveDecisionReadPath } from "../project-fs/index.ts";
 import type { PhaseEntry } from "../plan/state.ts";
 import { normalizePrunedDecisionPath } from "./pruned-ledger.ts";
 import {
@@ -268,7 +264,7 @@ async function sharedExternalGates(
     let other: string;
     try {
       other = await readOwnedText(
-        await resolveContainedReadPath(cwd, otherPath),
+        await resolveDecisionReadPath(cwd, otherPath),
       );
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") continue; // raced away

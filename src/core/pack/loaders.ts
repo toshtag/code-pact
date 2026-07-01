@@ -13,7 +13,7 @@
 // wrap them in a call-site catch to keep their optional degrade-to-[]/skip.
 
 import { readOwnedText, listOwned } from "../project-fs/operations.ts";
-import { resolveContainedReadPath } from "../project-fs/authority-resolvers.ts";
+import { resolveRulesDirectoryReadPath } from "../project-fs/authority-resolvers.ts";
 import { parse as parseYaml } from "yaml";
 import { Phase } from "../schemas/phase.ts";
 import { AgentProfile } from "../schemas/agent-profile.ts";
@@ -84,7 +84,7 @@ export async function loadRules(
 ): Promise<RuleDoc[]> {
   let entries: string[];
   try {
-    const rulesDir = await resolveContainedReadPath(cwd, "design/rules");
+    const rulesDir = await resolveRulesDirectoryReadPath(cwd);
     entries = await listOwned(rulesDir);
   } catch {
     return [];

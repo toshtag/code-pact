@@ -1,7 +1,4 @@
-import {
-  readOwnedText,
-  resolveInstructionReadPath,
-} from "../project-fs/index.ts";
+import { readOwnedText, resolveRulesReadPath } from "../project-fs/index.ts";
 import {
   PROTECTED_PATHS,
   synthesizeSample,
@@ -58,7 +55,7 @@ export async function loadProtectedPaths(
   let raw: string;
   try {
     raw = await readOwnedText(
-      await resolveInstructionReadPath(cwd, PROTECTED_PATHS_RULE_FILE),
+      await resolveRulesReadPath(cwd, PROTECTED_PATHS_RULE_FILE),
     );
   } catch {
     return { paths: PROTECTED_PATHS, source: "fallback" };

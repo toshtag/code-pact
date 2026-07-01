@@ -1,4 +1,4 @@
-import { listOwned, readOwnedText } from "../project-fs/operations.ts";
+import { listOwnedDirents, readOwnedText } from "../project-fs/operations.ts";
 import { basename } from "node:path";
 import { EventPack, type PackedEvent } from "../schemas/event-pack.ts";
 import type { LoadedEventFile } from "../progress/events-io.ts";
@@ -12,6 +12,7 @@ import {
   archiveEventPacksRelDir,
   eventPackRelPath,
   resolveArchiveOwnedPath,
+  resolveArchiveOwnedListPath,
   sha256Hex,
 } from "./paths.ts";
 import { loadArchiveBundles } from "./archive-bundle-loader.ts";
@@ -281,10 +282,12 @@ function bundleOnlyEventPackEntries(
 export async function readEventPackFiles(
   cwd: string,
 ): Promise<LoadedEventPack[]> {
-  const dir = await resolveArchiveOwnedPath(cwd, archiveEventPacksRelDir());
+  const dir = await resolveArchiveOwnedListPath(cwd, archiveEventPacksRelDir());
   let names: string[];
   try {
-    names = await listOwned(dir);
+    names = await listOwnedDirents(dir).then(dirents =>
+      dirents.filter(e => e.isFile()).map(e => e.name),
+    );
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") names = [];
     else throw err;
@@ -391,10 +394,12 @@ export type EventPackReadError = {
 export async function readEventPackFilesLenient(
   cwd: string,
 ): Promise<{ packs: LoadedEventPack[]; errors: EventPackReadError[] }> {
-  const dir = await resolveArchiveOwnedPath(cwd, archiveEventPacksRelDir());
+  const dir = await resolveArchiveOwnedListPath(cwd, archiveEventPacksRelDir());
   let names: string[];
   try {
-    names = await listOwned(dir);
+    names = await listOwnedDirents(dir).then(dirents =>
+      dirents.filter(e => e.isFile()).map(e => e.name),
+    );
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") names = [];
     else throw err; // a dir that cannot be enumerated is not a per-file issue

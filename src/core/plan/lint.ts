@@ -31,7 +31,7 @@ import {
   parseAdrCommitments,
 } from "../decisions/adr.ts";
 import { parseFrontMatter } from "../pack/front-matter.ts";
-import { resolveContainedReadPath } from "../project-fs/authority-resolvers.ts";
+import { resolveDecisionReadPath } from "../project-fs/index.ts";
 import { readOwnedText } from "../project-fs/operations.ts";
 import { parse as parseYaml } from "yaml";
 import { Project } from "../schemas/project.ts";
@@ -561,7 +561,7 @@ async function detectAdrCommitmentsEmpty(
     let content: string;
     try {
       content = await readOwnedText(
-        await resolveContainedReadPath(cwd, adrPath),
+        await resolveDecisionReadPath(cwd, adrPath),
       );
     } catch {
       continue; // referenced ADR vanished — nothing to advise on

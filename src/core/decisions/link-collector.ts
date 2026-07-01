@@ -1,5 +1,9 @@
 import { listOwnedDirents, readOwnedText } from "../project-fs/operations.ts";
-import { resolveContainedReadPath } from "../project-fs/authority-resolvers.ts";
+import {
+  resolveExplicitUserReadPath,
+  resolveInitListPath,
+} from "../project-fs/index.ts";
+import type { OwnedReadPath } from "../project-fs/branded-paths-internal.ts";
 import { posix } from "node:path";
 
 /**
@@ -112,10 +116,10 @@ async function discoverSources(
   ): Promise<void> {
     let abs;
     if (rel === ".") {
-      abs = await resolveContainedReadPath(cwd, "."); // the project root itself is trusted
+      abs = await resolveInitListPath(cwd, "."); // the project root itself is trusted
     } else {
       try {
-        abs = await resolveContainedReadPath(cwd, rel); // symlink-free guard
+        abs = await resolveInitListPath(cwd, rel); // symlink-free guard
       } catch {
         issues.push({ source_file: rel, line: null, reason: "unreadable" });
         return;
@@ -173,8 +177,8 @@ export async function collectInboundLinks(
     if (rel === target) continue; // the file being pruned itself
     let content: string;
     try {
-      const abs = await resolveContainedReadPath(cwd, rel); // symlink-free guard
-      content = await readOwnedText(abs);
+      const abs = await resolveExplicitUserReadPath(cwd, rel); // symlink-free guard
+      content = await readOwnedText(abs as unknown as OwnedReadPath);
     } catch {
       issues.push({ source_file: rel, line: null, reason: "unreadable" });
       continue;

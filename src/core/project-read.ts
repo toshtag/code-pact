@@ -1,4 +1,7 @@
-import { resolveContainedReadPath, readOwnedText } from "./project-fs/index.ts";
+import {
+  resolveExplicitUserReadPath,
+  readExplicitUserText,
+} from "./project-fs/index.ts";
 
 /**
  * Reads an OPTIONAL, project-owned text file. `relPath` is resolved through
@@ -21,7 +24,9 @@ export async function readProjectTextOrNull(
   relPath: string,
 ): Promise<string | null> {
   try {
-    return await readOwnedText(await resolveContainedReadPath(cwd, relPath));
+    return await readExplicitUserText(
+      await resolveExplicitUserReadPath(cwd, relPath),
+    );
   } catch {
     return null;
   }

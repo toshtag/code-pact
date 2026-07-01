@@ -3,7 +3,10 @@ import {
   readOwnedText,
   unlinkOwned,
 } from "../project-fs/operations.ts";
-import type { OwnedReadPath } from "../project-fs/branded-paths-internal.ts";
+import type {
+  OwnedReadPath,
+  OwnedDeletePath,
+} from "../project-fs/branded-paths-internal.ts";
 import { basename, join } from "node:path";
 import type { ArchiveBundleKind } from "../schemas/archive-bundle.ts";
 import { loadArchiveBundles } from "./archive-bundle-loader.ts";
@@ -33,6 +36,8 @@ import {
   archiveEventPacksRelDir,
   archivePhasesRelDir,
   resolveArchiveOwnedPath,
+  resolveArchiveOwnedDeletePath,
+  resolveArchiveOwnedListPath,
   sha256Hex,
 } from "./paths.ts";
 import { computeMemberIdsSha256 } from "./archive-bundle-reader.ts";
@@ -113,7 +118,7 @@ export type ArchiveDeleteOutcome = {
 };
 
 type DeleteVerdict =
-  | { disposition: "delete"; abs: OwnedReadPath }
+  | { disposition: "delete" }
   | { disposition: "vanished" }
   | { disposition: "skip"; reason: ArchiveDeleteSkipReason; detail?: string };
 
@@ -175,7 +180,7 @@ async function evaluateRecordDeleteGate(
       detail: (err as Error).message,
     };
   }
-  return { disposition: "delete", abs };
+  return { disposition: "delete" };
 }
 
 export type ArchiveDeleteHooks = {
@@ -203,7 +208,7 @@ export async function deleteLooseCoveredByBundle(
   // never delete a loose record we cannot prove is captured.
   const { index } = loadArchiveBundles(cwd);
 
-  const dir = await resolveArchiveOwnedPath(cwd, looseRelDirFor(kind));
+  const dir = await resolveArchiveOwnedListPath(cwd, looseRelDirFor(kind));
   let names: string[];
   try {
     const dirents = await listOwnedDirents(dir);
@@ -242,7 +247,9 @@ export async function deleteLooseCoveredByBundle(
     }
     if (hooks.beforeUnlink) await hooks.beforeUnlink(id);
     try {
-      await unlinkOwned(verdict.abs);
+      await unlinkOwned(
+        await resolveArchiveOwnedDeletePath(cwd, looseRelPath(kind, name)),
+      );
       deleted.push(id);
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") vanished.push(id);
@@ -565,9 +572,9 @@ export async function retireSupersededBundles(
       m => keepById.get(m.id) === m.bytes,
     );
     if (!allCovered) continue; // fail-closed: keep a bundle the keep bundle doesn't fully cover
-    let abs: OwnedReadPath;
+    let abs: OwnedDeletePath;
     try {
-      abs = await resolveArchiveOwnedPath(
+      abs = await resolveArchiveOwnedDeletePath(
         cwd,
         `${archiveBundlesRelDir()}/${basename(file)}`,
       );

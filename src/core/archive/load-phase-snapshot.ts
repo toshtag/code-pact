@@ -1,4 +1,4 @@
-import { listOwned, readOwnedText } from "../project-fs/operations.ts";
+import { listOwnedDirents, readOwnedText } from "../project-fs/operations.ts";
 import type { OwnedReadPath } from "../project-fs/branded-paths-internal.ts";
 import { basename } from "node:path";
 import { PhaseSnapshot } from "../schemas/phase-snapshot.ts";
@@ -8,6 +8,7 @@ import {
   archivePhasesRelDir,
   phaseSnapshotRelPath,
   resolveArchiveOwnedPath,
+  resolveArchiveOwnedListPath,
   sha256Hex,
 } from "./paths.ts";
 import { loadArchiveBundles } from "./archive-bundle-loader.ts";
@@ -623,9 +624,9 @@ export async function enumerateArchivedPhaseSnapshots(cwd: string): Promise<{
   // 1. Loose snapshot files.
   let names: string[] = [];
   try {
-    names = await listOwned(
-      await resolveArchiveOwnedPath(cwd, archivePhasesRelDir()),
-    );
+    names = await listOwnedDirents(
+      await resolveArchiveOwnedListPath(cwd, archivePhasesRelDir()),
+    ).then(dirents => dirents.filter(e => e.isFile()).map(e => e.name));
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     // No archive dir is the normal untouched-project state — not even an advisory.

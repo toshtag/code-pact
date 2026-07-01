@@ -1,7 +1,7 @@
 import {
   readOwnedText,
   resolvePhaseReadPath,
-  resolveContainedWritePath,
+  resolvePhaseWritePath,
 } from "../project-fs/index.ts";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { atomicWriteText } from "../../io/atomic-text.ts";
@@ -237,7 +237,7 @@ export async function applyPlannedWrite(
   cwd: string,
   diff: TaskStatusDiff,
 ): Promise<void> {
-  const absPath = await resolveContainedWritePath(cwd, diff.file).then(
+  const absPath = await resolvePhaseWritePath(cwd, diff.file).then(
     p => p as string,
   );
   const raw = await readOwnedText(await resolvePhaseReadPath(cwd, diff.file));

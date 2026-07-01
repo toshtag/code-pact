@@ -1,12 +1,13 @@
 import {
-  listOwned,
+  listOwnedDirents,
   readOwnedText,
   lstatOwned,
 } from "../project-fs/operations.ts";
 import {
-  resolveContainedReadPath,
-  resolveContainedWritePath,
-} from "../project-fs/authority-resolvers.ts";
+  resolvePhaseReadPath,
+  resolvePhaseDirectoryReadPath,
+} from "../project-fs/index.ts";
+import { resolveArchiveOwnedWritePath } from "./paths.ts";
 import type {
   OwnedReadPath,
   OwnedWritePath,
@@ -203,8 +204,10 @@ async function findLivePhaseYamlsById(
 ): Promise<{ paths: string[]; incomplete: string | null }> {
   let entries: string[];
   try {
-    const phasesDir = await resolveContainedReadPath(cwd, "design/phases");
-    entries = await listOwned(phasesDir);
+    const phasesDir = await resolvePhaseDirectoryReadPath(cwd);
+    entries = await listOwnedDirents(phasesDir).then(dirents =>
+      dirents.filter(e => e.isFile() || e.isSymbolicLink()).map(e => e.name),
+    );
   } catch (err) {
     if (isEnoent(err)) return { paths: [], incomplete: null }; // no dir → nothing live
     return {
@@ -218,7 +221,7 @@ async function findLivePhaseYamlsById(
     const rel = `design/phases/${entry}`;
     let abs: OwnedReadPath;
     try {
-      abs = await resolveContainedReadPath(cwd, rel);
+      abs = await resolvePhaseReadPath(cwd, rel);
     } catch {
       // A symlink (in-project or escaping): fail closed — we cannot read it to prove
       // it is NOT a live YAML with the target id.
@@ -282,8 +285,10 @@ export async function findLiveTaskOwnersByTaskId(
 ): Promise<{ owners: LiveTaskOwner[]; incomplete: string | null }> {
   let entries: string[];
   try {
-    const phasesDir = await resolveContainedReadPath(cwd, "design/phases");
-    entries = await listOwned(phasesDir);
+    const phasesDir = await resolvePhaseDirectoryReadPath(cwd);
+    entries = await listOwnedDirents(phasesDir).then(dirents =>
+      dirents.filter(e => e.isFile() || e.isSymbolicLink()).map(e => e.name),
+    );
   } catch (err) {
     if (isEnoent(err)) return { owners: [], incomplete: null }; // no dir → nothing live
     return {
@@ -297,7 +302,7 @@ export async function findLiveTaskOwnersByTaskId(
     const rel = `design/phases/${entry}`;
     let abs: OwnedReadPath;
     try {
-      abs = await resolveContainedReadPath(cwd, rel);
+      abs = await resolvePhaseReadPath(cwd, rel);
     } catch {
       // A symlink (in-project or escaping): fail closed — we cannot read it to prove
       // it does NOT own the task_id.
@@ -370,7 +375,7 @@ async function phaseFileStillPresent(
 
   if (roadmapPath !== null) {
     try {
-      await lstatOwned(await resolveContainedReadPath(cwd, roadmapPath));
+      await lstatOwned(await resolvePhaseReadPath(cwd, roadmapPath));
       return { kind: "present", phase_path: roadmapPath }; // the referenced file is on disk
     } catch (err) {
       if (!isEnoent(err)) {
@@ -404,7 +409,7 @@ export async function planEventPack(
   phaseId: string,
 ): Promise<EventPackPlan> {
   assertSafePlanId(phaseId, "Phase id");
-  const packPath = await resolveContainedWritePath(
+  const packPath = await resolveArchiveOwnedWritePath(
     cwd,
     eventPackRelPath(phaseId),
   );
