@@ -1,4 +1,9 @@
-import { readFile } from "./project-fs/raw-internal.ts";
+import { readOwnedText } from "./project-fs/operations.ts";
+import {
+  resolveProjectConfigReadPath,
+  resolveAgentProfileReadPath,
+} from "./project-fs/authority-resolvers.ts";
+import { unbrand } from "./project-fs/branded-paths-internal.ts";
 import { parse as parseYaml } from "yaml";
 import { AgentProfileRefPath } from "./schemas/agent-profile-ref-path.ts";
 import { assertSafePlanId } from "./schemas/plan-id.ts";
@@ -9,7 +14,6 @@ import {
   type OwnedWritePath,
   type OwnedReadPath,
 } from "./project-fs/branded-paths-internal.ts";
-import { resolveProjectConfigPath } from "./project-config-path.ts";
 import {
   AgentProfile,
   type AgentProfile as AgentProfileType,
@@ -78,7 +82,7 @@ async function readProjectYamlForProfileChecks(
   cwd: string,
 ): Promise<unknown | null> {
   try {
-    const raw = await readFile(await resolveProjectConfigPath(cwd), "utf8");
+    const raw = await readOwnedText(await resolveProjectConfigReadPath(cwd));
     return parseYaml(raw) as unknown;
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
@@ -112,29 +116,29 @@ async function assertProfileRelNotShared(
 }
 
 async function assertProfileNameMatches(
-  absPath: string,
+  path: OwnedReadPath,
   agentName: string,
 ): Promise<void> {
   let raw: string;
   try {
-    raw = await readFile(absPath, "utf8");
+    raw = await readOwnedText(path);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
     throw profileConfigError(
-      `Agent profile for "${agentName}" at ${absPath} cannot be read before writing.`,
+      `Agent profile for "${agentName}" at ${unbrand(path)} cannot be read before writing.`,
     );
   }
   try {
     const profile = AgentProfile.parse(parseYaml(raw) as unknown);
     if (profile.name !== agentName) {
       throw profileConfigError(
-        `Agent profile at ${absPath} declares name "${profile.name}", but "${agentName}" was requested. Automatic profile writes require the profile name to match the target agent.`,
+        `Agent profile at ${unbrand(path)} declares name "${profile.name}", but "${agentName}" was requested. Automatic profile writes require the profile name to match the target agent.`,
       );
     }
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "CONFIG_ERROR") throw err;
     throw profileConfigError(
-      `Agent profile for "${agentName}" at ${absPath} is malformed and cannot be safely written.`,
+      `Agent profile for "${agentName}" at ${unbrand(path)} is malformed and cannot be safely written.`,
     );
   }
 }
@@ -164,7 +168,7 @@ export async function resolveAgentProfileRel(
   assertSafePlanId(agentName, "Agent");
   let raw: string;
   try {
-    raw = await readFile(await resolveProjectConfigPath(cwd), "utf8");
+    raw = await readOwnedText(await resolveProjectConfigReadPath(cwd));
   } catch (err) {
     // Absent project.yaml → convention. But a present-but-unreadable file
     // (EACCES, EISDIR, transient I/O) is a real problem: surface it rather than
@@ -296,7 +300,7 @@ export async function resolveOwnedAgentProfilePath(
   assertWritableProfileRel(agentName, rel);
   await assertProfileRelNotShared(cwd, agentName, rel);
   try {
-    const path = await resolveSymlinkFreeProjectPath(
+    const path = await resolveAgentProfileReadPath(
       cwd,
       [".code-pact", rel].join("/"),
     );
@@ -345,7 +349,7 @@ export async function loadAdapterProfileForAdapter(
   const path = await resolveAgentProfilePath(cwd, agentName);
   let raw: string;
   try {
-    raw = await readFile(path, "utf8");
+    raw = await readOwnedText(path);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {
       return {
