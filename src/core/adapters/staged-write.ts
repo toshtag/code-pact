@@ -10,6 +10,7 @@ import {
 } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { atomicWriteText } from "../../io/atomic-text.ts";
+import { brandOwnedWrite } from "../project-fs/branded-paths-internal.ts";
 import { isSupportedAgent, type SupportedAgent } from "../agents.ts";
 import { adapterRegistry } from "./index.ts";
 import type { DesiredAdapterFileRole } from "./types.ts";
@@ -735,7 +736,7 @@ export class FileTransaction {
       if (s.content === undefined) {
         throw new Error(`missing staged write content for ${s.relPath}`);
       }
-      await atomicWriteText(s.tempPath, s.content);
+      await atomicWriteText(brandOwnedWrite(s.tempPath), s.content);
       const tempStat = await dataStat(s.tempPath);
       if (!tempStat.isFile()) {
         await dataUnlink(s.tempPath).catch(() => {});
