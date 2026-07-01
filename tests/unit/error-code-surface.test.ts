@@ -83,6 +83,7 @@ const KNOWN_CODES: Record<
   DECISION_RETIRE_STALE: "public",
   DECISION_REQUIRED: "public",
   DUPLICATE_PHASE_ID: "public",
+  FS_AUTHORITY_FAILURE: "public",
   INVALID_TASK_TRANSITION: "public",
   LOCK_HELD: "public",
   MANIFEST_NOT_FOUND: "public",

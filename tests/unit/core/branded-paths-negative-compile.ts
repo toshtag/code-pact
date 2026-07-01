@@ -13,9 +13,8 @@
  */
 import {
   readOwnedText,
-  writeOwnedText,
-  removeOwned,
-  listOwned,
+  unlinkOwned,
+  listOwnedDirents,
 } from "../../../src/core/project-fs/index.ts";
 import type {
   OwnedReadPath,
@@ -37,14 +36,11 @@ const _badDelete: OwnedDeletePath = "/tmp/evil";
 // @ts-expect-error readOwnedText rejects raw string
 void readOwnedText("/etc/passwd" as string);
 
-// @ts-expect-error writeOwnedText rejects raw string
-void writeOwnedText("/tmp/evil" as string, "payload");
+// @ts-expect-error unlinkOwned rejects raw string
+void unlinkOwned("/tmp/evil" as string);
 
-// @ts-expect-error removeOwned rejects raw string
-void removeOwned("/tmp/evil" as string);
-
-// @ts-expect-error listOwned rejects raw string
-void listOwned("/etc" as string);
+// @ts-expect-error listOwnedDirents rejects raw string
+void listOwnedDirents("/etc" as string);
 
 // --- These usages MUST compile (positive control) ---
 
