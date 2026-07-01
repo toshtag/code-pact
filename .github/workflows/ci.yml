@@ -50,8 +50,9 @@ jobs:
         if: matrix.profile == 'full'
 
       # Security hardening invariants: verifies raw fs exports removed,
-      # owned-read.ts deprecated, allowlist empty, decision-ref validator
-      # unified, O_NOFOLLOW read, exclusive create, docs synced.
+      # owned-read.ts deprecated, allowlist structured with line numbers,
+      # decision-ref validator unified, O_NOFOLLOW read, exclusive create,
+      # docs synced.
       - run: pnpm check:security-hardening
         if: matrix.profile == 'full'
 

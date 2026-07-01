@@ -71,25 +71,34 @@ console.log("\n=== 2. owned-read.ts deprecated ===");
 }
 
 // ---------------------------------------------------------------------------
-// 3. TRUSTED_FS_MODULES — limited set
+// 3. TRUSTED_FS_MODULES — limited set + RAW_FS_IMPORT_ALLOWLIST
 // ---------------------------------------------------------------------------
 console.log("\n=== 3. TRUSTED_FS_MODULES scope ===");
 {
   const checker = readFile("scripts/check-fs-authority.mjs");
   check("TRUSTED_FS_MODULES is defined", grepIn(checker, "TRUSTED_FS_MODULES"));
-  // The 7 core trusted modules per the plan (checked via join() fragments)
+  check(
+    "RAW_FS_IMPORT_ALLOWLIST is defined",
+    grepIn(checker, "RAW_FS_IMPORT_ALLOWLIST"),
+  );
+  // Core trusted modules — fully exempt from all checks
   const expectedCore = [
     "raw-internal.ts",
     "operations.ts",
     "authority-resolvers.ts",
     "branded-paths-internal.ts",
-    "control-plane.ts",
     "path-safety.ts",
     "atomic-text.ts",
   ];
   for (const file of expectedCore) {
     check(`TRUSTED_FS_MODULES includes ${file}`, grepIn(checker, file));
   }
+  // control-plane.ts must NOT be in TRUSTED_FS_MODULES anymore
+  // (it uses branded operations, not raw fs)
+  check(
+    "control-plane.ts not in TRUSTED_FS_MODULES (removed)",
+    !grepIn(checker, 'join("src", "core", "project-fs", "control-plane.ts")'),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -194,15 +203,25 @@ console.log("\n=== 8. Exclusive create ===");
 }
 
 // ---------------------------------------------------------------------------
-// 9. Allowlist is empty (call-site granular, no broad auto-approval)
+// 9. Allowlist is structured JSON with line numbers (no broad auto-approval)
 // ---------------------------------------------------------------------------
 console.log("\n=== 9. Allowlist ===");
 {
   const allowlist = readFile(".code-pact/fs-authority-allowlist.json");
-  check(
-    "allowlist is empty",
-    allowlist.trim() === "{}" || allowlist.trim() === "",
-  );
+  const parsed = JSON.parse(allowlist);
+  const keys = Object.keys(parsed);
+  check("allowlist is valid JSON", keys.length > 0);
+  let allHaveLine = true;
+  for (const key of keys) {
+    for (const entry of parsed[key]) {
+      if (typeof entry.line !== "number") {
+        allHaveLine = false;
+        break;
+      }
+    }
+    if (!allHaveLine) break;
+  }
+  check("all allowlist entries have numeric line field", allHaveLine);
 }
 
 // ---------------------------------------------------------------------------
