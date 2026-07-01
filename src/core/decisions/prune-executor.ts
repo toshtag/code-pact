@@ -1,5 +1,19 @@
-import { readFile, stat, unlink } from "../project-fs/raw-internal.ts";
-import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
+import {
+  readOwnedText,
+  statOwned,
+  unlinkOwned,
+} from "../project-fs/operations.ts";
+import {
+  resolveInitReadPath,
+  resolveInitWritePath,
+} from "../project-fs/authority-resolvers.ts";
+import {
+  unbrand,
+  brandOwnedRead,
+  brandOwnedDelete,
+  type OwnedReadPath,
+  type OwnedWritePath,
+} from "../project-fs/branded-paths-internal.ts";
 import {
   atomicWriteText,
   atomicReplaceExistingText,
@@ -230,7 +244,7 @@ function errDetail(err: unknown): string {
 }
 
 type TargetCheck =
-  | { ok: true; abs: string; ino: number; dev: number }
+  | { ok: true; abs: OwnedReadPath; ino: number; dev: number }
   | { ok: false; found: string };
 
 /**
@@ -256,15 +270,15 @@ async function inspectTarget(
   expectedIno?: number,
   expectedDev?: number,
 ): Promise<TargetCheck> {
-  let abs: string;
+  let abs: OwnedReadPath;
   try {
-    abs = await resolveSymlinkFreeProjectPath(cwd, relPath);
+    abs = await resolveInitReadPath(cwd, relPath);
   } catch {
     return { ok: false, found: "<path now escapes the project root>" };
   }
   let content: string;
   try {
-    content = await readFile(abs, "utf8");
+    content = await readOwnedText(abs);
   } catch (err) {
     return {
       ok: false,
@@ -278,7 +292,7 @@ async function inspectTarget(
     return { ok: false, found: "<record content changed since the verdict>" };
   let st;
   try {
-    st = await stat(abs);
+    st = await statOwned(abs);
   } catch (err) {
     return {
       ok: false,
@@ -397,11 +411,11 @@ export async function applyPrune(
   const stale: PruneStaleSpan[] = [];
   const pending: PendingRewrite[] = [];
   for (const [file, its] of byFile) {
-    let abs: string;
+    let abs: OwnedReadPath;
     let content: string;
     try {
-      abs = await resolveSymlinkFreeProjectPath(cwd, file);
-      content = await readFile(abs, "utf8");
+      abs = await resolveInitReadPath(cwd, file);
+      content = await readOwnedText(abs);
     } catch {
       for (const it of its) {
         stale.push({
@@ -529,13 +543,15 @@ export async function applyPrune(
     // Re-resolve the ledger path at COMMIT time (not the cached preflight one), so
     // a design/decisions ancestor symlinked out of the repo since preflight is
     // caught here — never read/write an external PRUNED.md.
-    const ledgerPath = await resolveSymlinkFreeProjectPath(cwd, LEDGER_REL);
+    const ledgerPath = await resolveInitWritePath(cwd, LEDGER_REL);
     // Read the ledger as it stands now, tracking existence precisely so "absent"
     // is distinguishable from "present but empty".
     let currentLedger = "";
     let currentExists = true;
     try {
-      currentLedger = await readFile(ledgerPath, "utf8");
+      currentLedger = await readOwnedText(
+        await resolveInitReadPath(cwd, LEDGER_REL),
+      );
     } catch (err) {
       if (errDetail(err) !== "ENOENT") throw err;
       currentExists = false;
@@ -609,9 +625,9 @@ export async function applyPrune(
         errDetail(err),
       );
     }
-    let abs: string;
+    let abs: OwnedWritePath;
     try {
-      abs = await resolveSymlinkFreeProjectPath(cwd, r.rel);
+      abs = await resolveInitWritePath(cwd, r.rel);
     } catch {
       throw new PruneWriteError(
         "rewrite_links",
@@ -621,7 +637,7 @@ export async function applyPrune(
     }
     let current: string | null = null;
     try {
-      current = await readFile(abs, "utf8");
+      current = await readOwnedText(brandOwnedRead(unbrand(abs)));
     } catch {
       current = null;
     }
@@ -671,7 +687,7 @@ export async function applyPrune(
         `target changed under prune (${tDel.found}) — refusing to delete`,
       );
     }
-    await unlink(tDel.abs);
+    await unlinkOwned(brandOwnedDelete(unbrand(tDel.abs)));
   } catch (err) {
     if (err instanceof PruneWriteError) throw err;
     throw new PruneWriteError(

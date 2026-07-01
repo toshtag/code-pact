@@ -1,8 +1,6 @@
 import { atomicCreateTextExclusive } from "../../io/atomic-text.ts";
-import {
-  assertSafeRelativePath,
-  resolveSymlinkFreeProjectPath,
-} from "../path-safety.ts";
+import { assertSafeRelativePath } from "../path-safety.ts";
+import { resolveDecisionWritePath } from "../project-fs/authority-resolvers.ts";
 import { PLAN_ID_PATTERN } from "../schemas/plan-id.ts";
 import { normalizeDecisionRefPath } from "../schemas/decision-ref.ts";
 
@@ -116,7 +114,7 @@ export async function writeProposedAdrIfAbsent(
       `Refusing to scaffold "${relPath}": ADR stubs must be decision records under ${DECISIONS_DIR}`,
     );
   }
-  const abs = await resolveSymlinkFreeProjectPath(cwd, normalized);
+  const abs = await resolveDecisionWritePath(cwd, normalized);
   try {
     await atomicCreateTextExclusive(abs, proposedAdrStub(label));
     return "created";
