@@ -24,7 +24,9 @@ describe("hasDecisionAdrForTaskId", () => {
   });
 
   it("ignores non-.md files", () => {
-    expect(hasDecisionAdrForTaskId(["P1-T1-decision.txt"], "P1-T1")).toBe(false);
+    expect(hasDecisionAdrForTaskId(["P1-T1-decision.txt"], "P1-T1")).toBe(
+      false,
+    );
   });
 
   it("returns false when no file includes the task id", () => {
@@ -64,7 +66,9 @@ describe("readDecisionAdrFiles", () => {
   it("returns canonical decision paths when the directory exists", async () => {
     await mkdir(join(cwd, "design", "decisions"), { recursive: true });
     await writeFile(join(cwd, "design", "decisions", "P1-T1-rfc.md"), "x");
-    expect(await readDecisionAdrFiles(cwd)).toContain("design/decisions/P1-T1-rfc.md");
+    expect(await readDecisionAdrFiles(cwd)).toContain(
+      "design/decisions/P1-T1-rfc.md",
+    );
   });
 
   it("excludes non-decision files (README.md, PRUNED.md ledger) from the candidate scan", async () => {
@@ -77,7 +81,6 @@ describe("readDecisionAdrFiles", () => {
     expect(files).not.toContain("design/decisions/README.md");
     expect(files).not.toContain("design/decisions/PRUNED.md");
   });
-
 });
 
 // Step 2b characterization: the two LIVE decision-read primitives that the pack
@@ -94,7 +97,10 @@ describe("readLiveDecisionDir / readLiveDecisionFile (live decision-read seam)",
   });
 
   it("readLiveDecisionDir reports present=false / [] for an absent dir (ENOENT)", async () => {
-    expect(await readLiveDecisionDir(cwd)).toEqual({ present: false, entries: [] });
+    expect(await readLiveDecisionDir(cwd)).toEqual({
+      present: false,
+      entries: [],
+    });
   });
 
   it("readLiveDecisionDir reports present=true with NON_DECISION_FILES filtered out", async () => {
@@ -111,7 +117,10 @@ describe("readLiveDecisionDir / readLiveDecisionFile (live decision-read seam)",
 
   it("readLiveDecisionFile returns ok for a safe in-project decision file", async () => {
     await mkdir(join(cwd, "design", "decisions"), { recursive: true });
-    await writeFile(join(cwd, "design", "decisions", "a.md"), "**Status:** accepted\n");
+    await writeFile(
+      join(cwd, "design", "decisions", "a.md"),
+      "**Status:** accepted\n",
+    );
     const r = await readLiveDecisionFile(cwd, "design/decisions/a.md");
     expect(r.kind).toBe("ok");
     expect(r.kind === "ok" && r.content).toContain("accepted");
@@ -130,7 +139,10 @@ describe("readLiveDecisionDir / readLiveDecisionFile (live decision-read seam)",
 
   it("readLiveDecisionFile accepts a nested ADR under the decision namespace", async () => {
     await mkdir(join(cwd, "design", "decisions", "p3"), { recursive: true });
-    await writeFile(join(cwd, "design", "decisions", "p3", "adr.md"), "nested body");
+    await writeFile(
+      join(cwd, "design", "decisions", "p3", "adr.md"),
+      "nested body",
+    );
     const r = await readLiveDecisionFile(cwd, "design/decisions/p3/adr.md");
     expect(r.kind).toBe("ok");
     expect(r.kind === "ok" && r.content).toBe("nested body");
@@ -172,15 +184,22 @@ describe("isAbsentDecisionsDirError", () => {
 
 describe("isDecisionRequiredForTask", () => {
   it("is true when the task requires a decision", () => {
-    expect(isDecisionRequiredForTask({}, { requires_decision: true })).toBe(true);
+    expect(isDecisionRequiredForTask({}, { requires_decision: true })).toBe(
+      true,
+    );
   });
   it("is true when the phase requires a decision (parity with verify)", () => {
-    expect(isDecisionRequiredForTask({ requires_decision: true }, {})).toBe(true);
+    expect(isDecisionRequiredForTask({ requires_decision: true }, {})).toBe(
+      true,
+    );
   });
   it("is false when neither does", () => {
     expect(isDecisionRequiredForTask({}, {})).toBe(false);
     expect(
-      isDecisionRequiredForTask({ requires_decision: false }, { requires_decision: false }),
+      isDecisionRequiredForTask(
+        { requires_decision: false },
+        { requires_decision: false },
+      ),
     ).toBe(false);
   });
 });
@@ -191,7 +210,9 @@ describe("isDecisionRequiredForTask", () => {
 
 describe("parseAdrStatus", () => {
   it("reads the bold-line status, stripping a glued paren/comma", () => {
-    expect(parseAdrStatus("# T\n\n**Status:** accepted (P16, 2026-05)\n")).toEqual({
+    expect(
+      parseAdrStatus("# T\n\n**Status:** accepted (P16, 2026-05)\n"),
+    ).toEqual({
       word: "accepted",
       source: "bold-line",
     });
@@ -202,7 +223,9 @@ describe("parseAdrStatus", () => {
   });
 
   it("handles CRLF line endings", () => {
-    expect(parseAdrStatus("# T\r\n\r\n**Status:** proposed\r\n").word).toBe("proposed");
+    expect(parseAdrStatus("# T\r\n\r\n**Status:** proposed\r\n").word).toBe(
+      "proposed",
+    );
   });
 
   it("returns word=null with source=none when there is no status line", () => {
@@ -221,7 +244,10 @@ describe("parseAdrStatus", () => {
 
   it("frontmatter status wins over the bold line when both are present", () => {
     const content = "---\nstatus: proposed\n---\n# T\n\n**Status:** accepted\n";
-    expect(parseAdrStatus(content)).toEqual({ word: "proposed", source: "frontmatter" });
+    expect(parseAdrStatus(content)).toEqual({
+      word: "proposed",
+      source: "frontmatter",
+    });
   });
 });
 
@@ -236,7 +262,9 @@ describe("classifyAdr", () => {
   });
 
   it("explicit accepted → accepted", () => {
-    expect(classifyAdr("**Status:** accepted (P1, 2026)\n").acceptance).toBe("accepted");
+    expect(classifyAdr("**Status:** accepted (P1, 2026)\n").acceptance).toBe(
+      "accepted",
+    );
   });
 
   it("each blocking status → blocked", () => {
@@ -246,7 +274,9 @@ describe("classifyAdr", () => {
   });
 
   it("explicit UNKNOWN status (typo) → unknown_status (does NOT resolve)", () => {
-    expect(classifyAdr("**Status:** acceptd\n").acceptance).toBe("unknown_status");
+    expect(classifyAdr("**Status:** acceptd\n").acceptance).toBe(
+      "unknown_status",
+    );
   });
 });
 
@@ -300,7 +330,9 @@ describe("resolveDecisionGate — filename scan (any-accepted-wins)", () => {
   it("no matching ADR → unresolved with the canonical reason", async () => {
     const res = await resolveDecisionGate(cwd, "P1-T1");
     expect(res.resolved).toBe(false);
-    expect(res.reason).toBe('No ADR found for task "P1-T1" in design/decisions/');
+    expect(res.reason).toBe(
+      'No ADR found for task "P1-T1" in design/decisions/',
+    );
   });
 
   it("absent design/decisions/ → unresolved, dirPresent=false, specific message", async () => {
@@ -369,13 +401,17 @@ describe("resolveDecisionGate — decision_refs (all-must-be-accepted)", () => {
       "design/decisions/gone.md",
     ]);
     expect(res.resolved).toBe(false);
-    const missing = res.considered.find((c) => c.path.endsWith("gone.md"));
+    const missing = res.considered.find(c => c.path.endsWith("gone.md"));
     expect(missing?.acceptance).toBe("missing");
   });
 
   it("explicit ref to a directory named *.md → unreadable, unresolved, no throw", async () => {
-    await mkdir(join(cwd, "design", "decisions", "P1-T1.md"), { recursive: true });
-    const res = await resolveDecisionGate(cwd, "P1-T1", ["design/decisions/P1-T1.md"]);
+    await mkdir(join(cwd, "design", "decisions", "P1-T1.md"), {
+      recursive: true,
+    });
+    const res = await resolveDecisionGate(cwd, "P1-T1", [
+      "design/decisions/P1-T1.md",
+    ]);
     expect(res.resolved).toBe(false);
     expect(res.considered).toEqual([
       {
@@ -417,7 +453,7 @@ describe("resolveDecisionGate — decision_refs path safety (fail-closed)", () =
     await writeFile(join(outsideDir, "outside.md"), "**Status:** accepted\n");
     const res = await resolveDecisionGate(cwd, "P1-T1", ["../outside.md"]);
     expect(res.resolved).toBe(false);
-    const entry = res.considered.find((c) => c.path.includes("outside.md"));
+    const entry = res.considered.find(c => c.path.includes("outside.md"));
     expect(entry?.acceptance).toBe("unsafe_path");
     expect(entry?.accepted).toBe(false);
     expect(res.reason).toContain("unsafe path");
@@ -435,7 +471,7 @@ describe("resolveDecisionGate — decision_refs path safety (fail-closed)", () =
       "design/decisions/escape.md",
     ]);
     expect(res.resolved).toBe(false);
-    const entry = res.considered.find((c) => c.path.includes("escape.md"));
+    const entry = res.considered.find(c => c.path.includes("escape.md"));
     expect(entry?.acceptance).toBe("unsafe_path");
   });
 
@@ -450,9 +486,9 @@ describe("resolveDecisionGate — decision_refs path safety (fail-closed)", () =
       "../b.md",
     ]);
     expect(res.resolved).toBe(false);
-    expect(
-      res.considered.find((c) => c.path.includes("b.md"))?.acceptance,
-    ).toBe("unsafe_path");
+    expect(res.considered.find(c => c.path.includes("b.md"))?.acceptance).toBe(
+      "unsafe_path",
+    );
   });
 
   it("makeDecisionResolver is fail-closed on a traversal ref too", async () => {
@@ -461,7 +497,7 @@ describe("resolveDecisionGate — decision_refs path safety (fail-closed)", () =
     const res = await resolver.resolve("P1-T1", ["../outside.md"]);
     expect(res.resolved).toBe(false);
     expect(
-      res.considered.find((c) => c.path.includes("outside.md"))?.acceptance,
+      res.considered.find(c => c.path.includes("outside.md"))?.acceptance,
     ).toBe("unsafe_path");
   });
 
@@ -475,7 +511,7 @@ describe("resolveDecisionGate — decision_refs path safety (fail-closed)", () =
     await writeFile(join(cwd, ".env"), "API_TOKEN=secret-marker\n");
     const res = await resolveDecisionGate(cwd, "P1-T1", [".env"]);
     expect(res.resolved).toBe(false);
-    const entry = res.considered.find((c) => c.path.includes(".env"));
+    const entry = res.considered.find(c => c.path.includes(".env"));
     expect(entry?.acceptance).toBe("unsafe_path");
     expect(entry?.accepted).toBe(false);
     // The secret content must never surface in the resolution result.
@@ -485,10 +521,12 @@ describe("resolveDecisionGate — decision_refs path safety (fail-closed)", () =
   it("in-project doc outside design/decisions/ → unsafe_path, gate NOT released", async () => {
     await mkdir(join(cwd, "docs"), { recursive: true });
     await writeFile(join(cwd, "docs", "cli-contract.md"), "# no status line\n");
-    const res = await resolveDecisionGate(cwd, "P1-T1", ["docs/cli-contract.md"]);
+    const res = await resolveDecisionGate(cwd, "P1-T1", [
+      "docs/cli-contract.md",
+    ]);
     expect(res.resolved).toBe(false);
     expect(
-      res.considered.find((c) => c.path.includes("cli-contract.md"))?.acceptance,
+      res.considered.find(c => c.path.includes("cli-contract.md"))?.acceptance,
     ).toBe("unsafe_path");
   });
 
@@ -546,7 +584,7 @@ describe("classifyDecisionAdrs", () => {
     await writeAdr("empty.md", "\n");
 
     const byFile = Object.fromEntries(
-      (await classifyDecisionAdrs(cwd)).map((a) => [a.file, a]),
+      (await classifyDecisionAdrs(cwd)).map(a => [a.file, a]),
     );
     expect(byFile["design/decisions/accepted.md"]!.acceptance).toBe("accepted");
     expect(byFile["design/decisions/proposed.md"]!.acceptance).toBe("blocked");
@@ -560,7 +598,10 @@ describe("classifyDecisionAdrs", () => {
   });
 
   it("frontmatter typo wins over an accepted bold line", async () => {
-    await writeAdr("fm.md", "---\nstatus: acceptd\n---\n\n**Status:** accepted\n");
+    await writeAdr(
+      "fm.md",
+      "---\nstatus: acceptd\n---\n\n**Status:** accepted\n",
+    );
     const [entry] = await classifyDecisionAdrs(cwd);
     expect(entry).toMatchObject({
       acceptance: "unknown_status",
@@ -572,25 +613,34 @@ describe("classifyDecisionAdrs", () => {
   it("ignores non-.md entries", async () => {
     await writeAdr("real.md", "**Status:** accepted\n");
     await writeAdr(".DS_Store", "binary-ish\n");
-    const files = (await classifyDecisionAdrs(cwd)).map((a) => a.file);
+    const files = (await classifyDecisionAdrs(cwd)).map(a => a.file);
     expect(files).toEqual(["design/decisions/real.md"]);
   });
 
   it("skips (does not crash on) a DIRECTORY named *.md — hostile repo, EISDIR", async () => {
     await writeAdr("real.md", "**Status:** accepted\n");
     // A directory named like an ADR: a bare readFile would throw EISDIR (exit 3).
-    await mkdir(join(cwd, "design", "decisions", "evil.md"), { recursive: true });
-    const files = (await classifyDecisionAdrs(cwd)).map((a) => a.file);
+    await mkdir(join(cwd, "design", "decisions", "evil.md"), {
+      recursive: true,
+    });
+    const files = (await classifyDecisionAdrs(cwd)).map(a => a.file);
     expect(files).toEqual(["design/decisions/real.md"]); // evil.md skipped, no throw
   });
 
   it("skips an ADR whose file symlink-escapes the project (contained read)", async () => {
     const outside = await mkdtemp(join(tmpdir(), "adr-classify-out-"));
     try {
-      await writeFile(join(outside, "secret.md"), "**Status:** accepted\nSECRET\n", "utf8");
+      await writeFile(
+        join(outside, "secret.md"),
+        "**Status:** accepted\nSECRET\n",
+        "utf8",
+      );
       await mkdir(join(cwd, "design", "decisions"), { recursive: true });
-      await symlink(join(outside, "secret.md"), join(cwd, "design", "decisions", "leak.md"));
-      const files = (await classifyDecisionAdrs(cwd)).map((a) => a.file);
+      await symlink(
+        join(outside, "secret.md"),
+        join(cwd, "design", "decisions", "leak.md"),
+      );
+      const files = (await classifyDecisionAdrs(cwd)).map(a => a.file);
       expect(files).toEqual([]); // the escaping symlink is `unsafe` → skipped
     } finally {
       await rm(outside, { recursive: true, force: true });
@@ -607,8 +657,12 @@ describe("parseAdrCommitments", () => {
   });
 
   it("returns hasSection:true / no items when the section has zero checkboxes", () => {
-    const content = "## Implementation commitments\n\nProse only, no checkboxes.\n";
-    expect(parseAdrCommitments(content)).toEqual({ hasSection: true, items: [] });
+    const content =
+      "## Implementation commitments\n\nProse only, no checkboxes.\n";
+    expect(parseAdrCommitments(content)).toEqual({
+      hasSection: true,
+      items: [],
+    });
   });
 
   it("extracts mixed checked/unchecked items (`- [ ]` / `- [x]` / `- [X]`)", () => {
@@ -630,7 +684,8 @@ describe("parseAdrCommitments", () => {
   });
 
   it("accepts `*` bullets as well as `-`", () => {
-    const content = "## Implementation commitments\n\n* [ ] Star-bulleted item\n";
+    const content =
+      "## Implementation commitments\n\n* [ ] Star-bulleted item\n";
     expect(parseAdrCommitments(content).items).toEqual([
       { text: "Star-bulleted item", done: false },
     ]);
@@ -681,12 +736,18 @@ describe("parseAdrCommitments", () => {
 
   it("does NOT match an h3 `### Implementation commitments`", () => {
     const content = "### Implementation commitments\n\n- [ ] item\n";
-    expect(parseAdrCommitments(content)).toEqual({ hasSection: false, items: [] });
+    expect(parseAdrCommitments(content)).toEqual({
+      hasSection: false,
+      items: [],
+    });
   });
 
   it("does NOT match a heading with trailing text after the title", () => {
     const content = "## Implementation commitments and more\n\n- [ ] item\n";
-    expect(parseAdrCommitments(content)).toEqual({ hasSection: false, items: [] });
+    expect(parseAdrCommitments(content)).toEqual({
+      hasSection: false,
+      items: [],
+    });
   });
 
   it("tolerates leading whitespace before `##` (same h2 detection as the rest of the codebase)", () => {
@@ -702,7 +763,9 @@ describe("parseAdrCommitments", () => {
 
   it("ignores a checkbox item with empty text (`- [ ] ` with nothing after)", () => {
     const content = "## Implementation commitments\n\n- [ ] \n- [ ] real\n";
-    expect(parseAdrCommitments(content).items).toEqual([{ text: "real", done: false }]);
+    expect(parseAdrCommitments(content).items).toEqual([
+      { text: "real", done: false },
+    ]);
   });
 
   it("does not mistake a front-matter `status:` for body, and reads the body section", () => {
@@ -726,5 +789,228 @@ describe("parseAdrCommitments", () => {
     expect(parseAdrCommitments(content).items).toEqual([
       { text: "first", done: false },
     ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Nested decision gate tests — decision_refs pointing into subdirectories
+// under design/decisions/. The namespace contract (DecisionRefPath) allows
+// nested paths; the gate must resolve them identically to top-level refs.
+// ---------------------------------------------------------------------------
+
+describe("resolveDecisionGate — nested decision_refs", () => {
+  let cwd: string;
+  beforeEach(async () => {
+    cwd = await mkdtemp(join(tmpdir(), "adr-nested-"));
+    await mkdir(join(cwd, "design", "decisions", "sub"), { recursive: true });
+    await mkdir(join(cwd, "design", "decisions", "deep", "path"), {
+      recursive: true,
+    });
+  });
+  afterEach(async () => {
+    await rm(cwd, { recursive: true, force: true });
+  });
+
+  it("nested accepted ref → resolved", async () => {
+    await writeFile(
+      join(cwd, "design", "decisions", "sub", "nested-accepted.md"),
+      "**Status:** accepted (P1, 2026)\n",
+    );
+    const res = await resolveDecisionGate(cwd, "P1-T1", [
+      "design/decisions/sub/nested-accepted.md",
+    ]);
+    expect(res.resolved).toBe(true);
+    expect(res.via).toBe("decision_refs");
+    expect(res.considered).toHaveLength(1);
+    expect(res.considered[0]!.acceptance).toBe("accepted");
+  });
+
+  it("nested proposed ref → unresolved", async () => {
+    await writeFile(
+      join(cwd, "design", "decisions", "sub", "nested-proposed.md"),
+      "**Status:** proposed\n",
+    );
+    const res = await resolveDecisionGate(cwd, "P1-T1", [
+      "design/decisions/sub/nested-proposed.md",
+    ]);
+    expect(res.resolved).toBe(false);
+    expect(res.considered[0]!.acceptance).toBe("blocked");
+  });
+
+  it("nested missing ref → unresolved, acceptance=missing", async () => {
+    const res = await resolveDecisionGate(cwd, "P1-T1", [
+      "design/decisions/sub/does-not-exist.md",
+    ]);
+    expect(res.resolved).toBe(false);
+    expect(res.considered[0]!.acceptance).toBe("missing");
+  });
+
+  it("deeply nested accepted ref → resolved", async () => {
+    await writeFile(
+      join(cwd, "design", "decisions", "deep", "path", "deep-adr.md"),
+      "**Status:** accepted (P1, 2026)\n",
+    );
+    const res = await resolveDecisionGate(cwd, "P1-T1", [
+      "design/decisions/deep/path/deep-adr.md",
+    ]);
+    expect(res.resolved).toBe(true);
+    expect(res.considered[0]!.acceptance).toBe("accepted");
+  });
+
+  it("mixed top-level accepted + nested accepted → resolved", async () => {
+    await writeFile(
+      join(cwd, "design", "decisions", "top.md"),
+      "**Status:** accepted (P1, 2026)\n",
+    );
+    await writeFile(
+      join(cwd, "design", "decisions", "sub", "nested.md"),
+      "**Status:** accepted (P1, 2026)\n",
+    );
+    const res = await resolveDecisionGate(cwd, "P1-T1", [
+      "design/decisions/top.md",
+      "design/decisions/sub/nested.md",
+    ]);
+    expect(res.resolved).toBe(true);
+  });
+
+  it("mixed top-level accepted + nested proposed → unresolved (all-must-be-accepted)", async () => {
+    await writeFile(
+      join(cwd, "design", "decisions", "top.md"),
+      "**Status:** accepted (P1, 2026)\n",
+    );
+    await writeFile(
+      join(cwd, "design", "decisions", "sub", "nested.md"),
+      "**Status:** proposed\n",
+    );
+    const res = await resolveDecisionGate(cwd, "P1-T1", [
+      "design/decisions/top.md",
+      "design/decisions/sub/nested.md",
+    ]);
+    expect(res.resolved).toBe(false);
+  });
+
+  it("same basename in different directories does not collide", async () => {
+    await writeFile(
+      join(cwd, "design", "decisions", "ADR-001.md"),
+      "**Status:** accepted (P1, 2026)\n",
+    );
+    await writeFile(
+      join(cwd, "design", "decisions", "sub", "ADR-001.md"),
+      "**Status:** proposed\n",
+    );
+    const resTop = await resolveDecisionGate(cwd, "P1-T1", [
+      "design/decisions/ADR-001.md",
+    ]);
+    expect(resTop.resolved).toBe(true);
+
+    const resNested = await resolveDecisionGate(cwd, "P1-T1", [
+      "design/decisions/sub/ADR-001.md",
+    ]);
+    expect(resNested.resolved).toBe(false);
+    expect(resNested.considered[0]!.acceptance).toBe("blocked");
+  });
+
+  it("nested README.md ref → unsafe_path (not a decision record)", async () => {
+    await writeFile(
+      join(cwd, "design", "decisions", "sub", "README.md"),
+      "# Index\n",
+    );
+    const res = await resolveDecisionGate(cwd, "P1-T1", [
+      "design/decisions/sub/README.md",
+    ]);
+    expect(res.resolved).toBe(false);
+    expect(res.considered[0]!.acceptance).toBe("unsafe_path");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Nested quality scan tests — classifyDecisionAdrs on nested subdirectories.
+// Pins that nested ADRs get the same quality classification as top-level ones.
+// ---------------------------------------------------------------------------
+
+describe("classifyDecisionAdrs — nested quality scan", () => {
+  let cwd: string;
+  beforeEach(async () => {
+    cwd = await mkdtemp(join(tmpdir(), "adr-nested-quality-"));
+    await mkdir(join(cwd, "design", "decisions", "sub"), { recursive: true });
+  });
+  afterEach(async () => {
+    await rm(cwd, { recursive: true, force: true });
+  });
+
+  it("nested ADR with unknown status is reported as unknown_status", async () => {
+    await writeFile(
+      join(cwd, "design", "decisions", "sub", "typo.md"),
+      "**Status:** acceptd\n",
+    );
+    const results = await classifyDecisionAdrs(cwd);
+    const entry = results.find(r => r.file === "design/decisions/sub/typo.md");
+    expect(entry).toBeDefined();
+    expect(entry!.acceptance).toBe("unknown_status");
+  });
+
+  it("nested accepted ADR with empty commitments is reported", async () => {
+    await writeFile(
+      join(cwd, "design", "decisions", "sub", "thin.md"),
+      "**Status:** accepted (P1, 2026)\n\n## Decision\n\nSettled.\n",
+    );
+    const results = await classifyDecisionAdrs(cwd);
+    const entry = results.find(r => r.file === "design/decisions/sub/thin.md");
+    expect(entry).toBeDefined();
+    expect(entry!.acceptance).toBe("accepted");
+  });
+
+  it("nested accepted thin ADR (status only, no body) is reported as accepted", async () => {
+    await writeFile(
+      join(cwd, "design", "decisions", "sub", "minimal.md"),
+      "**Status:** accepted\n",
+    );
+    const results = await classifyDecisionAdrs(cwd);
+    const entry = results.find(
+      r => r.file === "design/decisions/sub/minimal.md",
+    );
+    expect(entry).toBeDefined();
+    expect(entry!.acceptance).toBe("accepted");
+  });
+
+  it("nested README.md variants are never classified as decision records", async () => {
+    await writeFile(
+      join(cwd, "design", "decisions", "sub", "README.md"),
+      "# Index\n",
+    );
+    await writeFile(
+      join(cwd, "design", "decisions", "sub", "readme.md"),
+      "# Index lowercase\n",
+    );
+    const results = await classifyDecisionAdrs(cwd);
+    expect(
+      results.find(r => r.file === "design/decisions/sub/README.md"),
+    ).toBeUndefined();
+    expect(
+      results.find(r => r.file === "design/decisions/sub/readme.md"),
+    ).toBeUndefined();
+  });
+
+  it("same basename in two directories remains distinct", async () => {
+    await mkdir(join(cwd, "design", "decisions", "other"), { recursive: true });
+    await writeFile(
+      join(cwd, "design", "decisions", "sub", "dup.md"),
+      "**Status:** accepted\n",
+    );
+    await writeFile(
+      join(cwd, "design", "decisions", "other", "dup.md"),
+      "**Status:** proposed\n",
+    );
+    const results = await classifyDecisionAdrs(cwd);
+    const subEntry = results.find(
+      r => r.file === "design/decisions/sub/dup.md",
+    );
+    const otherEntry = results.find(
+      r => r.file === "design/decisions/other/dup.md",
+    );
+    expect(subEntry).toBeDefined();
+    expect(otherEntry).toBeDefined();
+    expect(subEntry!.acceptance).toBe("accepted");
+    expect(otherEntry!.acceptance).toBe("blocked");
   });
 });
