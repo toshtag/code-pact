@@ -1,4 +1,5 @@
-import { readFile } from "../core/project-fs/raw-internal.ts";
+import { readOwnedText } from "../core/project-fs/operations.ts";
+import type { OwnedReadPath } from "../core/project-fs/branded-paths-internal.ts";
 import { parse as parseYaml } from "yaml";
 import type { ZodType } from "zod";
 
@@ -13,10 +14,10 @@ export class ParseError extends Error {
 }
 
 export async function loadYaml<Output>(
-  file: string,
+  file: OwnedReadPath,
   schema: ZodType<Output>,
 ): Promise<Output> {
-  const raw = await readFile(file, "utf8");
+  const raw = await readOwnedText(file);
   const data: unknown = parseYaml(raw);
   const result = schema.safeParse(data);
   if (!result.success) {

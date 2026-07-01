@@ -6,6 +6,10 @@ import {
   open,
   link,
 } from "../core/project-fs/raw-internal.ts";
+import {
+  unbrand,
+  type OwnedWritePath,
+} from "../core/project-fs/branded-paths-internal.ts";
 import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
 
@@ -168,13 +172,14 @@ async function writeThenRename(
  * to still hold exactly `content`.
  */
 export async function atomicWriteText(
-  path: string,
+  path: OwnedWritePath,
   content: string,
   expected?: ExpectedState,
   opts: { mkdir?: boolean } = {},
 ): Promise<void> {
-  if (opts.mkdir !== false) await mkdir(dirname(path), { recursive: true });
-  await writeThenRename(path, content, expected);
+  const raw = unbrand(path);
+  if (opts.mkdir !== false) await mkdir(dirname(raw), { recursive: true });
+  await writeThenRename(raw, content, expected);
 }
 
 /**
@@ -193,7 +198,7 @@ export async function atomicWriteText(
  * distinguished portably. The caller should still re-read before calling.
  */
 export async function atomicReplaceExistingText(
-  path: string,
+  path: OwnedWritePath,
   content: string,
   expectedCurrent?: string,
 ): Promise<void> {
@@ -201,7 +206,7 @@ export async function atomicReplaceExistingText(
     expectedCurrent !== undefined
       ? { kind: "present", content: expectedCurrent }
       : undefined;
-  await writeThenRename(path, content, expected);
+  await writeThenRename(unbrand(path), content, expected);
 }
 
 /**
@@ -232,21 +237,22 @@ export function __setAtomicCreateConflictForTests(
 }
 
 export async function atomicCreateTextExclusive(
-  path: string,
+  path: OwnedWritePath,
   content: string,
   opts: { mkdir?: boolean } = {},
 ): Promise<void> {
+  const raw = unbrand(path);
   if (opts.mkdir !== false) {
-    await mkdir(dirname(path), { recursive: true });
+    await mkdir(dirname(raw), { recursive: true });
   }
 
-  const tmp = await createExclusiveTemp(path, content);
+  const tmp = await createExclusiveTemp(raw, content);
 
   try {
     if (createConflictInjector) {
       await createConflictInjector();
     }
-    await link(tmp, path);
+    await link(tmp, raw);
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "EEXIST") {
