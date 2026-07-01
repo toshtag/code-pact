@@ -4,15 +4,17 @@ import {
   resolveExplicitUserReadPath,
   resolveInstructionReadPath,
   resolveProjectConfigReadPath,
+  resolveInitWritePath,
 } from "../core/project-fs/index.ts";
+import {
+  unbrand,
+  type OwnedWritePath,
+} from "../core/project-fs/branded-paths-internal.ts";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { atomicWriteText } from "../io/atomic-text.ts";
 import { Prompter } from "../lib/prompt.ts";
-import {
-  assertSafeRelativePath,
-  resolveSymlinkFreeProjectPath,
-} from "../core/path-safety.ts";
+import { assertSafeRelativePath } from "../core/path-safety.ts";
 import { Project } from "../core/schemas/project.ts";
 import type { LocaleCode } from "../core/schemas/locale.ts";
 import { isPristineInitConstitution } from "../core/constitution.ts";
@@ -320,9 +322,11 @@ async function existingIsPristinePlaceholder(
   }
 }
 
-async function resolveConstitutionOutputPath(cwd: string): Promise<string> {
+async function resolveConstitutionOutputPath(
+  cwd: string,
+): Promise<OwnedWritePath> {
   try {
-    return await resolveSymlinkFreeProjectPath(cwd, "design/constitution.md");
+    return await resolveInitWritePath(cwd, "design/constitution.md");
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "PATH_OUTSIDE_PROJECT" || code === "PATH_NOT_OWNED") {
@@ -357,7 +361,7 @@ export async function runPlanConstitution(
       existing !== null &&
       !(await existingIsPristinePlaceholder(cwd, existing))
     ) {
-      return { path: constitutionPath, skipped: true };
+      return { path: unbrand(constitutionPath), skipped: true };
     }
   }
 
@@ -378,7 +382,7 @@ export async function runPlanConstitution(
   try {
     const content = generateConstitutionMd(answers, locale);
     await atomicWriteText(constitutionPath, content);
-    return { path: constitutionPath, skipped: false };
+    return { path: unbrand(constitutionPath), skipped: false };
   } finally {
     cleanupPrompter?.();
   }

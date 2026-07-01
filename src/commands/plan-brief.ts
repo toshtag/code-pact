@@ -3,15 +3,17 @@ import {
   readExplicitUserText,
   resolveExplicitUserReadPath,
   resolveInstructionReadPath,
+  resolveInitWritePath,
 } from "../core/project-fs/index.ts";
+import {
+  unbrand,
+  type OwnedWritePath,
+} from "../core/project-fs/branded-paths-internal.ts";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { atomicWriteText } from "../io/atomic-text.ts";
 import { Prompter } from "../lib/prompt.ts";
-import {
-  assertSafeRelativePath,
-  resolveSymlinkFreeProjectPath,
-} from "../core/path-safety.ts";
+import { assertSafeRelativePath } from "../core/path-safety.ts";
 import type { Locale } from "../i18n/index.ts";
 import { messages as messageCatalog } from "../i18n/index.ts";
 import type {
@@ -298,9 +300,9 @@ export async function runBriefWizard(
   return { what, who, differentiator };
 }
 
-async function resolveBriefOutputPath(cwd: string): Promise<string> {
+async function resolveBriefOutputPath(cwd: string): Promise<OwnedWritePath> {
   try {
-    return await resolveSymlinkFreeProjectPath(cwd, "design/brief.md");
+    return await resolveInitWritePath(cwd, "design/brief.md");
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "PATH_OUTSIDE_PROJECT" || code === "PATH_NOT_OWNED") {
@@ -329,7 +331,7 @@ export async function runPlanBrief(
       await readOwnedText(
         await resolveInstructionReadPath(cwd, "design/brief.md"),
       );
-      return { path: briefPath, skipped: true };
+      return { path: unbrand(briefPath), skipped: true };
     } catch {
       // file doesn't exist — proceed
     }
@@ -353,7 +355,7 @@ export async function runPlanBrief(
   try {
     const content = generateBriefMd(answers, locale);
     await atomicWriteText(briefPath, content);
-    return { path: briefPath, skipped: false };
+    return { path: unbrand(briefPath), skipped: false };
   } finally {
     cleanupPrompter?.();
   }
