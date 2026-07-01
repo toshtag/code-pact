@@ -275,7 +275,6 @@ const AUTHORITY_EXPORTS = new Map([
       ["resolveOwnedDirectoryReadPath", "owned_read"],
       ["resolveAgentProfileReadPath", "owned_read"],
       ["resolveAdapterStaticReadPath", "owned_read"],
-      ["resolveContainedReadPath", "owned_read"],
       // Write resolvers
       ["resolveDecisionWritePath", "owned_write"],
       ["resolvePhaseWritePath", "owned_write"],
@@ -286,12 +285,10 @@ const AUTHORITY_EXPORTS = new Map([
       ["resolveAgentProfileWritePath", "owned_write"],
       ["resolveProjectConfigWritePath", "owned_write"],
       ["resolveGitignoreWritePath", "owned_write"],
-      ["resolveContainedWritePath", "owned_write"],
       // Delete resolvers
       ["resolveDecisionDeletePath", "owned_delete"],
       ["resolvePhaseDeletePath", "owned_delete"],
       ["resolveProgressDeletePath", "owned_delete"],
-      ["resolveContainedDeletePath", "owned_delete"],
     ]),
   ],
   [
@@ -933,6 +930,32 @@ function checkFile(filePath, allowlist, allowlistUsed) {
     }
   }
 
+  // Detect wildcard re-exports from raw-internal.ts (export * from ".../raw-internal.ts").
+  // These bypass the branded API by re-exporting all raw primitives.
+  for (const stmt of sourceFile.statements) {
+    if (
+      ts.isExportDeclaration(stmt) &&
+      stmt.exportClause === undefined &&
+      ts.isStringLiteral(stmt.moduleSpecifier)
+    ) {
+      const specifier = stmt.moduleSpecifier.text;
+      const modulePath = resolveImport(sourceFile.fileName, specifier);
+      const isRawInternal =
+        modulePath === RAW_INTERNAL_MODULE ||
+        specifier.endsWith("raw-internal.ts");
+      if (!isRawInternal) continue;
+      const line =
+        sourceFile.getLineAndCharacterOfPosition(stmt.getStart()).line + 1;
+      findings.push({
+        line,
+        fn: "raw-internal wildcard re-export",
+        key: `${relFile}#*`,
+        arg: specifier,
+        text: sourceFile.text.split("\n")[line - 1]?.trim() ?? "",
+      });
+    }
+  }
+
   // Detect named re-exports from raw-internal.ts (export { x } from ".../raw-internal.ts").
   // These bypass the branded API by re-exporting raw primitives.
   for (const stmt of sourceFile.statements) {
@@ -1024,6 +1047,37 @@ function checkFile(filePath, allowlist, allowlistUsed) {
           text: sourceFile.text.split("\n")[line - 1]?.trim() ?? "",
         });
       }
+    }
+  }
+
+  // Detect namespace imports of branded-paths-internal.ts (import * as brands from "...").
+  // These allow bypassing the brand constructor named-import check via property access
+  // (e.g. brands.brandOwnedRead(path)).
+  for (const stmt of sourceFile.statements) {
+    if (!ts.isImportDeclaration(stmt)) continue;
+    if (!ts.isStringLiteral(stmt.moduleSpecifier)) continue;
+    const modulePath = resolveImport(
+      sourceFile.fileName,
+      stmt.moduleSpecifier.text,
+    );
+    if (
+      modulePath !==
+      join("src", "core", "project-fs", "branded-paths-internal.ts")
+    ) {
+      continue;
+    }
+    const bindings = stmt.importClause?.namedBindings;
+    if (!bindings || !ts.isNamespaceImport(bindings)) continue;
+    if (!BRAND_CONSTRUCTOR_IMPORT_ALLOWLIST.has(relFile)) {
+      const line =
+        sourceFile.getLineAndCharacterOfPosition(stmt.getStart()).line + 1;
+      findings.push({
+        line,
+        fn: "brand constructor namespace import",
+        key: `${relFile}#*`,
+        arg: stmt.moduleSpecifier.text,
+        text: sourceFile.text.split("\n")[line - 1]?.trim() ?? "",
+      });
     }
   }
 
