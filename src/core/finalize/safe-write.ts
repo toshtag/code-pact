@@ -237,9 +237,7 @@ export async function applyPlannedWrite(
   cwd: string,
   diff: TaskStatusDiff,
 ): Promise<void> {
-  const absPath = await resolvePhaseWritePath(cwd, diff.file).then(
-    p => p as string,
-  );
+  const writePath = await resolvePhaseWritePath(cwd, diff.file);
   const raw = await readOwnedText(await resolvePhaseReadPath(cwd, diff.file));
   const phase = Phase.parse(parseYaml(raw) as unknown);
   const tasks = phase.tasks ?? [];
@@ -257,5 +255,5 @@ export async function applyPlannedWrite(
       ...tasks.slice(idx + 1),
     ],
   };
-  await atomicWriteText(absPath, stringifyYaml(updated));
+  await atomicWriteText(writePath, stringifyYaml(updated));
 }
