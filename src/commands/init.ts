@@ -1,4 +1,11 @@
-import { mkdir, access, lstat, readFile } from "../core/project-fs/raw-internal.ts";
+import {
+  readOwnedText,
+  accessOwned,
+  lstatOwned,
+  mkdirOwned,
+  resolveContainedReadPath,
+  type OwnedReadPath,
+} from "../core/project-fs/index.ts";
 import { atomicWriteText } from "../io/atomic-text.ts";
 import { stringify as toYaml } from "yaml";
 import type { LocaleCode } from "../core/schemas/locale.ts";
@@ -10,7 +17,10 @@ import type { BaselineSnapshot } from "../core/schemas/baseline-snapshot.ts";
 import { DEFAULT_AGENT_PROFILES, type SupportedAgent } from "../core/agents.ts";
 import { renderInitConstitution } from "../core/constitution.ts";
 import { messages as messageCatalog } from "../i18n/index.ts";
-import { isGitRepo, gitIgnoredControlPlaneAreas } from "../core/control-plane-ignore.ts";
+import {
+  isGitRepo,
+  gitIgnoredControlPlaneAreas,
+} from "../core/control-plane-ignore.ts";
 import { resolveSymlinkFreeProjectPath } from "../core/path-safety.ts";
 
 export type { SupportedAgent } from "../core/agents.ts";
@@ -85,7 +95,7 @@ function codingStyleMd(locale: LocaleCode): string {
     "",
     `# ${t.header}`,
     "",
-    ...t.rules.map((r) => `- ${r}`),
+    ...t.rules.map(r => `- ${r}`),
     "",
     `> ${t.editHint}`,
   ].join("\n");
@@ -95,9 +105,9 @@ function codingStyleMd(locale: LocaleCode): string {
 // File generation helpers
 // ---------------------------------------------------------------------------
 
-async function exists(p: string): Promise<boolean> {
+async function exists(p: OwnedReadPath): Promise<boolean> {
   try {
-    await access(p);
+    await accessOwned(p);
     return true;
   } catch {
     return false;
@@ -110,8 +120,9 @@ async function writeIfAbsent(
   force: boolean,
   created: string[],
   skipped: string[],
+  ownedPath: OwnedReadPath,
 ): Promise<void> {
-  if (!force && (await exists(p))) {
+  if (!force && (await exists(ownedPath))) {
     skipped.push(p);
     return;
   }
@@ -145,14 +156,20 @@ async function resolveInitPath(cwd: string, relPath: string): Promise<string> {
   }
 }
 
-async function assertInitEntryType(cwd: string, relPath: string, expected: "directory" | "file"): Promise<void> {
-  const abs = await resolveInitPath(cwd, relPath);
+async function assertInitEntryType(
+  cwd: string,
+  relPath: string,
+  expected: "directory" | "file",
+): Promise<void> {
+  const abs = await resolveContainedReadPath(cwd, relPath);
   let st;
   try {
-    st = await lstat(abs);
+    st = await lstatOwned(abs);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
-    const e = new Error(`init cannot inspect "${relPath}": ${(err as Error).message}`);
+    const e = new Error(
+      `init cannot inspect "${relPath}": ${(err as Error).message}`,
+    );
     (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
     throw e;
   }
@@ -165,13 +182,18 @@ async function assertInitEntryType(cwd: string, relPath: string, expected: "dire
         : st.isSymbolicLink()
           ? "symlink"
           : "special file";
-    const e = new Error(`init expected "${relPath}" to be ${expected} or absent, but found ${actual}`);
+    const e = new Error(
+      `init expected "${relPath}" to be ${expected} or absent, but found ${actual}`,
+    );
     (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
     throw e;
   }
 }
 
-async function preflightInitNamespaces(cwd: string, agents: SupportedAgent[]): Promise<void> {
+async function preflightInitNamespaces(
+  cwd: string,
+  agents: SupportedAgent[],
+): Promise<void> {
   for (const rel of [
     ".gitignore",
     ".code-pact/project.yaml",
@@ -180,8 +202,10 @@ async function preflightInitNamespaces(cwd: string, agents: SupportedAgent[]): P
     "design/constitution.md",
     "design/rules/coding-style.md",
     "design/roadmap.yaml",
-    ...agents.map((agent) => `.code-pact/agent-profiles/${agent}.yaml`),
-    ...DEFAULT_MODEL_PROFILES.map((mp) => `.code-pact/model-profiles/${mp.tier.replace(/_/g, "-")}.yaml`),
+    ...agents.map(agent => `.code-pact/agent-profiles/${agent}.yaml`),
+    ...DEFAULT_MODEL_PROFILES.map(
+      mp => `.code-pact/model-profiles/${mp.tier.replace(/_/g, "-")}.yaml`,
+    ),
   ]) {
     await assertInitEntryType(cwd, rel, "file");
   }
@@ -235,7 +259,11 @@ function gitignoreKey(line: string): string {
  * e.g. that a negation under an excluded parent dir is ineffective), and the
  * warning points the user there.
  */
-const BLANKET_IGNORE_KEYS = new Set([".code-pact", ".code-pact/*", ".code-pact/**"]);
+const BLANKET_IGNORE_KEYS = new Set([
+  ".code-pact",
+  ".code-pact/*",
+  ".code-pact/**",
+]);
 function detectBlanketCodePactIgnore(content: string): string | null {
   for (const raw of content.split("\n")) {
     const line = raw.trim();
@@ -263,15 +291,20 @@ async function ensureGitignoreEntries(
   const path = await resolveInitPath(cwd, ".gitignore");
   let existing: string | null = null;
   try {
-    existing = await readFile(path, "utf8");
+    existing = await readOwnedText(
+      await resolveContainedReadPath(cwd, ".gitignore"),
+    );
   } catch {
     existing = null;
   }
 
   const present = new Set(
-    (existing ?? "").split("\n").map(gitignoreKey).filter((k) => k.length > 0),
+    (existing ?? "")
+      .split("\n")
+      .map(gitignoreKey)
+      .filter(k => k.length > 0),
   );
-  const missing = entries.filter((e) => !present.has(gitignoreKey(e)));
+  const missing = entries.filter(e => !present.has(gitignoreKey(e)));
 
   if (missing.length === 0) {
     // The existing .gitignore already covers every entry — nothing to do.
@@ -291,8 +324,8 @@ async function ensureGitignoreEntries(
   created.push(path);
 }
 
-async function mkdirp(p: string): Promise<void> {
-  await mkdir(p, { recursive: true });
+async function mkdirp(p: OwnedReadPath): Promise<void> {
+  await mkdirOwned(p, { recursive: true });
 }
 
 // ---------------------------------------------------------------------------
@@ -311,7 +344,7 @@ export async function runInitCore(opts: InitCoreOptions): Promise<InitResult> {
   await preflightInitNamespaces(cwd, agents);
 
   // Guard: if .code-pact/ already exists and no --force, abort early
-  const toolDir = await resolveInitPath(cwd, ".code-pact");
+  const toolDir = await resolveContainedReadPath(cwd, ".code-pact");
   if (!force && (await exists(toolDir))) {
     const err = new Error(
       `".code-pact/" already exists in ${cwd}. Run with --force to overwrite.`,
@@ -323,9 +356,15 @@ export async function runInitCore(opts: InitCoreOptions): Promise<InitResult> {
   // -------------------------------------------------------------------------
   // .code-pact/
   // -------------------------------------------------------------------------
-  await mkdirp(await resolveInitPath(cwd, ".code-pact/agent-profiles"));
-  await mkdirp(await resolveInitPath(cwd, ".code-pact/model-profiles"));
-  await mkdirp(await resolveInitPath(cwd, ".code-pact/state/baselines"));
+  await mkdirp(
+    await resolveContainedReadPath(cwd, ".code-pact/agent-profiles"),
+  );
+  await mkdirp(
+    await resolveContainedReadPath(cwd, ".code-pact/model-profiles"),
+  );
+  await mkdirp(
+    await resolveContainedReadPath(cwd, ".code-pact/state/baselines"),
+  );
 
   // project.yaml
   const projectYaml: Project = {
@@ -333,7 +372,7 @@ export async function runInitCore(opts: InitCoreOptions): Promise<InitResult> {
     version: "0.1.0",
     locale,
     default_agent: defaultAgent,
-    agents: agents.map((a) => ({
+    agents: agents.map(a => ({
       name: a,
       profile: `agent-profiles/${a}.yaml`,
       enabled: true,
@@ -345,6 +384,7 @@ export async function runInitCore(opts: InitCoreOptions): Promise<InitResult> {
     force,
     created,
     skipped,
+    await resolveContainedReadPath(cwd, ".code-pact/project.yaml"),
   );
 
   // agent profiles
@@ -356,17 +396,28 @@ export async function runInitCore(opts: InitCoreOptions): Promise<InitResult> {
       force,
       created,
       skipped,
+      await resolveContainedReadPath(
+        cwd,
+        `.code-pact/agent-profiles/${agent}.yaml`,
+      ),
     );
   }
 
   // model profiles
   for (const mp of DEFAULT_MODEL_PROFILES) {
     await writeIfAbsent(
-      await resolveInitPath(cwd, `.code-pact/model-profiles/${mp.tier.replace(/_/g, "-")}.yaml`),
+      await resolveInitPath(
+        cwd,
+        `.code-pact/model-profiles/${mp.tier.replace(/_/g, "-")}.yaml`,
+      ),
       toYaml(mp),
       force,
       created,
       skipped,
+      await resolveContainedReadPath(
+        cwd,
+        `.code-pact/model-profiles/${mp.tier.replace(/_/g, "-")}.yaml`,
+      ),
     );
   }
 
@@ -382,6 +433,7 @@ export async function runInitCore(opts: InitCoreOptions): Promise<InitResult> {
     force,
     created,
     skipped,
+    await resolveContainedReadPath(cwd, ".code-pact/state/progress.yaml"),
   );
 
   // initial baseline snapshot (empty roadmap)
@@ -397,6 +449,10 @@ export async function runInitCore(opts: InitCoreOptions): Promise<InitResult> {
     force,
     created,
     skipped,
+    await resolveContainedReadPath(
+      cwd,
+      ".code-pact/state/baselines/initial.json",
+    ),
   );
 
   // .gitignore — ignore the machine-local / derived paths only; the rest of
@@ -428,9 +484,9 @@ export async function runInitCore(opts: InitCoreOptions): Promise<InitResult> {
   const KEEP_HINT =
     "keep only `/.code-pact/locks/`, `/.code-pact/cache/`, `/.local/`, `/.context/` ignored";
   const warnings: string[] = [];
-  const blanketLine = await resolveInitPath(cwd, ".gitignore")
-    .then((path) => readFile(path, "utf8"))
-    .then((c) => detectBlanketCodePactIgnore(c))
+  const blanketLine = await resolveContainedReadPath(cwd, ".gitignore")
+    .then(ownedPath => readOwnedText(ownedPath))
+    .then(c => detectBlanketCodePactIgnore(c))
     .catch(() => null);
   if (await isGitRepo(cwd)) {
     const ignoredAreas = await gitIgnoredControlPlaneAreas(cwd);
@@ -453,9 +509,9 @@ export async function runInitCore(opts: InitCoreOptions): Promise<InitResult> {
   // -------------------------------------------------------------------------
   // design/
   // -------------------------------------------------------------------------
-  await mkdirp(await resolveInitPath(cwd, "design/rules"));
-  await mkdirp(await resolveInitPath(cwd, "design/phases"));
-  await mkdirp(await resolveInitPath(cwd, "design/decisions"));
+  await mkdirp(await resolveContainedReadPath(cwd, "design/rules"));
+  await mkdirp(await resolveContainedReadPath(cwd, "design/phases"));
+  await mkdirp(await resolveContainedReadPath(cwd, "design/decisions"));
 
   // constitution.md
   await writeIfAbsent(
@@ -464,6 +520,7 @@ export async function runInitCore(opts: InitCoreOptions): Promise<InitResult> {
     force,
     created,
     skipped,
+    await resolveContainedReadPath(cwd, "design/constitution.md"),
   );
 
   // rules/coding-style.md
@@ -473,6 +530,7 @@ export async function runInitCore(opts: InitCoreOptions): Promise<InitResult> {
     force,
     created,
     skipped,
+    await resolveContainedReadPath(cwd, "design/rules/coding-style.md"),
   );
 
   // roadmap.yaml (empty phases — the sample phase below appends to it)
@@ -483,6 +541,7 @@ export async function runInitCore(opts: InitCoreOptions): Promise<InitResult> {
     force,
     created,
     skipped,
+    await resolveContainedReadPath(cwd, "design/roadmap.yaml"),
   );
 
   // Optional sample phase. Goes through runPhaseAdd so the wizard output
@@ -586,7 +645,10 @@ async function writeSamplePhase(
     });
     return result.path;
   } catch (err) {
-    if (err instanceof Error && (err as NodeJS.ErrnoException).code === "DUPLICATE_PHASE_ID") {
+    if (
+      err instanceof Error &&
+      (err as NodeJS.ErrnoException).code === "DUPLICATE_PHASE_ID"
+    ) {
       return undefined;
     }
     throw err;

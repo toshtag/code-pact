@@ -1,7 +1,9 @@
-import { readFile } from "../core/project-fs/raw-internal.ts";
+import {
+  readOwnedText,
+  resolveProjectConfigReadPath,
+} from "../core/project-fs/index.ts";
 import { parse as parseYaml } from "yaml";
 import { Project } from "../core/schemas/project.ts";
-import { resolveProjectConfigPath } from "../core/project-config-path.ts";
 import {
   EXPERIMENTAL_AGENTS,
   SUPPORTED_AGENTS,
@@ -47,7 +49,7 @@ export type AdapterListResult = {
 
 async function loadEnabledAgentNames(cwd: string): Promise<Set<string>> {
   try {
-    const raw = await readFile(await resolveProjectConfigPath(cwd), "utf8");
+    const raw = await readOwnedText(await resolveProjectConfigReadPath(cwd));
     const project = Project.parse(parseYaml(raw) as unknown);
     const names = new Set<string>();
     for (const a of project.agents) {

@@ -1,4 +1,4 @@
-import { readFile } from "../project-fs/raw-internal.ts";
+import { readOwnedText, resolvePhaseReadPath } from "../project-fs/index.ts";
 import { parse as parseYaml } from "yaml";
 import { Phase } from "../schemas/phase.ts";
 import {
@@ -19,7 +19,6 @@ import {
 } from "./load-phase-snapshot.ts";
 import { loadArchiveBundles } from "./archive-bundle-loader.ts";
 import { resolveArchiveRecordBytes } from "./resolve-archive-record.ts";
-import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
 import { atomicWriteText, type ExpectedState } from "../../io/atomic-text.ts";
 import {
   phaseSnapshotRelPath,
@@ -170,8 +169,7 @@ function isPhaseNotFound(err: unknown): boolean {
 
 /** Symlink-free owned read of a project-relative phase path. */
 async function readRawWithin(cwd: string, relPath: string): Promise<string> {
-  const abs = await resolveSymlinkFreeProjectPath(cwd, relPath);
-  return readFile(abs, "utf8");
+  return readOwnedText(await resolvePhaseReadPath(cwd, relPath));
 }
 
 async function readExistingRecord(

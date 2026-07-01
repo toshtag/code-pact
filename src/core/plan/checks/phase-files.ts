@@ -1,10 +1,9 @@
-import { readdir } from "../../project-fs/raw-internal.ts";
 import { join } from "node:path";
 import type { PlanIssue } from "../shared.ts";
 import type { Roadmap } from "../../schemas/roadmap.ts";
 import { phaseFilePresence } from "./fs.ts";
 import { resolveMissingPhaseRef } from "../../archive/load-phase-snapshot.ts";
-import { resolveSymlinkFreeProjectPath } from "../../path-safety.ts";
+import { listOwnedPhaseDirectory } from "../../project-fs/control-plane.ts";
 
 /**
  * Roadmap references a phase file that does not exist on disk. Both `plan lint`
@@ -76,8 +75,7 @@ export async function detectOrphanPhaseFiles(
 ): Promise<PlanIssue[]> {
   let entries: string[] = [];
   try {
-    const phasesDir = await resolveSymlinkFreeProjectPath(cwd, "design/phases");
-    entries = await readdir(phasesDir);
+    entries = await listOwnedPhaseDirectory(cwd);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
       return [
@@ -91,7 +89,7 @@ export async function detectOrphanPhaseFiles(
     }
     return [];
   }
-  const referenced = new Set(roadmap.phases.map((r) => r.path));
+  const referenced = new Set(roadmap.phases.map(r => r.path));
   const issues: PlanIssue[] = [];
   for (const entry of entries) {
     if (!entry.endsWith(".yaml")) continue;

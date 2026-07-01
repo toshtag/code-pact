@@ -1,10 +1,9 @@
-import { readFile } from "../project-fs/raw-internal.ts";
+import { readOwnedText, resolveDecisionReadPath } from "../project-fs/index.ts";
 import {
   DecisionStateRecord,
   DECISION_STATE_RECORD_SCHEMA_VERSION,
 } from "../schemas/decision-state-record.ts";
 import { classifyAdr } from "../decisions/adr.ts";
-import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
 import { atomicWriteText, type ExpectedState } from "../../io/atomic-text.ts";
 import {
   decisionRecordRelPath,
@@ -248,8 +247,9 @@ export async function planDecisionRecord(
   // FROM the live file, so an unreadable/escaping live file fails closed.
   let content: string;
   try {
-    const abs = await resolveSymlinkFreeProjectPath(cwd, canonical);
-    content = await readFile(abs, "utf8");
+    content = await readOwnedText(
+      await resolveDecisionReadPath(cwd, canonical),
+    );
   } catch (err) {
     if (isEnoent(err)) {
       if (existing.state === "present")

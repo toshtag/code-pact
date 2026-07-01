@@ -1,4 +1,7 @@
-import { stat } from "../core/project-fs/raw-internal.ts";
+import {
+  statOwned,
+  resolveContainedReadPath,
+} from "../core/project-fs/index.ts";
 import { join } from "node:path";
 import { AgentProfile } from "../core/schemas/agent-profile.ts";
 import { ModelProfile } from "../core/schemas/model-profile.ts";
@@ -258,12 +261,9 @@ export async function runAdapterUpgrade(
   // Resolve context_dir symlink-free BEFORE the model pin. context_dir is
   // NOT pre-created: the atomic write path creates it lazily when the first
   // context pack is written.
-  let contextDirAbs: string;
+  let contextDirAbs;
   try {
-    contextDirAbs = await resolveSymlinkFreeProjectPath(
-      cwd,
-      profile.context_dir,
-    );
+    contextDirAbs = await resolveContainedReadPath(cwd, profile.context_dir);
   } catch (err) {
     const e = new Error(
       `context_dir "${profile.context_dir}" resolves through a symlink or outside the project root and was refused: ${(err as Error).message}`,
@@ -275,7 +275,7 @@ export async function runAdapterUpgrade(
   // Type check: if context_dir already exists as a non-directory, a later
   // context pack write would fail. Catch it here — before any side effect.
   try {
-    const s = await stat(contextDirAbs);
+    const s = await statOwned(contextDirAbs);
     if (!s.isDirectory()) {
       const e = new Error(
         `context_dir "${profile.context_dir}" already exists but is not a directory`,

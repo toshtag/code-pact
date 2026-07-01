@@ -2,7 +2,14 @@ import { createHash } from "node:crypto";
 import { join, posix } from "node:path";
 import { assertSafePlanId } from "../schemas/plan-id.ts";
 import { normalizeDecisionRefPath } from "../schemas/decision-ref.ts";
-import { resolveSymlinkFreeProjectPath, resolveSymlinkFreeProjectPathSync } from "../path-safety.ts";
+import {
+  resolveSymlinkFreeProjectPath,
+  resolveSymlinkFreeProjectPathSync,
+} from "../path-safety.ts";
+import {
+  brandOwnedRead,
+  type OwnedReadPath,
+} from "../project-fs/branded-paths-internal.ts";
 
 // Record locations for the archive layer. One file per record (mirroring the
 // per-event ledger and `baselines/initial.json` precedents) — an append-only
@@ -59,17 +66,23 @@ function mapArchiveOwnershipError(err: unknown): never {
   throw err;
 }
 
-export async function resolveArchiveOwnedPath(cwd: string, relPath: string): Promise<string> {
+export async function resolveArchiveOwnedPath(
+  cwd: string,
+  relPath: string,
+): Promise<OwnedReadPath> {
   try {
-    return await resolveSymlinkFreeProjectPath(cwd, relPath);
+    return brandOwnedRead(await resolveSymlinkFreeProjectPath(cwd, relPath));
   } catch (err) {
     mapArchiveOwnershipError(err);
   }
 }
 
-export function resolveArchiveOwnedPathSync(cwd: string, relPath: string): string {
+export function resolveArchiveOwnedPathSync(
+  cwd: string,
+  relPath: string,
+): OwnedReadPath {
   try {
-    return resolveSymlinkFreeProjectPathSync(cwd, relPath);
+    return brandOwnedRead(resolveSymlinkFreeProjectPathSync(cwd, relPath));
   } catch (err) {
     mapArchiveOwnershipError(err);
   }
@@ -164,12 +177,22 @@ export function archiveDeleteIntentPath(cwd: string): string {
  * model the cross-bundle uniqueness rule already covers). `idsHash16` is hex from a
  * trusted sha256; never an external path component.
  */
-export function archiveBundlePath(cwd: string, kind: string, memberIdsSha256: string): string {
+export function archiveBundlePath(
+  cwd: string,
+  kind: string,
+  memberIdsSha256: string,
+): string {
   return join(cwd, archiveBundleRelPath(kind, memberIdsSha256));
 }
 
-export function archiveBundleRelPath(kind: string, memberIdsSha256: string): string {
-  return relPath([...ARCHIVE_BUNDLES_DIR_SEGMENTS, `${kind}-${memberIdsSha256.slice(0, 16)}.json`]);
+export function archiveBundleRelPath(
+  kind: string,
+  memberIdsSha256: string,
+): string {
+  return relPath([
+    ...ARCHIVE_BUNDLES_DIR_SEGMENTS,
+    `${kind}-${memberIdsSha256.slice(0, 16)}.json`,
+  ]);
 }
 
 /**
@@ -189,5 +212,8 @@ export function decisionRecordPath(cwd: string, canonicalRef: string): string {
 
 export function decisionRecordRelPath(canonicalRef: string): string {
   const stem = posix.basename(canonicalRef, ".md");
-  return relPath([...ARCHIVE_DECISIONS_DIR_SEGMENTS, `${stem}-${pathHash8(canonicalRef)}.json`]);
+  return relPath([
+    ...ARCHIVE_DECISIONS_DIR_SEGMENTS,
+    `${stem}-${pathHash8(canonicalRef)}.json`,
+  ]);
 }

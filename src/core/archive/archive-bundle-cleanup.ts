@@ -1,10 +1,18 @@
-import { readdir, readFile, unlink } from "../project-fs/raw-internal.ts";
+import {
+  listOwnedDirents,
+  readOwnedText,
+  unlinkOwned,
+} from "../project-fs/operations.ts";
+import type { OwnedReadPath } from "../project-fs/branded-paths-internal.ts";
 import { basename, join } from "node:path";
 import type { ArchiveBundleKind } from "../schemas/archive-bundle.ts";
 import { loadArchiveBundles } from "./archive-bundle-loader.ts";
 import { bindBundleMember } from "./archive-bundle-binding.ts";
 import { validateEventPackTier1 } from "./event-pack-reader.ts";
-import { reconcileLooseAndBundle, type BundleMemberIndex } from "./archive-bundle-index.ts";
+import {
+  reconcileLooseAndBundle,
+  type BundleMemberIndex,
+} from "./archive-bundle-index.ts";
 import {
   buildArchiveBundle,
   BundleWriteError,
@@ -84,7 +92,11 @@ export type ArchiveDeleteSkipReason =
   | "bundle_stale" // loose bytes ≠ the bundle member's bytes → not safely captured
   | "unlink_failed"; // a non-ENOENT failure during the unlink itself
 
-export type ArchiveDeleteSkip = { id: string; reason: ArchiveDeleteSkipReason; detail?: string };
+export type ArchiveDeleteSkip = {
+  id: string;
+  reason: ArchiveDeleteSkipReason;
+  detail?: string;
+};
 
 export type ArchiveDeleteOutcome = {
   kind: ArchiveBundleKind;
@@ -101,7 +113,7 @@ export type ArchiveDeleteOutcome = {
 };
 
 type DeleteVerdict =
-  | { disposition: "delete"; abs: string }
+  | { disposition: "delete"; abs: OwnedReadPath }
   | { disposition: "vanished" }
   | { disposition: "skip"; reason: ArchiveDeleteSkipReason; detail?: string };
 
@@ -115,7 +127,7 @@ async function evaluateRecordDeleteGate(
   index: BundleMemberIndex,
 ): Promise<DeleteVerdict> {
   const id = basename(name, ".json");
-  let abs: string;
+  let abs: OwnedReadPath;
   try {
     abs = await resolveArchiveOwnedPath(cwd, looseRelPath(kind, name));
   } catch {
@@ -123,10 +135,15 @@ async function evaluateRecordDeleteGate(
   }
   let looseBytes: string;
   try {
-    looseBytes = await readFile(abs, "utf8");
+    looseBytes = await readOwnedText(abs);
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return { disposition: "vanished" };
-    return { disposition: "skip", reason: "unreadable", detail: (err as Error).message };
+    if ((err as NodeJS.ErrnoException).code === "ENOENT")
+      return { disposition: "vanished" };
+    return {
+      disposition: "skip",
+      reason: "unreadable",
+      detail: (err as Error).message,
+    };
   }
   const entry = index.get(kind)?.get(id) ?? null;
   if (!entry) return { disposition: "skip", reason: "not_in_bundle" };
@@ -135,15 +152,28 @@ async function evaluateRecordDeleteGate(
   // — bindBundleMember only checks schema + canonical + id, so a byte-identical pair of
   // semantically-invalid event-pack bytes must NOT be a deletion authority.
   try {
-    bindBundleMember(kind, { id, sha256: entry.sha256, bytes: entry.bytes }, ARCHIVE_BUNDLE_STORE_LABEL);
-    if (kind === "event_pack") validateEventPackTier1(id, entry.bytes, ARCHIVE_BUNDLE_STORE_LABEL);
+    bindBundleMember(
+      kind,
+      { id, sha256: entry.sha256, bytes: entry.bytes },
+      ARCHIVE_BUNDLE_STORE_LABEL,
+    );
+    if (kind === "event_pack")
+      validateEventPackTier1(id, entry.bytes, ARCHIVE_BUNDLE_STORE_LABEL);
   } catch (err) {
-    return { disposition: "skip", reason: "bundle_member_invalid", detail: (err as Error).message };
+    return {
+      disposition: "skip",
+      reason: "bundle_member_invalid",
+      detail: (err as Error).message,
+    };
   }
   try {
     reconcileLooseAndBundle(id, looseBytes, entry, ARCHIVE_BUNDLE_STORE_LABEL);
   } catch (err) {
-    return { disposition: "skip", reason: "bundle_stale", detail: (err as Error).message };
+    return {
+      disposition: "skip",
+      reason: "bundle_stale",
+      detail: (err as Error).message,
+    };
   }
   return { disposition: "delete", abs };
 }
@@ -176,11 +206,21 @@ export async function deleteLooseCoveredByBundle(
   const dir = await resolveArchiveOwnedPath(cwd, looseRelDirFor(kind));
   let names: string[];
   try {
-    const dirents = await readdir(dir, { withFileTypes: true });
-    names = dirents.filter((e) => e.isFile() && e.name.endsWith(".json")).map((e) => e.name).sort();
+    const dirents = await listOwnedDirents(dir);
+    names = dirents
+      .filter(e => e.isFile() && e.name.endsWith(".json"))
+      .map(e => e.name)
+      .sort();
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-      return { kind, deleted: [], vanished: [], skipped: [], partial_applied: false, remaining_loose: 0 };
+      return {
+        kind,
+        deleted: [],
+        vanished: [],
+        skipped: [],
+        partial_applied: false,
+        remaining_loose: 0,
+      };
     }
     throw err;
   }
@@ -202,24 +242,38 @@ export async function deleteLooseCoveredByBundle(
     }
     if (hooks.beforeUnlink) await hooks.beforeUnlink(id);
     try {
-      await unlink(verdict.abs);
+      await unlinkOwned(verdict.abs);
       deleted.push(id);
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") vanished.push(id);
-      else skipped.push({ id, reason: "unlink_failed", detail: (err as Error).message });
+      else
+        skipped.push({
+          id,
+          reason: "unlink_failed",
+          detail: (err as Error).message,
+        });
     }
   }
 
   // Reconcile: re-enumerate present loose records — the survivors (kept = not deleted).
   let remaining = 0;
   try {
-    const after = await readdir(dir, { withFileTypes: true });
-    remaining = after.filter((e) => e.isFile() && e.name.endsWith(".json")).length;
+    const after = await listOwnedDirents(dir);
+    remaining = after.filter(
+      e => e.isFile() && e.name.endsWith(".json"),
+    ).length;
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
   }
 
-  return { kind, deleted, vanished, skipped, partial_applied: deleted.length > 0, remaining_loose: remaining };
+  return {
+    kind,
+    deleted,
+    vanished,
+    skipped,
+    partial_applied: deleted.length > 0,
+    remaining_loose: remaining,
+  };
 }
 
 export type CompactArchivePlan = {
@@ -291,24 +345,46 @@ type LooseDisposition =
  * candidate is actually adopted this run is decided globally in {@link buildCompactionPlan}
  * (the in-place supersede is only safe as a pure same-id-set replace of a single bundle).
  */
-function classifyLooseMember(index: BundleMemberIndex, kind: ArchiveBundleKind, m: LooseMember): LooseDisposition {
+function classifyLooseMember(
+  index: BundleMemberIndex,
+  kind: ArchiveBundleKind,
+  m: LooseMember,
+): LooseDisposition {
   const entry = index.get(kind)?.get(m.id) ?? null;
   if (entry == null) return { action: "bundle" };
   // The covering bundle member must itself be a valid authority (Tier-2 self-bind, + event_pack
   // Tier-1) — mirror the delete gate so the dry-run cannot promise an action the gate rejects.
   try {
-    bindBundleMember(kind, { id: m.id, sha256: entry.sha256, bytes: entry.bytes }, ARCHIVE_BUNDLE_STORE_LABEL);
-    if (kind === "event_pack") validateEventPackTier1(m.id, entry.bytes, ARCHIVE_BUNDLE_STORE_LABEL);
+    bindBundleMember(
+      kind,
+      { id: m.id, sha256: entry.sha256, bytes: entry.bytes },
+      ARCHIVE_BUNDLE_STORE_LABEL,
+    );
+    if (kind === "event_pack")
+      validateEventPackTier1(m.id, entry.bytes, ARCHIVE_BUNDLE_STORE_LABEL);
   } catch (err) {
-    return { action: "skip", reason: "bundle_member_invalid", detail: (err as Error).message };
+    return {
+      action: "skip",
+      reason: "bundle_member_invalid",
+      detail: (err as Error).message,
+    };
   }
   if (entry.bytes === m.bytes) return { action: "delete" };
   // DIVERGING → supersession candidate. The fresh loose must be foldable to adopt it.
   try {
-    bindBundleMember(kind, { id: m.id, sha256: sha256Hex(m.bytes), bytes: m.bytes }, "loose record");
-    if (kind === "event_pack") validateEventPackTier1(m.id, m.bytes, "loose record");
+    bindBundleMember(
+      kind,
+      { id: m.id, sha256: sha256Hex(m.bytes), bytes: m.bytes },
+      "loose record",
+    );
+    if (kind === "event_pack")
+      validateEventPackTier1(m.id, m.bytes, "loose record");
   } catch (err) {
-    return { action: "skip", reason: "bundle_stale", detail: `fresh loose not foldable: ${(err as Error).message}` };
+    return {
+      action: "skip",
+      reason: "bundle_stale",
+      detail: `fresh loose not foldable: ${(err as Error).message}`,
+    };
   }
   return { action: "supersede" };
 }
@@ -335,7 +411,10 @@ type CompactionPlan = CompactArchivePlan & {
  * retires + converges, so a later run (single bundle, nothing to fold) adopts them. STRICT
  * load — a corrupt store throws (the same fault the write path fails closed on).
  */
-async function buildCompactionPlan(cwd: string, kind: ArchiveBundleKind): Promise<CompactionPlan> {
+async function buildCompactionPlan(
+  cwd: string,
+  kind: ArchiveBundleKind,
+): Promise<CompactionPlan> {
   const { index, bundles } = loadArchiveBundles(cwd);
   const loose = await enumerateLooseMembers(cwd, kind);
 
@@ -357,11 +436,14 @@ async function buildCompactionPlan(cwd: string, kind: ArchiveBundleKind): Promis
   // atomic in-place replace with no other bundle to conflict. A misnamed/legacy single bundle
   // (not at its content address) would instead make the consolidated write CREATE at the content
   // address while the old file survives → conflict; defer it (the loose stays as bundle_stale).
-  const kindBundles = bundles.filter((b) => b.loaded.kind === kind);
+  const kindBundles = bundles.filter(b => b.loaded.kind === kind);
   const only = kindBundles.length === 1 ? kindBundles[0] : undefined;
   let canAdopt = false;
   if (only && would_bundle.length === 0) {
-    const caPath = archiveBundleRelPath(kind, computeMemberIdsSha256(only.loaded.members.map((m) => m.id)));
+    const caPath = archiveBundleRelPath(
+      kind,
+      computeMemberIdsSha256(only.loaded.members.map(m => m.id)),
+    );
     canAdopt = only.file === join("bundles", basename(caPath));
   }
   const would_supersede: string[] = [];
@@ -372,7 +454,8 @@ async function buildCompactionPlan(cwd: string, kind: ArchiveBundleKind): Promis
       would_skip.push({
         id,
         reason: "bundle_stale",
-        detail: "supersede deferred: consolidate/retire to a single bundle (and fold pending loose) first",
+        detail:
+          "supersede deferred: consolidate/retire to a single bundle (and fold pending loose) first",
       });
     }
   }
@@ -390,27 +473,41 @@ async function buildCompactionPlan(cwd: string, kind: ArchiveBundleKind): Promis
       byId.set(m.id, m.bytes); // fold a new record
     }
   }
-  const consolidated_members: LooseMember[] = [...byId].map(([id, bytes]) => ({ id, bytes }));
+  const consolidated_members: LooseMember[] = [...byId].map(([id, bytes]) => ({
+    id,
+    bytes,
+  }));
 
   // BUILD the exact consolidated bundle the write path would, so the dry-run predicts BUILD
   // faults read-only (a non-canonical / Tier-1-invalid member throws BundleWriteError "build").
   let would_retire_bundles: string[] = [];
   if (consolidated_members.length > 0) {
     const bundle = buildArchiveBundle(kind, consolidated_members);
-    const absPath = await resolveArchiveOwnedPath(cwd, archiveBundleRelPath(kind, bundle.member_ids_sha256));
+    const absPath = await resolveArchiveOwnedPath(
+      cwd,
+      archiveBundleRelPath(kind, bundle.member_ids_sha256),
+    );
     const consolidatedFile = join("bundles", basename(absPath));
     let existingBytes: string | null = null;
     try {
-      existingBytes = await readFile(absPath, "utf8");
+      existingBytes = await readOwnedText(absPath);
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
-        throw new BundleWriteError("write_bundle", false, `existing bundle unreadable: ${(err as Error).message}`);
+        throw new BundleWriteError(
+          "write_bundle",
+          false,
+          `existing bundle unreadable: ${(err as Error).message}`,
+        );
       }
     }
     // WRITE-conflict prediction: ONLY the non-adoption (create) path fails closed on a divergence
     // (the #467 guard — a non-canonical wrapper loadArchiveBundles tolerates must not be silently
     // overwritten). With adoption the write SUPERSEDES, so a divergence is INTENDED, not a conflict.
-    if (!has_adoption && existingBytes !== null && existingBytes !== serializeArchiveBundle(bundle)) {
+    if (
+      !has_adoption &&
+      existingBytes !== null &&
+      existingBytes !== serializeArchiveBundle(bundle)
+    ) {
       throw new BundleWriteError(
         "write_bundle",
         false,
@@ -418,8 +515,8 @@ async function buildCompactionPlan(cwd: string, kind: ArchiveBundleKind): Promis
       );
     }
     would_retire_bundles = bundles
-      .filter((b) => b.loaded.kind === kind && b.file !== consolidatedFile)
-      .map((b) => b.file);
+      .filter(b => b.loaded.kind === kind && b.file !== consolidatedFile)
+      .map(b => b.file);
   }
 
   return {
@@ -449,7 +546,7 @@ export async function retireSupersededBundles(
   keepFile: string,
 ): Promise<string[]> {
   const { bundles } = loadArchiveBundles(cwd);
-  const keep = bundles.find((b) => b.file === keepFile && b.loaded.kind === kind);
+  const keep = bundles.find(b => b.file === keepFile && b.loaded.kind === kind);
   if (!keep) {
     throw new BundleWriteError(
       "verify_bundle",
@@ -457,21 +554,28 @@ export async function retireSupersededBundles(
       `consolidated bundle ${keepFile} is not present at retire time — refusing to retire on a vanished authority`,
     );
   }
-  const keepById = new Map(keep.loaded.members.map((m) => [m.id, m.bytes] as const));
+  const keepById = new Map(
+    keep.loaded.members.map(m => [m.id, m.bytes] as const),
+  );
 
   const retired: string[] = [];
   for (const { file, loaded } of bundles) {
     if (loaded.kind !== kind || file === keepFile) continue;
-    const allCovered = loaded.members.every((m) => keepById.get(m.id) === m.bytes);
+    const allCovered = loaded.members.every(
+      m => keepById.get(m.id) === m.bytes,
+    );
     if (!allCovered) continue; // fail-closed: keep a bundle the keep bundle doesn't fully cover
-    let abs: string;
+    let abs: OwnedReadPath;
     try {
-      abs = await resolveArchiveOwnedPath(cwd, `${archiveBundlesRelDir()}/${basename(file)}`);
+      abs = await resolveArchiveOwnedPath(
+        cwd,
+        `${archiveBundlesRelDir()}/${basename(file)}`,
+      );
     } catch {
       continue; // unsafe path → never unlink
     }
     try {
-      await unlink(abs);
+      await unlinkOwned(abs);
       retired.push(file);
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") continue; // already gone — fine

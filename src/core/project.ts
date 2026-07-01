@@ -3,18 +3,18 @@
 // agent-resolution contract (codes, messages, precedence) defined in one place;
 // the per-function doc below is the contract of record.
 
-import { readFile } from "./project-fs/raw-internal.ts";
+import {
+  resolveProjectConfigReadPath,
+  readOwnedText,
+} from "./project-fs/index.ts";
 import { parse as parseYaml } from "yaml";
 import { Project } from "./schemas/project.ts";
-import { resolveProjectConfigPath } from "./project-config-path.ts";
 
 /** Load and validate `.code-pact/project.yaml`. */
 export async function loadProject(cwd: string): Promise<Project> {
-  let path: string;
   let raw: string;
   try {
-    path = await resolveProjectConfigPath(cwd);
-    raw = await readFile(path, "utf8");
+    raw = await readOwnedText(await resolveProjectConfigReadPath(cwd));
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     const detail =

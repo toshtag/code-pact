@@ -1,4 +1,4 @@
-import { readFile } from "../project-fs/raw-internal.ts";
+import { readOwnedText } from "../project-fs/index.ts";
 import { DecisionStateRecord } from "../schemas/decision-state-record.ts";
 import { decisionRecordRelPath, resolveArchiveOwnedPath } from "./paths.ts";
 import { loadArchiveBundles } from "./archive-bundle-loader.ts";
@@ -51,11 +51,15 @@ export async function readLooseDecisionRecordRaw(
   cwd: string,
   canonicalRef: string,
 ): Promise<RawLooseRecord> {
-  const path = await resolveArchiveOwnedPath(cwd, decisionRecordRelPath(canonicalRef));
+  const path = await resolveArchiveOwnedPath(
+    cwd,
+    decisionRecordRelPath(canonicalRef),
+  );
   try {
-    return { kind: "present", bytes: await readFile(path, "utf8") };
+    return { kind: "present", bytes: await readOwnedText(path) };
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { kind: "absent" };
+    if ((error as NodeJS.ErrnoException).code === "ENOENT")
+      return { kind: "absent" };
     return { kind: "invalid", error };
   }
 }
@@ -106,10 +110,13 @@ export async function resolveArchiveDecisionRecord(
   } catch (error) {
     return { kind: "invalid", error };
   }
-  if (resolved.kind === "invalid") return { kind: "invalid", error: resolved.error };
+  if (resolved.kind === "invalid")
+    return { kind: "invalid", error: resolved.error };
   if (resolved.kind === "absent") return { kind: "absent" };
   try {
-    const record = DecisionStateRecord.parse(JSON.parse(resolved.bytes) as unknown);
+    const record = DecisionStateRecord.parse(
+      JSON.parse(resolved.bytes) as unknown,
+    );
     return { kind: "valid", record };
   } catch (error) {
     return { kind: "invalid", error };

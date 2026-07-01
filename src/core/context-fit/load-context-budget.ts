@@ -23,7 +23,10 @@
 //     profile sink a built-in fallback, this mode validates ONLY the
 //     `context_budget` key in isolation, not the whole AgentProfile.
 
-import { readFile } from "../project-fs/raw-internal.ts";
+import {
+  readOwnedText,
+  resolveAgentProfileReadPath,
+} from "../project-fs/index.ts";
 import { parse as parseYaml } from "yaml";
 import { Project } from "../schemas/project.ts";
 import { loadProject, resolveEnabledAgent } from "../project.ts";
@@ -67,7 +70,12 @@ export async function loadAgentContextBudget(
   const path = await resolveAgentProfilePath(cwd, agentName);
   let profileRaw: string;
   try {
-    profileRaw = await readFile(path, "utf8");
+    profileRaw = await readOwnedText(
+      await resolveAgentProfileReadPath(
+        cwd,
+        `.code-pact/agent-profiles/${agentName}.yaml`,
+      ),
+    );
   } catch {
     const err = new Error(`Agent profile for "${agentName}" not found.`);
     (err as NodeJS.ErrnoException).code = "AGENT_NOT_FOUND";
@@ -103,7 +111,10 @@ export async function loadAgentContextBudgetBestEffort(
   agent: string | undefined,
 ): Promise<ContextBudgetProfilesType | undefined> {
   // project.yaml unreadable/absent → no override (built-in fallback applies).
-  const projectRaw = await readProjectTextOrNull(cwd, ".code-pact/project.yaml");
+  const projectRaw = await readProjectTextOrNull(
+    cwd,
+    ".code-pact/project.yaml",
+  );
   if (projectRaw === null) return undefined;
   let project;
   try {
@@ -112,20 +123,19 @@ export async function loadAgentContextBudgetBestEffort(
     return undefined;
   }
   const agentName = agent ?? project.default_agent;
-  const ref = project.agents.find((a) => a.name === agentName);
+  const ref = project.agents.find(a => a.name === agentName);
   // Unconfigured or disabled agent → no override. (A standard name must not be
   // gated on an agent being present/enabled — that is the agent-less contract.)
   if (!ref || ref.enabled === false) return undefined;
 
-  let path: string;
-  try {
-    path = await resolveAgentProfilePath(cwd, agentName);
-  } catch {
-    return undefined;
-  }
   let profileRaw: string;
   try {
-    profileRaw = await readFile(path, "utf8");
+    profileRaw = await readOwnedText(
+      await resolveAgentProfileReadPath(
+        cwd,
+        `.code-pact/agent-profiles/${agentName}.yaml`,
+      ),
+    );
   } catch {
     return undefined; // missing profile file → fallback, never fatal.
   }

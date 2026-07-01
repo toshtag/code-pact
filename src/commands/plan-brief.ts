@@ -1,4 +1,7 @@
-import { readFile } from "../core/project-fs/raw-internal.ts";
+import {
+  readOwnedText,
+  resolveContainedReadPath,
+} from "../core/project-fs/index.ts";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { atomicWriteText } from "../io/atomic-text.ts";
@@ -6,7 +9,6 @@ import { Prompter } from "../lib/prompt.ts";
 import {
   assertSafeRelativePath,
   resolveSymlinkFreeProjectPath,
-  resolveWithinProject,
 } from "../core/path-safety.ts";
 import type { Locale } from "../i18n/index.ts";
 import { messages as messageCatalog } from "../i18n/index.ts";
@@ -110,9 +112,9 @@ export async function loadBriefFromFile(
 
   // fs-authority: containment-only
   // reason: explicit user-selected input path (--from-file)
-  let absPath: string;
+  let absPath;
   try {
-    absPath = await resolveWithinProject(cwd, relPath);
+    absPath = await resolveContainedReadPath(cwd, relPath);
   } catch (err) {
     throw new PlanBriefFromFileError(
       "unsafe_path",
@@ -122,7 +124,7 @@ export async function loadBriefFromFile(
   }
   let raw: string;
   try {
-    raw = await readFile(absPath, "utf8");
+    raw = await readOwnedText(absPath);
   } catch (err) {
     throw new PlanBriefFromFileError(
       "unreadable",
@@ -322,7 +324,9 @@ export async function runPlanBrief(
 
   if (!force) {
     try {
-      await readFile(briefPath);
+      await readOwnedText(
+        await resolveContainedReadPath(cwd, "design/brief.md"),
+      );
       return { path: briefPath, skipped: true };
     } catch {
       // file doesn't exist — proceed

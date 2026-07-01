@@ -1,5 +1,4 @@
-import { readFile } from "./project-fs/raw-internal.ts";
-import { resolveSymlinkFreeProjectPath } from "./path-safety.ts";
+import { resolveContainedReadPath, readOwnedText } from "./project-fs/index.ts";
 
 /**
  * Reads an OPTIONAL, project-owned text file. `relPath` is resolved through
@@ -22,7 +21,7 @@ export async function readProjectTextOrNull(
   relPath: string,
 ): Promise<string | null> {
   try {
-    return await readFile(await resolveSymlinkFreeProjectPath(cwd, relPath), "utf8");
+    return await readOwnedText(await resolveContainedReadPath(cwd, relPath));
   } catch {
     return null;
   }

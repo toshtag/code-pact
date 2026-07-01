@@ -1,7 +1,6 @@
-import { readFile } from "../project-fs/raw-internal.ts";
+import { readOwnedText, resolvePhaseReadPath } from "../project-fs/index.ts";
 import { parse as parseYaml } from "yaml";
 import { Phase } from "../schemas/phase.ts";
-import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
 
 // The single seam that reads one LIVE phase YAML file off disk and validates it
 // as a full `Phase`. This exact body used to be byte-duplicated across ~8
@@ -39,19 +38,9 @@ export async function loadPhase(cwd: string, path: string): Promise<Phase> {
   // refusal maps to CONFIG_ERROR (fail-closed; control-plane input, never
   // swallowed to null). A genuinely-missing (non-symlink) phase still throws RAW
   // ENOENT — the legitimate archived-fallback signal resolve-task keys on.
-  let abs: string;
-  try {
-    abs = await resolveSymlinkFreeProjectPath(cwd, path);
-  } catch (err) {
-    const e = new Error(
-      `Phase path "${path}" is not a safe owned project path: ${(err as Error).message}`,
-    );
-    (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
-    throw e;
-  }
   let raw: string;
   try {
-    raw = await readFile(abs, "utf8");
+    raw = await readOwnedText(await resolvePhaseReadPath(cwd, path));
   } catch (err) {
     // ENOENT stays RAW: a missing roadmap-referenced phase is the legitimate
     // archived-fallback signal (resolve-task keys on `code === "ENOENT"`). Any
@@ -59,7 +48,9 @@ export async function loadPhase(cwd: string, path: string): Promise<Phase> {
     // directory → EISDIR, an intermediate is a file → ENOTDIR, EACCES, …) is an
     // adversarial input → CONFIG_ERROR, not an uncoded exit-3 internal error.
     if ((err as NodeJS.ErrnoException).code === "ENOENT") throw err;
-    const e = new Error(`Phase at ${abs} cannot be read: ${(err as Error).message}`);
+    const e = new Error(
+      `Phase at ${path} cannot be read: ${(err as Error).message}`,
+    );
     (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
     throw e;
   }
@@ -67,7 +58,9 @@ export async function loadPhase(cwd: string, path: string): Promise<Phase> {
     return Phase.parse(parseYaml(raw) as unknown);
   } catch (err) {
     // Malformed YAML / schema violation on a project-controlled phase → structured.
-    const e = new Error(`Phase at ${abs} is malformed (YAML or schema): ${(err as Error).message}`);
+    const e = new Error(
+      `Phase at ${path} is malformed (YAML or schema): ${(err as Error).message}`,
+    );
     (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
     throw e;
   }

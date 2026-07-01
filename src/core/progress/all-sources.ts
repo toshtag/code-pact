@@ -1,9 +1,8 @@
-import { readFile } from "../project-fs/raw-internal.ts";
+import { readOwnedText, resolveProgressReadPath } from "../project-fs/index.ts";
 import { parse as parseYaml } from "yaml";
 import { ProgressLog, type ProgressEvent } from "../schemas/progress-event.ts";
 import { computeEventId } from "./event-id.ts";
 import { type LoadedEventFile, readEventFiles } from "./events-io.ts";
-import { resolveProgressPath } from "./io.ts";
 import {
   readEventPackFiles,
   readEventPackFilesLenient,
@@ -132,7 +131,9 @@ export function filterArchivedTaskLegacyConflicts(
 /** Read legacy `progress.yaml` events (ENOENT → empty); strict parse always. */
 async function readLegacyEvents(cwd: string): Promise<ProgressEvent[]> {
   try {
-    const raw = await readFile(await resolveProgressPath(cwd), "utf8");
+    const raw = await readOwnedText(
+      await resolveProgressReadPath(cwd, ".code-pact/state/progress.yaml"),
+    );
     return ProgressLog.parse(parseYaml(raw) as unknown).events;
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
@@ -176,7 +177,10 @@ export async function readPackSources(
     // that cannot be enumerated still throws — that is not a per-file issue.
     const { packs: validPacks, errors } = await readEventPackFilesLenient(cwd);
     for (const e of errors) {
-      issues.push({ code: "EVENT_PACK_INVALID", message: `event pack ${e.path}: ${e.message}` });
+      issues.push({
+        code: "EVENT_PACK_INVALID",
+        message: `event pack ${e.path}: ${e.message}`,
+      });
     }
     packs = validPacks;
   } else {
@@ -188,15 +192,23 @@ export async function readPackSources(
   for (const pack of packs) {
     let bindingIssues: EventPackBindingIssue[];
     try {
-      bindingIssues = await validateEventPackBinding(cwd, pack, looseById, cache);
+      bindingIssues = await validateEventPackBinding(
+        cwd,
+        pack,
+        looseById,
+        cache,
+      );
     } catch (err) {
       if (!lenient) throw err;
-      issues.push({ code: "EVENT_PACK_INVALID", message: (err as Error).message });
+      issues.push({
+        code: "EVENT_PACK_INVALID",
+        message: (err as Error).message,
+      });
       continue;
     }
     if (bindingIssues.length > 0) {
       const message = `event pack "${pack.phaseId}" failed snapshot binding: ${bindingIssues
-        .map((i) => i.message)
+        .map(i => i.message)
         .join("; ")}`;
       if (!lenient) throw progressSourceError("EVENT_PACK_INVALID", message);
       issues.push({ code: "EVENT_PACK_INVALID", message });
@@ -232,7 +244,11 @@ export async function durableIdsAndArchivedTasks(
   for (const f of pack.looseFiles) durableIds.add(f.id);
   for (const f of pack.validatedPackFiles) durableIds.add(f.id);
   const { taskIds: archivedTaskIds, skipped } = await readArchivedTaskIds(cwd);
-  return { durableIds, archivedTaskIds, archivedEnumerationComplete: skipped.length === 0 };
+  return {
+    durableIds,
+    archivedTaskIds,
+    archivedEnumerationComplete: skipped.length === 0,
+  };
 }
 
 export async function readAllProgressEventSources(
@@ -246,13 +262,14 @@ export async function readAllProgressEventSources(
   // Step 7: legacy split (archived-task conflict gate).
   const { durableIds, archivedTaskIds, archivedEnumerationComplete } =
     await durableIdsAndArchivedTasks(cwd, pack);
-  const { mergeableLegacyEvents, issues: legacyIssues } = filterArchivedTaskLegacyConflicts(
-    rawLegacyEvents,
-    durableIds,
-    archivedTaskIds,
-    opts.mode,
-    archivedEnumerationComplete,
-  );
+  const { mergeableLegacyEvents, issues: legacyIssues } =
+    filterArchivedTaskLegacyConflicts(
+      rawLegacyEvents,
+      durableIds,
+      archivedTaskIds,
+      opts.mode,
+      archivedEnumerationComplete,
+    );
   return {
     rawLegacyEvents,
     mergeableLegacyEvents,

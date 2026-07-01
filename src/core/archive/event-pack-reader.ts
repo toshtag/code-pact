@@ -1,14 +1,26 @@
-import { readdir, readFile } from "../project-fs/raw-internal.ts";
+import { listOwned, readOwnedText } from "../project-fs/operations.ts";
 import { basename } from "node:path";
 import { EventPack, type PackedEvent } from "../schemas/event-pack.ts";
 import type { LoadedEventFile } from "../progress/events-io.ts";
 import { parseEventFileName } from "../progress/events-io.ts";
-import { atCompact, computeEventId, eventFileName } from "../progress/event-id.ts";
-import { archiveEventPacksRelDir, eventPackRelPath, resolveArchiveOwnedPath, sha256Hex } from "./paths.ts";
+import {
+  atCompact,
+  computeEventId,
+  eventFileName,
+} from "../progress/event-id.ts";
+import {
+  archiveEventPacksRelDir,
+  eventPackRelPath,
+  resolveArchiveOwnedPath,
+  sha256Hex,
+} from "./paths.ts";
 import { loadArchiveBundles } from "./archive-bundle-loader.ts";
 import { bindBundleMember } from "./archive-bundle-binding.ts";
 import type { BundleIndexEntry } from "./archive-bundle-index.ts";
-import { resolveArchiveRecordBytes, type RawLooseRecord } from "./resolve-archive-record.ts";
+import {
+  resolveArchiveRecordBytes,
+  type RawLooseRecord,
+} from "./resolve-archive-record.ts";
 import { readPendingDeleteFilters } from "./delete-intent-journal.ts";
 
 // ---------------------------------------------------------------------------
@@ -42,8 +54,13 @@ export type LoadedEventPack = {
  * through. `EVENT_PACK_INVALID` covers schema / integrity / per-entry / order /
  * duplicate failures — a strict reader throws it, a lenient reader collects it.
  */
-export function eventPackError(message: string, file: string): NodeJS.ErrnoException {
-  const err = new Error(`Event pack ${file}: ${message}`) as NodeJS.ErrnoException;
+export function eventPackError(
+  message: string,
+  file: string,
+): NodeJS.ErrnoException {
+  const err = new Error(
+    `Event pack ${file}: ${message}`,
+  ) as NodeJS.ErrnoException;
   err.code = "EVENT_PACK_INVALID";
   return err;
 }
@@ -56,14 +73,24 @@ export function eventPackError(message: string, file: string): NodeJS.ErrnoExcep
  * pins the bodies. This decides pack-vs-loose state identity for the compaction
  * idempotency table; it is NOT independent tamper-detection.
  */
-export function computeEventIdsSha256(entries: readonly LoadedEventFile[]): string {
+export function computeEventIdsSha256(
+  entries: readonly LoadedEventFile[],
+): string {
   const ids = [...entries]
     .sort((a, b) => {
       const aAt = atCompact(a.event.at);
       const bAt = atCompact(b.event.at);
-      return aAt < bAt ? -1 : aAt > bAt ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+      return aAt < bAt
+        ? -1
+        : aAt > bAt
+          ? 1
+          : a.id < b.id
+            ? -1
+            : a.id > b.id
+              ? 1
+              : 0;
     })
-    .map((e) => e.id);
+    .map(e => e.id);
   return sha256Hex(JSON.stringify(ids));
 }
 
@@ -82,10 +109,16 @@ export function computeEventIdsSha256(entries: readonly LoadedEventFile[]): stri
  * Returns the event as a `LoadedEventFile`, so packed events flow through
  * `mergeProgressStreams` identically to loose files.
  */
-export function validatePackedEvent(entry: PackedEvent, packFile: string): LoadedEventFile {
+export function validatePackedEvent(
+  entry: PackedEvent,
+  packFile: string,
+): LoadedEventFile {
   const name = parseEventFileName(entry.file);
   if (!name) {
-    throw eventPackError(`entry.file "${entry.file}" is not a valid event-file basename`, packFile);
+    throw eventPackError(
+      `entry.file "${entry.file}" is not a valid event-file basename`,
+      packFile,
+    );
   }
   const event = entry.event;
   const computedId = computeEventId(event);
@@ -138,7 +171,10 @@ export function validateEventPackTier1(
   }
   const result = EventPack.safeParse(parsedJson);
   if (!result.success) {
-    throw eventPackError(`failed schema validation: ${result.error.message}`, packFile);
+    throw eventPackError(
+      `failed schema validation: ${result.error.message}`,
+      packFile,
+    );
   }
   const pack = result.data;
   if (pack.phase_id !== fileStem) {
@@ -202,7 +238,10 @@ const ARCHIVE_BUNDLE_STORE_LABEL = ".code-pact/state/archive/bundles";
  * guarantee (`ARCHIVE_BUNDLE_INVALID` on non-canonical bytes). Used only for a phase
  * whose LOOSE pack is absent (loose-wins).
  */
-function loadEventPackFromBundleMember(phaseId: string, entry: BundleIndexEntry): LoadedEventPack {
+function loadEventPackFromBundleMember(
+  phaseId: string,
+  entry: BundleIndexEntry,
+): LoadedEventPack {
   const loaded = validateEventPackTier1(
     phaseId,
     entry.bytes,
@@ -239,11 +278,13 @@ function bundleOnlyEventPackEntries(
  * corrupt bundle (same all-or-nothing fail-closed policy as `readEventFiles`); a
  * lenient caller catches and collects. Tier 2 binding is NOT run here.
  */
-export async function readEventPackFiles(cwd: string): Promise<LoadedEventPack[]> {
+export async function readEventPackFiles(
+  cwd: string,
+): Promise<LoadedEventPack[]> {
   const dir = await resolveArchiveOwnedPath(cwd, archiveEventPacksRelDir());
   let names: string[];
   try {
-    names = await readdir(dir);
+    names = await listOwned(dir);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") names = [];
     else throw err;
@@ -251,7 +292,8 @@ export async function readEventPackFiles(cwd: string): Promise<LoadedEventPack[]
   // A pack named in a pending LOOSE-pair intent is LOGICALLY ABSENT everywhere; a pack
   // named in a pending BUNDLE-pair intent is absent from the BUNDLE side only (its loose
   // copy, if any, still resolves). Read-only; the journal is untouched.
-  const { looseAbsentIds, bundleAbsentIds } = await readPendingDeleteFilters(cwd);
+  const { looseAbsentIds, bundleAbsentIds } =
+    await readPendingDeleteFilters(cwd);
   const out: LoadedEventPack[] = [];
   const looseStems = new Set<string>();
   for (const name of names.sort()) {
@@ -259,13 +301,19 @@ export async function readEventPackFiles(cwd: string): Promise<LoadedEventPack[]
     const fileStem = basename(name, ".json");
     if (looseAbsentIds.has(fileStem)) continue; // loose-pair mid-deletion → absent
     looseStems.add(fileStem);
-    const path = await resolveArchiveOwnedPath(cwd, `${archiveEventPacksRelDir()}/${name}`);
-    const raw = await readFile(path, "utf8");
+    const path = await resolveArchiveOwnedPath(
+      cwd,
+      `${archiveEventPacksRelDir()}/${name}`,
+    );
+    const raw = await readOwnedText(path);
     out.push(validateEventPackTier1(fileStem, raw, path));
   }
   // Bundle members for phases whose loose pack is gone (strict: throws on a bad bundle).
   const index = loadArchiveBundles(cwd).index;
-  for (const [phaseId, entry] of bundleOnlyEventPackEntries(index, looseStems)) {
+  for (const [phaseId, entry] of bundleOnlyEventPackEntries(
+    index,
+    looseStems,
+  )) {
     if (looseAbsentIds.has(phaseId) || bundleAbsentIds.has(phaseId)) continue; // mid-deletion pair → bundle member absent
     out.push(loadEventPackFromBundleMember(phaseId, entry));
   }
@@ -273,11 +321,20 @@ export async function readEventPackFiles(cwd: string): Promise<LoadedEventPack[]
 }
 
 /** Read the LOOSE event-pack file's raw bytes. ENOENT → absent; other error → invalid. */
-async function readLooseEventPackRaw(cwd: string, phaseId: string): Promise<RawLooseRecord> {
+async function readLooseEventPackRaw(
+  cwd: string,
+  phaseId: string,
+): Promise<RawLooseRecord> {
   try {
-    return { kind: "present", bytes: await readFile(await resolveArchiveOwnedPath(cwd, eventPackRelPath(phaseId)), "utf8") };
+    return {
+      kind: "present",
+      bytes: await readOwnedText(
+        await resolveArchiveOwnedPath(cwd, eventPackRelPath(phaseId)),
+      ),
+    };
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return { kind: "absent" };
+    if ((err as NodeJS.ErrnoException).code === "ENOENT")
+      return { kind: "absent" };
     return { kind: "invalid", error: err };
   }
 }
@@ -289,10 +346,14 @@ async function readLooseEventPackRaw(cwd: string, phaseId: string): Promise<RawL
  *  it as absent (which would regenerate a subset pack). `absent` when neither store has
  *  it; `invalid` on a bundle-integrity fault or an unreadable loose file. The CALLER
  *  still runs `validateEventPackTier1` on the bytes (full Tier-1). */
-export async function resolveEventPackRaw(cwd: string, phaseId: string): Promise<RawLooseRecord> {
+export async function resolveEventPackRaw(
+  cwd: string,
+  phaseId: string,
+): Promise<RawLooseRecord> {
   let resolved;
   try {
-    const { looseAbsentIds, bundleAbsentIds } = await readPendingDeleteFilters(cwd); // mid-deletion pair → logically absent (bundle-pair: bundle side only)
+    const { looseAbsentIds, bundleAbsentIds } =
+      await readPendingDeleteFilters(cwd); // mid-deletion pair → logically absent (bundle-pair: bundle side only)
     resolved = await resolveArchiveRecordBytes({
       kind: "event_pack",
       id: phaseId,
@@ -306,12 +367,17 @@ export async function resolveEventPackRaw(cwd: string, phaseId: string): Promise
     return { kind: "invalid", error };
   }
   if (resolved.kind === "absent") return { kind: "absent" };
-  if (resolved.kind === "invalid") return { kind: "invalid", error: resolved.error };
+  if (resolved.kind === "invalid")
+    return { kind: "invalid", error: resolved.error };
   return { kind: "present", bytes: resolved.bytes };
 }
 
 /** One pack that failed Tier-1 (or read), for the per-file lenient reader. */
-export type EventPackReadError = { phaseId: string; path: string; message: string };
+export type EventPackReadError = {
+  phaseId: string;
+  path: string;
+  message: string;
+};
 
 /**
  * PER-FILE lenient read of every event pack: a single invalid/unreadable pack is
@@ -328,12 +394,13 @@ export async function readEventPackFilesLenient(
   const dir = await resolveArchiveOwnedPath(cwd, archiveEventPacksRelDir());
   let names: string[];
   try {
-    names = await readdir(dir);
+    names = await listOwned(dir);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") names = [];
     else throw err; // a dir that cannot be enumerated is not a per-file issue
   }
-  const { looseAbsentIds, bundleAbsentIds } = await readPendingDeleteFilters(cwd); // mid-deletion pairs → logically absent
+  const { looseAbsentIds, bundleAbsentIds } =
+    await readPendingDeleteFilters(cwd); // mid-deletion pairs → logically absent
   const packs: LoadedEventPack[] = [];
   const errors: EventPackReadError[] = [];
   const looseStems = new Set<string>();
@@ -342,9 +409,12 @@ export async function readEventPackFilesLenient(
     const fileStem = basename(name, ".json");
     if (looseAbsentIds.has(fileStem)) continue; // loose-pair mid-deletion → absent
     looseStems.add(fileStem);
-    const path = await resolveArchiveOwnedPath(cwd, `${archiveEventPacksRelDir()}/${name}`);
+    const path = await resolveArchiveOwnedPath(
+      cwd,
+      `${archiveEventPacksRelDir()}/${name}`,
+    );
     try {
-      const raw = await readFile(path, "utf8");
+      const raw = await readOwnedText(path);
       packs.push(validateEventPackTier1(fileStem, raw, path));
     } catch (err) {
       errors.push({ phaseId: fileStem, path, message: (err as Error).message });
@@ -364,7 +434,10 @@ export async function readEventPackFilesLenient(
     });
   }
   if (index) {
-    for (const [phaseId, entry] of bundleOnlyEventPackEntries(index, looseStems)) {
+    for (const [phaseId, entry] of bundleOnlyEventPackEntries(
+      index,
+      looseStems,
+    )) {
       if (looseAbsentIds.has(phaseId) || bundleAbsentIds.has(phaseId)) continue; // mid-deletion pair → bundle member absent
       try {
         packs.push(loadEventPackFromBundleMember(phaseId, entry));

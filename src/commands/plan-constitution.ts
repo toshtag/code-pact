@@ -1,4 +1,8 @@
-import { readFile } from "../core/project-fs/raw-internal.ts";
+import {
+  readOwnedText,
+  resolveContainedReadPath,
+  resolveProjectConfigReadPath,
+} from "../core/project-fs/index.ts";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { atomicWriteText } from "../io/atomic-text.ts";
@@ -6,10 +10,8 @@ import { Prompter } from "../lib/prompt.ts";
 import {
   assertSafeRelativePath,
   resolveSymlinkFreeProjectPath,
-  resolveWithinProject,
 } from "../core/path-safety.ts";
 import { Project } from "../core/schemas/project.ts";
-import { resolveProjectConfigPath } from "../core/project-config-path.ts";
 import type { LocaleCode } from "../core/schemas/locale.ts";
 import { isPristineInitConstitution } from "../core/constitution.ts";
 import type { Locale } from "../i18n/index.ts";
@@ -129,9 +131,9 @@ export async function loadConstitutionFromFile(
 
   // fs-authority: containment-only
   // reason: explicit user-selected input path (--from-file)
-  let absPath: string;
+  let absPath;
   try {
-    absPath = await resolveWithinProject(cwd, relPath);
+    absPath = await resolveContainedReadPath(cwd, relPath);
   } catch (err) {
     throw new PlanConstitutionFromFileError(
       "unsafe_path",
@@ -141,7 +143,7 @@ export async function loadConstitutionFromFile(
   }
   let raw: string;
   try {
-    raw = await readFile(absPath, "utf8");
+    raw = await readOwnedText(absPath);
   } catch (err) {
     throw new PlanConstitutionFromFileError(
       "unreadable",
@@ -304,7 +306,7 @@ async function existingIsPristinePlaceholder(
   existing: string,
 ): Promise<boolean> {
   try {
-    const raw = await readFile(await resolveProjectConfigPath(cwd), "utf8");
+    const raw = await readOwnedText(await resolveProjectConfigReadPath(cwd));
     const project = Project.parse(parseYaml(raw) as unknown);
     const localeCode: LocaleCode =
       typeof project.locale === "string"
@@ -341,7 +343,9 @@ export async function runPlanConstitution(
   if (!force) {
     let existing: string | null = null;
     try {
-      existing = await readFile(constitutionPath, "utf8");
+      existing = await readOwnedText(
+        await resolveContainedReadPath(cwd, "design/constitution.md"),
+      );
     } catch {
       existing = null; // file doesn't exist — proceed to generate
     }

@@ -1,4 +1,10 @@
-import { readFile, stat } from "../core/project-fs/raw-internal.ts";
+import {
+  readOwnedText,
+  statOwned,
+  resolveProjectConfigReadPath,
+  resolveContainedReadPath,
+  type OwnedReadPath,
+} from "../core/project-fs/index.ts";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import type { AgentProfile } from "../core/schemas/agent-profile.ts";
@@ -8,8 +14,6 @@ import { adapterRegistry } from "../core/adapters/index.ts";
 import { classifyManifestFileForRead } from "../core/adapters/manifest-file-ownership.ts";
 import { isSupportedAgent, type SupportedAgent } from "../core/agents.ts";
 import { loadAdapterProfileForAdapter } from "../core/agent-profile-path.ts";
-import { resolveSymlinkFreeProjectPath } from "../core/path-safety.ts";
-import { resolveProjectConfigPath } from "../core/project-config-path.ts";
 import { loadModelProfilesSafe } from "../core/models/load-model-profiles.ts";
 import {
   computeContentHash,
@@ -69,11 +73,10 @@ export type AdapterDoctorOptions = {
 // schema-invalid) is surfaced as CONFIG_ERROR rather than masked as "no
 // project", so `adapter doctor` doesn't report a clean bill on a broken config.
 async function loadProjectSafe(cwd: string): Promise<Project | null> {
-  let path: string;
   let raw: string;
   try {
-    path = await resolveProjectConfigPath(cwd);
-    raw = await readFile(path, "utf8");
+    const ownedPath = await resolveProjectConfigReadPath(cwd);
+    raw = await readOwnedText(ownedPath);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
     const e = new Error(`Cannot read .code-pact/project.yaml.`);
@@ -84,16 +87,14 @@ async function loadProjectSafe(cwd: string): Promise<Project | null> {
     return Project.parse(parseYaml(raw) as unknown);
   } catch (err) {
     const e = new Error(
-      `Cannot parse or validate ${path}: ${(err as Error).message}`,
+      `Cannot parse or validate .code-pact/project.yaml: ${(err as Error).message}`,
     );
     (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
     throw e;
   }
 }
 
-async function loadModelProfilesForDoctor(
-  cwd: string,
-): Promise<{
+async function loadModelProfilesForDoctor(cwd: string): Promise<{
   profiles: ModelProfile[];
   issue?: Omit<AdapterDoctorIssue, "agent">;
 }> {
@@ -134,9 +135,9 @@ async function readProjectFileForDoctor(
   relPath: string,
 ): Promise<ProjectReadResult> {
   const absPath = join(cwd, relPath);
-  let containedPath: string;
+  let ownedPath: OwnedReadPath;
   try {
-    containedPath = await resolveSymlinkFreeProjectPath(cwd, relPath);
+    ownedPath = await resolveContainedReadPath(cwd, relPath);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {
       return { kind: "missing", absPath };
@@ -145,12 +146,12 @@ async function readProjectFileForDoctor(
   }
 
   try {
-    const s = await stat(containedPath);
+    const s = await statOwned(ownedPath);
     if (!s.isFile()) return { kind: "missing", absPath };
     return {
       kind: "content",
       absPath,
-      content: await readFile(containedPath, "utf8"),
+      content: await readOwnedText(ownedPath),
     };
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {

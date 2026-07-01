@@ -12,7 +12,8 @@
 // decision seams are FAIL-CLOSED (throw on a non-ENOENT error), so the loaders
 // wrap them in a call-site catch to keep their optional degrade-to-[]/skip.
 
-import { readFile, readdir } from "../project-fs/raw-internal.ts";
+import { readOwnedText, listOwned } from "../project-fs/operations.ts";
+import { resolveContainedReadPath } from "../project-fs/authority-resolvers.ts";
 import { parse as parseYaml } from "yaml";
 import { Phase } from "../schemas/phase.ts";
 import { AgentProfile } from "../schemas/agent-profile.ts";
@@ -32,7 +33,6 @@ import {
   assertAgentProfileNameMatches,
   resolveAgentProfilePath,
 } from "../agent-profile-path.ts";
-import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
 import { listTrackedProjectFiles } from "../project-files/tracked-files.ts";
 
 // The project-contained read guard (`..`/absolute/symlink-escape → null) lives
@@ -53,7 +53,7 @@ export async function loadAgentProfile(
   const profilePath = await resolveAgentProfilePath(cwd, agentName);
   let raw: string;
   try {
-    raw = await readFile(profilePath, "utf8");
+    raw = await readOwnedText(profilePath);
   } catch {
     return null;
   }
@@ -84,8 +84,8 @@ export async function loadRules(
 ): Promise<RuleDoc[]> {
   let entries: string[];
   try {
-    const rulesDir = await resolveSymlinkFreeProjectPath(cwd, "design/rules");
-    entries = await readdir(rulesDir);
+    const rulesDir = await resolveContainedReadPath(cwd, "design/rules");
+    entries = await listOwned(rulesDir);
   } catch {
     return [];
   }

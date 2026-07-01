@@ -1,12 +1,21 @@
-import { readFile } from "../core/project-fs/raw-internal.ts";
-import { join } from "node:path";
+import {
+  readOwnedText,
+  resolveContainedReadPath,
+} from "../core/project-fs/index.ts";
 import { parse as parseYaml } from "yaml";
-import { PhaseImportInput, type PhaseImportEntry, type TaskImport } from "../core/schemas/phase-import.ts";
+import {
+  PhaseImportInput,
+  type PhaseImportEntry,
+  type TaskImport,
+} from "../core/schemas/phase-import.ts";
 import { Task } from "../core/schemas/task.ts";
 import { type PhaseRef } from "../core/schemas/roadmap.ts";
 import { loadRoadmap } from "../core/plan/roadmap.ts";
 import { loadPhase } from "../core/plan/load-phase.ts";
-import { createPhase, RESERVED_PHASE_IDS } from "../core/services/createPhase.ts";
+import {
+  createPhase,
+  RESERVED_PHASE_IDS,
+} from "../core/services/createPhase.ts";
 import {
   isDecisionRequiredForTask,
   readDecisionAdrFiles,
@@ -148,12 +157,19 @@ export function collectMisshapeWarnings(parsed: unknown): ImportWarning[] {
     const message = hasCanonical
       ? `${label} declares both \`verify_commands\` and legacy \`verification.commands\`. \`verify_commands\` is canonical and will be used; the nested \`verification.commands\` is ignored.`
       : `${label} uses \`verification.commands\` (the full Phase shape), which \`phase import\` does not read — it is ignored and the phase falls back to the default verify command. Use \`verify_commands\` (a flat top-level list) instead.`;
-    warnings.push({ code: "PHASE_VERIFY_COMMANDS_MISSHAPED", ...(phaseId !== undefined ? { phase_id: phaseId } : {}), message });
+    warnings.push({
+      code: "PHASE_VERIFY_COMMANDS_MISSHAPED",
+      ...(phaseId !== undefined ? { phase_id: phaseId } : {}),
+      message,
+    });
   }
   return warnings;
 }
 
-function parseInput(raw: string): { input: PhaseImportInput; warnings: ImportWarning[] } {
+function parseInput(raw: string): {
+  input: PhaseImportInput;
+  warnings: ImportWarning[];
+} {
   let parsed: unknown;
   try {
     parsed = parseYaml(raw);
@@ -176,10 +192,16 @@ function parseInput(raw: string): { input: PhaseImportInput; warnings: ImportWar
   return { input: result.data, warnings };
 }
 
-function applyTaskDefaults(raw: TaskImport): { task: Task; completedFields: string[] } {
+function applyTaskDefaults(raw: TaskImport): {
+  task: Task;
+  completedFields: string[];
+} {
   const completedFields: string[] = [];
   function d<T>(val: T | undefined, def: T, field: string): T {
-    if (val === undefined) { completedFields.push(field); return def; }
+    if (val === undefined) {
+      completedFields.push(field);
+      return def;
+    }
     return val;
   }
   const task: Task = {
@@ -189,7 +211,11 @@ function applyTaskDefaults(raw: TaskImport): { task: Task; completedFields: stri
     risk: d(raw.risk, "medium", "risk"),
     context_size: d(raw.context_size, "medium", "context_size"),
     write_surface: d(raw.write_surface, "medium", "write_surface"),
-    verification_strength: d(raw.verification_strength, "medium", "verification_strength"),
+    verification_strength: d(
+      raw.verification_strength,
+      "medium",
+      "verification_strength",
+    ),
     expected_duration: d(raw.expected_duration, "medium", "expected_duration"),
     status: d(raw.status, "planned", "status"),
     ...(raw.description !== undefined ? { description: raw.description } : {}),
@@ -198,10 +224,14 @@ function applyTaskDefaults(raw: TaskImport): { task: Task; completedFields: stri
     // not invent synthetic defaults. Absent stays undefined so old
     // YAML behaves unchanged.
     ...(raw.depends_on !== undefined ? { depends_on: raw.depends_on } : {}),
-    ...(raw.decision_refs !== undefined ? { decision_refs: raw.decision_refs } : {}),
+    ...(raw.decision_refs !== undefined
+      ? { decision_refs: raw.decision_refs }
+      : {}),
     ...(raw.reads !== undefined ? { reads: raw.reads } : {}),
     ...(raw.writes !== undefined ? { writes: raw.writes } : {}),
-    ...(raw.acceptance_refs !== undefined ? { acceptance_refs: raw.acceptance_refs } : {}),
+    ...(raw.acceptance_refs !== undefined
+      ? { acceptance_refs: raw.acceptance_refs }
+      : {}),
   };
   return { task, completedFields };
 }
@@ -235,10 +265,7 @@ export async function runPhaseImport(
   // ---- Read + schema-validate ------------------------------------------
   let raw: string;
   try {
-    raw = await readFile(
-      inputPath.startsWith("/") ? inputPath : join(cwd, inputPath),
-      "utf8",
-    );
+    raw = await readOwnedText(await resolveContainedReadPath(cwd, inputPath));
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     const e = new Error(`Could not read input file: ${detail}`);
@@ -294,11 +321,11 @@ export async function applyParsedPhaseImport(
   // phases are written and a later reserved-id entry is rejected.
   // `--force` does NOT bypass this; reserved ids are reserved at the
   // governance layer, not the collision-handling layer.
-  const reservedHits = input.phases.filter((e) =>
+  const reservedHits = input.phases.filter(e =>
     RESERVED_PHASE_IDS.includes(e.id),
   );
   if (reservedHits.length > 0) {
-    const ids = reservedHits.map((p) => `"${p.id}"`).join(", ");
+    const ids = reservedHits.map(p => `"${p.id}"`).join(", ");
     const e = new Error(
       `Phase id ${ids} is reserved for the sample-phase artifact created by \`init --sample-phase\`. Pick a different id in the import file.`,
     );
@@ -312,22 +339,22 @@ export async function applyParsedPhaseImport(
   for (const e of input.phases) {
     inputIdCounts.set(e.id, (inputIdCounts.get(e.id) ?? 0) + 1);
   }
-  const duplicateInInput = [...inputIdCounts.entries()].filter(([, n]) => n > 1);
+  const duplicateInInput = [...inputIdCounts.entries()].filter(
+    ([, n]) => n > 1,
+  );
   if (duplicateInInput.length > 0) {
     const ids = duplicateInInput.map(([id]) => id).join(", ");
-    const e = new Error(
-      `Input declares phase id more than once: ${ids}`,
-    );
+    const e = new Error(`Input declares phase id more than once: ${ids}`);
     (e as NodeJS.ErrnoException).code = "DUPLICATE_PHASE_ID";
     throw e;
   }
 
   // Identify which entries would collide with existing roadmap phases.
   const roadmap = await loadRoadmap(cwd);
-  const existingPhaseIds = new Set(roadmap.phases.map((r) => r.id));
+  const existingPhaseIds = new Set(roadmap.phases.map(r => r.id));
   const collidingPhaseIds = input.phases
-    .filter((e) => existingPhaseIds.has(e.id))
-    .map((e) => e.id);
+    .filter(e => existingPhaseIds.has(e.id))
+    .map(e => e.id);
 
   if (collidingPhaseIds.length > 0 && !force) {
     const e = new Error(
@@ -339,12 +366,10 @@ export async function applyParsedPhaseImport(
   }
 
   // Restrict the import set to phases we will actually write.
-  const importTargets = input.phases.filter(
-    (e) => !existingPhaseIds.has(e.id),
-  );
+  const importTargets = input.phases.filter(e => !existingPhaseIds.has(e.id));
   const skippedPhaseIds = input.phases
-    .filter((e) => existingPhaseIds.has(e.id))
-    .map((e) => e.id);
+    .filter(e => existingPhaseIds.has(e.id))
+    .map(e => e.id);
 
   // Task id collision check. We consider:
   //  - task ids declared in the import targets (may collide among themselves)
@@ -383,7 +408,9 @@ export async function applyParsedPhaseImport(
       for (const rawTask of entry.tasks ?? []) {
         const result = Task.safeParse(rawTask);
         if (!result.success) {
-          const missing = Object.keys(result.error.flatten().fieldErrors).join(", ");
+          const missing = Object.keys(result.error.flatten().fieldErrors).join(
+            ", ",
+          );
           errors.push(`  ${rawTask.id}: missing ${missing}`);
         }
       }
@@ -400,13 +427,16 @@ export async function applyParsedPhaseImport(
   // ---- Resolve tasks (apply defaults unless strict) --------------------
   const completedFieldsAll: CompletedField[] = [];
   type ResolvedEntry = { entry: PhaseImportEntry; tasks: Task[] };
-  const resolved: ResolvedEntry[] = importTargets.map((entry) => {
+  const resolved: ResolvedEntry[] = importTargets.map(entry => {
     const tasks: Task[] = [];
     for (const rawTask of entry.tasks ?? []) {
       const { task, completedFields } = applyTaskDefaults(rawTask);
       tasks.push(task);
       if (completedFields.length > 0) {
-        completedFieldsAll.push({ taskId: rawTask.id, fields: completedFields });
+        completedFieldsAll.push({
+          taskId: rawTask.id,
+          fields: completedFields,
+        });
       }
     }
     return { entry, tasks };
@@ -445,7 +475,9 @@ export async function applyParsedPhaseImport(
   const importedRefs: PhaseRef[] = [];
   const importedTaskIds: string[] = [];
   for (const { entry, tasks } of resolved) {
-    const created = await createPhase(entryToCreatePhaseInput(cwd, entry, tasks));
+    const created = await createPhase(
+      entryToCreatePhaseInput(cwd, entry, tasks),
+    );
     importedRefs.push(created.ref);
     for (const t of tasks) importedTaskIds.push(t.id);
   }
@@ -463,7 +495,10 @@ export async function applyParsedPhaseImport(
         const usingDefault = !refs || refs.length === 0;
         for (const target of scaffoldTargetsForTask(task.id, refs)) {
           if (!isUnderDecisionsDir(target)) {
-            scaffoldSkipped.push({ ref: target, reason: "outside design/decisions/" });
+            scaffoldSkipped.push({
+              ref: target,
+              reason: "outside design/decisions/",
+            });
             continue;
           }
           // Default `<task-id>.md` target: skip when a matching ADR filename

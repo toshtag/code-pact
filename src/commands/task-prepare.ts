@@ -1,4 +1,7 @@
-import { readFile } from "../core/project-fs/raw-internal.ts";
+import {
+  readOwnedText,
+  resolveDecisionReadPath,
+} from "../core/project-fs/index.ts";
 import { parse as parseYaml } from "yaml";
 import {
   resolveRecommendation,
@@ -24,7 +27,6 @@ import {
 } from "../core/agent-profile-path.ts";
 import { loadPhase } from "../core/plan/load-phase.ts";
 import { loadProject, resolveEnabledAgent } from "../core/project.ts";
-import { resolveSymlinkFreeProjectPath } from "../core/path-safety.ts";
 import type { Task as TaskT } from "../core/schemas/task.ts";
 
 // ---------------------------------------------------------------------------
@@ -126,7 +128,7 @@ async function loadAgentProfile(
   const path = await resolveAgentProfilePath(cwd, agentName);
   let raw: string;
   try {
-    raw = await readFile(path, "utf8");
+    raw = await readOwnedText(path);
   } catch {
     const err = new Error(`Agent profile for "${agentName}" not found.`);
     (err as NodeJS.ErrnoException).code = "AGENT_NOT_FOUND";
@@ -383,9 +385,8 @@ export async function runTaskPrepare(
       // `accepted`), so this read cannot escape the project root.
       let adrContent: string;
       try {
-        adrContent = await readFile(
-          await resolveSymlinkFreeProjectPath(cwd, considered.path),
-          "utf8",
+        adrContent = await readOwnedText(
+          await resolveDecisionReadPath(cwd, considered.path),
         );
       } catch {
         continue;

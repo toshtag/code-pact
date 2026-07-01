@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFile } from "../core/project-fs/raw-internal.ts";
+import { readOwnedText } from "../core/project-fs/index.ts";
 import type { SupportedAgent } from "../core/agents.ts";
 import {
   ACTIVATION_RULE_ANCHORS,
@@ -339,7 +339,7 @@ export async function runAdapterConformance(
   }
   let instructionContent: string;
   try {
-    instructionContent = await readFile(instructionOwnership.absPath, "utf8");
+    instructionContent = await readOwnedText(instructionOwnership.absPath);
   } catch {
     checks.push(
       fail("instruction_file_present", instructionEntry.path, {
@@ -542,7 +542,7 @@ export async function runAdapterConformance(
     }
     let diskContent: string;
     try {
-      diskContent = await readFile(ownership.absPath, "utf8");
+      diskContent = await readOwnedText(ownership.absPath);
     } catch {
       checks.push(
         fail("file_checksum_match", entry.path, {

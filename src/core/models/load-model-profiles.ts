@@ -1,7 +1,14 @@
-import { readFile, readdir, stat } from "../project-fs/raw-internal.ts";
 import { parse as parseYaml } from "yaml";
 import { ModelProfile } from "../schemas/model-profile.ts";
-import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
+import {
+  statOwned,
+  readOwnedText,
+  listOwned,
+} from "../project-fs/operations.ts";
+import {
+  resolveModelProfileDirectoryReadPath,
+  resolveModelProfileReadPath,
+} from "../project-fs/authority-resolvers.ts";
 
 const MODEL_PROFILES_DIR = ".code-pact/model-profiles";
 
@@ -27,10 +34,10 @@ function modelProfileConfigError(message: string): Error {
 export async function loadModelProfilesStrict(
   cwd: string,
 ): Promise<ModelProfile[]> {
-  const dirAbs = await resolveSymlinkFreeProjectPath(cwd, MODEL_PROFILES_DIR);
+  const dirBranded = await resolveModelProfileDirectoryReadPath(cwd);
   let entries: string[];
   try {
-    entries = await readdir(dirAbs);
+    entries = await listOwned(dirBranded);
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "ENOENT") return [];
@@ -41,14 +48,14 @@ export async function loadModelProfilesStrict(
   for (const entry of entries.sort()) {
     if (!entry.endsWith(".yaml")) continue;
     const relPath = `${MODEL_PROFILES_DIR}/${entry}`;
-    const abs = await resolveSymlinkFreeProjectPath(cwd, relPath);
-    const s = await stat(abs);
+    const fileBranded = await resolveModelProfileReadPath(cwd, relPath);
+    const s = await statOwned(fileBranded);
     if (!s.isFile()) {
       throw modelProfileConfigError(
         `Model profile entry "${relPath}" is not a regular file.`,
       );
     }
-    const raw = await readFile(abs, "utf8");
+    const raw = await readOwnedText(fileBranded);
     profiles.push(ModelProfile.parse(parseYaml(raw) as unknown));
   }
   return profiles;
@@ -63,16 +70,16 @@ export async function loadModelProfilesStrict(
 export async function loadModelProfilesSafe(
   cwd: string,
 ): Promise<ModelProfile[]> {
-  let dirAbs: string;
+  let dirBranded;
   try {
-    dirAbs = await resolveSymlinkFreeProjectPath(cwd, MODEL_PROFILES_DIR);
+    dirBranded = await resolveModelProfileDirectoryReadPath(cwd);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
     throw err;
   }
   let entries: string[];
   try {
-    entries = await readdir(dirAbs);
+    entries = await listOwned(dirBranded);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
     throw err;
@@ -81,14 +88,14 @@ export async function loadModelProfilesSafe(
   for (const entry of entries.sort()) {
     if (!entry.endsWith(".yaml")) continue;
     const relPath = `${MODEL_PROFILES_DIR}/${entry}`;
-    const abs = await resolveSymlinkFreeProjectPath(cwd, relPath);
-    const s = await stat(abs);
+    const fileBranded = await resolveModelProfileReadPath(cwd, relPath);
+    const s = await statOwned(fileBranded);
     if (!s.isFile()) {
       throw modelProfileConfigError(
         `Model profile entry "${relPath}" is not a regular file.`,
       );
     }
-    const raw = await readFile(abs, "utf8");
+    const raw = await readOwnedText(fileBranded);
     profiles.push(ModelProfile.parse(parseYaml(raw) as unknown));
   }
   return profiles;

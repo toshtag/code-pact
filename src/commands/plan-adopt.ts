@@ -13,13 +13,13 @@
 // prose produce no list items and fall to no_plan_items_detected — the
 // honest signal to use `plan prompt --schema-only` + an agent instead.
 
-import { readFile } from "../core/project-fs/raw-internal.ts";
+import {
+  readOwnedText,
+  resolveContainedReadPath,
+} from "../core/project-fs/index.ts";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
-import {
-  assertSafeRelativePath,
-  resolveWithinProject,
-} from "../core/path-safety.ts";
+import { assertSafeRelativePath } from "../core/path-safety.ts";
 import {
   PhaseImportInput,
   type PhaseImportEntry,
@@ -396,7 +396,7 @@ export async function runPlanAdopt(
   // reason: explicit user-selected input path (--from)
   let raw: string;
   try {
-    raw = await readFile(await resolveWithinProject(cwd, fromPath), "utf8");
+    raw = await readOwnedText(await resolveContainedReadPath(cwd, fromPath));
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "PATH_OUTSIDE_PROJECT") {
       throw new PlanAdoptError(

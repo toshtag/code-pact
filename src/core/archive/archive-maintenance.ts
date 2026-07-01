@@ -1,4 +1,5 @@
-import { readdir } from "../project-fs/raw-internal.ts";
+import { listOwned } from "../project-fs/operations.ts";
+import type { OwnedReadPath } from "../project-fs/branded-paths-internal.ts";
 import { ArchiveBundleKind } from "../schemas/archive-bundle.ts";
 import {
   archiveBundlesRelDir,
@@ -21,7 +22,12 @@ import {
   type RetentionDeleteOutcome,
   type RetentionPlan,
 } from "./archive-retention.ts";
-import { readDeleteIntent, recoverPendingDeletes, type DeleteIntentRead, type RecoveryOutcome } from "./delete-intent-journal.ts";
+import {
+  readDeleteIntent,
+  recoverPendingDeletes,
+  type DeleteIntentRead,
+  type RecoveryOutcome,
+} from "./delete-intent-journal.ts";
 import { runValidate } from "../../commands/validate.ts";
 import { runPlanLint } from "../../commands/plan-lint.ts";
 
@@ -71,9 +77,9 @@ export type ArchiveFileCounts = {
   total: number;
 };
 
-async function countJsonFiles(dir: string): Promise<number> {
+async function countJsonFiles(dir: OwnedReadPath): Promise<number> {
   try {
-    return (await readdir(dir)).filter((n) => n.endsWith(".json")).length;
+    return (await listOwned(dir)).filter(n => n.endsWith(".json")).length;
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return 0;
     throw err;
@@ -95,19 +101,48 @@ export type JournalStatus = {
 };
 
 export function describeJournal(read: DeleteIntentRead): JournalStatus {
-  if (read.kind === "absent") return { status: "absent", pending_before: false, intent_kinds: [], count: 0 };
-  if (read.kind === "corrupt") return { status: "corrupt", pending_before: true, intent_kinds: [], count: 0 };
-  const kinds = [...new Set(read.intent.intents.map((i) => i.intent_kind))].sort() as ("loose_pair" | "bundle_pair")[];
-  return { status: "present", pending_before: true, intent_kinds: kinds, count: read.intent.intents.length };
+  if (read.kind === "absent")
+    return {
+      status: "absent",
+      pending_before: false,
+      intent_kinds: [],
+      count: 0,
+    };
+  if (read.kind === "corrupt")
+    return {
+      status: "corrupt",
+      pending_before: true,
+      intent_kinds: [],
+      count: 0,
+    };
+  const kinds = [
+    ...new Set(read.intent.intents.map(i => i.intent_kind)),
+  ].sort() as ("loose_pair" | "bundle_pair")[];
+  return {
+    status: "present",
+    pending_before: true,
+    intent_kinds: kinds,
+    count: read.intent.intents.length,
+  };
 }
 
 /** Count the physical archive files on disk (loose records + bundles). Read-only. */
-export async function countArchiveFiles(cwd: string): Promise<ArchiveFileCounts> {
+export async function countArchiveFiles(
+  cwd: string,
+): Promise<ArchiveFileCounts> {
   const loose =
-    (await countJsonFiles(await resolveArchiveOwnedPath(cwd, archivePhasesRelDir()))) +
-    (await countJsonFiles(await resolveArchiveOwnedPath(cwd, archiveEventPacksRelDir()))) +
-    (await countJsonFiles(await resolveArchiveOwnedPath(cwd, archiveDecisionsRelDir())));
-  const bundles = await countJsonFiles(await resolveArchiveOwnedPath(cwd, archiveBundlesRelDir()));
+    (await countJsonFiles(
+      await resolveArchiveOwnedPath(cwd, archivePhasesRelDir()),
+    )) +
+    (await countJsonFiles(
+      await resolveArchiveOwnedPath(cwd, archiveEventPacksRelDir()),
+    )) +
+    (await countJsonFiles(
+      await resolveArchiveOwnedPath(cwd, archiveDecisionsRelDir()),
+    ));
+  const bundles = await countJsonFiles(
+    await resolveArchiveOwnedPath(cwd, archiveBundlesRelDir()),
+  );
   return { loose_records: loose, bundles, total: loose + bundles };
 }
 
@@ -188,13 +223,14 @@ export function deriveBoundedStatus(
   retentionPlans: readonly RetentionPlan[],
   pendingDeleteIntent: boolean,
 ): BoundedStatus {
-  const sum = (pick: (p: CompactArchivePlan) => number): number => compactPlans.reduce((n, p) => n + pick(p), 0);
+  const sum = (pick: (p: CompactArchivePlan) => number): number =>
+    compactPlans.reduce((n, p) => n + pick(p), 0);
   const fileReasons: FileCountReasons = {
-    would_bundle: sum((p) => p.would_bundle.length),
-    would_delete: sum((p) => p.would_delete.length),
-    would_supersede: sum((p) => p.would_supersede.length),
-    would_retire_bundles: sum((p) => p.would_retire_bundles.length),
-    would_skip: sum((p) => p.would_skip.length),
+    would_bundle: sum(p => p.would_bundle.length),
+    would_delete: sum(p => p.would_delete.length),
+    would_supersede: sum(p => p.would_supersede.length),
+    would_retire_bundles: sum(p => p.would_retire_bundles.length),
+    would_skip: sum(p => p.would_skip.length),
     pending_delete_intent: pendingDeleteIntent,
   };
   const unrefReasons: UnreferencedReasons = {
@@ -208,7 +244,8 @@ export function deriveBoundedStatus(
     fileReasons.would_supersede === 0 &&
     fileReasons.would_retire_bundles === 0 &&
     fileReasons.would_skip === 0;
-  const unreferencedBounded = !unrefReasons.pending_delete_intent && unrefReasons.would_drop === 0;
+  const unreferencedBounded =
+    !unrefReasons.pending_delete_intent && unrefReasons.would_drop === 0;
   return {
     file_count_bounded: fileCountBounded,
     file_count_unbounded_reasons: fileReasons,
@@ -254,10 +291,16 @@ function summarizeRetention(results: readonly RetentionDeleteOutcome[]): {
     deleted += r.deleted.length;
     bundleMemberRemoved += r.bundle_member_removed.length;
     skipped += r.skipped.length;
-    bundleMemberDeferred += r.skipped.filter((s) => s.reason === "needs_bundle_member_removal").length;
-    atomicPairDeferred += r.skipped.filter((s) => s.reason === "requires_atomic_pair_removal").length;
+    bundleMemberDeferred += r.skipped.filter(
+      s => s.reason === "needs_bundle_member_removal",
+    ).length;
+    atomicPairDeferred += r.skipped.filter(
+      s => s.reason === "requires_atomic_pair_removal",
+    ).length;
     for (const rec of r.recovered) {
-      (rec.intent_kind === "loose_pair" ? recoveredLoose : recoveredBundle).add(rec.id);
+      (rec.intent_kind === "loose_pair" ? recoveredLoose : recoveredBundle).add(
+        rec.id,
+      );
     }
   }
   return {
@@ -280,7 +323,9 @@ type CompactPassResult = {
   skipped: ArchiveDeleteSkip[];
 };
 
-function summarizeCompactPass(outcomes: CompactArchiveOutcome[]): CompactPassResult {
+function summarizeCompactPass(
+  outcomes: CompactArchiveOutcome[],
+): CompactPassResult {
   let filesRemoved = 0;
   let bundlesWritten = 0;
   const skipped: ArchiveDeleteSkip[] = [];
@@ -289,7 +334,12 @@ function summarizeCompactPass(outcomes: CompactArchiveOutcome[]): CompactPassRes
     if (!o.bundle.kind.startsWith("noop")) bundlesWritten += 1;
     skipped.push(...o.delete.skipped);
   }
-  return { outcomes, files_removed: filesRemoved, bundles_written: bundlesWritten, skipped };
+  return {
+    outcomes,
+    files_removed: filesRemoved,
+    bundles_written: bundlesWritten,
+    skipped,
+  };
 }
 
 /** Run `compactArchive` for every kind, in a stable order. Throws (fail-closed) on the
@@ -331,7 +381,12 @@ export class ArchiveMaintenanceError extends Error {
 
 export type CheckResult = {
   validate: { ok: boolean; errors: number; warnings: number };
-  plan_lint: { ok: boolean; errors: number; warnings: number; advisories: number };
+  plan_lint: {
+    ok: boolean;
+    errors: number;
+    warnings: number;
+    advisories: number;
+  };
 };
 
 /** Run the read-only post-checks an operator would otherwise run by hand: `validate`
@@ -343,10 +398,15 @@ async function runChecks(cwd: string): Promise<CheckResult> {
   return {
     validate: {
       ok: validate.ok,
-      errors: validate.issues.filter((i) => i.severity === "error").length,
-      warnings: validate.issues.filter((i) => i.severity === "warning").length,
+      errors: validate.issues.filter(i => i.severity === "error").length,
+      warnings: validate.issues.filter(i => i.severity === "warning").length,
     },
-    plan_lint: { ok: lint.ok, errors: lint.errors, warnings: lint.warnings, advisories: lint.advisories },
+    plan_lint: {
+      ok: lint.ok,
+      errors: lint.errors,
+      warnings: lint.warnings,
+      advisories: lint.advisories,
+    },
   };
 }
 
@@ -371,7 +431,10 @@ export type ArchiveMaintenanceDryRun = {
     /** `plans_are_pre_recovery` is true when a journal is pending: `--write` recovers FIRST, which
      *  changes the store, so the `compact` / `retention` plans below are CURRENT pre-recovery
      *  diagnostics, NOT the exact post-recovery plan. Re-run the dry-run after recovery for exact plans. */
-    journal: { name: "journal"; plans_are_pre_recovery: boolean } & JournalStatus;
+    journal: {
+      name: "journal";
+      plans_are_pre_recovery: boolean;
+    } & JournalStatus;
     compact: { name: "compact"; plans: CompactArchivePlan[] };
     retention: { name: "retention"; plans: RetentionPlan[] };
     checks: { name: "checks" } & CheckResult;
@@ -392,10 +455,22 @@ export async function planArchiveMaintenance(
   const retentionPlans = await planArchiveRetention(cwd, opts);
   const checks = await runChecks(cwd);
 
-  const planned_loose_folded = compactPlans.reduce((n, p) => n + p.would_bundle.length, 0);
-  const planned_loose_deleted = compactPlans.reduce((n, p) => n + p.would_delete.length, 0);
-  const planned_compact_skipped = compactPlans.reduce((n, p) => n + p.would_skip.length, 0);
-  const planned_drop = retentionPlans.reduce((n, p) => n + p.would_drop.length, 0);
+  const planned_loose_folded = compactPlans.reduce(
+    (n, p) => n + p.would_bundle.length,
+    0,
+  );
+  const planned_loose_deleted = compactPlans.reduce(
+    (n, p) => n + p.would_delete.length,
+    0,
+  );
+  const planned_compact_skipped = compactPlans.reduce(
+    (n, p) => n + p.would_skip.length,
+    0,
+  );
+  const planned_drop = retentionPlans.reduce(
+    (n, p) => n + p.would_drop.length,
+    0,
+  );
 
   return {
     mode: "dry_run",
@@ -409,12 +484,20 @@ export async function planArchiveMaintenance(
       planned_compact_skipped,
     },
     steps: {
-      journal: { name: "journal", ...journal, plans_are_pre_recovery: journal.pending_before },
+      journal: {
+        name: "journal",
+        ...journal,
+        plans_are_pre_recovery: journal.pending_before,
+      },
       compact: { name: "compact", plans: compactPlans },
       retention: { name: "retention", plans: retentionPlans },
       checks: { name: "checks", ...checks },
     },
-    bounded_status: deriveBoundedStatus(compactPlans, retentionPlans, journal.pending_before),
+    bounded_status: deriveBoundedStatus(
+      compactPlans,
+      retentionPlans,
+      journal.pending_before,
+    ),
   };
 }
 
@@ -452,10 +535,32 @@ export type ArchiveMaintenanceWrite = {
    *  success path, so a consumer reading only stdout JSON needs this to see the exit verdict). */
   verdict: { exit_code: 0 | 1; v2_bounded: boolean; checks_ok: boolean };
   steps: {
-    journal: { name: "journal"; ok: true; recovered: RetentionDeleteOutcome["recovered"] } & JournalStatus;
-    compact_before_retention: { name: "compact_before_retention"; ok: true; files_removed: number; bundles_written: number; skipped: ArchiveDeleteSkip[] };
-    retention: { name: "retention"; ok: true; results: RetentionDeleteOutcome[] };
-    compact_after_retention: { name: "compact_after_retention"; ok: true; ran: boolean; reason: string | null; files_removed: number; bundles_written: number; skipped: ArchiveDeleteSkip[] };
+    journal: {
+      name: "journal";
+      ok: true;
+      recovered: RetentionDeleteOutcome["recovered"];
+    } & JournalStatus;
+    compact_before_retention: {
+      name: "compact_before_retention";
+      ok: true;
+      files_removed: number;
+      bundles_written: number;
+      skipped: ArchiveDeleteSkip[];
+    };
+    retention: {
+      name: "retention";
+      ok: true;
+      results: RetentionDeleteOutcome[];
+    };
+    compact_after_retention: {
+      name: "compact_after_retention";
+      ok: true;
+      ran: boolean;
+      reason: string | null;
+      files_removed: number;
+      bundles_written: number;
+      skipped: ArchiveDeleteSkip[];
+    };
     bounded_status: { name: "bounded_status"; ok: boolean };
     checks: { name: "checks"; ok: boolean } & CheckResult;
   };
@@ -512,14 +617,25 @@ export async function runArchiveMaintenance(
     // do partial destructive work (an unlink / a bundle retire) before a later fsync fails. A CORRUPT
     // journal throws straight from `readDeleteIntent` BEFORE any mutation (and an absent one is a
     // no-op), so partial_applied is honestly false there.
-    throw new ArchiveMaintenanceError("journal_recovery", err as Error, completed, journalBefore.status === "present");
+    throw new ArchiveMaintenanceError(
+      "journal_recovery",
+      err as Error,
+      completed,
+      journalBefore.status === "present",
+    );
   }
   completed.push("journal_recovery");
   // The recovery-completed ids, tagged by intent_kind — reported on EVERY path (success AND any
   // later step's error envelope), so "what did the prior crashed delete complete?" is never lost.
   const recovered: RetentionDeleteOutcome["recovered"] = [
-    ...recovery.loose_pairs.map((id) => ({ id, intent_kind: "loose_pair" as const })),
-    ...recovery.bundle_pairs.map((id) => ({ id, intent_kind: "bundle_pair" as const })),
+    ...recovery.loose_pairs.map(id => ({
+      id,
+      intent_kind: "loose_pair" as const,
+    })),
+    ...recovery.bundle_pairs.map(id => ({
+      id,
+      intent_kind: "bundle_pair" as const,
+    })),
   ];
 
   // 2. compact-before-retention (now SAFE — no journal is pending after step 1).
@@ -529,7 +645,13 @@ export async function runArchiveMaintenance(
   } catch (err) {
     // Compaction unlinks loose files / writes+retires bundles, so a mid-run fault may have
     // already applied a kind — report partial_applied conservatively true.
-    throw new ArchiveMaintenanceError("compact_before_retention", err as Error, completed, true, recovered);
+    throw new ArchiveMaintenanceError(
+      "compact_before_retention",
+      err as Error,
+      completed,
+      true,
+      recovered,
+    );
   }
   completed.push("compact_before_retention");
 
@@ -537,9 +659,19 @@ export async function runArchiveMaintenance(
   //    recovered-bundle-pair exclusion in place; it does not recover a second time.
   let retentionResults: RetentionDeleteOutcome[];
   try {
-    retentionResults = await applyArchiveRetention(cwd, { ...opts, preRecovered: recovery }, hooks);
+    retentionResults = await applyArchiveRetention(
+      cwd,
+      { ...opts, preRecovered: recovery },
+      hooks,
+    );
   } catch (err) {
-    throw new ArchiveMaintenanceError("retention", err as Error, completed, true, recovered);
+    throw new ArchiveMaintenanceError(
+      "retention",
+      err as Error,
+      completed,
+      true,
+      recovered,
+    );
   }
   completed.push("retention");
   const retSummary = summarizeRetention(retentionResults);
@@ -549,18 +681,35 @@ export async function runArchiveMaintenance(
   //    the real store (not a guess), so it only runs when there is real folding to do.
   const afterRetentionPlans = await planAllKinds(cwd);
   const foldableRemains = afterRetentionPlans.some(
-    (p) => p.would_bundle.length > 0 || p.would_supersede.length > 0 || p.would_delete.length > 0,
+    p =>
+      p.would_bundle.length > 0 ||
+      p.would_supersede.length > 0 ||
+      p.would_delete.length > 0,
   );
-  let compactAfter: CompactPassResult = { outcomes: [], files_removed: 0, bundles_written: 0, skipped: [] };
+  let compactAfter: CompactPassResult = {
+    outcomes: [],
+    files_removed: 0,
+    bundles_written: 0,
+    skipped: [],
+  };
   let compactAfterRan = false;
   let compactAfterReason: string | null = null;
   if (foldableRemains) {
     compactAfterRan = true;
-    compactAfterReason = retSummary.bundle_member_removed > 0 ? "source_both_follow_up" : "materialized_loose";
+    compactAfterReason =
+      retSummary.bundle_member_removed > 0
+        ? "source_both_follow_up"
+        : "materialized_loose";
     try {
       compactAfter = summarizeCompactPass(await compactAllKinds(cwd));
     } catch (err) {
-      throw new ArchiveMaintenanceError("compact_after_retention", err as Error, completed, true, recovered);
+      throw new ArchiveMaintenanceError(
+        "compact_after_retention",
+        err as Error,
+        completed,
+        true,
+        recovered,
+      );
     }
     completed.push("compact_after_retention");
   }
@@ -573,19 +722,37 @@ export async function runArchiveMaintenance(
   let checks: CheckResult;
   let after: ArchiveFileCounts;
   try {
-    const finalCompactPlans = compactAfterRan ? await planAllKinds(cwd) : afterRetentionPlans;
+    const finalCompactPlans = compactAfterRan
+      ? await planAllKinds(cwd)
+      : afterRetentionPlans;
     const finalRetentionPlans = await planArchiveRetention(cwd, opts);
     const pendingAfter = (await readDeleteIntent(cwd)).kind !== "absent";
-    boundedStatus = deriveBoundedStatus(finalCompactPlans, finalRetentionPlans, pendingAfter);
+    boundedStatus = deriveBoundedStatus(
+      finalCompactPlans,
+      finalRetentionPlans,
+      pendingAfter,
+    );
   } catch (err) {
-    throw new ArchiveMaintenanceError("bounded_status", err as Error, completed, true, recovered);
+    throw new ArchiveMaintenanceError(
+      "bounded_status",
+      err as Error,
+      completed,
+      true,
+      recovered,
+    );
   }
   completed.push("bounded_status");
   try {
     checks = await runChecks(cwd);
     after = await countArchiveFiles(cwd);
   } catch (err) {
-    throw new ArchiveMaintenanceError("checks", err as Error, completed, true, recovered);
+    throw new ArchiveMaintenanceError(
+      "checks",
+      err as Error,
+      completed,
+      true,
+      recovered,
+    );
   }
 
   // Overall verdict (drives the CLI exit code). It is NOT just "did the checks pass" — the
@@ -598,7 +765,8 @@ export async function runArchiveMaintenance(
   // member / unsafe path, which keep `file_count_bounded` false) AND retention skips — so a
   // reader inspecting `summary.skipped === 0` is never misled into "no skipped work" while a
   // compaction skip lurks. The split is reported alongside (`compact_skipped` / `retention_skipped`).
-  const compactSkipped = compactBefore.skipped.length + compactAfter.skipped.length;
+  const compactSkipped =
+    compactBefore.skipped.length + compactAfter.skipped.length;
 
   return {
     mode: "write",
@@ -621,7 +789,11 @@ export async function runArchiveMaintenance(
       atomic_pair_deferred: retSummary.atomic_pair_deferred,
       source_both_follow_up: retSummary.bundle_member_removed,
     },
-    verdict: { exit_code: ok ? 0 : 1, v2_bounded: isV2Bounded(boundedStatus), checks_ok: checksPass },
+    verdict: {
+      exit_code: ok ? 0 : 1,
+      v2_bounded: isV2Bounded(boundedStatus),
+      checks_ok: checksPass,
+    },
     steps: {
       journal: { name: "journal", ok: true, ...journalBefore, recovered },
       compact_before_retention: {
@@ -641,7 +813,10 @@ export async function runArchiveMaintenance(
         bundles_written: compactAfter.bundles_written,
         skipped: compactAfter.skipped,
       },
-      bounded_status: { name: "bounded_status", ok: isV2Bounded(boundedStatus) },
+      bounded_status: {
+        name: "bounded_status",
+        ok: isV2Bounded(boundedStatus),
+      },
       checks: { name: "checks", ok: checksPass, ...checks },
     },
     bounded_status: boundedStatus,

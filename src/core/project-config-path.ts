@@ -1,5 +1,6 @@
-import { readFile, stat } from "./project-fs/raw-internal.ts";
 import { resolveSymlinkFreeProjectPath } from "./path-safety.ts";
+import { statOwned, readOwnedText } from "./project-fs/operations.ts";
+import { resolveProjectConfigReadPath } from "./project-fs/authority-resolvers.ts";
 
 const PROJECT_YAML_LOCALE_MAX_BYTES = 64 * 1024;
 
@@ -27,11 +28,11 @@ export async function readProjectYamlStrictOrNull(
   cwd: string,
 ): Promise<string | null> {
   try {
-    const path = await resolveProjectConfigPath(cwd);
-    const s = await stat(path);
+    const branded = await resolveProjectConfigReadPath(cwd);
+    const s = await statOwned(branded);
     if (!s.isFile()) return null;
     if (s.size > PROJECT_YAML_LOCALE_MAX_BYTES) return null;
-    return await readFile(path, "utf8");
+    return await readOwnedText(branded);
   } catch {
     return null;
   }

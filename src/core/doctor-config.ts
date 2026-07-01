@@ -1,7 +1,10 @@
-import { readFile, stat } from "./project-fs/raw-internal.ts";
+import {
+  readOwnedText,
+  statOwned,
+  resolveContainedReadPath,
+} from "./project-fs/index.ts";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
-import { resolveSymlinkFreeProjectPath } from "./path-safety.ts";
 
 // Optional per-project doctor configuration (`.code-pact/doctor.yaml`).
 //
@@ -33,11 +36,11 @@ const DOCTOR_CONFIG_MAX_BYTES = 128 * 1024;
  */
 export async function loadDoctorConfig(cwd: string): Promise<DoctorConfig> {
   try {
-    const path = await resolveSymlinkFreeProjectPath(cwd, ".code-pact/doctor.yaml");
-    const s = await stat(path);
+    const path = await resolveContainedReadPath(cwd, ".code-pact/doctor.yaml");
+    const s = await statOwned(path);
     if (!s.isFile()) return { disabled_checks: [] };
     if (s.size > DOCTOR_CONFIG_MAX_BYTES) return { disabled_checks: [] };
-    const raw = await readFile(path, "utf8");
+    const raw = await readOwnedText(path);
     const parsed = DoctorConfig.safeParse(parseYaml(raw));
     if (parsed.success) return parsed.data;
   } catch {

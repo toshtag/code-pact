@@ -1,6 +1,9 @@
-import { readFile } from "../project-fs/raw-internal.ts";
+import {
+  readOwnedText,
+  resolveDecisionReadPath,
+  resolveContainedReadPath,
+} from "../project-fs/index.ts";
 import type { PhaseEntry } from "../plan/state.ts";
-import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
 import { normalizePrunedDecisionPath } from "./pruned-ledger.ts";
 import {
   classifyAdr,
@@ -209,8 +212,7 @@ async function sharedExternalGates(
   // Target must be a readable regular file inside the project (symlink-escape-safe).
   let content: string | null = null;
   try {
-    const absTarget = await resolveSymlinkFreeProjectPath(cwd, decision);
-    content = await readFile(absTarget, "utf8");
+    content = await readOwnedText(await resolveDecisionReadPath(cwd, decision));
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "ENOENT") {
@@ -265,8 +267,9 @@ async function sharedExternalGates(
     if (otherPath === decision) continue;
     let other: string;
     try {
-      const absOther = await resolveSymlinkFreeProjectPath(cwd, otherPath);
-      other = await readFile(absOther, "utf8");
+      other = await readOwnedText(
+        await resolveContainedReadPath(cwd, otherPath),
+      );
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") continue; // raced away
       blocks.push({ gate: "dependency_unreadable", decision: otherPath });

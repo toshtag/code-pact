@@ -1,7 +1,6 @@
-import { readFile } from "../project-fs/raw-internal.ts";
+import { resolveRoadmapReadPath, readOwnedText } from "../project-fs/index.ts";
 import { parse as parseYaml } from "yaml";
 import { Roadmap } from "../schemas/roadmap.ts";
-import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
 
 /**
  * Strict loader for the phase registry at `design/roadmap.yaml`.
@@ -23,32 +22,23 @@ export async function loadRoadmap(cwd: string): Promise<Roadmap> {
   // same control plane (Blocker: roadmap/phase symlink-alias parity). A refusal
   // maps to CONFIG_ERROR (fail-closed); a missing/invalid roadmap still throws
   // ENOENT/ZodError as before.
-  let abs: string;
+  let raw: string;
   try {
-    abs = await resolveSymlinkFreeProjectPath(cwd, "design/roadmap.yaml");
+    raw = await readOwnedText(await resolveRoadmapReadPath(cwd));
   } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") throw err;
     const e = new Error(
       `design/roadmap.yaml is not a safe owned project path: ${(err as Error).message}`,
     );
     (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
     throw e;
   }
-  let raw: string;
-  try {
-    raw = await readFile(abs, "utf8");
-  } catch (err) {
-    // ENOENT stays RAW (callers treat a missing roadmap as "no project yet").
-    // Any other read failure (a directory at the path → EISDIR, ENOTDIR, EACCES)
-    // is structured rather than an uncoded exit-3.
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") throw err;
-    const e = new Error(`design/roadmap.yaml cannot be read: ${(err as Error).message}`);
-    (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
-    throw e;
-  }
   try {
     return Roadmap.parse(parseYaml(raw) as unknown);
   } catch (err) {
-    const e = new Error(`design/roadmap.yaml is malformed (YAML or schema): ${(err as Error).message}`);
+    const e = new Error(
+      `design/roadmap.yaml is malformed (YAML or schema): ${(err as Error).message}`,
+    );
     (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
     throw e;
   }

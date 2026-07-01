@@ -19,12 +19,12 @@
 // reference, or a broad reads glob can all be legitimate. The advisories
 // surface size risk; they never block work or apply a budget automatically.
 
-import { readFile } from "../project-fs/raw-internal.ts";
+import { readOwnedText, resolveDecisionReadPath } from "../project-fs/index.ts";
 import { buildContextPack } from "../pack/index.ts";
 import { recommendContextFit } from "../recommend/context-fit.ts";
 import { STANDARD_CONTEXT_BUDGET_PROFILES } from "./budget-profiles.ts";
 import { matchGlob, validateGlobSyntax } from "../glob.ts";
-import { assertSafeRelativePath, resolveSymlinkFreeProjectPath } from "../path-safety.ts";
+import { assertSafeRelativePath } from "../path-safety.ts";
 import { isDecisionRefPath } from "../schemas/decision-ref.ts";
 import { listTrackedProjectFiles } from "../project-files/tracked-files.ts";
 import type { PhaseEntry } from "../plan/state.ts";
@@ -131,14 +131,19 @@ export async function detectContextFitAdvisories(
         let bytes = fileBytesCache.get(ref);
         if (bytes === undefined) {
           try {
-            const content = await readFile(await resolveSymlinkFreeProjectPath(cwd, ref), "utf8");
+            const content = await readOwnedText(
+              await resolveDecisionReadPath(cwd, ref),
+            );
             bytes = Buffer.byteLength(content, "utf8");
           } catch {
             bytes = null; // missing/unreadable → not our advisory to raise
           }
           fileBytesCache.set(ref, bytes);
         }
-        if (bytes !== null && bytes > CONTEXT_FIT_ADVISORY_THRESHOLDS.largeDecisionBytes) {
+        if (
+          bytes !== null &&
+          bytes > CONTEXT_FIT_ADVISORY_THRESHOLDS.largeDecisionBytes
+        ) {
           issues.push({
             code: "TASK_DECLARED_DECISION_LARGE",
             severity: "warning",
@@ -150,7 +155,8 @@ export async function detectContextFitAdvisories(
             details: {
               path: ref,
               bytes,
-              threshold_bytes: CONTEXT_FIT_ADVISORY_THRESHOLDS.largeDecisionBytes,
+              threshold_bytes:
+                CONTEXT_FIT_ADVISORY_THRESHOLDS.largeDecisionBytes,
             },
           });
         }
@@ -216,7 +222,8 @@ export async function detectContextFitAdvisories(
           metrics = pack.explainMetrics
             ? {
                 naturalBytes: pack.explainMetrics.naturalBytes,
-                minimumAchievableBytes: pack.explainMetrics.minimumAchievableBytes,
+                minimumAchievableBytes:
+                  pack.explainMetrics.minimumAchievableBytes,
               }
             : null;
         } catch {
@@ -229,7 +236,10 @@ export async function detectContextFitAdvisories(
       }
       if (metrics === null) continue;
 
-      if (metrics.naturalBytes > CONTEXT_FIT_ADVISORY_THRESHOLDS.largeContextBalancedBytes) {
+      if (
+        metrics.naturalBytes >
+        CONTEXT_FIT_ADVISORY_THRESHOLDS.largeContextBalancedBytes
+      ) {
         // The pack already exceeds the `balanced` budget, so the actionable
         // suggestion is the next standard profile above it: `wide`.
         issues.push({
@@ -241,7 +251,8 @@ export async function detectContextFitAdvisories(
           task_id: task.id,
           details: {
             natural_bytes: metrics.naturalBytes,
-            threshold_bytes: CONTEXT_FIT_ADVISORY_THRESHOLDS.largeContextBalancedBytes,
+            threshold_bytes:
+              CONTEXT_FIT_ADVISORY_THRESHOLDS.largeContextBalancedBytes,
             recommended_profile: "wide",
           },
         });
@@ -264,7 +275,9 @@ export async function detectContextFitAdvisories(
           ? { agentContextBudgetProfiles }
           : {}),
       });
-      if (metrics.minimumAchievableBytes > recommendation.recommendedBudgetBytes) {
+      if (
+        metrics.minimumAchievableBytes > recommendation.recommendedBudgetBytes
+      ) {
         issues.push({
           code: "TASK_CONTEXT_BUDGET_UNACHIEVABLE",
           severity: "warning",

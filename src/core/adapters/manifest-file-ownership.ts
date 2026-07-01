@@ -1,7 +1,9 @@
 import { matchGlob } from "../glob.ts";
 import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
 import {
+  brandOwnedRead,
   brandOwnedWrite,
+  type OwnedReadPath,
   type OwnedWritePath,
 } from "../project-fs/branded-paths-internal.ts";
 import type { AdapterDescriptor, DesiredAdapterFileRole } from "./types.ts";
@@ -24,7 +26,7 @@ import type { AdapterDescriptor, DesiredAdapterFileRole } from "./types.ts";
  * On `owned`, `absPath` is the resolved, symlink-free absolute path to read.
  */
 export type ManifestFileOwnership =
-  | { kind: "owned"; absPath: string }
+  | { kind: "owned"; absPath: OwnedReadPath }
   | { kind: "unowned" }
   | { kind: "unsafe" }
   // The path is inside the adapter's BROAD write namespace (e.g. a dynamically
@@ -170,7 +172,7 @@ export async function classifyManifestFileForRead(
     // Rejects any symlink component (and `..` / absolute / drive paths): a
     // lexical path match is not proof the real destination is owned.
     const absPath = await resolveSymlinkFreeProjectPath(cwd, relPath);
-    return { kind: "owned", absPath };
+    return { kind: "owned", absPath: brandOwnedRead(absPath) };
   } catch {
     return { kind: "unsafe" };
   }

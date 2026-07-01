@@ -1,7 +1,7 @@
-import { readFile } from "../project-fs/raw-internal.ts";
+import { readOwnedText, resolveProgressReadPath } from "../project-fs/index.ts";
 import { parse as parseYaml } from "yaml";
 import { ProgressLog, type ProgressEvent } from "../schemas/progress-event.ts";
-import { mergeProgressStreams, resolveProgressPath } from "./io.ts";
+import { mergeProgressStreams } from "./io.ts";
 import { readEventFiles, writeEventFile } from "./events-io.ts";
 import { computeEventId } from "./event-id.ts";
 import { deriveTaskState } from "./task-state.ts";
@@ -47,7 +47,9 @@ export async function migrateProgressToEvents(
 ): Promise<MigrationResult> {
   let legacyEvents: ProgressEvent[] = [];
   try {
-    const raw = await readFile(await resolveProgressPath(cwd), "utf8");
+    const raw = await readOwnedText(
+      await resolveProgressReadPath(cwd, ".code-pact/state/progress.yaml"),
+    );
     legacyEvents = ProgressLog.parse(parseYaml(raw) as unknown).events;
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
@@ -60,14 +62,17 @@ export async function migrateProgressToEvents(
   // legacy-only fast path. Build that explicitly so the diff is meaningful even
   // in a dry run (no files written yet).
   const existing = await readEventFiles(cwd);
-  const asFiles = legacyEvents.map((event) => ({
+  const asFiles = legacyEvents.map(event => ({
     event,
     id: computeEventId(event),
     file: "",
   }));
-  const postMigration = mergeProgressStreams(legacyEvents, [...existing, ...asFiles]);
+  const postMigration = mergeProgressStreams(legacyEvents, [
+    ...existing,
+    ...asFiles,
+  ]);
   const state_changes: MigrationStateChange[] = [];
-  for (const task_id of new Set(legacyEvents.map((e) => e.task_id))) {
+  for (const task_id of new Set(legacyEvents.map(e => e.task_id))) {
     const before = deriveTaskState(legacyEvents, task_id).current;
     const after = deriveTaskState(postMigration, task_id).current;
     if (before !== after) state_changes.push({ task_id, before, after });

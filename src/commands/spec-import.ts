@@ -1,11 +1,15 @@
-import { readFile, stat } from "../core/project-fs/raw-internal.ts";
+import {
+  readOwnedText,
+  statOwned,
+  resolveContainedReadPath,
+  type OwnedReadPath,
+} from "../core/project-fs/index.ts";
 import { stringify as stringifyYaml } from "yaml";
 
 import { atomicWriteText } from "../io/atomic-text.ts";
 import {
   assertSafeRelativePath,
   resolveSymlinkFreeProjectPath,
-  resolveWithinProject,
 } from "../core/path-safety.ts";
 import { type SpecImportDetail } from "../contracts/spec-import-details.ts";
 import {
@@ -62,24 +66,39 @@ export interface SpecImportResult {
 
 const PHASE_ID_RE = /^[A-Za-z][A-Za-z0-9_-]*$/;
 
-async function resolveSpecPath(
+async function resolveSpecInputPath(
   cwd: string,
   relPath: string,
-  ctx: { sourcePath?: string; phaseId?: string; purpose: "input" | "output" },
-): Promise<string> {
-  // fs-authority: containment-only for input, ownership for output
-  // reason: input is an explicit user-selected import path; output is a
-  // control-plane write (spec namespace) and must be symlink-free.
+  ctx: { sourcePath?: string; phaseId?: string },
+): Promise<OwnedReadPath> {
   try {
-    return ctx.purpose === "output"
-      ? await resolveSymlinkFreeProjectPath(cwd, relPath)
-      : await resolveWithinProject(cwd, relPath);
+    return await resolveContainedReadPath(cwd, relPath);
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "PATH_OUTSIDE_PROJECT" || code === "PATH_NOT_OWNED") {
       throw new SpecImportError(
         "unsafe_path",
-        `spec import: ${ctx.purpose} path is unsafe: ${(err as Error).message}`,
+        `spec import: input path is unsafe: ${(err as Error).message}`,
+        { sourcePath: ctx.sourcePath, phaseId: ctx.phaseId },
+      );
+    }
+    throw err;
+  }
+}
+
+async function resolveSpecOutputPath(
+  cwd: string,
+  relPath: string,
+  ctx: { sourcePath?: string; phaseId?: string },
+): Promise<string> {
+  try {
+    return await resolveSymlinkFreeProjectPath(cwd, relPath);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "PATH_OUTSIDE_PROJECT" || code === "PATH_NOT_OWNED") {
+      throw new SpecImportError(
+        "unsafe_path",
+        `spec import: output path is unsafe: ${(err as Error).message}`,
         { sourcePath: ctx.sourcePath, phaseId: ctx.phaseId },
       );
     }
@@ -114,14 +133,13 @@ export async function runSpecImport(
     );
   }
 
-  const absInput = await resolveSpecPath(cwd, fromPath, {
+  const absInput = await resolveSpecInputPath(cwd, fromPath, {
     sourcePath: fromPath,
     phaseId,
-    purpose: "input",
   });
   let raw: string;
   try {
-    raw = await readFile(absInput, "utf8");
+    raw = await readOwnedText(absInput);
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "ENOENT") {
@@ -163,16 +181,15 @@ export async function runSpecImport(
   const phaseYaml = stringifyYaml(phaseYamlObj);
 
   const outputRel = `design/phases/${phaseId}-imported.yaml`;
-  const outputAbs = await resolveSpecPath(cwd, outputRel, {
+  const outputAbs = await resolveSpecOutputPath(cwd, outputRel, {
     sourcePath: fromPath,
     phaseId,
-    purpose: "output",
   });
 
   if (write) {
     if (!force) {
       try {
-        await stat(outputAbs);
+        await statOwned(await resolveContainedReadPath(cwd, outputRel));
         throw new SpecImportError(
           "phase_yaml_exists",
           `spec import: ${outputRel} already exists. Re-run with --force to overwrite.`,
@@ -294,13 +311,12 @@ export async function runSpecSuggest(
     );
   }
 
-  const absInput = await resolveSpecPath(cwd, suggestFromPath, {
+  const absInput = await resolveSpecInputPath(cwd, suggestFromPath, {
     sourcePath: suggestFromPath,
-    purpose: "input",
   });
   let raw: string;
   try {
-    raw = await readFile(absInput, "utf8");
+    raw = await readOwnedText(absInput);
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "ENOENT") {

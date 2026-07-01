@@ -1,11 +1,14 @@
-import { readFile } from "../project-fs/raw-internal.ts";
+import {
+  readOwnedText,
+  resolveInstructionReadPath,
+} from "../project-fs/index.ts";
 import {
   PROTECTED_PATHS,
   synthesizeSample,
   validateGlobSyntax,
   type ProtectedPathEntry,
 } from "../glob.ts";
-import { assertSafeRelativePath, resolveSymlinkFreeProjectPath } from "../path-safety.ts";
+import { assertSafeRelativePath } from "../path-safety.ts";
 
 // ---------------------------------------------------------------------------
 // Configurable protected paths.
@@ -54,8 +57,9 @@ export async function loadProtectedPaths(
 ): Promise<LoadProtectedPathsResult> {
   let raw: string;
   try {
-    const abs = await resolveSymlinkFreeProjectPath(cwd, PROTECTED_PATHS_RULE_FILE);
-    raw = await readFile(abs, "utf8");
+    raw = await readOwnedText(
+      await resolveInstructionReadPath(cwd, PROTECTED_PATHS_RULE_FILE),
+    );
   } catch {
     return { paths: PROTECTED_PATHS, source: "fallback" };
   }

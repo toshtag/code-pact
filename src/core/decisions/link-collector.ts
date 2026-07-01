@@ -1,6 +1,6 @@
-import { readFile, readdir } from "../project-fs/raw-internal.ts";
+import { listOwnedDirents, readOwnedText } from "../project-fs/operations.ts";
+import { resolveContainedReadPath } from "../project-fs/authority-resolvers.ts";
 import { posix } from "node:path";
-import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
 
 /**
  * One inbound reference considered by the prune write plan. `rewrite_action`
@@ -110,12 +110,12 @@ async function discoverSources(
     recursive: boolean,
     exts: string[],
   ): Promise<void> {
-    let abs: string;
+    let abs;
     if (rel === ".") {
-      abs = cwd; // the project root itself is trusted
+      abs = await resolveContainedReadPath(cwd, "."); // the project root itself is trusted
     } else {
       try {
-        abs = await resolveSymlinkFreeProjectPath(cwd, rel); // symlink-free guard
+        abs = await resolveContainedReadPath(cwd, rel); // symlink-free guard
       } catch {
         issues.push({ source_file: rel, line: null, reason: "unreadable" });
         return;
@@ -123,7 +123,7 @@ async function discoverSources(
     }
     let entries;
     try {
-      entries = await readdir(abs, { withFileTypes: true });
+      entries = await listOwnedDirents(abs);
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") return; // absent root/subdir is fine
       issues.push({
@@ -173,8 +173,8 @@ export async function collectInboundLinks(
     if (rel === target) continue; // the file being pruned itself
     let content: string;
     try {
-      const abs = await resolveSymlinkFreeProjectPath(cwd, rel); // symlink-free guard
-      content = await readFile(abs, "utf8");
+      const abs = await resolveContainedReadPath(cwd, rel); // symlink-free guard
+      content = await readOwnedText(abs);
     } catch {
       issues.push({ source_file: rel, line: null, reason: "unreadable" });
       continue;

@@ -1,10 +1,9 @@
-import { access } from "../project-fs/raw-internal.ts";
+import { accessOwned, resolveDecisionReadPath } from "../project-fs/index.ts";
 import {
   loadDecisionRecord,
   resolveArchiveDecisionRecord,
 } from "../archive/load-decision-record.ts";
 import { normalizeDecisionRef, sha256Hex } from "../archive/paths.ts";
-import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
 import type { DecisionStateRecord } from "../schemas/decision-state-record.ts";
 
 // ---------------------------------------------------------------------------
@@ -72,14 +71,14 @@ async function decisionFilePresence(
   cwd: string,
   canonical: string,
 ): Promise<"present" | "absent" | "inaccessible"> {
-  let abs: string;
+  let abs;
   try {
-    abs = await resolveSymlinkFreeProjectPath(cwd, canonical);
+    abs = await resolveDecisionReadPath(cwd, canonical);
   } catch {
     return "inaccessible"; // unsafe path / symlink escape — never a record-consult
   }
   try {
-    await access(abs);
+    await accessOwned(abs);
     return "present";
   } catch (err) {
     return (err as NodeJS.ErrnoException).code === "ENOENT"

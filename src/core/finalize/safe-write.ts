@@ -1,15 +1,13 @@
-import { readFile } from "../project-fs/raw-internal.ts";
+import {
+  readOwnedText,
+  resolvePhaseReadPath,
+  resolveContainedWritePath,
+} from "../project-fs/index.ts";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { atomicWriteText } from "../../io/atomic-text.ts";
-import {
-  assertSafeRelativePath,
-  resolveSymlinkFreeProjectPath,
-} from "../path-safety.ts";
+import { assertSafeRelativePath } from "../path-safety.ts";
 import { Phase, type PhaseStatus } from "../schemas/phase.ts";
-import {
-  computeTaskStatusDiff,
-  type TaskStatusDiff,
-} from "./diff.ts";
+import { computeTaskStatusDiff, type TaskStatusDiff } from "./diff.ts";
 
 // ---------------------------------------------------------------------------
 // Safe-write contract for Finalization & Reconciliation
@@ -153,9 +151,8 @@ export async function classifyWriteRequest(
 
   // 3. Owned path resolution: no symlink component is allowed for automated
   //    phase mutation, including in-project aliases.
-  let absPath: string;
   try {
-    absPath = await resolveSymlinkFreeProjectPath(cwd, file);
+    await resolvePhaseReadPath(cwd, file);
   } catch (err) {
     return {
       kind: "refused",
@@ -168,7 +165,7 @@ export async function classifyWriteRequest(
   // 4. Read the phase YAML.
   let raw: string;
   try {
-    raw = await readFile(absPath, "utf8");
+    raw = await readOwnedText(await resolvePhaseReadPath(cwd, file));
   } catch (err) {
     return {
       kind: "refused",
@@ -192,7 +189,7 @@ export async function classifyWriteRequest(
   }
 
   // 6. Task must exist in this phase.
-  const task = (phase.tasks ?? []).find((t) => t.id === taskId);
+  const task = (phase.tasks ?? []).find(t => t.id === taskId);
   if (!task) {
     return {
       kind: "refused",
@@ -240,11 +237,13 @@ export async function applyPlannedWrite(
   cwd: string,
   diff: TaskStatusDiff,
 ): Promise<void> {
-  const absPath = await resolveSymlinkFreeProjectPath(cwd, diff.file);
-  const raw = await readFile(absPath, "utf8");
+  const absPath = await resolveContainedWritePath(cwd, diff.file).then(
+    p => p as string,
+  );
+  const raw = await readOwnedText(await resolvePhaseReadPath(cwd, diff.file));
   const phase = Phase.parse(parseYaml(raw) as unknown);
   const tasks = phase.tasks ?? [];
-  const idx = tasks.findIndex((t) => t.id === diff.task_id);
+  const idx = tasks.findIndex(t => t.id === diff.task_id);
   if (idx === -1) {
     throw new Error(
       `task "${diff.task_id}" not found in "${diff.file}" at apply time`,

@@ -1,7 +1,10 @@
-import { readRegularOwnedText } from "../project-fs/raw-internal.ts";
-import { readdir } from "../project-fs/raw-internal.ts";
+import {
+  readRegularOwnedTextBranded,
+  listOwnedDirents,
+  resolveDecisionReadPath,
+  resolveOwnedDirectoryReadPath,
+} from "../project-fs/index.ts";
 import { parseFrontMatter } from "../pack/front-matter.ts";
-import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
 import {
   isDecisionRefPath,
   normalizeDecisionRefPath,
@@ -88,10 +91,10 @@ export async function listLiveDecisionFiles(
 
   async function walk(relDir: string): Promise<void> {
     let dirents: import("node:fs").Dirent[];
-    let absDir: string;
     try {
-      absDir = await resolveSymlinkFreeProjectPath(cwd, relDir);
-      dirents = await readdir(absDir, { withFileTypes: true });
+      dirents = await listOwnedDirents(
+        await resolveOwnedDirectoryReadPath(cwd, relDir),
+      );
     } catch (error) {
       if (relDir === "design/decisions" && isAbsentDecisionsDirError(error)) {
         throw error;
@@ -370,16 +373,16 @@ function diskReader(cwd: string): RelFileReader {
     if (normalized === null || !isDecisionRefPath(normalized)) {
       return { kind: "unsafe" };
     }
-    let abs: string;
+    let abs;
     try {
       // Structural path-safety + ownership guard. Throws on `..`, absolute
       // paths, drive letters, and any symlink component.
-      abs = await resolveSymlinkFreeProjectPath(cwd, normalized);
+      abs = await resolveDecisionReadPath(cwd, normalized);
     } catch {
       return { kind: "unsafe" };
     }
     try {
-      const content = await readRegularOwnedText(abs);
+      const content = await readRegularOwnedTextBranded(abs);
       return { kind: "ok", content };
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;

@@ -31,12 +31,12 @@ import {
   parseAdrCommitments,
 } from "../decisions/adr.ts";
 import { parseFrontMatter } from "../pack/front-matter.ts";
-import { readFile } from "../project-fs/raw-internal.ts";
+import { resolveContainedReadPath } from "../project-fs/authority-resolvers.ts";
+import { readOwnedText } from "../project-fs/operations.ts";
 import { parse as parseYaml } from "yaml";
 import { Project } from "../schemas/project.ts";
 import { detectContextFitAdvisories } from "../context-fit/advisories.ts";
 import { loadAgentContextBudgetBestEffort } from "../context-fit/load-context-budget.ts";
-import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
 import { readProjectTextOrNull } from "../project-read.ts";
 import type { PhaseEntry, PlanState } from "./state.ts";
 import { collectPlanArtifacts } from "./state.ts";
@@ -560,9 +560,8 @@ async function detectAdrCommitmentsEmpty(
   for (const [adrPath, { task_id, phase_id }] of accepted) {
     let content: string;
     try {
-      content = await readFile(
-        await resolveSymlinkFreeProjectPath(cwd, adrPath),
-        "utf8",
+      content = await readOwnedText(
+        await resolveContainedReadPath(cwd, adrPath),
       );
     } catch {
       continue; // referenced ADR vanished — nothing to advise on

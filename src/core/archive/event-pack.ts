@@ -1,4 +1,16 @@
-import { readFile, lstat, readdir } from "../project-fs/raw-internal.ts";
+import {
+  listOwned,
+  readOwnedText,
+  lstatOwned,
+} from "../project-fs/operations.ts";
+import {
+  resolveContainedReadPath,
+  resolveContainedWritePath,
+} from "../project-fs/authority-resolvers.ts";
+import type {
+  OwnedReadPath,
+  OwnedWritePath,
+} from "../project-fs/branded-paths-internal.ts";
 import { parse as parseYaml } from "yaml";
 import {
   EventPack,
@@ -12,7 +24,6 @@ import { atCompact } from "../progress/event-id.ts";
 import { assertSafePlanId } from "../schemas/plan-id.ts";
 import { loadRoadmap } from "../plan/roadmap.ts";
 import { resolvePhaseRef } from "../plan/resolve-phase.ts";
-import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
 import { readPackSources } from "../progress/all-sources.ts";
 import { resolvePhaseSnapshotRaw } from "./load-phase-snapshot.ts";
 import {
@@ -33,11 +44,7 @@ import {
   classifyLoosePackRelationship,
   type CoveredLooseRelationship,
 } from "./event-pack-cleanup.ts";
-import {
-  eventPackRelPath,
-  resolveArchiveOwnedPath,
-  sha256Hex,
-} from "./paths.ts";
+import { eventPackRelPath, sha256Hex } from "./paths.ts";
 import { atomicWriteText } from "../../io/atomic-text.ts";
 
 // ---------------------------------------------------------------------------
@@ -72,7 +79,7 @@ export type EventPackPlan =
   | {
       kind: "write";
       phaseId: string;
-      packPath: string;
+      packPath: OwnedWritePath;
       pack: EventPack;
       /** Count of loose files for the phase's tasks (for loose_remaining_count).
        *  The snapshot, its raw bytes, and the per-id loose map are NOT carried on
@@ -84,7 +91,7 @@ export type EventPackPlan =
   | {
       kind: "noop_already_packed";
       phaseId: string;
-      packPath: string;
+      packPath: OwnedWritePath;
       loose_remaining_count: number;
       cleanup_pending: boolean;
       /** Which loose↔pack relationship this verdict reflects — `empty` (fully
@@ -101,14 +108,14 @@ export type EventPackApplyOutcome =
   | {
       kind: "written";
       phaseId: string;
-      packPath: string;
+      packPath: OwnedWritePath;
       pack: EventPack;
       loose_count: number;
     }
   | {
       kind: "noop_already_packed";
       phaseId: string;
-      packPath: string;
+      packPath: OwnedWritePath;
       loose_remaining_count: number;
       cleanup_pending: boolean;
       /** Which loose↔pack relationship this verdict reflects — `empty` (fully
@@ -196,8 +203,8 @@ async function findLivePhaseYamlsById(
 ): Promise<{ paths: string[]; incomplete: string | null }> {
   let entries: string[];
   try {
-    const phasesDir = await resolveSymlinkFreeProjectPath(cwd, "design/phases");
-    entries = await readdir(phasesDir);
+    const phasesDir = await resolveContainedReadPath(cwd, "design/phases");
+    entries = await listOwned(phasesDir);
   } catch (err) {
     if (isEnoent(err)) return { paths: [], incomplete: null }; // no dir → nothing live
     return {
@@ -209,9 +216,9 @@ async function findLivePhaseYamlsById(
   for (const entry of entries.sort()) {
     if (!entry.endsWith(".yaml")) continue;
     const rel = `design/phases/${entry}`;
-    let abs: string;
+    let abs: OwnedReadPath;
     try {
-      abs = await resolveSymlinkFreeProjectPath(cwd, rel);
+      abs = await resolveContainedReadPath(cwd, rel);
     } catch {
       // A symlink (in-project or escaping): fail closed — we cannot read it to prove
       // it is NOT a live YAML with the target id.
@@ -222,7 +229,7 @@ async function findLivePhaseYamlsById(
     }
     let raw: string;
     try {
-      raw = await readFile(abs, "utf8");
+      raw = await readOwnedText(abs);
     } catch {
       // A YAML in design/phases/ we cannot read could be the live target phase —
       // fail closed rather than assume it is not.
@@ -275,8 +282,8 @@ export async function findLiveTaskOwnersByTaskId(
 ): Promise<{ owners: LiveTaskOwner[]; incomplete: string | null }> {
   let entries: string[];
   try {
-    const phasesDir = await resolveSymlinkFreeProjectPath(cwd, "design/phases");
-    entries = await readdir(phasesDir);
+    const phasesDir = await resolveContainedReadPath(cwd, "design/phases");
+    entries = await listOwned(phasesDir);
   } catch (err) {
     if (isEnoent(err)) return { owners: [], incomplete: null }; // no dir → nothing live
     return {
@@ -288,9 +295,9 @@ export async function findLiveTaskOwnersByTaskId(
   for (const entry of entries.sort()) {
     if (!entry.endsWith(".yaml")) continue;
     const rel = `design/phases/${entry}`;
-    let abs: string;
+    let abs: OwnedReadPath;
     try {
-      abs = await resolveSymlinkFreeProjectPath(cwd, rel);
+      abs = await resolveContainedReadPath(cwd, rel);
     } catch {
       // A symlink (in-project or escaping): fail closed — we cannot read it to prove
       // it does NOT own the task_id.
@@ -301,7 +308,7 @@ export async function findLiveTaskOwnersByTaskId(
     }
     let raw: string;
     try {
-      raw = await readFile(abs, "utf8");
+      raw = await readOwnedText(abs);
     } catch {
       return {
         owners: [],
@@ -363,7 +370,7 @@ async function phaseFileStillPresent(
 
   if (roadmapPath !== null) {
     try {
-      await lstat(await resolveSymlinkFreeProjectPath(cwd, roadmapPath));
+      await lstatOwned(await resolveContainedReadPath(cwd, roadmapPath));
       return { kind: "present", phase_path: roadmapPath }; // the referenced file is on disk
     } catch (err) {
       if (!isEnoent(err)) {
@@ -397,7 +404,7 @@ export async function planEventPack(
   phaseId: string,
 ): Promise<EventPackPlan> {
   assertSafePlanId(phaseId, "Phase id");
-  const packPath = await resolveArchiveOwnedPath(
+  const packPath = await resolveContainedWritePath(
     cwd,
     eventPackRelPath(phaseId),
   );
