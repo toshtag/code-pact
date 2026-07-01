@@ -19,6 +19,9 @@ export type {
   OwnedListPath,
 } from "./branded-paths.ts";
 
+export type { FileHandle } from "./raw-internal.ts";
+export { constants } from "./raw-internal.ts";
+
 export {
   readOwnedText,
   readExplicitUserText,
@@ -40,7 +43,17 @@ export {
   copyOwnedToOwned,
   linkOwned,
   openOwnedRead,
+  openOwnedReadWithFlags,
   openOwnedWriteExclusive,
+  openOwnedWrite,
+  existsOwnedSync,
+  readOwnedFileSync,
+  readdirOwnedSync,
+  listOwnedDirentsSync,
+  realpathOwned,
+  realpathOwnedSync,
+  mkdtempOwned,
+  removeOwnedPath,
 } from "./operations.ts";
 
 export {
