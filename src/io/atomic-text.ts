@@ -218,7 +218,8 @@ export async function atomicReplaceExistingText(
  *   - `link()` fails with `EEXIST` if `dest` already exists — no overwrite.
  *   - The temp file is created with exclusive (`"wx"`) semantics, so it cannot
  *     be pre-squatted by a symlink.
- *   - The temp file is always cleaned up (success or failure).
+ *   - The temp file is cleaned up on success; on cleanup failure the temp
+ *     hard link may persist (the destination is NOT rolled back).
  *
  * On filesystems that do not support hard links (e.g. some FUSE mounts), the
  * `link()` call fails with `ENOSYS` or `EPERM` — this function does NOT fall
@@ -267,6 +268,12 @@ export async function atomicCreateTextExclusive(
     }
     throw err;
   } finally {
-    await unlink(tmp).catch(() => {});
+    await unlink(tmp).catch((err: NodeJS.ErrnoException) => {
+      if (err.code !== "ENOENT") {
+        console.warn(
+          `atomicCreateTextExclusive: stale temp file may persist: ${tmp} (${err.code})`,
+        );
+      }
+    });
   }
 }
