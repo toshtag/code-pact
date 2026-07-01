@@ -1,13 +1,22 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdtemp, rm, writeFile, readFile, readdir, symlink } from "node:fs/promises";
+import {
+  mkdtemp,
+  rm,
+  writeFile,
+  readFile,
+  readdir,
+  symlink,
+} from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   atomicWriteText,
   atomicReplaceExistingText,
+  atomicCreateTextExclusive,
   __setAtomicTempTokenForTests,
   __setAtomicWriteFailAfterOpenForTests,
+  __setAtomicCreateConflictForTests,
 } from "../../../src/io/atomic-text.ts";
 
 let dir: string;
@@ -20,7 +29,7 @@ afterEach(async () => {
 
 async function noTempLeftBehind(): Promise<boolean> {
   const entries = await readdir(dir);
-  return !entries.some((e) => e.includes(".tmp-"));
+  return !entries.some(e => e.includes(".tmp-"));
 }
 
 describe("atomicWriteText", () => {
@@ -40,7 +49,9 @@ describe("atomicWriteText", () => {
   it("expected present: refuses (and cleans up) when the destination drifted", async () => {
     const p = join(dir, "a.txt");
     await writeFile(p, "edited-by-someone-else", "utf8");
-    await expect(atomicWriteText(p, "v2", { kind: "present", content: "v1" })).rejects.toThrow();
+    await expect(
+      atomicWriteText(p, "v2", { kind: "present", content: "v1" }),
+    ).rejects.toThrow();
     expect(await readFile(p, "utf8")).toBe("edited-by-someone-else"); // not clobbered
     expect(await noTempLeftBehind()).toBe(true);
   });
@@ -74,7 +85,9 @@ describe("atomicWriteText", () => {
     expect(await readFile(p, "utf8")).toBe("filled");
 
     const q = join(dir, "e.txt"); // expected present-empty but actually absent
-    await expect(atomicWriteText(q, "v", { kind: "present", content: "" })).rejects.toThrow();
+    await expect(
+      atomicWriteText(q, "v", { kind: "present", content: "" }),
+    ).rejects.toThrow();
     expect(await noTempLeftBehind()).toBe(true);
   });
 
@@ -84,7 +97,9 @@ describe("atomicWriteText", () => {
     expect(await readFile(ok, "utf8")).toBe("v");
 
     const p = join(dir, "gone", "a.txt"); // parent missing → must fail, not mkdir
-    await expect(atomicWriteText(p, "v", undefined, { mkdir: false })).rejects.toThrow();
+    await expect(
+      atomicWriteText(p, "v", undefined, { mkdir: false }),
+    ).rejects.toThrow();
     expect(await noTempLeftBehind()).toBe(true);
   });
 });
@@ -121,10 +136,14 @@ describe("atomicWriteText — temp symlink clobber resistance", () => {
 
     // Exclusive create (flag "wx") fails EEXIST on the symlink and never follows
     // it; retries exhaust on the fixed token → the write rejects.
-    await expect(atomicWriteText(dest, "attacker-would-overwrite")).rejects.toThrow();
+    await expect(
+      atomicWriteText(dest, "attacker-would-overwrite"),
+    ).rejects.toThrow();
 
     // The outside target was never written through.
-    expect(await readFile(outsideFile, "utf8")).toBe("original outside content");
+    expect(await readFile(outsideFile, "utf8")).toBe(
+      "original outside content",
+    );
     // The real destination was never created.
     expect(existsSync(dest)).toBe(false);
   });
@@ -147,7 +166,9 @@ describe("atomicWriteText — temp cleanup on mid-write failure", () => {
       return e;
     });
     const dest = join(dir, "target.txt");
-    await expect(atomicWriteText(dest, "data")).rejects.toMatchObject({ code: "EFBIG" });
+    await expect(atomicWriteText(dest, "data")).rejects.toMatchObject({
+      code: "EFBIG",
+    });
     // No stray `.tmp-<uuid>` left behind, and the destination was never created.
     expect(await noTempLeftBehind()).toBe(true);
     expect(existsSync(dest)).toBe(false);
@@ -162,7 +183,9 @@ describe("atomicWriteText — temp cleanup on mid-write failure", () => {
       (e as NodeJS.ErrnoException).code = "EIO";
       return e;
     });
-    await expect(atomicReplaceExistingText(dest, "new")).rejects.toMatchObject({ code: "EIO" });
+    await expect(atomicReplaceExistingText(dest, "new")).rejects.toMatchObject({
+      code: "EIO",
+    });
     expect(await noTempLeftBehind()).toBe(true);
     expect(await readFile(dest, "utf8")).toBe("original"); // destination untouched
   });
@@ -188,5 +211,90 @@ describe("atomicReplaceExistingText", () => {
     await expect(atomicReplaceExistingText(p, "v2", "v1")).rejects.toThrow();
     expect(await readFile(p, "utf8")).toBe("edited");
     expect(await noTempLeftBehind()).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// atomicCreateTextExclusive — exclusive create via hard link publish.
+// The publish primitive is `link(tmp, dest)` which fails EEXIST if dest
+// already exists. This prevents overwrite of an existing ADR scaffold,
+// even under a concurrent writer race.
+// ---------------------------------------------------------------------------
+
+describe("atomicCreateTextExclusive", () => {
+  afterEach(() => __setAtomicCreateConflictForTests(null));
+
+  it("creates a file when absent", async () => {
+    const p = join(dir, "new-adr.md");
+    await atomicCreateTextExclusive(p, "# ADR-001\n");
+    expect(await readFile(p, "utf8")).toBe("# ADR-001\n");
+    expect(await noTempLeftBehind()).toBe(true);
+  });
+
+  it("creates missing parent directories by default", async () => {
+    const p = join(dir, "sub", "dir", "adr.md");
+    await atomicCreateTextExclusive(p, "content");
+    expect(await readFile(p, "utf8")).toBe("content");
+  });
+
+  it("refuses to overwrite an existing file (EEXIST)", async () => {
+    const p = join(dir, "exists.md");
+    await writeFile(p, "original", "utf8");
+    await expect(atomicCreateTextExclusive(p, "new")).rejects.toMatchObject({
+      code: "EEXIST",
+    });
+    expect(await readFile(p, "utf8")).toBe("original");
+    expect(await noTempLeftBehind()).toBe(true);
+  });
+
+  it("opts.mkdir=false: does NOT create a missing parent directory", async () => {
+    const p = join(dir, "gone", "a.md");
+    await expect(
+      atomicCreateTextExclusive(p, "v", { mkdir: false }),
+    ).rejects.toThrow();
+    expect(await noTempLeftBehind()).toBe(true);
+  });
+
+  it("cleans up the temp file on conflict (no stray .tmp- left behind)", async () => {
+    const p = join(dir, "conflict.md");
+    await writeFile(p, "pre-existing", "utf8");
+    await expect(atomicCreateTextExclusive(p, "challenger")).rejects.toThrow();
+    const entries = await readdir(dir);
+    expect(entries.filter(e => e.includes(".tmp-"))).toEqual([]);
+  });
+
+  it("simulated concurrent writer: second call gets EEXIST, first content survives", async () => {
+    const p = join(dir, "race.md");
+    let conflictTriggered = false;
+    __setAtomicCreateConflictForTests(async () => {
+      if (!conflictTriggered) {
+        conflictTriggered = true;
+        await writeFile(p, "winner wrote first", "utf8");
+      }
+    });
+    await expect(atomicCreateTextExclusive(p, "loser")).rejects.toMatchObject({
+      code: "EEXIST",
+    });
+    expect(await readFile(p, "utf8")).toBe("winner wrote first");
+    expect(await noTempLeftBehind()).toBe(true);
+  });
+
+  it("two concurrent calls to the same path: exactly one succeeds", async () => {
+    const p = join(dir, "concurrent.md");
+    const [r1, r2] = await Promise.allSettled([
+      atomicCreateTextExclusive(p, "writer-A"),
+      atomicCreateTextExclusive(p, "writer-B"),
+    ]);
+    const successCount = [r1, r2].filter(r => r.status === "fulfilled").length;
+    const eexistCount = [r1, r2].filter(
+      r =>
+        r.status === "rejected" &&
+        (r.reason as NodeJS.ErrnoException)?.code === "EEXIST",
+    ).length;
+    expect(successCount).toBe(1);
+    expect(eexistCount).toBe(1);
+    expect(await noTempLeftBehind()).toBe(true);
+    const content = await readFile(p, "utf8");
+    expect(["writer-A", "writer-B"]).toContain(content);
   });
 });

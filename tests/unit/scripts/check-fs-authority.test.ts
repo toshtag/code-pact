@@ -114,12 +114,12 @@ describe("check-fs-authority", () => {
 
   it("allows a domain resolver that grants owned read authority", async () => {
     const result = await runFixture([
-      'import { stat } from "node:fs/promises";',
+      'import { statOwned } from "../../src/core/project-fs/index.ts";',
       'import { resolveAgentProfilePath } from "../../src/core/agent-profile-path.ts";',
       "",
       "async function f(cwd: string) {",
       '  const p = await resolveAgentProfilePath(cwd, "claude-code");',
-      "  await stat(p);",
+      "  await statOwned(p);",
       "}",
       "",
     ]);
@@ -145,13 +145,13 @@ describe("check-fs-authority", () => {
 
   it("allows mutation-authority object paths for write sinks", async () => {
     const result = await runFixture([
-      'import { writeFile } from "node:fs/promises";',
+      'import { writeOwnedText } from "../../src/core/project-fs/index.ts";',
       'import { authorizeAdapterMutationPath } from "../../src/core/adapters/manifest-file-ownership.ts";',
       "",
       "async function f(cwd: string, descriptor: any) {",
       '  const ownership = await authorizeAdapterMutationPath(cwd, descriptor, "CLAUDE.md", { expectedRole: "instruction", allowDynamicWrite: false });',
       '  if (ownership.kind === "owned") {',
-      '    await writeFile(ownership.absPath, "ok");',
+      '    await writeOwnedText(ownership.absPath, "ok");',
       "  }",
       "}",
       "",
@@ -378,14 +378,14 @@ describe("check-fs-authority", () => {
 
   it("allows rename and copy when both path arguments have authority", async () => {
     const result = await runFixture([
-      'import { copyFile, rename } from "node:fs/promises";',
+      'import { copyOwnedToOwned, renameOwned } from "../../src/core/project-fs/index.ts";',
       'import { resolveOwnedAgentProfilePath } from "../../src/core/agent-profile-path.ts";',
       "",
       "async function f(cwd: string) {",
       '  const src = await resolveOwnedAgentProfilePath(cwd, "claude-code");',
       '  const dst = await resolveOwnedAgentProfilePath(cwd, "codex");',
-      "  await copyFile(src, dst);",
-      "  await rename(src, dst);",
+      "  await copyOwnedToOwned(src, dst);",
+      "  await renameOwned(src, dst);",
       "}",
       "",
     ]);
@@ -509,7 +509,7 @@ describe("check-fs-authority", () => {
 
   it("rejects projectFs sink aliases", async () => {
     const result = await runFixture([
-      'import { writeFile } from "../../src/core/project-fs/index.ts";',
+      'import { writeFile } from "../../src/core/project-fs/raw-internal.ts";',
       "",
       "async function f(profile: any) {",
       "  const sink = writeFile;",
@@ -536,7 +536,7 @@ describe("check-fs-authority", () => {
 
   it("rejects rename aliases with an untrusted destination", async () => {
     const result = await runFixture([
-      'import { rename } from "../../src/core/project-fs/index.ts";',
+      'import { rename } from "../../src/core/project-fs/raw-internal.ts";',
       'import { resolveOwnedAgentProfilePath } from "../../src/core/agent-profile-path.ts";',
       "",
       "async function f(cwd: string, profile: any) {",
@@ -552,7 +552,7 @@ describe("check-fs-authority", () => {
 
   it("rejects unlink aliases", async () => {
     const result = await runFixture([
-      'import { unlink } from "../../src/core/project-fs/index.ts";',
+      'import { unlink } from "../../src/core/project-fs/raw-internal.ts";',
       "",
       "async function f(untrustedPath: string) {",
       "  const remove = unlink;",
@@ -566,7 +566,7 @@ describe("check-fs-authority", () => {
 
   it("rejects open aliases with write flags", async () => {
     const result = await runFixture([
-      'import { open } from "../../src/core/project-fs/index.ts";',
+      'import { open } from "../../src/core/project-fs/raw-internal.ts";',
       "",
       "async function f(untrustedPath: string) {",
       "  const opener = open;",
@@ -580,7 +580,7 @@ describe("check-fs-authority", () => {
 
   it("rejects object property sink aliases", async () => {
     const result = await runFixture([
-      'import { writeFile } from "../../src/core/project-fs/index.ts";',
+      'import { writeFile } from "../../src/core/project-fs/raw-internal.ts";',
       "",
       "async function f(untrustedPath: string) {",
       "  const fsApi = { sink: writeFile };",
@@ -642,5 +642,234 @@ describe("check-fs-authority", () => {
     ]);
     expect(result.ok).toBe(false);
     expect(result.output).toContain("unknown raw fs operation");
+  });
+
+  it("rejects raw-internal imports from non-trusted modules", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "code-pact-fs-authority-"));
+    const target = join(dir, "probe.ts");
+    await writeFile(
+      target,
+      [
+        'import { readFile } from "../../src/core/project-fs/raw-internal.ts";',
+        "",
+        "async function f(path: string) {",
+        '  await readFile(path, "utf8");',
+        "}",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    try {
+      await execFileAsync("node", [scriptPath, target]);
+      throw new Error("check-fs-authority unexpectedly passed");
+    } catch (err) {
+      const output = `${(err as { stdout?: string }).stdout ?? ""}\n${
+        (err as { stderr?: string }).stderr ?? ""
+      }`;
+      expect(output).toContain("raw-internal import");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects node:fs imports from non-trusted modules", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "code-pact-fs-authority-"));
+    const target = join(dir, "probe.ts");
+    await writeFile(
+      target,
+      [
+        'import { readFile } from "node:fs/promises";',
+        "",
+        "async function f(path: string) {",
+        '  await readFile(path, "utf8");',
+        "}",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    try {
+      await execFileAsync("node", [scriptPath, target]);
+      throw new Error("check-fs-authority unexpectedly passed");
+    } catch (err) {
+      const output = `${(err as { stdout?: string }).stdout ?? ""}\n${
+        (err as { stderr?: string }).stderr ?? ""
+      }`;
+      expect(output).toContain("node:fs import");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects raw-internal alias imports from non-trusted modules", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "code-pact-fs-authority-"));
+    const target = join(dir, "probe.ts");
+    await writeFile(
+      target,
+      [
+        'import { readFile as readIt } from "../../src/core/project-fs/raw-internal.ts";',
+        "",
+        "async function f(path: string) {",
+        '  await readIt(path, "utf8");',
+        "}",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    try {
+      await execFileAsync("node", [scriptPath, target]);
+      throw new Error("check-fs-authority unexpectedly passed");
+    } catch (err) {
+      const output = `${(err as { stdout?: string }).stdout ?? ""}\n${
+        (err as { stderr?: string }).stderr ?? ""
+      }`;
+      expect(output).toContain("raw-internal import");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects raw-internal namespace imports from non-trusted modules", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "code-pact-fs-authority-"));
+    const target = join(dir, "probe.ts");
+    await writeFile(
+      target,
+      [
+        'import * as rawFs from "../../src/core/project-fs/raw-internal.ts";',
+        "",
+        "async function f(path: string) {",
+        '  await rawFs.readFile(path, "utf8");',
+        "}",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    try {
+      await execFileAsync("node", [scriptPath, target]);
+      throw new Error("check-fs-authority unexpectedly passed");
+    } catch (err) {
+      const output = `${(err as { stdout?: string }).stdout ?? ""}\n${
+        (err as { stderr?: string }).stderr ?? ""
+      }`;
+      expect(output).toContain("raw-internal import");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("function-wide allowlist does not auto-approve a new dangerous call site in the same function", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "code-pact-fs-authority-"));
+    const target = join(dir, "probe.ts");
+    const allowlistPath = join(
+      dir,
+      ".code-pact",
+      "fs-authority-allowlist.json",
+    );
+    const { mkdir: mkdirAsync } = await import("node:fs/promises");
+    await mkdirAsync(join(dir, ".code-pact"), { recursive: true });
+    await writeFile(
+      allowlistPath,
+      JSON.stringify({
+        "probe.ts#f": [
+          {
+            operation: "readFile",
+            authority: "explicit_user_input",
+            reason: "user-supplied config path",
+          },
+        ],
+      }),
+      "utf8",
+    );
+    await writeFile(
+      target,
+      [
+        'import { readFile, writeFile } from "node:fs/promises";',
+        "",
+        "async function f(profile: any, userPath: string) {",
+        '  await readFile(userPath, "utf8");',
+        '  await writeFile(profile.instruction_filename, "x");',
+        "}",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    try {
+      await execFileAsync("node", [scriptPath, target], { cwd: dir });
+      throw new Error("check-fs-authority unexpectedly passed");
+    } catch (err) {
+      const output = `${(err as { stdout?: string }).stdout ?? ""}\n${
+        (err as { stderr?: string }).stderr ?? ""
+      }`;
+      expect(output).toContain("writeFile() called on non-authority path");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects raw-internal re-exports from non-trusted modules", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "code-pact-fs-authority-"));
+    const target = join(dir, "probe.ts");
+    await writeFile(
+      target,
+      [
+        'export { readFile } from "../../src/core/project-fs/raw-internal.ts";',
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    try {
+      await execFileAsync("node", [scriptPath, target]);
+      throw new Error("check-fs-authority unexpectedly passed");
+    } catch (err) {
+      const output = `${(err as { stdout?: string }).stdout ?? ""}\n${
+        (err as { stderr?: string }).stderr ?? ""
+      }`;
+      expect(output).toContain("raw-internal import");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects node:fs namespace imports from non-trusted modules", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "code-pact-fs-authority-"));
+    const target = join(dir, "probe.ts");
+    await writeFile(
+      target,
+      [
+        'import * as fs from "node:fs/promises";',
+        "",
+        "async function f(path: string) {",
+        '  await fs.readFile(path, "utf8");',
+        "}",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    try {
+      await execFileAsync("node", [scriptPath, target]);
+      throw new Error("check-fs-authority unexpectedly passed");
+    } catch (err) {
+      const output = `${(err as { stdout?: string }).stdout ?? ""}\n${
+        (err as { stderr?: string }).stderr ?? ""
+      }`;
+      expect(output).toContain("node:fs import");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("discovery covers all src/**/*.ts including src/io and src/lib subdirectories", async () => {
+    try {
+      const { stdout } = await execFileAsync("node", [scriptPath], {
+        cwd: repoRoot,
+      });
+      expect(stdout).not.toContain("raw-internal import");
+      expect(stdout).not.toContain("node:fs import");
+    } catch (err) {
+      const output = `${(err as { stdout?: string }).stdout ?? ""}\n${
+        (err as { stderr?: string }).stderr ?? ""
+      }`;
+      expect(output).not.toContain("raw-internal import");
+      expect(output).not.toContain("node:fs import");
+    }
   });
 });
