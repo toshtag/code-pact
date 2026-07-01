@@ -38,6 +38,7 @@ import {
   copyFile as copyFileRaw,
   link as linkRaw,
   open as openRaw,
+  openReadNoFollow,
   mkdtemp as mkdtempRaw,
   readRegularOwnedText as readRegularOwnedTextRaw,
   existsSync as existsSyncRaw,
@@ -46,7 +47,7 @@ import {
   realpathSync as realpathSyncRaw,
 } from "./raw-internal.ts";
 import { realpath as realpathRaw } from "node:fs/promises";
-import type { FileHandle } from "./raw-internal.ts";
+import type { FileHandle } from "node:fs/promises";
 
 export async function readOwnedText(path: OwnedReadPath): Promise<string> {
   return readRegularOwnedTextRaw(unbrand(path));
@@ -152,14 +153,7 @@ export async function linkOwned(
 }
 
 export async function openOwnedRead(path: OwnedReadPath): Promise<FileHandle> {
-  return openRaw(unbrand(path), "r");
-}
-
-export async function openOwnedReadWithFlags(
-  path: OwnedReadPath,
-  flags: number,
-): Promise<FileHandle> {
-  return openRaw(unbrand(path), flags);
+  return openReadNoFollow(unbrand(path));
 }
 
 export async function openOwnedWriteExclusive(

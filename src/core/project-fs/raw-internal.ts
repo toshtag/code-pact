@@ -7,9 +7,9 @@
  * or the authority resolvers in {@link ./owned-read.ts} and
  * {@link ./control-plane.ts}.
  *
- * The `check:fs-authority` AST gate treats this module as a trusted fs
- * primitive (listed in `TRUSTED_FS_MODULES`). Non-trusted modules that
- * import from here will be flagged by the checker.
+ * The `check:fs-authority` AST gate allows this module only inside the raw
+ * filesystem boundary. Domain modules that import from here are flagged by the
+ * checker.
  */
 export {
   access,
@@ -42,6 +42,35 @@ export {
 export type { Dirent, Stats } from "node:fs";
 
 import { open as openRaw, constants as constantsRaw } from "node:fs/promises";
+import type { FileHandle } from "node:fs/promises";
+
+function unsupportedNoFollowError(): NodeJS.ErrnoException {
+  const error = new Error(
+    "O_NOFOLLOW is not supported on this platform; refusing to read without symlink protection",
+  );
+  (error as NodeJS.ErrnoException).code = "ENOSYS";
+  return error;
+}
+
+export function resolveNoFollowFlag(value: unknown): number {
+  if (typeof value !== "number") {
+    throw unsupportedNoFollowError();
+  }
+  return value;
+}
+
+export async function openReadNoFollow(path: string): Promise<FileHandle> {
+  const flags = constantsRaw.O_RDONLY | resolveNoFollowFlag(constantsRaw.O_NOFOLLOW);
+  try {
+    return await openRaw(path, flags);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "EINVAL" || code === "ENOTSUP" || code === "EOPNOTSUPP") {
+      throw unsupportedNoFollowError();
+    }
+    throw err;
+  }
+}
 
 /**
  * Read a regular text file via an O_NOFOLLOW file descriptor, preventing
@@ -61,28 +90,7 @@ import { open as openRaw, constants as constantsRaw } from "node:fs/promises";
  * ENOSYS rather than silently falling back to an unsafe read.
  */
 export async function readRegularOwnedText(path: string): Promise<string> {
-  if (typeof constantsRaw.O_NOFOLLOW !== "number") {
-    const error = new Error(
-      "O_NOFOLLOW is not supported on this platform; refusing to read without symlink protection",
-    );
-    (error as NodeJS.ErrnoException).code = "ENOSYS";
-    throw error;
-  }
-  const flags = constantsRaw.O_RDONLY | constantsRaw.O_NOFOLLOW;
-  let handle;
-  try {
-    handle = await openRaw(path, flags);
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code === "EINVAL") {
-      const error = new Error(
-        "O_NOFOLLOW is not supported on this platform; refusing to read without symlink protection",
-      );
-      (error as NodeJS.ErrnoException).code = "ENOSYS";
-      throw error;
-    }
-    throw err;
-  }
+  const handle = await openReadNoFollow(path);
   try {
     const stats = await handle.stat();
     if (!stats.isFile()) {

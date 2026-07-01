@@ -3,8 +3,9 @@
  *
  * This module exports ONLY branded path types, branded operations, and
  * namespace-specific authority resolvers. Raw fs primitives are available
- * from {@link ./raw-internal.ts} — but only trusted modules (listed in
- * `TRUSTED_FS_MODULES` in `check-fs-authority.mjs`) may import from there.
+ * from the raw-internal module — but only raw filesystem boundary modules
+ * listed in `RAW_FS_IMPORT_ALLOWLIST` in `check-fs-authority.mjs` may import
+ * from there.
  * The `check:fs-authority` AST gate enforces this at CI time.
  *
  * Domain modules MUST use the branded operations or namespace-specific
@@ -19,8 +20,7 @@ export type {
   OwnedListPath,
 } from "./branded-paths.ts";
 
-export type { FileHandle } from "./raw-internal.ts";
-export { constants } from "./raw-internal.ts";
+export type { FileHandle } from "node:fs/promises";
 
 export {
   readOwnedText,
@@ -43,7 +43,6 @@ export {
   copyOwnedToOwned,
   linkOwned,
   openOwnedRead,
-  openOwnedReadWithFlags,
   openOwnedWriteExclusive,
   openOwnedWrite,
   existsOwnedSync,

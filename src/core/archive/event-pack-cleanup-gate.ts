@@ -17,12 +17,9 @@
 // gate table (G0–G8) is the binding source for every disposition here.
 // ---------------------------------------------------------------------------
 
-import {
-  openOwnedReadWithFlags,
-  lstatOwned,
-} from "../project-fs/operations.ts";
+import { openOwnedRead, lstatOwned } from "../project-fs/operations.ts";
 import { brandOwnedRead } from "../project-fs/branded-paths-internal.ts";
-import { constants, type FileHandle } from "../project-fs/index.ts";
+import type { FileHandle } from "../project-fs/index.ts";
 import {
   planEventPack,
   findLiveTaskOwnersByTaskId,
@@ -55,10 +52,6 @@ export function looseEventRelPath(file: string): string {
 function isEnoent(err: unknown): boolean {
   return (err as NodeJS.ErrnoException)?.code === "ENOENT";
 }
-
-/** Open read-only WITHOUT following a final-component symlink, where the platform
- *  supports it (`O_NOFOLLOW` falls back to 0 — follow — where it is absent). */
-const O_NOFOLLOW_READONLY = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0);
 
 /**
  * Read a loose event file as a REGULAR file, never reading or accepting a symlink's
@@ -95,7 +88,7 @@ async function readRegularEventFileNoSymlink(
   // (2) open with O_NOFOLLOW (where supported); (3) fstat + inode identity check.
   let fh: FileHandle;
   try {
-    fh = await openOwnedReadWithFlags(brandOwnedRead(abs), O_NOFOLLOW_READONLY);
+    fh = await openOwnedRead(brandOwnedRead(abs));
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "ENOENT") return { disposition: "vanished" };
