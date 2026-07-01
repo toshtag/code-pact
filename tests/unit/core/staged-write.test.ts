@@ -58,8 +58,8 @@ vi.mock("../../../src/core/project-fs/raw-internal.ts", async importActual => {
       const from = String(args[0]);
       const to = String(args[1]);
       const isDataRename =
-        !from.includes(".code-pact/state/adapter-transactions") &&
-        !to.includes(".code-pact/state/adapter-transactions");
+        !from.includes("adapter-transactions") &&
+        !to.includes("adapter-transactions");
       if (isDataRename) failAfterFirstRename.count++;
       if (
         isDataRename &&

@@ -54,7 +54,7 @@ describe("phaseSnapshotPath", () => {
 });
 
 describe("normalizeDecisionRef (canonical confinement)", () => {
-  it("accepts a top-level design/decisions/*.md and normalizes ./ prefixes", () => {
+  it("accepts a design/decisions/**/*.md and normalizes ./ prefixes", () => {
     expect(normalizeDecisionRef("design/decisions/foo-rfc.md")).toBe(
       "design/decisions/foo-rfc.md",
     );
