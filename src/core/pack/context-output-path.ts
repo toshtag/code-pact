@@ -1,4 +1,8 @@
 import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
+import {
+  brandOwnedWrite,
+  type OwnedWritePath,
+} from "../project-fs/branded-paths-internal.ts";
 import { ContextOutputDir } from "../schemas/agent-profile.ts";
 import { PlanId } from "../schemas/plan-id.ts";
 
@@ -22,7 +26,7 @@ export async function resolveProfileContextOutputPath(
   cwd: string,
   contextDir: string,
   taskId: string,
-): Promise<string> {
+): Promise<OwnedWritePath> {
   // 1. Schema-validate the context_dir namespace.
   try {
     ContextOutputDir.parse(contextDir);
@@ -38,9 +42,7 @@ export async function resolveProfileContextOutputPath(
   try {
     PlanId.parse(taskId);
   } catch {
-    const e = new Error(
-      `task id "${taskId}" is not a valid plan identifier`,
-    );
+    const e = new Error(`task id "${taskId}" is not a valid plan identifier`);
     (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
     throw e;
   }
@@ -48,7 +50,7 @@ export async function resolveProfileContextOutputPath(
   // 3. Build the full output path and resolve through symlink-free containment.
   const relPath = `${contextDir}/${taskId}.md`;
   try {
-    return await resolveSymlinkFreeProjectPath(cwd, relPath);
+    return brandOwnedWrite(await resolveSymlinkFreeProjectPath(cwd, relPath));
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "PATH_OUTSIDE_PROJECT" || code === "PATH_NOT_OWNED") {

@@ -14,6 +14,11 @@ import { deriveTaskState } from "../progress/task-state.ts";
 import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
 import { resolveProfileContextOutputPath } from "./context-output-path.ts";
 import {
+  brandOwnedWrite,
+  unbrand,
+  type OwnedWritePath,
+} from "../project-fs/branded-paths-internal.ts";
+import {
   loadAgentProfile,
   loadConstitution,
   loadRules,
@@ -314,16 +319,16 @@ export async function writeContextPack(
 ): Promise<WriteContextPackResult> {
   const { cwd, agentName, outputDir } = opts;
   const profile = await loadAgentProfile(cwd, agentName);
-  let outputPath: string;
+  let outputPath: OwnedWritePath;
   if (outputDir !== undefined) {
     // Explicit --output-dir: caller authority, not profile-derived.
     // Absolute paths are used as-is (explicit user choice, e.g. /tmp).
     // Project-relative paths are resolved through symlink-free containment.
     if (isAbsolute(outputDir)) {
-      outputPath = join(outputDir, `${pack.taskId}.md`);
+      outputPath = brandOwnedWrite(join(outputDir, `${pack.taskId}.md`));
     } else {
       const dir = await resolveSymlinkFreeProjectPath(cwd, outputDir);
-      outputPath = join(dir, `${pack.taskId}.md`);
+      outputPath = brandOwnedWrite(join(dir, `${pack.taskId}.md`));
     }
   } else {
     // Profile-derived: constrained to .context/** + symlink-free resolution
@@ -335,5 +340,5 @@ export async function writeContextPack(
     );
   }
   await atomicWriteText(outputPath, pack.content);
-  return { outputPath };
+  return { outputPath: unbrand(outputPath) };
 }
