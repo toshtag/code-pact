@@ -7,7 +7,8 @@
 // re-exports below keep existing adapter call sites working unchanged.
 // ---------------------------------------------------------------------------
 
-import { readFile, stat } from "../project-fs/raw-internal.ts";
+import { readOwnedText, statOwned } from "../project-fs/operations.ts";
+import { brandOwnedRead } from "../project-fs/branded-paths-internal.ts";
 import {
   assertSafeRelativePath as assertSafeRelativePathImpl,
   resolveSymlinkFreeProjectPath,
@@ -46,7 +47,7 @@ export async function readAuthorizedRegularFileMaybe(
 ): Promise<string | null> {
   let st: import("node:fs").Stats;
   try {
-    st = await stat(absPath);
+    st = await statOwned(brandOwnedRead(absPath));
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "ENOENT") return null;
@@ -60,7 +61,7 @@ export async function readAuthorizedRegularFileMaybe(
     );
   }
   try {
-    return await readFile(absPath, "utf8");
+    return await readOwnedText(brandOwnedRead(absPath));
   } catch (err) {
     throw configError(
       `authorized adapter file "${relPath}" cannot be read (${(err as NodeJS.ErrnoException).code ?? "unreadable"})`,
@@ -74,7 +75,7 @@ export async function authorizedPathExists(
   relPath: string,
 ): Promise<boolean> {
   try {
-    await stat(absPath);
+    await statOwned(brandOwnedRead(absPath));
     return true;
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
@@ -129,7 +130,7 @@ export async function assertAdapterWritePathsContained(
     // Type check the FINAL entry (follow symlinks — containment already vetted).
     let st: import("node:fs").Stats;
     try {
-      st = await stat(abs);
+      st = await statOwned(brandOwnedRead(abs));
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
       if (code === "ENOENT") {

@@ -1,4 +1,4 @@
-import { readFile } from "../project-fs/raw-internal.ts";
+import { readOwnedText } from "../project-fs/operations.ts";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
@@ -6,6 +6,8 @@ import { atomicWriteText } from "../../io/atomic-text.ts";
 import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
 import {
   brandOwnedWrite,
+  brandOwnedRead,
+  unbrand,
   type OwnedWritePath,
 } from "../project-fs/branded-paths-internal.ts";
 import {
@@ -102,7 +104,7 @@ export async function readManifest(
   const path = await resolveManifestPath(cwd, agentName);
   let raw: string;
   try {
-    raw = await readFile(path, "utf8");
+    raw = await readOwnedText(brandOwnedRead(unbrand(path)));
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
     // Any OTHER read failure on a project-controlled (adversarial) manifest path
