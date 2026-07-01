@@ -33,6 +33,14 @@ export {
   lstatExplicitUser,
   lstatOwnedList,
   mkdirOwned,
+  writeOwnedText,
+  writeOwnedFile,
+  removeOwned,
+  renameOwned,
+  copyOwnedToOwned,
+  linkOwned,
+  openOwnedRead,
+  openOwnedWriteExclusive,
 } from "./operations.ts";
 
 export {

@@ -31,8 +31,15 @@ import {
   unlink as unlinkRaw,
   access as accessRaw,
   mkdir as mkdirRaw,
+  writeFile as writeFileRaw,
+  rename as renameRaw,
+  rm as rmRaw,
+  copyFile as copyFileRaw,
+  link as linkRaw,
+  open as openRaw,
   readRegularOwnedText as readRegularOwnedTextRaw,
 } from "./raw-internal.ts";
+import type { FileHandle } from "./raw-internal.ts";
 
 export async function readOwnedText(path: OwnedReadPath): Promise<string> {
   return readRegularOwnedTextRaw(unbrand(path));
@@ -91,4 +98,56 @@ export async function mkdirOwned(
   options?: { recursive?: boolean },
 ): Promise<void> {
   await mkdirRaw(unbrand(path), options);
+}
+
+export async function writeOwnedText(
+  path: OwnedWritePath,
+  content: string,
+): Promise<void> {
+  await writeFileRaw(unbrand(path), content, "utf8");
+}
+
+export async function writeOwnedFile(
+  path: OwnedWritePath,
+  data: string | Buffer | Uint8Array,
+): Promise<void> {
+  await writeFileRaw(unbrand(path), data);
+}
+
+export async function removeOwned(
+  path: OwnedDeletePath,
+  options?: { recursive?: boolean; force?: boolean },
+): Promise<void> {
+  await rmRaw(unbrand(path), options);
+}
+
+export async function renameOwned(
+  src: OwnedWritePath | OwnedDeletePath,
+  dst: OwnedWritePath,
+): Promise<void> {
+  await renameRaw(unbrand(src), unbrand(dst));
+}
+
+export async function copyOwnedToOwned(
+  src: OwnedReadPath,
+  dst: OwnedWritePath,
+): Promise<void> {
+  await copyFileRaw(unbrand(src), unbrand(dst));
+}
+
+export async function linkOwned(
+  src: OwnedReadPath,
+  dst: OwnedWritePath,
+): Promise<void> {
+  await linkRaw(unbrand(src), unbrand(dst));
+}
+
+export async function openOwnedRead(path: OwnedReadPath): Promise<FileHandle> {
+  return openRaw(unbrand(path), "r");
+}
+
+export async function openOwnedWriteExclusive(
+  path: OwnedWritePath,
+): Promise<FileHandle> {
+  return openRaw(unbrand(path), "wx");
 }

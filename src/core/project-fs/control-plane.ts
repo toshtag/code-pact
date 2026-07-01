@@ -1,16 +1,13 @@
-import { readRegularOwnedText, stat, readdir } from "./raw-internal.ts";
-import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
-import { isDecisionRefPath } from "../schemas/decision-ref.ts";
+import { readOwnedText, statOwned, listOwned } from "./operations.ts";
+import {
+  resolvePhaseReadPath,
+  resolvePhaseDirectoryReadPath,
+  resolveDecisionReadPath,
+  resolveDecisionDirectoryReadPath,
+  resolveRoadmapReadPath,
+  resolveInitReadPath,
+} from "./authority-resolvers.ts";
 import { PhaseRef } from "../schemas/roadmap.ts";
-
-/**
- * Read a regular text file at an absolute path via O_NOFOLLOW fd read,
- * preventing final-entry symlink swap races. Throws on directory, ENOENT,
- * symlink (ELOOP), or any I/O error. The path must already be authority-resolved.
- */
-async function readRegularText(abs: string): Promise<string> {
-  return readRegularOwnedText(abs);
-}
 
 /**
  * Read a phase YAML from the project. The path must come from a validated
@@ -22,8 +19,7 @@ export async function readOwnedPhaseRaw(
   ref: PhaseRef,
 ): Promise<string> {
   PhaseRef.parse(ref);
-  const abs = await resolveSymlinkFreeProjectPath(cwd, ref.path);
-  return readRegularText(abs);
+  return readOwnedText(await resolvePhaseReadPath(cwd, ref.path));
 }
 
 /**
@@ -36,8 +32,7 @@ export async function readOwnedPhaseRawByPath(
   phasePath: string,
 ): Promise<string> {
   const ref = PhaseRef.parse({ id: "unknown", path: phasePath, weight: 1 });
-  const abs = await resolveSymlinkFreeProjectPath(cwd, ref.path);
-  return readRegularText(abs);
+  return readOwnedText(await resolvePhaseReadPath(cwd, ref.path));
 }
 
 /**
@@ -49,15 +44,7 @@ export async function readOwnedDecisionRaw(
   cwd: string,
   decisionPath: string,
 ): Promise<string> {
-  if (!isDecisionRefPath(decisionPath)) {
-    const err = new Error(
-      `path "${decisionPath}" is not a valid decision reference (must be under design/decisions/**/*.md)`,
-    );
-    (err as NodeJS.ErrnoException).code = "PATH_NOT_OWNED";
-    throw err;
-  }
-  const abs = await resolveSymlinkFreeProjectPath(cwd, decisionPath);
-  return readRegularText(abs);
+  return readOwnedText(await resolveDecisionReadPath(cwd, decisionPath));
 }
 
 /**
@@ -65,8 +52,7 @@ export async function readOwnedDecisionRaw(
  * (`design/roadmap.yaml`) with symlink-free resolution.
  */
 export async function readOwnedRoadmapRaw(cwd: string): Promise<string> {
-  const abs = await resolveSymlinkFreeProjectPath(cwd, "design/roadmap.yaml");
-  return readRegularText(abs);
+  return readOwnedText(await resolveRoadmapReadPath(cwd));
 }
 
 /**
@@ -75,8 +61,7 @@ export async function readOwnedRoadmapRaw(cwd: string): Promise<string> {
  * are NOT followed by the caller (readdir withFileTypes distinguishes).
  */
 export async function listOwnedPhaseDirectory(cwd: string): Promise<string[]> {
-  const abs = await resolveSymlinkFreeProjectPath(cwd, "design/phases");
-  return readdir(abs);
+  return listOwned(await resolvePhaseDirectoryReadPath(cwd));
 }
 
 /**
@@ -86,8 +71,7 @@ export async function listOwnedPhaseDirectory(cwd: string): Promise<string[]> {
 export async function listOwnedDecisionDirectory(
   cwd: string,
 ): Promise<string[]> {
-  const abs = await resolveSymlinkFreeProjectPath(cwd, "design/decisions");
-  return readdir(abs);
+  return listOwned(await resolveDecisionDirectoryReadPath(cwd));
 }
 
 /**
@@ -99,14 +83,14 @@ export async function ownedPathPresence(
   cwd: string,
   relPath: string,
 ): Promise<"present" | "absent" | "inaccessible"> {
-  let abs: string;
+  let path;
   try {
-    abs = await resolveSymlinkFreeProjectPath(cwd, relPath);
+    path = await resolveInitReadPath(cwd, relPath);
   } catch {
     return "inaccessible";
   }
   try {
-    await stat(abs);
+    await statOwned(path);
     return "present";
   } catch (err) {
     return (err as NodeJS.ErrnoException).code === "ENOENT"
