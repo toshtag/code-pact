@@ -9,6 +9,8 @@
  * Domain modules MUST use these resolvers instead of constructing branded
  * paths directly or using generic containment-only helpers.
  */
+import { isAbsolute, relative, resolve } from "node:path";
+import { realpath } from "node:fs/promises";
 import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
 import {
   isDecisionRefPath,
@@ -19,9 +21,13 @@ import {
   brandOwnedRead,
   brandOwnedWrite,
   brandOwnedDelete,
+  brandExplicitUserRead,
+  brandOwnedList,
   type OwnedReadPath,
   type OwnedWritePath,
   type OwnedDeletePath,
+  type ExplicitUserReadPath,
+  type OwnedListPath,
 } from "./branded-paths-internal.ts";
 
 function codedPathNotOwned(raw: string): Error {
@@ -30,9 +36,11 @@ function codedPathNotOwned(raw: string): Error {
   return err;
 }
 
-function codedPathOutsideProject(raw: string): Error {
-  const err = new Error(`path resolves outside the project root: ${raw}`);
-  (err as NodeJS.ErrnoException).code = "PATH_OUTSIDE_PROJECT";
+function codedFilesystemAuthorityFailure(raw: string, code?: string): Error {
+  const err = new Error(
+    `filesystem authority resolution failed for "${raw}"${code ? ` (${code})` : ""}`,
+  );
+  (err as NodeJS.ErrnoException).code = "FS_AUTHORITY_FAILURE";
   return err;
 }
 
@@ -41,6 +49,10 @@ async function resolveAndBrandRead(
   relPath: string,
   validate: (relPath: string) => boolean,
 ): Promise<OwnedReadPath> {
+  if (relPath === ".") {
+    if (!validate(relPath)) throw codedPathNotOwned(relPath);
+    return brandOwnedRead(cwd);
+  }
   assertSafeRelativePath(relPath);
   if (!validate(relPath)) {
     throw codedPathNotOwned(relPath);
@@ -48,8 +60,12 @@ async function resolveAndBrandRead(
   try {
     const abs = await resolveSymlinkFreeProjectPath(cwd, relPath);
     return brandOwnedRead(abs);
-  } catch {
-    throw codedPathOutsideProject(relPath);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "PATH_NOT_OWNED" || code === "PATH_OUTSIDE_PROJECT") {
+      throw error;
+    }
+    throw codedFilesystemAuthorityFailure(relPath, code);
   }
 }
 
@@ -58,6 +74,10 @@ async function resolveAndBrandWrite(
   relPath: string,
   validate: (relPath: string) => boolean,
 ): Promise<OwnedWritePath> {
+  if (relPath === ".") {
+    if (!validate(relPath)) throw codedPathNotOwned(relPath);
+    return brandOwnedWrite(cwd);
+  }
   assertSafeRelativePath(relPath);
   if (!validate(relPath)) {
     throw codedPathNotOwned(relPath);
@@ -65,8 +85,12 @@ async function resolveAndBrandWrite(
   try {
     const abs = await resolveSymlinkFreeProjectPath(cwd, relPath);
     return brandOwnedWrite(abs);
-  } catch {
-    throw codedPathOutsideProject(relPath);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "PATH_NOT_OWNED" || code === "PATH_OUTSIDE_PROJECT") {
+      throw error;
+    }
+    throw codedFilesystemAuthorityFailure(relPath, code);
   }
 }
 
@@ -75,6 +99,10 @@ async function resolveAndBrandDelete(
   relPath: string,
   validate: (relPath: string) => boolean,
 ): Promise<OwnedDeletePath> {
+  if (relPath === ".") {
+    if (!validate(relPath)) throw codedPathNotOwned(relPath);
+    return brandOwnedDelete(cwd);
+  }
   assertSafeRelativePath(relPath);
   if (!validate(relPath)) {
     throw codedPathNotOwned(relPath);
@@ -82,8 +110,69 @@ async function resolveAndBrandDelete(
   try {
     const abs = await resolveSymlinkFreeProjectPath(cwd, relPath);
     return brandOwnedDelete(abs);
-  } catch {
-    throw codedPathOutsideProject(relPath);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "PATH_NOT_OWNED" || code === "PATH_OUTSIDE_PROJECT") {
+      throw error;
+    }
+    throw codedFilesystemAuthorityFailure(relPath, code);
+  }
+}
+
+async function resolveAndBrandList(
+  cwd: string,
+  relPath: string,
+  validate: (relPath: string) => boolean,
+): Promise<OwnedListPath> {
+  if (relPath === ".") {
+    if (!validate(relPath)) throw codedPathNotOwned(relPath);
+    return brandOwnedList(cwd);
+  }
+  assertSafeRelativePath(relPath);
+  if (!validate(relPath)) {
+    throw codedPathNotOwned(relPath);
+  }
+  try {
+    const abs = await resolveSymlinkFreeProjectPath(cwd, relPath);
+    return brandOwnedList(abs);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "PATH_NOT_OWNED" || code === "PATH_OUTSIDE_PROJECT") {
+      throw error;
+    }
+    throw codedFilesystemAuthorityFailure(relPath, code);
+  }
+}
+
+async function resolveAndBrandExplicitUserRead(
+  cwd: string,
+  relPath: string,
+): Promise<ExplicitUserReadPath> {
+  let projectRelative: string;
+  if (isAbsolute(relPath)) {
+    const cwdReal = await realpath(cwd).catch(() => cwd);
+    const inputReal = await realpath(relPath).catch(() => resolve(relPath));
+    projectRelative = relative(cwdReal, inputReal);
+    if (projectRelative.startsWith("..")) {
+      const cwdResolved = resolve(cwd);
+      projectRelative = relative(cwdResolved, resolve(relPath));
+    }
+  } else {
+    projectRelative = relPath;
+  }
+  if (projectRelative === ".") {
+    return brandExplicitUserRead(cwd);
+  }
+  assertSafeRelativePath(projectRelative);
+  try {
+    const abs = await resolveSymlinkFreeProjectPath(cwd, projectRelative);
+    return brandExplicitUserRead(abs);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "PATH_NOT_OWNED" || code === "PATH_OUTSIDE_PROJECT") {
+      throw error;
+    }
+    throw codedFilesystemAuthorityFailure(relPath, code);
   }
 }
 
@@ -107,13 +196,22 @@ export async function resolveDecisionReadPath(
  */
 export async function resolveDecisionDirectoryReadPath(
   cwd: string,
-): Promise<OwnedReadPath> {
-  return resolveAndBrandRead(cwd, "design/decisions", () => true);
+): Promise<OwnedListPath> {
+  return resolveAndBrandList(cwd, "design/decisions", () => true);
 }
 
 /**
- * Resolve a phase file path for reading. Phase paths come from a validated
- * `PhaseRef` and must end with `.yaml`.
+ * Resolve the phases directory (`design/phases/`) for listing.
+ */
+export async function resolvePhaseDirectoryReadPath(
+  cwd: string,
+): Promise<OwnedListPath> {
+  return resolveAndBrandList(cwd, "design/phases", () => true);
+}
+
+/**
+ * Resolve a phase file path for reading. Phase paths must be under
+ * `design/phases/` and end with `.yaml`.
  */
 export async function resolvePhaseReadPath(
   cwd: string,
@@ -123,8 +221,9 @@ export async function resolvePhaseReadPath(
     cwd,
     relPath,
     p =>
+      p.startsWith("design/phases/") &&
       p.endsWith(".yaml") &&
-      (p.startsWith("design/phases/") || p.startsWith("design/")),
+      p !== "design/phases/.yaml",
   );
 }
 
@@ -165,8 +264,8 @@ export async function resolveModelProfileReadPath(
  */
 export async function resolveModelProfileDirectoryReadPath(
   cwd: string,
-): Promise<OwnedReadPath> {
-  return resolveAndBrandRead(cwd, ".code-pact/model-profiles", () => true);
+): Promise<OwnedListPath> {
+  return resolveAndBrandList(cwd, ".code-pact/model-profiles", () => true);
 }
 
 /**
@@ -194,19 +293,27 @@ export async function resolveGitignoreReadPath(
   return resolveAndBrandRead(cwd, ".gitignore", () => true);
 }
 
+const INSTRUCTION_PATHS = new Set([
+  "design/constitution.md",
+  "design/brief.md",
+]);
+
+function isInstructionPath(raw: string): boolean {
+  return INSTRUCTION_PATHS.has(raw);
+}
+
 /**
- * Resolve a design instruction file (e.g. `design/constitution.md`,
+ * Resolve a design instruction file (`design/constitution.md` or
  * `design/brief.md`) for reading.
  */
 export async function resolveInstructionReadPath(
   cwd: string,
   relPath: string,
 ): Promise<OwnedReadPath> {
-  return resolveAndBrandRead(
-    cwd,
-    relPath,
-    p => p.startsWith("design/") && p.endsWith(".md"),
-  );
+  if (!isInstructionPath(relPath)) {
+    throw codedPathNotOwned(relPath);
+  }
+  return resolveAndBrandRead(cwd, relPath, () => true);
 }
 
 /**
@@ -216,8 +323,8 @@ export async function resolveInstructionReadPath(
 export async function resolveContextDirectoryReadPath(
   cwd: string,
   relPath: string,
-): Promise<OwnedReadPath> {
-  return resolveAndBrandRead(cwd, relPath, () => true);
+): Promise<OwnedListPath> {
+  return resolveAndBrandList(cwd, relPath, () => true);
 }
 
 /**
@@ -227,8 +334,8 @@ export async function resolveContextDirectoryReadPath(
 export async function resolveOwnedDirectoryReadPath(
   cwd: string,
   relPath: string,
-): Promise<OwnedReadPath> {
-  return resolveAndBrandRead(
+): Promise<OwnedListPath> {
+  return resolveAndBrandList(
     cwd,
     relPath,
     p =>
@@ -268,24 +375,83 @@ export async function resolveAdapterStaticReadPath(
 }
 
 /**
- * Resolve any project-relative path for symlink-free reading.
- * This is the generic fallback for diagnostic reads that have already been
- * validated by the caller (e.g. manifest ownership checks). It provides
- * containment and symlink-free resolution but does NOT enforce namespace
- * ownership — callers must ensure the path is safe to read.
+ * Resolve a design rules file (`design/rules/*.md`) for reading.
  */
-export async function resolveContainedReadPath(
+export async function resolveRulesReadPath(
   cwd: string,
   relPath: string,
 ): Promise<OwnedReadPath> {
-  if (relPath === ".") {
-    return brandOwnedRead(cwd);
-  }
-  const projectRelative = relPath.startsWith("/")
-    ? relPath.slice(cwd.endsWith("/") ? cwd.length : cwd.length + 1)
-    : relPath;
-  const abs = await resolveSymlinkFreeProjectPath(cwd, projectRelative);
-  return brandOwnedRead(abs);
+  return resolveAndBrandRead(
+    cwd,
+    relPath,
+    p => p.startsWith("design/rules/") && p.endsWith(".md"),
+  );
+}
+
+/**
+ * Resolve the design rules directory (`design/rules/`) for listing.
+ */
+export async function resolveRulesDirectoryReadPath(
+  cwd: string,
+): Promise<OwnedListPath> {
+  return resolveAndBrandList(cwd, "design/rules", () => true);
+}
+
+/**
+ * Resolve the doctor config file (`.code-pact/doctor.yaml`) for reading.
+ */
+export async function resolveDoctorConfigReadPath(
+  cwd: string,
+): Promise<OwnedReadPath> {
+  return resolveAndBrandRead(cwd, ".code-pact/doctor.yaml", () => true);
+}
+
+/**
+ * Resolve an explicit user-supplied input path (e.g. `--from-file`) for
+ * reading. This grants read access ONLY — the resulting ExplicitUserReadPath
+ * cannot be passed to write, delete, or mkdir operations.
+ */
+export async function resolveExplicitUserReadPath(
+  cwd: string,
+  relPath: string,
+): Promise<ExplicitUserReadPath> {
+  return resolveAndBrandExplicitUserRead(cwd, relPath);
+}
+
+/**
+ * Resolve a project directory for mkdir during init. Init is a special
+ * command that creates the initial project structure, so it needs write
+ * access to any path under the project root. The path must still pass
+ * symlink-free resolution.
+ */
+export async function resolveInitWritePath(
+  cwd: string,
+  relPath: string,
+): Promise<OwnedWritePath> {
+  return resolveAndBrandWrite(cwd, relPath, () => true);
+}
+
+/**
+ * Resolve a project path for reading during init. Init needs to check
+ * existence of files in any namespace. The path must pass symlink-free
+ * resolution.
+ */
+export async function resolveInitReadPath(
+  cwd: string,
+  relPath: string,
+): Promise<OwnedReadPath> {
+  return resolveAndBrandRead(cwd, relPath, () => true);
+}
+
+/**
+ * Resolve a project directory for listing during init or general project
+ * traversal (e.g. link-collector). The path must pass symlink-free resolution.
+ */
+export async function resolveInitListPath(
+  cwd: string,
+  relPath: string,
+): Promise<OwnedListPath> {
+  return resolveAndBrandList(cwd, relPath, () => true);
 }
 
 // ── Write resolvers ──────────────────────────────────────────────────────
@@ -306,8 +472,8 @@ export async function resolveDecisionWritePath(
 }
 
 /**
- * Resolve a phase file path for writing. Phase paths must end with `.yaml`
- * and be under `design/phases/` or `design/`.
+ * Resolve a phase file path for writing. Phase paths must be under
+ * `design/phases/` and end with `.yaml`.
  */
 export async function resolvePhaseWritePath(
   cwd: string,
@@ -317,8 +483,9 @@ export async function resolvePhaseWritePath(
     cwd,
     relPath,
     p =>
+      p.startsWith("design/phases/") &&
       p.endsWith(".yaml") &&
-      (p.startsWith("design/phases/") || p.startsWith("design/")),
+      p !== "design/phases/.yaml",
   );
 }
 
@@ -356,18 +523,17 @@ export async function resolveProgressDeletePath(
 }
 
 /**
- * Resolve a design instruction file (e.g. `design/constitution.md`,
+ * Resolve a design instruction file (`design/constitution.md` or
  * `design/brief.md`) for writing.
  */
 export async function resolveInstructionWritePath(
   cwd: string,
   relPath: string,
 ): Promise<OwnedWritePath> {
-  return resolveAndBrandWrite(
-    cwd,
-    relPath,
-    p => p.startsWith("design/") && p.endsWith(".md"),
-  );
+  if (!isInstructionPath(relPath)) {
+    throw codedPathNotOwned(relPath);
+  }
+  return resolveAndBrandWrite(cwd, relPath, () => true);
 }
 
 /**
@@ -441,40 +607,8 @@ export async function resolvePhaseDeletePath(
     cwd,
     relPath,
     p =>
+      p.startsWith("design/phases/") &&
       p.endsWith(".yaml") &&
-      (p.startsWith("design/phases/") || p.startsWith("design/")),
+      p !== "design/phases/.yaml",
   );
-}
-
-/**
- * Resolve any project-relative path for symlink-free writing.
- * Generic fallback for write operations that have already been validated
- * by the caller. Provides containment and symlink-free resolution but
- * does NOT enforce namespace ownership.
- */
-export async function resolveContainedWritePath(
-  cwd: string,
-  relPath: string,
-): Promise<OwnedWritePath> {
-  const projectRelative = relPath.startsWith("/")
-    ? relPath.slice(cwd.endsWith("/") ? cwd.length : cwd.length + 1)
-    : relPath;
-  const abs = await resolveSymlinkFreeProjectPath(cwd, projectRelative);
-  return brandOwnedWrite(abs);
-}
-
-/**
- * Resolve any project-relative path for symlink-free deletion.
- * Generic fallback for delete operations that have already been validated
- * by the caller.
- */
-export async function resolveContainedDeletePath(
-  cwd: string,
-  relPath: string,
-): Promise<OwnedDeletePath> {
-  const projectRelative = relPath.startsWith("/")
-    ? relPath.slice(cwd.endsWith("/") ? cwd.length : cwd.length + 1)
-    : relPath;
-  const abs = await resolveSymlinkFreeProjectPath(cwd, projectRelative);
-  return brandOwnedDelete(abs);
 }

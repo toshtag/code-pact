@@ -8,7 +8,13 @@ import {
 } from "../path-safety.ts";
 import {
   brandOwnedRead,
+  brandOwnedDelete,
+  brandOwnedList,
+  brandOwnedWrite,
   type OwnedReadPath,
+  type OwnedDeletePath,
+  type OwnedListPath,
+  type OwnedWritePath,
 } from "../project-fs/branded-paths-internal.ts";
 
 // Record locations for the archive layer. One file per record (mirroring the
@@ -72,6 +78,39 @@ export async function resolveArchiveOwnedPath(
 ): Promise<OwnedReadPath> {
   try {
     return brandOwnedRead(await resolveSymlinkFreeProjectPath(cwd, relPath));
+  } catch (err) {
+    mapArchiveOwnershipError(err);
+  }
+}
+
+export async function resolveArchiveOwnedDeletePath(
+  cwd: string,
+  relPath: string,
+): Promise<OwnedDeletePath> {
+  try {
+    return brandOwnedDelete(await resolveSymlinkFreeProjectPath(cwd, relPath));
+  } catch (err) {
+    mapArchiveOwnershipError(err);
+  }
+}
+
+export async function resolveArchiveOwnedListPath(
+  cwd: string,
+  relPath: string,
+): Promise<OwnedListPath> {
+  try {
+    return brandOwnedList(await resolveSymlinkFreeProjectPath(cwd, relPath));
+  } catch (err) {
+    mapArchiveOwnershipError(err);
+  }
+}
+
+export async function resolveArchiveOwnedWritePath(
+  cwd: string,
+  relPath: string,
+): Promise<OwnedWritePath> {
+  try {
+    return brandOwnedWrite(await resolveSymlinkFreeProjectPath(cwd, relPath));
   } catch (err) {
     mapArchiveOwnershipError(err);
   }
