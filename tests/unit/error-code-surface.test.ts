@@ -258,10 +258,15 @@ const KNOWN_CODES: Record<
   // from "owned". Command layers map it to CONFIG_ERROR / ADAPTER_MANIFEST_INVALID.
   // It is internal, not a top-level public envelope.
   PATH_NOT_OWNED: "internal",
-  // Node.js standard errno: emitted by control-plane readRegularText when
-  // a path that should be a regular file is a directory. Always caught and
-  // remapped by callers (e.g. ENOENT-like handling in archive/decision gates).
-  EISDIR: "internal",
+  // Emitted by readRegularOwnedText (raw-internal.ts) when O_NOFOLLOW is
+  // not supported on the platform. Always caught and remapped by callers.
+  ENOSYS: "internal",
+  // Emitted by readRegularOwnedText (raw-internal.ts) when a path that
+  // should be a regular file is not. Always caught and remapped by callers.
+  ENOTFILE: "internal",
+  // Emitted by pruned-ledger.ts when a serialized row has a path that
+  // fails decision ref validation. Surfaced as an unhandled exception.
+  INVALID_PRUNED_DECISION_PATH: "internal",
   // Defense-in-depth invariant: an adapter generator produced two desired
   // files at the same path with differing content. Should never fire (each
   // adapter uniquifies its own paths); surfaced as an unhandled exception

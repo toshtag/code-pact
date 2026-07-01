@@ -47,10 +47,10 @@ vi.mock("node:fs/promises", async importActual => {
   };
 });
 
-vi.mock("../../../src/core/project-fs/index.ts", async importActual => {
+vi.mock("../../../src/core/project-fs/raw-internal.ts", async importActual => {
   const actual =
     await importActual<
-      typeof import("../../../src/core/project-fs/index.ts")
+      typeof import("../../../src/core/project-fs/raw-internal.ts")
     >();
   return {
     ...actual,
