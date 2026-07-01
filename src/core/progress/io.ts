@@ -1,12 +1,11 @@
-import { readFile } from "../project-fs/raw-internal.ts";
+import { readOwnedText } from "../project-fs/operations.ts";
+import { resolveProgressReadPath } from "../project-fs/authority-resolvers.ts";
+import type { OwnedWritePath } from "../project-fs/branded-paths-internal.ts";
 import { join } from "node:path";
 import { stringify as stringifyYaml } from "yaml";
 import { atomicWriteText } from "../../io/atomic-text.ts";
 import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
-import {
-  ProgressLog,
-  type ProgressEvent,
-} from "../schemas/progress-event.ts";
+import { ProgressLog, type ProgressEvent } from "../schemas/progress-event.ts";
 import { computeEventId, normalizeAt } from "./event-id.ts";
 import { type LoadedEventFile } from "./events-io.ts";
 import { readAllProgressEventSources } from "./all-sources.ts";
@@ -19,7 +18,10 @@ export function progressPath(cwd: string): string {
 
 export async function resolveProgressPath(cwd: string): Promise<string> {
   try {
-    return await resolveSymlinkFreeProjectPath(cwd, PROGRESS_PATH_SEGMENTS.join("/"));
+    return await resolveSymlinkFreeProjectPath(
+      cwd,
+      PROGRESS_PATH_SEGMENTS.join("/"),
+    );
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "PATH_OUTSIDE_PROJECT" || code === "PATH_NOT_OWNED") {
@@ -84,14 +86,19 @@ export function mergeProgressStreams(
     if (!byId.has(id)) byId.set(id, { event, order: Number.MAX_SAFE_INTEGER });
   }
   return [...byId.entries()]
-    .map(([id, { event, order }]) => ({ id, event, order, at: normalizeAt(event.at) }))
+    .map(([id, { event, order }]) => ({
+      id,
+      event,
+      order,
+      at: normalizeAt(event.at),
+    }))
     .sort(
       (a, b) =>
         (a.at < b.at ? -1 : a.at > b.at ? 1 : 0) ||
         (a.id < b.id ? -1 : a.id > b.id ? 1 : 0) ||
         a.order - b.order,
     )
-    .map((m) => m.event);
+    .map(m => m.event);
 }
 
 /**
@@ -115,7 +122,9 @@ export async function loadMergedProgress(cwd: string): Promise<LoadedProgress> {
   // enforced. Strict mode: a corrupt/unbound pack or a legacy conflict throws.
   let raw = "";
   try {
-    raw = await readFile(path, "utf8");
+    raw = await readOwnedText(
+      await resolveProgressReadPath(cwd, PROGRESS_PATH_SEGMENTS.join("/")),
+    );
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
   }
@@ -151,7 +160,7 @@ export async function loadProgressLog(cwd: string): Promise<LoadedProgress> {
  * the serialization step separately.
  */
 export async function atomicWriteYaml(
-  path: string,
+  path: OwnedWritePath,
   value: unknown,
 ): Promise<void> {
   await atomicWriteText(path, stringifyYaml(value));
