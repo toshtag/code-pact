@@ -1,7 +1,11 @@
-import { readdir, readFile } from "../project-fs/raw-internal.ts";
+import { readOwnedText, listOwned } from "../project-fs/operations.ts";
+import {
+  resolvePhaseReadPath,
+  resolvePhaseDirectoryReadPath,
+  resolvePhaseWritePath,
+} from "../project-fs/authority-resolvers.ts";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { atomicWriteText } from "../../io/atomic-text.ts";
-import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
 import { Phase } from "../schemas/phase.ts";
 
 // Apply an explicit old -> new path rename map to the `reads` / `writes`
@@ -92,34 +96,18 @@ function applyToList(
   return { next, changed: true };
 }
 
-async function resolveSyncPath(cwd: string, relPath: string): Promise<string> {
-  try {
-    return await resolveSymlinkFreeProjectPath(cwd, relPath);
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code === "PATH_OUTSIDE_PROJECT" || code === "PATH_NOT_OWNED") {
-      const e = new Error(
-        `${relPath} is not a safe project-contained sync path: ${(err as Error).message}`,
-      );
-      (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
-      throw e;
-    }
-    throw err;
-  }
-}
-
 export async function runSyncPaths(opts: {
   cwd: string;
   renames: RenamePair[];
   mode: SyncMode;
 }): Promise<SyncPathsResult> {
   const { cwd, renames, mode } = opts;
-  const renameMap = new Map(renames.map((r) => [r.from, r.to]));
+  const renameMap = new Map(renames.map(r => [r.from, r.to]));
 
-  const phasesDir = await resolveSyncPath(cwd, "design/phases");
+  const phasesDir = await resolvePhaseDirectoryReadPath(cwd);
   let entries: string[] = [];
   try {
-    entries = await readdir(phasesDir);
+    entries = await listOwned(phasesDir);
   } catch {
     entries = [];
   }
@@ -133,7 +121,6 @@ export async function runSyncPaths(opts: {
   for (const entry of entries) {
     if (!entry.endsWith(".yaml")) continue;
     const relPath = `design/phases/${entry}`;
-    const absPath = await resolveSyncPath(cwd, relPath);
 
     // READ-MODIFY-WRITE site — deliberately NOT routed through the
     // core/plan/load-phase.ts seam. It needs the raw bytes to rewrite them in
@@ -141,7 +128,7 @@ export async function runSyncPaths(opts: {
     // archive-fallback: you cannot rewrite a phase file you have archived /
     // deleted, so a missing/archived phase must surface here (skipped/failed),
     // never be silently synthesized from a snapshot.
-    const raw = await readFile(absPath, "utf8");
+    const raw = await readOwnedText(await resolvePhaseReadPath(cwd, relPath));
     let phase: Phase;
     try {
       phase = Phase.parse(parseYaml(raw) as unknown);
@@ -154,7 +141,7 @@ export async function runSyncPaths(opts: {
     }
 
     let fileChanged = false;
-    const tasks = (phase.tasks ?? []).map((task) => {
+    const tasks = (phase.tasks ?? []).map(task => {
       let next = task;
       for (const field of ["reads", "writes"] as const) {
         const list = task[field];
@@ -180,10 +167,20 @@ export async function runSyncPaths(opts: {
 
     if (mode === "write") {
       const updatedPhase: Phase = { ...phase, tasks };
-      await atomicWriteText(absPath, stringifyYaml(updatedPhase));
+      await atomicWriteText(
+        await resolvePhaseWritePath(cwd, relPath),
+        stringifyYaml(updatedPhase),
+      );
       written.push(relPath);
     }
   }
 
-  return { mode, renames, changes, files_changed: filesChanged, written, skipped };
+  return {
+    mode,
+    renames,
+    changes,
+    files_changed: filesChanged,
+    written,
+    skipped,
+  };
 }

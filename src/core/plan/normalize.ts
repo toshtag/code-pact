@@ -1,8 +1,16 @@
-import type { Dirent } from "../project-fs/raw-internal.ts";
-import { readFile, readdir, stat } from "../project-fs/raw-internal.ts";
+import {
+  readOwnedText,
+  listOwnedDirents,
+  statOwned,
+} from "../project-fs/operations.ts";
+import {
+  resolveInitListPath,
+  resolveInitReadPath,
+  resolveInitWritePath,
+} from "../project-fs/authority-resolvers.ts";
+import type { OwnedReadPath } from "../project-fs/branded-paths-internal.ts";
 import { join, relative, sep } from "node:path";
 import { atomicWriteText } from "../../io/atomic-text.ts";
-import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
 import { progressPath } from "../progress/io.ts";
 
 const TRAILING_WHITESPACE = /[ \t]+$/;
@@ -26,51 +34,35 @@ export type NormalizeResult = {
   written: string[];
 };
 
-async function pathExists(p: string): Promise<boolean> {
+async function pathExists(p: OwnedReadPath): Promise<boolean> {
   try {
-    await stat(p);
+    await statOwned(p);
     return true;
   } catch {
     return false;
   }
 }
 
-async function walkFiles(root: string): Promise<string[]> {
+async function walkFiles(rootRel: string, cwd: string): Promise<string[]> {
   const out: string[] = [];
-  async function recurse(dir: string): Promise<void> {
-    let entries: Dirent[];
+  async function recurse(relDir: string): Promise<void> {
+    let entries;
     try {
-      entries = await readdir(dir, { withFileTypes: true });
+      entries = await listOwnedDirents(await resolveInitListPath(cwd, relDir));
     } catch {
       return;
     }
     for (const entry of entries) {
-      const abs = join(dir, entry.name);
+      const rel = join(relDir, entry.name);
       if (entry.isDirectory()) {
-        await recurse(abs);
+        await recurse(rel);
       } else if (entry.isFile()) {
-        out.push(abs);
+        out.push(rel);
       }
     }
   }
-  await recurse(root);
+  await recurse(rootRel);
   return out;
-}
-
-async function resolveNormalizePath(cwd: string, relPath: string): Promise<string> {
-  try {
-    return await resolveSymlinkFreeProjectPath(cwd, relPath);
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code === "PATH_OUTSIDE_PROJECT" || code === "PATH_NOT_OWNED") {
-      const e = new Error(
-        `${relPath} is not a safe project-contained normalize path: ${(err as Error).message}`,
-      );
-      (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
-      throw e;
-    }
-    throw err;
-  }
 }
 
 function isYamlFile(p: string): boolean {
@@ -103,7 +95,7 @@ export function normalizeYamlContent(input: string): {
     reasons.push("crlf");
   }
   let trimmed = false;
-  const lines = s.split("\n").map((line) => {
+  const lines = s.split("\n").map(line => {
     if (TRAILING_WHITESPACE.test(line)) {
       trimmed = true;
       return line.replace(TRAILING_WHITESPACE, "");
@@ -153,9 +145,9 @@ export async function runNormalize(opts: {
   const changes: NormalizeFileChange[] = [];
   const written: string[] = [];
 
-  for (const abs of files) {
-    const raw = await readFile(abs, "utf8");
-    const kind: NormalizeFileKind = isMarkdownFile(abs) ? "markdown" : "yaml";
+  for (const rel of files) {
+    const raw = await readOwnedText(await resolveInitReadPath(opts.cwd, rel));
+    const kind: NormalizeFileKind = isMarkdownFile(rel) ? "markdown" : "yaml";
     const result =
       kind === "markdown"
         ? normalizeMarkdownContent(raw)
@@ -163,11 +155,13 @@ export async function runNormalize(opts: {
 
     if (result.content === raw) continue;
 
-    const rel = relative(opts.cwd, abs);
     changes.push({ path: rel, kind, reasons: result.reasons });
 
     if (opts.mode === "write") {
-      await atomicWriteText(abs, result.content);
+      await atomicWriteText(
+        await resolveInitWritePath(opts.cwd, rel),
+        result.content,
+      );
       written.push(rel);
     }
   }
@@ -178,17 +172,17 @@ export async function runNormalize(opts: {
 async function collectTargetFiles(cwd: string): Promise<string[]> {
   const files: string[] = [];
 
-  const designDir = await resolveNormalizePath(cwd, "design");
-  if (await pathExists(designDir)) {
-    const all = await walkFiles(designDir);
-    for (const abs of all) {
-      if (isYamlFile(abs) || isMarkdownFile(abs)) files.push(abs);
+  if (await pathExists(await resolveInitReadPath(cwd, "design"))) {
+    const all = await walkFiles("design", cwd);
+    for (const rel of all) {
+      if (isYamlFile(rel) || isMarkdownFile(rel)) files.push(rel);
     }
   }
 
   const progressRel = relative(cwd, progressPath(cwd)).split(sep).join("/");
-  const progress = await resolveNormalizePath(cwd, progressRel);
-  if (await pathExists(progress)) files.push(progress);
+  if (await pathExists(await resolveInitReadPath(cwd, progressRel))) {
+    files.push(progressRel);
+  }
 
   files.sort();
   return files;
