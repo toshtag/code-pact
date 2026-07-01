@@ -1,9 +1,11 @@
-import { listOwnedDirents, readOwnedText } from "../project-fs/operations.ts";
+import {
+  listOwnedDirents,
+  readExplicitUserText,
+} from "../project-fs/operations.ts";
 import {
   resolveExplicitUserReadPath,
   resolveInitListPath,
 } from "../project-fs/index.ts";
-import type { OwnedReadPath } from "../project-fs/branded-paths-internal.ts";
 import { posix } from "node:path";
 
 /**
@@ -178,7 +180,7 @@ export async function collectInboundLinks(
     let content: string;
     try {
       const abs = await resolveExplicitUserReadPath(cwd, rel); // symlink-free guard
-      content = await readOwnedText(abs as unknown as OwnedReadPath);
+      content = await readExplicitUserText(abs);
     } catch {
       issues.push({ source_file: rel, line: null, reason: "unreadable" });
       continue;

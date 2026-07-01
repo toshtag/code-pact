@@ -48,6 +48,14 @@ export async function statOwned(path: OwnedReadPath) {
   return statRaw(unbrand(path));
 }
 
+export async function statExplicitUser(path: ExplicitUserReadPath) {
+  return statRaw(unbrand(path));
+}
+
+export async function lstatExplicitUser(path: ExplicitUserReadPath) {
+  return lstatRaw(unbrand(path));
+}
+
 export async function listOwnedDirents(
   path: OwnedListPath,
 ): Promise<import("node:fs").Dirent[]> {

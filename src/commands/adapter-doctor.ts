@@ -1,10 +1,9 @@
 import {
   readOwnedText,
   readExplicitUserText,
-  statOwned,
+  statExplicitUser,
   resolveProjectConfigReadPath,
   resolveExplicitUserReadPath,
-  type OwnedReadPath,
   type ExplicitUserReadPath,
 } from "../core/project-fs/index.ts";
 import { join } from "node:path";
@@ -148,7 +147,7 @@ async function readProjectFileForDoctor(
   }
 
   try {
-    const s = await statOwned(ownedPath as unknown as OwnedReadPath);
+    const s = await statExplicitUser(ownedPath);
     if (!s.isFile()) return { kind: "missing", absPath };
     return {
       kind: "content",
