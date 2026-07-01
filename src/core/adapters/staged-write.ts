@@ -1,27 +1,24 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
-  mkdir as rawMkdir,
-  open as rawOpen,
-  readFile as rawReadFile,
-  readdir as rawReaddir,
-  rename as rawRename,
-  unlink as rawUnlink,
-  lstat as rawLstat,
-} from "node:fs/promises";
+  mkdirOwned,
+  openOwnedRead,
+  openOwnedWriteExclusive,
+  readOwnedText,
+  listOwned,
+  renameOwned,
+  unlinkOwned,
+  lstatOwned,
+  statOwned,
+} from "../project-fs/operations.ts";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { atomicWriteText } from "../../io/atomic-text.ts";
-import { brandOwnedWrite } from "../project-fs/branded-paths-internal.ts";
 import { isSupportedAgent, type SupportedAgent } from "../agents.ts";
 import { adapterRegistry } from "./index.ts";
 import type { DesiredAdapterFileRole } from "./types.ts";
 import {
-  readFile as dataReadFile,
-  rename as dataRename,
-  stat as dataStat,
-  unlink as dataUnlink,
-} from "../project-fs/raw-internal.ts";
-import {
   unbrand,
+  brandOwnedWrite,
+  brandOwnedRead,
   brandOwnedDelete,
   type OwnedDeletePath,
   type OwnedWritePath,
@@ -265,7 +262,7 @@ export function adapterStaticDeleteTarget(
 
 async function pathExists(path: string): Promise<boolean> {
   try {
-    await dataStat(path);
+    await statOwned(brandOwnedRead(path));
     return true;
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return false;
@@ -274,9 +271,9 @@ async function pathExists(path: string): Promise<boolean> {
 }
 
 async function syncDirectory(dir: string): Promise<void> {
-  let handle: Awaited<ReturnType<typeof rawOpen>> | null = null;
+  let handle: Awaited<ReturnType<typeof openOwnedRead>> | null = null;
   try {
-    handle = await rawOpen(dir, "r");
+    handle = await openOwnedRead(brandOwnedRead(dir));
     await handle.sync();
   } catch {
     // Directory fsync is not supported on every platform/filesystem.
@@ -286,32 +283,35 @@ async function syncDirectory(dir: string): Promise<void> {
 }
 
 async function durableWriteJson(path: string, value: unknown): Promise<void> {
-  await rawMkdir(dirname(path), { recursive: true, mode: 0o700 });
+  await mkdirOwned(brandOwnedWrite(dirname(path)), {
+    recursive: true,
+    mode: 0o700,
+  });
   const tmp = `${path}.tmp-${randomUUID()}`;
-  let handle: Awaited<ReturnType<typeof rawOpen>> | null = null;
+  let handle: Awaited<ReturnType<typeof openOwnedWriteExclusive>> | null = null;
   try {
-    handle = await rawOpen(tmp, "wx", 0o600);
+    handle = await openOwnedWriteExclusive(brandOwnedWrite(tmp));
     await handle.writeFile(`${JSON.stringify(value, null, 2)}\n`, "utf8");
     await handle.sync();
     await handle.close();
     handle = null;
-    await rawRename(tmp, path);
+    await renameOwned(brandOwnedDelete(tmp), brandOwnedWrite(path));
     await syncDirectory(dirname(path));
   } catch (err) {
     await handle?.close().catch(() => {});
-    await rawUnlink(tmp).catch(() => {});
+    await unlinkOwned(brandOwnedDelete(tmp)).catch(() => {});
     throw err;
   }
 }
 
 async function removeFileIfExists(path: string): Promise<void> {
-  await dataUnlink(path).catch(err => {
+  await unlinkOwned(brandOwnedDelete(path)).catch(err => {
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
   });
 }
 
 async function cleanupJournal(path: string): Promise<void> {
-  await rawUnlink(path).catch(err => {
+  await unlinkOwned(brandOwnedDelete(path)).catch(err => {
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
   });
   await syncDirectory(dirname(path));
@@ -323,7 +323,7 @@ function sha256Bytes(bytes: Buffer): string {
 
 async function hashFile(path: string): Promise<FileState> {
   try {
-    const bytes = await dataReadFile(path);
+    const bytes = await readOwnedText(brandOwnedRead(path));
     return { kind: "present", sha256: sha256Bytes(Buffer.from(bytes)) };
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {
@@ -405,7 +405,7 @@ function assertUuidV4(value: string, label: string): void {
 
 async function ensureRegularFileIfPresent(path: string): Promise<void> {
   try {
-    const st = await dataStat(path);
+    const st = await statOwned(brandOwnedRead(path));
     if (st.isDirectory()) {
       throw new Error(`transaction target is a directory: ${path}`);
     }
@@ -535,11 +535,17 @@ export class FileTransaction {
       await this.createPreparedTemps();
       for (const s of this.staged) {
         if (s.preState.kind === "present") {
-          await dataRename(s.finalPath, s.backupPath);
+          await renameOwned(
+            brandOwnedDelete(s.finalPath),
+            brandOwnedWrite(s.backupPath),
+          );
           mutated = true;
         }
         if (s.kind === "write") {
-          await dataRename(s.tempPath, s.finalPath);
+          await renameOwned(
+            brandOwnedDelete(s.tempPath),
+            brandOwnedWrite(s.finalPath),
+          );
           mutated = true;
         } else {
           mutated = true;
@@ -613,7 +619,8 @@ export class FileTransaction {
       return;
     }
     for (const s of this.staged) {
-      if (s.kind === "write") await dataUnlink(s.tempPath).catch(() => {});
+      if (s.kind === "write")
+        await unlinkOwned(brandOwnedDelete(s.tempPath)).catch(() => {});
     }
     this.state = "rolled_back";
   }
@@ -737,9 +744,9 @@ export class FileTransaction {
         throw new Error(`missing staged write content for ${s.relPath}`);
       }
       await atomicWriteText(brandOwnedWrite(s.tempPath), s.content);
-      const tempStat = await dataStat(s.tempPath);
+      const tempStat = await statOwned(brandOwnedRead(s.tempPath));
       if (!tempStat.isFile()) {
-        await dataUnlink(s.tempPath).catch(() => {});
+        await unlinkOwned(brandOwnedDelete(s.tempPath)).catch(() => {});
         throw new Error(
           `staged temp path is not a regular file: ${s.tempPath}`,
         );
@@ -758,7 +765,7 @@ export class FileTransaction {
     for (const s of this.staged) {
       if (s.preState.kind === "present") {
         try {
-          await dataUnlink(s.backupPath);
+          await unlinkOwned(brandOwnedDelete(s.backupPath));
         } catch (err) {
           if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
             failures.push(`${s.backupPath}: ${(err as Error).message}`);
@@ -767,7 +774,7 @@ export class FileTransaction {
       }
       if (s.kind === "write") {
         try {
-          await dataUnlink(s.tempPath);
+          await unlinkOwned(brandOwnedDelete(s.tempPath));
         } catch (err) {
           if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
             failures.push(`${s.tempPath}: ${(err as Error).message}`);
@@ -813,7 +820,7 @@ async function loadJournal(
 ): Promise<AdapterTransactionJournalV2> {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(await rawReadFile(journalPath, "utf8"));
+    parsed = JSON.parse(await readOwnedText(brandOwnedRead(journalPath)));
   } catch (err) {
     throw new TransactionRecoveryError(
       `cannot read adapter transaction journal: ${(err as Error).message}`,
@@ -1017,7 +1024,10 @@ async function reconcileEntryToOldState(
           `ambiguous final state ${stateLabel(finalState)} while backup holds pre-state`,
         );
       }
-      await dataRename(paths.backupPath, paths.finalPath);
+      await renameOwned(
+        brandOwnedDelete(paths.backupPath),
+        brandOwnedWrite(paths.finalPath),
+      );
     } else if (!sameState(finalState, entry.pre_state)) {
       throw new Error(
         `cannot restore old state; final=${stateLabel(finalState)} backup=${stateLabel(backupState)}`,
@@ -1166,7 +1176,7 @@ async function assertTransactionTargetStillOwned(
 async function rejectLegacyProjectJournals(cwd: string): Promise<string[]> {
   const legacyDir = join(resolve(cwd), LEGACY_TRANSACTION_DIR_REL);
   try {
-    await rawLstat(legacyDir);
+    await lstatOwned(brandOwnedRead(legacyDir));
     return [LEGACY_REJECTION];
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
@@ -1184,7 +1194,7 @@ export async function recoverPendingAdapterTransactions(
   const stateDir = await adapterTransactionProjectDir(cwd);
   let names: string[];
   try {
-    names = await rawReaddir(stateDir);
+    names = await listOwned(brandOwnedRead(stateDir));
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {
       return { recovered: [], cleaned: [], rejected };
