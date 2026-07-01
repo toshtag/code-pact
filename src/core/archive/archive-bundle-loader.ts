@@ -1,8 +1,17 @@
-import { readdirSync, readFileSync } from "../project-fs/raw-internal.ts";
+import {
+  readOwnedFileSync,
+  listOwnedDirentsSync,
+} from "../project-fs/operations.ts";
 import { join } from "node:path";
 import { archiveBundlesRelDir, resolveArchiveOwnedPathSync } from "./paths.ts";
-import { validateArchiveBundleTier1, type LoadedArchiveBundle } from "./archive-bundle-reader.ts";
-import { buildBundleMemberIndex, type BundleMemberIndex } from "./archive-bundle-index.ts";
+import {
+  validateArchiveBundleTier1,
+  type LoadedArchiveBundle,
+} from "./archive-bundle-reader.ts";
+import {
+  buildBundleMemberIndex,
+  type BundleMemberIndex,
+} from "./archive-bundle-index.ts";
 
 // ---------------------------------------------------------------------------
 // Archive-bundle directory loader (Layer 1c-ii-a) — the I/O that reads
@@ -37,21 +46,22 @@ export function loadArchiveBundles(cwd: string): LoadedArchiveBundles {
     // withFileTypes + isFile() so a `.json`-named SUBDIRECTORY can never reach
     // readFileSync (which would throw an untyped EISDIR instead of the contract's
     // ARCHIVE_BUNDLE_INVALID). Bundles are plain files only.
-    names = readdirSync(dir, { withFileTypes: true })
-      .filter((e) => e.isFile() && e.name.endsWith(".json"))
-      .map((e) => e.name)
+    names = listOwnedDirentsSync(dir)
+      .filter(e => e.isFile() && e.name.endsWith(".json"))
+      .map(e => e.name)
       .sort();
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === "ENOENT") return { index: new Map(), bundles: [] };
+    if ((err as NodeJS.ErrnoException).code === "ENOENT")
+      return { index: new Map(), bundles: [] };
     throw err;
   }
-  const bundles = names.map((name) => {
+  const bundles = names.map(name => {
     const file = join("bundles", name); // stable relative label for error messages
     const path = resolveArchiveOwnedPathSync(
       cwd,
       `${archiveBundlesRelDir()}/${name}`,
     );
-    const raw = readFileSync(path, "utf8");
+    const raw = readOwnedFileSync(path);
     return { file, loaded: validateArchiveBundleTier1(raw, file) };
   });
   return { index: buildBundleMemberIndex(bundles), bundles };

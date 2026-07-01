@@ -1,4 +1,12 @@
-import { readFile, readdir, unlink } from "../project-fs/raw-internal.ts";
+import {
+  readOwnedText,
+  listOwned,
+  unlinkOwned,
+} from "../project-fs/operations.ts";
+import {
+  brandOwnedRead,
+  brandOwnedDelete,
+} from "../project-fs/branded-paths-internal.ts";
 import { basename } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { Phase } from "../schemas/phase.ts";
@@ -200,9 +208,8 @@ async function buildLiveGraph(cwd: string): Promise<LiveGraphResult> {
   for (const p of roadmap.phases) {
     let raw: string;
     try {
-      raw = await readFile(
-        await resolveSymlinkFreeProjectPath(cwd, p.path),
-        "utf8",
+      raw = await readOwnedText(
+        brandOwnedRead(await resolveSymlinkFreeProjectPath(cwd, p.path)),
       );
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") continue; // archived phase — not a live ref source
@@ -300,7 +307,7 @@ async function buildSourceMap(
   let looseIds: string[];
   try {
     looseIds = (
-      await readdir(await resolveArchiveOwnedPath(cwd, looseRelDirFor(kind)))
+      await listOwned(await resolveArchiveOwnedPath(cwd, looseRelDirFor(kind)))
     )
       .filter(n => n.endsWith(".json"))
       .map(n => basename(n, ".json"))
@@ -337,9 +344,8 @@ async function buildSourceMap(
     if (src === "bundle") continue; // no loose copy
     let looseRaw: string | null = null;
     try {
-      looseRaw = await readFile(
+      looseRaw = await readOwnedText(
         await resolveArchiveOwnedPath(cwd, looseRelPath(kind, id)),
-        "utf8",
       );
     } catch {
       looseRaw = null;
@@ -567,7 +573,7 @@ async function enumerateArchivedDecisions(cwd: string): Promise<{
   let looseNames: string[];
   try {
     looseNames = (
-      await readdir(
+      await listOwned(
         await resolveArchiveOwnedPath(cwd, archiveDecisionsRelDir()),
       )
     ).filter(n => n.endsWith(".json"));
@@ -609,12 +615,11 @@ async function enumerateArchivedDecisions(cwd: string): Promise<{
     try {
       parseInto(
         id,
-        await readFile(
+        await readOwnedText(
           await resolveArchiveOwnedPath(
             cwd,
             `${archiveDecisionsRelDir()}/${name}`,
           ),
-          "utf8",
         ),
       );
     } catch {
@@ -763,12 +768,11 @@ async function planEventPackRetention(
       bytes =
         src === "bundle"
           ? (bundleMembers.get(id)?.bytes ?? null)
-          : await readFile(
+          : await readOwnedText(
               await resolveArchiveOwnedPath(
                 cwd,
                 looseRelPath("event_pack", id),
               ),
-              "utf8",
             );
     } catch {
       bytes = null;
@@ -968,7 +972,7 @@ export async function gateLooseDelete(
   }
   let raw: string;
   try {
-    raw = await readFile(abs, "utf8");
+    raw = await readOwnedText(brandOwnedRead(abs));
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT")
       return { kind: "vanished" };
@@ -1090,7 +1094,7 @@ async function deleteLooseDropped(
       continue;
     }
     try {
-      await unlink(verdict.abs);
+      await unlinkOwned(brandOwnedDelete(verdict.abs));
       out.deleted.push(item.id);
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === "ENOENT")
