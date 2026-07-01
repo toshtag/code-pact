@@ -1,5 +1,13 @@
 import { createHash } from "node:crypto";
-import { lstat, mkdir, realpath } from "node:fs/promises";
+import {
+  lstatOwned,
+  mkdirOwned,
+  realpathOwned,
+} from "../project-fs/operations.ts";
+import {
+  brandOwnedRead,
+  brandOwnedWrite,
+} from "../project-fs/branded-paths-internal.ts";
 import { homedir, platform } from "node:os";
 import { isAbsolute, join } from "node:path";
 
@@ -33,10 +41,12 @@ export function adapterTransactionStateRoot(): string {
 }
 
 export async function canonicalProjectRoot(cwd: string): Promise<string> {
-  return realpath(cwd);
+  return realpathOwned(brandOwnedRead(cwd));
 }
 
-export async function adapterTransactionProjectDir(cwd: string): Promise<string> {
+export async function adapterTransactionProjectDir(
+  cwd: string,
+): Promise<string> {
   const projectRoot = await canonicalProjectRoot(cwd);
   const key = createHash("sha256").update(projectRoot).digest("hex");
   const root = adapterTransactionStateRoot();
@@ -62,14 +72,16 @@ function requireAbsoluteEnvPath(name: string, value: string): string {
 }
 
 async function ensurePrivateDirectory(dir: string): Promise<void> {
-  await mkdir(dir, { recursive: true, mode: 0o700 });
+  await mkdirOwned(brandOwnedWrite(dir), { recursive: true, mode: 0o700 });
   await assertPrivateDirectory(dir);
 }
 
 async function assertPrivateDirectory(dir: string): Promise<void> {
-  const st = await lstat(dir);
+  const st = await lstatOwned(brandOwnedRead(dir));
   if (st.isSymbolicLink()) {
-    throw configError(`transaction state directory must not be a symlink: ${dir}`);
+    throw configError(
+      `transaction state directory must not be a symlink: ${dir}`,
+    );
   }
   if (!st.isDirectory()) {
     throw configError(`transaction state path must be a directory: ${dir}`);
@@ -77,10 +89,14 @@ async function assertPrivateDirectory(dir: string): Promise<void> {
   if (platform() !== "win32") {
     const uid = typeof process.getuid === "function" ? process.getuid() : null;
     if (uid !== null && st.uid !== uid) {
-      throw configError(`transaction state directory is not owned by the current user: ${dir}`);
+      throw configError(
+        `transaction state directory is not owned by the current user: ${dir}`,
+      );
     }
     if ((st.mode & 0o022) !== 0) {
-      throw configError(`transaction state directory must not be group/other writable: ${dir}`);
+      throw configError(
+        `transaction state directory must not be group/other writable: ${dir}`,
+      );
     }
   }
 }
