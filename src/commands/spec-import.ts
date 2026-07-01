@@ -3,15 +3,14 @@ import {
   statOwned,
   resolveExplicitUserReadPath,
   resolvePhaseReadPath,
+  resolvePhaseWritePath,
   type ExplicitUserReadPath,
 } from "../core/project-fs/index.ts";
+import { type OwnedWritePath } from "../core/project-fs/branded-paths-internal.ts";
 import { stringify as stringifyYaml } from "yaml";
 
 import { atomicWriteText } from "../io/atomic-text.ts";
-import {
-  assertSafeRelativePath,
-  resolveSymlinkFreeProjectPath,
-} from "../core/path-safety.ts";
+import { assertSafeRelativePath } from "../core/path-safety.ts";
 import { type SpecImportDetail } from "../contracts/spec-import-details.ts";
 import {
   parseTasksMd,
@@ -91,9 +90,9 @@ async function resolveSpecOutputPath(
   cwd: string,
   relPath: string,
   ctx: { sourcePath?: string; phaseId?: string },
-): Promise<string> {
+): Promise<OwnedWritePath> {
   try {
-    return await resolveSymlinkFreeProjectPath(cwd, relPath);
+    return await resolvePhaseWritePath(cwd, relPath);
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "PATH_OUTSIDE_PROJECT" || code === "PATH_NOT_OWNED") {
