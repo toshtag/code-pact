@@ -12,7 +12,7 @@ import {
 // The FIRST reader of the `.code-pact/state/archive/decisions/<stem>-<hash8>.json`
 // decision-state records written by `decision-record.ts` (step 3). The DECISION
 // analogue of `load-phase-snapshot.ts` (step 4): it makes a RETIRED decision
-// (its `design/decisions/*.md` deleted) still resolve from its record, so an
+// (its `design/decisions/**/*.md` deleted) still resolve from its record, so an
 // active gate that needs it survives `rm -rf design/decisions` (criterion A3).
 //
 // This module is a PURE LOCATOR only. The two locked reader predicates
