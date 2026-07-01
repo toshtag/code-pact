@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { runAdapterConformance } from "../../../src/commands/adapter-conformance.ts";
 import { runAdapterDoctor } from "../../../src/commands/adapter-doctor.ts";
 import { atomicWriteText } from "../../../src/io/atomic-text.ts";
+import { brandOwnedWrite } from "../../../src/core/project-fs/branded-paths-internal.ts";
 
 type FsOperation = {
   operation: string;
@@ -375,7 +376,7 @@ describe("filesystem operation proof — conformance", () => {
     const target = join(dir, "atomic.txt");
 
     resetSpies();
-    await atomicWriteText(target, "hello");
+    await atomicWriteText(brandOwnedWrite(target), "hello");
 
     const tempOpen = spies.operations.find(
       op =>
