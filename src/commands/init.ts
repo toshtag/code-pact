@@ -9,6 +9,7 @@ import {
   type OwnedReadPath,
   type OwnedWritePath,
 } from "../core/project-fs/index.ts";
+import { unbrand } from "../core/project-fs/branded-paths-internal.ts";
 import { atomicWriteText } from "../io/atomic-text.ts";
 import { stringify as toYaml } from "yaml";
 import type { LocaleCode } from "../core/schemas/locale.ts";
@@ -24,7 +25,6 @@ import {
   isGitRepo,
   gitIgnoredControlPlaneAreas,
 } from "../core/control-plane-ignore.ts";
-import { resolveSymlinkFreeProjectPath } from "../core/path-safety.ts";
 
 export type { SupportedAgent } from "../core/agents.ts";
 
@@ -118,7 +118,7 @@ async function exists(p: OwnedReadPath): Promise<boolean> {
 }
 
 async function writeIfAbsent(
-  p: string,
+  p: OwnedWritePath,
   content: string,
   force: boolean,
   created: string[],
@@ -126,37 +126,14 @@ async function writeIfAbsent(
   ownedPath: OwnedReadPath,
 ): Promise<void> {
   if (!force && (await exists(ownedPath))) {
-    skipped.push(p);
+    skipped.push(unbrand(p));
     return;
   }
   // atomicWriteText: temp-file + rename. Prevents an interrupted `init`
   // from leaving a half-written project file on disk. Behaviour is
   // identical to the previous writeFile call for the happy path.
   await atomicWriteText(p, content);
-  created.push(p);
-}
-
-async function resolveInitPath(cwd: string, relPath: string): Promise<string> {
-  try {
-    return await resolveSymlinkFreeProjectPath(cwd, relPath);
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (
-      code === "PATH_OUTSIDE_PROJECT" ||
-      code === "PATH_NOT_OWNED" ||
-      code === "ENOTDIR" ||
-      code === "EACCES" ||
-      code === "EPERM" ||
-      code === "ELOOP"
-    ) {
-      const e = new Error(
-        `init refuses to write through unsafe project path "${relPath}": ${(err as Error).message}`,
-      );
-      (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
-      throw e;
-    }
-    throw err;
-  }
+  created.push(unbrand(p));
 }
 
 async function assertInitEntryType(
@@ -308,7 +285,7 @@ async function ensureGitignoreEntries(
   entries: string[],
   created: string[],
 ): Promise<void> {
-  const path = await resolveInitPath(cwd, ".gitignore");
+  const path = await resolveInitWritePath(cwd, ".gitignore");
   let existing: string | null = null;
   try {
     existing = await readOwnedText(await resolveGitignoreReadPath(cwd));
@@ -339,7 +316,7 @@ async function ensureGitignoreEntries(
     next = `${existing}${sep}${missing.join("\n")}\n`;
   }
   await atomicWriteText(path, next);
-  created.push(path);
+  created.push(unbrand(path));
 }
 
 async function mkdirp(p: OwnedWritePath): Promise<void> {
@@ -391,7 +368,7 @@ export async function runInitCore(opts: InitCoreOptions): Promise<InitResult> {
     })),
   };
   await writeIfAbsent(
-    await resolveInitPath(cwd, ".code-pact/project.yaml"),
+    await resolveInitWritePath(cwd, ".code-pact/project.yaml"),
     toYaml(projectYaml),
     force,
     created,
@@ -403,7 +380,10 @@ export async function runInitCore(opts: InitCoreOptions): Promise<InitResult> {
   for (const agent of agents) {
     const profile = DEFAULT_AGENT_PROFILES[agent];
     await writeIfAbsent(
-      await resolveInitPath(cwd, `.code-pact/agent-profiles/${agent}.yaml`),
+      await resolveInitWritePath(
+        cwd,
+        `.code-pact/agent-profiles/${agent}.yaml`,
+      ),
       toYaml(profile),
       force,
       created,
@@ -415,7 +395,7 @@ export async function runInitCore(opts: InitCoreOptions): Promise<InitResult> {
   // model profiles
   for (const mp of DEFAULT_MODEL_PROFILES) {
     await writeIfAbsent(
-      await resolveInitPath(
+      await resolveInitWritePath(
         cwd,
         `.code-pact/model-profiles/${mp.tier.replace(/_/g, "-")}.yaml`,
       ),
@@ -437,7 +417,7 @@ export async function runInitCore(opts: InitCoreOptions): Promise<InitResult> {
   // CI branch-drift gate from skipping on an untracked ledger).
   const emptyLog: ProgressLog = { events: [] };
   await writeIfAbsent(
-    await resolveInitPath(cwd, ".code-pact/state/progress.yaml"),
+    await resolveInitWritePath(cwd, ".code-pact/state/progress.yaml"),
     toYaml(emptyLog),
     force,
     created,
@@ -453,7 +433,7 @@ export async function runInitCore(opts: InitCoreOptions): Promise<InitResult> {
     phases: [],
   };
   await writeIfAbsent(
-    await resolveInitPath(cwd, ".code-pact/state/baselines/initial.json"),
+    await resolveInitWritePath(cwd, ".code-pact/state/baselines/initial.json"),
     JSON.stringify(baseline, null, 2) + "\n",
     force,
     created,
@@ -521,7 +501,7 @@ export async function runInitCore(opts: InitCoreOptions): Promise<InitResult> {
 
   // constitution.md
   await writeIfAbsent(
-    await resolveInitPath(cwd, "design/constitution.md"),
+    await resolveInitWritePath(cwd, "design/constitution.md"),
     renderInitConstitution(projectName, locale),
     force,
     created,
@@ -531,7 +511,7 @@ export async function runInitCore(opts: InitCoreOptions): Promise<InitResult> {
 
   // rules/coding-style.md
   await writeIfAbsent(
-    await resolveInitPath(cwd, "design/rules/coding-style.md"),
+    await resolveInitWritePath(cwd, "design/rules/coding-style.md"),
     codingStyleMd(locale),
     force,
     created,
@@ -542,7 +522,7 @@ export async function runInitCore(opts: InitCoreOptions): Promise<InitResult> {
   // roadmap.yaml (empty phases — the sample phase below appends to it)
   const roadmap: Roadmap = { phases: [] };
   await writeIfAbsent(
-    await resolveInitPath(cwd, "design/roadmap.yaml"),
+    await resolveInitWritePath(cwd, "design/roadmap.yaml"),
     toYaml(roadmap),
     force,
     created,
