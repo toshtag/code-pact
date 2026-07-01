@@ -22,7 +22,7 @@ The project keeps two state surfaces:
   phase's runtime truth lives in a `.code-pact/state` archive
   snapshot and a retired decision's in a `.code-pact/state`
   decision record, so a completed `design/phases/*.yaml` or a
-  retired `design/decisions/*.md` may be hand-deleted once its
+  retired `design/decisions/**/*.md` may be hand-deleted once its
   snapshot (for a phase) or record (for a decision) exists.
 - **the progress ledger (`.code-pact/state/events/`)** — the operational log.
   An append-only event stream of `started` / `done` / `failed` /
@@ -94,7 +94,7 @@ a fixed flag surface within a major line.
   per-section `bytes` + `reason_code` breakdown so the
   inclusion decisions become auditable.
 - **`code-pact task start` / `task complete` / `task
-  finalize`** — the state-machine transitions. `start` records
+finalize`** — the state-machine transitions. `start` records
   the `started` event; `complete` runs the verification
   commands declared on the task and appends `done` on pass;
   `finalize` reconciles declared writes against actual git
@@ -108,7 +108,7 @@ a fixed flag surface within a major line.
   of task statuses against progress events; writes phase YAML
   status updates when run with `--write`.
 - **`code-pact adapter install` / `adapter upgrade` / `adapter
-  doctor`** — adapter lifecycle. `install` writes the
+doctor`** — adapter lifecycle. `install` writes the
   per-agent instruction files and registers a manifest;
   `doctor` detects drift across manifest, generator, and
   contract surfaces.
@@ -135,14 +135,14 @@ are recomputed on every harness run.
   needs; the inverse (a fat constant pack) would mean the
   context machinery is dead weight.
 - **First-pass verification rate.** Percentage of `task
-  complete` invocations whose declared verification passes on
+complete` invocations whose declared verification passes on
   the first attempt, across the dogfood corpus. A proxy for
   whether the context pack delivered what the agent needed to
   implement the task correctly.
 - **Task lifecycle adherence rate.** Percentage of agent
   sessions where the recommended lifecycle (`task prepare ─►
-  task start ─► implement ─► verify ─► task complete ─► task
-  finalize`) was followed without skipping or reordering. A
+task start ─► implement ─► verify ─► task complete ─► task
+finalize`) was followed without skipping or reordering. A
   proxy for whether the contract is legible enough to act on.
   The v2 operational definition counts a task as adherent when
   it has at least one `started` event before its first `done`
