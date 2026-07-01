@@ -1377,7 +1377,8 @@ function checkFile(filePath, allowlist, allowlistUsed) {
                       )) &&
                     typeof aEntry.reason === "string" &&
                     aEntry.reason.length > 0 &&
-                    (!aEntry.line || Math.abs(aEntry.line - callLine) <= 2),
+                    typeof aEntry.line === "number" &&
+                    Math.abs(aEntry.line - callLine) <= 2,
                 );
                 if (matched) {
                   allowlistUsed.add(`${aKey}:${fnName}`);

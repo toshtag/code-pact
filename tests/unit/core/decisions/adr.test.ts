@@ -1014,3 +1014,156 @@ describe("classifyDecisionAdrs — nested quality scan", () => {
     expect(otherEntry!.acceptance).toBe("blocked");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Nested filename-scan tests — the gate resolves via substring basename match
+// (no explicit decision_refs) on nested subdirectory paths. Pins that nested
+// ADRs are first-class filename-scan candidates, not just explicit-ref targets.
+// ---------------------------------------------------------------------------
+
+describe("resolveDecisionGate — nested filename-scan", () => {
+  let cwd: string;
+  beforeEach(async () => {
+    cwd = await mkdtemp(join(tmpdir(), "adr-nested-scan-"));
+    await mkdir(join(cwd, "design", "decisions", "sub"), { recursive: true });
+  });
+  afterEach(async () => {
+    await rm(cwd, { recursive: true, force: true });
+  });
+
+  it("nested accepted ADR matching task id via filename-scan → resolved", async () => {
+    await writeFile(
+      join(cwd, "design", "decisions", "sub", "P1-T1-rfc.md"),
+      "**Status:** accepted (P1, 2026)\n",
+    );
+    const res = await resolveDecisionGate(cwd, "P1-T1", undefined);
+    expect(res.resolved).toBe(true);
+    expect(res.via).toBe("filename-scan");
+    expect(res.considered).toHaveLength(1);
+    expect(res.considered[0]!.acceptance).toBe("accepted");
+    expect(res.considered[0]!.path).toBe("design/decisions/sub/P1-T1-rfc.md");
+  });
+
+  it("nested proposed ADR matching task id via filename-scan → unresolved (blocked)", async () => {
+    await writeFile(
+      join(cwd, "design", "decisions", "sub", "P1-T1-rfc.md"),
+      "**Status:** proposed\n",
+    );
+    const res = await resolveDecisionGate(cwd, "P1-T1", undefined);
+    expect(res.resolved).toBe(false);
+    expect(res.via).toBe("filename-scan");
+    expect(res.considered[0]!.acceptance).toBe("blocked");
+  });
+
+  it("nested ADR not matching task id → not considered (no false positive)", async () => {
+    await writeFile(
+      join(cwd, "design", "decisions", "sub", "P2-T3-other.md"),
+      "**Status:** accepted (P2, 2026)\n",
+    );
+    const res = await resolveDecisionGate(cwd, "P1-T1", undefined);
+    expect(res.resolved).toBe(false);
+    expect(res.considered).toHaveLength(0);
+  });
+
+  it("deeply nested accepted ADR matching task id → resolved", async () => {
+    await mkdir(join(cwd, "design", "decisions", "deep", "path"), {
+      recursive: true,
+    });
+    await writeFile(
+      join(cwd, "design", "decisions", "deep", "path", "P1-T1-deep.md"),
+      "**Status:** accepted (P1, 2026)\n",
+    );
+    const res = await resolveDecisionGate(cwd, "P1-T1", undefined);
+    expect(res.resolved).toBe(true);
+    expect(res.via).toBe("filename-scan");
+  });
+
+  it("mixed top-level + nested both matching → resolved (any accepted)", async () => {
+    await writeFile(
+      join(cwd, "design", "decisions", "P1-T1-top.md"),
+      "**Status:** proposed\n",
+    );
+    await writeFile(
+      join(cwd, "design", "decisions", "sub", "P1-T1-nested.md"),
+      "**Status:** accepted (P1, 2026)\n",
+    );
+    const res = await resolveDecisionGate(cwd, "P1-T1", undefined);
+    expect(res.resolved).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Directory-list error propagation — an unreadable design/decisions/ directory
+// (EACCES, not ENOENT/ENOTDIR) must throw DECISION_SCAN_UNREADABLE, not be
+// silently swallowed as "no decisions".
+// ---------------------------------------------------------------------------
+
+describe("listLiveDecisionFiles — directory-list EACCES → DECISION_SCAN_UNREADABLE", () => {
+  let cwd: string;
+  beforeEach(async () => {
+    cwd = await mkdtemp(join(tmpdir(), "adr-eacces-"));
+  });
+  afterEach(async () => {
+    await rm(cwd, { recursive: true, force: true });
+  });
+
+  it("EACCES on design/decisions/ → throws with DECISION_SCAN_UNREADABLE", async () => {
+    await mkdir(join(cwd, "design", "decisions"), { recursive: true });
+    await writeFile(
+      join(cwd, "design", "decisions", "P1-T1.md"),
+      "**Status:** accepted\n",
+    );
+    await (
+      await import("node:fs/promises")
+    ).chmod(join(cwd, "design", "decisions"), 0o000);
+    try {
+      await expect(readLiveDecisionDir(cwd)).rejects.toMatchObject({
+        code: "DECISION_SCAN_UNREADABLE",
+      });
+    } finally {
+      await (
+        await import("node:fs/promises")
+      ).chmod(join(cwd, "design", "decisions"), 0o755);
+    }
+  });
+
+  it("EACCES on a nested subdirectory → throws with DECISION_SCAN_UNREADABLE", async () => {
+    await mkdir(join(cwd, "design", "decisions", "sub"), { recursive: true });
+    await writeFile(
+      join(cwd, "design", "decisions", "sub", "P1-T1.md"),
+      "**Status:** accepted\n",
+    );
+    await (
+      await import("node:fs/promises")
+    ).chmod(join(cwd, "design", "decisions", "sub"), 0o000);
+    try {
+      await expect(readLiveDecisionDir(cwd)).rejects.toMatchObject({
+        code: "DECISION_SCAN_UNREADABLE",
+      });
+    } finally {
+      await (
+        await import("node:fs/promises")
+      ).chmod(join(cwd, "design", "decisions", "sub"), 0o755);
+    }
+  });
+
+  it("DECISION_SCAN_UNREADABLE propagates through resolveDecisionGate (filename-scan)", async () => {
+    await mkdir(join(cwd, "design", "decisions"), { recursive: true });
+    await writeFile(
+      join(cwd, "design", "decisions", "P1-T1.md"),
+      "**Status:** accepted\n",
+    );
+    await (
+      await import("node:fs/promises")
+    ).chmod(join(cwd, "design", "decisions"), 0o000);
+    try {
+      const res = await resolveDecisionGate(cwd, "P1-T1", undefined);
+      expect(res.resolved).toBe(false);
+      expect(res.reason).toContain("DECISION_SCAN_UNREADABLE");
+    } finally {
+      await (
+        await import("node:fs/promises")
+      ).chmod(join(cwd, "design", "decisions"), 0o755);
+    }
+  });
+});

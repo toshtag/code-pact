@@ -103,6 +103,15 @@ console.log("\n=== 4. Authority checker discovery ===");
     "checker discovers all .ts files under src/",
     grepIn(checker, 'join\\("src"\\)'),
   );
+  // Phase 4.1: allowlist line field is required (no function-wide auto-approval)
+  check(
+    "allowlist requires typeof aEntry.line === number",
+    grepIn(checker, 'typeof aEntry\\.line === "number"'),
+  );
+  check(
+    "allowlist does NOT use optional line (!aEntry.line)",
+    !grepIn(checker, "!aEntry\\.line"),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -299,6 +308,41 @@ console.log("\n=== 10. Test coverage ===");
   check(
     "same basename distinct parent test present",
     grepIn(adrTest, "same basename"),
+  );
+
+  // Phase 9.10: nested filename-scan tests
+  check(
+    "nested filename-scan tests present",
+    grepIn(adrTest, "nested filename-scan"),
+  );
+
+  // Phase 9.11: directory-list EACCES → DECISION_SCAN_UNREADABLE tests
+  check(
+    "directory-list EACCES tests present",
+    grepIn(adrTest, "directory-list EACCES"),
+  );
+  check(
+    "DECISION_SCAN_UNREADABLE propagation test present",
+    grepIn(adrTest, "DECISION_SCAN_UNREADABLE"),
+  );
+
+  // Phase 9.12: nested inbound link rewrite test
+  check(
+    "nested inbound link rewrite test present",
+    grepIn(pruneTest, "nested decision --write rewrites inbound links"),
+  );
+
+  // Phase 9.13: nested archive fallback + live nested unsafe path tests
+  const gateArchiveTest = readFile(
+    "tests/unit/core/decisions/decision-gate-archive.test.ts",
+  );
+  check(
+    "nested archive fallback exact match tests present",
+    grepIn(gateArchiveTest, "nested archive fallback"),
+  );
+  check(
+    "live nested unsafe path never falls back test present",
+    grepIn(gateArchiveTest, "live nested unsafe path never falls back"),
   );
 }
 

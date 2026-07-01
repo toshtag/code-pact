@@ -708,4 +708,60 @@ tasks:
     );
     expect(pruned).toContain(nestedPath);
   });
+
+  it("nested decision --write rewrites inbound links pointing to the nested path", async () => {
+    const p = await createTempProject({
+      init: true,
+      prefix: "decprune-nested-link-",
+    });
+    cleanups.push(p.cleanup);
+    await mkdir(join(p.dir, "design", "decisions", "sub"), { recursive: true });
+    await mkdir(join(p.dir, "design", "phases"), { recursive: true });
+    await mkdir(join(p.dir, "docs"), { recursive: true });
+    const nestedPath = "design/decisions/sub/nested-rfc.md";
+    await writeFile(join(p.dir, nestedPath), ACCEPTED);
+    await writeFile(
+      join(p.dir, "design", "roadmap.yaml"),
+      `phases:\n  - id: P1\n    path: design/phases/P1.yaml\n    weight: 10\n`,
+    );
+    await writeFile(
+      join(p.dir, "design", "phases", "P1.yaml"),
+      PHASE("done", nestedPath),
+    );
+    // Inbound link from docs/x.md to the nested decision
+    await writeFile(
+      join(p.dir, "docs", "x.md"),
+      "# X\n\nSee [d](../design/decisions/sub/nested-rfc.md).\n",
+    );
+
+    // Dry-run: link_rewrite.items should contain the nested target
+    const dryRes = p.run(["decision", "prune", nestedPath, "--json"]);
+    const dryEnv = expectJsonOk<{
+      plan: {
+        link_rewrite: { status: string; items: Record<string, unknown>[] };
+      };
+    }>(dryRes);
+    expect(dryEnv.data.plan.link_rewrite.status).toBe("ready");
+    const item = dryEnv.data.plan.link_rewrite.items.find(
+      i => i.source_file === "docs/x.md",
+    );
+    expect(item).toBeDefined();
+    expect(item).toMatchObject({
+      link_kind: "inline",
+      rewrite_action: "delink",
+      normalized_target: nestedPath,
+    });
+
+    // --write: the inbound link is rewritten (delinked)
+    const writeRes = p.run([
+      "decision",
+      "prune",
+      nestedPath,
+      "--write",
+      "--json",
+    ]);
+    expect(writeRes.code).toBe(0);
+    const after = await readFile(join(p.dir, "docs", "x.md"), "utf8");
+    expect(after).not.toContain("nested-rfc.md");
+  });
 });
