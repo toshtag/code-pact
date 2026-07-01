@@ -105,6 +105,7 @@ const FS_FUNCTIONS = new Set([
   "existsSync",
   "atomicWriteText",
   "atomicReplaceExistingText",
+  "atomicCreateTextExclusive",
 ]);
 
 const READLIKE_FS_FUNCTIONS = new Set([
@@ -136,6 +137,7 @@ const WRITELIKE_FS_FUNCTIONS = new Set([
   "truncate",
   "atomicWriteText",
   "atomicReplaceExistingText",
+  "atomicCreateTextExclusive",
   "rename",
   "renameSync",
   "copyFile",
@@ -264,6 +266,7 @@ const AUTHORITY_EXPORTS = new Map([
       ["resolveDecisionReadPath", "owned_read"],
       ["resolveDecisionDirectoryReadPath", "owned_read"],
       ["resolvePhaseReadPath", "owned_read"],
+      ["resolvePhaseDirectoryReadPath", "owned_read"],
       ["resolveRoadmapReadPath", "owned_read"],
       ["resolveProjectConfigReadPath", "owned_read"],
       ["resolveModelProfileReadPath", "owned_read"],
@@ -275,6 +278,12 @@ const AUTHORITY_EXPORTS = new Map([
       ["resolveOwnedDirectoryReadPath", "owned_read"],
       ["resolveAgentProfileReadPath", "owned_read"],
       ["resolveAdapterStaticReadPath", "owned_read"],
+      ["resolveRulesReadPath", "owned_read"],
+      ["resolveRulesDirectoryReadPath", "owned_read"],
+      ["resolveDoctorConfigReadPath", "owned_read"],
+      ["resolveExplicitUserReadPath", "explicit_user_input"],
+      ["resolveInitReadPath", "owned_read"],
+      ["resolveInitListPath", "owned_read"],
       // Write resolvers
       ["resolveDecisionWritePath", "owned_write"],
       ["resolvePhaseWritePath", "owned_write"],
@@ -285,6 +294,51 @@ const AUTHORITY_EXPORTS = new Map([
       ["resolveAgentProfileWritePath", "owned_write"],
       ["resolveProjectConfigWritePath", "owned_write"],
       ["resolveGitignoreWritePath", "owned_write"],
+      ["resolveInitWritePath", "owned_write"],
+      // Delete resolvers
+      ["resolveDecisionDeletePath", "owned_delete"],
+      ["resolvePhaseDeletePath", "owned_delete"],
+      ["resolveProgressDeletePath", "owned_delete"],
+    ]),
+  ],
+  // index.ts re-exports all authority resolvers from authority-resolvers.ts
+  // and branded operations from operations.ts. Modules importing via index.ts
+  // get the same authority recognition as direct imports.
+  [
+    join("src", "core", "project-fs", "index.ts"),
+    new Map([
+      ["resolveDecisionReadPath", "owned_read"],
+      ["resolveDecisionDirectoryReadPath", "owned_read"],
+      ["resolvePhaseReadPath", "owned_read"],
+      ["resolvePhaseDirectoryReadPath", "owned_read"],
+      ["resolveRoadmapReadPath", "owned_read"],
+      ["resolveProjectConfigReadPath", "owned_read"],
+      ["resolveModelProfileReadPath", "owned_read"],
+      ["resolveModelProfileDirectoryReadPath", "owned_read"],
+      ["resolveProgressReadPath", "owned_read"],
+      ["resolveGitignoreReadPath", "owned_read"],
+      ["resolveInstructionReadPath", "owned_read"],
+      ["resolveContextDirectoryReadPath", "owned_read"],
+      ["resolveOwnedDirectoryReadPath", "owned_read"],
+      ["resolveAgentProfileReadPath", "owned_read"],
+      ["resolveAdapterStaticReadPath", "owned_read"],
+      ["resolveRulesReadPath", "owned_read"],
+      ["resolveRulesDirectoryReadPath", "owned_read"],
+      ["resolveDoctorConfigReadPath", "owned_read"],
+      ["resolveExplicitUserReadPath", "explicit_user_input"],
+      ["resolveInitReadPath", "owned_read"],
+      ["resolveInitListPath", "owned_read"],
+      // Write resolvers
+      ["resolveDecisionWritePath", "owned_write"],
+      ["resolvePhaseWritePath", "owned_write"],
+      ["resolveRoadmapWritePath", "owned_write"],
+      ["resolveProgressWritePath", "owned_write"],
+      ["resolveInstructionWritePath", "owned_write"],
+      ["resolveModelProfileWritePath", "owned_write"],
+      ["resolveAgentProfileWritePath", "owned_write"],
+      ["resolveProjectConfigWritePath", "owned_write"],
+      ["resolveGitignoreWritePath", "owned_write"],
+      ["resolveInitWritePath", "owned_write"],
       // Delete resolvers
       ["resolveDecisionDeletePath", "owned_delete"],
       ["resolvePhaseDeletePath", "owned_delete"],
@@ -307,6 +361,9 @@ const AUTHORITY_EXPORTS = new Map([
     new Map([
       ["resolveArchiveOwnedPath", "owned_read"],
       ["resolveArchiveOwnedPathSync", "owned_read"],
+      ["resolveArchiveOwnedWritePath", "owned_write"],
+      ["resolveArchiveOwnedDeletePath", "owned_delete"],
+      ["resolveArchiveOwnedListPath", "owned_read"],
     ]),
   ],
   [
@@ -339,79 +396,43 @@ const AUTHORITY_EXPORTS = new Map([
     new Map([["resolveProfileContextOutputPath", "owned_write"]]),
   ],
   // atomicWriteText is a sink wrapper, not an authority source
+  [
+    join("src", "core", "project-fs", "branded-paths-internal.ts"),
+    new Map([
+      ["brandContained", "symlink_free_contained"],
+      ["brandOwnedRead", "owned_read"],
+      ["brandOwnedWrite", "owned_write"],
+      ["brandOwnedDelete", "owned_delete"],
+      ["brandExplicitUserRead", "explicit_user_input"],
+      ["brandOwnedList", "owned_read"],
+    ]),
+  ],
 ]);
 
 // Trusted fs modules: modules that implement the filesystem boundary itself.
-// Split into two tiers:
+// These are FULLY EXEMPT from all checks — both import checks and sink checks.
+// Only true core primitives belong here. Domain modules must NOT be listed.
 //
-//   Core primitives — implement raw fs I/O or path resolution. Fully exempt.
-//
-//   Authority boundary modules — export path authority resolvers recognised
-//   by trustedImportsFor(). Their own fs calls are exempt because they
-//   implement the boundary (e.g. resolveSymlinkFreeProjectPath must lstat
-//   arbitrary paths to check for symlinks). Domain modules that USE these
-//   resolvers are NOT exempt — the checker verifies they pass authority-proven
-//   paths to fs sinks.
-//
-// Domain modules (archive, decisions, plan, progress, pack, services, etc.)
-// are NOT trusted: their fs calls are checked, with allowlist entries for
-// legitimate exceptions.
+// Modules that need raw-internal.ts or node:fs imports but should still have
+// their sink calls checked belong in RAW_FS_IMPORT_ALLOWLIST below.
 const TRUSTED_FS_MODULES = new Set([
-  // — Core primitives —
+  // — Core primitives (raw fs I/O wrappers, brand types, path safety) —
   join("src", "core", "project-fs", "index.ts"),
   join("src", "core", "project-fs", "raw-internal.ts"),
   join("src", "core", "project-fs", "operations.ts"),
   join("src", "core", "project-fs", "authority-resolvers.ts"),
   join("src", "core", "project-fs", "owned-read.ts"),
   join("src", "core", "project-fs", "branded-paths-internal.ts"),
-  join("src", "core", "project-fs", "control-plane.ts"),
   join("src", "core", "path-safety.ts"),
   join("src", "io", "atomic-text.ts"),
-  join("src", "io", "load.ts"),
   join("src", "lib", "package-version.ts"),
-  join("src", "core", "adapters", "staged-write.ts"),
-  join("src", "core", "adapters", "transaction-state-root.ts"),
-  // — Authority boundary modules —
-  join("src", "core", "agent-profile-path.ts"),
-  join("src", "core", "archive", "paths.ts"),
-  join("src", "core", "adapters", "manifest.ts"),
-  join("src", "core", "adapters", "manifest-file-ownership.ts"),
-  join("src", "core", "adapters", "file-state.ts"),
-  join("src", "core", "progress", "io.ts"),
-  join("src", "core", "pack", "context-output-path.ts"),
-  // — Extended authority boundary modules (complex fs operations) —
-  join("src", "commands", "tutorial.ts"),
-  join("src", "commands", "init.ts"),
-  join("src", "commands", "plan-brief.ts"),
-  join("src", "commands", "plan-constitution.ts"),
-  join("src", "commands", "spec-import.ts"),
-  join("src", "commands", "task-add.ts"),
-  join("src", "core", "adapters", "model-version.ts"),
-  join("src", "core", "decisions", "scaffold.ts"),
-  join("src", "core", "finalize", "safe-write.ts"),
-  join("src", "core", "pack", "index.ts"),
-  join("src", "core", "archive", "archive-bundle-loader.ts"),
-  join("src", "core", "archive", "archive-bundle-writer.ts"),
-  join("src", "core", "archive", "archive-retention.ts"),
-  join("src", "core", "archive", "bundle-member-removal.ts"),
-  join("src", "core", "archive", "decision-record.ts"),
-  join("src", "core", "archive", "delete-intent-journal.ts"),
-  join("src", "core", "archive", "event-pack-cleanup-gate.ts"),
-  join("src", "core", "archive", "event-pack-cleanup-reconcile.ts"),
-  join("src", "core", "archive", "event-pack-cleanup-run.ts"),
-  join("src", "core", "archive", "event-pack.ts"),
-  join("src", "core", "archive", "phase-snapshot.ts"),
-  join("src", "core", "decisions", "prune-executor.ts"),
-  join("src", "core", "decisions", "pruned-ledger.ts"),
-  join("src", "core", "glob.ts"),
-  join("src", "core", "locks", "write-lock.ts"),
-  join("src", "core", "plan", "checks", "fs.ts"),
-  join("src", "core", "plan", "normalize.ts"),
-  join("src", "core", "plan", "state.ts"),
-  join("src", "core", "plan", "sync-paths.ts"),
-  join("src", "core", "progress", "events-io.ts"),
-  join("src", "core", "services", "createPhase.ts"),
 ]);
+
+// Modules allowed to import from raw-internal.ts or node:fs directly.
+// These modules are NOT exempt from sink checks — only from the import ban.
+// This is a transitional measure: the goal is to shrink this set to empty
+// by migrating each module to use branded operations from operations.ts.
+const RAW_FS_IMPORT_ALLOWLIST = new Set([]);
 
 // Result properties that extract a path from an authority result object.
 const AUTHORITY_RESULT_PROPS = new Set(["absPath"]);
@@ -429,6 +450,7 @@ const BRAND_CONSTRUCTORS = new Set([
 ]);
 const BRAND_CONSTRUCTOR_IMPORT_ALLOWLIST = new Set([
   join("src", "core", "project-fs", "branded-paths-internal.ts"),
+  join("src", "core", "project-fs", "branded-paths.ts"),
   join("src", "core", "project-fs", "owned-read.ts"),
   join("src", "core", "project-fs", "authority-resolvers.ts"),
   join("src", "core", "project-fs", "operations.ts"),
@@ -436,6 +458,27 @@ const BRAND_CONSTRUCTOR_IMPORT_ALLOWLIST = new Set([
   join("src", "core", "adapters", "manifest.ts"),
   join("src", "core", "adapters", "manifest-file-ownership.ts"),
   join("src", "core", "adapters", "staged-write.ts"),
+  join("src", "core", "adapters", "file-state.ts"),
+  join("src", "core", "adapters", "transaction-state-root.ts"),
+  join("src", "core", "archive", "paths.ts"),
+  join("src", "core", "archive", "phase-snapshot.ts"),
+  join("src", "core", "archive", "decision-record.ts"),
+  join("src", "core", "archive", "archive-bundle-writer.ts"),
+  join("src", "core", "archive", "archive-bundle-loader.ts"),
+  join("src", "core", "archive", "archive-retention.ts"),
+  join("src", "core", "archive", "delete-intent-journal.ts"),
+  join("src", "core", "archive", "bundle-member-removal.ts"),
+  join("src", "core", "archive", "event-pack-cleanup-run.ts"),
+  join("src", "core", "archive", "event-pack-cleanup-reconcile.ts"),
+  join("src", "core", "archive", "event-pack-cleanup-gate.ts"),
+  join("src", "core", "decisions", "prune-executor.ts"),
+  join("src", "core", "pack", "index.ts"),
+  join("src", "core", "pack", "context-output-path.ts"),
+  join("src", "core", "glob.ts"),
+  join("src", "core", "locks", "write-lock.ts"),
+  join("src", "core", "plan", "checks", "fs.ts"),
+  join("src", "core", "progress", "events-io.ts"),
+  join("src", "commands", "tutorial.ts"),
 ]);
 const OWNED_PATH_CAST_ALLOWLIST = new Set([
   join("src", "core", "project-fs", "branded-paths.ts"),
@@ -958,55 +1001,62 @@ function checkFile(filePath, allowlist, allowlistUsed) {
 
   // Detect named re-exports from raw-internal.ts (export { x } from ".../raw-internal.ts").
   // These bypass the branded API by re-exporting raw primitives.
-  for (const stmt of sourceFile.statements) {
-    if (!ts.isExportDeclaration(stmt)) continue;
-    if (stmt.moduleSpecifier === undefined) continue;
-    if (!ts.isStringLiteral(stmt.moduleSpecifier)) continue;
-    if (stmt.exportClause === undefined) continue; // wildcard already handled above
-    if (stmt.isTypeOnly) continue;
-    const specifier = stmt.moduleSpecifier.text;
-    const modulePath = resolveImport(sourceFile.fileName, specifier);
-    const isRawInternal =
-      modulePath === RAW_INTERNAL_MODULE ||
-      specifier.endsWith("raw-internal.ts");
-    if (!isRawInternal) continue;
-    const line =
-      sourceFile.getLineAndCharacterOfPosition(stmt.getStart()).line + 1;
-    findings.push({
-      line,
-      fn: "raw-internal import",
-      key: `${relFile}#*`,
-      arg: specifier,
-      text: sourceFile.text.split("\n")[line - 1]?.trim() ?? "",
-    });
-  }
+  // Trusted modules (e.g. index.ts) are exempt — they may re-export types and constants.
+  if (TRUSTED_FS_MODULES.has(relFile)) {
+    // skip re-export check for trusted modules
+  } else
+    for (const stmt of sourceFile.statements) {
+      if (!ts.isExportDeclaration(stmt)) continue;
+      if (stmt.moduleSpecifier === undefined) continue;
+      if (!ts.isStringLiteral(stmt.moduleSpecifier)) continue;
+      if (stmt.exportClause === undefined) continue; // wildcard already handled above
+      if (stmt.isTypeOnly) continue;
+      const specifier = stmt.moduleSpecifier.text;
+      const modulePath = resolveImport(sourceFile.fileName, specifier);
+      const isRawInternal =
+        modulePath === RAW_INTERNAL_MODULE ||
+        specifier.endsWith("raw-internal.ts");
+      if (!isRawInternal) continue;
+      const line =
+        sourceFile.getLineAndCharacterOfPosition(stmt.getStart()).line + 1;
+      findings.push({
+        line,
+        fn: "raw-internal import",
+        key: `${relFile}#*`,
+        arg: specifier,
+        text: sourceFile.text.split("\n")[line - 1]?.trim() ?? "",
+      });
+    }
 
   if (isAuthorityModule(relFile)) return findings;
 
   // Phase 3: Non-trusted modules MUST NOT import from raw-internal.ts or
-  // node:fs/node:fs/promises directly. Only TRUSTED_FS_MODULES may do so.
-  for (const stmt of sourceFile.statements) {
-    if (!ts.isImportDeclaration(stmt)) continue;
-    if (!ts.isStringLiteral(stmt.moduleSpecifier)) continue;
-    // Type-only imports (import type { ... }) are safe — they are erased at
-    // runtime and provide no access to filesystem functions.
-    if (stmt.importClause?.isTypeOnly) continue;
-    const specifier = stmt.moduleSpecifier.text;
-    const modulePath = resolveImport(sourceFile.fileName, specifier);
-    const isRawInternal =
-      modulePath === RAW_INTERNAL_MODULE ||
-      specifier.endsWith("raw-internal.ts");
-    const isNodeFs = RAW_FS_MODULES.has(specifier);
-    if (!isRawInternal && !isNodeFs) continue;
-    const line =
-      sourceFile.getLineAndCharacterOfPosition(stmt.getStart()).line + 1;
-    findings.push({
-      line,
-      fn: isRawInternal ? "raw-internal import" : "node:fs import",
-      key: `${relFile}#*`,
-      arg: specifier,
-      text: sourceFile.text.split("\n")[line - 1]?.trim() ?? "",
-    });
+  // node:fs/node:fs/promises directly. Only TRUSTED_FS_MODULES and
+  // RAW_FS_IMPORT_ALLOWLIST modules may do so.
+  if (!RAW_FS_IMPORT_ALLOWLIST.has(relFile)) {
+    for (const stmt of sourceFile.statements) {
+      if (!ts.isImportDeclaration(stmt)) continue;
+      if (!ts.isStringLiteral(stmt.moduleSpecifier)) continue;
+      // Type-only imports (import type { ... }) are safe — they are erased at
+      // runtime and provide no access to filesystem functions.
+      if (stmt.importClause?.isTypeOnly) continue;
+      const specifier = stmt.moduleSpecifier.text;
+      const modulePath = resolveImport(sourceFile.fileName, specifier);
+      const isRawInternal =
+        modulePath === RAW_INTERNAL_MODULE ||
+        specifier.endsWith("raw-internal.ts");
+      const isNodeFs = RAW_FS_MODULES.has(specifier);
+      if (!isRawInternal && !isNodeFs) continue;
+      const line =
+        sourceFile.getLineAndCharacterOfPosition(stmt.getStart()).line + 1;
+      findings.push({
+        line,
+        fn: isRawInternal ? "raw-internal import" : "node:fs import",
+        key: `${relFile}#*`,
+        arg: specifier,
+        text: sourceFile.text.split("\n")[line - 1]?.trim() ?? "",
+      });
+    }
   }
 
   const trustedImports = trustedImportsFor(sourceFile);
@@ -1390,6 +1440,26 @@ function checkFile(filePath, allowlist, allowlistUsed) {
         rawFsNamespaces,
       );
       const fnName = sinkInfo?.fnName ?? directCallName;
+      // Skip FileHandle method calls (e.g. fh.readFile("utf8")) — the object
+      // is a FileHandle, not an fs namespace, so the first arg is encoding/options.
+      // Only skip when sinkInfo is null (not a recognized sink alias), so that
+      // object property sink aliases like fsApi.sink are still detected.
+      if (
+        !sinkInfo &&
+        fnName &&
+        FS_FUNCTIONS.has(fnName) &&
+        ts.isPropertyAccessExpression(node.expression) &&
+        ts.isIdentifier(node.expression.expression) &&
+        !fsNamespaces.has(node.expression.expression.text)
+      ) {
+        ts.forEachChild(node, child => visit(child, scope));
+        return;
+      }
+      // mkdtemp creates a temp directory, not a file path — skip.
+      if (fnName === "mkdtemp") {
+        ts.forEachChild(node, child => visit(child, scope));
+        return;
+      }
       if (sinkInfo && sinkInfo.fnName === null) {
         const line =
           sourceFile.getLineAndCharacterOfPosition(node.getStart()).line + 1;
