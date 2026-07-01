@@ -635,12 +635,22 @@ async function cmdPlanNormalize(
 
     return result.ok ? 0 : 1;
   } catch (err: unknown) {
-    const code =
+    const rawCode =
       (err as NodeJS.ErrnoException).code ?? "PLAN_NORMALIZE_FAILED";
+    const code = normalizeFsAuthorityConfigCode(rawCode);
     const message = err instanceof Error ? err.message : String(err);
     emitError(json, code, message);
     return code === "CONFIG_ERROR" ? 2 : 3;
   }
+}
+
+function normalizeFsAuthorityConfigCode(code: string): string {
+  return code === "PATH_NOT_OWNED" ||
+    code === "PATH_OUTSIDE_PROJECT" ||
+    code === "FS_AUTHORITY_FAILURE" ||
+    code === "ENOSYS"
+    ? "CONFIG_ERROR"
+    : code;
 }
 
 // Ledger-read failures are integrity DIAGNOSTICS, not public command errors —
@@ -851,7 +861,10 @@ async function cmdPlanSyncPaths(
     try {
       result = await runPlanSyncPaths({ cwd, renames, mode });
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === "CONFIG_ERROR") {
+      const code = normalizeFsAuthorityConfigCode(
+        (err as NodeJS.ErrnoException).code ?? "PLAN_SYNC_PATHS_FAILED",
+      );
+      if (code === "CONFIG_ERROR") {
         const message = err instanceof Error ? err.message : String(err);
         emitError(json, "CONFIG_ERROR", message);
         return 2;
