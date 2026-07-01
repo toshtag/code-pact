@@ -29,7 +29,18 @@
 // exercise the real path. NOT documented in public surfaces — no
 // compatibility guarantee.
 
-import { mkdir, readFile, stat, unlink, writeFile } from "../project-fs/raw-internal.ts";
+import {
+  mkdirOwned,
+  readOwnedText,
+  statOwned,
+  unlinkOwned,
+  openOwnedWriteExclusive,
+} from "../project-fs/operations.ts";
+import {
+  brandOwnedRead,
+  brandOwnedWrite,
+  brandOwnedDelete,
+} from "../project-fs/branded-paths-internal.ts";
 import { hostname } from "node:os";
 import { dirname, join } from "node:path";
 import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
@@ -51,7 +62,9 @@ export type LockHeldError = NodeJS.ErrnoException & {
 };
 
 export function isLockHeldError(err: unknown): err is LockHeldError {
-  return err instanceof Error && (err as NodeJS.ErrnoException).code === "LOCK_HELD";
+  return (
+    err instanceof Error && (err as NodeJS.ErrnoException).code === "LOCK_HELD"
+  );
 }
 
 const NOOP_HANDLE: LockHandle = { release: async () => {} };
@@ -66,7 +79,10 @@ export function lockPathFor(cwd: string): string {
 
 async function resolveLockPath(cwd: string): Promise<string> {
   try {
-    return await resolveSymlinkFreeProjectPath(cwd, ".code-pact/locks/write.lock");
+    return await resolveSymlinkFreeProjectPath(
+      cwd,
+      ".code-pact/locks/write.lock",
+    );
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (
@@ -112,7 +128,7 @@ export async function acquireWriteLock(
   if (locksDisabledViaEnv()) return NOOP_HANDLE;
 
   const lockPath = await resolveLockPath(cwd);
-  await mkdir(dirname(lockPath), { recursive: true });
+  await mkdirOwned(brandOwnedWrite(dirname(lockPath)), { recursive: true });
 
   const holder: LockHolder = {
     pid: process.pid,
@@ -122,7 +138,9 @@ export async function acquireWriteLock(
   };
 
   try {
-    await writeFile(lockPath, JSON.stringify(holder), { flag: "wx" });
+    const fh = await openOwnedWriteExclusive(brandOwnedWrite(lockPath));
+    await fh.writeFile(JSON.stringify(holder));
+    await fh.close();
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "EEXIST") {
       // Lock already held. Read the existing holder for diagnostics;
@@ -130,7 +148,7 @@ export async function acquireWriteLock(
       // surface `null` in the envelope instead of failing the contender.
       let existing: LockHolder | null = null;
       try {
-        const raw = await readFile(lockPath, "utf8");
+        const raw = await readOwnedText(brandOwnedRead(lockPath));
         const parsed = JSON.parse(raw) as Partial<LockHolder>;
         if (
           typeof parsed.pid === "number" &&
@@ -157,14 +175,14 @@ export async function acquireWriteLock(
     throw err;
   }
 
-  const created = await stat(lockPath);
+  const created = await statOwned(brandOwnedRead(lockPath));
   return {
     release: async () => {
       try {
         const currentPath = await resolveLockPath(cwd);
-        const current = await stat(currentPath);
+        const current = await statOwned(brandOwnedRead(currentPath));
         if (current.dev === created.dev && current.ino === created.ino) {
-          await unlink(currentPath);
+          await unlinkOwned(brandOwnedDelete(currentPath));
         }
       } catch {
         // Best-effort release. The lock file may have been removed
