@@ -1,5 +1,9 @@
-import type { Dirent } from "./project-fs/raw-internal.ts";
-import { readdir } from "./project-fs/raw-internal.ts";
+import { listOwnedDirents } from "./project-fs/operations.ts";
+import { resolveInitListPath } from "./project-fs/authority-resolvers.ts";
+import {
+  brandOwnedList,
+  type OwnedListPath,
+} from "./project-fs/branded-paths-internal.ts";
 import { join, relative } from "node:path";
 
 // ---------------------------------------------------------------------------
@@ -58,11 +62,16 @@ export function validateGlobSyntax(pattern: string): string | null {
   if (pattern.length === 0) return "empty glob pattern";
   if (pattern.length > MAX_GLOB_LENGTH)
     return `glob pattern exceeds ${MAX_GLOB_LENGTH} characters`;
-  if (pattern.startsWith("!")) return "negation patterns ('!') are not supported in P10";
-  if (/[{}]/.test(pattern)) return "brace expansion ('{...}') is not supported in P10";
-  if (/[@+?!*]\(/.test(pattern)) return "extglob syntax ('@(...)', '+(...)', '*(...)', '?(...)', '!(...)') is not supported in P10";
-  if (/[[\]]/.test(pattern)) return "character classes ('[...]') are not supported in P10";
-  if (pattern.includes("\\")) return "backslash escapes are not supported in P10";
+  if (pattern.startsWith("!"))
+    return "negation patterns ('!') are not supported in P10";
+  if (/[{}]/.test(pattern))
+    return "brace expansion ('{...}') is not supported in P10";
+  if (/[@+?!*]\(/.test(pattern))
+    return "extglob syntax ('@(...)', '+(...)', '*(...)', '?(...)', '!(...)') is not supported in P10";
+  if (/[[\]]/.test(pattern))
+    return "character classes ('[...]') are not supported in P10";
+  if (pattern.includes("\\"))
+    return "backslash escapes are not supported in P10";
 
   for (const segment of pattern.split("/")) {
     if (segment.includes("**") && segment !== "**") {
@@ -95,7 +104,7 @@ export function validateGlobSyntax(pattern: string): string | null {
  */
 export function globToRegex(pattern: string): RegExp {
   const DOUBLE = "\u0001"; // sentinel for `**` segments
-  const segments = pattern.split("/").map((seg) => {
+  const segments = pattern.split("/").map(seg => {
     if (seg === "**") return DOUBLE;
     // Escape regex metachars (excluding `*`), then expand `*` to `[^/]*`. `?` is a
     // LITERAL in this glob subset (validateGlobSyntax accepts it), so it MUST be
@@ -162,7 +171,11 @@ function matchSegments(p: readonly string[], s: readonly string[]): boolean {
       starPi = pi;
       starSi = si;
       pi += 1; // first try `**` matching zero segments
-    } else if (pi < p.length && p[pi] !== "**" && matchSegment(p[pi]!, s[si]!)) {
+    } else if (
+      pi < p.length &&
+      p[pi] !== "**" &&
+      matchSegment(p[pi]!, s[si]!)
+    ) {
       pi += 1;
       si += 1;
     } else if (starPi !== -1) {
@@ -224,10 +237,10 @@ export async function walkAndMatch(
 ): Promise<string[]> {
   const matches: string[] = [];
 
-  async function walk(dir: string): Promise<void> {
-    let entries: Dirent[];
+  async function walk(dir: OwnedListPath): Promise<void> {
+    let entries;
     try {
-      entries = await readdir(dir, { withFileTypes: true });
+      entries = await listOwnedDirents(dir);
     } catch {
       return;
     }
@@ -236,14 +249,14 @@ export async function walkAndMatch(
       const rel = toPosix(relative(cwd, abs));
       if (entry.isDirectory()) {
         if (WALK_IGNORE_DIRS.has(entry.name)) continue;
-        await walk(abs);
+        await walk(brandOwnedList(abs));
       } else if (entry.isFile()) {
         if (matchGlob(pattern, rel)) matches.push(rel);
       }
     }
   }
 
-  await walk(cwd);
+  await walk(await resolveInitListPath(cwd, "."));
   return matches.sort();
 }
 
@@ -316,7 +329,7 @@ export function findProtectedPathOverlaps(
   // intermediate segment where `matchGlob` lets each `**` match zero), which let
   // a declared write like `design/**/**/roadmap.yaml` evade this protected-path
   // overlap while still matching `design/roadmap.yaml` at runtime.
-  return protectedPaths.filter((entry) => {
+  return protectedPaths.filter(entry => {
     // declared glob is broader-than/equal-to the protected pattern.
     if (matchGlob(declaredGlob, entry.sample)) return true;
     // protected pattern is broader-than/equal-to the declared glob.
@@ -334,7 +347,7 @@ export function findProtectedPathOverlaps(
  * synthesis routine.
  */
 export function synthesizeSample(glob: string): string {
-  const segments = glob.split("/").map((seg) => {
+  const segments = glob.split("/").map(seg => {
     if (seg === "**") return "p10sampledir";
     return seg.replace(/\*/g, "p10sample");
   });
