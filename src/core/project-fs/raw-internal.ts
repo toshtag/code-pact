@@ -61,6 +61,13 @@ import { open as openRaw, constants as constantsRaw } from "node:fs/promises";
  * ENOSYS rather than silently falling back to an unsafe read.
  */
 export async function readRegularOwnedText(path: string): Promise<string> {
+  if (typeof constantsRaw.O_NOFOLLOW !== "number") {
+    const error = new Error(
+      "O_NOFOLLOW is not supported on this platform; refusing to read without symlink protection",
+    );
+    (error as NodeJS.ErrnoException).code = "ENOSYS";
+    throw error;
+  }
   const flags = constantsRaw.O_RDONLY | constantsRaw.O_NOFOLLOW;
   let handle;
   try {
