@@ -116,17 +116,17 @@ const FS_FUNCTIONS = new Set([
   "listOwnedDirents",
   "writeOwnedText",
   "writeOwnedFile",
+  "writeOwnedTextExclusive",
+  "writeOwnedTempDurably",
+  "fsyncOwnedRegularFile",
+  "fsyncOwnedDirectory",
   "removeOwned",
-  "removeOwnedPath",
   "unlinkOwned",
   "mkdirOwned",
   "renameOwned",
   "copyOwnedToOwned",
   "linkOwned",
-  "openOwnedRead",
-  "openOwned",
-  "openOwnedWrite",
-  "openOwnedWriteExclusive",
+  "readOwnedTextSyncNoFollow",
 ]);
 
 const READLIKE_FS_FUNCTIONS = new Set([
@@ -153,7 +153,9 @@ const READLIKE_FS_FUNCTIONS = new Set([
   "lstatExplicitUser",
   "listOwned",
   "listOwnedDirents",
-  "openOwnedRead",
+  "readOwnedTextSyncNoFollow",
+  "fsyncOwnedRegularFile",
+  "fsyncOwnedDirectory",
 ]);
 
 const WRITELIKE_FS_FUNCTIONS = new Set([
@@ -170,9 +172,9 @@ const WRITELIKE_FS_FUNCTIONS = new Set([
   "atomicCreateTextExclusive",
   "writeOwnedText",
   "writeOwnedFile",
+  "writeOwnedTextExclusive",
+  "writeOwnedTempDurably",
   "mkdirOwned",
-  "openOwnedWrite",
-  "openOwnedWriteExclusive",
   "rename",
   "renameSync",
   "copyFile",
@@ -197,7 +199,6 @@ const DELETELIKE_FS_FUNCTIONS = new Set([
   "unlink",
   "unlinkSync",
   "removeOwned",
-  "removeOwnedPath",
   "unlinkOwned",
 ]);
 
@@ -227,10 +228,10 @@ function capabilitiesForKind(kind) {
     return { read: true, write: false, delete: false, explicitUserInput: true };
   }
   if (kind === "owned_write") {
-    return { read: true, write: true, delete: true, explicitUserInput: false };
+    return { read: false, write: true, delete: false, explicitUserInput: false };
   }
   if (kind === "owned_delete") {
-    return { read: true, write: false, delete: true, explicitUserInput: false };
+    return { read: false, write: false, delete: true, explicitUserInput: false };
   }
   if (kind === "owned_read") {
     return {
@@ -276,13 +277,11 @@ function isSinkAuthorizedForCapability(kind, capability) {
 function isSinkAuthorized(kind, fnName) {
   if (kind === "explicit_user_input") return true;
   if (READLIKE_FS_FUNCTIONS.has(fnName)) {
-    return (
-      kind === "owned_read" || kind === "owned_write" || kind === "owned_delete"
-    );
+    return kind === "owned_read";
   }
   if (WRITELIKE_FS_FUNCTIONS.has(fnName)) return kind === "owned_write";
   if (DELETELIKE_FS_FUNCTIONS.has(fnName)) {
-    return kind === "owned_delete" || kind === "owned_write";
+    return kind === "owned_delete";
   }
   return false;
 }
@@ -315,13 +314,10 @@ const AUTHORITY_EXPORTS = new Map([
       ["resolveContextDirectoryReadPath", "owned_read"],
       ["resolveOwnedDirectoryReadPath", "owned_read"],
       ["resolveAgentProfileReadPath", "owned_read"],
-      ["resolveAdapterStaticReadPath", "owned_read"],
       ["resolveRulesReadPath", "owned_read"],
       ["resolveRulesDirectoryReadPath", "owned_read"],
       ["resolveDoctorConfigReadPath", "owned_read"],
       ["resolveExplicitUserReadPath", "explicit_user_input"],
-      ["resolveInitReadPath", "owned_read"],
-      ["resolveInitListPath", "owned_read"],
       // Write resolvers
       ["resolveDecisionWritePath", "owned_write"],
       ["resolvePhaseWritePath", "owned_write"],
@@ -332,7 +328,6 @@ const AUTHORITY_EXPORTS = new Map([
       ["resolveAgentProfileWritePath", "owned_write"],
       ["resolveProjectConfigWritePath", "owned_write"],
       ["resolveGitignoreWritePath", "owned_write"],
-      ["resolveInitWritePath", "owned_write"],
       // Delete resolvers
       ["resolveDecisionDeletePath", "owned_delete"],
       ["resolvePhaseDeletePath", "owned_delete"],
@@ -359,13 +354,10 @@ const AUTHORITY_EXPORTS = new Map([
       ["resolveContextDirectoryReadPath", "owned_read"],
       ["resolveOwnedDirectoryReadPath", "owned_read"],
       ["resolveAgentProfileReadPath", "owned_read"],
-      ["resolveAdapterStaticReadPath", "owned_read"],
       ["resolveRulesReadPath", "owned_read"],
       ["resolveRulesDirectoryReadPath", "owned_read"],
       ["resolveDoctorConfigReadPath", "owned_read"],
       ["resolveExplicitUserReadPath", "explicit_user_input"],
-      ["resolveInitReadPath", "owned_read"],
-      ["resolveInitListPath", "owned_read"],
       // Write resolvers
       ["resolveDecisionWritePath", "owned_write"],
       ["resolvePhaseWritePath", "owned_write"],
@@ -376,11 +368,116 @@ const AUTHORITY_EXPORTS = new Map([
       ["resolveAgentProfileWritePath", "owned_write"],
       ["resolveProjectConfigWritePath", "owned_write"],
       ["resolveGitignoreWritePath", "owned_write"],
-      ["resolveInitWritePath", "owned_write"],
       // Delete resolvers
       ["resolveDecisionDeletePath", "owned_delete"],
       ["resolvePhaseDeletePath", "owned_delete"],
       ["resolveProgressDeletePath", "owned_delete"],
+      ["resolveProjectScaffoldReadPath", "owned_read"],
+      ["resolveProjectScaffoldWritePath", "owned_write"],
+    ]),
+  ],
+  [
+    join(
+      "src",
+      "core",
+      "project-fs",
+      "authorities",
+      "project-config-authority.ts",
+    ),
+    new Map([
+      ["projectConfigReadPath", "owned_read"],
+      ["projectConfigWritePath", "owned_write"],
+      ["projectConfigDeletePath", "owned_delete"],
+      ["projectConfigListPath", "owned_read"],
+      ["resolveProjectTreeListPath", "owned_read"],
+      ["resolveProjectScaffoldReadPath", "owned_read"],
+      ["resolveProjectScaffoldWritePath", "owned_write"],
+      ["resolveProjectPresenceReadPath", "owned_read"],
+    ]),
+  ],
+  [
+    join(
+      "src",
+      "core",
+      "project-fs",
+      "authorities",
+      "normalize-authority.ts",
+    ),
+    new Map([
+      ["resolveNormalizeReadPath", "owned_read"],
+      ["resolveNormalizeWritePath", "owned_write"],
+      ["resolveNormalizeListPath", "owned_read"],
+      ["normalizeReadPath", "owned_read"],
+      ["normalizeWritePath", "owned_write"],
+      ["normalizeListPath", "owned_read"],
+    ]),
+  ],
+  [
+    join("src", "core", "project-fs", "authorities", "prune-authority.ts"),
+    new Map([
+      ["resolvePruneSourceReadPath", "owned_read"],
+      ["resolvePruneSourceWritePath", "owned_write"],
+      ["resolvePrunedLedgerReadPath", "owned_read"],
+      ["resolvePrunedLedgerWritePath", "owned_write"],
+      ["pruneReadPath", "owned_read"],
+      ["pruneWritePath", "owned_write"],
+      ["pruneDeletePath", "owned_delete"],
+    ]),
+  ],
+  [
+    join("src", "core", "project-fs", "authorities", "archive-authority.ts"),
+    new Map([
+      ["archiveReadPath", "owned_read"],
+      ["archiveWritePath", "owned_write"],
+      ["archiveDeletePath", "owned_delete"],
+      ["archiveListPath", "owned_read"],
+    ]),
+  ],
+  [
+    join("src", "core", "project-fs", "authorities", "adapter-authority.ts"),
+    new Map([
+      ["adapterReadPath", "owned_read"],
+      ["adapterWritePath", "owned_write"],
+      ["adapterDeletePath", "owned_delete"],
+      ["adapterListPath", "owned_read"],
+    ]),
+  ],
+  [
+    join(
+      "src",
+      "core",
+      "project-fs",
+      "authorities",
+      "context-output-authority.ts",
+    ),
+    new Map([
+      ["contextOutputReadPath", "owned_read"],
+      ["contextOutputWritePath", "owned_write"],
+    ]),
+  ],
+  [
+    join("src", "core", "project-fs", "authorities", "profile-authority.ts"),
+    new Map([
+      ["profileReadPath", "owned_read"],
+      ["profileWritePath", "owned_write"],
+    ]),
+  ],
+  [
+    join("src", "core", "project-fs", "authorities", "decision-authority.ts"),
+    new Map([
+      ["decisionReadPath", "owned_read"],
+      ["decisionWritePath", "owned_write"],
+      ["decisionDeletePath", "owned_delete"],
+      ["decisionListPath", "owned_read"],
+    ]),
+  ],
+  [
+    join("src", "core", "project-fs", "authorities", "phase-authority.ts"),
+    new Map([
+      ["phaseReadPath", "owned_read"],
+      ["phaseWritePath", "owned_write"],
+      ["phaseDeletePath", "owned_delete"],
+      ["phaseListPath", "owned_read"],
     ]),
   ],
   [
@@ -452,8 +549,14 @@ const RAW_FS_IMPORT_ALLOWLIST = new Set([
   join("src", "core", "project-fs", "raw-internal.ts"),
   join("src", "core", "project-fs", "operations.ts"),
   join("src", "core", "project-fs", "authority-resolvers.ts"),
-  join("src", "core", "project-fs", "owned-read.ts"),
   join("src", "core", "project-fs", "branded-paths-internal.ts"),
+  join(
+    "src",
+    "core",
+    "project-fs",
+    "authorities",
+    "temporary-sandbox-authority.ts",
+  ),
   join("src", "core", "path-safety.ts"),
   join("src", "io", "atomic-text.ts"),
   join("src", "lib", "package-version.ts"),
@@ -474,42 +577,61 @@ const BRAND_CONSTRUCTORS = new Set([
   "brandOwnedRead",
   "brandOwnedWrite",
   "brandOwnedDelete",
+  "brandOwnedList",
+  "brandExplicitUserRead",
+  "brandTemporarySandbox",
 ]);
 const BRAND_CONSTRUCTOR_IMPORT_ALLOWLIST = new Set([
   join("src", "core", "project-fs", "branded-paths-internal.ts"),
-  join("src", "core", "project-fs", "branded-paths.ts"),
-  join("src", "core", "project-fs", "owned-read.ts"),
   join("src", "core", "project-fs", "authority-resolvers.ts"),
   join("src", "core", "project-fs", "operations.ts"),
-  join("src", "core", "agent-profile-path.ts"),
-  join("src", "core", "adapters", "manifest.ts"),
-  join("src", "core", "adapters", "manifest-file-ownership.ts"),
-  join("src", "core", "adapters", "staged-write.ts"),
-  join("src", "core", "adapters", "file-state.ts"),
-  join("src", "core", "adapters", "transaction-state-root.ts"),
-  join("src", "core", "archive", "paths.ts"),
-  join("src", "core", "archive", "phase-snapshot.ts"),
-  join("src", "core", "archive", "decision-record.ts"),
-  join("src", "core", "archive", "archive-bundle-writer.ts"),
-  join("src", "core", "archive", "archive-bundle-loader.ts"),
-  join("src", "core", "archive", "archive-retention.ts"),
-  join("src", "core", "archive", "delete-intent-journal.ts"),
-  join("src", "core", "archive", "bundle-member-removal.ts"),
-  join("src", "core", "archive", "event-pack-cleanup-run.ts"),
-  join("src", "core", "archive", "event-pack-cleanup-reconcile.ts"),
-  join("src", "core", "archive", "event-pack-cleanup-gate.ts"),
-  join("src", "core", "decisions", "prune-executor.ts"),
-  join("src", "core", "pack", "index.ts"),
-  join("src", "core", "pack", "context-output-path.ts"),
-  join("src", "core", "glob.ts"),
-  join("src", "core", "locks", "write-lock.ts"),
-  join("src", "core", "plan", "checks", "fs.ts"),
-  join("src", "core", "progress", "events-io.ts"),
-  join("src", "commands", "tutorial.ts"),
+  join("src", "core", "project-fs", "authorities", "decision-authority.ts"),
+  join("src", "core", "project-fs", "authorities", "phase-authority.ts"),
+  join(
+    "src",
+    "core",
+    "project-fs",
+    "authorities",
+    "project-config-authority.ts",
+  ),
+  join("src", "core", "project-fs", "authorities", "profile-authority.ts"),
+  join("src", "core", "project-fs", "authorities", "archive-authority.ts"),
+  join("src", "core", "project-fs", "authorities", "adapter-authority.ts"),
+  join(
+    "src",
+    "core",
+    "project-fs",
+    "authorities",
+    "context-output-authority.ts",
+  ),
+  join("src", "core", "project-fs", "authorities", "normalize-authority.ts"),
+  join("src", "core", "project-fs", "authorities", "prune-authority.ts"),
+  join(
+    "src",
+    "core",
+    "project-fs",
+    "authorities",
+    "temporary-sandbox-authority.ts",
+  ),
 ]);
 const OWNED_PATH_CAST_ALLOWLIST = new Set([
   join("src", "core", "project-fs", "branded-paths.ts"),
   join("src", "core", "project-fs", "branded-paths-internal.ts"),
+]);
+
+const FORBIDDEN_PUBLIC_FS_API_IMPORTS = new Set([
+  `resolveInit${"Read"}Path`,
+  `resolveInit${"Write"}Path`,
+  `resolveInit${"List"}Path`,
+  `resolveAdapterStatic${"Read"}Path`,
+  `openOwned${"Write"}`,
+  `openOwned${"Write"}Exclusive`,
+  `openOwned${"Read"}`,
+  `mkdtemp${"Owned"}`,
+  `removeOwned${"Path"}`,
+  `readOwnedFile${"Sync"}`,
+  `realpathOwned${"Sync"}`,
+  `File${"Handle"}`,
 ]);
 
 // ---------------------------------------------------------------------------
@@ -942,14 +1064,8 @@ function requiredPathArguments(fnName, node) {
   if (fnName === "symlink") {
     return [{ index: 1, capability: "write" }];
   }
-  if (fnName === "open" || fnName === "openSync" || fnName === "openOwned") {
+  if (fnName === "open" || fnName === "openSync") {
     return [{ index: 0, capability: openRequiredCapability(node) }];
-  }
-  if (fnName === "openOwnedRead") {
-    return [{ index: 0, capability: "read" }];
-  }
-  if (fnName === "openOwnedWrite" || fnName === "openOwnedWriteExclusive") {
-    return [{ index: 0, capability: "write" }];
   }
   if (READLIKE_FS_FUNCTIONS.has(fnName)) {
     return [{ index: 0, capability: "read" }];
@@ -1110,6 +1226,38 @@ function checkFile(filePath, allowlist, allowlistUsed) {
   const sinkAliases = new Map(fsImports.sinks);
   const fsNamespaces = new Set(fsImports.namespaces);
   const rawFsNamespaces = new Set(fsImports.rawNamespaces);
+
+  for (const stmt of sourceFile.statements) {
+    if (!ts.isImportDeclaration(stmt)) continue;
+    if (!ts.isStringLiteral(stmt.moduleSpecifier)) continue;
+    const modulePath = resolveImport(
+      sourceFile.fileName,
+      stmt.moduleSpecifier.text,
+    );
+    if (
+      modulePath !== join("src", "core", "project-fs", "index.ts") &&
+      modulePath !== join("src", "core", "project-fs", "operations.ts") &&
+      modulePath !==
+        join("src", "core", "project-fs", "authority-resolvers.ts")
+    ) {
+      continue;
+    }
+    const bindings = stmt.importClause?.namedBindings;
+    if (!bindings || !ts.isNamedImports(bindings)) continue;
+    for (const el of bindings.elements) {
+      const imported = el.propertyName?.text ?? el.name.text;
+      if (!FORBIDDEN_PUBLIC_FS_API_IMPORTS.has(imported)) continue;
+      const line =
+        sourceFile.getLineAndCharacterOfPosition(el.getStart()).line + 1;
+      findings.push({
+        line,
+        fn: "forbidden public filesystem API import",
+        key: `${relFile}#*`,
+        arg: imported,
+        text: sourceFile.text.split("\n")[line - 1]?.trim() ?? "",
+      });
+    }
+  }
 
   for (const stmt of sourceFile.statements) {
     if (!ts.isImportDeclaration(stmt)) continue;
@@ -1496,8 +1644,8 @@ function checkFile(filePath, allowlist, allowlistUsed) {
         rawFsNamespaces,
       );
       const fnName = sinkInfo?.fnName ?? directCallName;
-      // Skip FileHandle method calls (e.g. fh.readFile("utf8")) — the object
-      // is a FileHandle, not an fs namespace, so the first arg is encoding/options.
+      // Skip raw-handle method calls (e.g. fh.readFile("utf8")) — the object is
+      // not an fs namespace, so the first arg is encoding/options.
       // Only skip when sinkInfo is null (not a recognized sink alias), so that
       // object property sink aliases like fsApi.sink are still detected.
       if (

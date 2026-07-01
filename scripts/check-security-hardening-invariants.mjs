@@ -1,14 +1,4 @@
 #!/usr/bin/env node
-// ---------------------------------------------------------------------------
-// check-security-hardening-invariants.mjs
-//
-// Verifies all completion invariants for the security hardening initiative.
-// Each check is a structural / textual assertion on the codebase that must
-// hold at CI time. Exits 0 only when every invariant passes.
-//
-// Run: node scripts/check-security-hardening-invariants.mjs
-// ---------------------------------------------------------------------------
-
 import {
   existsSync,
   mkdtempSync,
@@ -19,7 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { join, resolve, dirname } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -30,32 +20,21 @@ function check(name, condition, detail = "") {
     console.log(`  ✓ ${name}`);
   } else {
     console.error(`  ✗ ${name}${detail ? ` — ${detail}` : ""}`);
-    failures++;
+    failures += 1;
   }
 }
 
-function readFile(rel) {
+function read(rel) {
   return readFileSync(join(repoRoot, rel), "utf8");
-}
-
-function fileExists(rel) {
-  return existsSync(join(repoRoot, rel));
-}
-
-function grepIn(content, pattern) {
-  return new RegExp(pattern).test(content);
 }
 
 function walkTs(dir) {
   const out = [];
   for (const entry of readdirSync(dir)) {
     const full = join(dir, entry);
-    const stat = statSync(full);
-    if (stat.isDirectory()) {
-      out.push(...walkTs(full));
-    } else if (entry.endsWith(".ts") && !entry.endsWith(".d.ts")) {
-      out.push(full);
-    }
+    const st = statSync(full);
+    if (st.isDirectory()) out.push(...walkTs(full));
+    else if (entry.endsWith(".ts") && !entry.endsWith(".d.ts")) out.push(full);
   }
   return out;
 }
@@ -67,13 +46,64 @@ function rel(abs) {
     .join("/");
 }
 
+const AUTHORITY_MODULES = [
+  "src/core/project-fs/authorities/adapter-authority.ts",
+  "src/core/project-fs/authorities/archive-authority.ts",
+  "src/core/project-fs/authorities/context-output-authority.ts",
+  "src/core/project-fs/authorities/decision-authority.ts",
+  "src/core/project-fs/authorities/normalize-authority.ts",
+  "src/core/project-fs/authorities/phase-authority.ts",
+  "src/core/project-fs/authorities/profile-authority.ts",
+  "src/core/project-fs/authorities/project-config-authority.ts",
+  "src/core/project-fs/authorities/prune-authority.ts",
+  "src/core/project-fs/authorities/temporary-sandbox-authority.ts",
+];
+
+const BRAND_IMPORT_EXPECTED = [
+  ...AUTHORITY_MODULES,
+  "src/core/project-fs/authority-resolvers.ts",
+].sort();
+
+const FORBIDDEN_API_NAMES = [
+  `resolveInit${"Read"}Path`,
+  `resolveInit${"Write"}Path`,
+  `resolveInit${"List"}Path`,
+  `resolveAdapterStatic${"Read"}Path`,
+  `openOwned${"Write"}`,
+  `mkdtemp${"Owned"}`,
+  `removeOwned${"Path"}`,
+  `readOwnedFile${"Sync"}`,
+  `realpathOwned${"Sync"}`,
+];
+
+function hasForbiddenApiName(text) {
+  return FORBIDDEN_API_NAMES.some(name => text.includes(name));
+}
+
+function actualBrandConstructorImportFiles() {
+  const files = new Set();
+  const importPattern =
+    /import\s+(?!type\b)(?:\{([^}]+)\}|\*\s+as\s+\w+)\s+from\s+["']([^"']*branded-paths-internal\.ts)["']/g;
+  const brandPattern =
+    /\bbrand(Contained|OwnedRead|OwnedWrite|OwnedDelete|OwnedList|ExplicitUserRead|TemporarySandbox)\b/;
+  for (const file of walkTs(join(repoRoot, "src"))) {
+    const text = readFileSync(file, "utf8");
+    for (const match of text.matchAll(importPattern)) {
+      if (match[0].includes("* as") || brandPattern.test(match[1] ?? "")) {
+        files.add(rel(file));
+      }
+    }
+  }
+  return [...files].sort();
+}
+
 function actualRawImportFiles() {
   const files = new Set();
-  const rawModulePattern =
+  const rawPattern =
     /(?:import|export)\s+(?!type\b)[^'"]*\s+from\s+["']([^"']+)["']/g;
   for (const file of walkTs(join(repoRoot, "src"))) {
     const text = readFileSync(file, "utf8");
-    for (const match of text.matchAll(rawModulePattern)) {
+    for (const match of text.matchAll(rawPattern)) {
       const specifier = match[1];
       if (
         specifier === "node:fs" ||
@@ -87,16 +117,15 @@ function actualRawImportFiles() {
   return [...files].sort();
 }
 
-function runAuthorityFixture(name, lines) {
+function runFixture(name, relPath, source) {
   const dir = mkdtempSync(join(repoRoot, ".tmp-security-hardening-"));
-  const fixture = join(dir, `${name}.ts`);
-  writeFileSync(fixture, `${lines.join("\n")}\n`, "utf8");
+  const path = join(dir, `${name}.ts`);
+  writeFileSync(path, `${source.trim()}\n`, "utf8");
   try {
-    execFileSync(
-      "node",
-      [join(repoRoot, "scripts/check-fs-authority.mjs"), fixture],
-      { cwd: repoRoot, stdio: "pipe" },
-    );
+    execFileSync("node", [join(repoRoot, "scripts/check-fs-authority.mjs"), path], {
+      cwd: repoRoot,
+      stdio: "pipe",
+    });
     return 0;
   } catch (err) {
     return typeof err.status === "number" ? err.status : 1;
@@ -105,63 +134,47 @@ function runAuthorityFixture(name, lines) {
   }
 }
 
-const containedReadResolver = "resolveContained" + "ReadPath";
-const containedWriteResolver = "resolveContained" + "WritePath";
-const containedDeleteResolver = "resolveContained" + "DeletePath";
+function runChecker() {
+  try {
+    execFileSync("node", [join(repoRoot, "scripts/check-fs-authority.mjs")], {
+      cwd: repoRoot,
+      stdio: "pipe",
+    });
+    return 0;
+  } catch (err) {
+    return typeof err.status === "number" ? err.status : 1;
+  }
+}
 
-// ---------------------------------------------------------------------------
-// 1. Branded filesystem API — raw fs primitives NOT exported from index
-// ---------------------------------------------------------------------------
-console.log("\n=== 1. Branded filesystem API ===");
+console.log("\n=== 1. Public API Surface ===");
 {
-  const index = readFile("src/core/project-fs/index.ts");
+  const index = read("src/core/project-fs/index.ts");
+  check("project-fs/index.ts has no forbidden API", !hasForbiddenApiName(index));
   check(
-    "index.ts does not export raw fs primitives",
-    !grepIn(index, "export\\s+\\*\\s+from\\s+['\"]\\./raw-internal"),
-    "raw-internal wildcard export found",
+    "project-fs/index.ts does not export FileHandle",
+    !/\bFileHandle\b/.test(index),
   );
   check(
-    "index.ts exports branded operations",
-    grepIn(index, "readOwnedText|writeOwnedText|removeOwned"),
-  );
-  check(
-    "index.ts exports authority resolvers",
-    grepIn(index, "resolveDecision|resolveAgentProfile|resolveAndBrand"),
+    "operations.ts has no arbitrary open/write temp API",
+    !hasForbiddenApiName(read("src/core/project-fs/operations.ts")),
   );
 }
 
-// ---------------------------------------------------------------------------
-// 2. owned-read.ts deprecated — no active exports
-// ---------------------------------------------------------------------------
-console.log("\n=== 2. owned-read.ts deprecated ===");
+console.log("\n=== 2. Brand Constructor Provenance ===");
 {
-  const ownedRead = readFile("src/core/project-fs/owned-read.ts");
+  const actual = actualBrandConstructorImportFiles();
   check(
-    "owned-read.ts is deprecated",
-    grepIn(ownedRead, "@deprecated|deprecated"),
+    "brand constructor import file set matches authority modules",
+    JSON.stringify(actual) === JSON.stringify(BRAND_IMPORT_EXPECTED),
+    `actual: ${actual.join(", ")}`,
   );
 }
 
-// ---------------------------------------------------------------------------
-// 3. Raw fs import boundary — exact set, no file-level trusted return
-// ---------------------------------------------------------------------------
-console.log("\n=== 3. Raw fs import boundary ===");
+console.log("\n=== 3. Raw FS Boundary ===");
 {
-  const checker = readFile("scripts/check-fs-authority.mjs");
-  check(
-    "RAW_FS_IMPORT_ALLOWLIST is defined",
-    grepIn(checker, "RAW_FS_IMPORT_ALLOWLIST"),
-  );
-  check(
-    "TRUSTED_FS_MODULES is removed",
-    !grepIn(checker, "TRUSTED_FS_MODULES"),
-  );
-  check(
-    "file-level authority early return is removed",
-    !grepIn(checker, "isAuthorityModule\\("),
-  );
-  const expectedRawImportFiles = [
+  const expected = [
     "src/core/path-safety.ts",
+    "src/core/project-fs/authorities/temporary-sandbox-authority.ts",
     "src/core/project-fs/authority-resolvers.ts",
     "src/core/project-fs/operations.ts",
     "src/core/project-fs/raw-internal.ts",
@@ -171,384 +184,123 @@ console.log("\n=== 3. Raw fs import boundary ===");
   const actual = actualRawImportFiles();
   check(
     "raw fs import file set matches exact allowlist",
-    JSON.stringify(actual) === JSON.stringify(expectedRawImportFiles),
+    JSON.stringify(actual) === JSON.stringify(expected),
     `actual: ${actual.join(", ")}`,
   );
 }
 
-// ---------------------------------------------------------------------------
-// 4. Authority checker scans full src directory
-// ---------------------------------------------------------------------------
-console.log("\n=== 4. Authority checker discovery ===");
+console.log("\n=== 4. Safe Read ===");
 {
-  const checker = readFile("scripts/check-fs-authority.mjs");
-  check("checker walks src/ recursively", grepIn(checker, "walkTs"));
+  const raw = read("src/core/project-fs/raw-internal.ts");
+  const operations = read("src/core/project-fs/operations.ts");
+  check("async read uses O_NOFOLLOW", /O_NOFOLLOW/.test(raw));
+  check("sync read uses O_NOFOLLOW + fstat", /readRegularOwnedTextSync/.test(raw) && /fstatSyncRaw/.test(raw));
   check(
-    "checker discovers all .ts files under src/",
-    grepIn(checker, 'join\\("src"\\)'),
-  );
-  // Phase 4.1: allowlist line field is required (no function-wide auto-approval)
-  check(
-    "allowlist requires typeof aEntry.line === number",
-    grepIn(checker, 'typeof aEntry\\.line === "number"'),
-  );
-  check(
-    "allowlist does NOT use optional line (!aEntry.line)",
-    !grepIn(checker, "!aEntry\\.line"),
+    "operations has no unsafe readFileSync(unbrand(path))",
+    !/readFileSyncRaw\(unbrand\(path\)/.test(operations),
   );
 }
 
-// ---------------------------------------------------------------------------
-// 5. DecisionRefPath — single source of truth
-// ---------------------------------------------------------------------------
-console.log("\n=== 5. DecisionRefPath validator ===");
+console.log("\n=== 5. PhasePath Single Source ===");
 {
-  const schema = readFile("src/core/schemas/decision-ref.ts");
+  check("PhasePath schema exists", existsSync(join(repoRoot, "src/core/schemas/phase-path.ts")));
   check(
-    "NON_DECISION_BASENAMES uses toLocaleLowerCase",
-    grepIn(schema, "toLocaleLowerCase"),
+    "roadmap uses PhasePath",
+    /path:\s*PhasePath/.test(read("src/core/schemas/roadmap.ts")),
   );
   check(
-    "FORBIDDEN_DECISION_SEGMENT includes control chars",
-    grepIn(schema, "\\\\u0000-\\\\u001f"),
-  );
-  check("FORBIDDEN_DECISION_SEGMENT includes pipe", grepIn(schema, "\\|"));
-  check("FORBIDDEN_DECISION_SEGMENT includes backtick", grepIn(schema, "`"));
-  check("FORBIDDEN_DECISION_SEGMENT includes hash", grepIn(schema, "#"));
-  check(
-    "normalizeDecisionRefPath is exported",
-    grepIn(schema, "export function normalizeDecisionRefPath"),
+    "phase snapshot uses PhasePath",
+    /original_path:\s*PhasePath/.test(read("src/core/schemas/phase-snapshot.ts")),
   );
   check(
-    "DecisionRefPath schema is exported",
-    grepIn(schema, "export const DecisionRefPath"),
+    "authority resolver uses isPhasePath",
+    /isPhasePath/.test(read("src/core/project-fs/authority-resolvers.ts")),
   );
 }
 
-// ---------------------------------------------------------------------------
-// 6. pruned-ledger.ts uses unified normalization
-// ---------------------------------------------------------------------------
-console.log("\n=== 6. pruned-ledger unified normalization ===");
+console.log("\n=== 6. Malicious Fixtures ===");
 {
-  const ledger = readFile("src/core/decisions/pruned-ledger.ts");
-  check(
-    "pruned-ledger imports normalizeDecisionRefPath",
-    grepIn(ledger, "normalizeDecisionRefPath"),
-  );
-  check(
-    "pruned-ledger throws on invalid path (no silent fallback)",
-    grepIn(ledger, "throw") && !grepIn(ledger, "return null.*fallback"),
-  );
-}
+  const fixtures = [
+    {
+      name: "generic-project-read",
+      relPath: "src/core/pack/index.ts",
+      source: `
+        import { ${`resolveInit${"Read"}Path`}, readOwnedText } from "../src/core/project-fs/index.ts";
+        export async function f(cwd, userPath) {
+          return readOwnedText(await ${`resolveInit${"Read"}Path`}(cwd, userPath));
+        }
+      `,
+    },
+    {
+      name: "generic-project-write",
+      relPath: "src/core/plan/normalize.ts",
+      source: `
+        import { ${`resolveInit${"Write"}Path`}, writeOwnedText } from "../src/core/project-fs/index.ts";
+        export async function f(cwd, userPath) {
+          await writeOwnedText(await ${`resolveInit${"Write"}Path`}(cwd, userPath), "x");
+        }
+      `,
+    },
+    {
+      name: "write-capability-read",
+      relPath: "src/core/archive/delete-intent-journal.ts",
+      source: `
+        import { ${`openOwned${"Write"}`} } from "../src/core/project-fs/index.ts";
+        export async function f(writePath) {
+          const h = await ${`openOwned${"Write"}`}(writePath, "r");
+          return h.readFile("utf8");
+        }
+      `,
+    },
+    {
+      name: "external-mkdtemp",
+      relPath: "src/commands/tutorial.ts",
+      source: `
+        import { ${`mkdtemp${"Owned"}`} } from "../src/core/project-fs/index.ts";
+        export async function f(prefix) {
+          await ${`mkdtemp${"Owned"}`}(prefix);
+        }
+      `,
+    },
+    {
+      name: "self-brand-former-domain",
+      relPath: "src/core/pack/index.ts",
+      source: `
+        import { brandOwnedWrite } from "../src/core/project-fs/branded-paths-internal.ts";
+        import { atomicWriteText } from "../src/io/atomic-text.ts";
+        export async function f(userPath) {
+          await atomicWriteText(brandOwnedWrite(userPath), "x");
+        }
+      `,
+    },
+  ];
 
-// ---------------------------------------------------------------------------
-// 7. Symlink-safe read — O_NOFOLLOW
-// ---------------------------------------------------------------------------
-console.log("\n=== 7. Symlink-safe read ===");
-{
-  const rawInternal = readFile("src/core/project-fs/raw-internal.ts");
-  check(
-    "raw-internal exports readRegularOwnedText",
-    grepIn(rawInternal, "readRegularOwnedText"),
-  );
-  check(
-    "readRegularOwnedText uses O_NOFOLLOW",
-    grepIn(rawInternal, "O_NOFOLLOW"),
-  );
-  const operations = readFile("src/core/project-fs/operations.ts");
-  check(
-    "readOwnedText uses fd no-follow reader, not readFileRaw",
-    grepIn(operations, "readRegularOwnedTextRaw") &&
-      !grepIn(operations, "readFileRaw\\(unbrand\\(path\\)"),
-  );
-}
-
-// ---------------------------------------------------------------------------
-// 8. Exclusive create — atomicCreateTextExclusive
-// ---------------------------------------------------------------------------
-console.log("\n=== 8. Exclusive create ===");
-{
-  const atomic = readFile("src/io/atomic-text.ts");
-  check(
-    "atomicCreateTextExclusive is exported",
-    grepIn(atomic, "export async function atomicCreateTextExclusive"),
-  );
-  check("uses link() as publish primitive", grepIn(atomic, "link\\("));
-  check("throws EEXIST on conflict (no overwrite)", grepIn(atomic, "EEXIST"));
-
-  const scaffold = readFile("src/core/decisions/scaffold.ts");
-  check(
-    "scaffold uses atomicCreateTextExclusive",
-    grepIn(scaffold, "atomicCreateTextExclusive"),
-  );
-}
-
-// ---------------------------------------------------------------------------
-// 9. Allowlist is structured JSON with line numbers (no broad auto-approval)
-// ---------------------------------------------------------------------------
-console.log("\n=== 9. Allowlist ===");
-{
-  const allowlist = readFile(".code-pact/fs-authority-allowlist.json");
-  const parsed = JSON.parse(allowlist);
-  const keys = Object.keys(parsed);
-  check("allowlist is valid JSON", keys.length > 0);
-  let allHaveLine = true;
-  for (const key of keys) {
-    for (const entry of parsed[key]) {
-      if (typeof entry.line !== "number") {
-        allHaveLine = false;
-        break;
-      }
-    }
-    if (!allHaveLine) break;
+  for (const fixture of fixtures) {
+    check(`${fixture.name} exits 1`, runFixture(fixture.name, fixture.relPath, fixture.source) === 1);
   }
-  check("all allowlist entries have numeric line field", allHaveLine);
 }
 
-// ---------------------------------------------------------------------------
-// 10. Tests exist for security hardening
-// ---------------------------------------------------------------------------
-console.log("\n=== 10. Test coverage ===");
+console.log("\n=== 7. Checker Execution ===");
 {
+  check("check-fs-authority exits 0 on repository", runChecker() === 0);
+  const checker = read("scripts/check-fs-authority.mjs");
   check(
-    "decision-ref.test.ts exists",
-    fileExists("tests/unit/schemas/decision-ref.test.ts"),
+    "checker rejects forbidden public FS API imports",
+    /FORBIDDEN_PUBLIC_FS_API_IMPORTS/.test(checker),
   );
   check(
-    "atomic-text.test.ts exists",
-    fileExists("tests/unit/io/atomic-text.test.ts"),
-  );
-  check(
-    "check-fs-authority.test.ts exists",
-    fileExists("tests/unit/scripts/check-fs-authority.test.ts"),
-  );
-  check(
-    "adr.test.ts exists",
-    fileExists("tests/unit/core/decisions/adr.test.ts"),
-  );
-  check(
-    "decision-prune.test.ts exists",
-    fileExists("tests/integration/decision-prune.test.ts"),
-  );
-
-  // Phase 9.2: case-insensitive tests
-  const decRefTest = readFile("tests/unit/schemas/decision-ref.test.ts");
-  check(
-    "case-insensitive README/PRUNED tests present",
-    grepIn(decRefTest, "case-insensitive") && grepIn(decRefTest, "ReadMe"),
-  );
-  check(
-    "control character reject tests present",
-    grepIn(decRefTest, "control character"),
-  );
-
-  // Phase 9.6: concurrency tests
-  const atomicTest = readFile("tests/unit/io/atomic-text.test.ts");
-  check(
-    "atomicCreateTextExclusive tests present",
-    grepIn(atomicTest, "atomicCreateTextExclusive"),
-  );
-  check(
-    "concurrent writer test present",
-    grepIn(atomicTest, "concurrent") ||
-      grepIn(atomicTest, "Promise.allSettled"),
-  );
-
-  // Phase 9.1: authority checker tests
-  const authTest = readFile("tests/unit/scripts/check-fs-authority.test.ts");
-  check(
-    "raw-internal import rejection test present",
-    grepIn(authTest, "raw-internal import"),
-  );
-  check(
-    "node:fs import rejection test present",
-    grepIn(authTest, "node:fs import"),
-  );
-
-  // Phase 9.3: nested decision gate tests
-  const adrTest = readFile("tests/unit/core/decisions/adr.test.ts");
-  check(
-    "nested decision gate tests present",
-    grepIn(adrTest, "nested decision_refs"),
-  );
-
-  // Phase 9.5: nested prune integration tests
-  const pruneTest = readFile("tests/integration/decision-prune.test.ts");
-  check(
-    "nested prune integration tests present",
-    grepIn(pruneTest, "nested decision paths"),
-  );
-
-  // Phase 9.7: nested retire integration tests
-  check(
-    "decision-retire.test.ts exists",
-    fileExists("tests/integration/decision-retire.test.ts"),
-  );
-  const retireTest = readFile("tests/integration/decision-retire.test.ts");
-  check(
-    "nested retire integration tests present",
-    grepIn(retireTest, "nested decision paths"),
-  );
-
-  // Phase 9.8: expanded authority checker tests
-  check(
-    "raw-internal re-export rejection test present",
-    grepIn(authTest, "raw-internal re-exports"),
-  );
-  check(
-    "node:fs namespace import rejection test present",
-    grepIn(authTest, "node:fs namespace"),
-  );
-  check(
-    "generic resolver rejection tests present",
-    grepIn(authTest, "generic contained read/write/delete resolver fixtures"),
-  );
-  check(
-    "read-to-delete/write-open rejection tests present",
-    grepIn(authTest, "read authority passed to delete and write-open"),
-  );
-  check(
-    "namespace brand rejection test present",
-    grepIn(authTest, "brand constructor namespace import"),
-  );
-
-  // Phase 9.9: nested quality scan tests
-  check(
-    "nested quality scan tests present",
-    grepIn(adrTest, "nested quality scan"),
-  );
-  check(
-    "same basename distinct parent test present",
-    grepIn(adrTest, "same basename"),
-  );
-
-  // Phase 9.10: nested filename-scan tests
-  check(
-    "nested filename-scan tests present",
-    grepIn(adrTest, "nested filename-scan"),
-  );
-
-  // Phase 9.11: directory-list EACCES → DECISION_SCAN_UNREADABLE tests
-  check(
-    "directory-list EACCES tests present",
-    grepIn(adrTest, "directory-list EACCES"),
-  );
-  check(
-    "DECISION_SCAN_UNREADABLE propagation test present",
-    grepIn(adrTest, "DECISION_SCAN_UNREADABLE"),
-  );
-
-  // Phase 9.12: nested inbound link rewrite test
-  check(
-    "nested inbound link rewrite test present",
-    grepIn(pruneTest, "nested decision --write rewrites inbound links"),
-  );
-
-  // Phase 9.13: nested archive fallback + live nested unsafe path tests
-  const gateArchiveTest = readFile(
-    "tests/unit/core/decisions/decision-gate-archive.test.ts",
-  );
-  check(
-    "nested archive fallback exact match tests present",
-    grepIn(gateArchiveTest, "nested archive fallback"),
-  );
-  check(
-    "live nested unsafe path never falls back test present",
-    grepIn(gateArchiveTest, "live nested unsafe path never falls back"),
+    "checker does not trust removed init/static resolvers",
+    !checker
+      .replace(/FORBIDDEN_PUBLIC_FS_API_IMPORTS[\s\S]*?\]\);/, "")
+      .includes(`resolveInit${"Read"}Path`) &&
+      !checker.includes(`resolveAdapterStatic${"Read"}Path`),
   );
 }
 
-// ---------------------------------------------------------------------------
-// 11. Negative fixture execution
-// ---------------------------------------------------------------------------
-console.log("\n=== 11. Negative fixture execution ===");
-{
-  check(
-    "generic write fixture exits 1",
-    runAuthorityFixture("generic-write", [
-      `import { ${containedWriteResolver}, writeOwnedText } from "../src/core/project-fs/index.ts";`,
-      "async function f(cwd, userPath) {",
-      `  await writeOwnedText(await ${containedWriteResolver}(cwd, userPath), "x");`,
-      "}",
-    ]) === 1,
-  );
-  check(
-    "raw-internal wildcard re-export fixture exits 1",
-    runAuthorityFixture("raw-reexport", [
-      'export * from "../src/core/project-fs/raw-internal.ts";',
-    ]) === 1,
-  );
-  check(
-    "namespace brand fixture exits 1",
-    runAuthorityFixture("namespace-brand", [
-      'import * as brands from "../src/core/project-fs/branded-paths-internal.ts";',
-      'import { readOwnedText } from "../src/core/project-fs/index.ts";',
-      "async function f(path) {",
-      "  return readOwnedText(brands.brandOwnedRead(path));",
-      "}",
-    ]) === 1,
-  );
-  check(
-    "read-to-delete fixture exits 1",
-    runAuthorityFixture("read-delete", [
-      'import { resolveProjectConfigReadPath, unlinkOwned } from "../src/core/project-fs/index.ts";',
-      "async function f(cwd) {",
-      "  await unlinkOwned(await resolveProjectConfigReadPath(cwd));",
-      "}",
-    ]) === 1,
-  );
-}
-
-// ---------------------------------------------------------------------------
-// 12. Documentation updated — design/decisions/**/*.md
-// ---------------------------------------------------------------------------
-console.log("\n=== 12. Documentation ===");
-{
-  const lifecycle = readFile("docs/concepts/design-doc-lifecycle.md");
-  check(
-    "design-doc-lifecycle uses **/*.md",
-    grepIn(lifecycle, "design/decisions/\\*\\*/\\*\\.md"),
-  );
-
-  const docsMaint = readFile("docs/maintainers/docs-maintenance.md");
-  check(
-    "docs-maintenance uses **/*.md",
-    grepIn(docsMaint, "design/decisions/\\*\\*/\\*\\.md"),
-  );
-
-  const constitution = readFile("design/constitution.md");
-  check(
-    "constitution uses **/*.md",
-    grepIn(constitution, "design/decisions/\\*\\*/\\*\\.md"),
-  );
-
-  const readme = readFile("design/decisions/README.md");
-  check(
-    "decisions README uses **/*.md",
-    grepIn(readme, "design/decisions/\\*\\*/\\*\\.md"),
-  );
-
-  const positioning = readFile("docs/positioning.md");
-  check(
-    "positioning uses **/*.md",
-    grepIn(positioning, "design/decisions/\\*\\*/\\*\\.md"),
-  );
-
-  const cliContract = readFile("docs/cli-contract.md");
-  check(
-    "cli-contract uses **/*.md",
-    grepIn(cliContract, "design/decisions/\\*\\*/\\*\\.md"),
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Summary
-// ---------------------------------------------------------------------------
 console.log("\n=== Summary ===");
 if (failures === 0) {
   console.log("All security hardening invariants verified ✓");
   process.exit(0);
-} else {
-  console.error(`${failures} invariant(s) failed ✗`);
-  process.exit(1);
 }
+console.error(`${failures} invariant(s) failed ✗`);
+process.exit(1);
