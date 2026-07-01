@@ -20,7 +20,8 @@
 // pack covering the snapshot) — NEVER from the dry-run `planLooseCleanup` cross-read.
 // ---------------------------------------------------------------------------
 
-import { unlink } from "../project-fs/raw-internal.ts";
+import { unlinkOwned } from "../project-fs/operations.ts";
+import { brandOwnedDelete } from "../project-fs/branded-paths-internal.ts";
 import {
   evaluateDeleteGate,
   looseEventRelPath,
@@ -110,7 +111,11 @@ export async function unlinkGatedLoose(
         deleted,
         vanished,
         skipped,
-        abort: { path: looseEventRelPath(file), reason: verdict.reason, detail: verdict.detail },
+        abort: {
+          path: looseEventRelPath(file),
+          reason: verdict.reason,
+          detail: verdict.detail,
+        },
       };
     }
     if (verdict.disposition === "vanished") {
@@ -130,7 +135,7 @@ export async function unlinkGatedLoose(
     // racing the unlink).
     if (hooks.beforeUnlink) await hooks.beforeUnlink(file);
     try {
-      await unlink(verdict.abs);
+      await unlinkOwned(brandOwnedDelete(verdict.abs));
       deleted.push(file);
     } catch (err) {
       // ENOENT: a raced delete in the gate→unlink window → already gone (vanished),
@@ -141,7 +146,8 @@ export async function unlinkGatedLoose(
       // authoritatively. It is NOT an abort — abort is reserved for the global safety
       // gates (G6/G7/G8), not a per-file FS failure.
       if (isEnoent(err)) vanished.push(file);
-      else skipped.push({ path: looseEventRelPath(file), reason: "unreadable" });
+      else
+        skipped.push({ path: looseEventRelPath(file), reason: "unreadable" });
     }
   }
 
@@ -207,7 +213,9 @@ function alreadyCleanedOutcome(): CleanupOutcome {
  *  the unlink loop. The phase ended clean with nothing for us to unlink, so it is
  *  `cleaned` (NOT already_cleaned, which would falsely claim partial_applied:false and
  *  vanished_count:0). `vanished` is the pre-write loose count (all of it vanished). */
-function cleanedAllVanishedAfterWriteOutcome(vanishedCount: number): CleanupOutcome {
+function cleanedAllVanishedAfterWriteOutcome(
+  vanishedCount: number,
+): CleanupOutcome {
   return {
     ok: true,
     kind: "cleaned",
@@ -228,7 +236,10 @@ function cleanedAllVanishedAfterWriteOutcome(vanishedCount: number): CleanupOutc
  *  `verify_pack` readback failure leaves the pack ON disk. (The other `verify_pack`
  *  source, `writeFailedAfterPackBrokenOutcome`, is a post-write re-prepare failure
  *  where the pack may already be gone.) `cleanup_started:false` — no unlink began. */
-function writeFailedOutcome(err: EventPackWriteError, looseRemaining: number): CleanupOutcome {
+function writeFailedOutcome(
+  err: EventPackWriteError,
+  looseRemaining: number,
+): CleanupOutcome {
   if (err.phase === "write_pack") {
     return {
       ok: false,
@@ -267,7 +278,9 @@ function writeFailedOutcome(err: EventPackWriteError, looseRemaining: number): C
  *  which would falsely report partial_applied:false despite the pack write. NOTE the
  *  pack may NO LONGER be on disk here (e.g. removed before re-prepare), so partial:true
  *  asserts a mutation happened, not that the pack is still present. */
-function writeFailedAfterPackBrokenOutcome(looseRemaining: number): CleanupOutcome {
+function writeFailedAfterPackBrokenOutcome(
+  looseRemaining: number,
+): CleanupOutcome {
   return {
     ok: false,
     code: "STATE_COMPACT_WRITE_FAILED",
@@ -304,7 +317,8 @@ export function buildPostLoopOutcome(
   preLoopVanishedCount = 0,
 ): CleanupOutcome {
   const looseDeletedCount = loop.deleted.length;
-  const vanishedCount = preLoopVanishedCount + loop.vanished.length + recon.vanished_count;
+  const vanishedCount =
+    preLoopVanishedCount + loop.vanished.length + recon.vanished_count;
   // partial_applied↔loose_deleted_count, paired exactly as the CleanupOutcome type
   // requires: a non-zero delete count forces partial_applied:true; partial_applied is
   // also true when the pack was written this run even with 0 unlinks (cell-10 all-vanish).
@@ -319,7 +333,10 @@ export function buildPostLoopOutcome(
   // reconciliation may have incidentally produced (that would mislabel a live-owner /
   // snapshot-divergence abort as a stale pack and send the operator to the wrong fix).
   if (loop.abort) {
-    const block = loop.abort.reason === "pack_missing_event" ? "pack_stale_after_cleanup" : undefined;
+    const block =
+      loop.abort.reason === "pack_missing_event"
+        ? "pack_stale_after_cleanup"
+        : undefined;
     return {
       ok: false,
       code: "STATE_COMPACT_CLEANUP_FAILED",
@@ -431,7 +448,8 @@ export async function runEventPackCleanup(
         // `cleanup_remaining_loose` reports the loose set the FAILED pack targeted
         // (plan.loose_count); the CLI-wiring PR adds `pack_path` (computed from
         // cwd+phaseId, as Layer 2 does) when it emits the error.
-        if (err instanceof EventPackWriteError) return writeFailedOutcome(err, plan.loose_count);
+        if (err instanceof EventPackWriteError)
+          return writeFailedOutcome(err, plan.loose_count);
         throw err;
       }
       // Only count a mutation if WE wrote the pack; a concurrent writer's pack
@@ -447,7 +465,8 @@ export async function runEventPackCleanup(
     try {
       prep = await prepareLooseCleanup(cwd, phaseId, hooks.prepare);
     } catch (err) {
-      if (packWrittenThisRun) return writeFailedAfterPackBrokenOutcome(preWriteLooseCount);
+      if (packWrittenThisRun)
+        return writeFailedAfterPackBrokenOutcome(preWriteLooseCount);
       throw err;
     }
   }
@@ -464,10 +483,14 @@ export async function runEventPackCleanup(
       // honest terminal is a verify_pack WRITE_FAILED (partial_applied:true, cleanup
       // never started) — NOT an ineligible/partial_applied:false. Without a write this
       // run it is a plain ineligible (or the pack-absent defensive for needs_pack_write).
-      if (packWrittenThisRun) return writeFailedAfterPackBrokenOutcome(preWriteLooseCount);
+      if (packWrittenThisRun)
+        return writeFailedAfterPackBrokenOutcome(preWriteLooseCount);
       return prep.kind === "ineligible"
         ? ineligibleOutcome(prep.block)
-        : ineligibleOutcome({ kind: "pack_invalid", detail: "event pack not present after write" });
+        : ineligibleOutcome({
+            kind: "pack_invalid",
+            detail: "event pack not present after write",
+          });
     case "already_clean":
       // Normally nothing was removed → already_cleaned. But if WE wrote the pack this
       // run (cell 10) and every loose then vanished before the re-prepare, the pack
@@ -489,8 +512,18 @@ export async function runEventPackCleanup(
   const loop = await unlinkGatedLoose(cwd, target, ctx, hooks.loop);
   const recon = await reconcileSurvivors(
     cwd,
-    { target, packIds: ctx.packIds, snapshotTaskIds: ctx.snapshotTaskIds, loopSkipped: loop.skipped },
+    {
+      target,
+      packIds: ctx.packIds,
+      snapshotTaskIds: ctx.snapshotTaskIds,
+      loopSkipped: loop.skipped,
+    },
     hooks.reconcile,
   );
-  return buildPostLoopOutcome(loop, recon, packWrittenThisRun, preLoopVanishedCount);
+  return buildPostLoopOutcome(
+    loop,
+    recon,
+    packWrittenThisRun,
+    preLoopVanishedCount,
+  );
 }
