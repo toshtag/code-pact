@@ -13,6 +13,8 @@ import type {
   OwnedReadPath,
   OwnedWritePath,
   OwnedDeletePath,
+  ExplicitUserReadPath,
+  OwnedListPath,
 } from "./branded-paths.ts";
 
 export type {
@@ -20,6 +22,8 @@ export type {
   OwnedReadPath,
   OwnedWritePath,
   OwnedDeletePath,
+  ExplicitUserReadPath,
+  OwnedListPath,
 };
 
 export { unbrand } from "./branded-paths.ts";
@@ -38,4 +42,12 @@ export function brandOwnedWrite(path: string): OwnedWritePath {
 
 export function brandOwnedDelete(path: string): OwnedDeletePath {
   return path as OwnedDeletePath;
+}
+
+export function brandExplicitUserRead(path: string): ExplicitUserReadPath {
+  return path as ExplicitUserReadPath;
+}
+
+export function brandOwnedList(path: string): OwnedListPath {
+  return path as OwnedListPath;
 }

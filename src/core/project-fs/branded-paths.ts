@@ -48,6 +48,22 @@ export type OwnedDeletePath = string & {
 };
 
 /**
+ * A path resolved from explicit user input (e.g. `--from-file`). This grants
+ * read access ONLY — it cannot be passed to write, delete, or mkdir operations.
+ */
+export type ExplicitUserReadPath = string & {
+  readonly [brand]: "explicit_user_read";
+};
+
+/**
+ * A path resolved for directory listing. This grants listing (readdir) access
+ * ONLY — it cannot be passed to readOwnedText, write, or delete operations.
+ */
+export type OwnedListPath = string & {
+  readonly [brand]: "owned_list";
+};
+
+/**
  * Extract the underlying string from any branded path.
  */
 export function unbrand(
@@ -55,7 +71,9 @@ export function unbrand(
     | SymlinkFreeContainedPath
     | OwnedReadPath
     | OwnedWritePath
-    | OwnedDeletePath,
+    | OwnedDeletePath
+    | ExplicitUserReadPath
+    | OwnedListPath,
 ): string {
   return path as string;
 }
