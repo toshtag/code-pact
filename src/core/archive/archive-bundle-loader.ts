@@ -1,5 +1,5 @@
 import {
-  readOwnedFileSync,
+  readOwnedTextSyncNoFollow,
   listOwnedDirentsSync,
 } from "../project-fs/operations.ts";
 import { join } from "node:path";
@@ -61,7 +61,7 @@ export function loadArchiveBundles(cwd: string): LoadedArchiveBundles {
       cwd,
       `${archiveBundlesRelDir()}/${name}`,
     );
-    const raw = readOwnedFileSync(path);
+    const raw = readOwnedTextSyncNoFollow(path);
     return { file, loaded: validateArchiveBundleTier1(raw, file) };
   });
   return { index: buildBundleMemberIndex(bundles), bundles };

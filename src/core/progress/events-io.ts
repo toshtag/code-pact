@@ -5,14 +5,14 @@ import {
   listOwned,
   readOwnedText,
   removeOwned,
-  openOwnedWriteExclusive,
+  writeOwnedTextExclusive,
 } from "../project-fs/operations.ts";
 import {
-  brandOwnedRead,
-  brandOwnedWrite,
-  brandOwnedDelete,
-  brandOwnedList,
-} from "../project-fs/branded-paths-internal.ts";
+  projectConfigReadPath,
+  projectConfigWritePath,
+  projectConfigDeletePath,
+  projectConfigListPath,
+} from "../project-fs/authorities/project-config-authority.ts";
 import { join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { ProgressEvent } from "../schemas/progress-event.ts";
@@ -202,7 +202,7 @@ async function readValidatedEventFile(
 ): Promise<LoadedEventFile> {
   return validateEventFileContent(
     file,
-    await readOwnedText(brandOwnedRead(path)),
+    await readOwnedText(projectConfigReadPath(path)),
   );
 }
 
@@ -238,7 +238,7 @@ export async function writeEventFile(
   const dir = await resolveEventsDir(cwd);
   const file = eventFileName(parsed);
   const path = await resolveEventPath(cwd, file);
-  await mkdirOwned(brandOwnedWrite(dir), { recursive: true });
+  await mkdirOwned(projectConfigWritePath(dir), { recursive: true });
   const body = stringifyYaml({ ...parsed, at: normalizeAt(parsed.at), id });
 
   // Temp name is dot-prefixed (never matches EVENT_FILE_RE) and carries a random
@@ -250,11 +250,9 @@ export async function writeEventFile(
   // collision is impossible via the uuid, so its errors must propagate, not be
   // mistaken for "the final already exists").
   try {
-    const fh = await openOwnedWriteExclusive(brandOwnedWrite(tmp));
-    await fh.writeFile(body, "utf8");
-    await fh.close();
+    await writeOwnedTextExclusive(projectConfigWritePath(tmp), body);
     try {
-      await linkOwned(brandOwnedRead(tmp), brandOwnedWrite(path)); // atomic, no-overwrite publish
+      await linkOwned(projectConfigReadPath(tmp), projectConfigWritePath(path)); // atomic, no-overwrite publish
       return { id, path, alreadyExisted: false };
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
@@ -265,7 +263,7 @@ export async function writeEventFile(
       return { id, path, alreadyExisted: true };
     }
   } finally {
-    await removeOwned(brandOwnedDelete(tmp), { force: true });
+    await removeOwned(projectConfigDeletePath(tmp), { force: true });
   }
 }
 
@@ -282,7 +280,7 @@ export async function readEventFiles(cwd: string): Promise<LoadedEventFile[]> {
   const dir = await resolveEventsDir(cwd);
   let names: string[];
   try {
-    names = await listOwned(brandOwnedList(dir));
+    names = await listOwned(projectConfigListPath(dir));
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
     throw err;

@@ -3,8 +3,8 @@
  *
  * Each resolver validates that a path belongs to a specific owned namespace
  * (e.g. `design/decisions/`, `.code-pact/`, `design/phases/`) before branding
- * it as an {@link OwnedReadPath}. This replaces the generic
- * `owned-read.ts` which only proved containment, not namespace ownership.
+ * it as an {@link OwnedReadPath}. Generic containment-only helpers are not
+ * authority: they prove location, not namespace ownership.
  *
  * Domain modules MUST use these resolvers instead of constructing branded
  * paths directly or using generic containment-only helpers.
@@ -16,6 +16,7 @@ import {
   isDecisionRefPath,
   normalizeDecisionRefPath,
 } from "../schemas/decision-ref.ts";
+import { isPhasePath } from "../schemas/phase-path.ts";
 import { assertSafeRelativePath } from "../path-safety.ts";
 import {
   brandOwnedRead,
@@ -69,6 +70,8 @@ async function resolveAndBrandRead(
   }
 }
 
+export const resolveAndBrandReadForAuthority = resolveAndBrandRead;
+
 async function resolveAndBrandWrite(
   cwd: string,
   relPath: string,
@@ -93,6 +96,8 @@ async function resolveAndBrandWrite(
     throw codedFilesystemAuthorityFailure(relPath, code);
   }
 }
+
+export const resolveAndBrandWriteForAuthority = resolveAndBrandWrite;
 
 async function resolveAndBrandDelete(
   cwd: string,
@@ -119,6 +124,8 @@ async function resolveAndBrandDelete(
   }
 }
 
+export const resolveAndBrandDeleteForAuthority = resolveAndBrandDelete;
+
 async function resolveAndBrandList(
   cwd: string,
   relPath: string,
@@ -143,6 +150,8 @@ async function resolveAndBrandList(
     throw codedFilesystemAuthorityFailure(relPath, code);
   }
 }
+
+export const resolveAndBrandListForAuthority = resolveAndBrandList;
 
 async function resolveAndBrandExplicitUserRead(
   cwd: string,
@@ -220,10 +229,7 @@ export async function resolvePhaseReadPath(
   return resolveAndBrandRead(
     cwd,
     relPath,
-    p =>
-      p.startsWith("design/phases/") &&
-      p.endsWith(".yaml") &&
-      p !== "design/phases/.yaml",
+    isPhasePath,
   );
 }
 
@@ -361,20 +367,6 @@ export async function resolveAgentProfileReadPath(
 }
 
 /**
- * Resolve an adapter static file path for reading.
- */
-export async function resolveAdapterStaticReadPath(
-  cwd: string,
-  relPath: string,
-): Promise<OwnedReadPath> {
-  return resolveAndBrandRead(
-    cwd,
-    relPath,
-    p => p.startsWith(".code-pact/") || p.startsWith("design/"),
-  );
-}
-
-/**
  * Resolve a design rules file (`design/rules/*.md`) for reading.
  */
 export async function resolveRulesReadPath(
@@ -418,42 +410,6 @@ export async function resolveExplicitUserReadPath(
   return resolveAndBrandExplicitUserRead(cwd, relPath);
 }
 
-/**
- * Resolve a project directory for mkdir during init. Init is a special
- * command that creates the initial project structure, so it needs write
- * access to any path under the project root. The path must still pass
- * symlink-free resolution.
- */
-export async function resolveInitWritePath(
-  cwd: string,
-  relPath: string,
-): Promise<OwnedWritePath> {
-  return resolveAndBrandWrite(cwd, relPath, () => true);
-}
-
-/**
- * Resolve a project path for reading during init. Init needs to check
- * existence of files in any namespace. The path must pass symlink-free
- * resolution.
- */
-export async function resolveInitReadPath(
-  cwd: string,
-  relPath: string,
-): Promise<OwnedReadPath> {
-  return resolveAndBrandRead(cwd, relPath, () => true);
-}
-
-/**
- * Resolve a project directory for listing during init or general project
- * traversal (e.g. link-collector). The path must pass symlink-free resolution.
- */
-export async function resolveInitListPath(
-  cwd: string,
-  relPath: string,
-): Promise<OwnedListPath> {
-  return resolveAndBrandList(cwd, relPath, () => true);
-}
-
 // ── Write resolvers ──────────────────────────────────────────────────────
 
 /**
@@ -482,10 +438,7 @@ export async function resolvePhaseWritePath(
   return resolveAndBrandWrite(
     cwd,
     relPath,
-    p =>
-      p.startsWith("design/phases/") &&
-      p.endsWith(".yaml") &&
-      p !== "design/phases/.yaml",
+    isPhasePath,
   );
 }
 
@@ -606,9 +559,6 @@ export async function resolvePhaseDeletePath(
   return resolveAndBrandDelete(
     cwd,
     relPath,
-    p =>
-      p.startsWith("design/phases/") &&
-      p.endsWith(".yaml") &&
-      p !== "design/phases/.yaml",
+    isPhasePath,
   );
 }

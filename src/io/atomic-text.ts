@@ -9,7 +9,7 @@ import {
 import {
   unbrand,
   type OwnedWritePath,
-} from "../core/project-fs/branded-paths-internal.ts";
+} from "../core/project-fs/branded-paths.ts";
 import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
 

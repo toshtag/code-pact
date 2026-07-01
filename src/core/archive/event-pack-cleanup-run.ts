@@ -21,7 +21,7 @@
 // ---------------------------------------------------------------------------
 
 import { unlinkOwned } from "../project-fs/operations.ts";
-import { brandOwnedDelete } from "../project-fs/branded-paths-internal.ts";
+import { archiveDeletePath } from "../project-fs/authorities/archive-authority.ts";
 import {
   evaluateDeleteGate,
   looseEventRelPath,
@@ -135,7 +135,7 @@ export async function unlinkGatedLoose(
     // racing the unlink).
     if (hooks.beforeUnlink) await hooks.beforeUnlink(file);
     try {
-      await unlinkOwned(brandOwnedDelete(verdict.abs));
+      await unlinkOwned(archiveDeletePath(verdict.abs));
       deleted.push(file);
     } catch (err) {
       // ENOENT: a raced delete in the gate→unlink window → already gone (vanished),

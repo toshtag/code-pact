@@ -6,7 +6,7 @@ import {
 import type {
   OwnedReadPath,
   OwnedDeletePath,
-} from "../project-fs/branded-paths-internal.ts";
+} from "../project-fs/authorities/archive-authority.ts";
 import { basename, join } from "node:path";
 import type { ArchiveBundleKind } from "../schemas/archive-bundle.ts";
 import { loadArchiveBundles } from "./archive-bundle-loader.ts";

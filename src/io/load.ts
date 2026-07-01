@@ -1,5 +1,5 @@
 import { readOwnedText } from "../core/project-fs/operations.ts";
-import type { OwnedReadPath } from "../core/project-fs/branded-paths-internal.ts";
+import type { OwnedReadPath } from "../core/project-fs/branded-paths.ts";
 import { parse as parseYaml } from "yaml";
 import type { ZodType } from "zod";
 

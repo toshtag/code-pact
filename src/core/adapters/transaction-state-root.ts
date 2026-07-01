@@ -5,9 +5,9 @@ import {
   realpathOwned,
 } from "../project-fs/operations.ts";
 import {
-  brandOwnedRead,
-  brandOwnedWrite,
-} from "../project-fs/branded-paths-internal.ts";
+  adapterReadPath,
+  adapterWritePath,
+} from "../project-fs/authorities/adapter-authority.ts";
 import { homedir, platform } from "node:os";
 import { isAbsolute, join } from "node:path";
 
@@ -41,7 +41,7 @@ export function adapterTransactionStateRoot(): string {
 }
 
 export async function canonicalProjectRoot(cwd: string): Promise<string> {
-  return realpathOwned(brandOwnedRead(cwd));
+  return realpathOwned(adapterReadPath(cwd));
 }
 
 export async function adapterTransactionProjectDir(
@@ -72,12 +72,12 @@ function requireAbsoluteEnvPath(name: string, value: string): string {
 }
 
 async function ensurePrivateDirectory(dir: string): Promise<void> {
-  await mkdirOwned(brandOwnedWrite(dir), { recursive: true, mode: 0o700 });
+  await mkdirOwned(adapterWritePath(dir), { recursive: true, mode: 0o700 });
   await assertPrivateDirectory(dir);
 }
 
 async function assertPrivateDirectory(dir: string): Promise<void> {
-  const st = await lstatOwned(brandOwnedRead(dir));
+  const st = await lstatOwned(adapterReadPath(dir));
   if (st.isSymbolicLink()) {
     throw configError(
       `transaction state directory must not be a symlink: ${dir}`,

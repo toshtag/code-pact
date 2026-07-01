@@ -3,13 +3,13 @@ import {
   accessOwned,
   lstatOwned,
   mkdirOwned,
-  resolveInitReadPath,
-  resolveInitWritePath,
+  resolveProjectScaffoldReadPath,
+  resolveProjectScaffoldWritePath,
   resolveGitignoreReadPath,
   type OwnedReadPath,
   type OwnedWritePath,
 } from "../core/project-fs/index.ts";
-import { unbrand } from "../core/project-fs/branded-paths-internal.ts";
+import { unbrand } from "../core/project-fs/branded-paths.ts";
 import { atomicWriteText } from "../io/atomic-text.ts";
 import { stringify as toYaml } from "yaml";
 import type { LocaleCode } from "../core/schemas/locale.ts";
@@ -143,7 +143,7 @@ async function assertInitEntryType(
 ): Promise<void> {
   let abs;
   try {
-    abs = await resolveInitReadPath(cwd, relPath);
+    abs = await resolveProjectScaffoldReadPath(cwd, relPath);
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (
@@ -285,7 +285,7 @@ async function ensureGitignoreEntries(
   entries: string[],
   created: string[],
 ): Promise<void> {
-  const path = await resolveInitWritePath(cwd, ".gitignore");
+  const path = await resolveProjectScaffoldWritePath(cwd, ".gitignore");
   let existing: string | null = null;
   try {
     existing = await readOwnedText(await resolveGitignoreReadPath(cwd));
@@ -339,7 +339,7 @@ export async function runInitCore(opts: InitCoreOptions): Promise<InitResult> {
   await preflightInitNamespaces(cwd, agents);
 
   // Guard: if .code-pact/ already exists and no --force, abort early
-  const toolDir = await resolveInitReadPath(cwd, ".code-pact");
+  const toolDir = await resolveProjectScaffoldReadPath(cwd, ".code-pact");
   if (!force && (await exists(toolDir))) {
     const err = new Error(
       `".code-pact/" already exists in ${cwd}. Run with --force to overwrite.`,
@@ -351,9 +351,9 @@ export async function runInitCore(opts: InitCoreOptions): Promise<InitResult> {
   // -------------------------------------------------------------------------
   // .code-pact/
   // -------------------------------------------------------------------------
-  await mkdirp(await resolveInitWritePath(cwd, ".code-pact/agent-profiles"));
-  await mkdirp(await resolveInitWritePath(cwd, ".code-pact/model-profiles"));
-  await mkdirp(await resolveInitWritePath(cwd, ".code-pact/state/baselines"));
+  await mkdirp(await resolveProjectScaffoldWritePath(cwd, ".code-pact/agent-profiles"));
+  await mkdirp(await resolveProjectScaffoldWritePath(cwd, ".code-pact/model-profiles"));
+  await mkdirp(await resolveProjectScaffoldWritePath(cwd, ".code-pact/state/baselines"));
 
   // project.yaml
   const projectYaml: Project = {
@@ -368,19 +368,19 @@ export async function runInitCore(opts: InitCoreOptions): Promise<InitResult> {
     })),
   };
   await writeIfAbsent(
-    await resolveInitWritePath(cwd, ".code-pact/project.yaml"),
+    await resolveProjectScaffoldWritePath(cwd, ".code-pact/project.yaml"),
     toYaml(projectYaml),
     force,
     created,
     skipped,
-    await resolveInitReadPath(cwd, ".code-pact/project.yaml"),
+    await resolveProjectScaffoldReadPath(cwd, ".code-pact/project.yaml"),
   );
 
   // agent profiles
   for (const agent of agents) {
     const profile = DEFAULT_AGENT_PROFILES[agent];
     await writeIfAbsent(
-      await resolveInitWritePath(
+      await resolveProjectScaffoldWritePath(
         cwd,
         `.code-pact/agent-profiles/${agent}.yaml`,
       ),
@@ -388,14 +388,14 @@ export async function runInitCore(opts: InitCoreOptions): Promise<InitResult> {
       force,
       created,
       skipped,
-      await resolveInitReadPath(cwd, `.code-pact/agent-profiles/${agent}.yaml`),
+      await resolveProjectScaffoldReadPath(cwd, `.code-pact/agent-profiles/${agent}.yaml`),
     );
   }
 
   // model profiles
   for (const mp of DEFAULT_MODEL_PROFILES) {
     await writeIfAbsent(
-      await resolveInitWritePath(
+      await resolveProjectScaffoldWritePath(
         cwd,
         `.code-pact/model-profiles/${mp.tier.replace(/_/g, "-")}.yaml`,
       ),
@@ -403,7 +403,7 @@ export async function runInitCore(opts: InitCoreOptions): Promise<InitResult> {
       force,
       created,
       skipped,
-      await resolveInitReadPath(
+      await resolveProjectScaffoldReadPath(
         cwd,
         `.code-pact/model-profiles/${mp.tier.replace(/_/g, "-")}.yaml`,
       ),
@@ -417,12 +417,12 @@ export async function runInitCore(opts: InitCoreOptions): Promise<InitResult> {
   // CI branch-drift gate from skipping on an untracked ledger).
   const emptyLog: ProgressLog = { events: [] };
   await writeIfAbsent(
-    await resolveInitWritePath(cwd, ".code-pact/state/progress.yaml"),
+    await resolveProjectScaffoldWritePath(cwd, ".code-pact/state/progress.yaml"),
     toYaml(emptyLog),
     force,
     created,
     skipped,
-    await resolveInitReadPath(cwd, ".code-pact/state/progress.yaml"),
+    await resolveProjectScaffoldReadPath(cwd, ".code-pact/state/progress.yaml"),
   );
 
   // initial baseline snapshot (empty roadmap)
@@ -433,12 +433,12 @@ export async function runInitCore(opts: InitCoreOptions): Promise<InitResult> {
     phases: [],
   };
   await writeIfAbsent(
-    await resolveInitWritePath(cwd, ".code-pact/state/baselines/initial.json"),
+    await resolveProjectScaffoldWritePath(cwd, ".code-pact/state/baselines/initial.json"),
     JSON.stringify(baseline, null, 2) + "\n",
     force,
     created,
     skipped,
-    await resolveInitReadPath(cwd, ".code-pact/state/baselines/initial.json"),
+    await resolveProjectScaffoldReadPath(cwd, ".code-pact/state/baselines/initial.json"),
   );
 
   // .gitignore — ignore the machine-local / derived paths only; the rest of
@@ -499,39 +499,39 @@ export async function runInitCore(opts: InitCoreOptions): Promise<InitResult> {
   // -------------------------------------------------------------------------
   // design/
   // -------------------------------------------------------------------------
-  await mkdirp(await resolveInitWritePath(cwd, "design/rules"));
-  await mkdirp(await resolveInitWritePath(cwd, "design/phases"));
-  await mkdirp(await resolveInitWritePath(cwd, "design/decisions"));
+  await mkdirp(await resolveProjectScaffoldWritePath(cwd, "design/rules"));
+  await mkdirp(await resolveProjectScaffoldWritePath(cwd, "design/phases"));
+  await mkdirp(await resolveProjectScaffoldWritePath(cwd, "design/decisions"));
 
   // constitution.md
   await writeIfAbsent(
-    await resolveInitWritePath(cwd, "design/constitution.md"),
+    await resolveProjectScaffoldWritePath(cwd, "design/constitution.md"),
     renderInitConstitution(projectName, locale),
     force,
     created,
     skipped,
-    await resolveInitReadPath(cwd, "design/constitution.md"),
+    await resolveProjectScaffoldReadPath(cwd, "design/constitution.md"),
   );
 
   // rules/coding-style.md
   await writeIfAbsent(
-    await resolveInitWritePath(cwd, "design/rules/coding-style.md"),
+    await resolveProjectScaffoldWritePath(cwd, "design/rules/coding-style.md"),
     codingStyleMd(locale),
     force,
     created,
     skipped,
-    await resolveInitReadPath(cwd, "design/rules/coding-style.md"),
+    await resolveProjectScaffoldReadPath(cwd, "design/rules/coding-style.md"),
   );
 
   // roadmap.yaml (empty phases — the sample phase below appends to it)
   const roadmap: Roadmap = { phases: [] };
   await writeIfAbsent(
-    await resolveInitWritePath(cwd, "design/roadmap.yaml"),
+    await resolveProjectScaffoldWritePath(cwd, "design/roadmap.yaml"),
     toYaml(roadmap),
     force,
     created,
     skipped,
-    await resolveInitReadPath(cwd, "design/roadmap.yaml"),
+    await resolveProjectScaffoldReadPath(cwd, "design/roadmap.yaml"),
   );
 
   // Optional sample phase. Goes through runPhaseAdd so the wizard output

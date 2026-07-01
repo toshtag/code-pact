@@ -7,15 +7,15 @@ import {
   resolveSymlinkFreeProjectPathSync,
 } from "../path-safety.ts";
 import {
-  brandOwnedRead,
-  brandOwnedDelete,
-  brandOwnedList,
-  brandOwnedWrite,
+  archiveReadPath,
+  archiveDeletePath,
+  archiveListPath,
+  archiveWritePath,
   type OwnedReadPath,
   type OwnedDeletePath,
   type OwnedListPath,
   type OwnedWritePath,
-} from "../project-fs/branded-paths-internal.ts";
+} from "../project-fs/authorities/archive-authority.ts";
 
 // Record locations for the archive layer. One file per record (mirroring the
 // per-event ledger and `baselines/initial.json` precedents) — an append-only
@@ -77,7 +77,7 @@ export async function resolveArchiveOwnedPath(
   relPath: string,
 ): Promise<OwnedReadPath> {
   try {
-    return brandOwnedRead(await resolveSymlinkFreeProjectPath(cwd, relPath));
+    return archiveReadPath(await resolveSymlinkFreeProjectPath(cwd, relPath));
   } catch (err) {
     mapArchiveOwnershipError(err);
   }
@@ -88,7 +88,7 @@ export async function resolveArchiveOwnedDeletePath(
   relPath: string,
 ): Promise<OwnedDeletePath> {
   try {
-    return brandOwnedDelete(await resolveSymlinkFreeProjectPath(cwd, relPath));
+    return archiveDeletePath(await resolveSymlinkFreeProjectPath(cwd, relPath));
   } catch (err) {
     mapArchiveOwnershipError(err);
   }
@@ -99,7 +99,7 @@ export async function resolveArchiveOwnedListPath(
   relPath: string,
 ): Promise<OwnedListPath> {
   try {
-    return brandOwnedList(await resolveSymlinkFreeProjectPath(cwd, relPath));
+    return archiveListPath(await resolveSymlinkFreeProjectPath(cwd, relPath));
   } catch (err) {
     mapArchiveOwnershipError(err);
   }
@@ -110,7 +110,7 @@ export async function resolveArchiveOwnedWritePath(
   relPath: string,
 ): Promise<OwnedWritePath> {
   try {
-    return brandOwnedWrite(await resolveSymlinkFreeProjectPath(cwd, relPath));
+    return archiveWritePath(await resolveSymlinkFreeProjectPath(cwd, relPath));
   } catch (err) {
     mapArchiveOwnershipError(err);
   }
@@ -121,7 +121,7 @@ export function resolveArchiveOwnedPathSync(
   relPath: string,
 ): OwnedReadPath {
   try {
-    return brandOwnedRead(resolveSymlinkFreeProjectPathSync(cwd, relPath));
+    return archiveReadPath(resolveSymlinkFreeProjectPathSync(cwd, relPath));
   } catch (err) {
     mapArchiveOwnershipError(err);
   }

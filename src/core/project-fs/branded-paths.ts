@@ -64,6 +64,15 @@ export type OwnedListPath = string & {
 };
 
 /**
+ * A temporary sandbox path created by a dedicated sandbox authority. It is not
+ * an owned project write path and cannot be passed to project write/delete
+ * operations.
+ */
+export type TemporarySandboxPath = string & {
+  readonly [brand]: "temporary_sandbox";
+};
+
+/**
  * Extract the underlying string from any branded path.
  */
 export function unbrand(
@@ -73,7 +82,8 @@ export function unbrand(
     | OwnedWritePath
     | OwnedDeletePath
     | ExplicitUserReadPath
-    | OwnedListPath,
+    | OwnedListPath
+    | TemporarySandboxPath,
 ): string {
   return path as string;
 }

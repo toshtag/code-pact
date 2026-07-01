@@ -4,9 +4,9 @@ import {
   unlinkOwned,
 } from "../project-fs/operations.ts";
 import {
-  brandOwnedRead,
-  brandOwnedDelete,
-} from "../project-fs/branded-paths-internal.ts";
+  archiveReadPath,
+  archiveDeletePath,
+} from "../project-fs/authorities/archive-authority.ts";
 import { basename } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { Phase } from "../schemas/phase.ts";
@@ -209,7 +209,7 @@ async function buildLiveGraph(cwd: string): Promise<LiveGraphResult> {
     let raw: string;
     try {
       raw = await readOwnedText(
-        brandOwnedRead(await resolveSymlinkFreeProjectPath(cwd, p.path)),
+        archiveReadPath(await resolveSymlinkFreeProjectPath(cwd, p.path)),
       );
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") continue; // archived phase — not a live ref source
@@ -972,7 +972,7 @@ export async function gateLooseDelete(
   }
   let raw: string;
   try {
-    raw = await readOwnedText(brandOwnedRead(abs));
+    raw = await readOwnedText(archiveReadPath(abs));
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT")
       return { kind: "vanished" };
@@ -1094,7 +1094,7 @@ async function deleteLooseDropped(
       continue;
     }
     try {
-      await unlinkOwned(brandOwnedDelete(verdict.abs));
+      await unlinkOwned(archiveDeletePath(verdict.abs));
       out.deleted.push(item.id);
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === "ENOENT")

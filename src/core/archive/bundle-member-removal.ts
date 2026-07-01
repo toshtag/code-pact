@@ -1,16 +1,15 @@
 import {
-  readOwnedFileSync,
+  readOwnedTextSyncNoFollow,
   readOwnedText,
-  openOwnedRead,
-  openOwnedWrite,
   renameOwned,
   unlinkOwned,
+  writeOwnedTempDurably,
 } from "../project-fs/operations.ts";
 import {
-  brandOwnedRead,
-  brandOwnedWrite,
-  brandOwnedDelete,
-} from "../project-fs/branded-paths-internal.ts";
+  archiveReadPath,
+  archiveWritePath,
+  archiveDeletePath,
+} from "../project-fs/authorities/archive-authority.ts";
 import { basename, join } from "node:path";
 import type {
   ArchiveBundle,
@@ -161,7 +160,7 @@ export function computeRemoval(
     .map(b => ({
       file: basename(b.file),
       sha256: sha256Hex(
-        readOwnedFileSync(brandOwnedRead(join(bundleDir, basename(b.file)))),
+        readOwnedTextSyncNoFollow(archiveReadPath(join(bundleDir, basename(b.file)))),
       ), // the on-disk raw bytes
       member_ids_sha256: computeMemberIdsSha256(
         b.loaded.members.map(m => m.id),
@@ -377,7 +376,7 @@ export async function removeBundleMembers(
     );
     let raw: string;
     try {
-      raw = await readOwnedText(brandOwnedRead(abs));
+      raw = await readOwnedText(archiveReadPath(abs));
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") continue; // already gone — idempotent
       throw err;
@@ -387,7 +386,7 @@ export async function removeBundleMembers(
       for (const id of rb.member_ids) staleHeldIds.add(id); // its members STILL resolve from this un-retired bundle
       continue;
     }
-    await unlinkOwned(brandOwnedDelete(abs));
+    await unlinkOwned(archiveDeletePath(abs));
     retiredAny = true;
   }
   if (retiredAny) await fsyncDirRequired(dir, "bundle_retire"); // make the removal durable
@@ -433,7 +432,7 @@ async function assertSurvivorBundleOnDisk(
   );
   let raw: string;
   try {
-    raw = await readOwnedText(brandOwnedRead(path));
+    raw = await readOwnedText(archiveReadPath(path));
   } catch (err) {
     throw new Error(
       `bundle-member removal: the survivor bundle ${basename(path)} vanished before retiring the old bundle(s): ${(err as Error).message}`,
@@ -470,62 +469,40 @@ export async function durablyWriteBundle(
     // (file DATA fsync + directory fsync) and re-verify the bytes BEFORE returning to the retire step.
     // Opened `r+` (not `r`): fsync of a read-only fd is not durability-meaningful on every platform,
     // so a write handle makes the keep's DATA-fsync barrier unambiguous (the file is one we own).
-    const fh = await openOwnedRead(brandOwnedRead(path));
     try {
-      const existing = await fh.readFile("utf8");
+      const existing = await readOwnedText(archiveReadPath(path));
       if (existing !== bytes) {
         throw new Error(
           `bundle-member removal: a different bundle already exists at ${basename(path)}`,
         );
       }
       verifyBundleReadback(existing, kind, bundle.members, basename(path));
-      await fsyncFileRequired(fh, "bundle_write"); // REQUIRED: the keep's DATA must be durable
+      await fsyncFileRequired(path, "bundle_write"); // REQUIRED: the keep's DATA must be durable
     } catch (err) {
-      await fh.close().catch(() => {});
       throw err; // propagate the ORIGINAL fault (different-bundle / readback / data-fsync), never masked
-    }
-    try {
-      await fh.close(); // on the success path the close is itself a barrier — an unflushed write can surface here
-    } catch (err) {
-      throw new DeleteIntentDurabilityError(
-        "failed",
-        `keep bundle close failed: ${(err as Error).message}`,
-      );
     }
     await fsyncDirRequired(dir, "bundle_write"); // REQUIRED: the keep's directory entry must be durable
     return;
   }
   const tmp = `${path}.tmp-${process.pid}-${Date.now()}`;
-  const fh = await openOwnedWrite(brandOwnedWrite(tmp));
   try {
-    await fh.writeFile(bytes, "utf8");
-    await fh.sync(); // MANDATORY: fsync the DATA before it can be renamed into place
+    await writeOwnedTempDurably(archiveWritePath(tmp), bytes);
   } catch (err) {
-    await fh.close().catch(() => {});
-    await unlinkOwned(brandOwnedDelete(tmp)).catch(() => {});
+    await unlinkOwned(archiveDeletePath(tmp)).catch(() => {});
     throw new DeleteIntentDurabilityError(
       "failed",
       `new bundle temp write/fsync failed: ${(err as Error).message}`,
     );
   }
   try {
-    await fh.close(); // a close failure after fsync is still a durability fault (the data may not be flushed)
+    await renameOwned(archiveDeletePath(tmp), archiveWritePath(path));
   } catch (err) {
-    await unlinkOwned(brandOwnedDelete(tmp)).catch(() => {});
-    throw new DeleteIntentDurabilityError(
-      "failed",
-      `new bundle temp close failed: ${(err as Error).message}`,
-    );
-  }
-  try {
-    await renameOwned(brandOwnedDelete(tmp), brandOwnedWrite(path));
-  } catch (err) {
-    await unlinkOwned(brandOwnedDelete(tmp)).catch(() => {});
+    await unlinkOwned(archiveDeletePath(tmp)).catch(() => {});
     throw err;
   }
   await fsyncDirRequired(dir, "bundle_write"); // REQUIRED: make the rename durable BEFORE any retire
   verifyBundleReadback(
-    await readOwnedText(brandOwnedRead(path)),
+    await readOwnedText(archiveReadPath(path)),
     kind,
     bundle.members,
     basename(path),
@@ -554,8 +531,7 @@ export async function looseCopyExists(
 
 async function pathExists(path: string): Promise<boolean> {
   try {
-    const fh = await openOwnedRead(brandOwnedRead(path));
-    await fh.close();
+    await readOwnedText(archiveReadPath(path));
     return true;
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return false;

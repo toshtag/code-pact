@@ -1,5 +1,5 @@
 import { readOwnedText } from "../project-fs/operations.ts";
-import { resolveAdapterStaticReadPath } from "../project-fs/index.ts";
+import { resolvePrunedLedgerReadPath } from "../project-fs/authorities/prune-authority.ts";
 import { posix } from "node:path";
 import {
   assertSafeRelativePath,
@@ -112,10 +112,7 @@ export async function readPrunedLedger(cwd: string): Promise<Set<string>> {
     // Route through the symlink-escape guard: this set SILENCES missing-decision_ref
     // integrity warnings, so it must never trust a PRUNED.md that resolves outside
     // the repo. A resolve escape throws and lands in the fail-closed branch below.
-    const path = await resolveAdapterStaticReadPath(
-      cwd,
-      "design/decisions/PRUNED.md",
-    );
+    const path = await resolvePrunedLedgerReadPath(cwd);
     text = await readOwnedText(path);
   } catch {
     // Any failure (escape, absent ENOENT, EACCES, EISDIR) → empty set. This is the
@@ -223,10 +220,7 @@ export async function buildAppendedLedger(
   let existing = "";
   let existed = true;
   try {
-    const branded = await resolveAdapterStaticReadPath(
-      cwd,
-      "design/decisions/PRUNED.md",
-    );
+    const branded = await resolvePrunedLedgerReadPath(cwd);
     existing = await readOwnedText(branded);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;

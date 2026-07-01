@@ -5,8 +5,8 @@ import {
   resolveDecisionReadPath,
   resolveDecisionDirectoryReadPath,
   resolveRoadmapReadPath,
-  resolveInitReadPath,
 } from "./authority-resolvers.ts";
+import { resolveProjectPresenceReadPath } from "./authorities/project-config-authority.ts";
 import { PhaseRef } from "../schemas/roadmap.ts";
 
 /**
@@ -85,7 +85,7 @@ export async function ownedPathPresence(
 ): Promise<"present" | "absent" | "inaccessible"> {
   let path;
   try {
-    path = await resolveInitReadPath(cwd, relPath);
+    path = await resolveProjectPresenceReadPath(cwd, relPath);
   } catch {
     return "inaccessible";
   }

@@ -5,8 +5,8 @@ import {
   resolvePhaseReadPath,
   resolveRoadmapReadPath,
 } from "../project-fs/authority-resolvers.ts";
-import { unbrand } from "../project-fs/branded-paths-internal.ts";
-import type { OwnedReadPath } from "../project-fs/branded-paths-internal.ts";
+import { unbrand } from "../project-fs/branded-paths.ts";
+import type { OwnedReadPath } from "../project-fs/branded-paths.ts";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { loadYaml, ParseError } from "../../io/load.ts";

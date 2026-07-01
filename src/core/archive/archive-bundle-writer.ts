@@ -1,9 +1,9 @@
 import { listOwnedDirents, readOwnedText } from "../project-fs/operations.ts";
 import {
   unbrand,
-  brandOwnedRead,
-  brandOwnedWrite,
-} from "../project-fs/branded-paths-internal.ts";
+  archiveReadPath,
+  archiveWritePath,
+} from "../project-fs/authorities/archive-authority.ts";
 import { basename, join } from "node:path";
 import {
   ArchiveBundle,
@@ -238,7 +238,7 @@ async function readbackAndVerify(
 ): Promise<void> {
   let reread: string;
   try {
-    reread = await readOwnedText(brandOwnedRead(path));
+    reread = await readOwnedText(archiveReadPath(path));
   } catch (err) {
     throw new BundleWriteError(
       "verify_bundle",
@@ -325,7 +325,7 @@ async function persistArchiveBundle(
     // rejects it.
     try {
       await atomicReplaceExistingText(
-        brandOwnedWrite(unbrand(path)),
+        archiveWritePath(unbrand(path)),
         bytes,
         existing,
       );
@@ -360,7 +360,7 @@ async function persistArchiveBundle(
   }
   try {
     await atomicWriteText(
-      brandOwnedWrite(unbrand(path)),
+      archiveWritePath(unbrand(path)),
       bytes,
       { kind: "absent" },
       { mkdir: true },

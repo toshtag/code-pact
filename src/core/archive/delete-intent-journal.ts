@@ -1,17 +1,18 @@
 import {
+  fsyncOwnedDirectory,
+  fsyncOwnedRegularFile,
   mkdirOwned,
-  openOwnedRead,
-  openOwnedWrite,
   readOwnedText,
   renameOwned,
   unlinkOwned,
+  writeOwnedTempDurably,
 } from "../project-fs/operations.ts";
 import {
-  brandOwnedRead,
-  brandOwnedWrite,
-  brandOwnedDelete,
-} from "../project-fs/branded-paths-internal.ts";
-import type { FileHandle } from "../project-fs/index.ts";
+  archiveReadPath,
+  archiveWritePath,
+  archiveDeletePath,
+  archiveListPath,
+} from "../project-fs/authorities/archive-authority.ts";
 import { basename, dirname } from "node:path";
 import {
   DeleteIntent,
@@ -122,17 +123,13 @@ export async function fsyncDirRequired(
       `directory fsync is unsupported on ${process.platform} (${purpose})`,
     );
   }
-  let dh;
   try {
-    dh = await openOwnedRead(brandOwnedRead(dir));
-    await dh.sync();
+    await fsyncOwnedDirectory(archiveListPath(dir));
   } catch (err) {
     throw new DeleteIntentDurabilityError(
       "failed",
       `directory fsync failed (${purpose}, ${dir}): ${(err as Error).message}`,
     );
-  } finally {
-    await dh?.close();
   }
 }
 
@@ -152,7 +149,7 @@ export function __setDeleteIntentFileFsyncForTests(
  *  on any I/O failure (never swallowed). Unlike a directory fsync this is supported on
  *  every platform (fsync of a regular file), so there is no `unsupported` case. */
 export async function fsyncFileRequired(
-  fh: FileHandle,
+  path: string,
   purpose: string,
 ): Promise<void> {
   if (fileFsyncOverride) {
@@ -160,7 +157,7 @@ export async function fsyncFileRequired(
     return;
   }
   try {
-    await fh.sync();
+    await fsyncOwnedRegularFile(archiveReadPath(path));
   } catch (err) {
     throw new DeleteIntentDurabilityError(
       "failed",
@@ -171,8 +168,7 @@ export async function fsyncFileRequired(
 
 async function pathExists(path: string): Promise<boolean> {
   try {
-    const fh = await openOwnedRead(brandOwnedRead(path));
-    await fh.close();
+    await readOwnedText(archiveReadPath(path));
     return true;
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return false;
@@ -216,7 +212,7 @@ export async function writeDeleteIntent(
   const content = serializeDeleteIntent(intent);
   const path = await resolveArchiveOwnedPath(cwd, archiveDeleteIntentRelPath());
   const dir = dirname(path);
-  await mkdirOwned(brandOwnedWrite(dir), { recursive: true });
+  await mkdirOwned(archiveWritePath(dir), { recursive: true });
   // PREFLIGHT the directory durability barrier BEFORE writing anything: if the platform
   // cannot fsync a directory (`unsupported`) or the dir fsync fails (`failed`), abort HERE
   // so the journal is NEVER left on disk. (A barrier failure only AFTER the rename would
@@ -226,25 +222,13 @@ export async function writeDeleteIntent(
   await fsyncDirRequired(dir, "commit");
   const tmp = `${path}.tmp-${process.pid}-${Date.now()}`;
 
-  const fh = await openOwnedWrite(brandOwnedWrite(tmp));
   try {
-    await fh.writeFile(content, "utf8");
-    await fh.sync(); // MANDATORY: fsync the data before it can be renamed into place
+    await writeOwnedTempDurably(archiveWritePath(tmp), content);
   } catch (err) {
-    await fh.close().catch(() => {});
-    await unlinkOwned(brandOwnedDelete(tmp)).catch(() => {});
+    await unlinkOwned(archiveDeletePath(tmp)).catch(() => {});
     throw new DeleteIntentDurabilityError(
       "failed",
       `delete-intent temp write/fsync failed: ${(err as Error).message}`,
-    );
-  }
-  try {
-    await fh.close(); // a close failure after fsync is still a durability fault (the data may not be flushed)
-  } catch (err) {
-    await unlinkOwned(brandOwnedDelete(tmp)).catch(() => {});
-    throw new DeleteIntentDurabilityError(
-      "failed",
-      `delete-intent temp close failed: ${(err as Error).message}`,
     );
   }
   try {
@@ -252,9 +236,9 @@ export async function writeDeleteIntent(
     // write lock there is no concurrent creator, so this check is race-free in
     // practice; rename(2) would otherwise silently replace.
     if (await pathExists(path)) throw new PendingDeleteIntentError();
-    await renameOwned(brandOwnedDelete(tmp), brandOwnedWrite(path));
+    await renameOwned(archiveDeletePath(tmp), archiveWritePath(path));
   } catch (err) {
-    await unlinkOwned(brandOwnedDelete(tmp)).catch(() => {});
+    await unlinkOwned(archiveDeletePath(tmp)).catch(() => {});
     throw err;
   }
   // REQUIRED: make the rename (the commit) durable. A failure here throws BEFORE
@@ -269,7 +253,7 @@ export async function writeDeleteIntent(
 export async function clearDeleteIntent(cwd: string): Promise<void> {
   const path = await resolveArchiveOwnedPath(cwd, archiveDeleteIntentRelPath());
   try {
-    await unlinkOwned(brandOwnedDelete(path));
+    await unlinkOwned(archiveDeletePath(path));
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
     return; // already gone — nothing to make durable
@@ -291,14 +275,11 @@ export type DeleteIntentRead =
 export async function readDeleteIntent(cwd: string): Promise<DeleteIntentRead> {
   let raw: string;
   try {
-    const fh = await openOwnedRead(
-      await resolveArchiveOwnedPath(cwd, archiveDeleteIntentRelPath()),
+    raw = await readOwnedText(
+      archiveReadPath(
+        await resolveArchiveOwnedPath(cwd, archiveDeleteIntentRelPath()),
+      ),
     );
-    try {
-      raw = await fh.readFile("utf8");
-    } finally {
-      await fh.close();
-    }
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT")
       return { kind: "absent" };
@@ -542,7 +523,7 @@ export async function assertBundlePairsCommittable(
     let raw: string;
     try {
       raw = await readOwnedText(
-        brandOwnedRead(await resolveArchiveBundleFile(cwd, file)),
+        archiveReadPath(await resolveArchiveBundleFile(cwd, file)),
       );
     } catch (err) {
       throw new BundlePairNotCommittableError(
@@ -608,7 +589,7 @@ async function completeBundlePairRetires(
         );
         let newRaw: string;
         try {
-          newRaw = await readOwnedText(brandOwnedRead(newPath));
+          newRaw = await readOwnedText(archiveReadPath(newPath));
         } catch (err) {
           throw new DeleteIntentRecoveryError(
             `bundle-pair recovery: survivor bundle ${member.new_bundle.file} missing before retiring ${kind} for ${pair.phase_id}: ${(err as Error).message}`,
@@ -627,7 +608,7 @@ async function completeBundlePairRetires(
         const oldPath = await resolveArchiveBundleFile(cwd, old.file);
         let oldRaw: string;
         try {
-          oldRaw = await readOwnedText(brandOwnedRead(oldPath));
+          oldRaw = await readOwnedText(archiveReadPath(oldPath));
         } catch (err) {
           if ((err as NodeJS.ErrnoException).code === "ENOENT") continue; // already retired — idempotent
           throw err;
@@ -637,7 +618,7 @@ async function completeBundlePairRetires(
             `bundle-pair recovery: old bundle ${old.file} no longer matches the committed digest (${kind}, ${pair.phase_id}) — refusing to retire an unrecognised bundle`,
           );
         }
-        await unlinkOwned(brandOwnedDelete(oldPath));
+        await unlinkOwned(archiveDeletePath(oldPath));
         retiredAny = true;
       }
     }
@@ -703,7 +684,7 @@ export async function recoverPendingDeletes(
 
 async function unlinkIfPresent(abs: string): Promise<void> {
   try {
-    await unlinkOwned(brandOwnedDelete(abs));
+    await unlinkOwned(archiveDeletePath(abs));
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
   }

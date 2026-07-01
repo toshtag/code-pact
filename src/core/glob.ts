@@ -1,9 +1,9 @@
 import { listOwnedDirents } from "./project-fs/operations.ts";
-import { resolveInitListPath } from "./project-fs/authority-resolvers.ts";
 import {
-  brandOwnedList,
-  type OwnedListPath,
-} from "./project-fs/branded-paths-internal.ts";
+  projectConfigListPath,
+  resolveProjectTreeListPath,
+} from "./project-fs/authorities/project-config-authority.ts";
+import type { OwnedListPath } from "./project-fs/branded-paths.ts";
 import { join, relative } from "node:path";
 
 // ---------------------------------------------------------------------------
@@ -249,14 +249,14 @@ export async function walkAndMatch(
       const rel = toPosix(relative(cwd, abs));
       if (entry.isDirectory()) {
         if (WALK_IGNORE_DIRS.has(entry.name)) continue;
-        await walk(brandOwnedList(abs));
+        await walk(projectConfigListPath(abs));
       } else if (entry.isFile()) {
         if (matchGlob(pattern, rel)) matches.push(rel);
       }
     }
   }
 
-  await walk(await resolveInitListPath(cwd, "."));
+  await walk(await resolveProjectTreeListPath(cwd, "."));
   return matches.sort();
 }
 

@@ -17,9 +17,8 @@
 // gate table (G0–G8) is the binding source for every disposition here.
 // ---------------------------------------------------------------------------
 
-import { openOwnedRead, lstatOwned } from "../project-fs/operations.ts";
-import { brandOwnedRead } from "../project-fs/branded-paths-internal.ts";
-import type { FileHandle } from "../project-fs/index.ts";
+import { lstatOwned, readOwnedText } from "../project-fs/operations.ts";
+import { archiveReadPath } from "../project-fs/authorities/archive-authority.ts";
 import {
   planEventPack,
   findLiveTaskOwnersByTaskId,
@@ -78,39 +77,30 @@ async function readRegularEventFileNoSymlink(
   // platform, before any open that could follow it.
   let pre;
   try {
-    pre = await lstatOwned(brandOwnedRead(abs));
+    pre = await lstatOwned(archiveReadPath(abs));
   } catch (err) {
     if (isEnoent(err)) return { disposition: "vanished" };
     return { disposition: "skip", reason: "unreadable" };
   }
   if (!pre.isFile()) return { disposition: "skip", reason: "not_regular_file" };
 
-  // (2) open with O_NOFOLLOW (where supported); (3) fstat + inode identity check.
-  let fh: FileHandle;
+  // (2) read with O_NOFOLLOW + fstat. The async read primitive refuses final
+  // symlinks and non-regular files without returning a raw handle.
   try {
-    fh = await openOwnedRead(brandOwnedRead(abs));
+    return { raw: await readOwnedText(archiveReadPath(abs)) };
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "ENOENT") return { disposition: "vanished" };
     // ELOOP = O_NOFOLLOW refused a symlink; EISDIR/ENOTDIR = not a regular file.
-    if (code === "ELOOP" || code === "EISDIR" || code === "ENOTDIR") {
+    if (
+      code === "ELOOP" ||
+      code === "EISDIR" ||
+      code === "ENOTDIR" ||
+      code === "ENOTFILE"
+    ) {
       return { disposition: "skip", reason: "not_regular_file" };
     }
     return { disposition: "skip", reason: "unreadable" };
-  }
-  try {
-    const st = await fh.stat();
-    // Not a regular file, OR a different inode than lstat saw (the path was swapped
-    // between lstat and open) → refuse to read it.
-    if (!st.isFile() || st.ino !== pre.ino || st.dev !== pre.dev) {
-      return { disposition: "skip", reason: "not_regular_file" };
-    }
-    return { raw: await fh.readFile("utf8") };
-  } catch (err) {
-    if (isEnoent(err)) return { disposition: "vanished" };
-    return { disposition: "skip", reason: "unreadable" };
-  } finally {
-    await fh.close();
   }
 }
 

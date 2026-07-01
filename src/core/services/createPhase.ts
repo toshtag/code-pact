@@ -2,8 +2,8 @@ import { mkdirOwned } from "../project-fs/operations.ts";
 import {
   resolvePhaseWritePath,
   resolveRoadmapWritePath,
-  resolveInitWritePath,
 } from "../project-fs/authority-resolvers.ts";
+import { resolveProjectScaffoldWritePath } from "../project-fs/authorities/project-config-authority.ts";
 import { stringify as toYaml } from "yaml";
 import { atomicWriteText } from "../../io/atomic-text.ts";
 import { Phase } from "../schemas/phase.ts";
@@ -146,7 +146,7 @@ export async function createPhase(
     ...(opts.tasks && opts.tasks.length > 0 ? { tasks: opts.tasks } : {}),
   });
 
-  await mkdirOwned(await resolveInitWritePath(cwd, "design/phases"), {
+  await mkdirOwned(await resolveProjectScaffoldWritePath(cwd, "design/phases"), {
     recursive: true,
   });
   await atomicWriteText(

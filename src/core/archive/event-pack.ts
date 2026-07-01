@@ -11,7 +11,7 @@ import { resolveArchiveOwnedWritePath } from "./paths.ts";
 import type {
   OwnedReadPath,
   OwnedWritePath,
-} from "../project-fs/branded-paths-internal.ts";
+} from "../project-fs/authorities/archive-authority.ts";
 import { parse as parseYaml } from "yaml";
 import {
   EventPack,

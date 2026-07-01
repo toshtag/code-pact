@@ -1,11 +1,11 @@
 import { matchGlob } from "../glob.ts";
 import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
 import {
-  brandOwnedRead,
-  brandOwnedWrite,
+  adapterReadPath,
+  adapterWritePath,
   type OwnedReadPath,
   type OwnedWritePath,
-} from "../project-fs/branded-paths-internal.ts";
+} from "../project-fs/authorities/adapter-authority.ts";
 import type { AdapterDescriptor, DesiredAdapterFileRole } from "./types.ts";
 
 /**
@@ -75,7 +75,7 @@ export async function authorizeAdapterMutationPath(
     try {
       return {
         kind: "owned",
-        absPath: brandOwnedWrite(
+        absPath: adapterWritePath(
           await resolveSymlinkFreeProjectPath(cwd, relPath),
         ),
       };
@@ -102,7 +102,7 @@ export async function authorizeAdapterMutationPath(
   try {
     return {
       kind: "dynamic_write",
-      absPath: brandOwnedWrite(
+      absPath: adapterWritePath(
         await resolveSymlinkFreeProjectPath(cwd, relPath),
       ),
     };
@@ -172,7 +172,7 @@ export async function classifyManifestFileForRead(
     // Rejects any symlink component (and `..` / absolute / drive paths): a
     // lexical path match is not proof the real destination is owned.
     const absPath = await resolveSymlinkFreeProjectPath(cwd, relPath);
-    return { kind: "owned", absPath: brandOwnedRead(absPath) };
+    return { kind: "owned", absPath: adapterReadPath(absPath) };
   } catch {
     return { kind: "unsafe" };
   }

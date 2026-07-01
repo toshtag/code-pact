@@ -3,12 +3,12 @@ import {
   readExplicitUserText,
   resolveExplicitUserReadPath,
   resolveInstructionReadPath,
-  resolveInitWritePath,
+  resolveProjectScaffoldWritePath,
 } from "../core/project-fs/index.ts";
 import {
   unbrand,
   type OwnedWritePath,
-} from "../core/project-fs/branded-paths-internal.ts";
+} from "../core/project-fs/branded-paths.ts";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { atomicWriteText } from "../io/atomic-text.ts";
@@ -302,7 +302,7 @@ export async function runBriefWizard(
 
 async function resolveBriefOutputPath(cwd: string): Promise<OwnedWritePath> {
   try {
-    return await resolveInitWritePath(cwd, "design/brief.md");
+    return await resolveProjectScaffoldWritePath(cwd, "design/brief.md");
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "PATH_OUTSIDE_PROJECT" || code === "PATH_NOT_OWNED") {

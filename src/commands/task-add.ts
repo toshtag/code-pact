@@ -3,7 +3,7 @@ import { stringify as toYaml } from "yaml";
 import { atomicWriteText } from "../io/atomic-text.ts";
 import { resolvePhaseInRoadmap } from "../core/plan/resolve-phase.ts";
 import { resolvePhaseWritePath } from "../core/project-fs/index.ts";
-import type { OwnedWritePath } from "../core/project-fs/branded-paths-internal.ts";
+import type { OwnedWritePath } from "../core/project-fs/branded-paths.ts";
 import { Phase } from "../core/schemas/phase.ts";
 import { TaskType, type Task } from "../core/schemas/task.ts";
 import { assertSafePlanId } from "../core/schemas/plan-id.ts";

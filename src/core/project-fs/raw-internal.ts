@@ -4,8 +4,7 @@
  * This module re-exports the raw `node:fs` functions that implement the
  * filesystem boundary itself. Domain modules MUST NOT import from here
  * directly — they should use the branded-path API from {@link ./index.ts}
- * or the authority resolvers in {@link ./owned-read.ts} and
- * {@link ./control-plane.ts}.
+ * or the namespace authority resolvers exposed by {@link ./index.ts}.
  *
  * The `check:fs-authority` AST gate allows this module only inside the raw
  * filesystem boundary. Domain modules that import from here are flagged by the
@@ -33,6 +32,9 @@ export {
   readFileSync,
   writeFileSync,
   existsSync,
+  closeSync,
+  fstatSync,
+  openSync,
   readdirSync,
   statSync,
   lstatSync,
@@ -41,6 +43,12 @@ export {
 } from "node:fs";
 export type { Dirent, Stats } from "node:fs";
 
+import {
+  closeSync as closeSyncRaw,
+  fstatSync as fstatSyncRaw,
+  openSync as openSyncRaw,
+  readFileSync as readFileSyncRaw,
+} from "node:fs";
 import { open as openRaw, constants as constantsRaw } from "node:fs/promises";
 import type { FileHandle } from "node:fs/promises";
 
@@ -61,6 +69,22 @@ export function resolveNoFollowFlag(value: unknown): number {
 
 export async function openReadNoFollow(path: string): Promise<FileHandle> {
   const flags = constantsRaw.O_RDONLY | resolveNoFollowFlag(constantsRaw.O_NOFOLLOW);
+  try {
+    return await openRaw(path, flags);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "EINVAL" || code === "ENOTSUP" || code === "EOPNOTSUPP") {
+      throw unsupportedNoFollowError();
+    }
+    throw err;
+  }
+}
+
+export async function openDirectoryNoFollow(path: string): Promise<FileHandle> {
+  const flags =
+    constantsRaw.O_RDONLY |
+    resolveNoFollowFlag(constantsRaw.O_NOFOLLOW) |
+    constantsRaw.O_DIRECTORY;
   try {
     return await openRaw(path, flags);
   } catch (err) {
@@ -101,5 +125,31 @@ export async function readRegularOwnedText(path: string): Promise<string> {
     return await handle.readFile({ encoding: "utf8" });
   } finally {
     await handle.close();
+  }
+}
+
+export function readRegularOwnedTextSync(path: string): string {
+  const flags =
+    constantsRaw.O_RDONLY | resolveNoFollowFlag(constantsRaw.O_NOFOLLOW);
+  let fd: number;
+  try {
+    fd = openSyncRaw(path, flags);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "EINVAL" || code === "ENOTSUP" || code === "EOPNOTSUPP") {
+      throw unsupportedNoFollowError();
+    }
+    throw err;
+  }
+  try {
+    const stats = fstatSyncRaw(fd);
+    if (!stats.isFile()) {
+      const error = new Error("path is not a regular file");
+      (error as NodeJS.ErrnoException).code = "ENOTFILE";
+      throw error;
+    }
+    return readFileSyncRaw(fd, "utf8");
+  } finally {
+    closeSyncRaw(fd);
   }
 }

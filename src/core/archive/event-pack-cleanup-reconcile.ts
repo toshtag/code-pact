@@ -26,9 +26,9 @@ import {
   listOwned,
 } from "../project-fs/operations.ts";
 import {
-  brandOwnedRead,
-  brandOwnedList,
-} from "../project-fs/branded-paths-internal.ts";
+  archiveReadPath,
+  archiveListPath,
+} from "../project-fs/authorities/archive-authority.ts";
 import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { ProgressEvent } from "../schemas/progress-event.ts";
@@ -84,7 +84,7 @@ type SurvivorContent =
 async function readSurvivorContent(abs: string): Promise<SurvivorContent> {
   let st;
   try {
-    st = await lstatOwned(brandOwnedRead(abs));
+    st = await lstatOwned(archiveReadPath(abs));
   } catch (err) {
     if (isEnoent(err)) return "gone";
     return { id: null, taskId: null, reason: "unreadable_after_cleanup" };
@@ -93,7 +93,7 @@ async function readSurvivorContent(abs: string): Promise<SurvivorContent> {
     return { id: null, taskId: null, reason: "not_regular_file_after_cleanup" };
   let raw: string;
   try {
-    raw = await readOwnedText(brandOwnedRead(abs));
+    raw = await readOwnedText(archiveReadPath(abs));
   } catch (err) {
     if (isEnoent(err)) return "gone";
     return { id: null, taskId: null, reason: "unreadable_after_cleanup" };
@@ -183,7 +183,7 @@ export async function reconcileSurvivors(
   const dir = eventsDir(cwd);
   let names: string[];
   try {
-    names = await listOwned(brandOwnedList(dir));
+    names = await listOwned(archiveListPath(dir));
   } catch (err) {
     if (isEnoent(err))
       names = []; // no dir → nothing present

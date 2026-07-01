@@ -4,8 +4,8 @@ import {
 } from "../project-fs/operations.ts";
 import {
   resolveExplicitUserReadPath,
-  resolveInitListPath,
 } from "../project-fs/index.ts";
+import { resolveProjectTreeListPath } from "../project-fs/authorities/project-config-authority.ts";
 import { posix } from "node:path";
 
 /**
@@ -118,10 +118,10 @@ async function discoverSources(
   ): Promise<void> {
     let abs;
     if (rel === ".") {
-      abs = await resolveInitListPath(cwd, "."); // the project root itself is trusted
+      abs = await resolveProjectTreeListPath(cwd, "."); // the project root itself is trusted
     } else {
       try {
-        abs = await resolveInitListPath(cwd, rel); // symlink-free guard
+        abs = await resolveProjectTreeListPath(cwd, rel); // symlink-free guard
       } catch {
         issues.push({ source_file: rel, line: null, reason: "unreadable" });
         return;

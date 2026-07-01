@@ -18,9 +18,8 @@ export type {
   OwnedDeletePath,
   ExplicitUserReadPath,
   OwnedListPath,
+  TemporarySandboxPath,
 } from "./branded-paths.ts";
-
-export type { FileHandle } from "node:fs/promises";
 
 export {
   readOwnedText,
@@ -42,17 +41,15 @@ export {
   renameOwned,
   copyOwnedToOwned,
   linkOwned,
-  openOwnedRead,
-  openOwnedWriteExclusive,
-  openOwnedWrite,
   existsOwnedSync,
-  readOwnedFileSync,
+  readOwnedTextSyncNoFollow,
   readdirOwnedSync,
   listOwnedDirentsSync,
   realpathOwned,
-  realpathOwnedSync,
-  mkdtempOwned,
-  removeOwnedPath,
+  writeOwnedTextExclusive,
+  writeOwnedTempDurably,
+  fsyncOwnedRegularFile,
+  fsyncOwnedDirectory,
 } from "./operations.ts";
 
 export {
@@ -70,14 +67,10 @@ export {
   resolveContextDirectoryReadPath,
   resolveOwnedDirectoryReadPath,
   resolveAgentProfileReadPath,
-  resolveAdapterStaticReadPath,
   resolveRulesReadPath,
   resolveRulesDirectoryReadPath,
   resolveDoctorConfigReadPath,
   resolveExplicitUserReadPath,
-  resolveInitWritePath,
-  resolveInitReadPath,
-  resolveInitListPath,
   // Write resolvers
   resolveDecisionWritePath,
   resolvePhaseWritePath,
@@ -93,3 +86,8 @@ export {
   resolvePhaseDeletePath,
   resolveProgressDeletePath,
 } from "./authority-resolvers.ts";
+
+export {
+  resolveProjectScaffoldReadPath,
+  resolveProjectScaffoldWritePath,
+} from "./authorities/project-config-authority.ts";

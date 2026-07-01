@@ -1,10 +1,9 @@
-import { mkdtempOwned, removeOwnedPath } from "../core/project-fs/index.ts";
 import {
-  unbrand,
-  brandOwnedDelete,
-} from "../core/project-fs/branded-paths-internal.ts";
+  createTutorialSandbox,
+  removeTutorialSandbox,
+} from "../core/project-fs/authorities/temporary-sandbox-authority.ts";
+import { unbrand } from "../core/project-fs/branded-paths.ts";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
 import type { LocaleCode } from "../core/schemas/locale.ts";
 import { messages as messageCatalog } from "../i18n/index.ts";
 import { runInitCore } from "./init.ts";
@@ -78,11 +77,8 @@ export async function runTutorial(
     }
   };
 
-  const sandbox = unbrand(
-    await mkdtempOwned(
-      join(opts.sandboxParent ?? tmpdir(), "code-pact-tutorial-"),
-    ),
-  );
+  const sandboxPath = await createTutorialSandbox(opts.sandboxParent ?? tmpdir());
+  const sandbox = unbrand(sandboxPath);
   let kept = false;
 
   try {
@@ -186,10 +182,7 @@ export async function runTutorial(
     return { sandbox, kept, steps };
   } finally {
     if (opts.keep !== true) {
-      await removeOwnedPath(brandOwnedDelete(sandbox), {
-        recursive: true,
-        force: true,
-      });
+      await removeTutorialSandbox(sandboxPath);
     }
   }
 }

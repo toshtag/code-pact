@@ -1,5 +1,5 @@
 import { listOwnedDirents, readOwnedText } from "../project-fs/operations.ts";
-import type { OwnedReadPath } from "../project-fs/branded-paths-internal.ts";
+import type { OwnedReadPath } from "../project-fs/branded-paths.ts";
 import { basename } from "node:path";
 import { PhaseSnapshot } from "../schemas/phase-snapshot.ts";
 import type { TerminalEvidence } from "../schemas/phase-snapshot.ts";

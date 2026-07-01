@@ -3,17 +3,17 @@ import {
   resolveProjectConfigReadPath,
   resolveAgentProfileReadPath,
 } from "./project-fs/authority-resolvers.ts";
-import { unbrand } from "./project-fs/branded-paths-internal.ts";
+import { unbrand } from "./project-fs/authorities/profile-authority.ts";
 import { parse as parseYaml } from "yaml";
 import { AgentProfileRefPath } from "./schemas/agent-profile-ref-path.ts";
 import { assertSafePlanId } from "./schemas/plan-id.ts";
 import { resolveSymlinkFreeProjectPath } from "./path-safety.ts";
 import {
-  brandOwnedWrite,
-  brandOwnedRead,
+  profileWritePath,
+  profileReadPath,
   type OwnedWritePath,
   type OwnedReadPath,
-} from "./project-fs/branded-paths-internal.ts";
+} from "./project-fs/authorities/profile-authority.ts";
 import {
   AgentProfile,
   type AgentProfile as AgentProfileType,
@@ -262,7 +262,7 @@ export async function resolveAgentProfilePath(
       cwd,
       [".code-pact", rel].join("/"),
     );
-    return brandOwnedRead(abs);
+    return profileReadPath(abs);
   } catch (err) {
     if (shouldMapPathErrorToConfig(err)) {
       throw profileConfigError(
@@ -305,7 +305,7 @@ export async function resolveOwnedAgentProfilePath(
       [".code-pact", rel].join("/"),
     );
     await assertProfileNameMatches(path, agentName);
-    return brandOwnedWrite(path);
+    return profileWritePath(path);
   } catch (err) {
     if (shouldMapPathErrorToConfig(err)) {
       throw profileConfigError(

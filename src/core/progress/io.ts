@@ -1,6 +1,6 @@
 import { readOwnedText } from "../project-fs/operations.ts";
 import { resolveProgressReadPath } from "../project-fs/authority-resolvers.ts";
-import type { OwnedWritePath } from "../project-fs/branded-paths-internal.ts";
+import type { OwnedWritePath } from "../project-fs/branded-paths.ts";
 import { join } from "node:path";
 import { stringify as stringifyYaml } from "yaml";
 import { atomicWriteText } from "../../io/atomic-text.ts";

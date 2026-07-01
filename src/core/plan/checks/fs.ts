@@ -1,5 +1,5 @@
 import { accessOwned, existsOwnedSync } from "../../project-fs/operations.ts";
-import { brandOwnedRead } from "../../project-fs/branded-paths-internal.ts";
+import { projectConfigReadPath } from "../../project-fs/authorities/project-config-authority.ts";
 import {
   resolveSymlinkFreeProjectPath,
   resolveSymlinkFreeProjectPathSync,
@@ -14,7 +14,7 @@ import {
  */
 export async function fileExists(p: string): Promise<boolean> {
   try {
-    await accessOwned(brandOwnedRead(p));
+    await accessOwned(projectConfigReadPath(p));
     return true;
   } catch {
     return false;
@@ -33,7 +33,7 @@ export async function phaseFilePresence(
   p: string,
 ): Promise<"present" | "absent" | "inaccessible"> {
   try {
-    await accessOwned(brandOwnedRead(p));
+    await accessOwned(projectConfigReadPath(p));
     return "present";
   } catch (err) {
     return (err as NodeJS.ErrnoException).code === "ENOENT"
@@ -61,7 +61,7 @@ export async function projectPathPresence(
     return "inaccessible";
   }
   try {
-    await accessOwned(brandOwnedRead(abs));
+    await accessOwned(projectConfigReadPath(abs));
     return "present";
   } catch (err) {
     return (err as NodeJS.ErrnoException).code === "ENOENT"
@@ -80,5 +80,5 @@ export function projectPathPresenceSync(
   } catch {
     return "inaccessible";
   }
-  return existsOwnedSync(brandOwnedRead(abs)) ? "present" : "absent";
+  return existsOwnedSync(projectConfigReadPath(abs)) ? "present" : "absent";
 }

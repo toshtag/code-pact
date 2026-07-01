@@ -1,5 +1,5 @@
 import { listOwnedDirents } from "../project-fs/operations.ts";
-import type { OwnedListPath } from "../project-fs/branded-paths-internal.ts";
+import type { OwnedListPath } from "../project-fs/branded-paths.ts";
 import { ArchiveBundleKind } from "../schemas/archive-bundle.ts";
 import {
   archiveBundlesRelDir,

@@ -1,5 +1,5 @@
 import { readOwnedText, resolveDecisionReadPath } from "../project-fs/index.ts";
-import { brandOwnedWrite } from "../project-fs/branded-paths-internal.ts";
+import { archiveWritePath } from "../project-fs/authorities/archive-authority.ts";
 import {
   DecisionStateRecord,
   DECISION_STATE_RECORD_SCHEMA_VERSION,
@@ -422,7 +422,7 @@ export async function applyDecisionRecordPlan(
         ? { kind: "absent" }
         : { kind: "present", content: plan.existing_raw };
     await atomicWriteText(
-      brandOwnedWrite(plan.path),
+      archiveWritePath(plan.path),
       serializeDecisionRecord(plan.record),
       expected,
     );

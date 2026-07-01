@@ -6,7 +6,7 @@ import {
   resolvePhaseWritePath,
   type ExplicitUserReadPath,
 } from "../core/project-fs/index.ts";
-import { type OwnedWritePath } from "../core/project-fs/branded-paths-internal.ts";
+import { type OwnedWritePath } from "../core/project-fs/branded-paths.ts";
 import { stringify as stringifyYaml } from "yaml";
 
 import { atomicWriteText } from "../io/atomic-text.ts";

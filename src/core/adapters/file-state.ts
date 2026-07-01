@@ -8,7 +8,7 @@
 // ---------------------------------------------------------------------------
 
 import { readOwnedText, statOwned } from "../project-fs/operations.ts";
-import { brandOwnedRead } from "../project-fs/branded-paths-internal.ts";
+import { adapterReadPath } from "../project-fs/authorities/adapter-authority.ts";
 import {
   assertSafeRelativePath as assertSafeRelativePathImpl,
   resolveSymlinkFreeProjectPath,
@@ -47,7 +47,7 @@ export async function readAuthorizedRegularFileMaybe(
 ): Promise<string | null> {
   let st: import("node:fs").Stats;
   try {
-    st = await statOwned(brandOwnedRead(absPath));
+    st = await statOwned(adapterReadPath(absPath));
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "ENOENT") return null;
@@ -61,7 +61,7 @@ export async function readAuthorizedRegularFileMaybe(
     );
   }
   try {
-    return await readOwnedText(brandOwnedRead(absPath));
+    return await readOwnedText(adapterReadPath(absPath));
   } catch (err) {
     throw configError(
       `authorized adapter file "${relPath}" cannot be read (${(err as NodeJS.ErrnoException).code ?? "unreadable"})`,
@@ -75,7 +75,7 @@ export async function authorizedPathExists(
   relPath: string,
 ): Promise<boolean> {
   try {
-    await statOwned(brandOwnedRead(absPath));
+    await statOwned(adapterReadPath(absPath));
     return true;
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
@@ -130,7 +130,7 @@ export async function assertAdapterWritePathsContained(
     // Type check the FINAL entry (follow symlinks — containment already vetted).
     let st: import("node:fs").Stats;
     try {
-      st = await statOwned(brandOwnedRead(abs));
+      st = await statOwned(adapterReadPath(abs));
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
       if (code === "ENOENT") {

@@ -18,7 +18,6 @@
  */
 import {
   unbrand,
-  brandOwnedWrite,
   type OwnedDeletePath,
   type OwnedReadPath,
   type OwnedWritePath,
@@ -38,16 +37,14 @@ import {
   copyFile as copyFileRaw,
   link as linkRaw,
   open as openRaw,
+  openDirectoryNoFollow,
   openReadNoFollow,
-  mkdtemp as mkdtempRaw,
   readRegularOwnedText as readRegularOwnedTextRaw,
+  readRegularOwnedTextSync as readRegularOwnedTextSyncRaw,
   existsSync as existsSyncRaw,
-  readFileSync as readFileSyncRaw,
   readdirSync as readdirSyncRaw,
-  realpathSync as realpathSyncRaw,
 } from "./raw-internal.ts";
 import { realpath as realpathRaw } from "node:fs/promises";
-import type { FileHandle } from "node:fs/promises";
 
 export async function readOwnedText(path: OwnedReadPath): Promise<string> {
   return readRegularOwnedTextRaw(unbrand(path));
@@ -152,22 +149,63 @@ export async function linkOwned(
   await linkRaw(unbrand(src), unbrand(dst));
 }
 
-export async function openOwnedRead(path: OwnedReadPath): Promise<FileHandle> {
-  return openReadNoFollow(unbrand(path));
+export async function writeOwnedTextExclusive(
+  path: OwnedWritePath,
+  content: string | Buffer | Uint8Array,
+): Promise<void> {
+  const handle = await openRaw(unbrand(path), "wx");
+  try {
+    await handle.writeFile(content);
+  } finally {
+    await handle.close();
+  }
 }
 
-export async function openOwnedWriteExclusive(
+export async function writeOwnedTempDurably(
   path: OwnedWritePath,
-): Promise<FileHandle> {
-  return openRaw(unbrand(path), "wx");
+  content: string | Buffer | Uint8Array,
+): Promise<void> {
+  const handle = await openRaw(unbrand(path), "wx");
+  try {
+    await handle.writeFile(content);
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+}
+
+export async function fsyncOwnedRegularFile(
+  path: OwnedReadPath,
+): Promise<void> {
+  const handle = await openReadNoFollow(unbrand(path));
+  try {
+    const stats = await handle.stat();
+    if (!stats.isFile()) {
+      const error = new Error("path is not a regular file");
+      (error as NodeJS.ErrnoException).code = "ENOTFILE";
+      throw error;
+    }
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+}
+
+export async function fsyncOwnedDirectory(path: OwnedListPath): Promise<void> {
+  const handle = await openDirectoryNoFollow(unbrand(path));
+  try {
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
 }
 
 export function existsOwnedSync(path: OwnedReadPath): boolean {
   return existsSyncRaw(unbrand(path));
 }
 
-export function readOwnedFileSync(path: OwnedReadPath): string {
-  return readFileSyncRaw(unbrand(path), "utf8");
+export function readOwnedTextSyncNoFollow(path: OwnedReadPath): string {
+  return readRegularOwnedTextSyncRaw(unbrand(path));
 }
 
 export function readdirOwnedSync(
@@ -184,27 +222,4 @@ export function listOwnedDirentsSync(
 
 export async function realpathOwned(path: OwnedReadPath): Promise<string> {
   return realpathRaw(unbrand(path));
-}
-
-export function realpathOwnedSync(path: OwnedReadPath): string {
-  return realpathSyncRaw(unbrand(path));
-}
-
-export async function openOwnedWrite(
-  path: OwnedWritePath,
-  mode: string = "w",
-): Promise<FileHandle> {
-  return openRaw(unbrand(path), mode);
-}
-
-export async function mkdtempOwned(prefix: string): Promise<OwnedWritePath> {
-  const dir = await mkdtempRaw(prefix);
-  return brandOwnedWrite(dir);
-}
-
-export async function removeOwnedPath(
-  path: OwnedDeletePath,
-  options?: { recursive?: boolean; force?: boolean },
-): Promise<void> {
-  await rmRaw(unbrand(path), options);
 }

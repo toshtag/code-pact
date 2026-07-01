@@ -14,10 +14,10 @@ import { deriveTaskState } from "../progress/task-state.ts";
 import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
 import { resolveProfileContextOutputPath } from "./context-output-path.ts";
 import {
-  brandOwnedWrite,
+  contextOutputWritePath,
   unbrand,
   type OwnedWritePath,
-} from "../project-fs/branded-paths-internal.ts";
+} from "../project-fs/authorities/context-output-authority.ts";
 import {
   loadAgentProfile,
   loadConstitution,
@@ -325,10 +325,10 @@ export async function writeContextPack(
     // Absolute paths are used as-is (explicit user choice, e.g. /tmp).
     // Project-relative paths are resolved through symlink-free containment.
     if (isAbsolute(outputDir)) {
-      outputPath = brandOwnedWrite(join(outputDir, `${pack.taskId}.md`));
+      outputPath = contextOutputWritePath(join(outputDir, `${pack.taskId}.md`));
     } else {
       const dir = await resolveSymlinkFreeProjectPath(cwd, outputDir);
-      outputPath = brandOwnedWrite(join(dir, `${pack.taskId}.md`));
+      outputPath = contextOutputWritePath(join(dir, `${pack.taskId}.md`));
     }
   } else {
     // Profile-derived: constrained to .context/** + symlink-free resolution

@@ -4,12 +4,12 @@ import {
   resolveExplicitUserReadPath,
   resolveInstructionReadPath,
   resolveProjectConfigReadPath,
-  resolveInitWritePath,
+  resolveProjectScaffoldWritePath,
 } from "../core/project-fs/index.ts";
 import {
   unbrand,
   type OwnedWritePath,
-} from "../core/project-fs/branded-paths-internal.ts";
+} from "../core/project-fs/branded-paths.ts";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { atomicWriteText } from "../io/atomic-text.ts";
@@ -326,7 +326,7 @@ async function resolveConstitutionOutputPath(
   cwd: string,
 ): Promise<OwnedWritePath> {
   try {
-    return await resolveInitWritePath(cwd, "design/constitution.md");
+    return await resolveProjectScaffoldWritePath(cwd, "design/constitution.md");
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === "PATH_OUTSIDE_PROJECT" || code === "PATH_NOT_OWNED") {

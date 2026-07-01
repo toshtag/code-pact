@@ -5,11 +5,11 @@ import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { atomicWriteText } from "../../io/atomic-text.ts";
 import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
 import {
-  brandOwnedWrite,
-  brandOwnedRead,
+  adapterWritePath,
+  adapterReadPath,
   unbrand,
   type OwnedWritePath,
-} from "../project-fs/branded-paths-internal.ts";
+} from "../project-fs/authorities/adapter-authority.ts";
 import {
   AdapterManifest,
   AdapterManifestLenient,
@@ -53,7 +53,7 @@ export async function resolveManifestPath(
   agentName: string,
 ): Promise<OwnedWritePath> {
   try {
-    return brandOwnedWrite(
+    return adapterWritePath(
       await resolveSymlinkFreeProjectPath(cwd, manifestRelPath(agentName)),
     );
   } catch (err) {
@@ -104,7 +104,7 @@ export async function readManifest(
   const path = await resolveManifestPath(cwd, agentName);
   let raw: string;
   try {
-    raw = await readOwnedText(brandOwnedRead(unbrand(path)));
+    raw = await readOwnedText(adapterReadPath(unbrand(path)));
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
     // Any OTHER read failure on a project-controlled (adversarial) manifest path

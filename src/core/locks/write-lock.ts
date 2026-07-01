@@ -31,16 +31,16 @@
 
 import {
   mkdirOwned,
+  writeOwnedTextExclusive,
   readOwnedText,
   statOwned,
   unlinkOwned,
-  openOwnedWriteExclusive,
 } from "../project-fs/operations.ts";
 import {
-  brandOwnedRead,
-  brandOwnedWrite,
-  brandOwnedDelete,
-} from "../project-fs/branded-paths-internal.ts";
+  projectConfigReadPath,
+  projectConfigWritePath,
+  projectConfigDeletePath,
+} from "../project-fs/authorities/project-config-authority.ts";
 import { hostname } from "node:os";
 import { dirname, join } from "node:path";
 import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
@@ -128,7 +128,7 @@ export async function acquireWriteLock(
   if (locksDisabledViaEnv()) return NOOP_HANDLE;
 
   const lockPath = await resolveLockPath(cwd);
-  await mkdirOwned(brandOwnedWrite(dirname(lockPath)), { recursive: true });
+  await mkdirOwned(projectConfigWritePath(dirname(lockPath)), { recursive: true });
 
   const holder: LockHolder = {
     pid: process.pid,
@@ -138,9 +138,10 @@ export async function acquireWriteLock(
   };
 
   try {
-    const fh = await openOwnedWriteExclusive(brandOwnedWrite(lockPath));
-    await fh.writeFile(JSON.stringify(holder));
-    await fh.close();
+    await writeOwnedTextExclusive(
+      projectConfigWritePath(lockPath),
+      JSON.stringify(holder),
+    );
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "EEXIST") {
       // Lock already held. Read the existing holder for diagnostics;
@@ -148,7 +149,7 @@ export async function acquireWriteLock(
       // surface `null` in the envelope instead of failing the contender.
       let existing: LockHolder | null = null;
       try {
-        const raw = await readOwnedText(brandOwnedRead(lockPath));
+        const raw = await readOwnedText(projectConfigReadPath(lockPath));
         const parsed = JSON.parse(raw) as Partial<LockHolder>;
         if (
           typeof parsed.pid === "number" &&
@@ -175,14 +176,14 @@ export async function acquireWriteLock(
     throw err;
   }
 
-  const created = await statOwned(brandOwnedRead(lockPath));
+  const created = await statOwned(projectConfigReadPath(lockPath));
   return {
     release: async () => {
       try {
         const currentPath = await resolveLockPath(cwd);
-        const current = await statOwned(brandOwnedRead(currentPath));
+        const current = await statOwned(projectConfigReadPath(currentPath));
         if (current.dev === created.dev && current.ino === created.ino) {
-          await unlinkOwned(brandOwnedDelete(currentPath));
+          await unlinkOwned(projectConfigDeletePath(currentPath));
         }
       } catch {
         // Best-effort release. The lock file may have been removed

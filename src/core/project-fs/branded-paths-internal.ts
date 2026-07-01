@@ -15,6 +15,7 @@ import type {
   OwnedDeletePath,
   ExplicitUserReadPath,
   OwnedListPath,
+  TemporarySandboxPath,
 } from "./branded-paths.ts";
 
 export type {
@@ -24,6 +25,7 @@ export type {
   OwnedDeletePath,
   ExplicitUserReadPath,
   OwnedListPath,
+  TemporarySandboxPath,
 };
 
 export { unbrand } from "./branded-paths.ts";
@@ -50,4 +52,8 @@ export function brandExplicitUserRead(path: string): ExplicitUserReadPath {
 
 export function brandOwnedList(path: string): OwnedListPath {
   return path as OwnedListPath;
+}
+
+export function brandTemporarySandbox(path: string): TemporarySandboxPath {
+  return path as TemporarySandboxPath;
 }
