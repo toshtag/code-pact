@@ -22,8 +22,23 @@ import {
   rename as renameRaw,
   copyFile as copyFileRaw,
   stat as statRaw,
+  lstat as lstatRaw,
   unlink as unlinkRaw,
   access as accessRaw,
+  mkdir as mkdirRaw,
+  open as openRaw,
+  link as linkRaw,
+  readRegularOwnedText as readRegularOwnedTextRaw,
+  type FileHandle,
+} from "./raw-internal.ts";
+import {
+  readFileSync as readFileSyncRaw,
+  writeFileSync as writeFileSyncRaw,
+  existsSync as existsSyncRaw,
+  readdirSync as readdirSyncRaw,
+  statSync as statSyncRaw,
+  lstatSync as lstatSyncRaw,
+  constants as constantsRaw,
 } from "./raw-internal.ts";
 
 export async function readOwnedText(path: OwnedReadPath): Promise<string> {
@@ -42,6 +57,19 @@ export async function listOwned(path: OwnedReadPath): Promise<string[]> {
   return readdirRaw(unbrand(path));
 }
 
+export async function listOwnedDirents(
+  path: OwnedReadPath,
+): Promise<import("node:fs").Dirent[]> {
+  return readdirRaw(unbrand(path), { withFileTypes: true });
+}
+
+export async function writeOwnedFile(
+  path: OwnedWritePath,
+  data: string | Buffer,
+): Promise<void> {
+  await writeFileRaw(unbrand(path), data);
+}
+
 export async function writeOwnedText(
   path: OwnedWritePath,
   content: string,
@@ -53,7 +81,9 @@ export async function removeOwned(path: OwnedDeletePath): Promise<void> {
   await rmRaw(unbrand(path), { force: true });
 }
 
-export async function unlinkOwned(path: OwnedDeletePath): Promise<void> {
+export async function unlinkOwned(
+  path: OwnedDeletePath | OwnedReadPath,
+): Promise<void> {
   await unlinkRaw(unbrand(path));
 }
 
@@ -74,3 +104,65 @@ export async function copyOwnedToOwned(
 export async function accessOwned(path: OwnedReadPath): Promise<void> {
   await accessRaw(unbrand(path));
 }
+
+export async function lstatOwned(path: OwnedReadPath) {
+  return lstatRaw(unbrand(path));
+}
+
+export async function mkdirOwned(
+  path: OwnedWritePath | OwnedReadPath,
+  options?: { recursive?: boolean },
+): Promise<void> {
+  await mkdirRaw(unbrand(path), options);
+}
+
+export async function openOwned(
+  path: OwnedWritePath | OwnedReadPath,
+  flags: string | number,
+): Promise<FileHandle> {
+  return openRaw(unbrand(path), flags);
+}
+
+export async function linkOwned(
+  source: OwnedWritePath,
+  destination: OwnedWritePath,
+): Promise<void> {
+  await linkRaw(unbrand(source), unbrand(destination));
+}
+
+export async function readRegularOwnedTextBranded(
+  path: OwnedReadPath,
+): Promise<string> {
+  return readRegularOwnedTextRaw(unbrand(path));
+}
+
+// ---- Sync variants ----
+
+export function readOwnedTextSync(path: OwnedReadPath): string {
+  return readFileSyncRaw(unbrand(path), "utf8");
+}
+
+export function existsOwnedSync(path: OwnedReadPath): boolean {
+  return existsSyncRaw(unbrand(path));
+}
+
+export function listOwnedSync(path: OwnedReadPath): string[] {
+  return readdirSyncRaw(unbrand(path));
+}
+
+export function statOwnedSync(path: OwnedReadPath) {
+  return statSyncRaw(unbrand(path));
+}
+
+export function lstatOwnedSync(path: OwnedReadPath) {
+  return lstatSyncRaw(unbrand(path));
+}
+
+export function writeOwnedTextSync(
+  path: OwnedWritePath,
+  content: string,
+): void {
+  writeFileSyncRaw(unbrand(path), content, "utf8");
+}
+
+export { constantsRaw as constants };

@@ -1,5 +1,4 @@
-import { readRegularOwnedText, stat } from "./raw-internal.ts";
-import { readdir } from "./index.ts";
+import { readRegularOwnedText, stat, readdir } from "./raw-internal.ts";
 import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
 import { isDecisionRefPath } from "../schemas/decision-ref.ts";
 import { PhaseRef } from "../schemas/roadmap.ts";
