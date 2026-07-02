@@ -8,12 +8,15 @@ import {
   writeOwnedTextExclusive,
 } from "../project-fs/operations.ts";
 import {
-  projectConfigReadPath,
-  projectConfigWritePath,
-  projectConfigDeletePath,
-  projectConfigListPath,
+  resolveProgressEventDeletePath,
+  resolveProgressEventReadPath,
+  resolveProgressEventsDirListPath,
+  resolveProgressEventsDirWritePath,
+  resolveProgressEventWritePath,
+  unbrand,
 } from "../project-fs/authorities/project-config-authority.ts";
 import { join } from "node:path";
+import type { OwnedReadPath } from "../project-fs/branded-paths.ts";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { ProgressEvent } from "../schemas/progress-event.ts";
 import {
@@ -22,7 +25,6 @@ import {
   eventFileName,
   normalizeAt,
 } from "./event-id.ts";
-import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
 
 /**
  * Per-event progress ledger.
@@ -43,15 +45,16 @@ export function eventsDir(cwd: string): string {
   return join(cwd, ...EVENTS_DIR_SEGMENTS);
 }
 
-export async function resolveEventsDir(cwd: string): Promise<string> {
+async function resolveEventsDirForWrite(cwd: string) {
   try {
-    return await resolveSymlinkFreeProjectPath(
-      cwd,
-      EVENTS_DIR_SEGMENTS.join("/"),
-    );
+    return await resolveProgressEventsDirWritePath(cwd);
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
-    if (code === "PATH_OUTSIDE_PROJECT" || code === "PATH_NOT_OWNED") {
+    if (
+      code === "PATH_OUTSIDE_PROJECT" ||
+      code === "PATH_NOT_OWNED" ||
+      code === "FS_AUTHORITY_FAILURE"
+    ) {
       const e = new Error(
         `.code-pact/state/events is not a safe owned progress ledger path: ${(err as Error).message}`,
       );
@@ -62,22 +65,47 @@ export async function resolveEventsDir(cwd: string): Promise<string> {
   }
 }
 
-async function resolveEventPath(cwd: string, file: string): Promise<string> {
+export async function resolveEventsDir(cwd: string) {
   try {
-    return await resolveSymlinkFreeProjectPath(
-      cwd,
-      [...EVENTS_DIR_SEGMENTS, file].join("/"),
-    );
+    return await resolveProgressEventsDirListPath(cwd);
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
-    if (code === "PATH_OUTSIDE_PROJECT" || code === "PATH_NOT_OWNED") {
+    if (
+      code === "PATH_OUTSIDE_PROJECT" ||
+      code === "PATH_NOT_OWNED" ||
+      code === "FS_AUTHORITY_FAILURE"
+    ) {
       const e = new Error(
-        `.code-pact/state/events/${file} is not a safe owned progress ledger path: ${(err as Error).message}`,
+        `.code-pact/state/events is not a safe owned progress ledger path: ${(err as Error).message}`,
       );
       (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
       throw e;
     }
     throw err;
+  }
+}
+
+function mapEventPathError(file: string, err: unknown): never {
+  const code = (err as NodeJS.ErrnoException).code;
+  if (
+    code === "PATH_OUTSIDE_PROJECT" ||
+    code === "PATH_NOT_OWNED" ||
+    code === "FS_AUTHORITY_FAILURE"
+  ) {
+    const e = new Error(
+      `.code-pact/state/events/${file} is not a safe owned progress ledger path: ${(err as Error).message}`,
+    );
+    (e as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+    throw e;
+  }
+  throw err;
+}
+
+async function resolveEventReadPath(cwd: string, file: string) {
+  try {
+    return await resolveProgressEventReadPath(cwd, file);
+  } catch (err) {
+    mapEventPathError(file, err);
   }
 }
 
@@ -197,12 +225,12 @@ export function validateEventFileContent(
 }
 
 async function readValidatedEventFile(
-  path: string,
+  path: OwnedReadPath,
   file: string,
 ): Promise<LoadedEventFile> {
   return validateEventFileContent(
     file,
-    await readOwnedText(projectConfigReadPath(path)),
+    await readOwnedText(path),
   );
 }
 
@@ -235,35 +263,47 @@ export async function writeEventFile(
 ): Promise<WrittenEvent> {
   const parsed = ProgressEvent.parse(event); // fail closed on an invalid event
   const id = computeEventId(parsed);
-  const dir = await resolveEventsDir(cwd);
   const file = eventFileName(parsed);
-  const path = await resolveEventPath(cwd, file);
-  await mkdirOwned(projectConfigWritePath(dir), { recursive: true });
+  const pathRead: OwnedReadPath = await resolveEventReadPath(cwd, file);
+  await mkdirOwned(await resolveEventsDirForWrite(cwd), { recursive: true });
   const body = stringifyYaml({ ...parsed, at: normalizeAt(parsed.at), id });
 
   // Temp name is dot-prefixed (never matches EVENT_FILE_RE) and carries a random
   // uuid so it can't collide with a stale temp / reused pid; `wx` refuses to
   // reuse an existing temp rather than clobber it.
-  const tmp = join(dir, `.tmp-${process.pid}-${randomUUID()}-${file}`);
+  const tmpFile = `.tmp-${process.pid}-${randomUUID()}-${file}`;
   // Outer try guarantees the temp is removed even if the temp write itself
   // fails partway; the inner try/catch handles ONLY `link`'s EEXIST (a temp
   // collision is impossible via the uuid, so its errors must propagate, not be
   // mistaken for "the final already exists").
   try {
-    await writeOwnedTextExclusive(projectConfigWritePath(tmp), body);
+    await writeOwnedTextExclusive(
+      await resolveProgressEventWritePath(cwd, tmpFile),
+      body,
+    );
     try {
-      await linkOwned(projectConfigReadPath(tmp), projectConfigWritePath(path)); // atomic, no-overwrite publish
-      return { id, path, alreadyExisted: false };
+      const pathWrite = await resolveProgressEventWritePath(cwd, file);
+      await linkOwned(
+        await resolveProgressEventReadPath(cwd, tmpFile),
+        pathWrite,
+      ); // atomic, no-overwrite publish
+      return { id, path: unbrand(pathWrite), alreadyExisted: false };
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
       // Final already exists. A valid event here necessarily hashes to our id
       // (the filename), so it IS the same event; corruption / wrong stored id /
       // mismatched prefix throws EVENT_FILE_ID_MISMATCH.
-      await readValidatedEventFile(path, file);
-      return { id, path, alreadyExisted: true };
+      await readValidatedEventFile(pathRead, file);
+      return {
+        id,
+        path: unbrand(await resolveProgressEventWritePath(cwd, file)),
+        alreadyExisted: true,
+      };
     }
   } finally {
-    await removeOwned(projectConfigDeletePath(tmp), { force: true });
+    await removeOwned(await resolveProgressEventDeletePath(cwd, tmpFile), {
+      force: true,
+    });
   }
 }
 
@@ -277,10 +317,9 @@ export async function writeEventFile(
  * file (callers map to the usual INVALID_YAML / SCHEMA_ERROR surfaces).
  */
 export async function readEventFiles(cwd: string): Promise<LoadedEventFile[]> {
-  const dir = await resolveEventsDir(cwd);
   let names: string[];
   try {
-    names = await listOwned(projectConfigListPath(dir));
+    names = await listOwned(await resolveEventsDir(cwd));
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
     throw err;
@@ -289,7 +328,7 @@ export async function readEventFiles(cwd: string): Promise<LoadedEventFile[]> {
   for (const file of names.sort()) {
     if (!parseEventFileName(file)) continue; // not an event file — ignore
     out.push(
-      await readValidatedEventFile(await resolveEventPath(cwd, file), file),
+      await readValidatedEventFile(await resolveEventReadPath(cwd, file), file),
     );
   }
   return out;
