@@ -37,13 +37,13 @@ import {
   unlinkOwned,
 } from "../project-fs/operations.ts";
 import {
-  projectConfigReadPath,
-  projectConfigWritePath,
-  projectConfigDeletePath,
+  resolveProjectRuntimeLockDeletePath,
+  resolveProjectRuntimeLockDirWritePath,
+  resolveProjectRuntimeLockReadPath,
+  resolveProjectRuntimeLockWritePath,
 } from "../project-fs/authorities/project-config-authority.ts";
 import { hostname } from "node:os";
-import { dirname, join } from "node:path";
-import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
+import { join } from "node:path";
 
 export type LockHolder = {
   pid: number;
@@ -77,28 +77,23 @@ export function lockPathFor(cwd: string): string {
   return join(cwd, ".code-pact", "locks", "write.lock");
 }
 
-async function resolveLockPath(cwd: string): Promise<string> {
-  try {
-    return await resolveSymlinkFreeProjectPath(
-      cwd,
-      ".code-pact/locks/write.lock",
-    );
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (
-      code === "PATH_OUTSIDE_PROJECT" ||
-      code === "PATH_NOT_OWNED" ||
-      code === "ENOTDIR" ||
-      code === "EACCES" ||
-      code === "EPERM" ||
-      code === "ELOOP"
-    ) {
-      const wrapped = new Error((err as Error).message);
-      (wrapped as NodeJS.ErrnoException).code = "CONFIG_ERROR";
-      throw wrapped;
-    }
-    throw err;
+function mapLockConfigError(err: unknown): never {
+  const code = (err as NodeJS.ErrnoException).code;
+  if (
+    code === "PATH_OUTSIDE_PROJECT" ||
+    code === "PATH_NOT_OWNED" ||
+    code === "ENOTDIR" ||
+    code === "EEXIST" ||
+    code === "EACCES" ||
+    code === "EPERM" ||
+    code === "ELOOP" ||
+    code === "FS_AUTHORITY_FAILURE"
+  ) {
+    const wrapped = new Error((err as Error).message);
+    (wrapped as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+    throw wrapped;
   }
+  throw err;
 }
 
 /**
@@ -127,8 +122,13 @@ export async function acquireWriteLock(
 ): Promise<LockHandle> {
   if (locksDisabledViaEnv()) return NOOP_HANDLE;
 
-  const lockPath = await resolveLockPath(cwd);
-  await mkdirOwned(projectConfigWritePath(dirname(lockPath)), { recursive: true });
+  try {
+    await mkdirOwned(await resolveProjectRuntimeLockDirWritePath(cwd), {
+      recursive: true,
+    });
+  } catch (err) {
+    mapLockConfigError(err);
+  }
 
   const holder: LockHolder = {
     pid: process.pid,
@@ -139,7 +139,7 @@ export async function acquireWriteLock(
 
   try {
     await writeOwnedTextExclusive(
-      projectConfigWritePath(lockPath),
+      await resolveProjectRuntimeLockWritePath(cwd),
       JSON.stringify(holder),
     );
   } catch (err) {
@@ -149,7 +149,9 @@ export async function acquireWriteLock(
       // surface `null` in the envelope instead of failing the contender.
       let existing: LockHolder | null = null;
       try {
-        const raw = await readOwnedText(projectConfigReadPath(lockPath));
+        const raw = await readOwnedText(
+          await resolveProjectRuntimeLockReadPath(cwd),
+        );
         const parsed = JSON.parse(raw) as Partial<LockHolder>;
         if (
           typeof parsed.pid === "number" &&
@@ -164,26 +166,27 @@ export async function acquireWriteLock(
       }
       const message =
         existing !== null
-          ? `Another code-pact mutation is in progress: ${existing.cmd} (pid: ${existing.pid}, host: ${existing.hostname}, started: ${existing.created_at}). If you are certain no command is running, remove ${lockPath} and retry.`
-          : `Another code-pact mutation appears to be in progress (lock file at ${lockPath} could not be read). If you are certain no command is running, remove the lock file and retry.`;
+          ? `Another code-pact mutation is in progress: ${existing.cmd} (pid: ${existing.pid}, host: ${existing.hostname}, started: ${existing.created_at}). If you are certain no command is running, remove ${lockPathFor(cwd)} and retry.`
+          : `Another code-pact mutation appears to be in progress (lock file at ${lockPathFor(cwd)} could not be read). If you are certain no command is running, remove the lock file and retry.`;
       const lockErr: LockHeldError = Object.assign(new Error(message), {
         code: "LOCK_HELD",
         lock_holder: existing,
-        lock_path: lockPath,
+        lock_path: lockPathFor(cwd),
       });
       throw lockErr;
     }
     throw err;
   }
 
-  const created = await statOwned(projectConfigReadPath(lockPath));
+  const created = await statOwned(await resolveProjectRuntimeLockReadPath(cwd));
   return {
     release: async () => {
       try {
-        const currentPath = await resolveLockPath(cwd);
-        const current = await statOwned(projectConfigReadPath(currentPath));
+        const current = await statOwned(
+          await resolveProjectRuntimeLockReadPath(cwd),
+        );
         if (current.dev === created.dev && current.ino === created.ino) {
-          await unlinkOwned(projectConfigDeletePath(currentPath));
+          await unlinkOwned(await resolveProjectRuntimeLockDeletePath(cwd));
         }
       } catch {
         // Best-effort release. The lock file may have been removed
