@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { checkPackageTarball } from "../../../scripts/check-package-tarball.mjs";
-import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, rm, symlink, link } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -250,5 +250,118 @@ describe("checkPackageTarball", () => {
       true,
     );
     await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it("fails when a symlink is in the tarball", async () => {
+    tempDir = await mkdtemp(join(tmpdir(), "tarball-test-"));
+    const tarRunner = makeTarRunner();
+    const pkgDir = join(tempDir, "package");
+    await mkdir(pkgDir, { recursive: true });
+    await writeFile(join(pkgDir, "package.json"), JSON.stringify(repoPkg));
+    await writeFile(join(pkgDir, "README.md"), "# code-pact");
+    await writeFile(join(pkgDir, "LICENSE"), "MIT");
+    await mkdir(join(pkgDir, "dist"), { recursive: true });
+    await writeFile(
+      join(pkgDir, "dist", "cli.js"),
+      "#!/usr/bin/env node\nconsole.log('hi');",
+    );
+    await symlink(
+      join(pkgDir, "dist", "cli.js"),
+      join(pkgDir, "dist", "cli-link"),
+    );
+    const tarballPath = join(tempDir, "test.tgz");
+    await tarRunner(["-czf", tarballPath, "-C", tempDir, "package"], tempDir);
+
+    const result = await checkPackageTarball({
+      tarballPath,
+      repoPkg,
+      tarRunner,
+      tempDirMaker: makeTempDir,
+      tempDirRemover: removeTempDir,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.problems.some((p: string) => p.includes("symlink"))).toBe(
+      true,
+    );
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it("fails when a hard link is in the tarball", async () => {
+    tempDir = await mkdtemp(join(tmpdir(), "tarball-test-"));
+    const tarRunner = makeTarRunner();
+    const pkgDir = join(tempDir, "package");
+    await mkdir(pkgDir, { recursive: true });
+    await writeFile(join(pkgDir, "package.json"), JSON.stringify(repoPkg));
+    await writeFile(join(pkgDir, "README.md"), "# code-pact");
+    await writeFile(join(pkgDir, "LICENSE"), "MIT");
+    await mkdir(join(pkgDir, "dist"), { recursive: true });
+    await writeFile(
+      join(pkgDir, "dist", "cli.js"),
+      "#!/usr/bin/env node\nconsole.log('hi');",
+    );
+    await link(
+      join(pkgDir, "dist", "cli.js"),
+      join(pkgDir, "dist", "cli-hardlink"),
+    );
+    const tarballPath = join(tempDir, "test.tgz");
+    await tarRunner(["-czf", tarballPath, "-C", tempDir, "package"], tempDir);
+
+    const result = await checkPackageTarball({
+      tarballPath,
+      repoPkg,
+      tarRunner,
+      tempDirMaker: makeTempDir,
+      tempDirRemover: removeTempDir,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.problems.some((p: string) => p.includes("hard link"))).toBe(
+      true,
+    );
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it("fails when a ../ traversal entry is in the tarball", async () => {
+    const fakeListing = [
+      "package/package.json",
+      "package/README.md",
+      "package/LICENSE",
+      "package/dist/cli.js",
+      "package/../etc/passwd",
+    ].join("\n");
+    const fakeVerbose = [
+      "-rw-r--r-- 0/0 100 2026-01-01 00:00 package/package.json",
+      "-rw-r--r-- 0/0 100 2026-01-01 00:00 package/README.md",
+      "-rw-r--r-- 0/0 100 2026-01-01 00:00 package/LICENSE",
+      "-rw-r--r-- 0/0 100 2026-01-01 00:00 package/dist/cli.js",
+      "-rw-r--r-- 0/0 100 2026-01-01 00:00 package/../etc/passwd",
+    ].join("\n");
+    const mockTarRunner = vi.fn(async (args: string[]): Promise<TarResult> => {
+      if (args[0] === "-tzf") return { stdout: fakeListing, stderr: "" };
+      if (args[0] === "-tzvf") return { stdout: fakeVerbose, stderr: "" };
+      if (args[0] === "-xzf") return { stdout: "", stderr: "" };
+      throw new Error(`unexpected tar args: ${args.join(" ")}`);
+    });
+    const mockFileReader = vi.fn(async (path: string): Promise<string> => {
+      if (path.endsWith("package.json")) return JSON.stringify(repoPkg);
+      if (path.endsWith("cli.js"))
+        return "#!/usr/bin/env node\nconsole.log('hi');";
+      if (path.endsWith("README.md")) return "# code-pact";
+      if (path.endsWith("LICENSE")) return "MIT";
+      throw new Error(`unexpected read: ${path}`);
+    });
+
+    const result = await checkPackageTarball({
+      tarballPath: "/dev/null",
+      repoPkg,
+      tarRunner: mockTarRunner,
+      tempDirMaker: makeTempDir,
+      tempDirRemover: removeTempDir,
+      fileReader: mockFileReader,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.problems.some((p: string) => p.includes("../"))).toBe(true);
   });
 });
