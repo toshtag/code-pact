@@ -35,6 +35,31 @@ async function runFixture(lines: string[]): Promise<{
   }
 }
 
+async function runFixtureUnder(
+  relDir: string,
+  lines: string[],
+): Promise<{
+  ok: boolean;
+  output: string;
+}> {
+  const dir = await mkdtemp(join(repoRoot, relDir, "tmp-fs-authority-"));
+  const target = join(dir, "probe.ts");
+  await writeFile(target, lines.join("\n"), "utf8");
+  try {
+    await execFileAsync("node", [scriptPath, target], { cwd: repoRoot });
+    return { ok: true, output: "" };
+  } catch (err) {
+    return {
+      ok: false,
+      output: `${(err as { stdout?: string }).stdout ?? ""}\n${
+        (err as { stderr?: string }).stderr ?? ""
+      }`,
+    };
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
 describe("check-fs-authority", () => {
   it("rejects raw fs wildcard re-exports", async () => {
     const result = await runFixture(['export * from "node:fs/promises";', ""]);
@@ -125,6 +150,121 @@ describe("check-fs-authority", () => {
     expect(writeOpen.output).toContain(
       "forbidden public filesystem API import() called",
     );
+  });
+
+  it("rejects operation authority escalation through same-domain thin wrappers", async () => {
+    const writeToRead = await runFixtureUnder("src/core/adapters", [
+      'import { readOwnedText } from "../../project-fs/operations.ts";',
+      'import { adapterReadPath } from "../../project-fs/authorities/adapter-authority.ts";',
+      'import type { OwnedWritePath } from "../../project-fs/branded-paths.ts";',
+      "",
+      "async function leak(path: OwnedWritePath) {",
+      "  return readOwnedText(adapterReadPath(path));",
+      "}",
+      "",
+    ]);
+    expect(writeToRead.ok).toBe(false);
+    expect(writeToRead.output).toContain(
+      "readOwnedText() called on non-authority path",
+    );
+
+    const writeToDelete = await runFixtureUnder("src/core/adapters", [
+      'import { unlinkOwned } from "../../project-fs/operations.ts";',
+      'import { adapterDeletePath } from "../../project-fs/authorities/adapter-authority.ts";',
+      'import type { OwnedWritePath } from "../../project-fs/branded-paths.ts";',
+      "",
+      "async function erase(path: OwnedWritePath) {",
+      "  await unlinkOwned(adapterDeletePath(path));",
+      "}",
+      "",
+    ]);
+    expect(writeToDelete.ok).toBe(false);
+    expect(writeToDelete.output).toContain(
+      "unlinkOwned() called on non-authority path",
+    );
+
+    const deleteToRead = await runFixtureUnder("src/core/adapters", [
+      'import { readOwnedText } from "../../project-fs/operations.ts";',
+      'import { adapterReadPath } from "../../project-fs/authorities/adapter-authority.ts";',
+      'import type { OwnedDeletePath } from "../../project-fs/branded-paths.ts";',
+      "",
+      "async function leak(path: OwnedDeletePath) {",
+      "  return readOwnedText(adapterReadPath(path));",
+      "}",
+      "",
+    ]);
+    expect(deleteToRead.ok).toBe(false);
+    expect(deleteToRead.output).toContain(
+      "readOwnedText() called on non-authority path",
+    );
+  });
+
+  it("rejects renamed generic project authority from content read and owned write sinks", async () => {
+    const projectProbeRead = await runFixtureUnder("src/core/pack", [
+      'import { readOwnedText } from "../../project-fs/index.ts";',
+      'import { resolveProjectProbeReadPath } from "../../project-fs/authorities/project-config-authority.ts";',
+      "",
+      "async function leak(cwd: string, userPath: string) {",
+      "  return readOwnedText(await resolveProjectProbeReadPath(cwd, userPath));",
+      "}",
+      "",
+    ]);
+    expect(projectProbeRead.ok).toBe(false);
+    expect(projectProbeRead.output).toContain(
+      "readOwnedText() called on non-authority path",
+    );
+
+    const explicitOutputOwnedWrite = await runFixtureUnder("src/core/pack", [
+      'import { writeOwnedText } from "../../project-fs/index.ts";',
+      'import { resolveExplicitProjectContextOutputWritePath } from "../../project-fs/authorities/context-output-authority.ts";',
+      "",
+      "async function overwrite(cwd: string, userPath: string) {",
+      '  await writeOwnedText(await resolveExplicitProjectContextOutputWritePath(cwd, userPath), "x");',
+      "}",
+      "",
+    ]);
+    expect(explicitOutputOwnedWrite.ok).toBe(false);
+    expect(explicitOutputOwnedWrite.output).toContain(
+      "writeOwnedText() called on non-authority path",
+    );
+  });
+
+  it("allows explicit-output and project-presence capabilities only at their narrow sinks", async () => {
+    const explicitOutput = await runFixtureUnder("src/core/pack", [
+      'import { atomicWriteText } from "../../../io/atomic-text.ts";',
+      'import { resolveExplicitProjectContextOutputWritePath } from "../../project-fs/authorities/context-output-authority.ts";',
+      "",
+      "async function writePack(cwd: string, userPath: string) {",
+      '  await atomicWriteText(await resolveExplicitProjectContextOutputWritePath(cwd, userPath), "x");',
+      "}",
+      "",
+    ]);
+    expect(explicitOutput.ok).toBe(true);
+
+    const projectPresence = await runFixtureUnder("src/core/plan/checks", [
+      'import { accessProjectPresence } from "../../../project-fs/operations.ts";',
+      'import { resolveProjectProbeReadPath } from "../../../project-fs/authorities/project-config-authority.ts";',
+      "",
+      "async function probe(cwd: string, userPath: string) {",
+      "  await accessProjectPresence(await resolveProjectProbeReadPath(cwd, userPath));",
+      "}",
+      "",
+    ]);
+    expect(projectPresence.ok).toBe(true);
+  });
+
+  it("allows same-domain thin wrappers from containment proof", async () => {
+    const result = await runFixtureUnder("src/core/adapters", [
+      'import { writeOwnedText } from "../../project-fs/operations.ts";',
+      'import { adapterWritePath } from "../../project-fs/authorities/adapter-authority.ts";',
+      'import { resolveSymlinkFreeProjectPath } from "../../path-safety.ts";',
+      "",
+      "async function writeGenerated(cwd: string) {",
+      '  await writeOwnedText(adapterWritePath(await resolveSymlinkFreeProjectPath(cwd, "CLAUDE.md")), "x");',
+      "}",
+      "",
+    ]);
+    expect(result.ok).toBe(true);
   });
 
   it("does not let a later same-name authority variable bless an earlier unsafe sink", async () => {
