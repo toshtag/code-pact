@@ -14,8 +14,15 @@ import type {
   OwnedWritePath,
   OwnedDeletePath,
   ExplicitUserReadPath,
+  ExplicitUserWritePath,
   OwnedListPath,
+  ProjectTreeListPath,
+  ProjectPresencePath,
+  ArchiveAuthorityPath,
+  AdapterAuthorityPath,
   TemporarySandboxPath,
+  AuthorityPathProof,
+  ValidatedAuthorityPath,
 } from "./branded-paths.ts";
 
 export type {
@@ -24,8 +31,15 @@ export type {
   OwnedWritePath,
   OwnedDeletePath,
   ExplicitUserReadPath,
+  ExplicitUserWritePath,
   OwnedListPath,
+  ProjectTreeListPath,
+  ProjectPresencePath,
+  ArchiveAuthorityPath,
+  AdapterAuthorityPath,
   TemporarySandboxPath,
+  AuthorityPathProof,
+  ValidatedAuthorityPath,
 };
 
 export { unbrand } from "./branded-paths.ts";
@@ -50,10 +64,36 @@ export function brandExplicitUserRead(path: string): ExplicitUserReadPath {
   return path as ExplicitUserReadPath;
 }
 
+export function brandExplicitUserWrite(path: string): ExplicitUserWritePath {
+  return path as ExplicitUserWritePath;
+}
+
 export function brandOwnedList(path: string): OwnedListPath {
   return path as OwnedListPath;
 }
 
+export function brandProjectTreeList(path: string): ProjectTreeListPath {
+  return path as ProjectTreeListPath;
+}
+
+export function brandProjectPresence(path: string): ProjectPresencePath {
+  return path as ProjectPresencePath;
+}
+
+export function brandArchiveAuthority(path: string): ArchiveAuthorityPath {
+  return path as ArchiveAuthorityPath;
+}
+
+export function brandAdapterAuthority(path: string): AdapterAuthorityPath {
+  return path as AdapterAuthorityPath;
+}
+
 export function brandTemporarySandbox(path: string): TemporarySandboxPath {
   return path as TemporarySandboxPath;
+}
+
+export function brandValidatedAuthorityPath(
+  path: string,
+): ValidatedAuthorityPath {
+  return path as ValidatedAuthorityPath;
 }
