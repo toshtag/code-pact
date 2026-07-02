@@ -5,15 +5,11 @@ import {
 } from "../project-fs/operations.ts";
 import {
   PruneSourcePath,
+  resolvePruneSourceDeletePath,
   resolvePruneSourceReadPath,
   resolvePruneSourceWritePath,
   resolvePrunedLedgerReadPath,
   resolvePrunedLedgerWritePath,
-} from "../project-fs/authorities/prune-authority.ts";
-import {
-  unbrand,
-  pruneReadPath,
-  pruneDeletePath,
 } from "../project-fs/authorities/prune-authority.ts";
 import type { OwnedReadPath, OwnedWritePath } from "../project-fs/branded-paths.ts";
 import {
@@ -639,7 +635,9 @@ export async function applyPrune(
     }
     let current: string | null = null;
     try {
-      current = await readOwnedText(pruneReadPath(unbrand(abs)));
+      current = await readOwnedText(
+        await resolvePruneSourceReadPath(cwd, PruneSourcePath.parse(r.rel)),
+      );
     } catch {
       current = null;
     }
@@ -689,7 +687,12 @@ export async function applyPrune(
         `target changed under prune (${tDel.found}) — refusing to delete`,
       );
     }
-    await unlinkOwned(pruneDeletePath(unbrand(tDel.abs)));
+    await unlinkOwned(
+      await resolvePruneSourceDeletePath(
+        cwd,
+        PruneSourcePath.parse(input.remove_file),
+      ),
+    );
   } catch (err) {
     if (err instanceof PruneWriteError) throw err;
     throw new PruneWriteError(

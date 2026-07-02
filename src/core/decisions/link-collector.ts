@@ -1,5 +1,5 @@
 import {
-  listOwnedDirents,
+  listProjectTreeDirents,
   readExplicitUserText,
 } from "../project-fs/operations.ts";
 import {
@@ -129,7 +129,7 @@ async function discoverSources(
     }
     let entries;
     try {
-      entries = await listOwnedDirents(abs);
+      entries = await listProjectTreeDirents(abs);
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") return; // absent root/subdir is fine
       issues.push({
