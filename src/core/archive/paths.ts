@@ -2,15 +2,15 @@ import { createHash } from "node:crypto";
 import { join, posix } from "node:path";
 import { assertSafePlanId } from "../schemas/plan-id.ts";
 import { normalizeDecisionRefPath } from "../schemas/decision-ref.ts";
-import {
-  resolveSymlinkFreeProjectPath,
-  resolveSymlinkFreeProjectPathSync,
-} from "../path-safety.ts";
+import { resolveSymlinkFreeProjectPathSync } from "../path-safety.ts";
 import {
   archiveReadPath,
-  archiveDeletePath,
-  archiveListPath,
-  archiveWritePath,
+  resolveArchiveAuthorityProof,
+  resolveArchiveDeletePath,
+  resolveArchiveListPath,
+  resolveArchiveReadPath,
+  resolveArchiveWritePath,
+  type ArchiveAuthorityPath,
   type OwnedReadPath,
   type OwnedDeletePath,
   type OwnedListPath,
@@ -75,9 +75,20 @@ function mapArchiveOwnershipError(err: unknown): never {
 export async function resolveArchiveOwnedPath(
   cwd: string,
   relPath: string,
-): Promise<OwnedReadPath> {
+): Promise<OwnedReadPath & ArchiveAuthorityPath> {
   try {
-    return archiveReadPath(await resolveSymlinkFreeProjectPath(cwd, relPath));
+    return await resolveArchiveReadPath(cwd, relPath);
+  } catch (err) {
+    mapArchiveOwnershipError(err);
+  }
+}
+
+export async function resolveArchiveAuthorityPath(
+  cwd: string,
+  relPath: string,
+): Promise<ArchiveAuthorityPath> {
+  try {
+    return await resolveArchiveAuthorityProof(cwd, relPath);
   } catch (err) {
     mapArchiveOwnershipError(err);
   }
@@ -86,9 +97,9 @@ export async function resolveArchiveOwnedPath(
 export async function resolveArchiveOwnedDeletePath(
   cwd: string,
   relPath: string,
-): Promise<OwnedDeletePath> {
+): Promise<OwnedDeletePath & ArchiveAuthorityPath> {
   try {
-    return archiveDeletePath(await resolveSymlinkFreeProjectPath(cwd, relPath));
+    return await resolveArchiveDeletePath(cwd, relPath);
   } catch (err) {
     mapArchiveOwnershipError(err);
   }
@@ -97,9 +108,9 @@ export async function resolveArchiveOwnedDeletePath(
 export async function resolveArchiveOwnedListPath(
   cwd: string,
   relPath: string,
-): Promise<OwnedListPath> {
+): Promise<OwnedListPath & ArchiveAuthorityPath> {
   try {
-    return archiveListPath(await resolveSymlinkFreeProjectPath(cwd, relPath));
+    return await resolveArchiveListPath(cwd, relPath);
   } catch (err) {
     mapArchiveOwnershipError(err);
   }
@@ -108,9 +119,9 @@ export async function resolveArchiveOwnedListPath(
 export async function resolveArchiveOwnedWritePath(
   cwd: string,
   relPath: string,
-): Promise<OwnedWritePath> {
+): Promise<OwnedWritePath & ArchiveAuthorityPath> {
   try {
-    return archiveWritePath(await resolveSymlinkFreeProjectPath(cwd, relPath));
+    return await resolveArchiveWritePath(cwd, relPath);
   } catch (err) {
     mapArchiveOwnershipError(err);
   }
@@ -119,12 +130,30 @@ export async function resolveArchiveOwnedWritePath(
 export function resolveArchiveOwnedPathSync(
   cwd: string,
   relPath: string,
-): OwnedReadPath {
+): OwnedReadPath & ArchiveAuthorityPath {
   try {
-    return archiveReadPath(resolveSymlinkFreeProjectPathSync(cwd, relPath));
+    assertArchiveRelPath(relPath);
+    return archiveReadPath(
+      resolveSymlinkFreeProjectPathSync(
+        cwd,
+        relPath,
+      ) as unknown as ArchiveAuthorityPath,
+    ) as OwnedReadPath & ArchiveAuthorityPath;
   } catch (err) {
     mapArchiveOwnershipError(err);
   }
+}
+
+function assertArchiveRelPath(relPath: string): void {
+  if (
+    relPath === ".code-pact/state/archive" ||
+    relPath.startsWith(".code-pact/state/archive/")
+  ) {
+    return;
+  }
+  const err = new Error(`path is outside the archive authority namespace: ${relPath}`);
+  (err as NodeJS.ErrnoException).code = "PATH_NOT_OWNED";
+  throw err;
 }
 
 /**
