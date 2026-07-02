@@ -133,11 +133,11 @@ After `git push origin vX.Y.Z`, the tag page on GitHub should show a green "Veri
 
 ### Existing unsigned tags
 
-`v0.1.0-alpha.0` is unsigned (predates this policy). It is intentionally **not** re-tagged; moving it would invalidate the npm publish that points at the original commit. The signed-release policy applies from `v0.2.0-alpha.0` forward.
+`v0.1.0-alpha.0` is unsigned (predates this policy). It is intentionally **not** re-tagged; moving it would invalidate the npm artifact that points at the original commit. The signed-release policy applies from `v0.2.0-alpha.0` forward.
 
 ## npm `dist-tags` policy
 
-npm publishes the first version of a package with both the chosen tag (e.g. `--tag alpha`) and the implicit `latest` tag set. **`npm dist-tag rm code-pact latest` is rejected with HTTP 400 by the registry** — the `latest` tag is reserved and can only be moved, not deleted.
+The npm registry assigns the first version of a package both the chosen tag (e.g. `--tag alpha`) and the implicit `latest` tag set. **`npm dist-tag rm code-pact latest` is rejected with HTTP 400 by the registry** — the `latest` tag is reserved and can only be moved, not deleted.
 
 Starting with v1.0.0:
 

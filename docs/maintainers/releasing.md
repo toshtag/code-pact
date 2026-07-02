@@ -2,8 +2,8 @@
 
 The repeatable steps to cut a release. Most of it is a normal PR; only the
 **signed tag** is maintainer-local (it needs the maintainer's signing key).
-Publishing is fully automated via GitHub Actions Trusted Publishing — no local
-`npm publish` is required.
+Publishing is fully automated via GitHub Actions Trusted Publishing; maintainers
+do not run a local registry publication command.
 
 `package.json` `files` whitelists `dist/` + `LICENSE`; npm additionally **always**
 includes `package.json` and the `README` regardless of `files`. Source under `src/`
