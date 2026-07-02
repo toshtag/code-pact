@@ -115,6 +115,14 @@ it("deleted phase + NO snapshot → MISSING_PHASE_FILE (fail-closed, unchanged)"
   expect(issues[0]!.code).toBe("MISSING_PHASE_FILE");
 });
 
+it("missing design/phases directory → absent, not inaccessible", async () => {
+  await rm(join(cwd, "design", "phases"), { recursive: true });
+  const issues = await detectMissingPhaseFiles(cwd, roadmap);
+  expect(issues).toHaveLength(2);
+  expect(issues.every(issue => issue.code === "MISSING_PHASE_FILE")).toBe(true);
+  expect(issues.every(issue => issue.message.includes("does not exist"))).toBe(true);
+});
+
 it("deleted phase + CORRUPT snapshot → PHASE_SNAPSHOT_INVALID (loud fail-closed)", async () => {
   await writePhaseSnapshot(cwd, "P1", { now: NOW });
   await writeFile(phaseSnapshotPath(cwd, "P1"), "{ not json", "utf8");
