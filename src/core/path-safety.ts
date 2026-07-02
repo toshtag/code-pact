@@ -2,6 +2,7 @@ import { lstat, realpath } from "./project-fs/raw-internal.ts";
 import { lstatSync, realpathSync } from "./project-fs/raw-internal.ts";
 import { join, resolve, sep } from "node:path";
 import { RelativePosixPath } from "./schemas/relative-path.ts";
+import type { SymlinkFreeContainedPath } from "./project-fs/branded-paths.ts";
 
 // ---------------------------------------------------------------------------
 // Neutral path-safety module
@@ -101,7 +102,7 @@ export function pathTraversesSymlinkSync(
 export async function resolveSymlinkFreeProjectPath(
   cwd: string,
   relPath: string,
-): Promise<string> {
+): Promise<SymlinkFreeContainedPath> {
   if (await pathTraversesSymlink(cwd, relPath)) {
     const err = new Error(
       `path "${relPath}" resolves through a symlink; refusing to write/delete through an unowned project path`,
@@ -109,13 +110,13 @@ export async function resolveSymlinkFreeProjectPath(
     (err as NodeJS.ErrnoException).code = "PATH_NOT_OWNED";
     throw err;
   }
-  return resolveWithinProject(cwd, relPath);
+  return (await resolveWithinProject(cwd, relPath)) as SymlinkFreeContainedPath;
 }
 
 export function resolveSymlinkFreeProjectPathSync(
   cwd: string,
   relPath: string,
-): string {
+): SymlinkFreeContainedPath {
   if (pathTraversesSymlinkSync(cwd, relPath)) {
     const err = new Error(
       `path "${relPath}" resolves through a symlink; refusing to write/delete through an unowned project path`,
@@ -123,7 +124,7 @@ export function resolveSymlinkFreeProjectPathSync(
     (err as NodeJS.ErrnoException).code = "PATH_NOT_OWNED";
     throw err;
   }
-  return resolveWithinProjectSync(cwd, relPath);
+  return resolveWithinProjectSync(cwd, relPath) as SymlinkFreeContainedPath;
 }
 
 /** @deprecated Use resolveSymlinkFreeProjectPath instead. */
