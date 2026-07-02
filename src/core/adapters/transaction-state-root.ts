@@ -7,6 +7,9 @@ import {
 import {
   adapterReadPath,
   adapterWritePath,
+  adapterValidatedAuthorityPath,
+  type AdapterAuthorityPath,
+  type ValidatedAuthorityPath,
 } from "../project-fs/authorities/adapter-authority.ts";
 import { homedir, platform } from "node:os";
 import { isAbsolute, join } from "node:path";
@@ -16,6 +19,9 @@ export const LEGACY_TRANSACTION_DIR_REL = join(
   "state",
   "adapter-transactions",
 );
+
+export type AdapterPrivateStatePath = AdapterAuthorityPath &
+  ValidatedAuthorityPath;
 
 export function adapterTransactionStateRoot(): string {
   if (process.env.CODE_PACT_STATE_HOME) {
@@ -41,12 +47,12 @@ export function adapterTransactionStateRoot(): string {
 }
 
 export async function canonicalProjectRoot(cwd: string): Promise<string> {
-  return realpathOwned(adapterReadPath(cwd));
+  return realpathOwned(adapterReadPath(adapterValidatedAuthorityPath(cwd)));
 }
 
 export async function adapterTransactionProjectDir(
   cwd: string,
-): Promise<string> {
+): Promise<AdapterPrivateStatePath> {
   const projectRoot = await canonicalProjectRoot(cwd);
   const key = createHash("sha256").update(projectRoot).digest("hex");
   const root = adapterTransactionStateRoot();
@@ -54,8 +60,31 @@ export async function adapterTransactionProjectDir(
   const transactionsDir = join(root, "adapter-transactions");
   await ensurePrivateDirectory(transactionsDir);
   const dir = join(transactionsDir, key);
-  await ensurePrivateDirectory(dir);
-  return dir;
+  const projectDir = await ensurePrivateDirectory(dir);
+  return projectDir;
+}
+
+export async function adapterTransactionJournalPath(
+  cwd: string,
+  journalId: string,
+): Promise<AdapterPrivateStatePath> {
+  return adapterValidatedAuthorityPath(
+    join(await adapterTransactionProjectDir(cwd), `${journalId}.json`),
+  );
+}
+
+export function adapterTransactionJournalPathInDir(
+  dir: AdapterPrivateStatePath,
+  fileName: string,
+): AdapterPrivateStatePath {
+  return adapterValidatedAuthorityPath(join(dir, fileName));
+}
+
+export function adapterTransactionSidecarPath(
+  path: AdapterPrivateStatePath,
+  suffix: string,
+): AdapterPrivateStatePath {
+  return adapterValidatedAuthorityPath(`${path}${suffix}`);
 }
 
 function configError(message: string): Error {
@@ -71,13 +100,19 @@ function requireAbsoluteEnvPath(name: string, value: string): string {
   return value;
 }
 
-async function ensurePrivateDirectory(dir: string): Promise<void> {
-  await mkdirOwned(adapterWritePath(dir), { recursive: true, mode: 0o700 });
+async function ensurePrivateDirectory(
+  dir: string,
+): Promise<AdapterPrivateStatePath> {
+  const path = adapterValidatedAuthorityPath(dir);
+  await mkdirOwned(adapterWritePath(path), { recursive: true, mode: 0o700 });
   await assertPrivateDirectory(dir);
+  return path;
 }
 
 async function assertPrivateDirectory(dir: string): Promise<void> {
-  const st = await lstatOwned(adapterReadPath(dir));
+  const st = await lstatOwned(
+    adapterReadPath(adapterValidatedAuthorityPath(dir)),
+  );
   if (st.isSymbolicLink()) {
     throw configError(
       `transaction state directory must not be a symlink: ${dir}`,
