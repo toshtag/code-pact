@@ -58,8 +58,8 @@ describe("fetchRegistryMetadata", () => {
     expect(sleeper).toHaveBeenCalledTimes(2);
   });
 
-  it("fails immediately on non-404 error", async () => {
-    const fetcher = vi.fn(async () => ({ ok: false, status: 500 }));
+  it("fails immediately on non-retryable error", async () => {
+    const fetcher = vi.fn(async () => ({ ok: false, status: 403 }));
     const sleeper = vi.fn(async () => {});
 
     await expect(
@@ -69,7 +69,7 @@ describe("fetchRegistryMetadata", () => {
         fetcher as any,
         sleeper as any,
       ),
-    ).rejects.toThrow("500");
+    ).rejects.toThrow("403");
 
     expect(sleeper).not.toHaveBeenCalled();
   });
