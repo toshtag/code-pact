@@ -1,16 +1,14 @@
 #!/usr/bin/env node
 import {
   existsSync,
-  mkdtempSync,
   readFileSync,
   readdirSync,
-  rmSync,
   statSync,
-  writeFileSync,
 } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { checkSourceText } from "./lib/fs-authority-checker.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 let failures = 0;
@@ -46,6 +44,16 @@ function rel(abs) {
     .join("/");
 }
 
+function authorityModulesWithGenericProofWrappers() {
+  const offenders = [];
+  const pattern =
+    /export\s+function\s+\w+\s*\(\s*\w+\s*:\s*AuthorityPathProof\s*\)\s*:\s*Owned(?:Read|Write|Delete|List)Path/g;
+  for (const file of AUTHORITY_MODULES) {
+    if (pattern.test(read(file))) offenders.push(file);
+  }
+  return offenders;
+}
+
 const AUTHORITY_MODULES = [
   "src/core/project-fs/authorities/adapter-authority.ts",
   "src/core/project-fs/authorities/archive-authority.ts",
@@ -60,7 +68,11 @@ const AUTHORITY_MODULES = [
 ];
 
 const BRAND_IMPORT_EXPECTED = [
-  ...AUTHORITY_MODULES,
+  "src/core/project-fs/authorities/adapter-authority.ts",
+  "src/core/project-fs/authorities/archive-authority.ts",
+  "src/core/project-fs/authorities/context-output-authority.ts",
+  "src/core/project-fs/authorities/project-config-authority.ts",
+  "src/core/project-fs/authorities/temporary-sandbox-authority.ts",
   "src/core/project-fs/authority-resolvers.ts",
 ].sort();
 
@@ -85,7 +97,7 @@ function actualBrandConstructorImportFiles() {
   const importPattern =
     /import\s+(?!type\b)(?:\{([^}]+)\}|\*\s+as\s+\w+)\s+from\s+["']([^"']*branded-paths-internal\.ts)["']/g;
   const brandPattern =
-    /\bbrand(Contained|OwnedRead|OwnedWrite|OwnedDelete|OwnedList|ExplicitUserRead|TemporarySandbox)\b/;
+    /\bbrand(Contained|OwnedRead|OwnedWrite|OwnedDelete|OwnedList|ExplicitUserRead|ExplicitUserWrite|ProjectPresence|ProjectTreeList|TemporarySandbox|ValidatedAuthorityPath|ArchiveAuthority|AdapterAuthority)\b/;
   for (const file of walkTs(join(repoRoot, "src"))) {
     const text = readFileSync(file, "utf8");
     for (const match of text.matchAll(importPattern)) {
@@ -118,19 +130,16 @@ function actualRawImportFiles() {
 }
 
 function runFixture(name, relPath, source) {
-  const dir = mkdtempSync(join(repoRoot, ".tmp-security-hardening-"));
-  const path = join(dir, `${name}.ts`);
-  writeFileSync(path, `${source.trim()}\n`, "utf8");
   try {
-    execFileSync("node", [join(repoRoot, "scripts/check-fs-authority.mjs"), path], {
-      cwd: repoRoot,
-      stdio: "pipe",
+    const findings = checkSourceText({
+      relPath,
+      sourceText: `${source.trim()}\n`,
     });
-    return 0;
+    return findings.length > 0 ? 1 : 0;
   } catch (err) {
-    return typeof err.status === "number" ? err.status : 1;
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`fixture ${name} failed to execute: ${message}`);
+    return 2;
   }
 }
 
@@ -218,14 +227,48 @@ console.log("\n=== 5. PhasePath Single Source ===");
   );
 }
 
-console.log("\n=== 6. Malicious Fixtures ===");
+console.log("\n=== 6. Authority Provenance Tightening ===");
+{
+  const archivePaths = read("src/core/archive/paths.ts");
+  const projectConfigAuthority = read(
+    "src/core/project-fs/authorities/project-config-authority.ts",
+  );
+  const checker = read("scripts/check-fs-authority.mjs");
+  check(
+    "archive owned resolvers use archive namespace resolvers, not generic containment branding",
+    !/archive(Read|Write|Delete|List)Path\(\s*await\s+resolveSymlinkFreeProjectPath/.test(
+      archivePaths,
+    ),
+  );
+  check(
+    "sync archive resolver has explicit archive namespace assertion",
+    /assertArchiveRelPath\(relPath\)/.test(archivePaths),
+  );
+  check(
+    "project tree resolver returns ProjectTreeListPath, not OwnedListPath",
+    /Promise<ProjectTreeListPath>/.test(projectConfigAuthority),
+  );
+  check(
+    "checker models project_tree_list as a distinct authority kind",
+    /"project_tree_list"/.test(checker) &&
+      /listProjectTreeDirents/.test(checker),
+  );
+  const genericProofWrappers = authorityModulesWithGenericProofWrappers();
+  check(
+    "authority modules expose no AuthorityPathProof-to-Owned thin wrappers",
+    genericProofWrappers.length === 0,
+    `offenders: ${genericProofWrappers.join(", ")}`,
+  );
+}
+
+console.log("\n=== 7. Malicious Fixtures ===");
 {
   const fixtures = [
     {
       name: "generic-project-read",
       relPath: "src/core/pack/index.ts",
       source: `
-        import { ${`resolveInit${"Read"}Path`}, readOwnedText } from "../src/core/project-fs/index.ts";
+        import { ${`resolveInit${"Read"}Path`}, readOwnedText } from "../project-fs/index.ts";
         export async function f(cwd, userPath) {
           return readOwnedText(await ${`resolveInit${"Read"}Path`}(cwd, userPath));
         }
@@ -235,7 +278,7 @@ console.log("\n=== 6. Malicious Fixtures ===");
       name: "generic-project-write",
       relPath: "src/core/plan/normalize.ts",
       source: `
-        import { ${`resolveInit${"Write"}Path`}, writeOwnedText } from "../src/core/project-fs/index.ts";
+        import { ${`resolveInit${"Write"}Path`}, writeOwnedText } from "../project-fs/index.ts";
         export async function f(cwd, userPath) {
           await writeOwnedText(await ${`resolveInit${"Write"}Path`}(cwd, userPath), "x");
         }
@@ -245,7 +288,7 @@ console.log("\n=== 6. Malicious Fixtures ===");
       name: "write-capability-read",
       relPath: "src/core/archive/delete-intent-journal.ts",
       source: `
-        import { ${`openOwned${"Write"}`} } from "../src/core/project-fs/index.ts";
+        import { ${`openOwned${"Write"}`} } from "../project-fs/index.ts";
         export async function f(writePath) {
           const h = await ${`openOwned${"Write"}`}(writePath, "r");
           return h.readFile("utf8");
@@ -256,7 +299,7 @@ console.log("\n=== 6. Malicious Fixtures ===");
       name: "external-mkdtemp",
       relPath: "src/commands/tutorial.ts",
       source: `
-        import { ${`mkdtemp${"Owned"}`} } from "../src/core/project-fs/index.ts";
+        import { ${`mkdtemp${"Owned"}`} } from "../core/project-fs/index.ts";
         export async function f(prefix) {
           await ${`mkdtemp${"Owned"}`}(prefix);
         }
@@ -266,10 +309,101 @@ console.log("\n=== 6. Malicious Fixtures ===");
       name: "self-brand-former-domain",
       relPath: "src/core/pack/index.ts",
       source: `
-        import { brandOwnedWrite } from "../src/core/project-fs/branded-paths-internal.ts";
-        import { atomicWriteText } from "../src/io/atomic-text.ts";
+        import { brandOwnedWrite } from "../project-fs/branded-paths-internal.ts";
+        import { atomicWriteText } from "../../io/atomic-text.ts";
         export async function f(userPath) {
           await atomicWriteText(brandOwnedWrite(userPath), "x");
+        }
+      `,
+    },
+    {
+      name: "thin-authority-wrapper-cross-domain",
+      relPath: "src/core/pack/index.ts",
+      source: `
+        import { archiveWritePath } from "../project-fs/authorities/archive-authority.ts";
+        import { writeOwnedText } from "../project-fs/index.ts";
+        export async function f(userPath) {
+          await writeOwnedText(archiveWritePath(userPath), "x");
+        }
+      `,
+    },
+    {
+      name: "thin-authority-wrapper-same-domain-raw-arg",
+      relPath: "src/core/archive/delete-intent-journal.ts",
+      source: `
+        import { archiveWritePath } from "../project-fs/authorities/archive-authority.ts";
+        import { writeOwnedText } from "../project-fs/index.ts";
+        export async function f(userPath) {
+          await writeOwnedText(archiveWritePath(userPath), "x");
+        }
+      `,
+    },
+    {
+      name: "thin-authority-wrapper-write-to-read",
+      relPath: "src/core/adapters/staged-write.ts",
+      source: `
+        import { readOwnedText } from "../project-fs/operations.ts";
+        import { adapterReadPath } from "../project-fs/authorities/adapter-authority.ts";
+        import type { OwnedWritePath } from "../project-fs/branded-paths.ts";
+        export async function f(path: OwnedWritePath) {
+          return readOwnedText(adapterReadPath(path));
+        }
+      `,
+    },
+    {
+      name: "thin-authority-wrapper-write-to-delete",
+      relPath: "src/core/adapters/staged-write.ts",
+      source: `
+        import { unlinkOwned } from "../project-fs/operations.ts";
+        import { adapterDeletePath } from "../project-fs/authorities/adapter-authority.ts";
+        import type { OwnedWritePath } from "../project-fs/branded-paths.ts";
+        export async function f(path: OwnedWritePath) {
+          await unlinkOwned(adapterDeletePath(path));
+        }
+      `,
+    },
+    {
+      name: "thin-authority-wrapper-delete-to-read",
+      relPath: "src/core/adapters/staged-write.ts",
+      source: `
+        import { readOwnedText } from "../project-fs/operations.ts";
+        import { adapterReadPath } from "../project-fs/authorities/adapter-authority.ts";
+        import type { OwnedDeletePath } from "../project-fs/branded-paths.ts";
+        export async function f(path: OwnedDeletePath) {
+          return readOwnedText(adapterReadPath(path));
+        }
+      `,
+    },
+    {
+      name: "project-tree-list-cannot-read-file",
+      relPath: "src/core/glob.ts",
+      source: `
+        import { resolveProjectTreeListPath } from "./project-fs/authorities/project-config-authority.ts";
+        import { readOwnedText } from "./project-fs/index.ts";
+        export async function f(cwd, userPath) {
+          return readOwnedText(await resolveProjectTreeListPath(cwd, userPath));
+        }
+      `,
+    },
+    {
+      name: "project-presence-cannot-read-file",
+      relPath: "src/core/pack/index.ts",
+      source: `
+        import { resolveProjectProbeReadPath } from "../project-fs/authorities/project-config-authority.ts";
+        import { readOwnedText } from "../project-fs/index.ts";
+        export async function f(cwd, userPath) {
+          return readOwnedText(await resolveProjectProbeReadPath(cwd, userPath));
+        }
+      `,
+    },
+    {
+      name: "explicit-output-cannot-use-owned-write",
+      relPath: "src/core/pack/index.ts",
+      source: `
+        import { resolveExplicitProjectContextOutputWritePath } from "../project-fs/authorities/context-output-authority.ts";
+        import { writeOwnedText } from "../project-fs/index.ts";
+        export async function f(cwd, userPath) {
+          await writeOwnedText(await resolveExplicitProjectContextOutputWritePath(cwd, userPath), "x");
         }
       `,
     },
@@ -280,7 +414,7 @@ console.log("\n=== 6. Malicious Fixtures ===");
   }
 }
 
-console.log("\n=== 7. Checker Execution ===");
+console.log("\n=== 8. Checker Execution ===");
 {
   check("check-fs-authority exits 0 on repository", runChecker() === 0);
   const checker = read("scripts/check-fs-authority.mjs");
