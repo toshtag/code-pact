@@ -1,16 +1,14 @@
 import { readOwnedText } from "./project-fs/operations.ts";
 import {
   resolveProjectConfigReadPath,
-  resolveAgentProfileReadPath,
 } from "./project-fs/authority-resolvers.ts";
 import { unbrand } from "./project-fs/authorities/profile-authority.ts";
 import { parse as parseYaml } from "yaml";
 import { AgentProfileRefPath } from "./schemas/agent-profile-ref-path.ts";
 import { assertSafePlanId } from "./schemas/plan-id.ts";
-import { resolveSymlinkFreeProjectPath } from "./path-safety.ts";
 import {
-  profileWritePath,
-  profileReadPath,
+  resolveProfileWritePath,
+  resolveProfileReadPath,
   type OwnedWritePath,
   type OwnedReadPath,
 } from "./project-fs/authorities/profile-authority.ts";
@@ -60,7 +58,8 @@ function shouldMapPathErrorToConfig(err: unknown): boolean {
     code === "EISDIR" ||
     code === "ELOOP" ||
     code === "EACCES" ||
-    code === "EPERM"
+    code === "EPERM" ||
+    code === "FS_AUTHORITY_FAILURE"
   );
 }
 
@@ -258,11 +257,7 @@ export async function resolveAgentProfilePath(
 ): Promise<OwnedReadPath> {
   const rel = await resolveAgentProfileRel(cwd, agentName);
   try {
-    const abs = await resolveSymlinkFreeProjectPath(
-      cwd,
-      [".code-pact", rel].join("/"),
-    );
-    return profileReadPath(abs);
+    return await resolveProfileReadPath(cwd, [".code-pact", rel].join("/"));
   } catch (err) {
     if (shouldMapPathErrorToConfig(err)) {
       throw profileConfigError(
@@ -300,12 +295,12 @@ export async function resolveOwnedAgentProfilePath(
   assertWritableProfileRel(agentName, rel);
   await assertProfileRelNotShared(cwd, agentName, rel);
   try {
-    const path = await resolveAgentProfileReadPath(
-      cwd,
-      [".code-pact", rel].join("/"),
+    const relPath = [".code-pact", rel].join("/");
+    await assertProfileNameMatches(
+      await resolveProfileReadPath(cwd, relPath),
+      agentName,
     );
-    await assertProfileNameMatches(path, agentName);
-    return profileWritePath(path);
+    return await resolveProfileWritePath(cwd, relPath);
   } catch (err) {
     if (shouldMapPathErrorToConfig(err)) {
       throw profileConfigError(
