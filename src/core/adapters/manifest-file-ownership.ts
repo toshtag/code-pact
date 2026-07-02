@@ -1,8 +1,9 @@
 import { matchGlob } from "../glob.ts";
-import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
 import {
   adapterReadPath,
   adapterWritePath,
+  resolveAdapterProjectAuthorityPath,
+  type AdapterAuthorityPath,
   type OwnedReadPath,
   type OwnedWritePath,
 } from "../project-fs/authorities/adapter-authority.ts";
@@ -26,7 +27,7 @@ import type { AdapterDescriptor, DesiredAdapterFileRole } from "./types.ts";
  * On `owned`, `absPath` is the resolved, symlink-free absolute path to read.
  */
 export type ManifestFileOwnership =
-  | { kind: "owned"; absPath: OwnedReadPath }
+  | { kind: "owned"; absPath: OwnedReadPath & AdapterAuthorityPath }
   | { kind: "unowned" }
   | { kind: "unsafe" }
   // The path is inside the adapter's BROAD write namespace (e.g. a dynamically
@@ -39,8 +40,8 @@ export type ManifestFileOwnership =
   | { kind: "unverifiable_dynamic" };
 
 export type AdapterMutationPathAuthority =
-  | { kind: "owned"; absPath: OwnedWritePath }
-  | { kind: "dynamic_write"; absPath: OwnedWritePath }
+  | { kind: "owned"; absPath: OwnedWritePath & AdapterAuthorityPath }
+  | { kind: "dynamic_write"; absPath: OwnedWritePath & AdapterAuthorityPath }
   | { kind: "unowned" }
   | { kind: "unsafe" };
 
@@ -76,7 +77,7 @@ export async function authorizeAdapterMutationPath(
       return {
         kind: "owned",
         absPath: adapterWritePath(
-          await resolveSymlinkFreeProjectPath(cwd, relPath),
+          await resolveAdapterProjectAuthorityPath(cwd, relPath),
         ),
       };
     } catch {
@@ -103,7 +104,7 @@ export async function authorizeAdapterMutationPath(
     return {
       kind: "dynamic_write",
       absPath: adapterWritePath(
-        await resolveSymlinkFreeProjectPath(cwd, relPath),
+        await resolveAdapterProjectAuthorityPath(cwd, relPath),
       ),
     };
   } catch {
@@ -171,7 +172,7 @@ export async function classifyManifestFileForRead(
   try {
     // Rejects any symlink component (and `..` / absolute / drive paths): a
     // lexical path match is not proof the real destination is owned.
-    const absPath = await resolveSymlinkFreeProjectPath(cwd, relPath);
+    const absPath = await resolveAdapterProjectAuthorityPath(cwd, relPath);
     return { kind: "owned", absPath: adapterReadPath(absPath) };
   } catch {
     return { kind: "unsafe" };

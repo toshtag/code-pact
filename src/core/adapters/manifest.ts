@@ -3,11 +3,10 @@ import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { atomicWriteText } from "../../io/atomic-text.ts";
-import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
 import {
   adapterWritePath,
   adapterReadPath,
-  unbrand,
+  resolveAdapterProjectAuthorityPath,
   type OwnedWritePath,
 } from "../project-fs/authorities/adapter-authority.ts";
 import {
@@ -54,7 +53,7 @@ export async function resolveManifestPath(
 ): Promise<OwnedWritePath> {
   try {
     return adapterWritePath(
-      await resolveSymlinkFreeProjectPath(cwd, manifestRelPath(agentName)),
+      await resolveAdapterProjectAuthorityPath(cwd, manifestRelPath(agentName)),
     );
   } catch (err) {
     // A path-containment refusal (a `.code-pact/adapters` symlink that escapes
@@ -101,10 +100,24 @@ export async function readManifest(
 ): Promise<AdapterManifest | null> {
   // Resolve OUTSIDE the read try/catch: a symlink-escape throw must propagate
   // (fail-closed) rather than be swallowed as a missing-manifest `null`.
-  const path = await resolveManifestPath(cwd, agentName);
+  let path;
+  try {
+    path = await resolveAdapterProjectAuthorityPath(
+      cwd,
+      manifestRelPath(agentName),
+    );
+  } catch (err) {
+    const e = new Error(
+      `Adapter manifest path for "${agentName}" is not an owned project path and was refused: ${
+        (err as Error).message
+      }`,
+    );
+    (e as NodeJS.ErrnoException).code = "ADAPTER_MANIFEST_INVALID";
+    throw e;
+  }
   let raw: string;
   try {
-    raw = await readOwnedText(adapterReadPath(unbrand(path)));
+    raw = await readOwnedText(adapterReadPath(path));
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
     // Any OTHER read failure on a project-controlled (adversarial) manifest path
@@ -164,8 +177,9 @@ export async function writeManifest(
   manifest: AdapterManifest,
 ): Promise<string> {
   const planned = await planManifestWrite(cwd, agentName, manifest);
-  await atomicWriteText(planned.path, planned.content);
-  return planned.path;
+  const path = await resolveManifestPath(cwd, agentName);
+  await atomicWriteText(path, planned.content);
+  return path;
 }
 
 export async function planManifestWrite(
