@@ -243,19 +243,44 @@ function capabilitiesForKind(kind) {
     return { read: true, write: false, delete: false, explicitUserInput: true };
   }
   if (kind === "explicit_user_output") {
-    return { read: false, write: false, delete: false, explicitUserInput: false };
+    return {
+      read: false,
+      write: false,
+      delete: false,
+      explicitUserInput: false,
+    };
   }
   if (kind === "project_tree_list") {
-    return { read: false, write: false, delete: false, explicitUserInput: false };
+    return {
+      read: false,
+      write: false,
+      delete: false,
+      explicitUserInput: false,
+    };
   }
   if (kind === "project_presence") {
-    return { read: false, write: false, delete: false, explicitUserInput: false };
+    return {
+      read: false,
+      write: false,
+      delete: false,
+      explicitUserInput: false,
+    };
   }
   if (kind === "owned_write") {
-    return { read: false, write: true, delete: false, explicitUserInput: false };
+    return {
+      read: false,
+      write: true,
+      delete: false,
+      explicitUserInput: false,
+    };
   }
   if (kind === "owned_delete") {
-    return { read: false, write: false, delete: true, explicitUserInput: false };
+    return {
+      read: false,
+      write: false,
+      delete: true,
+      explicitUserInput: false,
+    };
   }
   if (kind === "owned_read") {
     return {
@@ -320,8 +345,12 @@ function isThinAuthorityInputAllowed(inputKind, outputKind) {
 function isSinkAuthorized(kind, fnName) {
   if (kind === "explicit_user_input") return true;
   if (READLIKE_FS_FUNCTIONS.has(fnName)) {
-    if (fnName === "listProjectTreeDirents") return kind === "project_tree_list";
-    if (fnName === "accessProjectPresence" || fnName === "existsProjectPresenceSync") {
+    if (fnName === "listProjectTreeDirents")
+      return kind === "project_tree_list";
+    if (
+      fnName === "accessProjectPresence" ||
+      fnName === "existsProjectPresenceSync"
+    ) {
       return kind === "project_presence";
     }
     return kind === "owned_read";
@@ -451,13 +480,7 @@ const AUTHORITY_EXPORTS = new Map([
     ]),
   ],
   [
-    join(
-      "src",
-      "core",
-      "project-fs",
-      "authorities",
-      "normalize-authority.ts",
-    ),
+    join("src", "core", "project-fs", "authorities", "normalize-authority.ts"),
     new Map([
       ["resolveNormalizeReadPath", "owned_read"],
       ["resolveNormalizeWritePath", "owned_write"],
@@ -1107,9 +1130,7 @@ function isAuthorityExpression(node, scope, trustedImports, localWrappers) {
         trustedImports,
         localWrappers,
       );
-      return ALLOWLIST_AUTHORIZED_KINDS.has(argKind)
-        ? argKind
-        : "unauthorized";
+      return ALLOWLIST_AUTHORIZED_KINDS.has(argKind) ? argKind : "unauthorized";
     }
     if (name === "unbrand" && node.arguments.length > 0) {
       const argKind = isAuthorityExpression(
@@ -1118,9 +1139,7 @@ function isAuthorityExpression(node, scope, trustedImports, localWrappers) {
         trustedImports,
         localWrappers,
       );
-      return ALLOWLIST_AUTHORIZED_KINDS.has(argKind)
-        ? argKind
-        : "unauthorized";
+      return ALLOWLIST_AUTHORIZED_KINDS.has(argKind) ? argKind : "unauthorized";
     }
     return "unauthorized";
   }
@@ -1209,12 +1228,16 @@ function requiredPathArguments(fnName, node) {
       { index: 1, capability: "write" },
     ];
   }
+  if (fnName === "link" || fnName === "linkOwned") {
+    return [
+      { index: 0, capability: "write" },
+      { index: 1, capability: "write" },
+    ];
+  }
   if (
     fnName === "copyFile" ||
     fnName === "cp" ||
-    fnName === "link" ||
-    fnName === "copyOwnedToOwned" ||
-    fnName === "linkOwned"
+    fnName === "copyOwnedToOwned"
   ) {
     return [
       { index: 0, capability: "read" },
@@ -1348,26 +1371,26 @@ export function checkSourceText({
   // Detect named re-exports from raw-internal.ts (export { x } from ".../raw-internal.ts").
   // These bypass the branded API by re-exporting raw primitives.
   for (const stmt of sourceFile.statements) {
-      if (!ts.isExportDeclaration(stmt)) continue;
-      if (stmt.moduleSpecifier === undefined) continue;
-      if (!ts.isStringLiteral(stmt.moduleSpecifier)) continue;
-      if (stmt.exportClause === undefined) continue; // wildcard already handled above
-      if (stmt.isTypeOnly) continue;
-      const specifier = stmt.moduleSpecifier.text;
-      const modulePath = resolveImport(sourceFile.fileName, specifier);
-      const isRawInternal =
-        modulePath === RAW_INTERNAL_MODULE ||
-        specifier.endsWith("raw-internal.ts");
-      if (!isRawInternal) continue;
-      const line =
-        sourceFile.getLineAndCharacterOfPosition(stmt.getStart()).line + 1;
-      findings.push({
-        line,
-        fn: "raw-internal import",
-        key: `${relFile}#*`,
-        arg: specifier,
-        text: sourceFile.text.split("\n")[line - 1]?.trim() ?? "",
-      });
+    if (!ts.isExportDeclaration(stmt)) continue;
+    if (stmt.moduleSpecifier === undefined) continue;
+    if (!ts.isStringLiteral(stmt.moduleSpecifier)) continue;
+    if (stmt.exportClause === undefined) continue; // wildcard already handled above
+    if (stmt.isTypeOnly) continue;
+    const specifier = stmt.moduleSpecifier.text;
+    const modulePath = resolveImport(sourceFile.fileName, specifier);
+    const isRawInternal =
+      modulePath === RAW_INTERNAL_MODULE ||
+      specifier.endsWith("raw-internal.ts");
+    if (!isRawInternal) continue;
+    const line =
+      sourceFile.getLineAndCharacterOfPosition(stmt.getStart()).line + 1;
+    findings.push({
+      line,
+      fn: "raw-internal import",
+      key: `${relFile}#*`,
+      arg: specifier,
+      text: sourceFile.text.split("\n")[line - 1]?.trim() ?? "",
+    });
   }
 
   // Non-boundary modules MUST NOT import from raw-internal.ts or
@@ -1414,8 +1437,7 @@ export function checkSourceText({
     if (
       modulePath !== join("src", "core", "project-fs", "index.ts") &&
       modulePath !== join("src", "core", "project-fs", "operations.ts") &&
-      modulePath !==
-        join("src", "core", "project-fs", "authority-resolvers.ts")
+      modulePath !== join("src", "core", "project-fs", "authority-resolvers.ts")
     ) {
       continue;
     }
@@ -2134,6 +2156,9 @@ function main() {
   process.exit(0);
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(process.argv[1]).href
+) {
   main();
 }
