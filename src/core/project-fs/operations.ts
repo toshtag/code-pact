@@ -143,7 +143,7 @@ export async function removeOwned(
 }
 
 export async function renameOwned(
-  src: OwnedWritePath | OwnedDeletePath,
+  src: OwnedDeletePath,
   dst: OwnedWritePath,
 ): Promise<void> {
   await renameRaw(unbrand(src), unbrand(dst));
@@ -157,7 +157,7 @@ export async function copyOwnedToOwned(
 }
 
 export async function linkOwned(
-  src: OwnedReadPath,
+  src: OwnedWritePath,
   dst: OwnedWritePath,
 ): Promise<void> {
   await linkRaw(unbrand(src), unbrand(dst));
