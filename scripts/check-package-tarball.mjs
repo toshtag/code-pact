@@ -214,34 +214,77 @@ export async function checkPackageTarball(opts) {
       );
     }
 
-    // 6. Verify runtime dependencies match
-    const repoDeps = repoPkg.dependencies ?? {};
-    const tarballDeps = tarballPkg.dependencies ?? {};
-    const repoDepKeys = Object.keys(repoDeps).sort();
-    const tarballDepKeys = Object.keys(tarballDeps).sort();
+    // 6. Verify no forbidden lifecycle scripts in tarball package.json
+    const FORBIDDEN_LIFECYCLE_SCRIPTS = new Set([
+      "preinstall",
+      "install",
+      "postinstall",
+      "prepublish",
+      "prepare",
+      "prepublishOnly",
+      "prepack",
+      "postpack",
+      "publish",
+      "postpublish",
+    ]);
 
-    if (repoDepKeys.length !== tarballDepKeys.length) {
-      problems.push(
-        `dependency count mismatch: repository has ${repoDepKeys.length}, tarball has ${tarballDepKeys.length}`,
-      );
-    } else {
-      for (const key of repoDepKeys) {
-        if (tarballDeps[key] !== repoDeps[key]) {
-          problems.push(
-            `dependency "${key}" version mismatch: repository "${repoDeps[key]}", tarball "${tarballDeps[key]}"`,
-          );
-        }
-      }
-      for (const key of tarballDepKeys) {
-        if (!(key in repoDeps)) {
-          problems.push(
-            `tarball has extra dependency "${key}" not in repository package.json`,
-          );
-        }
+    const tarballScripts = tarballPkg.scripts ?? {};
+    for (const name of FORBIDDEN_LIFECYCLE_SCRIPTS) {
+      if (Object.prototype.hasOwnProperty.call(tarballScripts, name)) {
+        problems.push(`forbidden lifecycle script in tarball: scripts.${name}`);
       }
     }
 
-    // 7. Verify dist/cli.js exists and has shebang
+    // 7. Verify runtime dependencies match exactly
+    function assertExactMap(label, repositoryValue, tarballValue) {
+      const expected = repositoryValue ?? {};
+      const actual = tarballValue ?? {};
+      const expectedEntries = Object.entries(expected).sort(([a], [b]) =>
+        a.localeCompare(b),
+      );
+      const actualEntries = Object.entries(actual).sort(([a], [b]) =>
+        a.localeCompare(b),
+      );
+
+      if (JSON.stringify(expectedEntries) !== JSON.stringify(actualEntries)) {
+        problems.push(`${label} does not match repository package.json`);
+      }
+    }
+
+    assertExactMap(
+      "dependencies",
+      repoPkg.dependencies,
+      tarballPkg.dependencies,
+    );
+    assertExactMap(
+      "optionalDependencies",
+      repoPkg.optionalDependencies,
+      tarballPkg.optionalDependencies,
+    );
+    assertExactMap(
+      "peerDependencies",
+      repoPkg.peerDependencies,
+      tarballPkg.peerDependencies,
+    );
+    assertExactMap(
+      "peerDependenciesMeta",
+      repoPkg.peerDependenciesMeta,
+      tarballPkg.peerDependenciesMeta,
+    );
+
+    // bundledDependencies and bundleDependencies must be empty/undefined in both
+    for (const key of ["bundledDependencies", "bundleDependencies"]) {
+      const repoVal = repoPkg[key] ?? [];
+      const tarballVal = tarballPkg[key] ?? [];
+      if (JSON.stringify(repoVal) !== JSON.stringify(tarballVal)) {
+        problems.push(`${key} does not match repository package.json`);
+      }
+      if (tarballVal.length > 0) {
+        problems.push(`${key} must be empty in tarball`);
+      }
+    }
+
+    // 8. Verify dist/cli.js exists and has shebang
     try {
       const cliContent = await fileReader(join(pkgDir, "dist", "cli.js"));
       if (!cliContent.startsWith("#!/usr/bin/env node")) {
