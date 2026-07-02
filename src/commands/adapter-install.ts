@@ -367,7 +367,7 @@ export async function runAdapterInstall(
       // file's ownership cannot be proven via manifest SHA alone. An existing
       // dynamic file is preserved (warn) — not refused — so the rest of the
       // install can proceed (static writes, model pin, manifest).
-      if (await authorizedPathExists(absPath, desired.path)) {
+      if (await authorizedPathExists(authority.absPath, desired.path)) {
         if (manifestEntry?.ownership === "handed_off") {
           action = "skip";
         } else {
@@ -380,7 +380,7 @@ export async function runAdapterInstall(
       }
     } else {
       const diskContent = await readAuthorizedRegularFileMaybe(
-        absPath,
+        authority.absPath,
         desired.path,
       );
       const diskHash =

@@ -364,7 +364,7 @@ export async function runAdapterUpgrade(
       // file's ownership cannot be proven via manifest SHA alone. An existing
       // dynamic file is preserved (warn) — not refused — so the rest of the
       // upgrade can proceed (static writes, model pin, manifest refresh).
-      if (await authorizedPathExists(absPath, desired.path)) {
+      if (await authorizedPathExists(authority.absPath, desired.path)) {
         if (manifestEntry?.ownership === "handed_off") {
           local = "managed-clean";
           desiredState = "current";
@@ -393,7 +393,7 @@ export async function runAdapterUpgrade(
       }
     } else {
       const diskContent = await readAuthorizedRegularFileMaybe(
-        absPath,
+        authority.absPath,
         desired.path,
       );
       const diskHash =
@@ -534,7 +534,10 @@ export async function runAdapterUpgrade(
       continue;
     }
 
-    const diskContent = await readAuthorizedRegularFileMaybe(absPath, relPath);
+    const diskContent = await readAuthorizedRegularFileMaybe(
+      authority.absPath,
+      relPath,
+    );
     if (diskContent === null) continue; // managed-missing: nothing on disk to prune
     const isClean = computeContentHash(diskContent) === entry.sha256;
     const action: FileAction = isClean ? "prune" : "refuse";
