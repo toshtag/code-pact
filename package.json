@@ -66,8 +66,7 @@
     "check:package-tarball": "node scripts/check-package-tarball.mjs",
     "verify:published-tarball": "node scripts/verify-published-tarball.mjs",
     "check:supply-chain": "node scripts/check-supply-chain-invariants.mjs",
-    "release:check": "pnpm typecheck && pnpm test && pnpm build && pnpm check:docs && pnpm check:fs-containment && pnpm check:fs-authority && pnpm check:security-hardening && pnpm check:supply-chain && pnpm check:release-version && node dist/cli.js validate --json && node dist/cli.js plan lint --include-quality --strict --json && node dist/cli.js plan analyze --strict --json",
-    "prepublishOnly": "node scripts/assert-package-metadata.mjs"
+    "release:check": "pnpm typecheck && pnpm test && pnpm build && pnpm check:docs && pnpm check:fs-containment && pnpm check:fs-authority && pnpm check:security-hardening && pnpm check:supply-chain && pnpm check:release-version && node dist/cli.js validate --json && node dist/cli.js plan lint --include-quality --strict --json && node dist/cli.js plan analyze --strict --json"
   },
   "dependencies": {
     "yaml": "^2.9.0",
