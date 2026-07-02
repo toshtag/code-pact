@@ -96,6 +96,9 @@ const {
 } = await import("../../../src/core/adapters/staged-write.ts");
 const { brandOwnedWrite } =
   await import("../../../src/core/project-fs/branded-paths-internal.ts");
+const { adapterValidatedAuthorityPath, adapterWritePath } = await import(
+  "../../../src/core/project-fs/authorities/adapter-authority.ts"
+);
 const { adapterTransactionProjectDir } =
   await import("../../../src/core/adapters/transaction-state-root.ts");
 
@@ -146,6 +149,10 @@ function manifestWriteTarget(agentName: SupportedAgent = "claude-code") {
   };
 }
 
+function adapterOwnedWrite(path: string) {
+  return adapterWritePath(adapterValidatedAuthorityPath(brandOwnedWrite(path)));
+}
+
 function staticInstructionWriteTarget() {
   const path = join(dir, "CLAUDE.md");
   return {
@@ -154,7 +161,7 @@ function staticInstructionWriteTarget() {
       "claude-code",
       "CLAUDE.md",
       "instruction",
-      { kind: "owned", absPath: brandOwnedWrite(path) },
+      { kind: "owned", absPath: adapterOwnedWrite(path) },
     ),
   };
 }
@@ -214,7 +221,7 @@ describe("FileTransaction — authority target guards", () => {
           "claude-code",
           ".claude/skills/code-pact-other.md",
           "skill",
-          { kind: "dynamic_write", absPath: brandOwnedWrite(target) },
+          { kind: "dynamic_write", absPath: adapterOwnedWrite(target) },
         ),
         "content",
       ),
@@ -234,7 +241,7 @@ describe("FileTransaction — authority target guards", () => {
         "claude-code",
         ".claude/skills/code-pact-private.md",
         "skill",
-        { kind: "dynamic_write", absPath: brandOwnedWrite(target) },
+        { kind: "dynamic_write", absPath: adapterOwnedWrite(target) },
       ),
       "content",
     );
