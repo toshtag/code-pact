@@ -18,7 +18,10 @@
 // ---------------------------------------------------------------------------
 
 import { lstatOwned, readOwnedText } from "../project-fs/operations.ts";
-import { archiveReadPath } from "../project-fs/authorities/archive-authority.ts";
+import {
+  archiveReadPath,
+  type ArchiveAuthorityPath,
+} from "../project-fs/authorities/archive-authority.ts";
 import {
   planEventPack,
   findLiveTaskOwnersByTaskId,
@@ -31,13 +34,12 @@ import {
 } from "./event-pack-reader.ts";
 import { bindPackToSnapshot } from "./event-pack-binding.ts";
 import { readPackSources } from "../progress/all-sources.ts";
-import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
 import {
   EVENTS_DIR_SEGMENTS,
   parseEventFileName,
   validateEventFileContent,
 } from "../progress/events-io.ts";
-import { eventPackPath, sha256Hex } from "./paths.ts";
+import { eventPackPath, resolveArchiveAuthorityPath, sha256Hex } from "./paths.ts";
 import {
   classifyLoosePackRelationship,
   type CleanupSkipReason,
@@ -71,7 +73,7 @@ function isEnoent(err: unknown): boolean {
  * writers, not a hostile local filesystem racing the read.
  */
 async function readRegularEventFileNoSymlink(
-  abs: string,
+  abs: ArchiveAuthorityPath,
 ): Promise<{ raw: string } | DeleteGateVerdict> {
   // (1) lstat — does NOT follow a symlink, so this rejects a symlink on every
   // platform, before any open that could follow it.
@@ -144,7 +146,7 @@ export type DeleteGateVerdict =
       /** The project-resolved absolute path the gate VERIFIED. The unlink loop
        *  removes exactly this path — it does NOT re-resolve, so it cannot diverge
        *  from what was gated and cannot mislabel a re-resolve failure. */
-      abs: string;
+      abs: ArchiveAuthorityPath;
     }
   | { disposition: "skip"; reason: CleanupSkipReason }
   | { disposition: "vanished" }
@@ -168,9 +170,9 @@ export async function evaluateDeleteGate(
 ): Promise<DeleteGateVerdict> {
   // G1 — the path resolves WITHIN the project (no symlink/`..` escape). First, per
   // the RFC's locked order.
-  let abs: string;
+  let abs: ArchiveAuthorityPath;
   try {
-    abs = await resolveSymlinkFreeProjectPath(cwd, looseEventRelPath(file));
+    abs = await resolveArchiveAuthorityPath(cwd, looseEventRelPath(file));
   } catch {
     return { disposition: "skip", reason: "path_escape" };
   }

@@ -27,13 +27,13 @@ import {
 } from "../project-fs/operations.ts";
 import {
   archiveReadPath,
-  archiveListPath,
+  type ArchiveAuthorityPath,
 } from "../project-fs/authorities/archive-authority.ts";
-import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { ProgressEvent } from "../schemas/progress-event.ts";
 import { computeEventId } from "../progress/event-id.ts";
-import { eventsDir, parseEventFileName } from "../progress/events-io.ts";
+import { parseEventFileName, resolveEventsDir } from "../progress/events-io.ts";
+import { resolveArchiveAuthorityPath } from "./paths.ts";
 import { looseEventRelPath } from "./event-pack-cleanup-gate.ts";
 import {
   classifyPostRunSurvivor,
@@ -81,7 +81,9 @@ type SurvivorContent =
  * honest concurrent writers) a symlink read here only mis-classifies a survivor for
  * the advisory/INCOMPLETE counts; it can never cause a delete.
  */
-async function readSurvivorContent(abs: string): Promise<SurvivorContent> {
+async function readSurvivorContent(
+  abs: ArchiveAuthorityPath,
+): Promise<SurvivorContent> {
   let st;
   try {
     st = await lstatOwned(archiveReadPath(abs));
@@ -180,10 +182,9 @@ export async function reconcileSurvivors(
   const targetSet = new Set(target.map(t => t.slice(t.lastIndexOf("/") + 1)));
   const skipByPath = new Map(loopSkipped.map(s => [s.path, s.reason]));
 
-  const dir = eventsDir(cwd);
   let names: string[];
   try {
-    names = await listOwned(archiveListPath(dir));
+    names = await listOwned(await resolveEventsDir(cwd));
   } catch (err) {
     if (isEnoent(err))
       names = []; // no dir → nothing present
@@ -214,7 +215,31 @@ export async function reconcileSurvivors(
       packIds.has(parsedName.id) || // (ii) filename id is in the verified pack
       existingSkipReason !== null; // (iv) carries a loop skip record
 
-    const survivor = await readSurvivorContent(join(dir, name));
+    let abs: ArchiveAuthorityPath;
+    try {
+      abs = await resolveArchiveAuthorityPath(cwd, relPath);
+    } catch {
+      if (filenameScoped) {
+        verdicts.push(
+          classifyPostRunSurvivor(
+            {
+              path: relPath,
+              contentEventId: null,
+              idUnknownReason: "unreadable_after_cleanup",
+              existingSkipReason,
+            },
+            { has: eventId => packIds.has(eventId) },
+          ),
+        );
+      } else {
+        advisories.push({
+          code: "unclassified_loose_after_cleanup",
+          path: relPath,
+        });
+      }
+      continue;
+    }
+    const survivor = await readSurvivorContent(abs);
     if (survivor === "gone") {
       // Vanished between the re-enumeration and the content read. NOT a present
       // survivor (so never in `skipped` / remaining), but if a filename/target/skip

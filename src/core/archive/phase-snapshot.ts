@@ -1,5 +1,6 @@
 import { readOwnedText, resolvePhaseReadPath } from "../project-fs/index.ts";
 import { archiveWritePath } from "../project-fs/authorities/archive-authority.ts";
+import type { ArchiveAuthorityPath } from "../project-fs/authorities/archive-authority.ts";
 import { parse as parseYaml } from "yaml";
 import { Phase } from "../schemas/phase.ts";
 import {
@@ -120,10 +121,10 @@ export type PhaseSnapshotBlock =
   | { kind: "live_file_missing"; original_path: string };
 
 export type PhaseSnapshotPlan =
-  | { kind: "write"; path: string; record: PhaseSnapshot }
+  | { kind: "write"; path: ArchiveAuthorityPath; record: PhaseSnapshot }
   | {
       kind: "refresh";
-      path: string;
+      path: ArchiveAuthorityPath;
       record: PhaseSnapshot;
       existing_source_sha256: string;
       current_source_sha256: string;

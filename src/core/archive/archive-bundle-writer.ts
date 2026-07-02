@@ -1,8 +1,8 @@
 import { listOwnedDirents, readOwnedText } from "../project-fs/operations.ts";
 import {
-  unbrand,
   archiveReadPath,
   archiveWritePath,
+  type ArchiveAuthorityPath,
 } from "../project-fs/authorities/archive-authority.ts";
 import { basename, join } from "node:path";
 import {
@@ -19,6 +19,7 @@ import {
   archiveDecisionsRelDir,
   archiveEventPacksRelDir,
   archivePhasesRelDir,
+  resolveArchiveAuthorityPath,
   resolveArchiveOwnedPath,
   resolveArchiveOwnedListPath,
   sha256Hex,
@@ -231,7 +232,7 @@ function assertSupersedePersistSafe(
 /** Re-read the just-written bundle from disk and verify it (Tier-1 + Tier-2 +
  *  strict-reconcile vs the folded loose). Shared by the create and supersede paths. */
 async function readbackAndVerify(
-  path: string,
+  path: ArchiveAuthorityPath,
   kind: ArchiveBundleKind,
   members: readonly LooseMember[],
   file: string,
@@ -272,7 +273,7 @@ async function persistArchiveBundle(
 
   const bundle = buildArchiveBundle(kind, members);
   const bytes = serializeArchiveBundle(bundle);
-  const path = await resolveArchiveOwnedPath(
+  const path = await resolveArchiveAuthorityPath(
     cwd,
     archiveBundleRelPath(kind, bundle.member_ids_sha256),
   );
@@ -280,7 +281,7 @@ async function persistArchiveBundle(
 
   let existing: string | null = null;
   try {
-    existing = await readOwnedText(path);
+    existing = await readOwnedText(archiveReadPath(path));
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
       throw new BundleWriteError(
@@ -325,7 +326,7 @@ async function persistArchiveBundle(
     // rejects it.
     try {
       await atomicReplaceExistingText(
-        archiveWritePath(unbrand(path)),
+        archiveWritePath(path),
         bytes,
         existing,
       );
@@ -360,7 +361,7 @@ async function persistArchiveBundle(
   }
   try {
     await atomicWriteText(
-      archiveWritePath(unbrand(path)),
+      archiveWritePath(path),
       bytes,
       { kind: "absent" },
       { mkdir: true },

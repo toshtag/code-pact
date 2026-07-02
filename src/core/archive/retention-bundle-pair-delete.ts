@@ -157,8 +157,8 @@ export async function deleteBundlePairsJournaled(
   if (committableIds.length === 0) return { removed: [], skipped };
 
   // CONSOLIDATED removal per kind over the FULL committable batch (shared-bundle correct).
-  const phaseRemoval = computeRemoval(cwd, "phase_snapshot", committableIds, dir);
-  const packRemoval = computeRemoval(cwd, "event_pack", committableIds, dir);
+  const phaseRemoval = computeRemoval(cwd, "phase_snapshot", committableIds);
+  const packRemoval = computeRemoval(cwd, "event_pack", committableIds);
   if (phaseRemoval.unsafe || packRemoval.unsafe) {
     // A kind has an authority-invalid member → the whole kind's removal is unprovable.
     for (const phase_id of committableIds) skipped.push({ phase_id, reason: "unsafe_authority" });

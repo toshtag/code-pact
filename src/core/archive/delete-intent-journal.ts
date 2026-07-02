@@ -12,6 +12,7 @@ import {
   archiveWritePath,
   archiveDeletePath,
   archiveListPath,
+  type ArchiveAuthorityPath,
 } from "../project-fs/authorities/archive-authority.ts";
 import { basename, dirname } from "node:path";
 import {
@@ -27,6 +28,7 @@ import {
   archivePhasesRelDir,
   eventPackRelPath,
   phaseSnapshotRelPath,
+  resolveArchiveAuthorityPath,
   resolveArchiveOwnedPath,
   sha256Hex,
 } from "./paths.ts";
@@ -110,7 +112,7 @@ export function __setDeleteIntentDirFsyncForTests(
  *  `unsupported` on a platform that cannot fsync a directory, `failed` on a real
  *  I/O error (`EIO` / `ENOSPC` / permission / handle failure). */
 export async function fsyncDirRequired(
-  dir: string,
+  dir: ArchiveAuthorityPath,
   purpose: string,
 ): Promise<void> {
   if (dirFsyncOverride) {
@@ -149,7 +151,7 @@ export function __setDeleteIntentFileFsyncForTests(
  *  on any I/O failure (never swallowed). Unlike a directory fsync this is supported on
  *  every platform (fsync of a regular file), so there is no `unsupported` case. */
 export async function fsyncFileRequired(
-  path: string,
+  path: ArchiveAuthorityPath,
   purpose: string,
 ): Promise<void> {
   if (fileFsyncOverride) {
@@ -166,7 +168,7 @@ export async function fsyncFileRequired(
   }
 }
 
-async function pathExists(path: string): Promise<boolean> {
+async function pathExists(path: ArchiveAuthorityPath): Promise<boolean> {
   try {
     await readOwnedText(archiveReadPath(path));
     return true;
@@ -179,8 +181,8 @@ async function pathExists(path: string): Promise<boolean> {
 async function resolveArchiveBundleFile(
   cwd: string,
   file: string,
-): Promise<string> {
-  return resolveArchiveOwnedPath(
+): Promise<ArchiveAuthorityPath> {
+  return resolveArchiveAuthorityPath(
     cwd,
     `${archiveBundlesRelDir()}/${basename(file)}`,
   );
@@ -210,8 +212,11 @@ export async function writeDeleteIntent(
     intents,
   };
   const content = serializeDeleteIntent(intent);
-  const path = await resolveArchiveOwnedPath(cwd, archiveDeleteIntentRelPath());
-  const dir = dirname(path);
+  const path = await resolveArchiveAuthorityPath(cwd, archiveDeleteIntentRelPath());
+  const dir = await resolveArchiveAuthorityPath(
+    cwd,
+    dirname(archiveDeleteIntentRelPath()),
+  );
   await mkdirOwned(archiveWritePath(dir), { recursive: true });
   // PREFLIGHT the directory durability barrier BEFORE writing anything: if the platform
   // cannot fsync a directory (`unsupported`) or the dir fsync fails (`failed`), abort HERE
@@ -220,7 +225,10 @@ export async function writeDeleteIntent(
   // pair the caller was told was deferred. The preflight makes `unsupported` mean "no
   // journal", so the caller's defer is honest.)
   await fsyncDirRequired(dir, "commit");
-  const tmp = `${path}.tmp-${process.pid}-${Date.now()}`;
+  const tmp = await resolveArchiveAuthorityPath(
+    cwd,
+    `${archiveDeleteIntentRelPath()}.tmp-${process.pid}-${Date.now()}`,
+  );
 
   try {
     await writeOwnedTempDurably(archiveWritePath(tmp), content);
@@ -251,14 +259,17 @@ export async function writeDeleteIntent(
  *  unlink the file, then fsync the directory (required) so the removal survives
  *  power loss. */
 export async function clearDeleteIntent(cwd: string): Promise<void> {
-  const path = await resolveArchiveOwnedPath(cwd, archiveDeleteIntentRelPath());
+  const path = await resolveArchiveAuthorityPath(cwd, archiveDeleteIntentRelPath());
   try {
     await unlinkOwned(archiveDeletePath(path));
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
     return; // already gone — nothing to make durable
   }
-  await fsyncDirRequired(dirname(path), "clear");
+  await fsyncDirRequired(
+    await resolveArchiveAuthorityPath(cwd, dirname(archiveDeleteIntentRelPath())),
+    "clear",
+  );
 }
 
 /** The journal as read from disk: absent (the normal steady state), present (a
@@ -682,7 +693,7 @@ export async function recoverPendingDeletes(
   };
 }
 
-async function unlinkIfPresent(abs: string): Promise<void> {
+async function unlinkIfPresent(abs: ArchiveAuthorityPath): Promise<void> {
   try {
     await unlinkOwned(archiveDeletePath(abs));
   } catch (err) {

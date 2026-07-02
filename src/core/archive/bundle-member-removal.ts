@@ -9,8 +9,9 @@ import {
   archiveReadPath,
   archiveWritePath,
   archiveDeletePath,
+  type ArchiveAuthorityPath,
 } from "../project-fs/authorities/archive-authority.ts";
-import { basename, join } from "node:path";
+import { basename } from "node:path";
 import type {
   ArchiveBundle,
   ArchiveBundleKind,
@@ -35,6 +36,7 @@ import {
   archiveDecisionsRelDir,
   archiveEventPacksRelDir,
   archivePhasesRelDir,
+  resolveArchiveAuthorityPath,
   resolveArchiveOwnedPath,
   resolveArchiveOwnedPathSync,
   sha256Hex,
@@ -102,7 +104,6 @@ export function computeRemoval(
   cwd: string,
   kind: ArchiveBundleKind,
   removeIds: readonly string[],
-  bundleDir = resolveArchiveOwnedPathSync(cwd, archiveBundlesRelDir()),
 ): RemovalComputation {
   const { index, bundles } = loadArchiveBundles(cwd); // STRICT — a corrupt store throws (fail-closed)
   const members =
@@ -160,7 +161,14 @@ export function computeRemoval(
     .map(b => ({
       file: basename(b.file),
       sha256: sha256Hex(
-        readOwnedTextSyncNoFollow(archiveReadPath(join(bundleDir, basename(b.file)))),
+        readOwnedTextSyncNoFollow(
+          archiveReadPath(
+            resolveArchiveOwnedPathSync(
+              cwd,
+              `${archiveBundlesRelDir()}/${basename(b.file)}`,
+            ),
+          ),
+        ),
       ), // the on-disk raw bytes
       member_ids_sha256: computeMemberIdsSha256(
         b.loaded.members.map(m => m.id),
@@ -297,7 +305,7 @@ export async function removeBundleMembers(
   hooks: BundleRemovalHooks = {},
 ): Promise<BundleMemberRemovalOutcome> {
   const dir = await resolveArchiveOwnedPath(cwd, archiveBundlesRelDir());
-  const c = computeRemoval(cwd, kind, removeIds, dir); // re-run the authority (never a stale caller plan)
+  const c = computeRemoval(cwd, kind, removeIds); // re-run the authority (never a stale caller plan)
   if (c.unsafe) {
     // The kind is fail-closed (an authority-invalid current member), so NOTHING is touched — but EVERY
     // requested CURRENT member must still get a terminal outcome (it was asked for, it still resolves):
@@ -370,7 +378,7 @@ export async function removeBundleMembers(
     // survivor bundle that vanished / was corrupted between the durable write and this unlink (a bug, or
     // the test seam modelling it) would let us retire the old bundle and lose the survivors too.
     if (c.new_bundle) await assertSurvivorBundleOnDisk(cwd, kind, c.new_bundle);
-    const abs = await resolveArchiveOwnedPath(
+    const abs = await resolveArchiveAuthorityPath(
       cwd,
       `${archiveBundlesRelDir()}/${basename(rb.file)}`,
     );
@@ -426,7 +434,7 @@ async function assertSurvivorBundleOnDisk(
   kind: ArchiveBundleKind,
   bundle: ArchiveBundle,
 ): Promise<void> {
-  const path = await resolveArchiveOwnedPath(
+  const path = await resolveArchiveAuthorityPath(
     cwd,
     archiveBundleRelPath(kind, bundle.member_ids_sha256),
   );
@@ -454,12 +462,12 @@ export async function durablyWriteBundle(
   kind: ArchiveBundleKind,
   bundle: ArchiveBundle,
 ): Promise<void> {
-  const path = await resolveArchiveOwnedPath(
+  const path = await resolveArchiveAuthorityPath(
     cwd,
     archiveBundleRelPath(kind, bundle.member_ids_sha256),
   );
   const bytes = serializeArchiveBundle(bundle);
-  const dir = await resolveArchiveOwnedPath(cwd, archiveBundlesRelDir());
+  const dir = await resolveArchiveAuthorityPath(cwd, archiveBundlesRelDir());
   if (await pathExists(path)) {
     // The keep already exists — but "visible on disk" is NOT "durable", in TWO ways: a prior run
     // could have written its DATA without an fsync (data pages still only in the page cache) AND/OR
@@ -484,7 +492,10 @@ export async function durablyWriteBundle(
     await fsyncDirRequired(dir, "bundle_write"); // REQUIRED: the keep's directory entry must be durable
     return;
   }
-  const tmp = `${path}.tmp-${process.pid}-${Date.now()}`;
+  const tmp = await resolveArchiveAuthorityPath(
+    cwd,
+    `${archiveBundleRelPath(kind, bundle.member_ids_sha256)}.tmp-${process.pid}-${Date.now()}`,
+  );
   try {
     await writeOwnedTempDurably(archiveWritePath(tmp), bytes);
   } catch (err) {
@@ -529,7 +540,7 @@ export async function looseCopyExists(
   );
 }
 
-async function pathExists(path: string): Promise<boolean> {
+async function pathExists(path: ArchiveAuthorityPath): Promise<boolean> {
   try {
     await readOwnedText(archiveReadPath(path));
     return true;

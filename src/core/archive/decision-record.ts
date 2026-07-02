@@ -1,5 +1,6 @@
 import { readOwnedText, resolveDecisionReadPath } from "../project-fs/index.ts";
 import { archiveWritePath } from "../project-fs/authorities/archive-authority.ts";
+import type { ArchiveAuthorityPath } from "../project-fs/authorities/archive-authority.ts";
 import {
   DecisionStateRecord,
   DECISION_STATE_RECORD_SCHEMA_VERSION,
@@ -73,10 +74,10 @@ export type DecisionRecordBlock =
   | { kind: "live_file_missing"; canonical_ref: string };
 
 export type DecisionRecordPlan =
-  | { kind: "write"; path: string; record: DecisionStateRecord }
+  | { kind: "write"; path: ArchiveAuthorityPath; record: DecisionStateRecord }
   | {
       kind: "refresh";
-      path: string;
+      path: ArchiveAuthorityPath;
       record: DecisionStateRecord;
       existing_source_sha256: string;
       current_source_sha256: string;

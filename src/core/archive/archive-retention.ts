@@ -6,6 +6,7 @@ import {
 import {
   archiveReadPath,
   archiveDeletePath,
+  type ArchiveAuthorityPath,
 } from "../project-fs/authorities/archive-authority.ts";
 import { basename } from "node:path";
 import { parse as parseYaml } from "yaml";
@@ -13,7 +14,7 @@ import { Phase } from "../schemas/phase.ts";
 import { PhaseSnapshot } from "../schemas/phase-snapshot.ts";
 import { DecisionStateRecord } from "../schemas/decision-state-record.ts";
 import { loadRoadmap } from "../plan/roadmap.ts";
-import { resolveSymlinkFreeProjectPath } from "../path-safety.ts";
+import { resolvePhaseReadPath } from "../project-fs/authority-resolvers.ts";
 import {
   ARCHIVE_DECISIONS_DIR_SEGMENTS,
   ARCHIVE_EVENT_PACKS_DIR_SEGMENTS,
@@ -209,7 +210,7 @@ async function buildLiveGraph(cwd: string): Promise<LiveGraphResult> {
     let raw: string;
     try {
       raw = await readOwnedText(
-        archiveReadPath(await resolveSymlinkFreeProjectPath(cwd, p.path)),
+        await resolvePhaseReadPath(cwd, p.path),
       );
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") continue; // archived phase — not a live ref source
@@ -945,7 +946,7 @@ export function looseStillAuthorityValid(
 }
 
 export type LooseDeleteVerdict =
-  | { kind: "delete"; abs: string }
+  | { kind: "delete"; abs: ArchiveAuthorityPath }
   | { kind: "vanished" }
   | { kind: "skip"; reason: RetentionDeleteSkipReason };
 
@@ -964,7 +965,7 @@ export async function gateLooseDelete(
   id: string,
   expectedSha256: string | undefined,
 ): Promise<LooseDeleteVerdict> {
-  let abs: string;
+  let abs: ArchiveAuthorityPath;
   try {
     abs = await resolveArchiveOwnedPath(cwd, looseRelPath(kind, id));
   } catch {
