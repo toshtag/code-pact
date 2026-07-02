@@ -23,6 +23,8 @@ import {
   type OwnedWritePath,
   type ExplicitUserReadPath,
   type OwnedListPath,
+  type ProjectTreeListPath,
+  type ProjectPresencePath,
 } from "./branded-paths-internal.ts";
 import {
   readdir as readdirRaw,
@@ -74,6 +76,12 @@ export async function listOwnedDirents(
   return readdirRaw(unbrand(path), { withFileTypes: true });
 }
 
+export async function listProjectTreeDirents(
+  path: ProjectTreeListPath,
+): Promise<import("node:fs").Dirent[]> {
+  return readdirRaw(unbrand(path), { withFileTypes: true });
+}
+
 export async function listOwned(
   path: OwnedListPath | OwnedReadPath,
 ): Promise<string[]> {
@@ -85,6 +93,12 @@ export async function unlinkOwned(path: OwnedDeletePath): Promise<void> {
 }
 
 export async function accessOwned(path: OwnedReadPath): Promise<void> {
+  await accessRaw(unbrand(path));
+}
+
+export async function accessProjectPresence(
+  path: ProjectPresencePath,
+): Promise<void> {
   await accessRaw(unbrand(path));
 }
 
@@ -201,6 +215,10 @@ export async function fsyncOwnedDirectory(path: OwnedListPath): Promise<void> {
 }
 
 export function existsOwnedSync(path: OwnedReadPath): boolean {
+  return existsSyncRaw(unbrand(path));
+}
+
+export function existsProjectPresenceSync(path: ProjectPresencePath): boolean {
   return existsSyncRaw(unbrand(path));
 }
 
