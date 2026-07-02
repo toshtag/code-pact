@@ -7,6 +7,7 @@
 
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, resolve, relative } from "node:path";
+import { pathToFileURL } from "node:url";
 import ts from "typescript";
 
 // ---------------------------------------------------------------------------
@@ -18,6 +19,8 @@ import ts from "typescript";
 //   owned_read / owned_write / owned_delete: domain-specific helpers that
 //     prove semantic ownership for a specific operation kind.
 //   explicit_user_input: paths selected by the user (e.g. --from-file flags).
+//   explicit_user_output: paths selected by the user for output only.
+//   project_presence: paths authorized only for existence/access probes.
 //   not_a_path: helpers that return content/boolean/object, not a path.
 //   unauthorized: anything else.
 //   unknown: uninitialized or unreachable.
@@ -29,6 +32,9 @@ const AUTHORITY_KINDS = new Set([
   "owned_write",
   "owned_delete",
   "explicit_user_input",
+  "explicit_user_output",
+  "project_tree_list",
+  "project_presence",
   "authority_read_object",
   "authority_write_object",
   "not_a_path",
@@ -48,6 +54,9 @@ const SINK_AUTHORIZED_KINDS = new Set([
 
 const ALLOWLIST_AUTHORIZED_KINDS = new Set([
   ...SINK_AUTHORIZED_KINDS,
+  "explicit_user_output",
+  "project_tree_list",
+  "project_presence",
   // Structured allowlist entries may document fixed project paths that are
   // intentionally guarded only by containment. This exception is never granted
   // by dataflow inference.
@@ -127,6 +136,9 @@ const FS_FUNCTIONS = new Set([
   "copyOwnedToOwned",
   "linkOwned",
   "readOwnedTextSyncNoFollow",
+  "listProjectTreeDirents",
+  "accessProjectPresence",
+  "existsProjectPresenceSync",
 ]);
 
 const READLIKE_FS_FUNCTIONS = new Set([
@@ -156,6 +168,9 @@ const READLIKE_FS_FUNCTIONS = new Set([
   "readOwnedTextSyncNoFollow",
   "fsyncOwnedRegularFile",
   "fsyncOwnedDirectory",
+  "listProjectTreeDirents",
+  "accessProjectPresence",
+  "existsProjectPresenceSync",
 ]);
 
 const WRITELIKE_FS_FUNCTIONS = new Set([
@@ -227,6 +242,15 @@ function capabilitiesForKind(kind) {
   if (kind === "explicit_user_input") {
     return { read: true, write: false, delete: false, explicitUserInput: true };
   }
+  if (kind === "explicit_user_output") {
+    return { read: false, write: false, delete: false, explicitUserInput: false };
+  }
+  if (kind === "project_tree_list") {
+    return { read: false, write: false, delete: false, explicitUserInput: false };
+  }
+  if (kind === "project_presence") {
+    return { read: false, write: false, delete: false, explicitUserInput: false };
+  }
   if (kind === "owned_write") {
     return { read: false, write: true, delete: false, explicitUserInput: false };
   }
@@ -267,6 +291,11 @@ function intersectKinds(a, b) {
 }
 
 function isSinkAuthorizedForCapability(kind, capability) {
+  if (capability === "project_tree_list") return kind === "project_tree_list";
+  if (capability === "project_presence") return kind === "project_presence";
+  if (capability === "explicit_user_write") {
+    return kind === "owned_write" || kind === "explicit_user_output";
+  }
   const caps = capabilitiesForKind(kind);
   if (capability === "read") return caps.read;
   if (capability === "write") return caps.write;
@@ -274,9 +303,27 @@ function isSinkAuthorizedForCapability(kind, capability) {
   return false;
 }
 
+function capabilityForAuthorityKind(kind) {
+  if (kind === "owned_read") return "read";
+  if (kind === "owned_write") return "write";
+  if (kind === "owned_delete") return "delete";
+  return null;
+}
+
+function isThinAuthorityInputAllowed(inputKind, outputKind) {
+  if (inputKind === "symlink_free_contained") return true;
+  const requiredCapability = capabilityForAuthorityKind(outputKind);
+  if (requiredCapability === null) return false;
+  return isSinkAuthorizedForCapability(inputKind, requiredCapability);
+}
+
 function isSinkAuthorized(kind, fnName) {
   if (kind === "explicit_user_input") return true;
   if (READLIKE_FS_FUNCTIONS.has(fnName)) {
+    if (fnName === "listProjectTreeDirents") return kind === "project_tree_list";
+    if (fnName === "accessProjectPresence" || fnName === "existsProjectPresenceSync") {
+      return kind === "project_presence";
+    }
     return kind === "owned_read";
   }
   if (WRITELIKE_FS_FUNCTIONS.has(fnName)) return kind === "owned_write";
@@ -385,14 +432,22 @@ const AUTHORITY_EXPORTS = new Map([
       "project-config-authority.ts",
     ),
     new Map([
-      ["projectConfigReadPath", "owned_read"],
-      ["projectConfigWritePath", "owned_write"],
-      ["projectConfigDeletePath", "owned_delete"],
-      ["projectConfigListPath", "owned_read"],
-      ["resolveProjectTreeListPath", "owned_read"],
+      ["resolveProjectTreeListPath", "project_tree_list"],
       ["resolveProjectScaffoldReadPath", "owned_read"],
       ["resolveProjectScaffoldWritePath", "owned_write"],
       ["resolveProjectPresenceReadPath", "owned_read"],
+      ["resolveProjectRuntimeLockReadPath", "owned_read"],
+      ["resolveProjectRuntimeLockWritePath", "owned_write"],
+      ["resolveProjectRuntimeLockDeletePath", "owned_delete"],
+      ["resolveProjectRuntimeLockDirWritePath", "owned_write"],
+      ["resolveProgressEventsDirWritePath", "owned_write"],
+      ["resolveProgressEventsDirListPath", "owned_read"],
+      ["resolveProgressEventReadPath", "owned_read"],
+      ["resolveProgressEventWritePath", "owned_write"],
+      ["resolveProgressEventDeletePath", "owned_delete"],
+      ["resolveProjectProbeReadPath", "project_presence"],
+      ["resolveStandaloneProjectProbeReadPath", "project_presence"],
+      ["resolveProjectProbeReadPathSync", "project_presence"],
     ]),
   ],
   [
@@ -407,9 +462,6 @@ const AUTHORITY_EXPORTS = new Map([
       ["resolveNormalizeReadPath", "owned_read"],
       ["resolveNormalizeWritePath", "owned_write"],
       ["resolveNormalizeListPath", "owned_read"],
-      ["normalizeReadPath", "owned_read"],
-      ["normalizeWritePath", "owned_write"],
-      ["normalizeListPath", "owned_read"],
     ]),
   ],
   [
@@ -417,11 +469,9 @@ const AUTHORITY_EXPORTS = new Map([
     new Map([
       ["resolvePruneSourceReadPath", "owned_read"],
       ["resolvePruneSourceWritePath", "owned_write"],
+      ["resolvePruneSourceDeletePath", "owned_delete"],
       ["resolvePrunedLedgerReadPath", "owned_read"],
       ["resolvePrunedLedgerWritePath", "owned_write"],
-      ["pruneReadPath", "owned_read"],
-      ["pruneWritePath", "owned_write"],
-      ["pruneDeletePath", "owned_delete"],
     ]),
   ],
   [
@@ -431,6 +481,11 @@ const AUTHORITY_EXPORTS = new Map([
       ["archiveWritePath", "owned_write"],
       ["archiveDeletePath", "owned_delete"],
       ["archiveListPath", "owned_read"],
+      ["resolveArchiveAuthorityProof", "symlink_free_contained"],
+      ["resolveArchiveReadPath", "owned_read"],
+      ["resolveArchiveWritePath", "owned_write"],
+      ["resolveArchiveDeletePath", "owned_delete"],
+      ["resolveArchiveListPath", "owned_read"],
     ]),
   ],
   [
@@ -440,6 +495,9 @@ const AUTHORITY_EXPORTS = new Map([
       ["adapterWritePath", "owned_write"],
       ["adapterDeletePath", "owned_delete"],
       ["adapterListPath", "owned_read"],
+      ["adapterValidatedAuthorityPath", "symlink_free_contained"],
+      ["resolveAdapterProjectAuthorityPath", "symlink_free_contained"],
+      ["resolveAdapterProjectAuthorityPathSync", "symlink_free_contained"],
     ]),
   ],
   [
@@ -451,33 +509,16 @@ const AUTHORITY_EXPORTS = new Map([
       "context-output-authority.ts",
     ),
     new Map([
-      ["contextOutputReadPath", "owned_read"],
-      ["contextOutputWritePath", "owned_write"],
+      ["resolveProfileContextOutputWritePath", "owned_write"],
+      ["resolveExplicitProjectContextOutputWritePath", "explicit_user_output"],
+      ["resolveExplicitContextOutputWritePath", "explicit_user_output"],
     ]),
   ],
   [
     join("src", "core", "project-fs", "authorities", "profile-authority.ts"),
     new Map([
-      ["profileReadPath", "owned_read"],
-      ["profileWritePath", "owned_write"],
-    ]),
-  ],
-  [
-    join("src", "core", "project-fs", "authorities", "decision-authority.ts"),
-    new Map([
-      ["decisionReadPath", "owned_read"],
-      ["decisionWritePath", "owned_write"],
-      ["decisionDeletePath", "owned_delete"],
-      ["decisionListPath", "owned_read"],
-    ]),
-  ],
-  [
-    join("src", "core", "project-fs", "authorities", "phase-authority.ts"),
-    new Map([
-      ["phaseReadPath", "owned_read"],
-      ["phaseWritePath", "owned_write"],
-      ["phaseDeletePath", "owned_delete"],
-      ["phaseListPath", "owned_read"],
+      ["resolveProfileReadPath", "owned_read"],
+      ["resolveProfileWritePath", "owned_write"],
     ]),
   ],
   [
@@ -492,10 +533,15 @@ const AUTHORITY_EXPORTS = new Map([
     ]),
   ],
   [
+    join("src", "core", "progress", "events-io.ts"),
+    new Map([["resolveEventsDir", "owned_read"]]),
+  ],
+  [
     join("src", "core", "archive", "paths.ts"),
     new Map([
       ["resolveArchiveOwnedPath", "owned_read"],
       ["resolveArchiveOwnedPathSync", "owned_read"],
+      ["resolveArchiveAuthorityPath", "symlink_free_contained"],
       ["resolveArchiveOwnedWritePath", "owned_write"],
       ["resolveArchiveOwnedDeletePath", "owned_delete"],
       ["resolveArchiveOwnedListPath", "owned_read"],
@@ -530,6 +576,15 @@ const AUTHORITY_EXPORTS = new Map([
     join("src", "core", "pack", "context-output-path.ts"),
     new Map([["resolveProfileContextOutputPath", "owned_write"]]),
   ],
+  [
+    join("src", "core", "adapters", "transaction-state-root.ts"),
+    new Map([
+      ["adapterTransactionProjectDir", "symlink_free_contained"],
+      ["adapterTransactionJournalPath", "symlink_free_contained"],
+      ["adapterTransactionJournalPathInDir", "symlink_free_contained"],
+      ["adapterTransactionSidecarPath", "symlink_free_contained"],
+    ]),
+  ],
   // atomicWriteText is a sink wrapper, not an authority source
   [
     join("src", "core", "project-fs", "branded-paths-internal.ts"),
@@ -540,6 +595,7 @@ const AUTHORITY_EXPORTS = new Map([
       ["brandOwnedDelete", "owned_delete"],
       ["brandExplicitUserRead", "explicit_user_input"],
       ["brandOwnedList", "owned_read"],
+      ["brandValidatedAuthorityPath", "symlink_free_contained"],
     ]),
   ],
 ]);
@@ -564,6 +620,14 @@ const RAW_FS_IMPORT_ALLOWLIST = new Set([
 
 // Result properties that extract a path from an authority result object.
 const AUTHORITY_RESULT_PROPS = new Set(["absPath"]);
+const AUTHORITY_PROOF_PROPS = new Set([
+  "abs",
+  "backupPath",
+  "finalPath",
+  "journalDir",
+  "journalPath",
+  "tempPath",
+]);
 const OWNED_PATH_TYPES = new Set([
   "SymlinkFreeContainedPath",
   "OwnedReadPath",
@@ -571,6 +635,11 @@ const OWNED_PATH_TYPES = new Set([
   "OwnedDeletePath",
   "OwnedListPath",
   "ExplicitUserReadPath",
+  "ExplicitUserWritePath",
+  "AuthorityPathProof",
+  "ValidatedAuthorityPath",
+  "ProjectTreeListPath",
+  "ProjectPresencePath",
 ]);
 const BRAND_CONSTRUCTORS = new Set([
   "brandContained",
@@ -579,7 +648,10 @@ const BRAND_CONSTRUCTORS = new Set([
   "brandOwnedDelete",
   "brandOwnedList",
   "brandExplicitUserRead",
+  "brandExplicitUserWrite",
+  "brandProjectPresence",
   "brandTemporarySandbox",
+  "brandValidatedAuthorityPath",
 ]);
 const BRAND_CONSTRUCTOR_IMPORT_ALLOWLIST = new Set([
   join("src", "core", "project-fs", "branded-paths-internal.ts"),
@@ -615,6 +687,7 @@ const BRAND_CONSTRUCTOR_IMPORT_ALLOWLIST = new Set([
   ),
 ]);
 const OWNED_PATH_CAST_ALLOWLIST = new Set([
+  join("src", "core", "path-safety.ts"),
   join("src", "core", "project-fs", "branded-paths.ts"),
   join("src", "core", "project-fs", "branded-paths-internal.ts"),
 ]);
@@ -633,6 +706,47 @@ const FORBIDDEN_PUBLIC_FS_API_IMPORTS = new Set([
   `realpathOwned${"Sync"}`,
   `File${"Handle"}`,
 ]);
+
+const THIN_AUTHORITY_WRAPPERS = new Set([
+  "adapterReadPath",
+  "adapterWritePath",
+  "adapterDeletePath",
+  "adapterListPath",
+  "archiveReadPath",
+  "archiveWritePath",
+  "archiveDeletePath",
+  "archiveListPath",
+]);
+
+function thinAuthorityImportAllowed(exported, relFile) {
+  if (exported.startsWith("adapter")) {
+    return relFile.startsWith(join("src", "core", "adapters") + "/");
+  }
+  if (exported.startsWith("archive")) {
+    return relFile.startsWith(join("src", "core", "archive") + "/");
+  }
+  if (exported.startsWith("contextOutput")) {
+    return relFile.startsWith(join("src", "core", "pack") + "/");
+  }
+  if (exported.startsWith("normalize")) {
+    return relFile === join("src", "core", "plan", "normalize.ts");
+  }
+  if (exported.startsWith("profile")) {
+    return relFile === join("src", "core", "agent-profile-path.ts");
+  }
+  if (exported.startsWith("projectConfig")) {
+    return new Set([
+      join("src", "core", "glob.ts"),
+      join("src", "core", "locks", "write-lock.ts"),
+      join("src", "core", "plan", "checks", "fs.ts"),
+      join("src", "core", "progress", "events-io.ts"),
+    ]).has(relFile);
+  }
+  if (exported.startsWith("prune")) {
+    return relFile === join("src", "core", "decisions", "prune-executor.ts");
+  }
+  return false;
+}
 
 // ---------------------------------------------------------------------------
 // Structured allowlist for explicit user-input paths and other exceptions.
@@ -672,10 +786,22 @@ function kindFromTypeNode(typeNode) {
   if (!typeNode) return null;
   const text = typeNode.getText();
   if (/\bOwnedReadPath\b/.test(text)) return "owned_read";
+  if (/\bExplicitUserReadPath\b/.test(text)) return "explicit_user_input";
+  if (/\bExplicitUserWritePath\b/.test(text)) return "explicit_user_output";
   if (/\bOwnedWritePath\b/.test(text)) return "owned_write";
   if (/\bOwnedDeletePath\b/.test(text)) return "owned_delete";
-  if (/\bExplicitUserReadPath\b/.test(text)) return "explicit_user_input";
   if (/\bOwnedListPath\b/.test(text)) return "owned_read";
+  if (/\bProjectTreeListPath\b/.test(text)) return "project_tree_list";
+  if (/\bProjectPresencePath\b/.test(text)) return "project_presence";
+  if (/\bAdapterPrivateStatePath\b/.test(text)) return "symlink_free_contained";
+  if (/\bArchiveAuthorityPath\b/.test(text)) return "symlink_free_contained";
+  if (/\bAdapterAuthorityPath\b/.test(text)) return "symlink_free_contained";
+  if (/\bValidatedAuthorityPath\b/.test(text)) {
+    return "symlink_free_contained";
+  }
+  if (/\bAuthorityPathProof\b/.test(text)) {
+    return "symlink_free_contained";
+  }
   if (/\bSymlinkFreeContainedPath\b/.test(text)) {
     return "symlink_free_contained";
   }
@@ -765,6 +891,7 @@ function trustedImportsFor(sourceFile) {
           kind,
           importPath: modulePath,
           exportName: exported,
+          thin: THIN_AUTHORITY_WRAPPERS.has(exported),
         });
       }
     }
@@ -926,6 +1053,16 @@ function isTrustedAuthorityCall(node, scope, trustedImports, localWrappers) {
   const info = trustedImports.get(name);
   if (info) {
     if (isShadowed(node, name, scope)) return null;
+    if (info.thin) {
+      const arg = node.arguments[0];
+      const argKind = isAuthorityExpression(
+        arg,
+        scope,
+        trustedImports,
+        localWrappers,
+      );
+      if (!isThinAuthorityInputAllowed(argKind, info.kind)) return null;
+    }
     return info.kind;
   }
   // Check local wrappers (no shadowing check needed — these are local
@@ -970,13 +1107,26 @@ function isAuthorityExpression(node, scope, trustedImports, localWrappers) {
         trustedImports,
         localWrappers,
       );
-      return SINK_AUTHORIZED_KINDS.has(argKind) ? argKind : "unauthorized";
+      return ALLOWLIST_AUTHORIZED_KINDS.has(argKind)
+        ? argKind
+        : "unauthorized";
+    }
+    if (name === "unbrand" && node.arguments.length > 0) {
+      const argKind = isAuthorityExpression(
+        node.arguments[0],
+        scope,
+        trustedImports,
+        localWrappers,
+      );
+      return ALLOWLIST_AUTHORIZED_KINDS.has(argKind)
+        ? argKind
+        : "unauthorized";
     }
     return "unauthorized";
   }
   if (ts.isIdentifier(node)) {
     const kind = getVarKind(scope, node.text);
-    return SINK_AUTHORIZED_KINDS.has(kind) ? kind : "unauthorized";
+    return ALLOWLIST_AUTHORIZED_KINDS.has(kind) ? kind : "unauthorized";
   }
   if (ts.isPropertyAccessExpression(node)) {
     if (
@@ -991,7 +1141,17 @@ function isAuthorityExpression(node, scope, trustedImports, localWrappers) {
         return objectPathKind;
       }
       // If the variable itself is sink-authorized, its .absPath is also authorized.
-      return SINK_AUTHORIZED_KINDS.has(kind) ? kind : "unauthorized";
+      return ALLOWLIST_AUTHORIZED_KINDS.has(kind) ? kind : "unauthorized";
+    }
+    if (AUTHORITY_PROOF_PROPS.has(node.name.text)) {
+      return "symlink_free_contained";
+    }
+    if (
+      node.name.text === "path" &&
+      ts.isIdentifier(node.expression) &&
+      node.expression.text === "plan"
+    ) {
+      return "symlink_free_contained";
     }
     return "unauthorized";
   }
@@ -1068,7 +1228,19 @@ function requiredPathArguments(fnName, node) {
     return [{ index: 0, capability: openRequiredCapability(node) }];
   }
   if (READLIKE_FS_FUNCTIONS.has(fnName)) {
+    if (fnName === "listProjectTreeDirents") {
+      return [{ index: 0, capability: "project_tree_list" }];
+    }
+    if (
+      fnName === "accessProjectPresence" ||
+      fnName === "existsProjectPresenceSync"
+    ) {
+      return [{ index: 0, capability: "project_presence" }];
+    }
     return [{ index: 0, capability: "read" }];
+  }
+  if (fnName === "atomicWriteText") {
+    return [{ index: 0, capability: "explicit_user_write" }];
   }
   if (WRITELIKE_FS_FUNCTIONS.has(fnName)) {
     return [{ index: 0, capability: "write" }];
@@ -1110,11 +1282,16 @@ function walkTs(dir, files) {
 // Check a single file
 // ---------------------------------------------------------------------------
 
-function checkFile(filePath, allowlist, allowlistUsed) {
-  const relFile = rel(filePath);
-  const text = readFileSync(filePath, "utf8");
+export function checkSourceText({
+  relPath,
+  sourceText,
+  allowlist = new Map(),
+  allowlistUsed = new Set(),
+}) {
+  const relFile = relPath.split(/[\\/]/).join("/");
+  const text = sourceText;
   const sourceFile = ts.createSourceFile(
-    filePath,
+    resolve(relFile),
     text,
     ts.ScriptTarget.Latest,
     true,
@@ -1252,6 +1429,38 @@ function checkFile(filePath, allowlist, allowlistUsed) {
       findings.push({
         line,
         fn: "forbidden public filesystem API import",
+        key: `${relFile}#*`,
+        arg: imported,
+        text: sourceFile.text.split("\n")[line - 1]?.trim() ?? "",
+      });
+    }
+  }
+
+  for (const stmt of sourceFile.statements) {
+    if (!ts.isImportDeclaration(stmt)) continue;
+    if (!ts.isStringLiteral(stmt.moduleSpecifier)) continue;
+    const modulePath = resolveImport(
+      sourceFile.fileName,
+      stmt.moduleSpecifier.text,
+    );
+    if (
+      !modulePath?.startsWith(
+        join("src", "core", "project-fs", "authorities") + "/",
+      )
+    ) {
+      continue;
+    }
+    const bindings = stmt.importClause?.namedBindings;
+    if (!bindings || !ts.isNamedImports(bindings)) continue;
+    for (const el of bindings.elements) {
+      const imported = el.propertyName?.text ?? el.name.text;
+      if (!THIN_AUTHORITY_WRAPPERS.has(imported)) continue;
+      if (thinAuthorityImportAllowed(imported, relFile)) continue;
+      const line =
+        sourceFile.getLineAndCharacterOfPosition(el.getStart()).line + 1;
+      findings.push({
+        line,
+        fn: "thin authority wrapper import",
         key: `${relFile}#*`,
         arg: imported,
         text: sourceFile.text.split("\n")[line - 1]?.trim() ?? "",
@@ -1749,6 +1958,15 @@ function checkFile(filePath, allowlist, allowlistUsed) {
   return findings;
 }
 
+function checkFile(filePath, allowlist, allowlistUsed) {
+  return checkSourceText({
+    relPath: rel(filePath),
+    sourceText: readFileSync(filePath, "utf8"),
+    allowlist,
+    allowlistUsed,
+  });
+}
+
 function detectWrapperKind(fnNode, trustedImports) {
   if (!fnNode.body) return null;
   const body = fnNode.body;
@@ -1760,7 +1978,7 @@ function detectWrapperKind(fnNode, trustedImports) {
       trustedImports,
       null,
     );
-    return SINK_AUTHORIZED_KINDS.has(kind) ? kind : null;
+    return ALLOWLIST_AUTHORIZED_KINDS.has(kind) ? kind : null;
   }
   if (!ts.isBlock(body)) return null;
   // Case 2: block body with single return statement: return await trustedCall(...)
@@ -1771,6 +1989,16 @@ function detectWrapperKind(fnNode, trustedImports) {
 function detectBlockWrapperKind(block, scope, trustedImports) {
   if (!block || !ts.isBlock(block)) return null;
   for (const stmt of block.statements) {
+    if (ts.isVariableStatement(stmt)) {
+      for (const decl of stmt.declarationList.declarations) {
+        if (!ts.isIdentifier(decl.name)) continue;
+        const kind = decl.initializer
+          ? isAuthorityExpression(decl.initializer, scope, trustedImports, null)
+          : (kindFromTypeNode(decl.type) ?? "unauthorized");
+        declareVar(scope, decl.name.text, kind);
+      }
+      continue;
+    }
     if (ts.isReturnStatement(stmt) && stmt.expression) {
       const kind = isAuthorityExpression(
         stmt.expression,
@@ -1778,7 +2006,7 @@ function detectBlockWrapperKind(block, scope, trustedImports) {
         trustedImports,
         null,
       );
-      return SINK_AUTHORIZED_KINDS.has(kind) ? kind : null;
+      return ALLOWLIST_AUTHORIZED_KINDS.has(kind) ? kind : null;
     }
     if (ts.isTryStatement(stmt)) {
       // Check if try block returns a trusted call and catch always exits
@@ -1847,58 +2075,65 @@ function findEnclosingFunctionName(node) {
 // Main
 // ---------------------------------------------------------------------------
 
-const allowlist = loadAllowlist();
-const allowlistUsed = new Set();
+function main() {
+  const allowlist = loadAllowlist();
+  const allowlistUsed = new Set();
 
-const filesToCheck = process.argv.slice(2);
-const runFiles = filesToCheck.length > 0 ? filesToCheck : discoverTargetFiles();
+  const filesToCheck = process.argv.slice(2);
+  const runFiles =
+    filesToCheck.length > 0 ? filesToCheck : discoverTargetFiles();
 
-let total = 0;
-for (const file of runFiles) {
-  const absPath = resolve(file);
-  if (!existsSync(absPath)) continue;
-  let findings;
-  try {
-    findings = checkFile(absPath, allowlist, allowlistUsed);
-  } catch (err) {
-    console.error(`fs-authority: error checking ${file}: ${err.message}`);
-    process.exit(2);
+  let total = 0;
+  for (const file of runFiles) {
+    const absPath = resolve(file);
+    if (!existsSync(absPath)) continue;
+    let findings;
+    try {
+      findings = checkFile(absPath, allowlist, allowlistUsed);
+    } catch (err) {
+      console.error(`fs-authority: error checking ${file}: ${err.message}`);
+      process.exit(2);
+    }
+    for (const f of findings) {
+      total++;
+      console.log(
+        `${file}:${f.line}: ${f.fn}() called on non-authority path "${f.arg}" [${f.key}]`,
+      );
+      console.log(`    ${f.text}`);
+    }
   }
-  for (const f of findings) {
-    total++;
-    console.log(
-      `${file}:${f.line}: ${f.fn}() called on non-authority path "${f.arg}" [${f.key}]`,
-    );
-    console.log(`    ${f.text}`);
-  }
-}
 
-// Check for stale allowlist entries
-const staleEntries = [];
-if (filesToCheck.length === 0) {
-  for (const key of allowlist.keys()) {
-    const entries = allowlist.get(key);
-    for (const entry of entries) {
-      const usedKey = `${key}:${entry.operation}`;
-      if (!allowlistUsed.has(usedKey)) {
-        staleEntries.push(usedKey);
+  // Check for stale allowlist entries
+  const staleEntries = [];
+  if (filesToCheck.length === 0) {
+    for (const key of allowlist.keys()) {
+      const entries = allowlist.get(key);
+      for (const entry of entries) {
+        const usedKey = `${key}:${entry.operation}`;
+        if (!allowlistUsed.has(usedKey)) {
+          staleEntries.push(usedKey);
+        }
       }
     }
   }
-}
-if (staleEntries.length > 0) {
-  for (const key of staleEntries) {
-    console.log(
-      `fs-authority: stale allowlist entry "${key}" — file/function not found or not used.`,
-    );
+  if (staleEntries.length > 0) {
+    for (const key of staleEntries) {
+      console.log(
+        `fs-authority: stale allowlist entry "${key}" — file/function not found or not used.`,
+      );
+    }
+    total += staleEntries.length;
   }
-  total += staleEntries.length;
+
+  if (total > 0) {
+    console.log(
+      `\nfs-authority: ${total} finding(s). Fs operations must use approved project authority helpers.`,
+    );
+    process.exit(1);
+  }
+  process.exit(0);
 }
 
-if (total > 0) {
-  console.log(
-    `\nfs-authority: ${total} finding(s). Fs operations must use approved project authority helpers.`,
-  );
-  process.exit(1);
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main();
 }
-process.exit(0);
