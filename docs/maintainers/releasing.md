@@ -84,20 +84,68 @@ After the release-prep PR merges to `main`:
    git push origin v<version>
    ```
 8. **Approve the publish workflow.** Pushing the tag triggers
-   `.github/workflows/publish.yml`, which runs in the `npm-publish` GitHub
-   Environment. Approve the deployment in the GitHub Actions UI. The workflow
+   `.github/workflows/publish.yml`. The workflow has four jobs with strict
+   permission separation:
+
+   | Job              | Permissions                         | Runs                                                                                                               |
+   | ---------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+   | `prepare`        | `contents: read`                    | checkout, tag verification, `release:check`, tarball build + inspection, release notes generation, artifact upload |
+   | `publish`        | `contents: read`, `id-token: write` | artifact download, manifest verification, `npm publish --ignore-scripts` (no checkout, no repository code)         |
+   | `verify`         | `contents: read`                    | artifact download, registry tarball download + byte verification, integrity report upload                          |
+   | `github-release` | `contents: write`                   | artifact download, `gh release create/edit` (no checkout, no repository code)                                      |
+
+   Approve the deployment in the GitHub Actions UI (the `publish` job runs in
+   the `npm-publish` GitHub Environment with required reviewers). The workflow
    then:
-   - verifies the signed annotated tag (`check-release-tag.mjs`),
-   - runs `pnpm release:check` (the full release gate),
-   - builds and inspects the exact tarball (`check-package-tarball.mjs`),
-   - publishes that tarball via npm Trusted Publishing (OIDC, no npm token),
-   - downloads the registry tarball and verifies its bytes
+   - **prepare** verifies the signed annotated tag (`check-release-tag.mjs`),
+     runs `pnpm release:check`, builds and inspects the exact tarball
+     (`check-package-tarball.mjs`), generates release notes, and uploads the
+     artifact,
+   - **publish** downloads the verified artifact and publishes it via npm
+     Trusted Publishing (OIDC, no npm token) with `--ignore-scripts`,
+   - **verify** downloads the registry tarball and verifies its bytes
      (`verify-published-tarball.mjs`),
-   - creates a GitHub Release with an auto-generated `## Integrity` section.
+   - **github-release** creates a GitHub Release with an auto-generated
+     `## Integrity` section.
+
 9. **Verify.** After the workflow succeeds:
    - Check the npm package page for the provenance badge.
    - Check the GitHub Release for the auto-generated Integrity section
      (shasum, integrity, local SHA-256, provenance note).
+
+## One-time security setup
+
+These steps are performed once by a repository administrator. They cannot be
+verified from code alone — attach evidence (screenshots or API output) to the
+rollout PR.
+
+### GitHub Environment: `npm-publish`
+
+1. **Create** a GitHub Environment named `npm-publish` (Settings → Environments).
+2. **Required reviewers:** add the maintainer or release team.
+3. **Prevent self-review:** enabled — the person who pushed the tag cannot
+   approve their own deployment.
+4. **Allow administrators to bypass:** disabled — no bypass.
+5. **Deployment branches and tags:** selected tags → `v*` only.
+
+### npm Trusted Publisher
+
+Configure at [npmjs.com](https://www.npmjs.com/) → package settings →
+Trusted Publishing:
+
+1. **Provider:** GitHub Actions.
+2. **Repository:** `toshtag/code-pact` (or the target repository).
+3. **Workflow filename:** `publish.yml`.
+4. **Environment:** `npm-publish`.
+5. **Allowed action:** `npm publish` only.
+
+### After first successful publish
+
+1. **Revoke** any existing npm automation tokens (Access Tokens → delete).
+2. **Remove** `NPM_TOKEN` from GitHub repository secrets (if it existed).
+3. **Disable token-based publish** in the npm package settings (require Trusted
+   Publishing only).
+4. **Confirm** maintainer accounts have 2FA enabled.
 
 ## What does NOT need a release
 
