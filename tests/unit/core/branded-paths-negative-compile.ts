@@ -15,6 +15,8 @@ import {
   readOwnedText,
   unlinkOwned,
   listOwnedDirents,
+  linkOwned,
+  renameOwned,
 } from "../../../src/core/project-fs/index.ts";
 import type {
   OwnedReadPath,
@@ -41,6 +43,24 @@ void unlinkOwned("/tmp/evil" as string);
 
 // @ts-expect-error listOwnedDirents rejects raw string
 void listOwnedDirents("/etc" as string);
+
+// --- linkOwned / renameOwned capability enforcement ---
+
+declare const _readPath: OwnedReadPath;
+declare const _writePath: OwnedWritePath;
+declare const _deletePath: OwnedDeletePath;
+
+// @ts-expect-error read authority cannot be the source of a hard link because
+// the writable alias could mutate the same inode.
+void linkOwned(_readPath, _writePath);
+
+// @ts-expect-error rename removes the source pathname, so write authority is
+// insufficient — delete authority is required.
+void renameOwned(_writePath, _writePath);
+
+// Positive controls.
+void linkOwned(_writePath, _writePath);
+void renameOwned(_deletePath, _writePath);
 
 // --- These usages MUST compile (positive control) ---
 
