@@ -212,4 +212,23 @@ describe("verifyPublishedTarball", () => {
     expect(result.ok).toBe(true);
     expect(result.report?.shasum).toBe(testSha1);
   });
+
+  it("fails when version exists but local artifact differs from registry", async () => {
+    const differentBytes = new TextEncoder().encode("tampered content");
+    const result = await verifyPublishedTarball({
+      packageName: "code-pact",
+      version: "2.0.1",
+      localTarballPath: "/dev/null",
+      metadataFetcher: async () => metadata,
+      tarballFetcher: async () => testBytes,
+      fileReader: async () => differentBytes,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(
+      result.problems.some(
+        (p: string) => p.includes("size") || p.includes("bytes"),
+      ),
+    ).toBe(true);
+  });
 });
