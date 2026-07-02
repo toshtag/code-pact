@@ -1,14 +1,20 @@
 import {
-  brandOwnedDelete,
-  brandOwnedList,
-  brandOwnedRead,
-  brandOwnedWrite,
+  brandProjectPresence,
+  brandProjectTreeList,
   type OwnedDeletePath,
   type OwnedListPath,
   type OwnedReadPath,
   type OwnedWritePath,
+  type ProjectTreeListPath,
+  type ProjectPresencePath,
 } from "../branded-paths-internal.ts";
+import { basename, dirname } from "node:path";
 import {
+  assertSafeRelativePath,
+  resolveSymlinkFreeProjectPathSync,
+} from "../../path-safety.ts";
+import {
+  resolveAndBrandDeleteForAuthority,
   resolveAndBrandListForAuthority,
   resolveAndBrandReadForAuthority,
   resolveAndBrandWriteForAuthority,
@@ -48,29 +54,53 @@ export type {
   OwnedListPath,
   OwnedReadPath,
   OwnedWritePath,
+  ProjectTreeListPath,
+  ProjectPresencePath,
 } from "../branded-paths.ts";
 
-export function projectConfigReadPath(path: string): OwnedReadPath {
-  return brandOwnedRead(path);
+function isProjectRuntimeLockDir(path: string): boolean {
+  return path === ".code-pact/locks";
 }
 
-export function projectConfigWritePath(path: string): OwnedWritePath {
-  return brandOwnedWrite(path);
+function isProjectRuntimeLockFile(path: string): boolean {
+  return path === ".code-pact/locks/write.lock";
 }
 
-export function projectConfigDeletePath(path: string): OwnedDeletePath {
-  return brandOwnedDelete(path);
+function isProgressEventsDir(path: string): boolean {
+  return path === ".code-pact/state/events";
 }
 
-export function projectConfigListPath(path: string): OwnedListPath {
-  return brandOwnedList(path);
+function isProgressEventPath(path: string): boolean {
+  return (
+    path.startsWith(".code-pact/state/events/") &&
+    !path.slice(".code-pact/state/events/".length).includes("/")
+  );
+}
+
+function mapProjectRuntimeConfigError(err: unknown): never {
+  const code = (err as NodeJS.ErrnoException).code;
+  if (
+    code === "PATH_OUTSIDE_PROJECT" ||
+    code === "PATH_NOT_OWNED" ||
+    code === "ENOTDIR" ||
+    code === "EACCES" ||
+    code === "EPERM" ||
+    code === "ELOOP" ||
+    code === "FS_AUTHORITY_FAILURE"
+  ) {
+    const wrapped = new Error((err as Error).message);
+    (wrapped as NodeJS.ErrnoException).code = "CONFIG_ERROR";
+    throw wrapped;
+  }
+  throw err;
 }
 
 export async function resolveProjectTreeListPath(
   cwd: string,
   relPath: string,
-): Promise<OwnedListPath> {
-  return resolveAndBrandListForAuthority(cwd, relPath, () => true);
+): Promise<ProjectTreeListPath> {
+  const path = await resolveAndBrandListForAuthority(cwd, relPath, () => true);
+  return brandProjectTreeList(path);
 }
 
 export async function resolveProjectScaffoldReadPath(
@@ -100,4 +130,136 @@ export async function resolveProjectScaffoldWritePath(
   relPath: string,
 ): Promise<OwnedWritePath> {
   return resolveAndBrandWriteForAuthority(cwd, relPath, isProjectScaffoldPath);
+}
+
+export async function resolveProjectRuntimeLockReadPath(
+  cwd: string,
+): Promise<OwnedReadPath> {
+  try {
+    return await resolveAndBrandReadForAuthority(
+      cwd,
+      ".code-pact/locks/write.lock",
+      isProjectRuntimeLockFile,
+    );
+  } catch (err) {
+    mapProjectRuntimeConfigError(err);
+  }
+}
+
+export async function resolveProjectRuntimeLockWritePath(
+  cwd: string,
+): Promise<OwnedWritePath> {
+  try {
+    return await resolveAndBrandWriteForAuthority(
+      cwd,
+      ".code-pact/locks/write.lock",
+      isProjectRuntimeLockFile,
+    );
+  } catch (err) {
+    mapProjectRuntimeConfigError(err);
+  }
+}
+
+export async function resolveProjectRuntimeLockDeletePath(
+  cwd: string,
+): Promise<OwnedDeletePath> {
+  try {
+    return await resolveAndBrandDeleteForAuthority(
+      cwd,
+      ".code-pact/locks/write.lock",
+      isProjectRuntimeLockFile,
+    );
+  } catch (err) {
+    mapProjectRuntimeConfigError(err);
+  }
+}
+
+export async function resolveProjectRuntimeLockDirWritePath(
+  cwd: string,
+): Promise<OwnedWritePath> {
+  try {
+    return await resolveAndBrandWriteForAuthority(
+      cwd,
+      ".code-pact/locks",
+      isProjectRuntimeLockDir,
+    );
+  } catch (err) {
+    mapProjectRuntimeConfigError(err);
+  }
+}
+
+export async function resolveProgressEventsDirWritePath(
+  cwd: string,
+): Promise<OwnedWritePath> {
+  return resolveAndBrandWriteForAuthority(
+    cwd,
+    ".code-pact/state/events",
+    isProgressEventsDir,
+  );
+}
+
+export async function resolveProgressEventsDirListPath(
+  cwd: string,
+): Promise<OwnedListPath> {
+  return resolveAndBrandListForAuthority(
+    cwd,
+    ".code-pact/state/events",
+    isProgressEventsDir,
+  );
+}
+
+export async function resolveProgressEventReadPath(
+  cwd: string,
+  file: string,
+): Promise<OwnedReadPath> {
+  return resolveAndBrandReadForAuthority(
+    cwd,
+    [".code-pact/state/events", file].join("/"),
+    isProgressEventPath,
+  );
+}
+
+export async function resolveProgressEventWritePath(
+  cwd: string,
+  file: string,
+): Promise<OwnedWritePath> {
+  return resolveAndBrandWriteForAuthority(
+    cwd,
+    [".code-pact/state/events", file].join("/"),
+    isProgressEventPath,
+  );
+}
+
+export async function resolveProgressEventDeletePath(
+  cwd: string,
+  file: string,
+): Promise<OwnedDeletePath> {
+  return resolveAndBrandDeleteForAuthority(
+    cwd,
+    [".code-pact/state/events", file].join("/"),
+    isProgressEventPath,
+  );
+}
+
+export async function resolveProjectProbeReadPath(
+  cwd: string,
+  relPath: string,
+): Promise<ProjectPresencePath> {
+  return brandProjectPresence(
+    await resolveAndBrandReadForAuthority(cwd, relPath, () => true),
+  );
+}
+
+export async function resolveStandaloneProjectProbeReadPath(
+  path: string,
+): Promise<ProjectPresencePath> {
+  return resolveProjectProbeReadPath(dirname(path), basename(path));
+}
+
+export function resolveProjectProbeReadPathSync(
+  cwd: string,
+  relPath: string,
+): ProjectPresencePath {
+  assertSafeRelativePath(relPath);
+  return brandProjectPresence(resolveSymlinkFreeProjectPathSync(cwd, relPath));
 }

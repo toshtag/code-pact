@@ -1,9 +1,6 @@
 import { z } from "zod";
 import { RelativePosixPath } from "../../schemas/relative-path.ts";
 import {
-  brandOwnedDelete,
-  brandOwnedRead,
-  brandOwnedWrite,
   type OwnedDeletePath,
   type OwnedReadPath,
   type OwnedWritePath,
@@ -11,6 +8,7 @@ import {
 export { unbrand } from "../branded-paths.ts";
 import {
   resolveAndBrandReadForAuthority,
+  resolveAndBrandDeleteForAuthority,
   resolveAndBrandWriteForAuthority,
 } from "../authority-resolvers.ts";
 
@@ -43,6 +41,15 @@ export async function resolvePruneSourceWritePath(
   );
 }
 
+export async function resolvePruneSourceDeletePath(
+  cwd: string,
+  path: PruneSourcePath,
+): Promise<OwnedDeletePath> {
+  return resolveAndBrandDeleteForAuthority(cwd, path, p =>
+    PruneSourcePath.safeParse(p).success,
+  );
+}
+
 export async function resolvePrunedLedgerReadPath(
   cwd: string,
 ): Promise<OwnedReadPath> {
@@ -61,16 +68,4 @@ export async function resolvePrunedLedgerWritePath(
     "design/decisions/PRUNED.md",
     p => p === "design/decisions/PRUNED.md",
   );
-}
-
-export function pruneReadPath(path: string): OwnedReadPath {
-  return brandOwnedRead(path);
-}
-
-export function pruneWritePath(path: string): OwnedWritePath {
-  return brandOwnedWrite(path);
-}
-
-export function pruneDeletePath(path: string): OwnedDeletePath {
-  return brandOwnedDelete(path);
 }

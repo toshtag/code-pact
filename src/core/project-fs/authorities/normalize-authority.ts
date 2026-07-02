@@ -1,9 +1,6 @@
 import { z } from "zod";
 import { RelativePosixPath } from "../../schemas/relative-path.ts";
 import {
-  brandOwnedList,
-  brandOwnedRead,
-  brandOwnedWrite,
   type OwnedListPath,
   type OwnedReadPath,
   type OwnedWritePath,
@@ -52,16 +49,4 @@ export async function resolveNormalizeListPath(
     path,
     p => p === "design" || p.startsWith("design/"),
   );
-}
-
-export function normalizeReadPath(path: string): OwnedReadPath {
-  return brandOwnedRead(path);
-}
-
-export function normalizeWritePath(path: string): OwnedWritePath {
-  return brandOwnedWrite(path);
-}
-
-export function normalizeListPath(path: string): OwnedListPath {
-  return brandOwnedList(path);
 }
