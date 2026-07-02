@@ -228,10 +228,7 @@ async function readValidatedEventFile(
   path: OwnedReadPath,
   file: string,
 ): Promise<LoadedEventFile> {
-  return validateEventFileContent(
-    file,
-    await readOwnedText(path),
-  );
+  return validateEventFileContent(file, await readOwnedText(path));
 }
 
 export type WrittenEvent = {
@@ -277,16 +274,11 @@ export async function writeEventFile(
   // collision is impossible via the uuid, so its errors must propagate, not be
   // mistaken for "the final already exists").
   try {
-    await writeOwnedTextExclusive(
-      await resolveProgressEventWritePath(cwd, tmpFile),
-      body,
-    );
+    const tmpWrite = await resolveProgressEventWritePath(cwd, tmpFile);
+    await writeOwnedTextExclusive(tmpWrite, body);
     try {
       const pathWrite = await resolveProgressEventWritePath(cwd, file);
-      await linkOwned(
-        await resolveProgressEventReadPath(cwd, tmpFile),
-        pathWrite,
-      ); // atomic, no-overwrite publish
+      await linkOwned(tmpWrite, pathWrite); // atomic, no-overwrite publish
       return { id, path: unbrand(pathWrite), alreadyExisted: false };
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
