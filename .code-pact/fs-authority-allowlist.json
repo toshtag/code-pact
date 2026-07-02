@@ -1,12 +1,4 @@
 {
-  "src/core/adapters/manifest.ts#writeManifest": [
-    {
-      "operation": "atomicWriteText",
-      "authority": "owned_write",
-      "reason": "Path proven by authority resolver or brand constructor; checker cannot trace through complex dataflow",
-      "line": 165
-    }
-  ],
   "src/core/adapters/model-version.ts#resolveAndPinModelVersion": [
     {
       "operation": "atomicWriteText",
